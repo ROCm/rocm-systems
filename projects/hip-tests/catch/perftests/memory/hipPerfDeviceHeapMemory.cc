@@ -1,21 +1,9 @@
 /*
-Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 #include <hip_test_common.hh>
 #include <hip_test_defgroups.hh>
 #include <chrono>
@@ -25,12 +13,11 @@ __global__ void mallocTest() {
   memset(ptr, 0, size);
   free(ptr);
 }
-__global__ void mallocTest_1()
-{
-    size_t size = 1024;
-    int* ptr = (int*)malloc(size);
-    memset(ptr, 0, size);
-    free(ptr);
+__global__ void mallocTest_1() {
+  size_t size = 1024;
+  int* ptr = (int*)malloc(size);
+  memset(ptr, 0, size);
+  free(ptr);
 }
 /**
  * The tests in this file are added to see the performance improvement with the
@@ -63,8 +50,8 @@ __global__ void mallocTest_1()
  * ------------------------
  * - HIP_VERSION >= 6.5
  */
-TEST_CASE("Unit_Perf_Device_Heap_Memory_Allocation") {
-  HIP_CHECK(hipDeviceSetLimit(hipLimitMallocHeapSize, 128*1024*1024));
+HIP_TEST_CASE(Unit_Perf_Device_Heap_Memory_Allocation) {
+  HIP_CHECK(hipDeviceSetLimit(hipLimitMallocHeapSize, 128 * 1024 * 1024));
   hipEvent_t event;
   HIP_CHECK(hipEventCreate(&event));
   REQUIRE(event != nullptr);
@@ -87,8 +74,8 @@ TEST_CASE("Unit_Perf_Device_Heap_Memory_Allocation") {
   REQUIRE(time > time_1);
   HIP_CHECK(hipEventDestroy(event));
   HIP_CHECK(hipStreamDestroy(stream));
-  std::cout<<"First Kernel Latency: "<<time<<" micro seconds"<<std::endl;
-  std::cout<<"Second Kernel Latency: "<<time_1<<" micro seconds"<<std::endl;
+  std::cout << "First Kernel Latency: " << time << " micro seconds" << std::endl;
+  std::cout << "Second Kernel Latency: " << time_1 << " micro seconds" << std::endl;
 }
 /**
  * End doxygen group PerformanceTest.

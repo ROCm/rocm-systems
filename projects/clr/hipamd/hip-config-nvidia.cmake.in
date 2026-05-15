@@ -1,0 +1,12 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+foreach(__lib device host amdhip64)
+    if (NOT TARGET hip::${__lib})
+        add_library(hip::${__lib} INTERFACE IMPORTED)
+        set_target_properties(hip::${__lib} PROPERTIES
+		INTERFACE_INCLUDE_DIRECTORIES @PACKAGE_INCLUDE_INSTALL_DIR@
+		INTERFACE_SYSTEM_INCLUDE_DIRECTORIES @PACKAGE_INCLUDE_INSTALL_DIR@)
+    endif()
+endforeach()

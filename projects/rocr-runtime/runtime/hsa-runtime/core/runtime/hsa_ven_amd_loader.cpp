@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -42,8 +42,9 @@
 
 #include "core/inc/hsa_ven_amd_loader_impl.h"
 
-#include "core/inc/amd_hsa_loader.hpp"
 #include "core/inc/runtime.h"
+#include "core/inc/amd_gpu_agent.h"
+#include "core/inc/amd_hsa_loader.hpp"
 
 namespace rocr {
 

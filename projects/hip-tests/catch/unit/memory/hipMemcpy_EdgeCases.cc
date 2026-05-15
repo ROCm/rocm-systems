@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2021 - present Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /*
 This testcase verifies following scenarios
@@ -39,35 +26,37 @@ This testcase verifies following scenarios
 #endif
 
 
-static constexpr auto NUM_ELM{4*1024 * 1024};
+static auto NUM_ELM() {
+  static const auto val = isQuickLevel() ? 128 * 1024 : 4 * 1024 * 1024;
+  return val;
+}
 static unsigned blocksPerCU{6};  // to hide latency
 static unsigned threadsPerBlock{256};
 
-template<typename T>
-class DeviceMemory {
+template <typename T> class DeviceMemory {
  public:
-    explicit DeviceMemory(size_t numElements);
-    DeviceMemory() = delete;
-    ~DeviceMemory();
-    T* A_d() const { return _A_d + _offset; }
-    T* B_d() const { return _B_d + _offset; }
-    T* C_d() const { return _C_d + _offset; }
-    T* C_dd() const { return _C_dd + _offset; }
-    size_t maxNumElements() const { return _maxNumElements; }
-    void offset(int offset) { _offset = offset; }
-    int offset() const { return _offset; }
+  explicit DeviceMemory(size_t numElements);
+  DeviceMemory() = delete;
+  ~DeviceMemory();
+  T* A_d() const { return _A_d + _offset; }
+  T* B_d() const { return _B_d + _offset; }
+  T* C_d() const { return _C_d + _offset; }
+  T* C_dd() const { return _C_dd + _offset; }
+  size_t maxNumElements() const { return _maxNumElements; }
+  void offset(int offset) { _offset = offset; }
+  int offset() const { return _offset; }
+
  private:
-    T* _A_d;
-    T* _B_d;
-    T* _C_d;
-    T* _C_dd;
-    size_t _maxNumElements;
-    int _offset;
+  T* _A_d;
+  T* _B_d;
+  T* _C_d;
+  T* _C_dd;
+  size_t _maxNumElements;
+  int _offset;
 };
 
-template <typename T>
-DeviceMemory<T>::DeviceMemory(size_t numElements) :
-                 _maxNumElements(numElements), _offset(0) {
+template <typename T> DeviceMemory<T>::DeviceMemory(size_t numElements)
+    : _maxNumElements(numElements), _offset(0) {
   T** np = nullptr;
   HipTest::initArrays(&_A_d, &_B_d, &_C_d, np, np, np, numElements, 0);
   size_t sizeElements = numElements * sizeof(T);
@@ -75,70 +64,63 @@ DeviceMemory<T>::DeviceMemory(size_t numElements) :
 }
 
 
-template <typename T>
-DeviceMemory<T>::~DeviceMemory() {
+template <typename T> DeviceMemory<T>::~DeviceMemory() {
   T* np = nullptr;
   HipTest::freeArrays<T>(_A_d, _B_d, _C_d, np, np, np, 0);
   HIP_CHECK(hipFree(_C_dd));
   _C_dd = NULL;
 }
 
-template <typename T>
-class HostMemory {
+template <typename T> class HostMemory {
  public:
-    HostMemory(size_t numElements, bool usePinnedHost);
-    HostMemory() = delete;
-    void reset(size_t numElements, bool full = false);
-    ~HostMemory();
-    T* A_h() const { return _A_h + _offset; }
-    T* B_h() const { return _B_h + _offset; }
-    T* C_h() const { return _C_h + _offset; }
+  HostMemory(size_t numElements, bool usePinnedHost);
+  HostMemory() = delete;
+  void reset(size_t numElements, bool full = false);
+  ~HostMemory();
+  T* A_h() const { return _A_h + _offset; }
+  T* B_h() const { return _B_h + _offset; }
+  T* C_h() const { return _C_h + _offset; }
 
-    size_t maxNumElements() const { return _maxNumElements; }
-    void offset(int offset) { _offset = offset; }
-    int offset() const { return _offset; }
+  size_t maxNumElements() const { return _maxNumElements; }
+  void offset(int offset) { _offset = offset; }
+  int offset() const { return _offset; }
 
-    // Host arrays, secondary copy
-    T* A_hh;
-    T* B_hh;
-    bool _usePinnedHost;
+  // Host arrays, secondary copy
+  T* A_hh;
+  T* B_hh;
+  bool _usePinnedHost;
 
  private:
-    size_t _maxNumElements;
-    int _offset;
+  size_t _maxNumElements;
+  int _offset;
 
-    // Host arrays
-    T* _A_h;
-    T* _B_h;
-    T* _C_h;
+  // Host arrays
+  T* _A_h;
+  T* _B_h;
+  T* _C_h;
 };
 
-  template <typename T>
-HostMemory<T>::HostMemory(size_t numElements, bool usePinnedHost)
-  : _usePinnedHost(usePinnedHost), _maxNumElements(numElements), _offset(0) {
-    T** np = nullptr;
-    HipTest::initArrays(np, np, np, &_A_h, &_B_h, &_C_h,
-                        numElements, usePinnedHost);
+template <typename T> HostMemory<T>::HostMemory(size_t numElements, bool usePinnedHost)
+    : _usePinnedHost(usePinnedHost), _maxNumElements(numElements), _offset(0) {
+  T** np = nullptr;
+  HipTest::initArrays(np, np, np, &_A_h, &_B_h, &_C_h, numElements, usePinnedHost);
 
-    A_hh = NULL;
-    B_hh = NULL;
+  A_hh = NULL;
+  B_hh = NULL;
 
 
-    size_t sizeElements = numElements * sizeof(T);
+  size_t sizeElements = numElements * sizeof(T);
 
-    if (usePinnedHost) {
-      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A_hh), sizeElements,
-                              hipHostMallocDefault));
-      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&B_hh), sizeElements,
-                              hipHostMallocDefault));
-    } else {
-      A_hh = reinterpret_cast<T*>(malloc(sizeElements));
-      B_hh = reinterpret_cast<T*>(malloc(sizeElements));
-    }
+  if (usePinnedHost) {
+    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A_hh), sizeElements, hipHostMallocDefault));
+    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&B_hh), sizeElements, hipHostMallocDefault));
+  } else {
+    A_hh = reinterpret_cast<T*>(malloc(sizeElements));
+    B_hh = reinterpret_cast<T*>(malloc(sizeElements));
   }
+}
 
-template <typename T>
-void HostMemory<T>::reset(size_t numElements, bool full) {
+template <typename T> void HostMemory<T>::reset(size_t numElements, bool full) {
   // Initialize the host data:
   for (size_t i = 0; i < numElements; i++) {
     (A_hh)[i] = 1097.0 + i;
@@ -151,8 +133,7 @@ void HostMemory<T>::reset(size_t numElements, bool full) {
   }
 }
 
-template <typename T>
-HostMemory<T>::~HostMemory() {
+template <typename T> HostMemory<T>::~HostMemory() {
   HipTest::freeArraysForHost(_A_h, _B_h, _C_h, _usePinnedHost);
 
   if (_usePinnedHost) {
@@ -166,7 +147,7 @@ HostMemory<T>::~HostMemory() {
 }
 
 #ifdef _WIN32
-void memcpytest2_get_host_memory(size_t *free, size_t *total) {
+void memcpytest2_get_host_memory(size_t* free, size_t* total) {
   MEMORYSTATUSEX status;
   status.dwLength = sizeof(status);
   GlobalMemoryStatusEx(&status);
@@ -179,7 +160,7 @@ void memcpytest2_get_host_memory(size_t *free, size_t *total) {
 }
 #else
 struct sysinfo memInfo;
-void memcpytest2_get_host_memory(size_t  *free, size_t *total) {
+void memcpytest2_get_host_memory(size_t* free, size_t* total) {
   sysinfo(&memInfo);
   uint64_t freePhysMem = memInfo.freeram;
   freePhysMem *= memInfo.mem_unit;
@@ -207,11 +188,13 @@ void memcpytest2_get_host_memory(size_t  *free, size_t *total) {
 // (runtime figures out direction).  if false, use
 // explicit memcpy direction.
 //
-template <typename T>
-void memcpytest2(DeviceMemory<T>* dmem, HostMemory<T>* hmem,
-    size_t numElements, bool useHostToHost,
-    bool useDeviceToDevice, bool useMemkindDefault) {
+template <typename T> void memcpytest2(DeviceMemory<T>* dmem, HostMemory<T>* hmem,
+                                       size_t numElements, bool useHostToHost,
+                                       bool useDeviceToDevice, bool useMemkindDefault) {
   size_t sizeElements = numElements * sizeof(T);
+  int threads = 1024;
+  int blocks =
+      (numElements % threads == 0) ? (numElements / threads) : ((numElements / threads) + 1);
 
   hmem->reset(numElements);
 
@@ -222,40 +205,39 @@ void memcpytest2(DeviceMemory<T>* dmem, HostMemory<T>* hmem,
   if (useHostToHost) {
     // Do some extra host-to-host copies here to mix things up:
     HIP_CHECK(hipMemcpy(hmem->A_hh, hmem->A_h(), sizeElements,
-          useMemkindDefault ? hipMemcpyDefault : hipMemcpyHostToHost));
+                        useMemkindDefault ? hipMemcpyDefault : hipMemcpyHostToHost));
     HIP_CHECK(hipMemcpy(hmem->B_hh, hmem->B_h(), sizeElements,
-          useMemkindDefault ? hipMemcpyDefault : hipMemcpyHostToHost));
+                        useMemkindDefault ? hipMemcpyDefault : hipMemcpyHostToHost));
 
 
     HIP_CHECK(hipMemcpy(dmem->A_d(), hmem->A_hh, sizeElements,
-          useMemkindDefault ? hipMemcpyDefault : hipMemcpyHostToDevice));
+                        useMemkindDefault ? hipMemcpyDefault : hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(dmem->B_d(), hmem->B_hh, sizeElements,
-          useMemkindDefault ? hipMemcpyDefault : hipMemcpyHostToDevice));
+                        useMemkindDefault ? hipMemcpyDefault : hipMemcpyHostToDevice));
   } else {
     HIP_CHECK(hipMemcpy(dmem->A_d(), hmem->A_h(), sizeElements,
-          useMemkindDefault ? hipMemcpyDefault : hipMemcpyHostToDevice));
+                        useMemkindDefault ? hipMemcpyDefault : hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(dmem->B_d(), hmem->B_h(), sizeElements,
-          useMemkindDefault ? hipMemcpyDefault : hipMemcpyHostToDevice));
+                        useMemkindDefault ? hipMemcpyDefault : hipMemcpyHostToDevice));
   }
 
-  hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), dim3(1), 0, 0,
-      static_cast<const T*>(dmem->A_d()), static_cast<const T*>(dmem->B_d()),
-      dmem->C_d(), numElements);
+  hipLaunchKernelGGL(HipTest::vectorADD, blocks, threads, 0, 0, static_cast<const T*>(dmem->A_d()),
+                     static_cast<const T*>(dmem->B_d()), dmem->C_d(), numElements);
   HIP_CHECK(hipGetLastError());
 
   if (useDeviceToDevice) {
     // Do an extra device-to-device copy here to mix things up:
     HIP_CHECK(hipMemcpy(dmem->C_dd(), dmem->C_d(), sizeElements,
-          useMemkindDefault ? hipMemcpyDefault : hipMemcpyDeviceToDevice));
+                        useMemkindDefault ? hipMemcpyDefault : hipMemcpyDeviceToDevice));
 
     // Destroy the original dmem->C_d():
     HIP_CHECK(hipMemset(dmem->C_d(), 0x5A, sizeElements));
 
     HIP_CHECK(hipMemcpy(hmem->C_h(), dmem->C_dd(), sizeElements,
-          useMemkindDefault ? hipMemcpyDefault : hipMemcpyDeviceToHost));
+                        useMemkindDefault ? hipMemcpyDefault : hipMemcpyDeviceToHost));
   } else {
     HIP_CHECK(hipMemcpy(hmem->C_h(), dmem->C_d(), sizeElements,
-          useMemkindDefault ? hipMemcpyDefault : hipMemcpyDeviceToHost));
+                        useMemkindDefault ? hipMemcpyDefault : hipMemcpyDeviceToHost));
   }
 
   HIP_CHECK(hipDeviceSynchronize());
@@ -268,21 +250,17 @@ void memcpytest2(DeviceMemory<T>* dmem, HostMemory<T>* hmem,
 // Try all the 16 possible combinations to memcpytest2 - usePinnedHost,
 // useHostToHost,
 // useDeviceToDevice, useMemkindDefault
-template <typename T>
-void memcpytest2_for_type(size_t numElements) {
+template <typename T> void memcpytest2_for_type(size_t numElements) {
   DeviceMemory<T> memD(numElements);
   HostMemory<T> memU(numElements, 0 /*usePinnedHost*/);
   HostMemory<T> memP(numElements, 1 /*usePinnedHost*/);
 
   for (int usePinnedHost = 0; usePinnedHost <= 1; usePinnedHost++) {
     for (int useHostToHost = 0; useHostToHost <= 1; useHostToHost++) {
-      for (int useDeviceToDevice = 0; useDeviceToDevice <= 1;
-          useDeviceToDevice++) {
-        for (int useMemkindDefault = 0; useMemkindDefault <= 1;
-            useMemkindDefault++) {
-          memcpytest2<T>(&memD, usePinnedHost ? &memP : &memU,
-              numElements, useHostToHost,
-              useDeviceToDevice, useMemkindDefault);
+      for (int useDeviceToDevice = 0; useDeviceToDevice <= 1; useDeviceToDevice++) {
+        for (int useMemkindDefault = 0; useMemkindDefault <= 1; useMemkindDefault++) {
+          memcpytest2<T>(&memD, usePinnedHost ? &memP : &memU, numElements, useHostToHost,
+                         useDeviceToDevice, useMemkindDefault);
         }
       }
     }
@@ -290,8 +268,7 @@ void memcpytest2_for_type(size_t numElements) {
 }
 
 // Try many different sizes to memory copy.
-template <typename T>
-void memcpytest2_sizes(size_t maxElem = 0) {
+template <typename T> void memcpytest2_sizes(size_t maxElem = 0) {
   int deviceId;
   HIP_CHECK(hipGetDevice(&deviceId));
 
@@ -318,8 +295,7 @@ void memcpytest2_sizes(size_t maxElem = 0) {
 }
 
 // Try many different sizes to memory copy.
-template <typename T>
-void memcpytest2_offsets(size_t maxElem, bool devOffsets, bool hostOffsets) {
+template <typename T> void memcpytest2_offsets(size_t maxElem, bool devOffsets, bool hostOffsets) {
   int deviceId;
   HIP_CHECK(hipGetDevice(&deviceId));
 
@@ -362,24 +338,22 @@ void memcpytest2_offsets(size_t maxElem, bool devOffsets, bool hostOffsets) {
 
 // Create multiple threads to stress multi-thread locking behavior in the
 // allocation/deallocation/tracking logic:
-template <typename T>
-void multiThread_1(bool serialize, bool usePinnedHost) {
-  DeviceMemory<T> memD(NUM_ELM);
-  HostMemory<T> mem1(NUM_ELM, usePinnedHost);
-  HostMemory<T> mem2(NUM_ELM, usePinnedHost);
+template <typename T> void multiThread_1(bool serialize, bool usePinnedHost) {
+  DeviceMemory<T> memD(NUM_ELM());
+  HostMemory<T> mem1(NUM_ELM(), usePinnedHost);
+  HostMemory<T> mem2(NUM_ELM(), usePinnedHost);
 
-  std::thread t1(memcpytest2<T>, &memD, &mem1, NUM_ELM, 0, 0, 0);
+  std::thread t1(memcpytest2<T>, &memD, &mem1, NUM_ELM(), 0, 0, 0);
   if (serialize) {
     t1.join();
   }
 
 
-  std::thread t2(memcpytest2<T>, &memD, &mem2, NUM_ELM, 0, 0, 0);
+  std::thread t2(memcpytest2<T>, &memD, &mem2, NUM_ELM(), 0, 0, 0);
   if (serialize) {
     t2.join();
   }
 }
-
 
 
 /*
@@ -388,26 +362,26 @@ Initializes device variables
 Launches kernel and performs the sum of device variables
 copies the result to host variable and validates the result.
 */
-TEMPLATE_TEST_CASE("Unit_hipMemcpy_KernelLaunch", "", int, float,
-                   double) {
-  size_t Nbytes = NUM_ELM * sizeof(TestType);
+HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy_KernelLaunch, int, float, double) {
+  size_t Nbytes = NUM_ELM() * sizeof(TestType);
 
   TestType *A_d{nullptr}, *B_d{nullptr}, *C_d{nullptr};
   TestType *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr};
 
-  HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, NUM_ELM, false);
+  HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, NUM_ELM(), false);
 
   HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
 
-  hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), dim3(1), 0, 0,
-                     static_cast<const TestType*>(A_d),
-                     static_cast<const TestType*>(B_d), C_d, NUM_ELM);
+  constexpr int threads = 1024;
+  int blocks = NUM_ELM() / threads;
+  hipLaunchKernelGGL(HipTest::vectorADD, blocks, 1024, 0, 0, static_cast<const TestType*>(A_d),
+                     static_cast<const TestType*>(B_d), C_d, NUM_ELM());
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
 
   HIP_CHECK(hipDeviceSynchronize());
-  HipTest::checkVectorADD(A_h, B_h, C_h, NUM_ELM);
+  HipTest::checkVectorADD(A_h, B_h, C_h, NUM_ELM());
 
   HipTest::freeArrays<TestType>(A_d, B_d, C_d, A_h, B_h, C_h, false);
 }
@@ -420,63 +394,52 @@ This testcase verifies the following scenarios
 4. Device context change
 5. H2D-D2D-D2H peer GPU
 */
-TEMPLATE_TEST_CASE("Unit_hipMemcpy_H2H-H2D-D2H-H2PinMem", "", int,
-                   float, double) {
+HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy_H2H_H2D_D2H_H2PinMem, int, float, double) {
   TestType *A_d{nullptr}, *B_d{nullptr};
   TestType *A_h{nullptr}, *B_h{nullptr};
   TestType *A_Ph{nullptr}, *B_Ph{nullptr};
   HIP_CHECK(hipSetDevice(0));
-  HipTest::initArrays<TestType>(&A_d, &B_d, nullptr,
-                             &A_h, &B_h, nullptr,
-                             NUM_ELM*sizeof(TestType));
-  HipTest::initArrays<TestType>(nullptr, nullptr, nullptr,
-                             &A_Ph, &B_Ph, nullptr,
-                             NUM_ELM*sizeof(TestType), true);
+  HipTest::initArrays<TestType>(&A_d, &B_d, nullptr, &A_h, &B_h, nullptr,
+                                NUM_ELM() * sizeof(TestType));
+  HipTest::initArrays<TestType>(nullptr, nullptr, nullptr, &A_Ph, &B_Ph, nullptr,
+                                NUM_ELM() * sizeof(TestType), true);
 
   SECTION("H2H, H2PinMem and PinMem2H") {
-    HIP_CHECK(hipMemcpy(B_h, A_h, NUM_ELM*sizeof(TestType),
-                        hipMemcpyDefault));
-    HIP_CHECK(hipMemcpy(A_Ph, B_h, NUM_ELM*sizeof(TestType),
-                        hipMemcpyDefault));
-    HIP_CHECK(hipMemcpy(B_Ph, A_Ph, NUM_ELM*sizeof(TestType),
-                        hipMemcpyDefault));
-    HipTest::checkTest(A_h, B_Ph, NUM_ELM);
+    HIP_CHECK(hipMemcpy(B_h, A_h, NUM_ELM() * sizeof(TestType), hipMemcpyDefault));
+    HIP_CHECK(hipMemcpy(A_Ph, B_h, NUM_ELM() * sizeof(TestType), hipMemcpyDefault));
+    HIP_CHECK(hipMemcpy(B_Ph, A_Ph, NUM_ELM() * sizeof(TestType), hipMemcpyDefault));
+    HipTest::checkTest(A_h, B_Ph, NUM_ELM());
   }
 
   SECTION("H2D-D2D-D2H-SameGPU") {
-    HIP_CHECK(hipMemcpy(A_d, A_h, NUM_ELM*sizeof(TestType), hipMemcpyDefault));
-    HIP_CHECK(hipMemcpy(B_d, A_d, NUM_ELM*sizeof(TestType), hipMemcpyDefault));
-    HIP_CHECK(hipMemcpy(B_h, B_d, NUM_ELM*sizeof(TestType), hipMemcpyDefault));
-    HipTest::checkTest(A_h, B_h, NUM_ELM);
+    HIP_CHECK(hipMemcpy(A_d, A_h, NUM_ELM() * sizeof(TestType), hipMemcpyDefault));
+    HIP_CHECK(hipMemcpy(B_d, A_d, NUM_ELM() * sizeof(TestType), hipMemcpyDefault));
+    HIP_CHECK(hipMemcpy(B_h, B_d, NUM_ELM() * sizeof(TestType), hipMemcpyDefault));
+    HipTest::checkTest(A_h, B_h, NUM_ELM());
   }
 
   SECTION("pH2D-D2D-D2pH-SameGPU") {
-    HIP_CHECK(hipMemcpy(A_d, A_Ph, NUM_ELM*sizeof(TestType),
-                        hipMemcpyDefault));
-    HIP_CHECK(hipMemcpy(B_d, A_d, NUM_ELM*sizeof(TestType), hipMemcpyDefault));
-    HIP_CHECK(hipMemcpy(B_Ph, B_d, NUM_ELM*sizeof(TestType),
-                        hipMemcpyDefault));
-    HipTest::checkTest(A_Ph, B_Ph, NUM_ELM);
+    HIP_CHECK(hipMemcpy(A_d, A_Ph, NUM_ELM() * sizeof(TestType), hipMemcpyDefault));
+    HIP_CHECK(hipMemcpy(B_d, A_d, NUM_ELM() * sizeof(TestType), hipMemcpyDefault));
+    HIP_CHECK(hipMemcpy(B_Ph, B_d, NUM_ELM() * sizeof(TestType), hipMemcpyDefault));
+    HipTest::checkTest(A_Ph, B_Ph, NUM_ELM());
   }
   SECTION("H2D-D2D-D2H-DeviceContextChange") {
     int deviceCount = 0;
     HIP_CHECK(hipGetDeviceCount(&deviceCount));
     if (deviceCount < 2) {
-      SUCCEED("deviceCount less then 2");
+      WARN("Skipping section: " << HipTest::SkipReason::kFewerThanTwoGpus);
     } else {
       int canAccessPeer = 0;
       HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1));
       if (canAccessPeer) {
         HIP_CHECK(hipSetDevice(1));
-        HIP_CHECK(hipMemcpy(A_d, A_h, NUM_ELM*sizeof(TestType),
-                            hipMemcpyDefault));
-        HIP_CHECK(hipMemcpy(B_d, A_d, NUM_ELM*sizeof(TestType),
-                            hipMemcpyDefault));
-        HIP_CHECK(hipMemcpy(B_h, B_d, NUM_ELM*sizeof(TestType),
-                            hipMemcpyDefault));
-        HipTest::checkTest(A_h, B_h, NUM_ELM);
+        HIP_CHECK(hipMemcpy(A_d, A_h, NUM_ELM() * sizeof(TestType), hipMemcpyDefault));
+        HIP_CHECK(hipMemcpy(B_d, A_d, NUM_ELM() * sizeof(TestType), hipMemcpyDefault));
+        HIP_CHECK(hipMemcpy(B_h, B_d, NUM_ELM() * sizeof(TestType), hipMemcpyDefault));
+        HipTest::checkTest(A_h, B_h, NUM_ELM());
       } else {
-        SUCCEED("P2P capability is not present");
+        WARN("Skipping section: " << HipTest::SkipReason::kPeerAccessUnavailable);
       }
     }
   }
@@ -485,38 +448,33 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy_H2H-H2D-D2H-H2PinMem", "", int,
     int deviceCount = 0;
     HIP_CHECK(hipGetDeviceCount(&deviceCount));
     if (deviceCount < 2) {
-      SUCCEED("deviceCount less then 2");
+      WARN("Skipping section: " << HipTest::SkipReason::kFewerThanTwoGpus);
     } else {
       int canAccessPeer = 0;
       HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1));
       if (canAccessPeer) {
         HIP_CHECK(hipSetDevice(1));
-        TestType *C_d{nullptr};
-        HipTest::initArrays<TestType>(nullptr, nullptr, &C_d,
-            nullptr, nullptr, nullptr,
-            NUM_ELM*sizeof(TestType));
-        HIP_CHECK(hipMemcpy(A_d, A_h, NUM_ELM*sizeof(TestType),
-                            hipMemcpyDefault));
-        HIP_CHECK(hipMemcpy(C_d, A_d, NUM_ELM*sizeof(TestType),
-                            hipMemcpyDefault));
-        HIP_CHECK(hipMemcpy(B_h, C_d, NUM_ELM*sizeof(TestType),
-                            hipMemcpyDefault));
-        HipTest::checkTest(A_h, B_h, NUM_ELM);
+        TestType* C_d{nullptr};
+        HipTest::initArrays<TestType>(nullptr, nullptr, &C_d, nullptr, nullptr, nullptr,
+                                      NUM_ELM() * sizeof(TestType));
+        HIP_CHECK(hipMemcpy(A_d, A_h, NUM_ELM() * sizeof(TestType), hipMemcpyDefault));
+        HIP_CHECK(hipMemcpy(C_d, A_d, NUM_ELM() * sizeof(TestType), hipMemcpyDefault));
+        HIP_CHECK(hipMemcpy(B_h, C_d, NUM_ELM() * sizeof(TestType), hipMemcpyDefault));
+        HipTest::checkTest(A_h, B_h, NUM_ELM());
         HIP_CHECK(hipFree(C_d));
       } else {
-        SUCCEED("P2P capability is not present");
+        WARN("Skipping section: " << HipTest::SkipReason::kPeerAccessUnavailable);
       }
     }
   }
 
   HipTest::freeArrays<TestType>(A_d, B_d, nullptr, A_h, B_h, nullptr, false);
-  HipTest::freeArrays<TestType>(nullptr, nullptr, nullptr, A_Ph,
-                                B_Ph, nullptr, true);
+  HipTest::freeArrays<TestType>(nullptr, nullptr, nullptr, A_Ph, B_Ph, nullptr, true);
 }
 /*
 This testcase verifies the multi thread scenario
 */
-TEST_CASE("Unit_hipMemcpy_MultiThreadWithSerialization") {
+HIP_TEST_CASE(Unit_hipMemcpy_MultiThreadWithSerialization) {
   HIP_CHECK(hipDeviceReset());
 
   // Simplest cases: serialize the threads, and also used pinned memory:
@@ -532,25 +490,25 @@ This testcase verifies hipMemcpy API with pinnedMemory and hostRegister
 along with kernel launches
 */
 
-TEMPLATE_TEST_CASE("Unit_hipMemcpy_PinnedRegMemWithKernelLaunch",
-                   "", int, float, double) {
+HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy_PinnedRegMemWithKernelLaunch,
+                   int, float, double) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < 2) {
-    SUCCEED("No of devices are less than 2");
-  } else {
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+  }
+  {
     // 1 refers to pinned Memory
     // 2 refers to register Memory
     int MallocPinType = GENERATE(0, 1);
-    size_t Nbytes = NUM_ELM * sizeof(TestType);
-    unsigned blocks = HipTest::setNumBlocks(blocksPerCU,
-                                            threadsPerBlock, NUM_ELM);
+    size_t Nbytes = NUM_ELM() * sizeof(TestType);
+    unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, NUM_ELM());
 
     TestType *A_d{nullptr}, *B_d{nullptr}, *C_d{nullptr};
     TestType *X_d{nullptr}, *Y_d{nullptr}, *Z_d{nullptr};
     TestType *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr};
     if (MallocPinType) {
-      HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, NUM_ELM, true);
+      HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, NUM_ELM(), true);
     } else {
       A_h = reinterpret_cast<TestType*>(malloc(Nbytes));
       HIP_CHECK(hipHostRegister(A_h, Nbytes, hipHostRegisterDefault));
@@ -558,31 +516,28 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy_PinnedRegMemWithKernelLaunch",
       HIP_CHECK(hipHostRegister(B_h, Nbytes, hipHostRegisterDefault));
       C_h = reinterpret_cast<TestType*>(malloc(Nbytes));
       HIP_CHECK(hipHostRegister(C_h, Nbytes, hipHostRegisterDefault));
-      HipTest::initArrays<TestType>(&A_d, &B_d, &C_d, nullptr, nullptr,
-                                    nullptr, NUM_ELM, false);
-      HipTest::setDefaultData<TestType>(NUM_ELM, A_h, B_h, C_h);
+      HipTest::initArrays<TestType>(&A_d, &B_d, &C_d, nullptr, nullptr, nullptr, NUM_ELM(), false);
+      HipTest::setDefaultData<TestType>(NUM_ELM(), A_h, B_h, C_h);
     }
     HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
 
-    hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock),
-                       0, 0, static_cast<const TestType*>(A_d),
-                       static_cast<const TestType*>(B_d), C_d, NUM_ELM);
+    hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, 0,
+                       static_cast<const TestType*>(A_d), static_cast<const TestType*>(B_d), C_d,
+                       NUM_ELM());
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
-    HipTest::checkVectorADD(A_h, B_h, C_h, NUM_ELM);
+    HipTest::checkVectorADD(A_h, B_h, C_h, NUM_ELM());
 
     unsigned int seed = time(0);
-    HIP_CHECK(hipSetDevice(HipTest::RAND_R(&seed) % (numDevices-1)+1));
+    HIP_CHECK(hipSetDevice(HipTest::RAND_R(&seed) % (numDevices - 1) + 1));
 
     int device;
     HIP_CHECK(hipGetDevice(&device));
-    std::cout <<"hipMemcpy is set to happen between device 0 and device "
-      <<device << std::endl;
-    HipTest::initArrays<TestType>(&X_d, &Y_d, &Z_d, nullptr,
-                                  nullptr, nullptr, NUM_ELM, false);
+    std::cout << "hipMemcpy is set to happen between device 0 and device " << device << std::endl;
+    HipTest::initArrays<TestType>(&X_d, &Y_d, &Z_d, nullptr, nullptr, nullptr, NUM_ELM(), false);
 
-    for (int j = 0; j < NUM_ELM; j++) {
+    for (int j = 0; j < NUM_ELM(); j++) {
       A_h[j] = 0;
       B_h[j] = 0;
       C_h[j] = 0;
@@ -593,13 +548,13 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy_PinnedRegMemWithKernelLaunch",
     HIP_CHECK(hipMemcpy(B_h, B_d, Nbytes, hipMemcpyDeviceToHost));
     HIP_CHECK(hipMemcpy(Y_d, B_h, Nbytes, hipMemcpyHostToDevice));
 
-    hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock),
-                       0, 0, static_cast<const TestType*>(X_d),
-                       static_cast<const TestType*>(Y_d), Z_d, NUM_ELM);
+    hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, 0,
+                       static_cast<const TestType*>(X_d), static_cast<const TestType*>(Y_d), Z_d,
+                       NUM_ELM());
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipMemcpy(C_h, Z_d, Nbytes, hipMemcpyDeviceToHost));
 
-    HipTest::checkVectorADD(A_h, B_h, C_h, NUM_ELM);
+    HipTest::checkVectorADD(A_h, B_h, C_h, NUM_ELM());
 
     if (MallocPinType) {
       HipTest::freeArrays<TestType>(A_d, B_d, C_d, A_h, B_h, C_h, true);
@@ -610,10 +565,8 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy_PinnedRegMemWithKernelLaunch",
       free(B_h);
       HIP_CHECK(hipHostUnregister(C_h));
       free(C_h);
-      HipTest::freeArrays<TestType>(A_d, B_d, C_d, nullptr,
-                                    nullptr, nullptr, false);
+      HipTest::freeArrays<TestType>(A_d, B_d, C_d, nullptr, nullptr, nullptr, false);
     }
-      HipTest::freeArrays<TestType>(X_d, Y_d, Z_d, nullptr,
-                                    nullptr, nullptr, false);
+    HipTest::freeArrays<TestType>(X_d, Y_d, Z_d, nullptr, nullptr, nullptr, false);
   }
 }

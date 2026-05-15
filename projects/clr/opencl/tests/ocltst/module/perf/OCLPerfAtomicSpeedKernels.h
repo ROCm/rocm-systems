@@ -1,24 +1,10 @@
-/* Copyright (c) 2010 - 2021 Advanced Micro Devices, Inc.
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
-
-static const char *local_atomics_histogram =
+static const char* local_atomics_histogram =
     "#pragma OPENCL EXTENSION cl_khr_local_int32_base_atomics : enable\n"
     "#define MIN(a,b) ((a) < (b)) ? (a) : (b) \n"
     "#define MAX(a,b) ((a) > (b)) ? (a) : (b) \n"
@@ -121,7 +107,7 @@ static const char *local_atomics_histogram =
     "    }\n"
     "}\n";
 
-static const char *local_atomics_reduce =
+static const char* local_atomics_reduce =
     " __kernel void local_atomics_reduce( __global uint *Histogram, uint "
     "nSubHists )\n"
     "{\n"
@@ -134,7 +120,7 @@ static const char *local_atomics_reduce =
     "    Histogram[ tid ] = bin;\n"
     "}\n";
 
-static const char *global_atomics_histogram =
+static const char* global_atomics_histogram =
     "#pragma OPENCL EXTENSION cl_khr_global_int32_base_atomics : enable\n"
     "__kernel __attribute__((reqd_work_group_size(256,1,1)))\n"
     "void global_atomics_histogram(uint ItemsPerThread,\n"
@@ -159,7 +145,7 @@ static const char *global_atomics_histogram =
     "   }\n"
     "}\n";
 
-static const char *global_vec4_atomics_histogram =
+static const char* global_vec4_atomics_histogram =
     "#pragma OPENCL EXTENSION cl_khr_global_int32_base_atomics : enable\n"
     "__kernel __attribute__((reqd_work_group_size(256,1,1)))\n"
     "void global_atomics_histogram(uint ItemsPerThread,\n"
@@ -196,7 +182,7 @@ static const char *global_vec4_atomics_histogram =
     "   }\n"
     "}\n";
 
-static const char *global_atomics_sum_reduction_all_to_zero =
+static const char* global_atomics_sum_reduction_all_to_zero =
     "#pragma OPENCL EXTENSION cl_khr_global_int32_base_atomics : enable\n"
     " __kernel void global_atomics_sum_reduction_all_to_zero(uint "
     "ItemsPerThread, __global uint *Input, __global int *Output )\n"
@@ -222,7 +208,7 @@ static const char *global_atomics_sum_reduction_all_to_zero =
     "    atom_add( &(Output[0]), sum);\n"
     "}\n";
 
-static const char *global_atomics_sum_reduction_workgroup =
+static const char* global_atomics_sum_reduction_workgroup =
     "#pragma OPENCL EXTENSION cl_khr_global_int32_base_atomics : enable\n"
     " __kernel void global_atomics_sum_reduction_workgroup(uint "
     "ItemsPerThread, __global uint *Input, __global int *Output )\n"
@@ -248,7 +234,7 @@ static const char *global_atomics_sum_reduction_workgroup =
     "    atom_add( &(Output[get_group_id(0)]), sum);\n"
     "}\n";
 
-static const char *local_reduction =
+static const char* local_reduction =
     "__kernel void local_reduction(__global uint* input, __global uint* "
     "output, __local uint* sdata)\n"
     "{\n"
@@ -285,7 +271,7 @@ static const char *local_reduction =
     "   if(tid == 0) output[get_group_id(0)] = sdata[0];\n"
     "}\n";
 
-static const char *local_vec4_reduction =
+static const char* local_vec4_reduction =
     "__kernel void local_reduction(__global uint4* input, __global uint4* "
     "output, __local uint4* sdata)\n"
     "{\n"
@@ -322,7 +308,7 @@ static const char *local_vec4_reduction =
     "   if(tid == 0) output[get_group_id(0)] = sdata[0];\n"
     "}\n";
 
-static const char *local_atomics_reduction =
+static const char* local_atomics_reduction =
     "#pragma OPENCL EXTENSION cl_khr_local_int32_base_atomics : enable\n"
     "__kernel void local_reduction(__global uint* input, __global uint* "
     "output, __local uint* sdata)\n"
@@ -360,7 +346,7 @@ static const char *local_atomics_reduction =
     "   if(tid == 0) output[get_group_id(0)] = sdata[0];\n"
     "}\n";
 
-static const char *local_vec4_atomics_reduction =
+static const char* local_vec4_atomics_reduction =
     "#pragma OPENCL EXTENSION cl_khr_local_int32_base_atomics : enable\n"
     "__kernel void local_reduction(__global uint4* input, __global uint4* "
     "output, __local uint4* sdata)\n"

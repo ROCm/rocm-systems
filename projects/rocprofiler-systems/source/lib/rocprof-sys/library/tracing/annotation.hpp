@@ -1,38 +1,21 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
+#include "common/defines.h"
 #include "core/common.hpp"
 #include "core/concepts.hpp"
-#include "core/debug.hpp"
-#include "core/defines.hpp"
 #include "core/perfetto.hpp"
 #include "core/state.hpp"
 #include "core/utility.hpp"
 #include "rocprofiler-systems/categories.h"  // in rocprof-sys-user
+#include <cstdint>
 
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/operations/types/get.hpp>
+
+#include "logger/debug.hpp"
 
 #include <type_traits>
 
@@ -57,12 +40,12 @@ using annotation_value_type_t = typename annotation_value_type<Idx>::type;
 
 ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_CSTR, const char*)
 ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_SIZE_T, size_t)
-ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_INT16, int16_t)
-ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_INT32, int32_t)
-ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_INT64, int64_t)
-ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_UINT16, uint16_t)
-ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_UINT32, uint32_t)
-ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_UINT64, uint64_t)
+ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_INT16, std::int16_t)
+ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_INT32, std::int32_t)
+ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_INT64, std::int64_t)
+ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_UINT16, std::uint16_t)
+ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_UINT32, std::uint32_t)
+ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_UINT64, std::uint64_t)
 ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_FLOAT32, float)
 ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_FLOAT64, double)
 ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_VOID_P, void*)
@@ -72,7 +55,7 @@ ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_VOID_P, void*)
 template <typename Np, typename Tp>
 auto
 add_perfetto_annotation(
-    perfetto_event_context_t& ctx, Np&& _name, Tp&& _val, int64_t _idx = -1,
+    perfetto_event_context_t& ctx, Np&& _name, Tp&& _val, std::int64_t _idx = -1,
     std::enable_if_t<
         !std::is_same<std::remove_pointer_t<concepts::unqualified_type_t<Np>>,
                       rocprofsys_annotation_t>::value,
@@ -88,7 +71,7 @@ add_perfetto_annotation(
         auto* _dbg = ctx.event()->add_debug_annotations();
         if(_idx >= 0)
         {
-            auto _arg_name = JOIN("", "arg", _idx, "-", std::forward<Np>(_name));
+            auto _arg_name = fmt::format("arg{}-{}", _idx, std::forward<Np>(_name));
             _dbg->set_name(_arg_name);
         }
         else
@@ -112,7 +95,7 @@ add_perfetto_annotation(
     }
     else if constexpr(std::is_enum<value_type>::value)
     {
-        _get_dbg()->set_int_value(static_cast<int64_t>(_val));
+        _get_dbg()->set_int_value(static_cast<std::int64_t>(_val));
     }
     else if constexpr(std::is_floating_point<value_type>::value)
     {
@@ -131,11 +114,11 @@ add_perfetto_annotation(
     }
     else if constexpr(std::is_pointer<value_type>::value)
     {
-        _get_dbg()->set_pointer_value(reinterpret_cast<uint64_t>(_val));
+        _get_dbg()->set_pointer_value(reinterpret_cast<std::uint64_t>(_val));
     }
     else if constexpr(concepts::can_stringify<value_type>::value)
     {
-        _get_dbg()->set_string_value(JOIN("", std::forward<Tp>(_val)));
+        _get_dbg()->set_string_value(fmt::format("{}", std::forward<Tp>(_val)));
     }
     else
     {
@@ -183,11 +166,12 @@ add_perfetto_annotation(perfetto_event_context_t&      ctx,
             if(!(_annotation.type > ROCPROFSYS_VALUE_NONE &&
                  _annotation.type < ROCPROFSYS_VALUE_LAST))
             {
-                ROCPROFSYS_FAIL_F(
-                    "Error! annotation '%s' has an invalid type designation "
-                    "%lu which is outside of acceptable range [%i, %i]\n",
-                    _annotation.name, _annotation.type, ROCPROFSYS_VALUE_NONE + 1,
-                    ROCPROFSYS_VALUE_LAST - 1);
+                LOG_CRITICAL("Annotation '{}' has an invalid type designation "
+                             "{} which is outside of acceptable range [{}, {}]",
+                             _annotation.name, _annotation.type,
+                             ROCPROFSYS_VALUE_NONE + 1, ROCPROFSYS_VALUE_LAST - 1);
+                ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+                std::exit(1);
             }
         }
 
@@ -197,8 +181,7 @@ add_perfetto_annotation(perfetto_event_context_t&      ctx,
         }
         else
         {
-            throw ::rocprofsys::exception<std::runtime_error>(
-                "invalid annotation value type");
+            throw std::runtime_error("Annotation value type is invalid");
         }
     }
 }
@@ -220,8 +203,6 @@ using perfetto_event_context_t = ::rocprofsys::tracing::perfetto_event_context_t
 template <typename Tp>
 struct annotate<perfetto_event_context_t, Tp>
 {
-    TIMEMORY_DEFAULT_OBJECT(annotate)
-
     auto operator()(Tp& obj, perfetto_event_context_t& _ctx) const
     {
         return sfinae(obj, 0, _ctx);
@@ -285,8 +266,6 @@ template <typename Tp>
 struct perfetto_annotate : annotate<perfetto_event_context_t, Tp>
 {
     using base_type = annotate<perfetto_event_context_t, Tp>;
-
-    TIMEMORY_DEFAULT_OBJECT(perfetto_annotate)
 
     auto operator()(Tp& obj, perfetto_event_context_t& _ctx) const
     {

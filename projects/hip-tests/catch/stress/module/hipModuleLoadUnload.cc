@@ -1,20 +1,7 @@
 /*
-   Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-   Permission is hereby granted, free of charge, to any person obtaining a copy
-   of this software and associated documentation files (the "Software"), to deal
-   in the Software without restriction, including without limitation the rights
-   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-   copies of the Software, and to permit persons to whom the Software is
-   furnished to do so, subject to the following conditions:
-   The above copyright notice and this permission notice shall be included in
-   all copies or substantial portions of the Software.
-   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-   IMPLIED, INNCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-   FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANNY CLAIM, DAMAGES OR OTHER
-   LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-   OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-   THE SOFTWARE.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
  */
 
 #include <hip_test_common.hh>
@@ -38,14 +25,15 @@ void saxpy(float a, float* x, float* y, float* out, size_t n)
 }
 )"};
 
-static constexpr size_t num_iterations = 200000; // 20K times
+static constexpr size_t num_iterations = 200000;  // 20K times
 
 bool CommitBCToFile(char* executable, size_t exe_size, const std::string& bit_code_file) {
   std::fstream bc_file;
   bc_file.open(bit_code_file, std::ios::out | std::ios::binary);
 
   if (!bc_file) {
-    WARN("Cannot create file");;
+    WARN("Cannot create file");
+    ;
     return false;
   }
 
@@ -74,7 +62,7 @@ void GetCodeObjectUsingRTC(size_t codeSize, std::vector<char>& code) {
   if (logSize) {
     std::string log(logSize, '\0');
     HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
-    WARN("Log: "<< log);
+    WARN("Log: " << log);
   }
   REQUIRE(compileResult == HIPRTC_SUCCESS);
   HIPRTC_CHECK(hiprtcGetCodeSize(prog, &codeSize));
@@ -101,8 +89,7 @@ void GetCodeObjectUsingRTC(size_t codeSize, std::vector<char>& code) {
  *    - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Stress_hipModuleLoadUnload") {
-
+HIP_TEST_CASE(Stress_hipModuleLoadUnload) {
   size_t code_size = 0;
   std::vector<char> code;
   GetCodeObjectUsingRTC(code_size, code);
@@ -115,7 +102,7 @@ TEST_CASE("Stress_hipModuleLoadUnload") {
 
   for (size_t iter_idx = 0; iter_idx < num_iterations; ++iter_idx) {
     if ((iter_idx % 2000) == 0) {
-      std::cout<<"Iteration :"<<iter_idx<<std::endl;
+      std::cout << "Iteration :" << iter_idx << std::endl;
       UNSCOPED_INFO("Unscoped Prints");
     }
 

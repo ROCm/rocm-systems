@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "hipMallocManagedCommon.hh"
 #include <atomic>
@@ -31,14 +15,12 @@ __global__ void MallcMangdFlgTst(int n, float* x, float* y) {
 }
 
 // The following section tests working of hipMallocManaged with flag parameters
-TEST_CASE("Unit_hipMallocManaged_FlgParam") {
-  
+HIP_TEST_CASE(Unit_hipMallocManaged_FlgParam) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
-  
+
   std::atomic<int> DataMismatch{0};
   bool IfTestPassed = true;
   float *HmmAG = NULL, *HmmAH1 = NULL, *HmmAH2 = NULL, INIT_VAL = 2.5;
@@ -120,14 +102,12 @@ TEST_CASE("Unit_hipMallocManaged_FlgParam") {
 
 // The following function tests Memory access allocated using hipMallocManaged
 // in multiple streams
-TEST_CASE("Unit_hipMallocManaged_AccessMultiStream") {
-  
+HIP_TEST_CASE(Unit_hipMallocManaged_AccessMultiStream) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
-  
+
   std::atomic<int> DataMismatch{0};
   bool IfTestPassed = true;
   float *HmmAG = NULL, *HmmAH1 = NULL, *HmmAH2 = NULL, INIT_VAL = 2.5;
@@ -138,17 +118,14 @@ TEST_CASE("Unit_hipMallocManaged_AccessMultiStream") {
   } else {
     NumStrms = 4;
   }
-  hipStream_t** Stream = new hipStream_t*[NumStrms];
-  for (int i = 0; i < NumStrms; ++i) {
-    Stream[i] = reinterpret_cast<hipStream_t*>(malloc(sizeof(hipStream_t)));
-  }
+  std::vector<hipStream_t> streams(NumStrms);
   float *Ad = NULL, *Ah = NULL;
   Ah = new float[NUM_ELMS];
   for (int i = 0; i < NumStrms; ++i) {
     if (MultiDevice >= 2) {
       HIP_CHECK(hipSetDevice(i));
     }
-    HIP_CHECK(hipStreamCreate(Stream[i]));
+    HIP_CHECK(hipStreamCreate(&streams[i]));
   }
   HIP_CHECK(hipSetDevice(0));
   // Testing hipMemAttachGlobal Flag
@@ -170,8 +147,8 @@ TEST_CASE("Unit_hipMallocManaged_AccessMultiStream") {
     }
     HIP_CHECK(hipMalloc(&Ad, NUM_ELMS * sizeof(float)));
     HIP_CHECK(hipMemset(Ad, 0, NUM_ELMS * sizeof(float)));
-    MallcMangdFlgTst<<<dimGrid, dimBlock, 0, *(Stream[i])>>>(NUM_ELMS, HmmAG, Ad);
-    HIP_CHECK(hipStreamSynchronize(*(Stream[i])));
+    MallcMangdFlgTst<<<dimGrid, dimBlock, 0, streams[i]>>>(NUM_ELMS, HmmAG, Ad);
+    HIP_CHECK(hipStreamSynchronize(streams[i]));
     // Validating the results
     HIP_CHECK(hipMemcpy(Ah, Ad, NUM_ELMS * sizeof(float), hipMemcpyDeviceToHost));
     for (int j = 0; j < NUM_ELMS; ++j) {
@@ -205,8 +182,8 @@ TEST_CASE("Unit_hipMallocManaged_AccessMultiStream") {
       HIP_CHECK(hipSetDevice(i));
     }
     HIP_CHECK(hipMemset(HmmAH2, 0, NUM_ELMS * sizeof(float)));
-    MallcMangdFlgTst<<<dimGrid, dimBlock, 0, *(Stream[i])>>>(NUM_ELMS, HmmAH1, HmmAH2);
-    HIP_CHECK(hipStreamSynchronize(*(Stream[i])));
+    MallcMangdFlgTst<<<dimGrid, dimBlock, 0, streams[i]>>>(NUM_ELMS, HmmAH1, HmmAH2);
+    HIP_CHECK(hipStreamSynchronize(streams[i]));
     for (int j = 0; j < NUM_ELMS; ++j) {
       if (HmmAH2[j] != (INIT_VAL * INIT_VAL)) {
         DataMismatch++;
@@ -223,7 +200,7 @@ TEST_CASE("Unit_hipMallocManaged_AccessMultiStream") {
   HIP_CHECK(hipFree(HmmAH1));
   HIP_CHECK(hipFree(HmmAH2));
   for (int i = 0; i < NumStrms; ++i) {
-    HIP_CHECK(hipStreamDestroy(*(Stream[i])));
+    HIP_CHECK(hipStreamDestroy(streams[i]));
   }
   REQUIRE(IfTestPassed);
 }

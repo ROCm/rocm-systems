@@ -1,0 +1,245 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include "common/synchronized.hpp"
+#include "core/agent.hpp"
+#include "core/categories.hpp"
+
+#include <cassert>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <initializer_list>
+#include <map>
+#include <memory>
+#include <optional>
+#include <rocprofiler-sdk/callback_tracing.h>
+#include <rocprofiler-sdk/cxx/name_info.hpp>
+#include <set>
+#include <spdlog/fmt/ranges.h>
+#include <string.h>
+#include <string>
+#include <sys/types.h>
+#include <unordered_set>
+#include <vector>
+
+namespace rocprofsys
+{
+namespace trace_cache
+{
+namespace info
+{
+struct process
+{
+    pid_t         pid;  // < Unique
+    pid_t         ppid;
+    std::string   command;
+    std::string   environment;
+    std::string   extdata;
+    std::uint32_t start;
+    std::uint32_t end;
+};
+
+struct pmc
+{
+    agent_type    type;
+    size_t        agent_type_index;
+    std::string   target_arch;
+    size_t        event_code;
+    size_t        instance_id;
+    std::string   name;  // < Unique
+    std::string   symbol;
+    std::string   description;
+    std::string   long_description;
+    std::string   component;
+    std::string   units;
+    std::string   value_type;
+    std::string   block;
+    std::string   expression;
+    std::uint32_t is_constant;
+    std::uint32_t is_derived;
+    std::string   extdata;
+};
+
+struct pmc_info_hash
+{
+    std::size_t operator()(const pmc& _pmc) const noexcept
+    {
+        std::size_t h1 = std::hash<size_t>{}(static_cast<size_t>(_pmc.type));
+        std::size_t h2 = std::hash<size_t>{}(_pmc.agent_type_index);
+        std::size_t h3 = std::hash<std::string>{}(_pmc.name);
+        return h1 ^ (h2 << 1) ^ (h3 << 1);
+    }
+};
+
+struct pmc_info_equal
+{
+    bool operator()(const pmc& lhs, const pmc& rhs) const noexcept
+    {
+        return lhs.type == rhs.type && lhs.agent_type_index == rhs.agent_type_index &&
+               lhs.name == rhs.name;
+    }
+};
+
+struct thread
+{
+    std::int32_t  parent_process_id;
+    std::int32_t  process_id;
+    std::uint64_t thread_id;  // < Unique
+    std::uint32_t start;
+    std::uint32_t end;
+    std::string   extdata;
+    friend bool   operator<(const thread& lhs, const thread& rhs)
+    {
+        return lhs.thread_id < rhs.thread_id;
+    }
+
+    friend bool operator==(const thread& lhs, const thread& rhs)
+    {
+        return lhs.parent_process_id == rhs.parent_process_id &&
+               lhs.process_id == rhs.process_id && lhs.thread_id == rhs.thread_id;
+    }
+};
+
+template <typename Category>
+inline std::string
+format_track_name(std::optional<int> first_section  = std::nullopt,
+                  std::optional<int> second_section = std::nullopt)
+{
+    return fmt::format("{}{}{}", tim::trait::name<Category>::value,
+                       first_section ? fmt::format("_{}", *first_section) : "",
+                       second_section ? fmt::format("_{}", *second_section) : "");
+}
+
+template <typename Category>
+inline std::string
+annotate_with_nic(const std::string& nic, std::optional<int> first_section = std::nullopt,
+                  std::optional<int> second_section = std::nullopt)
+{
+    std::stringstream ss;
+    ss << std::string(tim::trait::name<Category>::value) + " [" + nic + "]";
+    if(first_section) ss << "_" << std::to_string(*first_section);
+    if(second_section) ss << "_" << std::to_string(*second_section);
+    return ss.str();
+}
+
+struct track
+{
+    std::string           track_name;  // < Unique
+    std::optional<size_t> thread_id;
+    std::string           extdata;
+
+    friend bool operator<(const track& lhs, const track& rhs)
+    {
+        return lhs.track_name.compare(rhs.track_name) < 0;
+    }
+};
+
+struct code_object_less
+{
+    bool operator()(const rocprofiler_callback_tracing_code_object_load_data_t& lhs,
+                    const rocprofiler_callback_tracing_code_object_load_data_t& rhs) const
+    {
+        return lhs.code_object_id < rhs.code_object_id;
+    }
+};
+
+struct kernel_symbol_less
+{
+    bool operator()(
+        const rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t& lhs,
+        const rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t& rhs)
+        const
+    {
+        return lhs.kernel_id < rhs.kernel_id;
+    }
+};
+
+}  // namespace info
+
+struct metadata_registry
+{
+    metadata_registry();
+    metadata_registry(const metadata_registry&)            = delete;
+    metadata_registry& operator=(const metadata_registry&) = delete;
+    metadata_registry(metadata_registry&&)                 = delete;
+    metadata_registry& operator=(metadata_registry&&)      = delete;
+
+    void set_process(const info::process& process);
+    void add_pmc_info(const info::pmc& pmc_info);
+    void add_thread_info(const info::thread& thread_info);
+    void add_track(const info::track& track_info);
+    void add_queue(const std::uint64_t& queue_handle);
+    void add_stream(const std::uint64_t& stream_handle);
+    void add_string(const std::string_view string_value);
+
+    info::process               get_process_info() const;
+    std::optional<info::pmc>    get_pmc_info(const std::string_view& unique_name) const;
+    std::optional<info::thread> get_thread_info(const std::uint32_t& thread_id) const;
+    std::optional<info::track>  get_track_info(const std::string_view& track_name) const;
+    std::vector<info::pmc>      get_pmc_info_list() const;
+    std::vector<info::thread>   get_thread_info_list() const;
+    std::vector<info::track>    get_track_info_list() const;
+    std::vector<std::uint64_t>  get_queue_list() const;
+    std::vector<std::uint64_t>  get_stream_list() const;
+    std::vector<std::string_view> get_string_list() const;
+
+    bool save_to_file(const std::string&                         filepath,
+                      const std::vector<std::shared_ptr<agent>>& _agents) const;
+    bool load_from_file(const std::string&                   filepath,
+                        std::vector<std::shared_ptr<agent>>& _agents);
+
+    void add_code_object(
+        const rocprofiler_callback_tracing_code_object_load_data_t& code_object);
+    void add_kernel_symbol(
+        const rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t&
+            kernel_symbol);
+    std::vector<rocprofiler_callback_tracing_code_object_load_data_t>
+    get_code_object_list() const;
+    std::vector<rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t>
+    get_kernel_symbol_list() const;
+    std::optional<rocprofiler_callback_tracing_code_object_load_data_t> get_code_object(
+        std::uint64_t code_object_id) const;
+    std::optional<rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t>
+    get_kernel_symbol(std::uint64_t kernel_id) const;
+    rocprofiler::sdk::buffer_name_info_t<const char*>   get_buffer_name_info() const;
+    rocprofiler::sdk::callback_name_info_t<const char*> get_callback_tracing_info() const;
+
+private:
+    common::synchronized<info::process> m_process{};
+    common::synchronized<
+        std::unordered_set<info::pmc, info::pmc_info_hash, info::pmc_info_equal>>
+                                                 m_pmc_infos{};
+    common::synchronized<std::set<info::thread>> m_threads{};
+    common::synchronized<std::set<info::track>>  m_tracks{};
+
+    common::synchronized<std::set<std::uint64_t>>         m_streams{};
+    common::synchronized<std::set<std::uint64_t>>         m_queues{};
+    common::synchronized<std::unordered_set<std::string>> m_strings{};
+    common::synchronized<std::set<rocprofiler_callback_tracing_code_object_load_data_t,
+                                  info::code_object_less>>
+        m_code_objects{};
+    common::synchronized<
+        std::set<rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t,
+                 info::kernel_symbol_less>>
+                                                      m_kernel_symbols{};
+    rocprofiler::sdk::buffer_name_info_t<const char*> m_buffered_tracing_info{
+        rocprofiler::sdk::get_buffer_tracing_names<const char*>()
+    };
+    rocprofiler::sdk::callback_name_info_t<const char*> m_callback_tracing_info{
+        rocprofiler::sdk::get_callback_tracing_names<const char*>()
+    };
+
+    using callback_rename_map_t =
+        std::map<rocprofiler_tracing_operation_t, std::string_view>;
+
+    void overwrite_callback_names(
+        std::initializer_list<
+            std::pair<rocprofiler_callback_tracing_kind_t, callback_rename_map_t>>
+            rename_table);
+};
+
+}  // namespace trace_cache
+}  // namespace rocprofsys

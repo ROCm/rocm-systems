@@ -77,4 +77,11 @@ public:
         ISSUE_LDS_DIRECT = 31,
         ISSUE_BRMSG      = 31,
     };
+
+    // max number of waves per CU
+    static constexpr size_t   max_wave_cnt = 32;
+    static constexpr uint32_t gfx_ip_major = 9;
+    // By default, we assume the GFX942 in the SDK,
+    // as that's the first arch supporting PC sampling.
+    static constexpr uint32_t gfx_ip_minor = 4;
 };

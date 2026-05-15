@@ -1,22 +1,8 @@
-/* Copyright (c) 2016 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "device/pal/palgpuopen.hpp"
 #include "device/pal/paldevice.hpp"
@@ -135,13 +121,12 @@ bool RgpCaptureMgr::Update(Pal::IPlatform* platform) {
 
     const uint32_t api_version = settings.oclVersion_;
 
-    trace_.gpa_session_ = new GpuUtil::GpaSession(platform, device_.iDev(),
-                                                  api_version >> 4,   // OCL API version major
-                                                  api_version & 0xf,  // OCL API version minor
-                                                  (amd::IS_HIP) ? GpuUtil::ApiType::Hip :
-                                                                  GpuUtil::ApiType::OpenCl,
-                                                  RgpSqttInstrumentationSpecVersion,
-                                                  RgpSqttInstrumentationApiVersion);
+    trace_.gpa_session_ = new GpuUtil::GpaSession(
+        platform, device_.iDev(),
+        api_version >> 4,   // OCL API version major
+        api_version & 0xf,  // OCL API version minor
+        (amd::IS_HIP) ? GpuUtil::ApiType::Hip : GpuUtil::ApiType::OpenCl,
+        RgpSqttInstrumentationSpecVersion, RgpSqttInstrumentationApiVersion);
 
     if (trace_.gpa_session_ == nullptr) {
       result = false;
@@ -359,7 +344,7 @@ Pal::Result RgpCaptureMgr::CheckForTraceResults() {
 // ================================================================================================
 // Called after a swap chain presents.  This signals a (next) frame-begin boundary and is
 // used to coordinate RGP trace start/stop.
-void RgpCaptureMgr::PreDispatch(VirtualGPU* gpu, const HSAILKernel& kernel, size_t x, size_t y,
+void RgpCaptureMgr::PreDispatch(VirtualGPU* gpu, const pal::Kernel& kernel, size_t x, size_t y,
                                 size_t z) {
   // Wait for the driver to be resumed in case it's been paused.
   WaitForDriverResume();
@@ -562,7 +547,6 @@ Pal::Result RgpCaptureMgr::PrepareRGPTrace(VirtualGPU* gpu) {
   }
 
   if (result == Pal::Result::Success) {
-
     trace_.begin_queue_ = nullptr;
     trace_.status_ = TraceStatus::Preparing;
   } else {
@@ -614,15 +598,16 @@ Pal::Result RgpCaptureMgr::BeginRGPTrace(VirtualGPU* gpu) {
 
     // Fill GPU commands
     gpu->eventBegin(MainEngine);
-    result = trace_.gpa_session_->BeginSample(
-      gpu->queue(MainEngine).iCmd(), sampleConfig, &trace_.gpa_sample_id_);
+    result = trace_.gpa_session_->BeginSample(gpu->queue(MainEngine).iCmd(), sampleConfig,
+                                              &trace_.gpa_sample_id_);
     gpu->eventEnd(MainEngine, trace_.begin_sqtt_event_);
   }
 
   if (result == Pal::Result::Success) {
     GpuUtil::SampleTraceApiInfo sample_trace_api_info = {};
-    sample_trace_api_info.instructionTraceMode = (inst_tracing_enabled_) ?
-        GpuUtil::InstructionTraceMode::FullFrame : GpuUtil::InstructionTraceMode::Disabled;
+    sample_trace_api_info.instructionTraceMode = (inst_tracing_enabled_)
+                                                     ? GpuUtil::InstructionTraceMode::FullFrame
+                                                     : GpuUtil::InstructionTraceMode::Disabled;
     trace_.gpa_session_->SetSampleTraceApiInfo(sample_trace_api_info, trace_.gpa_sample_id_);
   }
 
@@ -846,8 +831,10 @@ void RgpCaptureMgr::WriteMarker(const VirtualGPU* gpu, const void* data, size_t 
   Pal::RgpMarkerSubQueueFlags subQueueFlags = {};
   subQueueFlags.includeMainSubQueue = 1;
 
-  gpu->queue(MainEngine).iCmd()->CmdInsertRgpTraceMarker(
-    subQueueFlags, static_cast<uint32_t>(data_size / sizeof(uint32_t)), data);
+  gpu->queue(MainEngine)
+      .iCmd()
+      ->CmdInsertRgpTraceMarker(subQueueFlags, static_cast<uint32_t>(data_size / sizeof(uint32_t)),
+                                data);
 }
 
 // ================================================================================================
@@ -963,7 +950,8 @@ void RgpCaptureMgr::WriteComputeBindMarker(const VirtualGPU* gpu, uint64_t api_h
   RgpSqttMarkerPipelineBind marker = {};
 
   marker.identifier = RgpSqttMarkerIdentifierBindPipeline;
-  marker.cbID = gpu->queue(MainEngine).cmdBufId();;
+  marker.cbID = gpu->queue(MainEngine).cmdBufId();
+  ;
   marker.bindPoint = 1;
 
   memcpy(marker.apiPsoHash, &api_hash, sizeof(api_hash));
@@ -972,4 +960,4 @@ void RgpCaptureMgr::WriteComputeBindMarker(const VirtualGPU* gpu, uint64_t api_h
 
 }  // namespace amd::pal
 
-#endif // PAL_GPUOPEN_OCL
+#endif  // PAL_GPUOPEN_OCL

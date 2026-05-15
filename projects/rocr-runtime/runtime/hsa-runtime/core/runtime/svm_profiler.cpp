@@ -42,10 +42,20 @@
 
 #include "core/inc/svm_profiler.h"
 
-#include <stdint.h>
+#include <cinttypes>
+#include <cstdint>
 #include <algorithm>
+#if defined(__linux__)
 #include <sys/eventfd.h>
 #include <poll.h>
+#else
+struct pollfd {
+  int fd;
+  short int events;
+  short int revents;
+};
+#define POLLIN 0x001  // from poll.h...
+#endif
 
 #include "core/util/utils.h"
 #include "core/inc/runtime.h"
@@ -171,7 +181,12 @@ void SvmProfileControl::PollSmi() {
   };
 
   while (!exit) {
+#if defined(__linux__)
     int ready = poll(&files[0], files.size(), -1);
+#else
+    int ready = 0;
+    assert(!"Unimplemented!");
+#endif
     if (ready < 1) {
       assert(false && "poll failed!");
       return;
@@ -207,7 +222,7 @@ void SvmProfileControl::PollSmi() {
             uint64_t time;
             int pid;
             int offset = 0;
-            int args = sscanf(cursor, "%x %lu -%u%n", &event_id, &time, &pid, &offset);
+            int args = sscanf(cursor, "%x %" SCNu64 " -%u%n", &event_id, &time, &pid, &offset);
             assert(args == 3 && "Parsing error!");
 
             std::string detail;
@@ -220,7 +235,7 @@ void SvmProfileControl::PollSmi() {
                 uint32_t from, to;
                 uint32_t trigger = 0;
                 uint32_t fetch, pref;
-                args = sscanf(cursor, "@%lx(%x) %x->%x %x:%x %u", &addr, &size, &from, &to, &fetch,
+                args = sscanf(cursor, "@%" SCNx64 "(%x) %x->%x %x:%x %u", &addr, &size, &from, &to, &fetch,
                               &pref, &trigger);
                 assert(args == 7 && "Parsing error!");
 
@@ -240,7 +255,7 @@ void SvmProfileControl::PollSmi() {
                 uint32_t size;
                 uint32_t from, to;
                 uint32_t trigger;
-                args = sscanf(cursor, "@%lx(%x) %x->%x %u", &addr, &size, &from, &to, &trigger);
+                args = sscanf(cursor, "@%" SCNx64 "(%x) %x->%x %u", &addr, &size, &from, &to, &trigger);
                 assert(args == 5 && "Parsing error!");
 
                 addr *= 4096;
@@ -258,7 +273,7 @@ void SvmProfileControl::PollSmi() {
                 uint64_t addr;
                 uint32_t gpuid;
                 char mode;
-                args = sscanf(cursor, "@%lx(%x) %c", &addr, &gpuid, &mode);
+                args = sscanf(cursor, "@%" SCNx64 "(%x) %c", &addr, &gpuid, &mode);
 
                 addr *= 4096;
 
@@ -274,7 +289,7 @@ void SvmProfileControl::PollSmi() {
                 uint64_t addr;
                 uint32_t gpuid;
                 char mode;
-                args = sscanf(cursor, "@%lx(%x) %c", &addr, &gpuid, &mode);
+                args = sscanf(cursor, "@%" SCNx64 "(%x) %c", &addr, &gpuid, &mode);
                 assert(args == 3 && "Parsing error!");
 
                 addr *= 4096;
@@ -311,7 +326,7 @@ void SvmProfileControl::PollSmi() {
                 uint32_t size;
                 uint32_t gpuid;
                 uint32_t trigger;
-                args = sscanf(cursor, "@%lx(%x) %x %u", &addr, &size, &gpuid, &trigger);
+                args = sscanf(cursor, "@%" SCNx64 "(%x) %x %u", &addr, &size, &gpuid, &trigger);
                 assert(args == 4 && "Parsing error!");
 
                 addr *= 4096;
@@ -345,9 +360,10 @@ void SvmProfileControl::PollSmi() {
 }
 
 SvmProfileControl::SvmProfileControl() : event(-1), exit(false) {
+#if defined(__linux__)
   event = eventfd(0, EFD_CLOEXEC);
   if (event == -1) return;
-
+#endif
   poll_smi_thread_ = os::CreateThread(PollSmiRun, (void*)this);
   if (poll_smi_thread_ == NULL) {
     assert(false && "Poll SMI thread creation error.");
@@ -356,14 +372,18 @@ SvmProfileControl::SvmProfileControl() : event(-1), exit(false) {
 }
 
 SvmProfileControl::~SvmProfileControl() {
-  if (event != -1) eventfd_write(event, 1);
+#if defined(__linux__)
+  if (event != -1) {
+    eventfd_write(event, 1);
+    close(event);
+  }
+#endif
   if (poll_smi_thread_ != NULL) {
     exit = true;
     os::WaitForThread(poll_smi_thread_);
     os::CloseThread(poll_smi_thread_);
     poll_smi_thread_ = NULL;
   }
-  close(event);
 }
 
 template <typename... Args>

@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2020-2021 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INNCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANNY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #ifdef __linux__
@@ -34,7 +21,7 @@ THE SOFTWARE.
 /**
  * Fetches Gpu device count
  */
-static void getDeviceCount(int *pdevCnt) {
+static void getDeviceCount(int* pdevCnt) {
   int fd[2], val = 0;
   pid_t childpid;
 
@@ -109,15 +96,13 @@ static bool getTotalMemoryOfMaskedDevices(int actualNumGPUs) {
     setenv("HIP_VISIBLE_DEVICES", visibleDeviceString, 1);
 #endif
 
-    for (int count = 1;
-        count < actualNumGPUs; count++) {
+    for (int count = 1; count < actualNumGPUs; count++) {
       size_t totMem;
       err = hipDeviceTotalMem(&totMem, count);
       if (err == hipSuccess) {
         testResult &= false;
       } else {
-        printf("hipDeviceTotalMem: Error Code Returned: '%s'(%d)\n",
-              hipGetErrorString(err), err);
+        printf("hipDeviceTotalMem: Error Code Returned: '%s'(%d)\n", hipGetErrorString(err), err);
       }
     }
     close(fd[0]);
@@ -154,7 +139,7 @@ static bool getTotalMemoryOfMaskedDevices(int actualNumGPUs) {
  *  - Multi-device test
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceTotalMem_MaskedDevices") {
+HIP_TEST_CASE(Unit_hipDeviceTotalMem_MaskedDevices) {
   int count = -1;
   constexpr int ReqGPUs = 2;
   bool ret;
@@ -165,7 +150,7 @@ TEST_CASE("Unit_hipDeviceTotalMem_MaskedDevices") {
     ret = getTotalMemoryOfMaskedDevices(count);
     REQUIRE(ret == true);
   } else {
-    SUCCEED("Not enough GPUs to run the masked GPU tests");
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 }
 

@@ -33,6 +33,7 @@ class RepoEntry(BaseModel):
         url      : Individual GitHub org plus repo names in matching case and punctuation. (e.g., "ROCm/rocBLAS")
         branch   : The base branch of the sub-repo to target (e.g., "develop").
         category : Directory category in the super-repo (e.g., "projects" or "shared").
+        monorepo_source_of_truth : Whether this project has completed migration to monorepo as source of truth.
     """
     name: str
     url: str
@@ -40,6 +41,7 @@ class RepoEntry(BaseModel):
     category: str
     auto_subtree_pull: bool
     auto_subtree_push: bool
+    monorepo_source_of_truth: bool
 
 class RepoConfig(BaseModel):
     """

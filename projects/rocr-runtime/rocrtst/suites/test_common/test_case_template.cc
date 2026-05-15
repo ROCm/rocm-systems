@@ -108,11 +108,7 @@
 #include "gtest/gtest.h"
 #include "hsa/hsa.h"
 
-#ifdef ROCRTST_EMULATOR_BUILD
-static const uint32_t kNumBufferElements = 4;
-#else
-static const uint32_t kNumBufferElements = 256;
-#endif
+static const uint32_t kNumBufferElements = rocrtst::isEmuModeEnabled() ? 4 : 256;
 
 #define RET_IF_HSA_ERR(err) { \
   if ((err) != HSA_STATUS_SUCCESS) { \
@@ -127,20 +123,6 @@ static const uint32_t kNumBufferElements = 256;
 
 // Many test cases want to perform an operation on memory sizes of various
 // granularities.
-#if 0
-static const int kNumGranularity = 20;
-const char* Str[kNumGranularity] = {"1k", "2K", "4K", "8K", "16K", "32K",
-    "64K", "128K", "256K", "512K", "1M", "2M", "4M", "8M", "16M", "32M",
-                                               "64M", "128M", "256M", "512M"};
-
-const size_t Size[kNumGranularity] = {
-    1024, 2*1024, 4*1024, 8*1024, 16*1024, 32*1024, 64*1024, 128*1024,
-    256*1024, 512*1024, 1024*1024, 2048*1024, 4096*1024, 8*1024*1024,
-    16*1024*1024, 32*1024*1024, 64*1024*1024, 128*1024*1024, 256*1024*1024,
-    512*1024*1024};
-
-static const int kMaxCopySize = Size[kNumGranularity - 1];
-#endif
 TestExample::TestExample(void) :
     TestBase() {
   set_num_iteration(10);  // Number of iterations to execute of the main test;
@@ -172,6 +154,7 @@ void TestExample::SetUp(void) {
   // TestBase::SetUp() will set HSA_ENABLE_INTERRUPT if enable_interrupt() is
   // true, and call hsa_init(). It also prints the SetUp header.
   TestBase::SetUp();
+  if (test_skipped_) return;
 
   // SetDefaultAgents(this) will assign the first CPU and GPU found on
   // iterating through the agents and assign them to cpu_device_ and

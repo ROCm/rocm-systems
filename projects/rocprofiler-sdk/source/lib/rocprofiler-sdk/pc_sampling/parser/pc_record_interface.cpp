@@ -107,6 +107,17 @@ PCSamplingParserContext::parse(const upcoming_samples_t& upcoming,
     {
         parseSample_func = _get_parse_func_for_method<GFX11>(pcs_method);
     }
+    else if(gfxip_major == 12)
+    {
+        if(gfxip_minor == 5)
+        {
+            parseSample_func = _get_parse_func_for_method<GFX1250>(pcs_method);
+        }
+        else
+        {
+            parseSample_func = _get_parse_func_for_method<GFX12>(pcs_method);
+        }
+    }
     else
     {
         return PCSAMPLE_STATUS_INVALID_GFXIP;

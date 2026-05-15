@@ -140,6 +140,12 @@ run_impl()
 int
 run()
 {
+#if _OPENMP == 202011
+    std::cout << "Compiler OpenMP version == 202011" << std::endl;
+#elif _OPENMP == 201811
+    std::cout << "Compiler OpenMP version == 201811" << std::endl;
+#endif
+
 #pragma omp parallel
     {
         run_impl();

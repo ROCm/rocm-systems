@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of intge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "MemUtils.hh"
 
@@ -34,9 +18,8 @@ constexpr int testValue2 = 98;
 using namespace mem_utils;
 
 // Helper function to run tests for hipMemset allocation types
-template <typename T>
-void runAsyncTests(hipStream_t stream, allocType type, memType memType, MultiDData data1,
-                   MultiDData data2) {
+template <typename T> void runAsyncTests(hipStream_t stream, allocType type, memType memType,
+                                         MultiDData data1, MultiDData data2) {
   std::pair<T*, T*> aPtr{};
   MultiDData totalRange;
   totalRange.width = data1.width + data2.width;
@@ -61,9 +44,8 @@ void runAsyncTests(hipStream_t stream, allocType type, memType memType, MultiDDa
   }
 }
 
-template <typename T>
-static void doMemsetTest(allocType mallocType, memType memset_type, MultiDData data1,
-                         MultiDData data2) {
+template <typename T> static void doMemsetTest(allocType mallocType, memType memset_type,
+                                               MultiDData data1, MultiDData data2) {
   enum StreamType { NULLSTR, CREATEDSTR };
   auto streamType = GENERATE(NULLSTR, CREATEDSTR);
   hipStream_t stream{nullptr};
@@ -79,8 +61,7 @@ static void doMemsetTest(allocType mallocType, memType memset_type, MultiDData d
  * test 2 async hipMemset's on the same memory at different offsets
  */
 
-TEST_CASE("Unit_hipMemsetASyncMulti") {
-
+HIP_TEST_CASE(Unit_hipMemsetASyncMulti) {
   allocType mallocType = GENERATE(allocType::hostMalloc, allocType::deviceMalloc,
                                   allocType::hostRegisted, allocType::devRegistered);
   memType mem_type = memType::hipMemsetD8;
@@ -97,7 +78,7 @@ TEST_CASE("Unit_hipMemsetASyncMulti") {
 /*
  * test 2 async hipMemsetD[8,16,32]'s on the same memory at different offsets
  */
-TEMPLATE_TEST_CASE("Unit_hipMemsetDASyncMulti", "", int8_t, int16_t, uint32_t) {
+HIP_TEMPLATE_TEST_CASE(Unit_hipMemsetDASyncMulti, int8_t, int16_t, uint32_t) {
   allocType mallocType = GENERATE(allocType::hostRegisted, allocType::deviceMalloc,
                                   allocType::hostMalloc, allocType::devRegistered);
   memType memset_type;
@@ -121,10 +102,9 @@ TEMPLATE_TEST_CASE("Unit_hipMemsetDASyncMulti", "", int8_t, int16_t, uint32_t) {
 /*
  * test 2 async hipMemset2D's on the same memory at different offsets
  */
-TEST_CASE("Unit_hipMemset2DASyncMulti") {
+HIP_TEST_CASE(Unit_hipMemset2DASyncMulti) {
 #if HT_AMD
-  HipTest::HIP_SKIP_TEST("EXSWCPHIPT-127");
-  return;
+  HIP_SKIP_TEST("tracked issue EXSWCPHIPT-127.");
 #endif
   allocType mallocType = GENERATE(allocType::deviceMalloc, allocType::hostMalloc,
                                   allocType::hostRegisted, allocType::devRegistered);
@@ -143,10 +123,9 @@ TEST_CASE("Unit_hipMemset2DASyncMulti") {
 /*
  * test 2 async hipMemset3D's on the same memory at different offsets
  */
-TEST_CASE("Unit_hipMemset3DASyncMulti") {
+HIP_TEST_CASE(Unit_hipMemset3DASyncMulti) {
 #if HT_AMD
-  HipTest::HIP_SKIP_TEST("EXSWCPHIPT-127");
-  return;
+  HIP_SKIP_TEST("tracked issue EXSWCPHIPT-127.");
 #endif
   allocType mallocType = GENERATE(allocType::deviceMalloc, allocType::hostMalloc,
                                   allocType::hostRegisted, allocType::devRegistered);

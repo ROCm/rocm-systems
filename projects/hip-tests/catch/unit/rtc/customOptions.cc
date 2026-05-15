@@ -24,7 +24,7 @@ __global__ void kernel(int* a) {
 }
 )"};
 
-TEST_CASE("Unit_hiprtc_cpp17") {
+HIP_TEST_CASE(Unit_hiprtc_cpp17) {
   using namespace std;
   hiprtcProgram prog;
   hiprtcCreateProgram(&prog,         // prog
@@ -93,7 +93,7 @@ template <typename T> __global__ void my_sqrt(T* input, int N) {
 }
 )"};
 
-TEST_CASE("Unit_hiprtc_namehandling") {
+HIP_TEST_CASE(Unit_hiprtc_namehandling) {
   using namespace std;
   hiprtcProgram prog;
   hiprtcCreateProgram(&prog,                 // prog
@@ -133,7 +133,8 @@ TEST_CASE("Unit_hiprtc_namehandling") {
 
   for (size_t i = 0; i < name_expressions.size(); i++) {
     const char* mangled_instantiation_cstr;
-    REQUIRE(HIPRTC_SUCCESS == hiprtcGetLoweredName(prog, name_expressions[i].c_str(), &mangled_instantiation_cstr));
+    REQUIRE(HIPRTC_SUCCESS ==
+            hiprtcGetLoweredName(prog, name_expressions[i].c_str(), &mangled_instantiation_cstr));
 
     std::string mangled_name_str = mangled_instantiation_cstr;
     mangled_names[name_expressions[i]] = mangled_name_str;
@@ -147,7 +148,7 @@ TEST_CASE("Unit_hiprtc_namehandling") {
   REQUIRE(compileResult == HIPRTC_SUCCESS);
 }
 
-TEST_CASE("Unit_hiprtc_getloweredname") {
+HIP_TEST_CASE(Unit_hiprtc_getloweredname) {
   using namespace std;
   hiprtcProgram prog;
   hiprtcCreateProgram(&prog,                 // prog
@@ -169,8 +170,10 @@ TEST_CASE("Unit_hiprtc_getloweredname") {
   }
 
   const char* mangled_instantiation_cstr;
-  // Verifies if hiprtcGetLoweredName successfully gets the lowered name for named expressions with space
-  REQUIRE(HIPRTC_SUCCESS == hiprtcGetLoweredName(prog, name_expression.c_str(), &mangled_instantiation_cstr));
+  // Verifies if hiprtcGetLoweredName successfully gets the lowered name for named expressions with
+  // space
+  REQUIRE(HIPRTC_SUCCESS ==
+          hiprtcGetLoweredName(prog, name_expression.c_str(), &mangled_instantiation_cstr));
 
   std::string mangled_name_str = mangled_instantiation_cstr;
   // Checks if the fetched lowered name is not empty

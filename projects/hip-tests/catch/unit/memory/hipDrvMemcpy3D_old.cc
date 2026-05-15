@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
  * @addtogroup hipDrvMemcpy3D hipDrvMemcpy3D
@@ -45,8 +32,7 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
 
-template<typename T>
-class DrvMemcpy3D {
+template <typename T> class DrvMemcpy3D {
   int width, height, depth;
   unsigned int size;
   hipArray_Format formatKind;
@@ -55,9 +41,9 @@ class DrvMemcpy3D {
   HIP_MEMCPY3D myparms;
   hipDeviceptr_t D_m, E_m;
   T* hData{nullptr};
+
  public:
-  DrvMemcpy3D(int l_width, int l_height, int l_depth,
-      hipArray_Format l_format);
+  DrvMemcpy3D(int l_width, int l_height, int l_depth, hipArray_Format l_format);
   DrvMemcpy3D() = delete;
   void AllocateMemory();
   void SetDefaultData();
@@ -70,8 +56,7 @@ class DrvMemcpy3D {
 
 /* Intializes class variables */
 template <typename T>
-DrvMemcpy3D<T>::DrvMemcpy3D(int l_width, int l_height, int l_depth,
-    hipArray_Format l_format) {
+DrvMemcpy3D<T>::DrvMemcpy3D(int l_width, int l_height, int l_depth, hipArray_Format l_format) {
   width = l_width;
   height = l_height;
   depth = l_depth;
@@ -79,25 +64,21 @@ DrvMemcpy3D<T>::DrvMemcpy3D(int l_width, int l_height, int l_depth,
 }
 
 /* Allocating Memory */
-template <typename T>
-void DrvMemcpy3D<T>::AllocateMemory() {
+template <typename T> void DrvMemcpy3D<T>::AllocateMemory() {
   size = width * height * depth * sizeof(T);
   hData = reinterpret_cast<T*>(malloc(size));
   memset(hData, 0, size);
   for (int i = 0; i < depth; i++) {
     for (int j = 0; j < height; j++) {
       for (int k = 0; k < width; k++) {
-        hData[i*width*height + j*width +k] = i*width*height + j*width + k;
+        hData[i * width * height + j * width + k] = i * width * height + j * width + k;
       }
     }
   }
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&D_m),
-                          &pitch_D, width*sizeof(T), height));
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&E_m),
-                          &pitch_E, width*sizeof(T), height));
-  HIP_ARRAY3D_DESCRIPTOR *desc;
-  desc = reinterpret_cast<HIP_ARRAY3D_DESCRIPTOR*>
-         (malloc(sizeof(HIP_ARRAY3D_DESCRIPTOR)));
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&D_m), &pitch_D, width * sizeof(T), height));
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&E_m), &pitch_E, width * sizeof(T), height));
+  HIP_ARRAY3D_DESCRIPTOR* desc;
+  desc = reinterpret_cast<HIP_ARRAY3D_DESCRIPTOR*>(malloc(sizeof(HIP_ARRAY3D_DESCRIPTOR)));
   desc->Format = formatKind;
   desc->NumChannels = 1;
   desc->Width = width;
@@ -109,8 +90,7 @@ void DrvMemcpy3D<T>::AllocateMemory() {
 }
 
 /* Setting the default data */
-template <typename T>
-void DrvMemcpy3D<T>::SetDefaultData() {
+template <typename T> void DrvMemcpy3D<T>::SetDefaultData() {
   memset(&myparms, 0x0, sizeof(HIP_MEMCPY3D));
   myparms.srcXInBytes = 0;
   myparms.srcY = 0;
@@ -120,7 +100,7 @@ void DrvMemcpy3D<T>::SetDefaultData() {
   myparms.dstY = 0;
   myparms.dstZ = 0;
   myparms.dstLOD = 0;
-  myparms.WidthInBytes = width*sizeof(T);
+  myparms.WidthInBytes = width * sizeof(T);
   myparms.Height = height;
   myparms.Depth = depth;
 }
@@ -129,16 +109,15 @@ void DrvMemcpy3D<T>::SetDefaultData() {
 This function verifies the negative scenarios of
 hipDrvMemcpy3D API
 */
-template <typename T>
-void DrvMemcpy3D<T>::NegativeTests() {
+template <typename T> void DrvMemcpy3D<T>::NegativeTests() {
   HIP_CHECK(hipSetDevice(0));
   AllocateMemory();
   SetDefaultData();
   int deviceId;
   HIP_CHECK(hipGetDevice(&deviceId));
   unsigned int MaxPitch;
-  HIP_CHECK(hipDeviceGetAttribute(reinterpret_cast<int *>(&MaxPitch),
-                                  hipDeviceAttributeMaxPitch, deviceId));
+  HIP_CHECK(hipDeviceGetAttribute(reinterpret_cast<int*>(&MaxPitch), hipDeviceAttributeMaxPitch,
+                                  deviceId));
   myparms.srcHost = hData;
   myparms.dstArray = arr;
   myparms.srcPitch = width * sizeof(T);
@@ -168,7 +147,7 @@ void DrvMemcpy3D<T>::NegativeTests() {
   }
 
   SECTION("Passing width > max width size") {
-    myparms.WidthInBytes = width*sizeof(T) + 1;
+    myparms.WidthInBytes = width * sizeof(T) + 1;
     REQUIRE(hipDrvMemcpy3D(&myparms) != hipSuccess);
   }
 
@@ -231,7 +210,7 @@ void DrvMemcpy3D<T>::NegativeTests() {
     myparms.srcHeight = height;
     myparms.dstHost = hData;
     myparms.dstArray = nullptr;
-    myparms.dstPitch = width*sizeof(T);
+    myparms.dstPitch = width * sizeof(T);
     myparms.dstHeight = height;
     REQUIRE(hipDrvMemcpy3D(&myparms) != hipSuccess);
   }
@@ -239,7 +218,7 @@ void DrvMemcpy3D<T>::NegativeTests() {
   SECTION("dst pitch greater than Max allowed pitch") {
     myparms.dstDevice = hipDeviceptr_t(D_m);
     myparms.dstArray = nullptr;
-    myparms.dstPitch = MaxPitch+1;
+    myparms.dstPitch = MaxPitch + 1;
     myparms.dstHeight = height;
     myparms.dstMemoryType = hipMemoryTypeDevice;
     REQUIRE(hipDrvMemcpy3D(&myparms) != hipSuccess);
@@ -259,9 +238,7 @@ void DrvMemcpy3D<T>::NegativeTests() {
     REQUIRE(hipDrvMemcpy3D(&myparms) != hipSuccess);
   }
 
-  SECTION("Nullptr to hipDrvMemcpy3D") {
-    REQUIRE(hipDrvMemcpy3D(nullptr) != hipSuccess);
-  }
+  SECTION("Nullptr to hipDrvMemcpy3D") { REQUIRE(hipDrvMemcpy3D(nullptr) != hipSuccess); }
 
   DeAllocateMemory();
 }
@@ -269,8 +246,7 @@ void DrvMemcpy3D<T>::NegativeTests() {
 This function verifies the Extent validation scenarios of
 hipDrvMemcpy3D API
 */
-template <typename T>
-void DrvMemcpy3D<T>::Extent_Validation() {
+template <typename T> void DrvMemcpy3D<T>::Extent_Validation() {
   HIP_CHECK(hipSetDevice(0));
   // Allocating the memory
   AllocateMemory();
@@ -315,8 +291,7 @@ This functionality is verified in 2 scenarios
 2. Device context change scenario where memory is allocated in 1 GPU
    and hipDrvMemcpy3D API is trigerred from another GPU
 */
-template <typename T>
-void DrvMemcpy3D<T>::HostDevice_DrvMemcpy3D(bool device_context_change) {
+template <typename T> void DrvMemcpy3D<T>::HostDevice_DrvMemcpy3D(bool device_context_change) {
   HIP_CHECK(hipSetDevice(0));
   bool skip_test = false;
   int peerAccess = 0;
@@ -324,7 +299,7 @@ void DrvMemcpy3D<T>::HostDevice_DrvMemcpy3D(bool device_context_change) {
   if (device_context_change) {
     HIP_CHECK(hipDeviceCanAccessPeer(&peerAccess, 0, 1));
     if (!peerAccess) {
-      WARN("skipped the testcase as no peer access");
+      HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
       skip_test = true;
     } else {
       HIP_CHECK(hipSetDevice(1));
@@ -353,8 +328,8 @@ void DrvMemcpy3D<T>::HostDevice_DrvMemcpy3D(bool device_context_change) {
     myparms.dstPitch = pitch_E;
     myparms.dstHeight = height;
     HIP_CHECK(hipDrvMemcpy3D(&myparms));
-    T *hOutputData = reinterpret_cast<T*>(malloc(size));
-    memset(hOutputData, 0,  size);
+    T* hOutputData = reinterpret_cast<T*>(malloc(size));
+    memset(hOutputData, 0, size);
 
     // Device to host
     SetDefaultData();
@@ -386,8 +361,7 @@ This functionality is verified in 2 scenarios
 2. Device context change scenario where memory is allocated in 1 GPU
    and hipDrvMemcpy3D API is trigerred from another GPU
 */
-template <typename T>
-void DrvMemcpy3D<T>::HostArray_DrvMemcpy3D(bool device_context_change) {
+template <typename T> void DrvMemcpy3D<T>::HostArray_DrvMemcpy3D(bool device_context_change) {
   HIP_CHECK(hipSetDevice(0));
   bool skip_test = false;
   int peerAccess = 0;
@@ -395,7 +369,7 @@ void DrvMemcpy3D<T>::HostArray_DrvMemcpy3D(bool device_context_change) {
   if (device_context_change) {
     HIP_CHECK(hipDeviceCanAccessPeer(&peerAccess, 0, 1));
     if (!peerAccess) {
-      WARN("skipped the testcase as no peer access");
+      HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
       skip_test = true;
     } else {
       HIP_CHECK(hipSetDevice(1));
@@ -417,8 +391,8 @@ void DrvMemcpy3D<T>::HostArray_DrvMemcpy3D(bool device_context_change) {
     myparms.srcArray = arr;
     myparms.dstArray = arr1;
     HIP_CHECK(hipDrvMemcpy3D(&myparms));
-    T *hOutputData = reinterpret_cast<T*>(malloc(size));
-    memset(hOutputData, 0,  size);
+    T* hOutputData = reinterpret_cast<T*>(malloc(size));
+    memset(hOutputData, 0, size);
     SetDefaultData();
     // Device to host
     myparms.srcMemoryType = hipMemoryTypeArray;
@@ -435,8 +409,7 @@ void DrvMemcpy3D<T>::HostArray_DrvMemcpy3D(bool device_context_change) {
   DeAllocateMemory();
 }
 /* DeAllocating the memory */
-template <typename T>
-void DrvMemcpy3D<T>::DeAllocateMemory() {
+template <typename T> void DrvMemcpy3D<T>::DeAllocateMemory() {
   HIP_CHECK(hipArrayDestroy(arr));
   HIP_CHECK(hipArrayDestroy(arr1));
   free(hData);
@@ -454,17 +427,16 @@ void DrvMemcpy3D<T>::DeAllocateMemory() {
  *  - HIP_VERSION >= 6.0
  */
 
-TEMPLATE_TEST_CASE("Unit_hipDrvMemcpy3D_MultipleDataTypes", "",
-    uint8_t, int, float) {
+HIP_TEMPLATE_TEST_CASE(Unit_hipDrvMemcpy3D_MultipleDataTypes, uint8_t, int, float) {
   CHECK_IMAGE_SUPPORT
   for (int i = 1; i < 25; i++) {
     if (std::is_same<TestType, float>::value) {
       DrvMemcpy3D<TestType> memcpy3d_float(i, i, i, HIP_AD_FORMAT_FLOAT);
       memcpy3d_float.HostArray_DrvMemcpy3D();
-    } else if (std::is_same<TestType, uint8_t>::value)  {
+    } else if (std::is_same<TestType, uint8_t>::value) {
       DrvMemcpy3D<TestType> memcpy3d_intx(i, i, i, HIP_AD_FORMAT_UNSIGNED_INT8);
       memcpy3d_intx.HostArray_DrvMemcpy3D();
-    } else if (std::is_same<TestType, int>::value)  {
+    } else if (std::is_same<TestType, int>::value) {
       DrvMemcpy3D<TestType> memcpy3d_inty(i, i, i, HIP_AD_FORMAT_SIGNED_INT32);
       memcpy3d_inty.HostArray_DrvMemcpy3D();
     }
@@ -483,7 +455,7 @@ TEMPLATE_TEST_CASE("Unit_hipDrvMemcpy3D_MultipleDataTypes", "",
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipDrvMemcpy3D_HosttoDevice") {
+HIP_TEST_CASE(Unit_hipDrvMemcpy3D_HosttoDevice) {
   CHECK_IMAGE_SUPPORT
   DrvMemcpy3D<float> memcpy3d_D2H_float(10, 10, 1, HIP_AD_FORMAT_FLOAT);
   memcpy3d_D2H_float.HostDevice_DrvMemcpy3D();
@@ -502,7 +474,8 @@ TEST_CASE("Unit_hipDrvMemcpy3D_HosttoDevice") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipDrvMemcpy3D_Negative") {
+HIP_TEST_CASE(Unit_hipDrvMemcpy3D_Negative) {
+  CHECK_IMAGE_SUPPORT
   DrvMemcpy3D<float> memcpy3d(10, 10, 1, HIP_AD_FORMAT_FLOAT);
   memcpy3d.NegativeTests();
 }
@@ -520,7 +493,7 @@ TEST_CASE("Unit_hipDrvMemcpy3D_Negative") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipDrvMemcpy3D_ExtentValidation") {
+HIP_TEST_CASE(Unit_hipDrvMemcpy3D_ExtentValidation) {
   CHECK_IMAGE_SUPPORT
   DrvMemcpy3D<float> memcpy3d(10, 10, 1, HIP_AD_FORMAT_FLOAT);
   memcpy3d.Extent_Validation();
@@ -539,7 +512,7 @@ TEST_CASE("Unit_hipDrvMemcpy3D_ExtentValidation") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipDrvMemcpy3D_H2DDeviceContextChange") {
+HIP_TEST_CASE(Unit_hipDrvMemcpy3D_H2DDeviceContextChange) {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -547,7 +520,7 @@ TEST_CASE("Unit_hipDrvMemcpy3D_H2DDeviceContextChange") {
     DrvMemcpy3D<float> memcpy3d(10, 10, 1, HIP_AD_FORMAT_FLOAT);
     memcpy3d.HostDevice_DrvMemcpy3D(true);
   } else {
-    SUCCEED("skipped testcase as Device count is < 2");
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 }
 
@@ -564,7 +537,7 @@ TEST_CASE("Unit_hipDrvMemcpy3D_H2DDeviceContextChange") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipDrvMemcpy3D_Host2ArrayDeviceContextChange") {
+HIP_TEST_CASE(Unit_hipDrvMemcpy3D_Host2ArrayDeviceContextChange) {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -572,7 +545,7 @@ TEST_CASE("Unit_hipDrvMemcpy3D_Host2ArrayDeviceContextChange") {
     DrvMemcpy3D<float> memcpy3d(10, 10, 1, HIP_AD_FORMAT_FLOAT);
     memcpy3d.HostArray_DrvMemcpy3D(true);
   } else {
-    SUCCEED("skipped testcase as Device count is < 2");
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 }
 
@@ -592,39 +565,35 @@ TEST_CASE("Unit_hipDrvMemcpy3D_Host2ArrayDeviceContextChange") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipDrvMemcpy3D_multiDevice_Basic_Size_Test") {
+HIP_TEST_CASE(Unit_hipDrvMemcpy3D_multiDevice_Basic_Size_Test) {
   CHECK_IMAGE_SUPPORT
   constexpr int size_128b = 128, size_256b = 256;
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
-  for (int i=0; i < numDevices; i++) {
+  for (int i = 0; i < numDevices; i++) {
     HIP_CHECK(hipSetDevice(i));
 
     SECTION("Verify with 128 for all height, width & depth value") {
-      DrvMemcpy3D<int> memcpy3d(size_128b, size_128b, size_128b,
-                                HIP_AD_FORMAT_SIGNED_INT32);
+      DrvMemcpy3D<int> memcpy3d(size_128b, size_128b, size_128b, HIP_AD_FORMAT_SIGNED_INT32);
       memcpy3d.HostArray_DrvMemcpy3D();
     }
     SECTION("Verify with 256 for height and 128 for width & depth value") {
-      DrvMemcpy3D<int> memcpy3d(size_256b, size_128b, size_128b,
-                                HIP_AD_FORMAT_SIGNED_INT32);
+      DrvMemcpy3D<int> memcpy3d(size_256b, size_128b, size_128b, HIP_AD_FORMAT_SIGNED_INT32);
       memcpy3d.HostArray_DrvMemcpy3D();
     }
     SECTION("Verify with 256 for width and 128 for height & depth value") {
-      DrvMemcpy3D<float> memcpy3d(size_128b, size_256b, size_128b,
-                                  HIP_AD_FORMAT_FLOAT);
+      DrvMemcpy3D<float> memcpy3d(size_128b, size_256b, size_128b, HIP_AD_FORMAT_FLOAT);
       memcpy3d.HostArray_DrvMemcpy3D();
     }
     SECTION("Verify with 256 for depth and 128 for height & width value") {
-      DrvMemcpy3D<int> memcpy3d(size_128b, size_128b, size_256b,
-                                HIP_AD_FORMAT_SIGNED_INT32);
+      DrvMemcpy3D<int> memcpy3d(size_128b, size_128b, size_256b, HIP_AD_FORMAT_SIGNED_INT32);
       memcpy3d.HostArray_DrvMemcpy3D();
     }
   }
 }
 
 /**
-* End doxygen group MemoryTest.
-* @}
-*/
+ * End doxygen group MemoryTest.
+ * @}
+ */

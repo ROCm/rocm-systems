@@ -24,6 +24,7 @@
 
 #include "counter_info.hpp"
 #include "generator.hpp"
+#include "kfd_info.hpp"
 #include "pc_sample_transform.hpp"
 #include "statistics.hpp"
 #include "stream_info.hpp"
@@ -61,6 +62,7 @@ struct buffered_output
     void flush();
     void read();
     void clear();
+    void reset();
     void destroy();
 
     uint64_t           get_num_bytes() const;
@@ -133,6 +135,18 @@ buffered_output<Tp, DomainT>::clear()
 
 template <typename Tp, domain_type DomainT>
 void
+buffered_output<Tp, DomainT>::reset()
+{
+    if(!enabled) return;
+
+    if(auto*& filebuf = get_tmp_file_buffer<type>(buffer_type_v); filebuf)
+    {
+        filebuf->reset();
+    }
+}
+
+template <typename Tp, domain_type DomainT>
+void
 buffered_output<Tp, DomainT>::destroy()
 {
     if(!enabled) return;
@@ -178,6 +192,7 @@ using scratch_memory_buffered_output_t =
 using memory_allocation_buffered_output_t =
     buffered_output<tool_buffer_tracing_memory_allocation_ext_record_t,
                     domain_type::MEMORY_ALLOCATION>;
+using kfd_buffered_output_t = buffered_output<tool_buffer_tracing_kfd_record_t, domain_type::KFD>;
 using counter_records_buffered_output_t =
     ::rocprofiler::tool::buffered_output<rocprofiler::tool::serialized_counter_record_t,
                                          domain_type::COUNTER_VALUES>;

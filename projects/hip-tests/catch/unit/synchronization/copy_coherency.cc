@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_kernels.hh>
 #include <hip_test_common.hh>
@@ -25,24 +12,28 @@ unsigned blocksPerCU = 6;
 
 class MemcpyFunction {
  public:
-    MemcpyFunction(const char* fileName, const char* functionName) {
-      load(fileName, functionName);
-    }
-    void load(const char* fileName, const char* functionName);
-    void launch(int* dst, const int* src, size_t numElements, hipStream_t s);
+  MemcpyFunction(const char* fileName, const char* functionName) { load(fileName, functionName); }
+  void load(const char* fileName, const char* functionName);
+  void launch(int* dst, const int* src, size_t numElements, hipStream_t s);
+  void unload();
 
  private:
-    hipFunction_t _function;
-    hipModule_t _module;
+  hipFunction_t _function;
+  hipModule_t _module;
 };
 
 
 void MemcpyFunction::load(const char* fileName, const char* functionName) {
-    HIP_CHECK(hipModuleLoad(&_module, fileName));
-    HIP_CHECK(hipModuleGetFunction(&_function, _module, functionName));
+  HIP_CHECK(hipModuleLoad(&_module, fileName));
+  HIP_CHECK(hipModuleGetFunction(&_function, _module, functionName));
 }
 
-void MemcpyFunction::launch(int* dst, const int* src, size_t numElements, hipStream_t s) { // NOLINT
+void MemcpyFunction::unload() {
+  HIP_CHECK(hipModuleUnload(_module));
+}
+
+void MemcpyFunction::launch(int* dst, const int* src, size_t numElements,
+                            hipStream_t s) {  // NOLINT
   struct {
     int* _dst;
     const int* _src;
@@ -54,13 +45,11 @@ void MemcpyFunction::launch(int* dst, const int* src, size_t numElements, hipStr
   args._numElements = numElements;
 
   size_t size = sizeof(args);
-  void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
-                    HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END};
-  unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock,
-                    numElements);
-  HIP_CHECK(hipModuleLaunchKernel(_function, blocks, 1, 1, threadsPerBlock,
-            1, 1, 0, s, NULL,
-            reinterpret_cast<void**>(&config)));
+  void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
+                    HIP_LAUNCH_PARAM_END};
+  unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, numElements);
+  HIP_CHECK(hipModuleLaunchKernel(_function, blocks, 1, 1, threadsPerBlock, 1, 1, 0, s, NULL,
+                                  reinterpret_cast<void**>(&config)));
 }
 
 bool g_warnOnFail = true;
@@ -79,7 +68,7 @@ __global__ void memcpyIntKernel(int* dst, const int* src, size_t numElements) {
   int gid = (blockIdx.x * blockDim.x + threadIdx.x);
   int stride = blockDim.x * gridDim.x;
   for (size_t i = gid; i < numElements; i += stride) {
-      dst[i] = src[i];
+    dst[i] = src[i];
   }
 }
 
@@ -92,25 +81,25 @@ void checkReverse(const int* ptr, int numElements, int expected) {
       REQUIRE(ptr[i] == expected);
     }
     if (++mismatchCnt >= 10) {
-        break;
+      break;
     }
   }
 }
 
-#define ENUM_CASE_STR(x)                                                      \
-    case x:                                                                   \
-        return #x
+#define ENUM_CASE_STR(x)                                                                           \
+  case x:                                                                                          \
+    return #x
 
 enum CmdType { COPY, KERNEL, MODULE_KERNEL, MAX_CmdType };
 
 const char* CmdTypeStr(CmdType c) {
-    switch (c) {
-        ENUM_CASE_STR(COPY);
-        ENUM_CASE_STR(KERNEL);
-        ENUM_CASE_STR(MODULE_KERNEL);
-        default:
-            return "UNKNOWN";
-    }
+  switch (c) {
+    ENUM_CASE_STR(COPY);
+    ENUM_CASE_STR(KERNEL);
+    ENUM_CASE_STR(MODULE_KERNEL);
+    default:
+      return "UNKNOWN";
+  }
 }
 
 enum SyncType {
@@ -138,40 +127,35 @@ const char* SyncTypeStr(SyncType s) {
   }
 }
 
-void runCmd(CmdType cmd, int* dst, const int* src, hipStream_t s,
-             size_t numElements) {
+void runCmd(CmdType cmd, int* dst, const int* src, hipStream_t s, size_t numElements) {
   switch (cmd) {
     case COPY:
-      HIP_CHECK(
-        hipMemcpyAsync(dst, src, numElements * sizeof(int),
-                        hipMemcpyDeviceToDevice, s));
+      HIP_CHECK(hipMemcpyAsync(dst, src, numElements * sizeof(int), hipMemcpyDeviceToDevice, s));
       break;
     case KERNEL: {
-      unsigned blocks = HipTest::setNumBlocks(blocksPerCU,
-                                 threadsPerBlock, numElements);
-      hipLaunchKernelGGL(memcpyIntKernel, dim3(blocks), dim3(threadsPerBlock),
-                          0, s, dst, src, numElements);
+      unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, numElements);
+      hipLaunchKernelGGL(memcpyIntKernel, dim3(blocks), dim3(threadsPerBlock), 0, s, dst, src,
+                         numElements);
     } break;
     case MODULE_KERNEL: {
       MemcpyFunction g_moduleMemcpy("memcpyInt.hsaco", "memcpyIntKernel");
       g_moduleMemcpy.launch(dst, src, numElements, s);
+      g_moduleMemcpy.unload();
     } break;
     default:
       printf("Info:unknown cmd=%d type", cmd);
   }
 }
 
-void resetInputs(int* Ad, int* Bd, int* Ch,
-                 size_t numElements, int expected) {
-  unsigned blocks = HipTest::setNumBlocks(blocksPerCU,
-                                          threadsPerBlock, numElements);
-  hipLaunchKernelGGL(memsetIntKernel, dim3(blocks), dim3(threadsPerBlock),
-                      0, hipStream_t(0), Ad, expected, numElements);
+void resetInputs(int* Ad, int* Bd, int* Ch, size_t numElements, int expected) {
+  unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, numElements);
+  hipLaunchKernelGGL(memsetIntKernel, dim3(blocks), dim3(threadsPerBlock), 0, hipStream_t(0), Ad,
+                     expected, numElements);
   // poison with bad value to ensure is overwritten correctly
-  hipLaunchKernelGGL(memsetIntKernel, dim3(blocks), dim3(threadsPerBlock),
-                      0, hipStream_t(0), Bd, 0xDEADBEEF, numElements);
-  hipLaunchKernelGGL(memsetIntKernel, dim3(blocks), dim3(threadsPerBlock),
-                      0, hipStream_t(0), Bd, 0xF000BA55, numElements);
+  hipLaunchKernelGGL(memsetIntKernel, dim3(blocks), dim3(threadsPerBlock), 0, hipStream_t(0), Bd,
+                     0xDEADBEEF, numElements);
+  hipLaunchKernelGGL(memsetIntKernel, dim3(blocks), dim3(threadsPerBlock), 0, hipStream_t(0), Bd,
+                     0xF000BA55, numElements);
   memset(Ch, 13, numElements * sizeof(int));
   HIP_CHECK(hipDeviceSynchronize());
 }
@@ -184,22 +168,22 @@ void resetInputs(int* Ad, int* Bd, int* Ch,
 // Correct result at the end is that Ch contains the
 // contents originally in Ad (integer 0x42)
 
-void runTestImpl(CmdType cmdAType, SyncType syncType, CmdType cmdBType,
-                 hipStream_t stream1, hipStream_t stream2, int numElements,
-                 int* Ad, int* Bd, int* Cd, int* Ch, int expected) {
+void runTestImpl(CmdType cmdAType, SyncType syncType, CmdType cmdBType, hipStream_t stream1,
+                 hipStream_t stream2, int numElements, int* Ad, int* Bd, int* Cd, int* Ch,
+                 int expected) {
   hipEvent_t e;
   HIP_CHECK(hipEventCreateWithFlags(&e, 0));
 
   resetInputs(Ad, Bd, Ch, numElements, expected);
 
   const size_t sizeElements = numElements * sizeof(int);
-  fprintf(stderr, "test: runTest with %zu bytes (%6.2f MB) cmdA=%s; sync=%s; cmdB=%s\n", // NOLINT
-          sizeElements, static_cast<double>(sizeElements / 1024.0),
-          CmdTypeStr(cmdAType), SyncTypeStr(syncType), CmdTypeStr(cmdBType));
+  fprintf(stderr, "test: runTest with %zu bytes (%6.2f MB) cmdA=%s; sync=%s; cmdB=%s\n",  // NOLINT
+          sizeElements, static_cast<double>(sizeElements / 1024.0), CmdTypeStr(cmdAType),
+          SyncTypeStr(syncType), CmdTypeStr(cmdBType));
 
-  /*if (SKIP_MODULE_KERNEL && ((cmdAType == MODULE_KERNEL) || (cmdBType == MODULE_KERNEL))) { // NOLINT
-    fprintf(stderr, "warn: skipping since test infra does not yet support modules\n"); // NOLINT
-    return;
+  /*if (SKIP_MODULE_KERNEL && ((cmdAType == MODULE_KERNEL) || (cmdBType == MODULE_KERNEL))) { //
+  NOLINT fprintf(stderr, "warn: skipping since test infra does not yet support modules\n"); //
+  NOLINT return;
   }*/
 
   // Step A:
@@ -213,7 +197,7 @@ void runTestImpl(CmdType cmdAType, SyncType syncType, CmdType cmdBType,
       hipError_t st = hipErrorNotReady;
       HIP_CHECK(hipEventRecord(e, stream1));
       do {
-          st = hipEventQuery(e);
+        st = hipEventQuery(e);
       } while (st == hipErrorNotReady);
       HIP_CHECK(st);
     } break;
@@ -228,7 +212,7 @@ void runTestImpl(CmdType cmdAType, SyncType syncType, CmdType cmdBType,
     case STREAM_QUERY: {
       hipError_t st = hipErrorNotReady;
       do {
-          st = hipStreamQuery(stream1);
+        st = hipStreamQuery(stream1);
       } while (st == hipErrorNotReady);
       HIP_CHECK(st);
     } break;
@@ -246,8 +230,7 @@ void runTestImpl(CmdType cmdAType, SyncType syncType, CmdType cmdBType,
 
   // Copy back to host, use async copy to avoid any extra synchronization
   //  that might mask issues.
-  HIP_CHECK(hipMemcpyAsync(Ch, Cd, sizeElements, hipMemcpyDeviceToHost,
-                            stream2));
+  HIP_CHECK(hipMemcpyAsync(Ch, Cd, sizeElements, hipMemcpyDeviceToHost, stream2));
   HIP_CHECK(hipStreamSynchronize(stream2));
 
   checkReverse(Ch, numElements, expected);
@@ -271,8 +254,7 @@ void testWrapper(size_t numElements) {
   HIP_CHECK(hipStreamCreate(&stream2));
   HIP_CHECK(hipDeviceSynchronize());
 
-  runTestImpl(COPY, EVENT_SYNC, KERNEL, stream1, stream2, numElements,
-              Ad, Bd, Cd, Ch, expected);
+  runTestImpl(COPY, EVENT_SYNC, KERNEL, stream1, stream2, numElements, Ad, Bd, Cd, Ch, expected);
 
   for (int cmdA = 0; cmdA < MAX_CmdType; cmdA++) {
     for (int cmdB = 0; cmdB < MAX_CmdType; cmdB++) {
@@ -285,8 +267,8 @@ void testWrapper(size_t numElements) {
           // case STREAM_QUERY:
           case STREAM_SYNC:
           case DEVICE_SYNC:
-            runTestImpl(CmdType(cmdA), SyncType(syncMode), CmdType(cmdB),
-                      stream1, stream2, numElements, Ad, Bd, Cd, Ch, expected);
+            runTestImpl(CmdType(cmdA), SyncType(syncMode), CmdType(cmdB), stream1, stream2,
+                        numElements, Ad, Bd, Cd, Ch, expected);
             break;
           default:
             break;
@@ -332,7 +314,7 @@ void testWrapper(size_t numElements) {
  *    - HIP_VERSION >= 5.5
  */
 
-TEST_CASE("Unit_Copy_Coherency") {
+HIP_TEST_CASE(Unit_Copy_Coherency) {
   for (int index = 0; index < sizeof(g_elementSizes) / sizeof(int); index++) {
     size_t numElements = g_elementSizes[index];
     testWrapper(numElements);

@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
  * @addtogroup surfCubemap surfCubemap
@@ -29,16 +13,16 @@ THE SOFTWARE.
 #include <hip_array_common.hh>
 #include <hip_test_common.hh>
 #include <hip_texture_helper.hh>
+#include "surf_common.h"
 
 #pragma clang diagnostic ignored "-Wunused-variable"
 #pragma clang diagnostic ignored "-Wunused-parameter"
 
 #define LOG_DATA 0
 
-template <typename T>
-__global__ void surfCubemapKernelR(hipSurfaceObject_t surfaceObject, T* outputData, int width,
-                                   int height) {
-#if !defined(__HIP_NO_IMAGE_SUPPORT) || !__HIP_NO_IMAGE_SUPPORT
+template <typename T> __global__ void surfCubemapKernelR(hipSurfaceObject_t surfaceObject,
+                                                         T* outputData, int width, int height) {
+#if !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   int y = blockIdx.y * blockDim.y + threadIdx.y;
   if (x < width && y < height) {
@@ -47,10 +31,9 @@ __global__ void surfCubemapKernelR(hipSurfaceObject_t surfaceObject, T* outputDa
 #endif
 }
 
-template <typename T>
-__global__ void surfCubemapKernelW(hipSurfaceObject_t surfaceObject, T* inputData, int width,
-                                   int height) {
-#if !defined(__HIP_NO_IMAGE_SUPPORT) || !__HIP_NO_IMAGE_SUPPORT
+template <typename T> __global__ void surfCubemapKernelW(hipSurfaceObject_t surfaceObject,
+                                                         T* inputData, int width, int height) {
+#if !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   int y = blockIdx.y * blockDim.y + threadIdx.y;
   if (x < width && y < height) {
@@ -59,10 +42,10 @@ __global__ void surfCubemapKernelW(hipSurfaceObject_t surfaceObject, T* inputDat
 #endif
 }
 
-template <typename T>
-__global__ void surfCubemapKernelRW(hipSurfaceObject_t surfaceObject,
-                                    hipSurfaceObject_t outputSurfObj, int width, int height) {
-#if !defined(__HIP_NO_IMAGE_SUPPORT) || !__HIP_NO_IMAGE_SUPPORT
+template <typename T> __global__ void surfCubemapKernelRW(hipSurfaceObject_t surfaceObject,
+                                                          hipSurfaceObject_t outputSurfObj,
+                                                          int width, int height) {
+#if !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   int y = blockIdx.y * blockDim.y + threadIdx.y;
   if (x < width && y < height) {
@@ -282,15 +265,16 @@ template <typename T> static void runTestRW(const int width, const int height) {
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-TEMPLATE_TEST_CASE("Unit_surfCubemapread_Positive_Basic", "", char, uchar, short, ushort, int, uint,
-                   float, char1, uchar1, short1, ushort1, int1, uint1, float1, char2, uchar2,
-                   short2, ushort2, int2, uint2, float2, char4, uchar4, short4, ushort4, int4,
-                   uint4, float4) {
+HIP_TEMPLATE_TEST_CASE(Unit_surfCubemapread_Positive_Basic, char, unsigned char, short, unsigned short,
+                   int, unsigned int, float) {
   CHECK_IMAGE_SUPPORT;
 
   const int width = GENERATE(31, 67);
   const int height = GENERATE(131, 263);
-  runTestR<TestType>(width, height);
+  runTestR<vector_type_helper_t<TestType, 0>>(width, height);
+  runTestR<vector_type_helper_t<TestType, 1>>(width, height);
+  runTestR<vector_type_helper_t<TestType, 2>>(width, height);
+  runTestR<vector_type_helper_t<TestType, 4>>(width, height);
 }
 
 /**
@@ -304,15 +288,16 @@ TEMPLATE_TEST_CASE("Unit_surfCubemapread_Positive_Basic", "", char, uchar, short
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-TEMPLATE_TEST_CASE("Unit_surfCubemapwrite_Positive_Basic", "", char, uchar, short, ushort, int,
-                   uint, float, char1, uchar1, short1, ushort1, int1, uint1, float1, char2, uchar2,
-                   short2, ushort2, int2, uint2, float2, char4, uchar4, short4, ushort4, int4,
-                   uint4, float4) {
+HIP_TEMPLATE_TEST_CASE(Unit_surfCubemapwrite_Positive_Basic, char, unsigned char, short, unsigned short,
+                   int, unsigned int, float) {
   CHECK_IMAGE_SUPPORT;
 
   const int width = GENERATE(31, 67);
   const int height = GENERATE(131, 263);
-  runTestW<TestType>(width, height);
+  runTestW<vector_type_helper_t<TestType, 0>>(width, height);
+  runTestW<vector_type_helper_t<TestType, 1>>(width, height);
+  runTestW<vector_type_helper_t<TestType, 2>>(width, height);
+  runTestW<vector_type_helper_t<TestType, 4>>(width, height);
 }
 
 /**
@@ -326,18 +311,19 @@ TEMPLATE_TEST_CASE("Unit_surfCubemapwrite_Positive_Basic", "", char, uchar, shor
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-TEMPLATE_TEST_CASE("Unit_surfCubemap_Positive_ReadWrite", "", char, uchar, short, ushort, int, uint,
-                   float, char1, uchar1, short1, ushort1, int1, uint1, float1, char2, uchar2,
-                   short2, ushort2, int2, uint2, float2, char4, uchar4, short4, ushort4, int4,
-                   uint4, float4) {
+HIP_TEMPLATE_TEST_CASE(Unit_surfCubemap_Positive_ReadWrite, char, unsigned char, short, unsigned short,
+                   int, unsigned int, float) {
   CHECK_IMAGE_SUPPORT;
 
   const int width = GENERATE(31, 67);
   const int height = GENERATE(131, 263);
-  runTestRW<TestType>(width, height);
+  runTestRW<vector_type_helper_t<TestType, 0>>(width, height);
+  runTestRW<vector_type_helper_t<TestType, 1>>(width, height);
+  runTestRW<vector_type_helper_t<TestType, 2>>(width, height);
+  runTestRW<vector_type_helper_t<TestType, 4>>(width, height);
 }
 
 /**
-* End doxygen group SurfaceTest.
-* @}
-*/
+ * End doxygen group SurfaceTest.
+ * @}
+ */

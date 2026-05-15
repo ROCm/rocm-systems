@@ -8,10 +8,10 @@ macro(dashboard_submit)
   endif()
 endmacro()
 
-set(CTEST_PROJECT_NAME "aqlprofile")
-set(CTEST_NIGHTLY_START_TIME "01:00:00 UTC")
-set(CTEST_DROP_METHOD "http")
-set(CTEST_DROP_SITE "cdash.rocprofiler.amd.com")
+set(CTEST_PROJECT_NAME "AQLProfile")
+set(CTEST_NIGHTLY_START_TIME "05:00:00 UTC")
+set(CTEST_DROP_METHOD "https")
+set(CTEST_DROP_SITE "my.cdash.org")
 set(CTEST_DROP_LOCATION "/submit.php?project=${CTEST_PROJECT_NAME}")
 set(CTEST_DROP_SITE_CDASH TRUE)
 
@@ -62,13 +62,13 @@ endif()
 macro(handle_error _message _ret)
   if(NOT ${${_ret}} EQUAL 0)
     dashboard_submit(PARTS Done RETURN_VALUE _submit_ret)
-    message(WARNING "${_message} failed: ${${_ret}}")
+    message(AUTHOR_WARNING "${_message} failed: ${${_ret}}")
   endif()
 endmacro()
 
 ctest_start(Continuous)
 
-ctest_update(SOURCE "${CTEST_SOURCE_DIRECTORY}" BUILD "${CTEST_BINARY_DIRECTORY}" RETURN_VALUE _update_ret)
+ctest_update(SOURCE "${CTEST_SOURCE_DIRECTORY}" RETURN_VALUE _update_ret)
 handle_error("Update" _update_ret)
 
 ctest_configure(SOURCE "${CTEST_SOURCE_DIRECTORY}" BUILD "${CTEST_BINARY_DIRECTORY}" RETURN_VALUE _configure_ret)
@@ -76,12 +76,12 @@ dashboard_submit(PARTS Start Update Configure RETURN_VALUE _submit_ret)
 
 handle_error("Configure" _configure_ret)
 
-ctest_build(SOURCE "${CTEST_SOURCE_DIRECTORY}" BUILD "${CTEST_BINARY_DIRECTORY}" RETURN_VALUE _build_ret)
+ctest_build(BUILD "${CTEST_BINARY_DIRECTORY}" RETURN_VALUE _build_ret)
 dashboard_submit(PARTS Build RETURN_VALUE _submit_ret)
 
 handle_error("Build" _build_ret)
 
-ctest_test(SOURCE "${CTEST_SOURCE_DIRECTORY}" BUILD "${CTEST_BINARY_DIRECTORY}" RETURN_VALUE _test_ret)
+ctest_test(BUILD "${CTEST_BINARY_DIRECTORY}" RETURN_VALUE _test_ret)
 dashboard_submit(PARTS Test RETURN_VALUE _submit_ret)
 
 handle_error("Testing" _test_ret)
@@ -90,5 +90,5 @@ dashboard_submit(PARTS Done RETURN_VALUE _submit_ret)
 if(_submit_ret EQUAL 0)
   message(STATUS "Dashboard submission successful.")
 else()
-  message(WARNING "Dashboard submission failed with code ${_submit_ret}.")
+  message(AUTHOR_WARNING "Dashboard submission failed with code ${_submit_ret}.")
 endif()

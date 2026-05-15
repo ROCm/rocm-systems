@@ -1,11 +1,19 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
+import argparse
 import logging
-from collections import defaultdict
+import threading
+from collections.abc import Hashable
 from datetime import datetime
 from enum import Enum
+from typing import Any, Optional
 
 import pandas as pd
+from textual.widgets import TextArea
 
 import config
+from utils import schema
 
 
 class LogLevel(str, Enum):
@@ -16,11 +24,11 @@ class LogLevel(str, Enum):
 
 
 class Logger:
-    def __init__(self, output_area=None):
+    def __init__(self, output_area: Optional[TextArea] = None) -> None:
         self.output_area = output_area
         self._setup_logger()
 
-    def _setup_logger(self):
+    def _setup_logger(self) -> None:
         self.logger = logging.getLogger("app")
         self.logger.setLevel(logging.INFO)
 
@@ -32,56 +40,78 @@ class Logger:
             handler.setFormatter(formatter)
             self.logger.addHandler(handler)
 
-    def set_output_area(self, output_area):
+    def set_output_area(self, output_area: TextArea) -> None:
         self.output_area = output_area
 
-    def log(self, message, level=LogLevel.INFO, update_ui=True):
+    def log(
+        self, message: str, log_level: str = "INFO", update_ui: bool = True
+    ) -> None:
         level_map = {
-            LogLevel.INFO: logging.INFO,
-            LogLevel.SUCCESS: logging.INFO,
-            LogLevel.WARNING: logging.WARNING,
-            LogLevel.ERROR: logging.ERROR,
+            "INFO": logging.INFO,
+            "SUCCESS": logging.INFO,
+            "WARNING": logging.WARNING,
+            "ERROR": logging.ERROR,
         }
+        self.logger.log(level_map[log_level], message)
 
-        self.logger.log(level_map[level], message)
+        if (
+            not update_ui
+            or not self.output_area
+            or not hasattr(self.output_area, "text")
+        ):
+            return
 
         timestamp = datetime.now().strftime("%H:%M:%S")
+        formatted_msg = f"[{timestamp}] [{log_level}] {message}"
+        app = getattr(self.output_area, "app", None)
 
-        if update_ui and self.output_area:
-            if level == LogLevel.ERROR:
-                formatted_msg = f"[{timestamp}] [ERROR] {message}"
-            elif level == LogLevel.WARNING:
-                formatted_msg = f"[{timestamp}] [WARNING] {message}"
-            elif level == LogLevel.SUCCESS:
-                formatted_msg = f"[{timestamp}] [SUCCESS] {message}"
+        if app is None or not hasattr(app, "_thread_id"):
+            # app not ready yet — update immediately (safe during compose)
+            if self.output_area.text:
+                self.output_area.text += "\n" + formatted_msg
             else:
-                formatted_msg = f"[{timestamp}] [INFO] {message}"
+                self.output_area.text = formatted_msg
+            return
 
-            if hasattr(self.output_area, "text"):
-                current_text = self.output_area.text
-                self.output_area.text = (
-                    f"{current_text}\n{formatted_msg}"
-                    if current_text
-                    else formatted_msg
-                )
-                # HACK: moving curson to end of output
-                # (Is there a better way to achieve this?)
-                self.output_area.cursor_location = (999999, 0)
+        # Detect if we are on UI thread
+        in_ui_thread = threading.get_ident() == app._thread_id
 
-    def info(self, message, update_ui=True):
-        self.log(message, LogLevel.INFO, update_ui)
+        def _apply() -> None:
+            if self.output_area.text:
+                self.output_area.text += "\n" + formatted_msg
+            else:
+                self.output_area.text = formatted_msg
+            self.output_area.cursor_location = (999999, 0)
 
-    def success(self, message, update_ui=True):
-        self.log(message, LogLevel.SUCCESS, update_ui)
+        if in_ui_thread:
+            _apply()
+        else:
+            app.call_from_thread(_apply)
 
-    def warning(self, message, update_ui=True):
-        self.log(message, LogLevel.WARNING, update_ui)
+    def info(self, message: str, update_ui: bool = True) -> None:
+        self.log(message, "INFO", update_ui)
 
-    def error(self, message, update_ui=True):
-        self.log(message, LogLevel.ERROR, update_ui)
+    def success(self, message: str, update_ui: bool = True) -> None:
+        self.log(message, "SUCCESS", update_ui)
+
+    def warning(self, message: str, update_ui: bool = True) -> None:
+        self.log(message, "WARNING", update_ui)
+
+    def error(self, message: str, update_ui: bool = True) -> None:
+        self.log(message, "ERROR", update_ui)
 
 
-def get_top_kernels_and_dispatch_ids(runs):
+def get_top_kernels(
+    runs: dict[str, Any],
+) -> Optional[list[dict[Hashable, Any]]]:
+    """
+    Get top kernels with aggregated stats (one row per kernel).
+
+    Returns a list of records sorted by percent of total time,
+    each containing kernel name, call count, total time, and percent.
+    Returns None if runs is empty or workload has no dfs.
+    Returns empty list if the top kernel dataframe is empty.
+    """
     if not runs:
         return None
 
@@ -90,62 +120,55 @@ def get_top_kernels_and_dispatch_ids(runs):
         return None
 
     top_kernel_df = base_run.dfs.get(1)
-    dispatch_id_df = base_run.dfs.get(2)
-
-    if top_kernel_df is None or dispatch_id_df is None:
+    if top_kernel_df is None:
         return None
 
-    merged_df = pd.merge(
-        top_kernel_df, dispatch_id_df, on="Kernel_Name", how="outer"
-    ).sort_values("Pct", ascending=False)
+    if top_kernel_df.empty:
+        return []
 
-    return merged_df.to_dict("records")
+    # top_kernel_df already contains aggregated per-kernel stats
+    # (Kernel_Name, Count, Total_Time, Percent, etc.)
+    if "Percent" not in top_kernel_df.columns:
+        # If Percent column is missing, return unsorted records
+        return top_kernel_df.to_dict("records")
+
+    result_df = top_kernel_df.sort_values("Percent", ascending=False)
+
+    return result_df.to_dict("records")
 
 
-def process_panels_to_dataframes(args, kernel_df, archConfigs, roof_plot=None):
-    """
-    Process panel data into pandas DataFrames.
-    Returns a nested dictionary structure with DataFrames and tui_style information.
-
-    Returns:
-        Dict[str, Dict[str, Dict[str, Any]]]: Nested structure {
-            "section_name": {
-                "subsection_name": {
-                    "df": DataFrame,
-                    "tui_style": dict or None
-                }
-            }
-        }
-    """
-
-    # TODO: add individual kernel roofline logic
-    # TODO: implement args logic:
-    #       args.filter_metrics
-    #       args.cols
-    #       args.max_stat_num
-    #       args.df_file_dir
-
-    result_structure = defaultdict(dict)
-
+def process_panels_to_dataframes(
+    args: argparse.Namespace,
+    kernel_df: dict[int, pd.DataFrame],
+    arch_configs: schema.ArchConfig,
+    _profiling_config: dict[str, Any],  # Reserved for future filter_blocks logic
+    _roof_plot: Optional[str] = None,  # Reserved for future roofline support
+) -> dict[str, dict[str, dict[str, Any]]]:
+    result_structure = {}
     decimal_precision = getattr(args, "decimal", 2) if args else 2
 
-    for panel_id, panel in archConfigs.panel_configs.items():
+    for panel_id, panel in arch_configs.panel_configs.items():
+        if panel_id == 3000 and not args.membw_analysis:
+            continue
+
         if panel_id in config.HIDDEN_SECTIONS:
             continue
 
         section_name = f"{panel_id // 100}. {panel['title']}"
+        section_data = {}
 
         for data_source in panel["data source"]:
             for type, table_config in data_source.items():
                 table_id = table_config["id"]
 
-                if table_id not in kernel_df:
+                if (
+                    table_id not in kernel_df
+                    or kernel_df[table_id] is None
+                    or kernel_df[table_id].empty
+                ):
                     continue
 
                 base_df = kernel_df[table_id]
-
-                if base_df is None or base_df.empty:
-                    continue
 
                 df = pd.DataFrame(index=base_df.index)
 
@@ -158,49 +181,40 @@ def process_panels_to_dataframes(args, kernel_df, archConfigs, roof_plot=None):
                 df = apply_rounding_logic(df, decimal_precision)
 
                 subsection_name = (
-                    str(table_config["id"] // 100) + "." + str(table_config["id"] % 100)
+                    f"{table_config['id'] // 100}.{table_config['id'] % 100}"
                 )
-                if "title" in table_config and table_config["title"]:
-                    subsection_name += " " + table_config["title"]
+                if table_config.get("title"):
+                    subsection_name += f" {table_config['title']}"
 
-                result_structure[section_name][subsection_name] = {
+                section_data[subsection_name] = {
                     "df": df,
-                    "tui_style": None,
+                    "tui_style": (
+                        table_config.get("tui_style")
+                        if type == "metric_table"
+                        else None
+                    ),
                 }
 
-                if type == "metric_table" and "tui_style" in table_config:
-                    result_structure[section_name][subsection_name]["tui_style"] = (
-                        table_config["tui_style"]
-                    )
+        if section_data:
+            result_structure[section_name] = section_data
 
-    return dict(result_structure)
+    return result_structure
 
 
-def apply_rounding_logic(df, decimal_precision):
-    df_copy = df.copy()
+def apply_rounding_logic(df: pd.DataFrame, decimal_precision: int) -> pd.DataFrame:
+    if df.empty:
+        return df
 
-    for column in df_copy.columns:
-        if column in ["Metric", "Tips", "coll_level", "Unit", "Kernel_Name", "Info"]:
-            continue
+    df_rounded = df.copy()
 
-        if df_copy[column].dtype in ["float64", "float32", "int64", "int32"]:
-            df_copy[column] = df_copy[column].round(decimal_precision)
-        else:
-            try:
-                numeric_series = pd.to_numeric(df_copy[column], errors="coerce")
-                if not numeric_series.isna().all():
-                    rounded_series = numeric_series.round(decimal_precision)
+    float_cols = df_rounded.select_dtypes(include=["float"]).columns
+    if len(float_cols) > 0:
+        df_rounded[float_cols] = df_rounded[float_cols].round(decimal_precision)
 
-                    if df_copy[column].dtype == "object":
-                        df_copy[column] = df_copy[column].combine(
-                            rounded_series,
-                            lambda orig, rounded: (
-                                rounded if pd.notna(rounded) else orig
-                            ),
-                        )
-                    else:
-                        df_copy[column] = rounded_series
-            except (ValueError, TypeError):
-                continue
+    non_float_cols = df_rounded.select_dtypes(exclude=["float"]).columns
+    for col in non_float_cols:
+        numeric_series = pd.to_numeric(df_rounded[col], errors="coerce")
+        if numeric_series.notna().any():
+            df_rounded[col] = numeric_series.round(decimal_precision)
 
-    return df_copy
+    return df_rounded

@@ -36,17 +36,16 @@ void devicemalloc(float* x, float* y, float* out, float** px, float** py, size_t
 }
 )"};
 
-TEST_CASE("Unit_hiprtc_devicemalloc") {
+HIP_TEST_CASE(Unit_hiprtc_devicemalloc) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
 
   using namespace std;
   hiprtcProgram prog;
-  hiprtcCreateProgram(&prog,       // prog
+  hiprtcCreateProgram(&prog,              // prog
                       devicemalloc,       // buffer
                       "devicemalloc.cu",  // name
                       0, nullptr, nullptr);
@@ -118,12 +117,15 @@ TEST_CASE("Unit_hiprtc_devicemalloc") {
   void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
                     HIP_LAUNCH_PARAM_END};
 
-  HIP_CHECK(hipModuleLaunchKernel(kernel, NUM_BLOCKS, 1, 1, NUM_THREADS, 1, 1, 0, nullptr, nullptr, config));
+  HIP_CHECK(hipModuleLaunchKernel(kernel, NUM_BLOCKS, 1, 1, NUM_THREADS, 1, 1, 0, nullptr, nullptr,
+                                  config));
 
   HIP_CHECK(hipMemcpy(hOut.get(), dOut, bufferSize, hipMemcpyDeviceToHost));
 
   HIP_CHECK(hipFree(dX));
   HIP_CHECK(hipFree(dY));
+  HIP_CHECK(hipFree(pA));
+  HIP_CHECK(hipFree(pB));
   HIP_CHECK(hipFree(dOut));
 
   HIP_CHECK(hipModuleUnload(module));

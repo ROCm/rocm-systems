@@ -24,10 +24,11 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/dl.hpp"
 
 #include <rocprofiler-sdk/experimental/thread_trace.h>
 
-#include <glog/logging.h>
+#include "lib/common/logging.hpp"
 
 #include <cstdint>
 
@@ -41,9 +42,13 @@ using parameter_pack = rocprofiler::thread_trace::thread_trace_parameter_pack;
 rocprofiler_status_t
 build_pack_from_array(parameter_pack&                             pack,
                       const rocprofiler_thread_trace_parameter_t* params,
-                      size_t                                      num_parameters)
+                      size_t                                      num_parameters,
+                      rocprofiler_agent_id_t                      agent_id)
 {
-    auto id_map = rocprofiler::counters::getPerfCountersIdMap();
+    const auto* agent = rocprofiler::agent::get_agent(agent_id);
+    if(agent == nullptr) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    auto id_map = rocprofiler::counters::getPerfCountersIdMap(agent);
 
     for(size_t p = 0; p < num_parameters; p++)
     {
@@ -68,6 +73,8 @@ build_pack_from_array(parameter_pack&                             pack,
                 auto event_it = id_map.find(param.counter_id.handle);
                 if(event_it != id_map.end())
                     pack.perfcounters.push_back({event_it->second, param.simd_mask});
+                else
+                    return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
             }
             break;
             case ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTERS_CTRL:
@@ -81,6 +88,13 @@ build_pack_from_array(parameter_pack&                             pack,
                 break;
             case ROCPROFILER_THREAD_TRACE_PARAMETER_NO_DETAIL:
                 pack.no_detail_simd = param.value != 0;
+                break;
+            case ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE:
+                if(param.value >= ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE_LAST)
+                    return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+                pack.triple_buffering =
+                    (ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE_TRIPLE_BUFFER ==
+                     param.value);
                 break;
             case ROCPROFILER_THREAD_TRACE_PARAMETER_LAST:
                 return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
@@ -125,9 +139,12 @@ rocprofiler_configure_dispatch_thread_trace_service(
     if(pack.dispatch_cb_fn == nullptr) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
     {
-        auto status = build_pack_from_array(pack, parameters, num_parameters);
+        auto status = build_pack_from_array(pack, parameters, num_parameters, agent_id);
         if(status != ROCPROFILER_STATUS_SUCCESS) return status;
     }
+
+    // Triple buffer not supported in dispatch mode
+    if(pack.triple_buffering) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
     ctx->dispatch_thread_trace->add_agent(agent_id, pack);
     return ROCPROFILER_STATUS_SUCCESS;
@@ -160,12 +177,23 @@ rocprofiler_configure_device_thread_trace_service(
     pack.callback_userdata = userdata;
 
     {
-        auto status = build_pack_from_array(pack, parameters, num_parameters);
+        auto status = build_pack_from_array(pack, parameters, num_parameters, agent_id);
         if(status != ROCPROFILER_STATUS_SUCCESS) return status;
     }
 
     // Serialization not supported in device mode
     if(pack.bSerialize) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    if(pack.triple_buffering)
+    {
+        // For now, only one SE is allowed in triple buffering. Check mask is power of two.
+        if((pack.shader_engine_mask & (pack.shader_engine_mask - 1)) != 0)
+            return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
+        // Triple buffering requires specific AQLProfile symbols that may not be available
+        auto* aqlprofile_dl = rocprofiler::thread_trace::get_aqlprofile_dl();
+        if(!aqlprofile_dl || !aqlprofile_dl->valid()) return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
+    }
 
     ctx->device_thread_trace->add_agent(agent_id, pack);
     return ROCPROFILER_STATUS_SUCCESS;

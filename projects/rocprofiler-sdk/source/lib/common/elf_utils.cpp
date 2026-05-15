@@ -79,12 +79,20 @@ ElfInfo::ElfInfo(std::string _fname)
 bool
 ElfInfo::has_symbol(const std::function<bool(std::string_view)>& _checker) const
 {
-    for(const auto& itr : symbol_entries)
+    ROCP_INFO << fmt::format("{} has {} symbols ({} .dynsym + {} .symtab)",
+                             filename,
+                             dynamic_symbol_entries.size() + symbol_entries.size(),
+                             dynamic_symbol_entries.size(),
+                             symbol_entries.size());
+
+    // Search publicly visible symbols first
+    for(const auto& itr : dynamic_symbol_entries)
     {
         if(!itr.name.empty() && _checker(itr.name)) return true;
     }
-    // For stripped binaries
-    for(const auto& itr : dynamic_symbol_entries)
+
+    // Search all other symbols (may be empty if optimize_for_visible_symbols + non-empty .dynsym)
+    for(const auto& itr : symbol_entries)
     {
         if(!itr.name.empty() && _checker(itr.name)) return true;
     }
@@ -92,8 +100,77 @@ ElfInfo::has_symbol(const std::function<bool(std::string_view)>& _checker) const
     return false;
 }
 
+std::string
+ElfInfo::as_string() const
+{
+    auto _oss = std::ostringstream{};
+
+    _oss << "ELF File: " << filename << "\n";
+    if(reader.get_class() == ELFIO::ELFCLASS32)
+        _oss << "  - ELF 32-bit\n";
+    else
+        _oss << "  - ELF 64-bit\n";
+
+    _oss << "  - ELF file encoding: "
+         << ((reader.get_encoding() == ELFIO::ELFDATA2LSB) ? std::string_view{"Little endian"}
+                                                           : std::string_view{"Big endian"})
+         << "\n";
+
+    _oss << "  - ELF version: " << reader.get_elf_version() << "\n";
+    _oss << "  - ELF header size: " << reader.get_header_size() << "\n";
+    _oss << "  - ELF OS ABI: " << reader.get_os_abi() << "\n";
+    _oss << "  - Number of sections: " << reader.sections.size() << "\n";
+
+    _oss << fmt::format("  - Symbols ({}):\n", symbol_entries.size());
+    for(size_t k = 0; k < symbol_entries.size(); ++k)
+    {
+        if(!symbol_entries.at(k).name.empty())
+            _oss << "          [" << k << "] " << symbol_entries.at(k).name << "\n";
+    }
+
+    _oss << fmt::format("  - Dynamic Symbols ({}):\n", dynamic_symbol_entries.size());
+    for(size_t k = 0; k < dynamic_symbol_entries.size(); ++k)
+    {
+        if(!dynamic_symbol_entries.at(k).name.empty())
+            _oss << "          [" << k << "] " << dynamic_symbol_entries.at(k).name << "\n";
+    }
+
+    _oss << fmt::format("  - Dynamic entries ({}):\n", dynamic_entries.size());
+    for(size_t k = 0; k < dynamic_entries.size(); ++k)
+    {
+        if(!dynamic_entries.at(k).name.empty())
+            _oss << "          [" << k << "] " << dynamic_entries.at(k).name << "\n";
+    }
+
+    _oss << fmt::format("  - Relocation entries ({}):\n", reloc_entries.size());
+    for(size_t k = 0; k < reloc_entries.size(); ++k)
+    {
+        auto _sym_idx = reloc_entries.at(k).symbol;
+        auto _name    = std::string{};
+        if(_sym_idx < symbol_entries.size()) _name = symbol_entries.at(_sym_idx).name;
+        if(!_name.empty()) _oss << "          [" << k << "] " << _name << "\n";
+    }
+
+    // Print ELF file segments info
+    ELFIO::Elf_Half seg_num = reader.segments.size();
+    _oss << fmt::format("  - Number of segments ({}):\n", seg_num);
+    for(ELFIO::Elf_Half j = 0; j < seg_num; ++j)
+    {
+        const ELFIO::segment* pseg = reader.segments[j];
+        _oss << "      [" << std::setw(2) << j << "] flags: " << as_hex(pseg->get_flags(), 16)
+             << "   offset: " << as_hex(pseg->get_offset(), 16)
+             << "   align: " << as_hex(pseg->get_align(), 16)
+             << "   virt: " << as_hex(pseg->get_virtual_address(), 16)
+             << "   phys: " << as_hex(pseg->get_physical_address(), 16)
+             << "  fsize: " << std::setw(8) << pseg->get_file_size() << "  msize: " << std::setw(8)
+             << pseg->get_memory_size() << "\n";
+    }
+
+    return _oss.str();
+}
+
 ElfInfo
-read(const std::string& _inp)
+read(const std::string& _inp, bool optimize_for_visible_symbols)
 {
     auto  _info                  = ElfInfo{_inp};
     auto& reader                 = _info.reader;
@@ -105,7 +182,8 @@ read(const std::string& _inp)
 
     ROCP_TRACE << "\nReading " << _inp;
 
-    if(!reader.load(_inp))
+    constexpr auto lazy_parsing = true;
+    if(!reader.load(_inp, lazy_parsing))
         ROCP_WARNING << fmt::format("ELF parsing for '{}' did not succeed", _inp);
 
     if(reader.get_class() == ELFIO::ELFCLASS32)
@@ -135,6 +213,16 @@ read(const std::string& _inp)
         return std::string_view{lhs->get_name()} < std::string_view{rhs->get_name()};
     });
 
+    bool has_dsymtab = false;
+    for(auto* itr : sections)
+    {
+        if(itr->get_size() > 0 && itr->get_type() == ELFIO::SHT_DYNSYM)
+        {
+            has_dsymtab = true;
+            break;
+        }
+    }
+
     for(ELFIO::Elf_Half j = 0; j < sec_num; ++j)
     {
         Section* psec = sections.at(j);
@@ -148,6 +236,13 @@ read(const std::string& _inp)
 
         if(psec->get_type() == ELFIO::SHT_SYMTAB)
         {
+            if(optimize_for_visible_symbols && has_dsymtab)
+            {
+                ROCP_INFO << fmt::format("[{}] Skipping loading of .symtab since .dynsym is "
+                                         "present and optimize_for_visible_symbols=true",
+                                         _inp);
+                continue;
+            }
             const ELFIO::symbol_section_accessor _symbols(reader, psec);
             ROCP_TRACE << "  - Number of symbol entries: " << _symbols.get_symbols_num();
             for(ELFIO::Elf_Xword k = 0; k < _symbols.get_symbols_num(); ++k)
@@ -169,6 +264,14 @@ read(const std::string& _inp)
         }
         else if(psec->get_type() == ELFIO::SHT_REL || psec->get_type() == ELFIO::SHT_RELA)
         {
+            if(optimize_for_visible_symbols)
+            {
+                ROCP_INFO_IF(psec->get_type() == ELFIO::SHT_REL) << fmt::format(
+                    "[{}] Skipping loading of .rel since optimize_for_visible_symbols=true", _inp);
+                ROCP_INFO_IF(psec->get_type() == ELFIO::SHT_RELA) << fmt::format(
+                    "[{}] Skipping loading of .rela since optimize_for_visible_symbols=true", _inp);
+                continue;
+            }
             const ELFIO::relocation_section_accessor reloc{reader, psec};
             ROCP_TRACE << "  - Number of relocation entries: " << reloc.get_entries_num();
             for(ELFIO::Elf_Xword k = 0; k < reloc.get_entries_num(); ++k)
@@ -176,50 +279,7 @@ read(const std::string& _inp)
         }
     }
 
-    ROCP_TRACE << "  - Symbols:";
-    for(size_t k = 0; k < symbol_entries.size(); ++k)
-    {
-        if(!symbol_entries.at(k).name.empty())
-            ROCP_TRACE << "          [" << k << "] " << symbol_entries.at(k).name;
-    }
-
-    ROCP_TRACE << "  - Dynamic Symbols:";
-    for(size_t k = 0; k < dynamic_symbol_entries.size(); ++k)
-    {
-        if(!dynamic_symbol_entries.at(k).name.empty())
-            ROCP_TRACE << "          [" << k << "] " << dynamic_symbol_entries.at(k).name;
-    }
-
-    ROCP_TRACE << "  - Dynamic entries:";
-    for(size_t k = 0; k < dynamic_entries.size(); ++k)
-    {
-        if(!dynamic_entries.at(k).name.empty())
-            ROCP_TRACE << "          [" << k << "] " << dynamic_entries.at(k).name;
-    }
-
-    ROCP_TRACE << "  - Relocation entries:";
-    for(size_t k = 0; k < reloc_entries.size(); ++k)
-    {
-        auto _sym_idx = reloc_entries.at(k).symbol;
-        auto _name    = std::string{};
-        if(_sym_idx < symbol_entries.size()) _name = symbol_entries.at(_sym_idx).name;
-        if(!_name.empty()) ROCP_TRACE << "          [" << k << "] " << _name;
-    }
-
-    // Print ELF file segments info
-    ELFIO::Elf_Half seg_num = reader.segments.size();
-    ROCP_TRACE << "  - Number of segments: " << seg_num;
-    for(ELFIO::Elf_Half j = 0; j < seg_num; ++j)
-    {
-        const ELFIO::segment* pseg = reader.segments[j];
-        ROCP_TRACE << "      [" << std::setw(2) << j << "] flags: " << as_hex(pseg->get_flags(), 16)
-                   << "   offset: " << as_hex(pseg->get_offset(), 16)
-                   << "   align: " << as_hex(pseg->get_align(), 16)
-                   << "   virt: " << as_hex(pseg->get_virtual_address(), 16)
-                   << "   phys: " << as_hex(pseg->get_physical_address(), 16)
-                   << "  fsize: " << std::setw(8) << pseg->get_file_size()
-                   << "  msize: " << std::setw(8) << pseg->get_memory_size();
-    }
+    ROCP_TRACE << _info.as_string();
 
     return _info;
 }

@@ -4,26 +4,45 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
+      - '.github/workflows/rocprofiler-sdk-codeql.yml'
       - 'projects/rocprofiler-sdk/**'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
       - '!projects/rocprofiler-sdk/CODEOWNERS'
       - '!projects/rocprofiler-sdk/source/docs/**'
-      - '!projects/rocprofiler-sdk/*.md'
 
   push:
     branches:
       - develop
     paths:
+      - '.github/workflows/rocprofiler-sdk-codeql.yml'
       - 'projects/rocprofiler-sdk/**'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
       - '!projects/rocprofiler-sdk/CODEOWNERS'
       - '!projects/rocprofiler-sdk/source/docs/**'
-      - '!projects/rocprofiler-sdk/*.md'
 
 env:
   ROCM_PATH: "/opt/rocm"
-  GPU_TARGETS: "gfx900;gfx906;gfx908;gfx90a;gfx940;gfx941;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1201"
+  GPU_TARGETS: "gfx906;gfx908;gfx90a;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1201"
   PATH: "/usr/bin:$PATH"
   EXCLUDED_PATHS: "external /tmp/build/external"
   GLOBAL_CMAKE_OPTIONS: "-DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON"
+  ENABLE_ROCR_BUILD: "false"
+  ENABLE_HIP_CLR_BUILD: "false"
+  ENABLE_ROCPROFILER_REGISTER_BUILD: "false"
+  ENABLE_AQLPROFILE_BUILD: "false"
+  INSTALL_NIGHTLY_ROCM: "false"
 
 jobs:
   analyze:
@@ -51,8 +70,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-        - language: cpp
-          build-mode: manual
+        # cpp analysis disabled - takes too long and frequently times out
+        # - language: cpp
+        #   build-mode: manual
         - language: python
           build-mode: none
         - language : actions
@@ -64,19 +84,29 @@ jobs:
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        sudo apt update
-        sudo apt install -y software-properties-common
+        sudo apt update -y
+        sudo apt upgrade -y
+        sudo apt install -y software-properties-common wget rocm-llvm-dev
         sudo apt-add-repository ppa:git-core/ppa
-        sudo apt-get update
-        sudo apt-get install -y git build-essential cmake g++-11 g++-12 python3-pip libdw-dev libsqlite3-dev rccl-dev rocdecode-dev rocjpeg-dev
-        git config --global --add safe.directory '*'
+        wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
+        sudo tee /etc/apt/sources.list.d/rocm.list << EOF
+        deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/7.1 jammy main
+        deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/graphics/7.1/ubuntu jammy main
+        EOF
+        sudo apt update -y
+        sudo apt upgrade -y
+        sudo apt install -y git build-essential cmake g++-11 g++-12 python3-pip libdw-dev libsqlite3-dev rccl-dev libva-amdgpu-dev rocdecode-dev rocjpeg-dev
         sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
         sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
+        git config --global --add safe.directory '*'
 
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         sparse-checkout: |
+          .github/actions/rocprofiler-sdk-util
           projects/rocprofiler-sdk
+          projects/clr
+          projects/hip
           .github/workflows/rocprofiler-sdk-codeql.yml
           .github/workflows/rocprofiler-sdk-formatting.yml
         submodules: 'true'
@@ -88,6 +118,22 @@ jobs:
         languages: ${{ matrix.language }}
         build-mode: ${{ matrix.build-mode }}
         queries: security-extended
+
+    - name: Build ROCProfiler SDK Dependencies
+      if: ${{ env.ENABLE_HIP_CLR_BUILD == 'true' }}
+      uses: ./.github/actions/rocprofiler-sdk-util
+      with:
+        rocm-path: ${{ env.ROCM_PATH }}
+        gpu-target: 'gfx94X'
+        compiler-launcher: /usr/bin/ccache
+        enable-rocr-build: ${{ env.ENABLE_ROCR_BUILD }}
+        enable-hip-clr-build: ${{ env.ENABLE_HIP_CLR_BUILD }}
+        enable-rocprofiler-register-build: ${{ env.ENABLE_ROCPROFILER_REGISTER_BUILD }}
+        enable-aqlprofile-build: ${{ env.ENABLE_AQLPROFILE_BUILD }}
+        install-nightly-rocm: ${{ env.INSTALL_NIGHTLY_ROCM }}
+        build-jobs: '8'
+        ccache-key: ccache-codeql-ubuntu-22.04-gfx94X
+        ccache-variant: ccache
 
     - name: Configure and Build
       timeout-minutes: 30

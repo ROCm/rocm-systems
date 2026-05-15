@@ -123,6 +123,16 @@ def test_csv_data(csv_data):
         "rocDecGetVideoFrame",
         "rocDecGetDecodeStatus",
         "rocDecDestroyBitstreamReader",
+        "rocDecCreateDecoder",
+        "rocDecGetErrorName",
+        "rocDecCreateVideoParser",
+        "rocDecParseVideoData",
+        "rocDecDestroyVideoParser",
+        "rocDecDestroyDecoder",
+        "rocDecGetDecoderCaps",
+        "rocDecGetDecodeStatus",
+        "rocDecReconfigureDecoder",
+        "rocDecGetVideoFrame",
     ]:
         assert call in api_calls
 

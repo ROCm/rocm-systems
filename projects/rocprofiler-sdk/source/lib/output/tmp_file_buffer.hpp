@@ -70,11 +70,25 @@ struct file_buffer
     file_buffer& operator=(const file_buffer&) = delete;
     file_buffer& operator=(file_buffer&&) noexcept = default;
 
+    void reset();
+
     domain_type       domain = {};
     uint64_t          nbytes = 0;
     ring_buffer_t<Tp> buffer = {};
     tmp_file          file;
 };
+
+template <typename Tp>
+void
+file_buffer<Tp>::reset()
+{
+    auto _lk = std::lock_guard<std::mutex>{file.file_mutex};
+    file.close();
+    file.remove();  // Delete old file
+    file.file_pos.clear();
+    nbytes = 0;
+    buffer.clear();
+}
 
 template <typename Tp>
 struct file_buffer<ring_buffer_t<Tp>>
@@ -104,9 +118,9 @@ offload_buffer(domain_type type)
         return;
     }
 
-    auto                         _lk      = std::lock_guard<std::mutex>(filebuf->file.file_mutex);
-    [[maybe_unused]] static auto _success = filebuf->file.open();
-    auto&                        _fs      = filebuf->file.stream;
+    auto                  _lk      = std::lock_guard<std::mutex>(filebuf->file.file_mutex);
+    [[maybe_unused]] auto _success = filebuf->file.open();
+    auto&                 _fs      = filebuf->file.stream;
 
     ROCP_CI_LOG_IF(WARNING, _fs.tellg() != _fs.tellp())  // this should always be true
         << "tellg=" << _fs.tellg() << ", tellp=" << _fs.tellp();

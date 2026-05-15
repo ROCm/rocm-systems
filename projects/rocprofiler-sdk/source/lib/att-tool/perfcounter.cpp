@@ -58,5 +58,42 @@ PerfcounterFile(WaveConfig& config, const perfevent_t* events, size_t event_coun
     std::string filename = "se" + std::to_string(config.shader_engine) + "_perfcounter.json";
     OutputFile(config.filemgr->dir / filename) << json;
 }
+
+void
+RealtimeTS::add(int shader, const realtime_t* events, size_t event_count)
+{
+    if(event_count == 0) return;
+
+    auto& storage = aggregated[shader];
+    storage.insert(storage.end(), events, events + event_count);
+}
+
+RealtimeTS::~RealtimeTS()
+{
+    if(aggregated.empty()) return;
+
+    nlohmann::json json;
+    json["metadata"]["descriptor"] = "[gfx_clock, realtime_clock]";
+    json["metadata"]["frequency"]  = frequency;
+
+    for(auto& [shader, realtime] : aggregated)
+    {
+        if(realtime.empty()) continue;
+
+        nlohmann::json data;
+        for(auto& event : realtime)
+        {
+            nlohmann::json json_event;
+            json_event.push_back(event.shader_clock);
+            json_event.push_back(event.realtime_clock);
+
+            data.push_back(json_event);
+        }
+        json["SE" + std::to_string(shader)] = data;
+    }
+
+    OutputFile(this->path) << json;
+}
+
 }  // namespace att_wrapper
 }  // namespace rocprofiler

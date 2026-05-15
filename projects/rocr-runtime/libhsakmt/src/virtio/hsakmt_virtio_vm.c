@@ -111,3 +111,10 @@ void* vhsakmt_node_doorbell(vhsakmt_device_handle dev, uint32_t node) {
 
   return dev->vhsakmt_nodes[node].doorbell_base;
 }
+
+struct vhsakmt_node* vhsakmt_get_node_by_id(vhsakmt_device_handle dev, uint32_t node_id) {
+  if (!dev->vhsakmt_nodes || !dev->sys_props) return NULL;
+  if (node_id >= dev->sys_props->NumNodes) return NULL;
+
+  return &dev->vhsakmt_nodes[node_id];
+}

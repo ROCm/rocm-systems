@@ -1,24 +1,9 @@
 /*
-Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
 #include <hip_test_common.hh>
 #include "hipMallocManagedCommon.hh"
 #include <atomic>
@@ -33,7 +18,8 @@ __global__ void HmmMultiThread(int n, float* x, float* y) {
 
 __global__ void KrnlWth2MemTypes(int* Hmm, int* Dptr, size_t n) {
   size_t index = blockIdx.x * blockDim.x + threadIdx.x;
-  for (size_t i = index; i < n; i++) {
+  size_t stride = blockDim.x * gridDim.x;
+  for (size_t i = index; i < n; i += stride) {
     Hmm[i] = Dptr[i] + 10;
   }
 }
@@ -81,14 +67,17 @@ static void LaunchKrnl(int* Hmm1, size_t NumElms, int InitVal, int GpuOrdnl, int
     WARN("Data Mismatch observed at line: " << __LINE__);
     IfTestPassed = false;
   }
+  HIPCHECK(hipFree(Hmm2));
+  HIPCHECK(hipStreamDestroy(strm));
 }
 
 static void LaunchKrnl2(int* Hmm, size_t NumElms, int InitVal, int HmmMem) {
-  int *ptr = nullptr, blockSize = 64, *HstPtr = nullptr;
+  int *ptr = nullptr, blockSize = 64;
+  std::unique_ptr<int[]> host_ptr;
   hipStream_t strm;
   HIPCHECK(hipStreamCreate(&strm));
   if (HmmMem == 0) {
-    HstPtr = reinterpret_cast<int*>(new int[NumElms]);
+    host_ptr = std::make_unique<int[]>(NumElms);
     HIPCHECK(hipMalloc(&ptr, (sizeof(int) * NumElms)));
   } else {
     HIPCHECK(hipMallocManaged(&ptr, (sizeof(int) * NumElms)));
@@ -102,9 +91,9 @@ static void LaunchKrnl2(int* Hmm, size_t NumElms, int InitVal, int HmmMem) {
   // Verifying the result
   int DataMismatch = 0;
   if (HmmMem == 0) {
-    HIPCHECK(hipMemcpy(HstPtr, ptr, (sizeof(int) * NumElms), hipMemcpyDeviceToHost));
+    HIPCHECK(hipMemcpy(host_ptr.get(), ptr, (sizeof(int) * NumElms), hipMemcpyDeviceToHost));
     for (size_t i = 0; i < NumElms; ++i) {
-      if (HstPtr[i] != (InitVal + 10)) {
+      if (host_ptr[i] != (InitVal + 10)) {
         DataMismatch++;
       }
     }
@@ -293,11 +282,10 @@ static void AllocateHmmMemory(int flag, int device) {
   }
 }
 
-TEST_CASE("Unit_hipMallocManaged_MultiThread") {
+HIP_TEST_CASE(Unit_hipMallocManaged_MultiThread) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
   IfTestPassed = true;
@@ -347,22 +335,20 @@ TEST_CASE("Unit_hipMallocManaged_MultiThread") {
 
 // The following test checks what happens when same Hmm memory is used to
 // launch multiple threads over multiple gpus
-TEST_CASE("Unit_hipMallocManaged_MGpuMThread") {
+HIP_TEST_CASE(Unit_hipMallocManaged_MGpuMThread) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
   IfTestPassed = true;
   int Ngpus = 0;
   HIP_CHECK(hipGetDeviceCount(&Ngpus));
   if (Ngpus < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping test because more than one device was not found.");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
-  int InitVal = 123, *Hmm1 = NULL, NumElms = 4096 * 4;
+  int InitVal = 123, *Hmm1 = NULL, NumElms = isQuickLevel() ? 4096 : 4096 * 4;
   HIP_CHECK(hipMallocManaged(&Hmm1, (NumElms * sizeof(int))));
   for (int i = 0; i < NumElms; ++i) {
     Hmm1[i] = InitVal;
@@ -383,22 +369,22 @@ TEST_CASE("Unit_hipMallocManaged_MGpuMThread") {
       }
     }
   }
+  HIP_CHECK(hipFree(Hmm1));
   REQUIRE(IfTestPassed);
 }
 
 
 // The following test checks what happens when multiple kernels are launched
 // with same Hmm memory
-TEST_CASE("Unit_hipMallocManaged_MultiKrnlComnHmm") {
+HIP_TEST_CASE(Unit_hipMallocManaged_MultiKrnlComnHmm) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
   IfTestPassed = true;
 
-  int InitVal = 123, *Hmm = NULL, NumElms = 1024 * 4, TotThrds = 2;
+  int InitVal = 123, *Hmm = NULL, NumElms = isQuickLevel() ? 4096 : 1024 * 4, TotThrds = 2;
   int HmmMem2 = 0, *HstPtr = nullptr;  //  to indicate the thread that
   //  hipMalloc() memory has to be used
   HstPtr = reinterpret_cast<int*>(new int[NumElms]);
@@ -418,20 +404,20 @@ TEST_CASE("Unit_hipMallocManaged_MultiKrnlComnHmm") {
     }
   }
   delete[] HstPtr;
+  HIP_CHECK(hipFree(Hmm));
 }
 
 
 // The following test checks what happens when multiple kernels are launched
 // with same hipMalloc() memory
-TEST_CASE("Unit_hipMallocManaged_MultiKrnlComnMalloc") {
+HIP_TEST_CASE(Unit_hipMallocManaged_MultiKrnlComnMalloc) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
   IfTestPassed = true;
-  int InitVal = 123, *Dptr = NULL, NumElms = 4096 * 8, TotThrds = 2;
+  int InitVal = 123, *Dptr = NULL, NumElms = isQuickLevel() ? 4096 : 4096 * 8, TotThrds = 2;
   int* HstPtr = reinterpret_cast<int*>(new int[NumElms]);
   HIP_CHECK(hipMalloc(&Dptr, (NumElms * sizeof(int))));
   for (int i = 0; i < NumElms; ++i) {
@@ -454,16 +440,15 @@ TEST_CASE("Unit_hipMallocManaged_MultiKrnlComnMalloc") {
 
 //  The following section tests the scenario wherein multiple threads use their
 //  own stream to launch kernel on common Hmm memory
-TEST_CASE("Unit_hipMallocManaged_MultiThrdMultiStrm") {
+HIP_TEST_CASE(Unit_hipMallocManaged_MultiThrdMultiStrm) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
   IfTestPassed = true;
 
-  int NumElms = 4096 * 4;
+  int NumElms = isQuickLevel() ? 4096 : 4096 * 4;
   int *Hmm1 = NULL, TotlThrds = 4, InitVal = 123;
   int HmmMem = 1;  //  to indicate the thread that Hmm memory need to be
   //  used inside it
@@ -481,20 +466,21 @@ TEST_CASE("Unit_hipMallocManaged_MultiThrdMultiStrm") {
       thr.join();
     }
   }
+
+  HIP_CHECK(hipFree(Hmm1));
 }
 
 
 //  The following section tests the scenario wherein two threads each use
 //  different kernel but common HMM memory
-TEST_CASE("Unit_hipMallocManaged_TwoKrnlsComnHmmMem") {
+HIP_TEST_CASE(Unit_hipMallocManaged_TwoKrnlsComnHmmMem) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
   IfTestPassed = true;
-  int InitVal = 123, *Dptr = NULL, NumElms = 4096 * 4, TotThrds = 2;
+  int InitVal = 123, *Dptr = NULL, NumElms = isQuickLevel() ? 4096 : 4096 * 4, TotThrds = 2;
   int* HstPtr = reinterpret_cast<int*>(new int[NumElms]);
   HIP_CHECK(hipMalloc(&Dptr, (NumElms * sizeof(int))));
   for (int i = 0; i < NumElms; ++i) {

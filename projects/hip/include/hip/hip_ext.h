@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #ifndef HIP_INCLUDE_HIP_HIP_EXT_H
 #define HIP_INCLUDE_HIP_HIP_EXT_H
@@ -26,8 +10,9 @@ THE SOFTWARE.
 #if defined(__cplusplus)
 #include <tuple>
 #include <type_traits>
+#include <array>
 #endif
-/** @addtogroup Execution Execution Management
+/** @addtogroup Execution Execution Control
  *  @{
  */
 
@@ -49,9 +34,9 @@ THE SOFTWARE.
  * @param [in] kernelParams  pointer to kernel parameters.
  * @param [in] extra  Pointer to kernel arguments. These are passed directly to the kernel and
  * must be in the memory layout and alignment expected by the kernel.
- * All passed arguments must be naturally aligned according to their type. The memory address of each
- * argument should be a multiple of its size in bytes. Please refer to hip_porting_driver_api.md
- * for sample usage.
+ * All passed arguments must be naturally aligned according to their type. The memory address of
+ * each argument should be a multiple of its size in bytes. Please refer to
+ * hip_porting_driver_api.md for sample usage.
  * @param [in] startEvent  If non-null, specified event will be updated to track the start time of
  * the kernel launch. The event must be created before calling this API.
  * @param [in] stopEvent  If non-null, specified event will be updated to track the stop time of
@@ -68,14 +53,14 @@ THE SOFTWARE.
  *
  */
 HIP_PUBLIC_API
- extern "C" hipError_t hipExtModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX,
-                                    uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ,
-                                    uint32_t localWorkSizeX, uint32_t localWorkSizeY,
-                                    uint32_t localWorkSizeZ, size_t sharedMemBytes,
-                                    hipStream_t hStream, void** kernelParams, void** extra,
-                                    hipEvent_t startEvent __dparm(NULL),
-                                    hipEvent_t stopEvent __dparm(NULL),
-                                    uint32_t flags __dparm(0));
+extern "C" hipError_t hipExtModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX,
+                                               uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ,
+                                               uint32_t localWorkSizeX, uint32_t localWorkSizeY,
+                                               uint32_t localWorkSizeZ, size_t sharedMemBytes,
+                                               hipStream_t hStream, void** kernelParams,
+                                               void** extra, hipEvent_t startEvent __dparm(NULL),
+                                               hipEvent_t stopEvent __dparm(NULL),
+                                               uint32_t flags __dparm(0));
 /**
  * @brief This HIP API is deprecated, please use hipExtModuleLaunchKernel() instead.
  *
@@ -83,12 +68,12 @@ HIP_PUBLIC_API
 HIP_DEPRECATED("use hipExtModuleLaunchKernel instead")
 HIP_PUBLIC_API
 extern "C" hipError_t hipHccModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX,
-                                    uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ,
-                                    uint32_t localWorkSizeX, uint32_t localWorkSizeY,
-                                    uint32_t localWorkSizeZ, size_t sharedMemBytes,
-                                    hipStream_t hStream, void** kernelParams, void** extra,
-                                    hipEvent_t startEvent __dparm(NULL),
-                                    hipEvent_t stopEvent __dparm(NULL));
+                                               uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ,
+                                               uint32_t localWorkSizeX, uint32_t localWorkSizeY,
+                                               uint32_t localWorkSizeZ, size_t sharedMemBytes,
+                                               hipStream_t hStream, void** kernelParams,
+                                               void** extra, hipEvent_t startEvent __dparm(NULL),
+                                               hipEvent_t stopEvent __dparm(NULL));
 
 #if defined(__cplusplus)
 
@@ -118,7 +103,8 @@ extern "C" hipError_t hipExtLaunchKernel(const void* function_address, dim3 numB
                                          hipEvent_t stopEvent, int flags);
 
 /**
- * @brief Launches kernel with dimention parameters and shared memory on stream with templated kernel and arguments.
+ * @brief Launches kernel with dimention parameters and shared memory on stream with templated
+ * kernel and arguments.
  *
  * @param [in] kernel  Kernel to launch.
  * @param [in] numBlocks  const number of blocks.
@@ -141,18 +127,22 @@ inline void hipExtLaunchKernelGGL(F kernel, const dim3& numBlocks, const dim3& d
                                   std::uint32_t sharedMemBytes, hipStream_t stream,
                                   hipEvent_t startEvent, hipEvent_t stopEvent, std::uint32_t flags,
                                   Args... args) {
-    constexpr size_t count = sizeof...(Args);
-    auto tup_ = std::tuple<Args...>{args...};
-    auto tup = validateArgsCountType(kernel, tup_);
-    void* _Args[count];
-    pArgs<0>(tup, _Args);
+  validateArgs(kernel);
+  auto k = reinterpret_cast<void*>(kernel);
 
-    auto k = reinterpret_cast<void*>(kernel);
-    hipExtLaunchKernel(k, numBlocks, dimBlocks, _Args, sharedMemBytes, stream, startEvent,
-                       stopEvent, (int)flags);
+  if constexpr (std::is_same_v<F, void (*)(Args...)>) {
+    std::array<void*, sizeof...(Args)> ptrArgsArr{static_cast<void*>(&args)...};
+    hipExtLaunchKernel(k, numBlocks, dimBlocks, ptrArgsArr.data(), sharedMemBytes, stream,
+                       startEvent, stopEvent, (int)flags);
+  } else {
+    auto formals = validateArgsCountType(kernel, args...);
+    auto ptrArgsArr = pArgs(formals);
+    hipExtLaunchKernel(k, numBlocks, dimBlocks, ptrArgsArr.data(), sharedMemBytes, stream,
+                       startEvent, stopEvent, (int)flags);
+  }
 }
 
-#endif // defined(__cplusplus)
+#endif  // defined(__cplusplus)
 
 // doxygen end AMD-specific features
 /**

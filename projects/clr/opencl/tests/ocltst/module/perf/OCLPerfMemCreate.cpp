@@ -1,22 +1,8 @@
-/* Copyright (c) 2010 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "OCLPerfMemCreate.h"
 
@@ -65,8 +51,8 @@ void OCLPerfMemCreate::open(unsigned int test, char* units, double& conversion,
   CHECK_RESULT((error_ != CL_SUCCESS), "Error opening test");
   test_ = test % NUM_TESTS;
   cl_device_type deviceType;
-  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_TYPE,
-                                     sizeof(deviceType), &deviceType, NULL);
+  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_TYPE, sizeof(deviceType),
+                                     &deviceType, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "CL_DEVICE_TYPE failed");
 
   useSubBuf_ = (test >= NUM_TESTS);
@@ -76,15 +62,13 @@ void OCLPerfMemCreate::open(unsigned int test, char* units, double& conversion,
     failed_ = true;
     return;
   }
-  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL,
-                                                 &error_);
+  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateProgramWithSource()  failed");
-  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId], NULL,
-                                    NULL, NULL);
+  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId], NULL, NULL, NULL);
   if (error_ != CL_SUCCESS) {
     char programLog[1024];
-    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId],
-                                    CL_PROGRAM_BUILD_LOG, 1024, programLog, 0);
+    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId], CL_PROGRAM_BUILD_LOG, 1024,
+                                    programLog, 0);
     printf("\n%s\n", programLog);
     fflush(stdout);
   }
@@ -93,8 +77,7 @@ void OCLPerfMemCreate::open(unsigned int test, char* units, double& conversion,
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateKernel() failed");
 }
 
-static void CL_CALLBACK notify_callback(const char* errinfo,
-                                        const void* private_info, size_t cb,
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
                                         void* user_data) {}
 
 void OCLPerfMemCreate::run(void) {
@@ -112,8 +95,7 @@ void OCLPerfMemCreate::run(void) {
   // Clear destination buffer
   memset(values, 0, BufSize * sizeof(cl_int4));
 
-  size_t bufSize = ((test_ % 2) == 0) ? BufSize * sizeof(cl_int4)
-                                      : BufSizeC * sizeof(cl_int4);
+  size_t bufSize = ((test_ % 2) == 0) ? BufSize * sizeof(cl_int4) : BufSizeC * sizeof(cl_int4);
   size_t iter = ((test_ % 2) == 0) ? Iterations : IterationsC;
 
   if (test_ == 4) {
@@ -128,16 +110,15 @@ void OCLPerfMemCreate::run(void) {
   timer.Start();
 
   for (size_t i = 0; i < iter; ++i) {
-    buffer =
-        _wrapper->clCreateBuffer(context_, flags, bufSize, hostPtr, &error_);
+    buffer = _wrapper->clCreateBuffer(context_, flags, bufSize, hostPtr, &error_);
     bufptr = &buffer;
     CHECK_RESULT((error_ != CL_SUCCESS), "clCreateBuffer() failed");
     if (useSubBuf_) {
       cl_buffer_region reg;
       reg.origin = 0;
       reg.size = bufSize;
-      subBuf = _wrapper->clCreateSubBuffer(
-          buffer, flags, CL_BUFFER_CREATE_TYPE_REGION, &reg, &error_);
+      subBuf =
+          _wrapper->clCreateSubBuffer(buffer, flags, CL_BUFFER_CREATE_TYPE_REGION, &reg, &error_);
       bufptr = &subBuf;
       CHECK_RESULT((error_ != CL_SUCCESS), "clCreateSubBuffer() failed");
     }
@@ -146,8 +127,8 @@ void OCLPerfMemCreate::run(void) {
     CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg() failed");
 
     size_t gws[1] = {64};
-    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1,
-                                              NULL, gws, NULL, 0, NULL, NULL);
+    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1, NULL, gws, NULL, 0,
+                                              NULL, NULL);
     CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed");
 
     _wrapper->clFinish(cmdQueues_[_deviceId]);

@@ -1,22 +1,8 @@
-/* Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "hip_mempool_impl.hpp"
 #include "hip_vm.hpp"
@@ -41,8 +27,8 @@ void Heap::AddMemory(amd::Memory* memory, const MemoryTimestamp& ts) {
 }
 
 // ================================================================================================
-amd::Memory* Heap::FindMemory(size_t size, Stream* stream, bool opportunistic,
-    void* dptr, MemoryTimestamp* ts) {
+amd::Memory* Heap::FindMemory(size_t size, Stream* stream, bool opportunistic, void* dptr,
+                              MemoryTimestamp* ts) {
   amd::Memory* memory = nullptr;
   auto start = allocations_.lower_bound({size, nullptr});
   for (auto it = start; it != allocations_.end();) {
@@ -62,6 +48,7 @@ amd::Memory* Heap::FindMemory(size_t size, Stream* stream, bool opportunistic,
       total_size_ -= memory->getSize();
       // Preserve event, since the logic could skip GPU wait on reuse
       ts->event_ = it->second.event_;
+      ts->refcount_ = it->second.refcount_;
       // Remove found allocation from the map
       it = allocations_.erase(it);
       break;
@@ -91,6 +78,9 @@ bool Heap::RemoveMemory(amd::Memory* memory, MemoryTimestamp* ts) {
 
 // ================================================================================================
 Heap::SortedMap::iterator Heap::EraseAllocation(Heap::SortedMap::iterator& it) {
+  if (it->second.refcount_ > 0) {
+    return ++it;
+  }
   auto memory = it->first.second;
   const device::Memory* dev_mem = memory->getDeviceMemory(*device_->devices()[0]);
   void* dev_mem_vaddr = reinterpret_cast<void*>(dev_mem->virtualAddress());
@@ -117,6 +107,10 @@ bool Heap::ReleaseAllMemory(size_t min_bytes_to_hold, bool safe_release) {
     if (total_size_ <= min_bytes_to_hold) {
       return true;
     }
+    if (it->second.refcount_ > 0) {
+      ++it;
+      continue;
+    }
     // Safe release forces unconditional wait for memory
     if (safe_release) {
       it->second.Wait();
@@ -141,6 +135,10 @@ bool Heap::ReleaseAllMemory() {
     // @note: Managed memory controls the threshold on its own
     if (!use_vm_heap_ && (total_size_ <= release_threshold_)) {
       return true;
+    }
+    if (it->second.refcount_ > 0) {
+      ++it;
+      continue;
     }
     if (it->second.IsSafeRelease()) {
       it = EraseAllocation(it);
@@ -179,7 +177,7 @@ void Heap::SetAccess(hip::Device* device, bool enable) {
 
 // ================================================================================================
 void* MemoryPool::AllocateMemory(size_t size, Stream* stream, void* dptr) {
-  amd::ScopedLock lock(lock_pool_ops_);
+  std::scoped_lock lock(lock_pool_ops_);
 
   void* dev_ptr = nullptr;
   MemoryTimestamp ts;
@@ -201,11 +199,13 @@ void* MemoryPool::AllocateMemory(size_t size, Stream* stream, void* dptr) {
       dev_ptr = amd::SvmBuffer::malloc(*context, flags, size, dev_info.memBaseAddrAlign_, nullptr);
     }
     if (dev_ptr == nullptr) {
-      size_t free = 0, total =0;
-      hipError_t err = hipMemGetInfo(&free, &total);
+      size_t free = 0, total = 0;
+      hipError_t err = ihipMemGetInfo(&free, &total);
       if (err == hipSuccess) {
-        LogPrintfError("Allocation failed : Device memory : required :\
-          %zu | free :%zu | total :%zu", size, free, total);
+        LogPrintfError(
+            "Allocation failed : Device memory : required :\
+          %zu | free :%zu | total :%zu",
+            size, free, total);
       }
       return nullptr;
     }
@@ -231,8 +231,8 @@ void* MemoryPool::AllocateMemory(size_t size, Stream* stream, void* dptr) {
   ts.AddSafeStream(stream);
   busy_heap_.AddMemory(memory, ts);
 
-  max_total_size_ = std::max(max_total_size_, busy_heap_.GetTotalSize() +
-                                                  free_heap_.GetTotalSize());
+  max_total_size_ =
+      std::max(max_total_size_, busy_heap_.GetTotalSize() + free_heap_.GetTotalSize());
   // Increment the reference counter on the pool
   retain();
 
@@ -242,12 +242,19 @@ void* MemoryPool::AllocateMemory(size_t size, Stream* stream, void* dptr) {
 }
 
 // ================================================================================================
-bool MemoryPool::FreeMemory(amd::Memory* memory, Stream* stream, Event* event) {
+bool MemoryPool::FreeMemory(amd::Memory* memory, Stream* stream, Event* event, bool skip_event) {
   {
-    amd::ScopedLock lock(lock_pool_ops_);
+    std::scoped_lock lock(lock_pool_ops_);
 
     if (!state_.use_vm_heap_ && memory->getUserData().phys_mem_obj != nullptr) {
       memory = memory->getUserData().phys_mem_obj;
+    }
+    // Graph-allocated virtual buffer: normal FreeMemory/SvmBuffer::free miss
+    // releasing phys_mem_obj, sub_obj, and parent VA. Handle cleanup here.
+    if (HIP_MEM_POOL_USE_VM && (memory->getMemFlags() & CL_MEM_VA_RANGE_AMD) &&
+        memory->parent() != nullptr &&
+        memory->getUserData().phys_mem_obj != nullptr) {
+      amd::Memory* phys_mem_obj = memory->getUserData().phys_mem_obj;
     }
 
     // If the free heap grows over the busy heap, then force release
@@ -259,7 +266,7 @@ bool MemoryPool::FreeMemory(amd::Memory* memory, Stream* stream, Event* event) {
       // If free mmeory is less than 12.5% of total, then force wait release
       size_t free = 0;
       size_t total = 0;
-      hipError_t err = hipMemGetInfo(&free, &total);
+      hipError_t err = ihipMemGetInfo(&free, &total);
       if ((err == hipSuccess) && (free < (total >> 3))) {
         constexpr bool kSafeRelease = true;
         free_heap_.ReleaseAllMemory(free_heap_.GetTotalSize() >> 1, kSafeRelease);
@@ -274,7 +281,7 @@ bool MemoryPool::FreeMemory(amd::Memory* memory, Stream* stream, Event* event) {
     }
     ClPrint(amd::LOG_INFO, amd::LOG_MEM_POOL, "Pool FreeMem: %p, %p", memory->getSvmPtr(), memory);
 
-    if (memory->getUserData().vaddr_mem_obj != nullptr) {
+    if (ts.refcount_ == 0 && memory->getUserData().vaddr_mem_obj != nullptr) {
       auto va_mem = memory->getUserData().vaddr_mem_obj;
       if (stream == nullptr) {
         stream = g_devices[memory->getUserData().deviceId]->NullStream();
@@ -290,22 +297,27 @@ bool MemoryPool::FreeMemory(amd::Memory* memory, Stream* stream, Event* event) {
       // The stream of destruction is a safe stream, because the app must handle sync
       ts.AddSafeStream(stream);
 
-      if (event == nullptr) {
+      // Preserve any caller-provided completion event even when marker creation is
+      // skipped. A null event is reserved for the explicit host-safe free path below.
+      if (event != nullptr) {
+        // If event is provided, then use it to track memory availability
+        ts.SetEvent(event);
+      } else if (!skip_event) {
         // Add a marker to the stream to trace availability of this memory
+        // Graph path: skip marker creation and blocking waits to avoid deadlocking
+        // the non-direct-dispatch queue thread. Markers enqueued during submit() land
+        // behind commands in the FIFO that depend on them, causing a deadlock.
+        // The safe stream added above is sufficient for reuse checks in FindMemory.
         Event* e = new hip::Event(0);
-        if (e != nullptr) {
-          if (hipSuccess == e->addMarker(stream, nullptr)) {
-            ts.SetEvent(e);
-            // Make sure runtime sends a notification
-            auto result = e->ready();
-          }
+        if (hipSuccess == e->addMarker(stream, nullptr)) {
+          ts.SetEvent(e);
+          // Make sure runtime sends a notification
+          auto result = e->ready();
         }
       } else {
-        ts.SetEvent(event);
+        // Assume a safe release from hipFree() if stream is nullptr
+        ts.SetEvent(nullptr);
       }
-    } else {
-      // Assume a safe release from hipFree() if stream is nullptr
-      ts.SetEvent(nullptr);
     }
     free_heap_.AddMemory(memory, ts);
   }
@@ -327,28 +339,28 @@ void MemoryPool::ReleaseAllMemory() {
 
 // ================================================================================================
 void MemoryPool::ReleaseFreedMemory() {
-  amd::ScopedLock lock(lock_pool_ops_);
+  std::scoped_lock lock(lock_pool_ops_);
 
   free_heap_.ReleaseAllMemory();
 }
 
 // ================================================================================================
 void MemoryPool::RemoveStream(Stream* stream) {
-  amd::ScopedLock lock(lock_pool_ops_);
+  std::scoped_lock lock(lock_pool_ops_);
 
   free_heap_.RemoveStream(stream);
 }
 
 // ================================================================================================
 void MemoryPool::TrimTo(size_t min_bytes_to_hold) {
-  amd::ScopedLock lock(lock_pool_ops_);
+  std::scoped_lock lock(lock_pool_ops_);
 
   free_heap_.ReleaseAllMemory(min_bytes_to_hold);
 }
 
 // ================================================================================================
 hipError_t MemoryPool::SetAttribute(hipMemPoolAttr attr, void* value) {
-  amd::ScopedLock lock(lock_pool_ops_);
+  std::scoped_lock lock(lock_pool_ops_);
   uint64_t reset;
 
   switch (attr) {
@@ -360,7 +372,7 @@ hipError_t MemoryPool::SetAttribute(hipMemPoolAttr attr, void* value) {
       // Enable/disable HIP event check for freed memory
       state_.opportunistic_ = *reinterpret_cast<int32_t*>(value);
       break;
-    case  hipMemPoolReuseAllowInternalDependencies:
+    case hipMemPoolReuseAllowInternalDependencies:
       // Enable/disable internal extra dependencies introduced in runtime
       state_.internal_dependencies_ = *reinterpret_cast<int32_t*>(value);
       break;
@@ -400,7 +412,7 @@ hipError_t MemoryPool::SetAttribute(hipMemPoolAttr attr, void* value) {
 
 // ================================================================================================
 hipError_t MemoryPool::GetAttribute(hipMemPoolAttr attr, void* value) {
-  amd::ScopedLock lock(lock_pool_ops_);
+  std::scoped_lock lock(lock_pool_ops_);
 
   switch (attr) {
     case hipMemPoolReuseFollowEventDependencies:
@@ -411,7 +423,7 @@ hipError_t MemoryPool::GetAttribute(hipMemPoolAttr attr, void* value) {
       // Enable/disable HIP event check for freed memory
       *reinterpret_cast<int32_t*>(value) = Opportunistic();
       break;
-    case  hipMemPoolReuseAllowInternalDependencies:
+    case hipMemPoolReuseAllowInternalDependencies:
       // Enable/disable internal extra dependencies introduced in runtime
       *reinterpret_cast<int32_t*>(value) = InternalDependencies();
       break;
@@ -420,17 +432,19 @@ hipError_t MemoryPool::GetAttribute(hipMemPoolAttr attr, void* value) {
       break;
     case hipMemPoolAttrReservedMemCurrent:
       // All allocated memory by the pool in OS
-      *reinterpret_cast<uint64_t*>(value) = (state_.use_vm_heap_) ? MappedSize() :
-        (busy_heap_.GetTotalSize() + free_heap_.GetTotalSize());
+      *reinterpret_cast<uint64_t*>(value) =
+          (state_.use_vm_heap_) ? MappedSize()
+                                : (busy_heap_.GetTotalSize() + free_heap_.GetTotalSize());
       break;
     case hipMemPoolAttrReservedMemHigh:
       // High watermark of all allocated memory in OS, since the last reset
-      *reinterpret_cast<uint64_t*>(value) = (state_.use_vm_heap_)
-          ? MaxMappedSize() : max_total_size_;
+      *reinterpret_cast<uint64_t*>(value) =
+          (state_.use_vm_heap_) ? MaxMappedSize() : max_total_size_;
       break;
     case hipMemPoolAttrUsedMemCurrent:
-      // Total currently used memory by the pool
-      *reinterpret_cast<uint64_t*>(value) = busy_heap_.GetTotalSize();
+      // Total currently used memory by the pool, including graph-cached entries in free_heap_
+      *reinterpret_cast<uint64_t*>(value) =
+          busy_heap_.GetTotalSize() + free_heap_.GetRefcountedSize();
       break;
     case hipMemPoolAttrUsedMemHigh:
       // High watermark of all used memoryS, since the last reset
@@ -444,7 +458,7 @@ hipError_t MemoryPool::GetAttribute(hipMemPoolAttr attr, void* value) {
 
 // ================================================================================================
 void MemoryPool::SetAccess(hip::Device* device, hipMemAccessFlags flags) {
-  amd::ScopedLock lock(lock_pool_ops_);
+  std::scoped_lock lock(lock_pool_ops_);
 
   // Check if the requested device is the pool device where memory was allocated
   if (device == device_) {
@@ -474,7 +488,7 @@ void MemoryPool::SetAccess(hip::Device* device, hipMemAccessFlags flags) {
 
 // ================================================================================================
 void MemoryPool::GetAccess(hip::Device* device, hipMemAccessFlags* flags) {
-  amd::ScopedLock lock(lock_pool_ops_);
+  std::scoped_lock lock(lock_pool_ops_);
 
   // Current pool device has full access to memory allocation
   *flags = (device == device_) ? hipMemAccessFlagsProtReadWrite : hipMemAccessFlagsProtNone;
@@ -494,7 +508,7 @@ void MemoryPool::FreeAllMemory(Stream* stream) {
 
 // ================================================================================================
 amd::Os::FileDesc MemoryPool::Export() {
-  amd::ScopedLock lock(lock_pool_ops_);
+  std::scoped_lock lock(lock_pool_ops_);
   if (shared_ != nullptr) {
     return shared_->handle_;
   }
@@ -505,14 +519,14 @@ amd::Os::FileDesc MemoryPool::Export() {
   // Note: Windows can accept an unnamed allocation
   snprintf(file_name, kFileNameSize, "%p", this);
   amd::Os::FileDesc handle{};
-  shared_ = reinterpret_cast<SharedMemPool*>(amd::Os::CreateIpcMemory(
-      file_name, sizeof(SharedMemPool), &handle));
+  shared_ = reinterpret_cast<SharedMemPool*>(
+      amd::Os::CreateIpcMemory(file_name, sizeof(SharedMemPool), &handle));
   if (shared_ != nullptr) {
     shared_->handle_ = handle;
     shared_->state_ = state_.value_;
     shared_->access_size_ = 0;
     memset(shared_->access_, 0, sizeof(SharedAccess) * kMaxMgpuAccess);
-    assert((access_map_.size() <= kMaxMgpuAccess) && "Can't support more GPU(s) in shared access" );
+    assert((access_map_.size() <= kMaxMgpuAccess) && "Can't support more GPU(s) in shared access");
     for (auto it : access_map_) {
       shared_->access_[shared_->access_size_] = SharedAccess{it.first->deviceId(), it.second};
       shared_->access_size_++;
@@ -523,7 +537,7 @@ amd::Os::FileDesc MemoryPool::Export() {
 
 // ================================================================================================
 bool MemoryPool::Import(amd::Os::FileDesc handle) {
-  amd::ScopedLock lock(lock_pool_ops_);
+  std::scoped_lock lock(lock_pool_ops_);
   bool result = false;
   auto shared = reinterpret_cast<SharedMemPool*>(
       amd::Os::OpenIpcMemory(nullptr, handle, sizeof(SharedMemPool)));
@@ -537,4 +551,4 @@ bool MemoryPool::Import(amd::Os::FileDesc handle) {
   }
   return result;
 }
-}
+}  // namespace hip

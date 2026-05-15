@@ -1,23 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 
@@ -44,7 +29,7 @@ static void hipUserObjectCreate_Functional_1(void* object, void destroyObj(void*
   HIP_CHECK(hipUserObjectRelease(hObject));
 }
 
-TEST_CASE("Unit_hipUserObjectCreate_Functional_1") {
+HIP_TEST_CASE(Unit_hipUserObjectCreate_Functional_1) {
   SECTION("Called with int Object") {
     int* object = new int();
     REQUIRE(object != nullptr);
@@ -78,7 +63,7 @@ static void hipUserObjectCreate_Functional_2(void* object, void destroyObj(void*
   HIP_CHECK(hipUserObjectRelease(hObject, refCount));
 }
 
-TEST_CASE("Unit_hipUserObjectCreate_Functional_2") {
+HIP_TEST_CASE(Unit_hipUserObjectCreate_Functional_2) {
   SECTION("Called with int Object") {
     int* object = new int();
     REQUIRE(object != nullptr);
@@ -112,7 +97,7 @@ static void hipUserObjectCreate_Functional_3(void* object, void destroyObj(void*
   HIP_CHECK(hipUserObjectRelease(hObject));
 }
 
-TEST_CASE("Unit_hipUserObjectCreate_Functional_3") {
+HIP_TEST_CASE(Unit_hipUserObjectCreate_Functional_3) {
   SECTION("Called with int Object") {
     int* object = new int();
     REQUIRE(object != nullptr);
@@ -149,7 +134,7 @@ static void hipUserObjectCreate_Functional_4(void* object, void destroyObj(void*
   HIP_CHECK(hipUserObjectRelease(hObject, refCount + refCountRetain));
 }
 
-TEST_CASE("Unit_hipUserObjectCreate_Functional_4") {
+HIP_TEST_CASE(Unit_hipUserObjectCreate_Functional_4) {
   SECTION("Called with int Object") {
     int* object = new int();
     REQUIRE(object != nullptr);
@@ -181,7 +166,7 @@ TEST_CASE("Unit_hipUserObjectCreate_Functional_4") {
  5) Pass initialRefcount as INT_MAX
  6) Pass flag other than hipUserObjectNoDestructorSync
  */
-TEST_CASE("Unit_hipUserObjectCreate_Negative") {
+HIP_TEST_CASE(Unit_hipUserObjectCreate_Negative) {
   int* object = new int();
   REQUIRE(object != nullptr);
 
@@ -190,32 +175,39 @@ TEST_CASE("Unit_hipUserObjectCreate_Negative") {
     HIP_CHECK_ERROR(
         hipUserObjectCreate(nullptr, object, destroyIntObj, 1, hipUserObjectNoDestructorSync),
         hipErrorInvalidValue);
+    delete object;
   }
   SECTION("Pass object as nullptr") {
     HIP_CHECK(
         hipUserObjectCreate(&hObject, nullptr, destroyIntObj, 1, hipUserObjectNoDestructorSync));
+    HIP_CHECK(hipUserObjectRelease(hObject, 1));
+    delete object;
   }
   SECTION("Pass Callback function as nullptr") {
     HIP_CHECK_ERROR(
         hipUserObjectCreate(&hObject, object, nullptr, 1, hipUserObjectNoDestructorSync),
         hipErrorInvalidValue);
+    delete object;
   }
   SECTION("Pass initialRefcount as 0") {
     HIP_CHECK_ERROR(
         hipUserObjectCreate(&hObject, object, destroyIntObj, 0, hipUserObjectNoDestructorSync),
         hipErrorInvalidValue);
+    delete object;
   }
   SECTION("Pass initialRefcount as INT_MAX") {
     HIP_CHECK(hipUserObjectCreate(&hObject, object, destroyIntObj, INT_MAX,
                                   hipUserObjectNoDestructorSync));
+    HIP_CHECK(hipUserObjectRelease(hObject, INT_MAX));
   }
   SECTION("Pass flag other than hipUserObjectNoDestructorSync") {
     HIP_CHECK_ERROR(hipUserObjectCreate(&hObject, object, destroyIntObj, 1, hipUserObjectFlags(9)),
                     hipErrorInvalidValue);
+    delete object;
   }
 }
 
-TEST_CASE("Unit_hipUserObj_Negative_Test") {
+HIP_TEST_CASE(Unit_hipUserObj_Negative_Test) {
   int* object = new int();
   REQUIRE(object != nullptr);
 
@@ -225,9 +217,12 @@ TEST_CASE("Unit_hipUserObj_Negative_Test") {
   HIP_CHECK(hipUserObjectCreate(&hObject, object, destroyIntObj, 2, hipUserObjectNoDestructorSync));
   REQUIRE(hObject != nullptr);
 
-  // Release more than created.
+  // Release more than created. Will not release the references.
   HIP_CHECK(hipUserObjectRelease(hObject, 4));
 
-  // Retain reference to a removed user object
+  // Retain reference
   HIP_CHECK(hipUserObjectRetain(hObject, 1));
+
+  // Release all the references pending
+  HIP_CHECK(hipUserObjectRelease(hObject, 3));
 }

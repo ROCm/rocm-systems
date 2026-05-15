@@ -62,15 +62,32 @@
   } \
 }
 
-#ifndef ROCRTST_EMULATOR_BUILD
-static const uint32_t kBinarySearchLength = 512;
-static const uint32_t kBinarySearchFindMe = 108;
-static const uint32_t kWorkGroupSize = 256;
-#else
-static const uint32_t kBinarySearchLength = 16;
-static const uint32_t kBinarySearchFindMe = 6;
-static const uint32_t kWorkGroupSize = 8;
-#endif
+bool isEmuModeEnabled() {
+  auto checkMode = []{ 
+    const char* path = "/sys/module/amdgpu/parameters/emu_mode";
+    FILE* file = fopen(path, "r");
+    if (!file) {
+      std::cout << "Failed to open file." << std::endl;
+      return false;
+    }
+
+    int emu_mode = 0;
+    if (fscanf(file, "%d", &emu_mode) != 1) {
+      std::cout << "Failed to parse as a decimal." << std::endl;
+      fclose(file);
+      return false;
+    }
+    fclose(file);
+    return emu_mode != 0;
+  };
+
+  static bool emu_mode = checkMode(); 
+  return emu_mode;
+}
+
+static const uint32_t kBinarySearchLength = isEmuModeEnabled() ? 16 : 512;
+static const uint32_t kBinarySearchFindMe = isEmuModeEnabled() ? 6 : 108;
+static const uint32_t kWorkGroupSize = isEmuModeEnabled() ? 8 : 256;
 
 // Hold all the info specific to binary search
 typedef struct BinarySearch {

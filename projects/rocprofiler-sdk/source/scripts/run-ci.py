@@ -1,5 +1,27 @@
 #!/usr/bin/env python3
 
+# MIT License
+#
+# Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
 
 import os
 import re
@@ -14,8 +36,8 @@ import multiprocessing
 # and default value for CTEST_SUBMIT_URL
 # _PROJECT_NAME = "rocprofiler-v2-internal"
 # _BASE_URL = "10.194.116.31/cdash"
-_PROJECT_NAME = "rocprofiler-sdk"
-_BASE_URL = "cdash.rocprofiler.amd.com"
+_PROJECT_NAME = "rocprofiler-sdk-alt"
+_BASE_URL = "my.cdash.org"
 _GCOVR_GENERATE_CMD = None
 
 # these are various default values
@@ -94,15 +116,39 @@ def generate_custom(args, cmake_args, ctest_args):
     MEMCHECK_SUPPRESSION_FILE = ""
 
     if MEMCHECK_TYPE == "AddressSanitizer":
-        MEMCHECK_SANITIZER_OPTIONS = "detect_leaks=0 use_sigaltstack=0"
+        # print_suppressions=1 shows which suppressions matched during the run
+        MEMCHECK_SANITIZER_OPTIONS = (
+            "detect_leaks=0 use_sigaltstack=0 print_suppressions=1"
+        )
         MEMCHECK_SUPPRESSION_FILE = (
             f"{SOURCE_DIR}/source/scripts/address-sanitizer-suppr.txt"
         )
+        os.environ["ASAN_OPTIONS"] = " ".join(
+            [
+                "detect_leaks=0",
+                "use_sigaltstack=0",
+                "print_suppressions=1",
+                f"suppressions={SOURCE_DIR}/source/scripts/address-sanitizer-suppr.txt",
+                os.environ.get("ASAN_OPTIONS", ""),
+            ]
+        )
     elif MEMCHECK_TYPE == "LeakSanitizer":
+        # fast_unwind_on_malloc=1 avoids deadlock in libgcc unwinder during early init
+        # print_suppressions=1 shows which suppressions matched during the run
+        MEMCHECK_SANITIZER_OPTIONS = "fast_unwind_on_malloc=1 print_suppressions=1"
         MEMCHECK_SUPPRESSION_FILE = (
             f"{SOURCE_DIR}/source/scripts/leak-sanitizer-suppr.txt"
         )
+        os.environ["LSAN_OPTIONS"] = " ".join(
+            [
+                f"suppressions={SOURCE_DIR}/source/scripts/leak-sanitizer-suppr.txt",
+                "fast_unwind_on_malloc=1",
+                "print_suppressions=1",
+                os.environ.get("LSAN_OPTIONS", ""),
+            ]
+        )
     elif MEMCHECK_TYPE == "ThreadSanitizer":
+        # print_suppressions=1 shows which suppressions matched during the run
         external_symbolizer_path = ""
         for version in range(8, 20):
             _symbolizer = shutil.which(f"llvm-symbolizer-{version}")
@@ -112,6 +158,7 @@ def generate_custom(args, cmake_args, ctest_args):
             [
                 "history_size=5",
                 "detect_deadlocks=0",
+                "print_suppressions=1",
                 f"suppressions={SOURCE_DIR}/source/scripts/thread-sanitizer-suppr.txt",
                 external_symbolizer_path,
                 os.environ.get("TSAN_OPTIONS", ""),
@@ -128,6 +175,20 @@ def generate_custom(args, cmake_args, ctest_args):
                 os.environ.get("UBSAN_OPTIONS", ""),
             ]
         )
+
+    # Print suppression file contents for debugging
+    if MEMCHECK_TYPE:
+        print(f"\n{'=' * 60}")
+        print(f"Sanitizer: {MEMCHECK_TYPE}")
+        print(f"{'=' * 60}")
+
+        # Print environment variables for sanitizers that use them
+        for env_var in ["TSAN_OPTIONS", "UBSAN_OPTIONS", "ASAN_OPTIONS", "LSAN_OPTIONS"]:
+            if env_var in os.environ:
+                print(f"\n{env_var}:")
+                print(f"  {os.environ[env_var]}")
+
+        print(f"\n{'=' * 60}\n")
 
     codecov_exclude = [
         "/usr/.*",
@@ -193,9 +254,9 @@ def generate_custom(args, cmake_args, ctest_args):
         set(CTEST_PROJECT_NAME "{_PROJECT_NAME}")
         set(CTEST_NIGHTLY_START_TIME "05:00:00 UTC")
 
-        set(CTEST_DROP_METHOD "http")
+        set(CTEST_DROP_METHOD "https")
         set(CTEST_DROP_SITE_CDASH TRUE)
-        set(CTEST_SUBMIT_URL "http://{SUBMIT_URL}")
+        set(CTEST_SUBMIT_URL "https://{SUBMIT_URL}")
 
         set(CTEST_UPDATE_TYPE git)
         set(CTEST_UPDATE_VERSION_ONLY TRUE)

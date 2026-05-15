@@ -1,22 +1,8 @@
-/* Copyright (c) 2010 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "oclTestLog.h"
 
@@ -25,8 +11,7 @@
 
 #include "OCLLog.h"
 
-oclLog::oclLog()
-    : m_stdout_fp(stdout), m_filename(""), m_writeToFileIsEnabled(false) {}
+oclLog::oclLog() : m_stdout_fp(stdout), m_filename(""), m_writeToFileIsEnabled(false) {}
 
 oclLog::~oclLog() { disable_write_to_file(); }
 
@@ -35,8 +20,7 @@ void oclLog::enable_write_to_file(std::string filename) {
   m_filename = filename;
   FILE* fp = fopen(m_filename.c_str(), "w");
   if (fp == NULL) {
-    oclTestLog(OCLTEST_LOG_ALWAYS,
-               "ERROR: Cannot open file %s. Disabling logging to file.\n",
+    oclTestLog(OCLTEST_LOG_ALWAYS, "ERROR: Cannot open file %s. Disabling logging to file.\n",
                filename.c_str());
     m_writeToFileIsEnabled = false;
   } else {
@@ -59,8 +43,7 @@ void oclLog::vprint(char const* fmt, va_list args) {
   if (m_writeToFileIsEnabled) {
     FILE* fp = fopen(m_filename.c_str(), "a");
     if (fp == NULL) {
-      oclTestLog(OCLTEST_LOG_ALWAYS,
-                 "ERROR: Cannot open file %s. Disabling logging to file.\n",
+      oclTestLog(OCLTEST_LOG_ALWAYS, "ERROR: Cannot open file %s. Disabling logging to file.\n",
                  m_filename.c_str());
       m_writeToFileIsEnabled = false;
     }
@@ -93,9 +76,7 @@ void oclTestLog(oclLoggingLevel logLevel, const char* fmt, ...) {
   }
 }
 
-void oclTestEnableLogToFile(const char* filename) {
-  theLog().enable_write_to_file(filename);
-}
+void oclTestEnableLogToFile(const char* filename) { theLog().enable_write_to_file(filename); }
 
 void oclTestSetLogLevel(int level) {
   if (level >= 0) {

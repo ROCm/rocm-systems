@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2021-2023 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /*
 Following scenarios are verified for hipPointerGetAttributes API
@@ -30,7 +14,7 @@ Following scenarios are verified for hipPointerGetAttributes API
 */
 #include <inttypes.h>
 #include <hip_test_common.hh>
- 
+
 #ifdef __linux__
 #include <sys/mman.h>
 #endif
@@ -51,17 +35,14 @@ constexpr size_t N{1000000};
 // Utility Functions:
 //=================================================================================================
 
-bool operator==(const hipPointerAttribute_t& lhs,
-                const hipPointerAttribute_t& rhs) {
-  return ((lhs.hostPointer == rhs.hostPointer) &&
-          (lhs.devicePointer == rhs.devicePointer) &&
+bool operator==(const hipPointerAttribute_t& lhs, const hipPointerAttribute_t& rhs) {
+  return ((lhs.hostPointer == rhs.hostPointer) && (lhs.devicePointer == rhs.devicePointer) &&
           (lhs.type == rhs.type) && (lhs.device == rhs.device) &&
           (lhs.allocationFlags == rhs.allocationFlags));
 }
 
 
-bool operator!=(const hipPointerAttribute_t& lhs,
-                const hipPointerAttribute_t& rhs) {
+bool operator!=(const hipPointerAttribute_t& lhs, const hipPointerAttribute_t& rhs) {
   return !(lhs == rhs);
 }
 
@@ -92,8 +73,7 @@ void printAttribs(const hipPointerAttribute_t* attribs) {
   printf(
       "hostPointer:%p devicePointer:%p  type:%s deviceId:%d isManaged:%d "
       "allocationFlags:%u\n",
-      attribs->hostPointer, attribs->devicePointer,
-      memoryTypeToString(attribs->type),
+      attribs->hostPointer, attribs->devicePointer, memoryTypeToString(attribs->type),
       attribs->device, attribs->isManaged, attribs->allocationFlags);
 }
 
@@ -112,8 +92,7 @@ struct SuperPointerAttribute {
 
 
 // Support function to check result against a reference:
-void checkPointer(const SuperPointerAttribute& ref, int major,
-                  int minor, void* pointer) {
+void checkPointer(const SuperPointerAttribute& ref, int major, int minor, void* pointer) {
   hipPointerAttribute_t attribs;
   resetAttribs(&attribs);
 
@@ -137,9 +116,12 @@ void checkPointer(const SuperPointerAttribute& ref, int major,
 // we do this in the testMultiThreaded_1 test.
 void clusterAllocs(int numAllocs, size_t minSize, size_t maxSize) {
   Nbytes = N * sizeof(char);
-  printf("clusterAllocs numAllocs=%d size=" "%" PRIu64 ".." "%" PRIu64 "\n",
-         numAllocs, static_cast<uint64_t>(minSize),
-         static_cast<uint64_t>(maxSize));
+  printf(
+      "clusterAllocs numAllocs=%d size="
+      "%" PRIu64
+      ".."
+      "%" PRIu64 "\n",
+      numAllocs, static_cast<uint64_t>(minSize), static_cast<uint64_t>(maxSize));
   const int Max_Devices = 256;
   std::vector<SuperPointerAttribute> reference(numAllocs);
 
@@ -166,17 +148,14 @@ void clusterAllocs(int numAllocs, size_t minSize, size_t maxSize) {
 
     void* ptr;
     if (isDevice) {
-      totalDeviceAllocated[reference[i]._attrib.device] +=
-                                  reference[i]._sizeBytes;
-      HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&ptr),
-                               reference[i]._sizeBytes));
+      totalDeviceAllocated[reference[i]._attrib.device] += reference[i]._sizeBytes;
+      HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&ptr), reference[i]._sizeBytes));
       reference[i]._attrib.type = hipMemoryTypeDevice;
       reference[i]._attrib.devicePointer = ptr;
       reference[i]._attrib.hostPointer = NULL;
       reference[i]._attrib.allocationFlags = 0;
     } else {
-      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&ptr),
-                              reference[i]._sizeBytes,
+      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&ptr), reference[i]._sizeBytes,
                               hipHostMallocDefault));
       reference[i]._attrib.type = hipMemoryTypeHost;
       reference[i]._attrib.devicePointer = ptr;
@@ -192,12 +171,12 @@ void clusterAllocs(int numAllocs, size_t minSize, size_t maxSize) {
     HIP_CHECK(hipMemGetInfo(&free, &total));
     printf(
         "  device#%d: hipMemGetInfo: "
-        "free=%zu (%4.2fMB) totalDevice=""%" PRIu64 "(%4.2fMB) total=%zu "
+        "free=%zu (%4.2fMB) totalDevice="
+        "%" PRIu64
+        "(%4.2fMB) total=%zu "
         "(%4.2fMB)\n",
-        i, free, (free / 1024.0 / 1024.0),
-        static_cast<uint64_t>(totalDeviceAllocated[i]),
-        (totalDeviceAllocated[i]) / 1024.0 / 1024.0, total,
-        (total / 1024.0 / 1024.0));
+        i, free, (free / 1024.0 / 1024.0), static_cast<uint64_t>(totalDeviceAllocated[i]),
+        (totalDeviceAllocated[i]) / 1024.0 / 1024.0, total, (total / 1024.0 / 1024.0));
     REQUIRE(free + totalDeviceAllocated[i] <= total);
   }
 
@@ -230,7 +209,7 @@ void clusterAllocs(int numAllocs, size_t minSize, size_t maxSize) {
  * ------------------------
  *  - HIP_VERSION >= 5.7
  */
-TEST_CASE("Unit_hipPointerGetAttributes_Basic") {
+HIP_TEST_CASE(Unit_hipPointerGetAttributes_Basic) {
   HIP_CHECK(hipSetDevice(0));
   Nbytes = N * sizeof(char);
   printf("\n");
@@ -243,15 +222,15 @@ TEST_CASE("Unit_hipPointerGetAttributes_Basic") {
   hipError_t e;
 
   HIP_CHECK(hipMalloc(&A_d, Nbytes));
-  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A_Pinned_h),
-                          Nbytes, hipHostMallocDefault));
+  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A_Pinned_h), Nbytes, hipHostMallocDefault));
 
   size_t free, total;
   HIP_CHECK(hipMemGetInfo(&free, &total));
-  printf("hipMemGetInfo: free=%zu (%4.2f) Nbytes=""%" PRIu64
-         "total=%zu (%4.2f)\n", free,
-         (free / 1024.0 / 1024.0), static_cast<uint64_t>(Nbytes),
-          total, (total / 1024.0 / 1024.0));
+  printf(
+      "hipMemGetInfo: free=%zu (%4.2f) Nbytes="
+      "%" PRIu64 "total=%zu (%4.2f)\n",
+      free, (free / 1024.0 / 1024.0), static_cast<uint64_t>(Nbytes), total,
+      (total / 1024.0 / 1024.0));
   REQUIRE(free + Nbytes <= total);
 
 
@@ -271,16 +250,14 @@ TEST_CASE("Unit_hipPointerGetAttributes_Basic") {
   // Corner case at end of array:
   resetAttribs(&attribs2);
   HIP_CHECK(hipPointerGetAttributes(&attribs2, A_d + Nbytes - 1));
-  REQUIRE((ptr + Nbytes - 1) == reinterpret_cast<char*>
-                               (attribs2.devicePointer));
+  REQUIRE((ptr + Nbytes - 1) == reinterpret_cast<char*>(attribs2.devicePointer));
 
   // Pointer just beyond array must be invalid or at least a different pointer
   resetAttribs(&attribs2);
   e = hipPointerGetAttributes(&attribs2, A_d + Nbytes + 1);
   if (e != hipErrorInvalidValue) {
     // We might have strayed into another pointer area.
-    REQUIRE(reinterpret_cast<char*>(ptr) !=
-            reinterpret_cast<char*>(attribs2.devicePointer));
+    REQUIRE(reinterpret_cast<char*>(ptr) != reinterpret_cast<char*>(attribs2.devicePointer));
   }
 
 
@@ -317,7 +294,7 @@ TEST_CASE("Unit_hipPointerGetAttributes_Basic") {
  *  - HIP_VERSION >= 5.7
  */
 
-TEST_CASE("Unit_hipPointerGetAttributes_ClusterAlloc") {
+HIP_TEST_CASE(Unit_hipPointerGetAttributes_ClusterAlloc) {
   srand(0x100);
   printf("\n=============================================\n");
   clusterAllocs(100, 1024 * 1, 1024 * 1024);
@@ -334,7 +311,7 @@ TEST_CASE("Unit_hipPointerGetAttributes_ClusterAlloc") {
  *  - HIP_VERSION >= 5.7
  */
 
-TEST_CASE("Unit_hipPointerGetAttributes_TinyClusterAlloc") {
+HIP_TEST_CASE(Unit_hipPointerGetAttributes_TinyClusterAlloc) {
   srand(0x200);
   printf("\n=============================================\n");
   clusterAllocs(1000, 1, 10);  //  Many tiny allocations;
@@ -344,7 +321,7 @@ TEST_CASE("Unit_hipPointerGetAttributes_TinyClusterAlloc") {
 // IN : serialize will force the test to run in serial fashion.
 #if 0  // FIXME_jatinx These need to be ported to HIP_CHECK_THREAD.
 Disabling it for now
-TEST_CASE("Unit_hipPointerGetAttributes_MultiThread") {
+HIP_TEST_CASE(Unit_hipPointerGetAttributes_MultiThread) {
   srand(0x300);
   auto serialize = 1;
   printf("\n=============================================\n");
@@ -377,13 +354,12 @@ TEST_CASE("Unit_hipPointerGetAttributes_MultiThread") {
  *  - HIP_VERSION >= 5.7
  */
 
-TEST_CASE("Unit_hipPointerGetAttributes_Negative") {
+HIP_TEST_CASE(Unit_hipPointerGetAttributes_Negative) {
 #if HT_AMD  // Nvidia crashed in hipPointerGetAttributes on nullptr
   SECTION("Invalid Attributes Pointer") {
     int* dPtr{nullptr};
     HIP_CHECK(hipMalloc(&dPtr, sizeof(int)));
-    HIP_CHECK_ERROR(hipPointerGetAttributes(nullptr, dPtr),
-                                     hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipPointerGetAttributes(nullptr, dPtr), hipErrorInvalidValue);
     HIP_CHECK(hipFree(dPtr));
   }
 #endif
@@ -401,16 +377,15 @@ TEST_CASE("Unit_hipPointerGetAttributes_Negative") {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipPointerGetAttributes_GpuIter") {
+HIP_TEST_CASE(Unit_hipPointerGetAttributes_GpuIter) {
   int deviceCount{0};
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   REQUIRE(deviceCount != 0);
 
   // Memory Types
-  enum MemoryTypes {DeviceMemory = 0, HostMemory, MappedMemory};
+  enum MemoryTypes { DeviceMemory = 0, HostMemory, MappedMemory };
   auto MemoryType =
-      GENERATE(MemoryTypes::DeviceMemory, MemoryTypes::HostMemory,
-               MemoryTypes::MappedMemory);
+      GENERATE(MemoryTypes::DeviceMemory, MemoryTypes::HostMemory, MemoryTypes::MappedMemory);
 
   INFO("Memory Type: " << MemoryType);
 
@@ -421,9 +396,9 @@ TEST_CASE("Unit_hipPointerGetAttributes_GpuIter") {
     if (MemoryType == MemoryTypes::DeviceMemory) {
       HIP_CHECK(hipMalloc(&ptr, sizeof(int)));
     } else if (MemoryType == MemoryTypes::HostMemory) {
-        HIP_CHECK(hipHostMalloc(&ptr, sizeof(int)));
+      HIP_CHECK(hipHostMalloc(&ptr, sizeof(int)));
     } else if (MemoryType == MemoryTypes::MappedMemory) {
-        HIP_CHECK(hipHostMalloc(&ptr, sizeof(int), hipHostMallocMapped));
+      HIP_CHECK(hipHostMalloc(&ptr, sizeof(int), hipHostMallocMapped));
     }
     REQUIRE(ptr != nullptr);
     hipPointerAttribute_t attributes{};
@@ -439,16 +414,14 @@ TEST_CASE("Unit_hipPointerGetAttributes_GpuIter") {
       REQUIRE(attributes.hostPointer == ptr);
     } else if (MemoryType == MemoryTypes::MappedMemory) {
       int* devicePtr{nullptr};
-      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&devicePtr),
-                                        ptr, 0));
+      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&devicePtr), ptr, 0));
       REQUIRE(attributes.hostPointer == ptr);
       REQUIRE(attributes.hostPointer == devicePtr);
     }
 
     if (MemoryType == MemoryTypes::DeviceMemory) {
       HIP_CHECK(hipFree(ptr));
-    } else if (MemoryType == MemoryTypes::MappedMemory ||
-               MemoryType == MemoryTypes::HostMemory) {
+    } else if (MemoryType == MemoryTypes::MappedMemory || MemoryType == MemoryTypes::HostMemory) {
       HIP_CHECK(hipHostFree(ptr));
     }
   }
@@ -464,7 +437,7 @@ TEST_CASE("Unit_hipPointerGetAttributes_GpuIter") {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipPointerGetAttributes_GpuIter_Managed__Memory") {
+HIP_TEST_CASE(Unit_hipPointerGetAttributes_GpuIter_Managed__Memory) {
   int deviceCount{0};
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   REQUIRE(deviceCount != 0);
@@ -472,8 +445,7 @@ TEST_CASE("Unit_hipPointerGetAttributes_GpuIter_Managed__Memory") {
   for (int i = 0; i < deviceCount; i++) {
     HIP_CHECK(hipSetDevice(i));
     int managed_memory = 0;
-    HIP_CHECK(hipDeviceGetAttribute(&managed_memory,
-    hipDeviceAttributeManagedMemory, i));
+    HIP_CHECK(hipDeviceGetAttribute(&managed_memory, hipDeviceAttributeManagedMemory, i));
     if (!managed_memory) {
       INFO("Managed memory access not supported on the device" << i);
     } else {
@@ -502,37 +474,38 @@ TEST_CASE("Unit_hipPointerGetAttributes_GpuIter_Managed__Memory") {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipPointerGetAttributes_GpuIter_Unregistered_Memory") {
+HIP_TEST_CASE(Unit_hipPointerGetAttributes_GpuIter_Unregistered_Memory) {
   int deviceCount{0};
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   REQUIRE(deviceCount != 0);
-  int* ptr1{nullptr}; int* ptr2{nullptr}; int* ptr3{nullptr};
+  int* ptr1{nullptr};
+  int* ptr2{nullptr};
+  int* ptr3{nullptr};
   for (int i = 0; i < deviceCount; i++) {
     HIP_CHECK(hipSetDevice(i));
     int N = 5;
     ptr1 = new int;
     ptr2 = reinterpret_cast<int*>(malloc(sizeof(int)));
-    ptr3 = reinterpret_cast<int *>(calloc(N, sizeof(int)));
+    ptr3 = reinterpret_cast<int*>(calloc(N, sizeof(int)));
     int ptr4[1000];
-    #ifdef __linux__
-      void* ptr5{nullptr};
-      ptr5 = mmap ( NULL, N*sizeof(int),
-        PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
+#ifdef __linux__
+    void* ptr5{nullptr};
+    ptr5 = mmap(NULL, N * sizeof(int), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
 
-      if (ptr5 == MAP_FAILED) {
-        INFO("Mapping Failed\n");
-        REQUIRE(false);
-      }
-      REQUIRE(ptr5 != nullptr);
-      hipPointerAttribute_t attributes1{};
-      HIP_CHECK(hipPointerGetAttributes(&attributes1, ptr5));
-      REQUIRE(attributes1.type == hipMemoryTypeUnregistered);
-      int err = munmap(ptr5, N*sizeof(int));
-      if (err != 0) {
-       INFO("UnMapping Failed\n");
-       REQUIRE(false);
-      }
-    #endif
+    if (ptr5 == MAP_FAILED) {
+      INFO("Mapping Failed\n");
+      REQUIRE(false);
+    }
+    REQUIRE(ptr5 != nullptr);
+    hipPointerAttribute_t attributes1{};
+    HIP_CHECK(hipPointerGetAttributes(&attributes1, ptr5));
+    REQUIRE(attributes1.type == hipMemoryTypeUnregistered);
+    int err = munmap(ptr5, N * sizeof(int));
+    if (err != 0) {
+      INFO("UnMapping Failed\n");
+      REQUIRE(false);
+    }
+#endif
     REQUIRE(ptr1 != nullptr);
     REQUIRE(ptr2 != nullptr);
     REQUIRE(ptr3 != nullptr);
@@ -554,6 +527,6 @@ TEST_CASE("Unit_hipPointerGetAttributes_GpuIter_Unregistered_Memory") {
 }
 
 /**
-* End doxygen group MemoryTest.
-* @}
-*/
+ * End doxygen group MemoryTest.
+ * @}
+ */

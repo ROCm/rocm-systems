@@ -286,6 +286,14 @@ is_pc_sampling_method_supported(rocprofiler_pc_sampling_method_t method,
             else
                 return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL;
         }
+        else if(agent_name.find("gfx12") == 0)
+        {
+            // 1.5 version enables host-trap PC sampling on gfx12
+            if(pcs_ioctl_version >= PC_SAMPLING_IOCTL_COMPUTE_VERSION(1, 5))
+                return ROCPROFILER_STATUS_SUCCESS;
+            else
+                return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL;
+        }
     }
     else if(method == ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC)
     {
@@ -306,6 +314,14 @@ is_pc_sampling_method_supported(rocprofiler_pc_sampling_method_t method,
         {
             // 1.4 version enables stochastic PC sampling on gfx950
             if(pcs_ioctl_version >= PC_SAMPLING_IOCTL_COMPUTE_VERSION(1, 4))
+                return ROCPROFILER_STATUS_SUCCESS;
+            else
+                return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL;
+        }
+        else if(agent_name.find("gfx1250") == 0)
+        {
+            // 1.7 version enables stochastic PC sampling on gfx1250
+            if(pcs_ioctl_version >= PC_SAMPLING_IOCTL_COMPUTE_VERSION(1, 7))
                 return ROCPROFILER_STATUS_SUCCESS;
             else
                 return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL;

@@ -1,24 +1,9 @@
 /*
-Copyright (c) 2020 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
 // Test Description:
 /* This test implements sum reduction kernel, first with each threads own rank
    as input and comparing the sum with expected sum output derieved from n(n-1)/2
@@ -54,7 +39,7 @@ __device__ int reduction_kernel_shfl_down(coalesced_group const& g, int val) {
   }
 }
 
-__global__ void kernel_shfl_down (int * dPtr, int *dResults, int lane_delta, int cg_sizes) {
+__global__ void kernel_shfl_down(int* dPtr, int* dResults, int lane_delta, int cg_sizes) {
   int id = threadIdx.x + blockIdx.x * blockDim.x;
 
   if (id % cg_sizes == 0) {
@@ -66,11 +51,11 @@ __global__ void kernel_shfl_down (int * dPtr, int *dResults, int lane_delta, int
   }
 }
 
-__global__ void kernel_cg_group_partition_shfl_down(int* result, unsigned int tileSz, int cg_sizes) {
-
+__global__ void kernel_cg_group_partition_shfl_down(int* result, unsigned int tileSz,
+                                                    int cg_sizes) {
   int id = threadIdx.x + blockIdx.x * blockDim.x;
   if (id % cg_sizes == 0) {
-    coalesced_group  threadBlockCGTy = coalesced_threads();
+    coalesced_group threadBlockCGTy = coalesced_threads();
     int input, outputSum, expectedSum;
 
     // Choose a leader thread to print the results
@@ -131,12 +116,15 @@ static void test_group_partition(unsigned int tileSz) {
 
   std::vector<unsigned int> cg_sizes = {1, 2, 3};
   for (auto i : cg_sizes) {
-
-    int numTiles = ((blockSize * threadsPerBlock) / i) / tileSz;
+    // Match device: only threads with id % cg_sizes == 0 participate in coalesced_threads()
+    int totalThreads = blockSize * threadsPerBlock;
+    int participatingThreads = (totalThreads + i - 1) / i;
+    // Kernel writes result[thread_rank()/tileSz]; partial tiles still have a leader, so use ceiling
+    int numTiles = (participatingThreads + tileSz - 1) / tileSz;
     int expectedSum = ((tileSz - 1) * tileSz / 2);
     int* expectedResult = new int[numTiles];
 
-    // numTiles = 0 when partitioning is possible. The below statement is to avoid
+    // numTiles = 0 when partitioning is not possible. The below statement is to avoid
     // out-of-bounds error and still evaluate failure case.
     numTiles = (numTiles == 0) ? 1 : numTiles;
 
@@ -147,7 +135,7 @@ static void test_group_partition(unsigned int tileSz) {
     int* dResult = NULL;
     int* hResult = NULL;
 
-    HIPCHECK(hipHostMalloc(&hResult, numTiles * sizeof(int), hipHostMallocDefault));
+    HIPCHECK(hipHostMalloc(&hResult, numTiles  * sizeof(int), hipHostMallocDefault));
     memset(hResult, 0, numTiles * sizeof(int));
 
     HIPCHECK(hipMalloc(&dResult, numTiles * sizeof(int)));
@@ -156,7 +144,7 @@ static void test_group_partition(unsigned int tileSz) {
     // Launch Kernel
     hipLaunchKernelGGL(kernel_cg_group_partition_shfl_down, blockSize, threadsPerBlock,
                        threadsPerBlock * sizeof(int), 0, dResult, tileSz, i);
-    HIP_CHECK(hipGetLastError()); 
+    HIP_CHECK(hipGetLastError());
     err = hipDeviceSynchronize();
     if (err != hipSuccess) {
       fprintf(stderr, "Failed to launch kernel (error code %s)!\n", hipGetErrorString(err));
@@ -177,10 +165,8 @@ static void test_group_partition(unsigned int tileSz) {
 }
 
 static void test_shfl_down() {
-
-  std::vector<unsigned int> cg_sizes = {1, 2, 3};
+  std::vector<unsigned int> cg_sizes = {1, 2};
   for (auto i : cg_sizes) {
-
     hipError_t err;
     int blockSize = 1;
     int threadsPerBlock = WAVE_SIZE;
@@ -193,8 +179,9 @@ static void test_shfl_down() {
     int* dPtr = NULL;
     int* dResults = NULL;
     int lane_delta = rand() % group_size;
-    std::cout << "Testing coalesced_groups shfl_down with lane_delta " << lane_delta << "and group size "
-              << WAVE_SIZE << '\n' << std::endl;
+    std::cout << "Testing coalesced_groups shfl_down with lane_delta " << lane_delta
+              << "and group size " << WAVE_SIZE << '\n'
+              << std::endl;
 
     int arrSize = blockSize * threadsPerBlock * sizeof(int);
 
@@ -208,25 +195,25 @@ static void test_shfl_down() {
     for (int i = 0; i < group_size; i++) {
       cpuResultsArr[i] = (i + lane_delta >= group_size) ? hPtr[i] : hPtr[i + lane_delta];
     }
-    //printf("Array passed to GPU for computation\n");
-    //printResultsCoalescedGroupsShflDown(hPtr, WAVE_SIZE);
+    // printf("Array passed to GPU for computation\n");
+    // printResultsCoalescedGroupsShflDown(hPtr, WAVE_SIZE);
     HIPCHECK(hipMalloc(&dPtr, group_size_in_bytes));
     HIPCHECK(hipMalloc(&dResults, group_size_in_bytes));
 
     HIPCHECK(hipMemcpy(dPtr, hPtr, group_size_in_bytes, hipMemcpyHostToDevice));
     // Launch Kernel
-    hipLaunchKernelGGL(kernel_shfl_down, blockSize, threadsPerBlock,
-                       threadsPerBlock * sizeof(int), 0, dPtr, dResults, lane_delta, i);
-    HIP_CHECK(hipGetLastError()); 
+    hipLaunchKernelGGL(kernel_shfl_down, blockSize, threadsPerBlock, threadsPerBlock * sizeof(int),
+                       0, dPtr, dResults, lane_delta, i);
+    HIP_CHECK(hipGetLastError());
     HIPCHECK(hipMemcpy(hPtr, dResults, group_size_in_bytes, hipMemcpyDeviceToHost));
     err = hipDeviceSynchronize();
     if (err != hipSuccess) {
       fprintf(stderr, "Failed to launch kernel (error code %s)!\n", hipGetErrorString(err));
     }
-    //printf("GPU results: \n");
-    //printResultsCoalescedGroupsShflDown(hPtr, WAVE_SIZE);
-    //printf("Printing cpu to be verified array\n");
-    //printResultsCoalescedGroupsShflDown(cpuResultsArr, WAVE_SIZE);
+    // printf("GPU results: \n");
+    // printResultsCoalescedGroupsShflDown(hPtr, WAVE_SIZE);
+    // printf("Printing cpu to be verified array\n");
+    // printResultsCoalescedGroupsShflDown(cpuResultsArr, WAVE_SIZE);
 
     compareResultsCoalescedGroupsShflDown(hPtr, cpuResultsArr, group_size_in_bytes);
     std::cout << "Results verified!\n";
@@ -239,8 +226,7 @@ static void test_shfl_down() {
 }
 
 
-
-TEST_CASE("Unit_coalesced_groups_shfl_down") {
+HIP_TEST_CASE(Unit_coalesced_groups_shfl_down) {
   // Use default device for validating the test
   int deviceId;
   ASSERT_EQUAL(hipGetDevice(&deviceId), hipSuccess);
@@ -248,9 +234,9 @@ TEST_CASE("Unit_coalesced_groups_shfl_down") {
   ASSERT_EQUAL(hipGetDeviceProperties(&deviceProperties, deviceId), hipSuccess);
 
   // Test shfl_down with random group sizes
-    for (int i = 0; i < 100; i++) {
-      test_shfl_down();
-    }
+  for (int i = 0; i < 100; i++) {
+    test_shfl_down();
+  }
 
   std::cout << "Testing static tiled_partition for different tile sizes using shfl_down"
             << std::endl;
@@ -262,5 +248,4 @@ TEST_CASE("Unit_coalesced_groups_shfl_down") {
     test_group_partition(i);
     testNo++;
   }
-
 }

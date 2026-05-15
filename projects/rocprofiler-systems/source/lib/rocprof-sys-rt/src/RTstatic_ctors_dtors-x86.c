@@ -39,7 +39,7 @@ extern void (*DYNINSTctors_end)(void);
 extern void (*DYNINSTdtors_end)(void);
 
 extern void
-DYNINSTBaseInit();
+DYNINSTBaseInit(void);
 
 typedef struct
 {
@@ -66,7 +66,7 @@ typedef struct
  */
 
 void
-DYNINSTglobal_ctors_handler()
+DYNINSTglobal_ctors_handler(void)
 {
     void (**ctor)(void) = &DYNINSTctors_begin;
 
@@ -82,7 +82,7 @@ DYNINSTglobal_ctors_handler()
 }
 
 void
-DYNINSTglobal_dtors_handler()
+DYNINSTglobal_dtors_handler(void)
 {
     void (**dtor)(void) = &DYNINSTdtors_begin;
 
@@ -95,7 +95,7 @@ DYNINSTglobal_dtors_handler()
 }
 
 void
-DYNINSTglobal_irel_handler()
+DYNINSTglobal_irel_handler(void)
 {
     if(sizeof(long) == 8)
     {

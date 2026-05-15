@@ -1,44 +1,58 @@
 {
   "repositories": [
     {
+      "name": "amdsmi",
+      "url": "ROCm/amdsmi",
+      "branch": "amd-staging",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
+    },
+    {
       "name": "aqlprofile",
       "url": "ROCm/aqlprofile",
       "branch": "amd-staging",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true
+      "auto_subtree_push": false,
+      "monorepo_source_of_truth": true
     },
     {
       "name": "clr",
       "url": "ROCm/clr",
-      "branch": "amd-staging",
+      "branch": "develop",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
     },
     {
       "name": "hip",
       "url": "ROCm/hip",
-      "branch": "amd-staging",
+      "branch": "develop",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
     },
     {
       "name": "hipother",
       "url": "ROCm/hipother",
-      "branch": "amd-staging",
+      "branch": "develop",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
     },
     {
       "name": "hip-tests",
       "url": "ROCm/hip-tests",
-      "branch": "amd-staging",
+      "branch": "develop",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
     },
     {
       "name": "rdc",
@@ -46,7 +60,8 @@
       "branch": "amd-staging",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
     },
     {
       "name": "rocm-core",
@@ -54,7 +69,8 @@
       "branch": "amd-mainline",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
     },
     {
       "name": "rocminfo",
@@ -62,7 +78,8 @@
       "branch": "amd-staging",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
     },
     {
       "name": "rocm-smi-lib",
@@ -70,7 +87,8 @@
       "branch": "amd-staging",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
     },
     {
       "name": "rocprofiler",
@@ -78,7 +96,8 @@
       "branch": "amd-staging",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true
+      "auto_subtree_push": false,
+      "monorepo_source_of_truth": true
     },
     {
       "name": "rocprofiler-compute",
@@ -86,7 +105,8 @@
       "branch": "develop",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true
+      "auto_subtree_push": false,
+      "monorepo_source_of_truth": true
     },
     {
       "name": "rocprofiler-register",
@@ -94,7 +114,8 @@
       "branch": "amd-staging",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true
+      "auto_subtree_push": false,
+      "monorepo_source_of_truth": true
     },
     {
       "name": "rocprofiler-sdk",
@@ -102,7 +123,8 @@
       "branch": "amd-staging",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true
+      "auto_subtree_push": false,
+      "monorepo_source_of_truth": true
     },
     {
       "name": "rocprofiler-systems",
@@ -110,15 +132,17 @@
       "branch": "amd-staging",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true
+      "auto_subtree_push": false,
+      "monorepo_source_of_truth": true
     },
     {
       "name": "rocr-runtime",
       "url": "ROCm/ROCR-Runtime",
-      "branch": "amd-staging",
+      "branch": "develop",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
     },
     {
       "name": "roctracer",
@@ -126,7 +150,80 @@
       "branch": "amd-staging",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true
+      "auto_subtree_push": false,
+      "monorepo_source_of_truth": true
+    },
+    {
+      "name": "rocshmem",
+      "url": "ROCm/rocshmem",
+      "branch": "develop",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
+    },
+    {
+      "name": "rccl",
+      "url": "ROCm/rccl",
+      "branch": "develop",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
+    },
+    {
+      "name": "rccl-tests",
+      "url": "ROCm/rccl-tests",
+      "branch": "develop",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
+    },
+    {
+      "name": "rocdecode",
+      "url": "ROCm/rocDecode",
+      "branch": "develop",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
+    },
+    {
+      "name": "rocjpeg",
+      "url": "ROCm/rocJPEG",
+      "branch": "develop",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
+    },
+    {
+      "name": "rocr-debug-agent",
+      "url": "ROCm/rocr_debug_agent",
+      "branch": "amd-staging",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
+    },
+    {
+      "name": "rocdbgapi",
+      "url": "ROCm/ROCdbgapi",
+      "branch": "amd-staging",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
+    },
+    {
+      "name": "hipfile",
+      "url": "ROCm/hipFile",
+      "branch": "develop",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
     }
   ]
 }

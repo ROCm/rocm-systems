@@ -59,50 +59,40 @@
  *
  */
 
-struct _cl_platform_id
-{
-    cl_icd_dispatch *dispatch;
+struct _cl_platform_id {
+  cl_icd_dispatch* dispatch;
 };
 
-struct _cl_device_id
-{
-    cl_icd_dispatch *dispatch;
+struct _cl_device_id {
+  cl_icd_dispatch* dispatch;
 };
 
-struct _cl_context
-{
-    cl_icd_dispatch *dispatch;
+struct _cl_context {
+  cl_icd_dispatch* dispatch;
 };
 
-struct _cl_command_queue
-{
-    cl_icd_dispatch *dispatch;
+struct _cl_command_queue {
+  cl_icd_dispatch* dispatch;
 };
 
-struct _cl_mem
-{
-    cl_icd_dispatch *dispatch;
+struct _cl_mem {
+  cl_icd_dispatch* dispatch;
 };
 
-struct _cl_program
-{
-    cl_icd_dispatch *dispatch;
+struct _cl_program {
+  cl_icd_dispatch* dispatch;
 };
 
-struct _cl_kernel
-{
-    cl_icd_dispatch *dispatch;
+struct _cl_kernel {
+  cl_icd_dispatch* dispatch;
 };
 
-struct _cl_event
-{
-    cl_icd_dispatch *dispatch;
+struct _cl_event {
+  cl_icd_dispatch* dispatch;
 };
 
-struct _cl_sampler
-{
-    cl_icd_dispatch *dispatch;
+struct _cl_sampler {
+  cl_icd_dispatch* dispatch;
 };
 
-#endif // _ICD_DISPATCH_H_
-
+#endif  // _ICD_DISPATCH_H_

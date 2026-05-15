@@ -1,24 +1,9 @@
 /*
-Copyright (c) 2020 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
 #include <hip_test_common.hh>
 #include <hip/hip_cooperative_groups.h>
 
@@ -179,16 +164,16 @@ __global__ void test_kernel(unsigned int* atomic_val, unsigned int* array, uint3
       // until all of the other wavefronts have incremented the
       // per-loop atomic and hit the grid.sync()
 #if HT_AMD
-      while (__hip_atomic_load(&per_loop_atomic[i], __ATOMIC_RELAXED,
-            __HIP_MEMORY_SCOPE_AGENT) < (grid_blocks - 1)) {
+      while (__hip_atomic_load(&per_loop_atomic[i], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT) <
+             (grid_blocks - 1)) {
         __builtin_amdgcn_s_sleep(127);
       }
 
       // Give the other waves time to maybe go around the loop again
       // if the barrier has failed
       __builtin_amdgcn_s_sleep(127);
-#else // CUDA does not seem to need an ordered atomic load
-      while(per_loop_atomic[i] < (grid_blocks - 1)) {
+#else  // CUDA does not seem to need an ordered atomic load
+      while (per_loop_atomic[i] < (grid_blocks - 1)) {
       }
 #endif
     }
@@ -234,15 +219,15 @@ static void verify_recorded_values(unsigned int* recorded_values, uint32_t loops
       // Check the recorded value
       unsigned int recorded_value = recorded_values[grid_id * loops + i];
       REQUIRE(recorded_value == expected_value);
-      INFO("Mismatch at loop " << i << " for grid " << grid_id << ": expected "
-           << expected_value << ", got " << recorded_value);
+      INFO("Mismatch at loop " << i << " for grid " << grid_id << ": expected " << expected_value
+                               << ", got " << recorded_value);
     }
   }
 }
 
-template <typename F>
-static void test_cg_multi_grid_group_type(F kernel_func, int num_devices, int block_size,
-                                          bool specific_api_test) {
+template <typename F> static void test_cg_multi_grid_group_type(F kernel_func, int num_devices,
+                                                                int block_size,
+                                                                bool specific_api_test) {
   // Create a stream each device
   hipStream_t stream[MaxGPUs];
   for (int i = 0; i < num_devices; i++) {
@@ -378,7 +363,7 @@ static void test_cg_multi_grid_group_type(F kernel_func, int num_devices, int bl
   }
 }
 
-TEST_CASE("Unit_hipCGMultiGridGroupType_Basic") {
+HIP_TEST_CASE(Unit_hipCGMultiGridGroupType_Basic) {
   int num_devices = 0;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
   num_devices = min(num_devices, MaxGPUs);
@@ -389,8 +374,7 @@ TEST_CASE("Unit_hipCGMultiGridGroupType_Basic") {
   for (int i = 0; i < num_devices; i++) {
     HIP_CHECK(hipGetDeviceProperties(&device_properties, i));
     if (!device_properties.cooperativeMultiDeviceLaunch) {
-      HipTest::HIP_SKIP_TEST("Device doesn't support cooperative launch!");
-      return;
+      HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
     }
     max_threads_per_blk = min(max_threads_per_blk, device_properties.maxThreadsPerBlock);
   }
@@ -425,7 +409,7 @@ TEST_CASE("Unit_hipCGMultiGridGroupType_Basic") {
   }
 }
 
-TEST_CASE("Unit_hipCGMultiGridGroupType_Barrier") {
+HIP_TEST_CASE(Unit_hipCGMultiGridGroupType_Barrier) {
   int num_devices = 0;
   uint32_t loops = GENERATE(1, 2, 3, 4);
   uint32_t warps = GENERATE(4, 8, 16, 32);
@@ -433,16 +417,14 @@ TEST_CASE("Unit_hipCGMultiGridGroupType_Barrier") {
 
   HIP_CHECK(hipGetDeviceCount(&num_devices));
   if (num_devices < 2) {
-    HipTest::HIP_SKIP_TEST("Device number is < 2");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   std::vector<hipDeviceProp_t> device_properties(num_devices);
   for (int i = 0; i < num_devices; i++) {
     HIP_CHECK(hipGetDeviceProperties(&device_properties[i], i));
     if (!device_properties[i].cooperativeMultiDeviceLaunch) {
-      HipTest::HIP_SKIP_TEST("Device doesn't support cooperative launch!");
-      return;
+      HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
     }
   }
 
@@ -469,8 +451,8 @@ TEST_CASE("Unit_hipCGMultiGridGroupType_Barrier") {
   int max_blocks_per_sm = INT_MAX;
   for (int i = 0; i < num_devices; i++) {
     HIP_CHECK(hipSetDevice(i));
-    HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(
-        &max_blocks_per_sm_arr[i], test_kernel, num_threads_in_block, 0));
+    HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(&max_blocks_per_sm_arr[i], test_kernel,
+                                                           num_threads_in_block, 0));
     if (max_blocks_per_sm_arr[i] < max_blocks_per_sm) {
       max_blocks_per_sm = max_blocks_per_sm_arr[i];
     }
@@ -489,7 +471,7 @@ TEST_CASE("Unit_hipCGMultiGridGroupType_Barrier") {
   std::vector<hipStream_t> streams(num_devices);
   std::vector<unsigned int*> per_loop_atomic(num_devices);
   // Allocate and initialize grid-specific counters and values using hipHostMalloc
-  unsigned int* grid_counters, *recorded_values, *grid_values;
+  unsigned int *grid_counters, *recorded_values, *grid_values;
   HIP_CHECK(hipHostMalloc(&grid_counters, sizeof(unsigned int) * num_devices));
   HIP_CHECK(hipHostMalloc(&recorded_values, sizeof(unsigned int) * num_devices * loops));
   HIP_CHECK(hipHostMalloc(&grid_values, sizeof(unsigned int) * num_devices));

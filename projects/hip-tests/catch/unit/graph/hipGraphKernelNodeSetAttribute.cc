@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
@@ -33,13 +17,13 @@ constexpr std::array<hipAccessProperty, 3> kAccessProperties{
 static bool CompareAccessPolicyWindow(const hipKernelNodeAttrValue& lhs,
                                       const hipKernelNodeAttrValue& rhs) {
   return lhs.accessPolicyWindow.base_ptr == rhs.accessPolicyWindow.base_ptr &&
-      lhs.accessPolicyWindow.num_bytes == rhs.accessPolicyWindow.num_bytes &&
-      lhs.accessPolicyWindow.hitRatio == rhs.accessPolicyWindow.hitRatio &&
-      lhs.accessPolicyWindow.hitProp == rhs.accessPolicyWindow.hitProp &&
-      lhs.accessPolicyWindow.missProp == rhs.accessPolicyWindow.missProp;
+         lhs.accessPolicyWindow.num_bytes == rhs.accessPolicyWindow.num_bytes &&
+         lhs.accessPolicyWindow.hitRatio == rhs.accessPolicyWindow.hitRatio &&
+         lhs.accessPolicyWindow.hitProp == rhs.accessPolicyWindow.hitProp &&
+         lhs.accessPolicyWindow.missProp == rhs.accessPolicyWindow.missProp;
 }
 
-TEST_CASE("Unit_hipGraphKernelNodeSetAttribute_Positive_AccessPolicyWindow") {
+HIP_TEST_CASE(Unit_hipGraphKernelNodeSetAttribute_Positive_AccessPolicyWindow) {
   constexpr int N = 1024;
 
   const auto hit_prop = GENERATE(from_range(begin(kAccessProperties), end(kAccessProperties)));
@@ -93,7 +77,7 @@ TEST_CASE("Unit_hipGraphKernelNodeSetAttribute_Positive_AccessPolicyWindow") {
   HIP_CHECK(hipFree(C_d));
 }
 
-TEST_CASE("Unit_hipGraphKernelNodeSetAttribute_Positive_Cooperative") {
+HIP_TEST_CASE(Unit_hipGraphKernelNodeSetAttribute_Positive_Cooperative) {
   constexpr int N = 1024;
 
   int *A_d, *B_d, *C_d;
@@ -135,7 +119,7 @@ TEST_CASE("Unit_hipGraphKernelNodeSetAttribute_Positive_Cooperative") {
   HIP_CHECK(hipFree(C_d));
 }
 
-TEST_CASE("Unit_hipGraphKernelNodeSetAttribute_Negative_Parameters") {
+HIP_TEST_CASE(Unit_hipGraphKernelNodeSetAttribute_Negative_Parameters) {
   constexpr int N = 1024;
 
   int *A_d, *B_d, *C_d;

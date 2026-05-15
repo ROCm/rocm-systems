@@ -1,22 +1,8 @@
-/* Copyright (c) 2010 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "OCLPerfDeviceEnqueueEvent.h"
 
@@ -56,8 +42,7 @@ static unsigned int levelList[] = {
 };
 
 const static char* strKernel = {KERNEL_CODE(
-  \n __kernel void childKernel(__global uint* buf, uint level,
-                                clk_event_t wait_evt) {
+  \n __kernel void childKernel(__global uint* buf, uint level, clk_event_t wait_evt) {
   int idx = get_global_id(0);
   if (idx < 0) {
     buf[idx] = 0;
@@ -108,8 +93,7 @@ OCLPerfDeviceEnqueueEvent::OCLPerfDeviceEnqueueEvent() {
 
 OCLPerfDeviceEnqueueEvent::~OCLPerfDeviceEnqueueEvent() {}
 
-void OCLPerfDeviceEnqueueEvent::open(unsigned int test, char* units,
-                                     double& conversion,
+void OCLPerfDeviceEnqueueEvent::open(unsigned int test, char* units, double& conversion,
                                      unsigned int deviceId) {
   if (type_ == CL_DEVICE_TYPE_CPU) {
     return;
@@ -127,12 +111,11 @@ void OCLPerfDeviceEnqueueEvent::open(unsigned int test, char* units,
 
   size_t param_size = 0;
   char* strVersion = 0;
-  error_ = _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_VERSION, 0,
-                                     0, &param_size);
+  error_ = _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_VERSION, 0, 0, &param_size);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
   strVersion = new char[param_size];
-  error_ = _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_VERSION,
-                                     param_size, strVersion, 0);
+  error_ =
+      _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_VERSION, param_size, strVersion, 0);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
   if (strVersion[7] < '2') {
     failed_ = true;
@@ -140,16 +123,14 @@ void OCLPerfDeviceEnqueueEvent::open(unsigned int test, char* units,
   }
   delete strVersion;
 
-  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL,
-                                                 &error_);
+  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateProgramWithSource()  failed");
 
-  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId],
-                                    "-cl-std=CL2.0", NULL, NULL);
+  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId], "-cl-std=CL2.0", NULL, NULL);
   if (error_ != CL_SUCCESS) {
     char programLog[1024];
-    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId],
-                                    CL_PROGRAM_BUILD_LOG, 1024, programLog, 0);
+    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId], CL_PROGRAM_BUILD_LOG, 1024,
+                                    programLog, 0);
     printf("\n%s\n", programLog);
     fflush(stdout);
   }
@@ -163,8 +144,7 @@ void OCLPerfDeviceEnqueueEvent::open(unsigned int test, char* units,
 
   cl_mem buffer;
 
-  buffer = _wrapper->clCreateBuffer(context_, CL_MEM_ALLOC_HOST_PTR, 2048, NULL,
-                                    &error_);
+  buffer = _wrapper->clCreateBuffer(context_, CL_MEM_ALLOC_HOST_PTR, 2048, NULL, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateBuffer() failed");
   buffers_.push_back(buffer);
 
@@ -172,23 +152,19 @@ void OCLPerfDeviceEnqueueEvent::open(unsigned int test, char* units,
   const cl_queue_properties cprops[] = {
       CL_QUEUE_PROPERTIES,
       static_cast<cl_queue_properties>(CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE |
-                                       CL_QUEUE_ON_DEVICE_DEFAULT |
-                                       CL_QUEUE_ON_DEVICE),
+                                       CL_QUEUE_ON_DEVICE_DEFAULT | CL_QUEUE_ON_DEVICE),
       CL_QUEUE_SIZE, queueSize, 0};
-  deviceQueue_ = _wrapper->clCreateCommandQueueWithProperties(
-      context_, devices_[deviceId], cprops, &error_);
-  CHECK_RESULT((error_ != CL_SUCCESS),
-               "clCreateCommandQueueWithProperties() failed");
+  deviceQueue_ =
+      _wrapper->clCreateCommandQueueWithProperties(context_, devices_[deviceId], cprops, &error_);
+  CHECK_RESULT((error_ != CL_SUCCESS), "clCreateCommandQueueWithProperties() failed");
 #else
   skip_ = true;
-  testDescString =
-      "DeviceEnqueue NOT supported for < 2.0 builds. Test Skipped.";
+  testDescString = "DeviceEnqueue NOT supported for < 2.0 builds. Test Skipped.";
   return;
 #endif
 }
 
-static void CL_CALLBACK notify_callback(const char* errinfo,
-                                        const void* private_info, size_t cb,
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
                                         void* user_data) {}
 
 void OCLPerfDeviceEnqueueEvent::run(void) {
@@ -216,8 +192,8 @@ void OCLPerfDeviceEnqueueEvent::run(void) {
   error_ = _wrapper->clSetKernelArg(kernel_, 1, sizeof(unsigned int), &level);
   CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg() failed");
 
-  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1,
-                                            NULL, gws, lws, 0, NULL, NULL);
+  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1, NULL, gws, lws, 0,
+                                            NULL, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed");
 
   _wrapper->clFinish(cmdQueues_[_deviceId]);
@@ -229,8 +205,8 @@ void OCLPerfDeviceEnqueueEvent::run(void) {
   timer.Reset();
   timer.Start();
   for (unsigned int i = 0; i < repeats; i++) {
-    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1,
-                                              NULL, gws, lws, 0, NULL, NULL);
+    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1, NULL, gws, lws, 0,
+                                              NULL, NULL);
     CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed");
 
     _wrapper->clFinish(cmdQueues_[_deviceId]);
@@ -241,10 +217,9 @@ void OCLPerfDeviceEnqueueEvent::run(void) {
 
   _perfInfo = (float)(threads * repeats * level) / (float)(sec * 1000000.);
   char buf[256];
-  SNPRINTF(
-      buf, sizeof(buf),
-      "%5d threads spawning %2d threads, queue size %3dKB (Mdisp/s), level=%2d",
-      threads, lws_value, queueSize / 1024, level);
+  SNPRINTF(buf, sizeof(buf),
+           "%5d threads spawning %2d threads, queue size %3dKB (Mdisp/s), level=%2d", threads,
+           lws_value, queueSize / 1024, level);
   testDescString = buf;
 }
 
@@ -256,8 +231,7 @@ unsigned int OCLPerfDeviceEnqueueEvent::close(void) {
 
   if (deviceQueue_) {
     error_ = _wrapper->clReleaseCommandQueue(deviceQueue_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseCommandQueue failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseCommandQueue failed");
   }
   if (kernel2_) {
     error_ = _wrapper->clReleaseKernel(kernel2_);

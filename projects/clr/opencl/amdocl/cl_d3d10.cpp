@@ -1,22 +1,8 @@
-/* Copyright (c) 2009 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #ifdef _WIN32
 
@@ -396,7 +382,6 @@ RUNTIME_ENTRY(cl_int, clEnqueueReleaseD3D10ObjectsKHR,
 RUNTIME_EXIT
 
 
-
 /*! @}
  *  \addtogroup CL-D3D10 interop helper functions
  *  @{
@@ -412,7 +397,7 @@ RUNTIME_EXIT
 //      clCreateBufferFromD3D10ResourceAMD
 //
 cl_mem amd::clCreateBufferFromD3D10ResourceAMD(Context& amdContext, cl_mem_flags flags,
-                                          ID3D10Resource* pD3DResource, int* errcode_ret) {
+                                               ID3D10Resource* pD3DResource, int* errcode_ret) {
   // Verify pD3DResource is a buffer
   D3D10_RESOURCE_DIMENSION rType;
   pD3DResource->GetType(&rType);
@@ -491,8 +476,8 @@ cl_mem amd::clCreateImage1DFromD3D10ResourceAMD(
 //      clCreateImage2DFromD3D10ResourceAMD
 //
 cl_mem amd::clCreateImage2DFromD3D10ResourceAMD(Context& amdContext, cl_mem_flags flags,
-                                           ID3D10Resource* pD3DResource, UINT subresource,
-                                           int* errcode_ret) {
+                                                ID3D10Resource* pD3DResource, UINT subresource,
+                                                int* errcode_ret) {
   // Verify the resource is a 2D texture
   D3D10_RESOURCE_DIMENSION rType;
   pD3DResource->GetType(&rType);
@@ -527,8 +512,8 @@ cl_mem amd::clCreateImage2DFromD3D10ResourceAMD(Context& amdContext, cl_mem_flag
 //      clCreateImage2DFromD3D10ResourceAMD
 //
 cl_mem amd::clCreateImage3DFromD3D10ResourceAMD(Context& amdContext, cl_mem_flags flags,
-                                           ID3D10Resource* pD3DResource, UINT subresource,
-                                           int* errcode_ret) {
+                                                ID3D10Resource* pD3DResource, UINT subresource,
+                                                int* errcode_ret) {
   // Verify the resource is a 2D texture
   D3D10_RESOURCE_DIMENSION rType;
   pD3DResource->GetType(&rType);
@@ -588,8 +573,6 @@ void amd::SyncD3D10Objects(std::vector<amd::Memory*>& memObjects) {
   while (S_OK != query->GetData(&data, sizeof(BOOL), 0)) {
   }
 }
-
-
 
 
 #endif  //_WIN32

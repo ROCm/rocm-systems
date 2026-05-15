@@ -39,8 +39,8 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa/api_id.h>
 #include <rocprofiler-sdk/hsa/table_id.h>
+#include <rocprofiler-sdk/cxx/constants.hpp>
 
-#include <glog/logging.h>
 #include <hsa/amd_hsa_signal.h>
 #include <hsa/hsa.h>
 
@@ -62,7 +62,7 @@ namespace memory_allocation
 namespace
 {
 using context_t                = context::context;
-using external_corr_id_map_t   = std::unordered_map<const context_t*, rocprofiler_user_data_t>;
+using external_corr_id_map_t   = tracing::external_correlation_id_map_t;
 using region_to_agent_map      = std::unordered_map<hsa_region_t, rocprofiler_agent_id_t>;
 using memory_pool_to_agent_map = std::unordered_map<hsa_amd_memory_pool_t, rocprofiler_agent_id_t>;
 using region_to_agent_pair     = std::pair<region_to_agent_map*, rocprofiler_agent_id_t>;
@@ -324,8 +324,6 @@ get_next_dispatch()
     return _v;
 }
 
-constexpr auto null_rocp_agent_id = rocprofiler_agent_id_t{.handle = 0};
-
 struct memory_allocation_data
 {
     using timestamp_t     = rocprofiler_timestamp_t;
@@ -333,7 +331,7 @@ struct memory_allocation_data
     using buffered_data_t = rocprofiler_buffer_tracing_memory_allocation_record_t;
 
     rocprofiler_thread_id_t                   tid            = common::get_tid();
-    rocprofiler_agent_id_t                    agent          = null_rocp_agent_id;
+    rocprofiler_agent_id_t                    agent          = sdk::null_agent_id;
     uint64_t                                  size_allocated = 0;
     rocprofiler_address_t                     address        = {.handle = 0};
     uint64_t                                  start_ts       = 0;
@@ -414,7 +412,7 @@ get_agent(T val, IterateFunc iterate_func, CallbackFunc callback)
             }
         }
     }
-    return existing.count(val) == 0 ? null_rocp_agent_id : existing.at(val);
+    return existing.count(val) == 0 ? sdk::null_agent_id : existing.at(val);
 }
 
 rocprofiler_address_t
@@ -502,6 +500,14 @@ memory_allocation_impl(Args... args)
         // increase the reference count to prevent this correlation ID from being retired by another
         // service
         _data.correlation_id->add_ref_count();
+    }
+
+    if(!_data.correlation_id)
+    {
+        // During finalization - execute without tracing
+        return invoke(get_next_dispatch<TableIdx, OpIdx>(),
+                      std::move(_tied_args),
+                      std::make_index_sequence<N>{});
     }
 
     auto thr_id = _data.correlation_id->thread_idx;
@@ -628,6 +634,14 @@ memory_free_impl(Args... args)
         // increase the reference count to prevent this correlation ID from being retired by another
         // service
         _data.correlation_id->add_ref_count();
+    }
+
+    if(!_data.correlation_id)
+    {
+        // During finalization - execute without tracing
+        return invoke(get_next_dispatch<TableIdx, OpIdx>(),
+                      std::move(_tied_args),
+                      std::make_index_sequence<N>{});
     }
 
     auto thr_id = _data.correlation_id->thread_idx;

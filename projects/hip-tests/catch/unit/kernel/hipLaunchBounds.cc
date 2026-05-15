@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
 Testcase Scenarios : hipLaunchBounds_With_maxThreadsPerBlock
@@ -37,23 +24,19 @@ Testcase Scenarios : hipLaunchBounds_With_maxThreadsPerBlock_blocksPerCU
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
 
-__global__ void
-__launch_bounds__(128, 2)
-MyKernel(int N, int *x, int val) {
+__global__ void __launch_bounds__(128, 2) MyKernel(int N, int* x, int val) {
   for (int i = 0; i < N; i++) {
     x[i] = val;
   }
 }
 
-__global__ void
-__launch_bounds__(64)
-MyKernel_2(int N, int *x, int val) {
+__global__ void __launch_bounds__(64) MyKernel_2(int N, int* x, int val) {
   for (int i = 0; i < N; i++) {
     x[i] = val;
   }
 }
 
-static bool verify(int N, int *x, int val) {
+static bool verify(int N, int* x, int val) {
   for (int i = 0; i < N; i++) {
     if (x[i] != val) {
       return false;
@@ -62,12 +45,12 @@ static bool verify(int N, int *x, int val) {
   return true;
 }
 
-TEST_CASE("Unit_hipLaunchBounds_With_maxThreadsPerBlock_Check") {
+HIP_TEST_CASE(Unit_hipLaunchBounds_With_maxThreadsPerBlock_Check) {
   constexpr size_t N = 10000;
   hipError_t ret;
-  int *x;
+  int* x;
 
-  HIP_CHECK(hipMallocManaged(&x, N*sizeof(int)));
+  HIP_CHECK(hipMallocManaged(&x, N * sizeof(int)));
   REQUIRE(x != nullptr);
 
   SECTION("Passing threadsPerBlock same as kernel launch_bounds") {
@@ -102,12 +85,12 @@ TEST_CASE("Unit_hipLaunchBounds_With_maxThreadsPerBlock_Check") {
   HIP_CHECK(hipFree(x));
 }
 
-TEST_CASE("Unit_hipLaunchBounds_With_maxThreadsPerBlock_blocksPerCU_Check") {
+HIP_TEST_CASE(Unit_hipLaunchBounds_With_maxThreadsPerBlock_blocksPerCU_Check) {
   constexpr size_t N = 10000;
   hipError_t ret;
-  int *x;
+  int* x;
 
-  HIP_CHECK(hipMallocManaged(&x, N*sizeof(int)));
+  HIP_CHECK(hipMallocManaged(&x, N * sizeof(int)));
   REQUIRE(x != nullptr);
 
   SECTION("Passing threadsPerBlock same as kernel launch_bounds") {
@@ -170,4 +153,3 @@ TEST_CASE("Unit_hipLaunchBounds_With_maxThreadsPerBlock_blocksPerCU_Check") {
 
   HIP_CHECK(hipFree(x));
 }
-

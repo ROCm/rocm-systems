@@ -1,148 +1,183 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
-##############################################################################
-
+import argparse
 import copy
+from collections import OrderedDict
+from collections.abc import Hashable
 from pathlib import Path
+from typing import Any, Optional
+
+import pandas as pd
 
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from rocprof_compute_tui.utils.tui_utils import (
-    get_top_kernels_and_dispatch_ids,
+    get_top_kernels,
     process_panels_to_dataframes,
 )
 from utils import file_io, parser, schema
-from utils.kernel_name_shortener import kernel_name_shortener
-from utils.logger import console_error, demarcate
+from utils.logger import console_error, console_log, demarcate
 
 
 class tui_analysis(OmniAnalyze_Base):
-    def __init__(self, args, supported_archs, path):
+    def __init__(
+        self, args: argparse.Namespace, supported_archs: dict[str, str], path: str
+    ) -> None:
         super().__init__(args, supported_archs)
-        self.path = str(path)
-        self.arch = None
-        self.raw_dfs = {}
-        self.kernel_dfs = {}
+        self.path = path
+        self.args = self.get_args()
 
-    # -----------------------
-    # Required child methods
-    # -----------------------
     @demarcate
-    def pre_processing(self):
+    def pre_processing(self) -> None:
         self._profiling_config = file_io.load_profiling_config(self.path)
-
         self._runs = self.initalize_runs()
 
-        if self.get_args().random_port:
+        if self.args.random_port:
             console_error("--gui flag is required to enable --random-port")
 
-        self._runs[self.path].raw_pmc = file_io.create_df_pmc(
+        workload = self._runs[self.path]
+
+        # Initialize per-kernel dataframes
+        self.raw_dfs: dict[str, Any] = {}
+
+        if self.pc_sampling_only():
+            console_log(
+                "analysis",
+                "Only PC sampling and kernel tracing data"
+                " available, metrics calculation will be"
+                " skipped",
+            )
+            workload.raw_pmc = file_io.process_pc_sampling_kernel_trace(self.path)
+            workload.raw_pmc = workload.raw_pmc.rename(
+                columns={"Dispatch_Id": "Dispatch_ID"}
+            )
+            # Create multi index dataframe with key pmc_perf
+            workload.raw_pmc = pd.concat([workload.raw_pmc], keys=["pmc_perf"], axis=1)
+
+            kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
+                df_in=workload.raw_pmc,
+                raw_data_dir=self.path,
+                filter_gpu_ids=workload.filter_gpu_ids,
+                filter_dispatch_ids=workload.filter_dispatch_ids,
+                filter_nodes=workload.filter_nodes,
+                time_unit=self.args.time_unit,
+                kernel_verbose=self.args.kernel_verbose,
+            )
+            workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
+            workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
+
+            parser.load_non_mertrics_table(
+                workload=workload,
+                dir_path=self.path,
+                args=self.args,
+            )
+            parser.nullify_unevaluated_metric_values(workload)
+            return
+
+        # Join pmc_perf_*.csv or results_*.csv files if needed (Phase 2)
+        self.join_workload_csvs(Path(self.path))
+
+        workload.raw_pmc = file_io.create_df_pmc(
             self.path,
-            self.get_args().nodes,
-            self.get_args().spatial_multiplexing,
-            self.get_args().kernel_verbose,
-            self.get_args().verbose,
+            self.args.nodes,
+            self.args.spatial_multiplexing,
+            self.args.kernel_verbose,
+            self.args.verbose,
             self._profiling_config,
         )
 
-        if self.get_args().spatial_multiplexing:
-            self._runs[self.path].raw_pmc = self.spatial_multiplex_merge_counters(
-                self._runs[self.path].raw_pmc
-            )
+        if self.args.spatial_multiplexing:
+            workload.raw_pmc = self.spatial_multiplex_merge_counters(workload.raw_pmc)
 
-        file_io.create_df_kernel_top_stats(
-            df_in=self._runs[self.path].raw_pmc,
+        kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
+            df_in=workload.raw_pmc,
             raw_data_dir=self.path,
-            filter_gpu_ids=self._runs[self.path].filter_gpu_ids,
-            filter_dispatch_ids=self._runs[self.path].filter_dispatch_ids,
-            filter_nodes=self._runs[self.path].filter_nodes,
-            time_unit=self.get_args().time_unit,
-            max_stat_num=self.get_args().max_stat_num,
-            kernel_verbose=self.get_args().kernel_verbose,
+            filter_gpu_ids=workload.filter_gpu_ids,
+            filter_dispatch_ids=workload.filter_dispatch_ids,
+            filter_nodes=workload.filter_nodes,
+            time_unit=self.args.time_unit,
+            kernel_verbose=self.args.kernel_verbose,
+        )
+        workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
+        workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
+
+        parser.load_non_mertrics_table(
+            workload=workload,
+            dir_path=self.path,
+            args=self.args,
         )
 
-        kernel_name_shortener(
-            self._runs[self.path].raw_pmc, self.get_args().kernel_verbose
-        )
+        # Group raw PMC data by kernel name
+        kernel_groups = workload.raw_pmc.pmc_perf.groupby("Kernel_Name")
 
-        # 1. load top kernel
-        parser.load_kernel_top(
-            workload=self._runs[self.path], dir=self.path, args=self.get_args()
-        )
+        for kernel_name, group in kernel_groups:
+            # Get all dispatch indices for this kernel
+            dispatch_indices = group.index.tolist()
 
-        # 2. load table data for each kernel
-        self.raw_dfs.clear()
-        for idx in self._runs[self.path].raw_pmc.index:
-            kernel_df = self._runs[self.path].raw_pmc.loc[[idx]]
-            kernel_name = kernel_df.pmc_perf["Kernel_Name"].loc[idx]
-            this_dfs = copy.deepcopy(self._runs[self.path].dfs)
+            # Extract raw PMC data for all dispatches of this kernel
+            kernel_raw_pmc = workload.raw_pmc.loc[dispatch_indices]
+
+            kernel_dfs = copy.deepcopy(workload.dfs)
+
+            # Evaluate metrics aggregated across all dispatches of this kernel
             parser.eval_metric(
-                this_dfs,
-                self._runs[self.path].dfs_type,
-                self._runs[self.path].sys_info.iloc[0],
-                kernel_df,
-                self.get_args().debug,
+                kernel_dfs,
+                workload.dfs_type,
+                workload.sys_info.iloc[0],
+                workload.roofline_peaks,
+                kernel_raw_pmc,
+                self.args.debug,
                 self._profiling_config,
             )
 
-            self.raw_dfs[kernel_name] = this_dfs
+            self.raw_dfs[str(kernel_name)] = kernel_dfs
 
-    def initalize_runs(self, normalization_filter=None):
-        sysinfo_path = Path(self.path)
-        sys_info = file_io.load_sys_info(sysinfo_path.joinpath("sysinfo.csv"))
-        self.arch = sys_info.iloc[0]["gpu_arch"]
-        args = self.get_args()
+    def initalize_runs(
+        self, normalization_filter: Optional[str] = None
+    ) -> OrderedDict[str, schema.Workload]:
+        sys_info = file_io.load_sys_info(str(Path(self.path) / "sysinfo.csv"))
+        arch = sys_info.iloc[0]["gpu_arch"]
+
         self.generate_configs(
-            self.arch,
-            args.config_dir,
-            args.list_stats,
-            args.filter_metrics,
+            arch,
+            self.args.config_dir,
+            self.args.list_stats,
+            self.args.filter_metrics,
             sys_info.iloc[0],
         )
-
         self.load_options(normalization_filter)
 
         w = schema.Workload()
-        w.sys_info = file_io.load_sys_info(sysinfo_path.joinpath("sysinfo.csv"))
-        mspec = self.get_socs()[self.arch]._mspec
-        if args.specs_correction:
-            w.sys_info = parser.correct_sys_info(mspec, args.specs_correction)
+        w.sys_info = (
+            parser.correct_sys_info(
+                self.get_socs()[arch]._mspec, self.args.specs_correction
+            )
+            if self.args.specs_correction
+            else sys_info
+        )
+        w.roofline_peaks = pd.DataFrame()
         w.avail_ips = w.sys_info["ip_blocks"].item().split("|")
-        w.dfs = copy.deepcopy(self._arch_configs[self.arch].dfs)
-        w.dfs_type = self._arch_configs[self.arch].dfs_type
-        self._runs[self.path] = w
+        w.dfs = copy.deepcopy(self._arch_configs[arch].dfs)
+        w.dfs_type = self._arch_configs[arch].dfs_type
 
+        self._runs[self.path] = w
         return self._runs
 
-    @demarcate
-    def run_kernel_analysis(self):
-        self.kernel_dfs.clear()
-        for kernel_name, df in self.raw_dfs.items():
-            self.kernel_dfs[kernel_name] = process_panels_to_dataframes(
-                self.get_args(), df, self._arch_configs[self.arch], roof_plot=None
-            )
-        return self.kernel_dfs
+    def run_kernel_analysis(self) -> dict[str, dict[str, Any]]:
+        """Generate per-kernel analysis keyed by kernel_name."""
+        arch = list(self._arch_configs.keys())[0]
 
-    @demarcate
-    def run_top_kernel(self):
-        return get_top_kernels_and_dispatch_ids(self._runs)
+        # Convert per-kernel raw_dfs to display format
+        result: dict[str, dict[str, Any]] = {}
+        for kernel_name, kernel_dfs in self.raw_dfs.items():
+            result[kernel_name] = process_panels_to_dataframes(
+                self.args,
+                kernel_dfs,
+                self._arch_configs[arch],
+                self._profiling_config,
+            )
+
+        return result
+
+    def run_top_kernel(self) -> Optional[list[dict[Hashable, Any]]]:
+        return get_top_kernels(self._runs)

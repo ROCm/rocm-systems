@@ -35,28 +35,28 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
 
 /**
  * error
- * constant function, Prints error messages 
+ * constant function, Prints error messages
  * @param errorMsg char* message
  */
-void error(const char* errorMsg);	
+void error(const char* errorMsg);
 
 /**
  * error
- * constant function, Prints error messages 
+ * constant function, Prints error messages
  * @param errorMsg std::string message
  */
 void error(std::string errorMsg);
 
 /**
  * expectedError
- * constant function, Prints error messages 
+ * constant function, Prints error messages
  * @param errorMsg char* message
  */
-void expectedError(const char* errorMsg);	
+void expectedError(const char* errorMsg);
 
 /**
  * expectedError
- * constant function, Prints error messages 
+ * constant function, Prints error messages
  * @param errorMsg string message
  */
 void expectedError(std::string errorMsg);
@@ -69,19 +69,19 @@ void expectedError(std::string errorMsg);
  * @param length number of values to compare
  * @param epsilon errorWindow
  */
-bool compare(const float *refData, const float *data, 
-        const int length, const float epsilon = 1e-6f); 
-bool compare(const double *refData, const double *data, 
-        const int length, const double epsilon = 1e-6); 
+bool compare(const float *refData, const float *data,
+        const int length, const float epsilon = 1e-6f);
+bool compare(const double *refData, const double *data,
+        const int length, const double epsilon = 1e-6);
 
 /**
  * printArray
  * displays a array on std::out
  */
-template<typename T> 
+template<typename T>
 void printArray(
      const std::string header,
-     const T * data, 
+     const T * data,
      const int width,
      const int height);
 
@@ -90,37 +90,37 @@ void printArray(
  * fillRandom
  * fill array with random values
  */
-template<typename T> 
+template<typename T>
 int fillRandom(
-     T * arrayPtr, 
+     T * arrayPtr,
      const int width,
      const int height,
      const T rangeMin,
      const T rangeMax,
-     unsigned int seed=123);	
-  
+     unsigned int seed=123);
+
 /**
  * fillPos
  * fill the specified positions
  */
-template<typename T> 
+template<typename T>
 int fillPos(
-     T * arrayPtr, 
+     T * arrayPtr,
      const int width,
      const int height);
-  
+
 /**
  * fillConstant
  * fill the array with constant value
  */
-template<typename T> 
+template<typename T>
 int fillConstant(
-     T * arrayPtr, 
+     T * arrayPtr,
      const int width,
      const int height,
      const T val);
 
-  
+
 /**
  * roundToPowerOf2
  * rounds to a power of 2
@@ -134,16 +134,16 @@ T roundToPowerOf2(T val);
  */
 template<typename T>
 int isPowerOf2(T val);
-  
+
 /**
  * checkVal
- * Set default(isAPIerror) parameter to false 
- * if checkVaul is used to check otherthan OpenCL API error code 
+ * Set default(isAPIerror) parameter to false
+ * if checkVaul is used to check otherthan OpenCL API error code
  */
-template<typename T> 
+template<typename T>
 bool checkVal(
-  T input, 
-  T reference, 
+  T input,
+  T reference,
   std::string message, bool isAPIerror = true);
 
 /**
@@ -151,7 +151,7 @@ bool checkVal(
  * convert a T type to string
  */
 template<typename T>
-std::string toString(T t, std::ios_base & (*r)(std::ios_base&)); 
+std::string toString(T t, std::ios_base & (*r)(std::ios_base&));
 
 
 

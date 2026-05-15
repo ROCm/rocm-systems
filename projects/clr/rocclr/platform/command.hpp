@@ -1,22 +1,8 @@
-/* Copyright (c) 2010 - 2024 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #ifndef COMMAND_HPP_
 #define COMMAND_HPP_
@@ -67,7 +53,7 @@ class Event : public RuntimeObject {
   typedef void(CL_CALLBACK* CallBackFunction)(cl_event event, int32_t command_exec_status,
                                               void* user_data);
 
-  struct CallBackEntry : public HeapObject {
+  struct CallBackEntry {
     struct CallBackEntry* next_;  //!< the next entry in the callback list.
 
     std::atomic<CallBackFunction> callback_;  //!< callback function pointer.
@@ -83,26 +69,24 @@ class Event : public RuntimeObject {
 
  private:
   Monitor lock_;
-  Monitor notify_lock_;   //!< Lock used for notification with direct dispatch only
+  mutable Monitor notify_lock_;  //!< Lock used for notification with direct dispatch only
 
   std::atomic<CallBackEntry*> callbacks_;  //!< linked list of callback entries.
   std::atomic<int32_t> status_;            //!< current execution status.
   std::atomic_flag notified_;              //!< Command queue was notified
 
-  void*  hw_event_;                        //!< HW event ID associated with SW event
-  Event* notify_event_;                    //!< Notify event, which should contain HW signal
-  const Device* device_;                   //!< Device, this event associated with
-
-  std::atomic<int32_t> event_entry_scope_; //!< Command entry scope
-                                           //!< 2 - system scope, 1 - device scope,
-                                           //!< 0 - ignore, -1 - invalid
-
+  void* hw_event_;        //!< HW event ID associated with SW event
+  std::atomic<Event*> notify_event_;   //!< Notify event, which should contain HW signal
+  std::atomic<int32_t> event_entry_scope_;  //!< Command entry scope
+                                            //!< 2 - system scope, 1 - device scope,
+                                            //!< 0 - ignore, -1 - invalid
+  std::vector<void*> dep_hw_events_;  //!< Dependent HW events associated with SW event
  protected:
   static const EventWaitList nullWaitList;
+  const Device* device_;  //!< Device, this event associated with
 
   struct ProfilingInfo {
-    ProfilingInfo(bool enabled = false)
-      : enabled_(enabled), marker_ts_(false) {
+    ProfilingInfo(bool enabled = false) : enabled_(enabled), marker_ts_(false) {
       if (enabled) {
         clear();
         correlation_id_ = amd::activity_prof::correlation_id;
@@ -115,17 +99,17 @@ class Event : public RuntimeObject {
     uint64_t end_;
 
     uint64_t correlation_id_;
-    bool enabled_;        //!< Profiling enabled for the wave limiter
-    bool marker_ts_;      //!< TS marker
-    bool batch_flush_ = true; //!< Command can flush the batch in direct dispatch mode
+    bool enabled_;             //!< Profiling enabled for the wave limiter
+    bool marker_ts_;           //!< TS marker
+    bool batch_flush_ = true;  //!< Command can flush the batch in direct dispatch mode
 
-   void clear() {
+    void clear() {
       queued_ = 0ULL;
       submitted_ = 0ULL;
       start_ = 0ULL;
       end_ = 0ULL;
       correlation_id_ = 0ULL;
-     }
+    }
   } profilingInfo_;
 
   //! Construct a new event.
@@ -193,7 +177,7 @@ class Event : public RuntimeObject {
 
   //! Signal all threads waiting on this event.
   void signal() {
-    ScopedLock lock(lock_);// Unnecessary
+    ScopedLock lock(lock_);  // Unnecessary
     lock_.notifyAll();
   }
 
@@ -231,32 +215,77 @@ class Event : public RuntimeObject {
   void setCommandEntryScope(int32_t scope) {
     event_entry_scope_.store(scope, std::memory_order_relaxed);
   }
+
+  //! Set dependent hardware events
+  void setDepHwEvents(const std::vector<void*> &hw_events) {
+    dep_hw_events_ = hw_events;
+  }
+
+  //! Get dependent hardware events
+  const std::vector<void*>& getDepHwEvents() const {
+    return dep_hw_events_;
+  }
+
+  //! Add a dependent hardware event
+  void addDepHwEvent(void* hw_event) {
+    dep_hw_events_.push_back(hw_event);
+  }
+
+  //! Clear dependent hardware events
+  void clearDepHwEvents() {
+    dep_hw_events_.clear();
+  }
 };
 
 union CopyMetadata {
+  enum CopyEnginePreference { NONE = 0, BLIT = 1, SDMA = 2, CPDMA = 3 };
+  //! Source access ordering for batch copies
+  enum SrcAccessOrder {
+    kSrcAccessOrderStream = 0,         //!< Access to source must be in stream order
+    kSrcAccessOrderDuringApiCall = 1,  //!< Source access completes before API returns
+    kSrcAccessOrderAny = 2             //!< Source access can be out of stream order
+  };
 
-  enum CopyEnginePreference {
-    NONE = 0,
-    BLIT = 1,
-    SDMA = 2,
-    CPDMA = 3
+  enum CopyOpType {
+    kCopyOpLinear          = 0,
+    kCopyOpBroadcast       = 1,
+    kCopyOpSwap            = 2,
+    kCopyOpIndirectSrc     = 3,
+    kCopyOpIndirectDst     = 4,
+    kCopyOpIndirectSrcDst  = 5,
   };
 
   struct {
     uint32_t isAsync_ : 1;
     uint32_t copyEnginePreference_ : 2;
+    uint32_t srcAccessOrder_ : 2;       //!< Source access ordering for batch copies
+    uint32_t preferCE_ : 1;             //!< Prefer compute engine over SDMA
+    uint32_t copyOpType_ : 3;           //!< Operation type (CopyOpType)
+    uint32_t reserved_ : 23;            //!< Reserved for future use
   };
   uint32_t flags_;
-  CopyMetadata() : flags_(0){}
+  CopyMetadata() : flags_(0) {}
   CopyMetadata(bool isAsync, CopyEnginePreference copyEnginePreference)
       : isAsync_(isAsync),
-        copyEnginePreference_(copyEnginePreference) {}
+        copyEnginePreference_(copyEnginePreference),
+        srcAccessOrder_(kSrcAccessOrderStream),
+        preferCE_(0),
+        copyOpType_(kCopyOpLinear),
+        reserved_(0) {}
+  CopyMetadata(bool isAsync, CopyEnginePreference copyEnginePreference,
+               SrcAccessOrder srcAccessOrder)
+      : isAsync_(isAsync),
+        copyEnginePreference_(copyEnginePreference),
+        srcAccessOrder_(srcAccessOrder),
+        preferCE_(0),
+        copyOpType_(kCopyOpLinear),
+        reserved_(0) {}
 };
 
 // Interface to callback to allocate kernel args from the graph kernel arg pool.
 class GraphKernelArgManager {
  public:
-  virtual address AllocKernArg(size_t size, size_t alignment) = 0;
+  virtual address AllocKernArg(size_t size, size_t alignment, int devId) = 0;
 };
 
 /*! \brief An operation that is submitted to a command queue.
@@ -268,7 +297,7 @@ class GraphKernelArgManager {
  */
 class Command : public Event {
  private:
-  static SysmemPool<ComputeCommand> *command_pool_;  //!< Pool of active commands
+  static SysmemPool<ComputeCommand>* command_pool_;  //!< Pool of active commands
   HostQueue* queue_;               //!< The command queue this command is enqueue into
   Command* next_;                  //!< Next GPU command in the queue list
   Command* batch_head_ = nullptr;  //!< The head of the batch commands
@@ -276,13 +305,13 @@ class Command : public Event {
   std::vector<void*> data_;
   const Event* waitingEvent_;  //!< Waiting event associated with the marker
 
-  bool packetCapturing_ = false;           //!< Flag to enable/disable graph gpu packet capture
+  bool packetCapturing_ = false;       //!< Flag to enable/disable graph gpu packet capture
   std::vector<uint8_t*>* gpuPackets_;  //!< GPU packets captured when graph capturing is enabled
   GraphKernelArgManager* graphKernArgMgr_ = nullptr;  //!< KernelMgr for graph
   address kernArgOffset_ = nullptr;  //!< KernelArg buffer to used when graph capturing is enabled
-  std::string* capturedKernelName_ = nullptr;  //!< Kenrnel under capture
+  const std::string** capturedKernelName_ = nullptr;  //!< Kernel under capture
  protected:
-  bool cpu_wait_ = false;         //!< If true, then the command was issued for CPU/GPU sync
+  bool cpu_wait_ = false;  //!< If true, then the command was issued for CPU/GPU sync
 
   //! The Events that need to complete before this command is submitted.
   EventWaitList eventWaitList_;
@@ -292,8 +321,7 @@ class Command : public Event {
   uint32_t commandWaitBits_;
 
   //! Construct a new command of the given OpenCL type.
-  Command(HostQueue& queue, cl_command_type type,
-          const EventWaitList& eventWaitList = nullWaitList,
+  Command(HostQueue& queue, cl_command_type type, const EventWaitList& eventWaitList = nullWaitList,
           uint32_t commandWaitBits = 0, const Event* waitingEvent = nullptr);
 
   //! Construct a new command of the given OpenCL type.
@@ -328,18 +356,18 @@ class Command : public Event {
 
   //! Sets AQL capture state, aql packet to capture and where to copy kernArgs
   void setPktCapturingState(bool state, std::vector<uint8_t*>* packet,
-                         amd::GraphKernelArgManager* graphKernArgMgr,
-                         std::string* capturedKernelName) {
+                            amd::GraphKernelArgManager* graphKernArgMgr,
+                            const std::string** capturedKernelName) {
     packetCapturing_ = state;
     gpuPackets_ = packet;
     graphKernArgMgr_ = graphKernArgMgr;
     capturedKernelName_ = capturedKernelName;
   }
 
-  //! Updates kernel name with the captured kernel name
+  //! Updates kernel name with the captured kernel name (stores pointer, no copy)
   void SetKernelName(const std::string& kernelName) {
     if (capturedKernelName_ != nullptr) {
-      *capturedKernelName_ = kernelName;
+      *capturedKernelName_ = &kernelName;
     }
   }
 
@@ -350,8 +378,8 @@ class Command : public Event {
     return packet;
   }
 
-  address getKernArgOffset(int size, int alignment) {
-    return graphKernArgMgr_->AllocKernArg(size, alignment);
+  address getGraphKernArg(int size, int alignment, int devId) {
+    return graphKernArgMgr_->AllocKernArg(size, alignment, devId);
   }
 
   //! Overload new/delete for fast commands allocation/destruction
@@ -373,6 +401,7 @@ class Command : public Event {
 
   //! Update with the list of events this command needs to wait on before dispatch
   void updateEventWaitList(const EventWaitList& waitList) {
+    eventWaitList_.reserve(eventWaitList_.size() + waitList.size());
     for (auto event : waitList) {
       event->retain();
       eventWaitList_.push_back(event);
@@ -396,6 +425,12 @@ class Command : public Event {
 
   //! Release the resources associated with this event.
   virtual void releaseResources();
+
+  //! Empty function for pinned memory check
+  virtual bool IsMemoryPinned() const { return false; }
+
+  //! Empty function for release of pinned memory
+  virtual void ReleasePinnedMemory() {}
 
   //! Empty function for adding pinned memory
   virtual void AddPinnedMemory(Memory* pinned) {}
@@ -427,7 +462,7 @@ class Command : public Event {
 };
 
 class UserEvent : public Command {
-  const Context&        context_;     //!< OCL context associated with the event
+  const Context& context_;            //!< OCL context associated with the event
   std::vector<Command*> dependents_;  //!< Commands, which depends on this user event
 
  public:
@@ -460,9 +495,7 @@ class UserEvent : public Command {
   }
 
   //! Adds dependent commands for the user event
-  void AddDependent(Command* command) {
-    dependents_.push_back(command);
-  }
+  void AddDependent(Command* command) { dependents_.push_back(command); }
 
   virtual void submit(device::VirtualDevice& device) { ShouldNotCallThis(); }
 
@@ -498,23 +531,34 @@ class NDRangeContainer;
 class OneMemoryArgCommand : public Command {
  protected:
   Memory* memory_;
-  std::vector<Memory*>  pinned_memory_;   //!< Pinned memory object
+  std::vector<Memory*> pinned_memory_;  //!< Pinned memory object
 
  public:
   OneMemoryArgCommand(HostQueue& queue, cl_command_type type, const EventWaitList& eventWaitList,
                       Memory& memory)
       : Command(queue, type, eventWaitList, AMD_SERIALIZE_COPY), memory_(&memory) {
-    memory_->retain();
+    if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+      memory_->retain();
+    }
   }
 
-  virtual void releaseResources() {
-    memory_->release();
-    DEBUG_ONLY(memory_ = NULL);
+  virtual void releaseResources() override {
+    if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+      memory_->release();
+    }
     Command::releaseResources();
+    ReleasePinnedMemory();
+  }
+
+  //! Release all pinned memory for this command
+  virtual void ReleasePinnedMemory() override {
     for (auto it : pinned_memory_) {
       it->release();
     }
+    pinned_memory_.clear();
   }
+  //! Release all pinned memory for this command
+  virtual bool IsMemoryPinned() const override { return !pinned_memory_.empty(); }
 
   //! Adds pinned memory, used in this command for later release
   virtual void AddPinnedMemory(Memory* pinned) override { pinned_memory_.push_back(pinned); }
@@ -535,14 +579,17 @@ class TwoMemoryArgsCommand : public Command {
       : Command(queue, type, eventWaitList, AMD_SERIALIZE_COPY),
         memory1_(&memory1),
         memory2_(&memory2) {
-    memory1_->retain();
-    memory2_->retain();
+    if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+      memory1_->retain();
+      memory2_->retain();
+    }
   }
 
   virtual void releaseResources() {
-    memory1_->release();
-    memory2_->release();
-    DEBUG_ONLY(memory1_ = memory2_ = NULL);
+    if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+      memory1_->release();
+      memory2_->release();
+    }
     Command::releaseResources();
   }
 
@@ -572,6 +619,7 @@ class ReadMemoryCommand : public OneMemoryArgCommand {
   BufferRect bufRect_;   //!< Buffer rectangle information
   BufferRect hostRect_;  //!< Host memory rectangle information
   amd::CopyMetadata copyMetadata_;
+
  public:
   //! Construct a new ReadMemoryCommand
   ReadMemoryCommand(HostQueue& queue, cl_command_type cmdType, const EventWaitList& eventWaitList,
@@ -661,8 +709,8 @@ class ReadMemoryCommand : public OneMemoryArgCommand {
     hostRect_ = hostRect;
   }
   //! Updates command parameters
-  void setParams(Memory& memory, Coord3D origin, Coord3D size, void* hostPtr,
-                 size_t rowPitch = 0, size_t slicePitch = 0) {
+  void setParams(Memory& memory, Coord3D origin, Coord3D size, void* hostPtr, size_t rowPitch = 0,
+                 size_t slicePitch = 0) {
     memory_ = &memory;
     origin_ = origin;
     size_ = size;
@@ -706,7 +754,7 @@ class WriteMemoryCommand : public OneMemoryArgCommand {
         hostPtr_(hostPtr),
         rowPitch_(rowPitch),
         slicePitch_(slicePitch),
-        copyMetadata_(copyMetadata){
+        copyMetadata_(copyMetadata) {
     // Sanity checks
     assert(hostPtr != NULL && "hostPtr cannot be null");
     assert(size.c[0] > 0 && "invalid");
@@ -724,7 +772,7 @@ class WriteMemoryCommand : public OneMemoryArgCommand {
         slicePitch_(0),
         bufRect_(bufRect),
         hostRect_(hostRect),
-        copyMetadata_(copyMetadata){
+        copyMetadata_(copyMetadata) {
     // Sanity checks
     assert(hostPtr != NULL && "hostPtr cannot be null");
     assert(size.c[0] > 0 && "invalid");
@@ -991,6 +1039,7 @@ class CopyMemoryCommand : public TwoMemoryArgsCommand {
   BufferRect srcRect_;  //!< Source buffer rectangle information
   BufferRect dstRect_;  //!< Destination buffer rectangle information
   amd::CopyMetadata copyMetadata_;
+
  public:
   CopyMemoryCommand(HostQueue& queue, cl_command_type cmdType, const EventWaitList& eventWaitList,
                     Memory& srcMemory, Memory& dstMemory, Coord3D srcOrigin, Coord3D dstOrigin,
@@ -999,7 +1048,7 @@ class CopyMemoryCommand : public TwoMemoryArgsCommand {
         srcOrigin_(srcOrigin),
         dstOrigin_(dstOrigin),
         size_(size),
-        copyMetadata_(copyMetadata){
+        copyMetadata_(copyMetadata) {
     // Sanity checks
     assert(size.c[0] > 0 && "invalid");
   }
@@ -1083,10 +1132,65 @@ class CopyMemoryCommand : public TwoMemoryArgsCommand {
   bool isEntireMemory() const;
 };
 
+//! Structure to hold individual copy operation info for batch copies
+struct BatchCopyOp {
+  Memory* srcMemory;       //!< Source memory object
+  Memory* dstMemory;       //!< Destination memory object
+  size_t srcOffset;        //!< Offset in source buffer
+  size_t dstOffset;        //!< Offset in destination buffer
+  size_t size;             //!< Size of the copy in bytes
+  CopyMetadata metadata;   //!< Copy metadata for this operation
+
+  BatchCopyOp(Memory* src, Memory* dst, size_t srcOff, size_t dstOff,
+              size_t sz, CopyMetadata meta = CopyMetadata())
+      : srcMemory(src), dstMemory(dst), srcOffset(srcOff),
+        dstOffset(dstOff), size(sz), metadata(meta) {}
+};
+
+/*! \brief  A batch copy memory command for multiple buffer-to-buffer copies
+ *
+ *  \details Executes multiple copy operations as a batch. Copies within
+ *           a batch are not guaranteed to execute in any specific order
+ *           relative to each other.
+ */
+class BatchCopyMemoryCommand : public Command {
+ private:
+  std::vector<BatchCopyOp> copyOps_;  //!< Vector of copy operations
+
+ public:
+  BatchCopyMemoryCommand(HostQueue& queue, cl_command_type cmdType,
+                         const EventWaitList& eventWaitList,
+                         std::vector<BatchCopyOp>&& copyOps)
+      : Command(queue, cmdType, eventWaitList),
+        copyOps_(std::move(copyOps)) {}
+
+  BatchCopyMemoryCommand(HostQueue& queue, cl_command_type cmdType,
+                         const EventWaitList& eventWaitList,
+                         const std::vector<BatchCopyOp>& copyOps)
+      : Command(queue, cmdType, eventWaitList),
+        copyOps_(copyOps) {}
+
+  virtual void submit(device::VirtualDevice& device) { device.submitBatchCopyMemory(*this); }
+
+  //! Return the vector of copy operations
+  std::vector<BatchCopyOp>& copyOps() { return copyOps_; }
+
+  //! Return the number of copy operations in the batch
+  size_t count() const { return copyOps_.size(); }
+
+  //! Validate peer memory access for all operations
+  bool validatePeerMemory() const {
+    for (const auto& op : copyOps_) {
+      if (op.srcMemory == nullptr || op.dstMemory == nullptr) {
+        return false;
+      }
+    }
+    return true;
+  }
+};
+
 /*! \brief  A generic map memory command. Makes a memory object accessible to the host.
  *
- * @todo:dgladdin   Need to think more about how the pitch parameters operate in
- *                  the context of unified buffer/image commands.
  */
 
 class MapMemoryCommand : public OneMemoryArgCommand {
@@ -1176,8 +1280,11 @@ class MigrateMemObjectsCommand : public Command {
                            const std::vector<amd::Memory*>& memObjects,
                            cl_mem_migration_flags flags)
       : Command(queue, type, eventWaitList), migrationFlags_(flags) {
+    memObjects_.reserve(memObjects.size());
     for (const auto& it : memObjects) {
-      it->retain();
+      if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+        it->retain();
+      }
       memObjects_.push_back(it);
     }
   }
@@ -1186,8 +1293,10 @@ class MigrateMemObjectsCommand : public Command {
 
   //! Release all resources associated with this command
   void releaseResources() {
-    for (const auto& it : memObjects_) {
-      it->release();
+    if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+      for (const auto& it : memObjects_) {
+        it->release();
+      }
     }
     Command::releaseResources();
   }
@@ -1207,16 +1316,16 @@ class NDRangeKernelCommand : public Command {
  private:
   Kernel& kernel_;
   NDRangeContainer sizes_;
-  address parameters_;      //!< Pointer to the kernel argumets
+  address parameters_;  //!< Pointer to the kernel argumets
   // The below fields are specific to the HIP functionality
-  uint32_t sharedMemBytes_; //!< Size of reserved shared memory
-  uint32_t extraParam_;     //!< Extra flags for the kernel launch
-  uint32_t gridId_;         //!< Grid ID in the multi GPU kernel launch
-  uint32_t numGrids_;       //!< Total number of grids in multi GPU launch
-  uint64_t prevGridSum_;    //!< A sum of previous grids to the current launch
-  uint64_t allGridSum_;     //!< A sum of all grids in multi GPU launch
-  uint32_t firstDevice_;    //!< Device index of the first device in the gridc
-  uint32_t numWorkgroups_;  //!< Total number of workgroups in the current launch
+  uint32_t sharedMemBytes_;  //!< Size of reserved shared memory
+  uint32_t extraParam_;      //!< Extra flags for the kernel launch
+  uint32_t gridId_;          //!< Grid ID in the multi GPU kernel launch
+  uint32_t numGrids_;        //!< Total number of grids in multi GPU launch
+  uint64_t prevGridSum_;     //!< A sum of previous grids to the current launch
+  uint64_t allGridSum_;      //!< A sum of all grids in multi GPU launch
+  uint32_t firstDevice_;     //!< Device index of the first device in the gridc
+  uint32_t numWorkgroups_;   //!< Total number of workgroups in the current launch
 
  public:
   enum {
@@ -1229,8 +1338,8 @@ class NDRangeKernelCommand : public Command {
   NDRangeKernelCommand(HostQueue& queue, const EventWaitList& eventWaitList, Kernel& kernel,
                        const NDRangeContainer& sizes, uint32_t sharedMemBytes = 0,
                        uint32_t extraParam = 0, uint32_t gridId = 0, uint32_t numGrids = 0,
-                       uint64_t prevGridSum = 0, uint64_t allGridSum = 0,
-                       uint32_t firstDevice = 0, bool forceProfiling = false);
+                       uint64_t prevGridSum = 0, uint64_t allGridSum = 0, uint32_t firstDevice = 0,
+                       bool forceProfiling = false);
 
   virtual void submit(device::VirtualDevice& device) { device.submitKernel(*this); }
 
@@ -1301,10 +1410,10 @@ class NDRangeKernelCommand : public Command {
   }
 
   // Capture kernel parameters and validate
-  int32_t captureAndValidate();
+  int32_t captureOpenCLArgsAndValidate();
 
   // Allocate, capture and set kernel parameters
-  int32_t AllocCaptureSetValidate(void** kernelParams, address kernArgs, size_t kernArgsSize);
+  int32_t captureHIPArgsAndValidate(void** kernelParams, address kernArgs, size_t kernArgsSize);
 };
 
 class NativeFnCommand : public Command {
@@ -1325,7 +1434,7 @@ class NativeFnCommand : public Command {
   ~NativeFnCommand() { delete[] args_; }
 
   void releaseResources() {
-    for (const auto& memObject: memObjects_) {
+    for (const auto& memObject : memObjects_) {
       memObject->release();
     }
     Command::releaseResources();
@@ -1342,35 +1451,44 @@ class ExternalSemaphoreCmd : public Command {
   enum ExternalSemaphoreCmdType { COMMAND_WAIT_EXTSEMAPHORE, COMMAND_SIGNAL_EXTSEMAPHORE };
 
  private:
-  const void* sem_ptr_; //!< Pointer to external semaphore
-  uint64_t fence_;           //!< semaphore value to be set
-  ExternalSemaphoreCmdType cmd_type_; //!< Signal or Wait semaphore command
+  const void* sem_ptr_;                //!< Pointer to external semaphore
+  uint64_t fence_;                     //!< semaphore value to be set
+  ExternalSemaphoreCmdType cmd_type_;  //!< Signal or Wait semaphore command
 
  public:
   ExternalSemaphoreCmd(HostQueue& queue, const void* sem_ptr, uint64_t fence,
                        ExternalSemaphoreCmdType cmd_type)
-      : Command::Command(queue, CL_COMMAND_USER), sem_ptr_(sem_ptr), fence_(fence),
-                         cmd_type_(cmd_type) {}
+      : Command::Command(queue, CL_COMMAND_USER),
+        sem_ptr_(sem_ptr),
+        fence_(fence),
+        cmd_type_(cmd_type) {}
 
-  virtual void submit(device::VirtualDevice& device) {
-    device.submitExternalSemaphoreCmd(*this);
-  }
+  virtual void submit(device::VirtualDevice& device) { device.submitExternalSemaphoreCmd(*this); }
   const void* sem_ptr() const { return sem_ptr_; }
   const uint64_t fence() { return fence_; }
   const ExternalSemaphoreCmdType semaphoreCmd() { return cmd_type_; }
-
 };
 
 
 class Marker : public Command {
+  device::Signal* ipc_completion_signal_ = nullptr;
+  device::Signal* ipc_dep_signal_ = nullptr;
+
  public:
   //! Create a new Marker
   Marker(HostQueue& queue, bool userVisible, const EventWaitList& eventWaitList = nullWaitList,
          const Event* waitingEvent = nullptr, bool cpu_wait = false)
-      : Command(queue, userVisible ? CL_COMMAND_MARKER : 0, eventWaitList, 0, waitingEvent)
-    {
-      cpu_wait_ = cpu_wait;
-    }
+      : Command(queue, userVisible ? CL_COMMAND_MARKER : 0, eventWaitList, 0, waitingEvent) {
+    cpu_wait_ = cpu_wait;
+  }
+
+  //! Attach an IPC signal as completion_signal on the barrier packet (for event record)
+  void setIpcCompletionSignal(device::Signal* s) { ipc_completion_signal_ = s; }
+  device::Signal* ipcCompletionSignal() const { return ipc_completion_signal_; }
+
+  //! Attach an IPC signal as dep_signal on the barrier packet (for stream wait)
+  void setIpcDepSignal(device::Signal* s) { ipc_dep_signal_ = s; }
+  device::Signal* ipcDepSignal() const { return ipc_dep_signal_; }
 
   //! The actual command implementation.
   virtual void submit(device::VirtualDevice& device) { device.submitMarker(*this); }
@@ -1379,19 +1497,45 @@ class Marker : public Command {
 class AccumulateCommand : public Command {
  private:
   //! Kernel names and timestamps list for activity profiling
-  std::vector<std::string> kernelNames_;
+  std::vector<const std::string*> kernelNames_;
+  const std::vector<const std::string*>* kernelNamesRef_ = nullptr;
   std::vector<std::pair<uint64_t, uint64_t>> tsList_;
+  //! HW events that need to be released when this command is destroyed
+  std::unordered_map<Device*, std::vector<void*>> hw_events_;
 
  public:
   //! Create a new Marker
   AccumulateCommand(HostQueue& queue, const EventWaitList& eventWaitList = nullWaitList,
-         const Event* waitingEvent = nullptr)
-      : Command(queue, CL_COMMAND_TASK, eventWaitList, 0, waitingEvent)
-      {}
+                    const Event* waitingEvent = nullptr)
+      : Command(queue, CL_COMMAND_TASK, eventWaitList, 0, waitingEvent) {}
+
+  //! Destructor - release all retained HW events
+  virtual ~AccumulateCommand();
+
+  //! Add HW event to the list for later cleanup.
+  //! Does not retain — caller owns the reference. Attached events are
+  //! released via ReleaseGlobalSignal in ~AccumulateCommand when the
+  //! profiling signals are destroyed after graph completion.
+  void addHwEvent(void* hw_event, Device* device = nullptr) {
+    if (hw_event != nullptr) {
+      Device* dev = (device != nullptr) ? device : const_cast<Device*>(device_);
+      if (dev != nullptr) {
+        hw_events_[dev].push_back(hw_event);
+      }
+    }
+  }
 
   //! Add kernel name to the list if available
-  void addKernelName(const std::string& kernelName) {
-    kernelNames_.push_back(kernelName);
+  void addKernelName(const std::string* kernelName) { kernelNames_.push_back(kernelName); }
+
+  //! Add multiple kernel names in bulk
+  void addKernelNames(const std::vector<const std::string*>& kernelNames) {
+    kernelNames_.insert(kernelNames_.end(), kernelNames.begin(), kernelNames.end());
+  }
+
+  //! Set kernel names by reference
+  void setKernelNamesRef(const std::vector<const std::string*>* kernelNames) {
+    kernelNamesRef_ = kernelNames;
   }
 
   //! Add kernel timestamp to the list if available
@@ -1399,20 +1543,16 @@ class AccumulateCommand : public Command {
     tsList_.push_back(std::make_pair(startTs, endTs));
   }
 
-  //! Return the kernel names
-  const std::vector<std::string>& getKernelNames() const {
-    return kernelNames_;
+  //! Return the kernel names (pointers to stable strings, no copies)
+  const std::vector<const std::string*>& getKernelNames() const {
+    return kernelNamesRef_ != nullptr ? *kernelNamesRef_ : kernelNames_;
   }
 
   //! Return the kernel timestamps
-  const std::vector<std::pair<uint64_t, uint64_t>>& getTimestamps() const {
-    return tsList_;
-  }
+  const std::vector<std::pair<uint64_t, uint64_t>>& getTimestamps() const { return tsList_; }
 
   //! The command implementation
-  virtual void submit(device::VirtualDevice& device) {
-    device.submitAccumulate(*this);
-  }
+  virtual void submit(device::VirtualDevice& device) { device.submitAccumulate(*this); }
 };
 
 /*! \brief  Maps CL objects created from external ones and syncs the contents (blocking).
@@ -1428,16 +1568,21 @@ class ExtObjectsCommand : public Command {
   ExtObjectsCommand(HostQueue& queue, const EventWaitList& eventWaitList, uint32_t num_objects,
                     const std::vector<amd::Memory*>& memoryObjects, cl_command_type type)
       : Command(queue, type, eventWaitList) {
+    memObjects_.reserve(memoryObjects.size());
     for (const auto& it : memoryObjects) {
-      it->retain();
+      if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+        it->retain();
+      }
       memObjects_.push_back(it);
     }
   }
 
   //! Release all resources associated with this command
   void releaseResources() {
-    for (const auto& it : memObjects_) {
-      it->release();
+    if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+      for (const auto& it : memObjects_) {
+        it->release();
+      }
     }
     Command::releaseResources();
   }
@@ -1655,8 +1800,11 @@ class MakeBuffersResidentCommand : public Command {
                              const std::vector<amd::Memory*>& memObjects,
                              cl_bus_address_amd* busAddr)
       : Command(queue, type, eventWaitList), busAddresses_(busAddr) {
+    memObjects_.reserve(memObjects.size());
     for (const auto& it : memObjects) {
-      it->retain();
+      if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+        it->retain();
+      }
       memObjects_.push_back(it);
     }
   }
@@ -1665,7 +1813,9 @@ class MakeBuffersResidentCommand : public Command {
 
   void releaseResources() {
     for (const auto& it : memObjects_) {
-      it->release();
+      if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+        it->release();
+      }
     }
     Command::releaseResources();
   }
@@ -1687,8 +1837,8 @@ class SvmFreeMemoryCommand : public Command {
 
  public:
   SvmFreeMemoryCommand(HostQueue& queue, const EventWaitList& eventWaitList,
-                       uint32_t numSvmPointers, void** svmPointers,
-                       freeCallBack pfnFreeFunc, void* userData)
+                       uint32_t numSvmPointers, void** svmPointers, freeCallBack pfnFreeFunc,
+                       void* userData)
       : Command(queue, CL_COMMAND_SVM_FREE, eventWaitList),
         //! We copy svmPointers since it can be reused/deallocated after
         //  command creation
@@ -1836,10 +1986,11 @@ class CopyMemoryP2PCommand : public CopyMemoryCommand {
       : CopyMemoryCommand(queue, cmdType, eventWaitList, srcMemory, dstMemory, srcOrigin, dstOrigin,
                           size) {}
 
-  CopyMemoryP2PCommand(HostQueue& queue, cl_command_type cmdType, const EventWaitList& eventWaitList,
-                    Memory& srcMemory, Memory& dstMemory, Coord3D srcOrigin, Coord3D dstOrigin,
-                    Coord3D size, const BufferRect& srcRect, const BufferRect& dstRect,
-                    amd::CopyMetadata copyMetadata = amd::CopyMetadata())
+  CopyMemoryP2PCommand(HostQueue& queue, cl_command_type cmdType,
+                       const EventWaitList& eventWaitList, Memory& srcMemory, Memory& dstMemory,
+                       Coord3D srcOrigin, Coord3D dstOrigin, Coord3D size,
+                       const BufferRect& srcRect, const BufferRect& dstRect,
+                       amd::CopyMetadata copyMetadata = amd::CopyMetadata())
       : CopyMemoryCommand(queue, cmdType, eventWaitList, srcMemory, dstMemory, srcOrigin, dstOrigin,
                           size, srcRect, dstRect) {}
 
@@ -1853,18 +2004,21 @@ class CopyMemoryP2PCommand : public CopyMemoryCommand {
  *  \details    Prefetches SVM memory into the destination device or CPU
  */
 class SvmPrefetchAsyncCommand : public Command {
-  const void* dev_ptr_;   //!< Device pointer to memory for prefetch
-  size_t count_;          //!< the size for prefetch
-  bool cpu_access_;       //!< Prefetch data into CPU location
-  int numa_id_;           //!< Host NUMA node id
-  amd::Device* dev_;      //!< Destination device to prefetch to
+  const void* dev_ptr_;  //!< Device pointer to memory for prefetch
+  size_t count_;         //!< the size for prefetch
+  bool cpu_access_;      //!< Prefetch data into CPU location
+  int numa_id_;          //!< Host NUMA node id
+  amd::Device* dev_;     //!< Destination device to prefetch to
 
  public:
-  SvmPrefetchAsyncCommand(HostQueue& queue, const EventWaitList& eventWaitList,
-                          const void* dev_ptr, size_t count, amd::Device* dev,
-                          bool cpu_access, int numa_id)
-      : Command(queue, 1, eventWaitList), dev_ptr_(dev_ptr), count_(count),
-        cpu_access_(cpu_access), dev_(dev), numa_id_(numa_id) {}
+  SvmPrefetchAsyncCommand(HostQueue& queue, const EventWaitList& eventWaitList, const void* dev_ptr,
+                          size_t count, amd::Device* dev, bool cpu_access, int numa_id)
+      : Command(queue, 1, eventWaitList),
+        dev_ptr_(dev_ptr),
+        count_(count),
+        cpu_access_(cpu_access),
+        dev_(dev),
+        numa_id_(numa_id) {}
 
   virtual void submit(device::VirtualDevice& device) { device.submitSvmPrefetchAsync(*this); }
 
@@ -1877,34 +2031,66 @@ class SvmPrefetchAsyncCommand : public Command {
   int numa_id() const { return numa_id_; }
 };
 
+/*! \brief      Batch prefetch command for SVM memory
+ *
+ *  \details    Prefetches multiple SVM memory ranges into their destination devices or CPU
+ */
+class SvmPrefetchBatchAsyncCommand : public Command {
+ public:
+  SvmPrefetchBatchAsyncCommand(HostQueue& queue, std::vector<void*>& dev_ptrs,
+                               std::vector<size_t>& sizes,
+                               std::vector<amd::Device*>& target_devices)
+      : Command(queue, 1),
+        dev_ptrs_(std::move(dev_ptrs)),
+        sizes_(std::move(sizes)),
+        target_devices_(std::move(target_devices)),
+        count_(dev_ptrs_.size()) {
+    assert(sizes_.size() == count_ && "sizes vector must match dev_ptrs size");
+    assert(target_devices_.size() == count_ && "target_devices vector must match dev_ptrs size");
+  }
+
+  virtual void submit(device::VirtualDevice& device) { device.SubmitSvmPrefetchBatchAsync(*this); }
+
+  void* const* DevicePointers() const { return dev_ptrs_.data(); }
+  const size_t* Sizes() const { return sizes_.data(); }
+  size_t Count() const { return count_; }
+  amd::Device* const* TargetDevices() const { return target_devices_.data(); }
+
+ private:
+  std::vector<void*> dev_ptrs_;               //!< Array of device pointers to memory for prefetch
+  std::vector<size_t> sizes_;                 //!< Array of sizes for prefetch
+  std::vector<amd::Device*> target_devices_;  //!< Array of device pointers (one per operation)
+  size_t count_;                              //!< Number of prefetch operations
+};
+
 /*! \brief  A virtual map memory command.
  *
  */
 
 class VirtualMapCommand : public Command {
  private:
-  const void* ptr_;     //!< Virtual address to map to the memory
+  const void* ptr_;  //!< Virtual address to map to the memory
 
-protected:
+ protected:
   Memory* memory_;  //!< Memory to map, nullptr means unmap
   size_t size_;     //!< Size of the mapping in bytes
 
-public:
+ public:
   //! Construct a new VirtualMapCommand
-  VirtualMapCommand(HostQueue& queue, const EventWaitList& eventWaitList,
-                   void* ptr, size_t size, Memory* memory)
-      : Command(queue, 1, eventWaitList),
-        ptr_(ptr),
-        size_(size),
-        memory_(memory) {
+  VirtualMapCommand(HostQueue& queue, const EventWaitList& eventWaitList, void* ptr, size_t size,
+                    Memory* memory)
+      : Command(queue, 1, eventWaitList), ptr_(ptr), size_(size), memory_(memory) {
     // Sanity checks
     assert(size > 0 && "invalid");
-    if (memory_) memory_->retain();
+    if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+      if (memory_) memory_->retain();
+    }
   }
 
   virtual void releaseResources() {
-    if (memory_) memory_->release();
-    DEBUG_ONLY(memory_ = nullptr);
+    if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+      if (memory_) memory_->release();
+    }
     Command::releaseResources();
   }
 
@@ -1920,34 +2106,35 @@ public:
 
 //! Union used in memory suballocator, must be updated with the new commands
 union ComputeCommand {
-  ReadMemoryCommand             cmd0;
-  WriteMemoryCommand            cmd1;
-  FillMemoryCommand             cmd2;
-  CopyMemoryCommand             cmd3;
-  MapMemoryCommand              cmd4;
-  UnmapMemoryCommand            cmd5;
-  MigrateMemObjectsCommand      cmd6;
-  NDRangeKernelCommand          cmd7;
-  NativeFnCommand               cmd8;
-  ExternalSemaphoreCmd          cmd9;
-  Marker                        cmd10;
-  AccumulateCommand             cmd11;
-  AcquireExtObjectsCommand      cmd13;
-  ReleaseExtObjectsCommand      cmd14;
-  PerfCounterCommand            cmd15;
-  ThreadTraceMemObjectsCommand  cmd16;
-  ThreadTraceCommand            cmd17;
-  SignalCommand                 cmd18;
-  MakeBuffersResidentCommand    cmd19;
-  SvmFreeMemoryCommand          cmd20;
-  SvmCopyMemoryCommand          cmd21;
-  SvmFillMemoryCommand          cmd22;
-  SvmMapMemoryCommand           cmd23;
-  SvmUnmapMemoryCommand         cmd24;
-  CopyMemoryP2PCommand          cmd25;
-  SvmPrefetchAsyncCommand       cmd26;
-  VirtualMapCommand             cmd27;
-  BatchMemoryOperationCommand   cmd28;
+  ReadMemoryCommand cmd0;
+  WriteMemoryCommand cmd1;
+  FillMemoryCommand cmd2;
+  CopyMemoryCommand cmd3;
+  MapMemoryCommand cmd4;
+  UnmapMemoryCommand cmd5;
+  MigrateMemObjectsCommand cmd6;
+  NDRangeKernelCommand cmd7;
+  NativeFnCommand cmd8;
+  ExternalSemaphoreCmd cmd9;
+  Marker cmd10;
+  AccumulateCommand cmd11;
+  AcquireExtObjectsCommand cmd13;
+  ReleaseExtObjectsCommand cmd14;
+  PerfCounterCommand cmd15;
+  ThreadTraceMemObjectsCommand cmd16;
+  ThreadTraceCommand cmd17;
+  SignalCommand cmd18;
+  MakeBuffersResidentCommand cmd19;
+  SvmFreeMemoryCommand cmd20;
+  SvmCopyMemoryCommand cmd21;
+  SvmFillMemoryCommand cmd22;
+  SvmMapMemoryCommand cmd23;
+  SvmUnmapMemoryCommand cmd24;
+  CopyMemoryP2PCommand cmd25;
+  SvmPrefetchAsyncCommand cmd26;
+  VirtualMapCommand cmd27;
+  BatchMemoryOperationCommand cmd28;
+  SvmPrefetchBatchAsyncCommand cmd29;
   ComputeCommand() {}
   ~ComputeCommand() {}
 };

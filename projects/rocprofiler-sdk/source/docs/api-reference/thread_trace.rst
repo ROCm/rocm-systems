@@ -5,7 +5,7 @@
 .. _thread-trace:
 
 ROCprof Trace Decoder and thread trace APIs
-======================================================
+============================================
 
 Thread trace is a profiling method that provides fine-grained insight into GPU kernel execution by collecting detailed traces of shader instructions executed by the GPU. This feature captures GPU occupancy, instruction execution times, fast performance counters, and other detailed performance data. Thread trace utilizes GPU hardware instrumentation to record events as they happen, resulting in precise timing information about wave (threads) execution behavior.
 
@@ -15,14 +15,10 @@ ROCprofiler-SDK provides wrapper APIs for the ROCprof Trace Decoder, a library t
 
     Thread trace can generate large amounts of data, especially when profiling complex applications or longer execution runs. This might require handling potentially high volumes of trace data, so it’s recommended to implement appropriate filtering strategies to focus on the specific parts of interest in your application.
 
-.. note::
-
-    ROCprof Trace Decoder is a binary-only library and can be found `here <https://github.com/ROCm/rocprof-trace-decoder/releases>`_.
-
 Thread trace service API
-------------------------------------
+--------------------------
 
-This section describes how to use the ROCprofiler-SDK thread trace API to configure and use the thread trace service. For fully functional examples, see `Samples <https://github.com/ROCm/rocprofiler-sdk/tree/amd-mainline/samples/thread_trace>`_.
+This section describes how to use the ROCprofiler-SDK thread trace API to configure and use the thread trace service. For fully functional examples, see `Samples <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-sdk/samples/thread_trace>`_.
 
 tool_init() setup
 ++++++++++++++++++
@@ -60,7 +56,7 @@ Here are the steps to set up ``tool_init()`` for thread trace:
                 for(size_t i = 0; i < _num_agents; ++i)
                 {
                     auto* agent = static_cast<const rocprofiler_agent_v0_t*>(_agents[i]);
-                    if(agent->type == ROCPROFILER_AGENT_TYPE_GPU) 
+                    if(agent->type == ROCPROFILER_AGENT_TYPE_GPU)
                         agent_v->emplace_back(agent->id);
                 }
                 return ROCPROFILER_STATUS_SUCCESS;
@@ -74,21 +70,21 @@ Here are the steps to set up ``tool_init()`` for thread trace:
 .. code-block:: cpp
 
     std::vector<rocprofiler_thread_trace_parameter_t> params{};
-    
+
     params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, 0xF});
-    
+
     params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU, 0});
-    
+
     params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT, 0xF});
-    
+
     params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, 1u<<30}); // 1 GB
-    
+
 The configuration parameters are described here:
 
 - ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK: Configures the Shader Engine (SE) mask, which determines the SEs to be traced. This is a bitmask where each bit corresponds to a SE. For MI3xx, each hex digit corresponds to an XCD. It's highly recommended to trace only one SE at a time to avoid data loss.
 
 - ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU: Configures the target Compute Unit (CU) or WGP. Instruction tracing can only operate on a single CU or WGP at a time. The same target is used for all SEs in ``ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK``.
-  
+
 - ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT: Configures SIMD selection. For gfx9, this is a bitmask where each bit corresponds to a SIMD lane. For example, 0xF selects all SIMD lanes in the ``target_cu``. For gfx10, gfx11, and gfx12, this selects a single SIMD ID to trace. Results are taken mod4 for compatibility with gfx9 so 0xF selects SIMD3 of the target WGP.
 
 - ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE: Configures the buffer size. This buffer is shared among all SEs specified in ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK. There is a minimal side effect to specifying a larger buffer size, except for increased VRAM usage.
@@ -139,12 +135,12 @@ To enable selective thread trace based on specific kernel dispatches, use the di
                       rocprofiler_user_data_t* dispatch_userdata)
     {
         // Trace only the desired kernels
-        if(target_kernel_id == kernel_id) 
+        if(target_kernel_id == kernel_id)
             return ROCPROFILER_THREAD_TRACE_CONTROL_START_AND_STOP;
-            
+
         return ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
     }
-    
+
     // Configure dispatch-based thread trace
     for(auto agent_id : agents)
     {
@@ -169,7 +165,7 @@ To start the context after all services are configured, use:
     auto status = rocprofiler_start_context(ctx);
 
     // Run your application workload here.
-    
+
 To stop the context to end data collection for device-wide thread trace, use:
 
 .. code-block:: cpp
@@ -179,17 +175,21 @@ To stop the context to end data collection for device-wide thread trace, use:
 ROCprof Trace Decoder API
 --------------------------------
 
-The thread trace functionality requires you to install the ROCprof Trace Decoder package separately. This package provides the necessary decoder library for processing thread trace data. Ensure to install this package on your system before using the thread trace feature.
+The ROCProf Trace Decoder is a dedicated library for processing thread trace data.
+
+.. note::
+
+    For ROCm releases earlier than 7.13, using the thread trace functionality requires you to install the ROCprof Trace Decoder package separately.
 
 Trace Decoder setup
-++++++++++++++
+++++++++++++++++++++
 
 To decode the raw thread trace data, create and initialize a Trace Decoder:
 
 .. code-block:: cpp
 
     rocprofiler_thread_trace_decoder_id_t decoder{};
-    
+
     // Create the Trace Decoder with the path to the decoder library
     ROCPROFILER_CALL(
         rocprofiler_thread_trace_decoder_create(&decoder, "/opt/rocm/lib"),
@@ -229,7 +229,7 @@ To properly decode instruction addresses, track the code object information:
         if(data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE) return;
 
         auto* memorybase = reinterpret_cast<const void*>(data->memory_base);
-        
+
         // Register code object with Trace Decoder
         ROCPROFILER_CALL(
             rocprofiler_thread_trace_decoder_codeobj_load(
@@ -294,26 +294,26 @@ The trace decoder provides decoded information through a callback:
                 }
                 break;
             }
-            
+
             // Handle other record types as needed
         }
     }
 
 Trace Decoder info events
-++++++++++++++++++
++++++++++++++++++++++++++++
 
 The Trace Decoder provides important information about the quality and comprehensiveness of the trace data through ``ROCPROFILER_THREAD_TRACE_DECODER_RECORD_INFO`` events. It is important to handle these events to understand potential issues with your trace data:
 
 - ROCPROFILER_THREAD_TRACE_DECODER_INFO_DATA_LOST
 
   This event indicates that part of the trace data was dropped either due to hardware bandwidth limitations or buffer overflows. Receiving this event implies that portions of your trace might be missing or unreliable, which can affect the accuracy of any analysis based on the trace data.
-   
+
   **Possible causes:**
 
   - The trace buffer size was too small for the workload
 
   - Memory bandwidth was exceeded
-   
+
   **Recommended actions:**
 
   - Increase buffer sizes if possible
@@ -327,7 +327,7 @@ The Trace Decoder provides important information about the quality and comprehen
 - ROCPROFILER_THREAD_TRACE_DECODER_INFO_STITCH_INCOMPLETE
 
   This event indicates that the Trace Decoder was unable to find the PC (Program Counter) address for one or more  traced instructions. Affected instructions will have their "pc" field set to zero.
-   
+
   **Possible causes:**
 
   - The trace was started in the middle of a kernel execution:
@@ -346,12 +346,12 @@ The Trace Decoder provides important information about the quality and comprehen
 
 For more information about the data structures and functions available for thread trace decoding, see the following headers:
 
-- `trace_decoder.h <https://github.com/ROCm/rocprofiler-sdk/blob/amd-mainline/source/include/rocprofiler-sdk/experimental/thread-trace/trace_decoder.h>`_
+- `trace_decoder.h <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-sdk/source/include/rocprofiler-sdk/experimental/thread-trace/trace_decoder.h>`_
 
-- `trace_decoder_types.h <https://github.com/ROCm/rocprofiler-sdk/blob/amd-mainline/source/include/rocprofiler-sdk/experimental/thread-trace/trace_decoder_types.h>`_
+- `trace_decoder_types.h <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-sdk/source/include/rocprofiler-sdk/experimental/thread-trace/trace_decoder_types.h>`_
 
-- `core.h <https://github.com/ROCm/rocprofiler-sdk/blob/amd-mainline/source/include/rocprofiler-sdk/experimental/thread-trace/core.h>`_
+- `core.h <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-sdk/source/include/rocprofiler-sdk/experimental/thread-trace/core.h>`_
 
-- `dispatch.h <https://github.com/ROCm/rocprofiler-sdk/blob/amd-mainline/source/include/rocprofiler-sdk/experimental/thread-trace/dispatch.h>`_
+- `dispatch.h <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-sdk/source/include/rocprofiler-sdk/experimental/thread-trace/dispatch.h>`_
 
-- `agent.h <https://github.com/ROCm/rocprofiler-sdk/blob/amd-mainline/source/include/rocprofiler-sdk/experimental/thread-trace/agent.h>`_
+- `agent.h <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-sdk/source/include/rocprofiler-sdk/experimental/thread-trace/agent.h>`_

@@ -1,0 +1,77 @@
+{
+    "required_tables": [
+        {
+            "commit": "Validation rules for python-builtin tests",
+            "name": "top",
+            "required_columns": [
+                "total_calls",
+                "total_duration",
+                "average",
+                "percentage"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "equals",
+                    "description": "Verify that '[run][builtin.py:31]' has a total of 5 calls.",
+                    "error_message": "'[run][builtin.py:31]' does not have 5 total calls, as expected.",
+                    "expected_result": 5,
+                    "query": "SELECT total_calls FROM top WHERE name = '[run][builtin.py:31]';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Verify that '[inefficient][builtin.py:17]' has a total of 5 calls.",
+                    "error_message": "'[inefficient][builtin.py:17]' does not have 5 total calls, as expected.",
+                    "expected_result": 5,
+                    "query": "SELECT total_calls FROM top WHERE name = '[inefficient][builtin.py:17]';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Verify that '[fib][builtin.py:13]' has a total of 445 calls.",
+                    "error_message": "'[fib][builtin.py:13]' does not have 445 total calls, as expected.",
+                    "expected_result": 445,
+                    "query": "SELECT total_calls FROM top WHERE name = '[fib][builtin.py:13]';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Verify that percentages sum to 100.",
+                    "error_message": "Percentages do not sum to 100.",
+                    "expected_result": 100,
+                    "query": "SELECT ROUND(SUM(percentage), 1) FROM top;"
+                }
+            ]
+        },
+        {
+            "commit": "",
+            "name": "regions",
+            "required_columns": [
+                "id",
+                "guid",
+                "category",
+                "name"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "equals",
+                    "description": "Verify that '[run][builtin.py:31]' has a total of 5 calls.",
+                    "error_message": "'[run][builtin.py:31]' does not have 5 total calls, as expected.",
+                    "expected_result": 5,
+                    "query": "SELECT COUNT(*) FROM regions WHERE name = '[run][builtin.py:31]';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Verify that '[inefficient][builtin.py:17]' has a total of 5 calls.",
+                    "error_message": "'[inefficient][builtin.py:17]' does not have 5 total calls, as expected.",
+                    "expected_result": 5,
+                    "query": "SELECT COUNT(*) FROM regions WHERE name = '[inefficient][builtin.py:17]';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Verify that '[fib][builtin.py:13]' has a total of 445 calls.",
+                    "error_message": "'[fib][builtin.py:13] does not have 445 total calls, as expected.",
+                    "expected_result": 445,
+                    "query": "SELECT COUNT(*) FROM regions WHERE name = '[fib][builtin.py:13]';"
+                }
+            ]
+        }
+    ]
+}

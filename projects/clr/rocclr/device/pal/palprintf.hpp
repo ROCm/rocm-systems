@@ -1,22 +1,8 @@
-/* Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -54,7 +40,7 @@ class Kernel;
 class VirtualGPU;
 class Memory;
 
-class PrintfDbg : public amd::HeapObject {
+class PrintfDbg {
  public:
   //! Debug buffer size per workitem
   static constexpr uint WorkitemDebugSize = 4096;
@@ -102,30 +88,30 @@ class PrintfDbg : public amd::HeapObject {
 
   //! Returns TRUE if a float value has to be printed
   bool checkFloat(const std::string& fmt  //!< Format string
-                  ) const;
+  ) const;
 
   //! Returns TRUE if a string value has to be printed
   bool checkString(const std::string& fmt  //!< Format string
-                   ) const;
+  ) const;
 
   //! Finds the specifier in the format string
   int checkVectorSpecifier(const std::string& fmt,  //!< Format string
                            size_t startPos,         //!< Start position for processing
                            size_t& curPos           //!< End position for processing
-                           ) const;
+  ) const;
 
   //! Outputs an argument
-  size_t outputArgument(const std::string& fmt,   //!< Format strint
-                        bool printFloat,          //!< Argument is a float value
-                        size_t size,              //!< Argument's size
-                        const void* argument      //!< Argument's location
-                        ) const;
+  size_t outputArgument(const std::string& fmt,  //!< Format strint
+                        bool printFloat,         //!< Argument is a float value
+                        size_t size,             //!< Argument's size
+                        const void* argument     //!< Argument's location
+  ) const;
 
   //! Displays the PrintfDbg
   void outputDbgBuffer(const device::PrintfInfo& info,  //!< printf info
                        const uint32_t* workitemData,    //!< The PrintfDbg dump buffer
                        size_t& i                        //!< index to the data in the buffer
-                       ) const;
+  ) const;
 
  private:
   //! Disable copy constructor
@@ -138,7 +124,7 @@ class PrintfDbg : public amd::HeapObject {
   bool clearWorkitems(VirtualGPU& gpu,  //!< Virtual GPU object
                       size_t idxStart,  //!< Workitem global index start
                       size_t number     //!< Number of workitems to clear
-                      ) const;
+  ) const;
 
   //! Returns the pointer to the workitem data block
   uint32_t* mapWorkitem(VirtualGPU& gpu,  //!< Virtual GPU object
@@ -149,7 +135,7 @@ class PrintfDbg : public amd::HeapObject {
   //! Unamp the staged buffer
   void unmapWorkitem(VirtualGPU& gpu,              //!< Virtual GPU object
                      const uint32_t* workitemData  //!< The PrintfDbg dump buffer
-                     ) const;
+  ) const;
 
   size_t wiDbgSize_;     //!< Workitem debug size
   Memory initCntValue_;  //!< Initialized count value

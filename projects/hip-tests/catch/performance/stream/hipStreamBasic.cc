@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include <performance_common.hh>
@@ -27,12 +14,15 @@ THE SOFTWARE.
  * @ingroup PerformanceTest
  * Contains performance tests for all hipStream related APIs
  */
- 
- class HipDeviceGetStreamPriorityRangeBenchmark : public Benchmark<HipDeviceGetStreamPriorityRangeBenchmark> {
+
+class HipDeviceGetStreamPriorityRangeBenchmark
+    : public Benchmark<HipDeviceGetStreamPriorityRangeBenchmark> {
  public:
   void operator()() {
     int priority_min, priority_max;
-    TIMED_SECTION(kTimerTypeCpu) { HIP_CHECK(hipDeviceGetStreamPriorityRange(&priority_min, &priority_max)); }
+    TIMED_SECTION(kTimerTypeCpu) {
+      HIP_CHECK(hipDeviceGetStreamPriorityRange(&priority_min, &priority_max));
+    }
   }
 };
 
@@ -42,19 +32,19 @@ class HipStreamQueryBenchmark : public Benchmark<HipStreamQueryBenchmark> {
     hipError_t error;
     hipStream_t stream;
     HIP_CHECK(hipStreamCreate(&stream));
-    void *dptr;
-    
-    if(perform_work) {
+    void* dptr;
+
+    if (perform_work) {
       HIP_CHECK(hipMallocAsync(&dptr, 2048 * 4, stream));
     }
 
     TIMED_SECTION(kTimerTypeCpu) { error = hipStreamQuery(stream); }
-    
-    if(perform_work) {
+
+    if (perform_work) {
       HIP_CHECK(hipFreeAsync(dptr, stream));
       HIP_CHECK(hipStreamSynchronize(stream));
     }
-    
+
     HIP_CHECK(hipStreamDestroy(stream));
   }
 };
@@ -65,9 +55,9 @@ class HipStreamSynchronizeBenchmark : public Benchmark<HipStreamSynchronizeBench
     hipError_t error;
     hipStream_t stream;
     HIP_CHECK(hipStreamCreate(&stream));
-    
+
     TIMED_SECTION(kTimerTypeCpu) { error = hipStreamSynchronize(stream); }
-      
+
     HIP_CHECK(hipStreamDestroy(stream));
   }
 };
@@ -93,21 +83,23 @@ class HipStreamCreateBenchmark : public Benchmark<HipStreamCreateBenchmark> {
   }
 };
 
-class HipStreamCreateWithPriorityBenchmark : public Benchmark<HipStreamCreateWithPriorityBenchmark> {
+class HipStreamCreateWithPriorityBenchmark
+    : public Benchmark<HipStreamCreateWithPriorityBenchmark> {
  public:
   void operator()(unsigned int flag) {
     hipStream_t stream;
     int priority_min, priority_max, priority_mid;
-    
+
     HIP_CHECK(hipDeviceGetStreamPriorityRange(&priority_min, &priority_max));
     priority_mid = (priority_max + priority_min) / 2;
-    
-    TIMED_SECTION(kTimerTypeCpu) { HIP_CHECK(hipStreamCreateWithPriority(&stream, flag, priority_mid)); }
+
+    TIMED_SECTION(kTimerTypeCpu) {
+      HIP_CHECK(hipStreamCreateWithPriority(&stream, flag, priority_mid));
+    }
 
     HIP_CHECK(hipStreamDestroy(stream));
   }
 };
-
 
 
 static std::string GetStreamCreateFlagName(unsigned flag) {
@@ -143,7 +135,7 @@ class HipStreamCreateWithFlagsBenchmark : public Benchmark<HipStreamCreateWithFl
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Performance_hipStreamCreate") {
+HIP_TEST_CASE(Performance_hipStreamCreate) {
   HipStreamCreateBenchmark benchmark;
   benchmark.Run();
 }
@@ -174,7 +166,7 @@ static void RunBenchmarkWithPriority(unsigned flag) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Performance_hipStreamCreateWithFlags") {
+HIP_TEST_CASE(Performance_hipStreamCreateWithFlags) {
   const auto flag = GENERATE(hipStreamDefault, hipStreamNonBlocking);
   RunBenchmark(flag);
 }
@@ -193,7 +185,7 @@ TEST_CASE("Performance_hipStreamCreateWithFlags") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Performance_hipStreamCreateWithPriority") {
+HIP_TEST_CASE(Performance_hipStreamCreateWithPriority) {
   const auto flag = GENERATE(hipStreamDefault, hipStreamNonBlocking);
   RunBenchmarkWithPriority(flag);
 }
@@ -209,7 +201,7 @@ TEST_CASE("Performance_hipStreamCreateWithPriority") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Performance_hipStreamDestroy") {
+HIP_TEST_CASE(Performance_hipStreamDestroy) {
   HipStreamDestroyBenchmark benchmark;
   benchmark.Run();
 }
@@ -225,7 +217,7 @@ TEST_CASE("Performance_hipStreamDestroy") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Performance_hipDeviceGetStreamPriorityRange") {
+HIP_TEST_CASE(Performance_hipDeviceGetStreamPriorityRange) {
   HipDeviceGetStreamPriorityRangeBenchmark benchmark;
   benchmark.Run();
 }
@@ -241,10 +233,10 @@ TEST_CASE("Performance_hipDeviceGetStreamPriorityRange") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Performance_hipStreamQuery") {
+HIP_TEST_CASE(Performance_hipStreamQuery) {
   const auto perform_work = GENERATE(true, false);
   HipStreamQueryBenchmark benchmark;
-  if(perform_work) {
+  if (perform_work) {
     benchmark.AddSectionName("stream with work");
   } else {
     benchmark.AddSectionName("stream without work");
@@ -263,12 +255,12 @@ TEST_CASE("Performance_hipStreamQuery") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Performance_hipStreamSynchronize") {
+HIP_TEST_CASE(Performance_hipStreamSynchronize) {
   HipStreamSynchronizeBenchmark benchmark;
   benchmark.Run();
 }
 
 /**
-* End doxygen group PerformanceTest.
-* @}
-*/
+ * End doxygen group PerformanceTest.
+ * @}
+ */

@@ -1,3 +1,9 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 namespace HipTest {
 template <typename T> __global__ void vectorADD(const T* A_d, const T* B_d, T* C_d, size_t NELEM) {
   size_t offset = (blockIdx.x * blockDim.x + threadIdx.x);

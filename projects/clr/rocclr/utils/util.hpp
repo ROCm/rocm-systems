@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #ifndef UTIL_HPP_
 #define UTIL_HPP_
@@ -58,7 +44,9 @@ template <uint N, int S> struct NextPowerOfTwoHelper {
   static constexpr uint prev = NextPowerOfTwoHelper<N, S / 2>::value;
   static constexpr uint value = (prev >> S) | prev;
 };
-template <uint N> struct NextPowerOfTwoHelper<N, 1> { static constexpr int value = (N >> 1) | N; };
+template <uint N> struct NextPowerOfTwoHelper<N, 1> {
+  static constexpr int value = (N >> 1) | N;
+};
 
 template <uint N> struct NextPowerOfTwo {
   static constexpr uint value = NextPowerOfTwoHelper<N - 1, 16>::value + 1;
@@ -83,10 +71,14 @@ template <typename T> inline T nextPowerOfTwo(T val) {
 }
 
 // Compute log2(N)
-template <uint N> struct Log2 { static constexpr uint value = Log2<N / 2>::value + 1; };
+template <uint N> struct Log2 {
+  static constexpr uint value = Log2<N / 2>::value + 1;
+};
 
 // Break the recursion
-template <> struct Log2<1> { static constexpr uint value = 0; };
+template <> struct Log2<1> {
+  static constexpr uint value = 0;
+};
 
 /*! \brief Return the log2 for a value of type T.
  *
@@ -250,21 +242,21 @@ inline float half2float(const uint16_t Val) {
   uint32_t signBit = ((uint32_t)(Val & 0x8000)) << signBitShift;
   uint32_t exponent = (Val & halfExpoentMask) >> 10;
   uint32_t fraction = ((uint32_t)(Val & halfFractionMask))
-                      << 13; // Aligning half fraction to float
+                      << 13;  // Aligning half fraction to float
   union {
     uint32_t u32Arg;
     float fArg;
   };
   // Handling special cases
-  if (exponent == 0x1f) { // NaN or Infinity
+  if (exponent == 0x1f) {  // NaN or Infinity
     // When all exponent bits are 1, the value is either Infinity or NaN
     // For NaN, the fraction part should also be non-zero.
-    u32Arg = signBit | 0x7f800000 |
-           fraction; // setting exponent to all 1's and keeping the fraction
+    u32Arg =
+        signBit | 0x7f800000 | fraction;  // setting exponent to all 1's and keeping the fraction
     return fArg;
-  } else if (exponent == 0) { // Subnormal numbers or zero
+  } else if (exponent == 0) {  // Subnormal numbers or zero
     if (fraction == 0) {
-      u32Arg = signBit; // Plus or minus zero
+      u32Arg = signBit;  // Plus or minus zero
       return fArg;
     } else {
       // Normalize subnormal number
@@ -273,17 +265,16 @@ inline float half2float(const uint16_t Val) {
         exponent--;
       }
       exponent++;
-      fraction &=
-          ~(1 << 23); // Remove leading 1 (implicit for normalized numbers)
+      fraction &= ~(1 << 23);  // Remove leading 1 (implicit for normalized numbers)
     }
   }
-  uint32_t floatExponent =
-      ((exponent + floatExponentBias - halfExponentBias) & 0xff)
-      << floatExponentShift;
+  uint32_t floatExponent = ((exponent + floatExponentBias - halfExponentBias) & 0xff)
+                           << floatExponentShift;
   u32Arg = signBit | floatExponent | fraction;
   return fArg;
 }
 
-/*@}*/} // namespace amd
+/*@}*/  // namespace amd
+}  // namespace amd
 
 #endif /*UTIL_HPP_*/

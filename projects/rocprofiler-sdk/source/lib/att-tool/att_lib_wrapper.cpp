@@ -51,6 +51,7 @@ ATTFileMgr::ATTFileMgr(Fspath                                _dir,
     table     = std::make_shared<AddressTable>();
     codefile  = std::make_shared<CodeFile>(dir, table);
     filenames = std::make_shared<FilenameMgr>(dir);
+    realtime  = std::make_shared<RealtimeTS>(dir);
 
     for(size_t i = 0; i < ROCPROFILER_THREAD_TRACE_DECODER_WSTATE_LAST; i++)
         wstates.at(i) = std::make_shared<WstatesFile>(i, dir);
@@ -92,12 +93,13 @@ ATTFileMgr::addDecoder(const char* filepath, uint64_t id, uint64_t load_addr, ui
 
     codeobjs_to_delete.push_back(id);
     table->addDecoder(buffer.data(), buffer.size(), id, load_addr, memsize);
+    codefile->addCodeobj(id);
 }
 
 void
 ATTFileMgr::parseShader(int se_id, std::vector<char>& data)
 {
-    WaveConfig config(se_id, filenames, codefile, wstates);
+    WaveConfig config(se_id, filenames, codefile, realtime, wstates);
     ToolData   tooldata(data, config, decoder);
 
     if(!config.occupancy.empty()) occupancy.emplace(se_id, std::move(config.occupancy));

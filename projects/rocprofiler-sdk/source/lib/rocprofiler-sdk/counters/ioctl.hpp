@@ -24,15 +24,35 @@
 
 #include <rocprofiler-sdk/agent.h>
 
+#include <cstdint>
+
 namespace rocprofiler
 {
 namespace counters
 {
+unsigned long
+get_profiler_ioctl_request_for_version(uint32_t major_version, uint32_t minor_version);
+
 bool
 counter_collection_has_device_lock();
 
 rocprofiler_status_t
 counter_collection_device_lock(const rocprofiler_agent_t* agent, bool all_queues);
+
+rocprofiler_status_t
+counter_collection_device_unlock(const rocprofiler_agent_t* agent);
+
+bool
+ptl_control_supported();
+
+bool
+use_device_lock_at_start();
+
+rocprofiler_status_t
+counter_collection_ptl_disable(const rocprofiler_agent_t* agent);
+
+rocprofiler_status_t
+counter_collection_ptl_enable(const rocprofiler_agent_t* agent);
 
 }  // namespace counters
 }  // namespace rocprofiler

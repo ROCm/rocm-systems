@@ -1,0 +1,46 @@
+Rocprofiler-Compute version: 3.3.1
+Profiler choice: rocprofiler-sdk
+Path: /home/abchoudh/rocm/iteration_multiplexing/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI350
+Target: MI350
+Command: ./vcopy -i 20 -n 1048576 -b 256
+Kernel Selection: None
+Dispatch Selection: None
+Filtered sections: All
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Collecting Performance Counters
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Using native counter collection tool: /tmp/rocprofiler-compute-tool-hlz4fagh/librocprofiler-compute-tool.so
+Iteration multiplexing: kernel
+[profiling] Current input files: /home/abchoudh/rocm/iteration_multiplexing/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI350/perfmon/SQC_DCACHE_INFLIGHT_LEVEL.txt, /home/abchoudh/rocm/iteration_multiplexing/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI350/perfmon/SQC_ICACHE_INFLIGHT_LEVEL.txt, /home/abchoudh/rocm/iteration_multiplexing/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI350/perfmon/SQ_IFETCH_LEVEL.txt, /home/abchoudh/rocm/iteration_multiplexing/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI350/perfmon/SQ_INST_LEVEL_LDS.txt, /home/abchoudh/rocm/iteration_multiplexing/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI350/perfmon/SQ_INST_LEVEL_SMEM.txt, /home/abchoudh/rocm/iteration_multiplexing/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI350/perfmon/SQ_INST_LEVEL_VMEM.txt, /home/abchoudh/rocm/iteration_multiplexing/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI350/perfmon/SQ_LEVEL_WAVES.txt, /home/abchoudh/rocm/iteration_multiplexing/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI350/perfmon/pmc_perf_0.txt, /home/abchoudh/rocm/iteration_multiplexing/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI350/perfmon/pmc_perf_1.txt, /home/abchoudh/rocm/iteration_multiplexing/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI350/perfmon/pmc_perf_10.txt, /home/abchoudh/rocm/iteration_multiplexing/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI350/perfmon/pmc_perf_11.txt, /home/abchoudh/rocm/iteration_multiplexing/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI350/perfmon/pmc_perf_12.txt, /home/abchoudh/rocm/iteration_multiplexing/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI350/perfmon/pmc_perf_2.txt, /home/abchoudh/rocm/iteration_multiplexing/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI350/perfmon/pmc_perf_3.txt, /home/abchoudh/rocm/iteration_multiplexing/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI350/perfmon/pmc_perf_4.txt, /home/abchoudh/rocm/iteration_multiplexing/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI350/perfmon/pmc_perf_5.txt, /home/abchoudh/rocm/iteration_multiplexing/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI350/perfmon/pmc_perf_6.txt, /home/abchoudh/rocm/iteration_multiplexing/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI350/perfmon/pmc_perf_7.txt, /home/abchoudh/rocm/iteration_multiplexing/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI350/perfmon/pmc_perf_8.txt, /home/abchoudh/rocm/iteration_multiplexing/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI350/perfmon/pmc_perf_9.txt
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.0.0 (1.0.0)
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [create_tool_data] Logging counter collection to: /home/abchoudh/rocm/iteration_multiplexing/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI350/out/pmc_1/counter_collection_dc877c12.csv
+   |-> [rocprofiler-sdk] W20251106 22:30:29.205097 139710715580160 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.393942 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool init
+   |-> [rocprofiler-sdk] W20251106 22:30:29.205260 139710715580160 simple_timer.cpp:55] [rocprofv3] './vcopy -i 20 -n 1048576 -b 256' ::     0.000000 sec
+   |-> [rocprofiler-sdk] W20251106 22:30:29.320658 139710715580160 tool.cpp:2420] HSA version 8.20.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] W20251106 22:30:29.541811 139710715580160 simple_timer.cpp:55] [rocprofv3] './vcopy -i 20 -n 1048576 -b 256' ::     0.336552 sec
+   |-> [rocprofiler-sdk] W20251106 22:30:29.551750 139710715580160 generateRocpd.cpp:582] writing SQL database for process 2606306 on node 1574819130
+   |-> [rocprofiler-sdk] E20251106 22:30:29.552127 139710715580160 generateRocpd.cpp:605] Opened result file: /home/abchoudh/rocm/iteration_multiplexing/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI350/out/pmc_1/smci350-zts-gtu-e14-25/2606306_results.db (UUID=000024e7-2937-7937-957f-585d5fb64277)
+   |-> [rocprofiler-sdk] W20251106 22:30:29.584905 139710715580160 simple_timer.cpp:55] SQLite3 generation :: rocpd_string             ::     0.016552 sec
+   |-> [rocprofiler-sdk] W20251106 22:30:29.585113 139710715580160 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_node          ::     0.000200 sec
+   |-> [rocprofiler-sdk] W20251106 22:30:29.586186 139710715580160 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_process       ::     0.001069 sec
+   |-> [rocprofiler-sdk] W20251106 22:30:29.592977 139710715580160 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_agent         ::     0.006506 sec
+   |-> [rocprofiler-sdk] W20251106 22:30:31.791895 139710715580160 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_pmc           ::     2.198912 sec
+   |-> [rocprofiler-sdk] W20251106 22:30:31.792565 139710715580160 simple_timer.cpp:55] SQLite3 generation :: rocpd kernel info        ::     0.000645 sec
+   |-> [rocprofiler-sdk] W20251106 22:30:31.792572 139710715580160 simple_timer.cpp:55] SQLite3 generation :: rocpd_region             ::     0.000002 sec
+   |-> [rocprofiler-sdk] W20251106 22:30:31.795306 139710715580160 simple_timer.cpp:55] SQLite3 generation :: rocpd_kernel_dispatch    ::     0.002731 sec
+   |-> [rocprofiler-sdk] W20251106 22:30:31.795311 139710715580160 simple_timer.cpp:55] SQLite3 generation :: rocpd_pmc_event          ::     0.000000 sec
+   |-> [rocprofiler-sdk] W20251106 22:30:31.795313 139710715580160 simple_timer.cpp:55] SQLite3 generation :: rocpd_memory_copy        ::     0.000000 sec
+   |-> [rocprofiler-sdk] W20251106 22:30:31.795315 139710715580160 simple_timer.cpp:55] SQLite3 generation :: rocpd_memory_allocate    ::     0.000001 sec
+   |-> [rocprofiler-sdk] W20251106 22:30:31.795405 139710715580160 simple_timer.cpp:55] SQLite3 generation :: SQL indexing             ::     0.000089 sec
+   |-> [rocprofiler-sdk] W20251106 22:30:31.796398 139710715580160 simple_timer.cpp:55] SQLite3 generation :: total                    ::     2.244648 sec
+   |-> [rocprofiler-sdk] W20251106 22:30:31.797844 139710715580160 simple_timer.cpp:55] [rocprofv3] output generation ::     2.254739 sec
+   |-> [rocprofiler-sdk] W20251106 22:30:31.800089 139710715580160 simple_timer.cpp:55] [rocprofv3] tool finalization ::     2.258250 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool fini
+   |-> [rocprofiler-sdk] vcopy testing on GCD 0
+   |-> [rocprofiler-sdk] Finished allocating vectors on the CPU
+PC sampling data collection skipped as block 21 is not specified.
+[roofline] Skipping roofline
+[roofline] Skipping roofline

@@ -92,6 +92,7 @@ public:
 
     std::shared_ptr<class CodeFile>            codefile{nullptr};
     std::shared_ptr<class FilenameMgr>         filenames{nullptr};
+    std::shared_ptr<class RealtimeTS>          realtime{nullptr};
     std::shared_ptr<AddressTable>              table{nullptr};
     std::map<size_t, std::vector<occupancy_t>> occupancy{};
     std::vector<uint64_t>                      codeobjs_to_delete{};

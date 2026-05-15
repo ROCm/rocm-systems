@@ -339,4 +339,4 @@ Here is the general sequence of events when a code object is loaded and unloaded
     all buffers that might contain references to that code object or kernel symbol identifier before
     deleting the associated data.
 
-For a sample of code object tracing, see `samples/code_object_tracing <https://github.com/ROCm/rocprofiler-sdk/tree/amd-mainline/samples/code_object_tracing>`_.
+For a sample of code object tracing, see `samples/code_object_tracing <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-sdk/samples/code_object_tracing>`_.

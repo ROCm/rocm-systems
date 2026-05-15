@@ -34,12 +34,12 @@ Panel Config:
         metric:
           METRIC01:
             value: AVG(100 * SQ_ACTIVE_INST_SCA / ( $GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu ))
-            unit: pct
+            unit: Percent
             peak: 100
             pop: AVG(100* SQ_ACTIVE_INST_SCA/($GRBM_GUI_ACTIVE_PER_XCD*$cu_per_gpu))
           METRIC02:
             value: AVG(100 * SQ_ACTIVE_INST_VALU / ( $GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
-            unit: pct
+            unit: Percent
             peak: 100
             pop: AVG(100* SQ_ACTIVE_INST_VALU/($GRBM_GUI_ACTIVE_PER_XCD*$cu_per_gpu))
     # CSV table sample

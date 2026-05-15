@@ -45,6 +45,9 @@ cmake_minimum_required(VERSION 3.7)
 
 # Set the project name
 project("rocr")
+set( CORE_TARGET "hsa-rocr" )
+set( BUILD_ENABLE_LINTIAN_OVERRIDES ON CACHE BOOL "Enable/Disable Lintian Overrides" )
+set( BUILD_DEBIAN_PKGING_FLAG ON CACHE BOOL "Internal Status Flag to indicate Debian Packaging Build" )
 
 set(CMAKE_VERBOSE_MAKEFILE ON)
 ## Expose static library option
@@ -82,11 +85,12 @@ function(add_rocm_subdir subdir subdir_assigns)
 endfunction()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules")
+include ( GNUInstallDirs )
 include(utils)
 
 
 ## Get version strings
-get_version("1.18.0")
+get_version("1.21.0")
 if (${ROCM_PATCH_VERSION})
   set(VERSION_PATCH ${ROCM_PATCH_VERSION})
 endif()
@@ -117,6 +121,11 @@ set_target_properties(hsakmt PROPERTIES
                                 ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/libhsakmt/archive"
                                 LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/libhsakmt/lib"
                                 RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/libhsakmt/runtime")
+if (WIN32)
+set_target_properties(hsakmt PROPERTIES
+                      CXX_STANDARD 20
+                      CXX_STANDARD_REQUIRED ON)
+endif()
 
 if (BUILD_THUNK_VIRTIO)
   add_rocm_subdir(libhsakmt/src/virtio "${THUNK_VIRTIO_DEFINITIONS}")
@@ -128,6 +137,11 @@ if (BUILD_ROCR)
                                ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/rocr/archive"
                                LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/rocr/lib"
                                RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/rocr/runtime")
+if (WIN32)
+  set_target_properties(hsa-runtime64 PROPERTIES
+                        CXX_STANDARD 20
+                        CXX_STANDARD_REQUIRED ON)
+endif()
 
   if (BUILD_SHARED_LIBS)
     add_dependencies(hsa-runtime64 hsakmt)
@@ -169,15 +183,20 @@ endif()
 if (ENABLE_ASAN_PACKAGING)
   # ASAN Package requires only asan component with libraries and license file
   set(CPACK_COMPONENTS_ALL asan)
+  set( COMP_TYPE "asan" )
 else()
   set(CPACK_COMPONENTS_ALL binary dev)
+  set( COMP_TYPE "binary" )
 endif()
+
+set(PKG_MAINTAINER_NM "AMD HSA Support")
+set(PKG_MAINTAINER_EMAIL "dl.HSA-Runtime-Support@amd.com")
 set(CPACK_DEB_COMPONENT_INSTALL ON)
 set(CPACK_RPM_COMPONENT_INSTALL ON)
 set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc.")
 set(CPACK_PACKAGE_VERSION ${PACKAGE_VERSION_STRING})
-set(CPACK_PACKAGE_CONTACT "AMD HSA Support <dl.HSA-Runtime-Support@amd.com>")
-set(CPACK_COMPONENT_DESCRIPTION "AMD Heterogeneous System Architecture HSA - Linux HSA Runtime for Boltzmann (ROCm) platforms\nIncludes HSAKMT, the user-mode API interfaces used to interact with the ROCk driver.\n Contains the headers, pkgonfig and\n cmake files for ROCT.")
+set(CPACK_PACKAGE_CONTACT "${PKG_MAINTAINER_NM} <${PKG_MAINTAINER_EMAIL}>")
+set(CPACK_COMPONENT_DESCRIPTION "Includes HSAKMT, the ROCk driver, headers, pkgonfig and cmake files for ROCT.")
 set(CPACK_COMPONENT_BINARY_DESCRIPTION "AMD Heterogeneous System Architecture HSA - Linux HSA Runtime for Boltzmann (ROCm) platforms")
 set(CPACK_COMPONENT_DEV_DESCRIPTION "AMD Heterogeneous System Architecture HSA development package.\n This package contains the headers and cmake files for the rocr-runtime package.")
 set(CPACK_COMPONENT_ASAN_DESCRIPTION "AMD Heterogeneous System Architecture HSA - Linux HSA instrumented libraries for Boltzmann (ROCm) platforms")
@@ -187,6 +206,7 @@ if (DEFINED ENV{ROCM_LIBPATCH_VERSION})
   message("Using CPACK_PACKAGE_VERSION ${CPACK_PACKAGE_VERSION}")
 endif()
 
+if (UNIX)
 # Debian package specific variables
 set(CPACK_DEBIAN_BINARY_PACKAGE_NAME "hsa-rocr")
 set(CPACK_DEBIAN_DEV_PACKAGE_NAME "hsa-rocr-dev")
@@ -223,6 +243,10 @@ set(CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS "libdrm-amdgpu-dev | libdrm-dev, rocm-core
 set(CPACK_DEBIAN_ASAN_PACKAGE_RECOMMENDS "libdrm-amdgpu-dev")
 
 set(CPACK_DEBIAN_BINARY_PACKAGE_RECOMMENDS "libdrm-amdgpu-amdgpu1")
+else()
+set(CPACK_DEBIAN_BINARY_PACKAGE_DEPENDS "hsakmt-roct")
+set(CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS "hsakmt-roct")
+endif()
 if (ROCM_DEP_ROCMCORE)
   string(APPEND CPACK_DEBIAN_BINARY_PACKAGE_DEPENDS ", rocm-core")
   string(APPEND CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS ", rocm-core-asan")
@@ -244,6 +268,7 @@ set(CPACK_RPM_DEV_PACKAGE_OBSOLETES "hsakmt-roct,hsakmt-roct-devel,hsakmt-roct-d
 
 set(CPACK_RPM_DEV_PACKAGE_NAME "hsa-rocr-devel")
 set(CPACK_RPM_ASAN_PACKAGE_NAME "hsa-rocr-asan")
+if (UNIX)
 if (DEFINED ENV{CPACK_RPM_PACKAGE_RELEASE})
   set(CPACK_RPM_PACKAGE_RELEASE $ENV{CPACK_RPM_PACKAGE_RELEASE})
 else()
@@ -254,6 +279,7 @@ string(APPEND CPACK_RPM_PACKAGE_RELEASE "%{?dist}")
 set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
 message("CPACK_RPM_PACKAGE_RELEASE: ${CPACK_RPM_PACKAGE_RELEASE}")
 set(CPACK_RPM_PACKAGE_LICENSE "NCSA")
+endif()
 
 ## Process the Rpm install/remove scripts to update the CPACK variables
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/RPM/Binary/post.in" RPM/Binary/post @ONLY)
@@ -289,7 +315,7 @@ endif()
 if (ROCM_DEP_ROCMCORE)
   string(APPEND CPACK_RPM_BINARY_PACKAGE_REQUIRES " rocm-core")
   string(APPEND CPACK_RPM_ASAN_PACKAGE_REQUIRES " rocm-core-asan")
-else()
+elseif (UNIX)
   string(REGEX REPLACE ",? ?rocm-core" "" CPACK_RPM_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
   string(REGEX REPLACE ",? ?rocm-core" "" CPACK_DEBIAN_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
   string(REGEX REPLACE ",? ?rocm-core" "" CPACK_RPM_DEV_PACKAGE_REQUIRES ${CPACK_RPM_DEV_PACKAGE_REQUIRES})
@@ -317,6 +343,7 @@ include(CPack)
 # Group binary and dev component to single package
 if(NOT BUILD_SHARED_LIBS)
     cpack_add_component_group("static")
+    set( COMP_TYPE "static" )
     cpack_add_component(binary  GROUP static)
     cpack_add_component(dev GROUP static)
 endif()
@@ -324,3 +351,6 @@ endif()
 cpack_add_component(asan
   DISPLAY_NAME "ASAN"
   DESCRIPTION "ASAN libraries for rocr-runtime")
+
+# Debian specific packaging configuration install lintian files
+configure_pkg( ${CORE_TARGET} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )

@@ -1,22 +1,8 @@
-/* Copyright (c) 2020 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip/hip_runtime.h>
 #include "hip_internal.hpp"
@@ -24,6 +10,7 @@
 #include "platform/context.hpp"
 #include "platform/command.hpp"
 #include "platform/memory.hpp"
+#include "os/os.hpp"
 
 namespace hip {
 
@@ -31,6 +18,10 @@ namespace hip {
 hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0, bool use_host_ptr = 0);
 hipError_t ihipMemPrefetchAsync(const void* dev_ptr, size_t count, hipMemLocation location,
                                 hipStream_t stream);
+hipError_t ihipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t count,
+                                     hipMemLocation* prefetch_locs, size_t* prefetch_loc_idxs,
+                                     size_t num_prefetch_locs, unsigned long long flags,
+                                     hipStream_t stream);
 hipError_t ihipMemAdvise(const void* dev_ptr, size_t count, hipMemoryAdvise advice,
                          hipMemLocation location);
 
@@ -39,31 +30,61 @@ static_assert(hipCpuDeviceId == amd::CpuDeviceId, "CPU device ID mismatch with R
 static_assert(hipInvalidDeviceId == amd::InvalidDeviceId,
               "Invalid device ID mismatch with ROCclr!");
 
-static_assert(static_cast<uint32_t>(hipMemAdviseSetReadMostly) ==
-              amd::MemoryAdvice::SetReadMostly, "Enum mismatch with ROCclr!");
+static_assert(static_cast<uint32_t>(hipMemAdviseSetReadMostly) == amd::MemoryAdvice::SetReadMostly,
+              "Enum mismatch with ROCclr!");
 static_assert(static_cast<uint32_t>(hipMemAdviseUnsetReadMostly) ==
-              amd::MemoryAdvice::UnsetReadMostly, "Enum mismatch with ROCclr!");
+                  amd::MemoryAdvice::UnsetReadMostly,
+              "Enum mismatch with ROCclr!");
 static_assert(static_cast<uint32_t>(hipMemAdviseSetPreferredLocation) ==
-              amd::MemoryAdvice::SetPreferredLocation, "Enum mismatch with ROCclr!");
+                  amd::MemoryAdvice::SetPreferredLocation,
+              "Enum mismatch with ROCclr!");
 static_assert(static_cast<uint32_t>(hipMemAdviseUnsetPreferredLocation) ==
-              amd::MemoryAdvice::UnsetPreferredLocation, "Enum mismatch with ROCclr!");
-static_assert(static_cast<uint32_t>(hipMemAdviseSetAccessedBy) ==
-              amd::MemoryAdvice::SetAccessedBy, "Enum mismatch with ROCclr!");
+                  amd::MemoryAdvice::UnsetPreferredLocation,
+              "Enum mismatch with ROCclr!");
+static_assert(static_cast<uint32_t>(hipMemAdviseSetAccessedBy) == amd::MemoryAdvice::SetAccessedBy,
+              "Enum mismatch with ROCclr!");
 static_assert(static_cast<uint32_t>(hipMemAdviseUnsetAccessedBy) ==
-              amd::MemoryAdvice::UnsetAccessedBy, "Enum mismatch with ROCclr!");
+                  amd::MemoryAdvice::UnsetAccessedBy,
+              "Enum mismatch with ROCclr!");
 static_assert(static_cast<uint32_t>(hipMemAdviseSetCoarseGrain) ==
-              amd::MemoryAdvice::SetCoarseGrain, "Enum mismatch with ROCclr!");
+                  amd::MemoryAdvice::SetCoarseGrain,
+              "Enum mismatch with ROCclr!");
 static_assert(static_cast<uint32_t>(hipMemAdviseUnsetCoarseGrain) ==
-              amd::MemoryAdvice::UnsetCoarseGrain, "Enum mismatch with ROCclr!");
+                  amd::MemoryAdvice::UnsetCoarseGrain,
+              "Enum mismatch with ROCclr!");
 
 static_assert(static_cast<uint32_t>(hipMemRangeAttributeReadMostly) ==
-              amd::MemRangeAttribute::ReadMostly, "Enum mismatch with ROCclr!");
+                  amd::MemRangeAttribute::ReadMostly,
+              "Enum mismatch with ROCclr!");
 static_assert(static_cast<uint32_t>(hipMemRangeAttributePreferredLocation) ==
-              amd::MemRangeAttribute::PreferredLocation, "Enum mismatch with ROCclr!");
+                  amd::MemRangeAttribute::PreferredLocation,
+              "Enum mismatch with ROCclr!");
 static_assert(static_cast<uint32_t>(hipMemRangeAttributeAccessedBy) ==
-              amd::MemRangeAttribute::AccessedBy, "Enum mismatch with ROCclr!");
+                  amd::MemRangeAttribute::AccessedBy,
+              "Enum mismatch with ROCclr!");
 static_assert(static_cast<uint32_t>(hipMemRangeAttributeLastPrefetchLocation) ==
-              amd::MemRangeAttribute::LastPrefetchLocation, "Enum mismatch with ROCclr!");
+                  amd::MemRangeAttribute::LastPrefetchLocation,
+              "Enum mismatch with ROCclr!");
+
+// ================================================================================================
+static bool AllDevicesSupportPageableMemoryAccess() {
+  for (const auto& hip_device : g_devices) {
+    if (!hip_device->devices()[0]->info().hmmCpuMemoryAccessible_) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// ================================================================================================
+static bool AllDevicesSupportHmm() {
+  for (const auto& hip_device : g_devices) {
+    if (!hip_device->devices()[0]->info().hmmSupported_) {
+      return false;
+    }
+  }
+  return true;
+}
 
 // ================================================================================================
 hipError_t hipMallocManaged(void** dev_ptr, size_t size, unsigned int flags) {
@@ -84,8 +105,7 @@ hipError_t hipMallocManaged(void** dev_ptr, size_t size, unsigned int flags) {
 }
 
 // ================================================================================================
-hipError_t hipMemPrefetchAsync(const void* dev_ptr, size_t count, int device,
-                               hipStream_t stream) {
+hipError_t hipMemPrefetchAsync(const void* dev_ptr, size_t count, int device, hipStream_t stream) {
   HIP_INIT_API(hipMemPrefetchAsync, dev_ptr, count, device, stream);
   CHECK_STREAM_CAPTURE_SUPPORTED();
   hipMemLocation location;
@@ -108,6 +128,19 @@ hipError_t hipMemPrefetchAsync_v2(const void* dev_ptr, size_t count, hipMemLocat
     HIP_RETURN(hipErrorInvalidValue);
   }
   HIP_RETURN(ihipMemPrefetchAsync(dev_ptr, count, location, stream));
+}
+
+// ================================================================================================
+hipError_t hipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t count,
+                                    hipMemLocation* prefetch_locs, size_t* prefetch_loc_idxs,
+                                    size_t num_prefetch_locs, unsigned long long flags,
+                                    hipStream_t stream) {
+  HIP_INIT_API(hipMemPrefetchBatchAsync, dev_ptrs, sizes, count, prefetch_locs, prefetch_loc_idxs,
+               num_prefetch_locs, flags, stream);
+  CHECK_STREAM_CAPTURE_SUPPORTED();
+
+  HIP_RETURN(ihipMemPrefetchBatchAsync(dev_ptrs, sizes, count, prefetch_locs, prefetch_loc_idxs,
+                                       num_prefetch_locs, flags, stream));
 }
 
 // ================================================================================================
@@ -147,8 +180,8 @@ hipError_t hipMemRangeGetAttribute(void* data, size_t data_size, hipMemRangeAttr
   amd::Device* dev = g_devices[0]->devices()[0];
 
   // Get the allocation attribute from AMD HMM
-  if (!dev->GetSvmAttributes(&data, &data_size, reinterpret_cast<int*>(&attribute), 1,
-                             dev_ptr, count)) {
+  if (!dev->GetSvmAttributes(&data, &data_size, reinterpret_cast<int*>(&attribute), 1, dev_ptr,
+                             count)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -159,19 +192,17 @@ hipError_t hipMemRangeGetAttribute(void* data, size_t data_size, hipMemRangeAttr
 hipError_t hipMemRangeGetAttributes(void** data, size_t* data_sizes,
                                     hipMemRangeAttribute* attributes, size_t num_attributes,
                                     const void* dev_ptr, size_t count) {
-  HIP_INIT_API(hipMemRangeGetAttributes, data, data_sizes,
-               attributes, num_attributes, dev_ptr, count);
+  HIP_INIT_API(hipMemRangeGetAttributes, data, data_sizes, attributes, num_attributes, dev_ptr,
+               count);
 
   if ((data == nullptr) || (data_sizes == nullptr) || (attributes == nullptr) ||
       (num_attributes == 0) || (dev_ptr == nullptr) || (count == 0)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  if (*data_sizes > 0) {
-    for (int i = 0 ; i<*data_sizes ; i++) {
-      if (!data[i]) {
-        HIP_RETURN(hipErrorInvalidValue);
-      }
+  for (int i = 0; i < num_attributes; i++) {
+    if (!data[i]) {
+      HIP_RETURN(hipErrorInvalidValue);
     }
   }
 
@@ -188,8 +219,8 @@ hipError_t hipMemRangeGetAttributes(void** data, size_t* data_sizes,
   // Shouldn't matter for which device the interface is called
   amd::Device* dev = g_devices[0]->devices()[0];
   // Get the allocation attributes from AMD HMM
-  if (!dev->GetSvmAttributes(data, data_sizes, reinterpret_cast<int*>(attributes),
-      num_attributes, dev_ptr, count)) {
+  if (!dev->GetSvmAttributes(data, data_sizes, reinterpret_cast<int*>(attributes), num_attributes,
+                             dev_ptr, count)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -197,8 +228,8 @@ hipError_t hipMemRangeGetAttributes(void** data, size_t* data_sizes,
 }
 
 // ================================================================================================
-hipError_t hipStreamAttachMemAsync(hipStream_t stream, void* dev_ptr,
-                                   size_t length, unsigned int flags) {
+hipError_t hipStreamAttachMemAsync(hipStream_t stream, void* dev_ptr, size_t length,
+                                   unsigned int flags) {
   HIP_INIT_API(hipStreamAttachMemAsync, stream, dev_ptr, length, flags);
   // stream can be null, length can be 0.
   if (dev_ptr == nullptr) {
@@ -217,8 +248,9 @@ hipError_t hipStreamAttachMemAsync(hipStream_t stream, void* dev_ptr,
   // host-accessible region of system-allocated pageable memory.
   // This type of memory may only be specified if the device associated with the
   // stream reports a non-zero value for the device attribute hipDevAttrPageableMemoryAccess.
-  hip::Stream* hip_stream = (stream == nullptr || stream == hipStreamLegacy) ?
-                             hip::getCurrentDevice()->NullStream() : hip::getStream(stream);
+  hip::Stream* hip_stream = (stream == nullptr || stream == hipStreamLegacy)
+                                ? hip::getCurrentDevice()->NullStream()
+                                : hip::getStream(stream);
   size_t offset = 0;
   amd::Memory* memObj = getMemoryObject(dev_ptr, offset);
   if (memObj == nullptr) {
@@ -258,9 +290,9 @@ hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align, bool use_hos
   // allocation in the device driver
   if (use_host_ptr) {
     // If the host pointer is already allocated, map it to svm fine grain buffer
-    *ptr = amd::SvmBuffer::malloc(ctx, CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_USE_HOST_PTR, size,
-                                  (align == 0) ? dev.info().memBaseAddrAlign_ : align, nullptr,
-                                  *ptr);
+    *ptr =
+        amd::SvmBuffer::malloc(ctx, CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_USE_HOST_PTR, size,
+                               (align == 0) ? dev.info().memBaseAddrAlign_ : align, nullptr, *ptr);
   } else {
     *ptr = amd::SvmBuffer::malloc(ctx, CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR, size,
                                   (align == 0) ? dev.info().memBaseAddrAlign_ : align);
@@ -268,12 +300,12 @@ hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align, bool use_hos
   if (*ptr == nullptr) {
     return hipErrorMemoryAllocation;
   }
-  size_t offset = 0; //this is ignored
+  size_t offset = 0;  // this is ignored
   amd::Memory* memObj = getMemoryObject(*ptr, offset);
   if (memObj == nullptr) {
     return hipErrorMemoryAllocation;
   }
-  //saves the current device id so that it can be accessed later
+  // saves the current device id so that it can be accessed later
   memObj->getUserData().deviceId = hip::getCurrentDevice()->deviceId();
 
   ClPrint(amd::LOG_INFO, amd::LOG_API, "ihipMallocManaged ptr=0x%zx", *ptr);
@@ -300,9 +332,19 @@ hipError_t ihipMemPrefetchAsync(const void* dev_ptr, size_t count, hipMemLocatio
   const bool cpuAccess = isHost || isHostNuma || isHostCurrent;
 
   // Determine the target device index:
-  //  - for host-prefetch and host-current, always use device 0
+  //  - for host-prefetch, use default CPU agent
+  //  - for host-current, query the current thread's NUMA node ID
   //  - for host-NUMA or device-prefetch, use the provided id
-  int targetDevice = (isHost || isHostCurrent) ? hipCpuDeviceId : location.id;
+  int targetDevice;
+  if (isHost) {
+    targetDevice = hipCpuDeviceId;
+  } else if (isHostCurrent) {
+    uint32_t numa_node = amd::numa::getCurrentNumaNode();
+    targetDevice =
+        (numa_node == static_cast<uint32_t>(-1)) ? hipCpuDeviceId : static_cast<int>(numa_node);
+  } else {
+    targetDevice = location.id;
+  }
 
   amd::Device* dev = nullptr;
   if (cpuAccess == false) {
@@ -318,13 +360,13 @@ hipError_t ihipMemPrefetchAsync(const void* dev_ptr, size_t count, hipMemLocatio
   // Pick the specified stream or Null one from the provided target device
   if (cpuAccess == true) {
     hip_stream = (stream == nullptr || stream == hipStreamLegacy)
-        ? hip::getCurrentDevice()->NullStream()
-        : hip::getStream(stream);
+                     ? hip::getCurrentDevice()->NullStream()
+                     : hip::getStream(stream);
   } else {
     dev = g_devices[targetDevice]->devices()[0];
     hip_stream = (stream == nullptr || stream == hipStreamLegacy)
-        ? g_devices[targetDevice]->NullStream()
-        : hip::getStream(stream);
+                     ? g_devices[targetDevice]->NullStream()
+                     : hip::getStream(stream);
   }
 
   if (hip_stream == nullptr) {
@@ -334,11 +376,118 @@ hipError_t ihipMemPrefetchAsync(const void* dev_ptr, size_t count, hipMemLocatio
   amd::Command::EventWaitList waitList;
   amd::SvmPrefetchAsyncCommand* command = new amd::SvmPrefetchAsyncCommand(
       *hip_stream, waitList, dev_ptr, count, dev, cpuAccess, targetDevice);
+  command->enqueue();
+  command->release();
+  return hipSuccess;
+}
+// ================================================================================================
+hipError_t ihipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t count,
+                                     hipMemLocation* prefetch_locs, size_t* prefetch_loc_idxs,
+                                     size_t num_prefetch_locs, unsigned long long flags,
+                                     hipStream_t stream) {
+  if ((dev_ptrs == nullptr) || (sizes == nullptr) || (prefetch_locs == nullptr) ||
+      (prefetch_loc_idxs == nullptr)) {
+    return hipErrorInvalidValue;
+  }
+
+  if ((count == 0) || (num_prefetch_locs == 0) || (num_prefetch_locs > count)) {
+    return hipErrorInvalidValue;
+  }
+
+  if ((flags != 0) || (stream == nullptr)) {
+    return hipErrorInvalidValue;
+  }
+
+  if (prefetch_loc_idxs[0] != 0) {
+    return hipErrorInvalidValue;
+  }
+
+  for (size_t idx = 0; idx < num_prefetch_locs; idx++) {
+    if (prefetch_loc_idxs[idx] >= count) {
+      return hipErrorInvalidValue;
+    }
+    if (idx > 0 && prefetch_loc_idxs[idx] <= prefetch_loc_idxs[idx - 1]) {
+      return hipErrorInvalidValue;
+    }
+  }
+
+  if (!AllDevicesSupportHmm()) {
+    return hipErrorInvalidValue;
+  }
+
+  getStreamPerThread(stream);
+
+  hip::Stream* hip_stream = hip::getStream(stream);
+  if (hip_stream == nullptr) {
+    return hipErrorInvalidValue;
+  }
+
+  bool requires_pageable_support = false;
+  amd::SvmPrefetchBatchAsyncCommand* command = nullptr;
+  {
+    std::vector<void*> dev_ptrs_vec(count);
+    std::vector<size_t> sizes_vec(count);
+    std::vector<amd::Device*> devices_vec(count);
+
+    // Validate input pointers
+    for (size_t op_idx = 0; op_idx < count; op_idx++) {
+      if (sizes[op_idx] == 0 || dev_ptrs[op_idx] == nullptr) {
+        return hipErrorInvalidValue;
+      }
+    }
+
+    // Batched memory object lookup with single lock acquisition
+    std::vector<size_t> offsets;
+    std::vector<amd::Memory*> mem_objs = getMemoryObjectBatch(dev_ptrs, count, offsets);
+
+    // Validate and prepare each operation
+    size_t current_loc = 0;
+    for (size_t op_idx = 0; op_idx < count; op_idx++) {
+      void* dev_ptr = dev_ptrs[op_idx];
+      size_t size = sizes[op_idx];
+      amd::Memory* mem_obj = mem_objs[op_idx];
+      size_t offset = offsets[op_idx];
+
+      if ((mem_obj == nullptr) || (size > (mem_obj->getSize() - offset))) {
+        return hipErrorInvalidValue;
+      }
+
+      const bool is_managed_memory =
+          (mem_obj->getMemFlags() & (CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR)) != 0;
+
+      requires_pageable_support |= !is_managed_memory;
+
+      if (current_loc + 1 < num_prefetch_locs && op_idx >= prefetch_loc_idxs[current_loc + 1]) {
+        current_loc++;
+      }
+      hipMemLocation location = prefetch_locs[current_loc];
+
+      amd::Device* dev = nullptr;
+      if (location.type == hipMemLocationTypeDevice) {
+        if (location.id < 0 || static_cast<size_t>(location.id) >= g_devices.size()) {
+          return hipErrorInvalidValue;
+        }
+        dev = g_devices[location.id]->devices()[0];
+      }
+
+      dev_ptrs_vec[op_idx] = dev_ptr;
+      sizes_vec[op_idx] = size;
+      devices_vec[op_idx] = dev;
+    }
+
+    if (requires_pageable_support && !AllDevicesSupportPageableMemoryAccess()) {
+      return hipErrorInvalidValue;
+    }
+
+    command =
+        new amd::SvmPrefetchBatchAsyncCommand(*hip_stream, dev_ptrs_vec, sizes_vec, devices_vec);
+  }
   if (command == nullptr) {
     return hipErrorOutOfMemory;
   }
   command->enqueue();
   command->release();
+
   return hipSuccess;
 }
 // ================================================================================================
@@ -368,10 +517,16 @@ hipError_t ihipMemAdvise(const void* dev_ptr, size_t count, hipMemoryAdvise advi
       use_cpu = true;
       break;
     case hipMemLocationTypeHost:
-    case hipMemLocationTypeHostNumaCurrent:
       targetDevice = hipCpuDeviceId;
       use_cpu = true;
       break;
+    case hipMemLocationTypeHostNumaCurrent: {
+      uint32_t numa_node = amd::numa::getCurrentNumaNode();
+      targetDevice =
+          (numa_node == static_cast<uint32_t>(-1)) ? hipCpuDeviceId : static_cast<int>(numa_node);
+      use_cpu = true;
+      break;
+    }
     default:
       return hipErrorInvalidValue;
   }
@@ -397,4 +552,4 @@ hipError_t ihipMemAdvise(const void* dev_ptr, size_t count, hipMemoryAdvise advi
 
   return hipSuccess;
 }
-} //namespace hip
+}  // namespace hip

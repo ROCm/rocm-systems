@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #ifndef HIP_CODE_OBJECT_HPP
 #define HIP_CODE_OBJECT_HPP
@@ -55,6 +39,10 @@ constexpr char kHipFatBinName_[] = "hipfatbin-";
 constexpr char kOffloadKindHipv4_[] = "hipv4-";  // bundled code objects need the prefix
 constexpr char kOffloadHipV4FatBinName_[] = "hipfatbin-hipv4-";
 
+// Fat binary wrapper magic values
+constexpr uint32_t kHipfMagic = 0x48495046;  // "HIPF" little-endian (normal fat binary)
+constexpr uint32_t kHipkMagic = 0x4B504948;  // "HIPK" little-endian (kpack'd binary)
+
 // Clang Offload bundler description & Header in uncompressed mode.
 struct ClangOffloadBundleInfo {
   uint64_t offset;
@@ -81,10 +69,10 @@ struct ClangOffloadBundleCompressedHeader {
 };
 }  // namespace symbols
 
-//Forward Declaration for friend usage
+// Forward Declaration for friend usage
 class PlatformState;
 
-//Code Object base class
+// Code Object base class
 class CodeObject {
  public:
   virtual ~CodeObject() {}
@@ -96,95 +84,107 @@ class CodeObject {
   friend const std::vector<hipModule_t>& modules();
 };
 
-//Dynamic Code Object
+// Dynamic Code Object
 class DynCO : public CodeObject {
   // Guards Dynamic Code object
-  amd::Monitor dclock_{true};
+  std::recursive_mutex dclock_;
 
-public:
+ public:
   DynCO() : device_id_(ihipGetDevice()), fb_info_(nullptr), module_(nullptr) {}
   virtual ~DynCO();
 
-  //LoadsCodeObject and its data
-  hipError_t loadCodeObject(const char* fname, const void* image=nullptr);
+  // LoadsCodeObject and its data
+  hipError_t loadCodeObject(const char* fname, const void* image = nullptr);
   hipModule_t getModule() const { return module_; };
 
-  //Gets GlobalVar/Functions from a dynamically loaded code object
-  hipError_t getDynFunc(hipFunction_t* hfunc, std::string func_name);
+  // Gets GlobalVar/Functions from a dynamically loaded code object
+  hipError_t getDynFunc(hipFunction_t* hfunc, const std::string& func_name);
   hipError_t getFuncCount(unsigned int* count);
   bool isValidDynFunc(const void* hfunc);
-  hipError_t getDeviceVar(DeviceVar** dvar, std::string var_name);
+  hipError_t GetDeviceVar(amd::Memory** mem, const std::string& var_name);
+  hip::Var* getVar(const std::string& var_name);
 
   hipError_t getManagedVarPointer(std::string name, void** pointer, size_t* size_ptr) const {
     auto it = vars_.find(name);
-    if (it != vars_.end() && it->second->getVarKind() == Var::DVK_Managed) {
+    if (it != vars_.end() && it->second->GetVarKind() == Var::DVK_Managed) {
       if (pointer != nullptr) {
-        *pointer = it->second->getManagedVarPtr();
+        *pointer = it->second->GetManagedVarPtr();
       }
       if (size_ptr != nullptr) {
-        *size_ptr = it->second->getSize();
+        *size_ptr = it->second->GetSize();
       }
     }
     return hipSuccess;
   }
 
-private:
+ private:
   int device_id_;
   FatBinaryInfo* fb_info_;
   hipModule_t module_;
 
-  //Maps for vars/funcs, could be keyed in with std::string name
+  // Maps for vars/funcs, could be keyed in with std::string name
   std::unordered_map<std::string, Function*> functions_;
   std::unordered_map<std::string, Var*> vars_;
 
-  //Populate Global Vars/Funcs from an code object(@ module_load)
+  // Populate Global Vars/Funcs from an code object(@ module_load)
   hipError_t populateDynGlobalFuncs();
   hipError_t populateDynGlobalVars();
   hipError_t initDynManagedVars(const std::string& managedVar);
 };
 
-//Static Code Object
-class StatCO: public CodeObject {
-  // Guards Static Code object
-  amd::Monitor sclock_{true};
-public:
-  StatCO();
+// Static Code Object
+class StatCO : public CodeObject {
+ public:
+  explicit StatCO(const PlatformState& owner);
   virtual ~StatCO();
 
-  //Add/Remove/Digest Fat Binaries passed to us from "__hipRegisterFatBinary"
-  FatBinaryInfo** addFatBinary(const void* data, bool initialized, bool& success);
-  hipError_t removeFatBinary(FatBinaryInfo** module);
-  hipError_t digestFatBinary(const void* data, FatBinaryInfo*& programs);
+  // Add/Remove/Digest Fat Binaries passed to us from "__hipRegisterFatBinary"
+  FatBinaryInfo** AddFatBinary(const void* data, bool& success);
+  FatBinaryInfo** AddKpackBinary(const void* hipk_metadata, const void* wrapper_addr,
+                                 bool& success);
+  hipError_t RemoveFatBinary(FatBinaryInfo** module);
+  hipError_t DigestFatBinary(const void* data, FatBinaryInfo*& programs);
+  void RemoveAllFatBinaries();
 
-  //Register vars/funcs given to use from __hipRegister[Var/Func/ManagedVar]
-  hipError_t registerStatFunction(const void* hostFunction, Function* func);
-  hipError_t registerStatGlobalVar(const void* hostVar, Var* var);
-  hipError_t registerStatManagedVar(Var *var);
+  // Register vars/funcs given to use from __hipRegister[Var/Func/ManagedVar]
+  hipError_t RegisterFunction(const void* hostFunction, Function* func);
+  hipError_t RegisterGlobalVar(const void* hostVar, Var* var);
+  hipError_t RegisterManagedVar(Var* var);
 
-  //Retrive Vars/Funcs for a given hostSidePtr(const void*), unless stated otherwise.
-  const char* getStatFuncName(const void* hostFunction);
-  hipError_t getStatFunc(hipFunction_t* hfunc, const void* hostFunction, int deviceId);
-  hipError_t getStatFuncAttr(hipFuncAttributes* func_attr, const void* hostFunction, int deviceId);
-  hipError_t getStatGlobalVar(const void* hostVar, int deviceId, hipDeviceptr_t* dev_ptr,
-                              size_t* size_ptr);
+  // Retrive Vars/Funcs for a given hostSidePtr(const void*), unless stated otherwise.
+  const char* GetFuncName(const void* hostFunction);
+  hipError_t GetFunc(hipFunction_t* hfunc, const void* hostFunction, int deviceId);
+  hipError_t GetFuncAttr(hipFuncAttributes* func_attr, const void* hostFunction, int deviceId);
+  hipError_t GetGlobalVar(const void* hostVar, int deviceId, hipDeviceptr_t* dev_ptr,
+                          size_t* size_ptr);
 
-  //Managed variable is a defined symbol in code object
-  //pointer to the alocated managed memory has to be copied to the address of symbol
-  hipError_t initStatManagedVarDevicePtr(int deviceId);
-private:
-  friend class hip::PlatformState;
-  //Populated during __hipRegisterFatBinary
+  // Managed variable is a defined symbol in code object
+  // pointer to the alocated managed memory has to be copied to the address of symbol
+  hipError_t InitManagedVarDevicePtr(int deviceId);
+
+  // Find a deferred managed var whose mmap address equals ptr
+  Var* FindDeferredManagedVar(const void* ptr);
+
+  // Resize device-specific data structures for all registered functions and variables
+  void ResizeForDevices(size_t device_count);
+
+ private:
+  std::recursive_mutex sclock_;            //!< Guards Static Code object
+  const PlatformState& owner_;             //!< Reference to owning PlatformState
+  //! Populated during __hipRegisterFatBinary
   std::unordered_map<const void*, FatBinaryInfo*> modules_;
-  //Populated during __hipRegisterFuncs
+  //! Populated during __hipRegisterFuncs
   std::unordered_map<const void*, Function*> functions_;
-  //Populated during __hipRegisterVars
-  std::unordered_map<const void*, Var*> vars_;
-  //Populated during __hipRegisterManagedVar
+  std::unordered_map<const void*, Var*> vars_;               //!< Populated during __hipRegisterVars
+  //! Populated during __hipRegisterManagedVar
   std::unordered_map<FatBinaryInfo**, std::vector<Var*> > managedVars_;
-  //Reverse mapping of modules to speed up removal
+  //! Reverse mapping of modules to speed up removal
   std::unordered_map<FatBinaryInfo**, const void*> module_to_hostModule_;
+  //! Reverse mapping of functions
   std::unordered_map<FatBinaryInfo**, std::vector<const void*> > module_to_hostFunctions_;
+  //! Reverse mapping of vars
   std::unordered_map<FatBinaryInfo**, std::vector<const void*> > module_to_hostVars_;
+  //! Tracks managed var initialization per device
   std::unordered_map<int, bool> managedVarsDevicePtrInitalized_;
 };
 

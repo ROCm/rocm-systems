@@ -25,6 +25,7 @@
 #include "lib/output/csv.hpp"
 #include "outputfile.hpp"
 
+#include <algorithm>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -54,6 +55,13 @@ CodeFile::CodeFile(Fspath _dir, std::shared_ptr<AddressTable> _table)
 , table(std::move(_table))
 {}
 
+void
+CodeFile::addCodeobj(uint64_t id)
+{
+    if(std::find(codeobj_ids.begin(), codeobj_ids.end(), id) == codeobj_ids.end())
+        codeobj_ids.emplace_back(id);
+}
+
 CodeFile::~CodeFile()
 {
     std::vector<std::pair<pcinfo_t, std::unique_ptr<CodeLine>>> vec;
@@ -72,8 +80,7 @@ CodeFile::~CodeFile()
                   vec.end(),
                   [](const std::pair<pcinfo_t, std::unique_ptr<CodeLine>>& a,
                      const std::pair<pcinfo_t, std::unique_ptr<CodeLine>>& b) {
-                      if(a.first.marker_id == b.first.marker_id) return a.first.addr < b.first.addr;
-                      return a.first.marker_id < b.first.marker_id;
+                      return a.first < b.first;
                   });
 
         std::stringstream ofs;
@@ -92,8 +99,8 @@ CodeFile::~CodeFile()
             if(kernel_names.find(pc) != kernel_names.end())
             {
                 csv_encoder::write_row(ofs,
-                                       pc.marker_id,
-                                       pc.addr,
+                                       pc.code_object_id,
+                                       pc.address,
                                        "; " + kernel_names.at(pc).name,
                                        0,
                                        0,
@@ -102,8 +109,8 @@ CodeFile::~CodeFile()
                                        kernel_names.at(pc).demangled);
             }
             csv_encoder::write_row(ofs,
-                                   pc.marker_id,
-                                   pc.addr,
+                                   pc.code_object_id,
+                                   pc.address,
                                    line->code_line->inst,
                                    line->hitcount,
                                    line->latency,
@@ -138,16 +145,16 @@ CodeFile::~CodeFile()
         {
             std::stringstream code;
             code << "[\"; " << kernel_names.at(line.first).name << "\",0," << (isa.line_number - 1)
-                 << ",\"" << kernel_names.at(line.first).demangled << "\"," << line.first.marker_id
-                 << "," << line.first.addr << ",0,0,0,0]";
+                 << ",\"" << kernel_names.at(line.first).demangled << "\","
+                 << line.first.code_object_id << "," << line.first.address << ",0,0,0,0]";
             jcode.push_back(nlohmann::json::parse(code.str()));
         }
 
         std::stringstream code;
         code << "[\"" << isa.code_line->inst << "\",0," << isa.line_number << ",\""
-             << isa.code_line->comment << "\"," << line.first.marker_id << "," << line.first.addr
-             << "," << isa.hitcount << "," << isa.latency << "," << isa.stall << "," << isa.idle
-             << "]";
+             << isa.code_line->comment << "\"," << line.first.code_object_id << ","
+             << line.first.address << "," << isa.hitcount << "," << isa.latency << "," << isa.stall
+             << "," << isa.idle << "]";
 
         jcode.push_back(nlohmann::json::parse(code.str()));
 
@@ -175,6 +182,43 @@ CodeFile::~CodeFile()
     json["code"]    = jcode;
     json["version"] = TOOL_VERSION;
     json["header"]  = "ISA, _, LineNumber, Source, Codeobj, Vaddr, Hit, Latency, Stall, Idle";
+
+    nlohmann::json jfuncmap = nlohmann::json::array();
+    for(auto cid : codeobj_ids)
+    {
+        auto fmap = table->getFuncmap(cid);
+        if(!fmap) continue;
+
+        for(const auto& entry_ptr : fmap->entries)
+        {
+            if(!entry_ptr || entry_ptr->name.empty()) continue;
+
+            const char* kind_str = nullptr;
+            switch(entry_ptr->kind)
+            {
+                case rocprofiler::sdk::codeobj::funcmap::FuncmapEntryKind::Function:
+                    kind_str = "F";
+                    break;
+                case rocprofiler::sdk::codeobj::funcmap::FuncmapEntryKind::UserScope:
+                    kind_str = "U";
+                    break;
+                case rocprofiler::sdk::codeobj::funcmap::FuncmapEntryKind::Point:
+                    kind_str = "P";
+                    break;
+                case rocprofiler::sdk::codeobj::funcmap::FuncmapEntryKind::Kernel:
+                    kind_str = "K";
+                    break;
+            }
+
+            jfuncmap.push_back({cid,
+                                entry_ptr->id,
+                                kind_str,
+                                entry_ptr->name,
+                                entry_ptr->source_loc,
+                                entry_ptr->vaddr});
+        }
+    }
+    json["sqtt_funcmap"] = std::move(jfuncmap);
 
     OutputFile(dir / "code.json") << json;
 

@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "cl_common.hpp"
 #include "vdi_common.hpp"
@@ -28,9 +14,6 @@
 #endif  //_WIN32
 
 #include <mutex>
-
-amd::PlatformIDS amd::PlatformID::Platform =  //{ NULL };
-    {amd::ICDDispatchedObject::icdVendorDispatch_};
 
 static cl_int CL_API_CALL icdGetPlatformInfo(cl_platform_id platform, cl_platform_info param_name,
                                              size_t param_value_size, void* param_value,
@@ -86,8 +69,8 @@ cl_icd_dispatch amd::ICDDispatchedObject::icdVendorDispatch_[] = {
      WINDOWS_SWITCH(clEnqueueAcquireD3D10ObjectsKHR, NULL),
      WINDOWS_SWITCH(clEnqueueReleaseD3D10ObjectsKHR, NULL), clSetEventCallback, clCreateSubBuffer,
      clSetMemObjectDestructorCallback, clCreateUserEvent, clSetUserEventStatus,
-     clEnqueueReadBufferRect, clEnqueueWriteBufferRect, clEnqueueCopyBufferRect,
-     NULL, NULL, NULL, clCreateEventFromGLsyncKHR,
+     clEnqueueReadBufferRect, clEnqueueWriteBufferRect, clEnqueueCopyBufferRect, NULL, NULL, NULL,
+     clCreateEventFromGLsyncKHR,
 
      /* OpenCL 1.2*/
      clCreateSubDevices, clRetainDevice, clReleaseDevice, clCreateImage,
@@ -114,23 +97,16 @@ cl_icd_dispatch amd::ICDDispatchedObject::icdVendorDispatch_[] = {
          clEnqueueReleaseDX9MediaSurfacesKHR,
          NULL),  // KHRpfn_clEnqueueReleaseDX9MediaSurfacesKHR clEnqueueReleaseDX9MediaSurfacesKHR;
 
-     NULL,
-     NULL, NULL, NULL,
+     NULL, NULL, NULL, NULL,
 
      clCreateCommandQueueWithProperties, clCreatePipe, clGetPipeInfo, clSVMAlloc, clSVMFree,
      clEnqueueSVMFree, clEnqueueSVMMemcpy, clEnqueueSVMMemFill, clEnqueueSVMMap, clEnqueueSVMUnmap,
      clCreateSamplerWithProperties, clSetKernelArgSVMPointer, clSetKernelExecInfo,
-     clGetKernelSubGroupInfo,
-     clCloneKernel,
-     clCreateProgramWithIL,
-     clEnqueueSVMMigrateMem,
-     clGetDeviceAndHostTimer,
-     clGetHostTimer,
-     clGetKernelSubGroupInfo,
+     clGetKernelSubGroupInfo, clCloneKernel, clCreateProgramWithIL, clEnqueueSVMMigrateMem,
+     clGetDeviceAndHostTimer, clGetHostTimer, clGetKernelSubGroupInfo,
      clSetDefaultDeviceCommandQueue,
 
-     clSetProgramReleaseCallback,
-     clSetProgramSpecializationConstant }};
+     clSetProgramReleaseCallback, clSetProgramSpecializationConstant}};
 
 CL_API_ENTRY cl_int CL_API_CALL clIcdGetPlatformIDsKHR(cl_uint num_entries,
                                                        cl_platform_id* platforms,
@@ -142,6 +118,8 @@ CL_API_ENTRY cl_int CL_API_CALL clIcdGetPlatformIDsKHR(cl_uint num_entries,
 
   if (!amd::Runtime::initialized()) {
     amd::Runtime::init();
+    // Print the current path of the library
+    amd::Os::PrintLibraryLocation();
   }
 
   if (num_platforms != NULL && platforms == NULL) {

@@ -1,27 +1,5 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 from __future__ import annotations
 
@@ -29,16 +7,31 @@ import math
 import sys
 import traceback
 from io import StringIO
+from typing import Any, Optional
 
 import pandas as pd
 import plotext as plt
 import plotly.express as px
+import plotly.graph_objects as go
 from textual.widgets import Static
 
-from utils.mem_chart import plot_mem_chart
+from utils.mem_chart_gfx9 import plot_mem_chart as plot_mem_chart_gfx9
+from utils.mem_chart_gfx11 import plot_mem_chart as plot_mem_chart_gfx11
+
+# Constants
+MIN_PLOT_WIDTH = 20
+WIDTH_MULTIPLIER_SMALL = 3
+WIDTH_MULTIPLIER_TINY = 100
+HEIGHT_MULTIPLIER_SMALL = 10
+HEIGHT_MULTIPLIER_TINY = 300
+WIDTH_THRESHOLD_SMALL = 20
+WIDTH_THRESHOLD_TINY = 1
+HEIGHT_THRESHOLD_SMALL = 20
+HEIGHT_THRESHOLD_TINY = 0.5
+DEFAULT_WIDTH_OFFSET = 40
 
 
-def simple_bar(df, title=None):
+def simple_bar(df: pd.DataFrame, title: Optional[str] = None) -> Optional[str]:
     """
     Plot data with simple bar chart
     """
@@ -47,7 +40,8 @@ def simple_bar(df, title=None):
 
     if "Metric" in df.columns and "Avg" in df.columns:
         metric_dict = (
-            pd.DataFrame([df["Metric"], df["Avg"]])
+            pd
+            .DataFrame([df["Metric"], df["Avg"]])
             .replace("", 0)
             .replace(float("inf"), -1)  # It should not happen
             .replace(float("-inf"), -1)
@@ -63,20 +57,20 @@ def simple_bar(df, title=None):
     plt.clear_figure()
 
     # adjust plot size along x axis based on the max value
-    w = max(list(metric_dict.values())) - 40
-    if w < 20 and w > 1:
-        w *= 3
-    elif w < 1:
-        w *= 100
+    w = max(list(metric_dict.values())) - DEFAULT_WIDTH_OFFSET
+    if w < WIDTH_THRESHOLD_SMALL and w > WIDTH_THRESHOLD_TINY:
+        w *= WIDTH_MULTIPLIER_SMALL
+    elif w < WIDTH_THRESHOLD_TINY:
+        w *= WIDTH_MULTIPLIER_TINY
     plt.simple_bar(list(metric_dict.keys()), list(metric_dict.values()), width=w)
-    # plt.show()
+
     plot_content = plt.build()
     if not plot_content or plot_content.strip() == "":
         return None
-    return "\n" + plot_content + "\n"
+    return f"\n{plot_content}\n"
 
 
-def simple_multiple_bar(df, title=None):
+def simple_multiple_bar(df: pd.DataFrame, title: Optional[str] = None) -> Optional[str]:
     """
     Plot data with simple multiple bar chart
     """
@@ -92,51 +86,35 @@ def simple_multiple_bar(df, title=None):
     data = t_df.transpose().to_dict("split")["data"]
     labels = data.pop(0)
 
-    # plt.simple_multiple_bar(labels, data, labels = sub_labels) #, width=w)
-
-    # print(data)
     plt.theme("pro")
     # adjust plot size along y axis based on the max value
     h = max(max(y) for y in data)
-    # print(h)
-    if h < 20 and h > 0.5:
-        h *= 10
-    elif h < 0.5 or math.isclose(h, 0.5):
-        h *= 300
+
+    if h < HEIGHT_THRESHOLD_SMALL and h > HEIGHT_THRESHOLD_TINY:
+        h *= HEIGHT_MULTIPLIER_SMALL
+    elif h < HEIGHT_THRESHOLD_TINY or math.isclose(h, HEIGHT_THRESHOLD_TINY):
+        h *= HEIGHT_MULTIPLIER_TINY
 
     plt.plot_size(height=h)
     plt.multiple_bar(labels, data)
 
-    # plt.show()
     plot_content = plt.build()
     if not plot_content or plot_content.strip() == "":
         return None
-    return "\n" + plot_content + "\n"
+    return f"\n{plot_content}\n"
 
 
-def simple_box(df, orientation="v", title=None):
+def simple_box(
+    df: pd.DataFrame, orientation: str = "v", title: Optional[str] = None
+) -> Optional[str]:
     """
     Plot data with simple box/whisker chart.
     Accept pre-calculated data only for now.
     """
 
-    # Example:
-    # labels = ["apple", "bee", "cat", "dog"]
-    # datas = [
-    #     # max, q3, q2, q1, min
-    #     [10, 7, 5, 3, 1.5],
-    #     [19, 12.3, 9, 7, 4],
-    #     [15, 14, 11, 9, 8],
-    #     [13, 12, 11, 10, 6]]
-
-    # plt.box(labels, datas, width=0.1, hint='hint')
-    # plt.theme("pro")
-    # plt.title("Most Favored Pizzas in the World")
-    # plt.show()
-
     plt.clear_figure()
-    labels = []
-    data = []
+    labels: list[str] = []
+    data: list[list[float]] = []
 
     # TODO:
     # handle Nan and None properly
@@ -147,7 +125,7 @@ def simple_box(df, orientation="v", title=None):
     t_df = (
         df.fillna(0).replace("", 0).replace(float("inf"), -1).replace(float("-inf"), -1)
     )
-    for index, row in t_df.iterrows():
+    for _, row in t_df.iterrows():
         column_name = row.get("Metric") or row.get("Channel")
 
         if column_name is None:
@@ -159,14 +137,6 @@ def simple_box(df, orientation="v", title=None):
         data.append([row["Max"], row["Q3"], row["Median"], row["Q1"], row["Min"]])
 
     # TODO: need better fix for horizontal overflow
-    # labels_length *= 0.80
-    # print("~~~~~~~~~~~~~~~~~~~~")
-    # print(labels)
-    # print(labels_length)
-    # print(data)
-    # print("~~~~~~~~~~~~~~~~~~~~")
-    # print(plt.bar.__doc__)
-
     if orientation == "v":
         # adjust plot size along x axis based on total labels length
         plt.plot_size(labels_length, 30)
@@ -180,14 +150,19 @@ def simple_box(df, orientation="v", title=None):
     )
     plt.theme("pro")
 
-    # plt.show()
     plot_content = plt.build()
     if not plot_content or plot_content.strip() == "":
         return None
-    return "\n" + plot_content + "\n"
+    return f"\n{plot_content}\n"
 
 
-def px_simple_bar(df, title: str = None, id=None, style: dict = None, orientation="h"):
+def px_simple_bar(
+    df: pd.DataFrame,
+    title: Optional[str] = None,
+    id: Optional[int] = None,
+    style: Optional[dict[str, Any]] = None,
+    orientation: str = "h",
+) -> go.Figure:
     """
     Plot data with simple bar chart
     """
@@ -196,15 +171,15 @@ def px_simple_bar(df, title: str = None, id=None, style: dict = None, orientatio
     if "Metric" in df.columns and ("Count" in df.columns or "Value" in df.columns):
         detected_label = "Count" if "Count" in df.columns else "Value"
         df[detected_label] = [
-            x.astype(int) if x != "" else int(0) for x in df[detected_label]
+            x.astype(int) if x != "" else 0 for x in df[detected_label]
         ]
     else:
         raise NameError("simple_bar: No Metric or Count in df columns!")
 
     # Assign figure characteristics
-    range_color = style.get("range_color", None)
-    label_txt = style.get("label_txt", None)
-    xrange = style.get("xrange", None)
+    range_color = style.get("range_color", None) if style else None
+    label_txt = style.get("label_txt", None) if style else None
+    xrange = style.get("xrange", None) if style else None
     if label_txt is not None:
         label_txt = label_txt.strip("()")
         try:
@@ -236,32 +211,35 @@ def px_simple_bar(df, title: str = None, id=None, style: dict = None, orientatio
     return fig
 
 
-def px_simple_multi_bar(df, title=None, id=None):
+def px_simple_multi_bar(
+    df: pd.DataFrame, title: Optional[str] = None, id: Optional[int] = None
+) -> list[go.Figure]:
     """
     Plot data with simple multiple bar chart
     """
 
     # TODO: handle Nan and None properly
     if "Metric" in df.columns and "Avg" in df.columns:
-        df["Avg"] = [x.astype(int) if x != "" else int(0) for x in df["Avg"]]
+        df["Avg"] = [x.astype(int) if x != "" else 0 for x in df["Avg"]]
     else:
         raise NameError("simple_multi_bar: No Metric or Count in df columns!")
 
-    dfigs = []
-    nested_bar = {}
+    dfigs: list[go.Figure] = []
+    nested_bar: dict[str, dict[str, Any]] = {}
     df_unit = df["Unit"][0]
     if id == 1604:
         nested_bar = {"NC": {}, "UC": {}, "RW": {}, "CC": {}}
-        for index, row in df.iterrows():
+        for _, row in df.iterrows():
             nested_bar[row["Coherency"]][row["Xfer"]] = row["Avg"]
     if id == 1704:
         nested_bar = {"Read": {}, "Write": {}}
-        for index, row in df.iterrows():
+        for _, row in df.iterrows():
             nested_bar[row["Transaction"]][row["Type"]] = row["Avg"]
 
     for group, metric in nested_bar.items():
         dfigs.append(
-            px.bar(
+            px
+            .bar(
                 title=group,
                 x=metric.values(),
                 y=metric.keys(),
@@ -290,7 +268,7 @@ class RooflinePlot(Static):
     }
     """
 
-    def __init__(self, df: pd.DataFrame, **kwargs):
+    def __init__(self, df: pd.DataFrame, **kwargs: Any) -> None:
         """Initialize the roofline plot"""
         super().__init__("", classes="roofline", **kwargs)
         self.df = df
@@ -319,10 +297,11 @@ class MemoryChart(Static):
     }
     """
 
-    def __init__(self, df: pd.DataFrame, **kwargs):
+    def __init__(self, df: pd.DataFrame, **kwargs: Any) -> None:
         super().__init__("", classes="mem-chart", **kwargs)
         self.df = df
 
+    def on_mount(self) -> None:
         try:
             if self.df is None or self.df.empty:
                 self.update("No chart data generated")
@@ -334,11 +313,19 @@ class MemoryChart(Static):
 
             metric_dict = dict(zip(self.df["Metric"], self.df["Value"]))
 
+            # Route to arch-specific chart renderer
+            mspec = getattr(self.app, "mspec", None)
+            gpu_arch = mspec.gpu_arch if mspec else ""
+            if gpu_arch.startswith("gfx115"):
+                plot_func = plot_mem_chart_gfx11
+            else:
+                plot_func = plot_mem_chart_gfx9
+
             original_stdout = sys.stdout
             try:
                 with StringIO() as string_buffer:
                     sys.stdout = string_buffer
-                    result = plot_mem_chart("", "per_kernel", metric_dict)
+                    result = plot_func("", "per_kernel", metric_dict)
                     stdout_output = string_buffer.getvalue()
             finally:
                 sys.stdout = original_stdout
@@ -368,7 +355,7 @@ class SimpleBar(Static):
     }
     """
 
-    def __init__(self, df: pd.DataFrame, **kwargs):
+    def __init__(self, df: pd.DataFrame, **kwargs: Any) -> None:
         super().__init__("", classes="simple-bar", **kwargs)
         self.df = df
 
@@ -401,7 +388,7 @@ class SimpleBox(Static):
     }
     """
 
-    def __init__(self, df: pd.DataFrame, **kwargs):
+    def __init__(self, df: pd.DataFrame, **kwargs: Any) -> None:
         super().__init__("", classes="simple-box", **kwargs)
         self.df = df
 
@@ -436,7 +423,7 @@ class SimpleMultiBar(Static):
     }
     """
 
-    def __init__(self, df: pd.DataFrame, **kwargs):
+    def __init__(self, df: pd.DataFrame, **kwargs: Any) -> None:
         super().__init__("", classes="simple-multi-bar", **kwargs)
         self.df = df
 

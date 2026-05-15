@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2022 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "platform/runtime.hpp"
 #include "os/os.hpp"
@@ -73,12 +59,14 @@ bool Runtime::init() {
     return true;
   }
 
-  if (!Flag::init() || !option::init() || !Device::init()
+  if (!Flag::init() || !option::init() ||
+      !Device::init()
       // Agent initializes last
       || (!amd::IS_HIP && !Agent::init())) {
     ClPrint(LOG_ERROR, LOG_INIT, "Runtime initialization failed");
     return false;
   }
+
   ClPrint(LOG_INFO, LOG_MISC, "ROCclr version: %s", ROCCLR_VERSION_GITHASH);
 
   initialized_ = true;
@@ -103,17 +91,38 @@ void Runtime::tearDown() {
 }
 
 // ~RuntimeTearDown() will reference listenerLock.
-// listenerLock will be constructed ealier and destructed later than
+// listenerLock will be constructed earlier and destructed later than
 // runtime_tear_down.
-amd::Monitor listenerLock("Hostcall listener lock");
-std::vector<ReferenceCountedObject*> RuntimeTearDown::external_;
+amd::Monitor listenerLock{};
+std::vector<ReferenceCountedObject*> RuntimeTearDown::external_{};
+std::vector<std::pair<std::string, RuntimeTearDown::TearDownCallback>> 
+  RuntimeTearDown::tear_down_funcs_{};
+class RuntimeTearDown runtime_tear_down{};
 
+// =================================================================================================
 RuntimeTearDown::~RuntimeTearDown() {
+  // Flush and stop async logging. Note: Windows will destroy other threads by now
+#ifdef _WIN32
+    FlushAsyncLogsInCurrentThread();
+#else
+    FlushAsyncLogs();
+#endif
+  if (IsAsyncLoggingEnabled()) {
+    EnableAsyncLogging(false);
+  }
+  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Begin runtime teardown");
 #if !defined(_WIN32) && !defined(BUILD_STATIC_LIBS)
   // Only perform destruction if process matches the initialization,
-  // to avoid a call with the child process after fork()
+  // to avoid a call with the child process after fork().
   if (amd::IS_HIP && amd::Os::getProcessId() == Runtime::pid()) {
-    for (auto it: external_) {
+    // Execute teardown funcs in reverse order of registration.
+    for (auto it = tear_down_funcs_.rbegin(); it != tear_down_funcs_.rend(); ++it) {
+      ClPrint(amd::LOG_DEBUG, amd::LOG_INIT, "~RuntimeTearDown invoke callback: %s",
+              it->first.c_str());
+      it->second();
+    }
+    for (auto it : external_) {
+      ClPrint(amd::LOG_DEBUG, amd::LOG_INIT, "~RuntimeTearDown release external object: %p", it);
       it->release();
     }
     Runtime::tearDown();
@@ -121,12 +130,17 @@ RuntimeTearDown::~RuntimeTearDown() {
 #endif
 }
 
+// =================================================================================================
 void RuntimeTearDown::RegisterObject(ReferenceCountedObject* obj) {
-    external_.push_back(obj);
+  external_.push_back(obj);
 }
 
-class RuntimeTearDown runtime_tear_down;
+// =================================================================================================
+void RuntimeTearDown::RegisterTearDownCallback(const std::string& msg, TearDownCallback func) {
+  tear_down_funcs_.emplace_back(msg, std::move(func));
+}
 
+// =================================================================================================
 uint ReferenceCountedObject::retain() {
   uint prev = referenceCount_.fetch_add(1, std::memory_order_relaxed);
   assert(prev != 0 && "An object with count==0 is invalid");
@@ -134,7 +148,7 @@ uint ReferenceCountedObject::retain() {
 }
 
 uint ReferenceCountedObject::release() {
-  uint newCount = referenceCount_.fetch_sub(1, std::memory_order_relaxed) - 1;
+  uint newCount = referenceCount_.fetch_sub(1, std::memory_order_acq_rel) - 1;
   if (newCount == 0) {
     if (terminate()) {
       // The destructor should be called with a count==1 for the last thread

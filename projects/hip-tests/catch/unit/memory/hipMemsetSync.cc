@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of intge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include <utils.hh>
@@ -51,9 +35,9 @@ struct MultiDData {
 };
 
 // set of helper functions to tidy the nested switch statements
-template <typename T>
-static std::pair<T*, T*> deviceMallocHelper(memSetType memType, size_t dataW, size_t dataH,
-                                            size_t dataD, size_t& dataPitch) {
+template <typename T> static std::pair<T*, T*> deviceMallocHelper(memSetType memType, size_t dataW,
+                                                                  size_t dataH, size_t dataD,
+                                                                  size_t& dataPitch) {
   size_t elementSize = sizeof(T);
   size_t sizeInBytes = elementSize * dataW * dataH * dataD;
   T* aPtr{};
@@ -88,9 +72,8 @@ static std::pair<T*, T*> deviceMallocHelper(memSetType memType, size_t dataW, si
   return std::make_pair(aPtr, nullptr);
 }
 
-template <typename T>
-static std::pair<T*, T*> hostMallocHelper(size_t dataW, size_t dataH, size_t dataD,
-                                          size_t& dataPitch) {
+template <typename T> static std::pair<T*, T*> hostMallocHelper(size_t dataW, size_t dataH,
+                                                                size_t dataD, size_t& dataPitch) {
   size_t elementSize = sizeof(T);
   size_t sizeInBytes = elementSize * dataW * dataH * dataD;
   T* aPtr;
@@ -101,9 +84,9 @@ static std::pair<T*, T*> hostMallocHelper(size_t dataW, size_t dataH, size_t dat
   return std::make_pair(aPtr, nullptr);
 }
 
-template <typename T>
-static std::pair<T*, T*> hostRegisteredHelper(size_t dataW, size_t dataH, size_t dataD,
-                                              size_t& dataPitch) {
+template <typename T> static std::pair<T*, T*> hostRegisteredHelper(size_t dataW, size_t dataH,
+                                                                    size_t dataD,
+                                                                    size_t& dataPitch) {
   size_t elementSize = sizeof(T);
   size_t sizeInBytes = elementSize * dataW * dataH * dataD;
   T* aPtr = new T[dataW * dataH * dataD];
@@ -114,9 +97,9 @@ static std::pair<T*, T*> hostRegisteredHelper(size_t dataW, size_t dataH, size_t
   return std::make_pair(aPtr, nullptr);
 }
 
-template <typename T>
-static std::pair<T*, T*> devRegisteredHelper(size_t dataW, size_t dataH, size_t dataD,
-                                             size_t& dataPitch) {
+template <typename T> static std::pair<T*, T*> devRegisteredHelper(size_t dataW, size_t dataH,
+                                                                   size_t dataD,
+                                                                   size_t& dataPitch) {
   size_t elementSize = sizeof(T);
   size_t sizeInBytes = elementSize * dataW * dataH * dataD;
   T* aPtr = new T[dataW * dataH * dataD];
@@ -164,9 +147,9 @@ static std::pair<T*, T*> initMemory(allocType type, memSetType memType, MultiDDa
 }
 
 // set of helper functions to tidy the nested switch statements
-template <typename T>
-static void deviceMallocCopy(memSetType memType, T* aPtr, T* hostMem, size_t dataW, size_t dataH,
-                             size_t dataD, size_t& dataPitch) {
+template <typename T> static void deviceMallocCopy(memSetType memType, T* aPtr, T* hostMem,
+                                                   size_t dataW, size_t dataH, size_t dataD,
+                                                   size_t& dataPitch) {
   size_t elementSize = sizeof(T);
   size_t sizeInBytes = elementSize * dataW * dataH * dataD;
   switch (memType) {
@@ -200,9 +183,8 @@ static void deviceMallocCopy(memSetType memType, T* aPtr, T* hostMem, size_t dat
   }
 }
 
-template <typename T>
-static void hostCopy(memSetType memType, T* aPtr, T* hostMem, size_t dataW, size_t dataH,
-                     size_t dataD, size_t& dataPitch) {
+template <typename T> static void hostCopy(memSetType memType, T* aPtr, T* hostMem, size_t dataW,
+                                           size_t dataH, size_t dataD, size_t& dataPitch) {
   size_t elementSize = sizeof(T);
   size_t sizeInBytes = elementSize * dataW * dataH * dataD;
   hipMemcpy3DParms params{};
@@ -236,9 +218,9 @@ static void hostCopy(memSetType memType, T* aPtr, T* hostMem, size_t dataW, size
   }
 }
 
-template <typename T>
-static void devRegisteredCopy(memSetType memType, T* aPtr, T* hostMem, size_t dataW, size_t dataH,
-                              size_t dataD, size_t& dataPitch) {
+template <typename T> static void devRegisteredCopy(memSetType memType, T* aPtr, T* hostMem,
+                                                    size_t dataW, size_t dataH, size_t dataD,
+                                                    size_t& dataPitch) {
   size_t elementSize = sizeof(T);
 
   switch (memType) {
@@ -309,9 +291,9 @@ void verifyData(T* aPtr, size_t value, MultiDData& data, allocType type, memSetT
 }
 
 // macro to allow reuse of functions for testing versions of hipMemset
-template <typename T>
-void memsetCheck(T* aPtr, size_t value, memSetType memsetType, MultiDData& data, bool async = false,
-                 hipStream_t stream = nullptr) {
+template <typename T> void memsetCheck(T* aPtr, size_t value, memSetType memsetType,
+                                       MultiDData& data, bool async = false,
+                                       hipStream_t stream = nullptr) {
   size_t dataW = data.width;
   size_t dataH = data.height == 0 ? 1 : data.height;
   size_t dataD = data.depth == 0 ? 1 : data.depth;
@@ -407,8 +389,7 @@ void runTests(allocType type, memSetType memsetType, MultiDData data, hipStream_
   bool async = GENERATE(true, false);
   CAPTURE(type, memsetType, data.width, data.height, data.depth, stream, async);
   std::pair<T*, T*> aPtr = initMemory<T>(type, memsetType, data);
-  using namespace std::chrono_literals;
-  const std::chrono::duration<uint64_t, std::milli> delay = 100ms;
+  const auto delay = std::chrono::milliseconds(isQuickLevel() ? 10 : 100);
   LaunchDelayKernel(delay, stream);
   memsetCheck(aPtr.first, testValue, memsetType, data, async, stream);
 
@@ -431,7 +412,9 @@ void runTests(allocType type, memSetType memsetType, MultiDData data, hipStream_
 template <typename T>
 static void doMemsetTest(allocType mallocType, memSetType memset_type, MultiDData data) {
   enum StreamType { NULLSTR, CREATEDSTR };
-  auto streamType = GENERATE(NULLSTR, CREATEDSTR);
+  auto streamType = isQuickLevel()
+      ? GENERATE(CREATEDSTR)
+      : GENERATE(NULLSTR, CREATEDSTR);
   hipStream_t stream{nullptr};
 
   if (streamType == CREATEDSTR) HIP_CHECK(hipStreamCreate(&stream));
@@ -441,11 +424,7 @@ static void doMemsetTest(allocType mallocType, memSetType memset_type, MultiDDat
   if (streamType == CREATEDSTR) HIP_CHECK(hipStreamDestroy(stream));
 }
 
-TEST_CASE("Unit_hipMemsetSync") {
-#if HT_NVIDIA
-  HipTest::HIP_SKIP_TEST("EXSWCPHIPT-86");
-  return;
-#endif
+HIP_TEST_CASE(Unit_hipMemsetSync) {
   allocType type = GENERATE(allocType::deviceMalloc, allocType::hostMalloc, allocType::hostRegisted,
                             allocType::devRegistered);
   memSetType memset_type = memSetType::hipMemset;
@@ -454,11 +433,7 @@ TEST_CASE("Unit_hipMemsetSync") {
   doMemsetTest<char>(type, memset_type, data);
 }
 
-TEMPLATE_TEST_CASE("Unit_hipMemsetDSync", "", int8_t, int16_t, uint32_t) {
-#if HT_NVIDIA
-  HipTest::HIP_SKIP_TEST("EXSWCPHIPT-86");
-  return;
-#endif
+HIP_TEMPLATE_TEST_CASE(Unit_hipMemsetDSync, int8_t, int16_t, uint32_t) {
   allocType mallocType = GENERATE(allocType::hostRegisted, allocType::deviceMalloc,
                                   allocType::hostMalloc, allocType::devRegistered);
   memSetType memset_type;
@@ -476,33 +451,25 @@ TEMPLATE_TEST_CASE("Unit_hipMemsetDSync", "", int8_t, int16_t, uint32_t) {
   doMemsetTest<TestType>(mallocType, memset_type, data);
 }
 
-TEST_CASE("Unit_hipMemset2DSync") {
-#if HT_NVIDIA
-  HipTest::HIP_SKIP_TEST("EXSWCPHIPT-86");
-  return;
-#endif
+HIP_TEST_CASE(Unit_hipMemset2DSync) {
   allocType mallocType = GENERATE(allocType::deviceMalloc, allocType::hostMalloc,
                                   allocType::hostRegisted, allocType::devRegistered);
   memSetType memset_type = memSetType::hipMemset2D;
   MultiDData data;
-  data.width = GENERATE(512, 1024);
-  data.height = GENERATE(512, 1024);
+  data.width = isQuickLevel() ? GENERATE(128, 256) : GENERATE(512, 1024);
+  data.height = isQuickLevel() ? GENERATE(128, 256) : GENERATE(512, 1024);
 
   doMemsetTest<char>(mallocType, memset_type, data);
 }
 
-TEST_CASE("Unit_hipMemset3DSync") {
-#if HT_NVIDIA
-  HipTest::HIP_SKIP_TEST("EXSWCPHIPT-86");
-  return;
-#endif
+HIP_TEST_CASE(Unit_hipMemset3DSync) {
   allocType mallocType = GENERATE(allocType::deviceMalloc, allocType::hostMalloc,
                                   allocType::hostRegisted, allocType::devRegistered);
   memSetType memset_type = memSetType::hipMemset3D;
   MultiDData data;
-  data.width = GENERATE(128, 256);
-  data.height = GENERATE(128, 256);
-  data.depth = GENERATE(128, 256);
+  data.width = isQuickLevel() ? GENERATE(32, 64) : GENERATE(128, 256);
+  data.height = isQuickLevel() ? GENERATE(32, 64) : GENERATE(128, 256);
+  data.depth = isQuickLevel() ? GENERATE(32, 64) : GENERATE(128, 256);
 
   doMemsetTest<char>(mallocType, memset_type, data);
 }

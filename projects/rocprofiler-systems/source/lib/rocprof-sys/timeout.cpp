@@ -1,37 +1,20 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "core/categories.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/locking.hpp"
 #include "core/state.hpp"
 #include "library/components/pthread_gotcha.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_info.hpp"
+#include <cstdint>
 
 #include <timemory/log/color.hpp>
 #include <timemory/signals/types.hpp>
 #include <timemory/unwind/backtrace.hpp>
+
+#include "logger/debug.hpp"
 
 #include <chrono>
 #include <sstream>
@@ -53,12 +36,12 @@ namespace log     = ::tim::log;
 constexpr auto timeout_signal   = signals::sys_signal::Hangup;
 constexpr auto timeout_signal_v = static_cast<int>(timeout_signal);
 
-auto                  main_thread_native_handle         = pthread_self();
-bool                  ci_timeout_active                 = false;
-auto                  ci_timeout_mutex                  = locking::atomic_mutex{};
-uint64_t              ci_timeout_backtrace_global_count = 1;
-uint64_t              ci_timeout_backtrace_global_done  = 0;
-thread_local uint64_t ci_timeout_backtrace_local_count  = 0;
+auto                       main_thread_native_handle         = pthread_self();
+bool                       ci_timeout_active                 = false;
+auto                       ci_timeout_mutex                  = locking::atomic_mutex{};
+std::uint64_t              ci_timeout_backtrace_global_count = 1;
+std::uint64_t              ci_timeout_backtrace_global_done  = 0;
+thread_local std::uint64_t ci_timeout_backtrace_local_count  = 0;
 
 void
 ci_timeout_backtrace(int)
@@ -76,7 +59,7 @@ ci_timeout_backtrace(int)
 
     static auto _mutex = locking::atomic_mutex{};
     auto        _lk    = locking::atomic_lock{ _mutex };
-    ROCPROFSYS_PRINT("%s\n", _err.str().c_str());
+    LOG_INFO("{}", _err.str());
 
     ++ci_timeout_backtrace_global_done;
 }
@@ -94,10 +77,10 @@ ensure_ci_timeout_backtrace(double             _ci_timeout_seconds,
     while(_ci_timeout_seconds <= _factor)
         _factor /= 1.25;
 
-    uint64_t _ci_timeout_nitr    = 0;
-    int64_t  _ci_timeout_nanosec = (_ci_timeout_seconds - _factor) * units::sec;
-    auto     _ci_timeout_total_count =
-        get_env<uint64_t>("ROCPROFSYS_CI_TIMEOUT_COUNT", 1, false);
+    std::uint64_t _ci_timeout_nitr    = 0;
+    std::int64_t  _ci_timeout_nanosec = (_ci_timeout_seconds - _factor) * units::sec;
+    auto          _ci_timeout_total_count =
+        get_env<std::uint64_t>("ROCPROFSYS_CI_TIMEOUT_COUNT", 1, false);
     const auto root_pid =
         get_env<pid_t>("ROCPROFSYS_ROOT_PROCESS", process::get_id(), false);
 
@@ -114,9 +97,10 @@ ensure_ci_timeout_backtrace(double             _ci_timeout_seconds,
             return;
         }
 
-        auto    _tids             = pthread_gotcha::get_native_handles();
-        int64_t _ci_timeout_pause = (_factor * units::sec) / (3 * (_tids.size() + 1));
-        auto    _kill_thread      = [_ci_timeout_pause](auto _handle) {
+        auto         _tids = pthread_gotcha::get_native_handles();
+        std::int64_t _ci_timeout_pause =
+            (_factor * units::sec) / (3 * (_tids.size() + 1));
+        auto _kill_thread = [_ci_timeout_pause](auto _handle) {
             // execute the pthread_kill and wait until ci_timeout_backtrace increments
             // ci_timeout_backtrace_global_done (or 50 iterations pass) to avoid
             // the backtraces overlapping output
@@ -127,18 +111,16 @@ ensure_ci_timeout_backtrace(double             _ci_timeout_seconds,
                 const auto& _info = thread_info::get(_handle);
                 if(_info)
                 {
-                    ROCPROFSYS_WARNING_F(
-                        0, "pthread_kill(%zu, %i) failed for thread %zi (info: %s)\n",
-                        _handle, timeout_signal_v, _info->index_data->sequent_value,
-                        _info->as_string().c_str());
+                    LOG_WARNING("pthread_kill({}, {}) failed for thread {} (info: {})",
+                                static_cast<size_t>(_handle), timeout_signal_v,
+                                _info->index_data->sequent_value, _info->as_string());
                 }
                 else
                 {
-                    ROCPROFSYS_WARNING_F(
-                        0,
-                        "pthread_kill(%zu, %i) failed. executing generic "
-                                "kill(%i, %i)...\n",
-                        _handle, timeout_signal_v, process::get_id(), timeout_signal_v);
+                    LOG_WARNING("pthread_kill({}, {}) failed. executing generic "
+                                "kill({}, {})...",
+                                _handle, timeout_signal_v, process::get_id(),
+                                timeout_signal_v);
                 }
 
                 ::kill(process::get_id(), timeout_signal_v);
@@ -151,18 +133,14 @@ ensure_ci_timeout_backtrace(double             _ci_timeout_seconds,
         };
 
         _tids.erase(main_thread_native_handle);
-        ROCPROFSYS_WARNING_F(-127,
-                             "timeout after %8.3f seconds... Generating backtraces for "
-                             "%zu threads...\n",
-                             _ci_timeout_seconds, _tids.size() + 1);
+        LOG_WARNING("Timeout after {} seconds... Generating backtraces for "
+                    "{} threads...",
+                    _ci_timeout_seconds, _tids.size() + 1);
 
         for(auto itr : _tids)
             _kill_thread(itr);
 
         _kill_thread(main_thread_native_handle);
-
-        ::rocprofsys::debug::flush();
-        ::rocprofsys::debug::lock _debug_lk{};
 
         if(++_ci_timeout_nitr >= _ci_timeout_total_count)
         {
@@ -176,7 +154,7 @@ ensure_ci_timeout_backtrace(double             _ci_timeout_seconds,
         }
     }
 
-    ROCPROFSYS_WARNING_F(0, "timeout thread exiting...\n");
+    LOG_WARNING("Timeout thread exiting...");
 }
 }  // namespace
 

@@ -1,22 +1,8 @@
-/* Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "top.hpp"
 #include "os/os.hpp"
@@ -58,14 +44,12 @@ Settings::Settings() {
 
   hostMemDirectAccess_ = HostMemDisable;
 
-  libSelector_ = amd::LibraryUndefined;
-
   // By default use host blit
   blitEngine_ = BlitEngineHost;
   pinnedXferSize_ = GPU_PINNED_XFER_SIZE * Mi;
-  size_t defaultMinXferSize = amd::IS_HIP ? 128: 4;
-  pinnedMinXferSize_ = flagIsDefault(GPU_PINNED_MIN_XFER_SIZE)
-    ? defaultMinXferSize * Mi : GPU_PINNED_MIN_XFER_SIZE * Mi;
+  size_t defaultMinXferSize = amd::IS_HIP ? 128 : 4;
+  pinnedMinXferSize_ = flagIsDefault(GPU_PINNED_MIN_XFER_SIZE) ? defaultMinXferSize * Mi
+                                                               : GPU_PINNED_MIN_XFER_SIZE * Mi;
 
   // GPU device by default
   apuSystem_ = false;
@@ -119,10 +103,8 @@ Settings::Settings() {
       std::min(static_cast<uint64_t>(GPU_MAX_SUBALLOC_SIZE) * Ki, subAllocationChunkSize_);
 
   maxCmdBuffers_ = 12;
-  useLightning_ = amd::IS_HIP ? true : ((!flagIsDefault(GPU_ENABLE_LC)) ? GPU_ENABLE_LC : false);
   enableWgpMode_ = false;
   enableWave32Mode_ = false;
-  hsailExplicitXnack_ = false;
   lcWavefrontSize64_ = true;
   enableHwP2P_ = false;
   imageBufferWar_ = false;
@@ -131,17 +113,16 @@ Settings::Settings() {
   alwaysResident_ = amd::IS_HIP ? true : false;
   prepinnedMinSize_ = 0;
   cpDmaCopySizeMax_ = GPU_CP_DMA_COPY_SIZE * Ki;
-  kernel_arg_impl_ = flagIsDefault(HIP_FORCE_DEV_KERNARG)
-                         ? KernelArgImpl::DeviceKernelArgs
-                         : HIP_FORCE_DEV_KERNARG;
+  kernel_arg_impl_ = flagIsDefault(HIP_FORCE_DEV_KERNARG) ? KernelArgImpl::DeviceKernelArgs
+                                                          : HIP_FORCE_DEV_KERNARG;
 
   limit_blit_wg_ = 16;
-  DEBUG_CLR_GRAPH_PACKET_CAPTURE = false; // disable graph performance optimizations for PAL
+  DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING = 0;  // disable graph performance optimizations for PAL
 }
 
 bool Settings::create(const Pal::DeviceProperties& palProp,
                       const Pal::GpuMemoryHeapProperties* heaps, const Pal::WorkStationCaps& wscaps,
-                      bool enableXNACK, bool reportAsOCL12Device) {
+                      const amd::Isa& isa, bool reportAsOCL12Device) {
   uint32_t osVer = 0x0;
 
   // Disable thread trace by default for all devices
@@ -152,8 +133,7 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
     apuSystem_ = true;
   }
 
-  enableXNACK_ = enableXNACK;
-  hsailExplicitXnack_ = enableXNACK;
+  enableXNACK_ = (isa.xnack() == amd::Isa::Feature::Enabled);
   bool useWavefront64 = false;
 
   std::string appName = {};
@@ -162,6 +142,7 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
 
   switch (palProp.revision) {
     // Fall through for Navi4x ...
+    case Pal::AsicRevision::Navi44:
     case Pal::AsicRevision::Navi48:
     // Fall through for Navi3x ...
     case Pal::AsicRevision::Navi33:
@@ -171,6 +152,8 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
     // Fall through for Navi2x ...
     case Pal::AsicRevision::StrixHalo:
     case Pal::AsicRevision::Strix1:
+    case Pal::AsicRevision::Krackan1:
+    case Pal::AsicRevision::Krackan2:
     case Pal::AsicRevision::Phoenix1:
     case Pal::AsicRevision::Phoenix2:
     case Pal::AsicRevision::HawkPoint1:
@@ -183,8 +166,7 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
     case Pal::AsicRevision::Navi21:
       // set wavefront 64 for Geekbench 5
       {
-        if (appName == "Geekbench 5.exe" ||
-            appName == "geekbench_x86_64.exe" ||
+        if (appName == "Geekbench 5.exe" || appName == "geekbench_x86_64.exe" ||
             appName == "geekbench5.exe") {
           useWavefront64 = true;
         }
@@ -193,11 +175,8 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
     case Pal::AsicRevision::Navi14:
     case Pal::AsicRevision::Navi12:
     case Pal::AsicRevision::Navi10:
-      useLightning_ = GPU_ENABLE_LC;
       enableWgpMode_ = GPU_ENABLE_WGP_MODE;
-      if (useLightning_) {
-        enableWave32Mode_ = true;
-      }
+      enableWave32Mode_ = true;
       if (!flagIsDefault(GPU_ENABLE_WAVE32_MODE)) {
         enableWave32Mode_ = GPU_ENABLE_WAVE32_MODE;
       }
@@ -205,16 +184,14 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
         enableWave32Mode_ = 0;
       }
       lcWavefrontSize64_ = !enableWave32Mode_;
-      if (palProp.gfxLevel == Pal::GfxIpLevel::GfxIp10_1) {
+      if (palProp.gfxTriple.major == 10 && palProp.gfxTriple.minor == 1) {
         // GFX10.1 HW doesn't support custom pitch. Enable double copy workaround
         imageBufferWar_ = GPU_IMAGE_BUFFER_WAR;
       }
       enableHwP2P_ = true;
       enableCoopGroups_ = IS_LINUX;
       enableCoopMultiDeviceGroups_ = IS_LINUX;
-      if (useLightning_) {
-        singleFpDenorm_ = true;
-      }
+      singleFpDenorm_ = true;
       enableExtension(ClKhrFp16);
       threadTraceEnable_ = AMD_THREAD_TRACE_ENABLE;
       // Cache line size is 64 bytes
@@ -222,11 +199,9 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
       // L1 cache size is 16KB
       cacheSize_ = 16 * Ki;
 
-      libSelector_ = amd::GPU_Library_CI;
       if (LP64_SWITCH(false, true)) {
-        oclVersion_ = !reportAsOCL12Device
-            ? XCONCAT(OpenCL, XCONCAT(OPENCL_MAJOR, OPENCL_MINOR))
-            : OpenCL12;
+        oclVersion_ =
+            !reportAsOCL12Device ? XCONCAT(OpenCL, XCONCAT(OPENCL_MAJOR, OPENCL_MINOR)) : OpenCL12;
       }
       if (OPENCL_VERSION < 200) {
         oclVersion_ = OpenCL12;
@@ -281,17 +256,12 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
     enableExtension(ClAmdCopyBufferP2P);
   }
 
-  if (!useLightning_) {
-    enableExtension(ClAmdPopcnt);
-    enableExtension(ClAmdVec3);
-    enableExtension(ClAmdPrintf);
-  }
   // Enable some platform extensions
   enableExtension(ClAmdDeviceAttributeQuery);
 
   if (hwLDSSize_ == 0) {
     // Use hardcoded values for now, since PAL properties aren't available with offline devices
-    hwLDSSize_ = (IS_LINUX || amd::IS_HIP) ? 64 * Ki: 32 * Ki;
+    hwLDSSize_ = (IS_LINUX || amd::IS_HIP) ? 64 * Ki : 32 * Ki;
   }
 
   imageSupport_ = true;
@@ -306,12 +276,6 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
   if (doublePrecision_) {
     // Enable KHR double precision extension
     enableExtension(ClKhrFp64);
-  }
-
-  if (!useLightning_) {
-    // Enable AMD double precision extension
-    doublePrecision_ = true;
-    enableExtension(ClAmdFp64);
   }
 
   if (palProp.gpuMemoryProperties.busAddressableMemSize > 0) {
@@ -344,9 +308,8 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
 #endif
   }
 
-  if (apuSystem_ &&
-      ((heaps[Pal::GpuHeapLocal].logicalSize +
-        heaps[Pal::GpuHeapInvisible].logicalSize) < (150 * Mi))) {
+  if (apuSystem_ && ((heaps[Pal::GpuHeapLocal].logicalSize +
+                      heaps[Pal::GpuHeapInvisible].logicalSize) < (150 * Mi))) {
     remoteAlloc_ = true;
   }
 
@@ -356,18 +319,25 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
                                   (uint64_t)GPU_RESOURCE_CACHE_SIZE * Mi);
   } else {
     if (apuSystem_) {
-      resourceCacheSize_ = std::max((
-        (heaps[Pal::GpuHeapLocal].logicalSize + heaps[Pal::GpuHeapInvisible].logicalSize
-        + heaps[Pal::GpuHeapGartUswc].logicalSize) / 8),
-        (uint64_t)GPU_RESOURCE_CACHE_SIZE * Mi);
+      resourceCacheSize_ = std::max(
+          ((heaps[Pal::GpuHeapLocal].logicalSize + heaps[Pal::GpuHeapInvisible].logicalSize +
+            heaps[Pal::GpuHeapGartUswc].logicalSize) /
+           8),
+          (uint64_t)GPU_RESOURCE_CACHE_SIZE * Mi);
     } else {
-      resourceCacheSize_ = std::max(((
-        heaps[Pal::GpuHeapLocal].logicalSize + heaps[Pal::GpuHeapInvisible].logicalSize) / 8),
-        (uint64_t)GPU_RESOURCE_CACHE_SIZE * Mi);
+      resourceCacheSize_ = std::max(
+          ((heaps[Pal::GpuHeapLocal].logicalSize + heaps[Pal::GpuHeapInvisible].logicalSize) / 8),
+          (uint64_t)GPU_RESOURCE_CACHE_SIZE * Mi);
     }
 #if !defined(_LP64)
     resourceCacheSize_ = std::min(resourceCacheSize_, 1 * Gi);
 #endif
+  }
+  uint64_t resourceCacheCap = static_cast<uint64_t>(GPU_MAX_RESOURCE_CACHE_SIZE) * Mi;
+  if (resourceCacheCap < static_cast<uint64_t>(resourceCacheSize_)) {
+    // In 32 bit build, if the above is true, resourceCacheCap is smaller than
+    // 32 bit variable resourceCacheSize_, truncation doesn't happen in the following assignment.
+    resourceCacheSize_ = static_cast<size_t>(resourceCacheCap);
   }
 
   // If is Rebar, override prepinned memory size.
@@ -376,9 +346,8 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
     prepinnedMinSize_ = PAL_PREPINNED_MEMORY_SIZE * Ki;
   }
 
-  limit_blit_wg_ = enableWgpMode_
-      ? palProp.gfxipProperties.shaderCore.numAvailableCus / 2
-      : palProp.gfxipProperties.shaderCore.numAvailableCus;
+  limit_blit_wg_ = enableWgpMode_ ? palProp.gfxipProperties.shaderCore.numAvailableCus / 2
+                                  : palProp.gfxipProperties.shaderCore.numAvailableCus;
 
   // Override current device settings
   override();

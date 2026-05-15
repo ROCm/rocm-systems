@@ -39,8 +39,10 @@ def main(argv=None, config=None):
     """
     import argparse
     from . import csv
+    from . import merge
     from . import otf2
     from . import output_config
+    from . import package
     from . import pftrace
     from . import query
     from . import summary
@@ -64,6 +66,34 @@ Example usage:
     Convert 2 databases, output CSV, OTF2, and perfetto trace formats
     $ rocpd convert -i db{3,4}.db --output-format csv otf2 pftrace
 
+"""
+
+    merge_examples = """
+
+Example usage:
+
+    Merge the three databases and output to a folder called merged3DBs
+    $ rocpd merge -i db0.db db1.db db2.db -d merged3DBs
+
+    Merge all the databases from the node0 folder and output to the node0_output folder, with filename called largeMerged.db
+    $ rocpd merge -i node0/*.db -d node0_output -o largeMerged
+"""
+
+    package_examples = """
+
+Example usage:
+
+    Index the three databases into a metadata file (index.yaml) in the current folder, just reference the databases where they are on the filesystem
+    $ rocpd package -i node0/db0.db node1/db1.db node2/db2.db
+
+    Package and copy/consolidate all the databases into a my_MPI_run_1.rpdb folder so it can be managed easier
+    $ rocpd package -i node0/db0.db node1/db1.db node2/db2.db -d my_MPI_run_1 --consolidate --copy
+
+    Package and copy/consolidate all the databases from my_MPI_run_1.rpdb folder append node5/db5.db and make new folder
+    $ rocpd package -i my_MPI_run_1.rpdb node5/db5.db -d my_MPI_run_1_append_5 --consolidate --copy
+
+    Use my_MPI_run_1.rpdb folder and move/consolidate node7/db7.db and re-use same .rpdb folder
+    $ rocpd package -i my_MPI_run_1.rpdb node7/db7.db -d my_MPI_run_1 --consolidate
 """
 
     query_examples = """
@@ -94,6 +124,7 @@ Example usage:
     $ rocpd summary -i db{0,1}.db --region-categories HIP MARKERS --domain-summary --format html
 
 """
+    input_help_string = "Input path and filename to one or more database(s). Wildcards accepted, as well as .rpdb folders"
 
     # Add the subparsers
     parser = argparse.ArgumentParser(
@@ -109,6 +140,18 @@ Example usage:
         help="Print the version information and exit",
     )
 
+    def add_required_args(_parser):
+        _required_params = _parser.add_argument_group("Required options")
+        _required_params.add_argument(
+            "-i",
+            "--input",
+            required=True,
+            type=output_config.check_file_exists,
+            nargs="+",
+            help=input_help_string,
+        )
+        return _required_params
+
     subparsers = parser.add_subparsers(dest="command")
     converter = subparsers.add_parser(
         "convert",
@@ -116,6 +159,22 @@ Example usage:
         allow_abbrev=False,
         formatter_class=argparse.RawTextHelpFormatter,
         epilog=convert_examples,
+    )
+
+    merger = subparsers.add_parser(
+        "merge",
+        description="Generate merged database from rocPD databases",
+        allow_abbrev=False,
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog=merge_examples,
+    )
+
+    packager = subparsers.add_parser(
+        "package",
+        description="Package database files into .rpdb output",
+        allow_abbrev=False,
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog=package_examples,
     )
 
     query_reporter = subparsers.add_parser(
@@ -138,15 +197,7 @@ Example usage:
         return val.lower().replace("perfetto", "pftrace")
 
     # add required options for each subparser
-    converter_required_params = converter.add_argument_group("Required options")
-    converter_required_params.add_argument(
-        "-i",
-        "--input",
-        required=True,
-        type=output_config.check_file_exists,
-        nargs="+",
-        help="Input path and filename to one or more database(s)",
-    )
+    converter_required_params = add_required_args(converter)
     converter_required_params.add_argument(
         "-f",
         "--output-format",
@@ -158,43 +209,39 @@ Example usage:
         required=True,
     )
 
-    query_required_params = query_reporter.add_argument_group("Required options")
-    query_required_params.add_argument(
-        "-i",
-        "--input",
-        required=True,
-        type=output_config.check_file_exists,
-        nargs="+",
-        help="Input path and filename to one or more database(s)",
-    )
-
-    summary_required_params = generate_summary.add_argument_group("Required options")
-    summary_required_params.add_argument(
-        "-i",
-        "--input",
-        required=True,
-        type=output_config.check_file_exists,
-        nargs="+",
-        help="Input path and filename to one or more database(s)",
-    )
+    add_required_args(merger)
+    add_required_args(packager)
+    add_required_args(query_reporter)
+    add_required_args(generate_summary)
 
     # converter: add args from any sub-modules
-    valid_out_config_args = output_config.add_args(converter)
-    valid_generic_args = output_config.add_generic_args(converter)
-    valid_pftrace_args = pftrace.add_args(converter)
-    valid_csv_args = csv.add_args(converter)
-    valid_otf2_args = otf2.add_args(converter)
-    valid_time_window_args = time_window.add_args(converter)
+    process_converter_args = []
+    process_converter_args.append(output_config.add_args(converter))
+    process_converter_args.append(output_config.add_generic_args(converter))
+    process_converter_args.append(pftrace.add_args(converter))
+    process_converter_args.append(csv.add_args(converter))
+    process_converter_args.append(otf2.add_args(converter))
+    process_converter_args.append(time_window.add_args(converter))
+
+    # merge: subparser args
+    process_merger_args = []
+    process_merger_args.append(merge.add_args(merger))
+
+    # package: subparser args
+    process_packager_args = []
+    process_packager_args.append(package.add_args(packager))
 
     # query: subparser args
-    valid_out_config_args = output_config.add_args(query_reporter)
-    valid_query_args = query.add_args(query_reporter)
-    valid_time_window_args = time_window.add_args(query_reporter)
+    process_query_reporter_args = []
+    process_query_reporter_args.append(output_config.add_args(query_reporter))
+    process_query_reporter_args.append(query.add_args(query_reporter))
+    process_query_reporter_args.append(time_window.add_args(query_reporter))
 
     # summary: subparser args
-    valid_io_args = summary.add_io_args(generate_summary)
-    valid_summary_args = summary.add_args(generate_summary)
-    valid_time_window_args = time_window.add_args(generate_summary)
+    process_generate_summary_args = []
+    process_generate_summary_args.append(output_config.add_args(generate_summary))
+    process_generate_summary_args.append(summary.add_args(generate_summary))
+    process_generate_summary_args.append(time_window.add_args(generate_summary))
 
     # parse the command line arguments
     args = parser.parse_args(argv)
@@ -213,30 +260,18 @@ Example usage:
 
     # if the user requested converter, process the conversion
     if args.command == "convert":
-        # process the args
-        out_cfg_args = output_config.process_args(args, valid_out_config_args)
-        generic_out_cfg_args = output_config.process_generic_args(
-            args, valid_generic_args
+        # construct the rocpd import data object
+        input = RocpdImportData(
+            args.input,
+            automerge_limit=getattr(
+                args, "automerge_limit", package.IDEAL_NUMBER_OF_DATABASE_FILES
+            ),
         )
-        pftrace_args = pftrace.process_args(args, valid_pftrace_args)
-        csv_args = csv.process_args(args, valid_csv_args)
-        otf2_args = otf2.process_args(args, valid_otf2_args)
-        window_args = time_window.process_args(args, valid_time_window_args)
 
-        # now start processing the data.  Import the data and merge the views
-        importData = RocpdImportData(args.input)
+        all_args = {}
+        for pitr in process_converter_args:
+            all_args.update(pitr(input, args))
 
-        # adjust the time window view of the data
-        if window_args is not None:
-            time_window.apply_time_window(importData, **window_args)
-
-        all_args = {
-            **out_cfg_args,
-            **generic_out_cfg_args,
-            **pftrace_args,
-            **csv_args,
-            **otf2_args,
-        }
         # setup the config args
         config = (
             output_config.output_config(**all_args)
@@ -254,42 +289,71 @@ Example usage:
         for out_format in args.output_format:
             if out_format in format_handlers:
                 print(f"Converting database(s) to {out_format} format:")
-                format_handlers[out_format](importData, config)
+                format_handlers[out_format](input, config)
             else:
                 print(f"Warning: Unsupported output format '{out_format}'")
 
+    # if the user requested merge module, execute the merge
+    elif args.command == "merge":
+        # no construction of the import data object
+        input = None
+
+        # merge subparser args
+        merge_args = {}
+        for pitr in process_merger_args:
+            merge_args.update(pitr(input, args))
+
+        merge.execute(args.input, **merge_args)
+
+    # if the user requested package module, package up the database
+    elif args.command == "package":
+        # construct the rocpd import data object
+        input = None
+
+        # package subparser args
+        packager_args = {}
+        for pitr in process_packager_args:
+            packager_args.update(pitr(input, args))
+
+        package.execute(args.input, **packager_args)
+
     # if the user requested query module, execute the query
     elif args.command == "query":
-        # query subparser args
-        query_args = query.process_args(args, valid_query_args)
-        out_cfg_args = output_config.process_args(args, valid_out_config_args)
-        window_args = time_window.process_args(args, valid_time_window_args)
+        # construct the rocpd import data object
+        input = RocpdImportData(
+            args.input,
+            automerge_limit=getattr(
+                args, "automerge_limit", package.IDEAL_NUMBER_OF_DATABASE_FILES
+            ),
+        )
 
-        all_args = {**query_args, **out_cfg_args}
+        # query subparser args
+        query_args = {}
+        for pitr in process_query_reporter_args:
+            query_args.update(pitr(input, args))
 
         query.execute(
-            args.input,
+            input,
             args,
-            window_args=window_args,
-            **all_args,
+            **query_args,
         )
 
     # if the user requested a summary, generate the views
     elif args.command == "summary":
+        # construct the rocpd import data object
+        input = RocpdImportData(
+            args.input,
+            automerge_limit=getattr(
+                args, "automerge_limit", package.IDEAL_NUMBER_OF_DATABASE_FILES
+            ),
+        )
+
         # summary subparser args
-        summary_args = summary.process_args(args, valid_summary_args)
-        io_args = output_config.process_args(args, valid_io_args)
-        window_args = time_window.process_args(args, valid_time_window_args)
+        summary_args = {}
+        for pitr in process_generate_summary_args:
+            summary_args.update(pitr(input, args))
 
-        # now start processing the data.  Import the data and merge the views
-        importData = RocpdImportData(args.input)
-
-        # adjust the time window view of the data
-        if window_args is not None:
-            time_window.apply_time_window(importData, **window_args)
-
-        all_args = {**summary_args, **io_args}
-        summary.generate_all_summaries(importData, **all_args)
+        summary.generate_all_summaries(input, **summary_args)
 
     print("Done. Exiting...")
 

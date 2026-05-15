@@ -1,22 +1,8 @@
-/* Copyright (c) 2024 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "device/pal/palubercapturemgr.hpp"
 #include "device/pal/paldevice.hpp"
@@ -57,23 +43,53 @@ UberTraceCaptureMgr* UberTraceCaptureMgr::Create(Pal::IPlatform* platform, const
   return mgr;
 }
 
-// ================================================================================================
-UberTraceCaptureMgr::UberTraceCaptureMgr(Pal::IPlatform* platform, const Device& device)
-  : device_(device),
-    dev_driver_server_(platform->GetDevDriverServer()),
-    global_disp_count_(1), // Must start from 1 according to RGP spec
-    user_event_(nullptr),
-    current_event_id_(0),
-    trace_session_(platform->GetTraceSession()),
-    trace_controller_(nullptr),
-    code_object_trace_source_(nullptr),
-    queue_timings_trace_source_(nullptr) {
+static void PAL_STDCALL UberTraceStateChangeCallback(const GpuUtil::TraceSession& pTraceSession,
+                                                     GpuUtil::TraceSessionState newState,
+                                                     void* pPrivateData)
+{
+    UberTraceCaptureMgr* mgr = static_cast<UberTraceCaptureMgr*>(pPrivateData);
+
+    switch (newState)
+    {
+        // boundary for prepare-phase dispatches
+        case GpuUtil::TraceSessionState::Preparing:
+        // boundary for detailed capture
+        case GpuUtil::TraceSessionState::Running:
+        // boundary for end of detailed trace
+#if (PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 939)
+        case GpuUtil::TraceSessionState::Postamble:
+#else
+        // boundary for end of trace
+        case GpuUtil::TraceSessionState::Waiting:
+#endif
+        {
+            VirtualGPU* current_gpu = mgr->GetCurrentGPU();
+            if (current_gpu != nullptr) {
+                bool flush_success = current_gpu->queue(MainEngine).flush();
+                assert(flush_success);
+            }
+            break;
+        }
+        default:
+            break;
+    }
 }
 
 // ================================================================================================
-UberTraceCaptureMgr::~UberTraceCaptureMgr() {
-  DestroyUberTraceResources();
-}
+UberTraceCaptureMgr::UberTraceCaptureMgr(Pal::IPlatform* platform, const Device& device)
+    : device_(device),
+      dev_driver_server_(platform->GetDevDriverServer()),
+      global_disp_count_(1),  // Must start from 1 according to RGP spec
+      user_event_(nullptr),
+      current_event_id_(0),
+      trace_session_(platform->GetTraceSession()),
+      trace_controller_(nullptr),
+      code_object_trace_source_(nullptr),
+      queue_timings_trace_source_(nullptr),
+      registered_trace_state_callback_(false) {}
+
+// ================================================================================================
+UberTraceCaptureMgr::~UberTraceCaptureMgr() { DestroyUberTraceResources(); }
 
 // ================================================================================================
 bool UberTraceCaptureMgr::CreateUberTraceResources(Pal::IPlatform* platform) {
@@ -119,6 +135,13 @@ bool UberTraceCaptureMgr::CreateUberTraceResources(Pal::IPlatform* platform) {
       break;
     }
 
+    result = trace_session_->RegisterTraceStateChangeCallback(UberTraceStateChangeCallback, this);
+    if (result != Pal::Result::Success) {
+      break;
+    }
+
+    registered_trace_state_callback_ = true;
+
     success = true;
   } while (false);
 
@@ -153,6 +176,11 @@ void UberTraceCaptureMgr::DestroyUberTraceResources() {
     delete queue_timings_trace_source_;
     queue_timings_trace_source_ = nullptr;
   }
+
+  if (registered_trace_state_callback_) {
+    trace_session_->UnregisterTraceStateChangeCallback(UberTraceStateChangeCallback, this);
+    registered_trace_state_callback_ = false;
+  }
 }
 
 // ================================================================================================
@@ -175,18 +203,19 @@ bool UberTraceCaptureMgr::Init(Pal::IPlatform* platform) {
 }
 
 // ================================================================================================
-void UberTraceCaptureMgr::PreDispatch(VirtualGPU* gpu, const HSAILKernel& kernel,
-                                      size_t x, size_t y, size_t z) {
+void UberTraceCaptureMgr::PreDispatch(VirtualGPU* gpu, const pal::Kernel& kernel, size_t x,
+                                      size_t y, size_t z) {
   // Wait for the driver to be resumed in case it's been paused.
   WaitForDriverResume();
 
   // Increment dispatch count in RenderOp trace controller
   Pal::IQueue* pQueue = gpu->queue(MainEngine).iQueue_;
-  GpuUtil::RenderOpCounts opCounts =
-  {
+  GpuUtil::RenderOpCounts opCounts = {
       .dispatchCount = 1u,
   };
-  trace_controller_->RecordRenderOps(pQueue,opCounts);
+  current_gpu_ = gpu;
+  trace_controller_->RecordRenderOps(pQueue, opCounts);
+  current_gpu_ = nullptr;
 
   if (trace_session_->GetTraceSessionState() == GpuUtil::TraceSessionState::Running) {
     RgpSqttMarkerEventType apiEvent = RgpSqttMarkerEventType::CmdNDRangeKernel;
@@ -226,8 +255,7 @@ void UberTraceCaptureMgr::PreDispatch(VirtualGPU* gpu, const HSAILKernel& kernel
 }
 
 // ================================================================================================
-void UberTraceCaptureMgr::PostDispatch(VirtualGPU* gpu) {
-}
+void UberTraceCaptureMgr::PostDispatch(VirtualGPU* gpu) {}
 
 // ================================================================================================
 // Waits for the driver to be resumed if it's currently paused.
@@ -257,8 +285,7 @@ bool UberTraceCaptureMgr::IsQueueTimingActive() const {
 }
 
 // ================================================================================================
-bool UberTraceCaptureMgr::RegisterTimedQueue(uint32_t queue_id,
-                                             Pal::IQueue* iQueue,
+bool UberTraceCaptureMgr::RegisterTimedQueue(uint32_t queue_id, Pal::IQueue* iQueue,
                                              bool* debug_vmid) const {
   // Get the OS context handle for this queue (this is a thing that RGP needs on DX clients;
   // it may be optional for Vulkan, but we provide it anyway if available).
@@ -267,9 +294,8 @@ bool UberTraceCaptureMgr::RegisterTimedQueue(uint32_t queue_id,
 
   // QueryKernelContextInfo may fail.
   // If so, just use a context identifier of 0.
-  uint64_t queueContext = (result == Pal::Result::Success)
-                        ? kernelContextInfo.contextIdentifier
-                        : 0;
+  uint64_t queueContext =
+      (result == Pal::Result::Success) ? kernelContextInfo.contextIdentifier : 0;
 
   // Register the queue with the GPA session class for timed queue operation support.
   result = queue_timings_trace_source_->RegisterTimedQueue(iQueue, queue_id, queueContext);
@@ -290,13 +316,13 @@ Pal::Result UberTraceCaptureMgr::TimedQueueSubmit(Pal::IQueue* queue, uint64_t c
   timedSubmitInfo.pSqttCmdBufIds = &sqttCmdBufIds;
   timedSubmitInfo.frameIndex = 0;
 
-  // Do a timed submit of all the command buffers
-  Pal::Result result = queue_timings_trace_source_->TimedSubmit(queue,
-                                                                submitInfo,
-                                                                timedSubmitInfo);
-
-  // Punt to non-timed submit if a timed submit fails (or is not supported)
-  if (result != Pal::Result::Success) {
+  Pal::Result result = Pal::Result::Success;
+  if (IsQueueTimingActive()) {
+    result = queue_timings_trace_source_->TimedSubmit(queue, submitInfo, timedSubmitInfo);
+    if (result != Pal::Result::Success) {
+      result = queue->Submit(submitInfo);
+    }
+  } else {
     result = queue->Submit(submitInfo);
   }
 
@@ -315,8 +341,8 @@ uint64_t UberTraceCaptureMgr::AddElfBinary(const void* exe_binary, size_t exe_bi
                                            Pal::IGpuMemory* pGpuMemory, size_t offset) {
   GpuUtil::ElfBinaryInfo elfBinaryInfo = {};
   elfBinaryInfo.pBinary = exe_binary;
-  elfBinaryInfo.binarySize = exe_binary_size; ///< FAT Elf binary size.
-  elfBinaryInfo.pGpuMemory = pGpuMemory;      ///< GPU Memory where the compiled ISA resides.
+  elfBinaryInfo.binarySize = exe_binary_size;  ///< FAT Elf binary size.
+  elfBinaryInfo.pGpuMemory = pGpuMemory;       ///< GPU Memory where the compiled ISA resides.
   elfBinaryInfo.offset = static_cast<Pal::gpusize>(offset);
 
   elfBinaryInfo.originalHash = DevDriver::MetroHash::MetroHash64(
@@ -341,8 +367,10 @@ void UberTraceCaptureMgr::WriteMarker(const VirtualGPU* gpu, const void* data,
   Pal::RgpMarkerSubQueueFlags subQueueFlags = {};
   subQueueFlags.includeMainSubQueue = 1;
 
-  gpu->queue(MainEngine).iCmd()->CmdInsertRgpTraceMarker(
-    subQueueFlags, static_cast<uint32_t>(data_size / sizeof(uint32_t)), data);
+  gpu->queue(MainEngine)
+      .iCmd()
+      ->CmdInsertRgpTraceMarker(subQueueFlags, static_cast<uint32_t>(data_size / sizeof(uint32_t)),
+                                data);
 }
 
 // ================================================================================================
@@ -350,8 +378,8 @@ void UberTraceCaptureMgr::WriteMarker(const VirtualGPU* gpu, const void* data,
 void UberTraceCaptureMgr::WriteComputeBindMarker(const VirtualGPU* gpu, uint64_t api_hash) const {
   RgpSqttMarkerPipelineBind marker = {};
   marker.identifier = RgpSqttMarkerIdentifierBindPipeline;
-  marker.cbID       = gpu->queue(MainEngine).cmdBufId();
-  marker.bindPoint  = 1;
+  marker.cbID = gpu->queue(MainEngine).cmdBufId();
+  marker.bindPoint = 1;
 
   memcpy(marker.apiPsoHash, &api_hash, sizeof(api_hash));
   WriteMarker(gpu, &marker, sizeof(marker));
@@ -360,18 +388,18 @@ void UberTraceCaptureMgr::WriteComputeBindMarker(const VirtualGPU* gpu, uint64_t
 // ================================================================================================
 // Inserts an RGP pre-dispatch marker
 void UberTraceCaptureMgr::WriteEventWithDimsMarker(const VirtualGPU* gpu,
-                                                   RgpSqttMarkerEventType apiType,
-                                                   uint32_t x, uint32_t y, uint32_t z) const {
+                                                   RgpSqttMarkerEventType apiType, uint32_t x,
+                                                   uint32_t y, uint32_t z) const {
   assert(apiType != RgpSqttMarkerEventType::Invalid);
 
   RgpSqttMarkerEvent event = {};
   event.identifier = RgpSqttMarkerIdentifierEvent;
-  event.apiType    = static_cast<uint32_t>(apiType);
-  event.cmdID      = current_event_id_++;
-  event.cbID       = gpu->queue(MainEngine).cmdBufId();
+  event.apiType = static_cast<uint32_t>(apiType);
+  event.cmdID = current_event_id_++;
+  event.cbID = gpu->queue(MainEngine).cmdBufId();
 
   RgpSqttMarkerEventWithDims eventWithDims = {};
-  eventWithDims.event   = event;
+  eventWithDims.event = event;
   eventWithDims.event.hasThreadDims = 1;
   eventWithDims.threadX = x;
   eventWithDims.threadY = y;
@@ -387,10 +415,10 @@ void UberTraceCaptureMgr::WriteBarrierStartMarker(const VirtualGPU* gpu,
     amd::ScopedLock traceLock(&trace_mutex_);
 
     RgpSqttMarkerBarrierStart marker = {};
-    marker.cbId       = gpu->queue(MainEngine).cmdBufId();
+    marker.cbId = gpu->queue(MainEngine).cmdBufId();
     marker.identifier = RgpSqttMarkerIdentifierBarrierStart;
-    marker.internal   = true;
-    marker.dword02    = data.reason;
+    marker.internal = true;
+    marker.dword02 = data.reason;
 
     WriteMarker(gpu, &marker, sizeof(marker));
   }
@@ -407,30 +435,30 @@ void UberTraceCaptureMgr::WriteBarrierEndMarker(const VirtualGPU* gpu,
     // syncs and pipeline stalls.
     Pal::Developer::BarrierOperations operations = data.operations;
     operations.pipelineStalls.u16All |= 0;
-    operations.caches.u16All         |= 0;
+    operations.caches.u16All |= 0;
 
     RgpSqttMarkerBarrierEnd marker = {};
-    marker.identifier              = RgpSqttMarkerIdentifierBarrierEnd;
-    marker.cbId                    = gpu->queue(MainEngine).cmdBufId();
-    marker.numLayoutTransitions    = 0;
-    marker.waitOnEopTs             = operations.pipelineStalls.eopTsBottomOfPipe;
-    marker.vsPartialFlush          = operations.pipelineStalls.vsPartialFlush;
-    marker.psPartialFlush          = operations.pipelineStalls.psPartialFlush;
-    marker.csPartialFlush          = operations.pipelineStalls.csPartialFlush;
-    marker.pfpSyncMe               = operations.pipelineStalls.pfpSyncMe;
-    marker.syncCpDma               = operations.pipelineStalls.syncCpDma;
-    marker.invalTcp                = operations.caches.invalTcp;
-    marker.invalSqI                = operations.caches.invalSqI$;
-    marker.invalSqK                = operations.caches.invalSqK$;
-    marker.flushTcc                = operations.caches.flushTcc;
-    marker.invalTcc                = operations.caches.invalTcc;
-    marker.flushCb                 = operations.caches.flushCb;
-    marker.invalCb                 = operations.caches.invalCb;
-    marker.flushDb                 = operations.caches.flushDb;
-    marker.invalDb                 = operations.caches.invalDb;
+    marker.identifier = RgpSqttMarkerIdentifierBarrierEnd;
+    marker.cbId = gpu->queue(MainEngine).cmdBufId();
+    marker.numLayoutTransitions = 0;
+    marker.waitOnEopTs = operations.pipelineStalls.eopTsBottomOfPipe;
+    marker.vsPartialFlush = operations.pipelineStalls.vsPartialFlush;
+    marker.psPartialFlush = operations.pipelineStalls.psPartialFlush;
+    marker.csPartialFlush = operations.pipelineStalls.csPartialFlush;
+    marker.pfpSyncMe = operations.pipelineStalls.pfpSyncMe;
+    marker.syncCpDma = operations.pipelineStalls.syncCpDma;
+    marker.invalTcp = operations.caches.invalTcp;
+    marker.invalSqI = operations.caches.invalSqI$;
+    marker.invalSqK = operations.caches.invalSqK$;
+    marker.flushTcc = operations.caches.flushTcc;
+    marker.invalTcc = operations.caches.invalTcc;
+    marker.flushCb = operations.caches.flushCb;
+    marker.invalCb = operations.caches.invalCb;
+    marker.flushDb = operations.caches.flushDb;
+    marker.invalDb = operations.caches.invalDb;
 
     WriteMarker(gpu, &marker, sizeof(marker));
   }
 }
 
-} // namespace amd::pal
+}  // namespace amd::pal

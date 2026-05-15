@@ -1,28 +1,15 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <functional>
 
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
- 
+
 
 #include "graph_dependency_common.hh"
 
@@ -54,7 +41,7 @@ inline constexpr size_t kNumOfRootNodes = 3;
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphGetRootNodes_Positive_Functional") {
+HIP_TEST_CASE(Unit_hipGraphGetRootNodes_Positive_Functional) {
   using namespace std::placeholders;
   constexpr size_t N = 1024;
   hipGraph_t graph;
@@ -140,7 +127,7 @@ TEST_CASE("Unit_hipGraphGetRootNodes_Positive_Functional") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphGetRootNodes_Positive_CapturedStream") {
+HIP_TEST_CASE(Unit_hipGraphGetRootNodes_Positive_CapturedStream) {
   hipStream_t streamForGraph{nullptr};
   hipGraph_t graph{nullptr};
   hipGraphExec_t graphExec{nullptr};
@@ -180,7 +167,7 @@ TEST_CASE("Unit_hipGraphGetRootNodes_Positive_CapturedStream") {
   HIP_CHECK(hipGraphGetRootNodes(graph, nodes, &numRootNodes));
   REQUIRE(numRootNodes == expectedRootNodes);
 
-#if HT_NVIDIA // EXSWHTEC-225
+#if HT_NVIDIA  // EXSWHTEC-225
   // Verify root nodes have correct type.
   hipGraphNodeType nodeType;
   HIP_CHECK(hipGraphNodeGetType(nodes[0], &nodeType));
@@ -226,7 +213,7 @@ TEST_CASE("Unit_hipGraphGetRootNodes_Positive_CapturedStream") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphGetRootNodes_Negative_Parameters") {
+HIP_TEST_CASE(Unit_hipGraphGetRootNodes_Negative_Parameters) {
   hipGraph_t graph{nullptr};
   size_t numRootNodes{0};
 
@@ -267,6 +254,6 @@ TEST_CASE("Unit_hipGraphGetRootNodes_Negative_Parameters") {
 }
 
 /**
-* End doxygen group GraphTest.
-* @}
-*/
+ * End doxygen group GraphTest.
+ * @}
+ */

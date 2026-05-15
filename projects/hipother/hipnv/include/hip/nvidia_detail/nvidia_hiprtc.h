@@ -1,24 +1,9 @@
 /*
-Copyright (c) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
 #ifndef HIPRTC_H
 #define HIPRTC_H
 
@@ -122,16 +107,19 @@ inline static hiprtcResult hiprtcVersion(int* major, int* minor) {
 
 typedef nvrtcProgram hiprtcProgram;
 
-inline static hiprtcResult hiprtcAddNameExpression(hiprtcProgram prog, const char* name_expression) {
+inline static hiprtcResult hiprtcAddNameExpression(hiprtcProgram prog,
+                                                   const char* name_expression) {
   return nvrtcResultTohiprtcResult(nvrtcAddNameExpression(prog, name_expression));
 }
 
-inline static hiprtcResult hiprtcCompileProgram(hiprtcProgram prog, int numOptions, const char** options) {
+inline static hiprtcResult hiprtcCompileProgram(hiprtcProgram prog, int numOptions,
+                                                const char** options) {
   return nvrtcResultTohiprtcResult(nvrtcCompileProgram(prog, numOptions, options));
 }
 
-inline static hiprtcResult hiprtcCreateProgram(hiprtcProgram* prog, const char* src, const char* name,
-                                 int numHeaders, const char** headers, const char** includeNames) {
+inline static hiprtcResult hiprtcCreateProgram(hiprtcProgram* prog, const char* src,
+                                               const char* name, int numHeaders,
+                                               const char** headers, const char** includeNames) {
   return nvrtcResultTohiprtcResult(
       nvrtcCreateProgram(prog, src, name, numHeaders, headers, includeNames));
 }
@@ -141,7 +129,7 @@ inline static hiprtcResult hiprtcDestroyProgram(hiprtcProgram* prog) {
 }
 
 inline static hiprtcResult hiprtcGetLoweredName(hiprtcProgram prog, const char* name_expression,
-                                  const char** lowered_name) {
+                                                const char** lowered_name) {
   return nvrtcResultTohiprtcResult(nvrtcGetLoweredName(prog, name_expression, lowered_name));
 }
 

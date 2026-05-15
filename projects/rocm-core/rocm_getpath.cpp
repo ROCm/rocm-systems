@@ -1,45 +1,31 @@
-////////////////////////////////////////////////////////////////////////////////
-//
-// MIT License
-//
-// Copyright (c) 2017 - 2024 Advanced Micro Devices, Inc. All rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-//
-////////////////////////////////////////////////////////////////////////////////
+//Copyright © Advanced Micro Devices, Inc., or its affiliates.
+//SPDX-License-Identifier: MIT
 
-#include <string.h>
-#include <stdlib.h>
-#include <limits.h> /* PATH_MAX */
-#include <stdio.h>
-#include <link.h>
-#include <dlfcn.h>
+#include <cstring> /* String Operations */
+#include <cstdlib> /* Dynamic Memory Mgmt */
+#include <cstdio>  /* FILENAME_MAX */
+#if !defined(_WIN32) && !defined(_WIN64)
+  #include <climits> /* PATH_MAX */
+  #include <link.h>  /* ELF Dynamic Linking DS */
+  #include <dlfcn.h> /* Dynamic linker Operations */
+  #define RC_PATH_MAX (PATH_MAX+1)
+#else
+  #if defined(_WIN32) || defined(_WIN64)
+    #include <windows.h> /* MAX_PATH */
+    #define PATH_MAX MAX_PATH
+  #elif !defined(PATH_MAX)
+    #define PATH_MAX FILENAME_MAX
+  #endif
+  #define RC_PATH_MAX ((PATH_MAX > 1024 && FILENAME_MAX > 1024 ? 1024 : (PATH_MAX < FILENAME_MAX ? PATH_MAX : FILENAME_MAX))+1)
+#endif
+
 #include "rocm_getpath.h"
 
 /* Macro for NULL CHECK */
 #define NULL_CHECK(ptr) if(!ptr) return PathIncorrecPararmeters;
 
-
 /* Target Library Install Dir */
 #define TARGET_LIB_INSTALL_DIR TARGET_LIBRARY_INSTALL_DIR
-
-/* Target Library Name Buf Size */
-#define LIBRARY_FILENAME_BUFSZ (PATH_MAX+1)
 
 /* Internal Function to get Base Path - Ref from Icarus Logic*/
 static int getROCmBase(char *buf);
@@ -66,8 +52,8 @@ PathErrors_t getROCmInstallPath( char** InstallPath, unsigned int *InstallPathLe
         char *bufPtr = (char *)NULL;
         unsigned int bufSz = 0;
 
-        bufPtr = (char *)malloc( LIBRARY_FILENAME_BUFSZ * sizeof(char) );
-        memset( bufPtr, 0, LIBRARY_FILENAME_BUFSZ );
+        bufPtr = (char *)malloc( RC_PATH_MAX * sizeof(char) );
+        memset( bufPtr, 0, RC_PATH_MAX );
         *InstallPathLen = 0;
         *InstallPath = NULL;
 
@@ -96,7 +82,7 @@ static int getROCmBase(char *buf)
 {
   int len=0;
   char *envStr=NULL;
-  char libFileName[LIBRARY_FILENAME_BUFSZ];
+  char libFileName[RC_PATH_MAX];
   char *end=NULL;
 
   // Check Environment Variable is set for ROCM
@@ -109,7 +95,7 @@ static int getROCmBase(char *buf)
          /* Already has at least one terminating */
          len--;
       }
-      if (len > PATH_MAX-1 ) {
+      if (len > RC_PATH_MAX-1 ) {
          return PathValuesTooLong;
       }
       strncpy(buf, envStr, len);
@@ -121,45 +107,53 @@ static int getROCmBase(char *buf)
     }
   }
 
-  // If Environment Variable is not set
-  // use dl APIs to get target lib path
-  // and get rocm base install path using the lib Path.
-#if BUILD_SHARED_LIBS
-  sprintf(libFileName, "lib%s.so", TARGET_LIBRARY_NAME);
-  void *handle=dlopen(libFileName,RTLD_NOW);
-  if (!handle){
-    /* We can't find the library */
-    return PathLinuxRuntimeErrors;
-  }
-  /* Variable to hold the return value from dlinfo */
-  struct link_map *map = (struct link_map*)NULL;
-  /* Query the runtime linker */
-  dlinfo(handle,RTLD_DI_LINKMAP,&map);
-  if (map ->l_name && realpath(map ->l_name,buf)) {
-    /* Get Library Directory Path */
-    char *end = strrchr(buf, '/');
-    if (end && end > buf) {
-      *end = '\0';
+  /* If Environment Variable is not set
+   * use platform-specific APIs to get target lib path
+   * and get rocm base install path using the lib Path. */
+#if defined(_WIN32) || defined(_WIN64)
+  /* Limited support for Windows:
+   * getROCmBase() Needs ROCM_PATH environment variable set on Windows. */
+  return PathWindowsNotSet;
+#else
+  #if BUILD_SHARED_LIBS
+    sprintf(libFileName, "lib%s.so", TARGET_LIBRARY_NAME);
+    void *handle=dlopen(libFileName,RTLD_NOW);
+    if (!handle){
+      /* We can't find the library */
+      return PathLinuxRuntimeErrors;
     }
-  }
-  else{
-    /* If l_name is NULL or realpath() failed
-     * Close handle before return error */
+    /* Variable to hold the return value from dlinfo */
+    struct link_map *map = (struct link_map*)NULL;
+    /* Query the runtime linker */
+    dlinfo(handle,RTLD_DI_LINKMAP,&map);
+    if (map ->l_name && realpath(map ->l_name,buf)) {
+      /* Get Library Directory Path */
+      char *end = strrchr(buf, '/');
+      if (end && end > buf) {
+        *end = '\0';
+      }
+    }
+    else{
+      /* If l_name is NULL or realpath() failed
+       * Close handle before return error */
+      dlclose(handle);
+      return PathLinuxRuntimeErrors;
+    }
+
     dlclose(handle);
+    /* find the start of substring TARGET_LIB_INSTALL_DIR
+     * To strip down Path up to Parent Directory of TARGET_LIB_INSTALL_DIR. */
+    end=strstr(buf, TARGET_LIB_INSTALL_DIR);
+    if( NULL == end ){
+      /* We can't find the library install directory*/
+      return PathLinuxRuntimeErrors;
+    }
+    *end = '\0';
+  #else
+    // BUILD_SHARED_LIBS not defined
     return PathLinuxRuntimeErrors;
-  }
-
-  dlclose(handle);
-  /* find the start of substring TARGET_LIB_INSTALL_DIR
-   * To strip down Path up to Parent Directory of TARGET_LIB_INSTALL_DIR. */
-  end=strstr(buf, TARGET_LIB_INSTALL_DIR);
-  if( NULL == end ){
-    /* We can't find the library install directory*/
-    return PathLinuxRuntimeErrors;
-  }
-  *end = '\0';
+  #endif
 #endif
-
   /* Length of Path String up to Parent Directoy (ROCm Base Path)
    * with trailing '/'.*/
   len = strlen(buf);

@@ -1,29 +1,18 @@
-/* Copyright (c) 2008 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #ifndef TOP_HPP_
 #define TOP_HPP_
 
-#if defined(__ARM_ARCH_7__) || defined(__ARM_ARCH_7A__) || defined(__arm) || defined(__arm__) || defined(_M_ARM) || defined(__aarch64__) || defined(_M_ARM64)
+#if defined(__ARM_ARCH_7__) || defined(__ARM_ARCH_7A__) || defined(__arm) || defined(__arm__) ||   \
+    defined(_M_ARM) || defined(__aarch64__) || defined(_M_ARM64)
 #define ATI_ARCH_ARM
-#elif defined(i386) || defined(__i386) || defined(__i386__) || defined(_M_IX86) || defined(__x86__) || defined(__x86_64) || defined(__x86_64__) || defined(__amd64) || defined(__amd64__) || defined(_M_X64) || defined(_M_AMD64)
+#elif defined(i386) || defined(__i386) || defined(__i386__) || defined(_M_IX86) ||                 \
+    defined(__x86__) || defined(__x86_64) || defined(__x86_64__) || defined(__amd64) ||            \
+    defined(__amd64__) || defined(_M_X64) || defined(_M_AMD64)
 #define ATI_ARCH_X86
 #endif
 
@@ -82,7 +71,7 @@ typedef __int32 ssize_t;
 #else /*!_WIN32*/
 #define SIZE_T_FMT "%zu"
 #define PTR_FMT "%p"
-#define ROCCLR_INIT_PRIORITY(priority) __attribute__ ((init_priority (priority)))
+#define ROCCLR_INIT_PRIORITY(priority) __attribute__((init_priority(priority)))
 #endif /*!_WIN32*/
 
 typedef uint32_t cl_mem_fence_flags;
@@ -161,18 +150,6 @@ class MemoryPoolObject {
   void operator delete(void*, void* address) {}
 };
 
-/*! \brief For objects allocated on the C-heap.
- */
-class HeapObject {
- public:
-  void* operator new(size_t size);
-  void operator delete(void* obj);
-  void* operator new(size_t size, size_t extSize) {
-    return HeapObject::operator new(size + extSize);
-  };
-  void operator delete(void* obj, size_t extSize) { HeapObject::operator delete(obj); }
-};
-
 /*! \brief For all reference counted objects.
  */
 class ReferenceCountedObject {
@@ -198,7 +175,8 @@ class ReferenceCountedObject {
   uint release();
 };
 
-/*@}*/} // namespace amd
+/*@}*/  // namespace amd
+}  // namespace amd
 
 #undef min  // using std::min
 #undef max  // using std::max

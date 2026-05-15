@@ -1,22 +1,8 @@
-/* Copyright (c) 2012 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "commandqueue.hpp"
 #include "thread/monitor.hpp"
@@ -35,9 +21,10 @@
 namespace amd {
 
 HostQueue::HostQueue(Context& context, Device& device, cl_command_queue_properties props,
-                     uint queueRTCUs, Priority priority, const std::vector<uint32_t>& cuMask)
-    : CommandQueue(context, device, props, device.info().queueProperties_, queueRTCUs,
-                   priority, cuMask),
+                     uint queueRTCUs, Priority priority, const std::vector<uint32_t>& cuMask,
+                     bool dedicated_queue)
+    : CommandQueue(context, device, props, device.info().queueProperties_, queueRTCUs, priority,
+                   cuMask, dedicated_queue),
       lastEnqueueCommand_(nullptr),
       head_(nullptr),
       tail_(nullptr),
@@ -62,7 +49,7 @@ HostQueue::HostQueue(Context& context, Device& device, cl_command_queue_properti
 }
 
 bool HostQueue::terminate() {
-  // incase of force destroy skip checking on the last command
+  // In case of force destroy skip checking on the last command
   if (AMD_DIRECT_DISPATCH) {
     if (!forceDestroy_ && vdev() != nullptr) {
       // If the queue still has the last command, then wait and release it
@@ -72,10 +59,10 @@ bool HostQueue::terminate() {
       Command* lastCommand = getLastQueuedCommand(true);
       if (lastCommand != nullptr) {
         // Check if CPU batch wasn't flushed for completion with the last command
-        if (GetSubmissionBatch() != nullptr) {
+        if (GetSubmissionBatchSize() != 0) {
           auto command = new Marker(*this, false);
           if (command != nullptr) {
-            ClPrint(LOG_DEBUG, LOG_CMD, "Marker queued to ensure finish");
+            ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Marker queued to ensure finish");
             command->enqueue();
             lastCommand->release();
             lastCommand = command;
@@ -141,11 +128,21 @@ bool HostQueue::terminate() {
   return true;
 }
 
+void HostQueue::FlushSubmissionBatch() {
+  if (size_ > DEBUG_CLR_MAX_BATCH_SIZE) {
+    auto marker = new Marker(*this, false);
+    if (marker != nullptr) {
+      marker->enqueue();
+      marker->release();
+    }
+  }
+}
+
 void HostQueue::finishCommand(Command* command) {
   if (command == nullptr) {
     command = getLastQueuedCommand(true);
     if (command != nullptr) {
-      ClPrint(LOG_DEBUG, LOG_CMD, "No command, awaiting complete status on host");
+      ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "No command, awaiting complete status on host");
       command->awaitCompletion();
       command->release();
     }
@@ -154,7 +151,7 @@ void HostQueue::finishCommand(Command* command) {
   // Check hardware event status for the specific command
   static constexpr bool kWaitCompletion = true;
   if (!device().IsHwEventReady(command->event(), kWaitCompletion)) {
-    ClPrint(LOG_DEBUG, LOG_CMD, "No HW event, awaiting complete status on host");
+    ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "No HW event, awaiting complete status on host");
     command->awaitCompletion();
   }
 }
@@ -168,8 +165,15 @@ void HostQueue::finish(bool cpu_wait) {
 
     command = getLastQueuedCommand(true);
     if (command == nullptr) {
+      ClPrint(LOG_DEBUG, LOG_CMD, "No command awaiting completion on host");
       return;
     }
+
+    if (!AMD_DIRECT_DISPATCH && !Os::isThreadAlive(thread_)) {
+      command->release();
+      return;
+    }
+
     // Force blocking wait if requested. That allows to avoid a build up of unreleased CPU commands
     if ((DEBUG_HIP_BLOCK_SYNC > 0) &&
         (vdev()->QueuedAsyncHandlers().load() > DEBUG_HIP_BLOCK_SYNC)) {
@@ -181,13 +185,13 @@ void HostQueue::finish(bool cpu_wait) {
   }
 
   size_t batchSize = GetSubmissionBatchSize();
-  ClPrint(LOG_DEBUG, LOG_CMD,
+  ClPrint(LOG_DETAIL_DEBUG, LOG_CMD,
           "finish() called with batch size: %zu, cpu_wait: %d, "
           "fence dirty: %d",
           batchSize, cpu_wait, vdev()->isFenceDirty());
 
   // Force marker if the batch wasn't sent for CPU update or fence is dirty
-  if (nullptr == command || (GetSubmissionBatch() != nullptr) || vdev()->isFenceDirty()) {
+  if (nullptr == command || (batchSize != 0)|| vdev()->isFenceDirty()) {
     if (nullptr != command) {
       command->release();
     }
@@ -200,28 +204,33 @@ void HostQueue::finish(bool cpu_wait) {
     command->enqueue();
   }
 
-  // Check HW status of the ROCcrl event. Note: not all ROCclr modes support HW status
+  // Check HW status of the ROCclr event. Note: not all ROCclr modes support HW status
   static constexpr bool kWaitCompletion = true;
   if (cpu_wait || !device().IsHwEventReady(command->event(), kWaitCompletion, GetSyncPolicy())) {
-    ClPrint(LOG_DEBUG, LOG_CMD,
+    ClPrint(LOG_DETAIL_DEBUG, LOG_CMD,
             "No HW event or batch size is less than %zu, "
             "await command completion",
             minBatchSize);
     command->awaitCompletion();
-
-    if (IS_HIP) {
-      ScopedLock sl(vdev()->execution());
-      ScopedLock l(lastCmdLock_);
-      // Runtime can clear the last command only if no other submissions occured
-      // during finish()
-      if (command == lastEnqueueCommand_) {
+  }
+  if (IS_HIP) {
+    std::scoped_lock sl(vdev()->execution());
+    ScopedLock l(lastCmdLock_);
+    // Runtime can clear the last command only if no other submissions occured
+    // during finish()
+    if (command == lastEnqueueCommand_) {
+      // Under Windows runtime can't destroy objects in the callback thread.
+      // Also runtime should force interrupt before any destroy. Hence, if it was just gpu wait,
+      // then keep the lastEnqueueCommand_ for the interrupt handling.
+      if (IS_LINUX || cpu_wait || GPU_ENABLE_PAL != 0) {
         device_.removeFromActiveQueues(this);
         lastEnqueueCommand_->release();
         lastEnqueueCommand_ = nullptr;
       }
     }
   }
-
+  // Release SDMA engine assignments
+  vdev()->ReleaseSdmaEngines();
   // Release all HW queues, which are idle or nearly idle
   vdev()->ReleaseAllHwQueues();
 
@@ -258,16 +267,15 @@ void HostQueue::loop(device::VirtualDevice* virtualDevice) {
     // Process the command's event wait list.
     const Command::EventWaitList& events = command->eventWaitList();
     bool dependencyFailed = false;
-    ClPrint(LOG_DEBUG, LOG_CMD, "Command (%s) processing: %p ,events.size(): %d",
+    ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command (%s) processing: %p ,events.size(): %d",
             amd::activity_prof::getOclCommandKindString(command->type()), command, events.size());
     for (const auto& it : events) {
       // Only wait if the command is enqueued into another queue.
       if (it->command().queue() != this) {
         // Runtime has to flush the current batch only if the dependent wait is blocking
         if (it->command().status() != CL_COMPLETE) {
-          ClPrint(LOG_DEBUG, LOG_CMD, "Command (%s) %p awaiting event: %p",
-                  amd::activity_prof::getOclCommandKindString(command->type()),
-                  command, it);
+          ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command (%s) %p awaiting event: %p",
+                  amd::activity_prof::getOclCommandKindString(command->type()), command, it);
           virtualDevice->flush(head, true);
           tail = head = NULL;
           dependencyFailed |= !it->awaitCompletion();
@@ -288,9 +296,8 @@ void HostQueue::loop(device::VirtualDevice* virtualDevice) {
       continue;
     }
 
-    ClPrint(LOG_DEBUG, LOG_CMD, "Command (%s) submitted: %p",
-            amd::activity_prof::getOclCommandKindString(command->type()),
-            command);
+    ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command (%s) submitted: %p",
+            amd::activity_prof::getOclCommandKindString(command->type()), command);
 
     command->setStatus(CL_SUBMITTED);
 
@@ -351,7 +358,7 @@ Command* HostQueue::getLastQueuedCommand(bool retain) {
   if (AMD_DIRECT_DISPATCH) {
     // The batch update must be lock protected to avoid a race condition
     // when multiple threads submit/flush/update the batch at the same time
-    ScopedLock sl(vdev()->execution());
+    std::scoped_lock sl(vdev()->execution());
     // Since the lastCmdLock_ is acquired, it is safe to read and retain the lastEnqueueCommand.
     // It is guaranteed that the pointer will not change.
     if (retain && lastEnqueueCommand_ != nullptr) {

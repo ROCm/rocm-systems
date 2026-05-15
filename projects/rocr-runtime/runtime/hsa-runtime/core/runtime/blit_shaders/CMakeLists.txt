@@ -3,7 +3,7 @@
 ## The University of Illinois/NCSA
 ## Open Source License (NCSA)
 ##
-## Copyright (c) 2014-2023, Advanced Micro Devices, Inc. All rights reserved.
+## Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 ##
 ## Developed by:
 ##
@@ -49,10 +49,10 @@ find_package(Clang REQUIRED HINTS ${CMAKE_PREFIX_PATH}/llvm PATHS /opt/rocm/llvm
 find_package(LLVM REQUIRED HINTS ${CMAKE_PREFIX_PATH}/llvm PATHS /opt/rocm/llvm )
 
 # Set the target devices
-set (TARGET_DEVS "gfx900;gfx1010;gfx1030;gfx1100;gfx1200")
+set (TARGET_DEVS "gfx900;gfx1010;gfx1030;gfx1100;gfx1200;gfx1250")
 
 # Set the postfix for each target device
-set (POSTFIX "9;1010;10;11;12")
+set (POSTFIX "9;1010;10;11;12;1250")
 
 # If verbose output is enabled, print paths and target devices
 if(${CMAKE_VERBOSE_MAKEFILE})
@@ -148,11 +148,19 @@ function(generate_bytecodeStrm HeaderFILE)
 		COPYONLY)
 
 	# Add a custom command to generate the header file
+if (UNIX)
 	add_custom_command(OUTPUT ${HeaderFILE}.h
 		COMMAND ${CMAKE_CURRENT_BINARY_DIR}/create_blit_shader_header.sh ${ARG_LIST} ${HSACO_TARG_LIST}
 		COMMENT "Collating blit shaders..."
 		DEPENDS ${HSACO_TARG_LIST} ${CMAKE_CURRENT_BINARY_DIR}/create_blit_shader_header.sh)
-
+else()
+  find_package(Python3 COMPONENTS Interpreter REQUIRED)
+  add_custom_command(
+    OUTPUT ${HeaderFILE}.h
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/create_blit_shader_header.py ${ARG_LIST} ${HSACO_TARG_LIST}
+    COMMENT "Collating blit shaders..."
+    DEPENDS ${HSACO_TARG_LIST} create_blit_shader_header.py)
+endif()
 	# Add a custom target that depends on the header file
 	add_custom_target(${HeaderFILE} DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${HeaderFILE}.h)
 

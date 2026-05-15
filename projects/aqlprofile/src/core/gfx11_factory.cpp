@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "core/pm4_factory.h"
+#include "core/gfx11_factory.h"
 #include "def/gfx11_def.h"
 #include "pm4/gfx11_cmd_builder.h"
 #include "pm4/pmc_builder.h"
@@ -28,31 +28,7 @@
 
 namespace aql_profile {
 
-// Gfx11 factory class
-class Gfx11Factory : public Pm4Factory {
- public:
-  explicit Gfx11Factory(const AgentInfo* agent_info)
-      : Pm4Factory(BlockInfoMap(block_table_, sizeof(block_table_))) {
-    Init(agent_info);
-  }
-  Gfx11Factory(const GpuBlockInfo** table, const uint32_t& size, const AgentInfo* agent_info)
-      : Pm4Factory(BlockInfoMap(table, size)) {
-    Init(agent_info);
-  }
-  bool IsGFX11() const override { return true; }
-
-  virtual int GetAccumLowID() const override { return 1; };
-  virtual int GetAccumHiID() const override { return 1; };
-
- protected:
-  // void ConstructTable(const AgentInfo* agent_info);
-  void Init(const AgentInfo* agent_info);
-  // void ConstructBuilders(const AgentInfo* agent_info);
-  static const GpuBlockInfo* block_table_[AQLPROFILE_BLOCKS_NUMBER];
-};
-
 // Gfx builders init
-// void Gfx11Factory::ConstructBuilders(const AgentInfo* agent_info) {
 void Gfx11Factory::Init(const AgentInfo* agent_info) {
   Pm4Factory::cmd_builder_ = new pm4_builder::Gfx11CmdBuilder(nullptr);
   if (Pm4Factory::cmd_builder_ == NULL) throw aql_profile_exc_msg("CmdBuilder allocation failed");

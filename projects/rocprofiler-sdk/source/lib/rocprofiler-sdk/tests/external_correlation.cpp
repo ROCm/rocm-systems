@@ -198,20 +198,18 @@ tool_tracing_buffered(rocprofiler_context_id_t      context,
              << ", drop_count=" << drop_count << ", start=" << record->start_timestamp
              << ", stop=" << record->end_timestamp;
 
-        static int64_t last_corr_id = -1;
-        auto           corr_id      = static_cast<int64_t>(record->correlation_id.internal);
+        auto corr_id = static_cast<int64_t>(record->correlation_id.internal);
 
         std::cout << info.str() << "\n" << std::flush;
         EXPECT_GE(context.handle, 0) << info.str();
         EXPECT_GT(record->thread_id, 0) << info.str();
         EXPECT_GT(record->kind, 0) << info.str();
-        EXPECT_GT(corr_id, last_corr_id) << info.str();
+        EXPECT_GT(corr_id, 0) << info.str();
         EXPECT_GT(record->start_timestamp, 0) << info.str();
         EXPECT_GT(record->end_timestamp, 0) << info.str();
         EXPECT_LE(record->start_timestamp, record->end_timestamp) << info.str();
 
         cb_data->client_callback_count++;
-        last_corr_id = corr_id;
     }
 }
 

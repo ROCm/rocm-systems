@@ -1,31 +1,15 @@
 /*
-Copyright (c) 2015 - 2023 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
  *  @file  amd_detail/hip_runtime.h
  *  @brief Contains definitions of APIs for HIP runtime.
  */
 
-//#pragma once
+// #pragma once
 #ifndef HIP_INCLUDE_HIP_AMD_DETAIL_HIP_RUNTIME_H
 #define HIP_INCLUDE_HIP_AMD_DETAIL_HIP_RUNTIME_H
 
@@ -83,11 +67,14 @@ size_t amd_dbgapi_get_build_id();
 #include <cmath>
 #include <cstdint>
 #include <tuple>
+#include <array>
+#include <utility>
+#include <type_traits>
 #else
 #include <math.h>
 #include <stdint.h>
-#endif // __cplusplus
-#endif // !defined(__HIPCC_RTC__)
+#endif  // __cplusplus
+#endif  // !defined(__HIPCC_RTC__)
 
 #if __HIP_CLANG_ONLY__
 
@@ -105,7 +92,7 @@ size_t amd_dbgapi_get_build_id();
 #include <hip/amd_detail/texture_fetch_functions.h>
 #include <hip/amd_detail/texture_indirect_functions.h>
 extern int HIP_TRACE_API;
-#endif // !defined(__HIPCC_RTC__)
+#endif  // !defined(__HIPCC_RTC__)
 
 #ifdef __cplusplus
 #include <hip/amd_detail/hip_ldg.h>
@@ -155,17 +142,17 @@ extern int HIP_TRACE_API;
 
 
 #define launch_bounds_impl0(requiredMaxThreadsPerBlock)                                            \
-    __attribute__((amdgpu_flat_work_group_size(1, requiredMaxThreadsPerBlock)))
+  __attribute__((amdgpu_flat_work_group_size(1, requiredMaxThreadsPerBlock)))
 #define launch_bounds_impl1(requiredMaxThreadsPerBlock, minBlocksPerMultiprocessor)                \
-    __attribute__((amdgpu_flat_work_group_size(1, requiredMaxThreadsPerBlock),                     \
-                   amdgpu_waves_per_eu(minBlocksPerMultiprocessor)))
+  __attribute__((amdgpu_flat_work_group_size(1, requiredMaxThreadsPerBlock),                       \
+                 amdgpu_waves_per_eu(minBlocksPerMultiprocessor)))
 #define select_impl_(_1, _2, impl_, ...) impl_
 #define __launch_bounds__(...)                                                                     \
   select_impl_(__VA_ARGS__, launch_bounds_impl1, launch_bounds_impl0, )(__VA_ARGS__)
 
 #if !defined(__HIPCC_RTC__)
 __host__ inline void* __get_dynamicgroupbaseptr() { return nullptr; }
-#endif // !defined(__HIPCC_RTC__)
+#endif  // !defined(__HIPCC_RTC__)
 
 // End doxygen API:
 /**
@@ -181,70 +168,78 @@ __host__ inline void* __get_dynamicgroupbaseptr() { return nullptr; }
 
 typedef int hipLaunchParm;
 
-template <std::size_t n, typename... Ts,
-          typename std::enable_if<n == sizeof...(Ts)>::type* = nullptr>
-void pArgs(const std::tuple<Ts...>&, void*) {}
-
-template <std::size_t n, typename... Ts,
-          typename std::enable_if<n != sizeof...(Ts)>::type* = nullptr>
-void pArgs(const std::tuple<Ts...>& formals, void** _vargs) {
-    using T = typename std::tuple_element<n, std::tuple<Ts...> >::type;
-
-    static_assert(!std::is_reference<T>{},
-                  "A __global__ function cannot have a reference as one of its "
-                  "arguments.");
-#if defined(HIP_STRICT)
-    static_assert(std::is_trivially_copyable<T>{},
-                  "Only TriviallyCopyable types can be arguments to a __global__ "
-                  "function");
-#endif
-    _vargs[n] = const_cast<void*>(reinterpret_cast<const void*>(&std::get<n>(formals)));
-    return pArgs<n + 1>(formals, _vargs);
+template <typename... Formals, typename... Actuals>
+std::tuple<Formals...> validateArgsCountType(void (*kernel)(Formals...),
+                                             Actuals... actuals) {
+  static_assert(sizeof...(Formals) == sizeof...(Actuals), "Argument Count Mismatch");
+  return {std::move(actuals)...};
 }
 
-template <typename... Formals, typename... Actuals>
-std::tuple<Formals...> validateArgsCountType(void (*kernel)(Formals...), std::tuple<Actuals...>(actuals)) {
-    static_assert(sizeof...(Formals) == sizeof...(Actuals), "Argument Count Mismatch");
-    std::tuple<Formals...> to_formals{std::move(actuals)};
-    return to_formals;
+template <typename T> constexpr bool validateArgType() {
+  static_assert(!std::is_reference<T>{},
+                "A __global__ function cannot have a reference as one of its "
+                "arguments.");
+#if defined(HIP_STRICT)
+  static_assert(std::is_trivially_copyable<T>{},
+                "Only TriviallyCopyable types can be arguments to a __global__ "
+                "function");
+#endif
+  return !std::is_reference<T>{} && std::is_trivially_copyable<T>{};
+}
+
+template <typename... Ts> constexpr bool validateArgs(void (*)(Ts...)) {
+  return (validateArgType<Ts>() && ... && true);
+}
+
+template <typename... Ts, size_t... Is>
+std::array<void*, sizeof...(Ts)> pArgs(std::tuple<Ts...>& formals,
+                                       __hip_internal::index_sequence<Is...>) {
+  return {(static_cast<void*>(&std::get<Is>(formals)))...};
+}
+
+template <typename... Ts> std::array<void*, sizeof...(Ts)> pArgs(std::tuple<Ts...>& formals) {
+  return pArgs(formals, __hip_internal::make_index_sequence<sizeof...(Ts)>());
 }
 
 #if defined(HIP_TEMPLATE_KERNEL_LAUNCH)
 template <typename... Args, typename F = void (*)(Args...)>
 void hipLaunchKernelGGL(F kernel, const dim3& numBlocks, const dim3& dimBlocks,
                         std::uint32_t sharedMemBytes, hipStream_t stream, Args... args) {
-    constexpr size_t count = sizeof...(Args);
-    auto tup_ = std::tuple<Args...>{args...};
-    auto tup = validateArgsCountType(kernel, tup_);
-    void* _Args[count];
-    pArgs<0>(tup, _Args);
+  validateArgs(kernel);
+  auto k = reinterpret_cast<void*>(kernel);
 
-    auto k = reinterpret_cast<void*>(kernel);
-    hipLaunchKernel(k, numBlocks, dimBlocks, _Args, sharedMemBytes, stream);
+  if constexpr (std::is_same_v<F, void (*)(Args...)>) {
+    std::array<void*, sizeof...(Args)> ptrArgsArr{static_cast<void*>(&args)...};
+    hipLaunchKernel(k, numBlocks, dimBlocks, ptrArgsArr.data(), sharedMemBytes, stream);
+  } else {
+    auto formals = validateArgsCountType(kernel, args...);
+    auto ptrArgsArr = pArgs(formals);
+    hipLaunchKernel(k, numBlocks, dimBlocks, ptrArgsArr.data(), sharedMemBytes, stream);
+  }
 }
 #else
 #define hipLaunchKernelGGLInternal(kernelName, numBlocks, numThreads, memPerBlock, streamId, ...)  \
-    do {                                                                                           \
-        kernelName<<<(numBlocks), (numThreads), (memPerBlock), (streamId)>>>(__VA_ARGS__);         \
-    } while (0)
+  do {                                                                                             \
+    kernelName<<<(numBlocks), (numThreads), (memPerBlock), (streamId)>>>(__VA_ARGS__);             \
+  } while (0)
 
-#define hipLaunchKernelGGL(kernelName, ...)  hipLaunchKernelGGLInternal((kernelName), __VA_ARGS__)
+#define hipLaunchKernelGGL(kernelName, ...) hipLaunchKernelGGLInternal((kernelName), __VA_ARGS__)
 #endif
 
 #include <hip/hip_runtime_api.h>
-#endif // !defined(__HIPCC_RTC__)
+#endif  // !defined(__HIPCC_RTC__)
 
 #if defined(__HIPCC_RTC__)
 typedef struct dim3 {
-    __hip_uint32_t x;  ///< x
-    __hip_uint32_t y;  ///< y
-    __hip_uint32_t z;  ///< z
+  __hip_uint32_t x;  ///< x
+  __hip_uint32_t y;  ///< y
+  __hip_uint32_t z;  ///< z
 #ifdef __cplusplus
-    constexpr __device__ dim3(__hip_uint32_t _x = 1, __hip_uint32_t _y = 1, __hip_uint32_t _z = 1)
-            : x(_x), y(_y), z(_z){};
+  constexpr __device__ dim3(__hip_uint32_t _x = 1, __hip_uint32_t _y = 1, __hip_uint32_t _z = 1)
+      : x(_x), y(_y), z(_z) {};
 #endif
 } dim3;
-#endif // !defined(__HIPCC_RTC__)
+#endif  // !defined(__HIPCC_RTC__)
 
 #pragma push_macro("__DEVICE__")
 #define __DEVICE__ static __device__ __forceinline__
@@ -269,43 +264,41 @@ __DEVICE__ unsigned int __hip_get_grid_dim_x() { return __ockl_get_num_groups(0)
 __DEVICE__ unsigned int __hip_get_grid_dim_y() { return __ockl_get_num_groups(1); }
 __DEVICE__ unsigned int __hip_get_grid_dim_z() { return __ockl_get_num_groups(2); }
 
-#define __HIP_DEVICE_BUILTIN(DIMENSION, FUNCTION)               \
-  __declspec(property(get = __get_##DIMENSION)) unsigned int DIMENSION; \
-  __DEVICE__ unsigned int __get_##DIMENSION(void) {                     \
-    return FUNCTION;                                            \
-  }
+#define __HIP_DEVICE_BUILTIN(DIMENSION, FUNCTION)                                                  \
+  __declspec(property(get = __get_##DIMENSION)) unsigned int DIMENSION;                            \
+  __DEVICE__ unsigned int __get_##DIMENSION(void) { return FUNCTION; }
 
 struct __hip_builtin_threadIdx_t {
-  __HIP_DEVICE_BUILTIN(x,__hip_get_thread_idx_x());
-  __HIP_DEVICE_BUILTIN(y,__hip_get_thread_idx_y());
-  __HIP_DEVICE_BUILTIN(z,__hip_get_thread_idx_z());
+  __HIP_DEVICE_BUILTIN(x, __hip_get_thread_idx_x());
+  __HIP_DEVICE_BUILTIN(y, __hip_get_thread_idx_y());
+  __HIP_DEVICE_BUILTIN(z, __hip_get_thread_idx_z());
 #ifdef __cplusplus
   __device__ operator dim3() const { return dim3(x, y, z); }
 #endif
 };
 
 struct __hip_builtin_blockIdx_t {
-  __HIP_DEVICE_BUILTIN(x,__hip_get_block_idx_x());
-  __HIP_DEVICE_BUILTIN(y,__hip_get_block_idx_y());
-  __HIP_DEVICE_BUILTIN(z,__hip_get_block_idx_z());
+  __HIP_DEVICE_BUILTIN(x, __hip_get_block_idx_x());
+  __HIP_DEVICE_BUILTIN(y, __hip_get_block_idx_y());
+  __HIP_DEVICE_BUILTIN(z, __hip_get_block_idx_z());
 #ifdef __cplusplus
   __device__ operator dim3() const { return dim3(x, y, z); }
 #endif
 };
 
 struct __hip_builtin_blockDim_t {
-  __HIP_DEVICE_BUILTIN(x,__hip_get_block_dim_x());
-  __HIP_DEVICE_BUILTIN(y,__hip_get_block_dim_y());
-  __HIP_DEVICE_BUILTIN(z,__hip_get_block_dim_z());
+  __HIP_DEVICE_BUILTIN(x, __hip_get_block_dim_x());
+  __HIP_DEVICE_BUILTIN(y, __hip_get_block_dim_y());
+  __HIP_DEVICE_BUILTIN(z, __hip_get_block_dim_z());
 #ifdef __cplusplus
   __device__ operator dim3() const { return dim3(x, y, z); }
 #endif
 };
 
 struct __hip_builtin_gridDim_t {
-  __HIP_DEVICE_BUILTIN(x,__hip_get_grid_dim_x());
-  __HIP_DEVICE_BUILTIN(y,__hip_get_grid_dim_y());
-  __HIP_DEVICE_BUILTIN(z,__hip_get_grid_dim_z());
+  __HIP_DEVICE_BUILTIN(x, __hip_get_grid_dim_x());
+  __HIP_DEVICE_BUILTIN(y, __hip_get_grid_dim_y());
+  __HIP_DEVICE_BUILTIN(z, __hip_get_grid_dim_z());
 #ifdef __cplusplus
   __device__ operator dim3() const { return dim3(x, y, z); }
 #endif
@@ -342,15 +335,15 @@ extern const __device__ __attribute__((weak)) __hip_builtin_gridDim_t gridDim;
 #if __HIP_HCC_COMPAT_MODE__
 // Define HCC work item functions in terms of HIP builtin variables.
 #pragma push_macro("__DEFINE_HCC_FUNC")
-#define __DEFINE_HCC_FUNC(hc_fun,hip_var) \
-inline __device__ __attribute__((always_inline)) unsigned int hc_get_##hc_fun(unsigned int i) { \
-  if (i==0) \
-    return hip_var.x; \
-  else if(i==1) \
-    return hip_var.y; \
-  else \
-    return hip_var.z; \
-}
+#define __DEFINE_HCC_FUNC(hc_fun, hip_var)                                                         \
+  inline __device__ __attribute__((always_inline)) unsigned int hc_get_##hc_fun(unsigned int i) {  \
+    if (i == 0)                                                                                    \
+      return hip_var.x;                                                                            \
+    else if (i == 1)                                                                               \
+      return hip_var.y;                                                                            \
+    else                                                                                           \
+      return hip_var.z;                                                                            \
+  }
 
 __DEFINE_HCC_FUNC(workitem_id, threadIdx)
 __DEFINE_HCC_FUNC(group_id, blockIdx)
@@ -359,9 +352,7 @@ __DEFINE_HCC_FUNC(num_groups, gridDim)
 #pragma pop_macro("__DEFINE_HCC_FUNC")
 
 extern "C" __device__ __attribute__((const)) size_t __ockl_get_global_id(unsigned int);
-inline __device__ __attribute__((always_inline)) unsigned int
-hc_get_workitem_absolute_id(int dim)
-{
+inline __device__ __attribute__((always_inline)) unsigned int hc_get_workitem_absolute_id(int dim) {
   return (unsigned int)__ockl_get_global_id(dim);
 }
 
@@ -385,9 +376,9 @@ hc_get_workitem_absolute_id(int dim)
 #include <include/cuda_wrappers/new>
 #undef __CUDA__
 #pragma pop_macro("__CUDA__")
-#endif // !_OPENMP || __HIP_ENABLE_CUDA_WRAPPER_FOR_OPENMP__
-#endif // !defined(__HIPCC_RTC__)
-#endif // !__CLANG_HIP_RUNTIME_WRAPPER_INCLUDED__
-#endif // __HIP_CLANG_ONLY__
+#endif  // !_OPENMP || __HIP_ENABLE_CUDA_WRAPPER_FOR_OPENMP__
+#endif  // !defined(__HIPCC_RTC__)
+#endif  // !__CLANG_HIP_RUNTIME_WRAPPER_INCLUDED__
+#endif  // __HIP_CLANG_ONLY__
 
 #endif  // HIP_AMD_DETAIL_RUNTIME_H

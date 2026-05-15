@@ -23,6 +23,7 @@
 #pragma once
 
 #include "disassembly.hpp"
+#include "funcmap.hpp"
 #include "segment.hpp"
 
 #include <dwarf.h>
@@ -33,11 +34,13 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace rocprofiler
@@ -66,6 +69,71 @@ struct Instruction
     marker_id_t codeobj_id{0};  // Instruction code object load id, if from loaded codeobj
 
     static constexpr std::string_view separator = " -> ";
+};
+
+/**
+ * @brief Extracts inlined function call stack information for a given address
+ *
+ * This struct is used to recursively search through DWARF debug information to find all inlined
+ * functions that contain the specified address, building a complete call stack from the outermost
+ * function down to the innermost inlined function.
+ */
+struct DIEInfo
+{
+    struct DRange
+    {
+        Dwarf_Addr low{std::numeric_limits<Dwarf_Addr>::max()};
+        Dwarf_Addr high{0};
+
+        // Makes sure this range includes the "other" range
+        void expand(const DRange& other)
+        {
+            low  = std::min(low, other.low);
+            high = std::max(high, other.high);
+        }
+
+        /**
+         * @brief Is the address inside the low/hihg range?
+         */
+        bool contains(Dwarf_Addr addr) const { return low <= addr && high > addr; }
+    };
+
+    DIEInfo(Dwarf_Die* die);
+
+    /**
+     * @brief Recursively traverses all children DIEInfos to find inlined functions at a specific
+     * address
+     *
+     * This function performs a depth-first traversal of the DWARF debug information tree,
+     * checking each DIE for inlined function information that covers the specified address.
+     * It processes both the current DIE and all its children (including siblings at each level)
+     * to ensure comprehensive coverage of all possible inlined function contexts.
+     *
+     * The traversal is necessary because inlined functions can be nested (function A inlines
+     * function B which inlines function C) and multiple inlined functions can exist at the
+     * same scope level as siblings in the DWARF tree.
+     *
+     * @param addr The address to search for inlined function information
+     * @param call_stack Reference to vector that accumulates the call stack information
+     * @return True if either this instance or one of the children added an entry to the stack
+     */
+    bool getCallStackRecursive(Dwarf_Addr addr, std::vector<std::string>& call_stack);
+
+    std::vector<DRange>                   all_ranges{};
+    std::vector<std::unique_ptr<DIEInfo>> children{};
+
+    // Union of ranges, or the same as dwarf_lo/hi pc
+    DRange total_range{};
+    // Union of all children's children_range + this total range
+    DRange children_range{};
+
+    std::string file_and_line{};
+
+    void addRange(const DRange& range)
+    {
+        all_ranges.push_back(range);
+        total_range.expand(range);
+    }
 };
 
 class CodeobjDecoderComponent
@@ -104,17 +172,24 @@ public:
 
         if(dbg)
         {
-            Dwarf_Off cu_offset{0}, next_offset;
-            size_t    header_size;
+            Dwarf_Off cu_offset{};
+            Dwarf_Off next_offset{};
+            size_t    header_size{};
 
-            std::map<uint64_t, std::string> line_addrs;
+            struct LineEntry
+            {
+                Dwarf_Addr  end_addr;
+                std::string text;
+            };
+            std::map<Dwarf_Addr, LineEntry>                         line_addrs{};
+            std::unordered_map<Dwarf_Off, std::unique_ptr<DIEInfo>> diemap{};
 
             while(
                 dwarf_nextcu(
                     dbg.get(), cu_offset, &next_offset, &header_size, nullptr, nullptr, nullptr) ==
                 0)
             {
-                Dwarf_Die die;
+                Dwarf_Die die{};
                 if(!dwarf_offdie(dbg.get(), cu_offset + header_size, &die))
                 {
                     cu_offset = next_offset;
@@ -129,48 +204,76 @@ public:
                     continue;
                 }
 
-                for(size_t i = 0; i < line_count; ++i)
+                // Each row in the DWARF line table covers [addr, next_row_addr).
+                // The terminator of a contiguous code sequence is a row with the
+                // end_sequence flag set -- its address is one past the last
+                // instruction in the sequence. Using the next row's address
+                // (rather than the next *kept* row's address, or codeobj_size)
+                // ensures that ranges never extend across gaps in DWARF
+                // coverage or past the end of an end_sequence boundary.
+                for(size_t i = 0; i + 1 < line_count; ++i)
                 {
-                    Dwarf_Addr  addr;
-                    int         line_number;
-                    Dwarf_Line* line = dwarf_onesrcline(lines, i);
+                    Dwarf_Addr  addr{};
+                    Dwarf_Addr  end_addr{};
+                    int         line_number{};
+                    bool        end_sequence = false;
+                    Dwarf_Line* line         = dwarf_onesrcline(lines, i);
+                    Dwarf_Line* next_line    = dwarf_onesrcline(lines, i + 1);
 
-                    if(line && dwarf_lineaddr(line, &addr) == 0 &&
-                       dwarf_lineno(line, &line_number) == 0 && line_number != 0)
+                    if(line == nullptr || next_line == nullptr) continue;
+                    if(dwarf_lineaddr(line, &addr) != 0) continue;
+                    if(dwarf_lineaddr(next_line, &end_addr) != 0) continue;
+                    if(end_addr <= addr) continue;
+
+                    // Skip end_sequence rows -- they only mark the end boundary
+                    // of the previous row, they aren't a real source location.
+                    if(dwarf_lineendsequence(line, &end_sequence) == 0 && end_sequence) continue;
+
+                    // line_number == 0 is a valid DWARF row meaning "this address
+                    // belongs to this source file but has no specific line"
+                    // (typically compiler-synthesized code, prologue/epilogue,
+                    // or optimizer-merged blocks). addr2line renders these as
+                    // "<file>:?" -- keep them with the same convention so they
+                    // are not silently dropped.
+                    if(dwarf_lineno(line, &line_number) != 0) continue;
+
+                    const char* src_cstr = dwarf_linesrc(line, nullptr, nullptr);
+                    if(src_cstr == nullptr) continue;
+
+                    std::string src        = src_cstr;
+                    auto        dwarf_line = src + ':';
+                    if(line_number != 0)
+                        dwarf_line += std::to_string(line_number);
+                    else
+                        dwarf_line += '?';
+
+                    std::vector<std::string> call_stack_info{};
+
+                    auto& die_ptr = diemap[dwarf_dieoffset(&die)];
+                    if(die_ptr == nullptr) die_ptr = std::make_unique<DIEInfo>(&die);
+                    die_ptr->getCallStackRecursive(addr, call_stack_info);
+
+                    size_t capacity =
+                        dwarf_line.size() + Instruction::separator.size() * call_stack_info.size();
+                    for(const auto& call : call_stack_info)
+                        capacity += call.size();
+
+                    dwarf_line.reserve(capacity);
+                    for(const auto& call : call_stack_info)
                     {
-                        std::string src             = dwarf_linesrc(line, nullptr, nullptr);
-                        auto        dwarf_line      = src + ':' + std::to_string(line_number);
-                        auto        call_stack_info = extractInlinedCallStackInfo(dbg.get(), addr);
-
-                        size_t capacity = dwarf_line.size() +
-                                          Instruction::separator.size() * call_stack_info.size();
-                        for(const auto& call : call_stack_info)
-                            capacity += call.size();
-
-                        dwarf_line.reserve(capacity);
-                        for(const auto& call : call_stack_info)
-                        {
-                            dwarf_line += Instruction::separator;
-                            dwarf_line += call;
-                        }
-                        line_addrs[addr] = std::move(dwarf_line);
+                        dwarf_line += Instruction::separator;
+                        dwarf_line += call;
                     }
+                    line_addrs[addr] = LineEntry{end_addr, std::move(dwarf_line)};
                 }
                 cu_offset = next_offset;
             }
 
-            auto it = line_addrs.begin();
-            if(it != line_addrs.end())
+            for(auto& [addr, entry] : line_addrs)
             {
-                while(std::next(it) != line_addrs.end())
-                {
-                    uint64_t delta   = std::next(it)->first - it->first;
-                    auto     segment = segment::address_range_t{it->first, delta, 0};
-                    m_line_number_map.emplace(segment, std::move(it->second));
-                    it++;
-                }
-                auto segment = segment::address_range_t{it->first, codeobj_size - it->first, 0};
-                m_line_number_map.emplace(segment, std::move(it->second));
+                if(entry.end_addr <= addr) continue;
+                auto segment = segment::address_range_t{addr, entry.end_addr - addr, 0};
+                m_line_number_map.emplace(segment, std::move(entry.text));
             }
         }
 
@@ -181,6 +284,78 @@ public:
             m_symbol_map = disassembly->GetKernelMap();  // Can throw
         } catch(...)
         {}
+
+        // .sqtt_funcmap is an ASCII section emitted by the sqtt_instrumentation
+        // pass. Each newline-terminated row assigns a marker ID (the value
+        // emitted by s_ttracedata{,_imm} at runtime -- see
+        // funcmap::decode_marker_value) to a function, kernel, user scope, or
+        // point marker. See funcmap.hpp for the full grammar.
+        //
+        //   .sqtt_funcmap (raw bytes -- one row per entry, '\n'-terminated):
+        //   +--------------------------------------------------------------+
+        //   | F:1:my_device_fn@/path/file.cpp:42                           |
+        //   | K:my_kernel@/path/file.cpp:8                                 |
+        //   | U:2:my_scope_marker                                          |
+        //   | P:3:vmem_load@/path/file.cpp:71                              |
+        //   | W:64                                                         |
+        //   +--------------------------------------------------------------+
+        //         |           |
+        //         |           +-- optional "@source_loc" tail (file[:line])
+        //         |
+        //         +-- F:id:name...  function -- enter/exit scope marker
+        //         +-- K:name...     kernel   -- name -> vaddr lookup, no id
+        //         +-- U:id:name     user-defined scope marker (enter/exit)
+        //         +-- P:id:name...  point marker (barrier, mem op, user pt)
+        //         +-- W:N           wave size (32 or 64)
+        //                          |
+        //                          v  funcmap::parse_funcmap_section
+        //   m_funcmap.entries   insertion-ordered list of FuncmapEntry rows
+        //   m_funcmap.by_id     id -> entry  (K: rows have no id; not indexed)
+        //   m_funcmap.wave_size value of the W: row (0 if absent)
+        //
+        // The pass below joins the freshly-parsed funcmap against
+        // m_symbol_map (which the disassembler already populated from
+        // .symtab) to back-fill `vaddr` on every F:/K: entry whose name
+        // matches a kernel symbol. This lets consumers resolve a marker to
+        // function-name to load address in one shot.
+        auto section_bytes =
+            funcmap::extract_elf_section(codeobj_data, codeobj_size, ".sqtt_funcmap");
+        if(section_bytes)
+        {
+            m_funcmap = funcmap::parse_funcmap_section(*section_bytes);
+
+            // m_symbol_map is vaddr-keyed; build the reverse index for the join.
+            std::unordered_map<std::string, uint64_t> name_to_vaddr;
+            name_to_vaddr.reserve(m_symbol_map.size());
+            for(const auto& [vaddr, sym] : m_symbol_map)
+                name_to_vaddr.emplace(sym.name, vaddr);
+
+            // FuncmapEntry is shared_ptr<const>, so we copy-on-write: clone,
+            // set vaddr, then swap the shared_ptr in entries[] (and by_id).
+            for(auto& entry_ptr : m_funcmap.entries)
+            {
+                if(!entry_ptr) continue;
+                if(entry_ptr->kind != funcmap::FuncmapEntryKind::Function &&
+                   entry_ptr->kind != funcmap::FuncmapEntryKind::Kernel)
+                    continue;
+
+                auto it = name_to_vaddr.find(entry_ptr->name);
+                if(it == name_to_vaddr.end()) continue;
+
+                auto updated   = std::make_shared<funcmap::FuncmapEntry>(*entry_ptr);
+                updated->vaddr = it->second;
+                // K: rows are not present in by_id by design (they carry no
+                // marker ID -- see parse_funcmap_section). The identity guard
+                // skips slots already overwritten by a later F:/U:/P: row.
+                if(updated->kind != funcmap::FuncmapEntryKind::Kernel)
+                {
+                    auto bid = m_funcmap.by_id.find(updated->id);
+                    if(bid != m_funcmap.by_id.end() && bid->second == entry_ptr)
+                        bid->second = updated;
+                }
+                entry_ptr = std::move(updated);
+            }
+        }
     }
     ~CodeobjDecoderComponent() = default;
 
@@ -205,84 +380,16 @@ public:
         return inst;
     }
 
+    // Parsed `.sqtt_funcmap` with vaddr back-filled on F:/K: rows. Empty
+    // when the code object has no .sqtt_funcmap section.
+    const funcmap::Funcmap& getFuncmap() const { return m_funcmap; }
+
     std::map<uint64_t, SymbolInfo>            m_symbol_map{};
+    funcmap::Funcmap                          m_funcmap{};
     std::vector<std::shared_ptr<Instruction>> instructions{};
     std::unique_ptr<DisassemblyInstance>      disassembly{};
 
     std::map<segment::address_range_t, std::string> m_line_number_map{};
-
-private:
-    /**
-     * @brief Extracts inlined function call stack information for a given address
-     *
-     * This function searches through DWARF debug information to find all inlined functions
-     * that contain the specified address, building a complete call stack from the outermost
-     * function down to the innermost inlined function.
-     *
-     * @param dbg DWARF debug information handle
-     * @param addr The address to analyze for inlined function information
-     * @return Vector of strings representing the call stack, formatted as "filename:line"
-     *         The stack is ordered from caller to callee (outermost to innermost)
-     */
-    static std::vector<std::string> extractInlinedCallStackInfo(Dwarf* dbg, Dwarf_Addr addr);
-
-    /**
-     * @brief Checks if a DWARF Debug Information Entry (DIE) contains a specific address
-     *
-     * This function recursively searches through a DIE and its children to determine
-     * if any of them contain the specified address within their address ranges.
-     * Used as an optimization to quickly determine if a compilation unit or function
-     * contains the target address before doing expensive traversal.
-     *
-     * @param die Pointer to the DWARF DIE to check
-     * @param addr The address to search for
-     * @return true if the DIE or any of its children contain the address, false otherwise
-     */
-    static bool checkDIEContainsAddress(Dwarf_Die* die, Dwarf_Addr addr);
-
-    /**
-     * @brief Recursively traverses all DWARF DIEs to find inlined functions at a specific address
-     *
-     * This function performs a depth-first traversal of the DWARF debug information tree,
-     * checking each DIE for inlined function information that covers the specified address.
-     * It processes both the current DIE and all its children (including siblings at each level)
-     * to ensure comprehensive coverage of all possible inlined function contexts.
-     *
-     * The traversal is necessary because inlined functions can be nested (function A inlines
-     * function B which inlines function C) and multiple inlined functions can exist at the
-     * same scope level as siblings in the DWARF tree.
-     *
-     * @param die Pointer to the current DWARF DIE to examine
-     * @param addr The address to search for inlined function information
-     * @param call_stack Reference to vector that accumulates the call stack information
-     */
-    static void traverseAllDIEs(Dwarf_Die*                die,
-                                Dwarf_Addr                addr,
-                                std::vector<std::string>& call_stack);
-
-    /**
-     * @brief Examines a specific DWARF DIE for inlined function information at an address
-     *
-     * This function checks if a given DIE represents an inlined subroutine that contains
-     * the specified address. If it does, it extracts the call site information (filename
-     * and line number where the function was inlined) and adds it to the call stack.
-     *
-     * The function specifically looks for DW_TAG_inlined_subroutine DIEs and validates
-     * that the address falls within the DIE's address range (either contiguous via
-     * low_pc/high_pc or non-contiguous via ranges attribute). It then extracts the
-     * call site information using DW_AT_call_file and DW_AT_call_line attributes.
-     *
-     * @param die Pointer to the DWARF DIE to examine
-     * @param addr The address to check against the DIE's address ranges
-     * @param call_stack Reference to vector where call site info will be added
-     *
-     * @note Only processes DW_TAG_inlined_subroutine DIEs. Regular functions
-     *       (DW_TAG_subprogram) are ignored since this function specifically
-     *       extracts inlined function call information.
-     */
-    static void checkDIEForInlinedFunction(Dwarf_Die*                die,
-                                           Dwarf_Addr                addr,
-                                           std::vector<std::string>& call_stack);
 };
 
 class LoadedCodeobjDecoder
@@ -357,7 +464,9 @@ public:
         if(!decoder) throw std::exception();
         return decoder->m_symbol_map;
     }
-    const uint64_t load_addr;
+    const funcmap::Funcmap& getFuncmap() const;
+    bool                    has_decoder() const noexcept { return bool(decoder); }
+    const uint64_t          load_addr;
 
 private:
     uint64_t load_end{0};
@@ -418,6 +527,15 @@ public:
         {}
         return nullptr;
     }
+
+    funcmap::Funcmap::EntryPtr getMarker(marker_id_t id, uint32_t funcmap_id) const;
+
+    // Returns nullopt if `id` has no registered decoder (or the decoder is
+    // uninitialized). Caller-side existence test replaces what used to be a
+    // try/catch on decoders.at(id). Funcmap is returned by value (copy of a
+    // vector + unordered_map of shared_ptrs) since std::optional cannot hold
+    // a reference in C++17.
+    std::optional<funcmap::Funcmap> getFuncmap(marker_id_t id) const;
 
 protected:
     std::unordered_map<marker_id_t, std::shared_ptr<LoadedCodeobjDecoder>> decoders{};
@@ -519,172 +637,189 @@ public:
         }
     }
 
+    std::vector<std::pair<marker_id_t, funcmap::Funcmap::EntryPtr>> findMarkerAny(
+        uint32_t funcmap_id) const;
+
+    uint32_t getWaveSize() const;
+
 private:
     segment::CodeobjTableTranslator table{};
 };
 
-inline std::vector<std::string>
-CodeobjDecoderComponent::extractInlinedCallStackInfo(Dwarf* dbg, Dwarf_Addr addr)
+inline const funcmap::Funcmap&
+LoadedCodeobjDecoder::getFuncmap() const
 {
-    std::vector<std::string> call_stack{};
+    if(!decoder) throw std::exception();
+    return decoder->getFuncmap();
+}
 
-    // Iterate through all compilation units to find the one containing our address
-    Dwarf_Off cu_offset{};
-    Dwarf_Off next_offset{};
-    size_t    header_size{};
+inline funcmap::Funcmap::EntryPtr
+CodeobjMap::getMarker(marker_id_t id, uint32_t funcmap_id) const
+{
+    auto it = decoders.find(id);
+    if(it == decoders.end()) return nullptr;
 
-    while(dwarf_nextcu(dbg, cu_offset, &next_offset, &header_size, nullptr, nullptr, nullptr) == 0)
+    try
     {
-        Dwarf_Die cu_die{};
-        if(!dwarf_offdie(dbg, cu_offset + header_size, &cu_die))
+        return it->second->getFuncmap().find(funcmap_id);
+    } catch(...)
+    {
+        return nullptr;
+    }
+}
+
+inline std::optional<funcmap::Funcmap>
+CodeobjMap::getFuncmap(marker_id_t id) const
+{
+    auto it = decoders.find(id);
+    if(it == decoders.end() || !it->second || !it->second->has_decoder()) return std::nullopt;
+    return it->second->getFuncmap();
+}
+
+inline std::vector<std::pair<marker_id_t, funcmap::Funcmap::EntryPtr>>
+CodeobjAddressTranslate::findMarkerAny(uint32_t funcmap_id) const
+{
+    std::vector<std::pair<marker_id_t, funcmap::Funcmap::EntryPtr>> out;
+    for(const auto& [id, dec] : decoders)
+    {
+        try
         {
-            cu_offset = next_offset;
+            if(auto entry = dec->getFuncmap().find(funcmap_id))
+                out.emplace_back(id, std::move(entry));
+        } catch(...)
+        {}
+    }
+    return out;
+}
+
+inline uint32_t
+CodeobjAddressTranslate::getWaveSize() const
+{
+    uint32_t agreed = 0;
+    for(const auto& [id, dec] : decoders)
+    {
+        uint32_t w = 0;
+        try
+        {
+            w = dec->getFuncmap().wave_size;
+        } catch(...)
+        {
             continue;
         }
 
-        bool cu_contains_addr = false;
+        if(w == 0) continue;
+        if(agreed == 0)
+        {
+            agreed = w;
+        }
+        else if(agreed != w)
+        {
+            std::cerr << "rocprofiler-sdk: .sqtt_funcmap wave size disagreement (" << agreed
+                      << " vs " << w << " from codeobj id " << id << ")\n";
+            return 0;
+        }
+    }
+    return agreed;
+}
 
-        // Try to get low_pc and high_pc from CU
-        // If no simple range, check if any child DIE contains this address
+inline DIEInfo::DIEInfo(Dwarf_Die* die)
+{
+    if(dwarf_tag(die) == DW_TAG_inlined_subroutine)
+    {
         Dwarf_Addr low_pc{};
         Dwarf_Addr high_pc{};
-        if(dwarf_lowpc(&cu_die, &low_pc) == 0 && dwarf_highpc(&cu_die, &high_pc) == 0)
-            cu_contains_addr = (addr >= low_pc && addr < high_pc);
-        else
-            cu_contains_addr = checkDIEContainsAddress(&cu_die, addr);
 
-        if(cu_contains_addr)
+        // Check if this inlined subroutine covers the target address
+        // First try simple contiguous range (low_pc to high_pc)
+        if(dwarf_lowpc(die, &low_pc) == 0 && dwarf_highpc(die, &high_pc) == 0)
         {
-            traverseAllDIEs(&cu_die, addr, call_stack);
-            break;
+            addRange(DRange{low_pc, high_pc});
+        }
+        else
+        {
+            // Function may have non-contiguous ranges
+            // Check all address ranges associated with this DIE
+            Dwarf_Addr base{};
+            ptrdiff_t  offset{};
+            while((offset = dwarf_ranges(die, offset, &base, &low_pc, &high_pc)) > 0)
+                addRange(DRange{low_pc, high_pc});
         }
 
-        cu_offset = next_offset;
+        // Extract call site information - where this function was inlined
+        Dwarf_Attribute call_file_attr{};
+        Dwarf_Attribute call_line_attr{};
+        Dwarf_Word      call_file{};
+        Dwarf_Word      call_line{};
+
+        // Get the file and line number where this function was called/inlined
+        // Do not return early - children must always be traversed for nested inlining
+        if(dwarf_attr(die, DW_AT_call_file, &call_file_attr) &&
+           dwarf_attr(die, DW_AT_call_line, &call_line_attr) &&
+           dwarf_formudata(&call_file_attr, &call_file) == 0 &&
+           dwarf_formudata(&call_line_attr, &call_line) == 0)
+        {
+            // Get the compilation unit to resolve file names
+            Dwarf_Die cu_die{};
+            if(dwarf_diecu(die, &cu_die, nullptr, nullptr))
+            {
+                // Get the source files table for this compilation unit
+                Dwarf_Files* files{};
+                size_t       nfiles{};
+                if(dwarf_getsrcfiles(&cu_die, &files, &nfiles) == 0 && call_file < nfiles)
+                {
+                    if(const char* filename = dwarf_filesrc(files, call_file, nullptr, nullptr))
+                    {
+                        file_and_line = std::string(filename) + ":" + std::to_string(call_line);
+                    }
+                }
+            }
+        }
+
+        // Always include this node's range so parents can find it via children_range
+        children_range = total_range;
     }
 
-    // Reverse the call stack to show from caller to callee
-    std::reverse(call_stack.begin(), call_stack.end());
-
-    return call_stack;
-}
-
-inline bool
-CodeobjDecoderComponent::checkDIEContainsAddress(Dwarf_Die* die, Dwarf_Addr addr)
-{
-    if(die == nullptr) return false;
-    // Check current DIE's address range
-    Dwarf_Addr low_pc{};
-    Dwarf_Addr high_pc{};
-    if(dwarf_lowpc(die, &low_pc) == 0 && dwarf_highpc(die, &high_pc) == 0)
-    {
-        if(addr >= low_pc && addr < high_pc) return true;
-    }
-    else
-    {
-        // Check ranges attribute for non-contiguous ranges
-        Dwarf_Addr base{};
-        ptrdiff_t  offset = 0;
-        while((offset = dwarf_ranges(die, offset, &base, &low_pc, &high_pc)) > 0)
-            if(addr >= low_pc && addr < high_pc) return true;
-    }
-
-    // Check children recursively
     Dwarf_Die child{};
-    if(dwarf_child(die, &child) == 0)
-        if(checkDIEContainsAddress(&child, addr)) return true;
 
-    return false;
-}
-
-inline void
-CodeobjDecoderComponent::traverseAllDIEs(Dwarf_Die*                die,
-                                         Dwarf_Addr                addr,
-                                         std::vector<std::string>& call_stack)
-{
-    if(die == nullptr) return;
-    // Check current DIE for inlined function information
-    checkDIEForInlinedFunction(die, addr, call_stack);
-
-    // Traverse children recursively (depth-first)
-    Dwarf_Die child{};
+    // Traverse children (recursive part)
     if(dwarf_child(die, &child) == 0)
     {
-        // Check all children AND their siblings at this level
-        // This is crucial because inlined functions can appear as siblings
-        // when multiple functions are inlined at the same scope level
         do
         {
-            traverseAllDIEs(&child, addr, call_stack);
+            children.emplace_back(std::make_unique<DIEInfo>(&child));
+            children_range.expand(children.back()->children_range);
+
         } while(dwarf_siblingof(&child, &child) == 0);
     }
 }
 
-inline void
-CodeobjDecoderComponent::checkDIEForInlinedFunction(Dwarf_Die*                die,
-                                                    Dwarf_Addr                addr,
-                                                    std::vector<std::string>& call_stack)
+inline bool
+DIEInfo::getCallStackRecursive(Dwarf_Addr addr, std::vector<std::string>& call_stack)
 {
-    // Only process inlined subroutines - these are functions that were
-    // expanded inline at compile time and have call site information
-    if(die == nullptr || dwarf_tag(die) != DW_TAG_inlined_subroutine) return;
+    if(!children_range.contains(addr)) return false;
 
-    Dwarf_Addr low_pc{};
-    Dwarf_Addr high_pc{};
-    bool       has_range{false};
+    bool addedOne = false;
 
-    // Check if this inlined subroutine covers the target address
-    // First try simple contiguous range (low_pc to high_pc)
-
-    if(dwarf_lowpc(die, &low_pc) == 0 && dwarf_highpc(die, &high_pc) == 0)
+    for(auto& child : children)
     {
-        // Simple contiguous range - check if address falls within
-        has_range = (addr >= low_pc && addr < high_pc);
+        // Only add from one of the children
+        addedOne = child->getCallStackRecursive(addr, call_stack);
+        if(addedOne) break;
     }
-    else
-    {
-        // Function may have non-contiguous ranges (optimized code)
-        // Check all address ranges associated with this DIE
-        Dwarf_Addr base{};
-        ptrdiff_t  offset{};
 
-        while((offset = dwarf_ranges(die, offset, &base, &low_pc, &high_pc)) > 0)
+    if(total_range.contains(addr))
+    {
+        for(auto& range : all_ranges)
         {
-            if(addr >= low_pc && addr < high_pc)
-            {
-                has_range = true;
-                break;
-            }
+            if(!range.contains(addr)) continue;
+
+            call_stack.emplace_back(file_and_line);
+            return true;
         }
     }
 
-    // If address doesn't fall within this inlined function, skip it
-    if(!has_range) return;
-
-    // Extract call site information - where this function was inlined
-    Dwarf_Attribute call_file_attr{};
-    Dwarf_Attribute call_line_attr{};
-    Dwarf_Word      call_file{};
-    Dwarf_Word      call_line{};
-
-    // Get the file and line number where this function was called/inlined
-
-    if(!dwarf_attr(die, DW_AT_call_file, &call_file_attr) ||
-       !dwarf_attr(die, DW_AT_call_line, &call_line_attr) ||
-       dwarf_formudata(&call_file_attr, &call_file) != 0 ||
-       dwarf_formudata(&call_line_attr, &call_line) != 0)
-        return;  // No call site information available
-
-    // Get the compilation unit to resolve file names
-    Dwarf_Die cu_die{};
-    if(!dwarf_diecu(die, &cu_die, nullptr, nullptr)) return;
-
-    // Get the source files table for this compilation unit
-    Dwarf_Files* files{};
-    size_t       nfiles{};
-    if(dwarf_getsrcfiles(&cu_die, &files, &nfiles) == 0 && call_file < nfiles)
-        if(const char* filename = dwarf_filesrc(files, call_file, nullptr, nullptr))
-            // Add "filename:line" to call stack showing where this function was inlined
-            call_stack.push_back(std::string(filename) + ":" + std::to_string(call_line));
+    // Check if one of the child nodes added to the stack
+    return addedOne;
 }
 
 }  // namespace disassembly

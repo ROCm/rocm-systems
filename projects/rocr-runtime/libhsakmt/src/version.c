@@ -24,8 +24,6 @@
  */
 
 #include "libhsakmt.h"
-#include <stdlib.h>
-#include <string.h>
 #include "hsakmt/linux/kfd_ioctl.h"
 
 HsaVersionInfo hsakmt_kfd_version_info;
@@ -43,7 +41,7 @@ HSAKMT_STATUS hsakmt_init_kfd_version(void)
 {
 	struct kfd_ioctl_get_version_args args = {0};
 
-	if (hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_GET_VERSION, &args) == -1)
+	if (hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_GET_VERSION, &args) == -1)
 		return HSAKMT_STATUS_ERROR;
 
 	hsakmt_kfd_version_info.KernelInterfaceMajorVersion = args.major_version;

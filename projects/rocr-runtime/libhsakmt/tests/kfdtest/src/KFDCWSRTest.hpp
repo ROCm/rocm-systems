@@ -35,6 +35,9 @@ class KFDCWSRTest : public KFDBaseComponentTest,
     KFDCWSRTest() {}
     ~KFDCWSRTest() {}
 
+    void BasicTest(int gpuNode);
+    void InterruptRestore(int gpuNode);
+
  protected:
     virtual void SetUp();
     virtual void TearDown();

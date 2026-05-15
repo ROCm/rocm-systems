@@ -1,21 +1,9 @@
 /*
-Copyright (c) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 #include "hip_module_launch_kernel_common.hh"
 
 #include <hip_test_common.hh>
@@ -32,17 +20,17 @@ static hipError_t hipModuleLaunchKernelWrapper(hipFunction_t f, uint32_t gridX, 
                                hStream, kernelParams, extra);
 }
 
-TEST_CASE("Unit_hipModuleLaunchKernel_Positive_Basic") {
+HIP_TEST_CASE(Unit_hipModuleLaunchKernel_Positive_Basic) {
   HIP_CHECK(hipFree(nullptr));
   ModuleLaunchKernelPositiveBasic<hipModuleLaunchKernelWrapper>();
 }
 
-TEST_CASE("Unit_hipModuleLaunchKernel_Positive_Parameters") {
+HIP_TEST_CASE(Unit_hipModuleLaunchKernel_Positive_Parameters) {
   HIP_CHECK(hipFree(nullptr));
   ModuleLaunchKernelPositiveParameters<hipModuleLaunchKernelWrapper>();
 }
 
-TEST_CASE("Unit_hipModuleLaunchKernel_Negative_Parameters") {
+HIP_TEST_CASE(Unit_hipModuleLaunchKernel_Negative_Parameters) {
   HIP_CHECK(hipFree(nullptr));
   ModuleLaunchKernelNegativeParameters<hipModuleLaunchKernelWrapper>();
 }
@@ -101,13 +89,13 @@ bool Module_Negative_tests() {
   args1._Ad = nullptr;
   args1._Bd = nullptr;
   args1._Cd = nullptr;
-  args1._n  = 0;
+  args1._n = 0;
   hipFunction_t MultKernel, KernelandExtraParamKernel;
   size_t size1;
   size1 = sizeof(args1);
   hipModule_t Module;
   hipStream_t stream1;
-  hipDeviceptr_t *Ad = nullptr;
+  hipDeviceptr_t* Ad = nullptr;
 #ifdef HT_NVIDIA
   HIP_CHECK(hipInit(0));
   hipCtx_t context;
@@ -116,122 +104,88 @@ bool Module_Negative_tests() {
 
   HIP_CHECK(hipModuleLoad(&Module, fileName));
   HIP_CHECK(hipModuleGetFunction(&MultKernel, Module, matmulK));
-  HIP_CHECK(hipModuleGetFunction(&KernelandExtraParamKernel,
-                                Module, KernelandExtra));
-  void *config1[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args1,
-    HIP_LAUNCH_PARAM_BUFFER_SIZE, &size1,
-    HIP_LAUNCH_PARAM_END};
-  void *params[] = {Ad};
+  HIP_CHECK(hipModuleGetFunction(&KernelandExtraParamKernel, Module, KernelandExtra));
+  void* config1[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args1, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size1,
+                     HIP_LAUNCH_PARAM_END};
+  void* params[] = {Ad};
   HIP_CHECK(hipStreamCreate(&stream1));
   // Passing nullptr to kernel function
-  err = hipModuleLaunchKernel(nullptr, 1, 1, 1, 1, 1, 1, 0,
-      stream1, NULL,
-      reinterpret_cast<void**>(&config1));
+  err = hipModuleLaunchKernel(nullptr, 1, 1, 1, 1, 1, 1, 0, stream1, NULL,
+                              reinterpret_cast<void**>(&config1));
   if (err == hipSuccess) {
     testStatus = false;
   }
   // Passing Max int value to block dimensions
-  err = hipModuleLaunchKernel(MultKernel, 1, 1, 1,
+  err = hipModuleLaunchKernel(MultKernel, 1, 1, 1, std::numeric_limits<uint32_t>::max(),
                               std::numeric_limits<uint32_t>::max(),
-                              std::numeric_limits<uint32_t>::max(),
-                              std::numeric_limits<uint32_t>::max(),
-                              0, stream1, NULL,
+                              std::numeric_limits<uint32_t>::max(), 0, stream1, NULL,
                               reinterpret_cast<void**>(&config1));
   if (err == hipSuccess) {
     testStatus = false;
   }
   // Passing 0 as value for all dimensions
-  err = hipModuleLaunchKernel(MultKernel, 0, 0, 0,
-                                 0,
-                                 0,
-                                 0, 0,
-                                 stream1, NULL,
-                                 reinterpret_cast<void**>(&config1));
+  err = hipModuleLaunchKernel(MultKernel, 0, 0, 0, 0, 0, 0, 0, stream1, NULL,
+                              reinterpret_cast<void**>(&config1));
   if (err == hipSuccess) {
     testStatus = false;
   }
   // Passing 0 as value for x dimension
-  err = hipModuleLaunchKernel(MultKernel, 0, 1, 1,
-                                 0,
-                                 1,
-                                 1, 0,
-                                 stream1, NULL,
-                                 reinterpret_cast<void**>(&config1));
+  err = hipModuleLaunchKernel(MultKernel, 0, 1, 1, 0, 1, 1, 0, stream1, NULL,
+                              reinterpret_cast<void**>(&config1));
   if (err == hipSuccess) {
     testStatus = false;
   }
   // Passing 0 as value for y dimension
-  err = hipModuleLaunchKernel(MultKernel, 1, 0, 1,
-                                 1,
-                                 0,
-                                 1, 0,
-                                 stream1, NULL,
-                                 reinterpret_cast<void**>(&config1));
+  err = hipModuleLaunchKernel(MultKernel, 1, 0, 1, 1, 0, 1, 0, stream1, NULL,
+                              reinterpret_cast<void**>(&config1));
   if (err == hipSuccess) {
     testStatus = false;
   }
   // Passing 0 as value for z dimension
-  err = hipModuleLaunchKernel(MultKernel, 1, 1, 0,
-                                 1,
-                                 1,
-                                 0, 0,
-                                 stream1, NULL,
-                                 reinterpret_cast<void**>(&config1));
+  err = hipModuleLaunchKernel(MultKernel, 1, 1, 0, 1, 1, 0, 0, stream1, NULL,
+                              reinterpret_cast<void**>(&config1));
   if (err == hipSuccess) {
     testStatus = false;
   }
   // Passing both kernel and extra params
-  err = hipModuleLaunchKernel(KernelandExtraParamKernel, 1, 1, 1, 1,
-                              1, 1, 0, stream1,
-                              reinterpret_cast<void**>(&params),
-                              reinterpret_cast<void**>(&config1));
+  err =
+      hipModuleLaunchKernel(KernelandExtraParamKernel, 1, 1, 1, 1, 1, 1, 0, stream1,
+                            reinterpret_cast<void**>(&params), reinterpret_cast<void**>(&config1));
   if (err == hipSuccess) {
     testStatus = false;
   }
   // Passing more than maxthreadsperblock to block dimensions
   hipDeviceProp_t deviceProp;
   HIP_CHECK(hipGetDeviceProperties(&deviceProp, 0));
-  err = hipModuleLaunchKernel(MultKernel, 1, 1, 1,
-                              deviceProp.maxThreadsPerBlock+1,
-                              deviceProp.maxThreadsPerBlock+1,
-                              deviceProp.maxThreadsPerBlock+1, 0, stream1, NULL,
-                              reinterpret_cast<void**>(&config1));
+  err = hipModuleLaunchKernel(MultKernel, 1, 1, 1, deviceProp.maxThreadsPerBlock + 1,
+                              deviceProp.maxThreadsPerBlock + 1, deviceProp.maxThreadsPerBlock + 1,
+                              0, stream1, NULL, reinterpret_cast<void**>(&config1));
   if (err == hipSuccess) {
     testStatus = false;
   }
   // Block dimension X = Max Allowed + 1
-  err = hipModuleLaunchKernel(MultKernel, 1, 1, 1,
-                            deviceProp.maxThreadsDim[0]+1,
-                            1,
-                            1, 0, stream1, NULL,
-                            reinterpret_cast<void**>(&config1));
+  err = hipModuleLaunchKernel(MultKernel, 1, 1, 1, deviceProp.maxThreadsDim[0] + 1, 1, 1, 0,
+                              stream1, NULL, reinterpret_cast<void**>(&config1));
   if (err == hipSuccess) {
     testStatus = false;
   }
   // Block dimension Y = Max Allowed + 1
-  err = hipModuleLaunchKernel(MultKernel, 1, 1, 1,
-                            1,
-                            deviceProp.maxThreadsDim[1]+1,
-                            1, 0, stream1, NULL,
-                            reinterpret_cast<void**>(&config1));
+  err = hipModuleLaunchKernel(MultKernel, 1, 1, 1, 1, deviceProp.maxThreadsDim[1] + 1, 1, 0,
+                              stream1, NULL, reinterpret_cast<void**>(&config1));
   if (err == hipSuccess) {
     testStatus = false;
   }
   // Block dimension Z = Max Allowed + 1
-  err = hipModuleLaunchKernel(MultKernel, 1, 1, 1,
-                            1,
-                            1,
-                            deviceProp.maxThreadsDim[2]+1, 0, stream1, NULL,
-                            reinterpret_cast<void**>(&config1));
+  err = hipModuleLaunchKernel(MultKernel, 1, 1, 1, 1, 1, deviceProp.maxThreadsDim[2] + 1, 0,
+                              stream1, NULL, reinterpret_cast<void**>(&config1));
   if (err == hipSuccess) {
     testStatus = false;
   }
   // Passing invalid config data to extra params
-  void *config3[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
-                     HIP_LAUNCH_PARAM_BUFFER_SIZE, &size1,
+  void* config3[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size1,
                      HIP_LAUNCH_PARAM_END};
   err = hipModuleLaunchKernel(MultKernel, 1, 1, 1, 1, 1, 1, 0, stream1, NULL,
-      reinterpret_cast<void**>(&config3));
+                              reinterpret_cast<void**>(&config3));
   if (err == hipSuccess) {
     testStatus = false;
   }
@@ -275,22 +229,13 @@ bool Module_GridBlock_Corner_Tests() {
   unsigned int maxgridY = deviceProp.maxGridSize[1];
   unsigned int maxgridZ = deviceProp.maxGridSize[2];
 #endif
-  struct gridblockDim test[6] = {{1, 1, 1, maxblockX, 1, 1},
-                                 {1, 1, 1, 1, maxblockY, 1},
-                                 {1, 1, 1, 1, 1, maxblockZ},
-                                 {maxgridX, 1, 1, 1, 1, 1},
-                                 {1, maxgridY, 1, 1, 1, 1},
-                                 {1, 1, maxgridZ, 1, 1, 1}};
+  struct gridblockDim test[6] = {{1, 1, 1, maxblockX, 1, 1}, {1, 1, 1, 1, maxblockY, 1},
+                                 {1, 1, 1, 1, 1, maxblockZ}, {maxgridX, 1, 1, 1, 1, 1},
+                                 {1, maxgridY, 1, 1, 1, 1},  {1, 1, maxgridZ, 1, 1, 1}};
   for (int i = 0; i < 6; i++) {
-    err = hipModuleLaunchKernel(DummyKernel,
-                                test[i].gridX,
-                                test[i].gridY,
-                                test[i].gridZ,
-                                test[i].blockX,
-                                test[i].blockY,
-                                test[i].blockZ,
-                                0,
-                                stream1, NULL, NULL);
+    err = hipModuleLaunchKernel(DummyKernel, test[i].gridX, test[i].gridY, test[i].gridZ,
+                                test[i].blockX, test[i].blockY, test[i].blockZ, 0, stream1, NULL,
+                                NULL);
     if (err != hipSuccess) {
       testStatus = false;
     }
@@ -321,25 +266,20 @@ bool Module_WorkGroup_Test() {
   // Passing Max int value to block dimensions
   hipDeviceProp_t deviceProp;
   HIP_CHECK(hipGetDeviceProperties(&deviceProp, 0));
-  double cuberootVal =
-              cbrt(static_cast<double>(deviceProp.maxThreadsPerBlock));
+  double cuberootVal = cbrt(static_cast<double>(deviceProp.maxThreadsPerBlock));
   uint32_t cuberoot_floor = floor(cuberootVal);
   uint32_t cuberoot_ceil = ceil(cuberootVal);
   // Scenario: (block.x * block.y * block.z) <= Work Group Size where
   // block.x < MaxBlockDimX , block.y < MaxBlockDimY and block.z < MaxBlockDimZ
-  err = hipModuleLaunchKernel(DummyKernel,
-                            1, 1, 1,
-                            cuberoot_floor, cuberoot_floor, cuberoot_floor,
-                            0, stream1, NULL, NULL);
+  err = hipModuleLaunchKernel(DummyKernel, 1, 1, 1, cuberoot_floor, cuberoot_floor, cuberoot_floor,
+                              0, stream1, NULL, NULL);
   if (err != hipSuccess) {
     testStatus = false;
   }
   // Scenario: (block.x * block.y * block.z) > Work Group Size where
   // block.x < MaxBlockDimX , block.y < MaxBlockDimY and block.z < MaxBlockDimZ
-  err = hipModuleLaunchKernel(DummyKernel,
-                            1, 1, 1,
-                            cuberoot_ceil, cuberoot_ceil, cuberoot_ceil + 1,
-                            0, stream1, NULL, NULL);
+  err = hipModuleLaunchKernel(DummyKernel, 1, 1, 1, cuberoot_ceil, cuberoot_ceil, cuberoot_ceil + 1,
+                              0, stream1, NULL, NULL);
   if (err == hipSuccess) {
     testStatus = false;
   }
@@ -351,7 +291,7 @@ bool Module_WorkGroup_Test() {
   return testStatus;
 }
 
-TEST_CASE("Unit_hipModuleLaunchKernel_Fntl") {
+HIP_TEST_CASE(Unit_hipModuleLaunchKernel_Fntl) {
   bool testStatus = false;
   SECTION("Negative test scenarios") {
     testStatus = Module_Negative_tests();
@@ -365,4 +305,22 @@ TEST_CASE("Unit_hipModuleLaunchKernel_Fntl") {
     testStatus = Module_WorkGroup_Test();
     REQUIRE(testStatus == true);
   }
+}
+
+HIP_TEST_CASE(Unit_hipModuleLaunchKernel_Verify_Capture) {
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  auto mg = ModuleGuard::InitModule("launch_kernel_module.code");
+
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+
+  hipFunction_t f = GetKernel(mg.module(), "NOPKernel");
+  HIP_CHECK(hipModuleLaunchKernel(f, 1, 1, 1, 1, 1, 1, 0, stream, nullptr, nullptr));
+
+  END_CAPTURE(stream);
+
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipStreamDestroy(stream));
 }

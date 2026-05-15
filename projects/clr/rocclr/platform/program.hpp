@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /*! \file program.hpp
  *  \brief  Declarations for Program and ProgramBinary objects.
@@ -50,26 +36,26 @@ namespace amd {
  */
 
 //! A kernel function symbol
-class Symbol : public HeapObject {
+class Symbol {
  public:
   typedef std::unordered_map<const Device*, const device::Kernel*> devicekernels_t;
 
  private:
-  devicekernels_t deviceKernels_;    //! All device kernels objects.
-  KernelSignature signature_;        //! Kernel signature.
+  devicekernels_t deviceKernels_;  //! All device kernels objects.
+  KernelSignature signature_;      //! Kernel signature.
 
  public:
   //! Default constructor
   Symbol() {}
 
   //! Set the entry point and check or set the signature.
-  bool setDeviceKernel(const Device& device,        //!< Device object.
-                       const device::Kernel* func   //!< Device kernel object.
-                       );
+  bool setDeviceKernel(const Device& device,       //!< Device object.
+                       const device::Kernel* func  //!< Device kernel object.
+  );
 
   //! Return the device kernel.
-  const device::Kernel* getDeviceKernel(const Device& device //!< Device object.
-                                        ) const;
+  const device::Kernel* getDeviceKernel(const Device& device  //!< Device object.
+  ) const;
 
   //! Return this Symbol's signature.
   const KernelSignature& signature() const { return signature_; }
@@ -81,19 +67,14 @@ class Context;
 class Program : public RuntimeObject {
  public:
   typedef std::tuple<const uint8_t* /*image*/, std::pair<size_t /*size*/, size_t /* file_offset */>,
-                     bool /*allocated*/> binary_t;
+                     bool /*allocated*/>
+      binary_t;
   typedef std::set<Device const*> devicelist_t;
   typedef std::unordered_map<Device const*, binary_t> devicebinary_t;
   typedef std::unordered_map<Device const*, device::Program*> deviceprograms_t;
-  typedef std::unordered_map<std::string, Symbol> symbols_t;
+  typedef std::unordered_map<std::string_view, Symbol> symbols_t;
 
-  enum Language {
-    Binary = 0,
-    OpenCL_C,
-    SPIRV,
-    Assembly,
-    HIP
-  };
+  enum Language { Binary = 0, OpenCL_C, SPIRV, Assembly, HIP };
 
   typedef bool(CL_CALLBACK* VarInfoCallback)(cl_program, std::string, void**, size_t*);
   VarInfoCallback varcallback;
@@ -119,7 +100,7 @@ class Program : public RuntimeObject {
 
   std::string programLog_;  //!< Log for parsing options, etc.
 
-  Monitor programLock_; //!< Lock to protect program data structure
+  std::recursive_mutex programLock_;  //!< Lock to protect program data structure
 
  protected:
   //! Destroy this program.
@@ -130,14 +111,13 @@ class Program : public RuntimeObject {
 
  public:
   //! Construct a new program to be compiled from the given source code.
-  Program(Context& context, const std::string& sourceCode, Language language,
-          int numHeaders = 0, const char** headers = nullptr, const char** headerNames= nullptr)
+  Program(Context& context, const std::string& sourceCode, Language language, int numHeaders = 0,
+          const char** headers = nullptr, const char** headerNames = nullptr)
       : context_(context),
         sourceCode_(sourceCode),
         language_(language),
         symbolTable_(NULL),
-        programLog_(),
-        programLock_(true) /* Program lock */ {
+        programLog_() {
     for (auto i = 0; i != numHeaders; ++i) {
       headers_.emplace_back(headers[i]);
       headerNames_.emplace_back(headerNames[i]);
@@ -146,9 +126,7 @@ class Program : public RuntimeObject {
 
   //! Construct a new program associated with a context.
   Program(Context& context, Language language = Binary)
-      : context_(context), language_(language),
-        symbolTable_(NULL),
-        programLock_(true) /* Program lock */ {}
+      : context_(context), language_(language), symbolTable_(NULL) {}
 
   //! Returns context, associated with the current program.
   const Context& context() const { return context_(); }
@@ -184,11 +162,11 @@ class Program : public RuntimeObject {
   const std::string& programLog() const { return programLog_; }
 
   //! Add a new device program with or without binary image and options.
-  int32_t addDeviceProgram(Device&, const void* image = NULL, size_t len = 0,
-                           bool make_copy = true, amd::option::Options* options = NULL,
+  int32_t addDeviceProgram(Device&, const void* image = NULL, size_t len = 0, bool make_copy = true,
+                           amd::option::Options* options = NULL,
                            const amd::Program* same_prog = nullptr,
-                           amd::Os::FileDesc fdesc = amd::Os::FDescInit(),
-                           size_t foffset = 0, std::string uri = std::string());
+                           amd::Os::FileDesc fdesc = amd::Os::FDescInit(), size_t foffset = 0,
+                           std::string uri = std::string());
 
   //! Find the section for the given device. Return NULL if not found.
   device::Program* getDeviceProgram(const Device& device) const;
@@ -204,21 +182,21 @@ class Program : public RuntimeObject {
 
   //! Compile the program for the given devices.
   int32_t compile(const std::vector<Device*>& devices, size_t numHeaders,
-                 const std::vector<const Program*>& headerPrograms, const char** headerIncludeNames,
-                 const char* options = NULL,
-                 void(CL_CALLBACK* notifyFptr)(cl_program, void*) = NULL, void* data = NULL,
-                 bool optionChangable = true);
+                  const std::vector<const Program*>& headerPrograms,
+                  const char** headerIncludeNames, const char* options = NULL,
+                  void(CL_CALLBACK* notifyFptr)(cl_program, void*) = NULL, void* data = NULL,
+                  bool optionChangable = true);
 
   //! Link the programs for the given devices.
   int32_t link(const std::vector<Device*>& devices, size_t numInputs,
-              const std::vector<Program*>& inputPrograms, const char* options = NULL,
-              void(CL_CALLBACK* notifyFptr)(cl_program, void*) = NULL, void* data = NULL,
-              bool optionChangable = true);
+               const std::vector<Program*>& inputPrograms, const char* options = NULL,
+               void(CL_CALLBACK* notifyFptr)(cl_program, void*) = NULL, void* data = NULL,
+               bool optionChangable = true);
 
   //! Build the program for the given devices.
   int32_t build(const std::vector<Device*>& devices, const char* options = NULL,
-               void(CL_CALLBACK* notifyFptr)(cl_program, void*) = NULL, void* data = NULL,
-               bool optionChangable = true, bool newDevProg = true);
+                void(CL_CALLBACK* notifyFptr)(cl_program, void*) = NULL, void* data = NULL,
+                bool optionChangable = true, bool newDevProg = true);
 
   //! Load the program. If devices is not specified, then load program for all devices.
   bool load(const std::vector<Device*>& devices = {});
@@ -229,11 +207,9 @@ class Program : public RuntimeObject {
   static int GetOclCVersion(const char* clVer);
 
   bool static ParseAllOptions(const std::string& options, option::Options& parsedOptions,
-                              bool optionChangable, bool linkOptsOnly, bool isLC);
+                              bool optionChangable, bool linkOptsOnly);
 
-  void setVarInfoCallBack(VarInfoCallback callback) {
-    varcallback = callback;
-  }
+  void setVarInfoCallBack(VarInfoCallback callback) { varcallback = callback; }
 
   //! Actions to perform during program unload
   void unload();

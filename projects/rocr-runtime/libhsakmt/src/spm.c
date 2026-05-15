@@ -25,8 +25,6 @@
 
 #include "libhsakmt.h"
 #include "hsakmt/linux/kfd_ioctl.h"
-#include <stdlib.h>
-#include <stdio.h>
 
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtSPMAcquire(HSAuint32 PreferredNode)
@@ -35,7 +33,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtSPMAcquire(HSAuint32 PreferredNode)
 	struct kfd_ioctl_spm_args args = {0};
 	uint32_t gpu_id;
 
-	ret = hsakmt_validate_nodeid(PreferredNode, &gpu_id);
+	ret = hsakmt_validate_nodeid(&hsakmt_primary_kfd_ctx, PreferredNode, &gpu_id);
 	if (ret != HSAKMT_STATUS_SUCCESS) {
 		pr_err("[%s] invalid node ID: %d\n", __func__, PreferredNode);
 		return ret;
@@ -45,7 +43,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtSPMAcquire(HSAuint32 PreferredNode)
 	args.op = KFD_IOCTL_SPM_OP_ACQUIRE;
 	args.gpu_id = gpu_id;
 
-	ret = hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_RLC_SPM, &args);
+	ret = hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_RLC_SPM, &args);
 
 	return ret;
 }
@@ -61,7 +59,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtSPMSetDestBuffer(HSAuint32 PreferredNode,
 	struct kfd_ioctl_spm_args args = {0};
 	uint32_t gpu_id = 0;
 
-	ret = hsakmt_validate_nodeid(PreferredNode, &gpu_id);
+	ret = hsakmt_validate_nodeid(&hsakmt_primary_kfd_ctx, PreferredNode, &gpu_id);
 	if (ret != HSAKMT_STATUS_SUCCESS) {
 		return ret;
 	}
@@ -72,7 +70,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtSPMSetDestBuffer(HSAuint32 PreferredNode,
 	args.op         = KFD_IOCTL_SPM_OP_SET_DEST_BUF;
 	args.gpu_id     = gpu_id;
 
-	ret = hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_RLC_SPM, &args);
+	ret = hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_RLC_SPM, &args);
 
 	*SizeCopied = args.bytes_copied;
 	*isSPMDataLoss = args.has_data_loss;
@@ -87,7 +85,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtSPMRelease(HSAuint32 PreferredNode)
 	struct kfd_ioctl_spm_args args = {0};
 	uint32_t gpu_id;
 
-	ret = hsakmt_validate_nodeid(PreferredNode, &gpu_id);
+	ret = hsakmt_validate_nodeid(&hsakmt_primary_kfd_ctx, PreferredNode, &gpu_id);
 	if (ret != HSAKMT_STATUS_SUCCESS) {
 		pr_err("[%s] invalid node ID: %d\n", __func__, PreferredNode);
 		return ret;
@@ -96,7 +94,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtSPMRelease(HSAuint32 PreferredNode)
 	args.op = KFD_IOCTL_SPM_OP_RELEASE;
 	args.gpu_id = gpu_id;
 
-	ret = hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_RLC_SPM, &args);
+	ret = hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_RLC_SPM, &args);
 
 	return ret;
 }

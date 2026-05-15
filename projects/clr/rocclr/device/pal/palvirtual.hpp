@@ -1,22 +1,8 @@
-/* Copyright (c) 2015 - 2022 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -36,6 +22,9 @@
 #include "palQueue.h"
 #include "palFence.h"
 #include "palLinearAllocator.h"
+#include "amd_hsa_queue.h"
+
+#include <atomic>
 
 /*! \addtogroup PAL PAL Resource Implementation
  *  @{
@@ -45,40 +34,41 @@
 namespace amd::pal {
 
 class Device;
-class Kernel;
 class Memory;
 class CalCounterReference;
 class VirtualGPU;
 class Program;
 class BlitManager;
 class ThreadTrace;
-class HSAILKernel;
+class Kernel;
 
 struct AqlPacketMgmt : public amd::EmbeddedObject {
   static constexpr uint32_t kAqlPacketsListSize = 4 * Ki;
-  AqlPacketMgmt()
-      : packet_index_(0) {
-    memset(aql_vgpus_, 0, sizeof(aql_vgpus_));
-  }
+  AqlPacketMgmt(const Device& dev);
 
-  hsa_kernel_dispatch_packet_t aql_packets_[kAqlPacketsListSize];  //!< The list of AQL packets
+#if defined(WITH_HSA_DEVICE)
+  amd_queue_v2_t amd_queue_{};
+#else
+  amd_queue_t amd_queue_{};
+#endif
+  alignas(sizeof(hsa_kernel_dispatch_packet_t))
+      hsa_kernel_dispatch_packet_t aql_packets_[kAqlPacketsListSize];  //!< The list of AQL packets
   GpuEvent aql_events_[kAqlPacketsListSize];    //!< The list of gpu for each AQL packet
   VirtualGPU* aql_vgpus_[kAqlPacketsListSize];  //!< The list of vgpus which had submissions
-  std::atomic<uint64_t> packet_index_;          //!< The active packet slot index
 };
 
- enum class BarrierType : uint8_t {
-   KernelToKernel = 0,
-   KernelToCopy,
-   CopyToKernel,
-   CopyToCopy,
-   FlushL2
+enum class BarrierType : uint8_t {
+  KernelToKernel = 0,
+  KernelToCopy,
+  CopyToKernel,
+  CopyToCopy,
+  FlushL2
 };
 
 //! Virtual GPU
 class VirtualGPU : public device::VirtualDevice {
  public:
-  class Queue : public amd::HeapObject {
+  class Queue {
    public:
     static constexpr uint MaxCommands = 256;
     static constexpr uint StartCmdBufIdx = 1;
@@ -88,6 +78,15 @@ class VirtualGPU : public device::VirtualDevice {
 
     Queue(const Queue&) = delete;
     Queue& operator=(const Queue&) = delete;
+
+    // This type is allocated exclusively via amd::AllocWithTrailing<Queue>(extSize, ...) so
+    // that a single block holds the wrapper plus PAL's IQueue / ICmdBuffer / IFence objects
+    // placed in the trailing region.
+    void* operator new(size_t) = delete;
+    void operator delete(void*) = delete;
+    // Placement new overloads required by MSVC when operator new(size_t) is deleted
+    void* operator new(size_t, void* p) noexcept { return p; }
+    void* operator new(size_t, std::align_val_t, void* p) noexcept { return p; }
 
     static Queue* Create(VirtualGPU& gpu,                       //!< ROCCLR virtual GPU object
                          Pal::QueueType queueType,              //!< PAL queue type
@@ -190,7 +189,7 @@ class VirtualGPU : public device::VirtualDevice {
 
     static uint32_t AllocedQueues(const VirtualGPU& gpu, Pal::EngineType type);
 
-    amd::Monitor* lock_;                       //!< Lock PAL queue for access
+    std::recursive_mutex* lock_;               //!< Lock PAL queue for access
     Pal::IQueue* iQueue_;                      //!< PAL queue object
     std::vector<Pal::ICmdBuffer*> iCmdBuffs_;  //!< PAL command buffers
     std::vector<Pal::IFence*> iCmdFences_;     //!< PAL fences, associated with CMD
@@ -200,12 +199,12 @@ class VirtualGPU : public device::VirtualDevice {
 
    private:
     void DumpMemoryReferences() const;
-    VirtualGPU& gpu_;        //!< ROCCLR virtual GPU object
-    Pal::IDevice* iDev_;     //!< PAL device
-    uint cmdBufIdSlot_;      //!< Command buffer ID slot for submissions
-    uint cmdBufIdCurrent_;   //!< Current global command buffer ID
-    uint cmbBufIdRetired_;   //!< The last retired command buffer ID
-    uint cmdCnt_;            //!< Counter of commands
+    VirtualGPU& gpu_;       //!< ROCCLR virtual GPU object
+    Pal::IDevice* iDev_;    //!< PAL device
+    uint cmdBufIdSlot_;     //!< Command buffer ID slot for submissions
+    uint cmdBufIdCurrent_;  //!< Current global command buffer ID
+    uint cmbBufIdRetired_;  //!< The last retired command buffer ID
+    uint cmdCnt_;           //!< Counter of commands
     std::unordered_map<GpuMemoryReference*, uint> memReferences_;
     Util::VirtualLinearAllocator vlAlloc_;
     std::vector<Pal::GpuMemoryRef> palMemRefs_;
@@ -218,7 +217,7 @@ class VirtualGPU : public device::VirtualDevice {
     uint max_command_buffers_;
   };
 
-  struct CommandBatch : public amd::HeapObject {
+  struct CommandBatch {
     amd::Command* head_;           //!< Command batch head
     GpuEvent events_[AllEngines];  //!< Last known GPU events
     TimeStamp* lastTS_;            //!< TS associated with command batch
@@ -317,16 +316,16 @@ class VirtualGPU : public device::VirtualDevice {
   void submitWriteMemory(amd::WriteMemoryCommand& vcmd);
   void submitCopyMemory(amd::CopyMemoryCommand& vcmd);
   void submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& vcmd);
+  void submitBatchCopyMemory(amd::BatchCopyMemoryCommand& vcmd);
   void submitMapMemory(amd::MapMemoryCommand& vcmd);
   void submitUnmapMemory(amd::UnmapMemoryCommand& vcmd);
   void submitKernel(amd::NDRangeKernelCommand& vcmd);
-  bool submitKernelInternal(
-      const amd::NDRangeContainer& sizes,  //!< Workload sizes
-      const amd::Kernel& kernel,           //!< Kernel for execution
-      const_address parameters,            //!< Parameters for the kernel
-      bool nativeMem = true,               //!< Native memory objects
-      uint32_t sharedMemBytes = 0,         //!< Shared memory size
-      bool anyOrder = false                //!< TRUE if any order launch mode is enabled
+  bool submitKernelInternal(const amd::NDRangeContainer& sizes,  //!< Workload sizes
+                            const amd::Kernel& kernel,           //!< Kernel for execution
+                            const_address parameters,            //!< Parameters for the kernel
+                            bool nativeMem = true,               //!< Native memory objects
+                            uint32_t sharedMemBytes = 0,         //!< Shared memory size
+                            bool anyOrder = false  //!< TRUE if any order launch mode is enabled
   );
   void submitNativeFn(amd::NativeFnCommand& vcmd);
   void submitFillMemory(amd::FillMemoryCommand& vcmd);
@@ -358,12 +357,6 @@ class VirtualGPU : public device::VirtualDevice {
   bool isFenceDirty() const { return false; }
 
   void HiddenHeapInit() {}
-
-  inline bool dispatchAqlPacket(uint8_t* aqlpacket, const std::string& kernelName,
-                                amd::AccumulateCommand* vcmd = nullptr) {
-    vcmd->addKernelName(kernelName);
-    return false;
-  }
 
   void resetFenceDirty() {}
 
@@ -492,29 +485,27 @@ class VirtualGPU : public device::VirtualDevice {
 
   void addBarrier(RgpSqqtBarrierReason reason = RgpSqqtBarrierReason::MemDependency,
                   BarrierType type = BarrierType::KernelToKernel) const {
-    Pal::AcquireReleaseInfo barrier = {
-      .srcGlobalStageMask = Pal::PipelineStageCs,
-      .dstGlobalStageMask = Pal::PipelineStageCs,
-      .srcGlobalAccessMask = Pal::CoherShader,
-      .dstGlobalAccessMask = Pal::CoherShader,
-      .memoryBarrierCount = 0,
-      .pMemoryBarriers = nullptr,
-      .imageBarrierCount = 0,
-      .pImageBarriers = nullptr,
-      .reason = static_cast<uint32_t>(reason)
-    };
+    Pal::AcquireReleaseInfo barrier = {.srcGlobalStageMask = Pal::PipelineStageCs,
+                                       .dstGlobalStageMask = Pal::PipelineStageCs,
+                                       .srcGlobalAccessMask = Pal::CoherShader,
+                                       .dstGlobalAccessMask = Pal::CoherShader,
+                                       .memoryBarrierCount = 0,
+                                       .pMemoryBarriers = nullptr,
+                                       .imageBarrierCount = 0,
+                                       .pImageBarriers = nullptr,
+                                       .reason = static_cast<uint32_t>(reason)};
 
     if (type == BarrierType::KernelToCopy) {
       barrier.dstGlobalStageMask = Pal::PipelineStageBlt;
       barrier.dstGlobalAccessMask = Pal::CoherCopy;
     } else if (type == BarrierType::CopyToKernel) {
       barrier.srcGlobalStageMask = Pal::PipelineStageBlt;
-      barrier.srcGlobalAccessMask  = Pal::CoherCopy;
+      barrier.srcGlobalAccessMask = Pal::CoherCopy;
     } else if (type == BarrierType::CopyToCopy) {
       barrier.srcGlobalStageMask = barrier.dstGlobalStageMask = Pal::PipelineStageBlt;
       barrier.srcGlobalAccessMask = barrier.dstGlobalAccessMask = Pal::CoherCopy;
     } else if (type == BarrierType::FlushL2) {
-      barrier.srcGlobalStageMask |= Pal::PipelineStageBlt; 
+      barrier.srcGlobalStageMask |= Pal::PipelineStageBlt;
       barrier.dstGlobalStageMask |= Pal::PipelineStageBlt;
       barrier.srcGlobalAccessMask = barrier.dstGlobalAccessMask = Pal::CoherCopy | Pal::CoherCpu;
     }
@@ -602,24 +593,23 @@ class VirtualGPU : public device::VirtualDevice {
   }
 
   //! Returns the current active slot for AQL packet
-  hsa_kernel_dispatch_packet_t* GetAqlPacketSlot(uint32_t* index) {
+  std::pair<hsa_kernel_dispatch_packet_t* /* packet address */, uint64_t /* packet id */>
+  GetAqlPacketSlot() const {
     auto& mgmt = *queues_[MainEngine]->aql_mgmt_;
-    // Atomic increment global AQL index and wrap around max AQL list size
-    *index = ++mgmt.packet_index_ % AqlPacketMgmt::kAqlPacketsListSize;
-    if (mgmt.aql_events_[*index].isValid()) {
+
+    std::atomic_ref write_ptr(*const_cast<uint64_t *>(&mgmt.amd_queue_.write_dispatch_id));
+    uint64_t packet_id = write_ptr.fetch_add (1, std::memory_order::relaxed);
+
+    uint32_t index = packet_id % mgmt.amd_queue_.hsa_queue.size;
+    if (mgmt.aql_events_[index].isValid()) {
       // Make sure GPU doesn't process this slot
-      mgmt.aql_vgpus_[*index]->waitForEvent(&mgmt.aql_events_[*index]);
+      mgmt.aql_vgpus_[index]->waitForEvent(&mgmt.aql_events_[index]);
     }
-    return &mgmt.aql_packets_[*index];
+    return {&mgmt.aql_packets_[index], packet_id};
   }
 
  protected:
   void profileEvent(EngineType engine, bool type) const;
-
-  //! Creates buffer object from image
-  amd::Memory* createBufferFromImage(
-      amd::Memory& amdImage  //! The parent image object(untiled images only)
-  );
 
  private:
   struct MemoryRange {
@@ -645,7 +635,7 @@ class VirtualGPU : public device::VirtualDevice {
                             bool nativeMem,             //!< Native memory objects
                             size_t& ldsAddess,          //!< Returns LDS size, used in the kernel
                             bool& imageBufferWrtBack,   //!< Image buffer write back is required
-                            std::vector<Image*>& wrtBackImageBuffer //!< images for write back
+                            std::vector<Image*>& wrtBackImageBuffer  //!< images for write back
   );
 
   //! Common function for fill memory used by both svm Fill and non-svm fill
@@ -666,31 +656,30 @@ class VirtualGPU : public device::VirtualDevice {
                   const amd::Coord3D& dstOrigin,   //!< destination memory object
                   const amd::Coord3D& size,        //!< copy size
                   const amd::BufferRect& srcRect,  //!< region of source for copy
-                  const amd::BufferRect& dstRect,   //!< region of destination for copy
-                  amd::CopyMetadata copyMetadata =
-                           amd::CopyMetadata()      //!< Memory copy MetaData
+                  const amd::BufferRect& dstRect,  //!< region of destination for copy
+                  amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
   );
 
-  void PrintChildren(const HSAILKernel& hsaKernel,  //!< The parent HSAIL kernel
+  void PrintChildren(const pal::Kernel& hsaKernel,  //!< The parent HSA kernel
                      VirtualGPU* gpuDefQueue        //!< Device queue for children execution
   );
 
   bool PreDeviceEnqueue(const amd::Kernel& kernel,     //!< Parent amd kernel object
-                        const HSAILKernel& hsaKernel,  //!< Parent HSAIL object
+                        const pal::Kernel& hsaKernel,  //!< Parent HSA kernel object
                         VirtualGPU** gpuDefQueue,      //!< [Return] GPU default queue
                         uint64_t* vmDefQueue           //!< [Return] VM handle to the virtual queue
   );
 
   void PostDeviceEnqueue(
       const amd::Kernel& kernel,     //!< Parent amd kernel object
-      const HSAILKernel& hsaKernel,  //!< Parent HSAIL object
+      const pal::Kernel& hsaKernel,  //!< Parent HSA kernel object
       VirtualGPU* gpuDefQueue,       //!< GPU default queue
       uint64_t vmDefQueue,           //!< VM handle to the virtual queue
       uint64_t vmParentWrap,         //!< VM handle to the wrapped AQL packet location
       GpuEvent* gpuEvent             //!< [Return] GPU event associated with the device enqueue
   );
 
-  Device& gpuDevice_;       //!< physical GPU device
+  Device& gpuDevice_;  //!< physical GPU device
 
   PrintfDbgHSA* printfDbgHSA_;  //!< HSAIL printf implemenation
 
@@ -722,10 +711,10 @@ class VirtualGPU : public device::VirtualDevice {
   uint deviceQueueSize_;       //!< Device queue size
   uint maskGroups_;  //!< The number of mask groups processed in the scheduler by one thread
 
-  Memory* hsaQueueMem_;                     //!< Memory for the amd_queue_t object
-  Pal::ICmdAllocator* cmdAllocator_;        //!< Command buffer allocator
-  Queue* queues_[AllEngines];               //!< HW queues for all engines
-  MemoryRange sdmaRange_;                   //!< SDMA memory range for write access
+  Memory* hsaQueueMem_;               //!< Memory for the amd_queue_t object
+  Pal::ICmdAllocator* cmdAllocator_;  //!< Command buffer allocator
+  Queue* queues_[AllEngines];         //!< HW queues for all engines
+  MemoryRange sdmaRange_;             //!< SDMA memory range for write access
 
   void* hostcallBuffer_;  //!< Hostcall buffer
 
@@ -770,6 +759,5 @@ template <bool avoidBarrierSubmit> uint VirtualGPU::Queue::submit(bool forceFlus
   }
   return id;
 }
-
 /*@}*/  // namespace amd::pal
 }  // namespace amd::pal

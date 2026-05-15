@@ -1,22 +1,8 @@
-/* Copyright (c) 2010 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "platform/commandqueue.hpp"
 #include "device/device.hpp"
@@ -31,15 +17,16 @@ HostBlitManager::HostBlitManager(VirtualDevice& vDev, Setup setup)
     : BlitManager(setup), vDev_(vDev), dev_(vDev.device()) {}
 
 bool HostBlitManager::readBuffer(device::Memory& srcMemory, void* dstHost,
-                                 const amd::Coord3D& origin, const amd::Coord3D& size,
-                                 bool entire, amd::CopyMetadata copyMetadata) const {
+                                 const amd::Coord3D& origin, const amd::Coord3D& size, bool entire,
+                                 amd::CopyMetadata copyMetadata) const {
   // Map the device memory to CPU visible
   void* src = srcMemory.cpuMap(vDev_, Memory::CpuReadOnly);
   if (NULL == src) {
     LogError("Couldn't map device memory for host read");
     return false;
   }
-
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY, "Using host memcpy D2H, src=%p, dst=%p, size=%zu",
+          (reinterpret_cast<const_address>(src) + origin[0]), dstHost, size[0]);
   // Copy memory
   std::memcpy(dstHost, reinterpret_cast<const_address>(src) + origin[0], size[0]);
 
@@ -148,8 +135,8 @@ bool HostBlitManager::readImage(device::Memory& srcMemory, void* dstHost,
 }
 
 bool HostBlitManager::writeBuffer(const void* srcHost, device::Memory& dstMemory,
-                                  const amd::Coord3D& origin, const amd::Coord3D& size,
-                                  bool entire, amd::CopyMetadata copyMetadata) const {
+                                  const amd::Coord3D& origin, const amd::Coord3D& size, bool entire,
+                                  amd::CopyMetadata copyMetadata) const {
   uint flags = 0;
   if (entire) {
     flags = Memory::CpuWriteOnly;
@@ -162,6 +149,8 @@ bool HostBlitManager::writeBuffer(const void* srcHost, device::Memory& dstMemory
     return false;
   }
 
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY, "Using host memcpy H2D, src=%p, dst=%p, size=%zu",
+        srcHost, (reinterpret_cast<address>(dst) + origin[0]), size[0]);
   // Copy memory
   std::memcpy(reinterpret_cast<address>(dst) + origin[0], srcHost, size[0]);
 
@@ -291,7 +280,10 @@ bool HostBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& dstM
     LogError("Couldn't map destination memory");
     return false;
   }
-
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY,
+          "Using host memcpy for copyBuffer, src=%p, dst=%p, size=%zu",
+          (reinterpret_cast<const_address>(src) + srcOrigin[0]),
+          (reinterpret_cast<address>(dst) + dstOrigin[0]), size[0]);
   // Straight forward buffer copy
   std::memcpy((reinterpret_cast<address>(dst) + dstOrigin[0]),
               (reinterpret_cast<const_address>(src) + srcOrigin[0]), size[0]);
@@ -323,6 +315,11 @@ bool HostBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory& 
     return false;
   }
 
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY,
+          "Using host memcpy for copyBufferRect, src=%p, dst=%p, size=%zu",
+          (reinterpret_cast<const_address>(src) + srcRect.offset(0, 0, 0)),
+          (reinterpret_cast<address>(dst) + dstRect.offset(0, 0, 0)), size[0]);
+
   for (size_t z = 0; z < size[2]; ++z) {
     for (size_t y = 0; y < size[1]; ++y) {
       size_t srcOffset = srcRect.offset(0, y, z);
@@ -338,6 +335,29 @@ bool HostBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory& 
   dstMemory.cpuUnmap(vDev_);
   srcMemory.cpuUnmap(vDev_);
 
+  return true;
+}
+
+bool HostBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& copyOps) const {
+  // Default implementation falls back to individual copies
+  for (const auto& op : copyOps) {
+    if (op.srcMemory == nullptr || op.dstMemory == nullptr) {
+      return false;
+    }
+    device::Memory* srcDevMem = op.srcMemory->getDeviceMemory(
+        *op.srcMemory->getContext().devices()[0]);
+    device::Memory* dstDevMem = op.dstMemory->getDeviceMemory(
+        *op.dstMemory->getContext().devices()[0]);
+    if (srcDevMem == nullptr || dstDevMem == nullptr) {
+      return false;
+    }
+    amd::Coord3D srcOrigin(op.srcOffset);
+    amd::Coord3D dstOrigin(op.dstOffset);
+    amd::Coord3D size(op.size);
+    if (!copyBuffer(*srcDevMem, *dstDevMem, srcOrigin, dstOrigin, size, false, op.metadata)) {
+      return false;
+    }
+  }
   return true;
 }
 
@@ -722,20 +742,23 @@ void HostBlitManager::FillBufferInfo::PackInfo(const device::Memory& memory, siz
                                                std::vector<FillBufferInfo>& packed_info) {
   // 1. Validate input arguments
   guarantee(fill_size >= pattern_size, "Pattern Size: %u cannot be greater than fill size: %u \n",
-                                        pattern_size, fill_size);
+            pattern_size, fill_size);
 
   // 2. Calculate the next closest dword aligned address for faster processing
   size_t dst_addr = memory.virtualAddress() + fill_origin;
   size_t aligned_dst_addr = amd::alignUp(dst_addr, kExtendedSize);
-  guarantee(aligned_dst_addr >= dst_addr, "Aligned address: %u cannot be greater than destination"
-                                          "address :%u \n", aligned_dst_addr, dst_addr);
+  guarantee(aligned_dst_addr >= dst_addr,
+            "Aligned address: %u cannot be greater than destination"
+            "address :%u \n",
+            aligned_dst_addr, dst_addr);
 
   // 3. If given address is not aligned calculate head and tail size.
   size_t head_size = std::min(aligned_dst_addr - dst_addr, fill_size);
   size_t aligned_size = ((fill_size - head_size) / kExtendedSize) * kExtendedSize;
   size_t tail_size = (fill_size - head_size) % kExtendedSize;
-  guarantee((head_size + aligned_size + tail_size) <= fill_size, "Head size, aligned size & tail"
-                                                          "size together cannot cross fill size");
+  guarantee((head_size + aligned_size + tail_size) <= fill_size,
+            "Head size, aligned size & tail"
+            "size together cannot cross fill size");
 
   // 4. Fill the head, aligned, tail info if they exist.
   if (head_size > 0) {

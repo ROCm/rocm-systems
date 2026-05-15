@@ -36,8 +36,8 @@ THE SOFTWARE.
 namespace amd {
 namespace rdc {
 
-//!< Some metrics, like PCIe throughput may take a second to retreive. The
-//!< MetricValue will cache those metrics for async retreive.
+//!< Some metrics, like PCIe throughput may take a second to retrieve. The
+//!< MetricValue will cache those metrics for async retrieve.
 struct MetricValue {
   uint64_t cache_ttl;
   uint64_t last_time;
@@ -91,7 +91,15 @@ class RdcMetricFetcherImpl final : public RdcMetricFetcher {
   bool async_get_pcie_throughput(uint32_t gpu_index, rdc_field_t field_id, rdc_field_value* value);
   void get_pcie_throughput(const RdcFieldKey& key);
 
-  //!< Async metric retreive
+  rdc_status_t fetch_gpu_field_(uint32_t gpu_index, rdc_field_t field_id, rdc_field_value* value,
+                                amdsmi_processor_handle& processor_handle);
+  rdc_status_t fetch_gpu_partition_field_(uint32_t gpu_index, rdc_field_t field_id,
+                                          rdc_field_value* value);
+  rdc_status_t fetch_cpu_field_(uint32_t gpu_index, rdc_field_t field_id, rdc_field_value* value);
+
+  bool async_fetching = false;
+
+  //!< Async metric retrieve
   std::map<RdcFieldKey, MetricValue> async_metrics_;
   std::map<RdcFieldKey, std::shared_ptr<FieldSMIData>> smi_data_;
   std::queue<MetricTask> updated_tasks_;

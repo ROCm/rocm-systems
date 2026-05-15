@@ -1,24 +1,9 @@
 /*
-Copyright (c) 2020 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
 #include <hip_test_common.hh>
 #include <hip/hip_cooperative_groups.h>
 
@@ -26,10 +11,13 @@ THE SOFTWARE.
 
 namespace cg = cooperative_groups;
 
+enum class GridTypeTests { gridGroupType, baseType, publicApi };
+
 static __device__ int gm[2];
 
 static __global__ void kernel_cg_grid_group_type(int* size_dev, int* thd_rank_dev,
-                                                 int* is_valid_dev, int* sync_dev) {
+                                                 int* is_valid_dev, int* sync_dev,
+                                                 dim3* group_dim_dev) {
   cg::grid_group gg = cg::this_grid();
   int gIdx = (blockIdx.x * blockDim.x) + threadIdx.x;
 
@@ -49,6 +37,9 @@ static __global__ void kernel_cg_grid_group_type(int* size_dev, int* thd_rank_de
     gm[1] = 20;
   gg.sync();
   sync_dev[gIdx] = gm[1] * gm[0];
+
+   // Test group_dim aka number of thread blocks in a grid
+  group_dim_dev[gIdx] = gg.group_dim();
 }
 
 static __global__ void kernel_cg_grid_group_type_via_base_type(int* size_dev, int* thd_rank_dev,
@@ -80,7 +71,8 @@ static __global__ void kernel_cg_grid_group_type_via_base_type(int* size_dev, in
 }
 
 static __global__ void kernel_cg_grid_group_type_via_public_api(int* size_dev, int* thd_rank_dev,
-                                                                int* is_valid_dev, int* sync_dev) {
+                                                                int* is_valid_dev, int* sync_dev,
+                                                                dim3* group_dim_dev) {
   cg::grid_group gg = cg::this_grid();
   int gIdx = (blockIdx.x * blockDim.x) + threadIdx.x;
 
@@ -100,6 +92,9 @@ static __global__ void kernel_cg_grid_group_type_via_public_api(int* size_dev, i
     gm[1] = 20;
   cg::sync(gg);
   sync_dev[gIdx] = gm[1] * gm[0];
+
+  // Test group_dim aka number of thread blocks in a grid
+  group_dim_dev[gIdx] = gg.group_dim();
 }
 
 static __global__ void coop_kernel(unsigned int* first_array, unsigned int* second_array,
@@ -246,31 +241,36 @@ static void verify_barrier_buffer(unsigned int loops, unsigned int warps,
   }
 }
 
-template <typename F> static void test_cg_grid_group_type(F kernel_func, int block_size) {
+template <typename F> static void test_cg_grid_group_type(F kernel_func, int block_size, GridTypeTests kernel_type) {
   int num_bytes = sizeof(int) * 2 * block_size;
+  int num_dim3_bytes = sizeof(dim3) * 2 * block_size;
   int *size_dev, *size_host;
   int *thd_rank_dev, *thd_rank_host;
   int *is_valid_dev, *is_valid_host;
   int *sync_dev, *sync_host;
+  dim3 *group_dim_dev, *group_dim_host;
 
   // Allocate device memory
   HIP_CHECK(hipMalloc(&size_dev, num_bytes));
   HIP_CHECK(hipMalloc(&thd_rank_dev, num_bytes));
   HIP_CHECK(hipMalloc(&is_valid_dev, num_bytes));
   HIP_CHECK(hipMalloc(&sync_dev, num_bytes));
+  HIP_CHECK(hipMalloc(&group_dim_dev, num_dim3_bytes));
 
   // Allocate host memory
   HIP_CHECK(hipHostMalloc(&size_host, num_bytes));
   HIP_CHECK(hipHostMalloc(&thd_rank_host, num_bytes));
   HIP_CHECK(hipHostMalloc(&is_valid_host, num_bytes));
   HIP_CHECK(hipHostMalloc(&sync_host, num_bytes));
+  HIP_CHECK(hipHostMalloc(&group_dim_host, num_dim3_bytes));
 
   // Launch Kernel
-  void* params[4];
+  void* params[5];
   params[0] = &size_dev;
   params[1] = &thd_rank_dev;
   params[2] = &is_valid_dev;
   params[3] = &sync_dev;
+  params[4] = &group_dim_dev;
   HIP_CHECK(hipLaunchCooperativeKernel(kernel_func, 2, block_size, params, 0, 0));
 
   // Copy result from device to host
@@ -278,6 +278,7 @@ template <typename F> static void test_cg_grid_group_type(F kernel_func, int blo
   HIP_CHECK(hipMemcpy(thd_rank_host, thd_rank_dev, num_bytes, hipMemcpyDeviceToHost));
   HIP_CHECK(hipMemcpy(is_valid_host, is_valid_dev, num_bytes, hipMemcpyDeviceToHost));
   HIP_CHECK(hipMemcpy(sync_host, sync_dev, num_bytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(group_dim_host, group_dim_dev, num_dim3_bytes, hipMemcpyDeviceToHost));
 
   // Validate results for both blocks together
   for (int i = 0; i < 2 * block_size; ++i) {
@@ -285,6 +286,11 @@ template <typename F> static void test_cg_grid_group_type(F kernel_func, int blo
     ASSERT_EQUAL(thd_rank_host[i], i);
     ASSERT_EQUAL(is_valid_host[i], 1);
     ASSERT_EQUAL(sync_host[i], 200);
+    if(kernel_type != GridTypeTests::baseType){
+      ASSERT_EQUAL(group_dim_host[i].x, 2);
+      ASSERT_EQUAL(group_dim_host[i].y, 1);
+      ASSERT_EQUAL(group_dim_host[i].z, 1);
+    }
   }
 
   // Free device memory
@@ -292,15 +298,17 @@ template <typename F> static void test_cg_grid_group_type(F kernel_func, int blo
   HIP_CHECK(hipFree(thd_rank_dev));
   HIP_CHECK(hipFree(is_valid_dev));
   HIP_CHECK(hipFree(sync_dev));
+  HIP_CHECK(hipFree(group_dim_dev));
 
   // Free host memory
   HIP_CHECK(hipHostFree(size_host));
   HIP_CHECK(hipHostFree(thd_rank_host));
   HIP_CHECK(hipHostFree(is_valid_host));
   HIP_CHECK(hipHostFree(sync_host));
+  HIP_CHECK(hipHostFree(group_dim_host));
 }
 
-TEST_CASE("Unit_hipCGGridGroupType_Basic") {
+HIP_TEST_CASE(Unit_hipCGGridGroupType_Basic) {
   // Use default device for validating the test
   int device;
   hipDeviceProp_t device_properties;
@@ -308,40 +316,43 @@ TEST_CASE("Unit_hipCGGridGroupType_Basic") {
   HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
 
   if (!device_properties.cooperativeLaunch) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support cooperative launch!");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
   }
 
   void* kernel_func;
+  GridTypeTests kernel_type = GridTypeTests::gridGroupType;
 
   SECTION("Default grid group API test") {
     kernel_func = reinterpret_cast<void*>(kernel_cg_grid_group_type);
+    kernel_type = GridTypeTests::gridGroupType;
   }
 #if HT_AMD
   SECTION("Base type grid group API test") {
     kernel_func = reinterpret_cast<void*>(kernel_cg_grid_group_type_via_base_type);
+    kernel_type = GridTypeTests::baseType;
   }
 #endif
 
   SECTION("Public API grid group test") {
     kernel_func = reinterpret_cast<void*>(kernel_cg_grid_group_type_via_public_api);
+    kernel_type = GridTypeTests::publicApi;
   }
 
   // Test for block_size in powers of 2
   int max_threads_per_blk = device_properties.maxThreadsPerBlock;
   for (int block_size = 2; block_size <= max_threads_per_blk; block_size = block_size * 2) {
-    test_cg_grid_group_type(kernel_func, block_size);
+    test_cg_grid_group_type(kernel_func, block_size, kernel_type);
   }
 
   // Test for random blockSizes, but the sequence is the same every execution
   srand(0);
   for (int i = 0; i < 10; i++) {
     // Test fails for only 1 thread per block
-    test_cg_grid_group_type(kernel_func, max(2, rand() % max_threads_per_blk));
+    test_cg_grid_group_type(kernel_func, max(2, rand() % max_threads_per_blk), kernel_type);
   }
 }
 
-TEST_CASE("Unit_hipCGGridGroupType_DataSharing") {
+HIP_TEST_CASE(Unit_hipCGGridGroupType_DataSharing) {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
   HIP_CHECK(hipSetDevice(device));
 
@@ -350,8 +361,7 @@ TEST_CASE("Unit_hipCGGridGroupType_DataSharing") {
   HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
 
   if (!device_properties.cooperativeLaunch) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support cooperative launch!");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
   }
 
   int loops = GENERATE(1, 2, 3, 4);
@@ -421,7 +431,7 @@ TEST_CASE("Unit_hipCGGridGroupType_DataSharing") {
   free(host_mem_2);
 }
 
-TEST_CASE("Unit_hipCGGridGroupType_Barrier") {
+HIP_TEST_CASE(Unit_hipCGGridGroupType_Barrier) {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
   HIP_CHECK(hipSetDevice(device));
 
@@ -430,8 +440,7 @@ TEST_CASE("Unit_hipCGGridGroupType_Barrier") {
   HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
 
   if (!device_properties.cooperativeLaunch) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support cooperative launch!");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
   }
 
   uint32_t loops = GENERATE(1, 2, 3, 4);

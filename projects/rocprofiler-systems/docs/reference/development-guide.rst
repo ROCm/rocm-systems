@@ -6,7 +6,7 @@
 Development guide
 ****************************************************
 
-This guide discusses the `ROCm Systems Profiler <https://github.com/ROCm/rocprofiler-systems>`_ design.
+This guide discusses the `ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_ design.
 It includes a list of the executables and libraries, along with a discussion of the application's
 memory, sampling, and time-window constraint models.
 
@@ -15,8 +15,8 @@ Executables
 
 This section lists the ROCm Systems Profiler executables.
 
-rocprof-sys-avail: `source/bin/rocprof-sys-avail <https://github.com/ROCm/rocprofiler-systems/tree/amd-mainline/source/bin/rocprof-sys-avail>`_
------------------------------------------------------------------------------------------------------------------------------------------------
+rocprof-sys-avail: `source/bin/rocprof-sys-avail <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/source/bin/rocprof-sys-avail>`_
+------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 The ``main`` routine of ``rocprof-sys-avail`` has three important sections:
 
@@ -24,16 +24,16 @@ The ``main`` routine of ``rocprof-sys-avail`` has three important sections:
 * Printing options
 * Printing hardware counters
 
-rocprof-sys-sample: `source/bin/rocprof-sys-sample <https://github.com/ROCm/rocprofiler-systems/tree/amd-mainline/source/bin/rocprof-sys-sample>`_
---------------------------------------------------------------------------------------------------------------------------------------------------
+rocprof-sys-sample: `source/bin/rocprof-sys-sample <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/source/bin/rocprof-sys-sample>`_
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 * Requires a command-line format of ``rocprof-sys-sample <options> -- <command> <command-args>``
 * Translates command-line options into environment variables
 * Adds ``librocprof-sys-dl.so`` to ``LD_PRELOAD``
 * Is launched by using ``execvpe`` with ``<command> <command-args>`` and a modified environment
 
-rocprof-sys-causal: `source/bin/rocprof-sys-causal <https://github.com/ROCm/rocprofiler-systems/tree/amd-mainline/source/bin/rocprof-sys-causal>`_
----------------------------------------------------------------------------------------------------------------------------------------------------
+rocprof-sys-causal: `source/bin/rocprof-sys-causal <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/source/bin/rocprof-sys-causal>`_
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 When there is exactly one causal profiling configuration variant (which enables debugging),
 ``rocprof-sys-casual`` has a nearly identical design to ``rocprof-sys-sample``
@@ -45,8 +45,8 @@ the following actions take place for each variant:
 * the child process launches ``<command> <command-args>`` using ``execvpe``, which modifies the environment for the variant
 * the parent process waits for the child process to finish
 
-rocprof-sys-instrument: `source/bin/rocprof-sys-instrument <https://github.com/ROCm/rocprofiler-systems/tree/amd-mainline/source/bin/rocprof-sys-instrument>`_
---------------------------------------------------------------------------------------------------------------------------------------------------------------
+rocprof-sys-instrument: `source/bin/rocprof-sys-instrument <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/source/bin/rocprof-sys-instrument>`_
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 * Requires a command-line format of ``rocprof-sys-instrument <options> -- <command> <command-args>``
 * Allows the user to provide options specifying whether to perform runtime instrumentation, use binary rewrite, or
@@ -70,32 +70,32 @@ rocprof-sys-instrument: `source/bin/rocprof-sys-instrument <https://github.com/R
 Libraries
 ========================================
 
-Common library: `source/lib/common <https://github.com/ROCm/rocprofiler-systems/tree/amd-mainline/source/lib/common>`_
---------------------------------------------------------------------------------------------------------------------------------
+Common library: `source/lib/common <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/source/lib/common>`_
+------------------------------------------------------------------------------------------------------------------------------------------
 
 * General header-only functionality used in multiple executables and/or libraries.
 * Not installed or exported outside of the build tree.
 
-Core library: `source/lib/core <https://github.com/ROCm/rocprofiler-systems/tree/amd-mainline/source/lib/core>`_
---------------------------------------------------------------------------------------------------------------------------------
+Core library: `source/lib/core <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/source/lib/core>`_
+-----------------------------------------------------------------------------------------------------------------------------------------
 
 * Static PIC library with functionality that does not depend on any components.
 * Not installed or exported outside of the build tree.
 
-Binary library: `source/lib/binary <https://github.com/ROCm/rocprofiler-systems/tree/amd-mainline/source/lib/binary>`_
---------------------------------------------------------------------------------------------------------------------------------
+Binary library: `source/lib/binary <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/source/lib/binary>`_
+--------------------------------------------------------------------------------------------------------------------------------------------
 
 * Static PIC library with functionality for reading/analyzing binary info.
 * Mostly used by the causal profiling sections of ``librocprof-sys``.
 * Not installed or exported outside of the build tree.
 
-librocprof-sys: `source/lib/rocprof-sys <https://github.com/ROCm/rocprofiler-systems/tree/amd-mainline/source/lib/rocprof-sys>`_
---------------------------------------------------------------------------------------------------------------------------------
+librocprof-sys: `source/lib/rocprof-sys <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/source/lib/rocprof-sys>`_
+-----------------------------------------------------------------------------------------------------------------------------------------------------
 
 This is the main library encapsulating all the capabilities.
 
-librocprof-sys-dl: `source/lib/rocprof-sys-dl <https://github.com/ROCm/rocprofiler-systems/tree/amd-mainline/source/lib/rocprof-sys-dl>`_
------------------------------------------------------------------------------------------------------------------------------------------
+librocprof-sys-dl: `source/lib/rocprof-sys-dl <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/source/lib/rocprof-sys-dl>`_
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 This is a lightweight, front-end library for ``librocprof-sys`` which serves three primary purposes:
 
@@ -105,8 +105,8 @@ This is a lightweight, front-end library for ``librocprof-sys`` which serves thr
 * Prevents re-entry if ``librocprof-sys`` calls an instrumented function internally
 * Coordinates communication between ``librocprof-sys-user`` and ``librocprof-sys``
 
-librocprof-sys-user: `source/lib/rocprof-sys-user <https://github.com/ROCm/rocprofiler-systems/tree/amd-mainline/source/lib/rocprof-sys-user>`_
------------------------------------------------------------------------------------------------------------------------------------------------
+librocprof-sys-user: `source/lib/rocprof-sys-user <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/source/lib/rocprof-sys-user>`_
+------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 * Provides a set of functions and types for the users to add to their code, for example,
   disabling data collection globally or on a specific thread or
@@ -327,14 +327,47 @@ Thread-data class
 
 Currently, most thread data is effectively stored in a static
 ``std::array<std::unique_ptr<T>, ROCPROFSYS_MAX_THREADS>`` instance.
-``ROCPROFSYS_MAX_THREADS`` is a value defined a compile-time and set to ``2048``
-for release builds. During finalization,
+``ROCPROFSYS_MAX_THREADS`` is a value defined at compile-time for release builds. During finalization,
 ROCm Systems Profiler iterates through the thread-data and transforms that data
 into something that can be passed along to Perfetto and/or Timemory.
-The downside of the current model is that if the user exceeds ``ROCPROFSYS_MAX_THREADS``,
-a segmentation fault occurs. To fix this issue,
-a new model is being adopted which has all the benefits of this model
-but permits dynamic expansion.
+In the current model, if the user exceeds ``ROCPROFSYS_MAX_THREADS`` at runtime,
+thread creation fails gracefully with a warning message, excess threads operate with thread-local fallback,
+and profiling is skipped and not persisted to output files for threads beyond ``ROCPROFSYS_MAX_THREADS``.
+To support truly dynamic thread limits without compile-time constraints, a new model is being adopted which
+has all the benefits of static allocation but permits dynamic expansion beyond ``ROCPROFSYS_MAX_THREADS``.
+Currently, the thread limit can be increased at compile-time using the ``ROCPROFSYS_MAX_THREADS`` CMake configuration option.
+
+Configuring thread limits
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+ROCm Systems Profiler uses a single CMake configuration option to control thread-related memory allocation:
+
+* ``ROCPROFSYS_MAX_THREADS``: Maximum number of threads supported (default if not explicitly set: ``128`` if nproc < 8, otherwise ``pow2_ceil(16 * nproc)``; must be a power of 2)
+
+This setting controls:
+
+* Thread ID manager capacity (maximum thread IDs that can be tracked)
+* Storage array sizes for thread-local data across the codebase
+* Timemory's internal thread storage (``TIMEMORY_MAX_THREADS``)
+
+**Build-time validation:**
+
+CMake enforces that ``ROCPROFSYS_MAX_THREADS`` must be a power of 2:
+
+.. code-block:: cmake
+
+   # Valid: 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, ... any power of 2
+   # Invalid: 100, 3000, 5000, 10000, ... (FATAL_ERROR)
+
+**Example: Building with custom thread limit**
+
+.. code-block:: shell
+
+   # Build with support for 8192 threads
+   cmake -B build \
+         -DROCPROFSYS_MAX_THREADS=8192 \
+         ..
+   cmake --build build
 
 Sampling model
 ========================================
@@ -356,15 +389,15 @@ lowers the sampling frequency for the real-time sampler
 to 10 interrupts per second of real-time.
 
 The ROCm Systems Profiler-specific implementation can be found in
-`source/lib/rocprof-sys/library/sampling.cpp <https://github.com/ROCm/rocprofiler-systems/blob/amd-mainline/source/lib/rocprof-sys/library/sampling.cpp>`_.
-Within `sampling.cpp <https://github.com/ROCm/rocprofiler-systems/blob/amd-mainline/source/lib/rocprof-sys/library/sampling.cpp>`_,
+`source/lib/rocprof-sys/library/sampling.cpp <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-systems/source/lib/rocprof-sys/library/sampling.cpp>`_.
+Within `sampling.cpp <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-systems/source/lib/rocprof-sys/library/sampling.cpp>`_,
 there is a bundle of three sampling components:
 
-* `backtrace_timestamp <https://github.com/ROCm/rocprofiler-systems/blob/amd-mainline/source/lib/rocprof-sys/library/components/backtrace_timestamp.hpp>`_ simply
+* `backtrace_timestamp <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-systems/source/lib/rocprof-sys/library/components/backtrace_timestamp.hpp>`_ simply
   records the wall-clock time of the sample.
-* `backtrace <https://github.com/ROCm/rocprofiler-systems/blob/amd-mainline/source/lib/rocprof-sys/library/components/backtrace.hpp>`_
+* `backtrace <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-systems/source/lib/rocprof-sys/library/components/backtrace.hpp>`_
   records the call-stack via libunwind.
-* `backtrace_metrics <https://github.com/ROCm/rocprofiler-systems/blob/amd-mainline/source/lib/rocprof-sys/library/components/backtrace_metrics.hpp>`_
+* `backtrace_metrics <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-systems/source/lib/rocprof-sys/library/components/backtrace_metrics.hpp>`_
   records the sample metrics, such as peak RSS and the hardware counters.
 
 These three components are bundled together in
@@ -387,7 +420,7 @@ Time-window constraint model
 ========================================
 
 With the recent introduction of tracing delay and duration, the
-`constraint namespace <https://github.com/ROCm/rocprofiler-systems/blob/amd-mainline/source/lib/core/constraint.hpp>`_
+`constraint namespace <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-systems/source/lib/core/constraint.hpp>`_
 was introduced to improve the management of delays and duration limits for
 data collection. The ``spec`` class accepts a clock identifier, a delay value, a duration value, and an
 integer indicating how many times to repeat the delay and duration cycle. It is therefore

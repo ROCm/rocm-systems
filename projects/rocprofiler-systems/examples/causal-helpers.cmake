@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
 #
 #   function for
 #
@@ -142,11 +145,27 @@ function(rocprofiler_systems_causal_example_executable _NAME)
     endif()
 
     if(ROCPROFSYS_INSTALL_EXAMPLES)
-        install(
-            TARGETS ${_NAME} ${_NAME}-rocprofsys ${_NAME}-coz
-            DESTINATION bin
-            COMPONENT rocprofiler-systems-examples
-            OPTIONAL
+        set(_TARGETS
+            ${_NAME}
+            ${_NAME}-rocprofsys
+            ${_NAME}-ndebug
+            ${_NAME}-rocprofsys-ndebug
+            ${_NAME}-coz
         )
+        set(_EXISTING_TARGETS)
+
+        foreach(_TARGET IN LISTS _TARGETS)
+            if(TARGET ${_TARGET})
+                list(APPEND _EXISTING_TARGETS ${_TARGET})
+            endif()
+        endforeach()
+
+        if(_EXISTING_TARGETS)
+            install(
+                TARGETS ${_EXISTING_TARGETS}
+                DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
+                COMPONENT rocprofiler-systems-examples
+            )
+        endif()
     endif()
 endfunction()

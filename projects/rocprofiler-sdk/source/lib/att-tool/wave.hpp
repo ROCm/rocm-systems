@@ -22,12 +22,12 @@
 
 #pragma once
 
+#include "att_lib_wrapper.hpp"
 #include "code.hpp"
 #include "filenames.hpp"
+#include "perfcounter.hpp"
 #include "waitcnt/analysis.hpp"
 #include "wstates.hpp"
-
-#include "att_lib_wrapper.hpp"
 
 #include <map>
 #include <unordered_map>
@@ -50,19 +50,22 @@ public:
     WaveConfig(int                           se_id,
                std::shared_ptr<FilenameMgr>& _mgr,
                std::shared_ptr<CodeFile>&    _code,
+               std::shared_ptr<RealtimeTS>&  _ts,
                WavestateArray&               _wstates)
     : shader_engine(se_id)
     , wstates(_wstates)
     , code(_code)
     , filemgr(_mgr)
+    , realtime(_ts)
     {}
 
     const int      shader_engine;
     WavestateArray wstates;
 
     std::array<SIMD, SIMD_NUM>   id_count{};
-    std::shared_ptr<CodeFile>    code;
-    std::shared_ptr<FilenameMgr> filemgr;
+    std::shared_ptr<CodeFile>    code{};
+    std::shared_ptr<FilenameMgr> filemgr{};
+    std::shared_ptr<RealtimeTS>  realtime{};
 
     std::map<pcinfo_t, KernelName> kernel_names{};
     std::vector<occupancy_t>       occupancy{};

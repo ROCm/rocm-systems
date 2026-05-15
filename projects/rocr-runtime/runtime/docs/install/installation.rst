@@ -25,7 +25,7 @@ Prerequisites
 - Install ``libdrm`` package.
 
 .. code-block:: shell
-    
+
     sudo apt install libdrm-dev
 
 The ROCR prebuilt binaries include:
@@ -60,14 +60,14 @@ Prerequisites
 
     sudo apt install libelf-dev g++
 
-- A compatible version of the ``libhsakmt`` library and the ``hsakmt.h`` header file. Obtain the latest version of these files from the `ROCT-Thunk-Interface repository <https://github.com/ROCm/ROCT-Thunk-Interface>`_.
+- A compatible version of the ``libhsakmt`` library and the ``hsakmt.h`` header file. Obtain the latest version of these files from `ROCR-Runtime/libhsakmt <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocr-runtime/libhsakmt>`_.
 
 - Install ``xxd``.
 
 .. code-block:: shell
 
     sudo apt install xxd
-    
+
 Building the runtime
 ----------------------
 

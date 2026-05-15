@@ -25,6 +25,7 @@
 
 #include <stdint.h>
 #include "pm4/trace_config.h"
+#include "def/gpu_block_info.h"
 
 namespace pm4_builder {
 // Counters vector class

@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INNCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANNY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
 Testcase Scenario :
@@ -46,8 +33,7 @@ static __global__ void device_function(float* C_d, float* A_d, size_t Num) {
   }
 }
 
-static void HIPRT_CB Thread1_Callback(hipStream_t stream, hipError_t status,
-                                      void* userData) {
+static void HIPRT_CB Thread1_Callback(hipStream_t stream, hipError_t status, void* userData) {
   HIPASSERT(stream == mystream);
   HIPASSERT(userData == nullptr);
   HIPCHECK(status);
@@ -63,8 +49,7 @@ static void HIPRT_CB Thread1_Callback(hipStream_t stream, hipError_t status,
   ++Cb_count;
 }
 
-static void HIPRT_CB Thread2_Callback(hipStream_t stream, hipError_t status,
-                                      void* userData) {
+static void HIPRT_CB Thread2_Callback(hipStream_t stream, hipError_t status, void* userData) {
   HIPASSERT(stream == mystream);
   HIPASSERT(userData == nullptr);
   HIPCHECK(status);
@@ -80,19 +65,15 @@ static void HIPRT_CB Thread2_Callback(hipStream_t stream, hipError_t status,
   ++Cb_count;
 }
 
-void Thread1_func() {
-  HIPCHECK(hipStreamAddCallback(mystream, Thread1_Callback, nullptr, 0));
-}
+void Thread1_func() { HIPCHECK(hipStreamAddCallback(mystream, Thread1_Callback, nullptr, 0)); }
 
-void Thread2_func() {
-  HIPCHECK(hipStreamAddCallback(mystream, Thread2_Callback, nullptr, 0));
-}
+void Thread2_func() { HIPCHECK(hipStreamAddCallback(mystream, Thread2_Callback, nullptr, 0)); }
 
 /**
  Test multiple hipStreamAddCallback() called over
  multiple Threads.
  */
-TEST_CASE("Unit_hipStreamAddCallback_MultipleThreads") {
+HIP_TEST_CASE(Unit_hipStreamAddCallback_MultipleThreads) {
   float *A_d, *C_d;
   size_t Nbytes = (N) * sizeof(float);
   constexpr float Phi = 1.618f;
@@ -110,30 +91,25 @@ TEST_CASE("Unit_hipStreamAddCallback_MultipleThreads") {
   HIP_CHECK(hipMalloc(&A_d, Nbytes));
   HIP_CHECK(hipMalloc(&C_d, Nbytes));
 
-  HIP_CHECK(
-  hipStreamCreateWithFlags(&mystream, hipStreamNonBlocking));
+  HIP_CHECK(hipStreamCreateWithFlags(&mystream, hipStreamNonBlocking));
 
-  HIP_CHECK(
-  hipMemcpyAsync(A_d, A1_h, Nbytes, hipMemcpyHostToDevice,
-                 mystream));
+  HIP_CHECK(hipMemcpyAsync(A_d, A1_h, Nbytes, hipMemcpyHostToDevice, mystream));
 
   constexpr unsigned threadsPerBlock = 256;
-  constexpr unsigned blocks = (N + 255)/threadsPerBlock;
+  constexpr int blocks =
+      (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
 
-  hipLaunchKernelGGL((device_function), dim3(blocks),
-                     dim3(threadsPerBlock), 0,
-                     mystream, C_d, A_d, N);
+  hipLaunchKernelGGL((device_function), dim3(blocks), dim3(threadsPerBlock), 0, mystream, C_d, A_d,
+                     N);
   LaunchDelayKernel(std::chrono::milliseconds(2000), mystream);
   HIP_CHECK(hipGetLastError());
-  HIP_CHECK(
-  hipMemcpyAsync(C1_h, C_d, Nbytes,
-                 hipMemcpyDeviceToHost, mystream));
+  HIP_CHECK(hipMemcpyAsync(C1_h, C_d, Nbytes, hipMemcpyDeviceToHost, mystream));
 
-  std::thread *T = new std::thread[numThreads];
+  std::thread* T = new std::thread[numThreads];
   for (int i = 0; i < numThreads; i++) {
     // Use different callback for every even thread
     // The callbacks will be added to same stream from different threads
-    if ((i%2) == 0)
+    if ((i % 2) == 0)
       T[i] = std::thread(Thread1_func);
     else
       T[i] = std::thread(Thread2_func);

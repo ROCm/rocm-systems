@@ -1,22 +1,8 @@
-/* Copyright (c) 2010 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #ifdef _WIN32
 
@@ -54,8 +40,7 @@ void Window::OnPaint(void) {
     bm.bmiHeader.biClrUsed = 0;
     bm.bmiHeader.biClrImportant = 0;
 
-    int ret = SetDIBitsToDevice(hDC, 0, 0, _w, _h, 0, 0, 0, _h, _data, &bm,
-                                DIB_RGB_COLORS);
+    int ret = SetDIBitsToDevice(hDC, 0, 0, _w, _h, 0, 0, 0, _h, _data, &bm, DIB_RGB_COLORS);
     assert(ret);
   }
 
@@ -64,8 +49,7 @@ void Window::OnPaint(void) {
 
 /*****************************************************************************
  *****************************************************************************/
-LRESULT WINAPI Window::DefWindowProc(HWND hWnd, UINT uMsg, WPARAM wParam,
-                                     LPARAM lParam) {
+LRESULT WINAPI Window::DefWindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
   switch (uMsg) {
     case WM_CHAR:
       switch (wParam) {
@@ -81,8 +65,7 @@ LRESULT WINAPI Window::DefWindowProc(HWND hWnd, UINT uMsg, WPARAM wParam,
   return ::DefWindowProc(hWnd, uMsg, wParam, lParam);
 }
 
-Window::Window(const char* title, int x, int y, int width, int height,
-               unsigned int uiStyle) {
+Window::Window(const char* title, int x, int y, int width, int height, unsigned int uiStyle) {
   _data = NULL;
   _w = 0;
   _h = 0;
@@ -109,8 +92,8 @@ Window::Window(const char* title, int x, int y, int width, int height,
   RECT r = {x, y, x + width, y + height};
   AdjustWindowRect(&r, uiStyle, 0);
 
-  _hWnd = CreateWindow("TST", title, uiStyle, r.left, r.top, r.right - r.left,
-                       r.bottom - r.top, NULL, NULL, GetModuleHandle(0), this);
+  _hWnd = CreateWindow("TST", title, uiStyle, r.left, r.top, r.right - r.left, r.bottom - r.top,
+                       NULL, NULL, GetModuleHandle(0), this);
   if (_hWnd == NULL) {
     MessageBox(NULL, "CreateWindow() failed.", "Error", MB_OK);
     exit(0);

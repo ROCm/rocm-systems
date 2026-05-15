@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2023 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #ifndef DEVICE_HPP_
 #define DEVICE_HPP_
@@ -34,9 +20,6 @@
 #include "devprogram.hpp"
 #include "devkernel.hpp"
 #include "amdocl/cl_profile_amd.h"
-#if defined(WITH_COMPILER_LIB)
-#include "hsailctx.hpp"
-#endif
 #include "devsignal.hpp"
 
 #if defined(__clang__)
@@ -67,6 +50,7 @@ class WriteMemoryCommand;
 class FillMemoryCommand;
 class CopyMemoryCommand;
 class CopyMemoryP2PCommand;
+class BatchCopyMemoryCommand;
 class MapMemoryCommand;
 class UnmapMemoryCommand;
 class MigrateMemObjectsCommand;
@@ -91,6 +75,7 @@ class SvmFillMemoryCommand;
 class SvmMapMemoryCommand;
 class SvmUnmapMemoryCommand;
 class SvmPrefetchAsyncCommand;
+class SvmPrefetchBatchAsyncCommand;
 class StreamOperationCommand;
 class BatchMemoryOperationCommand;
 class VirtualMapCommand;
@@ -103,25 +88,32 @@ struct Coord3D;
 
 //! @note: the defines match hip values
 enum MemoryAdvice : uint32_t {
-  SetReadMostly = 1,          ///< Data will mostly be read and only occassionally be written to
-  UnsetReadMostly = 2,        ///< Undo the effect of hipMemAdviseSetReadMostly
-  SetPreferredLocation = 3,   ///< Set the preferred location for the data as the specified device
-  UnsetPreferredLocation = 4, ///< Clear the preferred location for the data
-  SetAccessedBy = 5,          ///< Data will be accessed by the specified device, reducing
-                              ///< the amount of page faults
-  UnsetAccessedBy = 6,        ///< HMM decides on the page faulting policy for the specified device
-  SetCoarseGrain = 100,       ///< Change cache policy to improve performance (disables coherency)
-  UnsetCoarseGrain = 101      ///< Restore coherent cache policy at the cost of some performance
+  SetReadMostly = 1,           ///< Data will mostly be read and only occassionally be written to
+  UnsetReadMostly = 2,         ///< Undo the effect of hipMemAdviseSetReadMostly
+  SetPreferredLocation = 3,    ///< Set the preferred location for the data as the specified device
+  UnsetPreferredLocation = 4,  ///< Clear the preferred location for the data
+  SetAccessedBy = 5,           ///< Data will be accessed by the specified device, reducing
+                               ///< the amount of page faults
+  UnsetAccessedBy = 6,         ///< HMM decides on the page faulting policy for the specified device
+  SetCoarseGrain = 100,        ///< Change cache policy to improve performance (disables coherency)
+  UnsetCoarseGrain = 101       ///< Restore coherent cache policy at the cost of some performance
 };
 
 enum MemRangeAttribute : uint32_t {
-    ReadMostly = 1,           ///< Whether the range will mostly be read and only
-                              ///< occassionally be written to
-    PreferredLocation = 2,    ///< The preferred location of the range
-    AccessedBy = 3,           ///< Memory range has hipMemAdviseSetAccessedBy
-                              ///< set for specified device
-    LastPrefetchLocation = 4, ///< The last location to which the range was prefetched
-    CoherencyMode = 100,      ///< Current coherency mode for the specified range
+  ReadMostly = 1,            ///< Whether the range will mostly be read and only
+                             ///< occassionally be written to
+  PreferredLocation = 2,     ///< The preferred location of the range
+  AccessedBy = 3,            ///< Memory range has hipMemAdviseSetAccessedBy
+                             ///< set for specified device
+  LastPrefetchLocation = 4,  ///< The last location to which the range was prefetched
+  CoherencyMode = 100,       ///< Current coherency mode for the specified range
+};
+
+enum FuncCache : uint32_t  {
+  kPreferNone = 0,   ///< Default function cache configuration, no preference
+  kPreferLDS = 1,    ///< Prefer larger shared memory and smaller L1 cache
+  kPreferCache = 2,  ///< Prefer larger L1 cache and smaller shared memory
+  kPreferEqual = 3   ///< Prefer equal size L1 cache and shared memory
 };
 
 constexpr int CpuDeviceId = static_cast<int>(-1);
@@ -133,23 +125,26 @@ constexpr size_t kWave64 = 64;
 constexpr size_t kScratchBits12X = 18;
 constexpr size_t kScratchBits9X = 15;
 constexpr size_t kCompilerRequired = 64;
-constexpr size_t kMaxStackSize12X = (((1 << kScratchBits12X) - 1) * 256 / kWave32) - kCompilerRequired;
-constexpr size_t kMaxStackSize11X = (((1 << kScratchBits9X) - 1) * 256 / kWave32) - kCompilerRequired;
-constexpr size_t kMaxStackSize9X = (((1 << kScratchBits9X) - 1) * 256 / kWave64) - kCompilerRequired;
+constexpr size_t kMaxStackSize12X =
+    (((1 << kScratchBits12X) - 1) * 256 / kWave32) - kCompilerRequired;
+constexpr size_t kMaxStackSize11X =
+    (((1 << kScratchBits9X) - 1) * 256 / kWave32) - kCompilerRequired;
+constexpr size_t kMaxStackSize9X =
+    (((1 << kScratchBits9X) - 1) * 256 / kWave64) - kCompilerRequired;
 
 enum class ExternalSemaphoreHandleType : uint32_t {
-  OpaqueFd = 1,        // Handle is an opaque file descriptor
-  OpaqueWin32 = 2,     // Handle is an opaque shared NT handle
-  OpaqueWin32Kmt = 3,  // Handle is an opaque, globally shared handle
-  D3D12Fence = 4,      // Handle is a shared NT handle referencing a
-                       // D3D12 fence object
-  D3D11Fence = 5,      // Handle is a shared NT handle referencing a
-                       // D3D11 fence object
-  NvSciSync = 6,       // Opaque handle to NvSciSync Object
-  KeyedMutex = 7,      // Handle is a shared NT handle referencing a
-                       // D3D11 keyed mutex object
-  KeyedMutexKmt = 8,   // Handle is a shared KMT handle referencing a
-                       // D3D11 keyed mutex object
+  OpaqueFd = 1,                 // Handle is an opaque file descriptor
+  OpaqueWin32 = 2,              // Handle is an opaque shared NT handle
+  OpaqueWin32Kmt = 3,           // Handle is an opaque, globally shared handle
+  D3D12Fence = 4,               // Handle is a shared NT handle referencing a
+                                // D3D12 fence object
+  D3D11Fence = 5,               // Handle is a shared NT handle referencing a
+                                // D3D11 fence object
+  NvSciSync = 6,                // Opaque handle to NvSciSync Object
+  KeyedMutex = 7,               // Handle is a shared NT handle referencing a
+                                // D3D11 keyed mutex object
+  KeyedMutexKmt = 8,            // Handle is a shared KMT handle referencing a
+                                // D3D11 keyed mutex object
   TimelineSemaphoreFd = 9,      // Handle is an opaque handle file
                                 // descriptor referencing a timeline
                                 // semaphore
@@ -204,54 +199,54 @@ enum OclExtensions {
 };
 
 static constexpr const char* OclExtensionsString[] = {"cl_khr_fp64 ",
-                                            "cl_amd_fp64 ",
-                                            "cl_khr_select_fprounding_mode ",
-                                            "cl_khr_global_int32_base_atomics ",
-                                            "cl_khr_global_int32_extended_atomics ",
-                                            "cl_khr_local_int32_base_atomics ",
-                                            "cl_khr_local_int32_extended_atomics ",
-                                            "cl_khr_int64_base_atomics ",
-                                            "cl_khr_int64_extended_atomics ",
-                                            "cl_khr_3d_image_writes ",
-                                            "cl_khr_byte_addressable_store ",
-                                            "cl_khr_fp16 ",
-                                            "cl_khr_gl_sharing ",
-                                            "cl_khr_gl_depth_images ",
-                                            "cl_ext_device_fission ",
-                                            "cl_amd_device_attribute_query ",
-                                            "cl_amd_vec3 ",
-                                            "cl_amd_printf ",
-                                            "cl_amd_media_ops ",
-                                            "cl_amd_media_ops2 ",
-                                            "cl_amd_popcnt ",
+                                                      "cl_amd_fp64 ",
+                                                      "cl_khr_select_fprounding_mode ",
+                                                      "cl_khr_global_int32_base_atomics ",
+                                                      "cl_khr_global_int32_extended_atomics ",
+                                                      "cl_khr_local_int32_base_atomics ",
+                                                      "cl_khr_local_int32_extended_atomics ",
+                                                      "cl_khr_int64_base_atomics ",
+                                                      "cl_khr_int64_extended_atomics ",
+                                                      "cl_khr_3d_image_writes ",
+                                                      "cl_khr_byte_addressable_store ",
+                                                      "cl_khr_fp16 ",
+                                                      "cl_khr_gl_sharing ",
+                                                      "cl_khr_gl_depth_images ",
+                                                      "cl_ext_device_fission ",
+                                                      "cl_amd_device_attribute_query ",
+                                                      "cl_amd_vec3 ",
+                                                      "cl_amd_printf ",
+                                                      "cl_amd_media_ops ",
+                                                      "cl_amd_media_ops2 ",
+                                                      "cl_amd_popcnt ",
 #if defined(_WIN32)
-                                            "cl_khr_d3d10_sharing ",
-                                            "cl_khr_d3d11_sharing ",
-                                            "cl_khr_dx9_media_sharing ",
+                                                      "cl_khr_d3d10_sharing ",
+                                                      "cl_khr_d3d11_sharing ",
+                                                      "cl_khr_dx9_media_sharing ",
 #endif
-                                            "cl_khr_image2d_from_buffer ",
-                                            "cl_amd_bus_addressable_memory ",
-                                            "cl_amd_c11_atomics ",
-                                            "cl_khr_spir ",
-                                            "cl_khr_subgroups ",
-                                            "cl_khr_gl_event ",
-                                            "cl_khr_depth_images ",
-                                            "cl_khr_mipmap_image ",
-                                            "cl_khr_mipmap_image_writes ",
-                                            "cl_amd_copy_buffer_p2p ",
-                                            "cl_amd_assembly_program ",
+                                                      "cl_khr_image2d_from_buffer ",
+                                                      "cl_amd_bus_addressable_memory ",
+                                                      "cl_amd_c11_atomics ",
+                                                      "cl_khr_spir ",
+                                                      "cl_khr_subgroups ",
+                                                      "cl_khr_gl_event ",
+                                                      "cl_khr_depth_images ",
+                                                      "cl_khr_mipmap_image ",
+                                                      "cl_khr_mipmap_image_writes ",
+                                                      "cl_amd_copy_buffer_p2p ",
+                                                      "cl_amd_assembly_program ",
 #if defined(_WIN32)
-                                            "cl_amd_planar_yuv",
+                                                      "cl_amd_planar_yuv",
 #endif
-                                            NULL};
+                                                      NULL};
 
 static constexpr int AmdVendor = 0x1002;
 
 template <typename T>
-inline void WriteAqlArgAt(unsigned char* dst, //!< The write pointer to the buffer
-                          T src,              //!< The source pointer
-                          uint size,          //!< The size in bytes to copy
-                          size_t offset       //!< The alignment to follow while writing to the buffer
+inline void WriteAqlArgAt(unsigned char* dst,  //!< The write pointer to the buffer
+                          T src,               //!< The source pointer
+                          uint size,           //!< The size in bytes to copy
+                          size_t offset  //!< The alignment to follow while writing to the buffer
 ) {
   assert(sizeof(T) <= size && "Argument's size mismatches ABI!");
   *(reinterpret_cast<T*>(dst + offset)) = src;
@@ -289,12 +284,18 @@ struct Info : public amd::EmbeddedObject {
   //  using the data-parallel execution model.
   size_t maxWorkGroupSize_;
 
+  //! Maximum grid dimensions (from HSA_AGENT_INFO_GRID_MAX_DIM). Work-items per dimension.
+  uint32_t maxGridDim_[3];
+
   //! Preferred number of work-items in a work-group executing a kernel
   //  using the data-parallel execution model.
   size_t preferredWorkGroupSize_;
 
   //! Number of shader engines in physical GPU
-  size_t numberOfShaderEngines;
+  size_t numberOfShaderEngines_;
+
+  //! Maximum number of workgroups in cluster
+  size_t clusterMaxSize_;
 
   //! uint32_t Preferred native vector width size for built-in scalar types
   //  that can be put into vectors.
@@ -544,6 +545,7 @@ struct Info : public amd::EmbeddedObject {
   //! executed by SIMDs in the same compute unit.
   uint32_t simdPerCU_;
   uint32_t cuPerShaderArray_;  //!< Number of CUs per shader array
+
   //! The maximum number of work items from the same work group that can be
   //! executed by a SIMD in parallel
   uint32_t simdWidth_;
@@ -554,10 +556,10 @@ struct Info : public amd::EmbeddedObject {
   //! Available number of SGPRs
   uint32_t availableSGPRs_;
 
-  uint32_t availableVGPRs_; //!< Number of addressable VGPRs per thread in DWORDs
-  uint32_t vgprsPerSimd_;   //!< Number of VGPRs per SIMD in DWORDs
-  uint32_t vgprAllocGranularity_; //!< Number of VGPRs allocation granularity per thread in DWORDs
-  uint32_t availableRegistersPerCU_; //!< Number of VGPRs per CU in DWORDs
+  uint32_t availableVGPRs_;        //!< Number of addressable VGPRs per thread in DWORDs
+  uint32_t vgprsPerSimd_;          //!< Number of VGPRs per SIMD in DWORDs
+  uint32_t vgprAllocGranularity_;  //!< Number of VGPRs allocation granularity per thread in DWORDs
+  uint32_t availableRegistersPerCU_;  //!< Number of VGPRs per CU in DWORDs
 
   //! Number of global memory channels
   uint32_t globalMemChannels_;
@@ -569,6 +571,8 @@ struct Info : public amd::EmbeddedObject {
   uint32_t localMemSizePerCU_;
   //! Number of banks of local memory
   uint32_t localMemBanks_;
+  //! LDS alignment
+  uint32_t ldsAlignment_;
   //! Number of available async queues
   uint32_t numAsyncQueues_;
   //! Number of available real time queues
@@ -624,6 +628,8 @@ struct Info : public amd::EmbeddedObject {
   uint32_t asicRevision_;
   //! Returns the unique identifier for the device
   char uuid_[16];
+  //! Returns component unified id generated by AMD CUID library for the device
+  char cuid_[16];
   //! Max numbers of threads per CU
   uint32_t maxThreadsPerCU_;
 
@@ -635,9 +641,9 @@ struct Info : public amd::EmbeddedObject {
   //! large bar support.
   bool largeBar_;
 
-  uint32_t  hmmSupported_;            //!< ROCr supports HMM interfaces
-  uint32_t  hmmCpuMemoryAccessible_;  //!< CPU memory is accessible by GPU without pinning/register
-  uint32_t  hmmDirectHostAccess_;     //!< HMM memory is accessible from the host without migration
+  uint32_t hmmSupported_;            //!< ROCr supports HMM interfaces
+  uint32_t hmmCpuMemoryAccessible_;  //!< CPU memory is accessible by GPU without pinning/register
+  uint32_t hmmDirectHostAccess_;     //!< HMM memory is accessible from the host without migration
 
   //! global CU mask which will be applied to all queues created on this device
   std::vector<uint32_t> globalCUMask_;
@@ -645,65 +651,69 @@ struct Info : public amd::EmbeddedObject {
   //! AQL Barrier Value Packet support
   bool aqlBarrierValue_;
 
-  bool pcie_atomics_; //!< Pcie atomics support flag
+  bool pcie_atomics_;  //!< Pcie atomics support flag
 
-  bool virtualMemoryManagement_; //!< Virtual memory management support
-  size_t virtualMemAllocGranularity_; //!< virtual memory allocation size/addr granularity
-
+  bool virtualMemoryManagement_;       //!< Virtual memory management support
+  size_t virtualMemAllocGranularityMinimum_;  //!< minimum virtual memory allocation size/addr granularity
+  size_t virtualMemAllocGranularityRecommended_;  //!< recommended virtual memory allocation size/addr granularity
   uint32_t driverNodeId_;
   //! Number of Physical SGPRs per SIMD
   uint32_t sgprsPerSimd_;
 
-  uint32_t numSDMAengines_; //!< Number of available SDMA engines
+  uint32_t numSDMAengines_;  //!< Number of available SDMA engines
 
-  uint32_t luidLowPart_;        //!< Luid low 4 bytes, available in Windows only
-  uint32_t luidHighPart_;       //!< Luid high 4 bytes, available in Windows only
-  uint32_t luidDeviceNodeMask_; //!< Luid node mask
+  uint32_t luidLowPart_;         //!< Luid low 4 bytes, available in Windows only
+  uint32_t luidHighPart_;        //!< Luid high 4 bytes, available in Windows only
+  uint32_t luidDeviceNodeMask_;  //!< Luid node mask
 
-  size_t scratchLimitMin; //! Minimum size of scratch limit of this device memory in bytes.
-  size_t scratchLimitMax; //! Maximum size of scratch limit of this device memory in bytes.
+  size_t scratchLimitMin;  //! Minimum size of scratch limit of this device memory in bytes.
+  size_t scratchLimitMax;  //! Maximum size of scratch limit of this device memory in bytes.
 
-  uint32_t numberOfXccs_; //! The number of XCC(s) on the device
+  uint32_t numberOfXccs_;  //! The number of XCC(s) on the device
+
+  bool hasExpertSchedMode_;  //! Device supports expert scheduling mode
+
+  bool dmabufSupported_;  //!< DMABuf support flag
+  bool gpuDirectRdmaWithHipVmmSupported_;  //!< GPU Direct RDMA with HIP VMM (DMA-Buf + HIP VMM)
 };
 
 //! Device settings
-class Settings : public amd::HeapObject {
+class Settings {
  public:
-
   enum KernelArgImpl {
-    HostKernelArgs = 0,       //!< Kernel Arguments are put into host memory
-    DeviceKernelArgs,         //!< Device memory kernel arguments with no memory
-                              //!< ordering workaround (e.g. XGMI)
-    DeviceKernelArgsReadback, //!< Device memory kernel arguments with kernel
-                              //!< argument readback workaround
-    DeviceKernelArgsHDP       //!< Device memory kernel arguments with kernel
-                              //!< argument readback plus HDP flush workaround.
+    HostKernelArgs = 0,        //!< Kernel Arguments are put into host memory
+    DeviceKernelArgs,          //!< Device memory kernel arguments with no memory
+                               //!< ordering workaround (e.g. XGMI)
+    DeviceKernelArgsReadback,  //!< Device memory kernel arguments with kernel
+                               //!< argument readback workaround
+    DeviceKernelArgsHDP        //!< Device memory kernel arguments with kernel
+                               //!< argument readback plus HDP flush workaround.
   };
 
   uint64_t extensions_;  //!< Supported OCL extensions
   union {
     struct {
-      uint apuSystem_ : 1;            //!< Device is APU system with shared memory
-      uint supportRA_ : 1;            //!< Support RA channel order format
-      uint waitCommand_ : 1;          //!< Enables a wait for every submitted command
-      uint customHostAllocator_ : 1;  //!< True if device has custom host allocator
-                                      //  that replaces generic OS allocation routines
-      uint supportDepthsRGB_ : 1;     //!< Support DEPTH and sRGB channel order format
-      uint singleFpDenorm_ : 1;       //!< Support Single FP Denorm
-      uint hsailExplicitXnack_ : 1;   //!< Xnack in hsail path for this device
-      uint useLightning_ : 1;         //!< Enable LC path for this device
-      uint enableWgpMode_ : 1;        //!< Enable WGP mode for this device
-      uint enableWave32Mode_ : 1;     //!< Enable Wave32 mode for this device
-      uint lcWavefrontSize64_ : 1;    //!< Enable Wave64 mode for this device
-      uint enableXNACK_ : 1;          //!< Enable XNACK feature
-      uint enableCoopGroups_ : 1;     //!< Enable cooperative groups feature
-      uint enableCoopMultiDeviceGroups_ : 1; //!< Enable cooperative groups multi device
-      uint fenceScopeAgent_ : 1;      //!< Enable fence scope agent in AQL dispatch packet
-      uint rocr_backend_ : 1;         //!< Device uses ROCr backend for submissions
-      uint gwsInitSupported_:1;       //!< Check if GWS is supported on this machine.
-      uint kernel_arg_opt_: 1;        //!< Enables kernel arg optimization for blit kernels
-      uint kernel_arg_impl_ : 2;      //!< Kernel argument implementation
-      uint reserved_ : 12;
+      uint apuSystem_ : 1;                    //!< Device is APU system with shared memory
+      uint supportRA_ : 1;                    //!< Support RA channel order format
+      uint waitCommand_ : 1;                  //!< Enables a wait for every submitted command
+      uint customHostAllocator_ : 1;          //!< True if device has custom host allocator
+                                              //  that replaces generic OS allocation routines
+      uint supportDepthsRGB_ : 1;             //!< Support DEPTH and sRGB channel order format
+      uint singleFpDenorm_ : 1;               //!< Support Single FP Denorm
+      uint enableWgpMode_ : 1;                //!< Enable WGP mode for this device
+      uint enableWave32Mode_ : 1;             //!< Enable Wave32 mode for this device
+      uint lcWavefrontSize64_ : 1;            //!< Enable Wave64 mode for this device
+      uint enableXNACK_ : 1;                  //!< Enable XNACK feature
+      uint enableCoopGroups_ : 1;             //!< Enable cooperative groups feature
+      uint enableCoopMultiDeviceGroups_ : 1;  //!< Enable cooperative groups multi device
+      uint fenceScopeAgent_ : 1;              //!< Enable fence scope agent in AQL dispatch packet
+      uint rocr_backend_ : 1;                 //!< Device uses ROCr backend for submissions
+      uint gwsInitSupported_ : 1;             //!< Check if GWS is supported on this machine.
+      uint kernel_arg_opt_ : 1;               //!< Enables kernel arg optimization for blit kernels
+      uint kernel_arg_impl_ : 2;              //!< Kernel argument implementation
+      uint sdma_swap_supported_ : 1;         //!< SDMA linear swap copy (gfx94x/gfx95x)
+      uint groupMemCarveout_ : 1;             //!< Group memory carveout functionality
+      uint reserved_ : 10;
     };
     uint value_;
   };
@@ -713,7 +723,7 @@ class Settings : public amd::HeapObject {
 
   //! Virtual destructor as this class is used as a base class and is also used
   //! to delete the derived classes.
-  virtual ~Settings() {};
+  virtual ~Settings(){};
 
   //! Check the specified extension
   bool checkExtension(uint name) const {
@@ -724,6 +734,13 @@ class Settings : public amd::HeapObject {
   void enableExtension(uint name) { extensions_ |= static_cast<uint64_t>(1) << name; }
 
   size_t stagedXferSize_ = 0;     //!< Staged buffer size
+  typedef struct CarveoutPref {
+    uint8_t totalSharedBanks;
+    uint8_t preferLDSBanks;
+    uint8_t preferCacheLDSBanks;
+    uint8_t preferEqualLDSBanks;
+  } CarveoutPref;
+  CarveoutPref groupMemPref_;
 
  private:
   //! Disable copy constructor
@@ -735,7 +752,7 @@ class Settings : public amd::HeapObject {
 
 //! Device-independent cache memory, base class for the device-specific
 //! memories. One Memory instance refers to one or more of these.
-class Memory : public amd::HeapObject {
+class Memory {
  public:
   //! Resource map flags
   enum CpuMapFlags {
@@ -746,9 +763,9 @@ class Memory : public amd::HeapObject {
 
   //! Memory Access flags at device level
   enum MemAccess {
-    kMemAccessNone = 0,        //! No Access
-    kMemAccessRead = 1,        //! Read Access
-    kMemAccessReadWrite = 3    //! Read and Write Access
+    kMemAccessNone = 0,      //! No Access
+    kMemAccessRead = 1,      //! Read Access
+    kMemAccessReadWrite = 3  //! Read and Write Access
   };
 
   union SyncFlags {
@@ -761,7 +778,7 @@ class Memory : public amd::HeapObject {
     SyncFlags() : value_(0) {}
   };
 
-  struct WriteMapInfo : public amd::HeapObject {
+  struct WriteMapInfo {
     amd::Coord3D origin_;  //!< Origin of the map location
     amd::Coord3D region_;  //!< Mapped region
     amd::Image* baseMip_;  //!< The base mip level for images
@@ -821,8 +838,7 @@ class Memory : public amd::HeapObject {
 
   //! Immediate blocking write from device cache to owners's backing store.
   //! Marks owner as "current" by resetting the last writer to NULL.
-  virtual void syncHostFromCache(device::VirtualDevice* vDev,
-                                 SyncFlags syncFlags = SyncFlags()) {}
+  virtual void syncHostFromCache(device::VirtualDevice* vDev, SyncFlags syncFlags = SyncFlags()) {}
 
   //! Allocate memory for API-level maps
   virtual void* allocMapTarget(const amd::Coord3D& origin,  //!< The map location in memory
@@ -838,8 +854,7 @@ class Memory : public amd::HeapObject {
   void setPersistentMapFlag(bool persistentMapped) {
     if (persistentMapped == true) {
       flags_ |= PersistentMap;
-    }
-    else {
+    } else {
       flags_ &= ~PersistentMap;
     }
   }
@@ -891,7 +906,7 @@ class Memory : public amd::HeapObject {
 
   const WriteMapInfo* writeMapInfo(const void* mapAddress) const {
     // Unmap must be serialized.
-    amd::ScopedLock lock(owner()->lockMemoryOps());
+    std::scoped_lock lock(owner()->lockMemoryOps());
 
     auto it = writeMapInfo_.find(mapAddress);
     if (it == writeMapInfo_.end()) {
@@ -909,7 +924,7 @@ class Memory : public amd::HeapObject {
   //! Clear memory object as mapped read only
   void clearUnmapInfo(const void* mapAddress) {
     // Unmap must be serialized.
-    amd::ScopedLock lock(owner()->lockMemoryOps());
+    std::scoped_lock lock(owner()->lockMemoryOps());
     auto it = writeMapInfo_.find(mapAddress);
     if (it == writeMapInfo_.end()) {
       // Get the first map info
@@ -943,8 +958,7 @@ class Memory : public amd::HeapObject {
   void setAllowedPeerAccess(bool flag) {
     if (flag == true) {
       flags_ |= AllowedPeerAccess;
-    }
-    else {
+    } else {
       flags_ &= ~AllowedPeerAccess;
     }
   }
@@ -956,7 +970,9 @@ class Memory : public amd::HeapObject {
   MemAccess GetAccess() const { return memAccess_; }
 
   //! Retrieves shareable handle for hipMalloc'ed address range.
-  virtual bool GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handle) { return false; }
+  virtual bool GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handle) {
+    return false;
+  }
 
  protected:
   enum Flags {
@@ -967,11 +983,11 @@ class Memory : public amd::HeapObject {
     HostMemoryRegistered = 0x00000010,    //!< Host memory was registered
     MemoryCpuUncached = 0x00000020,       //!< Memory is uncached on CPU access(slow read)
     AllowedPeerAccess = 0x00000040,       //!< Memory can be accessed from peer
-    PersistentMap = 0x00000080            //!< Map Peristent memory
+    PersistentMap = 0x00000080            //!< Map Persistent memory
   };
   uint flags_;  //!< Memory object flags
 
-  MemAccess memAccess_; //!< Memory Access flag
+  MemAccess memAccess_;  //!< Memory Access flag
 
   amd::Memory* owner_;  //!< The Memory instance that we cache,
                         //!< or NULL if we're device-private workspace.
@@ -981,7 +997,7 @@ class Memory : public amd::HeapObject {
   //! NB, the map data below is for an API-level map (from clEnqueueMapBuffer),
   //! not a physical map. When a memory object does not use USE_HOST_PTR we
   //! can use a remote resource and DMA, avoiding the additional CPU memcpy.
-  amd::Memory* mapMemory_;            //!< Memory used as map target buffer
+  amd::Memory* mapMemory_;                //!< Memory used as map target buffer
   std::atomic<size_t> indirectMapCount_;  //!< Number of maps
   std::unordered_map<const void*, WriteMapInfo>
       writeMapInfo_;  //!< Saved write map info for partial unmap
@@ -1002,7 +1018,7 @@ class Memory : public amd::HeapObject {
   Memory(const Memory&) = delete;
 };
 
-class Sampler : public amd::HeapObject {
+class Sampler {
  public:
   //! Constructor
   Sampler() : hwSrd_(0), hwState_(nullptr) {}
@@ -1028,7 +1044,7 @@ class Sampler : public amd::HeapObject {
   Sampler(const Sampler&);
 };
 
-class ClBinary : public amd::HeapObject {
+class ClBinary {
  public:
   enum BinaryImageFormat {
     BIF_VERSION2 = 0,  //!< Binary Image Format version 2.0 (ELF)
@@ -1081,29 +1097,9 @@ class ClBinary : public amd::HeapObject {
   std::string DataURI() const;
 
   //! Loads llvmir binary from OCL binary file
-  bool loadLlvmBinary(
-      std::string& llvmBinary,                     //!< LLVMIR binary code
-      amd::Elf::ElfSections& elfSectionType  //!< LLVMIR binary is in SPIR format
-      ) const;
-
-  //! Loads compile options from OCL binary file
-  bool loadCompileOptions(std::string& compileOptions  //!< return the compile options loaded
-                          ) const;
-
-  //! Loads link options from OCL binary file
-  bool loadLinkOptions(std::string& linkOptions  //!< return the link options loaded
-                       ) const;
-
-  //! Store compile options into OCL binary file
-  void storeCompileOptions(const std::string& compileOptions  //!< the compile options to be stored
-  );
-
-  //! Store link options into OCL binary file
-  void storeLinkOptions(const std::string& linkOptions  //!< the link options to be stored
-  );
-
-  //! Check if the binary is recompilable
-  bool isRecompilable(std::string& llvmBinary, amd::Elf::ElfPlatform thePlatform);
+  bool loadLlvmBinary(std::string& llvmBinary,               //!< LLVMIR binary code
+                      amd::Elf::ElfSections& elfSectionType  //!< LLVMIR binary is in SPIR format
+  ) const;
 
   void saveOrigBinary(const char* origBinary, size_t origSize) {
     origBinary_ = origBinary;
@@ -1165,12 +1161,6 @@ class ClBinary : public amd::HeapObject {
   //! Returns TRUE if binary file was allocated
   bool isBinaryAllocated() const { return (flags_ & BinaryAllocated) ? true : false; }
 
-#if defined(WITH_COMPILER_LIB)
-  //! Returns BIF symbol name by symbolID,
-  //! returns empty string if not found or if BIF version is unsupported
-  std::string getBIFSymbol(unsigned int symbolID) const;
-#endif
-
  protected:
   const amd::Device& dev_;  //!< Device object
 
@@ -1188,21 +1178,21 @@ class ClBinary : public amd::HeapObject {
   size_t size_;         //!< binary size
   uint flags_;          //!< CL binary object flags
 
-  amd::Os::FileDesc fdesc_; //!< file descriptor
-  size_t foffset_;          //!< file offset
-  std::string uri_;         //!< memory URI
+  amd::Os::FileDesc fdesc_;  //!< file descriptor
+  size_t foffset_;           //!< file offset
+  std::string uri_;          //!< memory URI
 
   const char* origBinary_;  //!< original binary data
   size_t origSize_;         //!< original binary size
 
   int encryptCode_;  //!< Encryption Code for input binary (0 for not encrypted)
 
-  std::string fname_; //!< name of elf dump file
-  bool tempFile_;     //!< Is the elf dump file temporary
+  std::string fname_;  //!< name of elf dump file
+  bool tempFile_;      //!< Is the elf dump file temporary
 
  protected:
-  amd::Elf* elfIn_;        //!< ELF object for input ELF binary
-  amd::Elf* elfOut_;       //!< ELF object for output ELF binary
+  amd::Elf* elfIn_;           //!< ELF object for input ELF binary
+  amd::Elf* elfOut_;          //!< ELF object for output ELF binary
   BinaryImageFormat format_;  //!< which binary image format to use
 };
 
@@ -1238,7 +1228,7 @@ inline Program::binary_t Program::binary() {
  *
  *  \brief The device interface class for the performance counters
  */
-class PerfCounter : public amd::HeapObject {
+class PerfCounter {
  public:
   //! Constructor for the device performance
   PerfCounter() {}
@@ -1260,7 +1250,7 @@ class PerfCounter : public amd::HeapObject {
  *
  *  \brief The device interface class for the performance counters
  */
-class ThreadTrace : public amd::HeapObject {
+class ThreadTrace {
  public:
   //! Constructor for the device performance
   ThreadTrace() {}
@@ -1280,14 +1270,10 @@ class ThreadTrace : public amd::HeapObject {
 };
 
 //! A device execution environment.
-class VirtualDevice : public amd::HeapObject {
+class VirtualDevice : public amd::ReferenceCountedObject {
  public:
   //! Construct a new virtual device for the given physical device.
-  VirtualDevice(amd::Device& device)
-    : device_(device)
-    , blitMgr_(NULL)
-    , execution_(true) /* Virtual device execution lock */
-    , index_(0) {}
+  VirtualDevice(amd::Device& device) : device_(device), blitMgr_(NULL), index_(0) {}
 
   //! Destroy this virtual device.
   virtual ~VirtualDevice() {}
@@ -1295,10 +1281,26 @@ class VirtualDevice : public amd::HeapObject {
   //! Return the physical device for this virtual device.
   const amd::Device& device() const { return device_(); }
   virtual uint64_t getQueueID() = 0;
+
+  //! Snapshot the current HW queue as preferred for future re-acquisition (used by graph launch)
+  virtual void SetPreferredQueue() {}
+  //! Acquire a HW queue using the preferred hint, then clear the hint
+  virtual void AcquireQueueWithPreference() {}
+
+  //! Pin the current HW queue so ReleaseHwQueue() becomes a no-op (used by graph internal streams)
+  virtual void PinQueue() {}
+  //! Unpin the HW queue, allowing ReleaseHwQueue() to release it again
+  virtual void UnpinQueue() {}
+  //! Release current HW queue and acquire a new one, avoiding queues with IDs in the excluded set
+  virtual bool ReacquireQueueExcluding(const std::unordered_set<uint64_t>& excluded_ids) {
+    return false;
+  }
+
   virtual void submitReadMemory(amd::ReadMemoryCommand& cmd) = 0;
   virtual void submitWriteMemory(amd::WriteMemoryCommand& cmd) = 0;
   virtual void submitCopyMemory(amd::CopyMemoryCommand& cmd) = 0;
   virtual void submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) = 0;
+  virtual void submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) = 0;
   virtual void submitMapMemory(amd::MapMemoryCommand& cmd) = 0;
   virtual void submitUnmapMemory(amd::UnmapMemoryCommand& cmd) = 0;
   virtual void submitKernel(amd::NDRangeKernelCommand& command) = 0;
@@ -1322,7 +1324,8 @@ class VirtualDevice : public amd::HeapObject {
   /// Optional extensions
   virtual void submitSignal(amd::SignalCommand& cmd) = 0;
   virtual void submitMakeBuffersResident(amd::MakeBuffersResidentCommand& cmd) = 0;
-  virtual void submitSvmPrefetchAsync(amd::SvmPrefetchAsyncCommand& cmd) {
+  virtual void submitSvmPrefetchAsync(amd::SvmPrefetchAsyncCommand& cmd) { ShouldNotReachHere(); }
+  virtual void SubmitSvmPrefetchBatchAsync(amd::SvmPrefetchBatchAsyncCommand& cmd) {
     ShouldNotReachHere();
   }
   virtual void submitStreamOperation(amd::StreamOperationCommand& cmd) { ShouldNotReachHere(); }
@@ -1333,6 +1336,7 @@ class VirtualDevice : public amd::HeapObject {
   virtual void submitUserEvent(amd::UserEvent& vcmd) { ShouldNotReachHere(); }
 
   virtual address allocKernelArguments(size_t size, size_t alignment) { return nullptr; }
+  virtual void ReleaseSdmaEngines() {}  //!< Release SDMA engine assignments (ROCm specific)
   virtual void ReleaseAllHwQueues() {}
   virtual void ReleaseHwQueue() {}
 
@@ -1340,7 +1344,7 @@ class VirtualDevice : public amd::HeapObject {
   device::BlitManager& blitMgr() const { return *blitMgr_; }
 
   //! Returns the monitor object for execution access by VirtualGPU
-  amd::Monitor& execution() { return execution_; }
+  std::recursive_mutex& execution() { return execution_; }
 
   //! Returns the virtual device unique index
   uint index() const { return index_; }
@@ -1352,10 +1356,17 @@ class VirtualDevice : public amd::HeapObject {
   virtual bool isFenceDirty() const = 0;
   //! Init hidden heap for device memory allocations
   virtual void HiddenHeapInit() = 0;
-  //! Dispatch captured AQL packet
-  virtual bool dispatchAqlPacket(uint8_t* aqlpacket,
-                                 const std::string& kernelName,
-                                 amd::AccumulateCommand* vcmd = nullptr) = 0;
+
+  //! Fast-path dispatch using a pre-built contiguous flat packet buffer.
+  virtual bool dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPacketData,
+                                          const std::vector<uint32_t>& validFullHeaders,
+                                          amd::AccumulateCommand* vcmd = nullptr,
+                                          bool attach_signal = false,
+                                          const std::vector<const std::string*>* kernelNames = nullptr,
+                                          bool pre_patched = false,
+                                          bool blocking = false) {
+    return false;
+  }
 
   //! Returns the number of outstanding HSA async handlers
   std::atomic<uint64_t>& QueuedAsyncHandlers() const { return queued_async_handlers_; }
@@ -1373,33 +1384,63 @@ class VirtualDevice : public amd::HeapObject {
  protected:
   device::BlitManager* blitMgr_;  //!< Blit manager
 
-  amd::Monitor execution_;  //!< Lock to serialise access to all device objects
+  std::recursive_mutex execution_;  //!< Lock to serialise access to all device objects
   uint index_;              //!< The virtual device unique index
-  mutable std::atomic<uint64_t> queued_async_handlers_ = 0; //!< Outstanding HSA async handlers
+  mutable std::atomic<uint64_t> queued_async_handlers_ = 0;  //!< Outstanding HSA async handlers
+
+  //! Creates buffer object from image
+  amd::Memory* createBufferFromImage(
+      amd::Memory& amdImage  //! The parent image object(untiled images only)
+  ) {
+    amd::Memory* mem = new (amdImage.getContext()) amd::Buffer(amdImage, 0, 0, amdImage.getSize());
+    mem->setVirtualDevice(this);
+    if ((mem != nullptr) && !mem->create()) {
+      mem->release();
+    }
+    return mem;
+  }
+
+  //! Get copy command type from original copy command type and memory object types
+  cl_command_type getCopyCommandType(cl_command_type type, const cl_mem_object_type srcType,
+                                 const cl_mem_object_type dstType) {
+    if (srcType == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
+      if (dstType == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
+        type = CL_COMMAND_COPY_BUFFER;
+      } else if (dstType == CL_MEM_OBJECT_BUFFER) {
+        type = CL_COMMAND_COPY_BUFFER;
+      } else if (type == CL_COMMAND_COPY_IMAGE) {
+        type = CL_COMMAND_COPY_BUFFER_TO_IMAGE;
+      }
+    } else if (dstType == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
+      if (srcType == CL_MEM_OBJECT_BUFFER) {
+        type = CL_COMMAND_COPY_BUFFER;
+      } else if (type == CL_COMMAND_COPY_IMAGE) {
+        type = CL_COMMAND_COPY_IMAGE_TO_BUFFER;
+      }
+    }
+    return type;
+  }
 };
 
+extern bool getValueFromIsaMeta(const std::string& isa, const char* key, std::string& retValue);
 }  // namespace amd::device
 
 namespace amd {
 /*! IHIP IPC MEMORY Structure */
 #define AMD_IPC_MEM_HANDLE_SIZE 32
 
-typedef enum SyncPolicy {
-    Auto = 1,
-    Spin = 2,
-    Yield = 3,
-    Blocking = 4
-} SyncPolicy;
+typedef enum SyncPolicy { Auto = 1, Spin = 2, Yield = 3, Blocking = 4 } SyncPolicy;
 
 //! MemoryObject map lookup  class
 class MemObjMap : public AllStatic {
  public:
   struct IpcMemHandle {
     char ipc_handle[AMD_IPC_MEM_HANDLE_SIZE];  ///< ipc memory handle on ROCr
-    size_t psize;                        ///< Total size of the device memory allocation
-    size_t poffset;                      ///< Offset within the allocation
-    int owners_process_id;               ///< ID of the process that owns the allocation
-    char reserved[LP64_SWITCH(20, 12)];  ///< Reserved for future extensions
+    size_t psize;                              ///< Total size of the device memory allocation
+    size_t poffset;                            ///< Offset within the allocation
+    int owners_process_id;                     ///< ID of the process that owns the allocation
+    int owners_device_id;                      ///< ID of the device that owns the allocation
+    char reserved[LP64_SWITCH(16, 8)];        ///< Reserved for future extensions
 
     bool operator<(const IpcMemHandle& h) const {
       int cmp = std::memcmp(ipc_handle, h.ipc_handle, AMD_IPC_MEM_HANDLE_SIZE);
@@ -1415,8 +1456,25 @@ class MemObjMap : public AllStatic {
   static void RemoveMemObj(const void* k);
 
   //!< Find the mem object based on the input pointer, outputs the offset
-  static amd::Memory* FindMemObj( const void* k, size_t* offset = nullptr);
-  static void UpdateAccess(amd::Device *peerDev);
+  static amd::Memory* FindMemObj(const void* k, size_t* offset = nullptr, Device* dev = nullptr);
+  //!< Batched version: find multiple mem objects in one lock acquisition
+  static void FindMemObjBatch(const void* const* ptrs, size_t count,
+                              std::vector<amd::Memory*>& memories,
+                              std::vector<size_t>& offsets, Device* dev = nullptr);
+  //!< Batched pairs version: find src/dst pairs in one lock acquisition
+  static void FindMemObjBatchPairs(const void* const* srcs, const void* const* dsts,
+                                   size_t count,
+                                   std::vector<amd::Memory*>& src_memories,
+                                   std::vector<amd::Memory*>& dst_memories,
+                                   std::vector<size_t>& src_offsets,
+                                   std::vector<size_t>& dst_offsets,
+                                   Device* dev = nullptr);
+  //!< Single pair version: find one src/dst pair in one lock acquisition
+  static void FindMemObjPairs(const void* src, const void* dst,
+                              amd::Memory*& src_memory, amd::Memory*& dst_memory,
+                              size_t& src_offset, size_t& dst_offset,
+                              Device* dev = nullptr);
+  static void UpdateAccess(amd::Device* peerDev);
   //!< Purge all user allocated memories on the given device
   static void Purge(amd::Device* dev);
   //!< Same as AddMemObj but for virtual addressing
@@ -1434,13 +1492,26 @@ class MemObjMap : public AllStatic {
   //!< Same as FindMemObj but for ipc handle to MemObj mapping
   static amd::Memory* FindIpcHandleMemObj(const IpcMemHandle& k);
 
+  //!< Atomically find and remove a mem object by ptr. Returns the removed Memory* or nullptr.
+  static amd::Memory* FindAndRemoveMemObj(const void* k);
+
+  //!< Shared read/write lock for all MemObjMap operations (including per-device maps)
+  static std::shared_mutex AllocatedLock_;
+
  private:
+  // Helper struct for memory object lookup results
+  struct LookupResult {
+    amd::Memory* memory;
+    size_t offset;
+  };
+
+  //!< Core lookup helper used by all FindMemObj* functions. Caller must hold AllocatedLock_.
+  static LookupResult findMemObjNoLock(const void* ptr, Device* dev);
+
   //!< the mem object<->hostptr information container
   static std::map<uintptr_t, amd::Memory*> MemObjMap_;
   //!< the virtual mem object<->hostptr information container
   static std::map<uintptr_t, amd::Memory*> VirtualMemObjMap_;
-  //!< Shared read/write lock
-  static std::shared_mutex AllocatedLock_;
   //!< the ipc handle<->mem object information container
   static std::map<IpcMemHandle, amd::Memory*> IpcHandleMemObjMap_;
 };
@@ -1448,7 +1519,6 @@ class MemObjMap : public AllStatic {
 /// @brief Instruction Set Architecture properties.
 class Isa {
  public:
-
   /// @brief Isa's target feature setting type.
   enum class Feature : uint8_t {
     Unsupported,
@@ -1459,10 +1529,10 @@ class Isa {
 
   //! Return a non-zero uint64_t value that uniquely identifies the device.
   //! This can be used when a scalar value handle to the device is require.
-  static uint64_t toHandle(const Isa *isa) {
+  static uint64_t toHandle(const Isa* isa) {
     static_assert(sizeof(isa) <= sizeof(uint64_t), "Handle size does not match pointer size");
     assert((reinterpret_cast<uint64_t>(static_cast<const Isa*>(nullptr)) == 0) &&
-                  "nullptr value is not 0");
+           "nullptr value is not 0");
     return isa ? reinterpret_cast<uint64_t>(isa) : 0;
   }
 
@@ -1472,7 +1542,7 @@ class Isa {
   static const Isa* fromHandle(uint64_t handle) {
     static_assert(sizeof(handle) <= sizeof(uint64_t), "Handle size does not match pointer size");
     assert((reinterpret_cast<uint64_t>(static_cast<const Isa*>(nullptr)) == 0) &&
-                  "nullptr value is not 0");
+           "nullptr value is not 0");
     return handle ? reinterpret_cast<const Isa*>(handle) : nullptr;
   }
 
@@ -1483,14 +1553,7 @@ class Isa {
   std::string processorName() const;
 
   /// @returns This Isa's target ID name.
-  const char *targetId() const {
-    return targetId_;
-  }
-
-  /// @returns This Isa's name to use with the HSAIL compiler.
-  const char *hsailName() const {
-    return hsailId_;
-  }
+  const char* targetId() const { return targetId_; }
 
   /// @returns If the ROCm runtime supports the ISA.
   bool runtimeRocSupported() const {
@@ -1509,90 +1572,53 @@ class Isa {
   }
 
   /// @returns SRAM ECC feature status.
-  const Feature &sramecc() const {
-    return sramecc_;
-  }
+  const Feature& sramecc() const { return sramecc_; }
 
   /// @returns XNACK feature status.
-  const Feature &xnack() const {
-    return xnack_;
-  }
+  const Feature& xnack() const { return xnack_; }
 
   /// @returns True if SRAMECC feature is supported, false otherwise.
-  bool isSrameccSupported() const {
-    return sramecc_ != Feature::Unsupported;
-  }
+  bool isSrameccSupported() const { return sramecc_ != Feature::Unsupported; }
 
   /// @returns True if XNACK feature is supported, false otherwise.
-  bool isXnackSupported() const {
-    return xnack_ != Feature::Unsupported;
-  }
+  bool isXnackSupported() const { return xnack_ != Feature::Unsupported; }
 
   /// @returns This Isa's major version.
-  uint32_t versionMajor() const {
-    return versionMajor_;
-  }
+  uint32_t versionMajor() const { return versionMajor_; }
 
   /// @returns This Isa's minor version.
-  uint32_t versionMinor() const {
-    return versionMinor_;
-  }
+  uint32_t versionMinor() const { return versionMinor_; }
 
   /// @returns This Isa's stepping version.
-  uint32_t versionStepping() const {
-    return versionStepping_;
-  }
+  uint32_t versionStepping() const { return versionStepping_; }
 
   /// @returns This Isa's number of SIMDs per CU.
-  uint32_t simdPerCU() const {
-    return simdPerCU_;
-  }
+  uint32_t simdPerCU() const { return simdPerCU_; }
 
   /// @returns This Isa's
-  uint32_t simdWidth() const {
-    return simdWidth_;
-  }
+  uint32_t simdWidth() const { return simdWidth_; }
 
   /// @returns This Isa's number of instructions processed per SIMD.
-  uint32_t simdInstructionWidth() const {
-    return simdInstructionWidth_;
-  }
+  uint32_t simdInstructionWidth() const { return simdInstructionWidth_; }
 
   /// @returns This Isa's memory channel bank width.
-  uint32_t memChannelBankWidth() const {
-    return memChannelBankWidth_;
-  }
+  uint32_t memChannelBankWidth() const { return memChannelBankWidth_; }
 
   /// @returns This Isa's local memory size per CU.
-  uint32_t localMemSizePerCU() const {
-    return localMemSizePerCU_;
-  }
+  uint32_t localMemSizePerCU() const { return localMemSizePerCU_; }
 
   /// @returns This Isa's number of banks of local memory.
-  uint32_t localMemBanks() const {
-    return localMemBanks_;
-  }
+  uint32_t localMemBanks() const { return localMemBanks_; }
 
-#if defined(USE_COMGR_LIBRARY)
-  /// @returns This Isa's available sgprs per wavefront
-  size_t sgprPerWavefront() const {
-    setAvailableSgprVgprCached();
-    return sgprPerWavefront_;
-  }
-
-  /// @returns This Isa's available vgprs per wavefront
-  size_t vgprPerWavefront() const {
-    setAvailableSgprVgprCached();
-    return vgprPerWavefront_;
-  }
-#endif
+  /// @returns This Isa's LDS alignment
+  uint32_t ldsAlignment() const { return ldsAlignment_; }
 
   /// @returns True if @p codeObjectIsa and @p agentIsa are compatible,
   /// false otherwise.
-  static bool isCompatible(const Isa &codeObjectIsa, const Isa &agentIsa);
+  static bool isCompatible(const Isa& codeObjectIsa, const Isa& agentIsa);
 
   /// @returns Isa for requested @p isaName, null pointer if not supported.
-  static const Isa* findIsa(const char *isaName);
+  static const Isa* findIsa(const char* isaName);
 
   /// @returns Isa for requested @p version, null pointer if not supported.
   static const Isa* findIsa(uint32_t versionMajor, uint32_t versionMinor, uint32_t versionStepping,
@@ -1605,15 +1631,12 @@ class Isa {
   static const Isa* end();
 
  private:
-
-  constexpr Isa(const char* targetId, const char* hsailId,
-                bool runtimeRocSupported, bool runtimePalSupported,
+  constexpr Isa(const char* targetId, bool runtimeRocSupported, bool runtimePalSupported,
                 uint32_t versionMajor, uint32_t versionMinor, uint32_t versionStepping,
                 Feature sramecc, Feature xnack, uint32_t simdPerCU, uint32_t simdWidth,
                 uint32_t simdInstructionWidth, uint32_t memChannelBankWidth,
-                uint32_t localMemSizePerCU, uint32_t localMemBanks)
+                uint32_t localMemSizePerCU, uint32_t localMemBanks, uint32_t ldsAlignment)
       : targetId_(targetId),
-        hsailId_(hsailId),
         runtimeRocSupported_(runtimeRocSupported),
         runtimePalSupported_(runtimePalSupported),
         versionMajor_(versionMajor),
@@ -1627,26 +1650,14 @@ class Isa {
         memChannelBankWidth_(memChannelBankWidth),
         localMemSizePerCU_(localMemSizePerCU),
         localMemBanks_(localMemBanks),
-        sgprPerWavefront_(0),
-        vgprPerWavefront_(0) {}
+        ldsAlignment_(ldsAlignment) {}
 
   // @brief Returns the begin and end iterators for the suppported ISAs.
   static std::pair<const Isa*, const Isa*> supportedIsas();
 
-#if defined(USE_COMGR_LIBRARY)
-  // @brief Populate this Isa's available sgprs/vgprs per wavefront from comgr.
-  // Only called once per Isa.
-  void setAvailableSgprVgprCached() const;
-#endif
-
   // @brief Isa's target ID name. Used for LLVM COde Object Manager
   // compilations.
   const char* targetId_;
-
-  // @brief Isa's HSAIL name. Used for the Compiler Library for HSAIL
-  // compilation using the Shader Compiler Finalizer. Empty string if
-  // unsupported.
-  const char* hsailId_;
 
   bool runtimeRocSupported_;       //!< ROCm runtime is supported.
   bool runtimePalSupported_;       //!< PAL runtime is supported.
@@ -1661,11 +1672,8 @@ class Isa {
   uint32_t memChannelBankWidth_;   //!< Memory channel bank width.
   uint32_t localMemSizePerCU_;     //!< Local memory size per CU.
   uint32_t localMemBanks_;         //!< Number of banks of local memory.
-
-  mutable size_t sgprPerWavefront_;        //!< Number of sgpr per wavefront.
-  mutable size_t vgprPerWavefront_;        //!< Number of vgpr per wavefront.
-  mutable std::once_flag setSgprVgprFlag;  //!< Once flag for sgpr and vgpr retrieval.
-}; // class Isa
+  uint32_t ldsAlignment_;          //!< LDS alignment.
+};  // class Isa
 
 /*! \addtogroup Runtime
  *  @{
@@ -1675,9 +1683,6 @@ class Isa {
  */
 class Device : public RuntimeObject {
  protected:
-#if defined(WITH_COMPILER_LIB)
-  typedef aclCompiler Compiler;
-#endif
 
  public:
   // The structures below for MGPU launch match the device library format
@@ -1696,7 +1701,7 @@ class Device : public RuntimeObject {
     uint num_wg;
   };
 
-  //Attributes that could be retrived from hsa_amd_memory_pool_link_info_t.
+  // Attributes that could be retrived from hsa_amd_memory_pool_link_info_t.
   typedef enum LinkAttribute {
     kLinkLinkType = 0,
     kLinkHopCount,
@@ -1708,7 +1713,8 @@ class Device : public RuntimeObject {
     kNoAtomics = 0,
     kAtomics = 1,
     kKernArg = 2,
-    kUncachedAtomics = 4
+    kUncachedAtomics = 4,
+    kIoMemory = 8
   } MemorySegment;
 
   typedef enum CacheState {
@@ -1719,11 +1725,9 @@ class Device : public RuntimeObject {
   } CacheState;
 
   //<! Enum describing the access permissions of Virtual memory
-  enum class VmmAccess {
-    kNone           = 0x0,
-    kReadOnly       = 0x1,
-    kReadWrite      = 0x3
-  };
+  enum class VmmAccess { kNone = 0x0, kReadOnly = 0x1, kReadWrite = 0x3 };
+  //<! Enum describing the location of Virtual memory
+  enum class VmmLocationType { kNone = 0x0, kDevice = 0x1, kHost = 0x2 };
 
   typedef std::pair<LinkAttribute, int32_t /* value */> LinkAttrType;
 
@@ -1735,11 +1739,11 @@ class Device : public RuntimeObject {
   // Max Scratch size is based on ISA and thus per device.
   // Def value is as per GFX9 being the least among supported devices.
   size_t maxStackSize_ = kMaxStackSize9X;
-  static cl_int gpu_error_; //!< Store the GPU error cause during kernel launch
+  static cl_int gpu_error_;  //!< Store the GPU error cause during kernel launch
 
   typedef std::list<CommandQueue*> CommandQueues;
 
-  struct BlitProgram : public amd::HeapObject {
+  struct BlitProgram {
     Program* program_;  //!< GPU program object
     Context* context_;  //!< A dummy context
 
@@ -1753,16 +1757,11 @@ class Device : public RuntimeObject {
     );
   };
 
-#if defined(WITH_COMPILER_LIB)
-  virtual Compiler* compiler() const = 0;
-  virtual Compiler* binCompiler() const { return compiler(); }
-#endif
-
   Device();
   virtual ~Device();
 
   //! Initializes abstraction layer device object
-  bool create(const Isa &isa);
+  bool create(const Isa& isa);
 
   uint retain() {
     // Overwrite the RuntimeObject::retain().
@@ -1794,9 +1793,9 @@ class Device : public RuntimeObject {
   );
 
   static bool getDeviceIDs(cl_device_type deviceType,  //!< Device type
-                           uint32_t numEntries,         //!< Number of entries in the array
+                           uint32_t numEntries,        //!< Number of entries in the array
                            cl_device_id* devices,      //!< Array of the device ID(s)
-                           uint32_t* numDevices,        //!< Number of available devices
+                           uint32_t* numDevices,       //!< Number of available devices
                            bool offlineDevices         //!< Report offline devices
   );
 
@@ -1807,8 +1806,8 @@ class Device : public RuntimeObject {
     return (info().svmCapabilities_ &
             (CL_DEVICE_SVM_COARSE_GRAIN_BUFFER | CL_DEVICE_SVM_FINE_GRAIN_BUFFER |
              CL_DEVICE_SVM_FINE_GRAIN_SYSTEM)) != 0
-        ? true
-        : false;
+               ? true
+               : false;
   }
 
   //! check svm FGS support capability.
@@ -1839,10 +1838,13 @@ class Device : public RuntimeObject {
   virtual device::Memory* createView(
       amd::Memory& owner,           //!< Owner memory object
       const device::Memory& parent  //!< Parent device memory object for the view
-      ) const = 0;
+  ) const = 0;
 
   ///! Allocates a device signal object
   virtual device::Signal* createSignal() const = 0;
+
+  ///! Allocates an IPC-capable signal, or returns nullptr if unsupported
+  virtual device::Signal* createIpcSignal() const { return nullptr; }
 
   //! Return true if initialized external API interop, otherwise false
   virtual bool bindExternalDevice(
@@ -1866,7 +1868,31 @@ class Device : public RuntimeObject {
 
   //! Gets free memory on a GPU device
   virtual bool globalFreeMemory(size_t* freeMemory  //!< Free memory information on a GPU device
-                                ) const = 0;
+  ) const = 0;
+
+  /**
+   * @brief Read data from a file to device memory.
+   * @param[IN] handle: file descriptor of the file to read.
+   * @param[IN] devicePtr: VRAM buffer pointer.
+   * @param[IN] size: size of read.
+   * @param[IN] file_offset: offset into fd where data has to be read.
+   * @param[IN/OUT] size_copied: actual size read.
+   * @param[IN/OUT] status: additional status.
+   */
+  virtual bool amdFileRead(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
+                       uint64_t* size_copied, int32_t* status) = 0;
+
+  /**
+   * Write data from device memory to a file.
+   * @param[IN] handle: file descriptor of the file to write.
+   * @param[IN] devicePtr: VRAM buffer pointer.
+   * @param[IN] size: size of write.
+   * @param[IN] file_offset: offset into fd where data has to written.
+   * @param[IN/OUT] size_copied: actual size copied.
+   * @param[IN/OUT] status: additional status.
+   */
+  virtual bool amdFileWrite(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
+                       uint64_t* size_copied, int32_t* status) = 0;
 
   virtual bool importExtSemaphore(void** extSemaphore, const amd::Os::FileDesc& handle,
                                   amd::ExternalSemaphoreHandleType sem_handle_type) = 0;
@@ -1881,13 +1907,27 @@ class Device : public RuntimeObject {
    * @copydoc amd::Context::hostAlloc
    */
   virtual void* hostAlloc(size_t size, size_t alignment,
-                          MemorySegment mem_seg = kNoAtomics) const {
+                          MemorySegment mem_seg = kNoAtomics,
+                          const void* agentInfo = nullptr, bool allowAllAgentsAccess = true) const {
     ShouldNotCallThis();
     return NULL;
   }
 
-  virtual void* deviceLocalAlloc(size_t size, bool atomics = false,
-                                 bool pseudo_fine_grain = false, bool contiguous = false) const {
+  //! Flags for deviceLocalAlloc method
+  typedef union {
+    struct {
+      uint32_t atomics_ : 1;           //!< True if atomics support is required
+      uint32_t pseudo_fine_grain_ : 1; //!< True if pseudo fine grain memory is required
+      uint32_t contiguous_ : 1;        //!< True if contiguous memory allocation is required
+      uint32_t executable_ : 1;        //!< True if executable memory is required
+      uint32_t uncached_ : 1;          //!< True if uncached memory is required
+      uint32_t reserved_ : 27;         //!< Reserved for future use
+    };
+    uint32_t data_;
+  } AllocationFlags;
+
+  virtual void* deviceLocalAlloc(
+      size_t size, const AllocationFlags& flags = AllocationFlags{}, bool allowAllAgentsAccess = true) const {
     ShouldNotCallThis();
     return NULL;
   }
@@ -1944,8 +1984,8 @@ class Device : public RuntimeObject {
    * @param parent base_obj or sub_obj
    * @param ForceAlloc force_alloc
    */
-  amd::Memory* CreateVirtualBuffer(Context& device_context, void* vptr, size_t size,
-                                           int deviceId, bool parent, bool kForceAlloc = false);
+  amd::Memory* CreateVirtualBuffer(Context& device_context, void* vptr, size_t size, int deviceId,
+                                   int locationType, bool parent, bool kForceAlloc = false);
 
   /**
    * Deletes Virtual Buffer and creates memob
@@ -1971,7 +2011,8 @@ class Device : public RuntimeObject {
    * @param access_flags Access permissions
    * @param count Number of access permissions
    */
-  virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags) = 0;
+  virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
+                            VmmLocationType = VmmLocationType::kDevice) = 0;
 
   /**
    * Get Access permisions for a virtual memory object.
@@ -2045,8 +2086,7 @@ class Device : public RuntimeObject {
   virtual bool UpdateScratchLimitCurrent(size_t limit) const { return true; }
 
   //! Validate kernel
-  virtual bool validateKernel(const amd::Kernel& kernel,
-                              const device::VirtualDevice* vdev,
+  virtual bool validateKernel(const amd::Kernel& kernel, const device::VirtualDevice* vdev,
                               bool coop_groups = false) {
     return true;
   };
@@ -2057,18 +2097,38 @@ class Device : public RuntimeObject {
   };
 
   // Returns the status of HW event, associated with amd::Event
-  virtual bool IsHwEventReady(
-      const amd::Event& event,      //!< AMD event for HW status validation
-      bool wait = false,            //!< If true then forces the event completion
-      amd::SyncPolicy policy = amd::SyncPolicy::Auto
-      ) const {
+  virtual bool IsHwEventReady(const amd::Event& event,  //!< AMD event for HW status validation
+                              bool wait = false,  //!< If true then forces the event completion
+                              amd::SyncPolicy policy = amd::SyncPolicy::Auto) const {
     return false;
   };
 
   virtual void getHwEventTime(const amd::Event& event, uint64_t* start, uint64_t* end) const {};
 
-  virtual const uint32_t getPreferredNumaNode() const { return 0; }
+  virtual uint32_t getPreferredNumaNode() const {
+    return static_cast<uint32_t>(-1); //!< PAL doesn't support it
+  }
+
   virtual void ReleaseGlobalSignal(void* signal) const {}
+  virtual void RetainGlobalSignal(void* signal) const {}
+
+  virtual bool CreateHwEvents(int count, std::vector<void*>& hw_events) const { return false; }
+  virtual void DestroyHwEvent(void* hw_event) const {}
+
+  struct HwEventPatch {
+    static constexpr int kCompletionSignal = -1;
+    static constexpr int kExtDispatchDepSignal = -2;
+
+    uint8_t* packet;      // original dispatchPackets pointer (for UpdateAQLPacket matching)
+    uint8_t* flat_packet; // pointer into flatPacketData (patched directly at launch)
+    int hw_event_index;
+    int dep_slot;  // kCompletionSignal, kExtDispatchDepSignal, or 0-4 for barrier dep_signal[slot]
+  };
+
+  virtual uint8_t* CreateBarrierPacket() const { return nullptr; }
+  virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
+                                   const std::vector<void*>& hw_events) const {}
+
   virtual const bool isFineGrainSupported() const {
     return (info().svmCapabilities_ & CL_DEVICE_SVM_ATOMICS) != 0 ? true : false;
   }
@@ -2084,17 +2144,17 @@ class Device : public RuntimeObject {
   bool isOnline() const { return online_; }
 
   //! Returns device isa.
-  const Isa &isa() const {
+  const Isa& isa() const {
     assert(isa_);
     return *isa_;
   }
 
   //! Return a non-zero uint64_t value that uniquely identifies the device.
   //! This can be used when a scalar value handle to the device is require.
-  static uint64_t toHandle(const Device *device) {
+  static uint64_t toHandle(const Device* device) {
     static_assert(sizeof(device) <= sizeof(uint64_t), "Handle size does not match pointer size");
     assert((reinterpret_cast<uint64_t>(static_cast<const Device*>(nullptr)) == 0) &&
-                  "nullptr value is not 0");
+           "nullptr value is not 0");
     return device ? reinterpret_cast<uint64_t>(device) : 0;
   }
 
@@ -2104,7 +2164,7 @@ class Device : public RuntimeObject {
   static const Device* fromHhandle(uint64_t handle) {
     static_assert(sizeof(handle) <= sizeof(uint64_t), "Handle size does not match pointer size");
     assert((reinterpret_cast<uint64_t>(static_cast<const Device*>(nullptr)) == 0) &&
-                  "nullptr value is not 0");
+           "nullptr value is not 0");
     return handle ? reinterpret_cast<const Device*>(handle) : nullptr;
   }
 
@@ -2141,9 +2201,6 @@ class Device : public RuntimeObject {
   //! Checks if OCL runtime can use code object manager for compilation
   bool ValidateComgr();
 
-  //! Checks if OCL runtime can use hsail for compilation
-  bool ValidateHsail();
-
   bool IpcCreate(void* dev_ptr, size_t* mem_size, char* handle, size_t* mem_offset) const;
 
   bool IpcAttach(const char* handle, size_t mem_size, size_t mem_offset, unsigned int flags,
@@ -2158,7 +2215,7 @@ class Device : public RuntimeObject {
   amd::Context& GlbCtx() const { return *glb_ctx_; }
 
   //! Lock protect P2P staging operations
-  Monitor& P2PStageOps() const { return p2p_stage_ops_; }
+  std::recursive_mutex& P2PStageOps() const { return p2p_stage_ops_; }
 
   //! Staging buffer for P2P transfer
   Memory* P2PStage() const { return p2p_stage_; }
@@ -2188,8 +2245,7 @@ class Device : public RuntimeObject {
   uint32_t index() const { return index_; }
 
   //! Returns value for LinkAttribute for lost of vectors
-  virtual bool findLinkInfo(const amd::Device& other_device,
-                            std::vector<LinkAttrType>* link_attr) {
+  virtual bool findLinkInfo(const amd::Device& other_device, std::vector<LinkAttrType>* link_attr) {
     return false;
   }
 
@@ -2198,14 +2254,14 @@ class Device : public RuntimeObject {
 
   //! Adds the queue to the set of active command queues
   void addToActiveQueues(amd::CommandQueue* commandQueue) {
-     amd::ScopedLock lock(activeQueuesLock_);
-     activeQueues.insert(commandQueue);
+    amd::ScopedLock lock(activeQueuesLock_);
+    activeQueues[commandQueue] = true;
   }
 
   //! Removes the queue from the set of active command queues
   void removeFromActiveQueues(amd::CommandQueue* commandQueue) {
     amd::ScopedLock lock(activeQueuesLock_);
-    activeQueues.erase(commandQueue);
+    activeQueues[commandQueue] = false;
   }
 
   // Notifies device about context destroy
@@ -2222,6 +2278,39 @@ class Device : public RuntimeObject {
 
   //! Returns stack size set for the device
   size_t MaxStackSize() const { return maxStackSize_; }
+  //! Return group memory carveout
+  uint8_t GetGroupMemCarveout() const { return group_mem_carveout_hint_; }
+
+  //! Sets the group memory carveout percentage hint for the device
+  void UpdateGroupMemCarveout(uint8_t percent) { group_mem_carveout_hint_ = percent; }
+
+  uint8_t GetGroupMemCarveout(amd::FuncCache cacheConfig) const {
+    uint8_t totalSharedBanks = 0;
+    uint8_t LDSBanks = 0;
+    if (settings().groupMemCarveout_) {
+      totalSharedBanks = settings_->groupMemPref_.totalSharedBanks;
+      switch (cacheConfig) {
+        case kPreferLDS:
+          LDSBanks = settings_->groupMemPref_.preferLDSBanks;
+          break;
+        case kPreferCache:
+          LDSBanks = settings_->groupMemPref_.preferCacheLDSBanks;
+          break;
+        case kPreferEqual:
+          LDSBanks = settings_->groupMemPref_.preferEqualLDSBanks;
+          break;
+        case kPreferNone:
+        default:
+          break;
+      }
+    }
+    return (totalSharedBanks != 0) ? (static_cast<double>(LDSBanks) / totalSharedBanks) * 100 : 0;
+  }
+
+  //! Sets group memory carveout percentage hint for the device for respective cacheConfig
+  void UpdateGroupMemCarveout(amd::FuncCache cacheConfig) {
+    group_mem_carveout_hint_ = GetGroupMemCarveout(cacheConfig);
+  }
 
 #if defined(__clang__)
 #if __has_feature(address_sanitizer)
@@ -2240,42 +2329,54 @@ class Device : public RuntimeObject {
   // Removes a memory object from hostcall tracking.
   void RemoveHostcallMemory(amd::Memory* memory);
 
+  //! Clears hostcall memory tracking list without releasing.
+  void ClearHostcallMemories();
+
   //! Enable the specified extension
   char* getExtensionString();
 
-  device::Info info_;             //!< Device info structure
-  device::Settings* settings_;    //!< Device settings
+  //! Adds object<->vaddr mapping for this device
+  void AddDevMemObj(const void* k, amd::Memory* memObj);
+
+  //! Removes object<->vaddr mapping for this device
+  void RemoveDevMemObj(const void* k);
+
+  //! Finds a memory object by device virtual address for this device
+  amd::Memory* FindDevMemObj(const void* k, size_t* offset = nullptr) const;
+
+  device::Info info_;           //!< Device info structure
+  device::Settings* settings_;  //!< Device settings
   union {
     struct {
-      uint32_t online_: 1;        //!< The device in online
-      uint32_t activeWait_: 1;    //!< If true device requires active wait
+      uint32_t online_ : 1;      //!< The device in online
+      uint32_t activeWait_ : 1;  //!< If true device requires active wait
     };
-    uint32_t  state_;             //!< State bit mask
+    uint32_t state_;  //!< State bit mask
   };
 
   BlitProgram* blitProgram_;      //!< Blit program info
   static AppProfile appProfile_;  //!< application profile
   amd::Context* context_;         //!< Context
 
-  static amd::Context* glb_ctx_;      //!< Global context with all devices
-  static amd::Monitor p2p_stage_ops_; //!< Lock to serialise cache for the P2P resources
-  static Memory* p2p_stage_;          //!< Staging resources
+  static amd::Context* glb_ctx_;              //!< Global context with all devices
+  static std::recursive_mutex p2p_stage_ops_;  //!< Lock to serialise cache for the P2P resources
+  static Memory* p2p_stage_;                  //!< Staging resources
   std::vector<Device*> enabled_p2p_devices_;  //!< List of user enabled P2P devices for this device
 
   std::once_flag heap_initialized_;  //!< Heap buffer initialization flag
   std::once_flag heap_allocated_;    //!< Heap buffer allocation flag
 
-  device::Memory* heap_buffer_;     //!< Preallocated heap buffer for memory allocations on device
+  device::Memory* heap_buffer_;  //!< Preallocated heap buffer for memory allocations on device
 
-  amd::Memory* arena_mem_obj_;      //!< Arena memory object
-  uint64_t stack_size_{1024};       //!< Device stack size
-  device::Memory* initial_heap_buffer_;   //!< Initial heap buffer
-  uint64_t initial_heap_size_{HIP_INITIAL_DM_SIZE};  //!< Initial device heap size
-  amd::Monitor activeQueuesLock_ {}; //!< Guards access to the activeQueues set
-  std::unordered_set<amd::CommandQueue*> activeQueues; //!< The set of active queues
-
+  amd::Memory* arena_mem_obj_;                          //!< Arena memory object
+  uint64_t stack_size_{1024};                           //!< Device stack size
+  device::Memory* initial_heap_buffer_;                 //!< Initial heap buffer
+  uint64_t initial_heap_size_{HIP_INITIAL_DM_SIZE};     //!< Initial device heap size
+  amd::Monitor activeQueuesLock_{};                     //!< Guards access to the activeQueues set
+  std::unordered_map<amd::CommandQueue*, bool> activeQueues;  //!< The set of active queues
+  uint8_t group_mem_carveout_hint_; //!< LDS carveout
  private:
-  const Isa *isa_;                //!< Device isa
+  const Isa* isa_;  //!< Device isa
   bool IsTypeMatching(cl_device_type type, bool offlineDevices);
 
 #if defined(WITH_HSA_DEVICE)
@@ -2283,10 +2384,13 @@ class Device : public RuntimeObject {
 #endif
 
   static std::vector<Device*>* devices_;  //!< All known devices
-  static amd::Monitor lockP2P_;
-  Monitor* vaCacheAccess_;                            //!< Lock to serialize VA caching access
+  static std::recursive_mutex lockP2P_;
+  std::recursive_mutex* vaCacheAccess_;               //!< Lock to serialize VA caching access
   std::map<uintptr_t, device::Memory*>* vaCacheMap_;  //!< VA cache map
   uint32_t index_;                                    //!< Unique device index
+
+  std::map<uintptr_t, amd::Memory*>
+      devMemObjMap_;  //!< Per-device VA map for interleaved device VAs (Windows)
   static constexpr int kDefaultNumaNode = -1;         //! Default NUMA node value for SVM operations
   // Tracks all amd::Memory objects allocated via hostcall for this device.
   std::vector<amd::Memory*> hostcall_allocated_memories_;

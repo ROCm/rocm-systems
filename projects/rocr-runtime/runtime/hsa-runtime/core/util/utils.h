@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -49,13 +49,23 @@
 #include "stddef.h"
 #include "stdlib.h"
 #include "stdarg.h"
+#if defined(__linux__)
 #include "unistd.h"
+#endif
 #include <assert.h>
 #include <iostream>
 #include <string>
 #include <algorithm>
 #include <sstream>
 #include <thread>
+#include <locale>
+
+#if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__))
+#include <x86intrin.h>
+#endif
+#if defined(_MSC_VER) && (defined(_M_IX86) || defined(_M_X64))
+#include "intrin.h"
+#endif
 
 namespace rocr {
 extern FILE* log_file;
@@ -64,18 +74,21 @@ extern uint8_t log_flags[8];
 typedef unsigned int uint;
 typedef uint64_t uint64;
 
+// 2MB huge page size
+#define GPU_HUGE_PAGE_SIZE (2 << 20)
+
+// 4KB page size
+#define DEFAULT_GPU_PAGE_SIZE (1 << 12)
+
+void log_printf(const char* file, int line, const char* format, ...);
+
 #if defined(__GNUC__)
-#if defined(__i386__) || defined(__x86_64__)
-#include <x86intrin.h>
-#endif
 
 #define __forceinline __inline__ __attribute__((always_inline))
 #define __declspec(x) __attribute__((x))
 #undef __stdcall
 #define __stdcall  // __attribute__((__stdcall__))
 #define __ALIGNED__(x) __attribute__((aligned(x)))
-
-void log_printf(const char* file, int line, const char* format, ...);
 
 static __forceinline void* _aligned_malloc(size_t size, size_t alignment) {
 #ifdef _ISOC11_SOURCE
@@ -88,7 +101,6 @@ static __forceinline void* _aligned_malloc(size_t size, size_t alignment) {
 }
 static __forceinline void _aligned_free(void* ptr) { return free(ptr); }
 #elif defined(_MSC_VER) && (defined(_M_IX86) || defined(_M_X64))
-#include "intrin.h"
 #define __ALIGNED__(x) __declspec(align(x))
 #if (_MSC_VER < 1800)  // < VS 2013
 static __forceinline unsigned long long int strtoull(const char* str,
@@ -114,6 +126,7 @@ static __forceinline unsigned long long int strtoull(const char* str,
   do {                                                                                             \
   } while (false)
 #else
+#if defined(__linux__)
 #define debug_warning_n(exp, limit)                                                                \
   do {                                                                                             \
     static std::atomic<int> count(0);                                                              \
@@ -123,6 +136,18 @@ static __forceinline unsigned long long int strtoull(const char* str,
       count++;                                                                                     \
     }                                                                                              \
   } while (false)
+#else
+#define debug_warning_n(exp, limit)                                                                \
+  do {                                                                                             \
+    static std::atomic<int> count(0);                                                              \
+    if (!(exp) && (limit == 0 || count < limit)) {                                                 \
+      fprintf(stderr, "Warning: " STRING(exp) " in %s, " __FILE__ ":" STRING(__LINE__) "\n",       \
+              __FUNCSIG__);                                                                        \
+      count++;                                                                                     \
+    }                                                                                              \
+  } while (false)
+
+#endif
 #endif
 #define debug_warning(exp) debug_warning_n((exp), 0)
 
@@ -151,6 +176,16 @@ static __forceinline unsigned long long int strtoull(const char* str,
       rocr::log_printf(__FILENAME__, __LINE__, format, ##__VA_ARGS__);                             \
   } while (false);
 
+#define LogSignalDuration(flag, signal, msg)                                                       \
+  do {                                                                                             \
+    if (hsa_flag_isset64(log_flags, flag)) {                                                       \
+      amd_signal_t* amd_signal = reinterpret_cast<amd_signal_t*>(signal.handle);                   \
+      rocr::log_printf(__FILENAME__, __LINE__,                                                     \
+        "%s Signal = (0x%lx), ticks start/end = %lu / %lu, Ticks elapsed = %lu", msg, signal,      \
+        amd_signal->start_ts, amd_signal->end_ts, amd_signal->end_ts - amd_signal->start_ts);      \
+    }                                                                                              \
+  } while (false);
+
 // A macro to remove unused variable warnings
 #define UNUSED(x) (void)(x)
 
@@ -169,7 +204,7 @@ class ScopeGuard {
 
   ScopeGuard(ScopeGuard& rhs) { *this = rhs; }
 
-  __forceinline ~ScopeGuard() {
+  __forceinline ~ScopeGuard() noexcept(false) {
     if (!dismiss_) release_();
   }
   __forceinline ScopeGuard& operator=(ScopeGuard& rhs) {
@@ -359,10 +394,15 @@ inline void FlushCpuCache(const void* base, size_t offset, size_t len) {
   static long cacheline_size = 0;
 
   if (!cacheline_size) {
-#ifdef _SC_LEVEL1_DCACHE_LINESIZE
-		long sz = sysconf(_SC_LEVEL1_DCACHE_LINESIZE);
+    long sz = 64;
+#if defined(__linux__)
+  #ifdef _SC_LEVEL1_DCACHE_LINESIZE
+		sz = sysconf(_SC_LEVEL1_DCACHE_LINESIZE);
+  #else
+		sz = 0;
+#endif
 #else
-		long sz = 0;
+    //@todo abstract GetLogicalProcessorInformation call
 #endif
     if (sz <= 0) return;
     cacheline_size = sz;
@@ -411,6 +451,17 @@ inline uint32_t PtrHigh64Shift40(const void* p) {
   return (uint32_t)((ptr & 0xFFFFFF0000000000ULL) >> 40);
 }
 
+static inline uint8_t Ptr48High8(const void* p) {
+  uintptr_t ptr = reinterpret_cast<uintptr_t>(p);
+  return (uint8_t)((ptr & 0xFF0000000000ULL) >> 40);
+}
+
+static inline uint32_t Ptr48Low32(const void* p) {
+  uintptr_t ptr = reinterpret_cast<uintptr_t>(p);
+  assert((ptr & 0xFFFFFFFFFF00ULL) == ptr);
+  return (uint32_t)((ptr & 0xFFFFFFFFFFULL) >> 8);
+}
+
 inline uint32_t PtrLow32(const void* p) {
   return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(p));
 }
@@ -423,15 +474,20 @@ inline uint32_t PtrHigh32(const void* p) {
   return ptr;
 }
 
+inline uint32_t HighPart(uint64_t value) { return (value & 0xFFFFFFFF00000000) >> 32; }
+
+inline uint32_t LowPart(uint64_t value) { return (value & 0x00000000FFFFFFFF); }
+
 /// @brief: Concatenates two numbers of type InType to a number of type OutType
 /// @param: hi(Input), To be placed in the upper bits of the output
 /// @param: lo(Input), To be placed in the lower bits of the output
 /// @return: OutType, Concatenation of hi and lo
 template <typename OutType, typename InType>
-typename std::enable_if<std::is_integral<OutType>::value && std::is_integral<InType>::value &&
-                            sizeof(OutType) >= 2 * sizeof(InType),
-                        OutType>::type
-Concat(InType hi, InType lo) {
+constexpr
+    typename std::enable_if<std::is_integral<OutType>::value && std::is_integral<InType>::value &&
+                                sizeof(OutType) >= 2 * sizeof(InType),
+                            OutType>::type
+    Concat(InType hi, InType lo) {
   OutType res = ((static_cast<OutType>(hi) << sizeof(InType) * 8) | static_cast<OutType>(lo));
   return res;
 }

@@ -35,14 +35,15 @@ def validate_all_agents_are_sampled(
     input_kernel_trace_csv: pd.DataFrame,
     input_agent_info_csv: pd.DataFrame,
 ):
-    transpose_kernel_source_line_start = 137
-    transpose_kernel_source_line_end = 145
+    transpose_kernel_source_line_start = 181
+    transpose_kernel_source_line_end = 189
 
-    mi2xx_mi3xx_agents_df = input_agent_info_csv[
+    gfx9_gfx12_agents_df = input_agent_info_csv[
         input_agent_info_csv["Name"].apply(
             lambda name: name == "gfx90a"
             or name.startswith("gfx94")
             or name.startswith("gfx95")
+            or name.startswith("gfx12")
         )
     ]
 
@@ -65,7 +66,7 @@ def validate_all_agents_are_sampled(
     sampled_agents = samples_df["Agent_Id"].unique()
     sampled_agents_num = len(sampled_agents)
     # all agents must be sampled
-    assert sampled_agents_num == len(mi2xx_mi3xx_agents_df)
+    assert sampled_agents_num == len(gfx9_gfx12_agents_df)
 
     # separate samples per agents
     grouped_samples_per_agent = samples_df.groupby("Agent_Id")
@@ -77,7 +78,7 @@ def validate_all_agents_are_sampled(
     # extract decoded samples that are mapped to the transpose.cpp file
     transpose_samples_df = samples_df[
         samples_df["Instruction_Comment"].apply(
-            lambda comment: "transpose-all-agents.cpp" in comment
+            lambda comment: "transpose.cpp" in comment
         )
     ].copy()
     # determine the line number for each sample

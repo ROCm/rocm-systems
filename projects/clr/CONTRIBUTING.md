@@ -5,7 +5,8 @@ CLR is a part of HIP runtime for the AMD platform.Please follow these details to
 
 ## Issue Discussion ##
 
-Please use the [GitHub Issue](https://github.com/ROCm/clr/issues) tab to notify us of issues.
+Please use the [rocm-systems Issues](https://github.com/ROCm/rocm-systems/issues) tab to notify us of issues. In the `rocm-systems` repo, issues
+related to CLR should be labeled accordingly to ensure they receive the proper attention.
 
 * Use your best judgement for issue creation. If your issue is already listed, upvote the issue and
   comment or post to provide additional details, such as how you reproduced this issue.

@@ -5,14 +5,14 @@ subtrees:
 - caption: Install
   entries:
   - file: install/build.rst
-    title: ROCmInfo installation 
+    title: Build rocminfo
 
 - caption: How to
   entries:
   - file: how-to/use-rocminfo.rst
-    title: Use ROCmInfo
+    title: Use rocminfo
   - file: how-to/use-rocm-agent-enumerator.rst
-    title: Use ROCm agent enumerator 
+    title: Use ROCm agent enumerator
 
 - caption: About
   entries:

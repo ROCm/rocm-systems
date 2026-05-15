@@ -8,9 +8,7 @@ Standalone GUI analysis
 
 ROCm Compute Profiler's standalone analysis GUI is a lightweight web page that you can
 generate straight from the command line. The standalone analysis GUI is an
-alternative to the CLI if you want to explore profiling results visually, but
-without the additional setup requirements or server-side overhead of ROCm Compute Profiler's
-detailed :doc:`Grafana interface <grafana-gui>` option. This analysis
+alternative to the CLI if you want to explore profiling results visually. This analysis
 option is implemented as a simple `Flask <https://flask.palletsprojects.com>`_
 application that lets you view results from your preferred web browser.
 
@@ -27,10 +25,12 @@ application that lets you view results from your preferred web browser.
    See the :doc:`/reference/faq` for more details on SSH tunneling.
 
 Launch the standalone GUI analyzer
-----------------------------------
+==================================
 
 To launch the ROCm Compute Profiler GUI analyzer, include the ``--gui`` flag with your
-desired analysis command. For example:
+desired analysis command.
+
+For example:
 
 .. code-block:: shell-session
 
@@ -76,19 +76,18 @@ application's profiling data:
 #. Memory Chart Analysis
 #. Empirical Roofline Analysis
 
-   Use ``--roofline-data-type`` option to specify which data type(s) you would like displayed on the roofline PDFs in the standalone analysis GUI.
-   Data types can be stacked- for example, "--roofline-data-type FP32 FP64 I32" would display one PDF with FP32 and FP64 stacked, and one PDF with INT32.
+   Use ``--roofline-data-type`` option to specify which data type(s) you would like displayed on the roofline HTMLs in the standalone analysis GUI.
+   Data types can be stacked- for example, "--roofline-data-type FP32 FP64 I32" would display one HTML with FP32 and FP64 stacked, and one HTML with INT32.
    Default roofline data type plotted is FP32.
 
 #. Top Stats (Top Kernel Statistics)
 #. System Info
 #. System Speed-of-Light
+#. Roofline AI Data Metrics
 
 To dive deeper, use the dropdown menus at the top of the screen to isolate
 particular kernels or dispatches. You should see the web page update with
 metrics specific to your selected filters.
 
 Once a filter is applied, you'll see several additional sections become
-available with detailed metrics specific to that area of AMD hardware. These
-detailed sections mirror the data displayed in ROCm Compute Profiler's
-:doc:`Grafana interface <grafana-gui>`.
+available with detailed metrics specific to that area of AMD hardware.

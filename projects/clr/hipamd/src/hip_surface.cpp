@@ -1,22 +1,8 @@
-/* Copyright (c) 2015 - 2022 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip/hip_runtime.h>
 
@@ -62,7 +48,7 @@ hipError_t ihipCreateSurfaceObject(hipSurfaceObject_t* pSurfObject,
   }
 
   if (pResDesc->res.array.array->flags != hipArrayDefault &&
-     (pResDesc->res.array.array->flags & hipArraySurfaceLoadStore) == 0) {
+      (pResDesc->res.array.array->flags & hipArraySurfaceLoadStore) == 0) {
     return hipErrorInvalidValue;
   }
 
@@ -78,8 +64,8 @@ hipError_t ihipCreateSurfaceObject(hipSurfaceObject_t* pSurfObject,
   image = as_amd(memObj)->asImage();
 
   void* surfObjectBuffer = nullptr;
-  hipError_t err = ihipMalloc(&surfObjectBuffer, sizeof(__hip_surface),
-                              CL_MEM_SVM_FINE_GRAIN_BUFFER);
+  hipError_t err =
+      ihipMalloc(&surfObjectBuffer, sizeof(__hip_surface), CL_MEM_SVM_FINE_GRAIN_BUFFER);
   if (surfObjectBuffer == nullptr || err != hipSuccess) {
     return hipErrorOutOfMemory;
   }
@@ -112,4 +98,4 @@ hipError_t hipDestroySurfaceObject(hipSurfaceObject_t surfaceObject) {
 
   HIP_RETURN(ihipDestroySurfaceObject(surfaceObject));
 }
-} //namespace hip
+}  // namespace hip

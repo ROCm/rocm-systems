@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 cmake_minimum_required(VERSION 3.16.8)
 project(rocm-opencl)
 
@@ -16,11 +20,23 @@ endif()
 set(CPACK_DEB_COMPONENT_INSTALL ON)
 set(CPACK_RPM_COMPONENT_INSTALL ON)
 
+install(
+  FILES ${CMAKE_BINARY_DIR}/opencl/packages/opencl/${OPENCL_AMD_ICD_FILE}
+  DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/OpenCL/vendors
+  COMPONENT binary
+)
+
+install(
+  FILES ${CMAKE_BINARY_DIR}/opencl/packages/opencl/10-rocm-opencl.conf
+  DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/ld.so.conf.d
+  COMPONENT binary
+)
+
 install(TARGETS clinfo DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT binary)
-install(TARGETS amdocl DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary)
-install(TARGETS amdocl DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan)
-install(FILES ${opencl_SOURCE_DIR}/LICENSE.txt DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT binary)
-install(FILES ${opencl_SOURCE_DIR}/LICENSE.txt DESTINATION ${CMAKE_INSTALL_DOCDIR}-asan COMPONENT asan)
+install(TARGETS amdocl DESTINATION ${CMAKE_INSTALL_LIBDIR}/${AMDOCL_INSTALL_LIBDIR} COMPONENT binary)
+install(TARGETS amdocl DESTINATION ${CMAKE_INSTALL_LIBDIR}/${AMDOCL_INSTALL_LIBDIR} COMPONENT asan)
+install(FILES ${opencl_SOURCE_DIR}/LICENSE.md DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT binary)
+install(FILES ${opencl_SOURCE_DIR}/LICENSE.md DESTINATION ${CMAKE_INSTALL_DOCDIR}-asan COMPONENT asan)
 
 install(DIRECTORY ${opencl_SOURCE_DIR}/khronos/headers/opencl2.2/CL
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT dev

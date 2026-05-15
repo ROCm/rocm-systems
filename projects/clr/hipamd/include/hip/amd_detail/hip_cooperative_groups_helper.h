@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2015 - 2025 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
  *  @file  amd_detail/hip_cooperative_groups_helper.h
@@ -33,7 +17,7 @@ THE SOFTWARE.
 
 #if __cplusplus
 #if !defined(__HIPCC_RTC__)
-#include <hip/amd_detail/amd_hip_runtime.h> // threadId, blockId
+#include <hip/amd_detail/amd_hip_runtime.h>  // threadId, blockId
 #include <hip/amd_detail/amd_device_functions.h>
 #endif
 #if !defined(__align__)
@@ -56,26 +40,26 @@ using lane_mask = unsigned long long int;
 namespace cooperative_groups {
 
 /* Global scope */
-template <unsigned int size>
-using is_power_of_2 = __hip_internal::integral_constant<bool, (size & (size - 1)) == 0>;
+template <unsigned int size> using is_power_of_2 =
+    __hip_internal::integral_constant<bool, (size & (size - 1)) == 0>;
 
-template <unsigned int size>
-using is_valid_wavefront = __hip_internal::integral_constant<bool, size <= 64>;
+template <unsigned int size> using is_valid_wavefront =
+    __hip_internal::integral_constant<bool, size <= 64>;
 
-template <unsigned int size>
-using is_valid_tile_size =
-    __hip_internal::integral_constant<bool, is_power_of_2<size>::value && is_valid_wavefront<size>::value>;
+template <unsigned int size> using is_valid_tile_size =
+    __hip_internal::integral_constant<bool, is_power_of_2<size>::value &&
+                                                is_valid_wavefront<size>::value>;
 
-template <typename T>
-using is_valid_type =
-    __hip_internal::integral_constant<bool, __hip_internal::is_integral<T>::value || __hip_internal::is_floating_point<T>::value>;
+template <typename T> using is_valid_type =
+    __hip_internal::integral_constant<bool, __hip_internal::is_integral<T>::value ||
+                                                __hip_internal::is_floating_point<T>::value>;
 
 namespace internal {
 
 /**
-* @brief Enums representing different cooperative group types
-* @note  This enum is only applicable on Linux.
-*
+ * @brief Enums representing different cooperative group types
+ * @note  This enum is only applicable on Linux.
+ *
  */
 typedef enum {
   cg_invalid,
@@ -110,8 +94,8 @@ namespace helper {
  *           | | | |  | | | |
  * output:    1   1    0   0
  */
-__CG_STATIC_QUALIFIER__ unsigned long long adjust_mask(
-    unsigned long long base_mask, unsigned long long input_mask) {
+__CG_STATIC_QUALIFIER__ unsigned long long adjust_mask(unsigned long long base_mask,
+                                                       unsigned long long input_mask) {
   unsigned long long out = 0;
   for (unsigned int i = 0, index = 0; i < warpSize; i++) {
     auto lane_active = base_mask & (1ull << i);
@@ -133,15 +117,20 @@ __CG_STATIC_QUALIFIER__ unsigned long long adjust_mask(
 namespace multi_grid {
 
 __CG_STATIC_QUALIFIER__ __hip_uint32_t num_grids() {
-  return static_cast<__hip_uint32_t>(__ockl_multi_grid_num_grids()); }
+  return static_cast<__hip_uint32_t>(__ockl_multi_grid_num_grids());
+}
 
 __CG_STATIC_QUALIFIER__ __hip_uint32_t grid_rank() {
-  return static_cast<__hip_uint32_t>(__ockl_multi_grid_grid_rank()); }
+  return static_cast<__hip_uint32_t>(__ockl_multi_grid_grid_rank());
+}
 
-__CG_STATIC_QUALIFIER__ __hip_uint32_t num_threads() { return static_cast<__hip_uint32_t>(__ockl_multi_grid_size()); }
+__CG_STATIC_QUALIFIER__ __hip_uint32_t num_threads() {
+  return static_cast<__hip_uint32_t>(__ockl_multi_grid_size());
+}
 
 __CG_STATIC_QUALIFIER__ __hip_uint32_t thread_rank() {
-  return static_cast<__hip_uint32_t>(__ockl_multi_grid_thread_rank()); }
+  return static_cast<__hip_uint32_t>(__ockl_multi_grid_thread_rank());
+}
 
 __CG_STATIC_QUALIFIER__ bool is_valid() { return static_cast<bool>(__ockl_multi_grid_is_valid()); }
 
@@ -157,13 +146,13 @@ namespace grid {
 
 __CG_STATIC_QUALIFIER__ __hip_uint32_t num_threads() {
   return static_cast<__hip_uint32_t>((blockDim.z * gridDim.z) * (blockDim.y * gridDim.y) *
-                    (blockDim.x * gridDim.x));
+                                     (blockDim.x * gridDim.x));
 }
 
 __CG_STATIC_QUALIFIER__ __hip_uint32_t thread_rank() {
   // Compute global id of the workgroup to which the current thread belongs to
   __hip_uint32_t blkIdx = static_cast<__hip_uint32_t>((blockIdx.z * gridDim.y * gridDim.x) +
-                               (blockIdx.y * gridDim.x) + (blockIdx.x));
+                                                      (blockIdx.y * gridDim.x) + (blockIdx.x));
 
   // Compute total number of threads being passed to reach current workgroup
   // within grid
@@ -171,16 +160,31 @@ __CG_STATIC_QUALIFIER__ __hip_uint32_t thread_rank() {
       static_cast<__hip_uint32_t>(blkIdx * (blockDim.x * blockDim.y * blockDim.z));
 
   // Compute thread local rank within current workgroup
-  __hip_uint32_t local_thread_rank = static_cast<__hip_uint32_t>((threadIdx.z * blockDim.y * blockDim.x) +
-                                          (threadIdx.y * blockDim.x) + (threadIdx.x));
+  __hip_uint32_t local_thread_rank = static_cast<__hip_uint32_t>(
+      (threadIdx.z * blockDim.y * blockDim.x) + (threadIdx.y * blockDim.x) + (threadIdx.x));
 
   return (num_threads_till_current_workgroup + local_thread_rank);
+}
+
+__CG_STATIC_QUALIFIER__ __hip_uint32_t block_rank() {
+  return static_cast<__hip_uint32_t>((blockIdx.z * gridDim.y * gridDim.x) +
+                                     (blockIdx.y * gridDim.x) + (blockIdx.x));
 }
 
 __CG_STATIC_QUALIFIER__ bool is_valid() { return static_cast<bool>(__ockl_grid_is_valid()); }
 
 __CG_STATIC_QUALIFIER__ void sync() { __ockl_grid_sync(); }
 
+__CG_STATIC_QUALIFIER__ dim3 grid_dim() {
+  return (dim3(static_cast<__hip_uint32_t>(gridDim.x), static_cast<__hip_uint32_t>(gridDim.y),
+               static_cast<__hip_uint32_t>(gridDim.z)));
+}
+
+__CG_STATIC_QUALIFIER__ unsigned int barrier_arrive() { return __ockl_grid_bar_arrive(); }
+
+__CG_STATIC_QUALIFIER__ unsigned int barrier_signal() { return __ockl_grid_bar_arrive(); }
+
+__CG_STATIC_QUALIFIER__ void barrier_wait(unsigned int s) { __ockl_grid_bar_wait(s); }
 }  // namespace grid
 
 /**
@@ -206,40 +210,60 @@ __CG_STATIC_QUALIFIER__ __hip_uint32_t num_threads() {
 
 __CG_STATIC_QUALIFIER__ __hip_uint32_t thread_rank() {
   return (static_cast<__hip_uint32_t>((threadIdx.z * blockDim.y * blockDim.x) +
-                     (threadIdx.y * blockDim.x) + (threadIdx.x)));
+                                      (threadIdx.y * blockDim.x) + (threadIdx.x)));
 }
 
-__CG_STATIC_QUALIFIER__ bool is_valid() {
-  return true;
+__CG_STATIC_QUALIFIER__ __hip_uint32_t block_rank() {
+  return (static_cast<__hip_uint32_t>((blockIdx.z * gridDim.x * gridDim.y) +
+                                      (blockIdx.y * gridDim.x) + (blockIdx.x)));
 }
+
+__CG_STATIC_QUALIFIER__ bool is_valid() { return true; }
 
 __CG_STATIC_QUALIFIER__ void sync() { __syncthreads(); }
 
 __CG_STATIC_QUALIFIER__ dim3 block_dim() {
   return (dim3(static_cast<__hip_uint32_t>(blockDim.x), static_cast<__hip_uint32_t>(blockDim.y),
-          static_cast<__hip_uint32_t>(blockDim.z)));
+               static_cast<__hip_uint32_t>(blockDim.z)));
 }
 
+__CG_STATIC_QUALIFIER__ void barrier_arrive() {
+  __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
+#if __has_builtin(__builtin_amdgcn_s_barrier_signal) &&                                            \
+    __has_builtin(__builtin_amdgcn_s_barrier_wait)
+  __builtin_amdgcn_s_barrier_signal(-1);  // -1 is workgroup barriers
+#endif  // __builtin_amdgcn_s_barrier_signal && __builtin_amdgcn_s_barrier_wait
+}
+
+__CG_STATIC_QUALIFIER__ void barrier_wait() {
+#if __has_builtin(__builtin_amdgcn_s_barrier_signal) &&                                            \
+    __has_builtin(__builtin_amdgcn_s_barrier_wait)
+  __builtin_amdgcn_s_barrier_wait(-1);
+#else
+  __builtin_amdgcn_s_barrier();
+#endif  // __builtin_amdgcn_s_barrier_signal && __builtin_amdgcn_s_barrier_wait
+  __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
+}
 }  // namespace workgroup
 
 namespace tiled_group {
 
-// enforce ordering for memory intructions
-__CG_STATIC_QUALIFIER__ void sync() { __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, "agent"); }
+// enforce ordering for memory instructions
+__CG_STATIC_QUALIFIER__ void sync() { __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, "wavefront"); }
 
 }  // namespace tiled_group
 
 namespace coalesced_group {
 
-// enforce ordering for memory intructions
-__CG_STATIC_QUALIFIER__ void sync() { __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, "agent"); }
+// enforce ordering for memory instructions
+__CG_STATIC_QUALIFIER__ void sync() { __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, "wavefront"); }
 
 // Masked bit count
 //
 // For each thread, this function returns the number of active threads which
 // have i-th bit of x set and come before the current thread.
 __CG_STATIC_QUALIFIER__ unsigned int masked_bit_count(lane_mask x, unsigned int add = 0) {
-  unsigned int counter=0;
+  unsigned int counter = 0;
   if (static_cast<int>(warpSize) == 32) {
     counter = __builtin_amdgcn_mbcnt_lo(static_cast<unsigned int>(x), add);
   } else {
@@ -254,13 +278,121 @@ __CG_STATIC_QUALIFIER__ unsigned int masked_bit_count(lane_mask x, unsigned int 
 
 }  // namespace coalesced_group
 
+namespace cluster {
+__CG_STATIC_QUALIFIER__ void sync() {
+  __builtin_amdgcn_fence(__ATOMIC_RELEASE, "cluster");
+#if __has_builtin(__builtin_amdgcn_s_cluster_barrier)
+  // Generates a signal + wait combination for cluster barrier
+  __builtin_amdgcn_s_cluster_barrier();
+#else
+  __builtin_amdgcn_s_barrier();  // fallback to s_barrier if device does not support clusters
+#endif
+  __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "cluster");
+}
 
+__CG_STATIC_QUALIFIER__ void barrier_arrive() {
+  __builtin_amdgcn_fence(__ATOMIC_RELEASE, "cluster");
+#if __has_builtin(__builtin_amdgcn_s_barrier_signal) and                                           \
+    __has_builtin(__builtin_amdgcn_s_barrier_wait)
+  bool isfirst = __builtin_amdgcn_s_barrier_signal_isfirst(-1);  // -1 is workgroup barrier
+  __builtin_amdgcn_s_barrier_wait(-1);
+
+  if (isfirst) {
+    // Signal the cluster barrier, -3 means user cluster barrier
+    __builtin_amdgcn_s_barrier_signal(-3);
+  }
+#endif
+}
+
+__CG_STATIC_QUALIFIER__ void barrier_wait() {
+#if __has_builtin(__builtin_amdgcn_s_barrier_wait)
+  // wait on the cluster barrier, -3 means user cluster barrier
+  __builtin_amdgcn_s_barrier_wait(-3);
+#else
+  __builtin_amdgcn_s_barrier();  // Fall back to s_barrier
+#endif
+  __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "cluster");
+}
+
+__CG_STATIC_QUALIFIER__ dim3 block_index() {
+#if __has_builtin(__builtin_amdgcn_cluster_workgroup_id_x)
+  return dim3(__builtin_amdgcn_cluster_workgroup_id_x(), __builtin_amdgcn_cluster_workgroup_id_y(),
+              __builtin_amdgcn_cluster_workgroup_id_z());
+#else
+  return dim3{0, 0, 0};
+#endif
+}
+
+__CG_STATIC_QUALIFIER__ dim3 dim_blocks() {
+#if __has_builtin(__builtin_amdgcn_cluster_workgroup_max_id_x)
+  return dim3(__builtin_amdgcn_cluster_workgroup_max_id_x() + 1,
+              __builtin_amdgcn_cluster_workgroup_max_id_y() + 1,
+              __builtin_amdgcn_cluster_workgroup_max_id_z() + 1);
+#else
+  return dim3{1, 1, 1};
+#endif
+}
+
+__CG_STATIC_QUALIFIER__ unsigned int block_rank() {
+  auto idx = block_index();
+  auto dim = dim_blocks();
+  return idx.x + idx.y * dim.x + idx.z * dim.x * dim.y;
+}
+
+__CG_STATIC_QUALIFIER__ dim3 thread_index() {
+  const dim3 blockIndex = block_index();
+  return dim3(blockIndex.x * blockDim.x + threadIdx.x, blockIndex.y * blockDim.y + threadIdx.y,
+              blockIndex.z * blockDim.z + threadIdx.z);
+}
+
+__CG_STATIC_QUALIFIER__ unsigned int num_blocks() {
+#if __has_builtin(__builtin_amdgcn_cluster_workgroup_max_flat_id)
+  return __builtin_amdgcn_cluster_workgroup_max_flat_id() + 1;
+#else
+  return 1;
+#endif
+}
+
+__CG_STATIC_QUALIFIER__ dim3 dim_threads() {
+  const dim3 dimBlocks = dim_blocks();
+  const unsigned int x = dimBlocks.x * blockDim.x;
+  const unsigned int y = dimBlocks.y * blockDim.y;
+  const unsigned int z = dimBlocks.z * blockDim.z;
+  return dim3(x, y, z);
+}
+
+__CG_STATIC_QUALIFIER__ unsigned int num_threads() {
+  auto d = dim_threads();
+  return d.x * d.y * d.z;
+}
+
+__CG_STATIC_QUALIFIER__ unsigned int thread_rank() {
+  return block_rank() * (blockDim.x * blockDim.y * blockDim.z) +
+      ((threadIdx.z * blockDim.y * blockDim.x) + (threadIdx.y * blockDim.x) + threadIdx.x);
+}
+
+template <typename T> __CG_STATIC_QUALIFIER__ T* map_shared_rank(T* in, int rank) {
+#if __has_builtin(__builtin_amdgcn_map_shared_rank)
+  return (T*)(__builtin_amdgcn_map_shared_rank((void*)in, rank));
+#else
+  return nullptr;
+#endif
+}
+
+__CG_STATIC_QUALIFIER__ unsigned int query_shared_rank(const void* in) {
+#if __has_builtin(__builtin_amdgcn_query_shared_rank)
+  return static_cast<unsigned int>(
+      __builtin_amdgcn_query_shared_rank((__attribute__((address_space(11))) const void*)in));
+#else
+  return 0;
+#endif
+}
+}  // namespace cluster
 }  // namespace internal
-
 }  // namespace cooperative_groups
 /**
-*  @}
-*/
+ *  @}
+ */
 
 #endif  // __cplusplus
 #endif  // HIP_INCLUDE_HIP_AMD_DETAIL_HIP_COOPERATIVE_GROUPS_HELPER_H

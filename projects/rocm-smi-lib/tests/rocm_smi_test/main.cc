@@ -43,55 +43,55 @@
  *
  */
 
+#include <iostream>
+#include <memory>
 #include <string>
 #include <vector>
-#include <memory>
-#include <iostream>
 
-#include "rocm_smi/rocm_smi.h"
-#include "gtest/gtest.h"
-#include "rocm_smi_test/test_common.h"
-#include "rocm_smi_test/test_base.h"
+#include "functional/api_support_read.h"
+#include "functional/computepartition_read_write.h"
+#include "functional/err_cnt_read.h"
+#include "functional/evt_notif_read_write.h"
 #include "functional/fan_read.h"
 #include "functional/fan_read_write.h"
-#include "functional/temp_read.h"
-#include "functional/volt_read.h"
-#include "functional/volt_freq_curv_read.h"
-#include "functional/perf_level_read.h"
-#include "functional/overdrive_read.h"
 #include "functional/frequencies_read.h"
-#include "functional/sys_info_read.h"
-#include "functional/gpu_busy_read.h"
-#include "functional/power_read.h"
-#include "functional/overdrive_read_write.h"
-#include "functional/perf_level_read_write.h"
 #include "functional/frequencies_read_write.h"
-#include "functional/pci_read_write.h"
-#include "functional/power_read_write.h"
-#include "functional/power_cap_read_write.h"
-#include "functional/version_read.h"
-#include "functional/err_cnt_read.h"
-#include "functional/mem_util_read.h"
+#include "functional/gpu_busy_read.h"
 #include "functional/id_info_read.h"
-#include "functional/perf_cntr_read_write.h"
-#include "functional/process_info_read.h"
-#include "functional/xgmi_read_write.h"
-#include "functional/mem_page_info_read.h"
-#include "functional/api_support_read.h"
-#include "functional/measure_api_execution_time.h"
-#include "functional/mutual_exclusion.h"
-#include "functional/evt_notif_read_write.h"
 #include "functional/init_shutdown_refcount.h"
-#include "functional/computepartition_read_write.h"
-#include "rocm_smi_test/functional/hw_topology_read.h"
+#include "functional/measure_api_execution_time.h"
+#include "functional/mem_page_info_read.h"
+#include "functional/mem_util_read.h"
+#include "functional/memorypartition_read_write.h"
+#include "functional/mutual_exclusion.h"
+#include "functional/overdrive_read.h"
+#include "functional/overdrive_read_write.h"
+#include "functional/pci_read_write.h"
+#include "functional/perf_cntr_read_write.h"
+#include "functional/perf_level_read.h"
+#include "functional/perf_level_read_write.h"
+#include "functional/power_cap_read_write.h"
+#include "functional/power_read.h"
+#include "functional/power_read_write.h"
+#include "functional/process_info_read.h"
+#include "functional/sys_info_read.h"
+#include "functional/temp_read.h"
+#include "functional/version_read.h"
+#include "functional/volt_freq_curv_read.h"
+#include "functional/volt_read.h"
+#include "functional/xgmi_read_write.h"
+#include "gtest/gtest.h"
+#include "rocm_smi/rocm_smi.h"
 #include "rocm_smi_test/functional/gpu_metrics_read.h"
+#include "rocm_smi_test/functional/hw_topology_read.h"
 #include "rocm_smi_test/functional/metrics_counter_read.h"
 #include "rocm_smi_test/functional/perf_determinism.h"
-#include "functional/memorypartition_read_write.h"
+#include "rocm_smi_test/test_base.h"
+#include "rocm_smi_test/test_common.h"
 
-static RSMITstGlobals *sRSMIGlvalues = nullptr;
+static RSMITstGlobals* sRSMIGlvalues = nullptr;
 
-static void SetFlags(TestBase *test) {
+static void SetFlags(TestBase* test) {
   assert(sRSMIGlvalues != nullptr);
 
   test->set_verbosity(sRSMIGlvalues->verbosity);
@@ -100,7 +100,7 @@ static void SetFlags(TestBase *test) {
   test->set_num_iterations(sRSMIGlvalues->num_iterations);
 }
 
-static void RunCustomTestProlog(TestBase *test) {
+static void RunCustomTestProlog(TestBase* test) {
   SetFlags(test);
 
   if (sRSMIGlvalues->verbosity >= TestBase::VERBOSE_STANDARD) {
@@ -109,7 +109,7 @@ static void RunCustomTestProlog(TestBase *test) {
   test->SetUp();
   test->Run();
 }
-static void RunCustomTestEpilog(TestBase *tst) {
+static void RunCustomTestEpilog(TestBase* tst) {
   if (sRSMIGlvalues->verbosity >= TestBase::VERBOSE_STANDARD) {
     tst->DisplayResults();
   }
@@ -122,7 +122,7 @@ static void RunCustomTestEpilog(TestBase *tst) {
 //   * RunCustomTestProlog(test)  // Run() should contain minimal code
 //   * <insert call to actual test function within test case>
 //   * RunCustomTestEpilog(test)
-static void RunGenericTest(TestBase *test) {
+static void RunGenericTest(TestBase* test) {
   RunCustomTestProlog(test);
   RunCustomTestEpilog(test);
 }

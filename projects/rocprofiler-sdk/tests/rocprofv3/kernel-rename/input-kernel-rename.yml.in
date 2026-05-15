@@ -1,0 +1,20 @@
+jobs:
+  - mangled_kernels: True
+    sys_trace: False
+    hsa_trace: False
+    hsa_core_trace: True
+    hsa_amd_trace: False
+    hip_compiler_trace: False
+    hip_runtime_trace: True
+    kernel_trace: True
+    memory_copy_trace: True
+    marker_trace: False
+    output_directory: "@CMAKE_CURRENT_BINARY_DIR@/%argt%-trace-inp-yaml"
+    output_file: out
+    output_format: [pftrace, json, otf2]
+    log_level: env
+    kernel_rename: True
+    perfetto_shmem_size_hint: 128
+    perfetto_buffer_size: 2048000
+    perfetto_buffer_fill_policy: ring_buffer
+    perfetto_backend: inprocess

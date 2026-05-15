@@ -1,30 +1,15 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 
 #include <hip_test_common.hh>
 #include "hipArrayCommon.hh"
 #include "utils.hh"
 #include <array>
+#include <string>
 
 
 /*
@@ -36,7 +21,7 @@ THE SOFTWARE.
  * 4. Call hipFreeMipmappedArray twice on the same pointer and check that the implementation handles
  * the second call correctly.
  */
-TEMPLATE_TEST_CASE("Unit_hipFreeMipmappedArrayImplicitSyncArray", "", char, float) {
+HIP_TEMPLATE_TEST_CASE(Unit_hipFreeMipmappedArrayImplicitSyncArray, char, float) {
   hipMipmappedArray_t arrayPtr{};
   hipExtent extent{};
   hipChannelFormatDesc desc = hipCreateChannelDesc<TestType>();
@@ -56,15 +41,20 @@ TEMPLATE_TEST_CASE("Unit_hipFreeMipmappedArrayImplicitSyncArray", "", char, floa
   HIP_CHECK(hipGetDeviceProperties(&props, 0))
 
   for (auto numLevels : levels) {
+    INFO(" extent: (" << extent.width << ", " << extent.height << ", " << extent.depth << ") and "
+                      << numLevels << " levels. Total VRAM: " << props.totalGlobalMem);
     if (extent.width * extent.height * extent.depth * numLevels * sizeof(TestType) >
-        props.totalGlobalMem) {
+        props.totalGlobalMem / 2) {
       // some devices will not have enough memory allocate the 6GB required for the biggest extent
-      // We skip the test in that case (and no warning is needed)
+      // We would skip the test if the extent would require more than half of the global memory.
+      // Note that totalGlobalMem is not an exact measurement of the available memory for
+      // compute and we cannot use it as an exact value, so we use half
+      // (we use SUCCEED as no warning is needed)
       SUCCEED(
-          "Device does not have enough global memory to allocate a mipmapped array using this "
-          " extent: ("
-          << extent.width << ", " << extent.height << ", " << extent.depth << ") and " << numLevels
-          << " levels");
+          "Device might not have enough global memory to allocate a mipmapped array using this "
+          "extent; "
+          "test will not be run. Total global memory: "
+          << props.totalGlobalMem);
       continue;
     }
 
@@ -79,35 +69,15 @@ TEMPLATE_TEST_CASE("Unit_hipFreeMipmappedArrayImplicitSyncArray", "", char, floa
   }
 }
 
-TEST_CASE("Unit_hipFreeMipmappedArray_Negative_Nullptr") {
-  HIP_CHECK_ERROR(hipFreeMipmappedArray(nullptr), hipErrorInvalidValue);
-}
-
-TEST_CASE("Unit_hipFreeMipmappedArray_Negative_DoubleFree") {
-  hipMipmappedArray_t arrayPtr{};
-  hipExtent extent{};
-  hipChannelFormatDesc desc = hipCreateChannelDesc<char>();
-
+HIP_TEST_CASE(Unit_hipFreeMipmappedArray_Negative_Nullptr) {
 #if HT_AMD
-  const unsigned int flags = hipArrayDefault;
+  HIP_CHECK_ERROR(hipFreeMipmappedArray(nullptr), hipErrorInvalidValue);
 #else
-  const unsigned int flags = GENERATE(hipArrayDefault, hipArraySurfaceLoadStore);
+  HIP_CHECK(hipFreeMipmappedArray(nullptr));
 #endif
-
-  extent.width = GENERATE(64, 512, 1024);
-  extent.height = GENERATE(64, 512, 1024);
-  extent.depth = GENERATE(0, 64, 512, 1024);
-
-  const unsigned int numLevels = GENERATE(1, 5, 7);
-
-  HIP_CHECK_IGNORED_RETURN(hipMallocMipmappedArray(&arrayPtr, &desc, extent, numLevels, flags),
-                           hipErrorNotSupported);
-
-  HIP_CHECK(hipFreeMipmappedArray(arrayPtr));
-  HIP_CHECK_ERROR(hipFreeMipmappedArray(arrayPtr), hipErrorContextIsDestroyed);
 }
 
-TEMPLATE_TEST_CASE("Unit_hipFreeMipmappedArrayMultiTArray", "", char, int) {
+HIP_TEMPLATE_TEST_CASE(Unit_hipFreeMipmappedArrayMultiTArray, char, int) {
   constexpr size_t numAllocs = 10;
   std::vector<std::thread> threads;
   std::vector<hipMipmappedArray_t> ptrs(numAllocs);

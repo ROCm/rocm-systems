@@ -25,6 +25,8 @@
 
 #include "utils.hpp"
 
+#include <rocprofiler-sdk-roctx/roctx.h>
+
 #include <hip/hip_vector_types.h>
 #include <hip/math_functions.h>
 #include <omp.h>
@@ -473,6 +475,19 @@ hipPerfMandelBrot::printResults()
     std::cout << std::endl;
 }
 
+struct roctx_range
+{
+    template <typename... Args>
+    roctx_range(Args&&... args)
+    {
+        auto _ss = std::stringstream{};
+        ((_ss << args), ...);
+        roctxRangePush(_ss.str().c_str());
+    }
+
+    ~roctx_range() { roctxRangePop(); }
+};
+
 // Wrappers for the kernel launches
 void
 hipPerfMandelBrot::float_mad(uint* out,
@@ -487,6 +502,9 @@ hipPerfMandelBrot::float_mad(uint* out,
                              int          threads_per_block,
                              int          kernelCnt)
 {
+    auto _range =
+        roctx_range{__FUNCTION__, "(streams=", getNumStreams(), ", kernels=", kernelCnt, ")"};
+
     int streamCnt = getNumStreams();
     hipLaunchKernelGGL(float_mad_kernel<float>,
                        dim3(blocks),
@@ -515,6 +533,9 @@ hipPerfMandelBrot::float_mandel_unroll(uint* out,
                                        int          threads_per_block,
                                        int          kernelCnt)
 {
+    auto _range =
+        roctx_range{__FUNCTION__, "(streams=", getNumStreams(), ", kernels=", kernelCnt, ")"};
+
     int streamCnt = getNumStreams();
     hipLaunchKernelGGL(float_mandel_unroll_kernel<float>,
                        dim3(blocks),
@@ -543,6 +564,9 @@ hipPerfMandelBrot::double_mad(uint* out,
                               int          threads_per_block,
                               int          kernelCnt)
 {
+    auto _range =
+        roctx_range{__FUNCTION__, "(streams=", getNumStreams(), ", kernels=", kernelCnt, ")"};
+
     int streamCnt = getNumStreams();
     hipLaunchKernelGGL(double_mad_kernel<double>,
                        dim3(blocks),
@@ -571,6 +595,9 @@ hipPerfMandelBrot::double_mandel_unroll(uint* out,
                                         int          threads_per_block,
                                         int          kernelCnt)
 {
+    auto _range =
+        roctx_range{__FUNCTION__, "(streams=", getNumStreams(), ", kernels=", kernelCnt, ")"};
+
     int streamCnt = getNumStreams();
     hipLaunchKernelGGL(float_mandel_unroll_kernel<double>,
                        dim3(blocks),
@@ -589,6 +616,8 @@ hipPerfMandelBrot::double_mandel_unroll(uint* out,
 void
 hipPerfMandelBrot::run(unsigned int testCase, unsigned int /* deviceId */)
 {
+    auto _run_range = roctx_range{__FUNCTION__, "(testCase=", testCase, ")"};
+
     unsigned int numStreams = getNumStreams();
     coordIdx                = testCase % numCoords;
 
@@ -667,6 +696,8 @@ hipPerfMandelBrot::run(unsigned int testCase, unsigned int /* deviceId */)
 
     for(unsigned int k = 0; k < numLoops; k++)
     {
+        auto _loop_range = roctx_range{__FUNCTION__, "(testCase=", testCase, ") :: loop #", k};
+
         if((testCase == 0 || testCase == 1 || testCase == 2 || testCase == 5 || testCase == 6 ||
             testCase == 7 || testCase == 10 || testCase == 11 || testCase == 12))
         {
@@ -805,6 +836,8 @@ hipPerfMandelBrot::checkData(uint* ptr)
 int
 main(int argc, char* argv[])
 {
+    auto _range = roctx_range{argv[0]};
+
     // Default values for kernels and streams
     unsigned int numStreamsWarmup = 1, numKernelsWarmup = 1;
     unsigned int numStreamsSync = 1, numKernelsSync = 1;

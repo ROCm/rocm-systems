@@ -31,7 +31,6 @@ import pandas as pd
 from collections import OrderedDict
 from perfetto.trace_processor import TraceProcessor, TraceProcessorConfig
 
-
 PerfettoTraceProcessorShellPath = os.path.join(
     os.path.dirname(__file__), "trace_processor_shell"
 )
@@ -283,8 +282,7 @@ class PerfettoReader:
             "SELECT slice_id, track_id, category, depth, stack_id, parent_stack_id, ts, dur, name FROM slice"
         )
 
-        counter_df = self.query_tp(
-            """SELECT
+        counter_df = self.query_tp("""SELECT
                 counter_track.id as slice_id,
                 counter.track_id,
                 counter_track.name as track_name,
@@ -299,8 +297,7 @@ class PerfettoReader:
             JOIN counter ON counter.track_id = counter_track.id
             WHERE counter_track.name LIKE 'AGENT%'
             AND counter.value > 0
-            GROUP BY counter.track_id"""
-        )
+            GROUP BY counter.track_id""")
 
         # Transform counter data to match the main dataframe schema
         if not counter_df.empty:
@@ -342,6 +339,53 @@ class PerfettoReader:
             self.dataframe = pd.concat(
                 [self.dataframe, counter_collection_df], ignore_index=True
             )
+
+        scratch_df = self.query_tp("""WITH Pairs AS(
+                  SELECT
+                     counter.id as slice_id,
+                     track_id,
+                     ts,
+                     (LEAD(counter.ts) OVER window) - counter.ts AS dur,
+                     counter_track.name as track_name,
+                     ROW_NUMBER() OVER window AS rn
+                  FROM counter JOIN counter_track ON counter.track_id = counter_track.id
+                  WHERE counter_track.name LIKE '%SCRATCH MEMORY%' 
+                  WINDOW window AS (PARTITION BY counter.value, track_id ORDER BY counter.ts)
+            )
+            SELECT 
+               slice_id,
+               track_id,
+               'scratch_memory' as category,
+               0 as depth,
+               0 as stack_id,
+               0 as parent_stack_id,
+               ts,
+               dur,
+               Pairs.track_name as name
+            FROM Pairs WHERE (rn % 2 == 1) ORDER BY slice_id""")
+
+        # Transform scratch memory data to match the main dataframe schema
+        if not scratch_df.empty:
+            # Register counter track IDs in self.track_ids before adding to dataframe
+            for row in scratch_df.itertuples():
+                if (
+                    row.tp_index < len(self.track_ids)
+                    and row.track_id not in self.track_ids[row.tp_index]
+                ):
+                    # Add the counter track to track_ids with reasonable default values
+                    self.track_ids[row.tp_index][row.track_id] = {
+                        "tp_index": row.tp_index,
+                        "pid": 0,
+                        "tid": 0,
+                        "rank": 0,
+                        "thread": 0,
+                        "prio": 2,
+                        "process_name": "scratch_process",
+                        "thread_name": f"scratch_track_{row.category}",
+                    }
+
+            # Concatenate with main dataframe
+            self.dataframe = pd.concat([self.dataframe, scratch_df], ignore_index=True)
 
         self.df_categories = sorted(list(self.dataframe["category"].unique()))
 
@@ -420,26 +464,38 @@ class PerfettoReader:
             _thread_name = (
                 thread.thread_name if thread.track_name is None else thread.track_name
             )
-            for process in self.process.itertuples():
-                if process.tp_index != thread.tp_index:
-                    continue
-                _process_name = (
-                    process.process_name
-                    if process.track_name is None
-                    else process.track_name
-                )
-                if process.track_id == thread.track_parent_id:
-                    self.track_ids[thread.tp_index][thread.track_id] = {
-                        "tp_index": thread.tp_index,
-                        "pid": process.pid,
-                        "tid": thread.tid,
-                        "rank": -1,
-                        "thread": -1,
-                        "prio": 0 if thread.is_main_thread else 1,
-                        "process_name": _process_name,
-                        "thread_name": _thread_name,
-                    }
-                    break
+            if thread.track_parent_id == 0:
+                self.track_ids[thread.tp_index][thread.track_id] = {
+                    "tp_index": thread.tp_index,
+                    "pid": 0,
+                    "tid": thread.tid,
+                    "rank": -1,
+                    "thread": -1,
+                    "prio": 0 if thread.is_main_thread else 1,
+                    "process_name": "",
+                    "thread_name": _thread_name,
+                }
+            else:
+                for process in self.process.itertuples():
+                    if process.tp_index != thread.tp_index:
+                        continue
+                    _process_name = (
+                        process.process_name
+                        if process.track_name is None
+                        else process.track_name
+                    )
+                    if process.track_id == thread.track_parent_id:
+                        self.track_ids[thread.tp_index][thread.track_id] = {
+                            "tp_index": thread.tp_index,
+                            "pid": process.pid,
+                            "tid": thread.tid,
+                            "rank": -1,
+                            "thread": -1,
+                            "prio": 0 if thread.is_main_thread else 1,
+                            "process_name": _process_name,
+                            "thread_name": _thread_name,
+                        }
+                        break
 
         # some track ids do not have an associated system thread id so handle them here.
         # for example, omnitrace post-processes sampling data collected on a thread

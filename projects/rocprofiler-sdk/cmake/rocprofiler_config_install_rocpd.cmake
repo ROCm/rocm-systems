@@ -39,7 +39,7 @@ configure_package_config_file(
 write_basic_package_version_file(
     ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}/${PACKAGE_NAME}-config-version.cmake
     VERSION ${PROJECT_VERSION}
-    COMPATIBILITY SameMinorVersion)
+    COMPATIBILITY SameMajorVersion)
 
 install(
     FILES
@@ -101,6 +101,6 @@ set(${PACKAGE_NAME}_DIR
     CACHE PATH "${PACKAGE_NAME} build tree install" FORCE)
 
 install(
-    FILES ${PROJECT_SOURCE_DIR}/LICENSE
+    FILES ${PROJECT_SOURCE_DIR}/LICENSE.md
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/${PACKAGE_NAME}
     COMPONENT rocpd)

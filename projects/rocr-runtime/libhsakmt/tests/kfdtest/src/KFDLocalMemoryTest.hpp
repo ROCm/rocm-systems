@@ -32,6 +32,11 @@ class KFDLocalMemoryTest : public KFDBaseComponentTest {
  public:
     KFDLocalMemoryTest() {}
     ~KFDLocalMemoryTest() {}
+    void AccessLocalMem(int gpuNode);
+    void BasicTest(int gpuNode);
+    void VerifyContentsAfterUnmapAndMap(int gpuNode);
+    void Fragmentation(int gpuNode);
+    void CheckZeroInitializationVram(int gpuNode);
 
  protected:
     virtual void SetUp();

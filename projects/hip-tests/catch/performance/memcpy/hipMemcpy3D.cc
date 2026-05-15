@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "memcpy_performance_common.hh"
 
@@ -29,49 +16,50 @@ class Memcpy3DBenchmark : public Benchmark<Memcpy3DBenchmark> {
  public:
   void operator()(const hipPitchedPtr& dst_ptr, const hipPitchedPtr& src_ptr,
                   const hipExtent extent, hipMemcpyKind kind) {
-    hipMemcpy3DParms params = CreateMemcpy3DParam(dst_ptr, make_hipPos(0, 0, 0),
-                                                  src_ptr, make_hipPos(0, 0, 0),
-                                                  extent, kind);
-    TIMED_SECTION(kTimerTypeCpu) {
-      HIP_CHECK(hipMemcpy3D(&params));
-    }
+    hipMemcpy3DParms params = CreateMemcpy3DParam(dst_ptr, make_hipPos(0, 0, 0), src_ptr,
+                                                  make_hipPos(0, 0, 0), extent, kind);
+    TIMED_SECTION(kTimerTypeCpu) { HIP_CHECK(hipMemcpy3D(&params)); }
   }
 };
 
-static void RunBenchmark(const hipExtent extent, hipMemcpyKind kind, bool enable_peer_access=false) {
+static void RunBenchmark(const hipExtent extent, hipMemcpyKind kind,
+                         bool enable_peer_access = false) {
   Memcpy3DBenchmark benchmark;
-  benchmark.AddSectionName("(" + std::to_string(extent.width) + ", " + std::to_string(extent.height)
-                           + ", " + std::to_string(extent.depth) + ")");
+  benchmark.AddSectionName("(" + std::to_string(extent.width) + ", " +
+                           std::to_string(extent.height) + ", " + std::to_string(extent.depth) +
+                           ")");
 
   if (kind == hipMemcpyDeviceToHost) {
     LinearAllocGuard3D<int> device_allocation(extent);
-    LinearAllocGuard<int> host_allocation(LinearAllocs::hipHostMalloc, device_allocation.width() * 
-                                          device_allocation.height() * device_allocation.depth());
-    benchmark.Run(make_hipPitchedPtr(host_allocation.ptr(), device_allocation.width(), 
+    LinearAllocGuard<int> host_allocation(
+        LinearAllocs::hipHostMalloc,
+        device_allocation.width() * device_allocation.height() * device_allocation.depth());
+    benchmark.Run(make_hipPitchedPtr(host_allocation.ptr(), device_allocation.width(),
                                      device_allocation.width(), device_allocation.height()),
                   device_allocation.pitched_ptr(), device_allocation.extent(), kind);
   } else if (kind == hipMemcpyHostToDevice) {
     LinearAllocGuard3D<int> device_allocation(extent);
-    LinearAllocGuard<int> host_allocation(LinearAllocs::hipHostMalloc, device_allocation.pitch() * 
-                                          device_allocation.height() * device_allocation.depth());
+    LinearAllocGuard<int> host_allocation(
+        LinearAllocs::hipHostMalloc,
+        device_allocation.pitch() * device_allocation.height() * device_allocation.depth());
     benchmark.Run(device_allocation.pitched_ptr(),
                   make_hipPitchedPtr(host_allocation.ptr(), device_allocation.pitch(),
                                      device_allocation.width(), device_allocation.height()),
                   device_allocation.extent(), kind);
   } else if (kind == hipMemcpyHostToHost) {
     LinearAllocGuard3D<int> device_allocation(extent);
-    LinearAllocGuard<int> src_allocation(LinearAllocs::hipHostMalloc, extent.width * 
-                                         extent.height * extent.depth);
-    LinearAllocGuard<int> dst_allocation(LinearAllocs::hipHostMalloc, extent.width * 
-                                         extent.height * extent.depth);
-    benchmark.Run(make_hipPitchedPtr(dst_allocation.ptr(), extent.width, extent.width, extent.height),
-                  make_hipPitchedPtr(src_allocation.ptr(), extent.width, extent.width, extent.height),
-                  extent, kind);
+    LinearAllocGuard<int> src_allocation(LinearAllocs::hipHostMalloc,
+                                         extent.width * extent.height * extent.depth);
+    LinearAllocGuard<int> dst_allocation(LinearAllocs::hipHostMalloc,
+                                         extent.width * extent.height * extent.depth);
+    benchmark.Run(
+        make_hipPitchedPtr(dst_allocation.ptr(), extent.width, extent.width, extent.height),
+        make_hipPitchedPtr(src_allocation.ptr(), extent.width, extent.width, extent.height), extent,
+        kind);
   } else {
     // hipMemcpyDeviceToDevice
     int src_device = std::get<0>(GetDeviceIds(enable_peer_access));
     int dst_device = std::get<1>(GetDeviceIds(enable_peer_access));
-    if (src_device == -1 && dst_device == -1) { return; }
 
     LinearAllocGuard3D<int> src_allocation(extent);
     HIP_CHECK(hipSetDevice(dst_device));
@@ -98,8 +86,7 @@ static void RunBenchmark(const hipExtent extent, hipMemcpyKind kind, bool enable
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Performance_hipMemcpy3D_DeviceToHost") {
-  CHECK_IMAGE_SUPPORT
+HIP_TEST_CASE(Performance_hipMemcpy3D_DeviceToHost) {
   const auto width = GENERATE(4_KB, 4_MB, 16_MB);
   RunBenchmark(make_hipExtent(width, 16, 4), hipMemcpyDeviceToHost);
 }
@@ -119,8 +106,7 @@ TEST_CASE("Performance_hipMemcpy3D_DeviceToHost") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Performance_hipMemcpy3D_HostToDevice") {
-  CHECK_IMAGE_SUPPORT
+HIP_TEST_CASE(Performance_hipMemcpy3D_HostToDevice) {
   const auto width = GENERATE(4_KB, 4_MB, 16_MB);
   RunBenchmark(make_hipExtent(width, 16, 4), hipMemcpyHostToDevice);
 }
@@ -140,8 +126,7 @@ TEST_CASE("Performance_hipMemcpy3D_HostToDevice") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Performance_hipMemcpy3D_HostToHost") {
-  CHECK_IMAGE_SUPPORT
+HIP_TEST_CASE(Performance_hipMemcpy3D_HostToHost) {
   const auto width = GENERATE(4_KB, 4_MB, 16_MB);
   RunBenchmark(make_hipExtent(width, 16, 4), hipMemcpyHostToHost);
 }
@@ -161,8 +146,7 @@ TEST_CASE("Performance_hipMemcpy3D_HostToHost") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Performance_hipMemcpy3D_DeviceToDevice_DisablePeerAccess") {
-  CHECK_IMAGE_SUPPORT
+HIP_TEST_CASE(Performance_hipMemcpy3D_DeviceToDevice_DisablePeerAccess) {
   const auto width = GENERATE(4_KB, 4_MB, 16_MB);
   RunBenchmark(make_hipExtent(width, 16, 4), hipMemcpyDeviceToDevice);
 }
@@ -184,11 +168,9 @@ TEST_CASE("Performance_hipMemcpy3D_DeviceToDevice_DisablePeerAccess") {
  *  - Device supports Peer-to-Peer access
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Performance_hipMemcpy3D_DeviceToDevice_EnablePeerAccess") {
-  CHECK_IMAGE_SUPPORT
+HIP_TEST_CASE(Performance_hipMemcpy3D_DeviceToDevice_EnablePeerAccess) {
   if (HipTest::getDeviceCount() < 2) {
-    HipTest::HIP_SKIP_TEST("This test requires 2 GPUs. Skipping.");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
   const auto width = GENERATE(4_KB, 4_MB, 16_MB);
   RunBenchmark(make_hipExtent(width, 16, 4), hipMemcpyDeviceToDevice, true);

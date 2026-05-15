@@ -54,6 +54,9 @@
 
 namespace rocr {
 
+constexpr size_t DEFAULT_COUNTED_QUEUE_SIZE = 16384;
+constexpr uint32_t DEFAULT_GPU_HW_QUEUES_MAX = 4;
+
 class Flag {
  public:
   enum SDMA_OVERRIDE { SDMA_DISABLE, SDMA_ENABLE, SDMA_DEFAULT };
@@ -239,7 +242,7 @@ class Flag {
     image_print_srd_ = (var == "1") ? true : false;
 
     var = os::GetEnvVar("HSA_ENABLE_MWAITX");
-    enable_mwaitx_ = (var == "1") ? true : false;
+    enable_mwaitx_ = (var == "0") ? false : true;
 
     var = os::GetEnvVar("HSA_ENABLE_IPC_MODE_LEGACY");
     enable_ipc_mode_legacy_ = (var == "1") ? true : false;
@@ -292,8 +295,39 @@ class Flag {
     var = os::GetEnvVar("HSA_ENABLE_DTIF");
     enable_dtif_ = (var == "1") ? true : false;
 
+    // This allows detecting if the dxg driver is loaded.
+    var = os::GetEnvVar("HSA_ENABLE_DXG_DETECTION");
+    enable_dxg_detection_ = (var == "0") ? false : true;
+
     var = os::GetEnvVar("HSA_CO_DMACOPY_SIZE");
     co_dmacopy_size_ = var.empty() ? 1024*1024 : atoi(var.c_str());
+
+    var = os::GetEnvVar("HSA_COREDUMP_SHOW_PROGRESS");
+    enable_core_dump_progress_ = (var == "1");
+
+    var = os::GetEnvVar("HSA_DISABLE_COREDUMP_ON_EXCEPTION");
+    core_dump_disable_ = (var == "1");
+
+    core_dump_pattern_ = os::GetEnvVar("HSA_COREDUMP_PATTERN");
+
+    // This enables generation of lightweight gpu coredumps (Scratch & CWSR).
+    var = os::GetEnvVar("HSA_ENABLE_LIGHTWEIGHT_COREDUMP");
+    lightweight_core_dump_enable_ = (var == "1");
+
+    // This limits the maximum number of hardware queues that can be created per 
+    // priority level for counted queues on every GPU agent. By default, the limit is set to 4.
+    var = os::GetEnvVar("GPU_MAX_HW_QUEUES");
+    cp_queues_limit_ = var.empty() ? DEFAULT_GPU_HW_QUEUES_MAX : atoi(var.c_str());
+
+    // This allows configuring the size of counted queues created through 
+    // hsa_amd_counted_queue_acquire API. If not set, default queue size is set to 16384.
+    var = os::GetEnvVar("HSA_COUNTED_QUEUE_SIZE");
+    counted_queue_size_ = var.empty() ? DEFAULT_COUNTED_QUEUE_SIZE : atoi(var.c_str());
+
+    // HSA_SDMA_LINEAR_B2B: 1=force B2B, 0=force broadcast, unset=auto (size threshold)
+    var = os::GetEnvVar("HSA_SDMA_LINEAR_B2B");
+    sdma_linear_b2b_ = (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
+
   }
 
   void parse_masks(uint32_t maxGpu, uint32_t maxCU) {
@@ -357,11 +391,17 @@ class Flag {
 
   bool enable_scratch_alt() const { return enable_scratch_alt_; }
 
+  bool enable_scratch() const { return enable_scratch_; }
+
   size_t scratch_single_limit_async() const { return scratch_single_limit_async_; }
 
   std::string tools_lib_names() const { return tools_lib_names_; }
 
   bool disable_image() const { return disable_image_; }
+
+  void disable_image(bool disable) { disable_image_ = disable; }
+
+  void set_ipc_mode_legacy(bool enable) { enable_ipc_mode_legacy_ = enable; }
 
   bool disable_pc_sampling() const { return disable_pc_sampling_; }
 
@@ -408,6 +448,10 @@ class Flag {
 
   size_t co_dmacopy_size() const { return co_dmacopy_size_; }
 
+  uint32_t cp_queues_limit() const { return cp_queues_limit_; }
+
+  size_t counted_queue_size() const { return counted_queue_size_; }
+
   bool dev_mem_queue_buf() const { return dev_mem_queue_buf_; }
 
   uint32_t signal_abort_timeout() const { return signal_abort_timeout_; }
@@ -417,7 +461,54 @@ class Flag {
   bool enable_3d_swizzle() const { return enable_3d_swizzle_; }
 
   bool enable_dtif() const { return enable_dtif_; }
- private:
+
+  bool enable_dxg_detection() const { return enable_dxg_detection_; }
+
+  SDMA_OVERRIDE sdma_linear_b2b() const { return sdma_linear_b2b_; }
+
+  [[nodiscard]]
+  bool core_dump_disable() const { return core_dump_disable_; }
+
+  [[nodiscard]]
+  bool enable_core_dump_progress() const {
+                                       return enable_core_dump_progress_; }
+
+  [[nodiscard]]
+  const std::string& core_dump_pattern() const {
+                                         return core_dump_pattern_; }
+
+  [[nodiscard]]
+  bool lightweight_core_dump_enable() const { 
+    return lightweight_core_dump_enable_; 
+  } 
+
+  void set_sdma(bool peer_sdma, bool sdma_gang) {
+    enable_peer_sdma_ = peer_sdma ? SDMA_ENABLE : SDMA_DISABLE;
+    enable_sdma_gang_ = sdma_gang ? SDMA_ENABLE : SDMA_DISABLE;
+  }
+
+  void disable_scratch() {
+    scratch_single_limit_ = 0;
+    //scratch_single_limit_async_ = 0;
+    enable_scratch_async_reclaim_ = false;
+    enable_scratch_alt_ = false;
+    enable_scratch_ = false;
+    scratch_mem_size_ = 0;
+    no_scratch_reclaim_ = true;
+    no_scratch_thread_limit_ = true;
+  }
+
+  void disable_xnack() { xnack_ = XNACK_DISABLE; }
+
+  void disable_fine_grain_pcie() { fine_grain_pcie_ = false; }
+
+  void disable_dev_mem_queue_buf() { dev_mem_queue_buf_ = false; }
+
+  void disable_sdma_hdp_flush() { enable_sdma_hdp_flush_ = false; }
+
+  void set_disable_tool_register(bool disable) { disable_tool_register_ = disable; }
+
+  private:
   bool check_flat_scratch_;
   bool enable_vm_fault_message_;
   bool enable_interrupt_;
@@ -451,6 +542,8 @@ class Flag {
   int  async_events_thread_priority_;
   bool enable_3d_swizzle_ = false;
   bool enable_dtif_;
+  bool enable_dxg_detection_;
+  SDMA_OVERRIDE sdma_linear_b2b_ = SDMA_DEFAULT;
 
   SDMA_OVERRIDE enable_sdma_;
   SDMA_OVERRIDE enable_peer_sdma_;
@@ -468,6 +561,7 @@ class Flag {
   size_t scratch_single_limit_async_;
   bool enable_scratch_async_reclaim_;
   bool enable_scratch_alt_;
+  bool enable_scratch_ = true;
 
   std::string tools_lib_names_;
   std::string svm_profile_;
@@ -482,6 +576,14 @@ class Flag {
   size_t pc_sampling_max_device_buffer_size_;
 
   size_t co_dmacopy_size_;
+
+  bool core_dump_disable_ = false;
+  bool enable_core_dump_progress_ = false;
+  std::string core_dump_pattern_;
+  bool lightweight_core_dump_enable_ = false;
+
+  uint32_t cp_queues_limit_;
+  size_t counted_queue_size_;
 
   // Map GPU index post RVD to its default cu mask.
   std::map<uint32_t, std::vector<uint32_t>> cu_mask_;

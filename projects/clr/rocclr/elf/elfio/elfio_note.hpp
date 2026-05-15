@@ -40,135 +40,111 @@ namespace ELFIO {
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
-template< class S >
-class note_section_accessor_template
-{
-  public:
-//------------------------------------------------------------------------------
-    note_section_accessor_template( const elfio& elf_file_, S* section_ ) :
-                                    elf_file( elf_file_ ), note_section( section_ )
-    {
-        process_section();
+template <class S> class note_section_accessor_template {
+ public:
+  //------------------------------------------------------------------------------
+  note_section_accessor_template(const elfio& elf_file_, S* section_)
+      : elf_file(elf_file_), note_section(section_) {
+    process_section();
+  }
+
+  //------------------------------------------------------------------------------
+  Elf_Word get_notes_num() const { return (Elf_Word)note_start_positions.size(); }
+
+  //------------------------------------------------------------------------------
+  bool get_note(Elf_Word index, Elf_Word& type, std::string& name, void*& desc,
+                Elf_Word& descSize) const {
+    if (index >= note_section->get_size()) {
+      return false;
     }
 
-//------------------------------------------------------------------------------
-    Elf_Word
-    get_notes_num() const
-    {
-        return (Elf_Word)note_start_positions.size();
+    const char* pData = note_section->get_data() + note_start_positions[index];
+    int align = sizeof(Elf_Word);
+
+    const endianess_convertor& convertor = elf_file.get_convertor();
+    type = convertor(*(const Elf_Word*)(pData + 2 * align));
+    Elf_Word namesz = convertor(*(const Elf_Word*)(pData));
+    descSize = convertor(*(const Elf_Word*)(pData + sizeof(namesz)));
+    Elf_Xword max_name_size = note_section->get_size() - note_start_positions[index];
+    if (namesz < 1 || namesz > max_name_size || namesz + descSize > max_name_size) {
+      return false;
+    }
+    name.assign(pData + 3 * align, namesz - 1);
+    if (0 == descSize) {
+      desc = 0;
+    } else {
+      desc = const_cast<char*>(pData + 3 * align + ((namesz + align - 1) / align) * align);
     }
 
-//------------------------------------------------------------------------------
-    bool
-    get_note( Elf_Word     index,
-              Elf_Word&    type,
-              std::string& name,
-              void*&       desc,
-              Elf_Word&    descSize ) const
-    {
-        if ( index >= note_section->get_size() ) {
-            return false;
-        }
+    return true;
+  }
 
-        const char* pData = note_section->get_data() + note_start_positions[index];
-        int align = sizeof( Elf_Word );
+  //------------------------------------------------------------------------------
+  void add_note(Elf_Word type, const std::string& name, const void* desc, Elf_Word descSize) {
+    const endianess_convertor& convertor = elf_file.get_convertor();
 
-        const endianess_convertor& convertor = elf_file.get_convertor();
-        type = convertor( *(const Elf_Word*)( pData + 2*align ) );
-        Elf_Word namesz = convertor( *(const Elf_Word*)( pData ) );
-        descSize        = convertor( *(const Elf_Word*)( pData + sizeof( namesz ) ) );
-        Elf_Xword max_name_size = note_section->get_size() - note_start_positions[index];
-        if ( namesz            < 1             ||
-             namesz            > max_name_size ||
-             namesz + descSize > max_name_size ) {
-            return false;
-        }
-        name.assign( pData + 3*align, namesz - 1);
-        if ( 0 == descSize ) {
-            desc = 0;
-        }
-        else {
-            desc = const_cast<char*> ( pData + 3*align +
-                                       ( ( namesz + align - 1 )/align )*align );
-        }
-
-        return true;
+    int align = sizeof(Elf_Word);
+    Elf_Word nameLen = (Elf_Word)name.size() + 1;
+    Elf_Word nameLenConv = convertor(nameLen);
+    std::string buffer(reinterpret_cast<char*>(&nameLenConv), align);
+    Elf_Word descSizeConv = convertor(descSize);
+    buffer.append(reinterpret_cast<char*>(&descSizeConv), align);
+    type = convertor(type);
+    buffer.append(reinterpret_cast<char*>(&type), align);
+    buffer.append(name);
+    buffer.append(1, '\x00');
+    const char pad[] = {'\0', '\0', '\0', '\0'};
+    if (nameLen % align != 0) {
+      buffer.append(pad, align - nameLen % align);
+    }
+    if (desc != 0 && descSize != 0) {
+      buffer.append(reinterpret_cast<const char*>(desc), descSize);
+      if (descSize % align != 0) {
+        buffer.append(pad, align - descSize % align);
+      }
     }
 
-//------------------------------------------------------------------------------
-    void add_note( Elf_Word           type,
-                   const std::string& name,
-                   const void*        desc,
-                   Elf_Word           descSize )
-    {
-        const endianess_convertor& convertor = elf_file.get_convertor();
+    note_start_positions.push_back(note_section->get_size());
+    note_section->append_data(buffer);
+  }
 
-        int align            = sizeof( Elf_Word );
-        Elf_Word nameLen     = (Elf_Word)name.size() + 1;
-        Elf_Word nameLenConv = convertor( nameLen );
-        std::string buffer( reinterpret_cast<char*>( &nameLenConv ), align );
-        Elf_Word descSizeConv = convertor( descSize );
-        buffer.append( reinterpret_cast<char*>( &descSizeConv ), align );
-        type = convertor( type );
-        buffer.append( reinterpret_cast<char*>( &type ), align );
-        buffer.append( name );
-        buffer.append( 1, '\x00' );
-        const char pad[] = { '\0', '\0', '\0', '\0' };
-        if ( nameLen % align != 0 ) {
-            buffer.append( pad, align - nameLen % align );
-        }
-        if ( desc != 0 && descSize != 0 ) {
-            buffer.append( reinterpret_cast<const char*>( desc ), descSize );
-            if ( descSize % align != 0 ) {
-                buffer.append( pad, align - descSize % align );
-            }
-        }
+ private:
+  //------------------------------------------------------------------------------
+  void process_section() {
+    const endianess_convertor& convertor = elf_file.get_convertor();
+    const char* data = note_section->get_data();
+    Elf_Xword size = note_section->get_size();
+    Elf_Xword current = 0;
 
-        note_start_positions.push_back( note_section->get_size() );
-        note_section->append_data( buffer );
+    note_start_positions.clear();
+
+    // Is it empty?
+    if (0 == data || 0 == size) {
+      return;
     }
 
-  private:
-//------------------------------------------------------------------------------
-    void process_section()
-    {
-        const endianess_convertor& convertor = elf_file.get_convertor();
-        const char* data                     = note_section->get_data();
-        Elf_Xword   size                     = note_section->get_size();
-        Elf_Xword   current                  = 0;
+    int align = sizeof(Elf_Word);
+    while (current + 3 * align <= size) {
+      note_start_positions.push_back(current);
+      Elf_Word namesz = convertor(*(const Elf_Word*)(data + current));
+      Elf_Word descsz = convertor(*(const Elf_Word*)(data + current + sizeof(namesz)));
 
-        note_start_positions.clear();
-
-        // Is it empty?
-        if ( 0 == data || 0 == size ) {
-            return;
-        }
-
-        int align = sizeof( Elf_Word );
-        while ( current + 3*align <= size ) {
-            note_start_positions.push_back( current );
-            Elf_Word namesz = convertor(
-                            *(const Elf_Word*)( data + current ) );
-            Elf_Word descsz = convertor(
-                            *(const Elf_Word*)( data + current + sizeof( namesz ) ) );
-
-            current += 3*sizeof( Elf_Word ) +
-                       ( ( namesz + align - 1 ) / align ) * align +
-                       ( ( descsz + align - 1 ) / align ) * align;
-        }
+      current += 3 * sizeof(Elf_Word) + ((namesz + align - 1) / align) * align +
+                 ((descsz + align - 1) / align) * align;
     }
+  }
 
-//------------------------------------------------------------------------------
-  private:
-    const elfio&           elf_file;
-    S*                     note_section;
-    std::vector<Elf_Xword> note_start_positions;
+  //------------------------------------------------------------------------------
+ private:
+  const elfio& elf_file;
+  S* note_section;
+  std::vector<Elf_Xword> note_start_positions;
 };
 
 using note_section_accessor = note_section_accessor_template<section>;
 using const_note_section_accessor = note_section_accessor_template<const section>;
 
-} // namespace ELFIO
-} // namespace amd
+}  // namespace ELFIO
+}  // namespace amd
 
-#endif // ELFIO_NOTE_HPP
+#endif  // ELFIO_NOTE_HPP

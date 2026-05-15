@@ -24,6 +24,7 @@
 
 import os
 import sys
+import re
 import argparse
 import textwrap
 import subprocess
@@ -60,6 +61,12 @@ class dotdict(dict):
                     [dotdict(i) if isinstance(i, (dict)) else i for i in v],
                 )
 
+    def __getstate__(self):
+        return self.__dict__
+
+    def __setstate__(self, d):
+        self.__dict__ = d
+
 
 def patch_message(msg, *args):
     msg = textwrap.dedent(msg)
@@ -72,14 +79,14 @@ def patch_message(msg, *args):
 
 def fatal_error(msg, *args, exit_code=1):
     msg = patch_message(msg, *args)
-    sys.stderr.write(f"Fatal error: {msg}\n")
+    sys.stderr.write(f"[rocprofv3] Fatal error: {msg}\n")
     sys.stderr.flush()
     sys.exit(exit_code)
 
 
 def warning(msg, *args):
     msg = patch_message(msg, *args)
-    sys.stderr.write(f"Warning: {msg}\n")
+    sys.stderr.write(f"[rocprofv3] Warning: {msg}\n")
     sys.stderr.flush()
 
 
@@ -115,6 +122,120 @@ def strtobool(val):
     else:
         val_type = type(val).__name__
         raise ValueError(f"invalid truth value {val} (type={val_type})")
+
+
+def get_mpi_rank_and_size(custom_rank_env=None, custom_size_env=None):
+    """Detect MPI rank and size from the same MPI implementation's environment variables.
+
+    This ensures that rank and size come from the same source (e.g., both from OpenMPI,
+    not mixing OpenMPI rank with SLURM size).
+
+    Args:
+        custom_rank_env: Optional custom environment variable name for rank detection.
+        custom_size_env: Optional custom environment variable name for size detection.
+
+    Returns:
+        Tuple of (rank, size, rank_var, size_var) where:
+        - rank and size are integers or None
+        - rank_var and size_var are the environment variable names used (strings or None)
+    """
+    # If custom environment variables are specified, use them exclusively
+    if custom_rank_env is not None and custom_size_env is not None:
+        rank = int(os.environ[custom_rank_env]) if custom_rank_env in os.environ else None
+        size = int(os.environ[custom_size_env]) if custom_size_env in os.environ else None
+        return (rank, size, custom_rank_env, custom_size_env)
+
+    for rank_var, size_var in [
+        ["PBS_NODENUM", "PBS_O_TASKNUM"],  # most runtime-specific to most generic
+        ["SLURM_PROCID", "SLURM_NTASKS"],
+        ["PMI_RANK", "PMI_SIZE"],
+        ["MV2_COMM_WORLD_RANK", "MV2_COMM_WORLD_SIZE"],
+        ["OMPI_COMM_WORLD_RANK", "OMPI_COMM_WORLD_SIZE"],
+        ["MPI_RANKID", "MPI_NRANKS"],
+        ["MPI_LOCALRANKID", "MPI_LOCALNRANKS"],
+        ["MPI_RANK", "MPI_SIZE"],
+    ]:
+        if rank_var in os.environ and size_var in os.environ:
+            return (
+                int(os.environ[rank_var]),
+                int(os.environ[size_var]),
+                rank_var,
+                size_var,
+            )
+
+    # MPICH (PMI_ID is rank-like, but no corresponding size variable in this check)
+    # Skip this to avoid returning incomplete information
+
+    return (None, None, None, None)
+
+
+def parse_rank_specification(rank_spec):
+    """Parse a rank specification string and return a set of ranks.
+    Supports comma-separated ranges and individual ranks.
+    Examples: "0-3,8,10-15" -> {0,1,2,3,8,10,11,12,13,14,15}
+              "0,1,2" -> {0,1,2}
+    """
+    ranks = set()
+    if not rank_spec:
+        return ranks
+
+    for part in rank_spec.split(","):
+        part = part.strip()
+        match = re.match(r"^(\d+)-(\d+)$", part)
+        if match:
+            start, end = int(match.group(1)), int(match.group(2))
+            if start > end:
+                fatal_error(f"Invalid range: {part} (start > end)")
+            ranks.update(range(start, end + 1))
+        elif re.match(r"^\d+$", part):
+            ranks.add(int(part))
+        else:
+            fatal_error(
+                f"Invalid rank specification '{part}': not a valid integer or range"
+            )
+
+    return ranks
+
+
+def should_rank_provide_output(
+    mpi_ranks_spec=None, custom_rank_env=None, custom_size_env=None
+):
+    """Check if the current MPI rank should provide profile/trace output.
+    Args:
+        mpi_ranks_spec: String specification of ranks (e.g., "0-3,8,10-15")
+                       If None, all ranks provide output (default behavior).
+        custom_rank_env: Optional custom environment variable name for rank detection.
+        custom_size_env: Optional custom environment variable name for world size detection.
+    Returns:
+        True if this rank should provide output, False otherwise.
+    """
+    # If no specification provided, all ranks provide output (default)
+    if not mpi_ranks_spec:
+        return True
+
+    # Get both rank and size from the same source
+    current_rank, world_size, _, _ = get_mpi_rank_and_size(
+        custom_rank_env, custom_size_env
+    )
+
+    # If we can't detect the rank, assume we should provide output
+    if current_rank is None:
+        return True
+
+    # Parse the rank specification
+    selected_ranks = parse_rank_specification(mpi_ranks_spec)
+
+    # Validate that selected ranks are within the valid range
+    if world_size is not None and selected_ranks:
+        max_selected_rank = max(selected_ranks)
+        if max_selected_rank >= world_size:
+            fatal_error(
+                f"Invalid rank specification: rank {max_selected_rank} is out of range. "
+                f"MPI world size is {world_size} (valid ranks: 0-{world_size - 1})"
+            )
+
+    # Check if current rank is in the selected set
+    return current_rank in selected_ranks
 
 
 def resolve_library_path(val, args, is_sdk_lib=True):
@@ -223,6 +344,16 @@ def parse_arguments(args=None):
 For MPI applications (or other job launchers such as SLURM), place rocprofv3 inside the job launcher:
 
     $ mpirun -n 4 rocprofv3 --hip-trace -- ./mympiapp
+
+For MPI applications, select specific ranks to provide profile/trace output:
+
+    $ mpirun -n 16 rocprofv3 --hip-trace --profile-mpi-ranks 0-3,8 -- ./mympiapp
+    $ srun -n 32 rocprofv3 --hip-trace --profile-mpi-ranks 0 -- ./myapp
+
+For attachment profiling of running processes:
+
+    $ rocprofv3 --attach <PID> --hip-trace --kernel-trace
+    $ rocprofv3 --attach 1234 --attach-duration-msec 10 --hsa-trace
 
 """
 
@@ -352,6 +483,11 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
     )
     add_parser_bool_argument(
         basic_tracing_options,
+        "--kfd-trace",
+        help="For collecting --kfd-page-migration-trace, --kfd-page-mapping-trace, --kfd-queue-trace, and --kfd-dropped-events-trace. KFD (Kernel Fusion Driver) traces capture low level driver routines involved in mapping, unmapping, and migration of data between GPU and system memories, as well as eviction/restoration of GPU queues to facilitate such routines.",
+    )
+    add_parser_bool_argument(
+        basic_tracing_options,
         "--scratch-memory-trace",
         help="For collecting Scratch Memory operations Traces. Helps in determining scratch allocations and manage them efficiently",
     )
@@ -414,16 +550,44 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         help="For collecting HSA API Traces (Finalizer-extension API), e.g. HSA functions prefixed with only 'hsa_ext_program_' (i.e. hsa_ext_program_create).",
     )
 
+    add_parser_bool_argument(
+        extended_tracing_options,
+        "--kfd-page-migration-trace",
+        help="For collecting KFD Trace events involving migration of pages across memory devices.",
+    )
+
+    add_parser_bool_argument(
+        extended_tracing_options,
+        "--kfd-page-mapping-trace",
+        help="For collecting KFD Trace events involving faulting, mapping, and invalidation of pages.",
+    )
+
+    add_parser_bool_argument(
+        extended_tracing_options,
+        "--kfd-queue-trace",
+        help="For collecting KFD Trace events involving GPU queue eviction and restore operations.",
+    )
+
+    add_parser_bool_argument(
+        extended_tracing_options,
+        "--kfd-dropped-events-trace",
+        help="For collecting KFD Trace events involving events dropped by KFD.",
+    )
+
     counter_collection_options = parser.add_argument_group("Counter collection options")
 
     counter_collection_options.add_argument(
         "--pmc",
         help=(
-            "Specify Performance Monitoring Counters to collect(comma OR space separated in case of more than 1 counters). "
-            "Note: job will fail if entire set of counters cannot be collected in single pass"
+            "Specify Performance Monitoring Counters to collect (space-separated). "
+            "For single-pass: --pmc COUNTER1 COUNTER2 ... "
+            'For multi-pass: --pmc "GROUP1_C1 GROUP1_C2" --pmc "GROUP2_C1 GROUP2_C2" ... '
+            "Note: Use multiple --pmc flags for multi-pass collection when counters "
+            "cannot be collected simultaneously due to hardware limitations"
         ),
         default=None,
         nargs="*",
+        action="append",
     )
 
     pc_sampling_options = parser.add_argument_group("PC sampling options")
@@ -525,6 +689,27 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
     filter_options = parser.add_argument_group("Filtering options")
 
     filter_options.add_argument(
+        "--profile-mpi-ranks",
+        help="Specify which MPI ranks should provide profile/trace output using comma-separated ranges and individual ranks (e.g., '0-3,8,10-15'). If not specified, all ranks provide output. The tool runs on all ranks but only selected ranks generate output files.",
+        default=os.environ.get("ROCPROF_MPI_RANKS", None),
+        type=str,
+        metavar="RANK_SPECIFICATION",
+    )
+    filter_options.add_argument(
+        "--mpi-world-rank-variable",
+        help="Specify the environment variable to use for determining the MPI rank (e.g., 'MY_CUSTOM_RANK_VAR'). If not specified, the tool will automatically detect the rank from common MPI environment variables.",
+        default=None,
+        type=str,
+        metavar="ENVIRONMENT_VARIABLE",
+    )
+    filter_options.add_argument(
+        "--mpi-world-size-variable",
+        help="Specify the environment variable to use for determining the MPI world size (e.g., 'MY_CUSTOM_SIZE_VAR'). If not specified, the tool will automatically detect the world size from common MPI environment variables.",
+        default=None,
+        type=str,
+        metavar="ENVIRONMENT_VARIABLE",
+    )
+    filter_options.add_argument(
         "--kernel-include-regex",
         help="Include the kernels matching this filter from counter-collection and thread-trace data (non-matching kernels will be excluded)",
         default=None,
@@ -565,7 +750,12 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
     add_parser_bool_argument(
         filter_options,
         "--selected-regions",
-        help="If set, rocprofv3 will only profile regions of code surrounded by roctxProfilerResume(0) and roctxProfilerPause(0)",
+        help="If set, rocprofv3 will only profile regions of code surrounded by roctxProfilerResume(0) and roctxProfilerPause(0).",
+    )
+    add_parser_bool_argument(
+        filter_options,
+        "--selected-regions-ref-count",
+        help="If set, rocprofv3 will reference count roctxProfilerResume and roctxProfilerPause calls to ignore nested pause/resume pairs",
     )
 
     perfetto_options = parser.add_argument_group("Perfetto-specific options")
@@ -705,6 +895,16 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         Note: glog still installs signal handlers which provide backtraces""",
     )
 
+    add_parser_bool_argument(
+        advanced_options,
+        "--process-sync",
+        help="""Enables the process synchronization in the rocprofv3 tool finalization stage.
+        When --process-sync is set to true,
+        and rocprofv3 tool will force process to wait for its peer processes finishing write the trace data,
+        then they proceed.
+        Note: some workloads will teminate the process group when one of the process is finished""",
+    )
+
     advanced_options.add_argument(
         "--minimum-output-data",
         help="""Output files are generated only if output data size > minimum output data".
@@ -715,14 +915,33 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         metavar="KB",
     )
 
-    reserved_options = parser.add_argument_group("Reserved options")
-    reserved_options.add_argument(
+    advanced_options.add_argument(
         "-p",
         "--pid",
-        help=argparse.SUPPRESS,
-        type=str,
-        nargs="+",
+        "--attach",
+        help="""Attach to a target process by pid and execute as a tool from within said process.""",
+        type=int,
         default=None,
+    )
+
+    advanced_options.add_argument(
+        "--attach-duration-msec",
+        help="""When --pid is used, sets the amount of time in milliseconds the profiler will be attached before detaching. When unset, the profiler will wait until Enter is pressed to detach.""",
+        type=int,
+        default=None,
+    )
+
+    add_parser_bool_argument(
+        advanced_options,
+        "--attach-children",
+        help="""When --pid is used, attach to the target process and all of its descendant processes. Enabled by default; use --attach-children=false to attach only to the specified PID.""",
+        default=True,
+    )
+
+    add_parser_bool_argument(
+        advanced_options,
+        "--attach-sync-output",
+        help="[Attach mode only] Generate output files synchronously during detachment (default: async). Use this option when scripts need to access output files immediately after rocprofv3 exits",
     )
 
     if args is None:
@@ -768,6 +987,13 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
     )
 
     att_options.add_argument(
+        "--att-consecutive-kernels",
+        help="Consecutive kernels to profile with ATT. Default 0",
+        default=None,
+        type=str,
+    )
+
+    att_options.add_argument(
         "--att-buffer-size",
         help="Thread trace buffer size. Default 256MB",
         default=None,
@@ -800,6 +1026,13 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         help="(gfx9) Integer in [1,32] range specifying collection period. 0 = disabled.",
         default=None,
         type=int,
+    )
+
+    add_parser_bool_argument(
+        att_options,
+        "--att-perfcounter-target-only",
+        default=False,
+        help="(gfx9) Enable performance counters only for the target CU. This heavily reduces bandwidth use.",
     )
 
     att_options.add_argument(
@@ -866,12 +1099,18 @@ def parse_json(json_file):
 
 def parse_text(text_file):
     def process_line(line):
-        if "pmc:" not in line:
-            return ""
+        # Strip leading/trailing whitespace
         line = line.strip()
+        # Remove comments first (before checking for pmc:)
         pos = line.find("#")
         if pos >= 0:
             line = line[0:pos]
+        # Trim again after comment removal
+        line = line.strip()
+
+        # Now check if line contains pmc: (after comment removal)
+        if "pmc:" not in line:
+            return ""
 
         def _dedup(_line, _sep):
             for itr in _sep:
@@ -897,7 +1136,25 @@ def parse_text(text_file):
 def parse_input(input_file):
 
     _, extension = os.path.splitext(input_file)
-    if extension == ".txt":
+    if extension == ".txt" or extension == ".text":
+        warning("""
+            Text file format for counter collection is deprecated and will be removed in a future release.
+            Please use JSON or YAML format instead.
+
+            Example conversion:
+            Text file (deprecated):
+                pmc: counter1 counter2
+
+            YAML file (recommended):
+                jobs:
+                  - pmc:
+                      - counter1
+                  - pmc:
+                      - counter2
+
+            JSON file (recommended):
+                {"jobs":[{"pmc": ["SQ_WAVES"]},{ "pmc":["GRBM_COUNT"]}]}
+            """)
         text_input = parse_text(input_file)
         text_input_lst = [{"pmc": itr, "sub_directory": "pmc_"} for itr in text_input]
         return [dotdict(itr) for itr in text_input_lst]
@@ -927,41 +1184,115 @@ def patch_args(data):
         data.kernel_iteration_range, str
     ):
         data.kernel_iteration_range = [data.kernel_iteration_range]
+
+    # Normalize pmc field: flatten nested lists from action="append" to match input file format
+    if hasattr(data, "pmc") and isinstance(data.pmc, list):
+        # If pmc is a list of lists (from --pmc flags with action="append"),
+        # and we're in single-pass mode (len == 1), flatten it to match input file format
+        if len(data.pmc) == 1 and isinstance(data.pmc[0], list):
+            data.pmc = data.pmc[0]
+
     return data
 
 
-def get_args(cmd_args, inp_args):
+def get_args(
+    cmd_args, inp_args, filter=None, require_in_both=False, ignore_prev_inp=None
+):
+    """
+    Merges key and values in dict cmd_args and inp_args and returns the merged dict. This is typically used to combine
+    arguments from multiple sources (e.g. command line and an input file).
+
+    If a key has conflicting values in cmd_args and inp_args, a RuntimeError is thrown.
+    If a filter is provided (as a list of regex strings), only keys matching at least one filter regex will throw a
+    RuntimeError for conflicting values. If the key with conflicting values does not match a filter, a warning is
+    generated instead, and the value from cmd_args is used in the merged dict.
+    If require_in_both is True, all keys must be present in both cmd_args and inp_args or a RuntimeError is thrown.
+    This is typically used when arguments must match exactly.
+    If a filter is provided and require_in_both is True, only keys matching at least one filter regex will throw a
+    RuntimeError if they are not present in both cmd_args and inp_args. If the key does not match a filter, a warning
+    is generated instead, and the unique key is used in the merged dict.
+    """
+
+    import re
+
+    filter_regex = re.compile(filter) if filter is not None else None
+    ignored_regex = re.compile(ignore_prev_inp) if ignore_prev_inp is not None else None
+
     def ensure_type(name, var, type_id):
         if not isinstance(var, type_id):
             raise TypeError(
-                f"{name} is of type {type(var).__name__}, expected {type(type_id).__name__}"
+                f"{name} is of type {type(var).__name__}, expected {type_id.__name__}"
             )
 
-    ensure_type("cmd_args", cmd_args, argparse.Namespace)
-    ensure_type("inp_args", inp_args, dotdict)
+    if isinstance(cmd_args, argparse.Namespace):
+        ensure_type("cmd_args", cmd_args, argparse.Namespace)
+        ensure_type("inp_args", inp_args, dotdict)
 
-    cmd_keys = list(cmd_args.__dict__.keys())
-    inp_keys = list(inp_args.keys())
+        cmd_keys = list(cmd_args.__dict__.keys())
+        inp_keys = list(inp_args.keys())
+
+    else:
+        ensure_type("cmd_args", cmd_args, dotdict)
+        ensure_type("inp_args", inp_args, dotdict)
+
+        cmd_keys = list(cmd_args.keys())
+        inp_keys = list(inp_args.keys())
+
     data = {}
+
+    def is_ignored(key):
+        if ignored_regex:
+            return ignored_regex.match(key)
+        return False
 
     def get_attr(key):
         if has_set_attr(cmd_args, key):
             return getattr(cmd_args, key)
+        elif is_ignored(key):
+            return None
         elif has_set_attr(inp_args, key):
             return getattr(inp_args, key)
         return None
 
+    def is_filtered(key):
+        if filter_regex:
+            return filter_regex.match(key)
+        else:
+            # if there are no filters, all keys match
+            return True
+        return False
+
     for itr in set(cmd_keys + inp_keys):
+        # check for conflicting args between the two argument lists
         if (
             has_set_attr(cmd_args, itr)
             and has_set_attr(inp_args, itr)
             and getattr(cmd_args, itr) != getattr(inp_args, itr)
         ):
-            raise RuntimeError(
-                f"conflicting value for {itr} : {getattr(cmd_args, itr)} vs {getattr(inp_args, itr)}"
-            )
-        else:
-            data[itr] = get_attr(itr)
+            if is_filtered(itr):
+                raise RuntimeError(
+                    f"Option '{itr}' has conflicting values: {getattr(cmd_args, itr)} vs {getattr(inp_args, itr)}"
+                )
+            else:
+                warning(
+                    f"Option '{itr}' has been modified. {itr}={getattr(cmd_args, itr)} (previously {itr}={getattr(inp_args, itr)})"
+                )
+
+        # if require_in_both was set, check for keys unique to each argument list
+        if require_in_both and (
+            has_set_attr(cmd_args, itr) != has_set_attr(inp_args, itr)
+        ):
+            if is_filtered(itr):
+                raise RuntimeError(
+                    f"Option '{itr}' was only present in one argument list : {getattr(cmd_args, itr, None)} vs {getattr(inp_args, itr, None)}"
+                )
+            else:
+                warning(
+                    f"Option '{itr}' was only present in one argument list, but will be used : {itr}={get_attr(itr)}"
+                )
+
+        # has preference towards command line args
+        data[itr] = get_attr(itr)
 
     return patch_args(dotdict(data))
 
@@ -972,12 +1303,62 @@ def run(app_args, args, **kwargs):
     use_execv = kwargs.get("use_execv", True)
     app_pass = kwargs.get("pass_id", None)
 
-    if args.pid is not None:
+    # Validate custom MPI environment variables
+    # If one custom variable is specified, both must be provided
+    custom_rank_env = (
+        args.mpi_world_rank_variable
+        if has_set_attr(args, "mpi_world_rank_variable")
+        else None
+    )
+    custom_size_env = (
+        args.mpi_world_size_variable
+        if has_set_attr(args, "mpi_world_size_variable")
+        else None
+    )
+
+    if (custom_rank_env is not None and custom_size_env is None) or (
+        custom_rank_env is None and custom_size_env is not None
+    ):
         fatal_error(
-            """The -p shorthand option for --collection-period is now an upper-case -P
-                    In the future, rocprofv3 plans to support debugger-like process attachment and -p
-                    is de-facto standard shorthand option for this feature"""
+            "When using custom MPI environment variables, "
+            "both --mpi-world-rank-variable and --mpi-world-size-variable must be specified"
         )
+
+    # Set ROCPROF_MPI_RANK_VAR and ROCPROF_MPI_SIZE_VAR to tell C++ which env variables to read
+    # This allows subprocesses to correctly read their own rank/size from MPI environment
+    # instead of inheriting stale values from parent process
+    # Use get_mpi_rank_and_size to ensure rank and size come from the same source
+    # This normalizes all MPI implementations (OpenMPI, MVAPICH2, SLURM, custom, etc.)
+    mpi_rank, mpi_size, rank_var, size_var = get_mpi_rank_and_size(
+        custom_rank_env, custom_size_env
+    )
+    if rank_var is not None:
+        app_env["ROCPROF_MPI_RANK_VAR"] = rank_var
+    if size_var is not None:
+        app_env["ROCPROF_MPI_SIZE_VAR"] = size_var
+
+    # Check if this MPI rank should provide profile/trace output
+    # If not, run the application without profiling instrumentation
+    if has_set_attr(args, "profile_mpi_ranks"):
+        if not should_rank_provide_output(
+            args.profile_mpi_ranks, custom_rank_env, custom_size_env
+        ):
+            # We already have mpi_rank from above, just use it for logging
+            if mpi_rank is not None and args.log_level in ("info", "trace"):
+                sys.stderr.write(
+                    f"[rocprofv3] MPI rank {mpi_rank} not in selected ranks "
+                    f"({args.profile_mpi_ranks}), running application without profiling\n"
+                )
+                sys.stderr.flush()
+            # Execute application without profiling
+            if use_execv:
+                os.execvpe(app_args[0], app_args, env=app_env)
+            else:
+                try:
+                    exit_code = subprocess.check_call(app_args, env=app_env)
+                    return exit_code
+                except Exception as e:
+                    fatal_error(f"{e}\n")
 
     def setattrifnone(obj, attr, value):
         if getattr(obj, f"{attr}") is None:
@@ -1065,6 +1446,9 @@ def run(app_args, args, **kwargs):
     ROCPROF_LIST_AVAIL_TOOL_LIBRARY = (
         f"{ROCM_DIR}/lib/rocprofiler-sdk/librocprofv3-list-avail.so"
     )
+    ROCPROF_ATTACH_TOOL_LIBRARY = (
+        f"{ROCM_DIR}/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
+    )
 
     ROCPROF_TOOL_LIBRARY = resolve_library_path(ROCPROF_TOOL_LIBRARY, args)
     ROCPROF_SDK_LIBRARY = resolve_library_path(ROCPROF_SDK_LIBRARY, args)
@@ -1073,6 +1457,7 @@ def run(app_args, args, **kwargs):
     ROCPROF_LIST_AVAIL_TOOL_LIBRARY = resolve_library_path(
         ROCPROF_LIST_AVAIL_TOOL_LIBRARY, args
     )
+    ROCPROF_ATTACH_TOOL_LIBRARY = resolve_library_path(ROCPROF_ATTACH_TOOL_LIBRARY, args)
 
     prepend_preload = [itr for itr in args.preload if itr]
     append_preload = [
@@ -1080,8 +1465,9 @@ def run(app_args, args, **kwargs):
         ROCPROF_SDK_LIBRARY,
     ]
 
-    update_env("LD_PRELOAD", ":".join(prepend_preload), prepend=True)
-    update_env("LD_PRELOAD", ":".join(append_preload), append=True)
+    if not args.pid:
+        update_env("LD_PRELOAD", ":".join(prepend_preload), prepend=True)
+        update_env("LD_PRELOAD", ":".join(append_preload), append=True)
 
     update_env(
         "ROCP_TOOL_LIBRARIES",
@@ -1102,6 +1488,7 @@ def run(app_args, args, **kwargs):
     update_env("ROCPROF_OUTPUT_FILE_NAME", _output_file)
     update_env("ROCPROF_OUTPUT_PATH", _output_path)
     update_env("ROCPROF_OUTPUT_CONFIG_FILE", args.output_config, overwrite_if_true=True)
+    update_env("ROCPROF_ATTACH_OUTPUT_GENERATION_SYNC", args.attach_sync_output)
     if app_pass is not None and args.sub_directory is not None:
         app_env["ROCPROF_OUTPUT_PATH"] = os.path.join(
             f"{_output_path}", f"{args.sub_directory}{app_pass}"
@@ -1133,6 +1520,7 @@ def run(app_args, args, **kwargs):
             "hsa_trace",
             "marker_trace",
             "kernel_trace",
+            "kfd_trace",
             "memory_copy_trace",
             "memory_allocation_trace",
             "scratch_memory_trace",
@@ -1147,6 +1535,7 @@ def run(app_args, args, **kwargs):
             "hip_runtime_trace",
             "marker_trace",
             "kernel_trace",
+            "kfd_trace",
             "memory_copy_trace",
             "memory_allocation_trace",
             "scratch_memory_trace",
@@ -1164,8 +1553,12 @@ def run(app_args, args, **kwargs):
         for itr in ("core", "amd", "image", "finalizer"):
             setattrifnone(args, f"hsa_{itr}_trace", True)
 
+    if args.kfd_trace:
+        for itr in ("page_migration", "page_mapping", "queue", "dropped_events"):
+            setattrifnone(args, f"kfd_{itr}_trace", True)
+
     trace_count = 0
-    trace_opts = ["--hip-trace", "--hsa-trace"]
+    trace_opts = ["--hip-trace", "--hsa-trace", "--kfd-trace"]
     for opt, env_val in dict(
         [
             ["hip_compiler_trace", "HIP_COMPILER_API_TRACE"],
@@ -1181,6 +1574,10 @@ def run(app_args, args, **kwargs):
             ["kernel_trace", "KERNEL_TRACE"],
             ["memory_copy_trace", "MEMORY_COPY_TRACE"],
             ["memory_allocation_trace", "MEMORY_ALLOCATION_TRACE"],
+            ["kfd_page_migration_trace", "KFD_PAGE_MIGRATION_TRACE"],
+            ["kfd_page_mapping_trace", "KFD_PAGE_MAPPING_TRACE"],
+            ["kfd_queue_trace", "KFD_QUEUE_TRACE"],
+            ["kfd_dropped_events_trace", "KFD_DROPPED_EVENTS_TRACE"],
             ["scratch_memory_trace", "SCRATCH_MEMORY_TRACE"],
             ["group_by_queue", "GROUP_BY_QUEUE"],
         ]
@@ -1280,11 +1677,23 @@ def run(app_args, args, **kwargs):
         args.selected_regions,
         overwrite_if_true=True,
     )
+    update_env(
+        "ROCPROF_SELECTED_REGIONS_REF_COUNT",
+        args.selected_regions_ref_count,
+        overwrite_if_true=True,
+    )
 
     if args.list_avail:
         update_env(
             "ROCPROF_LIST_AVAIL_TOOL_LIBRARY",
             ROCPROF_LIST_AVAIL_TOOL_LIBRARY,
+            overwrite_if_true=True,
+        )
+
+    if args.pid:
+        update_env(
+            "ROCPROF_ATTACH_TOOL_LIBRARY",
+            ROCPROF_ATTACH_TOOL_LIBRARY,
             overwrite_if_true=True,
         )
 
@@ -1420,6 +1829,17 @@ def run(app_args, args, **kwargs):
                 env=app_env,
             )
 
+    elif args.pid:
+        update_env("ROCPROF_ATTACH_PID", args.pid)
+        if args.attach_duration_msec is not None:
+            update_env("ROCPROF_ATTACH_DURATION", f"{args.attach_duration_msec}")
+        update_env("ROCPROF_ATTACH_CHILDREN", "1" if args.attach_children else "0")
+        path = os.path.join(f"{ROCM_DIR}", "bin/rocprof-attach")
+        if app_args:
+            exit_code = subprocess.check_call([sys.executable, path], env=app_env)
+        else:
+            app_args = [sys.executable, path]
+
     elif not app_args and not args.echo:
         log_config(app_env)
         fatal_error("No application provided")
@@ -1452,9 +1872,36 @@ def run(app_args, args, **kwargs):
 
     if args.pmc:
         update_env("ROCPROF_COUNTER_COLLECTION", True, overwrite=True)
-        update_env(
-            "ROCPROF_COUNTERS", "pmc: {}".format(" ".join(args.pmc)), overwrite=True
-        )
+
+        # Check if multi-pass mode (multiple --pmc flags)
+        # argparse with action='append' + nargs='*' creates list of lists
+        # Multi-pass: args.pmc = [['SQ_WAVES'], ['GRBM_COUNT']] (list of lists)
+        # Single-pass: args.pmc = ['SQ_WAVES', 'FETCH_SIZE'] (list of strings)
+        is_multipass = len(args.pmc) > 0 and isinstance(args.pmc[0], list)
+        if is_multipass:
+            # Multi-pass: set ROCPROF_COUNTER_GROUPS (newline-delimited)
+            # args.pmc is a list of lists: [['SQ_WAVES'], ['GRBM_COUNT']]
+            group_env = ""
+            for group in args.pmc:
+                # Each group is a list of counter names
+                counter_str = " ".join(group)
+                group_env += f"pmc: {counter_str}\n"
+            group_env = group_env.rstrip()
+
+            update_env("ROCPROF_COUNTER_GROUPS", group_env, overwrite=True)
+
+            # Set interval if specified
+            if hasattr(args, "pmc_group_interval") and args.pmc_group_interval:
+                update_env(
+                    "ROCPROF_COUNTER_GROUPS_INTERVAL",
+                    f"{str(args.pmc_group_interval)}",
+                    overwrite=True,
+                )
+        else:
+            # Single-pass: set ROCPROF_COUNTERS (existing behavior)
+            # args.pmc is a list of counter names: ['SQ_WAVES', 'FETCH_SIZE']
+            counter_str = " ".join(args.pmc)
+            update_env("ROCPROF_COUNTERS", f"pmc: {counter_str}", overwrite=True)
 
     if args.pmc_groups:
         group_env = ""
@@ -1509,6 +1956,9 @@ def run(app_args, args, **kwargs):
     if args.disable_signal_handlers is not None:
         update_env("ROCPROF_SIGNAL_HANDLERS", not args.disable_signal_handlers)
 
+    if args.process_sync is not None:
+        update_env("ROCPROF_PROCESS_SYNC", args.process_sync)
+
     if args.minimum_output_data:
         update_env("ROCPROF_MINIMUM_OUTPUT_BYTES", args.minimum_output_data * 1024)
 
@@ -1554,6 +2004,12 @@ def run(app_args, args, **kwargs):
                 int_auto(args.att_simd_select),
                 overwrite=True,
             )
+        if args.att_consecutive_kernels:
+            update_env(
+                "ROCPROF_ATT_CONSECUTIVE_KERNELS",
+                int_auto(args.att_consecutive_kernels),
+                overwrite=True,
+            )
         if args.att_serialize_all:
             update_env(
                 "ROCPROF_ATT_PARAM_SERIALIZE_ALL",
@@ -1595,6 +2051,12 @@ def run(app_args, args, **kwargs):
                     args.att_perfcounter_ctrl,
                     overwrite=True,
                 )
+        if args.att_perfcounter_target_only:
+            update_env(
+                "ROCPROF_ATT_PARAM_TARGET_ONLY",
+                1 if args.att_perfcounter_target_only else 0,
+                overwrite=True,
+            )
         if args.att_activity:
             if args.pmc:
                 fatal_error("ATT activity cannot be enabled with PMC")
@@ -1649,23 +2111,142 @@ def main(argv=None):
             print(f"    {key:>16}: {itr}")
         return 0
 
+    # If no arguments provided, show help and exit
+    if (argv is None and len(sys.argv) == 1) or (argv is not None and len(argv) == 0):
+        parse_arguments(["--help"])
+        return 0
+
     inp_args = (
         parse_input(cmd_args.input) if getattr(cmd_args, "input") else [dotdict({})]
     )
 
-    if len(inp_args) == 1:
+    # Detect CLI multi-pass mode (multiple --pmc flags)
+    cli_multipass = (
+        hasattr(cmd_args, "pmc") and cmd_args.pmc is not None and len(cmd_args.pmc) > 1
+    )
+
+    # Validate CLI multi-pass usage
+    if cli_multipass:
+        # Check for empty groups
+        for idx, group in enumerate(cmd_args.pmc):
+            if not group or (isinstance(group, list) and len(group) == 0):
+                fatal_error(
+                    f"Empty counter group in --pmc flag {idx + 1}. "
+                    "Each --pmc must specify at least one counter."
+                )
+
+    # Validate incompatible options
+    if cli_multipass and cmd_args.pid:
+        fatal_error(
+            "Multi-pass counter collection (multiple --pmc flags) is not compatible with attach mode (--pid)"
+        )
+
+    if cli_multipass and cmd_args.collection_period:
+        fatal_error(
+            "Multi-pass counter collection (multiple --pmc flags) is not compatible with --collection-period"
+        )
+
+    # Check if we should use multi-pass mode:
+    # 1. Multiple --pmc flags on CLI (cli_multipass)
+    # 2. Multiple pmc lines in input file (len(inp_args) > 1)
+    # 3. CLI has --pmc AND input file has pmc (combine them as separate passes)
+    cli_has_pmc = hasattr(cmd_args, "pmc") and cmd_args.pmc is not None
+    input_has_pmc = len(inp_args) > 0 and has_set_attr(inp_args[0], "pmc")
+    use_multipass = cli_multipass or len(inp_args) > 1 or (cli_has_pmc and input_has_pmc)
+
+    if not use_multipass:
+        # Single-pass mode: only one source of PMC (either CLI or input file, but not both)
+        # Normalize cmd_args.pmc before comparison with inp_args
+        # Single --pmc flag creates [['SQ_WAVES']] due to action="append", but input file has ['SQ_WAVES']
+        if cli_has_pmc and len(cmd_args.pmc) == 1 and isinstance(cmd_args.pmc[0], list):
+            cmd_args.pmc = cmd_args.pmc[0]
+
         args = get_args(cmd_args, inp_args[0])
+
+        if args.pid:
+            # For reattachment support, args must be the same as previous rocprofv3 sessions
+            # Store args in a temporary file for future sessions. If the temporary file already exists,
+            # compare those args and error out if the tracing options are not the same.
+            import pickle
+
+            if args.collection_period:
+                fatal_error("--collection-period is not compatible with attach mode")
+
+            fname = f"/tmp/rocprofv3_attach_{args.pid}.pkl"
+            if not os.path.exists(fname):
+                # if this is the first attachment, write the temp configuration file for future attachments
+                with open(fname, "wb") as ofs:
+                    if args.log_level in ("config", "info", "trace"):
+                        print(f"Saving attach configuration to {fname}...")
+                    pickle.dump(args, ofs)
+            else:
+                # if this is not the first attachment
+                # load the configuration from the previous attachment
+                with open(fname, "rb") as ifs:
+                    if args.log_level in ("config", "info", "trace"):
+                        print(f"Loading attach configuration from {fname}...")
+                    prev_args = pickle.load(ifs)
+
+                # get_args will compare the arguments used to the previous attachments's arguments
+                # arguments matching the filter will throw an error if they are different
+                args = get_args(
+                    args,
+                    dotdict(prev_args),
+                    # when updating this filter, please also update documentation on reattachment
+                    # in using-rocprofv3-process-attachment.rst
+                    filter=r".*_trace|^pc_sampling_.*$|^att_.*$|"
+                    r"^(pmc|pmc_groups|output_config|extra_counters)$|"
+                    r"^kernel_(include_regex|exclude_regex|iteration_range)$",
+                    require_in_both=True,
+                    # Allow this value to be None if it is not set in current cmd line
+                    ignore_prev_inp=r"attach_duration_msec",
+                )
+
         pass_idx = None
         if has_set_attr(args, "pmc") and len(args.pmc) > 0:
             pass_idx = 1
         ec = run(app_args, args, pass_id=pass_idx)
-    else:
+    elif use_multipass:
+        # Multi-pass mode: from CLI --pmc flags and/or input file
         ec = 0
-        for idx, itr in enumerate(inp_args):
-            args = get_args(cmd_args, itr)
+
+        # Collect all pass configs from both CLI and input file
+        all_pass_configs = []
+
+        # Add CLI PMC groups as pass configs if present
+        if cli_has_pmc:
+            cli_pmc_groups = cmd_args.pmc
+            cmd_args.pmc = None  # Clear to avoid conflicts when merging with input file
+            # Normalize: action="append" creates [['GRBM_COUNT']] for single --pmc
+            if len(cli_pmc_groups) == 1 and isinstance(cli_pmc_groups[0], list):
+                all_pass_configs.append({"pmc": cli_pmc_groups[0], "from_cli": True})
+            else:
+                # Multiple --pmc flags: already a list of lists
+                for pmc_group in cli_pmc_groups:
+                    all_pass_configs.append({"pmc": pmc_group, "from_cli": True})
+
+        # Add input file job configs (preserving all settings, not just PMC)
+        for inp_arg in inp_args:
+            if has_set_attr(inp_arg, "pmc"):
+                all_pass_configs.append({"config": inp_arg, "from_cli": False})
+
+        # Get base args from first input arg (for CLI-only passes)
+        base_args = get_args(cmd_args, inp_args[0])
+
+        # Run each pass with its specific config
+        for idx, pass_config in enumerate(all_pass_configs):
+            if pass_config["from_cli"]:
+                # CLI pass: use base_args and override PMC
+                pass_args = dotdict(dict(base_args))
+                pass_args.pmc = pass_config["pmc"]
+                pass_args.sub_directory = "pass_"
+            else:
+                # Input file pass: merge cmd_args with the full job config
+                pass_args = get_args(cmd_args, pass_config["config"])
+
             _ec = run(
                 app_args,
-                args,
+                pass_args,
                 pass_id=(idx + 1),
                 use_execv=False,
             )

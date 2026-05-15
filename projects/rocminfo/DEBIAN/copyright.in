@@ -1,0 +1,7 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: @DEB_PACKAGE_NAME@
+Upstream-Contact: @DEB_MAINTAINER_NAME@ <@DEB_MAINTAINER_EMAIL@>
+Source: https://github.com/ROCm/rocm-systems
+Files: *
+License: @DEB_LICENSE@
+Copyright: @DEB_COPYRIGHT_YEAR@ Advanced Micro Devices, Inc. All rights reserved.

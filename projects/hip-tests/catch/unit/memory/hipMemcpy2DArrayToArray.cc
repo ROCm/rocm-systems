@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include <hip/hip_runtime_api.h>
@@ -32,7 +19,7 @@ bool compare_arrays(int* arr1, int* arr2, int width, int height) {
   return true;
 }
 
-TEST_CASE("Unit_hipMemcpy2DArrayToArray_Negative") {
+HIP_TEST_CASE(Unit_hipMemcpy2DArrayToArray_Negative) {
   CHECK_IMAGE_SUPPORT
 
   constexpr int width = 256;
@@ -97,26 +84,22 @@ TEST_CASE("Unit_hipMemcpy2DArrayToArray_Negative") {
   }
 
   SECTION("Invalid source and destination arrays") {
-    HIP_CHECK_ERROR(hipMemcpy2DArrayToArray(nullptr, 0, 0,
-                                            nullptr, 0, 0,
-                                            width, height,
+    HIP_CHECK_ERROR(hipMemcpy2DArrayToArray(nullptr, 0, 0, nullptr, 0, 0, width, height,
                                             hipMemcpyDeviceToDevice),
-                                            hipErrorInvalidResourceHandle);
+                    hipErrorInvalidResourceHandle);
   }
 
   SECTION("Invalid copy direction") {
-    HIP_CHECK_ERROR(hipMemcpy2DArrayToArray(d_dst_arr, 0, 0,
-                                            d_src_arr, 0, 0,
-                                            width, height,
+    HIP_CHECK_ERROR(hipMemcpy2DArrayToArray(d_dst_arr, 0, 0, d_src_arr, 0, 0, width, height,
                                             static_cast<hipMemcpyKind>(-100)),
-                                            hipErrorInvalidMemcpyDirection);
+                    hipErrorInvalidMemcpyDirection);
   }
 
   HIP_CHECK(hipFreeArray(d_src_arr));
   HIP_CHECK(hipFreeArray(d_dst_arr));
 }
 
-TEST_CASE("Unit_hipMemcpy2DArrayToArray_Positive") {
+HIP_TEST_CASE(Unit_hipMemcpy2DArrayToArray_Positive) {
   CHECK_IMAGE_SUPPORT
 
   constexpr int width = 4;
@@ -171,7 +154,7 @@ TEST_CASE("Unit_hipMemcpy2DArrayToArray_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemcpy2DArrayToArray_BasicPositive") {
+HIP_TEST_CASE(Unit_hipMemcpy2DArrayToArray_BasicPositive) {
   CHECK_IMAGE_SUPPORT
 
   const size_t width = 1024;
@@ -180,7 +163,8 @@ TEST_CASE("Unit_hipMemcpy2DArrayToArray_BasicPositive") {
 
   std::vector<char> srcHost(N), dstHost(N);
   for (int i = 0; i < N; i++) {
-    srcHost[i] = 'A'; dstHost[i] = 'Z';
+    srcHost[i] = 'A';
+    dstHost[i] = 'Z';
   }
 
   hipChannelFormatDesc desc = hipCreateChannelDesc<char>();
@@ -194,17 +178,13 @@ TEST_CASE("Unit_hipMemcpy2DArrayToArray_BasicPositive") {
   HIP_CHECK(hipMallocArray(&dstArray, &desc, width, height, flags));
   REQUIRE(dstArray != nullptr);
 
-  HIP_CHECK(hipMemcpy2DToArray(srcArray, 0, 0, srcHost.data(), width,
-                               width, height,
+  HIP_CHECK(hipMemcpy2DToArray(srcArray, 0, 0, srcHost.data(), width, width, height,
                                hipMemcpyHostToDevice));
 
-  HIP_CHECK(hipMemcpy2DArrayToArray(dstArray, 0, 0,
-                                    srcArray, 0, 0,
-                                    width, height,
+  HIP_CHECK(hipMemcpy2DArrayToArray(dstArray, 0, 0, srcArray, 0, 0, width, height,
                                     hipMemcpyDeviceToDevice));
 
-  HIP_CHECK(hipMemcpy2DFromArray(dstHost.data(), width, dstArray,
-                                 0, 0, width, height,
+  HIP_CHECK(hipMemcpy2DFromArray(dstHost.data(), width, dstArray, 0, 0, width, height,
                                  hipMemcpyDeviceToHost));
 
   for (int i = 0; i < N; i++) {

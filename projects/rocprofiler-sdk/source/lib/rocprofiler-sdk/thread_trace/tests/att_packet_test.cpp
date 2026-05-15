@@ -26,6 +26,7 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 #include "lib/rocprofiler-sdk/counters/tests/hsa_tables.hpp"
+#include "lib/rocprofiler-sdk/counters/tests/metrics_test_helpers.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
@@ -33,8 +34,8 @@
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 
-#include <glog/logging.h>
 #include <gtest/gtest.h>
+#include "lib/common/logging.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -74,6 +75,27 @@ test_init()
     [[maybe_unused]] static bool run_once = init();
 }
 
+rocprofiler_status_t
+get_sq_waves_counter(rocprofiler_agent_id_t /* id */,
+                     rocprofiler_counter_id_t* counters,
+                     size_t                    num_counters,
+                     void*                     userdata)
+{
+    for(size_t i = 0; i < num_counters; ++i)
+    {
+        auto _info = rocprofiler_counter_info_v1_t{};
+        ROCPROFILER_CALL(
+            rocprofiler_query_counter_info(counters[i], ROCPROFILER_COUNTER_INFO_VERSION_1, &_info),
+            "query counter");
+
+        if(_info.name && std::string_view(_info.name).find("SQ_WAVES") == 0)
+        {
+            static_cast<rocprofiler_thread_trace_parameter_t*>(userdata)->counter_id = counters[i];
+            return ROCPROFILER_STATUS_SUCCESS;
+        }
+    }
+    return ROCPROFILER_STATUS_ERROR;
+}
 }  // namespace rocprofiler
 
 using namespace rocprofiler;
@@ -160,7 +182,12 @@ TEST(thread_trace, configure_test)
                rocprofiler_dispatch_id_t,
                void*,
                rocprofiler_user_data_t*) { return ROCPROFILER_THREAD_TRACE_CONTROL_NONE; },
-            [](rocprofiler_agent_id_t, int64_t, void*, size_t, rocprofiler_user_data_t) {},
+            [](rocprofiler_agent_id_t,
+               int64_t,
+               void*,
+               size_t,
+               rocprofiler_thread_trace_shader_data_flags_t,
+               rocprofiler_user_data_t) {},
             nullptr);
     }
 
@@ -171,6 +198,7 @@ TEST(thread_trace, configure_test)
 
 TEST(thread_trace, perfcounters_configure_test)
 {
+    constexpr int NUM_COUNTERS = 3;
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     test_init();
 
@@ -180,32 +208,94 @@ TEST(thread_trace, perfcounters_configure_test)
     rocprofiler_context_id_t ctx{0};
     ROCPROFILER_CALL(rocprofiler_create_context(&ctx), "context creation failed");
 
-    // Only GFX9 SQ Block counters are supported
-    std::vector<std::pair<std::string, uint64_t>> perf_counters = {
-        {"SQ_WAVES", 0x1}, {"SQ_WAVES", 0x2}, {"SQ_WAVES", 0x2}, {"GRBM_COUNT", 0x3}};
-    std::set<std::pair<uint32_t, uint32_t>>           expected;
-    std::vector<rocprofiler_thread_trace_parameter_t> params;
-    params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTERS_CTRL, {1}});
-    auto metrics = rocprofiler::counters::getMetricsForAgent("gfx90a");
+    auto agents = hsa::get_queue_controller()->get_supported_agents();
+    ASSERT_GT(agents.size(), 0);
 
-    for(auto& [counter_name, simd_mask] : perf_counters)
-        for(auto& metric : metrics)
-            if(metric.name() == counter_name)
-            {
-                rocprofiler_thread_trace_parameter_t att_param;
-                att_param.type       = ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTER;
-                att_param.counter_id = rocprofiler_counter_id_t{.handle = metric.id()};
-                att_param.simd_mask  = simd_mask;
-                params.push_back(att_param);
-                expected.insert({std::atoi(metric.event().c_str()), simd_mask});
-            }
+    for(auto& [_, agent] : agents)
+    {
+        auto params = std::vector<rocprofiler_thread_trace_parameter_t>{};
+        params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTERS_CTRL, {1}});
+
+        auto sq_waves = rocprofiler_thread_trace_parameter_t{};
+        sq_waves.type = ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTER;
+        ROCPROFILER_CALL(rocprofiler_iterate_agent_supported_counters(
+                             agent.get_rocp_agent()->id, get_sq_waves_counter, &sq_waves),
+                         "iterate counters");
+
+        for(int i = 0; i < NUM_COUNTERS; i++)
+        {
+            sq_waves.simd_mask = 1 << i;
+            params.emplace_back(sq_waves);
+        }
+
+        ROCPROFILER_CALL(
+            rocprofiler_configure_dispatch_thread_trace_service(
+                ctx,
+                agent.get_rocp_agent()->id,
+                params.data(),
+                params.size(),
+                [](rocprofiler_agent_id_t,
+                   rocprofiler_queue_id_t,
+                   rocprofiler_async_correlation_id_t,
+                   rocprofiler_kernel_id_t,
+                   rocprofiler_dispatch_id_t,
+                   void*,
+                   rocprofiler_user_data_t*) { return ROCPROFILER_THREAD_TRACE_CONTROL_NONE; },
+                [](rocprofiler_agent_id_t,
+                   int64_t,
+                   void*,
+                   size_t,
+                   rocprofiler_thread_trace_shader_data_flags_t,
+                   rocprofiler_user_data_t) {},
+                nullptr),
+            "configure");
+    }
+
+    auto* context = rocprofiler::context::get_mutable_registered_context(ctx);
+    auto* tracer  = context->dispatch_thread_trace.get();
+
+    ASSERT_NE(tracer, nullptr);
+    for(auto& [id, agent] : tracer->get_agents())
+    {
+        // We expect perfcounters.size() to match the number of counters we added
+        ASSERT_EQ(agent->params.perfcounter_ctrl, 1);
+        ASSERT_EQ(agent->params.perfcounters.size(), NUM_COUNTERS);
+        for(const auto& param : agent->params.perfcounters)
+        {
+            // We expect a nonzero event id (.first) and nonzero simd mask (.second)
+            EXPECT_TRUE(param.first != 0);
+            EXPECT_TRUE(param.second != 0)
+                << "valid AQLprofile mask not generated for perfcounters";
+        }
+    }
+    context::pop_client(1);
+}
+
+TEST(thread_trace, perfcounters_configure_fail_test)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+    rocprofiler_context_id_t ctx{0};
+    ROCPROFILER_CALL(rocprofiler_create_context(&ctx), "context creation failed");
 
     auto agents = hsa::get_queue_controller()->get_supported_agents();
     ASSERT_GT(agents.size(), 0);
 
     for(auto& [_, agent] : agents)
     {
-        rocprofiler_configure_dispatch_thread_trace_service(
+        auto params = std::vector<rocprofiler_thread_trace_parameter_t>{};
+        params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTERS_CTRL, {1}});
+
+        auto sq_waves = rocprofiler_thread_trace_parameter_t{};
+        sq_waves.type = ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTER;
+        // We are not initializing the counter, so we expect the configuration to fail
+        params.emplace_back(sq_waves);
+
+        auto status = rocprofiler_configure_dispatch_thread_trace_service(
             ctx,
             agent.get_rocp_agent()->id,
             params.data(),
@@ -217,21 +307,15 @@ TEST(thread_trace, perfcounters_configure_test)
                rocprofiler_dispatch_id_t,
                void*,
                rocprofiler_user_data_t*) { return ROCPROFILER_THREAD_TRACE_CONTROL_NONE; },
-            [](rocprofiler_agent_id_t, int64_t, void*, size_t, rocprofiler_user_data_t) {},
+            [](rocprofiler_agent_id_t,
+               int64_t,
+               void*,
+               size_t,
+               rocprofiler_thread_trace_shader_data_flags_t,
+               rocprofiler_user_data_t) {},
             nullptr);
-    }
 
-    auto* context = rocprofiler::context::get_mutable_registered_context(ctx);
-    auto* tracer  = context->dispatch_thread_trace.get();
-
-    ASSERT_NE(tracer, nullptr);
-    for(auto& [id, agent] : tracer->get_agents())
-    {
-        ASSERT_EQ(agent->params.perfcounter_ctrl, 1);
-        ASSERT_EQ(agent->params.perfcounters.size(), 3);
-        for(const auto& param : agent->params.perfcounters)
-            EXPECT_TRUE(expected.find(param) != expected.end())
-                << "valid AQLprofile mask not generated for perfcounters";
+        EXPECT_NE(status, ROCPROFILER_STATUS_SUCCESS);
     }
     context::pop_client(1);
 }
@@ -257,7 +341,7 @@ TEST(thread_trace, perfcounters_aql_options_test)
             if(metric.name() == counter_name)
                 _params.perfcounters.push_back({std::atoi(metric.event().c_str()), simd_mask});
     _params.perfcounter_ctrl = 2;
-    auto new_tracer          = std::make_unique<thread_trace::ThreadTracerQueue>(
+    auto new_tracer          = std::make_unique<thread_trace::ThreadTracerAgent>(
         _params, begin(agents)->second.get_rocp_agent()->id);
 
     ASSERT_EQ(new_tracer->factory->aql_params.size(),
@@ -286,13 +370,14 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
         params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_NO_DETAIL, {0}});
 
         {
-            auto metrics = rocprofiler::counters::getMetricsForAgent("gfx90a");
+            auto metrics = rocprofiler::counters::getMetricsForAgent(agent);
 
             rocprofiler_thread_trace_parameter_t att_param;
             att_param.type      = ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTER;
             att_param.simd_mask = 0xF;
             for(auto& metric : metrics)
-                if(metric.name() == "SQ_WAVES") rocprofiler_counter_id_t{.handle = metric.id()};
+                if(metric.name() == "SQ_WAVES")
+                    att_param.counter_id = rocprofiler_counter_id_t{.handle = metric.id()};
 
             params.push_back(att_param);
         }
@@ -302,7 +387,12 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
             agent->id,
             params.data(),
             params.size(),
-            [](rocprofiler_agent_id_t, int64_t, void*, size_t, rocprofiler_user_data_t) {},
+            [](rocprofiler_agent_id_t,
+               int64_t,
+               void*,
+               size_t,
+               rocprofiler_thread_trace_shader_data_flags_t,
+               rocprofiler_user_data_t) {},
             rocprofiler_user_data_t{});
     }
     return ROCPROFILER_STATUS_SUCCESS;
@@ -324,4 +414,112 @@ TEST(thread_trace, agent_configure_test)
                                                         sizeof(rocprofiler_agent_t),
                                                         &ctx),
                      "Failed to find GPU agents");
+
+    context::pop_client(1);
+}
+
+TEST(thread_trace, triple_buffer_multiple_shader)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+    rocprofiler_context_id_t ctx{0};
+    ROCPROFILER_CALL(rocprofiler_create_context(&ctx), "context creation failed");
+
+    auto configure_agents = [](rocprofiler_agent_version_t /* version */,
+                               const void** agents,
+                               size_t       num_agents,
+                               void*        ctx_ptr) {
+        for(size_t idx = 0; idx < num_agents; idx++)
+        {
+            const auto* agent = static_cast<const rocprofiler_agent_v0_t*>(agents[idx]);
+            if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
+
+            auto parameters = std::vector<rocprofiler_thread_trace_parameter_t>{};
+            parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE,
+                                  ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE_TRIPLE_BUFFER});
+            parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, {0x3}});
+
+            auto status = rocprofiler_configure_device_thread_trace_service(
+                *reinterpret_cast<rocprofiler_context_id_t*>(ctx_ptr),
+                agent->id,
+                parameters.data(),
+                parameters.size(),
+                [](rocprofiler_agent_id_t,
+                   int64_t,
+                   void*,
+                   size_t,
+                   rocprofiler_thread_trace_shader_data_flags_t,
+                   rocprofiler_user_data_t) {},
+                rocprofiler_user_data_t{});
+
+            return status;
+        }
+        return ROCPROFILER_STATUS_ERROR;
+    };
+
+    auto status = rocprofiler_query_available_agents(
+        ROCPROFILER_AGENT_INFO_VERSION_0, configure_agents, sizeof(rocprofiler_agent_t), &ctx);
+    ASSERT_EQ(status, ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT);
+
+    context::pop_client(1);
+}
+
+TEST(thread_trace, triple_buffer_dispatch_mode)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+    rocprofiler_context_id_t ctx{0};
+    ROCPROFILER_CALL(rocprofiler_create_context(&ctx), "context creation failed");
+
+    auto configure_agents = [](rocprofiler_agent_version_t /* version */,
+                               const void** agents,
+                               size_t       num_agents,
+                               void*        ctx_ptr) {
+        for(size_t idx = 0; idx < num_agents; idx++)
+        {
+            const auto* agent = static_cast<const rocprofiler_agent_v0_t*>(agents[idx]);
+            if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
+
+            auto parameters = std::vector<rocprofiler_thread_trace_parameter_t>{};
+            parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE,
+                                  ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE_TRIPLE_BUFFER});
+
+            auto status = rocprofiler_configure_dispatch_thread_trace_service(
+                *reinterpret_cast<rocprofiler_context_id_t*>(ctx_ptr),
+                agent->id,
+                parameters.data(),
+                parameters.size(),
+                [](rocprofiler_agent_id_t,
+                   rocprofiler_queue_id_t,
+                   rocprofiler_async_correlation_id_t,
+                   rocprofiler_kernel_id_t,
+                   rocprofiler_dispatch_id_t,
+                   void*,
+                   rocprofiler_user_data_t*) { return ROCPROFILER_THREAD_TRACE_CONTROL_NONE; },
+                [](rocprofiler_agent_id_t,
+                   int64_t,
+                   void*,
+                   size_t,
+                   rocprofiler_thread_trace_shader_data_flags_t,
+                   rocprofiler_user_data_t) {},
+                nullptr);
+
+            return status;
+        }
+        return ROCPROFILER_STATUS_ERROR;
+    };
+
+    auto status = rocprofiler_query_available_agents(
+        ROCPROFILER_AGENT_INFO_VERSION_0, configure_agents, sizeof(rocprofiler_agent_t), &ctx);
+    ASSERT_EQ(status, ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT);
+
+    context::pop_client(1);
 }

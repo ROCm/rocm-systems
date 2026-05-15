@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -61,6 +61,9 @@
 #include <utility>
 #include <semaphore.h>
 #include "core/inc/runtime.h"
+#include <sys/mman.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #if defined(__i386__) || defined(__x86_64__)
 #include <cpuid.h>
 #endif
@@ -262,9 +265,19 @@ static_assert(sizeof(SharedMutex) == sizeof(pthread_rwlock_t*), "OS abstraction 
 static_assert(sizeof(Thread) == sizeof(os_thread*), "OS abstraction size mismatch");
 
 LibHandle LoadLib(std::string filename) {
-  void* ret = dlopen(filename.c_str(), RTLD_LAZY);
+  // RTLD_NODELETE keeps the library mapped even after dlclose.
+  // This prevents crashes when the library has circular dependencies:
+  // if libA loads libB, and libB links against libA, then dlclose(libB)
+  // could unmap libA while libA's code is still executing.
+  // With RTLD_NODELETE, dlclose decrements the refcount but does not
+  // unmap the code pages or run destructors - those happen at process exit.
+  int dlopen_flags = RTLD_LAZY;
+#ifdef RTLD_NODELETE
+  dlopen_flags |= RTLD_NODELETE;
+#endif
+  void* ret = dlopen(filename.c_str(), dlopen_flags);
   if (ret == nullptr) debug_print("LoadLib(%s) failed: %s\n", filename.c_str(), dlerror());
-  return *(LibHandle*)&ret;
+  return ret;
 }
 
 void* GetExportAddress(LibHandle lib, std::string export_name) {
@@ -294,7 +307,7 @@ void* GetExportAddress(LibHandle lib, std::string export_name) {
   return NULL;
 }
 
-void CloseLib(LibHandle lib) { dlclose(*(void**)&lib); }
+bool CloseLib(LibHandle lib) { return (dlclose(*(void**)&lib) == 0) ? true : false; }
 
 /*
  * @brief Look for a symbol called "HSA_AMD_TOOL_PRIORITY" across all loaded
@@ -312,6 +325,13 @@ void CloseLib(LibHandle lib) { dlclose(*(void**)&lib); }
  * shared objects.
  */
 
+// Disable ASAN: dl_iterate_phdr pointers may reside outside ASAN's shadow
+// mapped range as ASLR makes this non-deterministic across nodes/runs
+#if defined(__has_attribute)
+#if __has_attribute(no_sanitize)
+__attribute__((no_sanitize("address")))
+#endif
+#endif
 static int callback(struct dl_phdr_info* info, size_t size, void* data) {
   std::vector<std::string>* loadedToolsLib = (std::vector<std::string>*)data;
   assert(loadedToolsLib != nullptr);
@@ -324,7 +344,7 @@ static int callback(struct dl_phdr_info* info, size_t size, void* data) {
    * will have a specific segment or section. Hence its skipped.
    */
 
-  if ((info) && (info->dlpi_name[0] != '\0')) {
+  if ((info) && (info->dlpi_name) && (info->dlpi_name[0] != '\0')) {
     if (std::string(info->dlpi_name).find("vdso.so") != std::string::npos) return 0;
 
     /*
@@ -539,6 +559,8 @@ EventHandle CreateOsEvent(bool auto_reset, bool init_state) {
   EventDescriptor* eventDescrp;
   eventDescrp = (EventDescriptor*)malloc(sizeof(EventDescriptor));
 
+  if(!eventDescrp) { return nullptr; }
+
   pthread_mutex_init(&eventDescrp->mutex, NULL);
   pthread_cond_init(&eventDescrp->event, NULL);
   eventDescrp->auto_reset = auto_reset;
@@ -579,7 +601,7 @@ int WaitForOsEvent(EventHandle event, unsigned int milli_seconds) {
   }
 
   int ret_code = 0;
-  
+
   if (!eventDescrp->state) {
     if (milli_seconds == 0) {
       ret_code = 1;
@@ -814,6 +836,267 @@ bool ParseCpuID(cpuid_t* cpuinfo) {
 #else
   return false;
 #endif
+}
+
+uint64_t TimeNanos() {
+  struct timespec tp;
+  ::clock_gettime(CLOCK_MONOTONIC, &tp);
+  return (uint64_t)tp.tv_sec * (1000ULL * 1000ULL * 1000ULL) + (uint64_t)tp.tv_nsec;
+}
+
+static inline int MemProtToOsProt(MemProt prot) {
+  switch (prot) {
+    case MEM_PROT_NONE:
+      return PROT_NONE;
+    case MEM_PROT_READ:
+      return PROT_READ;
+    case MEM_PROT_RW:
+      return PROT_READ | PROT_WRITE;
+    case MEM_PROT_RWX:
+      return PROT_READ | PROT_WRITE | PROT_EXEC;
+    default:
+      break;
+  }
+  return -1;
+}
+
+size_t PageSize() {
+  static size_t g_page_size_ = 0;  //!< The default os page size
+  if (g_page_size_ == 0) {
+    g_page_size_ = (size_t)::sysconf(_SC_PAGESIZE);
+  }
+  return g_page_size_;
+}
+
+bool UnmapMemory(void* va, size_t size) { return ::munmap(va, size) == 0; }
+
+bool MapMemory(void* va, size_t size, MemProt perms, int fd, uint64_t cpu_addr) {
+  void* mapped_ptr = ::mmap(va, size, MemProtToOsProt(perms), 
+                            MAP_SHARED | MAP_FIXED, fd, cpu_addr);
+  if (mapped_ptr != va)
+      return false;
+  return true;
+}
+
+void* ReserveMemory(void* start, size_t size, size_t alignment, MemProt prot) {
+  size = AlignUp(size, PageSize());
+  // check for invalid input size
+  if (size == 0) {
+    return NULL;
+  }
+  alignment = std::max(PageSize(), AlignUp(alignment, PageSize()));
+  assert(IsPowerOfTwo(alignment) && "not a power of 2");
+
+  size_t requested = size + alignment - PageSize();
+  address mem = (address)::mmap(start, requested, MemProtToOsProt(prot),
+                                MAP_PRIVATE | MAP_NORESERVE | MAP_ANONYMOUS, 0, 0);
+
+  // check for out of memory
+  if (mem == MAP_FAILED) return NULL;
+
+  address aligned = AlignUp(mem, alignment);
+
+  // return the unused leading pages to the free state
+  if (&aligned[0] != &mem[0]) {
+    assert(&aligned[0] > &mem[0] && "check this code");
+    if (::munmap(&mem[0], &aligned[0] - &mem[0]) != 0) {
+      assert(!"::munmap failed");
+    }
+  }
+  // return the unused trailing pages to the free state
+  if (&aligned[size] != &mem[requested]) {
+    assert(&aligned[size] < &mem[requested] && "check this code");
+    if (::munmap(&aligned[size], &mem[requested] - &aligned[size]) != 0) {
+      assert(!"::munmap failed");
+    }
+  }
+
+  // Hint to enable THP for large host allocations which can help in performance gain
+  constexpr size_t kLargePageSize = 2 * 1024 * 1024;
+  if (size >= kLargePageSize) {
+    int status = madvise(aligned, size, MADV_HUGEPAGE);
+    if (status) {
+      fprintf(stderr,
+              "madvise with advice MADV_HUGEPAGE"
+              " starting at address %p and page size 0x%zx, returned %d, errno: %s",
+              aligned, size, status, strerror(errno));
+    }
+  }
+
+  return aligned;
+}
+
+bool ReleaseMemory(void* addr, size_t size) {
+  assert(IsMultipleOf(addr, PageSize()) && "not page aligned!");
+  size = AlignUp(size, PageSize());
+
+  return 0 == ::munmap(addr, size);
+}
+
+bool CommitMemory(void* addr, size_t size, MemProt prot) {
+  assert(IsMultipleOf(addr, PageSize()) && "not page aligned!");
+  size = AlignUp(size, PageSize());
+
+  return ::mmap(addr, size, MemProtToOsProt(prot), MAP_PRIVATE | MAP_FIXED | MAP_ANONYMOUS, -1,
+                0) != MAP_FAILED;
+}
+
+bool UncommitMemory(void* addr, size_t size) {
+  assert(IsMultipleOf(addr, PageSize()) && "not page aligned!");
+  size = AlignUp(size, PageSize());
+
+  return ::mmap(addr, size, PROT_NONE, MAP_PRIVATE | MAP_FIXED | MAP_NORESERVE | MAP_ANONYMOUS, -1,
+                0) != MAP_FAILED;
+}
+
+bool ProtectMemory(void* va, size_t size, MemProt perms) {
+  return ::mprotect(va, size, MemProtToOsProt(perms)) == 0;
+}
+
+uint64_t HostTotalPhysicalMemory() {
+  static uint64_t totalPhys = 0;
+
+  if (totalPhys != 0) {
+    return totalPhys;
+  }
+
+  totalPhys = sysconf(_SC_PAGESIZE) * sysconf(_SC_PHYS_PAGES);
+  return totalPhys;
+}
+
+int Ffs(int i) { return ffs(i); }
+
+int Ctz(uint64_t i) { return __builtin_ctz(i); }
+
+int Popcount(uint32_t i) { return __builtin_popcount(i); }
+
+char* DlError() { return dlerror(); }
+
+static inline int IPCSockToFd(IPCSocket sock) {
+  return static_cast<int>(sock);
+}
+
+static inline IPCSocket FdToIPCSock(int fd) {
+  return static_cast<IPCSocket>(fd);
+}
+
+IPCSocket CreateIPCServer(const char* name, int backlog) {
+  int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+  if (fd == -1) return INVALID_SOCKET_VALUE;
+
+  struct sockaddr_un address;
+  memset(&address, 0, sizeof(address));
+  address.sun_family = AF_UNIX;
+  strncpy(address.sun_path, name, sizeof(address.sun_path) - 1);
+  address.sun_path[0] = 0;  // abstract namespace
+
+  if (bind(fd, (struct sockaddr*)&address, sizeof(address)) != 0) {
+    close(fd);
+    return INVALID_SOCKET_VALUE;
+  }
+  if (listen(fd, backlog) != 0) {
+    close(fd);
+    return INVALID_SOCKET_VALUE;
+  }
+  return FdToIPCSock(fd);
+}
+
+IPCSocket AcceptIPCConnection(IPCSocket server) {
+  int fd = accept(IPCSockToFd(server), NULL, NULL);
+  if (fd == -1) return INVALID_SOCKET_VALUE;
+  return FdToIPCSock(fd);
+}
+
+IPCSocket ConnectToIPCServer(const char* name, std::chrono::milliseconds timeout,
+                             std::chrono::milliseconds retryInterval) {
+  int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+  if (fd == -1) return INVALID_SOCKET_VALUE;
+
+  struct sockaddr_un address;
+  memset(&address, 0, sizeof(address));
+  address.sun_family = AF_UNIX;
+  strncpy(address.sun_path, name, sizeof(address.sun_path) - 1);
+  address.sun_path[0] = 0;  // abstract namespace
+
+  auto deadline = std::chrono::steady_clock::now() + timeout;
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (connect(fd, (struct sockaddr*)&address, sizeof(address)) == 0)
+      return FdToIPCSock(fd);
+    usleep(static_cast<useconds_t>(retryInterval.count()) * 1000);
+  }
+
+  close(fd);
+  return INVALID_SOCKET_VALUE;
+}
+
+void SetIPCSocketRecvTimeout(IPCSocket sock, std::chrono::seconds timeout) {
+  struct timeval tv;
+  tv.tv_sec = static_cast<time_t>(timeout.count());
+  tv.tv_usec = 0;
+  setsockopt(IPCSockToFd(sock), SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+}
+
+int IPCSocketRead(IPCSocket conn, void* buf, size_t len) {
+  return static_cast<int>(read(IPCSockToFd(conn), buf, len));
+}
+
+int IPCSocketWrite(IPCSocket conn, const void* buf, size_t len) {
+  return static_cast<int>(write(IPCSockToFd(conn), buf, len));
+}
+
+int IPCSendHandle(IPCSocket conn, intptr_t handle) {
+  int fd = static_cast<int>(handle);
+  char iov_buf[1] = {'y'};
+  struct iovec io = {.iov_base = iov_buf, .iov_len = 1};
+
+  char cmsg_buf[CMSG_SPACE(sizeof(int))];
+  memset(cmsg_buf, 0, sizeof(cmsg_buf));
+
+  struct msghdr msg = {};
+  msg.msg_iov = &io;
+  msg.msg_iovlen = 1;
+  msg.msg_control = cmsg_buf;
+  msg.msg_controllen = sizeof(cmsg_buf);
+
+  struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg);
+  if (!cmsg) return -1;
+  cmsg->cmsg_level = SOL_SOCKET;
+  cmsg->cmsg_type = SCM_RIGHTS;
+  cmsg->cmsg_len = CMSG_LEN(sizeof(int));
+  memcpy(CMSG_DATA(cmsg), &fd, sizeof(int));
+
+  msg.msg_controllen = CMSG_SPACE(sizeof(int));
+
+  return (sendmsg(IPCSockToFd(conn), &msg, 0) < 0) ? -1 : 0;
+}
+
+intptr_t IPCRecvHandle(IPCSocket conn) {
+  char m_buffer[1];
+  struct iovec io = {.iov_base = m_buffer, .iov_len = sizeof(m_buffer)};
+
+  char c_buffer[256];
+  struct msghdr msg = {};
+  msg.msg_iov = &io;
+  msg.msg_iovlen = 1;
+  msg.msg_control = c_buffer;
+  msg.msg_controllen = sizeof(c_buffer);
+
+  ssize_t rcv = recvmsg(IPCSockToFd(conn), &msg, MSG_WAITALL);
+  if (rcv < 0) return -1;
+
+  while (!rcv)
+    rcv = recvmsg(IPCSockToFd(conn), &msg, MSG_WAITALL);
+
+  struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg);
+  if (!cmsg) return -1;
+  int fd;
+  memcpy(&fd, CMSG_DATA(cmsg), sizeof(fd));
+  return fd;
+}
+
+void CloseIPCSocket(IPCSocket sock) {
+  if (sock != INVALID_SOCKET_VALUE)
+    close(IPCSockToFd(sock));
 }
 
 }   //  namespace os

@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
  * @addtogroup hipGraphMemAllocNodeGetParams hipGraphMemAllocNodeGetParams
@@ -51,11 +38,24 @@ THE SOFTWARE.
  *  - HIP_VERSION >= 6.0
  */
 
-static bool validateAllocParam(hipMemAllocNodeParams in, hipMemAllocNodeParams out) {
+static bool validateAllocParam(hipMemAllocNodeParams in, hipMemAllocNodeParams out,
+                               bool accessDesc = false) {
   if (in.bytesize != out.bytesize) return false;
   if (in.poolProps.allocType != out.poolProps.allocType) return false;
   if (in.poolProps.location.id != out.poolProps.location.id) return false;
   if (in.poolProps.location.type != out.poolProps.location.type) return false;
+
+  if (accessDesc) {
+    if (in.accessDescs->location.type != out.accessDescs->location.type) {
+      return false;
+    }
+    if (in.accessDescs->location.id != out.accessDescs->location.id) {
+      return false;
+    }
+    if (in.accessDescs->flags != out.accessDescs->flags) {
+      return false;
+    }
+  }
 
   return true;
 }
@@ -118,11 +118,11 @@ static void hipGraphMemAllocNodeGetParams_Functional(unsigned deviceId = 0) {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional") {
+HIP_TEST_CASE(Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional) {
   hipGraphMemAllocNodeGetParams_Functional();
 }
 
-TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_MultiDevice") {
+HIP_TEST_CASE(Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_MultiDevice) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
@@ -131,7 +131,7 @@ TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_MultiDevice") {
       hipGraphMemAllocNodeGetParams_Functional(i);
     }
   } else {
-    SUCCEED("Skipped the testcase as there is no device to test.");
+    HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
 }
 
@@ -150,7 +150,7 @@ TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_MultiDevice") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_2") {
+HIP_TEST_CASE(Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_2) {
   constexpr size_t N = 1024 * 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -231,10 +231,10 @@ TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_2") {
   HIP_CHECK(hipGraphMemAllocNodeGetParams(allocNodeC, &params_out));
   REQUIRE(true == validateAllocParam(params_in, params_out));
 
-  int temp[] = {0};
-  HIP_CHECK(hipGraphMemFreeNodeGetParams(freeNodeA, reinterpret_cast<void*>(temp)));
-  HIP_CHECK(hipGraphMemFreeNodeGetParams(freeNodeB, reinterpret_cast<void*>(temp)));
-  HIP_CHECK(hipGraphMemFreeNodeGetParams(freeNodeC, reinterpret_cast<void*>(temp)));
+  void* paramPtr{};
+  HIP_CHECK(hipGraphMemFreeNodeGetParams(freeNodeA, reinterpret_cast<void*>(&paramPtr)));
+  HIP_CHECK(hipGraphMemFreeNodeGetParams(freeNodeB, reinterpret_cast<void*>(&paramPtr)));
+  HIP_CHECK(hipGraphMemFreeNodeGetParams(freeNodeC, reinterpret_cast<void*>(&paramPtr)));
 
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
   HIP_CHECK(hipGraphLaunch(graphExec, stream));
@@ -263,7 +263,7 @@ TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_2") {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_3") {
+HIP_TEST_CASE(Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_3) {
   constexpr auto element_count{512 * 1024 * 1024};
   constexpr size_t num_bytes = element_count * sizeof(int);
 
@@ -299,7 +299,7 @@ TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_3") {
 
   hipMemAllocNodeParams get_alloc_params;
   HIP_CHECK(hipGraphMemAllocNodeGetParams(alloc_node, &get_alloc_params));
-  REQUIRE(memcmp(&alloc_param, &get_alloc_params, sizeof(hipMemAllocNodeParams)) == 0);
+  REQUIRE(validateAllocParam(alloc_param, get_alloc_params, true) == true);
 
   constexpr int fill_value = 11;
   hipGraphNode_t memset_node;
@@ -356,7 +356,7 @@ TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_3") {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Negative") {
+HIP_TEST_CASE(Unit_hipGraphMem_Alloc_Free_NodeGetParams_Negative) {
   hipError_t ret;
   constexpr size_t N = 1024 * 1024;
   constexpr size_t Nbytes = N * sizeof(int);
@@ -430,6 +430,6 @@ TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Negative") {
 }
 
 /**
-* End doxygen group GraphTest.
-* @}
-*/
+ * End doxygen group GraphTest.
+ * @}
+ */

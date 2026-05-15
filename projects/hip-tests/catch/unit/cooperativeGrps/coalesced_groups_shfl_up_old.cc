@@ -1,24 +1,9 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
 // Test Description:
 /* This test implements prefix sum(scan) kernel, first with each threads own rank
    as input and comparing the sum with expected serial summation output on CPU.
@@ -47,21 +32,18 @@ __device__ int prefix_sum_kernel(coalesced_group const& g, int val) {
   return val;
 }
 
-__global__ void kernel_shfl_up (int * dPtr, int *dResults, int lane_delta, int cg_sizes) {
+__global__ void kernel_shfl_up(int* dPtr, int* dResults, int lane_delta, int cg_sizes, int group_size) {
   int id = threadIdx.x + blockIdx.x * blockDim.x;
 
   if (id % cg_sizes == 0) {
     coalesced_group g = coalesced_threads();
     int rank = g.thread_rank();
     int val = dPtr[rank];
-    dResults[rank] = g.shfl_up(val, lane_delta);
-  return;
+    if (rank < group_size) dResults[rank] = g.shfl_up(val, lane_delta);
   }
-
 }
 
 __global__ void kernel_cg_group_partition_shfl_up(int* dPtr, unsigned int tileSz, int cg_sizes) {
-
   int id = threadIdx.x + blockIdx.x * blockDim.x;
   if (id % cg_sizes == 0) {
     coalesced_group threadBlockCGTy = coalesced_threads();
@@ -129,7 +111,6 @@ static void test_group_partition(unsigned tileSz) {
 
   std::vector<unsigned int> cg_sizes = {1, 2, 3};
   for (auto i : cg_sizes) {
-
     int arrSize = blockSize * threadsPerBlock * sizeof(int);
 
     HIPCHECK(hipHostMalloc(&hPtr, arrSize));
@@ -137,8 +118,8 @@ static void test_group_partition(unsigned tileSz) {
 
     // Launch Kernel
     hipLaunchKernelGGL(kernel_cg_group_partition_shfl_up, blockSize, threadsPerBlock,
-                     threadsPerBlock * sizeof(int), 0, dPtr, tileSz, i);
-    HIP_CHECK(hipGetLastError()); 
+                       threadsPerBlock * sizeof(int), 0, dPtr, tileSz, i);
+    HIP_CHECK(hipGetLastError());
     HIPCHECK(hipMemcpy(hPtr, dPtr, arrSize, hipMemcpyDeviceToHost));
     err = hipDeviceSynchronize();
     if (err != hipSuccess) {
@@ -147,11 +128,11 @@ static void test_group_partition(unsigned tileSz) {
 
     cpuPrefixSum = new int[tileSz];
     serialScan(cpuPrefixSum, tileSz);
-    //std::cout << "\nPrefix sum results on CPU\n";
-    //printResults(cpuPrefixSum, tileSz);
+    // std::cout << "\nPrefix sum results on CPU\n";
+    // printResults(cpuPrefixSum, tileSz);
 
-    //std::cout << "\nPrefix sum results on GPU\n";
-    //printResults(hPtr, tileSz);
+    // std::cout << "\nPrefix sum results on GPU\n";
+    // printResults(hPtr, tileSz);
     std::cout << "\n";
     verifyResultsCoalescedGroupsShflUp(hPtr, cpuPrefixSum, tileSz);
     std::cout << "Results verified!\n";
@@ -163,10 +144,8 @@ static void test_group_partition(unsigned tileSz) {
 }
 
 static void test_shfl_up() {
-
   std::vector<unsigned int> cg_sizes = {1, 2, 3};
   for (auto i : cg_sizes) {
-
     hipError_t err;
     int blockSize = 1;
 
@@ -178,10 +157,11 @@ static void test_shfl_up() {
     int* hPtr = NULL;
     int* dPtr = NULL;
     int* dResults = NULL;
-    int lane_delta =  (rand() % group_size);
+    int lane_delta = (rand() % group_size);
 
     std::cout << "Testing coalesced_groups shfl_up with lane_delta " << lane_delta
-              << " and group size " << WAVE_SIZE << '\n' << std::endl;
+              << " and group size " << WAVE_SIZE << '\n'
+              << std::endl;
 
     int arrSize = blockSize * threadsPerBlock * sizeof(int);
 
@@ -190,31 +170,31 @@ static void test_shfl_up() {
     for (int i = 0; i < WAVE_SIZE; i++) {
       hPtr[i] = rand() % 1000;
     }
-    //printResults(hPtr, WAVE_SIZE);
+    // printResults(hPtr, WAVE_SIZE);
 
     int* cpuResultsArr = (int*)malloc(group_size_in_bytes);
     for (int i = 0; i < group_size; i++) {
-      cpuResultsArr[i] = (i <= (lane_delta - 1)) ?  hPtr[i] : hPtr[i - lane_delta];
+      cpuResultsArr[i] = (i <= (lane_delta - 1)) ? hPtr[i] : hPtr[i - lane_delta];
     }
 
-    //printf("Printing cpu results arr\n");
-    //printResults(cpuResultsArr, WAVE_SIZE);
+    // printf("Printing cpu results arr\n");
+    // printResults(cpuResultsArr, WAVE_SIZE);
 
     HIPCHECK(hipMalloc(&dPtr, group_size_in_bytes));
     HIPCHECK(hipMalloc(&dResults, group_size_in_bytes));
 
     HIPCHECK(hipMemcpy(dPtr, hPtr, group_size_in_bytes, hipMemcpyHostToDevice));
     // Launch Kernel
-    hipLaunchKernelGGL(kernel_shfl_up, blockSize, threadsPerBlock,
-                       threadsPerBlock * sizeof(int), 0, dPtr, dResults, lane_delta, i);
+    hipLaunchKernelGGL(kernel_shfl_up, blockSize, threadsPerBlock, threadsPerBlock * sizeof(int), 0,
+                       dPtr, dResults, lane_delta, i, group_size);
     HIPCHECK(hipMemcpy(hPtr, dResults, group_size_in_bytes, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipGetLastError()); 
+    HIP_CHECK(hipGetLastError());
     err = hipDeviceSynchronize();
     if (err != hipSuccess) {
       fprintf(stderr, "Failed to launch kernel (error code %s)!\n", hipGetErrorString(err));
     }
-    //printf("GPU computation array :\n");
-    //printResults(hPtr, WAVE_SIZE);
+    // printf("GPU computation array :\n");
+    // printResults(hPtr, WAVE_SIZE);
 
     verifyResultsCoalescedGroupsShflUp(hPtr, cpuResultsArr, group_size_in_bytes);
     std::cout << "Results verified!\n";
@@ -226,7 +206,7 @@ static void test_shfl_up() {
   }
 }
 
-TEST_CASE("Unit_coalesced_groups_shfl_up") {
+HIP_TEST_CASE(Unit_coalesced_groups_shfl_up) {
   // Use default device for validating the test
   int deviceId;
   ASSERT_EQUAL(hipGetDevice(&deviceId), hipSuccess);
@@ -234,7 +214,7 @@ TEST_CASE("Unit_coalesced_groups_shfl_up") {
   ASSERT_EQUAL(hipGetDeviceProperties(&deviceProperties, deviceId), hipSuccess);
 
   for (int i = 0; i < 100; i++) {
-      test_shfl_up();
+    test_shfl_up();
   }
 
   std::cout << "Testing coalesced_groups partitioning and shfl_up" << '\n' << std::endl;

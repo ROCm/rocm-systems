@@ -1,37 +1,21 @@
 /*
-Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "hip/hip_runtime.h"
 #include <iostream>
 #include <fstream>
 #include <vector>
+#include <cstring>
 #include "hip_helper.h"
 
 #define fileName "tex2dKernel.code"
 
 bool testResult = true;
 
-template<typename T,
-    typename std::enable_if<std::is_arithmetic<T>::value>::type *t = nullptr>
+template <typename T, typename std::enable_if<std::is_arithmetic<T>::value>::type* t = nullptr>
 static inline hipArray_Format getArrayFormat() {
   if (std::is_same<char, T>::value) {
     return HIP_AD_FORMAT_SIGNED_INT8;
@@ -45,98 +29,82 @@ static inline hipArray_Format getArrayFormat() {
   return HIP_AD_FORMAT_HALF;
 }
 
-template<typename T,
-    typename std::enable_if<!std::is_arithmetic<T>::value>::type *t = nullptr>
+template <typename T, typename std::enable_if<!std::is_arithmetic<T>::value>::type* t = nullptr>
 static inline hipArray_Format getArrayFormat() {
   return getArrayFormat<decltype(T::x)>();
 }
 
-template<typename T>
-static inline constexpr int rank() {
+template <typename T> static inline constexpr int rank() {
   return sizeof(T) / sizeof(decltype(T::x));
 }
 
 #ifdef __HIP_PLATFORM_NVIDIA__
 template <typename T,
-    typename std::enable_if<std::is_same<T, int4>::value ||
-                            std::is_same<T, short4>::value ||
-                            std::is_same<T, char4>::value ||
-                            std::is_same<T, float4>::value>::type *t = nullptr>
-static inline bool operator!=(const T& a, const T& b)
-{
-    return (a.x != b.x) || (a.y != b.y) || (a.z != b.z) || (a.w != b.w);
+          typename std::enable_if<std::is_same<T, int4>::value || std::is_same<T, short4>::value ||
+                                  std::is_same<T, char4>::value ||
+                                  std::is_same<T, float4>::value>::type* t = nullptr>
+static inline bool operator!=(const T& a, const T& b) {
+  return (a.x != b.x) || (a.y != b.y) || (a.z != b.z) || (a.w != b.w);
 }
 #endif
 
 
-template<typename T>
-static inline T getRandom() {
+template <typename T> static inline T getRandom() {
   double r = 0;
-  if (std::is_signed < T > ::value) {
+  if (std::is_signed<T>::value) {
     r = (std::rand() - RAND_MAX / 2.0) / (RAND_MAX / 2.0 + 1.);
   } else {
     r = std::rand() / (RAND_MAX + 1.);
   }
-  return static_cast<T>(std::numeric_limits < T > ::max() * r);
+  return static_cast<T>(std::numeric_limits<T>::max() * r);
 }
 
-template<typename T,
-    typename std::enable_if<std::is_arithmetic<T>::value>::type* = nullptr>
+template <typename T, typename std::enable_if<std::is_arithmetic<T>::value>::type* = nullptr>
 static inline constexpr int getChannels() {
   return 1;
 }
 
-template<typename T,
-    typename std::enable_if<!std::is_arithmetic<T>::value>::type *t = nullptr,
-    typename std::enable_if<rank<T>() != 0>::type *r = nullptr>
+template <typename T, typename std::enable_if<!std::is_arithmetic<T>::value>::type* t = nullptr,
+          typename std::enable_if<rank<T>() != 0>::type* r = nullptr>
 static inline constexpr int getChannels() {
   return rank<T>();
 }
 
-template<typename T,
-    typename std::enable_if<std::is_arithmetic<T>::value>::type* = nullptr>
-static inline void printDiff(const int &i, const int &j, const T &expected,
-                             const T &output) {
-  std::cout << "Difference [" << i << " " << j << "]: " << expected << " - "
-      << output << "\n";
+template <typename T, typename std::enable_if<std::is_arithmetic<T>::value>::type* = nullptr>
+static inline void printDiff(const int& i, const int& j, const T& expected, const T& output) {
+  std::cout << "Difference [" << i << " " << j << "]: " << expected << " - " << output << "\n";
 }
 
-template<typename T,
-    typename std::enable_if<!std::is_arithmetic<T>::value>::type* = nullptr,
-    typename std::enable_if<rank<T>() == 4>::type* = nullptr>
-static inline void printDiff(const int &i, const int &j, const T &expected,
-                             const T &output) {
-  std::cout << "Difference [" << i << " " << j << "]: " << expected.x << ","
-      << expected.y << "," << expected.z << "," << expected.w << " - "
-      << output.x << "," << output.y << "," << output.z << "," << output.w
-      << "\n";
+template <typename T, typename std::enable_if<!std::is_arithmetic<T>::value>::type* = nullptr,
+          typename std::enable_if<rank<T>() == 4>::type* = nullptr>
+static inline void printDiff(const int& i, const int& j, const T& expected, const T& output) {
+  std::cout << "Difference [" << i << " " << j << "]: " << expected.x << "," << expected.y << ","
+            << expected.z << "," << expected.w << " - " << output.x << "," << output.y << ","
+            << output.z << "," << output.w << "\n";
 }
 
-template<typename T,
-    typename std::enable_if<std::is_arithmetic<T>::value>::type* = nullptr>
-static inline void initVal(T &val) {
+template <typename T, typename std::enable_if<std::is_arithmetic<T>::value>::type* = nullptr>
+static inline void initVal(T& val) {
   val = getRandom<T>();
 }
 
-template<typename T,
-    typename std::enable_if<!std::is_arithmetic<T>::value>::type* = nullptr,
-    typename std::enable_if<rank<T>() == 4>::type* = nullptr>
-static inline void initVal(T &val) {
+template <typename T, typename std::enable_if<!std::is_arithmetic<T>::value>::type* = nullptr,
+          typename std::enable_if<rank<T>() == 4>::type* = nullptr>
+static inline void initVal(T& val) {
   val.x = getRandom<decltype(T::x)>();
   val.y = getRandom<decltype(T::x)>();
   val.z = getRandom<decltype(T::x)>();
   val.w = getRandom<decltype(T::x)>();
 }
 
-template<typename T>
-bool runTest(hipModule_t &module, const char *refName, const char *funcName) {
+template <typename T> bool runTest(hipModule_t& module, const char* refName, const char* funcName) {
   hipArray_Format format = getArrayFormat<T>();
   int channels = getChannels<T>();
   unsigned int width = 256;
   unsigned int height = 256;
   unsigned int size = width * height * sizeof(T);
-  T *hData = (T*) malloc(size);
-  memset(hData, 0, size);
+  T* hData = (T*)malloc(size);
+  std::memset(hData, 0, size);
   for (int i = 0; i < height; i++) {
     for (int j = 0; j < width; j++) {
       initVal(hData[i * width + j]);
@@ -149,16 +117,16 @@ bool runTest(hipModule_t &module, const char *refName, const char *funcName) {
 
   const size_t spitch = width * sizeof(T);
 
-  checkHipErrors(hipMemcpy2DToArray(array, 0, 0, hData, spitch, width * sizeof(T),
-                        height, hipMemcpyHostToDevice));
+  checkHipErrors(hipMemcpy2DToArray(array, 0, 0, hData, spitch, width * sizeof(T), height,
+                                    hipMemcpyHostToDevice));
 
   hipResourceDesc resDesc;
-  memset(&resDesc, 0, sizeof(resDesc));
+  std::memset(&resDesc, 0, sizeof(resDesc));
   resDesc.resType = hipResourceTypeArray;
   resDesc.res.array.array = array;
 
   hipTextureDesc texDesc;
-  memset(&texDesc, 0, sizeof(texDesc));
+  std::memset(&texDesc, 0, sizeof(texDesc));
   texDesc.addressMode[0] = hipAddressModeClamp;
   texDesc.addressMode[1] = hipAddressModeClamp;
   texDesc.filterMode = hipFilterModePoint;
@@ -168,24 +136,24 @@ bool runTest(hipModule_t &module, const char *refName, const char *funcName) {
   hipTextureObject_t texObj;
   checkHipErrors(hipCreateTextureObject(&texObj, &resDesc, &texDesc, nullptr));
 
-  T *dData = NULL;
-  checkHipErrors(hipMalloc((void** )&dData, size));
+  T* dData = NULL;
+  checkHipErrors(hipMalloc((void**)&dData, size));
 
   struct {
-    void *_Ad;
+    void* _Ad;
     hipTextureObject_t _texObj;
     unsigned int _Bd;
     unsigned int _Cd;
   } args;
-  args._Ad = (void*) dData;
+  args._Ad = (void*)dData;
   args._texObj = texObj;
   args._Bd = width;
   args._Cd = height;
 
   size_t sizeTemp = sizeof(args);
 
-  void *config[] = { HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
-      HIP_LAUNCH_PARAM_BUFFER_SIZE, &sizeTemp, HIP_LAUNCH_PARAM_END };
+  void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &sizeTemp,
+                    HIP_LAUNCH_PARAM_END};
 
   hipFunction_t Function;
   checkHipErrors(hipModuleGetFunction(&Function, module, funcName));
@@ -193,12 +161,11 @@ bool runTest(hipModule_t &module, const char *refName, const char *funcName) {
   int temp1 = width / 16;
   int temp2 = height / 16;
   checkHipErrors(
-      hipModuleLaunchKernel(Function, 16, 16, 1, temp1, temp2, 1, 0, 0, NULL,
-                            (void** )&config));
+      hipModuleLaunchKernel(Function, 16, 16, 1, temp1, temp2, 1, 0, 0, NULL, (void**)&config));
   checkHipErrors(hipDeviceSynchronize());
 
-  T *hOutputData = (T*) malloc(size);
-  memset(hOutputData, 0, size);
+  T* hOutputData = (T*)malloc(size);
+  std::memset(hOutputData, 0, size);
   checkHipErrors(hipMemcpy(hOutputData, dData, size, hipMemcpyDeviceToHost));
 
   for (int i = 0; i < height; i++) {
@@ -220,10 +187,9 @@ bool runTest(hipModule_t &module, const char *refName, const char *funcName) {
 }
 
 inline bool isImageSupported() {
-    int imageSupport = 1;
+  int imageSupport = 1;
 #ifdef __HIP_PLATFORM_AMD__
-    checkHipErrors(hipDeviceGetAttribute(&imageSupport, hipDeviceAttributeImageSupport,
-                              0));
+  checkHipErrors(hipDeviceGetAttribute(&imageSupport, hipDeviceAttributeImageSupport, 0));
 #endif
   return imageSupport != 0;
 }

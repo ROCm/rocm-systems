@@ -1,23 +1,11 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "warp_shfl_common.hh"
+#include "warp_common.hh"
 
 #include <bitset>
 
@@ -31,9 +19,9 @@ THE SOFTWARE.
 
 namespace cg = cooperative_groups;
 
-template <typename T>
-__global__ void shfl_xor(T* const out, const T* const in, const uint64_t* const active_masks,
-                         const int lane_mask, const int width) {
+template <typename T> __global__ void shfl_xor(T* const out, const T* const in,
+                                               const uint64_t* const active_masks,
+                                               const int lane_mask, const int width) {
   if (deactivate_thread(active_masks)) {
     return;
   }
@@ -46,10 +34,18 @@ __global__ void shfl_xor(T* const out, const T* const in, const uint64_t* const 
 template <typename T> class WarpShflXOR : public WarpShflTest<WarpShflXOR<T>, T> {
  public:
   void launch_kernel(T* const arr_dev, T* const input_dev, const uint64_t* const active_masks) {
+    const auto inv_reduction_factor = 1 / GetTestReductionFactor();
+
+    std::vector<unsigned int> lane_masks;
+    for (double i = 0; i < this->warp_size_; i += inv_reduction_factor) {
+        lane_masks.emplace_back(static_cast<unsigned int>(std::floor(i)));
+    }
+
     width_ = generate_width(this->warp_size_);
     INFO("Width: " << width_);
-    lane_mask_ = GENERATE_COPY(range(0, this->warp_size_));
+    lane_mask_ = GENERATE_COPY(from_range(lane_masks.begin(), lane_masks.end()));
     INFO("Lane mask: " << lane_mask_);
+
     shfl_xor<<<this->grid_.grid_dim_, this->grid_.block_dim_>>>(arr_dev, input_dev, active_masks,
                                                                 lane_mask_, width_);
   }
@@ -61,7 +57,7 @@ template <typename T> class WarpShflXOR : public WarpShflTest<WarpShflXOR<T>, T>
       const int warp_target = rank_in_warp ^ this->lane_mask_;
       const int target_offset = warp_target - rank_in_warp;
       const auto mask_idx = this->warps_in_block_ * (i / this->grid_.threads_in_block_count_) +
-          rank_in_block / this->warp_size_;
+                            rank_in_block / this->warp_size_;
       const std::bitset<sizeof(uint64_t) * 8> active_mask(this->active_masks_[mask_idx]);
 
       const auto target_partition = warp_target / width_;
@@ -96,7 +92,7 @@ template <typename T> class WarpShflXOR : public WarpShflTest<WarpShflXOR<T>, T>
  *  - HIP_VERSION >= 5.2
  *  - Device supports warp shuffle
  */
-TEMPLATE_TEST_CASE("Unit_Warp_Shfl_XOR_Positive_Basic", "", int, unsigned int, long, unsigned long,
+HIP_TEMPLATE_TEST_CASE(Unit_Warp_Shfl_XOR_Positive_Basic, int, unsigned int, long, unsigned long,
                    long long, unsigned long long, float, double, __half, __half2) {
   int device;
   hipDeviceProp_t device_properties;
@@ -104,8 +100,7 @@ TEMPLATE_TEST_CASE("Unit_Warp_Shfl_XOR_Positive_Basic", "", int, unsigned int, l
   HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
 
   if (!device_properties.arch.hasWarpShuffle) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support Warp Shuffle!");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kWarpShuffleUnsupported);
   }
 
   SECTION("Shfl Xor with specified active mask and input values") {
@@ -118,6 +113,6 @@ TEMPLATE_TEST_CASE("Unit_Warp_Shfl_XOR_Positive_Basic", "", int, unsigned int, l
 }
 
 /**
-* End doxygen group DeviceLanguageTest.
-* @}
-*/
+ * End doxygen group DeviceLanguageTest.
+ * @}
+ */

@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 
@@ -33,8 +17,8 @@ THE SOFTWARE.
 #include <vector>
 #include "shfl.hh"
 
-static constexpr auto shfl {
-  R"(
+static constexpr auto shfl{
+    R"(
 template <typename T>
 __global__ void shflUpSum(T* a, int size) {
   T val = a[threadIdx.x];
@@ -66,30 +50,32 @@ __global__ void shflXorSum(T* a, int size) {
 }
 )"};
 
-template <typename T>
-void runTestShflSync(int option) {
+template <typename T> void runTestShflSync(int option) {
   using namespace std;
   hiprtcProgram prog;
-  hiprtcCreateProgram(&prog,      // prog
-                      shfl,       // buffer
+  hiprtcCreateProgram(&prog,           // prog
+                      shfl,            // buffer
                       "shfl_sync.cu",  // name
                       0, nullptr, nullptr);
 
   string str;
-  switch(option) {
-  case 1:
-  str = "shflUpSum<__half>"; break;
-  case 2:
-  str = "shflDownSum<__half>"; break;
-  case 3:
-  str = "shflXorSum<__half>"; break;
-  default:
-  INFO("Options 1,2,3 are supported, but the passed option is: " << option);
-  REQUIRE(false);
+  switch (option) {
+    case 1:
+      str = "shflUpSum<__half>";
+      break;
+    case 2:
+      str = "shflDownSum<__half>";
+      break;
+    case 3:
+      str = "shflXorSum<__half>";
+      break;
+    default:
+      INFO("Options 1,2,3 are supported, but the passed option is: " << option);
+      REQUIRE(false);
   }
 
   hiprtcAddNameExpression(prog, str.c_str());
-  const char* options[] = { "-DHIP_ENABLE_WARP_SYNC_BUILTINS" };
+  const char* options[] = {"-DHIP_ENABLE_WARP_SYNC_BUILTINS"};
   hiprtcResult compileResult{hiprtcCompileProgram(prog, 1, options)};
   size_t logSize;
   HIPRTC_CHECK(hiprtcGetProgramLogSize(prog, &logSize));
@@ -136,11 +122,13 @@ void runTestShflSync(int option) {
   HIP_CHECK(hipMemcpy(&a, d_a, bufferSize, hipMemcpyDefault));
   bool result;
   switch (option) {
-  case 1: //shflUpSum
-  result = compare(a[n - 1], cpuSum); break;
-  case 2: //shflDownSum
-  case 3: //shflXorSum
-  result = compare(a[0], cpuSum); break;
+    case 1:  // shflUpSum
+      result = compare(a[n - 1], cpuSum);
+      break;
+    case 2:  // shflDownSum
+    case 3:  // shflXorSum
+      result = compare(a[0], cpuSum);
+      break;
   }
 
   if (result) {
@@ -151,10 +139,9 @@ void runTestShflSync(int option) {
   HIP_CHECK(hipFree(d_a));
   HIP_CHECK(hipModuleUnload(module));
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
-
 }
 
-TEST_CASE("Unit_hiprtc_half_shuffle_sync") {
+HIP_TEST_CASE(Unit_hiprtc_half_shuffle_sync) {
   runTestShflSync<__half>(1);
   runTestShflSync<__half>(2);
   runTestShflSync<__half>(3);

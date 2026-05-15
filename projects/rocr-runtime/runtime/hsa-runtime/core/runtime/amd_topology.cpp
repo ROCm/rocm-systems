@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -58,8 +58,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include <link.h>
-
 #include "core/inc/amd_aie_agent.h"
 #include "core/inc/amd_available_drivers.h"
 #include "core/inc/amd_cpu_agent.h"
@@ -72,7 +70,12 @@
 #include "core/inc/amd_virtio_driver.h"
 #endif
 
-extern r_debug _amdgpu_r_debug;
+#if defined(__linux__)
+#include <link.h>
+#else
+#include "loader/executable.hpp"
+#endif
+extern r_debug _amdgpu_r_debug_r;
 
 namespace rocr {
 namespace AMD {
@@ -81,17 +84,17 @@ namespace {
 
 const std::array<std::function<hsa_status_t(std::unique_ptr<core::Driver>&)>,
 #if _WIN32
-                 0
+                 1
 #elif __linux__
                  static_cast<size_t>(core::DriverType::NUM_DRIVER_TYPES)
 #endif
                  >
     discover_driver_funcs = {
+        KfdDriver::DiscoverDriver
 #ifdef __linux__
-        KfdDriver::DiscoverDriver,
-        XdnaDriver::DiscoverDriver,
+        , XdnaDriver::DiscoverDriver
 #ifdef HSAKMT_VIRTIO_ENABLED
-        KfdVirtioDriver::DiscoverDriver,
+        , KfdVirtioDriver::DiscoverDriver
 #endif
 #endif
 };
@@ -116,6 +119,25 @@ bool InitializeDriver(std::unique_ptr<core::Driver>& driver) {
 
   driver_guard.Dismiss();
   return true;
+}
+
+// Builds a short description of a GPU node for warning messages
+std::string GpuNodeDescription(HSAuint32 node_id, const HsaNodeProperties& node_prop) {
+  char name[HSA_PUBLIC_NAME_SIZE + 1];
+  name[HSA_PUBLIC_NAME_SIZE] = '\0';
+  memcpy(name, node_prop.AMDName, HSA_PUBLIC_NAME_SIZE);
+  // Trim trailing spaces/nuls
+  for (int i = HSA_PUBLIC_NAME_SIZE - 1; i >= 0 && (name[i] == '\0' || name[i] == ' '); --i)
+    name[i] = '\0';
+  if (name[0] != '\0') {
+    std::ostringstream ss;
+    ss << name << " (node " << node_id << ")";
+    return ss.str();
+  }
+  std::ostringstream ss;
+  ss << "GPU node " << node_id << " (DeviceID 0x" << std::hex << node_prop.DeviceId << std::dec
+     << ")";
+  return ss.str();
 }
 
 void DiscoverCpu(HSAuint32 node_id, HsaNodeProperties& node_prop, core::DriverType driver_type) {
@@ -164,16 +186,25 @@ GpuAgent* DiscoverGpu(HSAuint32 node_id, HsaNodeProperties& node_prop, bool xnac
       }
     }
   } catch (const hsa_exception& e) {
-    if(e.error_code() == HSA_STATUS_ERROR_INVALID_ISA) {
+    const hsa_status_t err = e.error_code();
+    const bool unsupported_isa = (err == HSA_STATUS_ERROR_INVALID_ISA);
+    if (unsupported_isa) {
+      // Ignore unsupported GPUs and proceed with supported ones. Warn so users
+      // know why a device is missing (e.g. older generations no longer supported).
+      std::string desc = GpuNodeDescription(node_id, node_prop);
       ifdebug {
-        if (!strIsEmpty(e.what())) debug_print("Warning: %s\n", e.what());
+        fprintf(stderr,
+              "ROCm/HSA: Skipping unsupported GPU: %s.\n"
+              "  Reason: %s\n"
+              "  Use ROCR_VISIBLE_DEVICES to limit to supported GPU(s) if needed.\n",
+              desc.c_str(),
+              (e.what() == nullptr || strIsEmpty(e.what())) ? "unsupported or deprecated device"
+                                                            : e.what());
       }
-      // Ignore unrecognized GPUs.
       return nullptr;
-    } else {
-      // Rethrow remaining exceptions.
-      throw;
     }
+    // Rethrow remaining exceptions.
+    throw;
   }
   if (enabled) gpu->Enable();
   core::Runtime::runtime_singleton_->RegisterAgent(gpu, enabled);
@@ -181,8 +212,10 @@ GpuAgent* DiscoverGpu(HSAuint32 node_id, HsaNodeProperties& node_prop, bool xnac
 }
 
 void DiscoverAie(uint32_t node_id, HsaNodeProperties& node_prop) {
+#if defined(__linux__)
   AieAgent* aie = new AieAgent(node_id, node_prop);
   core::Runtime::runtime_singleton_->RegisterAgent(aie, true);
+#endif
 }
 
 void RegisterLinkInfo(const std::unique_ptr<core::Driver>& driver, uint32_t node_id,
@@ -278,10 +311,30 @@ void SurfaceGpuList(std::vector<int32_t>& gpu_list, bool xnack_mode, bool enable
       // Obtain properties of the node
       hsa_status_t ret = gpu_driver->GetNodeProperties(node_prop, gpu_list[idx]);
       assert(ret == HSA_STATUS_SUCCESS && "Error in getting Node Properties");
+      (void)ret;
 
       // disable interrupt signal for DTIF platform
       if (core::Runtime::runtime_singleton_->flag().enable_dtif())
         core::g_use_interrupt_wait = false;
+
+      if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
+        core::Runtime::runtime_singleton_->flag().disable_image(true);
+#if defined(_WIN32)
+        core::Runtime::runtime_singleton_->flag().disable_image(false);
+        if (node_prop.Capability2.ui32.AqlEmulationPm4_)
+#endif
+        {
+          core::g_use_interrupt_wait = false;
+          core::Runtime::runtime_singleton_->flag().disable_scratch();
+        }
+        core::Runtime::runtime_singleton_->flag().set_sdma(false, false);
+        core::Runtime::runtime_singleton_->flag().disable_xnack();
+        core::Runtime::runtime_singleton_->flag().disable_fine_grain_pcie();
+        core::Runtime::runtime_singleton_->flag().set_ipc_mode_legacy(false);
+        core::Runtime::runtime_singleton_->flag().disable_dev_mem_queue_buf();
+        core::Runtime::runtime_singleton_->flag().disable_sdma_hdp_flush();
+        core::Runtime::runtime_singleton_->flag().set_disable_tool_register(true);
+      }
 
       // Instantiate a Gpu device. The IO links
       // of this node have already been registered
@@ -397,7 +450,12 @@ bool BuildTopology() {
     }
   }
 
-  // Instantiate ROCr objects to encapsulate Gpu devices
+  // Instantiate ROCr objects to encapsulate Gpu devices. GPUs in gpu_usr_list are
+  // surfaced to the user (enabled=true); GPUs in gpu_disabled are created but
+  // not surfaced (enabled=false), so they are not enumerated by hsa_iterate_agents.
+  // Unsupported GPUs (e.g. unrecognized ISA) are skipped in DiscoverGpu and not
+  // created; a future improvement could create them with enabled=false if
+  // GpuAgent supports skipping ISA-dependent init.
   SurfaceGpuList(gpu_usr_list, rt->XnackEnabled(), true);
   SurfaceGpuList(gpu_disabled, rt->XnackEnabled(), false);
 

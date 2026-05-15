@@ -115,6 +115,10 @@ TEST(enum_string, fwd_h)
     TEST_STR(ROCPROFILER_BUFFER_TRACING_ROCDECODE_API);
     TEST_STR(ROCPROFILER_BUFFER_TRACING_KFD_QUEUE);
 
+    // rocprofiler_hip_stream_operation_t
+    TEST_STR(ROCPROFILER_HIP_STREAM_NONE);
+    TEST_STR(ROCPROFILER_HIP_STREAM_DESTROY);
+
     // rocprofiler_code_object_operation_t
     TEST_STR(ROCPROFILER_CODE_OBJECT_NONE);
     TEST_STR(ROCPROFILER_CODE_OBJECT_LOAD);
@@ -368,7 +372,11 @@ namespace sdk
 namespace details
 {
 using namespace enum_string_test;
-ROCPROFILER_ENUM_INFO(test_unsupported_enum_val, TEST_ENUM_VALUE_NONE, TEST_ENUM_VALUE_LAST, false);
+ROCPROFILER_ENUM_INFO(test_unsupported_enum_val,
+                      TEST_ENUM_VALUE_NONE,
+                      TEST_ENUM_VALUE_LAST,
+                      false,
+                      not_operation);
 ROCPROFILER_ENUM_LABEL(TEST_ENUM_VALUE_V1);
 ROCPROFILER_ENUM_LABEL(TEST_ENUM_VALUE_V3);
 }  // namespace details

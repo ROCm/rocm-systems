@@ -1,20 +1,7 @@
 /*
-   Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
-   Permission is hereby granted, free of charge, to any person obtaining a copy
-   of this software and associated documentation files (the "Software"), to deal
-   in the Software without restriction, including without limitation the rights
-   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-   copies of the Software, and to permit persons to whom the Software is
-   furnished to do so, subject to the following conditions:
-   The above copyright notice and this permission notice shall be included in
-   all copies or substantial portions of the Software.
-   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-   IMPLIED, INNCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-   FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANNY CLAIM, DAMAGES OR OTHER
-   LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-   OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-   THE SOFTWARE.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
  */
 
 #include <hip_test_common.hh>
@@ -45,10 +32,10 @@
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolCreate_Negative_Parameter") {
+HIP_TEST_CASE(Unit_hipMemPoolCreate_Negative_Parameter) {
   checkMempoolSupported(0)
 
-  int num_dev = 0;
+      int num_dev = 0;
   HIP_CHECK(hipGetDeviceCount(&num_dev));
 
   hipMemPoolProps pool_props;
@@ -88,9 +75,8 @@ TEST_CASE("Unit_hipMemPoolCreate_Negative_Parameter") {
   }
 }
 
-TEST_CASE("Unit_hipMemPoolCreate_With_maxSize") {
-  checkMempoolSupported(0)
-  hipMemPoolProps pool_props;
+HIP_TEST_CASE(Unit_hipMemPoolCreate_With_maxSize) {
+  checkMempoolSupported(0) hipMemPoolProps pool_props;
   memset(&pool_props, 0, sizeof(pool_props));
   pool_props.allocType = hipMemAllocationTypePinned;
   pool_props.handleTypes = hipMemHandleTypeNone;
@@ -105,20 +91,23 @@ TEST_CASE("Unit_hipMemPoolCreate_With_maxSize") {
   HIP_CHECK(hipStreamCreate(&stream));
   hipMemPool_t mem_pool = nullptr;
   HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props));
-  HIP_CHECK(hipMallocFromPoolAsync (reinterpret_cast<void**>(&A), 1024 * 1024 * 512, mem_pool, stream));
+  HIP_CHECK(
+      hipMallocFromPoolAsync(reinterpret_cast<void**>(&A), 1024 * 1024 * 512, mem_pool, stream));
 #if HT_AMD
-  HIP_CHECK_ERROR(hipMallocFromPoolAsync (reinterpret_cast<void**>(&B), 1024 * 1024 * 513, mem_pool,
-                                          stream), hipErrorOutOfMemory);
+  HIP_CHECK_ERROR(
+      hipMallocFromPoolAsync(reinterpret_cast<void**>(&B), 1024 * 1024 * 513, mem_pool, stream),
+      hipErrorOutOfMemory);
 #else
-  HIP_CHECK(hipMallocFromPoolAsync (reinterpret_cast<void**>(&B), 1024 * 1024 * 513, mem_pool, stream));
+  HIP_CHECK(
+      hipMallocFromPoolAsync(reinterpret_cast<void**>(&B), 1024 * 1024 * 513, mem_pool, stream));
 #endif
+  HIP_CHECK(hipFreeAsync(A, stream));
   HIP_CHECK(hipMemPoolDestroy(mem_pool));
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
-TEST_CASE("Unit_hipMemPoolCreate_Without_maxSize") {
-  checkMempoolSupported(0)
-  hipMemPoolProps pool_props;
+HIP_TEST_CASE(Unit_hipMemPoolCreate_Without_maxSize) {
+  checkMempoolSupported(0) hipMemPoolProps pool_props;
   memset(&pool_props, 0, sizeof(pool_props));
   pool_props.allocType = hipMemAllocationTypePinned;
   pool_props.handleTypes = hipMemHandleTypeNone;
@@ -131,13 +120,17 @@ TEST_CASE("Unit_hipMemPoolCreate_Without_maxSize") {
   HIP_CHECK(hipStreamCreate(&stream));
   hipMemPool_t mem_pool = nullptr;
   HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props));
-  HIP_CHECK(hipMallocFromPoolAsync (reinterpret_cast<void**>(&A), 1024 * 1024 * 512, mem_pool, stream));
-  HIP_CHECK(hipMallocFromPoolAsync (reinterpret_cast<void**>(&B), 1024 * 1024 * 513, mem_pool, stream));
-  HIP_CHECK(hipMemPoolDestroy(mem_pool));
+  HIP_CHECK(
+      hipMallocFromPoolAsync(reinterpret_cast<void**>(&A), 1024 * 1024 * 512, mem_pool, stream));
+  HIP_CHECK(
+      hipMallocFromPoolAsync(reinterpret_cast<void**>(&B), 1024 * 1024 * 513, mem_pool, stream));
+  HIP_CHECK(hipFreeAsync(A, stream));
+  HIP_CHECK(hipFreeAsync(B, stream));
   HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipMemPoolDestroy(mem_pool));
 }
 
-static __global__ void setKer(int *devptr) {
+static __global__ void setKer(int* devptr) {
   int tid = blockIdx.x * blockDim.x + threadIdx.x;
   devptr[tid] = tid;
 }
@@ -153,13 +146,12 @@ static __global__ void setKer(int *devptr) {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolCreate_DeviceTest") {
-  checkMempoolSupported(0)
-  int num_devices = 0;
+HIP_TEST_CASE(Unit_hipMemPoolCreate_DeviceTest) {
+  checkMempoolSupported(0) int num_devices = 0;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
   checkIfMultiDev(num_devices)
-  // Scenario1
-  SECTION("Simple Device Test") {
+      // Scenario1
+      SECTION("Simple Device Test") {
     for (int dev = 0; dev < num_devices; dev++) {
       hipMemPool_t mem_pool;
       hipMemPoolProps prop{};
@@ -183,14 +175,14 @@ TEST_CASE("Unit_hipMemPoolCreate_DeviceTest") {
     HIP_CHECK(hipMemPoolCreate(&mem_pool, &prop));
     // Try allocating from mempool in other device context
     for (int dev = 1; dev < num_devices; dev++) {
-      int *A_d;
+      int* A_d;
       HIP_CHECK(hipSetDevice(dev));
-      HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d),
-                                       N*sizeof(int), mem_pool, 0));
+      HIP_CHECK(
+          hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d), N * sizeof(int), mem_pool, 0));
       HIP_CHECK(hipStreamSynchronize(0));
       HIP_CHECK(hipSetDevice(0));
       // Launch kernel to access A_d and free it on dev 0 context
-      setKer<<<N/numThreadsPerBlk, numThreadsPerBlk, 0, 0>>>(A_d);
+      setKer<<<N / numThreadsPerBlk, numThreadsPerBlk, 0, 0>>>(A_d);
       HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A_d), 0));
       HIP_CHECK(hipStreamSynchronize(0));
     }
@@ -199,6 +191,6 @@ TEST_CASE("Unit_hipMemPoolCreate_DeviceTest") {
 }
 
 /**
-* End doxygen group StreamOTest.
-* @}
-*/
+ * End doxygen group StreamOTest.
+ * @}
+ */

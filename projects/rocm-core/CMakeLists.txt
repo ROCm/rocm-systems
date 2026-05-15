@@ -1,28 +1,5 @@
-################################################################################
-##
-## MIT License
-##
-## Copyright (c) 2017 - 2023 Advanced Micro Devices, Inc. All rights Reserved.
-##
-## Permission is hereby granted, free of charge, to any person obtaining a copy
-## of this software and associated documentation files (the "Software"), to deal
-## in the Software without restriction, including without limitation the rights
-## to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-## copies of the Software, and to permit persons to whom the Software is
-## furnished to do so, subject to the following conditions:
-##
-## The above copyright notice and this permission notice shall be included in all
-## copies or substantial portions of the Software.
-##
-## THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-## IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-## FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-## AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-## LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-## OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-## SOFTWARE.
-##
-################################################################################
+##Copyright © Advanced Micro Devices, Inc., or its affiliates.
+##SPDX-License-Identifier: MIT
 
 cmake_minimum_required( VERSION 3.16 )
 set( CORE_TARGET "rocm-core" )
@@ -66,7 +43,7 @@ parse_rocm_version( ${ROCM_VERSION} )
 set( CPACK_PACKAGING_INSTALL_PREFIX "/opt/rocm" CACHE PATH "default cpack directory" )
 set( BUILD_SHARED_LIBS ON CACHE BOOL "Build shared library (.so) or not." )
 set( CPACK_GENERATOR "TGZ;DEB;RPM" CACHE STRING "package types to be produced " )
-set( LICENSE_FILE "${CMAKE_CURRENT_SOURCE_DIR}/copyright" CACHE PATH "Path to License File in source dir" )
+set( LICENSE_FILE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md" CACHE PATH "Path to License File in source dir" )
 set( BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR} )
 set( EXTENDED_PACKAGE_DESCRIPTION
      "ROCM-CORE package helps to get ROCm release version,get install path.
@@ -86,6 +63,9 @@ set( SO_MINOR "0" )
 if( NOT DEFINED BUILD_ID )
   set( BUILD_ID "9999")
 endif()
+
+# cpack interferes with inbox packaging, add an option to disable it but don't disable by default
+option(DISABLE_CPACK "disable most of cpack from running" OFF)
 
 #Add the libpatch version if available
 if( DEFINED VERSION_POINT )
@@ -149,6 +129,32 @@ if(BUILD_SHARED_LIBS)
             DESTINATION ${CMAKE_INSTALL_LIBDIR}
             COMPONENT CORE_RUNTIME )
 
+  if( NOT WIN32 )
+    # rdhc tool is developed and tested for Linux based systems only.
+    # rdhc tool is not supported on Windows.
+    # Install rdhc files
+    install ( FILES
+              ${CMAKE_CURRENT_SOURCE_DIR}/rdhc/README.md
+              ${CMAKE_CURRENT_SOURCE_DIR}/rdhc/requirements.txt
+              DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rdhc
+              COMPONENT CORE_RUNTIME)
+
+    install ( PROGRAMS ${CMAKE_CURRENT_SOURCE_DIR}/rdhc/rdhc.py
+              DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${CORE_TARGET}
+              COMPONENT CORE_RUNTIME )
+
+    # Create symlink for rdhc in bin directory
+    add_custom_target ( rdhc_symlink ALL
+                      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                      COMMAND ${CMAKE_COMMAND} -E create_symlink
+                      ../${CMAKE_INSTALL_LIBEXECDIR}/${CORE_TARGET}/rdhc.py rdhc-link )
+
+    install ( FILES ${CMAKE_CURRENT_BINARY_DIR}/rdhc-link
+              DESTINATION ${CMAKE_INSTALL_BINDIR}
+              RENAME rdhc
+              COMPONENT CORE_RUNTIME )
+  endif()
+
 else()
   install ( FILES ${BUILD_DIR}/version
             DESTINATION .info
@@ -168,6 +174,33 @@ else()
   install ( FILES ${BUILD_DIR}/rocmmod
             DESTINATION ${CMAKE_INSTALL_LIBDIR}
             COMPONENT ${STATIC_COMP_TYPE} )
+
+  if( NOT WIN32 )
+    # rdhc tool is developed and tested for Linux based systems only.
+    # rdhc tool is not supported on Windows.
+    # Install rdhc files
+    install ( FILES
+              ${CMAKE_CURRENT_SOURCE_DIR}/rdhc/README.md
+              ${CMAKE_CURRENT_SOURCE_DIR}/rdhc/requirements.txt
+              DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rdhc
+              COMPONENT ${STATIC_COMP_TYPE})
+
+    install ( PROGRAMS ${CMAKE_CURRENT_SOURCE_DIR}/rdhc/rdhc.py
+              DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${CORE_TARGET}
+              COMPONENT ${STATIC_COMP_TYPE} )
+
+    # Create symlink for rdhc in bin directory
+    add_custom_target ( rdhc_symlink_static ALL
+                      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                      COMMAND ${CMAKE_COMMAND} -E create_symlink
+                      ../${CMAKE_INSTALL_LIBEXECDIR}/${CORE_TARGET}/rdhc.py rdhc-link-static )
+
+    install ( FILES ${CMAKE_CURRENT_BINARY_DIR}/rdhc-link-static
+              DESTINATION ${CMAKE_INSTALL_BINDIR}
+              RENAME rdhc
+              COMPONENT ${STATIC_COMP_TYPE} )
+  endif()
+
 endif()
 
 ## Cmake module config file configurations
@@ -238,10 +271,12 @@ message ( STATUS "Using CPACK_DEBIAN_PACKAGE_RELEASE ${CPACK_DEBIAN_PACKAGE_RELE
 set ( CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT" )
 
 # Debian specific packaging configuration
-if(COMP_TYPE)
-  configure_debian_pkg( ${CORE_TARGET} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )
-elseif(STATIC_COMP_TYPE)
-  configure_debian_pkg( ${CORE_TARGET} ${STATIC_COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )
+if ( NOT DISABLE_CPACK)
+    if(COMP_TYPE)
+    configure_debian_pkg( ${CORE_TARGET} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )
+    elseif(STATIC_COMP_TYPE)
+    configure_debian_pkg( ${CORE_TARGET} ${STATIC_COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )
+    endif()
 endif()
 
 ## RPM package specific variables
@@ -291,7 +326,7 @@ set ( CPACK_RPM_CORE_STATIC_POST_UNINSTALL_SCRIPT_FILE "${BUILD_DIR}/prerm" )
 set ( CPACK_RPM_PACKAGE_DESCRIPTION "${EXTENDED_PACKAGE_DESCRIPTION}" )
 
 if ( DEFINED CPACK_PACKAGING_INSTALL_PREFIX )
-    set ( CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION 
+    set ( CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
           "${CPACK_PACKAGING_INSTALL_PREFIX} ${CPACK_PACKAGING_INSTALL_PREFIX}/.info" )
 endif()
 
@@ -316,4 +351,6 @@ if( BUILD_ENABLE_LINTIAN_OVERRIDES STREQUAL "ON" AND BUILD_DEBIAN_PKGING_FLAG ST
 endif()
 
 ## Include packaging
-include ( CPack )
+if ( NOT DISABLE_CPACK)
+    include ( CPack )
+endif()

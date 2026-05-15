@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2024 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "platform/activity.hpp"
 #include "platform/command.hpp"
@@ -66,13 +52,27 @@ Event::~Event() {
     delete callback;
     callback = next;
   }
-  // Release the notify event
-  if (notify_event_ != nullptr) {
-    notify_event_->release();
+  if (auto* notifyEvent = notify_event_.load(std::memory_order_acquire)) {
+    notifyEvent->release();
   }
   // Destroy global HW event if available
   if ((hw_event_ != nullptr) && (device_ != nullptr)) {
     device_->ReleaseGlobalSignal(hw_event_);
+  }
+}
+
+// ================================================================================================
+AccumulateCommand::~AccumulateCommand() {
+  // Release all retained HW events per device
+  for (auto& device_events_pair : hw_events_) {
+    Device* dev = device_events_pair.first;
+    if (dev != nullptr) {
+      for (void* hw_event : device_events_pair.second) {
+        if (hw_event != nullptr) {
+          dev->ReleaseGlobalSignal(hw_event);
+        }
+      }
+    }
   }
 }
 
@@ -100,6 +100,7 @@ uint64_t Event::recordProfilingInfo(int32_t status, uint64_t timeStamp) {
 
 // Global epoch time since the first processed command
 uint64_t epoch = 0;
+std::once_flag epoch_init;
 // ================================================================================================
 bool Event::setStatus(int32_t status, uint64_t timeStamp) {
   assert(status <= CL_QUEUED && "invalid status");
@@ -112,9 +113,7 @@ bool Event::setStatus(int32_t status, uint64_t timeStamp) {
 
   if (profilingInfo().enabled_) {
     timeStamp = recordProfilingInfo(status, timeStamp);
-    if (epoch == 0) {
-      epoch = profilingInfo().queued_;
-    }
+    std::call_once(epoch_init, [&]{ epoch = profilingInfo().queued_;});
   }
 
   if (amd::IS_HIP) {
@@ -150,7 +149,7 @@ bool Event::setStatus(int32_t status, uint64_t timeStamp) {
       releaseResources();
     }
 
-    if (profilingInfo().enabled_ && amd::activity_prof::IsEnabled(OP_ID_DISPATCH)) {
+    if (profilingInfo().enabled_) {
       amd::activity_prof::ReportActivity(command());
     }
 
@@ -160,13 +159,12 @@ bool Event::setStatus(int32_t status, uint64_t timeStamp) {
     }
 
     if (profilingInfo().enabled_) {
-      ClPrint(LOG_DEBUG, LOG_CMD, "Command %p complete (Wall: %ld, CPU: %ld, GPU: %ld us)",
-        &command(),
-        ((profilingInfo().end_ - epoch) / 1000),
-        ((profilingInfo().submitted_ - profilingInfo().queued_) / 1000),
-        ((profilingInfo().end_ - profilingInfo().start_) / 1000));
+      ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command %p complete (Wall: %ld, CPU: %ld, GPU: %ld us)",
+              &command(), ((profilingInfo().end_ - epoch) / 1000),
+              ((profilingInfo().submitted_ - profilingInfo().queued_) / 1000),
+              ((profilingInfo().end_ - profilingInfo().start_) / 1000));
     } else {
-      ClPrint(LOG_DEBUG, LOG_CMD, "Command %p complete", &command());
+      ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command %p complete", &command());
     }
     release();
   }
@@ -178,7 +176,7 @@ bool Event::setStatus(int32_t status, uint64_t timeStamp) {
 bool Event::resetStatus(int32_t status) {
   int32_t currentStatus = this->status();
   if (currentStatus != CL_COMPLETE) {
-    ClPrint(LOG_ERROR, LOG_CMD, "command is reset before complete current status :%d",
+    ClPrint(LOG_ERROR, LOG_CMD, "Command is reset before complete current status :%d",
             currentStatus);
   }
   if (!status_.compare_exchange_strong(currentStatus, status, std::memory_order_relaxed)) {
@@ -192,7 +190,7 @@ bool Event::resetStatus(int32_t status) {
 // ================================================================================================
 bool Event::setCallback(int32_t status, Event::CallBackFunction callback, void* data,
                         bool blocking) {
-  assert(status >= CL_COMPLETE && status <= CL_QUEUED && "invalid status");
+  assert(status >= CL_COMPLETE && status <= CL_QUEUED && "Invalid status");
 
   CallBackEntry* entry = new CallBackEntry(status, callback, data, blocking);
   if (entry == NULL) {
@@ -200,8 +198,8 @@ bool Event::setCallback(int32_t status, Event::CallBackFunction callback, void* 
   }
 
   entry->next_ = callbacks_;
-  while (!callbacks_.compare_exchange_weak(entry->next_, entry))
-    ;  // Someone else is also updating the head of the linked list! reload.
+  while (!callbacks_.compare_exchange_weak(
+      entry->next_, entry));  // Someone else is also updating the head of the linked list! reload.
 
   // Check if the event has already reached 'status'
   if (this->status() <= status && entry->callback_ != CallBackFunction(0)) {
@@ -241,8 +239,8 @@ bool Event::awaitCompletion() {
       return false;
     }
 
-    ClPrint(LOG_DEBUG, LOG_WAIT, "Waiting for event %p to complete, current status %d",
-      this, status());
+    ClPrint(LOG_DETAIL_DEBUG, LOG_WAIT, "Waiting for event %p to complete, current status %d",
+            this, status());
     auto* queue = command().queue();
     if ((queue != nullptr) && queue->vdev()->ActiveWait()) {
       while (status() > CL_COMPLETE) {
@@ -256,7 +254,7 @@ bool Event::awaitCompletion() {
         lock_.wait();
       }
     }
-    ClPrint(LOG_DEBUG, LOG_WAIT, "Event %p wait completed", this);
+    ClPrint(LOG_DETAIL_DEBUG, LOG_WAIT, "Event %p wait completed", this);
   }
 
   return status() == CL_COMPLETE;
@@ -271,12 +269,10 @@ bool Event::notifyCmdQueue(bool cpu_wait) {
         // If HW event was assigned, then notification can be ignored, since a barrier was issued
         // @note: Force the marker always in OCL for now, since OCL events require precise
         // sequence of the status update
-        ((HwEvent() == nullptr) || !amd::IS_HIP) &&
-        !notified_.test_and_set()) {
+        ((HwEvent() == nullptr) || !amd::IS_HIP) && (notify_event_ == nullptr)) {
       // Make sure the queue is draining the enqueued commands.
       amd::Command* command = new amd::Marker(*queue, false, nullWaitList, this, cpu_wait);
       if (command == NULL) {
-        notified_.clear();
         return false;
       }
       command->enqueue();
@@ -300,13 +296,21 @@ bool Event::notifyCmdQueue(bool cpu_wait) {
 
 const Event::EventWaitList Event::nullWaitList(0);
 
+static bool IsActivityEnabledAndCommit(cl_command_type type) {
+  auto op = amd::activity_prof::OperationId(type);
+  if (amd::activity_prof::IsEnabled(op)) {
+    amd::activity_prof::CommitRecord(op);
+    return true;
+  }
+  return false;
+}
+
 // ================================================================================================
 Command::Command(HostQueue& queue, cl_command_type type, const EventWaitList& eventWaitList,
                  uint32_t commandWaitBits, const Event* waitingEvent)
-    : Event(queue,
-            amd::activity_prof::IsEnabled(amd::activity_prof::OperationId(type)) ||
-                queue.properties().test(CL_QUEUE_PROFILING_ENABLE) ||
-                Agent::shouldPostEventEvents()),
+    : Event(queue, IsActivityEnabledAndCommit(type) ||
+                       queue.properties().test(CL_QUEUE_PROFILING_ENABLE) ||
+                       Agent::shouldPostEventEvents()),
       queue_(&queue),
       next_(nullptr),
       type_(type),
@@ -314,7 +318,7 @@ Command::Command(HostQueue& queue, cl_command_type type, const EventWaitList& ev
       eventWaitList_(eventWaitList),
       commandWaitBits_(commandWaitBits) {
   // Retain the commands from the event wait list.
-  for (const auto &event: eventWaitList) {
+  for (const auto& event : eventWaitList) {
     event->retain();
   }
 }
@@ -325,7 +329,7 @@ void Command::operator delete(void* ptr) {
   if (DEBUG_CLR_SYSMEM_POOL) {
     command_pool_->Free(ptr);
   } else {
-    ::operator delete (ptr);
+    ::operator delete(ptr);
   }
 }
 
@@ -334,7 +338,7 @@ void* Command::operator new(size_t size) {
   if (DEBUG_CLR_SYSMEM_POOL) {
     return command_pool_->Alloc(size);
   } else {
-    return ::operator new (size);
+    return ::operator new(size);
   }
 }
 
@@ -343,7 +347,7 @@ void Command::releaseResources() {
   const Command::EventWaitList& events = eventWaitList();
 
   // Release the commands from the event wait list.
-  for (const auto &event: events) {
+  for (const auto& event : events) {
     event->release();
   }
 }
@@ -356,7 +360,7 @@ void Command::enqueue() {
     Agent::postEventCreate(as_cl(static_cast<Event*>(this)), type_);
   }
 
-  ClPrint(LOG_DEBUG, LOG_CMD, "Command (%s) enqueued: %p to queue: %p",
+  ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command (%s) enqueued: %p to queue: %p",
           amd::activity_prof::getOclCommandKindString(this->type()), this, queue_);
 
   // Direct dispatch logic below will submit the command immediately, but the command status
@@ -366,7 +370,7 @@ void Command::enqueue() {
 
     // Notify all commands about the waiter. Barrier will be sent in order to obtain
     // HSA signal for a wait on the current queue
-    for (const auto &event: eventWaitList()) {
+    for (const auto& event : eventWaitList()) {
       if (!amd::IS_HIP && event->command().type() == CL_COMMAND_USER) {
         if (event->status() >= CL_COMPLETE) {
           reinterpret_cast<amd::UserEvent*>(event)->AddDependent(this);
@@ -381,12 +385,12 @@ void Command::enqueue() {
 
     // The batch update must be lock protected to avoid a race condition
     // when multiple threads submit/flush/update the batch at the same time
-    ScopedLock sl(queue_->vdev()->execution());
+    std::scoped_lock sl(queue_->vdev()->execution());
     queue_->FormSubmissionBatch(this);
 
     // Enqueue flushes, except profiling markers to avoid frequent expensive callbacks
-    if (((type() == 0) && profilingInfo().batch_flush_) ||
-        (type() == CL_COMMAND_MARKER) || (type() == CL_COMMAND_TASK)) {
+    if (((type() == 0) && profilingInfo().batch_flush_) || (type() == CL_COMMAND_MARKER) ||
+        (type() == CL_COMMAND_TASK)) {
       // The current HSA signal tracking logic requires profiling enabled for the markers
       EnableProfiling();
       // Update batch head for the current marker. Hence the status of all commands can be
@@ -399,7 +403,7 @@ void Command::enqueue() {
       queue_->ResetSubmissionBatch();
     } else {
       submit(*queue_->vdev());
-      queue_->FlushSubmissionBatch(this);
+      queue_->FlushSubmissionBatch();
     }
   } else {
     queue_->append(*this);
@@ -502,8 +506,7 @@ bool OneMemoryArgCommand::validatePeerMemory() {
   // extra memory objects.
   if (queue_device->settings().rocr_backend_) {
     const std::vector<Device*>& srcDevices = memory_->getContext().devices();
-    if (!memory_->isArena() &&
-        srcDevices.size() == 1 && queue_device != srcDevices[0]) {
+    if (!memory_->isArena() && srcDevices.size() == 1 && queue_device != srcDevices[0]) {
       // current device and source device are not same hence
       // explicit allow access is needed for P2P access
       device::Memory* mem = memory_->getDeviceMemory(*srcDevices[0]);
@@ -532,7 +535,7 @@ bool OneMemoryArgCommand::validateMemory() {
   return true;
 }
 
-bool TwoMemoryArgsCommand::validatePeerMemory(){
+bool TwoMemoryArgsCommand::validatePeerMemory() {
   bool accessAllowed = true;
   amd::Device* queue_device = &queue()->device();
   // Explicite Allow access is needed when first time memory is accessed from other device.
@@ -549,16 +552,14 @@ bool TwoMemoryArgsCommand::validatePeerMemory(){
     const std::vector<Device*>& dstDevices = memory2_->getContext().devices();
     // explicit allow access is needed for P2P access
     device::Memory* mem1 = memory1_->getDeviceMemory(*srcDevices[0]);
-    if (!memory1_->isArena() &&
-        !mem1->getAllowedPeerAccess() && srcDevices.size() == 1) {
+    if (!memory1_->isArena() && !mem1->getAllowedPeerAccess() && srcDevices.size() == 1) {
       void* src = reinterpret_cast<void*>(mem1->originalDeviceAddress());
       accessAllowed = srcDevices[0]->deviceAllowAccess(src);
       mem1->setAllowedPeerAccess(true);
     }
 
     device::Memory* mem2 = memory2_->getDeviceMemory(*dstDevices[0]);
-    if (!memory2_->isArena() &&
-        !mem2->getAllowedPeerAccess() && dstDevices.size() == 1) {
+    if (!memory2_->isArena() && !mem2->getAllowedPeerAccess() && dstDevices.size() == 1) {
       void* dst = reinterpret_cast<void*>(mem2->originalDeviceAddress());
       accessAllowed &= dstDevices[0]->deviceAllowAccess(dst);
       mem2->setAllowedPeerAccess(true);
@@ -609,24 +610,24 @@ bool CopyMemoryCommand::isEntireMemory() const {
       Coord3D imageSize(size()[0] * size()[1] * size()[2] *
                         source().asImage()->getImageFormat().getElementSize());
       result = source().isEntirelyCovered(srcOrigin(), size()) &&
-          destination().isEntirelyCovered(dstOrigin(), imageSize);
+               destination().isEntirelyCovered(dstOrigin(), imageSize);
     } break;
     case CL_COMMAND_COPY_BUFFER_TO_IMAGE: {
       Coord3D imageSize(size()[0] * size()[1] * size()[2] *
                         destination().asImage()->getImageFormat().getElementSize());
       result = source().isEntirelyCovered(srcOrigin(), imageSize) &&
-          destination().isEntirelyCovered(dstOrigin(), size());
+               destination().isEntirelyCovered(dstOrigin(), size());
     } break;
     case CL_COMMAND_COPY_BUFFER_RECT: {
       Coord3D rectSize(size()[0] * size()[1] * size()[2]);
       Coord3D srcOffs(srcRect().start_);
       Coord3D dstOffs(dstRect().start_);
       result = source().isEntirelyCovered(srcOffs, rectSize) &&
-          destination().isEntirelyCovered(dstOffs, rectSize);
+               destination().isEntirelyCovered(dstOffs, rectSize);
     } break;
     default:
       result = source().isEntirelyCovered(srcOrigin(), size()) &&
-          destination().isEntirelyCovered(dstOrigin(), size());
+               destination().isEntirelyCovered(dstOrigin(), size());
       break;
   }
   return result;
@@ -665,7 +666,7 @@ bool MigrateMemObjectsCommand::validateMemory() {
 }
 
 // =================================================================================================
-int32_t NDRangeKernelCommand::AllocCaptureSetValidate(void** kernelParams, address kernArgs,
+int32_t NDRangeKernelCommand::captureHIPArgsAndValidate(void** kernelParams, address kernArgs,
                                                       size_t kernArgsSize) {
   const amd::Device& device = queue()->device();
   // Validate the kernel before submission
@@ -679,14 +680,14 @@ int32_t NDRangeKernelCommand::AllocCaptureSetValidate(void** kernelParams, addre
     return CL_OUT_OF_RESOURCES;
   }
 
-  if (!kernel().parameters().captureAndSet(kernelParams, kernArgs, kernArgsSize, parameters_)) {
+  if (!kernel().parameters().captureHIPArgs(kernelParams, kernArgs, kernArgsSize, parameters_)) {
     LogError("Cannot capture and set the kernel parameters");
     return CL_OUT_OF_RESOURCES;
   }
   return CL_SUCCESS;
 }
 
-int32_t NDRangeKernelCommand::captureAndValidate() {
+int32_t NDRangeKernelCommand::captureOpenCLArgsAndValidate() {
   const amd::Device& device = queue()->device();
   // Validate the kernel before submission
   if (!queue()->device().validateKernel(kernel(), queue()->vdev(), cooperativeGroups())) {
@@ -695,8 +696,8 @@ int32_t NDRangeKernelCommand::captureAndValidate() {
 
   int32_t error;
   uint64_t lclMemSize = kernel().getDeviceKernel(device)->workGroupInfo()->localMemSize_;
-  parameters_ = kernel().parameters().capture(*queue()->vdev(),
-                                              sharedMemBytes_ + lclMemSize, &error);
+  parameters_ = kernel().parameters().captureOpenCLArgs(*queue()->vdev(),
+                                                        sharedMemBytes_ + lclMemSize, &error);
   return error;
 }
 
@@ -796,13 +797,15 @@ bool CopyMemoryP2PCommand::validateMemory() {
   }
 
   if (devices[0]->P2PStage() != nullptr && p2pStaging) {
-    amd::ScopedLock lock(devices[0]->P2PStageOps());
+    std::scoped_lock lock(devices[0]->P2PStageOps());
     // Make sure runtime allocates memory on every device
     for (uint d = 0; d < devices[0]->GlbCtx().devices().size(); ++d) {
-      device::Memory* mem = devices[0]->P2PStage()->getDeviceMemory(*devices[0]->GlbCtx().devices()[d]);
+      device::Memory* mem =
+          devices[0]->P2PStage()->getDeviceMemory(*devices[0]->GlbCtx().devices()[d]);
       if (nullptr == mem) {
-        DevLogPrintfError("Cannot get P2P stage Device Memory for device: 0x%x \n",
-                          devices[0]->GlbCtx().devices()[d]);
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+                "Cannot get P2P stage Device Memory for device: 0x%x \n",
+                devices[0]->GlbCtx().devices()[d]);
         return false;
       }
     }

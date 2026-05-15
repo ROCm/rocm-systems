@@ -1,0 +1,124 @@
+{
+    "required_tables": [
+        {
+            "commit": "Validation rules for rocm_marker_api",
+            "name": "events_args",
+            "required_columns": [
+                "event_id",
+                "category",
+                "stack_id",
+                "parent_stack_id",
+                "correlation_id"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify that 'rocm_marker_api' appears in category at least 5 times in table events_args",
+                    "error_message": "'rocm_marker_api' category entries are fewer than expected in events_args",
+                    "expected_result": 5,
+                    "query": "SELECT COUNT(*) FROM events_args WHERE category = 'rocm_marker_api';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Check for missing category entries",
+                    "error_message": "Empty or NULL category entries found in events_args",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM events_args WHERE category IS NULL OR TRIM(category) = '';"
+                }
+            ]
+        },
+        {
+            "commit": "Validation rules for rocm_marker_api",
+            "name": "regions",
+            "required_columns": [
+                "id",
+                "guid",
+                "category",
+                "name"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than_or_equal",
+                    "description": "Verify that 'rocm_marker_api' appears in category 10 times in 'regions' table",
+                    "error_message": "Less than 10 'rocm_marker_api' entries in the 'regions' table",
+                    "expected_result": 10,
+                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_marker_api';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Ensure there are no rocTX API calls that last 0 seconds",
+                    "error_message": "Found rocTX API captures where duration is 0",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_marker_api' AND duration = 0;"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Check for any NULL values in the 'name' column of regions",
+                    "error_message": "NULL entries found in the name column of regions",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM regions WHERE name IS NULL;"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Verify that roctxMark markers appear 5 times in table 'regions'",
+                    "error_message": "Expected 5 roctxMark marker entries in `regions` table",
+                    "expected_result": 5,
+                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_marker_api' AND name LIKE 'roctxMark_%';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Verify that roctxRangePush markers appear 3 times in table 'regions'",
+                    "error_message": "Expected 3 roctxRangePush marker entries in `regions` table",
+                    "expected_result": 3,
+                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_marker_api' AND name LIKE 'roctxRangePush_%';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Verify that roctxRangeStart markers appear 2 times in table 'regions'",
+                    "error_message": "Expected 2 roctxRangeStart marker entries in `regions` table",
+                    "expected_result": 2,
+                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_marker_api' AND name LIKE 'roctxRangeStart_%';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Verify that roctxRangePop markers do not appear in table 'regions'",
+                    "error_message": "Found unexpected roctxRangePop marker entries in `regions` table",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_marker_api' AND name LIKE 'roctxRangePop%';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Verify that roctxRangeStop markers do not appear in table 'regions'",
+                    "error_message": "Found unexpected roctxRangeStop marker entries in `regions` table",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_marker_api' AND name LIKE 'roctxRangeStop%';"
+                }
+            ]
+        },
+        {
+            "commit": "Validation rule for rocm_marker_api",
+            "name": "rocpd_string",
+            "required_columns": [
+                "id",
+                "guid",
+                "string"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify that 'rocm_marker_api' string is present in the table",
+                    "error_message": "'rocm_marker_api' string not found in the table rocpd_string",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM rocpd_string WHERE string LIKE '%rocm_marker_api%';"
+                },
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify that 'roctx' string is present in the table",
+                    "error_message": "'roctx' string not found in the table rocpd_string",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM rocpd_string WHERE string LIKE '%roctx%';"
+                }
+            ]
+        }
+    ]
+}

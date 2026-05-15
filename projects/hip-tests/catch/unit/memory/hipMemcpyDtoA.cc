@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 
@@ -23,7 +10,7 @@ THE SOFTWARE.
 
 #define N 32
 
-TEMPLATE_TEST_CASE("Unit_hipMemcpyDtoA_Basic", "", char, int, float) {
+HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyDtoA_Basic, char, int, float) {
   CHECK_IMAGE_SUPPORT
 
   hipArray_t dst_array = nullptr;
@@ -53,7 +40,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyDtoA_Basic", "", char, int, float) {
   HIP_CHECK(hipFree(reinterpret_cast<void*>(src_device)));
 }
 
-TEST_CASE("Unit_hipMemcpyDtoA_Negative") {
+HIP_TEST_CASE(Unit_hipMemcpyDtoA_Negative) {
   CHECK_IMAGE_SUPPORT
 
   hipArray_t dst_array = nullptr;
@@ -71,8 +58,7 @@ TEST_CASE("Unit_hipMemcpyDtoA_Negative") {
 
   SECTION("src device ptr is invalid") {
     HIP_CHECK(hipFree(reinterpret_cast<void*>(src_device)));
-    HIP_CHECK_ERROR(hipMemcpyDtoA(dst_array, 0, src_device, copy_size),
-                    hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipMemcpyDtoA(dst_array, 0, src_device, copy_size), hipErrorInvalidValue);
   }
 
   HIP_CHECK(hipFreeArray(dst_array));
@@ -95,7 +81,7 @@ TEST_CASE("Unit_hipMemcpyDtoA_Negative") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemcpyDtoA_BasicPositive") {
+HIP_TEST_CASE(Unit_hipMemcpyDtoA_BasicPositive) {
   CHECK_IMAGE_SUPPORT
 
   const size_t width = 1024;
@@ -106,14 +92,14 @@ TEST_CASE("Unit_hipMemcpyDtoA_BasicPositive") {
 
   std::vector<int> srcHost(size), dstHost(size);
   for (int i = 0; i < size; i++) {
-    srcHost[i] = value; dstHost[i] = 0;
+    srcHost[i] = value;
+    dstHost[i] = 0;
   }
 
   int* srcDevice = nullptr;
   HIP_CHECK(hipMalloc(&srcDevice, sizeBytes));
   REQUIRE(srcDevice != nullptr);
-  HIP_CHECK(hipMemcpy(srcDevice, srcHost.data(), sizeBytes,
-            hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(srcDevice, srcHost.data(), sizeBytes, hipMemcpyHostToDevice));
 
   hipChannelFormatDesc desc = hipCreateChannelDesc<int>();
   unsigned int flags = hipArrayDefault;
@@ -121,9 +107,7 @@ TEST_CASE("Unit_hipMemcpyDtoA_BasicPositive") {
   HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
   REQUIRE(array != nullptr);
 
-  HIP_CHECK(hipMemcpyDtoA(array, 0,
-                          reinterpret_cast<hipDeviceptr_t>(srcDevice),
-                          sizeBytes));
+  HIP_CHECK(hipMemcpyDtoA(array, 0, reinterpret_cast<hipDeviceptr_t>(srcDevice), sizeBytes));
 
   HIP_CHECK(hipMemcpyAtoH(dstHost.data(), array, 0, sizeBytes));
   for (int i = 0; i < size; i++) {

@@ -30,9 +30,12 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
+      - id: check-json # Check JSON files for syntax errors
       - id: check-yaml # Check YAML files for syntax errors
       - id: trailing-whitespace # Remove trailing whitespace
       - id: end-of-file-fixer # Fix files to have a newline at the end
+      - id: pretty-format-json # Pretty-format JSON files
+        args: ['--indent', '4', '--autofix']
 
   - repo: https://github.com/pre-commit/mirrors-clang-format
     rev: v18.1.8 # Version 18 as specified in contributor guide
@@ -41,28 +44,29 @@ repos:
         files: \.(c|cpp|h.*)$
 
   - repo: https://github.com/BlankSpruce/gersemi
-    rev: 0.19.3
+    rev: 0.23.1
     hooks:
     - id: gersemi
+
+  - repo: https://github.com/DavidAnson/markdownlint-cli2
+    rev: v0.22.1
+    hooks:
+      - id: markdownlint-cli2
+        exclude: ^external/
 
   - repo: local
     hooks:
       - id: check-copyright
         name: copyright-detector
-        require_serial: true # Slightly slower, but prevents hook running script many times
+        require_serial: true
         entry: ./projects/rocprofiler-systems/scripts/check-copyright.sh
         language: script
-        files: \.(c|h|txt|cpp|hpp|py)$
+        files: \.(c|h|txt|cpp|hpp|py|cmake)$
         exclude: ^\.|^docs/|^examples/lulesh/|^examples/mpi/|^examples/openmp/|^external/|^cmake/
 
-  # - repo: local
-  #   hooks:
-  #     - id: check-copyright-date
-  #       name: Check Copyright Date
-  #       # Check copyright date in all files
-  #       # Fails if something is out of date.
-  #       # -u automatically updates copyright year
-  #       entry: ./scripts/check-copyright.sh -u
-  #       language: script
-  #       files: \.(c|h|txt|cpp|hpp|py)$
-  #       exclude: ^\.|^docs/|^examples/lulesh/|^examples/mpi/|^examples/openmp/|^external/|^cmake/
+      - id: check-fixedwidth-types
+        name: fixedwidth-type-consistency
+        entry: ./projects/rocprofiler-systems/scripts/check-fixedwidth-types.sh
+        language: script
+        files: \.(cpp|hpp)$
+        exclude: ^\.|^external/|^examples/

@@ -23,10 +23,8 @@
 #include "libpyrocpd.hpp"
 #include "lib/output/format_path.hpp"
 #include "lib/python/rocpd/source/common.hpp"
-#include "lib/python/rocpd/source/csv.hpp"
 #include "lib/python/rocpd/source/functions.hpp"
 #include "lib/python/rocpd/source/interop.hpp"
-#include "lib/python/rocpd/source/otf2.hpp"
 #include "lib/python/rocpd/source/perfetto.hpp"
 #include "lib/python/rocpd/source/serialization/sql.hpp"
 #include "lib/python/rocpd/source/sql_generator.hpp"
@@ -56,6 +54,7 @@
 #include <rocprofiler-sdk-rocpd/sql.h>
 
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <gotcha/gotcha.h>
 #include <pybind11/detail/common.h>
 #include <pybind11/pybind11.h>
@@ -285,6 +284,9 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
         .def_readwrite("kernel_rename", &tool::output_config::kernel_rename)
         .def_readwrite("agent_index_value", &tool::output_config::agent_index_value)
         .def_readwrite("group_by_queue", &tool::output_config::group_by_queue)
+        .def_readwrite("annotate_args", &tool::output_config::annotate_args)
+        .def_readwrite("annotate_kfd", &tool::output_config::annotate_kfd)
+        .def_readwrite("annotate_pmc", &tool::output_config::annotate_pmc)
         .def_readwrite("perfetto_shmem_size_hint", &tool::output_config::perfetto_shmem_size_hint)
         .def_readwrite("perfetto_buffer_size", &tool::output_config::perfetto_buffer_size)
         .def_readwrite("perfetto_backend", &tool::output_config::perfetto_backend)
@@ -415,13 +417,13 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
             constexpr auto region_order_by = "start ASC, end DESC";
             constexpr auto sample_order_by = "timestamp ASC";
 
-            auto perfetto_session = rocpd::output::PerfettoSession{output_cfg};
-            auto sqlgen_perf      = common::simple_timer{
+            auto* conn             = rocpd::interop::get_connection(std::move(data.connection));
+            auto  perfetto_session = rocpd::output::PerfettoSession{output_cfg, conn};
+            auto  sqlgen_perf      = common::simple_timer{
                 fmt::format("Perfetto generation from {} SQL database(s)", data.size())};
             for(auto obj : {data.connection})
             {
-                auto* conn  = rocpd::interop::get_connection(std::move(obj));
-                auto  nodes = rocpd::read<rocpd::types::node>(conn);
+                auto nodes = rocpd::read<rocpd::types::node>(conn);
 
                 for(const auto& nitr : nodes)
                 {
@@ -461,6 +463,9 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                         auto memory_copies = rocpd::sql_generator<rocpd::types::memory_copies>{
                             conn, select_guid_nid_pid("memory_copies")};
 
+                        auto scratch_memory = rocpd::sql_generator<rocpd::types::scratch_memory>{
+                            conn, select_guid_nid_pid("scratch_memory")};
+
                         auto counters = rocpd::sql_generator<rocpd::types::counter>{
                             conn, select_guid_nid_pid("counters_collection")};
 
@@ -496,6 +501,7 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                                                       samples,
                                                       kernels,
                                                       memory_copies,
+                                                      scratch_memory,
                                                       memory_allocations,
                                                       counters);
                     }
@@ -504,263 +510,6 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
             return true;
         },
         "Write pftrace output file from rocpd SQLite3 database");
-
-    pyrocpd.def(
-        "write_csv",
-        [](rocpd::RocpdImportData& data, const rocprofiler::tool::output_config& output_cfg) {
-            auto sqlgen_csv = common::simple_timer{
-                fmt::format("CSV generation from {} SQL database(s)", data.size())};
-
-            if(data.empty()) return;
-
-            auto csv_manager = rocpd::output::CsvManager{output_cfg};
-
-            for(auto obj : {data.connection})
-            {
-                auto* conn  = rocpd::interop::get_connection(std::move(obj));
-                auto  nodes = rocpd::read<rocpd::types::node>(conn);
-
-                for(const auto& nitr : nodes)
-                {
-                    auto agents = rocpd::read<rocpd::types::agent>(
-                        conn, fmt::format("WHERE guid = '{}' AND nid = {}", nitr.guid, nitr.id));
-                    auto processes = rocpd::read<rocpd::types::process>(
-                        conn, fmt::format("WHERE guid = '{}' AND nid = {}", nitr.guid, nitr.id));
-
-                    for(const auto& pitr : processes)
-                    {
-                        ROCP_FATAL_IF(pitr.nid != nitr.id || pitr.guid != nitr.guid)
-                            << fmt::format("Found process with a mismatched nid/guid. process: "
-                                           "{}/{} vs. node: {}/{}",
-                                           pitr.nid,
-                                           pitr.guid,
-                                           nitr.id,
-                                           nitr.guid);
-                        auto _sqlgen_csv = common::simple_timer{fmt::format(
-                            "CSV generation from SQL for process {} (total)", pitr.pid)};
-
-                        auto select_guid_nid_pid = [&nitr, &pitr](std::string_view tbl,
-                                                                  std::string_view
-                                                                      where_extra_condition = {}) {
-                            return fmt::format(
-                                "SELECT * FROM {} WHERE guid = '{}' AND nid = {} AND pid = {} {}",
-                                tbl,
-                                pitr.guid,
-                                nitr.id,
-                                pitr.pid,
-                                where_extra_condition);
-                        };
-
-                        rocpd::output::write_agent_info_csv(csv_manager, agents);
-
-                        constexpr auto region_order_by = "start ASC, end DESC";
-
-                        auto kernels = rocpd::sql_generator<rocpd::types::kernel_dispatch>{
-                            conn, select_guid_nid_pid("kernels"), region_order_by};
-                        auto memory_copies = rocpd::sql_generator<rocpd::types::memory_copies>{
-                            conn, select_guid_nid_pid("memory_copies"), region_order_by};
-                        auto memory_allocations =
-                            rocpd::sql_generator<rocpd::types::memory_allocation>{
-                                conn, select_guid_nid_pid("memory_allocations"), region_order_by};
-                        auto hip_api_calls = rocpd::sql_generator<rocpd::types::region>{
-                            conn,
-                            select_guid_nid_pid("regions", "AND category LIKE 'HIP_%'"),
-                            region_order_by};
-                        auto hsa_api_calls = rocpd::sql_generator<rocpd::types::region>{
-                            conn,
-                            select_guid_nid_pid("regions", "AND category LIKE 'HSA_%'"),
-                            region_order_by};
-                        auto marker_api_calls = rocpd::sql_generator<rocpd::types::region>{
-                            conn,
-                            select_guid_nid_pid("regions_and_samples",
-                                                "AND category LIKE 'MARKER_%'"),
-                            region_order_by};
-                        auto counters_calls = rocpd::sql_generator<rocpd::types::counter>{
-                            conn, select_guid_nid_pid("counters_collection"), region_order_by};
-                        auto scratch_memory_calls =
-                            rocpd::sql_generator<rocpd::types::scratch_memory>{
-                                conn, select_guid_nid_pid("scratch_memory"), region_order_by};
-                        auto rccl_calls = rocpd::sql_generator<rocpd::types::region>{
-                            conn,
-                            select_guid_nid_pid("regions", "AND category LIKE 'RCCL_%'"),
-                            region_order_by};
-                        auto rocdecode_calls = rocpd::sql_generator<rocpd::types::region>{
-                            conn,
-                            select_guid_nid_pid("regions", "AND category LIKE 'ROCDECODE_%'"),
-                            region_order_by};
-                        auto rocjpeg_calls = rocpd::sql_generator<rocpd::types::region>{
-                            conn,
-                            select_guid_nid_pid("regions", "AND category LIKE 'ROCJPEG_%'"),
-                            region_order_by};
-
-                        rocpd::output::write_csvs(csv_manager,
-                                                  kernels,
-                                                  memory_copies,
-                                                  memory_allocations,
-                                                  hip_api_calls,
-                                                  hsa_api_calls,
-                                                  marker_api_calls,
-                                                  counters_calls,
-                                                  scratch_memory_calls,
-                                                  rccl_calls,
-                                                  rocdecode_calls,
-                                                  rocjpeg_calls);
-                    }
-                }
-            }
-        },
-        "Write trace data to CSV files");
-
-    pyrocpd.def(
-        "write_otf2",
-        [](rocpd::RocpdImportData& data, const tool::output_config& output_cfg) {
-            auto _create_agent_index =
-                [&output_cfg](const rocpd::types::agent& _agent) -> tool::agent_index {
-                auto ret_index = tool::create_agent_index(
-                    output_cfg.agent_index_value,
-                    _agent.node_id,                                      // absolute index
-                    static_cast<uint32_t>(_agent.logical_node_id),       // relative index
-                    static_cast<uint32_t>(_agent.logical_node_type_id),  // type-relative index
-                    std::string_view(_agent.type));
-                return ret_index;
-            };
-
-            constexpr auto kernels_order_by =
-                "agent_abs_index ASC, stream_id ASC, queue_id ASC, start ASC, end DESC";
-
-            // to initialise the OTF@ session properly we need to know:
-            // (1) the process with the earliest start time
-            // (2) find the process with the longest duration
-            uint64_t min_start_time = std::numeric_limits<uint64_t>::max();
-            uint64_t max_fini_time  = 0;
-            for(auto obj : {data.connection})
-            {
-                auto* conn = rocpd::interop::get_connection(std::move(obj));
-
-                // min start
-                sqlite3_stmt* _stmt_min_start;
-                sqlite3_prepare_v2(
-                    conn, "SELECT MIN(start) FROM processes;", -1, &_stmt_min_start, nullptr);
-                uint64_t _min_start_time = std::numeric_limits<uint64_t>::max();
-                if(sqlite3_step(_stmt_min_start) == SQLITE_ROW)
-                {
-                    _min_start_time =
-                        static_cast<uint64_t>(sqlite3_column_int64(_stmt_min_start, 0));
-                }
-
-                sqlite3_finalize(_stmt_min_start);
-                if(min_start_time > _min_start_time)
-                {
-                    min_start_time = _min_start_time;
-                }
-                //// max fini
-                sqlite3_stmt* _stmt_max_fini;
-                sqlite3_prepare_v2(
-                    conn, "SELECT MAX(fini) FROM processes;", -1, &_stmt_max_fini, nullptr);
-                uint64_t _max_fini_time = 0;
-                if(sqlite3_step(_stmt_max_fini) == SQLITE_ROW)
-                {
-                    _max_fini_time = static_cast<uint64_t>(sqlite3_column_int64(_stmt_max_fini, 0));
-                }
-
-                sqlite3_finalize(_stmt_max_fini);
-                if(max_fini_time < _max_fini_time)
-                {
-                    max_fini_time = _max_fini_time;
-                }
-            }
-
-            auto otf2_session =
-                rocpd::output::OTF2Session(output_cfg, min_start_time, max_fini_time);
-
-            auto sqlgen_otf2 = common::simple_timer{
-                fmt::format("OTF2 generation from {} SQL database(s)", data.size())};
-
-            uint16_t _process_counter = 0;
-            for(auto obj : {data.connection})
-            {
-                auto* conn  = rocpd::interop::get_connection(std::move(obj));
-                auto  nodes = rocpd::read<rocpd::types::node>(conn);
-                for(const auto& nitr : nodes)
-                {
-                    auto agents = rocpd::read<rocpd::types::agent>(
-                        conn, fmt::format("WHERE guid = '{}' AND nid = {}", nitr.guid, nitr.id));
-                    auto processes = rocpd::read<rocpd::types::process>(
-                        conn, fmt::format("WHERE guid = '{}' AND nid = {}", nitr.guid, nitr.id));
-
-                    // absolute_index |-> (agent, agent_index)
-                    auto agents_map = std::unordered_map<uint64_t, rocpd::output::extended_agent>{};
-
-                    for(const auto& itr : agents)
-                    {
-                        const rocprofiler::tool::agent_index new_index = _create_agent_index(itr);
-                        const std::string labeled_name = fmt::format("{}", itr.name);
-                        agents_map.emplace(
-                            itr.absolute_index,
-                            rocpd::output::extended_agent{itr, new_index, labeled_name});
-                    }
-
-                    for(const auto& pitr : processes)
-                    {
-                        ROCP_FATAL_IF(pitr.nid != nitr.id || pitr.guid != nitr.guid)
-                            << fmt::format("Found process with a mismatched nid/guid. process: "
-                                           "{}/{} vs. node: {}/{}",
-                                           pitr.nid,
-                                           pitr.guid,
-                                           nitr.id,
-                                           nitr.guid);
-
-                        auto select_guid_nid_pid =
-                            [&nitr, &pitr](std::string_view tbl,
-                                           std::string_view where_extra_condition = "") {
-                                return fmt::format("SELECT * FROM {} WHERE guid = '{}' AND "
-                                                   "nid = {} AND pid = {} {}",
-                                                   tbl,
-                                                   pitr.guid,
-                                                   nitr.id,
-                                                   pitr.pid,
-                                                   where_extra_condition);
-                            };
-
-                        constexpr auto region_order_by = "start ASC, end DESC";
-
-                        auto _sqlgen_otf2 = common::simple_timer{fmt::format(
-                            "OTF2 generation from SQL for process {} (total)", pitr.pid)};
-
-                        auto kernels = rocpd::sql_generator<rocpd::types::kernel_dispatch>{
-                            conn, select_guid_nid_pid("kernels"), kernels_order_by};
-
-                        auto memory_allocations =
-                            rocpd::sql_generator<rocpd::types::memory_allocation>{
-                                conn, select_guid_nid_pid("memory_allocations"), region_order_by};
-
-                        auto memory_copies = rocpd::sql_generator<rocpd::types::memory_copies>{
-                            conn, select_guid_nid_pid("memory_copies"), region_order_by};
-
-                        auto regions = rocpd::sql_generator<rocpd::types::region>{
-                            conn, select_guid_nid_pid("regions"), region_order_by};
-
-                        auto threads = rocpd::sql_generator<rocpd::types::thread>{
-                            conn, select_guid_nid_pid("threads")};
-
-                        ROCP_TRACE << "Starting OTF2 generation from SQL for process " << pitr.pid;
-                        auto _sqlgen_perfw = common::simple_timer{fmt::format(
-                            "OTF2 generation from SQL for process {} (write)", pitr.pid)};
-                        rocpd::output::write_otf2(otf2_session,
-                                                  pitr,
-                                                  _process_counter,
-                                                  agents_map,
-                                                  threads,
-                                                  regions,
-                                                  kernels,
-                                                  memory_copies,
-                                                  memory_allocations);
-                        _process_counter++;
-                    }
-                }
-            }
-        },
-        "Write OTF2 output file from rocpd SQLite3 database");
 
     // NOLINTEND(performance-unnecessary-value-param)
 

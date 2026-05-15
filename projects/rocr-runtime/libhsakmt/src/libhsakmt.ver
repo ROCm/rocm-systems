@@ -7,6 +7,7 @@ hsaKmtGetVersion;
 hsaKmtAcquireSystemProperties;
 hsaKmtReleaseSystemProperties;
 hsaKmtGetNodeProperties;
+hsaKmtGetNodeWallclockFrequency;
 hsaKmtGetNodeMemoryProperties;
 hsaKmtGetNodeCacheProperties;
 hsaKmtGetNodeIoLinkProperties;
@@ -89,6 +90,16 @@ hsaKmtPcSamplingDestroy;
 hsaKmtPcSamplingStart;
 hsaKmtPcSamplingStop;
 hsaKmtPcSamplingSupport;
+hsaKmtAisReadWriteFile;
+#if defined(_WIN32)
+hsaKmtGetMemoryHandle;
+#endif
+hsaKmtHandleImport;
+hsaKmtMemoryVaMap;
+hsaKmtMemoryVaUnmap;
+hsaKmtMemHandleFree;
+hsaKmtMemoryGetCpuAddr;
+hsaKmtMemoryCpuMap;
 local: *;
 };
 

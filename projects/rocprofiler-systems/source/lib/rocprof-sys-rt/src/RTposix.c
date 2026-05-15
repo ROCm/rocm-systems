@@ -33,6 +33,8 @@
  * RTposix.c: runtime instrumentation functions for generic posix.
  ************************************************************************/
 
+#define _GNU_SOURCE
+
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -56,7 +58,7 @@
 
 #if !(defined(arch_power) && defined(os_linux))
 void
-RTmutatedBinary_init()
+RTmutatedBinary_init(void)
 {
     return;
 }
@@ -81,7 +83,7 @@ struct passwd* passwd_info = NULL;
 #endif
 
 void
-libdyninstAPI_RT_init()
+libdyninstAPI_RT_init(void)
 {
     static int initCalledOnce = 0;
 
@@ -198,7 +200,7 @@ DYNINSTasyncConnect(int pid)
 }
 
 int
-DYNINSTasyncDisconnect()
+DYNINSTasyncDisconnect(void)
 {
     if(DYNINSTstaticMode) return 0;
     rtdebug_printf("%s[%d]:  welcome to DYNINSTasyncDisconnect\n", __FILE__, __LINE__);
@@ -281,7 +283,7 @@ extern void
 dyninstTrapHandler(int sig, siginfo_t* info, void* context);
 
 int
-DYNINSTinitializeTrapHandler()
+DYNINSTinitializeTrapHandler(void)
 {
     int              result;
     struct sigaction new_handler;

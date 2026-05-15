@@ -60,7 +60,8 @@ rocprofiler_add_interface_library(rocprofiler-sdk-rt "Build flags for runtime li
                                   INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-atomic "atomic library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-gtest "Google Test library" INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-sdk-glog "Google Log library" INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-sdk-abseil "Abseil logging library"
+                                  INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-fmt "C++ format string library"
                                   INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-cxx-filesystem "C++ filesystem library"
@@ -80,7 +81,8 @@ rocprofiler_add_interface_library(rocprofiler-sdk-hip "HIP library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-hsa-runtime "HSA runtime library"
                                   INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-amd-comgr "AMD comgr library" INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-sdk-hsa-aql "AQL library" INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-sdk-aqlprofile-external
+                                  "(External) AQL library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-hsakmt
                                   "HSAKMT library for AMD KFD support" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-drm "drm (amdgpu) library" INTERNAL)
@@ -92,21 +94,20 @@ rocprofiler_add_interface_library(rocprofiler-sdk-drm "drm (amdgpu) library" INT
 # runtime library
 #
 
-rocprofiler_add_interface_library(
+rocprofiler_add_nolink_interface_library(
     rocprofiler-sdk-hip-nolink "rocprofiler-sdk-hip without linking to HIP library"
     IMPORTED)
-rocprofiler_add_interface_library(
+rocprofiler_add_nolink_interface_library(
     rocprofiler-sdk-hsa-runtime-nolink
     "rocprofiler-sdk-hsa-runtime without linking to HSA library" IMPORTED)
-rocprofiler_add_interface_library(
+rocprofiler_add_nolink_interface_library(
     rocprofiler-sdk-hsakmt-nolink
     "rocprofiler-sdk-hsakmt without linking to HSAKMT library" IMPORTED)
-rocprofiler_add_interface_library(rocprofiler-sdk-rccl-nolink
-                                  "RCCL headers without linking to RCCL library" IMPORTED)
-rocprofiler_add_interface_library(
+rocprofiler_add_nolink_interface_library(
+    rocprofiler-sdk-rccl-nolink "RCCL headers without linking to RCCL library" IMPORTED)
+rocprofiler_add_nolink_interface_library(
     rocprofiler-sdk-rocdecode-nolink
     "ROCDECODE headers without linking to ROCDECODE library" IMPORTED)
-
-rocprofiler_add_interface_library(
+rocprofiler_add_nolink_interface_library(
     rocprofiler-sdk-rocjpeg-nolink "ROCJPEG headers without linking to ROCJPEG library"
     IMPORTED)

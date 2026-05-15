@@ -25,10 +25,6 @@ THE SOFTWARE.
 
 #ifdef __cplusplus
 extern "C" {
-#endif  // __cplusplus
-
-#ifdef __cplusplus
-
 // cstddef include causes issues on older GCC
 // use stddef.h instead
 #if __GNUC__ < 9
@@ -83,6 +79,9 @@ typedef enum {
                             //!<   operation
   RDC_ST_CORRUPTED_EEPROM,  //!< EEPROM is corrupted
   RDC_ST_DISABLED_MODULE,   //!< Attempted loading disabled module
+
+  RDC_ST_GROUP_NOT_FOUND,     //!< Specified group not found
+  RDC_ST_FLDGROUP_NOT_FOUND,  //!< Specified field group not found
 
   RDC_ST_UNKNOWN_ERROR = 0xFFFFFFFF  //!< Unknown error
 } rdc_status_t;
@@ -156,6 +155,11 @@ typedef enum { INTEGER = 0, DOUBLE, STRING, BLOB } rdc_field_type_t;
 #define RDC_MAX_VERSION_STR_LENGTH 60
 
 /**
+ * @brief Max number of GPUs tracked per job
+ */
+#define RDC_MAX_NUM_GPUS_PER_JOB 16
+
+/**
  * @brief Max configuration can be collected using the configuration get
  */
 #define RDC_MAX_CONFIG_SETTINGS 32
@@ -175,6 +179,7 @@ typedef enum {
   RDC_FI_NUM_OF_COMPUTE_UNITS,     //!< Number of compute units
   RDC_FI_UUID,                     //!< Device UUID
   RDC_FI_GPU_PARTITION_COUNT,
+  RDC_FI_KFD_ID,
 
   /**
    * @brief Frequency related fields
@@ -196,7 +201,10 @@ typedef enum {
   RDC_FI_PCIE_RX,        //!< PCIe Rx utilization information
   // RDC_FI_PCIE_TX, RDC_FI_PCIE_RX are not supported on new ASIC
   // The RDC_FI_PCIE_BANDWIDTH should be used
-  RDC_FI_PCIE_BANDWIDTH,  //!< PCIe bandwidth in Mbps
+  RDC_FI_PCIE_BANDWIDTH,                   //!< PCIe bandwidth in Mbps
+  RDC_FI_PCIE_LC_PERF_OTHER_END_RECOVERY,  //!< PCIe link recovery count
+  RDC_FI_PCIE_NAK_RCVD_COUNT_ACC,          //!< PCIe NAK received count
+  RDC_FI_PCIE_NAK_SENT_COUNT_ACC,          //!< PCIe NAK sent count
 
   /**
    * @brief GPU usage related fields
@@ -208,8 +216,8 @@ typedef enum {
   RDC_FI_GPU_MM_DEC_UTIL,           //!< Multimedia decoder busy percentage
   RDC_FI_GPU_MEMORY_ACTIVITY,       //!< Memory busy percentage
   RDC_FI_GPU_MEMORY_MAX_BANDWIDTH,  //<! The Memory max bandwidth at current memory clock in
-                                    // Mb/Second
-  RDC_FI_GPU_MEMORY_CUR_BANDWIDTH,  //<! The Memory current bandwidth in Mb/Second
+                                    // Gb/Second
+  RDC_FI_GPU_MEMORY_CUR_BANDWIDTH,  //<! The Memory current bandwidth in Gb/Second
   RDC_FI_GPU_BUSY_PERCENT,          //<! The GPU busy percentage
 
   /**
@@ -345,7 +353,6 @@ typedef enum {
   RDC_FI_PROF_CPF_CPF_TCIU_IDLE,
   RDC_FI_PROF_CPF_CPF_TCIU_STALL,
   RDC_FI_PROF_SIMD_UTILIZATION,
-  RDC_FI_PROF_KFD_ID,
 
   /**
    * @brief Raw XGMI counter events
@@ -424,6 +431,30 @@ typedef enum {
   RDC_HEALTH_EEPROM_CONFIG_VALID,    //!< Reads the EEPROM and verifies the checksums
   RDC_HEALTH_POWER_THROTTLE_TIME,    //!< Power throttle status counter
   RDC_HEALTH_THERMAL_THROTTLE_TIME,  //!< Total time in thermal throttle status (microseconds)
+
+  /**
+   * @brief RDC CPU related fields
+   */
+  RDC_FI_CPU_SKT_COUNT = 10000,  //!< CPU socket count
+  RDC_FI_CPU_FIRST = RDC_FI_CPU_SKT_COUNT,
+  RDC_FI_CPU_MODEL,                  //!< Name of the model
+  RDC_FI_CPU_MODEL_ID,               //!< CPU model identifier
+  RDC_FI_CPU_FAMILY,                 //!< CPU family identifier
+  RDC_FI_CPU_CORES_PER_SKT,          //!< CPU cores per socket
+  RDC_FI_CPU_SKT_ENERGY,             //!< CPU socket energy consumption (microjoules)
+  RDC_FI_CPU_HSMP_DRIVER_VERSION,    //!< HSMP driver version
+  RDC_FI_CPU_SMU_FW_VERSION,         //!< SMU firmware version
+  RDC_FI_CPU_HSMP_PROTO_VERSION,     //!< HSMP protocol version
+  RDC_FI_CPU_FCLK_FREQUENCY,         //!< CPU fabric clock frequency (MHz)
+  RDC_FI_CPU_MCLK_FREQUENCY,         //!< CPU memory clock frequency (MHz)
+  RDC_FI_CPU_CCLK_LIMIT,             //!< CPU core clock limit (MHz)
+  RDC_FI_CPU_SKT_ACTIVE_FREQ_LIMIT,  //!< CPU socket active frequency limit (MHz)
+  RDC_FI_CPU_SKT_FREQ_LIMIT_SRC,     //!< CPU socket frequency limit source type
+  RDC_FI_CPU_SKT_FREQ_RANGE_MAX,     //!< CPU socket maximum frequency range (MHz)
+  RDC_FI_CPU_SKT_FREQ_RANGE_MIN,     //!< CPU socket minimum frequency range (MHz)
+  RDC_FI_CPU_SKT_C0_RESIDENCY,       //!< CPU socket C0 residency percentage
+  RDC_FI_CPU_SKT_LCLK_DPM_LEVEL,     //!< CPU socket LCLK DPM level
+  RDC_FI_CPU_LAST = RDC_FI_CPU_SKT_LCLK_DPM_LEVEL,
 } rdc_field_t;
 
 // even and odd numbers are used for correctable and uncorrectable errors
@@ -488,19 +519,22 @@ typedef struct {
   uint64_t start_time;  //!< The time to start the watching
   uint64_t end_time;    //!< The time to stop the watching
 
-  uint64_t energy_consumed;             //!< GPU Energy consumed
-  uint64_t ecc_correct;                 //!< Correctable errors
-  uint64_t ecc_uncorrect;               //!< Uncorrectable errors
-  rdc_stats_summary_t pcie_tx;          //!< Bytes sent over PCIe stats
-  rdc_stats_summary_t pcie_rx;          //!< Bytes received over PCIe stats
-  rdc_stats_summary_t pcie_total;       //!< Total PCIe bandwidth stats
-                                        //!< pcie_tx/pcie_rx are not available on mi300, max integer
-                                        //!< returned, so use pcie_total
-  rdc_stats_summary_t power_usage;      //!< GPU Power usage stats
-  rdc_stats_summary_t gpu_clock;        //!< GPU Clock speed stats
-  rdc_stats_summary_t memory_clock;     //!< Mem. Clock speed stats
-  rdc_stats_summary_t gpu_utilization;  //!< GPU Utilization stats
-  rdc_stats_summary_t gpu_temperature;  //!< GPU temperature stats
+  uint64_t energy_consumed;        //!< GPU Energy consumed
+  uint64_t ecc_correct;            //!< Correctable errors
+  uint64_t ecc_uncorrect;          //!< Uncorrectable errors
+  rdc_stats_summary_t pcie_tx;     //!< Bytes sent over PCIe stats
+  rdc_stats_summary_t pcie_rx;     //!< Bytes received over PCIe stats
+  rdc_stats_summary_t pcie_total;  //!< Total PCIe bandwidth stats
+                                   //!< pcie_tx/pcie_rx are not available on mi300, max integer
+                                   //!< returned, so use pcie_total
+  uint32_t pcie_lc_perf_other_end_recovery_count;  //!< PCIE other end recovery count
+  uint32_t pcie_nak_sent_count_acc;                //!< PCIE NAK sent accumulated count
+  uint32_t pcie_nak_rcvd_count_acc;                //!< PCIE NAK received accumulated count
+  rdc_stats_summary_t power_usage;                 //!< GPU Power usage stats
+  rdc_stats_summary_t gpu_clock;                   //!< GPU Clock speed stats
+  rdc_stats_summary_t memory_clock;                //!< Mem. Clock speed stats
+  rdc_stats_summary_t gpu_utilization;             //!< GPU Utilization stats
+  rdc_stats_summary_t gpu_temperature;             //!< GPU temperature stats
 
   uint64_t max_gpu_memory_used;            //!< Maximum GPU memory used
   rdc_stats_summary_t memory_utilization;  //!< Memory Utilization statistics
@@ -522,11 +556,11 @@ typedef struct {
  * @brief The structure to hold the job stats
  */
 typedef struct {
-  uint32_t num_gpus;              //!< Number of GPUs used by job
-  rdc_gpu_usage_info_t summary;   //!< Job usage summary statistics
-                                  //!< (overall)
-  rdc_gpu_usage_info_t gpus[16];  //!< Job usage summary statistics by GPU
-  uint32_t num_processes;         //!< Number of processes tracked
+  uint32_t num_gpus;                                    //!< Number of GPUs used by job
+  rdc_gpu_usage_info_t summary;                         //!< Job usage summary statistics
+                                                        //!< (overall)
+  rdc_gpu_usage_info_t gpus[RDC_MAX_NUM_GPUS_PER_JOB];  //!< Job usage summary statistics by GPU
+  uint32_t num_processes;                               //!< Number of processes tracked
   rdc_process_status_info_t
       processes[RDC_MAX_NUM_PROCESSES_STATUS];  //!< Array to track process start/stop times
 } rdc_job_info_t;
@@ -1216,6 +1250,23 @@ rdc_status_t rdc_group_field_create(rdc_handle_t p_rdc_handle, uint32_t num_fiel
                                     rdc_field_grp_t* rdc_field_group_id);
 
 /**
+ *  @brief Add a field to an existing field group
+ *
+ *  @details Add a single field ID to an existing field group created by
+ *  rdc_group_field_create
+ *
+ *  @param[in] p_rdc_handle The RDC handler.
+ *
+ *  @param[in] rdc_field_group_id The field group ID to add the field to
+ *
+ *  @param[in] field_id The field ID to be added to the field group
+ *
+ *  @retval ::RDC_ST_OK is returned upon successful call.
+ */
+rdc_status_t rdc_group_field_add_field(rdc_handle_t p_rdc_handle,
+                                       rdc_field_grp_t rdc_field_group_id, rdc_field_t field_id);
+
+/**
  *  @brief Get information about a field group
  *
  *  @details Get detail information about a field group created by
@@ -1511,6 +1562,8 @@ typedef struct {
   rdc_policy_condition_t condition;  //!< the condition that is meet
   rdc_gpu_group_t group_id;          //!< The group id trigger this callback
   int64_t value;                     //!< The current value that meet the condition
+  uint32_t gpu_index;                //!< GPU index that hit the condition
+  bool reset_triggered;              //!< if reset was attempted
 } rdc_policy_callback_response_t;
 
 /**
@@ -1659,7 +1712,7 @@ rdc_status_t rdc_config_set(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                             rdc_config_setting_t setting);
 
 /**
- *  @brief Get the configrations
+ *  @brief Get the configurations
  *
  *  @details Get all the configurations for all nodes belong to the given group
  *
@@ -1812,15 +1865,15 @@ rdc_status_t rdc_get_num_partition(rdc_handle_t p_rdc_handle, uint32_t index,
 bool rdc_is_partition_string(const char* s);
 
 /**
- * @brief Parse partition id into physical gpu and partition
+ * @brief Parse partition id into socket and partition
  *
  * @param[in] s - singular partition string
- * @param[out] physicalGpu - socket id
+ * @param[out] socket - socket id
  * @param[out] partition - partition id
  *
  * @retval bool - success
  */
-bool rdc_parse_partition_string(const char* s, uint32_t* physicalGpu, uint32_t* partition);
+bool rdc_parse_partition_string(const char* s, uint32_t* socket, uint32_t* partition);
 
 #ifdef __cplusplus
 }

@@ -1,33 +1,15 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "library/components/comm_data.hpp"
-#include "core/agent_manager.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
 #include "core/node_info.hpp"
 #include "core/perfetto.hpp"
-#include "core/rocpd/data_processor.hpp"
+#include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/sample_type.hpp"
 #include "library/tracing.hpp"
+#include <cstdint>
 
 #include <timemory/units.hpp>
 
@@ -39,7 +21,7 @@ namespace
 {
 template <typename Tp, typename... Args>
 void
-write_perfetto_counter_track(uint64_t _val)
+write_perfetto_counter_track(std::uint64_t _val)
 {
     using counter_track = rocprofsys::perfetto_counter_track<Tp>;
 
@@ -49,9 +31,8 @@ write_perfetto_counter_track(uint64_t _val)
         auto _emplace = [](const size_t _idx) {
             if(!counter_track::exists(_idx))
             {
-                std::string _label = (_idx > 0)
-                                         ? JOIN(" ", Tp::label, JOIN("", '[', _idx, ']'))
-                                         : Tp::label;
+                std::string _label =
+                    (_idx > 0) ? fmt::format(" {} [{}]", Tp::label, _idx) : Tp::label;
                 counter_track::emplace(_idx, _label, "bytes");
             }
         };
@@ -60,12 +41,12 @@ write_perfetto_counter_track(uint64_t _val)
         static std::once_flag _once{};
         std::call_once(_once, _emplace, _idx);
 
-        static std::mutex _mutex{};
-        static uint64_t   value = 0;
-        uint64_t          _now  = 0;
+        static std::mutex    _mutex{};
+        static std::uint64_t value = 0;
+        std::uint64_t        _now  = 0;
         {
             std::unique_lock<std::mutex> _lk{ _mutex };
-            _now = rocprofsys::tracing::now<uint64_t>();
+            _now = rocprofsys::tracing::now<std::uint64_t>();
             _val = (value += _val);
         }
 
@@ -76,41 +57,26 @@ write_perfetto_counter_track(uint64_t _val)
 
 namespace
 {
-rocpd::data_processor&
-get_data_processor()
-{
-    return rocpd::data_processor::get_instance();
-}
-
 void
-rocpd_initialize_comm_data_categories()
+metadata_initialize_comm_data_categories()
 {
     static bool _is_initialized = false;
     if(_is_initialized) return;
 
-    get_data_processor().insert_category(category_enum_id<category::comm_data>::value,
-                                         trait::name<category::comm_data>::value);
-#if defined(ROCPROFSYS_USE_MPI)
-    get_data_processor().insert_category(category_enum_id<category::mpi>::value,
-                                         trait::name<category::mpi>::value);
-#endif
-#if defined(ROCPROFSYS_USE_RCCL)
-    get_data_processor().insert_category(category_enum_id<category::rocm_rccl>::value,
-                                         trait::name<category::rocm_rccl>::value);
-#endif
+    trace_cache::get_metadata_registry().add_string(
+        trait::name<category::comm_data>::value);
+    trace_cache::get_metadata_registry().add_string(trait::name<category::mpi>::value);
+    trace_cache::get_metadata_registry().add_string(trait::name<category::ucx>::value);
+
     _is_initialized = true;
 }
 
 template <typename Track>
 void
-rocpd_initialize_track()
+metadata_initialize_track()
 {
-    auto& n_info      = node_info::get_instance();
-    auto  thread_id   = std::nullopt;
-    auto  _init_track = [&](const char* label) {
-        ROCPROFSYS_VERBOSE(3, "INSERT_TRACK label: %s, node ID: %d, Process ID: %d",
-                            label, n_info.id, getpid());
-        get_data_processor().insert_track(label, n_info.id, getpid(), thread_id);
+    auto _init_track = [&](const char* label) {
+        trace_cache::get_metadata_registry().add_track({ label, std::nullopt, "{}" });
     };
 
     static std::once_flag _once{};
@@ -118,9 +84,8 @@ rocpd_initialize_track()
 }
 
 void
-rocpd_initialize_comm_data_pmc()
+metadata_initialize_comm_data_pmc()
 {
-    [[maybe_unused]] auto& data_processor = get_data_processor();
     // find the proper values for a following definitions
     [[maybe_unused]] size_t                EVENT_CODE       = 0;
     [[maybe_unused]] size_t                INSTANCE_ID      = 0;
@@ -131,67 +96,59 @@ rocpd_initialize_comm_data_pmc()
     [[maybe_unused]] constexpr const char* MSG              = "bytes";
     [[maybe_unused]] constexpr const auto* TARGET_ARCH      = "CPU";
     auto                                   ni               = node_info::get_instance();
-    constexpr const auto                   DEVICE_ID = 0;  // Assuming CPU device ID is 0
-
-    auto&                 _agent_manager = agent_manager::get_instance();
-    [[maybe_unused]] auto base_id =
-        _agent_manager.get_agent_by_id(DEVICE_ID, agent_type::CPU).base_id;
+    [[maybe_unused]] constexpr const auto  DEVICE_ID = 0;  // Assuming CPU device ID is 0
 
 #if defined(ROCPROFSYS_USE_MPI)
-    data_processor.insert_pmc_description(
-        ni.id, getpid(), base_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-        comm_data::mpi_send::label, "Tracks MPI Send communication data sizes",
-        trait::name<category::mpi>::description, LONG_DESCRIPTION, COMPONENT, MSG, "ABS",
-        BLOCK, EXPRESSION, 0, 0);
-
-    data_processor.insert_pmc_description(
-        ni.id, getpid(), base_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-        comm_data::mpi_recv::label, "Tracks MPI Receive communication data sizes",
-        trait::name<category::mpi>::description, LONG_DESCRIPTION, COMPONENT, MSG, "ABS",
-        BLOCK, EXPRESSION, 0, 0);
+    trace_cache::get_metadata_registry().add_pmc_info(
+        { agent_type::CPU, DEVICE_ID, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+          comm_data::mpi_send::label, "Tracks MPI communication data sizes",
+          trait::name<category::mpi>::description, LONG_DESCRIPTION, COMPONENT, MSG,
+          rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
+    trace_cache::get_metadata_registry().add_pmc_info(
+        { agent_type::CPU, DEVICE_ID, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+          comm_data::mpi_recv::label, "Tracks MPI communication data sizes",
+          trait::name<category::mpi>::description, LONG_DESCRIPTION, COMPONENT, MSG,
+          rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
 #endif
-#if defined(ROCPROFSYS_USE_RCCL)
-    data_processor.insert_pmc_description(
-        ni.id, getpid(), base_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID, rccl_send::label,
-        "Tracks RCCL Send communication data sizes",
-        trait::name<category::rocm_rccl>::description, LONG_DESCRIPTION, COMPONENT, MSG,
-        "ABS", BLOCK, EXPRESSION, 0, 0);
-
-    data_processor.insert_pmc_description(
-        ni.id, getpid(), base_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID, rccl_recv::label,
-        "Tracks RCCL Receive communication data sizes",
-        trait::name<category::rocm_rccl>::description, LONG_DESCRIPTION, COMPONENT, MSG,
-        "ABS", BLOCK, EXPRESSION, 0, 0);
-#endif
+    trace_cache::get_metadata_registry().add_pmc_info(
+        { agent_type::CPU, DEVICE_ID, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+          comm_data::ucx_send::label, "Tracks UCX communication data sizes",
+          trait::name<category::ucx>::description, LONG_DESCRIPTION, COMPONENT, MSG,
+          rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
+    trace_cache::get_metadata_registry().add_pmc_info(
+        { agent_type::CPU, DEVICE_ID, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+          comm_data::ucx_recv::label, "Tracks UCX communication data sizes",
+          trait::name<category::ucx>::description, LONG_DESCRIPTION, COMPONENT, MSG,
+          rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
 }
 
 template <typename Track>
 void
-rocpd_process_cpu_usage_events(const uint32_t device_id, int bytes)
+cache_comm_data_events(const std::uint32_t device_id, int bytes)
 {
-    auto& data_processor = get_data_processor();
-    auto  event_id       = data_processor.insert_event(
-        category_enum_id<category::comm_data>::value, 0, 0, 0);
-
-    auto& agents = agent_manager::get_instance();
-    auto  agent  = agents.get_agent_by_id(device_id, agent_type::CPU);
-
-    auto insert_event_and_sample = [&](const char* name, uint64_t timestamp,
-                                       double value) {
-        data_processor.insert_pmc_event(event_id, agent.device_id, name, value);
-        data_processor.insert_sample(name, timestamp, event_id);
-    };
-
-    static std::mutex _mutex{};
-    static uint64_t   value = 0;
-    uint64_t          _now  = 0;
+    static std::mutex    _mutex{};
+    static std::uint64_t value = 0;
+    std::uint64_t        _now  = 0;
     {
         std::unique_lock<std::mutex> _lk{ _mutex };
-        _now  = rocprofsys::tracing::now<uint64_t>();
+        _now  = rocprofsys::tracing::now<std::uint64_t>();
         bytes = (value += bytes);
     }
+    const std::string track_name      = Track::label;
+    const size_t      timestamp_ns    = _now;
+    const std::string event_metadata  = "{}";
+    const size_t      stack_id        = 0;
+    const size_t      parent_stack_id = 0;
+    const size_t      correlation_id  = 0;
+    const std::string call_stack      = "{}";
+    const std::string line_info       = "{}";
 
-    insert_event_and_sample(Track::label, _now, bytes);
+    trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
+        static_cast<size_t>(category_enum_id<category::comm_data>::value),
+        track_name.c_str(), timestamp_ns, event_metadata.c_str(), stack_id,
+        parent_stack_id, correlation_id, call_stack.c_str(), line_info.c_str(), device_id,
+        static_cast<std::uint8_t>(agent_type::CPU), track_name.c_str(),
+        static_cast<double>(value), std::nullopt });
 }
 
 }  // namespace
@@ -199,10 +156,16 @@ rocpd_process_cpu_usage_events(const uint32_t device_id, int bytes)
 void
 comm_data::start()
 {
-    if(get_use_rocpd())
     {
-        rocpd_initialize_comm_data_categories();
-        rocpd_initialize_comm_data_pmc();
+        metadata_initialize_comm_data_categories();
+        metadata_initialize_comm_data_pmc();
+
+#if defined(ROCPROFSYS_USE_MPI)
+        metadata_initialize_track<mpi_send>();
+        metadata_initialize_track<mpi_recv>();
+#endif
+        metadata_initialize_track<ucx_send>();
+        metadata_initialize_track<ucx_recv>();
     }
 }
 
@@ -226,7 +189,7 @@ comm_data::configure()
     _once = true;
 
     comm_data_tracker_t::label()        = "comm_data";
-    comm_data_tracker_t::description()  = "Tracks MPI/RCCL communication data sizes";
+    comm_data_tracker_t::description()  = "Tracks MPI/RCCL/UCX communication data sizes";
     comm_data_tracker_t::display_unit() = "MB";
     comm_data_tracker_t::unit()         = units::megabyte;
 
@@ -248,10 +211,8 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int cou
 
     write_perfetto_counter_track<mpi_send>(count * _size);
 
-    if(get_use_rocpd())
     {
-        rocpd_initialize_track<mpi_send>();
-        rocpd_process_cpu_usage_events<mpi_send>(0, count * _size);
+        cache_comm_data_events<mpi_send>(0, count * _size);
     }
 
     if(rocprofsys::get_use_timemory())
@@ -259,10 +220,9 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int cou
         auto      _name = std::string_view{ _data.tool_id };
         tracker_t _a{ _name };
         add(_a, count * _size);
-        tracker_t _b{ JOIN('/', _name, JOIN('=', "dst", dst)) };
+        tracker_t _b{ fmt::format("{}/dst={}", _name, dst) };
         add(_b, count * _size);
-        add(JOIN('/', _name, JOIN('=', "dst", dst), JOIN('=', "tag", tag)),
-            count * _size);
+        add(fmt::format("{}/dst={}/tag={}", _name, dst, tag), count * _size);
     }
 }
 
@@ -276,10 +236,8 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, int count,
 
     if(get_use_perfetto()) write_perfetto_counter_track<mpi_recv>(count * _size);
 
-    if(get_use_rocpd())
     {
-        rocpd_initialize_track<mpi_recv>();
-        rocpd_process_cpu_usage_events<mpi_recv>(0, count * _size);
+        cache_comm_data_events<mpi_recv>(0, count * _size);
     }
 
     if(rocprofsys::get_use_timemory())
@@ -287,10 +245,9 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, int count,
         auto      _name = std::string_view{ _data.tool_id };
         tracker_t _a{ _name };
         add(_a, count * _size);
-        tracker_t _b{ JOIN('/', _name, JOIN('=', "dst", dst)) };
+        tracker_t _b{ fmt::format("{}/dst={}", _name, dst) };
         add(_b, count * _size);
-        add(JOIN('/', _name, JOIN('=', "dst", dst), JOIN('=', "tag", tag)),
-            count * _size);
+        add(fmt::format("{}/dst={}/tag={}", _name, dst, tag), count * _size);
     }
 }
 
@@ -304,10 +261,8 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int cou
 
     if(get_use_perfetto()) write_perfetto_counter_track<mpi_send>(count * _size);
 
-    if(get_use_rocpd())
     {
-        rocpd_initialize_track<mpi_send>();
-        rocpd_process_cpu_usage_events<mpi_send>(0, count * _size);
+        cache_comm_data_events<mpi_send>(0, count * _size);
     }
 
     if(rocprofsys::get_use_timemory())
@@ -315,10 +270,9 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int cou
         auto      _name = std::string_view{ _data.tool_id };
         tracker_t _a{ _name };
         add(_a, count * _size);
-        tracker_t _b{ JOIN('/', _name, JOIN('=', "dst", dst)) };
+        tracker_t _b{ fmt::format("{}/dst={}", _name, dst) };
         add(_b, count * _size);
-        add(JOIN('/', _name, JOIN('=', "dst", dst), JOIN('=', "tag", tag)),
-            count * _size);
+        add(fmt::format("{}/dst={}/tag={}", _name, dst, tag), count * _size);
     }
 }
 
@@ -332,10 +286,8 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, int count,
 
     if(get_use_perfetto()) write_perfetto_counter_track<mpi_recv>(count * _size);
 
-    if(get_use_rocpd())
     {
-        rocpd_initialize_track<mpi_recv>();
-        rocpd_process_cpu_usage_events<mpi_recv>(0, count * _size);
+        cache_comm_data_events<mpi_recv>(0, count * _size);
     }
 
     if(rocprofsys::get_use_timemory())
@@ -343,10 +295,9 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, int count,
         auto      _name = std::string_view{ _data.tool_id };
         tracker_t _a{ _name };
         add(_a, count * _size);
-        tracker_t _b{ JOIN('/', _name, JOIN('=', "dst", dst)) };
+        tracker_t _b{ fmt::format("{}/dst={}", _name, dst) };
         add(_b, count * _size);
-        add(JOIN('/', _name, JOIN('=', "dst", dst), JOIN('=', "tag", tag)),
-            count * _size);
+        add(fmt::format("{}/dst={}/tag={}", _name, dst, tag), count * _size);
     }
 }
 
@@ -360,10 +311,8 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, int count,
 
     if(get_use_perfetto()) write_perfetto_counter_track<mpi_send>(count * _size);
 
-    if(get_use_rocpd())
     {
-        rocpd_initialize_track<mpi_send>();
-        rocpd_process_cpu_usage_events<mpi_send>(0, count * _size);
+        cache_comm_data_events<mpi_send>(0, count * _size);
     }
 
     if(rocprofsys::get_use_timemory())
@@ -371,7 +320,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, int count,
         auto      _name = std::string_view{ _data.tool_id };
         tracker_t _t{ _name };
         add(_t, count * _size);
-        add(JOIN('/', _name, JOIN('=', "root", root)), count * _size);
+        add(fmt::format("{}/root={}", _name, root), count * _size);
     }
 }
 
@@ -389,12 +338,9 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, void*, 
         write_perfetto_counter_track<mpi_send>(count * _size);
     }
 
-    if(get_use_rocpd())
     {
-        rocpd_initialize_track<mpi_send>();
-        rocpd_initialize_track<mpi_recv>();
-        rocpd_process_cpu_usage_events<mpi_recv>(0, count * _size);
-        rocpd_process_cpu_usage_events<mpi_send>(0, count * _size);
+        cache_comm_data_events<mpi_recv>(0, count * _size);
+        cache_comm_data_events<mpi_send>(0, count * _size);
     }
 
     if(rocprofsys::get_use_timemory()) add(_data, count * _size);
@@ -416,10 +362,9 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int sen
         write_perfetto_counter_track<mpi_recv>(recvcount * _recv_size);
     }
 
-    if(get_use_rocpd())
     {
-        rocpd_process_cpu_usage_events<mpi_send>(0, sendcount * _send_size);
-        rocpd_process_cpu_usage_events<mpi_recv>(0, recvcount * _send_size);
+        cache_comm_data_events<mpi_send>(0, sendcount * _send_size);
+        cache_comm_data_events<mpi_recv>(0, recvcount * _recv_size);
     }
 
     if(rocprofsys::get_use_timemory())
@@ -428,23 +373,21 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int sen
         tracker_t _t{ _name };
         add(_t, sendcount * _send_size + recvcount * _recv_size);
         {
-            tracker_t _b{ JOIN('/', _name, "send") };
+            tracker_t _b{ fmt::format("{}/send", _name) };
             add(_b, sendcount * _send_size);
-            tracker_t _c{ JOIN('/', _name, JOIN('=', "send", dst)) };
+            tracker_t _c{ fmt::format("{}/send={}", _name, dst) };
             add(_b, sendcount * _send_size);
-            add(JOIN('/', _name, "send", JOIN('=', "tag", sendtag)),
-                sendcount * _send_size);
-            add(JOIN('/', _name, JOIN('=', "send", dst), JOIN('=', "tag", sendtag)),
+            add(fmt::format("{}/send={}/tag={}", _name, sendtag), sendcount * _send_size);
+            add(fmt::format("{}/send={}/tag={}", _name, dst, sendtag),
                 sendcount * _send_size);
         }
         {
-            tracker_t _b{ JOIN('/', _name, "recv") };
+            tracker_t _b{ fmt::format("{}/recv", _name) };
             add(_b, recvcount * _recv_size);
-            tracker_t _c{ JOIN('/', _name, JOIN('=', "recv", src)) };
+            tracker_t _c{ fmt::format("{}/recv={}", _name, src) };
             add(_b, recvcount * _recv_size);
-            add(JOIN('/', _name, "recv", JOIN('=', "tag", recvtag)),
-                recvcount * _recv_size);
-            add(JOIN('/', _name, JOIN('=', "recv", src), JOIN('=', "tag", recvtag)),
+            add(fmt::format("{}/recv={}/tag={}", _name, recvtag), recvcount * _recv_size);
+            add(fmt::format("{}/recv={}/tag={}", _name, src, recvtag),
                 recvcount * _recv_size);
         }
     }
@@ -467,10 +410,9 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int sen
         write_perfetto_counter_track<mpi_recv>(recvcount * _recv_size);
     }
 
-    if(get_use_rocpd())
     {
-        rocpd_process_cpu_usage_events<mpi_send>(0, sendcount * _send_size);
-        rocpd_process_cpu_usage_events<mpi_recv>(0, recvcount * _send_size);
+        cache_comm_data_events<mpi_send>(0, sendcount * _send_size);
+        cache_comm_data_events<mpi_recv>(0, recvcount * _recv_size);
     }
 
     if(rocprofsys::get_use_timemory())
@@ -478,10 +420,10 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int sen
         auto      _name = std::string_view{ _data.tool_id };
         tracker_t _t{ _name };
         add(_t, sendcount * _send_size + recvcount * _recv_size);
-        tracker_t _r(JOIN('/', _name, JOIN('=', "root", root)));
+        tracker_t _r(fmt::format("{}/root={}", _name, root));
         add(_r, sendcount * _send_size + recvcount * _recv_size);
-        add(JOIN('/', _name, JOIN('=', "root", root), "send"), sendcount * _send_size);
-        add(JOIN('/', _name, JOIN('=', "root", root), "recv"), recvcount * _recv_size);
+        add(fmt::format("{}/root={}/send", _name, root), sendcount * _send_size);
+        add(fmt::format("{}/root={}/recv", _name, root), recvcount * _recv_size);
     }
 }
 
@@ -501,10 +443,9 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int sen
         write_perfetto_counter_track<mpi_recv>(recvcount * _recv_size);
     }
 
-    if(get_use_rocpd())
     {
-        rocpd_process_cpu_usage_events<mpi_send>(0, sendcount * _send_size);
-        rocpd_process_cpu_usage_events<mpi_recv>(0, recvcount * _recv_size);
+        cache_comm_data_events<mpi_send>(0, sendcount * _send_size);
+        cache_comm_data_events<mpi_recv>(0, recvcount * _recv_size);
     }
 
     if(rocprofsys::get_use_timemory())
@@ -512,11 +453,302 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int sen
         auto      _name = std::string_view{ _data.tool_id };
         tracker_t _t{ _name };
         add(_t, sendcount * _send_size + recvcount * _recv_size);
-        add(JOIN('/', _name, "send"), sendcount * _send_size);
-        add(JOIN('/', _name, "recv"), recvcount * _recv_size);
+        add(fmt::format("{}/send", _name), sendcount * _send_size);
+        add(fmt::format("{}/recv", _name), recvcount * _recv_size);
     }
 }
 #endif
+
+// UCX communication tracking implementations
+
+// ucp_tag_send_nbx: (void* ep, const void* buffer, size_t count, std::uint64_t tag, const
+// void* param)
+void
+comm_data::audit(const gotcha_data& _data, audit::incoming, void*, const void*,
+                 size_t count, std::uint64_t tag, const void*)
+{
+    if(count == 0) return;
+
+    if(get_use_perfetto()) write_perfetto_counter_track<ucx_send>(count);
+
+    {
+        cache_comm_data_events<ucx_send>(0, count);
+    }
+
+    if(rocprofsys::get_use_timemory())
+    {
+        auto      _name = std::string_view{ _data.tool_id };
+        tracker_t _t{ _name };
+        add(_t, count);
+        add(fmt::format("{}/tag={}", _name, tag), count);
+    }
+}
+
+// ucp_tag_recv_nbx: (void* worker, void* buffer, size_t count, std::uint64_t tag,
+// std::uint64_t tag_mask, const void* param)
+void
+comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t count,
+                 std::uint64_t tag, std::uint64_t tag_mask, const void*)
+{
+    if(count == 0) return;
+
+    if(get_use_perfetto()) write_perfetto_counter_track<ucx_recv>(count);
+
+    {
+        cache_comm_data_events<ucx_recv>(0, count);
+    }
+
+    if(rocprofsys::get_use_timemory())
+    {
+        auto      _name = std::string_view{ _data.tool_id };
+        tracker_t _t{ _name };
+        add(_t, count);
+        add(fmt::format("{}/tag={}", _name, tag), count);
+        add(fmt::format("{}/tag={}/tag_mask={}", _name, tag, tag_mask), count);
+    }
+}
+
+// ucp_put_nbx: (void* ep, const void* buffer, size_t count, std::uint64_t remote_addr,
+// void* rkey, const void* param)
+void
+comm_data::audit(const gotcha_data& _data, audit::incoming, void*, const void*,
+                 size_t count, std::uint64_t remote_addr, void*, const void*)
+{
+    if(count == 0) return;
+
+    if(get_use_perfetto()) write_perfetto_counter_track<ucx_send>(count);
+
+    {
+        cache_comm_data_events<ucx_send>(0, count);
+    }
+
+    if(rocprofsys::get_use_timemory())
+    {
+        auto      _name = std::string_view{ _data.tool_id };
+        tracker_t _t{ _name };
+        add(_t, count);
+        add(fmt::format("{}/remote_addr={}", _name, remote_addr), count);
+    }
+}
+
+// ucp_get_nbx: (void* ep, void* buffer, size_t count, std::uint64_t remote_addr, void*
+// rkey, const void* param)
+void
+comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t count,
+                 std::uint64_t remote_addr, void*, const void*)
+{
+    if(count == 0) return;
+
+    if(get_use_perfetto()) write_perfetto_counter_track<ucx_recv>(count);
+
+    {
+        cache_comm_data_events<ucx_recv>(0, count);
+    }
+
+    if(rocprofsys::get_use_timemory())
+    {
+        auto      _name = std::string_view{ _data.tool_id };
+        tracker_t _t{ _name };
+        add(_t, count);
+        add(fmt::format("{}/remote_addr={}", _name, remote_addr), count);
+    }
+}
+
+// ucp_am_send_nbx: (void* ep, unsigned id, const void* header, size_t header_length,
+// const void* buffer, size_t count, const void* param)
+void
+comm_data::audit(const gotcha_data& _data, audit::incoming, void*, unsigned id,
+                 const void*, size_t header_length, const void*, size_t count,
+                 const void*)
+{
+    if(count == 0 && header_length == 0) return;
+
+    size_t total_size = header_length + count;
+    if(get_use_perfetto()) write_perfetto_counter_track<ucx_send>(total_size);
+
+    {
+        cache_comm_data_events<ucx_send>(0, total_size);
+    }
+
+    if(rocprofsys::get_use_timemory())
+    {
+        auto      _name = std::string_view{ _data.tool_id };
+        tracker_t _t{ _name };
+        add(_t, total_size);
+        add(fmt::format("{}/am_id={}", _name, id), total_size);
+    }
+}
+
+// ucp_stream_send_nbx: (void* ep, const void* buffer, size_t count, const void* param)
+void
+comm_data::audit(const gotcha_data& _data, audit::incoming, void*, const void*,
+                 size_t             count, const void*)
+{
+    if(count == 0) return;
+
+    if(get_use_perfetto()) write_perfetto_counter_track<ucx_send>(count);
+
+    {
+        cache_comm_data_events<ucx_send>(0, count);
+    }
+
+    if(rocprofsys::get_use_timemory())
+    {
+        auto      _name = std::string_view{ _data.tool_id };
+        tracker_t _t{ _name };
+        add(_t, count);
+    }
+}
+
+// ucp_stream_recv_nbx: (void* ep, void* buffer, size_t count, size_t* length, const void*
+// param)
+void
+comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t count,
+                 size_t*, const void*)
+{
+    if(count == 0) return;
+
+    if(get_use_perfetto()) write_perfetto_counter_track<ucx_recv>(count);
+
+    {
+        cache_comm_data_events<ucx_recv>(0, count);
+    }
+
+    if(rocprofsys::get_use_timemory())
+    {
+        auto      _name = std::string_view{ _data.tool_id };
+        tracker_t _t{ _name };
+        add(_t, count);
+    }
+}
+
+// Legacy: ucp_tag_send_nb/nbx - send with tag matching (for old-style wrappers)
+void
+comm_data::audit(const gotcha_data& _data, audit::incoming, void*, size_t count, void*,
+                 void*, void*)
+{
+    if(count == 0) return;
+
+    if(get_use_perfetto()) write_perfetto_counter_track<ucx_send>(count);
+
+    {
+        cache_comm_data_events<ucx_send>(0, count);
+    }
+
+    if(rocprofsys::get_use_timemory())
+    {
+        auto      _name = std::string_view{ _data.tool_id };
+        tracker_t _t{ _name };
+        add(_t, count);
+    }
+}
+
+// Legacy: ucp_tag_recv_nb/nbx - receive with tag matching (for old-style wrappers)
+void
+comm_data::audit(const gotcha_data& _data, audit::incoming, void*, size_t count, void*,
+                 void*, void*, void*, void*)
+{
+    if(count == 0) return;
+
+    if(get_use_perfetto()) write_perfetto_counter_track<ucx_recv>(count);
+
+    {
+        cache_comm_data_events<ucx_recv>(0, count);
+    }
+
+    if(rocprofsys::get_use_timemory())
+    {
+        auto      _name = std::string_view{ _data.tool_id };
+        tracker_t _t{ _name };
+        add(_t, count);
+    }
+}
+
+// ucp_put/get operations - RMA
+void
+comm_data::audit(const gotcha_data& _data, audit::incoming, void*, size_t length,
+                 std::uint64_t, void*, void*)
+{
+    if(length == 0) return;
+
+    bool is_put = _data.tool_id.find("ucp_put") != std::string::npos;
+
+    if(get_use_perfetto())
+    {
+        if(is_put)
+            write_perfetto_counter_track<ucx_send>(length);
+        else
+            write_perfetto_counter_track<ucx_recv>(length);
+    }
+
+    {
+        if(is_put)
+            cache_comm_data_events<ucx_send>(0, length);
+        else
+            cache_comm_data_events<ucx_recv>(0, length);
+    }
+
+    if(rocprofsys::get_use_timemory())
+    {
+        auto      _name = std::string_view{ _data.tool_id };
+        tracker_t _t{ _name };
+        add(_t, length);
+    }
+}
+
+// ucp_am_send_nb/nbx - active message send
+void
+comm_data::audit(const gotcha_data& _data, audit::incoming, void*, unsigned, void*,
+                 size_t header_length, void*, size_t length, unsigned, void*)
+{
+    size_t total_length = header_length + length;
+    if(total_length == 0) return;
+
+    if(get_use_perfetto()) write_perfetto_counter_track<ucx_send>(total_length);
+
+    {
+        cache_comm_data_events<ucx_send>(0, total_length);
+    }
+
+    if(rocprofsys::get_use_timemory())
+    {
+        auto      _name = std::string_view{ _data.tool_id };
+        tracker_t _t{ _name };
+        add(_t, total_length);
+    }
+}
+
+// ucp_stream_send/recv operations
+void
+comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t count,
+                 void*, unsigned, void*)
+{
+    if(count == 0) return;
+
+    bool is_send = _data.tool_id.find("send") != std::string::npos;
+
+    if(get_use_perfetto())
+    {
+        if(is_send)
+            write_perfetto_counter_track<ucx_send>(count);
+        else
+            write_perfetto_counter_track<ucx_recv>(count);
+    }
+
+    {
+        if(is_send)
+            cache_comm_data_events<ucx_send>(0, count);
+        else
+            cache_comm_data_events<ucx_recv>(0, count);
+    }
+
+    if(rocprofsys::get_use_timemory())
+    {
+        auto      _name = std::string_view{ _data.tool_id };
+        tracker_t _t{ _name };
+        add(_t, count);
+    }
+}
 
 #if defined(ROCPROFSYS_USE_RCCL)
 // Kept for reference, but now gathered throught the SDK callbacks.
@@ -539,7 +771,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, const v
         auto      _name = std::string_view{ _data.tool_id };
         tracker_t _t{ _name };
         add(_t, count * _size);
-        add(JOIN('/', _name, JOIN('=', "root", root)), count * _size);
+        add(fmt::format("{}/root={}", _name, root), count * _size);
     }
 }
 
@@ -572,9 +804,6 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, size_t 
         ROCPROFSYS_CI_THROW(true, "RCCL function not handled: %s", _data.tool_id.c_str());
     }
 
-    if(get_use_perfetto()) write_perfetto_counter_track<rccl_recv>(count * _size);
-    if(get_use_rocpd()) rocpd_process_cpu_usage_events<rccl_recv>(0, count * _size);
-
     if(rocprofsys::get_use_timemory())
     {
         auto        _name  = std::string_view{ _data.tool_id };
@@ -583,7 +812,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, size_t 
 
         tracker_t _t{ _name };
         add(_t, count * _size);
-        add(JOIN('/', _name, JOIN('=', _label, peer)), count * _size);
+        add(fmt::format("{}/{}={}", _name, _label, peer), count * _size);
     }
 }
 
@@ -603,7 +832,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, const v
         auto      _name = std::string_view{ _data.tool_id };
         tracker_t _t{ _name };
         add(_t, count * _size);
-        add(JOIN('/', _data.tool_id, JOIN('=', "root", root)), count * _size);
+        add(fmt::format("{}/root={}", _data.tool_id, root), count * _size);
     }
 }
 
@@ -654,8 +883,3 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, const v
 #endif
 }  // namespace component
 }  // namespace rocprofsys
-
-ROCPROFSYS_INSTANTIATE_EXTERN_COMPONENT(
-    TIMEMORY_ESC(data_tracker<float, tim::project::rocprofsys>), true, float)
-
-ROCPROFSYS_INSTANTIATE_EXTERN_COMPONENT(comm_data, false, void)

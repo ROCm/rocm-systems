@@ -1,26 +1,13 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
- 
+
 
 #pragma clang diagnostic ignored "-Wunused-parameter"
 
@@ -29,32 +16,29 @@ unsigned threadsPerBlock = 256;
 template <unsigned batch, typename T>
 __device__ void sum(T* sdata, unsigned groupElements, unsigned tid) {
   T tmp;
-  if (groupElements < batch)
-      return;
+  if (groupElements < batch) return;
   // sdata[tid] += sdata[tid - batch/2] does not work when block size is
   // greater than wave size because one wave may complete before another
   // wave.
-  if (tid >= batch/2 && tid < groupElements)
-      tmp = sdata[tid - batch/2];
+  if (tid >= batch / 2 && tid < groupElements) tmp = sdata[tid - batch / 2];
   __syncthreads();
-  if (tid >= batch/2 && tid < groupElements)
-      sdata[tid] += tmp;
+  if (tid >= batch / 2 && tid < groupElements) sdata[tid] += tmp;
   __syncthreads();
 }
 
-template <typename T>
-__global__ void testExternSharedKernel(const T* A_d, const T* B_d, T* C_d,
-                                    size_t numElements, size_t groupElements) {
+template <typename T> __global__ void testExternSharedKernel(const T* A_d, const T* B_d, T* C_d,
+                                                             size_t numElements,
+                                                             size_t groupElements) {
   // declare dynamic shared memory
   extern __shared__ double sdata0[];
-  T* sdata = reinterpret_cast<T *>(sdata0);
+  T* sdata = reinterpret_cast<T*>(sdata0);
 
   size_t gid = (blockIdx.x * blockDim.x + threadIdx.x);
   size_t tid = threadIdx.x;
 
   // initialize dynamic shared memory
   if (tid < groupElements) {
-      sdata[tid] = static_cast<T>(tid);
+    sdata[tid] = static_cast<T>(tid);
   }
   __syncthreads();
 
@@ -71,16 +55,15 @@ __global__ void testExternSharedKernel(const T* A_d, const T* B_d, T* C_d,
   C_d[gid] = A_d[gid] + B_d[gid] + sdata[tid % groupElements];
 }
 
-template <typename T>
-void testExternShared(size_t N, unsigned groupElements) {
+template <typename T> void testExternShared(size_t N, unsigned groupElements) {
   size_t Nbytes = N * sizeof(T);
 
   T *A_d, *B_d, *C_d;
   T *A_h, *B_h, *C_h;
 
   HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, false);
-  unsigned blocks = N/threadsPerBlock;
-  assert(N == blocks * threadsPerBlock);
+  unsigned blocks = N / threadsPerBlock;
+  REQUIRE(N == blocks * threadsPerBlock);
 
   HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
@@ -90,8 +73,7 @@ void testExternShared(size_t N, unsigned groupElements) {
 
   // launch kernel with dynamic shared memory
   hipLaunchKernelGGL(HIP_KERNEL_NAME(testExternSharedKernel<T>), dim3(blocks),
-                     dim3(threadsPerBlock), groupMemBytes, 0, A_d, B_d, C_d,
-                     N, groupElements);
+                     dim3(threadsPerBlock), groupMemBytes, 0, A_d, B_d, C_d, N, groupElements);
 
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
@@ -129,7 +111,7 @@ void testExternShared(size_t N, unsigned groupElements) {
  *    - HIP_VERSION >= 5.5
  */
 
-TEST_CASE("Unit_hipDynamicShared") {
+HIP_TEST_CASE(Unit_hipDynamicShared) {
   SECTION("test case with float for least size") {
     testExternShared<float>(1024, 4);
     testExternShared<float>(1024, 8);
@@ -162,15 +144,17 @@ TEST_CASE("Unit_hipDynamicShared") {
     testExternShared<double>(65536, 64);
   }
 
+  // We can not allocate all of the LDS with ASAN
+#if !defined(ENABLE_ADDRESS_SANITIZER)
   SECTION("test case with float for max LDS size") {
     int maxLDS = 0;
-    HIP_CHECK(hipDeviceGetAttribute(&maxLDS,
-                                  hipDeviceAttributeMaxSharedMemoryPerBlock, 0));
-    testExternShared<float>(1024, maxLDS/sizeof(float));
+    HIP_CHECK(hipDeviceGetAttribute(&maxLDS, hipDeviceAttributeMaxSharedMemoryPerBlock, 0));
+    testExternShared<float>(1024, maxLDS / sizeof(float));
   }
+#endif
 }
 
 /**
-* End doxygen group KernelTest.
-* @}
-*/
+ * End doxygen group KernelTest.
+ * @}
+ */

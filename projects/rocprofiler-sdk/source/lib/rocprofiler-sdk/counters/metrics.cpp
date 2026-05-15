@@ -21,6 +21,7 @@
 // THE SOFTWARE.
 
 #include "metrics.hpp"
+#include "id_decode.hpp"
 
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
@@ -28,10 +29,13 @@
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
+#include "lib/rocprofiler-sdk/aql/helpers.hpp"
+#include "lib/rocprofiler-sdk/spm/interface.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/cxx/details/tokenize.hpp>
+#include <rocprofiler-sdk/cxx/operators.hpp>
 
-#include "glog/logging.h"
 #include "yaml-cpp/exceptions.h"
 #include "yaml-cpp/node/convert.h"
 #include "yaml-cpp/node/detail/impl.h"
@@ -44,7 +48,9 @@
 #include <dlfcn.h>  // for dladdr
 #include <cstdint>
 #include <cstdlib>
+#include <map>
 #include <memory>
+#include <system_error>
 #include <vector>
 
 namespace rocprofiler
@@ -141,6 +147,23 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
                 header.push_back(counter);
             }
         }
+        else
+        {
+            ROCP_ERROR << "Invalid extra counters YAML format. Expected structure:\n"
+                       << "rocprofiler-sdk:\n"
+                       << "  counters-schema-version: 1\n"
+                       << "  counters:\n"
+                       << "  - name: COUNTER_NAME\n"
+                       << "    description: 'Counter description'\n"
+                       << "    properties: []\n"
+                       << "    definitions:\n"
+                       << "    - architectures:\n"
+                       << "      - gfx942\n"
+                       << "      block: BLOCK_NAME\n"
+                       << "      event: EVENT_ID\n"
+                       << "Got:\n"
+                       << override.data;
+        }
     }
 
     for(const auto& counter : header)
@@ -232,26 +255,65 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
 std::string
 findViaInstallPath(const std::string& filename)
 {
+    namespace fs = common::filesystem;
+
     Dl_info dl_info = {};
     ROCP_INFO << filename << " is being looked up via install path";
-    if(dladdr(reinterpret_cast<const void*>(rocprofiler_query_available_agents), &dl_info) != 0)
+    if(dladdr(reinterpret_cast<const void*>(rocprofiler_query_available_agents), &dl_info) != 0 &&
+       dl_info.dli_fname != nullptr)
     {
-        return common::filesystem::path{dl_info.dli_fname}.parent_path().parent_path() /
+        // Resolve symlinks to get the absolute physical path of the .so file.
+        auto     ec            = std::error_code{};
+        auto     lib_path      = fs::path{dl_info.dli_fname};
+        fs::path real_lib_path = fs::canonical(lib_path, ec);
+        if(!ec)
+        {
+            lib_path = real_lib_path;
+        }
+
+        return lib_path.parent_path().parent_path() /
                fmt::format("share/rocprofiler-sdk/{}", filename);
     }
     return filename;
 }
 
 std::string
-findViaEnvironment(const std::string& filename)
+locateMetricsFile(std::string_view name)
 {
-    if(const char* metrics_path = nullptr; (metrics_path = getenv("ROCPROFILER_METRICS_PATH")))
+    namespace fs = common::filesystem;
+
+    auto metric_env_path = std::string{"not set"};
+
+    // 1) Try env var
+    if(const char* env = std::getenv("ROCPROFILER_METRICS_PATH"))
     {
-        ROCP_INFO << filename << " is being looked up via env variable ROCPROFILER_METRICS_PATH";
-        return common::filesystem::path{std::string{metrics_path}} / filename;
+        metric_env_path = env;
+        auto env_paths = sdk::parse::tokenize<std::vector<std::string>>(env, std::string_view{":"});
+        for(const auto& path : env_paths)
+        {
+            fs::path candidate = fs::path{path} / std::string{name};
+            if(fs::exists(candidate))
+            {
+                ROCP_INFO << name << " found via ROCPROFILER_METRICS_PATH: " << candidate.string();
+                return candidate.string();
+            }
+        }
+        ROCP_INFO << name << " not found at ROCPROFILER_METRICS_PATH (" << env
+                  << "). Falling back to install path.";
     }
-    // No environment variable, lookup via install path
-    return findViaInstallPath(filename);
+
+    // 2) Fall back to install path
+    auto install_candidate = findViaInstallPath(std::string{name});
+    if(fs::exists(install_candidate))
+    {
+        ROCP_INFO << name << " found via install path: " << install_candidate;
+        return install_candidate;
+    }
+
+    ROCP_FATAL << "Metric file '" << name << "' not found.\n"
+               << "  Tried: ROCPROFILER_METRICS_PATH (" << metric_env_path << "), and"
+               << install_candidate;
+    return {};
 }
 
 }  // namespace
@@ -280,7 +342,7 @@ loadMetrics(bool reload, const std::optional<ArchMetric> add_metric)
     }
 
     auto reload_func = [&]() {
-        auto counters_path = findViaEnvironment("counter_defs.yaml");
+        auto counters_path = locateMetricsFile("config.yaml");
         ROCP_FATAL_IF(!common::filesystem::exists(counters_path))
             << "metric xml file '" << counters_path << "' does not exist";
         return std::make_shared<counter_metrics_t>(loadYAML(counters_path, add_metric));
@@ -307,29 +369,25 @@ loadMetrics(bool reload, const std::optional<ArchMetric> add_metric)
 }
 
 std::unordered_map<uint64_t, int>
-getPerfCountersIdMap()
+getPerfCountersIdMap(const rocprofiler_agent_t* agent)
 {
-    std::unordered_map<uint64_t, int> map;
-    auto                              mets = loadMetrics();
-
-    for(const auto& [agent, list] : mets->arch_to_metric)
+    auto map = std::unordered_map<uint64_t, int>{};
+    for(const auto& metric : getMetricsForAgent(agent))
     {
-        if(agent.find("gfx9") == std::string::npos) continue;
-        for(const auto& metric : list)
-        {
-            if(metric.name().find("SQ_") == 0 && !metric.event().empty())
-                map.emplace(metric.id(), std::stoi(metric.event()));
-        }
+        // Only add basic SQ counters
+        if(metric.name().find("SQ_") == 0 && !metric.event().empty())
+            map.emplace(metric.id(), std::stoi(metric.event()));
     }
 
     return map;
 }
 
 std::vector<Metric>
-getMetricsForAgent(const std::string& agent)
+getMetricsForAgent(const rocprofiler_agent_t* agent)
 {
     auto mets = loadMetrics();
-    if(const auto* metric_ptr = rocprofiler::common::get_val(mets->arch_to_metric, agent))
+    if(const auto* metric_ptr =
+           rocprofiler::common::get_val(mets->arch_to_metric, std::string(agent->name)))
     {
         return *metric_ptr;
     }
@@ -342,6 +400,7 @@ checkValidMetric(const std::string& agent, const Metric& metric)
 {
     auto        metrics   = loadMetrics();
     const auto* agent_map = common::get_val(metrics->arch_to_id, agent);
+
     return agent_map != nullptr && agent_map->count(metric.id()) > 0;
 }
 
@@ -397,5 +456,41 @@ Metric::Metric(const std::string&,  // Get rid of this...
         }
     }
 }
+
+bool
+has_spm_support(const Metric& metric, rocprofiler_agent_id_t agent_id)
+{
+    using cache_key_t = std::pair<rocprofiler_agent_id_t, uint64_t>;
+    using cache_t     = std::map<cache_key_t, bool>;
+    using sync_cache  = common::Synchronized<cache_t>;
+
+    static auto*& cache = common::static_object<sync_cache>::construct(cache_t{});
+
+    auto key = cache_key_t{agent_id, metric.id()};
+
+    return cache->wlock([&](auto& data) {
+        auto it = data.find(key);
+        if(it != data.end()) return it->second;
+
+        bool supported = false;
+        if(!metric.event().empty())
+        {
+            if(const auto* sym = rocprofiler::spm::construct_spm_interface())
+            {
+                auto aql_agent  = *CHECK_NOTNULL(rocprofiler::agent::get_aql_agent(agent_id));
+                auto query_info = rocprofiler::aql::get_query_info(agent_id, metric);
+                auto pmc_event  = aqlprofile_pmc_event_t{};
+                pmc_event.block_name =
+                    static_cast<hsa_ven_amd_aqlprofile_block_name_t>(query_info.id);
+                pmc_event.event_id =
+                    static_cast<uint32_t>(std::stoul(metric.event().c_str(), nullptr));
+                supported = sym->spm_is_event_supported(aql_agent, pmc_event);
+            }
+        }
+        data.emplace(key, supported);
+        return supported;
+    });
+}
+
 }  // namespace counters
 }  // namespace rocprofiler

@@ -27,16 +27,17 @@
 #include "timestamps.hpp"
 
 #include "lib/common/logging.hpp"
+#include "lib/common/regex.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/marker/api_id.h>
 
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 
 #include <unistd.h>
 #include <cstdint>
 #include <iomanip>
-#include <regex>
 #include <sstream>
 #include <string_view>
 #include <utility>
@@ -62,7 +63,7 @@ get_stats(const stats_map_t& data_v)
 }  // namespace
 
 stats_entry_t
-generate_stats(const output_config& /*cfg*/,
+generate_stats(const output_config&                                               cfg,
                const metadata&                                                    tool_metadata,
                const generator<tool_buffer_tracing_kernel_dispatch_ext_record_t>& data)
 {
@@ -72,6 +73,7 @@ generate_stats(const output_config& /*cfg*/,
         for(auto record : data.get(ditr))
         {
             auto kernel_name = tool_metadata.get_kernel_name(record.dispatch_info.kernel_id,
+                                                             cfg.kernel_rename,
                                                              record.correlation_id.external.value);
 
             kernel_stats[kernel_name] += (record.end_timestamp - record.start_timestamp);
@@ -182,6 +184,14 @@ generate_stats(const output_config& /*cfg*/,
     }
 
     return get_stats(memory_allocation_stats);
+}
+
+stats_entry_t
+generate_stats(const output_config& /*cfg*/,
+               const metadata& /*tool_metadata*/,
+               const generator<tool_buffer_tracing_kfd_record_t>& /*data*/)
+{
+    return stats_entry_t{};
 }
 
 stats_entry_t
@@ -429,7 +439,7 @@ generate_stats(const output_config& cfg,
             {
                 auto _col_name = get_domain_column_name(ditr.first);
 
-                if(std::regex_match(_col_name.data(), std::regex{itr}))
+                if(rocprofiler::common::regex::regex_match(_col_name.data(), itr))
                 {
                     if(!ditr.second) continue;
                     _names.emplace_back(_col_name);

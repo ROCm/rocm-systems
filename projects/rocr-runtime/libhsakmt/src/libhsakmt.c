@@ -1,4 +1,9 @@
-#include <stdio.h>
+/*
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
+ * 
+ * SPDX-License-Identifier: MIT
+ */
+ 
 #include <errno.h>
 #include <sys/ioctl.h>
 

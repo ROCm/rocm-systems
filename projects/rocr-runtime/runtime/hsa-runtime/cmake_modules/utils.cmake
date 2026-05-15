@@ -54,10 +54,10 @@ function( get_path LIB CACHED_PATH HELP )
         find_file( FULLPATH NAMES ${ARGS_NAMES} HINTS ${${CACHED_PATH}} ${ARGS_HINTS} )
     endif()
     set( RESULT (NOT ${FULLPATH} MATCHES NOTFOUND) )
-    
+
     # Extract path
     get_filename_component ( DIRPATH ${FULLPATH} DIRECTORY )
-    
+
     # Check path against cache
     if( NOT "${${CACHED_PATH}}" STREQUAL "" )
         if ( NOT "${${CACHED_PATH}}" STREQUAL "${DIRPATH}" )

@@ -1,343 +1,461 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
-##############################################################################
-
-import os
 import re
 from collections import OrderedDict
 from pathlib import Path
+from typing import Any, Optional
 
 import pandas as pd
 import yaml
 
 import config
-from utils import rocpd_data, schema
+from utils import schema, utils_analysis
 from utils.kernel_name_shortener import kernel_name_shortener
-from utils.logger import console_debug, console_error, console_log, demarcate
+from utils.logger import (
+    console_debug,
+    console_error,
+    console_log,
+    console_warning,
+    demarcate,
+)
+from utils.utils_common import normalize_filter_to_str_list
 
 # TODO: use pandas chunksize or dask to read really large csv file
 # from dask import dataframe as dd
 
-# the build-in config to list kernel names purpose only
-top_stats_build_in_config = {
-    0: {
-        "id": 0,
-        "title": "Top Kernels",
-        "data source": [{"raw_csv_table": {"id": 1, "source": "pmc_kernel_top.csv"}}],
-    },
-    1: {
-        "id": 1,
-        "title": "Dispatch List",
-        "data source": [
-            {"raw_csv_table": {"id": 2, "source": "pmc_dispatch_info.csv"}}
-        ],
-    },
-}
 
-
-def load_sys_info(f):
+def load_sys_info(f: str) -> pd.DataFrame:
     """
     Load sys running info from csv file to a df.
     """
-    return pd.read_csv(f)
+    from utils.specs import canonical_gpu_arch
+
+    df = pd.read_csv(f)
+    if "gpu_arch" in df.columns and not df.empty:
+        df["gpu_arch"] = df["gpu_arch"].map(
+            lambda x: canonical_gpu_arch(str(x)) if pd.notna(x) else x
+        )
+    return df
 
 
-def load_panel_configs(dir):
+def load_panel_configs(
+    dirs: list[str],
+) -> OrderedDict[int, dict[str, Any]]:
     """
     Load all panel configs from yaml file.
     """
-    d = {}
-    for root, dirs, files in os.walk(dir):
-        for f in files:
-            if f.endswith(".yaml"):
-                with open(str(Path(root).joinpath(f))) as file:
-                    config = yaml.safe_load(file)
-                    # metric key can be None due to some metric tables
-                    # not having any metrics
-                    # metric key should be empty dict instead of None
-                    for data_source in config["Panel Config"]["data source"]:
-                        metric_table = data_source.get("metric_table")
-                        if metric_table and metric_table["metric"] is None:
-                            metric_table["metric"] = {}
-                    d[config["Panel Config"]["id"]] = config["Panel Config"]
+    configs: dict[int, dict[str, Any]] = {}
+    for dir_path in dirs:
+        for yaml_file in Path(dir_path).glob("*.yaml"):
+            with open(yaml_file) as file:
+                config_yml = yaml.safe_load(file)
+                # metric key can be None due to some metric-
+                # tables not having any metrics
+                # metric key should be empty dict instead of None
+                panel_config = config_yml["Panel Config"]
+                for data_source in panel_config["data source"]:
+                    metric_table = data_source.get("metric_table")
+                    if metric_table and metric_table["metric"] is None:
+                        metric_table["metric"] = {}
+                configs[panel_config["id"]] = panel_config
 
     # TODO: sort metrics as the header order in case they-
     # are not defined in the same order
-
-    od = OrderedDict(sorted(d.items()))
-    # for key, value in od.items():
-    #     print(key, value)
-    return od
+    return OrderedDict(sorted(configs.items()))
 
 
-def load_profiling_config(config_dir):
+def load_profiling_config(config_dir: str) -> dict[str, Any]:
     """
     Load profiling config from yaml file.
     """
+    config_path = Path(config_dir) / "profiling_config.yaml"
     try:
-        with open(Path(config_dir).joinpath("profiling_config.yaml")) as file:
-            prof_config = yaml.safe_load(file)
-            return prof_config
+        with open(config_path) as file:
+            return yaml.safe_load(file) or {}
     except FileNotFoundError:
         console_log(f"Could not find profiling_config.yaml in {config_dir}")
-    return dict()
+    return {}
 
 
 @demarcate
 def create_df_kernel_top_stats(
-    df_in,
-    raw_data_dir,
-    filter_gpu_ids,
-    filter_dispatch_ids,
-    filter_nodes,
-    time_unit,
-    max_stat_num,
-    kernel_verbose,
-    sortby="sum",
-):
+    df_in: dict[str, pd.DataFrame],
+    raw_data_dir: str,
+    filter_gpu_ids: Optional[list[str]],
+    filter_dispatch_ids: Optional[list[str]],
+    filter_nodes: Optional[str],
+    time_unit: str,
+    kernel_verbose: int,
+    sortby: str = "sum",
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Create top stats info by grouping kernels with user's filters.
+
+    Returns:
+        A tuple of (kernel_top_df, dispatch_info_df).
     """
 
-    # NB: think about df = pd.DataFrame(df_in["pmc_perf"].copy())
-    df = df_in["pmc_perf"]
-
-    # Demangle original KernelNames
-    kernel_name_shortener(df, kernel_verbose)
+    df = df_in["pmc_perf"].copy()
 
     # The logic below for filters are the same as in parser.apply_filters(),
     # which can be merged together if need it.
 
     if filter_nodes:
-        df = df.loc[df["Node"].astype(str).isin([filter_nodes])]
+        df = df.loc[
+            df["Node"].astype(str).isin(normalize_filter_to_str_list(filter_nodes))
+        ]
 
     if filter_gpu_ids:
-        df = df.loc[df["GPU_ID"].astype(str).isin([filter_gpu_ids])]
+        df = df.loc[
+            df["GPU_ID"].astype(str).isin(normalize_filter_to_str_list(filter_gpu_ids))
+        ]
 
     if filter_dispatch_ids:
         # NB: support ignoring the 1st n dispatched execution by '> n'
         #     The better way may be parsing python slice string
-        if ">" in filter_dispatch_ids[0]:
-            m = re.match(r"\> (\d+)", filter_dispatch_ids[0])
-            df = df[df["Dispatch_ID"] > int(m.group(1))]
+        first_filter = filter_dispatch_ids[0]
+
+        if isinstance(first_filter, str) and first_filter.startswith(">"):
+            match = re.match(r">\s*(\d+)", str(first_filter))
+            if match:
+                threshold = int(match.group(1))
+                df = df[df["Dispatch_ID"] > threshold]
         else:
-            df = df.loc[df["Dispatch_ID"].astype(str).isin(filter_dispatch_ids)]
+            filter_strings = [str(f) for f in filter_dispatch_ids]
+            df = df.loc[df["Dispatch_ID"].astype(str).isin(filter_strings)]
 
     # First, create a dispatches file used to populate global vars
-    dispatch_info = (
-        df.loc[:, ["Node", "Dispatch_ID", "Kernel_Name", "GPU_ID"]]
-        if "Node" in df.columns
-        else df.loc[:, ["Dispatch_ID", "Kernel_Name", "GPU_ID"]]
-    )
-    dispatch_info.to_csv(
-        str(Path(raw_data_dir).joinpath("pmc_dispatch_info.csv")), index=False
-    )
+    dispatch_columns = ["Kernel_Name", "GPU_ID"]
+    if "Dispatch_ID" in df.columns:
+        dispatch_columns.insert(0, "Dispatch_ID")
+    if "Node" in df.columns:
+        dispatch_columns.insert(0, "Node")
 
-    time_stats = pd.concat(
-        [df["Kernel_Name"], (df["End_Timestamp"] - df["Start_Timestamp"])],
-        keys=["Kernel_Name", "ExeTime"],
-        axis=1,
-    )
+    dispatch_info = df[dispatch_columns]
+    dispatch_output_path = Path(raw_data_dir) / "pmc_dispatch_info.csv"
+    dispatch_info.to_csv(dispatch_output_path, index=False)
 
-    grouped = time_stats.groupby(by=["Kernel_Name"]).agg({
-        "ExeTime": ["count", "sum", "mean", "median"]
-    })
+    if "Dispatch_ID" in df.columns:
+        # Calculate execution times
+        execution_times = df["End_Timestamp"] - df["Start_Timestamp"]
+        time_stats = pd.DataFrame({
+            "Kernel_Name": df["Kernel_Name"],
+            "ExeTime": execution_times,
+        })
 
-    time_unit_str = "(" + time_unit + ")"
-    grouped.columns = [
-        x.capitalize() + time_unit_str if x != "count" else x.capitalize()
-        for x in grouped.columns.get_level_values(1)
-    ]
+        grouped = time_stats.groupby("Kernel_Name")["ExeTime"].agg([
+            "count",
+            "sum",
+            "mean",
+            "median",
+        ])
+    else:
+        time_stats = pd.DataFrame({
+            "Kernel_Name": df["Kernel_Name"],
+            "count": df["Count"],
+            "sum": df["Mean_Time"] * df["Count"],
+            "mean": df["Mean_Time"],
+            "median": df["Median_Time"],
+        })
 
-    key = "Sum" + time_unit_str
-    grouped[key] = grouped[key].div(config.TIME_UNITS[time_unit])
-    key = "Mean" + time_unit_str
-    grouped[key] = grouped[key].div(config.TIME_UNITS[time_unit])
-    key = "Median" + time_unit_str
-    grouped[key] = grouped[key].div(config.TIME_UNITS[time_unit])
+        result_data: list[dict[str, Any]] = []
+        for _, group in time_stats.groupby("Kernel_Name"):
+            row: dict[str, Any] = {}
 
-    grouped = grouped.reset_index()  # Remove special group indexing
+            row["Kernel_Name"] = group["Kernel_Name"].iloc[0]
+            row["count"] = group["count"].sum()
+            row["sum"] = group["sum"].sum()
+            row["mean"] = row["sum"] / row["count"]
 
-    key = "Sum" + time_unit_str
-    grouped["Pct"] = grouped[key] / grouped[key].sum() * 100
+            sorted_data_by_mean = group.sort_values("mean")
+            sorted_data_by_mean["count_cumsum"] = sorted_data_by_mean["count"].cumsum()
+            median_threshold = row["count"] / 2
+            median_value = sorted_data_by_mean.loc[
+                sorted_data_by_mean["count_cumsum"] >= median_threshold, "median"
+            ].iloc[0]
+            row["median"] = median_value
 
-    # NB:
+            result_data.append(row)
+
+        grouped = pd.DataFrame(result_data)
+
+    # Rename columns with time unit
+    time_unit_suffix = f"({time_unit})"
+    column_mapping = {
+        "count": "Count",
+        "sum": f"Sum{time_unit_suffix}",
+        "mean": f"Mean{time_unit_suffix}",
+        "median": f"Median{time_unit_suffix}",
+    }
+    grouped = grouped.rename(columns=column_mapping)
+
+    # Convert time units
+    time_divisor = config.TIME_UNITS[time_unit]
+    for col in [
+        f"Sum{time_unit_suffix}",
+        f"Mean{time_unit_suffix}",
+        f"Median{time_unit_suffix}",
+    ]:
+        grouped[col] = grouped[col] / time_divisor
+
+    if "Dispatch_ID" in df.columns:
+        grouped = grouped.reset_index()
+
+    # Calculate percent
+    sum_column = f"Sum{time_unit_suffix}"
+    grouped["Percent"] = grouped[sum_column] / grouped[sum_column].sum() * 100
+
     #   Sort by total time as default.
     if sortby == "sum":
-        grouped = grouped.sort_values(by=("Sum" + time_unit_str), ascending=False)
-        grouped.to_csv(
-            str(Path(raw_data_dir).joinpath("pmc_kernel_top.csv")), index=False
-        )
+        grouped = grouped.sort_values(sum_column, ascending=False)
+        grouped.to_csv(str(Path(raw_data_dir) / "pmc_kernel_top.csv"), index=False)
     elif sortby == "kernel":
         grouped = grouped.sort_values("Kernel_Name")
-        grouped.to_csv(
-            str(Path(raw_data_dir).joinpath("pmc_kernel_top.csv")), index=False
+        grouped.to_csv(str(Path(raw_data_dir) / "pmc_kernel_top.csv"), index=False)
+
+    return grouped.reset_index(drop=True), dispatch_info.reset_index(drop=True)
+
+
+def build_agent_to_gpu_map(
+    agent_info_path: Path,
+) -> dict[str, int]:
+    """
+    Map ``"Agent N"`` strings to 0-indexed GPU IDs.
+
+    GPU agents are identified by ``Agent_Type == "GPU"`` in the
+    agent info CSV.  They are sorted by ``Node_Id`` so that the
+    first GPU agent maps to GPU 0, the second to GPU 1, etc.
+
+    Returns an empty dict when *agent_info_path* does not exist.
+    """
+    if not agent_info_path.exists():
+        return {}
+
+    agent_df = pd.read_csv(agent_info_path)
+    gpu_agents = (
+        agent_df[agent_df["Agent_Type"] == "GPU"]
+        .sort_values("Node_Id")
+        .reset_index(drop=True)
+    )
+    return {f"Agent {row.Node_Id}": row.Index for row in gpu_agents.itertuples()}
+
+
+@demarcate
+def process_pc_sampling_kernel_trace(
+    workload_path: str,
+) -> pd.DataFrame:
+    """
+    Build kernel and dispatch info from a kernel trace.
+
+    Used for PC-sampling-only runs where ``pmc_perf`` data is not
+    available.  Reads ``ps_file_kernel_trace.csv`` (and optionally
+    ``ps_file_agent_info.csv`` for GPU ID mapping)
+    """
+    trace_path = Path(workload_path) / "ps_file_kernel_trace.csv"
+    if not trace_path.exists():
+        console_warning(
+            f"Kernel trace not found at {trace_path}. Cannot build dispatch data."
         )
+        return pd.DataFrame(
+            columns=[
+                "Dispatch_Id",
+                "Kernel_Name",
+                "Start_Timestamp",
+                "End_Timestamp",
+                "GPU_ID",
+            ]
+        )
+
+    trace_df = pd.read_csv(trace_path)
+
+    # Map agent IDs to GPU IDs
+    agent_to_gpu = build_agent_to_gpu_map(
+        Path(workload_path) / "ps_file_agent_info.csv"
+    )
+    trace_df["GPU_ID"] = trace_df["Agent_Id"].map(agent_to_gpu).fillna(0).astype(int)
+
+    trace_df = trace_df[
+        ["Dispatch_Id", "Kernel_Name", "Start_Timestamp", "End_Timestamp", "GPU_ID"]
+    ]
+
+    return trace_df
 
 
 @demarcate
 def create_df_pmc(
-    raw_data_root_dir, nodes, spatial_multiplexing, kernel_verbose, verbose, config
-):
+    raw_data_root_dir: str,
+    nodes: Optional[list[str]],
+    spatial_multiplexing: bool,
+    kernel_verbose: int,
+    verbose: int,
+    config_dict: dict[str, Any],
+) -> pd.DataFrame:
     """
     Load all raw pmc counters and join into one df.
     """
 
-    def create_single_df_pmc(raw_data_dir, node_name, kernel_verbose, verbose):
-        dfs = []
-        coll_levels = []
+    def create_single_df_pmc(
+        raw_data_dir: str, node_name: Optional[str], kernel_verbose: int, verbose: int
+    ) -> pd.DataFrame:
+        dfs: list[pd.DataFrame] = []
+        coll_levels: list[str] = []
 
-        df = pd.DataFrame()  # noqa: F841
-        new_df = pd.DataFrame()  # noqa: F841
-        for root, dirs, files in os.walk(raw_data_dir):
-            for f in files:
-                # print("file ", f)
-                if (f.endswith(".csv") and f.startswith("SQ")) or (
-                    f == schema.pmc_perf_file_prefix + ".csv"
-                ):
-                    tmp_df = pd.read_csv(str(Path(root).joinpath(f)))
-                    if config.get("format_rocprof_output") == "rocpd":
-                        tmp_df = rocpd_data.process_rocpd_csv(tmp_df)
-                    # Demangle original KernelNames
-                    kernel_name_shortener(tmp_df, kernel_verbose)
+        coll_level_map = {}
+        for file_name in Path(raw_data_dir).rglob("*.csv"):
+            # In csv format accumulator counters are specified as
+            # SQ_ACCUM_PREV_HIRES counter in the coll_level specific csv
+            if config_dict.get(
+                "format_rocprof_output"
+            ) == "csv" and file_name.name.startswith("pmc_perf_SQ"):
+                coll_level_map[file_name] = file_name.name[
+                    len("pmc_perf_") : -len(".csv")
+                ]
 
-                    # NB:
-                    #   Idealy, the Node column should be added out of
-                    #   multiindexing level. Here, we add it into pmc_perf
-                    #   as it is the main sub-df which can be handled easily
-                    #   later.
-                    if f == "pmc_perf.csv" and node_name != None:
-                        tmp_df.insert(0, "Node", node_name)
-                    dfs.append(tmp_df)
-                    coll_levels.append(f[:-4])
+            # coll_level for pmc_perf.csv
+            if file_name.name == f"{schema.PMC_PERF_FILE_PREFIX}.csv":
+                coll_level_map[file_name] = schema.PMC_PERF_FILE_PREFIX
+
+        for csv_file in coll_level_map:
+            tmp_df = pd.read_csv(csv_file)
+
+            if config_dict.get("format_rocprof_output") == "rocpd":
+                tmp_df = utils_analysis.process_rocpd_csv(tmp_df)
+
+            # Demangle original KernelNames
+            # Skip for Standalone Roofline with -1 to keep full kernel names
+            if kernel_verbose >= 0:
+                kernel_name_shortener(tmp_df, kernel_verbose)
+
+            # NB:
+            #   Idealy, the Node column should be added out of
+            #   multiindexing level. Here, we add it into pmc_perf
+            #   as it is the main sub-df which can be handled easily
+            #   later.
+            if (
+                csv_file.name == f"{schema.PMC_PERF_FILE_PREFIX}.csv"
+                and node_name is not None
+            ):
+                tmp_df.insert(0, "Node", node_name)
+
+            dfs.append(tmp_df)
+            coll_levels.append(coll_level_map[csv_file])
+
+        if not dfs:
+            return pd.DataFrame()
 
         # TODO: double check the case if all tmp_df.shape[0] are not on the same page
         final_df = pd.concat(dfs, keys=coll_levels, axis=1, join="inner", copy=False)
         if verbose >= 2:
-            console_debug("pmc_raw_data final_single_df %s" % final_df.info)
+            console_debug(f"pmc_raw_data final_single_df {final_df.info}")
         return final_df
 
+    root_path = Path(raw_data_root_dir)
+
+    # 1. spatial multiplexing case
     if spatial_multiplexing:
-        df = pd.DataFrame()
-        # todo: more err check
-        for subdir in Path(raw_data_root_dir).iterdir():
+        dfs: list[pd.DataFrame] = []
+
+        for subdir in root_path.iterdir():
             if subdir.is_dir():
                 new_df = create_single_df_pmc(
-                    subdir, str(subdir.name), kernel_verbose, verbose
+                    str(subdir), str(subdir.name), kernel_verbose, verbose
                 )
-                df = pd.concat([df, new_df])
-        return df
+                if not new_df.empty:
+                    dfs.append(new_df)
+        return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
 
-    # specified node list
-    else:
-        # regular single node case
-        if nodes is None:
-            return create_single_df_pmc(
-                raw_data_root_dir, None, kernel_verbose, verbose
-            )
+    # 2. regular single node case (nodes=None)
+    if nodes is None:
+        return create_single_df_pmc(raw_data_root_dir, None, kernel_verbose, verbose)
 
-        # "empty list" means all nodes
-        elif not nodes:
-            df = pd.DataFrame()
-            # todo: more err check
-            for subdir in Path(raw_data_root_dir).iterdir():
-                if subdir.is_dir():
-                    new_df = create_single_df_pmc(
-                        subdir, str(subdir.name), kernel_verbose, verbose
-                    )
-                    df = pd.concat([df, new_df])
-            return df
+    # 3. all nodes case (nodes=[])
+    if not nodes:
+        dfs: list[pd.DataFrame] = []
 
-        # specified node list
-        else:
-            df = pd.DataFrame()
-            # todo: more err check
-            for subdir in nodes:
-                p = Path(raw_data_root_dir)
+        for subdir in root_path.iterdir():
+            if subdir.is_dir():
                 new_df = create_single_df_pmc(
-                    p.joinpath(subdir), subdir, kernel_verbose, verbose
+                    str(subdir), str(subdir.name), kernel_verbose, verbose
                 )
-                df = pd.concat([df, new_df])
-            return df
+                if not new_df.empty:
+                    dfs.append(new_df)
+        return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
+
+    # 4. specified node list case (nodes=[...])
+    dfs: list[pd.DataFrame] = []
+
+    for node in nodes:
+        node_path = root_path / node
+        if node_path.exists():
+            new_df = create_single_df_pmc(str(node_path), node, kernel_verbose, verbose)
+            if not new_df.empty:
+                dfs.append(new_df)
+    return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
 
 
-def collect_wave_occu_per_cu(in_dir, out_dir, numSE):
+def collect_wave_occu_per_cu(in_dir: str, out_dir: str, num_se: int) -> None:
     """
     Collect wave occupancy info from in_dir csv files
     and consolidate into out_dir/wave_occu_per_cu.csv.
     It depends highly on wave_occu_se*.csv format.
     """
+    in_path = Path(in_dir)
+    all_data = pd.DataFrame()
 
-    all = pd.DataFrame()
+    for i in range(num_se):
+        file_path = in_path / f"wave_occu_se{i}.csv"
+        if not file_path.exists():
+            continue
 
-    for i in range(numSE):
-        p = Path(in_dir, "wave_occu_se" + str(i) + ".csv")
-        if p.exists():
-            tmp_df = pd.read_csv(p)
-            SE_idx = "SE" + str(tmp_df.loc[0, "SE"])
-            tmp_df.rename(
-                columns={
-                    "Dispatch": "Dispatch",
-                    "SE": "SE",
-                    "CU": "CU",
-                    "Occupancy": SE_idx,
-                },
-                inplace=True,
-            )
+        tmp_df = pd.read_csv(file_path)
+        if tmp_df.empty:
+            continue
 
-            # TODO: join instead of concat!
-            if i == 0:
-                all = tmp_df[{"CU", SE_idx}]
-                all.sort_index(axis=1, inplace=True)
-            else:
-                all = pd.concat([all, tmp_df[SE_idx]], axis=1, copy=False)
+        se_idx = f"SE{tmp_df.loc[0, 'SE']}"
+        tmp_df.rename(
+            columns={
+                "Dispatch": "Dispatch",
+                "SE": "SE",
+                "CU": "CU",
+                "Occupancy": se_idx,
+            }
+        )
 
-    if not all.empty:
-        # print(all.transpose())
-        all.to_csv(Path(out_dir, "wave_occu_per_cu.csv"), index=False)
+        # TODO: join instead of concat!
+        if i == 0:
+            all_data = tmp_df[{"CU", se_idx}]
+            all_data.sort_index(axis=1, inplace=True)
+        else:
+            all_data = pd.concat([all_data, tmp_df[se_idx]], axis=1, copy=False)
+
+    if not all_data.empty:
+        all_data.to_csv(Path(out_dir) / "wave_occu_per_cu.csv", index=False)
 
 
-def is_single_panel_config(root_dir, supported_archs):
+def is_single_panel_config(
+    root_dir: str, supported_archs: dict[str, str]
+) -> Optional[bool]:
     """
     Check the root configs dir structure to decide using one config set for all
     archs, or one for each arch.
     """
     # If not single config, verify all supported archs have defined configs
-    supported_archs = supported_archs.keys()
-    counter = 0
-    for arch in supported_archs:
-        if root_dir.joinpath(arch).exists():
-            counter += 1
-    if counter == 0:
+    arch_names = list(supported_archs.keys())
+    root_path = Path(root_dir)
+    arch_count = sum(1 for arch in arch_names if (root_path / arch).exists())
+
+    if arch_count == 0:
         return True
-    elif counter == len(supported_archs):
+    elif arch_count == len(arch_names):
         return False
     else:
-        console_error("Found multiple panel config sets but incomplete for all archs.")
+        console_warning(
+            "Found multiple panel config sets but incomplete for all archs."
+        )
 
 
-def find_1st_sub_dir(directory):
+def find_1st_sub_dir(directory: str) -> Optional[str]:
     """
     Find the first sub dir in a directory
     """
@@ -346,7 +464,19 @@ def find_1st_sub_dir(directory):
         # Iterate over entries in the directory
         for entry in dir_path.iterdir():
             if entry.is_dir():  # Check if it's a directory
-                return entry
+                return str(entry)
+        return None
     except FileNotFoundError:
-        print(f"The directory '{directory}' does not exist.")
-    return None
+        console_error(f'The directory "{directory}" does not exist.', exit=False)
+
+
+def get_valid_nodes(directory: str) -> list[str]:
+    """Return subdirectory names that contain sysinfo.csv"""
+    dir_path = Path(directory)
+    if not dir_path.is_dir():
+        return []
+    return [
+        entry.name
+        for entry in dir_path.iterdir()
+        if entry.is_dir() and (entry / "sysinfo.csv").exists()
+    ]

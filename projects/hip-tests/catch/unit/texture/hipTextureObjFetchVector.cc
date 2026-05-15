@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include <hip_array_common.hh>
@@ -25,8 +12,7 @@ THE SOFTWARE.
 #pragma clang diagnostic ignored "-Wunused-variable"
 #pragma clang diagnostic ignored "-Wunused-parameter"
 
-template <typename T>
-__global__ void tex1dKernelFetch(T *val, hipTextureObject_t obj, int N) {
+template <typename T> __global__ void tex1dKernelFetch(T* val, hipTextureObject_t obj, int N) {
 #if !__HIP_NO_IMAGE_SUPPORT
   int k = blockIdx.x * blockDim.x + threadIdx.x;
   if (k < N) {
@@ -35,38 +21,29 @@ __global__ void tex1dKernelFetch(T *val, hipTextureObject_t obj, int N) {
 #endif
 }
 
-template<
-  typename T,
-  typename std::enable_if<rank<T>() == 1>::type* = nullptr>
-static inline void printVector(T &val) {
+template <typename T, typename std::enable_if<rank<T>() == 1>::type* = nullptr>
+static inline void printVector(T& val) {
   using B = decltype(T::x);
-  constexpr bool isChar = std::is_same<B, char>::value
-      || std::is_same<B, unsigned char>::value;
+  constexpr bool isChar = std::is_same<B, char>::value || std::is_same<B, unsigned char>::value;
   std::cout << "(";
   std::cout << (isChar ? static_cast<int>(val.x) : val.x);
   std::cout << ")";
 }
 
-template<
-  typename T,
-  typename std::enable_if<rank<T>() == 2>::type* = nullptr>
-static inline void printVector(T &val) {
+template <typename T, typename std::enable_if<rank<T>() == 2>::type* = nullptr>
+static inline void printVector(T& val) {
   using B = decltype(T::x);
-  constexpr bool isChar = std::is_same<B, char>::value
-      || std::is_same<B, unsigned char>::value;
+  constexpr bool isChar = std::is_same<B, char>::value || std::is_same<B, unsigned char>::value;
   std::cout << "(";
   std::cout << (isChar ? static_cast<int>(val.x) : val.x);
   std::cout << ", " << (isChar ? static_cast<int>(val.y) : val.y);
   std::cout << ")";
 }
 
-template<
-  typename T,
-  typename std::enable_if<rank<T>() == 4>::type* = nullptr>
-static inline void printVector(T &val) {
+template <typename T, typename std::enable_if<rank<T>() == 4>::type* = nullptr>
+static inline void printVector(T& val) {
   using B = decltype(T::x);
-  constexpr bool isChar = std::is_same<B, char>::value
-      || std::is_same<B, unsigned char>::value;
+  constexpr bool isChar = std::is_same<B, char>::value || std::is_same<B, unsigned char>::value;
   std::cout << "(";
   std::cout << (isChar ? static_cast<int>(val.x) : val.x);
   std::cout << ", " << (isChar ? static_cast<int>(val.y) : val.y);
@@ -75,16 +52,15 @@ static inline void printVector(T &val) {
   std::cout << ")";
 }
 
-template<typename T>
-bool runTest() {
+template <typename T> bool runTest() {
   const int N = 1024;
   bool testResult = true;
   // Allocating the required buffer on gpu device
   T *texBuf, *texBufOut;
   T val[N], output[N];
-  auto err = hipGetLastError(); // Clear err due to negative tests
+  auto err = hipGetLastError();  // Clear err due to negative tests
   memset(output, 0, sizeof(output));
-  std::srand(std::time(nullptr)); // use current time as seed for random generator
+  std::srand(std::time(nullptr));  // use current time as seed for random generator
 
   for (int i = 0; i < N; i++) {
     initVal<T>(val[i]);
@@ -114,9 +90,8 @@ bool runTest() {
   dim3 dimBlock(64, 1, 1);
   dim3 dimGrid((N + dimBlock.x - 1) / dimBlock.x, 1, 1);
 
-  hipLaunchKernelGGL(tex1dKernelFetch<T>, dimGrid, dimBlock, 0, 0, texBufOut,
-                     texObj, N);
-  HIP_CHECK(hipGetLastError()); 
+  hipLaunchKernelGGL(tex1dKernelFetch<T>, dimGrid, dimBlock, 0, 0, texBufOut, texObj, N);
+  HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipDeviceSynchronize());
 
   HIP_CHECK(hipMemcpy(output, texBufOut, N * sizeof(T), hipMemcpyDeviceToHost));
@@ -140,13 +115,8 @@ bool runTest() {
   return testResult;
 }
 
-TEST_CASE("Unit_hipTextureFetch_vector") {
+HIP_TEST_CASE(Unit_hipTextureFetch_vector) {
   CHECK_IMAGE_SUPPORT
-
-#if __HIP_NO_IMAGE_SUPPORT
-  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
-  return;
-#endif
 
   // test for char
   runTest<char1>();

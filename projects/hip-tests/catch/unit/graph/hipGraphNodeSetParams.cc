@@ -1,23 +1,8 @@
 /*
-Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 
 #include <hip_test_checkers.hh>
@@ -44,13 +29,13 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipGraphNodeSetParams_Negative_Parameters") {
+HIP_TEST_CASE(Unit_hipGraphNodeSetParams_Negative_Parameters) {
   hipGraph_t graph;
   hipGraphExec_t graphExec;
   hipGraphNode_t node;
   hipGraphNodeParams node_params = {};
-  char *A_d;
-  char *A_h;
+  char* A_d;
+  char* A_h;
   size_t N = 10;
   size_t Nbytes = N * sizeof(char);
 
@@ -67,7 +52,7 @@ TEST_CASE("Unit_hipGraphNodeSetParams_Negative_Parameters") {
   HIP_CHECK(hipGraphAddNode(&node, graph, nullptr, 0, &node_params));
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
   HIP_CHECK(hipGraphLaunch(graphExec, 0));
-  A_h = reinterpret_cast<char *>(malloc(Nbytes));
+  A_h = reinterpret_cast<char*>(malloc(Nbytes));
   HIP_CHECK(hipMemcpy(A_h, A_d, Nbytes, hipMemcpyDeviceToHost));
   hipGraphNodeParams node_params2 = {};
   node_params2.type = hipGraphNodeTypeMemset;
@@ -79,17 +64,17 @@ TEST_CASE("Unit_hipGraphNodeSetParams_Negative_Parameters") {
   node_params2.memset.value = 110;
 
   SECTION("node == nullptr") {
-    HIP_CHECK_ERROR(hipGraphNodeSetParams(nullptr, &node_params2),
-                    hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipGraphNodeSetParams(nullptr, &node_params2), hipErrorInvalidValue);
   }
 
   SECTION("nodeParams == nullptr") {
-    HIP_CHECK_ERROR(hipGraphNodeSetParams(node, nullptr),
-                    hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipGraphNodeSetParams(node, nullptr), hipErrorInvalidValue);
   }
 
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipFree(A_d));
+  free(A_h);
 }
 
 /**
@@ -104,7 +89,7 @@ TEST_CASE("Unit_hipGraphNodeSetParams_Negative_Parameters") {
  * ------------------------
  *    - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipGraphNodeSetParams_Positive") {
+HIP_TEST_CASE(Unit_hipGraphNodeSetParams_Positive) {
   hipGraph_t graph;
   hipGraphExec_t graphExec;
   hipGraphNode_t node;
@@ -132,6 +117,7 @@ TEST_CASE("Unit_hipGraphNodeSetParams_Positive") {
   for (int i = 0; i < N; i++) {
     REQUIRE(A_h[i] == 99);
   }
+  HIP_CHECK(hipGraphExecDestroy(graphExec));
 
   hipGraphNodeParams node_params2 = {};
   node_params2.type = hipGraphNodeTypeMemset;
@@ -158,6 +144,6 @@ TEST_CASE("Unit_hipGraphNodeSetParams_Positive") {
 }
 
 /**
-* End doxygen group GraphTest.
-* @}
-*/
+ * End doxygen group GraphTest.
+ * @}
+ */

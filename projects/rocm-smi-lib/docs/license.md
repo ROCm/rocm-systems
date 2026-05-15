@@ -1,4 +1,4 @@
 # License
 
-```{include} ../License.txt
+```{include} ../LICENSE.md
 ```

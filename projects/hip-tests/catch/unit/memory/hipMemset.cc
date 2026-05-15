@@ -1,20 +1,7 @@
 /*
- * Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
  */
 
 /**
@@ -34,46 +21,36 @@ Testcase Scenarios :
 // Table with unique number of elements and memset values.
 // (N, memsetval, memsetD32val, memsetD16val, memsetD8val)
 typedef std::tuple<size_t, char, int, int16_t, char> tupletype;
-static constexpr std::initializer_list<tupletype> tableItems {
-               std::make_tuple((4*1024*1024), 0x42, 0xDEADBEEF, 0xDEAD, 0xDE),
-               std::make_tuple((10)         , 0x42, 0x101     , 0x10,   0x1),
-               std::make_tuple((10013)      , 0x5a, 0xDEADBEEF, 0xDEAD, 0xDE),
-               std::make_tuple((256*1024*1024), 0xa6, 0xCAFEBABE, 0xCAFE, 0xCA)
-               };
+static constexpr std::initializer_list<tupletype> tableItems{
+    std::make_tuple((4 * 1024 * 1024), 0x42, 0xDEADBEEF, 0xDEAD, 0xDE),
+    std::make_tuple((10), 0x42, 0x101, 0x10, 0x1),
+    std::make_tuple((10013), 0x5a, 0xDEADBEEF, 0xDEAD, 0xDE),
+    std::make_tuple((256 * 1024 * 1024), 0xa6, 0xCAFEBABE, 0xCAFE, 0xCA)};
 
-enum MemsetType {
-  hipMemsetTypeDefault,
-  hipMemsetTypeD8,
-  hipMemsetTypeD16,
-  hipMemsetTypeD32
-};
+enum MemsetType { hipMemsetTypeDefault, hipMemsetTypeD8, hipMemsetTypeD16, hipMemsetTypeD32 };
 
-template<typename T>
-static bool testhipMemset(T *A_h, T *A_d, T memsetval, enum MemsetType type,
-                  size_t numElements) {
+template <typename T>
+static bool testhipMemset(T* A_h, T* A_d, T memsetval, enum MemsetType type, size_t numElements) {
   size_t Nbytes = numElements * sizeof(T);
   bool testResult = true;
   constexpr auto MAX_OFFSET = 3;  // To memset on unaligned ptr.
 
   HIP_CHECK(hipMalloc(&A_d, Nbytes));
-  A_h = reinterpret_cast<T*> (malloc(Nbytes));
+  A_h = reinterpret_cast<T*>(malloc(Nbytes));
   REQUIRE(A_h != nullptr);
 
-  for (int offset = MAX_OFFSET; offset >= 0; offset --) {
+  for (int offset = MAX_OFFSET; offset >= 0; offset--) {
     if (type == hipMemsetTypeDefault) {
       HIP_CHECK(hipMemset(A_d + offset, memsetval, numElements - offset));
 
     } else if (type == hipMemsetTypeD8) {
-      HIP_CHECK(hipMemsetD8((hipDeviceptr_t)(A_d + offset), memsetval,
-                                                    numElements - offset));
+      HIP_CHECK(hipMemsetD8((hipDeviceptr_t)(A_d + offset), memsetval, numElements - offset));
 
     } else if (type == hipMemsetTypeD16) {
-      HIP_CHECK(hipMemsetD16((hipDeviceptr_t)(A_d + offset), memsetval,
-                                                    numElements - offset));
+      HIP_CHECK(hipMemsetD16((hipDeviceptr_t)(A_d + offset), memsetval, numElements - offset));
 
     } else if (type == hipMemsetTypeD32) {
-      HIP_CHECK(hipMemsetD32((hipDeviceptr_t)(A_d + offset), memsetval,
-                                                    numElements - offset));
+      HIP_CHECK(hipMemsetD32((hipDeviceptr_t)(A_d + offset), memsetval, numElements - offset));
     }
 
     HIP_CHECK(hipMemcpy(A_h, A_d, Nbytes, hipMemcpyDeviceToHost));
@@ -92,9 +69,8 @@ static bool testhipMemset(T *A_h, T *A_d, T memsetval, enum MemsetType type,
 }
 
 
-template<typename T>
-static bool testhipMemsetAsync(T *A_h, T *A_d, T memsetval,
-                                 enum MemsetType type, size_t numElements) {
+template <typename T> static bool testhipMemsetAsync(T* A_h, T* A_d, T memsetval,
+                                                     enum MemsetType type, size_t numElements) {
   size_t Nbytes = numElements * sizeof(T);
   bool testResult = true;
   constexpr auto MAX_OFFSET = 3;  // To memset on unaligned ptr.
@@ -102,25 +78,24 @@ static bool testhipMemsetAsync(T *A_h, T *A_d, T memsetval,
 
   HIP_CHECK(hipStreamCreate(&stream));
   HIP_CHECK(hipMalloc(&A_d, Nbytes));
-  A_h = reinterpret_cast<T*> (malloc(Nbytes));
+  A_h = reinterpret_cast<T*>(malloc(Nbytes));
   REQUIRE(A_h != nullptr);
 
-  for (int offset = MAX_OFFSET; offset >= 0; offset --) {
+  for (int offset = MAX_OFFSET; offset >= 0; offset--) {
     if (type == hipMemsetTypeDefault) {
-      HIP_CHECK(hipMemsetAsync(A_d + offset, memsetval, numElements - offset,
-                                                                      stream));
+      HIP_CHECK(hipMemsetAsync(A_d + offset, memsetval, numElements - offset, stream));
 
     } else if (type == hipMemsetTypeD8) {
-      HIP_CHECK(hipMemsetD8Async((hipDeviceptr_t)(A_d + offset), memsetval,
-                                                numElements - offset, stream));
+      HIP_CHECK(hipMemsetD8Async((hipDeviceptr_t)(A_d + offset), memsetval, numElements - offset,
+                                 stream));
 
     } else if (type == hipMemsetTypeD16) {
-      HIP_CHECK(hipMemsetD16Async((hipDeviceptr_t)(A_d + offset), memsetval,
-                                                numElements - offset, stream));
+      HIP_CHECK(hipMemsetD16Async((hipDeviceptr_t)(A_d + offset), memsetval, numElements - offset,
+                                  stream));
 
     } else if (type == hipMemsetTypeD32) {
-      HIP_CHECK(hipMemsetD32Async((hipDeviceptr_t)(A_d + offset), memsetval,
-                                                numElements - offset, stream));
+      HIP_CHECK(hipMemsetD32Async((hipDeviceptr_t)(A_d + offset), memsetval, numElements - offset,
+                                  stream));
     }
 
     HIP_CHECK(hipStreamSynchronize(stream));
@@ -145,7 +120,7 @@ static bool testhipMemsetAsync(T *A_h, T *A_d, T memsetval,
  * Test hipMemset, hipMemsetD8, hipMemsetD16, hipMemsetD32 apis with unique
  * number of elements and memset values.
  */
-TEST_CASE("Unit_hipMemset_SetMemoryWithOffset") {
+HIP_TEST_CASE(Unit_hipMemset_SetMemoryWithOffset) {
   char memsetval;
   int memsetD32val;
   int16_t memsetD16val;
@@ -154,7 +129,7 @@ TEST_CASE("Unit_hipMemset_SetMemoryWithOffset") {
   bool ret;
 
   std::tie(N, memsetval, memsetD32val, memsetD16val, memsetD8val) =
-                 GENERATE(table<size_t, char, int, int16_t, char>(tableItems));
+      GENERATE(table<size_t, char, int, int16_t, char>(tableItems));
 
 
   SECTION("Memset with hipMemsetTypeDefault") {
@@ -187,7 +162,7 @@ TEST_CASE("Unit_hipMemset_SetMemoryWithOffset") {
  * Test hipMemsetAsync, hipMemsetD8Async, hipMemsetD16Async, hipMemsetD32Async
  * apis with unique number of elements and memset values.
  */
-TEST_CASE("Unit_hipMemsetAsync_SetMemoryWithOffset") {
+HIP_TEST_CASE(Unit_hipMemsetAsync_SetMemoryWithOffset) {
   char memsetval;
   int memsetD32val;
   int16_t memsetD16val;
@@ -196,7 +171,7 @@ TEST_CASE("Unit_hipMemsetAsync_SetMemoryWithOffset") {
   bool ret;
 
   std::tie(N, memsetval, memsetD32val, memsetD16val, memsetD8val) =
-                 GENERATE(table<size_t, char, int, int16_t, char>(tableItems));
+      GENERATE(table<size_t, char, int, int16_t, char>(tableItems));
 
 
   SECTION("Memset with hipMemsetTypeDefault") {
@@ -227,7 +202,7 @@ TEST_CASE("Unit_hipMemsetAsync_SetMemoryWithOffset") {
 /**
  * Test hipMemset small size buffers with unique memset values.
  */
-TEST_CASE("Unit_hipMemset_SmallBufferSizes") {
+HIP_TEST_CASE(Unit_hipMemset_SmallBufferSizes) {
   char *A_d, *A_h;
   constexpr int memsetval = 0x24;
 
@@ -235,15 +210,14 @@ TEST_CASE("Unit_hipMemset_SmallBufferSizes") {
   int numBytes = numElements * sizeof(char);
 
   HIP_CHECK(hipMalloc(&A_d, numBytes));
-  A_h = reinterpret_cast<char*> (malloc(numBytes));
+  A_h = reinterpret_cast<char*>(malloc(numBytes));
 
   HIP_CHECK(hipMemset(A_d, memsetval, numBytes));
   HIP_CHECK(hipMemcpy(A_h, A_d, numBytes, hipMemcpyDeviceToHost));
 
   for (int i = 0; i < numBytes; i++) {
     if (A_h[i] != memsetval) {
-      INFO("Mismatch at index:" << i << " computed:" << A_h[i]
-                                          << " memsetval:" << memsetval);
+      INFO("Mismatch at index:" << i << " computed:" << A_h[i] << " memsetval:" << memsetval);
       REQUIRE(false);
     }
   }
@@ -256,20 +230,20 @@ TEST_CASE("Unit_hipMemset_SmallBufferSizes") {
 /**
  * Test two memset async operations at the same time.
  */
-TEST_CASE("Unit_hipMemset_2AsyncOperations") {
+HIP_TEST_CASE(Unit_hipMemset_2AsyncOperations) {
   std::vector<float> v;
   v.resize(2048);
-  float* p2, *p3;
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&p2), 4096 + 4096*2));
-  p3 = p2+2048;
+  float *p2, *p3;
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&p2), 4096 + 4096 * 2));
+  p3 = p2 + 2048;
   hipStream_t s;
   HIP_CHECK(hipStreamCreate(&s));
-  HIP_CHECK(hipMemsetAsync(p2, 0, 32*32*4, s));
-  HIP_CHECK(hipMemsetD32Async((hipDeviceptr_t)p3, 0x3fe00000, 32*32, s));
+  HIP_CHECK(hipMemsetAsync(p2, 0, 32 * 32 * 4, s));
+  HIP_CHECK(hipMemsetD32Async((hipDeviceptr_t)p3, 0x3fe00000, 32 * 32, s));
   HIP_CHECK(hipStreamSynchronize(s));
   for (int i = 0; i < 256; ++i) {
-    HIP_CHECK(hipMemsetAsync(p2, 0, 32*32*4, s));
-    HIP_CHECK(hipMemsetD32Async((hipDeviceptr_t)p3, 0x3fe00000, 32*32, s));
+    HIP_CHECK(hipMemsetAsync(p2, 0, 32 * 32 * 4, s));
+    HIP_CHECK(hipMemsetD32Async((hipDeviceptr_t)p3, 0x3fe00000, 32 * 32, s));
   }
   HIP_CHECK(hipStreamSynchronize(s));
   HIP_CHECK(hipDeviceSynchronize());
@@ -281,4 +255,52 @@ TEST_CASE("Unit_hipMemset_2AsyncOperations") {
 
   HIP_CHECK(hipFree(p2));
   HIP_CHECK(hipStreamDestroy(s));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test hipMemset while stream is capturing.
+ * Test source
+ * ------------------------
+ *    - unit/memory/hipMemset.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 6.0
+ */
+HIP_TEST_CASE(Unit_hipMemset_Capture) {
+  const size_t N = 1024;
+  void* dst = nullptr;
+  HIP_CHECK(hipMalloc(&dst, N));
+
+  hipError_t memcpy_err = hipSuccess;
+  BEGIN_CAPTURE_SYNC(memcpy_err, false);
+  HIP_CHECK_ERROR(hipMemset(dst, 0xAB, N), memcpy_err);
+  END_CAPTURE_SYNC(memcpy_err);
+
+  HIP_CHECK(hipFree(dst));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test hipMemsetD8 while stream is capturing.
+ * Test source
+ * ------------------------
+ *    - unit/memory/hipMemset.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 6.0
+ */
+HIP_TEST_CASE(Unit_hipMemsetD8_Capture) {
+  const size_t N = 512;
+  void* dst = nullptr;
+  HIP_CHECK(hipMalloc(&dst, N * sizeof(uint8_t)));
+
+  hipError_t memcpy_err = hipSuccess;
+  BEGIN_CAPTURE_SYNC(memcpy_err, false);
+  HIP_CHECK_ERROR(hipMemsetD8(reinterpret_cast<hipDeviceptr_t>(dst), 0xCD, N), memcpy_err);
+  END_CAPTURE_SYNC(memcpy_err);
+
+  HIP_CHECK(hipFree(dst));
 }

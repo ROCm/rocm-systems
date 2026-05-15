@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # configure packaging
 
 function(rocprofiler_systems_parse_release)
@@ -51,7 +54,7 @@ set(CPACK_PACKAGE_VERSION_MINOR "${PROJECT_VERSION_MINOR}")
 set(CPACK_PACKAGE_VERSION_PATCH "${PROJECT_VERSION_PATCH}")
 
 set(CPACK_PACKAGE_CONTACT "https://github.com/ROCm/rocprofiler-systems")
-set(CPACK_RESOURCE_FILE_LICENSE "${PROJECT_SOURCE_DIR}/LICENSE")
+set(CPACK_RESOURCE_FILE_LICENSE "${PROJECT_SOURCE_DIR}/LICENSE.md")
 set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF)
 
 # For handling the project rebranding from "omnitrace" to "rocprofiler-systems"
@@ -64,11 +67,9 @@ set(ROCPROFSYS_CPACK_SYSTEM_NAME
 )
 set(ROCPROFSYS_CPACK_PACKAGE_SUFFIX "")
 
-if(ROCPROFSYS_USE_ROCM)
-    set(ROCPROFSYS_CPACK_PACKAGE_SUFFIX
-        "${ROCPROFSYS_CPACK_PACKAGE_SUFFIX}-ROCm-${ROCmVersion_NUMERIC_VERSION}"
-    )
-endif()
+set(ROCPROFSYS_CPACK_PACKAGE_SUFFIX
+    "${ROCPROFSYS_CPACK_PACKAGE_SUFFIX}-ROCm-${ROCmVersion_NUMERIC_VERSION}"
+)
 
 if(ROCPROFSYS_USE_PAPI)
     set(ROCPROFSYS_CPACK_PACKAGE_SUFFIX "${ROCPROFSYS_CPACK_PACKAGE_SUFFIX}-PAPI")
@@ -177,8 +178,7 @@ if(NOT ROCPROFSYS_BUILD_DYNINST)
             timer
         )
             list(
-                APPEND
-                _DEBIAN_PACKAGE_DEPENDS
+                APPEND _DEBIAN_PACKAGE_DEPENDS
                 "libboost-${_BOOST_COMPONENT}-dev (>= 1.67.0)"
             )
         endforeach()
@@ -195,10 +195,8 @@ if(ROCmVersion_FOUND)
         " (>= ${ROCmVersion_MAJOR_VERSION}.0.0.${ROCmVersion_NUMERIC_VERSION})"
     )
 endif()
-if(ROCPROFSYS_USE_ROCM)
-    list(APPEND _DEBIAN_PACKAGE_DEPENDS "amd-smi-lib${_AMD_SMI_SUFFIX}")
-    list(APPEND _DEBIAN_PACKAGE_DEPENDS "rocprofiler-sdk (>= ${rocprofiler-sdk_VERSION})")
-endif()
+list(APPEND _DEBIAN_PACKAGE_DEPENDS "amd-smi-lib${_AMD_SMI_SUFFIX}")
+list(APPEND _DEBIAN_PACKAGE_DEPENDS "rocprofiler-sdk (>= ${rocprofiler-sdk_VERSION})")
 if(ROCPROFSYS_USE_MPI)
     if("${ROCPROFSYS_MPI_IMPL}" STREQUAL "openmpi")
         list(APPEND _DEBIAN_PACKAGE_DEPENDS "libopenmpi-dev")
@@ -276,11 +274,9 @@ if(ROCPROFSYS_USE_MPI)
     endif()
 endif()
 
-if(ROCPROFSYS_USE_ROCM)
-    if(ROCPROFSYS_BUILD_TESTING)
-        list(APPEND _RPM_PACKAGE_REQUIRES "rocdecode-test")
-        list(APPEND _RPM_PACKAGE_REQUIRES "rocjpeg-test")
-    endif()
+if(ROCPROFSYS_BUILD_TESTING)
+    list(APPEND _RPM_PACKAGE_REQUIRES "rocdecode-test")
+    list(APPEND _RPM_PACKAGE_REQUIRES "rocjpeg-test")
 endif()
 
 string(REPLACE ";" ", " _RPM_PACKAGE_REQUIRES "${_RPM_PACKAGE_REQUIRES}")

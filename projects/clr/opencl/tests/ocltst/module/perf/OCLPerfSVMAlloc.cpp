@@ -1,22 +1,8 @@
-/* Copyright (c) 2010 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "OCLPerfSVMAlloc.h"
 
@@ -58,7 +44,7 @@ static const cl_svm_mem_flags FGFlags[NUM_FG_FLAGS] = {
 };
 #endif
 
-static const char *strKernel =
+static const char* strKernel =
     "__kernel void dummy(__global uint* out)    \n"
     "{                                          \n"
     "   uint id = get_global_id(0);             \n"
@@ -75,7 +61,7 @@ OCLPerfSVMAlloc::OCLPerfSVMAlloc() {
 
 OCLPerfSVMAlloc::~OCLPerfSVMAlloc() {}
 
-void OCLPerfSVMAlloc::open(unsigned int test, char *units, double &conversion,
+void OCLPerfSVMAlloc::open(unsigned int test, char* units, double& conversion,
                            unsigned int deviceId) {
   OCLTestImp::open(test, units, conversion, deviceId);
   CHECK_RESULT((error_ != CL_SUCCESS), "Error opening test");
@@ -110,8 +96,8 @@ void OCLPerfSVMAlloc::open(unsigned int test, char *units, double &conversion,
   }
 
   cl_device_type deviceType;
-  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_TYPE,
-                                     sizeof(deviceType), &deviceType, NULL);
+  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_TYPE, sizeof(deviceType),
+                                     &deviceType, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "CL_DEVICE_TYPE failed");
 
   if (!(deviceType & CL_DEVICE_TYPE_GPU)) {
@@ -120,15 +106,13 @@ void OCLPerfSVMAlloc::open(unsigned int test, char *units, double &conversion,
     return;
   }
 
-  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL,
-                                                 &error_);
+  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateProgramWithSource()  failed");
-  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId],
-                                    "-cl-std=CL2.0", NULL, NULL);
+  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId], "-cl-std=CL2.0", NULL, NULL);
   if (error_ != CL_SUCCESS) {
     char programLog[1024];
-    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId],
-                                    CL_PROGRAM_BUILD_LOG, 1024, programLog, 0);
+    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId], CL_PROGRAM_BUILD_LOG, 1024,
+                                    programLog, 0);
     printf("\n%s\n", programLog);
     fflush(stdout);
   }
@@ -143,9 +127,8 @@ void OCLPerfSVMAlloc::open(unsigned int test, char *units, double &conversion,
 #endif
 }
 
-static void CL_CALLBACK notify_callback(const char *errinfo,
-                                        const void *private_info, size_t cb,
-                                        void *user_data) {}
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
+                                        void* user_data) {}
 
 void OCLPerfSVMAlloc::run(void) {
   if (skip_) {
@@ -156,9 +139,9 @@ void OCLPerfSVMAlloc::run(void) {
     return;
   }
 #if defined(CL_VERSION_2_0)
-  cl_uint *buffer = NULL;
+  cl_uint* buffer = NULL;
   CPerfCounter timer;
-  void *hostPtr = NULL;
+  void* hostPtr = NULL;
 
   size_t bufSize = sizeList[testSize_] * sizeof(cl_int4);
   size_t iter = 100;
@@ -173,23 +156,23 @@ void OCLPerfSVMAlloc::run(void) {
 
   for (size_t i = 0; i < iter; ++i) {
     if (!FGSystem_) {
-      buffer = (cl_uint *)clSVMAlloc(context_, flags, bufSize, 0);
+      buffer = (cl_uint*)clSVMAlloc(context_, flags, bufSize, 0);
     } else {
-      buffer = (cl_uint *)malloc(bufSize);
+      buffer = (cl_uint*)malloc(bufSize);
     }
     CHECK_RESULT(buffer == 0, "Allocation failed");
 
     error_ = _wrapper->clSetKernelArgSVMPointer(kernel_, 0, buffer);
     CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg() failed");
 
-    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1,
-                                              NULL, gws, lws, 0, NULL, NULL);
+    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1, NULL, gws, lws, 0,
+                                              NULL, NULL);
     CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed");
 
     _wrapper->clFinish(cmdQueues_[_deviceId]);
 
     if (!FGSystem_) {
-      clSVMFree(context_, (void *)buffer);
+      clSVMFree(context_, (void*)buffer);
     } else {
       free(buffer);
     }
@@ -202,9 +185,9 @@ void OCLPerfSVMAlloc::run(void) {
   size_t numN = 100;
 
   if (!FGSystem_) {
-    buffer = (cl_uint *)clSVMAlloc(context_, flags, bufSize, 0);
+    buffer = (cl_uint*)clSVMAlloc(context_, flags, bufSize, 0);
   } else {
-    buffer = (cl_uint *)malloc(bufSize);
+    buffer = (cl_uint*)malloc(bufSize);
   }
   CHECK_RESULT(buffer == 0, "Allocation failed");
 
@@ -213,50 +196,42 @@ void OCLPerfSVMAlloc::run(void) {
     error_ = _wrapper->clSetKernelArgSVMPointer(kernel_, 0, buffer);
     CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg() failed");
 
-    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1,
-                                              NULL, gws, lws, 0, NULL, NULL);
+    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1, NULL, gws, lws, 0,
+                                              NULL, NULL);
     CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed");
   }
   _wrapper->clFinish(cmdQueues_[_deviceId]);
   timer2.Stop();
 
   if (!FGSystem_) {
-    clSVMFree(context_, (void *)buffer);
+    clSVMFree(context_, (void*)buffer);
   } else {
     free(buffer);
   }
 
   char pFlags[5];
-  pFlags[0] =
-      (testCGFlag_ == 0 || testCGFlag_ == 2) ? 'R' : '_';  // CL_MEM_READ_ONLY
-  pFlags[1] =
-      (testCGFlag_ == 0 || testCGFlag_ == 1) ? 'W' : '_';  // CL_MEM_WRITE_ONLY
-  pFlags[2] = (testFGFlag_ == 1 || testFGFlag_ == 2)
-                  ? 'F'
-                  : '_';                       // CL_MEM_SVM_FINE_GRAIN_BUFFER
-  pFlags[3] = (testFGFlag_ == 2) ? 'A' : '_';  // CL_MEM_SVM_ATOMICS
+  pFlags[0] = (testCGFlag_ == 0 || testCGFlag_ == 2) ? 'R' : '_';  // CL_MEM_READ_ONLY
+  pFlags[1] = (testCGFlag_ == 0 || testCGFlag_ == 1) ? 'W' : '_';  // CL_MEM_WRITE_ONLY
+  pFlags[2] = (testFGFlag_ == 1 || testFGFlag_ == 2) ? 'F' : '_';  // CL_MEM_SVM_FINE_GRAIN_BUFFER
+  pFlags[3] = (testFGFlag_ == 2) ? 'A' : '_';                      // CL_MEM_SVM_ATOMICS
 
   char buf[256];
 
   if (!FGSystem_ && (testFGFlag_ == 0)) {
-    SNPRINTF(buf, sizeof(buf),
-             "Coarse Grain Buffer Alloc + Free (GB/s) for %6d KB, flags=%4s",
+    SNPRINTF(buf, sizeof(buf), "Coarse Grain Buffer Alloc + Free (GB/s) for %6d KB, flags=%4s",
              (int)bufSize / 1024, pFlags);
   } else if (!FGSystem_ && (testFGFlag_ > 0)) {
-    SNPRINTF(buf, sizeof(buf),
-             "Fine Grain Buffer   Alloc + Free (GB/s) for %6d KB, flags=%4s",
+    SNPRINTF(buf, sizeof(buf), "Fine Grain Buffer   Alloc + Free (GB/s) for %6d KB, flags=%4s",
              (int)bufSize / 1024, pFlags);
   } else if (FGSystem_) {
-    SNPRINTF(buf, sizeof(buf),
-             "Fine Grain System   Alloc + Free (GB/s) for %6d KB, flags=N/A ",
+    SNPRINTF(buf, sizeof(buf), "Fine Grain System   Alloc + Free (GB/s) for %6d KB, flags=N/A ",
              (int)bufSize / 1024);
   }
 
   testDescString = buf;
   double sec1 = timer.GetElapsedTime();
   double sec2 = timer2.GetElapsedTime();
-  _perfInfo = static_cast<float>((bufSize * (double)(1e-09)) /
-                                 (sec1 / iter - sec2 / numN));
+  _perfInfo = static_cast<float>((bufSize * (double)(1e-09)) / (sec1 / iter - sec2 / numN));
 #endif
 }
 

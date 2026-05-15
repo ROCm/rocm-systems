@@ -326,12 +326,12 @@ TEST(evaluate_ast, counter_constants)
             // Check that the value matches agent_t and that its dim/id is set correctly
             ASSERT_EQ(ptr->size(), 1);
             EXPECT_EQ(ptr->at(0).counter_value, raw_agent_values[c.name()]);
-            EXPECT_EQ(rocprofiler::counters::rec_to_counter_id(ptr->at(0).id).handle, c.id());
-            EXPECT_EQ(rocprofiler::counters::rec_to_dim_pos(
-                          ptr->at(0).id,
-                          rocprofiler::counters::rocprofiler_profile_counter_instance_types::
-                              ROCPROFILER_DIMENSION_NONE),
-                      0);
+
+            // Extract and compare the base metric ID
+            auto reconstructed_id = rocprofiler::counters::rec_to_counter_id(ptr->at(0).id);
+            auto base_metric =
+                rocprofiler::counters::get_base_metric_from_counter_id(reconstructed_id);
+            EXPECT_EQ(base_metric, c.id());
         }
         asts.at("gfx9").at(name).expand_derived(asts.at("gfx9"));
         std::vector<std::unique_ptr<std::vector<rocprofiler_record_counter_t>>> cache;
@@ -340,13 +340,10 @@ TEST(evaluate_ast, counter_constants)
         EXPECT_FLOAT_EQ(ret->at(0).counter_value, final_computed_values[name]);
 
         asts.at("gfx9").at(name).set_out_id(*ret);
-        EXPECT_EQ(rocprofiler::counters::rec_to_counter_id(ret->at(0).id).handle,
-                  metrics[name].id());
-        EXPECT_EQ(rocprofiler::counters::rec_to_dim_pos(
-                      ret->at(0).id,
-                      rocprofiler::counters::rocprofiler_profile_counter_instance_types::
-                          ROCPROFILER_DIMENSION_NONE),
-                  0);
+        // Extract and compare the base metric ID
+        auto reconstructed_id = rocprofiler::counters::rec_to_counter_id(ret->at(0).id);
+        auto base_metric = rocprofiler::counters::get_base_metric_from_counter_id(reconstructed_id);
+        EXPECT_EQ(base_metric, metrics[name].id());
     }
 }
 
@@ -528,7 +525,13 @@ TEST(evaluate_ast, evaluate_simple_counters)
         for(const auto& v : *ret)
         {
             set_counter_in_rec(expected[pos].id, {.handle = metrics[name].id()});
-            EXPECT_EQ(v.id, expected[pos].id);
+            // Compare base metrics extracted from counter IDs
+            auto v_counter_id        = rocprofiler::counters::rec_to_counter_id(v.id);
+            auto expected_counter_id = rocprofiler::counters::rec_to_counter_id(expected[pos].id);
+            auto v_base = rocprofiler::counters::get_base_metric_from_counter_id(v_counter_id);
+            auto expected_base =
+                rocprofiler::counters::get_base_metric_from_counter_id(expected_counter_id);
+            EXPECT_EQ(v_base, expected_base);
             EXPECT_FLOAT_EQ(v.counter_value, expected[pos].counter_value);
             pos++;
         }
@@ -650,7 +653,13 @@ run_reduce_test(
         for(const auto& v : *ret)
         {
             set_counter_in_rec(expected[pos].id, {.handle = metrics[name].id()});
-            EXPECT_EQ(v.id, expected[pos].id);
+            // Compare base metrics extracted from counter IDs
+            auto v_counter_id        = rocprofiler::counters::rec_to_counter_id(v.id);
+            auto expected_counter_id = rocprofiler::counters::rec_to_counter_id(expected[pos].id);
+            auto v_base = rocprofiler::counters::get_base_metric_from_counter_id(v_counter_id);
+            auto expected_base =
+                rocprofiler::counters::get_base_metric_from_counter_id(expected_counter_id);
+            EXPECT_EQ(v_base, expected_base);
             EXPECT_FLOAT_EQ(v.counter_value, expected[pos].counter_value);
             pos++;
         }
@@ -1155,7 +1164,14 @@ TEST(evaluate_ast, evaluate_mixed_counters)
         for(const auto& v : *ret)
         {
             set_counter_in_rec(expected.at(pos).id, {.handle = metrics[name].id()});
-            EXPECT_EQ(v.id, expected.at(pos).id);
+            // Compare base metrics extracted from counter IDs
+            auto v_counter_id = rocprofiler::counters::rec_to_counter_id(v.id);
+            auto expected_counter_id =
+                rocprofiler::counters::rec_to_counter_id(expected.at(pos).id);
+            auto v_base = rocprofiler::counters::get_base_metric_from_counter_id(v_counter_id);
+            auto expected_base =
+                rocprofiler::counters::get_base_metric_from_counter_id(expected_counter_id);
+            EXPECT_EQ(v_base, expected_base);
             EXPECT_FLOAT_EQ(v.counter_value, expected.at(pos).counter_value);
             pos++;
         }
@@ -1253,7 +1269,13 @@ TEST(evaluate_ast, derived_counter_reduction)
         for(const auto& v : *ret)
         {
             set_counter_in_rec(expected[pos].id, {.handle = metrics[name].id()});
-            EXPECT_EQ(v.id, expected[pos].id);
+            // Compare base metrics extracted from counter IDs
+            auto v_counter_id        = rocprofiler::counters::rec_to_counter_id(v.id);
+            auto expected_counter_id = rocprofiler::counters::rec_to_counter_id(expected[pos].id);
+            auto v_base = rocprofiler::counters::get_base_metric_from_counter_id(v_counter_id);
+            auto expected_base =
+                rocprofiler::counters::get_base_metric_from_counter_id(expected_counter_id);
+            EXPECT_EQ(v_base, expected_base);
             EXPECT_FLOAT_EQ(v.counter_value, expected[pos].counter_value);
             pos++;
         }
@@ -1290,12 +1312,10 @@ TEST(evatuate_ast, evaluate_select)
         }
         for(auto& dim_pair : dims)
         {
-            size_t  bit_length = DIM_BIT_LENGTH / ROCPROFILER_DIMENSION_LAST;
-            int64_t mask = (MAX_64 >> (64 - bit_length)) << ((dim_pair.first - 1) * bit_length);
+            uint64_t mask = get_dim_mask(dim_pair.first);
             for(auto& rec : a)
             {
-                rec.id = rec.id | mask;
-                rec.id = rec.id ^ mask;
+                rec.id = (rec.id | mask) ^ mask;
             }
         }
         return a;
@@ -1382,7 +1402,13 @@ TEST(evatuate_ast, evaluate_select)
         for(const auto& v : *ret)
         {
             set_counter_in_rec(expected[pos].id, {.handle = metrics[name].id()});
-            EXPECT_EQ(v.id, expected[pos].id);
+            // Compare base metrics extracted from counter IDs
+            auto v_counter_id        = rocprofiler::counters::rec_to_counter_id(v.id);
+            auto expected_counter_id = rocprofiler::counters::rec_to_counter_id(expected[pos].id);
+            auto v_base = rocprofiler::counters::get_base_metric_from_counter_id(v_counter_id);
+            auto expected_base =
+                rocprofiler::counters::get_base_metric_from_counter_id(expected_counter_id);
+            EXPECT_EQ(v_base, expected_base);
             EXPECT_FLOAT_EQ(v.counter_value, expected[pos].counter_value);
             pos++;
         }
@@ -1392,8 +1418,6 @@ TEST(evatuate_ast, evaluate_select)
 TEST(evaluate_ast, counter_reduction_dimension)
 {
     using namespace rocprofiler::counters;
-
-    size_t bit_length = DIM_BIT_LENGTH / ROCPROFILER_DIMENSION_LAST;
 
     auto get_base_rec_id = [](uint64_t counter_id) {
         rocprofiler_counter_instance_id_t base_id = 0;
@@ -1407,10 +1431,8 @@ TEST(evaluate_ast, counter_reduction_dimension)
         std::vector<rocprofiler_record_counter_t>                 result;
         for(auto rec : a)
         {
-            int64_t mask_dim = (MAX_64 >> (64 - bit_length)) << (bit_length * 0);
-
-            rec.id = rec.id | mask_dim;
-            rec.id = rec.id ^ mask_dim;
+            uint64_t mask = get_dim_mask(ROCPROFILER_DIMENSION_XCC);
+            rec.id        = (rec.id | mask) ^ mask;
             if(groups_dim.find(rec.id) == groups_dim.end())
             {
                 groups_dim[rec.id] = rec;
@@ -1520,7 +1542,13 @@ TEST(evaluate_ast, counter_reduction_dimension)
         for(const auto& v : *ret)
         {
             set_counter_in_rec(expected[pos].id, {.handle = metrics[name].id()});
-            EXPECT_EQ(v.id, expected[pos].id);
+            // Compare base metrics extracted from counter IDs
+            auto v_counter_id        = rocprofiler::counters::rec_to_counter_id(v.id);
+            auto expected_counter_id = rocprofiler::counters::rec_to_counter_id(expected[pos].id);
+            auto v_base = rocprofiler::counters::get_base_metric_from_counter_id(v_counter_id);
+            auto expected_base =
+                rocprofiler::counters::get_base_metric_from_counter_id(expected_counter_id);
+            EXPECT_EQ(v_base, expected_base);
             EXPECT_FLOAT_EQ(v.counter_value, expected[pos].counter_value);
             pos++;
         }

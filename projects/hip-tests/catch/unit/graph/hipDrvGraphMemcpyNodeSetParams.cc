@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <functional>
 
@@ -49,7 +33,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipDrvGraphMemcpyNodeSetParams_Positive_Basic") {
+HIP_TEST_CASE(Unit_hipDrvGraphMemcpyNodeSetParams_Positive_Basic) {
   using namespace std::placeholders;
 
   constexpr bool async = false;
@@ -94,7 +78,7 @@ TEST_CASE("Unit_hipDrvGraphMemcpyNodeSetParams_Positive_Basic") {
   HIP_CHECK(hipCtxDestroy(context));
 }
 
-TEST_CASE("Unit_hipDrvGraphMemcpyNodeSetParams_Positive_Array") {
+HIP_TEST_CASE(Unit_hipDrvGraphMemcpyNodeSetParams_Positive_Array) {
   CHECK_IMAGE_SUPPORT
 
   using namespace std::placeholders;
@@ -144,7 +128,7 @@ TEST_CASE("Unit_hipDrvGraphMemcpyNodeSetParams_Positive_Array") {
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipDrvGraphMemcpyNodeSetParams_Negative_Parameters") {
+HIP_TEST_CASE(Unit_hipDrvGraphMemcpyNodeSetParams_Negative_Parameters) {
   using namespace std::placeholders;
 
   HIP_CHECK(hipInit(0));
@@ -190,8 +174,7 @@ TEST_CASE("Unit_hipDrvGraphMemcpyNodeSetParams_Negative_Parameters") {
       invalid_ptr.pitch = extent.width - 1;
       auto invalid_params =
           GetDrvMemcpy3DParms(invalid_ptr, dst_pos, src_ptr, src_pos, extent, kind);
-      HIP_CHECK_ERROR(hipDrvGraphMemcpyNodeSetParams(node, &invalid_params),
-                      hipErrorInvalidValue);
+      HIP_CHECK_ERROR(hipDrvGraphMemcpyNodeSetParams(node, &invalid_params), hipErrorInvalidValue);
     }
 
     SECTION("srcPitch < width") {
@@ -199,8 +182,7 @@ TEST_CASE("Unit_hipDrvGraphMemcpyNodeSetParams_Negative_Parameters") {
       invalid_ptr.pitch = extent.width - 1;
       auto invalid_params =
           GetDrvMemcpy3DParms(dst_ptr, dst_pos, invalid_ptr, src_pos, extent, kind);
-      HIP_CHECK_ERROR(hipDrvGraphMemcpyNodeSetParams(node, &invalid_params),
-                      hipErrorInvalidValue);
+      HIP_CHECK_ERROR(hipDrvGraphMemcpyNodeSetParams(node, &invalid_params), hipErrorInvalidValue);
     }
 
     SECTION("dstPitch > max pitch") {
@@ -319,6 +301,6 @@ TEST_CASE("Unit_hipDrvGraphMemcpyNodeSetParams_Negative_Parameters") {
 }
 
 /**
-* End doxygen group GraphTest.
-* @}
-*/
+ * End doxygen group GraphTest.
+ * @}
+ */

@@ -1,0 +1,36 @@
+__pycache__
+*.egg-info
+
+# Build directories
+build/
+build-*/
+*.o
+*.so
+*.a
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# Compiled executables
+*.exe
+standalone
+client
+
+# Unbundled output
+*.unbundled/
+
+# Test artifacts (elf_modify_load tests)
+tests/elf_modify_load/test_mapped_section
+tests/elf_modify_load/test_mapped_section.*
+tests/elf_modify_load/test_mapped_section_*
+tests/elf_modify_load/test_zero_page_aligned
+tests/elf_modify_load/test_zero_page_unaligned_*
+tests/elf_modify_load/test_zero_page_both_unaligned
+tests/elf_modify_load/*.zeroed
+tests/elf_modify_load/custom_data.bin
+tests/elf_modify_load/test_should_fail
+tests/elf_modify_load/test_verify_pie
+tests/elf_modify_load/test_interp_preserved.bin

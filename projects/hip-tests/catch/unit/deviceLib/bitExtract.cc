@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2021 - 2021 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include <hip/device_functions.h>
@@ -52,7 +36,7 @@ __global__ void HIP_kernel(unsigned int* out32, unsigned int* in32_0, unsigned i
   out64[x] = __bitextract_u64(in64_0[x], in64_1[x], in64_2[x]);
 }
 
-TEST_CASE("Unit_bitExtract") {
+HIP_TEST_CASE(Unit_bitExtract) {
   using namespace std;
 
   unsigned int* hostOut32;
@@ -128,19 +112,14 @@ TEST_CASE("Unit_bitExtract") {
   HIP_CHECK(hipMalloc((void**)&deviceSrc164, NUM * sizeof(unsigned int)));
   HIP_CHECK(hipMalloc((void**)&deviceSrc264, NUM * sizeof(unsigned int)));
 
-  HIP_CHECK(
-      hipMemcpy(deviceSrc032, hostSrc032, NUM * sizeof(unsigned int), hipMemcpyHostToDevice));
-  HIP_CHECK(
-      hipMemcpy(deviceSrc132, hostSrc132, NUM * sizeof(unsigned int), hipMemcpyHostToDevice));
-  HIP_CHECK(
-      hipMemcpy(deviceSrc232, hostSrc232, NUM * sizeof(unsigned int), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(deviceSrc032, hostSrc032, NUM * sizeof(unsigned int), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(deviceSrc132, hostSrc132, NUM * sizeof(unsigned int), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(deviceSrc232, hostSrc232, NUM * sizeof(unsigned int), hipMemcpyHostToDevice));
 
   HIP_CHECK(hipMemcpy(deviceSrc064, hostSrc064, NUM * sizeof(unsigned long long int),
-                       hipMemcpyHostToDevice));
-  HIP_CHECK(
-      hipMemcpy(deviceSrc164, hostSrc164, NUM * sizeof(unsigned int), hipMemcpyHostToDevice));
-  HIP_CHECK(
-      hipMemcpy(deviceSrc264, hostSrc264, NUM * sizeof(unsigned int), hipMemcpyHostToDevice));
+                      hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(deviceSrc164, hostSrc164, NUM * sizeof(unsigned int), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(deviceSrc264, hostSrc264, NUM * sizeof(unsigned int), hipMemcpyHostToDevice));
 
 
   hipLaunchKernelGGL(HIP_kernel, dim3(num_blocks), dim3(num_threads_per_block), 0, 0, deviceOut32,
@@ -151,7 +130,7 @@ TEST_CASE("Unit_bitExtract") {
 
   HIP_CHECK(hipMemcpy(hostOut32, deviceOut32, NUM * sizeof(unsigned int), hipMemcpyDeviceToHost));
   HIP_CHECK(hipMemcpy(hostOut64, deviceOut64, NUM * sizeof(unsigned long long int),
-                       hipMemcpyDeviceToHost));
+                      hipMemcpyDeviceToHost));
 
   // verify the results
   errors = 0;

@@ -1,22 +1,8 @@
-/* Copyright (c) 2010 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "OCLGLDepthBuffer.h"
 
@@ -58,8 +44,8 @@ void OCLGLDepthBuffer::open(unsigned int test, char* units, double& conversion,
 
   char* pExtensions = (char*)malloc(8192);
   size_t returnSize;
-  _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_EXTENSIONS, 8192,
-                            pExtensions, &returnSize);
+  _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_EXTENSIONS, 8192, pExtensions,
+                            &returnSize);
 
   // if extension if not supported
   if (!strstr(pExtensions, "cl_khr_gl_depth_images")) {
@@ -73,17 +59,14 @@ void OCLGLDepthBuffer::open(unsigned int test, char* units, double& conversion,
   _currentTest = test;
 
   // Build the kernel
-  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL,
-                                                 &error_);
-  CHECK_RESULT((error_ != CL_SUCCESS),
-               "clCreateProgramWithSource()  failed (%d)", error_);
+  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL, &error_);
+  CHECK_RESULT((error_ != CL_SUCCESS), "clCreateProgramWithSource()  failed (%d)", error_);
 
-  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId], NULL,
-                                    NULL, NULL);
+  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId], NULL, NULL, NULL);
   if (error_ != CL_SUCCESS) {
     char programLog[1024];
-    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId],
-                                    CL_PROGRAM_BUILD_LOG, 1024, programLog, 0);
+    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId], CL_PROGRAM_BUILD_LOG, 1024,
+                                    programLog, 0);
     printf("\n%s\n", programLog);
     fflush(stdout);
   }
@@ -117,8 +100,7 @@ void OCLGLDepthBuffer::run(void) {
   CHECK_RESULT((retVal != true), "cl-gl depth test failed ");
 }
 
-bool OCLGLDepthBuffer::testDepthRead(GLint internalFormat,
-                                     GLenum attachmentType) {
+bool OCLGLDepthBuffer::testDepthRead(GLint internalFormat, GLenum attachmentType) {
   cl_int error;
   size_t dimSizes[] = {c_dimSize, c_dimSize};
 
@@ -134,8 +116,7 @@ bool OCLGLDepthBuffer::testDepthRead(GLint internalFormat,
   glGenTextures(1, &colorBuffer_);
   glEnable(GL_TEXTURE_2D);
   glBindTexture(GL_TEXTURE_2D, colorBuffer_);
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, c_dimSize, c_dimSize, 0, GL_RGBA,
-               GL_UNSIGNED_BYTE, 0);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, c_dimSize, c_dimSize, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0);
   glBindTexture(GL_TEXTURE_2D, 0);
   // create a renderbuffer for the depth/stencil buffer
   glGenRenderbuffers(1, &glDepthBuffer_);
@@ -145,8 +126,7 @@ bool OCLGLDepthBuffer::testDepthRead(GLint internalFormat,
   //
   glBindFramebuffer(GL_FRAMEBUFFER, frameBufferOBJ_);
   glFramebufferTexture(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, colorBuffer_, 0);
-  glFramebufferRenderbuffer(GL_FRAMEBUFFER, attachmentType, GL_RENDERBUFFER,
-                            glDepthBuffer_);
+  glFramebufferRenderbuffer(GL_FRAMEBUFFER, attachmentType, GL_RENDERBUFFER, glDepthBuffer_);
 
   GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
   if (GL_FRAMEBUFFER_COMPLETE != status) {
@@ -161,34 +141,31 @@ bool OCLGLDepthBuffer::testDepthRead(GLint internalFormat,
   glLoadIdentity();
   glEnable(GL_DEPTH_TEST);
   // The Type Of Depth Testing To Do
-  glClear(GL_COLOR_BUFFER_BIT |
-          GL_DEPTH_BUFFER_BIT);     // Clear Screen And Depth Buffer
-  glBegin(GL_QUADS);                // Draw A Quad
-  glVertex3f(-1.0f, 1.0f, -6.0f);   // Top Left
-  glVertex3f(1.0f, 1.0f, -6.0f);    // Top Right
-  glVertex3f(1.0f, -1.0f, -3.0f);   // Bottom Right
-  glVertex3f(-1.0f, -1.0f, -3.0f);  // Bottom Left
+  glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);  // Clear Screen And Depth Buffer
+  glBegin(GL_QUADS);                                   // Draw A Quad
+  glVertex3f(-1.0f, 1.0f, -6.0f);                      // Top Left
+  glVertex3f(1.0f, 1.0f, -6.0f);                       // Top Right
+  glVertex3f(1.0f, -1.0f, -3.0f);                      // Bottom Right
+  glVertex3f(-1.0f, -1.0f, -3.0f);                     // Bottom Left
   glEnd();
 
   glFinish();
 
-  clDepth_ = _wrapper->clCreateFromGLRenderbuffer(context_, CL_MEM_READ_WRITE,
-                                                  glDepthBuffer_, &error);
+  clDepth_ =
+      _wrapper->clCreateFromGLRenderbuffer(context_, CL_MEM_READ_WRITE, glDepthBuffer_, &error);
   if (CL_SUCCESS != error) {
     printf("clCreateFromGLRenderbuffer failed\n");
     return false;
   }
 
-  clOutputBuffer_ = _wrapper->clCreateBuffer(context_, CL_MEM_WRITE_ONLY,
-                                             bufferSize, NULL, &error);
+  clOutputBuffer_ = _wrapper->clCreateBuffer(context_, CL_MEM_WRITE_ONLY, bufferSize, NULL, &error);
   if (CL_SUCCESS != error) return false;
 
-  clSampler_ = _wrapper->clCreateSampler(context_, CL_FALSE, CL_ADDRESS_NONE,
-                                         CL_FILTER_NEAREST, &error);
+  clSampler_ =
+      _wrapper->clCreateSampler(context_, CL_FALSE, CL_ADDRESS_NONE, CL_FILTER_NEAREST, &error);
   if (CL_SUCCESS != error) return false;
 
-  error = _wrapper->clEnqueueAcquireGLObjects(cmdQueues_[_deviceId], 1,
-                                              &clDepth_, 0, NULL, NULL);
+  error = _wrapper->clEnqueueAcquireGLObjects(cmdQueues_[_deviceId], 1, &clDepth_, 0, NULL, NULL);
 
   _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem), &clOutputBuffer_);
 
@@ -196,17 +173,15 @@ bool OCLGLDepthBuffer::testDepthRead(GLint internalFormat,
 
   _wrapper->clSetKernelArg(kernel_, 2, sizeof(cl_sampler), &clSampler_);
 
-  _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 2, NULL,
-                                   dimSizes, NULL, 0, NULL, NULL);
+  _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 2, NULL, dimSizes, NULL, 0, NULL,
+                                   NULL);
 
-  _wrapper->clEnqueueReleaseGLObjects(cmdQueues_[_deviceId], 1, &clDepth_, 0,
-                                      NULL, NULL);
+  _wrapper->clEnqueueReleaseGLObjects(cmdQueues_[_deviceId], 1, &clDepth_, 0, NULL, NULL);
 
-  _wrapper->clEnqueueReadBuffer(cmdQueues_[_deviceId], clOutputBuffer_, CL_TRUE,
-                                0, bufferSize, pCLOutput_, 0, NULL, NULL);
+  _wrapper->clEnqueueReadBuffer(cmdQueues_[_deviceId], clOutputBuffer_, CL_TRUE, 0, bufferSize,
+                                pCLOutput_, 0, NULL, NULL);
 
-  glReadPixels(0, 0, c_dimSize, c_dimSize, GL_DEPTH_COMPONENT, GL_FLOAT,
-               pGLOutput_);
+  glReadPixels(0, 0, c_dimSize, c_dimSize, GL_DEPTH_COMPONENT, GL_FLOAT, pGLOutput_);
 
   // test that both resources are identical.
   if (0 == memcmp(pGLOutput_, pCLOutput_, bufferSize)) {

@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2021 - 2021 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include <hip/device_functions.h>
@@ -93,7 +77,7 @@ static unsigned int cpu_funnelshift_rc(unsigned int lo, unsigned int hi, unsigne
   return val & 0xffffffff;
 }
 
-TEST_CASE("Unit_funnelshift") {
+HIP_TEST_CASE(Unit_funnelshift) {
   unsigned int* host_l_output;
   unsigned int* host_lc_output;
   unsigned int* host_r_output;
@@ -147,13 +131,13 @@ TEST_CASE("Unit_funnelshift") {
                      device_r_output, device_rc_output);
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipMemcpy(host_l_output, device_l_output, NUM_TESTS * sizeof(unsigned int),
-                       hipMemcpyDeviceToHost));
+                      hipMemcpyDeviceToHost));
   HIP_CHECK(hipMemcpy(host_lc_output, device_lc_output, NUM_TESTS * sizeof(unsigned int),
-                       hipMemcpyDeviceToHost));
+                      hipMemcpyDeviceToHost));
   HIP_CHECK(hipMemcpy(host_r_output, device_r_output, NUM_TESTS * sizeof(unsigned int),
-                       hipMemcpyDeviceToHost));
+                      hipMemcpyDeviceToHost));
   HIP_CHECK(hipMemcpy(host_rc_output, device_rc_output, NUM_TESTS * sizeof(unsigned int),
-                       hipMemcpyDeviceToHost));
+                      hipMemcpyDeviceToHost));
 
   // verify the results
   errors = 0;
@@ -203,6 +187,11 @@ TEST_CASE("Unit_funnelshift") {
   free(host_lc_output);
   free(host_r_output);
   free(host_rc_output);
+
+  free(golden_l);
+  free(golden_lc);
+  free(golden_r);
+  free(golden_rc);
 
   REQUIRE(errors == 0);
 }

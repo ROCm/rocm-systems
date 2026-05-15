@@ -1,22 +1,8 @@
-/* Copyright (c) 2010 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "OCLGLCommon.h"
 
@@ -91,8 +77,7 @@ bool OCLGLCommon::initializeGLContext(OCLGLHandle& hGL) {
   pfd.dwDamageMask = 0;
 
   dispDevice.cb = sizeof(DISPLAY_DEVICE);
-  for (deviceNum = 0; EnumDisplayDevices(NULL, deviceNum, &dispDevice, 0);
-       deviceNum++) {
+  for (deviceNum = 0; EnumDisplayDevices(NULL, deviceNum, &dispDevice, 0); deviceNum++) {
     if (dispDevice.StateFlags & DISPLAY_DEVICE_MIRRORING_DRIVER) {
       continue;
     }
@@ -149,8 +134,8 @@ bool OCLGLCommon::checkAssociationDeviceWithGLContext(OCLGLHandle& hGL) {
                                         (cl_context_properties)hGL->hdc,
                                         0};
 
-  error_ = _wrapper->clGetGLContextInfoKHR(
-      properties, CL_DEVICES_FOR_GL_CONTEXT_KHR, 0, NULL, &devicesSize);
+  error_ = _wrapper->clGetGLContextInfoKHR(properties, CL_DEVICES_FOR_GL_CONTEXT_KHR, 0, NULL,
+                                           &devicesSize);
   if (error_ != CL_SUCCESS) {
     printf("clGetGLContextInfoKHR failed (%d)\n", error_);
     return false;
@@ -159,9 +144,8 @@ bool OCLGLCommon::checkAssociationDeviceWithGLContext(OCLGLHandle& hGL) {
   cl_uint numDevices = (cl_uint)devicesSize / sizeof(cl_device_id);
   cl_device_id* interopDevices = (cl_device_id*)malloc(devicesSize);
 
-  error_ =
-      _wrapper->clGetGLContextInfoKHR(properties, CL_DEVICES_FOR_GL_CONTEXT_KHR,
-                                      devicesSize, interopDevices, NULL);
+  error_ = _wrapper->clGetGLContextInfoKHR(properties, CL_DEVICES_FOR_GL_CONTEXT_KHR, devicesSize,
+                                           interopDevices, NULL);
   if (error_ != CL_SUCCESS) {
     printf("clGetGLContextInfoKHR failed (%d)\n", error_);
     free(interopDevices);
@@ -192,8 +176,7 @@ void OCLGLCommon::createCLContextFromGLContext(OCLGLHandle& hGL) {
   // Release current command queue
   if (cmdQueues_[_deviceId]) {
     error_ = _wrapper->clReleaseCommandQueue(cmdQueues_[_deviceId]);
-    CHECK_RESULT_NO_RETURN((error_ != CL_SUCCESS),
-                           "clReleaseCommandQueue() failed");
+    CHECK_RESULT_NO_RETURN((error_ != CL_SUCCESS), "clReleaseCommandQueue() failed");
   }
 
   // Release current context
@@ -203,15 +186,12 @@ void OCLGLCommon::createCLContextFromGLContext(OCLGLHandle& hGL) {
   }
 
   // Create new CL context from GL context
-  context_ =
-      clCreateContext(properties, 1, &devices_[_deviceId], NULL, NULL, &error_);
+  context_ = clCreateContext(properties, 1, &devices_[_deviceId], NULL, NULL, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateContext() failed (%d)", error_);
 
   // Create command queue for new context
-  cmdQueues_[_deviceId] =
-      _wrapper->clCreateCommandQueue(context_, devices_[_deviceId], 0, &error_);
-  CHECK_RESULT((error_ != CL_SUCCESS), "clCreateCommandQueue() failed (%d)",
-               error_);
+  cmdQueues_[_deviceId] = _wrapper->clCreateCommandQueue(context_, devices_[_deviceId], 0, &error_);
+  CHECK_RESULT((error_ != CL_SUCCESS), "clCreateCommandQueue() failed (%d)", error_);
 
   GLenum glErr = glewInit();
   CHECK_RESULT((glErr != GLEW_OK), "glewInit() failed");
@@ -225,8 +205,8 @@ void OCLGLCommon::makeCurrent(OCLGLHandle hGL) {
   }
 }
 
-void OCLGLCommon::getCLContextPropertiesFromGLContext(
-    const OCLGLHandle hGL, cl_context_properties properties[7]) {
+void OCLGLCommon::getCLContextPropertiesFromGLContext(const OCLGLHandle hGL,
+                                                      cl_context_properties properties[7]) {
   if (!properties) return;
 
   properties[0] = CL_CONTEXT_PLATFORM;

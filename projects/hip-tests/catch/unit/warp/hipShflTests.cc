@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
@@ -165,7 +152,7 @@ template <typename T> static void runTest() {
  *    - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Unit_hipShflTests") {
+HIP_TEST_CASE(Unit_hipShflTests) {
   SECTION("run test for int") { runTest<int>(); }
   SECTION("run test for float") { runTest<float>(); }
   SECTION("run test for double") { runTest<double>(); }
@@ -190,52 +177,55 @@ TEST_CASE("Unit_hipShflTests") {
  *    - HIP_VERSION >= 6.2
  */
 
-__global__ void testShflWithUndefArgs(unsigned long total_out_strings, unsigned long* str_counter, uint32_t* out) {
+__global__ void testShflWithUndefArgs(unsigned long total_out_strings, unsigned long* str_counter,
+                                      uint32_t* out) {
   constexpr auto BLOCK_SIZE = warpSize;
   unsigned long lane = threadIdx.x % BLOCK_SIZE;
 
   auto get_next_string = [&]() {
     unsigned long istring;
-    #pragma clang diagnostic push
-    #pragma clang diagnostic ignored "-Wuninitialized"
-    if (lane == 0) { istring = atomicAdd(str_counter, 1); }
-    #pragma clang diagnostic pop
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wuninitialized"
+    if (lane == 0) {
+      istring = atomicAdd(str_counter, 1);
+    }
+#pragma clang diagnostic pop
     return __shfl(istring, 0, warpSize);
   };
 
   for (unsigned long istring = get_next_string(); istring < total_out_strings;
-       istring           = get_next_string()) {
+       istring = get_next_string()) {
     out[lane]++;
   }
 }
-TEST_CASE("Unit_hipShflUndefArgs") {
+HIP_TEST_CASE(Unit_hipShflUndefArgs) {
   hipDeviceProp_t prop;
   int device;
   HIP_CHECK(hipGetDevice(&device));
   HIP_CHECK(hipGetDeviceProperties(&prop, device));
   size_t count = prop.warpSize;
-  unsigned long *str_ctr;
-  uint32_t *str_ctr1;
+  unsigned long* str_ctr;
+  uint32_t* str_ctr1;
   HIP_CHECK(hipMalloc(&str_ctr, sizeof(unsigned long)));
   HIP_CHECK(hipMemset(str_ctr, 0, sizeof(unsigned long)));
   HIP_CHECK(hipMalloc(&str_ctr1, sizeof(uint32_t) * count));
   HIP_CHECK(hipMemset(str_ctr1, 0, sizeof(uint32_t) * count));
   testShflWithUndefArgs<<<1, count>>>(12, str_ctr, str_ctr1);
   uint32_t* out = new uint32_t[count];
-  for (int i = 0 ; i < count; i++) {
+  for (int i = 0; i < count; i++) {
     out[i] = 0;
   }
   HIP_CHECK(hipMemcpy(out, str_ctr1, count * sizeof(uint32_t), hipMemcpyDeviceToHost));
   HIP_CHECK(hipDeviceSynchronize());
-  for (int i = 0 ; i < count; i++) {
+  for (int i = 0; i < count; i++) {
     REQUIRE(out[i] == 12);
   }
   HIP_CHECK(hipFree(str_ctr));
   HIP_CHECK(hipFree(str_ctr1));
-  delete [] out;
+  delete[] out;
 }
 
 /**
-* End doxygen group ShflTest.
-* @}
-*/
+ * End doxygen group ShflTest.
+ * @}
+ */

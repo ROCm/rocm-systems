@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <vector>
 
@@ -46,7 +30,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_tex1Dfetch_Positive_ReadModeElementType", "", char, unsigned char, short,
+HIP_TEMPLATE_TEST_CASE(Unit_tex1Dfetch_Positive_ReadModeElementType, char, unsigned char, short,
                    unsigned short, int, unsigned int, float) {
   CHECK_IMAGE_SUPPORT;
 
@@ -89,9 +73,11 @@ TEMPLATE_TEST_CASE("Unit_tex1Dfetch_Positive_ReadModeElementType", "", char, uns
   HIP_CHECK(hipDeviceSynchronize());
 
   for (auto i = 0u; i < out_alloc_h.size(); ++i) {
-    INFO("Index: " << i);
     const auto ref_val = tex_h[i];
-    REQUIRE(out_alloc_h[i] == ref_val);
+    if (!(out_alloc_h[i] == ref_val)) {
+      INFO("Index: " << i);
+      REQUIRE(false);
+    }
   }
 }
 
@@ -106,7 +92,7 @@ TEMPLATE_TEST_CASE("Unit_tex1Dfetch_Positive_ReadModeElementType", "", char, uns
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_tex1Dfetch_Positive_ReadModeNormalizedFloat", "", char, unsigned char,
+HIP_TEMPLATE_TEST_CASE(Unit_tex1Dfetch_Positive_ReadModeNormalizedFloat, char, unsigned char,
                    short, unsigned short) {
   CHECK_IMAGE_SUPPORT;
 
@@ -136,7 +122,8 @@ TEMPLATE_TEST_CASE("Unit_tex1Dfetch_Positive_ReadModeNormalizedFloat", "", char,
   tex_desc.normalizedCoords = false;
   tex_desc.addressMode[0] = hipAddressModeClamp;
 
-  LinearAllocGuard<vec4<float>> out_alloc_d(LinearAllocs::hipMalloc, tex_h.size() * sizeof(vec4<float>));
+  LinearAllocGuard<vec4<float>> out_alloc_d(LinearAllocs::hipMalloc,
+                                            tex_h.size() * sizeof(vec4<float>));
   TextureGuard tex(&res_desc, &tex_desc);
 
   const auto num_threads = std::min<size_t>(1024, tex_h.size());
@@ -150,13 +137,15 @@ TEMPLATE_TEST_CASE("Unit_tex1Dfetch_Positive_ReadModeNormalizedFloat", "", char,
   HIP_CHECK(hipDeviceSynchronize());
 
   for (auto i = 0u; i < out_alloc_h.size(); ++i) {
-    INFO("Index: " << i);
     const auto ref_val = Vec4Map(tex_h[i]);
-    REQUIRE(out_alloc_h[i] == ref_val);
+    if (!(out_alloc_h[i] == ref_val)) {
+      INFO("Index: " << i);
+      REQUIRE(false);
+    }
   }
 }
 
 /**
-* End doxygen group TextureTest.
-* @}
-*/
+ * End doxygen group TextureTest.
+ * @}
+ */

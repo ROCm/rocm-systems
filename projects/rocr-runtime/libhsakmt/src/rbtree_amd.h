@@ -33,7 +33,7 @@ struct rbtree_key_s {
 	unsigned long addr;
 	unsigned long size;
 };
-#define BIT(x) (1<<(x))
+#define BIT(x) (1U<<(x))
 #define LKP_ALL (BIT(ADDR_BIT) | BIT(SIZE_BIT))
 #define LKP_ADDR (BIT(ADDR_BIT))
 #define LKP_ADDR_SIZE (BIT(ADDR_BIT) | BIT(SIZE_BIT))

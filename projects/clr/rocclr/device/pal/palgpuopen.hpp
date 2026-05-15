@@ -1,22 +1,8 @@
-/* Copyright (c) 2016 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -41,7 +27,7 @@ namespace amd::pal {
 class Settings;
 class Device;
 class VirtualGPU;
-class HSAILKernel;
+class Kernel;
 
 // ================================================================================================
 enum class RgpSqqtBarrierReason : uint32_t {
@@ -53,7 +39,7 @@ enum class RgpSqqtBarrierReason : uint32_t {
   Unknown = 0xffffffff
 };
 
-}
+}  // namespace amd::pal
 
 #ifdef PAL_GPUOPEN_OCL
 #include "protocols/rgpServer.h"
@@ -99,8 +85,8 @@ class RgpCaptureMgr final : public ICaptureMgr {
 
   static RgpCaptureMgr* Create(Pal::IPlatform* platform, const Device& device);
 
-  void PreDispatch(VirtualGPU* gpu, const HSAILKernel& kernel,
-                   size_t x, size_t y, size_t z) override;
+  void PreDispatch(VirtualGPU* gpu, const pal::Kernel& kernel, size_t x, size_t y,
+                   size_t z) override;
 
   void PostDispatch(VirtualGPU* gpu) override;
 
@@ -112,17 +98,17 @@ class RgpCaptureMgr final : public ICaptureMgr {
   void WriteBarrierEndMarker(const VirtualGPU* gpu,
                              const Pal::Developer::BarrierData& data) const override;
 
-  bool RegisterTimedQueue(uint32_t queue_id,
-                          Pal::IQueue* iQueue, bool* debug_vmid) const override;
+  bool RegisterTimedQueue(uint32_t queue_id, Pal::IQueue* iQueue, bool* debug_vmid) const override;
 
   Pal::Result TimedQueueSubmit(Pal::IQueue* queue, uint64_t cmdId,
                                const Pal::SubmitInfo& submitInfo) const override;
 
   bool Update(Pal::IPlatform* platform) override;
 
-  uint64_t AddElfBinary(const void* exe_binary, size_t exe_binary_size,
-                        const void* elf_binary, size_t elf_binary_size,
-                        Pal::IGpuMemory* pGpuMemory, size_t offset) override;
+  uint64_t AddElfBinary(const void* exe_binary, size_t exe_binary_size, const void* elf_binary,
+                        size_t elf_binary_size, Pal::IGpuMemory* pGpuMemory,
+                        size_t offset) override;
+
  private:
   // Steps that an RGP trace goes through
   enum class TraceStatus {
@@ -142,7 +128,7 @@ class RgpCaptureMgr final : public ICaptureMgr {
     GpuEvent end_sqtt_event_;    // Event that is signaled when a trace-end cmdbuf retires
     GpuEvent end_event_;         // Event that is signaled when a trace-end cmdbuf retires
 
-    VirtualGPU* begin_queue_;    // The queue that triggered starting SQTT
+    VirtualGPU* begin_queue_;  // The queue that triggered starting SQTT
 
     GpuUtil::GpaSession* gpa_session_;  // GPA session helper object for building RGP data
     uint32_t gpa_sample_id_;            // Sample ID associated with the current trace
@@ -201,10 +187,10 @@ class RgpCaptureMgr final : public ICaptureMgr {
 
   union {
     struct {
-      uint32_t trace_enabled_: 1;         // True if tracing is currently enabled (master flag)
-      uint32_t inst_tracing_enabled_: 1;  // Enable instruction-level SQTT tokens
-      uint32_t perf_counters_enabled_: 1; // True if perf counters are enabled
-      uint32_t static_vm_id_: 1;          // Static VM ID can be used for capture
+      uint32_t trace_enabled_ : 1;          // True if tracing is currently enabled (master flag)
+      uint32_t inst_tracing_enabled_ : 1;   // Enable instruction-level SQTT tokens
+      uint32_t perf_counters_enabled_ : 1;  // True if perf counters are enabled
+      uint32_t static_vm_id_ : 1;           // Static VM ID can be used for capture
     };
     uint32_t value_;
   };
@@ -221,15 +207,16 @@ inline bool RgpCaptureMgr::IsQueueTimingActive() const {
            trace_.status_ == TraceStatus::WaitingForSqtt));
 }
 }  // namespace amd::pal
-#else // PAL_GPUOPEN_OCL
+#else   // PAL_GPUOPEN_OCL
 namespace amd::pal {
 class RgpCaptureMgr {
  public:
   static RgpCaptureMgr* Create(Pal::IPlatform* platform, const Device& device) { return nullptr; }
-  Pal::Result TimedQueueSubmit(
-    Pal::IQueue* queue, uint64_t cmdId, Pal::SubmitInfo& submitInfo) const
-    { return Pal::Result::Success; }
-  void PreDispatch(VirtualGPU* gpu, const HSAILKernel& kernel, size_t x, size_t y, size_t z) {}
+  Pal::Result TimedQueueSubmit(Pal::IQueue* queue, uint64_t cmdId,
+                               Pal::SubmitInfo& submitInfo) const {
+    return Pal::Result::Success;
+  }
+  void PreDispatch(VirtualGPU* gpu, const pal::Kernel& kernel, size_t x, size_t y, size_t z) {}
   void PostDispatch(VirtualGPU* gpu) {}
   void FinishRGPTrace(VirtualGPU* gpu, bool aborted) {}
   bool RegisterTimedQueue(uint32_t queue_id, Pal::IQueue* iQueue, bool* debug_vmid) const {
@@ -242,4 +229,4 @@ class RgpCaptureMgr {
   }
 };
 }  // namespace amd::pal
-#endif // PAL_GPUOPEN_OCL
+#endif  // PAL_GPUOPEN_OCL

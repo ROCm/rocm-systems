@@ -1,22 +1,8 @@
-/* Copyright (c) 2010 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "OCLGLTexture.h"
 
@@ -63,8 +49,7 @@ OCLGLTexture::OCLGLTexture()
 
 OCLGLTexture::~OCLGLTexture() {}
 
-void OCLGLTexture::open(unsigned int test, char* units, double& conversion,
-                        unsigned int deviceId) {
+void OCLGLTexture::open(unsigned int test, char* units, double& conversion, unsigned int deviceId) {
   // Initialize random number seed
   srand((unsigned int)time(NULL));
 
@@ -76,22 +61,18 @@ void OCLGLTexture::open(unsigned int test, char* units, double& conversion,
 
   // Build the kernel
   if (0 == currentTest_) {
-    program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernelui,
-                                                   NULL, &error_);
+    program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernelui, NULL, &error_);
 
   } else {
-    program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernelf,
-                                                   NULL, &error_);
+    program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernelf, NULL, &error_);
   }
-  CHECK_RESULT((error_ != CL_SUCCESS),
-               "clCreateProgramWithSource()  failed (%d)", error_);
+  CHECK_RESULT((error_ != CL_SUCCESS), "clCreateProgramWithSource()  failed (%d)", error_);
 
-  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId], NULL,
-                                    NULL, NULL);
+  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId], NULL, NULL, NULL);
   if (error_ != CL_SUCCESS) {
     char programLog[1024];
-    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId],
-                                    CL_PROGRAM_BUILD_LOG, 1024, programLog, 0);
+    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId], CL_PROGRAM_BUILD_LOG, 1024,
+                                    programLog, 0);
     printf("\n%s\n", programLog);
     fflush(stdout);
   }
@@ -105,12 +86,10 @@ void OCLGLTexture::run(void) {
   bool retVal = false;
   switch (currentTest_) {
     case 0:
-      retVal = runTextureTest<unsigned int>(GL_RGBA32UI, GL_RGBA_INTEGER,
-                                            GL_UNSIGNED_INT);
+      retVal = runTextureTest<unsigned int>(GL_RGBA32UI, GL_RGBA_INTEGER, GL_UNSIGNED_INT);
       break;
     case 1:
-      retVal =
-          runTextureTest<unsigned char>(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
+      retVal = runTextureTest<unsigned char>(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
       break;
     case 2:
       retVal = runTextureTest<short>(GL_RGBA16, GL_RGBA, GL_SHORT);

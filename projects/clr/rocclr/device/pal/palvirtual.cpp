@@ -1,23 +1,10 @@
-/* Copyright (c) 2015 - 2022 Advanced Micro Devices, Inc.
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
-
+#include "platform/command_utils.hpp"
 #include "platform/perfctr.hpp"
 #include "platform/threadtrace.hpp"
 #include "platform/kernel.hpp"
@@ -39,6 +26,9 @@
 #include <sstream>
 #include <algorithm>
 #include <thread>
+#include <cstddef>
+#include <limits>
+#include <utility>
 #include "palQueue.h"
 #include "palFence.h"
 #include "palQueueSemaphore.h"
@@ -51,6 +41,37 @@
 #endif  // _WIN32
 
 namespace amd::pal {
+
+AqlPacketMgmt::AqlPacketMgmt(const Device& dev) {
+  memset(aql_vgpus_, 0, sizeof(aql_vgpus_));
+
+  static_assert(sizeof(decltype(amd_queue_)::read_dispatch_id) == sizeof(uint64_t));
+  static_assert(sizeof(decltype(amd_queue_)::write_dispatch_id) == sizeof(uint64_t));
+
+  // Initialize the amd_queue_
+  amd_queue_.hsa_queue.type = HSA_QUEUE_TYPE_MULTI;
+  amd_queue_.hsa_queue.features = HSA_QUEUE_FEATURE_KERNEL_DISPATCH;
+  amd_queue_.hsa_queue.base_address = &aql_packets_[0];
+  amd_queue_.hsa_queue.size = sizeof(aql_packets_) / sizeof(aql_packets_[0]);
+  amd_queue_.hsa_queue.id = []() {
+    static std::atomic<uint64_t> queue_counter;
+    return queue_counter++;
+  }();
+  amd_queue_.read_dispatch_id_field_base_byte_offset =
+      offsetof(decltype(amd_queue_), read_dispatch_id) - offsetof(decltype(amd_queue_), hsa_queue);
+
+  amd_queue_.max_cu_id = dev.properties().gfxipProperties.shaderCore.numAvailableCus - 1;
+  amd_queue_.max_wave_id = dev.properties().gfxipProperties.shaderCore.numSimdsPerCu *
+          dev.properties().gfxipProperties.shaderCore.numWavefrontsPerSimd -
+      1;
+
+  amd_queue_.private_segment_aperture_base_hi = static_cast<uint32_t>(
+      dev.properties().gpuMemoryProperties.privateApertureBase >> LP64_SWITCH(0, 32));
+  amd_queue_.group_segment_aperture_base_hi = static_cast<uint32_t>(
+      dev.properties().gpuMemoryProperties.sharedApertureBase >> LP64_SWITCH(0, 32));
+
+  AMD_HSA_BITS_SET(amd_queue_.queue_properties, AMD_QUEUE_PROPERTIES_IS_PTR64, LP64_SWITCH(0, 1));
+}
 
 uint32_t VirtualGPU::Queue::AllocedQueues(const VirtualGPU& gpu, Pal::EngineType type) {
   uint32_t allocedQueues = 0;
@@ -70,7 +91,7 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
   Pal::CmdBufferCreateInfo cmdCreateInfo = {};
   Pal::QueueCreateInfo qCreateInfo = {};
   qCreateInfo.engineIndex =
-    (queueType == Pal::QueueTypeCompute) ? gpu.dev().computeEnginesId()[engineIdx] : engineIdx;
+      (queueType == Pal::QueueTypeCompute) ? gpu.dev().computeEnginesId()[engineIdx] : engineIdx;
   qCreateInfo.aqlQueue = true;
   qCreateInfo.queueType = queueType;
   qCreateInfo.priority = Pal::QueuePriority::Normal;
@@ -90,16 +111,17 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
     if (gpu.dev().settings().enableWgpMode_) {
       rtCU = rtCU * 2;
     }
-    qCreateInfo.numReservedCu = amd::alignDown(rtCU,
-      gpu.dev().properties().engineProperties[Pal::EngineTypeCompute].dedicatedCuGranularity);
+    qCreateInfo.numReservedCu = amd::alignDown(
+        rtCU,
+        gpu.dev().properties().engineProperties[Pal::EngineTypeCompute].dedicatedCuGranularity);
     if (qCreateInfo.numReservedCu == 0) {
       return nullptr;
     }
-    if ((priority == amd::CommandQueue::Priority::Medium)  &&
-         // If Windows HWS is enabled, then the both real time queues are allocated
-         // on the same engine
-         (gpu.dev().exclusiveComputeEnginesId().find(ExclusiveQueueType::RealTime1) !=
-          gpu.dev().exclusiveComputeEnginesId().end())) {
+    if ((priority == amd::CommandQueue::Priority::Medium) &&
+        // If Windows HWS is enabled, then the both real time queues are allocated
+        // on the same engine
+        (gpu.dev().exclusiveComputeEnginesId().find(ExclusiveQueueType::RealTime1) !=
+         gpu.dev().exclusiveComputeEnginesId().end())) {
       it = gpu.dev().exclusiveComputeEnginesId().find(ExclusiveQueueType::RealTime1);
     } else {
       it = gpu.dev().exclusiveComputeEnginesId().find(ExclusiveQueueType::RealTime0);
@@ -140,23 +162,25 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
   }
 
   size_t allocSize = qSize + max_command_buffers * (cmdSize + fSize);
-  VirtualGPU::Queue* queue =
-      new (allocSize) VirtualGPU::Queue(gpu, palDev, residency_limit, max_command_buffers);
+  VirtualGPU::Queue* queue = amd::AllocWithTrailing<VirtualGPU::Queue>(
+      allocSize, gpu, palDev, residency_limit, max_command_buffers);
+  
   if (queue != nullptr) {
     address addrQ = nullptr;
     if (((qCreateInfo.engineType == Pal::EngineTypeCompute) ||
          (qCreateInfo.engineType == Pal::EngineTypeDma)) &&
-         (qCreateInfo.priority != Pal::QueuePriority::Realtime)) {
+        (qCreateInfo.priority != Pal::QueuePriority::Realtime)) {
       uint32_t index = AllocedQueues(gpu, qCreateInfo.engineType);
       // Create PAL queue object
       if (index < GPU_MAX_HW_QUEUES) {
-        Device::QueueRecycleInfo* info = new (qSize) Device::QueueRecycleInfo();
+        Device::QueueRecycleInfo* info =
+            amd::AllocWithTrailing<Device::QueueRecycleInfo>(qSize, gpu.dev());
         if (info == nullptr) {
           LogError("Could not create QueueRecycleInfo!");
           return nullptr;
         }
         addrQ = reinterpret_cast<address>(&info[1]);
-        qCreateInfo.aqlPacketList = info->AqlPacketList();
+        qCreateInfo.aqlPacketList = info->DebuggerData();
         result = palDev->CreateQueue(qCreateInfo, addrQ, &queue->iQueue_);
         if (result == Pal::Result::Success) {
           const_cast<Device&>(gpu.dev()).QueuePool().insert({queue->iQueue_, info});
@@ -164,7 +188,7 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
           // Save uniqueue index for scratch buffer access
           info->index_ = index;
         } else {
-          delete queue;
+          amd::DestroyWithTrailing(queue);
           return nullptr;
         }
       } else {
@@ -192,7 +216,10 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
       queue->lock_ = &info->queue_lock_;
       addrQ = reinterpret_cast<address>(&queue[1]);
     } else {
-      Device::QueueRecycleInfo* info = new Device::QueueRecycleInfo();
+      // Exclusive-compute path: the PAL IQueue is placed into the Queue wrapper's trailing
+      // region (see addrQ assignment below), so QueueRecycleInfo carries no trailing payload.
+      Device::QueueRecycleInfo* info =
+          amd::AllocWithTrailing<Device::QueueRecycleInfo>(0, gpu.dev());
       if (info == nullptr) {
         LogError("Could not create QueueRecycleInfo!");
         return nullptr;
@@ -201,11 +228,11 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
       queue->aql_mgmt_ = &info->aql_packet_mgmt_;
       // Exclusive compute path
       addrQ = reinterpret_cast<address>(&queue[1]);
-      qCreateInfo.aqlPacketList = info->AqlPacketList();
+      qCreateInfo.aqlPacketList = info->DebuggerData();
       result = palDev->CreateQueue(qCreateInfo, addrQ, &queue->iQueue_);
     }
     if (result != Pal::Result::Success) {
-      delete queue;
+      amd::DestroyWithTrailing(queue);
       return nullptr;
     }
     queue->UpdateAppPowerProfile();
@@ -216,7 +243,7 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
     for (uint i = 0; i < max_command_buffers; ++i) {
       result = palDev->CreateCmdBuffer(cmdCreateInfo, &addrCmd[i * cmdSize], &queue->iCmdBuffs_[i]);
       if (result != Pal::Result::Success) {
-        delete queue;
+        amd::DestroyWithTrailing(queue);
         return nullptr;
       }
 
@@ -224,13 +251,13 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
       fenceCreateinfo.flags.signaled = false;
       result = palDev->CreateFence(fenceCreateinfo, &addrF[i * fSize], &queue->iCmdFences_[i]);
       if (result != Pal::Result::Success) {
-        delete queue;
+        amd::DestroyWithTrailing(queue);
         return nullptr;
       }
       if (i == StartCmdBufIdx) {
         result = queue->iCmdBuffs_[i]->Begin(cmdBuildInfo);
         if (result != Pal::Result::Success) {
-          delete queue;
+          amd::DestroyWithTrailing(queue);
           return nullptr;
         }
       }
@@ -240,21 +267,22 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
 }
 
 VirtualGPU::Queue::~Queue() {
-  delete reinterpret_cast<Device::QueueRecycleInfo*>(info_);
+  amd::DestroyWithTrailing(reinterpret_cast<Device::QueueRecycleInfo*>(info_));
 
   if (nullptr != iQueue_) {
     // Make sure the queues are idle
     // It's unclear why PAL could still have a busy queue
-    amd::ScopedLock l(lock_);
+    std::scoped_lock l(*lock_);
     iQueue_->WaitIdle();
   }
 
   // Remove all memory references
   std::vector<Pal::IGpuMemory*> memRef;
+  memRef.reserve(memReferences_.size());
   for (auto it : memReferences_) {
     memRef.push_back(it.first->iMem());
   }
-  if (memRef.size() != 0) {
+  if (!memRef.empty()) {
     iDev_->RemoveGpuMemoryReferences(memRef.size(), &memRef[0], iQueue_);
   }
   memReferences_.clear();
@@ -282,7 +310,7 @@ VirtualGPU::Queue::~Queue() {
             queue.second->index_--;
           }
         }
-        delete gpu_.dev().QueuePool().find(iQueue_)->second;
+        amd::DestroyWithTrailing(gpu_.dev().QueuePool().find(iQueue_)->second);
         const_cast<Device&>(gpu_.dev()).QueuePool().erase(iQueue_);
       }
     } else {
@@ -365,14 +393,12 @@ void VirtualGPU::Queue::addCmdDoppRef(Pal::IGpuMemory* iMem, bool lastDoppCmd, b
 
 // ================================================================================================
 bool VirtualGPU::Queue::flush() {
-  amd::ScopedLock l(lock_);
+  std::scoped_lock l(*lock_);
   const Settings& settings = gpu_.dev().settings();
 
   if (!settings.alwaysResident_ && palMemRefs_.size() != 0) {
-    Pal::Result result = iDev_->AddGpuMemoryReferences(
-                                      palMemRefs_.size(),
-                                      &palMemRefs_[0], iQueue_,
-                                      Pal::GpuMemoryRefCantTrim);
+    Pal::Result result = iDev_->AddGpuMemoryReferences(palMemRefs_.size(), &palMemRefs_[0], iQueue_,
+                                                       Pal::GpuMemoryRefCantTrim);
     if (Pal::Result::Success != result) {
       LogPrintfError("PAL failed to make resident resources! result: %d", result);
       return false;
@@ -396,21 +422,21 @@ bool VirtualGPU::Queue::flush() {
   }
 
   Pal::PerSubQueueSubmitInfo perSubQueueSubmitInfo = {};
-  perSubQueueSubmitInfo.cmdBufferCount  = 1;
-  perSubQueueSubmitInfo.ppCmdBuffers    = &iCmdBuffs_[cmdBufIdSlot_];
+  perSubQueueSubmitInfo.cmdBufferCount = 1;
+  perSubQueueSubmitInfo.ppCmdBuffers = &iCmdBuffs_[cmdBufIdSlot_];
 
   Pal::MultiSubmitInfo submitInfo = {};
   submitInfo.perSubQueueInfoCount = 1;
-  submitInfo.pPerSubQueueInfo     = &perSubQueueSubmitInfo;
+  submitInfo.pPerSubQueueInfo = &perSubQueueSubmitInfo;
 
-  submitInfo.doppRefCount         = palDoppRefs_.size();
-  submitInfo.pDoppRefs            = palDoppRefs_.data();
+  submitInfo.doppRefCount = palDoppRefs_.size();
+  submitInfo.pDoppRefs = palDoppRefs_.data();
 
-  submitInfo.externPhysMemCount   = palSdiRefs_.size();
-  submitInfo.ppExternPhysMem      = palSdiRefs_.data();
+  submitInfo.externPhysMemCount = palSdiRefs_.size();
+  submitInfo.ppExternPhysMem = palSdiRefs_.data();
 
-  submitInfo.fenceCount           = 1;
-  submitInfo.ppFences             = &iCmdFences_[cmdBufIdSlot_];
+  submitInfo.fenceCount = 1;
+  submitInfo.ppFences = &iCmdFences_[cmdBufIdSlot_];
 
   if (iQueue_->Type() == Pal::QueueTypeCompute) {
     if (gpu_.dev().settings().kernel_arg_impl_ == KernelArgImpl::DeviceKernelArgs) {
@@ -508,7 +534,7 @@ bool VirtualGPU::Queue::flush() {
 
 // ================================================================================================
 bool VirtualGPU::Queue::waitForEvent(uint id) {
-  amd::ScopedLock l(lock_);
+  std::scoped_lock l(*lock_);
   if (isDone(id)) {
     return true;
   }
@@ -527,7 +553,7 @@ bool VirtualGPU::Queue::waitForEvent(uint id) {
 
 // ================================================================================================
 bool VirtualGPU::Queue::isDone(uint id) {
-  amd::ScopedLock l(lock_);
+  std::scoped_lock l(*lock_);
   if ((id <= cmbBufIdRetired_) || (id > cmdBufIdCurrent_)) {
     return true;
   }
@@ -536,10 +562,10 @@ bool VirtualGPU::Queue::isDone(uint id) {
     // Flush the current command buffer
     if (!flush()) {
       // If flush failed, then exit earlier...
+      gpu_.dev().gpu_error_ = CL_INVALID_OPERATION;
       return false;
     }
   }
-
   if (Pal::Result::Success != iCmdFences_[id % max_command_buffers_]->GetStatus()) {
     return false;
   }
@@ -578,8 +604,7 @@ void VirtualGPU::Queue::DumpMemoryReferences() const {
       dump << (it.first)->iMem()->Desc().gpuVirtAddr << ", "
            << (it.first)->iMem()->Desc().gpuVirtAddr + (it.first)->iMem()->Desc().size;
       dump.setf(std::ios::dec);
-      dump << "] CbId:" << it.second << ", Heap: " << (it.first)->iMem()->Desc().heaps[0]
-           << "\n";
+      dump << "] CbId:" << it.second << ", Heap: " << (it.first)->iMem()->Desc().heaps[0] << "\n";
       idx++;
     }
 
@@ -899,9 +924,8 @@ bool VirtualGPU::create(bool profiling, uint deviceQueueSize, uint rtCUs,
   createInfo.flags.autoMemoryReuse = false;
   createInfo.allocInfo[Pal::CommandDataAlloc].allocHeap = Pal::GpuHeapGartUswc;
   createInfo.allocInfo[Pal::CommandDataAlloc].suballocSize =
-      VirtualGPU::Queue::MaxCommands * (320 +
-                                        ((profiling) ? 96 : 0) +
-                                        ((dev().captureMgr() != nullptr)? 512 : 0));
+      VirtualGPU::Queue::MaxCommands *
+      (320 + ((profiling) ? 96 : 0) + ((dev().captureMgr() != nullptr) ? 512 : 0));
   createInfo.allocInfo[Pal::CommandDataAlloc].allocSize =
       dev().settings().maxCmdBuffers_ * createInfo.allocInfo[Pal::CommandDataAlloc].suballocSize;
 
@@ -929,8 +953,8 @@ bool VirtualGPU::create(bool profiling, uint deviceQueueSize, uint rtCUs,
 
   uint idx = index() % dev().numComputeEngines();
   uint64_t residency_limit = dev().properties().gpuMemoryProperties.flags.supportPerSubmitMemRefs
-      ? 0
-      : (dev().properties().gpuMemoryProperties.maxLocalMemSize >> 2);
+                                 ? 0
+                                 : (dev().properties().gpuMemoryProperties.maxLocalMemSize >> 2);
   uint max_cmd_buffers = dev().settings().maxCmdBuffers_;
 
   if (dev().numComputeEngines()) {
@@ -941,8 +965,8 @@ bool VirtualGPU::create(bool profiling, uint deviceQueueSize, uint rtCUs,
     }
     const auto& info = dev().QueuePool().find(queues_[MainEngine]->iQueue_);
     hwRing_ = (info != dev().QueuePool().end())
-        ? info->second->index_
-        : (index() % dev().numExclusiveComputeEngines()) + GPU_MAX_HW_QUEUES;
+                  ? info->second->index_
+                  : (index() % dev().numExclusiveComputeEngines()) + GPU_MAX_HW_QUEUES;
 
     // Check if device has SDMA engines
     if (dev().numDMAEngines() != 0 && !dev().settings().disableSdma_) {
@@ -966,8 +990,7 @@ bool VirtualGPU::create(bool profiling, uint deviceQueueSize, uint rtCUs,
   }
 
   // Create buffers for kernel arg management
-  if (!managedBuffer_.create(dev().settings().kernel_arg_impl_ ==
-                                     KernelArgImpl::DeviceKernelArgs
+  if (!managedBuffer_.create(dev().settings().kernel_arg_impl_ == KernelArgImpl::DeviceKernelArgs
                                  ? Resource::Persistent
                                  : Resource::RemoteUSWC)) {
     // Try just USWC if persistent memory failed
@@ -1070,13 +1093,13 @@ bool VirtualGPU::allocHsaQueueMem() {
 
 VirtualGPU::~VirtualGPU() {
   // Not safe to remove a queue. So lock the device
-  amd::ScopedLock k(dev().lockAsyncOps());
-  amd::ScopedLock lock(dev().vgpusAccess());
+  std::scoped_lock k(dev().lockAsyncOps());
+  std::scoped_lock lock(dev().vgpusAccess());
 
   if (queues_[MainEngine] != nullptr) {
     // Clear all timestamps, associated with this virtual GPU
     auto& mgmt = *queues_[MainEngine]->aql_mgmt_;
-    for (uint32_t i = 0; i < AqlPacketMgmt::kAqlPacketsListSize; ++i) {
+    for (uint32_t i = 0; i < mgmt.amd_queue_.hsa_queue.size; ++i) {
       if (mgmt.aql_vgpus_[i] == this) {
         mgmt.aql_vgpus_[i] = nullptr;
         mgmt.aql_events_[i].invalidate();
@@ -1125,8 +1148,8 @@ VirtualGPU::~VirtualGPU() {
 
   {
     // Destroy queues
-    delete queues_[MainEngine];
-    delete queues_[SdmaEngine];
+    amd::DestroyWithTrailing(queues_[MainEngine]);
+    amd::DestroyWithTrailing(queues_[SdmaEngine]);
 
     if (nullptr != cmdAllocator_) {
       cmdAllocator_->Destroy();
@@ -1146,7 +1169,7 @@ VirtualGPU::~VirtualGPU() {
 
     // Not safe to add a resource if create/destroy queue is in process, since
     // the size of the TS array can change
-    amd::ScopedLock r(dev().lockResources());
+    std::scoped_lock r(dev().lockResources());
     gpuDevice_.numOfVgpus_--;
     gpuDevice_.vgpus_.erase(gpuDevice_.vgpus_.begin() + index());
     for (uint idx = index(); idx < dev().vgpus().size(); ++idx) {
@@ -1162,8 +1185,7 @@ VirtualGPU::~VirtualGPU() {
   }
 
   if (hostcallBuffer_ != nullptr) {
-    ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
-            "deleting hostcall buffer %p for virtual queue %p",
+    ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "deleting hostcall buffer %p for virtual queue %p",
             hostcallBuffer_, this);
     amd::disableHostcalls(hostcallBuffer_);
     dev().svmFree(hostcallBuffer_);
@@ -1172,7 +1194,7 @@ VirtualGPU::~VirtualGPU() {
 
 void VirtualGPU::submitReadMemory(amd::ReadMemoryCommand& vcmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
-  amd::ScopedLock lock(execution());
+  std::scoped_lock lock(execution());
 
   // Translate memory references and ensure cache up-to-date
   pal::Memory* memory = dev().getGpuMemory(&vcmd.source());
@@ -1220,8 +1242,8 @@ void VirtualGPU::submitReadMemory(amd::ReadMemoryCommand& vcmd) {
         // occur on the first unaligned page, because in Windows memory manager can
         // have CPU access to the allocation header in another thread
         // and a race condition is possible.
-        char* tmpHost = amd::alignUp(
-            reinterpret_cast<char*>(vcmd.destination()), PinnedMemoryAlignment);
+        char* tmpHost =
+            amd::alignUp(reinterpret_cast<char*>(vcmd.destination()), PinnedMemoryAlignment);
 
         // Find the partial size for unaligned copy
         size_t partial = tmpHost - reinterpret_cast<char*>(vcmd.destination());
@@ -1232,11 +1254,13 @@ void VirtualGPU::submitReadMemory(amd::ReadMemoryCommand& vcmd) {
         }
         // Make first step transfer
         if (partial > 0) {
-          result = blitMgr().readBuffer(*memory, vcmd.destination(), origin, partial, false, vcmd.copyMetadata());
+          result = blitMgr().readBuffer(*memory, vcmd.destination(), origin, partial, false,
+                                        vcmd.copyMetadata());
         }
         // Second step transfer if something left to copy
         if (partial < size[0]) {
-          result &= blitMgr().readBuffer(*memory, tmpHost, origin[0] + partial, size[0] - partial, false, vcmd.copyMetadata());
+          result &= blitMgr().readBuffer(*memory, tmpHost, origin[0] + partial, size[0] - partial,
+                                         false, vcmd.copyMetadata());
         }
       }
       if (nullptr != bufferFromImage) {
@@ -1253,8 +1277,9 @@ void VirtualGPU::submitReadMemory(amd::ReadMemoryCommand& vcmd) {
         result = blitMgr().copyBufferRect(*memory, *hostMemory, vcmd.bufRect(), hostbufferRect,
                                           vcmd.size(), vcmd.isEntireMemory(), vcmd.copyMetadata());
       } else {
-        result = blitMgr().readBufferRect(*memory, vcmd.destination(), vcmd.bufRect(),
-                                          vcmd.hostRect(), vcmd.size(), vcmd.isEntireMemory(), vcmd.copyMetadata());
+        result =
+            blitMgr().readBufferRect(*memory, vcmd.destination(), vcmd.bufRect(), vcmd.hostRect(),
+                                     vcmd.size(), vcmd.isEntireMemory(), vcmd.copyMetadata());
       }
     } break;
     case CL_COMMAND_READ_IMAGE:
@@ -1267,18 +1292,17 @@ void VirtualGPU::submitReadMemory(amd::ReadMemoryCommand& vcmd) {
           amd::Image* image = imageBuffer->owner()->asImage();
           amd::Coord3D offs(0);
           // Copy memory from the original image buffer into the backing store image
-          result = blitMgr().copyBufferToImage(*buffer, *imageBuffer->CopyImageBuffer(), offs,
-                                               offs, image->getRegion(), true,
-                                               image->getRowPitch(), image->getSlicePitch(), vcmd.copyMetadata());
+          result = blitMgr().copyBufferToImage(*buffer, *imageBuffer->CopyImageBuffer(), offs, offs,
+                                               image->getRegion(), true, image->getRowPitch(),
+                                               image->getSlicePitch(), vcmd.copyMetadata());
         }
       }
       if (hostMemory != nullptr) {
         // Accelerated image to buffer transfer without pinning
         amd::Coord3D dstOrigin(offset);
-        result =
-            blitMgr().copyImageToBuffer(*memory, *hostMemory, vcmd.origin(), dstOrigin, vcmd.size(),
-                                        vcmd.isEntireMemory(), vcmd.rowPitch(), vcmd.slicePitch(),
-                                        vcmd.copyMetadata());
+        result = blitMgr().copyImageToBuffer(*memory, *hostMemory, vcmd.origin(), dstOrigin,
+                                             vcmd.size(), vcmd.isEntireMemory(), vcmd.rowPitch(),
+                                             vcmd.slicePitch(), vcmd.copyMetadata());
       } else {
         result = blitMgr().readImage(*memory, vcmd.destination(), vcmd.origin(), vcmd.size(),
                                      vcmd.rowPitch(), vcmd.slicePitch(), vcmd.isEntireMemory(),
@@ -1300,7 +1324,7 @@ void VirtualGPU::submitReadMemory(amd::ReadMemoryCommand& vcmd) {
 
 void VirtualGPU::submitWriteMemory(amd::WriteMemoryCommand& vcmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
-  amd::ScopedLock lock(execution());
+  std::scoped_lock lock(execution());
 
   // Translate memory references and ensure cache up to date
   pal::Memory* memory = dev().getGpuMemory(&vcmd.destination());
@@ -1343,7 +1367,7 @@ void VirtualGPU::submitWriteMemory(amd::WriteMemoryCommand& vcmd) {
         origin.c[0] *= elemSize;
         size.c[0] *= elemSize;
       }
-      if ((hostMemory != nullptr) && (vcmd.size()[0] > dev().settings().prepinnedMinSize_)){
+      if ((hostMemory != nullptr) && (vcmd.size()[0] > dev().settings().prepinnedMinSize_)) {
         // Accelerated transfer without pinning
         amd::Coord3D srcOrigin(offset);
         result = blitMgr().copyBuffer(*hostMemory, *memory, srcOrigin, origin, size,
@@ -1365,11 +1389,13 @@ void VirtualGPU::submitWriteMemory(amd::WriteMemoryCommand& vcmd) {
         }
         // Make first step transfer
         if (partial > 0) {
-          result = blitMgr().writeBuffer(vcmd.source(), *memory, origin, partial, false, vcmd.copyMetadata());
+          result = blitMgr().writeBuffer(vcmd.source(), *memory, origin, partial, false,
+                                         vcmd.copyMetadata());
         }
         // Second step transfer if something left to copy
         if (partial < size[0]) {
-          result &= blitMgr().writeBuffer(tmpHost, *memory, origin[0] + partial, size[0] - partial, false, vcmd.copyMetadata());
+          result &= blitMgr().writeBuffer(tmpHost, *memory, origin[0] + partial, size[0] - partial,
+                                          false, vcmd.copyMetadata());
         }
       }
       if (nullptr != bufferFromImage) {
@@ -1394,10 +1420,9 @@ void VirtualGPU::submitWriteMemory(amd::WriteMemoryCommand& vcmd) {
       if (hostMemory != nullptr) {
         // Accelerated buffer to image transfer without pinning
         amd::Coord3D srcOrigin(offset);
-        result =
-            blitMgr().copyBufferToImage(*hostMemory, *memory, srcOrigin, vcmd.origin(), vcmd.size(),
-                                        vcmd.isEntireMemory(), vcmd.rowPitch(), vcmd.slicePitch(),
-                                        vcmd.copyMetadata());
+        result = blitMgr().copyBufferToImage(*hostMemory, *memory, srcOrigin, vcmd.origin(),
+                                             vcmd.size(), vcmd.isEntireMemory(), vcmd.rowPitch(),
+                                             vcmd.slicePitch(), vcmd.copyMetadata());
       } else {
         result = blitMgr().writeImage(vcmd.source(), *memory, vcmd.origin(), vcmd.size(),
                                       vcmd.rowPitch(), vcmd.slicePitch(), vcmd.isEntireMemory(),
@@ -1428,7 +1453,7 @@ bool VirtualGPU::copyMemory(cl_command_type type, amd::Memory& srcMem, amd::Memo
   pal::Memory* dstMemory = dev().getGpuMemory(&dstMem);
   pal::Memory* srcMemory = dev().getGpuMemory(&srcMem);
 
-  if(dstMemory == nullptr || srcMemory == nullptr){
+  if (dstMemory == nullptr || srcMemory == nullptr) {
     LogError("submitcopyMemory Failed!");
     return false;
   }
@@ -1443,25 +1468,25 @@ bool VirtualGPU::copyMemory(cl_command_type type, amd::Memory& srcMem, amd::Memo
   amd::Memory* bufferFromImageDst = nullptr;
 
   // Force buffer read for IMAGE1D_BUFFER
-  if ((srcMem.getType() == CL_MEM_OBJECT_IMAGE1D_BUFFER)) {
+  if (srcMem.getType() == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
     bufferFromImageSrc = createBufferFromImage(srcMem);
     if (nullptr == bufferFromImageSrc) {
       LogError("We should not fail buffer creation from image_buffer!");
     } else {
-      type = CL_COMMAND_COPY_BUFFER;
       srcMemory = dev().getGpuMemory(bufferFromImageSrc);
     }
   }
   // Force buffer write for IMAGE1D_BUFFER
-  if ((dstMem.getType() == CL_MEM_OBJECT_IMAGE1D_BUFFER)) {
+  if (dstMem.getType() == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
     bufferFromImageDst = createBufferFromImage(dstMem);
     if (nullptr == bufferFromImageDst) {
       LogError("We should not fail buffer creation from image_buffer!");
     } else {
-      type = CL_COMMAND_COPY_BUFFER;
       dstMemory = dev().getGpuMemory(bufferFromImageDst);
     }
   }
+
+  type = getCopyCommandType(type, srcMem.getType(), dstMem.getType());
 
   bool result = false;
 
@@ -1475,49 +1500,61 @@ bool VirtualGPU::copyMemory(cl_command_type type, amd::Memory& srcMem, amd::Memo
       amd::Coord3D realSize(size.c[0], size.c[1], size.c[2]);
 
       if (nullptr != bufferFromImageSrc) {
-        size_t elemSize = srcMem.asImage()->getImageFormat().getElementSize();
+        const size_t elemSize = srcMem.asImage()->getImageFormat().getElementSize();
         realSrcOrigin.c[0] *= elemSize;
         if (nullptr != bufferFromImageDst) {
           realDstOrigin.c[0] *= elemSize;
         }
         realSize.c[0] *= elemSize;
       } else if (nullptr != bufferFromImageDst) {
-        size_t elemSize = dstMem.asImage()->getImageFormat().getElementSize();
+        const size_t elemSize = dstMem.asImage()->getImageFormat().getElementSize();
         realDstOrigin.c[0] *= elemSize;
         realSize.c[0] *= elemSize;
       }
 
       result = blitMgr().copyBuffer(*srcMemory, *dstMemory, realSrcOrigin, realDstOrigin, realSize,
                                     entire, copyMetadata);
-
-      if (nullptr != bufferFromImageSrc) {
-        bufferFromImageSrc->release();
-      }
-      if (nullptr != bufferFromImageDst) {
-        bufferFromImageDst->release();
-      }
     } break;
     case CL_COMMAND_COPY_BUFFER_RECT:
-      result = blitMgr().copyBufferRect(*srcMemory, *dstMemory, srcRect, dstRect, size, entire, copyMetadata);
+      result = blitMgr().copyBufferRect(*srcMemory, *dstMemory, srcRect, dstRect, size, entire,
+                                        copyMetadata);
       break;
     case CL_COMMAND_COPY_IMAGE_TO_BUFFER: {
-        result =
-          blitMgr().copyImageToBuffer(*srcMemory, *dstMemory, srcOrigin, dstOrigin, size, entire, dstRect.rowPitch_, dstRect.slicePitch_, copyMetadata);
+      amd::Coord3D realDstOrigin(dstOrigin);
+      if (nullptr != bufferFromImageDst) {
+        const size_t elemSize = dstMem.asImage()->getImageFormat().getElementSize();
+        realDstOrigin.c[0] *= elemSize;
+      }
+      result =
+          blitMgr().copyImageToBuffer(*srcMemory, *dstMemory, srcOrigin, realDstOrigin, size, entire,
+                                      dstRect.rowPitch_, dstRect.slicePitch_, copyMetadata);
       break;
     }
     case CL_COMMAND_COPY_BUFFER_TO_IMAGE: {
-        result =
-          blitMgr().copyBufferToImage(*srcMemory, *dstMemory, srcOrigin, dstOrigin, size, entire, srcRect.rowPitch_, srcRect.slicePitch_, copyMetadata);
+      amd::Coord3D realSrcOrigin(srcOrigin);
+      if (nullptr != bufferFromImageSrc) {
+        const size_t elemSize = srcMem.asImage()->getImageFormat().getElementSize();
+        realSrcOrigin.c[0] *= elemSize;
+      }
+      result =
+          blitMgr().copyBufferToImage(*srcMemory, *dstMemory, realSrcOrigin, dstOrigin, size, entire,
+                                      srcRect.rowPitch_, srcRect.slicePitch_, copyMetadata);
       break;
     }
     case CL_COMMAND_COPY_IMAGE:
-      result = blitMgr().copyImage(*srcMemory, *dstMemory, srcOrigin, dstOrigin, size, entire, copyMetadata);
+      result = blitMgr().copyImage(*srcMemory, *dstMemory, srcOrigin, dstOrigin, size, entire,
+                                   copyMetadata);
       break;
     default:
       LogError("Unsupported command type for memory copy!");
       break;
   }
-
+  if (nullptr != bufferFromImageSrc) {
+    bufferFromImageSrc->release();
+  }
+  if (nullptr != bufferFromImageDst) {
+    bufferFromImageDst->release();
+  }
   if (!result) {
     LogError("submitCopyMemory failed!");
     return false;
@@ -1530,7 +1567,7 @@ bool VirtualGPU::copyMemory(cl_command_type type, amd::Memory& srcMem, amd::Memo
 
 void VirtualGPU::submitCopyMemory(amd::CopyMemoryCommand& vcmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
-  amd::ScopedLock lock(execution());
+  std::scoped_lock lock(execution());
 
   profilingBegin(vcmd);
 
@@ -1538,7 +1575,8 @@ void VirtualGPU::submitCopyMemory(amd::CopyMemoryCommand& vcmd) {
   bool entire = vcmd.isEntireMemory();
 
   if (!copyMemory(type, vcmd.source(), vcmd.destination(), entire, vcmd.srcOrigin(),
-                  vcmd.dstOrigin(), vcmd.size(), vcmd.srcRect(), vcmd.dstRect(), vcmd.copyMetadata())) {
+                  vcmd.dstOrigin(), vcmd.size(), vcmd.srcRect(), vcmd.dstRect(),
+                  vcmd.copyMetadata())) {
     vcmd.setStatus(CL_INVALID_OPERATION);
   }
 
@@ -1547,7 +1585,7 @@ void VirtualGPU::submitCopyMemory(amd::CopyMemoryCommand& vcmd) {
 
 void VirtualGPU::submitSvmCopyMemory(amd::SvmCopyMemoryCommand& vcmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
-  amd::ScopedLock lock(execution());
+  std::scoped_lock lock(execution());
   profilingBegin(vcmd);
 
   cl_command_type type = vcmd.type();
@@ -1622,7 +1660,7 @@ void VirtualGPU::submitSvmCopyMemory(amd::SvmCopyMemoryCommand& vcmd) {
 
 void VirtualGPU::submitMapMemory(amd::MapMemoryCommand& vcmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
-  amd::ScopedLock lock(execution());
+  std::scoped_lock lock(execution());
 
   profilingBegin(vcmd);
 
@@ -1681,16 +1719,6 @@ void VirtualGPU::submitMapMemory(amd::MapMemoryCommand& vcmd) {
           bufferFromImage->release();
         }
       } else {
-        // Validate if it's a view for a map of mip level
-        if (vcmd.memory().parent() != nullptr) {
-          amd::Image* amdImage = vcmd.memory().parent()->asImage();
-          if ((amdImage != nullptr) && (amdImage->getMipLevels() > 1)) {
-            // Save map write info in the parent object
-            dev().getGpuMemory(amdImage)->saveMapInfo(vcmd.mapPtr(), vcmd.origin(), vcmd.size(),
-                                                      vcmd.mapFlags(), vcmd.isEntireMemory(),
-                                                      vcmd.memory().asImage());
-          }
-        }
         if (!blitMgr().copyImageToBuffer(*memory, *memory->mapMemory(), vcmd.origin(), dstOrigin,
                                          vcmd.size(), vcmd.isEntireMemory())) {
           LogError("submitMapMemory() - copy failed");
@@ -1706,11 +1734,8 @@ void VirtualGPU::submitMapMemory(amd::MapMemoryCommand& vcmd) {
 }
 
 void VirtualGPU::submitUnmapMemory(amd::UnmapMemoryCommand& vcmd) {
-  bool unmapMip = false;
-  amd::Image* amdImage;
-  {
     // Make sure VirtualGPU has an exclusive access to the resources
-    amd::ScopedLock lock(execution());
+    std::scoped_lock lock(execution());
 
     pal::Memory* memory = dev().getGpuMemory(&vcmd.memory());
     amd::Memory* owner = memory->owner();
@@ -1720,19 +1745,6 @@ void VirtualGPU::submitUnmapMemory(amd::UnmapMemoryCommand& vcmd) {
       return;
     }
     profilingBegin(vcmd);
-
-    // Check if image is a mipmap and assign a saved view
-    amdImage = owner->asImage();
-    if ((amdImage != nullptr) && (amdImage->getMipLevels() > 1) &&
-        (writeMapInfo->baseMip_ != nullptr)) {
-      // Assign mip level view
-      amdImage = writeMapInfo->baseMip_;
-      // Clear unmap flags from the parent image
-      memory->clearUnmapInfo(vcmd.mapPtr());
-      memory = dev().getGpuMemory(amdImage);
-      unmapMip = true;
-      writeMapInfo = memory->writeMapInfo(vcmd.mapPtr());
-    }
 
     // We used host memory
     if ((owner->getHostMem() != nullptr) && memory->isDirectMap()) {
@@ -1748,7 +1760,7 @@ void VirtualGPU::submitUnmapMemory(amd::UnmapMemoryCommand& vcmd) {
     // and therefore are treated like a remote resource
     else if (memory->isPersistentMapped()) {
       // Map/unmap must be serialized
-      amd::ScopedLock lock(owner->lockMemoryOps());
+      std::scoped_lock lock(owner->lockMemoryOps());
       memory->unmap(this);
       if (memory->getMapCount() == 0) {
         memory->setPersistentMapFlag(false);
@@ -1757,7 +1769,6 @@ void VirtualGPU::submitUnmapMemory(amd::UnmapMemoryCommand& vcmd) {
       if (writeMapInfo->isUnmapWrite()) {
         amd::Coord3D srcOrigin(0, 0, 0);
         // Target is a remote resource, so copy
-        assert(memory->mapMemory() != nullptr);
         if (memory->desc().buffer_) {
           if (!blitMgr().copyBuffer(*memory->mapMemory(), *memory, writeMapInfo->origin_,
                                     writeMapInfo->origin_, writeMapInfo->region_,
@@ -1805,13 +1816,6 @@ void VirtualGPU::submitUnmapMemory(amd::UnmapMemoryCommand& vcmd) {
     memory->clearUnmapInfo(vcmd.mapPtr());
 
     profilingEnd(vcmd);
-  }
-  // Release a view for a mipmap map
-  if (unmapMip) {
-    // Memory release should be outside of the execution lock,
-    // because mapMemory_ isn't marked for a specifc GPU
-    amdImage->release();
-  }
 }
 
 bool VirtualGPU::fillMemory(cl_command_type type, amd::Memory* amdMemory, const void* pattern,
@@ -1883,24 +1887,23 @@ bool VirtualGPU::fillMemory(cl_command_type type, amd::Memory* amdMemory, const 
 
 void VirtualGPU::submitFillMemory(amd::FillMemoryCommand& cmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
-  amd::ScopedLock lock(execution());
+  std::scoped_lock lock(execution());
 
   profilingBegin(cmd);
   if (cmd.type() == CL_COMMAND_FILL_IMAGE) {
-    if (!fillMemory(cmd.type(), &cmd.memory(), cmd.pattern(), cmd.patternSize(),
-        cmd.origin(), cmd.size())) {
+    if (!fillMemory(cmd.type(), &cmd.memory(), cmd.pattern(), cmd.patternSize(), cmd.origin(),
+                    cmd.size())) {
       cmd.setStatus(CL_INVALID_OPERATION);
     }
   } else {
-    size_t width  = cmd.size().c[0];
+    size_t width = cmd.size().c[0];
     size_t height = cmd.size().c[1];
-    size_t depth  = cmd.size().c[2];
-    size_t pitch  = cmd.surface().c[0];
+    size_t depth = cmd.size().c[2];
+    size_t pitch = cmd.surface().c[0];
     amd::Coord3D origin = cmd.origin();
     amd::Coord3D region{cmd.surface().c[1], cmd.surface().c[2], depth};
     amd::BufferRect rect;
-    rect.create(static_cast<size_t*>(origin), static_cast<size_t*>(region),
-        pitch, 0);
+    rect.create(static_cast<size_t*>(origin), static_cast<size_t*>(region), pitch, 0);
 
     bool force_blit = false;
     if (amd::IS_HIP) {
@@ -1915,7 +1918,7 @@ void VirtualGPU::submitFillMemory(amd::FillMemoryCommand& cmd) {
       for (size_t row = 0; row < height; row++) {
         const size_t rowOffset = rect.offset(0, row, slice);
         if (!fillMemory(cmd.type(), &cmd.memory(), cmd.pattern(), cmd.patternSize(),
-            amd::Coord3D{rowOffset, 0, 0}, amd::Coord3D{width, 1, 1}, force_blit)) {
+                        amd::Coord3D{rowOffset, 0, 0}, amd::Coord3D{width, 1, 1}, force_blit)) {
           cmd.setStatus(CL_INVALID_OPERATION);
         }
       }
@@ -1926,7 +1929,7 @@ void VirtualGPU::submitFillMemory(amd::FillMemoryCommand& cmd) {
 
 void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
-  amd::ScopedLock lock(execution());
+  std::scoped_lock lock(execution());
 
   profilingBegin(cmd);
 
@@ -1962,7 +1965,7 @@ void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
         result = blitMgr().copyBuffer(*srcDevMem, *dstDevMem, srcOrigin, dstOrigin, size,
                                       cmd.isEntireMemory());
       } else {
-        amd::ScopedLock lock(dev().P2PStageOps());
+        std::scoped_lock lock(dev().P2PStageOps());
         Memory* dstStgMem = static_cast<pal::Memory*>(
             dev().P2PStage()->getDeviceMemory(*cmd.source().getContext().devices()[0]));
         Memory* srcStgMem = static_cast<pal::Memory*>(
@@ -1992,10 +1995,10 @@ void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
     }
     case CL_COMMAND_COPY_BUFFER_RECT: {
       if (p2pAllowed) {
-        result = blitMgr().copyBufferRect(*srcDevMem, *dstDevMem, cmd.srcRect(), cmd.dstRect(), size,
-                                          cmd.isEntireMemory(), cmd.copyMetadata());
+        result = blitMgr().copyBufferRect(*srcDevMem, *dstDevMem, cmd.srcRect(), cmd.dstRect(),
+                                          size, cmd.isEntireMemory(), cmd.copyMetadata());
       } else {
-        amd::ScopedLock lock(dev().P2PStageOps());
+        std::scoped_lock lock(dev().P2PStageOps());
         Memory* dstStgMem = static_cast<pal::Memory*>(
             dev().P2PStage()->getDeviceMemory(*cmd.source().getContext().devices()[0]));
         Memory* srcStgMem = static_cast<pal::Memory*>(
@@ -2011,8 +2014,7 @@ void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
           result &= dstDevMem->dev().xferMgr().copyBufferRect(*srcStgMem, *dstDevMem, cmd.srcRect(),
                                                               cmd.dstRect(), size, false,
                                                               cmd.copyMetadata());
-        }
-        else {
+        } else {
           size_t srcOffset;
           size_t dstOffset;
           result = true;
@@ -2071,9 +2073,58 @@ void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
   profilingEnd(cmd);
 }
 
+void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
+  // Make sure VirtualGPU has an exclusive access to the resources
+  std::scoped_lock lock(execution());
+
+  profilingBegin(cmd);
+
+  auto& copyOps = cmd.copyOps();
+  if (copyOps.empty()) {
+    profilingEnd(cmd);
+    return;
+  }
+
+  // Sync caches for all source and destination memory objects
+  device::Memory::SyncFlags syncFlags;
+  syncFlags.skipEntire_ = false;
+
+  for (auto& op : copyOps) {
+    Memory* srcDevMem = dev().getGpuMemory(op.srcMemory);
+    Memory* dstDevMem = dev().getGpuMemory(op.dstMemory);
+
+    if (srcDevMem == nullptr || dstDevMem == nullptr) {
+      LogError("submitBatchCopyMemory: Invalid memory objects!");
+      cmd.setStatus(CL_INVALID_MEM_OBJECT);
+      profilingEnd(cmd);
+      return;
+    }
+
+    dstDevMem->syncCacheFromHost(*this, syncFlags);
+    srcDevMem->syncCacheFromHost(*this);
+  }
+
+  bool result = true;
+
+  // Execute batch copy through blit manager
+  result = blitMgr().copyBufferBatch(copyOps);
+
+  if (!result) {
+    LogError("submitBatchCopyMemory failed!");
+    cmd.setStatus(CL_OUT_OF_RESOURCES);
+  } else {
+    // Mark all destinations as written
+    for (const auto& op : copyOps) {
+      op.dstMemory->signalWrite(&dev());
+    }
+  }
+
+  profilingEnd(cmd);
+}
+
 void VirtualGPU::submitSvmMapMemory(amd::SvmMapMemoryCommand& vcmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
-  amd::ScopedLock lock(execution());
+  std::scoped_lock lock(execution());
 
   profilingBegin(vcmd);
 
@@ -2113,7 +2164,7 @@ void VirtualGPU::submitSvmMapMemory(amd::SvmMapMemoryCommand& vcmd) {
 
 void VirtualGPU::submitSvmUnmapMemory(amd::SvmUnmapMemoryCommand& vcmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
-  amd::ScopedLock lock(execution());
+  std::scoped_lock lock(execution());
   profilingBegin(vcmd);
 
   // no op for FGS supported device
@@ -2148,7 +2199,7 @@ void VirtualGPU::submitSvmUnmapMemory(amd::SvmUnmapMemoryCommand& vcmd) {
 
 void VirtualGPU::submitSvmFillMemory(amd::SvmFillMemoryCommand& vcmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
-  amd::ScopedLock lock(execution());
+  std::scoped_lock lock(execution());
 
   profilingBegin(vcmd);
 
@@ -2158,7 +2209,7 @@ void VirtualGPU::submitSvmFillMemory(amd::SvmFillMemoryCommand& vcmd) {
     amd::Memory* dstMemory = amd::MemObjMap::FindMemObj(vcmd.dst());
     assert(dstMemory && "No svm Buffer to fill with!");
     size_t offset = reinterpret_cast<uintptr_t>(vcmd.dst()) -
-        reinterpret_cast<uintptr_t>(dstMemory->getSvmPtr());
+                    reinterpret_cast<uintptr_t>(dstMemory->getSvmPtr());
 
     pal::Memory* memory = dev().getGpuMemory(dstMemory);
 
@@ -2180,7 +2231,7 @@ void VirtualGPU::submitSvmFillMemory(amd::SvmFillMemoryCommand& vcmd) {
 
 void VirtualGPU::submitMigrateMemObjects(amd::MigrateMemObjectsCommand& vcmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
-  amd::ScopedLock lock(execution());
+  std::scoped_lock lock(execution());
 
   profilingBegin(vcmd);
 
@@ -2207,7 +2258,7 @@ void VirtualGPU::submitMigrateMemObjects(amd::MigrateMemObjectsCommand& vcmd) {
 void VirtualGPU::submitSvmFreeMemory(amd::SvmFreeMemoryCommand& vcmd) {
   // in-order semantics: previous commands need to be done before we start
   // Make sure VirtualGPU has an exclusive access to the resources
-  amd::ScopedLock lock(execution());
+  std::scoped_lock lock(execution());
 
   profilingBegin(vcmd);
   std::vector<void*>& svmPointers = vcmd.svmPointers();
@@ -2225,7 +2276,7 @@ void VirtualGPU::submitSvmFreeMemory(amd::SvmFreeMemoryCommand& vcmd) {
 
 void VirtualGPU::submitStreamOperation(amd::StreamOperationCommand& cmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
-  amd::ScopedLock lock(execution());
+  std::scoped_lock lock(execution());
   profilingBegin(cmd);
 
   const cl_command_type type = cmd.type();
@@ -2239,21 +2290,39 @@ void VirtualGPU::submitStreamOperation(amd::StreamOperationCommand& cmd) {
   Memory* memory = dev().getGpuMemory(amdMemory);
 
   if (type == ROCCLR_COMMAND_STREAM_WAIT_VALUE) {
-
     // Use a blit kernel to perform the wait operation
     // mask is applied on value before performing
     // the comparision defined by 'condition'
     bool result = static_cast<KernelBlitManager&>(blitMgr()).streamOpsWait(*memory, value, offset,
-                                                                            sizeBytes, flags, mask);
-    ClPrint(amd::LOG_DEBUG, amd::LOG_COPY, "Waiting for value: 0x%lx."
-            " Flags: 0x%lx mask: 0x%lx", value, flags, mask);
+                                                                           sizeBytes, flags, mask);
+    ClPrint(amd::LOG_DEBUG, amd::LOG_COPY,
+            "Waiting for value: 0x%lx."
+            " Flags: 0x%lx mask: 0x%lx",
+            value, flags, mask);
     if (!result) {
       LogError("submitStreamOperation: Wait failed!");
     }
   } else if (type == ROCCLR_COMMAND_STREAM_WRITE_VALUE) {
-    bool result = static_cast<KernelBlitManager&>(blitMgr()).streamOpsWrite(*memory, value,
-                                                                            offset, sizeBytes);
-    ClPrint(amd::LOG_DEBUG, amd::LOG_COPY, "Writing value: 0x%lx", value);
+    bool result;
+    switch (flags) {
+      case ROCCLR_STREAM_WRITE_VALUE_DEFAULT: {
+        result = blitMgr().streamOpsWrite(*memory, value, offset, sizeBytes);
+        break;
+      }
+      case ROCCLR_STREAM_WRITE_VALUE_INCREMENT: {
+        result = blitMgr().streamOpsIncrement(*memory, value, offset, sizeBytes);
+        break;
+      }
+      case ROCCLR_STREAM_WRITE_VALUE_DECREMENT: {
+        result = blitMgr().streamOpsDecrement(*memory, value, offset, sizeBytes);
+        break;
+      }
+      default: {
+        ShouldNotReachHere();
+        break;
+      }
+    }
+
     if (!result) {
       LogError("submitStreamOperation: Write failed!");
     }
@@ -2266,7 +2335,7 @@ void VirtualGPU::submitStreamOperation(amd::StreamOperationCommand& cmd) {
 // ================================================================================================
 void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
-  amd::ScopedLock lock(execution());
+  std::scoped_lock lock(execution());
 
   profilingBegin(vcmd);
   amd::Memory* phys_mem_obj = vcmd.memory();
@@ -2278,31 +2347,31 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
 
   // Create a view, since original base obj will map the whole memory and multimap cases wont work.
   amd::Memory* vaddr_sub_obj = nullptr;
+  Pal::IGpuMemory* phymem_igpu_mem = nullptr;
   size_t vaddr_offset = 0;
+  size_t phys_offset = 0;
   if (phys_mem_obj != nullptr) {
     constexpr bool kParent = false;
     vaddr_sub_obj = phys_mem_obj->getContext().devices()[0]->CreateVirtualBuffer(
-                      phys_mem_obj->getContext(), const_cast<void*>(vcmd.ptr()),
-                      vcmd.size(), phys_mem_obj->getUserData().deviceId, kParent);
+        phys_mem_obj->getContext(), const_cast<void*>(vcmd.ptr()), vcmd.size(),
+        phys_mem_obj->getUserData().deviceId, phys_mem_obj->getUserData().locationType, kParent);
 
-    // Calculate the offset from the original pointer.
-    vaddr_offset = (reinterpret_cast<address>(vaddr_sub_obj->getSvmPtr())
-                     - reinterpret_cast<address>(vaddr_base_obj->getSvmPtr()));
+    pal::Memory* phys_pal_mem = dev().getGpuMemory(phys_mem_obj);
+    phymem_igpu_mem = phys_pal_mem->iMem();
+    phys_offset = phys_pal_mem->offset();
+  } else {
+    vaddr_sub_obj = amd::MemObjMap::FindMemObj(vcmd.ptr());
   }
+
+  // Calculate the offset from the original pointer.
+  vaddr_offset = (reinterpret_cast<address>(vaddr_sub_obj->getSvmPtr()) -
+                  reinterpret_cast<address>(vaddr_base_obj->getSvmPtr()));
 
   // The imem() in the backend is shared between base and sub/view object.
   pal::Memory* vaddr_pal_mem = dev().getGpuMemory(vaddr_base_obj);
-  Pal::IGpuMemory* phymem_igpu_mem = (phys_mem_obj == nullptr) ?
-      nullptr : dev().getGpuMemory(phys_mem_obj)->iMem();
-
-  Pal::VirtualMemoryRemapRange range{
-    vaddr_pal_mem->iMem(),
-    vaddr_offset,
-    phymem_igpu_mem,
-    0,
-    vcmd.size(),
-    Pal::VirtualGpuMemAccessMode::NoAccess
-  };
+  Pal::VirtualMemoryRemapRange range{vaddr_pal_mem->iMem(), vaddr_offset,
+                                     phymem_igpu_mem,       phys_offset,
+                                     vcmd.size(),           Pal::VirtualGpuMemAccessMode::NoAccess};
 
   // Wait for previous operations before unmap
   if (phys_mem_obj == nullptr) {
@@ -2326,7 +2395,7 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
       phys_mem_obj->getUserData().vaddr_mem_obj = vaddr_sub_obj;
     } else {
       // assert the vaddr_mem_obj is mapped and needs to be removed
-      amd::Memory* vaddr_sub_obj = amd::MemObjMap::FindMemObj(vcmd.ptr());
+      vaddr_sub_obj = amd::MemObjMap::FindMemObj(vcmd.ptr());
       assert(vaddr_sub_obj != nullptr);
       assert(vcmd.ptr() == vaddr_sub_obj->getSvmPtr());
 
@@ -2341,7 +2410,7 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
 }
 
 // ================================================================================================
-void VirtualGPU::PrintChildren(const HSAILKernel& hsaKernel, VirtualGPU* gpuDefQueue) {
+void VirtualGPU::PrintChildren(const pal::Kernel& hsaKernel, VirtualGPU* gpuDefQueue) {
   AmdAqlWrap* wraps = (AmdAqlWrap*)(&((AmdVQueueHeader*)gpuDefQueue->virtualQueue_->data())[1]);
   uint p = 0;
   for (uint i = 0; i < gpuDefQueue->vqHeader_->aql_slot_num; ++i) {
@@ -2376,11 +2445,11 @@ void VirtualGPU::PrintChildren(const HSAILKernel& hsaKernel, VirtualGPU* gpuDefQ
       print << wraps[i].aql.grid_size_y << ", ";
       print << wraps[i].aql.grid_size_z << "]\n";
 
-      HSAILKernel* child = nullptr;
+      pal::Kernel* child = nullptr;
       for (auto it = hsaKernel.prog().kernels().begin(); it != hsaKernel.prog().kernels().end();
            ++it) {
-        if (wraps[i].aql.kernel_object == static_cast<HSAILKernel*>(it->second)->gpuAqlCode()) {
-          child = static_cast<HSAILKernel*>(it->second);
+        if (wraps[i].aql.kernel_object == static_cast<pal::Kernel*>(it->second)->gpuAqlCode()) {
+          child = static_cast<pal::Kernel*>(it->second);
         }
       }
       if (child == nullptr) {
@@ -2444,7 +2513,7 @@ void VirtualGPU::PrintChildren(const HSAILKernel& hsaKernel, VirtualGPU* gpuDefQ
 }
 
 // ================================================================================================
-bool VirtualGPU::PreDeviceEnqueue(const amd::Kernel& kernel, const HSAILKernel& hsaKernel,
+bool VirtualGPU::PreDeviceEnqueue(const amd::Kernel& kernel, const pal::Kernel& hsaKernel,
                                   VirtualGPU** gpuDefQueue, uint64_t* vmDefQueue) {
   amd::DeviceQueue* defQueue = kernel.program().context().defDeviceQueue(dev());
   if (nullptr == defQueue) {
@@ -2477,7 +2546,7 @@ bool VirtualGPU::PreDeviceEnqueue(const amd::Kernel& kernel, const HSAILKernel& 
 }
 
 // ================================================================================================
-void VirtualGPU::PostDeviceEnqueue(const amd::Kernel& kernel, const HSAILKernel& hsaKernel,
+void VirtualGPU::PostDeviceEnqueue(const amd::Kernel& kernel, const pal::Kernel& hsaKernel,
                                    VirtualGPU* gpuDefQueue, uint64_t vmDefQueue,
                                    uint64_t vmParentWrap, GpuEvent* gpuEvent) {
   uint32_t id = gpuEvent->id_;
@@ -2583,7 +2652,7 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
     // Wait for the execution on the current queue, since the coop groups will use the device queue
     waitAllEngines();
 
-    amd::ScopedLock lock(queue->blitMgr().lockXfer());
+    std::scoped_lock k(*(queue->blitMgr().lockXfer()));
 
     queue->profilingBegin(vcmd);
 
@@ -2602,7 +2671,7 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
     queue->waitAllEngines();
   } else {
     // Make sure VirtualGPU has an exclusive access to the resources
-    amd::ScopedLock lock(execution());
+    std::scoped_lock lock(execution());
 
     profilingBegin(vcmd);
 
@@ -2617,14 +2686,13 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
 }
 
 // ================================================================================================
-bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes,
-                                      const amd::Kernel& kernel, const_address parameters,
-                                      bool nativeMem, uint32_t sharedMemBytes,
-                                      bool anyOrder) {
+bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const amd::Kernel& kernel,
+                                      const_address parameters, bool nativeMem,
+                                      uint32_t sharedMemBytes, bool anyOrder) {
   state_.anyOrder_ = anyOrder;
 
   // Get the HSA kernel object
-  const HSAILKernel& hsaKernel = static_cast<const HSAILKernel&>(*(kernel.getDeviceKernel(dev())));
+  const pal::Kernel& hsaKernel = static_cast<const pal::Kernel&>(*(kernel.getDeviceKernel(dev())));
 
   // If RGP capturing is enabled, then start SQTT trace
   if (rgpCaptureEna()) {
@@ -2668,12 +2736,12 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes,
     iCmd()->CmdCommentString(buf);
   }
 
-  bool imageBufferWrtBack = false; // Image buffer write back is required
-  std::vector<Image*> wrtBackImageBuffer; // Array of images for write back
+  bool imageBufferWrtBack = false;         // Image buffer write back is required
+  std::vector<Image*> wrtBackImageBuffer;  // Array of images for write back
 
   // Check memory dependency and SVM objects
-  if (!processMemObjectsHSA(kernel, parameters, nativeMem, ldsSize,
-                            imageBufferWrtBack, wrtBackImageBuffer)) {
+  if (!processMemObjectsHSA(kernel, parameters, nativeMem, ldsSize, imageBufferWrtBack,
+                            wrtBackImageBuffer)) {
     LogError("Wrong memory objects!");
     return false;
   }
@@ -2684,25 +2752,28 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes,
   GpuEvent gpuEvent(queues_[MainEngine]->cmdBufId());
   uint32_t id = gpuEvent.id_;
   uint64_t vmParentWrap = 0;
-  uint32_t aql_index = 0;
   // Program the kernel arguments for the GPU execution
-  hsa_kernel_dispatch_packet_t* aqlPkt = hsaKernel.loadArguments(
-      *this, kernel, sizes, parameters, ldsSize + sharedMemBytes, vmDefQueue, &vmParentWrap, &aql_index);
+  auto&& [aqlPkt, aql_packet_id] =
+      hsaKernel.loadArguments(*this, kernel, sizes, parameters, ldsSize + sharedMemBytes,
+                              vmDefQueue, &vmParentWrap);
   assert((nullptr != aqlPkt) && "Couldn't load kernel arguments");
 
+  auto& amd_queue = queues_[MainEngine]->aql_mgmt_->amd_queue_;
+  uint32_t aql_index = aql_packet_id % amd_queue.hsa_queue.size;
+
   // Dynamic call stack size is considered to calculate private segment size and scratch regs
-  // in LightningKernel::postLoad(). As it is not called during hipModuleLaunchKernel unlike
+  // in pal::Kernel::postLoad(). As it is not called during hipModuleLaunchKernel unlike
   // hipLaunchKernel/hipLaunchKernelGGL, Updated value is passed to dispatch packet.
   size_t privateMemSize = hsaKernel.spillSegSize();
   if ((hsaKernel.workGroupInfo()->usedStackSize_ & 0x1) == 0x1) {
     privateMemSize = std::max<uint32_t>(static_cast<uint32_t>(device().StackSize()),
-                              hsaKernel.workGroupInfo()->scratchRegs_ * sizeof(uint32_t)) ;
+                                        hsaKernel.workGroupInfo()->scratchRegs_ * sizeof(uint32_t));
     // Validate privateMemSize is more than max allowed.
     size_t maxStackSize = device().MaxStackSize();
     if (privateMemSize > maxStackSize) {
       ClPrint(amd::LOG_INFO, amd::LOG_KERN,
-        "Scratch size (%zu) exceeds max allowed (%zu) for kernel : %s",
-        privateMemSize, maxStackSize, hsaKernel.name().c_str());
+              "Scratch size (%zu) exceeds max allowed (%zu) for kernel : %s", privateMemSize,
+              maxStackSize, hsaKernel.name().c_str());
       LogError("Scratch size exceeds max allowed.");
       return false;
     }
@@ -2720,19 +2791,41 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes,
   }
   dispatchParam.pCpuAqlCode = hsaKernel.cpuAqlKd();
   dispatchParam.hsaQueueVa = hsaQueueMem_->vmAddress();
-  if (!hsaKernel.prog().isLC() && hsaKernel.workGroupInfo()->wavesPerSimdHint_ != 0) {
-    constexpr uint32_t kWavesPerSimdLimit = 4;
-    dispatchParam.wavesPerSh = kWavesPerSimdLimit *
-      dev().info().cuPerShaderArray_ * dev().info().simdPerCU_;
-  } else {
-    dispatchParam.wavesPerSh = 0;
-  }
+  dispatchParam.wavesPerSh = 0;
   dispatchParam.useAtc = dev().settings().svmFineGrainSystem_ ? true : false;
   dispatchParam.kernargSegmentSize = hsaKernel.argsBufferSize();
   dispatchParam.aqlPacketIndex = aql_index;
+
+  // Update the mqd's information about scratch memory.
+  amd_queue.scratch_backing_memory_location = static_cast<uint64_t>(dispatchParam.scratchAddr);
+  amd_queue.scratch_backing_memory_byte_size = static_cast<uint64_t>(dispatchParam.scratchSize);
+
+  // FIXME: Conservatively, the read_dispatch_id cannot be smaller than the current aql_packet_id -
+  // hsa_queue.size for the debugger to work correctly. The read_dispatch_id really should be
+  // updated when the CmdBuf is marked as complete.
+  uint64_t new_read_dispatch_id = (aql_packet_id >= amd_queue.hsa_queue.size)
+      ? (aql_packet_id - amd_queue.hsa_queue.size + 1)
+      : 0;
+
+  // Do an atomic max of &amd_queue.read_dispatch_id and new_read_dispatch_id
+  uint64_t old_read_dispatch_id = amd_queue.read_dispatch_id;
+  std::atomic_ref read_dispatch_id(*const_cast<uint64_t *>(&amd_queue.read_dispatch_id));
+  while (!read_dispatch_id.compare_exchange_weak(old_read_dispatch_id,
+                                                 new_read_dispatch_id,
+                                                 std::memory_order::relaxed,
+                                                 std::memory_order::relaxed))
+    ;
+
   // Run AQL dispatch in HW
   eventBegin(MainEngine);
+
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 954
   iCmd()->CmdDispatchAql(dispatchParam);
+#else  // PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 954
+  Pal::DispatchAqlFeedback feedback{};
+  iCmd()->CmdDispatchAql(dispatchParam, &feedback);
+  amd_queue.compute_tmpring_size = feedback.tmpRingSize;
+#endif  // PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 954
 
   if (id != gpuEvent.id_) {
     LogError("Something is wrong. ID mismatch!\n");
@@ -2780,7 +2873,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes,
 // ================================================================================================
 void VirtualGPU::submitNativeFn(amd::NativeFnCommand& vcmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
-  amd::ScopedLock lock(execution());
+  std::scoped_lock lock(execution());
 
   Unimplemented();  //!< @todo: Unimplemented
 }
@@ -2813,7 +2906,7 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
     // Use GPU based timing for HIP events
 
     // Make sure VirtualGPU has an exclusive access to the resources
-    amd::ScopedLock lock(execution());
+    std::scoped_lock lock(execution());
     GpuEvent event;
     profilingBegin(vcmd);
     eventBegin(MainEngine);
@@ -2824,26 +2917,21 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
 }
 
 // ================================================================================================
-void VirtualGPU::submitAccumulate(amd::AccumulateCommand& vcmd) {
-}
+void VirtualGPU::submitAccumulate(amd::AccumulateCommand& vcmd) {}
 
 // ================================================================================================
 void VirtualGPU::submitExternalSemaphoreCmd(amd::ExternalSemaphoreCmd& cmd) {
-
   const Pal::IQueueSemaphore* sem = reinterpret_cast<const Pal::IQueueSemaphore*>(cmd.sem_ptr());
 
-  if (cmd.semaphoreCmd() ==
-      amd::ExternalSemaphoreCmd::COMMAND_SIGNAL_EXTSEMAPHORE) {
+  if (cmd.semaphoreCmd() == amd::ExternalSemaphoreCmd::COMMAND_SIGNAL_EXTSEMAPHORE) {
     flushDMA(MainEngine);
-    if (Pal::Result::Success !=
-        queues_[MainEngine]->iQueue_->SignalQueueSemaphore(const_cast<Pal::IQueueSemaphore*>(sem),
-                                                           cmd.fence())) {
+    if (Pal::Result::Success != queues_[MainEngine]->iQueue_->SignalQueueSemaphore(
+                                    const_cast<Pal::IQueueSemaphore*>(sem), cmd.fence())) {
       LogError("Failed to signal external semaphore");
     }
   } else {
-    if (Pal::Result::Success !=
-        queues_[MainEngine]->iQueue_->WaitQueueSemaphore(const_cast<Pal::IQueueSemaphore*>(sem),
-                                                         cmd.fence())) {
+    if (Pal::Result::Success != queues_[MainEngine]->iQueue_->WaitQueueSemaphore(
+                                    const_cast<Pal::IQueueSemaphore*>(sem), cmd.fence())) {
       LogError("Failed to wait on external semaphore");
     }
   }
@@ -2858,7 +2946,7 @@ void VirtualGPU::releaseMemory(GpuMemoryReference* mem) {
 
 void VirtualGPU::submitPerfCounter(amd::PerfCounterCommand& vcmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
-  amd::ScopedLock lock(execution());
+  std::scoped_lock lock(execution());
 
   const amd::PerfCounterCommand::PerfCounterList counters = vcmd.getCounters();
 
@@ -2937,7 +3025,7 @@ void VirtualGPU::submitPerfCounter(amd::PerfCounterCommand& vcmd) {
 
 void VirtualGPU::submitThreadTraceMemObjects(amd::ThreadTraceMemObjectsCommand& cmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
-  amd::ScopedLock lock(execution());
+  std::scoped_lock lock(execution());
 
   profilingBegin(cmd);
 
@@ -2988,7 +3076,7 @@ void VirtualGPU::submitThreadTraceMemObjects(amd::ThreadTraceMemObjectsCommand& 
 
 void VirtualGPU::submitThreadTrace(amd::ThreadTraceCommand& cmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
-  amd::ScopedLock lock(execution());
+  std::scoped_lock lock(execution());
 
   profilingBegin(cmd);
 
@@ -3032,7 +3120,7 @@ void VirtualGPU::submitThreadTrace(amd::ThreadTraceCommand& cmd) {
 
 void VirtualGPU::submitAcquireExtObjects(amd::AcquireExtObjectsCommand& vcmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
-  amd::ScopedLock lock(execution());
+  std::scoped_lock lock(execution());
 
   profilingBegin(vcmd);
 
@@ -3051,7 +3139,7 @@ void VirtualGPU::submitAcquireExtObjects(amd::AcquireExtObjectsCommand& vcmd) {
 
 void VirtualGPU::submitReleaseExtObjects(amd::ReleaseExtObjectsCommand& vcmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
-  amd::ScopedLock lock(execution());
+  std::scoped_lock lock(execution());
 
   profilingBegin(vcmd);
 
@@ -3069,7 +3157,7 @@ void VirtualGPU::submitReleaseExtObjects(amd::ReleaseExtObjectsCommand& vcmd) {
 }
 
 void VirtualGPU::submitSignal(amd::SignalCommand& vcmd) {
-  amd::ScopedLock lock(execution());
+  std::scoped_lock lock(execution());
   profilingBegin(vcmd);
   pal::Memory* pGpuMemory = dev().getGpuMemory(&vcmd.memory());
 
@@ -3118,10 +3206,10 @@ void VirtualGPU::submitSignal(amd::SignalCommand& vcmd) {
 }
 
 void VirtualGPU::submitMakeBuffersResident(amd::MakeBuffersResidentCommand& vcmd) {
-  amd::ScopedLock lock(execution());
+  std::scoped_lock lock(execution());
   profilingBegin(vcmd);
 
-  std::vector<amd::Memory*> memObjects = vcmd.memObjects();
+  const std::vector<amd::Memory*>& memObjects = vcmd.memObjects();
   uint32_t numObjects = memObjects.size();
   Pal::GpuMemoryRef* pGpuMemRef = new Pal::GpuMemoryRef[numObjects];
   Pal::IGpuMemory** pGpuMems = new Pal::IGpuMemory*[numObjects];
@@ -3137,7 +3225,7 @@ void VirtualGPU::submitMakeBuffersResident(amd::MakeBuffersResidentCommand& vcmd
   dev().iDev()->AddGpuMemoryReferences(numObjects, pGpuMemRef, queues_[MainEngine]->iQueue_,
                                        Pal::GpuMemoryRefCantTrim);
   {
-    amd::ScopedLock l(queues_[MainEngine]->lock_);
+    std::scoped_lock l(*(queues_[MainEngine]->lock_));
     dev().iDev()->InitBusAddressableGpuMemory(queues_[MainEngine]->iQueue_, numObjects, pGpuMems);
   }
 
@@ -3226,7 +3314,7 @@ void VirtualGPU::flush(amd::Command* list, bool wait) {
 
   {
     //! @todo: Check if really need a lock
-    amd::ScopedLock lock(execution());
+    std::scoped_lock lock(execution());
     for (uint i = 0; i < AllEngines; ++i) {
       flushDMA(i);
       // Reset event so we won't try to wait again,
@@ -3320,12 +3408,29 @@ bool VirtualGPU::waitAllEngines(CommandBatch* cb) {
 }
 
 void VirtualGPU::waitEventLock(CommandBatch* cb) {
-  bool earlyDone = false;
+  bool earlyDone = true;
+  GpuEvent eventsCopy[AllEngines];
+
   {
-    // Make sure VirtualGPU has an exclusive access to the resources
-    amd::ScopedLock lock(execution());
-    earlyDone = waitAllEngines(cb);
+    std::scoped_lock lock(execution());
+
+    GpuEvent* events = (cb == nullptr) ? events_ : cb->events_;
+
+    // The first loop is to flush all engines and/or check if
+    // engines are idle already
+    for (uint i = 0; i < AllEngines; ++i) {
+      eventsCopy[i] = events[i];
+      earlyDone &= isDone(&events[i]);
+    }
+
+    // Release all pinned memory
+    releasePinnedMem();
   }
+
+  for (uint i = 0; i < AllEngines; ++i) {
+    waitForEvent(&eventsCopy[i]);
+  }
+
   // Get timestamp, incase readjustTimeGPU_ needs to be updated
   uint64_t endTimeStampCPU = amd::Os::timeNanos();
 
@@ -3396,8 +3501,8 @@ void VirtualGPU::profilingBegin(amd::Command& command) {
 
 void VirtualGPU::profilingEnd(amd::Command& command) {
   // Get the TimeStamp object associated witht the current command
-  TimeStamp* ts = !command.data().empty() ? reinterpret_cast<TimeStamp*>(command.data().back())
-                                            : nullptr;
+  TimeStamp* ts =
+      !command.data().empty() ? reinterpret_cast<TimeStamp*>(command.data().back()) : nullptr;
   if (ts != nullptr) {
     // Check if the command actually did any GPU submission
     if (ts->isValid()) {
@@ -3434,8 +3539,8 @@ bool VirtualGPU::profilingCollectResults(CommandBatch* cb, const amd::Event* wai
   first = cb->head_;
   while (nullptr != first) {
     // Get the TimeStamp object associated witht the current command
-    TimeStamp* ts = !first->data().empty() ? reinterpret_cast<TimeStamp*>(first->data().back())
-                                            : nullptr;
+    TimeStamp* ts =
+        !first->data().empty() ? reinterpret_cast<TimeStamp*>(first->data().back()) : nullptr;
 
     if (ts != nullptr) {
       ts->value(&startTimeStamp, &endTimeStamp);
@@ -3452,8 +3557,8 @@ bool VirtualGPU::profilingCollectResults(CommandBatch* cb, const amd::Event* wai
   first = cb->head_;
   while (nullptr != first) {
     // Get the TimeStamp object associated witht the current command
-    TimeStamp* ts = !first->data().empty() ? reinterpret_cast<TimeStamp*>(first->data().back())
-                                            : nullptr;
+    TimeStamp* ts =
+        !first->data().empty() ? reinterpret_cast<TimeStamp*>(first->data().back()) : nullptr;
 
     current = first->getNext();
 
@@ -3508,8 +3613,7 @@ void VirtualGPU::profileEvent(EngineType engine, bool type) const {
 }
 
 bool VirtualGPU::processMemObjectsHSA(const amd::Kernel& kernel, const_address params,
-                                      bool nativeMem, size_t& ldsAddress,
-                                      bool& imageBufferWrtBack,
+                                      bool nativeMem, size_t& ldsAddress, bool& imageBufferWrtBack,
                                       std::vector<Image*>& wrtBackImageBuffer) {
   const amd::KernelParameters& kernelParams = kernel.parameters();
 
@@ -3536,7 +3640,7 @@ bool VirtualGPU::processMemObjectsHSA(const amd::Kernel& kernel, const_address p
     }
     // get svm non arugment information
     void* const* svmPtrArray =
-        reinterpret_cast<void* const*>(params + kernelParams.getExecInfoOffset());
+        reinterpret_cast<void* const*>(params + kernelParams.getTotalSize());
     for (size_t i = 0; i < count; i++) {
       amd::Memory* memory = amd::MemObjMap::FindMemObj(svmPtrArray[i]);
       if (nullptr == memory) {
@@ -3550,7 +3654,6 @@ bool VirtualGPU::processMemObjectsHSA(const amd::Kernel& kernel, const_address p
           continue;
         }
       } else {
-
         // Validate Mem Access in case of VMM Memory
         if (!memory->ValidateMemAccess(dev(), true)) {
           return false;
@@ -3586,7 +3689,7 @@ bool VirtualGPU::processMemObjectsHSA(const amd::Kernel& kernel, const_address p
   bool srdResource = false;
   amd::Memory* const* memories =
       reinterpret_cast<amd::Memory* const*>(params + kernelParams.memoryObjOffset());
-  const HSAILKernel& hsaKernel = static_cast<const HSAILKernel&>(*(kernel.getDeviceKernel(dev())));
+  const pal::Kernel& hsaKernel = static_cast<const pal::Kernel&>(*(kernel.getDeviceKernel(dev())));
   const amd::KernelSignature& signature = kernel.signature();
   ldsAddress = hsaKernel.ldsSize();
 
@@ -3666,9 +3769,8 @@ bool VirtualGPU::processMemObjectsHSA(const amd::Kernel& kernel, const_address p
           //! Note: SVM with subbuffers has an issue with tracking.
           //! Conformance can send read only subbuffer, but update the region
           //! in the kernel.
-          if ((mem != nullptr) &&
-              ((!info.readOnly_ && (mem->getSvmPtr() == nullptr)) ||
-               ((mem->getMemFlags() & CL_MEM_READ_ONLY) == 0))) {
+          if ((mem != nullptr) && ((!info.readOnly_ && (mem->getSvmPtr() == nullptr)) ||
+                                   ((mem->getMemFlags() & CL_MEM_READ_ONLY) == 0))) {
             mem->signalWrite(&dev());
           }
           if (info.oclObject_ == amd::KernelParameterDescriptor::ImageObject) {
@@ -3781,7 +3883,7 @@ bool VirtualGPU::processMemObjectsHSA(const amd::Kernel& kernel, const_address p
     // Note: runtime can skip sync if the same kernel is used,
     // since the number of scratch regs remains the same
     if (!IsSameKernel(kernel)) {
-       memoryDependency().validate(*this, scratch->memObj_, IsReadOnly);
+      memoryDependency().validate(*this, scratch->memObj_, IsReadOnly);
     }
     addVmMemory(scratch->memObj_);
     logVmMemory("scratch", scratch->memObj_);
@@ -3791,16 +3893,6 @@ bool VirtualGPU::processMemObjectsHSA(const amd::Kernel& kernel, const_address p
   memoryDependency().sync(*this);
 
   return true;
-}
-
-amd::Memory* VirtualGPU::createBufferFromImage(amd::Memory& amdImage) {
-  amd::Memory* mem = new (amdImage.getContext()) amd::Buffer(amdImage, 0, 0, amdImage.getSize());
-  mem->setVirtualDevice(this);
-  if ((mem != nullptr) && !mem->create()) {
-    mem->release();
-  }
-
-  return mem;
 }
 
 void VirtualGPU::writeVQueueHeader(VirtualGPU& hostQ, const Memory* kernelTable) {
@@ -3846,22 +3938,17 @@ void* VirtualGPU::getOrCreateHostcallBuffer() {
   hostcallBuffer_ = dev().svmAlloc(dev().context(), size, align,
                                    CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS, nullptr);
   if (!hostcallBuffer_) {
-    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE,
-            "Failed to create hostcall buffer");
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "Failed to create hostcall buffer");
     return nullptr;
   }
 
   ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
-          "Created hostcall buffer %p (numPackets == %d, size == %d, align == %d) for virtual queue %p\n",
-          hostcallBuffer_,
-          numPackets,
-          size,
-          align,
-          this);
+          "Created hostcall buffer %p (numPackets == %d, size == %d, align == %d) for virtual "
+          "queue %p\n",
+          hostcallBuffer_, numPackets, size, align, this);
 
   if (!amd::enableHostcalls(dev(), hostcallBuffer_, numPackets)) {
-    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE,
-            "Failed to register hostcall buffer %p with listener",
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "Failed to register hostcall buffer %p with listener",
             hostcallBuffer_);
     return nullptr;
   }

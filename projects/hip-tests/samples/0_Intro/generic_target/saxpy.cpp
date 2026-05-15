@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip/hiprtc.h>
 #include <hip/hip_runtime.h>
@@ -26,6 +10,7 @@ THE SOFTWARE.
 
 #include <cassert>
 #include <cstddef>
+#include <cstring>
 #include <memory>
 #include <iostream>
 #include <iterator>
@@ -36,7 +21,7 @@ static constexpr auto NUM_BLOCKS{32};
 using namespace std;
 
 static constexpr auto saxpy{
-R"(
+    R"(
 #include "test_header.h"
 #include "test_header1.h"
 extern "C"
@@ -50,8 +35,7 @@ void saxpy(real a, realptr x, realptr y, realptr out, size_t n)
 }
 )"};
 
-int main()
-{
+int main() {
   hipDeviceProp_t props;
   int device = 0;
   checkHipErrors(hipSetDevice(device));
@@ -62,11 +46,11 @@ int main()
   auto pos = agentTarget.find(':');
 
   if (pos != std::string::npos) {
-    postFix = agentTarget.substr(pos); // Features
+    postFix = agentTarget.substr(pos);  // Features
     agentTarget.resize(pos);
   }
   if (!getGenericTarget(agentTarget, genericTarget)) {
-    cout << props.gcnArchName <<" has no generic target support. Skipped!" << endl;
+    cout << props.gcnArchName << " has no generic target support. Skipped!" << endl;
     return 0;
   }
   if (agentTarget.find("gfx906") != std::string::npos) {
@@ -86,16 +70,20 @@ int main()
   vector<const char*> header_sources;
   header_names.push_back("test_header.h");
   header_names.push_back("test_header1.h");
-  header_sources.push_back("#ifndef HIPRTC_TEST_HEADER_H\n#define HIPRTC_TEST_HEADER_H\ntypedef float real;\n#endif //HIPRTC_TEST_HEADER_H\n");
-  header_sources.push_back("#ifndef HIPRTC_TEST_HEADER1_H\n#define HIPRTC_TEST_HEADER1_H\ntypedef float* realptr;\n#endif //HIPRTC_TEST_HEADER1_H\n");
-  hiprtcCreateProgram(&prog,                 // prog
-                      saxpy,                 // buffer
-                      "saxpy.cu",            // name
-                      num_headers,           // numHeaders
-                      &header_sources[0],    // headers
-                      &header_names[0]);     // includeNames
+  header_sources.push_back(
+      "#ifndef HIPRTC_TEST_HEADER_H\n#define HIPRTC_TEST_HEADER_H\ntypedef float real;\n#endif "
+      "//HIPRTC_TEST_HEADER_H\n");
+  header_sources.push_back(
+      "#ifndef HIPRTC_TEST_HEADER1_H\n#define HIPRTC_TEST_HEADER1_H\ntypedef float* "
+      "realptr;\n#endif //HIPRTC_TEST_HEADER1_H\n");
+  hiprtcCreateProgram(&prog,               // prog
+                      saxpy,               // buffer
+                      "saxpy.cu",          // name
+                      num_headers,         // numHeaders
+                      &header_sources[0],  // headers
+                      &header_names[0]);   // includeNames
 
-  string offload {"--offload-arch="};
+  string offload{"--offload-arch="};
   offload += genericTarget.c_str();
   /*
    * offload must be one of following:
@@ -108,17 +96,17 @@ int main()
    *
    * */
   const char* options[] = {offload.c_str(), "-mcode-object-version=6", "-w"};
-  hiprtcResult compileResult {
-    hiprtcCompileProgram(prog, sizeof(options) / sizeof(options[0]), options) };
+  hiprtcResult compileResult{
+      hiprtcCompileProgram(prog, sizeof(options) / sizeof(options[0]), options)};
 
   size_t logSize;
   hiprtcGetProgramLogSize(prog, &logSize);
 
   if (logSize) {
-      string log(logSize, '\0');
-      hiprtcGetProgramLog(prog, &log[0]);
+    string log(logSize, '\0');
+    hiprtcGetProgramLog(prog, &log[0]);
 
-      cout << log << '\n';
+    cout << log << '\n';
   }
 
   if (compileResult != HIPRTC_SUCCESS) {
@@ -148,43 +136,42 @@ int main()
   unique_ptr<float[]> hOut{new float[n]};
 
   for (size_t i = 0; i < n; ++i) {
-      hX[i] = static_cast<float>(i);
-      hY[i] = static_cast<float>(i * 2);
+    hX[i] = static_cast<float>(i);
+    hY[i] = static_cast<float>(i * 2);
   }
 
   hipDeviceptr_t dX, dY, dOut;
-  checkHipErrors(hipMalloc((void **)&dX, bufferSize));
-  checkHipErrors(hipMalloc((void **)&dY, bufferSize));
-  checkHipErrors(hipMalloc((void **)&dOut, bufferSize));
+  checkHipErrors(hipMalloc((void**)&dX, bufferSize));
+  checkHipErrors(hipMalloc((void**)&dY, bufferSize));
+  checkHipErrors(hipMalloc((void**)&dOut, bufferSize));
   checkHipErrors(hipMemcpyHtoD(dX, hX.get(), bufferSize));
   checkHipErrors(hipMemcpyHtoD(dY, hY.get(), bufferSize));
 
   struct {
-      float a_;
-      hipDeviceptr_t b_;
-      hipDeviceptr_t c_;
-      hipDeviceptr_t d_;
-      size_t e_;
+    float a_;
+    hipDeviceptr_t b_;
+    hipDeviceptr_t c_;
+    hipDeviceptr_t d_;
+    size_t e_;
   } args{a, dX, dY, dOut, n};
 
   auto size = sizeof(args);
-  void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
-                    HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
+  void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
                     HIP_LAUNCH_PARAM_END};
 
-  checkHipErrors(hipModuleLaunchKernel(kernel, NUM_BLOCKS, 1, 1, NUM_THREADS, 1, 1,
-                        0, nullptr, nullptr, config));
+  checkHipErrors(hipModuleLaunchKernel(kernel, NUM_BLOCKS, 1, 1, NUM_THREADS, 1, 1, 0, nullptr,
+                                       nullptr, config));
   checkHipErrors(hipMemcpyDtoH(hOut.get(), dOut, bufferSize));
 
   for (size_t i = 0; i < n; ++i) {
-      if (fabs(a * hX[i] + hY[i] - hOut[i]) > fabs(hOut[i])* 1e-6) {
-        cout << "Validation failed." << endl;
-      }
+    if (fabs(a * hX[i] + hY[i] - hOut[i]) > fabs(hOut[i]) * 1e-6) {
+      cout << "Validation failed." << endl;
+    }
   }
 
-  checkHipErrors(hipFree((void *)dX));
-  checkHipErrors(hipFree((void *)dY));
-  checkHipErrors(hipFree((void *)dOut));
+  checkHipErrors(hipFree((void*)dX));
+  checkHipErrors(hipFree((void*)dY));
+  checkHipErrors(hipFree((void*)dOut));
 
   checkHipErrors(hipModuleUnload(module));
 

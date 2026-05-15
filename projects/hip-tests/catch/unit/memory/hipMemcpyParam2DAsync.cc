@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "memcpy2d_tests_common.hh"
 
@@ -27,7 +11,7 @@ THE SOFTWARE.
 #include <resource_guards.hh>
 #include <utils.hh>
 
-TEST_CASE("Unit_hipMemcpyParam2DAsync_Positive_Basic") {
+HIP_TEST_CASE(Unit_hipMemcpyParam2DAsync_Positive_Basic) {
   using namespace std::placeholders;
 
   constexpr bool async = true;
@@ -36,12 +20,10 @@ TEST_CASE("Unit_hipMemcpyParam2DAsync_Positive_Basic") {
   const StreamGuard stream_guard(stream_type);
   const hipStream_t stream = stream_guard.stream();
 
-#if HT_NVIDIA // Disabled on AMD due to defect - EXSWHTEC-236
   SECTION("Device to Host") {
     Memcpy2DDeviceToHostShell<async>(
         std::bind(MemcpyParam2DAdapter<async>(), _1, _2, _3, _4, _5, _6, _7, stream), stream);
   }
-#endif
   SECTION("Device to Device") {
     SECTION("Peer access disabled") {
       Memcpy2DDeviceToDeviceShell<async, false>(
@@ -56,16 +38,13 @@ TEST_CASE("Unit_hipMemcpyParam2DAsync_Positive_Basic") {
     Memcpy2DHostToDeviceShell<async>(
         std::bind(MemcpyParam2DAdapter<async>(), _1, _2, _3, _4, _5, _6, _7, stream), stream);
   }
-#if HT_NVIDIA // Disabled on AMD due to defect - EXSWHTEC-236
   SECTION("Host to Host") {
     Memcpy2DHostToHostShell<async>(
         std::bind(MemcpyParam2DAdapter<async>(), _1, _2, _3, _4, _5, _6, _7, stream), stream);
   }
-#endif
 }
 
-TEST_CASE("Unit_hipMemcpyParam2DAsync_Positive_Synchronization_Behavior") {
-  CHECK_IMAGE_SUPPORT
+HIP_TEST_CASE(Unit_hipMemcpyParam2DAsync_Positive_Synchronization_Behavior) {
   using namespace std::placeholders;
 
   constexpr bool async = true;
@@ -76,13 +55,13 @@ TEST_CASE("Unit_hipMemcpyParam2DAsync_Positive_Synchronization_Behavior") {
     Memcpy2DHtoDSyncBehavior(
         std::bind(MemcpyParam2DAdapter<async>(), _1, _2, _3, _4, _5, _6, _7, nullptr), false);
   }
-#if HT_NVIDIA // Disabled on AMD due to defect - EXSWHTEC-233
+#if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-233
   SECTION("Device to Pageable Host") {
     Memcpy2DDtoHPageableSyncBehavior(
         std::bind(MemcpyParam2DAdapter<async>(), _1, _2, _3, _4, _5, _6, _7, nullptr), true);
   }
 #endif
-#if HT_NVIDIA // Disabled on AMD due to defect - EXSWHTEC-236
+#if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-236
   SECTION("Device to Pinned Host") {
     Memcpy2DDtoHPinnedSyncBehavior(
         std::bind(MemcpyParam2DAdapter<async>(), _1, _2, _3, _4, _5, _6, _7, nullptr), false);
@@ -92,7 +71,7 @@ TEST_CASE("Unit_hipMemcpyParam2DAsync_Positive_Synchronization_Behavior") {
     Memcpy2DDtoDSyncBehavior(
         std::bind(MemcpyParam2DAdapter<async>(), _1, _2, _3, _4, _5, _6, _7, nullptr), false);
   }
-#if HT_NVIDIA // Disabled on AMD due to defect - EXSWHTEC-233
+#if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-233
   SECTION("Host to Host") {
     Memcpy2DHtoHSyncBehavior(
         std::bind(MemcpyParam2DAdapter<async>(), _1, _2, _3, _4, _5, _6, _7, nullptr), true);
@@ -100,13 +79,12 @@ TEST_CASE("Unit_hipMemcpyParam2DAsync_Positive_Synchronization_Behavior") {
 #endif
 }
 
-TEST_CASE("Unit_hipMemcpyParam2DAsync_Positive_Parameters") {
-  CHECK_IMAGE_SUPPORT
+HIP_TEST_CASE(Unit_hipMemcpyParam2DAsync_Positive_Parameters) {
   constexpr bool async = true;
   Memcpy2DZeroWidthHeight<async>(MemcpyParam2DAdapter<async>());
 }
 
-TEST_CASE("Unit_hipMemcpyParam2DAsync_Positive_Array") {
+HIP_TEST_CASE(Unit_hipMemcpyParam2DAsync_Positive_Array) {
   CHECK_IMAGE_SUPPORT
   constexpr bool async = true;
   SECTION("Array from/to Host") {
@@ -117,8 +95,7 @@ TEST_CASE("Unit_hipMemcpyParam2DAsync_Positive_Array") {
   }
 }
 
-TEST_CASE("Unit_hipMemcpyParam2DAsync_Negative_Parameters") {
-  CHECK_IMAGE_SUPPORT
+HIP_TEST_CASE(Unit_hipMemcpyParam2DAsync_Negative_Parameters) {
   constexpr bool async = true;
 
   constexpr size_t cols = 128;
@@ -160,7 +137,7 @@ TEST_CASE("Unit_hipMemcpyParam2DAsync_Negative_Parameters") {
                                                     width, height, kind),
                       hipErrorInvalidValue);
     }
-#if HT_NVIDIA // Disabled on AMD due to defect - EXSWHTEC-237
+#if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-237
     SECTION("WidthInBytes + srcXInBytes > srcPitch") {
       HIP_CHECK_ERROR(MemcpyParam2DAdapter<async>(make_hipExtent(spitch - width + 1, 0, 0))(
                           dst, dpitch, src, spitch, width, height, kind),
@@ -212,4 +189,41 @@ TEST_CASE("Unit_hipMemcpyParam2DAsync_Negative_Parameters") {
     NegativeTests(dst_alloc.ptr(), dst_alloc.pitch(), src_alloc.ptr(), src_alloc.pitch(),
                   dst_alloc.width(), dst_alloc.height(), hipMemcpyDeviceToDevice);
   }
+}
+
+static constexpr size_t NUM_W{10};
+static constexpr size_t NUM_H{10};
+
+HIP_TEST_CASE(Unit_hipMemcpyParam2DAsync_Capture) {
+  void* device_a = nullptr;
+  void* device_b = nullptr;
+  size_t pitch_a = 0;
+  size_t pitch_b = 0;
+  constexpr size_t kWidthInBytes = NUM_W * sizeof(int);
+  constexpr size_t kHeight = NUM_H;
+
+  HIP_CHECK(hipMallocPitch(&device_a, &pitch_a, kWidthInBytes, kHeight));
+  HIP_CHECK(hipMallocPitch(&device_b, &pitch_b, kWidthInBytes, kHeight));
+
+  hipStream_t stream = nullptr;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  hip_Memcpy2D memcpy_desc{};
+  memcpy_desc.srcMemoryType = hipMemoryTypeDevice;
+  memcpy_desc.srcDevice = reinterpret_cast<hipDeviceptr_t>(device_a);
+  memcpy_desc.srcPitch = pitch_a;
+  memcpy_desc.dstMemoryType = hipMemoryTypeDevice;
+  memcpy_desc.dstDevice = reinterpret_cast<hipDeviceptr_t>(device_b);
+  memcpy_desc.dstPitch = pitch_b;
+  memcpy_desc.WidthInBytes = kWidthInBytes;
+  memcpy_desc.Height = kHeight;
+
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+  HIP_CHECK(hipMemcpyParam2DAsync(&memcpy_desc, stream));
+  END_CAPTURE(stream);
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(device_a));
+  HIP_CHECK(hipFree(device_b));
 }

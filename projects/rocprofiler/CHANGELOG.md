@@ -393,3 +393,14 @@ Example for file plugin output:
 ### Resolved issues
 
 - Fixed issue where invalid UTF-8 characters in a trace log would crash the program
+
+## ROCProfiler for ROCm 7.1
+
+### Added
+
+### Resolved issues
+
+### Removed
+
+- `rocprofv2` doesn't support gfx12. For gfx12, use `rocprofv3` tool.
+

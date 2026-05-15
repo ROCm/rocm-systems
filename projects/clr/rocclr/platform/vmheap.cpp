@@ -1,22 +1,8 @@
-/* Copyright (c) 2025 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <string>
 #include <fstream>
@@ -51,7 +37,7 @@ bool VmHeap::ReleaseAddressRange(void* addr) {
 // ================================================================================================
 bool VmHeap::CommitMemory(void* addr, size_t size) {
   const auto& dev_info = device_->info();
-  size_t granularity = dev_info.virtualMemAllocGranularity_;
+  size_t granularity = dev_info.virtualMemAllocGranularityRecommended_;
   auto padded_size = alignUp(size, granularity);
 
   // Allocate physical memory
@@ -67,8 +53,8 @@ bool VmHeap::CommitMemory(void* addr, size_t size) {
   Memory* phys_mem_obj = MemObjMap::FindMemObj(ptr, &offset);
 
   // Map the physical memory to a virtual address
-  Command* cmd = new VirtualMapCommand(
-    GetVmQueue(), Command::EventWaitList{}, addr, padded_size, phys_mem_obj);
+  Command* cmd = new VirtualMapCommand(GetVmQueue(), Command::EventWaitList{}, addr, padded_size,
+                                       phys_mem_obj);
   cmd->enqueue();
   cmd->awaitCompletion();
   cmd->release();
@@ -86,23 +72,20 @@ bool VmHeap::UncommitMemory(void* addr, size_t size) {
   Memory* phys_mem_obj = vaddr_sub_obj->getUserData().phys_mem_obj;
 
   // Unmap the physical memory from a virtual address
-  Command* cmd = new VirtualMapCommand(
-    GetVmQueue(), Command::EventWaitList{}, addr, size, nullptr);
+  Command* cmd = new VirtualMapCommand(GetVmQueue(), Command::EventWaitList{}, addr, size, nullptr);
   cmd->enqueue();
   cmd->awaitCompletion();
   cmd->release();
-  vaddr_sub_obj->release();
   SvmBuffer::free(device_->context(), phys_mem_obj->getSvmPtr());
   return true;
 }
 
 // ================================================================================================
 VmHeap::VmHeap(Device* device, size_t va_size, size_t chunk_size, GetQueueFunc get_queue)
-  : block_alignment_(kMinBlockAlignment)
-  , chunk_size_(chunk_size)
-  , lock_(true)
-  , device_(device)
-  , get_vm_queue_(get_queue) {
+    : block_alignment_(kMinBlockAlignment),
+      chunk_size_(chunk_size),
+      device_(device),
+      get_vm_queue_(get_queue) {
   va_size_ = alignUp(va_size, chunk_size);
   free_size_ = va_size_;
 }
@@ -110,10 +93,10 @@ VmHeap::VmHeap(Device* device, size_t va_size, size_t chunk_size, GetQueueFunc g
 // ================================================================================================
 VmHeap::~VmHeap() {
   if (created_) {
-    ScopedLock k(lock_);
+    std::scoped_lock k(lock_);
 
     // Release all heap blocks
-    HeapBlock* walk, * next;
+    HeapBlock *walk, *next;
     walk = busy_list_;
     while (walk) {
       next = walk->next_;
@@ -168,7 +151,7 @@ bool VmHeap::MapPhysMemory(size_t offset, size_t size) {
         mapped_size_ += chunk_size_;
         if (mapped_size_ > max_mapped_size_) {
           ClPrint(LOG_INFO, LOG_MEM_POOL, "VM heap grows in physical alloc to %d GB\n",
-            static_cast<int>(mapped_size_ / Gi));
+                  static_cast<int>(mapped_size_ / Gi));
         }
         max_mapped_size_ = std::max(max_mapped_size_, mapped_size_);
         mapped_mem_[i] = true;
@@ -205,8 +188,7 @@ void VmHeap::UnmapPhysMemory(size_t offset, size_t size) {
         mapped_size_ -= chunk_size_;
         free_mapped -= chunk_size_;
         mapped_mem_[i] = false;
-      }
-      else {
+      } else {
         assert(false);
       }
     }
@@ -215,7 +197,7 @@ void VmHeap::UnmapPhysMemory(size_t offset, size_t size) {
 
 // ================================================================================================
 void VmHeap::TrimPhysMemory(size_t unmap_threshold) {
-  ScopedLock k(lock_);
+  std::scoped_lock k(lock_);
   auto current = free_list_;
   auto unmap_org = unmap_threshold_;
   unmap_threshold_ = unmap_threshold;
@@ -228,7 +210,7 @@ void VmHeap::TrimPhysMemory(size_t unmap_threshold) {
 
 // ================================================================================================
 address VmHeap::Alloc(size_t size) {
-  ScopedLock k(lock_);
+  std::scoped_lock k(lock_);
 
   if (!created_) {
     // Create VM heap if it's not created
@@ -241,7 +223,10 @@ address VmHeap::Alloc(size_t size) {
   size_t offset = 0;
   auto hb = AllocBlock(size + block_alignment_);
   if (hb != nullptr) {
-    offset = ((hb->Offset() & ~kChunkSize) == 0) ? hb->Offset() + block_alignment_ : hb->Offset();
+    // Add 256-byte offset if virtual address matches chunk address to avoid map conflicts
+    offset = ((hb->Offset() & (kChunkSize - 1)) == 0)
+               ? hb->Offset() + block_alignment_
+               : hb->Offset();
     ptr = base_address_ + offset;
   } else {
     return nullptr;
@@ -256,8 +241,8 @@ address VmHeap::Alloc(size_t size) {
   if (memory->getUserData().data == nullptr) {
     memory->getUserData().data = hb;
   }
-  ClPrint(LOG_INFO, LOG_MEM_POOL,
-    "VmHeap Alloc: %p offset(%zx + %zx) hb(%p)", ptr, hb->Offset(), memory->getSize(), hb);
+  ClPrint(LOG_INFO, LOG_MEM_POOL, "VmHeap Alloc: %p offset(%zx + %zx) hb(%p)", ptr, hb->Offset(),
+          memory->getSize(), hb);
   return ptr;
 }
 
@@ -272,11 +257,11 @@ void VmHeap::Free(Memory* memory) {
   if (!created_ || (addr < base_address_)) {
     return;
   }
-  ScopedLock k(lock_);
+  std::scoped_lock k(lock_);
   if (memory->getUserData().data != nullptr) {
     auto hb = reinterpret_cast<HeapBlock*>(memory->getUserData().data);
-    ClPrint(LOG_INFO, LOG_MEM_POOL, "VmHeap Free: %p offset(%zx + %zx) hb(%p)",
-      addr, hb->Offset(), memory->getSize(), hb);
+    ClPrint(LOG_INFO, LOG_MEM_POOL, "VmHeap Free: %p offset(%zx + %zx) hb(%p)", addr, hb->Offset(),
+            memory->getSize(), hb);
     FreeBlock(hb);
   }
   MemObjMap::RemoveMemObj(addr);
@@ -286,7 +271,7 @@ void VmHeap::Free(Memory* memory) {
 // ================================================================================================
 HeapBlock* VmHeap::AllocBlock(size_t un_size) {
   assert(un_size != 0);
-  ScopedLock k(lock_);
+  std::scoped_lock k(lock_);
   HeapBlock* walk = free_list_;
   HeapBlock* best = nullptr;
 
@@ -315,7 +300,7 @@ HeapBlock* VmHeap::AllocBlock(size_t un_size) {
   if (best != nullptr) {
     // Got one, but need to split it. Keep first part in free list,
     // put second part into busy list
-    HeapBlock *newblock = SplitBlock(best, size);
+    HeapBlock* newblock = SplitBlock(best, size);
     newblock->busy_ = true;
     InsertBlock(&busy_list_, newblock);
     free_size_ -= size;
@@ -380,7 +365,7 @@ void VmHeap::InsertBlock(HeapBlock** head, HeapBlock* blk) {
   blk->next_ = walk->next_;
   blk->prev_ = walk;
   if (walk->next_) {
-      walk->next_->prev_ = blk;
+    walk->next_->prev_ = blk;
   }
   walk->next_ = blk;
 }
@@ -402,7 +387,7 @@ void VmHeap::Join2Blocks(HeapBlock* first, HeapBlock* second) const {
   first->size_ = first->size_ + second->size_;
   first->next_ = second->next_;
   if (second->next_) {
-      second->next_->prev_ = first;
+    second->next_->prev_ = first;
   }
   delete second;
 }
@@ -413,12 +398,12 @@ void VmHeap::MergeBlock(HeapBlock** head, HeapBlock* blk) {
 
   // Merge with successor if possible
   if ((blk->next_ != nullptr) && (blk->offset_ + blk->size_ == blk->next_->offset_)) {
-      Join2Blocks(blk, blk->next_);
+    Join2Blocks(blk, blk->next_);
   }
 
   // Merge with predecessor if possible
   if ((blk->prev_ != nullptr) && (blk->prev_->offset_ + blk->prev_->size_ == blk->offset_)) {
-      Join2Blocks(blk->prev_, blk);
+    Join2Blocks(blk->prev_, blk);
   }
 }
 
@@ -465,12 +450,12 @@ void VmHeapArray::TrimPhysMemory(size_t unmap_threshold) {
   for (uint i = 0; i < kMaxArraySize; ++i) {
     // Check the threshold against the accumulated sizes in all heaps
     if (vm_heaps_[i]->created_ && [this]() {
-      uint64_t size = 0;
-      for (uint i = 0; i < kMaxArraySize; ++i) {
-        size += vm_heaps_[i]->FreeMappedSize();
-      }
-      return size;
-     }() > unmap_threshold) {
+          uint64_t size = 0;
+          for (uint i = 0; i < kMaxArraySize; ++i) {
+            size += vm_heaps_[i]->FreeMappedSize();
+          }
+          return size;
+        }() > unmap_threshold) {
       vm_heaps_[i]->TrimPhysMemory(unmap_threshold);
     } else {
       break;
@@ -524,4 +509,4 @@ void VmHeapArray::ResetMaxMappedSize() {
   }
 }
 
-} // namespace amd
+}  // namespace amd

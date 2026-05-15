@@ -111,6 +111,7 @@ void RdciDiscoverySubSystem::show_help() const {
 void RdciDiscoverySubSystem::show_attributes() {
   uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES];
   uint32_t count = 0;
+
   rdc_status_t result = rdc_device_get_all(rdc_handle_, gpu_index_list, &count);
   if (result != RDC_ST_OK) {
     throw RdcException(result, "Fail to get device information");
@@ -234,14 +235,14 @@ void RdciDiscoverySubSystem::show_attributes_with_partitions() {
         std::cout << ", \"partitions\": [";
       }
       for (uint32_t pid = 0; pid < num_partition; pid++) {
-        std::string instance_str = "g" + std::to_string(i) + "." + std::to_string(pid);
-
+        std::string instance_str;
         rdc_entity_info_t part_info;
         part_info.device_index = i;
         part_info.instance_index = pid;
         part_info.entity_role = RDC_DEVICE_ROLE_PARTITION_INSTANCE;
         part_info.device_type = RDC_DEVICE_TYPE_GPU;
         uint32_t part_entity_index = rdc_get_entity_index_from_info(part_info);
+        instance_str = "g" + std::to_string(i) + "." + std::to_string(pid);
 
         rdc_resource_profile_t part_xcc = {};
         rdc_resource_profile_t part_decoder = {};

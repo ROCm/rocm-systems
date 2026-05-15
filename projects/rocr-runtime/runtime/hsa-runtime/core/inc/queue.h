@@ -75,6 +75,7 @@ struct AqlPacket {
     hsa_barrier_and_packet_t barrier_and;
     hsa_barrier_or_packet_t barrier_or;
     hsa_agent_dispatch_packet_t agent;
+    hsa_amd_ext_kernel_dispatch_packet_t ext_dispatch;
   };
 
   // Access the type field from a packet header. The caller is responsible for
@@ -90,17 +91,62 @@ struct AqlPacket {
             (type(header) != HSA_PACKET_TYPE_INVALID));
   }
 
+  bool __forceinline isDispatch() const {
+    return (type(packet.header) == HSA_PACKET_TYPE_KERNEL_DISPATCH);
+  }
+
+  bool __forceinline isExtDispatch() const {
+    return (type(packet.header) == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
+            amd_vendor.format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH);
+  }
+
   bool __forceinline IsDispatchAndNeedsScratch() const {
     assert(IsValid(packet.header) && "Invalid packet in dynamic scratch handler.");
 
-    if (type(packet.header) != HSA_PACKET_TYPE_KERNEL_DISPATCH ||
-        dispatch.private_segment_size == 0)
-      return false;
+    if (isDispatch() && dispatch.private_segment_size > 0) {
+      assert((dispatch.workgroup_size_x != 0) && (dispatch.workgroup_size_y != 0) &&
+             (dispatch.workgroup_size_z != 0) && "Invalid dispatch dimension.");
+      return true;
+    } else if (isExtDispatch() && ext_dispatch.private_segment_size > 0) {
+      assert((ext_dispatch.workgroup_size_x != 0) && (ext_dispatch.workgroup_size_y != 0) &&
+             (ext_dispatch.workgroup_size_z != 0) && "Invalid ext dispatch dimension.");
+      return true;
+    }
 
-    assert((dispatch.workgroup_size_x != 0) && (dispatch.workgroup_size_y != 0) &&
-           (dispatch.workgroup_size_z != 0) && "Invalid dispatch dimension.");
+    return false;
+  }
 
-    return true;
+  uint32_t __forceinline dispatch_grid_size_x() const {
+    if (isDispatch()) {
+      return dispatch.grid_size_x;
+    } else if (isExtDispatch()) {
+      return ext_dispatch.cluster_count_x * ext_dispatch.cluster_size_x *
+          ext_dispatch.workgroup_size_x;
+    }
+    assert(false && "Invalid dispatch pkt");
+    return 0;
+  }
+
+  uint32_t __forceinline dispatch_grid_size_y() const {
+    if (isDispatch()) {
+      return dispatch.grid_size_y;
+    } else if (isExtDispatch()) {
+      return ext_dispatch.cluster_count_y * ext_dispatch.cluster_size_y *
+          ext_dispatch.workgroup_size_y;
+    }
+    assert(false && "Invalid dispatch pkt");
+    return 0;
+  }
+
+  uint32_t __forceinline dispatch_grid_size_z() const {
+    if (isDispatch()) {
+      return dispatch.grid_size_z;
+    } else if (isExtDispatch()) {
+      return ext_dispatch.cluster_count_z * ext_dispatch.cluster_size_z *
+          ext_dispatch.workgroup_size_z;
+    }
+    assert(false && "Invalid dispatch pkt");
+    return 0;
   }
 
   std::string string() const {
@@ -116,7 +162,6 @@ struct AqlPacket {
       string << "type: UNKNOWN#" << t;
       return string.str();
     }
-
     string << "type: " << type_names[t]
            << "\nbarrier: " << ((dispatch.header >> HSA_PACKET_HEADER_BARRIER) &
                                 ((1 << HSA_PACKET_HEADER_WIDTH_BARRIER) - 1))
@@ -125,28 +170,67 @@ struct AqlPacket {
            << "\nrelease: " << ((dispatch.header >> HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE) &
                                 ((1 << HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE) - 1));
 
-    if (t == HSA_PACKET_TYPE_KERNEL_DISPATCH) {
-      string << "\nDim: " << dispatch.setup
-             << "\nworkgroup_size: " << dispatch.workgroup_size_x << ", "
-             << dispatch.workgroup_size_y << ", " << dispatch.workgroup_size_z
-             << "\ngrid_size: " << dispatch.grid_size_x << ", "
-             << dispatch.grid_size_y << ", " << dispatch.grid_size_z
-             << "\nprivate_size: " << dispatch.private_segment_size
-             << "\ngroup_size: " << dispatch.group_segment_size
-             << "\nkernel_object: " << dispatch.kernel_object
-             << "\nkern_arg: " << dispatch.kernarg_address
-             << "\nsignal: " << dispatch.completion_signal.handle;
+    switch (t) {
+      case HSA_PACKET_TYPE_KERNEL_DISPATCH:
+        string << "\nDim: " << dispatch.setup << "\nworkgroup_size: " << dispatch.workgroup_size_x
+               << ", " << dispatch.workgroup_size_y << ", " << dispatch.workgroup_size_z
+               << "\ngrid_size: " << dispatch.grid_size_x << ", " << dispatch.grid_size_y << ", "
+               << dispatch.grid_size_z << "\nprivate_size: " << dispatch.private_segment_size
+               << "\ngroup_size: " << dispatch.group_segment_size
+               << "\nkernel_object: " << dispatch.kernel_object
+               << "\nkern_arg: " << dispatch.kernarg_address
+               << "\nsignal: " << dispatch.completion_signal.handle;
+        break;
+      case HSA_PACKET_TYPE_VENDOR_SPECIFIC:
+        if (amd_vendor.format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH) {
+          string << "\nDim: " << ext_dispatch.setup
+                 << "\nworkgroup_size: " << ext_dispatch.workgroup_size_x << ", "
+                 << ext_dispatch.workgroup_size_y << ", " << ext_dispatch.workgroup_size_z
+                 << "\ncluster_count: " << ext_dispatch.cluster_count_x << ", "
+                 << ext_dispatch.cluster_count_y << ", " << ext_dispatch.cluster_count_z
+                 << "\ncluster_size: " << ext_dispatch.cluster_size_x << ", "
+                 << ext_dispatch.cluster_size_y << ", " << ext_dispatch.cluster_size_z
+                 << "\nprivate_size: " << ext_dispatch.private_segment_size
+                 << "\ngroup_size: " << ext_dispatch.group_segment_size
+                 << "\nkernel_object: " << ext_dispatch.kernel_object
+                 << "\nkern_arg: " << ext_dispatch.kernarg_address
+                 << "\nsignal: " << ext_dispatch.completion_signal.handle;
+        }
+        break;
+      case HSA_PACKET_TYPE_BARRIER_AND:
+      case HSA_PACKET_TYPE_BARRIER_OR:
+        for (int i = 0; i < 5; i++)
+          string << "\ndep[" << i << "]: " << barrier_and.dep_signal[i].handle;
+        string << "\nsignal: " << barrier_and.completion_signal.handle;
+        break;
     }
-
-    if ((t == HSA_PACKET_TYPE_BARRIER_AND) ||
-        (t == HSA_PACKET_TYPE_BARRIER_OR)) {
-      for (int i = 0; i < 5; i++)
-        string << "\ndep[" << i << "]: " << barrier_and.dep_signal[i].handle;
-      string << "\nsignal: " << barrier_and.completion_signal.handle;
-    }
-
     return string.str();
   }
+};
+
+struct AqlMetadataPrefetchPacket {
+  typedef struct header_s {
+    uint8_t type;
+    uint8_t reserved[2];
+    uint8_t version_minor:5;
+    uint8_t version_major:3;
+  } header_t;
+
+  union {
+    struct {
+      header_t header0;
+      uint32_t event_id;
+      uint8_t user_data0[56];
+      header_t header1;
+      uint8_t user_data1[60];
+      header_t header2;
+      uint8_t user_data2[60];
+      header_t header3;
+      uint8_t user_data3[60];
+    } packet;
+    hsa_amd_metadata_kernel_dispatch_packet_t dispatch;
+    hsa_amd_metadata_barrier_packet_t barrier;
+  };
 };
 
 class Queue;
@@ -168,12 +252,15 @@ All funtions other than Convert and public_handle must be virtual.
 */
 class Queue : public Checked<0xFA3906A679F9DB49> {
  public:
-  Queue(SharedQueue* shared_queue, uint64_t queue_flags)
-      : Queue(shared_queue, queue_flags, false) {}
+  Queue(SharedQueue* shared_queue, uint64_t queue_flags, core::Agent* agent)
+      : Queue(shared_queue, queue_flags, false, agent) {}
 
-  Queue(SharedQueue* shared_queue, uint64_t queue_flags, bool pcie_write_ordering)
+  Queue(SharedQueue* shared_queue, uint64_t queue_flags, bool pcie_write_ordering, core::Agent* agent)
       : amd_queue_(shared_queue->amd_queue),
+        use_count(0),
+        is_counted_queue(false),
         shared_queue_(shared_queue),
+        agent_(agent),
         flags_(queue_flags),
         pcie_write_ordering_(pcie_write_ordering) {
     public_handle_ = Convert(this);
@@ -213,7 +300,7 @@ class Queue : public Checked<0xFA3906A679F9DB49> {
   virtual hsa_status_t Inactivate() = 0;
 
   /// @brief Change the scheduling priority of the queue
-  virtual hsa_status_t SetPriority(HSA_QUEUE_PRIORITY priority) = 0;
+  virtual hsa_status_t SetPriority(HSA::hsa_amd_queue_priority_internal_t priority) = 0;
 
   /// @brief Reads the Read Index of Queue using Acquire semantics
   ///
@@ -372,6 +459,13 @@ class Queue : public Checked<0xFA3906A679F9DB49> {
 
   hsa_queue_t* public_handle() const { return public_handle_; }
 
+  // Get a pointer to the agent that owns this queue
+  core::Agent* GetAgent() { return agent_; }
+
+  // @brief Attributes specifically for counted queue types
+  uint32_t use_count;
+  bool is_counted_queue;
+
   typedef void* rtti_t;
 
   bool IsType(rtti_t id) { return _IsA(id); }
@@ -400,6 +494,8 @@ class Queue : public Checked<0xFA3906A679F9DB49> {
   virtual bool _IsA(rtti_t id) const = 0;
 
   SharedQueue* shared_queue_;
+
+  core::Agent* agent_; // pointer to the agent that owns this queue
 
   hsa_queue_t* public_handle_;
 

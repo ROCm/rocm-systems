@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
@@ -41,9 +28,8 @@ static __global__ void kerTestDeviceMalloc(size_t size) {
   int myId = threadIdx.x + blockDim.x * blockIdx.x;
   // Allocate
   if (myId == 0) {
-    dev_common_ptr = reinterpret_cast<char*> (malloc(size));
+    dev_common_ptr = reinterpret_cast<char*>(malloc(size));
     if (dev_common_ptr == nullptr) {
-      printf("Device Allocation Failed! \n");
       return;
     }
   }
@@ -57,7 +43,6 @@ static __global__ void kerTestDeviceWrite() {
   int myId = threadIdx.x + blockDim.x * blockIdx.x;
   // Allocate
   if (dev_common_ptr == nullptr) {
-    printf("Device Allocation Failed! \n");
     return;
   }
   *(dev_common_ptr + myId) = SCHAR_MAX;
@@ -67,13 +52,13 @@ static __global__ void kerTestDeviceWrite() {
  * This kernel frees the memory chunk allocated in kernel
  * kerTestDeviceMalloc using free().
  */
-static __global__ void kerTestDeviceFree(int *result) {
+static __global__ void kerTestDeviceFree(int* result) {
   int myId = threadIdx.x + blockDim.x * blockIdx.x;
   // Allocate
   if (myId == 0) {
     if (dev_common_ptr != nullptr) {
       *result = 1;
-      for (int idx = 0; idx < (BLOCKSIZE*GRIDSIZE); idx++) {
+      for (int idx = 0; idx < (BLOCKSIZE * GRIDSIZE); idx++) {
         if (*(dev_common_ptr + myId) != SCHAR_MAX) {
           *result = 0;
           break;
@@ -95,7 +80,6 @@ static __global__ void kerTestDeviceNew(size_t size) {
   if (myId == 0) {
     dev_common_ptr = new char[size];
     if (dev_common_ptr == nullptr) {
-      printf("Device Allocation Failed! \n");
       return;
     }
   }
@@ -105,13 +89,13 @@ static __global__ void kerTestDeviceNew(size_t size) {
  * This kernel frees the memory chunk allocated in kernel
  * kerTestDeviceNew using delete operator.
  */
-static __global__ void kerTestDeviceDelete(int *result) {
+static __global__ void kerTestDeviceDelete(int* result) {
   int myId = threadIdx.x + blockDim.x * blockIdx.x;
   // Allocate
   if (myId == 0) {
     if (dev_common_ptr != nullptr) {
       *result = 1;
-      for (int idx = 0; idx < (BLOCKSIZE*GRIDSIZE); idx++) {
+      for (int idx = 0; idx < (BLOCKSIZE * GRIDSIZE); idx++) {
         if (*(dev_common_ptr + myId) != SCHAR_MAX) {
           *result = 0;
           break;
@@ -140,7 +124,7 @@ static bool testDeviceAllocMulProc(bool testmalloc) {
   childpid = fork();
   if (childpid > 0) {  // Parent
     close(fd[1]);
-    int *result_d{nullptr};
+    int* result_d{nullptr};
     HIP_CHECK(hipMalloc(&result_d, sizeof(int)));
     // Allocate in parent
     if (testmalloc) {
@@ -185,7 +169,7 @@ static bool testDeviceAllocMulProc(bool testmalloc) {
     HIP_CHECK(hipFree(result_d));
   } else if (!childpid) {  // Child
     // Wait for hipDeviceSetLimit() completion in parent.
-    int *result_d{nullptr};
+    int* result_d{nullptr};
     HIP_CHECK(hipMalloc(&result_d, sizeof(int)));
     close(fd[0]);
     // Allocate in child
@@ -230,7 +214,7 @@ static bool testDeviceMemMulProc(bool testmalloc) {
   bool testResult = false;
   pid_t childpid;
   int testResultChild = 0;
-  size_t size = BLOCKSIZE*GRIDSIZE;
+  size_t size = BLOCKSIZE * GRIDSIZE;
   // create pipe descriptors
   pipe(fd);
   // fork process
@@ -239,7 +223,7 @@ static bool testDeviceMemMulProc(bool testmalloc) {
     close(fd[1]);
     int *result_d{nullptr}, *result_h{nullptr};
     HIP_CHECK(hipMalloc(&result_d, sizeof(int)));
-    result_h = reinterpret_cast<int*> (malloc(sizeof(int)));
+    result_h = reinterpret_cast<int*>(malloc(sizeof(int)));
     REQUIRE(result_h != nullptr);
     // Allocate in parent
     if (testmalloc) {
@@ -257,8 +241,7 @@ static bool testDeviceMemMulProc(bool testmalloc) {
     }
     HIP_CHECK(hipDeviceSynchronize());
     *result_h = 0;
-    HIP_CHECK(hipMemcpy(result_h, result_d, sizeof(int),
-              hipMemcpyDefault));
+    HIP_CHECK(hipMemcpy(result_h, result_d, sizeof(int), hipMemcpyDefault));
     if (*result_h == 0) {
       testResult = false;
     } else {
@@ -282,7 +265,7 @@ static bool testDeviceMemMulProc(bool testmalloc) {
     close(fd[0]);
     int *result_d{nullptr}, *result_h{nullptr};
     HIP_CHECK(hipMalloc(&result_d, sizeof(int)));
-    result_h = reinterpret_cast<int*> (malloc(sizeof(int)));
+    result_h = reinterpret_cast<int*>(malloc(sizeof(int)));
     REQUIRE(result_h != nullptr);
     // Allocate in child
     if (testmalloc) {
@@ -300,8 +283,7 @@ static bool testDeviceMemMulProc(bool testmalloc) {
     }
     HIP_CHECK(hipDeviceSynchronize());
     *result_h = 0;
-    HIP_CHECK(hipMemcpy(result_h, result_d, sizeof(int),
-              hipMemcpyDefault));
+    HIP_CHECK(hipMemcpy(result_h, result_d, sizeof(int), hipMemcpyDefault));
     // send the value on the write-descriptor:
     write(fd[1], result_h, sizeof(int));
     // close the write descriptor:
@@ -316,7 +298,7 @@ static bool testDeviceMemMulProc(bool testmalloc) {
 /**
  * Multiprocess device side malloc test.
  */
-TEST_CASE("Unit_deviceAllocation_Malloc_MultProcess") {
+HIP_TEST_CASE(Unit_deviceAllocation_Malloc_MultProcess) {
   auto res = testDeviceAllocMulProc(true);
   REQUIRE(res == true);
 }
@@ -324,7 +306,7 @@ TEST_CASE("Unit_deviceAllocation_Malloc_MultProcess") {
 /**
  * Multiprocess device side new test.
  */
-TEST_CASE("Unit_deviceAllocation_New_MultProcess") {
+HIP_TEST_CASE(Unit_deviceAllocation_New_MultProcess) {
   auto res = testDeviceAllocMulProc(false);
   REQUIRE(res == true);
 }
@@ -332,7 +314,7 @@ TEST_CASE("Unit_deviceAllocation_New_MultProcess") {
 /**
  * Multiprocess device side malloc, write and free test.
  */
-TEST_CASE("Unit_deviceAllocation_MallocFree_MultProcess") {
+HIP_TEST_CASE(Unit_deviceAllocation_MallocFree_MultProcess) {
   auto res = testDeviceMemMulProc(true);
   REQUIRE(res == true);
 }
@@ -340,7 +322,7 @@ TEST_CASE("Unit_deviceAllocation_MallocFree_MultProcess") {
 /**
  * Multiprocess device side new, write and delete test.
  */
-TEST_CASE("Unit_deviceAllocation_NewDelete_MultProcess") {
+HIP_TEST_CASE(Unit_deviceAllocation_NewDelete_MultProcess) {
   auto res = testDeviceMemMulProc(false);
   REQUIRE(res == true);
 }

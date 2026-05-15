@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
@@ -41,21 +28,17 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_NegTst") {
+HIP_TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_NegTst) {
   // declare host and device arrays
   int rows, cols;
   rows = GENERATE(3, 4, 100);
   cols = GENERATE(3, 4, 100);
   int *srcD, *srcH;
   int *dstD, *dstH;
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&srcD),
-                      sizeof(int) * rows * cols));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dstD),
-                      sizeof(int) * rows * cols));
-  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&srcH),
-                      sizeof(int) * rows * cols));
-  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&dstH),
-                      sizeof(int) * rows * cols));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&srcD), sizeof(int) * rows * cols));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dstD), sizeof(int) * rows * cols));
+  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&srcH), sizeof(int) * rows * cols));
+  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&dstH), sizeof(int) * rows * cols));
 
   // initialise array with corresponding index values
   for (int i = 0; i < rows * cols; i++) {
@@ -65,7 +48,8 @@ TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_NegTst") {
 
   hip_Memcpy2D pCopy;
 
-  SECTION("srcY(second argument) + non-zero WidthInBytes(15th argument)\
+  SECTION(
+      "srcY(second argument) + non-zero WidthInBytes(15th argument)\
            * Height(16th argument) points to unallocated memory") {
     pCopy.srcXInBytes = 0;
     pCopy.srcY = rows;
@@ -81,7 +65,8 @@ TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_NegTst") {
     pCopy.dstPitch = cols * sizeof(int);
     HIP_CHECK_ERROR(hipDrvMemcpy2DUnaligned(&pCopy), hipErrorInvalidValue);
   }
-  SECTION("srcHost(4th argument), srcDevice(5th argument), srcArray(6th\
+  SECTION(
+      "srcHost(4th argument), srcDevice(5th argument), srcArray(6th\
           argument) passed nullptr") {
     pCopy.srcXInBytes = 0;
     pCopy.srcY = 0;
@@ -103,11 +88,12 @@ TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_NegTst") {
     }
     SECTION("srcArray passed nullptr") {
       pCopy.srcMemoryType = hipMemoryTypeArray;
-      pCopy.srcArray =  nullptr;
+      pCopy.srcArray = nullptr;
     }
     HIP_CHECK_ERROR(hipDrvMemcpy2DUnaligned(&pCopy), hipErrorInvalidValue);
   }
-  SECTION("dstY(second argument) + non-zero WidthInBytes(15th argument)\
+  SECTION(
+      "dstY(second argument) + non-zero WidthInBytes(15th argument)\
            * Height(16th argument) points to unallocated memory") {
     pCopy.srcXInBytes = 0;
     pCopy.srcY = 0;
@@ -123,7 +109,8 @@ TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_NegTst") {
     pCopy.dstPitch = cols * sizeof(int);
     HIP_CHECK_ERROR(hipDrvMemcpy2DUnaligned(&pCopy), hipErrorInvalidValue);
   }
-  SECTION("dstHost(4th argument), dstDevice(5th argument), dstArray(6th\
+  SECTION(
+      "dstHost(4th argument), dstDevice(5th argument), dstArray(6th\
           argument) passed nullptr") {
     pCopy.srcXInBytes = 0;
     pCopy.srcY = 0;
@@ -145,11 +132,12 @@ TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_NegTst") {
     }
     SECTION("dstArray passed nullptr") {
       pCopy.dstMemoryType = hipMemoryTypeArray;
-      pCopy.dstArray =  nullptr;
+      pCopy.dstArray = nullptr;
     }
     HIP_CHECK_ERROR(hipDrvMemcpy2DUnaligned(&pCopy), hipErrorInvalidValue);
   }
-  SECTION("WidthInBytes * Height greater than allocated memory(both src \
+  SECTION(
+      "WidthInBytes * Height greater than allocated memory(both src \
           and dst)") {
     pCopy.srcXInBytes = 0;
     pCopy.srcY = 0;
@@ -182,8 +170,9 @@ TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_NegTst") {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_FuncTst") {
-  SECTION("Different types of memory transfers functional tests to check if\
+HIP_TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_FuncTst) {
+  SECTION(
+      "Different types of memory transfers functional tests to check if\
           copied array contains correct values") {
     // declare host and device arrays
     int rows, cols;
@@ -191,10 +180,8 @@ TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_FuncTst") {
     cols = GENERATE(3, 4, 100);
     int *srcD, *srcH;
     int *dstD, *dstH;
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&srcD),
-                        sizeof(int) * rows * cols));
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dstD),
-                        sizeof(int) * rows * cols));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&srcD), sizeof(int) * rows * cols));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dstD), sizeof(int) * rows * cols));
     srcH = reinterpret_cast<int*>(malloc(sizeof(int) * rows * cols));
     dstH = reinterpret_cast<int*>(malloc(sizeof(int) * rows * cols));
 
@@ -269,9 +256,7 @@ TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_FuncTst") {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_Positive_Basic") {
-  CHECK_IMAGE_SUPPORT
-
+HIP_TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_Positive_Basic) {
   SECTION("Device to Device") {
     SECTION("Peer access enabled") {
       Memcpy2DDeviceToDeviceShell<false, true, true>(DrvMemcpy2DUnalignedAdapter());
@@ -298,9 +283,7 @@ TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_Positive_Basic") {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_Positive_Synchronization_Behavior") {
-  CHECK_IMAGE_SUPPORT
-
+HIP_TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_Positive_Synchronization_Behavior) {
   HIP_CHECK(hipDeviceSynchronize());
 
   SECTION("Host to Device") { Memcpy2DHtoDSyncBehavior<true>(DrvMemcpy2DUnalignedAdapter(), true); }
@@ -325,6 +308,6 @@ TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_Positive_Synchronization_Behavior") {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_Positive_Parameters") {
+HIP_TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_Positive_Parameters) {
   Memcpy2DZeroWidthHeight<false, true>(DrvMemcpy2DUnalignedAdapter());
 }

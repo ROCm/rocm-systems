@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /*
 hipGraphInstantiateWithParams(hipGraphExec_t* pGraphExec, hipGraph_t graph,
@@ -51,39 +38,38 @@ constexpr size_t N = 1000000;
 * ------------------------
 * - HIP_VERSION >= 6.2
 */
-TEST_CASE("Unit_hipGraphInstantiateWithParams_Negative") {
+HIP_TEST_CASE(Unit_hipGraphInstantiateWithParams_Negative) {
   SECTION("Passing nullptr pGraphExec") {
     hipGraph_t graph;
     hipGraphInstantiateParams params;
     HIP_CHECK(hipGraphCreate(&graph, 0));
-    REQUIRE(hipGraphInstantiateWithParams(nullptr,
-                                       graph, &params) == hipErrorInvalidValue);
+    REQUIRE(hipGraphInstantiateWithParams(nullptr, graph, &params) == hipErrorInvalidValue);
+    HIP_CHECK(hipGraphDestroy(graph));
   }
 
   SECTION("Passing nullptr to graph") {
     hipGraphExec_t graphExec;
     hipGraphInstantiateParams params;
-    REQUIRE(hipGraphInstantiateWithParams(&graphExec,
-                                     nullptr, &params) == hipErrorInvalidValue);
+    REQUIRE(hipGraphInstantiateWithParams(&graphExec, nullptr, &params) == hipErrorInvalidValue);
   }
 
   SECTION("Passing nullptr to params") {
     hipGraph_t graph;
     HIP_CHECK(hipGraphCreate(&graph, 0));
     hipGraphExec_t graphExec;
-    REQUIRE(hipGraphInstantiateWithParams(&graphExec,
-                                       graph, nullptr) == hipErrorInvalidValue);
+    REQUIRE(hipGraphInstantiateWithParams(&graphExec, graph, nullptr) == hipErrorInvalidValue);
+    HIP_CHECK(hipGraphDestroy(graph));
   }
 
   SECTION("Passing invalid flag") {
     hipGraph_t graph;
     HIP_CHECK(hipGraphCreate(&graph, 0));
     hipGraphExec_t graphExec;
-    hipGraphInstantiateParams params;
-    params.flags = 10;
-    REQUIRE(hipGraphInstantiateWithParams(&graphExec,
-                                       graph, &params) == hipErrorInvalidValue);
+    hipGraphInstantiateParams params{};
+    params.flags = 100;
+    REQUIRE(hipGraphInstantiateWithParams(&graphExec, graph, &params) == hipErrorInvalidValue);
     REQUIRE(params.result_out == hipGraphInstantiateError);
+    HIP_CHECK(hipGraphDestroy(graph));
   }
 }
 
@@ -116,8 +102,7 @@ void GraphInstantiateWithParams_DependencyGraph() {
   memsetParams.elementSize = sizeof(char);
   memsetParams.width = Nbytes;
   memsetParams.height = 1;
-  HIP_CHECK(hipGraphAddMemsetNode(&memset_A, graph, nullptr, 0,
-                                                              &memsetParams));
+  HIP_CHECK(hipGraphAddMemsetNode(&memset_A, graph, nullptr, 0, &memsetParams));
 
   memset(&memsetParams, 0, sizeof(memsetParams));
   memsetParams.dst = reinterpret_cast<void*>(B_d);
@@ -126,37 +111,33 @@ void GraphInstantiateWithParams_DependencyGraph() {
   memsetParams.elementSize = sizeof(char);
   memsetParams.width = Nbytes;
   memsetParams.height = 1;
-  HIP_CHECK(hipGraphAddMemsetNode(&memset_B, graph, nullptr, 0,
-                                                              &memsetParams));
+  HIP_CHECK(hipGraphAddMemsetNode(&memset_B, graph, nullptr, 0, &memsetParams));
 
-  void* kernelArgs1[] = {&C_d, &memsetVal, reinterpret_cast<void *>(&NElem)};
-  kernelNodeParams.func =
-                       reinterpret_cast<void *>(HipTest::memsetReverse<int>);
+  void* kernelArgs1[] = {&C_d, &memsetVal, reinterpret_cast<void*>(&NElem)};
+  kernelNodeParams.func = reinterpret_cast<void*>(HipTest::memsetReverse<int>);
   kernelNodeParams.gridDim = dim3(blocks);
   kernelNodeParams.blockDim = dim3(threadsPerBlock);
   kernelNodeParams.sharedMemBytes = 0;
   kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs1);
   kernelNodeParams.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&memsetKer_C, graph, nullptr, 0,
-                                                        &kernelNodeParams));
+  HIP_CHECK(hipGraphAddKernelNode(&memsetKer_C, graph, nullptr, 0, &kernelNodeParams));
 
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0, A_d, A_h,
-                                   Nbytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_B, graph, nullptr, 0, B_d, B_h,
-                                   Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0, A_d, A_h, Nbytes,
+                                    hipMemcpyHostToDevice));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_B, graph, nullptr, 0, B_d, B_h, Nbytes,
+                                    hipMemcpyHostToDevice));
 
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, graph, nullptr, 0, C_h, C_d,
-                                   Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, graph, nullptr, 0, C_h, C_d, Nbytes,
+                                    hipMemcpyDeviceToHost));
 
-  void* kernelArgs2[] = {&A_d, &B_d, &C_d, reinterpret_cast<void *>(&NElem)};
-  kernelNodeParams.func = reinterpret_cast<void *>(HipTest::vectorADD<int>);
+  void* kernelArgs2[] = {&A_d, &B_d, &C_d, reinterpret_cast<void*>(&NElem)};
+  kernelNodeParams.func = reinterpret_cast<void*>(HipTest::vectorADD<int>);
   kernelNodeParams.gridDim = dim3(blocks);
   kernelNodeParams.blockDim = dim3(threadsPerBlock);
   kernelNodeParams.sharedMemBytes = 0;
   kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs2);
   kernelNodeParams.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&kernel_vecAdd, graph, nullptr, 0,
-                                                        &kernelNodeParams));
+  HIP_CHECK(hipGraphAddKernelNode(&kernel_vecAdd, graph, nullptr, 0, &kernelNodeParams));
 
   // Create dependencies
   HIP_CHECK(hipGraphAddDependencies(graph, &memset_A, &memcpyH2D_A, 1));
@@ -197,25 +178,24 @@ void GraphInstantiateWithParams_StreamCapture() {
 
   // Fill with Phi + i
   for (size_t i = 0; i < N; i++) {
-      A_h[i] = 1.618f + i;
+    A_h[i] = 1.618f + i;
   }
   HIP_CHECK(hipMalloc(&A_d, Nbytes));
   HIP_CHECK(hipMalloc(&C_d, Nbytes));
   REQUIRE(A_d != nullptr);
   REQUIRE(C_d != nullptr);
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-
 
   HIP_CHECK(hipStreamCreate(&stream));
-  constexpr unsigned blocks = 512;
-  constexpr unsigned threadsPerBlock = 256;
-
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream));
 
+  HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream));
   HIP_CHECK(hipMemsetAsync(C_d, 0, Nbytes, stream));
-  hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks),
-                              dim3(threadsPerBlock), 0, stream, A_d, C_d, N);
+
+  constexpr unsigned threadsPerBlock = 256;
+  constexpr unsigned blocks =
+      (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
+  hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks), dim3(threadsPerBlock), 0, stream, A_d,
+                     C_d, N);
   HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, stream));
 
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
@@ -251,39 +231,39 @@ void GraphInstantiateWithParams_StreamCapture() {
 }
 
 /**
-* Test Description
-* ------------------------
-* - Verifies hipGraphInstantiateWithParams API by creating dependency graph
-* - and instantiate, launch and verify the result
-*
-* Test source
-* ------------------------
-* - catch/unit/graph/hipGraphInstantiateWithParams.cc
-* Test requirements
-* ------------------------
-* - HIP_VERSION >= 6.2
-*/
-TEST_CASE("Unit_hipGraphInstantiateWithParams_DependencyGraph") {
+ * Test Description
+ * ------------------------
+ * - Verifies hipGraphInstantiateWithParams API by creating dependency graph
+ * - and instantiate, launch and verify the result
+ *
+ * Test source
+ * ------------------------
+ * - catch/unit/graph/hipGraphInstantiateWithParams.cc
+ * Test requirements
+ * ------------------------
+ * - HIP_VERSION >= 6.2
+ */
+HIP_TEST_CASE(Unit_hipGraphInstantiateWithParams_DependencyGraph) {
   GraphInstantiateWithParams_DependencyGraph();
 }
 
 
 /**
-* Test Description
-* ------------------------
-* - Verifies hipGraphInstantiateWithParams API by using StreamCapture
-* - to create create a graph and instantiate, launch and verify results
-*
-* Test source
-* ------------------------
-* - catch/unit/graph/hipGraphInstantiateWithParams.cc
-* Test requirements
-* ------------------------
-* - HIP_VERSION >= 6.2
-*/
-TEST_CASE("Unit_hipGraphInstantiateWithParams_StreamCapture") {
-      GraphInstantiateWithParams_StreamCapture();
+ * Test Description
+ * ------------------------
+ * - Verifies hipGraphInstantiateWithParams API by using StreamCapture
+ * - to create create a graph and instantiate, launch and verify results
+ *
+ * Test source
+ * ------------------------
+ * - catch/unit/graph/hipGraphInstantiateWithParams.cc
+ * Test requirements
+ * ------------------------
+ * - HIP_VERSION >= 6.2
+ */
+HIP_TEST_CASE(Unit_hipGraphInstantiateWithParams_StreamCapture) {
+  GraphInstantiateWithParams_StreamCapture();
 }
 
 
-#endif // CUDA_VERSION >= CUDA_12000
+#endif  // CUDA_VERSION >= CUDA_12000

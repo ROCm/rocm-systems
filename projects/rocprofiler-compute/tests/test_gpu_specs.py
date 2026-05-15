@@ -1,42 +1,17 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
-##############################################################################
-
-import os
 import re
 import subprocess
 import tempfile
-from importlib.machinery import SourceFileLoader
 from unittest.mock import patch
 
 import pytest
 
-from src.utils.specs import generate_machine_specs
-
-rocprof_compute = SourceFileLoader(
-    "rocprof-compute", "src/rocprof-compute"
-).load_module()
+try:
+    from src.utils.specs import generate_machine_specs
+except Exception:
+    from utils.specs import generate_machine_specs
 
 # NOTE: Only testing gfx942 for now.
 GFX942_CHIP_IDS_TO_NUM_XCDS = {
@@ -66,7 +41,7 @@ def parse_table_dict(output: str) -> dict:
     """
     Parse an ASCII table into a dict mapping Spec -> Value.
     """
-    lines = [line for line in output.splitlines() if line.startswith("│")]
+    lines = [line for line in output.splitlines() if line.startswith("|")]
     # locate header row (the one containing 'Spec' and 'Value')
     header_idx = next(
         (i for i, ln in enumerate(lines) if "Spec" in ln and "Value" in ln), None
@@ -74,16 +49,17 @@ def parse_table_dict(output: str) -> dict:
     if header_idx is None:
         raise ValueError("Header row with Spec and Value not found")
 
-    header_cells = [c.strip() for c in lines[header_idx].strip("│").split("│")]
+    header_cells = [c.strip() for c in lines[header_idx].strip("|").split("|")]
 
     spec_i = header_cells.index("Spec")
     value_i = header_cells.index("Value")
 
     result = {}
-    for ln in lines[header_idx + 2 :]:
-        if ln.startswith("├") or ln.startswith("╘"):
+    for ln in lines[header_idx + 1 :]:
+        # Skip separator lines
+        if ln.startswith("+"):
             continue
-        cells = [c.strip() for c in ln.strip("│").split("│")]
+        cells = [c.strip() for c in ln.strip("|").split("|")]
         if len(cells) <= max(spec_i, value_i):
             continue
         spec = cells[spec_i]
@@ -91,14 +67,6 @@ def parse_table_dict(output: str) -> dict:
         if spec:
             result[spec] = value
     return result
-
-
-def run(cmd):
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if cmd[0] == "amd-smi" and p.returncode == 8:
-        print("ERROR: No GPU detected. Unable to load amd-smi")
-        assert 0
-    return p.stdout.decode("utf-8")
 
 
 def get_num_xcds():
@@ -152,7 +120,7 @@ def test_num_xcds_spec_class(monkeypatch):
     num_xcds = get_num_xcds()
 
     # 2. load machine specs
-    machine_spec = generate_machine_specs(None)
+    machine_spec = generate_machine_specs(None, None)
 
     # 3. check results are expected
     assert machine_spec.compute_partition is not None
@@ -171,12 +139,20 @@ def test_num_xcds_cli_output():
     num_xcds = get_num_xcds()
 
     # 2. Run rocprof-compute -s and grab rocprof-compute num_xcd
-    proc = subprocess.run(
-        ["src/rocprof-compute", "-s"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+    try:
+        proc = subprocess.run(
+            ["src/rocprof-compute", "-s"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except Exception:
+        proc = subprocess.run(
+            ["./rocprof-compute", "-s"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
     assert proc.returncode == 0, (
         f"Non-zero exit ({proc.returncode}), stderr:\n{proc.stderr}"
     )
@@ -203,26 +179,24 @@ def test_load_yaml_file_not_found():
     """Test _load_yaml with non-existent file - covers lines 104-105"""
     from src.utils.mi_gpu_spec import MIGPUSpecs
 
-    non_existent_path = "/path/that/does/not/exist/file.yaml"
-
-    with pytest.raises(SystemExit):
-        MIGPUSpecs._load_yaml(non_existent_path)
+    with pytest.raises(FileNotFoundError):
+        MIGPUSpecs._load_yaml("non_existent_file.yaml")
 
 
 @pytest.mark.misc
 def test_load_yaml_invalid_yaml():
     """Test _load_yaml with corrupted YAML - covers lines 106-107"""
+    import yaml
+
     from src.utils.mi_gpu_spec import MIGPUSpecs
 
+    # Create invalid YAML file
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
         f.write("invalid: yaml: content: [\nunclosed bracket")
         temp_path = f.name
 
-    try:
-        with pytest.raises(SystemExit):
-            MIGPUSpecs._load_yaml(temp_path)
-    finally:
-        os.unlink(temp_path)
+    with pytest.raises(yaml.YAMLError):
+        MIGPUSpecs._load_yaml(str(temp_path))
 
 
 @pytest.mark.misc
@@ -231,7 +205,7 @@ def test_load_yaml_generic_exception():
     from src.utils.mi_gpu_spec import MIGPUSpecs
 
     with patch("builtins.open", side_effect=PermissionError("Access denied")):
-        with pytest.raises(SystemExit):
+        with pytest.raises(PermissionError, match="Access denied"):
             MIGPUSpecs._load_yaml("some_file.yaml")
 
 
@@ -241,8 +215,7 @@ def test_get_gpu_series_dict_uninitialized():
     from src.utils.mi_gpu_spec import MIGPUSpecs
 
     with patch.object(MIGPUSpecs, "_gpu_series_dict", {}):
-        with pytest.raises(SystemExit):
-            MIGPUSpecs.get_gpu_series_dict()
+        assert MIGPUSpecs.get_gpu_series_dict() == {}
 
 
 @pytest.mark.misc
@@ -251,8 +224,7 @@ def test_get_gpu_series_uninitialized():
     from src.utils.mi_gpu_spec import MIGPUSpecs
 
     with patch.object(MIGPUSpecs, "_gpu_series_dict", {}):
-        with pytest.raises(SystemExit):
-            result = MIGPUSpecs.get_gpu_series("gfx942")  # noqa: F841
+        assert MIGPUSpecs.get_gpu_series_dict() == {}
 
 
 @pytest.mark.misc
@@ -328,7 +300,9 @@ def test_get_num_xcds_unknown_gpu_model():
     """Test get_num_xcds with unknown gpu model - covers lines 319-321"""
     from src.utils.mi_gpu_spec import MIGPUSpecs
 
-    result = MIGPUSpecs.get_num_xcds(gpu_arch="gfx950", gpu_model="UNKNOWN_MODEL")  # noqa: F841
+    result = MIGPUSpecs.get_num_xcds(  # noqa: F841
+        gpu_arch="gfx950", gpu_model="UNKNOWN_MODEL"
+    )
 
 
 @pytest.mark.misc
@@ -379,9 +353,7 @@ def test_get_chip_id_dict_empty():
     from src.utils.mi_gpu_spec import MIGPUSpecs
 
     with patch.object(MIGPUSpecs, "_chip_id_dict", {}):
-        with patch("src.utils.mi_gpu_spec.console_error") as mock_error:
-            result = MIGPUSpecs.get_chip_id_dict()  # noqa: F841
-            mock_error.assert_called_once()
+        assert MIGPUSpecs.get_chip_id_dict() == {}
 
 
 @pytest.mark.misc
@@ -390,9 +362,7 @@ def test_get_num_xcds_dict_empty():
     from src.utils.mi_gpu_spec import MIGPUSpecs
 
     with patch.object(MIGPUSpecs, "_num_xcds_dict", {}):
-        with patch("src.utils.mi_gpu_spec.console_error") as mock_error:
-            result = MIGPUSpecs.get_num_xcds_dict()  # noqa: F841
-            mock_error.assert_called_once()
+        assert MIGPUSpecs.get_num_xcds_dict() == {}
 
 
 @pytest.mark.misc
@@ -401,6 +371,7 @@ def test_normal_functionality_still_works():
     from src.utils.mi_gpu_spec import MIGPUSpecs
 
     result = MIGPUSpecs.get_gpu_model("gfx90a", None)
+
     assert result is not None
 
     result = MIGPUSpecs.get_gpu_series("gfx90a")

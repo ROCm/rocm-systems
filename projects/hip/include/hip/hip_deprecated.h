@@ -1,3 +1,9 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 #pragma once
 
 // This file will add older hip functions used in the versioning system
@@ -23,7 +29,10 @@ typedef struct hipDeviceProp_tR0000 {
   int minor;  ///< Minor compute capability.  On HCC, this is an approximation and features may
               ///< differ from CUDA CC.  See the arch feature flags for portable ways to query
               ///< feature caps.
-  int multiProcessorCount;          ///< Number of multi-processors (compute units).
+  int multiProcessorCount;          ///< Number of multi-processors. When the GPU works in Compute
+                                    ///< Unit (CU) mode, this value equals the number of CUs;
+                                    ///< when in Workgroup Processor (WGP) mode, this value equels
+                                    ///< half of CUs, because a single WGP contains two CUs.
   int l2CacheSize;                  ///< L2 cache size.
   int maxThreadsPerMultiProcessor;  ///< Maximum resident threads per multi-processor.
   int computeMode;                  ///< Compute mode.

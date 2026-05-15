@@ -69,6 +69,8 @@
 #define COL_YEL  "\x1B[33m"
 #define COL_RESET "\033[0m"
 
+#define UNUSED(x) (void)(x)
+
 #define RET_IF_HSA_ERR(err) { \
   if ((err) != HSA_STATUS_SUCCESS) { \
     char err_val[12];                                                         \
@@ -135,10 +137,10 @@ struct agent_info_t {
   uint32_t simds_per_cu;
   uint32_t shader_engs;
   uint32_t shader_arrs_per_sh_eng;
+  uint32_t bdf_id;
   hsa_isa_t agent_isa;
   hsa_dim3_t grid_max_dim;
   uint16_t workgroup_max_dim[3];
-  uint16_t bdf_id;
   bool fast_f16;
   bool coherent_host_access;
   uint32_t pkt_processor_ucode_ver;
@@ -193,6 +195,7 @@ static const uint32_t kIndentSize = 2;
 
 static bool wsl_env = false;
 static bool dtif_env = false;
+static bool model_env = false;
 
 enum rocmi_int_format {
   ROCMI_INT_FORMAT_DEC = 1,
@@ -239,6 +242,15 @@ static void DetectWSLEnvironment() {
   }
 }
 
+static void DetectModelEnvironment() {
+  char *var = getenv("HSA_MODEL_TOPOLOGY");
+  if (var == NULL)
+    return;
+
+  printf("Model: environment detected with topology path: %s\n", var);
+  model_env = true;
+}
+
 static void DetectDTIFEnvironment() {
   char *var = getenv("HSA_ENABLE_DTIF");
   if (var == NULL)
@@ -277,6 +289,7 @@ static void printLabel(char const *l, bool newline = false,
   }
 }
 static void printValueStr(char const *s, bool newline = true) {
+  UNUSED(newline);
   printf("%-*s\n", kValueFieldSize, s);
 }
 
@@ -883,6 +896,8 @@ AcquireAndDisplayMemPoolInfo(const hsa_amd_memory_pool_t pool,
   hsa_status_t err;
   pool_info_t pool_i;
 
+  UNUSED(indent);
+
   err = AcquirePoolInfo(pool, &pool_i);
   RET_IF_HSA_ERR(err);
 
@@ -1033,6 +1048,8 @@ static hsa_status_t
 AcquireAndDisplayISAInfo(const hsa_isa_t isa, uint32_t indent) {
   hsa_status_t err;
   isa_info_t isa_i;
+
+  UNUSED(indent);
 
   isa_i.name_str = nullptr;
   err = AcquireISAInfo(isa, &isa_i);
@@ -1304,16 +1321,22 @@ int CheckInitialState(void) {
 // acccumulate information about those objects. Corresponding to each
 // Acquire-type function is a Display* function which display the
 // accumulated data in a formatted way.
-int main(int argc, char* argv[]) {
+int main() {
   hsa_status_t err;
 
   DetectWSLEnvironment();
   DetectDTIFEnvironment();
+  DetectModelEnvironment();
 
-  if (!(wsl_env || dtif_env) && CheckInitialState()) {
+  if (!(wsl_env || dtif_env || model_env) && CheckInitialState()) {
     return 1;
   }
   err = hsa_init();
+  if (wsl_env && (err != HSA_STATUS_SUCCESS)) {
+    printf("%shsa_init Failed, possibly no supported GPU devices%s\n",
+                                                            COL_RED, COL_RESET);
+    return 1;
+  }
   RET_IF_HSA_ERR(err)
 
   // Acquire and display system information

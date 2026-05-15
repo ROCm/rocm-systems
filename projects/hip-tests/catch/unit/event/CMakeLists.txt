@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 # Common Tests - Test independent of all platforms
 set(TEST_SRC
     Unit_hipEvent_Negative.cc
@@ -17,9 +21,15 @@ if(HIP_PLATFORM MATCHES "amd")
   set(AMD_SRC
       Unit_hipEventQuery.cc
   )
+  if(UNIX)
+    set(AMD_SRC
+      ${AMD_SRC}
+      Unit_hipEventIpc_shm_cleanup.cc)
+  endif()
   set(TEST_SRC ${TEST_SRC} ${AMD_SRC})
 endif()
 
 hip_add_exe_to_target(NAME EventTest
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
+

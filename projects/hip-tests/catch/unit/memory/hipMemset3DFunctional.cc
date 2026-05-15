@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
 Testcase Scenarios :
@@ -92,15 +79,15 @@ Testcase Scenarios :
 static void testMemsetWithExtent(bool bAsync, hipExtent tstExtent) {
   hipPitchedPtr devPitchedPtr;
   hipError_t ret;
-  char *A_h;
+  char* A_h;
   size_t numH = NUMH_EXT, numW = NUMW_EXT, depth = DEPTH_EXT;
   size_t width = numW * sizeof(char);
   hipExtent extent = make_hipExtent(width, numH, depth);
 
   size_t sizeElements = width * numH * depth;
-  size_t elements = numW* numH* depth;
+  size_t elements = numW * numH * depth;
 
-  A_h = reinterpret_cast<char *>(malloc(sizeElements));
+  A_h = reinterpret_cast<char*>(malloc(sizeElements));
   REQUIRE(A_h != nullptr);
   memset(A_h, 0, sizeElements);
   HIP_CHECK(hipMalloc3D(&devPitchedPtr, extent));
@@ -109,30 +96,26 @@ static void testMemsetWithExtent(bool bAsync, hipExtent tstExtent) {
     HIP_CHECK(hipStreamCreate(&stream));
 
     ret = hipMemset3DAsync(devPitchedPtr, MEMSETVAL, extent, stream);
-    INFO("testMemsetWithExtent(" << extent.width << "," << extent.height
-                                 << "," << extent.depth << ") memset "
-                                 << MEMSETVAL << ", ret : " << ret);
+    INFO("testMemsetWithExtent(" << extent.width << "," << extent.height << "," << extent.depth
+                                 << ") memset " << MEMSETVAL << ", ret : " << ret);
     REQUIRE(ret == hipSuccess);
 
     ret = hipMemset3DAsync(devPitchedPtr, TESTVAL, tstExtent, stream);
-    INFO("testMemsetWithExtent(" << tstExtent.width << "," << tstExtent.height
-                                 << "," << tstExtent.depth << ") memset "
-                                 << TESTVAL << "ret : " << ret);
+    INFO("testMemsetWithExtent(" << tstExtent.width << "," << tstExtent.height << ","
+                                 << tstExtent.depth << ") memset " << TESTVAL << "ret : " << ret);
     REQUIRE(ret == hipSuccess);
 
     HIP_CHECK(hipStreamSynchronize(stream));
     HIP_CHECK(hipStreamDestroy(stream));
   } else {
     ret = hipMemset3D(devPitchedPtr, MEMSETVAL, extent);
-    INFO("testMemsetWithExtent(" << extent.width << "," << extent.height
-                                 << "," << extent.depth << ") memset "
-                                 << MEMSETVAL << ",ret : " << ret);
+    INFO("testMemsetWithExtent(" << extent.width << "," << extent.height << "," << extent.depth
+                                 << ") memset " << MEMSETVAL << ",ret : " << ret);
     REQUIRE(ret == hipSuccess);
 
     ret = hipMemset3D(devPitchedPtr, TESTVAL, tstExtent);
-    INFO("testMemsetWithExtent(" << tstExtent.width << "," << tstExtent.height
-                                 << "," << tstExtent.depth << ") memset "
-                                 << TESTVAL << ",ret : " << ret);
+    INFO("testMemsetWithExtent(" << tstExtent.width << "," << tstExtent.height << ","
+                                 << tstExtent.depth << ") memset " << TESTVAL << ",ret : " << ret);
     REQUIRE(ret == hipSuccess);
   }
 
@@ -153,9 +136,9 @@ static void testMemsetWithExtent(bool bAsync, hipExtent tstExtent) {
 
   for (size_t i = 0; i < elements; i++) {
     if (A_h[i] != MEMSETVAL) {
-      INFO("testMemsetWithExtent: index:" << i << ",computed:"
-               << std::hex << static_cast<int>(A_h[i]) << ",memsetval:"
-                                            << std::hex << MEMSETVAL);
+      INFO("testMemsetWithExtent: index:" << i << ",computed:" << std::hex
+                                          << static_cast<int>(A_h[i]) << ",memsetval:" << std::hex
+                                          << MEMSETVAL);
       REQUIRE(false);
     }
   }
@@ -170,15 +153,15 @@ static void testMemsetWithExtent(bool bAsync, hipExtent tstExtent) {
  */
 static void testMemsetMaxValue(bool bAsync) {
   hipPitchedPtr devPitchedPtr;
-  unsigned char *A_h;
+  unsigned char* A_h;
   int memsetval = std::numeric_limits<unsigned char>::max();
   size_t numH = NUMH_MAX, numW = NUMW_MAX, depth = DEPTH_MAX;
   size_t width = numW * sizeof(unsigned char);
   hipExtent extent = make_hipExtent(width, numH, depth);
   size_t sizeElements = width * numH * depth;
-  size_t elements = numW* numH* depth;
+  size_t elements = numW * numH * depth;
 
-  A_h = reinterpret_cast<unsigned char *> (malloc(sizeElements));
+  A_h = reinterpret_cast<unsigned char*>(malloc(sizeElements));
   REQUIRE(A_h != nullptr);
   memset(A_h, 0, sizeElements);
 
@@ -215,9 +198,8 @@ static void testMemsetMaxValue(bool bAsync) {
 
   for (size_t i = 0; i < elements; i++) {
     if (A_h[i] != memsetval) {
-      INFO("testMemsetMaxValue: index:" << i << ",computed:"
-               << std::hex << static_cast<int>(A_h[i]) << ",memsetval:"
-                                            << std::hex << memsetval);
+      INFO("testMemsetMaxValue: index:" << i << ",computed:" << std::hex << static_cast<int>(A_h[i])
+                                        << ",memsetval:" << std::hex << memsetval);
       REQUIRE(false);
     }
   }
@@ -232,8 +214,8 @@ static void testMemsetMaxValue(bool bAsync) {
 static void seekAndSet3DArraySlice(bool bAsync) {
   char array3D[ZSIZE_S][YSIZE_S][XSIZE_S]{};
   dim3 arr_dimensions = dim3(ZSIZE_S, YSIZE_S, XSIZE_S);
-  hipExtent extent = make_hipExtent(sizeof(char) * arr_dimensions.x,
-                                    arr_dimensions.y, arr_dimensions.z);
+  hipExtent extent =
+      make_hipExtent(sizeof(char) * arr_dimensions.x, arr_dimensions.y, arr_dimensions.z);
   hipPitchedPtr devicePitchedPointer;
   int memsetval = MEMSETVAL, memsetval4seeked = TESTVAL;
 
@@ -251,19 +233,17 @@ static void seekAndSet3DArraySlice(bool bAsync) {
   size_t slicePitch = pitch * extent.height;
 
   // Point devptr to selected slice
-  char *devPtrSlice = (reinterpret_cast<char *>(devicePitchedPointer.ptr))
-                       + slice_index * slicePitch;
-  hipExtent extentSlice = make_hipExtent(sizeof(char) * arr_dimensions.x,
-                                         arr_dimensions.y, 1);
-  hipPitchedPtr modDevPitchedPtr = make_hipPitchedPtr(devPtrSlice, pitch,
-                                         arr_dimensions.x, arr_dimensions.y);
+  char* devPtrSlice =
+      (reinterpret_cast<char*>(devicePitchedPointer.ptr)) + slice_index * slicePitch;
+  hipExtent extentSlice = make_hipExtent(sizeof(char) * arr_dimensions.x, arr_dimensions.y, 1);
+  hipPitchedPtr modDevPitchedPtr =
+      make_hipPitchedPtr(devPtrSlice, pitch, arr_dimensions.x, arr_dimensions.y);
 
   if (bAsync) {
     // Memset selected slice (Async)
     hipStream_t stream;
     HIP_CHECK(hipStreamCreate(&stream));
-    HIP_CHECK(hipMemset3DAsync(modDevPitchedPtr, memsetval4seeked,
-                              extentSlice, stream));
+    HIP_CHECK(hipMemset3DAsync(modDevPitchedPtr, memsetval4seeked, extentSlice, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
     HIP_CHECK(hipStreamDestroy(stream));
   } else {
@@ -275,8 +255,8 @@ static void seekAndSet3DArraySlice(bool bAsync) {
   hipMemcpy3DParms myparms{};
   myparms.srcPos = make_hipPos(0, 0, 0);
   myparms.dstPos = make_hipPos(0, 0, 0);
-  myparms.dstPtr = make_hipPitchedPtr(array3D, sizeof(char) * arr_dimensions.x,
-                                      arr_dimensions.x, arr_dimensions.y);
+  myparms.dstPtr = make_hipPitchedPtr(array3D, sizeof(char) * arr_dimensions.x, arr_dimensions.x,
+                                      arr_dimensions.y);
   myparms.srcPtr = devicePitchedPointer;
   myparms.extent = extent;
 #if HT_NVIDIA
@@ -292,18 +272,16 @@ static void seekAndSet3DArraySlice(bool bAsync) {
       for (int x = 0; x < XSIZE_S; x++) {
         if (z == slice_index) {
           if (array3D[z][y][x] != memsetval4seeked) {
-            INFO("seekAndSet3DArray Slice: mismatch at index: Arr(" << z
-                   << "," << y << "," << x << ") " << "computed:" << std::hex
-                   << array3D[z][y][x] << ", memsetval:" << std::hex
-                   << memsetval4seeked);
+            INFO("seekAndSet3DArray Slice: mismatch at index: Arr("
+                 << z << "," << y << "," << x << ") " << "computed:" << std::hex << array3D[z][y][x]
+                 << ", memsetval:" << std::hex << memsetval4seeked);
             REQUIRE(false);
           }
         } else {
           if (array3D[z][y][x] != memsetval) {
-            INFO("seekAndSet3DArray Slice: mismatch at index: Arr(" << z
-                   << "," << y << "," << x << ") " << "computed:" << std::hex
-                   << array3D[z][y][x] << ", memsetval:" << std::hex
-                   << memsetval);
+            INFO("seekAndSet3DArray Slice: mismatch at index: Arr("
+                 << z << "," << y << "," << x << ") " << "computed:" << std::hex << array3D[z][y][x]
+                 << ", memsetval:" << std::hex << memsetval);
             REQUIRE(false);
           }
         }
@@ -321,8 +299,8 @@ static void seekAndSet3DArraySlice(bool bAsync) {
 static void seekAndSet3DArrayPortion(bool bAsync) {
   char array3D[ZSIZE_P][YSIZE_P][XSIZE_P]{};
   dim3 arr_dimensions = dim3(ZSIZE_P, YSIZE_P, XSIZE_P);
-  hipExtent extent = make_hipExtent(sizeof(char) * arr_dimensions.x,
-                                    arr_dimensions.y, arr_dimensions.z);
+  hipExtent extent =
+      make_hipExtent(sizeof(char) * arr_dimensions.x, arr_dimensions.y, arr_dimensions.z);
   hipPitchedPtr devicePitchedPointer;
   int memsetval = MEMSETVAL, memsetval4seeked = TESTVAL;
 
@@ -336,27 +314,25 @@ static void seekAndSet3DArrayPortion(bool bAsync) {
   int slice_index = ZPOS_START, y = YPOS_START, x = XPOS_START;
 
   // Select 10th slice
-  char *devPtrSlice = (reinterpret_cast<char *>(devicePitchedPointer.ptr))
-                       + slice_index * slicePitch;
+  char* devPtrSlice =
+      (reinterpret_cast<char*>(devicePitchedPointer.ptr)) + slice_index * slicePitch;
 
   // Now select row at height as 10
-  char *current_row = reinterpret_cast<char *>(devPtrSlice + y * pitch);
+  char* current_row = reinterpret_cast<char*>(devPtrSlice + y * pitch);
 
   // Now select index of selected row as 10
-  char *devPtrIndexed = &current_row[x];
+  char* devPtrIndexed = &current_row[x];
 
   // Make dev Pitchedptr, extent
-  hipPitchedPtr modDevPitchedPtr = make_hipPitchedPtr(devPtrIndexed, pitch,
-                                         arr_dimensions.x, arr_dimensions.y);
-  hipExtent setExtent = make_hipExtent(sizeof(char) * XSET_LEN, YSET_LEN,
-                                       ZSET_LEN);
+  hipPitchedPtr modDevPitchedPtr =
+      make_hipPitchedPtr(devPtrIndexed, pitch, arr_dimensions.x, arr_dimensions.y);
+  hipExtent setExtent = make_hipExtent(sizeof(char) * XSET_LEN, YSET_LEN, ZSET_LEN);
 
   if (bAsync) {
     // Memset selected portion (Async)
     hipStream_t stream;
     HIP_CHECK(hipStreamCreate(&stream));
-    HIP_CHECK(hipMemset3DAsync(modDevPitchedPtr, memsetval4seeked,
-                              setExtent, stream));
+    HIP_CHECK(hipMemset3DAsync(modDevPitchedPtr, memsetval4seeked, setExtent, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
     HIP_CHECK(hipStreamDestroy(stream));
   } else {
@@ -368,8 +344,8 @@ static void seekAndSet3DArrayPortion(bool bAsync) {
   hipMemcpy3DParms myparms{};
   myparms.srcPos = make_hipPos(0, 0, 0);
   myparms.dstPos = make_hipPos(0, 0, 0);
-  myparms.dstPtr = make_hipPitchedPtr(array3D, sizeof(char) * arr_dimensions.x,
-                                      arr_dimensions.y, arr_dimensions.z);
+  myparms.dstPtr = make_hipPitchedPtr(array3D, sizeof(char) * arr_dimensions.x, arr_dimensions.y,
+                                      arr_dimensions.z);
   myparms.srcPtr = devicePitchedPointer;
   myparms.extent = extent;
 #if HT_NVIDIA
@@ -383,24 +359,21 @@ static void seekAndSet3DArrayPortion(bool bAsync) {
   for (int z = 0; z < ZSIZE_P; z++) {
     for (int y = 0; y < YSIZE_P; y++) {
       for (int x = 0; x < XSIZE_P; x++) {
-        if ((z >= ZPOS_START && z <= ZPOS_END) &&
-            (y >= YPOS_START && y <= YPOS_END) &&
+        if ((z >= ZPOS_START && z <= ZPOS_END) && (y >= YPOS_START && y <= YPOS_END) &&
             (x >= XPOS_START && x <= XPOS_END)) {
           if (array3D[z][y][x] != memsetval4seeked) {
-            INFO("seekAndSet3DArray Portion: mismatch at index: Arr(" << z
-                   << "," << y << "," << x << ") " << "computed:" << std::hex
-                   << array3D[z][y][x] << ", memsetval:" << std::hex
-                   << memsetval4seeked);
+            INFO("seekAndSet3DArray Portion: mismatch at index: Arr("
+                 << z << "," << y << "," << x << ") " << "computed:" << std::hex << array3D[z][y][x]
+                 << ", memsetval:" << std::hex << memsetval4seeked);
             REQUIRE(false);
           }
         } else {
-           if (array3D[z][y][x] != memsetval) {
-            INFO("seekAndSet3DArray Portion: mismatch at index: Arr(" << z
-                   << "," << y << "," << x << ") " << "computed:" << std::hex
-                   << array3D[z][y][x] << ", memsetval:" << std::hex
-                   << memsetval);
+          if (array3D[z][y][x] != memsetval) {
+            INFO("seekAndSet3DArray Portion: mismatch at index: Arr("
+                 << z << "," << y << "," << x << ") " << "computed:" << std::hex << array3D[z][y][x]
+                 << ", memsetval:" << std::hex << memsetval);
             REQUIRE(false);
-           }
+          }
         }
       }
     }
@@ -410,13 +383,11 @@ static void seekAndSet3DArrayPortion(bool bAsync) {
 }
 
 
-
 /**
  * Test Memset3D with different combinations of extent
  * taking zero and non-zero fields.
  */
-TEST_CASE("Unit_hipMemset3D_MemsetWithExtent") {
-  CHECK_IMAGE_SUPPORT
+HIP_TEST_CASE(Unit_hipMemset3D_MemsetWithExtent) {
 
   hipExtent testExtent;
   size_t numH = NUMH_EXT, numW = NUMW_EXT, depth = DEPTH_EXT;
@@ -451,8 +422,7 @@ TEST_CASE("Unit_hipMemset3D_MemsetWithExtent") {
  * Test Memset3DAsync with different combinations of extent
  * taking zero and non-zero fields.
  */
-TEST_CASE("Unit_hipMemset3DAsync_MemsetWithExtent") {
-  CHECK_IMAGE_SUPPORT
+HIP_TEST_CASE(Unit_hipMemset3DAsync_MemsetWithExtent) {
 
   hipExtent testExtent;
   size_t numH = NUMH_EXT, numW = NUMW_EXT, depth = DEPTH_EXT;
@@ -485,8 +455,7 @@ TEST_CASE("Unit_hipMemset3DAsync_MemsetWithExtent") {
 /**
  * Memset3D with max unsigned char and verify memset operation is success
  */
-TEST_CASE("Unit_hipMemset3D_MemsetMaxValue") {
-  CHECK_IMAGE_SUPPORT
+HIP_TEST_CASE(Unit_hipMemset3D_MemsetMaxValue) {
 
   testMemsetMaxValue(0);
 }
@@ -494,8 +463,7 @@ TEST_CASE("Unit_hipMemset3D_MemsetMaxValue") {
 /**
  * Memset3DAsync with max unsigned char and verify memset operation is success
  */
-TEST_CASE("Unit_hipMemset3DAsync_MemsetMaxValue") {
-  CHECK_IMAGE_SUPPORT
+HIP_TEST_CASE(Unit_hipMemset3DAsync_MemsetMaxValue) {
 
   testMemsetMaxValue(1);
 }
@@ -503,8 +471,7 @@ TEST_CASE("Unit_hipMemset3DAsync_MemsetMaxValue") {
 /**
  * Seek and set random slice of 3d array, verify memset is success
  */
-TEST_CASE("Unit_hipMemset3D_SeekSetSlice") {
-  CHECK_IMAGE_SUPPORT
+HIP_TEST_CASE(Unit_hipMemset3D_SeekSetSlice) {
 
   seekAndSet3DArraySlice(0);
 }
@@ -512,8 +479,7 @@ TEST_CASE("Unit_hipMemset3D_SeekSetSlice") {
 /**
  * Seek and set random slice of 3d array with async, verify memset is success
  */
-TEST_CASE("Unit_hipMemset3DAsync_SeekSetSlice") {
-  CHECK_IMAGE_SUPPORT
+HIP_TEST_CASE(Unit_hipMemset3DAsync_SeekSetSlice) {
 
   seekAndSet3DArraySlice(1);
 }
@@ -521,8 +487,7 @@ TEST_CASE("Unit_hipMemset3DAsync_SeekSetSlice") {
 /**
  * Memset3D selected portion of 3d array
  */
-TEST_CASE("Unit_hipMemset3D_SeekSetArrayPortion") {
-  CHECK_IMAGE_SUPPORT
+HIP_TEST_CASE(Unit_hipMemset3D_SeekSetArrayPortion) {
 
   seekAndSet3DArrayPortion(0);
 }
@@ -530,8 +495,7 @@ TEST_CASE("Unit_hipMemset3D_SeekSetArrayPortion") {
 /**
  * Memset3DAsync selected portion of 3d array
  */
-TEST_CASE("Unit_hipMemset3DAsync_SeekSetArrayPortion") {
-  CHECK_IMAGE_SUPPORT
+HIP_TEST_CASE(Unit_hipMemset3DAsync_SeekSetArrayPortion) {
 
   seekAndSet3DArrayPortion(1);
 }

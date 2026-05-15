@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "cl_common.hpp"
 #include "vdi_common.hpp"
@@ -213,7 +199,12 @@ RUNTIME_ENTRY(cl_int, clEnqueueNDRangeKernel,
   }
 #endif  // CL_VERSION
   if (global_work_size == NULL) {
-    return CL_INVALID_VALUE;
+    if ((OPENCL_MAJOR == 2 && OPENCL_MINOR >= 1) || (OPENCL_MAJOR > 2)) {
+      static size_t inputZeroes[3] = {0, 0, 0};
+      global_work_size = inputZeroes;
+    } else {
+      return CL_INVALID_VALUE;
+    }
   }
 
   if (local_work_size == NULL) {
@@ -227,7 +218,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueNDRangeKernel,
         return CL_INVALID_WORK_GROUP_SIZE;
       }
       // >32bits global work size is not supported.
-      if ((global_work_size[dim] == 0) || (global_work_size[dim] > static_cast<size_t>(0xffffffff))) {
+      if ((global_work_size[dim] == 0) ||
+          (global_work_size[dim] > static_cast<size_t>(0xffffffff))) {
         return CL_INVALID_GLOBAL_WORK_SIZE;
       }
       numWorkItems *= local_work_size[dim];
@@ -252,8 +244,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueNDRangeKernel,
   }
 
   amd::Command::EventWaitList eventWaitList;
-  cl_int err = amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list,
-                                       event_wait_list);
+  cl_int err =
+      amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list, event_wait_list);
   if (err != CL_SUCCESS) {
     return err;
   }
@@ -268,7 +260,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueNDRangeKernel,
   // ndrange is now owned by command. Do not delete it!
 
   // Make sure we have memory for the command execution
-  cl_int result = command->captureAndValidate();
+  cl_int result = command->captureOpenCLArgsAndValidate();
   if (result != CL_SUCCESS) {
     delete command;
     return result;
@@ -461,8 +453,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueNativeKernel,
   }
 
   amd::Command::EventWaitList eventWaitList;
-  cl_int err = amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list,
-                                       event_wait_list);
+  cl_int err =
+      amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list, event_wait_list);
   if (err != CL_SUCCESS) {
     return err;
   }
@@ -642,8 +634,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueMarkerWithWaitList,
   }
 
   amd::Command::EventWaitList eventWaitList;
-  cl_int err = amd::clSetEventWaitList(eventWaitList, *hostQueue, num_events_in_wait_list,
-                                       event_wait_list);
+  cl_int err =
+      amd::clSetEventWaitList(eventWaitList, *hostQueue, num_events_in_wait_list, event_wait_list);
   if (err != CL_SUCCESS) {
     return err;
   }
@@ -798,8 +790,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueBarrierWithWaitList,
   }
 
   amd::Command::EventWaitList eventWaitList;
-  cl_int err = amd::clSetEventWaitList(eventWaitList, *hostQueue, num_events_in_wait_list,
-                                       event_wait_list);
+  cl_int err =
+      amd::clSetEventWaitList(eventWaitList, *hostQueue, num_events_in_wait_list, event_wait_list);
   if (err != CL_SUCCESS) {
     return err;
   }
@@ -964,9 +956,7 @@ RUNTIME_EXIT
  *
  */
 RUNTIME_ENTRY(cl_int, clGetDeviceAndHostTimer,
-              (cl_device_id device, cl_ulong * device_timestamp,
-               cl_ulong * host_timestamp)) {
-
+              (cl_device_id device, cl_ulong* device_timestamp, cl_ulong* host_timestamp)) {
   if (!is_valid(device)) {
     return CL_INVALID_DEVICE;
   }
@@ -1012,9 +1002,7 @@ RUNTIME_EXIT
  *    by the OpenCL implementation on the host.
  *
  */
-RUNTIME_ENTRY(cl_int, clGetHostTimer,
-              (cl_device_id device, cl_ulong * host_timestamp)) {
-
+RUNTIME_ENTRY(cl_int, clGetHostTimer, (cl_device_id device, cl_ulong* host_timestamp)) {
   if (!is_valid(device)) {
     return CL_INVALID_DEVICE;
   }

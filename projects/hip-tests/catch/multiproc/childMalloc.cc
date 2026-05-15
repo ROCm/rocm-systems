@@ -1,3 +1,9 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
@@ -54,7 +60,7 @@ bool testMallocFromChild() {
 }
 
 
-TEST_CASE("ChildMalloc") {
+HIP_TEST_CASE(ChildMalloc) {
   auto res = testMallocFromChild();
   REQUIRE(res == true);
 }

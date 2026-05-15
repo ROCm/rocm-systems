@@ -422,7 +422,7 @@ private:
   Executable(const Executable &e);
   Executable& operator=(const Executable &e);
 
-  static std::vector<Executable*> executables;
+  static std::vector<std::shared_ptr<Executable>> executables;
   static std::mutex executables_mutex;
 };
 
@@ -482,6 +482,7 @@ public:
 
   /// @brief Finds the handle of executable to which @p device_address
   /// belongs. Return NULL handle if device address is invalid.
+  #undef FindExecutable
   virtual hsa_executable_t FindExecutable(uint64_t device_address) = 0;
 
   /// @brief Returns host address given @p device_address. If @p device_address

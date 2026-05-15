@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include <kernels.hh>
@@ -39,7 +23,6 @@ THE SOFTWARE.
  */
 
 void testSynchronize(hipStream_t stream) {
-
   constexpr size_t N = 1024;
 
   constexpr int blocks = 1024;
@@ -57,11 +40,10 @@ void testSynchronize(hipStream_t stream) {
   HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
 
   HipTest::launchKernel<float>(HipTest::vectorADD<float>, blocks, 1, 0, stream,
-                              static_cast<const float*>(A_d), static_cast<const float*>(B_d),
-                              C_d, N);
+                               static_cast<const float*>(A_d), static_cast<const float*>(B_d), C_d,
+                               N);
 
-  if ( stream != nullptr )
-  {
+  if (stream != nullptr) {
     HIP_CHECK(hipStreamSynchronize(stream));
   }
 
@@ -81,22 +63,20 @@ void testSynchronize(hipStream_t stream) {
 /**
  * Test Description
  * ------------------------
- *  - Synchronization of an event that is completed after a simple kernel launch (on null/created stream).
- * Test source
+ *  - Synchronization of an event that is completed after a simple kernel launch (on null/created
+ * stream). Test source
  * ------------------------
  *  - unit/event/hipEventSynchronize.cc
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipEventSynchronize_Default_Positive") {
+HIP_TEST_CASE(Unit_hipEventSynchronize_Default_Positive) {
   hipStream_t stream{nullptr};
 
-  SECTION("Kernel launched in null stream") {
-    testSynchronize(stream);
-  }
+  SECTION("Kernel launched in null stream") { testSynchronize(stream); }
 
-  SECTION ("Kernel launched in created stream") {
+  SECTION("Kernel launched in created stream") {
     HIP_CHECK(hipStreamCreate(&stream));
     testSynchronize(stream);
     HIP_CHECK(hipStreamDestroy(stream));
@@ -114,7 +94,7 @@ TEST_CASE("Unit_hipEventSynchronize_Default_Positive") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipEventSynchronize_NoEventRecord_Positive") {
+HIP_TEST_CASE(Unit_hipEventSynchronize_NoEventRecord_Positive) {
   constexpr size_t N = 1024;
 
   constexpr int blocks = 1024;
@@ -135,8 +115,8 @@ TEST_CASE("Unit_hipEventSynchronize_NoEventRecord_Positive") {
   HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
 
   HipTest::launchKernel<float>(HipTest::vectorADD<float>, blocks, 1, 0, 0,
-                              static_cast<const float*>(A_d), static_cast<const float*>(B_d),
-                              C_d, N);
+                               static_cast<const float*>(A_d), static_cast<const float*>(B_d), C_d,
+                               N);
 
   // Record the end_event
   HIP_CHECK(hipEventRecord(end_event, NULL));
@@ -158,6 +138,6 @@ TEST_CASE("Unit_hipEventSynchronize_NoEventRecord_Positive") {
 }
 
 /**
-* End doxygen group EventTest.
-* @}
-*/
+ * End doxygen group EventTest.
+ * @}
+ */

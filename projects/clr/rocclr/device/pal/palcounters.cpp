@@ -1,22 +1,8 @@
-/* Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "device/pal/palcounters.hpp"
 #include "device/pal/palvirtual.hpp"
@@ -25,62 +11,62 @@
 namespace amd::pal {
 
 static constexpr std::array<PCIndexSelect, 50> blockIdToIndexSelect = {{
-    PCIndexSelect::None,                     // CPF
-    PCIndexSelect::ShaderEngine,             // IA
-    PCIndexSelect::ShaderEngine,             // VGT
-    PCIndexSelect::ShaderArray,              // PA
-    PCIndexSelect::ShaderArray,              // SC
-    PCIndexSelect::ShaderEngine,             // SPI
-    PCIndexSelect::ShaderEngine,             // SQ
-    PCIndexSelect::ShaderArray,              // SX
-    PCIndexSelect::ComputeUnit,              // TA
-    PCIndexSelect::ComputeUnit,              // TD
-    PCIndexSelect::ComputeUnit,              // TCP
-    PCIndexSelect::Instance,                 // TCC
-    PCIndexSelect::Instance,                 // TCA
-    PCIndexSelect::ShaderArray,              // DB
-    PCIndexSelect::ShaderArray,              // CB
-    PCIndexSelect::None,                     // GDS
-    PCIndexSelect::None,                     // SRBM
-    PCIndexSelect::None,                     // GRBM
-    PCIndexSelect::ShaderEngine,             // GRBMSE
-    PCIndexSelect::None,                     // RLC
-    PCIndexSelect::Instance,                 // DMA
-    PCIndexSelect::None,                     // MC
-    PCIndexSelect::None,                     // CPG
-    PCIndexSelect::None,                     // CPC
-    PCIndexSelect::None,                     // WD
-    PCIndexSelect::None,                     // TCS
-    PCIndexSelect::None,                     // ATC
-    PCIndexSelect::None,                     // ATCL2
-    PCIndexSelect::None,                     // MCVML2
-    PCIndexSelect::Instance,                 // EA
-    PCIndexSelect::None,                     // RPB
-    PCIndexSelect::ShaderArray,              // RMI
-    PCIndexSelect::Instance,                 // UMCCH
-    PCIndexSelect::Instance,                 // GE
-    PCIndexSelect::ShaderArray,              // GL1A
-    PCIndexSelect::ShaderArray,              // GL1C
-    PCIndexSelect::ShaderArray,              // GL1CG
-    PCIndexSelect::Instance,                 // GL2A
-    PCIndexSelect::Instance,                 // GL2C
-    PCIndexSelect::None,                     // CHA
-    PCIndexSelect::Instance,                 // CHC
-    PCIndexSelect::None,                     // CHCG
-    PCIndexSelect::None,                     // GUS
-    PCIndexSelect::None,                     // GCR
-    PCIndexSelect::None,                     // PH
-    PCIndexSelect::ShaderArray,              // UTCL1
-    PCIndexSelect::None,                     // GeDist
-    PCIndexSelect::ShaderEngine,             // GeSe
-    PCIndexSelect::None,                     // Df
-    PCIndexSelect::ComputeUnit,              // SqWgp
+    PCIndexSelect::None,          // CPF
+    PCIndexSelect::ShaderEngine,  // IA
+    PCIndexSelect::ShaderEngine,  // VGT
+    PCIndexSelect::ShaderArray,   // PA
+    PCIndexSelect::ShaderArray,   // SC
+    PCIndexSelect::ShaderEngine,  // SPI
+    PCIndexSelect::ShaderEngine,  // SQ
+    PCIndexSelect::ShaderArray,   // SX
+    PCIndexSelect::ComputeUnit,   // TA
+    PCIndexSelect::ComputeUnit,   // TD
+    PCIndexSelect::ComputeUnit,   // TCP
+    PCIndexSelect::Instance,      // TCC
+    PCIndexSelect::Instance,      // TCA
+    PCIndexSelect::ShaderArray,   // DB
+    PCIndexSelect::ShaderArray,   // CB
+    PCIndexSelect::None,          // GDS
+    PCIndexSelect::None,          // SRBM
+    PCIndexSelect::None,          // GRBM
+    PCIndexSelect::ShaderEngine,  // GRBMSE
+    PCIndexSelect::None,          // RLC
+    PCIndexSelect::Instance,      // DMA
+    PCIndexSelect::None,          // MC
+    PCIndexSelect::None,          // CPG
+    PCIndexSelect::None,          // CPC
+    PCIndexSelect::None,          // WD
+    PCIndexSelect::None,          // TCS
+    PCIndexSelect::None,          // ATC
+    PCIndexSelect::None,          // ATCL2
+    PCIndexSelect::None,          // MCVML2
+    PCIndexSelect::Instance,      // EA
+    PCIndexSelect::None,          // RPB
+    PCIndexSelect::ShaderArray,   // RMI
+    PCIndexSelect::Instance,      // UMCCH
+    PCIndexSelect::Instance,      // GE
+    PCIndexSelect::ShaderArray,   // GL1A
+    PCIndexSelect::ShaderArray,   // GL1C
+    PCIndexSelect::ShaderArray,   // GL1CG
+    PCIndexSelect::Instance,      // GL2A
+    PCIndexSelect::Instance,      // GL2C
+    PCIndexSelect::None,          // CHA
+    PCIndexSelect::Instance,      // CHC
+    PCIndexSelect::None,          // CHCG
+    PCIndexSelect::None,          // GUS
+    PCIndexSelect::None,          // GCR
+    PCIndexSelect::None,          // PH
+    PCIndexSelect::ShaderArray,   // UTCL1
+    PCIndexSelect::None,          // GeDist
+    PCIndexSelect::ShaderEngine,  // GeSe
+    PCIndexSelect::None,          // Df
+    PCIndexSelect::ComputeUnit,   // SqWgp
 }};
 
 PalCounterReference* PalCounterReference::Create(VirtualGPU& gpu) {
   Pal::Result result;
 
-  if (blockIdToIndexSelect.size() !=  static_cast<size_t>(Pal::GpuBlock::Count)) {
+  if (blockIdToIndexSelect.size() != static_cast<size_t>(Pal::GpuBlock::Count)) {
     LogError("Size of blockIdToIndexSelect does not match GpuBlock::Count");
   }
 
@@ -114,7 +100,7 @@ PalCounterReference* PalCounterReference::Create(VirtualGPU& gpu) {
 PalCounterReference::~PalCounterReference() {
   // The counter object is always associated with a particular queue,
   // so we have to lock just this queue
-  amd::ScopedLock lock(gpu_.execution());
+  std::scoped_lock lock(gpu_.execution());
 
   delete layout_;
   delete memory_;
@@ -194,7 +180,7 @@ bool PalCounterReference::finalize() {
 
     assert(layout.sampleCount == numExpCounters_);
     size_t size = sizeof(Pal::GlobalCounterLayout) +
-        (sizeof(Pal::GlobalSampleLayout) * (layout.sampleCount - 1));
+                  (sizeof(Pal::GlobalSampleLayout) * (layout.sampleCount - 1));
     layout_ = reinterpret_cast<Pal::GlobalCounterLayout*>(new char[size]);
     if (layout_ != nullptr) {
       layout_->sampleCount = layout.sampleCount;
@@ -666,20 +652,14 @@ static constexpr std::array<std::pair<int, int>, 140> gfx10BlockIdPal = {{
 }};
 
 void PerfCounter::convertInfo() {
-  switch (dev().ipLevel()) {
-    case Pal::GfxIpLevel::GfxIp10_1:
-    case Pal::GfxIpLevel::GfxIp10_3:
-    case Pal::GfxIpLevel::GfxIp11_0:
-    case Pal::GfxIpLevel::GfxIp11_5:
-      if (info_.blockIndex_ < gfx10BlockIdPal.size()) {
-        auto p = gfx10BlockIdPal[info_.blockIndex_];
-        info_.blockIndex_ = std::get<0>(p);
-        info_.counterIndex_ = std::get<1>(p);
-      }
-      break;
-    default:
-      Unimplemented();
-      break;
+  if (dev().properties().gfxTriple.major < 12) {
+    if (info_.blockIndex_ < gfx10BlockIdPal.size()) {
+      auto p = gfx10BlockIdPal[info_.blockIndex_];
+      info_.blockIndex_ = std::get<0>(p);
+      info_.counterIndex_ = std::get<1>(p);
+    }
+  } else {
+    Unimplemented();
   }
 
   assert(info_.blockIndex_ < blockIdToIndexSelect.size());
@@ -722,15 +702,16 @@ bool PerfCounter::create() {
       break;
 
     case PCIndexSelect::ShaderArray:
-      if (info_.counterIndex_ >=
-          (dev().properties().gfxipProperties.shaderCore.numShaderArrays * dev().properties().gfxipProperties.shaderCore.numShaderEngines)) {
+      if (info_.counterIndex_ >= (dev().properties().gfxipProperties.shaderCore.numShaderArrays *
+                                  dev().properties().gfxipProperties.shaderCore.numShaderEngines)) {
         return true;
       }
       counter_start = info_.counterIndex_;
-      counter_step = dev().properties().gfxipProperties.shaderCore.numShaderArrays * dev().properties().gfxipProperties.shaderCore.numShaderEngines;
+      counter_step = dev().properties().gfxipProperties.shaderCore.numShaderArrays *
+                     dev().properties().gfxipProperties.shaderCore.numShaderEngines;
       break;
 
-      case PCIndexSelect::ComputeUnit:
+    case PCIndexSelect::ComputeUnit:
       if (info_.counterIndex_ >=
           dev().properties().gfxipProperties.shaderCore.maxCusPerShaderArray) {
         return true;

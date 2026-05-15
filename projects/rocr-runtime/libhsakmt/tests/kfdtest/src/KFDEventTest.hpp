@@ -31,6 +31,14 @@ class KFDEventTest :  public KFDBaseComponentTest {
     KFDEventTest(void) {}
     ~KFDEventTest(void) {}
 
+    void CreateDestroyEvent(int gpuNode);
+    void CreateMaxEvents(int gpuNode);
+    void SignalEvent(int gpuNode);
+    void SignalEventExt(int gpuNode);
+    void SignalMaxEvents(int gpuNode);
+    void SignalMultipleEventsWaitForAll(int gpuNode);
+    void SignalInvalidEvent(int gpuNode);
+
     // @brief Executed before every test in KFDEventTest.
     virtual void SetUp();
     // @brief Executed after every test in KFDEventTest.

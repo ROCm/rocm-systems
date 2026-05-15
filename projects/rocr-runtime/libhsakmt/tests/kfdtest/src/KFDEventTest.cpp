@@ -47,7 +47,7 @@ void KFDEventTest::TearDown() {
     for (int i = 0; i < MAX_GPU; i++) {
         if (m_pHsaEventGPU[i] != NULL) {
             // hsaKmtDestroyEvent moved to TearDown to make sure it is being called
-            EXPECT_SUCCESS(hsaKmtDestroyEvent(m_pHsaEventGPU[i]));
+            EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, m_pHsaEventGPU[i]));
         }
     }
 
@@ -56,13 +56,10 @@ void KFDEventTest::TearDown() {
     ROUTINE_END
 }
 
-static void CreateDestroyEvent(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDEventTest::CreateDestroyEvent(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDEventTest* pKFDEventTest = (KFDEventTest*)pTestParamters->pTestObject;
-
-    int gpuIndex = pKFDEventTest->Get_NodeInfo()->HsaGPUindexFromGpuNode(gpuNode);
-    HsaEvent* m_pHsaEvent = pKFDEventTest->m_pHsaEventGPU[gpuIndex];
+    int gpuIndex = Get_NodeInfo()->HsaGPUindexFromGpuNode(gpuNode);
+    HsaEvent* m_pHsaEvent = m_pHsaEventGPU[gpuIndex];
 
     ASSERT_SUCCESS_GPU(CreateQueueTypeEvent(false, false, gpuNode, &m_pHsaEvent), gpuNode);
     EXPECT_NE_GPU(0, m_pHsaEvent->EventData.HWData2, gpuNode);
@@ -72,17 +69,16 @@ static void CreateDestroyEvent(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDEventTest, CreateDestroyEvent) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(CreateDestroyEvent));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->CreateDestroyEvent(gpuNode);
+    }));
 
     // Destroy event is being called in test TearDown
     TEST_END;
 }
 
 
-static void CreateMaxEvents(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDEventTest* pKFDEventTest = (KFDEventTest*)pTestParamters->pTestObject;
+void KFDEventTest::CreateMaxEvents(int gpuNode) {
 
     static const unsigned int MAX_EVENT_NUMBER = 256;
 
@@ -96,26 +92,25 @@ static void CreateMaxEvents(KFDTEST_PARAMETERS* pTestParamters) {
     }
 
     for (i = 0; i < MAX_EVENT_NUMBER; i++) {
-        EXPECT_SUCCESS_GPU(hsaKmtDestroyEvent(pHsaEvent[i]), gpuNode);
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, pHsaEvent[i]), gpuNode);
     }
 }
 
 TEST_F(KFDEventTest, CreateMaxEvents) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(CreateMaxEvents));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->CreateMaxEvents(gpuNode);
+    }));
 
     TEST_END;
 }
 
-static void SignalEvent(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDEventTest::SignalEvent(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDEventTest* pKFDEventTest = (KFDEventTest*)pTestParamters->pTestObject;
-
-    int gpuIndex = pKFDEventTest->Get_NodeInfo()->HsaGPUindexFromGpuNode(gpuNode);
-    HsaEvent* m_pHsaEvent = pKFDEventTest->m_pHsaEventGPU[gpuIndex];
-    HSAuint32 m_FamilyId = pKFDEventTest->GetFamilyIdFromNodeId(gpuNode);
+    int gpuIndex = Get_NodeInfo()->HsaGPUindexFromGpuNode(gpuNode);
+    HsaEvent* m_pHsaEvent = m_pHsaEventGPU[gpuIndex];
+    HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
 
     PM4Queue queue;
     HsaEvent *tmp_event;
@@ -136,9 +131,9 @@ static void SignalEvent(KFDTEST_PARAMETERS* pTestParamters) {
 
     queue.Wait4PacketConsumption();
 
-    EXPECT_SUCCESS_GPU(hsaKmtWaitOnEvent(m_pHsaEvent, g_TestTimeOut), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtWaitOnEvent, m_hsakmt_current_ctx, m_pHsaEvent, g_TestTimeOut), gpuNode);
 
-    EXPECT_SUCCESS_GPU(hsaKmtDestroyEvent(tmp_event), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, tmp_event), gpuNode);
 
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
 }
@@ -146,27 +141,26 @@ static void SignalEvent(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDEventTest, SignalEvent) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(SignalEvent));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->SignalEvent(gpuNode);
+    }));
 
     TEST_END;
 }
 
 /* test event signaling with event age enabled wait */
-static void SignalEventExt(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDEventTest::SignalEventExt(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDEventTest* pKFDEventTest = (KFDEventTest*)pTestParamters->pTestObject;
-
-    int gpuIndex = pKFDEventTest->Get_NodeInfo()->HsaGPUindexFromGpuNode(gpuNode);
-    HsaEvent* m_pHsaEvent = pKFDEventTest->m_pHsaEventGPU[gpuIndex];
-    HSAuint32 m_FamilyId = pKFDEventTest->GetFamilyIdFromNodeId(gpuNode);
+    int gpuIndex = Get_NodeInfo()->HsaGPUindexFromGpuNode(gpuNode);
+    HsaEvent* m_pHsaEvent = m_pHsaEventGPU[gpuIndex];
+    HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
 
     PM4Queue queue;
     HsaEvent *tmp_event;
     uint64_t event_age;
 
-    if (pKFDEventTest->Get_Version()->KernelInterfaceMajorVersion == 1 &&
-        pKFDEventTest->Get_Version()->KernelInterfaceMinorVersion < 14) {
+    if (Get_Version()->KernelInterfaceMajorVersion == 1 &&
+        Get_Version()->KernelInterfaceMinorVersion < 14) {
         LOG() << "event age tracking isn't supported in KFD. Exiting." << std::endl;
         return;
     }
@@ -183,36 +177,36 @@ static void SignalEventExt(KFDTEST_PARAMETERS* pTestParamters) {
     event_age = 1;
     queue.PlaceAndSubmitPacket(PM4ReleaseMemoryPacket(m_FamilyId, false,
                     m_pHsaEvent->EventData.HWData2, m_pHsaEvent->EventId));
-    EXPECT_SUCCESS_GPU(hsaKmtWaitOnEvent_Ext(m_pHsaEvent, g_TestTimeOut, &event_age), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtWaitOnEvent_Ext, m_hsakmt_current_ctx, m_pHsaEvent, g_TestTimeOut, &event_age), gpuNode);
     ASSERT_EQ_GPU(event_age, 2, gpuNode);
     queue.PlaceAndSubmitPacket(PM4ReleaseMemoryPacket(m_FamilyId, false,
                     m_pHsaEvent->EventData.HWData2, m_pHsaEvent->EventId));
-    EXPECT_SUCCESS_GPU(hsaKmtWaitOnEvent_Ext(m_pHsaEvent, g_TestTimeOut, &event_age), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtWaitOnEvent_Ext, m_hsakmt_current_ctx, m_pHsaEvent, g_TestTimeOut, &event_age), gpuNode);
     ASSERT_EQ_GPU(event_age, 3, gpuNode);
 
     /* 2. event wait return without sleep after the event signals */
     queue.PlaceAndSubmitPacket(PM4ReleaseMemoryPacket(m_FamilyId, false,
                     m_pHsaEvent->EventData.HWData2, m_pHsaEvent->EventId));
     sleep(1); /* wait for event signaling */
-    EXPECT_SUCCESS_GPU(hsaKmtWaitOnEvent_Ext(m_pHsaEvent, g_TestTimeOut, &event_age), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtWaitOnEvent_Ext, m_hsakmt_current_ctx, m_pHsaEvent, g_TestTimeOut, &event_age), gpuNode);
     ASSERT_EQ_GPU(event_age, 4, gpuNode);
 
     /* 3. signaling from CPU */
-    hsaKmtSetEvent(m_pHsaEvent);
-    EXPECT_SUCCESS_GPU(hsaKmtWaitOnEvent_Ext(m_pHsaEvent, g_TestTimeOut, &event_age), gpuNode);
+    HSAKMT_CALL(hsaKmtSetEvent, m_hsakmt_current_ctx, m_pHsaEvent);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtWaitOnEvent_Ext, m_hsakmt_current_ctx, m_pHsaEvent, g_TestTimeOut, &event_age), gpuNode);
     ASSERT_EQ_GPU(event_age, 5, gpuNode);
 
     /* 4. when event_age is 0, hsaKmtWaitOnEvent_Ext always sleeps */
     event_age = 0;
-    ASSERT_EQ_GPU(HSAKMT_STATUS_WAIT_TIMEOUT, hsaKmtWaitOnEvent_Ext(m_pHsaEvent, g_TestTimeOut, &event_age), gpuNode);
+    ASSERT_EQ_GPU(HSAKMT_STATUS_WAIT_TIMEOUT, HSAKMT_CALL(hsaKmtWaitOnEvent_Ext, m_hsakmt_current_ctx, m_pHsaEvent, g_TestTimeOut, &event_age), gpuNode);
 
     /* 5. when event_age is 0, it always stays 0 after the event signals */
     queue.PlaceAndSubmitPacket(PM4ReleaseMemoryPacket(m_FamilyId, false,
                     m_pHsaEvent->EventData.HWData2, m_pHsaEvent->EventId));
-    EXPECT_SUCCESS(hsaKmtWaitOnEvent_Ext(m_pHsaEvent, g_TestTimeOut, &event_age));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtWaitOnEvent_Ext, m_hsakmt_current_ctx, m_pHsaEvent, g_TestTimeOut, &event_age));
     ASSERT_EQ(event_age, 0);
 
-    EXPECT_SUCCESS(hsaKmtDestroyEvent(tmp_event));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, tmp_event));
 
     EXPECT_SUCCESS(queue.Destroy());
 
@@ -221,7 +215,9 @@ static void SignalEventExt(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDEventTest, SignalEventExt) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(SignalEventExt));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->SignalEventExt(gpuNode);
+    }));
 
     TEST_END;
 }
@@ -278,7 +274,7 @@ class QueueAndSignalBenchmark {
         startTime = gettime();
         queue.SubmitPacket();
         for (int i = 0; i < eventCount; i++) {
-            r = hsaKmtWaitOnEvent(pHsaEvent[i], g_TestTimeOut);
+            r = HSAKMT_CALL(hsaKmtWaitOnEvent, g_baseTest->m_hsakmt_current_ctx, pHsaEvent[i], g_TestTimeOut);
 
             if (r != HSAKMT_STATUS_SUCCESS)
                 goto exit;
@@ -291,7 +287,7 @@ class QueueAndSignalBenchmark {
 exit:
         for (int i = 0; i < eventCount; i++) {
             if (pHsaEvent[i])
-                hsaKmtDestroyEvent(pHsaEvent[i]);
+                HSAKMT_CALL(hsaKmtDestroyEvent, g_baseTest->m_hsakmt_current_ctx, pHsaEvent[i]);
         }
         queue.Destroy();
 
@@ -352,10 +348,7 @@ TEST_F(KFDEventTest, DISABLED_MeasureInterruptConsumption) {
     TEST_END;
 }
 
-static void SignalMaxEvents(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDEventTest* pKFDEventTest = (KFDEventTest*)pTestParamters->pTestObject;
+void KFDEventTest::SignalMaxEvents(int gpuNode) {
 
     static const unsigned int MAX_EVENT_NUMBER = 4095;
     uint64_t time, latency;
@@ -368,18 +361,17 @@ static void SignalMaxEvents(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDEventTest, SignalMaxEvents) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(SignalMaxEvents));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->SignalMaxEvents(gpuNode);
+    }));
 
     TEST_END;
 }
 
-static void SignalMultipleEventsWaitForAll(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDEventTest::SignalMultipleEventsWaitForAll(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDEventTest* pKFDEventTest = (KFDEventTest*)pTestParamters->pTestObject;
-
-    int gpuIndex = pKFDEventTest->Get_NodeInfo()->HsaGPUindexFromGpuNode(gpuNode);
-    HSAuint32 m_FamilyId = pKFDEventTest->GetFamilyIdFromNodeId(gpuNode);
+    int gpuIndex = Get_NodeInfo()->HsaGPUindexFromGpuNode(gpuNode);
+    HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
 
     static const unsigned int EVENT_NUMBER = 64;  // 64 is the maximum for hsaKmtWaitOnMultipleEvents
     static const unsigned int WAIT_BETWEEN_SUBMISSIONS_MS = 50;
@@ -405,18 +397,20 @@ static void SignalMultipleEventsWaitForAll(KFDTEST_PARAMETERS* pTestParamters) {
         Delay(WAIT_BETWEEN_SUBMISSIONS_MS);
     }
 
-    EXPECT_SUCCESS_GPU(hsaKmtWaitOnMultipleEvents(pHsaEvent, EVENT_NUMBER, true, g_TestTimeOut), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtWaitOnMultipleEvents, m_hsakmt_current_ctx, pHsaEvent, EVENT_NUMBER, true, g_TestTimeOut), gpuNode);
 
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
 
     for (i = 0; i < EVENT_NUMBER; i++)
-        EXPECT_SUCCESS_GPU(hsaKmtDestroyEvent(pHsaEvent[i]), gpuNode);
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, pHsaEvent[i]), gpuNode);
 }
 
 TEST_F(KFDEventTest, SignalMultipleEventsWaitForAll) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(SignalMultipleEventsWaitForAll));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->SignalMultipleEventsWaitForAll(gpuNode);
+    }));
 
     TEST_END;
 }
@@ -425,14 +419,11 @@ TEST_F(KFDEventTest, SignalMultipleEventsWaitForAll) {
  * gracefully and with good performance. On current GPUs and firmware it
  * should be handled on a fast path.
  */
-static void SignalInvalidEvent(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDEventTest::SignalInvalidEvent(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDEventTest* pKFDEventTest = (KFDEventTest*)pTestParamters->pTestObject;
-
-    int gpuIndex = pKFDEventTest->Get_NodeInfo()->HsaGPUindexFromGpuNode(gpuNode);
-    HsaEvent* m_pHsaEvent = pKFDEventTest->m_pHsaEventGPU[gpuIndex];
-    HSAuint32 m_FamilyId = pKFDEventTest->GetFamilyIdFromNodeId(gpuNode);
+    int gpuIndex = Get_NodeInfo()->HsaGPUindexFromGpuNode(gpuNode);
+    HsaEvent* m_pHsaEvent = m_pHsaEventGPU[gpuIndex];
+    HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
 
     PM4Queue queue;
 
@@ -462,7 +453,7 @@ static void SignalInvalidEvent(KFDTEST_PARAMETERS* pTestParamters) {
         HSAuint64 startTime = GetSystemTickCountInMicroSec();
         queue.SubmitPacket();
 
-        EXPECT_SUCCESS_GPU(hsaKmtWaitOnEvent(m_pHsaEvent, g_TestTimeOut), gpuNode);
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtWaitOnEvent, m_hsakmt_current_ctx, m_pHsaEvent, g_TestTimeOut), gpuNode);
 
         duration[i] = GetSystemTickCountInMicroSec() - startTime;
         total += duration[i];
@@ -501,14 +492,16 @@ static void SignalInvalidEvent(KFDTEST_PARAMETERS* pTestParamters) {
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
 
     for (int i = 0; i < EVENT_NUMBER; i++)
-        EXPECT_SUCCESS_GPU(hsaKmtDestroyEvent(pHsaEvent[i]), gpuNode);
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, pHsaEvent[i]), gpuNode);
 
 }
 
 TEST_F(KFDEventTest, SignalInvalidEvent) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(SignalInvalidEvent));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->SignalInvalidEvent(gpuNode);
+    }));
 
     TEST_END;
 }

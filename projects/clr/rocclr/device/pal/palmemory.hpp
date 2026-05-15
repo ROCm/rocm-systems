@@ -1,22 +1,8 @@
-/* Copyright (c) 2015 - 2023 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -84,9 +70,9 @@ class Memory : public device::Memory, public Resource {
   bool createInterop();
 
   //! Overloads the resource create method
-  virtual bool create(Resource::MemoryType memType,             //!< Memory type
-                      Resource::CreateParams* params = nullptr, //!< Prameters for create
-                      bool forceLinear = false                  //!< Forces linear tiling for images
+  virtual bool create(Resource::MemoryType memType,              //!< Memory type
+                      Resource::CreateParams* params = nullptr,  //!< Prameters for create
+                      bool forceLinear = false  //!< Forces linear tiling for images
   );
 
   //! Allocate memory for API-level maps
@@ -158,10 +144,11 @@ class Memory : public device::Memory, public Resource {
   //! forced USWC memory on APU and will cause a switch to
   //! indirect map for allocations with a possibility of host read
   bool isDirectMap() {
-    return (isCacheable() || (!isHostMemDirectAccess() &&
-                              (!IsPersistent() || (owner()->getContext().devices().size() > 1))) ||
-             (owner()->getMemFlags() &
-              (CL_MEM_ALLOC_HOST_PTR | CL_MEM_HOST_WRITE_ONLY | CL_MEM_READ_ONLY)));
+    return (isCacheable() ||
+            (!isHostMemDirectAccess() &&
+             (!IsPersistent() || (owner()->getContext().devices().size() > 1))) ||
+            (owner()->getMemFlags() &
+             (CL_MEM_ALLOC_HOST_PTR | CL_MEM_HOST_WRITE_ONLY | CL_MEM_READ_ONLY)));
   }
 
   //! Quick view update for managed buffers. It should avoid expensive object allocations
@@ -206,7 +193,7 @@ class Buffer : public pal::Memory {
   //! Creates a view from current resource
   virtual Memory* createBufferView(
       amd::Memory& subBufferOwner  //!< The abstraction layer subbuf owner
-      ) const;
+  ) const;
 
   //! Returns an export handle for the interprocess communication
   virtual bool ExportHandle(void* handle) const final;

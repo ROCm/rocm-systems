@@ -1,39 +1,27 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 #include <hip/hip_runtime.h>
 #include <hip/hip_runtime_api.h>
 
-#include <algorithm> // std::min
+#include <algorithm>  // std::min
 
-#define CHECK_RET_VAL(cmd) \
-{ \
-  hipError_t error = cmd;\
-  if (error != hipSuccess) {\
-    fprintf(stderr, "error: '%s'(%d) at %s:%d\n", hipGetErrorString(error), \
-     error, __FILE__, __LINE__);\
-    exit(EXIT_FAILURE);\
-  }\
-}
+#define CHECK_RET_VAL(cmd)                                                                         \
+  {                                                                                                \
+    hipError_t error = cmd;                                                                        \
+    if (error != hipSuccess) {                                                                     \
+      fprintf(stderr, "error: '%s'(%d) at %s:%d\n", hipGetErrorString(error), error, __FILE__,     \
+              __LINE__);                                                                           \
+      exit(EXIT_FAILURE);                                                                          \
+    }                                                                                              \
+  }
 
 __global__ static void addition(float* C, float* A, float* B, size_t N) {
-  size_t offset = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
-  size_t stride = hipBlockDim_x * hipGridDim_x;
+  size_t offset = blockIdx.x * blockDim.x + threadIdx.x;
+  size_t stride = blockDim.x * gridDim.x;
 
   for (size_t i = offset; i < N; i += stride) {
     C[i] = A[i] + B[i];
@@ -72,11 +60,10 @@ static int vectorAddKernelTest() {
 
   const unsigned blocks = 512;
   const unsigned threadsPerBlock = 256;
-  hipLaunchKernelGGL(addition, dim3(blocks), dim3(threadsPerBlock),
-                     0, 0, C_d, A_d, B_d, N);
+  hipLaunchKernelGGL(addition, dim3(blocks), dim3(threadsPerBlock), 0, 0, C_d, A_d, B_d, N);
   CHECK_RET_VAL(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
 
-  for (size_t i=0; i < N ; i++) {
+  for (size_t i = 0; i < N; i++) {
     if (C_h[i] != (A_h[i] + B_h[i])) {
       testResult = 0;
       break;
@@ -99,17 +86,16 @@ namespace cg = cooperative_groups;
 
 static const uint BufferSizeInDwords = 448 * 1024 * 1024;
 
-__global__ static void test_gws(uint* buf, uint bufSize,
-                         int64_t* tmpBuf, int64_t* result) {
+__global__ static void test_gws(uint* buf, uint bufSize, int64_t* tmpBuf, int64_t* result) {
   extern __shared__ int64_t tmp[];
   uint offset = blockIdx.x * blockDim.x + threadIdx.x;
-  uint stride = gridDim.x  * blockDim.x;
+  uint stride = gridDim.x * blockDim.x;
   cg::grid_group gg = cg::this_grid();
 
   int64_t sum = 0;
 
   for (uint i = offset; i < bufSize; i += stride) {
-      sum += buf[i];
+    sum += buf[i];
   }
 
   tmp[threadIdx.x] = sum;
@@ -123,7 +109,9 @@ __global__ static void test_gws(uint* buf, uint bufSize,
     tmpBuf[blockIdx.x] = sum;
   }
 
-  gg.sync();
+  // TODO: remove syncthreads with grid sync when compiler issue is fixed
+  // gg.sync();
+  __syncthreads();
 
   if (offset == 0) {
     for (uint i = 1; i < gridDim.x; ++i) {
@@ -141,7 +129,7 @@ static int cooperativeKernelTest() {
   int64_t* Ah;
 
   hipDeviceProp_t deviceProp;
-  hipGetDeviceProperties(&deviceProp, 0);
+  CHECK_RET_VAL(hipGetDeviceProperties(&deviceProp, 0));
 
   if (!deviceProp.cooperativeLaunch) {
     return testResult;
@@ -163,7 +151,7 @@ static int cooperativeKernelTest() {
   CHECK_RET_VAL(hipStreamCreate(&stream));
 
   dim3 dimBlock = dim3(1);
-  dim3 dimGrid  = dim3(1);
+  dim3 dimGrid = dim3(1);
 
   int numBlocks = 0;
   uint workgroups[4] = {32, 64, 128, 256};
@@ -172,27 +160,23 @@ static int cooperativeKernelTest() {
     dimBlock.x = workgroups[i];
     /* Calculate the device occupancy to know how many blocks can be
        run concurrently */
-    hipOccupancyMaxActiveBlocksPerMultiprocessor(&numBlocks,
-    test_gws, dimBlock.x * dimBlock.y * dimBlock.z, dimBlock.x *
-    sizeof(int64_t));
+    CHECK_RET_VAL(hipOccupancyMaxActiveBlocksPerMultiprocessor(
+        &numBlocks, test_gws, dimBlock.x * dimBlock.y * dimBlock.z, dimBlock.x * sizeof(int64_t)));
     dimGrid.x = deviceProp.multiProcessorCount * std::min(numBlocks, 32);
-    CHECK_RET_VAL(hipMalloc(reinterpret_cast<void**>(&dB),
-                       dimGrid.x * sizeof(int64_t)));
+    CHECK_RET_VAL(hipMalloc(reinterpret_cast<void**>(&dB), dimGrid.x * sizeof(int64_t)));
 
-    void *params[4];
+    void* params[4];
     params[0] = reinterpret_cast<void*>(&dA);
     params[1] = (void*)(&BufferSizeInDwords);  // NOLINT
     params[2] = reinterpret_cast<void*>(&dB);
     params[3] = reinterpret_cast<void*>(&dC);
 
-    CHECK_RET_VAL(hipLaunchCooperativeKernel(reinterpret_cast<void*>(test_gws),
-                                        dimGrid, dimBlock, params,
-                                        dimBlock.x * sizeof(int64_t), stream));
+    CHECK_RET_VAL(hipLaunchCooperativeKernel(reinterpret_cast<void*>(test_gws), dimGrid, dimBlock,
+                                             params, dimBlock.x * sizeof(int64_t), stream));
 
     CHECK_RET_VAL(hipMemcpy(Ah, dC, sizeof(int64_t), hipMemcpyDeviceToHost));
 
-    if (*Ah != (((int64_t)(BufferSizeInDwords) * (BufferSizeInDwords - 1))
-                   / 2)) {
+    if (*Ah != (((int64_t)(BufferSizeInDwords) * (BufferSizeInDwords - 1)) / 2)) {
       CHECK_RET_VAL(hipFree(dB));
       testResult = 0;
       break;
@@ -204,11 +188,9 @@ static int cooperativeKernelTest() {
   CHECK_RET_VAL(hipStreamDestroy(stream));
   CHECK_RET_VAL(hipFree(dC));
   CHECK_RET_VAL(hipFree(dA));
-  delete [] init;
+  delete[] init;
   free(Ah);
   return testResult;
 }
 
-extern "C" int lazyLoad() {
-  return vectorAddKernelTest() & cooperativeKernelTest();
-}
+extern "C" int lazyLoad() { return vectorAddKernelTest() & cooperativeKernelTest(); }

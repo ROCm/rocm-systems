@@ -1,23 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "vulkan_test.hh"
 
@@ -48,7 +33,7 @@ template <typename T> bool WriteAndValidateData(hipArray_t& array, size_t array_
   return is_valid;
 }
 
-TEST_CASE("Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Positive_Read_Write") {
+HIP_TEST_CASE(Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Positive_Read_Write) {
   VulkanTest vkt(enable_validation);
   using type = uint8_t;
   constexpr uint32_t count = 16384;
@@ -81,7 +66,7 @@ TEST_CASE("Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Positive_Read_Wr
   HIP_CHECK(hipGetMipmappedArrayLevel(&level_arr, mipmapped_arr, 1));
 
   size_t level_arr_size = mipmapped_arr_desc.extent.width * mipmapped_arr_desc.extent.height *
-      mipmapped_arr_desc.extent.depth;
+                          mipmapped_arr_desc.extent.depth;
 
   REQUIRE(WriteAndValidateData<type>(level_arr, level_arr_size) == true);
 
@@ -90,7 +75,7 @@ TEST_CASE("Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Positive_Read_Wr
   HIP_CHECK(hipDestroyExternalMemory(ext_memory));
 }
 
-TEST_CASE("Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Array_Layered") {
+HIP_TEST_CASE(Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Array_Layered) {
   VulkanTest vkt(enable_validation);
   using type = uint8_t;
   constexpr uint32_t count = 16384;
@@ -123,7 +108,7 @@ TEST_CASE("Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Array_Layered") 
   HIP_CHECK(hipDestroyExternalMemory(ext_memory));
 }
 
-TEST_CASE("Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Array_Cubemap") {
+HIP_TEST_CASE(Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Array_Cubemap) {
   VulkanTest vkt(enable_validation);
   using type = uint8_t;
   //  cubemap HIP array is allocated if all three extents are non-zero and the hipArrayCubemap
@@ -160,7 +145,7 @@ TEST_CASE("Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Array_Cubemap") 
   HIP_CHECK(hipDestroyExternalMemory(ext_memory));
 }
 
-TEST_CASE("Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Negative_Parameters") {
+HIP_TEST_CASE(Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT
 
   VulkanTest vkt(enable_validation);
@@ -210,5 +195,57 @@ TEST_CASE("Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Negative_Paramet
         hipErrorInvalidValue);
   }
 
+  HIP_CHECK(hipDestroyExternalMemory(ext_memory));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test hipExternalMemoryGetMappedMipmappedArray while stream is capturing.
+ * Test source
+ * ------------------------
+ *    - unit/vulkan_interop/hipExternalMemoryGetMappedMipmappedArray.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 6.0
+ */
+HIP_TEST_CASE(Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Capture) {
+  VulkanTest vkt(enable_validation);
+  using type = uint8_t;
+  //  cubemap HIP array is allocated if all three extents are non-zero and the hipArrayCubemap
+  //  flag is set. Width must be equal to height, and depth must be six
+  constexpr uint32_t cube_size = 32;
+  constexpr uint32_t depth = 6;
+  constexpr uint32_t ext_mem_size = cube_size * cube_size * depth;
+
+  const auto vk_storage =
+      vkt.CreateMappedStorage<type>(ext_mem_size, VK_BUFFER_USAGE_TRANSFER_DST_BIT, true);
+  if (vk_storage.memory == nullptr) {
+    return;
+  }
+
+  const auto ext_mem_desc = vkt.BuildMemoryDescriptor(vk_storage.memory, vk_storage.size);
+  hipExternalMemory_t ext_memory;
+  HIP_CHECK(hipImportExternalMemory(&ext_memory, &ext_mem_desc));
+
+  hipExternalMemoryMipmappedArrayDesc mipmapped_arr_desc = {};
+  mipmapped_arr_desc.extent = {};
+  mipmapped_arr_desc.extent.width = cube_size;
+  mipmapped_arr_desc.extent.height = cube_size;
+  mipmapped_arr_desc.extent.depth = depth;
+  mipmapped_arr_desc.flags = hipArrayCubemap;
+  mipmapped_arr_desc.formatDesc = hipCreateChannelDesc<type>();
+  mipmapped_arr_desc.numLevels = GENERATE(1, 2, 4);
+  mipmapped_arr_desc.offset = 0;
+  hipMipmappedArray_t mipmapped_arr = nullptr;
+
+  hipError_t memcpy_err = hipSuccess;
+  BEGIN_CAPTURE_SYNC(memcpy_err, true);
+  HIP_CHECK_ERROR(
+      hipExternalMemoryGetMappedMipmappedArray(&mipmapped_arr, ext_memory, &mipmapped_arr_desc),
+                                               memcpy_err);
+  END_CAPTURE_SYNC(memcpy_err);
+
+  HIP_CHECK(hipFreeMipmappedArray(mipmapped_arr));
   HIP_CHECK(hipDestroyExternalMemory(ext_memory));
 }

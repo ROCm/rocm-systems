@@ -2,24 +2,24 @@
 //
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
-// 
-// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
-// 
+//
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
+//
 // Developed by:
-// 
+//
 //                 AMD Research and AMD HSA Software Development
-// 
+//
 //                 Advanced Micro Devices, Inc.
-// 
+//
 //                 www.amd.com
-// 
+//
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to
 // deal with the Software without restriction, including without limitation
 // the rights to use, copy, modify, merge, publish, distribute, sublicense,
 // and/or sell copies of the Software, and to permit persons to whom the
 // Software is furnished to do so, subject to the following conditions:
-// 
+//
 //  - Redistributions of source code must retain the above copyright notice,
 //    this list of conditions and the following disclaimers.
 //  - Redistributions in binary form must reproduce the above copyright
@@ -29,7 +29,7 @@
 //    nor the names of its contributors may be used to endorse or promote
 //    products derived from this Software without specific prior written
 //    permission.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
@@ -41,7 +41,6 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #ifdef _WIN32  // Are we compiling for windows?
-#define NOMINMAX
 
 #include "core/util/os.h"
 
@@ -49,10 +48,13 @@
 #include <process.h>
 #include <string>
 #include <windows.h>
+#include <ntstatus.h>
+#include <psapi.h>
 
 #include <emmintrin.h>
 #include <pmmintrin.h>
 #include <xmmintrin.h>
+#include <shared_mutex>
 
 #undef Yield
 #undef CreateMutex
@@ -74,45 +76,56 @@ static_assert(sizeof(EventHandle) == sizeof(::HANDLE),
               "OS abstraction size mismatch");
 
 LibHandle LoadLib(std::string filename) {
+  // Pin the library to prevent unloading, equivalent to RTLD_NODELETE on Linux.
+  // This prevents crashes when the library has circular dependencies back to ROCR.
   HMODULE ret = LoadLibrary(filename.c_str());
-  return *(LibHandle*)&ret;
+  if (ret != NULL) {
+    // Pin by address rather than filename to avoid path resolution issues.
+    HMODULE pinned;
+    if (!GetModuleHandleExA(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN,
+            reinterpret_cast<LPCSTR>(ret), &pinned)) {
+      debug_print("LoadLib(%s) pinning failed: error %lu\n", filename.c_str(), GetLastError());
+    }
+  }
+  return reinterpret_cast<LibHandle>(ret);
 }
 
 void* GetExportAddress(LibHandle lib, std::string export_name) {
   return GetProcAddress(*(HMODULE*)&lib, export_name.c_str());
 }
 
-void CloseLib(LibHandle lib) { FreeLibrary(*(::HMODULE*)&lib); }
+bool CloseLib(LibHandle lib) { return FreeLibrary(*(::HMODULE*)&lib); }
 
 std::vector<LibHandle> GetLoadedLibs() {
   // Use EnumProcessModulesEx
-  static_assert(false, "Not implemented.");
+  assert(!"Not implemented.");
+  return std::vector<LibHandle>{};
 }
 
 std::string GetLibraryName(LibHandle lib) {
-  static_assert(false, "Not implemented.");
+  assert(!"Not implemented.");
+  return std::string{};
 }
 
 Semaphore CreateSemaphore() {
-  sem = static_cast<void*>(CreateSemaphore(NULL, 0, LONG_MAX, NULL));
-  assert(sem != NULL && "CreateSemaphore failed");
-
+  auto sem = static_cast<void*>(CreateSemaphoreA(nullptr, 0, LONG_MAX, nullptr));
+  assert(sem != nullptr && "CreateSemaphore failed");
   return *(Semaphore*)&sem;
 }
 
 bool WaitSemaphore(Semaphore sem) {
-  return WaitForSingleObject(*(::HANDLE*)&lock, INFINITE) == WAIT_OBJECT_0;
+  return WaitForSingleObject(sem, INFINITE) == WAIT_OBJECT_0;
 }
 
 void PostSemaphore(Semaphore sem) {
-  ReleaseSemaphore(static_cast<HANDLE>(*sem), 1, NULL);
+  ReleaseSemaphore(sem, 1, nullptr);
 }
 
 void DestroySemaphore(Semaphore sem) {
-  if (!CloseHandle(static_cast<HANDLE>(*sem))) {
+  if (!CloseHandle(sem)) {
     assert("CloseHandle() failed");
   }
-  *sem = NULL;
 }
 
 Mutex CreateMutex() { return CreateEvent(NULL, false, true, NULL); }
@@ -259,48 +272,37 @@ uint64_t AccurateClockFrequency() {
 }
 
 SharedMutex CreateSharedMutex() {
-  assert(false && "Not implemented.");
-  abort();
-  return nullptr;
+  return reinterpret_cast<SharedMutex>(new std::shared_mutex());
 }
 
 bool TryAcquireSharedMutex(SharedMutex lock) {
-  assert(false && "Not implemented.");
-  abort();
-  return false;
+  return reinterpret_cast<std::shared_mutex*>(lock)->try_lock();
 }
 
 bool AcquireSharedMutex(SharedMutex lock) {
-  assert(false && "Not implemented.");
-  abort();
-  return false;
+  reinterpret_cast<std::shared_mutex*>(lock)->lock();
+  return true;
 }
 
 void ReleaseSharedMutex(SharedMutex lock) {
-  assert(false && "Not implemented.");
-  abort();
+  reinterpret_cast<std::shared_mutex*>(lock)->unlock();
 }
 
 bool TrySharedAcquireSharedMutex(SharedMutex lock) {
-  assert(false && "Not implemented.");
-  abort();
-  return false;
+  return reinterpret_cast<std::shared_mutex*>(lock)->try_lock_shared();
 }
 
 bool SharedAcquireSharedMutex(SharedMutex lock) {
-  assert(false && "Not implemented.");
-  abort();
-  return false;
+  reinterpret_cast<std::shared_mutex*>(lock)->lock_shared();
+  return true;
 }
 
 void SharedReleaseSharedMutex(SharedMutex lock) {
-  assert(false && "Not implemented.");
-  abort();
+  reinterpret_cast<std::shared_mutex*>(lock)->unlock_shared();
 }
 
 void DestroySharedMutex(SharedMutex lock) {
-  assert(false && "Not implemented.");
-  abort();
+  delete reinterpret_cast<std::shared_mutex*>(lock);
 }
 
 uint64_t ReadSystemClock() {
@@ -310,15 +312,395 @@ uint64_t ReadSystemClock() {
 }
 
 uint64_t SystemClockFrequency() {
-  assert(false && "Not implemented.");
-  abort();
-  return 0;
+  LARGE_INTEGER frequency;
+  QueryPerformanceFrequency(&frequency);
+  return frequency.QuadPart;
 }
 
 bool ParseCpuID(cpuid_t* cpuinfo) {
-  assert(false && "Not implemented.");
-  abort();
+  int regs[4] = {};
+  int info{};
+
+  __cpuid(regs, info);
+  memset(cpuinfo->ManufacturerID, 0, sizeof(cpuinfo->ManufacturerID));
+  *reinterpret_cast<int*>(cpuinfo->ManufacturerID) = regs[1];
+  *reinterpret_cast<int*>(cpuinfo->ManufacturerID + 4) = regs[3];
+  *reinterpret_cast<int*>(cpuinfo->ManufacturerID + 8) = regs[2];
+  // @todo fill the rest of CPU info
+  return true;
+}
+
+bool IsEnvVarSet(std::string env_var_name) {
+  char* buff = NULL;
+  buff = getenv(env_var_name.c_str());
+  return (buff != NULL);
+}
+
+std::vector<LibHandle> GetLoadedToolsLib() {
+  std::vector<LibHandle> ret;
+  std::vector<std::string> names;
+  HMODULE hMods[1024];
+  HANDLE hProcess = GetCurrentProcess();
+  DWORD cbNeeded;
+  unsigned int i;
+
+  if (EnumProcessModules(hProcess, hMods, sizeof(hMods), &cbNeeded)) {
+    for (i = 0; i < (cbNeeded / sizeof(HMODULE)); i++) {
+      TCHAR szModName[MAX_PATH];
+
+      // Get the full path to the module's file.
+
+      if (GetModuleFileNameEx(hProcess, hMods[i], szModName, sizeof(szModName) / sizeof(TCHAR))) {
+        // Print the module name and handle value.
+        names.push_back(szModName);
+      }
+    }
+  }
+
+  if (!names.empty()) {
+    for (auto& name : names) ret.push_back(LoadLib(name));
+  }
+
+  return ret;
+}
+
+int GetProcessId() { return ::_getpid(); }
+
+uint64_t TimeNanos() {
+  static double PerformanceFrequency = 0.f;
+  if (PerformanceFrequency == 0) {
+    LARGE_INTEGER frequency;
+    QueryPerformanceFrequency(&frequency);
+    PerformanceFrequency = (double)frequency.QuadPart;
+  }
+  LARGE_INTEGER current;
+  QueryPerformanceCounter(&current);
+  return (uint64_t)((double)current.QuadPart / PerformanceFrequency * 1e9);
+}
+
+static inline int memProtToOsProt(MemProt prot) {
+  switch (prot) {
+    case MEM_PROT_NONE:
+      return PAGE_NOACCESS;
+    case MEM_PROT_READ:
+      return PAGE_READONLY;
+    case MEM_PROT_RW:
+      return PAGE_READWRITE;
+    case MEM_PROT_RWX:
+      return PAGE_EXECUTE_READWRITE;
+    default:
+      break;
+  }
+  return -1;
+}
+
+static size_t g_page_size_ = 0;   //!< The default os page size
+static int processorCount_;       //!< The number of active processors
+static size_t allocationGranularity_;
+
+//! Return the default os page size.
+size_t PageSize() {
+  if (g_page_size_ == 0) {
+    SYSTEM_INFO si{};
+    ::GetSystemInfo(&si);
+    g_page_size_ = si.dwPageSize;
+  }
+  return g_page_size_;
+}
+
+void* ReserveMemory(void* start, size_t size, size_t alignment, MemProt prot) {
+  size = AlignUp(size, PageSize());
+  if (allocationGranularity_ == 0) {
+    SYSTEM_INFO si;
+    ::GetSystemInfo(&si);
+    g_page_size_ = si.dwPageSize;
+    allocationGranularity_ = (size_t)si.dwAllocationGranularity;
+  }
+  alignment = std::max(allocationGranularity_, AlignUp(alignment, allocationGranularity_));
+  assert(IsPowerOfTwo(alignment) && "not a power of 2");
+
+  size_t requested = size + alignment - allocationGranularity_;
+  address mem, aligned;
+  do {
+    mem = reinterpret_cast<address>(VirtualAlloc(start, requested, MEM_RESERVE, memProtToOsProt(prot)));
+
+    // check for out of memory.
+    if (mem == NULL) return NULL;
+
+    aligned = AlignUp(mem, alignment);
+
+    // check for already aligned memory.
+    if (aligned == mem && size == requested) {
+      return mem;
+    }
+
+    // try to reserve the aligned address.
+    if (VirtualFree(mem, 0, MEM_RELEASE) == 0) {
+      assert(!"VirtualFree failed");
+    }
+
+    mem = (address)VirtualAlloc(aligned, size, MEM_RESERVE, memProtToOsProt(prot));
+    assert((mem == NULL || mem == aligned) && "VirtualAlloc failed");
+
+  } while (mem != aligned);
+
+  return mem;
+}
+bool ReleaseMemory(void* addr, size_t size) { return VirtualFree(addr, 0, MEM_RELEASE) != 0; }
+
+bool CommitMemory(void* addr, size_t size, MemProt prot) {
+  return VirtualAlloc(addr, size, MEM_COMMIT, memProtToOsProt(prot)) != NULL;
+}
+
+bool UncommitMemory(void* addr, size_t size) { return VirtualFree(addr, size, MEM_DECOMMIT) != 0; }
+
+uint64_t HostTotalPhysicalMemory() {
+  static uint64_t totalPhys = 0;
+
+  if (totalPhys != 0) {
+    return totalPhys;
+  }
+
+  MEMORYSTATUSEX mstatus;
+  mstatus.dwLength = sizeof(mstatus);
+
+  ::GlobalMemoryStatusEx(&mstatus);
+
+  totalPhys = mstatus.ullTotalPhys;
+  return totalPhys;
+}
+
+bool UnmapMemory(void* addr, size_t size) { return UncommitMemory(addr, size); }
+
+bool MapMemory(void* addr, size_t size, MemProt perms, int fd [[maybe_unused]],
+               uint64_t cpu_addr [[maybe_unused]]) {
+  if (perms == MEM_PROT_NONE) {
+    return true;
+  }
+  DWORD OldProtect;
+  return VirtualProtect(addr, size, memProtToOsProt(perms), &OldProtect) != 0;
+}
+
+bool ProtectMemory(void* va, size_t size, MemProt perms) {
+  if (perms == MEM_PROT_NONE) {
+    return UncommitMemory(va, size);
+  }
+  DWORD oldProt;
+  return VirtualProtect(va, size, memProtToOsProt(perms), &oldProt) != 0;
+}
+
+int Ffs(int i) {
+  int res = 0;
+  unsigned long index;
+  if (_BitScanForward(&index, i) != 0) {
+    res = index + 1;
+  }
+  return res;
+}
+
+int Ctz(uint64_t i) {
+  unsigned long index;
+  if (_BitScanForward64(&index, i)) {
+    return index;
+  } else {
+    return sizeof(i) * 8;
+  }
+}
+
+int Popcount(uint32_t i) { return __popcnt(i); }
+
+char* DlError() { return nullptr; }
+
+static const char* kPipePrefix = "\\\\.\\pipe\\";
+static const DWORD kMaxPipeInstances = 128;
+
+struct IPCPipeInfo {
+  HANDLE pipe;
+  std::string pipeName;  // non-empty only for server sockets
+  bool serverSide;       // true for server and accepted-connection sockets
+  uint32_t recvTimeoutMs;     // 0 = no timeout (blocking reads)
+};
+
+// Poll the pipe with PeekNamedPipe until data is available or timeout
+// expires.  Returns true if data is ready, false on timeout or pipe error.
+static bool WaitForPipeData(HANDLE pipe, uint32_t timeoutMs) {
+  if (timeoutMs <= 0) return true;
+  uint32_t elapsed = 0;
+  DWORD sleepMs = 1; // init with 1ms
+  const DWORD maxSleep = 500; // max at 500ms
+  while (elapsed < timeoutMs) {
+    DWORD available = 0;
+    if (!PeekNamedPipe(pipe, NULL, 0, NULL, &available, NULL))
+      return false;
+    if (available > 0) return true;
+    ::Sleep(sleepMs);
+    elapsed += static_cast<uint32_t>(sleepMs);
+    sleepMs = std::min(sleepMs * 2, maxSleep);
+  }
   return false;
+}
+
+static std::string PipeName(const char* name) {
+  return std::string(kPipePrefix) + name;
+}
+
+static HANDLE CreatePipeInstance(const char* fullName) {
+  return CreateNamedPipe(
+      fullName,
+      PIPE_ACCESS_DUPLEX,
+      PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+      kMaxPipeInstances,
+      4096, 4096, 0, NULL);
+}
+
+IPCSocket CreateIPCServer(const char* name, int backlog) {
+  std::string pipeName = PipeName(name);
+  (void)backlog;
+  HANDLE pipe = CreateNamedPipe(
+      pipeName.c_str(),
+      PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
+      PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+      kMaxPipeInstances,
+      4096, 4096, 0, NULL);
+  if (pipe == INVALID_HANDLE_VALUE) return INVALID_SOCKET_VALUE;
+  auto* info = new IPCPipeInfo{pipe, pipeName, true, 0};
+  return reinterpret_cast<IPCSocket>(info);
+}
+
+IPCSocket AcceptIPCConnection(IPCSocket server) {
+  auto* serverInfo = reinterpret_cast<IPCPipeInfo*>(server);
+  HANDLE connPipe = serverInfo->pipe;
+
+  if (!ConnectNamedPipe(connPipe, NULL)) {
+    DWORD err = GetLastError();
+    if (err != ERROR_PIPE_CONNECTED) return INVALID_SOCKET_VALUE;
+  }
+
+  // The current pipe instance is now connected to the client.
+  // Create a new instance so the server can accept the next client.
+  HANDLE newPipe = CreatePipeInstance(serverInfo->pipeName.c_str());
+  if (newPipe == INVALID_HANDLE_VALUE) {
+    DisconnectNamedPipe(connPipe);
+    assert(false && "!CreatePipeInstance failed.");
+    return INVALID_SOCKET_VALUE;
+  }
+  serverInfo->pipe = newPipe;
+
+  auto* connInfo = new IPCPipeInfo{connPipe, "", true, 0};
+  return reinterpret_cast<IPCSocket>(connInfo);
+}
+
+IPCSocket ConnectToIPCServer(const char* name, std::chrono::milliseconds timeout,
+                             std::chrono::milliseconds retryInterval) {
+  std::string pipeName = PipeName(name);
+  auto deadline = std::chrono::steady_clock::now() + timeout;
+  while (std::chrono::steady_clock::now() < deadline) {
+    HANDLE pipe = CreateFile(
+        pipeName.c_str(), GENERIC_READ | GENERIC_WRITE,
+        0, NULL, OPEN_EXISTING, 0, NULL);
+    if (pipe != INVALID_HANDLE_VALUE) {
+      auto* info = new IPCPipeInfo{pipe, "", false, 0};
+      return reinterpret_cast<IPCSocket>(info);
+    }
+    DWORD err = GetLastError();
+    if (err != ERROR_PIPE_BUSY && err != ERROR_FILE_NOT_FOUND) {
+      return INVALID_SOCKET_VALUE;
+    }
+    ::Sleep(static_cast<DWORD>(retryInterval.count()));
+  }
+  return INVALID_SOCKET_VALUE;
+}
+
+void SetIPCSocketRecvTimeout(IPCSocket sock, std::chrono::seconds timeout) {
+  auto* info = reinterpret_cast<IPCPipeInfo*>(sock);
+  info->recvTimeoutMs = static_cast<DWORD>(
+      std::chrono::duration_cast<std::chrono::milliseconds>(timeout).count());
+}
+
+int IPCSocketRead(IPCSocket conn, void* buf, size_t len) {
+  auto* info = reinterpret_cast<IPCPipeInfo*>(conn);
+  if (!WaitForPipeData(info->pipe, info->recvTimeoutMs))
+    return -1;
+  DWORD bytesRead = 0;
+  if (!ReadFile(info->pipe, buf, static_cast<DWORD>(len), &bytesRead, NULL))
+    return -1;
+  return static_cast<int>(bytesRead);
+}
+
+int IPCSocketWrite(IPCSocket conn, const void* buf, size_t len) {
+  auto* info = reinterpret_cast<IPCPipeInfo*>(conn);
+  DWORD bytesWritten = 0;
+  if (!WriteFile(info->pipe, buf, static_cast<DWORD>(len), &bytesWritten, NULL))
+    return -1;
+  return static_cast<int>(bytesWritten);
+}
+
+int IPCSendHandle(IPCSocket conn, intptr_t handle) {
+  auto* info = reinterpret_cast<IPCPipeInfo*>(conn);
+  HANDLE pipe = info->pipe;
+
+  if (!WaitForPipeData(pipe, info->recvTimeoutMs))
+    return -1;
+
+  DWORD remotePid = 0;
+  DWORD bytesRead = 0;
+  if (!ReadFile(pipe, &remotePid, sizeof(remotePid), &bytesRead, NULL) ||
+      bytesRead != sizeof(remotePid))
+    return -1;
+
+  HANDLE remoteProcess = OpenProcess(PROCESS_DUP_HANDLE, FALSE, remotePid);
+  if (!remoteProcess) return -1;
+
+  HANDLE dupHandle = NULL;
+  BOOL ok = DuplicateHandle(
+      GetCurrentProcess(), reinterpret_cast<HANDLE>(handle),
+      remoteProcess, &dupHandle, 0, FALSE, DUPLICATE_SAME_ACCESS);
+  CloseHandle(remoteProcess);
+  if (!ok) return -1;
+
+  DWORD bytesWritten = 0;
+  intptr_t handleVal = reinterpret_cast<intptr_t>(dupHandle);
+  if (!WriteFile(pipe, &handleVal, sizeof(handleVal), &bytesWritten, NULL) ||
+      bytesWritten != sizeof(handleVal))
+    return -1;
+
+  return 0;
+}
+
+intptr_t IPCRecvHandle(IPCSocket conn) {
+  auto* info = reinterpret_cast<IPCPipeInfo*>(conn);
+  HANDLE pipe = info->pipe;
+
+  DWORD myPid = static_cast<DWORD>(::_getpid());
+  DWORD bytesWritten = 0;
+  if (!WriteFile(pipe, &myPid, sizeof(myPid), &bytesWritten, NULL) ||
+      bytesWritten != sizeof(myPid))
+    return -1;
+
+  if (!WaitForPipeData(pipe, info->recvTimeoutMs))
+    return -1;
+
+  intptr_t handleVal = 0;
+  DWORD bytesRead = 0;
+  if (!ReadFile(pipe, &handleVal, sizeof(handleVal), &bytesRead, NULL) ||
+      bytesRead != sizeof(handleVal))
+    return -1;
+
+  return handleVal;
+}
+
+void CloseIPCSocket(IPCSocket sock) {
+  if (sock != INVALID_SOCKET_VALUE) {
+    auto* info = reinterpret_cast<IPCPipeInfo*>(sock);
+    // Server-side accepted connections need DisconnectNamedPipe to
+    // release the client before closing the handle.
+    if (info->serverSide && info->pipeName.empty()) {
+      DisconnectNamedPipe(info->pipe);
+    }
+    if (info->pipe && info->pipe != INVALID_HANDLE_VALUE)
+      CloseHandle(info->pipe);
+    delete info;
+  }
 }
 
 }   //  namespace os

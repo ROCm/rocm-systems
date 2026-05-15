@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 # Common Tests - Test independent of all platforms
 set(TEST_SRC
     Stress_hipStreamCreate.cc
@@ -6,5 +10,4 @@ set(TEST_SRC
 
 hip_add_exe_to_target(NAME stream_stress
                       TEST_SRC ${TEST_SRC}
-                      TEST_TARGET_NAME stress_test
-                      COMPILE_OPTIONS -std=c++17)
+                      TEST_TARGET_NAME stress_test)

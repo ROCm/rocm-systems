@@ -96,6 +96,14 @@ struct ElfInfo
 
     bool has_symbol(const std::function<bool(std::string_view)>&) const;
 
+    std::string as_string() const;
+
+    friend std::ostream& operator<<(std::ostream& os, const ElfInfo& info)
+    {
+        os << info.as_string();
+        return os;
+    }
+
     friend bool operator==(const ElfInfo& lhs, const ElfInfo& rhs)
     {
         return (lhs.filename == rhs.filename);
@@ -115,8 +123,10 @@ struct ElfInfo
     friend bool operator>=(const ElfInfo& lhs, const ElfInfo& rhs) { return !(lhs < rhs); }
 };
 
+// if optimize_for_visible_symbols is true, will skip populating data for sections that are not
+// needed for visible symbol lookups
 ElfInfo
-read(const std::string& _inp);
+read(const std::string& _inp, bool optimize_for_visible_symbols = false);
 }  // namespace elf_utils
 }  // namespace common
 }  // namespace rocprofiler

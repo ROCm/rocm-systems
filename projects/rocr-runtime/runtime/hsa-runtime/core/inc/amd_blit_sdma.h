@@ -71,9 +71,74 @@ class BlitSdmaBase : public core::Blit {
                                              const hsa_dim3_t* src_offset, const hsa_dim3_t* range,
                                              std::vector<core::Signal*>& dep_signals,
                                              core::Signal& out_signal) = 0;
+
+  virtual hsa_status_t SubmitCommand(const void* cmds, size_t cmd_size, uint64_t size,
+                                     const std::vector<core::Signal*>& dep_signals,
+                                     core::Signal& out_signal, std::vector<core::Signal*>& gang_signals) = 0;
+
+  virtual hsa_status_t SubmitLinearCopyBroadcastCommand(
+      const std::vector<void*>& dsts, const void* src, size_t size,
+      std::vector<core::Signal*>& dep_signals,
+      core::Signal& out_signal) = 0;
+
+  /// @brief Submit back-to-back linear copy commands for all destinations from a
+  /// shared source in a single SDMA ring submission (linearB2BCopy path).
+  /// Unlike broadcast, each destination gets one or more standard
+  /// SDMA_PKT_COPY_LINEAR packets (chunked when size exceeds the per-packet
+  /// limit); the compactness comes from batching all of them into one
+  /// SubmitCommand call.
+  virtual hsa_status_t SubmitLinearCopyB2BCommand(
+      const std::vector<void*>& dsts, const void* src, size_t size,
+      std::vector<core::Signal*>& dep_signals,
+      core::Signal& out_signal) = 0;
+
+  virtual bool BroadcastSupported() const = 0;
+  virtual bool PlatformAtomicSupport() const = 0;
+  virtual bool IsGfx1250() const = 0;
+
+  virtual hsa_status_t SubmitPrologue(const std::vector<core::Signal*>& dep_signals,
+                                      core::Signal& out_signal,
+                                      core::Signal& prologue_signal) = 0;
+
+  virtual hsa_status_t SubmitBody(const void* cmd, size_t cmd_size, uint64_t size,
+                                  core::Signal& prologue_signal,
+                                  core::Signal& body_signal) = 0;
+
+  /// @brief Submit epilogue that waits for bodies, then performs GCR writeback,
+  /// end timestamp, and sets out_signal to its final value.
+  /// When body_signals is non-empty, polls each body signal for 0 (non-atomic path).
+  /// When body_signals is empty, polls out_signal for body_complete_value (atomic path).
+  virtual hsa_status_t SubmitEpilogue(core::Signal& out_signal,
+                                      hsa_signal_value_t body_complete_value,
+                                      const std::vector<core::Signal*>& body_signals = {}) = 0;
+
+  virtual hsa_status_t SubmitLinearCopyBody(void* dst, const void* src, size_t size,
+                                            core::Signal& prologue_signal,
+                                            core::Signal& body_signal) = 0;
+
+  virtual hsa_status_t SubmitLinearSwapBody(void* addr_a, void* addr_b, size_t size,
+                                            core::Signal& prologue_signal,
+                                            core::Signal& body_signal) = 0;
+
+  virtual hsa_status_t SubmitLinearCopyBodyWaitSignal(
+      void* dst, const void* src, size_t size,
+      const std::vector<core::Signal*>& dep_signals,
+      core::Signal& out_signal) = 0;
+
+  virtual hsa_status_t SubmitLinearSwapBodyWaitSignal(
+      void* addr_a, void* addr_b, size_t size_a, size_t size_b,
+      const std::vector<core::Signal*>& dep_signals,
+      core::Signal& out_signal) = 0;
+
+  virtual hsa_status_t SubmitNotifyPrologue(
+      core::Signal* prologue_signal = nullptr) = 0;
+  virtual hsa_status_t SubmitNotifyEpilogue(core::Signal& out_signal) = 0;
+
+  virtual bool SwapSupported() const = 0;
+  virtual bool UsesGCR() const = 0;
 };
 
-template <bool useGCR> class BlitSdma : public BlitSdmaBase {
+template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
  public:
   BlitSdma();
 
@@ -94,10 +159,8 @@ template <bool useGCR> class BlitSdma : public BlitSdmaBase {
   ///
   /// @note: The call will block until all packets have executed.
   ///
-  /// @param agent Agent passed to Initialize.
-  ///
   /// @return hsa_status_t
-  virtual hsa_status_t Destroy(const core::Agent& agent) override;
+  virtual hsa_status_t Destroy() override;
 
   /// @brief Submit a linear copy command to the queue buffer.
   ///
@@ -130,6 +193,26 @@ template <bool useGCR> class BlitSdma : public BlitSdmaBase {
                                              std::vector<core::Signal*>& dep_signals,
                                              core::Signal& out_signal) override;
 
+  /// @brief Submit a broadcast linear copy command. Copies from a single source
+  /// to multiple destinations using SDMA broadcast packets (2 dsts per packet).
+  /// If the destination count is odd, the last destination uses a regular
+  /// linear copy packet. Large transfers are broken into size-chunked packets.
+  ///
+  /// @param dsts Vector of destination memory addresses.
+  /// @param src Memory address of the copy source.
+  /// @param size Size of the data to be copied to each destination.
+  /// @param dep_signals Arrays of dependent signal.
+  /// @param out_signal Output signal.
+  hsa_status_t SubmitLinearCopyBroadcastCommand(
+      const std::vector<void*>& dsts, const void* src, size_t size,
+      std::vector<core::Signal*>& dep_signals,
+      core::Signal& out_signal) override;
+
+  hsa_status_t SubmitLinearCopyB2BCommand(
+      const std::vector<void*>& dsts, const void* src, size_t size,
+      std::vector<core::Signal*>& dep_signals,
+      core::Signal& out_signal) override;
+
   /// @brief Submit a linear fill command to the queue buffer
   ///
   /// @param ptr Memory address of the fill destination.
@@ -143,6 +226,46 @@ template <bool useGCR> class BlitSdma : public BlitSdmaBase {
   virtual uint64_t PendingBytes() override;
   virtual void GangLeader(bool gang_leader) override { gang_leader_ = gang_leader; }
   virtual bool GangLeader() const override { return gang_leader_; }
+  bool BroadcastSupported() const override { return broadcast_supported_; }
+  bool PlatformAtomicSupport() const override { return platform_atomic_support_; }
+  bool IsGfx1250() const override { return is_gfx1250_; }
+
+  hsa_status_t SubmitPrologue(const std::vector<core::Signal*>& dep_signals,
+                              core::Signal& out_signal,
+                              core::Signal& prologue_signal) override;
+
+  hsa_status_t SubmitBody(const void* cmd, size_t cmd_size, uint64_t size,
+                          core::Signal& prologue_signal,
+                          core::Signal& body_signal) override;
+
+  hsa_status_t SubmitEpilogue(core::Signal& out_signal,
+                              hsa_signal_value_t body_complete_value,
+                              const std::vector<core::Signal*>& body_signals = {}) override;
+
+  hsa_status_t SubmitLinearCopyBody(void* dst, const void* src, size_t size,
+                                    core::Signal& prologue_signal,
+                                    core::Signal& body_signal) override;
+
+  hsa_status_t SubmitLinearSwapBody(void* addr_a, void* addr_b, size_t size,
+                                    core::Signal& prologue_signal,
+                                    core::Signal& body_signal) override;
+
+  hsa_status_t SubmitLinearCopyBodyWaitSignal(
+      void* dst, const void* src, size_t size,
+      const std::vector<core::Signal*>& dep_signals,
+      core::Signal& out_signal) override;
+
+  hsa_status_t SubmitLinearSwapBodyWaitSignal(
+      void* addr_a, void* addr_b, size_t size_a, size_t size_b,
+      const std::vector<core::Signal*>& dep_signals,
+      core::Signal& out_signal) override;
+
+  hsa_status_t SubmitNotifyPrologue(
+      core::Signal* prologue_signal = nullptr) override;
+  hsa_status_t SubmitNotifyEpilogue(core::Signal& out_signal) override;
+
+  bool SwapSupported() const override { return swap_supported_; }
+  bool UsesGCR() const override { return useGCR; }
 
  private:
   /// @brief Acquires the address into queue buffer where a new command
@@ -195,6 +318,15 @@ template <bool useGCR> class BlitSdma : public BlitSdmaBase {
   void BuildCopyCommand(char* cmd_addr, uint32_t num_copy_command, void* dst,
                         const void* src, size_t size);
 
+  void BuildBroadcastCopyCommand(char* cmd_addr, uint32_t num_copy_command,
+                                 void* dst1, void* dst2, const void* src, size_t size);
+
+  void BuildMulticastCopyCommand(char* cmd_addr, uint32_t num_copy_command,
+                                 const std::vector<void*>& dsts, const void* src, size_t size);
+
+  void BuildSwapCopyCommand(char* cmd_addr, uint32_t num_copy_command,
+                            void* addr_a, void* addr_b, size_t size);
+
   void BuildCopyRectCommand(const std::function<void*(size_t)>& append,
                             const hsa_pitched_ptr_t* dst, const hsa_dim3_t* dst_offset,
                             const hsa_pitched_ptr_t* src, const hsa_dim3_t* src_offset,
@@ -204,6 +336,21 @@ template <bool useGCR> class BlitSdma : public BlitSdmaBase {
                         size_t count);
 
   void BuildPollCommand(char* cmd_addr, void* addr, uint32_t reference);
+
+  void BuildPoll64bCommand(char* cmd_addr, void* addr, uint64_t reference);
+
+  void BuildFence64bCommand(char* cmd_addr, void* fence_addr, uint64_t fence_value);
+
+  void BuildWaitSignalCopyCommand(char* cmd_addr, uint32_t num_copy_command,
+                                  void* dst, const void* src, size_t size,
+                                  const core::Signal* wait_signal,
+                                  core::Signal* signal_signal);
+
+  void BuildWaitSignalSwapCommand(char* cmd_addr, uint32_t num_copy_command,
+                                  void* addr_a, void* addr_b,
+                                  size_t size_a, size_t size_b,
+                                  const core::Signal* wait_signal,
+                                  core::Signal* signal_signal);
 
   void BuildAtomicDecrementCommand(char* cmd_addr, void* addr);
 
@@ -215,7 +362,8 @@ template <bool useGCR> class BlitSdma : public BlitSdmaBase {
 
   hsa_status_t SubmitCommand(const void* cmds, size_t cmd_size, uint64_t size,
                              const std::vector<core::Signal*>& dep_signals,
-                             core::Signal& out_signal, std::vector<core::Signal*>& gang_signals);
+                             core::Signal& out_signal,
+                             std::vector<core::Signal*>& gang_signals) override;
 
   hsa_status_t SubmitBlockingCommand(const void* cmds, size_t cmd_size, uint64_t size);
 
@@ -253,7 +401,7 @@ template <bool useGCR> class BlitSdma : public BlitSdmaBase {
 
   // Internal signals for blocking APIs
   core::unique_signal_ptr signals_[2];
-  KernelMutex lock_;
+  std::mutex lock_;
   bool parity_;
 
   /// Queue resource descriptor for doorbell, read
@@ -265,6 +413,10 @@ template <bool useGCR> class BlitSdma : public BlitSdmaBase {
   uint64_t cached_commit_index_;
 
   static const uint32_t linear_copy_command_size_;
+
+  static const uint32_t broadcast_copy_command_size_;
+
+  static const uint32_t swap_copy_command_size_;
 
   static const uint32_t fill_command_size_;
 
@@ -280,7 +432,11 @@ template <bool useGCR> class BlitSdma : public BlitSdmaBase {
 
   static const uint32_t trap_command_size_;
 
-  static const uint32_t gcr_command_size_;
+  static const uint32_t fence_64b_command_size_;
+
+  static const uint32_t poll_64b_command_size_;
+
+  uint32_t gcr_command_size();
 
   // Max copy size of a single linear copy command packet.
   size_t max_single_linear_copy_size_;
@@ -308,13 +464,38 @@ template <bool useGCR> class BlitSdma : public BlitSdmaBase {
 
   /// Minimum submission size in bytes.
   size_t min_submission_size_;
+
+  /// Cached at init to avoid pointer chasing in the hot path.
+  bool needs_kmt_doorbell_;
+  bool sdma_wait_idle_;
+  bool is_dxg_;
+  bool enable_sdma_hdp_flush_;
+  bool sw_poll_workaround_;
+  volatile uint64_t* queue_wptr_;
+  volatile uint64_t* queue_rptr_;
+  volatile uint64_t* queue_doorbell_;
+
+  /// True if SDMA supports broadcast linear copy (one src -> two dst).
+  bool broadcast_supported_;
+
+  /// True for gfx1250 (major=12 minor=5): multicast, wait/signal packets, 64b poll/fence.
+  bool is_gfx1250_;
+
+  /// True if SDMA supports linear swap copy (gfx94X+).
+  bool swap_supported_;
 };
 
 
-typedef BlitSdma<false> BlitSdmaV4;
+typedef BlitSdma<false, false> BlitSdmaV4;
 
 // SDMA is connected to gL2.
-typedef BlitSdma<true> BlitSdmaV5;
+typedef BlitSdma<true, false> BlitSdmaV5;
+
+// SDMA ops are done by DACC Backend so LINEAR_COPY and CONSTANT_FILL ops are
+// not cached in GL2.
+// SDMA ops support NPD field (no prior dependency)
+// SDMA OSS v7.1
+typedef BlitSdma<true, true> BlitSdmaV6;
 
 }  // namespace amd
 }  // namespace rocr

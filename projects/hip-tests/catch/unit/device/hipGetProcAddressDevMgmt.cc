@@ -1,21 +1,9 @@
 /*
-Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 #include <hip_test_common.hh>
 #include <hip_test_helper.hh>
 #include <hip_test_defgroups.hh>
@@ -31,7 +19,7 @@ THE SOFTWARE.
  */
 constexpr int size = 20;
 constexpr size_t len = 256;
-void CreateMemPool(int device, hipMemPool_t &mem_pool) {
+void CreateMemPool(int device, hipMemPool_t& mem_pool) {
   hipMemPoolProps kPoolProps;
   kPoolProps.allocType = hipMemAllocationTypePinned;
   kPoolProps.location.type = hipMemLocationTypeDevice;
@@ -50,7 +38,7 @@ void CreateMemPool(int device, hipMemPool_t &mem_pool) {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_ValidateDeviceApis") {
+HIP_TEST_CASE(Unit_hipGetProcAddress_ValidateDeviceApis) {
   void* hipGetDeviceCount_ptr = nullptr;
   void* hipRuntimeGetVersion_ptr = nullptr;
   void* hipDeviceGetLimit_ptr = nullptr;
@@ -82,168 +70,113 @@ TEST_CASE("Unit_hipGetProcAddress_ValidateDeviceApis") {
   int currentHipVersion = 0;
   HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
 
-  HIP_CHECK(hipGetProcAddress("hipGetDeviceCount",
-                             &hipGetDeviceCount_ptr,
-                             currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipRuntimeGetVersion",
-                              &hipRuntimeGetVersion_ptr,
+  HIP_CHECK(hipGetProcAddress("hipGetDeviceCount", &hipGetDeviceCount_ptr, currentHipVersion, 0,
+                              nullptr));
+  HIP_CHECK(hipGetProcAddress("hipRuntimeGetVersion", &hipRuntimeGetVersion_ptr, currentHipVersion,
+                              0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipDeviceGetLimit", &hipDeviceGetLimit_ptr, currentHipVersion, 0,
+                              nullptr));
+  HIP_CHECK(hipGetProcAddress("hipDeviceSetLimit", &hipDeviceSetLimit_ptr, currentHipVersion, 0,
+                              nullptr));
+  HIP_CHECK(hipGetProcAddress("hipDeviceComputeCapability", &hipDeviceComputeCapability_ptr,
                               currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipDeviceGetLimit",
-                              &hipDeviceGetLimit_ptr,
+  HIP_CHECK(hipGetProcAddress("hipDeviceGet", &hipDeviceGet_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipDeviceGetPCIBusId", &hipDeviceGetPCIBusId_ptr, currentHipVersion,
+                              0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipDeviceGetByPCIBusId", &hipDeviceGetByPCIBusId_ptr,
                               currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipDeviceSetLimit",
-                              &hipDeviceSetLimit_ptr,
+  HIP_CHECK(hipGetProcAddress("hipDeviceGetDefaultMemPool", &hipDeviceGetDefaultMemPool_ptr,
                               currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipDeviceComputeCapability",
-                              &hipDeviceComputeCapability_ptr,
+  HIP_CHECK(
+      hipGetProcAddress("hipDeviceGetName", &hipDeviceGetName_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(
+      hipGetProcAddress("hipDeviceGetUuid", &hipDeviceGetUuid_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipGetDeviceFlags", &hipGetDeviceFlags_ptr, currentHipVersion, 0,
+                              nullptr));
+  HIP_CHECK(hipGetProcAddress("hipSetDeviceFlags", &hipSetDeviceFlags_ptr, currentHipVersion, 0,
+                              nullptr));
+  HIP_CHECK(
+      hipGetProcAddress("hipDeviceReset", &hipDeviceReset_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipDriverGetVersion", &hipDriverGetVersion_ptr, currentHipVersion, 0,
+                              nullptr));
+  HIP_CHECK(hipGetProcAddress("hipDeviceGetCacheConfig", &hipDeviceGetCacheConfig_ptr,
                               currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipDeviceGet",
-                              &hipDeviceGet_ptr,
+  HIP_CHECK(hipGetProcAddress("hipDeviceSetCacheConfig", &hipDeviceSetCacheConfig_ptr,
                               currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipDeviceGetPCIBusId",
-                              &hipDeviceGetPCIBusId_ptr,
+  HIP_CHECK(hipGetProcAddress("hipDeviceTotalMem", &hipDeviceTotalMem_ptr, currentHipVersion, 0,
+                              nullptr));
+  HIP_CHECK(hipGetProcAddress("hipGetDeviceProperties", &hipGetDeviceProperties_ptr,
                               currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipDeviceGetByPCIBusId",
-                              &hipDeviceGetByPCIBusId_ptr,
+  HIP_CHECK(hipGetProcAddress("hipGetDevicePropertiesR0000", &hipGetDevicePropertiesR0000_ptr,
                               currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipDeviceGetDefaultMemPool",
-                              &hipDeviceGetDefaultMemPool_ptr,
+  HIP_CHECK(hipGetProcAddress("hipGetDevicePropertiesR0600", &hipGetDevicePropertiesR0600_ptr,
                               currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipDeviceGetName",
-                              &hipDeviceGetName_ptr,
+  HIP_CHECK(
+      hipGetProcAddress("hipChooseDevice", &hipChooseDevice_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipChooseDeviceR0000", &hipChooseDeviceR0000_ptr, currentHipVersion,
+                              0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipChooseDeviceR0600", &hipChooseDeviceR0600_ptr, currentHipVersion,
+                              0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipDeviceSetSharedMemConfig", &hipDeviceSetSharedMemConfig_ptr,
                               currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipDeviceGetUuid",
-                              &hipDeviceGetUuid_ptr,
+  HIP_CHECK(hipGetProcAddress("hipDeviceGetSharedMemConfig", &hipDeviceGetSharedMemConfig_ptr,
                               currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipGetDeviceFlags",
-                              &hipGetDeviceFlags_ptr,
-                              currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipSetDeviceFlags",
-                              &hipSetDeviceFlags_ptr,
-                              currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipDeviceReset",
-                              &hipDeviceReset_ptr,
-                              currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipDriverGetVersion",
-                              &hipDriverGetVersion_ptr,
-                              currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipDeviceGetCacheConfig",
-                              &hipDeviceGetCacheConfig_ptr,
-                              currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipDeviceSetCacheConfig",
-                              &hipDeviceSetCacheConfig_ptr,
-                              currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipDeviceTotalMem",
-                               &hipDeviceTotalMem_ptr,
-                               currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipGetDeviceProperties",
-                              &hipGetDeviceProperties_ptr,
-                              currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipGetDevicePropertiesR0000",
-                              &hipGetDevicePropertiesR0000_ptr,
-                              currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipGetDevicePropertiesR0600",
-                              &hipGetDevicePropertiesR0600_ptr,
-                              currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipChooseDevice", &hipChooseDevice_ptr,
-                              currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipChooseDeviceR0000",
-                              &hipChooseDeviceR0000_ptr,
-                              currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipChooseDeviceR0600",
-                              &hipChooseDeviceR0600_ptr,
-                              currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipDeviceSetSharedMemConfig",
-                              &hipDeviceSetSharedMemConfig_ptr,
-                              currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipDeviceGetSharedMemConfig",
-                              &hipDeviceGetSharedMemConfig_ptr,
-                              currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipDeviceGetAttribute",
-                              &hipDeviceGetAttribute_ptr,
+  HIP_CHECK(hipGetProcAddress("hipDeviceGetAttribute", &hipDeviceGetAttribute_ptr,
                               currentHipVersion, 0, nullptr));
 
   hipError_t (*dyn_hipGetDeviceCount_ptr)(int*) =
-  reinterpret_cast<hipError_t (*)(int*)>
-  (hipGetDeviceCount_ptr);
+      reinterpret_cast<hipError_t (*)(int*)>(hipGetDeviceCount_ptr);
   hipError_t (*dyn_hipRuntimeGetVersion_ptr)(int*) =
-  reinterpret_cast<hipError_t (*)(int*)>
-  (hipRuntimeGetVersion_ptr);
+      reinterpret_cast<hipError_t (*)(int*)>(hipRuntimeGetVersion_ptr);
   hipError_t (*dyn_hipDeviceGetLimit_ptr)(size_t*, hipLimit_t) =
-  reinterpret_cast<hipError_t (*)(size_t*, hipLimit_t)>
-  (hipDeviceGetLimit_ptr);
+      reinterpret_cast<hipError_t (*)(size_t*, hipLimit_t)>(hipDeviceGetLimit_ptr);
   hipError_t (*dyn_hipDeviceSetLimit_ptr)(hipLimit_t, size_t) =
-  reinterpret_cast<hipError_t (*)(hipLimit_t, size_t)>
-  (hipDeviceSetLimit_ptr);
+      reinterpret_cast<hipError_t (*)(hipLimit_t, size_t)>(hipDeviceSetLimit_ptr);
   hipError_t (*dyn_hipDeviceComputeCapability_ptr)(int*, int*, hipDevice_t) =
-  reinterpret_cast<hipError_t (*)(int*, int*, hipDevice_t)>
-  (hipDeviceComputeCapability_ptr);
+      reinterpret_cast<hipError_t (*)(int*, int*, hipDevice_t)>(hipDeviceComputeCapability_ptr);
   hipError_t (*dyn_hipDeviceGet_ptr)(hipDevice_t*, int) =
-  reinterpret_cast<hipError_t (*)(hipDevice_t*, int)>
-  (hipDeviceGet_ptr);
-  hipError_t (*dyn_hipDeviceGetPCIBusId_ptr)(char* , int, int) =
-  reinterpret_cast<hipError_t (*)(char* , int, int)>
-  (hipDeviceGetPCIBusId_ptr);
+      reinterpret_cast<hipError_t (*)(hipDevice_t*, int)>(hipDeviceGet_ptr);
+  hipError_t (*dyn_hipDeviceGetPCIBusId_ptr)(char*, int, int) =
+      reinterpret_cast<hipError_t (*)(char*, int, int)>(hipDeviceGetPCIBusId_ptr);
   hipError_t (*dyn_hipDeviceGetByPCIBusId_ptr)(int*, const char*) =
-  reinterpret_cast<hipError_t (*)(int*, const char*)>
-  (hipDeviceGetByPCIBusId_ptr);
+      reinterpret_cast<hipError_t (*)(int*, const char*)>(hipDeviceGetByPCIBusId_ptr);
   hipError_t (*dyn_hipDeviceGetDefaultMemPool_ptr)(hipMemPool_t*, int) =
-  reinterpret_cast<hipError_t (*)(hipMemPool_t*, int)>
-  (hipDeviceGetDefaultMemPool_ptr);
+      reinterpret_cast<hipError_t (*)(hipMemPool_t*, int)>(hipDeviceGetDefaultMemPool_ptr);
   hipError_t (*dyn_hipDeviceGetName_ptr)(char*, int, hipDevice_t) =
-  reinterpret_cast<hipError_t (*)(char*, int, hipDevice_t)>
-  (hipDeviceGetName_ptr);
+      reinterpret_cast<hipError_t (*)(char*, int, hipDevice_t)>(hipDeviceGetName_ptr);
   hipError_t (*dyn_hipDeviceGetUuid_ptr)(hipUUID*, hipDevice_t) =
-  reinterpret_cast
-  <hipError_t (*)(hipUUID*, hipDevice_t)>(hipDeviceGetUuid_ptr);
+      reinterpret_cast<hipError_t (*)(hipUUID*, hipDevice_t)>(hipDeviceGetUuid_ptr);
   hipError_t (*dyn_hipGetDeviceFlags_ptr)(unsigned int*) =
-  reinterpret_cast<hipError_t (*)(unsigned int*)>
-  (hipGetDeviceFlags_ptr);
+      reinterpret_cast<hipError_t (*)(unsigned int*)>(hipGetDeviceFlags_ptr);
   hipError_t (*dyn_hipSetDeviceFlags_ptr)(unsigned int) =
-  reinterpret_cast<hipError_t (*)(unsigned int)>
-  (hipSetDeviceFlags_ptr);
-  hipError_t (*dyn_hipDeviceReset_ptr)() = reinterpret_cast
-  <hipError_t (*)()>(hipDeviceReset_ptr);
+      reinterpret_cast<hipError_t (*)(unsigned int)>(hipSetDeviceFlags_ptr);
+  hipError_t (*dyn_hipDeviceReset_ptr)() = reinterpret_cast<hipError_t (*)()>(hipDeviceReset_ptr);
   hipError_t (*dyn_hipDriverGetVersion_ptr)(int*) =
-  reinterpret_cast<hipError_t (*)(int*)>(hipDriverGetVersion_ptr);
-  hipError_t (*dyn_hipDeviceGetCacheConfig_ptr)(hipFuncCache_t *) =
-  reinterpret_cast<hipError_t (*)(hipFuncCache_t *)>
-  (hipDeviceGetCacheConfig_ptr);
+      reinterpret_cast<hipError_t (*)(int*)>(hipDriverGetVersion_ptr);
+  hipError_t (*dyn_hipDeviceGetCacheConfig_ptr)(hipFuncCache_t*) =
+      reinterpret_cast<hipError_t (*)(hipFuncCache_t*)>(hipDeviceGetCacheConfig_ptr);
   hipError_t (*dyn_hipDeviceSetCacheConfig_ptr)(hipFuncCache_t) =
-  reinterpret_cast<hipError_t (*)(hipFuncCache_t)>
-  (hipDeviceSetCacheConfig_ptr);
+      reinterpret_cast<hipError_t (*)(hipFuncCache_t)>(hipDeviceSetCacheConfig_ptr);
   hipError_t (*dyn_hipDeviceTotalMem_ptr)(size_t*, hipDevice_t) =
-  reinterpret_cast<hipError_t (*)(size_t*, hipDevice_t)>
-  (hipDeviceTotalMem_ptr);
+      reinterpret_cast<hipError_t (*)(size_t*, hipDevice_t)>(hipDeviceTotalMem_ptr);
   hipError_t (*dyn_hipGetDeviceProperties_ptr)(hipDeviceProp_t*, int) =
-  reinterpret_cast<hipError_t (*)(hipDeviceProp_t*, int)>
-  (hipGetDeviceProperties_ptr);
-  hipError_t(*dyn_hipGetDevicePropertiesR0000_ptr)
-            (hipDeviceProp_tR0000*, int) =
-  reinterpret_cast<hipError_t (*)(hipDeviceProp_tR0000*, int)>
-  (hipGetDevicePropertiesR0000_ptr);
-  hipError_t(*dyn_hipGetDevicePropertiesR0600_ptr)
-            (hipDeviceProp_tR0600*, int) =
-  reinterpret_cast<hipError_t (*)(hipDeviceProp_tR0600*, int)>
-  (hipGetDevicePropertiesR0600_ptr);
+      reinterpret_cast<hipError_t (*)(hipDeviceProp_t*, int)>(hipGetDeviceProperties_ptr);
+  hipError_t (*dyn_hipGetDevicePropertiesR0000_ptr)(hipDeviceProp_tR0000*, int) =
+      reinterpret_cast<hipError_t (*)(hipDeviceProp_tR0000*, int)>(hipGetDevicePropertiesR0000_ptr);
+  hipError_t (*dyn_hipGetDevicePropertiesR0600_ptr)(hipDeviceProp_tR0600*, int) =
+      reinterpret_cast<hipError_t (*)(hipDeviceProp_tR0600*, int)>(hipGetDevicePropertiesR0600_ptr);
   hipError_t (*dyn_hipChooseDevice_ptr)(int*, hipDeviceProp_t*) =
-  reinterpret_cast<hipError_t (*)(int*, hipDeviceProp_t*)>
-  (hipChooseDevice_ptr);
+      reinterpret_cast<hipError_t (*)(int*, hipDeviceProp_t*)>(hipChooseDevice_ptr);
   hipError_t (*dyn_hipChooseDeviceR0000_ptr)(int*, hipDeviceProp_tR0000*) =
-  reinterpret_cast<hipError_t (*)(int*, hipDeviceProp_tR0000*)>
-  (hipChooseDevice_ptr);
+      reinterpret_cast<hipError_t (*)(int*, hipDeviceProp_tR0000*)>(hipChooseDevice_ptr);
   hipError_t (*dyn_hipChooseDeviceR0600_ptr)(int*, hipDeviceProp_tR0600*) =
-  reinterpret_cast<hipError_t (*)(int*, hipDeviceProp_tR0600*)>
-  (hipChooseDevice_ptr);
+      reinterpret_cast<hipError_t (*)(int*, hipDeviceProp_tR0600*)>(hipChooseDevice_ptr);
   hipError_t (*dyn_hipDeviceSetSharedMemConfig_ptr)(hipSharedMemConfig) =
-  reinterpret_cast<hipError_t (*)(hipSharedMemConfig)>
-  (hipDeviceSetSharedMemConfig_ptr);
+      reinterpret_cast<hipError_t (*)(hipSharedMemConfig)>(hipDeviceSetSharedMemConfig_ptr);
   hipError_t (*dyn_hipDeviceGetSharedMemConfig_ptr)(hipSharedMemConfig*) =
-  reinterpret_cast<hipError_t (*)(hipSharedMemConfig*)>
-  (hipDeviceGetSharedMemConfig_ptr);
-  hipError_t (*dyn_hipDeviceGetAttribute_ptr)(int*, hipDeviceAttribute_t, int) = //NOLINT
-  reinterpret_cast<hipError_t (*)(int*, hipDeviceAttribute_t, int)>
-  (hipDeviceGetAttribute_ptr);
+      reinterpret_cast<hipError_t (*)(hipSharedMemConfig*)>(hipDeviceGetSharedMemConfig_ptr);
+  hipError_t (*dyn_hipDeviceGetAttribute_ptr)(int*, hipDeviceAttribute_t, int) =  // NOLINT
+      reinterpret_cast<hipError_t (*)(int*, hipDeviceAttribute_t, int)>(hipDeviceGetAttribute_ptr);
 
   // hipGetDeviceCount API
   int devCount_ptr = 0, devCount = 0;
@@ -267,7 +200,7 @@ TEST_CASE("Unit_hipGetProcAddress_ValidateDeviceApis") {
   REQUIRE(oldVal == oldVal_ptr);
   HIP_CHECK(hipDeviceSetLimit(hipLimitStackSize, oldVal + 8));
   HIP_CHECK(dyn_hipDeviceSetLimit_ptr(hipLimitStackSize, oldVal_ptr + 8));
-  REQUIRE((oldVal+8) == (oldVal_ptr + 8));
+  REQUIRE((oldVal + 8) == (oldVal_ptr + 8));
   size_t new_val;
   HIP_CHECK(dyn_hipDeviceGetLimit_ptr(&new_val, hipLimitStackSize));
   REQUIRE(new_val >= oldVal + 8);
@@ -281,8 +214,7 @@ TEST_CASE("Unit_hipGetProcAddress_ValidateDeviceApis") {
     HIP_CHECK(dyn_hipDeviceGet_ptr(&device_ptr, i));
     REQUIRE(device == device_ptr);
     HIP_CHECK(hipDeviceComputeCapability(&major, &minor, device));
-    HIP_CHECK(dyn_hipDeviceComputeCapability_ptr(&major_ptr,
-                                                 &minor_ptr, device));
+    HIP_CHECK(dyn_hipDeviceComputeCapability_ptr(&major_ptr, &minor_ptr, device));
     REQUIRE(major == major_ptr);
     REQUIRE(minor == minor_ptr);
   }
@@ -345,7 +277,7 @@ TEST_CASE("Unit_hipGetProcAddress_ValidateDeviceApis") {
   // hipDeviceSetCacheConfig API
   HIP_CHECK(hipSetDevice(0));
   auto cache_config = hipFuncCachePreferL1;
-  auto cache_config1 =  hipFuncCachePreferNone;
+  auto cache_config1 = hipFuncCachePreferNone;
   HIP_CHECK(hipDeviceSetCacheConfig(cache_config));
   HIP_CHECK(dyn_hipDeviceSetCacheConfig_ptr(cache_config1));
 
@@ -411,11 +343,8 @@ TEST_CASE("Unit_hipGetProcAddress_ValidateDeviceApis") {
 
   // hipDeviceGetAttribute API
   int value, value_ptr;
-  HIP_CHECK(hipDeviceGetAttribute(&value,
-                                  hipDeviceAttributeMaxThreadsPerBlock, 0));
-  HIP_CHECK(dyn_hipDeviceGetAttribute_ptr(&value_ptr,
-                                          hipDeviceAttributeMaxThreadsPerBlock,
-                                          0));
+  HIP_CHECK(hipDeviceGetAttribute(&value, hipDeviceAttributeMaxThreadsPerBlock, 0));
+  HIP_CHECK(dyn_hipDeviceGetAttribute_ptr(&value_ptr, hipDeviceAttributeMaxThreadsPerBlock, 0));
   REQUIRE(value == value_ptr);
 }
 /**
@@ -431,7 +360,7 @@ TEST_CASE("Unit_hipGetProcAddress_ValidateDeviceApis") {
  *  - HIP_VERSION >= 6.2
  */
 
-TEST_CASE("Unit_hipGetProcAddress_PeerDeviceAccessAPIs") {
+HIP_TEST_CASE(Unit_hipGetProcAddress_PeerDeviceAccessAPIs) {
   void* hipDeviceCanAccessPeer_ptr = nullptr;
   void* hipSetDevice_ptr = nullptr;
   void* hipGetDevice_ptr = nullptr;
@@ -441,39 +370,30 @@ TEST_CASE("Unit_hipGetProcAddress_PeerDeviceAccessAPIs") {
   int currentHipVersion = 0;
   HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
 
-  HIP_CHECK(hipGetProcAddress("hipDeviceCanAccessPeer",
-                              &hipDeviceCanAccessPeer_ptr,
+  HIP_CHECK(hipGetProcAddress("hipDeviceCanAccessPeer", &hipDeviceCanAccessPeer_ptr,
                               currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipSetDevice", &hipSetDevice_ptr,
-                               currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipGetDevice", &hipGetDevice_ptr,
-                               currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipDeviceEnablePeerAccess",
-                              &hipDeviceEnablePeerAccess_ptr,
-                               currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipDeviceDisablePeerAccess",
-                              &hipDeviceDisablePeerAccess_ptr,
+  HIP_CHECK(hipGetProcAddress("hipSetDevice", &hipSetDevice_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipGetDevice", &hipGetDevice_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipDeviceEnablePeerAccess", &hipDeviceEnablePeerAccess_ptr,
+                              currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipDeviceDisablePeerAccess", &hipDeviceDisablePeerAccess_ptr,
                               currentHipVersion, 0, nullptr));
 
   hipError_t (*dyn_hipDeviceCanAccessPeer_ptr)(int*, int, int) =
-  reinterpret_cast<hipError_t (*)(int*, int, int)>
-  (hipDeviceCanAccessPeer_ptr);
-  hipError_t (*dyn_hipSetDevice_ptr)(int) = reinterpret_cast
-  <hipError_t (*)(int)>(hipSetDevice_ptr);
-  hipError_t (*dyn_hipGetDevice_ptr)(int*) = reinterpret_cast
-  <hipError_t (*)(int*)>(hipGetDevice_ptr);
+      reinterpret_cast<hipError_t (*)(int*, int, int)>(hipDeviceCanAccessPeer_ptr);
+  hipError_t (*dyn_hipSetDevice_ptr)(int) = reinterpret_cast<hipError_t (*)(int)>(hipSetDevice_ptr);
+  hipError_t (*dyn_hipGetDevice_ptr)(int*) =
+      reinterpret_cast<hipError_t (*)(int*)>(hipGetDevice_ptr);
   hipError_t (*dyn_hipDeviceEnablePeerAccess_ptr)(int, unsigned int) =
-  reinterpret_cast <hipError_t (*)(int, unsigned int)>
-  (hipDeviceEnablePeerAccess_ptr);
-  hipError_t (*dyn_hipDeviceDisablePeerAccess_ptr)(int) = reinterpret_cast
-  <hipError_t (*)(int)>(hipDeviceDisablePeerAccess_ptr);
+      reinterpret_cast<hipError_t (*)(int, unsigned int)>(hipDeviceEnablePeerAccess_ptr);
+  hipError_t (*dyn_hipDeviceDisablePeerAccess_ptr)(int) =
+      reinterpret_cast<hipError_t (*)(int)>(hipDeviceDisablePeerAccess_ptr);
 
   SECTION("Test Peer Device Access API's") {
     int canAccessPeer_ptr = 0, canAccessPeer = 0, devCount = 0;
     HIP_CHECK(hipGetDeviceCount(&devCount));
     if (devCount < 2) {
-      HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
-      return;
+      HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     }
     // hipDeviceCanAccessPeer API
     int devId{};
@@ -497,69 +417,53 @@ TEST_CASE("Unit_hipGetProcAddress_PeerDeviceAccessAPIs") {
         HIP_CHECK(hipSetDevice(dev));
         HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, dev, peerDev));
         if (canAccessPeer == 0) {
-          HipTest::HIP_SKIP_TEST("Skipping because no P2P support");
-          return;
+          HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
         }
         HIP_CHECK(hipDeviceEnablePeerAccess(peerDev, 0));
         HIP_CHECK_ERROR(dyn_hipDeviceEnablePeerAccess_ptr(peerDev, 0),
                         hipErrorPeerAccessAlreadyEnabled);
         HIP_CHECK(hipDeviceDisablePeerAccess(peerDev));
-        HIP_CHECK_ERROR(dyn_hipDeviceDisablePeerAccess_ptr(peerDev),
-                        hipErrorPeerAccessNotEnabled);
+        HIP_CHECK_ERROR(dyn_hipDeviceDisablePeerAccess_ptr(peerDev), hipErrorPeerAccessNotEnabled);
       }
     }
   }
 }
-bool CheckMemPoolSupport(const int device) {
+void CheckMemPoolSupport(const int device) {
   int mem_pool_support = 0;
   HIP_CHECK(
-      hipDeviceGetAttribute(&mem_pool_support,
-                            hipDeviceAttributeMemoryPoolsSupported, device));
+      hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, device));
   if (!mem_pool_support) {
-    HipTest::HIP_SKIP_TEST("Device doest have memory pool support");
-    return false;
+    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
-  return true;
 }
 
-TEST_CASE("Unit_hipGetProcAddress_SetGetMemPoolAPIs") {
+HIP_TEST_CASE(Unit_hipGetProcAddress_SetGetMemPoolAPIs) {
   void* hipDeviceSetMemPool_ptr = nullptr;
   void* hipDeviceGetMemPool_ptr = nullptr;
   int currentHipVersion = 0;
   HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
-  HIP_CHECK(hipGetProcAddress("hipDeviceSetMemPool",
-                              &hipDeviceSetMemPool_ptr,
-                              currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipDeviceGetMemPool",
-                              &hipDeviceGetMemPool_ptr,
-                              currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipDeviceSetMemPool", &hipDeviceSetMemPool_ptr, currentHipVersion, 0,
+                              nullptr));
+  HIP_CHECK(hipGetProcAddress("hipDeviceGetMemPool", &hipDeviceGetMemPool_ptr, currentHipVersion, 0,
+                              nullptr));
   hipError_t (*dyn_hipDeviceSetMemPool_ptr)(int, hipMemPool_t) =
-  reinterpret_cast<hipError_t (*)(int, hipMemPool_t)>
-  (hipDeviceSetMemPool_ptr);
+      reinterpret_cast<hipError_t (*)(int, hipMemPool_t)>(hipDeviceSetMemPool_ptr);
   hipError_t (*dyn_hipDeviceGetMemPool_ptr)(hipMemPool_t*, int) =
-  reinterpret_cast<hipError_t (*)(hipMemPool_t*, int)>
-  (hipDeviceGetMemPool_ptr);
+      reinterpret_cast<hipError_t (*)(hipMemPool_t*, int)>(hipDeviceGetMemPool_ptr);
 
   int devCount = 0;
   HIP_CHECK(hipGetDeviceCount(&devCount));
   if (devCount < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
   // hipDeviceSetMemPool API
   hipMemPool_t getMemPool = nullptr, getMemPool_ptr = nullptr;
   HIP_CHECK(hipSetDevice(0));
-  if (!CheckMemPoolSupport(0)) {
-    return;
-  } else {
-    CreateMemPool(0, getMemPool);
-  }
+  CheckMemPoolSupport(0);
+  CreateMemPool(0, getMemPool);
   HIP_CHECK(hipSetDevice(1));
-  if (!CheckMemPoolSupport(1)) {
-    return;
-  } else {
-    CreateMemPool(1, getMemPool_ptr);
-  }
+  CheckMemPoolSupport(1);
+  CreateMemPool(1, getMemPool_ptr);
   HIP_CHECK(hipDeviceSetMemPool(0, getMemPool));
   HIP_CHECK(dyn_hipDeviceSetMemPool_ptr(1, getMemPool_ptr));
   REQUIRE(getMemPool != nullptr);

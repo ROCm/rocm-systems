@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma clang diagnostic ignored "-Wunused-parameter"
 #include <hip_test_common.hh>
@@ -92,8 +79,8 @@ static void runMipMapTest(unsigned int width, unsigned int height, unsigned int 
   dim3 dimBlock(16, 16, 1);
   dim3 dimGrid(width / dimBlock.x, height / dimBlock.y, 1);
 
-  hipLaunchKernelGGL(tex2DKernel, dim3(dimGrid), dim3(dimBlock), 0, 0, dData,
-    width, height, mipmap_level);
+  hipLaunchKernelGGL(tex2DKernel, dim3(dimGrid), dim3(dimBlock), 0, 0, dData, width, height,
+                     mipmap_level);
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipDeviceSynchronize());
 
@@ -134,13 +121,8 @@ static void runMipMapTest(unsigned int width, unsigned int height, unsigned int 
  *  - Host specific (WINDOWS)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipTextureMipmapRef2D_Positive_Check") {
+HIP_TEST_CASE(Unit_hipTextureMipmapRef2D_Positive_Check) {
   CHECK_IMAGE_SUPPORT
-
-#if __HIP_NO_IMAGE_SUPPORT
-  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
-  return;
-#endif
 
   // Height Width Vector
   std::vector<unsigned int> hw_vec = {2048, 1024, 512, 256, 64};
@@ -154,8 +136,7 @@ TEST_CASE("Unit_hipTextureMipmapRef2D_Positive_Check") {
     }
   }
 #else
-  SUCCEED("Mipmaps are Supported only on windows on devices with image support,"
-    " skipping the test.");
+  HIP_SKIP_TEST(HipTest::SkipReason::kMipmappedArraysUnsupported);
 #endif
 }
 
@@ -178,13 +159,8 @@ TEST_CASE("Unit_hipTextureMipmapRef2D_Positive_Check") {
  *  - Host specific (WINDOWS)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipTextureMipmapRef2D_Negative_Parameters") {
+HIP_TEST_CASE(Unit_hipTextureMipmapRef2D_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT
-
-#if __HIP_NO_IMAGE_SUPPORT
-  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
-  return;
-#endif
 
 #if defined(_WIN32)
   unsigned int width = 64;
@@ -220,13 +196,12 @@ TEST_CASE("Unit_hipTextureMipmapRef2D_Negative_Parameters") {
 
   HIP_CHECK(hipFreeMipmappedArray(mip_array_ptr));
 #else
-  SUCCEED("Mipmaps are Supported only on windows on devices with image support,"
-    " skipping the test.");
+  HIP_SKIP_TEST(HipTest::SkipReason::kMipmappedArraysUnsupported);
 #endif
 }
 #endif
 
 /**
-* End doxygen group TextureTest.
-* @}
-*/
+ * End doxygen group TextureTest.
+ * @}
+ */

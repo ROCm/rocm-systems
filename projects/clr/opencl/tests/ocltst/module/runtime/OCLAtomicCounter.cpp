@@ -1,22 +1,8 @@
-/* Copyright (c) 2010 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "OCLAtomicCounter.h"
 
@@ -60,24 +46,21 @@ void OCLAtomicCounter::open(unsigned int test, char* units, double& conversion,
     return;
   }
 
-  _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_EXTENSIONS, 1024,
-                            name, &size);
+  _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_EXTENSIONS, 1024, name, &size);
   if (!strstr(name, "cl_ext_atomic_counter")) {
     printf("Atomic counter extension is required for this test!\n");
     failed_ = true;
     return;
   }
 
-  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL,
-                                                 &error_);
+  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateProgramWithSource()  failed");
 
-  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId], "-legacy",
-                                    NULL, NULL);
+  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId], "-legacy", NULL, NULL);
   if (error_ != CL_SUCCESS) {
     char programLog[1024];
-    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId],
-                                    CL_PROGRAM_BUILD_LOG, 1024, programLog, 0);
+    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId], CL_PROGRAM_BUILD_LOG, 1024,
+                                    programLog, 0);
     printf("\n%s\n", programLog);
     fflush(stdout);
   }
@@ -88,21 +71,18 @@ void OCLAtomicCounter::open(unsigned int test, char* units, double& conversion,
 
   cl_mem buffer;
   for (unsigned int i = 0; i < MaxCounters; ++i) {
-    buffer = _wrapper->clCreateBuffer(context_, CL_MEM_READ_WRITE,
-                                      sizeof(cl_uint), NULL, &error_);
+    buffer = _wrapper->clCreateBuffer(context_, CL_MEM_READ_WRITE, sizeof(cl_uint), NULL, &error_);
     CHECK_RESULT((error_ != CL_SUCCESS), "clCreateBuffer() failed");
     buffers_.push_back(buffer);
   }
 
-  buffer =
-      _wrapper->clCreateBuffer(context_, CL_MEM_READ_WRITE,
-                               MaxCounters * sizeof(cl_uint), NULL, &error_);
+  buffer = _wrapper->clCreateBuffer(context_, CL_MEM_READ_WRITE, MaxCounters * sizeof(cl_uint),
+                                    NULL, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateBuffer() failed");
   buffers_.push_back(buffer);
 }
 
-static void CL_CALLBACK notify_callback(const char* errinfo,
-                                        const void* private_info, size_t cb,
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
                                         void* user_data) {}
 
 void OCLAtomicCounter::run(void) {
@@ -111,9 +91,8 @@ void OCLAtomicCounter::run(void) {
   }
   cl_uint initVal[2] = {5, 10};
   for (unsigned int i = 0; i < MaxCounters; ++i) {
-    error_ = _wrapper->clEnqueueWriteBuffer(cmdQueues_[_deviceId], buffers()[i],
-                                            true, 0, sizeof(cl_uint),
-                                            &initVal[i], 0, NULL, NULL);
+    error_ = _wrapper->clEnqueueWriteBuffer(cmdQueues_[_deviceId], buffers()[i], true, 0,
+                                            sizeof(cl_uint), &initVal[i], 0, NULL, NULL);
     CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueWriteBuffer() failed");
   }
 
@@ -124,8 +103,8 @@ void OCLAtomicCounter::run(void) {
   }
 
   size_t gws[1] = {64};
-  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1,
-                                            NULL, gws, NULL, 0, NULL, NULL);
+  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1, NULL, gws, NULL, 0,
+                                            NULL, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed");
 
   cl_uint outputV[MaxCounters] = {0};
@@ -136,9 +115,8 @@ void OCLAtomicCounter::run(void) {
 
   for (unsigned int i = 0; i < MaxCounters; ++i) {
     cl_mem buffer = buffers()[i];
-    error_ = _wrapper->clEnqueueReadBuffer(cmdQueues_[_deviceId], buffers()[i],
-                                           true, 0, sizeof(cl_uint),
-                                           &outputV[i], 0, NULL, NULL);
+    error_ = _wrapper->clEnqueueReadBuffer(cmdQueues_[_deviceId], buffers()[i], true, 0,
+                                           sizeof(cl_uint), &outputV[i], 0, NULL, NULL);
     CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueReadBuffer() failed");
     if (initVal[i] != outputV[i]) {
       printf("%d != %d", initVal[i], outputV[i]);
@@ -151,9 +129,8 @@ void OCLAtomicCounter::run(void) {
   initVal[1]++;
 
   cl_mem buffer = buffers()[MaxCounters];
-  error_ = _wrapper->clEnqueueReadBuffer(
-      cmdQueues_[_deviceId], buffers()[MaxCounters], true, 0,
-      MaxCounters * sizeof(cl_uint), outputV, 0, NULL, NULL);
+  error_ = _wrapper->clEnqueueReadBuffer(cmdQueues_[_deviceId], buffers()[MaxCounters], true, 0,
+                                         MaxCounters * sizeof(cl_uint), outputV, 0, NULL, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueReadBuffer() failed");
   for (unsigned int i = 0; i < MaxCounters; ++i) {
     if (initVal[i] != outputV[i]) {

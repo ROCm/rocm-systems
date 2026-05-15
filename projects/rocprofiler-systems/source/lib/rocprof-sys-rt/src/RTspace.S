@@ -1,10 +1,10 @@
 .file "RTspace.s"
-        
+
 .globl DYNINSTstaticHeap_512K_lowmemHeap_1
 .type DYNINSTstaticHeap_512K_lowmemHeap_1, @object
 .size DYNINSTstaticHeap_512K_lowmemHeap_1, 524288
 
-.globl DYNINSTstaticHeap_16M_anyHeap_1        
+.globl DYNINSTstaticHeap_16M_anyHeap_1
 .type DYNINSTstaticHeap_16M_anyHeap_1, @object
 .size DYNINSTstaticHeap_16M_anyHeap_1, 16777216
 

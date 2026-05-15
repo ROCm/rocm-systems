@@ -1,39 +1,26 @@
 /*
-Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <iostream>
+#include <hip_test_common.hh>
 #include <hip/hiprtc.h>
 #include <vector>
 #include <string>
-#include <hip_test_common.hh>
 
 
 /**
-* @addtogroup hiprtcGetLoweredName hiprtcGetLoweredName
-* @{
-* @ingroup hiprtc
-* `hiprtcResult hiprtcGetLoweredName(prog,
-*               kernel_name_vec[i].c_str(), // name expression
-*               &name                       // lowered name
-*               ));` -
-* These test cases tests working hiprtcGetLoweredName() api
-*/
+ * @addtogroup hiprtcGetLoweredName hiprtcGetLoweredName
+ * @{
+ * @ingroup hiprtc
+ * `hiprtcResult hiprtcGetLoweredName(prog,
+ *               kernel_name_vec[i].c_str(), // name expression
+ *               &name                       // lowered name
+ *               ));` -
+ * These test cases tests working hiprtcGetLoweredName() api
+ */
 
 static const char* const gpuProgram1 = R"(
 template <int N, typename T>
@@ -65,12 +52,12 @@ bool Test(int CaseNum, const char* GpuProgram) {
   // Create an instance of hiprtcProgram
   hiprtcProgram prog;
 
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog,         // prog
-                                   GpuProgram,   // buffer
-                                   "prog.cu",     // name
-                                   0,             // numHeaders
-                                   NULL,          // headers
-                                   NULL));        // includeNames
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog,       // prog
+                                   GpuProgram,  // buffer
+                                   "prog.cu",   // name
+                                   0,           // numHeaders
+                                   NULL,        // headers
+                                   NULL));      // includeNames
 
   // add all name expressions for kernels
   std::vector<std::string> kernel_name_vec, kernelNameExpectdOutput;
@@ -100,9 +87,9 @@ bool Test(int CaseNum, const char* GpuProgram) {
     kernel_name_vec.push_back("my_kernel<(int)6, int, int >");
     kernel_name_vec.push_back("my_kernel<(int)10, long, long >");
     kernel_name_vec.push_back("my_kernel<(int)11, long long, long long >");
-    kernel_name_vec.push_back("my_kernel<(int)123, unsigned int, unsigned int >"); //NOLINT
+    kernel_name_vec.push_back("my_kernel<(int)123, unsigned int, unsigned int >");  // NOLINT
     kernel_name_vec.push_back("my_kernel<(int)1234, char, char >");
-    kernel_name_vec.push_back("my_kernel<(int)12345, unsigned char, unsigned char >"); //NOLINT
+    kernel_name_vec.push_back("my_kernel<(int)12345, unsigned char, unsigned char >");  // NOLINT
 
     kernelNameExpectdOutput.push_back("_Z9my_kernelILi3EffEvPT0_PT1_");
     kernelNameExpectdOutput.push_back("_Z9my_kernelILi66EfiEvPT0_PT1_");
@@ -128,15 +115,15 @@ bool Test(int CaseNum, const char* GpuProgram) {
   for (size_t i = 0; i < kernel_name_vec.size(); ++i)
     HIPRTC_CHECK(hiprtcAddNameExpression(prog, kernel_name_vec[i].c_str()));
 
-  hiprtcResult compileResult = hiprtcCompileProgram(prog,  // prog
-                                                    0,     // numOptions
+  hiprtcResult compileResult = hiprtcCompileProgram(prog,   // prog
+                                                    0,      // numOptions
                                                     NULL);  // options
   // Obtain compilation log from the program.
   size_t logSize;
   HIPRTC_CHECK(hiprtcGetProgramLogSize(prog, &logSize));
 
   if (logSize > 0) {
-    char *log = new char[logSize];
+    char* log = new char[logSize];
     HIPRTC_CHECK(hiprtcGetProgramLog(prog, log));
     INFO(log);
     delete[] log;
@@ -144,10 +131,10 @@ bool Test(int CaseNum, const char* GpuProgram) {
   }
   // Extract lowered names
   for (size_t i = 0; i < kernel_name_vec.size(); ++i) {
-    const char *name;
+    const char* name;
     HIPRTC_CHECK(hiprtcGetLoweredName(prog,
-                 kernel_name_vec[i].c_str(),  // name expression
-                 &name));                       // lowered name
+                                      kernel_name_vec[i].c_str(),  // name expression
+                                      &name));                     // lowered name
     if (name != kernelNameExpectdOutput[i]) {
       IfTestPassed = false;
     }
@@ -157,13 +144,13 @@ bool Test(int CaseNum, const char* GpuProgram) {
 }
 
 
-TEST_CASE("Unit_hiprtcGetLoweredName_templateKrnls") {
+HIP_TEST_CASE(Unit_hiprtcGetLoweredName_templateKrnls) {
   REQUIRE(Test(1, gpuProgram1));
   REQUIRE(Test(2, gpuProgram2));
   REQUIRE(Test(3, gpuProgram3));
 }
 
 /**
-* End doxygen group hiprtc.
-* @}
-*/
+ * End doxygen group hiprtc.
+ * @}
+ */

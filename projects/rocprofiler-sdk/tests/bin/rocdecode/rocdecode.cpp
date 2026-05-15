@@ -26,28 +26,76 @@ THE SOFTWARE.
 #include <cstring>
 #include <iostream>
 
+// Call rocDecode API with nullptrs to test rocDecode trace
+// Eventually should replace with functional calls, but this requires
+// finding and linking several FFmpeg and AV.. libraries (AVUTIL, AVCODEC, AVFORMAT)
+// Additionally, some rocdecode/share files like ffmpeg_video_dec.cpp would need
+// to be updated to resolve compiler warnings to compile with rocprofiler-sdk
 int
-main(int argc, char** argv)
+test_rocdecode_decoder()
 {
-    // Get input file
-    std::string input_file_path{};
-    for(int i = 1; i < argc; i++)
+    rocDecStatus rocdecode_status = rocDecCreateDecoder(nullptr, nullptr);
+    if(rocdecode_status != ROCDEC_INVALID_PARAMETER)
     {
-        if(!strcmp(argv[i], "-i"))
-        {
-            if(++i == argc)
-            {
-                std::cerr << "Provide path to input file" << std::endl;
-            }
-            input_file_path = argv[i];
-            continue;
-        }
+        std::cerr << "Expected ROCDEC_INVALID_PARAMETER\n";
+        return 1;
     }
+    if(rocDecGetErrorName(rocdecode_status) == nullptr)
+    {
+        std::cerr << "Expected error name to not be null\n";
+        return 1;
+    }
+    if(rocDecCreateVideoParser(nullptr, nullptr) != ROCDEC_INVALID_PARAMETER)
+    {
+        std::cerr << "Expected ROCDEC_INVALID_PARAMETER\n";
+        return 1;
+    }
+    if(rocDecParseVideoData(nullptr, nullptr) != ROCDEC_INVALID_PARAMETER)
+    {
+        std::cerr << "Expected ROCDEC_INVALID_PARAMETER\n";
+        return 1;
+    }
+    if(rocDecDestroyVideoParser(nullptr) != ROCDEC_INVALID_PARAMETER)
+    {
+        std::cerr << "Expected ROCDEC_INVALID_PARAMETER\n";
+        return 1;
+    }
+    if(rocDecDestroyDecoder(nullptr) != ROCDEC_INVALID_PARAMETER)
+    {
+        std::cerr << "Expected ROCDEC_INVALID_PARAMETER\n";
+        return 1;
+    }
+    if(rocDecGetDecoderCaps(nullptr) != ROCDEC_INVALID_PARAMETER)
+    {
+        std::cerr << "Expected ROCDEC_INVALID_PARAMETER\n";
+        return 1;
+    }
+    if(rocDecGetDecodeStatus(nullptr, 0, nullptr) != ROCDEC_INVALID_PARAMETER)
+    {
+        std::cerr << "Expected ROCDEC_INVALID_PARAMETER\n";
+        return 1;
+    }
+    if(rocDecReconfigureDecoder(nullptr, nullptr) != ROCDEC_INVALID_PARAMETER)
+    {
+        std::cerr << "Expected ROCDEC_INVALID_PARAMETER\n";
+        return 1;
+    }
+    if(rocDecGetVideoFrame(nullptr, 0, nullptr, nullptr, nullptr) != ROCDEC_INVALID_PARAMETER)
+    {
+        std::cerr << "Expected ROCDEC_INVALID_PARAMETER\n";
+        return 1;
+    }
+    return 0;
+}
+
+int
+test_rocdecode_bitstream_reader(const std::string& input_file)
+{
     // Set up bitstreamreader
     RocdecBitstreamReader bs_reader = nullptr;
     rocDecVideoCodec      rocdec_codec_id{};
     int                   bit_depth{};
-    if(rocDecCreateBitstreamReader(&bs_reader, input_file_path.c_str()) != ROCDEC_SUCCESS)
+    if(rocDecCreateBitstreamReader(&bs_reader, input_file.c_str()) != ROCDEC_SUCCESS)
     {
         std::cerr << "Failed to create the bitstream reader." << std::endl;
         return 1;
@@ -131,4 +179,35 @@ main(int argc, char** argv)
     {
         rocDecDestroyBitstreamReader(bs_reader);
     }
+    return 0;
+}
+
+int
+main(int argc, char** argv)
+{
+    // Get input file
+    std::string input_file_path{};
+    for(int i = 1; i < argc; i++)
+    {
+        if(!strcmp(argv[i], "-i"))
+        {
+            if(++i == argc)
+            {
+                std::cerr << "Provide path to input file" << std::endl;
+            }
+            input_file_path = argv[i];
+            continue;
+        }
+    }
+    if(test_rocdecode_bitstream_reader(input_file_path) != 0)
+    {
+        std::cerr << "rocDecode bitsream reader test failed\n";
+        return 1;
+    }
+    if(test_rocdecode_decoder() != 0)
+    {
+        std::cerr << "rocDecode decoder test failed\n";
+        return 1;
+    }
+    return 0;
 }

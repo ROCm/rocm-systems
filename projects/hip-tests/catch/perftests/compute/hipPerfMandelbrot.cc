@@ -1,20 +1,7 @@
 /*
- Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
  */
 
 /**
@@ -44,9 +31,8 @@ coordRec coords[] = {
 
 static unsigned int numCoords = sizeof(coords) / sizeof(coordRec);
 
-template <typename T>
-__global__ void float_mad_kernel(uint* out, uint width, T xPos, T yPos, T xStep, T yStep,
-                                 uint maxIter) {
+template <typename T> __global__ void float_mad_kernel(uint* out, uint width, T xPos, T yPos,
+                                                       T xStep, T yStep, uint maxIter) {
   int tid = (blockIdx.x * blockDim.x + threadIdx.x);
   int i = tid % width;
   int j = tid / width;
@@ -66,9 +52,9 @@ __global__ void float_mad_kernel(uint* out, uint width, T xPos, T yPos, T xStep,
   out[tid] = iter;
 }
 
-template <typename T>
-__global__ void float_mandel_unroll_kernel(uint* out, uint width, T xPos, T yPos, T xStep, T yStep,
-                                           uint maxIter) {
+template <typename T> __global__ void float_mandel_unroll_kernel(uint* out, uint width, T xPos,
+                                                                 T yPos, T xStep, T yStep,
+                                                                 uint maxIter) {
   int tid = (blockIdx.x * blockDim.x + threadIdx.x);
   int i = tid % width;
   int j = tid / width;
@@ -169,9 +155,8 @@ __global__ void float_mandel_unroll_kernel(uint* out, uint width, T xPos, T yPos
   out[tid] = (uint)ccount;
 }
 
-template <typename T>
-__global__ void double_mad_kernel(uint* out, uint width, T xPos, T yPos, T xStep, T yStep,
-                                  uint maxIter) {
+template <typename T> __global__ void double_mad_kernel(uint* out, uint width, T xPos, T yPos,
+                                                        T xStep, T yStep, uint maxIter) {
   int tid = (blockIdx.x * blockDim.x + threadIdx.x);
   int i = tid % width;
   int j = tid / width;
@@ -191,9 +176,9 @@ __global__ void double_mad_kernel(uint* out, uint width, T xPos, T yPos, T xStep
   out[tid] = iter;
 };
 
-template <typename T>
-__global__ void double_mandel_unroll_kernel(uint* out, uint width, T xPos, T yPos, T xStep, T yStep,
-                                            uint maxIter) {
+template <typename T> __global__ void double_mandel_unroll_kernel(uint* out, uint width, T xPos,
+                                                                  T yPos, T xStep, T yStep,
+                                                                  uint maxIter) {
   int tid = (blockIdx.x * blockDim.x + threadIdx.x);
 
   int i = tid % width;
@@ -370,7 +355,7 @@ void hipPerfMandelBrot::open(int deviceId) {
   int nGpu = 0;
   HIP_CHECK(hipGetDeviceCount(&nGpu));
   if (nGpu < 1) {
-    HipTest::HIP_SKIP_TEST("Skipping because devices < 1");
+    HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
   HIP_CHECK(hipSetDevice(deviceId));
   hipDeviceProp_t props;
@@ -548,7 +533,7 @@ bool hipPerfMandelBrot::run(unsigned int testCase) {
 
   // Compute GFLOPS.  There are 7 FLOPs per iteration
   double perf = (static_cast<double>(totalIters * numKernels) * 7 * static_cast<double>(1e-09)) /
-      (totalTime / (double)numLoops);
+                (totalTime / (double)numLoops);
 
 
   std::vector<std::string> kernelName = {"float", "float_unroll", "double", "double_unroll"};
@@ -600,7 +585,7 @@ void hipPerfMandelBrot::checkData(uint* ptr) {
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Perf_hipPerfMandelbrot") {
+HIP_TEST_CASE(Perf_hipPerfMandelbrot) {
   hipPerfMandelBrot mandelbrotCompute;
   int deviceId = 0;
   mandelbrotCompute.open(deviceId);

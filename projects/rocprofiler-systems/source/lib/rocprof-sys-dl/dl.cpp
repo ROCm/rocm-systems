@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #if !defined(ROCPROFSYS_DL_SOURCE)
 #    define ROCPROFSYS_DL_SOURCE 1
@@ -26,6 +7,7 @@
 
 #define ROCPROFSYS_COMMON_LIBRARY_NAME "dl"
 
+#include <cstdint>
 #include <timemory/log/color.hpp>
 
 #define ROCPROFSYS_COMMON_LIBRARY_LOG_START                                              \
@@ -45,23 +27,19 @@
 #include <timemory/utility/filepath.hpp>
 
 #include <cassert>
-#include <chrono>
 #include <gnu/libc-version.h>
 #include <link.h>
 #include <linux/limits.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <thread>
 #include <unistd.h>
 
-#if !defined(ROCPROFSYS_USE_ROCM)
-#    define ROCPROFSYS_USE_ROCM 0
-#endif
-
-#if ROCPROFSYS_USE_ROCM > 0
+#include <rocprofiler-sdk/version.h>
+#if __has_include(<rocprofiler-sdk/experimental/registration.h>)
+#    include <rocprofiler-sdk/experimental/registration.h>
+#else
 #    include <rocprofiler-sdk/registration.h>
 #endif
-
 //--------------------------------------------------------------------------------------//
 
 #define ROCPROFSYS_DLSYM(VARNAME, HANDLE, FUNCNAME)                                      \
@@ -147,16 +125,6 @@ reset_rocprofsys_preload()
     {
         (void) get_rocprofsys_is_preloaded();
         (void) get_rocprofsys_preload();
-        auto _modified_preload = std::string{};
-        for(const auto& itr : delimit(_preload_libs, ":"))
-        {
-            if(itr.find("librocprof-sys") != std::string::npos) continue;
-            _modified_preload += common::join("", ":", itr);
-        }
-        if(!_modified_preload.empty() && _modified_preload.find(':') == 0)
-            _modified_preload = _modified_preload.substr(1);
-
-        setenv("LD_PRELOAD", _modified_preload.c_str(), 1);
     }
 }
 
@@ -321,6 +289,8 @@ struct ROCPROFSYS_INTERNAL_API indirect
         ROCPROFSYS_DLSYM(rocprofsys_progress_f, m_omnihandle, "rocprofsys_progress");
         ROCPROFSYS_DLSYM(rocprofsys_annotated_progress_f, m_omnihandle,
                          "rocprofsys_annotated_progress");
+        ROCPROFSYS_DLSYM(rocprofsys_register_pause_callbacks_f, m_omnihandle,
+                         "rocprofsys_external_register_pause_callbacks");
 
         ROCPROFSYS_DLSYM(kokkosp_print_help_f, m_omnihandle, "kokkosp_print_help");
         ROCPROFSYS_DLSYM(kokkosp_parse_args_f, m_omnihandle, "kokkosp_parse_args");
@@ -369,8 +339,10 @@ struct ROCPROFSYS_INTERNAL_API indirect
         ROCPROFSYS_DLSYM(kokkosp_dual_view_modify_f, m_omnihandle,
                          "kokkosp_dual_view_modify");
 
-#if ROCPROFSYS_USE_ROCM > 0
         ROCPROFSYS_DLSYM(rocprofiler_configure_f, m_omnihandle, "rocprofiler_configure");
+#if ROCPROFILER_VERSION >= 10200
+        ROCPROFSYS_DLSYM(rocprofiler_configure_attach_f, m_omnihandle,
+                         "rocprofiler_configure_attach");
 #endif
 
 #if ROCPROFSYS_USE_OMPT == 0
@@ -425,47 +397,53 @@ public:
     void (*rocprofsys_progress_f)(const char*)                                 = nullptr;
     void (*rocprofsys_annotated_progress_f)(const char*, rocprofsys_annotation_t*,
                                             size_t)                            = nullptr;
+    void (*rocprofsys_register_pause_callbacks_f)(void (*)(), void (*)())      = nullptr;
 
     // librocprof-sys-user functions
     int (*rocprofsys_user_configure_f)(int, user_cb_t, user_cb_t*) = nullptr;
 
     // KokkosP functions
-    void (*kokkosp_print_help_f)(char*)                                       = nullptr;
-    void (*kokkosp_parse_args_f)(int, char**)                                 = nullptr;
-    void (*kokkosp_declare_metadata_f)(const char*, const char*)              = nullptr;
-    void (*kokkosp_request_tool_settings_f)(const uint32_t,
-                                            Kokkos_Tools_ToolSettings*)       = nullptr;
-    void (*kokkosp_init_library_f)(const int, const uint64_t, const uint32_t,
-                                   void*)                                     = nullptr;
-    void (*kokkosp_finalize_library_f)()                                      = nullptr;
-    void (*kokkosp_begin_parallel_for_f)(const char*, uint32_t, uint64_t*)    = nullptr;
-    void (*kokkosp_end_parallel_for_f)(uint64_t)                              = nullptr;
-    void (*kokkosp_begin_parallel_reduce_f)(const char*, uint32_t, uint64_t*) = nullptr;
-    void (*kokkosp_end_parallel_reduce_f)(uint64_t)                           = nullptr;
-    void (*kokkosp_begin_parallel_scan_f)(const char*, uint32_t, uint64_t*)   = nullptr;
-    void (*kokkosp_end_parallel_scan_f)(uint64_t)                             = nullptr;
-    void (*kokkosp_begin_fence_f)(const char*, uint32_t, uint64_t*)           = nullptr;
-    void (*kokkosp_end_fence_f)(uint64_t)                                     = nullptr;
-    void (*kokkosp_push_profile_region_f)(const char*)                        = nullptr;
-    void (*kokkosp_pop_profile_region_f)()                                    = nullptr;
-    void (*kokkosp_create_profile_section_f)(const char*, uint32_t*)          = nullptr;
-    void (*kokkosp_destroy_profile_section_f)(uint32_t)                       = nullptr;
-    void (*kokkosp_start_profile_section_f)(uint32_t)                         = nullptr;
-    void (*kokkosp_stop_profile_section_f)(uint32_t)                          = nullptr;
+    void (*kokkosp_print_help_f)(char*)                                        = nullptr;
+    void (*kokkosp_parse_args_f)(int, char**)                                  = nullptr;
+    void (*kokkosp_declare_metadata_f)(const char*, const char*)               = nullptr;
+    void (*kokkosp_request_tool_settings_f)(const std::uint32_t,
+                                            Kokkos_Tools_ToolSettings*)        = nullptr;
+    void (*kokkosp_init_library_f)(const int, const std::uint64_t, const std::uint32_t,
+                                   void*)                                      = nullptr;
+    void (*kokkosp_finalize_library_f)()                                       = nullptr;
+    void (*kokkosp_begin_parallel_for_f)(const char*, std::uint32_t,
+                                         std::uint64_t*)                       = nullptr;
+    void (*kokkosp_end_parallel_for_f)(std::uint64_t)                          = nullptr;
+    void (*kokkosp_begin_parallel_reduce_f)(const char*, std::uint32_t,
+                                            std::uint64_t*)                    = nullptr;
+    void (*kokkosp_end_parallel_reduce_f)(std::uint64_t)                       = nullptr;
+    void (*kokkosp_begin_parallel_scan_f)(const char*, std::uint32_t,
+                                          std::uint64_t*)                      = nullptr;
+    void (*kokkosp_end_parallel_scan_f)(std::uint64_t)                         = nullptr;
+    void (*kokkosp_begin_fence_f)(const char*, std::uint32_t, std::uint64_t*)  = nullptr;
+    void (*kokkosp_end_fence_f)(std::uint64_t)                                 = nullptr;
+    void (*kokkosp_push_profile_region_f)(const char*)                         = nullptr;
+    void (*kokkosp_pop_profile_region_f)()                                     = nullptr;
+    void (*kokkosp_create_profile_section_f)(const char*, std::uint32_t*)      = nullptr;
+    void (*kokkosp_destroy_profile_section_f)(std::uint32_t)                   = nullptr;
+    void (*kokkosp_start_profile_section_f)(std::uint32_t)                     = nullptr;
+    void (*kokkosp_stop_profile_section_f)(std::uint32_t)                      = nullptr;
     void (*kokkosp_allocate_data_f)(const SpaceHandle, const char*, const void* const,
-                                    const uint64_t)                           = nullptr;
+                                    const std::uint64_t)                       = nullptr;
     void (*kokkosp_deallocate_data_f)(const SpaceHandle, const char*, const void* const,
-                                      const uint64_t)                         = nullptr;
+                                      const std::uint64_t)                     = nullptr;
     void (*kokkosp_begin_deep_copy_f)(SpaceHandle, const char*, const void*, SpaceHandle,
-                                      const char*, const void*, uint64_t)     = nullptr;
-    void (*kokkosp_end_deep_copy_f)()                                         = nullptr;
-    void (*kokkosp_profile_event_f)(const char*)                              = nullptr;
-    void (*kokkosp_dual_view_sync_f)(const char*, const void* const, bool)    = nullptr;
-    void (*kokkosp_dual_view_modify_f)(const char*, const void* const, bool)  = nullptr;
+                                      const char*, const void*, std::uint64_t) = nullptr;
+    void (*kokkosp_end_deep_copy_f)()                                          = nullptr;
+    void (*kokkosp_profile_event_f)(const char*)                               = nullptr;
+    void (*kokkosp_dual_view_sync_f)(const char*, const void* const, bool)     = nullptr;
+    void (*kokkosp_dual_view_modify_f)(const char*, const void* const, bool)   = nullptr;
 
-#if ROCPROFSYS_USE_ROCM > 0
     rocprofiler_tool_configure_result_t* (*rocprofiler_configure_f)(
-        uint32_t, const char*, uint32_t, rocprofiler_client_id_t*) = nullptr;
+        std::uint32_t, const char*, std::uint32_t, rocprofiler_client_id_t*) = nullptr;
+#if ROCPROFILER_VERSION >= 10200
+    rocprofiler_tool_configure_attach_result_t* (*rocprofiler_configure_attach_f)(
+        std::uint32_t, const char*, std::uint32_t, rocprofiler_client_id_t*) = nullptr;
 #endif
 
     // OpenMP functions
@@ -522,6 +500,13 @@ get_active()
 }
 
 auto&
+get_user_api_active()
+{
+    static bool _v{ false };
+    return _v;
+}
+
+auto&
 get_enabled()
 {
     static auto* _v = new std::atomic<bool>{ get_env("ROCPROFSYS_INIT_ENABLED", true) };
@@ -538,7 +523,7 @@ get_thread_enabled()
 auto&
 get_thread_count()
 {
-    static thread_local int64_t _v = 0;
+    static thread_local std::int64_t _v = 0;
     return _v;
 }
 
@@ -807,12 +792,14 @@ extern "C"
     int rocprofsys_user_start_trace_dl(void)
     {
         dl::get_enabled().store(true);
+        dl::get_user_api_active() = true;
         return rocprofsys_user_start_thread_trace_dl();
     }
 
     int rocprofsys_user_stop_trace_dl(void)
     {
         dl::get_enabled().store(false);
+        dl::get_user_api_active() = false;
         return rocprofsys_user_stop_thread_trace_dl();
     }
 
@@ -830,13 +817,13 @@ extern "C"
 
     int rocprofsys_user_push_region_dl(const char* name)
     {
-        if(!dl::get_active()) return 0;
+        if(!dl::get_active() && !dl::get_user_api_active()) return 0;
         return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_push_region_f, name);
     }
 
     int rocprofsys_user_pop_region_dl(const char* name)
     {
-        if(!dl::get_active()) return 0;
+        if(!dl::get_active() && !dl::get_user_api_active()) return 0;
         return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_pop_region_f, name);
     }
 
@@ -850,7 +837,7 @@ extern "C"
                                                  rocprofsys_annotation_t* _annotations,
                                                  size_t _annotation_count)
     {
-        if(!dl::get_active()) return 0;
+        if(!dl::get_active() && !dl::get_user_api_active()) return 0;
         return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_push_category_region_f,
                                     ROCPROFSYS_CATEGORY_USER, name, _annotations,
                                     _annotation_count);
@@ -860,7 +847,7 @@ extern "C"
                                                 rocprofsys_annotation_t* _annotations,
                                                 size_t _annotation_count)
     {
-        if(!dl::get_active()) return 0;
+        if(!dl::get_active() && !dl::get_user_api_active()) return 0;
         return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_pop_category_region_f,
                                     ROCPROFSYS_CATEGORY_USER, name, _annotations,
                                     _annotation_count);
@@ -886,6 +873,13 @@ extern "C"
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_annotated_progress_f, _name,
                                     _annotations, _annotation_count);
+    }
+
+    void rocprofsys_external_register_pause_callbacks(void (*pause_fn)(),
+                                                      void (*resume_fn)())
+    {
+        ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_register_pause_callbacks_f,
+                             pause_fn, resume_fn);
     }
 
     void rocprofsys_set_instrumented(int _mode)
@@ -926,15 +920,15 @@ extern "C"
                                     value);
     }
 
-    void kokkosp_request_tool_settings(const uint32_t             version,
+    void kokkosp_request_tool_settings(const std::uint32_t        version,
                                        Kokkos_Tools_ToolSettings* settings)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_request_tool_settings_f,
                                     version, settings);
     }
 
-    void kokkosp_init_library(const int loadSeq, const uint64_t interfaceVer,
-                              const uint32_t devInfoCount, void* deviceInfo)
+    void kokkosp_init_library(const int loadSeq, const std::uint64_t interfaceVer,
+                              const std::uint32_t devInfoCount, void* deviceInfo)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_init_library_f, loadSeq,
                                     interfaceVer, devInfoCount, deviceInfo);
@@ -945,46 +939,49 @@ extern "C"
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_finalize_library_f);
     }
 
-    void kokkosp_begin_parallel_for(const char* name, uint32_t devid, uint64_t* kernid)
+    void kokkosp_begin_parallel_for(const char* name, std::uint32_t devid,
+                                    std::uint64_t* kernid)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_begin_parallel_for_f, name,
                                     devid, kernid);
     }
 
-    void kokkosp_end_parallel_for(uint64_t kernid)
+    void kokkosp_end_parallel_for(std::uint64_t kernid)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_end_parallel_for_f, kernid);
     }
 
-    void kokkosp_begin_parallel_reduce(const char* name, uint32_t devid, uint64_t* kernid)
+    void kokkosp_begin_parallel_reduce(const char* name, std::uint32_t devid,
+                                       std::uint64_t* kernid)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_begin_parallel_reduce_f, name,
                                     devid, kernid);
     }
 
-    void kokkosp_end_parallel_reduce(uint64_t kernid)
+    void kokkosp_end_parallel_reduce(std::uint64_t kernid)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_end_parallel_reduce_f, kernid);
     }
 
-    void kokkosp_begin_parallel_scan(const char* name, uint32_t devid, uint64_t* kernid)
+    void kokkosp_begin_parallel_scan(const char* name, std::uint32_t devid,
+                                     std::uint64_t* kernid)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_begin_parallel_scan_f, name,
                                     devid, kernid);
     }
 
-    void kokkosp_end_parallel_scan(uint64_t kernid)
+    void kokkosp_end_parallel_scan(std::uint64_t kernid)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_end_parallel_scan_f, kernid);
     }
 
-    void kokkosp_begin_fence(const char* name, uint32_t devid, uint64_t* kernid)
+    void kokkosp_begin_fence(const char* name, std::uint32_t devid, std::uint64_t* kernid)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_begin_fence_f, name, devid,
                                     kernid);
     }
 
-    void kokkosp_end_fence(uint64_t kernid)
+    void kokkosp_end_fence(std::uint64_t kernid)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_end_fence_f, kernid);
     }
@@ -999,38 +996,38 @@ extern "C"
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_pop_profile_region_f);
     }
 
-    void kokkosp_create_profile_section(const char* name, uint32_t* secid)
+    void kokkosp_create_profile_section(const char* name, std::uint32_t* secid)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_create_profile_section_f, name,
                                     secid);
     }
 
-    void kokkosp_destroy_profile_section(uint32_t secid)
+    void kokkosp_destroy_profile_section(std::uint32_t secid)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_destroy_profile_section_f,
                                     secid);
     }
 
-    void kokkosp_start_profile_section(uint32_t secid)
+    void kokkosp_start_profile_section(std::uint32_t secid)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_start_profile_section_f,
                                     secid);
     }
 
-    void kokkosp_stop_profile_section(uint32_t secid)
+    void kokkosp_stop_profile_section(std::uint32_t secid)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_stop_profile_section_f, secid);
     }
 
     void kokkosp_allocate_data(const SpaceHandle space, const char* label,
-                               const void* const ptr, const uint64_t size)
+                               const void* const ptr, const std::uint64_t size)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_allocate_data_f, space, label,
                                     ptr, size);
     }
 
     void kokkosp_deallocate_data(const SpaceHandle space, const char* label,
-                                 const void* const ptr, const uint64_t size)
+                                 const void* const ptr, const std::uint64_t size)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_deallocate_data_f, space,
                                     label, ptr, size);
@@ -1038,7 +1035,8 @@ extern "C"
 
     void kokkosp_begin_deep_copy(SpaceHandle dst_handle, const char* dst_name,
                                  const void* dst_ptr, SpaceHandle src_handle,
-                                 const char* src_name, const void* src_ptr, uint64_t size)
+                                 const char* src_name, const void* src_ptr,
+                                 std::uint64_t size)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_begin_deep_copy_f, dst_handle,
                                     dst_name, dst_ptr, src_handle, src_name, src_ptr,
@@ -1074,13 +1072,21 @@ extern "C"
     //
     //----------------------------------------------------------------------------------//
 
-#if ROCPROFSYS_USE_ROCM > 0
     rocprofiler_tool_configure_result_t* rocprofiler_configure(
-        uint32_t version, const char* runtime_version, uint32_t priority,
+        std::uint32_t version, const char* runtime_version, std::uint32_t priority,
         rocprofiler_client_id_t* client_id)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofiler_configure_f, version,
                                     runtime_version, priority, client_id);
+    }
+
+#if ROCPROFILER_VERSION >= 10200
+    rocprofiler_tool_configure_attach_result_t* rocprofiler_configure_attach(
+        std::uint32_t version, const char* runtime_version, std::uint32_t priority,
+        rocprofiler_client_id_t* client_id)
+    {
+        return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofiler_configure_attach_f,
+                                    version, runtime_version, priority, client_id);
     }
 #endif
 
@@ -1251,9 +1257,9 @@ rocprofsys_preload()
 
     verify_instrumented_preloaded();
 
-    static bool _once = false;
-    if(_once) return _preload;
-    _once = true;
+    static pid_t _once = 0;
+    if(_once == getpid()) return _preload;
+    _once = getpid();
 
     if(_preload)
     {

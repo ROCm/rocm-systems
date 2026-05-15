@@ -1,7 +1,7 @@
 .. meta::
    :description: How to use ROCm Compute Profiler's analyze mode
    :keywords: ROCm Compute Profiler, ROCm, profiler, tool, Instinct, accelerator, AMD,
-              Grafana, analysis, analyze mode
+              analysis, analyze mode
 
 ************
 Analyze mode
@@ -12,17 +12,22 @@ profiling. Your level of familiarity with the profiled application, computing
 environment, and experience with ROCm Compute Profiler should inform the analysis method you
 choose.
 
-While analyzing with the CLI offers quick and straightforward access to ROCm Compute Profiler
-metrics from the terminal, Grafana's dashboard GUI adds an extra layer of
-readability and interactivity you might prefer.
+.. note::
+
+   Analyze mode merges separate counter collection files (pmc_perf_*.csv or results_*.csv) into a unified pmc_perf.csv for analysis.
+
+.. note::
+
+   Reading intermediate ``results_*.csv`` files produced by ``rocpd`` profiling is
+   deprecated and will be removed in a future release. The analyze step will read ``.db``
+   files directly.
 
 See the following sections to explore ROCm Compute Profiler's analysis and visualization
 options.
 
 * :doc:`cli`
-* :doc:`grafana-gui`
 * :doc:`standalone-gui`
-* :doc:`text-based user interface (TUI)`
+* :doc:`tui`
 
 .. note::
 

@@ -4,7 +4,7 @@ include_guard(GLOBAL)
 include(CMakePackageConfigHelpers)
 
 install(
-    FILES ${PROJECT_SOURCE_DIR}/LICENSE
+    FILES ${PROJECT_SOURCE_DIR}/LICENSE.md
     DESTINATION ${CMAKE_INSTALL_DOCDIR}
     COMPONENT core)
 
@@ -57,7 +57,7 @@ configure_package_config_file(
 write_basic_package_version_file(
     ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}/${PROJECT_NAME}-config-version.cmake
     VERSION ${PROJECT_VERSION}
-    COMPATIBILITY SameMinorVersion)
+    COMPATIBILITY AnyNewerVersion)
 
 install(
     FILES

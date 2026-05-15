@@ -57,6 +57,12 @@ namespace rocrtst {
 /// Locate kernel code object file and return path suitable for use with open().
 std::string LocateKernelFile(std::string filename, hsa_agent_t agent);
 
+/// Locate platform configuration file using search priority:
+/// 1. ROCRTST_PLATFORM_CONFIG environment variable
+/// 2. ./config/platform_config.yaml (current directory)
+/// 3. <exe_dir>/../share/rocrtst/platform_config.yaml (installed location)
+std::string LocateConfigFile();
+
 /// Open binary kernel object file and set all member data related to the
 /// kernel. Assumes that input test already has the kernel file name,
 /// agent name and kernel function specifed
@@ -116,6 +122,37 @@ inline void AtomicSetPacketHeader(uint16_t header, uint16_t setup,
   __atomic_store_n(reinterpret_cast<uint32_t*>(queue_packet),
                                     header | (setup <<16), __ATOMIC_RELEASE);
 }
+
+/// @brief This function returns the Host Address for a code object given its device address
+/// @param[in] device device address
+/// @param[in] host host address
+/// @return HSA_STATUS_SUCCESS if no errors encountered
+hsa_status_t GetKernelObjectHostAddress(const void* device, const void** host);
+
+/// @brief This function tries to enable metadata prefetching on a queue
+/// @param[in] test Test from which information can be drawn
+/// @param[in] queue queue where AQL packets are enqueued
+/// @return HSA_STATUS_SUCCESS if no errors encountered
+/// @return HSA_STATUS_ERROR_INVALID_QUEUE if metadata prefetching is not supported
+hsa_status_t EnableMetadataPrefetch(BaseRocR* test, hsa_queue_t* queue);
+
+/// @brief This function sets some reasonable default values for a metadata prefetch
+/// packet. Override any field as necessary after calling this function
+/// @param[in] test Test from which information can be drawn
+/// @param[in] aql AQL packet from which information can be drawn
+/// @param[in] metadata  Metadata packet that will be populated
+/// @returns HSA_STATUS_SUCCESS if no errors encountered
+hsa_status_t InitializeMetadataPrefetchPacket(const BaseRocR* test,
+      void *local_args,
+      hsa_kernel_dispatch_packet_t* aql,
+      hsa_amd_metadata_kernel_dispatch_packet_t* metadata);
+
+/// This function writes all of the metadata packet fields to the queue
+/// \param[in] test Test containing the queue and medatadata packet to be written.
+/// \param[in] ind Index location where the metadata packet will be written. This
+/// needs to match the index where the AQL packet is written.
+/// \returns Pointer to dispatch packet in queue that was written to
+hsa_amd_metadata_kernel_dispatch_packet_t * WriteMetadataToQueue(BaseRocR* test, const uint64_t ind);
 
 /// Perform common operations to clean up after executing a test. Specifically,
 /// hsa_shut_down() is called and environment variables that were changed are

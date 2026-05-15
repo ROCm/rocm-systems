@@ -1,22 +1,8 @@
-/* Copyright (c) 2018 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip/hip_runtime.h>
 
@@ -47,10 +33,9 @@ hipError_t ihipChooseDevice(int* device, const DeviceProp* properties) {
     cl_uint matchedCount = 0;
     hipError_t err = hipSuccess;
 
-    if constexpr (std::is_same_v<DeviceProp, hipDeviceProp_tR0600>){
+    if constexpr (std::is_same_v<DeviceProp, hipDeviceProp_tR0600>) {
       err = ihipGetDeviceProperties(&currentProp, i);
-    }
-    else {
+    } else {
       err = hip::hipGetDevicePropertiesR0000(&currentProp, i);
     }
 
@@ -448,13 +433,26 @@ hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int device)
       break;
     case hipDeviceAttributeAccessPolicyMaxWindowSize:
       *pi = prop.accessPolicyMaxWindowSize;
-       break;
+      break;
     case hipDeviceAttributeNumberOfXccs:
       *pi = static_cast<int>(g_devices[device]->devices()[0]->info().numberOfXccs_);
-       break;
+      break;
     case hipDeviceAttributeMaxAvailableVgprsPerThread:
       *pi = static_cast<int>(g_devices[device]->devices()[0]->info().availableVGPRs_);
-       break;
+      break;
+    case hipDeviceAttributeHostNumaId:
+      *pi = static_cast<int>(g_devices[device]->devices()[0]->getPreferredNumaNode());
+      break;
+    case hipDeviceAttributeDmaBufSupported:
+      *pi = static_cast<int>(g_devices[device]->devices()[0]->info().dmabufSupported_);
+      break;
+    case hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported:
+      *pi = static_cast<int>(
+          g_devices[device]->devices()[0]->info().gpuDirectRdmaWithHipVmmSupported_);
+      break;
+    case hipDeviceAttributeExpertSchedMode:
+      *pi = static_cast<int>(g_devices[device]->devices()[0]->info().hasExpertSchedMode_);
+      break;
     default:
       HIP_RETURN(hipErrorInvalidValue);
   }
@@ -533,7 +531,8 @@ hipError_t hipDeviceGetLimit(size_t* pValue, hipLimit_t limit) {
       *pValue = hip::getCurrentDevice()->devices()[0]->info().scratchLimitMin;
       break;
     case hipExtLimitScratchMax:
-      *pValue = hip::getCurrentDevice()->devices()[0]->info().scratchLimitMax;;
+      *pValue = hip::getCurrentDevice()->devices()[0]->info().scratchLimitMax;
+      ;
       break;
     case hipExtLimitScratchCurrent:
       *pValue = hip::getCurrentDevice()->devices()[0]->ScratchLimitCurrent();
@@ -563,11 +562,8 @@ hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int device) {
   hipDeviceProp_tR0600 prop;
   HIP_RETURN_ONFAIL(ihipGetDeviceProperties(&prop, device));
   auto* deviceHandle = g_devices[device]->devices()[0];
-  snprintf (pciBusId, len, "%04x:%02x:%02x.%01x",
-                    prop.pciDomainID,
-                    prop.pciBusID,
-                    prop.pciDeviceID,
-                    deviceHandle->info().deviceTopology_.pcie.function);
+  snprintf(pciBusId, len, "%04x:%02x:%02x.%01x", prop.pciDomainID, prop.pciBusID, prop.pciDeviceID,
+           deviceHandle->info().deviceTopology_.pcie.function);
 
   HIP_RETURN(len <= 12 ? hipErrorInvalidValue : hipSuccess);
 }
@@ -604,6 +600,7 @@ hipError_t hipDeviceSetCacheConfig(hipFuncCache_t cacheConfig) {
 
   // No way to set cache config yet.
 
+  hip::getCurrentDevice()->devices()[0]->UpdateGroupMemCarveout(cacheConfig);
   HIP_RETURN(hipSuccess);
 }
 
@@ -653,7 +650,7 @@ hipError_t hipDeviceSetSharedMemConfig(hipSharedMemConfig config) {
 }
 
 hipError_t hipDeviceGetTexture1DLinearMaxWidth(size_t* maxWidthInElements,
- const hipChannelFormatDesc* fmtDesc, int device) {
+                                               const hipChannelFormatDesc* fmtDesc, int device) {
   HIP_INIT_API(hipDeviceGetTexture1DLinearMaxWidth, maxWidthInElements, fmtDesc, device);
   if (maxWidthInElements == nullptr || fmtDesc == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
@@ -661,8 +658,8 @@ hipError_t hipDeviceGetTexture1DLinearMaxWidth(size_t* maxWidthInElements,
   hipDeviceProp_tR0600 prop = {0};
   HIP_RETURN_ONFAIL(ihipGetDeviceProperties(&prop, device));
   // Calculate element size according to fmtDesc
-  size_t elementSize = (fmtDesc->x + fmtDesc->y
-  + fmtDesc->z + fmtDesc->w) / 8; // Convert from bits to bytes
+  size_t elementSize =
+      (fmtDesc->x + fmtDesc->y + fmtDesc->z + fmtDesc->w) / 8;  // Convert from bits to bytes
   if (elementSize == 0) {
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -717,33 +714,34 @@ hipError_t hipGetDeviceFlags(unsigned int* flags) {
   HIP_RETURN(hipSuccess);
 }
 
-hipError_t hipGetDriverEntryPoint_common(const char* symbol, void** funcPtr, unsigned long long flags,
-                                  hipDriverEntryPointQueryResult* status) {
+hipError_t hipGetDriverEntryPoint_common(const char* symbol, void** funcPtr,
+                                         unsigned long long flags,
+                                         hipDriverEntryPointQueryResult* status) {
   std::string symbolString = symbol;
   if (symbol == nullptr || symbolString == "" || funcPtr == nullptr) {
     return hipErrorInvalidValue;
   }
 
-  if (flags != hipEnableDefault && flags != hipEnableLegacyStream
-      && flags != hipEnablePerThreadDefaultStream) {
+  if (flags != hipEnableDefault && flags != hipEnableLegacyStream &&
+      flags != hipEnablePerThreadDefaultStream) {
     return hipErrorInvalidValue;
   }
 
-  void* handle = hip::PlatformState::instance().getDynamicLibraryHandle();
+  void* handle = hip::PlatformState::Instance().GetDynamicLibraryHandle();
   if (handle == nullptr) {
     return hipErrorInvalidValue;
   }
 
   if (flags == hipEnablePerThreadDefaultStream) {
-      symbolString += "_spt";
+    symbolString += "_spt";
   }
 
   *funcPtr = amd::Os::getSymbol(handle, symbolString.c_str());
-  if (funcPtr == nullptr) {
+  if (*funcPtr == nullptr) {
     if (flags == hipEnablePerThreadDefaultStream) {
       *funcPtr = amd::Os::getSymbol(handle, symbol);
     }
-    if (funcPtr == nullptr) {
+    if (*funcPtr == nullptr) {
       if (status != nullptr) {
         *status = hipDriverEntryPointSymbolNotFound;
       }
@@ -776,12 +774,14 @@ hipError_t hipSetDevice(int device) {
 
   hip::tls.isSetDeviceCalled = true;
   // Check if the device is already set
-  if (hip::tls.device_ != nullptr && hip::tls.device_->deviceId() == device) {
+  if (hip::tls.device_ != nullptr && hip::tls.device_->deviceId() == device
+      && hip::tls.device_->GetActiveStatus() == true) {
     HIP_RETURN(hipSuccess);
   }
 
   if (static_cast<unsigned int>(device) < g_devices.size()) {
     hip::setCurrentDevice(device);
+    hip::getCurrentDevice()->SetActiveStatus();
 
     HIP_RETURN(hipSuccess);
   } else if (g_devices.empty()) {
@@ -866,7 +866,7 @@ hipError_t hipSetValidDevices(int* device_arr, int len) {
   amd::Os::setPreferredNumaNode(preferredNumaNode);
   HIP_RETURN(hipSuccess);
 }
-} //namespace hip
+}  // namespace hip
 
 extern "C" hipError_t hipChooseDevice(int* device, const hipDeviceProp_tR0000* properties) {
   return hip::hipChooseDeviceR0000(device, properties);

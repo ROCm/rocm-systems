@@ -1,4 +1,8 @@
 #!/bin/bash
+
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 CURRENT_DIR=$(dirname -- $(realpath ${BASH_SOURCE[0]}));
 ROCM_PATH="${ROCM_PATH:=/opt/rocm}"
 

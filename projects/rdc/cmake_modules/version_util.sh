@@ -1,9 +1,12 @@
 #!/bin/bash
 
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 # Handle commandline args
 while [ "$1" != "" ]; do
     case $1 in
-        -c )  # Commits since prevous tag
+        -c )  # Commits since previous tag
             TARGET="count" ;;
          * )
             TARGET="count"
@@ -29,7 +32,7 @@ commits_since_last_tag() {
   PREV_CMT_NUM=`git rev-list --count $PREVIOUS_TAG`
   CURR_CMT_NUM=`git rev-list --count $CURRENT_TAG`
 
-  # Commits since prevous tag:
+  # Commits since previous tag:
   let NUM_COMMITS="${CURR_CMT_NUM}-${PREV_CMT_NUM}"
   echo $NUM_COMMITS
 }
@@ -40,4 +43,3 @@ case $TARGET in
 esac
 
 exit 0
-

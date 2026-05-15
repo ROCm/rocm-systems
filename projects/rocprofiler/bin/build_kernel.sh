@@ -1,4 +1,9 @@
 #!/bin/sh -x
+
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
+
 SO_EXT="hsaco"
 
 TEST_NAME=$1

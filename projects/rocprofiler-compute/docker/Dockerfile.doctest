@@ -22,6 +22,7 @@ RUN git config --global --add safe.directory /app
 # Install any dependencies specified in requirements.txt
 # Run interactive bash shell
  CMD ["/bin/bash", "-c", "\
-     python3 -m pip install -r docs/sphinx/requirements.txt \
+     cd /app/projects/rocprofiler-compute \
+     && python3 -m pip install -r docs/sphinx/requirements.txt \
      && exec /bin/bash \
  "]

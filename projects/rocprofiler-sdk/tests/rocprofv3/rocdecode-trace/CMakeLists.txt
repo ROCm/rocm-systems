@@ -30,46 +30,36 @@ if(NOT TARGET rocdecode-demo)
     set(IS_DISABLED ON)
 endif()
 
-add_test(
-    NAME rocprofv3-test-rocdecode-tracing-execute
+# rocDecode tracing test
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocdecode-tracing
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --rocdecode-trace -d
         ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out --output-format json csv pftrace
         otf2 --log-level env --
-        $<IF:$<TARGET_EXISTS:rocdecode-demo>,$<$<TARGET_EXISTS:rocdecode-demo>:$<TARGET_FILE:rocdecode-demo>>,rocdecode-demo>
-        -i ${ROCDECODE_VIDEO_FILE})
+        $<IF:$<TARGET_EXISTS:rocdecode-demo>,$<TARGET_FILE:rocdecode-demo>,rocdecode-demo>
+        -i ${ROCDECODE_VIDEO_FILE}
+    DEPENDS rocdecode-demo
+    TIMEOUT 45
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    FIXTURES_SETUP rocprofv3-test-rocdecode-tracing
+    DISABLED "${IS_DISABLED}")
 
-set_tests_properties(
-    rocprofv3-test-rocdecode-tracing-execute
-    PROPERTIES TIMEOUT
-               45
-               LABELS
-               "integration-tests"
-               ENVIRONMENT
-               "${rocdecode-tracing-env}"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
-               "${IS_DISABLED}")
-
-add_test(
-    NAME rocprofv3-test-rocdecode-tracing-validate
-    COMMAND
-        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
-        ${CMAKE_CURRENT_BINARY_DIR}/rocdecode-demo-trace/out_results.json --otf2-input
-        ${CMAKE_CURRENT_BINARY_DIR}/rocdecode-demo-trace/out_results.otf2 --pftrace-input
-        ${CMAKE_CURRENT_BINARY_DIR}/rocdecode-demo-trace/out_results.pftrace --csv-input
-        ${CMAKE_CURRENT_BINARY_DIR}/rocdecode-demo-trace/out_rocdecode_api_trace.csv)
-
-set_tests_properties(
-    rocprofv3-test-rocdecode-tracing-validate
-    PROPERTIES TIMEOUT
-               45
-               LABELS
-               "integration-tests"
-               DEPENDS
-               rocprofv3-test-rocdecode-tracing-execute
-               FAIL_REGULAR_EXPRESSION
-               "AssertionError"
-               DISABLED
-               "${IS_DISABLED}")
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-rocdecode-tracing
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    ARGS --json-input
+         ${CMAKE_CURRENT_BINARY_DIR}/rocdecode-demo-trace/out_results.json
+         --otf2-input
+         ${CMAKE_CURRENT_BINARY_DIR}/rocdecode-demo-trace/out_results.otf2
+         --pftrace-input
+         ${CMAKE_CURRENT_BINARY_DIR}/rocdecode-demo-trace/out_results.pftrace
+         --csv-input
+         ${CMAKE_CURRENT_BINARY_DIR}/rocdecode-demo-trace/out_rocdecode_api_trace.csv
+    TIMEOUT 45
+    LABELS "integration-tests"
+    FIXTURES_REQUIRED rocprofv3-test-rocdecode-tracing
+    DISABLED "${IS_DISABLED}")

@@ -1,10 +1,10 @@
 .. meta::
    :description: ROCm Compute Profiler documentation and reference
-   :keywords: Omniperf, ROCm, profiler, tool, Instinct, accelerator, AMD
+   :keywords: Omniperf, ROCm, profiler, tool, Instinct, GPUs, accelerator, AMD
 
-***********************************
-ROCm Compute Profiler documentation
-***********************************
+*******************************************
+ROCm Compute Profiler (rocprofiler-compute)
+*******************************************
 
 This documentation provides a comprehensive overview of the ROCm Compute
 Profiler tool. In addition to a full deployment guide with installation
@@ -15,15 +15,22 @@ If you're new to ROCm Compute Profiler, familiarize yourself with the tool by re
 chapters that follow and gradually learn its more advanced features. To get
 started, see :doc:`What is ROCm Compute Profiler? <what-is-rocprof-compute>`.
 
-ROCm Compute Profiler is open source and hosted at `<https://github.com/ROCm/rocprofiler-compute>`__.
+ROCm Compute Profiler is open source and hosted at `<https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-compute>`__.
+
+.. note::
+
+   The rocprofiler-compute repository for ROCm 7.0 and earlier is located at `<https://github.com/ROCm/rocprofiler-compute>`_.
 
 .. grid:: 2
    :gutter: 3
 
    .. grid-item-card:: Install
 
-      * :doc:`Installation and deployment <install/core-install>`
-      * :doc:`Grafana server for ROCm Compute Profiler <install/grafana-setup>`
+      * :doc:`Install ROCm Compute Profiler <install/core-install>`
+
+      * :doc:`Install from source <install/source-install>`
+
+      * :doc:`Quickstart <install/quickstart>`
 
    .. grid-item::
 
@@ -38,13 +45,14 @@ in practice.
 
       * :doc:`how-to/use`
 
-      * :doc:`how-to/profile/mode`
+      * :doc:`how-to/pc_sampling`
 
+      * :doc:`how-to/live_attach_detach`
+
+      * :doc:`how-to/profile/mode`
       * :doc:`how-to/analyze/mode`
 
         * :doc:`how-to/analyze/cli`
-
-        * :doc:`how-to/analyze/grafana-gui`
 
         * :doc:`how-to/analyze/standalone-gui`
 
@@ -54,15 +62,35 @@ in practice.
 
       * :doc:`conceptual/performance-model`
 
-        * :doc:`conceptual/compute-unit`
+        * :doc:`conceptual/cdna/cdna-performance-model`
 
-        * :doc:`conceptual/l2-cache`
+          * :doc:`conceptual/cdna/system-speed-of-light`
 
-        * :doc:`conceptual/shader-engine`
+          * :doc:`conceptual/cdna/compute-unit`
 
-        * :doc:`conceptual/command-processor`
+          * :doc:`conceptual/cdna/l2-cache`
 
-        * :doc:`conceptual/system-speed-of-light`
+          * :doc:`conceptual/cdna/shader-engine`
+
+          * :doc:`conceptual/cdna/command-processor`
+
+        * :doc:`conceptual/rdna/rdna-performance-model`
+
+          * :doc:`conceptual/rdna/system-speed-of-light`
+
+          * :doc:`conceptual/rdna/wgp`
+
+          * :doc:`conceptual/rdna/tcp-cache`
+
+          * :doc:`conceptual/rdna/gl1-cache`
+
+          * :doc:`conceptual/rdna/gl2-cache`
+
+          * :doc:`conceptual/rdna/shader-engine`
+
+          * :doc:`conceptual/rdna/command-processor`
+
+          * :doc:`conceptual/rdna/references`
 
       * :doc:`conceptual/definitions`
 

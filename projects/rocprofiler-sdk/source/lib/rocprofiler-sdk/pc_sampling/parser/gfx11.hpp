@@ -71,4 +71,9 @@ public:
         ISSUE_FLAT   = 31,
         ISSUE_BRMSG  = 31,
     };
+
+    // max number of waves per SIMD
+    static constexpr size_t   max_wave_cnt = 16;
+    static constexpr uint32_t gfx_ip_major = 11;
+    static constexpr uint32_t gfx_ip_minor = 0;
 };

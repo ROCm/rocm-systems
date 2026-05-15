@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma clang diagnostic ignored "-Wunused-parameter"
 #include <hip_test_common.hh>
@@ -33,13 +20,8 @@ __global__ void tex2DKernel(float* outputData, int width) {
 #endif
 }
 
-TEST_CASE("Unit_hipTextureRef2D_Check") {
+HIP_TEST_CASE(Unit_hipTextureRef2D_Check) {
   CHECK_IMAGE_SUPPORT
-
-#if __HIP_NO_IMAGE_SUPPORT
-  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
-  return;
-#endif
 
   constexpr int SIZE = 256;
   constexpr unsigned int width = SIZE;
@@ -56,12 +38,10 @@ TEST_CASE("Unit_hipTextureRef2D_Check") {
     }
   }
 
-  hipChannelFormatDesc channelDesc = hipCreateChannelDesc(32, 0, 0, 0,
-                                           hipChannelFormatKindFloat);
+  hipChannelFormatDesc channelDesc = hipCreateChannelDesc(32, 0, 0, 0, hipChannelFormatKindFloat);
   hipArray_t hipArray;
   HIP_CHECK(hipMallocArray(&hipArray, &channelDesc, width, height));
-  HIP_CHECK(hipMemcpyToArray(hipArray, 0, 0, hData, size,
-                             hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpyToArray(hipArray, 0, 0, hData, size, hipMemcpyHostToDevice));
 
   tex.addressMode[0] = hipAddressModeWrap;
   tex.addressMode[1] = hipAddressModeWrap;
@@ -76,9 +56,8 @@ TEST_CASE("Unit_hipTextureRef2D_Check") {
 
   dim3 dimBlock(16, 16, 1);
   dim3 dimGrid(width / dimBlock.x, height / dimBlock.y, 1);
-  hipLaunchKernelGGL(tex2DKernel, dim3(dimGrid), dim3(dimBlock), 0, 0,
-                     dData, width);
-  HIP_CHECK(hipGetLastError()); 
+  hipLaunchKernelGGL(tex2DKernel, dim3(dimGrid), dim3(dimBlock), 0, 0, dData, width);
+  HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipDeviceSynchronize());
 
   float* hOutputData = reinterpret_cast<float*>(malloc(size));
@@ -89,8 +68,8 @@ TEST_CASE("Unit_hipTextureRef2D_Check") {
   for (i = 0; i < height; i++) {
     for (j = 0; j < width; j++) {
       if (hData[i * width + j] != hOutputData[i * width + j]) {
-        INFO("Difference found at [ " << i << j << " ]: " <<
-              hData[i * width + j] << hOutputData[i * width + j]);
+        INFO("Difference found at [ " << i << j << " ]: " << hData[i * width + j]
+                                      << hOutputData[i * width + j]);
         REQUIRE(false);
       }
     }
@@ -101,5 +80,4 @@ TEST_CASE("Unit_hipTextureRef2D_Check") {
 }
 
 
-#endif // CUDA_VERSION < CUDA_12000
-
+#endif  // CUDA_VERSION < CUDA_12000

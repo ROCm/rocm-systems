@@ -1,20 +1,7 @@
 /*
- Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
  */
 
 /**
@@ -30,8 +17,7 @@
 
 using namespace std;
 
-template <unsigned int BLOCKSIZE>
-__launch_bounds__(BLOCKSIZE) __global__
+template <unsigned int BLOCKSIZE> __launch_bounds__(BLOCKSIZE) __global__
     void vectors_not_equal(int n, const double* __restrict__ x, const double* __restrict__ y,
                            double* __restrict__ workspace) {
   int gid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -90,8 +76,7 @@ __launch_bounds__(BLOCKSIZE) __global__
   }
 }
 
-template <unsigned int BLOCKSIZE>
-__launch_bounds__(BLOCKSIZE) __global__
+template <unsigned int BLOCKSIZE> __launch_bounds__(BLOCKSIZE) __global__
     void vectors_equal(int n, const double* __restrict__ x, double* __restrict__ workspace) {
   int gid = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -149,8 +134,8 @@ __launch_bounds__(BLOCKSIZE) __global__
   }
 }
 
-template <unsigned int BLOCKSIZE>
-__launch_bounds__(BLOCKSIZE) __global__ void dot_reduction(double* __restrict__ workspace) {
+template <unsigned int BLOCKSIZE> __launch_bounds__(BLOCKSIZE) __global__
+    void dot_reduction(double* __restrict__ workspace) {
   __shared__ double sdata[BLOCKSIZE];
 
   sdata[threadIdx.x] = workspace[threadIdx.x];
@@ -232,13 +217,13 @@ void computeDotProduct(int n, const double* x, const double* y, double& result, 
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Perf_hipPerfDotProduct") {
+HIP_TEST_CASE(Perf_hipPerfDotProduct) {
   int nGpu = 0;
   int p_gpuDevice = 0;
   HIP_CHECK(hipGetDeviceCount(&nGpu));
 
   if (nGpu < 1) {
-    HipTest::HIP_SKIP_TEST("Skipping because devices < 1");
+    HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
   hipDeviceProp_t props;
   HIP_CHECK(hipSetDevice(p_gpuDevice));

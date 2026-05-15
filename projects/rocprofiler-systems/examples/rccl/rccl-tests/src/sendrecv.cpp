@@ -7,6 +7,7 @@
 
 #include "common.h"
 #include "cuda_runtime.h"
+#include "rccl_compat.h"
 
 void
 SendRecvGetCollByteCount(size_t* sendcount, size_t* recvcount, size_t* paramcount,
@@ -58,8 +59,10 @@ SendRecvGetBw(size_t count, int typesize, double sec, double* algBw, double* bus
 
 testResult_t
 SendRecvRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type,
-                ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream)
+                ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream,
+                void* bias = nullptr)
 {
+    (void) bias;
     int nRanks;
     NCCLCHECK(ncclCommCount(comm, &nRanks));
     int rank;
@@ -74,8 +77,9 @@ SendRecvRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t typ
     return testSuccess;
 }
 
-struct testColl sendRecvTest = { "SendRecv", SendRecvGetCollByteCount, SendRecvInitData,
-                                 SendRecvGetBw, SendRecvRunColl };
+struct testColl sendRecvTest = { "SendRecv",       SendRecvGetCollByteCount,
+                                 SendRecvInitData, SendRecvGetBw,
+                                 SendRecvRunColl,  nullptr };
 
 void
 SendRecvGetBuffSize(size_t* sendcount, size_t* recvcount, size_t count, int nranks)

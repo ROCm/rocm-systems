@@ -1,20 +1,7 @@
 /*
- * Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
  */
 
 /*
@@ -37,8 +24,7 @@
 
 namespace hipDeviceGetPCIBusIdTests {
 
-void getPciBusId(int deviceCount,
-                 char **hipDeviceList) {
+void getPciBusId(int deviceCount, char** hipDeviceList) {
   for (int i = 0; i < deviceCount; i++) {
     HIP_CHECK(hipDeviceGetPCIBusId(hipDeviceList[i], MAX_DEVICE_LENGTH, i));
   }
@@ -57,13 +43,13 @@ void getPciBusId(int deviceCount,
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceGetPCIBusId_Check_PciBusID_WithAttr") {
+HIP_TEST_CASE(Unit_hipDeviceGetPCIBusId_Check_PciBusID_WithAttr) {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   REQUIRE_FALSE(deviceCount == 0);
   printf("No.of gpus in the system: %d\n", deviceCount);
   // Allocate an array of pointer to characters
-  char **hipDeviceList = new char*[deviceCount];
+  char** hipDeviceList = new char*[deviceCount];
   REQUIRE_FALSE(hipDeviceList == nullptr);
   for (int i = 0; i < deviceCount; i++) {
     hipDeviceList[i] = new char[MAX_DEVICE_LENGTH];
@@ -76,10 +62,8 @@ TEST_CASE("Unit_hipDeviceGetPCIBusId_Check_PciBusID_WithAttr") {
     int pciDeviceID = -1;
     int pciDomainID = -1;
     int tempPciBusId = -1;
-    sscanf(hipDeviceList[i], "%04x:%02x:%02x", &pciDomainID, &pciBusID,
-           &pciDeviceID);
-    HIP_CHECK(hipDeviceGetAttribute(&tempPciBusId,
-                                   hipDeviceAttributePciBusId, i));
+    sscanf(hipDeviceList[i], "%04x:%02x:%02x", &pciDomainID, &pciBusID, &pciDeviceID);
+    HIP_CHECK(hipDeviceGetAttribute(&tempPciBusId, hipDeviceAttributePciBusId, i));
     REQUIRE_FALSE(pciBusID != tempPciBusId);
   }
   // Deallocate
@@ -87,8 +71,9 @@ TEST_CASE("Unit_hipDeviceGetPCIBusId_Check_PciBusID_WithAttr") {
     delete[] hipDeviceList[i];
   }
   delete[] hipDeviceList;
-  printf("pciBusID output of both hipDeviceGetPCIBusId and"
-         " hipDeviceGetAttribute matched for all gpus\n");
+  printf(
+      "pciBusID output of both hipDeviceGetPCIBusId and"
+      " hipDeviceGetAttribute matched for all gpus\n");
 }
 
 /**
@@ -104,7 +89,7 @@ TEST_CASE("Unit_hipDeviceGetPCIBusId_Check_PciBusID_WithAttr") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceGetPCIBusId_Negative_PartialFill") {
+HIP_TEST_CASE(Unit_hipDeviceGetPCIBusId_Negative_PartialFill) {
   std::array<char, MAX_DEVICE_LENGTH> busID;
 
   const int device = GENERATE(range(0, HipTest::getDeviceCount()));
@@ -125,7 +110,7 @@ TEST_CASE("Unit_hipDeviceGetPCIBusId_Negative_PartialFill") {
   const auto strEnd = start + fillLen - 1;
   REQUIRE(std::all_of(start, strEnd, [](char& c) { return c != 0; }));
   REQUIRE(*strEnd == 0);
-  REQUIRE(std::all_of(strEnd+1, end, [](char& c) { return c == fillValue; }));
+  REQUIRE(std::all_of(strEnd + 1, end, [](char& c) { return c == fillValue; }));
 }
 
 /**
@@ -149,21 +134,18 @@ TEST_CASE("Unit_hipDeviceGetPCIBusId_Negative_PartialFill") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceGetPCIBusId_NegTst") {
+HIP_TEST_CASE(Unit_hipDeviceGetPCIBusId_NegTst) {
   char pciBusId[MAX_DEVICE_LENGTH];
   int device;
   HIP_CHECK(hipGetDevice(&device));
 
   // pciBusId is nullptr
   SECTION("pciBusId is nullptr") {
-    REQUIRE_FALSE(hipDeviceGetPCIBusId(nullptr, MAX_DEVICE_LENGTH, device)
-                  == hipSuccess);
+    REQUIRE_FALSE(hipDeviceGetPCIBusId(nullptr, MAX_DEVICE_LENGTH, device) == hipSuccess);
   }
 
   // len = 0
-  SECTION("len is 0") {
-    REQUIRE_FALSE(hipDeviceGetPCIBusId(pciBusId, 0, device) == hipSuccess);
-  }
+  SECTION("len is 0") { REQUIRE_FALSE(hipDeviceGetPCIBusId(pciBusId, 0, device) == hipSuccess); }
 
   // len < 0
   SECTION("len is less than 0") {
@@ -172,20 +154,18 @@ TEST_CASE("Unit_hipDeviceGetPCIBusId_NegTst") {
 
   // device = -1
   SECTION("device is -1") {
-    REQUIRE_FALSE(hipDeviceGetPCIBusId(pciBusId, MAX_DEVICE_LENGTH, -1)
-                  == hipSuccess);
+    REQUIRE_FALSE(hipDeviceGetPCIBusId(pciBusId, MAX_DEVICE_LENGTH, -1) == hipSuccess);
   }
   // device = Non Existing Device
   SECTION("device is out of bounds") {
     int deviceCount = 0;
     HIP_CHECK(hipGetDeviceCount(&deviceCount));
     REQUIRE_FALSE(deviceCount == 0);
-    REQUIRE_FALSE(hipDeviceGetPCIBusId(pciBusId, MAX_DEVICE_LENGTH,
-                  deviceCount) == hipSuccess);
+    REQUIRE_FALSE(hipDeviceGetPCIBusId(pciBusId, MAX_DEVICE_LENGTH, deviceCount) == hipSuccess);
   }
 }
 
 /**
-* End doxygen group DriverTest.
-* @}
-*/
+ * End doxygen group DriverTest.
+ * @}
+ */

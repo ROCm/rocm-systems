@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2022 - 2023 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "hiprtcInternal.hpp"
 
@@ -37,8 +21,8 @@ namespace hiprtc {
 
 // RTC Compile Program Member Functions
 RTCCompileProgram::RTCCompileProgram(std::string name_) : hip::RTCProgram(name_), fgpu_rdc_(false) {
-  if ((amd::Comgr::create_data_set(&compile_input_) != AMD_COMGR_STATUS_SUCCESS) ||
-      (amd::Comgr::create_data_set(&link_input_) != AMD_COMGR_STATUS_SUCCESS)) {
+  if ((compile_input_.Create() != AMD_COMGR_STATUS_SUCCESS) ||
+      (link_input_.Create() != AMD_COMGR_STATUS_SUCCESS)) {
     crashWithMessage("Failed to allocate internal hiprtc structure");
   }
   // Add internal header
@@ -89,8 +73,9 @@ bool RTCCompileProgram::addSource(const std::string& source, const std::string& 
 // addSource_impl is a different function because we need to add source when we track mangled
 // objects
 bool RTCCompileProgram::addSource_impl() {
-  std::vector<char> vsource(source_code_.begin(), source_code_.end());
-  if (!hip::helpers::addCodeObjData(compile_input_, vsource, source_name_, AMD_COMGR_DATA_KIND_SOURCE)) {
+  std::string_view vsource(source_code_.data(), source_code_.size());
+  if (!hip::helpers::addCodeObjData(compile_input_, vsource, source_name_,
+                                    AMD_COMGR_DATA_KIND_SOURCE)) {
     return false;
   }
   return true;
@@ -101,7 +86,7 @@ bool RTCCompileProgram::addHeader(const std::string& source, const std::string& 
     LogError("Error in hiprtc: source or name is of size 0 in addHeader");
     return false;
   }
-  std::vector<char> vsource(source.begin(), source.end());
+  std::string_view vsource(source.data(), source.size());
   if (!hip::helpers::addCodeObjData(compile_input_, vsource, name, AMD_COMGR_DATA_KIND_INCLUDE)) {
     return false;
   }
@@ -109,7 +94,7 @@ bool RTCCompileProgram::addHeader(const std::string& source, const std::string& 
 }
 
 bool RTCCompileProgram::addBuiltinHeader() {
-  std::vector<char> source(__hipRTC_header, __hipRTC_header + __hipRTC_header_size);
+  std::string_view source(__hipRTC_header, __hipRTC_header_size);
   std::string name{"hiprtc_runtime.h"};
   if (!hip::helpers::addCodeObjData(compile_input_, source, name, AMD_COMGR_DATA_KIND_INCLUDE)) {
     return false;
@@ -118,7 +103,7 @@ bool RTCCompileProgram::addBuiltinHeader() {
 }
 
 bool RTCCompileProgram::findExeOptions(const std::vector<std::string>& options,
-                                        std::vector<std::string>& exe_options) {
+                                       std::vector<std::string>& exe_options) {
   for (size_t i = 0; i < options.size(); ++i) {
     // -mllvm options passed by the app such as "-mllvm" "-amdgpu-early-inline-all=true"
     if (options[i] == "-mllvm") {
@@ -201,14 +186,15 @@ bool RTCCompileProgram::compile(const std::vector<std::string>& options, bool fg
   }
 
   if (fgpu_rdc_) {
-    if (!hip::helpers::compileToBitCode(compile_input_, isa_, compileOpts, build_log_, LLVMBitcode_)) {
+    if (!hip::helpers::compileToBitCode(compile_input_, isa_, compileOpts, build_log_,
+                                        LLVMBitcode_)) {
       LogError("Error in hiprtc: unable to compile source to bitcode");
       return false;
     }
   } else {
     LogInfo("Using the new path of comgr");
-    if (!hip::helpers::compileToExecutable(compile_input_, isa_, compileOpts, link_options_, build_log_,
-                             executable_)) {
+    if (!hip::helpers::compileToExecutable(compile_input_, isa_, compileOpts, link_options_,
+                                           build_log_, executable_)) {
       LogError("Failing to compile to realloc");
       return false;
     }
@@ -234,11 +220,10 @@ void RTCCompileProgram::stripNamedExpression(std::string& strippedName) {
   if (strippedName.front() == '&') {
     strippedName.erase(0, 1);
   }
-
 }
 
 bool RTCCompileProgram::trackMangledName(std::string& name) {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
 
   if (name.size() == 0) return false;
 
@@ -249,8 +234,10 @@ bool RTCCompileProgram::trackMangledName(std::string& name) {
 
   std::string gcn_expr = "__amdgcn_name_expr_";
   std::string size = std::to_string(mangled_names_.size());
-  const auto var1{"\n static __device__ const void* " + gcn_expr + size + "[]= {\"" + strippedName + "\", (void*)&" + strippedName + "};"};
-  const auto var2{"\n static auto __amdgcn_name_expr_stub_" + size + " = " + gcn_expr + size + ";\n"};
+  const auto var1{"\n static __device__ const void* " + gcn_expr + size + "[]= {\"" + strippedName +
+                  "\", (void*)&" + strippedName + "};"};
+  const auto var2{"\n static auto __amdgcn_name_expr_stub_" + size + " = " + gcn_expr + size +
+                  ";\n"};
   const auto code{var1 + var2};
 
   source_code_ += code;

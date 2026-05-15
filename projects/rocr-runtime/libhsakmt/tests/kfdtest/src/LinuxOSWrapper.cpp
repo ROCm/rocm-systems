@@ -110,6 +110,8 @@ void ComandLineArgumentsUsage() {
     printf("\t--timeout arg\t - Time Out\n");
     printf("\t--dst_node\t - For testing multiple nodes");
     printf("\t--sleep_time\t - For testing CRIU, etc");
+    printf("\t--concurrentnodes arg\t - Concurrent nodes string\n");
+    printf("\t--testnodenum arg\t - Number of concurrent nodes\n");
 }
 
 bool GetCommandLineArguments(int argc, char **argv, CommandLineArguments& rArgs) {
@@ -125,6 +127,8 @@ bool GetCommandLineArguments(int argc, char **argv, CommandLineArguments& rArgs)
         { "node", required_argument, 0, 0 },
         { "dst_node", required_argument, 0, 0 },
         { "sleep_time", required_argument, 0, 0 },
+        { "concurrentnodes", required_argument, 0, 0 },
+        { "testnodenum", required_argument, 0, 0 },
         { 0, 0, 0, 0 }
     };
 
@@ -135,6 +139,8 @@ bool GetCommandLineArguments(int argc, char **argv, CommandLineArguments& rArgs)
     rArgs.NodeId = -1;
     rArgs.DstNodeId = -1;
     rArgs.SleepTime = 0;
+    rArgs.ConcurrentNodes = "";
+    rArgs.TestNodeNum = 0;
 
     while (true) {
         int c = getopt_long(argc, argv, "", long_options, &option_index);
@@ -209,6 +215,18 @@ bool GetCommandLineArguments(int argc, char **argv, CommandLineArguments& rArgs)
                 int sleepTime = atoi(optarg);
                 if (sleepTime >= 0)
                     rArgs.SleepTime = sleepTime;
+            }
+            break;
+        case 7:
+            {
+                rArgs.ConcurrentNodes = optarg;
+            }
+            break;  
+        case 8:
+            {
+                int testNodeNum = atoi(optarg);
+                if (testNodeNum > 0)
+                    rArgs.TestNodeNum = testNodeNum;
             }
             break;
         }

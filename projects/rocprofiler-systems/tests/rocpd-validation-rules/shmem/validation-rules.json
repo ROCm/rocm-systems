@@ -1,0 +1,39 @@
+{
+    "required_tables": [
+        {
+            "name_prefix": "rocpd_string",
+            "required_columns": [
+                "id",
+                "string"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify that 'shmem' string is present in the table",
+                    "error_message": "'shmem' string not found in the table rocpd_string",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM {table_name} WHERE string LIKE 'shmem%';"
+                }
+            ]
+        },
+        {
+            "name": "regions",
+            "required_columns": [
+                "tid",
+                "start",
+                "end",
+                "name",
+                "category"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify that 'shmem' appears in category at least once in table regions",
+                    "error_message": "'shmem' category entries are fewer than expected in regions",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM {table_name} WHERE category = 'shmem';"
+                }
+            ]
+        }
+    ]
+}

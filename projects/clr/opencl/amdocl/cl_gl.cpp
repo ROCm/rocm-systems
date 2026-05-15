@@ -1,22 +1,8 @@
-/* Copyright (c) 2010 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "top.hpp"
 
@@ -213,13 +199,9 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateFromGLTexture,
   }
 
   const std::vector<amd::Device*>& devices = as_amd(context)->devices();
-  bool supportPass = false;
-  bool sizePass = false;
-  for (const auto& it : devices) {
-    if (it->info().imageSupport_) {
-      supportPass = true;
-    }
-  }
+  bool supportPass = std::any_of(devices.begin(), devices.end(), [](const amd::Device* device) {
+    return device->info().imageSupport_;
+  });
   if (!supportPass) {
     *not_null(errcode_ret) = CL_INVALID_OPERATION;
     LogWarning("there are no devices in context to support images");
@@ -298,13 +280,9 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateFromGLTexture2D,
   }
 
   const std::vector<amd::Device*>& devices = as_amd(context)->devices();
-  bool supportPass = false;
-  bool sizePass = false;
-  for (const auto& it : devices) {
-    if (it->info().imageSupport_) {
-      supportPass = true;
-    }
-  }
+  bool supportPass = std::any_of(devices.begin(), devices.end(), [](const amd::Device* device) {
+    return device->info().imageSupport_;
+  });
   if (!supportPass) {
     *not_null(errcode_ret) = CL_INVALID_OPERATION;
     LogWarning("there are no devices in context to support images");
@@ -378,13 +356,9 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateFromGLTexture3D,
   }
 
   const std::vector<amd::Device*>& devices = as_amd(context)->devices();
-  bool supportPass = false;
-  bool sizePass = false;
-  for (const auto& it : devices) {
-    if (it->info().imageSupport_) {
-      supportPass = true;
-    }
-  }
+  bool supportPass = std::any_of(devices.begin(), devices.end(), [](const amd::Device* device) {
+    return device->info().imageSupport_;
+  });
   if (!supportPass) {
     *not_null(errcode_ret) = CL_INVALID_OPERATION;
     LogWarning("there are no devices in context to support images");
@@ -431,8 +405,9 @@ RUNTIME_EXIT
  *
  *  \version 1.0r29
  */
-RUNTIME_ENTRY_RET(cl_mem, clCreateFromGLRenderbuffer, (cl_context context, cl_mem_flags flags,
-                                                       GLuint renderbuffer, cl_int* errcode_ret)) {
+RUNTIME_ENTRY_RET(cl_mem, clCreateFromGLRenderbuffer,
+                  (cl_context context, cl_mem_flags flags, GLuint renderbuffer,
+                   cl_int* errcode_ret)) {
   cl_mem clMemObj = NULL;
 
   if (!is_valid(context)) {
@@ -723,33 +698,33 @@ RUNTIME_ENTRY(cl_int, clEnqueueReleaseGLObjects,
 RUNTIME_EXIT
 
 /*! @}
-*  \addtogroup clCreateEventFromGLsyncKHR
-*  @{
-*/
+ *  \addtogroup clCreateEventFromGLsyncKHR
+ *  @{
+ */
 
 /*! \brief Creates an event object linked to an OpenGL sync object.
-*  Completion of such an event object is equivalent to waiting for completion
-*  of the fence command associated with the linked GL sync object.
-*
-*  \param context is valid OpenCL context created from an OpenGL context
-*  or share group, using the cl_khr_gl_sharing extension.
-*
-*  \param sync is the 'name' of a sync object in the GL share group associated
-*  with context.
-*
-*  \param errcode_ret Returns an appropriate error code as described below.
-*  If errcode_ret is NULL, no error code is returned.
-*
-*  \return a valid OpenCL event object and errcode_ret is set to CL_SUCCESS
-*  if the event object is created successfully.Otherwise, it returns a NULL
-*  value with one of the following error values returned in errcode_ret:
-*  - CL_INVALID_CONTEXT if context is not a valid context or was not created
-*    from a GL context.
-*  - CL_INVALID_GL_OBJECT if sync is not the name of a sync object in the
-*    GL share group associated with context.
-*
-*  \version 1.1
-*/
+ *  Completion of such an event object is equivalent to waiting for completion
+ *  of the fence command associated with the linked GL sync object.
+ *
+ *  \param context is valid OpenCL context created from an OpenGL context
+ *  or share group, using the cl_khr_gl_sharing extension.
+ *
+ *  \param sync is the 'name' of a sync object in the GL share group associated
+ *  with context.
+ *
+ *  \param errcode_ret Returns an appropriate error code as described below.
+ *  If errcode_ret is NULL, no error code is returned.
+ *
+ *  \return a valid OpenCL event object and errcode_ret is set to CL_SUCCESS
+ *  if the event object is created successfully.Otherwise, it returns a NULL
+ *  value with one of the following error values returned in errcode_ret:
+ *  - CL_INVALID_CONTEXT if context is not a valid context or was not created
+ *    from a GL context.
+ *  - CL_INVALID_GL_OBJECT if sync is not the name of a sync object in the
+ *    GL share group associated with context.
+ *
+ *  \version 1.1
+ */
 
 RUNTIME_ENTRY_RET(cl_event, clCreateEventFromGLsyncKHR,
                   (cl_context context, cl_GLsync clGLsync, cl_int* errcode_ret)) {
@@ -884,9 +859,8 @@ RUNTIME_ENTRY(cl_int, clGetGLContextInfoKHR,
 
         for (cl_uint i = 0; i < num_gpu_devices; ++i) {
           cl_device_id device = gpu_devices[i];
-          if (is_valid(device) &&
-              as_amd(device)->bindExternalDevice(info.flags_, info.hDev_, info.hCtx_,
-                                                 VALIDATE_ONLY)) {
+          if (is_valid(device) && as_amd(device)->bindExternalDevice(info.flags_, info.hDev_,
+                                                                     info.hCtx_, VALIDATE_ONLY)) {
             return amd::clGetInfo(device, param_value_size, param_value, param_value_size_ret);
           }
         }
@@ -902,8 +876,7 @@ RUNTIME_ENTRY(cl_int, clGetGLContextInfoKHR,
 
       cl_device_id* devices = (cl_device_id*)alloca(size);
 
-      errcode = clGetDeviceIDs(NULL, CL_DEVICE_TYPE_GPU, total_devices,
-                               devices, NULL);
+      errcode = clGetDeviceIDs(NULL, CL_DEVICE_TYPE_GPU, total_devices, devices, NULL);
       if (errcode != CL_SUCCESS) {
         return errcode;
       }
@@ -912,9 +885,8 @@ RUNTIME_ENTRY(cl_int, clGetGLContextInfoKHR,
 
       for (cl_uint i = 0; i < total_devices; ++i) {
         cl_device_id device = devices[i];
-        if (is_valid(device) &&
-            as_amd(device)->bindExternalDevice(info.flags_, info.hDev_, info.hCtx_,
-                                               VALIDATE_ONLY)) {
+        if (is_valid(device) && as_amd(device)->bindExternalDevice(info.flags_, info.hDev_,
+                                                                   info.hCtx_, VALIDATE_ONLY)) {
           compatible_devices.push_back(as_amd(device));
         }
       }
@@ -1438,15 +1410,15 @@ cl_mem clCreateFromGLTextureAMD(Context& amdContext, cl_mem_flags clFlags, GLenu
     target = (glTarget == GL_TEXTURE_CUBE_MAP) ? target : 0;
 
     if (wholeMipmap) {
-      pImageGL = new (amdContext)
-          ImageGL(amdContext, clType, clFlags, clImageFormat, static_cast<size_t>(gliTexWidth),
-                static_cast<size_t>(gliTexHeight), static_cast<size_t>(gliTexDepth), glTarget,
-                texture, miplevel, glInternalFormat, clGLType, numSamples, gliTexMaxLevel, target);
+      pImageGL = new (amdContext) ImageGL(
+          amdContext, clType, clFlags, clImageFormat, static_cast<size_t>(gliTexWidth),
+          static_cast<size_t>(gliTexHeight), static_cast<size_t>(gliTexDepth), glTarget, texture,
+          miplevel, glInternalFormat, clGLType, numSamples, gliTexMaxLevel, target);
     } else {
       pImageGL = new (amdContext)
           ImageGL(amdContext, clType, clFlags, clImageFormat, static_cast<size_t>(gliTexWidth),
-                static_cast<size_t>(gliTexHeight), static_cast<size_t>(gliTexDepth), glTarget,
-                texture, miplevel, glInternalFormat, clGLType, numSamples, target);
+                  static_cast<size_t>(gliTexHeight), static_cast<size_t>(gliTexDepth), glTarget,
+                  texture, miplevel, glInternalFormat, clGLType, numSamples, target);
     }
 
     if (!pImageGL) {
@@ -1590,14 +1562,18 @@ static cl_int clSetInteropObjects(cl_uint num_objects, const cl_mem* mem_objects
     return CL_INVALID_VALUE;
   }
 
+  size_t originalSize = interopObjects.size();
+  interopObjects.reserve(originalSize + num_objects);
   while (num_objects-- > 0) {
     cl_mem obj = *mem_objects++;
     if (!is_valid(obj)) {
+      interopObjects.resize(originalSize);
       return CL_INVALID_MEM_OBJECT;
     }
 
     amd::Memory* mem = as_amd(obj);
     if (mem->getInteropObj() == NULL) {
+      interopObjects.resize(originalSize);
       return CL_INVALID_GL_OBJECT;
     }
 
@@ -1643,8 +1619,7 @@ cl_int clEnqueueAcquireExtObjectsAMD(cl_command_queue command_queue, cl_uint num
   }
 
   amd::Command::EventWaitList eventWaitList;
-  err = amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list,
-                                event_wait_list);
+  err = amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list, event_wait_list);
   if (err != CL_SUCCESS) {
     return err;
   }
@@ -1716,8 +1691,7 @@ cl_int clEnqueueReleaseExtObjectsAMD(cl_command_queue command_queue, cl_uint num
   }
 
   amd::Command::EventWaitList eventWaitList;
-  err = amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list,
-                                event_wait_list);
+  err = amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list, event_wait_list);
   if (err != CL_SUCCESS) {
     return err;
   }

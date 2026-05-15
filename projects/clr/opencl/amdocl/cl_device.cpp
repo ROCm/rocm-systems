@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2022 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "cl_common.hpp"
 #include "vdi_common.hpp"
@@ -127,16 +113,14 @@ RUNTIME_ENTRY(cl_int, clGetPlatformInfo,
       value = "Advanced Micro Devices, Inc.";
       break;
     case CL_PLATFORM_EXTENSIONS:
-      value = "cl_khr_icd "
+      value =
+          "cl_khr_icd "
 #ifdef _WIN32
           "cl_khr_d3d10_sharing "
           "cl_khr_d3d11_sharing "
           "cl_khr_dx9_media_sharing "
 #endif  //_WIN32
           "cl_amd_event_callback "
-#if defined(WITH_COMPILER_LIB)
-          "cl_amd_offline_devices "
-#endif // defined(WITH_COMPILER_LIB)
           ;
       break;
     case CL_PLATFORM_ICD_SUFFIX_KHR:
@@ -206,7 +190,9 @@ RUNTIME_ENTRY(cl_int, clGetDeviceIDs,
       (num_entries == 0 && devices != NULL)) {
     return CL_INVALID_VALUE;
   }
-
+  if (device_type == 0) {
+    return CL_INVALID_DEVICE_TYPE;
+  }
   // Get all available devices
   if (!amd::Device::getDeviceIDs(device_type, num_entries, devices, num_devices, false)) {
     return CL_DEVICE_NOT_FOUND;
@@ -402,8 +388,9 @@ RUNTIME_ENTRY(cl_int, clGetDeviceInfo,
         CASE(CL_DEVICE_SIMD_INSTRUCTION_WIDTH_AMD, simdInstructionWidth_);
         CASE(CL_DEVICE_WAVEFRONT_WIDTH_AMD, wavefrontWidth_);
       case CL_DEVICE_GLOBAL_MEM_CHANNELS_AMD: {
-            cl_uint globalMemChannels = as_amd(device)->info().vramBusBitWidth_ / 32;
-            return amd::clGetInfo(globalMemChannels, param_value_size, param_value, param_value_size_ret);
+        cl_uint globalMemChannels = as_amd(device)->info().vramBusBitWidth_ / 32;
+        return amd::clGetInfo(globalMemChannels, param_value_size, param_value,
+                              param_value_size_ret);
       }
         CASE(CL_DEVICE_GLOBAL_MEM_CHANNEL_BANKS_AMD, globalMemChannelBanks_);
         CASE(CL_DEVICE_GLOBAL_MEM_CHANNEL_BANK_WIDTH_AMD, globalMemChannelBankWidth_);
@@ -445,7 +432,7 @@ RUNTIME_ENTRY(cl_int, clGetDeviceInfo,
         }
         return CL_SUCCESS;
       }
-      CASE(CL_DEVICE_PCIE_ID_AMD, pcieDeviceId_);
+        CASE(CL_DEVICE_PCIE_ID_AMD, pcieDeviceId_);
 #define CL_DEVICE_NUMERIC_VERSION 0x105E
       case CL_DEVICE_NUMERIC_VERSION: {
         std::string driverVersion = as_amd(device)->info().driverVersion_;

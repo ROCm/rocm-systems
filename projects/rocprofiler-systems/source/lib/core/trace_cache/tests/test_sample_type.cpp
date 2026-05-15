@@ -1,0 +1,654 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#include "core/trace_cache/sample_type.hpp"
+
+#include <array>
+#include <cstdint>
+#include <gtest/gtest.h>
+#include <vector>
+
+using namespace rocprofsys::trace_cache;
+
+class sample_type_test : public ::testing::Test
+{
+protected:
+    void SetUp() override { buffer.fill(0); }
+
+    std::array<std::uint8_t, 4096> buffer;
+};
+
+TEST_F(sample_type_test, kernel_dispatch_sample_serialize_deserialize)
+{
+    kernel_dispatch_sample original(1000, 2000, 42, 100, 200, 300, 400, 500, 600, 1024,
+                                    2048, 64, 32, 16, 256, 128, 64, 0xABCD);
+
+    serialize(buffer.data(), original);
+
+    std::uint8_t* buffer_ptr   = buffer.data();
+    auto          deserialized = deserialize<kernel_dispatch_sample>(buffer_ptr);
+
+    EXPECT_EQ(deserialized.start_timestamp, original.start_timestamp);
+    EXPECT_EQ(deserialized.end_timestamp, original.end_timestamp);
+    EXPECT_EQ(deserialized.thread_id, original.thread_id);
+    EXPECT_EQ(deserialized.agent_id_handle, original.agent_id_handle);
+    EXPECT_EQ(deserialized.kernel_id, original.kernel_id);
+    EXPECT_EQ(deserialized.dispatch_id, original.dispatch_id);
+    EXPECT_EQ(deserialized.queue_id_handle, original.queue_id_handle);
+    EXPECT_EQ(deserialized.correlation_id_internal, original.correlation_id_internal);
+    EXPECT_EQ(deserialized.correlation_id_ancestor, original.correlation_id_ancestor);
+    EXPECT_EQ(deserialized.private_segment_size, original.private_segment_size);
+    EXPECT_EQ(deserialized.group_segment_size, original.group_segment_size);
+    EXPECT_EQ(deserialized.workgroup_size_x, original.workgroup_size_x);
+    EXPECT_EQ(deserialized.workgroup_size_y, original.workgroup_size_y);
+    EXPECT_EQ(deserialized.workgroup_size_z, original.workgroup_size_z);
+    EXPECT_EQ(deserialized.grid_size_x, original.grid_size_x);
+    EXPECT_EQ(deserialized.grid_size_y, original.grid_size_y);
+    EXPECT_EQ(deserialized.grid_size_z, original.grid_size_z);
+    EXPECT_EQ(deserialized.stream_handle, original.stream_handle);
+}
+
+TEST_F(sample_type_test, kernel_dispatch_sample_get_size)
+{
+    kernel_dispatch_sample sample(1000, 2000, 42, 100, 200, 300, 400, 500, 600, 1024,
+                                  2048, 64, 32, 16, 256, 128, 64, 0xABCD);
+
+    size_t expected_size =
+        sizeof(std::uint64_t) * 9 + sizeof(std::uint32_t) * 8 + sizeof(std::uint64_t);
+
+    EXPECT_EQ(get_size(sample), expected_size);
+}
+
+TEST_F(sample_type_test, kernel_dispatch_sample_type_identifier)
+{
+    EXPECT_EQ(kernel_dispatch_sample::type_identifier,
+              type_identifier_t::kernel_dispatch);
+}
+
+TEST_F(sample_type_test, memory_copy_sample_serialize_deserialize)
+{
+    memory_copy_sample original(5000, 6000, 123, 200, 201, 1, 2, 4096, 700, 800, 0x1000,
+                                0x2000, 0xDEAD);
+
+    serialize(buffer.data(), original);
+
+    std::uint8_t* buffer_ptr   = buffer.data();
+    auto          deserialized = deserialize<memory_copy_sample>(buffer_ptr);
+
+    EXPECT_EQ(deserialized.start_timestamp, original.start_timestamp);
+    EXPECT_EQ(deserialized.end_timestamp, original.end_timestamp);
+    EXPECT_EQ(deserialized.thread_id, original.thread_id);
+    EXPECT_EQ(deserialized.dst_agent_id_handle, original.dst_agent_id_handle);
+    EXPECT_EQ(deserialized.src_agent_id_handle, original.src_agent_id_handle);
+    EXPECT_EQ(deserialized.kind, original.kind);
+    EXPECT_EQ(deserialized.operation, original.operation);
+    EXPECT_EQ(deserialized.bytes, original.bytes);
+    EXPECT_EQ(deserialized.correlation_id_internal, original.correlation_id_internal);
+    EXPECT_EQ(deserialized.correlation_id_ancestor, original.correlation_id_ancestor);
+    EXPECT_EQ(deserialized.dst_address_value, original.dst_address_value);
+    EXPECT_EQ(deserialized.src_address_value, original.src_address_value);
+    EXPECT_EQ(deserialized.stream_handle, original.stream_handle);
+}
+
+TEST_F(sample_type_test, memory_copy_sample_get_size)
+{
+    memory_copy_sample sample(5000, 6000, 123, 200, 201, 1, 2, 4096, 700, 800, 0x1000,
+                              0x2000, 0xDEAD);
+
+    size_t expected_size = sizeof(std::uint64_t) * 11 + sizeof(std::int32_t) * 2;
+
+    EXPECT_EQ(get_size(sample), expected_size);
+}
+
+TEST_F(sample_type_test, memory_copy_sample_type_identifier)
+{
+    EXPECT_EQ(memory_copy_sample::type_identifier, type_identifier_t::memory_copy);
+}
+
+TEST_F(sample_type_test, memory_allocate_sample_serialize_deserialize)
+{
+    memory_allocate_sample original(7000, 8000, 456, 300, 3, 4, 8192, 900, 1000, 0x3000,
+                                    0xBEEF);
+
+    serialize(buffer.data(), original);
+
+    std::uint8_t* buffer_ptr   = buffer.data();
+    auto          deserialized = deserialize<memory_allocate_sample>(buffer_ptr);
+
+    EXPECT_EQ(deserialized.start_timestamp, original.start_timestamp);
+    EXPECT_EQ(deserialized.end_timestamp, original.end_timestamp);
+    EXPECT_EQ(deserialized.thread_id, original.thread_id);
+    EXPECT_EQ(deserialized.agent_id_handle, original.agent_id_handle);
+    EXPECT_EQ(deserialized.kind, original.kind);
+    EXPECT_EQ(deserialized.operation, original.operation);
+    EXPECT_EQ(deserialized.allocation_size, original.allocation_size);
+    EXPECT_EQ(deserialized.correlation_id_internal, original.correlation_id_internal);
+    EXPECT_EQ(deserialized.correlation_id_ancestor, original.correlation_id_ancestor);
+    EXPECT_EQ(deserialized.address_value, original.address_value);
+    EXPECT_EQ(deserialized.stream_handle, original.stream_handle);
+}
+
+TEST_F(sample_type_test, memory_allocate_sample_get_size)
+{
+    memory_allocate_sample sample(7000, 8000, 456, 300, 3, 4, 8192, 900, 1000, 0x3000,
+                                  0xBEEF);
+
+    size_t expected_size = sizeof(std::uint64_t) * 9 + sizeof(std::int32_t) * 2;
+
+    EXPECT_EQ(get_size(sample), expected_size);
+}
+
+TEST_F(sample_type_test, memory_allocate_sample_type_identifier)
+{
+    EXPECT_EQ(memory_allocate_sample::type_identifier, type_identifier_t::memory_alloc);
+}
+
+TEST_F(sample_type_test, region_sample_serialize_deserialize)
+{
+    region_sample original(789, "test_function", 1100, 1200, 10000, 20000,
+                           "frame1\nframe2", "arg1=1, arg2=hello", "hip");
+
+    serialize(buffer.data(), original);
+
+    std::uint8_t* buffer_ptr   = buffer.data();
+    auto          deserialized = deserialize<region_sample>(buffer_ptr);
+
+    EXPECT_EQ(deserialized.thread_id, original.thread_id);
+    EXPECT_EQ(deserialized.name, original.name);
+    EXPECT_EQ(deserialized.correlation_id_internal, original.correlation_id_internal);
+    EXPECT_EQ(deserialized.correlation_id_ancestor, original.correlation_id_ancestor);
+    EXPECT_EQ(deserialized.start_timestamp, original.start_timestamp);
+    EXPECT_EQ(deserialized.end_timestamp, original.end_timestamp);
+    EXPECT_EQ(deserialized.call_stack, original.call_stack);
+    EXPECT_EQ(deserialized.args_str, original.args_str);
+    EXPECT_EQ(deserialized.category, original.category);
+}
+
+TEST_F(sample_type_test, region_sample_get_size)
+{
+    region_sample sample(789, "test_function", 1100, 1200, 10000, 20000, "frame1\nframe2",
+                         "arg1=1, arg2=hello", "hip");
+
+    size_t expected_size =
+        sizeof(std::uint64_t) * 5 + sizeof(size_t) * 4 + 13 + 13 + 18 + 3;
+
+    EXPECT_EQ(get_size(sample), expected_size);
+}
+
+TEST_F(sample_type_test, region_sample_type_identifier)
+{
+    EXPECT_EQ(region_sample::type_identifier, type_identifier_t::region);
+}
+
+TEST_F(sample_type_test, region_sample_empty_strings)
+{
+    region_sample original(123, "", 0, 0, 0, 0, "", "", "");
+
+    serialize(buffer.data(), original);
+
+    std::uint8_t* buffer_ptr   = buffer.data();
+    auto          deserialized = deserialize<region_sample>(buffer_ptr);
+
+    EXPECT_EQ(deserialized.thread_id, original.thread_id);
+    EXPECT_EQ(deserialized.name, "");
+    EXPECT_EQ(deserialized.call_stack, "");
+    EXPECT_EQ(deserialized.args_str, "");
+    EXPECT_EQ(deserialized.category, "");
+}
+
+TEST_F(sample_type_test, in_time_sample_serialize_deserialize)
+{
+    in_time_sample original(42, "GPU:0", 50000, "kernel_launch", 100, 99, 1500,
+                            "main\nfoo\nbar", "file.cpp:42");
+
+    serialize(buffer.data(), original);
+
+    std::uint8_t* buffer_ptr   = buffer.data();
+    auto          deserialized = deserialize<in_time_sample>(buffer_ptr);
+
+    EXPECT_EQ(deserialized.category_enum_id, original.category_enum_id);
+    EXPECT_EQ(deserialized.track_name, original.track_name);
+    EXPECT_EQ(deserialized.timestamp_ns, original.timestamp_ns);
+    EXPECT_EQ(deserialized.event_metadata, original.event_metadata);
+    EXPECT_EQ(deserialized.stack_id, original.stack_id);
+    EXPECT_EQ(deserialized.parent_stack_id, original.parent_stack_id);
+    EXPECT_EQ(deserialized.correlation_id, original.correlation_id);
+    EXPECT_EQ(deserialized.call_stack, original.call_stack);
+    EXPECT_EQ(deserialized.line_info, original.line_info);
+}
+
+TEST_F(sample_type_test, in_time_sample_get_size)
+{
+    in_time_sample sample(42, "GPU:0", 50000, "kernel_launch", 100, 99, 1500,
+                          "main\nfoo\nbar", "file.cpp:42");
+
+    size_t expected_size = sizeof(size_t) + sizeof(size_t) + 5 + sizeof(std::uint64_t) +
+                           sizeof(size_t) + 13 + sizeof(std::uint64_t) * 3 +
+                           sizeof(size_t) + 12 + sizeof(size_t) + 11;
+
+    EXPECT_EQ(get_size(sample), expected_size);
+}
+
+TEST_F(sample_type_test, in_time_sample_type_identifier)
+{
+    EXPECT_EQ(in_time_sample::type_identifier, type_identifier_t::in_time_sample);
+}
+
+TEST_F(sample_type_test, pmc_event_with_sample_serialize_deserialize)
+{
+    pmc_event_with_sample original(42, "CPU:0", 60000, "counter_sample", 200, 199, 1600,
+                                   "entry\nexit", "counter.cpp:100", 5, 1,
+                                   "PERF_COUNT_HW_CPU_CYCLES", 12345.67,
+                                   std::make_optional<std::int64_t>(135));
+
+    serialize(buffer.data(), original);
+
+    std::uint8_t* buffer_ptr   = buffer.data();
+    auto          deserialized = deserialize<pmc_event_with_sample>(buffer_ptr);
+
+    EXPECT_EQ(deserialized.category_enum_id, original.category_enum_id);
+    EXPECT_EQ(deserialized.track_name, original.track_name);
+    EXPECT_EQ(deserialized.timestamp_ns, original.timestamp_ns);
+    EXPECT_EQ(deserialized.event_metadata, original.event_metadata);
+    EXPECT_EQ(deserialized.stack_id, original.stack_id);
+    EXPECT_EQ(deserialized.parent_stack_id, original.parent_stack_id);
+    EXPECT_EQ(deserialized.correlation_id, original.correlation_id);
+    EXPECT_EQ(deserialized.call_stack, original.call_stack);
+    EXPECT_EQ(deserialized.line_info, original.line_info);
+    EXPECT_EQ(deserialized.device_id, original.device_id);
+    EXPECT_EQ(deserialized.device_type, original.device_type);
+    EXPECT_EQ(deserialized.pmc_info_name, original.pmc_info_name);
+    EXPECT_DOUBLE_EQ(deserialized.value, original.value);
+    EXPECT_EQ(deserialized.system_tid, original.system_tid);
+}
+
+TEST_F(sample_type_test, pmc_event_with_sample_get_size)
+{
+    pmc_event_with_sample sample(42, "CPU:0", 60000, "counter_sample", 200, 199, 1600,
+                                 "entry\nexit", "counter.cpp:100", 5, 1,
+                                 "PERF_COUNT_HW_CPU_CYCLES", 12345.67,
+                                 std::make_optional<std::int64_t>(135));
+
+    size_t expected_size =
+        sizeof(size_t) +               // category_enum_id
+        sizeof(size_t) + 5 +           // track_name "CPU:0"
+        sizeof(std::uint64_t) +        // timestamp_ns
+        sizeof(size_t) + 14 +          // event_metadata "counter_sample"
+        (sizeof(std::uint64_t) * 3) +  // stack_id, parent_stack_id, correlation_id
+        sizeof(size_t) + 10 +          // call_stack "entry\nexit"
+        sizeof(size_t) + 15 +          // line_info "counter.cpp:100"
+        sizeof(std::uint32_t) +        // device_id
+        sizeof(std::uint8_t) +         // device_type
+        sizeof(size_t) + 24 +          // pmc_info_name "PERF_COUNT_HW_CPU_CYCLES"
+        sizeof(double) +               // value
+        (sizeof(std::uint8_t) +
+         sizeof(std::int64_t));  // system_tid (has-value flag + value)
+
+    EXPECT_EQ(get_size(sample), expected_size);
+}
+
+TEST_F(sample_type_test, pmc_event_with_sample_serialize_deserialize_nullopt)
+{
+    pmc_event_with_sample original(42, "CPU:0", 60000, "counter_sample", 200, 199, 1600,
+                                   "entry\nexit", "counter.cpp:100", 5, 1,
+                                   "PERF_COUNT_HW_CPU_CYCLES", 12345.67, std::nullopt);
+
+    serialize(buffer.data(), original);
+
+    std::uint8_t* buffer_ptr   = buffer.data();
+    auto          deserialized = deserialize<pmc_event_with_sample>(buffer_ptr);
+
+    EXPECT_EQ(deserialized.category_enum_id, original.category_enum_id);
+    EXPECT_EQ(deserialized.track_name, original.track_name);
+    EXPECT_EQ(deserialized.timestamp_ns, original.timestamp_ns);
+    EXPECT_EQ(deserialized.event_metadata, original.event_metadata);
+    EXPECT_EQ(deserialized.stack_id, original.stack_id);
+    EXPECT_EQ(deserialized.parent_stack_id, original.parent_stack_id);
+    EXPECT_EQ(deserialized.correlation_id, original.correlation_id);
+    EXPECT_EQ(deserialized.call_stack, original.call_stack);
+    EXPECT_EQ(deserialized.line_info, original.line_info);
+    EXPECT_EQ(deserialized.device_id, original.device_id);
+    EXPECT_EQ(deserialized.device_type, original.device_type);
+    EXPECT_EQ(deserialized.pmc_info_name, original.pmc_info_name);
+    EXPECT_DOUBLE_EQ(deserialized.value, original.value);
+    EXPECT_FALSE(deserialized.system_tid.has_value());
+}
+
+// Tests for size consistency of pmc_event_with_sample with system_tid.
+// The value returned by get_size() must match the actual bytes written by serialize().
+TEST_F(sample_type_test, size_consistency_with_system_tid)
+{
+    pmc_event_with_sample sample_with_tid{
+        1,          "track",
+        1000,       "metadata",
+        2,          3,
+        4,          "callstack",
+        "lineinfo", 0,
+        0,          "counter",
+        42.0,       std::optional<std::int64_t>{ 12345 }  // has system_tid
+    };
+    size_t                    calculated_size = get_size(sample_with_tid);
+    std::vector<std::uint8_t> buf(calculated_size);
+    serialize(buf.data(), sample_with_tid);
+    // Deserialize and verify
+    std::uint8_t* buffer_ptr   = buf.data();
+    auto          deserialized = deserialize<pmc_event_with_sample>(buffer_ptr);
+    ASSERT_TRUE(deserialized.system_tid.has_value());
+    EXPECT_EQ(deserialized.system_tid.value(), 12345);
+    // Verify we consumed exactly calculated_size bytes
+    EXPECT_EQ(buffer_ptr - buf.data(), static_cast<std::ptrdiff_t>(calculated_size));
+}
+// Tests for size consistency of pmc_event_with_sample without system_tid.
+// The value returned by get_size() must match the actual bytes written by serialize().
+TEST_F(sample_type_test, size_consistency_without_system_tid)
+{
+    pmc_event_with_sample sample_no_tid{
+        1,           "track",    1000, "metadata", 2,         3,    4,
+        "callstack", "lineinfo", 0,    0,          "counter", 42.0,
+        std::nullopt  // no system_tid
+    };
+    size_t                    calculated_size = get_size(sample_no_tid);
+    std::vector<std::uint8_t> buf(calculated_size);
+    serialize(buf.data(), sample_no_tid);
+    std::uint8_t* buffer_ptr   = buf.data();
+    auto          deserialized = deserialize<pmc_event_with_sample>(buffer_ptr);
+    EXPECT_FALSE(deserialized.system_tid.has_value());
+    EXPECT_EQ(buffer_ptr - buf.data(), static_cast<std::ptrdiff_t>(calculated_size));
+}
+// Tests for the difference in size between pmc_event_with_sample with and without
+// system_tid. The value returned by get_size() must be different for the two cases.
+TEST_F(sample_type_test, different_sizes_based_on_optional_state)
+{
+    pmc_event_with_sample with_tid{ 1,          "track",
+                                    1000,       "metadata",
+                                    2,          3,
+                                    4,          "callstack",
+                                    "lineinfo", 0,
+                                    0,          "counter",
+                                    42.0,       std::optional<std::int64_t>{ 12345 } };
+    pmc_event_with_sample without_tid{ 1, "track",   1000,        "metadata",  2,
+                                       3, 4,         "callstack", "lineinfo",  0,
+                                       0, "counter", 42.0,        std::nullopt };
+    size_t                size_with    = get_size(with_tid);
+    size_t                size_without = get_size(without_tid);
+    // Variable-size: with_tid should be larger by sizeof(std::int64_t)
+    EXPECT_EQ(size_with, size_without + sizeof(std::int64_t))
+        << "Variable-size encoding should differ by inner type size";
+}
+
+TEST_F(sample_type_test, pmc_event_with_sample_get_size_nullopt)
+{
+    pmc_event_with_sample sample(42, "CPU:0", 60000, "counter_sample", 200, 199, 1600,
+                                 "entry\nexit", "counter.cpp:100", 5, 1,
+                                 "PERF_COUNT_HW_CPU_CYCLES", 12345.67, std::nullopt);
+
+    size_t expected_size =
+        sizeof(size_t) +               // category_enum_id
+        sizeof(size_t) + 5 +           // track_name "CPU:0"
+        sizeof(std::uint64_t) +        // timestamp_ns
+        sizeof(size_t) + 14 +          // event_metadata "counter_sample"
+        (sizeof(std::uint64_t) * 3) +  // stack_id, parent_stack_id, correlation_id
+        sizeof(size_t) + 10 +          // call_stack "entry\nexit"
+        sizeof(size_t) + 15 +          // line_info "counter.cpp:100"
+        sizeof(std::uint32_t) +        // device_id
+        sizeof(std::uint8_t) +         // device_type
+        sizeof(size_t) + 24 +          // pmc_info_name "PERF_COUNT_HW_CPU_CYCLES"
+        sizeof(double) +               // value
+        sizeof(std::uint8_t);          // system_tid (has-value flag only, nullopt)
+
+    EXPECT_EQ(get_size(sample), expected_size);
+}
+
+TEST_F(sample_type_test, pmc_event_with_sample_type_identifier)
+{
+    EXPECT_EQ(pmc_event_with_sample::type_identifier,
+              type_identifier_t::pmc_event_with_sample);
+}
+
+TEST_F(sample_type_test, backtrace_region_sample_serialize_deserialize)
+{
+    backtrace_region_sample original(1, 999, "Thread:999", "my_function", 90000, 95000,
+                                     "rocm", "main\nworker\nfunc", "worker.cpp:256",
+                                     "{\"extra\":\"data\"}");
+
+    serialize(buffer.data(), original);
+
+    std::uint8_t* buffer_ptr   = buffer.data();
+    auto          deserialized = deserialize<backtrace_region_sample>(buffer_ptr);
+
+    EXPECT_EQ(deserialized.type, original.type);
+    EXPECT_EQ(deserialized.thread_id, original.thread_id);
+    EXPECT_EQ(deserialized.track_name, original.track_name);
+    EXPECT_EQ(deserialized.name, original.name);
+    EXPECT_EQ(deserialized.start_timestamp, original.start_timestamp);
+    EXPECT_EQ(deserialized.end_timestamp, original.end_timestamp);
+    EXPECT_EQ(deserialized.category, original.category);
+    EXPECT_EQ(deserialized.call_stack, original.call_stack);
+    EXPECT_EQ(deserialized.line_info, original.line_info);
+    EXPECT_EQ(deserialized.extdata, original.extdata);
+}
+
+TEST_F(sample_type_test, backtrace_region_sample_get_size)
+{
+    backtrace_region_sample sample(1, 999, "Thread:999", "my_function", 90000, 95000,
+                                   "rocm", "main\nworker\nfunc", "worker.cpp:256",
+                                   "{\"extra\":\"data\"}");
+
+    size_t expected_size = sizeof(std::uint32_t) + sizeof(std::uint64_t) * 3 +
+                           sizeof(size_t) * 6 + 10 + 11 + 4 + 16 + 14 + 16;
+
+    EXPECT_EQ(get_size(sample), expected_size);
+}
+
+TEST_F(sample_type_test, backtrace_region_sample_type_identifier)
+{
+    EXPECT_EQ(backtrace_region_sample::type_identifier,
+              type_identifier_t::backtrace_region_sample);
+}
+
+TEST_F(sample_type_test, backtrace_region_sample_empty_strings)
+{
+    backtrace_region_sample original(0, 0, "", "", 0, 0, "", "", "", "");
+
+    serialize(buffer.data(), original);
+
+    std::uint8_t* buffer_ptr   = buffer.data();
+    auto          deserialized = deserialize<backtrace_region_sample>(buffer_ptr);
+
+    EXPECT_EQ(deserialized.track_name, "");
+    EXPECT_EQ(deserialized.name, "");
+    EXPECT_EQ(deserialized.category, "");
+    EXPECT_EQ(deserialized.call_stack, "");
+    EXPECT_EQ(deserialized.line_info, "");
+    EXPECT_EQ(deserialized.extdata, "");
+}
+
+TEST_F(sample_type_test, type_identifier_enum_values)
+{
+    EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::in_time_sample), 0x0000);
+    EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::pmc_event_with_sample),
+              0x0001);
+    EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::region), 0x0002);
+    EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::kernel_dispatch), 0x0003);
+    EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::memory_copy), 0x0004);
+    EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::memory_alloc), 0x0005);
+    EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::gpu_pmc_sample), 0x0006);
+    EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::cpu_pmc_sample), 0x0007);
+    EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::backtrace_region_sample),
+              0x0008);
+    EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::fragmented_space), 0xFFFF);
+}
+
+TEST_F(sample_type_test, kernel_dispatch_sample_default_constructor)
+{
+    kernel_dispatch_sample sample;
+    EXPECT_EQ(sample.type_identifier, type_identifier_t::kernel_dispatch);
+}
+
+TEST_F(sample_type_test, memory_copy_sample_default_constructor)
+{
+    memory_copy_sample sample;
+    EXPECT_EQ(sample.type_identifier, type_identifier_t::memory_copy);
+}
+
+TEST_F(sample_type_test, memory_allocate_sample_default_constructor)
+{
+    memory_allocate_sample sample;
+    EXPECT_EQ(sample.type_identifier, type_identifier_t::memory_alloc);
+}
+
+TEST_F(sample_type_test, region_sample_default_constructor)
+{
+    region_sample sample;
+    EXPECT_EQ(sample.type_identifier, type_identifier_t::region);
+}
+
+TEST_F(sample_type_test, in_time_sample_default_constructor)
+{
+    in_time_sample sample;
+    EXPECT_EQ(sample.type_identifier, type_identifier_t::in_time_sample);
+}
+
+TEST_F(sample_type_test, pmc_event_with_sample_default_constructor)
+{
+    pmc_event_with_sample sample;
+    EXPECT_EQ(sample.type_identifier, type_identifier_t::pmc_event_with_sample);
+}
+
+TEST_F(sample_type_test, backtrace_region_sample_default_constructor)
+{
+    backtrace_region_sample sample;
+    EXPECT_EQ(sample.type_identifier, type_identifier_t::backtrace_region_sample);
+}
+
+TEST_F(sample_type_test, kernel_dispatch_sample_large_values)
+{
+    kernel_dispatch_sample original(
+        UINT64_MAX, UINT64_MAX, UINT64_MAX, UINT64_MAX, UINT64_MAX, UINT64_MAX,
+        UINT64_MAX, UINT64_MAX, UINT64_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX,
+        UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, SIZE_MAX);
+
+    serialize(buffer.data(), original);
+
+    std::uint8_t* buffer_ptr   = buffer.data();
+    auto          deserialized = deserialize<kernel_dispatch_sample>(buffer_ptr);
+
+    EXPECT_EQ(deserialized.start_timestamp, UINT64_MAX);
+    EXPECT_EQ(deserialized.end_timestamp, UINT64_MAX);
+    EXPECT_EQ(deserialized.thread_id, UINT64_MAX);
+    EXPECT_EQ(deserialized.private_segment_size, UINT32_MAX);
+    EXPECT_EQ(deserialized.grid_size_z, UINT32_MAX);
+}
+
+TEST_F(sample_type_test, kfd_sample_default_constructor)
+{
+    kfd_sample sample;
+    EXPECT_EQ(sample.type_identifier, type_identifier_t::kfd_sample);
+}
+
+TEST_F(sample_type_test, kfd_sample_serialize_deserialize_page_fault)
+{
+    kfd_sample original(1234,                              // thread_id
+                        "PAGE_FAULT_READ_FAULT_MIGRATED",  // name
+                        100000,                            // start_timestamp
+                        200000,                            // end_timestamp
+                        "0;;std::uint64_t;;address;;0x7f4a00001000;;"
+                        "1;;string;;agent;;5;;",             // args_str
+                        "rocm_kfd_page_fault",               // category
+                        "KFD Page Fault [GPU 0]",            // track_name
+                        "{}",                                // event_metadata
+                        0,                                   // device_id
+                        static_cast<std::uint8_t>(1),        // device_type (GPU)
+                        "rocm_kfd_page_fault",               // pmc_info_name
+                        139637276676096.0,                   // value
+                        std::optional<std::int64_t>(1234));  // system_tid
+
+    serialize(buffer.data(), original);
+
+    std::uint8_t* buffer_ptr   = buffer.data();
+    auto          deserialized = deserialize<kfd_sample>(buffer_ptr);
+
+    EXPECT_EQ(deserialized.thread_id, original.thread_id);
+    EXPECT_EQ(deserialized.name, original.name);
+    EXPECT_EQ(deserialized.start_timestamp, original.start_timestamp);
+    EXPECT_EQ(deserialized.end_timestamp, original.end_timestamp);
+    EXPECT_EQ(deserialized.args_str, original.args_str);
+    EXPECT_EQ(deserialized.category, original.category);
+    EXPECT_EQ(deserialized.track_name, original.track_name);
+    EXPECT_EQ(deserialized.event_metadata, original.event_metadata);
+    EXPECT_EQ(deserialized.device_id, original.device_id);
+    EXPECT_EQ(deserialized.device_type, original.device_type);
+    EXPECT_EQ(deserialized.pmc_info_name, original.pmc_info_name);
+    EXPECT_DOUBLE_EQ(deserialized.value, original.value);
+    EXPECT_EQ(deserialized.system_tid, original.system_tid);
+}
+
+TEST_F(sample_type_test, kfd_sample_serialize_deserialize_page_migrate)
+{
+    kfd_sample original(5678, "PAGE_MIGRATE_PAGEFAULT_GPU", 300000, 500000,
+                        "0;;std::uint64_t;;start_address;;0x7fb100000000;;"
+                        "1;;std::uint64_t;;end_address;;0x7fb100200000;;"
+                        "2;;string;;src_agent;;1;;"
+                        "3;;string;;dst_agent;;2;;"
+                        "4;;string;;prefetch_agent;;null;;"
+                        "5;;string;;preferred_agent;;null;;"
+                        "6;;int;;error_code;;0;;",
+                        "rocm_kfd_page_migrate", "KFD Page Migrate [GPU 0->CPU 0]", "{}",
+                        0, static_cast<std::uint8_t>(1), "rocm_kfd_page_migrate",
+                        2097152.0, std::optional<std::int64_t>(5678));
+
+    serialize(buffer.data(), original);
+
+    std::uint8_t* buffer_ptr   = buffer.data();
+    auto          deserialized = deserialize<kfd_sample>(buffer_ptr);
+
+    EXPECT_EQ(deserialized.thread_id, original.thread_id);
+    EXPECT_EQ(deserialized.name, original.name);
+    EXPECT_EQ(deserialized.start_timestamp, original.start_timestamp);
+    EXPECT_EQ(deserialized.end_timestamp, original.end_timestamp);
+    EXPECT_EQ(deserialized.args_str, original.args_str);
+    EXPECT_EQ(deserialized.category, original.category);
+    EXPECT_EQ(deserialized.track_name, original.track_name);
+    EXPECT_EQ(deserialized.device_id, original.device_id);
+    EXPECT_EQ(deserialized.device_type, original.device_type);
+    EXPECT_EQ(deserialized.pmc_info_name, original.pmc_info_name);
+    EXPECT_DOUBLE_EQ(deserialized.value, original.value);
+    EXPECT_EQ(deserialized.system_tid, original.system_tid);
+}
+
+TEST_F(sample_type_test, kfd_sample_serialize_deserialize_instant_event)
+{
+    kfd_sample original(9999, "DROPPED_EVENTS", 400000, 400000,
+                        "0;;std::uint64_t;;count;;42;;", "rocm_kfd_event_dropped_events",
+                        "KFD Dropped Events", "{}", 0, static_cast<std::uint8_t>(1),
+                        "rocm_kfd_event_dropped_events", 42.0,
+                        std::optional<std::int64_t>(9999));
+
+    serialize(buffer.data(), original);
+
+    std::uint8_t* buffer_ptr   = buffer.data();
+    auto          deserialized = deserialize<kfd_sample>(buffer_ptr);
+
+    EXPECT_EQ(deserialized.start_timestamp, deserialized.end_timestamp);
+    EXPECT_EQ(deserialized.name, "DROPPED_EVENTS");
+    EXPECT_EQ(deserialized.category, "rocm_kfd_event_dropped_events");
+    EXPECT_DOUBLE_EQ(deserialized.value, 42.0);
+}
+
+TEST_F(sample_type_test, kfd_sample_get_size)
+{
+    kfd_sample original(1234, "PAGE_FAULT", 100000, 200000,
+                        "0;;std::uint64_t;;address;;0x1000;;", "rocm_kfd_page_fault",
+                        "KFD Page Fault [GPU 0]", "{}", 0, 1, "rocm_kfd_page_fault",
+                        4096.0, std::optional<std::int64_t>(1234));
+
+    auto size = get_size(original);
+    EXPECT_GT(size, 0u);
+
+    serialize(buffer.data(), original);
+
+    std::uint8_t* buffer_ptr   = buffer.data();
+    auto          deserialized = deserialize<kfd_sample>(buffer_ptr);
+    EXPECT_EQ(deserialized.name, original.name);
+    EXPECT_EQ(deserialized.category, original.category);
+}

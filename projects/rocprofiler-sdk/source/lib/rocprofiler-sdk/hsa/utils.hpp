@@ -25,6 +25,7 @@
 #include <rocprofiler-sdk/ext_version.h>
 
 #include "lib/common/stringize_arg.hpp"
+#include "lib/rocprofiler-sdk/hsa/details/fmt.hpp"
 
 #include <fmt/core.h>
 #include <fmt/ranges.h>

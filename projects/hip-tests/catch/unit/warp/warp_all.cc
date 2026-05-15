@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "warp_vote_common.hh"
 
@@ -41,16 +28,22 @@ static bool check_if_all(uint64_t predicate_mask, uint64_t active_mask, size_t p
   return true;
 }
 
-__global__ void kernel_all(uint64_t* const out, const uint64_t* const active_masks, uint64_t predicate) {
+__global__ void kernel_all(uint64_t* const out, const uint64_t* const active_masks,
+                           uint64_t predicate) {
   if (deactivate_thread(active_masks)) {
     return;
   }
 
   const auto grid = cg::this_grid();
   const auto warp = cg::tiled_partition(cg::this_thread_block(), warpSize);
-
   int pred = MASK_SHIFT(predicate, warp.thread_rank());
+
+#if HT_AMD
   out[grid.thread_rank()] = __all(pred);
+#else
+  unsigned mask = 0xFFFFFFFF;
+  out[grid.thread_rank()] = __all_sync(mask, pred);
+#endif
 }
 
 class WarpAll : public WarpVoteTest<WarpAll, uint64_t> {
@@ -68,7 +61,7 @@ class WarpAll : public WarpVoteTest<WarpAll, uint64_t> {
       const auto rank_in_block = this->grid_.thread_rank_in_block(i).value();
       const auto rank_in_warp = rank_in_block % this->warp_size_;
       const auto warp_idx = this->warps_in_block_ * (i / this->grid_.threads_in_block_count_) +
-          rank_in_block / this->warp_size_;
+                            rank_in_block / this->warp_size_;
       const auto block_rank = warp_idx / this->warps_in_block_;
       const std::bitset<sizeof(uint64_t) * 8> active_mask(this->active_masks_[warp_idx]);
 
@@ -108,27 +101,22 @@ class WarpAll : public WarpVoteTest<WarpAll, uint64_t> {
  *  - HIP_VERSION >= 5.2
  *  - Device supports warp vote
  */
-TEST_CASE("Unit_Warp_Vote_All_Positive_Basic") {
+HIP_TEST_CASE(Unit_Warp_Vote_All_Positive_Basic) {
   int device;
   hipDeviceProp_t device_properties;
   HIP_CHECK(hipGetDevice(&device));
   HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
 
   if (!device_properties.arch.hasWarpVote) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support Warp Vote!");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kWarpVoteUnsupported);
   }
 
-  SECTION("Warp Vote All with specified active mask") {
-    WarpAll().run(false);
-  }
+  SECTION("Warp Vote All with specified active mask") { WarpAll().run(false); }
 
-  SECTION("Warp Vote All with random active mask") {
-    WarpAll().run(true);
-  }
+  SECTION("Warp Vote All with random active mask") { WarpAll().run(true); }
 }
 
 /**
-* End doxygen group DeviceLanguageTest.
-* @}
-*/
+ * End doxygen group DeviceLanguageTest.
+ * @}
+ */

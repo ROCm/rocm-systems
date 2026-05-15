@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
  * Scenario: Validate behavior of hipGetDeviceProperties for masked devices.
@@ -36,7 +20,7 @@ THE SOFTWARE.
 /**
  * Fetches Gpu device count
  */
-static void getDeviceCount(int *pdevCnt) {
+static void getDeviceCount(int* pdevCnt) {
   int fd[2], val = 0;
   pid_t childpid;
 
@@ -84,7 +68,6 @@ static void getDeviceCount(int *pdevCnt) {
 }
 
 
-
 /**
  * Tries to fetch device properties of masked devices and returns pass/fail.
  */
@@ -112,15 +95,14 @@ static bool validateGetPropsOfMaskedDevices(int actualNumGPUs) {
     setenv("HIP_VISIBLE_DEVICES", visibleDeviceString, 1);
 #endif
 
-    for (int count = 1;
-        count < actualNumGPUs; count++) {
+    for (int count = 1; count < actualNumGPUs; count++) {
       hipDeviceProp_t prop;
       err = hipGetDeviceProperties(&prop, count);
       if (err == hipSuccess) {
         testResult &= false;
       } else {
-        printf("hipGetDeviceProperties: Error Code Returned: '%s'(%d)\n",
-              hipGetErrorString(err), err);
+        printf("hipGetDeviceProperties: Error Code Returned: '%s'(%d)\n", hipGetErrorString(err),
+               err);
       }
     }
     close(fd[0]);
@@ -144,11 +126,10 @@ static bool validateGetPropsOfMaskedDevices(int actualNumGPUs) {
 }
 
 
-
 /**
  * Scenario: Validate behavior of hipGetDeviceProperties for masked devices.
  */
-TEST_CASE("Unit_hipGetDeviceProperties_MaskedDevices") {
+HIP_TEST_CASE(Unit_hipGetDeviceProperties_MaskedDevices) {
   int count = -1;
   constexpr int ReqGPUs = 2;
   bool ret;
@@ -159,7 +140,7 @@ TEST_CASE("Unit_hipGetDeviceProperties_MaskedDevices") {
     ret = validateGetPropsOfMaskedDevices(count);
     REQUIRE(ret == true);
   } else {
-    SUCCEED("Not enough GPUs to run the masked GPU tests");
+    HIP_SKIP_TEST(HipTest::SkipReason::kRequiredDeviceCountNotMet);
   }
 }
 #endif

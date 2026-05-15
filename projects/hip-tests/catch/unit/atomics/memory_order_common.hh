@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -217,6 +201,8 @@ template <BuiltinAtomicOperation operation, int memory_order, int memory_scope> 
   SECTION("Global memory") {
     const auto alloc_type = LinearAllocs::hipMalloc;
     LinearAllocGuard<int> data(alloc_type, sizeof(int));
+
+    HIP_CHECK(hipMemset(data.ptr(), 0, sizeof(int)));
     TestKernel<operation, memory_order, memory_scope>
         <<<blocks, threads>>>(flag.ptr(), data.ptr(), ret.ptr());
   }
@@ -234,16 +220,24 @@ template <BuiltinAtomicOperation operation, int memory_order, int memory_scope> 
 }
 
 template <BuiltinAtomicOperation operation, int memory_order> void SystemTest() {
-  HipTest::HIP_SKIP_TEST("Skip system scope tests due to random failures!!");
-  return;
+  // The test need xnack on to make managed memory be host coherent.
+  // If xnack is off, managed memory has coarse grained access.
+  if (!HipTest::isXnackOn()) {
+    std::cerr << "GPU is not xnack enabled hence skipping system test\n";
+    return;
+  }
   std::thread host_thread;
 
   LinearAllocGuard<int> flag(LinearAllocs::hipMallocManaged, sizeof(int));
   LinearAllocGuard<int> ret(LinearAllocs::hipMallocManaged, sizeof(int));
 
+  HIP_CHECK(hipMemset(flag.ptr(), 0, sizeof(int)));
+
   SECTION("Global memory") {
     const auto alloc_type = GENERATE(LinearAllocs::hipHostMalloc , LinearAllocs::hipMallocManaged);
     LinearAllocGuard<int> data(alloc_type, sizeof(int));
+
+    HIP_CHECK(hipMemset(data.ptr(), 0, sizeof(int)));
 
     if constexpr(operation == BuiltinAtomicOperation::kAnd) {
       flag.ptr()[0] = 1;
@@ -255,6 +249,9 @@ template <BuiltinAtomicOperation operation, int memory_order> void SystemTest() 
       });
       ConsumerKernel<operation, memory_order, __HIP_MEMORY_SCOPE_SYSTEM>
           <<<1, 1>>>(flag.ptr(), data.ptr(), ret.ptr());
+
+      HIP_CHECK(hipDeviceSynchronize());
+      host_thread.join();
     }
 
     SECTION("Device producer - Host consumer") {
@@ -264,11 +261,11 @@ template <BuiltinAtomicOperation operation, int memory_order> void SystemTest() 
       });
       ProducerKernel<operation, memory_order, __HIP_MEMORY_SCOPE_SYSTEM>
           <<<1, 1>>>(flag.ptr(), data.ptr());
+
+      HIP_CHECK(hipDeviceSynchronize());
+      host_thread.join();
     }
   }
-
-  HIP_CHECK(hipDeviceSynchronize());
-  host_thread.join();
 
   REQUIRE(ret.ptr()[0] == kTestValue);
 }
@@ -398,6 +395,9 @@ template <BuiltinAtomicOperation operation, int memory_scope> void Test() {
   LinearAllocGuard<int> counter1(LinearAllocs::hipMallocManaged, sizeof(int));
   LinearAllocGuard<int> counter2(LinearAllocs::hipMallocManaged, sizeof(int));
 
+  HIP_CHECK(hipMemset(counter1.ptr(), 0, sizeof(int)));
+  HIP_CHECK(hipMemset(counter2.ptr(), 0, sizeof(int)));
+
   SECTION("Global memory") {
     const auto alloc_type = LinearAllocs::hipMalloc;
     LinearAllocGuard<int> flag1(alloc_type, sizeof(int));
@@ -426,14 +426,20 @@ template <BuiltinAtomicOperation operation, int memory_scope> void Test() {
 }
 
 template <BuiltinAtomicOperation operation> void SystemTest() {
-  HipTest::HIP_SKIP_TEST("Skip system scope tests due to random failures!!");
-  return;
+  // The test need xnack on to make managed memory be host coherent.
+  // If xnack is off, managed memory has coarse grained access.
+  if (!HipTest::isXnackOn()) {
+    std::cerr << "GPU is not xnack enabled hence skipping system test\n";
+    return;
+  }
   std::thread host_producer, host_consumer;
 
   LinearAllocGuard<int> counter1(LinearAllocs::hipMallocManaged, sizeof(int));
   LinearAllocGuard<int> counter2(LinearAllocs::hipMallocManaged, sizeof(int));
-
   std::vector<StreamGuard> streams;
+
+  HIP_CHECK(hipMemset(counter1.ptr(), 0, sizeof(int)));
+  HIP_CHECK(hipMemset(counter2.ptr(), 0, sizeof(int)));
 
   for (auto j = 0; j < 2; ++j) {
       streams.emplace_back(Streams::created);

@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 
@@ -30,14 +17,16 @@ THE SOFTWARE.
 /**
  * Test Description
  * ------------------------
- *  - Validates handling of invalid arguments for [hipCreateTextureObject](@ref hipCreateTextureObject):
+ *  - Validates handling of invalid arguments for [hipCreateTextureObject](@ref
+ * hipCreateTextureObject):
  *    -# When output pointer to the texture object is `nullptr`
  *      - Expected output: do not return `hipSuccess`
  *    -# When resource descriptor is `nullptr`
  *      - Expected output: do not return `hipSuccess`
  *    -# When texture descriptor is `nullptr`
  *      - Expected output: do not return `hipSuccess`
- *  - Validates handling of invalid arguments for [hipDestroyTextureObject](@ref hipDestroyTextureObject):
+ *  - Validates handling of invalid arguments for [hipDestroyTextureObject](@ref
+ * hipDestroyTextureObject):
  *    -# When texture object handle is `nullptr`
  *      - Expected output: return `hipSuccess`
  * Test source
@@ -48,10 +37,10 @@ THE SOFTWARE.
  *  - Textures supported on device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipCreateTextureObject_ArgValidation") {
+HIP_TEST_CASE(Unit_hipCreateTextureObject_ArgValidation) {
   CHECK_IMAGE_SUPPORT
 
-  float *texBuf;
+  float* texBuf;
   hipError_t ret;
   constexpr int xsize = 32;
   hipResourceDesc resDesc;
@@ -64,8 +53,7 @@ TEST_CASE("Unit_hipCreateTextureObject_ArgValidation") {
   memset(&resDesc, 0, sizeof(resDesc));
   resDesc.resType = hipResourceTypeLinear;
   resDesc.res.linear.devPtr = texBuf;
-  resDesc.res.linear.desc = hipCreateChannelDesc(xsize, 0, 0, 0,
-                       hipChannelFormatKindFloat);
+  resDesc.res.linear.desc = hipCreateChannelDesc(xsize, 0, 0, 0, hipChannelFormatKindFloat);
   resDesc.res.linear.sizeInBytes = N * sizeof(float);
 
   // Populate texture descriptor
@@ -92,12 +80,12 @@ TEST_CASE("Unit_hipCreateTextureObject_ArgValidation") {
       // API expected to return failure. Test skipped
       // on nvidia as api returns success and would lead
       // to unexpected behavior with app.
-      WARN("Texture Desc(nullptr) skipped on nvidia");
+      WARN("Skipping section: " << HipTest::SkipReason::kApiUnsupportedOnNvidia);
     }
   }
 
   SECTION("Destroy TextureObject with nullptr") {
-    ret = hipDestroyTextureObject((hipTextureObject_t)nullptr);
+    ret = hipDestroyTextureObject((hipTextureObject_t) nullptr);
     // api to return success and no crash seen.
     REQUIRE(ret == hipSuccess);
   }
@@ -107,6 +95,6 @@ TEST_CASE("Unit_hipCreateTextureObject_ArgValidation") {
 }
 
 /**
-* End doxygen group TextureTest.
-* @}
-*/
+ * End doxygen group TextureTest.
+ * @}
+ */

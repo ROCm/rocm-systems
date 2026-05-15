@@ -30,7 +30,7 @@
     Some common filters include:
 
     - `-k`/`--kernel` enables filtering kernels by name.
-    - `-d`/`--dispatch` enables filtering based on dispatch ID.
+    - `-d`/`--dispatch` enables filtering based on dispatch iteration.
     - `-b`/`--block` enables collects metrics for only the specified (one or more) hardware component blocks.
 
     To view available metrics by hardware Block you can use the `--list-metrics` argument:

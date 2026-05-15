@@ -38,7 +38,7 @@ Run these commands:
 ```bash
 cd "$CLR_DIR"
 mkdir -p build; cd build
-cmake -DUSE_COMGR_LIBRARY=ON -DCMAKE_PREFIX_PATH="/opt/rocm/" -DCLR_BUILD_HIP=OFF -DCLR_BUILD_OCL=ON ..
+cmake -DCMAKE_PREFIX_PATH="/opt/rocm/" -DCLR_BUILD_HIP=OFF -DCLR_BUILD_OCL=ON ..
 make -j$(nproc)
 ```
 

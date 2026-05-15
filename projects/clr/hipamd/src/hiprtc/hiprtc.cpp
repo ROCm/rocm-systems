@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2022 - Present Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "../hip_comgr_helper.hpp"
 #include <hip/hiprtc.h>
@@ -309,8 +293,7 @@ hiprtcResult hiprtcLinkCreate(unsigned int num_options, hiprtcJIT_option* option
 
   std::string name("LinkerProgram");
   hip::LinkProgram* rtc_link_prog_ptr = new hip::LinkProgram(name);
-  if (!rtc_link_prog_ptr->AddLinkerOptions(num_options, options_ptr,
-                                          options_vals_pptr)) {
+  if (!rtc_link_prog_ptr->AddLinkerOptions(num_options, options_ptr, options_vals_pptr)) {
     HIPRTC_RETURN(HIPRTC_ERROR_INVALID_OPTION);
   }
 
@@ -331,12 +314,11 @@ hiprtcResult hiprtcLinkAddFile(hiprtcLinkState hip_link_state, hiprtcJITInputTyp
   if (input_type == HIPRTC_JIT_INPUT_CUBIN || input_type == HIPRTC_JIT_INPUT_PTX ||
       input_type == HIPRTC_JIT_INPUT_FATBINARY || input_type == HIPRTC_JIT_INPUT_OBJECT ||
       input_type == HIPRTC_JIT_INPUT_LIBRARY || input_type == HIPRTC_JIT_INPUT_NVVM ||
-      input_type == HIPRTC_JIT_INPUT_SPIRV ) {
+      input_type == HIPRTC_JIT_INPUT_SPIRV) {
     HIPRTC_RETURN(HIPRTC_ERROR_INVALID_INPUT);
   }
 
-  hip::LinkProgram* rtc_link_prog_ptr =
-      reinterpret_cast<hip::LinkProgram*>(hip_link_state);
+  hip::LinkProgram* rtc_link_prog_ptr = reinterpret_cast<hip::LinkProgram*>(hip_link_state);
 
   if (!hip::LinkProgram::isLinkerValid(rtc_link_prog_ptr)) {
     HIPRTC_RETURN(HIPRTC_ERROR_INVALID_INPUT);
@@ -361,7 +343,7 @@ hiprtcResult hiprtcLinkAddData(hiprtcLinkState hip_link_state, hiprtcJITInputTyp
 
   if (input_type == HIPRTC_JIT_INPUT_CUBIN || input_type == HIPRTC_JIT_INPUT_PTX ||
       input_type == HIPRTC_JIT_INPUT_FATBINARY || input_type == HIPRTC_JIT_INPUT_OBJECT ||
-      input_type == HIPRTC_JIT_INPUT_LIBRARY || input_type == HIPRTC_JIT_INPUT_NVVM || 
+      input_type == HIPRTC_JIT_INPUT_LIBRARY || input_type == HIPRTC_JIT_INPUT_NVVM ||
       input_type == HIPRTC_JIT_INPUT_SPIRV) {
     HIPRTC_RETURN(HIPRTC_ERROR_INVALID_INPUT);
   }
@@ -371,8 +353,7 @@ hiprtcResult hiprtcLinkAddData(hiprtcLinkState hip_link_state, hiprtcJITInputTyp
     input_name = name;
   }
 
-  hip::LinkProgram* rtc_link_prog_ptr =
-      reinterpret_cast<hip::LinkProgram*>(hip_link_state);
+  hip::LinkProgram* rtc_link_prog_ptr = reinterpret_cast<hip::LinkProgram*>(hip_link_state);
 
   if (!hip::LinkProgram::isLinkerValid(rtc_link_prog_ptr)) {
     HIPRTC_RETURN(HIPRTC_ERROR_INVALID_INPUT);
@@ -392,8 +373,7 @@ hiprtcResult hiprtcLinkComplete(hiprtcLinkState hip_link_state, void** bin_out, 
     HIPRTC_RETURN(HIPRTC_ERROR_INVALID_INPUT);
   }
 
-  hip::LinkProgram* rtc_link_prog_ptr =
-      reinterpret_cast<hip::LinkProgram*>(hip_link_state);
+  hip::LinkProgram* rtc_link_prog_ptr = reinterpret_cast<hip::LinkProgram*>(hip_link_state);
 
   if (!hip::LinkProgram::isLinkerValid(rtc_link_prog_ptr)) {
     HIPRTC_RETURN(HIPRTC_ERROR_INVALID_INPUT);
@@ -409,8 +389,7 @@ hiprtcResult hiprtcLinkComplete(hiprtcLinkState hip_link_state, void** bin_out, 
 hiprtcResult hiprtcLinkDestroy(hiprtcLinkState hip_link_state) {
   HIPRTC_INIT_API(hip_link_state);
 
-  hip::LinkProgram* rtc_link_prog_ptr =
-      reinterpret_cast<hip::LinkProgram*>(hip_link_state);
+  hip::LinkProgram* rtc_link_prog_ptr = reinterpret_cast<hip::LinkProgram*>(hip_link_state);
 
   if (!hip::LinkProgram::isLinkerValid(rtc_link_prog_ptr)) {
     HIPRTC_RETURN(HIPRTC_ERROR_INVALID_INPUT);
