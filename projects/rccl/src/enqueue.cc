@@ -3190,6 +3190,13 @@ ncclResult_t ncclEnqueueCheck(struct ncclInfo* info) {
   // Check whether communicator is ready to communicate
   NCCLCHECKGOTO(ncclCommEnsureReady(info->comm), ret, fail);
 
+  if (__atomic_load_n(&info->comm->revokedFlag, __ATOMIC_ACQUIRE)) {
+    WARN("%s: communicator %p has been revoked; no new collectives may be enqueued",
+         info->opName, info->comm);
+    ret = ncclInvalidUsage;
+    goto fail;
+  }
+
   if (info->comm->checkPointers) {
     CUDACHECKGOTO(cudaGetDevice(&devOld), ret, fail);
     CUDACHECKGOTO(cudaSetDevice(info->comm->cudaDev), ret, fail);

@@ -950,7 +950,11 @@ else()
 endif()
 target_link_libraries(rccl PRIVATE   dl)
 target_link_libraries(rccl PRIVATE   ${SMI_LIBRARIES})
-target_link_libraries(rccl PRIVATE fmt::fmt-header-only)
+# Wrap fmt in $<BUILD_INTERFACE:...> so it's only used while building rccl
+# and is omitted from the exported rccl-targets export set. Without this,
+# a FetchContent-built fmt-header-only target leaks into rccl's link
+# interface and breaks install(EXPORT) for static builds.
+target_link_libraries(rccl PRIVATE $<BUILD_INTERFACE:fmt::fmt-header-only>)
 if(ENABLE_ROCSHMEM)
   target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
   target_link_libraries(rccl PRIVATE ${IBVERBS})
