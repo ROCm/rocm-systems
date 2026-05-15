@@ -187,7 +187,7 @@ public:
     }
     std::unique_ptr<Instruction> get(uint64_t ld_addr)
     {
-        if (!decoder || ld_addr < load_addr) return nullptr;
+        if (!decoder || ld_addr <= load_addr) return nullptr;
 
         uint64_t voffset = ld_addr - load_addr;
         auto faddr = decoder->va2fo(voffset);

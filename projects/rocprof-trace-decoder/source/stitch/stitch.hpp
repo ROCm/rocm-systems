@@ -107,7 +107,14 @@ public:
 
     bool try_match_swapped(const Instruction& first, const Instruction& second, const assemblyLine& line)
     {
-        return second.category == line.cat && first.category == getcode(line.next)->cat;
+        try
+        {
+            return second.category == line.cat && first.category == getcode(line.next)->cat;
+        }
+        catch (std::exception&)
+        {
+            return false;
+        }
     }
 
     std::vector<assemblyLinePtr>& code;
