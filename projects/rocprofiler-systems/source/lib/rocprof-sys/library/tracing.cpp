@@ -5,6 +5,7 @@
 #include "core/concepts.hpp"
 #include "core/config.hpp"
 #include "core/state.hpp"
+#include "core/track_registry.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 #include <cstdint>
@@ -44,18 +45,46 @@ bool debug_pop  = tim::get_env("ROCPROFSYS_DEBUG_POP", false) || get_debug_env()
 bool debug_mark = tim::get_env("ROCPROFSYS_DEBUG_MARK", false) || get_debug_env();
 bool debug_user = tim::get_env("ROCPROFSYS_DEBUG_USER_REGIONS", false) || get_debug_env();
 
+namespace
+{
+// Process-global default registry used when no engine has set an active
+// registry on the calling thread. Slice A keeps this for backward-compat;
+// slice B's engine sets a real registry via set_active_track_registry() at
+// engine.start(), and this default becomes vestigial.
+track_registry&
+process_default_registry()
+{
+    static auto _v = track_registry{};
+    return _v;
+}
+
+// Returns the active registry, lazily seeding the calling thread to the
+// process-global default if no registry is set. Hot-path callers
+// (get_perfetto_track_uuids / _mutex) invoke this and pay the seed cost
+// exactly once per thread per process.
+track_registry&
+active_or_default_registry()
+{
+    auto* reg = get_active_track_registry();
+    if(reg == nullptr)
+    {
+        reg = &process_default_registry();
+        set_active_track_registry(reg);
+    }
+    return *reg;
+}
+}  // namespace
+
 std::unordered_map<hash_value_t, std::string>&
 get_perfetto_track_uuids()
 {
-    static auto _v = std::unordered_map<hash_value_t, std::string>{};
-    return _v;
+    return active_or_default_registry().map();
 }
 
 std::mutex&
 get_perfetto_track_uuids_mutex()
 {
-    static auto _mtx = std::mutex{};
-    return _mtx;
+    return active_or_default_registry().mutex();
 }
 
 void
