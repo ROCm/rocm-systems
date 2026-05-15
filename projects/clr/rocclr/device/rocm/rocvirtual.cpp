@@ -1577,17 +1577,11 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
 
   uint8_t* queueBase = static_cast<uint8_t*>(gpu_queue_->base_address);
 
-  // Reserve ALL slots with a single wptr bump, then submit in kPeriod-sized chunks.
-  // Per-chunk: yield if the queue is full (handles graphs larger than the queue), then
-  // memcpy + per-packet fixups + headers + doorbell.  For graphs that fit in the queue
-  // the yield never fires.
-  uint64_t startIndex = Hsa::queue_add_write_index_screlease(gpu_queue_, numPackets);
+  // Reserve all slots upfront with a single atomic bump.
+  uint64_t globalStart = Hsa::queue_add_write_index_screlease(gpu_queue_, numPackets);
   setFenceDirty(true);
 
   // Update cached fence state from the last packet's release scope.
-  // Clear fence dirty if the last packet has system-scope release, matching
-  // the single-dispatch path in dispatchGenericAqlPacket (set dirty on reserve,
-  // then conditionally clear if system scope).
   auto expected_fence_state =
       extractAqlBits(lastHeader, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
                      HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE);
@@ -1598,16 +1592,17 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
 
   const size_t kPeriod = DEBUG_HIP_GRAPH_BATCH_SIZE;
   auto* first_loc = reinterpret_cast<uint32_t*>(
-      queueBase + (startIndex & queueMask) * kPacketSize);
+      queueBase + (globalStart & queueMask) * kPacketSize);
 
   for (size_t chunkStart = 0; chunkStart < numPackets; ) {
     const size_t chunkEnd  = std::min(chunkStart + kPeriod, numPackets);
     const size_t thisChunk = chunkEnd - chunkStart;
     const bool isFirstChunk = (chunkStart == 0);
     const bool isLastChunk  = (chunkEnd == numPackets);
+    const uint64_t startIndex = globalStart;
 
     // Yield until this chunk's physical slots are free.
-    while (((startIndex + chunkEnd - 1) - Hsa::queue_load_read_index_scacquire(gpu_queue_)) >=
+    while (((globalStart + chunkEnd - 1) - Hsa::queue_load_read_index_scacquire(gpu_queue_)) >=
            sw_queue_size) {
       amd::Os::yield();
     }
@@ -1724,8 +1719,9 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
 
   hasPendingDispatch_ = true;
 
+  const uint64_t lastSlotIdx = globalStart + numPackets - 1;
   auto* finalLastSlot = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
-      queueBase + ((startIndex + numPackets - 1) & queueMask) * kPacketSize);
+      queueBase + (lastSlotIdx & queueMask) * kPacketSize);
 
   // Skip the pending dispatch only when both conditions are met: a completion
   // signal tracks the last packet and the fence is already clean (system scope).
@@ -1733,7 +1729,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
     hasPendingDispatch_ = false;
   }
 
-  TrackQueueProgress(*finalLastSlot, startIndex + numPackets - 1, pre_patched);
+  TrackQueueProgress(*finalLastSlot, lastSlotIdx, pre_patched);
 
   if (blocking) {
     LogInfo("Running serialized as blocking is requested");
@@ -2116,9 +2112,10 @@ bool VirtualGPU::create() {
   void* md_rb = nullptr;
   SetGpuQueue(roc_device_.acquireQueue(queue_size, cooperative_, cuMask_, priority_, false,
                                        dedicated_queue_, nullptr, nullptr, &md_rb), md_rb);
-  if (!gpu_queue_) return false;
+  if (!gpu_queue_) { fprintf(stderr, "[DIAG] VirtualGPU::create: acquireQueue failed\n"); fflush(stderr); return false; }
 
   if (!managed_kernarg_buffer_.Create(Device::MemorySegment::kKernArg)) {
+    fprintf(stderr, "[DIAG] VirtualGPU::create: managed_kernarg_buffer_ failed\n"); fflush(stderr);
     LogError("Couldn't allocate arguments/signals for the queue");
     return false;
   }
@@ -2126,6 +2123,7 @@ bool VirtualGPU::create() {
   device::BlitManager::Setup blitSetup;
   blitMgr_ = new KernelBlitManager(*this, blitSetup);
   if ((nullptr == blitMgr_) || !blitMgr_->create(roc_device_)) {
+    fprintf(stderr, "[DIAG] VirtualGPU::create: BlitManager failed\n"); fflush(stderr);
     LogError("Could not create BlitManager!");
     return false;
   }
@@ -2152,6 +2150,7 @@ bool VirtualGPU::create() {
   // Allocate signal tracker for ROCr copy queue
   tracking_created_ = Barriers().Create();
   if (!tracking_created_) {
+    fprintf(stderr, "[DIAG] VirtualGPU::create: Barriers().Create() failed\n"); fflush(stderr);
     LogError("Could not create signal for copy queue!");
     return false;
   }

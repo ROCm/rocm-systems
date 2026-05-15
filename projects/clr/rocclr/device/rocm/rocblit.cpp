@@ -3245,7 +3245,9 @@ bool KernelBlitManager::resetContSignalBuffer(uint64_t* deviceVaBuf, uint32_t co
   amd::Command* saved_cmd = gpu().command();
   gpu().SetCommand(override_cmd);
 
-  constexpr bool kAttachSignal = true;
+  // Don't attach a runtime-pool signal in capture mode — the caller patches
+  // completion_signal directly into the captured AQL packet after capture.
+  constexpr bool kAttachSignal = false;
   bool result = gpu().submitKernelInternal(ndrange, *kernels_[blitType], parameters,
                                            /*event_handle=*/nullptr,
                                            /*sharedMemBytes=*/0,
@@ -3256,6 +3258,17 @@ bool KernelBlitManager::resetContSignalBuffer(uint64_t* deviceVaBuf, uint32_t co
   gpu().SetCommand(saved_cmd);
   releaseArguments(parameters);
   return result;
+}
+
+// ================================================================================================
+size_t KernelBlitManager::ResetContKernargSize() const {
+  const auto* gpuKernel = kernels_[ResetContSignalBuffer]->getDeviceKernel(gpu().dev());
+  return gpuKernel->KernargSegmentByteSize();
+}
+
+size_t KernelBlitManager::ResetContKernargAlignment() const {
+  const auto* gpuKernel = kernels_[ResetContSignalBuffer]->getDeviceKernel(gpu().dev());
+  return gpuKernel->KernargSegmentAlignment();
 }
 
 // ================================================================================================

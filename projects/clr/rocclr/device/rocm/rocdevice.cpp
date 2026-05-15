@@ -3890,6 +3890,7 @@ GraphSignalPool::~GraphSignalPool() {
     Hsa::memory_pool_free(cont_buffer_);
     cont_buffer_ = nullptr;
   }
+
 }
 
 // ================================================================================================
@@ -4037,12 +4038,14 @@ bool Device::ResetGraphSignalPool(device::VirtualDevice* vdev, GraphSignalPool* 
 }
 
 // ================================================================================================
-// Capture the reset-kernel AQL packet (with kernargs in the graph pool) at
-// instantiate time so it can be prepended to stream-0's flat buffer.
+// Capture the reset-kernel AQL packet at instantiate time.
 // captureCmd must already have setPktCapturingState(true, ...) called before
 // this function is invoked.  On success captureCmd->gpuPackets_[0] holds the
 // 64-byte dispatch packet; completion_signal is left zero — the caller writes
 // reset_signal_->signal_ at flat-buffer offset 56 after rebuildFlatBuffer.
+//
+// Kernargs are allocated from the graph's pre-sized kernarg pool via AllocKernArg.
+// GetKernelArgSizeForGraph reserves kResetKernelKernargSize bytes for this kernel.
 bool Device::CaptureResetKernelPacket(GraphSignalPool* pool, amd::Command* captureCmd) const {
   if (pool == nullptr || captureCmd == nullptr) return false;
 
@@ -4051,6 +4054,7 @@ bool Device::CaptureResetKernelPacket(GraphSignalPool* pool, amd::Command* captu
   if (cont_buf == nullptr || cont_cnt == 0) return false;
 
   auto& blit = static_cast<KernelBlitManager&>(xferQueue()->blitMgr());
+
   return blit.resetContSignalBuffer(cont_buf, cont_cnt,
                                     /*resetValue=*/kInitSignalValueOne,
                                     captureCmd);

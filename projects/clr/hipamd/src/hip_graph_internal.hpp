@@ -6,9 +6,11 @@
 
 #pragma once
 #include <algorithm>
+#include <chrono>
 #include <queue>
 #include <stack>
 #include <iostream>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -243,6 +245,9 @@ class GraphNode : public hipGraphNodeDOTAttribute {
                                   std::vector<uint8_t*>* batchPackets = nullptr,
                                   std::vector<const std::string*>* batchKernelNames = nullptr) {
     auto capture_stream = hip::getNullStream(g_devices[dev_id_]->devices()[0]->context(), false);
+    if (capture_stream == nullptr) {
+      return hipErrorInvalidDevice;
+    }
     hipError_t status = CreateCommand(capture_stream);
     if (status != hipSuccess) {
       return status;
@@ -1122,21 +1127,22 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   std::unordered_map<int, SegmentBatch> segmentBatches_;
 
   struct SyncPlan {
-    int num_segments = 0;   // total segment count (used for bounds checks)
-    int num_hw_events = 0;  // HW event slots to allocate (one per ncs=true segment)
+    int num_segments  = 0;  //!< total segment count (bounds check reference)
+    int num_hw_events = 0;  //!< HW event slots allocated (one per leaf parallel segment)
 
-    // Dense index into segment_hw_events for each segment.
-    // seg_to_hw_event[seg_id] == -1  ->  no completion signal emitted.
-    // seg_to_hw_event[seg_id] >= 0  ->  index into the compact hw_events vector.
-    std::vector<int> seg_to_hw_event;
-
-    // Stable ProfilingSignal* per HW event, allocated at instantiate time.
-    // Size == num_hw_events; indexed by seg_to_hw_event[seg_id].
+    //! seg_to_hw_event[seg_id]: -1 = no completion signal; >= 0 = index into segment_hw_events.
+    std::vector<int>   seg_to_hw_event;
+    //! Stable ProfilingSignal* per HW event slot; indexed via seg_to_hw_event.
     std::vector<void*> segment_hw_events;
 
     std::vector<amd::Device::HwEventPatch> patch_list;
-    std::vector<uint8_t*> barrier_packets;
-    std::vector<int> leaf_segment_ids;
+    std::vector<uint8_t*>                  barrier_packets;
+    std::vector<int>                       leaf_segment_ids;
+
+    //! Pointers to dep_signal[0].handle (AQL byte offset 8) in the flat buffer of
+    //! each non-stream-0 segment's first packet.  Patched at every hipGraphLaunch
+    //! with the reset kernel's per-launch completion signal handle.
+    std::vector<uint64_t*> nonstream0_dep_signal_ptrs;
 
     ~SyncPlan() {
       for (auto* p : barrier_packets) { delete[] p; }
@@ -1157,22 +1163,14 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   amd::Device* persistent_pool_device_ = nullptr;  //!< Device that owns persistent_pool_
 
   //! Dedicated completion signal for the pre-baked reset kernel.
-  //! CPU re-arms to 1 before each launch; GPU reset kernel drives it to 0.
-  //! Internal-stream reset-wait barriers (pre-baked in flat buffers) block on it.
-  //! Owned by persistent_pool_ — never freed here.
+  //! Non-null when graph has parallel (non-stream-0) segments; guards the
+  //! dep-signal barrier prepend in CaptureAndFormPacketsForGraph.
+  //! Freed in DestroyPersistentPool.
   amd::roc::ProfilingSignal* reset_signal_ = nullptr;
 
-  //! Drop persistent_pool_ in ~GraphExec. Caller must have already finished
-  //! every parallel stream so no in-flight AQL packet still references its
-  //! signals.
-  void DestroyPersistentPool() {
-    if (persistent_pool_ != nullptr && persistent_pool_device_ != nullptr) {
-      persistent_pool_device_->DestroyGraphSignalPool(persistent_pool_);
-      persistent_pool_ = nullptr;
-      reset_signal_ = nullptr;        // owned by pool, not freed here
-      sync_plan_.segment_hw_events.clear();
-    }
-  }
+  //! Release persistent_pool_ and reset_signal_.  Must be called only after
+  //! all in-flight launches have retired (no AQL packets still reference them).
+  void DestroyPersistentPool();
 };
 
 class ChildGraphNode : public GraphNode, public GraphExec {

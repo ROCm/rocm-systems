@@ -309,7 +309,6 @@ class Command : public Event {
   bool packetCapturing_ = false;       //!< Flag to enable/disable graph gpu packet capture
   std::vector<uint8_t*>* gpuPackets_;  //!< GPU packets captured when graph capturing is enabled
   GraphKernelArgManager* graphKernArgMgr_ = nullptr;  //!< KernelMgr for graph
-  address kernArgOffset_ = nullptr;  //!< KernelArg buffer to used when graph capturing is enabled
   const std::string** capturedKernelName_ = nullptr;  //!< Kernel under capture
   roc::GraphSignalPool* graph_signal_pool_ = nullptr;  //!< Graph-owned signal pool for this command
  protected:

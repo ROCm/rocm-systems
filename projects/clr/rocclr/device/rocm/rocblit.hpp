@@ -567,6 +567,12 @@ class KernelBlitManager : public DmaBlitManager {
                              uint64_t resetValue = 1,
                              amd::Command* override_cmd = nullptr) const;
 
+  //! Returns the kernarg segment size (bytes) for the resetContSignalBuffer
+  //! kernel.  Used by CaptureResetKernelPacket to pre-allocate a stable
+  //! kernarg buffer that bypasses the graph kernarg manager.
+  size_t ResetContKernargSize() const;
+  size_t ResetContKernargAlignment() const;
+
   virtual std::recursive_mutex* lockXfer() const { return &lockXferOps_; }
 
   virtual bool initHeap(device::Memory* heap_to_initialize, device::Memory* initial_blocks,

@@ -981,6 +981,23 @@ bool GraphExec::isGraphExecValid(GraphExec* pGraphExec) {
 }
 
 // ================================================================================================
+void GraphExec::DestroyPersistentPool() {
+  if (persistent_pool_ != nullptr && persistent_pool_device_ != nullptr) {
+    persistent_pool_device_->DestroyGraphSignalPool(persistent_pool_);
+    persistent_pool_ = nullptr;
+    sync_plan_.segment_hw_events.clear();
+  }
+  if (reset_signal_ != nullptr) {
+    if (reset_signal_->signal_.handle != 0) {
+      amd::roc::Hsa::signal_destroy(reset_signal_->signal_);
+      reset_signal_->signal_.handle = 0;  // prevent double-destroy in ~ProfilingSignal
+    }
+    delete reset_signal_;
+    reset_signal_ = nullptr;
+  }
+}
+
+// ================================================================================================
 hipError_t GraphExec::CreateStreams(uint32_t num_streams, int devId) {
   std::scoped_lock lock(graphExecStreamCreateLock_);
 
@@ -1023,6 +1040,7 @@ hipError_t GraphExec::CreateStreams(uint32_t num_streams, int devId) {
                                   hipStreamNonBlocking);
 
     if (!stream->Create()) {
+      fprintf(stderr, "[DIAG] CreateStreams: stream->Create() failed i=%u devId=%d\n", i, devId); fflush(stderr);
       ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Failed to create stream %u for device %d",
               i, devId);
       hip::Stream::Destroy(stream);
@@ -1184,6 +1202,17 @@ hipError_t GraphExec::Init() {
             "[hipGraph] Init: %zu device(s), %u total stream(s) (per-device cap: %u)",
             max_streams_dev_.size(), total_streams, DEBUG_HIP_FORCE_GRAPH_QUEUES);
 
+    // Ensure each device's blit program is initialized before creating parallel streams.
+    // CreateStreams creates VirtualGPUs which need blitProgram_ to be non-null; calling
+    // xferQueue() here initializes it as a side effect if not already done.
+    for (auto const& [dev_id, num_streams] : max_streams_dev_) {
+      if (num_streams > 0) {
+        auto* rocDev = static_cast<amd::roc::Device*>(g_devices[dev_id]->devices()[0]);
+        if (rocDev->blitProgram() == nullptr) {
+          rocDev->xferQueue();  // initializes blitProgram_ as a side effect
+        }
+      }
+    }
     // Create parallel streams for each device based on the capped requirements.
     for (auto const& [dev_id, num_streams] : max_streams_dev_) {
       if (num_streams > 0) {
@@ -1481,131 +1510,84 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
   auto* device =
       static_cast<amd::roc::Device*>(g_devices[instantiateDeviceId_]->devices()[0]);
 
-  // 1. Create the persistent signal pool (num_hw_events segment signals +
-  //    1 extra slot for reset_signal_) and populate sync_plan_.segment_hw_events.
-  //    gpu_count = num_hw_events + 1 so Acquire() for reset_signal_ doesn't grow.
-  if (sync_plan_.num_hw_events > 0 || true) {  // always create pool for reset kernel
-    const size_t gpu_count =
-        static_cast<size_t>(sync_plan_.num_hw_events) + 1;  // +1 for reset_signal_
+  // 1. Create the persistent signal pool (one slot per segment that needs a
+  //    completion signal).  Always create it when there are parallel streams so
+  //    the reset kernel has a pool to write through; the pool is also used for
+  //    the dep-signal barriers prepended to non-stream-0 segments.
+  {
+    const size_t hw_count = static_cast<size_t>(sync_plan_.num_hw_events);
     persistent_pool_ =
-        device->CreateGraphSignalPool(gpu_count,
-                                      static_cast<size_t>(sync_plan_.num_hw_events),
-                                      sync_plan_.segment_hw_events);
+        device->CreateGraphSignalPool(hw_count, hw_count, sync_plan_.segment_hw_events);
     if (persistent_pool_ == nullptr) {
       ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
-              "[hipGraph] CaptureAndFormPacketsForGraph: failed to create signal pool");
+              "[hipGraph] CaptureAndFormPacketsForGraph: CreateGraphSignalPool failed");
       return hipErrorOutOfMemory;
     }
     persistent_pool_device_ = device;
 
-    // 2. Acquire dedicated reset signal (the +1 slot pre-allocated above).
-    reset_signal_ =
-        static_cast<amd::roc::ProfilingSignal*>(persistent_pool_->Acquire());
-    if (reset_signal_ == nullptr) {
+    // 2. Allocate a CPU+GPU-accessible HSA signal used as a guard for
+    //    dep_signal[0] in non-stream-0 barriers.  Its handle is stored here
+    //    only to drive the logic in step 3 below; the actual per-launch
+    //    completion signal comes from the runtime's Barriers() pool.
+    reset_signal_ = new amd::roc::ProfilingSignal();
+    if (amd::roc::Hsa::signal_create(0, 0, nullptr, &reset_signal_->signal_) !=
+        HSA_STATUS_SUCCESS) {
       ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
-              "[hipGraph] CaptureAndFormPacketsForGraph: failed to acquire reset signal");
+              "[hipGraph] CaptureAndFormPacketsForGraph: hsa_signal_create failed");
+      delete reset_signal_;
+      reset_signal_ = nullptr;
       return hipErrorOutOfMemory;
     }
-    // reset_signal_ starts at 0; CPU will store 1 before each launch.
-    amd::roc::Hsa::signal_silent_store_relaxed(reset_signal_->signal_, 0);
   }
 
-  // 3. Capture the reset kernel AQL packet for stream-0.
-  //    The packet is produced by resetContSignalBuffer in capture mode:
-  //    kernargs are stored in the graph kernarg pool (via captureCmd),
-  //    and the 64-byte packet is pushed to captureCmd.gpuPackets_.
-  //    completion_signal is left zero here; it is patched below.
-  // std::vector<uint8_t*> resetPktVec;
-  // if (persistent_pool_ != nullptr && reset_signal_ != nullptr) {
-  //   GraphCaptureCommand captureCmd;
-  //   const std::string* capturedKernelName = nullptr;
-  //   captureCmd.setPktCapturingState(true, &resetPktVec, GetKernelArgManager(),
-  //                                   &capturedKernelName);
-  //   if (!device->CaptureResetKernelPacket(persistent_pool_, &captureCmd)) {
-  //     ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
-  //             "[hipGraph] CaptureAndFormPacketsForGraph: reset kernel capture failed");
-  //     // Non-fatal: fall back to not having pre-baked reset. Pool and signals
-  //     // are still valid; EnqueueSegmentedGraph will handle the fallback.
-  //     resetPktVec.clear();
-  //   }
-  // }
-
-  // 4. Find the stream-0 root segment (level 0, stream_id == 0) to prepend
-  //    the reset kernel packet to.  Also prepend reset-wait barriers to every
-  //    non-stream-0 root segment so they block until the reset kernel retires.
-  int stream0_root_seg_id = -1;
-  // if (!resetPktVec.empty() && reset_signal_ != nullptr) {
-  //   // Locate the first level-0 segment assigned to stream_id == 0.
-  //   auto lvl0_it = segments_per_level_.find(0);
-  //   if (lvl0_it != segments_per_level_.end()) {
-  //     for (int sid : lvl0_it->second) {
-  //       if (sid >= 0 && sid < static_cast<int>(segments_.size()) &&
-  //           segments_[sid].stream_id == 0) {
-  //         stream0_root_seg_id = sid;
-  //         break;
-  //       }
-  //     }
-  //   }
-
-    // Prepend reset kernel packet to stream-0's first batch.
-    // if (stream0_root_seg_id >= 0) {
-    //   auto it = segmentBatches_.find(stream0_root_seg_id);
-    //   if (it != segmentBatches_.end()) {
-    //     auto& firstBatch = it->second.packet_batches[0];
-    //     firstBatch.dispatchPackets.insert(firstBatch.dispatchPackets.begin(),
-    //                                       resetPktVec[0]);
-    //     static const std::string* const kBarrierKernelNamePtr = nullptr;
-    //     firstBatch.dispatchKernelNames.insert(
-    //         firstBatch.dispatchKernelNames.begin(), kBarrierKernelNamePtr);
-    //     // Adjust existing node range start indices to account for the prepended packet.
-    //     for (auto& nodeRange : firstBatch.nodeRanges) {
-    //       nodeRange.startIndex += 1;
-    //     }
-    //   }
-    // }
-
-  // 5. Prepend a reset-wait barrier (dep_signal[0] = reset_signal_->signal_)
-  //    to the first batch of every non-stream-0 segment so it blocks until
-  //    the live-dispatched reset kernel retires.  dep_signals survive
-  //    rebuildFlatBuffer (only completion_signal at offset 56 is zeroed).
+  // 3. Prepend a dep-signal barrier-and packet to the first batch of every
+  //    non-stream-0 segment.  dep_signal[0].handle is left as 0 here and
+  //    patched at each hipGraphLaunch with the reset kernel's per-launch
+  //    completion signal via nonstream0_dep_signal_ptrs.
   if (reset_signal_ != nullptr) {
     for (auto& [seg_id, segBatch] : segmentBatches_) {
       if (seg_id < 0 || seg_id >= static_cast<int>(segments_.size())) continue;
-      if (segments_[seg_id].stream_id == 0) continue;  // stream-0: natural ordering
+      if (segments_[seg_id].stream_id == 0) continue;
 
       if (segBatch.packet_batches.empty()) {
         segBatch.packet_batches.emplace_back();
       }
       auto& firstBatch = segBatch.packet_batches[0];
 
-      uint8_t* rwb = device->CreateBarrierPacket();
-      auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(rwb);
-      pkt->dep_signal[0] = reset_signal_->signal_;  // survives flat copy
-      sync_plan_.barrier_packets.push_back(rwb);
-
-      firstBatch.dispatchPackets.insert(firstBatch.dispatchPackets.begin(), rwb);
-      static const std::string* const kBarrierNameNull = nullptr;
-      firstBatch.dispatchKernelNames.insert(
-          firstBatch.dispatchKernelNames.begin(), kBarrierNameNull);
+      uint8_t* barrier = device->CreateBarrierPacket();
+      sync_plan_.barrier_packets.push_back(barrier);
+      firstBatch.dispatchPackets.insert(firstBatch.dispatchPackets.begin(), barrier);
+      firstBatch.dispatchKernelNames.insert(firstBatch.dispatchKernelNames.begin(), nullptr);
       for (auto& nodeRange : firstBatch.nodeRanges) {
         nodeRange.startIndex += 1;
       }
     }
   }
 
-  // -----------------------------------------------------------------------
-  // Build flat buffers now that all dispatchPackets are final.
-  // Also build pktToFlat so patch_list flat_packet pointers can be resolved.
-  // -----------------------------------------------------------------------
+  // Build flat buffers now that all dispatchPackets are final, and build
+  // pktToFlat so patch_list flat_packet pointers can be resolved.
+  // For non-stream-0 first batches, also record a pointer to dep_signal[0].handle
+  // (byte offset 8 of the first/barrier packet) so it can be patched at launch.
+  static constexpr size_t kDepSig0HandleOffset = 8;  // offset of dep_signal[0].handle in AQL packet
   std::unordered_map<const uint8_t*, uint8_t*> pktToFlat;
   for (auto& [seg_id, segBatch] : segmentBatches_) {
-    for (auto& batch : segBatch.packet_batches) {
-      if (!batch.dispatchPackets.empty()) {
-        batch.rebuildFlatBuffer();
-        for (size_t i = 0; i < batch.dispatchPackets.size(); ++i) {
-          pktToFlat[batch.dispatchPackets[i]] =
-              batch.flatPacketData.data() + i * PacketBatch::kAqlPktSize;
-        }
+    for (size_t bIdx = 0; bIdx < segBatch.packet_batches.size(); ++bIdx) {
+      auto& batch = segBatch.packet_batches[bIdx];
+      if (batch.dispatchPackets.empty()) continue;
+
+      batch.rebuildFlatBuffer();
+      for (size_t i = 0; i < batch.dispatchPackets.size(); ++i) {
+        pktToFlat[batch.dispatchPackets[i]] =
+            batch.flatPacketData.data() + i * PacketBatch::kAqlPktSize;
+      }
+
+      // Record the dep_signal[0].handle pointer for the barrier prepended to each
+      // non-stream-0 segment's first batch (step 3 above).
+      if (bIdx == 0 && reset_signal_ != nullptr &&
+          seg_id >= 0 && seg_id < static_cast<int>(segments_.size()) &&
+          segments_[seg_id].stream_id != 0) {
+        sync_plan_.nonstream0_dep_signal_ptrs.push_back(
+            reinterpret_cast<uint64_t*>(batch.flatPacketData.data() + kDepSig0HandleOffset));
       }
     }
   }
@@ -1618,38 +1600,19 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
     }
   }
 
-  // 6. Patch reset kernel's completion_signal in the flat buffer.
-  //    rebuildFlatBuffer zeroed offset 56; write reset_signal_->signal_ there.
-  // static constexpr size_t kSigOff = 56;
-  // if (!resetPktVec.empty() && stream0_root_seg_id >= 0 && reset_signal_ != nullptr) {
-  //   auto it = segmentBatches_.find(stream0_root_seg_id);
-  //   if (it != segmentBatches_.end() && !it->second.packet_batches.empty()) {
-  //     auto& flat = it->second.packet_batches[0].flatPacketData;
-  //     if (flat.size() >= kSigOff + sizeof(hsa_signal_t)) {
-  //       memcpy(flat.data() + kSigOff, &reset_signal_->signal_, sizeof(hsa_signal_t));
-  //     }
-  //   }
-  // }
-
-  // 7. Bake completion signals for all segments that need them (ApplyHwEventPatches
+  // 5. Bake completion signals for all segments that need them (ApplyHwEventPatches
   //    uses dense seg_to_hw_event indices into sync_plan_.segment_hw_events).
   if (!sync_plan_.patch_list.empty()) {
     device->ApplyHwEventPatches(sync_plan_.patch_list, sync_plan_.segment_hw_events);
   }
 
-  // Diagnostic: pool and reset signal state at instantiate time.
-  ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-          "[hipGraph] instantiate: pool=%p reset_sig=0x%zx "
-          "num_hw=%d stream0_seg=%d",
+  ClPrint(amd::LOG_DEBUG, amd::LOG_CODE,
+          "[hipGraph] instantiate: pool=%p reset_sig=0x%zx num_hw_events=%d "
+          "nonstream0_barriers=%zu",
           (void*)persistent_pool_,
           reset_signal_ ? reset_signal_->signal_.handle : 0UL,
-          sync_plan_.num_hw_events, stream0_root_seg_id);
-  if (persistent_pool_) {
-    ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-            "[hipGraph] pool: cont_buf=0x%zx cont_cnt=%u",
-            reinterpret_cast<uintptr_t>(persistent_pool_->ContBuffer()),
-            persistent_pool_->ContBufferCount());
-  }
+          sync_plan_.num_hw_events,
+          sync_plan_.nonstream0_dep_signal_ptrs.size());
 
   return status;
 }
@@ -1678,6 +1641,7 @@ hipError_t GraphExec::CaptureAQLPackets() {
 
     const size_t totalPoolSize = kernArgSize + kKernArgChunkSize;
     if (!kernArgManager_->AllocGraphKernargPool(totalPoolSize, g_devices[deviceId]->devices()[0])) {
+      fprintf(stderr, "[DIAG] AllocGraphKernargPool failed size=%zu devId=%d\n", totalPoolSize, deviceId); fflush(stderr);
       ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
               "[hipGraph] Failed to allocate kernel argument pool of size %zu for device %d",
               totalPoolSize, deviceId);
@@ -1904,66 +1868,6 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
     *out_status = hipSuccess;
   }
 
-  // Pool and signals are pre-allocated and pre-patched at instantiate time
-  // (CaptureAndFormPacketsForGraph).  EnqueueSegmentedGraph:
-  //   1. Re-arms reset_signal_ to 1 (CPU store).
-  //   2. Dispatches the reset kernel live on launch_stream to write 1 into
-  //      every pool signal via the GPU (signals are GPU-only; CPU cannot).
-  //   3. Captures the reset kernel's completion signal and enqueues an
-  //      ordering Marker on every internal stream that waits on it — this
-  //      prevents internal-stream dep-barriers from firing on stale 0 values
-  //      from the previous launch before the current reset completes.
-  //   4. Dispatches the pre-built flat packets for every segment.
-  //   5. Synchronizes leaf parallel streams back to launch_stream.
-
-  // Re-arm reset_signal_ (CPU store) before the GPU reset kernel runs.
-  if (reset_signal_ != nullptr) {
-    amd::roc::Hsa::signal_store_relaxed(reset_signal_->signal_, 1);
-  }
-
-  // Live-dispatch reset kernel on launch_stream.
-  void* gpu_reset_hw_event = nullptr;
-  if (persistent_pool_ != nullptr) {
-    auto* roc_device =
-        static_cast<amd::roc::Device*>(g_devices[instantiateDeviceId_]->devices()[0]);
-    bool did_gpu_reset = false;
-    if (!roc_device->ResetGraphSignalPool(launch_stream->vdev(), persistent_pool_,
-                                          false, &did_gpu_reset)) {
-      ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
-              "[hipGraph] EnqueueSegmentedGraph: ResetGraphSignalPool failed");
-      if (out_status != nullptr) *out_status = hipErrorUnknown;
-      return nullptr;
-    }
-    if (did_gpu_reset) {
-      // Pull the reset kernel's completion signal so ordering markers on
-      // internal streams can wait on it before executing their first barrier.
-      auto* gpu = static_cast<amd::roc::VirtualGPU*>(launch_stream->vdev());
-      gpu_reset_hw_event = gpu->Barriers().GetLastSignal();
-    }
-    ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-            "[hipGraph] launch: live reset dispatched (gpu=%d) pool cont_buf=0x%zx cnt=%u",
-            (int)did_gpu_reset,
-            reinterpret_cast<uintptr_t>(persistent_pool_->ContBuffer()),
-            persistent_pool_->ContBufferCount());
-  }
-
-  // Enqueue one ordering Marker per internal stream so that each stream's
-  // dep-barrier does not see stale 0 values from the prior launch.  The
-  // Marker waits on the reset kernel's completion signal; once the reset
-  // retires all pool signals are back at 1 and the dep-barriers are safe.
-  // if (gpu_reset_hw_event != nullptr) {
-  //   for (auto* s : streams) {
-  //     if (s == launch_stream) continue;
-  //     auto* marker = new amd::Marker(*s, kMarkerDisableFlush, {});
-  //     if (marker != nullptr) {
-  //       marker->addDepHwEvent(gpu_reset_hw_event);
-  //       marker->enqueue();
-  //       marker->release();
-  //     }
-  //   }
-  // }
-
-  // Resolve a segment's assigned hip::Stream* from its pre-computed stream_id.
   auto resolveSegmentStream = [&](const Segment& seg) -> hip::Stream* {
     if (!streams.empty()) {
       return streams[static_cast<size_t>(seg.stream_id) % streams.size()];
@@ -1973,18 +1877,34 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
 
   // Single AccumulateCommand anchors all segment dispatches.
   auto* graph_accumulate = new amd::AccumulateCommand(*launch_stream, {}, nullptr);
-  // graph_accumulate->SetGraphSignalPool(persistent_pool_);
 
-  // Dispatch pre-built flat packets level by level.
+  // Dispatch the reset kernel on launch_stream before any parallel segment.
+  // The per-launch completion signal it fires is patched into dep_signal[0] of
+  // every non-stream-0 segment's leading barrier-and packet, ensuring those
+  // segments block until the pool is reset (race-free across launches).
+  if (persistent_pool_ != nullptr && !sync_plan_.nonstream0_dep_signal_ptrs.empty()) {
+    auto* rocDev = static_cast<amd::roc::Device*>(launch_stream->GetDevice()->devices()[0]);
+    rocDev->ResetGraphSignalPool(launch_stream->vdev(), persistent_pool_,
+                                 /*prev_done=*/false, /*out_did_gpu_reset=*/nullptr);
+
+    auto* lastSig = static_cast<amd::roc::VirtualGPU*>(launch_stream->vdev())
+                        ->Barriers().GetLastSignal();
+    const hsa_signal_t reset_done = (lastSig != nullptr) ? lastSig->signal_
+                                                          : hsa_signal_t{0};
+    for (uint64_t* dep_ptr : sync_plan_.nonstream0_dep_signal_ptrs) {
+      *dep_ptr = reset_done.handle;
+    }
+    ClPrint(amd::LOG_DEBUG, amd::LOG_CODE,
+            "[hipGraph] reset kernel dispatched, completion_sig=0x%zx", reset_done.handle);
+  }
+
   for (int level = 0; level <= max_dependency_level_; ++level) {
     auto level_it = segments_per_level_.find(level);
     if (level_it == segments_per_level_.end()) continue;
 
     for (int segment_id : level_it->second) {
       const auto& segment = segments_[segment_id];
-      hip::Stream* current_stream = resolveSegmentStream(segment);
-
-      status = EnqueueSegment(segment, current_stream, graph_accumulate);
+      status = EnqueueSegment(segment, resolveSegmentStream(segment), graph_accumulate);
       if (status != hipSuccess) {
         graph_accumulate->release();
         if (out_status != nullptr) *out_status = status;
