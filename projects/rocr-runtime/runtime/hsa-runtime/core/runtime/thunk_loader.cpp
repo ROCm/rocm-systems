@@ -177,9 +177,8 @@ namespace core {
       HSAKMT_PFN(hsaKmtSetDispatchLog) =
           (HSAKMT_DEF(hsaKmtSetDispatchLog)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtSetDispatchLog");
       // Optional: only present in libhsakmt with KFD_IOC_PROFILER_DISPATCH_LOG
-      // support (KFD MINOR >= 20). Older thunks return NULL here; the caller
-      // (AqlQueue::SetProfiling) detects null and falls back to the legacy
-      // sentinel-scan path via hsaKmtSetQueueProfilingBuffer.
+      // support (KFD MINOR >= 20). Older thunks return NULL here; without it
+      // AqlQueue::SetProfiling(true) cannot complete dispatch-log registration.
 
       HSAKMT_PFN(hsaKmtDestroyQueue) = (HSAKMT_DEF(hsaKmtDestroyQueue)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtDestroyQueue");
       if (HSAKMT_PFN(hsaKmtDestroyQueue) == nullptr) goto LOAD_ERROR;

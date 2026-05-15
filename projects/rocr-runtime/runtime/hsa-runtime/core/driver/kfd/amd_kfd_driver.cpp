@@ -465,7 +465,7 @@ hsa_status_t KfdDriver::SetDispatchLog(HSA_QUEUEID queue_id, uint32_t gpu_id,
                                        void* wptr_addr, void* rptr_addr,
                                        void* signal_addr) const {
   // Same NOT_SUPPORTED-vs-transient distinction as SetQueueProfilingBuffer:
-  // missing thunk symbol = permanent (agent should fall back to legacy path);
+  // missing thunk symbol = profiling enable fails (no dispatch-log without it);
   // thunk-reported NOT_SUPPORTED = also permanent; everything else = transient.
   auto* loader = core::Runtime::runtime_singleton_->thunkLoader();
   if (loader->pfn_hsaKmtSetDispatchLog == nullptr)

@@ -230,10 +230,8 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
 
   /// @brief Get the per-queue MEC dispatch-record ring buffer info.
   /// @details Returns the ring buffer base and total size in bytes. The
-  /// substrate does NOT publish a host-visible firmware write pointer;
-  /// consumers must locate freshly-written records by scanning the ring
-  /// for a non-zero @c record_type sentinel (see
-  /// core/runtime/dispatch_log.cpp::drain_one_queue). Returns
+  /// drainer bounds the live region using the host-VA signal from
+  /// GetDispatchLogPointers (see core/runtime/dispatch_log.cpp). Returns
   /// HSA_STATUS_ERROR_NOT_INITIALIZED if profiling has not been enabled
   /// on this queue.
   hsa_status_t GetProfilingDispatchRecords(void** buffer_base,
@@ -255,9 +253,8 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   ///     only; FW does NOT enforce backpressure on overflow)
   ///
   /// All three pointers are nullptr if the new interface was not
-  /// enabled (kernel KFD MINOR < 20 or SetProfiling has not run yet).
-  /// Drainer code must check for null before dereferencing and fall
-  /// back to sentinel-scan.
+  /// enabled (kernel KFD MINOR < 20, missing libhsakmt thunk, ioctl
+  /// failure, or SetProfiling has not run yet).
   ///
   /// @returns HSA_STATUS_SUCCESS with non-null out-params if the new
   /// interface is active for this queue; HSA_STATUS_ERROR_NOT_INITIALIZED
@@ -463,9 +460,8 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   // adds the KFD_IOC_PROFILER_DISPATCH_LOG sub-op and a v9 MQD slot
   // pair (DW48/49) where the kernel programs the host VA the FW writes
   // the wptr to. Two more pointer pairs (rptr DW50/51, signal DW52/53)
-  // come along for the ride. When the new interface is unavailable
-  // (older kernel/FW) the dispatch_log_*_buf_ fields stay nullptr and
-  // the drainer falls back to sentinel scan over per-slot record_type.
+  // come along for the ride. Profiling enable fails if this path cannot
+  // be registered (no sentinel-scan fallback).
   void* dispatch_record_buffer_ = nullptr;
   uint32_t dispatch_record_buffer_size_ = 0;     // record count (NOT bytes)
 

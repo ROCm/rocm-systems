@@ -265,20 +265,17 @@ static inline void rocm_trace_emit_hsa_kernel_dispatch_record(
 }
 
 /* kernel_dispatch_drop emit helper. Emitted by the signal-bound drain
- * path (core/runtime/dispatch_log.cpp::drain_one_queue Path A) when the
- * host falls behind FW by more than ring_records: i.e. when
+ * path (core/runtime/dispatch_log.cpp::drain_one_queue) when the host
+ * falls behind FW by more than ring_records: i.e. when
  * (observed_signal - next_idx) > ring_records the older
  * ((observed_signal - next_idx) - ring_records) records have been
  * silently overwritten by FW (FW does not stall on full ring), and
  * the drainer emits this event with bytes_lost = the number of lost
  * records.
  *
- * NOT emitted on the sentinel-scan fallback path (Path B, older kernels
- * without the host-VA wptr/signal pointer set), because that path has
- * no out-of-band write-pointer to compare against. Also NOT emitted
- * during init-sync (next_idx == 0 first observation): the pre-zeroed
- * gap between slot 0 and the first FW-written slot is not a real
- * drop — those records never existed for this queue lifecycle.
+ * NOT emitted during init-sync (next_idx == 0 first observation): the
+ * pre-zeroed gap between slot 0 and the first FW-written slot is not a
+ * real drop — those records never existed for this queue lifecycle.
  *
  * Per-queue ENABLE failures still use stderr WARNING per spec §5;
  * those are configuration / substrate problems, not record-loss events.

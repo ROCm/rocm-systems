@@ -4754,11 +4754,9 @@ hsa_status_t HSA_API hsa_amd_queue_iterate(
  *
  * @param[out] buffer_size Size of the ring buffer in bytes.
  *
- * The substrate does NOT publish a host-visible firmware write pointer.
- * Consumers must locate freshly-written records by scanning the ring for
- * a non-zero @c record_type sentinel; see
- * core/runtime/dispatch_log.cpp::drain_one_queue for the canonical
- * sentinel-scan implementation.
+ * The host bounds the live region using the per-queue signal counter
+ * registered with KFD (see AqlQueue::GetDispatchLogPointers and
+ * core/runtime/dispatch_log.cpp::drain_one_queue).
  *
  * @retval ::HSA_STATUS_SUCCESS The ring buffer info has been returned.
  *

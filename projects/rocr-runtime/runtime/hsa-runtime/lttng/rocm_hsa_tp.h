@@ -205,16 +205,14 @@ LTTNG_UST_TRACEPOINT_EVENT(
     )
 )
 
-/* kernel_dispatch_drop: emitted by the signal-bound drain path (Path A
- * in core/runtime/dispatch_log.cpp::drain_one_queue) when the host
- * falls behind FW by more than ring_records, i.e. FW silently
- * overwrote unread records. bytes_lost is the count of lost records.
+/* kernel_dispatch_drop: emitted by the signal-bound drain path in
+ * core/runtime/dispatch_log.cpp::drain_one_queue when the host falls
+ * behind FW by more than ring_records, i.e. FW silently overwrote unread
+ * records. bytes_lost is the count of lost records.
  *
- * NOT emitted on the sentinel-scan fallback (Path B, older kernels
- * without host-VA wptr/signal pointers), nor during init-sync (the
- * pre-zeroed gap between slot 0 and the first FW-written slot is not
- * a real drop). Per-queue ENABLE failures are reported via stderr
- * WARNING per spec §5, not via this tracepoint. */
+ * NOT emitted during init-sync (the pre-zeroed gap between slot 0 and
+ * the first FW-written slot is not a real drop). Per-queue ENABLE failures
+ * are reported via stderr WARNING per spec §5, not via this tracepoint. */
 LTTNG_UST_TRACEPOINT_EVENT(
     rocm_hsa, kernel_dispatch_drop,
     LTTNG_UST_TP_ARGS(uint32_t, queue_id, uint64_t, bytes_lost),

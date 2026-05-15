@@ -1730,11 +1730,8 @@ hsa_status_t AqlQueue::SetProfiling(bool enabled) {
     // roll back the profiling-bit flip — so the queue is left exactly
     // as it was before the enable attempt.
     //
-    // The trailing nullptr argument is the libhsakmt WptrHostAddr param.
-    // It is intentionally unused — the substrate has no path to forward
-    // it to FW (see libhsakmt/src/queues.c::hsaKmtSetQueueProfilingBuffer
-    // and core/runtime/dispatch_log.cpp::drain_one_queue for the
-    // sentinel-scan design that replaces it).
+    // The trailing nullptr argument is the libhsakmt WptrHostAddr param;
+    // host-visible producer state is registered separately via SetDispatchLog.
     hsa_status_t buf_status = agent_->driver().SetQueueProfilingBuffer(
         queue_id_, dispatch_record_buffer_, num_records, nullptr);
     if (buf_status != HSA_STATUS_SUCCESS) {
@@ -1751,18 +1748,9 @@ hsa_status_t AqlQueue::SetProfiling(bool enabled) {
     Suspend();
     Resume();
 
-    // Phase-2: try to additionally register the new host-VA pointer set
-    // (wptr/rptr/signal) via KFD_IOC_PROFILER_DISPATCH_LOG. This is the
-    // path the FW reads on queue connect to publish per-record producer
-    // counters back to host-coherent memory, eliminating the need for
-    // sentinel-scan duplicate-detection in the drainer.
-    //
-    // Falls back gracefully on older kernel/libhsakmt: if the new thunk
-    // is missing or the ioctl returns -EINVAL/ENOTTY, the buffer remains
-    // registered via the legacy SetQueueProfilingBuffer + UPDATE_QUEUE
-    // path (which does not deliver wptr/signal updates). Any of the
-    // three pointers being null in queue_properties tells the drainer to
-    // skip the wptr-bound scan for that pointer.
+    // Phase-2: register host-VA wptr/rptr/signal via KFD_IOC_PROFILER_DISPATCH_LOG.
+    // Required for dispatch record draining (signal-bound); there is no
+    // sentinel-scan fallback.
     constexpr size_t kCacheLineSize = 64;
     dispatch_log_wptr_buf_ = agent_->system_allocator()(
         kCacheLineSize, kCacheLineSize, core::MemoryRegion::AllocateNonPaged);
@@ -1771,37 +1759,7 @@ hsa_status_t AqlQueue::SetProfiling(bool enabled) {
     dispatch_log_signal_buf_ = agent_->system_allocator()(
         kCacheLineSize, kCacheLineSize, core::MemoryRegion::AllocateNonPaged);
 
-    if (dispatch_log_wptr_buf_ && dispatch_log_rptr_buf_ && dispatch_log_signal_buf_) {
-      // Initialize all three counters to 0. FW writes post-increment values
-      // starting at 1; host reads with __atomic_load_n(__ATOMIC_ACQUIRE).
-      *(volatile uint64_t*)dispatch_log_wptr_buf_   = 0;
-      *(volatile uint64_t*)dispatch_log_rptr_buf_   = 0;
-      *(volatile uint64_t*)dispatch_log_signal_buf_ = 0;
-
-      hsa_status_t dl_status = agent_->driver().SetDispatchLog(
-          queue_id_, static_cast<uint32_t>(agent_->KfdGpuID()),
-          dispatch_record_buffer_, num_records,
-          dispatch_log_wptr_buf_, dispatch_log_rptr_buf_, dispatch_log_signal_buf_);
-      if (dl_status != HSA_STATUS_SUCCESS) {
-        // New path unavailable / refused. Drop the host words; legacy
-        // sentinel-scan path remains active via the buffer registration
-        // we already did above. Drainer detects null host-VA pointers
-        // and falls back automatically.
-        agent_->system_deallocator()(dispatch_log_wptr_buf_);
-        agent_->system_deallocator()(dispatch_log_rptr_buf_);
-        agent_->system_deallocator()(dispatch_log_signal_buf_);
-        dispatch_log_wptr_buf_ = nullptr;
-        dispatch_log_rptr_buf_ = nullptr;
-        dispatch_log_signal_buf_ = nullptr;
-      }
-      // Else: SetDispatchLog succeeded — the kernel updated
-      // queue_properties and re-ran update_mqd, so the new MQD slots
-      // (DW48-DW53) now hold our host VAs and FW will write to them on
-      // subsequent record emissions. No second Suspend/Resume needed; KFD
-      // did the update_queue internally.
-    } else {
-      // Allocation of one or more host words failed. Free any that did
-      // succeed and continue without the new path.
+    auto unwind_profiling_buffer_enable = [&]() {
       if (dispatch_log_wptr_buf_) {
         agent_->system_deallocator()(dispatch_log_wptr_buf_);
         dispatch_log_wptr_buf_ = nullptr;
@@ -1814,6 +1772,31 @@ hsa_status_t AqlQueue::SetProfiling(bool enabled) {
         agent_->system_deallocator()(dispatch_log_signal_buf_);
         dispatch_log_signal_buf_ = nullptr;
       }
+      agent_->system_deallocator()(dispatch_record_buffer_);
+      dispatch_record_buffer_ = nullptr;
+      dispatch_record_buffer_size_ = 0;
+      (void)agent_->driver().SetQueueProfilingBuffer(queue_id_, nullptr, 0, nullptr);
+      Suspend();
+      Resume();
+      Queue::SetProfiling(false);
+    };
+
+    if (!dispatch_log_wptr_buf_ || !dispatch_log_rptr_buf_ || !dispatch_log_signal_buf_) {
+      unwind_profiling_buffer_enable();
+      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    }
+
+    *(volatile uint64_t*)dispatch_log_wptr_buf_   = 0;
+    *(volatile uint64_t*)dispatch_log_rptr_buf_   = 0;
+    *(volatile uint64_t*)dispatch_log_signal_buf_ = 0;
+
+    hsa_status_t dl_status = agent_->driver().SetDispatchLog(
+        queue_id_, static_cast<uint32_t>(agent_->KfdGpuID()),
+        dispatch_record_buffer_, num_records,
+        dispatch_log_wptr_buf_, dispatch_log_rptr_buf_, dispatch_log_signal_buf_);
+    if (dl_status != HSA_STATUS_SUCCESS) {
+      unwind_profiling_buffer_enable();
+      return dl_status;
     }
 
     return HSA_STATUS_SUCCESS;
@@ -1927,9 +1910,8 @@ hsa_status_t AqlQueue::GetProfilingDispatchRecords(void** buffer_base,
   if (!dispatch_record_buffer_) return HSA_STATUS_ERROR_NOT_INITIALIZED;
   *buffer_base = dispatch_record_buffer_;
   // Report the FW-record-stride sized capacity (16 bytes per record), NOT the
-  // host-kernel oversized allocation. The drainer iterates 16-byte records
-  // and uses sentinel scan over per-slot record_type to locate fresh records
-  // (see core/runtime/dispatch_log.cpp::drain_one_queue).
+  // host-kernel oversized allocation. The drainer uses GetDispatchLogPointers
+  // (signal-bound) plus this ring view (core/runtime/dispatch_log.cpp).
   *buffer_size = dispatch_record_buffer_size_ * static_cast<uint32_t>(sizeof(mec_dispatch_record));
   return HSA_STATUS_SUCCESS;
 }
@@ -1942,8 +1924,7 @@ hsa_status_t AqlQueue::GetDispatchLogPointers(volatile uint64_t** wptr_ptr,
   //   1. SetProfiling(true) was called AND
   //   2. The new KFD_IOC_PROFILER_DISPATCH_LOG sub-op succeeded
   //      (kernel KFD MINOR >= 20 + libhsakmt has the new thunk).
-  // If either is false we report NOT_INITIALIZED and the drainer falls
-  // back to sentinel-scan via GetProfilingDispatchRecords.
+  // If either is false we report NOT_INITIALIZED.
   if (dispatch_log_wptr_buf_ == nullptr ||
       dispatch_log_rptr_buf_ == nullptr ||
       dispatch_log_signal_buf_ == nullptr) {

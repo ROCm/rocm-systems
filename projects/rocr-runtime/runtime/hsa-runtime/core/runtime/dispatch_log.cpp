@@ -60,39 +60,13 @@
 // dispatch_record_buffer_size trailing fields (KFD minor version 22+).
 // The HSA-side AqlQueue::SetProfiling owns the per-queue buffer
 // allocation, the libhsakmt hsaKmtSetQueueProfilingBuffer call, and the
-// Suspend/Resume that flushes the MQD via UPDATE_QUEUE. The dispatch_log
-// path here just calls QueueProfilingAcquire/Release (which forward to
-// SetProfiling) and then queries hsa_amd_profiling_get_dispatch_records
-// to fetch the buffer info.
-//
-// TWO-MODE DRAIN DESIGN: drain_one_queue runs in one of two modes per
-// queue, chosen at QueueProfilingAcquire time based on whether
-// AqlQueue::GetDispatchLogPointers (see core/runtime/amd_aql_queue.cpp)
-// returns a host-VA wptr/rptr/signal triple:
-//
-//   - PATH A (preferred, signal-bound): newer kernel/FW publish a
-//     host-readable FW write pointer (wptr) and a per-queue signal that
-//     the drainer waits on. The drainer reads wptr to bound the live
-//     region [next_idx, wptr) and consumes that range. See the
-//     signal-bound branch in drain_one_queue (and the registration in
-//     the per-queue enable block, where GetDispatchLogPointers is
-//     called and the wptr/rptr/signal pointers are captured).
-//
-//   - PATH B (legacy fallback, sentinel-scan): when GetDispatchLogPointers
-//     returns NOT_INITIALIZED (older kernel/FW or libhsakmt without
-//     host-VA pointer support), the substrate publishes neither a
-//     host-readable FW write pointer nor any other end-of-records marker.
-//     The drainer falls back to scanning the ring sequentially from a
-//     host-managed monotonic cursor (next_idx). A slot whose record_type
-//     is 0 is "empty" (FW writes record_type ∈ {1,2}, and the buffer is
-//     pre-zeroed at alloc in AqlQueue::SetProfiling). After consuming a
-//     slot the drainer clears the record_type sentinel so wraparound
-//     rewrites are re-detectable. See the "PATH B: SENTINEL-SCAN
-//     FALLBACK" branch in drain_one_queue.
-//
-// Both paths share the same 16-byte FW record stride, the same per-queue
-// next_idx cursor, the same batched LTTng emit path, and the same
-// drop-accounting; only the bound-of-live-region computation differs.
+// Suspend/Resume that flushes the MQD via UPDATE_QUEUE. Dispatch records
+// additionally require KFD_IOC_PROFILER_DISPATCH_LOG (host-VA wptr/rptr/
+// signal); AqlQueue::SetProfiling fails the enable if that registration
+// cannot complete. drain_one_queue is signal-bound: it reads the FW
+// monotonic record count from *signal_ptr and walks [next_idx, observed),
+// stopping at record_type==0 when the multi-XCC publish race or stale
+// init-prefix requires it (see drain_one_queue).
 
 #include "core/inc/dispatch_log.h"
 
@@ -186,35 +160,24 @@ struct queue_drain_state {
   uint32_t ring_mask    = 0;     // ring_records - 1, for slot indexing
 
   // Host-managed monotonic record cursor. Mutated only under drain_mu.
-  // Slot index is (next_idx & ring_mask).
-  //
-  // Two drain modes select on whether signal_ptr below is non-null:
-  //   - SIGNAL-bound scan (preferred, MINOR>=20): next_idx tracks the
-  //     absolute count of records the host has emitted. Each pass reads
-  //     *signal_ptr atomically and iterates [next_idx, signal). After
-  //     emitting all records, next_idx is set to signal and the same
-  //     value is published to *rptr_ptr for FW backpressure visibility
-  //     (FW does not currently read it but publishing keeps the door
-  //     open for future FW that does).
-  //   - Sentinel scan (fallback, older kernel/FW): next_idx still
-  //     advances per non-zero slot. record_type==0 marks empty; the
-  //     drainer clears the sentinel post-emit so wraparound rewrites
-  //     are re-detectable.
+  // Slot index is (next_idx & ring_mask). Signal-bound: each pass reads
+  // *signal_ptr and iterates [next_idx, signal). After emitting, next_idx
+  // is set to signal and published to *rptr_ptr for FW visibility.
   uint64_t next_idx = 0;
 
-  // Stale-zero quarantine state (Path A; debate stage code-quality C8/C9).
+  // Stale-zero quarantine state (signal-bound drain; debate stage code-quality C8/C9).
   //
-  // Path A stops at any record_type==0 slot inside [next_idx, observed)
+  // The drainer stops at any record_type==0 slot inside [next_idx, observed)
   // because we cannot cheaply distinguish (a) a pre-zeroed stale slot
   // (FW per-pipe scratch wptr persisted across queue lifecycles, leaving
   // the host buffer's prefix never written for THIS lifecycle) from
   // (b) a slot whose producing XCC has not finished publishing the
-  // record body yet (multi-XCC publish race documented in the Path A
+  // record body yet (multi-XCC publish race documented in the signal-bound
   // header comment). Stopping is safe for case (b) — next pass will
   // re-read once FW commits — but case (a) wedges forever (signal will
   // never advance past the prefix). The quarantine breaks the wedge:
   //
-  //   - On every Path A pass that stops at a zero slot, drain records
+  //   - On every drain pass that stops at a zero slot, drain records
   //     stall_first_seen (steady_clock::time_point) the FIRST time it
   //     stops at THIS (observed, next_idx) coordinate, and sets
   //     pending_zero_stall=true so the worker's signal-equal fast-skip
@@ -241,11 +204,9 @@ struct queue_drain_state {
   uint64_t                              stall_idx      = 0;
   std::atomic<bool>                     pending_zero_stall{false};
 
-  // Phase-2 host-VA pointer set. Populated by
-  // enable_dispatch_log_for_queue_locked from
-  // AqlQueue::GetDispatchLogPointers when the running kernel supports
-  // KFD_IOC_PROFILER_DISPATCH_LOG (MINOR>=20) and the new sub-op
-  // succeeded. All three are nullptr in fallback mode.
+  // Phase-2 host-VA pointer set. Populated by enable_dispatch_log_for_queue_locked
+  // from AqlQueue::GetDispatchLogPointers after SetProfiling(true) registered
+  // KFD_IOC_PROFILER_DISPATCH_LOG (required; enable fails otherwise).
   //
   // Memory model:
   //   - signal_ptr: FW writes per-record (post-increment record count)
@@ -254,7 +215,7 @@ struct queue_drain_state {
   //     TC-drain THEN signal write THEN TC-drain). Per single FW thread
   //     signal is the LAST write per record and carries the strongest
   //     "record committed" semantics. The drainer uses signal_ptr as
-  //     its source of truth (see drain_one_queue Path A for the
+  //     its source of truth (see drain_one_queue for the
   //     multi-XCC race rationale).
   //   - wptr_ptr: FW writes the same per-record value as signal_ptr,
   //     just earlier in the publish sequence. Kept registered so the
@@ -439,33 +400,10 @@ void for_each_known_queue_locked(F&& fn) {
 // ============================================================================
 // drain_one_queue. Holds qs.drain_mu for the entire pass.
 //
-// Sentinel-scan design: the substrate publishes no host-readable FW write
-// pointer (KFD `kfd_ioctl_update_queue_args` has only
-// dispatch_record_buffer_addr/size — see
-// /usr/src/amdgpu-*/include/uapi/linux/kfd_ioctl.h:99-108 on a host with
-// the gbt350 KFD). Instead, FW writes record_type ∈ {1, 2} into each slot
-// it produces; the host pre-zeroes the buffer at allocation
-// (AqlQueue::SetProfiling), so a slot whose record_type is 0 is "empty".
-//
-// We walk the ring sequentially from a host-managed monotonic cursor
-// (qs.next_idx). Each iteration:
-//   1. Read record_type for the slot at (next_idx & ring_mask).
-//   2. If 0, the ring tail has caught up — break and return.
-//   3. Otherwise snapshot the rest of the record, ZERO the slot (so a
-//      future wraparound re-write of the same slot can be re-detected),
-//      and process the START / END pairing as before.
-//
-// FW writes 16-byte mec_dispatch_record entries at 16-byte stride. The
-// host kernel BO size validation now uses `count * 16` for both the
-// legacy SetQueueProfilingBuffer path and the new dispatch_log sub-op
-// (kfd_process_queue_manager.c, post commit `03a8b58c3b96` "kfd:
-// validate dispatch record buffer using 16-byte record size",
-// 2026-04-08), matching the firmware/SDK 16-byte record stride. The
-// host therefore allocates `count * 16` exactly (see
-// amd_aql_queue.cpp:1690-1704); the earlier `count * 40`
-// over-allocation that worked around the older pre-fix kernel has
-// been removed. FW writes records back-to-back at 16-byte stride and
-// the drainer reads at the same 16-byte stride.
+// Signal-bound: FW publishes a monotonic post-increment record count to
+// *signal_ptr (after wptr). The host walks [next_idx, observed) at 16-byte
+// stride (see kSlotStride). FW writes 16-byte mec_dispatch_record entries;
+// the ring is sized record_count * 16 (AqlQueue::SetProfiling).
 // ============================================================================
 
 // Per-record stride at which FW writes records into the buffer. Matches
@@ -482,14 +420,14 @@ constexpr size_t kSlotStride = 16;
 constexpr uint32_t kBatchMax = 256;
 
 // Stale-zero quarantine threshold (debate stage code-quality C8/C10).
-// Path A stops at the first record_type==0 inside [next_idx, observed)
+// The signal-bound scan stops at the first record_type==0 inside [next_idx, observed)
 // to handle either a pre-zeroed stale slot OR a multi-XCC publish-race
 // in-flight slot. After this many milliseconds of being stalled at the
 // SAME (observed, next_idx) coordinate with no forward progress, the
 // drainer declares the slot stale and sweeps the contiguous stale-zero
 // prefix forward in one pass, emitting a single aggregate
 // kernel_dispatch_drop event covering the whole gap (see C10 logic in
-// drain_one_queue Path A below).
+// drain_one_queue below).
 //
 // 100 ms aligns with the wait_for_idle bound and is ~100x the worker's
 // max sleep cadence (1 ms), so a real in-flight XCC publish would
@@ -507,8 +445,7 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
   // Poisoned (disable in flight) or never-populated.
   if (qs.ring_base == nullptr || qs.ring_records == 0) return false;
 
-  // Shared batch buffer for both Path A (signal-bound) and Path B
-  // (sentinel-scan). Stack-allocated; per-pass scope.
+  // Stack-allocated batch buffer for LTTng emit.
   alignas(16) uint8_t batch_buf[kBatchMax * kSlotStride];
   uint32_t batch_count = 0;
   auto flush_batch = [&]() {
@@ -523,8 +460,10 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
   };
   ++qs.diag_drain_passes;
 
+  if (qs.signal_ptr == nullptr) return false;
+
   // ============================================================================
-  // PATH A: SIGNAL-BOUND SCAN (preferred, KFD MINOR>=20 + new FW)
+  // SIGNAL-BOUND SCAN (KFD_IOC_PROFILER_DISPATCH_LOG + new FW)
   //
   // FW publishes the post-increment record count to *qs.signal_ptr after
   // first publishing the same value to *qs.wptr_ptr (see f32_mec.uc
@@ -576,8 +515,7 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
   // qs.next_idx forward by the overrun distance and emit a
   // kernel_dispatch_drop tracepoint so the consumer sees the gap.
   // ============================================================================
-  if (qs.signal_ptr != nullptr) {
-    const uint64_t observed = __atomic_load_n(qs.signal_ptr, __ATOMIC_ACQUIRE);
+  const uint64_t observed = __atomic_load_n(qs.signal_ptr, __ATOMIC_ACQUIRE);
 
     // DIAG_LOSS: track peak observed signal per-queue
     {
@@ -621,7 +559,7 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
     //      with no kernel_dispatch_drop event.
     //
     // Code-quality C8/C9: the C7-era fix gated zero-rt-stop on
-    // initial_sync only, leaving steady-state Path A still emitting
+    // initial_sync only, leaving steady-state still emitting
     // zero-body slots as records under the multi-XCC race (C9), and
     // also wedging init-sync forever on a stale-zero prefix because
     // forward progress required signal to lap the ring (C8). Unified
@@ -908,97 +846,6 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
     // not enforce backpressure today but reads on connect/dequeue).
     if (qs.rptr_ptr) __atomic_store_n(qs.rptr_ptr, end, __ATOMIC_RELEASE);
     return any;
-  }
-
-  // ============================================================================
-  // PATH B: SENTINEL-SCAN FALLBACK (older kernel/FW without host-VA wptr)
-  //
-  // FW writes record_type ∈ {1, 2} into each slot it produces; host
-  // pre-zeroes the buffer at allocation, so a slot whose record_type
-  // is 0 is "empty". Drainer walks slots from qs.next_idx, atomic-stores
-  // record_type=0 after consume so wraparound rewrites are re-detectable.
-  //
-  // KNOWN ISSUE: FW slot reuse can cause the same (dispatch_idx,
-  // record_type) pair to be observed twice in a single session under
-  // burst patterns (capture rate observed at 250-316% vs expected 200%).
-  // The wptr-bound path above is immune to this; this fallback is only
-  // used on older kernels that don't ship the new MQD slots.
-  // ============================================================================
-  const uint64_t pass_budget = qs.ring_records;
-  uint64_t pass_consumed = 0;
-
-  bool any = false;
-  while (pass_consumed < pass_budget) {
-    // Cheap kill-switch pre-check (review C4): tested at the very top of
-    // the per-record body, BEFORE any slot mutation. translate_gpu_ts
-    // performs a linear interpolation under the agent's clock-cache
-    // lock, so doing it 1× per record × kRingSlots in the disable-race
-    // window is wasted work the emit helper would discard anyway. The
-    // helper's own kill-switch check still runs (defense in depth).
-    //
-    // Position rationale: this check MUST sit before the record_type
-    // load + slot mutation (below) so that bailing here leaves the slot
-    // intact and `qs.next_idx` still pointing at it. If we cleared the
-    // sentinel first and then bailed, the slot would be permanently
-    // destroyed (FW had already written it, and the wptr cursor stays
-    // put), and on the next drain pass the sentinel scan would observe
-    // rt == 0 at next_idx and stop — stranding any later FW-written
-    // records until the ring wraps and FW rewrites the broken slot.
-    // Today no runtime API toggles the kill switch (it is set-once at
-    // construction in lttng/rocm_trace_init.cpp), so the wedge is not
-    // currently reachable, but ordering this check before slot mutation
-    // removes the latent footgun for any future runtime-toggle path.
-    if (!force_emit && rocm_trace_disabled()) break;
-
-    const uint64_t slot = qs.next_idx & qs.ring_mask;
-    auto* rec = reinterpret_cast<mec_dispatch_record_16*>(
-        static_cast<char*>(qs.ring_base) + slot * kSlotStride);
-
-    // Sentinel: record_type == 0 means "empty / not yet written by FW".
-    //
-    // FW publish atomicity contract (per core/inc/mec_dispatch_record.h):
-    // each 16-byte mec_dispatch_record is written by a single GFX
-    // BUFFER_STORE_DWORDX4 (4 DWords = single TC write transaction). So
-    // any non-zero record_type observation implies the entire 16-byte
-    // record (ts_lo, ts_hi, record_type, dispatch_idx) is coherent. A
-    // partial / torn observation of "non-zero record_type but stale body"
-    // is not possible under that FW contract.
-    //
-    // We still use an acquire on the record_type load so the subsequent
-    // body loads are not reordered above it; this
-    // turns the type-load into a proper atomic acquire instead of a
-    // plain (data-racy) load on memory another agent writes
-    // concurrently. The body fields are read with relaxed atomicity for
-    // the same reason — to avoid UB from plain loads on FW-written
-    // memory — but no further fence is needed because the acquire on
-    // record_type already happens-before them.
-    uint32_t rt = __atomic_load_n(&rec->record_type, __ATOMIC_ACQUIRE);
-    if (rt == 0) break;
-
-    // Sentinel-scan path also batches: copy the FW record (16 bytes,
-    // exactly the mec_dispatch_record_16 layout the new tracepoint
-    // expects) into the batch buffer, then clear the sentinel.
-    std::memcpy(batch_buf + (size_t)batch_count * kSlotStride,
-                rec, kSlotStride);
-    batch_count++;
-
-    // Zero the record_type field so a wraparound rewrite by FW (next time
-    // the ring loops past this position) is re-detected as a fresh
-    // non-zero record_type. We only need to clear the sentinel field,
-    // not the entire 16-byte slot, since the FW always writes the full
-    // 16 bytes atomically.
-    __atomic_store_n(&rec->record_type, 0, __ATOMIC_RELEASE);
-
-    qs.next_idx += 1;
-    pass_consumed += 1;
-    any = true;
-
-    if (batch_count == kBatchMax) {
-      flush_batch();
-    }
-  }
-  flush_batch();
-  return any;
 }
 
 // Per-queue drain loop. One instance per active queue, spawned at enable
@@ -1051,52 +898,45 @@ void per_queue_drain_loop(std::shared_ptr<queue_drain_state> qs) {
   //   - 16-63 idle:          sleep 100 us
   //   - 64+ idle:            sleep 1 ms (steady-state idle)
   // First sign of work resets the counter to 0 and resumes hot-loop.
-  //
-  // Path B (sentinel-scan, no signal_ptr): falls back to the old yield-
-  // only loop because we have no cheap "no work" probe — we have to
-  // actually read the slot's record_type to know.
   uint64_t last_signal = 0;
   uint32_t idle_count = 0;
   while (!qs->should_stop.load(std::memory_order_acquire)) {
-    // Path A fast-path: if signal_ptr is registered, read it cheaply and
-    // skip the drain call entirely when no new records exist.
-    if (qs->signal_ptr != nullptr) {
-      const uint64_t cur = __atomic_load_n(qs->signal_ptr, __ATOMIC_ACQUIRE);
-      // Stale-zero quarantine override (debate stage code-quality C8):
-      // when drain_one_queue parked next_idx on a zero slot inside
-      // [next_idx, observed), pending_zero_stall is armed. Forward
-      // progress in that state requires us to keep CALLING drain (so
-      // the quarantine timer fires once kStaleZeroQuarantineMs has
-      // elapsed) even though *signal_ptr has not advanced. Honor the
-      // armed flag by bypassing the signal-equal fast-skip; we still
-      // adaptive-sleep below if drain returns no work.
-      const bool stalled =
-          qs->pending_zero_stall.load(std::memory_order_acquire);
-      if (cur == last_signal && !stalled) {
-        // No new records — adaptive backoff
-        ++idle_count;
-        if (idle_count <= 3) {
-          std::this_thread::yield();
-        } else if (idle_count <= 15) {
-          std::this_thread::sleep_for(std::chrono::microseconds(10));
-        } else if (idle_count <= 63) {
-          std::this_thread::sleep_for(std::chrono::microseconds(100));
-        } else {
-          std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        }
-        continue;
+    // Cheap probe: skip drain_one_queue when *signal_ptr is unchanged.
+    const uint64_t cur = __atomic_load_n(qs->signal_ptr, __ATOMIC_ACQUIRE);
+    // Stale-zero quarantine override (debate stage code-quality C8):
+    // when drain_one_queue parked next_idx on a zero slot inside
+    // [next_idx, observed), pending_zero_stall is armed. Forward
+    // progress in that state requires us to keep CALLING drain (so
+    // the quarantine timer fires once kStaleZeroQuarantineMs has
+    // elapsed) even though *signal_ptr has not advanced. Honor the
+    // armed flag by bypassing the signal-equal fast-skip; we still
+    // adaptive-sleep below if drain returns no work.
+    const bool stalled =
+        qs->pending_zero_stall.load(std::memory_order_acquire);
+    if (cur == last_signal && !stalled) {
+      // No new records — adaptive backoff
+      ++idle_count;
+      if (idle_count <= 3) {
+        std::this_thread::yield();
+      } else if (idle_count <= 15) {
+        std::this_thread::sleep_for(std::chrono::microseconds(10));
+      } else if (idle_count <= 63) {
+        std::this_thread::sleep_for(std::chrono::microseconds(100));
+      } else {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
       }
-      if (cur != last_signal) {
-        last_signal = cur;
-        idle_count = 0;
-      }
+      continue;
+    }
+    if (cur != last_signal) {
+      last_signal = cur;
+      idle_count = 0;
     }
 
     const bool any = drain_one_queue(*qs, /* force_emit = */ false);
     if (any) {
       ++qs->diag_drain_passes_with_work;  // DIAG_LOSS
     } else {
-      // Path B (sentinel-scan) fallback or spurious wakeup: yield.
+      // No work this iteration: yield / short sleep.
       ++idle_count;
       if (idle_count > 3) {
         std::this_thread::sleep_for(std::chrono::microseconds(100));
@@ -1222,15 +1062,11 @@ namespace {
 // Flow:
 //   1. Skip non-AQL / non-GPU queues.
 //   2. Skip if substrate is absent or agent is on the no-dispatch-log list.
-//   3. QueueProfilingAcquire -> AqlQueue::SetProfiling(true) -> alloc
-//      buffer + KFD UPDATE_QUEUE with the new trailing fields.
-//   4. AqlQueue::GetProfilingDispatchRecords to read back the buffer base
-//      and the FW-record-stride capacity in bytes (record_count * 16).
-//      The substrate publishes no host-visible FW write pointer; consumers
-//      locate fresh records via sentinel scan over per-slot record_type.
-//   5. Register a non-owning queue_drain_state in g_active_drainers with
-//      next_idx = 0 (the host-managed monotonic record cursor used by
-//      the sentinel-scan drainer).
+//   3. QueueProfilingAcquire -> AqlQueue::SetProfiling(true) -> alloc buffer,
+//      SetQueueProfilingBuffer, SetDispatchLog (host-VA wptr/rptr/signal required).
+//   4. AqlQueue::GetProfilingDispatchRecords for ring base + byte capacity.
+//   5. AqlQueue::GetDispatchLogPointers for the signal-bound drain path.
+//   6. Register queue_drain_state in g_active_drainers; next_idx per C2/C3 below.
 // ============================================================================
 
 void enable_dispatch_log_for_queue_locked(core::Queue* q) {
@@ -1307,9 +1143,7 @@ void enable_dispatch_log_for_queue_locked(core::Queue* q) {
   // in its BO-size validation; both that older kernel and the current
   // kfd_process_queue_manager.c validation accept *16. FW writes — and
   // the drainer reads — at the 16-byte FW record stride (see kSlotStride
-  // above and the per-slot addressing expressions in drain_one_queue:
-  // `static_cast<char*>(qs.ring_base) + slot * kSlotStride` on both the
-  // signal-bound Path A and the sentinel-scan Path B).
+  // and per-slot addressing in drain_one_queue).
   const uint32_t record_count = buf_bytes / static_cast<uint32_t>(sizeof(mec_dispatch_record_16));
   if (record_count == 0 || (record_count & (record_count - 1)) != 0) {
     std::fprintf(stderr,
@@ -1369,30 +1203,33 @@ void enable_dispatch_log_for_queue_locked(core::Queue* q) {
     qs->ring_records     = record_count;
     qs->ring_mask        = record_count - 1;
 
-    // Capture the Phase-2 host-VA pointer set if the new
-    // KFD_IOC_PROFILER_DISPATCH_LOG path is active for this queue.
-    // GetDispatchLogPointers returns NOT_INITIALIZED on older
-    // kernels (MINOR<20) or older libhsakmt (no SetDispatchLog
-    // thunk) — in that case the pointers stay null and the drainer
-    // falls back to sentinel-scan automatically.
+    // Host-VA wptr/rptr/signal (KFD_IOC_PROFILER_DISPATCH_LOG). Required:
+    // SetProfiling(true) fails the enable if registration cannot complete.
     volatile uint64_t* wptr_p   = nullptr;
     volatile uint64_t* rptr_p   = nullptr;
     volatile uint64_t* signal_p = nullptr;
-    bool ph2_fresh_allocation   = true;  // default-fresh; only consulted when path A wins
+    bool ph2_fresh_allocation = true;
     hsa_status_t dl_status =
         aql_queue->GetDispatchLogPointers(&wptr_p, &rptr_p, &signal_p,
                                           &ph2_fresh_allocation);
-    if (dl_status == HSA_STATUS_SUCCESS) {
-      qs->wptr_ptr   = wptr_p;
-      qs->rptr_ptr   = rptr_p;
-      qs->signal_ptr = signal_p;
+    if (dl_status != HSA_STATUS_SUCCESS || wptr_p == nullptr ||
+        rptr_p == nullptr || signal_p == nullptr) {
+      std::fprintf(stderr,
+                   "[hsa-runtime] dispatch_log: queue_id=%llu ENABLE step 3 "
+                   "(GetDispatchLogPointers) failed status=%d\n",
+                   static_cast<unsigned long long>(queue_id_of(q)),
+                   static_cast<int>(dl_status));
+      g_no_dispatch_log_agents.insert(q->GetAgent());
+      QueueProfilingRelease(q);
+      return;
     }
-    // else: legacy sentinel-scan mode; null pointers tell drain_one_queue
-    // to use the fallback scan path.
+    qs->wptr_ptr   = wptr_p;
+    qs->rptr_ptr   = rptr_p;
+    qs->signal_ptr = signal_p;
 
     // next_idx initialization (code-quality C2 + C3 round 2).
     //
-    // The Path A drainer treats next_idx as the monotonic floor of
+    // The signal-bound drainer treats next_idx as the monotonic floor of
     // already-emitted records. The choice of starting value depends on
     // whether SetProfiling(true) just freshly allocated and zeroed the
     // host signal word, or whether it hit the "buffer already wired"
@@ -1404,7 +1241,7 @@ void enable_dispatch_log_for_queue_locked(core::Queue* q) {
     //      case). SetProfiling(true) just allocated and zeroed the host
     //      signal word, so observed=0 and next_idx must also be 0. The
     //      first FW post-enable record write will jump signal from 0 to
-    //      (scratch_wptr_persisted + 1) and the drain_one_queue Path A
+    //      (scratch_wptr_persisted + 1) and the drain_one_queue
     //      initial-sync logic (initial_sync == (next_idx == 0)) handles
     //      the persisted scratch wptr exactly as before.
     //
@@ -1427,16 +1264,7 @@ void enable_dispatch_log_for_queue_locked(core::Queue* q) {
     //      disabled window, which is the only safe behavior since those
     //      records belong to a lifecycle that already ended from the
     //      consumer's point of view.
-    //
-    // Path B (sentinel-scan fallback, signal_ptr==nullptr) does NOT
-    // get the same fix: the existing per-slot record_type sentinel walk
-    // correctly handles a freshly-zeroed buffer but does NOT distinguish
-    // stale records left by a previous lifecycle from new records on a
-    // re-enable after a failed disable. That hazard is not addressed
-    // here; it only matters on older kernels (KFD MINOR < 20 or older
-    // libhsakmt) which can fall back to Path B. Documented limitation;
-    // pursue separately if it bites in practice.
-    if (qs->signal_ptr != nullptr && !ph2_fresh_allocation) {
+    if (!ph2_fresh_allocation) {
       qs->next_idx = __atomic_load_n(qs->signal_ptr, __ATOMIC_ACQUIRE);
       // Publish the snapshot to *rptr_ptr too so FW's backpressure view
       // matches our monotonic floor. SetProfiling on a re-enable after

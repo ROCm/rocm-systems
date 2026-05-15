@@ -46,24 +46,9 @@
 // for the implementation, and the Phase A spec (2026-04-27) for the full
 // design contract.
 //
-// Two-mode drain design (see drain_one_queue in dispatch_log.cpp):
-//
-//   - Path A (preferred, signal-bound): when AqlQueue::GetDispatchLogPointers
-//     returns a host-VA wptr/rptr/signal triple (newer kernel/FW that
-//     exposes the FW write pointer to the host), the drainer waits on the
-//     FW signal, reads the wptr to bound the live region, and consumes
-//     [next_idx, wptr). This is the steady-state path.
-//
-//   - Path B (legacy fallback, sentinel-scan): when GetDispatchLogPointers
-//     returns NOT_INITIALIZED (older kernel/FW or libhsakmt without
-//     host-VA pointer support), the drainer falls back to scanning the
-//     ring sequentially from a host-managed monotonic cursor (next_idx)
-//     and uses per-slot record_type==0 as the empty-slot sentinel.
-//
-// Path A is registered at queue enable in QueueProfilingAcquire (see the
-// GetDispatchLogPointers call in dispatch_log.cpp around the per-queue
-// enable block); Path B is the unconditional fallback when those pointers
-// are unavailable.
+// Draining is signal-bound: AqlQueue::GetDispatchLogPointers supplies host-VA
+// wptr/rptr/signal counters (KFD_IOC_PROFILER_DISPATCH_LOG). SetProfiling(true)
+// fails if that registration cannot complete; there is no sentinel-scan path.
 
 #ifndef HSA_RUNTME_CORE_INC_DISPATCH_LOG_H_
 #define HSA_RUNTME_CORE_INC_DISPATCH_LOG_H_
@@ -87,15 +72,12 @@ namespace dispatch_log {
 //
 // The buffer layout was originally defined as `header + ring data`. The
 // current substrate instead hands the drainer a flat ring of N records
-// at the 16-byte FW record stride. The drainer consumes that ring in one
-// of two modes (see top-of-file two-mode drain design comment above):
-// preferred Path A reads a host-VA FW wptr published via
-// AqlQueue::GetDispatchLogPointers; legacy Path B falls back to a
-// sentinel-scan over per-slot record_type when the wptr is unavailable.
-// In both modes the drainer advances a host-managed monotonic cursor
-// (next_idx). The original buffer header and DISPATCH_LOG_VERSION are no
-// longer used; they are retained here only as historical constants for
-// now and may be removed.
+// at the 16-byte FW record stride. The drainer is signal-bound: it reads
+// *signal_ptr from AqlQueue::GetDispatchLogPointers and walks [next_idx,
+// observed), using record_type==0 inside that window for multi-XCC /
+// init-sync quarantine (see drain_one_queue). The original buffer header
+// and DISPATCH_LOG_VERSION are no longer used; they are retained here only
+// as historical constants for now and may be removed.
 // -----------------------------------------------------------------------------
 
 // NOTE: the per-queue ring record count is NOT a build-time constant.
@@ -121,14 +103,13 @@ namespace dispatch_log {
 // regardless of the tag value. Stream consumers that want paired
 // start/end semantics join records on (queue_id, dispatch_idx) and
 // either order by gpu_ts or apply their own FW-version-specific
-// record_type interpretation. Only record_type == 0 is reserved by HSA
-// itself: it marks an empty (host-pre-zeroed and not yet FW-written)
-// slot in the sentinel-scan drainer.
+// record_type interpretation. record_type==0 marks an empty slot (buffer
+// pre-zeroed; also used inside the signal-bound scan for quarantine).
 #pragma pack(push, 1)
 struct mec_dispatch_record_16 {
   uint32_t ts_lo;          // GPU clock low 32 bits
   uint32_t ts_hi;          // GPU clock high 32 bits
-  uint32_t record_type;    // FW-defined; 0 reserved as the empty sentinel
+  uint32_t record_type;    // FW-defined; 0 marks empty / quarantine-relevant slot
   uint32_t dispatch_idx;   // FW-written dispatch idx (mec_dispatch_record::reserved)
 };
 #pragma pack(pop)
