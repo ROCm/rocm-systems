@@ -30,3 +30,6 @@ target_link_libraries(rocshmem_info
   PRIVATE
     roc::rocshmem
 )
+
+# When ASAN is enabled, rocshmem is built with -fno-gpu-rdc
+# rocshmem_info inherits this automatically

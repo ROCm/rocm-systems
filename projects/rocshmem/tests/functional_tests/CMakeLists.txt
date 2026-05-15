@@ -124,18 +124,13 @@ target_link_libraries(
 target_compile_options(
   ${PROJECT_NAME}
   PRIVATE
-    $<$<BOOL:${ASAN}>:-Xarch_host -fsanitize=address>
-    $<$<BOOL:${ASAN}>:-Xarch_host -g>
-    $<$<BOOL:${ASAN}>:-Xarch_device -g0>
+    $<$<BOOL:${ASAN}>:-fsanitize=address -g>
 )
 
 target_link_options(
   ${PROJECT_NAME}
   PRIVATE
-    $<$<BOOL:${ASAN}>:SHELL:-Xarch_host -fsanitize=address>
-    $<$<BOOL:${ASAN}>:SHELL:-Xarch_host -shared-libsan>
-    $<$<BOOL:${ASAN}>:SHELL:-Xarch_host -g>
-    $<$<BOOL:${ASAN}>:SHELL:-Xarch_device -g0>
+    $<$<BOOL:${ASAN}>:-fsanitize=address -shared-libsan -g>
 )
 
 ###############################################################################

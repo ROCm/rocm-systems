@@ -312,14 +312,13 @@ if (NOT BUILD_TESTS_ONLY)
   target_compile_options(
     ${PROJECT_NAME}
     PUBLIC
-      -fgpu-rdc
-      $<$<BOOL:${ASAN}>:-Xarch_device -g0>
+      $<$<NOT:$<BOOL:${ASAN}>>:-fgpu-rdc>
+      $<$<BOOL:${ASAN}>:-fno-gpu-rdc>
     PRIVATE
       -Wall
       -Wextra
       -ffile-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}/=
-      $<$<BOOL:${ASAN}>:-Xarch_host -fsanitize=address>
-      $<$<BOOL:${ASAN}>:-Xarch_host -g>
+      $<$<BOOL:${ASAN}>:-fsanitize=address -g>
   )
 
   target_include_directories(
@@ -341,23 +340,21 @@ if (NOT BUILD_TESTS_ONLY)
       hip::host
       dl
       hsa-runtime64::hsa-runtime64
-      -fgpu-rdc
+      $<$<NOT:$<BOOL:${ASAN}>>:-fgpu-rdc>
+      $<$<BOOL:${ASAN}>:-fno-gpu-rdc>
       $<$<NOT:$<BOOL:${FILESYSTEM_NO_LINK_NEEDED}>>:stdc++fs>
   )
 
   target_link_options(
     ${PROJECT_NAME}
     PUBLIC
-      $<$<BOOL:${ASAN}>:SHELL:-Xarch_host -fsanitize=address>
-      $<$<BOOL:${ASAN}>:SHELL:-Xarch_host -shared-libsan>
-      $<$<BOOL:${ASAN}>:SHELL:-Xarch_host -g>
-      $<$<BOOL:${ASAN}>:SHELL:-Xarch_device -g0>
+      $<$<BOOL:${ASAN}>:-fsanitize=address -shared-libsan -g>
   )
 
   if (ASAN)
     message(STATUS "Removing xnack- from GPU_TARGET as these are invalid with ASAN address sanitizer")
     list(FILTER GPU_TARGETS EXCLUDE REGEX ".*:xnack-$")
-    message(STATUS "ASAN enabled: Disabling LTO to avoid device code instrumentation issues")
+    message(STATUS "ASAN enabled: Disabling GPU RDC to avoid device LTO conflicts")
   endif()
 
   if(${ROCM_MAJOR_VERSION} LESS 7)
@@ -368,7 +365,7 @@ if (NOT BUILD_TESTS_ONLY)
   #############################################################################
   # DEVICE BITCODE COMPILATION
   #############################################################################
-  include(${CMAKE_SOURCE_DIR}/cmake/DeviceBitcode.cmake)
+  #include(${CMAKE_SOURCE_DIR}/cmake/DeviceBitcode.cmake)
 
   #############################################################################
   # INSTALL
