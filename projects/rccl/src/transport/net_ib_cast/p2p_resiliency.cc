@@ -217,6 +217,7 @@ static ncclResult_t IbCastResiliencyRepostRequest(struct ncclIbRequest* request)
         }
       }
       INFO(NCCL_NET, "NET/IB: %s: Reposting send request (request=%p, comm=%p, id=%ld, slot=%ld, nreqs=%d)", __func__, request, request->base, request->id, request->id % NET_IB_MAX_REQUESTS, request->nreqs);
+      request->base->resiliency->repostCount++;
       struct ncclIbRequest* firstReq = ((struct ncclIbSendComm*)request->base)->sendReqs[slot][0];
       NCCLCHECK(IbCastMultiSend((struct ncclIbSendComm*)request->base, slot, firstReq->desc.nqps, firstReq->desc.startQpIndex, firstReq->desc.wrrSched, false));
   } else if (request->type == NCCL_NET_IB_REQ_RECV) {

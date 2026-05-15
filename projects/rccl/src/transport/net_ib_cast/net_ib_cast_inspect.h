@@ -57,6 +57,30 @@ ncclResult_t ncclIbCastSetSchedParms(void* sendComm,
                                       bool splitData,
                                       uint32_t splitDataMin);
 
+/* ── Resiliency state introspection (requires ENABLE_FAULT_INJECTION) ── */
+#ifdef ENABLE_FAULT_INJECTION
+
+struct ncclIbCastResiliencyState {
+  bool recoveryEnabled;
+  bool inProgress;
+  int  outstandingRequests;
+  int  outstandingRecovery;
+  int  ndevs;
+  int  devState[4];
+};
+
+/* Fills out with the current resiliency state of the communicator.
+ * sendComm must have resiliency enabled (NCCL_IB_RESILIENCY_PORT_FAILOVER=1).
+ * Returns ncclInvalidArgument if resiliency context is NULL. */
+ncclResult_t ncclIbCastGetResiliencyState(void* sendComm, struct ncclIbCastResiliencyState* out);
+
+/* Returns the number of times IbCastResiliencyRepostRequest was called
+ * (i.e. selective retransmit count). Counter is stored in the resiliency
+ * context and incremented in p2p_resiliency.cc. */
+ncclResult_t ncclIbCastGetRepostCount(void* sendComm, int* out);
+
+#endif /* ENABLE_FAULT_INJECTION */
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
