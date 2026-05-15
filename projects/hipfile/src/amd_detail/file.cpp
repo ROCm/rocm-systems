@@ -23,45 +23,14 @@ using namespace std;
 namespace hipFile {
 
 UnregisteredFile::UnregisteredFile(int fd)
-    : client_fd(FileDescriptor::make_unmanaged(fd)), buffered_fd{}, unbuffered_fd{},
-      stx{Context<Sys>::get()->statx(fd, "", AT_EMPTY_PATH,
-#if defined(STATX_DIOALIGN)
-                                     STATX_TYPE | STATX_MODE | STATX_DIOALIGN
-#else
-                                     STATX_TYPE | STATX_MODE
-#endif
-                                     )},
-      flags{Context<Sys>::get()->fcntl(fd, F_GETFL, 0)},
+    : client_fd(FileDescriptor::make_unmanaged(fd)),
+      buffered_fd{FileDescriptor::make_unmanaged(-1)},
+      unbuffered_fd{FileDescriptor::make_unmanaged(fd)},
+      stx{},
+      flags{},
       mountinfo{},
-#if defined(STATX_DIOALIGN)
-      m_dio_mem_align{stx.stx_mask & STATX_DIOALIGN ? stx.stx_dio_mem_align : 4096},
-      m_dio_offset_align{stx.stx_mask & STATX_DIOALIGN ? stx.stx_dio_offset_align : 4096}
-#else
       m_dio_mem_align{4096}, m_dio_offset_align{4096}
-#endif
 {
-    std::string path = "/proc/self/fd/" + std::to_string(fd);
-
-    if (flags & O_DIRECT) {
-        unbuffered_fd = FileDescriptor::make_unmanaged(fd);
-        buffered_fd   = FileDescriptor::make_managed(
-            Context<Sys>::get()->open(path.c_str(), (flags | O_CLOEXEC) & ~O_DIRECT));
-    }
-    else {
-        buffered_fd = FileDescriptor::make_unmanaged(fd);
-        try {
-            unbuffered_fd = FileDescriptor::make_managed(
-                Context<Sys>::get()->open(path.c_str(), (flags | O_CLOEXEC) | O_DIRECT));
-        }
-        catch (const std::system_error &e) {
-            if (e.code().value() != EINVAL) {
-                throw;
-            }
-            unbuffered_fd      = nullopt;
-            m_dio_mem_align    = 0;
-            m_dio_offset_align = 0;
-        }
-    }
 }
 
 hipFileHandle_t
@@ -74,8 +43,8 @@ File::File(UnregisteredFile &&uf, const PassKey<FileMap> &)
     : m_client_fd{std::move(uf.client_fd)}, m_buffered_fd{std::move(uf.buffered_fd)},
       m_unbuffered_fd{std::move(uf.unbuffered_fd)}, m_dio_mem_align{uf.m_dio_mem_align},
       m_dio_offset_align{uf.m_dio_offset_align},
-      m_is_block_device{(uf.stx.stx_mask & STATX_TYPE) && S_ISBLK(uf.stx.stx_mode)},
-      m_is_regular_file{(uf.stx.stx_mask & STATX_TYPE) && S_ISREG(uf.stx.stx_mode)},
+      m_is_block_device{false},
+      m_is_regular_file{true},
       m_on_ext4_ordered{true},
       m_on_xfs{true}
 {
