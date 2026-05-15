@@ -53,8 +53,7 @@ static void RunBenchmark(const size_t min_bytes_to_hold) {
  */
 HIP_TEST_CASE(Performance_hipMemPoolTrimTo) {
   if (!AreMemPoolsSupported(0)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
   size_t min_bytes_to_hold = GENERATE(4_KB, 4_MB, 16_MB);
   RunBenchmark(min_bytes_to_hold);

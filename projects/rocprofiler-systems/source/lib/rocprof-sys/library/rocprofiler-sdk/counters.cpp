@@ -152,7 +152,7 @@ counter_storage::counter_storage(const client_data* _tool_data, std::uint64_t _d
 
     {
         constexpr auto _unit = ::perfetto::CounterTrack::Unit::UNIT_COUNT;
-        track_name           = fmt::format(" GPU {} [{}]", _metric_name, device_id);
+        track_name           = fmt::format("GPU {} [{}]", _metric_name, device_id);
         track                = std::make_unique<counter_track_type>(
             ::perfetto::StaticString(track_name.c_str()));
 
