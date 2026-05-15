@@ -2,23 +2,20 @@
 #
 # SPDX-License-Identifier: MIT
 
-# These examples use the hipFile C API directly from C++ (matching the
-# style of the standalone aiscp/offsetcp/read-write-check programs).
-# They deliberately bypass ais_add_executable and wire the dependencies
-# in by hand.
+# Async examples for the hipFile C API. Same style as examples/basics:
+# bypass ais_add_executable and wire dependencies in by hand. Shared helpers
+# come from the examples_common target defined in examples/common; the parent
+# CMakeLists adds examples/common before examples/async, so the target is in
+# scope by the time we reach this file.
 
-set(BASICS_EXAMPLES
-    bufregister-write
-    no-bufregister-write
-    no-odirect-write
-    iterative-read
-    iterative-devmem-offset-read
-    various-mem-rw
-    subregion-write
-    roundtrip-verify
+set(ASYNC_EXAMPLES
+    roundtrip-async
+    roundtrip-async-nonblocking-stream
+    roundtrip-async-multi-stream
+    roundtrip-async-multi-stream-registered
 )
 
-foreach(example ${BASICS_EXAMPLES})
+foreach(example ${ASYNC_EXAMPLES})
     add_executable(${example} "${example}.cpp")
     target_compile_features(${example} PRIVATE cxx_std_17)
     set_target_properties(${example} PROPERTIES CXX_EXTENSIONS OFF)

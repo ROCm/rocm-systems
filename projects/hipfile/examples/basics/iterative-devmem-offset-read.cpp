@@ -31,7 +31,7 @@
  *   6. ftruncate to exact size + hash verify
  */
 
-#include "basics_common.h"
+#include "examples_common.h"
 
 #include <hipfile.h>
 #include <hip/hip_runtime_api.h>

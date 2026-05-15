@@ -26,7 +26,7 @@
  *   6. Hash both files and compare
  */
 
-#include "basics_common.h"
+#include "examples_common.h"
 
 #include <hipfile.h>
 #include <hip/hip_runtime_api.h>

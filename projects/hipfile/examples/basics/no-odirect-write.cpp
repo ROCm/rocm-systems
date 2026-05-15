@@ -28,7 +28,7 @@
  *   HIPFILE_ALLOW_COMPAT_MODE=1 ./no-odirect-write OUTPUT
  */
 
-#include "basics_common.h"
+#include "examples_common.h"
 
 #include <hipfile.h>
 #include <hip/hip_runtime_api.h>

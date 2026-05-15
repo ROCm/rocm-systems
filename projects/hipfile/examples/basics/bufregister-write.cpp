@@ -22,7 +22,7 @@
  *   7. Hash both buffers and compare
  */
 
-#include "basics_common.h"
+#include "examples_common.h"
 
 #include <hipfile.h>
 #include <hip/hip_runtime_api.h>
