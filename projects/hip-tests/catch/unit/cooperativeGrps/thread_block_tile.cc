@@ -908,7 +908,7 @@ struct MaxMagnitude {
   }
 };
 
-void __global__ maxMagnitude(Vector* result)
+void __global__ maxMagnitude(Vector* result, AggregationType* aggregationType)
 {
   cg::thread_block mygroup = cg::this_thread_block();
   auto mytile = cg::tiled_partition<4>(mygroup);
@@ -918,7 +918,19 @@ void __global__ maxMagnitude(Vector* result)
                     { 0, 7 },
                     { 4, 1} };
 
-  *result = cg::reduce(mytile, input[threadIdx.x], op);
+  switch (*aggregationType) {
+  case AggregationType::Reduce:
+    result[threadIdx.x] = cg::reduce(mytile, input[threadIdx.x], op);
+    break;
+  case AggregationType::InclusiveScan:
+    result[threadIdx.x] = cg::inclusive_scan(mytile, input[threadIdx.x], op);
+    break;
+  case AggregationType::ExclusiveScan:
+    result[threadIdx.x] = cg::exclusive_scan(mytile, input[threadIdx.x], op);
+    break;
+  default:
+    assert(false && "Unexpected aggType");
+  }
 }
 
 // TODO g-h-c write a particular case for trivially copyable parameters for scans
@@ -926,21 +938,84 @@ void __global__ maxMagnitude(Vector* result)
 // tests that we can pass trivially copyable structs as values to reduce
 HIP_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Trivially_Copyable_Parameters)
 {
-  LinearAllocGuard<Vector> h_result(LinearAllocs::malloc, sizeof(Vector));
-  LinearAllocGuard<Vector> d_result(LinearAllocs::hipMalloc, sizeof(Vector));
   dim3 gridDim = { 1 };
   dim3 blockDim = { 4 };
-  void* devicePtr = d_result.ptr();
-  void* args[] = { &devicePtr };
+  LinearAllocGuard<Vector> h_result(LinearAllocs::malloc, sizeof(Vector) * blockDim.x);
+  LinearAllocGuard<Vector> d_result(LinearAllocs::hipMalloc, sizeof(Vector) * blockDim.x);
+  LinearAllocGuard<AggregationType> d_aggType(LinearAllocs::hipMalloc, sizeof(AggregationType));
+  std::array<void*, 2> devicePtrs = { d_result.ptr(), d_aggType.ptr() };
+  void* args[devicePtrs.size()];
   Vector* result;
+  AggregationType aggType = AggregationType::Reduce;
 
+  for (int i = 0; i < devicePtrs.size(); i++) {
+    args[i] = &devicePtrs[i];
+  }
+
+  HIP_CHECK(hipMemcpy(d_aggType.ptr(), &aggType, sizeof(aggType), hipMemcpyHostToDevice));
   HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(maxMagnitude), gridDim, blockDim, args, 0, nullptr));
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
                       h_result.size_bytes(), hipMemcpyDeviceToHost));
-  result = &h_result.host_ptr()[0];
-  REQUIRE((result->x == 1 && result->y == 9));
+
+  for (unsigned int idx = 0; idx < blockDim.x; idx++) {
+    result = &h_result.host_ptr()[idx];
+    REQUIRE((result->x == 1 && result->y == 9));
+  }
+}
+
+TEST_CASE(Unit_Thread_Block_Tile_Scan_Trivially_Copyable_Parameters)
+{
+  dim3 gridDim = { 1 };
+  dim3 blockDim = { 4 };
+  LinearAllocGuard<Vector> h_result(LinearAllocs::malloc, sizeof(Vector) * blockDim.x);
+  LinearAllocGuard<Vector> d_result(LinearAllocs::hipMalloc, sizeof(Vector) * blockDim.x);
+  LinearAllocGuard<AggregationType> d_aggType(LinearAllocs::hipMalloc, sizeof(AggregationType));
+  std::array<void*, 2> devicePtrs = { d_result.ptr(), d_aggType.ptr() };
+  void* args[devicePtrs.size()];
+  Vector* result;
+  AggregationType aggType;
+
+  for (int i = 0; i < devicePtrs.size(); i++) {
+    args[i] = &devicePtrs[i];
+  }
+
+  SECTION("inclusive") {
+    aggType = AggregationType::InclusiveScan;
+    HIP_CHECK(hipMemcpy(d_aggType.ptr(), &aggType, sizeof(aggType), hipMemcpyHostToDevice));
+    HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(maxMagnitude), gridDim, blockDim, args, 0, nullptr));
+    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
+                        h_result.size_bytes(), hipMemcpyDeviceToHost));
+    result = &h_result.host_ptr()[0];
+    REQUIRE((result->x == 2 && result->y == 3));
+    result = &h_result.host_ptr()[1];
+    REQUIRE((result->x == 1 && result->y == 9));
+    result = &h_result.host_ptr()[2];
+    REQUIRE((result->x == 1 && result->y == 9));
+    result = &h_result.host_ptr()[3];
+    REQUIRE((result->x == 1 && result->y == 9));
+  }
+
+  SECTION("exclusive") {
+    aggType = AggregationType::ExclusiveScan;
+    HIP_CHECK(hipMemcpy(d_aggType.ptr(), &aggType, sizeof(aggType), hipMemcpyHostToDevice));
+    HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(maxMagnitude), gridDim, blockDim, args, 0, nullptr));
+    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
+                        h_result.size_bytes(), hipMemcpyDeviceToHost));
+    result = &h_result.host_ptr()[0];
+    REQUIRE((result->x == 0 && result->y == 0));
+    result = &h_result.host_ptr()[1];
+    REQUIRE((result->x == 2 && result->y == 3));
+    result = &h_result.host_ptr()[2];
+    REQUIRE((result->x == 1 && result->y == 9));
+    result = &h_result.host_ptr()[3];
+    REQUIRE((result->x == 1 && result->y == 9));
+  }
 }
 
 template <size_t NumElems>
