@@ -123,9 +123,9 @@ def test_csv_data(csv_data):
         assert int(row["End_Timestamp"]) > 0
         assert int(row["Start_Timestamp"]) < int(row["End_Timestamp"])
 
-    # Confirm that the dispatch-table host-stream APIs we trace surface as
-    # function calls in the CSV (mirrors rocjpeg-trace's expected-symbols list).
-    expected_calls = {
+    # Every traced rocSHMEM host-stream API should surface as a function call in
+    # the CSV (mirrors the per-call assertions in rocdecode-trace and rocjpeg-trace).
+    for call in [
         "barrier_all_on_stream",
         "quiet_on_stream",
         "sync_all_on_stream",
@@ -135,13 +135,8 @@ def test_csv_data(csv_data):
         "putmem_on_stream",
         "putmem_signal_on_stream",
         "signal_wait_until_on_stream",
-    }
-    observed = set(api_calls)
-    # At least one of the traced ops should appear; the demo program decides
-    # which subset is exercised at runtime.
-    assert (
-        observed & expected_calls
-    ), f"No rocSHMEM host-stream API names found in CSV; saw: {sorted(observed)}"
+    ]:
+        assert call in api_calls
 
 
 def test_perfetto_data(pftrace_data, json_data):

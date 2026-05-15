@@ -29,7 +29,15 @@ project(
     VERSION 0.0.0)
 
 find_package(rocprofiler-sdk REQUIRED)
-find_package(rocSHMEM)
+# rocSHMEM's installed config references both MPI::MPI_CXX and
+# rocprofiler-register::rocprofiler-register in the roc::rocshmem link interface, so both
+# must be located first or find_package(rocshmem) will fail to define the imported target.
+# Package name is lowercase to match /opt/rocm/lib/cmake/rocshmem/.
+find_package(MPI COMPONENTS CXX)
+find_package(rocprofiler-register CONFIG PATHS ${ROCM_PATH} /opt/rocm)
+if(MPI_CXX_FOUND AND rocprofiler-register_FOUND)
+    find_package(rocshmem CONFIG PATHS ${ROCM_PATH} /opt/rocm)
+endif()
 
 rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py)
 
@@ -38,22 +46,37 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
 
 set(rocshmem-tracing-env "${PRELOAD_ENV}")
 
-# rocSHMEM real applications require MPI + multiple GPUs to be useful, so this integration
-# test is only enabled when a rocshmem-demo / rocshmem-example target is available in the
-# build (mirrors how rocjpeg-trace gates on rocjpeg-demo).
+# rocSHMEM needs an Open MPI launcher (mpirun / mpiexec) to bootstrap the symmetric heap,
+# so this integration test is only enabled when (a) the in-tree rocshmem-demo target is
+# built, and (b) an mpirun / mpiexec executable is on PATH. Allow root execution for
+# container CI (mirrors the mpi-ranks test pattern).
+find_program(MPIRUN_EXECUTABLE NAMES mpirun mpiexec)
+
+set(IS_DISABLED OFF)
 if(NOT TARGET rocshmem-demo)
     set(IS_DISABLED ON)
 endif()
+if(NOT MPIRUN_EXECUTABLE)
+    set(IS_DISABLED ON)
+endif()
 
+set(MPI_ENV_VARS OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1)
+
+# rocSHMEM cannot bootstrap with a single PE (MPI_Win_create fails) so the demo is
+# launched with -np 2. Each rank gets its own per-rank output directory keyed by
+# %env{OMPI_COMM_WORLD_RANK}% so the two rocprofv3 instances don't race on the same files.
+# Validation only inspects rank 0's trace; the API surface exercised by both ranks is
+# identical.
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocshmem-tracing
     COMMAND
+        ${CMAKE_COMMAND} -E env ${MPI_ENV_VARS} ${MPIRUN_EXECUTABLE} -np 2
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --rocshmem-trace -d
-        ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out --output-format json csv
-        --log-level env --
+        ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace/rank.%env{OMPI_COMM_WORLD_RANK}% -o out
+        --output-format json csv --log-level env --
         $<IF:$<TARGET_EXISTS:rocshmem-demo>,$<TARGET_FILE:rocshmem-demo>,rocshmem-demo>
     DEPENDS rocshmem-demo
-    TIMEOUT 45
+    TIMEOUT 60
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-rocshmem-tracing
@@ -65,13 +88,13 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py
     CONFIG pytest.ini
     ARGS --json-input
-         ${CMAKE_CURRENT_BINARY_DIR}/rocshmem-demo-trace/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/rocshmem-demo-trace/rank.0/out_results.json
          --otf2-input
-         ${CMAKE_CURRENT_BINARY_DIR}/rocshmem-demo-trace/out_results.otf2
+         ${CMAKE_CURRENT_BINARY_DIR}/rocshmem-demo-trace/rank.0/out_results.otf2
          --pftrace-input
-         ${CMAKE_CURRENT_BINARY_DIR}/rocshmem-demo-trace/out_results.pftrace
+         ${CMAKE_CURRENT_BINARY_DIR}/rocshmem-demo-trace/rank.0/out_results.pftrace
          --csv-input
-         ${CMAKE_CURRENT_BINARY_DIR}/rocshmem-demo-trace/out_rocshmem_api_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocshmem-demo-trace/rank.0/out_rocshmem_api_trace.csv
     TIMEOUT 45
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-rocshmem-tracing
