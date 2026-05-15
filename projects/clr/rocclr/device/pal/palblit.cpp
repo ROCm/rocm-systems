@@ -2159,6 +2159,15 @@ bool KernelBlitManager::fillBuffer(device::Memory& memory, const void* pattern, 
   }
 
   const uintptr_t fill_buf_addr = memory.virtualAddress() + origin[0];
+
+  if ((fill_buf_addr % patternSize) != 0) {
+    LogPrintfError(
+        "fillBuffer: buffer VA 0x%lx with origin %zu is not aligned to pattern size %zu; "
+        "kernel path requires (VA + origin) %% patternSize == 0",
+        memory.virtualAddress(), origin[0], patternSize);
+    return false;
+  }
+
   constexpr uint32_t kFillType = FillBufferUnAligned;
 
   Memory* mem = &gpuMem(memory);
@@ -2176,7 +2185,7 @@ bool KernelBlitManager::fillBuffer(device::Memory& memory, const void* pattern, 
 
   // Calculate head, body, body-tail, tail, and tiled body counts
   // Head/tail are byte counts. Body/body-tail are element counts.
-  constexpr size_t tile_size = sizeof(ulong) * 2;
+  constexpr size_t tile_size = 2 * sizeof(uint64_t);
   uintptr_t end_addr = fill_buf_addr + size[0];
 
   uintptr_t body_aligned_start = alignUp(fill_buf_addr, bodyElemSize);
@@ -2214,13 +2223,21 @@ bool KernelBlitManager::fillBuffer(device::Memory& memory, const void* pattern, 
 
   assert(head_count <= (2 * bodyElemSize - 2) &&
          "head_count must fit cleanup region (small-buffer case may be up to 2*bodyElemSize-2)");
-  assert(body_count <= (tile_size / bodyElemSize) &&
-         "body_count should fit before first 16-byte tile");
-  assert(body_tail_count <= (tile_size / bodyElemSize) &&
-         "body_tail_count should fit after last 16-byte tile");
+  // body_aligned_start is 8-aligned, tile_start = alignUp(body_aligned_start, 16),
+  // so (tile_start - body_aligned_start) / bodyElemSize is structurally 0 or 1.
+  assert(body_count <= 1 && "body_count is structurally 0 or 1");
+  assert(body_tail_count <= 1 && "body_tail_count is structurally 0 or 1");
   assert(tail_count < bodyElemSize && "tail_count should be less than body element size");
-  assert((head_count + body_count + body_tail_count + tail_count) < 16 &&
-         "cleanup region must fit in the kernel's 16-lane cleanup gate");
+  const size_t cleanup_total = head_count + body_count + body_tail_count + tail_count;
+  assert(cleanup_total <= 16 && "cleanup region must fit in the kernel's 16-lane cleanup gate");
+  if (cleanup_total > 16) {
+    LogPrintfError(
+        "fillBuffer: cleanup region size %zu exceeds 16-lane kernel gate "
+        "(head=%zu body=%zu body_tail=%zu tail=%zu, fill_buf_addr=0x%lx, size=%zu, patternSize=%zu)",
+        cleanup_total, head_count, body_count, body_tail_count, tail_count,
+        fill_buf_addr, size[0], patternSize);
+    return false;
+  }
 
   const size_t tail_offset =
       head_count + body_count * bodyElemSize + body_tile_count * tile_size + body_tail_count * bodyElemSize;
@@ -2244,6 +2261,8 @@ bool KernelBlitManager::fillBuffer(device::Memory& memory, const void* pattern, 
     uint16_t s0, s1, s2, s3;
   } counts = {static_cast<uint16_t>(head_count), static_cast<uint16_t>(body_count),
               static_cast<uint16_t>(body_tail_count), static_cast<uint16_t>(tail_count)};
+  static_assert(sizeof(size_t) == sizeof(uint64_t),
+                "Kernel arg passing assumes 64-bit size_t");
   setArgument(kernels_[kFillType], 0, sizeof(cl_mem), &mem, origin[0]);
   setArgument(kernels_[kFillType], 1, sizeof(cl_mem), &pGpuCB);
   setArgument(kernels_[kFillType], 2, sizeof(tiled_pattern), &tiled_pattern);
