@@ -656,7 +656,8 @@ typedef struct
 typedef enum
 {
     AQLPROFILE_SPM_PARAMETER_TYPE_BUFFER_SIZE = 0,
-    AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL,
+    AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL,  ///< Sample interval in clock cycles.
+                                                    ///< Must be a multiple of 32.
     AQLPROFILE_SPM_PARAMETER_TYPE_TIMEOUT,
     AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_MODE,
     AQLPROFILE_SPM_PARAMETER_TYPE_LAST,
@@ -673,6 +674,20 @@ typedef struct
     aqlprofile_spm_parameter_type_t type;
     uint64_t                        value;
 } aqlprofile_spm_parameter_t;
+
+typedef struct aqlprofile_spm_available_configuration_t
+{
+    aqlprofile_spm_parameter_type_t type;
+    union
+    {
+        struct
+        {
+            uint64_t                                 min_interval;
+            uint64_t                                 max_interval;
+            aqlprofile_spm_parameter_interval_mode_t mode;
+        } interval;  // interval in cycles
+    };
+} aqlprofile_spm_available_configuration_t;
 
 /**
  * @brief AQLprofile struct containing information for SPM counter events
@@ -811,6 +826,36 @@ aqlprofile_spm_decode_query(aqlprofile_spm_buffer_desc_t  desc,
 bool
 aqlprofile_spm_is_event_supported(aqlprofile_agent_handle_t agent, aqlprofile_pmc_event_t event);
 
+/**
+ * @brief Callback that provides the available SPM configurations for an agent.
+ *        The config array is only valid for the duration of the callback and
+ *        should not be freed or stored beyond the callback's return.
+ *
+ * @param[in] config     Array of available SPM configurations
+ * @param[in] num_config Number of configurations in the array
+ * @param[in] user_data  User data supplied by ::aqlprofile_spm_query_agent_configurations
+ */
+typedef hsa_status_t (*aqlprofile_spm_available_configurations_cb_t)(
+    const aqlprofile_spm_available_configuration_t* config,
+    size_t                                          num_config,
+    void*                                           user_data);
+
+/**
+ * @brief Query supported SPM configurations for a given agent.
+ *        Supported configurations (e.g. sample interval ranges) are returned
+ *        via the provided callback.
+ *
+ * @param[in] agent    Agent handle to query configurations for
+ * @param[in] cb       Callback in which configurations are returned
+ * @param[in] userdata User data passed back to the callback
+ * @retval HSA_STATUS_SUCCESS                if configurations were successfully queried
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT if cb is NULL
+ * @retval HSA_STATUS_ERROR_INVALID_AGENT    if agent is not found or does not support SPM
+ */
+hsa_status_t
+aqlprofile_spm_query_agent_configurations(aqlprofile_agent_handle_t                    agent,
+                                          aqlprofile_spm_available_configurations_cb_t cb,
+                                          void*                                        userdata);
 #ifdef __cplusplus
 }
 #endif

@@ -1,5 +1,7 @@
 # Transport sources (paths relative to PROJECT_SOURCE_DIR to match SRC_FILES convention)
 set(NET_IB_CAST_SOURCES
+    src/transport/net_ib_limits.h
+    src/transport/net_ib_cast/net_ib_cast_inspect.h
     src/transport/net_ib_cast/common_cast.h
     src/transport/net_ib_cast/connect_cast.h
     src/transport/net_ib_cast/gin_cast.h
@@ -26,6 +28,7 @@ set(NET_IB_CAST_SOURCES
 # is forwarded to target_include_directories(rccl ...).
 set(NET_IB_CAST_INCLUDE_DIRS
     "${CMAKE_BINARY_DIR}/hipify/src/transport/net_ib_cast"
+    "${CMAKE_BINARY_DIR}/hipify/src/transport"
     PARENT_SCOPE)
 
 # Propagate sources to parent scope so src/CMakeLists.txt can use ${NET_IB_CAST_SOURCES}
