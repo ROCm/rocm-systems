@@ -31,6 +31,7 @@
 #include <memory>
 #include <unordered_set>
 
+#include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/fdinfo.h"
 #include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi_logger.h"
@@ -120,35 +121,50 @@ amdsmi_status_t AMDSmiGPUDevice::amdgpu_query_cpu_affinity(std::string& cpu_affi
   return drm_.amdgpu_query_cpu_affinity(domain_bus_sstream.str(), cpu_affinity);
 }
 
+namespace {
 // cache the compute process list for the device
-static std::atomic<std::chrono::steady_clock::time_point> last_compute_process_list_update_time{
-    std::chrono::steady_clock::time_point{}};
-static const std::chrono::milliseconds compute_process_list_cache_duration =
-    std::chrono::milliseconds(500);  // 500 ms
-static std::mutex compute_process_list_mutex;
-static uint32_t num_running_processes = 0;
-static std::unique_ptr<rsmi_process_info_t[]> list_all_processes_ptr = nullptr;
-static std::unordered_map<uint32_t, amdsmi_proc_info_t> process_info_cache_map;
+struct ComputeProcessCache {
+  std::unique_ptr<rsmi_process_info_t[]> list_all_processes_ptr = nullptr;
+  std::atomic<std::chrono::steady_clock::time_point> last_compute_process_list_update_time{
+      std::chrono::steady_clock::time_point{}};
+  std::mutex mtx;
+  uint32_t num_running_processes = 0;
+};
+
+std::unordered_map<uint32_t, amdsmi_proc_info_t> process_info_cache_map;
+std::unordered_map<uint32_t, ComputeProcessCache*> compute_process_cache_map;
+std::mutex compute_process_list_mutex;
+static const std::chrono::milliseconds kComputeProcessCacheDuration =
+    std::chrono::milliseconds(read_env_ms("AMDSMI_PROCESS_INFO_CACHE_MS", 1));
+
+}  // namespace
 
 int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
     GPUComputeProcessList_t& compute_process_list, ComputeProcessListType_t list_type) {
-  /**
-   *  Clear the compute_process_list before starting.
-   */
-  compute_process_list.clear();
+  ComputeProcessCache* cache_ptr = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(compute_process_list_mutex);
+    if (compute_process_cache_map.find(gpu_id_) == compute_process_cache_map.end()) {
+      compute_process_cache_map[gpu_id_] = new ComputeProcessCache();
+    }
+    cache_ptr = compute_process_cache_map[gpu_id_];
+  }
 
   /**
    *  The first call to rsmi_compute_process_info_get() to find the number of
    *  rsmi_process_info_t currently running on the system.
    */
   auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
+  auto now = std::chrono::steady_clock::now();
+  auto last_read_delta = std::chrono::duration_cast<std::chrono::milliseconds>(
+      now - cache_ptr->last_compute_process_list_update_time.load());
   // only get new data if cache duration has expired
-  if (std::chrono::steady_clock::now() - last_compute_process_list_update_time.load() >
-      compute_process_list_cache_duration) {
+  if (last_read_delta > kComputeProcessCacheDuration) {
     // double-check locking pattern here
-    std::lock_guard<std::mutex> lock(compute_process_list_mutex);
-    if (std::chrono::steady_clock::now() - last_compute_process_list_update_time.load() <=
-        compute_process_list_cache_duration) {
+    std::lock_guard<std::mutex> lock(cache_ptr->mtx);
+    if (std::chrono::steady_clock::now() -
+            cache_ptr->last_compute_process_list_update_time.load() <=
+        kComputeProcessCacheDuration) {
       // another thread already updated the data while we were waiting for the lock
       // so just return the existing data
       return rsmi_status_t::RSMI_STATUS_SUCCESS;
@@ -157,8 +173,9 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
     // Clear the process info cache when refreshing
     process_info_cache_map.clear();
 
-    status_code = rsmi_compute_process_info_get(nullptr, &num_running_processes);
-    if ((status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) || (num_running_processes <= 0)) {
+    status_code = rsmi_compute_process_info_get(nullptr, &cache_ptr->num_running_processes);
+    if ((status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) ||
+        (cache_ptr->num_running_processes <= 0)) {
       return status_code;
     }
 
@@ -168,19 +185,20 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
      * second call to rsmi_compute_process_info_get() to get the actual data into
      *  the allocated rsmi_process_info_t array.
      */
-    list_all_processes_ptr = std::make_unique<rsmi_process_info_t[]>(num_running_processes);
+    cache_ptr->list_all_processes_ptr =
+        std::make_unique<rsmi_process_info_t[]>(cache_ptr->num_running_processes);
 
-    status_code =
-        rsmi_compute_process_info_get(list_all_processes_ptr.get(), &num_running_processes);
+    status_code = rsmi_compute_process_info_get(cache_ptr->list_all_processes_ptr.get(),
+                                                &cache_ptr->num_running_processes);
     if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
       return status_code;
     }
 
-    if (num_running_processes <= 0) {
+    if (cache_ptr->num_running_processes <= 0) {
       return rsmi_status_t::RSMI_STATUS_SUCCESS;  // No processes running
     }
 
-    last_compute_process_list_update_time = std::chrono::steady_clock::now();
+    cache_ptr->last_compute_process_list_update_time = std::chrono::steady_clock::now();
   }
 
   /**
@@ -349,11 +367,12 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
    *  Transfer/Save the ones linked to this device.
    */
   compute_process_list.clear();
-  for (auto process_idx = uint32_t(0); process_idx < num_running_processes; ++process_idx) {
+  std::lock_guard<std::mutex> lock(cache_ptr->mtx);
+  for (auto process_idx = uint32_t(0); process_idx < cache_ptr->num_running_processes;
+       ++process_idx) {
     if (list_type == ComputeProcessListType_t::kAllProcesses ||
         list_type == ComputeProcessListType_t::kAllProcessesOnDevice) {
-      std::lock_guard<std::mutex> lock(compute_process_list_mutex);
-      update_list_by_running_device(list_all_processes_ptr[process_idx]);
+      update_list_by_running_device(cache_ptr->list_all_processes_ptr[process_idx]);
     }
   }
 

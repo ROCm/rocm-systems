@@ -16,7 +16,8 @@
 
 template <bool should_synchronize, bool unaligned = false, typename F>
 void Memcpy2DDeviceToHostShell(F memcpy_func, const hipStream_t kernel_stream = nullptr) {
-  const auto kind = GENERATE(hipMemcpyDeviceToHost, hipMemcpyDefault);
+  const auto kind =
+      isQuickLevel() ? hipMemcpyDeviceToHost : GENERATE(hipMemcpyDeviceToHost, hipMemcpyDefault);
 
   constexpr size_t cols = 127;
   constexpr size_t rows = 128;
@@ -46,7 +47,8 @@ void Memcpy2DDeviceToHostShell(F memcpy_func, const hipStream_t kernel_stream = 
 
 template <bool should_synchronize, bool enable_peer_access, bool unaligned = false, typename F>
 void Memcpy2DDeviceToDeviceShell(F memcpy_func, const hipStream_t kernel_stream = nullptr) {
-  const auto kind = GENERATE(hipMemcpyDeviceToDevice, hipMemcpyDefault);
+  const auto kind = isQuickLevel() ? hipMemcpyDeviceToDevice
+                                   : GENERATE(hipMemcpyDeviceToDevice, hipMemcpyDefault);
 
   constexpr size_t cols = 127;
   constexpr size_t rows = 128;
@@ -61,10 +63,7 @@ void Memcpy2DDeviceToDeviceShell(F memcpy_func, const hipStream_t kernel_stream 
     int can_access_peer = 0;
     HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, src_device, dst_device));
     if (!can_access_peer) {
-      std::string msg = "Skipped as peer access cannot be enabled between devices " +
-          std::to_string(src_device) + " " + std::to_string(dst_device);
-      HipTest::HIP_SKIP_TEST(msg.c_str());
-      return;
+      HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
     }
   }
 
@@ -106,7 +105,8 @@ void Memcpy2DDeviceToDeviceShell(F memcpy_func, const hipStream_t kernel_stream 
 
 template <bool should_synchronize, bool unaligned = false, typename F>
 void Memcpy2DHostToDeviceShell(F memcpy_func, const hipStream_t kernel_stream = nullptr) {
-  const auto kind = GENERATE(hipMemcpyHostToDevice, hipMemcpyDefault);
+  const auto kind = isQuickLevel() ? hipMemcpyHostToDevice
+                                   : GENERATE(hipMemcpyHostToDevice, hipMemcpyDefault);
 
   constexpr size_t cols = 127;
   constexpr size_t rows = 128;
@@ -140,7 +140,8 @@ void Memcpy2DHostToDeviceShell(F memcpy_func, const hipStream_t kernel_stream = 
 
 template <bool should_synchronize, typename F>
 void Memcpy2DHostToHostShell(F memcpy_func, const hipStream_t kernel_stream = nullptr) {
-  const auto kind = GENERATE(hipMemcpyHostToHost, hipMemcpyDefault);
+  const auto kind =
+      isQuickLevel() ? hipMemcpyHostToHost : GENERATE(hipMemcpyHostToHost, hipMemcpyDefault);
 
   constexpr size_t cols = 127;
   constexpr size_t rows = 128;

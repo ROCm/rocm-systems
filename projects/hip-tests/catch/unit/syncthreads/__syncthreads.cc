@@ -27,7 +27,7 @@
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit___syncthreads_Positive_Basic) {
+HIP_TEST_CASE(Unit___syncthreads_Positive_Basic) {
   const auto kGridSize = 2;
   const auto kBlockSize = GENERATE(13, 32, 64, 513);
 

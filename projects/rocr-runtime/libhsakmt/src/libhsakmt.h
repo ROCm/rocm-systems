@@ -34,6 +34,7 @@
 #include <stdint.h>
 #include <limits.h>
 #include <stdio.h>
+#include <assert.h>
 
 extern int hsakmt_udmabuf_dev_fd;
 extern unsigned long hsakmt_kfd_open_count;
@@ -41,6 +42,7 @@ extern bool hsakmt_forked;
 extern pthread_mutex_t hsakmt_mutex;
 extern bool hsakmt_is_dgpu;
 extern int hsakmt_zfb_support;
+extern int hsakmt_pm4_target_xcc;
 
 extern HsaVersionInfo hsakmt_kfd_version_info;
 extern HsaKFDContext hsakmt_primary_kfd_ctx;
@@ -94,6 +96,8 @@ extern int hsakmt_page_shift;
 #define ALIGN_UP(x,align) (((uint64_t)(x) + (align) - 1) & ~(uint64_t)((align)-1))
 #define ALIGN_UP_32(x,align) (((uint32_t)(x) + (align) - 1) & ~(uint32_t)((align)-1))
 #define PAGE_ALIGN_UP(x) ALIGN_UP(x,PAGE_SIZE)
+#define IS_ALIGNED(x, alignment) (((uint64_t)(x) & ((alignment) - 1)) == 0)
+#define IS_PAGE_ALIGNED(x) (IS_ALIGNED(x, PAGE_SIZE))
 #define BITMASK(n) ((n) ? (UINT64_MAX >> (sizeof(UINT64_MAX) * CHAR_BIT - (n))) : 0)
 #define ARRAY_LEN(array) (sizeof(array) / sizeof(array[0]))
 
@@ -131,10 +135,24 @@ extern int hsakmt_debug_level;
         }                                       \
 })
 
+#define CHECK_CTX(ctx, ret_val) \
+	do { \
+		assert(ctx); \
+		if (!(ctx)) { \
+			pr_err("Expected a non-null ptr for HsaKFDContext"); \
+			return (ret_val); \
+		} \
+	} while (0)
+
 /* Expects gfxv (full) in decimal */
 #define HSA_GET_GFX_VERSION_MAJOR(gfxv)   (((gfxv) / 10000) % 100)
 #define HSA_GET_GFX_VERSION_MINOR(gfxv)   (((gfxv) / 100) % 100)
 #define HSA_GET_GFX_VERSION_STEP(gfxv)    ((gfxv) % 100)
+
+/* Expects gfxv (full) in hexadecimal */
+#define HSA_GET_GFX_VERSION_HEX_MAJOR(gfxv)   (((gfxv) >> 16) & 0xff)
+#define HSA_GET_GFX_VERSION_HEX_MINOR(gfxv)   (((gfxv) >> 8) & 0xff)
+#define HSA_GET_GFX_VERSION_HEX_STEP(gfxv)    ((gfxv) & 0xff)
 
 /* Expects HSA_ENGINE_ID.ui32, returns gfxv (full) in hex */
 #define HSA_GET_GFX_VERSION_FULL(ui32) \
@@ -174,6 +192,7 @@ enum full_gfx_versions {
 	GFX_VERSION_GFX1151		= 0x0B0501,
 	GFX_VERSION_GFX1200		= 0x0C0000,
 	GFX_VERSION_GFX1201		= 0x0C0001,
+	GFX_VERSION_GFX1250		= 0x0C0500
 };
 
 struct hsa_gfxip_table {
@@ -193,6 +212,7 @@ HSAKMT_STATUS hsakmt_gpuid_to_nodeid(HsaKFDContext *ctx, uint32_t gpu_id, uint32
 uint32_t hsakmt_get_gfxv_by_node_id(HsaKFDContext *ctx, HSAuint32 node_id);
 bool hsakmt_prefer_ats(HsaKFDContext *ctx, HSAuint32 node_id);
 uint16_t hsakmt_get_device_id_by_node_id(HsaKFDContext *ctx, HSAuint32 node_id);
+HSAuint8 hsakmt_device_is_apu_by_node_id(HsaKFDContext *ctx, HSAuint32 node_id);
 uint16_t hsakmt_get_device_id_by_gpu_id(HsaKFDContext *ctx, HSAuint32 gpu_id);
 uint32_t hsakmt_get_direct_link_cpu(HsaKFDContext *ctx, uint32_t gpu_node);
 int get_drm_render_fd_by_gpu_id(HSAuint32 gpu_id);
@@ -259,5 +279,5 @@ bool hsakmt_is_forked_child(void);
 
 /* Calculate VGPR and SGPR register file size per CU */
 uint32_t hsakmt_get_vgpr_size_per_cu(uint32_t gfxv);
-#define SGPR_SIZE_PER_CU 0x4000
+uint32_t hsakmt_get_sgpr_size_per_cu(uint32_t gfxv);
 #endif

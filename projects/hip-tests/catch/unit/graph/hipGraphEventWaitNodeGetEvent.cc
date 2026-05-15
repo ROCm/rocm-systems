@@ -43,7 +43,7 @@ static void validateEventWaitNodeGetEvent(unsigned flag) {
 /**
  * Scenario 1
  */
-TEST_CASE(Unit_hipGraphEventWaitNodeGetEvent_Functional) {
+HIP_TEST_CASE(Unit_hipGraphEventWaitNodeGetEvent_Functional) {
   // Create event nodes with different flags and validate with
   // hipGraphEventWaitNodeGetEvent.
   SECTION("Flag = hipEventDefault") { validateEventWaitNodeGetEvent(hipEventDefault); }
@@ -56,7 +56,7 @@ TEST_CASE(Unit_hipGraphEventWaitNodeGetEvent_Functional) {
 /**
  * Scenario 2
  */
-TEST_CASE(Unit_hipGraphEventWaitNodeGetEvent_Negative) {
+HIP_TEST_CASE(Unit_hipGraphEventWaitNodeGetEvent_Negative) {
   hipGraph_t graph;
   HIP_CHECK(hipGraphCreate(&graph, 0));
   hipEvent_t event_out;

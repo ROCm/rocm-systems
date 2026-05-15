@@ -52,7 +52,7 @@ __global__ void validateGPU(int* const vec, const int value, size_t N, unsigned 
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_Params) {
+HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_Params) {
   constexpr size_t N = 1024;
   hipGraph_t graph;
   hipGraphNode_t alloc_node;
@@ -153,7 +153,7 @@ TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_Params) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_NotSupported) {
+HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_NotSupported) {
   constexpr size_t N = 1024;
   hipGraph_t graph;
   hipGraphNode_t alloc_node;
@@ -276,7 +276,7 @@ static void createFreeGraph(hipGraphExec_t* graph_exec, int* device_alloc) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipGraphAddMemAllocNode_Positive_FreeInGraph) {
+HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Positive_FreeInGraph) {
   hipGraphExec_t graph_exec;
 
   LinearAllocGuard<int> host_alloc =
@@ -308,7 +308,7 @@ TEST_CASE(Unit_hipGraphAddMemAllocNode_Positive_FreeInGraph) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipGraphAddMemAllocNode_Positive_FreeOutsideStream) {
+HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Positive_FreeOutsideStream) {
   hipGraphExec_t graph_exec;
 
   LinearAllocGuard<int> host_alloc(LinearAllocs::malloc, element_count * sizeof(int));
@@ -354,7 +354,7 @@ TEST_CASE(Unit_hipGraphAddMemAllocNode_Positive_FreeOutsideStream) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipGraphAddMemAllocNode_Positive_FreeOutsideGraph) {
+HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Positive_FreeOutsideGraph) {
   hipGraphExec_t graph_exec;
 
   LinearAllocGuard<int> host_alloc(LinearAllocs::malloc, element_count * sizeof(int));
@@ -400,7 +400,7 @@ TEST_CASE(Unit_hipGraphAddMemAllocNode_Positive_FreeOutsideGraph) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipGraphAddMemAllocNode_Positive_FreeSeparateGraph) {
+HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Positive_FreeSeparateGraph) {
   hipGraphExec_t graph_exec1, graph_exec2;
 
   LinearAllocGuard<int> host_alloc(LinearAllocs::malloc, element_count * sizeof(int));
@@ -450,14 +450,11 @@ TEST_CASE(Unit_hipGraphAddMemAllocNode_Positive_FreeSeparateGraph) {
  *  - HIP_VERSION >= 6.1
  */
 
-TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_1) {
+HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_1) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    HipTest::HIP_SKIP_TEST(
-        "Runtime doesn't support Memory Pool."
-        " Skip the test case.");
-    return;
+    HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
   }
 
   constexpr size_t N = 1024 * 1024;
@@ -560,14 +557,11 @@ TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_1) {
 * ------------------------
 *  - HIP_VERSION >= 6.1
 */
-TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_2) {
+HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_2) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    HipTest::HIP_SKIP_TEST(
-        "Runtime doesn't support Memory Pool."
-        " Skip the test case.");
-    return;
+    HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
   }
 
   constexpr size_t Nbytes = 512 * 1024 * 1024;
@@ -629,14 +623,11 @@ TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_2) {
  * ------------------------
  * - HIP_VERSION >= 6.1
  */
-TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_3) {
+HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_3) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    HipTest::HIP_SKIP_TEST(
-        "Runtime doesn't support Memory Pool."
-        " Skip the test case.");
-    return;
+    HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
   }
 
   constexpr size_t Nbytes = 512 * 1024 * 1024;
@@ -703,14 +694,11 @@ TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_3) {
  * ------------------------
  * - HIP_VERSION >= 6.1
  */
-TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_4) {
+HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_4) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    HipTest::HIP_SKIP_TEST(
-        "Runtime doesn't support Memory Pool."
-        " Skip the test case.");
-    return;
+    HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
   }
 
   constexpr size_t Nbytes = 512 * 1024 * 1024;
@@ -792,14 +780,11 @@ TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_4) {
 * ------------------------
 *  - HIP_VERSION >= 6.1
 */
-TEST_CASE(Unit_hipGraphAddMemAllocNode_Argument_Check) {
+HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Argument_Check) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    HipTest::HIP_SKIP_TEST(
-        "Runtime doesn't support Memory Pool."
-        " Skip the test case.");
-    return;
+    HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
   }
 
   constexpr size_t Nbytes = 512 * 1024 * 1024;
@@ -1012,14 +997,11 @@ TEST_CASE(Unit_hipGraphAddMemAllocNode_Argument_Check) {
  * ------------------------
  * - HIP_VERSION >= 6.1
  */
-TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_Instanciate_Graph_Again) {
+HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_Instanciate_Graph_Again) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    HipTest::HIP_SKIP_TEST(
-        "Runtime doesn't support Memory Pool."
-        " Skip the test case.");
-    return;
+    HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
   }
 
   constexpr size_t Nbytes = 512 * 1024 * 1024;
@@ -1074,14 +1056,11 @@ TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_Instanciate_Graph_Again) {
 * ------------------------
 * - HIP_VERSION >= 6.1
 */
-TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_Free_Alloc_Memory_Again) {
+HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_Free_Alloc_Memory_Again) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    HipTest::HIP_SKIP_TEST(
-        "Runtime doesn't support Memory Pool."
-        " Skip the test case.");
-    return;
+    HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
   }
 
   constexpr size_t Nbytes = 512 * 1024 * 1024;
@@ -1139,14 +1118,11 @@ TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_Free_Alloc_Memory_Again) {
 * ------------------------
 * - HIP_VERSION >= 6.1
 */
-TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_With_Cloneed_Graph) {
+HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_With_Cloneed_Graph) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    HipTest::HIP_SKIP_TEST(
-        "Runtime doesn't support Memory Pool."
-        " Skip the test case.");
-    return;
+    HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
   }
 
   constexpr size_t N = 512 * 1024 * 1024;

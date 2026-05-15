@@ -33,6 +33,7 @@ impl bindgen::callbacks::ParseCallbacks for UpperCamelCaseCallbacks {
             match original_item_name {
                 "amdsmi_processor_handle"
                 | "amdsmi_socket_handle"
+                | "amdsmi_node_handle"
                 | "processor_type_t"
                 | "amd_metrics_table_header_t" => {
                     Some(convert_to_upper_camel_case(original_item_name))

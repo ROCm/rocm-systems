@@ -10,7 +10,9 @@
 
 #include "gl_interop_common.hh"
 
-TEST_CASE(Unit_hipGraphicsResourceGetMappedPointer_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipGraphicsResourceGetMappedPointer_Positive_Basic) {
+  CHECK_IMAGE_SUPPORT
+
   GLContextScopeGuard gl_context;
 
   const int device_count = HipTest::getDeviceCount();
@@ -44,7 +46,9 @@ TEST_CASE(Unit_hipGraphicsResourceGetMappedPointer_Positive_Basic) {
   HIP_CHECK(hipGraphicsUnregisterResource(vbo_resource));
 }
 
-TEST_CASE(Unit_hipGraphicsResourceGetMappedPointer_Null_Parameters) {
+HIP_TEST_CASE(Unit_hipGraphicsResourceGetMappedPointer_Null_Parameters) {
+  CHECK_IMAGE_SUPPORT
+
   GLContextScopeGuard gl_context;
 
   const int device_count = HipTest::getDeviceCount();
@@ -92,7 +96,9 @@ TEST_CASE(Unit_hipGraphicsResourceGetMappedPointer_Null_Parameters) {
   HIP_CHECK(hipGraphicsUnregisterResource(vbo_resource));
 }
 
-TEST_CASE(Unit_hipGraphicsResourceGetMappedPointer_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipGraphicsResourceGetMappedPointer_Negative_Parameters) {
+  CHECK_IMAGE_SUPPORT
+
   GLContextScopeGuard gl_context;
 
   const int device_count = HipTest::getDeviceCount();

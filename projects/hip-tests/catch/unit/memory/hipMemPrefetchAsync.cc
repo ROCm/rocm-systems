@@ -32,11 +32,10 @@ __global__ void MemPrefetchAsyncKernel(int* C_d, const int* A_d, size_t N) {
   }
 }
 
-TEST_CASE(Unit_hipMemPrefetchAsync_Basic_AllDevices) {
+HIP_TEST_CASE(Unit_hipMemPrefetchAsync_Basic_AllDevices) {
   const auto supported_devices = GetDevicesWithPrefetchSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST("Test need at least one device with managed memory support");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
   LinearAllocGuard<int> alloc1(LinearAllocs::hipMallocManaged, kPageSize);
@@ -62,11 +61,10 @@ TEST_CASE(Unit_hipMemPrefetchAsync_Basic_AllDevices) {
   ArrayFindIfNot(alloc1.ptr(), fill_value, count);
 }
 
-TEST_CASE(Unit_hipMemPrefetchAsync_Sync_Behavior) {
+HIP_TEST_CASE(Unit_hipMemPrefetchAsync_Sync_Behavior) {
   const auto supported_devices = GetDevicesWithPrefetchSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST("Test need at least one device with managed memory support");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
   const auto device = supported_devices.front();
   const auto stream_type = GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
@@ -79,11 +77,10 @@ TEST_CASE(Unit_hipMemPrefetchAsync_Sync_Behavior) {
   HIP_CHECK(hipStreamSynchronize(sg.stream()));
 }
 
-TEST_CASE(Unit_hipMemPrefetchAsync_Rounding_Behavior) {
+HIP_TEST_CASE(Unit_hipMemPrefetchAsync_Rounding_Behavior) {
   auto supported_devices = GetDevicesWithPrefetchSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST("Test need at least one device with managed memory support");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
   const auto device = supported_devices.front();
   LinearAllocGuard<uint8_t> alloc(LinearAllocs::hipMallocManaged, 3 * kPageSize);
@@ -112,11 +109,10 @@ TEST_CASE(Unit_hipMemPrefetchAsync_Rounding_Behavior) {
           static_cast<int>(attribute));
 }
 
-TEST_CASE(Unit_hipMemPrefetchAsync_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipMemPrefetchAsync_Negative_Parameters) {
   auto supported_devices = GetDevicesWithPrefetchSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST("Test need at least one device with managed memory support");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
   supported_devices.push_back(hipCpuDeviceId);
   const auto device = GENERATE_COPY(from_range(supported_devices));

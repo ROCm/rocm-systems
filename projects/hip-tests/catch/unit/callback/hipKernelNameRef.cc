@@ -27,7 +27,7 @@
  *  - HIP_VERSION >= 5.2
  *  - Platform specific (AMD)
  */
-TEST_CASE(Unit_hipKernelNameRef_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipKernelNameRef_Positive_Basic) {
   hipModule_t kernel_module{nullptr};
   hipFunction_t kernel_function{nullptr};
 
@@ -49,7 +49,7 @@ TEST_CASE(Unit_hipKernelNameRef_Positive_Basic) {
  *  - HIP_VERSION >= 5.2
  *  - Platform specific (AMD)
  */
-TEST_CASE(Unit_hipKernelNameRef_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipKernelNameRef_Negative_Parameters) {
   hipFunction_t kernel_function{nullptr};
   REQUIRE(hipKernelNameRef(kernel_function) == nullptr);
 }

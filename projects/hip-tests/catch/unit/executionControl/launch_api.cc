@@ -9,7 +9,7 @@
 #include <hip_test_common.hh>
 #include <resource_guards.hh>
 
-TEST_CASE(Unit_hipLaunchByPtr_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipLaunchByPtr_Positive_Basic) {
   LinearAllocGuard<int> alloc(LinearAllocs::hipMallocManaged, 4);
 
   SECTION("hipConfigureCall") { HIP_CHECK(hipConfigureCall(dim3{1}, dim3{1}, 0, nullptr)); }
@@ -27,12 +27,12 @@ TEST_CASE(Unit_hipLaunchByPtr_Positive_Basic) {
   REQUIRE(alloc.ptr()[0] == 42);
 }
 
-TEST_CASE(Unit_hipLaunchByPtr_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipLaunchByPtr_Negative_Parameters) {
   HIP_CHECK(hipConfigureCall(dim3{1}, dim3{1}, 0, nullptr));
   HIP_CHECK_ERROR(hipLaunchByPtr(nullptr), hipErrorInvalidDeviceFunction);
 }
 
-TEST_CASE(Unit___hipPushCallConfiguration_Positive_Basic) {
+HIP_TEST_CASE(Unit___hipPushCallConfiguration_Positive_Basic) {
   StreamGuard stream_guard(Streams::created);
   HIP_CHECK(__hipPushCallConfiguration(dim3{1, 2, 3}, dim3{3, 2, 1}, 1024, stream_guard.stream()));
 
@@ -52,7 +52,7 @@ TEST_CASE(Unit___hipPushCallConfiguration_Positive_Basic) {
   REQUIRE(stream == stream_guard.stream());
 }
 
-TEST_CASE(Unit_hipLaunchByPtr_Verify_Capture) {
+HIP_TEST_CASE(Unit_hipLaunchByPtr_Verify_Capture) {
   LinearAllocGuard<int> alloc(LinearAllocs::hipMallocManaged, 4);
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));

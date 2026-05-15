@@ -41,7 +41,7 @@ static __global__ void square_kernel(int* Buff) {
  *    - Host specific (LINUX)
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE(Unit_hipMemImportFromShareableHandle_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_Positive_Basic) {
   CTX_CREATE();
 
   hipDevice_t device;
@@ -84,7 +84,7 @@ TEST_CASE(Unit_hipMemImportFromShareableHandle_Positive_Basic) {
  *    - Host specific (LINUX)
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE(Unit_hipMemImportFromShareableHandle_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_Negative_Parameters) {
   CTX_CREATE();
 
   hipDevice_t device;
@@ -140,7 +140,7 @@ TEST_CASE(Unit_hipMemImportFromShareableHandle_Negative_Parameters) {
  *    - Host specific (LINUX)
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl) {
+HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl) {
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
   int fd[2], fdSig[2];
@@ -265,7 +265,7 @@ TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl) {
  *    - Host specific (LINUX)
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl) {
+HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl) {
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
   int fd[2], fdSig[2];
@@ -413,7 +413,7 @@ TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl) {
  *    - Host specific (LINUX)
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl) {
+HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl) {
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
   int fd[2], fdSig[2], fdpid[2];
@@ -544,7 +544,7 @@ TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl) {
   }
 }
 
-TEST_CASE(Unit_hipMemImportFromShareableHandle_Capture) {
+HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_Capture) {
   CTX_CREATE();
 
   hipDevice_t device;

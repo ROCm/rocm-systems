@@ -99,4 +99,4 @@ __host__ static void double_precision_math_functions() {
 #endif
 }
 
-TEST_CASE(Unit_DoublePrecisionMathHost) { double_precision_math_functions(); }
+HIP_TEST_CASE(Unit_DoublePrecisionMathHost) { double_precision_math_functions(); }

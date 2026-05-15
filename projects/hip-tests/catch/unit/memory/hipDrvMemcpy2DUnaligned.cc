@@ -28,7 +28,7 @@
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_NegTst) {
+HIP_TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_NegTst) {
   // declare host and device arrays
   int rows, cols;
   rows = GENERATE(3, 4, 100);
@@ -170,7 +170,7 @@ TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_NegTst) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_FuncTst) {
+HIP_TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_FuncTst) {
   SECTION(
       "Different types of memory transfers functional tests to check if\
           copied array contains correct values") {
@@ -256,9 +256,7 @@ TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_FuncTst) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_Positive_Basic) {
-  CHECK_IMAGE_SUPPORT
-
+HIP_TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_Positive_Basic) {
   SECTION("Device to Device") {
     SECTION("Peer access enabled") {
       Memcpy2DDeviceToDeviceShell<false, true, true>(DrvMemcpy2DUnalignedAdapter());
@@ -285,9 +283,7 @@ TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_Positive_Basic) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_Positive_Synchronization_Behavior) {
-  CHECK_IMAGE_SUPPORT
-
+HIP_TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_Positive_Synchronization_Behavior) {
   HIP_CHECK(hipDeviceSynchronize());
 
   SECTION("Host to Device") { Memcpy2DHtoDSyncBehavior<true>(DrvMemcpy2DUnalignedAdapter(), true); }
@@ -312,6 +308,6 @@ TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_Positive_Synchronization_Behavior) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_Positive_Parameters) {
+HIP_TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_Positive_Parameters) {
   Memcpy2DZeroWidthHeight<false, true>(DrvMemcpy2DUnalignedAdapter());
 }

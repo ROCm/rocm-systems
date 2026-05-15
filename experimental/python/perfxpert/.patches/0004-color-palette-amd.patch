@@ -1,0 +1,30 @@
+diff --git a/packages/opencode/src/cli/ui.ts b/packages/opencode/src/cli/ui.ts
+index 46335d24a..c287c2d93 100644
+--- a/packages/opencode/src/cli/ui.ts
++++ b/packages/opencode/src/cli/ui.ts
+@@ -12,14 +12,22 @@ const wordmark = [
+
+ export const CancelledError = NamedError.create("UICancelledError", z.void())
+
++// AMD ROCm PerfXpert palette — WCAG AA contrast on dark+light terminal bg.
++// AMD red #ED1C24 = RGB(237, 28, 36).
++// Uses ANSI 24-bit truecolor `\x1b[38;2;R;G;Bm` (CSI 38;2;r;g;b m).
++// All modern terminals (kitty, alacritty, iTerm2, Windows Terminal,
++// VSCode ≥1.60, xterm ≥331, GNOME Terminal ≥3.34) support 24-bit.
++// Legacy xterm-256 terminals degrade gracefully — the closest 256-colour
++// approximation is index 160 (`\x1b[38;5;160m`) but we keep the exact
++// brand colour on capable terminals.
+ export const Style = {
+-  TEXT_HIGHLIGHT: "\x1b[96m",
+-  TEXT_HIGHLIGHT_BOLD: "\x1b[96m\x1b[1m",
++  TEXT_HIGHLIGHT: "\x1b[38;2;237;28;36m",        // AMD red #ED1C24 (24-bit truecolor)
++  TEXT_HIGHLIGHT_BOLD: "\x1b[38;2;237;28;36m\x1b[1m",
+   TEXT_DIM: "\x1b[90m",
+   TEXT_DIM_BOLD: "\x1b[90m\x1b[1m",
+   TEXT_NORMAL: "\x1b[0m",
+   TEXT_NORMAL_BOLD: "\x1b[1m",
+-  TEXT_WARNING: "\x1b[93m",
++  TEXT_WARNING: "\x1b[93m",                      // kept bright-yellow for AA contrast
+   TEXT_WARNING_BOLD: "\x1b[93m\x1b[1m",
+   TEXT_DANGER: "\x1b[91m",
+   TEXT_DANGER_BOLD: "\x1b[91m\x1b[1m",

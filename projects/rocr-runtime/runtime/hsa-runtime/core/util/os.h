@@ -45,6 +45,7 @@
 #ifndef HSA_RUNTIME_CORE_UTIL_OS_H_
 #define HSA_RUNTIME_CORE_UTIL_OS_H_
 
+#include <chrono>
 #include <string>
 #include <vector>
 #include "utils.h"
@@ -78,7 +79,9 @@ static_assert(false, "Operating System not detected!");
 #endif
 
 /// @brief: Loads dynamic library based on file name. Return value will be NULL
-/// if failed.
+/// if failed. Uses platform-specific mechanisms to keep the library mapped
+/// after close (RTLD_NODELETE on Linux, module pinning on Windows) to prevent
+/// crashes when libraries have circular dependencies back to ROCR.
 /// @param: filename(Input), file name of the library.
 /// @return: LibHandle.
 LibHandle LoadLib(std::string filename);
@@ -89,8 +92,10 @@ LibHandle LoadLib(std::string filename);
 /// @return: void*.
 void* GetExportAddress(LibHandle lib, std::string export_name);
 
-/// @brief: Unloads the dynamic library.
-/// @param: lib(Input), library handle which will be unloaded.
+/// @brief: Closes the dynamic library handle. Note: With RTLD_NODELETE on Linux
+/// or module pinning on Windows, this decrements the reference count but may not
+/// actually unmap the library from memory.
+/// @param: lib(Input), library handle to close.
 bool CloseLib(LibHandle lib);
 
 /// @brief: Lists loaded tool libraries that contain
@@ -365,8 +370,69 @@ int Ffs(int i);
 /// Find the count of leading zeros
 int Ctz(uint64_t i);
 
+/// Population count (number of set bits)
+int Popcount(uint32_t i);
+
 /// Shared library or DLL load error
 char* DlError();
+
+// IPC socket abstraction for cross-process handle (FD / HANDLE) passing.
+typedef intptr_t IPCSocket;
+static const IPCSocket INVALID_SOCKET_VALUE = -1;
+
+/// @brief Create an IPC server socket bound to an abstract name and listening.
+/// @param name Abstract socket name (will be prefixed internally on each platform).
+/// @param backlog Maximum pending connections.
+/// @return IPCSocket handle, or invalid handle (-1) on failure.
+IPCSocket CreateIPCServer(const char* name, int backlog);
+
+/// @brief Accept a connection on an IPC server socket (blocking).
+/// @param server Server socket returned by CreateIPCServer.
+/// @return Connected IPCSocket handle, or invalid handle (-1) on failure.
+IPCSocket AcceptIPCConnection(IPCSocket server);
+
+/// @brief Connect to a named IPC server with retry/timeout.
+/// @param name Abstract socket name matching the server.
+/// @param timeout Total timeout.
+/// @param retryInterval Sleep interval between retries.
+/// @return Connected IPCSocket handle, or invalid handle (-1) on failure/timeout.
+IPCSocket ConnectToIPCServer(const char* name, std::chrono::milliseconds timeout,
+                             std::chrono::milliseconds retryInterval);
+
+/// @brief Set the receive timeout on an IPC socket.
+/// @param sock IPCSocket connection handle.
+/// @param timeout Receive timeout.
+void SetIPCSocketRecvTimeout(IPCSocket sock, std::chrono::seconds timeout);
+
+/// @brief Read data from an IPC socket.
+/// @param conn IPCSocket connection handle.
+/// @param buf Destination buffer.
+/// @param len Number of bytes to read.
+/// @return Number of bytes read, or -1 on error.
+int IPCSocketRead(IPCSocket conn, void* buf, size_t len);
+
+/// @brief Write data to an IPC socket.
+/// @param conn IPCSocket connection handle.
+/// @param buf Source buffer.
+/// @param len Number of bytes to write.
+/// @return Number of bytes written, or -1 on error.
+int IPCSocketWrite(IPCSocket conn, const void* buf, size_t len);
+
+/// @brief Send a native handle (FD on Linux, HANDLE on Windows) over an IPC socket.
+/// Uses SCM_RIGHTS on Linux; DuplicateHandle on Windows.
+/// @param conn IPCSocket connection handle.
+/// @param handle The native handle/fd to send (intptr_t to hold pointer-sized HANDLEs on Windows).
+/// @return 0 on success, -1 on failure.
+int IPCSendHandle(IPCSocket conn, intptr_t handle);
+
+/// @brief Receive a native handle (FD on Linux, HANDLE on Windows) from an IPC socket.
+/// @param conn IPCSocket connection handle.
+/// @return The received handle/fd as intptr_t, or -1 on failure.
+intptr_t IPCRecvHandle(IPCSocket conn);
+
+/// @brief Close any IPC socket (server or connection).
+/// @param sock IPCSocket handle to close.
+void CloseIPCSocket(IPCSocket sock);
 
 }   //  namespace os
 }   //  namespace rocr

@@ -18,6 +18,7 @@
 #include "register.h"
 #include "graph.h"
 #include "nvmlwrap.h"
+#include "amdsmi_wrap.h"
 #include "profiler.h"
 #include "allocator.h"
 #include "dev_runtime.h"
@@ -26,6 +27,7 @@
 #include "latency_profiler/CollTrace.h"
 #include "rccl_common.h"
 #include "recorder.h"
+#include "mem_manager.h"
 
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
@@ -115,6 +117,7 @@ struct cliqueInfo {
 struct ncclDestructor {
   struct ncclDestructor* next;
   void* obj;
+  struct ncclComm* comm;
   ncclResult_t(*fn)(struct ncclDestructor* me);
 };
 
@@ -155,6 +158,11 @@ struct ncclSharedResources {
   struct ncclProxyState* proxyState;
 };
 
+ /**
+  * NOTE: This struct contains pointer members. Shallow copies are only intended during early initialization,
+  * before these pointers are populated or before ownership/lifetime of the pointed-to resources matters.
+  * Do not treat an initialized ncclChannel as generally safe to shallow copy.
+  */
 struct ncclChannel {
   struct ncclChannelPeer** peers;
   struct ncclDevChannelPeer** devPeers;
@@ -467,8 +475,12 @@ struct ncclPeerInfo {
   struct ncclComm* comm;
   int cudaCompCap;
   size_t totalGlobalMem;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  amdsmiFabricDeviceInfo fabricInfo;
+#else
   // MNNVL support
   nvmlGpuFabricInfoV_t fabricInfo;
+#endif
   int cuMemSupport;
   int version;
 };
@@ -547,6 +559,18 @@ struct ncclComm {
   int* localRankToRank;
   // localRanks and localRanktoRank for all nodes
   struct ncclNodeRanks* nodeRanks;
+
+  // Hierarchical AG sub-communicators
+  struct ncclComm* hierarchicalIntraComm;
+  struct ncclComm* hierarchicalInterComm;
+  bool hierarchicalCommsInitialized;
+
+  // Hierarchical AG temporary buffers
+  void* hierarchicalAGTempBuffer;
+
+  // Force PAT algorithm for this communicator
+  bool forcePatEnable;
+
   // MNNVL: Multi-Node NVLink
   int MNNVL; // true when MNNVL is available
   struct cliqueInfo clique; // Our MNNVL clique information
@@ -602,6 +626,7 @@ struct ncclComm {
   uint32_t* childAbortFlag;
   uint32_t* childAbortFlagDev;
   uint32_t destroyFlag;
+  uint32_t revokedFlag;
 
   // Flags for enable P2P NET
   uint32_t p2pNet;
@@ -684,6 +709,10 @@ struct ncclComm {
 
   hipEvent_t doneEvent;
   hipStream_t lastStream;
+  // False until the first kernel launch on this comm. Distinguishes "no prior launch"
+  // from "prior launch on the default stream (lastStream==nullptr)" so ncclLaunchPrepare
+  // can correctly detect a stream change in either case.
+  bool lastStreamValid;
   latency_profiler::CollTrace* ctrace;
 
 #ifdef ENABLE_COLLTRACE
@@ -708,16 +737,6 @@ struct ncclComm {
   // shared structures for finalization
   int finalizeRankCnt;
 
-#if defined(ENABLE_MSCCLPP)
-  // Whether this comm is compatible with MSCCLPP
-  bool mscclppCompatible;
-  struct mscclppComm* mscclpp_comm;
-  size_t mscclpp_threshold;
-  bool mscclppForceEnable;
-#endif
-
-  // Whether this comm is compatible with MSCCL
-  bool mscclCompatible;
   // group job to support multi-thread FT
   struct ncclGroupJob *groupJob;
 
@@ -737,7 +756,7 @@ struct ncclComm {
   // CE Collective
   struct ncclCeColl ceColl;
   struct ncclIntruQueue<struct ncclCeInitTask, &ncclCeInitTask::next> ceInitTaskQueue;
-  
+
   // buffer registration cache
   struct ncclRegCache regCache;
   int isAllNvlink;
@@ -758,6 +777,9 @@ struct ncclComm {
   char* archName;
   // multiProcessorCount from hipDeviceProp_t [RCCL]
   int cuCount;
+  // [RCCL] Host mirrors of device side NCCL_LL128_LINEELEMS / NCCL_LL128_DATAELEMS
+  int ll128LineElems;
+  int ll128DataElems;
 
 #ifdef ENABLE_ROCSHMEM
   // circular ring buffer in rocshmem symmetric heap
@@ -776,6 +798,8 @@ struct ncclComm {
   bool enableDirectReduceScatter;
   // Temporary Buffer [RCCL]
   void* tempBuff;
+
+  struct ncclMemManager* memManager;  // Memory manager
 
   uint64_t endMagic;
 };

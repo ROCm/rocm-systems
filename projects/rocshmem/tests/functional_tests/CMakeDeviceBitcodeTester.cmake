@@ -48,7 +48,7 @@ foreach(GPU_ARCH ${BITCODE_GPU_ARCHS})
   add_custom_command(
     OUTPUT ${KERNEL_BC}
     COMMAND ${LLVM_CLANG}
-      -x hip --cuda-device-only -std=c++20 -emit-llvm
+      -x hip --cuda-device-only -std=c++17 -emit-llvm
       --offload-arch=${GPU_ARCH}
       -fvisibility=default
       -c ${CMAKE_CURRENT_SOURCE_DIR}/device_bitcode_tester_kernel.hip

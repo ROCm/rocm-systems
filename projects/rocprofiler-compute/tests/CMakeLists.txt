@@ -1,6 +1,8 @@
 find_package(MPI COMPONENTS CXX)
 
-set(CMAKE_HIP_COMPILER "amdclang++" CACHE STRING "desired c++ compiler" FORCE)
+if(NOT CMAKE_HIP_COMPILER)
+    set(CMAKE_HIP_COMPILER "amdclang++" CACHE STRING "desired c++ compiler")
+endif()
 if(CMAKE_HIP_COMPILER_ID STREQUAL "Clang" OR CMAKE_HIP_COMPILER_ID STREQUAL "ROCMClang")
     message(STATUS "Using ${CMAKE_HIP_COMPILER} to build for amdgpu backend")
 else()
@@ -97,4 +99,13 @@ add_executable(memcopy ${MEMCOPY_SOURCES})
 set_target_properties(
     memcopy
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/tests
+)
+
+add_custom_target(
+    simple_net
+    ALL
+    COMMAND
+        ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/sample/simple_net.py
+        ${CMAKE_SOURCE_DIR}/tests/simple_net.py
+    COMMENT "Copying simple_net.py to tests directory"
 )

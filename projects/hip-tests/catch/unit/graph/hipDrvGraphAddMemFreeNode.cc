@@ -32,7 +32,7 @@
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE(Unit_hipDrvGraphAddMemFreeNode_Negative_Params) {
+HIP_TEST_CASE(Unit_hipDrvGraphAddMemFreeNode_Negative_Params) {
   constexpr size_t N = 1024;
   hipGraph_t graph;
   hipGraphNode_t alloc_node, free_node;
@@ -87,7 +87,7 @@ TEST_CASE(Unit_hipDrvGraphAddMemFreeNode_Negative_Params) {
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE(Unit_hipDrvGraphAddMemFreeNode_Positive) {
+HIP_TEST_CASE(Unit_hipDrvGraphAddMemFreeNode_Positive) {
   constexpr size_t N = 1024;
   hipGraph_t graph;
   hipGraphExec_t graphExec;

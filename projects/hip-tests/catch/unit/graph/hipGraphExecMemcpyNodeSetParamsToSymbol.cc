@@ -83,7 +83,7 @@ void GraphExecMemcpyToSymbolSetParamsShell(const void* symbol, const void* alt_s
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Positive_Basic) {
   SECTION("char") {
     HIP_GRAPH_MEMCPY_NODE_SET_PARAMS_TO_FROM_SYMBOL_TEST(GraphExecMemcpyToSymbolSetParamsShell, 10,
                                                          char);
@@ -127,7 +127,7 @@ TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Positive_Basic) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Negative_Parameters) {
   using namespace std::placeholders;
   hipGraph_t graph = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -167,7 +167,7 @@ TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Negative_Parameters) {
 
   SECTION("Changing src allocation device") {
     if (HipTest::getDeviceCount() < 2) {
-      HipTest::HIP_SKIP_TEST("Test requires two connected GPUs");
+      WARN("Skipping section: fewer than two GPUs (second device required for this negative case).");
     } else {
       HIP_CHECK(hipSetDevice(1));
       LinearAllocGuard<int> new_var(LinearAllocs::hipMalloc, sizeof(int));

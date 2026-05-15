@@ -49,7 +49,7 @@ template <typename Func, typename T> void threadCall(Func f, hipStream_t stream)
 
   T* ptr{nullptr};
   constexpr size_t size = 1024;
-  constexpr size_t iter = 512;
+  const size_t iter = isQuickLevel() ? 8 : 512;
   HIP_CHECK_THREAD(hipMalloc(&ptr, sizeof(T) * size));
   hipEvent_t event{};
   HIP_CHECK_THREAD(hipEventCreate(&event));
@@ -97,7 +97,8 @@ template <typename Func, typename T> void launchThreads(Func f, TestType type) {
                                                    hipStream_t)>::value) &&  // hipMemsetD8Async
                 "Func f should be hipMemsetAsync or hipMemsetD*Async");
 
-  const size_t num_threads = (std::thread::hardware_concurrency() > 8)
+  const size_t num_threads = isQuickLevel() ? 4
+                            : (std::thread::hardware_concurrency() > 8)
                                  ? (((std::thread::hardware_concurrency() / 4) >= 127)
                                         ? 127
                                         : (std::thread::hardware_concurrency() / 4))
@@ -130,7 +131,7 @@ template <typename Func, typename T> void launchThreads(Func f, TestType type) {
   }
 }
 
-TEST_CASE(Unit_hipMemsetAsync_QueueJobsMultithreaded) {
+HIP_TEST_CASE(Unit_hipMemsetAsync_QueueJobsMultithreaded) {
   using hipMemsetAsync_t = hipError_t (*)(void*, int, const size_t, hipStream_t);
   using hipMemsetAsyncD8_t =
       hipError_t (*)(hipDeviceptr_t, unsigned char, const size_t, hipStream_t);

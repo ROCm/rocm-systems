@@ -14,9 +14,7 @@
 
 #pragma clang diagnostic ignored "-Wunused-variable"
 
-TEST_CASE(Unit_hipMemcpy3DAsync_Positive_Basic) {
-  CHECK_IMAGE_SUPPORT
-
+HIP_TEST_CASE(Unit_hipMemcpy3DAsync_Positive_Basic) {
   constexpr bool async = true;
 
   const auto stream_type = GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
@@ -39,9 +37,7 @@ TEST_CASE(Unit_hipMemcpy3DAsync_Positive_Basic) {
   SECTION("Host to Host") { Memcpy3DHostToHostShell<async>(Memcpy3DWrapper<async>, stream); }
 }
 
-TEST_CASE(Unit_hipMemcpy3DAsync_Positive_Synchronization_Behavior) {
-  CHECK_IMAGE_SUPPORT
-
+HIP_TEST_CASE(Unit_hipMemcpy3DAsync_Positive_Synchronization_Behavior) {
   constexpr bool async = true;
 
   HIP_CHECK(hipDeviceSynchronize());
@@ -61,14 +57,12 @@ TEST_CASE(Unit_hipMemcpy3DAsync_Positive_Synchronization_Behavior) {
   SECTION("Host to Host") { Memcpy3DHtoHSyncBehavior(Memcpy3DWrapper<async>, true); }
 }
 
-TEST_CASE(Unit_hipMemcpy3DAsync_Positive_Parameters) {
-  CHECK_IMAGE_SUPPORT
-
+HIP_TEST_CASE(Unit_hipMemcpy3DAsync_Positive_Parameters) {
   constexpr bool async = true;
   Memcpy3DZeroWidthHeightDepth<async>(Memcpy3DWrapper<async>);
 }
 
-TEST_CASE(Unit_hipMemcpy3DAsync_Positive_Array) {
+HIP_TEST_CASE(Unit_hipMemcpy3DAsync_Positive_Array) {
   CHECK_IMAGE_SUPPORT
 
   constexpr bool async = true;
@@ -78,9 +72,7 @@ TEST_CASE(Unit_hipMemcpy3DAsync_Positive_Array) {
 #endif
 }
 
-TEST_CASE(Unit_hipMemcpy3DAsync_Negative_Parameters) {
-  CHECK_IMAGE_SUPPORT
-
+HIP_TEST_CASE(Unit_hipMemcpy3DAsync_Negative_Parameters) {
   constexpr bool async = true;
   constexpr hipExtent extent{128 * sizeof(int), 128, 8};
 
@@ -228,9 +220,7 @@ TEST_CASE(Unit_hipMemcpy3DAsync_Negative_Parameters) {
   }
 }
 
-TEST_CASE(Unit_hipMemcpy3DAsync_Capture) {
-  CHECK_IMAGE_SUPPORT
-
+HIP_TEST_CASE(Unit_hipMemcpy3DAsync_Capture) {
   constexpr hipExtent kExtent{128 * sizeof(int), 128, 8};
 
   LinearAllocGuard3D<int> src_alloc(kExtent);

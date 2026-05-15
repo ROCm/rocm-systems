@@ -25,7 +25,7 @@
  * ------------------------
  *  - HIP_VERSION >= 6.1
  */
-TEST_CASE(Unit_hipGraphMemFreeNodeGetParams_ValidArgs) {
+HIP_TEST_CASE(Unit_hipGraphMemFreeNodeGetParams_ValidArgs) {
   hipGraphNode_t allocNode, freeNode;
   hipGraph_t graph;
   hipGraphExec_t graphExec;
@@ -72,7 +72,7 @@ TEST_CASE(Unit_hipGraphMemFreeNodeGetParams_ValidArgs) {
  * ------------------------
  *  - HIP_VERSION >= 6.1
  */
-TEST_CASE(Unit_hipGraphMemFreeNodeGetParams_InvalidArgs) {
+HIP_TEST_CASE(Unit_hipGraphMemFreeNodeGetParams_InvalidArgs) {
   hipGraphNode_t allocNode, freeNode;
   hipMemAllocNodeParams allocParam;
   hipGraph_t graph;

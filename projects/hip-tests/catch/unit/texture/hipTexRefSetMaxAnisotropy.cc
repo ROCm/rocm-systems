@@ -10,7 +10,7 @@
 
 #if defined(__HIP_PLATFORM_AMD__) || CUDA_VERSION < CUDA_12000
 
-TEST_CASE(Unit_hipTexRefSetMaxAnisotropy_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipTexRefSetMaxAnisotropy_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT
 
   hipCtx_t ctx;
@@ -39,7 +39,7 @@ TEST_CASE(Unit_hipTexRefSetMaxAnisotropy_Negative_Parameters) {
   HIP_CHECK(hipCtxDestroy(ctx));
 }
 
-TEST_CASE(Unit_hipTexRefSetMaxAnisotropy_Positive) {
+HIP_TEST_CASE(Unit_hipTexRefSetMaxAnisotropy_Positive) {
   CHECK_IMAGE_SUPPORT
 
   hipCtx_t ctx;

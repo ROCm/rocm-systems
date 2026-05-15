@@ -35,7 +35,7 @@
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGraphMemcpyNodeSetParams_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipGraphMemcpyNodeSetParams_Positive_Basic) {
   CHECK_IMAGE_SUPPORT
 
   constexpr bool async = false;
@@ -118,9 +118,7 @@ TEST_CASE(Unit_hipGraphMemcpyNodeSetParams_Positive_Basic) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGraphMemcpyNodeSetParams_Negative_Parameters) {
-  CHECK_IMAGE_SUPPORT
-
+HIP_TEST_CASE(Unit_hipGraphMemcpyNodeSetParams_Negative_Parameters) {
   using namespace std::placeholders;
 
   constexpr hipExtent extent{128 * sizeof(int), 128, 8};

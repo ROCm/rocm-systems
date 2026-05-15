@@ -33,7 +33,7 @@
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE(Unit_hipMemAddressReserve_AlignmentTest) {
+HIP_TEST_CASE(Unit_hipMemAddressReserve_AlignmentTest) {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -97,7 +97,7 @@ TEST_CASE(Unit_hipMemAddressReserve_AlignmentTest) {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE(Unit_hipMemAddressReserve_Negative) {
+HIP_TEST_CASE(Unit_hipMemAddressReserve_Negative) {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -136,7 +136,7 @@ TEST_CASE(Unit_hipMemAddressReserve_Negative) {
   CTX_DESTROY();
 }
 
-TEST_CASE(Unit_hipMemAddressReserve_Capture) {
+HIP_TEST_CASE(Unit_hipMemAddressReserve_Capture) {
   hipMemGenericAllocationHandle_t allocation_handle;
   size_t granularity = 0;
   constexpr size_t kAlignment = 2;

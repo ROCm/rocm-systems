@@ -37,7 +37,7 @@ namespace rdc {
 
 /// Open binary kernel object file and set all member data related to the
 /// kernel. Assumes that input test already has the kernel file name,
-/// agent name and kernel function specifed
+/// agent name and kernel function specified
 /// \param[in] test Test for which the kernel will be loaded.
 /// \param[in] agent for which the kernel will be loaded .
 /// \returns HSA_STATUS_SUCCESS if no errors
@@ -56,7 +56,7 @@ hsa_status_t SetDefaultAgents(RdcRocrBase* test);
 /// \param[in] device Device for which a queue is to be created
 /// \param[out] queue Address to which created queue pointer will be written
 /// \param[in] num_pkts Size of the queue to create
-/// \param[in] do_profile [Optional] Specificy whether profiled queue should
+/// \param[in] do_profile [Optional] Specify whether profiled queue should
 ///  be created
 /// \returns  HSA_STATUS_SUCCESS if no errors encountered
 hsa_status_t CreateQueue(hsa_agent_t device, hsa_queue_t** queue, uint32_t num_pkts = 0);

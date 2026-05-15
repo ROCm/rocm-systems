@@ -42,7 +42,7 @@ constexpr size_t LEN = 256;
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipDeviceGetName_NegTst) {
+HIP_TEST_CASE(Unit_hipDeviceGetName_NegTst) {
   std::array<char, LEN> name;
 
   int numDevices = 0;
@@ -101,7 +101,7 @@ TEST_CASE(Unit_hipDeviceGetName_NegTst) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipDeviceGetName_CheckPropName) {
+HIP_TEST_CASE(Unit_hipDeviceGetName_CheckPropName) {
   int numDevices = 0;
   std::array<char, LEN> name;
   hipDevice_t device;
@@ -129,11 +129,7 @@ TEST_CASE(Unit_hipDeviceGetName_CheckPropName) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipDeviceGetName_PartialFill) {
-#if HT_AMD
-  HipTest::HIP_SKIP_TEST("EXSWCPHIPT-108");
-  return;
-#endif
+HIP_TEST_CASE(Unit_hipDeviceGetName_PartialFill) {
   std::array<char, LEN> name;
 
   int numDevices = 0;
@@ -197,19 +193,17 @@ static inline std::vector<int> parseVisibleDevices() {
  * ------------------------
  *  - HIP_VERSION >= 5.7
  */
-TEST_CASE(Unit_hipDeviceName_gcnArchName_And_rocm_agent_enumerator) {
+HIP_TEST_CASE(Unit_hipDeviceName_gcnArchName_And_rocm_agent_enumerator) {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount <= 0) {
-    HipTest::HIP_SKIP_TEST("No device found, skipping the test.");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
 
   FILE* fpipe;
   fpipe = popen("rocm_agent_enumerator", "r");
   if (fpipe == nullptr) {
-    HipTest::HIP_SKIP_TEST("Unable to create command file.\n");
-    return;
+    HIP_SKIP_TEST("unable to create command file.");
   }
   char command_op[BUFFER_LEN];
   const char* defCpu = "gfx000";

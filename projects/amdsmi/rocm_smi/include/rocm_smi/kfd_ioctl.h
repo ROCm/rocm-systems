@@ -1068,7 +1068,7 @@ struct kfd_runtime_info {
  *
  * Coordinates debug exception signalling and debug device enablement with runtime.
  *
- * @r_debug - pointer to user struct for sharing information between ROCr and the debuggger
+ * @r_debug - pointer to user struct for sharing information between ROCr and the debugger
  * @mode_mask - mask to set mode
  *  KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK - enable runtime for debugging, otherwise disable
  *  KFD_RUNTIME_ENABLE_MODE_TTMP_SAVE_MASK - enable trap temporary setup (ignore on disable)
@@ -1177,7 +1177,7 @@ enum kfd_dbg_trap_operations {
  *     @exception_mask (IN)  - exceptions to raise to the debugger
  *     @rinfo_ptr      (IN)  - pointer to runtime info buffer (see kfd_runtime_info)
  *     @rinfo_size     (IN/OUT)  - size of runtime info buffer in bytes
- *     @dbg_fd         (IN)  - fd the KFD will nofify the debugger with of raised
+ *     @dbg_fd         (IN)  - fd the KFD will notify the debugger with of raised
  *          exceptions set in exception_mask.
  *
  *     Generic errors apply (see kfd_dbg_trap_operations).

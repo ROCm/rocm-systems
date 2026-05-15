@@ -20,11 +20,10 @@
  * THE SOFTWARE.
  */
 
-#include <fcntl.h>
 #include <sys/stat.h>
-#include <unistd.h>
 
 #include <cstring>
+#include <fstream>
 #include <memory>
 #include <sstream>
 
@@ -101,14 +100,15 @@ static auto amdsmi_read_cper_file(const std::string& filepath) -> CperFileCtx {
 
   ctx.file_size = file_stats.st_size;
   ctx.buffer = std::make_unique<char[]>(ctx.file_size);
-  int file = open(filepath.c_str(), O_RDONLY);
-  if (file == -1) {
-    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[CPER] failed to open file: " << filepath
-       << ", errno:()" << errno << "): " << strerror(errno);
+
+  std::ifstream file(filepath, std::ios::binary);
+  if (!file) {
+    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[CPER] failed to open file: " << filepath;
     LOG_ERROR(ss);
     return ctx;
   }
-  long bytes_read = read(file, ctx.buffer.get(), ctx.file_size);
+  file.read(ctx.buffer.get(), ctx.file_size);
+  long bytes_read = file.gcount();
   if (bytes_read <= 0) {
     ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__
        << "[CPER] failed to read complete file, read only  " << bytes_read << " of "
@@ -116,7 +116,6 @@ static auto amdsmi_read_cper_file(const std::string& filepath) -> CperFileCtx {
     LOG_ERROR(ss);
     return ctx;
   }
-  close(file);
 
   ctx.status = AMDSMI_STATUS_SUCCESS;
   ctx.file_size = bytes_read;

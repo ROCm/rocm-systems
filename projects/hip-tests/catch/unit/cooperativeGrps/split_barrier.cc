@@ -30,7 +30,7 @@ static __global__ void wg_split_barrier(float *out, float *in) {
   out[i] += mid[i];
 }
 
-TEST_CASE("Unit_coop_thread_block_split_barrier") {
+HIP_TEST_CASE(Unit_coop_thread_block_split_barrier) {
   constexpr size_t size = 32;
   float *d_out, *d_in;
 
@@ -78,7 +78,7 @@ static __global__ void grid_split_barrier(int *data, int *result, int N) {
   }
 }
 
-TEST_CASE("Unit_coop_grids_split_barrier") {
+HIP_TEST_CASE(Unit_coop_grids_split_barrier) {
   hipDeviceProp_t prop;
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
 

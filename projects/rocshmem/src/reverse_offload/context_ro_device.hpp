@@ -43,8 +43,6 @@ class ROContext : public Context {
  public:
   __host__ ROContext(Backend *b, size_t block_id = 0, bool default_ctx = false);
 
-  __device__ void ctx_destroy();
-
   __device__ void putmem(void *dest, const void *source, size_t nelems, int pe);
 
   __device__ void getmem(void *dest, const void *source, size_t nelems, int pe);

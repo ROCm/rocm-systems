@@ -316,6 +316,13 @@ code_object_t::open ()
 
   /* Calculate the size of the code object as loaded in memory.  Its size is
      the distance of the end of the highest segment from the load address.  */
+
+  if (elf_version (EV_CURRENT) == EV_NONE)
+    {
+      agent_warning ("elf_version failed");
+      return false;
+    }
+
   std::unique_ptr<Elf, void (*) (Elf *)> elf (
       elf_begin (fd, ELF_C_READ, nullptr), [] (Elf *elf) { elf_end (elf); });
   if (!elf)

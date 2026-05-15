@@ -177,7 +177,7 @@ unsigned int handle_one_gpu(rdc_health_response_t& response, unsigned int start_
     // set gpu health
     if (incident->health > gpu_health) gpu_health = incident->health;
 
-    // handle smae component
+    // handle same component
     component_detail_t detail;
     detail.component_health = RDC_HEALTH_RESULT_PASS;
     detail.err_str.clear();
@@ -289,7 +289,7 @@ int main(int, char**) {
   }
 
   std::cout << "Start to health monitor group:" << group_id << std::endl;
-  std::cout << "Sleep a few seconds before retreive the data ...\n";
+  std::cout << "Sleep a few seconds before retrieve the data ...\n";
   // For standalone mode, the daemon will update and cache the samples
   // take samples, standalone mode, do nothing
   usleep(5000000);  // sleep 5 seconds before fetch the stats

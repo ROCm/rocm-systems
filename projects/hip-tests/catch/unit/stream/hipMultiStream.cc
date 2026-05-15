@@ -24,19 +24,20 @@ __global__ void nKernel(float* y) {
   size_t tid{threadIdx.x};
   y[tid] = y[tid] + 1.0f;
 }
-TEST_CASE(Unit_hipMultiStream_sameDevice) {
+HIP_TEST_CASE(Unit_hipMultiStream_sameDevice) {
   constexpr int num_streams{8};
   hipStream_t streams[num_streams];
   float *data[num_streams], *yd, *xd;
   float y{1.0f}, x{1.0f};
+  const int n = isQuickLevel() ? (1 << 12) : NN;
   HIP_CHECK(hipMalloc((void**)&yd, sizeof(float)));
   HIP_CHECK(hipMalloc((void**)&xd, sizeof(float)));
   HIP_CHECK(hipMemcpy(yd, &y, sizeof(float), hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(xd, &x, sizeof(float), hipMemcpyHostToDevice));
   for (int i = 0; i < num_streams; i++) {
     HIP_CHECK(hipStreamCreate(&streams[i]));
-    HIP_CHECK(hipMalloc(&data[i], NN * sizeof(float)));
-    hipLaunchKernelGGL(kernel, dim3(1), dim3(1), 0, streams[i], data[i], xd, NN);
+    HIP_CHECK(hipMalloc(&data[i], n * sizeof(float)));
+    hipLaunchKernelGGL(kernel, dim3(1), dim3(1), 0, streams[i], data[i], xd, n);
     HIP_CHECK(hipGetLastError());
     hipLaunchKernelGGL(HIP_KERNEL_NAME(nKernel), dim3(1), dim3(1), 0, 0, yd);
     HIP_CHECK(hipGetLastError());
@@ -50,15 +51,14 @@ TEST_CASE(Unit_hipMultiStream_sameDevice) {
   REQUIRE(x == Catch::Approx(y));
 }
 
-TEST_CASE(Unit_hipMultiStream_multimeDevice) {
-  constexpr int nLoops = 50000;
+HIP_TEST_CASE(Unit_hipMultiStream_multimeDevice) {
+  const int nLoops = isQuickLevel() ? 500 : 50000;
   constexpr int nStreams = 2;
   std::vector<hipStream_t> streams(nStreams);
   int nGpu = 0;
   HIP_CHECK(hipGetDeviceCount(&nGpu));
   if (nGpu < 1) {
-    INFO("No GPU for Testing");
-    SUCCEED(true);
+    HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
   static int device = 0;
   HIP_CHECK(hipSetDevice(device));

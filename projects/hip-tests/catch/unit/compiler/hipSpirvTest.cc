@@ -9,4 +9,4 @@
 __global__ void kernel() { asm volatile("v_nop" ::: "memory"); }
 
 // This test case compiles with --offload-arch=amdgcnspirv to verify SPIRV mode
-TEST_CASE(Unit_test_spirv_mode) { kernel<<<1, 32>>>(); }
+HIP_TEST_CASE(Unit_test_spirv_mode) { kernel<<<1, 32>>>(); }

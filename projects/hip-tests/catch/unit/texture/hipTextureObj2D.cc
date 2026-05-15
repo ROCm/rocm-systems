@@ -33,7 +33,7 @@ __global__ void tex2DKernel(float* outputData, hipTextureObject_t textureObject,
  *  - Textures supported on device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipTextureObj2D_Check) {
+HIP_TEST_CASE(Unit_hipTextureObj2D_Check) {
   CHECK_IMAGE_SUPPORT
 
   constexpr int SIZE = 256;

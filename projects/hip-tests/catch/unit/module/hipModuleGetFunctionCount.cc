@@ -35,7 +35,7 @@
  * ------------------------
  * - HIP_VERSION >= 7.1
  */
-TEST_CASE(Unit_hipModuleGetFunctionCount_Functional) {
+HIP_TEST_CASE(Unit_hipModuleGetFunctionCount_Functional) {
   CTX_CREATE();
   hipModule_t moduleSingleArch, moduleEmpty, doubleKernelModule, rtcModule;
   unsigned int count = 0;
@@ -91,7 +91,7 @@ TEST_CASE(Unit_hipModuleGetFunctionCount_Functional) {
  * ------------------------
  * - HIP_VERSION >= 7.1
  */
-TEST_CASE(Unit_hipModuleGetFunctionCount_NegativeTsts) {
+HIP_TEST_CASE(Unit_hipModuleGetFunctionCount_NegativeTsts) {
   unsigned int count = 0;
   SECTION("Input module as nullptr") {
     HIP_CHECK_ERROR(hipModuleGetFunctionCount(&count, nullptr),

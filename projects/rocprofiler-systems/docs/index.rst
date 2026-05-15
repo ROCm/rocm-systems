@@ -40,7 +40,6 @@ profiling, how it supports performance analysis, and how to leverage its capabil
       * :doc:`Instrumenting and rewriting a binary application <./how-to/instrumenting-rewriting-binary-application>`
       * :doc:`Performing causal profiling <./how-to/performing-causal-profiling>`
       * :doc:`Profiling Python scripts <./how-to/profiling-python-scripts>`
-      * :doc:`Communication runtime profiling <./how-to/communication-runtime-profiling>`
       * :doc:`Network performance profiling <./how-to/nic-profiling>`
       * :doc:`Communication runtime profiling <./how-to/communication-runtime-profiling>`
       * :doc:`VCN and JPEG sampling and tracing <./how-to/vcn-jpeg-sampling>`

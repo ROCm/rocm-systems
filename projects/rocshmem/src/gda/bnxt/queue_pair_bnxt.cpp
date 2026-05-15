@@ -23,7 +23,7 @@
  *****************************************************************************/
 
 #include "gda/queue_pair.hpp"
-#include "util.hpp"
+#include "log.hpp"
 
 namespace rocshmem {
 
@@ -131,39 +131,45 @@ __device__ void QueuePair::bnxt_ring_doorbell(uint32_t slot_idx) {
   __hip_atomic_store(bnxt_dbr, hdr.typ_qid_indx, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_SYSTEM);
 }
 
-__device__ void QueuePair::bnxt_check_cqe_error(struct bnxt_re_req_cqe *cqe) {
-  struct bnxt_re_bcqe *hdr;
-  uint32_t flg_val;
-  uint8_t status;
-
-  const char bnxt_re_wc_error_strings[12][14] = {
-    "OK",
-    "BAD_RESP",
-    "LOC_LEN",
-    "LOC_QP_OP",
-    "PROT",
-    "MEM_OP",
-    "REM_INVAL",
-    "REM_ACC",
-    "REM_OP",
-    "RNR_NAK_XCED",
-    "TRNSP_XCED",
-    "WR_FLUSH",
-  };
-
-  hdr = (struct bnxt_re_bcqe*) ((char*)cqe + sizeof(struct bnxt_re_req_cqe));
-
-  flg_val = hdr->flg_st_typ_ph;
-
-  __threadfence();
-
-  // Is the CQE valid?
-  status = (flg_val >> BNXT_RE_BCQE_STATUS_SHIFT)
-         & BNXT_RE_BCQE_STATUS_MASK;
-
-  if (status != BNXT_RE_REQ_ST_OK) {
-    printf("CQ Error %s (%x)\n", bnxt_re_wc_error_strings[status], status);
-    abort();
+[[maybe_unused]] __attribute__((noinline))
+__device__ void QueuePair::bnxt_print_cqe_error(uint8_t status) {
+  switch (status) {
+  case BNXT_RE_REQ_ST_BAD_RESP:
+    LOGD_ERROR_ABORT("CQ error BAD_RESP (%x)", status);
+    break;
+  case BNXT_RE_REQ_ST_LOC_LEN:
+    LOGD_ERROR_ABORT("CQ error LOC_LEN (%x)", status);
+    break;
+  case BNXT_RE_REQ_ST_LOC_QP_OP:
+    LOGD_ERROR_ABORT("CQ error LOC_QP_OP (%x)", status);
+    break;
+  case BNXT_RE_REQ_ST_PROT:
+    LOGD_ERROR_ABORT("CQ error PROT (%x)", status);
+    break;
+  case BNXT_RE_REQ_ST_MEM_OP:
+    LOGD_ERROR_ABORT("CQ error MEM_OP (%x)", status);
+    break;
+  case BNXT_RE_REQ_ST_REM_INVAL:
+    LOGD_ERROR_ABORT("CQ error REM_INVAL (%x)", status);
+    break;
+  case BNXT_RE_REQ_ST_REM_ACC:
+    LOGD_ERROR_ABORT("CQ error REM_ACC (%x)", status);
+    break;
+  case BNXT_RE_REQ_ST_REM_OP:
+    LOGD_ERROR_ABORT("CQ error REM_OP (%x)", status);
+    break;
+  case BNXT_RE_REQ_ST_RNR_NAK_XCED:
+    LOGD_ERROR_ABORT("CQ error RNR_NAK_XCED (%x)", status);
+    break;
+  case BNXT_RE_REQ_ST_TRNSP_XCED:
+    LOGD_ERROR_ABORT("CQ error TRNSP_XCED (%x)", status);
+    break;
+  case BNXT_RE_REQ_ST_WR_FLUSH:
+    LOGD_ERROR_ABORT("CQ error WR_FLUSH (%x)", status);
+    break;
+  default:
+    LOGD_ERROR_ABORT("CQ error unknown status (%x)", status);
+    break;
   }
 }
 
@@ -180,13 +186,21 @@ __device__ void QueuePair::bnxt_poll_cq_until(uint32_t requested_available_slots
   do {
     cqe = (struct bnxt_re_req_cqe *) bnxt_cq.buf;
 
-#ifdef DEBUG
-    bnxt_check_cqe_error(cqe);
+#ifdef BUILD_DEBUG_DEVICE
+    {
+      uint32_t flg_val = __hip_atomic_load(
+          static_cast<uint32_t*>(__builtin_assume_aligned(
+              (char*)cqe + sizeof(struct bnxt_re_req_cqe) + offsetof(struct bnxt_re_bcqe, flg_st_typ_ph), 4)),
+          __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+      uint8_t status = (flg_val >> BNXT_RE_BCQE_STATUS_SHIFT) & BNXT_RE_BCQE_STATUS_MASK;
+      if (status != BNXT_RE_REQ_ST_OK)
+        bnxt_print_cqe_error(status);
+    }
 #endif
 
     /* Update the SQ head
      * This param provides us the wqe_idx but we need to convert to the slot idx.
-     * We assume a static slots size of GDA_BNXT_WQE_SLOT_COUNT thus can multipy by this value */
+     * We assume a static slots size of GDA_BNXT_WQE_SLOT_COUNT thus can multiply by this value */
     sq_head = (((cqe->con_indx & 0xFFFF) * GDA_BNXT_WQE_SLOT_COUNT) % sq_depth);
     bnxt_sq.head = sq_head;
 
@@ -198,17 +212,13 @@ __device__ void QueuePair::bnxt_poll_cq_until(uint32_t requested_available_slots
 }
 
 __device__ void QueuePair::bnxt_quiet() {
-  uint64_t active_lane_mask;
-  uint8_t active_lane_id;
-
-  active_lane_mask  = get_same_qp_lane_mask();
-  active_lane_id    = get_active_lane_num(active_lane_mask);
-
-  if (0 == active_lane_id) {
-    bnxt_poll_cq_until(bnxt_sq.depth);
-  }
+  bnxt_poll_cq_until(bnxt_sq.depth);
 }
 
+/**
+ * TODO: This function is redundant but kept because ionic has a different
+ * quiet_single implementation. Remove once ionic's quiet is unified.
+ */
 __device__ void QueuePair::bnxt_quiet_single() {
   bnxt_poll_cq_until(bnxt_sq.depth);
 }
@@ -225,7 +235,7 @@ __device__ void QueuePair::bnxt_write_rma_wqe(uintptr_t raddr, uintptr_t laddr, 
   uint32_t hdr_flags;
   uint32_t inline_msg;
 
-  inline_msg = length <= inline_threshold &&
+  inline_msg = static_cast<int32_t>(length) <= static_cast<int32_t>(inline_threshold) &&
                opcode == gda_op_rdma_write;
 
   bnxt_poll_cq_until(GDA_BNXT_WQE_SLOT_COUNT);
@@ -278,21 +288,14 @@ __device__ void QueuePair::bnxt_write_rma_wqe(uintptr_t raddr, uintptr_t laddr, 
   bnxt_re_incr_tail(&bnxt_sq, GDA_BNXT_WQE_SLOT_COUNT);
 }
 
-__device__ void QueuePair::bnxt_post_wqe_rma(int pe, int32_t length, uintptr_t laddr, uintptr_t raddr, uint8_t opcode) {
-  uint64_t active_lane_mask;
-  uint8_t active_lane_count;
-  uint8_t active_lane_id;
-
-  active_lane_mask  = get_same_qp_lane_mask();
-  active_lane_count = get_active_lane_count(active_lane_mask);
-  active_lane_id    = get_active_lane_num(active_lane_mask);
-
-  if (0 == active_lane_id) {
+__device__ void QueuePair::bnxt_post_wqe_rma(int32_t length,
+    uintptr_t laddr, uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info) {
+  if (wf_info.is_pe_group_first) {
     lock(&bnxt_sq.lock);
   }
 
-  for (int i = 0; i < active_lane_count; i++) {
-    if (i == active_lane_id) {
+  for (int i = 0; i < wf_info.num_pe_group_lanes; i++) {
+    if (i == wf_info.pe_group_logical_lane_id) {
       /* Write WQE to SQ */
       bnxt_write_rma_wqe(raddr, laddr, length, opcode);
 
@@ -301,14 +304,13 @@ __device__ void QueuePair::bnxt_post_wqe_rma(int pe, int32_t length, uintptr_t l
     }
   }
 
-  if (0 == active_lane_id) {
+  if (wf_info.is_pe_group_first) {
     unlock(&bnxt_sq.lock);
   }
 }
 
-__device__ void QueuePair::bnxt_post_wqe_rma_single(int32_t length, uintptr_t laddr,
-                                                    uintptr_t raddr, uint8_t opcode,
-                                                    bool ring_db) {
+__device__ void QueuePair::bnxt_post_wqe_rma_single(int32_t length,
+    uintptr_t laddr, uintptr_t raddr, uint8_t opcode, bool ring_db) {
 
   lock(&bnxt_sq.lock);
 
@@ -322,9 +324,8 @@ __device__ void QueuePair::bnxt_post_wqe_rma_single(int32_t length, uintptr_t la
   unlock(&bnxt_sq.lock);
 }
 
-__device__ uint32_t QueuePair::bnxt_write_amo_wqe(uintptr_t raddr, uint8_t opcode,
-                                                  int64_t atomic_data, int64_t atomic_cmp,
-                                                  bool fetching) {
+__device__ uint32_t QueuePair::bnxt_write_amo_wqe(uintptr_t raddr,
+    uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetching) {
   struct bnxt_re_bsqe hdr;
   struct bnxt_re_atomic amo;
   struct bnxt_re_sge sge;
@@ -385,24 +386,17 @@ __device__ uint32_t QueuePair::bnxt_write_amo_wqe(uintptr_t raddr, uint8_t opcod
   return atomic_idx;
 }
 
-__device__ uint64_t QueuePair::bnxt_post_wqe_amo(uintptr_t raddr, uint8_t opcode,
-                                                 int64_t atomic_data, int64_t atomic_cmp,
-                                                 bool fetching) {
-  uint64_t active_lane_mask;
-  uint8_t active_lane_count;
-  uint8_t active_lane_id;
+__device__ uint64_t QueuePair::bnxt_post_wqe_amo(uintptr_t raddr,
+    uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetching,
+    ActiveWFInfo &wf_info) {
   uint32_t atomic_idx = 0;
 
-  active_lane_mask  = get_same_qp_lane_mask();
-  active_lane_count = get_active_lane_count(active_lane_mask);
-  active_lane_id    = get_active_lane_num(active_lane_mask);
-
-  if (0 == active_lane_id) {
+    if (wf_info.is_pe_group_first) {
     lock(&bnxt_sq.lock);
   }
 
-  for (int i = 0; i < active_lane_count; i++) {
-    if (i == active_lane_id) {
+  for (int i = 0; i < wf_info.num_pe_group_lanes; i++) {
+    if (i == wf_info.pe_group_logical_lane_id) {
       atomic_idx = bnxt_write_amo_wqe(raddr, opcode, atomic_data, atomic_cmp, fetching);
 
       /* Ring Doorbell */
@@ -410,21 +404,20 @@ __device__ uint64_t QueuePair::bnxt_post_wqe_amo(uintptr_t raddr, uint8_t opcode
     }
   }
 
-  if (0 == active_lane_id) {
+  if (wf_info.is_pe_group_first) {
     unlock(&bnxt_sq.lock);
   }
 
   if (fetching) {
-    quiet();
+    bnxt_quiet();
     return fetching_atomic[atomic_idx];
   }
 
   return 0;
 }
 
-__device__ uint64_t QueuePair::bnxt_post_wqe_amo_single(uintptr_t raddr, uint8_t opcode,
-                                                        int64_t atomic_data, int64_t atomic_cmp,
-                                                        bool fetching) {
+__device__ uint64_t QueuePair::bnxt_post_wqe_amo_single(uintptr_t raddr,
+    uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetching) {
   uint32_t atomic_idx = 0;
 
   lock(&bnxt_sq.lock);
@@ -437,7 +430,7 @@ __device__ uint64_t QueuePair::bnxt_post_wqe_amo_single(uintptr_t raddr, uint8_t
   unlock(&bnxt_sq.lock);
 
   if (fetching) {
-    quiet();
+    bnxt_quiet_single();
     return fetching_atomic[atomic_idx];
   }
 

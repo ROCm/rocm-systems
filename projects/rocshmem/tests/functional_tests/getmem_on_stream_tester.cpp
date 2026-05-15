@@ -61,15 +61,8 @@ GetmemOnStreamTester::GetmemOnStreamTester(TesterArguments args)
   int total_bytes = num_bytes_stream * num_streams;
   buf_size = total_bytes;
 
-  source_buf = static_cast<char *>(rocshmem_malloc(buf_size));
-  dest_buf = static_cast<char *>(rocshmem_malloc(buf_size));
-
-  if (source_buf == nullptr || dest_buf == nullptr) {
-    std::cerr << "Error allocating memory from symmetric heap" << std::endl;
-    std::cerr << "source: " << source_buf << ", dest: " << dest_buf
-              << std::endl;
-    rocshmem_global_exit(1);
-  }
+  source_buf = static_cast<char *>(alloc_test_buffer(buf_size));
+  dest_buf = static_cast<char *>(alloc_test_buffer(buf_size, args.local_buf_type));
 
   streams.resize(num_streams);
   start_events_timed.resize(num_streams);
@@ -87,8 +80,8 @@ GetmemOnStreamTester::~GetmemOnStreamTester() {
     CHECK_HIP(hipEventDestroy(start_events_timed[i]));
     CHECK_HIP(hipStreamDestroy(streams[i]));
   }
-  rocshmem_free(source_buf);
-  rocshmem_free(dest_buf);
+  free_test_buffer(source_buf);
+  free_test_buffer(dest_buf, args.local_buf_type);
 }
 
 void GetmemOnStreamTester::preLaunchKernel() {
@@ -102,7 +95,7 @@ void GetmemOnStreamTester::postLaunchKernel() {
   }
 
   // Get elapsed time for each stream from HIP events
-  for (int stream_id = 0; stream_id < num_streams && stream_id < num_timers;
+  for (uint32_t stream_id = 0; stream_id < static_cast<uint32_t>(num_streams) && stream_id < static_cast<uint32_t>(num_timers);
        stream_id++) {
     float elapsed_time_ms = 0.0f;
     CHECK_HIP(hipEventElapsedTime(&elapsed_time_ms,
@@ -120,7 +113,7 @@ void GetmemOnStreamTester::postLaunchKernel() {
   }
 
   // Fill remaining timers with zero if num_timers > num_streams
-  for (int i = num_streams; i < num_timers; i++) {
+  for (uint32_t i = num_streams; i < static_cast<uint32_t>(num_timers); i++) {
     start_time[i] = 0;
     end_time[i] = 0;
   }
@@ -140,7 +133,7 @@ void GetmemOnStreamTester::resetBuffers(size_t size) {
   std::memset(dest_buf, 0, buf_size);
 }
 
-void GetmemOnStreamTester::launchKernel(dim3 gridSize, dim3 blockSize,
+void GetmemOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize, [[maybe_unused]] dim3 blockSize,
                                         int loop, size_t size) {
   // Execute warmup iterations (skip)
   for (int i = 0; i < args.skip; i++) {

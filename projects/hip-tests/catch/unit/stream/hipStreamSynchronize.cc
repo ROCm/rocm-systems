@@ -13,7 +13,7 @@ namespace hipStreamSynchronizeTest {
  * @brief Check that hipStreamSynchronize handles empty streams properly.
  *
  */
-TEST_CASE(Unit_hipStreamSynchronize_EmptyStream) {
+HIP_TEST_CASE(Unit_hipStreamSynchronize_EmptyStream) {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
   HIP_CHECK(hipStreamSynchronize(stream));
@@ -27,7 +27,7 @@ TEST_CASE(Unit_hipStreamSynchronize_EmptyStream) {
  * hipStreamSynchronize.
  *
  */
-TEST_CASE(Unit_hipStreamSynchronize_FinishWork) {
+HIP_TEST_CASE(Unit_hipStreamSynchronize_FinishWork) {
   const hipStream_t explicitStream = reinterpret_cast<hipStream_t>(-1);
   hipStream_t stream = GENERATE_COPY(explicitStream, hip::nullStream, hip::streamPerThread);
 
@@ -36,7 +36,7 @@ TEST_CASE(Unit_hipStreamSynchronize_FinishWork) {
     HIP_CHECK(hipStreamCreate(&stream));
   }
 
-  LaunchDelayKernel(std::chrono::milliseconds(500), stream);
+  LaunchDelayKernel(std::chrono::milliseconds(isQuickLevel() ? 50 : 500), stream);
   HIP_CHECK(hipStreamSynchronize(stream));
   HIP_CHECK(hipStreamQuery(stream));
 
@@ -48,7 +48,7 @@ TEST_CASE(Unit_hipStreamSynchronize_FinishWork) {
 /**
  * @brief Check that synchronizing the nullStream implicitly synchronizes all executing streams.
  */
-TEST_CASE(Unit_hipStreamSynchronize_NullStreamSynchronization) {
+HIP_TEST_CASE(Unit_hipStreamSynchronize_NullStreamSynchronization) {
   int totalStreams = 10;
 
   std::vector<hipStream_t> streams{};
@@ -60,7 +60,7 @@ TEST_CASE(Unit_hipStreamSynchronize_NullStreamSynchronization) {
   }
 
   for (int i = 0; i < totalStreams; ++i) {
-    LaunchDelayKernel(std::chrono::milliseconds(1000), streams[i]);
+    LaunchDelayKernel(std::chrono::milliseconds(isQuickLevel() ? 100 : 1000), streams[i]);
   }
 
   HIP_CHECK_ERROR(hipStreamQuery(hip::nullStream), hipErrorNotReady);
@@ -86,9 +86,9 @@ TEST_CASE(Unit_hipStreamSynchronize_NullStreamSynchronization) {
  *        Check that submiting work to the nullStream does not affect synchronization of other
  * streams. Check that querying the nullStream does not affect synchronization of other streams.
  */
-TEST_CASE(Unit_hipStreamSynchronize_SynchronizeStreamAndQueryNullStream) {
+HIP_TEST_CASE(Unit_hipStreamSynchronize_SynchronizeStreamAndQueryNullStream) {
 #if HT_AMD
-  HipTest::HIP_SKIP_TEST("EXSWCPHIPT-22");
+  HIP_SKIP_TEST("tracked issue EXSWCPHIPT-22.");
 #else
 
   hipStream_t stream1;
@@ -98,7 +98,7 @@ TEST_CASE(Unit_hipStreamSynchronize_SynchronizeStreamAndQueryNullStream) {
   HIP_CHECK(hipStreamCreate(&stream2));
 
   LaunchDelayKernel(std::chrono::milliseconds(500), stream1);
-  LaunchDelayKernel(std::chrono::milliseconds(2000), stream2);
+  LaunchDelayKernel(std::chrono::milliseconds(isQuickLevel() ? 100 : 2000), stream2);
 
   SECTION("Do not use NullStream") {}
   SECTION("Submit Kernel to NullStream") {
@@ -130,7 +130,7 @@ TEST_CASE(Unit_hipStreamSynchronize_SynchronizeStreamAndQueryNullStream) {
  * special stream.
  *
  */
-TEST_CASE(Unit_hipStreamSynchronize_NullStreamAndStreamPerThread) {
+HIP_TEST_CASE(Unit_hipStreamSynchronize_NullStreamAndStreamPerThread) {
   LaunchDelayKernel(std::chrono::milliseconds(500), hip::streamPerThread);
   HIP_CHECK_ERROR(hipStreamQuery(hip::nullStream), hipErrorNotReady);
   HIP_CHECK_ERROR(hipStreamQuery(hip::streamPerThread), hipErrorNotReady);

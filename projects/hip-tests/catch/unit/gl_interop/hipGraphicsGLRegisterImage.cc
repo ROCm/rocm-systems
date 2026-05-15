@@ -17,7 +17,9 @@ constexpr std::array<unsigned int, 5> kFlags{
     hipGraphicsRegisterFlagsTextureGather};
 }  // anonymous namespace
 
-TEST_CASE(Unit_hipGraphicsGLRegisterImage_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipGraphicsGLRegisterImage_Positive_Basic) {
+  CHECK_IMAGE_SUPPORT
+
   GLContextScopeGuard gl_context;
 
   const int device_count = HipTest::getDeviceCount();
@@ -40,7 +42,9 @@ TEST_CASE(Unit_hipGraphicsGLRegisterImage_Positive_Basic) {
   HIP_CHECK(hipGraphicsUnregisterResource(tex_resource));
 }
 
-TEST_CASE(Unit_hipGraphicsGLRegisterImage_Positive_Register_Twice) {
+HIP_TEST_CASE(Unit_hipGraphicsGLRegisterImage_Positive_Register_Twice) {
+  CHECK_IMAGE_SUPPORT
+
   GLContextScopeGuard gl_context;
   const int device_count = HipTest::getDeviceCount();
   unsigned int gl_device_count = 0;
@@ -64,7 +68,9 @@ TEST_CASE(Unit_hipGraphicsGLRegisterImage_Positive_Register_Twice) {
   HIP_CHECK(hipGraphicsUnregisterResource(tex_resource_2));
 }
 
-TEST_CASE(Unit_hipGraphicsGLRegisterImage_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipGraphicsGLRegisterImage_Negative_Parameters) {
+  CHECK_IMAGE_SUPPORT
+
   GLContextScopeGuard gl_context;
 
   GLImageObject tex;

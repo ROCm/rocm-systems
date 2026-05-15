@@ -1,0 +1,22 @@
+diff --git a/packages/opencode/src/cli/cmd/tui/component/error-component.tsx b/packages/opencode/src/cli/cmd/tui/component/error-component.tsx
+index c74d3bbc6..1f3c5cdc1 100644
+--- a/packages/opencode/src/cli/cmd/tui/component/error-component.tsx
++++ b/packages/opencode/src/cli/cmd/tui/component/error-component.tsx
+@@ -65,7 +65,7 @@ export function ErrorComponent(props: {
+     <box flexDirection="column" gap={1} backgroundColor={colors.bg}>
+       <box flexDirection="row" gap={1} alignItems="center">
+         <text attributes={TextAttributes.BOLD} fg={colors.text}>
+-          Please report an issue.
++          AMD ROCm PerfXpert — please report an issue.
+         </text>
+         <box onMouseUp={copyIssueURL} backgroundColor={colors.primary} padding={1}>
+           <text attributes={TextAttributes.BOLD} fg={colors.bg}>
+@@ -75,7 +75,7 @@ export function ErrorComponent(props: {
+         {copied() && <text fg={colors.muted}>Successfully copied</text>}
+       </box>
+       <box flexDirection="row" gap={2} alignItems="center">
+-        <text fg={colors.text}>A fatal error occurred!</text>
++        <text fg={colors.text}>A fatal error occurred in PerfXpert!</text>
+         <box onMouseUp={props.reset} backgroundColor={colors.primary} padding={1}>
+           <text fg={colors.bg}>Reset TUI</text>
+         </box>

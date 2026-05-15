@@ -36,7 +36,7 @@
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGraphNodeGetDependencies_Positive_Functional) {
+HIP_TEST_CASE(Unit_hipGraphNodeGetDependencies_Positive_Functional) {
   using namespace std::placeholders;
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
@@ -199,7 +199,7 @@ TEST_CASE(Unit_hipGraphNodeGetDependencies_Positive_Functional) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGraphNodeGetDependencies_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipGraphNodeGetDependencies_Negative_Parameters) {
   hipGraph_t graph{};
   const int numBytes = 100;
   size_t numDeps{1};

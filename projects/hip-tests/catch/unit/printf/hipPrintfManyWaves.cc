@@ -222,12 +222,11 @@ static void test_numbers(uint num_blocks, uint threads_per_block) {
  * ------------------------
  * - HIP_VERSION >= 6.2
  */
-TEST_CASE(Unit_Printf_PrintfManyWaves) {
+HIP_TEST_CASE(Unit_Printf_PrintfManyWaves) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
   uint num_blocks = 150;
   uint threads_per_block = 250;

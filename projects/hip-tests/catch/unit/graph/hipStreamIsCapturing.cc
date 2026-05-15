@@ -9,6 +9,8 @@
 
 #include "stream_capture_common.hh"
 
+static size_t captureN() { return isQuickLevel() ? 10000 : 1000000; }
+
 /**
  * @addtogroup hipStreamIsCapturing hipStreamIsCapturing
  * @{
@@ -31,7 +33,7 @@
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipStreamIsCapturing_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipStreamIsCapturing_Negative_Parameters) {
   const auto stream_type = GENERATE(Streams::perThread, Streams::created);
   StreamGuard stream_guard(stream_type);
   hipStream_t stream = stream_guard.stream();
@@ -63,7 +65,7 @@ TEST_CASE(Unit_hipStreamIsCapturing_Negative_Parameters) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipStreamIsCapturing_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipStreamIsCapturing_Positive_Basic) {
   hipStreamCaptureStatus cStatus;
   const auto stream_type = GENERATE(Streams::perThread, Streams::created);
   StreamGuard stream_guard(stream_type);
@@ -74,7 +76,7 @@ TEST_CASE(Unit_hipStreamIsCapturing_Positive_Basic) {
 }
 
 void checkStreamCaptureStatus(hipStreamCaptureMode mode, hipStream_t stream) {
-  constexpr size_t N = 1000000;
+  const size_t N = captureN();
 
   hipStreamCaptureStatus cStatus;
   size_t Nbytes = N * sizeof(float);
@@ -131,7 +133,7 @@ void checkStreamCaptureStatus(hipStreamCaptureMode mode, hipStream_t stream) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipStreamIsCapturing_Positive_Functional) {
+HIP_TEST_CASE(Unit_hipStreamIsCapturing_Positive_Functional) {
   const auto stream_type = GENERATE(Streams::perThread, Streams::created);
   StreamGuard stream_guard(stream_type);
   hipStream_t stream = stream_guard.stream();
@@ -161,8 +163,8 @@ static void thread_func(hipStream_t stream) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipStreamIsCapturing_Positive_Thread) {
-  constexpr size_t N = 1000000;
+HIP_TEST_CASE(Unit_hipStreamIsCapturing_Positive_Thread) {
+  const size_t N = captureN();
   size_t Nbytes = N * sizeof(float);
 
   hipGraph_t graph{nullptr};

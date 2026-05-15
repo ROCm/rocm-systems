@@ -49,11 +49,11 @@ struct SymbolLoweredName {
 };
 
 //! A program object for a specific device.
-class Program : public amd::HeapObject {
+class Program {
  public:
   typedef std::pair<const void* /* binary_image */, size_t /* binary size */> binary_t;
   typedef std::pair<amd::Os::FileDesc /* file_desc */, size_t /* file_offset */> finfo_t;
-  typedef std::unordered_map<std::string, Kernel*> kernels_t;
+  typedef std::unordered_map<std::string_view, Kernel*> kernels_t;
   // type of the program
   typedef enum {
     TYPE_NONE = 0,     // uncompiled

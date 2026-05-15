@@ -24,7 +24,7 @@ extern "C" {
  *    - HIP_VERSION >= 5.6
  */
 
-TEST_CASE(Unit_LaunchKernelgccTests) {
+HIP_TEST_CASE(Unit_LaunchKernelgccTests) {
   printf("Calling launchKernel files from here\n");
   int result = launchKernel();
   REQUIRE(result == 1);
@@ -44,7 +44,7 @@ TEST_CASE(Unit_LaunchKernelgccTests) {
  *    - HIP_VERSION >= 5.6
  */
 
-TEST_CASE(Unit_hipMallocgccTests) {
+HIP_TEST_CASE(Unit_hipMallocgccTests) {
   printf("Calling hipMalloc files from here\n");
   int result = hipMallocfunc();
   REQUIRE(result == 1);

@@ -108,13 +108,12 @@ static void RunBenchmark(const size_t array_size, unsigned int flag) {
  *  - Device supports Stream Wait Value operations
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Performance_hipStreamWaitValue32) {
+HIP_TEST_CASE(Performance_hipStreamWaitValue32) {
 #if HT_AMD
   if (!IsStreamWaitValueSupported(0)) {
-    HipTest::HIP_SKIP_TEST(
+    HIP_SKIP_TEST(
         "GPU 0 doesn't support hipStreamWaitValue32() function. "
-        "Hence skipping the testing with Pass result.\n");
-    return;
+        "Hence skipping the testing with Pass result.");
   }
 
   size_t array_size = GENERATE(4_KB, 4_MB, 16_MB);
@@ -145,12 +144,11 @@ TEST_CASE(Performance_hipStreamWaitValue32) {
  *  - Device supports Stream Wait Value operations
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Performance_hipStreamWaitValue64) {
+HIP_TEST_CASE(Performance_hipStreamWaitValue64) {
   if (!IsStreamWaitValueSupported(0)) {
-    HipTest::HIP_SKIP_TEST(
+    HIP_SKIP_TEST(
         "GPU 0 doesn't support hipStreamWaitValue64() function. "
-        "Hence skipping the testing with Pass result.\n");
-    return;
+        "Hence skipping the testing with Pass result.");
   }
   size_t array_size = GENERATE(4_KB, 4_MB, 16_MB);
   unsigned int flag = GENERATE(hipStreamWaitValueGte, hipStreamWaitValueEq, hipStreamWaitValueAnd,

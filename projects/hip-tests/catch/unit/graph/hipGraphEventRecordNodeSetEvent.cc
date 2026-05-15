@@ -73,7 +73,7 @@ static void setEventWaitNode() {
 /**
  * Scenario 2: Validate Change of event property in event record node.
  */
-TEST_CASE(Unit_hipGraphEventRecordNodeSetEvent_SetEventProperty) {
+HIP_TEST_CASE(Unit_hipGraphEventRecordNodeSetEvent_SetEventProperty) {
   hipGraph_t graph;
   HIP_CHECK(hipGraphCreate(&graph, 0));
   // Create events
@@ -142,7 +142,7 @@ TEST_CASE(Unit_hipGraphEventRecordNodeSetEvent_SetEventProperty) {
 /**
  * Scenario 1: Validate Set Get test for all Event flags
  */
-TEST_CASE(Unit_hipGraphEventRecordNodeSetEvent_SetGet) {
+HIP_TEST_CASE(Unit_hipGraphEventRecordNodeSetEvent_SetGet) {
   SECTION("Flag = hipEventDefault") { validateEventRecordNodeSetEvent(hipEventDefault); }
 
   SECTION("Flag = hipEventBlockingSync") { validateEventRecordNodeSetEvent(hipEventBlockingSync); }
@@ -155,7 +155,7 @@ TEST_CASE(Unit_hipGraphEventRecordNodeSetEvent_SetGet) {
 /**
  * Scenario 3: Negative Tests
  */
-TEST_CASE(Unit_hipGraphEventRecordNodeSetEvent_Negative) {
+HIP_TEST_CASE(Unit_hipGraphEventRecordNodeSetEvent_Negative) {
   hipGraph_t graph;
   HIP_CHECK(hipGraphCreate(&graph, 0));
   hipEvent_t event1, event2;

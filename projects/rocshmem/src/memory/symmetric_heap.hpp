@@ -52,6 +52,7 @@ namespace rocshmem {
 
 class RemoteHeapInfoAbstract {
 public:
+  virtual ~RemoteHeapInfoAbstract() = default;
   virtual WindowInfo* get_window_info() = 0;
   __host__ virtual const std::vector<char*, StdAllocatorHIP<char*>>& get_heap_bases() = 0;
   __device__ char** get_heap_bases() { return nullptr; }
@@ -93,6 +94,10 @@ class SymmetricHeap {
       remote_heap_info_ = new RemoteHeapInfoTCP(single_heap_.get_base_ptr(),
                                                 single_heap_.get_size(), bootstrap);
     }
+  }
+
+  ~SymmetricHeap() {
+    delete remote_heap_info_;
   }
   /**
    * @brief Allocates heap memory and returns ptr to caller

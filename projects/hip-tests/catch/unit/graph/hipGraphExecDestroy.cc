@@ -27,7 +27,7 @@
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGraphExecDestroy_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipGraphExecDestroy_Negative_Parameters) {
   SECTION("Pass hipGraphExecDestroy with nullptr") {
     HIP_CHECK_ERROR(hipGraphExecDestroy(nullptr), hipErrorInvalidValue);
   }
@@ -50,7 +50,7 @@ TEST_CASE(Unit_hipGraphExecDestroy_Negative_Parameters) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGraphExecDestroy_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipGraphExecDestroy_Positive_Basic) {
   hipGraph_t graph;
   hipGraphExec_t graphExec;
   hipStream_t streamForGraph;

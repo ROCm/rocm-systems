@@ -25,7 +25,7 @@
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE(Unit_hipMemRelease_negative) {
+HIP_TEST_CASE(Unit_hipMemRelease_negative) {
   CTX_CREATE();
   SECTION("Nullptr to handle") {
     REQUIRE(hipMemRelease((hipMemGenericAllocationHandle_t) nullptr) == hipErrorInvalidValue);
@@ -33,7 +33,7 @@ TEST_CASE(Unit_hipMemRelease_negative) {
   CTX_DESTROY();
 }
 
-TEST_CASE(Unit_hipMemRelease_Capture) {
+HIP_TEST_CASE(Unit_hipMemRelease_Capture) {
   CTX_CREATE();
 
   hipMemGenericAllocationHandle_t allocation_handle;

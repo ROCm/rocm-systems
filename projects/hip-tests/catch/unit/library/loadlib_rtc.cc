@@ -28,7 +28,7 @@ static std::vector<char> compile_using_hiprtc(const std::string& code, std::stri
   return res;
 }
 
-TEST_CASE(Unit_hip_library_load_rtc) {
+HIP_TEST_CASE(Unit_hip_library_load_rtc) {
   constexpr size_t size = 32;
   const std::string kernel1 =
       "extern \"C\" __global__ void add_kernel(float* out, float*a, float*b) { size_t i = "

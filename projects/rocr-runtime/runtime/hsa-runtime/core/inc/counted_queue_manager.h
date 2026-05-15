@@ -50,7 +50,7 @@ class CountedQueuePoolManager {
   core::Queue* FindOrCreateHardwareQueue(hsa_queue_type_t type, HSA::hsa_amd_queue_priority_internal_t priority,
                                            void (*callback)(hsa_status_t, hsa_queue_t*, void*),
                                            void* data, uint64_t flags);
-  
+
   core::Agent* agent_; // pointer to the gpu agent that owns this pool
   uint32_t max_hw_queues_;
   size_t counted_queue_size_;

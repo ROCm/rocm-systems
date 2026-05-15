@@ -11,7 +11,7 @@
  * @brief Check that querying a stream with no work returns hipSuccess
  *
  **/
-TEST_CASE(Unit_hipStreamQuery_WithNoWork) {
+HIP_TEST_CASE(Unit_hipStreamQuery_WithNoWork) {
   hipStream_t stream{nullptr};
 
   SECTION("Null Stream") { HIP_CHECK(hipStreamQuery(stream)); }
@@ -27,7 +27,7 @@ TEST_CASE(Unit_hipStreamQuery_WithNoWork) {
  * @brief Check that querying a stream with finished work returns hipSuccess
  *
  **/
-TEST_CASE(Unit_hipStreamQuery_WithFinishedWork) {
+HIP_TEST_CASE(Unit_hipStreamQuery_WithFinishedWork) {
   hipStream_t stream{nullptr};
 
   SECTION("Null Stream") {
@@ -54,13 +54,13 @@ TEST_CASE(Unit_hipStreamQuery_WithFinishedWork) {
  * hipErrorNotReady
  *
  */
-TEST_CASE(Unit_hipStreamQuery_SubmitWorkOnStreamAndQueryNullStream) {
+HIP_TEST_CASE(Unit_hipStreamQuery_SubmitWorkOnStreamAndQueryNullStream) {
   {
     hipStream_t stream;
     HIP_CHECK(hipStreamCreate(&stream));
 
     HIP_CHECK(hipStreamQuery(hip::nullStream));
-    LaunchDelayKernel(std::chrono::milliseconds(500), stream);
+    LaunchDelayKernel(std::chrono::milliseconds(isQuickLevel() ? 100 : 500), stream);
     HIP_CHECK_ERROR(hipStreamQuery(hip::nullStream), hipErrorNotReady);
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -73,9 +73,9 @@ TEST_CASE(Unit_hipStreamQuery_SubmitWorkOnStreamAndQueryNullStream) {
  * hipErrorNotReady.
  *
  */
-TEST_CASE(Unit_hipStreamQuery_NullStreamQuery) {
+HIP_TEST_CASE(Unit_hipStreamQuery_NullStreamQuery) {
   HIP_CHECK(hipStreamQuery(hip::nullStream));
-  LaunchDelayKernel(std::chrono::milliseconds(500), hip::nullStream);
+  LaunchDelayKernel(std::chrono::milliseconds(isQuickLevel() ? 100 : 500), hip::nullStream);
   HIP_CHECK_ERROR(hipStreamQuery(hip::nullStream), hipErrorNotReady);
 
   HIP_CHECK(hipStreamSynchronize(hip::nullStream));
@@ -85,11 +85,11 @@ TEST_CASE(Unit_hipStreamQuery_NullStreamQuery) {
  * @brief Check that querying a stream with pending work returns hipErrorNotReady
  *
  **/
-TEST_CASE(Unit_hipStreamQuery_WithPendingWork) {
+HIP_TEST_CASE(Unit_hipStreamQuery_WithPendingWork) {
   hipStream_t waitingStream{nullptr};
   HIP_CHECK(hipStreamCreate(&waitingStream));
 
-  LaunchDelayKernel(std::chrono::milliseconds(500), waitingStream);
+  LaunchDelayKernel(std::chrono::milliseconds(isQuickLevel() ? 100 : 500), waitingStream);
   HIP_CHECK_ERROR(hipStreamQuery(waitingStream), hipErrorNotReady);
   HIP_CHECK(hipStreamSynchronize(waitingStream));
   HIP_CHECK(hipStreamQuery(waitingStream));

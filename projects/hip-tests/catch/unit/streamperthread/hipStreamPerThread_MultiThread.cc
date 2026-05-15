@@ -31,7 +31,7 @@ hipStreamPerThread is an implicit stream which gets destroyed once thread is com
 Scenario : App pushes Async task(s) into hipStreamPerThread and did not wait for it to complete.
 Watch out : Incomplete task in hipStreamPerThread should not cause any crash due to thread exit.
  */
-TEST_CASE(Unit_hipStreamPerThread_MultiThread) {
+HIP_TEST_CASE(Unit_hipStreamPerThread_MultiThread) {
   constexpr unsigned int MAX_THREAD_CNT = 10;
   std::vector<std::thread> threads(MAX_THREAD_CNT);
 

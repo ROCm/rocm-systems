@@ -99,19 +99,16 @@ static bool gpu_to_gpu_coherency() {
 
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < numTestDevices) {
-    HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
-    return true;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
   SECTION("With device fine grained buffer") {
     HIP_CHECK(hipDeviceGetAttribute(&deviceFineGrain, hipDeviceAttributeFineGrainSupport, 0));
     if (deviceFineGrain == 0) {
-      HipTest::HIP_SKIP_TEST("The test skipped due to deviceFineGrain = 0 on device 0");
-      return true;
+      HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
     }
     HIP_CHECK(hipDeviceGetAttribute(&deviceFineGrain, hipDeviceAttributeFineGrainSupport, 1));
     if (deviceFineGrain == 0) {
-      HipTest::HIP_SKIP_TEST("The test skipped due to deviceFineGrain = 0 on device 1");
-      return true;
+      HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
     }
     HIP_CHECK(hipSetDevice(0));
     HIP_CHECK(hipDeviceEnablePeerAccess(1, 0));
@@ -272,8 +269,8 @@ static bool gpu_to_gpu_coherency() {
  *    - Test to be run only on AMD.
  */
 
-TEST_CASE(Unit_cache_coherency_gpu_gpu) {
-  bool passed = true;
+HIP_TEST_CASE(Unit_cache_coherency_gpu_gpu) {
   // Coherency between GPUs accessing local or remote FB.
-  REQUIRE(passed == gpu_to_gpu_coherency());
+  bool result = gpu_to_gpu_coherency();
+  REQUIRE(result);
 }

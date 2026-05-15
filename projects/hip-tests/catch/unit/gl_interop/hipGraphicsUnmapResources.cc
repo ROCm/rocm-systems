@@ -10,7 +10,9 @@
 
 #include "gl_interop_common.hh"
 
-TEST_CASE(Unit_hipGraphicsUnmapResources_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipGraphicsUnmapResources_Negative_Parameters) {
+  CHECK_IMAGE_SUPPORT
+
   GLContextScopeGuard gl_context;
 
   const int device_count = HipTest::getDeviceCount();

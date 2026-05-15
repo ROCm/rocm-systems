@@ -12,7 +12,7 @@
 #include <fstream>
 #include <vector>
 
-TEST_CASE(Unit_hipModuleLoadData_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipModuleLoadData_Positive_Basic) {
   HIP_CHECK(hipFree(nullptr));
   hipModule_t module = nullptr;
 
@@ -36,7 +36,7 @@ TEST_CASE(Unit_hipModuleLoadData_Positive_Basic) {
 
   SECTION("Load compiled module from file with generic target in regular fatbin") {
     if (!isGenericTargetSupported()) {
-      fprintf(stderr, "Generic target test is skipped\n");
+      WARN("Skipping section: generic target is not supported on this device.");
       return;
     }
     const auto loaded_module = LoadModuleIntoBuffer("copyKernelGenericTarget.code");
@@ -50,7 +50,7 @@ TEST_CASE(Unit_hipModuleLoadData_Positive_Basic) {
 
   SECTION("Load compiled module from file with generic target in compressed fatbin") {
     if (!isGenericTargetSupported()) {
-      fprintf(stderr, "Generic target test is skipped\n");
+      WARN("Skipping section: generic target is not supported on this device.");
       return;
     }
     const auto loaded_module = LoadModuleIntoBuffer("copyKernelGenericTargetCompressed.code");
@@ -71,7 +71,7 @@ TEST_CASE(Unit_hipModuleLoadData_Positive_Basic) {
   }
 }
 
-TEST_CASE(Unit_hipModuleLoadData_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipModuleLoadData_Negative_Parameters) {
   HIP_CHECK(hipFree(nullptr));
   hipModule_t module;
 
@@ -110,7 +110,7 @@ TEST_CASE(Unit_hipModuleLoadData_Negative_Parameters) {
 */
 #if HT_AMD
 // Below test disabled for NVIDIA due to the defect SWDEV-472385
-TEST_CASE(Unit_hipModuleLoadData_Functional) {
+HIP_TEST_CASE(Unit_hipModuleLoadData_Functional) {
   constexpr int LEN = 64;
   constexpr int SIZE = LEN << 2;
   constexpr auto FILENAME = "vcpy_kernel.code";

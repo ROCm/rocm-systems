@@ -27,7 +27,7 @@ void getWarpSize(int* warpSizePtr)
 }
 )"};
 
-TEST_CASE(Unit_hiprtc_warpsize) {
+HIP_TEST_CASE(Unit_hiprtc_warpsize) {
   using namespace std;
   hiprtcProgram prog;
   HIPRTC_CHECK(hiprtcCreateProgram(&prog, code, "code.cu", 0, nullptr, nullptr));

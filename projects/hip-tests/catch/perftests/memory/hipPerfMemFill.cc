@@ -499,7 +499,7 @@ template <class T> class hipPerfMemFill {
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE(Perf_hipPerfMemFill_test) {
+HIP_TEST_CASE(Perf_hipPerfMemFill_test) {
   std::cout << "Test int" << std::endl;
   hipPerfMemFill<int> hipPerfMemFillInt;
   REQUIRE(true == hipPerfMemFillInt.open(0));

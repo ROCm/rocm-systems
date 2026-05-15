@@ -21,7 +21,7 @@ Testcase Scenarios :
  * Scenario to verify hipExtStreamGetCUMask api returning default CU Mask or global CU Mask.
  * Scenario to verify hipExtStreamGetCUMask api returns custom mask set.
  */
-TEST_CASE(Unit_hipExtStreamGetCUMask_verifyDefaultAndCustomMask) {
+HIP_TEST_CASE(Unit_hipExtStreamGetCUMask_verifyDefaultAndCustomMask) {
   constexpr unsigned maxCUPerValue = 32;
   hipDeviceProp_t props;
   std::stringstream ss;
@@ -32,8 +32,7 @@ TEST_CASE(Unit_hipExtStreamGetCUMask_verifyDefaultAndCustomMask) {
   int nGpu = 0;
   HIP_CHECK(hipGetDeviceCount(&nGpu));
   if (nGpu < 1) {
-    INFO("info: didn't find any GPU! skipping the test!");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
 
   HIP_CHECK(hipSetDevice(0));
@@ -157,7 +156,7 @@ TEST_CASE(Unit_hipExtStreamGetCUMask_verifyDefaultAndCustomMask) {
 /**
  * Negative tests for hipExtStreamGetCUMask.
  */
-TEST_CASE(Unit_hipExtStreamGetCUMask_Negative) {
+HIP_TEST_CASE(Unit_hipExtStreamGetCUMask_Negative) {
   hipError_t ret;
   constexpr int maxNum = 6;
   std::vector<uint32_t> cuMask(maxNum);

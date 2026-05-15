@@ -44,19 +44,16 @@ __global__ void ReadKernel(int* out, int* in) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit___threadfence_system_Positive_Basic_Peer) {
+HIP_TEST_CASE(Unit___threadfence_system_Positive_Basic_Peer) {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
-    HipTest::HIP_SKIP_TEST("At least 2 devices are required");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   int can_access_peer = 0;
   HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, 0, 1));
   if (!can_access_peer) {
-    std::string msg = "Skipped as peer access cannot be enabled between devices";
-    HipTest::HIP_SKIP_TEST(msg.c_str());
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
   }
 
   HIP_CHECK(hipSetDevice(0));
@@ -98,7 +95,7 @@ TEST_CASE(Unit___threadfence_system_Positive_Basic_Peer) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit___threadfence_system_Positive_Basic_Host) {
+HIP_TEST_CASE(Unit___threadfence_system_Positive_Basic_Host) {
   LinearAllocGuard<int> in_host(LinearAllocs::hipHostMalloc, 2 * sizeof(int));
   LinearAllocGuard<int> out_host(LinearAllocs::hipHostMalloc, 2 * sizeof(int));
 

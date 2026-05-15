@@ -35,7 +35,7 @@ static void verifyDevResult(int* hostBuf, int* devBuf, int coef1, int coef2, siz
   delete[] buf;
 }
 
-TEST_CASE(Unit_KerArgOptimization_Saxpy) {
+HIP_TEST_CASE(Unit_KerArgOptimization_Saxpy) {
   constexpr size_t arraylen = 1 << 16;
   constexpr size_t arraylenBytes = arraylen * sizeof(int);
   constexpr auto blocksize = 256;

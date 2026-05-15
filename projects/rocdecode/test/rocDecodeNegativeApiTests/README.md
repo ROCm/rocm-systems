@@ -5,7 +5,7 @@ by providing invalid inputs, unexpected scenarios, or edge cases to ensure the A
 
 ## Prerequisites:
 
-* Install [rocDecode](../../README.md#build-and-install-instructions)
+* Install [rocDecode](https://rocm.docs.amd.com/projects/rocDecode/en/latest/install/rocDecode-build-and-install.html)
 
 ## Build
 

@@ -72,24 +72,19 @@ set(AMD_TEST_SRC
     # fp8_e8m0.cc # TODO, reenable it, disabling this test due to failure seen on TheRock,
     fp6_ocp.cc
     fp4_ocp.cc
+    memcpy_async.cc
+    bfloat16_atomic_test.cc
+    fp16_atomic_test.cc
 )
 
 set(AMD_ARCH_SPEC_TEST_SRC
-    AtomicAdd_Coherent_withunsafeflag.cc
-    AtomicAdd_Coherent_withoutflag.cc
-    AtomicAdd_Coherent_withnoUnsafeflag.cc
-    AtomicAdd_NonCoherent_withoutflag.cc
-    AtomicAdd_NonCoherent_withnoUnsafeflag.cc
-    AtomicAdd_NonCoherent_withunsafeflag.cc
+    AtomicAdd_Coherent.cc
+    AtomicAdd_NonCoherent.cc
     BuiltIns_fmax.cc
     BuiltIns_fmin.cc
     unsafeAtomicAdd_RTC.cc
-    unsafeAtomicAdd_Coherent_withunsafeflag.cc
-    unsafeAtomicAdd_Coherent_withoutflag.cc
-    unsafeAtomicAdd_Coherent_withnounsafeflag.cc
-    unsafeAtomicAdd_NonCoherent_withoutflag.cc
-    unsafeAtomicAdd_NonCoherent_withnounsafeflag.cc
-    unsafeAtomicAdd_NonCoherent_withunsafeflag.cc
+    unsafeAtomicAdd_Coherent.cc
+    unsafeAtomicAdd_NonCoherent.cc
 )
 
 set(AMD_GFX940_SPEC_TEST_SRC
@@ -106,24 +101,28 @@ if (HIP_PLATFORM MATCHES "amd")
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/kerDevAllocMultCO.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/deviceLib/kerDevAllocMultCO.code
                   -I${HIP_INCLUDE_DIR}
+		  ${HIP_PATH_OPT}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
   add_custom_target(kerDevWriteMultCO.code
                   COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/kerDevWriteMultCO.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/deviceLib/kerDevWriteMultCO.code
                   -I${HIP_INCLUDE_DIR}
+		  ${HIP_PATH_OPT}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
   add_custom_target(kerDevFreeMultCO.code
                   COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/kerDevFreeMultCO.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/deviceLib/kerDevFreeMultCO.code
                   -I${HIP_INCLUDE_DIR}
+		  ${HIP_PATH_OPT}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
   add_custom_target(kerDevAllocSingleKer.code
                   COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/kerDevAllocSingleKer.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/deviceLib/kerDevAllocSingleKer.code
                   -I${HIP_INCLUDE_DIR}
+		  ${HIP_PATH_OPT}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 else()
   add_custom_target(kerDevAllocMultCO.code

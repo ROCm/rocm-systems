@@ -15,7 +15,7 @@ texture<float, hipTextureType1D, hipReadModeElementType> tex_1D;
 texture<float, hipTextureType2D, hipReadModeElementType> tex_2D;
 texture<float, hipTextureType3D, hipReadModeElementType> tex_3D;
 
-TEST_CASE(Unit_hipUnbindTexture_Null_Texture) {
+HIP_TEST_CASE(Unit_hipUnbindTexture_Null_Texture) {
 #if HT_AMD
   HIP_CHECK_ERROR(hipUnbindTexture(nullptr), hipErrorInvalidValue);
 #else
@@ -24,7 +24,7 @@ TEST_CASE(Unit_hipUnbindTexture_Null_Texture) {
 #endif
 }
 
-TEST_CASE(Unit_hipUnbindTexture_Positive_1D) {
+HIP_TEST_CASE(Unit_hipUnbindTexture_Positive_1D) {
   CHECK_IMAGE_SUPPORT
 
   constexpr int size = 1024;
@@ -50,7 +50,7 @@ TEST_CASE(Unit_hipUnbindTexture_Positive_1D) {
   HIP_CHECK(hipFree(tex_buffer));
 }
 
-TEST_CASE(Unit_hipUnbindTexture_Positive_2D) {
+HIP_TEST_CASE(Unit_hipUnbindTexture_Positive_2D) {
   CHECK_IMAGE_SUPPORT
 
   constexpr int width = 1024;
@@ -72,7 +72,7 @@ TEST_CASE(Unit_hipUnbindTexture_Positive_2D) {
   HIP_CHECK(hipFree(dev_ptr));
 }
 
-TEST_CASE(Unit_hipUnbindTexture_Positive_3D) {
+HIP_TEST_CASE(Unit_hipUnbindTexture_Positive_3D) {
   CHECK_IMAGE_SUPPORT
 
   constexpr unsigned int width = 256;

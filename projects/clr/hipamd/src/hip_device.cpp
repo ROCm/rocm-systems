@@ -19,7 +19,6 @@ namespace hip {
 
 // ================================================================================================
 hip::Stream* Device::NullStream(bool wait) {
-  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_WAIT, "NullStream %p, wait %d", null_stream_, wait);
   if (null_stream_ == nullptr) {
     std::scoped_lock lock(lock_);
     if (null_stream_ == nullptr) {
@@ -99,10 +98,10 @@ void Device::RemoveMemoryPool(MemoryPool* pool) {
 }
 
 // ================================================================================================
-bool Device::FreeMemory(amd::Memory* memory, Stream* stream, Event* event) {
+bool Device::FreeMemory(amd::Memory* memory, Stream* stream, Event* event, bool skip_event) {
   std::scoped_lock lock(lock_);
   for (auto* pool : mem_pools_) {
-    if (pool->FreeMemory(memory, stream, event)) {
+    if (pool->FreeMemory(memory, stream, event, skip_event)) {
       return true;
     }
   }
@@ -137,11 +136,11 @@ void Device::AddSafeStream(Stream* event_stream, Stream* wait_stream) {
 void Device::Reset() {
   {
     std::scoped_lock lock(lock_);
-    for (auto* pool : mem_pools_) {
+    auto pools_to_delete = std::exchange(mem_pools_, {});
+    for (auto* pool : pools_to_delete) {
       pool->ReleaseAllMemory();
       delete pool;
     }
-    mem_pools_.clear();
   }
   flags_ = hipDeviceScheduleSpin;
   destroyAllStreams();
@@ -157,6 +156,7 @@ void Device::Reset() {
 void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stream) {
   amd::Command::EventWaitList eventWaitList(0);
   bool submitMarker = false;
+  std::vector<amd::CommandQueue*> activeQueues;
 
   auto waitForStream = [&submitMarker, &eventWaitList](hip::Stream* stream) {
     if (amd::Command* command = stream->getLastQueuedCommand(true)) {
@@ -183,7 +183,7 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
       waitForStream(null_stream_);
     }
   } else {
-    const auto activeQueues = blocking_stream->device().getActiveQueues();
+    activeQueues = blocking_stream->device().getActiveQueues();
     for (const auto& queue : activeQueues) {
       auto* active_stream = static_cast<hip::Stream*>(queue);
       // Only wait on blocking (non-nonblocking) streams other than the current one
@@ -192,7 +192,6 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
         ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_WAIT, "Waiting on active stream %p", active_stream);
         waitForStream(active_stream);
       }
-      queue->release();
     }
   }
 
@@ -205,6 +204,12 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
   // Release all active commands; safe after the marker was enqueued
   for (const auto& cmd : eventWaitList) {
     cmd->release();
+  }
+
+  // Release active queue references now that the marker has been fully enqueued
+  // and no longer needs to access the queues via eventWaitList commands
+  for (const auto& q : activeQueues) {
+    q->release();
   }
 }
 
@@ -496,8 +501,7 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
 
   constexpr auto kPixelSizeMax = 16;
   constexpr auto kInt32Max = static_cast<uint64_t>(std::numeric_limits<int32_t>::max());
-  constexpr auto kUint16Max = static_cast<uint64_t>(std::numeric_limits<uint16_t>::max()) + 1;
-  hipDeviceProp_tR0600 deviceProps = {};
+  hipDeviceProp_tR0600 deviceProps = {0};
 
   const auto& info = deviceHandle->info();
   const auto& isa = deviceHandle->isa();
@@ -512,9 +516,9 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   deviceProps.maxThreadsDim[0] = info.maxWorkItemSizes_[0];
   deviceProps.maxThreadsDim[1] = info.maxWorkItemSizes_[1];
   deviceProps.maxThreadsDim[2] = info.maxWorkItemSizes_[2];
-  deviceProps.maxGridSize[0] = kInt32Max;
-  deviceProps.maxGridSize[1] = kUint16Max;
-  deviceProps.maxGridSize[2] = kUint16Max;
+  deviceProps.maxGridSize[0] = std::min(static_cast<uint64_t>(info.maxGridDim_[0]), kInt32Max);
+  deviceProps.maxGridSize[1] = std::min(static_cast<uint64_t>(info.maxGridDim_[1]), kInt32Max);
+  deviceProps.maxGridSize[2] = std::min(static_cast<uint64_t>(info.maxGridDim_[2]), kInt32Max);
   deviceProps.clockRate = info.maxEngineClockFrequency_ * 1000;
   deviceProps.memoryClockRate = info.maxMemoryClockFrequency_ * 1000;
   deviceProps.memoryBusWidth = info.vramBusBitWidth_;
@@ -658,7 +662,7 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   // access policy
   deviceProps.accessPolicyMaxWindowSize = 0;
   // cluster launch
-  deviceProps.clusterLaunch = 0;
+  deviceProps.clusterLaunch = info.clusterMaxSize_ > 0;
   // Mapping HIP array
   deviceProps.deferredMappingHipArraySupported = 0;
   // RDMA options
@@ -701,8 +705,7 @@ hipError_t hipGetDevicePropertiesR0000(hipDeviceProp_tR0000* prop, int device) {
 
   constexpr auto kPixelSizeMax = 16;
   constexpr auto kInt32Max = static_cast<uint64_t>(std::numeric_limits<int32_t>::max());
-  constexpr auto kUint16Max = static_cast<uint64_t>(std::numeric_limits<uint16_t>::max()) + 1;
-  hipDeviceProp_tR0000 deviceProps = {};
+  hipDeviceProp_tR0000 deviceProps = {0};
 
   const auto& info = deviceHandle->info();
   const auto& isa = deviceHandle->isa();
@@ -715,9 +718,9 @@ hipError_t hipGetDevicePropertiesR0000(hipDeviceProp_tR0000* prop, int device) {
   deviceProps.maxThreadsDim[0] = info.maxWorkItemSizes_[0];
   deviceProps.maxThreadsDim[1] = info.maxWorkItemSizes_[1];
   deviceProps.maxThreadsDim[2] = info.maxWorkItemSizes_[2];
-  deviceProps.maxGridSize[0] = kInt32Max;
-  deviceProps.maxGridSize[1] = kUint16Max;
-  deviceProps.maxGridSize[2] = kUint16Max;
+  deviceProps.maxGridSize[0] = std::min(static_cast<uint64_t>(info.maxGridDim_[0]), kInt32Max);
+  deviceProps.maxGridSize[1] = std::min(static_cast<uint64_t>(info.maxGridDim_[1]), kInt32Max);
+  deviceProps.maxGridSize[2] = std::min(static_cast<uint64_t>(info.maxGridDim_[2]), kInt32Max);
   deviceProps.clockRate = info.maxEngineClockFrequency_ * 1000;
   deviceProps.memoryClockRate = info.maxMemoryClockFrequency_ * 1000;
   deviceProps.memoryBusWidth = info.vramBusBitWidth_;
@@ -801,8 +804,8 @@ hipError_t hipGetProcAddress_common(const char* symbol, void** pfn, int hipVersi
   }
   std::string symbolString = symbol;
 
-  if (flags != HIP_GET_PROC_ADDRESS_DEFAULT && flags != HIP_GET_PROC_ADDRESS_LEGACY_STREAM
-      && flags != HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM) {
+  if (flags != HIP_GET_PROC_ADDRESS_DEFAULT && flags != HIP_GET_PROC_ADDRESS_LEGACY_STREAM &&
+      flags != HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM) {
     return hipErrorInvalidValue;
   }
 
@@ -869,9 +872,10 @@ hipError_t hipGetProcAddress(const char* symbol, void** pfn, int hipVersion, uin
 
 // ================================================================================================
 hipError_t hipGetProcAddress_spt(const char* symbol, void** pfn, int hipVersion, uint64_t flags,
-                             hipDriverProcAddressQueryResult* symbolStatus) {
+                                 hipDriverProcAddressQueryResult* symbolStatus) {
   HIP_INIT_API(hipGetProcAddress, symbol, pfn, hipVersion, flags, symbolStatus);
-  flags = (flags == HIP_GET_PROC_ADDRESS_DEFAULT) ? HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM : flags;
+  flags = (flags == HIP_GET_PROC_ADDRESS_DEFAULT) ? HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM
+                                                  : flags;
   HIP_RETURN(hipGetProcAddress_common(symbol, pfn, hipVersion, flags, symbolStatus));
 }
 

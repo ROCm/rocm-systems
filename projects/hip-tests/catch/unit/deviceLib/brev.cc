@@ -52,7 +52,7 @@ __global__ void HIP_kernel(unsigned int* a, unsigned int* b, unsigned long long 
   }
 }
 
-TEST_CASE(Unit_brev) {
+HIP_TEST_CASE(Unit_brev) {
   using namespace std;
   unsigned int* hostA;
   unsigned int* hostB;

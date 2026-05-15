@@ -120,8 +120,7 @@ static void testP2PUniDirMemPerf(const int iterations, const TIMING_MODE timingM
   int gpuCount = 0;
   HIP_CHECK(hipGetDeviceCount(&gpuCount));
   if (gpuCount < 1) {
-    fprintf(stderr, "Need at least 1 GPU, skipped!\n");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
   vector<double> timeMs(gpuCount * gpuCount, 0.);
   vector<double> bandWidth(gpuCount * gpuCount, 0.);
@@ -263,8 +262,7 @@ static void testP2PBiDirMemPerf(const int iterations, const bool useHipMemcpyAsy
   int gpuCount = 0;
   HIP_CHECK(hipGetDeviceCount(&gpuCount));
   if (gpuCount < 1) {
-    fprintf(stderr, "Need at least 1 GPU, skipped!\n");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
   vector<double> timeMs(gpuCount * gpuCount, 0.);
   vector<double> bandWidth(gpuCount * gpuCount, 0.);
@@ -443,13 +441,13 @@ static void testP2PBiDirMemPerf(const int iterations, const bool useHipMemcpyAsy
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Perf_hipTestP2PUniDirMemcpyAsync_test_Timing_CPU) {
+HIP_TEST_CASE(Perf_hipTestP2PUniDirMemcpyAsync_test_Timing_CPU) {
   const int iterations =
       cmd_options.iterations == 1000 ? defaultIterations : cmd_options.iterations;
   testP2PUniDirMemPerf(iterations, TIMING_MODE_CPU, true);
 }
 
-TEST_CASE(Perf_hipTestP2PUniDirMemcpyAsync_test_Timing_GPU) {
+HIP_TEST_CASE(Perf_hipTestP2PUniDirMemcpyAsync_test_Timing_GPU) {
   const int iterations =
       cmd_options.iterations == 1000 ? defaultIterations : cmd_options.iterations;
   testP2PUniDirMemPerf(iterations, TIMING_MODE_GPU, true);
@@ -468,13 +466,13 @@ TEST_CASE(Perf_hipTestP2PUniDirMemcpyAsync_test_Timing_GPU) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Perf_hipTestP2PUniDirKernelCopy_test_Timing_CPU) {
+HIP_TEST_CASE(Perf_hipTestP2PUniDirKernelCopy_test_Timing_CPU) {
   const int iterations =
       cmd_options.iterations == 1000 ? defaultIterations : cmd_options.iterations;
   testP2PUniDirMemPerf(iterations, TIMING_MODE_CPU, false);
 }
 
-TEST_CASE(Perf_hipTestP2PUniDirKernelCopy_test_Timing_GPU) {
+HIP_TEST_CASE(Perf_hipTestP2PUniDirKernelCopy_test_Timing_GPU) {
   const int iterations =
       cmd_options.iterations == 1000 ? defaultIterations : cmd_options.iterations;
   testP2PUniDirMemPerf(iterations, TIMING_MODE_GPU, false);
@@ -495,7 +493,7 @@ TEST_CASE(Perf_hipTestP2PUniDirKernelCopy_test_Timing_GPU) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Perf_hipTestP2PBiDirMemcpyAsync_test) {
+HIP_TEST_CASE(Perf_hipTestP2PBiDirMemcpyAsync_test) {
   const int iterations =
       cmd_options.iterations == 1000 ? defaultIterations : cmd_options.iterations;
   testP2PBiDirMemPerf(iterations, true);
@@ -514,7 +512,7 @@ TEST_CASE(Perf_hipTestP2PBiDirMemcpyAsync_test) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Perf_hipTestP2PBiDirKernelCopy_test) {
+HIP_TEST_CASE(Perf_hipTestP2PBiDirKernelCopy_test) {
   const int iterations =
       cmd_options.iterations == 1000 ? defaultIterations : cmd_options.iterations;
   testP2PBiDirMemPerf(iterations, false);
@@ -531,7 +529,7 @@ TEST_CASE(Perf_hipTestP2PBiDirKernelCopy_test) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Perf_hipCheckP2PSupport) { checkP2PSupport(); }
+HIP_TEST_CASE(Perf_hipCheckP2PSupport) { checkP2PSupport(); }
 
 /**
  * End doxygen group perfMemoryTest.

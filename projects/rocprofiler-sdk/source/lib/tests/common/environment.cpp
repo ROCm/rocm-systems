@@ -131,7 +131,7 @@ TEST(common, environment_push_pop)
     common::set_env("ROCPROFILER_ENV_TEST_A", "0", 1);
     common::set_env("ROCPROFILER_ENV_TEST_B", "2", 1);
 
-    auto _store = env_store{{env_config{"ROCPROFILER_ENV_TEST_A", "1"},
+    auto _store = env_store{{env_config{"ROCPROFILER_ENV_TEST_A", "1", 1},
                              env_config{"ROCPROFILER_ENV_TEST_B", "2", 1},
                              env_config{"ROCPROFILER_ENV_TEST_C", "3", 0}}};
 

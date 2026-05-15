@@ -19,7 +19,7 @@
  * ------------------------
  *    - HIP_VERSION >= 7.0
  */
-TEST_CASE(Unit_hipDeviceGetTexture1DLinearMaxWidth_Positive) {
+HIP_TEST_CASE(Unit_hipDeviceGetTexture1DLinearMaxWidth_Positive) {
   CHECK_IMAGE_SUPPORT
 
   int deviceCount = 0;
@@ -53,7 +53,7 @@ TEST_CASE(Unit_hipDeviceGetTexture1DLinearMaxWidth_Positive) {
  * ------------------------
  *    - HIP_VERSION >= 7.0
  */
-TEST_CASE(Unit_hipDeviceGetTexture1DLinearMaxWidth_Negative) {
+HIP_TEST_CASE(Unit_hipDeviceGetTexture1DLinearMaxWidth_Negative) {
   CHECK_IMAGE_SUPPORT
 
   int deviceCount = 0;

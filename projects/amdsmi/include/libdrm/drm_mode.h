@@ -1397,7 +1397,7 @@ struct drm_mode_create_blob {
  *
  * User-space can release blobs as soon as they do not need to refer to them by
  * their blob object ID.  For instance, if you are using a MODE_ID blob in an
- * atomic commit and you will not make another commit re-using the same ID, you
+ * atomic commit and you will not make another commit reusing the same ID, you
  * can destroy the blob as soon as the commit has been issued, without waiting
  * for it to complete.
  */

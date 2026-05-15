@@ -31,13 +31,18 @@
 
 namespace gfx10
 {
+mapped_inst_t map_to_common_type(int einst, int dprate, int derate);
+
 struct wave_t : public WaveDataInternal
 {
     wave_t(int tg_cu, int tg_simd, int slot, pcinfo_t addr, class Token&, bool exbarw);
 
     int64_t last_state_cycle = 0;
     WaveslotState cur_state = WaveslotState::WS_IDLE;
+    bool next_ld_scale = false;
     bool extend_barrier_gfx11 = false;
+    bool bIsXnack = false;
+    int64_t last_xnack_cycle = -1;
 
     void update_barrier_gfx11(int64_t token_time);
     void apply_wave_rdy(int64_t time);
@@ -47,15 +52,9 @@ struct wave_t : public WaveDataInternal
     void apply_valu_inst(int64_t token_time);
     void apply_immediate(int64_t token_time);
     void new_pc(int64_t time, int64_t pc_value, class CodeobjTableTranslator& table);
-
-    // static std::unordered_map<int, const char*> INST_NAMES;
-    static mapped_inst_t map_to_common_type(int einst, int dprate, int derate);
 };
 
-class CSRegisterHandler : public ::CSRegisterHandler
-{
-public:
-};
+using CSRegisterHandler = ::CSRegisterHandler;
 } // namespace gfx10
 
 class RDNASQTParser : public SQTTParser

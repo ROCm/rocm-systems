@@ -27,7 +27,7 @@
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE(Unit_hipStreamSynchronize_spt_EmptyStream) {
+HIP_TEST_CASE(Unit_hipStreamSynchronize_spt_EmptyStream) {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
   HIP_CHECK(hipStreamSynchronize_spt(stream));
@@ -59,14 +59,14 @@ TEST_CASE(Unit_hipStreamSynchronize_spt_EmptyStream) {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE(Unit_hipStreamSynchronize_spt_FinishWork) {
+HIP_TEST_CASE(Unit_hipStreamSynchronize_spt_FinishWork) {
   hipStream_t explicitStream = reinterpret_cast<hipStream_t>(-1);
   hipStream_t stream = GENERATE_COPY(explicitStream, hip::nullStream, hip::streamPerThread);
   if (explicitStream) {
     HIP_CHECK(hipStreamCreate(&stream));
   }
 
-  LaunchDelayKernel(std::chrono::milliseconds(500), stream);
+  LaunchDelayKernel(std::chrono::milliseconds(isQuickLevel() ? 100 : 500), stream);
   HIP_CHECK(hipStreamSynchronize_spt(stream));
   HIP_CHECK(hipStreamQuery(stream));
 
@@ -89,15 +89,15 @@ TEST_CASE(Unit_hipStreamSynchronize_spt_FinishWork) {
  *  - HIP_VERSION >= 6.2
  */
 
-TEST_CASE(Unit_hipStreamSynchronize_spt_SynchronizeStreamAndQueryNullStream) {
+HIP_TEST_CASE(Unit_hipStreamSynchronize_spt_SynchronizeStreamAndQueryNullStream) {
   hipStream_t stream1;
   hipStream_t stream2;
 
   HIP_CHECK(hipStreamCreate(&stream1));
   HIP_CHECK(hipStreamCreate(&stream2));
 
-  LaunchDelayKernel(std::chrono::milliseconds(500), stream1);
-  LaunchDelayKernel(std::chrono::milliseconds(2000), stream2);
+  LaunchDelayKernel(std::chrono::milliseconds(isQuickLevel() ? 100 : 500), stream1);
+  LaunchDelayKernel(std::chrono::milliseconds(isQuickLevel() ? 400 : 2000), stream2);
   hip::stream::empty_kernel<<<1, 1, 0, hip::nullStream>>>();
 
   HIP_CHECK_ERROR(hipStreamQuery(stream1), hipErrorNotReady);

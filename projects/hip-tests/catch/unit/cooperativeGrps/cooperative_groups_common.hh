@@ -8,9 +8,9 @@
 
 #include <hip_test_common.hh>
 #include <hip/hip_cooperative_groups.h>
-
+#include <hip/cooperative_groups/hip_reduce.h>
 #include <cmd_options.hh>
-
+#include "../math/math_common.hh"
 namespace {
 constexpr int kMaxGPUs = 8;
 }  // namespace
@@ -42,7 +42,7 @@ template <class T> bool CheckDimensions(unsigned int device, T kernel, dim3 bloc
   HIP_CHECK(hipGetDeviceProperties(&props, device));
   num_sm = props.multiProcessorCount;
 
-  if ((blocks.x * blocks.y * blocks.z) > max_blocks_per_sm * num_sm ||
+  if ((blocks.x * blocks.y * blocks.z) >= max_blocks_per_sm * num_sm ||
        blocks.x <= 0 || blocks.y <= 0 || blocks.z <= 0 ||
        threads.x <= 0 || threads.y <= 0 || threads.z <= 0) {
     return false;
@@ -50,5 +50,3 @@ template <class T> bool CheckDimensions(unsigned int device, T kernel, dim3 bloc
 
   return true;
 }
-
-inline double GetTestReductionFactor() { return cmd_options.cg_reduction_factor * 0.01; }

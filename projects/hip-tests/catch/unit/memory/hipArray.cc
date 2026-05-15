@@ -5,7 +5,7 @@
  */
 
 #include <hip_test_common.hh>
-TEST_CASE(Unit_hipArray_Valid) {
+HIP_TEST_CASE(Unit_hipArray_Valid) {
   CHECK_IMAGE_SUPPORT
 
   hipArray_t array = nullptr;
@@ -18,7 +18,7 @@ TEST_CASE(Unit_hipArray_Valid) {
   HIP_CHECK(hipFreeArray(array));
 }
 
-TEST_CASE(Unit_hipArray_Invalid) {
+HIP_TEST_CASE(Unit_hipArray_Invalid) {
   CHECK_IMAGE_SUPPORT
 
   void* data = malloc(sizeof(char));
@@ -26,13 +26,13 @@ TEST_CASE(Unit_hipArray_Invalid) {
   REQUIRE(hipFreeArray(arrayPtr) == hipErrorContextIsDestroyed);
   free(data);
 }
-TEST_CASE(Unit_hipArray_Nullptr) {
+HIP_TEST_CASE(Unit_hipArray_Nullptr) {
   CHECK_IMAGE_SUPPORT
 
   hipArray_t array = nullptr;
   REQUIRE(hipFreeArray(array) == hipErrorInvalidValue);
 }
-TEST_CASE(Unit_hipArray_DoubleFree) {
+HIP_TEST_CASE(Unit_hipArray_DoubleFree) {
   CHECK_IMAGE_SUPPORT
 
   hipArray_t array = nullptr;
@@ -45,7 +45,7 @@ TEST_CASE(Unit_hipArray_DoubleFree) {
   HIP_CHECK(hipFreeArray(array));
   REQUIRE(hipFreeArray(array) == hipErrorContextIsDestroyed);
 }
-TEST_CASE(Unit_hipArray_TrippleDestroy) {
+HIP_TEST_CASE(Unit_hipArray_TrippleDestroy) {
   CHECK_IMAGE_SUPPORT
 
   hipArray_t array = nullptr;
@@ -59,14 +59,14 @@ TEST_CASE(Unit_hipArray_TrippleDestroy) {
   REQUIRE(hipArrayDestroy(array) == hipErrorContextIsDestroyed);
   REQUIRE(hipArrayDestroy(array) == hipErrorContextIsDestroyed);
 }
-TEST_CASE(Unit_hipArray_DoubleNullptr) {
+HIP_TEST_CASE(Unit_hipArray_DoubleNullptr) {
   CHECK_IMAGE_SUPPORT
 
   hipArray_t array = nullptr;
   REQUIRE(hipFreeArray(array) == hipErrorInvalidValue);
   REQUIRE(hipFreeArray(array) == hipErrorInvalidValue);
 }
-TEST_CASE(Unit_hipArray_DoubleInvalid) {
+HIP_TEST_CASE(Unit_hipArray_DoubleInvalid) {
   CHECK_IMAGE_SUPPORT
 
   void* data = malloc(sizeof(char));

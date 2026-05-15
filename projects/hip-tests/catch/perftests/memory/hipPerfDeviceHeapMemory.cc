@@ -50,7 +50,7 @@ __global__ void mallocTest_1() {
  * ------------------------
  * - HIP_VERSION >= 6.5
  */
-TEST_CASE(Unit_Perf_Device_Heap_Memory_Allocation) {
+HIP_TEST_CASE(Unit_Perf_Device_Heap_Memory_Allocation) {
   HIP_CHECK(hipDeviceSetLimit(hipLimitMallocHeapSize, 128 * 1024 * 1024));
   hipEvent_t event;
   HIP_CHECK(hipEventCreate(&event));

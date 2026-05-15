@@ -101,16 +101,17 @@ class DynCO : public CodeObject {
   hipError_t getDynFunc(hipFunction_t* hfunc, const std::string& func_name);
   hipError_t getFuncCount(unsigned int* count);
   bool isValidDynFunc(const void* hfunc);
-  hipError_t getDeviceVar(DeviceVar** dvar, const std::string& var_name);
+  hipError_t GetDeviceVar(amd::Memory** mem, const std::string& var_name);
+  hip::Var* getVar(const std::string& var_name);
 
   hipError_t getManagedVarPointer(std::string name, void** pointer, size_t* size_ptr) const {
     auto it = vars_.find(name);
-    if (it != vars_.end() && it->second->getVarKind() == Var::DVK_Managed) {
+    if (it != vars_.end() && it->second->GetVarKind() == Var::DVK_Managed) {
       if (pointer != nullptr) {
-        *pointer = it->second->getManagedVarPtr();
+        *pointer = it->second->GetManagedVarPtr();
       }
       if (size_ptr != nullptr) {
-        *size_ptr = it->second->getSize();
+        *size_ptr = it->second->GetSize();
       }
     }
     return hipSuccess;
@@ -160,6 +161,9 @@ class StatCO : public CodeObject {
   // Managed variable is a defined symbol in code object
   // pointer to the alocated managed memory has to be copied to the address of symbol
   hipError_t InitManagedVarDevicePtr(int deviceId);
+
+  // Find a deferred managed var whose mmap address equals ptr
+  Var* FindDeferredManagedVar(const void* ptr);
 
   // Resize device-specific data structures for all registered functions and variables
   void ResizeForDevices(size_t device_count);

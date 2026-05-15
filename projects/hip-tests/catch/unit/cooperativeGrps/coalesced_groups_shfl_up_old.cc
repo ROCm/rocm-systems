@@ -206,7 +206,7 @@ static void test_shfl_up() {
   }
 }
 
-TEST_CASE(Unit_coalesced_groups_shfl_up) {
+HIP_TEST_CASE(Unit_coalesced_groups_shfl_up) {
   // Use default device for validating the test
   int deviceId;
   ASSERT_EQUAL(hipGetDevice(&deviceId), hipSuccess);

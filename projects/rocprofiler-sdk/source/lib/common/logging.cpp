@@ -24,10 +24,12 @@
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 
+#include <absl/debugging/failure_signal_handler.h>
+#include <absl/log/globals.h>
+#include <absl/log/initialize.h>
+#include <absl/log/log.h>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
-#include <glog/logging.h>
-#include <glog/vlog_is_on.h>
 
 #include <fstream>
 #include <mutex>
@@ -46,42 +48,22 @@ void
 install_failure_signal_handler()
 {
     static auto _once = std::once_flag{};
-    std::call_once(_once, []() { google::InstallFailureSignalHandler(); });
+    std::call_once(
+        _once, []() { absl::InstallFailureSignalHandler(absl::FailureSignalHandlerOptions{}); });
 }
 
 struct log_level_info
 {
-    int32_t google_level  = 0;
-    int32_t verbose_level = 0;
+    int32_t severity_level = 0;
+    int32_t verbose_level  = 0;
 };
 
-env_store
-get_glog_env_config(const logging_config& cfg)
-{
-    auto as_env_config = [](std::string_view _var, const auto& _val) {
-        return env_config{std::string{_var}, fmt::format("{}", _val), 1};
-    };
+// Abseil log severity values: kInfo=0, kWarning=1, kError=2, kFatal=3
+constexpr int32_t log_severity_info    = 0;
+constexpr int32_t log_severity_warning = 1;
+constexpr int32_t log_severity_error   = 2;
+constexpr int32_t log_severity_fatal   = 3;
 
-    auto _data = std::vector<env_config>{
-        as_env_config("GLOG_minloglevel", cfg.loglevel),
-        as_env_config("GLOG_logtostderr", cfg.logtostderr ? 1 : 0),
-        as_env_config("GLOG_alsologtostderr", cfg.alsologtostderr ? 1 : 0),
-        as_env_config("GLOG_stderrthreshold", cfg.loglevel),
-        as_env_config("GLOG_v", cfg.vlog_level),
-    };
-
-    if(!cfg.logdir.empty())
-    {
-        _data.emplace_back(as_env_config("GOOGLE_LOG_DIR", cfg.logdir));
-        _data.emplace_back(as_env_config("GLOG_log_dir", cfg.logdir));
-    }
-    if(!cfg.vlog_modules.empty())
-    {
-        _data.emplace_back(as_env_config("GLOG_vmodule", cfg.vlog_modules));
-    }
-
-    return env_store{std::move(_data)};
-}
 }  // namespace
 
 void
@@ -89,17 +71,6 @@ init_logging(std::string_view env_prefix, logging_config cfg)
 {
     static auto _once = std::once_flag{};
     std::call_once(_once, [env_prefix, &cfg]() {
-        auto get_argv0 = []() {
-            auto ifs  = std::ifstream{"/proc/self/cmdline"};
-            auto sarg = std::string{};
-            while(ifs && !ifs.eof())
-            {
-                ifs >> sarg;
-                if(!sarg.empty()) break;
-            }
-            return sarg;
-        };
-
         auto to_lower = [](std::string val) {
             for(auto& itr : val)
                 itr = tolower(itr);
@@ -107,11 +78,11 @@ init_logging(std::string_view env_prefix, logging_config cfg)
         };
 
         const auto env_opts = std::unordered_map<std::string_view, log_level_info>{
-            {"trace", {google::INFO, ROCP_LOG_LEVEL_TRACE}},
-            {"info", {google::INFO, ROCP_LOG_LEVEL_INFO}},
-            {"warning", {google::WARNING, ROCP_LOG_LEVEL_WARNING}},
-            {"error", {google::ERROR, ROCP_LOG_LEVEL_ERROR}},
-            {"fatal", {google::FATAL, ROCP_LOG_LEVEL_NONE}}};
+            {"trace", {log_severity_info, ROCP_LOG_LEVEL_TRACE}},
+            {"info", {log_severity_info, ROCP_LOG_LEVEL_INFO}},
+            {"warning", {log_severity_warning, ROCP_LOG_LEVEL_WARNING}},
+            {"error", {log_severity_error, ROCP_LOG_LEVEL_ERROR}},
+            {"fatal", {log_severity_fatal, ROCP_LOG_LEVEL_NONE}}};
 
         auto supported = std::vector<std::string>{};
         supported.reserve(env_opts.size());
@@ -122,8 +93,6 @@ init_logging(std::string_view env_prefix, logging_config cfg)
 
         cfg.logdir       = get_env(fmt::format("{}_LOG_DIR", env_prefix), cfg.logdir);
         cfg.vlog_modules = get_env(fmt::format("{}_vmodule", env_prefix), cfg.vlog_modules);
-        cfg.logtostderr  = cfg.logdir.empty();  // log to stderr if no log dir set
-        // cfg.alsologtostderr = !cfg.logdir.empty();  // log to file if log dir set
 
         auto loglvl = to_lower(common::get_env(fmt::format("{}_LOG_LEVEL", env_prefix), ""));
         // default to warning
@@ -134,7 +103,7 @@ init_logging(std::string_view env_prefix, logging_config cfg)
             auto val = std::stol(loglvl);
             if(val < 0)
             {
-                loglvl_v   = google::FATAL;
+                loglvl_v   = log_severity_fatal;
                 vlog_level = val;
             }
             else
@@ -149,7 +118,7 @@ init_logging(std::string_view env_prefix, logging_config cfg)
                         break;
                     }
                 }
-                loglvl_v   = itr.google_level;
+                loglvl_v   = itr.severity_level;
                 vlog_level = itr.verbose_level;
             }
         }
@@ -163,35 +132,19 @@ init_logging(std::string_view env_prefix, logging_config cfg)
                     fmt::format("{}", fmt::join(supported.begin(), supported.end(), ", ")))};
             else
             {
-                loglvl_v   = env_opts.at(loglvl).google_level;
+                loglvl_v   = env_opts.at(loglvl).severity_level;
                 vlog_level = env_opts.at(loglvl).verbose_level;
             }
         }
 
-        auto _env_store = get_glog_env_config(cfg);
-
         update_logging(cfg);
-        _env_store.push();
 
-        if(!google::IsGoogleLoggingInitialized())
-        {
-            static auto argv0 = get_argv0();
-            // Prevent glog from crashing if vmodule is empty
-            if(FLAGS_vmodule.empty()) FLAGS_vmodule = " ";
-
-            google::InitGoogleLogging(argv0.c_str());
-
-            // Swap out memory to avoid leaking the string
-            if(!FLAGS_vmodule.empty()) std::string{}.swap(FLAGS_vmodule);
-            if(!FLAGS_log_dir.empty()) std::string{}.swap(FLAGS_log_dir);
-        }
+        absl::InitializeLog();
 
         update_logging(cfg);
 
         ROCP_INFO << "logging initialized via " << fmt::format("{}_LOG_LEVEL", env_prefix)
                   << ". Log Level: " << loglvl << ". Verbose Log Level: " << vlog_level;
-
-        _env_store.pop(false);
     });
 }
 
@@ -201,30 +154,15 @@ update_logging(const logging_config& cfg)
     static auto _mtx = std::mutex{};
     auto        _lk  = std::unique_lock<std::mutex>{_mtx};
 
-    FLAGS_timestamp_in_logfile_name = false;
-    FLAGS_logtostderr               = cfg.logtostderr;
-    FLAGS_minloglevel               = cfg.loglevel;
-    FLAGS_stderrthreshold           = cfg.loglevel;
-    FLAGS_alsologtostderr           = cfg.alsologtostderr;
-    FLAGS_v                         = cfg.vlog_level;
-
-    // if(!cfg.logdir.empty()) FLAGS_log_dir = cfg.logdir.c_str();
+    absl::SetMinLogLevel(static_cast<absl::LogSeverityAtLeast>(cfg.loglevel));
+    absl::SetStderrThreshold(static_cast<absl::LogSeverityAtLeast>(cfg.loglevel));
+    absl::SetGlobalVLogLevel(cfg.vlog_level);
 
     if(cfg.install_failure_handler) install_failure_signal_handler();
 
     if(!cfg.logdir.empty() && !fs::exists(cfg.logdir))
     {
         fs::create_directories(cfg.logdir);
-
-        if(cfg.logdir_gitignore)
-        {
-            auto ignore = fs::path{cfg.logdir} / ".gitignore";
-            if(!fs::exists(ignore))
-            {
-                std::ofstream ofs{ignore.string()};
-                ofs << "/**" << std::flush;
-            }
-        }
     }
 }
 }  // namespace common

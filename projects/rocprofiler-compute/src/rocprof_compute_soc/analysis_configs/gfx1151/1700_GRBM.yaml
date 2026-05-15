@@ -1,0 +1,74 @@
+# =============================================================================
+# RDNA3.5 (gfx1151) - RDNA3.5 GRBM (Graphics Register Bus Manager) Metrics
+# =============================================================================
+# GRBM provides top-level GPU utilization metrics
+# =============================================================================
+
+Panel Config:
+  id: 1700
+  title: Graphics Register Bus Manager (GRBM)
+  data source:
+  # =========================================================================
+  # GPU Utilization
+  # =========================================================================
+  - metric_table:
+      id: 1701
+      title: "GPU Utilization"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        GPU Busy:
+          avg: AVG((100 * GRBM_GUI_ACTIVE / GRBM_COUNT) if (GRBM_COUNT != 0) else None)
+          min: MIN((100 * GRBM_GUI_ACTIVE / GRBM_COUNT) if (GRBM_COUNT != 0) else None)
+          max: MAX((100 * GRBM_GUI_ACTIVE / GRBM_COUNT) if (GRBM_COUNT != 0) else None)
+          unit: Percent
+        CP Busy:
+          avg: AVG((100 * GRBM_CP_BUSY / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
+          min: MIN((100 * GRBM_CP_BUSY / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
+          max: MAX((100 * GRBM_CP_BUSY / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
+          unit: Percent
+        GL2C Busy:
+          avg: AVG((100 * GRBM_GL2C_BUSY / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
+          min: MIN((100 * GRBM_GL2C_BUSY / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
+          max: MAX((100 * GRBM_GL2C_BUSY / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
+          unit: Percent
+
+  # =========================================================================
+  # Shader Engine Utilization
+  # =========================================================================
+  - metric_table:
+      id: 1702
+      title: "Shader Engine Utilization"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        TA Busy:
+          avg: AVG((100 * GRBM_TA_BUSY / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
+          min: MIN((100 * GRBM_TA_BUSY / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
+          max: MAX((100 * GRBM_TA_BUSY / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
+          unit: Percent
+
+  metrics_description:
+    GPU Busy: |-
+      Percentage of time the GPU was actively processing work.
+      Per sample: 100 * GRBM_GUI_ACTIVE / GRBM_COUNT (when GRBM_COUNT != 0).
+      Avg / min / max are taken across samples.
+    CP Busy: |-
+      Percentage of GUI-active cycles the Command Processor was busy.
+      Per sample: 100 * GRBM_CP_BUSY / GRBM_GUI_ACTIVE (when GRBM_GUI_ACTIVE != 0).
+      CP handles kernel dispatch and command stream processing.
+    GL2C Busy: |-
+      Percentage of GUI-active cycles the GL2 Cache was busy.
+      Per sample: 100 * GRBM_GL2C_BUSY / GRBM_GUI_ACTIVE (when GRBM_GUI_ACTIVE != 0).
+      High utilization indicates memory-intensive workload.
+    TA Busy: |-
+      Percentage of GUI-active cycles the Texture Addresser was busy.
+      Per sample: 100 * GRBM_TA_BUSY / GRBM_GUI_ACTIVE (when GRBM_GUI_ACTIVE != 0).

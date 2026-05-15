@@ -21,6 +21,7 @@ set(AMD_TEST_SRC
     shfl.cc
     shfl_sync.cc
     rtc_reduce.cc
+    rtc_coop.cc
     stdheaders.cc
     hiprtc_MathConstants_HeaderTst.cc
     hiprtc_VectorTypes_HeaderTst.cc
@@ -31,6 +32,7 @@ set(AMD_TEST_SRC
     hipRtcPtrdiff_t.cc
     hiprtc_Bitcode_UndefinedFn.cc
     hiprtc_bfloat16_HeaderTst.cc
+    hiprtc_fp8.cc
 )
 
 add_custom_target(copyRtcHeaders ALL

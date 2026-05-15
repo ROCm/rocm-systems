@@ -7,6 +7,7 @@ if(BUILD_TESTS)
 
   option(OPENMP_TESTS_ENABLED "Enable OpenMP for unit tests" OFF)
   option(ENABLE_MPI_TESTS "Enable MPI-based tests" OFF)
+  option(RCCL_HAS_GIN_IB_PROXY "Build the IB Proxy GIN transport-level tests" OFF)
 
   message("Building rccl unit tests (Installed in /test/rccl-UnitTests)")
   if(ENABLE_MPI_TESTS)
@@ -89,9 +90,12 @@ if(BUILD_TESTS)
     ${GTEST_INCLUDE_DIRS}
     ${PROJECT_BINARY_DIR}/include # for generated rccl.h header
     ${PROJECT_BINARY_DIR}/hipify/src/include  # for rccl_bfloat16.h
+    ${PROJECT_BINARY_DIR}/hipify/src/include/nccl_device  # for rccl_ptr.h
     ${PROJECT_BINARY_DIR}/hipify/gensrc # for rccl_bfloat16.h
     ${PROJECT_BINARY_DIR}/hipify/src # for graph/topo.h
     ${PROJECT_BINARY_DIR}/hipify/src/include/plugin # for recorder tests, nccl_tuner.h
+    ${PROJECT_BINARY_DIR}/hipify/src/transport/net_ib_cast # for net_ib_fault_inject.h, net_ib_cast_inspect.h
+    ${PROJECT_BINARY_DIR}/hipify/src/transport             # for net_ib_limits.h
     ${ROCM_PATH}/include
     ${ROCM_PATH}
   )
@@ -111,6 +115,9 @@ if(BUILD_TESTS)
   endif()
   if(ENABLE_MPI_TESTS)
     list(APPEND RCCL_COMMON_COMPILE_DEFS MPI_TESTS_ENABLED)
+    if(RCCL_HAS_GIN_IB_PROXY)
+      list(APPEND RCCL_COMMON_COMPILE_DEFS RCCL_HAS_GIN_IB_PROXY)
+    endif()
   endif()
   list(APPEND RCCL_COMMON_COMPILE_DEFS __HIP_PLATFORM_AMD__)
 
@@ -191,68 +198,66 @@ if(BUILD_TESTS)
   # Create rccl-UnitTests binary
   add_executable(rccl-UnitTests ${TEST_SOURCE_FILES})
 
-  # Create rccl-UnitTestsFixtures binary if ROCm version is 4.6.0 or greater
-  # and build type is Debug
-  if (ROCM_VERSION VERSION_GREATER_EQUAL "60400" AND CMAKE_BUILD_TYPE MATCHES "Debug")
-    # Add rccl-UnitTestsFixtures binary
+  # rccl-UnitTestsFixtures: Tests that only use header-only internal dependencies
+  # (inline, static, constexpr, template functions) and can run in both Release and Debug.
+  if (ROCM_VERSION VERSION_GREATER_EQUAL "60400")
     list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsFixtures)
 
     set(TEST_FIXTURE_SOURCE_FILES
+      BitOpsTests.cpp
+      MiscTests.cpp
+      RomeTopoConsensusTests.cpp
+      EnqueueCountTests.cpp
+      device/TestOp128.cpp
+      common/main_fixtures.cpp
+      common/EnvVars.cpp
+      common/ProcessIsolatedTestRunner.cpp
+      common/TestChecks.cpp
+    )
+
+    add_executable(rccl-UnitTestsFixtures ${TEST_FIXTURE_SOURCE_FILES})
+
+    target_include_directories(rccl-UnitTestsFixtures PRIVATE
+      ${PROJECT_BINARY_DIR}/hipify/src/device
+    )
+  endif()
+
+  # rccl-UnitTestsFixturesDebug: Tests that access internal symbols compiled into
+  # librccl.so which are only visible in Debug builds (hidden visibility in Release).
+  if (ROCM_VERSION VERSION_GREATER_EQUAL "60400" AND CMAKE_BUILD_TYPE MATCHES "Debug")
+    list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsFixturesDebug)
+
+    set(TEST_FIXTURE_DEBUG_SOURCE_FILES
       AllocTests.cpp
       ParamTests.cpp
       ArgCheckTests.cpp
-      BitOpsTests.cpp
-      CommTests.cpp
       EnqueueTests.cpp
       IpcsocketTests.cpp
       NetSocketTests.cpp
       ProxyTests.cpp
       RcclWrapTests.cpp
       TransportTests.cpp
+      mem_manager/MemManagerTests.cpp
+      graph/XmlTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/ProcessIsolatedTestRunner.cpp
-      graph/XmlTests.cpp
     )
 
-    add_executable(rccl-UnitTestsFixtures ${TEST_FIXTURE_SOURCE_FILES})
+    add_executable(rccl-UnitTestsFixturesDebug ${TEST_FIXTURE_DEBUG_SOURCE_FILES})
+  endif()
 
-    # Create separate MPI test binary if MPI tests are enabled
-    if(ENABLE_MPI_TESTS)
-      # Define MPI test source files
-      set(MPI_TEST_SOURCE_FILES
-        common/main_mpi.cpp
-        common/MPIHelpers.cpp
-        common/MPITestCore.cpp
-        common/MPIEnvironment.cpp
-        common/TestChecks.cpp
-        transport/TransportMPIBase.cpp
-        transport/P2pMPITests.cpp
-        transport/NetMPITests.cpp
-        transport/ShmMPITests.cpp
-        transport/NetIbMPITests.cpp
-        ImplicitLaunchOrderMPITests.cpp
-      )
-
-      # Create the MPI test executable
-      add_executable(rccl-UnitTestsMPI ${MPI_TEST_SOURCE_FILES})
-
-      # Add to test executables list for proper linking
-      list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsMPI)
-
-    endif()
-
-    # rccl-UnitTestsAltRsmi: Uses TEST BUILD alt_rsmi.cc (ARSMI_TEST_BUILD)
-    # This separate executable compiles alt_rsmi.cc with ARSMI_TEST_BUILD,
-    # enabling external linkage of internal variables so that
-    # tests can access and manipulate them for testing.
+  # rccl-UnitTestsAltRsmi: Compiles alt_rsmi.cc directly (not via librccl.so) with
+  # ARSMI_TEST_BUILD, which gives external linkage to thread_local sysfs root variables
+  # so tests can redirect them to a temp directory. No librccl.so symbols needed,
+  # so this target works in both Release and Debug builds.
+  if (ROCM_VERSION VERSION_GREATER_EQUAL "60400")
     list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsAltRsmi)
 
     set(TEST_ALTRSMI_SOURCE_FILES
       AltRsmiTests.cpp
       ../src/misc/alt_rsmi.cc
-      common/main_fixtures.cpp
-      common/EnvVars.cpp
+      common/main_altrsmi.cpp
       common/ProcessIsolatedTestRunner.cpp
     )
 
@@ -260,12 +265,55 @@ if(BUILD_TESTS)
 
     # Define ARSMI_TEST_BUILD specifically for rccl-UnitTestsAltRsmi
     target_compile_definitions(rccl-UnitTestsAltRsmi PRIVATE ARSMI_TEST_BUILD)
+
+    # amdsmi_wrap.h is compiled directly into this target (via alt_rsmi.cc), so it
+    # needs the amdsmi include path that the rccl library target gets but doesn't
+    # propagate (PRIVATE scope). Without this, __has_include(<amd_smi/amdsmi.h>)
+    # returns false in test TUs even when AMDSMI_FABRIC_DIRECT is set.
+    if(DEFINED SMI_INCLUDE_DIR)
+      target_include_directories(rccl-UnitTestsAltRsmi PRIVATE ${SMI_INCLUDE_DIR})
+    endif()
+  endif()
+
+  # Create separate MPI test binary if MPI tests are enabled
+  if(ENABLE_MPI_TESTS)
+    set(MPI_TEST_SOURCE_FILES
+      common/main_mpi.cpp
+      common/MPIHelpers.cpp
+      common/MPITestCore.cpp
+      common/MPIEnvironment.cpp
+      common/TestChecks.cpp
+      transport/TransportMPIBase.cpp
+      transport/P2pMPITests.cpp
+      transport/NetMPITests.cpp
+      transport/ShmMPITests.cpp
+      transport/NetIbMPI/GeneralTests.cpp
+      transport/NetIbMPI/NicFusionTests.cpp
+      transport/NetIbMPI/CastTests.cpp
+      transport/NetIbMPI/FaultInjectTests.cpp
+      transport/GinMPI/GinMPITests.cpp
+      ImplicitLaunchOrderMPITests.cpp
+      CommMPITests.cpp
+      RegistrationMPITests.cpp
+      mem_manager/SuspendResumeMPITests.cpp
+      RevokeMPITests.cpp
+    )
+
+    add_executable(rccl-UnitTestsMPI ${MPI_TEST_SOURCE_FILES})
+    list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsMPI)
   endif()
 
   foreach(test_executable IN LISTS RCCL_TEST_EXECUTABLES)
     target_include_directories(${test_executable} PRIVATE ${RCCL_COMMON_INCLUDE_DIRS})
     target_compile_definitions(${test_executable} PRIVATE ${RCCL_COMMON_COMPILE_DEFS})
     target_link_libraries(${test_executable} PRIVATE ${RCCL_COMMON_LINK_LIBS})
+    if(BUILD_ADDRESS_SANITIZER)
+      target_compile_options(${test_executable} PRIVATE -fsanitize=address)
+      target_link_options(${test_executable} PRIVATE -fsanitize=address -shared-libasan)
+      if(DEFINED ASAN_RUNTIME_DIR)
+        target_link_options(${test_executable} PRIVATE "LINKER:-rpath,${ASAN_RUNTIME_DIR}")
+      endif()
+    endif()                                                                                                                                                                     
 
     # Add MPI-specific configuration if MPI tests are enabled
     if(ENABLE_MPI_TESTS)

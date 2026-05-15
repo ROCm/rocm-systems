@@ -6,25 +6,12 @@
 rocJPEG prerequisites
 ********************************************************************
 
-rocJPEG requires ROCm running on `GPUs based on the CDNA architecture <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html>`_.
+rocJPEG requires an `AMD GPU <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html>`_ with ``gfx908`` or higher.
 
-ROCm must be installed before installing rocJPEG. See `Quick start installation guide <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/install/quick-start.html>`_ for detailed ROCm installation instructions.
+rocJPEG is built and installed as part of `TheRock <https://github.com/ROCm/TheRock>`_. All core dependencies are provided by the TheRock build, including:
 
-rocJPEG has been tested on the following Linux environments:
-  
-* Ubuntu 22.04 and 24.04
-* RHEL 8 and 9
-* SLES 15 SP7
-
-See `Supported operating systems <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html#supported-operating-systems>`_ for the complete list of ROCm supported Linux environments.
-
-The following prerequisites are installed by the package installer. If you are building and installing using the source code, use the `rocJPEG-setup.py <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocjpeg/rocJPEG-setup.py>`_ setup script available in the rocJPEG GitHub repository to install these prerequisites. 
-
-* CMake version 3.10 or later
-* AMD Clang++
-* AMD VA Drivers
-* libva-devel on RHEL and SLES
-* libva-dev on Ubuntu 24.04 and later
-* libva-amdgpu-dev on Ubuntu 22.04 only
-* libstdc++-12-dev on Ubuntu 22.04 only
-* HIP, specifically the ``hip-dev`` package
+* HIP runtime and development libraries
+* AMD Clang++ compiler (C++17 required)
+* Libva and VA-API drivers
+* Libdrm (amdgpu)
+* CMake and pkg-config

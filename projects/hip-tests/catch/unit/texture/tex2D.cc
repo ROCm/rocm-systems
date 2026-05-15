@@ -32,7 +32,7 @@
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE(Unit_tex2D_Positive_ReadModeElementType, char, unsigned char, short,
+HIP_TEMPLATE_TEST_CASE(Unit_tex2D_Positive_ReadModeElementType, char, unsigned char, short,
                    unsigned short, int, unsigned int, float) {
   CHECK_IMAGE_SUPPORT;
   (void) hipGetLastError();  // Prevent negative tests affecting this
@@ -100,7 +100,7 @@ TEMPLATE_TEST_CASE(Unit_tex2D_Positive_ReadModeElementType, char, unsigned char,
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE(Unit_tex2D_Positive_ReadModeNormalizedFloat, char, unsigned char, short,
+HIP_TEMPLATE_TEST_CASE(Unit_tex2D_Positive_ReadModeNormalizedFloat, char, unsigned char, short,
                    unsigned short) {
   CHECK_IMAGE_SUPPORT;
 

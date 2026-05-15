@@ -58,7 +58,7 @@ verify the output from the operations.
  * Invoke hipStreamIsCapturing on both streams. Verify that the capture info(status)
  * of both s1 and s2 are identical.
  */
-TEST_CASE(Unit_hipStreamIsCapturing_ParentAndForkedStream) {
+HIP_TEST_CASE(Unit_hipStreamIsCapturing_ParentAndForkedStream) {
   hipStream_t stream1{nullptr}, stream2{nullptr};
   hipEvent_t event2{nullptr}, forkStreamEvent{nullptr};
   hipGraph_t graph{nullptr};
@@ -154,7 +154,7 @@ TEST_CASE(Unit_hipStreamIsCapturing_ParentAndForkedStream) {
  * operatoins. End the capture on the created stream. Execute the graph and verify the output from
  * the operations.
  */
-TEST_CASE(Unit_hipStreamIsCapturing_ChkNullStrmStatus) {
+HIP_TEST_CASE(Unit_hipStreamIsCapturing_ChkNullStrmStatus) {
   hipStream_t stream{nullptr}, streamForGraph{nullptr};
   hipGraph_t graph{nullptr};
   hipError_t ret;

@@ -189,7 +189,7 @@ ncclResult_t rocm_smi_getLinkInfo(int srcIndex, int dstIndex, RSMI_IO_LINK_TYPE*
       ARSMI_linkInfo tinfo;
       ARSMICHECK(ARSMI_topo_get_link_info(srcIndex, dstIndex, &tinfo));
 
-      *rsmi_type  = (RSMI_IO_LINK_TYPE) tinfo.type;
+      *rsmi_type  = (ARSMI_IO_LINK_TYPE) tinfo.type;
       if (*rsmi_type == RSMI_IOLINK_TYPE_XGMI && (tinfo.weight == 15 ||
         tinfo.weight == 41 || tinfo.weight == 13)) {
 	*hops = 1;

@@ -28,7 +28,7 @@
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipEventQuery_DifferentDevice) {
+HIP_TEST_CASE(Unit_hipEventQuery_DifferentDevice) {
   hipEvent_t event1{}, event2{};
   HIP_CHECK(hipEventCreate(&event1));
   HIP_CHECK(hipEventCreate(&event2));
@@ -42,7 +42,7 @@ TEST_CASE(Unit_hipEventQuery_DifferentDevice) {
   {
     HIP_CHECK(hipSetDevice(0));
     HIP_CHECK(hipEventRecord(event1, stream));
-    LaunchDelayKernel(std::chrono::milliseconds(3000), stream);
+    LaunchDelayKernel(std::chrono::milliseconds(isQuickLevel() ? 100 : 3000), stream);
     HIP_CHECK(hipEventRecord(event2, stream));
 
     HIP_CHECK(hipEventSynchronize(event1));

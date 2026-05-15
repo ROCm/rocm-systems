@@ -121,6 +121,18 @@ __host__ void Context::barrier_all_on_stream(hipStream_t stream) {
   HOST_DISPATCH(barrier_all_on_stream(stream));
 }
 
+__host__ void Context::quiet_on_stream(hipStream_t stream) {
+  ctxHostStats.incStat(NUM_HOST_QUIET);
+
+  HOST_DISPATCH(quiet_on_stream(stream));
+}
+
+__host__ void Context::sync_all_on_stream(hipStream_t stream) {
+  ctxHostStats.incStat(NUM_HOST_SYNC_ALL);
+
+  HOST_DISPATCH(sync_all_on_stream(stream));
+}
+
 __host__ void Context::alltoallmem_on_stream(rocshmem_team_t team, void *dest,
                                              const void *source, size_t size,
                                              hipStream_t stream) {

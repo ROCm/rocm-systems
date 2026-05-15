@@ -35,7 +35,7 @@ __global__ void HIP_kernel(unsigned int* out32, unsigned int* in32_0, unsigned i
   out64[x] = __bitinsert_u64(in64_0[x], in64_1[x], in64_2[x], in64_3[x]);
 }
 
-TEST_CASE(Unit_bitInsert) {
+HIP_TEST_CASE(Unit_bitInsert) {
   using namespace std;
 
   unsigned int* hostOut32;

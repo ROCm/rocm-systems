@@ -106,9 +106,9 @@ arguments
  *    - HIP_VERSION >= 5.5
  */
 
-TEST_CASE(Unit_hipExtLaunchKernelGGL) {
+HIP_TEST_CASE(Unit_hipExtLaunchKernelGGL) {
   SECTION("test run") {
-    size_t N = 4 * 1024 * 1024;
+    size_t N = isQuickLevel() ? 100 * 1024 : 4 * 1024 * 1024;
     test(N);
   }
   SECTION("testStruct run") { testStruct(); }

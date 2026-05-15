@@ -14,7 +14,7 @@ different stream with hipStreamWaitEvent api
 
 #include <hip_test_common.hh>
 #include <utils.hh>
-TEST_CASE(Unit_hipStreamWaitEvent_Negative) {
+HIP_TEST_CASE(Unit_hipStreamWaitEvent_Negative) {
   enum class StreamTestType { NullStream = 0, StreamPerThread, CreatedStream };
 
   auto streamType = GENERATE(StreamTestType::NullStream, StreamTestType::StreamPerThread,
@@ -53,7 +53,7 @@ TEST_CASE(Unit_hipStreamWaitEvent_Negative) {
   }
 }
 
-TEST_CASE(Unit_hipStreamWaitEvent_Default) {
+HIP_TEST_CASE(Unit_hipStreamWaitEvent_Default) {
   hipStream_t stream{nullptr};
   hipEvent_t waitEvent{nullptr};
 
@@ -63,7 +63,7 @@ TEST_CASE(Unit_hipStreamWaitEvent_Default) {
   REQUIRE(stream != nullptr);
   REQUIRE(waitEvent != nullptr);
 
-  LaunchDelayKernel(std::chrono::milliseconds(2000), stream);
+  LaunchDelayKernel(std::chrono::milliseconds(isQuickLevel() ? 100 : 2000), stream);
 
   HIP_CHECK(hipEventRecord(waitEvent, stream));
 
@@ -78,7 +78,7 @@ TEST_CASE(Unit_hipStreamWaitEvent_Default) {
   HIP_CHECK(hipEventDestroy(waitEvent));
 }
 
-TEST_CASE(Unit_hipStreamWaitEvent_DifferentStreams) {
+HIP_TEST_CASE(Unit_hipStreamWaitEvent_DifferentStreams) {
   hipStream_t blockedStreamA{nullptr}, streamBlockedOnStreamA{nullptr}, unblockingStream{nullptr};
   hipEvent_t waitEvent{nullptr};
 

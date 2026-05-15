@@ -30,7 +30,7 @@
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE(Unit_hipMemMapArrayAsync_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipMemMapArrayAsync_Positive_Basic) {
   HIP_CHECK(hipFree(0));
 
   hipDevice_t device;

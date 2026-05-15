@@ -12,14 +12,6 @@
 #include <cstring>
 namespace math_reference {
 
-inline float sin_pi(float x) {
-    return static_cast<float>(sin_pi(static_cast<double>(x)));
-}
-
-inline float cos_pi(float x) {
-    return static_cast<float>(cos_pi(static_cast<double>(x)));
-}
-
 inline double sin_pi(double x) {
     if (std::isnan(x)) return x;
     if (std::isinf(x)) return std::numeric_limits<double>::quiet_NaN();
@@ -69,6 +61,14 @@ inline double cos_pi(double x) {
         result = -std::cos((r - 1.0) * M_PI);
     }
     return result;
+}
+
+inline float sin_pi(float x) {
+    return static_cast<float>(sin_pi(static_cast<double>(x)));
+}
+
+inline float cos_pi(float x) {
+    return static_cast<float>(cos_pi(static_cast<double>(x)));
 }
 
 inline long double sin_pi(long double x) {
