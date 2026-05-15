@@ -31,6 +31,7 @@ def _make_sanitize_args(remaining, torch_trace=False):
         spatial_multiplexing=None,
         remaining=["--"] + remaining,
         torch_trace=torch_trace,
+        dispatch=None,
     )
 
 
