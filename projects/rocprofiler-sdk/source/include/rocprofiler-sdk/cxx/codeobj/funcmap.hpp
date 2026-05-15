@@ -320,6 +320,37 @@ parse_funcmap_section(std::string_view blob, bool silent)
     return out;
 }
 
+// Locate `section_name` in an in-memory ELF64 image and return a view of its
+// raw bytes. Returns nullopt for: missing/empty section, or any malformed
+// header (non-64-bit, bad sizes, OOB offsets, integer wrap on
+// sh_offset+sh_size). Bounds checks use subtraction against `elf_size` to
+// avoid uint64 wrap on adversarial sh_size values.
+//
+//   ┌─────────────────────────┐  ← elf_data
+//   │ ELF header (Elf64_Ehdr) │     e_shoff     → section header table
+//   │                         │     e_shnum     = N entries
+//   │                         │     e_shentsize = sizeof(Elf64_Shdr)
+//   │                         │     e_shstrndx  = index of .shstrtab in shdrs
+//   ├─────────────────────────┤
+//   │ section data            │
+//   │   .text                 │
+//   │   .rodata               │
+//   │   .sqtt_funcmap         │  ← returned on a hit
+//   │   .shstrtab        ◄────┼── shstr.sh_offset / sh_size point here
+//   ├─────────────────────────┤
+//   │ Section header table    │  ← e_shoff
+//   │   [0] SHT_NULL          │
+//   │   [1] .text     name=1  │── sh_name = offset into .shstrtab bytes
+//   │   [2] .rodata   name=7  │
+//   │   [3] .sqtt_..  name=15 │
+//   │   [4] .shstrtab name=29 │
+//   └─────────────────────────┘
+//
+// .shstrtab bytes (NUL-terminated strings packed end-to-end):
+//   offset:  0   1     6  7      13 14 15            28 29
+//   bytes:  \0 . t e x t \0 . r o d a t a \0 . s q t t _ f u n c m a p \0 . s h s t r t a b \0
+//                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+//                                            sh_name=15 → ".sqtt_funcmap"
 inline std::optional<std::string_view>
 extract_elf_section(const char* elf_data, size_t elf_size, std::string_view section_name)
 {
@@ -335,18 +366,21 @@ extract_elf_section(const char* elf_data, size_t elf_size, std::string_view sect
     if(ehdr.e_shoff == 0 || ehdr.e_shoff > elf_size) return std::nullopt;
     if(ehdr.e_shstrndx == SHN_UNDEF) return std::nullopt;
 
+    // Whole shdr table must fit inside elf_size without overflow.
     uint64_t shdr_table_bytes = uint64_t(ehdr.e_shnum) * sizeof(Elf64_Shdr);
     if(shdr_table_bytes / sizeof(Elf64_Shdr) != uint64_t(ehdr.e_shnum)) return std::nullopt;
     // Use subtraction to avoid wrap; e_shoff <= elf_size from the prior check.
     if(shdr_table_bytes > uint64_t(elf_size) - ehdr.e_shoff) return std::nullopt;
     if(ehdr.e_shstrndx >= ehdr.e_shnum) return std::nullopt;
 
+    // memcpy avoids alignment UB on the raw buffer.
     auto read_shdr = [&](unsigned idx) {
         Elf64_Shdr s;
         std::memcpy(&s, elf_data + ehdr.e_shoff + idx * sizeof(Elf64_Shdr), sizeof(Elf64_Shdr));
         return s;
     };
 
+    // .shstrtab — sh_name in every other shdr is an offset into [str_base, str_base+str_len).
     Elf64_Shdr shstr = read_shdr(ehdr.e_shstrndx);
     if(shstr.sh_offset > elf_size || shstr.sh_size > uint64_t(elf_size) - shstr.sh_offset)
         return std::nullopt;
@@ -354,6 +388,7 @@ extract_elf_section(const char* elf_data, size_t elf_size, std::string_view sect
     const char* str_base = elf_data + shstr.sh_offset;
     size_t      str_len  = shstr.sh_size;
 
+    // Empty view on OOB so the caller's name-compare safely fails.
     auto name_of = [&](uint32_t name_off) -> std::string_view {
         if(name_off >= str_len) return std::string_view{};
         size_t end = name_off;
@@ -362,19 +397,16 @@ extract_elf_section(const char* elf_data, size_t elf_size, std::string_view sect
         return std::string_view(str_base + name_off, end - name_off);
     };
 
+    // Linear scan; ELF doesn't index sections by name and N is small.
     for(unsigned i = 0; i < ehdr.e_shnum; ++i)
     {
         Elf64_Shdr s = read_shdr(i);
         if(name_of(s.sh_name) != section_name) continue;
 
-        if(s.sh_size == 0)
-        {
-            return std::nullopt;
-        }
+        // Empty section is treated as "not present".
+        if(s.sh_size == 0) return std::nullopt;
         if(s.sh_offset > elf_size || s.sh_size > uint64_t(elf_size) - s.sh_offset)
-        {
             return std::nullopt;
-        }
         return std::string_view(elf_data + s.sh_offset, s.sh_size);
     }
 

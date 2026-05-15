@@ -186,14 +186,8 @@ CodeFile::~CodeFile()
     nlohmann::json jfuncmap = nlohmann::json::array();
     for(auto cid : codeobj_ids)
     {
-        const rocprofiler::sdk::codeobj::funcmap::Funcmap* fmap = nullptr;
-        try
-        {
-            fmap = &table->getFuncmap(cid);
-        } catch(...)
-        {
-            continue;
-        }
+        auto fmap = table->getFuncmap(cid);
+        if(!fmap) continue;
 
         for(const auto& entry_ptr : fmap->entries)
         {

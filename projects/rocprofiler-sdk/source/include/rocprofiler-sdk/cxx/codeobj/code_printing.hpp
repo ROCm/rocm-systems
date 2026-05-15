@@ -285,42 +285,59 @@ public:
         } catch(...)
         {}
 
-        try
+        // .sqtt_funcmap (emitted by the sqtt_instrumentation LLVM pass) maps
+        // marker IDs to function/scope/point names. See
+        // sqtt-instrumentation/docs/SPEC.md and funcmap.hpp.
+        //
+        //   ┌──────────────────────────────────────────────────────────────┐
+        //   │ AMDGPU ELF code object                                       │
+        //   ├──────────────────────────────────────────────────────────────┤
+        //   │ .text         … GPU instructions                             │
+        //   │ .symtab       … kernel symbols → m_symbol_map (vaddr→name)   │
+        //   │ .debug_*      … DWARF → m_line_number_map (vaddr→source)     │
+        //   │ .sqtt_funcmap … ASCII rows: F:id:name@loc, K:name, U:, P:, W:│
+        //   └──────────────────────────────────────────────────────────────┘
+        //
+        // Below: parse the section, then join against m_symbol_map to
+        // back-fill `vaddr` on each F:/K: entry.
+        auto section_bytes =
+            funcmap::extract_elf_section(codeobj_data, codeobj_size, ".sqtt_funcmap");
+        if(section_bytes)
         {
-            auto section_bytes =
-                funcmap::extract_elf_section(codeobj_data, codeobj_size, ".sqtt_funcmap");
-            if(section_bytes)
+            m_funcmap = funcmap::parse_funcmap_section(*section_bytes);
+
+            // m_symbol_map is vaddr-keyed; build the reverse index for the join.
+            std::unordered_map<std::string, uint64_t> name_to_vaddr;
+            name_to_vaddr.reserve(m_symbol_map.size());
+            for(const auto& [vaddr, sym] : m_symbol_map)
+                name_to_vaddr.emplace(sym.name, vaddr);
+
+            // FuncmapEntry is shared_ptr<const>, so we copy-on-write: clone,
+            // set vaddr, then swap the shared_ptr in entries[] (and by_id).
+            for(auto& entry_ptr : m_funcmap.entries)
             {
-                m_funcmap = funcmap::parse_funcmap_section(*section_bytes);
+                if(!entry_ptr) continue;
+                if(entry_ptr->kind != funcmap::FuncmapEntryKind::Function &&
+                   entry_ptr->kind != funcmap::FuncmapEntryKind::Kernel)
+                    continue;
 
-                std::unordered_map<std::string, uint64_t> name_to_vaddr;
-                name_to_vaddr.reserve(m_symbol_map.size());
-                for(const auto& [vaddr, sym] : m_symbol_map)
-                    name_to_vaddr.emplace(sym.name, vaddr);
+                auto it = name_to_vaddr.find(entry_ptr->name);
+                if(it == name_to_vaddr.end()) continue;
 
-                for(auto& entry_ptr : m_funcmap.entries)
+                auto updated   = std::make_shared<funcmap::FuncmapEntry>(*entry_ptr);
+                updated->vaddr = it->second;
+                // K: rows are not present in by_id by design (they carry no
+                // marker ID — see parse_funcmap_section). The identity guard
+                // skips slots already overwritten by a later F:/U:/P: row.
+                if(updated->kind != funcmap::FuncmapEntryKind::Kernel)
                 {
-                    if(!entry_ptr) continue;
-                    if(entry_ptr->kind != funcmap::FuncmapEntryKind::Function &&
-                       entry_ptr->kind != funcmap::FuncmapEntryKind::Kernel)
-                        continue;
-
-                    auto it = name_to_vaddr.find(entry_ptr->name);
-                    if(it == name_to_vaddr.end()) continue;
-
-                    auto updated   = std::make_shared<funcmap::FuncmapEntry>(*entry_ptr);
-                    updated->vaddr = it->second;
-                    if(updated->kind != funcmap::FuncmapEntryKind::Kernel)
-                    {
-                        auto bid = m_funcmap.by_id.find(updated->id);
-                        if(bid != m_funcmap.by_id.end() && bid->second == entry_ptr)
-                            bid->second = updated;
-                    }
-                    entry_ptr = std::move(updated);
+                    auto bid = m_funcmap.by_id.find(updated->id);
+                    if(bid != m_funcmap.by_id.end() && bid->second == entry_ptr)
+                        bid->second = updated;
                 }
+                entry_ptr = std::move(updated);
             }
-        } catch(...)
-        {}
+        }
     }
     ~CodeobjDecoderComponent() = default;
 
@@ -345,6 +362,8 @@ public:
         return inst;
     }
 
+    // Parsed `.sqtt_funcmap` with vaddr back-filled on F:/K: rows. Empty
+    // when the code object has no .sqtt_funcmap section.
     const funcmap::Funcmap& getFuncmap() const { return m_funcmap; }
 
     std::map<uint64_t, SymbolInfo>            m_symbol_map{};
@@ -428,6 +447,7 @@ public:
         return decoder->m_symbol_map;
     }
     const funcmap::Funcmap& getFuncmap() const;
+    bool                    has_decoder() const noexcept { return bool(decoder); }
     const uint64_t          load_addr;
 
 private:
@@ -490,9 +510,14 @@ public:
         return nullptr;
     }
 
-    funcmap::Funcmap::EntryPtr getMarker(marker_id_t id, uint32_t marker_id) const;
+    funcmap::Funcmap::EntryPtr getMarker(marker_id_t id, uint32_t funcmap_id) const;
 
-    const funcmap::Funcmap& getFuncmap(marker_id_t id) const;
+    // Returns nullopt if `id` has no registered decoder (or the decoder is
+    // uninitialized). Caller-side existence test replaces what used to be a
+    // try/catch on decoders.at(id). Funcmap is returned by value (copy of a
+    // vector + unordered_map of shared_ptrs) since std::optional cannot hold
+    // a reference in C++17.
+    std::optional<funcmap::Funcmap> getFuncmap(marker_id_t id) const;
 
 protected:
     std::unordered_map<marker_id_t, std::shared_ptr<LoadedCodeobjDecoder>> decoders{};
@@ -595,7 +620,7 @@ public:
     }
 
     std::vector<std::pair<marker_id_t, funcmap::Funcmap::EntryPtr>> findMarkerAny(
-        uint32_t marker_id) const;
+        uint32_t funcmap_id) const;
 
     uint32_t getWaveSize() const;
 
@@ -611,35 +636,37 @@ LoadedCodeobjDecoder::getFuncmap() const
 }
 
 inline funcmap::Funcmap::EntryPtr
-CodeobjMap::getMarker(marker_id_t id, uint32_t marker_id) const
+CodeobjMap::getMarker(marker_id_t id, uint32_t funcmap_id) const
 {
     auto it = decoders.find(id);
     if(it == decoders.end()) return nullptr;
 
     try
     {
-        return it->second->getFuncmap().find(marker_id);
+        return it->second->getFuncmap().find(funcmap_id);
     } catch(...)
     {
         return nullptr;
     }
 }
 
-inline const funcmap::Funcmap&
+inline std::optional<funcmap::Funcmap>
 CodeobjMap::getFuncmap(marker_id_t id) const
 {
-    return decoders.at(id)->getFuncmap();
+    auto it = decoders.find(id);
+    if(it == decoders.end() || !it->second || !it->second->has_decoder()) return std::nullopt;
+    return it->second->getFuncmap();
 }
 
 inline std::vector<std::pair<marker_id_t, funcmap::Funcmap::EntryPtr>>
-CodeobjAddressTranslate::findMarkerAny(uint32_t marker_id) const
+CodeobjAddressTranslate::findMarkerAny(uint32_t funcmap_id) const
 {
     std::vector<std::pair<marker_id_t, funcmap::Funcmap::EntryPtr>> out;
     for(const auto& [id, dec] : decoders)
     {
         try
         {
-            if(auto entry = dec->getFuncmap().find(marker_id))
+            if(auto entry = dec->getFuncmap().find(funcmap_id))
                 out.emplace_back(id, std::move(entry));
         } catch(...)
         {}
