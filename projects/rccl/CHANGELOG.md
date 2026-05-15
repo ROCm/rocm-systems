@@ -13,6 +13,8 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Added `RCCL_IB_P2P_DISABLE_CTS` to disable CTS offload for P2P connections on AINIC. Defaults to 1 (disabled). When `RCCL_CTS_OFFLOAD_ENABLED=1` is explicitly set, it overrides this flag and forces CTS on all connections including P2P.
 * Merged `RCCL_CTS_INLINE_DATA` into `RCCL_CTS_OFFLOAD_ENABLED`. CTS offload and CTS inline data are now controlled by a single tri-state variable: `-1` (default, auto-enable on AINIC), `0` (force disable), `1` (force enable for all connections).
 * Added Pythonic API bindings under `bindings/nccl4py/` (RCCL fork of NVIDIA `nccl4py` v0.2.0). Provides Python access to RCCL collectives via Cython bindings, an on-disk `cuda.core` HIP shim for ROCm hosts without `cuda-bindings` / `cuda-core`, and RCCL-only collective wrappers (`ncclAllReduceWithBias`, `ncclAllToAllv`).
+* Added unit tests for the RCCL Device API in `rccl-UnitTestsFixtures` (`DeviceApi.LsaRemoteRead`, `DeviceApi.CuMemDisabled`, `DeviceApi.WinDisabled`) covering LSA symmetric remote read and `ncclDevCommCreate` gating under `NCCL_CUMEM_ENABLE` / `NCCL_WIN_ENABLE`.
+* `ProcessIsolatedTestRunner`: opt-in `TestConfig::withExec(true)` mode that runs an isolated child via `fork()+execve()` of the same binary instead of plain `fork()`. Required for HIP-using tests when the binary may have already initialized HIP in earlier tests of the same process (fork-after-init is unsafe for the HIP/ROCm runtime).
 
 ### Changed
 * Compatibility with NCCL 2.28.3.
