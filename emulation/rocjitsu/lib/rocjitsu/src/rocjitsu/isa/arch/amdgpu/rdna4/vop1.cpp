@@ -296,17 +296,16 @@ void VCvtI32F64Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    int32_t r;
-    if (std::isnan(s))
-      r = 0;
-    else if (s >= 2147483648.0)
-      r = INT32_MAX;
-    else if (s < -2147483648.0)
-      r = INT32_MIN;
-    else
-      r = static_cast<int32_t>(s);
-    vdst.write_lane(wf, lane, static_cast<uint32_t>(r));
+    vdst.write_lane(wf, lane, [&]() -> uint32_t {
+      double s = std::bit_cast<double>(static_cast<uint64_t>(src0.read_lane(wf, lane)));
+      if (std::isnan(s))
+        return 0;
+      if (s >= 2147483648.0)
+        return static_cast<uint32_t>(INT32_MAX);
+      if (s < -2147483648.0)
+        return static_cast<uint32_t>(INT32_MIN);
+      return static_cast<uint32_t>(static_cast<int32_t>(s));
+    }());
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -385,8 +384,9 @@ void VCvtF64I32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t s = static_cast<int32_t>(src0.read_lane(wf, lane));
-    vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(static_cast<double>(s)));
+    vdst.write_lane(wf, lane,
+                    std::bit_cast<uint64_t>(
+                        static_cast<double>(static_cast<int32_t>(src0.read_lane(wf, lane)))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -465,8 +465,9 @@ void VCvtF32I32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t s = static_cast<int32_t>(src0.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(static_cast<float>(s)));
+    vdst.write_lane(wf, lane,
+                    std::bit_cast<uint32_t>(
+                        static_cast<float>(static_cast<int32_t>(src0.read_lane(wf, lane)))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -545,8 +546,8 @@ void VCvtF32U32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = src0.read_lane(wf, lane);
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(static_cast<float>(s)));
+    vdst.write_lane(wf, lane,
+                    std::bit_cast<uint32_t>(static_cast<float>(src0.read_lane(wf, lane))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -625,15 +626,14 @@ void VCvtU32F32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(src0.read_lane(wf, lane));
-    uint32_t r;
-    if (std::isnan(s) || s < 0.0f)
-      r = 0;
-    else if (s >= 4294967296.0f)
-      r = UINT32_MAX;
-    else
-      r = static_cast<uint32_t>(s);
-    vdst.write_lane(wf, lane, r);
+    vdst.write_lane(wf, lane, [&]() -> uint32_t {
+      float s = std::bit_cast<float>(static_cast<uint32_t>(src0.read_lane(wf, lane)));
+      if (std::isnan(s) || s < 0.0f)
+        return 0u;
+      if (s >= 4294967296.0f)
+        return UINT32_MAX;
+      return static_cast<uint32_t>(s);
+    }());
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -712,17 +712,16 @@ void VCvtI32F32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(src0.read_lane(wf, lane));
-    int32_t r;
-    if (std::isnan(s))
-      r = 0;
-    else if (s >= 2147483648.0f)
-      r = INT32_MAX;
-    else if (s < -2147483648.0f)
-      r = INT32_MIN;
-    else
-      r = static_cast<int32_t>(s);
-    vdst.write_lane(wf, lane, static_cast<uint32_t>(r));
+    vdst.write_lane(wf, lane, [&]() -> uint32_t {
+      float s = std::bit_cast<float>(static_cast<uint32_t>(src0.read_lane(wf, lane)));
+      if (std::isnan(s))
+        return 0u;
+      if (s >= 2147483648.0f)
+        return static_cast<uint32_t>(INT32_MAX);
+      if (s < -2147483648.0f)
+        return static_cast<uint32_t>(INT32_MIN);
+      return static_cast<uint32_t>(static_cast<int32_t>(s));
+    }());
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -801,8 +800,9 @@ void VCvtF16F32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(src0.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, util::f32_to_f16(s));
+    vdst.write_lane(
+        wf, lane,
+        util::f32_to_f16(std::bit_cast<float>(static_cast<uint32_t>(src0.read_lane(wf, lane)))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -881,9 +881,9 @@ void VCvtF32F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t raw = src0.read_lane(wf, lane);
-    vdst.write_lane(wf, lane,
-                    std::bit_cast<uint32_t>(util::f16_to_f32(static_cast<uint16_t>(raw))));
+    vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -962,17 +962,16 @@ void VCvtNearestI32F32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(src0.read_lane(wf, lane));
-    int32_t r;
-    if (std::isnan(s))
-      r = 0;
-    else if (s >= 2147483648.0f)
-      r = INT32_MAX;
-    else if (s < -2147483648.0f)
-      r = INT32_MIN;
-    else
-      r = static_cast<int32_t>(s);
-    vdst.write_lane(wf, lane, static_cast<uint32_t>(r));
+    vdst.write_lane(wf, lane, [&]() -> uint32_t {
+      float s = std::bit_cast<float>(static_cast<uint32_t>(src0.read_lane(wf, lane)));
+      if (std::isnan(s))
+        return 0u;
+      if (s >= 2147483648.0f)
+        return static_cast<uint32_t>(INT32_MAX);
+      if (s < -2147483648.0f)
+        return static_cast<uint32_t>(INT32_MIN);
+      return static_cast<uint32_t>(static_cast<int32_t>(s));
+    }());
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -1051,17 +1050,16 @@ void VCvtFloorI32F32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(src0.read_lane(wf, lane));
-    int32_t r;
-    if (std::isnan(s))
-      r = 0;
-    else if (s >= 2147483648.0f)
-      r = INT32_MAX;
-    else if (s < -2147483648.0f)
-      r = INT32_MIN;
-    else
-      r = static_cast<int32_t>(s);
-    vdst.write_lane(wf, lane, static_cast<uint32_t>(r));
+    vdst.write_lane(wf, lane, [&]() -> uint32_t {
+      float s = std::bit_cast<float>(static_cast<uint32_t>(src0.read_lane(wf, lane)));
+      if (std::isnan(s))
+        return 0u;
+      if (s >= 2147483648.0f)
+        return static_cast<uint32_t>(INT32_MAX);
+      if (s < -2147483648.0f)
+        return static_cast<uint32_t>(INT32_MIN);
+      return static_cast<uint32_t>(static_cast<int32_t>(s));
+    }());
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -1168,8 +1166,9 @@ void VCvtF32F64Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(static_cast<float>(s)));
+    vdst.write_lane(wf, lane,
+                    std::bit_cast<uint32_t>(static_cast<float>(
+                        std::bit_cast<double>(static_cast<uint64_t>(src0.read_lane(wf, lane))))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -1248,8 +1247,9 @@ void VCvtF64F32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(src0.read_lane(wf, lane));
-    vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(static_cast<double>(s)));
+    vdst.write_lane(wf, lane,
+                    std::bit_cast<uint64_t>(static_cast<double>(
+                        std::bit_cast<float>(static_cast<uint32_t>(src0.read_lane(wf, lane))))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -1328,8 +1328,8 @@ void VCvtF32Ubyte0Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = src0.read_lane(wf, lane);
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(static_cast<float>(s & 0xFFu)));
+    vdst.write_lane(wf, lane,
+                    std::bit_cast<uint32_t>(static_cast<float>(src0.read_lane(wf, lane) & 0xFFu)));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -1408,8 +1408,9 @@ void VCvtF32Ubyte1Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = src0.read_lane(wf, lane);
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(static_cast<float>((s >> 8) & 0xFFu)));
+    vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(static_cast<float>((src0.read_lane(wf, lane) >> 8) & 0xFFu)));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -1488,8 +1489,9 @@ void VCvtF32Ubyte2Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = src0.read_lane(wf, lane);
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(static_cast<float>((s >> 16) & 0xFFu)));
+    vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(static_cast<float>((src0.read_lane(wf, lane) >> 16) & 0xFFu)));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -1568,8 +1570,9 @@ void VCvtF32Ubyte3Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = src0.read_lane(wf, lane);
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(static_cast<float>((s >> 24) & 0xFFu)));
+    vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(static_cast<float>((src0.read_lane(wf, lane) >> 24) & 0xFFu)));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -1648,15 +1651,14 @@ void VCvtU32F64Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    uint32_t r;
-    if (std::isnan(s) || s < 0.0)
-      r = 0;
-    else if (s >= 4294967296.0)
-      r = UINT32_MAX;
-    else
-      r = static_cast<uint32_t>(s);
-    vdst.write_lane(wf, lane, r);
+    vdst.write_lane(wf, lane, [&]() -> uint32_t {
+      double s = std::bit_cast<double>(static_cast<uint64_t>(src0.read_lane(wf, lane)));
+      if (std::isnan(s) || s < 0.0)
+        return 0u;
+      if (s >= 4294967296.0)
+        return UINT32_MAX;
+      return static_cast<uint32_t>(s);
+    }());
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -1735,8 +1737,8 @@ void VCvtF64U32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = src0.read_lane(wf, lane);
-    vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(static_cast<double>(s)));
+    vdst.write_lane(wf, lane,
+                    std::bit_cast<uint64_t>(static_cast<double>(src0.read_lane(wf, lane))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -1815,8 +1817,9 @@ void VTruncF64Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(std::trunc(s)));
+    vdst.write_lane64(
+        wf, lane,
+        std::bit_cast<uint64_t>(std::trunc(std::bit_cast<double>(src0.read_lane64(wf, lane)))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -1907,8 +1910,9 @@ void VCeilF64Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(std::ceil(s)));
+    vdst.write_lane64(
+        wf, lane,
+        std::bit_cast<uint64_t>(std::ceil(std::bit_cast<double>(src0.read_lane64(wf, lane)))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -1999,8 +2003,9 @@ void VRndneF64Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(std::nearbyint(s)));
+    vdst.write_lane64(
+        wf, lane,
+        std::bit_cast<uint64_t>(std::nearbyint(std::bit_cast<double>(src0.read_lane64(wf, lane)))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -2091,8 +2096,9 @@ void VFloorF64Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(std::floor(s)));
+    vdst.write_lane64(
+        wf, lane,
+        std::bit_cast<uint64_t>(std::floor(std::bit_cast<double>(src0.read_lane64(wf, lane)))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -2238,7 +2244,9 @@ void VMovB16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vdst.write_lane(wf, lane, src0.read_lane(wf, lane));
+    vdst.write_lane(wf, lane,
+                    static_cast<uint32_t>(
+                        static_cast<uint16_t>(static_cast<uint16_t>(src0.read_lane(wf, lane)))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -2317,8 +2325,10 @@ void VFractF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(src0.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(s - std::floor(s)));
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                      auto v = std::bit_cast<float>(src0.read_lane(wf, lane));
+                      return v - std::floor(v);
+                    }()));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -2409,8 +2419,9 @@ void VTruncF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(src0.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(std::trunc(s)));
+    vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(std::trunc(std::bit_cast<float>(src0.read_lane(wf, lane)))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -2501,8 +2512,9 @@ void VCeilF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(src0.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(std::ceil(s)));
+    vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(std::ceil(std::bit_cast<float>(src0.read_lane(wf, lane)))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -2593,8 +2605,9 @@ void VRndneF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(src0.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(std::nearbyint(s)));
+    vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(std::nearbyint(std::bit_cast<float>(src0.read_lane(wf, lane)))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -2685,8 +2698,9 @@ void VFloorF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(src0.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(std::floor(s)));
+    vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(std::floor(std::bit_cast<float>(src0.read_lane(wf, lane)))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -2777,8 +2791,9 @@ void VExpF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(src0.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(amdgpu::transcendental::exp_f32(s)));
+    vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(std::exp2(std::bit_cast<float>(src0.read_lane(wf, lane)))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -2869,8 +2884,9 @@ void VLogF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(src0.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(amdgpu::transcendental::log_f32(s)));
+    vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(std::log2(std::bit_cast<float>(src0.read_lane(wf, lane)))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -2961,8 +2977,8 @@ void VRcpF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(src0.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(amdgpu::transcendental::rcp_f32(s)));
+    vdst.write_lane(wf, lane,
+                    std::bit_cast<uint32_t>(1.0f / std::bit_cast<float>(src0.read_lane(wf, lane))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -3053,8 +3069,8 @@ void VRcpIflagF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(src0.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(amdgpu::transcendental::rcp_f32(s)));
+    vdst.write_lane(wf, lane,
+                    std::bit_cast<uint32_t>(1.0f / std::bit_cast<float>(src0.read_lane(wf, lane))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -3145,8 +3161,9 @@ void VRsqF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(src0.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(amdgpu::transcendental::rsq_f32(s)));
+    vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(1.0f / std::sqrt(std::bit_cast<float>(src0.read_lane(wf, lane)))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -3237,8 +3254,9 @@ void VRcpF64Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(amdgpu::transcendental::rcp_f64(s)));
+    vdst.write_lane64(
+        wf, lane,
+        std::bit_cast<uint64_t>(1.0f / std::bit_cast<double>(src0.read_lane64(wf, lane))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -3329,8 +3347,9 @@ void VRsqF64Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(amdgpu::transcendental::rsq_f64(s)));
+    vdst.write_lane64(wf, lane,
+                      std::bit_cast<uint64_t>(
+                          1.0f / std::sqrt(std::bit_cast<double>(src0.read_lane64(wf, lane)))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -3421,8 +3440,9 @@ void VSqrtF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(src0.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(amdgpu::transcendental::sqrt_f32(s)));
+    vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(std::sqrt(std::bit_cast<float>(src0.read_lane(wf, lane)))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -3513,8 +3533,9 @@ void VSqrtF64Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(amdgpu::transcendental::sqrt_f64(s)));
+    vdst.write_lane64(
+        wf, lane,
+        std::bit_cast<uint64_t>(std::sqrt(std::bit_cast<double>(src0.read_lane64(wf, lane)))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -3605,8 +3626,9 @@ void VSinF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(src0.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(amdgpu::transcendental::sin_f32(s)));
+    vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(std::sin(std::bit_cast<float>(src0.read_lane(wf, lane)))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -3697,8 +3719,9 @@ void VCosF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(src0.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(amdgpu::transcendental::cos_f32(s)));
+    vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(std::cos(std::bit_cast<float>(src0.read_lane(wf, lane)))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -3789,8 +3812,7 @@ void VNotB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = src0.read_lane(wf, lane);
-    vdst.write_lane(wf, lane, ~s);
+    vdst.write_lane(wf, lane, (~src0.read_lane(wf, lane)));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -3869,11 +3891,13 @@ void VBfrevB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = src0.read_lane(wf, lane);
-    uint32_t result = 0;
-    for (int i = 0; i < 32; ++i)
-      result |= ((s >> i) & 1) << (31 - i);
-    vdst.write_lane(wf, lane, result);
+    vdst.write_lane(wf, lane, [&]() {
+      uint32_t s = src0.read_lane(wf, lane);
+      uint32_t r = 0;
+      for (int i = 0; i < 32; ++i)
+        r |= ((s >> i) & 1) << (31 - i);
+      return r;
+    }());
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -3952,9 +3976,10 @@ void VClzI32U32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = src0.read_lane(wf, lane);
-    vdst.write_lane(
-        wf, lane, s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(s)));
+    vdst.write_lane(wf, lane, [&]() {
+      auto s = src0.read_lane(wf, lane);
+      return s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(s));
+    }());
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -4033,9 +4058,10 @@ void VCtzI32B32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = src0.read_lane(wf, lane);
-    vdst.write_lane(
-        wf, lane, s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(s)));
+    vdst.write_lane(wf, lane, [&]() {
+      auto s = src0.read_lane(wf, lane);
+      return s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(s));
+    }());
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -4114,12 +4140,11 @@ void VClsI32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = src0.read_lane(wf, lane);
-    int32_t sv = static_cast<int32_t>(s);
-    uint32_t abs_val = sv < 0 ? ~s : s;
-    vdst.write_lane(wf, lane,
-                    abs_val == 0 ? static_cast<uint32_t>(-1)
-                                 : static_cast<uint32_t>(std::countl_zero(abs_val)));
+    vdst.write_lane(wf, lane, [&]() {
+      auto s = static_cast<int32_t>(src0.read_lane(wf, lane));
+      uint32_t a = s < 0 ? ~static_cast<uint32_t>(s) : static_cast<uint32_t>(s);
+      return a == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(a));
+    }());
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -4198,11 +4223,13 @@ void VFrexpExpI32F64Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    int exp = 0;
-    if (s != 0.0 && !std::isnan(s) && !std::isinf(s))
-      std::frexp(s, &exp);
-    vdst.write_lane(wf, lane, static_cast<uint32_t>(exp));
+    vdst.write_lane64(wf, lane, [&]() {
+      double s = std::bit_cast<double>(src0.read_lane64(wf, lane));
+      int exp = 0;
+      if (s != 0.0 && !std::isnan(s) && !std::isinf(s))
+        std::frexp(s, &exp);
+      return static_cast<uint32_t>(exp);
+    }());
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -4293,10 +4320,11 @@ void VFrexpMantF64Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    int exp = 0;
-    double result = std::frexp(s, &exp);
-    vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
+    vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>([&]() {
+                        double s = std::bit_cast<double>(src0.read_lane64(wf, lane));
+                        int exp = 0;
+                        return std::frexp(s, &exp);
+                      }()));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -4387,8 +4415,10 @@ void VFractF64Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(s - std::floor(s)));
+    vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>([&]() {
+                        auto v = std::bit_cast<double>(src0.read_lane64(wf, lane));
+                        return v - std::floor(v);
+                      }()));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -4479,11 +4509,9 @@ void VFrexpExpI32F32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(src0.read_lane(wf, lane));
-    int exp = 0;
-    if (s != 0.0f && !std::isnan(s) && !std::isinf(s))
-      std::frexp(s, &exp);
-    vdst.write_lane(wf, lane, static_cast<uint32_t>(exp));
+    vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(std::ilogb(std::bit_cast<float>(src0.read_lane(wf, lane))) + 1));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -4574,10 +4602,11 @@ void VFrexpMantF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(src0.read_lane(wf, lane));
-    int exp = 0;
-    float result = std::frexp(s, &exp);
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                      int e;
+                      return std::frexp(
+                          static_cast<float>(std::bit_cast<float>(src0.read_lane(wf, lane))), &e);
+                    }()));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -4780,8 +4809,9 @@ void VCvtF16U16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t s = static_cast<uint16_t>(src0.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, util::f32_to_f16(static_cast<float>(s)));
+    vdst.write_lane(
+        wf, lane,
+        util::f32_to_f16(static_cast<float>(static_cast<uint16_t>(src0.read_lane(wf, lane)))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -4860,8 +4890,9 @@ void VCvtF16I16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t s = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
-    vdst.write_lane(wf, lane, util::f32_to_f16(static_cast<float>(s)));
+    vdst.write_lane(wf, lane,
+                    util::f32_to_f16(static_cast<float>(
+                        static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -4940,15 +4971,14 @@ void VCvtU16F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
-    uint16_t r;
-    if (std::isnan(s) || s < 0.0f)
-      r = 0;
-    else if (s >= 65536.0f)
-      r = UINT16_MAX;
-    else
-      r = static_cast<uint16_t>(s);
-    vdst.write_lane(wf, lane, static_cast<uint32_t>(r));
+    vdst.write_lane(wf, lane, [&]() -> uint32_t {
+      float s = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
+      if (std::isnan(s) || s < 0.0f)
+        return 0u;
+      if (s >= 65536.0f)
+        return static_cast<uint32_t>(UINT16_MAX);
+      return static_cast<uint32_t>(static_cast<uint16_t>(s));
+    }());
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -5027,17 +5057,16 @@ void VCvtI16F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
-    int16_t r;
-    if (std::isnan(s))
-      r = 0;
-    else if (s >= 32768.0f)
-      r = INT16_MAX;
-    else if (s < -32768.0f)
-      r = INT16_MIN;
-    else
-      r = static_cast<int16_t>(s);
-    vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(r)));
+    vdst.write_lane(wf, lane, [&]() -> uint32_t {
+      float s = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
+      if (std::isnan(s))
+        return 0u;
+      if (s >= 32768.0f)
+        return static_cast<uint32_t>(static_cast<uint16_t>(INT16_MAX));
+      if (s < -32768.0f)
+        return static_cast<uint32_t>(static_cast<uint16_t>(INT16_MIN));
+      return static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(s)));
+    }());
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -5116,8 +5145,9 @@ void VRcpF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
-    vdst.write_lane(wf, lane, util::f32_to_f16(1.0f / s));
+    vdst.write_lane(
+        wf, lane,
+        util::f32_to_f16(1.0f / util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -5208,8 +5238,9 @@ void VSqrtF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
-    vdst.write_lane(wf, lane, util::f32_to_f16(std::sqrt(s)));
+    vdst.write_lane(wf, lane,
+                    util::f32_to_f16(std::sqrt(
+                        util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane))))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -5300,8 +5331,9 @@ void VRsqF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
-    vdst.write_lane(wf, lane, util::f32_to_f16(1.0f / std::sqrt(s)));
+    vdst.write_lane(wf, lane,
+                    util::f32_to_f16(1.0f / std::sqrt(util::f16_to_f32(
+                                                static_cast<uint16_t>(src0.read_lane(wf, lane))))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -5392,8 +5424,9 @@ void VLogF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
-    vdst.write_lane(wf, lane, util::f32_to_f16(std::log2(s)));
+    vdst.write_lane(wf, lane,
+                    util::f32_to_f16(std::log2(
+                        util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane))))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -5484,8 +5517,9 @@ void VExpF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
-    vdst.write_lane(wf, lane, util::f32_to_f16(std::exp2(s)));
+    vdst.write_lane(wf, lane,
+                    util::f32_to_f16(std::exp2(
+                        util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane))))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -5576,10 +5610,12 @@ void VFrexpMantF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(src0.read_lane(wf, lane));
-    int exp = 0;
-    float result = std::frexp(s, &exp);
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    vdst.write_lane(wf, lane, util::f32_to_f16([&]() {
+                      int e;
+                      return std::frexp(static_cast<float>(util::f16_to_f32(
+                                            static_cast<uint16_t>(src0.read_lane(wf, lane)))),
+                                        &e);
+                    }()));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -5670,11 +5706,10 @@ void VFrexpExpI16F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
-    int exp = 0;
-    if (s != 0.0f && !std::isnan(s) && !std::isinf(s))
-      std::frexp(s, &exp);
-    vdst.write_lane(wf, lane, static_cast<uint32_t>(exp));
+    vdst.write_lane(
+        wf, lane,
+        util::f32_to_f16(
+            std::ilogb(util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)))) + 1));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -5765,8 +5800,9 @@ void VFloorF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
-    vdst.write_lane(wf, lane, util::f32_to_f16(std::floor(s)));
+    vdst.write_lane(wf, lane,
+                    util::f32_to_f16(std::floor(
+                        util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane))))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -5857,8 +5893,9 @@ void VCeilF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
-    vdst.write_lane(wf, lane, util::f32_to_f16(std::ceil(s)));
+    vdst.write_lane(wf, lane,
+                    util::f32_to_f16(std::ceil(
+                        util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane))))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -5949,8 +5986,9 @@ void VTruncF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
-    vdst.write_lane(wf, lane, util::f32_to_f16(std::trunc(s)));
+    vdst.write_lane(wf, lane,
+                    util::f32_to_f16(std::trunc(
+                        util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane))))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -6041,8 +6079,9 @@ void VRndneF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
-    vdst.write_lane(wf, lane, util::f32_to_f16(std::nearbyint(s)));
+    vdst.write_lane(wf, lane,
+                    util::f32_to_f16(std::nearbyint(
+                        util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane))))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -6133,8 +6172,10 @@ void VFractF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
-    vdst.write_lane(wf, lane, util::f32_to_f16(s - std::floor(s)));
+    vdst.write_lane(wf, lane, util::f32_to_f16([&]() {
+                      auto v = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
+                      return v - std::floor(v);
+                    }()));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -6225,8 +6266,9 @@ void VSinF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
-    vdst.write_lane(wf, lane, util::f32_to_f16(std::sin(s * 6.2831853071795864f)));
+    vdst.write_lane(wf, lane,
+                    util::f32_to_f16(std::sin(
+                        util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane))))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -6317,8 +6359,9 @@ void VCosF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
-    vdst.write_lane(wf, lane, util::f32_to_f16(std::cos(s * 6.2831853071795864f)));
+    vdst.write_lane(wf, lane,
+                    util::f32_to_f16(std::cos(
+                        util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane))))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -6583,8 +6626,10 @@ void VSwapB16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t tmp = vdst.read_lane(wf, lane);
-    vdst.write_lane(wf, lane, src0.read_lane(wf, lane));
+    uint16_t tmp = static_cast<uint16_t>(vdst.read_lane(wf, lane));
+    vdst.write_lane(wf, lane,
+                    static_cast<uint32_t>(
+                        static_cast<uint16_t>(static_cast<uint16_t>(src0.read_lane(wf, lane)))));
     src0.write_lane(wf, lane, tmp);
   }
   vdst.clear_delegate();
@@ -6779,8 +6824,8 @@ void VNotB16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = src0.read_lane(wf, lane);
-    vdst.write_lane(wf, lane, ~s);
+    vdst.write_lane(wf, lane,
+                    static_cast<uint32_t>(static_cast<uint16_t>((~src0.read_lane(wf, lane)))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -6859,9 +6904,9 @@ void VCvtI32I16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t s = static_cast<int32_t>(src0.read_lane(wf, lane));
     vdst.write_lane(wf, lane,
-                    static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(s & 0xFFFF))));
+                    static_cast<uint32_t>(static_cast<int32_t>(
+                        static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -6940,8 +6985,7 @@ void VCvtU32U16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = src0.read_lane(wf, lane);
-    vdst.write_lane(wf, lane, s & 0xFFFFu);
+    vdst.write_lane(wf, lane, (src0.read_lane(wf, lane) & 0xFFFFu));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -7020,8 +7064,9 @@ void VCvtF32Fp8Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float r = util::fp8_e4m3_to_f32(static_cast<uint8_t>(src0.read_lane(wf, lane) & 0xFF));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(r));
+    vdst.write_lane(wf, lane,
+                    std::bit_cast<uint32_t>(
+                        util::fp8_e4m3_to_f32(static_cast<uint8_t>(src0.read_lane(wf, lane)))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -7100,8 +7145,9 @@ void VCvtF32Bf8Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float r = util::bf8_e5m2_to_f32(static_cast<uint8_t>(src0.read_lane(wf, lane) & 0xFF));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(r));
+    vdst.write_lane(wf, lane,
+                    std::bit_cast<uint32_t>(
+                        util::bf8_e5m2_to_f32(static_cast<uint8_t>(src0.read_lane(wf, lane)))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {

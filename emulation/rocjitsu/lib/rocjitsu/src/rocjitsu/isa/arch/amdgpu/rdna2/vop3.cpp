@@ -1281,26 +1281,38 @@ void VFmacLegacyF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = std::bit_cast<float>(src0.read_lane(wf, lane));
-    float sv1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst_.neg & (1u << 1))
-      sv1 = -sv1;
-    float result = std::fma(sv0, sv1, std::bit_cast<float>(vdst.read_lane(wf, lane)));
-    if (inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst_.omod == 3)
-      result *= 0.5f;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                      float v = [&]() {
+                        float v = std::fma(
+                            [&]() {
+                              float sv = std::bit_cast<float>(src0.read_lane(wf, lane));
+                              if (inst_.abs & (1u << 0))
+                                sv = std::fabs(sv);
+                              if (inst_.neg & (1u << 0))
+                                sv = -sv;
+                              return sv;
+                            }(),
+                            [&]() {
+                              float sv = std::bit_cast<float>(src1.read_lane(wf, lane));
+                              if (inst_.abs & (1u << 1))
+                                sv = std::fabs(sv);
+                              if (inst_.neg & (1u << 1))
+                                sv = -sv;
+                              return sv;
+                            }(),
+                            std::bit_cast<float>(vdst.read_lane(wf, lane)));
+                        if (inst_.omod == 1)
+                          v *= 2.0f;
+                        else if (inst_.omod == 2)
+                          v *= 4.0f;
+                        else if (inst_.omod == 3)
+                          v *= 0.5f;
+                        return v;
+                      }();
+                      if (inst_.clamp)
+                        v = std::clamp(v, 0.0f, 1.0f);
+                      return v;
+                    }()));
   }
 }
 
@@ -1822,31 +1834,45 @@ void VFmaLegacyF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float a = std::bit_cast<float>(src0.read_lane(wf, lane));
-    float b = std::bit_cast<float>(src1.read_lane(wf, lane));
-    float c = std::bit_cast<float>(src2.read_lane(wf, lane));
-    if (inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst_.neg & (1u << 0))
-      a = -a;
-    if (inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst_.neg & (1u << 1))
-      b = -b;
-    if (inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst_.neg & (1u << 2))
-      c = -c;
-    float result = std::fma(a, b, c);
-    if (inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst_.omod == 3)
-      result *= 0.5f;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                      float v = [&]() {
+                        float v = std::fma(
+                            [&]() {
+                              float sv = std::bit_cast<float>(src0.read_lane(wf, lane));
+                              if (inst_.abs & (1u << 0))
+                                sv = std::fabs(sv);
+                              if (inst_.neg & (1u << 0))
+                                sv = -sv;
+                              return sv;
+                            }(),
+                            [&]() {
+                              float sv = std::bit_cast<float>(src1.read_lane(wf, lane));
+                              if (inst_.abs & (1u << 1))
+                                sv = std::fabs(sv);
+                              if (inst_.neg & (1u << 1))
+                                sv = -sv;
+                              return sv;
+                            }(),
+                            [&]() {
+                              float sv = std::bit_cast<float>(src2.read_lane(wf, lane));
+                              if (inst_.abs & (1u << 2))
+                                sv = std::fabs(sv);
+                              if (inst_.neg & (1u << 2))
+                                sv = -sv;
+                              return sv;
+                            }());
+                        if (inst_.omod == 1)
+                          v *= 2.0f;
+                        else if (inst_.omod == 2)
+                          v *= 4.0f;
+                        else if (inst_.omod == 3)
+                          v *= 0.5f;
+                        return v;
+                      }();
+                      if (inst_.clamp)
+                        v = std::clamp(v, 0.0f, 1.0f);
+                      return v;
+                    }()));
   }
 }
 

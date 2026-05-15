@@ -14,15 +14,9 @@ class CodegenConfig:
 
     Attributes:
         namespace: Top-level C++ namespace enclosing all generated code.
-            Not yet consumed by the generator (CppFile hardcodes
-            ``'rocjitsu'``); will be plumbed through in a follow-up.
         include_base: Base path prefix for architecture-specific includes
-            (e.g. ``'rocjitsu/isa/arch/amdgpu'``). Not yet consumed by
-            the generator; will be plumbed through in a follow-up.
-        use_shared: Emit shared struct aliases referencing ``amdgpu::``
-            baseline structs instead of per-ISA struct definitions.
+            (e.g. ``'rocjitsu/isa/arch/amdgpu'``).
     """
 
     namespace: str = 'rocjitsu'
     include_base: str = 'rocjitsu/isa/arch/amdgpu'
-    use_shared: bool = False

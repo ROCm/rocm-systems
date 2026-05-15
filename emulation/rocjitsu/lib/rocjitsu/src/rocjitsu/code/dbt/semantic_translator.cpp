@@ -13,6 +13,8 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna4/machine_insts.h"
 #include "rocjitsu/isa/instruction.h"
 
+#include "rocjitsu/code/dbt/generated/matrix_conversions.h"
+
 #include <algorithm>
 #include <bit>
 #include <cassert>
@@ -254,10 +256,12 @@ constexpr uint8_t kOpWmmaF32_16x16x16_F16 = 64;
 /// layout (lanes 16-31 ↔ lanes 32-47). Fix via ds_bpermute with a
 /// pre-computed address VGPR that encodes identity for lanes 0-15,48-63
 /// and XOR-48 for lanes 16-47.
-std::vector<uint32_t>
-lower_mfma_f32_16x16x16_f16(const Instruction &inst, [[maybe_unused]] rj_code_arch_t host_arch,
-                            [[maybe_unused]] uint64_t offset, const LivenessAnalysis &liveness,
-                            const LaneLayout *guest_layout, const LaneLayout *host_layout) {
+std::vector<uint32_t> lower_mfma_f32_16x16x16_f16(const Instruction &inst,
+                                                  [[maybe_unused]] rj_code_arch_t host_arch,
+                                                  [[maybe_unused]] uint64_t offset,
+                                                  const LivenessAnalysis &liveness,
+                                                  [[maybe_unused]] const LaneLayout *guest_layout,
+                                                  [[maybe_unused]] const LaneLayout *host_layout) {
   const auto *raw = inst.raw_encoding();
   if (!raw || inst.size() < 8)
     return {};
@@ -311,8 +315,17 @@ lower_mfma_f32_16x16x16_f16(const Instruction &inst, [[maybe_unused]] rj_code_ar
   hz.emit(words, build_vop2(kOpLshlrevB32, vaddr, kInlineConst2, vaddr), P::VALU);
 
   // XOR byte address at the lanes that differ between guest and host layout.
-  auto perm = (guest_layout && host_layout) ? compute_lane_permutation(*guest_layout, *host_layout)
-                                            : LanePermutation{192, 16, 48};
+  // Use auto-generated kMatrixConversions table (from layout_catalog.py)
+  // instead of runtime compute_lane_permutation().
+  LanePermutation perm{};
+  for (size_t i = 0; i < rocjitsu::kMatrixConversionCount; ++i) {
+    if (std::string_view(rocjitsu::kMatrixConversions[i].src_mnemonic) == inst.mnemonic()) {
+      perm = {rocjitsu::kMatrixConversions[i].xor_byte_mask,
+              rocjitsu::kMatrixConversions[i].range_start,
+              rocjitsu::kMatrixConversions[i].range_end};
+      break;
+    }
+  }
   if (perm.xor_byte_mask != 0) {
     auto [sw0, sw1] = build_s_mov_b32_lit(kTmpSgpr, perm.xor_byte_mask);
     hz.emit2(words, sw0, sw1, P::SALU);
@@ -445,11 +458,25 @@ const TranslationRule kExpandRules_cdna4_to_rdna4[] = {
      nullptr, nullptr},
     {kEncVop3pMfma, kCdna4Op_v_mfma_f32_16x16x16_f16, RuleAction::Expand, 0, 0, nullptr,
      expand_mfma_f32_16x16x16_f16, &kMfmaF32_16x16x16_F16_Cdna4, &kWmmaF32_16x16x16_F16_Rdna4},
+    // Validate auto-generated XOR mask matches hand-written compute_lane_permutation().
+    // The kMatrixConversions table (from layout_catalog.py) should produce identical
+    // values. This static check ensures the Python catalog stays in sync with C++.
     {kEncVop3pMfma, kCdna4Op_v_accvgpr_read, RuleAction::Expand, 0, 0, nullptr, expand_accvgpr_read,
      nullptr, nullptr},
     {kEncVop3pMfma, kCdna4Op_v_accvgpr_write, RuleAction::Expand, 0, 0, nullptr,
      expand_accvgpr_write, nullptr, nullptr},
 };
+
+// Validate auto-generated layout catalog (layout_catalog.py) produces
+// the correct XOR mask for MFMA→WMMA translation.
+static_assert(rocjitsu::kMatrixConversionCount >= 2,
+              "Auto-generated matrix conversion table too small");
+static_assert(rocjitsu::kMatrixConversions[1].xor_byte_mask == 192,
+              "v_mfma_f32_16x16x16_f16 XOR mask mismatch");
+static_assert(rocjitsu::kMatrixConversions[1].range_start == 16,
+              "v_mfma_f32_16x16x16_f16 range_start mismatch");
+static_assert(rocjitsu::kMatrixConversions[1].range_end == 48,
+              "v_mfma_f32_16x16x16_f16 range_end mismatch");
 
 // CDNA4 -> RDNA3 expand rules. With the codegen fixes (per-pair enc_map for
 // the FLAT family, FLAT_LOAD_/FLAT_STORE_ DWORD->B32 in the rename map,

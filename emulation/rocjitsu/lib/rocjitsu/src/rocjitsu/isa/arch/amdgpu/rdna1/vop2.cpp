@@ -597,11 +597,11 @@ void VMacLegacyF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = std::bit_cast<float>(src0.read_lane(wf, lane));
-    float sv1 = std::bit_cast<float>(vsrc1.read_lane(wf, lane));
-    vdst.write_lane(wf, lane,
-                    std::bit_cast<uint32_t>(
-                        std::fma(sv0, sv1, std::bit_cast<float>(vdst.read_lane(wf, lane)))));
+    vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(std::fma(std::bit_cast<float>(src0.read_lane(wf, lane)),
+                                         std::bit_cast<float>(vsrc1.read_lane(wf, lane)),
+                                         std::bit_cast<float>(vdst.read_lane(wf, lane)))));
   }
   vdst.clear_delegate();
   src0.clear_delegate();

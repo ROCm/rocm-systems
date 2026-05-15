@@ -6621,8 +6621,9 @@ void VExpLegacyF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(src0.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(amdgpu::transcendental::exp_f32(s)));
+    vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(std::exp2(std::bit_cast<float>(src0.read_lane(wf, lane)))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -6724,8 +6725,9 @@ void VLogLegacyF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(src0.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(amdgpu::transcendental::log_f32(s)));
+    vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(std::log2(std::bit_cast<float>(src0.read_lane(wf, lane)))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {
@@ -7637,8 +7639,9 @@ void VCvtF32Bf16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float r = util::bf16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane) & 0xFFFF));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(r));
+    vdst.write_lane(wf, lane,
+                    std::bit_cast<uint32_t>(
+                        util::bf16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)))));
   }
   src0.clear_delegate();
   if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {

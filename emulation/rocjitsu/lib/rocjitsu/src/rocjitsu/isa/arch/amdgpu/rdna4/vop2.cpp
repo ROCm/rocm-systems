@@ -165,9 +165,10 @@ void VAddF64Vop2::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double sv0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    double sv1 = std::bit_cast<double>(vsrc1.read_lane64(wf, lane));
-    vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(sv0 + sv1));
+    vdst.write_lane64(
+        wf, lane,
+        std::bit_cast<uint64_t>((std::bit_cast<double>(src0.read_lane64(wf, lane)) +
+                                 std::bit_cast<double>(vsrc1.read_lane64(wf, lane)))));
   }
   src0.clear_delegate();
   vsrc1.clear_delegate();
@@ -536,9 +537,10 @@ void VMulF64Vop2::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double sv0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    double sv1 = std::bit_cast<double>(vsrc1.read_lane64(wf, lane));
-    vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(sv0 * sv1));
+    vdst.write_lane64(
+        wf, lane,
+        std::bit_cast<uint64_t>((std::bit_cast<double>(src0.read_lane64(wf, lane)) *
+                                 std::bit_cast<double>(vsrc1.read_lane64(wf, lane)))));
   }
   src0.clear_delegate();
   vsrc1.clear_delegate();
@@ -1132,9 +1134,10 @@ void VMinNumF64Vop2::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double sv0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    double sv1 = std::bit_cast<double>(vsrc1.read_lane64(wf, lane));
-    vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(std::fmin(sv0, sv1)));
+    vdst.write_lane64(
+        wf, lane,
+        std::bit_cast<uint64_t>(std::fmin(std::bit_cast<double>(src0.read_lane64(wf, lane)),
+                                          std::bit_cast<double>(vsrc1.read_lane64(wf, lane)))));
   }
   src0.clear_delegate();
   vsrc1.clear_delegate();
@@ -1230,9 +1233,10 @@ void VMaxNumF64Vop2::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double sv0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    double sv1 = std::bit_cast<double>(vsrc1.read_lane64(wf, lane));
-    vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(std::fmax(sv0, sv1)));
+    vdst.write_lane64(
+        wf, lane,
+        std::bit_cast<uint64_t>(std::fmax(std::bit_cast<double>(src0.read_lane64(wf, lane)),
+                                          std::bit_cast<double>(vsrc1.read_lane64(wf, lane)))));
   }
   src0.clear_delegate();
   vsrc1.clear_delegate();
@@ -1644,9 +1648,10 @@ void VMinNumF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = std::bit_cast<float>(src0.read_lane(wf, lane));
-    float sv1 = std::bit_cast<float>(vsrc1.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(std::fmin(sv0, sv1)));
+    vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(std::fmin(std::bit_cast<float>(src0.read_lane(wf, lane)),
+                                          std::bit_cast<float>(vsrc1.read_lane(wf, lane)))));
   }
   src0.clear_delegate();
   vsrc1.clear_delegate();
@@ -1742,9 +1747,10 @@ void VMaxNumF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = std::bit_cast<float>(src0.read_lane(wf, lane));
-    float sv1 = std::bit_cast<float>(vsrc1.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(std::fmax(sv0, sv1)));
+    vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(std::fmax(std::bit_cast<float>(src0.read_lane(wf, lane)),
+                                          std::bit_cast<float>(vsrc1.read_lane(wf, lane)))));
   }
   src0.clear_delegate();
   vsrc1.clear_delegate();
@@ -2392,9 +2398,9 @@ void VLshlrevB64Vop2::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint64_t val = vsrc1.read_lane64(wf, lane);
-    uint32_t shift = src0.read_lane(wf, lane) & 63u;
-    vdst.write_lane64(wf, lane, val << shift);
+    vdst.write_lane64(wf, lane,
+                      (static_cast<uint64_t>(vsrc1.read_lane64(wf, lane))
+                       << (static_cast<uint64_t>(src0.read_lane64(wf, lane)) & 63u)));
   }
   src0.clear_delegate();
   vsrc1.clear_delegate();
@@ -3309,9 +3315,10 @@ void VMinNumF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
-    float sv1 = util::f16_to_f32(static_cast<uint16_t>(vsrc1.read_lane(wf, lane)));
-    vdst.write_lane(wf, lane, util::f32_to_f16(std::fmin(sv0, sv1)));
+    vdst.write_lane(wf, lane,
+                    util::f32_to_f16(std::fmin(
+                        util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane))),
+                        util::f16_to_f32(static_cast<uint16_t>(vsrc1.read_lane(wf, lane))))));
   }
   src0.clear_delegate();
   vsrc1.clear_delegate();
@@ -3407,9 +3414,10 @@ void VMaxNumF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
-    float sv1 = util::f16_to_f32(static_cast<uint16_t>(vsrc1.read_lane(wf, lane)));
-    vdst.write_lane(wf, lane, util::f32_to_f16(std::fmax(sv0, sv1)));
+    vdst.write_lane(wf, lane,
+                    util::f32_to_f16(std::fmax(
+                        util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane))),
+                        util::f16_to_f32(static_cast<uint16_t>(vsrc1.read_lane(wf, lane))))));
   }
   src0.clear_delegate();
   vsrc1.clear_delegate();

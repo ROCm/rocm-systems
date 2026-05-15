@@ -494,11 +494,11 @@ void VFmacF64Vop2::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double sv0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    double sv1 = std::bit_cast<double>(vsrc1.read_lane64(wf, lane));
-    vdst.write_lane64(wf, lane,
-                      std::bit_cast<uint64_t>(
-                          std::fma(sv0, sv1, std::bit_cast<double>(vdst.read_lane64(wf, lane)))));
+    vdst.write_lane64(
+        wf, lane,
+        std::bit_cast<uint64_t>(std::fma(std::bit_cast<double>(src0.read_lane64(wf, lane)),
+                                         std::bit_cast<double>(vsrc1.read_lane64(wf, lane)),
+                                         std::bit_cast<double>(vdst.read_lane64(wf, lane)))));
   }
   src0.clear_delegate();
   vsrc1.clear_delegate();
@@ -3430,12 +3430,11 @@ void VMacF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
-    float sv1 = util::f16_to_f32(static_cast<uint16_t>(vsrc1.read_lane(wf, lane)));
-    vdst.write_lane(
-        wf, lane,
-        util::f32_to_f16(
-            std::fma(sv0, sv1, util::f16_to_f32(static_cast<uint16_t>(vdst.read_lane(wf, lane))))));
+    vdst.write_lane(wf, lane,
+                    util::f32_to_f16(std::fma(
+                        util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane))),
+                        util::f16_to_f32(static_cast<uint16_t>(vsrc1.read_lane(wf, lane))),
+                        util::f16_to_f32(static_cast<uint16_t>(vdst.read_lane(wf, lane))))));
   }
   src0.clear_delegate();
   vsrc1.clear_delegate();
@@ -5767,11 +5766,11 @@ void VFmacF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = std::bit_cast<float>(src0.read_lane(wf, lane));
-    float sv1 = std::bit_cast<float>(vsrc1.read_lane(wf, lane));
-    vdst.write_lane(wf, lane,
-                    std::bit_cast<uint32_t>(
-                        std::fma(sv0, sv1, std::bit_cast<float>(vdst.read_lane(wf, lane)))));
+    vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(std::fma(std::bit_cast<float>(src0.read_lane(wf, lane)),
+                                         std::bit_cast<float>(vsrc1.read_lane(wf, lane)),
+                                         std::bit_cast<float>(vdst.read_lane(wf, lane)))));
   }
   src0.clear_delegate();
   vsrc1.clear_delegate();
