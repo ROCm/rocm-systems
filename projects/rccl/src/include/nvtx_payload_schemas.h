@@ -86,7 +86,7 @@ NCCL_NVTX_DEFINE_STRUCT_WITH_SCHEMA_ENTRIES(NcclNvtxParamsCommFinalize, static c
   )
 )
 
-typedef NcclNvtxParamsCommFinalize NcclNvtxParamsCommRevoke;
+typedef NcclNvtxParamsCommInitRank NcclNvtxParamsCommRevoke;
 
 NCCL_NVTX_DEFINE_STRUCT_WITH_SCHEMA_ENTRIES(NcclNvtxParamsAllGather, static constexpr,
   NCCL_NVTX_PAYLOAD_ENTRIES(
