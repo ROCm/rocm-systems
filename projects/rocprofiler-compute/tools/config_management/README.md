@@ -300,17 +300,10 @@ python tools/config_management/metric_description_manager.py --sync-all src/rocp
 python tools/config_management/metric_description_manager.py --generate-docs
 ```
 
-To regenerate **only selected** docs metrics (for example gfx1151 without rewriting CDNA YAMLs):
+To regenerate the docs YAML for a single architecture without rewriting the others (for example, gfx1151 only):
 
 ```bash
 python tools/config_management/metric_description_manager.py --generate-docs --docs-arch gfx1151
 ```
 
-Then refresh **MD5 entries** under `metric_descriptions` in `src/utils/.config_hashes.json` for:
-
-- `tools/per_arch_metric_definitions/gfx1151_metrics_description.yaml`
-- `docs/data/metrics/gfx1151_metrics.yaml`
-
-(`tests/test_autogen_config.py::test_metric_description_hashes_match_files` enforces these when present.)
-
-**RST enhancement:** Edit per-arch YAMLs directly. Framework preserves manual edits (detects when `rst != plain`).
+**Manual RST edits:** Edit per-arch YAMLs directly. The framework preserves an edit when its `rst` differs from `plain`.
