@@ -12,7 +12,6 @@ The information presented in this document is for informational purposes only an
 
 The hip-tests repository maintains several branches. The branches that are of importance are:
 
-* Main branch: This is the stable branch. It is up to date with the latest release branch, for example, if the latest release is `release/rocm-rel-7.2`, the `main` branch will be based on this release branch.
 * Develop branch: This is the default branch, on which the new features are still under development and visible. While this may be of interest to many, it should be noted that this branch and the features under development might not be stable.
 * Release branches: Branches corresponding to each ROCm or TheRock release, identified by release tags such as `rocm-7.2.0` (ROCm) and `release/TheRock7.12` (TheRock)..
 
