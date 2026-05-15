@@ -253,6 +253,8 @@ template <typename... Args>
 std::string
 get_serialized_args(Args&&... args)
 {
+    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+
     using tuple_type = std::tuple<Args...>;
     if constexpr(has_trace_cache_args<tuple_type>(
                      std::make_index_sequence<sizeof...(Args)>{}))
@@ -275,6 +277,8 @@ get_serialized_annotation_args(rocprofsys_annotation_t* annotations,
 {
     if(!annotations || annotation_count == 0) return {};
 
+    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+
     std::string   args_str = {};
     std::uint32_t idx      = 0;
     for(size_t i = 0; i < annotation_count; ++i)
@@ -289,6 +293,8 @@ template <typename... Args>
 std::string
 get_serialized_annotation_args(Args&&... args)
 {
+    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+
     std::string   args_str = {};
     std::uint32_t idx      = 0;
     ROCPROFSYS_FOLD_EXPRESSION(
@@ -562,6 +568,8 @@ category_region<CategoryT>::set_cache_args(std::string_view name,
 {
     if(name.empty() || serialized_args.empty()) return;
 
+    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+
     auto _hash = tim::add_hash_id(name);
     name       = tim::get_hash_identifier_fast(_hash);
     cache_args<CategoryT>(name.data(), std::move(serialized_args));
@@ -695,7 +703,6 @@ category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::incoming,
 
     if constexpr(sizeof...(Args) > 0)
     {
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
         set_cache_args(_data.tool_id.c_str(), get_serialized_annotation_args(_args...));
     }
 }
@@ -732,7 +739,6 @@ category_region<CategoryT>::audit(std::string_view _name, audit::incoming,
 
     if constexpr(sizeof...(Args) > 0)
     {
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
         set_cache_args(_name.data(), get_serialized_annotation_args(_args...));
     }
 }

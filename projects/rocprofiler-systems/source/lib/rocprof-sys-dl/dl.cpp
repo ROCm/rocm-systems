@@ -685,8 +685,15 @@ extern "C"
         if(!dl::get_active()) return;
         if(dl::get_thread_enabled())
         {
-            ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_push_trace_with_args_f, name,
-                                 serialized_args);
+            if(get_indirect().rocprofsys_push_trace_with_args_f)
+            {
+                ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_push_trace_with_args_f,
+                                     name, serialized_args);
+            }
+            else
+            {
+                ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_push_trace_f, name);
+            }
         }
         else
         {
