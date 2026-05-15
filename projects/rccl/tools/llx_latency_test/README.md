@@ -1,6 +1,6 @@
 # llx_latency_test
 
-Measures `T(GPU0 -> GPU1)` and one-way bandwidth for four NCCL-style LL
+Measures `T(GPU0 -> GPU1)` and one-way bandwidth for four RCCL-style LL
 flag/data signaling protocols between two GPUs on the same node, sweeping
 message sizes from 8 B to 128 MB.
 
