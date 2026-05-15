@@ -472,7 +472,7 @@ def construct_roof(
     headers: list[str] = []
 
     try:
-        with open(benchmark_results) as csvfile:
+        with open(benchmark_results, newline="", encoding="utf-8") as csvfile:
             csv_reader = csv.reader(csvfile, delimiter=",")
             row_count = 0
 

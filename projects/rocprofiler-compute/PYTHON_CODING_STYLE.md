@@ -7,6 +7,7 @@ This document outlines coding conventions and best practices for Python developm
 - [Function Length](#function-length)
 - [Naming Conventions](#naming-conventions)
 - [I/O and Computation Separation](#io-and-computation-separation)
+- [File I/O Encoding](#file-io-encoding)
 - [Nested Functions](#nested-functions)
 - [When to Use Helper Functions](#when-to-use-helper-functions)
 - [When NOT to Extract Helper Functions](#when-not-to-extract-helper-functions)
@@ -154,6 +155,31 @@ def hash_file(filepath: Path) -> str:
         for chunk in iter(lambda: f.read(4096), b""):
             md5.update(chunk)
     return md5.hexdigest()
+```
+
+## File I/O Encoding
+
+Text-mode file I/O should be deterministic across machines. Bare `open()` picks an encoding from the runtime locale, which varies between systems and produces silent corruption or hard decode errors when a file's bytes don't match. Declare the encoding at every call site so the behavior is the same everywhere.
+
+### Rules
+
+- Always pass `encoding="utf-8"` to `open()` for text-mode reads and writes.
+- Keep committed configuration files (YAML, JSON, INI) ASCII-only. Use plain ASCII substitutes for typographic glyphs: `x` or `*` for multiplication, straight quotes for smart quotes, and `--` for em dashes.
+
+### Example
+
+**Good:** Encoding declared explicitly
+
+```python
+with open(config_path, encoding="utf-8") as f:
+    data = yaml.safe_load(f)
+```
+
+**Bad:** Encoding inherited from the runtime locale
+
+```python
+with open(config_path) as f:
+    data = yaml.safe_load(f)
 ```
 
 ## Nested Functions
