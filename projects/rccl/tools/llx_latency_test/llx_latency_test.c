@@ -40,6 +40,8 @@
 #include <cstdio>
 #include <cstdint>
 #include <cstdlib>
+#include <cerrno>
+#include <climits>
 #include <atomic>
 #include <thread>
 #include <chrono>
@@ -652,26 +654,76 @@ static void run_lln_tf(int warmup, int iters, size_t data_bytes,
 // main
 // ---------------------------------------------------------------------------
 
-static size_t parse_size(const char* s)
+static bool parse_int(const char* s, int* out)
 {
-  char* end;
-  size_t v = (size_t)strtoull(s, &end, 0);
-  if (*end == 'K' || *end == 'k') v <<= 10;
-  else if (*end == 'M' || *end == 'm') v <<= 20;
-  else if (*end == 'G' || *end == 'g') v <<= 30;
-  return v;
+  char* end = nullptr;
+  errno = 0;
+  long v = strtol(s, &end, 10);
+  if (errno != 0 || end == s || *end != '\0' || v < INT_MIN || v > INT_MAX) return false;
+  *out = (int)v;
+  return true;
+}
+
+static bool parse_double(const char* s, double* out)
+{
+  char* end = nullptr;
+  errno = 0;
+  double v = strtod(s, &end);
+  if (errno != 0 || end == s || *end != '\0') return false;
+  *out = v;
+  return true;
+}
+
+static bool parse_size(const char* s, size_t* out)
+{
+  char* end = nullptr;
+  errno = 0;
+  unsigned long long v = strtoull(s, &end, 0);
+  if (errno != 0 || end == s) return false;
+  if (*end == 'K' || *end == 'k') {
+    v <<= 10;
+    ++end;
+  } else if (*end == 'M' || *end == 'm') {
+    v <<= 20;
+    ++end;
+  } else if (*end == 'G' || *end == 'g') {
+    v <<= 30;
+    ++end;
+  }
+  if (*end != '\0') return false;
+  *out = (size_t)v;
+  return true;
 }
 
 int main(int argc, char** argv)
 {
-  int warmup           = (argc > 1) ? atoi(argv[1]) : 10;
-  int iters            = (argc > 2) ? atoi(argv[2]) : 100;
-  g_watchdog_timeout_s = (argc > 3) ? atof(argv[3]) : 30.0;
-  const size_t MAX_DATA = (argc > 4) ? parse_size(argv[4]) : (128ULL << 20);
+  int warmup = 10;
+  int iters = 100;
+  g_watchdog_timeout_s = 30.0;
+  size_t MAX_DATA = (128ULL << 20);
 
-  if (warmup > ITERS_MAX || iters > ITERS_MAX) {
-    fprintf(stderr, "warmup/iters must be <= %d\n", ITERS_MAX); return 1;
+  if ((argc > 1 && !parse_int(argv[1], &warmup)) ||
+      (argc > 2 && !parse_int(argv[2], &iters)) ||
+      (argc > 3 && !parse_double(argv[3], &g_watchdog_timeout_s)) ||
+      (argc > 4 && !parse_size(argv[4], &MAX_DATA))) {
+    fprintf(stderr, "Invalid numeric argument(s)\n");
+    return 1;
   }
+
+  if (warmup < 0 || warmup > ITERS_MAX || iters <= 0 || iters > ITERS_MAX) {
+    fprintf(stderr, "warmup must be in [0, %d], iters must be in [1, %d]\n",
+            ITERS_MAX, ITERS_MAX);
+    return 1;
+  }
+  if (g_watchdog_timeout_s <= 0.0) {
+    fprintf(stderr, "timeout_s must be > 0\n");
+    return 1;
+  }
+  if (MAX_DATA < 8) {
+    fprintf(stderr, "max_bytes must be >= 8\n");
+    return 1;
+  }
+
 
   int can01 = 0, can10 = 0;
   HIP_CHECK(hipDeviceCanAccessPeer(&can01, 0, 1));
