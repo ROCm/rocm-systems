@@ -1370,9 +1370,145 @@ std::string VirtualGPU::AnalyzeAqlQueue() const {
 }
 
 // ================================================================================================
+bool VirtualGPU::ShouldMigrateQueue() const {
+  if (dedicated_queue_ || gpu_queue_ == nullptr ||
+      roc_device_.settings().dynamic_queues_ < 2) {
+    return false;
+  }
+
+  if (!roc_device_.queue_pool_changed_.load(std::memory_order_acquire)) {
+    return false;
+  }
+
+  constexpr uint64_t kMigrationMargin = 256;
+  amd::ScopedLock l(roc_device_.active_queue_access_);
+
+  uint qIndex;
+  switch (priority_) {
+    case amd::CommandQueue::Priority::Low:  qIndex = Device::QueuePriority::Low;  break;
+    case amd::CommandQueue::Priority::High: qIndex = Device::QueuePriority::High; break;
+    default:                               qIndex = Device::QueuePriority::Normal; break;
+  }
+
+  auto& pool = roc_device_.queuePool_[qIndex];
+  auto it = pool.find(gpu_queue_);
+  if (it == pool.end()) {
+    return false;
+  }
+  uint64_t current_metric = it->second.GetLoadMetric(gpu_queue_,
+                                roc_device_.settings().dynamic_queues_);
+
+  std::unordered_set<uint64_t> excluded{gpu_queue_->id};
+  hsa_queue_t* best = roc_device_.getQueueFromPool(qIndex, /*force_reuse=*/true,
+                                                    /*preferred=*/nullptr, &excluded);
+  if (best == nullptr) {
+    return false;
+  }
+
+  auto best_it = pool.find(best);
+  if (best_it != pool.end()) {
+    best_it->second.refCount--;
+  }
+
+  uint64_t best_metric = (best_it != pool.end())
+      ? best_it->second.GetLoadMetric(best, roc_device_.settings().dynamic_queues_)
+      : 0;
+
+  return (current_metric > best_metric + kMigrationMargin);
+}
+
+// ================================================================================================
+void VirtualGPU::MigrateToNewQueue(hsa_queue_t* new_queue) {
+  assert(new_queue != nullptr && new_queue != gpu_queue_);
+  assert(!dedicated_queue_);
+
+  hsa_queue_t* old_queue = gpu_queue_;
+
+  // Drain the previous migration's signal before reusing its slot. By the time migration
+  // fires again, the old queue has had time to drain, so this wait is practically zero.
+  // We use a fresh signal per migration to avoid the GPU-side circular dependency that
+  // arises when reusing the same signal handle across consecutive migrations on shared queues.
+  if (migration_signal_.handle != 0) {
+    Hsa::signal_wait_scacquire(migration_signal_, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX,
+                                HSA_WAIT_STATE_BLOCKED);
+    Hsa::signal_destroy(migration_signal_);
+    migration_signal_.handle = 0;
+  }
+
+  hsa_signal_t rendezvous{};
+  if (Hsa::signal_create(1, 0, nullptr, &rendezvous) != HSA_STATUS_SUCCESS) {
+    ClPrint(amd::LOG_WARNING, amd::LOG_QUEUE,
+            "MigrateToNewQueue: signal_create failed, skipping migration");
+    return;
+  }
+
+  // Barrier on old_queue: fires rendezvous when all prior work completes.
+  {
+    const uint32_t queueMask = old_queue->size - 1;
+    hsa_barrier_and_packet_t drain_barrier{};
+    drain_barrier.completion_signal = rendezvous;
+    uint64_t idx = Hsa::queue_add_write_index_screlease(old_queue, 1);
+    while ((idx - Hsa::queue_load_read_index_scacquire(old_queue)) >= queueMask);
+    hsa_barrier_and_packet_t* slot =
+        &(reinterpret_cast<hsa_barrier_and_packet_t*>(old_queue->base_address))[idx & queueMask];
+    *slot = drain_barrier;
+    packet_store_release(reinterpret_cast<uint32_t*>(slot), kBarrierPacketHeader, 0);
+    Hsa::signal_store_screlease(old_queue->doorbell_signal, idx);
+  }
+
+  // Barrier on new_queue: waits for rendezvous before any future work runs.
+  {
+    const uint32_t queueMask = new_queue->size - 1;
+    hsa_barrier_and_packet_t wait_barrier{};
+    wait_barrier.dep_signal[0] = rendezvous;
+    uint64_t idx = Hsa::queue_add_write_index_screlease(new_queue, 1);
+    while ((idx - Hsa::queue_load_read_index_scacquire(new_queue)) >= queueMask);
+    hsa_barrier_and_packet_t* slot =
+        &(reinterpret_cast<hsa_barrier_and_packet_t*>(new_queue->base_address))[idx & queueMask];
+    *slot = wait_barrier;
+    packet_store_release(reinterpret_cast<uint32_t*>(slot), kBarrierPacketHeader, 0);
+    Hsa::signal_store_screlease(new_queue->doorbell_signal, idx);
+  }
+
+  gpu_queue_ = new_queue;
+  metadata_preloader_.Detach();
+  metadata_preloader_.Attach(new_queue);
+
+  roc_device_.ReleaseActiveQueue(old_queue, priority_);
+
+  // Store for deferred wait+destroy at the start of the next migration (or destructor).
+  migration_signal_ = rendezvous;
+
+  roc_device_.queue_pool_changed_.store(false, std::memory_order_release);
+
+  ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
+          "VirtualGPU(%p) migrated HW queue %p -> %p", this,
+          old_queue->base_address, new_queue->base_address);
+}
+
+// ================================================================================================
 template <typename AqlPacket>
 bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, uint16_t rest,
                                           bool blocking, bool attach_signal, bool cluster_launch) {
+  if (ShouldMigrateQueue()) {
+    uint qIndex;
+    switch (priority_) {
+      case amd::CommandQueue::Priority::Low:  qIndex = Device::QueuePriority::Low;  break;
+      case amd::CommandQueue::Priority::High: qIndex = Device::QueuePriority::High; break;
+      default:                               qIndex = Device::QueuePriority::Normal; break;
+    }
+    std::unordered_set<uint64_t> excluded{gpu_queue_->id};
+    hsa_queue_t* new_queue = nullptr;
+    {
+      amd::ScopedLock l(roc_device_.active_queue_access_);
+      new_queue = roc_device_.getQueueFromPool(
+          qIndex, /*force_reuse=*/true, /*preferred=*/nullptr, &excluded);
+    }  // release lock before MigrateToNewQueue — it calls releaseQueue which re-acquires it
+    if (new_queue != nullptr) {
+      MigrateToNewQueue(new_queue);
+    }
+  }
+
   const uint32_t queueSize = gpu_queue_->size;
   const uint32_t queueMask = queueSize - 1;
   const uint32_t sw_queue_size = queueMask;
@@ -2172,7 +2308,13 @@ VirtualGPU::~VirtualGPU() {
   {
     std::scoped_lock l(execution());
     SetCoalesceWindow(0, nullptr);
+    if (migration_signal_.handle != 0) {
+      Hsa::signal_wait_scacquire(migration_signal_, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX,
+                                 HSA_WAIT_STATE_BLOCKED);
+      Hsa::signal_destroy(migration_signal_);
+    }
   }
+
 
   if (timestamp_ != nullptr) {
     timestamp_->release();

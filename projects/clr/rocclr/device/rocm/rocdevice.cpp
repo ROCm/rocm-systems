@@ -3557,6 +3557,7 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
   auto& qInfo = result.first->second;
   qInfo.refCount = 1;
   qInfo.hasDedicatedQueue_ = dedicated_queue;
+  queue_pool_changed_.store(true, std::memory_order_release);
   hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_RING_BUFFER,
                          &qInfo.metadataRingBuffer_);
   if (metadata_ring_buffer) {
@@ -3590,6 +3591,7 @@ bool Device::ReleaseActiveQueue(hsa_queue_t* queue, amd::CommandQueue::Priority 
   // Release a queue if the total number of allocated queues exceeds the max possible
   if (num_queues_[qIndex].load() > settings().max_hw_queues_) {
     releaseQueue(queue, std::vector<uint32_t>{}, false, true);
+    queue_pool_changed_.store(true, std::memory_order_release);
     return true;
   } else {
     return false;

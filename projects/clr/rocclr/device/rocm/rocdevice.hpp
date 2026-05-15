@@ -693,6 +693,8 @@ class Device : public NullDevice {
   size_t DeferredQueueCount();
 
  private:
+  friend class VirtualGPU;  //!< Allow VirtualGPU to access pool/lock for queue migration
+
   bool create();
 
   //! Construct a new physical HSA device
@@ -777,9 +779,14 @@ class Device : public NullDevice {
     uint64_t GetLoadMetric(hsa_queue_t* queue, uint32_t mode = 1) const {
       auto depth = GetHwQueueDepth(queue);
 
-      // Dedicated queue penalty: prefer regular queues, but use dedicated if regular queues
-      // have depth > ~128 packets. Penalty = 128 << 4 = 2048.
-      uint64_t dedicated_queue_penalty = hasDedicatedQueue_ ? 2048 : 0;
+      uint64_t dedicated_queue_penalty = 0;
+      if (hasDedicatedQueue_) {
+        // Scale from 0 (idle) to 2048 (fully loaded) over kDedicatedPenaltyDepth packets.
+        // At depth >= kDedicatedPenaltyDepth the dedicated queue is fully exclusive.
+        constexpr uint64_t kMaxPenalty = 2048;
+        constexpr uint64_t kDedicatedPenaltyDepth = 32;
+        dedicated_queue_penalty = std::min(kMaxPenalty, depth * (kMaxPenalty / kDedicatedPenaltyDepth));
+      }
 
       // Advanced weighted metric: Give queue depth significantly more weight than refCount
       uint64_t metric = dedicated_queue_penalty + (depth << 4) + static_cast<uint64_t>(refCount);
@@ -795,6 +802,7 @@ class Device : public NullDevice {
   std::vector<std::map<hsa_queue_t*, QueueInfo, QueueCompare>> queuePool_;
   amd::Monitor active_queue_access_;            //!< Lock to serialise virtual gpu list access
   std::atomic<uint32_t> num_queues_[QueuePriority::Total] = {};  //!< Per-priority queue counters
+  std::atomic<bool> queue_pool_changed_{false};  //!< Set when pool changes; consumed by ShouldMigrateQueue
 
   //! Use dynamic queues mode to get a queue from pool
   hsa_queue_t* getQueueFromPool(const uint qIndex, bool force_reuse = false,

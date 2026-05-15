@@ -544,6 +544,13 @@ class VirtualGPU : public device::VirtualDevice {
   virtual void ReleaseAllHwQueues() final;
   virtual void ReleaseHwQueue() final;
 
+  //! Returns true if this (non-dedicated) stream should migrate to a better queue.
+  bool ShouldMigrateQueue() const;
+
+  //! Migrates this stream to new_queue via a two-barrier AQL rendezvous that
+  //! drains the old queue before new_queue accepts any further work.
+  void MigrateToNewQueue(hsa_queue_t* new_queue);
+
   /**
    * @brief Waits on an outstanding kernel without regard to how
    * it was dispatched - with or without a signal
@@ -879,6 +886,7 @@ class VirtualGPU : public device::VirtualDevice {
   amd::CommandQueue::Priority priority_;  //!< The priority for the hsa queue
   bool dedicated_queue_;                  //!< TRUE if this VirtualGPU has a dedicated queue (e.g., null stream)
   bool queue_pinned_ = false;             //!< TRUE if queue is pinned by graph (blocks ReleaseHwQueue)
+  hsa_signal_t migration_signal_{0};      //!< Persistent rendezvous signal for MigrateToNewQueue; 0=unallocated
   hsa_queue_t* last_hwq_ = nullptr;       //!< Last HW queue used, for preferred re-acquisition hint
 
   cl_command_type copy_command_type_;  //!< Type of the copy command, used for ROC profiler
