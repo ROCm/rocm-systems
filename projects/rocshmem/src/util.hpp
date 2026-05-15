@@ -401,33 +401,35 @@ constexpr bool is_blocking(MemcpyKind k) {
 }
 
 template <int ChunkSize, CachePolicy LoadPolicy, CachePolicy StorePolicy, int Unroll = 8>
-__device__ __forceinline__ void copy_bulk(uint8_t* dst_bytes, uint8_t* src_bytes, size_t N16,
+__device__ __forceinline__ void copy_bulk(uint8_t* dst_bytes, uint8_t* src_bytes, size_t n_chunks,
                                           int tid, int stride) {
   using Acc = AsmAccess<ChunkSize, LoadPolicy, StorePolicy>;
   using T = typename Acc::type;
 
-  size_t i = tid;
+  size_t u_stride = static_cast<size_t>(stride);
+  size_t chunk_batch = u_stride * Unroll;
+  size_t offset = 0;
 
   // Unrolled block copy to hide latency
-  for (; i + stride * Unroll <= N16; i += stride * Unroll) {
+  for (; offset + chunk_batch <= n_chunks; offset += chunk_batch) {
     T regs[Unroll];
 
     #pragma unroll
     for (int u = 0; u < Unroll; ++u) {
-      regs[u] = Acc::load(src_bytes + (i + u * stride) * ChunkSize);
+      regs[u] = Acc::load(src_bytes + (offset + tid + u * u_stride) * ChunkSize);
     }
 
-    #pragma Unroll
+    #pragma unroll
     for (int u = 0; u < Unroll; ++u) {
       if constexpr (LoadPolicy != CachePolicy::Standard) {
         pipeline_wait_on_loads(Unroll - 1 - u);
       }
-      Acc::store(dst_bytes + (i + u * stride) * ChunkSize, regs[u]);
+      Acc::store(dst_bytes + (offset + tid + u * u_stride) * ChunkSize, regs[u]);
     }
   }
 
   // Tail loop for remaining ChunkSize-byte chunks
-  for (; i < N16; i += stride) {
+  for (size_t i = offset + tid; i < n_chunks; i += u_stride) {
     T val = Acc::load(src_bytes + i * ChunkSize);
     if constexpr (LoadPolicy != CachePolicy::Standard) {
       pipeline_wait_on_loads(0);
@@ -446,40 +448,10 @@ __device__ __forceinline__ void copy_dispatcher(uint8_t* dst, uint8_t* src, size
 
   size_t u_stride = static_cast<size_t>(stride);
 
-  // Adapt the Unroll strategy based on thread-count (stride) to cap VGPR usage,
-  // while ensuring we only instantiate heavy Unrolls if the message size warrants it.
-  if (stride <= 32) {
-    // Safe register pressure
-    if (N16 < u_stride * 2) [[likely]] {
-      copy_bulk<16, LP, SP, 1>(dst, src, N16, tid, stride);
-    } else if (N16 < u_stride * 4) {
-      copy_bulk<16, LP, SP, 2>(dst, src, N16, tid, stride);
-    } else if (N16 < u_stride * 8) {
-      copy_bulk<16, LP, SP, 4>(dst, src, N16, tid, stride);
-    } else {
-      copy_bulk<16, LP, SP, 8>(dst, src, N16, tid, stride);
-    }
-  } else if (stride <= 128) {
-    // High register pressure
-    if (N16 < u_stride * 2) {
-      copy_bulk<16, LP, SP, 1>(dst, src, N16, tid, stride);
-    } else if (N16 < u_stride * 4) {
-      copy_bulk<16, LP, SP, 2>(dst, src, N16, tid, stride);
-    } else if (N16 < u_stride * 8) {
-      copy_bulk<16, LP, SP, 4>(dst, src, N16, tid, stride);
-    } else {
-      copy_bulk<16, LP, SP, 8>(dst, src, N16, tid, stride);
-    }
+  if (N16 < u_stride * 16) {
+    copy_bulk<16, LP, SP, 1>(dst, src, N16, tid, stride);
   } else {
-    // Extreme register pressure
-    // copy_bulk<16, LP, SP, 1>(dst, src, N16, tid, stride);
-    if (N16 < u_stride * 2) {
-      copy_bulk<16, LP, SP, 1>(dst, src, N16, tid, stride);
-    } else if (N16 < u_stride * 4) {
-      copy_bulk<16, LP, SP, 2>(dst, src, N16, tid, stride);
-    } else {
-      copy_bulk<16, LP, SP, 4>(dst, src, N16, tid, stride);
-    }
+    copy_bulk<16, LP, SP, 16>(dst, src, N16, tid, stride);
   }
 }
 
