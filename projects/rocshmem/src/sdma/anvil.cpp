@@ -90,7 +90,7 @@ static const std::string getBusId(int deviceId) {
   return std::string(busIdChar);
 }
 
-SdmaQueue::SdmaQueue(int localDeviceId, int remoteDeviceId, hsa_agent_t& localAgent,
+SdmaQueue::SdmaQueue([[maybe_unused]] int localDeviceId, int remoteDeviceId, hsa_agent_t& localAgent,
                      uint32_t engineId)
     : remoteDeviceId_(remoteDeviceId) {
   int originalDeviceId;
