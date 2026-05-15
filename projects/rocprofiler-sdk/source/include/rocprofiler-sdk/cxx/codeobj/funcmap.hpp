@@ -41,7 +41,7 @@
 // instrumented function/marker; at runtime the matching ID surfaces in the
 // trace as `rocprofiler_thread_trace_decoder_shaderdata_t::value`
 // (see trace_decoder_types.h: bit 0 = exit_prev, bit 1 = is_enter,
-//  bits [31:2] = ID — or [7:2] when emitted via s_ttracedata_imm).
+//  bits [31:2] = ID -- or [7:2] when emitted via s_ttracedata_imm).
 
 namespace rocprofiler
 {
@@ -51,14 +51,14 @@ namespace codeobj
 {
 namespace funcmap
 {
-// ─── Declarations ───────────────────────────────────────────────────────────
+// --- Declarations -----------------------------------------------------------
 
 enum class FuncmapEntryKind
 {
-    Function,   // F:ID:name[@source_loc] — instrumented device function (entry/exit scope)
-    Kernel,     // K:name[@source_loc]    — kernel name (no ID — for vaddr lookup only)
-    UserScope,  // U:ID:name              — named user scope marker
-    Point       // P:ID:name[@source_loc] — point marker (barrier, memory op, addr trace, …)
+    Function,   // F:ID:name[@source_loc] -- instrumented device function (entry/exit scope)
+    Kernel,     // K:name[@source_loc]    -- kernel name (no ID -- for vaddr lookup only)
+    UserScope,  // U:ID:name              -- named user scope marker
+    Point       // P:ID:name[@source_loc] -- point marker (barrier, memory op, addr trace, ...)
 };
 
 struct FuncmapEntry
@@ -97,7 +97,7 @@ inline Funcmap
 parse_funcmap_section(std::string_view blob, bool silent = false);
 
 // Extract a section's bytes from an in-memory ELF64 image. Returns nullopt
-// when the section is absent (common case — non-instrumented binaries) OR
+// when the section is absent (common case -- non-instrumented binaries) OR
 // when the ELF header is rejected as malformed.
 inline std::optional<std::string_view>
 extract_elf_section(const char* elf_data, size_t elf_size, std::string_view section_name);
@@ -107,7 +107,7 @@ extract_elf_section(const char* elf_data, size_t elf_size, std::string_view sect
 constexpr MarkerValue
 decode_marker_value(uint32_t v) noexcept;
 
-// ─── Inline definitions ─────────────────────────────────────────────────────
+// --- Inline definitions -----------------------------------------------------
 
 inline Funcmap::EntryPtr
 Funcmap::find(uint32_t marker_id) const
@@ -226,7 +226,7 @@ parse_funcmap_section(std::string_view blob, bool silent)
                 {
                     const auto& prev = inserted.first->second;
                     std::string msg  = "duplicate marker ID " + std::to_string(id) +
-                                      " — previous \"" + prev->name + "\" replaced by \"" +
+                                      " -- previous \"" + prev->name + "\" replaced by \"" +
                                       entry->name + "\"";
                     detail::emit_warning(msg, line_no, silent);
                     inserted.first->second = entry;
@@ -326,31 +326,31 @@ parse_funcmap_section(std::string_view blob, bool silent)
 // sh_offset+sh_size). Bounds checks use subtraction against `elf_size` to
 // avoid uint64 wrap on adversarial sh_size values.
 //
-//   ┌─────────────────────────┐  ← elf_data
-//   │ ELF header (Elf64_Ehdr) │     e_shoff     → section header table
-//   │                         │     e_shnum     = N entries
-//   │                         │     e_shentsize = sizeof(Elf64_Shdr)
-//   │                         │     e_shstrndx  = index of .shstrtab in shdrs
-//   ├─────────────────────────┤
-//   │ section data            │
-//   │   .text                 │
-//   │   .rodata               │
-//   │   .sqtt_funcmap         │  ← returned on a hit
-//   │   .shstrtab        ◄────┼── shstr.sh_offset / sh_size point here
-//   ├─────────────────────────┤
-//   │ Section header table    │  ← e_shoff
-//   │   [0] SHT_NULL          │
-//   │   [1] .text     name=1  │── sh_name = offset into .shstrtab bytes
-//   │   [2] .rodata   name=7  │
-//   │   [3] .sqtt_..  name=15 │
-//   │   [4] .shstrtab name=29 │
-//   └─────────────────────────┘
+//   +-------------------------+  <- elf_data
+//   | ELF header (Elf64_Ehdr) |     e_shoff     -> section header table
+//   |                         |     e_shnum     = N entries
+//   |                         |     e_shentsize = sizeof(Elf64_Shdr)
+//   |                         |     e_shstrndx  = index of .shstrtab in shdrs
+//   +-------------------------+
+//   | section data            |
+//   |   .text                 |
+//   |   .rodata               |
+//   |   .sqtt_funcmap         |  <- returned on a hit
+//   |   .shstrtab        <----+-- shstr.sh_offset / sh_size point here
+//   +-------------------------+
+//   | Section header table    |  <- e_shoff
+//   |   [0] SHT_NULL          |
+//   |   [1] .text     name=1  |-- sh_name = offset into .shstrtab bytes
+//   |   [2] .rodata   name=7  |
+//   |   [3] .sqtt_..  name=15 |
+//   |   [4] .shstrtab name=29 |
+//   +-------------------------+
 //
 // .shstrtab bytes (NUL-terminated strings packed end-to-end):
 //   offset:  0   1     6  7      13 14 15            28 29
 //   bytes:  \0 . t e x t \0 . r o d a t a \0 . s q t t _ f u n c m a p \0 . s h s t r t a b \0
 //                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^
-//                                            sh_name=15 → ".sqtt_funcmap"
+//                                            sh_name=15 -> ".sqtt_funcmap"
 inline std::optional<std::string_view>
 extract_elf_section(const char* elf_data, size_t elf_size, std::string_view section_name)
 {
@@ -380,7 +380,7 @@ extract_elf_section(const char* elf_data, size_t elf_size, std::string_view sect
         return s;
     };
 
-    // .shstrtab — sh_name in every other shdr is an offset into [str_base, str_base+str_len).
+    // .shstrtab -- sh_name in every other shdr is an offset into [str_base, str_base+str_len).
     Elf64_Shdr shstr = read_shdr(ehdr.e_shstrndx);
     if(shstr.sh_offset > elf_size || shstr.sh_size > uint64_t(elf_size) - shstr.sh_offset)
         return std::nullopt;
@@ -410,7 +410,7 @@ extract_elf_section(const char* elf_data, size_t elf_size, std::string_view sect
         return std::string_view(elf_data + s.sh_offset, s.sh_size);
     }
 
-    return std::nullopt;  // section absent — common case, no diagnostic
+    return std::nullopt;  // section absent -- common case, no diagnostic
 }
 
 }  // namespace funcmap

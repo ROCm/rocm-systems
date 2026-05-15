@@ -35,7 +35,7 @@ using namespace rocprofiler::sdk::codeobj::funcmap;
 
 namespace
 {
-// RAII redirect of std::cerr → an internal ostringstream.
+// RAII redirect of std::cerr -> an internal ostringstream.
 class CerrCapture
 {
 public:
@@ -51,7 +51,7 @@ private:
 };
 }  // namespace
 
-// ─── decode_marker_value ────────────────────────────────────────────────────
+// --- decode_marker_value ----------------------------------------------------
 
 TEST(DecodeMarkerValue, EnterClearsExitPrev)
 {
@@ -87,7 +87,7 @@ TEST(DecodeMarkerValue, EnterAfterExitTransition)
     EXPECT_TRUE(m.exit_prev);
 }
 
-// ─── parse_funcmap_section ──────────────────────────────────────────────────
+// --- parse_funcmap_section --------------------------------------------------
 
 TEST(ParseFuncmap, EachRowKind)
 {
@@ -240,7 +240,7 @@ TEST(ParseFuncmap, MalformedWaveSizeWarns)
     EXPECT_NE(cap.str().find("malformed W:"), std::string::npos);
 }
 
-// ─── extract_elf_section: build a synthetic ELF64 in memory ─────────────────
+// --- extract_elf_section: build a synthetic ELF64 in memory -----------------
 
 namespace
 {
@@ -381,7 +381,7 @@ TEST(ExtractElfSection, AbsentSectionReturnsNullopt)
 
     auto sec =
         extract_elf_section(reinterpret_cast<const char*>(elf.data()), elf.size(), ".sqtt_funcmap");
-    EXPECT_FALSE(sec);  // common case — non-instrumented binary
+    EXPECT_FALSE(sec);  // common case -- non-instrumented binary
 }
 
 TEST(ExtractElfSection, EmptySectionReturnsNullopt)

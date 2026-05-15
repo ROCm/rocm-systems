@@ -206,7 +206,7 @@ public:
 
                 // Each row in the DWARF line table covers [addr, next_row_addr).
                 // The terminator of a contiguous code sequence is a row with the
-                // end_sequence flag set — its address is one past the last
+                // end_sequence flag set -- its address is one past the last
                 // instruction in the sequence. Using the next row's address
                 // (rather than the next *kept* row's address, or codeobj_size)
                 // ensures that ranges never extend across gaps in DWARF
@@ -225,7 +225,7 @@ public:
                     if(dwarf_lineaddr(next_line, &end_addr) != 0) continue;
                     if(end_addr <= addr) continue;
 
-                    // Skip end_sequence rows — they only mark the end boundary
+                    // Skip end_sequence rows -- they only mark the end boundary
                     // of the previous row, they aren't a real source location.
                     if(dwarf_lineendsequence(line, &end_sequence) == 0 && end_sequence) continue;
 
@@ -233,7 +233,7 @@ public:
                     // belongs to this source file but has no specific line"
                     // (typically compiler-synthesized code, prologue/epilogue,
                     // or optimizer-merged blocks). addr2line renders these as
-                    // "<file>:?" — keep them with the same convention so they
+                    // "<file>:?" -- keep them with the same convention so they
                     // are not silently dropped.
                     if(dwarf_lineno(line, &line_number) != 0) continue;
 
@@ -285,21 +285,40 @@ public:
         } catch(...)
         {}
 
-        // .sqtt_funcmap (emitted by the sqtt_instrumentation LLVM pass) maps
-        // marker IDs to function/scope/point names. See
-        // sqtt-instrumentation/docs/SPEC.md and funcmap.hpp.
+        // .sqtt_funcmap is an ASCII section emitted by the
+        // sqtt_instrumentation LLVM pass. Each newline-terminated row
+        // assigns a marker ID (the value emitted by s_ttracedata{,_imm} at
+        // runtime -- see funcmap::decode_marker_value) to a function, kernel,
+        // user scope, or point marker. See sqtt-instrumentation/docs/SPEC.md
+        // section "Funcmap format" and funcmap.hpp for the full grammar.
         //
-        //   ┌──────────────────────────────────────────────────────────────┐
-        //   │ AMDGPU ELF code object                                       │
-        //   ├──────────────────────────────────────────────────────────────┤
-        //   │ .text         … GPU instructions                             │
-        //   │ .symtab       … kernel symbols → m_symbol_map (vaddr→name)   │
-        //   │ .debug_*      … DWARF → m_line_number_map (vaddr→source)     │
-        //   │ .sqtt_funcmap … ASCII rows: F:id:name@loc, K:name, U:, P:, W:│
-        //   └──────────────────────────────────────────────────────────────┘
+        //   .sqtt_funcmap (raw bytes -- one row per entry, '\n'-terminated):
+        //   +--------------------------------------------------------------+
+        //   | F:1:my_device_fn@/path/file.cpp:42                           |
+        //   | K:my_kernel@/path/file.cpp:8                                 |
+        //   | U:2:my_scope_marker                                          |
+        //   | P:3:vmem_load@/path/file.cpp:71                              |
+        //   | W:64                                                         |
+        //   +--------------------------------------------------------------+
+        //         |           |
+        //         |           +-- optional "@source_loc" tail (file[:line])
+        //         |
+        //         +-- F:id:name...  function -- enter/exit scope marker
+        //         +-- K:name...     kernel   -- name -> vaddr lookup, no id
+        //         +-- U:id:name     user-defined scope marker (enter/exit)
+        //         +-- P:id:name...  point marker (barrier, mem op, user pt)
+        //         +-- W:N           wave size (32 or 64)
+        //                          |
+        //                          v  funcmap::parse_funcmap_section
+        //   m_funcmap.entries   insertion-ordered list of FuncmapEntry rows
+        //   m_funcmap.by_id     id -> entry  (K: rows have no id; not indexed)
+        //   m_funcmap.wave_size value of the W: row (0 if absent)
         //
-        // Below: parse the section, then join against m_symbol_map to
-        // back-fill `vaddr` on each F:/K: entry.
+        // The pass below joins the freshly-parsed funcmap against
+        // m_symbol_map (which the disassembler already populated from
+        // .symtab) to back-fill `vaddr` on every F:/K: entry whose name
+        // matches a kernel symbol. This lets consumers resolve a marker to
+        // function-name to load address in one shot.
         auto section_bytes =
             funcmap::extract_elf_section(codeobj_data, codeobj_size, ".sqtt_funcmap");
         if(section_bytes)
@@ -327,7 +346,7 @@ public:
                 auto updated   = std::make_shared<funcmap::FuncmapEntry>(*entry_ptr);
                 updated->vaddr = it->second;
                 // K: rows are not present in by_id by design (they carry no
-                // marker ID — see parse_funcmap_section). The identity guard
+                // marker ID -- see parse_funcmap_section). The identity guard
                 // skips slots already overwritten by a later F:/U:/P: row.
                 if(updated->kind != funcmap::FuncmapEntryKind::Kernel)
                 {
