@@ -1060,21 +1060,53 @@ void GraphExec::FindStreamsReqPerDevForSegments() {
   // For packet engine mode: analyze segments to determine stream requirements per device
   // We need to track the maximum number of concurrent segments per device at any level
 
+  max_streams_dev_.clear();
   std::unordered_map<int, int> streams_per_dev_at_level;
+  std::vector<GraphExec*> graphs_to_process{this};
 
-  for (const auto& [level, segment_ids] : segments_per_level_) {
-    streams_per_dev_at_level.clear();
+  while (!graphs_to_process.empty()) {
+    GraphExec* graphExec = graphs_to_process.back();
+    graphs_to_process.pop_back();
+    if (graphExec == nullptr) {
+      continue;
+    }
 
-    // Count segments per device at this level
-    for (int segment_id : segment_ids) {
-      if (segment_id >= 0 && segment_id < static_cast<int>(segments_.size())) {
-        streams_per_dev_at_level[segments_[segment_id].dev_id]++;
+    if (graphExec != this && graphExec->instantiateDeviceId_ == -1) {
+      graphExec->instantiateDeviceId_ = instantiateDeviceId_;
+      static_cast<amd::ReferenceCountedObject*>(g_devices[instantiateDeviceId_])->retain();
+    }
+
+    for (const auto& [level, segment_ids] : graphExec->segments_per_level_) {
+      streams_per_dev_at_level.clear();
+
+      // Count segments per device at this level
+      for (int segment_id : segment_ids) {
+        if (segment_id >= 0 && segment_id < static_cast<int>(graphExec->segments_.size())) {
+          const auto& segment = graphExec->segments_[segment_id];
+
+          // Determine device ID from segment's first node
+          int dev_id = hip::getCurrentDevice()->deviceId();
+          if (!segment.nodes.empty() && segment.first_node != nullptr) {
+            dev_id = segment.first_node->GetDeviceId();
+          }
+
+          streams_per_dev_at_level[dev_id]++;
+        }
+      }
+
+      // Update max streams per device based on this level's requirements
+      for (const auto& [dev_id, count] : streams_per_dev_at_level) {
+        max_streams_dev_[dev_id] = std::max(max_streams_dev_[dev_id], count);
       }
     }
 
-    // Update max streams per device based on this level's requirements
-    for (const auto& [dev_id, count] : streams_per_dev_at_level) {
-      max_streams_dev_[dev_id] = std::max(max_streams_dev_[dev_id], count);
+    for (const auto& segment : graphExec->segments_) {
+      if (segment.child_graph_ptr != nullptr) {
+        auto childGraphExec = dynamic_cast<GraphExec*>(segment.child_graph_ptr);
+        if (childGraphExec != nullptr) {
+          graphs_to_process.push_back(childGraphExec);
+        }
+      }
     }
   }
 }
@@ -1243,46 +1275,80 @@ void GraphExec::PacketBatch::setEnabled(GraphNode* node, bool enabled) {
     disabledNodeCount++;
   }
   range.enabled = enabled;
+  filteredCacheValid = false;
 }
 
 // ================================================================================================
-// Rebuild cached filtered lists of enabled packets
-// Only rebuilds if cache is stale (size doesn't match expected enabled count)
+// Rebuild cached filtered lists of enabled packets.
+// Barrier packets (prepended/appended by BuildSyncPlan) live in dispatchPackets
+// but are not tracked in nodeRanges.  A linear scan with a per-index enabled
+// bitmap preserves them while filtering out disabled node packets.
 // ================================================================================================
-void GraphExec::PacketBatch::rebuildFilteredLists() {
-  // Calculate expected size based on currently enabled nodes
-  size_t expectedCount = 0;
-  for (const auto& range : nodeRanges) {
-    if (range.enabled) {
-      expectedCount += range.packetCount;
-    }
-  }
-
-  // Cache is valid if size matches - no rebuild needed
-  if (enabledPackets.size() == expectedCount) {
+void GraphExec::PacketBatch::rebuildFilteredLists(
+    std::vector<amd::Device::HwEventPatch>& patch_list) {
+  if (filteredCacheValid) {
     return;
   }
 
-  // Cache is stale - rebuild filtered lists and the filtered flat buffer together.
+  // Default every packet to enabled; mark disabled-node packets false.
+  std::vector<bool> packetEnabled(dispatchPackets.size(), true);
+  for (const auto& range : nodeRanges) {
+    if (!range.enabled) {
+      for (size_t j = 0; j < range.packetCount; ++j) {
+        packetEnabled[range.startIndex + j] = false;
+      }
+    }
+  }
+
   enabledPackets.clear();
   enabledKernelNames.clear();
   filteredFlatPacketData.clear();
   filteredValidPacketFullHeaders.clear();
 
-  enabledPackets.reserve(expectedCount);
-  enabledKernelNames.reserve(expectedCount);
-  filteredFlatPacketData.reserve(expectedCount * kAqlPktSize);
-  filteredValidPacketFullHeaders.reserve(expectedCount);
+  enabledPackets.reserve(dispatchPackets.size());
+  enabledKernelNames.reserve(dispatchPackets.size());
+  filteredFlatPacketData.reserve(dispatchPackets.size() * kAqlPktSize);
+  filteredValidPacketFullHeaders.reserve(dispatchPackets.size());
 
-  for (const auto& range : nodeRanges) {
-    if (range.enabled) {
-      for (size_t j = 0; j < range.packetCount; ++j) {
-        const size_t packetIndex = range.startIndex + j;
-        const uint8_t* pkt_raw = dispatchPackets[packetIndex];
-        enabledPackets.push_back(dispatchPackets[packetIndex]);
-        enabledKernelNames.push_back(dispatchKernelNames[packetIndex]);
-        appendPacketToFlatBuffer(pkt_raw, filteredFlatPacketData,
-                                 filteredValidPacketFullHeaders);
+  // packet pointer -> index in the filtered flat buffer, built during the
+  // single pass below so patch_list resolution is O(patches) not O(p*n).
+  std::unordered_map<const void*, size_t> packetToFilteredIndex;
+
+  for (size_t i = 0; i < dispatchPackets.size(); ++i) {
+    if (packetEnabled[i]) {
+      size_t filteredIdx = enabledPackets.size();
+      enabledPackets.push_back(dispatchPackets[i]);
+      enabledKernelNames.push_back(dispatchKernelNames[i]);
+      appendPacketToFlatBuffer(dispatchPackets[i], filteredFlatPacketData,
+                               filteredValidPacketFullHeaders);
+      packetToFilteredIndex[dispatchPackets[i]] = filteredIdx;
+    }
+  }
+
+  // Re-point flat_packet pointers in patch_list into filteredFlatPacketData.
+  for (auto& patch : patch_list) {
+    auto it = packetToFilteredIndex.find(patch.packet);
+    if (it != packetToFilteredIndex.end()) {
+      patch.flat_packet =
+          filteredFlatPacketData.data() + it->second * kAqlPktSize;
+    }
+  }
+
+  filteredCacheValid = true;
+}
+
+// ================================================================================================
+// Restore flat_packet pointers in patch_list back to flatPacketData.
+// Called when all nodes are re-enabled (disabledNodeCount == 0) so that
+// ApplyHwEventPatches writes into the buffer the dispatch path will use.
+// ================================================================================================
+void GraphExec::PacketBatch::restorePatchListPointers(
+    std::vector<amd::Device::HwEventPatch>& patch_list) {
+  for (auto& patch : patch_list) {
+    for (size_t i = 0; i < dispatchPackets.size(); ++i) {
+      if (patch.packet == dispatchPackets[i]) {
+        patch.flat_packet = flatPacketData.data() + i * kAqlPktSize;
+        break;
       }
     }
   }
@@ -1428,9 +1494,11 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
 
         status = childGraphExec->CaptureAndFormPacketsForGraph();
         if (status != hipSuccess) {
-          LogWarning("Child graph packet capture failed for child graph in segment");
-          // Continue processing other child graphs
-          status = hipSuccess;
+          ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
+                  "[hipGraph] Child graph packet capture failed for child graph in segment, "
+                  "status=%d",
+                  status);
+          return status;
         }
       }
     }
@@ -1666,6 +1734,7 @@ void GraphExec::PacketBatch::rebuildFlatBuffer() {
   const size_t n = dispatchPackets.size();
   flatPacketData.clear();
   validPacketFullHeaders.clear();
+  filteredCacheValid = false;
   flatPacketData.reserve(n * kAqlPktSize);
   validPacketFullHeaders.reserve(n);
   for (const uint8_t* pkt_raw : dispatchPackets) {
@@ -1703,6 +1772,15 @@ hipError_t GraphExec::UpdatePacketBatchesForNodeEnableDisable(hip::GraphNode* no
     if (it != packetBatch.nodeToRangeIndex.end()) {
       // Found the batch containing this node - update enabled state
       packetBatch.setEnabled(node, isEnabled);
+      if (packetBatch.disabledNodeCount > 0) {
+        // Eagerly rebuild filtered lists and re-resolve patch_list flat_packet
+        // pointers so the launch path doesn't need to scan all segment batches.
+        packetBatch.rebuildFilteredLists(sync_plan_.patch_list);
+      } else {
+        // All nodes re-enabled: restore flat_packet pointers back to
+        // flatPacketData so ApplyHwEventPatches patches the correct buffer.
+        packetBatch.restorePatchListPointers(sync_plan_.patch_list);
+      }
       return hipSuccess;
     }
   }
@@ -1870,7 +1948,9 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
       flatData = &packetBatch.flatPacketData;
       flatHdrs = &packetBatch.validPacketFullHeaders;
     } else {
-      packetBatch.rebuildFilteredLists();
+      // Guard against stale filtered buffers: rebuildFlatBuffer (called from
+      // UpdateAQLPacket) invalidates the cache. This is a no-op when valid.
+      packetBatch.rebuildFilteredLists(sync_plan_.patch_list);
       kernelNamesToDispatch = &packetBatch.enabledKernelNames;
       flatData = &packetBatch.filteredFlatPacketData;
       flatHdrs = &packetBatch.filteredValidPacketFullHeaders;
@@ -2290,11 +2370,10 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
     // If the graph has kernels that does device side allocation,  during packet capture, heap is
     // allocated because heap pointer has to be added to the AQL packet, and initialized during
     // graph launch.
-    static bool initialized = false;
     // Todo: Hidden heap initialization is done only for single device graph
-    if (!initialized && HasHiddenHeap()) {
+    if (HasHiddenHeap() &&
+        hiddenHeapInitializedDevices_.insert(launch_stream->DeviceId()).second) {
       launch_stream->vdev()->HiddenHeapInit();
-      initialized = true;
     }
     amd::Command* last_cmd = nullptr;
     if (max_streams_dev_.size() == 1) {
