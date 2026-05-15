@@ -20,7 +20,9 @@ static constexpr int kWcGeneralErr    = 22; // IBV_WC_GENERAL_ERR
 // Resiliency device state constants (from ncclIbResiliencyDevState enum).
 static constexpr int kDevStateOk              = 0;  // ncclIbResiliencyDevStateOk
 static constexpr int kDevStateRecoveryInProgress = 2;  // ncclIbResiliencyDevStateRecoveryInProgress
-static constexpr int kDevStateRecovered       = 4;  // ncclIbResiliencyDevStateRecovered
+static constexpr int kDevStateRecoveryFailed   = 3;  // ncclIbResiliencyDevStateRecoveryFailed
+static constexpr int kDevStateRecovered        = 4;  // ncclIbResiliencyDevStateRecovered
+static constexpr int kDevStateErrorPermanent   = 5;  // ncclIbResiliencyDevStateErrorPermanent
 
 // Helper: Create a NIC Fusion merged device from physical devices 0 and 1.
 // Returns the merged device index, or -1 if fewer than 2 devices available.
@@ -2331,6 +2333,154 @@ TEST_F(NetIbMPITest, RecoveryDeviceOneFailure) {
     MPI_Barrier(MPI_COMM_WORLD);
     if (rank == 0 && !phase3RecvDone)
         DrainRecvRequest(recvReq3);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
+}
+
+// =============================================================================
+// Test: RecoveryUdTimeoutExhaustsAttempts
+//
+// Validates the UD recovery QP retry/timeout cycle. Only the sender's data
+// QP is driven to ERR — the receiver never enters recovery. With UD recovery
+// QPs, alive messages complete locally (fire-and-forget) but the receiver
+// never ACKs. The sender cycles through:
+//   AliveMessages → Ack (timeout) → retry → ... → RecoveryFailed
+//
+// This path was unreachable with RC recovery QPs (alive messages hung in
+// RNR retry forever). UD makes it testable.
+//
+// Default timing: 200ms start + 5 * (500ms batch + 5s ack timeout) ≈ 28s
+// =============================================================================
+TEST_F(NetIbMPITest, RecoveryUdTimeoutExhaustsAttempts) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    const char* failoverEnv  = getenv("NCCL_IB_RESILIENCY_PORT_FAILOVER");
+    const char* recoveryEnv  = getenv("NCCL_IB_RESILIENCY_PORT_RECOVERY");
+
+    if (!failoverEnv || strcmp(failoverEnv, "1") != 0) {
+        GTEST_SKIP() << "Requires NCCL_IB_RESILIENCY_PORT_FAILOVER=1";
+    }
+    if (!recoveryEnv || strcmp(recoveryEnv, "1") != 0) {
+        GTEST_SKIP() << "Requires NCCL_IB_RESILIENCY_PORT_RECOVERY=1";
+    }
+
+    const int rank = MPIEnvironment::world_rank;
+
+    net_ = &netIbCast;
+    int totalDevs = 0;
+    AssertInitAndGetDevices(&totalDevs);
+
+    int mergedDev = CreateMergedDeviceForFailover(net_, totalDevs);
+    if (mergedDev < 0) {
+        GTEST_SKIP() << "Requires NIC Fusion (ndevs >= 2). Found " << totalDevs << " physical devices.";
+    }
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(/*dev=*/mergedDev, &listenComm, &sendComm, &recvComm);
+
+    constexpr size_t kMsgSize = 8192;
+    std::vector<char> sendBuf(kMsgSize), recvBuf(kMsgSize);
+    for (size_t i = 0; i < kMsgSize; i++) sendBuf[i] = static_cast<char>((i * 53 + 37) & 0xFF);
+    memset(recvBuf.data(), 0, kMsgSize);
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* buf     = (rank == 0) ? static_cast<void*>(recvBuf.data())
+                                : static_cast<void*>(sendBuf.data());
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf, kMsgSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    const int actualNqps = GetActualNqps(sendComm, recvComm, buf, kMsgSize, /*tag=*/1700, mhandle);
+    ASSERT_GT(actualNqps, 0);
+
+    static constexpr int kTimeoutMpiTag = 9903;
+    // 200ms start + 5 * (500ms + 5s) ≈ 28s. Poll for 45s to be safe.
+    static constexpr int kTimeoutPollIters = 4500;
+
+    bool phase1RecvDone = false;
+    void* recvReq = nullptr;
+
+    if (rank == 0) {
+        void*  bufs[1]    = {buf};
+        size_t sizes[1]   = {kMsgSize};
+        int    tags[1]    = {1701};
+        void*  handles[1] = {mhandle};
+        ASSERT_EQ(PostRecv(recvComm, 1, bufs, sizes, tags, handles, &recvReq), ncclSuccess);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    if (rank == 1) {
+        ASSERT_EQ(ncclIbCastFaultDriveQpToError(sendComm, 0), ncclSuccess);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    struct TimeoutResult {
+        int sendRet;
+        int devState0;
+        int outstandingRecovery;
+    };
+    TimeoutResult tr = {};
+
+    if (rank == 1) {
+        void* sendReq = nullptr;
+        ncclResult_t sendRet = ncclSuccess;
+        for (int attempt = 0; attempt < kMaxRetryAttempts; attempt++) {
+            sendRet = PostSend(sendComm, buf, kMsgSize, 1701, mhandle, &sendReq);
+            if (sendRet != ncclSuccess || sendReq != nullptr) break;
+            usleep(kPollIntervalUs);
+        }
+
+        if (sendRet == ncclSuccess && sendReq != nullptr) {
+            for (int poll = 0; poll < 500; poll++) {
+                int done = 0, sz = 0;
+                ncclResult_t testRet = TestRequest(sendReq, &done, &sz);
+                if (testRet != ncclSuccess) { sendRet = testRet; break; }
+                if (done) break;
+                usleep(kPollIntervalUs);
+            }
+        }
+
+        // Wait for recovery to exhaust all attempts
+        struct ncclIbCastResiliencyState resState = {};
+        for (int poll = 0; poll < kTimeoutPollIters; poll++) {
+            ncclIbCastGetResiliencyState(sendComm, &resState);
+            if (resState.devState[0] == kDevStateRecoveryFailed ||
+                resState.devState[0] == kDevStateErrorPermanent) break;
+            usleep(10000);  // 10ms
+        }
+
+        tr.sendRet             = static_cast<int>(sendRet);
+        tr.devState0           = resState.devState[0];
+        tr.outstandingRecovery = resState.outstandingRecovery;
+
+        MPI_Send(&tr, sizeof(tr), MPI_BYTE, 0, kTimeoutMpiTag, MPI_COMM_WORLD);
+    }
+
+    if (rank == 0) {
+        for (int poll = 0; poll < 1500; poll++) {
+            int done = 0, sz = 0;
+            if (TestRequest(recvReq, &done, &sz) != ncclSuccess) break;
+            if (done) { phase1RecvDone = true; break; }
+            usleep(kPollIntervalUs);
+        }
+
+        MPI_Recv(&tr, sizeof(tr), MPI_BYTE, 1, kTimeoutMpiTag, MPI_COMM_WORLD,
+                 MPI_STATUS_IGNORE);
+
+        EXPECT_EQ(tr.sendRet, static_cast<int>(ncclSuccess))
+            << "Send should complete via surviving device";
+        // Recovery should have failed after exhausting all attempts
+        EXPECT_TRUE(tr.devState0 == kDevStateRecoveryFailed ||
+                    tr.devState0 == kDevStateErrorPermanent)
+            << "Expected RecoveryFailed(3) or ErrorPermanent(5) after UD timeout; "
+            << "got devState[0]=" << tr.devState0;
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (rank == 0 && !phase1RecvDone)
+        DrainRecvRequest(recvReq);
     TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
