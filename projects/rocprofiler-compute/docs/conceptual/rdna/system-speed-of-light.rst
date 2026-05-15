@@ -85,8 +85,8 @@ per cycle, multiplied by instance count and clock). They are not anchored to a
 single public RDNA 3.5 table, so the percentage of peak reported for these
 rows is indicative rather than exact.
 
-For context, the memory hierarchy is GL0 (TCP), then GL1, then GL2, then
-system memory through GCEA.
+For context, the memory hierarchy is GL0 (TCP Cache), then GL1, then GL2, then
+system memory through GCEA and Data Fabric.
 
 .. Note::
    For AMD Instinct accelerators (CDNA-CDNA4), see
