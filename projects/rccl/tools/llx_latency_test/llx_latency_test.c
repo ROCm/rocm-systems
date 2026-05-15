@@ -189,11 +189,10 @@ void storeLL(LLLine* dst, uint64_t val, uint32_t flag)
 __device__ __forceinline__
 uint64_t readLL(const LLLine* src, uint32_t flag)
 {
-  uint64_t lo, hi; int sp = 0;
+  uint64_t lo, hi;
   do {
     lo = sys_load64((cgptr64)src->v);
     hi = sys_load64((cgptr64)(src->v+1));
-    if (++sp > (1<<28)) return ~0ULL;
   } while ((uint32_t)(lo>>32) != flag || (uint32_t)(hi>>32) != flag);
   return (uint64_t)(uint32_t)lo | ((uint64_t)(uint32_t)hi << 32);
 }
@@ -231,10 +230,8 @@ uint64_t readLL_sc(const uint64_t* base, int lane, uint64_t flag)
 {
   bool is_flag = (lane == DATA_ELEMS);
   uint64_t val = 0;
-  int sp = 0;
   do {
     val = sys_load64((cgptr64)(base + lane));
-    if (++sp > (1<<28)) return ~0ULL;
   } while (__any(is_flag && (val != flag)));
   if (!is_flag) val = sys_load64((cgptr64)(base + lane));
   return val;
@@ -257,9 +254,8 @@ __device__ __forceinline__
 void wait_iter_ack(uint64_t* ack_buf, uint64_t target)
 {
   if (threadIdx.x == 0) {
-    int sp = 0; uint64_t v;
+    uint64_t v;
     do { v = sys_load64((cgptr64)ack_buf);
-         if (++sp > (1<<28)) break;
     } while (v != target);
   }
   __syncthreads();
@@ -430,9 +426,8 @@ void recv_ll_tf_kernel(uint64_t* ping, uint64_t* ack_buf, int* block_counters,
 
     if (lane == DATA_ELEMS) {
       for (int g = gtid / LINE_ELEMS; g < nlines; g += tot / LINE_ELEMS) {
-        int sp = 0; uint64_t v;
+        uint64_t v;
         do { v = sys_load64((cgptr64)(ping + g * LINE_ELEMS + DATA_ELEMS));
-             if (++sp > (1<<28)) break;
         } while (v != flag);
       }
     }
