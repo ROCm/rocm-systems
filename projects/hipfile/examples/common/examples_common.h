@@ -18,10 +18,20 @@
  * include. Must stay in sync with the typedef in hipfile.h. */
 typedef void *hipFileHandle_t;
 
+/// @brief Determines if value is a power of two.
+/// @param value [in] The value to inspect.
+/// @return True if value is a power of two, false otherwise.
+constexpr bool
+is_power_of_two(size_t value)
+{
+    return (value > 0) && ((value & (value - 1)) == 0);
+}
+
 /// @brief Alignment used for O_DIRECT transfers. Must be a power of two and a
 /// multiple of the underlying filesystem's logical block size; 4 KiB satisfies
 /// both for the ext4/xfs setups hipFile supports today.
 #define BLOCK_ALIGN ((size_t)4096)
+static_assert(is_power_of_two(BLOCK_ALIGN), "BLOCK_ALIGN must be a power of two");
 
 /// @brief Round value up to the next multiple of align. Align _must_ be a power of 2.
 /// @param value [in] The value to round up.
@@ -31,15 +41,6 @@ inline size_t
 align_up(size_t value, size_t align)
 {
     return (value + align - 1) & ~(align - 1);
-}
-
-/// @brief Determines if value is a power of two.
-/// @param value [in] The value to inspect.
-/// @return True if value is a power of two, false otherwise.
-constexpr bool
-is_power_of_two(size_t value)
-{
-    return (value > 0) && ((value & (value - 1)) == 0);
 }
 
 /// @brief Fill a buffer with a deterministic test pattern (byte i = i & 0xFF).

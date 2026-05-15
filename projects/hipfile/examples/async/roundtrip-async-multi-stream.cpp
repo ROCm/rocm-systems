@@ -94,8 +94,8 @@ main(int argc, char *argv[])
 
     int             rfd = -1, wfd = -1;
     hipFileHandle_t rhandle, whandle;
-    bool            rhandle_open = false;
-    bool            whandle_open = false;
+    bool            rhandle_open        = false;
+    bool            whandle_open        = false;
     slice_state     slices[NUM_STREAMS] = {};
     int             exit_status         = EXIT_FAILURE;
     hipError_t      hip_err;
@@ -123,8 +123,8 @@ main(int argc, char *argv[])
 
         hip_err = hipMalloc(&s.devbuf, SLICE_SIZE);
         if (hipSuccess != hip_err) {
-            fprintf(stderr, "Could not allocate %zu bytes on GPU %d for slice %d (%d)\n",
-                    (size_t)SLICE_SIZE, gpu_id, i, hip_err);
+            fprintf(stderr, "Could not allocate %zu bytes on GPU %d for slice %d (%d)\n", (size_t)SLICE_SIZE,
+                    gpu_id, i, hip_err);
             goto cleanup_slices;
         }
 
@@ -156,8 +156,8 @@ main(int argc, char *argv[])
         goto cleanup_slices;
     rhandle_open = true;
 
-    if (open_file(write_path, O_WRONLY | O_CREAT | O_DIRECT,
-                  S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH, &wfd, &whandle))
+    if (open_file(write_path, O_WRONLY | O_CREAT | O_DIRECT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH, &wfd,
+                  &whandle))
         goto close_rfile;
     whandle_open = true;
 
@@ -165,8 +165,8 @@ main(int argc, char *argv[])
      * the same stream will see the read result without an extra fence. */
     for (int i = 0; i < NUM_STREAMS; ++i) {
         slice_state &s = slices[i];
-        hipfile_err = hipFileReadAsync(rhandle, s.devbuf, &s.io_size, &s.file_offset,
-                                       &s.buf_offset, &s.bytes_read, s.stream);
+        hipfile_err    = hipFileReadAsync(rhandle, s.devbuf, &s.io_size, &s.file_offset, &s.buf_offset,
+                                          &s.bytes_read, s.stream);
         if (hipFileSuccess != hipfile_err.err) {
             fprintf(stderr, "hipFileReadAsync submit failed for slice %d (%s)\n", i,
                     hipFileGetOpErrorString(hipfile_err.err));
@@ -179,8 +179,8 @@ main(int argc, char *argv[])
      * different streams the operations may execute in parallel. */
     for (int i = 0; i < NUM_STREAMS; ++i) {
         slice_state &s = slices[i];
-        hipfile_err = hipFileWriteAsync(whandle, s.devbuf, &s.io_size, &s.file_offset,
-                                        &s.buf_offset, &s.bytes_written, s.stream);
+        hipfile_err    = hipFileWriteAsync(whandle, s.devbuf, &s.io_size, &s.file_offset, &s.buf_offset,
+                                           &s.bytes_written, s.stream);
         if (hipFileSuccess != hipfile_err.err) {
             fprintf(stderr, "hipFileWriteAsync submit failed for slice %d (%s)\n", i,
                     hipFileGetOpErrorString(hipfile_err.err));
@@ -191,20 +191,20 @@ main(int argc, char *argv[])
     /* 7. Drain each stream and check completion counts. */
     for (int i = 0; i < NUM_STREAMS; ++i) {
         slice_state &s = slices[i];
-        hip_err = hipStreamSynchronize(s.stream);
+        hip_err        = hipStreamSynchronize(s.stream);
         if (hipSuccess != hip_err) {
             fprintf(stderr, "hipStreamSynchronize failed for slice %d (%d)\n", i, hip_err);
             goto close_wfile;
         }
 
         if (s.bytes_read != (ssize_t)SLICE_SIZE) {
-            fprintf(stderr, "Async read short on slice %d: %zd of %zu\n", i,
-                    s.bytes_read, (size_t)SLICE_SIZE);
+            fprintf(stderr, "Async read short on slice %d: %zd of %zu\n", i, s.bytes_read,
+                    (size_t)SLICE_SIZE);
             goto close_wfile;
         }
         if (s.bytes_written != (ssize_t)SLICE_SIZE) {
-            fprintf(stderr, "Async write short on slice %d: %zd of %zu\n", i,
-                    s.bytes_written, (size_t)SLICE_SIZE);
+            fprintf(stderr, "Async write short on slice %d: %zd of %zu\n", i, s.bytes_written,
+                    (size_t)SLICE_SIZE);
             goto close_wfile;
         }
     }
@@ -232,8 +232,8 @@ main(int argc, char *argv[])
         if (verify_files_match(read_path, write_path, TOTAL_SIZE, &hash))
             goto cleanup_slices;
 
-        printf("OK  %s == %s  (%zu bytes across %d streams, hash 0x%016" PRIx64 ")\n",
-               read_path, write_path, (size_t)TOTAL_SIZE, NUM_STREAMS, hash);
+        printf("OK  %s == %s  (%zu bytes across %d streams, hash 0x%016" PRIx64 ")\n", read_path, write_path,
+               (size_t)TOTAL_SIZE, NUM_STREAMS, hash);
     }
 
     exit_status = EXIT_SUCCESS;

@@ -142,8 +142,8 @@ verify_files_match(const char *read_path, const char *write_path, size_t size, u
         return 1;
 
     if (hash_read != hash_write) {
-        fprintf(stderr, "Hash mismatch: %s=0x%016" PRIx64 "  %s=0x%016" PRIx64 "\n",
-                read_path, hash_read, write_path, hash_write);
+        fprintf(stderr, "Hash mismatch: %s=0x%016" PRIx64 "  %s=0x%016" PRIx64 "\n", read_path, hash_read,
+                write_path, hash_write);
         return 1;
     }
 

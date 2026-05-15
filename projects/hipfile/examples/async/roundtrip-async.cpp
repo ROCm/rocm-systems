@@ -114,8 +114,8 @@ main(int argc, char *argv[])
         goto deregister_buf;
     rhandle_open = true;
 
-    if (open_file(write_path, O_WRONLY | O_CREAT | O_TRUNC | O_DIRECT,
-                  S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH, &wfd, &whandle))
+    if (open_file(write_path, O_WRONLY | O_CREAT | O_TRUNC | O_DIRECT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH,
+                  &wfd, &whandle))
         goto close_rfile;
     whandle_open = true;
 
@@ -132,16 +132,16 @@ main(int argc, char *argv[])
         hoff_t  wbuf_offset   = 0;
         ssize_t bytes_written = 0;
 
-        hipfile_err = hipFileReadAsync(rhandle, devbuf, &rsize, &rfile_offset, &rbuf_offset,
-                                       &bytes_read, /*stream=*/0);
+        hipfile_err =
+            hipFileReadAsync(rhandle, devbuf, &rsize, &rfile_offset, &rbuf_offset, &bytes_read, /*stream=*/0);
         if (hipFileSuccess != hipfile_err.err) {
             fprintf(stderr, "hipFileReadAsync submit failed (%s)\n",
                     hipFileGetOpErrorString(hipfile_err.err));
             goto close_wfile;
         }
 
-        hipfile_err = hipFileWriteAsync(whandle, devbuf, &wsize, &wfile_offset, &wbuf_offset,
-                                        &bytes_written, /*stream=*/0);
+        hipfile_err = hipFileWriteAsync(whandle, devbuf, &wsize, &wfile_offset, &wbuf_offset, &bytes_written,
+                                        /*stream=*/0);
         if (hipFileSuccess != hipfile_err.err) {
             fprintf(stderr, "hipFileWriteAsync submit failed (%s)\n",
                     hipFileGetOpErrorString(hipfile_err.err));
@@ -193,8 +193,8 @@ main(int argc, char *argv[])
         if (verify_files_match(read_path, write_path, payload_size, &hash))
             goto deregister_buf;
 
-        printf("OK  %s == %s  (%zu bytes, hash 0x%016" PRIx64 ")\n",
-               read_path, write_path, payload_size, hash);
+        printf("OK  %s == %s  (%zu bytes, hash 0x%016" PRIx64 ")\n", read_path, write_path, payload_size,
+               hash);
     }
 
     exit_status = EXIT_SUCCESS;

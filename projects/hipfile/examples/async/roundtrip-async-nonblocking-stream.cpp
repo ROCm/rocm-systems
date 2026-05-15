@@ -69,13 +69,13 @@ main(int argc, char *argv[])
 
     int             rfd = -1, wfd = -1;
     hipFileHandle_t rhandle, whandle;
-    bool            rhandle_open    = false;
-    bool            whandle_open    = false;
-    void           *devbuf          = NULL;
-    bool            buf_registered  = false;
-    hipStream_t     stream          = NULL;
-    bool            stream_created  = false;
-    int             exit_status     = EXIT_FAILURE;
+    bool            rhandle_open   = false;
+    bool            whandle_open   = false;
+    void           *devbuf         = NULL;
+    bool            buf_registered = false;
+    hipStream_t     stream         = NULL;
+    bool            stream_created = false;
+    int             exit_status    = EXIT_FAILURE;
     hipError_t      hip_err;
     hipFileError_t  hipfile_err;
 
@@ -111,8 +111,8 @@ main(int argc, char *argv[])
         goto deregister_buf;
     rhandle_open = true;
 
-    if (open_file(write_path, O_RDWR | O_CREAT | O_DIRECT,
-                  S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH, &wfd, &whandle))
+    if (open_file(write_path, O_RDWR | O_CREAT | O_DIRECT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH, &wfd,
+                  &whandle))
         goto close_rfile;
     whandle_open = true;
 
@@ -145,16 +145,16 @@ main(int argc, char *argv[])
         hoff_t  wbuf_offset   = 0;
         ssize_t bytes_written = 0;
 
-        hipfile_err = hipFileReadAsync(rhandle, devbuf, &rsize, &rfile_offset, &rbuf_offset,
-                                       &bytes_read, stream);
+        hipfile_err =
+            hipFileReadAsync(rhandle, devbuf, &rsize, &rfile_offset, &rbuf_offset, &bytes_read, stream);
         if (hipFileSuccess != hipfile_err.err) {
             fprintf(stderr, "hipFileReadAsync submit failed (%s)\n",
                     hipFileGetOpErrorString(hipfile_err.err));
             goto destroy_stream;
         }
 
-        hipfile_err = hipFileWriteAsync(whandle, devbuf, &wsize, &wfile_offset, &wbuf_offset,
-                                        &bytes_written, stream);
+        hipfile_err =
+            hipFileWriteAsync(whandle, devbuf, &wsize, &wfile_offset, &wbuf_offset, &bytes_written, stream);
         if (hipFileSuccess != hipfile_err.err) {
             fprintf(stderr, "hipFileWriteAsync submit failed (%s)\n",
                     hipFileGetOpErrorString(hipfile_err.err));
@@ -206,8 +206,8 @@ main(int argc, char *argv[])
         if (verify_files_match(read_path, write_path, payload_size, &hash))
             goto destroy_stream;
 
-        printf("OK  %s == %s  (%zu bytes, hash 0x%016" PRIx64 ")\n",
-               read_path, write_path, payload_size, hash);
+        printf("OK  %s == %s  (%zu bytes, hash 0x%016" PRIx64 ")\n", read_path, write_path, payload_size,
+               hash);
     }
 
     exit_status = EXIT_SUCCESS;
