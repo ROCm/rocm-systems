@@ -93,6 +93,7 @@ ATTFileMgr::addDecoder(const char* filepath, uint64_t id, uint64_t load_addr, ui
 
     codeobjs_to_delete.push_back(id);
     table->addDecoder(buffer.data(), buffer.size(), id, load_addr, memsize);
+    codefile->addCodeobj(id);
 }
 
 void

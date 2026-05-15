@@ -6,7 +6,7 @@ rocprofiler_deactivate_clang_tidy()
 
 add_executable(codeobj-library-tests)
 
-set(CODEOBJ_LIB_TEST_SOURCES "codeobj_library_test.cpp")
+set(CODEOBJ_LIB_TEST_SOURCES "codeobj_library_test.cpp" "funcmap_test.cpp")
 
 target_sources(codeobj-library-tests PRIVATE ${CODEOBJ_LIB_TEST_SOURCES})
 
@@ -36,7 +36,7 @@ find_program(
     PATHS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
     PATH_SUFFIXES bin llvm/bin NO_CACHE)
 
-# The arch only matters for compilation, not execution — the test only parses DWARF debug
+# The arch only matters for compilation, not execution -- the test only parses DWARF debug
 # info from the resulting ELF.  Any valid arch works here.
 set(_SYNCKERNEL_ARCH "gfx90a")
 set(_SYNCKERNEL_SRC "${CMAKE_CURRENT_SOURCE_DIR}/syncthreads_kernel.hip")
