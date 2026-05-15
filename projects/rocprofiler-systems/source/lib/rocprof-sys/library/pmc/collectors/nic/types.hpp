@@ -86,7 +86,7 @@ union enabled_metrics
 
 // Bit-mask for all NIC RDMA metrics enabled
 inline constexpr std::uint32_t NIC_METRICS_COUNT = 10;
-inline constexpr std::uint32_t ALL_NIC_METRICS = (1 << NIC_METRICS_COUNT) - 1;
+inline constexpr std::uint32_t ALL_NIC_METRICS   = (1 << NIC_METRICS_COUNT) - 1;
 /**
  * @brief Container for NIC RDMA metrics.
  *
