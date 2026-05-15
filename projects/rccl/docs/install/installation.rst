@@ -44,11 +44,11 @@ base ROCm packages.
 
    .. code-block:: shell-session
 
-      amdrocm-rccl-<dev/devel><rocm_version>
+      amdrocm-rccl<dev/devel><rocm_version>
 
    Where:
 
-   * ``<dev/devel>`` specifies whether to install library files and
+   * ``<-dev/devel>`` specifies whether to install library files and
      headers. Omit this suffix to only install runtime packages.
 
      * ``-dev`` is used on Debian-based distributions, including Ubuntu.
@@ -58,7 +58,10 @@ base ROCm packages.
    * ``<rocm_version>`` is the ROCm Core SDK version to install. Omit this
      suffix to install the latest available version.
 
-   For example, to install the latest RCCL development package release for supported GPU architectures:
+   For example: ``amdrocm-rccl-dev7.13-gfx950``
+
+   Use the following command to install the latest RCCL development package
+   release for supported GPU architectures:
 
    .. tab-set::
 
