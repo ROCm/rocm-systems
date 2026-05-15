@@ -248,7 +248,11 @@ class RocProfCompute_Base:
         self._filter_blocks = self._soc.profiling_setup()
 
         # Write profiling configuration as yaml file
-        with open(f"{self.__args.output_directory}/profiling_config.yaml", "w") as f:
+        with open(
+            f"{self.__args.output_directory}/profiling_config.yaml",
+            "w",
+            encoding="utf-8",
+        ) as f:
             args_dict = vars(self.__args)
             # Override filter_blocks when writing profiling config yaml
             args_dict["filter_blocks"] = self._filter_blocks

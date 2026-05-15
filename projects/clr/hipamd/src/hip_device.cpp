@@ -98,10 +98,10 @@ void Device::RemoveMemoryPool(MemoryPool* pool) {
 }
 
 // ================================================================================================
-bool Device::FreeMemory(amd::Memory* memory, Stream* stream, Event* event) {
+bool Device::FreeMemory(amd::Memory* memory, Stream* stream, Event* event, bool skip_event) {
   std::scoped_lock lock(lock_);
   for (auto* pool : mem_pools_) {
-    if (pool->FreeMemory(memory, stream, event)) {
+    if (pool->FreeMemory(memory, stream, event, skip_event)) {
       return true;
     }
   }

@@ -121,6 +121,7 @@ def run_prof(
         / "rocprof_compute_soc"
         / "profile_configs"
         / "sdk_config.yaml",
+        encoding="utf-8",
     ) as filename:
         sdk_config = yaml.safe_load(filename)
     # Extra counter definitions
@@ -130,7 +131,7 @@ def run_prof(
             "counter_def_" + fname_path.name[len("pmc_perf_") :]
         )
         if counter_def_fname.exists():
-            with open(Path(counter_def_fname)) as file:
+            with open(Path(counter_def_fname), encoding="utf-8") as file:
                 sdk_config["rocprofiler-sdk"]["counters"].extend(
                     yaml.safe_load(file)["rocprofiler-sdk"]["counters"]
                 )
@@ -355,7 +356,7 @@ def run_prof(
             # copy and remove out directory if needed
             shutil.copyfile(
                 f"{workload_dir}/out/pmc_1/results_{fbase}.csv",
-                f"{workload_dir}/{fbase}.csv",
+                f"{workload_dir}/results_{fbase}.csv",
             )
             # Remove temp directory
             shutil.rmtree(f"{workload_dir}/out")
@@ -383,7 +384,7 @@ def run_prof(
             "SCR": "Scratch_Per_Workitem",
             "ACCUM_VGPR": "Accum_VGPR",
         }
-        csv_path = Path(workload_dir) / f"{fbase}.csv"
+        csv_path = Path(workload_dir) / f"results_{fbase}.csv"
         rows, _ = csv_ops.read_csv_as_dicts(str(csv_path))
         csv_ops.rename_columns(rows, output_headers)
         csv_ops.write_csv_from_dicts(str(csv_path), rows)

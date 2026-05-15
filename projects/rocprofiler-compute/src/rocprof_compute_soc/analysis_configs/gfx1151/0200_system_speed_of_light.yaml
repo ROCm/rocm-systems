@@ -167,8 +167,8 @@ Panel Config:
     Wavefront Occupancy: >-
       Average number of wavefronts resident on the GPU during kernel execution. Higher
       occupancy provides more opportunities to hide memory latency through wavefront
-      switching. However, maximum occupancy is not always optimal-excessive register or
-      LDS usage per wavefront may limit occupancy.
+      switching. However, maximum occupancy is not always optimal. Excessive register
+      or LDS usage per wavefront may limit occupancy.
     GL2 Cache Hit Rate: >-
       Percentage of GL2 cache requests that are serviced from cache without accessing
       system memory. Higher hit rates reduce memory bandwidth pressure and improve

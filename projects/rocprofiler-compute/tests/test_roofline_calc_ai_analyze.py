@@ -39,12 +39,9 @@ def run_calc_ai_analyze_with_values(monkeypatch, metric_values):
     }
     arch_config.dfs_type = {401: "metric_table", 402: "metric_table"}
 
-    pmc_data = pd.DataFrame({"Kernel_Name": [kernel_name]})
-    pmc_df = pd.concat({"pmc_perf": pmc_data}, axis=1)
+    pmc_df = pd.DataFrame({"Kernel_Name": [kernel_name]})
 
-    def mock_eval_metric(
-        dfs, dfs_type, sys_info_row, roofline_peaks, pmc_data, debug, config
-    ):
+    def mock_eval_metric(dfs, dfs_type, sys_info_row, roofline_peaks, pmc_data, debug):
         dfs[402] = pd.DataFrame({
             "Metric": [
                 "AI HBM",
@@ -71,7 +68,6 @@ def run_calc_ai_analyze_with_values(monkeypatch, metric_values):
     return calc_ai_analyze(
         workload=workload,
         pmc_df=pmc_df,
-        config={},
         arch_config=arch_config,
     )
 

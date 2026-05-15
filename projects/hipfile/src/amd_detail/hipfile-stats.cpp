@@ -24,6 +24,12 @@ hipFileStatsCreateContext(hipFileStatsContext_t **context, int targetPid)
     try {
         *context = reinterpret_cast<hipFileStatsContext_t *>(new StatsClient{targetPid});
     }
+    catch (const std::system_error &e) {
+        *context = nullptr;
+        if (e.code().value() == ENOSYS)
+            return hipFileStatsTargetProcessNotAccessible;
+        return hipFileStatsTargetProcessNotFound;
+    }
     catch (...) {
         *context = nullptr;
         return hipFileStatsTargetProcessNotFound;

@@ -10,7 +10,6 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from utils import schema
 from utils.logger import console_error, console_warning, demarcate
 from utils.metrics.debug_row_tracker import DebugRowTracker, debug_row_tracker
 from utils.metrics.expression import build_eval_string
@@ -99,8 +98,7 @@ def create_sys_vars(sys_info: pd.Series) -> dict[str, int | float]:
 
 
 def calc_builtin_vars(
-    raw_pmc_df: pd.DataFrame | dict,
-    config: dict,
+    raw_pmc_df: pd.DataFrame,
     sys_vars: dict[str, int | float],
 ) -> dict[str, Optional[str | float | int]]:
     """Calculate built-in variables."""
@@ -113,12 +111,7 @@ def calc_builtin_vars(
         if "PER_XCD" not in variable_key:
             continue
 
-        # NB: assume all built-in vars from pmc_perf.csv for now
-        eval_string = build_eval_string(
-            variable_value,
-            schema.PMC_PERF_FILE_PREFIX,
-            config,
-        )
+        eval_string = build_eval_string(variable_value)
         try:
             # Create temporary evaluator for this calculation
             # Pass sys_vars so that $num_xcd and other system variables are available
@@ -136,11 +129,7 @@ def calc_builtin_vars(
         if "PER_XCD" in variable_key:
             continue
 
-        eval_string = build_eval_string(
-            variable_value,
-            schema.PMC_PERF_FILE_PREFIX,
-            config,
-        )
+        eval_string = build_eval_string(variable_value)
         try:
             # Merge sys_vars with builtin_vars_collection for second pass
             combined_vars = {**sys_vars, **builtin_vars_collection}
@@ -162,24 +151,23 @@ def eval_metric(
     dfs_type: dict,
     sys_info: pd.Series,
     empirical_peaks_df: pd.DataFrame,
-    raw_pmc_df: pd.DataFrame | dict,
+    raw_pmc_df: pd.DataFrame,
     debug: bool,
-    config: dict,
 ) -> None:
     """Execute the expr string for each metric in the df."""
     # confirm no illogical counter values (only consider non-roofline runs)
     roof_only_run = sys_info.ip_blocks == "roofline"
     if (
         (not roof_only_run)
-        and hasattr(raw_pmc_df.get("pmc_perf", {}), "GRBM_GUI_ACTIVE")
-        and (raw_pmc_df["pmc_perf"]["GRBM_GUI_ACTIVE"] == 0).any()
+        and "GRBM_GUI_ACTIVE" in raw_pmc_df.columns
+        and (raw_pmc_df["GRBM_GUI_ACTIVE"] == 0).any()
     ):
         console_warning("Detected GRBM_GUI_ACTIVE == 0")
         console_error("Halting execution for warning above.")
 
     sys_vars = create_sys_vars(sys_info)
     empirical_peaks = create_empirical_peaks_dict(empirical_peaks_df)
-    builtin_vars = calc_builtin_vars(raw_pmc_df, config, sys_vars)
+    builtin_vars = calc_builtin_vars(raw_pmc_df, sys_vars)
     sys_vars.update(builtin_vars)
 
     # Clear any previous noise clamp warnings before this analysis
@@ -246,7 +234,7 @@ def validate_dual_issue_metrics(
     dfs: dict,
     dfs_type: dict,
     sys_info: pd.Series,
-    raw_pmc_df: pd.DataFrame | dict,
+    raw_pmc_df: pd.DataFrame,
 ) -> None:
     """
     Check if VALU Utilization or VALU FLOPs metrics exceed theoretical peak.
@@ -283,13 +271,13 @@ def validate_dual_issue_metrics(
 
                 if peak > 0 and value > peak:
                     dual_issue_confirmed = False
-                    if gpu_arch == "gfx950":
-                        if isinstance(raw_pmc_df, dict) and "pmc_perf" in raw_pmc_df:
-                            pmc_df = raw_pmc_df["pmc_perf"]
-                            if "SQ_ACTIVE_INST_VALU2" in pmc_df.columns:
-                                valu2_sum = pmc_df["SQ_ACTIVE_INST_VALU2"].sum()
-                                if valu2_sum > 0:
-                                    dual_issue_confirmed = True
+                    if (
+                        gpu_arch == "gfx950"
+                        and "SQ_ACTIVE_INST_VALU2" in raw_pmc_df.columns
+                    ):
+                        valu2_sum = raw_pmc_df["SQ_ACTIVE_INST_VALU2"].sum()
+                        if valu2_sum > 0:
+                            dual_issue_confirmed = True
 
                     # Determine warning message based on metric type
                     faq_url = (

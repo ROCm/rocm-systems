@@ -288,10 +288,10 @@ Panel YAMLs (src/) → Per-Arch YAMLs (tools/) → Docs YAMLs (docs/) → Sphinx
 **Files:**
 ```bash
 tools/per_arch_metric_definitions/
-  ├── gfx{908,90a,942,950}_metrics_description.yaml   # plain + rst + unit
+  ├── gfx{908,90a,942,950,1151}_metrics_description.yaml   # plain + rst + unit
 
 docs/data/metrics/
-  └── gfx{908,90a,942,950}_metrics.yaml               # rst + unit (generated)
+  └── gfx{908,90a,942,950,1151}_metrics.yaml               # rst + unit (generated)
 ```
 
 **After editing panel `metrics_description` sections:**
@@ -300,4 +300,10 @@ python tools/config_management/metric_description_manager.py --sync-all src/rocp
 python tools/config_management/metric_description_manager.py --generate-docs
 ```
 
-**RST enhancement:** Edit per-arch YAMLs directly. Framework preserves manual edits (detects when `rst != plain`).
+To regenerate the docs YAML for a single architecture without rewriting the others (for example, gfx1151 only):
+
+```bash
+python tools/config_management/metric_description_manager.py --generate-docs --docs-arch gfx1151
+```
+
+**Manual RST edits:** Edit per-arch YAMLs directly. The framework preserves an edit when its `rst` differs from `plain`.

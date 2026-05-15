@@ -2,8 +2,8 @@
 # SPDX-License-Identifier:  MIT
 
 import builtins
+import functools
 import io
-import locale
 import logging
 import math
 import os
@@ -17,6 +17,7 @@ import pytest
 import utils.utils_analysis as utils_analysis
 import utils.utils_common as utils_common
 import utils.utils_profile as utils_profile
+from utils.amdsmi_interface import _per_device_query
 from utils.tty import (
     format_duration,
     format_node_stats,
@@ -972,7 +973,7 @@ def test_run_prof_success_v3(tmp_path, monkeypatch):
 
     utils_profile.run_prof(str(fname), ["--arg"], workload_dir, logging.INFO, "csv")
 
-    assert Path(workload_dir + "/pmc_perf_test.csv").exists()
+    assert Path(workload_dir + "/results_pmc_perf_test.csv").exists()
 
 
 def test_run_prof_success_v3_csv(tmp_path, monkeypatch):
@@ -3364,1219 +3365,6 @@ def test_is_workload_empty_pandas_import_dependency():
 
 
 # =============================================================================
-# TESTS FOR LOCAL ENCODING FUNCTION
-#
-# Normal Functionality:
-#
-# Successful C.UTF-8 locale setting
-# Fallback to current UTF-8 locale when C.UTF-8 fails
-# Various UTF-8 encoding formats and case variations
-# Edge Cases:
-#
-# getdefaultlocale returning None or partial None values
-# Empty encoding strings
-# Unusual but valid locale names
-# Multiple function calls
-# Error Conditions:
-#
-# C.UTF-8 locale not available
-# Fallback locale setting failures
-# No UTF-8 locales available on system
-# getdefaultlocale exceptions
-# Various locale.Error scenarios
-# String Handling and Dependencies:
-#
-# UTF-8 substring detection in encoding names
-# Console error message formatting and parameters
-# Locale module dependency verification
-# Return value consistency
-# Special Scenarios:
-#
-# Thread safety simulation
-# Different locale error types and messages
-# Comprehensive error path coverage
-# Module import dependencies
-# =============================================================================
-
-
-def test_set_locale_encoding_successful_c_utf8():
-    """
-    Test set_locale_encoding when C.UTF-8 locale is
-    available and can be set successfully.
-
-    Returns:
-        None: Asserts function sets C.UTF-8 locale without errors.
-    """
-    from unittest.mock import patch
-
-    console_error_calls = []
-
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
-
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("utils.utils_common.console_error", side_effect=mock_console_error):
-            mock_setlocale.return_value = None
-
-            utils_common.set_locale_encoding()
-
-            mock_setlocale.assert_called_once_with(locale.LC_ALL, "C.UTF-8")
-            assert len(console_error_calls) == 0
-
-
-def test_set_locale_encoding_c_utf8_fails_fallback_to_current_utf8():
-    """
-    Test set_locale_encoding when C.UTF-8 fails but current locale is UTF-8 based.
-
-    Returns:
-        None: Asserts function falls back to current UTF-8 locale successfully.
-    """
-    import locale
-    from unittest.mock import patch
-
-    console_error_calls = []
-
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
-
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch(
-                "utils.utils_common.console_error", side_effect=mock_console_error
-            ):
-                mock_setlocale.side_effect = [
-                    locale.Error("C.UTF-8 not available"),
-                    None,
-                ]
-                mock_getdefaultlocale.return_value = ("en_US", "UTF-8")
-
-                utils_common.set_locale_encoding()
-
-                assert mock_setlocale.call_count == 2
-                mock_setlocale.assert_any_call(locale.LC_ALL, "C.UTF-8")
-                mock_setlocale.assert_any_call(locale.LC_ALL, "en_US")
-                assert len(console_error_calls) == 0
-
-
-def test_set_locale_encoding_c_utf8_fails_fallback_also_fails():
-    """
-    Test set_locale_encoding when both C.UTF-8 and fallback locale fail.
-
-    Returns:
-        None: Asserts function calls console_error when fallback locale fails.
-    """
-    import locale
-    from unittest.mock import patch
-
-    console_error_calls = []
-
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
-
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch(
-                "utils.utils_common.console_error", side_effect=mock_console_error
-            ):
-                fallback_error = locale.Error("Fallback locale failed")
-                mock_setlocale.side_effect = [
-                    locale.Error("C.UTF-8 not available"),
-                    fallback_error,
-                ]
-                mock_getdefaultlocale.return_value = ("en_US", "UTF-8")
-
-                utils_common.set_locale_encoding()
-
-                assert len(console_error_calls) == 1
-                assert (
-                    "Failed to set locale to the current UTF-8-based locale:"
-                    in console_error_calls[0][0][0]
-                )
-                assert "Fallback locale failed" in console_error_calls[0][0][0]
-
-
-def test_set_locale_encoding_no_utf8_locale_available():
-    """
-    Test set_locale_encoding when no UTF-8 locale is available.
-
-    Returns:
-        None: Asserts function calls console_error when no UTF-8 locale found.
-    """
-    import locale
-    from unittest.mock import patch
-
-    console_error_calls = []
-
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
-
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch(
-                "utils.utils_common.console_error", side_effect=mock_console_error
-            ):
-                mock_setlocale.side_effect = locale.Error("C.UTF-8 not available")
-                mock_getdefaultlocale.return_value = ("en_US", "ISO-8859-1")
-
-                utils_common.set_locale_encoding()
-
-                assert len(console_error_calls) == 1
-                assert (
-                    "Please ensure that a UTF-8-based "
-                    "locale is available on your system."
-                    in console_error_calls[0][0][0]
-                )
-                assert console_error_calls[0][1]["exit"] == False  # noqa
-
-
-def test_set_locale_encoding_getdefaultlocale_returns_none():
-    """
-    Test set_locale_encoding when getdefaultlocale returns None.
-
-    Returns:
-        None: Asserts function handles
-        None return from getdefaultlocale.
-    """
-    import locale
-    from unittest.mock import patch
-
-    console_error_calls = []
-
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
-
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch(
-                "utils.utils_common.console_error", side_effect=mock_console_error
-            ):
-                mock_setlocale.side_effect = locale.Error("C.UTF-8 not available")
-                mock_getdefaultlocale.return_value = None
-
-                utils_common.set_locale_encoding()
-
-                assert len(console_error_calls) == 1
-                assert (
-                    "Please ensure that a UTF-8-based locale "
-                    "is available on your system." in console_error_calls[0][0][0]
-                )
-
-
-def test_set_locale_encoding_getdefaultlocale_partial_none():
-    """
-    Test set_locale_encoding when getdefaultlocale returns partial None values.
-
-    Returns:
-        None: Asserts function handles partial None values from getdefaultlocale.
-    """
-    import locale
-    from unittest.mock import patch
-
-    console_error_calls = []
-
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
-
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch(
-                "utils.utils_common.console_error", side_effect=mock_console_error
-            ):
-                mock_setlocale.side_effect = locale.Error("C.UTF-8 not available")
-
-                mock_getdefaultlocale.return_value = ("en_US", None)
-
-                try:
-                    utils_common.set_locale_encoding()
-                except TypeError as e:
-                    if "argument of type 'NoneType' is not iterable" in str(e):
-                        pytest.skip(
-                            "Function doesn't handle None encoding "
-                            "gracefully - needs null check"
-                        )
-                    else:
-                        raise
-
-                assert len(console_error_calls) == 1
-                assert (
-                    "Please ensure that a UTF-8-based locale is "
-                    "available on your system." in console_error_calls[0][0][0]
-                )
-
-
-def test_set_locale_encoding_utf8_case_variations():
-    """
-    Test set_locale_encoding with various UTF-8 case variations in encoding.
-
-    Returns:
-        None: Asserts function handles different UTF-8 case formats.
-    """
-    import locale
-    from unittest.mock import patch
-
-    utf8_variations = ["UTF-8", "utf-8", "UTF8", "utf8"]
-
-    for utf8_variant in utf8_variations:
-        console_error_calls = []
-
-        def mock_console_error(*args, **kwargs):
-            console_error_calls.append((args, kwargs))
-
-        with patch("locale.setlocale") as mock_setlocale:
-            with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-                with patch(
-                    "utils.utils_common.console_error", side_effect=mock_console_error
-                ):
-                    mock_setlocale.side_effect = [
-                        locale.Error("C.UTF-8 not available"),
-                        None,
-                    ]
-                    mock_getdefaultlocale.return_value = ("en_US", utf8_variant)
-
-                    utils_common.set_locale_encoding()
-
-                    if "UTF-8" in utf8_variant:
-                        assert len(console_error_calls) == 0
-                        assert mock_setlocale.call_count == 2
-                    else:
-                        assert len(console_error_calls) == 1
-
-
-def test_set_locale_encoding_empty_encoding():
-    """
-    Test set_locale_encoding when getdefaultlocale returns empty encoding.
-
-    Returns:
-        None: Asserts function handles empty encoding string.
-    """
-    import locale
-    from unittest.mock import patch
-
-    console_error_calls = []
-
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
-
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch(
-                "utils.utils_common.console_error", side_effect=mock_console_error
-            ):
-                mock_setlocale.side_effect = locale.Error("C.UTF-8 not available")
-                mock_getdefaultlocale.return_value = ("en_US", "")
-
-                utils_common.set_locale_encoding()
-
-                assert len(console_error_calls) == 1
-                assert (
-                    "Please ensure that a UTF-8-based locale "
-                    "is available on your system." in console_error_calls[0][0][0]
-                )
-
-
-def test_set_locale_encoding_locale_with_utf8_substring():
-    """
-    Test set_locale_encoding with encoding that contains UTF-8 as substring.
-
-    Returns:
-        None: Asserts function correctly identifies UTF-8 in encoding names.
-    """
-    import locale
-    from unittest.mock import patch
-
-    console_error_calls = []
-
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
-
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch(
-                "utils.utils_common.console_error", side_effect=mock_console_error
-            ):
-                mock_setlocale.side_effect = [
-                    locale.Error("C.UTF-8 not available"),
-                    None,
-                ]
-                mock_getdefaultlocale.return_value = (
-                    "en_US",
-                    "ISO-8859-1.UTF-8.EXTENDED",
-                )
-
-                utils_common.set_locale_encoding()
-
-                assert len(console_error_calls) == 0
-                assert mock_setlocale.call_count == 2
-
-
-def test_set_locale_encoding_different_locale_error_types():
-    """
-    Test set_locale_encoding with different types of locale.Error exceptions.
-
-    Returns:
-        None: Asserts function handles various locale error scenarios.
-    """
-    import locale
-    from unittest.mock import patch
-
-    error_scenarios = [
-        "Locale not supported",
-        "Invalid locale specification",
-        "System locale database corrupted",
-        "",  # Empty error message
-    ]
-
-    for error_msg in error_scenarios:
-        console_error_calls = []
-
-        def mock_console_error(*args, **kwargs):
-            console_error_calls.append((args, kwargs))
-
-        with patch("locale.setlocale") as mock_setlocale:
-            with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-                with patch(
-                    "utils.utils_common.console_error", side_effect=mock_console_error
-                ):
-                    fallback_error = locale.Error(error_msg)
-                    mock_setlocale.side_effect = [
-                        locale.Error("C.UTF-8 not available"),
-                        fallback_error,
-                    ]
-                    mock_getdefaultlocale.return_value = ("en_US", "UTF-8")
-
-                    utils_common.set_locale_encoding()
-
-                    assert len(console_error_calls) == 1
-                    assert str(fallback_error) in console_error_calls[0][0][0]
-
-
-def test_set_locale_encoding_unusual_locale_names():
-    """
-    Test set_locale_encoding with unusual but valid locale names.
-
-    Returns:
-        None: Asserts function handles unusual locale name formats.
-    """
-    import locale
-    from unittest.mock import patch
-
-    unusual_locales = [
-        ("C", "UTF-8"),
-        ("POSIX", "UTF-8"),
-        ("en_US.UTF-8", "UTF-8"),
-        ("zh_CN.UTF-8", "UTF-8"),
-        ("", "UTF-8"),  # Empty locale name
-    ]
-
-    for locale_name, encoding in unusual_locales:
-        console_error_calls = []
-
-        def mock_console_error(*args, **kwargs):
-            console_error_calls.append((args, kwargs))
-
-        with patch("locale.setlocale") as mock_setlocale:
-            with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-                with patch(
-                    "utils.utils_common.console_error", side_effect=mock_console_error
-                ):
-                    mock_setlocale.side_effect = [
-                        locale.Error("C.UTF-8 not available"),
-                        None,
-                    ]
-                    mock_getdefaultlocale.return_value = (locale_name, encoding)
-
-                    utils_common.set_locale_encoding()
-
-                    assert len(console_error_calls) == 0
-                    assert mock_setlocale.call_count == 2
-                    mock_setlocale.assert_any_call(locale.LC_ALL, locale_name)
-
-
-def test_set_locale_encoding_getdefaultlocale_exception():
-    """
-    Test set_locale_encoding when getdefaultlocale raises an exception.
-
-    Returns:
-        None: Asserts function handles getdefaultlocale exceptions gracefully.
-    """
-    import locale
-    from unittest.mock import patch
-
-    console_error_calls = []
-
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
-
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch(
-                "utils.utils_common.console_error", side_effect=mock_console_error
-            ):
-                mock_setlocale.side_effect = locale.Error("C.UTF-8 not available")
-                mock_getdefaultlocale.side_effect = Exception("getdefaultlocale failed")
-
-                try:
-                    utils_common.set_locale_encoding()
-                except Exception:
-                    pass
-
-
-def test_set_locale_encoding_console_error_parameters():
-    """
-    Test set_locale_encoding console_error call parameters are correct.
-
-    Returns:
-        None: Asserts console_error is called with correct parameters.
-    """
-    import locale
-    from unittest.mock import patch
-
-    console_error_calls = []
-
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
-
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch(
-                "utils.utils_common.console_error", side_effect=mock_console_error
-            ):
-                mock_setlocale.side_effect = locale.Error("C.UTF-8 not available")
-                mock_getdefaultlocale.return_value = ("en_US", "ISO-8859-1")
-
-                utils_common.set_locale_encoding()
-
-                assert len(console_error_calls) == 1
-                args, kwargs = console_error_calls[0]
-                assert len(args) == 1
-                assert "exit" in kwargs
-                assert kwargs["exit"] == False  # noqa
-
-
-def test_set_locale_encoding_return_value():
-    """
-    Test that set_locale_encoding returns None (implicit return).
-
-    Returns:
-        None: Asserts function returns None in all scenarios.
-    """
-    import locale
-    from unittest.mock import patch
-
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("utils.utils_common.console_error"):
-            mock_setlocale.return_value = None
-
-            result = utils_common.set_locale_encoding()
-            assert result is None
-
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch("utils.utils_common.console_error"):
-                mock_setlocale.side_effect = locale.Error("C.UTF-8 not available")
-                mock_getdefaultlocale.return_value = ("en_US", "ISO-8859-1")
-
-                result = utils_common.set_locale_encoding()
-                assert result is None
-
-
-def test_set_locale_encoding_locale_module_import():
-    """
-    Test set_locale_encoding dependency on locale module.
-
-    Returns:
-        None: Asserts function properly uses locale module functionality.
-    """
-    import locale
-    from unittest.mock import patch
-
-    setlocale_calls = []
-    getdefaultlocale_calls = []
-
-    def mock_setlocale(category, locale_name):
-        setlocale_calls.append((category, locale_name))
-        return None
-
-    def mock_getdefaultlocale():
-        getdefaultlocale_calls.append(True)
-        return ("en_US", "UTF-8")
-
-    console_error_calls = []
-
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
-
-    with patch("locale.setlocale", side_effect=mock_setlocale):
-        with patch("locale.getdefaultlocale", side_effect=mock_getdefaultlocale):
-            with patch(
-                "utils.utils_common.console_error", side_effect=mock_console_error
-            ):
-                utils_common.set_locale_encoding()
-
-    assert len(setlocale_calls) == 1
-    assert setlocale_calls[0] == (locale.LC_ALL, "C.UTF-8")
-    assert len(getdefaultlocale_calls) == 0
-    assert len(console_error_calls) == 0
-
-    setlocale_calls.clear()
-    getdefaultlocale_calls.clear()
-    console_error_calls.clear()
-
-    def mock_setlocale_with_error(category, locale_name):
-        setlocale_calls.append((category, locale_name))
-        if locale_name == "C.UTF-8":
-            raise locale.Error("C.UTF-8 not available")
-        return None
-
-    with patch("locale.setlocale", side_effect=mock_setlocale_with_error):
-        with patch("locale.getdefaultlocale", side_effect=mock_getdefaultlocale):
-            with patch(
-                "utils.utils_common.console_error", side_effect=mock_console_error
-            ):
-                utils_common.set_locale_encoding()
-
-    assert len(setlocale_calls) == 2
-    assert setlocale_calls[0] == (locale.LC_ALL, "C.UTF-8")
-    assert setlocale_calls[1] == (locale.LC_ALL, "en_US")
-    assert len(getdefaultlocale_calls) == 1
-    assert len(console_error_calls) == 0
-
-
-def test_set_locale_encoding_multiple_calls():
-    """
-    Test set_locale_encoding behavior when called multiple times.
-
-    Returns:
-        None: Asserts function behaves consistently across multiple calls.
-    """
-    from unittest.mock import patch
-
-    console_error_calls = []
-
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
-
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("utils.utils_common.console_error", side_effect=mock_console_error):
-            mock_setlocale.return_value = None
-
-            utils_common.set_locale_encoding()
-            utils_common.set_locale_encoding()
-            utils_common.set_locale_encoding()
-
-            assert mock_setlocale.call_count == 3
-            assert len(console_error_calls) == 0
-
-
-def test_set_locale_encoding_thread_safety_simulation():
-    """
-    Test set_locale_encoding behavior in simulated concurrent scenarios.
-
-    Returns:
-        None: Asserts function handles concurrent-like access patterns.
-    """
-    import locale
-    from unittest.mock import patch
-
-    call_count = 0
-
-    def side_effect_setlocale(*args, **kwargs):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            raise locale.Error("First call fails")
-        return None
-
-    console_error_calls = []
-
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
-
-    with patch("locale.setlocale", side_effect=side_effect_setlocale):
-        with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch(
-                "utils.utils_common.console_error", side_effect=mock_console_error
-            ):
-                mock_getdefaultlocale.return_value = ("en_US", "UTF-8")
-
-                utils_common.set_locale_encoding()
-
-                assert call_count == 2
-                assert len(console_error_calls) == 0
-
-
-def test_set_locale_encoding_comprehensive_error_handling():
-    """
-    Test set_locale_encoding comprehensive error handling across all code paths.
-
-    Returns:
-        None: Asserts all error paths are properly handled.
-    """
-    import locale
-    from unittest.mock import patch
-
-    console_error_calls = []
-
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
-
-    test_scenarios = [
-        {
-            "name": "C.UTF-8 success",
-            "setlocale_side_effect": [None],
-            "getdefaultlocale_return": ("en_US", "UTF-8"),
-            "expected_errors": 0,
-        },
-        {
-            "name": "C.UTF-8 fails, fallback success",
-            "setlocale_side_effect": [locale.Error("C.UTF-8 fail"), None],
-            "getdefaultlocale_return": ("en_US", "UTF-8"),
-            "expected_errors": 0,
-        },
-        {
-            "name": "Both fail with UTF-8 locale",
-            "setlocale_side_effect": [
-                locale.Error("C.UTF-8 fail"),
-                locale.Error("Fallback fail"),
-            ],
-            "getdefaultlocale_return": ("en_US", "UTF-8"),
-            "expected_errors": 1,
-        },
-        {
-            "name": "No UTF-8 locale available",
-            "setlocale_side_effect": [locale.Error("C.UTF-8 fail")],
-            "getdefaultlocale_return": ("en_US", "ISO-8859-1"),
-            "expected_errors": 1,
-        },
-    ]
-
-    for scenario in test_scenarios:
-        console_error_calls.clear()
-
-        with patch("locale.setlocale") as mock_setlocale:
-            with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-                with patch(
-                    "utils.utils_common.console_error", side_effect=mock_console_error
-                ):
-                    mock_setlocale.side_effect = scenario["setlocale_side_effect"]
-                    mock_getdefaultlocale.return_value = scenario[
-                        "getdefaultlocale_return"
-                    ]
-
-                    utils_common.set_locale_encoding()
-
-                    assert len(console_error_calls) == scenario["expected_errors"], (
-                        f"Failed scenario: {scenario['name']}"
-                    )
-
-
-# =============================================================================
-# TESTS FOR reverse_multi_index_df_pmc FUNCTION
-#
-# Normal Functionality:
-#
-# Basic multi-index DataFrame decomposition
-# Multiple levels with different column counts
-# Data type preservation
-# Column order preservation
-# Edge Cases:
-#
-# Single-level columns (error case)
-# Empty DataFrames
-# Single column per level
-# Uneven column distribution
-# Single row DataFrames
-# Error Conditions:
-#
-# Non-multi-index columns raising ValueError
-# Proper error message validation
-# Data Integrity:
-#
-# Mixed data types preservation
-# NaN value handling
-# Index preservation
-# Memory efficiency
-# Special Scenarios:
-#
-# Special characters in column names
-# Numeric level names
-# Three-level MultiIndex handling
-# Large DataFrame performance
-# Duplicate level name handling
-# Return Value Validation:
-#
-# Correct return types (list of DataFrames, list of levels)
-# Proper DataFrame structure in results
-# Consistent length of returned lists
-# =============================================================================
-
-
-def test_reverse_multi_index_df_pmc_basic_functionality():
-    """
-    Test reverse_multi_index_df_pmc with a basic multi-index DataFrame.
-
-    Returns:
-        None: Asserts function correctly decomposes multi-index DataFrame.
-    """
-    import pandas as pd
-
-    data = {
-        ("file1", "col1"): [1, 2, 3],
-        ("file1", "col2"): [4, 5, 6],
-        ("file2", "col1"): [7, 8, 9],
-        ("file2", "col3"): [10, 11, 12],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert len(dfs) == 2
-    assert len(coll_levels) == 2
-    assert "file1" in coll_levels
-    assert "file2" in coll_levels
-
-    assert list(dfs[0].columns) == ["col1", "col2"]
-    assert list(dfs[0]["col1"]) == [1, 2, 3]
-    assert list(dfs[0]["col2"]) == [4, 5, 6]
-
-    assert list(dfs[1].columns) == ["col1", "col3"]
-    assert list(dfs[1]["col1"]) == [7, 8, 9]
-    assert list(dfs[1]["col3"]) == [10, 11, 12]
-
-
-def test_reverse_multi_index_df_pmc_empty_dataframe():
-    """
-    Test reverse_multi_index_df_pmc with empty multi-index DataFrame.
-
-    Returns:
-        None: Asserts function handles empty DataFrames correctly.
-    """
-    import pandas as pd
-
-    columns = pd.MultiIndex.from_tuples([("file1", "col1"), ("file1", "col2")])
-    df = pd.DataFrame(columns=columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert len(dfs) == 1
-    assert len(coll_levels) == 1
-    assert coll_levels[0] == "file1"
-    assert len(dfs[0]) == 0
-    assert list(dfs[0].columns) == ["col1", "col2"]
-
-
-def test_reverse_multi_index_df_pmc_single_column_per_level():
-    """
-    Test reverse_multi_index_df_pmc with single column per level.
-
-    Returns:
-        None: Asserts function handles single column per level correctly.
-    """
-    import pandas as pd
-
-    data = {
-        ("level1", "col1"): [1, 2, 3],
-        ("level2", "col1"): [4, 5, 6],
-        ("level3", "col1"): [7, 8, 9],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert len(dfs) == 3
-    assert len(coll_levels) == 3
-    assert set(coll_levels) == {"level1", "level2", "level3"}
-
-    for i, df_result in enumerate(dfs):
-        assert len(df_result.columns) == 1
-        assert df_result.columns[0] == "col1"
-        assert len(df_result) == 3
-
-
-def test_reverse_multi_index_df_pmc_uneven_column_distribution():
-    """
-    Test reverse_multi_index_df_pmc with uneven column distribution across levels.
-
-    Returns:
-        None: Asserts function handles uneven column distributions correctly.
-    """
-    import pandas as pd
-
-    data = {
-        ("file1", "col1"): [1, 2, 3],
-        ("file1", "col2"): [4, 5, 6],
-        ("file1", "col3"): [7, 8, 9],
-        ("file2", "col1"): [10, 11, 12],
-        ("file3", "col1"): [13, 14, 15],
-        ("file3", "col2"): [16, 17, 18],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert len(dfs) == 3
-    assert len(coll_levels) == 3
-    assert set(coll_levels) == {"file1", "file2", "file3"}
-
-    file1_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file1")
-    assert len(file1_df.columns) == 3
-
-    file2_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file2")
-    assert len(file2_df.columns) == 1
-
-    file3_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file3")
-    assert len(file3_df.columns) == 2
-
-
-def test_reverse_multi_index_df_pmc_duplicate_level_names():
-    """
-    Test reverse_multi_index_df_pmc with duplicate
-    level names (should handle unique() correctly).
-
-    Returns:
-        None: Asserts function handles duplicate level names correctly.
-    """
-    import pandas as pd
-
-    data = {
-        ("file1", "col1"): [1, 2, 3],
-        ("file1", "col2"): [4, 5, 6],
-        ("file1", "col3"): [7, 8, 9],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert len(dfs) == 1
-    assert len(coll_levels) == 1
-    assert coll_levels[0] == "file1"
-    assert len(dfs[0].columns) == 3
-    assert list(dfs[0].columns) == ["col1", "col2", "col3"]
-
-
-def test_reverse_multi_index_df_pmc_mixed_data_types():
-    """
-    Test reverse_multi_index_df_pmc with mixed data types in columns.
-
-    Returns:
-        None: Asserts function handles mixed data types correctly.
-    """
-    import pandas as pd
-
-    data = {
-        ("file1", "integers"): [1, 2, 3],
-        ("file1", "floats"): [1.1, 2.2, 3.3],
-        ("file1", "strings"): ["a", "b", "c"],
-        ("file2", "booleans"): [True, False, True],
-        ("file2", "mixed"): [1, "text", 3.14],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert len(dfs) == 2
-    assert len(coll_levels) == 2
-
-    file1_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file1")
-    assert file1_df["integers"].dtype == "int64"
-    assert file1_df["floats"].dtype == "float64"
-    assert file1_df["strings"].dtype == "object"
-
-    file2_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file2")
-    assert file2_df["booleans"].dtype == "bool"
-    assert file2_df["mixed"].dtype == "object"
-
-
-def test_reverse_multi_index_df_pmc_nan_values():
-    """
-    Test reverse_multi_index_df_pmc with NaN values in data.
-
-    Returns:
-        None: Asserts function handles NaN values correctly.
-    """
-    import numpy as np
-    import pandas as pd
-
-    data = {
-        ("file1", "col1"): [1, np.nan, 3],
-        ("file1", "col2"): [np.nan, 5, 6],
-        ("file2", "col1"): [7, 8, np.nan],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert len(dfs) == 2
-
-    file1_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file1")
-    assert pd.isna(file1_df.iloc[1, 0])
-    assert pd.isna(file1_df.iloc[0, 1])
-
-    file2_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file2")
-    assert pd.isna(file2_df.iloc[2, 0])
-
-
-def test_reverse_multi_index_df_pmc_special_column_names():
-    """
-    Test reverse_multi_index_df_pmc with special characters in column names.
-
-    Returns:
-        None: Asserts function handles special characters in column names.
-    """
-    import pandas as pd
-
-    data = {
-        ("file-1", "col_1"): [1, 2, 3],
-        ("file-1", "col.2"): [4, 5, 6],
-        ("file 2", "col@3"): [7, 8, 9],
-        ("file 2", "col#4"): [10, 11, 12],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert len(dfs) == 2
-    assert "file-1" in coll_levels
-    assert "file 2" in coll_levels
-
-    file1_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file-1")
-    assert "col_1" in file1_df.columns
-    assert "col.2" in file1_df.columns
-
-    file2_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file 2")
-    assert "col@3" in file2_df.columns
-    assert "col#4" in file2_df.columns
-
-
-def test_reverse_multi_index_df_pmc_numeric_level_names():
-    """
-    Test reverse_multi_index_df_pmc with numeric level names.
-
-    Returns:
-        None: Asserts function handles numeric level names correctly.
-    """
-    import pandas as pd
-
-    data = {
-        (1, "col1"): [1, 2, 3],
-        (1, "col2"): [4, 5, 6],
-        (2, "col1"): [7, 8, 9],
-        (3.5, "col1"): [10, 11, 12],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert len(dfs) == 3
-    assert set(coll_levels) == {1, 2, 3.5}
-
-    for level in [1, 2, 3.5]:
-        level_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == level)
-        assert len(level_df.columns) >= 1
-        assert "col1" in level_df.columns
-
-
-def test_reverse_multi_index_df_pmc_large_dataframe():
-    """
-    Test reverse_multi_index_df_pmc with large DataFrame.
-
-    Returns:
-        None: Asserts function handles large DataFrames efficiently.
-    """
-    import numpy as np
-    import pandas as pd
-
-    num_rows = 1000
-    num_levels = 5
-    num_cols_per_level = 10
-
-    data = {}
-    for level in range(num_levels):
-        for col in range(num_cols_per_level):
-            data[(f"level_{level}", f"col_{col}")] = np.random.randint(0, 100, num_rows)
-
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert len(dfs) == num_levels
-    assert len(coll_levels) == num_levels
-
-    for i, df_result in enumerate(dfs):
-        assert len(df_result) == num_rows
-        assert len(df_result.columns) == num_cols_per_level
-
-
-def test_reverse_multi_index_df_pmc_three_level_index():
-    """
-    Test reverse_multi_index_df_pmc with three-level MultiIndex (should still work).
-
-    Returns:
-        None: Asserts function handles three-level MultiIndex correctly.
-    """
-    import pandas as pd
-
-    data = {
-        ("file1", "group1", "col1"): [1, 2, 3],
-        ("file1", "group1", "col2"): [4, 5, 6],
-        ("file1", "group2", "col1"): [7, 8, 9],
-        ("file2", "group1", "col1"): [10, 11, 12],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert len(dfs) == 2
-    assert set(coll_levels) == {"file1", "file2"}
-
-    file1_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file1")
-    assert len(file1_df.columns.levels) == 2
-
-
-def test_reverse_multi_index_df_pmc_return_type_validation():
-    """
-    Test reverse_multi_index_df_pmc return types are correct.
-
-    Returns:
-        None: Asserts function returns correct types.
-    """
-    import pandas as pd
-
-    data = {
-        ("file1", "col1"): [1, 2, 3],
-        ("file2", "col1"): [4, 5, 6],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert isinstance(dfs, list)
-    assert isinstance(coll_levels, list)
-    assert all(isinstance(df, pd.DataFrame) for df in dfs)
-    assert len(dfs) == len(coll_levels)
-
-
-def test_reverse_multi_index_df_pmc_column_order_preservation():
-    """
-    Test reverse_multi_index_df_pmc preserves column order within levels.
-
-    Returns:
-        None: Asserts function preserves column order correctly.
-    """
-    import pandas as pd
-
-    data = {
-        ("file1", "z_col"): [1, 2, 3],
-        ("file1", "a_col"): [4, 5, 6],
-        ("file1", "m_col"): [7, 8, 9],
-        ("file2", "b_col"): [10, 11, 12],
-        ("file2", "y_col"): [13, 14, 15],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    file1_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file1")
-    assert list(file1_df.columns) == ["z_col", "a_col", "m_col"]
-
-    file2_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file2")
-    assert list(file2_df.columns) == ["b_col", "y_col"]
-
-
-def test_reverse_multi_index_df_pmc_index_preservation():
-    """
-    Test reverse_multi_index_df_pmc preserves DataFrame index.
-
-    Returns:
-        None: Asserts function preserves original DataFrame index.
-    """
-    import pandas as pd
-
-    data = {
-        ("file1", "col1"): [1, 2, 3],
-        ("file1", "col2"): [4, 5, 6],
-        ("file2", "col1"): [7, 8, 9],
-    }
-    df = pd.DataFrame(data, index=["row_a", "row_b", "row_c"])
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    for df_result in dfs:
-        assert list(df_result.index) == ["row_a", "row_b", "row_c"]
-
-
-def test_reverse_multi_index_df_pmc_memory_efficiency():
-    """
-    Test reverse_multi_index_df_pmc memory usage patterns.
-
-    Returns:
-        None: Asserts function doesn't create unnecessary copies.
-    """
-    import pandas as pd
-
-    data = {
-        ("file1", "col1"): [1, 2, 3],
-        ("file2", "col1"): [4, 5, 6],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    original_memory = df.memory_usage(deep=True).sum()
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    total_result_memory = sum(df.memory_usage(deep=True).sum() for df in dfs)
-
-    assert total_result_memory < original_memory * 3
-
-
-def test_reverse_multi_index_df_pmc_edge_case_single_row():
-    """
-    Test reverse_multi_index_df_pmc with single row DataFrame.
-
-    Returns:
-        None: Asserts function handles single row DataFrames correctly.
-    """
-    import pandas as pd
-
-    data = {
-        ("file1", "col1"): [100],
-        ("file1", "col2"): [200],
-        ("file2", "col1"): [300],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert len(dfs) == 2
-    assert len(coll_levels) == 2
-
-    for df_result in dfs:
-        assert len(df_result) == 1
-
-    file1_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file1")
-    assert file1_df.iloc[0]["col1"] == 100
-    assert file1_df.iloc[0]["col2"] == 200
-
-    file2_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file2")
-    assert file2_df.iloc[0]["col1"] == 300
-
-
-# =============================================================================
 # TESTS FOR merge_counters_spatial_multiplex FUNCTION
 # =============================================================================
 
@@ -4591,47 +3379,35 @@ def test_merge_counters_spatial_multiplex_basic_functionality():
     import pandas as pd
 
     data = {
-        ("file1", "Dispatch_ID"): [1, 2, 3],
-        ("file1", "GPU_ID"): [0, 0, 1],
-        ("file1", "Grid_Size"): [64, 128, 256],
-        ("file1", "Workgroup_Size"): [16, 32, 64],
-        ("file1", "LDS_Per_Workgroup"): [1024, 2048, 4096],
-        ("file1", "Scratch_Per_Workitem"): [0, 0, 0],
-        ("file1", "Arch_VGPR"): [32, 64, 96],
-        ("file1", "Accum_VGPR"): [0, 0, 0],
-        ("file1", "SGPR"): [16, 32, 48],
-        ("file1", "Wave_Size"): [64, 64, 64],
-        ("file1", "Correlation_ID"): [1001, 1002, 1003],
-        ("file1", "Kernel_ID"): [501, 502, 503],
-        ("file1", "Kernel_Name"): ["kernel_a", "kernel_a", "kernel_b"],
-        ("file1", "Start_Timestamp"): [1000, 1100, 2000],
-        ("file1", "End_Timestamp"): [1200, 1300, 2500],
-        ("file1", "Counter1"): [100, 200, 300],
-        ("file2", "Dispatch_ID"): [4, 5, 6],
-        ("file2", "GPU_ID"): [1, 2, 2],
-        ("file2", "Grid_Size"): [512, 1024, 2048],
-        ("file2", "Workgroup_Size"): [32, 64, 128],
-        ("file2", "LDS_Per_Workgroup"): [2048, 4096, 8192],
-        ("file2", "Scratch_Per_Workitem"): [0, 0, 0],
-        ("file2", "Arch_VGPR"): [64, 96, 128],
-        ("file2", "Accum_VGPR"): [0, 0, 0],
-        ("file2", "SGPR"): [32, 48, 64],
-        ("file2", "Wave_Size"): [64, 64, 64],
-        ("file2", "Correlation_ID"): [2001, 2002, 2003],
-        ("file2", "Kernel_ID"): [601, 602, 603],
-        ("file2", "Kernel_Name"): ["kernel_c", "kernel_c", "kernel_d"],
-        ("file2", "Start_Timestamp"): [3000, 3100, 4000],
-        ("file2", "End_Timestamp"): [3400, 3500, 4800],
-        ("file2", "Counter1"): [400, 500, 600],
+        "Dispatch_ID": [1, 2, 3, 4, 5, 6],
+        "GPU_ID": [0, 0, 1, 1, 2, 2],
+        "Grid_Size": [64, 128, 256, 512, 1024, 2048],
+        "Workgroup_Size": [16, 32, 64, 32, 64, 128],
+        "LDS_Per_Workgroup": [1024, 2048, 4096, 2048, 4096, 8192],
+        "Scratch_Per_Workitem": [0, 0, 0, 0, 0, 0],
+        "Arch_VGPR": [32, 64, 96, 64, 96, 128],
+        "Accum_VGPR": [0, 0, 0, 0, 0, 0],
+        "SGPR": [16, 32, 48, 32, 48, 64],
+        "Wave_Size": [64, 64, 64, 64, 64, 64],
+        "Correlation_ID": [1001, 1002, 1003, 2001, 2002, 2003],
+        "Kernel_ID": [501, 502, 503, 601, 602, 603],
+        "Kernel_Name": [
+            "kernel_a",
+            "kernel_a",
+            "kernel_b",
+            "kernel_c",
+            "kernel_c",
+            "kernel_d",
+        ],
+        "Start_Timestamp": [1000, 1100, 2000, 3000, 3100, 4000],
+        "End_Timestamp": [1200, 1300, 2500, 3400, 3500, 4800],
+        "Counter1": [100, 200, 300, 400, 500, 600],
     }
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     result = utils_analysis.merge_counters_spatial_multiplex(df)
 
     assert isinstance(result, pd.DataFrame)
-    assert isinstance(result.columns, pd.MultiIndex)
-    assert len(result.columns.levels) == 2
 
 
 def test_merge_counters_spatial_multiplex_kernel_name_fallback():
@@ -4644,25 +3420,24 @@ def test_merge_counters_spatial_multiplex_kernel_name_fallback():
     import pandas as pd
 
     data = {
-        ("file1", "Dispatch_ID"): [1, 2],
-        ("file1", "GPU_ID"): [0, 0],
-        ("file1", "Grid_Size"): [64, 128],
-        ("file1", "Workgroup_Size"): [16, 32],
-        ("file1", "LDS_Per_Workgroup"): [1024, 2048],
-        ("file1", "Scratch_Per_Workitem"): [0, 0],
-        ("file1", "Arch_VGPR"): [32, 64],
-        ("file1", "Accum_VGPR"): [0, 0],
-        ("file1", "SGPR"): [16, 32],
-        ("file1", "Wave_Size"): [64, 64],
-        ("file1", "Correlation_ID"): [1001, 1002],
-        ("file1", "Kernel_ID"): [501, 502],
-        ("file1", "Name"): ["kernel_a", "kernel_a"],
-        ("file1", "Start_Timestamp"): [1000, 1100],
-        ("file1", "End_Timestamp"): [1200, 1300],
-        ("file1", "Counter1"): [100, 200],
+        "Dispatch_ID": [1, 2],
+        "GPU_ID": [0, 0],
+        "Grid_Size": [64, 128],
+        "Workgroup_Size": [16, 32],
+        "LDS_Per_Workgroup": [1024, 2048],
+        "Scratch_Per_Workitem": [0, 0],
+        "Arch_VGPR": [32, 64],
+        "Accum_VGPR": [0, 0],
+        "SGPR": [16, 32],
+        "Wave_Size": [64, 64],
+        "Correlation_ID": [1001, 1002],
+        "Kernel_ID": [501, 502],
+        "Name": ["kernel_a", "kernel_a"],
+        "Start_Timestamp": [1000, 1100],
+        "End_Timestamp": [1200, 1300],
+        "Counter1": [100, 200],
     }
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     # The function currently has a bug where it doesn't properly check for 'Kernel_Name'
     # existence before accessing it, even though it has fallback logic for 'Name'
@@ -4693,25 +3468,24 @@ def test_merge_counters_spatial_multiplex_single_kernel_occurrence():
     import pandas as pd
 
     data = {
-        ("file1", "Dispatch_ID"): [1, 2, 3],
-        ("file1", "GPU_ID"): [0, 1, 2],
-        ("file1", "Grid_Size"): [64, 128, 256],
-        ("file1", "Workgroup_Size"): [16, 32, 64],
-        ("file1", "LDS_Per_Workgroup"): [1024, 2048, 4096],
-        ("file1", "Scratch_Per_Workitem"): [0, 0, 0],
-        ("file1", "Arch_VGPR"): [32, 64, 96],
-        ("file1", "Accum_VGPR"): [0, 0, 0],
-        ("file1", "SGPR"): [16, 32, 48],
-        ("file1", "Wave_Size"): [64, 64, 64],
-        ("file1", "Correlation_ID"): [1001, 1002, 1003],
-        ("file1", "Kernel_ID"): [501, 502, 503],
-        ("file1", "Kernel_Name"): ["kernel_a", "kernel_b", "kernel_c"],
-        ("file1", "Start_Timestamp"): [1000, 2000, 3000],
-        ("file1", "End_Timestamp"): [1200, 2500, 3800],
-        ("file1", "Counter1"): [100, 200, 300],
+        "Dispatch_ID": [1, 2, 3],
+        "GPU_ID": [0, 1, 2],
+        "Grid_Size": [64, 128, 256],
+        "Workgroup_Size": [16, 32, 64],
+        "LDS_Per_Workgroup": [1024, 2048, 4096],
+        "Scratch_Per_Workitem": [0, 0, 0],
+        "Arch_VGPR": [32, 64, 96],
+        "Accum_VGPR": [0, 0, 0],
+        "SGPR": [16, 32, 48],
+        "Wave_Size": [64, 64, 64],
+        "Correlation_ID": [1001, 1002, 1003],
+        "Kernel_ID": [501, 502, 503],
+        "Kernel_Name": ["kernel_a", "kernel_b", "kernel_c"],
+        "Start_Timestamp": [1000, 2000, 3000],
+        "End_Timestamp": [1200, 2500, 3800],
+        "Counter1": [100, 200, 300],
     }
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     result = utils_analysis.merge_counters_spatial_multiplex(df)
 
@@ -4729,19 +3503,19 @@ def test_merge_counters_spatial_multiplex_multiple_duplicate_kernels():
     import pandas as pd
 
     data = {
-        ("file1", "Dispatch_ID"): [1, 2, 3, 4, 5, 6],
-        ("file1", "GPU_ID"): [0, 0, 1, 1, 2, 2],
-        ("file1", "Grid_Size"): [64, 64, 128, 128, 256, 256],
-        ("file1", "Workgroup_Size"): [16, 16, 32, 32, 64, 64],
-        ("file1", "LDS_Per_Workgroup"): [1024, 1024, 2048, 2048, 4096, 4096],
-        ("file1", "Scratch_Per_Workitem"): [0, 0, 0, 0, 0, 0],
-        ("file1", "Arch_VGPR"): [32, 32, 64, 64, 96, 96],
-        ("file1", "Accum_VGPR"): [0, 0, 0, 0, 0, 0],
-        ("file1", "SGPR"): [16, 16, 32, 32, 48, 48],
-        ("file1", "Wave_Size"): [64, 64, 64, 64, 64, 64],
-        ("file1", "Correlation_ID"): [1001, 1002, 1003, 1004, 1005, 1006],
-        ("file1", "Kernel_ID"): [501, 502, 503, 504, 505, 506],
-        ("file1", "Kernel_Name"): [
+        "Dispatch_ID": [1, 2, 3, 4, 5, 6],
+        "GPU_ID": [0, 0, 1, 1, 2, 2],
+        "Grid_Size": [64, 64, 128, 128, 256, 256],
+        "Workgroup_Size": [16, 16, 32, 32, 64, 64],
+        "LDS_Per_Workgroup": [1024, 1024, 2048, 2048, 4096, 4096],
+        "Scratch_Per_Workitem": [0, 0, 0, 0, 0, 0],
+        "Arch_VGPR": [32, 32, 64, 64, 96, 96],
+        "Accum_VGPR": [0, 0, 0, 0, 0, 0],
+        "SGPR": [16, 16, 32, 32, 48, 48],
+        "Wave_Size": [64, 64, 64, 64, 64, 64],
+        "Correlation_ID": [1001, 1002, 1003, 1004, 1005, 1006],
+        "Kernel_ID": [501, 502, 503, 504, 505, 506],
+        "Kernel_Name": [
             "kernel_a",
             "kernel_a",
             "kernel_b",
@@ -4749,12 +3523,11 @@ def test_merge_counters_spatial_multiplex_multiple_duplicate_kernels():
             "kernel_c",
             "kernel_c",
         ],
-        ("file1", "Start_Timestamp"): [1000, 1100, 2000, 2100, 3000, 3100],
-        ("file1", "End_Timestamp"): [1200, 1300, 2500, 2600, 3800, 3900],
-        ("file1", "Counter1"): [100, 200, 300, 400, 500, 600],
+        "Start_Timestamp": [1000, 1100, 2000, 2100, 3000, 3100],
+        "End_Timestamp": [1200, 1300, 2500, 2600, 3800, 3900],
+        "Counter1": [100, 200, 300, 400, 500, 600],
     }
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     result = utils_analysis.merge_counters_spatial_multiplex(df)
 
@@ -4772,25 +3545,24 @@ def test_merge_counters_spatial_multiplex_timestamp_median_calculation():
     import pandas as pd
 
     data = {
-        ("file1", "Dispatch_ID"): [1, 2, 3],
-        ("file1", "GPU_ID"): [0, 0, 0],
-        ("file1", "Grid_Size"): [64, 64, 64],
-        ("file1", "Workgroup_Size"): [16, 16, 16],
-        ("file1", "LDS_Per_Workgroup"): [1024, 1024, 1024],
-        ("file1", "Scratch_Per_Workitem"): [0, 0, 0],
-        ("file1", "Arch_VGPR"): [32, 32, 32],
-        ("file1", "Accum_VGPR"): [0, 0, 0],
-        ("file1", "SGPR"): [16, 16, 16],
-        ("file1", "Wave_Size"): [64, 64, 64],
-        ("file1", "Correlation_ID"): [1001, 1002, 1003],
-        ("file1", "Kernel_ID"): [501, 502, 503],
-        ("file1", "Kernel_Name"): ["kernel_a", "kernel_a", "kernel_a"],
-        ("file1", "Start_Timestamp"): [1000, 1200, 1400],
-        ("file1", "End_Timestamp"): [1500, 1700, 1900],
-        ("file1", "Counter1"): [100, 200, 300],
+        "Dispatch_ID": [1, 2, 3],
+        "GPU_ID": [0, 0, 0],
+        "Grid_Size": [64, 64, 64],
+        "Workgroup_Size": [16, 16, 16],
+        "LDS_Per_Workgroup": [1024, 1024, 1024],
+        "Scratch_Per_Workitem": [0, 0, 0],
+        "Arch_VGPR": [32, 32, 32],
+        "Accum_VGPR": [0, 0, 0],
+        "SGPR": [16, 16, 16],
+        "Wave_Size": [64, 64, 64],
+        "Correlation_ID": [1001, 1002, 1003],
+        "Kernel_ID": [501, 502, 503],
+        "Kernel_Name": ["kernel_a", "kernel_a", "kernel_a"],
+        "Start_Timestamp": [1000, 1200, 1400],
+        "End_Timestamp": [1500, 1700, 1900],
+        "Counter1": [100, 200, 300],
     }
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     result = utils_analysis.merge_counters_spatial_multiplex(df)
 
@@ -5733,7 +4505,7 @@ def test_amdsmi_get_gpu_cache_size():
             side_effect=Exception("Mock exception"),
         ):
             cache_info = get_gpu_cache_info()
-            assert cache_info == {}
+            assert cache_info is None
 
 
 def test_amdsmi_get_gpu_num_compute_units():
@@ -5757,6 +4529,27 @@ def test_amdsmi_get_gpu_num_compute_units():
             assert cu_count == 0
 
 
+def test_per_device_query_returns_default_and_logs_last_error_on_all_failure():
+    """When every device raises, return the default and warn with the last error."""
+
+    @functools.partial(
+        _per_device_query, default_return="DEFAULT", warning_label="test label"
+    )
+    def fn(device, amdsmi):
+        raise RuntimeError(f"boom-{device}")
+
+    with mock.patch("utils.amdsmi_interface.get_device_handles") as handles_mock:
+        handles_mock.return_value = ["d1", "d2", "d3"]
+        with mock.patch("utils.amdsmi_interface.import_amdsmi_module"):
+            with mock.patch("utils.amdsmi_interface.console_warning") as warn_mock:
+                result = fn()
+                assert result == "DEFAULT"
+                warn_mock.assert_called_once()
+                warning_message = warn_mock.call_args[0][0]
+                assert "test label" in warning_message
+                assert "boom-d3" in warning_message
+
+
 # =============================================================================
 # TESTS FOR ITERATION MULTIPLEXING
 # =============================================================================
@@ -5767,203 +4560,198 @@ def test_impute_counters_iteration_multiplex(tmp_path: Path) -> None:
     import pandas as pd
 
     data = {
-        ("file1", "Dispatch_ID"): [1, 2, 3],
-        ("file1", "GPU_ID"): [0, 0, 0],
-        ("file1", "Grid_Size"): [1024, 512, 1024],
-        ("file1", "Workgroup_Size"): [64, 64, 64],
-        ("file1", "LDS_Per_Workgroup"): [32, 32, 32],
-        ("file1", "Scratch_Per_Workitem"): [0, 0, 0],
-        ("file1", "Arch_VGPR"): [16, 16, 16],
-        ("file1", "Accum_VGPR"): [0, 0, 0],
-        ("file1", "SGPR"): [32, 32, 32],
-        ("file1", "Kernel_Name"): ["kernel_a", "kernel_a", "kernel_a"],
-        ("file1", "Start_Timestamp"): [1000, 1200, 1400],
-        ("file1", "End_Timestamp"): [1500, 1700, 1900],
-        ("file1", "Kernel_ID"): [1, 1, 1],
-        ("file1", "Counter1"): [100, None, None],
-        ("file1", "Counter2"): [None, 500, 300],
+        "Dispatch_ID": [1, 2, 3],
+        "GPU_ID": [0, 0, 0],
+        "Grid_Size": [1024, 512, 1024],
+        "Workgroup_Size": [64, 64, 64],
+        "LDS_Per_Workgroup": [32, 32, 32],
+        "Scratch_Per_Workitem": [0, 0, 0],
+        "Arch_VGPR": [16, 16, 16],
+        "Accum_VGPR": [0, 0, 0],
+        "SGPR": [32, 32, 32],
+        "Kernel_Name": ["kernel_a", "kernel_a", "kernel_a"],
+        "Start_Timestamp": [1000, 1200, 1400],
+        "End_Timestamp": [1500, 1700, 1900],
+        "Kernel_ID": [1, 1, 1],
+        "Counter1": [100, None, None],
+        "Counter2": [None, 500, 300],
     }
 
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     # For "kernel" policy
     result = utils_analysis.impute_counters_iteration_multiplex(df, "kernel", tmp_path)
     # Sort by Dispatch_ID to ensure consistent order
-    result = result.sort_values(by=("file1", "Dispatch_ID"))
+    result = result.sort_values(by="Dispatch_ID")
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 3  # Ensure same number of rows
     # Assert Counter1 and Counter2 imputed for first two dispatches
-    assert result[("file1", "Counter2")].iloc[0] == 500
-    assert result[("file1", "Counter1")].iloc[1] == 100
+    assert result["Counter2"].iloc[0] == 500
+    assert result["Counter1"].iloc[1] == 100
 
     # For "kernel_launch_params" policy
     result = utils_analysis.impute_counters_iteration_multiplex(
         df, "kernel_launch_params", tmp_path
     )
     # Sort by Dispatch_ID to ensure consistent order
-    result = result.sort_values(by=("file1", "Dispatch_ID"))
+    result = result.sort_values(by="Dispatch_ID")
     # Assert Counter1 and Counter2 imputed for first and last dispatches
-    assert result[("file1", "Counter2")].iloc[0] == 300
-    assert result[("file1", "Counter1")].iloc[2] == 100
+    assert result["Counter2"].iloc[0] == 300
+    assert result["Counter1"].iloc[2] == 100
 
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 3  # Ensure same number of rows
 
     data = {
-        ("file1", "Dispatch_ID"): [1, 2, 3],
-        ("file1", "GPU_ID"): [0, 0, 0],
-        ("file1", "Grid_Size"): [1024, 1024, 1024],
-        ("file1", "Workgroup_Size"): [64, 64, 32],
-        ("file1", "LDS_Per_Workgroup"): [32, 24, 32],
-        ("file1", "Scratch_Per_Workitem"): [0, 0, 0],
-        ("file1", "Arch_VGPR"): [16, 16, 16],
-        ("file1", "Accum_VGPR"): [0, 0, 0],
-        ("file1", "SGPR"): [32, 32, 32],
-        ("file1", "Kernel_Name"): ["kernel_a", "kernel_a", "kernel_a"],
-        ("file1", "Start_Timestamp"): [1000, 1200, 1400],
-        ("file1", "End_Timestamp"): [1500, 1700, 1900],
-        ("file1", "Kernel_ID"): [1, 1, 1],
-        ("file1", "Counter1"): [100, None, 300],
-        ("file1", "Counter2"): [None, 500, None],
+        "Dispatch_ID": [1, 2, 3],
+        "GPU_ID": [0, 0, 0],
+        "Grid_Size": [1024, 1024, 1024],
+        "Workgroup_Size": [64, 64, 32],
+        "LDS_Per_Workgroup": [32, 24, 32],
+        "Scratch_Per_Workitem": [0, 0, 0],
+        "Arch_VGPR": [16, 16, 16],
+        "Accum_VGPR": [0, 0, 0],
+        "SGPR": [32, 32, 32],
+        "Kernel_Name": ["kernel_a", "kernel_a", "kernel_a"],
+        "Start_Timestamp": [1000, 1200, 1400],
+        "End_Timestamp": [1500, 1700, 1900],
+        "Kernel_ID": [1, 1, 1],
+        "Counter1": [100, None, 300],
+        "Counter2": [None, 500, None],
     }
 
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     result = utils_analysis.impute_counters_iteration_multiplex(
         df, "kernel_launch_params", tmp_path
     )
     # Sort by Dispatch_ID to ensure consistent order
-    result = result.sort_values(by=("file1", "Dispatch_ID"))
+    result = result.sort_values(by="Dispatch_ID")
 
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 3  # Ensure same number of rows
     # No imputation possible
-    assert pd.isna(result[("file1", "Counter2")].iloc[0])
-    assert pd.isna(result[("file1", "Counter1")].iloc[1])
-    assert pd.isna(result[("file1", "Counter2")].iloc[2])
+    assert pd.isna(result["Counter2"].iloc[0])
+    assert pd.isna(result["Counter1"].iloc[1])
+    assert pd.isna(result["Counter2"].iloc[2])
 
     # Test multi_kernel
     data = {
-        ("file1", "Dispatch_ID"): [1, 2, 3],
-        ("file1", "GPU_ID"): [0, 0, 0],
-        ("file1", "Grid_Size"): [1024, 1024, 512],
-        ("file1", "Workgroup_Size"): [64, 64, 64],
-        ("file1", "LDS_Per_Workgroup"): [32, 32, 32],
-        ("file1", "Scratch_Per_Workitem"): [0, 0, 0],
-        ("file1", "Arch_VGPR"): [16, 16, 16],
-        ("file1", "Accum_VGPR"): [0, 0, 0],
-        ("file1", "SGPR"): [32, 32, 32],
-        ("file1", "Kernel_Name"): ["kernel_a", "kernel_b", "kernel_a"],
-        ("file1", "Start_Timestamp"): [1000, 1200, 1400],
-        ("file1", "End_Timestamp"): [1500, 1700, 1900],
-        ("file1", "Kernel_ID"): [1, 1, 1],
-        ("file1", "Counter1"): [100, None, None],
-        ("file1", "Counter2"): [None, 500, 300],
+        "Dispatch_ID": [1, 2, 3],
+        "GPU_ID": [0, 0, 0],
+        "Grid_Size": [1024, 1024, 512],
+        "Workgroup_Size": [64, 64, 64],
+        "LDS_Per_Workgroup": [32, 32, 32],
+        "Scratch_Per_Workitem": [0, 0, 0],
+        "Arch_VGPR": [16, 16, 16],
+        "Accum_VGPR": [0, 0, 0],
+        "SGPR": [32, 32, 32],
+        "Kernel_Name": ["kernel_a", "kernel_b", "kernel_a"],
+        "Start_Timestamp": [1000, 1200, 1400],
+        "End_Timestamp": [1500, 1700, 1900],
+        "Kernel_ID": [1, 1, 1],
+        "Counter1": [100, None, None],
+        "Counter2": [None, 500, 300],
     }
 
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     # For "kernel" policy
     result = utils_analysis.impute_counters_iteration_multiplex(df, "kernel", tmp_path)
     # Sort by Dispatch_ID to ensure consistent order
-    result = result.sort_values(by=("file1", "Dispatch_ID"))
+    result = result.sort_values(by="Dispatch_ID")
     # Assert Counter1 and Counter2 imputed for first and last dispatches
-    assert result[("file1", "Counter2")].iloc[0] == 300
-    assert result[("file1", "Counter1")].iloc[2] == 100
+    assert result["Counter2"].iloc[0] == 300
+    assert result["Counter1"].iloc[2] == 100
 
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 3  # Ensure same number of rows
 
     # For "kernel_launch_params" policy
     data = {
-        ("file1", "Dispatch_ID"): [1, 2, 3],
-        ("file1", "GPU_ID"): [0, 0, 0],
-        ("file1", "Grid_Size"): [1024, 1024, 1024],
-        ("file1", "Workgroup_Size"): [64, 64, 32],
-        ("file1", "LDS_Per_Workgroup"): [32, 24, 32],
-        ("file1", "Scratch_Per_Workitem"): [0, 0, 0],
-        ("file1", "Arch_VGPR"): [16, 16, 16],
-        ("file1", "Accum_VGPR"): [0, 0, 0],
-        ("file1", "SGPR"): [32, 32, 32],
-        ("file1", "Kernel_Name"): ["kernel_a", "kernel_a", "kernel_a"],
-        ("file1", "Start_Timestamp"): [1000, 1200, 1400],
-        ("file1", "End_Timestamp"): [1500, 1700, 1900],
-        ("file1", "Kernel_ID"): [1, 1, 1],
-        ("file1", "Counter1"): [100, None, 300],
-        ("file1", "Counter2"): [None, 500, None],
+        "Dispatch_ID": [1, 2, 3],
+        "GPU_ID": [0, 0, 0],
+        "Grid_Size": [1024, 1024, 1024],
+        "Workgroup_Size": [64, 64, 32],
+        "LDS_Per_Workgroup": [32, 24, 32],
+        "Scratch_Per_Workitem": [0, 0, 0],
+        "Arch_VGPR": [16, 16, 16],
+        "Accum_VGPR": [0, 0, 0],
+        "SGPR": [32, 32, 32],
+        "Kernel_Name": ["kernel_a", "kernel_a", "kernel_a"],
+        "Start_Timestamp": [1000, 1200, 1400],
+        "End_Timestamp": [1500, 1700, 1900],
+        "Kernel_ID": [1, 1, 1],
+        "Counter1": [100, None, 300],
+        "Counter2": [None, 500, None],
     }
 
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     result = utils_analysis.impute_counters_iteration_multiplex(
         df, "kernel_launch_params", tmp_path
     )
     # Sort by Dispatch_ID to ensure consistent order
-    result = result.sort_values(by=("file1", "Dispatch_ID"))
+    result = result.sort_values(by="Dispatch_ID")
 
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 3  # Ensure same number of rows
     # No imputation possible
-    assert pd.isna(result[("file1", "Counter2")].iloc[0])
-    assert pd.isna(result[("file1", "Counter1")].iloc[1])
-    assert pd.isna(result[("file1", "Counter2")].iloc[2])
+    assert pd.isna(result["Counter2"].iloc[0])
+    assert pd.isna(result["Counter1"].iloc[1])
+    assert pd.isna(result["Counter2"].iloc[2])
 
     # Test incomplete last subgroup handling and no cross-subgroup contamination
     # Scenario: 3 counter buckets, 8 dispatches (2 complete subgroups + incomplete last)
     # Subgroup 0: rows 0-2, Subgroup 1: rows 3-5, Subgroup 2 (incomplete): rows 6-7
     data = {
-        ("file1", "Dispatch_ID"): [1, 2, 3, 4, 5, 6, 7, 8],
-        ("file1", "GPU_ID"): [0, 0, 0, 0, 0, 0, 0, 0],
-        ("file1", "Grid_Size"): [1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024],
-        ("file1", "Workgroup_Size"): [64, 64, 64, 64, 64, 64, 64, 64],
-        ("file1", "LDS_Per_Workgroup"): [32, 32, 32, 32, 32, 32, 32, 32],
-        ("file1", "Scratch_Per_Workitem"): [0, 0, 0, 0, 0, 0, 0, 0],
-        ("file1", "Arch_VGPR"): [16, 16, 16, 16, 16, 16, 16, 16],
-        ("file1", "Accum_VGPR"): [0, 0, 0, 0, 0, 0, 0, 0],
-        ("file1", "SGPR"): [32, 32, 32, 32, 32, 32, 32, 32],
-        ("file1", "Kernel_Name"): ["kernel_a"] * 8,
-        ("file1", "Start_Timestamp"): [1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400],
-        ("file1", "End_Timestamp"): [1100, 1300, 1500, 1700, 1900, 2100, 2300, 2500],
-        ("file1", "Kernel_ID"): [1, 1, 1, 1, 1, 1, 1, 1],
+        "Dispatch_ID": [1, 2, 3, 4, 5, 6, 7, 8],
+        "GPU_ID": [0, 0, 0, 0, 0, 0, 0, 0],
+        "Grid_Size": [1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024],
+        "Workgroup_Size": [64, 64, 64, 64, 64, 64, 64, 64],
+        "LDS_Per_Workgroup": [32, 32, 32, 32, 32, 32, 32, 32],
+        "Scratch_Per_Workitem": [0, 0, 0, 0, 0, 0, 0, 0],
+        "Arch_VGPR": [16, 16, 16, 16, 16, 16, 16, 16],
+        "Accum_VGPR": [0, 0, 0, 0, 0, 0, 0, 0],
+        "SGPR": [32, 32, 32, 32, 32, 32, 32, 32],
+        "Kernel_Name": ["kernel_a"] * 8,
+        "Start_Timestamp": [1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400],
+        "End_Timestamp": [1100, 1300, 1500, 1700, 1900, 2100, 2300, 2500],
+        "Kernel_ID": [1, 1, 1, 1, 1, 1, 1, 1],
         # Counter bucket pattern: A, B, C (repeats)
-        ("file1", "Counter_A"): [100, None, None, 200, None, None, 300, None],
-        ("file1", "Counter_B"): [None, 110, None, None, 210, None, None, 310],
-        ("file1", "Counter_C"): [None, None, 120, None, None, 220, None, None],
+        "Counter_A": [100, None, None, 200, None, None, 300, None],
+        "Counter_B": [None, 110, None, None, 210, None, None, 310],
+        "Counter_C": [None, None, 120, None, None, 220, None, None],
     }
 
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
     result = utils_analysis.impute_counters_iteration_multiplex(
         df, "kernel_launch_params", tmp_path
     )
-    result = result.sort_values(by=("file1", "Dispatch_ID"))
+    result = result.sort_values(by="Dispatch_ID")
 
     # Verify complete subgroups: all rows should have all counters
-    assert result[("file1", "Counter_A")].iloc[0] == 100
-    assert result[("file1", "Counter_A")].iloc[1] == 100
-    assert result[("file1", "Counter_A")].iloc[2] == 100
-    assert result[("file1", "Counter_B")].iloc[0] == 110
-    assert result[("file1", "Counter_C")].iloc[0] == 120
+    assert result["Counter_A"].iloc[0] == 100
+    assert result["Counter_A"].iloc[1] == 100
+    assert result["Counter_A"].iloc[2] == 100
+    assert result["Counter_B"].iloc[0] == 110
+    assert result["Counter_C"].iloc[0] == 120
 
     # Verify no cross-subgroup contamination: subgroup 1 has its own values
-    assert result[("file1", "Counter_A")].iloc[3] == 200
-    assert result[("file1", "Counter_A")].iloc[4] == 200
-    assert result[("file1", "Counter_B")].iloc[3] == 210
-    assert result[("file1", "Counter_C")].iloc[3] == 220
+    assert result["Counter_A"].iloc[3] == 200
+    assert result["Counter_A"].iloc[4] == 200
+    assert result["Counter_B"].iloc[3] == 210
+    assert result["Counter_C"].iloc[3] == 220
 
     # Verify incomplete last subgroup gets filled from previous subgroup
     # Row 6-7 only have Counter_A and Counter_B, missing Counter_C
-    assert result[("file1", "Counter_A")].iloc[6] == 300
-    assert result[("file1", "Counter_A")].iloc[7] == 300
-    assert result[("file1", "Counter_B")].iloc[6] == 310
-    assert result[("file1", "Counter_B")].iloc[7] == 310
+    assert result["Counter_A"].iloc[6] == 300
+    assert result["Counter_A"].iloc[7] == 300
+    assert result["Counter_B"].iloc[6] == 310
+    assert result["Counter_B"].iloc[7] == 310
     # Counter_C should be filled from previous subgroup via global ffill
-    assert result[("file1", "Counter_C")].iloc[6] == 220
-    assert result[("file1", "Counter_C")].iloc[7] == 220
+    assert result["Counter_C"].iloc[6] == 220
+    assert result["Counter_C"].iloc[7] == 220
 
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 8  # Ensure same number of rows
@@ -7812,3 +6600,56 @@ def test_format_table_ascii_text_wrapping():
     ]
     # Should have multiple lines for the wrapped description
     assert len(desc_lines) > 1, "Long description should wrap to multiple lines"
+
+
+# =============================================================================
+# TESTS FOR reconfigure_stdio_utf8 FUNCTION
+# =============================================================================
+
+
+def test_reconfigure_stdio_utf8_calls_reconfigure_on_both_streams():
+    """Both sys.stdout and sys.stderr should be reconfigured to utf-8/replace."""
+    fake_stdout = mock.MagicMock()
+    fake_stderr = mock.MagicMock()
+    with mock.patch("utils.utils_common.sys") as fake_sys:
+        fake_sys.stdout = fake_stdout
+        fake_sys.stderr = fake_stderr
+        utils_common.reconfigure_stdio_utf8()
+    fake_stdout.reconfigure.assert_called_once_with(encoding="utf-8", errors="replace")
+    fake_stderr.reconfigure.assert_called_once_with(encoding="utf-8", errors="replace")
+
+
+def test_reconfigure_stdio_utf8_swallows_attribute_error():
+    """Streams without a reconfigure attribute (captured / wrapped) are skipped."""
+    fake_stdout = mock.MagicMock(spec=[])  # no reconfigure attribute
+    fake_stderr = mock.MagicMock()
+    with mock.patch("utils.utils_common.sys") as fake_sys:
+        fake_sys.stdout = fake_stdout
+        fake_sys.stderr = fake_stderr
+        utils_common.reconfigure_stdio_utf8()  # must not raise
+    fake_stderr.reconfigure.assert_called_once_with(encoding="utf-8", errors="replace")
+
+
+def test_reconfigure_stdio_utf8_swallows_unsupported_operation():
+    """io.UnsupportedOperation from a captured stream must be swallowed."""
+    fake_stdout = mock.MagicMock()
+    fake_stdout.reconfigure.side_effect = io.UnsupportedOperation("not seekable")
+    fake_stderr = mock.MagicMock()
+    with mock.patch("utils.utils_common.sys") as fake_sys:
+        fake_sys.stdout = fake_stdout
+        fake_sys.stderr = fake_stderr
+        utils_common.reconfigure_stdio_utf8()  # must not raise
+    fake_stderr.reconfigure.assert_called_once_with(encoding="utf-8", errors="replace")
+
+
+def test_reconfigure_stdio_utf8_end_to_end_makes_non_ascii_print_safe():
+    """After reconfigure, encoding to bytes via the wrapper must not raise."""
+    raw = io.BytesIO()
+    wrapper = io.TextIOWrapper(raw, encoding="ascii", errors="strict")
+    with mock.patch("utils.utils_common.sys") as fake_sys:
+        fake_sys.stdout = wrapper
+        fake_sys.stderr = wrapper
+        utils_common.reconfigure_stdio_utf8()
+    wrapper.write("│ box │\n")  # would raise UnicodeEncodeError under ascii/strict
+    wrapper.flush()
+    assert raw.getvalue() == "│ box │\n".encode("utf-8")
