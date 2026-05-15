@@ -1177,9 +1177,45 @@ struct AsmAccess<1, LoadPolicy, StorePolicy> {
 
 __device__ __forceinline__ void pipeline_wait_on_loads(int waits) {
 #if defined(__gfx1201__)
-  asm volatile("s_wait_loadcnt %0" ::"n"(waits) : "memory");
+  // GFX12 splits memory counters further; flat_load utilizes loadcnt
+  switch (waits) {
+    case 15: asm volatile("s_wait_loadcnt 15" ::: "memory"); break;
+    case 14: asm volatile("s_wait_loadcnt 14" ::: "memory"); break;
+    case 13: asm volatile("s_wait_loadcnt 13" ::: "memory"); break;
+    case 12: asm volatile("s_wait_loadcnt 12" ::: "memory"); break;
+    case 11: asm volatile("s_wait_loadcnt 11" ::: "memory"); break;
+    case 10: asm volatile("s_wait_loadcnt 10" ::: "memory"); break;
+    case 9:  asm volatile("s_wait_loadcnt 9"  ::: "memory"); break;
+    case 8:  asm volatile("s_wait_loadcnt 8"  ::: "memory"); break;
+    case 7:  asm volatile("s_wait_loadcnt 7"  ::: "memory"); break;
+    case 6:  asm volatile("s_wait_loadcnt 6"  ::: "memory"); break;
+    case 5:  asm volatile("s_wait_loadcnt 5"  ::: "memory"); break;
+    case 4:  asm volatile("s_wait_loadcnt 4"  ::: "memory"); break;
+    case 3:  asm volatile("s_wait_loadcnt 3"  ::: "memory"); break;
+    case 2:  asm volatile("s_wait_loadcnt 2"  ::: "memory"); break;
+    case 1:  asm volatile("s_wait_loadcnt 1"  ::: "memory"); break;
+    default: asm volatile("s_wait_loadcnt 0"  ::: "memory"); break;
+  }
 #else
-  asm volatile("s_waitcnt vmcnt(%0)" ::"n"(waits) : "memory");
+  // GFX9/10/11 use vmcnt
+  switch (waits) {
+    case 15: asm volatile("s_waitcnt vmcnt(15)" ::: "memory"); break;
+    case 14: asm volatile("s_waitcnt vmcnt(14)" ::: "memory"); break;
+    case 13: asm volatile("s_waitcnt vmcnt(13)" ::: "memory"); break;
+    case 12: asm volatile("s_waitcnt vmcnt(12)" ::: "memory"); break;
+    case 11: asm volatile("s_waitcnt vmcnt(11)" ::: "memory"); break;
+    case 10: asm volatile("s_waitcnt vmcnt(10)" ::: "memory"); break;
+    case 9:  asm volatile("s_waitcnt vmcnt(9)"  ::: "memory"); break;
+    case 8:  asm volatile("s_waitcnt vmcnt(8)"  ::: "memory"); break;
+    case 7:  asm volatile("s_waitcnt vmcnt(7)"  ::: "memory"); break;
+    case 6:  asm volatile("s_waitcnt vmcnt(6)"  ::: "memory"); break;
+    case 5:  asm volatile("s_waitcnt vmcnt(5)"  ::: "memory"); break;
+    case 4:  asm volatile("s_waitcnt vmcnt(4)"  ::: "memory"); break;
+    case 3:  asm volatile("s_waitcnt vmcnt(3)"  ::: "memory"); break;
+    case 2:  asm volatile("s_waitcnt vmcnt(2)"  ::: "memory"); break;
+    case 1:  asm volatile("s_waitcnt vmcnt(1)"  ::: "memory"); break;
+    default: asm volatile("s_waitcnt vmcnt(0)"  ::: "memory"); break;
+  }
 #endif
 }
 
