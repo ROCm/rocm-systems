@@ -61,10 +61,18 @@ template <typename T, typename... Args> inline std::string ToString(T first, Arg
 }  // namespace internal
 }  // namespace hiprtc
 
+#define PRINT_HIPRTC_PATH()                                                                        \
+  static bool printed = false;                                                                     \
+  if (!printed) {                                                                                  \
+    amd::Os::PrintLibraryLocation();                                                               \
+    printed = true;                                                                                \
+  }
+
 // hiprtcInit lock
 static amd::Monitor g_hiprtcInitlock{};
 #define HIPRTC_INIT_API_INTERNAL(...)                                                              \
   amd::ScopedLock lock(g_hiprtcInitlock);                                                          \
+  PRINT_HIPRTC_PATH()                                                                              \
   if (!amd::Flag::init()) {                                                                        \
     HIPRTC_RETURN(HIPRTC_ERROR_INTERNAL_ERROR);                                                    \
   }
