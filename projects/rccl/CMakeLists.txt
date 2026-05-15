@@ -579,6 +579,14 @@ rocm_install(FILES       ${PROJECT_BINARY_DIR}/include/rccl/rccl.h src/include/p
              DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl)
 rocm_install(FILES       src/include/api_trace.h
              DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl/amd_detail)
+## Install nccl_device.h plus the nccl_device/ subtree (see Makefile INCEXPORTS).
+## Required by downstream consumers (e.g. PyTorch's NCCL-backend symmetric memory)
+## that #include <nccl_device.h> to use the symmetric kernel device APIs.
+rocm_install(FILES       src/include/nccl_device.h
+             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl)
+rocm_install(DIRECTORY   src/include/nccl_device
+             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl
+             FILES_MATCHING PATTERN "*.h")
 ## Install tuner config directory for CSV-based tuner
 file(COPY tuner DESTINATION ${PROJECT_BINARY_DIR})
 rocm_install(DIRECTORY ${PROJECT_BINARY_DIR}/tuner DESTINATION ${CMAKE_INSTALL_DATADIR}/rccl)
