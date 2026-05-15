@@ -38,17 +38,29 @@ Install ``ROCm LLVM`` package using the command:
 Building the HIP runtime
 ==========================================================
 
-As of ROCM 7.1, HIP is integrated into the core ROCm projects resides in the ``rocm-systems`` monorepository.
-In addition, the following components are also part of the monorepository:
+HIP is one of the core ROCm projects and resides in the `rocm-systems` monorepository.
+In addition, the monorepository also includes the following components:
 
 * ``clr``, AMD's Compute Language Runtime, includes ROCclr, HIPAMD and OpenCL.
 * ``hip-tests``, the HIP testing suite.
 
-Set the repository branch using the variable: ``ROCM_BRANCH``. For example, for ROCm 7.1, use:
+Beginning with TheRock 7.13 release, the rocm-systems codebase is also integrated into the TheRock repository.
 
-.. code-block:: shell
+Developers can build HIP using one of two methods:
 
-   export ROCM_BRANCH=release/rocm-rel-7.1
+* From ``rocm-systems`` monorepository
+* From the ROCm ``TheRock`` repository
+
+This document provides instructions for building HIP from the ``rocm-systems`` monorepository.
+For guidance on building HIP using TheRock, see the build documentation included with `TheRock <https://github.com/ROCm/TheRock/blob/main/README.md>`_.
+
+#. Set the repository branch
+
+   Set the branch using the variable: ``ROCM_BRANCH``. For example, for TheRock 7.13, use:
+
+   .. code-block:: shell
+
+      export ROCM_BRANCH=release/therock-7.13
 
 #. Get HIP source code.
 
@@ -68,8 +80,15 @@ Set the repository branch using the variable: ``ROCM_BRANCH``. For example, for 
    .. code-block:: shell
 
       cd "$CLR_DIR"
-      mkdir -p build; cd build
-      cmake -DHIP_COMMON_DIR=$HIP_DIR -DHIP_PLATFORM=amd -DCMAKE_PREFIX_PATH="/opt/rocm/" -DCMAKE_INSTALL_PREFIX=$PWD/install -DCLR_BUILD_HIP=ON -DCLR_BUILD_OCL=OFF ..
+      mkdir -p build && cd build
+      cmake \
+        -DHIP_COMMON_DIR="$HIP_DIR" \
+        -DHIP_PLATFORM=amd \
+        -DCMAKE_PREFIX_PATH="/opt/rocm/" \
+        -DCMAKE_INSTALL_PREFIX="$PWD/install" \
+        -DCLR_BUILD_HIP=ON \
+        -DCLR_BUILD_OCL=OFF \
+        ..
       make -j$(nproc)
       sudo make install
 
@@ -87,16 +106,11 @@ Set the repository branch using the variable: ``ROCM_BRANCH``. For example, for 
    * HSA is in ``<ROCM_PATH>``. This can be overridden by setting the ``HSA_PATH``
      environment variable.
 
-   * Clang is in ``<ROCM_PATH>/llvm/bin``. This can be overridden by setting the
-     ``HIP_CLANG_PATH`` environment variable.
-
    * The device library is in ``<ROCM_PATH>/lib``. This can be overridden by setting the
      ``DEVICE_LIB_PATH`` environment variable.
 
    * Optionally, you can add ``<ROCM_PATH>/bin`` to your ``PATH``, which can make it easier to
      use the tools.
-
-   * Optionally, you can set ``HIPCC_VERBOSE=7`` to output the command line for compilation.
 
    After you run the ``make install`` command, HIP is installed to ``<ROCM_PATH>`` by default, or ``$PWD/install/hip`` while ``INSTALL_PREFIX`` is defined.
 
@@ -149,7 +163,8 @@ HIP catch tests utilize the Catch2 testing framework.
 
    .. code-block:: shell
 
-      git clone -b release/rocm-rel-7.2 https://github.com/ROCm/rocm-systems.git
+      git clone -b "$ROCM_BRANCH" git@github.com:ROCm/rocm-systems.git
+      export HIPTESTS_DIR="$(readlink -f rocm-systems/projects/hip-tests)"
 
    Alternatively, you can clone the ``hip-tests`` package separately using sparse-checkout as described in the `Contributing to <https://github.com/ROCm/rocm-systems/blob/develop/CONTRIBUTING.md>`__ documentation. 
 
@@ -159,7 +174,7 @@ HIP catch tests utilize the Catch2 testing framework.
       cd rocm-systems
       git sparse-checkout init --cone
       git sparse-checkout set projects/hip-tests
-      git checkout release/rocm-rel-7.2 # or the specific branch of interest
+      git checkout release/therock-7.13 # or the specific branch of interest
 
 
 #. Set the ``HIPTESTS_DIR`` environment variable by running the following from outside the ``hip-tests`` folder: 
@@ -170,15 +185,21 @@ HIP catch tests utilize the Catch2 testing framework.
       echo $HIPTESTS_DIR
 
 
-#. Build HIP all tests from source.
+#. Build HIP tests from source.
 
    .. code-block:: shell
 
-      cd "$HIPTESTS_DIR"
+     cd "$HIPTESTS_DIR"
       mkdir -p build; cd build
-      cmake ../catch -DHIP_PLATFORM=amd -DHIP_PATH=$CLR_DIR/build/install  # or any path where HIP is installed; for example: ``/opt/rocm``
       export ROCM_PATH=/opt/rocm
-      make -j$(nproc) build_tests
+      cmake ../catch \
+        -DHIP_PLATFORM=amd \
+        -DCMAKE_PREFIX_PATH=$CLR_DIR/build/install \
+        -DCMAKE_CXX_COMPILER=$ROCM_PATH/bin/amdclang++ \
+        -DCMAKE_C_COMPILER=$ROCM_PATH/bin/amdclang \
+        -DCMAKE_HIP_COMPILER=$ROCM_PATH/bin/amdclang++ \
+        -DOFFLOAD_ARCH_STR="--offload-arch=<selected-gpu-arch>"
+      make build_tests
       ctest # run all tests
 
    HIP catch source files are found in ``$HIPTESTS_DIR/catch``. Catch tests are built under the folder ``$HIPTESTS_DIR/build/catch_tests``.
@@ -196,27 +217,7 @@ HIP catch tests utilize the Catch2 testing framework.
 
 #. Build a standalone HIP catch test.
 
-   HIP catch tests support compiling standalone tests using ``amdclang++``. For example:
-
-   .. code-block:: shell
-
-      amdclang++ -D__HIP_PLATFORM_AMD__ -x hip ./catch/unit/memory/hipPointerGetAttributes.cc \
-     -I ./catch/include ./catch/hipTestMain/standalone_main.cc -I ./catch/external/Catch2 \
-     -I $ROCM_PATH/include -L$ROCM_PATH/lib -lamdhip64 -o hipPointerGetAttributes
-
-   Or using ``hipcc``:
-
-   .. code-block:: shell
-
-      hipcc ./catch/unit/memory/hipPointerGetAttributes.cc -I ./catch/include \
-      ./catch/hipTestMain/standalone_main.cc -I ./catch/external/Catch2 -o hipPointerGetAttributes
-
-   And then run the test:
-
-   .. code-block:: shell
-
-      ./hipPointerGetAttributes
-
+   For detailed instructions on building the standalone Catch tests, consult the `hip-tests README.md <https://github.com/ROCm/rocm-systems/tree/release/therock-7.13/projects/hip-tests/README.md>`_.
 
 Run HIP
 =================================================
