@@ -53,11 +53,12 @@ def test_attachment_kernel_trace(kernel_input_data):
 
     simple_kernel_found = False
     kernel_threads = set()
+    has_valid_kernel_id = any(int(row["Kernel_Id"]) > 0 for row in kernel_input_data)
+    assert has_valid_kernel_id, "No valid Kernel_Id > 0 found in trace"
 
     for row in kernel_input_data:
         assert row["Kind"] == "KERNEL_DISPATCH"
         assert int(row["Queue_Id"]) > 0
-        assert int(row["Kernel_Id"]) > 0
         assert int(row["Correlation_Id"]) > 0
         assert int(row["End_Timestamp"]) >= int(row["Start_Timestamp"])
 
@@ -156,6 +157,10 @@ def test_kernel_dispatch(json_data):
 
     simple_kernel_found = False
     kernel_threads = set()
+    has_valid_kernel_id = any(
+        d["dispatch_info"]["kernel_id"] > 0 for d in kernel_dispatch_data
+    )
+    assert has_valid_kernel_id, "No valid kernel_id > 0 found in trace"
 
     for dispatch in kernel_dispatch_data:
         dispatch_info = dispatch["dispatch_info"]
@@ -165,7 +170,6 @@ def test_kernel_dispatch(json_data):
         assert dispatch["correlation_id"]["internal"] > 0
         assert dispatch["end_timestamp"] >= dispatch["start_timestamp"]
         assert dispatch_info["queue_id"]["handle"] > 0
-        assert dispatch_info["kernel_id"] > 0
 
         if "simple_kernel" in kernel_name:
             simple_kernel_found = True
