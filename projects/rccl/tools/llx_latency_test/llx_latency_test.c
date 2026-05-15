@@ -735,8 +735,10 @@ int main(int argc, char** argv)
   HIP_CHECK(hipDeviceCanAccessPeer(&can01, 0, 1));
   HIP_CHECK(hipDeviceCanAccessPeer(&can10, 1, 0));
   if (!can01 || !can10) { fprintf(stderr, "No peer access\n"); return 1; }
-  hipSetDevice(0); hipDeviceEnablePeerAccess(1, 0);
-  hipSetDevice(1); hipDeviceEnablePeerAccess(0, 0);
+  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipDeviceEnablePeerAccess(1, 0));
+  HIP_CHECK(hipSetDevice(1));
+  HIP_CHECK(hipDeviceEnablePeerAccess(0, 0));
 
   printf("LL one-way benchmark  LINE_BYTES=%d  DATA_BYTES=%d  "
          "warmup=%d  iters=%d  timeout=%.0fs  max=%zu B\n",
