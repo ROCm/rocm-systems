@@ -1528,13 +1528,7 @@ write_rocpd(
                     insert_value("grid_size_x", grid.x),
                     insert_value("grid_size_y", grid.y),
                     insert_value("grid_size_z", grid.z),
-                    insert_value("region_name_id",
-                                 [&]() {
-                                     auto it = string_entries.find(region_name);
-                                     if(it == string_entries.end())
-                                         return string_entries.at(region_name);  // triggers throw
-                                     return it->second;
-                                 }()),
+                    insert_value("region_name_id", string_entries.at(region_name)),
                     insert_value("event_id", evt_id),
                 });
         };

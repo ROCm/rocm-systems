@@ -43,8 +43,12 @@ def pytest_addoption(parser):
 
 
 def get_csv_data(file_path):
-    with open(file_path, "r") as inp:
-        return [row for row in csv.DictReader(inp)]
+    try:
+        with open(file_path, "r") as inp:
+            return [row for row in csv.DictReader(inp)]
+    except FileNotFoundError as e:
+        print(f"Error loading CSV file {file_path}: {e}")
+        return []
 
 
 def _skip_if(request):
@@ -95,5 +99,9 @@ def json_data(request):
     filename = request.config.getoption("--json-input")
     if not filename:
         pytest.skip("--json-input not provided")
-    with open(filename, "r") as inp:
-        return dotdict(collapse_dict_list(json.load(inp)))
+    try:
+        with open(filename, "r") as inp:
+            return dotdict(collapse_dict_list(json.load(inp)))
+    except FileNotFoundError as e:
+        print(f"Error loading JSON file {filename}: {e}")
+        return None
