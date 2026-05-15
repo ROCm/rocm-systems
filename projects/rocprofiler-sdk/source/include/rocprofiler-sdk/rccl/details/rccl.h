@@ -385,6 +385,26 @@ ncclCommRevoke(ncclComm_t comm, int revokeFlags);
 ncclResult_t
 pncclCommRevoke(ncclComm_t comm, int revokeFlags);
 
+ncclResult_t
+ncclCommGetUniqueId(ncclComm_t comm, ncclUniqueId* uniqueId);
+ncclResult_t
+pncclCommGetUniqueId(ncclComm_t comm, ncclUniqueId* uniqueId);
+
+ncclResult_t
+ncclCommGrow(ncclComm_t          comm,
+             int                 nRanks,
+             const ncclUniqueId* uniqueId,
+             int                 rank,
+             ncclComm_t*         newcomm,
+             ncclConfig_t*       config);
+ncclResult_t
+pncclCommGrow(ncclComm_t          comm,
+              int                 nRanks,
+              const ncclUniqueId* uniqueId,
+              int                 rank,
+              ncclComm_t*         newcomm,
+              ncclConfig_t*       config);
+
 /*! @brief      Creates a new communicator (multi thread/process version), similar to
    ncclCommInitRankConfig.
      @details    Allows to use more than one ncclUniqueId (up to one per rank),

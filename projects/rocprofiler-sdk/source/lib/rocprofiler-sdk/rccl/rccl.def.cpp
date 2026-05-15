@@ -116,6 +116,8 @@ RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_nc
 #endif
 #if RCCL_API_TRACE_VERSION_PATCH >= 4
 RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_ncclCommRevoke, ncclCommRevoke, ncclCommRevoke_fn, comm, revokeFlags)
+RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_ncclCommGetUniqueId, ncclCommGetUniqueId, ncclCommGetUniqueId_fn, comm, uniqueId)
+RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_ncclCommGrow, ncclCommGrow, ncclCommGrow_fn, comm, nRanks, uniqueId, rank, newcomm, config)
 #endif
 
 #else

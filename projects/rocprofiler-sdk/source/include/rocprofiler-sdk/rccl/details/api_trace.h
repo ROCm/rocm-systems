@@ -265,6 +265,15 @@ typedef ncclResult_t (*ncclAlltoAllv_fn_t)(const void*    sendbuff,
                                            ncclComm_t     comm,
                                            hipStream_t    stream);
 
+typedef ncclResult_t (*ncclCommGetUniqueId_fn_t)(ncclComm_t comm, ncclUniqueId* uniqueId);
+
+typedef ncclResult_t (*ncclCommGrow_fn_t)(ncclComm_t          comm,
+                                          int                 nRanks,
+                                          const ncclUniqueId* uniqueId,
+                                          int                 rank,
+                                          ncclComm_t*         newcomm,
+                                          ncclConfig_t*       config);
+
 typedef struct rcclApiFuncTable
 {
     uint64_t                      size;
@@ -312,6 +321,8 @@ typedef struct rcclApiFuncTable
     ncclAlltoAll_fn_t             ncclAlltoAll_fn;
     ncclAlltoAllv_fn_t            ncclAlltoAllv_fn;
     ncclCommRevoke_fn_t           ncclCommRevoke_fn;
+    ncclCommGetUniqueId_fn_t      ncclCommGetUniqueId_fn;
+    ncclCommGrow_fn_t             ncclCommGrow_fn;
 } rcclApiFuncTable;
 
 RCCL_EXTERN_C_FINI

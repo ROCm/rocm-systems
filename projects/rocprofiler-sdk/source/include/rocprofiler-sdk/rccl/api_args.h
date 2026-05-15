@@ -383,6 +383,20 @@ typedef union rocprofiler_rccl_api_args_t
         ncclComm_t comm;
         int        revokeFlags;
     } ncclCommRevoke;
+    struct
+    {
+        ncclComm_t    comm;
+        ncclUniqueId* uniqueId;
+    } ncclCommGetUniqueId;
+    struct
+    {
+        ncclComm_t          comm;
+        int                 nRanks;
+        const ncclUniqueId* uniqueId;
+        int                 rank;
+        ncclComm_t*         newcomm;
+        ncclConfig_t*       config;
+    } ncclCommGrow;
 #endif
 } rocprofiler_rccl_api_args_t;
 
