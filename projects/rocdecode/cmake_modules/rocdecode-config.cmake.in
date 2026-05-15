@@ -27,17 +27,6 @@ if(NOT TARGET @PROJECT_NAME@::@PROJECT_NAME@)
   set_target_properties(@PROJECT_NAME@::@PROJECT_NAME@ PROPERTIES INTERFACE_LINK_LIBRARIES ${@PROJECT_NAME@_LIBRARY})
 endif ()
 
-# When installed via TheRock, propagate DT_RPATH for rocm_sysdeps/lib to all consumers.
-# Some system libraries carry a transitive dependency on libva.so.2 and DT_RPATH
-# in the executable is inherited by all loaded libraries (unlike DT_RUNPATH), ensuring
-# these system libraries resolve libva.so.2 from TheRock instead of the system installation.
-# Applied unconditionally after target creation (whether by rocdecode-targets.cmake or the
-# fallback above) so it is not skipped when the exported targets file creates the target.
-if(EXISTS "${PACKAGE_PREFIX_DIR}/lib/rocm_sysdeps/lib" AND UNIX)
-  set_property(TARGET @PROJECT_NAME@::@PROJECT_NAME@ APPEND PROPERTY
-    INTERFACE_LINK_OPTIONS "-Wl,--disable-new-dtags,-rpath,${PACKAGE_PREFIX_DIR}/lib/rocm_sysdeps/lib")
-endif()
-
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(
     @PROJECT_NAME@
