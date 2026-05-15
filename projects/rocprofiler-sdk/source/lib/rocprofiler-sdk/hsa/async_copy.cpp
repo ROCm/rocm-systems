@@ -427,7 +427,7 @@ get_copy_metadata(hsa_agent_t      _hsa_dst_agent,
                 // A pointer is considered GPU device memory if its agentOwner matches
                 // the GPU agent handle passed to the copy operation.
                 const bool _src_is_device =
-                    _src_query_ok && (_src_info.agentOwner == _hsa_dst_agent);
+                    _src_query_ok && (_src_info.agentOwner == _hsa_src_agent);
                 const bool _dst_is_device =
                     _dst_query_ok && (_dst_info.agentOwner == _hsa_dst_agent);
 
