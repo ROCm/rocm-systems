@@ -14,6 +14,8 @@ add_library(
     input_parameters.cpp
     sdk_wrapper.h
     sdk_wrapper.cpp
+    tool_setup.h
+    tool_setup.cpp
 )
 
 target_include_directories(${target} PUBLIC .)

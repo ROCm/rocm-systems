@@ -34,8 +34,14 @@
 #endif
 #endif
 
+#if defined(__linux__)
+#include <climits>
+#include <unistd.h>
+#endif
+
 #include <algorithm>
 #include <chrono>
+#include <cinttypes>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -3532,12 +3538,24 @@ device::Signal* Device::createSignal() const { return new roc::Signal(); }
 device::Signal* Device::createIpcSignal() const { return new roc::IpcSignal(); }
 
 // ================================================================================================
+static std::string GetLocalHostName() {
+#if defined(__linux__)
+  char buf[HOST_NAME_MAX + 1];
+  buf[HOST_NAME_MAX] = '\0';
+  if (gethostname(buf, sizeof(buf)) == 0) return buf;
+#endif
+  return "";
+}
+
+// ================================================================================================
 hsa_status_t Device::BackendErrorCallBackHandler(const hsa_amd_event_t* event, void* data) {
   cl_int gpu_error = CL_SUCCESS;
   switch (event->event_type) {
     case HSA_AMD_GPU_MEMORY_FAULT_EVENT: {
       gpu_error = CL_INVALID_MEM_OBJECT;
       LogError("Memory Fault Error");
+      std::string hostnameStr = GetLocalHostName();
+      std::string host_tag = hostnameStr.empty() ? "" : "host: " + hostnameStr + ", ";
       for (auto* amd_dev : amd::Device::devices()) {
         if (amd_dev->type() != CL_DEVICE_TYPE_GPU) continue;
         Device* roc_dev = reinterpret_cast<Device*>(amd_dev);
@@ -3549,7 +3567,13 @@ hsa_status_t Device::BackendErrorCallBackHandler(const hsa_amd_event_t* event, v
                                      HSA_AMD_QUEUE_INFO_VM_FAULT_STATUS,
                                      &faulted) == HSA_STATUS_SUCCESS &&
               faulted) {
-            vgpu->AnalyzeAqlQueue();
+            std::string kernelName = vgpu->AnalyzeAqlQueue();
+            const char* kname = kernelName.c_str();
+            ClPrint(amd::LOG_NONE, amd::LOG_ALWAYS,
+                    "Memory Fault Error [%sGPU index: %u, "
+                    "faulting addr: 0x%" PRIx64 ", kernel: %s]",
+                    host_tag.c_str(), roc_dev->index(),
+                    event->memory_fault.virtual_address, kname);
           }
         }
       }
@@ -4007,15 +4031,19 @@ cl_int ConvertHSAErrorIntoCLError(hsa_status_t hsa_status) {
 void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data) {
   if (status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK) {
     Device* dev = reinterpret_cast<Device*>(data);
+    std::string hostnameStr = GetLocalHostName();
+    std::string host_tag = hostnameStr.empty() ? "" : "host: " + hostnameStr + ", ";
+    std::string kernelName;
     for (auto it : dev->vgpus()) {
       roc::VirtualGPU* vgpu = reinterpret_cast<roc::VirtualGPU*>(it);
       if (vgpu->gpu_queue() == queue) {
-        vgpu->AnalyzeAqlQueue();
+        kernelName = vgpu->AnalyzeAqlQueue();
       }
     }
     // Abort on device exceptions.
     const char* errorMsg = 0;
     Hsa::status_string(status, &errorMsg);
+    const char* kname = kernelName.c_str();
     if (status == HSA_STATUS_ERROR_OUT_OF_RESOURCES) {
       size_t global_available_mem = 0;
       if (HSA_STATUS_SUCCESS !=
@@ -4025,12 +4053,15 @@ void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data) {
         LogError("HSA_AMD_AGENT_INFO_MEMORY_AVAIL query failed.");
       }
       ClPrint(amd::LOG_NONE, amd::LOG_ALWAYS,
-              "Callback: Queue %p Aborting with error : %s Code: 0x%x Available Free mem : %zu MB",
-              queue->base_address, errorMsg, status, global_available_mem / Mi);
+              "Callback: Queue %p Aborting with error : %s Code: 0x%x Available Free mem : %zu MB"
+              " [%sGPU index: %u, kernel: %s]",
+              queue->base_address, errorMsg, status, global_available_mem / Mi,
+              host_tag.c_str(), dev->index(), kname);
     } else {
       ClPrint(amd::LOG_NONE, amd::LOG_ALWAYS,
-              "Callback: Queue %p aborting with error : %s code: 0x%x", queue->base_address,
-              errorMsg, status);
+              "Callback: Queue %p aborting with error : %s code: 0x%x"
+              " [%sGPU index: %u, kernel: %s]",
+              queue->base_address, errorMsg, status, host_tag.c_str(), dev->index(), kname);
     }
 
     // Core dumps generally provide limited value for OOM or register overflow,

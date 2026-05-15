@@ -541,7 +541,8 @@ namespace hip {
     MemoryPool* GetDefaultManagedMemoryPool() const { return default_managed_mem_pool_; }
     void AddMemoryPool(MemoryPool* pool);
     void RemoveMemoryPool(MemoryPool* pool);
-    bool FreeMemory(amd::Memory* memory, Stream* stream, Event* event = nullptr);
+    bool FreeMemory(amd::Memory* memory, Stream* stream, Event* event = nullptr,
+                    bool skip_event = false);
     void ReleaseFreedMemory();
     void RemoveStreamFromPools(Stream* stream);
     void AddSafeStream(Stream* event_stream, Stream* wait_stream);

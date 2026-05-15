@@ -1,6 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import functools
 import glob
 import importlib
 import os
@@ -913,3 +914,67 @@ def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
             f"{workload_dir}/out/pmc_1/results_{fbase}_marker_api_trace.csv",
             f"{workload_dir}/{fbase}_marker_api_trace.csv",
         )
+
+
+SHELL_EXTS = frozenset({".sh", ".bash", ".zsh", ".ksh", ".csh"})
+ETC_SHELLS_PATH = Path("/etc/shells")
+WELL_KNOWN_SHELLS = frozenset({
+    "bash",
+    "sh",
+    "dash",
+    "zsh",
+    "ksh",
+    "fish",
+    "csh",
+    "tcsh",
+})
+
+
+def read_etc_shells_basenames() -> frozenset[str]:
+    """
+    Read and return shell basenames listed in /etc/shells (lowercased).
+
+    Returns an empty set when /etc/shells is missing or unreadable so callers
+    degrade gracefully on platforms that do not provide it.
+    """
+    try:
+        content = ETC_SHELLS_PATH.read_text()
+    except OSError:
+        return frozenset()
+
+    basenames: set[str] = set()
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+
+        basename = Path(line).stem.lower()
+        if basename:
+            basenames.add(basename)
+    return frozenset(basenames)
+
+
+@functools.lru_cache(maxsize=1)
+def shell_basenames() -> frozenset[str]:
+    """Cached union of well-known shells with /etc/shells (lowercased)."""
+    return WELL_KNOWN_SHELLS | read_etc_shells_basenames()
+
+
+def is_shell_target(target: str) -> bool:
+    """
+    Check if ``target``'s argv[0] looks like a shell or shell script.
+
+    Shell basenames are sourced from /etc/shells; script extensions come from
+    SHELL_EXTS. ``target`` is parsed with ``shlex.split`` so quoted paths
+    (e.g. ``"/path with spaces/run.sh"``) are handled correctly.
+    """
+    try:
+        tokens = shlex.split(target)
+    except ValueError:
+        return False
+
+    if not tokens:
+        return False
+
+    argv0 = Path(tokens[0])
+    return argv0.stem.lower() in shell_basenames() or argv0.suffix.lower() in SHELL_EXTS

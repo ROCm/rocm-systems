@@ -283,3 +283,67 @@ def test_attach_library_resolution_with_fallback():
     with patch(resolve_target, side_effect=[str(new_lib), str(old_lib)]):
         with pytest.raises(SystemExit):
             profiler.get_profiler_options()
+
+
+# ---------------------------------------------------------------------------
+# get_profiler_options(): ROCPROF_SHELL_TARGET injection
+# ---------------------------------------------------------------------------
+def _make_sdk_profiler_options_args(
+    tmp_path: Path, remaining: str
+) -> argparse.Namespace:
+    """Build a minimal Namespace for get_profiler_options() unit tests."""
+    return argparse.Namespace(
+        remaining=remaining,
+        rocprofiler_sdk_tool_path="/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so",
+        format_rocprof_output="csv",
+        output_directory=str(tmp_path),
+        iteration_multiplexing=None,
+        attach_pid=None,
+        attach_duration_msec=None,
+        kokkos_trace=False,
+        kernel=None,
+        dispatch=None,
+        torch_trace=False,
+    )
+
+
+@pytest.mark.parametrize(
+    "remaining",
+    [
+        pytest.param("bash script.sh", id="bash_with_script"),
+        pytest.param("./run.sh", id="relative_shell_script"),
+        pytest.param("/usr/bin/zsh -c true", id="absolute_zsh_dash_c"),
+    ],
+)
+def test_shell_target_set_with_native_tool(tmp_path, remaining, mock_etc_shells):
+    """ROCPROF_SHELL_TARGET=1 when native tool is used and command is shell-like."""
+    args = _make_sdk_profiler_options_args(tmp_path, remaining)
+    profiler = rocprofiler_sdk_profiler(args, profiler_mode="rocprofiler-sdk", soc=None)
+    options = profiler.get_profiler_options(native_tool_path="/path/to/native_tool.so")
+    assert options.get("ROCPROF_SHELL_TARGET") == "1"
+
+
+@pytest.mark.parametrize(
+    "remaining",
+    [
+        pytest.param("/bin/true", id="non_shell_binary"),
+        pytest.param("python3 app.py", id="python_script"),
+        pytest.param("./vcopy -n 1024", id="custom_binary"),
+    ],
+)
+def test_shell_target_absent_with_native_tool_non_shell(
+    tmp_path, remaining, mock_etc_shells
+):
+    """ROCPROF_SHELL_TARGET is omitted when the workload is not a shell target."""
+    args = _make_sdk_profiler_options_args(tmp_path, remaining)
+    profiler = rocprofiler_sdk_profiler(args, profiler_mode="rocprofiler-sdk", soc=None)
+    options = profiler.get_profiler_options(native_tool_path="/path/to/native_tool.so")
+    assert "ROCPROF_SHELL_TARGET" not in options
+
+
+def test_shell_target_absent_without_native_tool(tmp_path, mock_etc_shells):
+    """Even with a shell-like command, no flag is set without a native tool."""
+    args = _make_sdk_profiler_options_args(tmp_path, "bash script.sh")
+    profiler = rocprofiler_sdk_profiler(args, profiler_mode="rocprofiler-sdk", soc=None)
+    options = profiler.get_profiler_options()
+    assert "ROCPROF_SHELL_TARGET" not in options
