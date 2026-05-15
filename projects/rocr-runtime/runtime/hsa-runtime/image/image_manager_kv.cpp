@@ -262,21 +262,7 @@ hsa_status_t ImageManagerKv::CalculateImageSizeAndAlignment(
 static const uint64_t kLimitSystem = 1ULL << 48;
 
 bool ImageManagerKv::IsLocalMemory(const void* address) const {
-  uintptr_t u_address = reinterpret_cast<uintptr_t>(address);
-
-  uint32_t major_ver = MajorVerFromDevID(chip_id_);
-
-  if (major_ver >= 8) {
-    return true;
-  }
-#ifdef HSA_LARGE_MODEL
-  // Fast path without querying local memory region info.
-  // User mode system memory addressable by CPU is 0 to 2^48.
-  return (u_address >= kLimitSystem);
-#else
-  // No local memory on 32 bit.
-  return false;
-#endif
+  return true;
 }
 
 hsa_status_t ImageManagerKv::PopulateImageSrd(Image& image, const metadata_amd_t* descriptor) const {
@@ -368,9 +354,7 @@ hsa_status_t ImageManagerKv::PopulateImageSrd(Image& image) const {
     word1.bits.swizzle_enable = false;
     word1.bits.cache_swizzle = false;
 
-    uint32_t major_ver = MajorVerFromDevID(chip_id_);
-    word2.bits.num_records = (major_ver < 8) ?
-                image.desc.width : image.desc.width * image_prop.element_size;
+    word2.bits.num_records = image.desc.width * image_prop.element_size;
 
     const Swizzle swizzle = ImageLut().MapSwizzle(image.desc.format.channel_order);
     word3.u32_all = 0;
@@ -628,8 +612,8 @@ hsa_status_t ImageManagerKv::CopyImage(const Image& dst_image,
     }
 
     if (copy_type != BlitKernel::KERNEL_OP_COPY_IMAGE_DEFAULT) {
-      // KV and CZ don't have write support for SRGBA image, so treat the
-      // destination image as RGBA image.
+      // SRGBA image write requires format swap to RGBA + manual gamma encoding because the
+      // hardware lacks native SRGBA store.
       SQ_IMG_RSRC_WORD1* word1 = reinterpret_cast<SQ_IMG_RSRC_WORD1*>(
           &const_cast<Image&>(dst_image).srd[1]);
 
@@ -685,8 +669,8 @@ hsa_status_t ImageManagerKv::FillImage(const Image& image, const void* pattern,
     case HSA_EXT_IMAGE_CHANNEL_ORDER_SRGB:
     case HSA_EXT_IMAGE_CHANNEL_ORDER_SRGBX:
     case HSA_EXT_IMAGE_CHANNEL_ORDER_SBGRA: {
-      // KV and CZ don't have write support for SRGBA image, so convert pattern
-      // to standard form and treat the image as RGBA image.
+      // SRGBA image write requires format swap to RGBA + manual gamma encoding because the
+      // hardware lacks native SRGBA store.
       const float* pattern_f = reinterpret_cast<const float*>(pattern);
       fill_value[0] = LinearToStandardRGB(pattern_f[0]);
       fill_value[1] = LinearToStandardRGB(pattern_f[1]);
@@ -722,12 +706,12 @@ hsa_status_t ImageManagerKv::FillImage(const Image& image, const void* pattern,
 }
 
 hsa_status_t ImageManagerKv::PopulateMipmapSrd(MipmappedArray& mipmap) const {
-  // Kv (GFX8) architecture does not support mipmaps
+  // Base-class fallback: mipmap support is provided by gfx9+ subclasses.
   return (hsa_status_t)HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED;
 }
 
 hsa_status_t ImageManagerKv::PopulateMipmapSrd(MipmappedArray& mipmap_array, const metadata_amd_t* desc) const {
-  // Kv (GFX8) architecture does not support mipmaps
+  // Base-class fallback: mipmap support is provided by gfx9+ subclasses.
   return (hsa_status_t)HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED;
 }
 
@@ -873,7 +857,7 @@ hsa_status_t ImageManagerKv::PopulateMipLevelSrd(
     const MipmappedArray& mipmap_array,
     uint32_t mip_level) const {
 
-  // Mip level views not supported on GFX8 hardware
+  // Base-class fallback: mip level views are provided by gfx9+ subclasses.
   return HSA_STATUS_ERROR_NOT_INITIALIZED;
 }
 

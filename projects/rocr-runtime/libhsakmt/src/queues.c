@@ -38,8 +38,8 @@
 
 static uint32_t get_hwreg_size_per_cu(uint32_t gfxv);
 
-/* 1024 doorbells, 4 or 8 bytes each doorbell depending on ASIC generation */
-#define DOORBELL_SIZE(gfxv)	(((gfxv) >= 0x90000) ? 8 : 4)
+/* 1024 doorbells, 8 bytes each doorbell */
+#define DOORBELL_SIZE(gfxv)	8
 #define DOORBELLS_PAGE_SIZE(ds)	(1024 * (ds))
 
 #define WG_CONTEXT_DATA_SIZE_PER_CU(gfxv, node)	\
@@ -195,12 +195,8 @@ static void get_doorbell_map_info(HsaKFDContext *ctx,
 				  uint32_t node_id,
 				  struct process_doorbells *doorbell)
 {
-	/*
-	 * GPUVM doorbell on Tonga requires a workaround for VM TLB ACTIVE bit
-	 * lookup bug. Remove ASIC check when this is implemented in amdgpu.
-	 */
 	uint32_t gfxv = hsakmt_get_gfxv_by_node_id(ctx, node_id);
-	doorbell->use_gpuvm = (hsakmt_is_dgpu && gfxv != GFX_VERSION_TONGA);
+	doorbell->use_gpuvm = hsakmt_is_dgpu;
 	doorbell->size = DOORBELLS_PAGE_SIZE(DOORBELL_SIZE(gfxv));
 
 	if (doorbell->size < (uint32_t) PAGE_SIZE) {
@@ -360,8 +356,6 @@ static bool update_ctx_save_restore_size(HsaKFDContext *ctx, uint32_t nodeid, st
 {
 	HsaNodeProperties node;
 
-	if (q->gfxv < GFX_VERSION_CARRIZO)
-		return false;
 	if (hsaKmtGetNodePropertiesCtx(ctx, nodeid, &node))
 		return false;
 	if (node.NumFComputeCores && node.NumSIMDPerCU) {
@@ -727,11 +721,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueV2Ctx(
 	q->gfxv = hsakmt_get_gfxv_by_node_id(ctx, NodeId);
 	q->use_ats = false;
 
-	if (q->gfxv == GFX_VERSION_TONGA)
-		q->eop_buffer_size = TONGA_PAGE_SIZE;
-	else if ((q->gfxv & ~(0xff)) == GFX_VERSION_AQUA_VANJARAM)
+	if ((q->gfxv & ~(0xff)) == GFX_VERSION_AQUA_VANJARAM)
 		q->eop_buffer_size = ((Type == HSA_QUEUE_COMPUTE) ? 4096 : 0);
-	else if (q->gfxv >= 0x80000)
+	else
 		q->eop_buffer_size = 4096;
 
 	/* By default, CUs are all turned on. Initialize cu_mask to '1

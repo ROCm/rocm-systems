@@ -64,7 +64,7 @@ endif()
 #
 # Define list of Target Device types for which to get code objects
 #
-set(DEV_LIST "gfx803" "gfx900" CACHE STRING "List of Gfx Devices")
+set(DEV_LIST "gfx900" CACHE STRING "List of Gfx Devices")
 set(TARGET_DEV_LIST ${DEV_LIST})
 separate_arguments(TARGET_DEV_LIST)
 
@@ -81,10 +81,7 @@ if(NOT DEFINED BITCODE_DIR)
   find_package(AMDDeviceLibs QUIET CONFIG)
   
   if(AMDDeviceLibs_FOUND)
-    if(TARGET AMDDeviceLibs::oclc_isa_version_803)
-      get_target_property(DEVICE_LIBS_LOCATION AMDDeviceLibs::oclc_isa_version_803 IMPORTED_LOCATION)
-      get_filename_component(BITCODE_DIR "${DEVICE_LIBS_LOCATION}" DIRECTORY)
-    elseif(TARGET AMDDeviceLibs::oclc_isa_version_900)
+    if(TARGET AMDDeviceLibs::oclc_isa_version_900)
       get_target_property(DEVICE_LIBS_LOCATION AMDDeviceLibs::oclc_isa_version_900 IMPORTED_LOCATION)
       get_filename_component(BITCODE_DIR "${DEVICE_LIBS_LOCATION}" DIRECTORY)
     else()
@@ -98,7 +95,7 @@ if(NOT DEFINED BITCODE_DIR)
     
     # Search for bitcode directory
     find_path(BITCODE_DIR 
-      NAMES "opencl.bc" "opencl.amdgcn.bc" "oclc_isa_version_803.bc"
+      NAMES "opencl.bc" "opencl.amdgcn.bc" "oclc_isa_version_900.bc"
       HINTS
         "${LLVM_LIBRARY_DIR}/amdgcn/bitcode"
         "${LLVM_LIBRARY_DIR}/../amdgcn/bitcode"

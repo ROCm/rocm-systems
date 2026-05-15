@@ -1896,32 +1896,6 @@ static std::string ConvertOldTargetNameToNew(
     NewName = "amdgcn-amd-amdhsa--gfx601";
   else if (OldName == "AMD:AMDGPU:6:0:2")
     NewName = "amdgcn-amd-amdhsa--gfx602";
-  else if (OldName == "AMD:AMDGPU:7:0:0")
-    NewName = "amdgcn-amd-amdhsa--gfx700";
-  else if (OldName == "AMD:AMDGPU:7:0:1")
-    NewName = "amdgcn-amd-amdhsa--gfx701";
-  else if (OldName == "AMD:AMDGPU:7:0:2")
-    NewName = "amdgcn-amd-amdhsa--gfx702";
-  else if (OldName == "AMD:AMDGPU:7:0:3")
-    NewName = "amdgcn-amd-amdhsa--gfx703";
-  else if (OldName == "AMD:AMDGPU:7:0:4")
-    NewName = "amdgcn-amd-amdhsa--gfx704";
-  else if (OldName == "AMD:AMDGPU:7:0:5")
-    NewName = "amdgcn-amd-amdhsa--gfx705";
-  else if (OldName == "AMD:AMDGPU:8:0:1") {
-    NewName = "amdgcn-amd-amdhsa--gfx801";
-    xnack_supported = true;
-  }
-  else if (OldName == "AMD:AMDGPU:8:0:0" || OldName == "AMD:AMDGPU:8:0:2")
-    NewName = "amdgcn-amd-amdhsa--gfx802";
-  else if (OldName == "AMD:AMDGPU:8:0:3" || OldName == "AMD:AMDGPU:8:0:4")
-    NewName = "amdgcn-amd-amdhsa--gfx803";
-  else if (OldName == "AMD:AMDGPU:8:0:5")
-    NewName = "amdgcn-amd-amdhsa--gfx805";
-  else if (OldName == "AMD:AMDGPU:8:1:0") {
-    NewName = "amdgcn-amd-amdhsa--gfx810";
-    xnack_supported = true;
-  }
   else if (OldName == "AMD:AMDGPU:9:0:0" || OldName == "AMD:AMDGPU:9:0:1") {
     NewName = "amdgcn-amd-amdhsa--gfx900";
     xnack_supported = true;
@@ -1954,11 +1928,7 @@ static std::string ConvertOldTargetNameToNew(
     else if (xnack_supported)
       NewName = NewName + ":xnack-";
   } else {
-    if (OldName == "AMD:AMDGPU:8:0:1")
-      NewName = NewName + ":xnack+";
-    else if (OldName == "AMD:AMDGPU:8:1:0")
-      NewName = NewName + ":xnack+";
-    else if (OldName == "AMD:AMDGPU:9:0:1")
+    if (OldName == "AMD:AMDGPU:9:0:1")
       NewName = NewName + ":xnack+";
     else if (OldName == "AMD:AMDGPU:9:0:3")
       NewName = NewName + ":xnack+";

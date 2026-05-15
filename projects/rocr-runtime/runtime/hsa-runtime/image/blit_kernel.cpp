@@ -60,18 +60,8 @@
 namespace rocr {
 namespace image {
 
-extern uint8_t blit_object_gfx7xx[14608];
-extern uint8_t blit_object_gfx8xx[15424];
 extern uint8_t blit_object_gfx9xx[15432];
 
-extern uint8_t ocl_blit_object_gfx700[];
-extern uint8_t ocl_blit_object_gfx701[];
-extern uint8_t ocl_blit_object_gfx702[];
-extern uint8_t ocl_blit_object_gfx801[];
-extern uint8_t ocl_blit_object_gfx802[];
-extern uint8_t ocl_blit_object_gfx803[];
-extern uint8_t ocl_blit_object_gfx805[];
-extern uint8_t ocl_blit_object_gfx810[];
 extern uint8_t ocl_blit_object_gfx900[];
 extern uint8_t ocl_blit_object_gfx902[];
 extern uint8_t ocl_blit_object_gfx904[];
@@ -986,23 +976,7 @@ hsa_status_t BlitKernel::GetPatchedBlitObject(const char* agent_name,
                                               uint8_t** blit_code_object) {
   std::string sname(agent_name);
 
-  if (sname == "gfx700") {
-    *blit_code_object = ocl_blit_object_gfx700;
-  } else if (sname == "gfx701") {
-    *blit_code_object = ocl_blit_object_gfx701;
-  } else if (sname == "gfx702") {
-    *blit_code_object = ocl_blit_object_gfx702;
-  } else if (sname == "gfx801") {
-    *blit_code_object = ocl_blit_object_gfx801;
-  } else if (sname == "gfx802") {
-    *blit_code_object = ocl_blit_object_gfx802;
-  } else if (sname == "gfx803") {
-    *blit_code_object = ocl_blit_object_gfx803;
-  } else if (sname == "gfx805") {
-    *blit_code_object = ocl_blit_object_gfx805;
-  } else if (sname == "gfx810") {
-    *blit_code_object = ocl_blit_object_gfx810;
-  } else if (sname == "gfx900") {
+  if (sname == "gfx900") {
     *blit_code_object = ocl_blit_object_gfx900;
   } else if (sname == "gfx902") {
     *blit_code_object = ocl_blit_object_gfx902;

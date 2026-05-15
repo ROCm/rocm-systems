@@ -185,11 +185,7 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::Initialize(const core::Agent& agent,
   const core::Runtime::LinkInfo& link =
             core::Runtime::runtime_singleton_->GetLinkInfo( agent_->node_id(),
                 core::Runtime::runtime_singleton_->cpu_agents()[0]->node_id());
-  if (isa_version == core::Isa::Version(7, 0, 1)) {
-    platform_atomic_support_ = false;
-  } else {
-    platform_atomic_support_ = link.info.atomic_support_64bit;
-  }
+  platform_atomic_support_ = link.info.atomic_support_64bit;
 
   // HDP flush supported on gfx900 and forward.
   // gfx90a can support xGMI host to device connections so bypass HDP flush

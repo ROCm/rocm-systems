@@ -396,12 +396,6 @@ TEST_F(KFDEvictTest, QueueTest) {
     int gpuIndex = m_NodeInfo.HsaGPUindexFromGpuNode(defaultGPUNode);
     const HsaNodeProperties *pNodeProperties = m_NodeInfo.HsaDefaultGPUNodeProperties();
 
-    /* Skip test for chip if it doesn't have CWSR, which the test depends on */
-    if (m_FamilyId < FAMILY_VI || isTonga(pNodeProperties)) {
-        LOG() << std::hex << "Skipping test: No CWSR present for family ID 0x" << m_FamilyId << "." << std::endl;
-        return;
-    }
-
     if (pNodeProperties->Integrated) {
         LOG() << "Skipping test on APU." << std::endl;
         return;

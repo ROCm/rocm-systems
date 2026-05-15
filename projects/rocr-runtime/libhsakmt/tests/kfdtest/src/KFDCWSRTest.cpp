@@ -78,8 +78,6 @@ static inline uint32_t checkCWSREnabled() {
 
 void KFDCWSRTest::BasicTest(int gpuNode) {
 
-    const HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
-
     Assembler* m_pAsm;
     m_pAsm = GetAssemblerFromNodeId(gpuNode);
     ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);
@@ -89,7 +87,7 @@ void KFDCWSRTest::BasicTest(int gpuNode) {
     // Increase delay on emulator by this factor.
     const int delayMult = (g_IsEmuMode ? 20 : 1);
 
-    if ((m_FamilyId >= FAMILY_VI) && (checkCWSREnabled())) {
+    if (checkCWSREnabled()) {
         HsaMemoryBuffer isaBuffer(PAGE_SIZE, gpuNode, true, false, true);
         ASSERT_SUCCESS_GPU(m_pAsm->RunAssembleBuf(PersistentIterateIsa, isaBuffer.As<char*>()), gpuNode);
 
@@ -149,7 +147,7 @@ void KFDCWSRTest::BasicTest(int gpuNode) {
         EXPECT_EQ_GPU(0, dispatch.SyncWithStatus(180000), gpuNode);
         EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
     } else {
-        LOG() << "Skipping test: No CWSR present for family ID 0x" << m_FamilyId << "." << std::endl;
+        LOG() << "Skipping test: CWSR not enabled." << std::endl;
     }
 
 }
@@ -195,13 +193,11 @@ INSTANTIATE_TEST_CASE_P(
 
 void KFDCWSRTest::InterruptRestore(int gpuNode) {
 
-    const HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
-
     Assembler* m_pAsm;
     m_pAsm = GetAssemblerFromNodeId(gpuNode);
     ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);
 
-   if ((m_FamilyId >= FAMILY_VI) && (checkCWSREnabled())) {
+   if (checkCWSREnabled()) {
         HsaMemoryBuffer isaBuffer(PAGE_SIZE, gpuNode, true/*zero*/, false/*local*/, true/*exec*/);
 
         ASSERT_SUCCESS_GPU(m_pAsm->RunAssembleBuf(InfiniteLoopIsa, isaBuffer.As<char*>()), gpuNode);
@@ -237,7 +233,7 @@ void KFDCWSRTest::InterruptRestore(int gpuNode) {
         delete dispatch2;
 
     } else {
-        LOG() << "Skipping test: No CWSR present for family ID 0x" << m_FamilyId << "." << std::endl;
+        LOG() << "Skipping test: CWSR not enabled." << std::endl;
     }
 }
 

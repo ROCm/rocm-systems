@@ -290,8 +290,6 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
   };
 
   struct CompiledShader {
-    ASICShader compute_7;
-    ASICShader compute_8;
     ASICShader compute_9;
     ASICShader compute_90a;
     ASICShader compute_942;
@@ -305,8 +303,6 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
   std::map<std::string, CompiledShader> compiled_shaders = {
       {"TrapHandler",
        {
-           {NULL, 0, 0, 0},                                                 // gfx7
-           {kCodeTrapHandler8, sizeof(kCodeTrapHandler8), 2, 4},            // gfx8
            {kCodeTrapHandler9, sizeof(kCodeTrapHandler9), 2, 4},            // gfx9
            {kCodeTrapHandler90a, sizeof(kCodeTrapHandler90a), 2, 4},        // gfx90a
            {NULL, 0, 0, 0},                                                 // gfx942
@@ -319,8 +315,6 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
        }},
       {"TrapHandlerKfdExceptions",
        {
-           {NULL, 0, 0, 0},                                                 // gfx7
-           {kCodeTrapHandler8, sizeof(kCodeTrapHandler8), 2, 4},            // gfx8
            {kCodeTrapHandlerV2_9, sizeof(kCodeTrapHandlerV2_9), 2, 4},      // gfx9
            {kCodeTrapHandlerV2_9, sizeof(kCodeTrapHandlerV2_9), 2, 4},      // gfx90a
            {kCodeTrapHandlerV2_942, sizeof(kCodeTrapHandlerV2_942), 2, 4},  // gfx942
@@ -332,8 +326,6 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
        }},
       {"CopyAligned",
        {
-           {kCodeCopyAligned7, sizeof(kCodeCopyAligned7), 32, 12},          // gfx7
-           {kCodeCopyAligned8, sizeof(kCodeCopyAligned8), 32, 12},          // gfx8
            {kCodeCopyAligned9, sizeof(kCodeCopyAligned9), 32, 12},          // gfx9
            {kCodeCopyAligned9, sizeof(kCodeCopyAligned9), 32, 12},          // gfx90a
            {kCodeCopyAligned9, sizeof(kCodeCopyAligned9), 32, 12},          // gfx942
@@ -345,8 +337,6 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
        }},
       {"CopyMisaligned",
        {
-           {kCodeCopyMisaligned7, sizeof(kCodeCopyMisaligned7), 23, 10},    // gfx7
-           {kCodeCopyMisaligned8, sizeof(kCodeCopyMisaligned8), 23, 10},    // gfx8
            {kCodeCopyMisaligned9, sizeof(kCodeCopyMisaligned9), 23, 10},    // gfx9
            {kCodeCopyMisaligned9, sizeof(kCodeCopyMisaligned9), 23, 10},    // gfx90a
            {kCodeCopyMisaligned9, sizeof(kCodeCopyMisaligned9), 23, 10},    // gfx942
@@ -358,8 +348,6 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
        }},
       {"Fill",
        {
-           {kCodeFill7, sizeof(kCodeFill7), 19, 8},                         // gfx7
-           {kCodeFill8, sizeof(kCodeFill8), 19, 8},                         // gfx8
            {kCodeFill9, sizeof(kCodeFill9), 19, 8},                         // gfx9
            {kCodeFill9, sizeof(kCodeFill9), 19, 8},                         // gfx90a
            {kCodeFill9, sizeof(kCodeFill9), 19, 8},                         // gfx942
@@ -377,12 +365,6 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
   ASICShader* asic_shader = NULL;
 
   switch (isa_->GetMajorVersion()) {
-    case 7:
-      asic_shader = &compiled_shader_it->second.compute_7;
-      break;
-    case 8:
-      asic_shader = &compiled_shader_it->second.compute_8;
-      break;
     case 9:
       if((isa_->GetMinorVersion() == 0) && (isa_->GetStepping() == 10)) {
         asic_shader = &compiled_shader_it->second.compute_90a;
@@ -886,9 +868,8 @@ void GpuAgent::InitDma() {
   auto blit_lambda = [this](bool use_xgmi, lazy_ptr<core::Queue>& queue, bool isHostToDev, uint32_t rec_eng) {
     Flag::SDMA_OVERRIDE sdma_override = core::Runtime::runtime_singleton_->flag().enable_sdma();
 
-    // User SDMA queues are unstable on gfx8 and unsupported on gfx1013.
-    bool use_sdma =
-        ((isa_->GetMajorVersion() != 8) && (isa_->GetVersion() != std::make_tuple(10, 1, 3)));
+    // User SDMA queues are unsupported on gfx1013.
+    bool use_sdma = (isa_->GetVersion() != std::make_tuple(10, 1, 3));
     if (sdma_override != Flag::SDMA_DEFAULT) use_sdma = (sdma_override == Flag::SDMA_ENABLE);
 
     if (use_sdma && (HSA_PROFILE_BASE == profile_)) {
@@ -1854,8 +1835,6 @@ hsa_status_t GpuAgent::DmaCopyRect(const hsa_pitched_ptr_t* dst, const hsa_dim3_
                                    const hsa_dim3_t* range, hsa_amd_copy_direction_t dir,
                                    std::vector<core::Signal*>& dep_signals,
                                    core::Signal& out_signal) {
-  if (isa_->GetMajorVersion() < 9) return HSA_STATUS_ERROR_INVALID_AGENT;
-
   SetCopyRequestRefCount(true);
   MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
   lazy_ptr<core::Blit>& blit = GetBlitObject((dir == hsaHostToDevice) ? BlitHostToDev :
@@ -1960,11 +1939,7 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
           HSA_DEFAULT_FLOAT_ROUNDING_MODE_NEAR;
       break;
     case HSA_AGENT_INFO_FAST_F16_OPERATION:
-      if (isa_->GetMajorVersion() >= 8) {
-        *((bool*)value) = true;
-      } else {
-        *((bool*)value) = false;
-      }
+      *((bool*)value) = true;
       break;
     case HSA_AGENT_INFO_PROFILE:
       *((hsa_profile_t*)value) = profile_;
@@ -2181,7 +2156,7 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
     case HSA_AMD_AGENT_INFO_UUID: {
       uint64_t uuid_value = static_cast<uint64_t>(properties_.UniqueID);
 
-      // Either device does not support UUID e.g. a Gfx8 device,
+      // Either device does not support UUID,
       // or runtime is using an older thunk library that does not
       // support UUID's
       if (uuid_value == 0) {
@@ -2464,7 +2439,7 @@ hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
 void GpuAgent::AcquireQueueMainScratch(ScratchInfo& scratch) {
   assert(scratch.main_queue_base == nullptr &&
          "AcquireQueueMainScratch called while holding scratch.");
-  bool need_queue_scratch_base = (isa_->GetMajorVersion() > 8);
+  bool need_queue_scratch_base = true;
 
   if (scratch.main_size == 0) {
     scratch.main_size = queue_scratch_len_;
@@ -2511,8 +2486,7 @@ void GpuAgent::AcquireQueueMainScratch(ScratchInfo& scratch) {
             ((scratch_pool_.size() - scratch_pool_.remaining() - scratch_cache_.free_bytes() +
              scratch.main_size) > small_limit));
 
-  if ((isa_->GetMajorVersion() < 8) ||
-      core::Runtime::runtime_singleton_->flag().no_scratch_reclaim()) {
+  if (core::Runtime::runtime_singleton_->flag().no_scratch_reclaim()) {
     large = false;
     use_reclaim = false;
   }
@@ -2927,11 +2901,6 @@ hsa_status_t GpuAgent::UpdateTrapHandlerWithPCS(pcs_sampling_data_t* pcs_hosttra
 }
 
 void GpuAgent::BindTrapHandler() {
-  if (isa_->GetMajorVersion() == 7) {
-    // No trap handler support on Gfx7, soft error.
-    return;
-  }
-
   // Assemble the trap handler source code.
   void* tma_addr = nullptr;
   uint64_t tma_size = 0;
@@ -2974,17 +2943,7 @@ void GpuAgent::BindTrapHandler() {
 void GpuAgent::InvalidateCodeCaches(void *ptr, size_t size) {
   // Check for microcode cache invalidation support.
   // This is deprecated in later microcode builds.
-  if (isa_->GetMajorVersion() == 7) {
-    if (properties_.EngineId.ui32.uCode < 420) {
-      // Microcode is handling code cache invalidation.
-      return;
-    }
-  } else if (isa_->GetMajorVersion() == 8 && isa_->GetMinorVersion() == 0) {
-    if (properties_.EngineId.ui32.uCode < 685) {
-      // Microcode is handling code cache invalidation.
-      return;
-    }
-  } else if (isa_->GetMajorVersion() > 12) {
+  if (isa_->GetMajorVersion() > 12) {
     assert(false && "Code cache invalidation not implemented for this agent");
   }
 
@@ -3011,8 +2970,7 @@ void GpuAgent::InvalidateCodeCaches(void *ptr, size_t size) {
       cache_inv_size_dw = 8;
   }
 
-  cache_inv[0] = PM4_HDR(PM4_HDR_IT_OPCODE_ACQUIRE_MEM, cache_inv_size_dw,
-             isa_->GetMajorVersion());
+  cache_inv[0] = PM4_HDR(PM4_HDR_IT_OPCODE_ACQUIRE_MEM, cache_inv_size_dw);
 
   if (ptr) {
     size_t size_granule = (size + 0xFF) >> 8;
@@ -3837,7 +3795,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
    *    done.
    */
 
-  cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_ATOMIC_MEM, atomic_ex_cmd_sz, isa_->GetMajorVersion());
+  cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_ATOMIC_MEM, atomic_ex_cmd_sz);
   cmd_data[i++] = PM4_ATOMIC_MEM_DW1_ATOMIC(PM4_ATOMIC_MEM_GL2_OP_ATOMIC_SWAP_RTN_64);
   cmd_data[i++] = PM4_ATOMIC_MEM_DW2_ADDR_LO(buf_write_val);
   cmd_data[i++] = PM4_ATOMIC_MEM_DW3_ADDR_HI((buf_write_val) >> 32);
@@ -3845,7 +3803,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
   cmd_data[i++] = PM4_ATOMIC_MEM_DW5_SRC_DATA_HI(((uint64_t)reset_write_val) >> 32);
   i += 3;
   /* copy data */
-  cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_COPY_DATA, copy_data_cmd_sz, isa_->GetMajorVersion());
+  cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_COPY_DATA, copy_data_cmd_sz);
   cmd_data[i++] =
       PM4_COPY_DATA_DW1(PM4_COPY_DATA_SRC_SEL_ATOMIC_RETURN_DATA | PM4_COPY_DATA_DST_SEL_TC_12 |
                         PM4_COPY_DATA_COUNT_SEL | PM4_COPY_DATA_WR_CONFIRM);
@@ -3855,7 +3813,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
 
   if (properties_.NumXcc > 1) {
     cmd_data[0] =
-      PM4_HDR(PM4_HDR_IT_OPCODE_PRED_EXEC, pred_exec_cmd_sz, isa_->GetMajorVersion());
+      PM4_HDR(PM4_HDR_IT_OPCODE_PRED_EXEC, pred_exec_cmd_sz);
     cmd_data[1] =
       PM4_PRED_EXEC_DW2_EXEC_COUNT(i - pred_exec_cmd_sz) | PM4_PRED_EXEC_DW2_VIRTUALXCCID_SELECT(0x1);
   }
@@ -3905,7 +3863,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
 
   /* WAIT_REG_MEM, wait on buf_written_val */
   cmd_data[i++] =
-      PM4_HDR(PM4_HDR_IT_OPCODE_WAIT_REG_MEM, wait_reg_mem_cmd_sz, isa_->GetMajorVersion());
+      PM4_HDR(PM4_HDR_IT_OPCODE_WAIT_REG_MEM, wait_reg_mem_cmd_sz);
   cmd_data[i++] = PM4_WAIT_REG_MEM_DW1(PM4_WAIT_REG_MEM_FUNCTION_EQUAL_TO_REFERENCE |
                                        PM4_WAIT_REG_MEM_MEM_SPACE_MEMORY_SPACE |
                                        PM4_WAIT_REG_MEM_OPERATION_WAIT_REG_MEM);
@@ -3922,7 +3880,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
   if (isa_->GetMajorVersion() == 12 &&
       (isa_->GetMinorVersion() == 0 || isa_->GetMinorVersion() == 5)) {
     cmd_data[i++] =
-        PM4_HDR(PM4_HDR_IT_OPCODE_ACQUIRE_MEM, acquire_mem_cmd_sz, isa_->GetMajorVersion());
+        PM4_HDR(PM4_HDR_IT_OPCODE_ACQUIRE_MEM, acquire_mem_cmd_sz);
     cmd_data[i++] = 0;                                // DW1: COHER_CNTL
     cmd_data[i++] = 0;                                // DW2: COHER_SIZE
     cmd_data[i++] = 0;                                // DW3: COHER_SIZE_HI
@@ -3938,7 +3896,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
        to_copy -= copy_bytes) {
 
     /* DMA_DATA PACKETS, copy buffer using CPDMA */
-    cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_DMA_DATA, dma_data_cmd_sz, isa_->GetMajorVersion());
+    cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_DMA_DATA, dma_data_cmd_sz);
     cmd_data[i++] = PM4_DMA_DATA_DW1(PM4_DMA_DATA_DST_SEL_DST_ADDR_USING_L2 |
                                      PM4_DMA_DATA_SRC_SEL_SRC_ADDR_USING_L2);
     cmd_data[i++] = PM4_DMA_DATA_DW2_SRC_ADDR_LO((uint64_t)buffer_temp);
@@ -3957,7 +3915,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
   }
 
   /* WRITE_DATA, Reset buf_written_val */
-  cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_WRITE_DATA, write_data_cmd_sz, isa_->GetMajorVersion());
+  cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_WRITE_DATA, write_data_cmd_sz);
   cmd_data[i++] = PM4_WRITE_DATA_DW1(PM4_WRITE_DATA_DST_SEL_TC_L2 |
                                      PM4_WRITE_DATA_WR_CONFIRM_WAIT_CONFIRMATION);
   cmd_data[i++] = PM4_WRITE_DATA_DW2_DST_MEM_ADDR_LO(buf_written_val[which_buffer]);
@@ -3966,7 +3924,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
 
   if (properties_.NumXcc > 1) {
     cmd_data[0] =
-      PM4_HDR(PM4_HDR_IT_OPCODE_PRED_EXEC, pred_exec_cmd_sz, isa_->GetMajorVersion());
+      PM4_HDR(PM4_HDR_IT_OPCODE_PRED_EXEC, pred_exec_cmd_sz);
     cmd_data[1] =
       PM4_PRED_EXEC_DW2_EXEC_COUNT(i - pred_exec_cmd_sz) | PM4_PRED_EXEC_DW2_VIRTUALXCCID_SELECT(0x1);
   }

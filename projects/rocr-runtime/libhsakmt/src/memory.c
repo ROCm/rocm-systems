@@ -45,55 +45,17 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtSetMemoryPolicyCtx(HsaKFDContext *ctx,
 					      void *MemoryAddressAlternate,
 					      HSAuint64 MemorySizeInBytes)
 {
-	struct kfd_ioctl_set_memory_policy_args args = {0};
-	HSAKMT_STATUS result;
-	uint32_t gpu_id;
-
-	CHECK_KFD_OPEN();
-
-	pr_debug("[%s] node %d; default %d; alternate %d\n",
-		__func__, Node, DefaultPolicy, AlternatePolicy);
-
-	result = hsakmt_validate_nodeid(ctx, Node, &gpu_id);
-	if (result != HSAKMT_STATUS_SUCCESS)
-		return result;
-
-	if (hsakmt_get_gfxv_by_node_id(ctx, Node) != GFX_VERSION_KAVERI)
-		/* This is a legacy API useful on Kaveri only. On dGPU
-		 * the alternate aperture is setup and used
-		 * automatically for coherent allocations. Don't let
-		 * app override it.
-		 */
-		return HSAKMT_STATUS_NOT_IMPLEMENTED;
-
-	/*
-	 * We accept any legal policy and alternate address location.
-	 * You get CC everywhere anyway.
+	/* This is a legacy API useful on Kaveri only. On dGPU the alternate
+	 * aperture is setup and used automatically for coherent allocations.
+	 * GFX7/GFX8 (including Kaveri) are no longer supported.
 	 */
-	if ((DefaultPolicy != HSA_CACHING_CACHED &&
-		DefaultPolicy != HSA_CACHING_NONCACHED) ||
-			(AlternatePolicy != HSA_CACHING_CACHED &&
-			AlternatePolicy != HSA_CACHING_NONCACHED))
-		return HSAKMT_STATUS_INVALID_PARAMETER;
-
-	CHECK_PAGE_MULTIPLE(MemoryAddressAlternate);
-	CHECK_PAGE_MULTIPLE(MemorySizeInBytes);
-
-	args.gpu_id = gpu_id;
-	args.default_policy = (DefaultPolicy == HSA_CACHING_CACHED) ?
-					KFD_IOC_CACHE_POLICY_COHERENT :
-					KFD_IOC_CACHE_POLICY_NONCOHERENT;
-
-	args.alternate_policy = (AlternatePolicy == HSA_CACHING_CACHED) ?
-					KFD_IOC_CACHE_POLICY_COHERENT :
-					KFD_IOC_CACHE_POLICY_NONCOHERENT;
-
-	args.alternate_aperture_base = (uintptr_t) MemoryAddressAlternate;
-	args.alternate_aperture_size = MemorySizeInBytes;
-
-	int err = hsakmt_ioctl(ctx->fd, AMDKFD_IOC_SET_MEMORY_POLICY, &args);
-
-	return (err == -1) ? HSAKMT_STATUS_ERROR : HSAKMT_STATUS_SUCCESS;
+	(void)ctx;
+	(void)Node;
+	(void)DefaultPolicy;
+	(void)AlternatePolicy;
+	(void)MemoryAddressAlternate;
+	(void)MemorySizeInBytes;
+	return HSAKMT_STATUS_NOT_IMPLEMENTED;
 }
 
 HSAuint32 hsakmt_PageSizeFromFlags(unsigned int pageSizeFlags)

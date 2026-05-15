@@ -28,15 +28,6 @@
 
 void KFDGraphicsInterop::RegisterGraphicsHandle(int gpuNode) {
 
-    HsaNodeInfo* m_NodeInfo = Get_NodeInfo();
-    const HsaNodeProperties *pNodeProps = m_NodeInfo->GetNodeProperties(gpuNode);
-    const HSAuint32 familyID = FamilyIdFromNode(pNodeProps);
-
-    if (isTonga(pNodeProps)) {
-        LOG() << "Skipping test: Tonga workaround in thunk returns incorrect allocation size." << std::endl;
-        return;
-    }
-
     HSAuint32 nodes[1] = {(uint32_t)gpuNode};
 
     const char metadata[] = "This data is really meta.";
@@ -51,10 +42,7 @@ void KFDGraphicsInterop::RegisterGraphicsHandle(int gpuNode) {
     // Create the buffer with metadata and get a dmabuf handle to it
     struct amdgpu_bo_alloc_request alloc;
     amdgpu_bo_handle handle;
-    if (familyID == FAMILY_CZ || isTonga(pNodeProps))
-        alloc.alloc_size = PAGE_SIZE * 8;
-    else
-        alloc.alloc_size = PAGE_SIZE;
+    alloc.alloc_size = PAGE_SIZE;
     alloc.phys_alignment = PAGE_SIZE;
     alloc.preferred_heap = AMDGPU_GEM_DOMAIN_VRAM;
     alloc.flags = AMDGPU_GEM_CREATE_CPU_ACCESS_REQUIRED;
@@ -190,10 +178,6 @@ TEST_F(KFDGraphicsInterop, RegisterForeignDeviceMem) {
         }
     }
 
-    const HsaNodeProperties *pNodeProps =
-        m_NodeInfo.GetNodeProperties(gpuNode2);
-    const HSAuint32 familyID = FamilyIdFromNode(pNodeProps);
-
     int rn = FindDRMRenderNode(gpuNode2);
     if (rn < 0) {
         LOG() << "Skipping test: Cound not find render node for 2nd GPU." << std::endl;
@@ -203,10 +187,7 @@ TEST_F(KFDGraphicsInterop, RegisterForeignDeviceMem) {
     // Allocate CPU accessible device memory on gpuNode2
     struct amdgpu_bo_alloc_request alloc;
     amdgpu_bo_handle handle;
-    if (familyID == FAMILY_CZ || isTonga(pNodeProps))
-        alloc.alloc_size = PAGE_SIZE * 8;
-    else
-        alloc.alloc_size = PAGE_SIZE;
+    alloc.alloc_size = PAGE_SIZE;
     alloc.phys_alignment = PAGE_SIZE;
     alloc.preferred_heap = AMDGPU_GEM_DOMAIN_VRAM;
     alloc.flags = AMDGPU_GEM_CREATE_CPU_ACCESS_REQUIRED;

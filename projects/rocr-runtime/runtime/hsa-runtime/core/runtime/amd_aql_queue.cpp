@@ -1208,14 +1208,6 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
   // If we had to reduce number of waves
   if (scratch.large) {
     amd_queue_.queue_properties |= AMD_QUEUE_PROPERTIES_USE_SCRATCH_ONCE;
-    // Set system release fence to flush scratch stores with older firmware versions.
-    if ((agent_->supported_isas()[0]->GetMajorVersion() == 8) && (agent_->GetMicrocodeVersion() < 729)) {
-      pkt->dispatch.header &=
-          ~(((1 << HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE) - 1)
-            << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
-      pkt->dispatch.header |=
-          (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
-    }
   } else if (scratch.alt_size && scratch.main_size > scratch.alt_size) {
     // Not using use-scratch-once, and dispatches that would fit in alt-scratch would also fit in
     // main scratch. No need for alt-scratch.
@@ -1563,8 +1555,6 @@ void AqlQueue::SetProfiling(bool enabled) {
 
 // If in_signal is NULL then this ExecutePM4 will block and wait for PM4 commands to complete
 // If in_signal is provided, then ExecutePM4 will return and caller may wait for in_signal
-// Note: On gfx8, there is no completion signal support, so ExecutePM4 will block even if
-// in_signal is provided, and it is still valid to check in_signal after ExecutePM4 returns.
 void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope_t acquireFence,
                           hsa_fence_scope_t releaseFence, hsa_signal_t* in_signal) {
   // pm4_ib_buf_ is a shared resource, so mutually exclude here.
@@ -1593,8 +1583,7 @@ void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope
   constexpr uint32_t ib_jump_size_dw = 4;
 
   uint32_t ib_jump_cmd[ib_jump_size_dw] = {
-      PM4_HDR(PM4_HDR_IT_OPCODE_INDIRECT_BUFFER, ib_jump_size_dw,
-                              agent_->supported_isas()[0]->GetMajorVersion()),
+      PM4_HDR(PM4_HDR_IT_OPCODE_INDIRECT_BUFFER, ib_jump_size_dw),
       PM4_INDIRECT_BUFFER_DW1_IB_BASE_LO(uint32_t(uintptr_t(pm4_ib_buf_) >> 2)),
       PM4_INDIRECT_BUFFER_DW2_IB_BASE_HI(uint32_t(uintptr_t(pm4_ib_buf_) >> 32)),
       (PM4_INDIRECT_BUFFER_DW3_IB_SIZE(uint32_t(cmd_size_b / sizeof(uint32_t))) |
@@ -1606,80 +1595,37 @@ void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope
   hsa_signal_t local_signal = {0};
   hsa_status_t err = HSA_STATUS_SUCCESS;
 
-  if (agent_->supported_isas()[0]->GetMajorVersion() <= 8) {
-    // Construct a set of PM4 to fit inside the AQL packet slot.
-    uint32_t slot_dw_idx = 0;
+  // Construct an AQL packet to jump to the PM4 IB.
+  struct amd_aql_pm4_ib {
+    uint16_t header;
+    uint16_t ven_hdr;
+    uint32_t ib_jump_cmd[4];
+    uint32_t dw_cnt_remain;
+    uint32_t reserved[8];
+    hsa_signal_t completion_signal;
+  };
 
-    // Construct a no-op command to pad the queue slot.
-    constexpr uint32_t rel_mem_size_dw = 7;
-    constexpr uint32_t nop_pad_size_dw = slot_size_dw - (ib_jump_size_dw + rel_mem_size_dw);
-
-    uint32_t* nop_pad = &slot_data[slot_dw_idx];
-    slot_dw_idx += nop_pad_size_dw;
-
-    nop_pad[0] = PM4_HDR(PM4_HDR_IT_OPCODE_NOP, nop_pad_size_dw,
-                              agent_->supported_isas()[0]->GetMajorVersion());
-
-    for (uint32_t i = 1; i < nop_pad_size_dw; ++i) {
-      nop_pad[i] = 0;
-    }
-
-    // Copy in command to execute the IB.
-    assert(slot_dw_idx + ib_jump_size_dw <= slot_size_dw && "PM4 exceeded queue slot size");
-    uint32_t* ib_jump = &slot_data[slot_dw_idx];
-    slot_dw_idx += ib_jump_size_dw;
-
-    memcpy(ib_jump, ib_jump_cmd, sizeof(ib_jump_cmd));
-
-    // Construct a command to advance the read index and invalidate the packet
-    // header. This must be the last command since this releases the queue slot
-    // for writing.
-    assert(slot_dw_idx + rel_mem_size_dw <= slot_size_dw && "PM4 exceeded queue slot size");
-    uint32_t* rel_mem = &slot_data[slot_dw_idx];
-
-    rel_mem[0] = PM4_HDR(PM4_HDR_IT_OPCODE_RELEASE_MEM, rel_mem_size_dw,
-                              agent_->supported_isas()[0]->GetMajorVersion());
-    rel_mem[1] = PM4_RELEASE_MEM_DW1_EVENT_INDEX(PM4_RELEASE_MEM_EVENT_INDEX_AQL);
-    rel_mem[2] = 0;
-    rel_mem[3] = 0;
-    rel_mem[4] = 0;
-    rel_mem[5] = 0;
-    rel_mem[6] = 0;
-  } else if (agent_->supported_isas()[0]->GetMajorVersion() >= 9) {
-    // Construct an AQL packet to jump to the PM4 IB.
-    struct amd_aql_pm4_ib {
-      uint16_t header;
-      uint16_t ven_hdr;
-      uint32_t ib_jump_cmd[4];
-      uint32_t dw_cnt_remain;
-      uint32_t reserved[8];
-      hsa_signal_t completion_signal;
-    };
-
-    if (!in_signal) {
-      err = hsa_signal_create(1, 0, NULL, &local_signal);
-      assert(err == HSA_STATUS_SUCCESS);
-    }
-
-    constexpr uint32_t AMD_AQL_FORMAT_PM4_IB = 0x1;
-
-    amd_aql_pm4_ib aql_pm4_ib{};
-    aql_pm4_ib.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE |
-                        (acquireFence << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
-                        (releaseFence << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
-
-    aql_pm4_ib.ven_hdr = AMD_AQL_FORMAT_PM4_IB;
-    aql_pm4_ib.ib_jump_cmd[0] = ib_jump_cmd[0];
-    aql_pm4_ib.ib_jump_cmd[1] = ib_jump_cmd[1];
-    aql_pm4_ib.ib_jump_cmd[2] = ib_jump_cmd[2];
-    aql_pm4_ib.ib_jump_cmd[3] = ib_jump_cmd[3];
-    aql_pm4_ib.dw_cnt_remain = 0xA;
-    aql_pm4_ib.completion_signal = in_signal ? *in_signal : local_signal;
-
-    memcpy(slot_data, &aql_pm4_ib, sizeof(aql_pm4_ib));
-  } else {
-    assert(false && "AqlQueue::ExecutePM4 not implemented");
+  if (!in_signal) {
+    err = hsa_signal_create(1, 0, NULL, &local_signal);
+    assert(err == HSA_STATUS_SUCCESS);
   }
+
+  constexpr uint32_t AMD_AQL_FORMAT_PM4_IB = 0x1;
+
+  amd_aql_pm4_ib aql_pm4_ib{};
+  aql_pm4_ib.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE |
+                      (acquireFence << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+                      (releaseFence << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+
+  aql_pm4_ib.ven_hdr = AMD_AQL_FORMAT_PM4_IB;
+  aql_pm4_ib.ib_jump_cmd[0] = ib_jump_cmd[0];
+  aql_pm4_ib.ib_jump_cmd[1] = ib_jump_cmd[1];
+  aql_pm4_ib.ib_jump_cmd[2] = ib_jump_cmd[2];
+  aql_pm4_ib.ib_jump_cmd[3] = ib_jump_cmd[3];
+  aql_pm4_ib.dw_cnt_remain = 0xA;
+  aql_pm4_ib.completion_signal = in_signal ? *in_signal : local_signal;
+
+  memcpy(slot_data, &aql_pm4_ib, sizeof(aql_pm4_ib));
 
   // Copy buffered commands into the queue slot.
   // Overwrite the AQL invalid header (first dword) last.
@@ -1696,12 +1642,7 @@ void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope
   doorbell->StoreRelease(write_idx);
 
   // Wait for the packet to be consumed.
-  if (agent_->supported_isas()[0]->GetMajorVersion() <= 8) {
-    while (queue->LoadReadIndexRelaxed() <= write_idx)
-      os::YieldThread();
-
-    if (in_signal) hsa_signal_store_screlease(*in_signal, 0);
-  } else if (!in_signal) {
+  if (!in_signal) {
     // On gfx9 and newer, if in_signal is not provided, we block and wait for own signal
     hsa_signal_value_t ret;
     ret = hsa_signal_wait_scacquire(local_signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,

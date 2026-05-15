@@ -2309,14 +2309,8 @@ static int fmm_set_memory_policy(HsaKFDContext *ctx,
 
 static uint32_t get_vm_alignment(uint32_t device_id)
 {
-	int page_size = 0;
-
-	if (device_id >= 0x6920 && device_id <= 0x6939) /* Tonga */
-		page_size = TONGA_PAGE_SIZE;
-	else if (device_id >= 0x9870 && device_id <= 0x9877) /* Carrizo */
-		page_size = TONGA_PAGE_SIZE;
-
-	return MAX(PAGE_SIZE, page_size);
+	(void)device_id;
+	return PAGE_SIZE;
 }
 
 static HSAKMT_STATUS get_process_apertures(HsaKFDContext *ctx,

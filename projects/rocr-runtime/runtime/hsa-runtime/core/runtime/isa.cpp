@@ -170,10 +170,6 @@ bool Isa::GetInfo(const hsa_isa_info_t &attribute, void *value) const {
     }
     case HSA_ISA_INFO_PROFILES: {
       bool profiles[2] = {true, false};
-      if (this->GetVersion() == Version(7, 0, 0) ||
-          this->GetVersion() == Version(8, 0, 1)) {
-        profiles[1] = true;
-      }
       memcpy(value, profiles, sizeof(profiles));
       return true;
     }
@@ -188,11 +184,7 @@ bool Isa::GetInfo(const hsa_isa_info_t &attribute, void *value) const {
       return true;
     }
     case HSA_ISA_INFO_FAST_F16_OPERATION: {
-      if (this->GetMajorVersion() >= 8) {
-        *((bool*)value) = true;
-      } else {
-        *((bool*)value) = false;
-      }
+      *((bool*)value) = true;
       return true;
     }
     case HSA_ISA_INFO_WORKGROUP_MAX_DIM: {
@@ -349,18 +341,6 @@ const IsaRegistry::IsaMap& IsaRegistry::GetSupportedIsas() {
   const IsaFeature enabled = IsaFeature::Enabled;
 
   //               Target ID                 Version   SRAMECC      XNACK
-  ISAREG_ENTRY_GEN("gfx700",                 7, 0, 0,  unsupported, unsupported, 64, "")
-  ISAREG_ENTRY_GEN("gfx701",                 7, 0, 1,  unsupported, unsupported, 64, "")
-  ISAREG_ENTRY_GEN("gfx702",                 7, 0, 2,  unsupported, unsupported, 64, "")
-  ISAREG_ENTRY_GEN("gfx801",                 8, 0, 1,  unsupported, any,         64, "")
-  ISAREG_ENTRY_GEN("gfx801:xnack-",          8, 0, 1,  unsupported, disabled,    64, "")
-  ISAREG_ENTRY_GEN("gfx801:xnack+",          8, 0, 1,  unsupported, enabled,     64, "")
-  ISAREG_ENTRY_GEN("gfx802",                 8, 0, 2,  unsupported, unsupported, 64, "")
-  ISAREG_ENTRY_GEN("gfx803",                 8, 0, 3,  unsupported, unsupported, 64, "")
-  ISAREG_ENTRY_GEN("gfx805",                 8, 0, 5,  unsupported, unsupported, 64, "")
-  ISAREG_ENTRY_GEN("gfx810",                 8, 1, 0,  unsupported, any,         64, "")
-  ISAREG_ENTRY_GEN("gfx810:xnack-",          8, 1, 0,  unsupported, disabled,    64, "")
-  ISAREG_ENTRY_GEN("gfx810:xnack+",          8, 1, 0,  unsupported, enabled,     64, "")
   ISAREG_ENTRY_GEN("gfx900",                 9, 0, 0,  unsupported, any,         64, "gfx9-generic")
   ISAREG_ENTRY_GEN("gfx900:xnack-",          9, 0, 0,  unsupported, disabled,    64, "gfx9-generic:xnack-")
   ISAREG_ENTRY_GEN("gfx900:xnack+",          9, 0, 0,  unsupported, enabled,     64, "gfx9-generic:xnack+")

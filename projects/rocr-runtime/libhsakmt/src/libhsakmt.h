@@ -81,9 +81,6 @@ extern int hsakmt_page_shift;
 #define PAGE_SHIFT hsakmt_page_shift
 #endif
 
-/* VI HW bug requires this virtual address alignment */
-#define TONGA_PAGE_SIZE 0x8000
-
 /* 64KB BigK fragment size for TLB efficiency */
 #define GPU_BIGK_PAGE_SIZE (1 << 16)
 
@@ -159,15 +156,6 @@ extern int hsakmt_debug_level;
 	(((ui32.Major) << 16) | ((ui32.Minor) << 8) | (ui32.Stepping))
 
 enum full_gfx_versions {
-	GFX_VERSION_KAVERI		= 0x070000,
-	GFX_VERSION_HAWAII		= 0x070001,
-	GFX_VERSION_CARRIZO		= 0x080001,
-	GFX_VERSION_TONGA		= 0x080002,
-	GFX_VERSION_FIJI		= 0x080003,
-	GFX_VERSION_POLARIS10		= 0x080003,
-	GFX_VERSION_POLARIS11		= 0x080003,
-	GFX_VERSION_POLARIS12		= 0x080003,
-	GFX_VERSION_VEGAM		= 0x080003,
 	GFX_VERSION_VEGA10		= 0x090000,
 	GFX_VERSION_RAVEN		= 0x090002,
 	GFX_VERSION_VEGA12		= 0x090004,

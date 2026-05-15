@@ -623,7 +623,7 @@ exit:
 
 TEST_F(KFDDBGTest, HitAddressWatch) {
     TEST_START(TESTPROFILE_RUNALL)
-    if (m_FamilyId >= FAMILY_VI) {
+    {
         int defaultGPUNode = m_NodeInfo.HsaDefaultGPUNode();
 
         if (hsaKmtCheckRuntimeDebugSupport()) {
@@ -739,9 +739,6 @@ TEST_F(KFDDBGTest, HitAddressWatch) {
         ASSERT_SUCCESS(queue.Destroy());
         debug->Detach();
         hsaKmtRuntimeDisable();
-    } else {
-        LOG() << "Skipping test: Test not supported on family ID 0x"
-              << m_FamilyId << "." << std::endl;
     }
 exit:
     LOG() << std::endl;

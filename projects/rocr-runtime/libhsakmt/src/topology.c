@@ -123,98 +123,6 @@ static HSAKMT_STATUS topology_take_snapshot(HsaKFDContext *ctx);
 static void topology_drop_snapshot(HsaKFDContext *ctx);
 
 static const struct hsa_gfxip_table gfxip_lookup_table[] = {
-	/* Kaveri Family */
-	{ 0x1304, 7, 0, 0, "Spectre" },
-	{ 0x1305, 7, 0, 0, "Spectre" },
-	{ 0x1306, 7, 0, 0, "Spectre" },
-	{ 0x1307, 7, 0, 0, "Spectre" },
-	{ 0x1309, 7, 0, 0, "Spectre" },
-	{ 0x130A, 7, 0, 0, "Spectre" },
-	{ 0x130B, 7, 0, 0, "Spectre" },
-	{ 0x130C, 7, 0, 0, "Spectre" },
-	{ 0x130D, 7, 0, 0, "Spectre" },
-	{ 0x130E, 7, 0, 0, "Spectre" },
-	{ 0x130F, 7, 0, 0, "Spectre" },
-	{ 0x1310, 7, 0, 0, "Spectre" },
-	{ 0x1311, 7, 0, 0, "Spectre" },
-	{ 0x1312, 7, 0, 0, "Spooky" },
-	{ 0x1313, 7, 0, 0, "Spectre" },
-	{ 0x1315, 7, 0, 0, "Spectre" },
-	{ 0x1316, 7, 0, 0, "Spooky" },
-	{ 0x1317, 7, 0, 0, "Spooky" },
-	{ 0x1318, 7, 0, 0, "Spectre" },
-	{ 0x131B, 7, 0, 0, "Spectre" },
-	{ 0x131C, 7, 0, 0, "Spectre" },
-	{ 0x131D, 7, 0, 0, "Spectre" },
-	/* Hawaii Family */
-	{ 0x67A0, 7, 0, 1, "Hawaii" },
-	{ 0x67A1, 7, 0, 1, "Hawaii" },
-	{ 0x67A2, 7, 0, 1, "Hawaii" },
-	{ 0x67A8, 7, 0, 1, "Hawaii" },
-	{ 0x67A9, 7, 0, 1, "Hawaii" },
-	{ 0x67AA, 7, 0, 1, "Hawaii" },
-	{ 0x67B0, 7, 0, 1, "Hawaii" },
-	{ 0x67B1, 7, 0, 1, "Hawaii" },
-	{ 0x67B8, 7, 0, 1, "Hawaii" },
-	{ 0x67B9, 7, 0, 1, "Hawaii" },
-	{ 0x67BA, 7, 0, 1, "Hawaii" },
-	{ 0x67BE, 7, 0, 1, "Hawaii" },
-	/* Carrizo Family */
-	{ 0x9870, 8, 0, 1, "Carrizo" },
-	{ 0x9874, 8, 0, 1, "Carrizo" },
-	{ 0x9875, 8, 0, 1, "Carrizo" },
-	{ 0x9876, 8, 0, 1, "Carrizo" },
-	{ 0x9877, 8, 0, 1, "Carrizo" },
-	/* Tonga Family */
-	{ 0x6920, 8, 0, 2, "Tonga" },
-	{ 0x6921, 8, 0, 2, "Tonga" },
-	{ 0x6928, 8, 0, 2, "Tonga" },
-	{ 0x6929, 8, 0, 2, "Tonga" },
-	{ 0x692B, 8, 0, 2, "Tonga" },
-	{ 0x692F, 8, 0, 2, "Tonga" },
-	{ 0x6930, 8, 0, 2, "Tonga" },
-	{ 0x6938, 8, 0, 2, "Tonga" },
-	{ 0x6939, 8, 0, 2, "Tonga" },
-	/* Fiji */
-	{ 0x7300, 8, 0, 3, "Fiji" },
-	{ 0x730F, 8, 0, 3, "Fiji" },
-	/* Polaris10 */
-	{ 0x67C0, 8, 0, 3, "Polaris10" },
-	{ 0x67C1, 8, 0, 3, "Polaris10" },
-	{ 0x67C2, 8, 0, 3, "Polaris10" },
-	{ 0x67C4, 8, 0, 3, "Polaris10" },
-	{ 0x67C7, 8, 0, 3, "Polaris10" },
-	{ 0x67C8, 8, 0, 3, "Polaris10" },
-	{ 0x67C9, 8, 0, 3, "Polaris10" },
-	{ 0x67CA, 8, 0, 3, "Polaris10" },
-	{ 0x67CC, 8, 0, 3, "Polaris10" },
-	{ 0x67CF, 8, 0, 3, "Polaris10" },
-	{ 0x67D0, 8, 0, 3, "Polaris10" },
-	{ 0x67DF, 8, 0, 3, "Polaris10" },
-	{ 0x6FDF, 8, 0, 3, "Polaris10" },
-	/* Polaris11 */
-	{ 0x67E0, 8, 0, 3, "Polaris11" },
-	{ 0x67E1, 8, 0, 3, "Polaris11" },
-	{ 0x67E3, 8, 0, 3, "Polaris11" },
-	{ 0x67E7, 8, 0, 3, "Polaris11" },
-	{ 0x67E8, 8, 0, 3, "Polaris11" },
-	{ 0x67E9, 8, 0, 3, "Polaris11" },
-	{ 0x67EB, 8, 0, 3, "Polaris11" },
-	{ 0x67EF, 8, 0, 3, "Polaris11" },
-	{ 0x67FF, 8, 0, 3, "Polaris11" },
-	/* Polaris12 */
-	{ 0x6980, 8, 0, 3, "Polaris12" },
-	{ 0x6981, 8, 0, 3, "Polaris12" },
-	{ 0x6985, 8, 0, 3, "Polaris12" },
-	{ 0x6986, 8, 0, 3, "Polaris12" },
-	{ 0x6987, 8, 0, 3, "Polaris12" },
-	{ 0x6995, 8, 0, 3, "Polaris12" },
-	{ 0x6997, 8, 0, 3, "Polaris12" },
-	{ 0x699F, 8, 0, 3, "Polaris12" },
-	/* VegaM */
-	{ 0x694C, 8, 0, 3, "VegaM" },
-	{ 0x694E, 8, 0, 3, "VegaM" },
-	{ 0x694F, 8, 0, 3, "VegaM" },
 	/* Vega10 */
 	{ 0x6860, 9, 0, 0, "Vega10" },
 	{ 0x6861, 9, 0, 0, "Vega10" },
@@ -2429,19 +2337,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetNodeMemoryPropertiesCtx(HsaKFDContext *ctx,
 				&MemoryProperties[i].VirtualBaseAddress, &aperture_limit) == HSAKMT_STATUS_SUCCESS) {
 		MemoryProperties[i].HeapType = HSA_HEAPTYPE_GPU_LDS;
 		MemoryProperties[i].SizeInBytes = node_props[NodeId].node.LDSSizeInKB * 1024;
-		i++;
-	}
-
-	/* Add Local memory - HSA_HEAPTYPE_FRAME_BUFFER_PRIVATE.
-	 * For dGPU the topology node contains Local Memory and it is added by
-	 * the for loop above
-	 */
-	if (hsakmt_get_gfxv_by_node_id(ctx, NodeId) == GFX_VERSION_KAVERI && i < NumBanks &&
-		node_props[NodeId].node.LocalMemSize > 0 &&
-		hsakmt_fmm_get_aperture_base_and_limit(ctx, FMM_GPUVM, gpu_id,
-				&MemoryProperties[i].VirtualBaseAddress, &aperture_limit) == HSAKMT_STATUS_SUCCESS) {
-		MemoryProperties[i].HeapType = HSA_HEAPTYPE_FRAME_BUFFER_PRIVATE;
-		MemoryProperties[i].SizeInBytes = node_props[NodeId].node.LocalMemSize;
 		i++;
 	}
 

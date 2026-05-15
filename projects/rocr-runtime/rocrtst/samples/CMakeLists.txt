@@ -25,7 +25,7 @@ cmake_minimum_required(VERSION 2.8.0)
 #       ROCRTST_BLD_BITS=32 or ROCRTST_BLD_BITS=64
 #
 #   4) Set TARGET_DEVICES to indicate gpu types for kernel
-#      builds (e.g., "gfx803;gfx900; ...")
+#      builds (e.g., "gfx900; ...")
 #
 #   Building rocrtst Suite
 #
@@ -43,7 +43,7 @@ cmake_minimum_required(VERSION 3.5.0)
 set(PROJECT_NAME "sample64")
 project (${PROJECT_NAME})
 
-set(DEFAULT_TARGET "gfx803")
+set(DEFAULT_TARGET "gfx900")
 
 #############################
 # COMMON AREA
@@ -108,9 +108,9 @@ if(NOT DEFINED TARGET_DEVICES OR TARGET_DEVICES STREQUAL "")
     set(TARGET_DEVICES ${AMDGPU_TARGETS})
   else()
     message("WARNING: No targets devices provided on command line")
-    message("  e.g., cmake -DTARGET_DEVICES=\"gfx803;gfx900;gfx...\" ..")
+    message("  e.g., cmake -DTARGET_DEVICES=\"gfx900;gfx...\" ..")
     message("  Using default target of ${DEFAULT_TARGET}")
-    list(APPEND TARGET_DEVICES "gfx803")
+    list(APPEND TARGET_DEVICES "gfx900")
   endif()
 endif()
 

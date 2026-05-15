@@ -16,7 +16,7 @@
 #       ROCRTST_BLD_BITS=32 or ROCRTST_BLD_BITS=64
 #
 #   4) Set TARGET_DEVICES to indicate gpu types for kernel
-#      builds (e.g., "gfx803;gfx900; ...")
+#      builds (e.g., "gfx900; ...")
 #
 #   Building rocrtst Suite
 #
@@ -109,8 +109,7 @@ else()
   set (CPACK_RPM_PACKAGE_REQUIRES "rocm-core,hsa-rocr-static-devel")
 endif()
 
-set(DEFAULT_TARGETS "gfx700;gfx701;gfx702;gfx801;gfx802;gfx803;gfx805;gfx810"
-                    "gfx900;gfx902;gfx904;gfx906;gfx908;gfx909;gfx90a;gfx90c;gfx942;gfx950"
+set(DEFAULT_TARGETS "gfx900;gfx902;gfx904;gfx906;gfx908;gfx909;gfx90a;gfx90c;gfx942;gfx950"
                     "gfx1010;gfx1011;gfx1012;gfx1013;gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036"
                     "gfx1100;gfx1101;gfx1102;gfx1103;gfx1150;gfx1151;gfx1152;gfx1200;gfx1201;gfx1250;gfx1251")
 
@@ -330,7 +329,7 @@ if(NOT DEFINED TARGET_DEVICES OR TARGET_DEVICES STREQUAL "")
     set(TARGET_DEVICES ${AMDGPU_TARGETS})
   else()
     message("No target devices provided on command line")
-    message("  e.g., cmake -DTARGET_DEVICES=\"gfx803;gfx900;gfx...\" ..")
+    message("  e.g., cmake -DTARGET_DEVICES=\"gfx900;gfx...\" ..")
     message("  Using default target of ${DEFAULT_TARGETS}")
     list(APPEND TARGET_DEVICES ${DEFAULT_TARGETS})
   endif()

@@ -122,8 +122,6 @@ include_directories ( ${TOOLS_SOURCE_DIR}/sp3/Chip/R1000 )
 include_directories ( ${TOOLS_SOURCE_DIR}/sp3/Chip/R1000/ci )
 include_directories ( ${TOOLS_SOURCE_DIR}/sp3/Chip/R1000/si )
 include_directories ( ${TOOLS_SOURCE_DIR}/sp3/Chip/R1000/gen )
-include_directories ( ${TOOLS_SOURCE_DIR}/sp3/Chip/R1000/gfx8 )
-include_directories ( ${TOOLS_SOURCE_DIR}/sp3/Chip/R1000/gfx81 )
 include_directories ( ${TOOLS_SOURCE_DIR}/sp3/Chip/R1000/gfx9 )
 
 set ( CORE_SRC   ${OPEN_SOURCE_DIR}/hsa-runtime/core/common/shared.cpp
@@ -199,17 +197,6 @@ set ( SP3_R1000_SRC   ${TOOLS_SOURCE_DIR}/sp3/Chip/R1000/sp3-asic.c
                       ${TOOLS_SOURCE_DIR}/sp3/Chip/R1000/si/sp3-si-inst-info.c
                       ${TOOLS_SOURCE_DIR}/sp3/Chip/R1000/si/sp3-si-regs.c
                       ${TOOLS_SOURCE_DIR}/sp3/Chip/R1000/si/sp3-si-tables.c
-                      ${TOOLS_SOURCE_DIR}/sp3/Chip/R1000/gfx81/sp3-gfx81-asic.c
-                      ${TOOLS_SOURCE_DIR}/sp3/Chip/R1000/gfx81/sp3-gfx81-dis.c
-                      ${TOOLS_SOURCE_DIR}/sp3/Chip/R1000/gfx81/sp3-gfx81-gen.c
-                      ${TOOLS_SOURCE_DIR}/sp3/Chip/R1000/gfx81/sp3-gfx81-inst-info.c
-                      ${TOOLS_SOURCE_DIR}/sp3/Chip/R1000/gfx81/sp3-gfx81-regs.c
-                      ${TOOLS_SOURCE_DIR}/sp3/Chip/R1000/gfx8/sp3-gfx8-asic.c
-                      ${TOOLS_SOURCE_DIR}/sp3/Chip/R1000/gfx8/sp3-gfx8-dis.c
-                      ${TOOLS_SOURCE_DIR}/sp3/Chip/R1000/gfx8/sp3-gfx8-gen.c
-                      ${TOOLS_SOURCE_DIR}/sp3/Chip/R1000/gfx8/sp3-gfx8-inst-info.c
-                      ${TOOLS_SOURCE_DIR}/sp3/Chip/R1000/gfx8/sp3-gfx8-regs.c
-                      ${TOOLS_SOURCE_DIR}/sp3/Chip/R1000/gfx8/sp3-gfx8-tables.c
                       ${TOOLS_SOURCE_DIR}/sp3/Chip/R1000/gfx9/sp3-gfx9-asic.c
                       ${TOOLS_SOURCE_DIR}/sp3/Chip/R1000/gfx9/sp3-gfx9-dis.c
                       ${TOOLS_SOURCE_DIR}/sp3/Chip/R1000/gfx9/sp3-gfx9-gen.c

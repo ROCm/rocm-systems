@@ -213,8 +213,9 @@ hsa_status_t ImageRuntime::CreateImageManager(hsa_agent_t agent, void* data) {
       image_manager = new ImageManagerAi();
       break;
     default:
-      image_manager = new ImageManagerKv();
-      break;
+      debug_print("ERROR: Unsupported GFX major version %u (GFX7/GFX8 are no longer supported)\n",
+                  major_ver);
+      return HSA_STATUS_ERROR_INVALID_AGENT;
     }
     hsa_error_code = image_manager->Initialize(agent);
 
@@ -820,18 +821,6 @@ hsa_status_t ImageRuntime::GetMipmapArrayLevelHandle(
 
   level_image_out.handle = 0;
 
-  // Get GPU architecture version
-  uint32_t chip_id;
-  hsa_status_t status = GetGPUAsicID(component, &chip_id);
-  if (status != HSA_STATUS_SUCCESS) {
-    return status;
-  }
-  uint32_t major_ver = MajorVerFromDevID(chip_id);
-  if (major_ver < 9) {
-    debug_print("ERROR: Mip level views not supported on GFX%u hardware\n", major_ver);
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  }
-
   // Validate mip level
   if (mip_level < 0) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -853,6 +842,7 @@ hsa_status_t ImageRuntime::GetMipmapArrayLevelHandle(
   MipmappedArray* level_view = MipmappedArray::Create(component);
   if (!level_view) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
+  hsa_status_t status = HSA_STATUS_SUCCESS;
   auto format = image_descriptor ? &image_descriptor->format : nullptr;
    if (format &&
        (array->desc.format.channel_type != format->channel_type ||

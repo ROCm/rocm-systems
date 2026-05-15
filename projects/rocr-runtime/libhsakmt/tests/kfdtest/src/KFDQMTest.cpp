@@ -820,49 +820,43 @@ HSAint64 KFDQMTest::GetAverageTimeConsumedwithCUMask(int node, uint32_t* mask, u
  * until all Shader Engines are full
  */
 void KFDQMTest::BasicCuMaskingLinear(int gpuNode) {
-    const HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
+    const HsaNodeProperties *pNodeProperties = Get_NodeInfo()->GetNodeProperties(gpuNode);
+    uint32_t ActiveCU = (pNodeProperties->NumFComputeCores / pNodeProperties->NumSIMDPerCU);
+    uint32_t numSEs = pNodeProperties->NumShaderBanks;
+    LOG() << std::dec << "# Compute cores: " << pNodeProperties->NumFComputeCores << std::endl;
+    LOG() << std::dec << "# SIMDs per CU: " << pNodeProperties->NumSIMDPerCU << std::endl;
+    LOG() << std::dec << "# Shader engines: " << numSEs << std::endl;
+    LOG() << std::dec << "# Active CUs: " << ActiveCU << std::endl;
+    HSAint64 TimewithCU1, TimewithCU;
+    uint32_t maskNumDwords = (ActiveCU + 31) / 32; /* Round up to the nearest multiple of 32 */
+    uint32_t maskNumBits = maskNumDwords * 32;
+    uint32_t mask[maskNumDwords];
+    double ratio;
 
-    if (m_FamilyId >= FAMILY_VI) {
-        const HsaNodeProperties *pNodeProperties = Get_NodeInfo()->GetNodeProperties(gpuNode);
-        uint32_t ActiveCU = (pNodeProperties->NumFComputeCores / pNodeProperties->NumSIMDPerCU);
-        uint32_t numSEs = pNodeProperties->NumShaderBanks;
-        LOG() << std::dec << "# Compute cores: " << pNodeProperties->NumFComputeCores << std::endl;
-        LOG() << std::dec << "# SIMDs per CU: " << pNodeProperties->NumSIMDPerCU << std::endl;
-        LOG() << std::dec << "# Shader engines: " << numSEs << std::endl;
-        LOG() << std::dec << "# Active CUs: " << ActiveCU << std::endl;
-        HSAint64 TimewithCU1, TimewithCU;
-        uint32_t maskNumDwords = (ActiveCU + 31) / 32; /* Round up to the nearest multiple of 32 */
-        uint32_t maskNumBits = maskNumDwords * 32;
-        uint32_t mask[maskNumDwords];
-        double ratio;
+    mask[0] = 0x1;
+    for (int i = 1; i < maskNumDwords; i++)
+        mask[i] = 0x0;
 
-        mask[0] = 0x1;
-        for (int i = 1; i < maskNumDwords; i++)
-            mask[i] = 0x0;
+    /* Execute once to get any HW optimizations out of the way */
+    TimeConsumedwithCUMask(gpuNode, mask, maskNumBits);
 
-        /* Execute once to get any HW optimizations out of the way */
-        TimeConsumedwithCUMask(gpuNode, mask, maskNumBits);
+    LOG() << "Getting baseline performance numbers (CU Mask: 0x1)" << std::endl;
+    TimewithCU1 = GetAverageTimeConsumedwithCUMask(gpuNode, mask, maskNumBits, 3);
 
-        LOG() << "Getting baseline performance numbers (CU Mask: 0x1)" << std::endl;
-        TimewithCU1 = GetAverageTimeConsumedwithCUMask(gpuNode, mask, maskNumBits, 3);
+    for (int nCUs = 2; nCUs <= ActiveCU; nCUs++) {
+        int maskIndex = (nCUs - 1) / 32;
+        mask[maskIndex] |= 1 << ((nCUs - 1) % 32);
 
-        for (int nCUs = 2; nCUs <= ActiveCU; nCUs++) {
-            int maskIndex = (nCUs - 1) / 32;
-            mask[maskIndex] |= 1 << ((nCUs - 1) % 32);
+        TimewithCU = TimeConsumedwithCUMask(gpuNode, mask, maskNumBits);
+        ratio = (double)(TimewithCU1) / ((double)(TimewithCU) * nCUs);
 
-            TimewithCU = TimeConsumedwithCUMask(gpuNode, mask, maskNumBits);
-            ratio = (double)(TimewithCU1) / ((double)(TimewithCU) * nCUs);
+        LOG() << "Expected performance of " << nCUs << " CUs vs 1 CU:" << std::endl;
+        LOG() << std::setprecision(2) << CuNegVariance << " <= " << std::fixed << std::setprecision(8)
+              << ratio << " <= " << std::setprecision(2) << CuPosVariance << std::endl;
 
-            LOG() << "Expected performance of " << nCUs << " CUs vs 1 CU:" << std::endl;
-            LOG() << std::setprecision(2) << CuNegVariance << " <= " << std::fixed << std::setprecision(8)
-                  << ratio << " <= " << std::setprecision(2) << CuPosVariance << std::endl;
+        EXPECT_TRUE((ratio >= CuNegVariance) && (ratio <= CuPosVariance));
 
-            EXPECT_TRUE((ratio >= CuNegVariance) && (ratio <= CuPosVariance));
-
-            RECORD(ratio) << "Ratio-" << nCUs << "-CUs";
-        }
-    } else {
-        LOG() << "Skipping test: Test not supported for family ID 0x" << m_FamilyId << "." << std::endl;
+        RECORD(ratio) << "Ratio-" << nCUs << "-CUs";
     }
 }
 
@@ -1494,73 +1488,67 @@ TEST_F(KFDQMTest, ExtendedCuMasking) {
  */
 void KFDQMTest::BasicCuMaskingEven(int gpuNode) {
 
-    const HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
+    const HsaNodeProperties *pNodeProperties = Get_NodeInfo()->GetNodeProperties(gpuNode);
+    uint32_t ActiveCU = (pNodeProperties->NumFComputeCores / pNodeProperties->NumSIMDPerCU);
+    uint32_t numShaderEngines = pNodeProperties->NumShaderBanks;
+    if (numShaderEngines == 1) {
+        LOG() << "Skipping test: Only 1 Shader Engine present." << std::endl;
+        return;
+    }
 
-    if (m_FamilyId >= FAMILY_VI) {
-        const HsaNodeProperties *pNodeProperties = Get_NodeInfo()->GetNodeProperties(gpuNode);
-        uint32_t ActiveCU = (pNodeProperties->NumFComputeCores / pNodeProperties->NumSIMDPerCU);
-        uint32_t numShaderEngines = pNodeProperties->NumShaderBanks;
-        if (numShaderEngines == 1) {
-            LOG() << "Skipping test: Only 1 Shader Engine present." << std::endl;
-            return;
+    LOG() << std::dec << "# Compute cores: " << pNodeProperties->NumFComputeCores << std::endl;
+    LOG() << std::dec << "# SIMDs per CU: " << pNodeProperties->NumSIMDPerCU << std::endl;
+    LOG() << std::dec << "# Shader engines: " << numShaderEngines << std::endl;
+    LOG() << std::dec << "# Active CUs: " << ActiveCU << std::endl;
+    HSAint64 TimewithCU1, TimewithCU;
+    uint32_t maskNumDwords = (ActiveCU + 31) / 32; /* Round up to the nearest multiple of 32 */
+    uint32_t maskNumBits = maskNumDwords * 32;
+    uint32_t mask[maskNumDwords];
+    int numCuPerShader = ActiveCU / numShaderEngines;
+    double ratio;
+
+    /* In KFD we symmetrically map mask to all SEs:
+     * mask[0] bit0 -> se0 cu0;
+     * mask[0] bit1 -> se1 cu0;
+     * ... (if # SE is 4)
+     * mask[0] bit4 -> se0 cu1;
+     * ...
+     */
+    /* Set Mask to 1 CU per SE */
+    memset(mask, 0, maskNumDwords * sizeof(uint32_t));
+    for (int i = 0; i < numShaderEngines; i++) {
+        int maskIndex = (i / 32) % maskNumDwords;
+        mask[maskIndex] |= 1 << (i % 32);
+    }
+
+    /* Execute once to get any HW optimizations out of the way */
+    TimeConsumedwithCUMask(gpuNode, mask, maskNumBits);
+
+    LOG() << "Getting baseline performance numbers (1 CU per SE)" << std::endl;
+    TimewithCU1 = GetAverageTimeConsumedwithCUMask(gpuNode, mask, maskNumBits, 3);
+
+    /* Each loop will add 1 more CU per SE. We use the mod and divide to handle
+     * when SEs aren't distributed in multiples of 32
+     * OR the new bit in for simplicity instead of re-creating the mask each iteration
+     */
+    for (int x = 0; x < numCuPerShader; x++) {
+        for (int se = 0; se < numShaderEngines; se++) {
+            int offset = x * numShaderEngines + se;
+            int maskIndex = (offset / 32) % maskNumDwords;
+            mask[maskIndex] |= 1 << (offset % 32);
         }
+        int nCUs = x + 1;
 
-        LOG() << std::dec << "# Compute cores: " << pNodeProperties->NumFComputeCores << std::endl;
-        LOG() << std::dec << "# SIMDs per CU: " << pNodeProperties->NumSIMDPerCU << std::endl;
-        LOG() << std::dec << "# Shader engines: " << numShaderEngines << std::endl;
-        LOG() << std::dec << "# Active CUs: " << ActiveCU << std::endl;
-        HSAint64 TimewithCU1, TimewithCU;
-        uint32_t maskNumDwords = (ActiveCU + 31) / 32; /* Round up to the nearest multiple of 32 */
-        uint32_t maskNumBits = maskNumDwords * 32;
-        uint32_t mask[maskNumDwords];
-        int numCuPerShader = ActiveCU / numShaderEngines;
-        double ratio;
+        TimewithCU = TimeConsumedwithCUMask(gpuNode, mask, maskNumBits);
+        ratio = (double)(TimewithCU1) / ((double)(TimewithCU) * nCUs);
 
-        /* In KFD we symmetrically map mask to all SEs:
-         * mask[0] bit0 -> se0 cu0;
-         * mask[0] bit1 -> se1 cu0;
-         * ... (if # SE is 4)
-         * mask[0] bit4 -> se0 cu1;
-         * ...
-         */
-        /* Set Mask to 1 CU per SE */
-        memset(mask, 0, maskNumDwords * sizeof(uint32_t));
-        for (int i = 0; i < numShaderEngines; i++) {
-            int maskIndex = (i / 32) % maskNumDwords;
-            mask[maskIndex] |= 1 << (i % 32);
-        }
+        LOG() << "Expected performance of " << nCUs << " CU(s)/SE vs 1 CU/SE:" << std::endl;
+        LOG() << std::setprecision(2) << CuNegVariance << " <= " << std::fixed << std::setprecision(8)
+              << ratio << " <= " << std::setprecision(2) << CuPosVariance << std::endl;
 
-        /* Execute once to get any HW optimizations out of the way */
-        TimeConsumedwithCUMask(gpuNode, mask, maskNumBits);
+        EXPECT_TRUE_GPU((ratio >= CuNegVariance) && (ratio <= CuPosVariance), gpuNode);
 
-        LOG() << "Getting baseline performance numbers (1 CU per SE)" << std::endl;
-        TimewithCU1 = GetAverageTimeConsumedwithCUMask(gpuNode, mask, maskNumBits, 3);
-
-        /* Each loop will add 1 more CU per SE. We use the mod and divide to handle
-         * when SEs aren't distributed in multiples of 32 (e.g. Tonga)
-         * OR the new bit in for simplicity instead of re-creating the mask each iteration
-         */
-        for (int x = 0; x < numCuPerShader; x++) {
-            for (int se = 0; se < numShaderEngines; se++) {
-                int offset = x * numShaderEngines + se;
-                int maskIndex = (offset / 32) % maskNumDwords;
-                mask[maskIndex] |= 1 << (offset % 32);
-            }
-            int nCUs = x + 1;
-
-            TimewithCU = TimeConsumedwithCUMask(gpuNode, mask, maskNumBits);
-            ratio = (double)(TimewithCU1) / ((double)(TimewithCU) * nCUs);
-
-            LOG() << "Expected performance of " << nCUs << " CU(s)/SE vs 1 CU/SE:" << std::endl;
-            LOG() << std::setprecision(2) << CuNegVariance << " <= " << std::fixed << std::setprecision(8)
-                  << ratio << " <= " << std::setprecision(2) << CuPosVariance << std::endl;
-
-            EXPECT_TRUE_GPU((ratio >= CuNegVariance) && (ratio <= CuPosVariance), gpuNode);
-
-            RECORD(ratio) << "Ratio-" << nCUs << "-CUs";
-        }
-    } else {
-        LOG() << "Skipping test: Test not supported for family ID 0x" << m_FamilyId << "." << std::endl;
+        RECORD(ratio) << "Ratio-" << nCUs << "-CUs";
     }
 }
 
@@ -1576,16 +1564,9 @@ TEST_F(KFDQMTest, BasicCuMaskingEven) {
 
 void KFDQMTest::testQueuePriority(int gpuNode, bool isSamePipe)
 {
-    const HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
-
     Assembler* m_pAsm;
     m_pAsm = GetAssemblerFromNodeId(gpuNode);
     ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);
-
-    if (m_FamilyId < FAMILY_VI) {
-        LOG() << "Skipping test: Shader won't run on CI." << std::endl;
-        return;
-    }
 
     // Reduce test case if running on emulator
     // Reduction applies to all 3 dims (effect is cubic)

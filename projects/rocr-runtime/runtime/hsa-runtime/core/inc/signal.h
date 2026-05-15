@@ -163,10 +163,10 @@ struct SharedSignal {
 
   void GetSdmaTsAddresses(uint64_t*& start, uint64_t*& end) {
     /*
-    SDMA timestamps on gfx7xx/8xxx require 32 byte alignment (gfx9xx relaxes
-    alignment to 8 bytes).  This conflicts with the frozen format for amd_signal_t
-    so we place the time stamps in sdma_start/end_ts instead (amd_signal.start_ts
-    is also properly aligned).  Reading of the timestamps occurs in GetRawTs().
+    SDMA timestamps require 8 byte alignment.  This conflicts with the frozen
+    format for amd_signal_t so we place the time stamps in sdma_start/end_ts
+    instead (amd_signal.start_ts is also properly aligned).  Reading of the
+    timestamps occurs in GetRawTs().
     */
     start = &sdma_start_ts;
     end = &sdma_end_ts;
