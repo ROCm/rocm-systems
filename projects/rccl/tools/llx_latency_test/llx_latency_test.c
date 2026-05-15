@@ -775,7 +775,14 @@ int main(int argc, char** argv)
   printf("Wire efficiency LL<N>: %d/%d = %.1f%%\n\n",
          DATA_ELEMS, LINE_ELEMS, 100.0 * DATA_ELEMS / LINE_ELEMS);
 
-  const size_t BUF_WIRE = max_data * 2;
+  // Buffer must hold the worst-case wire footprint across all protocols at the
+  // largest swept size. LL baseline: data_bytes * 2 (16-B lines, 50% eff).
+  // LL<N>: ceil(data_bytes / DATA_BYTES) * LINE_BYTES — this also guarantees
+  // at least one full line, covering the case where max_data < LINE_BYTES.
+  const size_t ll_wire  = max_data * 2;
+  const size_t lln_wire = ((max_data + DATA_BYTES - 1) / DATA_BYTES) * LINE_BYTES;
+  size_t BUF_WIRE = ll_wire > lln_wire ? ll_wire : lln_wire;
+  if (BUF_WIRE < (size_t)LINE_BYTES) BUF_WIRE = LINE_BYTES;
 
   // ping buffer on GPU1 (GPU0 writes remotely, GPU1 reads locally)
   // ack_buf on GPU0 (GPU1 writes remotely, GPU0 polls locally)
