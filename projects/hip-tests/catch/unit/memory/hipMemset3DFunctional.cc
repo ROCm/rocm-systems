@@ -1,8 +1,21 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 /**
 Testcase Scenarios :
@@ -387,7 +400,8 @@ static void seekAndSet3DArrayPortion(bool bAsync) {
  * Test Memset3D with different combinations of extent
  * taking zero and non-zero fields.
  */
-HIP_TEST_CASE(Unit_hipMemset3D_MemsetWithExtent) {
+TEST_CASE("Unit_hipMemset3D_MemsetWithExtent") {
+  CHECK_IMAGE_SUPPORT
 
   hipExtent testExtent;
   size_t numH = NUMH_EXT, numW = NUMW_EXT, depth = DEPTH_EXT;
@@ -422,7 +436,8 @@ HIP_TEST_CASE(Unit_hipMemset3D_MemsetWithExtent) {
  * Test Memset3DAsync with different combinations of extent
  * taking zero and non-zero fields.
  */
-HIP_TEST_CASE(Unit_hipMemset3DAsync_MemsetWithExtent) {
+TEST_CASE("Unit_hipMemset3DAsync_MemsetWithExtent") {
+  CHECK_IMAGE_SUPPORT
 
   hipExtent testExtent;
   size_t numH = NUMH_EXT, numW = NUMW_EXT, depth = DEPTH_EXT;
@@ -455,7 +470,8 @@ HIP_TEST_CASE(Unit_hipMemset3DAsync_MemsetWithExtent) {
 /**
  * Memset3D with max unsigned char and verify memset operation is success
  */
-HIP_TEST_CASE(Unit_hipMemset3D_MemsetMaxValue) {
+TEST_CASE("Unit_hipMemset3D_MemsetMaxValue") {
+  CHECK_IMAGE_SUPPORT
 
   testMemsetMaxValue(0);
 }
@@ -463,7 +479,8 @@ HIP_TEST_CASE(Unit_hipMemset3D_MemsetMaxValue) {
 /**
  * Memset3DAsync with max unsigned char and verify memset operation is success
  */
-HIP_TEST_CASE(Unit_hipMemset3DAsync_MemsetMaxValue) {
+TEST_CASE("Unit_hipMemset3DAsync_MemsetMaxValue") {
+  CHECK_IMAGE_SUPPORT
 
   testMemsetMaxValue(1);
 }
@@ -471,7 +488,8 @@ HIP_TEST_CASE(Unit_hipMemset3DAsync_MemsetMaxValue) {
 /**
  * Seek and set random slice of 3d array, verify memset is success
  */
-HIP_TEST_CASE(Unit_hipMemset3D_SeekSetSlice) {
+TEST_CASE("Unit_hipMemset3D_SeekSetSlice") {
+  CHECK_IMAGE_SUPPORT
 
   seekAndSet3DArraySlice(0);
 }
@@ -479,7 +497,8 @@ HIP_TEST_CASE(Unit_hipMemset3D_SeekSetSlice) {
 /**
  * Seek and set random slice of 3d array with async, verify memset is success
  */
-HIP_TEST_CASE(Unit_hipMemset3DAsync_SeekSetSlice) {
+TEST_CASE("Unit_hipMemset3DAsync_SeekSetSlice") {
+  CHECK_IMAGE_SUPPORT
 
   seekAndSet3DArraySlice(1);
 }
@@ -487,7 +506,8 @@ HIP_TEST_CASE(Unit_hipMemset3DAsync_SeekSetSlice) {
 /**
  * Memset3D selected portion of 3d array
  */
-HIP_TEST_CASE(Unit_hipMemset3D_SeekSetArrayPortion) {
+TEST_CASE("Unit_hipMemset3D_SeekSetArrayPortion") {
+  CHECK_IMAGE_SUPPORT
 
   seekAndSet3DArrayPortion(0);
 }
@@ -495,7 +515,8 @@ HIP_TEST_CASE(Unit_hipMemset3D_SeekSetArrayPortion) {
 /**
  * Memset3DAsync selected portion of 3d array
  */
-HIP_TEST_CASE(Unit_hipMemset3DAsync_SeekSetArrayPortion) {
+TEST_CASE("Unit_hipMemset3DAsync_SeekSetArrayPortion") {
+  CHECK_IMAGE_SUPPORT
 
   seekAndSet3DArrayPortion(1);
 }

@@ -1,8 +1,24 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
@@ -10,9 +26,10 @@
 #include <resource_guards.hh>
 #include <utils.hh>
 
-HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_Basic) {
+TEST_CASE("Unit_hipStreamAttachMemAsync_Positive_Basic") {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HipTest::HIP_SKIP_TEST("Managed memory is not supported");
+    return;
   }
 
   StreamGuard stream(Streams::created);
@@ -23,13 +40,15 @@ HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_Basic) {
   HIP_CHECK(hipStreamSynchronize(stream.stream()));
 }
 
-HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_Pageable) {
+TEST_CASE("Unit_hipStreamAttachMemAsync_Positive_Pageable") {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HipTest::HIP_SKIP_TEST("Managed memory is not supported");
+    return;
   }
 
   if (!DeviceAttributesSupport(0, hipDeviceAttributePageableMemoryAccess)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kPageableMemoryAccessUnsupported);
+    HipTest::HIP_SKIP_TEST("Pageable memory access is not supported");
+    return;
   }
 
   StreamGuard stream(Streams::created);
@@ -42,9 +61,10 @@ HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_Pageable) {
 // CUDA docs:
 // If the cudaMemAttachGlobal flag is specified, the memory can be accessed by any stream on any
 // device.
-HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_AttachGlobal) {
+TEST_CASE("Unit_hipStreamAttachMemAsync_Positive_AttachGlobal", "[multigpu]") {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HipTest::HIP_SKIP_TEST("Managed memory is not supported");
+    return;
   }
 
   const auto device_count = HipTest::getDeviceCount();
@@ -86,13 +106,15 @@ HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_AttachGlobal) {
 // If the cudaMemAttachHost flag is specified, the program makes a guarantee that it won't access
 // the memory on the device from any stream on a device that has a zero value for the device
 // attribute cudaDevAttrConcurrentManagedAccess.
-HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_AttachHost) {
+TEST_CASE("Unit_hipStreamAttachMemAsync_Positive_AttachHost") {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HipTest::HIP_SKIP_TEST("Managed memory is not supported");
+    return;
   }
 
   if (DeviceAttributesSupport(0, hipDeviceAttributeConcurrentManagedAccess)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedNoConcurrentAccess);
+    HipTest::HIP_SKIP_TEST("Device supports concurrent managed access");
+    return;
   }
 
   StreamGuard stream(Streams::created);
@@ -115,13 +137,15 @@ HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_AttachHost) {
 // If the cudaMemAttachSingle flag is specified and stream is associated with a device that has a
 // zero value for the device attribute cudaDevAttrConcurrentManagedAccess, the program makes a
 // guarantee that it will only access the memory on the device from stream.
-HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_AttachSingle) {
+TEST_CASE("Unit_hipStreamAttachMemAsync_Positive_AttachSingle") {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HipTest::HIP_SKIP_TEST("Managed memory is not supported");
+    return;
   }
 
   if (DeviceAttributesSupport(0, hipDeviceAttributeConcurrentManagedAccess)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedNoConcurrentAccess);
+    HipTest::HIP_SKIP_TEST("Device supports concurrent managed access");
+    return;
   }
 
   StreamGuard stream1(Streams::created);
@@ -150,9 +174,10 @@ HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_AttachSingle) {
   REQUIRE(*managed_single.ptr() == 128);
 }
 
-HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Negative_Parameters) {
+TEST_CASE("Unit_hipStreamAttachMemAsync_Negative_Parameters") {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HipTest::HIP_SKIP_TEST("Managed memory is not supported");
+    return;
   }
 
   StreamGuard stream(Streams::created);

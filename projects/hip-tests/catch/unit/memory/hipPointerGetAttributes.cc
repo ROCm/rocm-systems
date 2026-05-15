@@ -1,8 +1,24 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2021-2023 Advanced Micro Devices, Inc. All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 /*
 Following scenarios are verified for hipPointerGetAttributes API
@@ -209,7 +225,7 @@ void clusterAllocs(int numAllocs, size_t minSize, size_t maxSize) {
  * ------------------------
  *  - HIP_VERSION >= 5.7
  */
-HIP_TEST_CASE(Unit_hipPointerGetAttributes_Basic) {
+TEST_CASE("Unit_hipPointerGetAttributes_Basic") {
   HIP_CHECK(hipSetDevice(0));
   Nbytes = N * sizeof(char);
   printf("\n");
@@ -294,7 +310,7 @@ HIP_TEST_CASE(Unit_hipPointerGetAttributes_Basic) {
  *  - HIP_VERSION >= 5.7
  */
 
-HIP_TEST_CASE(Unit_hipPointerGetAttributes_ClusterAlloc) {
+TEST_CASE("Unit_hipPointerGetAttributes_ClusterAlloc", "[multigpu]") {
   srand(0x100);
   printf("\n=============================================\n");
   clusterAllocs(100, 1024 * 1, 1024 * 1024);
@@ -311,7 +327,7 @@ HIP_TEST_CASE(Unit_hipPointerGetAttributes_ClusterAlloc) {
  *  - HIP_VERSION >= 5.7
  */
 
-HIP_TEST_CASE(Unit_hipPointerGetAttributes_TinyClusterAlloc) {
+TEST_CASE("Unit_hipPointerGetAttributes_TinyClusterAlloc", "[multigpu]") {
   srand(0x200);
   printf("\n=============================================\n");
   clusterAllocs(1000, 1, 10);  //  Many tiny allocations;
@@ -321,7 +337,7 @@ HIP_TEST_CASE(Unit_hipPointerGetAttributes_TinyClusterAlloc) {
 // IN : serialize will force the test to run in serial fashion.
 #if 0  // FIXME_jatinx These need to be ported to HIP_CHECK_THREAD.
 Disabling it for now
-HIP_TEST_CASE(Unit_hipPointerGetAttributes_MultiThread) {
+TEST_CASE("Unit_hipPointerGetAttributes_MultiThread", "[multigpu]") {
   srand(0x300);
   auto serialize = 1;
   printf("\n=============================================\n");
@@ -354,7 +370,7 @@ HIP_TEST_CASE(Unit_hipPointerGetAttributes_MultiThread) {
  *  - HIP_VERSION >= 5.7
  */
 
-HIP_TEST_CASE(Unit_hipPointerGetAttributes_Negative) {
+TEST_CASE("Unit_hipPointerGetAttributes_Negative") {
 #if HT_AMD  // Nvidia crashed in hipPointerGetAttributes on nullptr
   SECTION("Invalid Attributes Pointer") {
     int* dPtr{nullptr};
@@ -377,7 +393,7 @@ HIP_TEST_CASE(Unit_hipPointerGetAttributes_Negative) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-HIP_TEST_CASE(Unit_hipPointerGetAttributes_GpuIter) {
+TEST_CASE("Unit_hipPointerGetAttributes_GpuIter", "[multigpu]") {
   int deviceCount{0};
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   REQUIRE(deviceCount != 0);
@@ -437,7 +453,8 @@ HIP_TEST_CASE(Unit_hipPointerGetAttributes_GpuIter) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-HIP_TEST_CASE(Unit_hipPointerGetAttributes_GpuIter_Managed__Memory) {
+TEST_CASE("Unit_hipPointerGetAttributes_GpuIter_Managed__Memory",
+          "[multigpu]") {
   int deviceCount{0};
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   REQUIRE(deviceCount != 0);
@@ -474,7 +491,8 @@ HIP_TEST_CASE(Unit_hipPointerGetAttributes_GpuIter_Managed__Memory) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-HIP_TEST_CASE(Unit_hipPointerGetAttributes_GpuIter_Unregistered_Memory) {
+TEST_CASE("Unit_hipPointerGetAttributes_GpuIter_Unregistered_Memory",
+          "[multigpu]") {
   int deviceCount{0};
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   REQUIRE(deviceCount != 0);

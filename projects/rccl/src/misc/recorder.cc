@@ -47,10 +47,10 @@ rcclApiCall::rcclApiCall(rcclCall_t type, const ncclInfo& info)://name(rcclCallS
                                                                 nTasks(info.comm->planner.nTasksP2p + info.comm->planner.nTasksColl),
                                                                 globalRank(info.comm->localRankToRank[info.comm->localRank])
 {
-  (void)hipMemGetAddressRange(&recvPtrBase, &recvPtrExtent, const_cast<void*>(info.recvbuff)); // should always exist for collectives
+  hipMemGetAddressRange(&recvPtrBase, &recvPtrExtent, const_cast<void*>(info.recvbuff)); // should always exist for collectives
   if (info.sendbuff) // ncclSend/Recv
   {
-    (void)hipMemGetAddressRange(&sendPtrBase, &sendPtrExtent, const_cast<void*>(info.sendbuff));
+    hipMemGetAddressRange(&sendPtrBase, &sendPtrExtent, const_cast<void*>(info.sendbuff));
   }
 }
 
@@ -136,8 +136,8 @@ void Recorder::captureGpuContext(rcclApiCall& call) const
     rcclReplayThreadIdx = syscall(SYS_gettid);
   }
 
-  int hipDev = -1;
-  (void)hipGetDevice(&hipDev); // need later change to copy from comm
+  int hipDev;
+  hipGetDevice(&hipDev); // need later change to copy from comm
 
   call.pid = pid;
   call.tid = rcclReplayThreadIdx;
@@ -609,22 +609,8 @@ void parseJsonEntry(const char* entry, std::vector<rcclApiCall>& calls)
   // TODO: parse comma too
   rcclApiCall call;
   std::string str(entry);
-
-  // Handle empty string case
-  if (str.empty()) {
-    printf("[ERROR] parseJsonEntry: empty entry string\n");
-    return;
-  }
-
   size_t begin = str.find_first_not_of(' ');
   size_t end = str.find(" : ");
-
-  // Validate that we found the delimiter and positions are valid
-  if (begin == std::string::npos || end == std::string::npos || end <= begin) {
-    printf("[ERROR] parseJsonEntry: invalid entry format: '%s'\n", entry);
-    return;
-  }
-
   rcclCall_t type = getFuncType(str.substr(begin, end-begin));
   call.type = type;
   switch(type) {

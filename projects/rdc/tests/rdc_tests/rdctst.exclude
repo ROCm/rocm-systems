@@ -39,3 +39,4 @@ $BLACKLIST_ALL_ASICS\
 "rsmitstReadOnly.TestFrequenciesRead:"\
 "rsmitstReadWrite.TestFrequenciesReadWrite:"\
 "rsmitstReadOnly.TestProcInfoRead"
+

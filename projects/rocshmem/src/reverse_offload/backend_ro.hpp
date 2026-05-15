@@ -39,6 +39,7 @@
 #include "profiler.hpp"
 #include "queue.hpp"
 #include "ro_team_proxy.hpp"
+#include "team_info_proxy.hpp"
 #include "window_proxy.hpp"
 
 namespace rocshmem {
@@ -93,10 +94,9 @@ class ROBackend : public Backend {
   /**
    * @copydoc Backend::create_new_team
    */
-  void create_new_team(Team *parent_team,
-                       const TeamInfo& team_info_wrt_parent,
-                       const TeamInfo& team_info_wrt_world, int num_pes,
-                       int my_pe_in_new_team, MPI_Comm new_team_comm,
+  void create_new_team(Team *parent_team, TeamInfo *team_info_wrt_parent,
+                       TeamInfo *team_info_wrt_world, int num_pes,
+                       int my_pe_in_new_team, MPI_Comm team_comm,
                        rocshmem_team_t *new_team) override;
 
   /**
@@ -146,7 +146,7 @@ class ROBackend : public Backend {
   /**
    * @brief Handle to device memory fields.
    */
-  BackendProxy backend_proxy{};
+  BackendProxyT backend_proxy{};
 
   /**
    * @brief Handle to block resources
@@ -205,19 +205,7 @@ class ROBackend : public Backend {
    *
    * See the transport class for more details.
    */
-  ROTeamProxy *team_world_proxy_;
-
-  /**
-   * @brief Allocate and initialize team shared.
-   *
-   * TEAM_SHARED contains the PEs that share a common memory domain
-   * (same node). Must be called after initIPC() since membership
-   * is determined from ipcImpl.pes_with_ipc_avail. Computes real
-   * pe_start/stride from the PE list; set to ROCSHMEM_TEAM_INVALID
-   * when IPC is disabled or when node-local ranks are not uniformly
-   * strided.
-   */
-  void setup_team_shared();
+  ROTeamProxyT *team_world_proxy_;
 
   /**
    * @brief Workers used to poll on the device network request queues.
@@ -233,7 +221,7 @@ class ROBackend : public Backend {
   /**
    * @brief Pool of contexts for RO_NET
    */
-  WindowProxy *ro_window_proxy_;
+  WindowProxyT *ro_window_proxy_;
 
  protected:
   /**
@@ -248,7 +236,7 @@ class ROBackend : public Backend {
    *
    * @note Internal data ownership is managed by the proxy
    */
-  ProfilerProxy profiler_proxy_;  // init handled in constructor
+  ProfilerProxyT profiler_proxy_;  // init handled in constructor
 
  public:
   /**
@@ -262,7 +250,7 @@ class ROBackend : public Backend {
    *
    * @note Internal data ownership is managed by the proxy
    */
-  DefaultContextProxy default_context_proxy_;  // init handled in constructor
+  DefaultContextProxyT default_context_proxy_;  // init handled in constructor
 
   /**
    * @brief Controls how many thread blocks are monitored by polling thread.
@@ -278,24 +266,24 @@ class ROBackend : public Backend {
   /**
    * @brief A free-list containing contexts.
    */
-  FreeListProxy<ROContext *> ctx_free_list{};
+  FreeListProxy<HIPAllocator, ROContext *> ctx_free_list{};
 
   /**
    * @brief AtomicWFQueue containing status flag buffers for default context
    */
-  AtomicWFQueueProxy<volatile char*> default_ctx_status_{};
+  AtomicWFQueueProxy<HIPAllocator, volatile char*> default_ctx_status_{};
 
   /**
    * @brief AtomicWFQueue containing rocshmem_g return buffers for default
    * context
    */
-  AtomicWFQueueProxy<uint64_t*> default_ctx_g_ret_buffer_{};
+  AtomicWFQueueProxy<HIPAllocator, uint64_t*> default_ctx_g_ret_buffer_{};
 
   /**
    * @brief AtomicWFQueue containing rocshmem return buffers for default
    * context
    */
-  AtomicWFQueueProxy<uint64_t*> default_ctx_atomic_ret_buffer_{};
+  AtomicWFQueueProxy<HIPAllocator, uint64_t*> default_ctx_atomic_ret_buffer_{};
 
   /**
    * @brief Holds maximum threads per work-group

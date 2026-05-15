@@ -24,34 +24,31 @@ namespace RcclUnitTesting
     // Prepare parent->child pipe
     int pipefd[2];
     if (pipe(pipefd) == -1) {
-      TEST_ERROR("Unable to create parent->child pipe for getting number of devices");
+      ERROR("Unable to create parent->child pipe for getting number of devices\n");
       return TEST_FAIL;
     }
     pid_t pid = fork();
     if (0 == pid) {
-      ErrCode result = [&]() -> ErrCode {
-        bool isGfxTest = false;
-        int dev;
-        CHECK_HIP(hipGetDeviceCount(&dev));
-        for (int deviceId = 0; deviceId < dev; deviceId++) {
-          char gcn[256];
-          hipDeviceProp_t devProp;
-          CHECK_HIP(hipGetDeviceProperties(&devProp, deviceId));
-          char *gcnArchNameToken = strtok(devProp.gcnArchName, ":");
-          strcpy(gcn, gcnArchNameToken);
-          if(std::strncmp(gfx, gcn, 5) == 0) {
-            isGfxTest = true;
-          } else {
-            isGfxTest = false;
-            break;
-          }
+      bool isGfxTest = false;
+      int dev;
+      hipGetDeviceCount(&dev);
+      for (int deviceId = 0; deviceId < dev; deviceId++) {
+        char gcn[256];
+        hipDeviceProp_t devProp;
+        hipGetDeviceProperties(&devProp, deviceId);
+        char *gcnArchNameToken = strtok(devProp.gcnArchName, ":");
+        strcpy(gcn, gcnArchNameToken);
+        if(std::strncmp(gfx, gcn, 5) == 0) {
+          isGfxTest = true;
+        } else {
+          isGfxTest = false;
+          break;
         }
-        if (write(pipefd[1], &isGfxTest, sizeof(isGfxTest)) != sizeof(isGfxTest)) return TEST_FAIL;
-        return TEST_SUCCESS;
-      }();
+      }
+      if (write(pipefd[1], &isGfxTest, sizeof(isGfxTest)) != sizeof(isGfxTest)) return TEST_FAIL;
       close(pipefd[0]);
       close(pipefd[1]);
-      exit(result == TEST_SUCCESS ? EXIT_SUCCESS : EXIT_FAILURE);
+      exit(EXIT_SUCCESS);
     }
     else {
       int status;
@@ -70,21 +67,18 @@ namespace RcclUnitTesting
     int pipefd[2];
     if (pipe(pipefd) == -1)
     {
-      TEST_ERROR("Unable to create parent->child pipe for getting number of devices");
+      ERROR("Unable to create parent->child pipe for getting number of devices\n");
       return TEST_FAIL;
     }
     pid_t pid = fork();
     if (0 == pid)
     {
-      ErrCode result = [&]() -> ErrCode {
-        int dev;
-        CHECK_HIP(hipGetDeviceCount(&dev));
-        if (write(pipefd[1], &dev, sizeof(dev)) != sizeof(dev)) return TEST_FAIL;
-        return TEST_SUCCESS;
-      }();
+      int dev;
+      hipGetDeviceCount(&dev);
+      if (write(pipefd[1], &dev, sizeof(dev)) != sizeof(dev)) return TEST_FAIL;
       close(pipefd[0]);
       close(pipefd[1]);
-      exit(result == TEST_SUCCESS ? EXIT_SUCCESS : EXIT_FAILURE);
+      exit(EXIT_SUCCESS);
     }
     else
     {
@@ -103,24 +97,21 @@ namespace RcclUnitTesting
     int pipefd[2];
     if (pipe(pipefd) == -1)
     {
-      TEST_ERROR("Unable to create parent->child pipe for getting the device mode");
+      ERROR("Unable to create parent->child pipe for getting the device mode\n");
       return TEST_FAIL;
     }
     pid_t pid = fork();
     if (0 == pid)
     {
-      ErrCode result = [&]() -> ErrCode {
-        bool isCpxMode = false;
-        int numDeviceCUs;
-        int deviceIdx = 0;
-        CHECK_HIP(hipDeviceGetAttribute(&numDeviceCUs, hipDeviceAttributeMultiprocessorCount, deviceIdx));
-        if(numDeviceCUs == 20 || numDeviceCUs == 38) isCpxMode = true;
-        if (write(pipefd[1], &isCpxMode, sizeof(isCpxMode)) != sizeof(isCpxMode)) return TEST_FAIL;
-        return TEST_SUCCESS;
-      }();
+      bool isCpxMode = false;
+      int numDeviceCUs;
+      int deviceIdx = 0;
+      hipDeviceGetAttribute(&numDeviceCUs, hipDeviceAttributeMultiprocessorCount, deviceIdx);
+      if(numDeviceCUs == 20 || numDeviceCUs == 38) isCpxMode = true;
+      if (write(pipefd[1], &isCpxMode, sizeof(isCpxMode)) != sizeof(isCpxMode)) return TEST_FAIL;
       close(pipefd[0]);
       close(pipefd[1]);
-      exit(result == TEST_SUCCESS ? EXIT_SUCCESS : EXIT_FAILURE);
+      exit(EXIT_SUCCESS);
     }
     else {
       int status;
@@ -156,22 +147,21 @@ namespace RcclUnitTesting
     // Prepare parent->child pipe
     int pipefd[2];
     if (pipe(pipefd) == -1) {
-      TEST_ERROR("Unable to create parent->child pipe for getting the device priority vector.");
+      ERROR("Unable to create parent->child pipe for getting the device priority vector.\n");
       return TEST_FAIL;
     }
     pid_t pid = fork();
     if (0 == pid) {
-      ErrCode result = [&]() -> ErrCode {
-        std::vector<int> result;
-        try {
+      std::vector<int> result;
+      try {
           int numDev;
-          CHECK_HIP(hipGetDeviceCount(&numDev));
+          hipGetDeviceCount(&numDev);
           std::unordered_map<int64_t, std::vector<int>> uniqueIdToGpuIndexes;
           for(int dev=0;dev<numDev;dev++){
             char busIdStr[] = "00000000:00:00.0";
             int64_t busId;
-            CHECK_HIP(hipDeviceGetPCIBusId(busIdStr, sizeof(busIdStr), dev));
-            CHECK_NCCL(busIdToInt64(busIdStr, &busId));
+            hipDeviceGetPCIBusId(busIdStr, sizeof(busIdStr), dev);
+            busIdToInt64(busIdStr, &busId);
             uniqueIdToGpuIndexes[busId].push_back(dev);
           }
           std::vector<std::pair<int64_t, std::vector<int>>> sortedIds(uniqueIdToGpuIndexes.begin(), uniqueIdToGpuIndexes.end());
@@ -181,16 +171,14 @@ namespace RcclUnitTesting
           for (const auto& pair : sortedIds) {
               result.insert(result.end(), pair.second.begin(), pair.second.end());
           }
-        } catch (const std::exception& e) {
+      } catch (const std::exception& e) {
           std::cerr << "Error: " << e.what() << std::endl;
-          return TEST_FAIL;
-        }
-        if (write(pipefd[1], result.data(), gpuPriorityOrder->size() * sizeof(int)) != gpuPriorityOrder->size() * sizeof(int)) return TEST_FAIL;
-        return TEST_SUCCESS;
-      }();
+          return 1;
+      }
+      if (write(pipefd[1], result.data(), gpuPriorityOrder->size() * sizeof(int)) != gpuPriorityOrder->size() * sizeof(int)) return TEST_FAIL;
       close(pipefd[0]);
       close(pipefd[1]);
-      exit(result == TEST_SUCCESS ? EXIT_SUCCESS : EXIT_FAILURE);
+      exit(EXIT_SUCCESS);
     }
     else {
       int status;
@@ -201,6 +189,7 @@ namespace RcclUnitTesting
       close(pipefd[1]);
     }
     return TEST_SUCCESS;
+    return 0;
   }
 
 

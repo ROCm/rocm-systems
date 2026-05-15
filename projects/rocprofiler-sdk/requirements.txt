@@ -14,4 +14,3 @@ pycobertura
 pytest
 pyyaml
 reportlab
-ruamel.yaml

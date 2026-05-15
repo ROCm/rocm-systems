@@ -1,8 +1,21 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 /**
  * @addtogroup hipHostMalloc
@@ -277,7 +290,7 @@ static void runTestPrefered(std::vector<NumaNodeInfo> &nodes, MallocType type, u
 }
 
 /* Test memory allocation on preferred host numa node on each CPU */
-HIP_TEST_CASE(Perf_hipPerfHostNumaAlloc_test_preferred_host_numa_node_on_each_GPU) {
+TEST_CASE("Perf_hipPerfHostNumaAlloc_test_preferred_host_numa_node_on_each_GPU") {
   std::vector<NumaNodeInfo> nodes;
   enumerateNumaNodes(nodes);
   if (nodes.empty()) {
@@ -292,7 +305,8 @@ HIP_TEST_CASE(Perf_hipPerfHostNumaAlloc_test_preferred_host_numa_node_on_each_GP
   int numaNode = -1;
   HIP_CHECK(hipDeviceGetAttribute(&numaNode, hipDeviceAttributeHostNumaId, 0));
   if (numaNode == -1) {
-    HIP_SKIP_TEST("host NUMA is not supported.");
+    HipTest::HIP_SKIP_TEST("Host NUMA isn't supported hence skipping the test...\n");
+    return;
   }
   HIP_CHECK(hipSetDevice(0));
   // In windows, it is the same with / without hipHostMallocNumaUser

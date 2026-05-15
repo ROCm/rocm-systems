@@ -1,8 +1,21 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
@@ -46,7 +59,7 @@ template <typename T> __global__ void vectorADD(const T* A_d, const T* B_d, T* C
  * ------------------------
  * - HIP_VERSION >= 6.4
  */
-HIP_TEST_CASE(Unit_hipGraph_Performance_Improvement_ParallelGraph) {
+TEST_CASE("Unit_hipGraph_Performance_Improvement_ParallelGraph") {
   hipGraphNode_t memCpy1, memCpy2, memCpy3;
   std::vector<hipGraphNode_t> kNode(kNumNode);
   hipGraph_t graph;
@@ -122,7 +135,7 @@ HIP_TEST_CASE(Unit_hipGraph_Performance_Improvement_ParallelGraph) {
  * ------------------------
  * - HIP_VERSION >= 6.4
  */
-HIP_TEST_CASE(Unit_hipGraph_Performance_With_Stream_Operations) {
+TEST_CASE("Unit_hipGraph_Performance_With_Stream_Operations") {
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
@@ -164,7 +177,7 @@ HIP_TEST_CASE(Unit_hipGraph_Performance_With_Stream_Operations) {
  * - HIP_VERSION >= 6.4
  */
 
-HIP_TEST_CASE(Unit_hipGraph_Performance_With_Stream_Capture) {
+TEST_CASE("Unit_hipGraph_Performance_With_Stream_Capture") {
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
   hipGraph_t graph;
   hipStream_t stream, streamForGraph;

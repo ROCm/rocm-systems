@@ -62,8 +62,8 @@ rocprofiler_systems_add_test(
     LABELS "coverage;function-coverage"
     RUN_ARGS 10 ${NUM_THREADS} 1000
     ENVIRONMENT "${_base_environment}"
-    RUNTIME_PASS_REGEX "(\\\[[0-9]+\\\]) code coverage     ::  66.67%"
-    REWRITE_RUN_PASS_REGEX "(\\\[[0-9]+\\\]) code coverage     ::  66.67%"
+    RUNTIME_PASS_REGEX "code coverage :: 66.67%"
+    REWRITE_RUN_PASS_REGEX "code coverage :: 66.67%"
 )
 
 rocprofiler_systems_add_test(
@@ -90,8 +90,8 @@ rocprofiler_systems_add_test(
     LABELS "coverage;function-coverage;hybrid-coverage"
     RUN_ARGS 10 ${NUM_THREADS} 1000
     ENVIRONMENT "${_base_environment}"
-    RUNTIME_PASS_REGEX "(\\\[[0-9]+\\\]) code coverage     ::  66.67%"
-    REWRITE_RUN_PASS_REGEX "(\\\[[0-9]+\\\]) code coverage     ::  66.67%"
+    RUNTIME_PASS_REGEX "code coverage :: 66.67%"
+    REWRITE_RUN_PASS_REGEX "code coverage :: 66.67%"
 )
 
 rocprofiler_systems_add_test(
@@ -130,8 +130,8 @@ rocprofiler_systems_add_test(
     LABELS "coverage;bb-coverage"
     RUN_ARGS 10 ${NUM_THREADS} 1000
     ENVIRONMENT "${_base_environment}"
-    RUNTIME_PASS_REGEX "(\\\[[0-9]+\\\]) function coverage ::  66.67%"
-    REWRITE_RUN_PASS_REGEX "(\\\[[0-9]+\\\]) function coverage ::  66.67%"
+    RUNTIME_PASS_REGEX "function coverage :: 66.67%"
+    REWRITE_RUN_PASS_REGEX "function coverage :: 66.67%"
 )
 
 rocprofiler_systems_add_test(
@@ -158,6 +158,6 @@ rocprofiler_systems_add_test(
     LABELS "coverage;bb-coverage;hybrid-coverage"
     RUN_ARGS 10 ${NUM_THREADS} 1000
     ENVIRONMENT "${_base_environment}"
-    RUNTIME_PASS_REGEX "(\\\[[0-9]+\\\]) function coverage ::  66.67%"
-    REWRITE_RUN_PASS_REGEX "(\\\[[0-9]+\\\]) function coverage ::  66.67%"
+    RUNTIME_PASS_REGEX "function coverage :: 66.67%"
+    REWRITE_RUN_PASS_REGEX "function coverage :: 66.67%"
 )

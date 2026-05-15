@@ -1,5 +1,4 @@
 # configure packaging
-include(CPackComponent)
 
 # Add packaging directives
 set(CPACK_PACKAGE_NAME ${PROJECT_NAME})

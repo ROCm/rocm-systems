@@ -33,6 +33,7 @@
 #    include <rocprofiler-sdk/hsa/api_id.h>
 #    include <rocprofiler-sdk/hsa/table_id.h>
 
+#    include <glog/logging.h>
 #    include <hsa/amd_hsa_signal.h>
 #    include <hsa/hsa.h>
 #    include <hsa/hsa_api_trace.h>

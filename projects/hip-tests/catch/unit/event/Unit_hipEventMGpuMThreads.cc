@@ -1,9 +1,21 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
+ Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+ Permission is hereby granted, free of charge, to any person obtaining a copy
+ of this software and associated documentation files (the "Software"), to deal
+ in the Software without restriction, including without limitation the rights
+ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ copies of the Software, and to permit persons to whom the Software is
+ furnished to do so, subject to the following conditions:
+ The above copyright notice and this permission notice shall be included in
+ all copies or substantial portions of the Software.
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ THE SOFTWARE.
  */
-
 #define HIP_TEMPLATE_KERNEL_LAUNCH
 #include <hip_test_common.hh>
 #include <stdio.h>
@@ -191,7 +203,7 @@ void testEventMGpuMThreads(int nThreads = 1) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipEventMGpuMThreads_1) { testEventMGpuMThreads(1); }
+TEST_CASE("Unit_hipEventMGpuMThreads_1") { testEventMGpuMThreads(1); }
 
 /**
  * Test Description
@@ -204,13 +216,13 @@ HIP_TEST_CASE(Unit_hipEventMGpuMThreads_1) { testEventMGpuMThreads(1); }
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipEventMGpuMThreads_2) {
+TEST_CASE("Unit_hipEventMGpuMThreads_2", "[multigpu]") {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices > 1) {
     testEventMGpuMThreads(numDevices);
   } else {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    SUCCEED("skipped the testcase as number of devices is less than 2");
   }
 }
 
@@ -225,7 +237,7 @@ HIP_TEST_CASE(Unit_hipEventMGpuMThreads_2) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipEventMGpuMThreads_3) {
+TEST_CASE("Unit_hipEventMGpuMThreads_3", "[multigpu]") {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices > 1) {
@@ -234,7 +246,7 @@ HIP_TEST_CASE(Unit_hipEventMGpuMThreads_3) {
     fprintf(stderr, "Second round\n");
     testEventMGpuMThreads(numDevices);
   } else {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    SUCCEED("skipped the testcase as number of devices is less than 2");
   }
 }
 

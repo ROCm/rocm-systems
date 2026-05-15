@@ -1,7 +1,20 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
+ * Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
  */
 
 /**
@@ -35,7 +48,8 @@ void queueJobsForhipMemset2DAsync(char* A_d, char* A_h, size_t pitch, size_t wid
 /**
  * Order of execution of device kernel and hipMemset2DAsync api.
  */
-HIP_TEST_CASE(Unit_hipMemset2DAsync_WithKernel) {
+TEST_CASE("Unit_hipMemset2DAsync_WithKernel") {
+  CHECK_IMAGE_SUPPORT
 
   constexpr auto N = 4 * 1024 * 1024;
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -113,7 +127,8 @@ HIP_TEST_CASE(Unit_hipMemset2DAsync_WithKernel) {
 /**
  * hipMemSet2DAsync execution in multiple threads.
  */
-HIP_TEST_CASE(Unit_hipMemset2DAsync_MultiThread) {
+TEST_CASE("Unit_hipMemset2DAsync_MultiThread") {
+  CHECK_IMAGE_SUPPORT
 
   constexpr auto memPerThread = 200;
   constexpr int memsetval = 0x22;
@@ -126,8 +141,7 @@ HIP_TEST_CASE(Unit_hipMemset2DAsync_MultiThread) {
   int validateCount{};
   hipStream_t stream;
 
-  const int maxThreads = isQuickLevel() ? 4 : NUM_THREADS;
-  auto thread_count = HipTest::getHostThreadCount(memPerThread, maxThreads);
+  auto thread_count = HipTest::getHostThreadCount(memPerThread, NUM_THREADS);
   if (thread_count == 0) {
     WARN("Resources not available for thread creation");
     return;
@@ -149,8 +163,7 @@ HIP_TEST_CASE(Unit_hipMemset2DAsync_MultiThread) {
   HIP_CHECK(hipMemcpy2D(B_d, width, B_h, pitch_B, NUM_W, NUM_H, hipMemcpyHostToDevice));
   HIP_CHECK(hipStreamCreate(&stream));
 
-  const int numIter = isQuickLevel() ? 2 : ITER;
-  for (int i = 0; i < numIter; i++) {
+  for (int i = 0; i < ITER; i++) {
     for (size_t k = 0; k < thread_count; k++) {
       if (k % 2) {
         t[k] = std::thread(queueJobsForhipMemset2DAsync, A_d, A_h, pitch_A, width, stream);
@@ -170,7 +183,7 @@ HIP_TEST_CASE(Unit_hipMemset2DAsync_MultiThread) {
     }
   }
 
-  REQUIRE(static_cast<size_t>(validateCount) == (numIter * elements));
+  REQUIRE(static_cast<size_t>(validateCount) == (ITER * elements));
 
   HIP_CHECK(hipFree(A_d));
   HIP_CHECK(hipFree(B_d));

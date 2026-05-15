@@ -26,38 +26,44 @@
 #include "libhsakmt.h"
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <errno.h>
 #include <unistd.h>
 #include <sys/mman.h>
+#include <stdio.h>
 #include "hsakmt/linux/kfd_ioctl.h"
 #include "fmm.h"
 #include "hsakmt/hsakmtmodel.h"
 #include <assert.h>
+
 
 struct hsa_kfd_event_context
 {
 	HSAuint64 *events_page;
 };
 
-int hsakmt_kfdcontext_init_event_context(HsaKFDContext *ctx)
+struct hsa_kfd_event_context *hsakmt_kfdcontext_get_event_context(HsaKFDContext *ctx)
 {
-	CHECK_CTX(ctx, -1);
+	assert(ctx);
 
 	if (ctx->event_context)
-		return 0;
+		return ctx->event_context;
 
 	ctx->event_context = calloc(1, sizeof(struct hsa_kfd_event_context));
 	if (!ctx->event_context) {
 		pr_err("Alloc memory failed for struct hsa_kfd_event_context size %zu\n",
 				 sizeof(struct hsa_kfd_event_context));
-		return -1;
+		return NULL;
 	}
-	return 0;
+	return ctx->event_context;
 }
 
 void hsakmt_clear_events_page(HsaKFDContext *ctx)
 {
-	ctx->event_context->events_page = NULL;
+	struct hsa_kfd_event_context *event_ctx = hsakmt_kfdcontext_get_event_context(ctx);
+	if (event_ctx) {
+		event_ctx->events_page = NULL;
+	}
 }
 
 static bool IsSystemEventType(HSA_EVENTTYPE type)
@@ -96,7 +102,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateEventCtx(HsaKFDContext *ctx,
 
 	/* dGPU code */
 	pthread_mutex_lock(&hsakmt_mutex);
-	event_ctx = ctx->event_context;
+	event_ctx = hsakmt_kfdcontext_get_event_context(ctx);
 	events_page = event_ctx->events_page;
 
 	if (hsakmt_is_dgpu && !events_page) {
@@ -107,9 +113,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateEventCtx(HsaKFDContext *ctx,
 			pthread_mutex_unlock(&hsakmt_mutex);
 			return HSAKMT_STATUS_ERROR;
 		}
-		if (!hsakmt_use_model)
+		if (hsakmt_use_model)
+			model_set_event_page(events_page, KFD_SIGNAL_EVENT_LIMIT);
+		else
 			hsakmt_fmm_get_handle(ctx, events_page, (uint64_t *)&args.event_page_offset, NULL);
-		// Note: In model mode, FFM handles event management entirely - no event page needed
 	}
 
 	if (hsakmt_ioctl(ctx->fd, AMDKFD_IOC_CREATE_EVENT, &args) != 0) {
@@ -186,7 +193,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDestroyEventCtx(HsaKFDContext *ctx,
 		return HSAKMT_STATUS_ERROR;
 
 	free(Event);
-
 	return HSAKMT_STATUS_SUCCESS;
 }
 
@@ -270,9 +276,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtWaitOnEvent_ExtCtx(HsaKFDContext *ctx,
 static HSAKMT_STATUS get_mem_info_svm_api(HsaKFDContext *ctx, uint64_t address, uint32_t gpu_id)
 {
 	struct kfd_ioctl_svm_args *args;
-	uint32_t node_id = 0;
-	HSAuint32 s_attr;
-	HSAuint32 i;
+        uint32_t node_id = 0;
+        HSAuint32 s_attr;
+        HSAuint32 i;
 	HSA_SVM_ATTRIBUTE attrs[] = {
 					{HSA_SVM_ATTR_PREFERRED_LOC, 0},
 					{HSA_SVM_ATTR_PREFETCH_LOC, 0},

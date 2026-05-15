@@ -23,7 +23,7 @@
 #ifndef __SMI_DEVLINK_NETLINK_H__
 #define __SMI_DEVLINK_NETLINK_H__
 
-#include <functional>
 #include <iostream>
+#include <functional>
 
-#endif  // __SMI_DEVLINK_NETLINK_H__
+#endif // __SMI_DEVLINK_NETLINK_H__

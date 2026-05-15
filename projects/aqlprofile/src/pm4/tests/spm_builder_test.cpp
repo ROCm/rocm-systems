@@ -29,9 +29,9 @@ public:
 class SpmBuilderTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        // TraceConfig has default member initializers (including non-trivial std::vector /
-        // std::unordered_map members), so do NOT memset it — just set the fields we need.
-
+        // Initialize test data structures
+        memset(&test_config_, 0, sizeof(test_config_));
+        
         // Set up default SPM config
         test_config_.sampleRate = 1000;
         test_config_.data_buffer_ptr = test_buffer_.data();

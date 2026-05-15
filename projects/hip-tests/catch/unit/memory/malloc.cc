@@ -10,7 +10,7 @@ TEST_CASE("Unit_hipHostMalloc_4bytes") {
 
 TEST_CASE("Unit_hipMalloc_4bytes") {
   int* d_a;
-  auto res = hipMalloc(&d_a, sizeof(int)); 
+  auto res = hipMalloc(&d_a, sizeof(int));
   REQUIRE(res == hipSuccess);
   res = hipFree(d_a);
   REQUIRE(res == hipSuccess);

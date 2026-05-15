@@ -1,8 +1,22 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+/* Copyright (c) 2015 - 2023 Advanced Micro Devices, Inc.
+
+ Permission is hereby granted, free of charge, to any person obtaining a copy
+ of this software and associated documentation files (the "Software"), to deal
+ in the Software without restriction, including without limitation the rights
+ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ copies of the Software, and to permit persons to whom the Software is
+ furnished to do so, subject to the following conditions:
+
+ The above copyright notice and this permission notice shall be included in
+ all copies or substantial portions of the Software.
+
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ THE SOFTWARE. */
 
 #pragma once
 
@@ -52,6 +66,7 @@ class NullDevice : public amd::Device {
   //! Creates an offline device with the specified target
   bool create(const char* palName,            //!< Device name
               const amd::Isa& isa,            //!< Device ISA
+              Pal::GfxIpLevel ipLevel,        //!< GPU ip level
               Pal::AsicRevision asicRevision  //!< PAL ASIC revision
   );
 
@@ -103,6 +118,7 @@ class NullDevice : public amd::Device {
   //! Releases non-blocking map target memory
   virtual void freeMapTarget(amd::Memory& mem, void* target) {}
 
+  Pal::GfxIpLevel ipLevel() const { return ipLevel_; }
   Pal::AsicRevision asicRevision() const { return asicRevision_; }
 
   //! Empty implementation on Null device
@@ -169,6 +185,7 @@ class NullDevice : public amd::Device {
   static Util::GenericAllocator allocator_;  //!< Generic memory allocator in PAL
 
   Pal::AsicRevision asicRevision_;  //!< ASIC revision
+  Pal::GfxIpLevel ipLevel_;         //!< Device IP level
   const char* palName_;             //!< Device name
 
   //! Fills OpenCL device info structure
@@ -230,21 +247,18 @@ class Sampler : public device::Sampler {
 //! A GPU device ordinal (physical GPU device)
 class Device : public NullDevice {
  public:
-  struct QueueRecycleInfo {
+  struct QueueRecycleInfo : public amd::HeapObject {
     int counter_;                    //!< Lock usage counter
     Pal::EngineType engineType_;     //!< Engine type
     uint32_t index_;                 //!< HW queue index for scratch buffer access
-    std::recursive_mutex queue_lock_;  //!< Queue lock for access
+    amd::Monitor queue_lock_;        //!< Queue lock for access
     AqlPacketMgmt aql_packet_mgmt_;  //!< AQL packets management class for debugger support
     QueueRecycleInfo(const Device& dev)
-        : counter_(1), engineType_(Pal::EngineTypeCompute), index_(0), aql_packet_mgmt_(dev) {}
-
-    // Allocated exclusively via amd::AllocWithTrailing<QueueRecycleInfo>(extSize, ...)
-    // Use extSize == 0 on the path that carries no PAL trailing payload.
-    void* operator new(size_t) = delete;
-    void operator delete(void*) = delete;
-    // Placement new overload required by MSVC when operator new(size_t) is deleted
-    void* operator new(size_t, void* p) noexcept { return p; }
+        : counter_(1),
+          engineType_(Pal::EngineTypeCompute),
+          index_(0),
+          queue_lock_(true) /* Queue lock for sharing */,
+          aql_packet_mgmt_(dev) {}
 
     //! Returns the MQD's read_dispatch_id's address.
     uintptr_t DebuggerData() const {
@@ -266,7 +280,7 @@ class Device : public NullDevice {
   };
 
   //! Transfer buffers
-  class XferBuffers {
+  class XferBuffers : public amd::HeapObject {
    public:
     static constexpr size_t MaxXferBufListSize = 8;
 
@@ -309,7 +323,7 @@ class Device : public NullDevice {
     const Device& gpuDevice_;         //!< GPU device object
   };
 
-  struct ScratchBuffer {
+  struct ScratchBuffer : public amd::HeapObject {
     Memory* memObj_;   //!< Memory objects for scratch buffers
     uint64_t offset_;  //!< Offset from the global scratch store
     uint64_t size_;    //!< Scratch buffer size on this queue
@@ -325,7 +339,7 @@ class Device : public NullDevice {
   };
 
 
-  class SrdManager {
+  class SrdManager : public amd::HeapObject {
    public:
     SrdManager(const Device& dev, uint srdSize, uint bufSize)
         : dev_(dev),
@@ -461,16 +475,16 @@ class Device : public NullDevice {
   pal::Memory* getGpuMemory(amd::Memory* mem  //!< Pointer to AMD memory object
   ) const;
 
-  std::recursive_mutex& lockAsyncOps() const { return lockAsyncOps_; }
+  amd::Monitor& lockAsyncOps() const { return lockAsyncOps_; }
 
   //! Returns the lock object for the virtual gpus list
-  std::recursive_mutex& vgpusAccess() const { return vgpusAccess_; }
+  amd::Monitor& vgpusAccess() const { return vgpusAccess_; }
 
   //! Returns the monitor object for PAL
-  std::recursive_mutex& lockPAL() const { return lockPAL_; }
+  amd::Monitor& lockPAL() const { return lockPAL_; }
 
   //! Returns the monitor object for PAL
-  std::recursive_mutex& lockResources() const { return lockResourceOps_; }
+  amd::Monitor& lockResources() const { return lockResourceOps_; }
 
   //! Returns the number of virtual GPUs allocated on this device
   uint numOfVgpus() const { return numOfVgpus_; }
@@ -553,8 +567,7 @@ class Device : public NullDevice {
 
   //! host memory alloc
   virtual void* hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg = kNoAtomics,
-                          const void* agentInfo = nullptr,
-                          bool allowAllAgentsAccess = true) const override;
+                          const void* agentInfo = nullptr) const override;
 
   //! SVM allocation
   virtual void* svmAlloc(amd::Context& context, size_t size, size_t alignment,
@@ -625,7 +638,7 @@ class Device : public NullDevice {
 
   //! Adds a resource to the global list
   void addResource(Resource* res) const {
-    std::scoped_lock lock(lockResources());
+    amd::ScopedLock lock(lockResources());
     auto findIt = resourceList_->find(res);
     res->resizeGpuEvents(numOfVgpus() - 1);
     if (resourceList_->end() == findIt) {
@@ -635,7 +648,7 @@ class Device : public NullDevice {
 
   //! Removes a resource from the global list
   void removeResource(Resource* res) const {
-    std::scoped_lock lock(lockResources());
+    amd::ScopedLock lock(lockResources());
     resourceList_->erase(res);
   }
 
@@ -644,7 +657,7 @@ class Device : public NullDevice {
     // Not safe to resize the list when runtime creates/destroys a queue at the same time
     // or other queues process a command, since the size of the TS array can change
     Device::ScopedLockVgpus v(*this);
-    std::scoped_lock r(lockResources());
+    amd::ScopedLock r(lockResources());
     for (const auto& it : *resourceList_) {
       it->resizeGpuEvents(index);
     }
@@ -652,7 +665,7 @@ class Device : public NullDevice {
 
   //! Erases an old queue from the list
   void eraseResoureList(uint index) const {
-    std::scoped_lock lock(lockResources());
+    amd::ScopedLock lock(lockResources());
     for (const auto& it : *resourceList_) {
       it->eraseGpuEvents(index);
     }
@@ -735,14 +748,14 @@ class Device : public NullDevice {
   static char* platformObj_;         //!< Memory allocated for PAL platform object
   static Pal::IPlatform* platform_;  //!< Pointer to the PAL platform object
 
-  mutable std::recursive_mutex lockAsyncOps_;  //!< Lock to serialise all async ops on this device
+  mutable amd::Monitor lockAsyncOps_;  //!< Lock to serialise all async ops on this device
   //! Lock to serialise all async ops on initialization heap operation
-  mutable std::recursive_mutex lockForInitHeap_;
-  mutable std::recursive_mutex lockPAL_;          //!< Lock to serialise PAL access
-  mutable std::recursive_mutex vgpusAccess_;      //!< Lock to serialise virtual gpu list access
-  mutable std::recursive_mutex scratchAlloc_;     //!< Lock to serialise scratch allocation
-  mutable std::recursive_mutex mapCacheOps_;      //!< Lock to serialise cache for the map resources
-  mutable std::recursive_mutex lockResourceOps_;  //!< Lock to serialise resource access
+  mutable amd::Monitor lockForInitHeap_;
+  mutable amd::Monitor lockPAL_;          //!< Lock to serialise PAL access
+  mutable amd::Monitor vgpusAccess_;      //!< Lock to serialise virtual gpu list access
+  mutable amd::Monitor scratchAlloc_;     //!< Lock to serialise scratch allocation
+  mutable amd::Monitor mapCacheOps_;      //!< Lock to serialise cache for the map resources
+  mutable amd::Monitor lockResourceOps_;  //!< Lock to serialise resource access
   mutable std::mutex lockAllowAccess_;    //!< To serialize allow_access calls
   XferBuffers* xferRead_;                 //!< Transfer buffers read
   std::vector<amd::Memory*>* mapCache_;   //!< Map cache info structure

@@ -10,11 +10,11 @@ static pthread_once_t initOnceControl = PTHREAD_ONCE_INIT;
 static ncclResult_t initResult;
 struct ncclIonicdvSymbols ionicdvSymbols;
 
-extern bool rcclUseAinic();
+extern int64_t rcclParamAinicRoce();
 
 ncclResult_t wrap_ionicdv_symbols(void) {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  if (rcclUseAinic()) {
+  if (rcclParamAinicRoce() == 1) {
     pthread_once(&initOnceControl,
                  [](){ initResult = buildIonicdvSymbols(&ionicdvSymbols); });
     return initResult;

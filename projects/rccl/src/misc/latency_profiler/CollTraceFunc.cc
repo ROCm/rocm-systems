@@ -28,8 +28,7 @@ ncclResult_t collTraceInit(ncclComm* comm) {
   if (!enableCollTrace()) {
     return ncclSuccess;
   }
-  if (comm->ctrace) delete comm->ctrace;
-  comm->ctrace = new CollTrace(comm);
+  comm->ctrace = std::make_unique<CollTrace>(comm);
   return ncclSuccess;
 }
 
@@ -37,8 +36,7 @@ ncclResult_t collTraceDestroy(ncclComm* comm) {
   if (comm->ctrace == nullptr) {
     return ncclSuccess;
   }
-  delete comm->ctrace;
-  comm->ctrace = nullptr;
+  comm->ctrace.reset();
   return ncclSuccess;
 }
 

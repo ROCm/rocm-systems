@@ -1,8 +1,24 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2022 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 #include "hiprtcInternal.hpp"
 
@@ -73,7 +89,7 @@ bool RTCCompileProgram::addSource(const std::string& source, const std::string& 
 // addSource_impl is a different function because we need to add source when we track mangled
 // objects
 bool RTCCompileProgram::addSource_impl() {
-  std::string_view vsource(source_code_.data(), source_code_.size());
+  std::vector<char> vsource(source_code_.begin(), source_code_.end());
   if (!hip::helpers::addCodeObjData(compile_input_, vsource, source_name_,
                                     AMD_COMGR_DATA_KIND_SOURCE)) {
     return false;
@@ -86,7 +102,7 @@ bool RTCCompileProgram::addHeader(const std::string& source, const std::string& 
     LogError("Error in hiprtc: source or name is of size 0 in addHeader");
     return false;
   }
-  std::string_view vsource(source.data(), source.size());
+  std::vector<char> vsource(source.begin(), source.end());
   if (!hip::helpers::addCodeObjData(compile_input_, vsource, name, AMD_COMGR_DATA_KIND_INCLUDE)) {
     return false;
   }
@@ -94,7 +110,7 @@ bool RTCCompileProgram::addHeader(const std::string& source, const std::string& 
 }
 
 bool RTCCompileProgram::addBuiltinHeader() {
-  std::string_view source(__hipRTC_header, __hipRTC_header_size);
+  std::vector<char> source(__hipRTC_header, __hipRTC_header + __hipRTC_header_size);
   std::string name{"hiprtc_runtime.h"};
   if (!hip::helpers::addCodeObjData(compile_input_, source, name, AMD_COMGR_DATA_KIND_INCLUDE)) {
     return false;
@@ -223,7 +239,7 @@ void RTCCompileProgram::stripNamedExpression(std::string& strippedName) {
 }
 
 bool RTCCompileProgram::trackMangledName(std::string& name) {
-  std::scoped_lock lock(lock_);
+  amd::ScopedLock lock(lock_);
 
   if (name.size() == 0) return false;
 

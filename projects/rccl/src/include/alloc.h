@@ -137,9 +137,6 @@ static inline ncclResult_t ncclCuMemHostAlloc(void** ptr, CUmemGenericAllocation
   int cudaDev;
   int cpuNumaNodeId = -1;
   CUmemAllocationHandleType type = ncclCuMemHandleType;
-  bool handleCreated = false;
-  bool addressReserved = false;
-  bool mapped = false;
 
   CUDACHECK(cudaGetDevice(&cudaDev));
   CUCHECK(cuDeviceGet(&currentDev, cudaDev));
@@ -152,35 +149,25 @@ static inline ncclResult_t ncclCuMemHostAlloc(void** ptr, CUmemGenericAllocation
   CUCHECK(cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM));
   ALIGN_SIZE(size, granularity);
   /* Allocate the physical memory on the device */
-  CUCHECKGOTO(cuMemCreate(&handle, size, &prop, 0), result, fail);
-  handleCreated = true;
+  CUCHECK(cuMemCreate(&handle, size, &prop, 0));
   /* Reserve a virtual address range */
-  CUCHECKGOTO(cuMemAddressReserve((CUdeviceptr*)ptr, size, granularity, 0, 0), result, fail);
-  addressReserved = true;
+  CUCHECK(cuMemAddressReserve((CUdeviceptr*)ptr, size, granularity, 0, 0));
   /* Map the virtual address range to the physical allocation */
-  CUCHECKGOTO(cuMemMap((CUdeviceptr)*ptr, size, 0, handle, 0), result, fail);
-  mapped = true;
+  CUCHECK(cuMemMap((CUdeviceptr)*ptr, size, 0, handle, 0));
   /* Now allow RW access to the newly mapped memory for local GPU */
   accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
   accessDesc.location.id = cudaDev;
   accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
-  CUCHECKGOTO(cuMemSetAccess((CUdeviceptr)*ptr, size, &accessDesc, 1), result, fail);
+  CUCHECK(cuMemSetAccess((CUdeviceptr)*ptr, size, &accessDesc, 1));
 
   /* Now allow RW access to the newly mapped memory from the CPU */
   accessDesc.location.type = CU_MEM_LOCATION_TYPE_HOST_NUMA;
   accessDesc.location.id = cpuNumaNodeId;
   accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
-  CUCHECKGOTO(cuMemSetAccess((CUdeviceptr)*ptr, size, &accessDesc, 1), result, fail);
+  CUCHECK(cuMemSetAccess((CUdeviceptr)*ptr, size, &accessDesc, 1));
 
   if (handlep) *handlep = handle;
   INFO(NCCL_ALLOC, "CUMEM Host Alloc Size %zi pointer %p handle %llx numa %d dev %d granularity %ld", size, *ptr, handle, cpuNumaNodeId, cudaDev, granularity);
-  return result;
-fail:
-  WARN("ncclCuMemHostAlloc failed (size %zu, dev %d): cleaning up partial allocation", size, cudaDev);
-  if (mapped) (void)cuMemUnmap((CUdeviceptr)*ptr, size);
-  if (addressReserved) (void)cuMemAddressFree((CUdeviceptr)*ptr, size);
-  if (handleCreated) (void)cuMemRelease(handle);
-  *ptr = nullptr;
   return result;
 }
 
@@ -188,13 +175,10 @@ static inline ncclResult_t ncclCuMemHostFree(void* ptr) {
   if (ptr == NULL) return ncclSuccess;
   ncclResult_t result = ncclSuccess;
   CUmemGenericAllocationHandle handle;
-  // ROCM-2696: Proper initialization of base and size is required for cuMemGetAddressRange
-  // base is dereferenced in cuMemGetAddressRange without checking for nullptr
-  CUdeviceptr base = nullptr;
   size_t size = 0;
   CUCHECK(cuMemRetainAllocationHandle(&handle, ptr));
   CUCHECK(cuMemRelease(handle));
-  CUCHECK(cuMemGetAddressRange(&base, &size, (CUdeviceptr)ptr));
+  CUCHECK(cuMemGetAddressRange(NULL, &size, (CUdeviceptr)ptr));
   TRACE(NCCL_ALLOC, "CUMEM Host Free Size %zi pointer %p handle 0x%llx", size, ptr, handle);
   CUCHECK(cuMemUnmap((CUdeviceptr)ptr, size));
   CUCHECK(cuMemRelease(handle));
@@ -313,22 +297,6 @@ extern struct allocationTracker allocTracker[];
 
 #include "rocmwrap.h"
 
-// Helper function to map memory and set access permissions for a device
-static inline ncclResult_t ncclCuMemMapAndSetAccess(void *ptr, size_t size,
-  CUmemGenericAllocationHandle handle,
-  int cudaDev) {
-  ncclResult_t result = ncclSuccess;
-  // Map the virtual address range to the physical allocation
-  CUCHECK(cuMemMap((CUdeviceptr)ptr, size, 0, handle, 0));
-  // Set access permissions for the device
-  CUmemAccessDesc accessDesc = {};
-  accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-  accessDesc.location.id = cudaDev;
-  accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
-  CUCHECK(cuMemSetAccess((CUdeviceptr)ptr, size, &accessDesc, 1));
-  return result;
-}
-
 // ncclCuMemAllocAddr takes memory handle and size and returns the mapped address pointer
 static inline ncclResult_t ncclCuMemAllocAddr(void **ptr, CUmemGenericAllocationHandle *handleIn, size_t size) {
   ncclResult_t result = ncclSuccess;
@@ -336,35 +304,25 @@ static inline ncclResult_t ncclCuMemAllocAddr(void **ptr, CUmemGenericAllocation
   CUmemAllocationProp prop = {};
   CUmemAccessDesc accessDesc = {};
   int cudaDev;
-  bool addressReserved = false;
-  bool mapped = false;
   CUDACHECK(cudaGetDevice(&cudaDev));
   CUCHECK(cuMemGetAllocationPropertiesFromHandle(&prop, *handleIn));
   CUCHECK(cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM));
   ALIGN_SIZE(size, granularity);
   /* Reserve a virtual address range */
-  CUCHECKGOTO(cuMemAddressReserve((CUdeviceptr *)ptr, size, granularity, 0, 0), result, fail);
-  addressReserved = true;
+  CUCHECK(cuMemAddressReserve((CUdeviceptr *)ptr, size, granularity, 0, 0));
   /* Map the virtual address range to the physical allocation */
-  CUCHECKGOTO(cuMemMap((CUdeviceptr)*ptr, size, 0, *handleIn, 0), result, fail);
-  mapped = true;
+  CUCHECK(cuMemMap((CUdeviceptr)*ptr, size, 0, *handleIn, 0));
   /* Now allow RW access to the newly mapped memory */
   accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
   accessDesc.location.id = cudaDev;
   accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
-  CUCHECKGOTO(cuMemSetAccess((CUdeviceptr)*ptr, size, &accessDesc, 1), result, fail);
-  TRACE(NCCL_ALLOC, "CuMem Map Size %zu pointer %p handle %p", size, *ptr, (void*)(uintptr_t)*handleIn);
+  CUCHECK(cuMemSetAccess((CUdeviceptr)*ptr, size, &accessDesc, 1));
+  TRACE(NCCL_ALLOC, "CuMem Map Size %zu pointer %p handle %llx", size, *ptr, *handleIn);
   if (cudaDev < MAX_ALLOC_TRACK_NGPU) {
      __atomic_fetch_add(&allocTracker[cudaDev].totalAlloc, 1, __ATOMIC_RELAXED);
      __atomic_fetch_add(&allocTracker[cudaDev].totalAllocSize, size, __ATOMIC_RELAXED);
   }
   INFO(NCCL_ALLOC, "ncclCuMemAllocAddr: Memory used = %ld on device = %d", allocTracker[cudaDev].totalAllocSize, cudaDev);
-  return result;
-fail:
-  WARN("ncclCuMemAllocAddr failed (size %zu, dev %d): cleaning up partial allocation", size, cudaDev);
-  if (mapped) (void)cuMemUnmap((CUdeviceptr)*ptr, size);
-  if (addressReserved) (void)cuMemAddressFree((CUdeviceptr)*ptr, size);
-  *ptr = nullptr;
   return result;
 }
 
@@ -377,10 +335,7 @@ static inline ncclResult_t ncclCuMemFreeAddr(void *ptr) {
   }
   ncclResult_t result = ncclSuccess;
   size_t size = 0;
-  // ROCM-2696: Proper initialization of base and size is required for cuMemGetAddressRange
-  // base is dereferenced in cuMemGetAddressRange without checking for nullptr
-  CUdeviceptr base = nullptr;
-  CUCHECK(cuMemGetAddressRange(&base, &size, (CUdeviceptr)ptr));
+  CUCHECK(cuMemGetAddressRange(NULL, &size, (CUdeviceptr)ptr));
   CUCHECK(cuMemUnmap((CUdeviceptr)ptr, size));
   CUCHECK(cuMemAddressFree((CUdeviceptr)ptr, size));
 
@@ -404,68 +359,30 @@ static inline ncclResult_t ncclCuMemAlloc(void **ptr, CUmemGenericAllocationHand
   CUmemGenericAllocationHandle handle;
   int cudaDev;
   int flag = 0;
-  bool handleCreated = false;
-  bool addressReserved = false;
-  bool mapped = false;
   CUDACHECK(cudaGetDevice(&cudaDev));
   CUCHECK(cuDeviceGet(&currentDev, cudaDev));
-#if defined(HIP_VMM_UNCACHED_MEMORY)
-  prop.type = hipMemAllocationTypeUncached;
-#else
   prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
-#endif
   prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
   prop.requestedHandleTypes = type;
   prop.location.id = currentDev;
-#if defined(__HIP_PLATFORM_AMD__)
-  // ROCM-2550: Use cuDeviceGetAttribute to check if RDMA support is available
-  // TODO: Remove once ROCM-2550 is fixed and uncomment the commented code below.
-  // Always enable gpuDirectRDMACapable: the non-RDMA VMM code path in
-  // HIP crashes (SIGSEGV in hipMemMap) after many allocations.
-  flag = 1;
-  prop.allocFlags.gpuDirectRDMACapable = flag;
-  // // Query device to see if RDMA support is available
+  // Query device to see if RDMA support is available
   // CUCHECK(cuDeviceGetAttribute(&flag, CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_WITH_CUDA_VMM_SUPPORTED, currentDev));
-  // if (flag) prop.allocFlags.gpuDirectRDMACapable = 1;
-#endif
+  if (flag) prop.allocFlags.gpuDirectRDMACapable = 1;
   CUCHECK(cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM));
   ALIGN_SIZE(size, granularity);
   /* Allocate the physical memory on the device */
-  CUCHECKGOTO(cuMemCreate(&handle, size, &prop, 0), result, fail);
-  handleCreated = true;
+  CUCHECK(cuMemCreate(&handle, size, &prop, 0));
   /* Reserve a virtual address range */
-  CUCHECKGOTO(cuMemAddressReserve((CUdeviceptr *)ptr, size, granularity, 0, 0), result, fail);
-  addressReserved = true;
+  CUCHECK(cuMemAddressReserve((CUdeviceptr *)ptr, size, granularity, 0, 0));
   /* Map the virtual address range to the physical allocation */
-  CUCHECKGOTO(cuMemMap((CUdeviceptr)*ptr, size, 0, handle, 0), result, fail);
-  mapped = true;
+  CUCHECK(cuMemMap((CUdeviceptr)*ptr, size, 0, handle, 0));
   /* Now allow RW access to the newly mapped memory */
   accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
   accessDesc.location.id = currentDev;
   accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
-  CUCHECKGOTO(cuMemSetAccess((CUdeviceptr)*ptr, size, &accessDesc, 1), result, fail);
+  CUCHECK(cuMemSetAccess((CUdeviceptr)*ptr, size, &accessDesc, 1));
   if (handlep) *handlep = handle;
-  // ROCM-20370 Workaround: hsa_amd_vmem_map writes internal bookkeeping metadata
-  // into the user-visible buffer after the kernel driver's SDMA clear,
-  // leaving non-zero residue at specific offsets. Zero it now so that
-  // structures like ncclSendMem/ncclRecvMem (head, tail, ptrExchange,
-  // redOpArgExchange) start at zero. Use a non-blocking stream with
-  // relaxed capture mode so this is safe when called from the proxy
-  // thread during graph capture on the main thread.
-  {
-    cudaStreamCaptureMode capMode = cudaStreamCaptureModeRelaxed;
-    CUDACHECKGOTO(cudaThreadExchangeStreamCaptureMode(&capMode), result, fail);
-    cudaStream_t zeroStream;
-    CUDACHECKGOTO(cudaStreamCreateWithFlags(&zeroStream, cudaStreamNonBlocking), result, restoreCapMode);
-    CUDACHECKGOTO(cudaMemsetAsync(*ptr, 0, size, zeroStream), result, destroyStream);
-    CUDACHECKGOTO(cudaStreamSynchronize(zeroStream), result, destroyStream);
-destroyStream:
-    CUDACHECK(cudaStreamDestroy(zeroStream));
-restoreCapMode:
-    CUDACHECK(cudaThreadExchangeStreamCaptureMode(&capMode));
-    if (result != ncclSuccess) goto fail;
-  }
-  TRACE(NCCL_ALLOC, "CuMem Alloc Size %zu pointer %p handle %p", size, *ptr, (void*)(uintptr_t)handle);
+  TRACE(NCCL_ALLOC, "CuMem Alloc Size %zu pointer %p handle %llx", size, *ptr, handle);
   
   if (cudaDev < MAX_ALLOC_TRACK_NGPU) {
      __atomic_fetch_add(&allocTracker[cudaDev].totalAlloc, 1, __ATOMIC_RELAXED);
@@ -473,13 +390,6 @@ restoreCapMode:
   }
   INFO(NCCL_ALLOC, "ncclCuMemAlloc: Memory used = %ld on device = %d", allocTracker[cudaDev].totalAllocSize, cudaDev);
 
-  return result;
-fail:
-  WARN("ncclCuMemAlloc failed (size %zu, dev %d): cleaning up partial allocation", size, cudaDev);
-  if (mapped) (void)cuMemUnmap((CUdeviceptr)*ptr, size);
-  if (addressReserved) (void)cuMemAddressFree((CUdeviceptr)*ptr, size);
-  if (handleCreated) (void)cuMemRelease(handle);
-  *ptr = nullptr;
   return result;
 }
 
@@ -495,9 +405,8 @@ static inline ncclResult_t ncclCuMemFree(void *ptr) {
   size_t size = 0;
   CUCHECK(cuMemRetainAllocationHandle(&handle, ptr));
   CUCHECK(cuMemRelease(handle));
-  CUdeviceptr base = nullptr;
-  CUCHECK(cuMemGetAddressRange(&base, &size, (CUdeviceptr)ptr));
-  TRACE(NCCL_ALLOC, "CuMem Free Size %zu pointer %p handle %p", size, ptr, (void*)(uintptr_t)handle);
+  CUCHECK(cuMemGetAddressRange(NULL, &size, (CUdeviceptr)ptr));
+  TRACE(NCCL_ALLOC, "CuMem Free Size %zu pointer %p handle 0x%llx", size, ptr, handle);
   CUCHECK(cuMemUnmap((CUdeviceptr)ptr, size));
   CUCHECK(cuMemRelease(handle));
   CUCHECK(cuMemAddressFree((CUdeviceptr)ptr, size));
@@ -518,27 +427,21 @@ static inline ncclResult_t ncclCuMemFree(void *ptr) {
 extern int ncclCuMemEnable();
 
 static inline ncclResult_t ncclCuMemAlloc(void **ptr, void *handlep, int type, size_t size) {
-  WARN("CUMEM requires ROCM_VERSION >= 7.0.0");
+  WARN("CUMEM not supported prior to ROCm 7.0");
   return ncclInternalError;
 }
 static inline ncclResult_t ncclCuMemFree(void *ptr) {
-  WARN("CUMEM requires ROCM_VERSION >= 7.0.0");
+  WARN("CUMEM not supported prior to ROCm 7.0");
   return ncclInternalError;
 }
 
 static inline ncclResult_t ncclCuMemAllocAddr(void **ptr, CUmemGenericAllocationHandle *handleIn, size_t size) {
-  WARN("CUMEM requires ROCM_VERSION >= 7.0.0");
+  WARN("CUMEM not supported prior to ROCm 7.0");
   return ncclInternalError;
 }
 
 static inline ncclResult_t ncclCuMemFreeAddr(void *ptr) {
-  WARN("CUMEM requires ROCM_VERSION >= 7.0.0");
-  return ncclInternalError;
-}
-
-static inline ncclResult_t ncclCuMemMapAndSetAccess(void *ptr, size_t size,
-  CUmemGenericAllocationHandle handle, int cudaDev) {
-  WARN("CUMEM requires ROCM_VERSION >= 7.0.0");
+  WARN("CUMEM not supported prior to ROCm 7.0");
   return ncclInternalError;
 }
 #endif
@@ -549,13 +452,8 @@ ncclResult_t ncclCudaMallocDebug(const char *filefunc, int line, T** ptr, size_t
   cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
   *ptr = nullptr;
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
-  if (nelem > 0) {
-    if (ncclCuMemEnable()) {
-      NCCLCHECKGOTO(ncclCuMemAlloc((void **)ptr, NULL, ncclCuMemHandleType, nelem*ncclSizeOfT<T>()), result, finish);
-    } else {
-      CUDACHECKGOTO(hipExtMallocWithFlags((void**)ptr, nelem*ncclSizeOfT<T>(), flags), result, finish);
-    }
-  }
+  if (nelem > 0) 
+    CUDACHECKGOTO(hipExtMallocWithFlags((void**)ptr, nelem*ncclSizeOfT<T>(), flags), result, finish);
 finish:
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
   if (*ptr == nullptr && nelem > 0) WARN("Failed to CUDA malloc %ld bytes", nelem*ncclSizeOfT<T>());
@@ -581,23 +479,17 @@ ncclResult_t ncclCudaCallocDebug(const char *filefunc, int line, T** ptr, size_t
   int dev;
 
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
-  if (nelem > 0) {
-    // Need a side stream so as not to interfere with graph capture.
-    cudaStream_t stream, sidestream;
-    NCCLCHECK(getSideStream(&sidestream));
-    stream = sidestream;
-    if (sidestream == nullptr)
-      CUDACHECK(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
-    if (ncclCuMemEnable()) {
-      NCCLCHECKGOTO(ncclCuMemAlloc((void **)ptr, NULL, ncclCuMemHandleType, nelem*ncclSizeOfT<T>()), result, finish);
-    } else {
-      CUDACHECKGOTO(hipExtMallocWithFlags((void**)ptr, nelem*ncclSizeOfT<T>(), flags), result, finish);
-    }
-    CUDACHECKGOTO(cudaMemsetAsync(*ptr, 0, nelem*ncclSizeOfT<T>(), stream), result, finish);
-    CUDACHECKGOTO(cudaStreamSynchronize(stream), result, finish);
-    if (sidestream == nullptr)
-      CUDACHECKGOTO(cudaStreamDestroy(stream), result, finish);
-  }
+  // Need a side stream so as not to interfere with graph capture.
+  cudaStream_t stream, sidestream;
+  NCCLCHECK(getSideStream(&sidestream));
+  stream = sidestream;
+  if (sidestream == nullptr)
+    CUDACHECK(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
+  CUDACHECKGOTO(hipExtMallocWithFlags((void**)ptr, nelem*ncclSizeOfT<T>(), flags), result, finish);
+  CUDACHECKGOTO(cudaMemsetAsync(*ptr, 0, nelem*ncclSizeOfT<T>(), stream), result, finish);
+  CUDACHECKGOTO(cudaStreamSynchronize(stream), result, finish);
+  if (sidestream == nullptr)
+    CUDACHECKGOTO(cudaStreamDestroy(stream), result, finish);
 finish:
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
   if (*ptr == nullptr && nelem > 0) WARN("Failed to CUDA calloc %ld bytes", nelem*ncclSizeOfT<T>());
@@ -623,11 +515,7 @@ ncclResult_t ncclCudaCallocAsyncDebug(const char *filefunc, int line, T** ptr, s
 
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
   if (nelem > 0) {
-    if (ncclCuMemEnable()) {
-      NCCLCHECKGOTO(ncclCuMemAlloc((void **)ptr, NULL, ncclCuMemHandleType, nelem*ncclSizeOfT<T>()), result, finish);
-    } else {
-      CUDACHECKGOTO(hipExtMallocWithFlags((void**)ptr, nelem*ncclSizeOfT<T>(), flags), result, finish);
-    }
+    CUDACHECKGOTO(hipExtMallocWithFlags((void**)ptr, nelem*ncclSizeOfT<T>(), flags), result, finish);
     CUDACHECKGOTO(cudaMemsetAsync(*ptr, 0, nelem*ncclSizeOfT<T>(), stream), result, finish); 
   }
 finish:

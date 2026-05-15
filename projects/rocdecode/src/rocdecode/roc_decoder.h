@@ -60,4 +60,5 @@ private:
     RocDecoderCreateInfo decoder_create_info_;
     std::vector<HipInteropDeviceMem> hip_interop_;
 
+    RocDecLogger logger_;
 };

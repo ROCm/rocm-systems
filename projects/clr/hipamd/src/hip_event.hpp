@@ -1,8 +1,22 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+/* Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc.
+
+ Permission is hereby granted, free of charge, to any person obtaining a copy
+ of this software and associated documentation files (the "Software"), to deal
+ in the Software without restriction, including without limitation the rights
+ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ copies of the Software, and to permit persons to whom the Software is
+ furnished to do so, subject to the following conditions:
+
+ The above copyright notice and this permission notice shall be included in
+ all copies or substantial portions of the Software.
+
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ THE SOFTWARE. */
 
 #ifndef HIP_EVENT_H
 #define HIP_EVENT_H
@@ -102,7 +116,8 @@ class Event {
   // Flushes CPU command batch in direct dispatch mode
   static constexpr bool kBatchFlush = true;
 
-  explicit Event(uint32_t flags) : flags_(flags), event_(nullptr) {
+  explicit Event(uint32_t flags)
+      : flags_(flags), lock_(true), event_(nullptr) {
     device_id_ = hip::getCurrentDevice()->deviceId();
   }
 
@@ -127,7 +142,7 @@ class Event {
   uint32_t flags() const { return flags_; }
 
   void BindCommand(amd::Command& command) {
-    std::scoped_lock lock(lock_);
+    amd::ScopedLock lock(lock_);
     if (event_ != nullptr) {
       event_->release();
     }
@@ -135,8 +150,8 @@ class Event {
     command.retain();
   }
 
-  std::recursive_mutex& lock() { return lock_; }
-  const int deviceId() const { return device_id_; }
+  amd::Monitor& lock() { return lock_; }
+  int deviceId() const { return device_id_; }
   void setDeviceId(int id) { device_id_ = id; }
   amd::Event* event() { return event_; }
 
@@ -163,10 +178,10 @@ class Event {
   virtual int64_t time(bool getStartTs) const;
 
  protected:
-  uint32_t flags_;             //!< Flags associated with the event
-  std::recursive_mutex lock_;  //!< Mutex for thread-safe access to event state
-  amd::Event* event_;          //!< Underlying ROCclr event object for GPU synchronization
-  int device_id_;              //!< Device ID where this event was created
+  uint32_t flags_;         //!< Flags associated with the event
+  amd::Monitor lock_;      //!< Mutex for thread-safe access to event state
+  amd::Event* event_;      //!< Underlying ROCclr event object for GPU synchronization
+  int device_id_;          //!< Device ID where this event was created
 };
 
 class EventDD : public Event {
@@ -179,9 +194,7 @@ class EventDD : public Event {
   int64_t time(bool getStartTs) const override;
 };
 
-/// Emulated IPC event using POSIX shared memory + stream write/wait value.
-/// Used on PAL/Windows path where ROCr IPC signals are unavailable.
-class IPCEventEmulated : public Event {
+class IPCEvent : public Event {
   /// IPC event metadata structure
   struct ihipIpcEvent_t {
     std::string ipc_name_;                //!< Name of the shared memory object for IPC
@@ -190,12 +203,13 @@ class IPCEventEmulated : public Event {
     ihipIpcEvent_t() : ipc_shmem_(nullptr) {
       ipc_name_.reserve(32);  // Reserve space for typical IPC name "/hip_<pid>_<counter>"
     }
+    void setipcname(const char* name) { ipc_name_ = name; }
   };
   ihipIpcEvent_t ipc_evt_;
 
  public:
-  explicit IPCEventEmulated(uint32_t flags = hipEventInterprocess) : Event(flags) {}
-  ~IPCEventEmulated() override {
+  explicit IPCEvent(uint32_t flags = hipEventInterprocess) : Event(flags) {}
+  ~IPCEvent() override {
     if (ipc_evt_.ipc_shmem_) {
       int owners = --ipc_evt_.ipc_shmem_->owners;
       // Make sure event is synchronized
@@ -232,33 +246,6 @@ class IPCEventEmulated : public Event {
 struct CallbackData {
   const int previous_read_index;               //!< Snapshot of read index for synchronization
   hip::ihipIpcEventShmem_t* const shmem;       //!< IPC shared memory for event signaling
-};
-
-/// True IPC event backed by a device::Signal with IPC capability.
-/// On ROCm, this uses ROCr IPC signals
-/// Record dispatches a standard barrier with an internal tracking signal, then
-/// registers an async handler that sets the IPC signal to 0 when work completes.
-/// StreamWait dispatches a barrier with the IPC signal as dep_signal;
-/// the GPU waits until the signal reaches 0 before proceeding.
-class IPCEvent : public Event {
-  amd::device::Signal* ipc_signal_;
-
- public:
-  explicit IPCEvent(uint32_t flags = hipEventInterprocess)
-      : Event(flags), ipc_signal_(nullptr) {}
-  ~IPCEvent() override;
-
-  hipError_t GetHandle(ihipIpcEventHandle_t* handle) override;
-  hipError_t OpenHandle(ihipIpcEventHandle_t* handle) override;
-  hipError_t synchronize() override;
-  hipError_t query() override;
-  hipError_t streamWait(hip::Stream* stream, uint flags) override;
-  hipError_t recordCommand(amd::Command*& command, amd::HostQueue* queue, uint32_t flags = 0,
-                           bool batch_flush = true) override;
-  hipError_t enqueueRecordCommand(hip::Stream* stream, amd::Command* command) override;
-
- private:
-  hipError_t createIpcSignalIfNeeded();
 };
 }  // namespace hip
 

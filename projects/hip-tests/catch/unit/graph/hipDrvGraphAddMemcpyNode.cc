@@ -1,8 +1,21 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 #include <functional>
 
@@ -51,7 +64,7 @@
  *  - HIP_VERSION >= 6.1
  */
 #if HT_AMD
-HIP_TEST_CASE(Unit_hipDrvGraphAddMemcpyNode_Negative) {
+TEST_CASE("Unit_hipDrvGraphAddMemcpyNode_Negative") {
   CHECK_IMAGE_SUPPORT
 
   constexpr size_t size = 1024;
@@ -334,7 +347,7 @@ static void hipDrvGraphAddMemcpyNode_test(int deviceid = 0) {
  *  - HIP_VERSION >= 6.1
  */
 
-HIP_TEST_CASE(Unit_hipDrvGraphAddMemcpyNode_test) {
+TEST_CASE("Unit_hipDrvGraphAddMemcpyNode_test") {
   CHECK_IMAGE_SUPPORT
 
   hipDrvGraphAddMemcpyNode_test();
@@ -355,7 +368,7 @@ HIP_TEST_CASE(Unit_hipDrvGraphAddMemcpyNode_test) {
  *  - HIP_VERSION >= 6.1
  */
 
-HIP_TEST_CASE(Unit_hipDrvGraphAddMemcpyNode_MulitDevice) {
+TEST_CASE("Unit_hipDrvGraphAddMemcpyNode_MulitDevice", "[multigpu]") {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
@@ -365,7 +378,7 @@ HIP_TEST_CASE(Unit_hipDrvGraphAddMemcpyNode_MulitDevice) {
       hipDrvGraphAddMemcpyNode_test(device);
     }
   } else {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    SUCCEED("skipped the testcase as no of devices is less than 2");
   }
 }
 #endif
@@ -385,7 +398,7 @@ HIP_TEST_CASE(Unit_hipDrvGraphAddMemcpyNode_MulitDevice) {
  *    - HIP_VERSION >= 6.0
  */
 
-HIP_TEST_CASE(Unit_hipDrvGraphAddMemcpyNode_Positive_Basic) {
+TEST_CASE("Unit_hipDrvGraphAddMemcpyNode_Positive_Basic") {
   using namespace std::placeholders;
 
   constexpr bool async = false;
@@ -425,7 +438,7 @@ HIP_TEST_CASE(Unit_hipDrvGraphAddMemcpyNode_Positive_Basic) {
   HIP_CHECK(hipCtxDestroy(context));
 }
 
-HIP_TEST_CASE(Unit_hipDrvGraphAddMemcpyNode_Positive_Array) {
+TEST_CASE("Unit_hipDrvGraphAddMemcpyNode_Positive_Array") {
   CHECK_IMAGE_SUPPORT
 
   using namespace std::placeholders;
@@ -480,7 +493,7 @@ HIP_TEST_CASE(Unit_hipDrvGraphAddMemcpyNode_Positive_Array) {
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-HIP_TEST_CASE(Unit_hipDrvGraphAddMemcpyNode_Negative_Parameters) {
+TEST_CASE("Unit_hipDrvGraphAddMemcpyNode_Negative_Parameters") {
   using namespace std::placeholders;
 
   HIP_CHECK(hipInit(0));

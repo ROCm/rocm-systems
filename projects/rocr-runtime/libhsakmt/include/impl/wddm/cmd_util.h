@@ -29,7 +29,6 @@ struct DispatchInfo {
   uint32_t                      scratchSizePerWave;
   uint32_t                      scratchBaseOffset[2];
   uint32_t                      offsetCnt;
-  uint32_t                      packetIndex;
 };
 
 class CmdUtil {

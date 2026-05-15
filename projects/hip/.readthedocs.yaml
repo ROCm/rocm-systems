@@ -4,16 +4,16 @@
 version: 2
 
 sphinx:
-   configuration: projects/hip/docs/conf.py
+   configuration: docs/conf.py
 
 formats: []
 
 python:
    install:
-   - requirements: projects/hip/docs/sphinx/requirements.txt
+   - requirements: docs/sphinx/requirements.txt
 
 conda:
-   environment: projects/hip/docs/environment.yml # needed until ubuntu ships doxygen >= 1.9.8
+   environment: docs/environment.yml # needed until ubuntu ships doxygen >= 1.9.8
 
 build:
    os: ubuntu-22.04

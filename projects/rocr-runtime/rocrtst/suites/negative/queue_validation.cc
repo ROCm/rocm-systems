@@ -122,7 +122,6 @@ void QueueValidation::SetUp(void) {
   hsa_status_t err;
 
   TestBase::SetUp();
-  if (test_skipped_) return;
 
   /* The queue exceptions will trigger a coredump. Set the limit to 0 to disable  */
   if (getrlimit(RLIMIT_CORE, &rlimit_)) {

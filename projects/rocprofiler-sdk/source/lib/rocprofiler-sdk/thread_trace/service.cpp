@@ -24,11 +24,10 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
-#include "lib/rocprofiler-sdk/thread_trace/dl.hpp"
 
 #include <rocprofiler-sdk/experimental/thread_trace.h>
 
-#include "lib/common/logging.hpp"
+#include <glog/logging.h>
 
 #include <cstdint>
 
@@ -89,13 +88,6 @@ build_pack_from_array(parameter_pack&                             pack,
             case ROCPROFILER_THREAD_TRACE_PARAMETER_NO_DETAIL:
                 pack.no_detail_simd = param.value != 0;
                 break;
-            case ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE:
-                if(param.value >= ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE_LAST)
-                    return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
-                pack.triple_buffering =
-                    (ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE_TRIPLE_BUFFER ==
-                     param.value);
-                break;
             case ROCPROFILER_THREAD_TRACE_PARAMETER_LAST:
                 return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
         }
@@ -143,9 +135,6 @@ rocprofiler_configure_dispatch_thread_trace_service(
         if(status != ROCPROFILER_STATUS_SUCCESS) return status;
     }
 
-    // Triple buffer not supported in dispatch mode
-    if(pack.triple_buffering) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
-
     ctx->dispatch_thread_trace->add_agent(agent_id, pack);
     return ROCPROFILER_STATUS_SUCCESS;
 }
@@ -183,17 +172,6 @@ rocprofiler_configure_device_thread_trace_service(
 
     // Serialization not supported in device mode
     if(pack.bSerialize) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
-
-    if(pack.triple_buffering)
-    {
-        // For now, only one SE is allowed in triple buffering. Check mask is power of two.
-        if((pack.shader_engine_mask & (pack.shader_engine_mask - 1)) != 0)
-            return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
-
-        // Triple buffering requires specific AQLProfile symbols that may not be available
-        auto* aqlprofile_dl = rocprofiler::thread_trace::get_aqlprofile_dl();
-        if(!aqlprofile_dl || !aqlprofile_dl->valid()) return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
-    }
 
     ctx->device_thread_trace->add_agent(agent_id, pack);
     return ROCPROFILER_STATUS_SUCCESS;

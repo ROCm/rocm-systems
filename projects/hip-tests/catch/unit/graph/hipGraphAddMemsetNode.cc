@@ -1,8 +1,23 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 #include <functional>
 #include <vector>
@@ -39,7 +54,9 @@ static char memSetVal = 'a';
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit_hipGraphAddMemsetNode_Positive_Basic, uint8_t, uint16_t, uint32_t) {
+TEMPLATE_TEST_CASE("Unit_hipGraphAddMemsetNode_Positive_Basic", "", uint8_t, uint16_t, uint32_t) {
+  CHECK_IMAGE_SUPPORT
+
   const auto f = [](hipMemsetParams* params) {
     hipGraph_t graph = nullptr;
     HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -87,7 +104,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipGraphAddMemsetNode_Positive_Basic, uint8_t, uint1
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_Negative_Parameters) {
+TEST_CASE("Unit_hipGraphAddMemsetNode_Negative_Parameters") {
   using namespace std::placeholders;
   hipGraph_t graph = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -112,7 +129,9 @@ HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_Negative_Parameters) {
  * using hipGraphAddMemsetNode. Copy the values in device memory to host using
  * hipGraphAddMemcpyNode. Verify the results.
  */
-HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMallocPitch_2D) {
+TEST_CASE("Unit_hipGraphAddMemsetNode_hipMallocPitch_2D") {
+  CHECK_IMAGE_SUPPORT
+
   size_t width = SIZE * sizeof(char), numW{SIZE}, numH{SIZE}, pitch_A;
   char* A_d;
 
@@ -177,7 +196,9 @@ HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMallocPitch_2D) {
  * hipGraphAddMemsetNode. Copy the values in device memory to host using
  * hipGraphAddMemcpyNode. Verify the results.
  */
-HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMallocPitch_1D) {
+TEST_CASE("Unit_hipGraphAddMemsetNode_hipMallocPitch_1D") {
+  CHECK_IMAGE_SUPPORT
+
   size_t width = SIZE * sizeof(char), numW{SIZE}, pitch_A;
   char* A_d;
 
@@ -236,7 +257,9 @@ HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMallocPitch_1D) {
  * hipGraphAddMemsetNode. Copy the values in device memory to host using
  * hipGraphAddMemcpyNode. Verify the results.
  */
-HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMalloc3D_2D) {
+TEST_CASE("Unit_hipGraphAddMemsetNode_hipMalloc3D_2D") {
+  CHECK_IMAGE_SUPPORT
+
   size_t width = SIZE * sizeof(char);
   size_t numW = SIZE, numH = SIZE;
 
@@ -311,7 +334,9 @@ HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMalloc3D_2D) {
  * memory using hipGraphAddMemsetNode. Copy the values in device
  * memory to host using hipGraphAddMemcpyNode. Verify the results.
  */
-HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMalloc3D_1D) {
+TEST_CASE("Unit_hipGraphAddMemsetNode_hipMalloc3D_1D") {
+  CHECK_IMAGE_SUPPORT
+
   size_t width = SIZE * sizeof(char);
   size_t numW = SIZE;
 
@@ -379,7 +404,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMalloc3D_1D) {
  * hipGraphAddMemsetNode. Copy the values in device memory to host using
  * hipGraphAddMemcpyNode. Verify the results.
  */
-HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMalloc_1D) {
+TEST_CASE("Unit_hipGraphAddMemsetNode_hipMalloc_1D") {
   char* A_d;
   size_t NumW = SIZE;
   size_t Nbytes1D = SIZE * sizeof(char);
@@ -438,7 +463,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMalloc_1D) {
   HIP_CHECK(hipFree(A_d));
 }
 
-HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMallocManaged) {
+TEST_CASE("Unit_hipGraphAddMemsetNode_hipMallocManaged") {
   int managed = 0;
   HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, 0));
   INFO("hipDeviceAttributeManagedMemory: " << managed);

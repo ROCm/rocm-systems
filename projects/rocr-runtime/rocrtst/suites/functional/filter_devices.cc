@@ -36,7 +36,6 @@ FilterDevicesTest::~FilterDevicesTest(void) {}
 
 void FilterDevicesTest::SetUp(void) {
   TestBase::SetUp();
-  if (test_skipped_) return;
 }
 
 void FilterDevicesTest::Run(void) {

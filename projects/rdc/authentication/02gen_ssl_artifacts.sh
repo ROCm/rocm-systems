@@ -41,3 +41,5 @@ rm rdc_cacert.pem
 cp ../install_client.sh ../install_server.sh $INSTALL_RT
 
 popd
+
+

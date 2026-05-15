@@ -14,7 +14,6 @@
 // Memory operations per rank for different synchronization protocols
 #define NCCL_CE_SYNC_OPS_PER_RANK_MC 2
 #define NCCL_CE_SYNC_OPS_PER_RANK_UC 3
-#define RCCL_CE_NUM_COPY_STREAMS 8
 
 struct ncclCeColl {
   uint8_t* baseUCSymReadyPtr;
@@ -26,9 +25,6 @@ struct ncclCeColl {
   uint32_t intraBatchSyncFreq;
   uint64_t intraBatchSyncMsgThreshold;
   struct ncclDevrWindow* ceSyncWin;
-  int nCopyStreams;
-  cudaStream_t copyStreams[RCCL_CE_NUM_COPY_STREAMS];
-  cudaEvent_t copyEvents[RCCL_CE_NUM_COPY_STREAMS];
 };
 
 struct ncclCeInitTask {
@@ -53,7 +49,7 @@ struct ncclCeBatchOpsParams {
   size_t* sizes;
   size_t numOps;
   bool intraBatchSync;
-#if ROCM_VERSION >= 71200
+#if CUDART_VERSION >= 12080
   cudaMemcpyAttributes* attrs;
   size_t* attrIdxs;
   size_t numAttrs;

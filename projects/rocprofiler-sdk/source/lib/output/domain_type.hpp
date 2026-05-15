@@ -40,7 +40,6 @@ enum class domain_type
     ROCDECODE,
     ROCJPEG,
     PC_SAMPLING_STOCHASTIC,
-    KFD,
     LAST,
 };
 

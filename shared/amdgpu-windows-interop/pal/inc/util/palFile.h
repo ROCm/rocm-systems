@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
+ *  Copyright (c) 2014-2025 Advanced Micro Devices, Inc. All Rights Reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -54,14 +54,14 @@
 namespace Util
 {
 #if defined(_WIN32)
-/// Wide-character of the platform's preferred path separator.
+/// Wide-character of the platform's prefered path separator.
 static constexpr wchar_t PathSepW = L'\\';
-/// Narrow-character of the platform's preferred path separator.
+/// Narrow-character of the platform's prefered path separator.
 static constexpr  char   PathSep = '\\';
 #else
-/// Wide-character of the platform's preferred path separator.
+/// Wide-character of the platform's prefered path separator.
 static constexpr wchar_t PathSepW = L'/';
-/// Narrow-character of the platform's preferred path separator.
+/// Narrow-character of the platform's prefered path separator.
 static constexpr  char   PathSep = '/';
 #endif
 

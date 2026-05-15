@@ -46,26 +46,32 @@ struct hsa_kfd_debug_context {
 	uint32_t runtime_capabilities_mask;
 };
 
-int hsakmt_kfdcontext_init_debug_context(HsaKFDContext *ctx)
+struct hsa_kfd_debug_context *hsakmt_kfdcontext_get_debug_context(HsaKFDContext *ctx)
 {
-	CHECK_CTX(ctx, -1);
+	assert(ctx);
+	if (!ctx) {
+		pr_err("Expected a non-null ptr for HsaKFDContext");
+		return NULL;
+	}
 
 	if (ctx->debug_context)
-		return 0;
+		return ctx->debug_context;
 
 	ctx->debug_context = calloc(1, sizeof(struct hsa_kfd_debug_context));
 	if (!ctx->debug_context) {
 		pr_err("Alloc memory failed for struct hsa_kfd_debug_context size %zu\n",
 				 sizeof(struct hsa_kfd_debug_context));
-		return -1;
+		return NULL;
 	}
-	return 0;
+	return ctx->debug_context;
 }
 
 HSAKMT_STATUS hsakmt_init_device_debugging_memory(HsaKFDContext *ctx, unsigned int NumNodes)
 {
 	unsigned int i;
-	struct hsa_kfd_debug_context *debug_ctx = ctx->debug_context;
+	struct hsa_kfd_debug_context *debug_ctx = hsakmt_kfdcontext_get_debug_context(ctx);
+	if (!debug_ctx)
+		return HSAKMT_STATUS_NO_MEMORY;
 
 	debug_ctx->is_device_debugged = malloc(NumNodes * sizeof(bool));
 	if (!debug_ctx->is_device_debugged)
@@ -79,7 +85,9 @@ HSAKMT_STATUS hsakmt_init_device_debugging_memory(HsaKFDContext *ctx, unsigned i
 
 void hsakmt_destroy_device_debugging_memory(HsaKFDContext *ctx)
 {
-	struct hsa_kfd_debug_context *debug_ctx = ctx->debug_context;
+	struct hsa_kfd_debug_context *debug_ctx = hsakmt_kfdcontext_get_debug_context(ctx);
+	if (!debug_ctx)
+		return;
 
 	if (debug_ctx->is_device_debugged) {
 		free(debug_ctx->is_device_debugged);
@@ -89,8 +97,8 @@ void hsakmt_destroy_device_debugging_memory(HsaKFDContext *ctx)
 
 bool hsakmt_debug_get_reg_status(HsaKFDContext *ctx, uint32_t node_id)
 {
-	struct hsa_kfd_debug_context *debug_ctx = ctx->debug_context;
-	if (!debug_ctx->is_device_debugged)
+	struct hsa_kfd_debug_context *debug_ctx = hsakmt_kfdcontext_get_debug_context(ctx);
+	if (!debug_ctx || !debug_ctx->is_device_debugged)
 		return false;
 
 	return debug_ctx->is_device_debugged[node_id];
@@ -103,7 +111,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDbgRegister(HSAuint32 NodeId)
 
 	CHECK_KFD_OPEN();
 	struct hsa_kfd_debug_context *debug_ctx =
-				hsakmt_primary_kfd_ctx.debug_context;
+				hsakmt_kfdcontext_get_debug_context(&hsakmt_primary_kfd_ctx);
 	if (!debug_ctx->is_device_debugged)
 		return HSAKMT_STATUS_NO_MEMORY;
 
@@ -132,7 +140,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDbgUnregister(HSAuint32 NodeId)
 
 	CHECK_KFD_OPEN();
 	struct hsa_kfd_debug_context *debug_ctx =
-				hsakmt_primary_kfd_ctx.debug_context;
+				hsakmt_kfdcontext_get_debug_context(&hsakmt_primary_kfd_ctx);
 	if (!debug_ctx->is_device_debugged)
 		return HSAKMT_STATUS_NO_MEMORY;
 
@@ -311,10 +319,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCheckRuntimeDebugSupportCtx(HsaKFDContext *ctx) {
 	HsaSystemProperties props = {0};
 	HsaVersionInfo versionInfo = {0};
 
-	//secondary context doesn't support the debugger
-	if (!ctx->hsakmt_is_primary_ctx)
-		return HSAKMT_STATUS_NOT_SUPPORTED;
-
 	memset(&node, 0x00, sizeof(node));
 	memset(&props, 0x00, sizeof(props));
 	if (hsaKmtAcquireSystemPropertiesCtx(ctx, &props))
@@ -348,7 +352,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRuntimeEnableCtx(HsaKFDContext *ctx,
 					    void *rDebug,
 					    bool setupTtmp)
 {
-	struct hsa_kfd_debug_context *debug_ctx = ctx->debug_context;
+	struct hsa_kfd_debug_context *debug_ctx = hsakmt_kfdcontext_get_debug_context(ctx);
 
 	struct kfd_ioctl_runtime_enable_args args = {0};
 	HSAKMT_STATUS result = hsaKmtCheckRuntimeDebugSupportCtx(ctx);
@@ -393,7 +397,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRuntimeDisableCtx(HsaKFDContext *ctx)
 HSAKMT_STATUS HSAKMTAPI hsaKmtGetRuntimeCapabilitiesCtx(HsaKFDContext *ctx,
 						  HSAuint32 *caps_mask)
 {
-	struct hsa_kfd_debug_context *debug_ctx = ctx->debug_context;
+	struct hsa_kfd_debug_context *debug_ctx = hsakmt_kfdcontext_get_debug_context(ctx);
 
 	*caps_mask = debug_ctx->runtime_capabilities_mask;
 	return HSAKMT_STATUS_SUCCESS;

@@ -10,7 +10,6 @@
 
 #define mmCOMPUTE_NUM_THREAD_X              0x2E07
 #define mmCOMPUTE_PGM_LO                    0x2E0C
-#define mmCOMPUTE_DISPATCH_PKT_ADDR_LO      0x2E0E
 #define mmCOMPUTE_DISPATCH_SCRATCH_BASE_LO  0x2E10
 #define mmCOMPUTE_PGM_RSRC1                 0x2E12
 #define mmCOMPUTE_PGM_RSRC3                 0x2E28
@@ -281,12 +280,6 @@ struct DispatchTemplate {
     uint32_t compute_pgm_lo;
     uint32_t compute_pgm_hi;
   } program_regs;
-
-  struct DispatchPktAddressRegs {
-    PM4_MEC_SET_SH_REG cmd_set_data;
-    uint32_t compute_pkt_addr_lo;
-    uint32_t compute_pkt_addr_hi;
-  } pkt_addr_regs;
 
   struct DispatchProgramResourceRegs {
     PM4_MEC_SET_SH_REG cmd_set_data;

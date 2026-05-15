@@ -1,8 +1,24 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2023-25 Advanced Micro Devices, Inc. All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 /**
  * @addtogroup hipMemMap hipMemMap
@@ -45,7 +61,7 @@ static __global__ void square_kernel(int* Buff) {
  * ------------------------
  *    - HIP_VERSION >= 7.0
  */
-HIP_TEST_CASE(Unit_hipMemMap_SameMemoryReuse) {
+TEST_CASE("Unit_hipMemMap_SameMemoryReuse") {
   constexpr int iterations = 20;
   size_t granularity = 0;
   size_t buffer_size = N * sizeof(int);
@@ -122,7 +138,7 @@ HIP_TEST_CASE(Unit_hipMemMap_SameMemoryReuse) {
  * ------------------------
  *    - HIP_VERSION >= 7.0
  */
-HIP_TEST_CASE(Unit_hipMemMap_PhysicalMemoryReuse_SingleGPU) {
+TEST_CASE("Unit_hipMemMap_PhysicalMemoryReuse_SingleGPU") {
   size_t granularity = 0;
   size_t buffer_size = N * sizeof(int);
   CTX_CREATE();
@@ -203,7 +219,7 @@ HIP_TEST_CASE(Unit_hipMemMap_PhysicalMemoryReuse_SingleGPU) {
  * ------------------------
  *    - HIP_VERSION >= 7.0
  */
-HIP_TEST_CASE(Unit_hipMemMap_PhysicalMemory_Map2MultVMMs) {
+TEST_CASE("Unit_hipMemMap_PhysicalMemory_Map2MultVMMs") {
   size_t granularity = 0;
   size_t buffer_size = N * sizeof(int);
   CTX_CREATE();
@@ -281,7 +297,8 @@ void physicalMemoryReuse_MultiDev (hipMemAllocationProp prop) {
   int devicecount = 0;
   HIP_CHECK(hipGetDeviceCount(&devicecount));
   if (devicecount < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST("Machine is Single GPU. Skipping Test..");
+    return;
   }
   size_t granularity = 0;
   size_t buffer_size = N * sizeof(int);
@@ -347,7 +364,7 @@ void physicalMemoryReuse_MultiDev (hipMemAllocationProp prop) {
  * ------------------------
  *    - HIP_VERSION >= 7.0
  */
-HIP_TEST_CASE(Unit_hipMemMap_PhysicalMemoryReuse_MultiDev) {
+TEST_CASE("Unit_hipMemMap_PhysicalMemoryReuse_MultiDev", "[multigpu]") {
   CHECK_P2P_SUPPORT
   SECTION("Memory Allocation Type as hipMemAllocationTypePinned") {
     hipMemAllocationProp prop{};
@@ -377,7 +394,7 @@ HIP_TEST_CASE(Unit_hipMemMap_PhysicalMemoryReuse_MultiDev) {
  * ------------------------
  *    - HIP_VERSION >= 7.0
  */
-HIP_TEST_CASE(Unit_hipMemMap_VMMMemoryReuse_SingleGPU) {
+TEST_CASE("Unit_hipMemMap_VMMMemoryReuse_SingleGPU") {
   size_t granularity = 0;
   size_t buffer_size = N * sizeof(int);
   CTX_CREATE();
@@ -453,7 +470,8 @@ void vMMMemoryReuse_MultiGPU (hipMemAllocationProp prop) {
   int deviceId = 0, devicecount = 0;
   HIP_CHECK(hipGetDeviceCount(&devicecount));
   if (devicecount < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST("Machine is Single GPU. Skipping Test..");
+    return;
   }
   size_t granularity = 0;
   size_t buffer_size = N * sizeof(int);
@@ -536,7 +554,7 @@ void vMMMemoryReuse_MultiGPU (hipMemAllocationProp prop) {
  * ------------------------
  *    - HIP_VERSION >= 7.0
  */
-HIP_TEST_CASE(Unit_hipMemMap_VMMMemoryReuse_MultiGPU) {
+TEST_CASE("Unit_hipMemMap_VMMMemoryReuse_MultiGPU", "[multigpu]") {
   CHECK_P2P_SUPPORT
   SECTION("Memory Allocation Type as hipMemAllocationTypePinned") {
     hipMemAllocationProp prop{};
@@ -565,7 +583,7 @@ HIP_TEST_CASE(Unit_hipMemMap_VMMMemoryReuse_MultiGPU) {
  * ------------------------
  *    - HIP_VERSION >= 7.0
  */
-HIP_TEST_CASE(Unit_hipMemMap_MapPartialVMMMem) {
+TEST_CASE("Unit_hipMemMap_MapPartialVMMMem") {
   int deviceId = 0;
   size_t granularity = 0;
   size_t buffer_size = N * sizeof(int);
@@ -630,7 +648,7 @@ HIP_TEST_CASE(Unit_hipMemMap_MapPartialVMMMem) {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-HIP_TEST_CASE(Unit_hipMemMap_negative) {
+TEST_CASE("Unit_hipMemMap_negative") {
   size_t granularity = 0;
   size_t buffer_size = N * sizeof(int);
   CTX_CREATE();
@@ -666,7 +684,7 @@ HIP_TEST_CASE(Unit_hipMemMap_negative) {
   CTX_DESTROY();
 }
 
-HIP_TEST_CASE(Unit_hipMemMap_Capture) {
+TEST_CASE("Unit_hipMemMap_Capture") {
   hipMemGenericAllocationHandle_t handle;
   size_t granularity = 0;
   constexpr size_t kAlignment = 2;

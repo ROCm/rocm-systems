@@ -1,11 +1,29 @@
-// Copyright (c) Advanced Micro Devices, Inc.
-// SPDX-License-Identifier: MIT
+// MIT License
+//
+// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
 
 #pragma once
 
 #include "core/demangler.hpp"
 #include "core/timemory.hpp"
-#include <cstdint>
 
 #include <timemory/components/base.hpp>
 #include <timemory/components/gotcha/backends.hpp>
@@ -54,13 +72,13 @@ TIMEMORY_NOINLINE void configure_mpip(const std::set<std::string>& permit = {},
 //
 template <typename Toolset, typename Tag>
 TIMEMORY_VISIBILITY("default")
-TIMEMORY_NOINLINE std::uint64_t activate_mpip();
+TIMEMORY_NOINLINE uint64_t activate_mpip();
 //
 //--------------------------------------------------------------------------------------//
 //
 template <typename Toolset, typename Tag>
 TIMEMORY_VISIBILITY("default")
-TIMEMORY_NOINLINE std::uint64_t deactivate_mpip(std::uint64_t);
+TIMEMORY_NOINLINE uint64_t deactivate_mpip(uint64_t);
 //
 //--------------------------------------------------------------------------------------//
 //
@@ -107,9 +125,9 @@ struct mpip_handle : base<mpip_handle<Toolset, Tag>, void>
 private:
     struct persistent_data
     {
-        std::atomic<short>        m_configured;
-        std::atomic<std::int64_t> m_count;
-        toolset_ptr_t             m_tool;
+        std::atomic<short>   m_configured;
+        std::atomic<int64_t> m_count;
+        toolset_ptr_t        m_tool;
     };
 
     static persistent_data& get_persistent_data()
@@ -125,7 +143,7 @@ private:
 
     static toolset_ptr_t& get_tool_instance() { return get_persistent_data().m_tool; }
 
-    static std::atomic<std::int64_t>& get_tool_count()
+    static std::atomic<int64_t>& get_tool_count()
     {
         return get_persistent_data().m_count;
     }
@@ -142,12 +160,12 @@ private:
 //
 //======================================================================================//
 //
-/// \fn std::uint64_t rocprofsys::component::activate_mpip()
+/// \fn uint64_t rocprofsys::component::activate_mpip()
 /// \brief The thread that first activates mpip will be the thread that turns it off.
 /// Function returns the number of new mpip handles
 ///
 template <typename Toolset, typename Tag>
-std::uint64_t
+uint64_t
 rocprofsys::component::activate_mpip()
 {
     using handle_t = rocprofsys::component::mpip_handle<Toolset, Tag>;
@@ -182,13 +200,13 @@ rocprofsys::component::activate_mpip()
 //
 //======================================================================================//
 //
-/// \fn std::uint64_t rocprofsys::component::deactivate_mpip(std::uint64_t id)
+/// \fn uint64_t rocprofsys::component::deactivate_mpip(uint64_t id)
 /// \brief The thread that created the initial mpip handle will turn off. Returns
 /// the number of handles active
 ///
 template <typename Toolset, typename Tag>
-std::uint64_t
-rocprofsys::component::deactivate_mpip(std::uint64_t id)
+uint64_t
+rocprofsys::component::deactivate_mpip(uint64_t id)
 {
     if(id > 0)
     {

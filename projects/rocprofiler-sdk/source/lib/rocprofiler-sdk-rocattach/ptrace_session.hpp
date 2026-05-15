@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,20 +22,16 @@
 
 #pragma once
 
-#include "ptrace_runner.hpp"
-
 #include <rocprofiler-sdk-rocattach/types.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
-#include <memory>
 #include <sstream>
 #include <string>
 #include <thread>
 #include <unordered_map>
-#include <variant>
 #include <vector>
 
 namespace rocprofiler
@@ -78,9 +74,6 @@ public:
                                      void*              second);
 
 private:
-    rocattach_status_t ptrace_call(__ptrace_request   op,
-                                   ptrace_parameter_t addr,
-                                   ptrace_parameter_t data) const;
     rocattach_status_t start_signal_handler();
     rocattach_status_t stop_signal_handler();
     rocattach_status_t wait_for_breakpoint();
@@ -142,7 +135,7 @@ private:
     };
 
     static void ptrace_signal_handler_func(
-        pid_t                                               pid,
+        int                                                 pid,
         std::atomic<ptrace_session_signal_handler_state_t>& state,
         std::atomic<rocattach_status_t>&                    error);
 
@@ -153,7 +146,7 @@ private:
 
     std::thread m_ptrace_signal_handler_thread;
 
-    const pid_t m_pid = -1;
+    const int m_pid = -1;
 };
 
 }  // namespace rocattach

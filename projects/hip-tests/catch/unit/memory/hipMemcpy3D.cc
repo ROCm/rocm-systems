@@ -1,8 +1,24 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 #include <memcpy1d_tests_common.hh>
 #include <memcpy3d_tests_common.hh>
@@ -14,7 +30,9 @@
 
 #pragma clang diagnostic ignored "-Wunused-variable"
 
-HIP_TEST_CASE(Unit_hipMemcpy3D_Positive_Basic) {
+TEST_CASE("Unit_hipMemcpy3D_Positive_Basic") {
+  CHECK_IMAGE_SUPPORT
+
   constexpr bool async = false;
 
   SECTION("Device to Host") { Memcpy3DDeviceToHostShell<async>(Memcpy3DWrapper<>); }
@@ -31,7 +49,9 @@ HIP_TEST_CASE(Unit_hipMemcpy3D_Positive_Basic) {
   SECTION("Host to Host") { Memcpy3DHostToHostShell<async>(Memcpy3DWrapper<>); }
 }
 
-HIP_TEST_CASE(Unit_hipMemcpy3D_Positive_Synchronization_Behavior) {
+TEST_CASE("Unit_hipMemcpy3D_Positive_Synchronization_Behavior") {
+  CHECK_IMAGE_SUPPORT
+
   HIP_CHECK(hipDeviceSynchronize());
 
   SECTION("Host to Device") { Memcpy3DHtoDSyncBehavior(Memcpy3DWrapper<>, true); }
@@ -43,7 +63,9 @@ HIP_TEST_CASE(Unit_hipMemcpy3D_Positive_Synchronization_Behavior) {
   SECTION("Host to Host") { Memcpy3DHtoHSyncBehavior(Memcpy3DWrapper<>, true); }
 }
 
-HIP_TEST_CASE(Unit_hipMemcpy3D_Positive_DeviceToDevice_Synchronization_Behavior) {
+TEST_CASE("Unit_hipMemcpy3D_Positive_DeviceToDevice_Synchronization_Behavior") {
+  CHECK_IMAGE_SUPPORT
+
   LinearAllocGuard3D<int> src_alloc(make_hipExtent(32 * sizeof(int), 32, 8));
   LinearAllocGuard3D<int> dst_alloc(make_hipExtent(32 * sizeof(int), 32, 8));
   HipTest::BlockingContext b_context{nullptr};
@@ -67,12 +89,14 @@ HIP_TEST_CASE(Unit_hipMemcpy3D_Positive_DeviceToDevice_Synchronization_Behavior)
   REQUIRE(hipStreamQuery(kernel_stream) == hipSuccess);
 }
 
-HIP_TEST_CASE(Unit_hipMemcpy3D_Positive_Parameters) {
+TEST_CASE("Unit_hipMemcpy3D_Positive_Parameters") {
+  CHECK_IMAGE_SUPPORT
+
   constexpr bool async = false;
   Memcpy3DZeroWidthHeightDepth<async>(Memcpy3DWrapper<>);
 }
 
-HIP_TEST_CASE(Unit_hipMemcpy3D_Positive_Array) {
+TEST_CASE("Unit_hipMemcpy3D_Positive_Array") {
   CHECK_IMAGE_SUPPORT
 
   constexpr bool async = false;
@@ -82,7 +106,9 @@ HIP_TEST_CASE(Unit_hipMemcpy3D_Positive_Array) {
 #endif
 }
 
-HIP_TEST_CASE(Unit_hipMemcpy3D_Negative_Parameters) {
+TEST_CASE("Unit_hipMemcpy3D_Negative_Parameters") {
+  CHECK_IMAGE_SUPPORT
+
   constexpr hipExtent extent{128 * sizeof(int), 128, 8};
 
   constexpr auto NegativeTests = [](hipPitchedPtr dst_ptr, hipPos dst_pos, hipPitchedPtr src_ptr,
@@ -229,7 +255,9 @@ HIP_TEST_CASE(Unit_hipMemcpy3D_Negative_Parameters) {
   }
 }
 
-HIP_TEST_CASE(Unit_hipMemcpy3D_Capture) {
+TEST_CASE("Unit_hipMemcpy3D_Capture") {
+  CHECK_IMAGE_SUPPORT
+
   constexpr hipExtent extent{16 * sizeof(int), 16, 16};
   LinearAllocGuard3D<int> dev_alloc(extent);
   LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc,

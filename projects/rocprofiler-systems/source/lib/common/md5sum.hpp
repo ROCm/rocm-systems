@@ -1,5 +1,24 @@
-// Copyright (c) Advanced Micro Devices, Inc.
-// SPDX-License-Identifier: MIT
+// MIT License
+//
+// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
 
 #pragma once
 
@@ -20,8 +39,8 @@ inline namespace common
 class md5sum
 {
 public:
-    using size_type                = std::uint32_t;  // must be 32bit
-    using raw_digest_t             = std::array<std::uint8_t, 16>;
+    using size_type                = uint32_t;  // must be 32bit
+    using raw_digest_t             = std::array<uint8_t, 16>;
     static constexpr int blocksize = 64;
 
     template <typename Tp, typename... Args>
@@ -50,17 +69,15 @@ public:
     friend std::ostream& operator<<(std::ostream&, md5sum md5);
 
 private:
-    void transform(const std::uint8_t block[blocksize]);
+    void transform(const uint8_t block[blocksize]);
 
     bool finalized = false;
     // 64bit counter for number of bits (lo, hi)
-    std::array<std::uint32_t, 2> count = { 0, 0 };
-    std::array<std::uint8_t, blocksize>
-        buffer{};  // overflow bytes from last 64 byte chunk
+    std::array<uint32_t, 2>        count = { 0, 0 };
+    std::array<uint8_t, blocksize> buffer{};  // overflow bytes from last 64 byte chunk
     // digest so far, initialized to magic initialization constants.
-    std::array<std::uint32_t, 4> state = { 0x67452301, 0xefcdab89, 0x98badcfe,
-                                           0x10325476 };
-    std::array<std::uint8_t, 16> digest{};  // result
+    std::array<uint32_t, 4> state = { 0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476 };
+    std::array<uint8_t, 16> digest{};  // result
 };
 
 template <typename Tp, typename... Args>
@@ -106,83 +123,79 @@ namespace
 using size_type = typename md5sum::size_type;
 
 // Constants for md5sumTransform routine.
-constexpr std::uint32_t S11 = 7;
-constexpr std::uint32_t S12 = 12;
-constexpr std::uint32_t S13 = 17;
-constexpr std::uint32_t S14 = 22;
-constexpr std::uint32_t S21 = 5;
-constexpr std::uint32_t S22 = 9;
-constexpr std::uint32_t S23 = 14;
-constexpr std::uint32_t S24 = 20;
-constexpr std::uint32_t S31 = 4;
-constexpr std::uint32_t S32 = 11;
-constexpr std::uint32_t S33 = 16;
-constexpr std::uint32_t S34 = 23;
-constexpr std::uint32_t S41 = 6;
-constexpr std::uint32_t S42 = 10;
-constexpr std::uint32_t S43 = 15;
-constexpr std::uint32_t S44 = 21;
+constexpr uint32_t S11 = 7;
+constexpr uint32_t S12 = 12;
+constexpr uint32_t S13 = 17;
+constexpr uint32_t S14 = 22;
+constexpr uint32_t S21 = 5;
+constexpr uint32_t S22 = 9;
+constexpr uint32_t S23 = 14;
+constexpr uint32_t S24 = 20;
+constexpr uint32_t S31 = 4;
+constexpr uint32_t S32 = 11;
+constexpr uint32_t S33 = 16;
+constexpr uint32_t S34 = 23;
+constexpr uint32_t S41 = 6;
+constexpr uint32_t S42 = 10;
+constexpr uint32_t S43 = 15;
+constexpr uint32_t S44 = 21;
 
 // low level logic operations
-static inline std::uint32_t
-F(std::uint32_t x, std::uint32_t y, std::uint32_t z);
+static inline uint32_t
+F(uint32_t x, uint32_t y, uint32_t z);
 
-static inline std::uint32_t
-G(std::uint32_t x, std::uint32_t y, std::uint32_t z);
+static inline uint32_t
+G(uint32_t x, uint32_t y, uint32_t z);
 
-static inline std::uint32_t
-H(std::uint32_t x, std::uint32_t y, std::uint32_t z);
+static inline uint32_t
+H(uint32_t x, uint32_t y, uint32_t z);
 
-static inline std::uint32_t
-I(std::uint32_t x, std::uint32_t y, std::uint32_t z);
+static inline uint32_t
+I(uint32_t x, uint32_t y, uint32_t z);
 
-static inline std::uint32_t
-rotate_left(std::uint32_t x, int n);
-
-static inline void
-FF(std::uint32_t& a, std::uint32_t b, std::uint32_t c, std::uint32_t d, std::uint32_t x,
-   std::uint32_t s, std::uint32_t ac);
+static inline uint32_t
+rotate_left(uint32_t x, int n);
 
 static inline void
-GG(std::uint32_t& a, std::uint32_t b, std::uint32_t c, std::uint32_t d, std::uint32_t x,
-   std::uint32_t s, std::uint32_t ac);
+FF(uint32_t& a, uint32_t b, uint32_t c, uint32_t d, uint32_t x, uint32_t s, uint32_t ac);
 
 static inline void
-HH(std::uint32_t& a, std::uint32_t b, std::uint32_t c, std::uint32_t d, std::uint32_t x,
-   std::uint32_t s, std::uint32_t ac);
+GG(uint32_t& a, uint32_t b, uint32_t c, uint32_t d, uint32_t x, uint32_t s, uint32_t ac);
 
 static inline void
-II(std::uint32_t& a, std::uint32_t b, std::uint32_t c, std::uint32_t d, std::uint32_t x,
-   std::uint32_t s, std::uint32_t ac);
+HH(uint32_t& a, uint32_t b, uint32_t c, uint32_t d, uint32_t x, uint32_t s, uint32_t ac);
+
+static inline void
+II(uint32_t& a, uint32_t b, uint32_t c, uint32_t d, uint32_t x, uint32_t s, uint32_t ac);
 
 // F, G, H and I are basic md5sum functions.
-inline std::uint32_t
-F(std::uint32_t x, std::uint32_t y, std::uint32_t z)
+inline uint32_t
+F(uint32_t x, uint32_t y, uint32_t z)
 {
     return (x & y) | (~x & z);
 }
 
-inline std::uint32_t
-G(std::uint32_t x, std::uint32_t y, std::uint32_t z)
+inline uint32_t
+G(uint32_t x, uint32_t y, uint32_t z)
 {
     return (x & z) | (y & ~z);
 }
 
-inline std::uint32_t
-H(std::uint32_t x, std::uint32_t y, std::uint32_t z)
+inline uint32_t
+H(uint32_t x, uint32_t y, uint32_t z)
 {
     return x ^ y ^ z;
 }
 
-inline std::uint32_t
-I(std::uint32_t x, std::uint32_t y, std::uint32_t z)
+inline uint32_t
+I(uint32_t x, uint32_t y, uint32_t z)
 {
     return y ^ (x | ~z);
 }
 
 // rotate_left rotates x left n bits.
-inline std::uint32_t
-rotate_left(std::uint32_t x, int n)
+inline uint32_t
+rotate_left(uint32_t x, int n)
 {
     return (x << n) | (x >> (32 - n));
 }
@@ -190,48 +203,42 @@ rotate_left(std::uint32_t x, int n)
 // FF, GG, HH, and II transformations for rounds 1, 2, 3, and 4.
 // Rotation is separate from addition to prevent recomputation.
 inline void
-FF(std::uint32_t& a, std::uint32_t b, std::uint32_t c, std::uint32_t d, std::uint32_t x,
-   std::uint32_t s, std::uint32_t ac)
+FF(uint32_t& a, uint32_t b, uint32_t c, uint32_t d, uint32_t x, uint32_t s, uint32_t ac)
 {
     a = rotate_left(a + F(b, c, d) + x + ac, s) + b;
 }
 
 inline void
-GG(std::uint32_t& a, std::uint32_t b, std::uint32_t c, std::uint32_t d, std::uint32_t x,
-   std::uint32_t s, std::uint32_t ac)
+GG(uint32_t& a, uint32_t b, uint32_t c, uint32_t d, uint32_t x, uint32_t s, uint32_t ac)
 {
     a = rotate_left(a + G(b, c, d) + x + ac, s) + b;
 }
 
 inline void
-HH(std::uint32_t& a, std::uint32_t b, std::uint32_t c, std::uint32_t d, std::uint32_t x,
-   std::uint32_t s, std::uint32_t ac)
+HH(uint32_t& a, uint32_t b, uint32_t c, uint32_t d, uint32_t x, uint32_t s, uint32_t ac)
 {
     a = rotate_left(a + H(b, c, d) + x + ac, s) + b;
 }
 
 inline void
-II(std::uint32_t& a, std::uint32_t b, std::uint32_t c, std::uint32_t d, std::uint32_t x,
-   std::uint32_t s, std::uint32_t ac)
+II(uint32_t& a, uint32_t b, uint32_t c, uint32_t d, uint32_t x, uint32_t s, uint32_t ac)
 {
     a = rotate_left(a + I(b, c, d) + x + ac, s) + b;
 }
 
-// decodes input (unsigned char) into output (std::uint32_t). Assumes len is a multiple
-// of 4.
+// decodes input (unsigned char) into output (uint32_t). Assumes len is a multiple of 4.
 void
-decode(std::uint32_t output[], const std::uint8_t input[], size_type len)
+decode(uint32_t output[], const uint8_t input[], size_type len)
 {
     for(unsigned int i = 0, j = 0; j < len; i++, j += 4)
-        output[i] = ((std::uint32_t) input[j]) | (((std::uint32_t) input[j + 1]) << 8) |
-                    (((std::uint32_t) input[j + 2]) << 16) |
-                    (((std::uint32_t) input[j + 3]) << 24);
+        output[i] = ((uint32_t) input[j]) | (((uint32_t) input[j + 1]) << 8) |
+                    (((uint32_t) input[j + 2]) << 16) | (((uint32_t) input[j + 3]) << 24);
 }
 
-// encodes input (std::uint32_t) into output (unsigned char). Assumes len is
+// encodes input (uint32_t) into output (unsigned char). Assumes len is
 // a multiple of 4.
 void
-encode(std::uint8_t output[], const std::uint32_t input[], size_type len)
+encode(uint8_t output[], const uint32_t input[], size_type len)
 {
     for(size_type i = 0, j = 0; j < len; i++, j += 4)
     {
@@ -246,9 +253,9 @@ encode(std::uint8_t output[], const std::uint32_t input[], size_type len)
 
 // apply md5sum algo on a block
 void
-md5sum::transform(const std::uint8_t block[blocksize])
+md5sum::transform(const uint8_t block[blocksize])
 {
-    std::uint32_t a = state[0], b = state[1], c = state[2], d = state[3], x[16];
+    uint32_t a = state[0], b = state[1], c = state[2], d = state[3], x[16];
     decode(x, block, blocksize);
 
     /* Round 1 */

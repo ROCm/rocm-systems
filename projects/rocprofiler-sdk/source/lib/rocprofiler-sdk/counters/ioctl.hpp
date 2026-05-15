@@ -24,15 +24,10 @@
 
 #include <rocprofiler-sdk/agent.h>
 
-#include <cstdint>
-
 namespace rocprofiler
 {
 namespace counters
 {
-unsigned long
-get_profiler_ioctl_request_for_version(uint32_t major_version, uint32_t minor_version);
-
 bool
 counter_collection_has_device_lock();
 

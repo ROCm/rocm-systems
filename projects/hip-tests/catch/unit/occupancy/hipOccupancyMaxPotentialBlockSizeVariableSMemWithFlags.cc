@@ -1,9 +1,21 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
-
+Copyright (c) 2022 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 #include <hip_test_common.hh>
 
 #define SHARED_MEM_CONST 256
@@ -69,7 +81,7 @@ void hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_chkRange(int block_size_limi
   - for 0 < block_size_limit < attr.maxThreadsPerBlock
   - for block_size_limit > attr.maxThreadsPerBlock
 */
-HIP_TEST_CASE(Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_chkRange) {
+TEST_CASE("Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_chkRange") {
   hipDeviceProp_t devProp;
   // Get current device property
   HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
@@ -96,12 +108,14 @@ HIP_TEST_CASE(Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_chkRange) {
   - for 0 < block_size_limit < attr.maxThreadsPerBlock
   - for block_size_limit > attr.maxThreadsPerBlock
 */
-HIP_TEST_CASE(Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_mgpu) {
+TEST_CASE("Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_mgpu",
+          "[multigpu]") {
   int devcount = 0;
   HIP_CHECK(hipGetDeviceCount(&devcount));
   // If only single GPU is detected then return
   if (devcount < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    SUCCEED("Skipping the test as number of Devices found less than 2");
+    return;
   }
   // Get current device property
   for (int dev = 0; dev < devcount; dev++) {
@@ -121,7 +135,7 @@ HIP_TEST_CASE(Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_mgpu) {
   Check the basic functionality of hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags
   by passing a functor as 4th parameter.
 */
-HIP_TEST_CASE(Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Functor) {
+TEST_CASE("Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Functor") {
   hipDeviceProp_t devProp;
   HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
   functorBlockSizeToDynamicSMemSize testFunc(SHARED_MEM_CONST);
@@ -141,7 +155,7 @@ HIP_TEST_CASE(Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Functor) {
   Check the basic functionality of hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags
   by passing a lambda function as 4th parameter.
 */
-HIP_TEST_CASE(Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Lambda) {
+TEST_CASE("Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Lambda") {
   hipDeviceProp_t devProp;
   HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
   auto testFunc = [](const int blockSize) {
@@ -175,7 +189,7 @@ HIP_TEST_CASE(Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Lambda) {
   - null func
   - Invalid flag
 */
-HIP_TEST_CASE(Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_NegTst) {
+TEST_CASE("Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_NegTst") {
   hipError_t ret;
   int minGridSize = 0, blockSize = 0;
 
@@ -280,7 +294,7 @@ static size_t getMaxDynShMem(int blocksize) {
   Using the derived gridsize and blocksize launch the kernel and validate its
   output.
 */
-HIP_TEST_CASE(Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Functional) {
+TEST_CASE("Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Functional") {
   hipDeviceProp_t devProp;
   HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
   SECTION("Non Dynamic Shared Kernel") {

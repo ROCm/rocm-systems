@@ -32,8 +32,8 @@ static std::mutex cxtListMutex;
 
 ncclResult_t ncclCudaContextTrack(struct ncclCudaContext** out) {
   ncclResult_t result = ncclSuccess;
-  int hcontext;
-  CUCHECK(hipGetDevice(&hcontext));
+  CUcontext hcontext;
+  cuCtxGetCurrent(&hcontext);
 
   std::lock_guard<std::mutex> lock(cxtListMutex);
   struct ncclCudaContext* p = cxtListHead;
@@ -183,7 +183,7 @@ ncclResult_t ncclStrongStreamAcquire(
             if (spare == nullptr) { // Keep one spare to reuse below.
               spare = cap;
             } else {
-              CUDACHECKIGNORE(cudaStreamDestroy(cap->captureStream));
+              cudaStreamDestroy(cap->captureStream);
               free(cap);
             }
           }

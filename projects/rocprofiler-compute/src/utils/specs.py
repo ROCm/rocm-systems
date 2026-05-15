@@ -1,6 +1,27 @@
-# Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier:  MIT
+##############################################################################
+# MIT License
+#
+# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
 
+##############################################################################
 """Get host/gpu specs."""
 
 from __future__ import annotations
@@ -16,6 +37,8 @@ from datetime import datetime
 from math import ceil
 from pathlib import Path as path
 from typing import Any, Optional, TypeVar
+
+import pandas as pd
 
 import config
 from utils.amdsmi_interface import (
@@ -34,19 +57,10 @@ from utils.logger import (
     demarcate,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.utils_common import format_table_ascii, get_version
+from utils.tty import get_table_string
+from utils.utils import get_version
 
 T = TypeVar("T")
-
-
-def canonical_gpu_arch(gpu_arch: Optional[str]) -> Optional[str]:
-    """Map LLVM GPU targets that share one SoC and analysis config tree."""
-    if gpu_arch is None:
-        return None
-    if gpu_arch == "gfx1152":
-        return "gfx1151"
-    return gpu_arch
-
 
 VERSION_LOC: list[str] = [
     "version",
@@ -71,9 +85,8 @@ def detect_arch(rocminfo_lines: list[str]) -> Optional[tuple[str, int]]:
         if not gpu_arch:
             continue
 
-        arch_for_support = canonical_gpu_arch(gpu_arch)
-        if arch_for_support in supported_gpu_arch:
-            return (arch_for_support, idx1)
+        if gpu_arch in supported_gpu_arch:
+            return (gpu_arch, idx1)
 
         if gpu_arch not in unsupported_gpu_arch:
             unsupported_gpu_arch.add(gpu_arch)
@@ -136,11 +149,7 @@ def generate_machine_specs(
                     "You need to reprofile to update data."
                 )
 
-            # Normalize arch aliases to canonical config targets
-            sysinfo_norm = dict(sysinfo)
-            gpu_arch = sysinfo_norm.get("gpu_arch")
-            sysinfo_norm["gpu_arch"] = {"gfx1152": "gfx1151"}.get(gpu_arch, gpu_arch)
-            return MachineSpecs(**sysinfo_norm)
+            return MachineSpecs(**sysinfo)
         except KeyError:
             console_error(
                 "Detected mismatch in sysinfo versioning. You need to reprofile "
@@ -209,17 +218,13 @@ def generate_machine_specs(
             f"but couldn't find class implementation {e}."
         )
 
-    # Derive SoC-dependent fields
-    if specs.rocminfo_lines is None:
-        # Yaml-only / no rocminfo: skip get_gpu_model (avoids chip-id warnings).
-        specs.gpu_model = specs.gpu_model or ""
-    else:
-        specs.gpu_model = (
-            mi_gpu_specs.get_gpu_model(specs.gpu_arch, specs.gpu_chip_id) or ""
-        )
+    # Update arch specific specs
+    specs.gpu_model = (
+        mi_gpu_specs.get_gpu_model(specs.gpu_arch, specs.gpu_chip_id) or ""
+    )
     specs.num_xcd = str(
         mi_gpu_specs.get_num_xcds(
-            specs.gpu_arch, specs.gpu_model or None, specs.compute_partition
+            specs.gpu_arch, specs.gpu_model, specs.compute_partition
         )
     )
     specs.total_l2_chan = totall2_banks(
@@ -348,11 +353,11 @@ class MachineSpecs:
     # _are_ included in profiling/analysis, so we mark them as 'optional'
     # in the metadata to avoid erroring out on missing fields on
     # serialization
-    workload_path: Optional[str] = field(
+    workload_name: Optional[str] = field(
         default=None,
         metadata={
-            "doc": "Path to the workload data directory.",
-            "name": "Workload Path",
+            "doc": "The name of the workload data was collected for.",
+            "name": "Workload Name",
             "optional": True,
             "show_in_table": True,
         },
@@ -774,10 +779,9 @@ class MachineSpecs:
         else:
             return self.total_l2_chan
 
-    def get_class_members(self) -> dict[str, Any]:
-        """Return class members as a dictionary."""
-        data: dict[str, Any] = {}
-        missing_required_fields: list[str] = []
+    def get_class_members(self) -> pd.DataFrame:
+        data = {}
+        missing_required_fields = []
 
         for class_field in fields(self):
             if not class_field.metadata.get("show_in_table", True):
@@ -800,21 +804,18 @@ class MachineSpecs:
                 )
             console_warning(f"Missing specs fields for {self.gpu_arch}")
 
-        return data
+        return pd.DataFrame(data, index=[0])
 
     def __repr__(self) -> str:
         topstr = (
             "Machine Specifications: describing the state of the machine that "
             "ROCm Compute Profiler data was collected on.\n"
         )
-        data: list[dict[str, Any]] = []
-        has_description = False
-        has_unit = False
-
+        data = []
         for class_field in fields(self):
             name = class_field.name
             if class_field.metadata.get("show_in_table", True):
-                _data: dict[str, Any] = {}
+                _data = {}
                 value = getattr(self, name)
                 if class_field.metadata:
                     # check out of table before any re-naming for pretty-printing
@@ -833,22 +834,20 @@ class MachineSpecs:
                         name = class_field.metadata["name"]
                     if "unit" in class_field.metadata:
                         _data["Unit"] = class_field.metadata["unit"]
-                        has_unit = True
                     if "doc" in class_field.metadata:
                         _data["Description"] = class_field.metadata["doc"]
-                        has_description = True
                 _data["Spec"] = name
-                _data["Value"] = value if value is not None else ""
+                _data["Value"] = value
                 data.append(_data)
-
-        # Build columns list based on what data is present
+        df = pd.DataFrame(data)
         columns = ["Spec", "Value"]
-        if has_description:
-            columns.append("Description")
-        if has_unit:
-            columns.append("Unit")
-
-        return topstr + format_table_ascii(data, columns, decimal=2)
+        if "Description" in df.columns:
+            columns += ["Description"]
+        if "Unit" in df.columns:
+            columns += ["Unit"]
+        df = df[columns]
+        df = df.fillna("")
+        return topstr + get_table_string(df, transpose=False, decimal=2)
 
 
 def get_rocm_ver() -> str:

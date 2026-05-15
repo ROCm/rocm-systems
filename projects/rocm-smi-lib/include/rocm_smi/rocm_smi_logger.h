@@ -65,14 +65,15 @@
 // C++ Header File(s)
 #include <fstream>
 #include <iostream>
-#include <mutex>
 #include <sstream>
 #include <string>
+#include <mutex>
 
 // POSIX Socket Header File(s)
 #include <errno.h>
 
 // Code Specific Header Files(s)
+
 
 namespace ROCmLogging {
 // Direct Interface for logging into log file or console using MACRO(s)
@@ -95,13 +96,18 @@ typedef enum LOG_LEVEL {
 } LogLevel;
 
 // enum for LOG_TYPE
-typedef enum LOG_TYPE { NO_LOG = 1, CONSOLE = 2, FILE_LOG = 3, BOTH_FILE_AND_CONSOLE = 4 } LogType;
+typedef enum LOG_TYPE {
+  NO_LOG = 1,
+  CONSOLE = 2,
+  FILE_LOG = 3,
+  BOTH_FILE_AND_CONSOLE = 4
+} LogType;
 
 class Logger {
  public:
   static Logger* getInstance() throw();
 
-  Logger& operator<<(std::string& s) {
+  Logger& operator<<(std::string &s) {
     switch (this->m_LogLevel) {
       case DISABLE_LOG:
         break;
@@ -126,10 +132,11 @@ class Logger {
     return *getInstance();
   }
 
-  Logger& operator<<(const char* s) { return operator<<(std::string(s)); }
+  Logger &operator<<(const char* s) {
+    return operator<<(std::string(s));
+  }
 
-  template <class T>
-  Logger& operator<<(const T& v) {
+  template <class T> Logger &operator<<(const T &v) {
     std::ostringstream s;
     s << v;
     std::string str = s.str();
@@ -176,8 +183,8 @@ class Logger {
 
   // Interfaces to control log levels
   void updateLogLevel(LogLevel logLevel);
-  void enableAllLogLevels();  // Enable all log levels
-  void disableLog();          // Disable all log levels, except error and alarm
+  void enableAllLogLevels();    // Enable all log levels
+  void disableLog();  // Disable all log levels, except error and alarm
 
   // Interfaces to control log Types
   void updateLogType(LogType logType);

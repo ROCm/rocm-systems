@@ -1,5 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier:  MIT
 
 """
 Tests for the jpegdecode example.
@@ -14,8 +14,7 @@ pytestmark = [
     pytest.mark.gpu,
     pytest.mark.decode,
     pytest.mark.jpegdecode,
-    pytest.mark.ci_enable,  # TODO: Deprecate once TheRock switches to CTest
-    pytest.mark.rocm,
+    pytest.mark.ci_enable,
 ]
 
 
@@ -29,7 +28,7 @@ def jpeg_decode_env() -> dict[str, str]:
     """Environment variables for JPEG decode tests."""
     return {
         "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api,kernel_dispatch,memory_copy,rocjpeg_api",
-        "ROCPROFSYS_AMD_SMI_METRICS": "busy,temp,power,jpeg_activity,mem_usage,gfx_clock,mem_clock",
+        "ROCPROFSYS_AMD_SMI_METRICS": "busy,temp,power,jpeg_activity,mem_usage",
         "ROCPROFSYS_SAMPLING_CPUS": "none",
     }
 
@@ -59,7 +58,6 @@ def get_run_args(rocprof_config) -> list[str]:
 # =============================================================================
 
 
-@pytest.mark.timeout(120)
 @pytest.mark.parametrize(
     "mode",
     [
@@ -67,7 +65,6 @@ def get_run_args(rocprof_config) -> list[str]:
         "sys_run",
     ],
 )
-@pytest.mark.class_name("jpeg-decode")
 class TestJPEGDecode(RocprofsysTest):
     def test(self, mode, jpeg_decode_env, jpeg_decode_rules, get_run_args, gpu_info):
         result = self.run_test(
@@ -75,6 +72,7 @@ class TestJPEGDecode(RocprofsysTest):
             "jpegdecode",
             env=jpeg_decode_env,
             run_args=get_run_args,
+            timeout=120,
         )
         self.assert_regex(result)
 
@@ -86,7 +84,7 @@ class TestJPEGDecode(RocprofsysTest):
                 counts=[1],
                 depths=[1],
                 counter_names=(
-                    ["JPEG Busy"] if "instinct" in gpu_info.categories else None
+                    ["JPEG Activity"] if "instinct" in gpu_info.categories else None
                 ),
             )
             self.assert_rocpd(result, rules_files=jpeg_decode_rules)

@@ -89,7 +89,7 @@ elf_strptr(Elf *e, size_t scndx, size_t offset)
 		}
 	} else {
 		/*
-		 * Otherwise, the `d_off' members are not usable and
+		 * Otherwise, the `d_off' members are not useable and
 		 * we need to compute offsets ourselves, taking into
 		 * account 'holes' in coverage of the section introduced
 		 * by alignment requirements.

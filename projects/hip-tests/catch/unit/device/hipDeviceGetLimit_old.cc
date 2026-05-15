@@ -46,13 +46,11 @@ TEST_CASE("Unit_hipDeviceGetLimit_NegTst") {
   size_t Value = 0;
 
   SECTION("NULL check") {
-    REQUIRE_FALSE(hipDeviceGetLimit(nullptr, hipLimitMallocHeapSize)
-                  == hipSuccess);
+    REQUIRE_FALSE(hipDeviceGetLimit(nullptr, hipLimitMallocHeapSize) == hipSuccess);
   }
 
   SECTION("Invalid Input Flag") {
-    REQUIRE_FALSE(hipDeviceGetLimit(&Value, static_cast<hipLimit_t>(0xff)) ==
-                  hipSuccess);
+    REQUIRE_FALSE(hipDeviceGetLimit(&Value, static_cast<hipLimit_t>(0xff)) == hipSuccess);
   }
 }
 
@@ -70,12 +68,11 @@ TEST_CASE("Unit_hipDeviceGetLimit_NegTst") {
 TEST_CASE("Unit_hipDeviceGetLimit_CheckValidityOfOutputVal") {
   size_t Value = 0;
 
-  REQUIRE(hipDeviceGetLimit(&Value, hipLimitMallocHeapSize) ==
-          hipSuccess);
+  REQUIRE(hipDeviceGetLimit(&Value, hipLimitMallocHeapSize) == hipSuccess);
   REQUIRE_FALSE(Value <= 0);
 }
 
 /**
-* End doxygen group DeviceTest.
-* @}
-*/
+ * End doxygen group DeviceTest.
+ * @}
+ */

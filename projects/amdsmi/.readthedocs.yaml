@@ -9,10 +9,10 @@ build:
     python: "3.12"
 
 sphinx:
-   configuration: projects/amdsmi/docs/conf.py
+   configuration: docs/conf.py
 
 formats: [htmlzip, pdf]
 
 python:
    install:
-   - requirements: projects/amdsmi/docs/sphinx/requirements.txt
+   - requirements: docs/sphinx/requirements.txt

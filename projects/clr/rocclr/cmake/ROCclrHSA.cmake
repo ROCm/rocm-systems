@@ -1,24 +1,38 @@
-# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# Copyright (c) 2020 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 #
-# SPDX-License-Identifier: MIT
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
 
-if (AMD_COMPUTE_WIN)
+if (ROCR_STATIC_OPEN)
   find_path(AMD_HSA_INCLUDE_DIR hsa.h
-    PATHS
-      ${ROCCLR_SRC_DIR}/../../rocr-runtime/runtime/hsa-runtime/inc
-      ${ROCCLR_SRC_DIR}/../../rocr-runtime/runtime/hsa-runtime
-      ${CMAKE_CURRENT_BINARY_DIR}/../../rocr/inc
-      ${CMAKE_CURRENT_BINARY_DIR}/../../rocr
-      ${CMAKE_CURRENT_BINARY_DIR}/../..
-      ${CMAKE_CURRENT_BINARY_DIR}/..
-      ${CMAKE_CURRENT_BINARY_DIR}
-      ${ROCM_PATH}
+    HINTS
+      /opt/rocm
       ${ROCM_INSTALL_PATH}
+      ${CMAKE_CURRENT_BINARY_DIR}
+    PATHS
+      ${CMAKE_CURRENT_BINARY_DIR}/..
+      ${CMAKE_CURRENT_BINARY_DIR}/../..
+      ${CMAKE_CURRENT_BINARY_DIR}/../../rocr
+      ${ROCCLR_SRC_DIR}/../../rocr-runtime/runtime/hsa-runtime
     PATH_SUFFIXES
       include
       include/hsa
-      inc
-    NO_DEFAULT_PATH)
+      inc)
   message("Roc CLR: " ${ROCCLR_SRC_DIR} "; HSA headers:" ${AMD_HSA_INCLUDE_DIR})
   target_include_directories(rocclr PUBLIC ${AMD_HSA_INCLUDE_DIR})
   target_include_directories(rocclr PUBLIC ${AMD_HSA_INCLUDE_DIR}/..)
@@ -34,16 +48,14 @@ if (AMD_COMPUTE_WIN)
   endif()
   # Link the static library (use the INTERFACE wrapper which applies --whole-archive correctly)
   target_link_libraries(rocclr PUBLIC hsa-runtime64)
-  if (NOT ROCCLR_ENABLE_PAL)
-    find_package(AMD_HSA_LOADER)
-    target_link_libraries(rocclr PUBLIC oclelf)
-  endif()
+  find_package(AMD_HSA_LOADER)
+  target_link_libraries(rocclr PUBLIC oclelf)
   target_compile_definitions(rocclr PUBLIC ROCR_STATIC_OPEN)
 else()
   if(UNIX)
     find_package(hsa-runtime64 1.11 REQUIRED CONFIG
       PATHS
-        ${ROCM_PATH}
+        /opt/rocm/
         ${ROCM_INSTALL_PATH}
       PATH_SUFFIXES
         cmake/hsa-runtime64
@@ -52,7 +64,7 @@ else()
   else()
     find_package(hsa-runtime64 1.11 REQUIRED CONFIG
       PATHS
-        ${ROCM_PATH}
+        /opt/rocm/
         ${ROCM_INSTALL_PATH}
         ${CMAKE_CURRENT_BINARY_DIR}
         ${CMAKE_INSTALL_PREFIX}
@@ -67,7 +79,7 @@ else()
     # note: Temporarily for PAL backend build
     find_path(AMD_HSA_INCLUDE_DIR hsa.h
       HINTS
-        ${ROCM_PATH}
+        /opt/rocm
         ${ROCM_INSTALL_PATH}
         ${CMAKE_CURRENT_BINARY_DIR}
       PATHS

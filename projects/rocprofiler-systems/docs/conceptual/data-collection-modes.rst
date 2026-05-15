@@ -30,7 +30,7 @@ ROCm Systems Profiler supports several modes of recording trace and profiling da
 |                             | dynamic library/executable, like ``pthread_mutex_lock`` |
 |                             | in ``libpthread.so`` or ``MPI_Init`` in the MPI library |
 +-----------------------------+---------------------------------------------------------+
-| User API (deprecated)       | User-defined regions and controls for User API ROCm     |
+| User API                    | User-defined regions and controls for User API ROCm     |
 |                             | Systems Profiler                                        |
 +-----------------------------+---------------------------------------------------------+
 
@@ -214,7 +214,7 @@ Sampling types:
 
 1. **CPU-Time sampling** (default)
 
-* Enabled using ``ROCPROFSYS_SAMPLING_CPUTIME=ON`` or ``--sample-cputime`` (both rocprof-sys-run and rocprof-sys-sample). The sampling can be controlled using:
+* Enabled using ``ROCPROFSYS_SAMPLING_CPUTIME=ON`` or ``--cputime`` (rocprof-sys-sample), ``--sample-cputime`` (rocprof-sys-run). The sampling can be controlled using:
 
   * ``ROCPROFSYS_SAMPLING_CPUTIME_FREQ``
   * ``ROCPROFSYS_SAMPLING_CPUTIME_DELAY``
@@ -222,7 +222,7 @@ Sampling types:
 
 2. **Real-Time sampling**
 
-* Enabled using ``ROCPROFSYS_SAMPLING_REALTIME=ON`` or ``--sample-realtime`` (both rocprof-sys-run and rocprof-sys-sample). The sampling can be controlled using:
+* Enabled using ``ROCPROFSYS_SAMPLING_REALTIME=ON`` or ``--realtime`` (rocprof-sys-sample), ``--sample-realtime`` (rocprof-sys-run). The sampling can be controlled using:
 
   * ``ROCPROFSYS_SAMPLING_REALTIME_FREQ``
   * ``ROCPROFSYS_SAMPLING_REALTIME_DELAY``

@@ -23,8 +23,28 @@ Wavefront launch stats
 The wavefront launch stats panel gives general information about the
 kernel launch:
 
-.. jinja:: wavefront-launch-stats
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: CDNA
+
+      .. jinja:: wavefront-launch-stats-gfx908
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 2
+
+      .. jinja:: wavefront-launch-stats-gfx90a
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 3
+
+      .. jinja:: wavefront-launch-stats-gfx942
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 4
+      :selected:
+
+      .. jinja:: wavefront-launch-stats-gfx950
+         :file: _templates/metrics_table.j2
 
 .. _wavefront-runtime-stats:
 
@@ -34,8 +54,28 @@ Wavefront runtime stats
 The wavefront runtime statistics gives a high-level overview of the
 execution of wavefronts in a kernel:
 
-.. jinja:: wavefront-runtime-stats
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: CDNA
+
+      .. jinja:: wavefront-runtime-stats-gfx908
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 2
+
+      .. jinja:: wavefront-runtime-stats-gfx90a
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 3
+
+      .. jinja:: wavefront-runtime-stats-gfx942
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 4
+      :selected:
+
+      .. jinja:: wavefront-runtime-stats-gfx950
+         :file: _templates/metrics_table.j2
 
 .. note::
 
@@ -79,8 +119,28 @@ This panel shows the total number of each type of instruction issued to
 the :doc:`various compute pipelines </conceptual/pipeline-descriptions>` on the
 :doc:`CU </conceptual/compute-unit>`. These are:
 
-.. jinja:: instruction-mix
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: CDNA
+
+      .. jinja:: instruction-mix-gfx908
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 2
+
+      .. jinja:: instruction-mix-gfx90a
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 3
+
+      .. jinja:: instruction-mix-gfx942
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 4
+      :selected:
+
+      .. jinja:: instruction-mix-gfx950
+         :file: _templates/metrics_table.j2
 
 .. note::
 
@@ -105,8 +165,23 @@ include :ref:`MFMA <desc-mfma>` instructions using the same precision; for
 instance, the “F16-ADD” metric does not include any 16-bit floating point
 additions executed as part of an MFMA instruction using the same precision.
 
-.. jinja:: valu-arith-instruction-mix
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: CDNA 2
+
+      .. jinja:: valu-arith-instruction-mix-gfx90a
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 3
+
+      .. jinja:: valu-arith-instruction-mix-gfx942
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 4
+      :selected:
+
+      .. jinja:: valu-arith-instruction-mix-gfx950
+         :file: _templates/metrics_table.j2
 
 For an example of these counters in action, refer to
 :ref:`valu-arith-instruction-mix-ex`.
@@ -137,8 +212,23 @@ This section details the types of Matrix Fused Multiply-Add
 MFMA instructions are classified by the type of input data they operate on, and
 *not* the data type the result is accumulated to.
 
-.. jinja:: mfma-instruction-mix
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: CDNA 2
+
+      .. jinja:: mfma-instruction-mix-gfx90a
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 3
+
+      .. jinja:: mfma-instruction-mix-gfx942
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 4
+      :selected:
+
+      .. jinja:: mfma-instruction-mix-gfx950
+         :file: _templates/metrics_table.j2
 
 Compute pipeline
 ================
@@ -198,8 +288,23 @@ various precisions. We note that unlike the
 are reported as FLOPs and IOPs, that is, the total number of operations
 executed.
 
-.. jinja:: compute-speed-of-light
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: CDNA 2
+
+      .. jinja:: compute-speed-of-light-gfx90a
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 3
+
+      .. jinja:: compute-speed-of-light-gfx942
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 4
+      :selected:
+
+      .. jinja:: compute-speed-of-light-gfx950
+         :file: _templates/metrics_table.j2
 
 .. _pipeline-stats:
 
@@ -212,8 +317,28 @@ various execution units on the :doc:`CU <compute-unit>`. Refer to
 :ref:`scheduler <desc-scheduler>` the for a high-level overview of execution
 units and instruction issue.
 
-.. jinja:: pipeline-stats
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: CDNA
+
+      .. jinja:: pipeline-stats-gfx908
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 2
+
+      .. jinja:: pipeline-stats-gfx90a
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 3
+
+      .. jinja:: pipeline-stats-gfx942
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 4
+      :selected:
+
+      .. jinja:: pipeline-stats-gfx950
+         :file: _templates/metrics_table.j2
 
 .. note::
 
@@ -244,5 +369,20 @@ not. For more detail on how operations are counted see the
    take into account the execution mask of the operation, and will report the
    same value even if EXEC is identically zero.
 
-.. jinja:: arithmetic-operations
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: CDNA 2
+
+      .. jinja:: arithmetic-operations-gfx90a
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 3
+
+      .. jinja:: arithmetic-operations-gfx942
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 4
+      :selected:
+
+      .. jinja:: arithmetic-operations-gfx950
+         :file: _templates/metrics_table.j2

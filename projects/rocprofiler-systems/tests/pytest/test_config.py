@@ -1,5 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier:  MIT
 
 """
 General configuration file tests.
@@ -11,10 +11,7 @@ from pathlib import Path
 import shutil
 from conftest import RocprofsysTest
 
-pytestmark = [
-    pytest.mark.rocprof_config,
-    pytest.mark.ci_enable,  # TODO: Deprecate once TheRock switches to CTest
-]
+pytestmark = [pytest.mark.rocprof_config, pytest.mark.ci_enable]
 
 
 # =============================================================================
@@ -57,6 +54,7 @@ class TestConfig(RocprofsysTest):
             "runtime_instrument",
             target=config_target,
             env=env,
+            timeout=400,  # In xdist, it can take much longer
             fail_on_pass=True,  # Expected to fail
         )
 
@@ -66,7 +64,6 @@ class TestConfig(RocprofsysTest):
             use_abort_fail_regex=False,
         )
 
-    @pytest.mark.timeout(120)
     def test_missing(self, test_output_dir: Path, config_target: str):
         """Test that missing config file causes failure."""
         # Use a path to a config file that doesn't exist
@@ -78,6 +75,7 @@ class TestConfig(RocprofsysTest):
             "runtime_instrument",
             target=config_target,
             env=env,
+            timeout=120,
             fail_on_pass=True,  # Expected to fail
         )
 

@@ -1,8 +1,24 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
@@ -32,7 +48,7 @@
  *    -# When first event is `nullptr`
  *      - Expected output: return `hipErrorInvalidHandle`
  *    -# When second event is `nullptr`
- *      - Expected output: return `hipErrorInvalidHandle`
+ *      - Expected output: return `hipErrorInvalidValue`
  * Test source
  * ------------------------
  *  - unit/event/Unit_hipEventElapsedTime.cc
@@ -40,7 +56,7 @@
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipEventElapsedTime_NullCheck) {
+TEST_CASE("Unit_hipEventElapsedTime_NullCheck") {
   hipEvent_t start, end;
   HIP_CHECK(hipEventCreate(&start));
   HIP_CHECK(hipEventCreate(&end));
@@ -61,7 +77,7 @@ HIP_TEST_CASE(Unit_hipEventElapsedTime_NullCheck) {
  * ------------------------
  *  - Calculates elapsed time when events are created with disable timing flag
  *    -# When flag is set to disable timing
- *      - Expected output: return `hipErrorInvalidHandle`
+ *      - Expected output: return `hipErrorInvalidValue`
  * Test source
  * ------------------------
  *  - unit/event/Unit_hipEventElapsedTime.cc
@@ -69,7 +85,7 @@ HIP_TEST_CASE(Unit_hipEventElapsedTime_NullCheck) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipEventElapsedTime_DisableTiming) {
+TEST_CASE("Unit_hipEventElapsedTime_DisableTiming") {
   float timeElapsed = 1.0f;
   hipEvent_t start, stop;
   HIP_CHECK(hipEventCreateWithFlags(&start, hipEventDisableTiming));
@@ -84,7 +100,7 @@ HIP_TEST_CASE(Unit_hipEventElapsedTime_DisableTiming) {
  * ------------------------
  *  - Calculates elapsed time when events are recorded on different devices
  *    -# When start and stop events are recorded on different devices
- *      - Expected output: return `hipErrorInvalidHandle`
+ *      - Expected output: return `hipErrorInvalidValue`
  * Test source
  * ------------------------
  *  - unit/event/Unit_hipEventElapsedTime.cc
@@ -92,34 +108,33 @@ HIP_TEST_CASE(Unit_hipEventElapsedTime_DisableTiming) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipEventElapsedTime_DifferentDevices) {
-  const auto device_count = HipTest::getDeviceCount();
-  if (device_count < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+TEST_CASE("Unit_hipEventElapsedTime_DifferentDevices", "[multigpu]") {
+  int devCount = 0;
+  HIP_CHECK(hipGetDeviceCount(&devCount));
+  if (devCount > 1) {
+    // create event on dev=0
+    HIP_CHECK(hipSetDevice(0));
+    hipEvent_t start;
+    HIP_CHECK(hipEventCreate(&start));
+
+    HIP_CHECK(hipEventRecord(start, nullptr));
+    HIP_CHECK(hipEventSynchronize(start));
+
+    // create event on dev=1
+    HIP_CHECK(hipSetDevice(1));
+    hipEvent_t stop;
+    HIP_CHECK(hipEventCreate(&stop));
+
+    HIP_CHECK(hipEventRecord(stop, nullptr));
+    HIP_CHECK(hipEventSynchronize(stop));
+
+    float tElapsed = 1.0f;
+    // start on device 0 but stop on device 1
+    HIP_ASSERT(hipEventElapsedTime(&tElapsed, start, stop) == hipErrorInvalidHandle);
+
+    HIP_CHECK(hipEventDestroy(start));
+    HIP_CHECK(hipEventDestroy(stop));
   }
-
-  // create event on dev=0
-  HIP_CHECK(hipSetDevice(0));
-  hipEvent_t start;
-  HIP_CHECK(hipEventCreate(&start));
-
-  HIP_CHECK(hipEventRecord(start, nullptr));
-  HIP_CHECK(hipEventSynchronize(start));
-
-  // create event on dev=1
-  HIP_CHECK(hipSetDevice(1));
-  hipEvent_t stop;
-  HIP_CHECK(hipEventCreate(&stop));
-
-  HIP_CHECK(hipEventRecord(stop, nullptr));
-  HIP_CHECK(hipEventSynchronize(stop));
-
-  float tElapsed = 1.0f;
-  // start on device 0 but stop on device 1
-  HIP_ASSERT(hipEventElapsedTime(&tElapsed, start, stop) == hipErrorInvalidHandle);
-
-  HIP_CHECK(hipEventDestroy(start));
-  HIP_CHECK(hipEventDestroy(stop));
 }
 
 
@@ -138,7 +153,7 @@ HIP_TEST_CASE(Unit_hipEventElapsedTime_DifferentDevices) {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipEventElapsedTime_NotReady_Negative) {
+TEST_CASE("Unit_hipEventElapsedTime_NotReady_Negative") {
   hipEvent_t start;
   HIP_CHECK(hipEventCreate(&start));
 
@@ -148,7 +163,7 @@ HIP_TEST_CASE(Unit_hipEventElapsedTime_NotReady_Negative) {
   // Record start event
   HIP_CHECK(hipEventRecord(start, nullptr));
 
-  LaunchDelayKernel(std::chrono::milliseconds(isQuickLevel() ? 100 : 1000));
+  LaunchDelayKernel(std::chrono::milliseconds(1000));
   // Record stop event
   HIP_CHECK(hipEventRecord(stop, nullptr));
 
@@ -174,7 +189,7 @@ HIP_TEST_CASE(Unit_hipEventElapsedTime_NotReady_Negative) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipEventElapsedTime) {
+TEST_CASE("Unit_hipEventElapsedTime") {
   hipEvent_t start;
   HIP_CHECK(hipEventCreate(&start));
 
@@ -194,7 +209,7 @@ HIP_TEST_CASE(Unit_hipEventElapsedTime) {
   HIP_CHECK(hipEventDestroy(stop));
 }
 
-HIP_TEST_CASE(Unit_hipEventElapsedTime_Verify_Capture) {
+TEST_CASE("Unit_hipEventElapsedTime_Verify_Capture") {
   hipEvent_t start, stop;
 
   HIP_CHECK(hipEventCreate(&start));

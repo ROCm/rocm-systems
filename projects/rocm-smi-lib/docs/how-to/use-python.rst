@@ -192,13 +192,13 @@ The following is the output from the ``-h`` flag:
      --rasenable BLOCK ERRTYPE                                        Enable RAS for specified block and error type
      --rasdisable BLOCK ERRTYPE                                       Disable RAS for specified block and error type
      --rasinject BLOCK                                                Inject RAS poison for specified block (ONLY WORKS ON
-                                                                       UNSECURED BOARDS)
+                                                                       UNSECURE BOARDS)
 
    Reset options:
      -r, --resetclocks                                                Reset clocks and OverDrive to default
      --resetfans                                                      Reset fans to automatic (driver) control
      --resetprofile                                                   Reset Power Profile back to default
-     --resetpoweroverdrive                                            Set the maximum GPU power back to the device default
+     --resetpoweroverdrive                                            Set the maximum GPU power back to the device deafult
                                                                       state
      --resetxgmierr                                                   Reset XGMI error count
      --resetperfdeterminism                                           Disable performance determinism

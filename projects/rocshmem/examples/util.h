@@ -55,7 +55,7 @@
   }                                                                       \
 }
 
-[[maybe_unused]] static int get_launcher_local_rank() {
+static int get_launcher_local_rank() {
     char *local_rank_str = nullptr;
 
     local_rank_str = getenv("OMPI_COMM_WORLD_LOCAL_RANK");

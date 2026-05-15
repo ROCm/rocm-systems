@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
+ *  Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All Rights Reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -153,7 +153,11 @@ public:
 
     virtual Pal::uint64 QueryGpuWorkMask() const override { return 0; }
 
-    virtual void OnTraceAccepted(Pal::uint32 gpuIndex, Pal::ICmdBuffer* pCmdBuf) override;
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 908
+    virtual void OnTraceAccepted(Pal::uint32 gpuIndex, Pal::ICmdBuffer* pCmdBuf) override { }
+#else
+    virtual void OnTraceAccepted() override { }
+#endif
     virtual void OnTraceBegin(Pal::uint32 gpuIndex, Pal::ICmdBuffer* pCmdBuf) override { }
     virtual void OnTraceEnd(Pal::uint32 gpuIndex, Pal::ICmdBuffer* pCmdBuf) override { }
 #if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 939
@@ -192,8 +196,6 @@ private:
     };
 
     Pal::IPlatform* const m_pPlatform;
-
-    Pal::uint32 m_traceGpuIndex;
 
     Util::RWLock                                                        m_registerPipelineLock;
     Util::Vector<CodeObjectDatabaseRecord*,         1, Pal::IPlatform>  m_codeObjectRecords;

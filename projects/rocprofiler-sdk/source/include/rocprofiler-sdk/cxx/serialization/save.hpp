@@ -733,7 +733,6 @@ void
 save(ArchiveT& ar, rocprofiler_buffer_tracing_kfd_event_page_migrate_record_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(size);
-    ROCP_SDK_SAVE_DATA_FIELD(kind);
     ROCP_SDK_SAVE_DATA_FIELD(operation);
     ROCP_SDK_SAVE_DATA_FIELD(timestamp);
     ROCP_SDK_SAVE_DATA_FIELD(pid);
@@ -751,7 +750,6 @@ void
 save(ArchiveT& ar, rocprofiler_buffer_tracing_kfd_event_page_fault_record_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(size);
-    ROCP_SDK_SAVE_DATA_FIELD(kind);
     ROCP_SDK_SAVE_DATA_FIELD(operation);
     ROCP_SDK_SAVE_DATA_FIELD(timestamp);
     ROCP_SDK_SAVE_DATA_FIELD(pid);
@@ -764,7 +762,6 @@ void
 save(ArchiveT& ar, rocprofiler_buffer_tracing_kfd_event_queue_record_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(size);
-    ROCP_SDK_SAVE_DATA_FIELD(kind);
     ROCP_SDK_SAVE_DATA_FIELD(operation);
     ROCP_SDK_SAVE_DATA_FIELD(timestamp);
     ROCP_SDK_SAVE_DATA_FIELD(pid);
@@ -776,7 +773,6 @@ void
 save(ArchiveT& ar, rocprofiler_buffer_tracing_kfd_event_unmap_from_gpu_record_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(size);
-    ROCP_SDK_SAVE_DATA_FIELD(kind);
     ROCP_SDK_SAVE_DATA_FIELD(operation);
     ROCP_SDK_SAVE_DATA_FIELD(timestamp);
     ROCP_SDK_SAVE_DATA_FIELD(pid);
@@ -790,7 +786,6 @@ void
 save(ArchiveT& ar, rocprofiler_buffer_tracing_kfd_event_dropped_events_record_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(size);
-    ROCP_SDK_SAVE_DATA_FIELD(kind);
     ROCP_SDK_SAVE_DATA_FIELD(operation);
     ROCP_SDK_SAVE_DATA_FIELD(timestamp);
     ROCP_SDK_SAVE_DATA_FIELD(pid);
@@ -802,7 +797,6 @@ void
 save(ArchiveT& ar, rocprofiler_buffer_tracing_kfd_page_migrate_record_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(size);
-    ROCP_SDK_SAVE_DATA_FIELD(kind);
     ROCP_SDK_SAVE_DATA_FIELD(operation);
     ROCP_SDK_SAVE_DATA_FIELD(start_timestamp);
     ROCP_SDK_SAVE_DATA_FIELD(end_timestamp);
@@ -821,7 +815,6 @@ void
 save(ArchiveT& ar, rocprofiler_buffer_tracing_kfd_page_fault_record_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(size);
-    ROCP_SDK_SAVE_DATA_FIELD(kind);
     ROCP_SDK_SAVE_DATA_FIELD(operation);
     ROCP_SDK_SAVE_DATA_FIELD(start_timestamp);
     ROCP_SDK_SAVE_DATA_FIELD(end_timestamp);
@@ -835,7 +828,6 @@ void
 save(ArchiveT& ar, rocprofiler_buffer_tracing_kfd_queue_record_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(size);
-    ROCP_SDK_SAVE_DATA_FIELD(kind);
     ROCP_SDK_SAVE_DATA_FIELD(operation);
     ROCP_SDK_SAVE_DATA_FIELD(start_timestamp);
     ROCP_SDK_SAVE_DATA_FIELD(end_timestamp);
@@ -1058,9 +1050,6 @@ save(ArchiveT& ar, rocprofiler_pc_sampling_snapshot_v0_t data)
     ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_stall_exp", arb_state_stall_exp);
     ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_stall_misc", arb_state_stall_misc);
     ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_stall_brmsg", arb_state_stall_brmsg);
-
-    // sampling lock error
-    ROCP_SDK_SAVE_DATA_BITFIELD("lck_err", sampling_lock_error);
 }
 
 template <typename ArchiveT>
@@ -1073,9 +1062,6 @@ save(ArchiveT& ar, rocprofiler_pc_sampling_memory_counters_t data)
     ROCP_SDK_SAVE_DATA_BITFIELD("sample_cnt", sample_cnt);
     ROCP_SDK_SAVE_DATA_BITFIELD("ds_cnt", ds_cnt);
     ROCP_SDK_SAVE_DATA_BITFIELD("km_cnt", km_cnt);
-    ROCP_SDK_SAVE_DATA_BITFIELD("async_cnt", async_cnt);
-    ROCP_SDK_SAVE_DATA_BITFIELD("tensor_cnt", tensor_cnt);
-    ROCP_SDK_SAVE_DATA_BITFIELD("xnack_cnt", xnack_cnt);
 }
 
 template <typename ArchiveT>
@@ -1274,7 +1260,6 @@ save(ArchiveT& ar, rocprofiler_counter_info_v1_t data)
     ROCP_SDK_SAVE_VALUE("instances",
                         rocprofiler::sdk::container::make_c_array(data.dimensions_instances,
                                                                   data.dimensions_instances_count));
-    ROCP_SDK_SAVE_DATA_FIELD(spm_support);
 }
 
 template <typename ArchiveT>

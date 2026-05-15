@@ -1,6 +1,3 @@
-# Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier: MIT
-
 if(NOT DEFINED CMAKE_INTERPROCEDURAL_OPTIMIZATION)
     set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
 endif()

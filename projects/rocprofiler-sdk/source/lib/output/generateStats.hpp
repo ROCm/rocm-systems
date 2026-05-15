@@ -23,7 +23,6 @@
 #pragma once
 
 #include "generator.hpp"
-#include "kfd_info.hpp"
 #include "metadata.hpp"
 #include "statistics.hpp"
 #include "stream_info.hpp"
@@ -76,11 +75,6 @@ stats_entry_t
 generate_stats(const output_config&                                                 cfg,
                const metadata&                                                      tool_metadata,
                const generator<tool_buffer_tracing_memory_allocation_ext_record_t>& data);
-
-stats_entry_t
-generate_stats(const output_config&                               cfg,
-               const metadata&                                    tool_metadata,
-               const generator<tool_buffer_tracing_kfd_record_t>& data);
 
 stats_entry_t
 generate_stats(const output_config& cfg,

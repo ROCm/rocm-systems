@@ -1,8 +1,24 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 #include <filesystem>
 #include <mutex>
@@ -15,7 +31,7 @@
 #include "utils/debug.hpp"
 
 namespace hip {
-void LibraryContainer::Register(const std::string &name, int device, hipKernel_t k) {
+void LibraryContainer::Register(std::string name, int device, hipKernel_t k) {
   std::scoped_lock<std::mutex> lock(lib_mutex_);
   auto key = std::make_pair(name, device);
   if (kernels_.find(key) == kernels_.end()) {
@@ -53,7 +69,7 @@ hipError_t LibraryContainer::EnumerateKernels(hipKernel_t* k, unsigned int maxKe
     if (auto ki = kernels_.find(std::make_pair(f.first, device_id)); ki!= kernels_.end()) {
       kern = ki->second;
     } else {
-      auto ret = f.second.get()->GetDynFunc(reinterpret_cast<hipFunction_t*>(&kern), m);
+      auto ret = f.second.get()->getDynFunc(reinterpret_cast<hipFunction_t*>(&kern), m);
       if (ret != hipSuccess) {
         return ret;
       }
@@ -64,7 +80,7 @@ hipError_t LibraryContainer::EnumerateKernels(hipKernel_t* k, unsigned int maxKe
   return hipSuccess;
 }
 
-hipError_t LibraryContainer::Kernel(hipKernel_t* k, const std::string &name) {
+hipError_t LibraryContainer::Kernel(hipKernel_t* k, std::string name) {
   auto device_id = hip::ihipGetDevice();
   if (auto ki = kernels_.find(std::make_pair(name, device_id)); ki != kernels_.end()) {
     *k = ki->second;
@@ -75,7 +91,7 @@ hipError_t LibraryContainer::Kernel(hipKernel_t* k, const std::string &name) {
   if (f == functions_.end()) {
     return hipErrorNotFound;
   }
-  auto ret = f->second.get()->GetDynFunc(reinterpret_cast<hipFunction_t*>(k), m);
+  auto ret = f->second.get()->getDynFunc(reinterpret_cast<hipFunction_t*>(k), m);
   if (ret != hipSuccess) {
     return ret;
   }
@@ -88,7 +104,7 @@ LibraryContainer::LibraryContainer(const char* code_object) {
   fatbin_ = std::make_shared<hip::FatBinaryInfo>(nullptr, code_object);
 }
 
-LibraryContainer::LibraryContainer(const std::string &file_name) {
+LibraryContainer::LibraryContainer(const std::string file_name) {
   fatbin_ = std::make_shared<hip::FatBinaryInfo>(file_name.c_str(), nullptr);
 }
 
@@ -124,7 +140,7 @@ hipError_t LibraryContainer::BuildIt() {
   // Process Functions and create kernel handles
   std::vector<std::string> function_names;
   program->getGlobalFuncFromCodeObj(&function_names);
-  for (const auto& name : function_names) {
+  for (auto& name : function_names) {
     functions_.emplace(std::make_pair(name, std::make_shared<hip::Function>(name)));
   }
 
@@ -260,7 +276,11 @@ hipError_t hipKernelGetParamInfo(hipKernel_t kernel, size_t paramIndex, size_t* 
   if (kernel == nullptr || paramOffset == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  const auto* const d_kernel = hip::asKernel(reinterpret_cast<hipFunction_t>(kernel));
+  const auto* const d_function = hip::DeviceFunc::asFunction(reinterpret_cast<hipFunction_t>(kernel));
+  if (d_function == nullptr) {
+    HIP_RETURN(hipErrorInvalidHandle);
+  }
+  const auto* const d_kernel = d_function->kernel();
   if (d_kernel == nullptr) {
     HIP_RETURN(hipErrorInvalidDeviceFunction);
   }
@@ -283,9 +303,13 @@ hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKerne
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  const auto* const d_kernel = hip::asKernel(kernel);
-  if (d_kernel == nullptr) {
+  const auto* const d_function = hip::DeviceFunc::asFunction(kernel);
+  if (d_function == nullptr) {
     HIP_RETURN(hipErrorInvalidHandle);
+  }
+  const auto* const d_kernel = d_function->kernel();
+  if (d_kernel == nullptr) {
+    HIP_RETURN(hipErrorInvalidDeviceFunction);
   }
 
   auto* currentDevice = hip::getCurrentDevice();
@@ -293,8 +317,8 @@ hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKerne
   if (dev < 0 || static_cast<size_t>(dev) >= devices.size()) {
     HIP_RETURN(hipErrorInvalidDevice);
   }
-  const auto& device = *devices[dev];
-
+  const auto& device = *devices[dev]; 
+  
   auto* dev_kernel = d_kernel->getDeviceKernel(device);
   if (dev_kernel == nullptr) {
     HIP_RETURN(hipErrorMissingConfiguration);
@@ -352,7 +376,11 @@ hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKer
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  amd::Kernel* d_kernel = hip::asKernel(kernel);
+  const auto* const d_function = hip::DeviceFunc::asFunction(kernel);
+  if (d_function == nullptr) {
+    HIP_RETURN(hipErrorInvalidHandle);
+  }
+  amd::Kernel* d_kernel = d_function->kernel();
   if (d_kernel == nullptr) {
     HIP_RETURN(hipErrorInvalidDeviceFunction);
   }

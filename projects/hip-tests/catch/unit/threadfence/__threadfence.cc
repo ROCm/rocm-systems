@@ -1,8 +1,24 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 #include <cmd_options.hh>
 #include <hip_test_common.hh>
@@ -28,7 +44,7 @@
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit___threadfence_Positive_Basic_Shared) {
+TEST_CASE("Unit___threadfence_Positive_Basic_Shared") {
   LinearAllocGuard<int> in_dev(LinearAllocs::hipMalloc, 2 * sizeof(int));
   LinearAllocGuard<int> out_dev(LinearAllocs::hipMalloc, 2 * sizeof(int));
 
@@ -60,7 +76,7 @@ HIP_TEST_CASE(Unit___threadfence_Positive_Basic_Shared) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit___threadfence_Positive_Basic_Global) {
+TEST_CASE("Unit___threadfence_Positive_Basic_Global") {
   LinearAllocGuard<int> in_dev(LinearAllocs::hipMalloc, 2 * sizeof(int));
   LinearAllocGuard<int> out_dev(LinearAllocs::hipMalloc, 2 * sizeof(int));
 
@@ -92,7 +108,7 @@ HIP_TEST_CASE(Unit___threadfence_Positive_Basic_Global) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit___threadfence_Positive_Basic_Pinned) {
+TEST_CASE("Unit___threadfence_Positive_Basic_Pinned") {
   LinearAllocGuard<int> in_host(LinearAllocs::hipHostMalloc, 2 * sizeof(int));
   LinearAllocGuard<int> out_host(LinearAllocs::hipHostMalloc, 2 * sizeof(int));
 
@@ -120,7 +136,7 @@ HIP_TEST_CASE(Unit___threadfence_Positive_Basic_Pinned) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit___threadfence_Positive_Basic_Managed) {
+TEST_CASE("Unit___threadfence_Positive_Basic_Managed") {
   LinearAllocGuard<int> in_host(LinearAllocs::hipMallocManaged, 2 * sizeof(int));
   LinearAllocGuard<int> out_host(LinearAllocs::hipMallocManaged, 2 * sizeof(int));
 
@@ -148,16 +164,19 @@ HIP_TEST_CASE(Unit___threadfence_Positive_Basic_Managed) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit___threadfence_Positive_Basic_Peer) {
+TEST_CASE("Unit___threadfence_Positive_Basic_Peer", "[multigpu]") {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST("At least 2 devices are required");
+    return;
   }
 
   int can_access_peer = 0;
   HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, 0, 1));
   if (!can_access_peer) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+    std::string msg = "Skipped as peer access cannot be enabled between devices";
+    HipTest::HIP_SKIP_TEST(msg.c_str());
+    return;
   }
 
   HIP_CHECK(hipSetDevice(0));

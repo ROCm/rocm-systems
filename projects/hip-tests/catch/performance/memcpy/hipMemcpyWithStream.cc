@@ -1,8 +1,21 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 #include "memcpy_performance_common.hh"
 
@@ -36,6 +49,9 @@ static void RunBenchmark(LinearAllocs dst_allocation_type, LinearAllocs src_allo
   } else {
     int src_device = std::get<0>(GetDeviceIds(enable_peer_access));
     int dst_device = std::get<1>(GetDeviceIds(enable_peer_access));
+    if (src_device == -1 && dst_device == -1) {
+      return;
+    }
 
     LinearAllocGuard<int> src_allocation(LinearAllocs::hipMalloc, size);
     HIP_CHECK(hipSetDevice(dst_device));
@@ -63,7 +79,7 @@ static void RunBenchmark(LinearAllocs dst_allocation_type, LinearAllocs src_allo
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Performance_hipMemcpyWithStream_DeviceToHost) {
+TEST_CASE("Performance_hipMemcpyWithStream_DeviceToHost") {
   const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);
   const auto src_allocation_type = LinearAllocs::hipMalloc;
   const auto dst_allocation_type = GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc);
@@ -88,7 +104,7 @@ HIP_TEST_CASE(Performance_hipMemcpyWithStream_DeviceToHost) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Performance_hipMemcpyWithStream_HostToDevice) {
+TEST_CASE("Performance_hipMemcpyWithStream_HostToDevice") {
   const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);
   const auto src_allocation_type = GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc);
   const auto dst_allocation_type = LinearAllocs::hipMalloc;
@@ -113,7 +129,7 @@ HIP_TEST_CASE(Performance_hipMemcpyWithStream_HostToDevice) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Performance_hipMemcpyWithStream_HostToHost) {
+TEST_CASE("Performance_hipMemcpyWithStream_HostToHost") {
   const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);
   const auto src_allocation_type = GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc);
   const auto dst_allocation_type = GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc);
@@ -138,7 +154,7 @@ HIP_TEST_CASE(Performance_hipMemcpyWithStream_HostToHost) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Performance_hipMemcpyWithStream_DeviceToDevice_DisablePeerAccess) {
+TEST_CASE("Performance_hipMemcpyWithStream_DeviceToDevice_DisablePeerAccess") {
   const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);
   const auto src_allocation_type = LinearAllocs::hipMalloc;
   const auto dst_allocation_type = LinearAllocs::hipMalloc;
@@ -165,9 +181,10 @@ HIP_TEST_CASE(Performance_hipMemcpyWithStream_DeviceToDevice_DisablePeerAccess) 
  *  - Device supports Peer-to-Peer access
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Performance_hipMemcpyWithStream_DeviceToDevice_EnablePeerAccess) {
+TEST_CASE("Performance_hipMemcpyWithStream_DeviceToDevice_EnablePeerAccess") {
   if (HipTest::getDeviceCount() < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST("This test requires 2 GPUs. Skipping.");
+    return;
   }
   const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);
   const auto src_allocation_type = LinearAllocs::hipMalloc;

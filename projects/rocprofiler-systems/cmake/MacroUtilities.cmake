@@ -1,6 +1,3 @@
-# Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier: MIT
-
 # include guard
 include_guard(DIRECTORY)
 
@@ -171,24 +168,25 @@ function(ROCPROFILER_SYSTEMS_STRIP_TARGET)
     endif()
 endfunction()
 
+# ------------------------------------------------------------------------------#
+# function add_rocprofiler_systems_test_target()
+#
+# Creates a target which runs ctest but depends on all the tests being built.
+#
+# function(ADD_ROCPROFSYS_TEST_TARGET) if(NOT TARGET rocprofiler-systems-test)
+# add_custom_target( rocprofiler-systems-test COMMAND ${CMAKE_COMMAND} --build
+# ${PROJECT_BINARY_DIR} --target test WORKING_DIRECTORY ${PROJECT_BINARY_DIR} COMMENT
+# "Running tests...") endif() endfunction()
+
 # ----------------------------------------------------------------------------------------#
-# function rocprofiler_systems_checkout_git_submodule()
+# macro rocprofiler_systems_checkout_git_submodule()
 #
-# Ensures a git submodule (or external repo) is checked out. If TEST_FILE exists in the
-# submodule directory, returns immediately. Otherwise:
+# Run "git submodule update" if a file in a submodule does not exist
 #
-#   - If .gitmodules exists: runs "git submodule update --init" for the submodule.
-#   - If REPO_URL is provided: clones the repo with "git clone -b REPO_BRANCH", then
-#     optionally runs "git submodule update --init --recursive" when RECURSIVE is set.
-#
-# ARGS:
-#   RECURSIVE (option)       -- add "--recursive" to git submodule update
-#   RELATIVE_PATH (one)      -- path to submodule, relative to WORKING_DIRECTORY
-#   WORKING_DIRECTORY (one)  -- base directory (default: PROJECT_SOURCE_DIR)
-#   TEST_FILE (one)         -- file whose existence indicates checkout (default: CMakeLists.txt)
-#   REPO_URL (one)          -- fallback: clone this URL when submodule dir missing
-#   REPO_BRANCH (one)       -- branch for REPO_URL clone (default: master)
-#   ADDITIONAL_CMDS (many)  -- extra args passed to git submodule update or clone
+# ARGS: RECURSIVE (option) -- add "--recursive" flag RELATIVE_PATH (one value) --
+# typically the relative path to submodule from PROJECT_SOURCE_DIR WORKING_DIRECTORY (one
+# value) -- (default: PROJECT_SOURCE_DIR) TEST_FILE (one value) -- file to check for
+# (default: CMakeLists.txt) ADDITIONAL_CMDS (many value) -- any addition commands to pass
 #
 function(ROCPROFILER_SYSTEMS_CHECKOUT_GIT_SUBMODULE)
     # parse args
@@ -225,6 +223,8 @@ function(ROCPROFILER_SYSTEMS_CHECKOUT_GIT_SUBMODULE)
     # if this file exists --> project has been checked out if not exists --> not been
     # checked out
     set(_TEST_FILE "${_DIR}/${CHECKOUT_TEST_FILE}")
+    # assuming a .gitmodules file exists
+    set(_SUBMODULE "${PROJECT_SOURCE_DIR}/.gitmodules")
 
     set(_TEST_FILE_EXISTS OFF)
     if(EXISTS "${_TEST_FILE}" AND NOT IS_DIRECTORY "${_TEST_FILE}")
@@ -237,32 +237,6 @@ function(ROCPROFILER_SYSTEMS_CHECKOUT_GIT_SUBMODULE)
 
     find_package(Git REQUIRED)
 
-    # .gitmodules lives at the monorepo root, not under PROJECT_SOURCE_DIR, because
-    # rocprofiler-systems was moved into the rocm-systems monorepo. Use git rev-parse
-    # to locate the root (result cached in CMakeCache.txt after first configure run).
-    if(NOT DEFINED CACHE{ROCPROFILER_SYSTEMS_GIT_TOPLEVEL})
-        execute_process(
-            COMMAND ${GIT_EXECUTABLE} rev-parse --show-toplevel
-            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-            OUTPUT_VARIABLE _GIT_TOPLEVEL
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-            RESULT_VARIABLE _GIT_TOPLEVEL_RET
-        )
-        if(NOT _GIT_TOPLEVEL_RET EQUAL 0)
-            message(
-                FATAL_ERROR
-                "Failed to determine git top-level directory. "
-                "Ensure this project is inside a git repository."
-            )
-        endif()
-        set(ROCPROFILER_SYSTEMS_GIT_TOPLEVEL
-            "${_GIT_TOPLEVEL}"
-            CACHE INTERNAL
-            "Git top-level directory"
-        )
-    endif()
-    set(_SUBMODULE "${ROCPROFILER_SYSTEMS_GIT_TOPLEVEL}/.gitmodules")
-
     set(_SUBMODULE_EXISTS OFF)
     if(EXISTS "${_SUBMODULE}" AND NOT IS_DIRECTORY "${_SUBMODULE}")
         set(_SUBMODULE_EXISTS ON)
@@ -273,65 +247,16 @@ function(ROCPROFILER_SYSTEMS_CHECKOUT_GIT_SUBMODULE)
         set(_HAS_REPO_URL ON)
     endif()
 
-    set(_RECURSE "")
-    if(CHECKOUT_RECURSIVE)
-        set(_RECURSE "--recursive")
-    endif()
-
-    # Shallow fetch: download only the pinned commit (--depth=1) instead of full
-    # history. Falls back to a full fetch if shallow fails (happens when the recorded
-    # SHA is not advertised by the remote, e.g. not a branch/tag tip and the server
-    # has not enabled uploadpack.allowReachableSHA1InWant).
-    option(
-        ROCPROFSYS_GIT_SHALLOW
-        "Use --depth=1 when fetching git submodules / external repos"
-        ON
-    )
-    set(_DEPTH "")
-    if(ROCPROFSYS_GIT_SHALLOW)
-        set(_DEPTH "--depth=1")
-    endif()
-
-    # Partial clone: skip blob history (--filter=blob:none); blobs fetched lazily on
-    # demand. Requires git >= 2.36 and remote with uploadpack.allowFilter=true (GitHub
-    # supports it). Falls back to non-filtered fetch if rejected. Combined with
-    # --depth=1 for minimal initial transfer.
-    option(
-        ROCPROFSYS_GIT_PARTIAL_CLONE
-        "Use --filter=blob:none when fetching git submodules / external repos"
-        ON
-    )
-    set(_FILTER "")
-    if(ROCPROFSYS_GIT_PARTIAL_CLONE)
-        set(_FILTER "--filter=blob:none")
-    endif()
-
     # if the module has not been checked out
     if(NOT _TEST_FILE_EXISTS AND _SUBMODULE_EXISTS)
-        # perform the checkout (shallow + partial first)
+        # perform the checkout
         execute_process(
             COMMAND
-                ${GIT_EXECUTABLE} submodule update --init ${_DEPTH} ${_FILTER} ${_RECURSE}
+                ${GIT_EXECUTABLE} submodule update --init ${_RECURSE}
                 ${CHECKOUT_ADDITIONAL_CMDS} ${CHECKOUT_RELATIVE_PATH}
             WORKING_DIRECTORY ${CHECKOUT_WORKING_DIRECTORY}
             RESULT_VARIABLE RET
         )
-
-        # retry without --depth=1 / --filter if shallow or partial fetch failed
-        # (pinned SHA may not be reachable; remote may reject filter)
-        if(RET GREATER 0 AND (ROCPROFSYS_GIT_SHALLOW OR ROCPROFSYS_GIT_PARTIAL_CLONE))
-            message(
-                STATUS
-                "Optimized fetch of '${CHECKOUT_RELATIVE_PATH}' failed; retrying full fetch"
-            )
-            execute_process(
-                COMMAND
-                    ${GIT_EXECUTABLE} submodule update --init ${_RECURSE}
-                    ${CHECKOUT_ADDITIONAL_CMDS} ${CHECKOUT_RELATIVE_PATH}
-                WORKING_DIRECTORY ${CHECKOUT_WORKING_DIRECTORY}
-                RESULT_VARIABLE RET
-            )
-        endif()
 
         # check the return code
         if(RET GREATER 0)
@@ -357,50 +282,22 @@ function(ROCPROFILER_SYSTEMS_CHECKOUT_GIT_SUBMODULE)
             execute_process(COMMAND ${CMAKE_COMMAND} -E remove_directory ${_DIR})
         endif()
 
-        # perform the checkout (shallow + partial first)
+        # perform the checkout
         execute_process(
             COMMAND
-                ${GIT_EXECUTABLE} clone ${_DEPTH} ${_FILTER} -b ${CHECKOUT_REPO_BRANCH}
+                ${GIT_EXECUTABLE} clone -b ${CHECKOUT_REPO_BRANCH}
                 ${CHECKOUT_ADDITIONAL_CMDS} ${CHECKOUT_REPO_URL} ${CHECKOUT_RELATIVE_PATH}
             WORKING_DIRECTORY ${CHECKOUT_WORKING_DIRECTORY}
             RESULT_VARIABLE RET
         )
 
-        # retry without --depth=1 / --filter if optimized clone failed
-        if(RET GREATER 0 AND (ROCPROFSYS_GIT_SHALLOW OR ROCPROFSYS_GIT_PARTIAL_CLONE))
-            message(
-                STATUS
-                "Optimized clone of '${CHECKOUT_REPO_URL}' failed; retrying full clone"
-            )
-            if(EXISTS "${_DIR}")
-                execute_process(COMMAND ${CMAKE_COMMAND} -E remove_directory ${_DIR})
-            endif()
-            execute_process(
-                COMMAND
-                    ${GIT_EXECUTABLE} clone -b ${CHECKOUT_REPO_BRANCH}
-                    ${CHECKOUT_ADDITIONAL_CMDS} ${CHECKOUT_REPO_URL}
-                    ${CHECKOUT_RELATIVE_PATH}
-                WORKING_DIRECTORY ${CHECKOUT_WORKING_DIRECTORY}
-                RESULT_VARIABLE RET
-            )
-        endif()
-
-        # perform the submodule update (shallow + partial first)
+        # perform the submodule update
         if(CHECKOUT_RECURSIVE AND EXISTS "${_DIR}" AND IS_DIRECTORY "${_DIR}")
             execute_process(
-                COMMAND
-                    ${GIT_EXECUTABLE} submodule update --init ${_DEPTH} ${_FILTER}
-                    ${_RECURSE}
+                COMMAND ${GIT_EXECUTABLE} submodule update --init ${_RECURSE}
                 WORKING_DIRECTORY ${_DIR}
                 RESULT_VARIABLE RET
             )
-            if(RET GREATER 0 AND (ROCPROFSYS_GIT_SHALLOW OR ROCPROFSYS_GIT_PARTIAL_CLONE))
-                execute_process(
-                    COMMAND ${GIT_EXECUTABLE} submodule update --init ${_RECURSE}
-                    WORKING_DIRECTORY ${_DIR}
-                    RESULT_VARIABLE RET
-                )
-            endif()
         endif()
 
         # check the return code
@@ -998,7 +895,7 @@ function(ROCPROFILER_SYSTEMS_DIRECTORY)
             rocprofiler_systems_message(FATAL_ERROR "Directory '${_PATH}' does not exist")
         elseif(NOT IS_DIRECTORY "${_PATH}" AND F_FAIL)
             rocprofiler_systems_message(FATAL_ERROR
-                "'${_PATH}' exists but is not a directory"
+                                        "'${_PATH}' exists but is not a directory"
             )
         elseif(NOT EXISTS "${_PATH}" AND F_MKDIR)
             execute_process(
@@ -1205,7 +1102,7 @@ function(ROCPROFILER_SYSTEMS_INSTALL_TPL _TPL_TARGET _NEW_NAME _BUILD_TREE_DIR _
 
     # build tree symbolic links
     rocprofiler_systems_buildtree_tpl("${_TPL_TARGET}" "${_NEW_NAME}"
-        "${_BUILD_TREE_DIR}" ${ARGN}
+                                      "${_BUILD_TREE_DIR}" ${ARGN}
     )
 
     install(

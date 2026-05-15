@@ -1,8 +1,21 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
+IMPLIED, INNCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANNY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 /* This file will be compiled using the compiler option given below.
    The functions will be calculating the time taken to execute under
@@ -274,7 +287,8 @@ void DefaultPT2_StrmWaitEvent() {
   int device;
   HIP_CHECK(hipGetDevice(&device));
   if (!DeviceAttributesSupport(device, hipDeviceAttributeManagedMemory)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HipTest::HIP_SKIP_TEST("Managed memory is not supported");
+    return;
   }
 
   hipEvent_t evt;
@@ -695,8 +709,9 @@ void DefaultPT2_hipMemcpy3D() {
 }
 
 
-HIP_TEST_CASE(Unit_hipStrmPerThrdDefault) {
+TEST_CASE("Unit_hipStrmPerThrdDefault") {
   CHECK_IMAGE_SUPPORT
+
   SECTION("Testing hipMemset/Memcpy() and their async version") {
     REQUIRE(DefaultPT2_Memcpy_MemSet(1, 0));
     REQUIRE(DefaultPT2_Memcpy_MemSet(1, 1));
@@ -726,15 +741,16 @@ HIP_TEST_CASE(Unit_hipStrmPerThrdDefault) {
 
   hipDeviceProp_t deviceProp;
   HIP_CHECK(hipGetDeviceProperties(&deviceProp, 0));
-  SECTION("Testing_hipLaunchCooperativeKernel()") {
-    if (!deviceProp.cooperativeLaunch) {
-      WARN("Skipping section: " << HipTest::SkipReason::kCooperativeLaunchUnsupported);
-      return;
+  if (deviceProp.cooperativeLaunch) {
+    SECTION("Testing_hipLaunchCooperativeKernel()") {
+      // launching hipLaunchCooperativeKernel() with Null stream
+      DefaultPT2_LaunchCooperativeKernel(1);
+      // launching hipLaunchCooperativeKernel() with user created stream
+      DefaultPT2_LaunchCooperativeKernel(0);
     }
-    // launching hipLaunchCooperativeKernel() with Null stream
-    DefaultPT2_LaunchCooperativeKernel(1);
-    // launching hipLaunchCooperativeKernel() with user created stream
-    DefaultPT2_LaunchCooperativeKernel(0);
+  } else {
+    INFO("Cooperative Launch feature is not supported, therefore skipping");
+    INFO(" the test Testing_hipLaunchCooperativeKernel()");
   }
 
   SECTION("Testing_StrmWaitEvent()") { DefaultPT2_StrmWaitEvent(); }

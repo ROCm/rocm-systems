@@ -1,8 +1,24 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 #include "hipMallocManagedCommon.hh"
 #include <atomic>
@@ -15,10 +31,11 @@ __global__ void MallcMangdFlgTst(int n, float* x, float* y) {
 }
 
 // The following section tests working of hipMallocManaged with flag parameters
-HIP_TEST_CASE(Unit_hipMallocManaged_FlgParam) {
+TEST_CASE("Unit_hipMallocManaged_FlgParam", "[multigpu]") {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
+    return;
   }
 
   std::atomic<int> DataMismatch{0};
@@ -102,10 +119,11 @@ HIP_TEST_CASE(Unit_hipMallocManaged_FlgParam) {
 
 // The following function tests Memory access allocated using hipMallocManaged
 // in multiple streams
-HIP_TEST_CASE(Unit_hipMallocManaged_AccessMultiStream) {
+TEST_CASE("Unit_hipMallocManaged_AccessMultiStream", "[multigpu]") {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
+    return;
   }
 
   std::atomic<int> DataMismatch{0};

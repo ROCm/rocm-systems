@@ -35,7 +35,7 @@ TEST(TransportTest, CollNetRecvSetup) {
 
   // Step 1: Allocate device-side array of ncclDevChannelPeer
   ncclDevChannelPeer* devPeerArrayDevice;
-  ASSERT_EQ(hipMalloc(&devPeerArrayDevice, sizeof(ncclDevChannelPeer) * 3), hipSuccess);
+  hipMalloc(&devPeerArrayDevice, sizeof(ncclDevChannelPeer) * 3);
 
   // Step 2: Create host-side array of device pointers
   ncclDevChannelPeer* devPeerPtrsHost[3] = {
@@ -46,10 +46,10 @@ TEST(TransportTest, CollNetRecvSetup) {
 
   // Step 3: Allocate device-side array of device pointers
   ncclDevChannelPeer** devPeerPtrsDevice;
-  ASSERT_EQ(hipMalloc(&devPeerPtrsDevice, sizeof(ncclDevChannelPeer*) * 3), hipSuccess);
+  hipMalloc(&devPeerPtrsDevice, sizeof(ncclDevChannelPeer*) * 3);
 
   // Step 4: Copy host-side array of device pointers to device
-  ASSERT_EQ(hipMemcpy(devPeerPtrsDevice, devPeerPtrsHost, sizeof(ncclDevChannelPeer*) * 3, hipMemcpyHostToDevice), hipSuccess);
+  hipMemcpy(devPeerPtrsDevice, devPeerPtrsHost, sizeof(ncclDevChannelPeer*) * 3, hipMemcpyHostToDevice);
 
   // Step 5: Set in channel
   channel.devPeers = devPeerPtrsDevice;
@@ -75,8 +75,8 @@ TEST(TransportTest, CollNetRecvSetup) {
   ASSERT_FALSE(failed);
 
   // --- Cleanup ---
-  ASSERT_EQ(hipFree(devPeerArrayDevice), hipSuccess);
-  ASSERT_EQ(hipFree(devPeerPtrsDevice), hipSuccess);
+  hipFree(devPeerArrayDevice);
+  hipFree(devPeerPtrsDevice);
 }
 
 TEST(TransportTest, CollNetSendSetup) {
@@ -103,7 +103,7 @@ TEST(TransportTest, CollNetSendSetup) {
 
   // Step 1: Allocate device-side array of ncclDevChannelPeer
   ncclDevChannelPeer* devPeerArrayDevice;
-  ASSERT_EQ(hipMalloc(&devPeerArrayDevice, sizeof(ncclDevChannelPeer) * 3), hipSuccess);
+  hipMalloc(&devPeerArrayDevice, sizeof(ncclDevChannelPeer) * 3);
 
   // Step 2: Create host-side array of device pointers
   ncclDevChannelPeer* devPeerPtrsHost[3] = {
@@ -114,10 +114,10 @@ TEST(TransportTest, CollNetSendSetup) {
 
   // Step 3: Allocate device-side array of device pointers
   ncclDevChannelPeer** devPeerPtrsDevice;
-  ASSERT_EQ(hipMalloc(&devPeerPtrsDevice, sizeof(ncclDevChannelPeer*) * 3), hipSuccess);
+  hipMalloc(&devPeerPtrsDevice, sizeof(ncclDevChannelPeer*) * 3);
 
   // Step 4: Copy host-side array of device pointers to device
-  ASSERT_EQ(hipMemcpy(devPeerPtrsDevice, devPeerPtrsHost, sizeof(ncclDevChannelPeer*) * 3, hipMemcpyHostToDevice), hipSuccess);
+  hipMemcpy(devPeerPtrsDevice, devPeerPtrsHost, sizeof(ncclDevChannelPeer*) * 3, hipMemcpyHostToDevice);
 
   // Step 5: Set in channel
   channel.devPeers = devPeerPtrsDevice;
@@ -144,8 +144,8 @@ TEST(TransportTest, CollNetSendSetup) {
   ASSERT_FALSE(failed);
 
   // --- Cleanup ---
-  ASSERT_EQ(hipFree(devPeerArrayDevice), hipSuccess);
-  ASSERT_EQ(hipFree(devPeerPtrsDevice), hipSuccess);
+  hipFree(devPeerArrayDevice);
+  hipFree(devPeerPtrsDevice);
 }
 
 

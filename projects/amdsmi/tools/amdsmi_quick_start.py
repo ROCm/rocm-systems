@@ -41,8 +41,8 @@ except ImportError as e:
 
 from pathlib import Path
 
-sys.path.append(str(Path("/opt/rocm/libexec/")))
-sys.path.append(str(Path("/opt/rocm/libexec/amdsmi_cli/")))
+sys.path.append(str(Path('/opt/rocm/libexec/')))
+sys.path.append(str(Path('/opt/rocm/libexec/amdsmi_cli/')))
 
 try:
     from amdsmi_commands import AMDSMICommands
@@ -50,7 +50,6 @@ try:
     from amdsmi_logger import AMDSMILogger
     from amdsmi_parser import AMDSMIParser
     import amdsmi_cli_exceptions
-
     helpers = AMDSMIHelpers()
 except ImportError as e:
     print(f"Failed to import amdsmi cli libs: {e}")
@@ -60,11 +59,9 @@ except ImportError as e:
 # Make exit & quit work without parens because it's annoying
 type(exit).__repr__ = sys.exit
 
-
 def signal_handler(sig, frame):
     logging.debug(f"Handling signal: {sig}")
     sys.exit(0)
-
 
 amdsmi_init()
 signal.signal(signal.SIGINT, signal_handler)
@@ -72,8 +69,7 @@ signal.signal(signal.SIGTERM, signal_handler)
 atexit.register(amdsmi_shut_down)
 
 gpus = amdsmi_get_processor_handles()
-ret = amdsmi_get_cpu_handles()
-cpus = ret["processor_handles"]
+cpus = amdsmi_get_cpusocket_handles()
 
 print(f"gpus variable populated with:{gpus}")
 print(f"cpus variable populated with:{cpus}")

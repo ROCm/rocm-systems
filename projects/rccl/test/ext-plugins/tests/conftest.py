@@ -14,10 +14,9 @@ import glob
 
 WORKDIR = os.getcwd()
 
-# Paths (set via environment variables, e.g. export RCCL_INSTALL_DIR=/path/to/rccl)
-RCCL_INSTALL_DIR = os.environ.get("RCCL_INSTALL_DIR", "path/to/rccl")
-OMPI_INSTALL_DIR = os.environ.get("OMPI_INSTALL_DIR", "path/to/ompi/install")
-RCCL_TESTS_DIR = os.environ.get("RCCL_TESTS_DIR", "path/to/rccl-tests")
+RCCL_INSTALL_DIR = "path/to/rccl"
+OMPI_INSTALL_DIR = "path/to/ompi/install"
+RCCL_TESTS_DIR = "path/to/rccl-tests"
 
 # Ext-Tuner Paths
 PLUGIN_DIR = f"{RCCL_INSTALL_DIR}/ext-tuner/example"
@@ -25,11 +24,7 @@ PLUGIN_SO = f"{PLUGIN_DIR}/libnccl-tuner-example.so"
 
 # Ext-Profiler Paths
 PROFILER_DIR = f"{RCCL_INSTALL_DIR}/ext-profiler/example"
-PROFILER_SO = f"{PROFILER_DIR}/librccl-profiler-example.so"
-
-# Ext-Inspector Paths
-INSPECTOR_DIR = f"{RCCL_INSTALL_DIR}/ext-profiler/inspector"
-INSPECTOR_SO = f"{INSPECTOR_DIR}/librccl-profiler-inspector.so"
+PROFILER_SO = f"{PROFILER_DIR}/librccl-profiler.so"
 
 # CSV Configs 
 VALID_CONFIG_WITH_WILDCARDS = os.path.join(WORKDIR, "assets/csv_confs/valid_config_with_wildcards.conf")
@@ -44,7 +39,7 @@ LOGDIR = os.path.join(WORKDIR, "logs")
 os.makedirs(LOGDIR, exist_ok=True)
 
 PROFILER_DUMP_DIR = os.path.join(WORKDIR, "profiler_dumps")
-INSPECTOR_DUMP_DIR = os.path.join(WORKDIR, "inspector_dumps")
+os.makedirs(PROFILER_DUMP_DIR, exist_ok=True)
 
 # Helper Functions
 def get_avg_bus_bandwidth(log_content: str):
@@ -176,8 +171,6 @@ def paths():
         RCCL_TESTS_DIR=RCCL_TESTS_DIR,
         PROFILER_DIR=PROFILER_DIR,
         PROFILER_SO=PROFILER_SO,
-        INSPECTOR_DIR=INSPECTOR_DIR,
-        INSPECTOR_SO=INSPECTOR_SO,
         # CSV Configs
         VALID_CONFIG_WITH_WILDCARDS=VALID_CONFIG_WITH_WILDCARDS,
         VALID_CONFIG_WITHOUT_WILDCARDS=VALID_CONFIG_WITHOUT_WILDCARDS,
@@ -188,7 +181,6 @@ def paths():
         MULTINODE_CONFIG=MULTINODE_CONFIG,
         LOGDIR=LOGDIR,
         PROFILER_DUMP_DIR=PROFILER_DUMP_DIR,
-        INSPECTOR_DUMP_DIR=INSPECTOR_DUMP_DIR,
         # Helper Functions for Ext-Tuner
         get_avg_bus_bandwidth=get_avg_bus_bandwidth,
         check_node_interface=check_node_interface,
@@ -211,11 +203,6 @@ def pytest_runtest_setup(item):
     if item.get_closest_marker("ext_profiler"):
         if not os.path.exists(PROFILER_SO):
             pytest.skip(f"Profiler plugin library not found at: {PROFILER_SO}")
-
-    # Check for ext_inspector marker
-    if item.get_closest_marker("ext_inspector"):
-        if not os.path.exists(INSPECTOR_SO):
-            pytest.skip(f"Inspector plugin library not found at: {INSPECTOR_SO}")
 
 @pytest.fixture(scope="session", autouse=True)
 def clear_profiler_dump(request):

@@ -597,7 +597,6 @@ namespace code {
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1150: name = "gfx1150"; xnack_supported = false; sramecc_supported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1151: name = "gfx1151"; xnack_supported = false; sramecc_supported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1152: name = "gfx1152"; xnack_supported = false; sramecc_supported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1153: name = "gfx1153"; xnack_supported = false; sramecc_supported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX11_GENERIC: name = "gfx11-generic"; xnack_supported = false; sramecc_supported = false; break;
 #endif // GFX11_BUILD
 #if defined(GFX12_BUILD)
@@ -759,7 +758,7 @@ namespace code {
         switch (img->EClass()) {
         case ELFCLASS64:
           // There is no e_machine and/or OS ABI for R600 so rely on checking
-          // the ELFCLASS to determine if AMDGCN verses R600. AMDHSA always uses
+          // the ELFCLASS to determin if AMDGCN verses R600. AMDHSA always uses
           // ELFCLASS64 and R600 always uses ELFCLASS32.
           isa_name += "amdgcn";
           break;

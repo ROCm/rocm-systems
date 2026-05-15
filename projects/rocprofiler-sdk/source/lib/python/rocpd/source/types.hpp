@@ -23,7 +23,6 @@
 #pragma once
 
 #include "lib/output/agent_info.hpp"
-#include "lib/output/kfd_info.hpp"
 #include "lib/output/node_info.hpp"
 
 #include <rocprofiler-sdk/agent.h>
@@ -246,27 +245,6 @@ struct sample
     decoded_extdata get_extdata() const;
 };
 
-struct event
-{
-    struct decoded_extdata
-    {
-        std::optional<::rocprofiler::tool::rocpd_kfd_event_data_t> kfd = {};
-    };
-
-    uint64_t    id              = 0;
-    guid_t      guid            = {};
-    uint64_t    category_id     = 0;
-    uint64_t    stack_id        = 0;
-    uint64_t    parent_stack_id = 0;
-    uint64_t    correlation_id  = 0;
-    std::string call_stack      = {};
-    std::string line_info       = {};
-    std::string extdata         = {};
-
-    bool            has_extdata() const { return (extdata.length() > 2); }
-    decoded_extdata get_extdata() const;
-};
-
 struct region_arg
 {
     uint64_t    id    = 0;
@@ -431,15 +409,12 @@ struct stats_node
 
 struct pmc_event
 {
-    uint64_t    id       = 0;
-    guid_t      guid     = {};
-    uint64_t    event_id = 0;
-    uint64_t    pmc_id   = 0;
-    double      value    = 0;
-    std::string extdata  = {};
-
-    bool has_extdata() const { return (extdata.length() > 2); }
-    void load_extdata();
+    uint64_t id            = 0;
+    guid_t   guid          = {};
+    pid_t    pid           = 0;
+    uint64_t event_id      = 0;
+    uint64_t pmc_id        = 0;
+    double   counter_value = 0;
 };
 
 struct counter
@@ -491,26 +466,16 @@ struct counter
 
 struct pmc_info
 {
-    uint64_t    id               = 0;
-    guid_t      guid             = {};
-    uint64_t    nid              = 0;
-    uint64_t    pid              = 0;
-    uint64_t    agent_id         = 0;
-    std::string target_arch      = {};
-    uint64_t    event_code       = 0;
-    uint64_t    instance_id      = 0;
-    std::string name             = {};
-    std::string symbol           = {};
-    std::string description      = {};
-    std::string long_description = {};
-    std::string component        = {};
-    std::string units            = {};
-    std::string value_type       = {};
-    std::string block            = {};
-    std::string expression       = {};
-    uint16_t    is_constant      = 0;
-    uint16_t    is_derived       = 0;
-    std::string extdata          = {};
+    uint64_t    id              = 0;
+    guid_t      guid            = {};
+    uint64_t    nid             = 0;
+    uint64_t    agent_abs_index = 0;
+    bool        is_constant     = false;
+    bool        is_derived      = false;
+    std::string name            = {};
+    std::string description     = {};
+    std::string block           = {};
+    std::string expression      = {};
 };
 
 }  // namespace types
@@ -705,29 +670,6 @@ load(ArchiveT& ar, rocpd::types::sample::decoded_extdata& data)
 
 template <typename ArchiveT>
 void
-load(ArchiveT& ar, rocpd::types::event& data)
-{
-    LOAD_DATA_FIELD(id);
-    LOAD_DATA_FIELD(guid);
-    LOAD_DATA_FIELD(category_id);
-    LOAD_DATA_FIELD(stack_id);
-    LOAD_DATA_FIELD(parent_stack_id);
-    LOAD_DATA_FIELD(correlation_id);
-    LOAD_DATA_FIELD(call_stack);
-    LOAD_DATA_FIELD(line_info);
-    LOAD_DATA_FIELD(extdata);
-}
-
-template <typename ArchiveT>
-void
-load(ArchiveT& ar, rocpd::types::event::decoded_extdata& data)
-{
-    data.kfd.reset();
-    ar(cereal::make_nvp("kfd", data.kfd));
-}
-
-template <typename ArchiveT>
-void
 load(ArchiveT& ar, rocpd::types::region_arg& data)
 {
     LOAD_DATA_FIELD(id);
@@ -914,10 +856,10 @@ load(ArchiveT& ar, rocpd::types::pmc_event& data)
 {
     LOAD_DATA_FIELD(id);
     LOAD_DATA_FIELD(guid);
+    LOAD_DATA_FIELD(pid);
     LOAD_DATA_FIELD(event_id);
     LOAD_DATA_FIELD(pmc_id);
-    LOAD_DATA_FIELD(value);
-    LOAD_DATA_FIELD(extdata);
+    // LOAD_DATA_FIELD(counter_value);
 }
 
 template <typename ArchiveT>
@@ -968,7 +910,6 @@ load(ArchiveT& ar, rocpd::types::counter& data)
     LOAD_DATA_FIELD(is_constant);
     LOAD_DATA_FIELD(is_derived);
 }
-
 template <typename ArchiveT>
 void
 load(ArchiveT& ar, rocpd::types::pmc_info& data)
@@ -976,22 +917,13 @@ load(ArchiveT& ar, rocpd::types::pmc_info& data)
     LOAD_DATA_FIELD(id);
     LOAD_DATA_FIELD(guid);
     LOAD_DATA_FIELD(nid);
-    LOAD_DATA_FIELD(pid);
-    LOAD_DATA_FIELD(agent_id);
-    LOAD_DATA_FIELD(target_arch);
-    LOAD_DATA_FIELD(event_code);
-    LOAD_DATA_FIELD(instance_id);
-    LOAD_DATA_FIELD(name);
-    LOAD_DATA_FIELD(description);
-    LOAD_DATA_FIELD(long_description);
-    LOAD_DATA_FIELD(component);
-    LOAD_DATA_FIELD(units);
-    LOAD_DATA_FIELD(value_type);
-    LOAD_DATA_FIELD(block);
-    LOAD_DATA_FIELD(expression);
+    LOAD_DATA_FIELD(agent_abs_index);
     LOAD_DATA_FIELD(is_constant);
     LOAD_DATA_FIELD(is_derived);
-    LOAD_DATA_FIELD(extdata);
+    LOAD_DATA_FIELD(name);
+    LOAD_DATA_FIELD(description);
+    LOAD_DATA_FIELD(block);
+    LOAD_DATA_FIELD(expression);
 }
 
 }  // namespace cereal

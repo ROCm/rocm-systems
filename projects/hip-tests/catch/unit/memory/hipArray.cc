@@ -1,11 +1,23 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
-
+Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 #include <hip_test_common.hh>
-HIP_TEST_CASE(Unit_hipArray_Valid) {
+TEST_CASE("Unit_hipArray_Valid") {
   CHECK_IMAGE_SUPPORT
 
   hipArray_t array = nullptr;
@@ -18,7 +30,7 @@ HIP_TEST_CASE(Unit_hipArray_Valid) {
   HIP_CHECK(hipFreeArray(array));
 }
 
-HIP_TEST_CASE(Unit_hipArray_Invalid) {
+TEST_CASE("Unit_hipArray_Invalid") {
   CHECK_IMAGE_SUPPORT
 
   void* data = malloc(sizeof(char));
@@ -26,13 +38,13 @@ HIP_TEST_CASE(Unit_hipArray_Invalid) {
   REQUIRE(hipFreeArray(arrayPtr) == hipErrorContextIsDestroyed);
   free(data);
 }
-HIP_TEST_CASE(Unit_hipArray_Nullptr) {
+TEST_CASE("Unit_hipArray_Nullptr") {
   CHECK_IMAGE_SUPPORT
 
   hipArray_t array = nullptr;
   REQUIRE(hipFreeArray(array) == hipErrorInvalidValue);
 }
-HIP_TEST_CASE(Unit_hipArray_DoubleFree) {
+TEST_CASE("Unit_hipArray_DoubleFree") {
   CHECK_IMAGE_SUPPORT
 
   hipArray_t array = nullptr;
@@ -45,7 +57,7 @@ HIP_TEST_CASE(Unit_hipArray_DoubleFree) {
   HIP_CHECK(hipFreeArray(array));
   REQUIRE(hipFreeArray(array) == hipErrorContextIsDestroyed);
 }
-HIP_TEST_CASE(Unit_hipArray_TrippleDestroy) {
+TEST_CASE("Unit_hipArray_TrippleDestroy") {
   CHECK_IMAGE_SUPPORT
 
   hipArray_t array = nullptr;
@@ -59,14 +71,14 @@ HIP_TEST_CASE(Unit_hipArray_TrippleDestroy) {
   REQUIRE(hipArrayDestroy(array) == hipErrorContextIsDestroyed);
   REQUIRE(hipArrayDestroy(array) == hipErrorContextIsDestroyed);
 }
-HIP_TEST_CASE(Unit_hipArray_DoubleNullptr) {
+TEST_CASE("Unit_hipArray_DoubleNullptr") {
   CHECK_IMAGE_SUPPORT
 
   hipArray_t array = nullptr;
   REQUIRE(hipFreeArray(array) == hipErrorInvalidValue);
   REQUIRE(hipFreeArray(array) == hipErrorInvalidValue);
 }
-HIP_TEST_CASE(Unit_hipArray_DoubleInvalid) {
+TEST_CASE("Unit_hipArray_DoubleInvalid") {
   CHECK_IMAGE_SUPPORT
 
   void* data = malloc(sizeof(char));

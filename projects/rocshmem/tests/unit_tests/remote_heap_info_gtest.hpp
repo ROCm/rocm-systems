@@ -30,7 +30,7 @@
 #include <mpi.h>
 
 #include "../src/memory/heap_memory.hpp"
-#include "../src/memory/std_allocator.hpp"
+#include "../src/memory/hip_allocator.hpp"
 #include "../src/memory/remote_heap_info.hpp"
 
 namespace rocshmem {
@@ -40,7 +40,7 @@ class RemoteHeapInfoTestFixture : public ::testing::Test
     /**
      * @brief Helper type for heap memory
      */
-    using HEAP_T = HeapMemoryType;
+    using HEAP_T = HeapMemory<HIPAllocator>;
 
     /**
      * @brief Helper type for RemoteHeapInfo with MPI
@@ -51,8 +51,7 @@ class RemoteHeapInfoTestFixture : public ::testing::Test
     /**
      * @brief Heap memory object
      */
-    HIPAllocator alloc_{};
-    HEAP_T heap_mem_{alloc_};
+    HEAP_T heap_mem_ {};
 
     /**
      * @brief Remote heap info with MPI Communicator

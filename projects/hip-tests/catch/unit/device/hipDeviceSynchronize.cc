@@ -1,8 +1,24 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 #include <hip_test_common.hh>
 
@@ -44,7 +60,7 @@ static __global__ void Iter(int* Ad, int num) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipDeviceSynchronize_Positive_Empty_Streams) {
+TEST_CASE("Unit_hipDeviceSynchronize_Positive_Empty_Streams") {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
   HIP_CHECK(hipSetDevice(device));
   INFO("Current device: " << device);
@@ -67,7 +83,7 @@ HIP_TEST_CASE(Unit_hipDeviceSynchronize_Positive_Empty_Streams) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipDeviceSynchronize_Positive_Nullstream) {
+TEST_CASE("Unit_hipDeviceSynchronize_Positive_Nullstream") {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
   HIP_CHECK(hipSetDevice(device));
   INFO("Current device: " << device);
@@ -99,7 +115,7 @@ HIP_TEST_CASE(Unit_hipDeviceSynchronize_Positive_Nullstream) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipDeviceSynchronize_Functional) {
+TEST_CASE("Unit_hipDeviceSynchronize_Functional") {
   int* A[NUM_STREAMS];
   int* Ad[NUM_STREAMS];
   hipStream_t stream[NUM_STREAMS];
@@ -120,9 +136,14 @@ HIP_TEST_CASE(Unit_hipDeviceSynchronize_Functional) {
     HIP_CHECK(hipMemcpyAsync(A[i], Ad[i], _SIZE, hipMemcpyDeviceToHost, stream[i]));
   }
 
-  // Do not assert on host-visible buffers before synchronize: the kernel may
-  // finish and D2H may complete before this thread runs again (fast GPU / CI),
-  // so "value not yet updated" is not reliable.
+
+  // This first check but relies on the kernel running for so long that the
+  // D2H async memcopy has not started yet. This will be true in an optimal
+  // asynchronous implementation.
+  // Conservative implementations which synchronize the hipMemcpyAsync will
+  // fail, ie if HIP_LAUNCH_BLOCKING=true.
+
+  REQUIRE(NUM_ITERS != A[NUM_STREAMS - 1][0] - 1);
   HIP_CHECK(hipDeviceSynchronize());
   REQUIRE(NUM_ITERS == A[NUM_STREAMS - 1][0] - 1);
   for (int i = 0; i < NUM_STREAMS; i++) {

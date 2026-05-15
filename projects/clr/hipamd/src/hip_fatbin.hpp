@@ -1,8 +1,24 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 #ifndef HIP_FAT_BINARY_HPP
 #define HIP_FAT_BINARY_HPP
@@ -65,7 +81,7 @@ class FatBinaryInfo {
   }
 
   //! Returns the lock for this fatbinary access
-  std::recursive_mutex& FatBinaryLock() { return fb_lock_; }
+  amd::Monitor& FatBinaryLock() { return fb_lock_; }
 
  private:
   void ReleaseImageAndFile();
@@ -86,7 +102,7 @@ class FatBinaryInfo {
   std::vector<amd::Program*> dev_programs_;  //!< Program info per Device
 
   std::shared_ptr<UniqueFD> ufd_;                         //!< Unique file descriptor
-  std::recursive_mutex fb_lock_;                          //!< Lock for the fat binary access
+  amd::Monitor fb_lock_{true};                            //!< Lock for the fat binary access
   std::unordered_set<const void*> code_obj_allocations_;  //!< Track allocations for code objects
 };
 

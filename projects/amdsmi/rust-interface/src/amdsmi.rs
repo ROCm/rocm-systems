@@ -1488,9 +1488,7 @@ pub fn amdsmi_get_gpu_memory_reserved_pages(
 /// Retrieves the fan speed for a given GPU handle and sensor index.
 ///
 /// This function returns the fan speed for the specified GPU handle and sensor index. The fan speed
-/// is a value relative to the per-device maximum. For legacy hwmon GPUs the maximum is
-/// AMDSMI_MAX_FAN_SPEED (255). For GPUs with the gpu_od sysfs interface, use
-/// `amdsmi_get_gpu_fan_speed_max()` to query the actual maximum.
+/// provides information as a value relative to AMDSMI_MAX_FAN_SPEED.
 ///
 /// # Arguments
 ///
@@ -1548,8 +1546,6 @@ pub fn amdsmi_get_gpu_fan_speed(
 ///
 /// Given a processor handle `processor_handle` and a sensor index `sensor_ind`, this function returns
 /// the maximum fan speed for the specified GPU.
-/// For legacy hwmon GPUs this is AMDSMI_MAX_FAN_SPEED (255). For GPUs with the gpu_od sysfs
-/// interface, the maximum is read from the OD_RANGE (e.g. 100).
 ///
 /// # Arguments
 ///
@@ -1777,8 +1773,7 @@ pub fn amdsmi_get_gpu_volt_metric(
 /// Reset the GPU fan of the device with the specified processor handle and sensor index.
 ///
 /// Given a processor handle `processor_handle` and a sensor index `sensor_ind`, this function resets the GPU fan
-/// to automatic driver control. For GPUs with the gpu_od sysfs interface, this writes the
-/// OD_RANGE minimum value to fan_minimum_pwm and commits the change.
+/// for the specified processor.
 ///
 /// # Arguments
 ///
@@ -1891,14 +1886,12 @@ pub fn amdsmi_get_gpu_fan_rpms(
 ///
 /// Given a processor handle `processor_handle`, a sensor index `sensor_ind`, and a fan speed `speed`,
 /// this function sets the GPU fan speed for the specified processor.
-/// For legacy hwmon GPUs the valid range is 0-255. For GPUs with the gpu_od sysfs interface,
-/// the valid range is determined dynamically from the OD_RANGE (e.g. 20-100).
 ///
 /// # Arguments
 ///
 /// * `processor_handle` - A handle to the processor for which the GPU fan speed is being set.
 /// * `sensor_ind` - The index of the fan sensor to set the speed for.
-/// * `speed` - The speed to set the fan to (0-255 for legacy hwmon, OD_RANGE for gpu_od GPUs).
+/// * `speed` - The speed to set the fan to, in RPM.
 ///
 /// # Returns
 ///
@@ -3869,7 +3862,7 @@ pub fn amdsmi_gpu_counter_group_supported(
         processor_handle,
         group
     ));
-    // Here amdsmi_wrapper::amdsmi_gpu_counter_group_supported return successful means supported.
+    // Here amdsmi_wrapper::amdsmi_gpu_counter_group_supported return successfull means supported.
     Ok(true)
 }
 

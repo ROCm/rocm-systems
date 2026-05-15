@@ -1,8 +1,22 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+/* Copyright (c) 2015 - 2023 Advanced Micro Devices, Inc.
+
+ Permission is hereby granted, free of charge, to any person obtaining a copy
+ of this software and associated documentation files (the "Software"), to deal
+ in the Software without restriction, including without limitation the rights
+ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ copies of the Software, and to permit persons to whom the Software is
+ furnished to do so, subject to the following conditions:
+
+ The above copyright notice and this permission notice shall be included in
+ all copies or substantial portions of the Software.
+
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ THE SOFTWARE. */
 
 #pragma once
 
@@ -73,7 +87,7 @@ class GpuMemoryReference : public amd::ReferenceCountedObject {
 static constexpr Pal::gpusize MaxGpuAlignment = 4 * Ki;
 
 //! GPU resource
-class Resource {
+class Resource : public amd::HeapObject {
  public:
   enum InteropType {
     InteropTypeless = 0,
@@ -181,7 +195,7 @@ class Resource {
   };
 
   //! Resource descriptor
-  struct Descriptor {
+  struct Descriptor : public amd::HeapObject {
     MemoryType type_;              //!< Memory type
     size_t width_;                 //!< Resource width
     size_t height_;                //!< Resource height
@@ -521,7 +535,7 @@ class Resource {
 
 typedef Util::BuddyAllocator<Device> MemBuddyAllocator;
 
-class MemorySubAllocator {
+class MemorySubAllocator : public amd::HeapObject {
  public:
   MemorySubAllocator(Device* device, bool retain_final_chunk = false)
       : device_(device), retain_final_chunk_(retain_final_chunk) {}
@@ -532,7 +546,7 @@ class MemorySubAllocator {
   GpuMemoryReference* Allocate(Pal::gpusize size, Pal::gpusize alignment,
                                const Pal::IGpuMemory* reserved_va, Pal::gpusize* offset);
   //! Free suballocation
-  bool Free(std::recursive_mutex& monitor, GpuMemoryReference* mem_ref, Pal::gpusize offset);
+  bool Free(amd::Monitor* monitor, GpuMemoryReference* mem_ref, Pal::gpusize offset);
 
  protected:
   //! Allocate new chunk of memory
@@ -566,11 +580,12 @@ class FineUncachedMemorySubAllocator : public MemorySubAllocator {
   bool CreateChunk(const Pal::IGpuMemory* reserved_va) override;
 };
 
-class ResourceCache {
+class ResourceCache : public amd::HeapObject {
  public:
   //! Default constructor
   ResourceCache(Device* device, size_t cacheSizeLimit)
-      : cacheSize_(0),
+      : lockCacheOps_(true), /* PAL resource cache */
+        cacheSize_(0),
         lclCacheSize_(0),
         persistentCacheSize_(0),
         cacheSizeLimit_(cacheSizeLimit),
@@ -618,7 +633,7 @@ class ResourceCache {
   //! Removes one last entry from the cache
   void removeLast();
 
-  std::recursive_mutex lockCacheOps_;  //!< Lock to serialise cache access
+  amd::Monitor lockCacheOps_;  //!< Lock to serialise cache access
 
   size_t cacheSize_;             //!< Current cache size in bytes
   size_t lclCacheSize_;          //!< Local memory stored in the cache

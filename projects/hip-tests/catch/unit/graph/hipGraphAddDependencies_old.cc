@@ -62,8 +62,7 @@ TEST_CASE("Unit_hipGraphAddDependencies_Functional") {
   memsetParams.elementSize = sizeof(char);
   memsetParams.width = Nbytes;
   memsetParams.height = 1;
-  HIP_CHECK(hipGraphAddMemsetNode(&memset_A, graph, nullptr, 0,
-                                                              &memsetParams));
+  HIP_CHECK(hipGraphAddMemsetNode(&memset_A, graph, nullptr, 0, &memsetParams));
 
   memset(&memsetParams, 0, sizeof(memsetParams));
   memsetParams.dst = reinterpret_cast<void*>(B_d);
@@ -72,38 +71,34 @@ TEST_CASE("Unit_hipGraphAddDependencies_Functional") {
   memsetParams.elementSize = sizeof(char);
   memsetParams.width = Nbytes;
   memsetParams.height = 1;
-  HIP_CHECK(hipGraphAddMemsetNode(&memset_B, graph, nullptr, 0,
-                                                              &memsetParams));
+  HIP_CHECK(hipGraphAddMemsetNode(&memset_B, graph, nullptr, 0, &memsetParams));
 
-  void* kernelArgs1[] = {&C_d, &memsetVal, reinterpret_cast<void *>(&NElem)};
-  kernelNodeParams.func =
-                       reinterpret_cast<void *>(HipTest::memsetReverse<int>);
+  void* kernelArgs1[] = {&C_d, &memsetVal, reinterpret_cast<void*>(&NElem)};
+  kernelNodeParams.func = reinterpret_cast<void*>(HipTest::memsetReverse<int>);
   kernelNodeParams.gridDim = dim3(blocks);
   kernelNodeParams.blockDim = dim3(threadsPerBlock);
   kernelNodeParams.sharedMemBytes = 0;
   kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs1);
   kernelNodeParams.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&memsetKer_C, graph, nullptr, 0,
-                                                        &kernelNodeParams));
+  HIP_CHECK(hipGraphAddKernelNode(&memsetKer_C, graph, nullptr, 0, &kernelNodeParams));
 
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0, A_d, A_h,
-                                   Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0, A_d, A_h, Nbytes,
+                                    hipMemcpyHostToDevice));
 
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_B, graph, nullptr, 0, B_d, B_h,
-                                   Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_B, graph, nullptr, 0, B_d, B_h, Nbytes,
+                                    hipMemcpyHostToDevice));
 
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, graph, nullptr, 0, C_h, C_d,
-                                   Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, graph, nullptr, 0, C_h, C_d, Nbytes,
+                                    hipMemcpyDeviceToHost));
 
-  void* kernelArgs2[] = {&A_d, &B_d, &C_d, reinterpret_cast<void *>(&NElem)};
-  kernelNodeParams.func = reinterpret_cast<void *>(HipTest::vectorADD<int>);
+  void* kernelArgs2[] = {&A_d, &B_d, &C_d, reinterpret_cast<void*>(&NElem)};
+  kernelNodeParams.func = reinterpret_cast<void*>(HipTest::vectorADD<int>);
   kernelNodeParams.gridDim = dim3(blocks);
   kernelNodeParams.blockDim = dim3(threadsPerBlock);
   kernelNodeParams.sharedMemBytes = 0;
   kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs2);
   kernelNodeParams.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&kernel_vecAdd, graph, nullptr, 0,
-                                                        &kernelNodeParams));
+  HIP_CHECK(hipGraphAddKernelNode(&kernel_vecAdd, graph, nullptr, 0, &kernelNodeParams));
 
   // Create dependencies
   HIP_CHECK(hipGraphAddDependencies(graph, &memset_A, &memcpyH2D_A, 1));
@@ -135,7 +130,7 @@ TEST_CASE("Unit_hipGraphAddDependencies_NegTest") {
   constexpr size_t Nbytes = 1024;
   hipGraph_t graph;
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  char *A_d;
+  char* A_d;
   hipGraphNode_t memset_A;
   hipMemsetParams memsetParams{};
   HIP_CHECK(hipMalloc(&A_d, Nbytes));
@@ -147,37 +142,30 @@ TEST_CASE("Unit_hipGraphAddDependencies_NegTest") {
   memsetParams.width = Nbytes;
   memsetParams.height = 1;
   hipGraphNode_t memcpyH2D_A;
-  char *A_h;
+  char* A_h;
   A_h = reinterpret_cast<char*>(malloc(Nbytes));
 
   SECTION("Null Graph") {
     // Create dependencies
-    HIP_CHECK(hipGraphAddMemsetNode(&memset_A, graph, nullptr, 0,
-                                   &memsetParams));
-    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0,
-                                   A_d, A_h, Nbytes, hipMemcpyHostToDevice));
-    REQUIRE(hipErrorInvalidValue == hipGraphAddDependencies(nullptr, &memset_A,
-                                   &memcpyH2D_A, 1));
+    HIP_CHECK(hipGraphAddMemsetNode(&memset_A, graph, nullptr, 0, &memsetParams));
+    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0, A_d, A_h, Nbytes,
+                                      hipMemcpyHostToDevice));
+    REQUIRE(hipErrorInvalidValue == hipGraphAddDependencies(nullptr, &memset_A, &memcpyH2D_A, 1));
   }
 
   SECTION("numDependencies is zero") {
-    REQUIRE(hipSuccess == hipGraphAddDependencies(graph, nullptr,
-                                   nullptr, 0));
+    REQUIRE(hipSuccess == hipGraphAddDependencies(graph, nullptr, nullptr, 0));
   }
 
   SECTION("One Null Graph Node") {
     // Create dependencies
-    HIP_CHECK(hipGraphAddMemsetNode(&memset_A, graph, nullptr, 0,
-                                    &memsetParams));
-    REQUIRE(hipErrorInvalidValue == hipGraphAddDependencies(graph, &memset_A,
-                                    nullptr, 1));
-    REQUIRE(hipErrorInvalidValue == hipGraphAddDependencies(graph, nullptr,
-                                    &memset_A, 1));
+    HIP_CHECK(hipGraphAddMemsetNode(&memset_A, graph, nullptr, 0, &memsetParams));
+    REQUIRE(hipErrorInvalidValue == hipGraphAddDependencies(graph, &memset_A, nullptr, 1));
+    REQUIRE(hipErrorInvalidValue == hipGraphAddDependencies(graph, nullptr, &memset_A, 1));
   }
 
   SECTION("Both Null Graph Node") {
-    REQUIRE(hipErrorInvalidValue == hipGraphAddDependencies(graph, nullptr,
-                                                  nullptr, 1));
+    REQUIRE(hipErrorInvalidValue == hipGraphAddDependencies(graph, nullptr, nullptr, 1));
   }
 
   // The following tests fail on AMD.
@@ -185,12 +173,10 @@ TEST_CASE("Unit_hipGraphAddDependencies_NegTest") {
     hipGraph_t graph1;
     HIP_CHECK(hipGraphCreate(&graph1, 0));
     // Create dependencies
-    HIP_CHECK(hipGraphAddMemsetNode(&memset_A, graph1, nullptr, 0,
-                                    &memsetParams));
-    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0,
-                            A_d, A_h, Nbytes, hipMemcpyHostToDevice));
-    REQUIRE(hipErrorInvalidValue == hipGraphAddDependencies(graph, &memset_A,
-                                    &memcpyH2D_A, 1));
+    HIP_CHECK(hipGraphAddMemsetNode(&memset_A, graph1, nullptr, 0, &memsetParams));
+    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0, A_d, A_h, Nbytes,
+                                      hipMemcpyHostToDevice));
+    REQUIRE(hipErrorInvalidValue == hipGraphAddDependencies(graph, &memset_A, &memcpyH2D_A, 1));
     HIP_CHECK(hipGraphDestroy(graph1));
   }
 
@@ -198,48 +184,39 @@ TEST_CASE("Unit_hipGraphAddDependencies_NegTest") {
     hipGraph_t graph1;
     HIP_CHECK(hipGraphCreate(&graph1, 0));
     // Create dependencies
-    HIP_CHECK(hipGraphAddMemsetNode(&memset_A, graph, nullptr, 0,
-                                &memsetParams));
-    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph1, nullptr,
-                                0, A_d, A_h, Nbytes, hipMemcpyHostToDevice));
-    REQUIRE(hipErrorInvalidValue == hipGraphAddDependencies(graph, &memset_A,
-                                &memcpyH2D_A, 1));
+    HIP_CHECK(hipGraphAddMemsetNode(&memset_A, graph, nullptr, 0, &memsetParams));
+    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph1, nullptr, 0, A_d, A_h, Nbytes,
+                                      hipMemcpyHostToDevice));
+    REQUIRE(hipErrorInvalidValue == hipGraphAddDependencies(graph, &memset_A, &memcpyH2D_A, 1));
     HIP_CHECK(hipGraphDestroy(graph1));
   }
 
   SECTION("From is uninitialized") {
     // Create dependencies
-    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr,
-                                0, A_d, A_h, Nbytes, hipMemcpyHostToDevice));
-    REQUIRE(hipErrorInvalidValue == hipGraphAddDependencies(graph, &memset_A,
-                                &memcpyH2D_A, 1));
+    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0, A_d, A_h, Nbytes,
+                                      hipMemcpyHostToDevice));
+    REQUIRE(hipErrorInvalidValue == hipGraphAddDependencies(graph, &memset_A, &memcpyH2D_A, 1));
   }
 
   SECTION("To is uninitialized") {
     // Create dependencies
-    HIP_CHECK(hipGraphAddMemsetNode(&memset_A, graph, nullptr, 0,
-                                    &memsetParams));
-    REQUIRE(hipErrorInvalidValue == hipGraphAddDependencies(graph, &memset_A,
-                                    &memcpyH2D_A, 1));
+    HIP_CHECK(hipGraphAddMemsetNode(&memset_A, graph, nullptr, 0, &memsetParams));
+    REQUIRE(hipErrorInvalidValue == hipGraphAddDependencies(graph, &memset_A, &memcpyH2D_A, 1));
   }
 
   SECTION("Duplicate Dependencies") {
     // Create dependencies
-    HIP_CHECK(hipGraphAddMemsetNode(&memset_A, graph, nullptr, 0,
-                          &memsetParams));
-    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0,
-                          A_d, A_h, Nbytes, hipMemcpyHostToDevice));
+    HIP_CHECK(hipGraphAddMemsetNode(&memset_A, graph, nullptr, 0, &memsetParams));
+    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0, A_d, A_h, Nbytes,
+                                      hipMemcpyHostToDevice));
     HIP_CHECK(hipGraphAddDependencies(graph, &memset_A, &memcpyH2D_A, 1));
-    REQUIRE(hipErrorInvalidValue == hipGraphAddDependencies(graph, &memset_A,
-            &memcpyH2D_A, 1));
+    REQUIRE(hipErrorInvalidValue == hipGraphAddDependencies(graph, &memset_A, &memcpyH2D_A, 1));
   }
 
   SECTION("Same Node Dependencies") {
     // Create dependencies
-    HIP_CHECK(hipGraphAddMemsetNode(&memset_A, graph, nullptr, 0,
-                                    &memsetParams));
-    REQUIRE(hipErrorInvalidValue == hipGraphAddDependencies(graph, &memset_A,
-                                    &memset_A, 1));
+    HIP_CHECK(hipGraphAddMemsetNode(&memset_A, graph, nullptr, 0, &memsetParams));
+    REQUIRE(hipErrorInvalidValue == hipGraphAddDependencies(graph, &memset_A, &memset_A, 1));
   }
 
   // Destroy

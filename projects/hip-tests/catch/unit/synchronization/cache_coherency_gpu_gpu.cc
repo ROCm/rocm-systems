@@ -1,9 +1,21 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
-
+Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 // Simple test for Fine Grained GPU-GPU coherency.
 
 #include <hip_test_kernels.hh>
@@ -99,16 +111,19 @@ static bool gpu_to_gpu_coherency() {
 
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < numTestDevices) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
+    return true;
   }
   SECTION("With device fine grained buffer") {
     HIP_CHECK(hipDeviceGetAttribute(&deviceFineGrain, hipDeviceAttributeFineGrainSupport, 0));
     if (deviceFineGrain == 0) {
-      HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
+      HipTest::HIP_SKIP_TEST("The test skipped due to deviceFineGrain = 0 on device 0");
+      return true;
     }
     HIP_CHECK(hipDeviceGetAttribute(&deviceFineGrain, hipDeviceAttributeFineGrainSupport, 1));
     if (deviceFineGrain == 0) {
-      HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
+      HipTest::HIP_SKIP_TEST("The test skipped due to deviceFineGrain = 0 on device 1");
+      return true;
     }
     HIP_CHECK(hipSetDevice(0));
     HIP_CHECK(hipDeviceEnablePeerAccess(1, 0));
@@ -269,8 +284,8 @@ static bool gpu_to_gpu_coherency() {
  *    - Test to be run only on AMD.
  */
 
-HIP_TEST_CASE(Unit_cache_coherency_gpu_gpu) {
+TEST_CASE("Unit_cache_coherency_gpu_gpu", "[multigpu]") {
+  bool passed = true;
   // Coherency between GPUs accessing local or remote FB.
-  bool result = gpu_to_gpu_coherency();
-  REQUIRE(result);
+  REQUIRE(passed == gpu_to_gpu_coherency());
 }

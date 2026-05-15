@@ -1,8 +1,21 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 /**
  * @addtogroup hipEventQueryCaptureRestrictions
@@ -309,7 +322,7 @@ static void runCrossThreadTest(void (*thread1Func)(), void (*thread2Func)(),
  * Test: During GLOBAL capture, hipEventQuery on normal event from default-mode thread
  * Expected: hipErrorStreamCaptureUnsupported (blocked by cross-thread GLOBAL capture)
  */
-HIP_TEST_CASE(Unit_hipEventQuery_GlobalCapture_DefaultMode_NormalEvent) {
+TEST_CASE("Unit_hipEventQuery_GlobalCapture_DefaultMode_NormalEvent") {
   runCrossThreadTest(thread1_global_capture_with_events,
                      thread2_default_mode_event_query_normal,
                      hipErrorStreamCaptureUnsupported,
@@ -320,7 +333,7 @@ HIP_TEST_CASE(Unit_hipEventQuery_GlobalCapture_DefaultMode_NormalEvent) {
  * Test: During GLOBAL capture, hipEventQuery on captured event from default-mode thread
  * Expected: hipErrorCapturedEvent (event was recorded during capture)
  */
-HIP_TEST_CASE(Unit_hipEventQuery_GlobalCapture_DefaultMode_CapturedEvent) {
+TEST_CASE("Unit_hipEventQuery_GlobalCapture_DefaultMode_CapturedEvent") {
   runCrossThreadTest(thread1_global_capture_with_events,
                      thread2_default_mode_event_query_captured,
                      hipErrorCapturedEvent,
@@ -331,7 +344,7 @@ HIP_TEST_CASE(Unit_hipEventQuery_GlobalCapture_DefaultMode_CapturedEvent) {
  * Test: During GLOBAL capture, hipEventSynchronize on normal event from default-mode thread
  * Expected: hipErrorStreamCaptureUnsupported (blocked by cross-thread GLOBAL capture)
  */
-HIP_TEST_CASE(Unit_hipEventSynchronize_GlobalCapture_DefaultMode_NormalEvent) {
+TEST_CASE("Unit_hipEventSynchronize_GlobalCapture_DefaultMode_NormalEvent") {
   runCrossThreadTest(thread1_global_capture_with_events,
                      thread2_default_mode_event_sync_normal,
                      hipErrorStreamCaptureUnsupported,
@@ -342,7 +355,7 @@ HIP_TEST_CASE(Unit_hipEventSynchronize_GlobalCapture_DefaultMode_NormalEvent) {
  * Test: During GLOBAL capture, hipEventSynchronize on captured event from default-mode thread
  * Expected: hipErrorCapturedEvent (event was recorded during capture)
  */
-HIP_TEST_CASE(Unit_hipEventSynchronize_GlobalCapture_DefaultMode_CapturedEvent) {
+TEST_CASE("Unit_hipEventSynchronize_GlobalCapture_DefaultMode_CapturedEvent") {
   runCrossThreadTest(thread1_global_capture_with_events,
                      thread2_default_mode_event_sync_captured,
                      hipErrorCapturedEvent,
@@ -361,7 +374,7 @@ HIP_TEST_CASE(Unit_hipEventSynchronize_GlobalCapture_DefaultMode_CapturedEvent) 
  * This is the key fix scenario: RCCL watchdog thread switches to RELAXED mode
  * and should be able to query events even when another thread has GLOBAL capture active.
  */
-HIP_TEST_CASE(Unit_hipEventQuery_GlobalCapture_RelaxedMode_NormalEvent) {
+TEST_CASE("Unit_hipEventQuery_GlobalCapture_RelaxedMode_NormalEvent") {
   runCrossThreadTest(thread1_global_capture_with_events,
                      thread2_relaxed_mode_event_query_normal,
                      hipSuccess,
@@ -372,7 +385,7 @@ HIP_TEST_CASE(Unit_hipEventQuery_GlobalCapture_RelaxedMode_NormalEvent) {
  * Test: During GLOBAL capture, hipEventSynchronize on normal event from RELAXED-mode thread
  * Expected: hipSuccess (RELAXED mode bypasses cross-thread GLOBAL capture check)
  */
-HIP_TEST_CASE(Unit_hipEventSynchronize_GlobalCapture_RelaxedMode_NormalEvent) {
+TEST_CASE("Unit_hipEventSynchronize_GlobalCapture_RelaxedMode_NormalEvent") {
   runCrossThreadTest(thread1_global_capture_with_events,
                      thread2_relaxed_mode_event_sync_normal,
                      hipSuccess,
@@ -387,7 +400,7 @@ HIP_TEST_CASE(Unit_hipEventSynchronize_GlobalCapture_RelaxedMode_NormalEvent) {
  * Test: During GLOBAL capture, hipEventQuery on normal event from THREAD_LOCAL-mode thread
  * Expected: hipSuccess (THREAD_LOCAL mode skips cross-thread GLOBAL capture check)
  */
-HIP_TEST_CASE(Unit_hipEventQuery_GlobalCapture_ThreadLocalMode_NormalEvent) {
+TEST_CASE("Unit_hipEventQuery_GlobalCapture_ThreadLocalMode_NormalEvent") {
   runCrossThreadTest(thread1_global_capture_with_events,
                      thread2_threadlocal_mode_event_query_normal,
                      hipSuccess,
@@ -398,7 +411,7 @@ HIP_TEST_CASE(Unit_hipEventQuery_GlobalCapture_ThreadLocalMode_NormalEvent) {
  * Test: During GLOBAL capture, hipEventSynchronize on normal event from THREAD_LOCAL-mode thread
  * Expected: hipSuccess (THREAD_LOCAL mode skips cross-thread GLOBAL capture check)
  */
-HIP_TEST_CASE(Unit_hipEventSynchronize_GlobalCapture_ThreadLocalMode_NormalEvent) {
+TEST_CASE("Unit_hipEventSynchronize_GlobalCapture_ThreadLocalMode_NormalEvent") {
   runCrossThreadTest(thread1_global_capture_with_events,
                      thread2_threadlocal_mode_event_sync_normal,
                      hipSuccess,
@@ -414,7 +427,7 @@ HIP_TEST_CASE(Unit_hipEventSynchronize_GlobalCapture_ThreadLocalMode_NormalEvent
  * Test: During THREAD_LOCAL capture, hipEventQuery on normal event from default-mode thread
  * Expected: hipSuccess (THREAD_LOCAL capture does NOT block other threads)
  */
-HIP_TEST_CASE(Unit_hipEventQuery_ThreadLocalCapture_DefaultMode_NormalEvent) {
+TEST_CASE("Unit_hipEventQuery_ThreadLocalCapture_DefaultMode_NormalEvent") {
   runCrossThreadTest(thread1_threadlocal_capture_with_events,
                      thread2_default_mode_event_query_normal,
                      hipSuccess,
@@ -425,7 +438,7 @@ HIP_TEST_CASE(Unit_hipEventQuery_ThreadLocalCapture_DefaultMode_NormalEvent) {
  * Test: During THREAD_LOCAL capture, hipEventQuery on captured event from default-mode thread
  * Expected: hipErrorCapturedEvent (captured event cannot be queried regardless of mode)
  */
-HIP_TEST_CASE(Unit_hipEventQuery_ThreadLocalCapture_DefaultMode_CapturedEvent) {
+TEST_CASE("Unit_hipEventQuery_ThreadLocalCapture_DefaultMode_CapturedEvent") {
   runCrossThreadTest(thread1_threadlocal_capture_with_events,
                      thread2_default_mode_event_query_captured,
                      hipErrorCapturedEvent,
@@ -436,7 +449,7 @@ HIP_TEST_CASE(Unit_hipEventQuery_ThreadLocalCapture_DefaultMode_CapturedEvent) {
  * Test: During THREAD_LOCAL capture, hipEventSynchronize on normal event from default-mode thread
  * Expected: hipSuccess (THREAD_LOCAL capture does NOT block other threads)
  */
-HIP_TEST_CASE(Unit_hipEventSynchronize_ThreadLocalCapture_DefaultMode_NormalEvent) {
+TEST_CASE("Unit_hipEventSynchronize_ThreadLocalCapture_DefaultMode_NormalEvent") {
   runCrossThreadTest(thread1_threadlocal_capture_with_events,
                      thread2_default_mode_event_sync_normal,
                      hipSuccess,
@@ -447,7 +460,7 @@ HIP_TEST_CASE(Unit_hipEventSynchronize_ThreadLocalCapture_DefaultMode_NormalEven
  * Test: During THREAD_LOCAL capture, hipEventSynchronize on captured event from default-mode thread
  * Expected: hipErrorCapturedEvent (captured event cannot be synchronized regardless of mode)
  */
-HIP_TEST_CASE(Unit_hipEventSynchronize_ThreadLocalCapture_DefaultMode_CapturedEvent) {
+TEST_CASE("Unit_hipEventSynchronize_ThreadLocalCapture_DefaultMode_CapturedEvent") {
   runCrossThreadTest(thread1_threadlocal_capture_with_events,
                      thread2_default_mode_event_sync_captured,
                      hipErrorCapturedEvent,
@@ -462,7 +475,7 @@ HIP_TEST_CASE(Unit_hipEventSynchronize_ThreadLocalCapture_DefaultMode_CapturedEv
  * Test: Same thread calls hipEventQuery on normal event while capturing in GLOBAL mode
  * Expected: hipErrorStreamCaptureUnsupported (same thread blocked in GLOBAL mode)
  */
-HIP_TEST_CASE(Unit_hipEventQuery_SameThread_GlobalCapture) {
+TEST_CASE("Unit_hipEventQuery_SameThread_GlobalCapture") {
   hipStream_t captureStream;
   hipStream_t otherStream;
   hipEvent_t normalEvent;
@@ -501,7 +514,7 @@ HIP_TEST_CASE(Unit_hipEventQuery_SameThread_GlobalCapture) {
  * Test: Same thread calls hipEventQuery on normal event while capturing in RELAXED mode
  * Expected: hipSuccess (RELAXED mode allows the operation)
  */
-HIP_TEST_CASE(Unit_hipEventQuery_SameThread_RelaxedCapture) {
+TEST_CASE("Unit_hipEventQuery_SameThread_RelaxedCapture") {
   hipStream_t captureStream;
   hipStream_t otherStream;
   hipEvent_t normalEvent;

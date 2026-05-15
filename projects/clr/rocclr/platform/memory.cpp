@@ -1,8 +1,22 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+/* Copyright (c) 2010 - 2025 Advanced Micro Devices, Inc.
+
+ Permission is hereby granted, free of charge, to any person obtaining a copy
+ of this software and associated documentation files (the "Software"), to deal
+ in the Software without restriction, including without limitation the rights
+ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ copies of the Software, and to permit persons to whom the Software is
+ furnished to do so, subject to the following conditions:
+
+ The above copyright notice and this permission notice shall be included in
+ all copies or substantial portions of the Software.
+
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ THE SOFTWARE. */
 
 #include "amdocl/cl_common.hpp"
 
@@ -83,6 +97,7 @@ Memory::Memory(Context& context, Type type, Flags flags, size_t size, void* svmP
       svmHostAddress_(svmPtr),
       resOffset_(0),
       flagsEx_(0),
+      lockMemoryOps_(true),
       alignment_(alignment) /* Memory Ops Lock */ {
   svmPtrCommited_ = (flags & CL_MEM_SVM_FINE_GRAIN_BUFFER) ? true : false;
   canBeCached_ = true;
@@ -106,7 +121,8 @@ Memory::Memory(Memory& parent, Flags flags, size_t origin, size_t size, Type typ
       mapCount_(0),
       svmHostAddress_(parent.getSvmPtr()),
       resOffset_(0),
-      flagsEx_(0) {
+      flagsEx_(0),
+      lockMemoryOps_(true) /* Memory Ops Lock */ {
   svmPtrCommited_ = parent.isSvmPtrCommited();
   canBeCached_ = true;
   parent_->retain();
@@ -176,12 +192,12 @@ void Memory::operator delete(void* p, const Context& context) { Memory::operator
 
 
 void Memory::addSubBuffer(Memory* view) {
-  std::scoped_lock lock(lockMemoryOps());
+  amd::ScopedLock lock(lockMemoryOps());
   subBuffers_.emplace(view);
 }
 
 void Memory::removeSubBuffer(Memory* view) {
-  std::scoped_lock lock(lockMemoryOps());
+  amd::ScopedLock lock(lockMemoryOps());
   subBuffers_.erase(view);
 }
 
@@ -315,7 +331,7 @@ bool Memory::addDeviceMemory(const Device* dev) {
   AllocState create = AllocCreate;
   AllocState init = AllocInit;
 
-  std::scoped_lock lock(lockMemoryOps());
+  amd::ScopedLock lock(lockMemoryOps());
   if (deviceAlloced_[dev].compare_exchange_strong(init, create, std::memory_order_acq_rel)) {
     // Check if runtime already allocated all available slots for device memory
     if (numDevices() == NumDevicesWithP2P()) {
@@ -517,7 +533,7 @@ bool Memory::usesSvmPointer() const {
 }
 
 void Memory::commitSvmMemory() {
-  std::scoped_lock lock(lockMemoryOps_);
+  ScopedLock lock(lockMemoryOps_);
   // if VRAM is visible for host, it is not necessary to mmap again
   if (!svmPtrCommited_ && !largeBarSystem_) {
     if (amd::Os::commitMemory(svmHostAddress_, size_, amd::Os::MEM_PROT_RW)) {
@@ -529,7 +545,7 @@ void Memory::commitSvmMemory() {
 }
 
 void Memory::uncommitSvmMemory() {
-  std::scoped_lock lock(lockMemoryOps_);
+  ScopedLock lock(lockMemoryOps_);
   if (svmPtrCommited_ && !(flags_ & CL_MEM_SVM_FINE_GRAIN_BUFFER)) {
     if (amd::Os::uncommitMemory(svmHostAddress_, size_)) {
       svmPtrCommited_ = false;
@@ -1501,21 +1517,21 @@ void Image::Format::formatColor(const void* colorRGBA, void* colorFormat) const 
   }
 }
 
-std::recursive_mutex SvmBuffer::AllocatedLock_ ROCCLR_INIT_PRIORITY(101);
+Monitor SvmBuffer::AllocatedLock_ ROCCLR_INIT_PRIORITY(101)("Guards SVM allocation list");
 std::map<uintptr_t, uintptr_t> SvmBuffer::Allocated_ ROCCLR_INIT_PRIORITY(101);
 
 void SvmBuffer::Add(uintptr_t k, uintptr_t v) {
-  std::scoped_lock lock(AllocatedLock_);
+  ScopedLock lock(AllocatedLock_);
   Allocated_.insert(std::pair<uintptr_t, uintptr_t>(k, v));
 }
 
 void SvmBuffer::Remove(uintptr_t k) {
-  std::scoped_lock lock(AllocatedLock_);
+  ScopedLock lock(AllocatedLock_);
   Allocated_.erase(k);
 }
 
 bool SvmBuffer::Contains(uintptr_t ptr) {
-  std::scoped_lock lock(AllocatedLock_);
+  ScopedLock lock(AllocatedLock_);
   auto it = Allocated_.upper_bound(ptr);
   if (it == Allocated_.begin()) {
     return false;

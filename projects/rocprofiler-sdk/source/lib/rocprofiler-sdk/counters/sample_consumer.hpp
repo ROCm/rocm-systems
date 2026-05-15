@@ -40,7 +40,7 @@ class consumer_thread_t
     using consume_func_t         = std::function<void(DataType&&)>;
 
 public:
-    consumer_thread_t(consume_func_t func) { this->consume_fn = func; }
+    consumer_thread_t(consume_func_t func) { this->consume_fn = std::move(func); }
     virtual ~consumer_thread_t() { exit(); }
 
     void start()

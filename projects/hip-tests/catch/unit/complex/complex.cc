@@ -1,8 +1,21 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 #include "complex_function_common.hh"
 #include "complex_cast_negative_kernels_rtc.hh"
@@ -37,7 +50,7 @@
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit_Device_Complex_Unary_Device_Sanity_Positive, hipFloatComplex,
+TEMPLATE_TEST_CASE("Unit_Device_Complex_Unary_Device_Sanity_Positive", "", hipFloatComplex,
                    hipDoubleComplex) {
   decltype(TestType().x) input_r = GENERATE(-4.75, 0, 1.75);
   decltype(TestType().x) input_i = GENERATE(-4.75, 0, 1.75);
@@ -70,7 +83,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_Device_Complex_Unary_Device_Sanity_Positive, hipFloa
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit_Device_Complex_Unary_Host_Sanity_Positive, hipFloatComplex,
+TEMPLATE_TEST_CASE("Unit_Device_Complex_Unary_Host_Sanity_Positive", "", hipFloatComplex,
                    hipDoubleComplex) {
   decltype(TestType().x) input_r = GENERATE(-4.75, 0, 1.75);
   decltype(TestType().x) input_i = GENERATE(-4.75, 0, 1.75);
@@ -102,7 +115,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_Device_Complex_Unary_Host_Sanity_Positive, hipFloatC
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit_Device_Complex_Binary_Device_Sanity_Positive, hipFloatComplex,
+TEMPLATE_TEST_CASE("Unit_Device_Complex_Binary_Device_Sanity_Positive", "", hipFloatComplex,
                    hipDoubleComplex) {
   decltype(TestType().x) input1_r = GENERATE(-4.75, 0, 1.75);
   decltype(TestType().x) input1_i = GENERATE(-4.75, 0, 1.75);
@@ -136,7 +149,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_Device_Complex_Binary_Device_Sanity_Positive, hipFlo
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit_Device_Complex_Binary_Host_Sanity_Positive, hipFloatComplex,
+TEMPLATE_TEST_CASE("Unit_Device_Complex_Binary_Host_Sanity_Positive", "", hipFloatComplex,
                    hipDoubleComplex) {
   decltype(TestType().x) input1_r = GENERATE(-4.75, 0, 1.75);
   decltype(TestType().x) input1_i = GENERATE(-4.75, 0, 1.75);
@@ -166,7 +179,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_Device_Complex_Binary_Host_Sanity_Positive, hipFloat
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit_Device_Complex_hipCfma_Device_Sanity_Positive, hipFloatComplex,
+TEMPLATE_TEST_CASE("Unit_Device_Complex_hipCfma_Device_Sanity_Positive", "", hipFloatComplex,
                    hipDoubleComplex) {
   decltype(TestType().x) input1_r = GENERATE(-4.75, 0, 1.75);
   decltype(TestType().x) input1_i = GENERATE(-4.75, 0, 1.75);
@@ -195,7 +208,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_Device_Complex_hipCfma_Device_Sanity_Positive, hipFl
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit_Device_Complex_hipCfma_Host_Sanity_Positive, hipFloatComplex,
+TEMPLATE_TEST_CASE("Unit_Device_Complex_hipCfma_Host_Sanity_Positive", "", hipFloatComplex,
                    hipDoubleComplex) {
   decltype(TestType().x) input1_r = GENERATE(-4.75, 0, 1.75);
   decltype(TestType().x) input1_i = GENERATE(-4.75, 0, 1.75);
@@ -224,7 +237,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_Device_Complex_hipCfma_Host_Sanity_Positive, hipFloa
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit_Device_make_Complex_Device_Positive, hipFloatComplex,
+TEMPLATE_TEST_CASE("Unit_Device_make_Complex_Device_Positive", "", hipFloatComplex,
                    hipDoubleComplex) {
   decltype(TestType().x) input_r = GENERATE(-0.25, 0, 0.25);
   decltype(TestType().x) input_i = GENERATE(-1.75, 0, 1.75);
@@ -253,7 +266,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_Device_make_Complex_Device_Positive, hipFloatComplex
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit_Device_make_Complex_Host_Positive, hipFloatComplex,
+TEMPLATE_TEST_CASE("Unit_Device_make_Complex_Host_Positive", "", hipFloatComplex,
                    hipDoubleComplex) {
   decltype(TestType().x) input_r = GENERATE(-0.25, 0, 0.25);
   decltype(TestType().x) input_i = GENERATE(-1.75, 0, 1.75);
@@ -278,7 +291,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_Device_make_Complex_Host_Positive, hipFloatComplex,
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_Device_make_hipComplex_Device_Positive) {
+TEST_CASE("Unit_Device_make_hipComplex_Device_Positive") {
   float input_r = GENERATE(-0.25, 0, 0.25);
   float input_i = GENERATE(-1.75, 0, 1.75);
 
@@ -306,7 +319,7 @@ HIP_TEST_CASE(Unit_Device_make_hipComplex_Device_Positive) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_Device_make_hipComplex_Host_Positive) {
+TEST_CASE("Unit_Device_make_hipComplex_Host_Positive") {
   float input_r = GENERATE(-0.25, 0, 0.25);
   float input_i = GENERATE(-1.75, 0, 1.75);
 
@@ -330,7 +343,7 @@ HIP_TEST_CASE(Unit_Device_make_hipComplex_Host_Positive) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit_Device_Complex_Cast_Device_Sanity_Positive, hipFloatComplex,
+TEMPLATE_TEST_CASE("Unit_Device_Complex_Cast_Device_Sanity_Positive", "", hipFloatComplex,
                    hipDoubleComplex) {
   decltype(TestType().x) input_r = GENERATE(-0.25, 0, 0.25);
   decltype(TestType().x) input_i = GENERATE(-1.75, 0, 1.75);
@@ -363,7 +376,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_Device_Complex_Cast_Device_Sanity_Positive, hipFloat
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit_Device_Complex_Cast_Host_Sanity_Positive, hipFloatComplex,
+TEMPLATE_TEST_CASE("Unit_Device_Complex_Cast_Host_Sanity_Positive", "", hipFloatComplex,
                    hipDoubleComplex) {
   decltype(TestType().x) input_r = GENERATE(-0.25, 0, 0.25);
   decltype(TestType().x) input_i = GENERATE(-1.75, 0, 1.75);
@@ -388,7 +401,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_Device_Complex_Cast_Host_Sanity_Positive, hipFloatCo
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit_Device_Complex_Constructor_Host, hipFloatComplex, hipDoubleComplex) {
+TEMPLATE_TEST_CASE("Unit_Device_Complex_Constructor_Host", "", hipFloatComplex, hipDoubleComplex) {
   decltype(TestType().x) input_r = GENERATE(-0.25, 0.25);
   TestType input{input_r};
 

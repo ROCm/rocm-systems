@@ -9,6 +9,8 @@
 #include "../mem_barrier.h"
 #include "core__types.h"
 
+#define __CUDACC__ 0
+
 struct ncclLsaBarrierHandle {
   ncclDevResourceHandle_t bufHandle;
   int nBarriers;

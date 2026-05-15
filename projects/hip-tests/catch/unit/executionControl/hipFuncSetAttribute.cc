@@ -1,8 +1,24 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 #include "execution_control_common.hh"
 
@@ -29,7 +45,7 @@
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipFuncSetAttribute_Positive_MaxDynamicSharedMemorySize) {
+TEST_CASE("Unit_hipFuncSetAttribute_Positive_MaxDynamicSharedMemorySize") {
   HIP_CHECK(hipFuncSetAttribute(reinterpret_cast<void*>(kernel),
                                 hipFuncAttributeMaxDynamicSharedMemorySize, 1024));
 
@@ -51,7 +67,7 @@ HIP_TEST_CASE(Unit_hipFuncSetAttribute_Positive_MaxDynamicSharedMemorySize) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipFuncSetAttribute_Positive_PreferredSharedMemoryCarveout) {
+TEST_CASE("Unit_hipFuncSetAttribute_Positive_PreferredSharedMemoryCarveout") {
   HIP_CHECK(hipFuncSetAttribute(reinterpret_cast<void*>(kernel),
                                 hipFuncAttributePreferredSharedMemoryCarveout, 50));
 
@@ -83,7 +99,7 @@ HIP_TEST_CASE(Unit_hipFuncSetAttribute_Positive_PreferredSharedMemoryCarveout) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipFuncSetAttribute_Positive_Parameters) {
+TEST_CASE("Unit_hipFuncSetAttribute_Positive_Parameters") {
   SECTION("hipFuncAttributeMaxDynamicSharedMemorySize == 0") {
     HIP_CHECK(hipFuncSetAttribute(reinterpret_cast<void*>(kernel),
                                   hipFuncAttributeMaxDynamicSharedMemorySize, 0));
@@ -144,7 +160,7 @@ HIP_TEST_CASE(Unit_hipFuncSetAttribute_Positive_Parameters) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipFuncSetAttribute_Negative_Parameters) {
+TEST_CASE("Unit_hipFuncSetAttribute_Negative_Parameters") {
   SECTION("func == nullptr") {
     HIP_CHECK_ERROR(hipFuncSetAttribute(nullptr, hipFuncAttributePreferredSharedMemoryCarveout, 50),
                     hipErrorInvalidDeviceFunction);
@@ -204,9 +220,10 @@ HIP_TEST_CASE(Unit_hipFuncSetAttribute_Negative_Parameters) {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipFuncSetAttribute_Positive_MaxDynamicSharedMemorySize_Not_Supported) {
+TEST_CASE("Unit_hipFuncSetAttribute_Positive_MaxDynamicSharedMemorySize_Not_Supported") {
 #if HT_NVIDIA
-  HIP_SKIP_TEST(HipTest::SkipReason::kApiUnsupportedOnNvidia);
+  HipTest::HIP_SKIP_TEST("This is an AMD specific test");
+  return;
 #endif
 
   hipFuncAttributes old_attributes;
@@ -235,9 +252,10 @@ HIP_TEST_CASE(Unit_hipFuncSetAttribute_Positive_MaxDynamicSharedMemorySize_Not_S
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipFuncSetAttribute_Positive_PreferredSharedMemoryCarveout_Not_Supported) {
+TEST_CASE("Unit_hipFuncSetAttribute_Positive_PreferredSharedMemoryCarveout_Not_Supported") {
 #if HT_NVIDIA
-  HIP_SKIP_TEST(HipTest::SkipReason::kApiUnsupportedOnNvidia);
+  HipTest::HIP_SKIP_TEST("This is an AMD specific test");
+  return;
 #endif
 
   hipFuncAttributes old_attributes;

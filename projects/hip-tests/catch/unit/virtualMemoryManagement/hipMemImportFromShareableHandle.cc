@@ -1,8 +1,24 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 /**
  * @addtogroup hipMemExportToShareableHandle hipMemExportToShareableHandle
@@ -41,7 +57,7 @@ static __global__ void square_kernel(int* Buff) {
  *    - Host specific (LINUX)
  *    - HIP_VERSION >= 6.1
  */
-HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_Positive_Basic) {
+TEST_CASE("Unit_hipMemImportFromShareableHandle_Positive_Basic") {
   CTX_CREATE();
 
   hipDevice_t device;
@@ -84,7 +100,7 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_Positive_Basic) {
  *    - Host specific (LINUX)
  *    - HIP_VERSION >= 6.1
  */
-HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_Negative_Parameters) {
+TEST_CASE("Unit_hipMemImportFromShareableHandle_Negative_Parameters") {
   CTX_CREATE();
 
   hipDevice_t device;
@@ -140,7 +156,7 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_Negative_Parameters) {
  *    - Host specific (LINUX)
  *    - HIP_VERSION >= 6.2
  */
-HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl) {
+TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl") {
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
   int fd[2], fdSig[2];
@@ -265,7 +281,7 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl) {
  *    - Host specific (LINUX)
  *    - HIP_VERSION >= 6.2
  */
-HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl) {
+TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl") {
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
   int fd[2], fdSig[2];
@@ -413,7 +429,7 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl) {
  *    - Host specific (LINUX)
  *    - HIP_VERSION >= 6.2
  */
-HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl) {
+TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl") {
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
   int fd[2], fdSig[2], fdpid[2];
@@ -544,7 +560,7 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl) {
   }
 }
 
-HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_Capture) {
+TEST_CASE("Unit_hipMemImportFromShareableHandle_Capture") {
   CTX_CREATE();
 
   hipDevice_t device;
@@ -578,7 +594,6 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_Capture) {
   END_CAPTURE(stream);
 
   HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipMemRelease(imported_handle));
   HIP_CHECK(hipMemRelease(allocation_handle));
   CTX_DESTROY();
 }

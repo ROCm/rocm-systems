@@ -74,12 +74,12 @@ class HostContextWindowInfo {
   WindowInfo* get() { return window_info_; }
 
   /**
-   * @brief Mark the window info as available (not allocated)
+   * @brief Mark the window info as avaialable (not allocated)
    */
   void mark_avail() { avail_ = true; }
 
   /**
-   * @brief Mark the window info as unavailable (allocated)
+   * @brief Mark the window info as unavaialble (allocated)
    */
   void mark_unavail() { avail_ = false; }
 
@@ -193,12 +193,8 @@ class HostInterface {
   __host__ void quiet(WindowInfo* window_info);
 
   __host__ void barrier_all(WindowInfo* window_info);
-
+  
   __host__ void barrier_all_on_stream(hipStream_t stream);
-
-  __host__ void quiet_on_stream(hipStream_t stream);
-
-  __host__ void sync_all_on_stream(hipStream_t stream);
 
   __host__ void alltoallmem_on_stream(rocshmem_team_t team, void *dest,
                                       const void *source, size_t size,
@@ -302,7 +298,7 @@ class HostInterface {
 #endif // USE_HDP_FLUSH
   }
 
-  __host__ void flush_remote_hdp([[maybe_unused]] int pe) {
+  __host__ void flush_remote_hdp(int pe) {
 #if defined USE_HDP_FLUSH
     unsigned flush_val{HdpPolicy::HDP_FLUSH_VAL};
     mpilib_ftable_.Put(&flush_val, 1, MPI_UNSIGNED, pe, 0, 1, MPI_UNSIGNED, hdp_win);

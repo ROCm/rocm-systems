@@ -1,8 +1,21 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 /*
 hipGraphInstantiateWithFlags(hipGraphExec_t* pGraphExec, hipGraph_t graph, unsigned long long
@@ -52,7 +65,7 @@ static __global__ void doubleKernel(int* arr, int size) {
 
 /* This test covers the negative scenarios of
    hipGraphInstantiateWithFlags API */
-HIP_TEST_CASE(Unit_hipGraphInstantiateWithFlags_Negative) {
+TEST_CASE("Unit_hipGraphInstantiateWithFlags_Negative") {
   SECTION("Passing nullptr pGraphExec") {
     hipGraph_t graph;
     HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -194,6 +207,8 @@ void GraphInstantiateWithFlags_StreamCapture(bool deviceContextChg = false) {
   HIP_CHECK(hipMalloc(&C_d, Nbytes));
   REQUIRE(A_d != nullptr);
   REQUIRE(C_d != nullptr);
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+
 
   HIP_CHECK(hipStreamCreate(&stream));
   constexpr unsigned threadsPerBlock = 256;
@@ -246,7 +261,7 @@ This testcase verifies hipGraphInstantiateWithFlags API
 by creating dependency graph and instantiate, launching and verifying
 the result
 */
-HIP_TEST_CASE(Unit_hipGraphInstantiateWithFlags_DependencyGraph) {
+TEST_CASE("Unit_hipGraphInstantiateWithFlags_DependencyGraph") {
   GraphInstantiateWithFlags_DependencyGraph();
 }
 
@@ -255,7 +270,7 @@ This testcase verifies hipGraphInstantiateWithFlags API
 by creating dependency graph on GPU-0 and instantiate, launching and verifying
 the result on GPU-1
 */
-HIP_TEST_CASE(Unit_hipGraphInstantiateWithFlags_DependencyGraphDeviceCtxtChg) {
+TEST_CASE("Unit_hipGraphInstantiateWithFlags_DependencyGraphDeviceCtxtChg", "[multigpu]") {
   int numDevices = 0;
   int canAccessPeer = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -264,10 +279,10 @@ HIP_TEST_CASE(Unit_hipGraphInstantiateWithFlags_DependencyGraphDeviceCtxtChg) {
     if (canAccessPeer) {
       GraphInstantiateWithFlags_DependencyGraph(true);
     } else {
-      HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+      SUCCEED("Machine does not seem to have P2P");
     }
   } else {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    SUCCEED("skipped the testcase as no of devices is less than 2");
   }
 }
 
@@ -276,7 +291,7 @@ This testcase verifies hipGraphInstantiateWithFlags API
 by creating capture graph and instantiate, launching and verifying
 the result
 */
-HIP_TEST_CASE(Unit_hipGraphInstantiateWithFlags_StreamCapture) {
+TEST_CASE("Unit_hipGraphInstantiateWithFlags_StreamCapture") {
   int numDevices = 0;
   int canAccessPeer = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -285,10 +300,10 @@ HIP_TEST_CASE(Unit_hipGraphInstantiateWithFlags_StreamCapture) {
     if (canAccessPeer) {
       GraphInstantiateWithFlags_StreamCapture();
     } else {
-      HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+      SUCCEED("Machine does not seem to have P2P");
     }
   } else {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    SUCCEED("skipped the testcase as no of devices is less than 2");
   }
 }
 
@@ -297,7 +312,7 @@ This testcase verifies hipGraphInstantiateWithFlags API
 by creating capture graph on GPU-0 and instantiate, launching and verifying
 the result on GPU-1
 */
-HIP_TEST_CASE(Unit_hipGraphInstantiateWithFlags_StreamCaptureDeviceContextChg) {
+TEST_CASE("Unit_hipGraphInstantiateWithFlags_StreamCaptureDeviceContextChg", "[multigpu]") {
   int numDevices = 0;
   int canAccessPeer = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -306,10 +321,10 @@ HIP_TEST_CASE(Unit_hipGraphInstantiateWithFlags_StreamCaptureDeviceContextChg) {
     if (canAccessPeer) {
       GraphInstantiateWithFlags_StreamCapture(true);
     } else {
-      HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+      SUCCEED("Machine does not seem to have P2P");
     }
   } else {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    SUCCEED("skipped the testcase as no of devices is less than 2");
   }
 }
 
@@ -322,7 +337,7 @@ Note - This test case is just to check if hipGraphInstantiateFlagAutoFreeOnLaunc
        is not resulting in compilation error or api failure. Real functional test
        will be added once the feature is fully implemented.
 */
-HIP_TEST_CASE(Unit_hipGraphInstantiateWithFlags_FlagAutoFreeOnLaunch_check) {
+TEST_CASE("Unit_hipGraphInstantiateWithFlags_FlagAutoFreeOnLaunch_check") {
   constexpr size_t size = 512 * 1024 * 1024;
   constexpr size_t Nbytes = size * sizeof(int);
 
@@ -378,10 +393,10 @@ HIP_TEST_CASE(Unit_hipGraphInstantiateWithFlags_FlagAutoFreeOnLaunch_check) {
   REQUIRE(bmem == amem);
   REQUIRE(bmemres == amemres);
 
+  HIP_CHECK(hipFree(A_d));  //  free allocMemory manually
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(A_d));
 }
 
 /**
@@ -396,7 +411,7 @@ HIP_TEST_CASE(Unit_hipGraphInstantiateWithFlags_FlagAutoFreeOnLaunch_check) {
  * ------------------------
  * - unit/graph/hipGraphInstantiateWithFlags.cc
  */
-HIP_TEST_CASE(Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchInLoop) {
+TEST_CASE("Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchInLoop") {
   constexpr size_t NBytes = 1024 * 1024 * 1024;
 
   void* devMem = nullptr;
@@ -458,7 +473,7 @@ HIP_TEST_CASE(Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchInLoop) {
  * ------------------------
  * - unit/graph/hipGraphInstantiateWithFlags.cc
  */
-HIP_TEST_CASE(Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchFillKernel) {
+TEST_CASE("Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchFillKernel") {
   int value = 100;
 
   int* hostMemDst = new int[SIZE];
@@ -551,7 +566,7 @@ HIP_TEST_CASE(Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchFillKernel) {
  * ------------------------
  * - unit/graph/hipGraphInstantiateWithFlags.cc
  */
-HIP_TEST_CASE(Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchDoubleKernel) {
+TEST_CASE("Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchDoubleKernel") {
   int* hostMemSrc = new int[SIZE];
   REQUIRE(hostMemSrc != nullptr);
 
@@ -658,7 +673,7 @@ HIP_TEST_CASE(Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchDoubleKernel) {
  * ------------------------
  * - unit/graph/hipGraphInstantiateWithFlags.cc
  */
-HIP_TEST_CASE(Unit_hipGraphInstantiateWithFlags_WithDefaultAndAutoFreeOnLaunch) {
+TEST_CASE("Unit_hipGraphInstantiateWithFlags_WithDefaultAndAutoFreeOnLaunch") {
   int* hostMem1 = new int[SIZE];
   REQUIRE(hostMem1 != nullptr);
   int* hostMem2 = new int[SIZE];

@@ -1,15 +1,26 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
 
 #include "stream_capture_common.hh"
-
-static size_t captureN() { return isQuickLevel() ? 10000 : 1000000; }
 
 /**
  * @addtogroup hipStreamIsCapturing hipStreamIsCapturing
@@ -33,7 +44,7 @@ static size_t captureN() { return isQuickLevel() ? 10000 : 1000000; }
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipStreamIsCapturing_Negative_Parameters) {
+TEST_CASE("Unit_hipStreamIsCapturing_Negative_Parameters") {
   const auto stream_type = GENERATE(Streams::perThread, Streams::created);
   StreamGuard stream_guard(stream_type);
   hipStream_t stream = stream_guard.stream();
@@ -65,7 +76,7 @@ HIP_TEST_CASE(Unit_hipStreamIsCapturing_Negative_Parameters) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipStreamIsCapturing_Positive_Basic) {
+TEST_CASE("Unit_hipStreamIsCapturing_Positive_Basic") {
   hipStreamCaptureStatus cStatus;
   const auto stream_type = GENERATE(Streams::perThread, Streams::created);
   StreamGuard stream_guard(stream_type);
@@ -76,7 +87,7 @@ HIP_TEST_CASE(Unit_hipStreamIsCapturing_Positive_Basic) {
 }
 
 void checkStreamCaptureStatus(hipStreamCaptureMode mode, hipStream_t stream) {
-  const size_t N = captureN();
+  constexpr size_t N = 1000000;
 
   hipStreamCaptureStatus cStatus;
   size_t Nbytes = N * sizeof(float);
@@ -133,7 +144,7 @@ void checkStreamCaptureStatus(hipStreamCaptureMode mode, hipStream_t stream) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipStreamIsCapturing_Positive_Functional) {
+TEST_CASE("Unit_hipStreamIsCapturing_Positive_Functional") {
   const auto stream_type = GENERATE(Streams::perThread, Streams::created);
   StreamGuard stream_guard(stream_type);
   hipStream_t stream = stream_guard.stream();
@@ -163,8 +174,8 @@ static void thread_func(hipStream_t stream) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipStreamIsCapturing_Positive_Thread) {
-  const size_t N = captureN();
+TEST_CASE("Unit_hipStreamIsCapturing_Positive_Thread") {
+  constexpr size_t N = 1000000;
   size_t Nbytes = N * sizeof(float);
 
   hipGraph_t graph{nullptr};

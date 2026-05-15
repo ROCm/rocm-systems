@@ -100,7 +100,6 @@
 #include "common/common.h"
 #include "common/helper_funcs.h"
 #include "common/hsatimer.h"
-#include "common/platform_filter.h"
 #include "gtest/gtest.h"
 #include "hsa/hsa.h"
 
@@ -187,8 +186,6 @@ static void ClearShared(Shared *s) {
 // Any 1-time setup involving member variables used in the rest of the test
 // should be done here.
 void IPCTest::SetUp(void) {
-  if (!checkPlatformFiltering()) return;
-
   hsa_status_t err;
 
   // Allow user to trigger a failure
@@ -251,7 +248,6 @@ void IPCTest::SetUp(void) {
   // TestBase::SetUp() will set HSA_ENABLE_INTERRUPT if enable_interrupt() is
   // true, and call hsa_init(). It also prints the SetUp header.
   TestBase::SetUp();
-  if (test_skipped_) return;
 
   // SetDefaultAgents(this) will assign the first CPU and GPU found on
   // iterating through the agents and assign them to cpu_device_ and
@@ -624,13 +620,12 @@ void IPCTest::Run(void) {
     PrintVerboseMesg();
   }
 
-  // Note: Close() (and hsa_shut_down()) will be called from main() for parent.
-  // Child process must shut down HSA runtime before exiting.
+  // Note: Close() (and hsa_shut_down()) will be called from main()
+  // processOne is true for parent process, false for child process
   if (parentProcess_) {
     ParentProcessImpl();
   } else {
     ChildProcessImpl();
-    hsa_shut_down();
     exit(0);
   }
 

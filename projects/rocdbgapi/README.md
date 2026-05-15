@@ -29,10 +29,14 @@ Building the ROCdbgapi library has the following prerequisites:
    as part of the AMD ROCm release by the ``comgr`` package.  On Windows, this
    is installed as part of the HIP SDK release.
 
-3. ROCm CMake modules, which can be installed using the ``rocm-cmake`` package
+3. The HSA runtime headers.  On Linux, this is installed as part of the
+   ``hsa-runtime64`` package.  The headers can also be found in the sources of
+   the ROCr (ROCm Runtime) project.
+
+4. ROCm CMake modules, which can be installed using the ``rocm-cmake`` package
    available as part of the AMD ROCm release.
 
-4. For Ubuntu 18.04 and Ubuntu 20.04, the following adds the needed packages:
+5. For Ubuntu 18.04 and Ubuntu 20.04, the following adds the needed packages:
 
    ````shell
    apt install gcc g++ make cmake doxygen graphviz texlive-full
@@ -42,7 +46,7 @@ Building the ROCdbgapi library has the following prerequisites:
    that prevents the PDF from being created.  ``doxygen`` 1.8.11 can be built
    from source to avoid the issue.
 
-5. For CentOS 8.1 and RHEL 8.1, the following adds the needed packages:
+6. For CentOS 8.1 and RHEL 8.1, the following adds the needed packages:
 
    ````shell
    yum install -y gcc gcc-g++ make cmake doxygen graphviz texlive \
@@ -54,7 +58,7 @@ Building the ROCdbgapi library has the following prerequisites:
    has a bug that prevents the PDF from being created. ``doxygen`` 1.8.11 can be
    built from source to avoid the issue.
 
-6. For SLES 15 Service Pack 15, the following adds the needed packages:
+7. For SLES 15 Service Pack 15, the following adds the needed packages:
 
    ````shell
    zypper in gcc gcc-g++ make cmake doxygen graphviz texlive-scheme-medium \
@@ -62,7 +66,7 @@ Building the ROCdbgapi library has the following prerequisites:
      texlive-tabu
    ````
 
-7. For Windows using MSYS2, the following adds the needed packages:
+8. For Windows using MSYS2, the following adds the needed packages:
 
    ````shell
    pacman -S make mingw-w64-ucrt-x86_64-gcc \
@@ -88,6 +92,9 @@ You may substitute a path of your own choosing for ``CMAKE_INSTALL_PREFIX``.
 By default, ROCdbapi is built as a shared library.  You may build it
 instead as a static library by setting the ``BUILD_SHARED_LIBS`` cmake
 variable to ``OFF``.
+
+To specify a custom path to the HSA runtime headers, set the
+``HSA_RUNTIME_INCLUDE_DIRECTORIES`` cmake variable.
 
 The built ROCdbgapi library will be placed in:
 

@@ -1,8 +1,24 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 #include <chrono>
 #include <hip_test_checkers.hh>
@@ -51,14 +67,13 @@ static inline void launchVectorAdd(float*& A_h, float*& B_h, float*& C_h,
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipEventDestroy_Unfinished) {
+TEST_CASE("Unit_hipEventDestroy_Unfinished") {
   hipEvent_t event;
 
   HIP_CHECK(hipEventCreate(&event));
 
   float *A_h, *B_h, *C_h;
-  launchVectorAdd(A_h, B_h, C_h,
-                  std::chrono::milliseconds(isQuickLevel() ? 100 : 1000));
+  launchVectorAdd(A_h, B_h, C_h, std::chrono::milliseconds(1000));
 
   HIP_CHECK(hipEventRecord(event));
   HIP_CHECK_ERROR(hipEventQuery(event), hipErrorNotReady);
@@ -81,7 +96,7 @@ HIP_TEST_CASE(Unit_hipEventDestroy_Unfinished) {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipEventDestroy_WithWaitingStream) {
+TEST_CASE("Unit_hipEventDestroy_WithWaitingStream") {
   hipEvent_t event;
   HIP_CHECK(hipEventCreate(&event));
 
@@ -119,14 +134,14 @@ HIP_TEST_CASE(Unit_hipEventDestroy_WithWaitingStream) {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipEventDestroy_Negative) {
+TEST_CASE("Unit_hipEventDestroy_Negative") {
   SECTION("Invalid Event") {
     hipEvent_t event{nullptr};
     HIP_CHECK_ERROR(hipEventDestroy(event), hipErrorInvalidResourceHandle);
   }
 }
 
-HIP_TEST_CASE(Unit_hipEventDestroy_Verify_Capture) {
+TEST_CASE("Unit_hipEventDestroy_Verify_Capture") {
   hipEvent_t event;
   HIP_CHECK(hipEventCreate(&event));
   REQUIRE(event != nullptr);

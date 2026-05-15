@@ -55,7 +55,7 @@ void
 SigquitTest ()
 {
   signal (SIGALRM, handle_alarm);
-  alarm (60);
+  alarm (30);
 
   hipError_t err;
   int start = 0;

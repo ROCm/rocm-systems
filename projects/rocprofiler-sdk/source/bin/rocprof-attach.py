@@ -72,17 +72,6 @@ def parse_arguments(args=None):
     )
 
     parser.add_argument(
-        "--attach-children",
-        help="""Attach to the target process and all of its descendant processes (default: true).
-  Can also be specified in environment variable ROCPROF_ATTACH_CHILDREN. This option overrides the environment variable if both are set.""",
-        type=lambda v: v.lower() not in ("0", "false", "no", "off"),
-        required=False,
-        default=os.environ.get("ROCPROF_ATTACH_CHILDREN", "1")
-        not in ("0", "false", "no", "off"),
-        metavar="BOOL",
-    )
-
-    parser.add_argument(
         "-t",
         "--attach-tool-library",
         help="""Comma delimited list of tool libraries to use during attachment.
@@ -121,7 +110,6 @@ def attach(
     attach_tool_library,
     attach_duration_msec,
     attach_library=ROCPROF_ATTACH_LIBRARY,
-    attach_children=True,
 ):
 
     if pid is None:
@@ -144,16 +132,9 @@ def attach(
         c_lib = ctypes.CDLL(attach_library)
         c_lib.rocattach_attach.restype = ctypes.c_int
         c_lib.rocattach_attach.argtypes = [ctypes.c_int]
-        c_lib.rocattach_attach_tree.restype = ctypes.c_int
-        c_lib.rocattach_attach_tree.argtypes = [ctypes.c_int]
         c_lib.rocattach_detach.restype = ctypes.c_int
         c_lib.rocattach_detach.argtypes = [ctypes.c_int]
-        c_lib.rocattach_detach_tree.restype = ctypes.c_int
-        c_lib.rocattach_detach_tree.argtypes = [ctypes.c_int]
-        if attach_children:
-            attach_status = c_lib.rocattach_attach_tree(pid)
-        else:
-            attach_status = c_lib.rocattach_attach(pid)
+        attach_status = c_lib.rocattach_attach(pid)
     except Exception as e:
         raise RuntimeError(f"Exception during library load and attachment: {e}")
 
@@ -168,10 +149,7 @@ def attach(
         print("Detaching. Please wait, this can take up to 1-2 minutes")
         sys.stdout.flush()
         try:
-            if attach_children:
-                detach_status = c_lib.rocattach_detach_tree(int(pid))
-            else:
-                detach_status = c_lib.rocattach_detach(int(pid))
+            detach_status = c_lib.rocattach_detach(int(pid))
         except Exception as e:
             print(f"Exception during detachment: {e}")
 
@@ -209,7 +187,6 @@ def main(cmd_args=None):
         attach_tool_library=args.attach_tool_library,
         attach_duration_msec=args.attach_duration_msec,
         attach_library=args.attach_library,
-        attach_children=args.attach_children,
     )
     return 0
 

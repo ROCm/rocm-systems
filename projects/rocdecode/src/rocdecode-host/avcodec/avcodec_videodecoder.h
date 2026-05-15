@@ -164,4 +164,5 @@ private:
     AVFormatContext * formatContext = nullptr;
     AVInputFormat * inputFormat = nullptr;
 
+    RocDecLogger logger_;
 };

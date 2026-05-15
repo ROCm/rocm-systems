@@ -36,7 +36,6 @@
 #include <atomic>
 #include <cstdint>
 #include <optional>
-#include <thread>
 
 namespace rocprofiler
 {

@@ -1,8 +1,23 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 #include <functional>
 #include <vector>
@@ -56,7 +71,7 @@ static void __global__ vector_square(int* A_d) {
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-HIP_TEMPLATE_TEST_CASE(Unit_hipGraphAddNodeTypeMemset_Positive_Basic, uint8_t, uint16_t,
+TEMPLATE_TEST_CASE("Unit_hipGraphAddNodeTypeMemset_Positive_Basic", "", uint8_t, uint16_t,
                    uint32_t) {
   const auto f = [](hipMemsetParams* params) {
     hipGraph_t graph = nullptr;
@@ -100,7 +115,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipGraphAddNodeTypeMemset_Positive_Basic, uint8_t, u
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-HIP_TEST_CASE(Unit_hipGraphAddNodeTypeKernel_Positive_Basic) {
+TEST_CASE("Unit_hipGraphAddNodeTypeKernel_Positive_Basic") {
   constexpr size_t allocation_size = N * sizeof(int);
   hipGraph_t graph;
   hipGraphExec_t graphExec;
@@ -167,7 +182,7 @@ HIP_TEST_CASE(Unit_hipGraphAddNodeTypeKernel_Positive_Basic) {
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-HIP_TEST_CASE(Unit_hipGraphAddNodeTypeHost_Positive_Basic) {
+TEST_CASE("Unit_hipGraphAddNodeTypeHost_Positive_Basic") {
   constexpr size_t allocation_size = N * sizeof(int);
   hipGraph_t graph;
   hipGraphExec_t graphExec;
@@ -215,7 +230,7 @@ HIP_TEST_CASE(Unit_hipGraphAddNodeTypeHost_Positive_Basic) {
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-HIP_TEST_CASE(Unit_hipGraphAddNodeTypeChildGraph_Positive_Basic) {
+TEST_CASE("Unit_hipGraphAddNodeTypeChildGraph_Positive_Basic") {
   constexpr size_t allocation_size = N * sizeof(int);
   hipGraph_t graph, childgraph;
   hipGraphExec_t graphExec;
@@ -310,7 +325,7 @@ static hipError_t MemcpyType3DWrapper(PtrVariant dst_ptr, hipPos dst_pos, PtrVar
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-HIP_TEST_CASE(Unit_hipGraphAddNodeTypeMemcpy_Positive_Basic) {
+TEST_CASE("Unit_hipGraphAddNodeTypeMemcpy_Positive_Basic") {
   CHECK_IMAGE_SUPPORT
 
   constexpr bool async = false;
@@ -369,7 +384,7 @@ HIP_TEST_CASE(Unit_hipGraphAddNodeTypeMemcpy_Positive_Basic) {
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-HIP_TEST_CASE(Unit_hipGraphAddNodeTypeEventRecord_Positive_Basic) {
+TEST_CASE("Unit_hipGraphAddNodeTypeEventRecord_Positive_Basic") {
   hipGraph_t graph;
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
@@ -407,7 +422,7 @@ HIP_TEST_CASE(Unit_hipGraphAddNodeTypeEventRecord_Positive_Basic) {
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-HIP_TEST_CASE(Unit_hipGraphAddNodeTypeEventWait_Positive_Basic) {
+TEST_CASE("Unit_hipGraphAddNodeTypeEventWait_Positive_Basic") {
   hipGraph_t graph;
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
@@ -453,7 +468,7 @@ HIP_TEST_CASE(Unit_hipGraphAddNodeTypeEventWait_Positive_Basic) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-HIP_TEST_CASE(Unit_hipGraphAddNodeTypeMemAlloc_Positive_Basic) {
+TEST_CASE("Unit_hipGraphAddNodeTypeMemAlloc_Positive_Basic") {
   constexpr size_t allocation_size = N * sizeof(int);
   hipGraph_t graph;
   hipStream_t streamForGraph;
@@ -510,7 +525,7 @@ HIP_TEST_CASE(Unit_hipGraphAddNodeTypeMemAlloc_Positive_Basic) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-HIP_TEST_CASE(Unit_hipGraphAddNode_Negative_Parameters) {
+TEST_CASE("Unit_hipGraphAddNode_Negative_Parameters") {
   using namespace std::placeholders;
   hipGraph_t graph = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));

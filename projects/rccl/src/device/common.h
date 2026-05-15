@@ -18,10 +18,7 @@
 
 #define __syncwarp()
 
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-#define STORE(DST, SRC) \
-  { __hip_atomic_store((__attribute__((address_space(1))) __typeof__(*(DST)) *)(DST), (SRC), __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM); }
-#elif defined(__GFX9__)
+#ifdef __GFX9__
 #define STORE(DST, SRC) \
   { __atomic_store_n((DST), (SRC), __ATOMIC_RELAXED); }
 #else
@@ -29,7 +26,7 @@
   { __atomic_store_n((DST), (SRC), __ATOMIC_SEQ_CST); }
 #endif
 
-#if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1151__) || defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx1250__)
+#if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1151__) || defined(__gfx1200__) || defined(__gfx1201__)
 #define __trace_hwreg() \
   collTrace->data_0 = 0;
 #else
@@ -189,16 +186,11 @@ struct ncclShmemData {
   uint64_t barrier_pat;
 };
 
-#ifdef RCCL_DEVICE_LINKER
-__shared__ ncclShmemData ncclShmem;
-__shared__ ulong2 ncclShmemPerWarp[ncclShmemScratchWarpSize()*(NCCL_MAX_NTHREADS/WARP_SIZE)/sizeof(ulong2)];
-#else
 extern __shared__ ncclShmemData ncclShmem;
 #if __CUDA_ARCH__ >= 700
   extern __shared__ ulong2 ncclShmemPerWarp[/*ncclShmemDynamicSize()/sizeof(ulong2)*/];
 #else
   extern __shared__ ulong2 ncclShmemPerWarp[ncclShmemScratchWarpSize()*(NCCL_MAX_NTHREADS/WARP_SIZE)/sizeof(ulong2)];
-#endif
 #endif
 
 #ifdef ENABLE_FAULT_INJECTION
@@ -624,7 +616,7 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
 #endif
 #ifdef ENABLE_WARP_SPEED
   if(tid == 0) {
-    ncclShmem.warpComm = args->warpLevelComm;
+    ncclShmem.warpComm = args->comm->warpLevelComm;
   }
 #endif
   __syncthreads(); // publish shmem
@@ -682,8 +674,7 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
     if (0 <= SpecializedFnId && ncclShmem.funcId == (unsigned)SpecializedFnId) {
       SpecializedRunWorkBatch().run();
     } else {
-#ifndef RCCL_DEVICE_TABLE_OMIT
-#if defined(USE_INDIRECT_FUNCTION_CALL) || defined(RCCL_DEVICE_LINKER)
+#ifdef USE_INDIRECT_FUNCTION_CALL
       if (COLL_UNROLL == 1)
         ncclDevFuncTable_1[ncclShmem.funcId]();
       else if (COLL_UNROLL == 2)
@@ -697,7 +688,6 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
         NCCL_CALL_FUNCTIONS_2(ncclShmem.funcId);
       else
         NCCL_CALL_FUNCTIONS_4(ncclShmem.funcId);
-#endif
 #endif
     }
 
@@ -743,7 +733,7 @@ __global__ void ncclDevKernelDebug_Generic_4(ncclDevKernelArgsDefaultStorage NCC
 #define DEFINE_ncclDevKernel_nop(suffix, coll, redop, ty, algo, proto, specializedFnId) \
   __global__ void ncclDevKernel_##suffix(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {}
 
-#if defined(USE_INDIRECT_FUNCTION_CALL) || defined(RCCL_DEVICE_LINKER)
+#ifdef USE_INDIRECT_FUNCTION_CALL
 #define DEFINE_ncclDevFunc(suffix, coll, redop, ty, algo, proto, acc, pipeline, unroll) \
   __device__ void ncclDevFunc_##suffix() { \
     RunWorkBatch<coll, ty, redop<ty>, algo, proto, acc, unroll, pipeline>().run(); \

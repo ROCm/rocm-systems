@@ -4,7 +4,7 @@
 version: 2
 
 sphinx:
-  configuration: projects/rocprofiler-compute/docs/conf.py
+  configuration: docs/conf.py
 
 build:
   os: ubuntu-22.04
@@ -13,4 +13,4 @@ build:
 
 python:
   install:
-  - requirements: projects/rocprofiler-compute/docs/sphinx/requirements.txt
+  - requirements: docs/sphinx/requirements.txt

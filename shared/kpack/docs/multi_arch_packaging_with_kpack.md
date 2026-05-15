@@ -1558,7 +1558,7 @@ rocm-blas-gfx120X_8.0.0_amd64.deb
   - Provides: rocm-blas-device-code
 ```
 
-Again, this is simplified for illustration. Details will be worked out by the implementers.
+Again, this is simplified for illustration. Details will be worked out by the implementors.
 
 **Installation Workflow**:
 

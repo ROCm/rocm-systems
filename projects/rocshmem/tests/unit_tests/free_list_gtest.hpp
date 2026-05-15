@@ -56,8 +56,8 @@ class FreeListTestFixture : public ::testing::Test {
   std::vector<T> h_input{};
   int wf_size;
 
-  FreeListProxy<T> list_proxy{};
-  FreeList<T>* free_list{};
+  FreeListProxy<Allocator, T> list_proxy{};
+  FreeList<T, Allocator>* free_list{};
 };
 
 using TestTypes = ::testing::Types<std::uint32_t, std::uint64_t>;

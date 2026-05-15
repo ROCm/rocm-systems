@@ -1,8 +1,22 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+/* Copyright (c) 2008 - 2021 Advanced Micro Devices, Inc.
+
+ Permission is hereby granted, free of charge, to any person obtaining a copy
+ of this software and associated documentation files (the "Software"), to deal
+ in the Software without restriction, including without limitation the rights
+ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ copies of the Software, and to permit persons to whom the Software is
+ furnished to do so, subject to the following conditions:
+
+ The above copyright notice and this permission notice shall be included in
+ all copies or substantial portions of the Software.
+
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ THE SOFTWARE. */
 
 /*! \file program.hpp
  *  \brief  Declarations for Program and ProgramBinary objects.
@@ -36,7 +50,7 @@ namespace amd {
  */
 
 //! A kernel function symbol
-class Symbol {
+class Symbol : public HeapObject {
  public:
   typedef std::unordered_map<const Device*, const device::Kernel*> devicekernels_t;
 
@@ -72,7 +86,7 @@ class Program : public RuntimeObject {
   typedef std::set<Device const*> devicelist_t;
   typedef std::unordered_map<Device const*, binary_t> devicebinary_t;
   typedef std::unordered_map<Device const*, device::Program*> deviceprograms_t;
-  typedef std::unordered_map<std::string_view, Symbol> symbols_t;
+  typedef std::unordered_map<std::string, Symbol> symbols_t;
 
   enum Language { Binary = 0, OpenCL_C, SPIRV, Assembly, HIP };
 
@@ -100,7 +114,7 @@ class Program : public RuntimeObject {
 
   std::string programLog_;  //!< Log for parsing options, etc.
 
-  std::recursive_mutex programLock_;  //!< Lock to protect program data structure
+  Monitor programLock_;  //!< Lock to protect program data structure
 
  protected:
   //! Destroy this program.
@@ -117,7 +131,8 @@ class Program : public RuntimeObject {
         sourceCode_(sourceCode),
         language_(language),
         symbolTable_(NULL),
-        programLog_() {
+        programLog_(),
+        programLock_(true) /* Program lock */ {
     for (auto i = 0; i != numHeaders; ++i) {
       headers_.emplace_back(headers[i]);
       headerNames_.emplace_back(headerNames[i]);
@@ -126,7 +141,10 @@ class Program : public RuntimeObject {
 
   //! Construct a new program associated with a context.
   Program(Context& context, Language language = Binary)
-      : context_(context), language_(language), symbolTable_(NULL) {}
+      : context_(context),
+        language_(language),
+        symbolTable_(NULL),
+        programLock_(true) /* Program lock */ {}
 
   //! Returns context, associated with the current program.
   const Context& context() const { return context_(); }

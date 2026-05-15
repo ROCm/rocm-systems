@@ -1,8 +1,24 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 
 #include <hip_test_common.hh>
@@ -32,7 +48,7 @@ enum class FreeType { DevFree, ArrayFree, ArrayDestroy, HostFree };
 using namespace std::chrono_literals;
 constexpr size_t numAllocs = 10;
 
-HIP_TEST_CASE(Unit_hipFreeImplicitSyncDev) {
+TEST_CASE("Unit_hipFreeImplicitSyncDev") {
   int* devPtr{};
   size_t size_mult = GENERATE(1, 32, 64, 128, 256);
   HIP_CHECK(hipMalloc(&devPtr, sizeof(*devPtr) * size_mult));
@@ -49,7 +65,7 @@ HIP_TEST_CASE(Unit_hipFreeImplicitSyncDev) {
   HIP_CHECK(hipStreamQuery(nullptr));
 }
 
-HIP_TEST_CASE(Unit_hipFreeImplicitSyncHost) {
+TEST_CASE("Unit_hipFreeImplicitSyncHost") {
   int* hostPtr{};
   size_t size_mult = GENERATE(1, 32, 64, 128, 256);
 
@@ -68,7 +84,7 @@ HIP_TEST_CASE(Unit_hipFreeImplicitSyncHost) {
 }
 
 #if HT_NVIDIA
-HIP_TEMPLATE_TEST_CASE(Unit_hipFreeImplicitSyncArray, char, float, float2, float4) {
+TEMPLATE_TEST_CASE("Unit_hipFreeImplicitSyncArray", "", char, float, float2, float4) {
   CHECK_IMAGE_SUPPORT
 
   using vec_info = vector_info<TestType>;
@@ -108,7 +124,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipFreeImplicitSyncArray, char, float, float2, float
 }
 #else  // AMD
 
-HIP_TEMPLATE_TEST_CASE(Unit_hipFreeImplicitSyncArray, char, float, float2, float4) {
+TEMPLATE_TEST_CASE("Unit_hipFreeImplicitSyncArray", "", char, float, float2, float4) {
   CHECK_IMAGE_SUPPORT
 
   hipArray_t arrayPtr{};
@@ -140,7 +156,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipFreeImplicitSyncArray, char, float, float2, float
 #endif
 
 // Freeing a invalid pointer with on device
-HIP_TEST_CASE(Unit_hipFreeNegativeDev) {
+TEST_CASE("Unit_hipFreeNegativeDev") {
   SECTION("InvalidPtr") {
     char value;
     HIP_CHECK_ERROR(hipFree(&value), hipErrorInvalidValue);
@@ -149,7 +165,7 @@ HIP_TEST_CASE(Unit_hipFreeNegativeDev) {
 }
 
 // Freeing a invalid pointer with on host
-HIP_TEST_CASE(Unit_hipFreeNegativeHost) {
+TEST_CASE("Unit_hipFreeNegativeHost") {
   SECTION("NullPtr") { HIP_CHECK(hipHostFree(nullptr)); }
   SECTION("InvalidPtr") {
     char hostPtr;
@@ -166,18 +182,17 @@ HIP_TEST_CASE(Unit_hipFreeNegativeHost) {
 #if (HT_AMD == 1) && (HT_LINUX == 1)
   SECTION("hipHostRegister AMD LINUX") {
     char* hostPtr = new char;
-    auto flag = GENERATE(hipHostRegisterDefault, hipHostRegisterPortable, hipHostRegisterMapped,
+    auto flag = GENERATE(hipHostRegisterDefault, hipHostRegisterPortable, hipHostRegisterMapped, 
                          hipHostRegisterIoMemory);
     HIP_CHECK(hipHostRegister((void*)hostPtr, sizeof(char), flag));
     HIP_CHECK_ERROR(hipHostFree(hostPtr), hipErrorInvalidValue);
-    HIP_CHECK(hipHostUnregister(hostPtr));
     delete hostPtr;
   }
 #endif
 }
 
 #if HT_NVIDIA
-HIP_TEST_CASE(Unit_hipFreeNegativeArray) {
+TEST_CASE("Unit_hipFreeNegativeArray") {
   DriverContext ctx;
 
   SECTION("ArrayFree") { HIP_CHECK(hipFreeArray(nullptr)); }
@@ -188,14 +203,14 @@ HIP_TEST_CASE(Unit_hipFreeNegativeArray) {
 #else
 
 // Freeing a invalid pointer with array
-HIP_TEST_CASE(Unit_hipFreeNegativeArray) {
+TEST_CASE("Unit_hipFreeNegativeArray") {
   SECTION("ArrayFree") { HIP_CHECK_ERROR(hipFreeArray(nullptr), hipErrorInvalidValue); }
   SECTION("ArrayDestroy") { HIP_CHECK_ERROR(hipArrayDestroy(nullptr), hipErrorInvalidValue); }
 }
 
 #endif
 
-HIP_TEST_CASE(Unit_hipFreeDoubleDevice) {
+TEST_CASE("Unit_hipFreeDoubleDevice") {
   size_t width = GENERATE(32, 512, 1024);
   char* ptr{};
   size_t size_mult = width;
@@ -205,7 +220,7 @@ HIP_TEST_CASE(Unit_hipFreeDoubleDevice) {
   HIP_CHECK_ERROR(hipFree(ptr), hipErrorInvalidValue);
 }
 
-HIP_TEST_CASE(Unit_hipFreeDoubleHost) {
+TEST_CASE("Unit_hipFreeDoubleHost") {
   size_t width = GENERATE(32, 512, 1024);
   char* ptr{};
   size_t size_mult = width;
@@ -217,8 +232,9 @@ HIP_TEST_CASE(Unit_hipFreeDoubleHost) {
 }
 
 #if HT_NVIDIA
-HIP_TEST_CASE(Unit_hipFreeDoubleArrayFree) {
-  HIP_SKIP_TEST("tracked issue EXSWCPHIPT-120.");
+TEST_CASE("Unit_hipFreeDoubleArrayFree") {
+  HipTest::HIP_SKIP_TEST("EXSWCPHIPT-120");
+  return;
 
   size_t width = GENERATE(32, 512, 1024);
   size_t height = GENERATE(0, 32, 512, 1024);
@@ -234,8 +250,9 @@ HIP_TEST_CASE(Unit_hipFreeDoubleArrayFree) {
   HIP_CHECK_ERROR(hipFreeArray(arrayPtr), hipErrorContextIsDestroyed);
 }
 
-HIP_TEST_CASE(Unit_hipFreeDoubleArrayDestroy) {
-  HIP_SKIP_TEST("tracked issue EXSWCPHIPT-120.");
+TEST_CASE("Unit_hipFreeDoubleArrayDestroy") {
+  HipTest::HIP_SKIP_TEST("EXSWCPHIPT-120");
+  return;
   using vec_info = vector_info<char>;
 
   size_t width = GENERATE(32, 512, 1024);
@@ -255,7 +272,7 @@ HIP_TEST_CASE(Unit_hipFreeDoubleArrayDestroy) {
 
 #else  // AMD
 
-HIP_TEST_CASE(Unit_hipFreeDoubleArray) {
+TEST_CASE("Unit_hipFreeDoubleArray") {
   CHECK_IMAGE_SUPPORT
 
   size_t width = GENERATE(32, 512, 1024);
@@ -281,7 +298,7 @@ HIP_TEST_CASE(Unit_hipFreeDoubleArray) {
 #endif
 
 
-HIP_TEMPLATE_TEST_CASE(Unit_hipFreeMultiTDev, char, int, float2, float4) {
+TEMPLATE_TEST_CASE("Unit_hipFreeMultiTDev", "", char, int, float2, float4) {
   std::vector<TestType*> ptrs(numAllocs);
   size_t allocSize = sizeof(TestType) * GENERATE(1, 32, 64, 128);
 
@@ -304,7 +321,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipFreeMultiTDev, char, int, float2, float4) {
   HIP_CHECK_THREAD_FINALIZE();
 }
 
-HIP_TEMPLATE_TEST_CASE(Unit_hipFreeMultiTHost, char, int, float2, float4) {
+TEMPLATE_TEST_CASE("Unit_hipFreeMultiTHost", "", char, int, float2, float4) {
   std::vector<TestType*> ptrs(numAllocs);
   size_t allocSize = sizeof(TestType) * GENERATE(1, 32, 64, 128);
 
@@ -328,7 +345,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipFreeMultiTHost, char, int, float2, float4) {
 }
 
 #if HT_NVIDIA
-HIP_TEMPLATE_TEST_CASE(Unit_hipFreeMultiTArray, char, int, float2, float4) {
+TEMPLATE_TEST_CASE("Unit_hipFreeMultiTArray", "", char, int, float2, float4) {
   using vec_info = vector_info<TestType>;
 
   size_t width = GENERATE(32, 128, 256, 512, 1024);
@@ -388,7 +405,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipFreeMultiTArray, char, int, float2, float4) {
 }
 #else
 
-HIP_TEMPLATE_TEST_CASE(Unit_hipFreeMultiTArray, char, int, float2, float4) {
+TEMPLATE_TEST_CASE("Unit_hipFreeMultiTArray", "", char, int, float2, float4) {
   CHECK_IMAGE_SUPPORT
 
   using vec_info = vector_info<TestType>;

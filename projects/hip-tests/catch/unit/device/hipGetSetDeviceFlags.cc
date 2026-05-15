@@ -1,8 +1,21 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 #include <hip_test_common.hh>
 #include <iterator>
@@ -31,7 +44,7 @@
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipGetSetDeviceFlags_NullptrFlag) {
+TEST_CASE("Unit_hipGetSetDeviceFlags_NullptrFlag") {
   HIP_CHECK_ERROR(hipGetDeviceFlags(nullptr), hipErrorInvalidValue);
 }
 
@@ -67,7 +80,7 @@ std::array<unsigned int, 16> getValidFlags() {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipGetSetDeviceFlags_ValidFlag) {
+TEST_CASE("Unit_hipGetSetDeviceFlags_ValidFlag") {
   auto validFlags = getValidFlags();
 
   unsigned int flag = 0;
@@ -88,7 +101,7 @@ HIP_TEST_CASE(Unit_hipGetSetDeviceFlags_ValidFlag) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipGetSetDeviceFlags_SetThenGet) {
+TEST_CASE("Unit_hipGetSetDeviceFlags_SetThenGet") {
   auto validFlags = getValidFlags();
 
   auto devNo = GENERATE(range(0, HipTest::getDeviceCount()));
@@ -119,7 +132,7 @@ HIP_TEST_CASE(Unit_hipGetSetDeviceFlags_SetThenGet) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipGetSetDeviceFlags_Threaded) {
+TEST_CASE("Unit_hipGetSetDeviceFlags_Threaded") {
   auto validFlags = getValidFlags();
 
   auto devNo = GENERATE(range(0, HipTest::getDeviceCount()));
@@ -169,7 +182,7 @@ HIP_TEST_CASE(Unit_hipGetSetDeviceFlags_Threaded) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipGetDeviceFlags_Positive_Context) {
+TEST_CASE("Unit_hipGetDeviceFlags_Positive_Context") {
   auto validFlags = getValidFlags();
   const unsigned int flags =
       GENERATE_COPY(from_range(std::begin(validFlags), std::end(validFlags)));
@@ -219,7 +232,7 @@ HIP_TEST_CASE(Unit_hipGetDeviceFlags_Positive_Context) {
  *  - Platform specific (NVIDIA)
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipGetSetDeviceFlags_InvalidFlag) {
+TEST_CASE("Unit_hipGetSetDeviceFlags_InvalidFlag") {
   const unsigned int invalidFlag = GENERATE(0xb011,     // schedule flags should not overlap
                                             0xb101,     // schedule flags should not overlap
                                             0xb110,     // schedule flags should not overlap

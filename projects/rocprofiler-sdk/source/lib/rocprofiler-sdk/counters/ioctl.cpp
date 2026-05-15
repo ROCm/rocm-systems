@@ -32,62 +32,12 @@ namespace rocprofiler
 {
 namespace counters
 {
-namespace
-{
-constexpr uint32_t mainline_profiler_ioctl_nr = 0x28;
-
-unsigned long
-get_mainline_profiler_ioctl_request()
-{
-    return AMDKFD_IOWR(mainline_profiler_ioctl_nr, struct kfd_ioctl_profiler_args);
-}
-
-unsigned long
-get_profiler_ioctl_request()
-{
-    static auto request = []() {
-        kfd_ioctl_get_version_args args = {};
-        if(ioctl(pc_sampling::ioctl::get_kfd_fd(), AMDKFD_IOC_GET_VERSION, &args) != 0)
-        {
-            auto err      = errno;
-            auto fallback = static_cast<unsigned long>(AMDKFD_IOC_PROFILER);
-            ROCP_INFO << fmt::format("KFD version query failed (error: {}); using fallback "
-                                     "profiler ioctl request {:#x}.",
-                                     strerror(err),
-                                     fallback);
-            return fallback;
-        }
-
-        auto selected =
-            get_profiler_ioctl_request_for_version(args.major_version, args.minor_version);
-        ROCP_INFO << fmt::format("KFD version {}.{} detected; using profiler ioctl request {:#x}.",
-                                 args.major_version,
-                                 args.minor_version,
-                                 selected);
-        return selected;
-    }();
-
-    return request;
-}
-}  // namespace
-
-unsigned long
-get_profiler_ioctl_request_for_version(uint32_t major_version, uint32_t minor_version)
-{
-    if(major_version > 1 || (major_version == 1 && minor_version >= 23))
-    {
-        return get_mainline_profiler_ioctl_request();
-    }
-
-    return AMDKFD_IOC_PROFILER;
-}
-
 bool
 counter_collection_has_device_lock()
 {
     kfd_ioctl_profiler_args args = {};
     args.op                      = KFD_IOC_PROFILER_VERSION;
-    int ret = ioctl(pc_sampling::ioctl::get_kfd_fd(), get_profiler_ioctl_request(), &args);
+    int ret = ioctl(pc_sampling::ioctl::get_kfd_fd(), AMDKFD_IOC_PROFILER, &args);
     if(ret == 0)
     {
         return true;
@@ -105,25 +55,24 @@ counter_collection_device_lock(const rocprofiler_agent_t* agent, bool all_queues
     args.pmc.lock                = 1;
     args.pmc.perfcount_enable    = all_queues ? 1 : 0;
 
-    int ret = ioctl(pc_sampling::ioctl::get_kfd_fd(), get_profiler_ioctl_request(), &args);
+    int ret = ioctl(pc_sampling::ioctl::get_kfd_fd(), AMDKFD_IOC_PROFILER, &args);
     if(ret != 0)
     {
-        auto err = errno;
-        switch(err)
+        switch(ret)
         {
-            case EBUSY:
+            case -EBUSY:
                 ROCP_WARNING << fmt::format(
                     "Device {} has a profiler attached to it. PMC Counters may be inaccurate.",
                     agent->id.handle);
                 return ROCPROFILER_STATUS_ERROR_OUT_OF_RESOURCES;
-            case EPERM:
+            case -EPERM:
                 ROCP_WARNING << fmt::format(
                     "Device {} could not be locked for profiling due to lack of permissions "
                     "(capability SYS_PERFMON). PMC Counters may be inaccurate and System Counter "
                     "Collection will be degraded.",
                     agent->id.handle);
                 return ROCPROFILER_STATUS_ERROR_PERMISSION_DENIED;
-            case EINVAL:
+            case -EINVAL:
                 ROCP_WARNING << fmt::format(
                     "Driver/Kernel version does not support locking device {}. PMC Counters may be "
                     "inaccurate and System Counter Collection will be degraded.",
@@ -131,11 +80,9 @@ counter_collection_device_lock(const rocprofiler_agent_t* agent, bool all_queues
                 return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI;
             default:
                 ROCP_WARNING << fmt::format(
-                    "Failed to lock device {} (error: {}). PMC Counters may be "
-                    "inaccurate and System Counter "
+                    "Failed to lock device {}. PMC Counters may be inaccurate and System Counter "
                     "Collection will be degraded.",
-                    agent->id.handle,
-                    strerror(err));
+                    agent->id.handle);
                 return ROCPROFILER_STATUS_ERROR;
         }
     }
@@ -153,7 +100,7 @@ counter_collection_device_unlock(const rocprofiler_agent_t* agent)
     args.pmc.lock                = 0;
     args.pmc.perfcount_enable    = 0;
 
-    int ret = ioctl(pc_sampling::ioctl::get_kfd_fd(), get_profiler_ioctl_request(), &args);
+    int ret = ioctl(pc_sampling::ioctl::get_kfd_fd(), AMDKFD_IOC_PROFILER, &args);
     if(ret != 0)
     {
         auto err = errno;
@@ -171,7 +118,7 @@ ptl_control_supported()
 {
     kfd_ioctl_profiler_args args = {};
     args.op                      = KFD_IOC_PROFILER_VERSION;
-    int ret = ioctl(pc_sampling::ioctl::get_kfd_fd(), get_profiler_ioctl_request(), &args);
+    int ret = ioctl(pc_sampling::ioctl::get_kfd_fd(), AMDKFD_IOC_PROFILER, &args);
     return (ret == 0);
 }
 
@@ -191,7 +138,7 @@ counter_collection_ptl_disable(const rocprofiler_agent_t* agent)
     args.ptl.gpu_id              = agent->gpu_id;
     args.ptl.enable              = 0;
 
-    int ret = ioctl(pc_sampling::ioctl::get_kfd_fd(), get_profiler_ioctl_request(), &args);
+    int ret = ioctl(pc_sampling::ioctl::get_kfd_fd(), AMDKFD_IOC_PROFILER, &args);
     if(ret != 0)
     {
         auto err = errno;
@@ -214,7 +161,7 @@ counter_collection_ptl_enable(const rocprofiler_agent_t* agent)
     args.ptl.gpu_id              = agent->gpu_id;
     args.ptl.enable              = 1;
 
-    int ret = ioctl(pc_sampling::ioctl::get_kfd_fd(), get_profiler_ioctl_request(), &args);
+    int ret = ioctl(pc_sampling::ioctl::get_kfd_fd(), AMDKFD_IOC_PROFILER, &args);
     if(ret != 0)
     {
         auto err = errno;

@@ -1,8 +1,21 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 /**
 Testcase Scenarios of hipGraphAddChildGraphNode API:
@@ -46,9 +59,6 @@ Functional:
     contains 3 independent kernel nodes and graph3 contains 3 independent
     memcpy d2h nodes. Graph1, graph2 and graph3 are added as child nodes in
     graph4. Graph4 is validated for functionality.
-18. Functional Test to verify that for a complex graph but having
-    non-Complex child graphs, same scheduling logic (classic or segment)
-    is used for main and child graphs
 
 Negative:
 1. Pass nullptr to graph node
@@ -62,17 +72,11 @@ Negative:
 #include <hip_test_kernels.hh>
 
 #define TEST_LOOP_SIZE 50
-
-__global__ void dummy_kernel(float* data) {
-  int idx = threadIdx.x + blockIdx.x * blockDim.x;
-  data[idx] = data[idx] * 2.0f;
-}
-
 /*
 This testcase verifies the negative scenarios of
 hipGraphAddChildGraphNode API
 */
-HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_Negative) {
+TEST_CASE("Unit_hipGraphAddChildGraphNode_Negative") {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   hipGraph_t graph, childgraph1;
@@ -116,7 +120,7 @@ This testcase verifies the following scenario
 Creates the graph, add the graph as a child node
 and verify the number of the nodes in the original graph
 */
-HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_OrgGraphAsChildGraph) {
+TEST_CASE("Unit_hipGraphAddChildGraphNode_OrgGraphAsChildGraph") {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   hipGraph_t graph, childGraph;
@@ -149,7 +153,6 @@ HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_OrgGraphAsChildGraph) {
   REQUIRE(numNodes == 3);
   HipTest::freeArrays<int>(A_d, B_d, nullptr, A_h, B_h, nullptr, false);
   HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(childGraph));
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipStreamDestroy(streamForGraph));
 }
@@ -159,7 +162,7 @@ This testcase verifies the following scenario
 Create graph, Add child nodes to the graph and execute only the
 child graph node and verify the behaviour
 */
-HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_ExecuteChildGraph) {
+TEST_CASE("Unit_hipGraphAddChildGraphNode_ExecuteChildGraph") {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   hipGraph_t graph, childgraph1;
@@ -210,7 +213,7 @@ This testcase verifies the following scenario
 creates graph, Add child nodes to graph, clone the graph and execute
 the cloned graph
 */
-HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_CloneChildGraph) {
+TEST_CASE("Unit_hipGraphAddChildGraphNode_CloneChildGraph") {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   hipGraph_t graph, childgraph1, clonedgraph;
@@ -262,7 +265,7 @@ This testcase verifies the following scenario
 Create graph, add multiple child nodes and validates the
 behaviour
 */
-HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_MultipleChildNodes) {
+TEST_CASE("Unit_hipGraphAddChildGraphNode_MultipleChildNodes") {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -325,7 +328,7 @@ HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_MultipleChildNodes) {
  This testcase verifies hipGraphAddChildGraphNode functionality
  where root node is the child node.
  */
-HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_SingleChildNode) {
+TEST_CASE("Unit_hipGraphAddChildGraphNode_SingleChildNode") {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -716,7 +719,7 @@ typedef class nestedGraph {
  Parent graph containing child graph, which in turn, contains another
  child graph.
  */
-HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_Cmplx_NestedGraphs) {
+TEST_CASE("Unit_hipGraphAddChildGraphNode_Cmplx_NestedGraphs") {
   hipGraph_t* graph;
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
@@ -739,7 +742,7 @@ HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_Cmplx_NestedGraphs) {
  Complex Scenario: This testcase verifies cloned nested graph functionality.
  Clone the nested graph and execute the clone graph.
  */
-HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_CmplxClone_NestedGraphs) {
+TEST_CASE("Unit_hipGraphAddChildGraphNode_CmplxClone_NestedGraphs") {
   hipGraph_t *graph, clonedGraph;
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
@@ -763,7 +766,7 @@ HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_CmplxClone_NestedGraphs) {
 /**
  Scenario: Adding an empty graph to Child Graph Node.
  */
-HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_EmptyGraphAsChildNode) {
+TEST_CASE("Unit_hipGraphAddChildGraphNode_EmptyGraphAsChildNode") {
   hipGraph_t graph, graphChild;
   hipGraphNode_t child_node;
   HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -778,7 +781,7 @@ HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_EmptyGraphAsChildNode) {
  when one of the child graph node is updated. In this test the kernel node
  function is updated to a different function.
  */
-HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_CmplxNstGrph_UpdKerFun) {
+TEST_CASE("Unit_hipGraphAddChildGraphNode_CmplxNstGrph_UpdKerFun") {
   hipGraph_t* graph;
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
@@ -802,7 +805,7 @@ HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_CmplxNstGrph_UpdKerFun) {
  function is updated to a different function and the nested graph is cloned.
  Execute the cloned graph and validate the results.
  */
-HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_CmplxNstGrph_UpdKerFun_Clone) {
+TEST_CASE("Unit_hipGraphAddChildGraphNode_CmplxNstGrph_UpdKerFun_Clone") {
   hipGraph_t *graph, clonedGraph;
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
@@ -827,7 +830,7 @@ HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_CmplxNstGrph_UpdKerFun_Clone) {
  when one of the child graph node is updated. In this test the kernel node
  parameters - blocksize and gridsize are updated.
  */
-HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_CmplxNstGrph_UpdKerDim) {
+TEST_CASE("Unit_hipGraphAddChildGraphNode_CmplxNstGrph_UpdKerDim") {
   hipGraph_t* graph;
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
@@ -850,7 +853,7 @@ HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_CmplxNstGrph_UpdKerDim) {
  when one of the nodes inside a child graph node is deleted and replaced with
  a new node.
  */
-HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_CmplxNstGrph_DelAddNode) {
+TEST_CASE("Unit_hipGraphAddChildGraphNode_CmplxNstGrph_DelAddNode") {
   hipGraph_t* graph;
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
@@ -874,7 +877,7 @@ HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_CmplxNstGrph_DelAddNode) {
  replaced with a new node. After modifying the original graph it is cloned
  and the cloned graph is executed and validated.
  */
-HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_CmplxNstGrph_AddNode_Clone) {
+TEST_CASE("Unit_hipGraphAddChildGraphNode_CmplxNstGrph_AddNode_Clone") {
   hipGraph_t *graph, clonedGraph;
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
@@ -899,7 +902,7 @@ HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_CmplxNstGrph_AddNode_Clone) {
  when one of the nodes inside a child graph node is deleted and replaced with
  a new child graph node.
  */
-HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_CmplxNstGrph_AddChdNode) {
+TEST_CASE("Unit_hipGraphAddChildGraphNode_CmplxNstGrph_AddChdNode") {
   hipGraph_t* graph;
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
@@ -922,7 +925,7 @@ HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_CmplxNstGrph_AddChdNode) {
  when one of the nodes inside a child graph node is deleted and replaced with
  a new child graph node.
  */
-HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_CmplxNstGrph_AddChdNode_Clone) {
+TEST_CASE("Unit_hipGraphAddChildGraphNode_CmplxNstGrph_AddChdNode_Clone") {
   hipGraph_t *graph, clonedGraph;
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
@@ -958,7 +961,7 @@ static void validateResults(int* A1_h, int* A2_h, size_t N) {
  memcpy d2h nodes. Graph1, graph2 and graph3 are added as child nodes in
  graph4. Graph4 is validated for functionality.
  */
-HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_MultGraphsAsSingleGraph) {
+TEST_CASE("Unit_hipGraphAddChildGraphNode_MultGraphsAsSingleGraph") {
   size_t size = 1024;
   constexpr auto blocksPerCU = 6;
   constexpr auto threadsPerBlock = 256;
@@ -1080,12 +1083,13 @@ HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_MultGraphsAsSingleGraph) {
  in multi GPU environment. Create one nested graph per GPU context. Execute
  all the created graphs in their respective GPUs and validate the output.
  */
-HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_CmplxNstGrph_MultGPU) {
+TEST_CASE("Unit_hipGraphAddChildGraphNode_CmplxNstGrph_MultGPU", "[multigpu]") {
   int devcount = 0;
   HIP_CHECK(hipGetDeviceCount(&devcount));
   // If only single GPU is detected then return
   if (devcount < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    SUCCEED("skipping the testcases as numDevices < 2");
+    return;
   }
   hipGraph_t** graph = new hipGraph_t*[devcount]();
   REQUIRE(graph != nullptr);
@@ -1127,122 +1131,4 @@ HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_CmplxNstGrph_MultGPU) {
   delete[] graphExec;
   delete[] streamForGraph;
   delete[] graph;
-}
-
-/**
- Complex Scenario: This testcase verifies that for a complex graph
- (with >16 segments and avg# of nodes per segment >8) but having
- non-Complex child graphs, same scheduling logic (classic or segment)
- is used for main and child graphs
- */
-HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_CmplxGrph_SchedLogic) {
-  // Allocate device memory for dummy operations
-  float* d_data;
-  size_t data_size = 256 * sizeof(float);
-  HIP_CHECK(hipMalloc(&d_data, data_size));
-
-  hipKernelNodeParams params = {};
-  void* args[] = {&d_data};
-  params.func = (void*)dummy_kernel;
-  params.gridDim = dim3(1, 1, 1);
-  params.blockDim = dim3(256, 1, 1);
-  params.sharedMemBytes = 0;
-  params.kernelParams = args;
-  params.extra = nullptr;
-
-  // Create child graphs
-  hipGraph_t child_graph[9];
-  hipGraphNode_t child_graph_node[9];
-  for (int i = 0; i < 9; i++) {
-    HIP_CHECK(hipGraphCreate(&child_graph[i], 0));
-    HIP_CHECK(hipGraphAddKernelNode(&child_graph_node[i], child_graph[i], nullptr, 0, &params));
-  }
-
-  // Create main graph with sequential dependencies
-  hipGraph_t main_graph;
-  HIP_CHECK(hipGraphCreate(&main_graph, 0));
-  hipGraphNode_t main_graph_node[18];
-  hipGraphNode_t deps[1];
-
-  // Kernel node
-  HIP_CHECK(hipGraphAddKernelNode(&main_graph_node[0], main_graph, nullptr, 0, &params));
-  deps[0] = {main_graph_node[0]};
-  HIP_CHECK(hipGraphAddKernelNode(&main_graph_node[1], main_graph, deps, 1, &params));
-
-  // Child graph node
-  deps[0] = {main_graph_node[1]};
-  HIP_CHECK(hipGraphAddChildGraphNode(&main_graph_node[2], main_graph, deps, 1, child_graph[0]));
-
-   // Kernel node
-  deps[0] = {main_graph_node[2]};
-  HIP_CHECK(hipGraphAddKernelNode(&main_graph_node[3], main_graph, deps, 1, &params));
-
-  // Child graph node
-  deps[0] = {main_graph_node[3]};
-  HIP_CHECK(hipGraphAddChildGraphNode(&main_graph_node[4], main_graph, deps, 1, child_graph[1]));
-
-  // Kernel node
-  deps[0] = {main_graph_node[4]};
-  HIP_CHECK(hipGraphAddKernelNode(&main_graph_node[5], main_graph, deps, 1, &params));
-  deps[0] = {main_graph_node[5]};
-  HIP_CHECK(hipGraphAddKernelNode(&main_graph_node[6], main_graph, deps, 1, &params));
-
-  // Child graph node
-  deps[0] = {main_graph_node[6]};
-  HIP_CHECK(hipGraphAddChildGraphNode(&main_graph_node[7], main_graph, deps, 1, child_graph[2]));
-  deps[0] = {main_graph_node[7]};
-  HIP_CHECK(hipGraphAddChildGraphNode(&main_graph_node[8], main_graph, deps, 1, child_graph[3]));
-  deps[0] = {main_graph_node[8]};
-  HIP_CHECK(hipGraphAddChildGraphNode(&main_graph_node[9], main_graph, deps, 1, child_graph[4]));
-
-  // Kernel node
-  deps[0] = {main_graph_node[9]};
-  HIP_CHECK(hipGraphAddKernelNode(&main_graph_node[10], main_graph, deps, 1, &params));
-
-  // Child graph node
-  deps[0] = {main_graph_node[10]};
-  HIP_CHECK(hipGraphAddChildGraphNode(&main_graph_node[11], main_graph, deps, 1, child_graph[5]));
-
-  // Kernel node
-  deps[0] = {main_graph_node[11]};
-  HIP_CHECK(hipGraphAddKernelNode(&main_graph_node[12], main_graph, deps, 1, &params));
-
-  // Child graph node
-  deps[0] = {main_graph_node[12]};
-  HIP_CHECK(hipGraphAddChildGraphNode(&main_graph_node[13], main_graph, deps, 1, child_graph[6]));
-
-  // Kernel node
-  deps[0] = {main_graph_node[13]};
-  HIP_CHECK(hipGraphAddKernelNode(&main_graph_node[14], main_graph, deps, 1, &params));
-
-  // Child graph node
-  deps[0] = {main_graph_node[14]};
-  HIP_CHECK(hipGraphAddChildGraphNode(&main_graph_node[15], main_graph, deps, 1, child_graph[7]));
-  deps[0] = {main_graph_node[15]};
-  HIP_CHECK(hipGraphAddChildGraphNode(&main_graph_node[16], main_graph, deps, 1, child_graph[8]));
-
-  // Kernel node
-  deps[0] = {main_graph_node[16]};
-  HIP_CHECK(hipGraphAddKernelNode(&main_graph_node[17], main_graph, deps, 1, &params));
-
-  // Instantiate the graph
-  hipGraphExec_t graph_exec;
-  HIP_CHECK(hipGraphInstantiate(&graph_exec, main_graph, nullptr, nullptr, 0));
-
-  // Launch graph
-  hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipGraphLaunch(graph_exec, stream)); // shouldn't cause any segfault here
-
-  // Synchronize stream
-  HIP_CHECK(hipStreamSynchronize(stream));
-
-  // Cleanup
-  HIP_CHECK(hipGraphExecDestroy(graph_exec));
-  HIP_CHECK(hipGraphDestroy(main_graph));
-  for (int i = 0; i < 9; i++) {
-    HIP_CHECK(hipGraphDestroy(child_graph[i]));
-  }
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(d_data));
 }

@@ -1,6 +1,3 @@
-# Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier: MIT
-
 # ------------------------------------------------------------------------------#
 #
 # TODO: [DFG] Remove this file after 'rocprofsys' rebranding is complete

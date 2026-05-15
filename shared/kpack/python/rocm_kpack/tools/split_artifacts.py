@@ -102,7 +102,6 @@ def single_split(args, toolchain: Toolchain):
         toolchain=toolchain,
         database_handlers=database_handlers,
         verbose=args.verbose,
-        gpu_targets=args.gpu_targets,
     )
 
     print(f"Splitting artifact: {args.input_dir}")
@@ -176,7 +175,6 @@ def batch_split(args, toolchain: Toolchain):
                 toolchain=toolchain,
                 database_handlers=database_handlers,
                 verbose=args.verbose,
-                gpu_targets=args.gpu_targets,
             )
 
             splitter.split(artifact_dir, args.output_dir)
@@ -278,14 +276,6 @@ Batch Mode:
         choices=available_handlers,
         default=None,
         help=f"Enable database splitting for specified types. Available: {', '.join(available_handlers)}",
-    )
-
-    parser.add_argument(
-        "--gpu-targets",
-        nargs="+",
-        default=None,
-        help="Only create per-arch artifacts for these GPU targets. "
-        "Database files for other architectures remain in the generic artifact.",
     )
 
     parser.add_argument(

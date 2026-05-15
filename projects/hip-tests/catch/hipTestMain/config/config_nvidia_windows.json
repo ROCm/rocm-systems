@@ -26,7 +26,6 @@
         "Unit_hipMemcpy3D_Positive_Synchronization_Behavior",
         "Unit_hipMemcpy2D_Positive_Synchronization_Behavior",
         "Unit_hipDrvMemcpy3D_Positive_Synchronization_Behavior",
-        "Unit_hipFreeMipmappedArray_Negative_DoubleFree",
         "Unit_hipModuleLoad_Positive_Basic",
         "Unit_hipModuleLoad_Negative_Load_From_A_File_That_Is_Not_A_Module",
         "Unit_hipModuleLoadData_Positive_Basic",
@@ -66,6 +65,8 @@
         "Unit_hipDeviceSynchronize_Functional",
         "Unit_hipDeviceReset_Positive_Basic",
         "Unit_hipDeviceReset_Positive_Threaded",
-        "Unit_hipModuleGetTexRef_Positive_Basic"
+        "Unit_hipModuleGetTexRef_Positive_Basic",
+        "=== Test does not reflect a valid use case - SWDEV-569454",
+        "Unit_hipStreamPerThread_MultiThread"
     ]
 }

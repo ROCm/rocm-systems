@@ -1,12 +1,6 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
-
 #include <hip_test_common.hh>
 
-HIP_TEST_CASE(Stress_hipMalloc) {
+TEST_CASE("Stress_hipMalloc", "DifferentSizes") {
   int* d_a = nullptr;
   SECTION("Size 10") {
     auto res = hipMalloc(&d_a, sizeof(10));

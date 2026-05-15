@@ -48,7 +48,6 @@
 #include "suites/test_common/test_base.h"
 #include "suites/test_common/test_common.h"
 #include "common/base_rocr_utils.h"
-#include "common/platform_filter.h"
 #include "gtest/gtest.h"
 
 static const int kOutputLineLength = 80;
@@ -61,25 +60,9 @@ static const char kCloseLabel[] = "TEST CLEAN UP";
 static const char kResultsLabel[] = "TEST RESULTS";
 
 
-TestBase::TestBase() : skip_(false), description_("") {
+TestBase::TestBase() : description_("") {
 }
 TestBase::~TestBase() {
-}
-
-bool TestBase::checkPlatformFiltering() {
-  std::string testName = std::string(
-      ::testing::UnitTest::GetInstance()->current_test_info()->
-          test_case_name()) + "." +
-      ::testing::UnitTest::GetInstance()->current_test_info()->name();
-
-  std::string skipReason;
-  if (!rocrtst::TestFilterManager::getInstance().
-          shouldRunTest(testName, &skipReason)) {
-    std::cout << "[ SKIPPED ] " << skipReason << '\n';
-    test_skipped_ = true;
-    return false;  // Test should be skipped
-  }
-  return true;  // Test should run
 }
 
 static void MakeHeaderStr(const char *inStr, std::string *outStr) {
@@ -101,8 +84,6 @@ void TestBase::SetupPrint() {
 }
 
 void TestBase::SetUp(void) {
-  if (!checkPlatformFiltering()) return;
-
   hsa_status_t err;
   SetupPrint();
   err = rocrtst::InitAndSetupHSA(this);
@@ -112,10 +93,6 @@ void TestBase::SetUp(void) {
 }
 
 void TestBase::Run(void) {
-  if (test_skipped_) {
-    return;  // Skip test execution if filtered out
-  }
-
   std::string label;
   MakeHeaderStr(kRunLabel, &label);
   printf("\n\t%s\n", label.c_str());
@@ -171,3 +148,4 @@ void TestBase::set_description(std::string d) {
     i = endlptr;
   }
 }
+

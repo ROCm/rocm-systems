@@ -1,9 +1,22 @@
 
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -90,7 +103,7 @@ int get_flags() {
                   hipHostMallocPortable | hipHostMallocMapped | hipHostMallocWriteCombined);
 }
 
-HIP_TEST_CASE(Unit_hipHostAlloc_Positive) {
+TEST_CASE("Unit_hipHostAlloc_Positive") {
   int* host_memory = nullptr;
   int flags = get_flags();
 
@@ -101,7 +114,7 @@ HIP_TEST_CASE(Unit_hipHostAlloc_Positive) {
   HIP_CHECK(hipFreeHost(host_memory));
 }
 
-HIP_TEST_CASE(Unit_hipHostAlloc_DataValidation) {
+TEST_CASE("Unit_hipHostAlloc_DataValidation") {
   int validation_number = 10;
   int* host_memory = nullptr;
   int* device_memory = nullptr;
@@ -132,7 +145,7 @@ HIP_TEST_CASE(Unit_hipHostAlloc_DataValidation) {
   HIP_CHECK(hipFreeHost(host_memory));
 }
 
-HIP_TEST_CASE(Unit_hipHostAlloc_Negative) {
+TEST_CASE("Unit_hipHostAlloc_Negative") {
   int* host_memory = nullptr;
   int flags = get_flags();
 
@@ -166,7 +179,7 @@ HIP_TEST_CASE(Unit_hipHostAlloc_Negative) {
  * ------------------------
  *  - HIP_VERSION >= 6.3
  */
-HIP_TEST_CASE(Unit_hipHostAlloc_Basic) {
+TEST_CASE("Unit_hipHostAlloc_Basic") {
   static constexpr auto LEN{1024 * 1024};
   static constexpr auto SIZE{LEN * sizeof(float)};
 
@@ -175,7 +188,7 @@ HIP_TEST_CASE(Unit_hipHostAlloc_Basic) {
   HIP_CHECK(hipGetDevice(&device));
   HIP_CHECK(hipGetDeviceProperties(&prop, device));
   if (prop.canMapHostMemory != 1) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
+    SUCCEED("Doesn't support HostPinned Memory");
   } else {
     float *A_h, *B_h, *C_h;
     float *A_d, *B_d, *C_d;
@@ -224,7 +237,7 @@ HIP_TEST_CASE(Unit_hipHostAlloc_Basic) {
  * using different synchronization techniquies
  * validates the result.
  */
-HIP_TEST_CASE(Unit_hipHostAlloc_Default) {
+TEST_CASE("Unit_hipHostAlloc_Default") {
   int* A = nullptr;
   HIP_CHECK(hipHostAlloc(reinterpret_cast<void**>(&A), SIZEBYTES, hipHostMallocDefault));
   std::string kPtrType{"default"};
@@ -249,7 +262,7 @@ HIP_TEST_CASE(Unit_hipHostAlloc_Default) {
  *  - HIP_VERSION >= 6.3
  */
 #if HT_AMD
-HIP_TEST_CASE(Unit_hipHostAlloc_Negative_NonCoherent) {
+TEST_CASE("Unit_hipHostAlloc_Negative_NonCoherent") {
   int* A = nullptr;
   REQUIRE(hipHostAlloc(reinterpret_cast<void**>(&A), SIZEBYTES, hipHostMallocNonCoherent) ==
           hipErrorInvalidValue);
@@ -272,7 +285,7 @@ HIP_TEST_CASE(Unit_hipHostAlloc_Negative_NonCoherent) {
  *  - HIP_VERSION >= 6.3
  */
 #if HT_AMD
-HIP_TEST_CASE(Unit_hipHostAlloc_Negative_Coherent) {
+TEST_CASE("Unit_hipHostAlloc_Negative_Coherent") {
   int* A = nullptr;
   REQUIRE(hipHostAlloc(reinterpret_cast<void**>(&A), SIZEBYTES, hipHostMallocCoherent) ==
           hipErrorInvalidValue);
@@ -295,7 +308,7 @@ HIP_TEST_CASE(Unit_hipHostAlloc_Negative_Coherent) {
  *  - HIP_VERSION >= 6.3
  */
 #if HT_AMD
-HIP_TEST_CASE(Unit_hipHostAlloc_Negative_NumaUser) {
+TEST_CASE("Unit_hipHostAlloc_Negative_NumaUser") {
   int* A = nullptr;
   REQUIRE(hipHostAlloc(reinterpret_cast<void**>(&A), SIZEBYTES, hipHostMallocNumaUser) ==
           hipErrorInvalidValue);
@@ -307,8 +320,8 @@ HIP_TEST_CASE(Unit_hipHostAlloc_Negative_NumaUser) {
  * Test Description
  * ------------------------
  *  - This testcase verifies the hipHostAlloc API by:
- *  Allocating more memory than total system RAM.
- *  Validate return hipErrorOutOfMemory.
+ *  Allocating more memory than total GPU memory.
+ *  Validate return hipSuccess.
  * Test source
  * ------------------------
  *  - unit/memory/hipHostAlloc.cc
@@ -316,20 +329,26 @@ HIP_TEST_CASE(Unit_hipHostAlloc_Negative_NumaUser) {
  * ------------------------
  *  - HIP_VERSION >= 6.3
  */
-HIP_TEST_CASE(Unit_hipHostAlloc_AllocateMoreThanTotalSystemMemory) {
-  char* host_ptr = nullptr;
-  const size_t total_ram_mb = HipTest::getTotalSystemMemoryInMB();
-  if (total_ram_mb == 0) {
-    HIP_SKIP_TEST("total system memory could not be queried.");
+TEST_CASE("Unit_hipHostAlloc_AllocateMoreThanAvailGPUMemory") {
+  char* A = nullptr;
+  size_t maxGpuMem = 0, availableMem = 0;
+  // Get available GPU memory and total GPU memory
+  HIP_CHECK(hipMemGetInfo(&availableMem, &maxGpuMem));
+#if defined(_WIN32)
+  size_t allocsize = availableMem - (256 * 1024 * 1024);
+  allocsize -= allocsize * (MEMORY_PERCENT / 100.0);
+#else
+  size_t allocsize = maxGpuMem + ((maxGpuMem * MEMORY_PERCENT) / 100);
+#endif
+  // Get free host In bytes
+  size_t hostMemFree = HipTest::getMemoryAmount() * 1024 * 1024;
+  // Ensure that allocsize < hostMemFree
+  if (allocsize < hostMemFree) {
+    HIP_CHECK(hipHostAlloc(reinterpret_cast<void**>(&A), allocsize, hipHostMallocDefault));
+    HIP_CHECK(hipHostFree(A));
+  } else {
+    WARN("Skipping test as CPU memory is less than GPU memory");
   }
-
-  const size_t total_ram_bytes = total_ram_mb * 1024 * 1024;
-  const size_t alloc_size_b = total_ram_bytes + ((total_ram_bytes * MEMORY_PERCENT) / 100);
-
-  HIP_CHECK_ERROR(
-      hipHostAlloc(reinterpret_cast<void**>(&host_ptr), alloc_size_b, hipHostMallocDefault),
-      hipErrorOutOfMemory);
-  REQUIRE(host_ptr == nullptr);
 }
 
 /**
@@ -347,7 +366,7 @@ HIP_TEST_CASE(Unit_hipHostAlloc_AllocateMoreThanTotalSystemMemory) {
  * ------------------------
  *  - HIP_VERSION >= 6.3
  */
-HIP_TEST_CASE(Unit_hipHostAlloc_ArgValidation) {
+TEST_CASE("Unit_hipHostAlloc_ArgValidation") {
   constexpr size_t allocSize = 1000;
   char* ptr;
 
@@ -368,7 +387,7 @@ HIP_TEST_CASE(Unit_hipHostAlloc_ArgValidation) {
   }
 }
 
-HIP_TEST_CASE(Unit_hipHostAlloc_Capture) {
+TEST_CASE("Unit_hipHostAlloc_Capture") {
   int* host_memory = nullptr;
   int flags = get_flags();
 

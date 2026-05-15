@@ -1,7 +1,3 @@
-# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
-#
-# SPDX-License-Identifier: MIT
-
 # The test must be with CMake 3.18 or above which supports LINK_LANGUAGE that is necessary for
 # Fortran build.
 cmake_minimum_required(VERSION 3.18.0)

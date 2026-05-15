@@ -1,8 +1,23 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 #include "vulkan_test.hh"
 #include "wait_semaphore_common.hh"
@@ -76,7 +91,7 @@ static hipError_t GraphExecSemaphoreSetParamsWaitWrapper(
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-HIP_TEST_CASE(Unit_hipGraphExecExternalSemaphoresWaitNodeSetParams_Positive_Basic) {
+TEST_CASE("Unit_hipGraphExecExternalSemaphoresWaitNodeSetParams_Positive_Basic") {
   WaitExternalSemaphoreCommon(GraphExecSemaphoreSetParamsWaitWrapper);
 }
 
@@ -97,7 +112,8 @@ HIP_TEST_CASE(Unit_hipGraphExecExternalSemaphoresWaitNodeSetParams_Positive_Basi
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-HIP_TEST_CASE(Unit_hipGraphExecExternalSemaphoresWaitNodeSetParams_Vulkan_Positive_Timeline_Semaphore) {
+TEST_CASE(
+    "Unit_hipGraphExecExternalSemaphoresWaitNodeSetParams_Vulkan_Positive_Timeline_Semaphore") {
   WaitExternalTimelineSemaphoreCommon(GraphExecSemaphoreSetParamsWaitWrapper);
 }
 #endif
@@ -116,7 +132,8 @@ HIP_TEST_CASE(Unit_hipGraphExecExternalSemaphoresWaitNodeSetParams_Vulkan_Positi
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-HIP_TEST_CASE(Unit_hipGraphExecExternalSemaphoresWaitNodeSetParams_Vulkan_Positive_Multiple_Semaphores) {
+TEST_CASE(
+    "Unit_hipGraphExecExternalSemaphoresWaitNodeSetParams_Vulkan_Positive_Multiple_Semaphores") {
   WaitExternalMultipleSemaphoresCommon(GraphExecSemaphoreSetParamsWaitWrapper);
 }
 
@@ -135,7 +152,7 @@ HIP_TEST_CASE(Unit_hipGraphExecExternalSemaphoresWaitNodeSetParams_Vulkan_Positi
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-HIP_TEST_CASE(Unit_hipGraphExecExternalSemaphoresWaitNodeSetParams_Vulkan_Negative_Parameters) {
+TEST_CASE("Unit_hipGraphExecExternalSemaphoresWaitNodeSetParams_Vulkan_Negative_Parameters") {
   hipGraph_t graph = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));
 

@@ -40,8 +40,7 @@ class HeapMemoryTestFixture : public ::testing::Test
     /**
      * @brief a heap memory object
      */
-    HIPAllocator alloc_{};
-    HeapMemoryType heap_mem_{alloc_};
+    HeapMemory<HIPAllocator> heap_mem_ {};
 };
 
 } // namespace rocshmem

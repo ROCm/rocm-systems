@@ -53,9 +53,6 @@ suppress_warnings = ["etoc.toctree"]
 
 numfig = False
 
-html_static_path = ["sphinx/static/css"]
-html_css_files = ["rocm_custom.css"]
-
 exclude_patterns = [
     "./doxygen/mainpage.md",
     "./understand/glossary.md",

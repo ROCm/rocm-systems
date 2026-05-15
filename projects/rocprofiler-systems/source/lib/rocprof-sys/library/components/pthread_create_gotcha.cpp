@@ -1,5 +1,24 @@
-// Copyright (c) Advanced Micro Devices, Inc.
-// SPDX-License-Identifier: MIT
+// MIT License
+//
+// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
 
 #include "library/components/pthread_create_gotcha.hpp"
 #include "core/config.hpp"
@@ -13,7 +32,6 @@
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
-#include <cstdint>
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/macros.hpp>
@@ -51,7 +69,7 @@ using category_region_t = tim::lightweight_tuple<category_region<category::pthre
 namespace
 {
 auto* is_shutdown   = new bool{ false };  // intentional data leak
-auto* bundles       = new std::map<std::int64_t, std::shared_ptr<bundle_t>>{};
+auto* bundles       = new std::map<int64_t, std::shared_ptr<bundle_t>>{};
 auto* bundles_mutex = new std::mutex{};
 auto  bundles_dtor  = scope::destructor{ []() {
     pthread_create_gotcha::shutdown();
@@ -63,7 +81,7 @@ auto  bundles_dtor  = scope::destructor{ []() {
 
 template <typename... Args>
 inline void
-start_bundle(bundle_t& _bundle, std::int64_t _tid, Args&&... _args)
+start_bundle(bundle_t& _bundle, int64_t _tid, Args&&... _args)
 {
     if(!get_use_timemory() && !get_use_perfetto()) return;
     LOG_TRACE("Starting bundle '{}' in thread {}...", _bundle.key(), _tid);
@@ -89,7 +107,7 @@ start_bundle(bundle_t& _bundle, std::int64_t _tid, Args&&... _args)
 
 template <typename... Args>
 inline void
-stop_bundle(bundle_t& _bundle, std::int64_t _tid, Args&&... _args)
+stop_bundle(bundle_t& _bundle, int64_t _tid, Args&&... _args)
 {
     if(!get_use_timemory() && !get_use_perfetto()) return;
 
@@ -156,15 +174,15 @@ pthread_create_gotcha::wrapper::operator()() const
 
     push_thread_state(ThreadState::Internal);
 
-    std::int64_t _tid         = -1;
-    void*        _ret         = nullptr;
-    auto         _is_sampling = false;
-    auto         _bundle      = std::shared_ptr<bundle_t>{};
-    auto         _signals     = std::set<int>{};
-    auto         _coverage    = (get_mode() == Mode::Coverage);
-    const auto&  _parent_info = thread_info::get(m_config.parent_tid, InternalTID);
-    const auto&  _info        = thread_info::init(m_config.offset);
-    auto _sequent_value       = _info->index_data ? _info->index_data->sequent_value : -1;
+    int64_t     _tid         = -1;
+    void*       _ret         = nullptr;
+    auto        _is_sampling = false;
+    auto        _bundle      = std::shared_ptr<bundle_t>{};
+    auto        _signals     = std::set<int>{};
+    auto        _coverage    = (get_mode() == Mode::Coverage);
+    const auto& _parent_info = thread_info::get(m_config.parent_tid, InternalTID);
+    const auto& _info        = thread_info::init(m_config.offset);
+    auto _sequent_value      = _info->index_data ? _info->index_data->sequent_value : -1;
     if(static_cast<size_t>(_sequent_value) >= ROCPROFSYS_MAX_THREADS)
     {
         static std::once_flag thread_limit_warning_flag;
@@ -479,7 +497,7 @@ pthread_create_gotcha::shutdown()
 }
 
 void
-pthread_create_gotcha::shutdown(std::int64_t _tid)
+pthread_create_gotcha::shutdown(int64_t _tid)
 {
     if(_tid == 0) shutdown();
 
@@ -495,21 +513,6 @@ pthread_create_gotcha::shutdown(std::int64_t _tid)
         itr->second.reset();
         bundles->erase(itr);
     }
-}
-
-std::mutex pthread_create_gotcha::s_mutex = {};
-
-void
-pthread_create_gotcha::pause()
-{
-    std::scoped_lock<std::mutex> _lk{ s_mutex };
-    pthread_create_gotcha_t::set_ready(false);
-}
-void
-pthread_create_gotcha::resume()
-{
-    std::scoped_lock<std::mutex> _lk{ s_mutex };
-    pthread_create_gotcha_t::set_ready(true);
 }
 
 void

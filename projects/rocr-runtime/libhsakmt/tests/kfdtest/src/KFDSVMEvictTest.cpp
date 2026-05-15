@@ -40,6 +40,7 @@ void KFDSVMEvictTest::SetUp() {
     ROUTINE_START
 
     KFDLocalMemoryTest::SetUp();
+
     SVMSetXNACKMode(GetParam());
 
     ROUTINE_END
@@ -74,7 +75,7 @@ HSAint32 KFDSVMEvictTest::GetBufferCounter(HSAuint64 vramSize, HSAuint64 vramBuf
      * KFD system memory limit is 15/16.
      */
     HSAint32 xnack_enable = 0;
-    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtGetXNACKMode, m_hsakmt_current_ctx, &xnack_enable));
+    EXPECT_SUCCESS(hsaKmtGetXNACKMode(&xnack_enable));
     if (!xnack_enable && size > (sysMemSize - (sysMemSize >> 4)))
         return 0;
 
@@ -234,13 +235,12 @@ TEST_P(KFDSVMEvictTest, BasicTest) {
 
     if (!SVMAPISupported())
         return;
-    if (m_is_xnack_supported) {
-        HSAint32 xnack_enable = 0;
-        EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtGetXNACKMode, g_baseTest->m_hsakmt_current_ctx, &xnack_enable));
-        if (!xnack_enable) {
-	        LOG() << std::hex << "Test is skipped with xnack off" << std::endl;
-                return;
-        }
+
+    HSAint32 xnack_enable = 0;
+    EXPECT_SUCCESS(hsaKmtGetXNACKMode(&xnack_enable));
+    if (!xnack_enable) {
+	    LOG() << std::hex << "Test is skipped with xnack off" << std::endl;
+            return;
     }
 
     HSAuint32 defaultGPUNode = m_NodeInfo.HsaDefaultGPUNode();
@@ -309,13 +309,12 @@ TEST_P(KFDSVMEvictTest, QueueTest) {
 
     if (!SVMAPISupported())
         return;
+
     HSAint32 xnack_enable = 0;
-    if (m_is_xnack_supported) {
-        EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtGetXNACKMode, g_baseTest->m_hsakmt_current_ctx, &xnack_enable));
-        if (!xnack_enable) {
-            LOG() << std::hex << "Test is skipped with xnack off" << std::endl;
-            return;
-        }
+    EXPECT_SUCCESS(hsaKmtGetXNACKMode(&xnack_enable));
+    if (!xnack_enable) {
+	LOG() << std::hex << "Test is skipped with xnack off" << std::endl;
+        return;
     }
 
     HSAuint32 defaultGPUNode = m_NodeInfo.HsaDefaultGPUNode();

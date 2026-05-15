@@ -158,9 +158,9 @@ def main():
     # Build pytest arguments; when frozen, load plugins explicitly if they are bundled
     args = list(sys.argv[1:])
     if getattr(sys, "frozen", False):
-        # xdist does not work when frozen (workers need a real Python, not this binary).
+        # xdist not loaded when frozen (workers need a real Python, not this binary).
         # Add -p without importing here so pytest loads plugins and can rewrite asserts.
-        plugins = ("pytest_timeout", "pytest_subtests")
+        plugins = ("pytest_order", "pytest_timeout", "pytest_subtests")
         prefix = []
         for name in plugins:
             prefix.extend(["-p", name])
@@ -206,7 +206,7 @@ build_pyinstaller() {
 
     # Install pytest plugins and optional deps needed for bundling
     echo "Installing pytest, plugins, and perfetto..."
-    pip install pytest pytest-subtests pytest-timeout perfetto
+    pip install pytest pytest-subtests pytest-timeout pytest-order perfetto
 
     # Create spec file for more control
     cat > "${SCRIPT_DIR}/rocprofsys_tests.spec" << SPEC_EOF
@@ -249,6 +249,8 @@ a = Analysis(
         'pytest_subtests',
         'pytest_subtests.plugin',
         'pytest_timeout',
+        'pytest_order',
+        'pytest_order.plugin',
         'rocprofsys',
         'rocprofsys.config',
         'rocprofsys.runners',
@@ -340,7 +342,7 @@ FROM quay.io/pypa/manylinux2014_x86_64
 
 # Install Python and pip
 RUN /opt/python/cp310-cp310/bin/python -m pip install --upgrade pip
-RUN /opt/python/cp310-cp310/bin/python -m pip install pyinstaller pytest pytest-subtests pytest-timeout perfetto
+RUN /opt/python/cp310-cp310/bin/python -m pip install pyinstaller pytest pytest-subtests pytest-timeout pytest-order perfetto
 
 # Set Python path
 ENV PATH="/opt/python/cp310-cp310/bin:$PATH"
@@ -382,6 +384,7 @@ a = Analysis(
         'pytest', '_pytest', '_pytest.assertion', '_pytest.config',
         '_pytest.fixtures', '_pytest.python',
         'pytest_subtests', 'pytest_subtests.plugin', 'pytest_timeout',
+        'pytest_order', 'pytest_order.plugin',
         'rocprofsys', 'rocprofsys.config', 'rocprofsys.runners',
         'rocprofsys.validators', 'rocprofsys.gpu', 'rocprofsys.capabilities',
         'perfetto',
@@ -564,9 +567,6 @@ def main():
     if not has_test_path:
         args.append(tests_dir)
 
-    # Change to tests directory so relative nodeids resolve correctly
-    os.chdir(tests_dir)
-
     # Print info
     print("=" * 60)
     print("rocprofiler-systems pytest runner")
@@ -584,16 +584,11 @@ if __name__ == "__main__":
 MAIN_EOF
 
     # Create the zipapp (don't use --main since we have __main__.py)
-    # --compress requires Python 3.11+
     cd "$BUILD_DIR"
-    COMPRESS_FLAG=""
-    if python3 -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)" 2>/dev/null; then
-        COMPRESS_FLAG="--compress"
-    fi
     python3 -m zipapp \
         --python "/usr/bin/env python3" \
         --output "${OUTPUT_DIR}/rocprofsys-tests.pyz" \
-        $COMPRESS_FLAG \
+        --compress \
         .
 
     # Make it executable
@@ -609,7 +604,7 @@ MAIN_EOF
     echo ""
     echo "Requirements on target machine:"
     echo "  - Python 3.8+"
-    echo "  - Install dependencies: pip install pytest pytest-subtests pytest-timeout"
+    echo "  - Install dependencies: pip install pytest pytest-subtests pytest-timeout pytest-order"
 }
 
 # Main build process
@@ -651,7 +646,7 @@ if [[ $BUILD_PYINSTALLER -eq 1 || $BUILD_PYINSTALLER_DOCKER -eq 1 ]]; then
 fi
 if [[ $BUILD_SHIV -eq 1 ]]; then
     echo "   Shiv:        python3 rocprofsys-tests.pyz -v"
-    echo "   (Requires: pip install pytest pytest-subtests pytest-timeout)"
+    echo "   (Requires: pip install pytest pytest-subtests pytest-timeout pytest-order)"
 fi
 echo ""
 echo "4. Common pytest options:"

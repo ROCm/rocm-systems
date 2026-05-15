@@ -33,7 +33,6 @@ set(CUID_SOURCES
     src/cuid_cpu.cc
     src/cuid_gpu.cc
     src/cuid_nic.cc
-    src/cuid_npu.cc
     src/cuid_platform.cc
     src/cuid_file.cc
     src/hmac.cc
@@ -49,7 +48,6 @@ set(CUID_HEADERS
     src/cuid_cpu.h
     src/cuid_gpu.h
     src/cuid_nic.h
-    src/cuid_npu.h
     src/cuid_platform.h
     src/cuid_file.h
     src/hmac.h

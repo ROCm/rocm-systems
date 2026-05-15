@@ -1,8 +1,21 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
+IMPLIED, INNCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANNY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 #include <hip_test_kernels.hh>
 #include <hip_test_common.hh>
@@ -36,7 +49,7 @@ static bool thread_results[NUMBER_OF_THREADS];
  *    - HIP_VERSION >= 5.6
  */
 
-HIP_TEST_CASE(Unit_hipStreamGetDevice_Negative) {
+TEST_CASE("Unit_hipStreamGetDevice_Negative") {
   hipStream_t stream;
 
   HIP_CHECK(hipStreamCreate(&stream));
@@ -61,7 +74,7 @@ HIP_TEST_CASE(Unit_hipStreamGetDevice_Negative) {
  *    - HIP_VERSION >= 5.6
  */
 
-HIP_TEST_CASE(Unit_hipStreamGetDevice_Usecase) {
+TEST_CASE("Unit_hipStreamGetDevice_Usecase", "[multigpu]") {
   int device_count = 0;
   HIP_CHECK(hipGetDeviceCount(&device_count));
   REQUIRE(device_count != 0);
@@ -155,7 +168,7 @@ static bool test_hipStreamGetDevice_MThread() {
   return status;
 }
 
-HIP_TEST_CASE(Unit_hipStreamGetDevice_MThread) { REQUIRE(true == test_hipStreamGetDevice_MThread()); }
+TEST_CASE("Unit_hipStreamGetDevice_MThread") { REQUIRE(true == test_hipStreamGetDevice_MThread()); }
 
 /**
  * Test Description
@@ -173,12 +186,13 @@ HIP_TEST_CASE(Unit_hipStreamGetDevice_MThread) { REQUIRE(true == test_hipStreamG
  *    - HIP_VERSION >= 5.6
  */
 
-HIP_TEST_CASE(Unit_hipStreamGetDevice_SetDiffDevice) {
+TEST_CASE("Unit_hipStreamGetDevice_SetDiffDevice", "[multigpu]") {
   hipDevice_t device_from_stream;
   int device_count = 0;
   HIP_CHECK(hipGetDeviceCount(&device_count));
   if (device_count < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
+    return;
   }
   for (int i = 0; i < device_count; ++i) {
     HIP_CHECK(hipSetDevice(i));
@@ -211,7 +225,7 @@ HIP_TEST_CASE(Unit_hipStreamGetDevice_SetDiffDevice) {
  *      Test to be run only on AMD machine as it's failing in CUDA.
  */
 #if HT_AMD
-HIP_TEST_CASE(Unit_hipStreamGetDevice_NullStream) {
+TEST_CASE("Unit_hipStreamGetDevice_NullStream", "[multigpu]") {
   int device_count = 0;
   HIP_CHECK(hipGetDeviceCount(&device_count));
   REQUIRE(device_count != 0);

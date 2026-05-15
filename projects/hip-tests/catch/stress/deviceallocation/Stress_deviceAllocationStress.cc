@@ -1,9 +1,21 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
-
+Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
@@ -328,7 +340,7 @@ static bool TestMemoryAllocationInLoop(int test_type, bool isMultikernel = false
 /**
  * Scenario: Test malloc till nullptr is returned using even chunksize.
  */
-HIP_TEST_CASE(Stress_deviceAllocation_malloc_Even) {
+TEST_CASE("Stress_deviceAllocation_malloc_Even") {
   REQUIRE(true == TestAllocationOfAllAvailableMemory(TEST_MALLOC_FREE, NO_ALLOCATION_ONHOST,
                                                      MEMORY_CHUNK_SIZE));
 }
@@ -336,7 +348,7 @@ HIP_TEST_CASE(Stress_deviceAllocation_malloc_Even) {
 /**
  * Scenario: Test malloc till nullptr is returned using odd chunksize.
  */
-HIP_TEST_CASE(Stress_deviceAllocation_malloc_Odd) {
+TEST_CASE("Stress_deviceAllocation_malloc_Odd") {
   REQUIRE(true == TestAllocationOfAllAvailableMemory(TEST_MALLOC_FREE, NO_ALLOCATION_ONHOST,
                                                      MEMORY_CHUNK_SIZE_ODD));
 }
@@ -344,7 +356,7 @@ HIP_TEST_CASE(Stress_deviceAllocation_malloc_Odd) {
 /**
  * Scenario: Test new till nullptr is returned using even chunksize.
  */
-HIP_TEST_CASE(Stress_deviceAllocation_new_Even) {
+TEST_CASE("Stress_deviceAllocation_new_Even") {
   REQUIRE(true == TestAllocationOfAllAvailableMemory(TEST_NEW_DELETE, NO_ALLOCATION_ONHOST,
                                                      MEMORY_CHUNK_SIZE));
 }
@@ -352,7 +364,7 @@ HIP_TEST_CASE(Stress_deviceAllocation_new_Even) {
 /**
  * Scenario: Test new till nullptr is returned using odd chunksize.
  */
-HIP_TEST_CASE(Stress_deviceAllocation_new_Odd) {
+TEST_CASE("Stress_deviceAllocation_new_Odd") {
   REQUIRE(true == TestAllocationOfAllAvailableMemory(TEST_NEW_DELETE, NO_ALLOCATION_ONHOST,
                                                      MEMORY_CHUNK_SIZE_ODD));
 }
@@ -362,7 +374,7 @@ HIP_TEST_CASE(Stress_deviceAllocation_new_Odd) {
  * is returned. Device memory is also allocated using hipmallocmanaged
  * from host.
  */
-HIP_TEST_CASE(Stress_deviceAllocation_malloc_hipmallocmanaged) {
+TEST_CASE("Stress_deviceAllocation_malloc_hipmallocmanaged") {
   REQUIRE(true == TestAllocationOfAllAvailableMemory(
                       TEST_MALLOC_FREE, ALLOCATE_ONHOST_HIPMALLOCMANAGED, MEMORY_CHUNK_SIZE));
 }
@@ -372,7 +384,7 @@ HIP_TEST_CASE(Stress_deviceAllocation_malloc_hipmallocmanaged) {
  * is returned. Device memory is also allocated using hipmallocmanaged
  * from host.
  */
-HIP_TEST_CASE(Stress_deviceAllocation_new_hipmallocmanaged) {
+TEST_CASE("Stress_deviceAllocation_new_hipmallocmanaged") {
   REQUIRE(true == TestAllocationOfAllAvailableMemory(
                       TEST_NEW_DELETE, ALLOCATE_ONHOST_HIPMALLOCMANAGED, MEMORY_CHUNK_SIZE));
 }
@@ -381,7 +393,7 @@ HIP_TEST_CASE(Stress_deviceAllocation_new_hipmallocmanaged) {
  * Scenario: This test checks device allocation using malloc till nullptr
  * is returned. Device memory is also allocated using hipmalloc from host.
  */
-HIP_TEST_CASE(Stress_deviceAllocation_malloc_hipmalloc) {
+TEST_CASE("Stress_deviceAllocation_malloc_hipmalloc") {
   REQUIRE(true == TestAllocationOfAllAvailableMemory(TEST_MALLOC_FREE, ALLOCATE_ONHOST_HIPMALLOC,
                                                      MEMORY_CHUNK_SIZE));
 }
@@ -390,7 +402,7 @@ HIP_TEST_CASE(Stress_deviceAllocation_malloc_hipmalloc) {
  * Scenario: This test checks device allocation using new till nullptr
  * is returned. Device memory is also allocated using hipmalloc from host.
  */
-HIP_TEST_CASE(Stress_deviceAllocation_new_hipmalloc) {
+TEST_CASE("Stress_deviceAllocation_new_hipmalloc") {
   REQUIRE(true == TestAllocationOfAllAvailableMemory(TEST_NEW_DELETE, ALLOCATE_ONHOST_HIPMALLOC,
                                                      MEMORY_CHUNK_SIZE));
 }
@@ -399,7 +411,7 @@ HIP_TEST_CASE(Stress_deviceAllocation_new_hipmalloc) {
  * Scenario: This test validates device allocation negative scenario
  * when size > available memory.
  */
-HIP_TEST_CASE(Stress_deviceAllocation_Negative) {
+TEST_CASE("Stress_deviceAllocation_Negative") {
   int *ret_d{nullptr}, *ret_h{nullptr};
   size_t avail = 0, tot = 0;
   HIP_CHECK(hipMemGetInfo(&avail, &tot));
@@ -428,7 +440,7 @@ HIP_TEST_CASE(Stress_deviceAllocation_Negative) {
  * Scenario: This test performs stress test of malloc/free in a loop
  * using single kernel.
  */
-HIP_TEST_CASE(Stress_deviceAllocation_malloc_loop_singlekernel) {
+TEST_CASE("Stress_deviceAllocation_malloc_loop_singlekernel") {
   REQUIRE(true == TestMemoryAllocationInLoop(TEST_MALLOC_FREE, false));
 }
 
@@ -436,7 +448,7 @@ HIP_TEST_CASE(Stress_deviceAllocation_malloc_loop_singlekernel) {
  * Scenario: This test performs stress test of new/delete in a loop
  * using single kernel.
  */
-HIP_TEST_CASE(Stress_deviceAllocation_new_loop_singlekernel) {
+TEST_CASE("Stress_deviceAllocation_new_loop_singlekernel") {
   REQUIRE(true == TestMemoryAllocationInLoop(TEST_NEW_DELETE, false));
 }
 
@@ -444,7 +456,7 @@ HIP_TEST_CASE(Stress_deviceAllocation_new_loop_singlekernel) {
  * Scenario: This test performs stress test of malloc/free in a loop
  * using multiple kernel.
  */
-HIP_TEST_CASE(Stress_deviceAllocation_malloc_loop_multkernel) {
+TEST_CASE("Stress_deviceAllocation_malloc_loop_multkernel") {
   REQUIRE(true == TestMemoryAllocationInLoop(TEST_MALLOC_FREE, true));
 }
 
@@ -452,6 +464,6 @@ HIP_TEST_CASE(Stress_deviceAllocation_malloc_loop_multkernel) {
  * Scenario: This test performs stress test of new/delete in a loop
  * using multiple kernel.
  */
-HIP_TEST_CASE(Stress_deviceAllocation_new_loop_multkernel) {
+TEST_CASE("Stress_deviceAllocation_new_loop_multkernel") {
   REQUIRE(true == TestMemoryAllocationInLoop(TEST_NEW_DELETE, true));
 }

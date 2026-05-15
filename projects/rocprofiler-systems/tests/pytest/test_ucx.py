@@ -1,5 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier:  MIT
 
 """
 UCX tests.
@@ -123,8 +123,7 @@ class TestUCX(RocprofsysTest):
             env=ucx_env,
             rewrite_args=REWRITE_ARGS,
             run_args=RUN_ARGS,
-            launcher="mpi",
-            num_procs=2,
+            mpi_ranks=2,
         )
         self.assert_regex(
             result,
@@ -159,12 +158,7 @@ class TestUCX(RocprofsysTest):
         SYS_RUN_PASS_REGEX = [r"ucx_gotcha|category::ucx|Using UCX|pml.*ucx"]
 
         result = self.run_test(
-            mode,
-            "mpi-send-recv",
-            env=ucx_env,
-            rewrite_args=REWRITE_ARGS,
-            launcher="mpi",
-            num_procs=2,
+            mode, "mpi-example", env=ucx_env, rewrite_args=REWRITE_ARGS, mpi_ranks=2
         )
         self.assert_regex(
             result,
@@ -203,8 +197,7 @@ class TestUCX(RocprofsysTest):
             env=ucx_mpip_env,
             rewrite_args=REWRITE_ARGS,
             run_args=RUN_ARGS,
-            launcher="mpi",
-            num_procs=2,
+            mpi_ranks=2,
         )
         self.assert_regex(
             result,
@@ -233,8 +226,7 @@ class TestUCX(RocprofsysTest):
             env=ucx_env,
             rewrite_args=REWRITE_ARGS,
             run_args=[msg_size],
-            launcher="mpi",
-            num_procs=2,
+            mpi_ranks=2,
         )
         self.assert_regex(
             result,
@@ -263,8 +255,7 @@ class TestUCX(RocprofsysTest):
             env=ucx_active_messages_env,
             rewrite_args=REWRITE_ARGS,
             run_args=RUN_ARGS,
-            launcher="mpi",
-            num_procs=2,
+            mpi_ranks=2,
         )
         self.assert_regex(
             result,

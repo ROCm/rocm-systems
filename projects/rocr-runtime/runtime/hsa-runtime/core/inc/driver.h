@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2023-2026, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -146,7 +146,6 @@ public:
                                       void **mem, size_t size,
                                       uint32_t node_id) = 0;
 
-  /// @brief Free memory allocated by @ref AllocateMemory.
   virtual hsa_status_t FreeMemory(void *mem, size_t size) = 0;
 
   /// @brief Create an agent dispatch queue with user-mode access rights.
@@ -158,13 +157,12 @@ public:
   /// if @p type is one of the SDMA queue types.
   /// @param[in] queue_addr Address of the queue's ring buffer.
   /// @param[in] queue_size_bytes Size of the queue's ring buffer in bytes.
-  /// @param[in] queue_metadata_size_bytes Size of the queue's metadata ring buffer in bytes.
   /// @param[in] event HsaEvent for event-driven callbacks.
   /// @param[out] queue_resource Queue resource information populated by the driver.
   virtual hsa_status_t CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
                                    HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id,
-                                   void* queue_addr, uint64_t queue_size_bytes, uint64_t queue_metadata_size_bytes,
-                                   HsaEvent* event, HsaQueueResource& queue_resource) const = 0;
+                                   void* queue_addr, uint64_t queue_size_bytes, HsaEvent* event,
+                                   HsaQueueResource& queue_resource) const = 0;
 
   /// @brief Destroy a queue.
   /// @param queue_id Kernel-mode driver's assigned queue ID.
@@ -198,7 +196,7 @@ public:
   virtual hsa_status_t AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
                                      uint32_t* first_gws) const = 0;
 
-  /// @brief Exports a memory object via dma-buf.
+  /// @brief Imports memory using dma-buf.
   ///
   /// @param[in] mem virtual address
   /// @param[in] size memory size in bytes
@@ -207,21 +205,13 @@ public:
   virtual hsa_status_t ExportDMABuf(void *mem, size_t size, int *dmabuf_fd,
                                     size_t *offset) = 0;
 
-  /// @brief Imports a memory object via dma-buf.
-  ///
-  /// @note The handle must be destroyed with @ref DestroyImportedShareableHandle.
+  /// @brief Imports a memory chunk via dma-buf.
   ///
   /// @param[in] dmabuf_fd dma-buf file descriptor
   /// @param[in] agent agent to import the memory for
   /// @param[out] handle handle to the imported memory
-  /// @param[in] mem address of existing buffer, used to bypass import
-  virtual hsa_status_t ImportDMABuf(int dmabuf_fd, const core::Agent& agent,
-                                    core::ShareableHandle* handle, void* mem = nullptr) = 0;
-
-  /// @brief Destroys the handle created during @ref ImportDMABuf.
-  ///
-  /// @param[in] handle handle of the object to release
-  virtual hsa_status_t DestroyImportedShareableHandle(core::ShareableHandle* handle) = 0;
+  virtual hsa_status_t ImportDMABuf(int dmabuf_fd, core::Agent &agent,
+                                    core::ShareableHandle &handle) = 0;
 
   /// @brief Maps the memory associated with the handle.
   ///
@@ -243,28 +233,21 @@ public:
   virtual hsa_status_t Unmap(core::ShareableHandle handle, void *mem,
                              size_t offset, size_t size) = 0;
 
-  /// @brief Maps the virtual address to the physical address and creates a handle to share this
-  /// mapping.
-  ///
-  /// @note The handle must be destroyed with @ref DestroyShareableHandle.
-  ///
+  /// @brief Get Shareable Memory Handle for physical memory
   /// @param[in] va virtual address
-  /// @param[in] mem physical memory handle
-  /// @param[in] size memory size in bytes
-  /// @param[in] agent agent associated with @p mem
+  /// @param[in] mem  physical memory handle
+  /// @param[in] size size of memory allocated in bytes
   /// @param[out] handle handle of the memory object
-  /// @param[out] offset memory offset in bytes
-  /// @param[out] drm_fd file descriptor
-  /// @param[out] drm_fd_offset offset in @p drm_fd
-  virtual hsa_status_t CreateShareableHandle(void* va, void* mem, size_t size,
-                                             const core::Agent& agent,
-                                             core::ShareableHandle* handle, uint64_t* offset,
-                                             int* drm_fd, uint64_t* drm_fd_offset) = 0;
+  virtual hsa_status_t GetShareableHandle(void* va, void* mem, size_t size,
+                                          core::ShareableHandle* handle) {
+    return HSA_STATUS_ERROR;
+  }
 
-  /// @brief Destroys the handle created during @ref CreateShareableHandle.
+  /// @brief Releases the object associated with the handle.
   ///
-  /// @param[in] handle handle of the object to destroy
-  virtual hsa_status_t DestroyShareableHandle(core::ShareableHandle* handle) = 0;
+  /// @param[in] handle handle of the object to release
+  virtual hsa_status_t
+  ReleaseShareableHandle(core::ShareableHandle &handle) = 0;
 
   /// @brief Acquire a streaming performance monitor on an agent.
   /// @param[in] preferred_node_id Node ID of the preferred agent.

@@ -1,8 +1,24 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc. All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 #include "hipClassKernel.h"
 
@@ -18,7 +34,7 @@ __global__ void ovldClassKernel(bool* result_ecd) {
   result_ecd[tid] = (tfo1.func1(10) == 20) && (tfo1.func1(10, 10) == 30);
 }
 
-HIP_TEST_CASE(Unit_hipClassKernel_Overload_Override) {
+TEST_CASE("Unit_hipClassKernel_Overload_Override") {
   bool *result_ecd, *result_ech;
   result_ech = AllocateHostMemory();
   result_ecd = AllocateDeviceMemory();
@@ -44,7 +60,7 @@ __global__ void friendClassKernel(bool* result_ecd) {
   result_ecd[tid] = (tfb1.showA() == 10);
 }
 
-HIP_TEST_CASE(Unit_hipClassKernel_Friend) {
+TEST_CASE("Unit_hipClassKernel_Friend") {
   bool* result_ecd;
   result_ecd = AllocateDeviceMemory();
   hipLaunchKernelGGL(friendClassKernel, dim3(BLOCKS), dim3(THREADS_PER_BLOCK), 0, 0, result_ecd);
@@ -59,7 +75,7 @@ __global__ void emptyClassKernel(bool* result_ecd) {
   result_ecd[tid] = (sizeof(testClassEmpty) == 1) && (&ob1 != &ob2);
 }
 
-HIP_TEST_CASE(Unit_hipClassKernel_Empty) {
+TEST_CASE("Unit_hipClassKernel_Empty") {
   bool *result_ecd, *result_ech;
   result_ech = AllocateHostMemory();
   result_ecd = AllocateDeviceMemory();
@@ -78,7 +94,7 @@ __global__ void sizeClassBKernel(bool* result_ecd) {
                     (sizeof(testSizeP3) == 8);
 }
 
-HIP_TEST_CASE(Unit_hipClassKernel_BSize) {
+TEST_CASE("Unit_hipClassKernel_BSize") {
   bool *result_ecd, *result_ech;
   result_ech = AllocateHostMemory();
   result_ecd = AllocateDeviceMemory();
@@ -95,7 +111,7 @@ __global__ void sizeClassKernel(bool* result_ecd) {
                     (sizeof(testSizeDerived2) == 20);
 }
 
-HIP_TEST_CASE(Unit_hipClassKernel_Size) {
+TEST_CASE("Unit_hipClassKernel_Size") {
   bool *result_ecd, *result_ech;
   result_ech = AllocateHostMemory();
   result_ecd = AllocateDeviceMemory();
@@ -115,7 +131,7 @@ __global__ void sizeVirtualClassKernel(bool* result_ecd, refStructSizes structSi
                     (structSizes.sizeOftestSizeDerMulti = sizeof(testSizeDerMulti));
 }
 
-HIP_TEST_CASE(Unit_hipClassKernel_Virtual) {
+TEST_CASE("Unit_hipClassKernel_Virtual") {
   bool *result_ecd, *result_ech;
   result_ech = AllocateHostMemory();
   result_ecd = AllocateDeviceMemory();
@@ -140,7 +156,7 @@ __global__ void passByValueKernel(testPassByValue obj, bool* result_ecd) {
   result_ecd[tid] = (obj.exI == 10) && (obj.exC == 'C');
 }
 
-HIP_TEST_CASE(Unit_hipClassKernel_Value) {
+TEST_CASE("Unit_hipClassKernel_Value") {
   bool *result_ecd, *result_ech;
   result_ech = AllocateHostMemory();
   result_ecd = AllocateDeviceMemory();

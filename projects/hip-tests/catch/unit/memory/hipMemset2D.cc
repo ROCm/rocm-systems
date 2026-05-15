@@ -1,7 +1,20 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
+ * Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
  */
 
 /**
@@ -30,7 +43,8 @@ static constexpr std::initializer_list<tupletype> tableItems{
 /**
  * Basic Functionality of hipMemset2D
  */
-HIP_TEST_CASE(Unit_hipMemset2D_BasicFunctional) {
+TEST_CASE("Unit_hipMemset2D_BasicFunctional") {
+  CHECK_IMAGE_SUPPORT
 
   constexpr int memsetval = 0x24;
   constexpr size_t numH = 256;
@@ -68,7 +82,8 @@ HIP_TEST_CASE(Unit_hipMemset2D_BasicFunctional) {
 /**
  * Basic Functionality of hipMemset2DAsync
  */
-HIP_TEST_CASE(Unit_hipMemset2DAsync_BasicFunctional) {
+TEST_CASE("Unit_hipMemset2DAsync_BasicFunctional") {
+  CHECK_IMAGE_SUPPORT
 
   constexpr int memsetval = 0x26;
   constexpr size_t numH = 256;
@@ -110,7 +125,8 @@ HIP_TEST_CASE(Unit_hipMemset2DAsync_BasicFunctional) {
 /**
  * Memset partial buffer with unique Width and Height
  */
-HIP_TEST_CASE(Unit_hipMemset2D_UniqueWidthHeight) {
+TEST_CASE("Unit_hipMemset2D_UniqueWidthHeight") {
+  CHECK_IMAGE_SUPPORT
 
   int width2D, height2D;
   int memsetWidth, memsetHeight;
@@ -164,7 +180,7 @@ HIP_TEST_CASE(Unit_hipMemset2D_UniqueWidthHeight) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-HIP_TEST_CASE(Unit_hipMemset2DAsync_capturehipMemset2DAsync) {
+TEST_CASE("Unit_hipMemset2DAsync_capturehipMemset2DAsync") {
   char *A_h, *B_h, *A_d;
   hipGraph_t graph{nullptr};
   hipGraphExec_t graphExec{nullptr};
@@ -223,7 +239,8 @@ HIP_TEST_CASE(Unit_hipMemset2DAsync_capturehipMemset2DAsync) {
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-HIP_TEST_CASE(Unit_hipMemset2D_Capture) {
+TEST_CASE("Unit_hipMemset2D_Capture") {
+  CHECK_IMAGE_SUPPORT
 
   constexpr int memsetval = 0x24;
   constexpr size_t numH = 256;

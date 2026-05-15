@@ -1,22 +1,37 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 #include "hip_module_common.hh"
 
 #include <hip_test_common.hh>
 #include <hip/hip_runtime_api.h>
 
-HIP_TEST_CASE(Unit_hipModuleGetFunction_Positive_Basic) {
+TEST_CASE("Unit_hipModuleGetFunction_Positive_Basic") {
   auto mg = ModuleGuard::InitModule("get_function_module.code");
   hipFunction_t kernel = nullptr;
   HIP_CHECK(hipModuleGetFunction(&kernel, mg.module(), "GlobalKernel"));
   REQUIRE(kernel != nullptr);
 }
 
-HIP_TEST_CASE(Unit_hipModuleGetFunction_Negative_Parameters) {
+TEST_CASE("Unit_hipModuleGetFunction_Negative_Parameters") {
   auto mg = ModuleGuard::InitModule("get_function_module.code");
   hipFunction_t kernel = nullptr;
 
@@ -56,11 +71,12 @@ HIP_TEST_CASE(Unit_hipModuleGetFunction_Negative_Parameters) {
 
 // Test description: Loading kernel function from different device than the one on which the module
 // is loaded
-HIP_TEST_CASE(Unit_hipModuleGetFunction_DiffDevice) {
+TEST_CASE("Unit_hipModuleGetFunction_DiffDevice", "[multigpu]") {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    SUCCEED("skipped the testcase as no of devices is less than 2");
+    return;
   }
 
   auto mg = ModuleGuard::InitModule("get_function_module.code");

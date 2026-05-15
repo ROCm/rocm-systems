@@ -89,7 +89,7 @@ typedef enum rocprofiler_status_t  // NOLINT(performance-enum-size)
                                                    ///< service that report incompatibility
     ROCPROFILER_STATUS_ERROR_OUT_OF_RESOURCES,     ///< The given resources are
                                                    ///< insufficient to complete operation
-    ROCPROFILER_STATUS_ERROR_CONFIG_NOT_FOUND,     ///< Could not find the counter profile
+    ROCPROFILER_STATUS_ERROR_PROFILE_NOT_FOUND,    ///< Could not find the counter profile
     ROCPROFILER_STATUS_ERROR_AGENT_DISPATCH_CONFLICT,  ///< Cannot enable both agent and dispatch
                                                        ///< counting in the same context.
     ROCPROFILER_STATUS_INTERNAL_NO_AGENT_CONTEXT,   ///< No agent context found, may not be an error
@@ -103,13 +103,7 @@ typedef enum rocprofiler_status_t  // NOLINT(performance-enum-size)
     ROCPROFILER_STATUS_ERROR_EXCEEDS_HW_LIMIT,          ///< Exceeds hardware limits for collection.
     ROCPROFILER_STATUS_ERROR_AGENT_ARCH_NOT_SUPPORTED,  ///< Agent HW architecture not supported.
     ROCPROFILER_STATUS_ERROR_PERMISSION_DENIED,         ///< Permission denied.
-    ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_REGISTER_VERSION,  ///< rocprofiler-register version is
-                                                             ///< incompatible. Late-start profiling
-                                                             ///< requires ROCm 7.0+.
     ROCPROFILER_STATUS_LAST,
-    ROCPROFILER_STATUS_ERROR_PROFILE_NOT_FOUND =
-        ROCPROFILER_STATUS_ERROR_CONFIG_NOT_FOUND,  ///< ROCPROFILER_STATUS_ERROR_PROFILE_NOT_FOUND
-                                                    ///< is deprecated
 } rocprofiler_status_t;
 
 /**

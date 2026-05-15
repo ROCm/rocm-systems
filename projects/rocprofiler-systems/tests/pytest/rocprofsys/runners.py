@@ -1,5 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier:  MIT
 
 """
 Test runners for different rocprofiler-systems instrumentation modes.
@@ -15,7 +15,6 @@ Provides classes for running tests with:
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from enum import Enum
 import os
 from pathlib import Path
 import shutil
@@ -24,13 +23,20 @@ from typing import Optional
 from .config import RocprofsysConfig
 
 
-def safe_remove(path: Path) -> None:
-    """Safely remove a file or directory, ignoring errors."""
+def _safe_remove_file(filepath: Path) -> None:
+    """Safely remove a file, ignoring errors."""
     try:
-        if path.is_dir():
-            shutil.rmtree(path)
-        elif path.is_file():
-            path.unlink()
+        if filepath.is_file():
+            filepath.unlink()
+    except OSError:
+        pass
+
+
+def _safe_remove_directory(dirpath: Path) -> None:
+    """Safely remove a directory recursively, ignoring errors."""
+    try:
+        if dirpath.is_dir():
+            shutil.rmtree(dirpath)
     except OSError:
         pass
 
@@ -128,11 +134,11 @@ class TestResult:
 
         # Clean up instrumented binaries
         for inst_file in self._instrumented_files:
-            safe_remove(inst_file)
+            _safe_remove_file(inst_file)
 
         # Clean up output directory
         if self.output_dir.exists():
-            safe_remove(self.output_dir)
+            _safe_remove_directory(self.output_dir)
 
     def cleanup_instrumented_binaries(self) -> None:
         """Clean up only the instrumented binary files."""
@@ -140,32 +146,16 @@ class TestResult:
             return
 
         for inst_file in self._instrumented_files:
-            safe_remove(inst_file)
+            _safe_remove_file(inst_file)
 
         # Also clean any .inst files in output directory
         if self.output_dir.exists():
             for inst_file in self.output_dir.glob("*.inst"):
-                safe_remove(inst_file)
+                _safe_remove_file(inst_file)
 
 
 class BaseRunner(ABC):
     """Abstract base class for test runners."""
-
-    class Launcher(str, Enum):
-        """Supported launcher types for multi-process test execution."""
-
-        MPI = "mpi"
-        SHMEM = "shmem"
-
-        def get_executable(self, capabilities) -> Optional[Path]:
-            return {
-                type(self).MPI: capabilities.mpiexec_exec,
-                type(self).SHMEM: capabilities.oshrun_exec,
-            }[self]
-
-        @property
-        def supports_oversubscribe_probe(self) -> bool:
-            return self is type(self).MPI
 
     def __init__(
         self,
@@ -174,35 +164,21 @@ class BaseRunner(ABC):
         target: str,
         output_dir: Path,
         run_args: Optional[list[str]] = None,
-        pre_run_args: Optional[list[str]] = None,
         env: Optional[dict[str, str]] = None,
         timeout: int = 300,
-        launcher: Optional[BaseRunner.Launcher | str] = None,
-        num_procs: int = 0,
+        mpi_ranks: int = 0,
         working_directory: Optional[Path] = None,
-        no_base_env: bool = False,
     ):
         self.config = config
         self.target = target
         self.target_exe = config.get_target_executable(target)
         self.output_dir = Path(output_dir)
         self.run_args = run_args or []
-        self.pre_run_args = pre_run_args or []
         self.timeout = timeout
-        try:
-            self.launcher = None if launcher is None else self.Launcher(launcher)
-        except ValueError as exc:
-            valid_launchers = ", ".join(_launcher.value for _launcher in self.Launcher)
-            raise ValueError(
-                f"Unknown launcher: {launcher!r}. Expected one of: {valid_launchers}"
-            ) from exc
-        self.num_procs = num_procs
+        self.mpi_ranks = mpi_ranks
         self.working_directory = working_directory or config.rocprofsys_build_dir
         self.env = config.get_fundamental_environment()
-        if no_base_env:
-            self.env["LD_LIBRARY_PATH"] = config.get_library_path()
-        else:
-            self.env.update(base_env)
+        self.env.update(base_env)
         self.env["ROCPROFSYS_OUTPUT_PATH"] = str(self.output_dir)
         if env:
             self.env.update(env)
@@ -216,53 +192,37 @@ class BaseRunner(ABC):
         """
         pass
 
-    def _wrap_with_launcher(self, command: list[str]) -> list[str]:
-        """Wrap command with launcher if needed.
+    def _wrap_with_mpi(self, command: list[str]) -> list[str]:
+        """Wrap command with MPI launcher if needed.
 
         Args:
             command: Base command
 
         Returns:
-            Command wrapped with launcher if needed
+            Command wrapped with mpiexec if MPI is enabled
         """
-        if self.launcher is None or self.num_procs == 0:
-            return command
+        if self.mpi_ranks > 0 and self.config.mpiexec:
+            mpi_cmd = [
+                str(self.config.mpiexec),
+                "-n",
+                str(self.mpi_ranks),
+            ]
 
-        launcher_exec = self.launcher.get_executable(self.config.capabilities)
-
-        if launcher_exec is None:
-            return command
-
-        cmd = [
-            str(launcher_exec),
-            "-n",
-            str(self.num_procs),
-        ]
-
-        if self.launcher.supports_oversubscribe_probe:
             try:
                 result = subprocess.run(
-                    [str(launcher_exec), "--oversubscribe", "-n", "1", "true"],
+                    [str(self.config.mpiexec), "--oversubscribe", "-n", "1", "true"],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     timeout=5,
                 )
                 if result.returncode == 0:
-                    cmd.insert(1, "--oversubscribe")
+                    mpi_cmd.insert(1, "--oversubscribe")
             except (subprocess.TimeoutExpired, OSError):
                 pass
 
-        if self.launcher is type(self).Launcher.SHMEM and command:
-            # PRRTE-based oshrun (Open MPI >= 5.0) strips the first literal
-            # `--` from the program argv, breaking `rocprof-sys-run -- <binary>`.
-            # A second `--` survives, so insert a decoy right after the program
-            # name to absorb the strip. Older ORTE-based oshrun (4.x) preserves
-            # `--` and would forward the decoy verbatim, so gate on version.
-            oshrun_version = self.config.capabilities.oshrun_version
-            if oshrun_version is not None and oshrun_version[0] >= 5:
-                command = [command[0], "--"] + command[1:]
+            return mpi_cmd + command
 
-        return cmd + command
+        return command
 
     def run(self) -> TestResult:
         """Execute the test.
@@ -286,7 +246,7 @@ class BaseRunner(ABC):
                 duration=0,
             )
 
-        command = self._wrap_with_launcher(command)
+        command = self._wrap_with_mpi(command)
 
         start_time = time.time()
 
@@ -366,8 +326,8 @@ class BaselineRunner(BaseRunner):
 
     def build_command(self) -> list[str]:
         if self.command:
-            return self.pre_run_args + self.command + self.run_args
-        return self.pre_run_args + [str(self.target_exe)] + self.run_args
+            return self.command + self.run_args
+        return [str(self.target_exe)] + self.run_args
 
 
 class SamplingRunner(BaseRunner):
@@ -390,7 +350,7 @@ class SamplingRunner(BaseRunner):
             sample_args: Arguments for rocprof-sys-sample
             **kwargs: Additional arguments passed to BaseRunner
         """
-        base_env = config.get_base_environment()
+        base_env = config.get_base_binary_environment()
         super().__init__(config, base_env, target, output_dir, **kwargs)
         self.sample_args = sample_args or []
 
@@ -398,9 +358,7 @@ class SamplingRunner(BaseRunner):
         return (
             [str(self.config.rocprofsys_sample)]
             + self.sample_args
-            + ["--"]
-            + self.pre_run_args
-            + [str(self.target_exe)]
+            + ["--", str(self.target_exe)]
             + self.run_args
         )
 
@@ -429,7 +387,7 @@ class BinaryRewriteRunner(BaseRunner):
                 fixture handle cleanup after validation completes.
             **kwargs: Additional arguments passed to BaseRunner
         """
-        base_env = config.get_base_environment()
+        base_env = config.get_base_binary_environment()
         super().__init__(config, base_env, target, output_dir, **kwargs)
         self.rewrite_args = rewrite_args or []
         self.instrumented_exe = output_dir / f"{target}.inst"
@@ -499,13 +457,11 @@ class BinaryRewriteRunner(BaseRunner):
 
     def build_command(self) -> list[str]:
         """Build command to run the instrumented binary."""
-        return (
-            [str(self.config.rocprofsys_run)]
-            + ["--"]
-            + self.pre_run_args
-            + [str(self.instrumented_exe)]
-            + self.run_args
-        )
+        return [
+            str(self.config.rocprofsys_run),
+            "--",
+            str(self.instrumented_exe),
+        ] + self.run_args
 
     def run(self) -> TestResult:
         """Execute full rewrite + run sequence.
@@ -558,12 +514,12 @@ class BinaryRewriteRunner(BaseRunner):
             return
 
         for inst_file in self._instrumented_files:
-            safe_remove(inst_file)
+            _safe_remove_file(inst_file)
 
         # Also clean any .inst files in output directory
         if self.output_dir.exists():
             for inst_file in self.output_dir.glob("*.inst"):
-                safe_remove(inst_file)
+                _safe_remove_file(inst_file)
 
 
 class RuntimeInstrumentRunner(BaseRunner):
@@ -586,7 +542,7 @@ class RuntimeInstrumentRunner(BaseRunner):
             runtime_args: Arguments for rocprof-sys-instrument
             **kwargs: Additional arguments passed to BaseRunner
         """
-        base_env = config.get_base_environment()
+        base_env = config.get_base_binary_environment()
         super().__init__(config, base_env, target, output_dir, **kwargs)
         self.runtime_args = runtime_args or []
 
@@ -595,9 +551,7 @@ class RuntimeInstrumentRunner(BaseRunner):
             [str(self.config.rocprofsys_instrument)]
             + self.runtime_args
             + ["--print-instrumented", "functions"]
-            + ["--"]
-            + self.pre_run_args
-            + [str(self.target_exe)]
+            + ["--", str(self.target_exe)]
             + self.run_args
         )
 
@@ -622,7 +576,7 @@ class SysRunRunner(BaseRunner):
             sysrun_args: Arguments for rocprof-sys-run (before --)
             **kwargs: Additional arguments passed to BaseRunner
         """
-        base_env = config.get_base_environment()
+        base_env = config.get_base_binary_environment()
         super().__init__(config, base_env, target, output_dir, **kwargs)
         self.sysrun_args = sysrun_args or []
 
@@ -630,9 +584,7 @@ class SysRunRunner(BaseRunner):
         return (
             [str(self.config.rocprofsys_run)]
             + self.sysrun_args
-            + ["--"]
-            + self.pre_run_args
-            + [str(self.target_exe)]
+            + ["--", str(self.target_exe)]
             + self.run_args
         )
 
@@ -669,9 +621,7 @@ class CausalRunner(BaseRunner):
             [str(self.config.rocprofsys_causal)]
             + ["--reset", "-m", str(self.causal_mode)]
             + self.causal_args
-            + ["--"]
-            + self.pre_run_args
-            + [str(self.target_exe)]
+            + ["--", str(self.target_exe)]
             + self.run_args
         )
 
@@ -699,9 +649,7 @@ class PythonRunner(BaseRunner):
         self.profile_args = profile_args or []
 
     def build_command(self) -> list[str]:
-        python_executable = self.config.capabilities.get_python_executable(
-            self.python_version
-        )
+        python_executable = self.config.get_python_executable(self.python_version)
 
         command = [str(python_executable)]
         if not self.standalone:
@@ -711,5 +659,5 @@ class PythonRunner(BaseRunner):
             if self.annotated:
                 command.extend(["--annotate-trace"])
             command.extend(["--"])
-        command.extend(self.pre_run_args + [str(self.target_exe)] + self.run_args)
+        command.extend([str(self.target_exe), *self.run_args])
         return command

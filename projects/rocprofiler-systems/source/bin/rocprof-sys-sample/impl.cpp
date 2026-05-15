@@ -1,31 +1,11 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier:  MIT
 
 #include "rocprof-sys-sample.hpp"
 
-#include "common/delimit.hpp"
+#include "common/common_utils.hpp"
 #include "common/environment.hpp"
-#include "common/join.hpp"
-#include "common/setup.hpp"
+#include "common/path.hpp"
 
 #include <timemory/environment.hpp>
 #include <timemory/log/color.hpp>
@@ -34,7 +14,6 @@
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/join.hpp>
 
-#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -45,7 +24,10 @@
 #include <vector>
 
 namespace color = tim::log::color;
+namespace path  = rocprofsys::common::path;
 using namespace timemory::join;
+using rocprofsys::common::remove_env;
+using rocprofsys::common::update_mode;
 using tim::get_env;
 using tim::log::monochrome;
 using tim::log::stream;
@@ -53,8 +35,8 @@ using tim::log::stream;
 namespace
 {
 int  verbose          = 0;
-auto updated_envs     = std::set<std::string_view>{};
-auto original_envs    = std::set<std::string>{};
+auto updated_envs     = std::unordered_set<std::string_view>{};
+auto original_envs    = std::unordered_set<std::string>{};
 auto clock_id_choices = []() {
     auto clock_name = [](std::string _v) {
         constexpr auto _clock_prefix = std::string_view{ "clock_" };
@@ -90,15 +72,6 @@ auto clock_id_choices = []() {
 }();
 }  // namespace
 
-std::string
-get_realpath(const std::string& _v)
-{
-    auto* _tmp = realpath(_v.c_str(), nullptr);
-    auto  _ret = std::string{ _tmp };
-    free(_tmp);
-    return _ret;
-}
-
 void
 print_command(const std::vector<char*>& _argv)
 {
@@ -122,47 +95,39 @@ get_initial_environment()
         }
     }
 
-    auto _dl_libpath   = get_realpath(get_internal_libpath("librocprof-sys-dl.so"));
-    auto _omni_libpath = get_realpath(get_internal_libpath("librocprof-sys.so"));
-    auto _libexecpath  = get_realpath(get_internal_script_path());
+    auto _dl_libpath = path::realpath(path::get_internal_libpath("librocprof-sys-dl.so"));
+    auto _omni_libpath = path::realpath(path::get_internal_libpath("librocprof-sys.so"));
+    auto _libexecpath  = path::realpath(path::get_internal_script_path());
+    auto _rootpath     = path::realpath(path::get_rocprofsys_root());
 
-    update_env(_env, "LD_PRELOAD", _dl_libpath, UPD_APPEND);
-    update_env(_env, "LD_LIBRARY_PATH", tim::filepath::dirname(_dl_libpath), UPD_APPEND);
-    update_env(_env, "ROCPROFSYS_SCRIPT_PATH", _libexecpath, UPD_REPLACE);
+    rocprofsys::common::update_env(_env, "ROCPROFSYS_ROOT", _rootpath,
+                                   update_mode::REPLACE, ":", updated_envs,
+                                   original_envs);
+    rocprofsys::common::update_env(_env, "LD_PRELOAD", _dl_libpath, update_mode::APPEND,
+                                   ":", updated_envs, original_envs);
+    rocprofsys::common::update_env(_env, "LD_LIBRARY_PATH",
+                                   tim::filepath::dirname(_dl_libpath),
+                                   update_mode::APPEND, ":", updated_envs, original_envs);
+    rocprofsys::common::update_env(_env, "ROCPROFSYS_SCRIPT_PATH", _libexecpath,
+                                   update_mode::REPLACE, ":", updated_envs,
+                                   original_envs);
+
+    // Discover LLVM libdir containing libomptarget.so and append to LD_LIBRARY_PATH
+    if(auto llvm_dir = rocprofsys::common::discover_llvm_libdir_for_ompt(verbose > 0);
+       !llvm_dir.empty())
+    {
+        rocprofsys::common::update_env(_env, "LD_LIBRARY_PATH", llvm_dir,
+                                       update_mode::APPEND, ":", updated_envs,
+                                       original_envs);
+    }
 
     auto _mode = get_env<std::string>("ROCPROFSYS_MODE", "sampling", false);
 
-    update_env(_env, "ROCPROFSYS_USE_SAMPLING", (_mode != "causal"));
+    rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_SAMPLING", (_mode != "causal"),
+                                   update_mode::REPLACE, ":", updated_envs,
+                                   original_envs);
 
-#if defined(ROCPROFSYS_USE_OMPT)
-    if(!getenv("OMP_TOOL_LIBRARIES"))
-        update_env(_env, "OMP_TOOL_LIBRARIES", _dl_libpath, UPD_APPEND);
-#endif
     return _env;
-}
-
-std::string
-get_internal_libpath(const std::string& _lib)
-{
-    auto _exe = std::string_view{ realpath("/proc/self/exe", nullptr) };
-    auto _pos = _exe.find_last_of('/');
-    auto _dir = std::string{ "./" };
-    if(_pos != std::string_view::npos) _dir = _exe.substr(0, _pos);
-    return rocprofsys::common::join("/", _dir, "..", "lib", _lib);
-}
-
-std::string
-get_internal_script_path(void)
-{
-    auto _exe = std::string_view{ realpath("/proc/self/exe", nullptr) };
-    auto _pos = _exe.find_last_of('/');
-    auto _dir = std::string{ "./" };
-    if(_pos != std::string_view::npos) _dir = _exe.substr(0, _pos);
-
-    auto _script_dir =
-        rocprofsys::common::join("/", _dir, "..", "libexec", "rocprofiler-systems");
-
-    return _script_dir;
 }
 
 void
@@ -212,75 +177,6 @@ print_updated_environment(std::vector<char*> _env)
     std::cerr << std::endl;
 }
 
-template <typename Tp>
-void
-update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_val,
-           update_mode&& _mode, std::string_view _join_delim)
-{
-    updated_envs.emplace(_env_var);
-
-    auto _prepend  = (_mode & UPD_PREPEND) == UPD_PREPEND;
-    auto _append   = (_mode & UPD_APPEND) == UPD_APPEND;
-    auto _weak_upd = (_mode & UPD_WEAK) == UPD_WEAK;
-
-    auto _key = join("", _env_var, "=");
-    for(auto& itr : _environ)
-    {
-        if(!itr) continue;
-        if(std::string_view{ itr }.find(_key) == 0)
-        {
-            if(_weak_upd)
-            {
-                // if the value has changed, do not update but allow overridding the value
-                // inherited from the initial env
-                if(original_envs.find(std::string{ itr }) == original_envs.end()) return;
-            }
-
-            if(_prepend || _append)
-            {
-                if(std::string_view{ itr }.find(join("", _env_val)) ==
-                   std::string_view::npos)
-                {
-                    auto _val = std::string{ itr }.substr(_key.length());
-                    free(itr);
-                    if(_prepend)
-                        itr =
-                            strdup(join('=', _env_var, join(_join_delim, _val, _env_val))
-                                       .c_str());
-                    else
-                        itr =
-                            strdup(join('=', _env_var, join(_join_delim, _env_val, _val))
-                                       .c_str());
-                }
-            }
-            else
-            {
-                free(itr);
-                itr = strdup(rocprofsys::common::join('=', _env_var, _env_val).c_str());
-            }
-            return;
-        }
-    }
-    _environ.emplace_back(
-        strdup(rocprofsys::common::join('=', _env_var, _env_val).c_str()));
-}
-
-void
-remove_env(std::vector<char*>& _environ, std::string_view _env_var)
-{
-    auto _key   = join("", _env_var, "=");
-    auto _match = [&_key](auto itr) { return std::string_view{ itr }.find(_key) == 0; };
-
-    _environ.erase(std::remove_if(_environ.begin(), _environ.end(), _match),
-                   _environ.end());
-
-    for(const auto& itr : original_envs)
-    {
-        if(std::string_view{ itr }.find(_key) == 0)
-            _environ.emplace_back(strdup(itr.c_str()));
-    }
-}
-
 std::vector<char*>
 parse_args(int argc, char** argv, std::vector<char*>& _env)
 {
@@ -288,7 +184,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
     using parser_err_t = typename parser_t::result_type;
 
     auto help_check = [](parser_t& p, int _argc, char** _argv) {
-        std::set<std::string> help_args = { "-h", "--help", "-?" };
+        std::unordered_set<std::string> help_args = { "-h", "--help", "-?" };
         return (p.exists("help") || _argc == 1 ||
                 (_argc > 1 && help_args.find(_argv[1]) != help_args.end()));
     };
@@ -310,12 +206,33 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         exit(_pec);
     };
 
-    auto* _dl_libpath =
-        realpath(get_internal_libpath("librocprof-sys-dl.so").c_str(), nullptr);
-    auto* _omni_libpath =
-        realpath(get_internal_libpath("librocprof-sys.so").c_str(), nullptr);
+    auto _dl_libpath = path::realpath(path::get_internal_libpath("librocprof-sys-dl.so"));
+    auto _omni_libpath = path::realpath(path::get_internal_libpath("librocprof-sys.so"));
 
-    auto parser = parser_t(argv[0]);
+    const auto* _desc = R"(
+Call-stack sampling profiler for applications without binary instrumentation.
+QUICK REFERENCE:
+  Presets:  --balanced (default), --profile-only (minimal), --trace-hpc (HPC/MPI), --workload-trace (GPU/ML)
+  Output:   Results saved to rocprof-sys-output/ directory
+  Visualize: Open perfetto-trace.proto in https://ui.perfetto.dev
+EXAMPLES:
+  Quick Start:
+    rocprof-sys-sample --balanced -- ./myapp
+  Workload-Specific Presets:
+    rocprof-sys-sample --trace-hpc -- ./hpc_app              # HPC/MPI/OpenMP
+    rocprof-sys-sample --workload-trace -- python train.py   # AI/ML/GPU workloads
+    rocprof-sys-sample --profile-only -- ./myapp             # Minimal overhead
+  Custom Configuration:
+    rocprof-sys-sample -f 100 --trace --hip-trace -- ./myapp
+    rocprof-sys-sample -o ./results myrun -- ./myapp
+    mpirun -n 4 rocprof-sys-sample --trace-hpc -- ./mpi_app
+PROFILING WORKFLOW:
+  1. Profile:   rocprof-sys-sample --balanced -- ./app
+  2. Analyze:   cat rocprof-sys-output/wall_clock.txt
+  3. Visualize: Open rocprof-sys-output/perfetto-trace.proto in ui.perfetto.dev
+)";
+
+    auto parser = parser_t(argv[0], _desc);
 
     parser.on_error([](parser_t&, const parser_err_t& _err) {
         stream(std::cerr, color::fatal()) << _err << "\n";
@@ -375,20 +292,426 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             auto _monochrome = p.get<bool>("monochrome");
             monochrome()     = _monochrome;
             p.set_use_color(!_monochrome);
-            update_env(_env, "ROCPROFSYS_MONOCHROME", (_monochrome) ? "1" : "0");
-            update_env(_env, "MONOCHROME", (_monochrome) ? "1" : "0");
+            rocprofsys::common::update_env(
+                _env, "ROCPROFSYS_MONOCHROME", (_monochrome) ? "1" : "0",
+                update_mode::REPLACE, ":", updated_envs, original_envs);
+            rocprofsys::common::update_env(_env, "MONOCHROME", (_monochrome) ? "1" : "0",
+                                           update_mode::REPLACE, ":", updated_envs,
+                                           original_envs);
         });
-    parser.add_argument({ "--debug" }, "Debug output")
+
+    parser.add_argument({ "--log-level" }, "Log level")
+        .max_count(1)
+        .dtype("string")
+        .choices({ "trace", "debug", "info", "warn", "error", "critical", "off" })
+        .action([&](parser_t& p) {
+            rocprofsys::common::update_env(
+                _env, "ROCPROFSYS_LOG_LEVEL", p.get<std::string>("log-level"),
+                update_mode::REPLACE, ":", updated_envs, original_envs);
+        });
+
+    parser.add_argument({ "--debug" }, "[DEPRECATED Use --log-level=debug] Debug output")
         .max_count(1)
         .action([&](parser_t& p) {
-            update_env(_env, "ROCPROFSYS_DEBUG", p.get<bool>("debug"));
+            rocprofsys::common::update_env(_env, "ROCPROFSYS_DEBUG", p.get<bool>("debug"),
+                                           update_mode::REPLACE, ":", updated_envs,
+                                           original_envs);
+
+            rocprofsys::common::update_env(_env, "ROCPROFSYS_LOG_LEVEL", "debug",
+                                           update_mode::REPLACE, ":", updated_envs,
+                                           original_envs);
         });
-    parser.add_argument({ "-v", "--verbose" }, "Verbose output")
+    parser
+        .add_argument({ "-v", "--verbose" },
+                      "[DEPRECATED Use --log-level=trace] Verbose output")
         .count(1)
         .action([&](parser_t& p) {
             auto _v = p.get<int>("verbose");
             verbose = _v;
-            update_env(_env, "ROCPROFSYS_VERBOSE", _v);
+
+            rocprofsys::common::update_env(_env, "ROCPROFSYS_VERBOSE", _v,
+                                           update_mode::REPLACE, ":", updated_envs,
+                                           original_envs);
+
+            constexpr std::array<const char*, 5> log_levels = { "off", "info", "debug",
+                                                                "debug", "trace" };
+
+            auto index = std::clamp(_v + 1, 0, static_cast<int>(log_levels.size() - 1));
+            rocprofsys::common::update_env(_env, "ROCPROFSYS_LOG_LEVEL",
+                                           log_levels[index], update_mode::REPLACE, ":",
+                                           updated_envs, original_envs);
+        });
+
+    parser.start_group("PRESET MODES",
+                       "Simplified profiling presets for common use cases");
+    parser
+        .add_argument(
+            { "--balanced" },
+            "Balanced profiling mode: moderate overhead with comprehensive data "
+            "(tracing, call-stack profiling, and sampling at 50Hz)")
+        .max_count(1)
+        .dtype("bool")
+        .action([&](parser_t& p) {
+            if(p.get<bool>("balanced"))
+            {
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_TRACE", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_PROFILE", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_SAMPLING", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_FREQ", 50,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_PROCESS_SAMPLING",
+                                               true, update_mode::REPLACE, ":",
+                                               updated_envs, original_envs);
+            }
+        });
+    parser
+        .add_argument({ "--profile-only" },
+                      "Profiling-only mode: lightweight profiling without tracing "
+                      "(flat profile, minimal overhead)")
+        .max_count(1)
+        .dtype("bool")
+        .action([&](parser_t& p) {
+            if(p.get<bool>("profile-only"))
+            {
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_TRACE", false,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_PROFILE", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_SAMPLING", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_FREQ", 100,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_PROCESS_SAMPLING",
+                                               false, update_mode::REPLACE, ":",
+                                               updated_envs, original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_FLAT_PROFILE", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+            }
+        });
+    parser
+        .add_argument(
+            { "--detailed" },
+            "Detailed profiling mode: full trace, profile, hardware counters, and "
+            "process sampling")
+        .max_count(1)
+        .dtype("bool")
+        .action([&](parser_t& p) {
+            if(p.get<bool>("detailed"))
+            {
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_TRACE", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_PROFILE", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_SAMPLING", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_FREQ", 100,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_PROCESS_SAMPLING",
+                                               true, update_mode::REPLACE, ":",
+                                               updated_envs, original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_CPUS", "all",
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                auto* hip_visible_devices = getenv("HIP_VISIBLE_DEVICES");
+                if(hip_visible_devices && strlen(hip_visible_devices) > 0)
+                {
+                    rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_GPUS",
+                                                   std::string(hip_visible_devices),
+                                                   update_mode::REPLACE, ":",
+                                                   updated_envs, original_envs);
+                }
+            }
+        });
+    parser
+        .add_argument(
+            { "--trace-hpc" },
+            "HPC workload preset: optimized for MPI, OpenMP, and compute-intensive "
+            "applications with hardware counter collection")
+        .max_count(1)
+        .dtype("bool")
+        .action([&](parser_t& p) {
+            if(p.get<bool>("trace-hpc"))
+            {
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_TRACE", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_PROFILE", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_SAMPLING", false,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_FREQ", 100,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_PROCESS_SAMPLING",
+                                               true, update_mode::REPLACE, ":",
+                                               updated_envs, original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_OMPT", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_RCCL", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_KOKKOSP", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_MPIP", "true",
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_CPUS", "none",
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(
+                    _env, "ROCPROFSYS_ROCM_DOMAINS",
+                    "hip_runtime_api,marker_api,kernel_dispatch,memory_copy,"
+                    "scratch_memory",
+                    update_mode::REPLACE, ":", updated_envs, original_envs);
+                rocprofsys::common::update_env(
+                    _env, "ROCPROFSYS_AMD_SMI_METRICS", "busy,temp,power,mem_usage",
+                    update_mode::REPLACE, ":", updated_envs, original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_PAPI_EVENTS",
+                                               "PAPI_TOT_INS,PAPI_TOT_CYC,PAPI_L3_TCM",
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+            }
+        });
+    parser
+        .add_argument({ "--workload-trace" },
+                      "General compute workload preset: optimized for AI/ML, HPC, and "
+                      "GPU workloads with "
+                      "comprehensive tracing and Python profiling")
+        .max_count(1)
+        .dtype("bool")
+        .action([&](parser_t& p) {
+            if(p.get<bool>("workload-trace"))
+            {
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_TRACE", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_PROFILE", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_SAMPLING", false,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_FREQ", 50,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_PROCESS_SAMPLING",
+                                               true, update_mode::REPLACE, ":",
+                                               updated_envs, original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_MPIP", "true",
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_CPUS", "none",
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(
+                    _env, "ROCPROFSYS_ROCM_DOMAINS",
+                    "hip_runtime_api,marker_api,kernel_dispatch,memory_copy,"
+                    "scratch_memory",
+                    update_mode::REPLACE, ":", updated_envs, original_envs);
+                rocprofsys::common::update_env(
+                    _env, "ROCPROFSYS_AMD_SMI_METRICS", "busy,temp,power,mem_usage",
+                    update_mode::REPLACE, ":", updated_envs, original_envs);
+                auto* hip_visible_devices = getenv("HIP_VISIBLE_DEVICES");
+                if(hip_visible_devices && strlen(hip_visible_devices) > 0)
+                {
+                    rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_GPUS",
+                                                   std::string(hip_visible_devices),
+                                                   update_mode::REPLACE, ":",
+                                                   updated_envs, original_envs);
+                }
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_ROCTRACER", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_TRACE_HIP_API", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_TRACE_HIP_ACTIVITY",
+                                               true, update_mode::REPLACE, ":",
+                                               updated_envs, original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_RCCL", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_ROCPD", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_PERFETTO_BUFFER_SIZE_KB",
+                                               2048000, update_mode::REPLACE, ":",
+                                               updated_envs, original_envs);
+            }
+        });
+    parser
+        .add_argument({ "--sys-trace" },
+                      "Comprehensive system API tracing: HIP API, HSA API, ROCTx, RCCL, "
+                      "rocDecode, rocJPEG, memory operations, and kernel dispatches")
+        .max_count(1)
+        .dtype("bool")
+        .action([&](parser_t& p) {
+            if(p.get<bool>("sys-trace"))
+            {
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_TRACE", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_PROFILE", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_ROCM", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(
+                    _env, "ROCPROFSYS_ROCM_DOMAINS",
+                    "hip_api,hsa_api,marker_api,rccl_api,memory_copy,"
+                    "scratch_memory,kernel_dispatch",
+                    update_mode::REPLACE, ":", updated_envs, original_envs);
+            }
+        });
+    parser
+        .add_argument(
+            { "--runtime-trace" },
+            "Runtime API tracing: HIP runtime API, ROCTx, RCCL, rocDecode, rocJPEG, "
+            "memory operations, and kernel dispatches (excludes HIP compiler and HSA "
+            "APIs)")
+        .max_count(1)
+        .dtype("bool")
+        .action([&](parser_t& p) {
+            if(p.get<bool>("runtime-trace"))
+            {
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_TRACE", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_PROFILE", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_ROCM", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(
+                    _env, "ROCPROFSYS_ROCM_DOMAINS",
+                    "hip_runtime_api,marker_api,rccl_api,memory_copy,"
+                    "scratch_memory,kernel_dispatch",
+                    update_mode::REPLACE, ":", updated_envs, original_envs);
+            }
+        });
+    parser
+        .add_argument(
+            { "--trace-gpu" },
+            "GPU workload analysis: trace with host functions, MPI, and device activity")
+        .max_count(1)
+        .dtype("bool")
+        .action([&](parser_t& p) {
+            if(p.get<bool>("trace-gpu"))
+            {
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_TRACE", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_PROFILE", false,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_ROCM", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_AMD_SMI", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_CPUS", "none",
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(
+                    _env, "ROCPROFSYS_ROCM_DOMAINS",
+                    "hip_runtime_api,marker_api,kernel_dispatch,memory_copy,"
+                    "scratch_memory",
+                    update_mode::REPLACE, ":", updated_envs, original_envs);
+            }
+        });
+    parser
+        .add_argument({ "--trace-openmp" },
+                      "OpenMP offload workloads: tracing with HSA domains enabled")
+        .max_count(1)
+        .dtype("bool")
+        .action([&](parser_t& p) {
+            if(p.get<bool>("trace-openmp"))
+            {
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_TRACE", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_PROFILE", false,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_ROCM", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(
+                    _env, "ROCPROFSYS_ROCM_DOMAINS",
+                    "hip_runtime_api,marker_api,kernel_dispatch,memory_copy,hsa_api",
+                    update_mode::REPLACE, ":", updated_envs, original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_OMPT", "YES",
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+            }
+        });
+    parser
+        .add_argument({ "--profile-mpi" }, "MPI communication latency profiling: flat "
+                                           "profiling with wall-clock per rank")
+        .max_count(1)
+        .dtype("bool")
+        .action([&](parser_t& p) {
+            if(p.get<bool>("profile-mpi"))
+            {
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_TRACE", false,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_PROFILE", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_FLAT_PROFILE", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_AMD_SMI", false,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_ROCM", false,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+            }
+        });
+    parser
+        .add_argument(
+            { "--trace-hw-counters" },
+            "Hardware counter collection: GPU performance counters during execution")
+        .max_count(1)
+        .dtype("bool")
+        .action([&](parser_t& p) {
+            if(p.get<bool>("trace-hw-counters"))
+            {
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_PROFILE", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_CPUS", "none",
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(
+                    _env, "ROCPROFSYS_ROCM_EVENTS", "VALUUtilization,Occupancy",
+                    update_mode::REPLACE, ":", updated_envs, original_envs);
+            }
         });
 
     parser.start_group("GENERAL OPTIONS",
@@ -397,9 +720,10 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         .min_count(0)
         .dtype("filepath")
         .action([&](parser_t& p) {
-            update_env(
+            rocprofsys::common::update_env(
                 _env, "ROCPROFSYS_CONFIG_FILE",
-                join(array_config{ ":" }, p.get<std::vector<std::string>>("config")));
+                join(array_config{ ":" }, p.get<std::vector<std::string>>("config")),
+                update_mode::REPLACE, ":", updated_envs, original_envs);
         });
     parser
         .add_argument({ "-o", "--output" },
@@ -409,14 +733,31 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         .max_count(2)
         .action([&](parser_t& p) {
             auto _v = p.get<std::vector<std::string>>("output");
-            update_env(_env, "ROCPROFSYS_OUTPUT_PATH", _v.at(0));
-            if(_v.size() > 1) update_env(_env, "ROCPROFSYS_OUTPUT_PREFIX", _v.at(1));
+            rocprofsys::common::update_env(_env, "ROCPROFSYS_OUTPUT_PATH", _v.at(0),
+                                           update_mode::REPLACE, ":", updated_envs,
+                                           original_envs);
+            if(_v.size() > 1)
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_OUTPUT_PREFIX", _v.at(1),
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
         });
     parser
         .add_argument({ "-T", "--trace" }, "Generate a detailed trace (perfetto output)")
         .max_count(1)
         .action([&](parser_t& p) {
-            update_env(_env, "ROCPROFSYS_TRACE", p.get<bool>("trace"));
+            rocprofsys::common::update_env(_env, "ROCPROFSYS_TRACE", p.get<bool>("trace"),
+                                           update_mode::REPLACE, ":", updated_envs,
+                                           original_envs);
+        });
+    parser
+        .add_argument({ "-L", "--trace-legacy" },
+                      "Use legacy direct mode for tracing instead of deferred trace "
+                      "generation (higher overhead)")
+        .max_count(1)
+        .action([&](parser_t& p) {
+            rocprofsys::common::update_env(
+                _env, "ROCPROFSYS_TRACE_LEGACY", p.get<bool>("trace-legacy"),
+                update_mode::REPLACE, ":", updated_envs, original_envs);
         });
     parser
         .add_argument(
@@ -425,7 +766,9 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         .max_count(1)
         .conflicts({ "flat-profile" })
         .action([&](parser_t& p) {
-            update_env(_env, "ROCPROFSYS_PROFILE", p.get<bool>("profile"));
+            rocprofsys::common::update_env(_env, "ROCPROFSYS_PROFILE",
+                                           p.get<bool>("profile"), update_mode::REPLACE,
+                                           ":", updated_envs, original_envs);
         });
     parser
         .add_argument({ "-F", "--flat-profile" },
@@ -433,8 +776,12 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         .max_count(1)
         .conflicts({ "profile" })
         .action([&](parser_t& p) {
-            update_env(_env, "ROCPROFSYS_PROFILE", p.get<bool>("flat-profile"));
-            update_env(_env, "ROCPROFSYS_FLAT_PROFILE", p.get<bool>("flat-profile"));
+            rocprofsys::common::update_env(
+                _env, "ROCPROFSYS_PROFILE", p.get<bool>("flat-profile"),
+                update_mode::REPLACE, ":", updated_envs, original_envs);
+            rocprofsys::common::update_env(
+                _env, "ROCPROFSYS_FLAT_PROFILE", p.get<bool>("flat-profile"),
+                update_mode::REPLACE, ":", updated_envs, original_envs);
         });
     parser
         .add_argument({ "-H", "--host" },
@@ -444,9 +791,16 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         .action([&](parser_t& p) {
             auto _h = p.get<bool>("host");
             auto _d = p.get<bool>("device");
-            update_env(_env, "ROCPROFSYS_USE_PROCESS_SAMPLING", _h || _d);
-            update_env(_env, "ROCPROFSYS_CPU_FREQ_ENABLED", _h);
-            if(_h) update_env(_env, "ROCPROFSYS_USE_AMD_SMI", _d);
+            rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_PROCESS_SAMPLING",
+                                           _h || _d, update_mode::REPLACE, ":",
+                                           updated_envs, original_envs);
+            rocprofsys::common::update_env(_env, "ROCPROFSYS_CPU_FREQ_ENABLED", _h,
+                                           update_mode::REPLACE, ":", updated_envs,
+                                           original_envs);
+            if(_h)
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_AMD_SMI", _d,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
         });
     parser
         .add_argument({ "-D", "--device" },
@@ -456,9 +810,16 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         .action([&](parser_t& p) {
             auto _h = p.get<bool>("host");
             auto _d = p.get<bool>("device");
-            update_env(_env, "ROCPROFSYS_USE_PROCESS_SAMPLING", _h || _d);
-            update_env(_env, "ROCPROFSYS_USE_AMD_SMI", _d);
-            if(_d) update_env(_env, "ROCPROFSYS_CPU_FREQ_ENABLED", _h);
+            rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_PROCESS_SAMPLING",
+                                           _h || _d, update_mode::REPLACE, ":",
+                                           updated_envs, original_envs);
+            rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_AMD_SMI", _d,
+                                           update_mode::REPLACE, ":", updated_envs,
+                                           original_envs);
+            if(_d)
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_CPU_FREQ_ENABLED", _h,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
         });
     parser
         .add_argument({ "-w", "--wait" },
@@ -466,8 +827,12 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
                       "'--sampling-wait'. See the descriptions for those two options.")
         .count(1)
         .action([&](parser_t& p) {
-            update_env(_env, "ROCPROFSYS_TRACE_DELAY", p.get<double>("wait"));
-            update_env(_env, "ROCPROFSYS_SAMPLING_DELAY", p.get<double>("wait"));
+            rocprofsys::common::update_env(_env, "ROCPROFSYS_TRACE_DELAY",
+                                           p.get<double>("wait"), update_mode::REPLACE,
+                                           ":", updated_envs, original_envs);
+            rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_DELAY",
+                                           p.get<double>("wait"), update_mode::REPLACE,
+                                           ":", updated_envs, original_envs);
         });
     parser
         .add_argument(
@@ -476,8 +841,12 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             "'--sampling-duration'. See the descriptions for those two options.")
         .count(1)
         .action([&](parser_t& p) {
-            update_env(_env, "ROCPROFSYS_TRACE_DURATION", p.get<double>("duration"));
-            update_env(_env, "ROCPROFSYS_SAMPLING_DURATION", p.get<double>("duration"));
+            rocprofsys::common::update_env(
+                _env, "ROCPROFSYS_TRACE_DURATION", p.get<double>("duration"),
+                update_mode::REPLACE, ":", updated_envs, original_envs);
+            rocprofsys::common::update_env(
+                _env, "ROCPROFSYS_SAMPLING_DURATION", p.get<double>("duration"),
+                update_mode::REPLACE, ":", updated_envs, original_envs);
         });
 
     parser.start_group("TRACING OPTIONS", "Specific options controlling tracing (i.e. "
@@ -489,8 +858,9 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         .count(1)
         .dtype("filepath")
         .action([&](parser_t& p) {
-            update_env(_env, "ROCPROFSYS_PERFETTO_FILE",
-                       p.get<std::string>("trace-file"));
+            rocprofsys::common::update_env(
+                _env, "ROCPROFSYS_PERFETTO_FILE", p.get<std::string>("trace-file"),
+                update_mode::REPLACE, ":", updated_envs, original_envs);
         });
     parser
         .add_argument({ "--trace-buffer-size" },
@@ -498,15 +868,19 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         .count(1)
         .dtype("KB")
         .action([&](parser_t& p) {
-            update_env(_env, "ROCPROFSYS_PERFETTO_BUFFER_SIZE_KB",
-                       p.get<int64_t>("trace-buffer-size"));
+            rocprofsys::common::update_env(_env, "ROCPROFSYS_PERFETTO_BUFFER_SIZE_KB",
+                                           p.get<int64_t>("trace-buffer-size"),
+                                           update_mode::REPLACE, ":", updated_envs,
+                                           original_envs);
         });
     parser.add_argument({ "--trace-fill-policy" }, _trace_policy_desc)
         .count(1)
         .choices({ "discard", "ring_buffer" })
         .action([&](parser_t& p) {
-            update_env(_env, "ROCPROFSYS_PERFETTO_FILL_POLICY",
-                       p.get<std::string>("trace-fill-policy"));
+            rocprofsys::common::update_env(_env, "ROCPROFSYS_PERFETTO_FILL_POLICY",
+                                           p.get<std::string>("trace-fill-policy"),
+                                           update_mode::REPLACE, ":", updated_envs,
+                                           original_envs);
         });
     parser
         .add_argument({ "--trace-wait" },
@@ -516,7 +890,9 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
                       "but that can changed via --trace-clock-id.")
         .count(1)
         .action([&](parser_t& p) {
-            update_env(_env, "ROCPROFSYS_TRACE_DELAY", p.get<double>("trace-wait"));
+            rocprofsys::common::update_env(
+                _env, "ROCPROFSYS_TRACE_DELAY", p.get<double>("trace-wait"),
+                update_mode::REPLACE, ":", updated_envs, original_envs);
         });
     parser
         .add_argument({ "--trace-duration" },
@@ -525,8 +901,9 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
                       "that can changed via --trace-clock-id.")
         .count(1)
         .action([&](parser_t& p) {
-            update_env(_env, "ROCPROFSYS_TRACE_DURATION",
-                       p.get<double>("trace-duration"));
+            rocprofsys::common::update_env(
+                _env, "ROCPROFSYS_TRACE_DURATION", p.get<double>("trace-duration"),
+                update_mode::REPLACE, ":", updated_envs, original_envs);
         });
     parser
         .add_argument(
@@ -536,9 +913,11 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             "and/or <DELAY>:<DURATION>:<REPEAT>:<CLOCK_ID>.")
         .min_count(1)
         .action([&](parser_t& p) {
-            update_env(_env, "ROCPROFSYS_TRACE_PERIODS",
-                       join(array_config{ ",", "", "" },
-                            p.get<std::vector<std::string>>("trace-periods")));
+            rocprofsys::common::update_env(
+                _env, "ROCPROFSYS_TRACE_PERIODS",
+                join(array_config{ ",", "", "" },
+                     p.get<std::vector<std::string>>("trace-periods")),
+                update_mode::REPLACE, ":", updated_envs, original_envs);
         });
     parser
         .add_argument(
@@ -551,8 +930,9 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             "rocprof-sys to auto-scale based on the number of threads.")
         .count(1)
         .action([&](parser_t& p) {
-            update_env(_env, "ROCPROFSYS_TRACE_PERIOD_CLOCK_ID",
-                       p.get<double>("trace-clock-id"));
+            rocprofsys::common::update_env(
+                _env, "ROCPROFSYS_TRACE_PERIOD_CLOCK_ID", p.get<double>("trace-clock-id"),
+                update_mode::REPLACE, ":", updated_envs, original_envs);
         })
         .choices(clock_id_choices.first)
         .choice_aliases(clock_id_choices.second);
@@ -567,12 +947,20 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         .choices({ "text", "json", "console" })
         .action([&](parser_t& p) {
             auto _v = p.get<std::set<std::string>>("profile");
-            update_env(_env, "ROCPROFSYS_PROFILE", true);
+            rocprofsys::common::update_env(_env, "ROCPROFSYS_PROFILE", true,
+                                           update_mode::REPLACE, ":", updated_envs,
+                                           original_envs);
             if(!_v.empty())
             {
-                update_env(_env, "ROCPROFSYS_TEXT_OUTPUT", _v.count("text") != 0);
-                update_env(_env, "ROCPROFSYS_JSON_OUTPUT", _v.count("json") != 0);
-                update_env(_env, "ROCPROFSYS_COUT_OUTPUT", _v.count("console") != 0);
+                rocprofsys::common::update_env(
+                    _env, "ROCPROFSYS_TEXT_OUTPUT", _v.count("text") != 0,
+                    update_mode::REPLACE, ":", updated_envs, original_envs);
+                rocprofsys::common::update_env(
+                    _env, "ROCPROFSYS_JSON_OUTPUT", _v.count("json") != 0,
+                    update_mode::REPLACE, ":", updated_envs, original_envs);
+                rocprofsys::common::update_env(
+                    _env, "ROCPROFSYS_COUT_OUTPUT", _v.count("console") != 0,
+                    update_mode::REPLACE, ":", updated_envs, original_envs);
             }
         });
 
@@ -585,9 +973,16 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         .max_count(2)
         .action([&](parser_t& p) {
             auto _v = p.get<std::vector<std::string>>("profile-diff");
-            update_env(_env, "ROCPROFSYS_DIFF_OUTPUT", true);
-            update_env(_env, "ROCPROFSYS_INPUT_PATH", _v.at(0));
-            if(_v.size() > 1) update_env(_env, "ROCPROFSYS_INPUT_PREFIX", _v.at(1));
+            rocprofsys::common::update_env(_env, "ROCPROFSYS_DIFF_OUTPUT", true,
+                                           update_mode::REPLACE, ":", updated_envs,
+                                           original_envs);
+            rocprofsys::common::update_env(_env, "ROCPROFSYS_INPUT_PATH", _v.at(0),
+                                           update_mode::REPLACE, ":", updated_envs,
+                                           original_envs);
+            if(_v.size() > 1)
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_INPUT_PREFIX", _v.at(1),
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
         });
 
     parser.start_group(
@@ -600,8 +995,9 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
                       "(number of interrupts per second)")
         .count(1)
         .action([&](parser_t& p) {
-            update_env(_env, "ROCPROFSYS_PROCESS_SAMPLING_FREQ",
-                       p.get<double>("process-freq"));
+            rocprofsys::common::update_env(
+                _env, "ROCPROFSYS_PROCESS_SAMPLING_FREQ", p.get<double>("process-freq"),
+                update_mode::REPLACE, ":", updated_envs, original_envs);
         });
     parser
         .add_argument({ "--process-wait" }, "Set the default wait time (i.e. delay) "
@@ -609,8 +1005,9 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
                                             "(in seconds of realtime)")
         .count(1)
         .action([&](parser_t& p) {
-            update_env(_env, "ROCPROFSYS_PROCESS_SAMPLING_DELAY",
-                       p.get<double>("process-wait"));
+            rocprofsys::common::update_env(
+                _env, "ROCPROFSYS_PROCESS_SAMPLING_DELAY", p.get<double>("process-wait"),
+                update_mode::REPLACE, ":", updated_envs, original_envs);
         });
     parser
         .add_argument(
@@ -618,8 +1015,10 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             "Set the duration of the host/device sampling (in seconds of realtime)")
         .count(1)
         .action([&](parser_t& p) {
-            update_env(_env, "ROCPROFSYS_SAMPLING_PROCESS_DURATION",
-                       p.get<double>("process-duration"));
+            rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_PROCESS_DURATION",
+                                           p.get<double>("process-duration"),
+                                           update_mode::REPLACE, ":", updated_envs,
+                                           original_envs);
         });
     parser
         .add_argument({ "--cpus" },
@@ -627,9 +1026,10 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         .dtype("int or range")
         .required({ "host" })
         .action([&](parser_t& p) {
-            update_env(
+            rocprofsys::common::update_env(
                 _env, "ROCPROFSYS_SAMPLING_CPUS",
-                join(array_config{ "," }, p.get<std::vector<std::string>>("cpus")));
+                join(array_config{ "," }, p.get<std::vector<std::string>>("cpus")),
+                update_mode::REPLACE, ":", updated_envs, original_envs);
         });
     parser
         .add_argument({ "--gpus" },
@@ -637,9 +1037,21 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         .dtype("int or range")
         .required({ "device" })
         .action([&](parser_t& p) {
-            update_env(
+            rocprofsys::common::update_env(
                 _env, "ROCPROFSYS_SAMPLING_GPUS",
-                join(array_config{ "," }, p.get<std::vector<std::string>>("gpus")));
+                join(array_config{ "," }, p.get<std::vector<std::string>>("gpus")),
+                update_mode::REPLACE, ":", updated_envs, original_envs);
+        });
+    parser
+        .add_argument({ "--ai-nics" },
+                      "AI NIC IDs for SMI queries. Comma-separated list.")
+        .dtype("string")
+        .required({ "device" })
+        .action([&](parser_t& p) {
+            rocprofsys::common::update_env(
+                _env, "ROCPROFSYS_SAMPLING_AINICS",
+                join(array_config{ "," }, p.get<std::vector<std::string>>("ai-nics")),
+                update_mode::REPLACE, ":", updated_envs, original_envs);
         });
 
     parser.start_group("GENERAL SAMPLING OPTIONS",
@@ -649,7 +1061,9 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
                                           "(number of interrupts per second)")
         .count(1)
         .action([&](parser_t& p) {
-            update_env(_env, "ROCPROFSYS_SAMPLING_FREQ", p.get<double>("freq"));
+            rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_FREQ",
+                                           p.get<double>("freq"), update_mode::REPLACE,
+                                           ":", updated_envs, original_envs);
         });
     parser
         .add_argument(
@@ -659,7 +1073,9 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             "delay of 1 second for CPU-clock sampler may not equal 1 second of realtime")
         .count(1)
         .action([&](parser_t& p) {
-            update_env(_env, "ROCPROFSYS_SAMPLING_DELAY", p.get<double>("sampling-wait"));
+            rocprofsys::common::update_env(
+                _env, "ROCPROFSYS_SAMPLING_DELAY", p.get<double>("sampling-wait"),
+                update_mode::REPLACE, ":", updated_envs, original_envs);
         });
     parser
         .add_argument(
@@ -669,8 +1085,9 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             "real-time duration... resulting in zero samples being taken")
         .count(1)
         .action([&](parser_t& p) {
-            update_env(_env, "ROCPROFSYS_SAMPLING_DURATION",
-                       p.get<double>("sampling-duration"));
+            rocprofsys::common::update_env(
+                _env, "ROCPROFSYS_SAMPLING_DURATION", p.get<double>("sampling-duration"),
+                update_mode::REPLACE, ":", updated_envs, original_envs);
         });
     parser
         .add_argument({ "-t", "--tids" },
@@ -679,8 +1096,10 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
                       "is assigned an atomically incrementing value.")
         .min_count(1)
         .action([&](parser_t& p) {
-            update_env(_env, "ROCPROFSYS_SAMPLING_TIDS",
-                       join(array_config{ ", " }, p.get<std::vector<int64_t>>("tids")));
+            rocprofsys::common::update_env(
+                _env, "ROCPROFSYS_SAMPLING_TIDS",
+                join(array_config{ ", " }, p.get<std::vector<int64_t>>("tids")),
+                update_mode::REPLACE, ":", updated_envs, original_envs);
         });
 
     parser.start_group(
@@ -690,21 +1109,29 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         .min_count(0)
         .action([&](parser_t& p) {
             auto _v = p.get<std::deque<std::string>>("cputime");
-            update_env(_env, "ROCPROFSYS_SAMPLING_CPUTIME", true);
+            rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_CPUTIME", true,
+                                           update_mode::REPLACE, ":", updated_envs,
+                                           original_envs);
             if(!_v.empty())
             {
-                update_env(_env, "ROCPROFSYS_SAMPLING_CPUTIME_FREQ", _v.front());
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_CPUTIME_FREQ",
+                                               _v.front(), update_mode::REPLACE, ":",
+                                               updated_envs, original_envs);
                 _v.pop_front();
             }
             if(!_v.empty())
             {
-                update_env(_env, "ROCPROFSYS_SAMPLING_CPUTIME_DELAY", _v.front());
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_CPUTIME_DELAY",
+                                               _v.front(), update_mode::REPLACE, ":",
+                                               updated_envs, original_envs);
                 _v.pop_front();
             }
             if(!_v.empty())
             {
-                update_env(_env, "ROCPROFSYS_SAMPLING_CPUTIME_TIDS",
-                           join(array_config{ "," }, _v));
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_CPUTIME_TIDS",
+                                               join(array_config{ "," }, _v),
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
             }
         });
 
@@ -712,21 +1139,29 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         .min_count(0)
         .action([&](parser_t& p) {
             auto _v = p.get<std::deque<std::string>>("realtime");
-            update_env(_env, "ROCPROFSYS_SAMPLING_REALTIME", true);
+            rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_REALTIME", true,
+                                           update_mode::REPLACE, ":", updated_envs,
+                                           original_envs);
             if(!_v.empty())
             {
-                update_env(_env, "ROCPROFSYS_SAMPLING_REALTIME_FREQ", _v.front());
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_REALTIME_FREQ",
+                                               _v.front(), update_mode::REPLACE, ":",
+                                               updated_envs, original_envs);
                 _v.pop_front();
             }
             if(!_v.empty())
             {
-                update_env(_env, "ROCPROFSYS_SAMPLING_REALTIME_DELAY", _v.front());
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_REALTIME_DELAY",
+                                               _v.front(), update_mode::REPLACE, ":",
+                                               updated_envs, original_envs);
                 _v.pop_front();
             }
             if(!_v.empty())
             {
-                update_env(_env, "ROCPROFSYS_SAMPLING_REALTIME_TIDS",
-                           join(array_config{ "," }, _v));
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_REALTIME_TIDS",
+                                               join(array_config{ "," }, _v),
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
             }
         });
 
@@ -735,18 +1170,20 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
                                                "mutex-locks", "spin-locks", "rw-locks",
                                                "rocm" };
 
-#if !defined(ROCPROFSYS_USE_MPI) && !defined(ROCPROFSYS_USE_MPI_HEADERS)
+#if(!defined(ROCPROFSYS_USE_MPI) || ROCPROFSYS_USE_MPI == 0) &&                          \
+    (!defined(ROCPROFSYS_USE_MPI_HEADERS) || ROCPROFSYS_USE_MPI_HEADERS == 0)
     _backend_choices.erase("mpip");
 #endif
 
-#if !defined(ROCPROFSYS_USE_OMPT)
+#if !defined(ROCPROFSYS_USE_OMPT) || ROCPROFSYS_USE_OMPT == 0
     _backend_choices.erase("ompt");
 #endif
 
-#if !defined(ROCPROFSYS_USE_ROCM)
+#if !defined(ROCPROFSYS_USE_ROCM) || ROCPROFSYS_USE_ROCM == 0
     _backend_choices.erase("rocm");
     _backend_choices.erase("amd-smi");
     _backend_choices.erase("rcclp");
+    _backend_choices.erase("ompt");
 #endif
 
     parser.start_group("BACKEND OPTIONS",
@@ -757,7 +1194,9 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         .action([&](parser_t& p) {
             auto _v      = p.get<std::set<std::string>>("include");
             auto _update = [&](const auto& _opt, bool _cond) {
-                if(_cond || _v.count("all") > 0) update_env(_env, _opt, true);
+                if(_cond || _v.count("all") > 0)
+                    rocprofsys::common::update_env(_env, _opt, true, update_mode::REPLACE,
+                                                   ":", updated_envs, original_envs);
             };
             _update("ROCPROFSYS_USE_KOKKOSP", _v.count("kokkosp") > 0);
             _update("ROCPROFSYS_USE_MPIP", _v.count("mpip") > 0);
@@ -769,11 +1208,10 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             _update("ROCPROFSYS_TRACE_THREAD_RW_LOCKS", _v.count("rw-locks") > 0);
             _update("ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS", _v.count("spin-locks") > 0);
 
-            if(_v.count("all") > 0 || _v.count("ompt") > 0)
-                update_env(_env, "OMP_TOOL_LIBRARIES", _dl_libpath, UPD_APPEND);
-
             if(_v.count("all") > 0 || _v.count("kokkosp") > 0)
-                update_env(_env, "KOKKOS_TOOLS_LIBS", _omni_libpath, UPD_APPEND);
+                rocprofsys::common::update_env(_env, "KOKKOS_TOOLS_LIBS", _omni_libpath,
+                                               update_mode::APPEND, ":", updated_envs,
+                                               original_envs);
         });
 
     parser.add_argument({ "-E", "--exclude" }, "Exclude data from these backends")
@@ -781,7 +1219,10 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         .action([&](parser_t& p) {
             auto _v      = p.get<std::set<std::string>>("exclude");
             auto _update = [&](const auto& _opt, bool _cond) {
-                if(_cond || _v.count("all") > 0) update_env(_env, _opt, false);
+                if(_cond || _v.count("all") > 0)
+                    rocprofsys::common::update_env(_env, _opt, false,
+                                                   update_mode::REPLACE, ":",
+                                                   updated_envs, original_envs);
             };
             _update("ROCPROFSYS_USE_KOKKOSP", _v.count("kokkosp") > 0);
             _update("ROCPROFSYS_USE_MPIP", _v.count("mpip") > 0);
@@ -793,17 +1234,8 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             _update("ROCPROFSYS_TRACE_THREAD_RW_LOCKS", _v.count("rw-locks") > 0);
             _update("ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS", _v.count("spin-locks") > 0);
 
-            // if(_v.count("all") > 0 || _v.count("rocprofiler") > 0)
-            // {
-            //     remove_env(_env, "ROCP_TOOL_LIB");
-            //     remove_env(_env, "ROCP_HSA_INTERCEPT");
-            // }
-
-            if(_v.count("all") > 0 || _v.count("ompt") > 0)
-                remove_env(_env, "OMP_TOOL_LIBRARIES");
-
             if(_v.count("all") > 0 || _v.count("kokkosp") > 0)
-                remove_env(_env, "KOKKOS_TOOLS_LIBS");
+                remove_env(_env, "KOKKOS_TOOLS_LIBS", original_envs);
         });
 
     parser.start_group("HARDWARE COUNTER OPTIONS", "See also: rocprof-sys-avail -H");
@@ -814,7 +1246,21 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         .action([&](parser_t& p) {
             auto _events =
                 join(array_config{ "," }, p.get<std::vector<std::string>>("cpu-events"));
-            update_env(_env, "ROCPROFSYS_PAPI_EVENTS", _events);
+            rocprofsys::common::update_env(_env, "ROCPROFSYS_PAPI_EVENTS", _events,
+                                           update_mode::REPLACE, ":", updated_envs,
+                                           original_envs);
+        });
+
+    parser
+        .add_argument({ "-G", "--gpu-events" },
+                      "Set the GPU hardware counter events to record (ref: "
+                      "`rocprof-sys-avail -H -c GPU`)")
+        .action([&](parser_t& p) {
+            auto _events =
+                join(array_config{ "," }, p.get<std::vector<std::string>>("gpu-events"));
+            rocprofsys::common::update_env(_env, "ROCPROFSYS_ROCM_EVENTS", _events,
+                                           update_mode::REPLACE, ":", updated_envs,
+                                           original_envs);
         });
 
     parser.start_group("MISCELLANEOUS OPTIONS", "");
@@ -823,8 +1269,9 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
                       "Include inline info in output when available")
         .max_count(1)
         .action([&](parser_t& p) {
-            update_env(_env, "ROCPROFSYS_SAMPLING_INCLUDE_INLINES",
-                       p.get<bool>("inlines"));
+            rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_INCLUDE_INLINES",
+                                           p.get<bool>("inlines"), update_mode::REPLACE,
+                                           ":", updated_envs, original_envs);
         });
 
     parser.add_argument({ "--hsa-interrupt" }, _hsa_interrupt_desc)
@@ -832,7 +1279,9 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         .dtype("int")
         .choices({ 0, 1 })
         .action([&](parser_t& p) {
-            update_env(_env, "HSA_ENABLE_INTERRUPT", p.get<int>("hsa-interrupt"));
+            rocprofsys::common::update_env(
+                _env, "HSA_ENABLE_INTERRUPT", p.get<int>("hsa-interrupt"),
+                update_mode::REPLACE, ":", updated_envs, original_envs);
         });
 
     parser.end_group();
@@ -863,13 +1312,43 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         throw std::runtime_error(_cerr.what());
 
     if(parser.exists("realtime") && !parser.exists("cputime"))
-        update_env(_env, "ROCPROFSYS_SAMPLING_CPUTIME", false);
+        rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_CPUTIME", false,
+                                       update_mode::REPLACE, ":", updated_envs,
+                                       original_envs);
     if(parser.exists("profile") && parser.exists("flat-profile"))
         throw std::runtime_error(
             "Error! '--profile' argument conflicts with '--flat-profile' argument");
 
-    free(_dl_libpath);
-    free(_omni_libpath);
+    auto active_presets = rocprofsys::common_utils::collect_active_presets(
+        parser, { "balanced", "profile-only", "detailed", "trace-hpc", "workload-trace",
+                  "sys-trace", "runtime-trace", "trace-gpu", "trace-openmp",
+                  "profile-mpi", "trace-hw-counters" });
+
+    const auto are_valid_presets =
+        rocprofsys::common_utils::validate_preset_modes(active_presets);
+
+    if(!are_valid_presets)
+    {
+        exit(EXIT_FAILURE);
+    }
+
+    if(parser.exists("hip-trace") && parser.get<bool>("hip-trace"))
+    {
+        rocprofsys::common_utils::warn_if_rocm_unavailable();
+    }
+
+    rocprofsys::common_utils::warn_if_gpu_preset_without_rocm(active_presets);
+
+    if(!active_presets.empty() && verbose >= 1)
+    {
+        rocprofsys::common_utils::print_pre_execution_info("sample", active_presets[0]);
+    }
 
     return _outv;
+}
+
+void
+add_torch_library_path(std::vector<char*>& envp, const std::vector<char*>& argv)
+{
+    rocprofsys::common::add_torch_library_path(envp, argv, verbose > 0, updated_envs);
 }

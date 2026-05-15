@@ -10,6 +10,8 @@
 #include "coop.h"
 #include "utility.h"
 
+#define __CUDACC__ 0
+
 struct ncclDevComm;
 typedef struct ncclDevComm ncclDevComm_t;
 

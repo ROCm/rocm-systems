@@ -1,7 +1,20 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
+   Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+   Permission is hereby granted, free of charge, to any person obtaining a copy
+   of this software and associated documentation files (the "Software"), to deal
+   in the Software without restriction, including without limitation the rights
+   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+   copies of the Software, and to permit persons to whom the Software is
+   furnished to do so, subject to the following conditions:
+   The above copyright notice and this permission notice shall be included in
+   all copies or substantial portions of the Software.
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INNCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANNY CLAIM, DAMAGES OR OTHER
+   LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+   OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+   THE SOFTWARE.
  */
 
 //  The following test case allocation, host access, device access of HMM
@@ -33,8 +46,7 @@ static bool IfTestPassed = true;
 // Kernel functions
 __global__ void KrnlWth2MemTypes(int* Hmm, int* Dptr, size_t n) {
   size_t index = blockIdx.x * blockDim.x + threadIdx.x;
-  size_t stride = blockDim.x * gridDim.x;
-  for (size_t i = index; i < n; i += stride) {
+  for (size_t i = index; i < n; i++) {
     Hmm[i] = Dptr[i] + 10;
   }
 }
@@ -106,9 +118,6 @@ static void LaunchKrnl4(size_t NumElms, int InitVal) {
     INFO("Data Mismatch observedafter the Kernel: KernelMul_MngdMem!!\n");
     REQUIRE(false);
   }
-  HIP_CHECK(hipFree(Hmm));
-  HIP_CHECK(hipFree(Dptr));
-  HIP_CHECK(hipStreamDestroy(strm));
   delete[] Hstptr;
 }
 
@@ -134,7 +143,7 @@ static int HmmAttrPrint() {
 //  The following test case allocation, host access, device access of HMM
 //   memory from size 1 to 10KB
 
-HIP_TEST_CASE(Stress_hipMallocManaged_MultiSize) {
+TEST_CASE("Stress_hipMallocManaged_MultiSize") {
   IfTestPassed = true;
   int managed = HmmAttrPrint();
   if (managed == 1) {
@@ -172,14 +181,16 @@ HIP_TEST_CASE(Stress_hipMallocManaged_MultiSize) {
     }
     HIP_CHECK(hipStreamDestroy(strm));
   } else {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    SUCCEED(
+        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
+        "attribute. Hence skipping the testing with Pass result.\n");
   }
 }
 
 // The following test case tests the behavior of kernel with a HMM memory and
 // hipMalloc memory
 
-HIP_TEST_CASE(Stress_hipMallocManaged_KrnlWth2MemTypes) {
+TEST_CASE("Stress_hipMallocManaged_KrnlWth2MemTypes") {
   IfTestPassed = true;
   int *Hmm = NULL, *Dptr = NULL, InitVal = 123;
   size_t NumElms = (1024 * 1024);
@@ -215,25 +226,29 @@ HIP_TEST_CASE(Stress_hipMallocManaged_KrnlWth2MemTypes) {
     delete[] Hptr;
     REQUIRE(IfTestPassed);
   } else {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    SUCCEED(
+        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
+        "attribute. Hence skipping the testing with Pass result.\n");
   }
 }
 
 
 // The following test case tests when the same Hmm memory is used for
 // launching multiple different kernels will results in any issue
-HIP_TEST_CASE(Stress_hipMallocManaged_MultiKrnlHmmAccess) {
+TEST_CASE("Stress_hipMallocManaged_MultiKrnlHmmAccess") {
   int managed = HmmAttrPrint();
   if (managed) {
     int InitVal = 123, NumElms = (1024 * 1024);
     LaunchKrnl4(NumElms, InitVal);
   } else {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    SUCCEED(
+        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
+        "attribute. Hence skipping the testing with Pass result.\n");
   }
 }
 
 // Testing the allocation of/scenarios around max possible memory
-HIP_TEST_CASE(Stress_hipMallocManaged_ExtremeSizes) {
+TEST_CASE("Stress_hipMallocManaged_ExtremeSizes") {
   int managed = HmmAttrPrint();
   if (managed == 1) {
     bool IfTestPassed = true;
@@ -308,6 +323,6 @@ HIP_TEST_CASE(Stress_hipMallocManaged_ExtremeSizes) {
     }
     REQUIRE(IfTestPassed);
   } else {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    SUCCEED("Gpu doesnt support HMM! Hence skipping the test with PASS result");
   }
 }

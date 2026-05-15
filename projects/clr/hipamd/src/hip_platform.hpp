@@ -1,9 +1,22 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+/* Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc.
 
+ Permission is hereby granted, free of charge, to any person obtaining a copy
+ of this software and associated documentation files (the "Software"), to deal
+ in the Software without restriction, including without limitation the rights
+ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ copies of the Software, and to permit persons to whom the Software is
+ furnished to do so, subject to the following conditions:
+
+ The above copyright notice and this permission notice shall be included in
+ all copies or substantial portions of the Software.
+
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ THE SOFTWARE. */
 #pragma once
 
 #include "hip_internal.hpp"
@@ -70,7 +83,7 @@ class PlatformState {
   bool CloseUniqueFileHandle(const std::shared_ptr<UniqueFD>& ufd);
 
   // Logging lock accessor
-  std::recursive_mutex& GetLogLock() { return lg_lock_; }
+  amd::Monitor& GetLogLock() { return lg_lock_; }
 
   // Friend functions for logging access
   friend hipError_t hipExtEnableLogging();
@@ -78,17 +91,17 @@ class PlatformState {
   friend hipError_t hipExtSetLoggingParams(size_t log_level, size_t log_size, size_t log_mask);
 
   inline bool RegisterLibraryFunction(const hipKernel_t f, const hipLibrary_t l) {
-    std::scoped_lock lock(lock_);
+    amd::ScopedLock lock(lock_);
     return library_functions_.try_emplace(f, l).second;
   }
 
   inline bool UnregisterLibraryFunction(const hipKernel_t f) {
-    std::scoped_lock lock(lock_);
+    amd::ScopedLock lock(lock_);
     return library_functions_.erase(f) > 0;
   }
 
   inline bool GetFunctionLibrary(const hipKernel_t f, hipLibrary_t* lib) {
-    std::scoped_lock lock(lock_);
+    amd::ScopedLock lock(lock_);
     auto it = library_functions_.find(f);
     if (it != library_functions_.end()) {
       *lib = it->second;
@@ -104,9 +117,9 @@ class PlatformState {
   PlatformState() : statCO_(*this), log_level_(0), log_size_(0), log_mask_(0) {}
   ~PlatformState() {}
 
-  std::recursive_mutex lock_;       //!< Guards PlatformState globals
-  std::recursive_mutex ufd_lock_;   //!< Unique FD Store Lock
-  std::recursive_mutex lg_lock_;    //!< Lock for logging operations
+  amd::Monitor lock_{true};         //!< Guards PlatformState globals
+  amd::Monitor ufd_lock_{true};     //!< Unique FD Store Lock
+  amd::Monitor lg_lock_{true};      //!< Lock for logging operations
   static PlatformState* platform_;  //!< Singleton instance
 
   //! Dynamic Code Object map, keyin module to get the corresponding object

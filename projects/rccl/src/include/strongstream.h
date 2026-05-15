@@ -129,7 +129,7 @@ struct ncclStrongStream {
 
 struct ncclCudaContext {
   struct ncclCudaContext* next;
-  int hcontext;
+  CUcontext hcontext;
   int refCount;
   struct ncclStrongStream launchOrder;
 };

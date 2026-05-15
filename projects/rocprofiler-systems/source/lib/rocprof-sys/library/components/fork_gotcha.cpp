@@ -1,5 +1,24 @@
-// Copyright (c) Advanced Micro Devices, Inc.
-// SPDX-License-Identifier: MIT
+// MIT License
+//
+// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
 
 #include "api.hpp"
 
@@ -30,9 +49,9 @@ namespace component
 namespace
 {
 // these are used to prevent handlers from executing multiple times
-thread_local bool prefork_lock         = false;
-thread_local bool postfork_parent_lock = false;
-thread_local bool postfork_child_lock  = false;
+bool prefork_lock         = false;
+bool postfork_parent_lock = false;
+bool postfork_child_lock  = false;
 
 // this does a quick exit (no cleanup) on child processes
 // because perfetto has a tendency to access memory it
@@ -63,11 +82,7 @@ prefork_setup()
                 "may result is segmentation fault");
     // TIMEMORY_CONDITIONAL_DEMANGLED_BACKTRACE(get_debug_env(), 16);
 
-    if(config::get_use_sampling())
-    {
-        sampling::block_samples();
-        sampling::prefork_lock_pmc_sampler();
-    }
+    if(config::get_use_sampling()) sampling::block_samples();
 
     rocprofsys::categories::disable_categories(config::get_enabled_categories());
 
@@ -85,11 +100,7 @@ postfork_parent()
     // Reinitialize AMD SMI in parent process to get fresh device handles before
     // unblocking the shutdown/setup transition. AMD SMI device handles may be corrupted
     // after fork.
-    if(config::get_use_sampling())
-    {
-        sampling::postfork_parent_reinit();
-        sampling::postfork_parent_unlock_pmc_sampler();
-    }
+    if(config::get_use_sampling()) sampling::postfork_parent_reinit();
 
     rocprofsys::categories::enable_categories(config::get_enabled_categories());
 
@@ -115,11 +126,7 @@ postfork_child()
     set_state(State::Finalized);
 
     // Clean up AMD SMI in child process before other shutdowns
-    if(config::get_use_sampling())
-    {
-        sampling::postfork_child_reset_pmc_sampler_lock();
-        sampling::postfork_child_cleanup();
-    }
+    if(config::get_use_sampling()) sampling::postfork_child_cleanup();
 
     settings::enabled() = false;
     settings::verbose() = -127;

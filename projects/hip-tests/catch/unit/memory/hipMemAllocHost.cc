@@ -1,14 +1,30 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 #include <hip_test_common.hh>
 
 static __global__ void write_integer(int* memory, int value) { *memory = value; }
 
-HIP_TEST_CASE(Unit_hipMemAllocHost_Positive) {
+TEST_CASE("Unit_hipMemAllocHost_Positive") {
   int* host_memory = nullptr;
   hipCtx_t ctx;
   hipDevice_t device;
@@ -21,7 +37,7 @@ HIP_TEST_CASE(Unit_hipMemAllocHost_Positive) {
   HIP_CHECK(hipCtxDestroy(ctx));
 }
 
-HIP_TEST_CASE(Unit_hipMemAllocHost_DataValidation) {
+TEST_CASE("Unit_hipMemAllocHost_DataValidation") {
   int validation_number = 10;
   int* host_memory = nullptr;
   hipEvent_t event = nullptr;
@@ -54,7 +70,7 @@ HIP_TEST_CASE(Unit_hipMemAllocHost_DataValidation) {
   HIP_CHECK(hipCtxDestroy(ctx));
 }
 
-HIP_TEST_CASE(Unit_hipMemAllocHost_Negative) {
+TEST_CASE("Unit_hipMemAllocHost_Negative") {
   int* host_memory = nullptr;
   hipCtx_t ctx;
   hipDevice_t device;
@@ -77,7 +93,7 @@ HIP_TEST_CASE(Unit_hipMemAllocHost_Negative) {
 /*
  * Verify that a device can read/write to the memory of another device
  */
-HIP_TEST_CASE(Unit_hipMemAllocHost_VerifyAccess) {
+TEST_CASE("Unit_hipMemAllocHost_VerifyAccess", "[multigpu]") {
   int devices_number = 0;
   HIP_CHECK(hipGetDeviceCount(&devices_number));
   std::vector<int*> devices_memories(devices_number);
@@ -91,12 +107,8 @@ HIP_TEST_CASE(Unit_hipMemAllocHost_VerifyAccess) {
                                     device_index));
 
     if (!support_unified_adressing) {
-      HIP_SKIP_TEST("unified addressing is not supported.");
+      HipTest::HIP_SKIP_TEST("Unified adressing is not supported.");
     }
-  }
-
-  for (int device_index = 0; device_index < devices_number; device_index++) {
-    HIP_CHECK(hipSetDevice(device_index));
 
     HIP_CHECK(hipCtxCreate(&devices_ctxs[device_index], 0, device_index));
     HIP_CHECK(
@@ -120,7 +132,7 @@ HIP_TEST_CASE(Unit_hipMemAllocHost_VerifyAccess) {
   }
 }
 
-HIP_TEST_CASE(Unit_hipMemAllocHost_Capture) {
+TEST_CASE("Unit_hipMemAllocHost_Capture") {
   int* host_memory = nullptr;
 
   hipError_t capture_error = hipSuccess;

@@ -1,8 +1,21 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 #include <hip_test_common.hh>
 
@@ -102,7 +115,7 @@ class TexObjectTestWrapper {
  *  - Textures supported on device
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipGetTexObjectResourceDesc_positive) {
+TEST_CASE("Unit_hipGetTexObjectResourceDesc_positive") {
   CHECK_IMAGE_SUPPORT;
   CTX_CREATE();
 
@@ -135,7 +148,7 @@ HIP_TEST_CASE(Unit_hipGetTexObjectResourceDesc_positive) {
  *  - Textures supported on device
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipGetTexObjectResourceDesc_Negative_Parameters) {
+TEST_CASE("Unit_hipGetTexObjectResourceDesc_Negative_Parameters") {
   CHECK_IMAGE_SUPPORT;
   CTX_CREATE();
 
@@ -187,7 +200,7 @@ HIP_TEST_CASE(Unit_hipGetTexObjectResourceDesc_Negative_Parameters) {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipGetTexObjectResourceViewDesc_positive) {
+TEST_CASE("Unit_hipGetTexObjectResourceViewDesc_positive") {
   CHECK_IMAGE_SUPPORT;
   CTX_CREATE();
   TexObjectTestWrapper* tex_obj_wrapper = new TexObjectTestWrapper(true);
@@ -220,7 +233,7 @@ HIP_TEST_CASE(Unit_hipGetTexObjectResourceViewDesc_positive) {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipGetTexObjectResourceViewDesc_Negative_Parameters) {
+TEST_CASE("Unit_hipGetTexObjectResourceViewDesc_Negative_Parameters") {
   CHECK_IMAGE_SUPPORT;
   CTX_CREATE();
   TexObjectTestWrapper* tex_obj_wrapper = new TexObjectTestWrapper(true);
@@ -272,7 +285,7 @@ HIP_TEST_CASE(Unit_hipGetTexObjectResourceViewDesc_Negative_Parameters) {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipGetTexObjectTextureDesc_positive) {
+TEST_CASE("Unit_hipGetTexObjectTextureDesc_positive") {
   CHECK_IMAGE_SUPPORT;
   CTX_CREATE();
 
@@ -306,7 +319,7 @@ HIP_TEST_CASE(Unit_hipGetTexObjectTextureDesc_positive) {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipGetTexObjectTextureDesc_Negative_Parameters) {
+TEST_CASE("Unit_hipGetTexObjectTextureDesc_Negative_Parameters") {
   CHECK_IMAGE_SUPPORT;
   CTX_CREATE();
 
@@ -354,7 +367,7 @@ HIP_TEST_CASE(Unit_hipGetTexObjectTextureDesc_Negative_Parameters) {
  *  - Textures supported on device
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipTexObjectDestroy_positive) {
+TEST_CASE("Unit_hipTexObjectDestroy_positive") {
   CHECK_IMAGE_SUPPORT;
   CTX_CREATE();
 

@@ -32,7 +32,6 @@
 #include <cstdlib>
 #include <fstream>
 #include <limits>
-#include <thread>
 #include <typeinfo>
 #include <utility>
 

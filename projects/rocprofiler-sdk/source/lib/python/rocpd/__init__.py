@@ -28,8 +28,7 @@ import os
 try:
     import ctypes
 
-    # RTLD_GLOBAL so Python + librocpd bind the same SQLite, avoiding mixed-lib symbol collisions
-    sqlite3lib = ctypes.CDLL("libsqlite3.so", mode=ctypes.RTLD_GLOBAL)
+    sqlite3lib = ctypes.CDLL("libsqlite3.so")
 except Exception:
     pass
 

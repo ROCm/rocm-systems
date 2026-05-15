@@ -10,9 +10,17 @@ rocDecode samples are available in the `rocDecode GitHub repository <https://git
 
 You can find a walkthrough of the ``videodecode.cpp`` sample at :doc:`Understanding the videodecode.cpp sample <../how-to/using-rocDecode-videodecode-sample>`.
 
-rocDecode is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. It can also be :doc:`built and installed from source <../install/rocDecode-build-and-install>`.
+All rocDecode packages, ``rocDecode``, ``rocdecode-dev``, ``rocdecode-host``, and ``rocdecode-test``, must be installed to use the rocDecode samples.
 
-FFmpeg development libraries must be installed to build and run samples. To run the installed CTest-based verification:
+If you're using a :doc:`package installer <../install/rocDecode-package-install>`, install ``rocdecode``, ``rocdecode-dev``, ``rocdecode-host``, and ``rocdecode-test``.
+
+If you're building and installing rocDecode from its :doc:`source code <../install/rocDecode-build-and-install>`, ``rocDecode-setup.py`` needs to be run with ``--developer`` set to ``ON``:
+
+.. code:: cpp
+
+   python3 rocDecode-setup.py --developer ON
+
+The ``rocDecode-test`` package needs to be built and installed as well:
 
 .. code:: shell
 

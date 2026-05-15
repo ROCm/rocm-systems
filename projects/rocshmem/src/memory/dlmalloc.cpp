@@ -27,15 +27,9 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 /* BEGIN AMD ROCSHMEM CHANGES */
 // To improve code coverage score, code for the following cases has been
 // stripped from imported dlmalloc.c:
-//   !ONLY_MSPACES; MALLOC_INSPECT_ALL; USE_LOCKS; DEBUG;
+//   !ONLY_MSPACES; MALLOC_INSPECT_ALL; USE_LOCKS; DEBUG; 
 #include "dlmalloc.hpp"
-#include "log.hpp"
 #include <cstdio>
-
-// Suppress GNU null pointer arithmetic warnings for dlmalloc's intentional
-// use of chunk2mem(0) for compile-time offset calculations
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wgnu-null-pointer-arithmetic"
 
 namespace rocshmem {
 
@@ -48,12 +42,14 @@ namespace rocshmem {
 #define NO_MALLOC_STATS 1
 
 #define USAGE_ERROR_ACTION(m, p) do {                                   \
-  LOG_ERROR_ABORT("Symmetric heap usage error detected, "               \
-                  "possibly at %p", p);                                 \
+  fprintf(stderr, "Symmetric heap usage error detected, "               \
+                  "possibly at %p\n", p);                               \
+  ABORT;                                                                \
 } while (0)
 
 #define CORRUPTION_ERROR_ACTION(m) do {                                 \
-  LOG_ERROR_ABORT("Symmetric heap data structure corruption found");    \
+  fprintf(stderr, "Symmetric heap data structure corruption found");    \
+  ABORT;                                                                \
 } while (0)
 
 #define DLMALLOC_EXPORT static
@@ -969,7 +965,7 @@ DLMALLOC_EXPORT int mspace_mallopt(int, int);
 #ifndef LACKS_ERRNO_H
 #include <errno.h>       /* for MALLOC_FAILURE_ACTION */
 #endif /* LACKS_ERRNO_H */
-#ifdef BUILD_DEBUG_TRACE_HOST
+#ifdef DEBUG
 #if ABORT_ON_ASSERT_FAILURE
 #undef assert
 #define assert(x) if(!(x)) ABORT
@@ -1165,7 +1161,7 @@ unsigned char _BitScanReverse(unsigned long *index, unsigned long mask);
     #define CALL_MREMAP(addr, osz, nsz, mv)     MFAIL
 #endif /* HAVE_MMAP && HAVE_MREMAP */
 
-/* mstate bit set if contiguous morecore disabled or failed */
+/* mstate bit set if continguous morecore disabled or failed */
 #define USE_NONCONTIGUOUS_BIT (4U)
 
 /* segment bit set in create_mspace_with_base */
@@ -1863,7 +1859,7 @@ static msegmentptr segment_holding(mstate m, char* addr) {
 }
 
 /* Return true if segment contains a segment link */
-[[maybe_unused]] static int has_segment_link(mstate m, msegmentptr ss) {
+static int has_segment_link(mstate m, msegmentptr ss) {
   msegmentptr sp = &m->seg;
   for (;;) {
     if ((char*)sp >= ss->base && (char*)sp < ss->base + ss->size)
@@ -2717,7 +2713,7 @@ static void add_segment(mstate m, char* tbase, size_t tsize, flag_t mmapped) {
   msegmentptr ss = (msegmentptr)(chunk2mem(sp));
   mchunkptr tnext = chunk_plus_offset(sp, ssize);
   mchunkptr p = tnext;
-  [[maybe_unused]] int nfences = 0;
+  int nfences = 0;
 
   /* reset top to new space */
   init_top(m, (mchunkptr)tbase, tsize - TOP_FOOT_SIZE);
@@ -2986,7 +2982,7 @@ static int sys_trim(mstate m, size_t pad) {
     if (m->topsize > pad) {
       /* Shrink top space in granularity-size units, keeping at least one */
       size_t unit = mparams.granularity;
-      [[maybe_unused]] size_t extra = ((m->topsize - pad + (unit - SIZE_T_ONE)) / unit -
+      size_t extra = ((m->topsize - pad + (unit - SIZE_T_ONE)) / unit -
                       SIZE_T_ONE) * unit;
       msegmentptr sp = segment_holding(m, (char*)m->top);
 
@@ -3593,7 +3589,7 @@ struct mallinfo mspace_mallinfo(mspace msp) {
 }
 #endif /* NO_MALLINFO */
 
-[[maybe_unused]] size_t mspace_usable_size(const void* mem) {
+size_t mspace_usable_size(const void* mem) {
   if (mem != 0) {
     mchunkptr p = mem2chunk(mem);
     if (is_inuse(p))
@@ -3602,7 +3598,7 @@ struct mallinfo mspace_mallinfo(mspace msp) {
   return 0;
 }
 
-[[maybe_unused]] int mspace_mallopt(int param_number, int value) {
+int mspace_mallopt(int param_number, int value) {
   return change_mparam(param_number, value);
 }
 
@@ -3851,10 +3847,10 @@ History:
         Wolfram Gloger (Gloger@lrz.uni-muenchen.de).
       * Use last_remainder in more cases.
       * Pack bins using idea from  colin@nyx10.cs.du.edu
-      * Use ordered bins instead of best-fit threshold
+      * Use ordered bins instead of best-fit threshhold
       * Eliminate block-local decls to simplify tracing and debugging.
       * Support another case of realloc via move into top
-      * Fix error occurring when initial sbrk_base not word-aligned.
+      * Fix error occuring when initial sbrk_base not word-aligned.
       * Rely on page size for units instead of SBRK_UNIT to
         avoid surprises about sbrk alignment conventions.
       * Add mallinfo, mallopt. Thanks to Raymond Nijssen
@@ -3946,19 +3942,16 @@ size_t DLMalloc::mspace_max_footprint(mspace msp) {
   return ::rocshmem::mspace_max_footprint(msp);
 }
 size_t DLMalloc::mspace_used(mspace msp) {
-  struct mallinfo mi{};
+  struct mallinfo mi{0};
   mi = mspace_mallinfo(msp);
   return mi.uordblks;
 }
 size_t DLMalloc::mspace_avail(mspace msp) {
-  struct mallinfo mi{};
+  struct mallinfo mi{0};
   mi = mspace_mallinfo(msp);
   return mi.fordblks;
 }
 #endif // MSPACES
 #endif // ROCSHMEM_ENCAPSULATE
 } // namespace rocshmem
-
-#pragma clang diagnostic pop
-
 /* END AMD ROCSHMEM CHANGES */

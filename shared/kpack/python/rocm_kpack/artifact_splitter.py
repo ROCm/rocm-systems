@@ -26,13 +26,7 @@ from rocm_kpack.binutils import BundledBinary, Toolchain
 from rocm_kpack.database_handlers import DatabaseHandler
 from rocm_kpack.kpack import PackedKernelArchive
 from rocm_kpack.compression import ZstdCompressor
-from rocm_kpack.kpack_transform import kpack_offload_binary, NotFatBinaryError
-
-
-def strip_target_features(target: str) -> str:
-    """Strip GPU target feature flags (e.g. 'gfx942:sramecc+:xnack-' -> 'gfx942')."""
-    colon_pos = target.find(":")
-    return target[:colon_pos] if colon_pos >= 0 else target
+from rocm_kpack.elf import kpack_offload_binary, NotFatBinaryError
 
 
 @dataclass
@@ -63,7 +57,6 @@ class FileClassificationVisitor:
         toolchain: Toolchain,
         database_handlers: Optional[List[DatabaseHandler]] = None,
         verbose: bool = False,
-        gpu_targets: Optional[Set[str]] = None,
     ):
         """
         Initialize the classification visitor.
@@ -72,12 +65,10 @@ class FileClassificationVisitor:
             toolchain: Toolchain instance for binary operations
             database_handlers: List of database handler instances
             verbose: Enable verbose output
-            gpu_targets: If set, only classify database files for these GPU targets
         """
         self.toolchain = toolchain
         self.database_handlers = database_handlers or []
         self.verbose = verbose
-        self.gpu_targets = gpu_targets
 
         # Accumulated results
         self.fat_binaries: List[Path] = []
@@ -97,38 +88,24 @@ class FileClassificationVisitor:
         if not file_path.is_file():
             return
 
-        # Check database handlers first — some files (e.g. MIOpen CK per-arch
-        # .so files) are also fat binaries, but compiled per-arch. Matching
-        # them here prevents them from entering the kpack processing path.
+        # Check if it's a fat binary
+        if is_fat_binary(file_path, self.toolchain):
+            self.fat_binaries.append(file_path)
+            if self.verbose:
+                print(f"  Found fat binary: {file_path.relative_to(prefix_path)}")
+            return
+
+        # Check database handlers
         for handler in self.database_handlers:
             arch = handler.detect(file_path, prefix_path)
             if arch:
-                if self.gpu_targets is not None and arch not in self.gpu_targets:
-                    if self.verbose:
-                        print(
-                            f"  Skipping {handler.name()} file for {arch} "
-                            f"(not in gpu_targets): {file_path.relative_to(prefix_path)}"
-                        )
-                    # Exclude from generic (per-arch content doesn't belong
-                    # there) but don't add to database_files_by_arch so no
-                    # per-arch artifact is created. The correct arch job will
-                    # produce this file. The return also prevents the file
-                    # from falling through to the fat binary / kpack path.
-                    self.exclude_from_generic.add(file_path)
-                    return
                 self.database_files_by_arch[arch].append((file_path, handler))
                 self.exclude_from_generic.add(file_path)
                 if self.verbose:
                     print(
                         f"  Found {handler.name()} database file for {arch}: {file_path.relative_to(prefix_path)}"
                     )
-                return  # First matching handler wins
-
-        # Check if it's a fat binary
-        if is_fat_binary(file_path, self.toolchain):
-            self.fat_binaries.append(file_path)
-            if self.verbose:
-                print(f"  Found fat binary: {file_path.relative_to(prefix_path)}")
+                break  # First matching handler wins
 
     def get_statistics(self) -> str:
         """Get a summary of classification results."""
@@ -217,7 +194,6 @@ class ArtifactSplitter:
         toolchain: Toolchain,
         database_handlers: Optional[List[DatabaseHandler]] = None,
         verbose: bool = False,
-        gpu_targets: Optional[List[str]] = None,
     ):
         """
         Initialize the artifact splitter.
@@ -227,16 +203,11 @@ class ArtifactSplitter:
             toolchain: Toolchain instance for binary operations
             database_handlers: Optional list of DatabaseHandler instances for kernel databases
             verbose: Enable verbose output
-            gpu_targets: If set, only create per-arch artifacts for these GPU targets.
-                         Target feature flags are stripped (e.g. 'gfx942:sramecc+:xnack-' -> 'gfx942').
         """
         self.artifact_prefix = artifact_prefix
         self.toolchain = toolchain
         self.database_handlers = database_handlers or []
         self.verbose = verbose
-        self.gpu_targets: Optional[Set[str]] = (
-            {strip_target_features(t) for t in gpu_targets} if gpu_targets else None
-        )
 
     def compute_kpack_search_pattern(self, binary_path: Path, prefix_root: Path) -> str:
         """
@@ -364,7 +335,7 @@ class ArtifactSplitter:
                         # Build source_binary_relpath with index suffix
                         # TOC always uses indexed format: "lib/foo.so#0", "lib/foo.so#1"
                         # This matches the co_index in wrapper's reserved1 field
-                        base_relpath = binary_path.relative_to(prefix_path).as_posix()
+                        base_relpath = str(binary_path.relative_to(prefix_path))
                         index = code_object_index[arch]
                         code_object_index[arch] += 1
                         indexed_relpath = f"{base_relpath}#{index}"
@@ -455,7 +426,6 @@ class ArtifactSplitter:
                 group_name=self.artifact_prefix,
                 gfx_arch_family=arch,  # Use specific arch, not family
                 gfx_arches=[arch],
-                compressor=ZstdCompressor(),
             )
 
             # Add kernels to archive
@@ -561,7 +531,7 @@ class ArtifactSplitter:
                     # Compute kernel_name to match TOC key format (without index):
                     # "{prefix}/{binary_relpath}" e.g. "rocrand/lib/librocrand.so.1.1"
                     # Runtime appends "#N" based on wrapper's reserved1 (co_index)
-                    binary_relpath = binary_path.relative_to(prefix_dir).as_posix()
+                    binary_relpath = binary_path.relative_to(prefix_dir)
                     kernel_name = f"{prefix}/{binary_relpath}"
 
                     # Add kpack search pattern and transform binary in one pass
@@ -713,10 +683,7 @@ class ArtifactSplitter:
 
             # Phase 1: Classify files using visitor
             classifier = FileClassificationVisitor(
-                self.toolchain,
-                self.database_handlers,
-                self.verbose,
-                gpu_targets=self.gpu_targets,
+                self.toolchain, self.database_handlers, self.verbose
             )
             self.scan_prefix(prefix_path, classifier)
 

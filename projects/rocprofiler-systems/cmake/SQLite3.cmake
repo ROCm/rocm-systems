@@ -1,6 +1,3 @@
-# Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier: MIT
-
 include_guard(GLOBAL)
 
 if(ROCPROFSYS_BUILD_SQLITE3)

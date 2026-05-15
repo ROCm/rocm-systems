@@ -18,10 +18,9 @@ THE SOFTWARE.
 */
 #include <hip_test_common.hh>
 
-static __global__ void f1(float *a) { *a = 1.0; }
+static __global__ void f1(float* a) { *a = 1.0; }
 
-template <typename T>
-static __global__ void f2(T *a) { *a = 1; }
+template <typename T> static __global__ void f2(T* a) { *a = 1; }
 
 /**
  * Defines
@@ -47,11 +46,11 @@ TEST_CASE("Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_Negative") {
   REQUIRE(ret != hipSuccess);
 
   ret = hipOccupancyMaxActiveBlocksPerMultiprocessor(&numBlock, f1, 0,
-                                         std::numeric_limits<std::size_t>::max());
+                                                     std::numeric_limits<std::size_t>::max());
   REQUIRE(ret != hipSuccess);
 
-  ret = hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(&numBlock, f1,
-                                  defBlkSize, 0, OccupancyDisableCachingOverride);
+  ret = hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(&numBlock, f1, defBlkSize, 0,
+                                                              OccupancyDisableCachingOverride);
   REQUIRE(ret == hipSuccess);
 }
 
@@ -73,7 +72,7 @@ TEST_CASE("Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_rangeValidation") {
 
   // Validate numBlock after passing dynSharedMemPerBlk
   HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(&numBlock, f1, blockSize,
-                                                           devProp.sharedMemPerBlock));
+                                                         devProp.sharedMemPerBlock));
 
   // Check if numBlocks and blockSize are within limits
   REQUIRE(numBlock > 0);
@@ -84,8 +83,7 @@ TEST_CASE("Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_templateInvocation"
   int blockSize = 32;
   int numBlock = 0;
 
-  HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor<void(*)(int *)>
-                                                  (&numBlock, f2, blockSize, 0));
+  HIP_CHECK(
+      hipOccupancyMaxActiveBlocksPerMultiprocessor<void (*)(int*)>(&numBlock, f2, blockSize, 0));
   REQUIRE(numBlock > 0);
 }
-

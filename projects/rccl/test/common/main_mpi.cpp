@@ -68,9 +68,7 @@ int main(int argc, char* argv[])
         MPIHelpers::restoreRankLogging(*rank_log_config);
     }
 
-    // MPI_Finalize is called by:
-    // 1. MPIEnvironment::TearDown() -> cleanup_mpi() (normal case)
-    // 2. MPIEnvironment destructor (safety net if TearDown fails or no tests match)
+    // MPI_Finalize called by MPIEnvironment destructor
     return ret_code;
 }
 

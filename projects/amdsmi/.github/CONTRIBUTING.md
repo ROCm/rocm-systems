@@ -28,36 +28,8 @@ for interacting with AMD GPUs.
 
 ## Coding Style ##
 
-We use [pre-commit](https://pre-commit.com/) hooks to enforce formatting.
-Install and run with:
-
-```bash
-pip install pre-commit
-pre-commit install
-pre-commit run --files ./**/*
-```
-
-### C/C++ ###
-
-Formatted with **clang-format** (Google style, 100 character line limit).
-See `.clang-format` for the full configuration.
-
-You can also format manually: `clang-format -i <path-to-source-file>`
-
-### Python ###
-
-Formatted and linted with **Ruff**. Configuration is in `pyproject.toml`.
-
-You can also run manually:
-
-```bash
-ruff check --fix .   # lint and auto-fix
-ruff format .        # format
-```
-
-### CMake ###
-
-Formatted with **gersemi** (cmake-format replacement).
+Please refer to `.clang-format`. It is suggested you use `pre-commit` tool.
+It mostly follows Google C++ formatting with 100 character line limit.
 
 ## Pull Request Guidelines ##
 
@@ -68,7 +40,7 @@ integration branch.
 ### Deliverables ###
 
 For each new file in repository,
-please include the licensing header:
+Please include the licensing header
 
     /*
      * =============================================================================
@@ -97,11 +69,16 @@ please include the licensing header:
 ### Process ###
 
 * Reviewers are listed in the CODEOWNERS file
-* All code must pass pre-commit checks before review
+* Code format guidelines
+
+AMD SMI uses the clang-format tool for formatting code in source files.
+The formatting style is captured in .clang-format which is located at
+the root of AMD SMI. These are different options to follow:
+
+   1. Using pre-commit and docker - `pre-commit run`
+   1. Using only clang-format - `clang-format -i \<path-to-the-source-file\>`
 
 ## References ##
 
 1. [pre-commit](https://github.com/pre-commit/pre-commit)
 1. [clang-format](https://clang.llvm.org/docs/ClangFormat.html)
-1. [Ruff](https://docs.astral.sh/ruff/)
-1. [gersemi](https://github.com/BlankSpruce/gersemi)

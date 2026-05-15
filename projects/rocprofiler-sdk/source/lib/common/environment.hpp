@@ -47,10 +47,7 @@ bool
 get_env(std::string_view, bool);
 
 template <typename Tp>
-Tp get_env(std::string_view,
-           Tp,
-           std::enable_if_t<std::is_integral<Tp>::value || std::is_floating_point<Tp>::value,
-                            sfinae> = {});
+Tp get_env(std::string_view, Tp, std::enable_if_t<std::is_integral<Tp>::value, sfinae> = {});
 
 int
 set_env(std::string_view, bool, int override = 0);
@@ -87,22 +84,20 @@ struct env_config
 {
     std::string env_name  = {};
     std::string env_value = {};
-    int         overwrite = 0;  // -1=only if set, 0=no overwrite, 1=overwrite
+    int         overwrite = 0;
 
     auto operator()(bool _verbose = false) const
     {
-        if(env_name.empty()) return -1;
-        // overwrite < 0: only modify if variable already exists
-        if(overwrite < 0 && ::std::getenv(env_name.c_str()) == nullptr)
-            return 0;
+        if(env_name.empty())
+            return -1;
         else if(_verbose)
         {
             ROCP_INFO << "[rocprofiler][set_env] setenv(\"" << env_name << "\", \"" << env_value
                       << "\", " << overwrite << ")\n";
         }
-        auto _ow = (overwrite < 0) ? 1 : overwrite;
-        return (env_value.empty() && _ow > 0) ? unsetenv(env_name.c_str())
-                                              : setenv(env_name.c_str(), env_value.c_str(), _ow);
+        return (env_value.empty() && overwrite > 0)
+                   ? unsetenv(env_name.c_str())
+                   : setenv(env_name.c_str(), env_value.c_str(), overwrite);
     }
 };
 
@@ -134,7 +129,7 @@ env_store::env_store(ContainerT<env_config, TailT...>&& _container)
     for(const auto& itr : _container)
     {
         m_original.emplace_back(env_config{itr.env_name, get_env(itr.env_name, ""), 1});
-        m_modified.emplace_back(env_config{itr.env_name, itr.env_value, itr.overwrite});
+        m_modified.emplace_back(env_config{itr.env_name, itr.env_value, 1});
     }
 }
 }  // namespace common

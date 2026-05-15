@@ -27,7 +27,6 @@
 #define _KFDCONTEXT_H_
 
 #include <stdint.h>
-#include <stdbool.h>
 
 struct hsa_kfd_topology_context;
 struct hsa_kfd_queue_context;
@@ -55,19 +54,6 @@ typedef struct _HsaKFDContext
 {
     /* File descriptor for the KFD device */
     int fd;
-    /*
-     * Primary kfd context flag.
-     * There is only one primary context per-process.
-     */
-    bool hsakmt_is_primary_ctx;
-
-    /*
-     * Indicates whether the SVM API is available for use
-     * in this context. True only if HSA_USE_SVM is not
-     * explicitly disabled (via env var) and all dGPUs in
-     * the topology report SVM API capability.
-     */
-    bool hsakmt_is_svm_api_supported;
 
     /* Topology context for managing system topology information */
     struct hsa_kfd_topology_context *topology_context;
@@ -88,23 +74,15 @@ typedef struct _HsaKFDContext
     struct hsa_kfd_perf_context *perf_context;
 } HsaKFDContext;
 
-/* Initialize a pre-allocated HsaKFDContext with the given fd.
- * Returns 0 on success, -1 on allocation failure.
- */
-int hsakmt_kfdcontext_init_context(int fd, HsaKFDContext *ctx);
-
-/*
- * Free all sub-context allocations. Also resets fd to -1 to
- * mark the context as invalid.
- * Does NOT free the HsaKFDContext struct itself;
- * the caller retains ownership.
- */
+// Initialize a pre-allocated HsaKFDContext with the given file descriptor
+void hsakmt_kfdcontext_init_context(int fd, HsaKFDContext *ctx);
+// Release all resources associated with the given KFD context
 void hsakmt_kfdcontext_clear_context(HsaKFDContext *ctx);
 
-int hsakmt_kfdcontext_init_fmm_context(HsaKFDContext *ctx);
-int hsakmt_kfdcontext_init_topology_context(HsaKFDContext *ctx);
-int hsakmt_kfdcontext_init_queue_context(HsaKFDContext *ctx);
-int hsakmt_kfdcontext_init_event_context(HsaKFDContext *ctx);
-int hsakmt_kfdcontext_init_debug_context(HsaKFDContext *ctx);
-int hsakmt_kfdcontext_init_perf_context(HsaKFDContext *ctx);
+struct hsa_kfd_topology_context *hsakmt_kfdcontext_get_topology_context(HsaKFDContext *ctx);
+struct hsa_kfd_fmm_context *hsakmt_kfdcontext_get_fmm_context(HsaKFDContext *ctx);
+struct hsa_kfd_queue_context *hsakmt_kfdcontext_get_queue_context(HsaKFDContext *ctx);
+struct hsa_kfd_event_context *hsakmt_kfdcontext_get_event_context(HsaKFDContext *ctx);
+struct hsa_kfd_debug_context *hsakmt_kfdcontext_get_debug_context(HsaKFDContext *ctx);
+struct hsa_kfd_perf_context *hsakmt_kfdcontext_get_perf_context(HsaKFDContext *ctx);
 #endif /* _KFDCONTEXT_H_ */

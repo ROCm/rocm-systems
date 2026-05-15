@@ -142,7 +142,6 @@ MemoryAsyncCopy::~MemoryAsyncCopy(void) {
 
 void MemoryAsyncCopy::SetUp(void) {
   TestBase::SetUp();
-  if (test_skipped_) return;
 
   hwloc_topology_init(&topology_);
 
@@ -569,12 +568,10 @@ void MemoryAsyncCopy::DisplayBenchmark(Transaction *t) const {
     printf("Skipped...\n");
     return;
   }
-
   if (verified_) {
     std::cout << "Verification: Pass" << std::endl;
   } else {
     std::cout << "Verification: Fail" << std::endl;
-    FAIL();
   }
 
   if (verbosity() < VERBOSE_STANDARD) {

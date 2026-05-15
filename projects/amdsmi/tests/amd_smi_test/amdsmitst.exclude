@@ -79,7 +79,7 @@ $BLACKLIST_ALL_ASICS\
 # /sys/class/kfd/kfd/topology/nodes/*/properties
 FILTER[90400]=\
 $BLACKLIST_ALL_ASICS\
-"amdsmitstReadOnly.TestVoltCurvRead:"
+"rsmitstReadOnly.TestVoltCurvRead"
 FILTER[90401]=${FILTER[90400]}
 FILTER[90402]=${FILTER[90400]}
 
@@ -98,3 +98,4 @@ FILTER[gfx1150]=${FILTER[strix_point]}
 FILTER[gfx1151]=${FILTER[strix_point]}
 FILTER[gfx1152]=${FILTER[strix_point]}
 FILTER[gfx1153]=${FILTER[strix_point]}
+

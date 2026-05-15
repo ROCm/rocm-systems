@@ -1,5 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier:  MIT
 
 """
 Lulesh tests.
@@ -9,8 +9,7 @@ from __future__ import annotations
 import pytest
 from conftest import RocprofsysTest
 
-# These binaries link against libgomp
-pytestmark = [pytest.mark.lulesh, pytest.mark.openmp]
+pytestmark = [pytest.mark.lulesh]
 
 # =============================================================================
 # Lulesh fixtures
@@ -19,14 +18,12 @@ pytestmark = [pytest.mark.lulesh, pytest.mark.openmp]
 
 @pytest.fixture
 def lulesh_base_env() -> dict[str, str]:
-    env = {
+    return {
         "ROCPROFSYS_USE_KOKKOSP": "ON",
         "ROCPROFSYS_COUT_OUTPUT": "ON",
         "ROCPROFSYS_SAMPLING_FREQ": "50",
         "ROCPROFSYS_KOKKOSP_PREFIX": "[kokkos]",
-        "ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK": "ON",
     }
-    return env
 
 
 # =============================================================================
@@ -35,7 +32,7 @@ def lulesh_base_env() -> dict[str, str]:
 
 
 # TODO: LULESH_USE_HIP does not currently work properly out of the box, tofix
-# TODO: LULESH_USE_MPI does not currently work, tofix
+@pytest.mark.mpi_optional("lulesh")
 class TestLulesh(RocprofsysTest):
     @pytest.mark.parametrize(
         "mode",
@@ -62,6 +59,7 @@ class TestLulesh(RocprofsysTest):
                 "-ME",
                 "lib(gomp|m-)",
             ],
+            mpi_ranks=8,
         )
         self.assert_regex(
             result,
@@ -80,6 +78,7 @@ class TestLulesh(RocprofsysTest):
             "lulesh",
             env=env,
             run_args=["-i", "10", "-s", "20", "-p"],
+            mpi_ranks=8,
         )
         self.assert_regex(result, pass_regex=[r"\|_\[kokkos\] [a-zA-Z]"])
 
@@ -87,7 +86,7 @@ class TestLulesh(RocprofsysTest):
         "mode", ["sampling", "binary_rewrite", "runtime_instrument", "sys_run"]
     )
     def test_kokkosp(self, mode):
-        env = {"ROCPROFSYS_USE_KOKKOSP": "ON", "ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK": "ON"}
+        env = {"ROCPROFSYS_USE_KOKKOSP": "ON"}
         result = self.run_test(
             mode,
             "lulesh",
@@ -106,6 +105,7 @@ class TestLulesh(RocprofsysTest):
                 "-ME",
                 "lib(gomp|m-)",
             ],
+            mpi_ranks=8,
         )
         self.assert_regex(result)
 
@@ -115,7 +115,6 @@ class TestLulesh(RocprofsysTest):
     def test_perfetto(self, mode, perfetto_env):
         env = perfetto_env.copy()
         env["ROCPROFSYS_USE_KOKKOSP"] = "OFF"
-        env["ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK"] = "ON"
         result = self.run_test(
             mode,
             "lulesh",
@@ -133,6 +132,7 @@ class TestLulesh(RocprofsysTest):
                 "-ME",
                 "libgomp",
             ],
+            mpi_ranks=8,
         )
         self.assert_regex(result)
 
@@ -143,7 +143,6 @@ class TestLulesh(RocprofsysTest):
     def test_timemory(self, mode, timemory_env):
         env = timemory_env.copy()
         env["ROCPROFSYS_USE_KOKKOSP"] = "OFF"
-        env["ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK"] = "ON"
         result = self.run_test(
             mode,
             "lulesh",
@@ -169,6 +168,7 @@ class TestLulesh(RocprofsysTest):
                 "--env",
                 "ROCPROFSYS_TIMEMORY_COMPONENTS=wall_clock peak_rss",
             ],
+            mpi_ranks=8,
         )
         self.assert_regex(
             result,

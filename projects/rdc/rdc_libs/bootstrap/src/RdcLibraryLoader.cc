@@ -29,7 +29,7 @@ namespace rdc {
 
 RdcLibraryLoader::RdcLibraryLoader() : libHandler_(nullptr) {}
 
-rdc_status_t RdcLibraryLoader::load(const char* filename, int dlopen_flags) {
+rdc_status_t RdcLibraryLoader::load(const char* filename) {
   if (filename == nullptr) {
     return RDC_ST_FAIL_LOAD_MODULE;
   }
@@ -38,7 +38,7 @@ rdc_status_t RdcLibraryLoader::load(const char* filename, int dlopen_flags) {
   }
 
   std::lock_guard<std::mutex> guard(library_mutex_);
-  libHandler_ = dlopen(filename, dlopen_flags);
+  libHandler_ = dlopen(filename, RTLD_LAZY);
   if (!libHandler_) {
     char* error = dlerror();
     throw RdcException(

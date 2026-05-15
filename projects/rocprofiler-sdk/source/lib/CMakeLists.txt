@@ -6,7 +6,6 @@ rocprofiler_activate_clang_tidy()
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "core")
 add_subdirectory(common)
 add_subdirectory(output)
-add_subdirectory(aqlprofile)
 add_subdirectory(rocprofiler-sdk)
 add_subdirectory(rocprofiler-sdk-attach)
 

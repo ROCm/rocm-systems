@@ -39,25 +39,14 @@ ncclResult_t  ncclMemAlloc_impl(void **ptr, size_t size) {
     flag = 0;
     (void) CUPFN(cuDeviceGetAttribute(&flag, CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED, currentDev));
     if (flag) requestedHandleTypes |= CU_MEM_HANDLE_TYPE_FABRIC;
-#if defined(HIP_VMM_UNCACHED_MEMORY)
-    memprop.type = hipMemAllocationTypeUncached;
-#else
     memprop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
-#endif
     memprop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
     memprop.requestedHandleTypes = (CUmemAllocationHandleType) requestedHandleTypes;
     memprop.location.id = currentDev;
-#if HIP_VERSION > 70000000
-    // ROCM-2550: Use cuDeviceGetAttribute to check if RDMA support is available
-    // TODO: Remove once ROCM-2550 is fixed
-    // Always enable gpuDirectRDMACapable: the non-RDMA VMM code path in
-    // HIP crashes (SIGSEGV in hipMemMap) after many allocations.
-    memprop.allocFlags.gpuDirectRDMACapable = 1;
-    // // Query device to see if RDMA support is available
-    // flag = 0;
+    // Query device to see if RDMA support is available
+    flag = 0;
     // CUCHECK(cuDeviceGetAttribute(&flag, CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_WITH_CUDA_VMM_SUPPORTED, currentDev));
-    // if (flag) memprop.allocFlags.gpuDirectRDMACapable = 1;
-#endif
+    if (flag) memprop.allocFlags.gpuDirectRDMACapable = 1;
     CUCHECK(cuMemGetAllocationGranularity(&memGran, &memprop, CU_MEM_ALLOC_GRANULARITY_RECOMMENDED));
     CUDACHECK(cudaGetDeviceCount(&dcnt));
     ALIGN_SIZE(handleSize, memGran);
@@ -301,7 +290,7 @@ ncclResult_t ncclShadowPoolDestruct(struct ncclShadowPool* pool) {
               pool->pages = page;
             }
           } else {
-            CUDACHECKIGNORE(cudaFreeAsync(obj->devObj, stream));
+            cudaFreeAsync(obj->devObj, stream);
           }
           struct ncclShadowObject* next = obj->next;
           free(obj);
@@ -312,15 +301,15 @@ ncclResult_t ncclShadowPoolDestruct(struct ncclShadowPool* pool) {
     free(pool->table);
 
     while (pool->pages != nullptr) {
-      CUDACHECKIGNORE(cudaFreeAsync(pool->pages->devObjs, stream));
+      cudaFreeAsync(pool->pages->devObjs, stream);
       struct ncclShadowPage* next = pool->pages->next;
       free(pool->pages);
       pool->pages = next;
     }
 
-    CUDACHECKIGNORE(cudaStreamSynchronize(stream));
-    CUDACHECKIGNORE(cudaStreamDestroy(stream));
-    CUDACHECKIGNORE(cudaMemPoolDestroy(pool->memPool));
+    cudaStreamSynchronize(stream);
+    cudaStreamDestroy(stream);
+    cudaMemPoolDestroy(pool->memPool);
   }
   return ncclSuccess;
 }
@@ -354,7 +343,7 @@ ncclResult_t ncclShadowPoolAlloc(
     props.allocType = cudaMemAllocationTypePinned;
     props.handleTypes = cudaMemHandleTypeNone;
     props.location.type = cudaMemLocationTypeDevice;
-    CUDACHECKIGNORE(cudaGetDevice(&props.location.id));
+    cudaGetDevice(&props.location.id);
     CUDACHECK(cudaMemPoolCreate(&pool->memPool, &props));
 
     pool->hbits = hbits = 4;

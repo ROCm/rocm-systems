@@ -1,8 +1,21 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
+IMPLIED, INNCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANNY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
@@ -100,7 +113,7 @@ static bool testMemset(allocator_fn_t allocator, deallocator_fn_t deallocator) {
  * ------------------------
  *  - HIP_VERSION >= 6.1
  */
-HIP_TEST_CASE(Unit_hipMemsetD32Async_ValidBuffer) {
+TEST_CASE("Unit_hipMemsetD32Async_ValidBuffer") {
   SECTION("Device Buffer") {
     bool result = testMemset(hipMalloc, hipFree);
 
@@ -128,7 +141,7 @@ HIP_TEST_CASE(Unit_hipMemsetD32Async_ValidBuffer) {
  * ------------------------
  *  - HIP_VERSION >= 6.1
  */
-HIP_TEST_CASE(Unit_hipMemsetD32Async_InvalidArg) {
+TEST_CASE("Unit_hipMemsetD32Async_InvalidArg") {
   constexpr size_t ptr_test_nelem = 4096;
   void* ptr = nullptr;
 
@@ -156,7 +169,7 @@ HIP_TEST_CASE(Unit_hipMemsetD32Async_InvalidArg) {
  * ------------------------
  *  - HIP_VERSION >= 6.1
  */
-HIP_TEST_CASE(Unit_hipMemsetD32Async_KernelBuffer) {
+TEST_CASE("Unit_hipMemsetD32Async_KernelBuffer") {
   constexpr size_t ptr_test_nelem = 4096;
   constexpr unsigned blocksPerCU = 6;
   constexpr unsigned threadsPerBlock = 256;

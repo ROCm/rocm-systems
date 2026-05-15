@@ -93,21 +93,19 @@ __global__ void WaveFrontPrimitiveTest(int loop, int skip,
 WaveFrontPrimitiveTester::WaveFrontPrimitiveTester(TesterArguments args)
     : Tester(args) {
   size_t buff_size = max_msg_size * args.num_wgs * num_warps;
-  char *local = (char *) alloc_test_buffer(buff_size, args.local_buf_type);
-  char *remote = (char *) alloc_test_buffer(buff_size);
+  source = (char *)rocshmem_malloc(buff_size);
+  dest = (char *)rocshmem_malloc(buff_size);
 
-  switch (_type) {
-    case WAVEPutTestType:
-    case WAVEPutNBITestType:
-      source = local;
-      dest = remote;
-      break;
-    case WAVEGetTestType:
-    case WAVEGetNBITestType:
-    default:
-      dest = local;
-      source = remote;
-      break;
+  if (source == nullptr || dest == nullptr) {
+    std::cerr << "Error allocating memory from symmetric heap" << std::endl;
+    std::cerr << "source: " << source << ", dest: " << dest << std::endl;
+    if (source) {
+      rocshmem_free(source);
+    }
+    if (dest) {
+      rocshmem_free(dest);
+    }
+    rocshmem_global_exit(1);
   }
 
   for(size_t i = 0; i < buff_size; i++) {
@@ -116,25 +114,8 @@ WaveFrontPrimitiveTester::WaveFrontPrimitiveTester(TesterArguments args)
 }
 
 WaveFrontPrimitiveTester::~WaveFrontPrimitiveTester() {
-  char *local = nullptr;
-  char *remote = nullptr;
-
-  switch (_type) {
-    case WAVEPutTestType:
-    case WAVEPutNBITestType:
-      local = source;
-      remote = dest;
-      break;
-    case WAVEGetTestType:
-    case WAVEGetNBITestType:
-    default:
-      local = dest;
-      remote = source;
-      break;
-  }
-
-  free_test_buffer(local, args.local_buf_type);
-  free_test_buffer(remote);
+  rocshmem_free(source);
+  rocshmem_free(dest);
 }
 
 void WaveFrontPrimitiveTester::resetBuffers(size_t size) {

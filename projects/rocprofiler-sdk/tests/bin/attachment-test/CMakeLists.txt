@@ -1,5 +1,5 @@
 #
-# attachment-test application for testing rocprof_attach
+# attachment-test application for testing rocprofv3_attach
 #
 
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)

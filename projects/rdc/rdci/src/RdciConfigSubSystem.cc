@@ -448,7 +448,7 @@ void RdciConfigSubSystem::display_config_settings(rdc_config_setting_list_t& rdc
           default:
             break;
         }
-        // Set the json separator
+        // Set the json seperator
         json_ss << "}";
         if ((gpu_index + 1) != rdc_group_info.count) {
           json_ss << ",";

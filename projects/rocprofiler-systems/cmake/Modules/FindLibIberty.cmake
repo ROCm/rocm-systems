@@ -1,6 +1,3 @@
-# Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier: MIT
-
 # ========================================================================================
 # FindLibIberty.cmake
 #
@@ -30,7 +27,7 @@
 #
 # ========================================================================================
 
-cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
 # Keep the semantics of IBERTY_LIBRARIES for backward compatibility NB: If both are
 # specified, LibIberty_LIBRARIES is ignored

@@ -70,18 +70,17 @@ __global__ void PingPongTest(int loop, int skip, long long int *start_time,
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
 PingPongTester::PingPongTester(TesterArguments args) : Tester(args) {
-  r_buf = (int *)alloc_test_buffer(sizeof(int) * args.num_wgs);
-  rtt_factor = 2;
+  r_buf = (int *)rocshmem_malloc(sizeof(int) * args.num_wgs);
 }
 
-PingPongTester::~PingPongTester() { free_test_buffer(r_buf); }
+PingPongTester::~PingPongTester() { rocshmem_free(r_buf); }
 
-void PingPongTester::resetBuffers([[maybe_unused]] size_t size) {
+void PingPongTester::resetBuffers(size_t size) {
   memset(r_buf, 0, sizeof(int) * args.num_wgs);
 }
 
 void PingPongTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                                  [[maybe_unused]] size_t size) {
+                                  size_t size) {
   size_t shared_bytes = 0;
 
   hipLaunchKernelGGL(PingPongTest, gridSize, blockSize, shared_bytes, stream,
@@ -92,4 +91,4 @@ void PingPongTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
   num_timed_msgs = loop;
 }
 
-void PingPongTester::verifyResults([[maybe_unused]] size_t size) {}
+void PingPongTester::verifyResults(size_t size) {}

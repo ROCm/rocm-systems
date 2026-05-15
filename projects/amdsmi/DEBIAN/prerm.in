@@ -59,25 +59,18 @@ rm_rocm_tests_dir(){
 }
 
 
-rm_logrotateConfig() {
-  # Drop our /etc/logrotate.d/amd_smi.conf snippet. We no longer mutate
-  # the system logrotate.timer or move cron.daily/logrotate to
-  # cron.hourly, so there is nothing else to restore here.
-  # Older packages (pre-cleanup) may have left a backup behind --
-  # restore it on a best-effort basis so a subsequent upgrade does not
-  # leave the user stuck with our hourly override.
+return_logrotateToOrigConfig() {
   local logrotateConfFile=/etc/logrotate.d/amd_smi.conf
-  if [ -f "$logrotateConfFile" ]; then
-    rm -f "$logrotateConfFile"
+  if [ -f $logrotateConfFile ]; then
+    rm -rf "$logrotateConfFile"
   fi
-  if [ -f /etc/cron.hourly/logrotate ] && [ ! -f /etc/cron.daily/logrotate ]; then
+  if [ -f /etc/cron.hourly/logrotate ]; then
     mv /etc/cron.hourly/logrotate /etc/cron.daily/logrotate
   fi
   if [ -f /lib/systemd/system/logrotate.timer.backup ]; then
-    mv -f /lib/systemd/system/logrotate.timer.backup /lib/systemd/system/logrotate.timer
-    if command -v systemctl >/dev/null 2>&1; then
-      systemctl reenable --now logrotate.timer >/dev/null 2>&1 || true
-    fi
+    cp /lib/systemd/system/logrotate.timer.backup /lib/systemd/system/logrotate.timer
+    rm -rf /lib/systemd/system/logrotate.timer.backup
+    systemctl reenable --now logrotate.timer
   fi
 }
 
@@ -132,8 +125,8 @@ case "$1" in
     echo "log folder removed"
     rm_rocm_tests_dir
     echo "rocm tests directory removed"
-    rm_logrotateConfig
-    echo "logrotate configuration removed"
+    return_logrotateToOrigConfig
+    echo "logrotate configuration restored"
   ;;
   ( purge )
   ;;

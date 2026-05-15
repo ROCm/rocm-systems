@@ -82,20 +82,25 @@ struct hsa_kfd_perf_context
 	unsigned int counter_props_count;
 };
 
-int hsakmt_kfdcontext_init_perf_context(HsaKFDContext *ctx)
+struct hsa_kfd_perf_context *hsakmt_kfdcontext_get_perf_context(HsaKFDContext *ctx)
 {
-	CHECK_CTX(ctx, -1);
+	assert(ctx);
+	if (!ctx) {
+		pr_err("Expected a non-null ptr for HsaKFDContext");
+		return NULL;
+	}
 
 	if (ctx->perf_context)
-		return 0;
+		return ctx->perf_context;
 
 	ctx->perf_context = calloc(1, sizeof(struct hsa_kfd_perf_context));
 	if (!ctx->perf_context) {
 		pr_err("Alloc memory failed for struct hsa_kfd_perf_context size %zu\n",
 				 sizeof(struct hsa_kfd_perf_context));
-		return -1;
+		return NULL;
 	}
-	return 0;
+
+	return ctx->perf_context;
 }
 
 static ssize_t readn(int fd, void *buf, size_t n)
@@ -121,7 +126,7 @@ static ssize_t readn(int fd, void *buf, size_t n)
 
 HSAKMT_STATUS hsakmt_init_counter_props(HsaKFDContext *ctx, unsigned int NumNodes)
 {
-	struct hsa_kfd_perf_context *perf_ctx = ctx->perf_context;
+	struct hsa_kfd_perf_context *perf_ctx = hsakmt_kfdcontext_get_perf_context(ctx);
 	perf_ctx->counter_props = calloc(NumNodes, sizeof(struct HsaCounterProperties *));
 	if (!perf_ctx->counter_props) {
 		pr_warn("Profiling is not available.\n");
@@ -136,7 +141,7 @@ HSAKMT_STATUS hsakmt_init_counter_props(HsaKFDContext *ctx, unsigned int NumNode
 void hsakmt_destroy_counter_props(HsaKFDContext *ctx)
 {
 	unsigned int i;
-	struct hsa_kfd_perf_context *perf_ctx = ctx->perf_context;
+	struct hsa_kfd_perf_context *perf_ctx = hsakmt_kfdcontext_get_perf_context(ctx);
 
 	if (!perf_ctx->counter_props)
 		return;
@@ -289,7 +294,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPmcGetCounterPropertiesCtx(HsaKFDContext *ctx,
 	struct perf_counter_block block = {0};
 	uint32_t total_blocks = 0;
 	HsaCounterBlockProperties *block_prop;
-	struct hsa_kfd_perf_context *perf_ctx = ctx->perf_context;
+	struct hsa_kfd_perf_context *perf_ctx = hsakmt_kfdcontext_get_perf_context(ctx);
 
 	if (!perf_ctx->counter_props)
 		return HSAKMT_STATUS_NO_MEMORY;
@@ -379,7 +384,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPmcRegisterTraceCtx(HsaKFDContext* ctx,
 	uint32_t block, num_blocks = 0, total_counters = 0;
 	uint64_t *counter_id_ptr;
 	int *fd_ptr;
-	struct hsa_kfd_perf_context *perf_ctx = ctx->perf_context;
+	struct hsa_kfd_perf_context *perf_ctx = hsakmt_kfdcontext_get_perf_context(ctx);
 
 	pr_debug("[%s] Number of counters %d\n", __func__, NumberOfCounters);
 

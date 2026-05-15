@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!@PYTHON_EXECUTABLE@
 
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT

@@ -43,13 +43,12 @@
  *
  */
 
-#include "rocm_smi_test/test_utils.h"
-
 #include <map>
 
 #include "rocm_smi/rocm_smi.h"
+#include "rocm_smi_test/test_utils.h"
 
-static const std::map<rsmi_fw_block_t, const char*> kDevFWNameMap = {
+static const std::map<rsmi_fw_block_t, const char *> kDevFWNameMap = {
     {RSMI_FW_BLOCK_ASD, "asd"},
     {RSMI_FW_BLOCK_CE, "ce"},
     {RSMI_FW_BLOCK_DMCU, "dmcu"},
@@ -75,9 +74,13 @@ static const std::map<rsmi_fw_block_t, const char*> kDevFWNameMap = {
     {RSMI_FW_BLOCK_VCN, "vcn"},
 };
 
-const char* NameFromFWEnum(rsmi_fw_block_t blk) { return kDevFWNameMap.at(blk); }
+const char *
+NameFromFWEnum(rsmi_fw_block_t blk) {
+  return kDevFWNameMap.at(blk);
+}
 
-static const std::map<rsmi_evt_notification_type_t, const char*> kEvtNotifEvntNameMap = {
+static const std::map<rsmi_evt_notification_type_t, const char *>
+                                                      kEvtNotifEvntNameMap = {
     {RSMI_EVT_NOTIF_VMFAULT, "RSMI_EVT_NOTIF_VMFAULT"},
     {RSMI_EVT_NOTIF_THERMAL_THROTTLE, "RSMI_EVT_NOTIF_THERMAL_THROTTLE"},
     {RSMI_EVT_NOTIF_GPU_PRE_RESET, "RSMI_EVT_NOTIF_GPU_PRE_RESET"},
@@ -89,7 +92,9 @@ static const std::map<rsmi_evt_notification_type_t, const char*> kEvtNotifEvntNa
     {RSMI_EVT_NOTIF_EVENT_QUEUE_EVICTION, "RSMI_EVT_NOTIF_EVENT_QUEUE_EVICTION"},
     {RSMI_EVT_NOTIF_EVENT_QUEUE_RESTORE, "RSMI_EVT_NOTIF_EVENT_QUEUE_RESTORE"},
     {RSMI_EVT_NOTIF_EVENT_UNMAP_FROM_GPU, "RSMI_EVT_NOTIF_EVENT_UNMAP_FROM_GPU"},
-    {RSMI_EVT_NOTIF_EVENT_ALL_PROCESS, "RSMI_EVT_NOTIF_EVENT_ALL_PROCESS"}};
-const char* NameFromEvtNotifType(rsmi_evt_notification_type_t evt) {
+    {RSMI_EVT_NOTIF_EVENT_ALL_PROCESS, "RSMI_EVT_NOTIF_EVENT_ALL_PROCESS"}
+};
+const char *
+NameFromEvtNotifType(rsmi_evt_notification_type_t evt) {
   return kEvtNotifEvntNameMap.at(evt);
 }

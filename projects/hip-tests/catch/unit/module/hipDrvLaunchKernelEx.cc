@@ -1,9 +1,21 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
-
+Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 #include <hip/hip_cooperative_groups.h>
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
@@ -34,9 +46,10 @@ static constexpr auto kernel_name = "cooperativeKernelEx";
  * ------------------------
  *    - HIP_VERSION >= 6.5
  */
-HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_NegTsts) {
+TEST_CASE("Unit_hipDrvLaunchKernelEx_NegTsts") {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
+    return;
   }
   int totalThreads = 64;
   int blockSize = 16;
@@ -187,7 +200,6 @@ bool runTestDrvLaunch(const char* testName, std::string kernelFunc, int totalThr
     }
   }
 
-  HIP_CHECK(hipModuleUnload(module));
   HIP_CHECK(hipFree(d_output));
   free(h_output);
   return success;
@@ -203,9 +215,10 @@ bool runTestDrvLaunch(const char* testName, std::string kernelFunc, int totalThr
  * ------------------------
  *    - HIP_VERSION >= 6.5
  */
-HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_Functional) {
+TEST_CASE("Unit_hipDrvLaunchKernelEx_Functional") {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
+    return;
   }
   REQUIRE(runTestDrvLaunch("hipDrvLaunchKernelEx", kernel_name, 64, 16, 2222) == true);
 }
@@ -225,10 +238,11 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_Functional) {
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_With_Different_Kernels) {
+TEST_CASE("Unit_hipDrvLaunchKernelEx_With_Different_Kernels") {
   CTX_CREATE();
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
+    return;
   }
 
   hipModule_t module;
@@ -304,10 +318,11 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_With_Different_Kernels) {
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_With_CooperativeKernelWithArgs) {
+TEST_CASE("Unit_hipDrvLaunchKernelEx_With_CooperativeKernelWithArgs") {
   CTX_CREATE();
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
+    return;
   }
 
   hipModule_t module;
@@ -379,10 +394,11 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_With_CooperativeKernelWithArgs) {
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_With_MaxBlockDims) {
+TEST_CASE("Unit_hipDrvLaunchKernelEx_With_MaxBlockDims") {
   CTX_CREATE();
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
+    return;
   }
 
   hipModule_t module;

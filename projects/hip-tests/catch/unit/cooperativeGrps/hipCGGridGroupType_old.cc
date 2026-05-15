@@ -1,9 +1,24 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2020 - 2022 Advanced Micro Devices, Inc. All rights reserved.
 
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 #include <hip_test_common.hh>
 #include <hip/hip_cooperative_groups.h>
 
@@ -287,9 +302,9 @@ template <typename F> static void test_cg_grid_group_type(F kernel_func, int blo
     ASSERT_EQUAL(is_valid_host[i], 1);
     ASSERT_EQUAL(sync_host[i], 200);
     if(kernel_type != GridTypeTests::baseType){
-      ASSERT_EQUAL(group_dim_host[i].x, 2);
-      ASSERT_EQUAL(group_dim_host[i].y, 1);
-      ASSERT_EQUAL(group_dim_host[i].z, 1);
+      ASSERT_EQUAL(group_dim_host[i].x, 2);           
+      ASSERT_EQUAL(group_dim_host[i].y, 1);          
+      ASSERT_EQUAL(group_dim_host[i].z, 1); 
     }
   }
 
@@ -308,7 +323,7 @@ template <typename F> static void test_cg_grid_group_type(F kernel_func, int blo
   HIP_CHECK(hipHostFree(group_dim_host));
 }
 
-HIP_TEST_CASE(Unit_hipCGGridGroupType_Basic) {
+TEST_CASE("Unit_hipCGGridGroupType_Basic") {
   // Use default device for validating the test
   int device;
   hipDeviceProp_t device_properties;
@@ -316,7 +331,8 @@ HIP_TEST_CASE(Unit_hipCGGridGroupType_Basic) {
   HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
 
   if (!device_properties.cooperativeLaunch) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    HipTest::HIP_SKIP_TEST("Device doesn't support cooperative launch!");
+    return;
   }
 
   void* kernel_func;
@@ -352,7 +368,7 @@ HIP_TEST_CASE(Unit_hipCGGridGroupType_Basic) {
   }
 }
 
-HIP_TEST_CASE(Unit_hipCGGridGroupType_DataSharing) {
+TEST_CASE("Unit_hipCGGridGroupType_DataSharing") {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
   HIP_CHECK(hipSetDevice(device));
 
@@ -361,7 +377,8 @@ HIP_TEST_CASE(Unit_hipCGGridGroupType_DataSharing) {
   HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
 
   if (!device_properties.cooperativeLaunch) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    HipTest::HIP_SKIP_TEST("Device doesn't support cooperative launch!");
+    return;
   }
 
   int loops = GENERATE(1, 2, 3, 4);
@@ -431,7 +448,7 @@ HIP_TEST_CASE(Unit_hipCGGridGroupType_DataSharing) {
   free(host_mem_2);
 }
 
-HIP_TEST_CASE(Unit_hipCGGridGroupType_Barrier) {
+TEST_CASE("Unit_hipCGGridGroupType_Barrier") {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
   HIP_CHECK(hipSetDevice(device));
 
@@ -440,7 +457,8 @@ HIP_TEST_CASE(Unit_hipCGGridGroupType_Barrier) {
   HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
 
   if (!device_properties.cooperativeLaunch) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    HipTest::HIP_SKIP_TEST("Device doesn't support cooperative launch!");
+    return;
   }
 
   uint32_t loops = GENERATE(1, 2, 3, 4);

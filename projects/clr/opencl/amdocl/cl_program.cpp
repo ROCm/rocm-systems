@@ -1,8 +1,22 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+/* Copyright (c) 2008 - 2021 Advanced Micro Devices, Inc.
+
+ Permission is hereby granted, free of charge, to any person obtaining a copy
+ of this software and associated documentation files (the "Software"), to deal
+ in the Software without restriction, including without limitation the rights
+ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ copies of the Software, and to permit persons to whom the Software is
+ furnished to do so, subject to the following conditions:
+
+ The above copyright notice and this permission notice shall be included in
+ all copies or substantial portions of the Software.
+
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ THE SOFTWARE. */
 
 #include "cl_common.hpp"
 #include "vdi_common.hpp"
@@ -1388,7 +1402,7 @@ RUNTIME_ENTRY(cl_int, clCreateKernelsInProgram,
   cl_kernel* result = kernels;
 
   for (const auto& it : symbols) {
-    amd::Kernel* kernel = new amd::Kernel(*amd_program, it.second, std::string(it.first));
+    amd::Kernel* kernel = new amd::Kernel(*amd_program, it.second, it.first);
     if (kernel == NULL) {
       while (--result >= kernels) {
         as_amd(*result)->release();
@@ -1556,30 +1570,17 @@ RUNTIME_ENTRY(cl_int, clSetKernelArg,
   if (((arg_value == NULL) && !is_local && (desc.type_ != T_POINTER)) ||
       ((arg_value != NULL) && is_local)) {
     as_amd(kernel)->parameters().reset(static_cast<size_t>(arg_index));
-    if (desc.type_ == T_SAMPLER) {
-      return CL_INVALID_SAMPLER;
-    }
     return CL_INVALID_ARG_VALUE;
   }
   if (!is_local && (desc.type_ == T_POINTER) && (arg_value != NULL)) {
     cl_mem memObj = *static_cast<const cl_mem*>(arg_value);
     amd::RuntimeObject* pObject = as_amd(memObj);
-    amd::Memory* pMem = as_amd(memObj);
-    if (NULL != memObj) {
-      if (amd::RuntimeObject::ObjectTypeMemory != pObject->objectType()) {
-        as_amd(kernel)->parameters().reset(static_cast<size_t>(arg_index));
-        return CL_INVALID_MEM_OBJECT;
-      }
-      else {
-        if (((desc.accessQualifier_ == CL_KERNEL_ARG_ACCESS_WRITE_ONLY) && 
-          (pMem->getMemFlags() == CL_MEM_READ_ONLY)) ||
-          ((desc.accessQualifier_ == CL_KERNEL_ARG_ACCESS_READ_ONLY) && 
-          (pMem->getMemFlags() == CL_MEM_WRITE_ONLY))){
-            as_amd(kernel)->parameters().reset(static_cast<size_t>(arg_index));
-            return CL_INVALID_ARG_VALUE;
-        }
-      }
+    if (NULL != memObj && amd::RuntimeObject::ObjectTypeMemory != pObject->objectType()) {
+      as_amd(kernel)->parameters().reset(static_cast<size_t>(arg_index));
+      return CL_INVALID_MEM_OBJECT;
     }
+  } else if ((desc.type_ == T_SAMPLER) && !is_valid(*static_cast<const cl_sampler*>(arg_value))) {
+    return CL_INVALID_SAMPLER;
   } else if (desc.type_ == T_QUEUE) {
     cl_command_queue queue = *static_cast<const cl_command_queue*>(arg_value);
     if (!is_valid(queue)) {

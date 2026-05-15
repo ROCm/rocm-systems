@@ -1,7 +1,3 @@
-# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
-#
-# SPDX-License-Identifier: MIT
-
 # Common Tests - Test independent of all platforms
 set(TEST_SRC
   hipClassKernel.cc
@@ -107,6 +103,7 @@ if(HIP_PLATFORM MATCHES "amd")
                     -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
                     -I${Catch2_SOURCE_DIR}/src
                     -I${Catch2_BINARY_DIR}/generated-includes
+                    -I${CMAKE_CURRENT_SOURCE_DIR}/../../external/picojson
                     --offload-arch=amdgcnspirv
                     -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/compiler/hipSpirvTest)
     add_dependencies(CompilerTest hipSpirvTest)

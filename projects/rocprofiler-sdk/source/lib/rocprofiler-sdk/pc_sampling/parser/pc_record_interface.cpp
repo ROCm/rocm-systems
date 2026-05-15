@@ -109,14 +109,7 @@ PCSamplingParserContext::parse(const upcoming_samples_t& upcoming,
     }
     else if(gfxip_major == 12)
     {
-        if(gfxip_minor == 5)
-        {
-            parseSample_func = _get_parse_func_for_method<GFX1250>(pcs_method);
-        }
-        else
-        {
-            parseSample_func = _get_parse_func_for_method<GFX12>(pcs_method);
-        }
+        parseSample_func = _get_parse_func_for_method<GFX12>(pcs_method);
     }
     else
     {

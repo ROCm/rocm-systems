@@ -25,7 +25,7 @@ namespace RcclUnitTesting
     case ncclFloat64: return 8;
     case ncclBfloat16: return 2;
     default:
-      TEST_ERROR("Unsupported datatype (%d)", dataType);
+      ERROR("Unsupported datatype (%d)\n", dataType);
       exit(0);
     }
   }
@@ -50,7 +50,7 @@ namespace RcclUnitTesting
       {
         if (ncclMemAlloc((void**)&I1, numBytes) != ncclSuccess)
         {
-          TEST_ERROR("Unable to allocate user managed GPU memory (%lu bytes)", numBytes);
+          ERROR("Unable to allocate user managed GPU memory (%lu bytes)\n", numBytes);
           return TEST_FAIL;
         }
       }
@@ -58,11 +58,19 @@ namespace RcclUnitTesting
       {
         if (useManagedMem)
         {
-          CHECK_HIP(hipMallocManaged(&I1, numBytes));
+          if (hipMallocManaged(&I1, numBytes) != hipSuccess)
+          {
+            ERROR("Unable to allocate managed memory of GPU memory (%lu bytes)\n", numBytes);
+            return TEST_FAIL;
+          }
         }
         else
         {
-          CHECK_HIP(hipMalloc(&I1, numBytes));
+          if (hipMalloc(&I1, numBytes) != hipSuccess)
+          {
+            ERROR("Unable to allocate memory of GPU memory (%lu bytes)\n", numBytes);
+            return TEST_FAIL;
+          }
         }
       }
 
@@ -77,7 +85,7 @@ namespace RcclUnitTesting
       this->ptr = calloc(numBytes, 1);
       if (!ptr)
       {
-        TEST_ERROR("Unable to allocate memory (%lu bytes)", numBytes);
+        ERROR("Unable to allocate memory (%lu bytes)\n", numBytes);
         return TEST_FAIL;
       }
     }
@@ -89,9 +97,9 @@ namespace RcclUnitTesting
     if (this->ptr != nullptr)
     {
       if (userRegistered)
-        CHECK_NCCL(ncclMemFree(this->ptr));
+        ncclMemFree(this->ptr);
       else
-        CHECK_HIP(hipFree(this->ptr));
+        hipFree(this->ptr);
       this->ptr = nullptr;
     }
     return TEST_SUCCESS;
@@ -109,8 +117,12 @@ namespace RcclUnitTesting
 
   ErrCode PtrUnion::ClearGpuMem(size_t const numBytes)
   {
-    CHECK_HIP(hipMemset(this->ptr, 0, numBytes));
-    CHECK_HIP(hipStreamSynchronize(NULL));
+    if (hipMemset(this->ptr, 0, numBytes) != hipSuccess)
+    {
+      ERROR("Unable to call hipMemset\n");
+      return TEST_FAIL;
+    }
+    hipStreamSynchronize(NULL);
     return TEST_SUCCESS;
   }
 
@@ -146,7 +158,11 @@ namespace RcclUnitTesting
     // If this is GPU memory, copy from CPU temp buffer
     if (isGpuMem)
     {
-      CHECK_HIP(hipMemcpy(this->ptr, temp.ptr, numBytes, hipMemcpyHostToDevice));
+      if (hipMemcpy(this->ptr, temp.ptr, numBytes, hipMemcpyHostToDevice) != hipSuccess)
+      {
+        ERROR("Unable to fill input with pattern for rank %d\n", globalRank);
+        return TEST_FAIL;
+      }
       temp.FreeCpuMem();
     }
 
@@ -170,7 +186,7 @@ namespace RcclUnitTesting
     case ncclFloat8e5m2:  B1[idx] = rccl_bfloat8(valueF); break;
     case ncclBfloat16: B2[idx] = hip_bfloat16(static_cast<float>(valueF)); break;
     default:
-      TEST_ERROR("Unsupported datatype");
+      ERROR("Unsupported datatype\n");
       return TEST_FAIL;
     }
     return TEST_SUCCESS;
@@ -193,7 +209,7 @@ namespace RcclUnitTesting
     case ncclFloat8e5m2:  valueF = float(B1[idx]); break;
     case ncclBfloat16: valueF = B2[idx]; break;
     default:
-      TEST_ERROR("Unsupported datatype");
+      ERROR("Unsupported datatype\n");
       return TEST_FAIL;
     }
     return TEST_SUCCESS;
@@ -225,7 +241,7 @@ namespace RcclUnitTesting
       case ncclFloat8e5m2:  B1[idx]  = rccl_bfloat8((float)B1[idx] * (float)scalarsPerRank.B1[rank]); break;
       case ncclBfloat16: B2[idx] *= scalarsPerRank.B2[rank]; break;
       default:
-        TEST_ERROR("Unsupported datatype");
+        ERROR("Unsupported datatype\n");
         return TEST_FAIL;
       }
     }
@@ -239,7 +255,7 @@ namespace RcclUnitTesting
   {
     if (inputCpu.ptr == nullptr)
     {
-      TEST_ERROR("Input pointer to Reduce should not be nullptr");
+      ERROR("Input pointer to Reduce should not be nullptr\n");
       return TEST_FAIL;
     }
 
@@ -260,7 +276,7 @@ namespace RcclUnitTesting
       case ncclFloat8e5m2:  B1[idx] = rccl_bfloat8(ReduceOp(op, float(B1[idx]), float(inputCpu.B1[idx]))); break;
       case ncclBfloat16: B2[idx] = hip_bfloat16(ReduceOp(op, float(B2[idx]), float(inputCpu.B2[idx]))); break;
       default:
-        TEST_ERROR("Unsupported datatype");
+        ERROR("Unsupported datatype\n");
         return TEST_FAIL;
       }
     }
@@ -289,7 +305,7 @@ namespace RcclUnitTesting
       case ncclFloat8e5m2:  B1[idx] = (rccl_bfloat8((float)(B1[idx]) / divisor)); break;
       case ncclBfloat16: B2[idx] = (hip_bfloat16((float)(B2[idx]) / divisor)); break;
       default:
-        TEST_ERROR("Unsupported datatype");
+        ERROR("Unsupported datatype\n");
         return TEST_FAIL;
       }
     }
@@ -321,7 +337,7 @@ namespace RcclUnitTesting
       case ncclFloat8e5m2: isMatch = (fabs(float(B1[idx]) - float(expected.B1[idx])) < 9e-2); break;
       case ncclBfloat16: isMatch = (fabs((float)B2[idx] - (float)expected.B2[idx]) < 9e-2); break;
       default:
-        TEST_ERROR("Unsupported datatype");
+        ERROR("Unsupported datatype\n");
         return TEST_FAIL;
       }
       if (!isMatch) break;
@@ -332,29 +348,29 @@ namespace RcclUnitTesting
       switch (dataType)
       {
       case ncclInt8:
-        TEST_ERROR("Expected output: %d.  Actual output: %d at index %lu", expected.I1[idx], I1[idx], idx); break;
+        ERROR("Expected output: %d.  Actual output: %d at index %lu\n", expected.I1[idx], I1[idx], idx); break;
       case ncclUint8:
-        TEST_ERROR("Expected output: %u.  Actual output: %u at index %lu", expected.U1[idx], U1[idx], idx); break;
+        ERROR("Expected output: %u.  Actual output: %u at index %lu\n", expected.U1[idx], U1[idx], idx); break;
       case ncclInt32:
-        TEST_ERROR("Expected output: %d.  Actual output: %d at index %lu", expected.I4[idx], I4[idx], idx); break;
+        ERROR("Expected output: %d.  Actual output: %d at index %lu\n", expected.I4[idx], I4[idx], idx); break;
       case ncclUint32:
-        TEST_ERROR("Expected output: %u.  Actual output: %u at index %lu", expected.U4[idx], U4[idx], idx); break;
+        ERROR("Expected output: %u.  Actual output: %u at index %lu\n", expected.U4[idx], U4[idx], idx); break;
       case ncclInt64:
-        TEST_ERROR("Expected output: %ld.  Actual output: %ld at index %lu", expected.I8[idx], I8[idx], idx); break;
+        ERROR("Expected output: %ld.  Actual output: %ld at index %lu\n", expected.I8[idx], I8[idx], idx); break;
       case ncclUint64:
-        TEST_ERROR("Expected output: %lu.  Actual output: %lu at index %lu", expected.U8[idx], U8[idx], idx); break;
+        ERROR("Expected output: %lu.  Actual output: %lu at index %lu\n", expected.U8[idx], U8[idx], idx); break;
       case ncclFloat8e4m3:
-        TEST_ERROR("Expected output: %f.  Actual output: %f at index %lu", (float)expected.F1[idx], (float)F1[idx], idx); break;
+        ERROR("Expected output: %f.  Actual output: %f at index %lu\n", (float)expected.F1[idx], (float)F1[idx], idx); break;
       case ncclFloat16:
-        TEST_ERROR("Expected output: %f.  Actual output: %f at index %lu", __half2float(expected.F2[idx]), __half2float(F2[idx]), idx); break;
+        ERROR("Expected output: %f.  Actual output: %f at index %lu\n", __half2float(expected.F2[idx]), __half2float(F2[idx]), idx); break;
       case ncclFloat32:
-        TEST_ERROR("Expected output: %f.  Actual output: %f at index %lu", expected.F4[idx], F4[idx], idx); break;
+        ERROR("Expected output: %f.  Actual output: %f at index %lu\n", expected.F4[idx], F4[idx], idx); break;
       case ncclFloat64:
-        TEST_ERROR("Expected output: %lf.  Actual output: %lf at index %lu", expected.F8[idx], F8[idx], idx); break;
+        ERROR("Expected output: %lf.  Actual output: %lf at index %lu\n", expected.F8[idx], F8[idx], idx); break;
       case ncclFloat8e5m2:
-        TEST_ERROR("Expected output: %f.  Actual output: %f at index %lu", (float)expected.B1[idx], (float)B1[idx], idx); break;
+        ERROR("Expected output: %f.  Actual output: %f at index %lu\n", (float)expected.B1[idx], (float)B1[idx], idx); break;
       case ncclBfloat16:
-        TEST_ERROR("Expected output: %f.  Actual output: %f at index %lu", (float)expected.B2[idx], (float)B2[idx], idx); break;
+        ERROR("Expected output: %f.  Actual output: %f at index %lu\n", (float)expected.B2[idx], (float)B2[idx], idx); break;
       default:
         break;
       }

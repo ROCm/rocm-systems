@@ -1,8 +1,21 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
@@ -28,7 +41,7 @@
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-HIP_TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_NegTst) {
+TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_NegTst") {
   // declare host and device arrays
   int rows, cols;
   rows = GENERATE(3, 4, 100);
@@ -170,7 +183,7 @@ HIP_TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_NegTst) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-HIP_TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_FuncTst) {
+TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_FuncTst") {
   SECTION(
       "Different types of memory transfers functional tests to check if\
           copied array contains correct values") {
@@ -256,7 +269,9 @@ HIP_TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_FuncTst) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-HIP_TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_Positive_Basic) {
+TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_Positive_Basic", "[multigpu]") {
+  CHECK_IMAGE_SUPPORT
+
   SECTION("Device to Device") {
     SECTION("Peer access enabled") {
       Memcpy2DDeviceToDeviceShell<false, true, true>(DrvMemcpy2DUnalignedAdapter());
@@ -283,7 +298,9 @@ HIP_TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_Positive_Basic) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-HIP_TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_Positive_Synchronization_Behavior) {
+TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_Positive_Synchronization_Behavior") {
+  CHECK_IMAGE_SUPPORT
+
   HIP_CHECK(hipDeviceSynchronize());
 
   SECTION("Host to Device") { Memcpy2DHtoDSyncBehavior<true>(DrvMemcpy2DUnalignedAdapter(), true); }
@@ -308,6 +325,6 @@ HIP_TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_Positive_Synchronization_Behavior) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-HIP_TEST_CASE(Unit_hipDrvMemcpy2DUnaligned_Positive_Parameters) {
+TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_Positive_Parameters") {
   Memcpy2DZeroWidthHeight<false, true>(DrvMemcpy2DUnalignedAdapter());
 }

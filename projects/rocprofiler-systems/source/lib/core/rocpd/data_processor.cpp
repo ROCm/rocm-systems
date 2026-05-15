@@ -1,10 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc.
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier:  MIT
 
 #include "data_processor.hpp"
 #include "core/rocpd/data_storage/database.hpp"
 #include "core/rocpd/data_storage/table_insert_query.hpp"
-#include <cstdint>
 
 #include "logger/debug.hpp"
 
@@ -99,7 +98,7 @@ data_processor::insert_process_info(size_t nid, size_t ppid, size_t pid, size_t 
 size_t
 data_processor::insert_agent(size_t node_id, size_t pid, const char* agent_type,
                              size_t absolute_index, size_t logical_index,
-                             size_t type_index, std::uint64_t uuid, const char* name,
+                             size_t type_index, uint64_t uuid, const char* name,
                              const char* model_name, const char* vendor_name,
                              const char* product_name, const char* user_name,
                              const char* extdata)
@@ -153,7 +152,7 @@ data_processor::insert_pmc_description(
     size_t event_code, size_t instance_id, const char* name, const char* symbol,
     const char* description, const char* long_description, const char* component,
     const char* units, const char* value_type, const char* block, const char* expression,
-    std::uint32_t is_constant, std::uint32_t is_derived, const char* extdata)
+    uint32_t is_constant, uint32_t is_derived, const char* extdata)
 {
     auto it = _pmc_descriptor_map.find({ agent_id, name });
     if(it != _pmc_descriptor_map.end())
@@ -211,7 +210,7 @@ data_processor::insert_pmc_event(size_t event_id, size_t agent_id, const char* p
 }
 
 void
-data_processor::insert_sample(const char* track, std::uint64_t timestamp, size_t event_id,
+data_processor::insert_sample(const char* track, uint64_t timestamp, size_t event_id,
                               const char* extdata)
 {
     LOG_TRACE("Insert sample: track: {}, timestamp: {}, event id: {}, extdata: {}", track,
@@ -276,8 +275,10 @@ data_processor::initialize_sample_stmt()
                      .set_columns("guid", "track_id", "timestamp", "event_id", "extdata")
                      .set_values('?', '?', '?', '?', '?')
                      .get_query_string();
-    _insert_sample_statement = data_storage::database::create_statement_executor<
-        const char*, size_t, std::uint64_t, size_t, const char*>(query, _database);
+    _insert_sample_statement =
+        data_storage::database::create_statement_executor<const char*, size_t, uint64_t,
+                                                          size_t, const char*>(query,
+                                                                               _database);
 }
 
 void
@@ -289,9 +290,11 @@ data_processor::initialize_region_stmt()
                                   "event_id", "extdata")
                      .set_values('?', '?', '?', '?', '?', '?', '?', '?', '?')
                      .get_query_string();
-    _insert_region_statement = data_storage::database::create_statement_executor<
-        const char*, size_t, size_t, size_t, std::uint64_t, std::uint64_t, size_t, size_t,
-        const char*>(query, _database);
+    _insert_region_statement =
+        data_storage::database::create_statement_executor<const char*, size_t, size_t,
+                                                          size_t, uint64_t, uint64_t,
+                                                          size_t, size_t, const char*>(
+            query, _database);
 }
 
 void
@@ -310,8 +313,8 @@ data_processor::initialize_kernel_dispatch_stmt()
                      .get_query_string();
     _insert_kernel_dispatch_statement = data_storage::database::create_statement_executor<
         const char*, size_t, size_t, size_t, size_t, size_t, size_t, size_t, size_t,
-        std::uint64_t, std::uint64_t, size_t, size_t, size_t, size_t, size_t, size_t,
-        size_t, size_t, size_t, size_t, const char*>(query, _database);
+        uint64_t, uint64_t, size_t, size_t, size_t, size_t, size_t, size_t, size_t,
+        size_t, size_t, size_t, const char*>(query, _database);
 }
 
 void
@@ -327,9 +330,9 @@ data_processor::initialize_memory_copy_stmt()
                                  '?', '?', '?', '?', '?', '?')
                      .get_query_string();
     _insert_memory_copy_statement = data_storage::database::create_statement_executor<
-        const char*, size_t, size_t, size_t, std::uint64_t, std::uint64_t, size_t, size_t,
-        size_t, size_t, size_t, size_t, size_t, size_t, size_t, size_t, const char*>(
-        query, _database);
+        const char*, size_t, size_t, size_t, uint64_t, uint64_t, size_t, size_t, size_t,
+        size_t, size_t, size_t, size_t, size_t, size_t, size_t, const char*>(query,
+                                                                             _database);
 }
 
 void
@@ -347,9 +350,9 @@ data_processor::initialize_kernel_symbol_stmt()
                         '?', '?', '?')
             .get_query_string();
     _insert_kernel_symbol_statement = data_storage::database::create_statement_executor<
-        size_t, const char*, size_t, size_t, std::uint64_t, const char*, const char*,
-        std::uint64_t, std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t,
-        std::uint32_t, std::uint32_t, std::uint32_t, const char*>(query, _database);
+        size_t, const char*, size_t, size_t, uint64_t, const char*, const char*, uint64_t,
+        uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
+        const char*>(query, _database);
 }
 
 void
@@ -363,8 +366,8 @@ data_processor::initialize_code_object_stmt()
             .set_values('?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?')
             .get_query_string();
     _insert_code_object_statement = data_storage::database::create_statement_executor<
-        size_t, const char*, size_t, size_t, size_t, const char*, std::uint64_t,
-        std::uint64_t, std::uint64_t, const char*, const char*>(query, _database);
+        size_t, const char*, size_t, size_t, size_t, const char*, uint64_t, uint64_t,
+        uint64_t, const char*, const char*>(query, _database);
 }
 
 void
@@ -393,9 +396,8 @@ data_processor::initialize_memory_alloc_stmt()
                                  '?', '?', '?', '?')
                      .get_query_string();
     _insert_memory_alloc_statement = data_storage::database::create_statement_executor<
-        const char*, size_t, size_t, size_t, size_t, const char*, const char*,
-        std::uint64_t, std::uint64_t, size_t, size_t, size_t, size_t, size_t,
-        const char*>(query, _database);
+        const char*, size_t, size_t, size_t, size_t, const char*, const char*, uint64_t,
+        uint64_t, size_t, size_t, size_t, size_t, size_t, const char*>(query, _database);
 
     // Statement without agent_id
     query = query_builder.set_table_name("rocpd_memory_allocate_" + _upid)
@@ -407,9 +409,9 @@ data_processor::initialize_memory_alloc_stmt()
                 .get_query_string();
     _insert_memory_alloc_no_agent_statement =
         data_storage::database::create_statement_executor<
-            const char*, size_t, size_t, size_t, const char*, const char*, std::uint64_t,
-            std::uint64_t, size_t, size_t, size_t, size_t, size_t, const char*>(
-            query, _database);
+            const char*, size_t, size_t, size_t, const char*, const char*, uint64_t,
+            uint64_t, size_t, size_t, size_t, size_t, size_t, const char*>(query,
+                                                                           _database);
 }
 
 void
@@ -445,10 +447,9 @@ data_processor::insert_queue_info(size_t queue_id, size_t node_id, size_t proces
 
 void
 data_processor::insert_code_object(size_t id, size_t node_id, size_t process_id,
-                                   size_t agent_id, const char* uri,
-                                   std::uint64_t ld_base, std::uint64_t ld_size,
-                                   std::uint64_t ld_delta, const char* storage_type,
-                                   const char* extdata)
+                                   size_t agent_id, const char* uri, uint64_t ld_base,
+                                   uint64_t ld_size, uint64_t ld_delta,
+                                   const char* storage_type, const char* extdata)
 {
     LOG_TRACE("Insert code object with ID: {}", id);
     _insert_code_object_statement(id, _upid.c_str(), node_id, process_id, agent_id, uri,
@@ -457,12 +458,11 @@ data_processor::insert_code_object(size_t id, size_t node_id, size_t process_id,
 
 void
 data_processor::insert_kernel_symbol(
-    size_t id, size_t node_id, size_t process_id, std::uint64_t code_obj_id,
-    const char* name, const char* display_name, std::uint32_t kernel_obj,
-    std::uint32_t kernarg_segmnt_size, std::uint32_t kernarg_segment_alignment,
-    std::uint32_t group_segment_size, std::uint32_t private_segment_size,
-    std::uint32_t sgrp_count, std::uint32_t arch_vgrp_count,
-    std::uint32_t accum_vgrp_count, const char* extdata)
+    size_t id, size_t node_id, size_t process_id, uint64_t code_obj_id, const char* name,
+    const char* display_name, uint32_t kernel_obj, uint32_t kernarg_segmnt_size,
+    uint32_t kernarg_segment_alignment, uint32_t group_segment_size,
+    uint32_t private_segment_size, uint32_t sgrp_count, uint32_t arch_vgrp_count,
+    uint32_t accum_vgrp_count, const char* extdata)
 {
     LOG_TRACE("Insert kernel symbol: {} with ID: {}", name, id);
     _insert_kernel_symbol_statement(
@@ -473,7 +473,7 @@ data_processor::insert_kernel_symbol(
 
 void
 data_processor::insert_region(size_t node_id, size_t process_id, size_t thread_id,
-                              std::uint64_t start, std::uint64_t end, size_t name_id,
+                              uint64_t start, uint64_t end, size_t name_id,
                               size_t event_id, const char* extdata)
 {
     LOG_TRACE("Insert region for event id: {}", event_id);
@@ -486,10 +486,10 @@ void
 data_processor::insert_kernel_dispatch(
     size_t node_id, size_t process_id, size_t thread_id, size_t agent_id,
     size_t kernel_id, size_t dispatch_id, size_t queue_id, size_t stream_id,
-    std::uint64_t start, std::uint64_t end, size_t private_segment_size,
-    size_t group_segment_size, size_t workgroup_size_x, size_t workgroup_size_y,
-    size_t workgroup_size_z, size_t grid_size_x, size_t grid_size_y, size_t grid_size_z,
-    size_t region_name_id, size_t event_id, const char* extdata)
+    uint64_t start, uint64_t end, size_t private_segment_size, size_t group_segment_size,
+    size_t workgroup_size_x, size_t workgroup_size_y, size_t workgroup_size_z,
+    size_t grid_size_x, size_t grid_size_y, size_t grid_size_z, size_t region_name_id,
+    size_t event_id, const char* extdata)
 {
     LOG_TRACE("Insert kernel dispatch for event id: {}", event_id);
 
@@ -502,7 +502,7 @@ data_processor::insert_kernel_dispatch(
 
 void
 data_processor::insert_memory_copy(size_t node_id, size_t process_id, size_t thread_id,
-                                   std::uint64_t start, std::uint64_t end, size_t name_id,
+                                   uint64_t start, uint64_t end, size_t name_id,
                                    size_t dst_agent_id, size_t dst_addr,
                                    size_t src_agent_id, size_t src_addr, size_t size,
                                    size_t queue_id, size_t stream_id,
@@ -518,9 +518,9 @@ data_processor::insert_memory_copy(size_t node_id, size_t process_id, size_t thr
 void
 data_processor::insert_memory_alloc(size_t node_id, size_t process_id, size_t thread_id,
                                     std::optional<size_t> agent_id, const char* type,
-                                    const char* level, std::uint64_t start,
-                                    std::uint64_t end, size_t address, size_t size,
-                                    size_t queue_id, size_t stream_id, size_t event_id,
+                                    const char* level, uint64_t start, uint64_t end,
+                                    size_t address, size_t size, size_t queue_id,
+                                    size_t stream_id, size_t event_id,
                                     const char* extdata)
 {
     if(agent_id.has_value())
@@ -540,8 +540,7 @@ data_processor::insert_memory_alloc(size_t node_id, size_t process_id, size_t th
 size_t
 data_processor::insert_thread_info(size_t node_id, size_t parent_process_id,
                                    size_t process_id, size_t thread_id, const char* name,
-                                   std::uint64_t start, std::uint64_t end,
-                                   const char* extdata)
+                                   uint64_t start, uint64_t end, const char* extdata)
 {
     auto it = _thread_id_map.find(thread_id);
 

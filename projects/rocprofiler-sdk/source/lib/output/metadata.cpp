@@ -384,9 +384,9 @@ std::vector<std::string>
 metadata::get_att_filenames() const
 {
     auto data = std::vector<std::string>{};
-    for(const auto& [key, files] : att_filenames)
+    for(const auto& filenames : att_filenames)
     {
-        for(const auto& file : files)
+        for(const auto& file : filenames.second.second)
         {
             data.emplace_back(fs::path{file}.filename());
         }

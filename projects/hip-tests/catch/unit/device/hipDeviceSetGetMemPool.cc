@@ -1,8 +1,24 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 #include <hip_test_common.hh>
 #include <hip/hip_runtime_api.h>
@@ -18,13 +34,15 @@
  * The memory pool must be local to the specified device.
  */
 
-static inline void CheckMemPoolSupport(const int device) {
+static inline bool CheckMemPoolSupport(const int device) {
   int mem_pool_support = 0;
   HIP_CHECK(
       hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, device));
   if (!mem_pool_support) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
+    HipTest::HIP_SKIP_TEST("Test only runs on devices with memory pool support");
+    return false;
   }
+  return true;
 }
 
 static inline hipMemPool_t CreateMemPool(const int device) {
@@ -54,10 +72,12 @@ static inline hipMemPool_t CreateMemPool(const int device) {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipDeviceSetMemPool_Positive_Basic) {
+TEST_CASE("Unit_hipDeviceSetMemPool_Positive_Basic") {
   const int device = GENERATE(range(0, HipTest::getDeviceCount()));
 
-  CheckMemPoolSupport(device);
+  if (!CheckMemPoolSupport(device)) {
+    return;
+  }
 
   hipMemPool_t mem_pool = CreateMemPool(device);
   HIP_CHECK(hipDeviceSetMemPool(device, mem_pool));
@@ -83,7 +103,7 @@ HIP_TEST_CASE(Unit_hipDeviceSetMemPool_Positive_Basic) {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipDeviceSetMemPool_Negative_Parameters) {
+TEST_CASE("Unit_hipDeviceSetMemPool_Negative_Parameters") {
   hipMemPool_t mem_pool;
   HIP_CHECK(hipDeviceGetDefaultMemPool(&mem_pool, 0));
 
@@ -125,10 +145,12 @@ HIP_TEST_CASE(Unit_hipDeviceSetMemPool_Negative_Parameters) {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipDeviceGetMemPool_Positive_Default) {
+TEST_CASE("Unit_hipDeviceGetMemPool_Positive_Default") {
   const int device = GENERATE(range(0, HipTest::getDeviceCount()));
 
-  CheckMemPoolSupport(device);
+  if (!CheckMemPoolSupport(device)) {
+    return;
+  }
 
   hipMemPool_t default_mem_pool;
   HIP_CHECK(hipDeviceGetDefaultMemPool(&default_mem_pool, device));
@@ -151,10 +173,12 @@ HIP_TEST_CASE(Unit_hipDeviceGetMemPool_Positive_Default) {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipDeviceGetMemPool_Positive_Basic) {
+TEST_CASE("Unit_hipDeviceGetMemPool_Positive_Basic") {
   const int device = GENERATE(range(0, HipTest::getDeviceCount()));
 
-  CheckMemPoolSupport(device);
+  if (!CheckMemPoolSupport(device)) {
+    return;
+  }
 
   hipMemPool_t mem_pool = CreateMemPool(device);
   HIP_CHECK(hipDeviceSetMemPool(device, mem_pool));
@@ -179,7 +203,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetMemPool_Positive_Basic) {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipDeviceGetMemPool_Positive_Threaded) {
+TEST_CASE("Unit_hipDeviceGetMemPool_Positive_Threaded") {
   class HipDeviceGetMemPoolTest : public ThreadedZigZagTest<HipDeviceGetMemPoolTest> {
    public:
     void TestPart2() {
@@ -198,7 +222,9 @@ HIP_TEST_CASE(Unit_hipDeviceGetMemPool_Positive_Threaded) {
     hipMemPool_t mem_pool_;
   };
 
-  CheckMemPoolSupport(0);
+  if (!CheckMemPoolSupport(0)) {
+    return;
+  }
 
   HipDeviceGetMemPoolTest test;
   test.run();
@@ -222,7 +248,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetMemPool_Positive_Threaded) {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipDeviceGetMemPool_Negative_Parameters) {
+TEST_CASE("Unit_hipDeviceGetMemPool_Negative_Parameters") {
   hipMemPool_t mem_pool;
 
   SECTION("mem_pool == nullptr") {

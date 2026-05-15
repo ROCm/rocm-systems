@@ -1,8 +1,24 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 /**
  Functional test for Memset3D and Memset3DAsync
@@ -15,7 +31,8 @@
 /**
  * Basic Functional test of hipMemset3D
  */
-HIP_TEST_CASE(Unit_hipMemset3D_BasicFunctional) {
+TEST_CASE("Unit_hipMemset3D_BasicFunctional") {
+  CHECK_IMAGE_SUPPORT
 
   constexpr int memsetval = 0x22;
   constexpr size_t numH = 256;
@@ -64,7 +81,8 @@ HIP_TEST_CASE(Unit_hipMemset3D_BasicFunctional) {
 /**
  * Basic Functional test of hipMemset3DAsync
  */
-HIP_TEST_CASE(Unit_hipMemset3DAsync_BasicFunctional) {
+TEST_CASE("Unit_hipMemset3DAsync_BasicFunctional") {
+  CHECK_IMAGE_SUPPORT
 
   constexpr int memsetval = 0x22;
   constexpr size_t numH = 256;
@@ -125,15 +143,15 @@ HIP_TEST_CASE(Unit_hipMemset3DAsync_BasicFunctional) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-HIP_TEST_CASE(Unit_hipMemset3DAsync_capturehipMemset3DAsync) {
+TEST_CASE("Unit_hipMemset3DAsync_capturehipMemset3DAsync") {
   char* A_h;
   hipPitchedPtr A_d;
   hipGraph_t graph{nullptr};
   hipGraphExec_t graphExec{nullptr};
   int row, col, dep;
-  row = isQuickLevel() ? GENERATE(3, 100) : GENERATE(3, 4, 100);
-  col = isQuickLevel() ? GENERATE(3, 100) : GENERATE(3, 4, 100);
-  dep = isQuickLevel() ? GENERATE(3, 100) : GENERATE(3, 4, 100);
+  row = GENERATE(3, 4, 100);
+  col = GENERATE(3, 4, 100);
+  dep = GENERATE(3, 4, 100);
   hipStream_t stream;
 
   A_h = reinterpret_cast<char*>(malloc(sizeof(char) * row * col * dep));
@@ -178,7 +196,8 @@ HIP_TEST_CASE(Unit_hipMemset3DAsync_capturehipMemset3DAsync) {
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-HIP_TEST_CASE(Unit_hipMemset3D_Capture) {
+TEST_CASE("Unit_hipMemset3D_Capture") {
+  CHECK_IMAGE_SUPPORT
 
   constexpr int memsetval = 0x22;
   constexpr size_t numH = 256;

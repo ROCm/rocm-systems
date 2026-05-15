@@ -1,8 +1,23 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 #include <functional>
 
@@ -38,8 +53,9 @@
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit_hipGraphExecMemsetNodeSetParams_Positive_Basic, uint8_t, uint16_t,
+TEMPLATE_TEST_CASE("Unit_hipGraphExecMemsetNodeSetParams_Positive_Basic", "", uint8_t, uint16_t,
                    uint32_t) {
+  CHECK_IMAGE_SUPPORT
 
   const size_t width = GENERATE(1, 64, kPageSize / sizeof(TestType) + 1);
 
@@ -113,7 +129,11 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipGraphExecMemsetNodeSetParams_Positive_Basic, uint
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipGraphExecMemsetNodeSetParams_Negative_Parameters) {
+TEST_CASE("Unit_hipGraphExecMemsetNodeSetParams_Negative_Parameters",
+          "[multigpu]") {
+  // FIXME: this test tests 1D/2D/3D stuff in one single go, need to decouple it so that it can run
+  // on devices with no image support
+  CHECK_IMAGE_SUPPORT
 
   using namespace std::placeholders;
 
@@ -147,7 +167,7 @@ HIP_TEST_CASE(Unit_hipGraphExecMemsetNodeSetParams_Negative_Parameters) {
 
   SECTION("Changing dst allocation device") {
     if (HipTest::getDeviceCount() < 2) {
-      WARN("Skipping section: fewer than two GPUs (second device required for this negative case).");
+      HipTest::HIP_SKIP_TEST("Test requires two connected GPUs");
     } else {
       HIP_CHECK(hipSetDevice(1));
       LinearAllocGuard<int> new_alloc(LinearAllocs::hipMalloc, 4 * sizeof(int));
@@ -172,7 +192,8 @@ HIP_TEST_CASE(Unit_hipGraphExecMemsetNodeSetParams_Negative_Parameters) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipGraphExecMemsetNodeSetParams_Negative_Updating_Non1D_Node) {
+TEST_CASE("Unit_hipGraphExecMemsetNodeSetParams_Negative_Updating_Non1D_Node") {
+  CHECK_IMAGE_SUPPORT
 
   hipGraph_t graph = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));

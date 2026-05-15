@@ -18,10 +18,9 @@ THE SOFTWARE.
 */
 #include <hip_test_common.hh>
 
-static __global__ void f1(float *a) { *a = 1.0; }
+static __global__ void f1(float* a) { *a = 1.0; }
 
-template <typename T>
-static __global__ void f2(T *a) { *a = 1; }
+template <typename T> static __global__ void f2(T* a) { *a = 1; }
 
 TEST_CASE("Unit_hipOccupancyMaxPotentialBlockSize_Negative") {
   hipError_t ret;
@@ -53,28 +52,27 @@ TEST_CASE("Unit_hipOccupancyMaxPotentialBlockSize_rangeValidation") {
   HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
 
   // Check if blockSize doen't exceed maxThreadsPerBlock
-  REQUIRE(gridSize > 0); REQUIRE(blockSize > 0);
+  REQUIRE(gridSize > 0);
+  REQUIRE(blockSize > 0);
   REQUIRE(blockSize <= devProp.maxThreadsPerBlock);
 
   // Pass dynSharedMemPerBlk, blockSizeLimit and check out param
   blockSize = 0;
   gridSize = 0;
 
-  HIP_CHECK(hipOccupancyMaxPotentialBlockSize(&gridSize, &blockSize, f1,
-           devProp.sharedMemPerBlock, devProp.maxThreadsPerBlock));
+  HIP_CHECK(hipOccupancyMaxPotentialBlockSize(&gridSize, &blockSize, f1, devProp.sharedMemPerBlock,
+                                              devProp.maxThreadsPerBlock));
 
   // Check if blockSize doen't exceed maxThreadsPerBlock
-  REQUIRE(gridSize > 0); REQUIRE(blockSize > 0);
+  REQUIRE(gridSize > 0);
+  REQUIRE(blockSize > 0);
   REQUIRE(blockSize <= devProp.maxThreadsPerBlock);
-
 }
 
 TEST_CASE("Unit_hipOccupancyMaxPotentialBlockSize_templateInvocation") {
   int gridSize = 0, blockSize = 0;
 
-  HIP_CHECK(hipOccupancyMaxPotentialBlockSize<void(*)(int *)>(&gridSize,
-                       &blockSize, f2, 0, 0));
+  HIP_CHECK(hipOccupancyMaxPotentialBlockSize<void (*)(int*)>(&gridSize, &blockSize, f2, 0, 0));
   REQUIRE(gridSize > 0);
   REQUIRE(blockSize > 0);
 }
-

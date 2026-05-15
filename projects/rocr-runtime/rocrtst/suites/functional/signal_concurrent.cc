@@ -147,7 +147,6 @@ void SignalConcurrentTest::SetUp(void) {
   hsa_status_t err;
 
   TestBase::SetUp();
-  if (test_skipped_) return;
 
   err = rocrtst::SetDefaultAgents(this);
   ASSERT_EQ(HSA_STATUS_SUCCESS, err);

@@ -54,11 +54,11 @@ check_hip_error(void);
 
 // ======================================================
 __global__ void
-kernel1(const int c, const int iter_num)
+kernel1(const int c)
 {
     int a = 0;
 #pragma nounroll
-    for(int i = 0; i < iter_num; i++)
+    for(int i = 0; i < ITER_NUM; i++)
     {
         asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
         asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
@@ -164,11 +164,11 @@ kernel1(const int c, const int iter_num)
 }
 
 __global__ void
-kernel2(const int c, const int iter_num)
+kernel2(const int c)
 {
     int a = 0;
 #pragma nounroll
-    for(int i = 0; i < iter_num; i++)
+    for(int i = 0; i < ITER_NUM; i++)
     {
         asm volatile("s_mov_b32 %0 %1\n" : "=s"(a) : "s"(c));
         asm volatile("s_mov_b32 %0 %1\n" : "=s"(a) : "s"(c));
@@ -274,14 +274,14 @@ kernel2(const int c, const int iter_num)
 }
 
 __global__ void
-kernel3(const float c, const int iter_num)
+kernel3(const float c)
 {
     double a        = threadIdx.x;
     float  i        = 0;
     float  d        = threadIdx.x;
     float  e        = 0;
     int    tid_even = threadIdx.x % 2;
-    for(int j = 0; j < iter_num; j++)
+    for(int j = 0; j < ITER_NUM; j++)
     {
         if(tid_even == 0)
         {
@@ -501,22 +501,21 @@ run_kernel()
     HIP_API_CALL(hipDeviceGetAttribute(&wave_size, hipDeviceAttributeWarpSize, 0));
 
     // Get device properties to retrieve GFXIP version
-    size_t num_blocks = BLOCK_SIZE;
-    size_t num_iters  = ITER_NUM;
+    uint32_t num_blocks = BLOCK_SIZE;
 
     for(int i = 1; i <= wave_size; i++)
     {
         if(i % 2 == 1)
-            kernel1<<<num_blocks, i>>>(i, num_iters);
+            kernel1<<<num_blocks, i>>>(i);
         else
-            kernel2<<<num_blocks, i>>>(i, num_iters);
+            kernel2<<<num_blocks, i>>>(i);
 
         check_hip_error();
         HIP_API_CALL(hipDeviceSynchronize());
     }
 
     float arg = 0;
-    kernel3<<<num_blocks, 4 * wave_size>>>(arg, num_iters);
+    kernel3<<<num_blocks, 4 * wave_size>>>(arg);
     check_hip_error();
     HIP_API_CALL(hipDeviceSynchronize());
 }

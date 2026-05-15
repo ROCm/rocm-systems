@@ -1,8 +1,21 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 /*
 Testcase Scenarios :
@@ -19,7 +32,7 @@ priority should be clamped to the priority range.
 /**
  * Create stream and check priority.
  */
-HIP_TEST_CASE(Unit_hipStreamGetPriority_happy) {
+TEST_CASE("Unit_hipStreamGetPriority_happy") {
   int priority_low = 0;
   int priority_high = 0;
   int devID = GENERATE(range(0, HipTest::getDeviceCount()));
@@ -69,7 +82,7 @@ HIP_TEST_CASE(Unit_hipStreamGetPriority_happy) {
 /**
  * both stream and priority passed as nullptr.
  */
-HIP_TEST_CASE(Unit_hipStreamGetPriority_nullptr_nullptr) {
+TEST_CASE("Unit_hipStreamGetPriority_nullptr_nullptr") {
   auto res = hipStreamGetPriority(nullptr, nullptr);
   REQUIRE(res == hipErrorInvalidValue);
 }
@@ -78,7 +91,7 @@ HIP_TEST_CASE(Unit_hipStreamGetPriority_nullptr_nullptr) {
 /**
  * valid stream and priority passed as nullptr.
  */
-HIP_TEST_CASE(Unit_hipStreamGetPriority_stream_nullptr) {
+TEST_CASE("Unit_hipStreamGetPriority_stream_nullptr") {
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
 
@@ -92,7 +105,7 @@ HIP_TEST_CASE(Unit_hipStreamGetPriority_stream_nullptr) {
 /**
  * nullptr stream and valid priority
  */
-HIP_TEST_CASE(Unit_hipStreamGetPriority_nullptr_priority) {
+TEST_CASE("Unit_hipStreamGetPriority_nullptr_priority") {
   int priority = -1;
   HIP_CHECK(hipStreamGetPriority(nullptr, &priority));
 }
@@ -100,7 +113,7 @@ HIP_TEST_CASE(Unit_hipStreamGetPriority_nullptr_priority) {
 /**
  * both stream and priority passed as valid.
  */
-HIP_TEST_CASE(Unit_hipStreamGetPriority_stream_priority) {
+TEST_CASE("Unit_hipStreamGetPriority_stream_priority") {
   int priority = -1;
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
@@ -114,7 +127,7 @@ HIP_TEST_CASE(Unit_hipStreamGetPriority_stream_priority) {
 /**
  * Create stream with CUMask and check priority is returned as expected.
  */
-HIP_TEST_CASE(Unit_hipStreamGetPriority_StreamsWithCUMask) {
+TEST_CASE("Unit_hipStreamGetPriority_StreamsWithCUMask") {
   hipStream_t stream{};
   int priority = 0;
   int priority_normal = 0;

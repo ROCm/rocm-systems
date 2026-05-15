@@ -1,8 +1,24 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+
+Permission is hereby granted, free of intge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 #include "MemUtils.hh"
 
@@ -61,7 +77,7 @@ template <typename T> static void doMemsetTest(allocType mallocType, memType mem
  * test 2 async hipMemset's on the same memory at different offsets
  */
 
-HIP_TEST_CASE(Unit_hipMemsetASyncMulti) {
+TEST_CASE("Unit_hipMemsetASyncMulti") {
   allocType mallocType = GENERATE(allocType::hostMalloc, allocType::deviceMalloc,
                                   allocType::hostRegisted, allocType::devRegistered);
   memType mem_type = memType::hipMemsetD8;
@@ -78,7 +94,7 @@ HIP_TEST_CASE(Unit_hipMemsetASyncMulti) {
 /*
  * test 2 async hipMemsetD[8,16,32]'s on the same memory at different offsets
  */
-HIP_TEMPLATE_TEST_CASE(Unit_hipMemsetDASyncMulti, int8_t, int16_t, uint32_t) {
+TEMPLATE_TEST_CASE("Unit_hipMemsetDASyncMulti", "", int8_t, int16_t, uint32_t) {
   allocType mallocType = GENERATE(allocType::hostRegisted, allocType::deviceMalloc,
                                   allocType::hostMalloc, allocType::devRegistered);
   memType memset_type;
@@ -102,9 +118,10 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemsetDASyncMulti, int8_t, int16_t, uint32_t) {
 /*
  * test 2 async hipMemset2D's on the same memory at different offsets
  */
-HIP_TEST_CASE(Unit_hipMemset2DASyncMulti) {
+TEST_CASE("Unit_hipMemset2DASyncMulti") {
 #if HT_AMD
-  HIP_SKIP_TEST("tracked issue EXSWCPHIPT-127.");
+  HipTest::HIP_SKIP_TEST("EXSWCPHIPT-127");
+  return;
 #endif
   allocType mallocType = GENERATE(allocType::deviceMalloc, allocType::hostMalloc,
                                   allocType::hostRegisted, allocType::devRegistered);
@@ -123,9 +140,10 @@ HIP_TEST_CASE(Unit_hipMemset2DASyncMulti) {
 /*
  * test 2 async hipMemset3D's on the same memory at different offsets
  */
-HIP_TEST_CASE(Unit_hipMemset3DASyncMulti) {
+TEST_CASE("Unit_hipMemset3DASyncMulti") {
 #if HT_AMD
-  HIP_SKIP_TEST("tracked issue EXSWCPHIPT-127.");
+  HipTest::HIP_SKIP_TEST("EXSWCPHIPT-127");
+  return;
 #endif
   allocType mallocType = GENERATE(allocType::deviceMalloc, allocType::hostMalloc,
                                   allocType::hostRegisted, allocType::devRegistered);

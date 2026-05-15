@@ -120,22 +120,29 @@ __global__ void ShmemPtrTest(int loop, int skip, long long int *start_time,
 ShmemPtrTester::ShmemPtrTester(TesterArguments args) : Tester(args) {
   size_t buff_size = args.wg_size * args.num_wgs + sizeof(int);
   CHECK_HIP(hipMalloc((void **)&_available, sizeof(int)));
-  dest = (char *) alloc_test_buffer(buff_size);
+  dest = (char *)rocshmem_malloc(buff_size);
+
+  if (dest == nullptr) {
+    std::cerr << "Error allocating memory from symmetric heap" << std::endl;
+    std::cerr << "dest: " << dest << std::endl;
+
+    rocshmem_global_exit(1);
+  }
 }
 
 ShmemPtrTester::~ShmemPtrTester() {
   CHECK_HIP(hipFree(_available));
-  free_test_buffer(dest);
+  rocshmem_free(dest);
 }
 
-void ShmemPtrTester::resetBuffers([[maybe_unused]] size_t size) {
+void ShmemPtrTester::resetBuffers(size_t size) {
   size_t buff_size = args.wg_size * args.num_wgs + sizeof(int);
   memset(dest, '0', buff_size);
   memset(_available, 0, sizeof(int));
 }
 
 void ShmemPtrTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                                  [[maybe_unused]] size_t size) {
+                                  size_t size) {
   size_t shared_bytes = 0;
 
   hipLaunchKernelGGL(ShmemPtrTest, gridSize, blockSize, shared_bytes,
@@ -146,7 +153,7 @@ void ShmemPtrTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
   num_timed_msgs = loop * gridSize.x * blockSize.x;
 }
 
-void ShmemPtrTester::verifyResults([[maybe_unused]] size_t size) {
+void ShmemPtrTester::verifyResults(size_t size) {
   if (args.myid == 0) {
     if (*_available == 0) {
       _print_results = false;

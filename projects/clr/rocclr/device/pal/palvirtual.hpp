@@ -1,8 +1,22 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+/* Copyright (c) 2015 - 2025 Advanced Micro Devices, Inc.
+
+ Permission is hereby granted, free of charge, to any person obtaining a copy
+ of this software and associated documentation files (the "Software"), to deal
+ in the Software without restriction, including without limitation the rights
+ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ copies of the Software, and to permit persons to whom the Software is
+ furnished to do so, subject to the following conditions:
+
+ The above copyright notice and this permission notice shall be included in
+ all copies or substantial portions of the Software.
+
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ THE SOFTWARE. */
 
 #pragma once
 
@@ -68,7 +82,7 @@ enum class BarrierType : uint8_t {
 //! Virtual GPU
 class VirtualGPU : public device::VirtualDevice {
  public:
-  class Queue {
+  class Queue : public amd::HeapObject {
    public:
     static constexpr uint MaxCommands = 256;
     static constexpr uint StartCmdBufIdx = 1;
@@ -78,15 +92,6 @@ class VirtualGPU : public device::VirtualDevice {
 
     Queue(const Queue&) = delete;
     Queue& operator=(const Queue&) = delete;
-
-    // This type is allocated exclusively via amd::AllocWithTrailing<Queue>(extSize, ...) so
-    // that a single block holds the wrapper plus PAL's IQueue / ICmdBuffer / IFence objects
-    // placed in the trailing region.
-    void* operator new(size_t) = delete;
-    void operator delete(void*) = delete;
-    // Placement new overloads required by MSVC when operator new(size_t) is deleted
-    void* operator new(size_t, void* p) noexcept { return p; }
-    void* operator new(size_t, std::align_val_t, void* p) noexcept { return p; }
 
     static Queue* Create(VirtualGPU& gpu,                       //!< ROCCLR virtual GPU object
                          Pal::QueueType queueType,              //!< PAL queue type
@@ -189,7 +194,7 @@ class VirtualGPU : public device::VirtualDevice {
 
     static uint32_t AllocedQueues(const VirtualGPU& gpu, Pal::EngineType type);
 
-    std::recursive_mutex* lock_;               //!< Lock PAL queue for access
+    amd::Monitor* lock_;                       //!< Lock PAL queue for access
     Pal::IQueue* iQueue_;                      //!< PAL queue object
     std::vector<Pal::ICmdBuffer*> iCmdBuffs_;  //!< PAL command buffers
     std::vector<Pal::IFence*> iCmdFences_;     //!< PAL fences, associated with CMD
@@ -217,7 +222,7 @@ class VirtualGPU : public device::VirtualDevice {
     uint max_command_buffers_;
   };
 
-  struct CommandBatch {
+  struct CommandBatch : public amd::HeapObject {
     amd::Command* head_;           //!< Command batch head
     GpuEvent events_[AllEngines];  //!< Last known GPU events
     TimeStamp* lastTS_;            //!< TS associated with command batch
@@ -357,6 +362,13 @@ class VirtualGPU : public device::VirtualDevice {
   bool isFenceDirty() const { return false; }
 
   void HiddenHeapInit() {}
+
+  //! Dispatches multiple AQL packets in a single batch operation
+  bool dispatchAqlPacketBatch(const std::vector<uint8_t*>& packets,
+                              const std::vector<std::string>& kernelNames,
+                              amd::AccumulateCommand* vcmd = nullptr, bool attach_signal = false) {
+    return false;
+  }
 
   void resetFenceDirty() {}
 
@@ -610,6 +622,39 @@ class VirtualGPU : public device::VirtualDevice {
 
  protected:
   void profileEvent(EngineType engine, bool type) const;
+
+  //! Creates buffer object from image
+  inline amd::Memory* createBufferFromImage(
+      amd::Memory& amdImage  //! The parent image object(untiled images only)
+  ) {
+    amd::Memory* mem = new (amdImage.getContext()) amd::Buffer(amdImage, 0, 0, amdImage.getSize());
+    mem->setVirtualDevice(this);
+    if (!mem->create()) {
+      mem->release();
+    }
+    return mem;
+  }
+
+  //! Get copy command type from original copy command type and memory object types
+  inline cl_command_type getCopyCommandType(cl_command_type type, const cl_mem_object_type srcType,
+                                 const cl_mem_object_type dstType) {
+    if (srcType == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
+      if (dstType == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
+        type = CL_COMMAND_COPY_BUFFER;
+      } else if (dstType == CL_MEM_OBJECT_BUFFER) {
+        type = CL_COMMAND_COPY_BUFFER;
+      } else if (type == CL_COMMAND_COPY_IMAGE) {
+        type = CL_COMMAND_COPY_BUFFER_TO_IMAGE;
+      }
+    } else if (dstType == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
+      if (srcType == CL_MEM_OBJECT_BUFFER) {
+        type = CL_COMMAND_COPY_BUFFER;
+      } else if (type == CL_COMMAND_COPY_IMAGE) {
+        type = CL_COMMAND_COPY_IMAGE_TO_BUFFER;
+      }
+    }
+    return type;
+  }
 
  private:
   struct MemoryRange {

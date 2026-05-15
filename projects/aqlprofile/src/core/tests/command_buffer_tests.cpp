@@ -22,7 +22,6 @@
 
 #include <gtest/gtest.h>
 #include "core/commandbuffermgr.hpp"
-#include <array>
 #include <climits>
 
 

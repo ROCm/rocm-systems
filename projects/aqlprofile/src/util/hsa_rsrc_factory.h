@@ -24,7 +24,11 @@
 #ifndef SRC_UTIL_HSA_RSRC_FACTORY_H_
 #define SRC_UTIL_HSA_RSRC_FACTORY_H_
 
-#include "hsa_includes.h"
+#include <hsa/hsa.h>
+#include <hsa/hsa_ext_amd.h>
+#include <hsa/hsa_ext_finalize.h>
+#include <hsa/hsa_ven_amd_aqlprofile.h>
+#include <hsa/hsa_ven_amd_loader.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -125,9 +129,6 @@ struct AgentInfo {
 
   // Timestamp frequency for realtime clock
   uint32_t timestamp_freq{0};
-
-  // Number of XCC per AID
-  uint32_t xcc_per_aid{1};
 };
 
 // HSA timer class

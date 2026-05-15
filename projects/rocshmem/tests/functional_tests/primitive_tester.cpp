@@ -84,7 +84,7 @@ __global__ void PrimitiveTest(int loop, int skip, long long int *start_time,
         break;
       case PTestType:
         {
-          /* Assignment required to verify we can send non-symetric memory */
+          /* Assigment required to verify we can send non-symetric memory */
           char val = *source;
           rocshmem_ctx_char_p(ctx, dest, val, 1);
         }
@@ -129,23 +129,19 @@ __global__ void PrimitiveTest(int loop, int skip, long long int *start_time,
  *****************************************************************************/
 PrimitiveTester::PrimitiveTester(TesterArguments args) : Tester(args) {
   size_t buff_size = max_msg_size * args.wg_size * args.num_wgs;
-  char *local = (char *) alloc_test_buffer(buff_size, args.local_buf_type);
-  char *remote = (char *) alloc_test_buffer(buff_size);
+  source = (char *)rocshmem_malloc(buff_size);
+  dest = (char *)rocshmem_malloc(buff_size);
 
-  switch (_type) {
-    case PutTestType:
-    case PutNBITestType:
-    case PTestType:
-      source = local;
-      dest = remote;
-      break;
-    case GetTestType:
-    case GetNBITestType:
-    case GTestType:
-    default:
-      dest = local;
-      source = remote;
-      break;
+  if (source == nullptr || dest == nullptr) {
+    std::cerr << "Error allocating memory from symmetric heap" << std::endl;
+    std::cerr << "source: " << source << ", dest: " << dest << std::endl;
+    if (source) {
+      rocshmem_free(source);
+    }
+    if (dest) {
+      rocshmem_free(dest);
+    }
+    rocshmem_global_exit(1);
   }
 
   for(size_t i = 0; i < buff_size; i++) {
@@ -154,27 +150,8 @@ PrimitiveTester::PrimitiveTester(TesterArguments args) : Tester(args) {
 }
 
 PrimitiveTester::~PrimitiveTester() {
-  char *local = nullptr;
-  char *remote = nullptr;
-
-  switch (_type) {
-    case PutTestType:
-    case PutNBITestType:
-    case PTestType:
-      local = source;
-      remote = dest;
-      break;
-    case GetTestType:
-    case GetNBITestType:
-    case GTestType:
-    default:
-      local = dest;
-      remote = source;
-      break;
-  }
-
-  free_test_buffer(local, args.local_buf_type);
-  free_test_buffer(remote);
+  rocshmem_free(source);
+  rocshmem_free(dest);
 }
 
 void PrimitiveTester::resetBuffers(size_t size) {

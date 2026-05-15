@@ -8,8 +8,7 @@ set(ROCPROFILER_LIB_PC_SAMPLING_PARSER_HEADERS
     rocr.h
     translation.hpp
     gfx950.hpp
-    gfx12.hpp
-    gfx1250.hpp)
+    gfx12.hpp)
 
 target_sources(
     rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_SOURCES}

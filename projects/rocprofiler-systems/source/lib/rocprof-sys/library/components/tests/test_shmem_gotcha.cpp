@@ -143,17 +143,6 @@ struct MockedCategoryRegion
     }
 };
 
-struct MockGotchaBundle
-{
-    MockedSHMEMGotcha instance;
-
-    template <typename>
-    MockedSHMEMGotcha* get()
-    {
-        return &instance;
-    }
-};
-
 struct MockedSHMEMPolicy
 {
     using gotcha_data     = MockedGotchaData;
@@ -161,7 +150,6 @@ struct MockedSHMEMPolicy
     using category_region = MockedCategoryRegion;
     using shmem_bundle_t  = void;
     using shmem_gotcha_t  = MockedSHMEMGotcha;
-    using gotcha_bundle_t = MockGotchaBundle;
 };
 
 using shmem_gotcha_under_test_t = rocprofsys::component::shmem_gotcha<MockedSHMEMPolicy>;

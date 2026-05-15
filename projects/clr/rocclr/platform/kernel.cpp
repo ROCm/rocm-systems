@@ -1,8 +1,22 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+/* Copyright (c) 2008 - 2021 Advanced Micro Devices, Inc.
+
+ Permission is hereby granted, free of charge, to any person obtaining a copy
+ of this software and associated documentation files (the "Software"), to deal
+ in the Software without restriction, including without limitation the rights
+ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ copies of the Software, and to permit persons to whom the Software is
+ furnished to do so, subject to the following conditions:
+
+ The above copyright notice and this permission notice shall be included in
+ all copies or substantial portions of the Software.
+
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ THE SOFTWARE. */
 
 #include "platform/kernel.hpp"
 #include "platform/program.hpp"
@@ -90,8 +104,8 @@ address KernelParameters::alloc(device::VirtualDevice& vDev) {
 }
 
 // =================================================================================================
-bool KernelParameters::captureHIPArgs(void** kernelParams, address kernArgs, size_t kernArgsSize,
-                                      address mem) {
+bool KernelParameters::captureAndSet(void** kernelParams, address kernArgs, size_t kernArgsSize,
+                                     address mem) {
   amd::Memory** memories = reinterpret_cast<amd::Memory**>(mem + memoryObjOffset());
   for (size_t idx = 0; idx < signature_.numParameters(); ++idx) {
     KernelParameterDescriptor& desc = signature_.params()[idx];
@@ -103,25 +117,37 @@ bool KernelParameters::captureHIPArgs(void** kernelParams, address kernArgs, siz
     if (kernelParams == nullptr && ((desc.offset_ + desc.size_) > kernArgsSize)) {
       value = &uint64_value;
     }
-    if (desc.type_ == T_POINTER) {
+    Memory* memArg = nullptr;
+    if (desc.type_ == T_POINTER && (desc.addressQualifier_ != CL_KERNEL_ARG_ADDRESS_LOCAL)) {
       LP64_SWITCH(uint32_value, uint64_value) = *(LP64_SWITCH(uint32_t*, uint64_t*))value;
-      Memory* memArg = nullptr;
-      if (!AMD_DIRECT_DISPATCH) {
-        memArg = amd::MemObjMap::FindMemObj(*reinterpret_cast<const void* const*>(value));
+      memArg = amd::MemObjMap::FindMemObj(*reinterpret_cast<const void* const*>(value));
+      memories[desc.info_.arrayIndex_] = memArg;
+      if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
         if (memArg != nullptr) {
           memArg->retain();
         }
       }
-      memories[desc.info_.arrayIndex_] = memArg;
+    } else if (desc.type_ == T_SAMPLER) {
+      LogError("Cannot handle Sampler now");
+      return false;
+    } else if (desc.type_ == T_QUEUE) {
+      LogError("Cannot handle Queue now");
+      return false;
     } else {
-      assert((desc.type_ != T_SAMPLER && desc.type_ != T_QUEUE) &&
-             "Unexpected argument type for a HIP kernel");
       switch (desc.size_) {
         case 4:
-          uint32_value = *(static_cast<const uint32_t*>(value));
+          if (desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_LOCAL) {
+            uint32_value = desc.size_;
+          } else {
+            uint32_value = *(static_cast<const uint32_t*>(value));
+          }
           break;
         case 8:
-          uint64_value = *(static_cast<const uint64_t*>(value));
+          if (desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_LOCAL) {
+            uint64_value = desc.size_;
+          } else {
+            uint64_value = *(static_cast<const uint64_t*>(value));
+          }
           break;
       }
     }
@@ -209,15 +235,22 @@ void KernelParameters::set(size_t index, size_t size, const void* value, bool sv
   desc.info_.defined_ = true;
 }
 
-address KernelParameters::captureOpenCLArgs(device::VirtualDevice& vDev, uint64_t lclMemSize,
-                                            int32_t* error) {
+address KernelParameters::capture(device::VirtualDevice& vDev, uint64_t lclMemSize,
+                                  int32_t* error) {
   const Device& device = vDev.device();
   *error = CL_SUCCESS;
 
-  // We need to make another allocation for kernel arguments, because the same
-  // kernel may be submitted once again, but with different arguments
-  // immediately after the current dispatch.
-  address mem = alloc(vDev);
+  //! Information about which arguments are SVM pointers is stored after
+  // the actual parameters, but only if the device has any SVM capability
+  const size_t execInfoSize = getNumberOfSvmPtr() * sizeof(void*);
+
+  address mem = vDev.allocKernelArguments(totalSize_ + execInfoSize, 128);
+  if (mem == nullptr) {
+    mem = reinterpret_cast<address>(
+        AlignedMemory::allocate(totalSize_ + execInfoSize, PARAMETERS_MIN_ALIGNMENT));
+  } else {
+    deviceKernelArgs_ = true;
+  }
 
   if (mem != nullptr) {
     ::memcpy(mem, values_, totalSize_);
@@ -276,9 +309,6 @@ address KernelParameters::captureOpenCLArgs(device::VirtualDevice& vDev, uint64_
       }
     }
 
-    //! Information about which arguments are SVM pointers is stored after
-    // the actual parameters, but only if the device has any SVM capability
-    const size_t execInfoSize = getNumberOfSvmPtr() * sizeof(void*);
     address last = mem + totalSize_;
     if (0 != execInfoSize) {
       ::memcpy(last, &execSvmPtr_[0], execInfoSize);

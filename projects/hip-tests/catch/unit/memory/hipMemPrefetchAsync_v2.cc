@@ -1,8 +1,23 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 #include <hip_test_common.hh>
 #include <utils.hh>
@@ -55,10 +70,11 @@ static std::vector<int> getSupportedDevices() {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-HIP_TEST_CASE(Unit_hipMemPrefetchAsync_v2_Device_Host) {
+TEST_CASE("Unit_hipMemPrefetchAsync_v2_Device_Host", "[multigpu]") {
   auto supportedDevices = getSupportedDevices();
   if (supportedDevices.empty()) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HipTest::HIP_SKIP_TEST(
+        "Test need at least one device with managed memory support");
   }
 
   HIP_CHECK(hipSetDevice(supportedDevices[0]));
@@ -166,13 +182,11 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_v2_Device_Host) {
  *  - HIP_VERSION >= 7.1
  */
 #if __linux__
-HIP_TEST_CASE(Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent) {
+TEST_CASE("Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent") {
   auto supportedDevices = getSupportedDevices();
-  if (supportedDevices.empty()) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedNoConcurrentAccess);
-  }
-  if (numa_available() < 0) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kHostNumaUnavailable);
+  if (supportedDevices.empty() || numa_available() < 0) {
+    HipTest::HIP_SKIP_TEST("Skipping as System does not have managed memory "
+                           "supported devices or No Numa nodes in system");
   }
 
   HIP_CHECK(hipSetDevice(supportedDevices[0]));
@@ -287,10 +301,11 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent) {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-HIP_TEST_CASE(Unit_hipMemPrefetchAsync_v2_Negative) {
+TEST_CASE("Unit_hipMemPrefetchAsync_v2_Negative") {
   auto supportedDevices = getSupportedDevices();
   if (supportedDevices.empty()) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HipTest::HIP_SKIP_TEST(
+        "Test need at least one device with managed memory support");
   }
 
   HIP_CHECK(hipSetDevice(supportedDevices[0]));

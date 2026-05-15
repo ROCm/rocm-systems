@@ -388,14 +388,7 @@ pcsample_status_t inline parse_buffer(generic_sample_t*                  buffer,
     }
     else if(gfxip_major == 12)
     {
-        if(gfxip_minor == 5)
-        {
-            parseSample_func = _parse_buffer<GFX1250, PcSamplingRecordT>;
-        }
-        else
-        {
-            parseSample_func = _parse_buffer<GFX12, PcSamplingRecordT>;
-        }
+        parseSample_func = _parse_buffer<GFX12, PcSamplingRecordT>;
     }
     else
     {

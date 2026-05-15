@@ -25,12 +25,8 @@
 #include "core/argparse.hpp"
 
 #include <csignal>
-#include <map>
 #include <sched.h>
-#include <set>
-#include <string>
 #include <string_view>
-#include <vector>
 
 using parser_data_t = rocprofsys::argparse::parser_data;
 

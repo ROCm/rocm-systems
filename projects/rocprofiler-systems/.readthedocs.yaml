@@ -10,9 +10,9 @@ build:
 
 python:
   install:
-  - requirements: projects/rocprofiler-systems/docs/sphinx/requirements.txt
+  - requirements: docs/sphinx/requirements.txt
 
 sphinx:
-  configuration: projects/rocprofiler-systems/docs/conf.py
+  configuration: docs/conf.py
 
 formats: []

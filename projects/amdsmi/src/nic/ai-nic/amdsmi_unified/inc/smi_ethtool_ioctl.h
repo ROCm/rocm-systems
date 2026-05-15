@@ -23,15 +23,16 @@
 #ifndef __SMI_ETHTOOL_IOCTL_H__
 #define __SMI_ETHTOOL_IOCTL_H__
 
+#include <unistd.h>
+#include <cstring>
+
+#include <iostream>
 #include <fcntl.h>
+#include <sys/ioctl.h>
+#include <string>
+
 #include <linux/ethtool.h>
 #include <net/if.h>
-#include <sys/ioctl.h>
-#include <unistd.h>
-
-#include <cstring>
-#include <iostream>
-#include <string>
 
 /**
  * @brief Generic template function to perform ethtool ioctl on network devices.
@@ -49,4 +50,4 @@
 template <typename T>
 int smi_ethtool_ioctl(const std::string& device, T* data);
 
-#endif  // __SMI_ETHTOOL_IOCTL_H__
+#endif // __SMI_ETHTOOL_IOCTL_H__

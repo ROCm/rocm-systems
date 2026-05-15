@@ -41,11 +41,9 @@ RocJpegStreamParser::~RocJpegStreamParser() {
  * @return True if the JPEG stream was successfully parsed, false otherwise.
  */
 bool RocJpegStreamParser::ParseJpegStream(const uint8_t *jpeg_stream, uint32_t jpeg_stream_size) {
-    FunctionEntryLogWithArgs(g_rocjpeg_logger, RocJpegFmtPtr(jpeg_stream) + ", " + ROCJPEG_TOSTR(jpeg_stream_size));
     std::lock_guard<std::mutex> lock(mutex_);
     if (jpeg_stream == nullptr) {
-        CriticalLog(g_rocjpeg_logger, "Invalid argument!");
-        FunctionExitLog(g_rocjpeg_logger);
+        ERR("invalid argument!");
         return false;
     }
 
@@ -64,14 +62,13 @@ bool RocJpegStreamParser::ParseJpegStream(const uint8_t *jpeg_stream, uint32_t j
 
     // The first two bytes of a JPEG must be 0XFFD8
     if (*stream_ != 0xFF || *(stream_ + 1) != SOI) {
-        ErrorLog(g_rocjpeg_logger, "Invalid JPEG!");
-        FunctionExitLog(g_rocjpeg_logger);
+        ERR("Invalid JPEG!");
         return false;
     }
 
     soi_marker_found = ParseSOI();
     if (!soi_marker_found) {
-        ErrorLog(g_rocjpeg_logger, "Failed to find the SOI marker!");
+        ERR("failed to find the SOI marker!");
     }
 
     while (!sos_marker_found  && stream_ <= stream_end_) {
@@ -83,36 +80,26 @@ bool RocJpegStreamParser::ParseJpegStream(const uint8_t *jpeg_stream, uint32_t j
 
         switch (marker) {
             case SOF:
-                if (!ParseSOF()) {
-                    FunctionExitLog(g_rocjpeg_logger);
+                if (!ParseSOF())
                     return false;
-                }
                 break;
             case DHT:
-                if (!ParseDHT()) {
-                    FunctionExitLog(g_rocjpeg_logger);
+                if (!ParseDHT())
                     return false;
-                }
                 dht_marker_found = true;
                 break;
             case DQT:
-                if (!ParseDQT()) {
-                    FunctionExitLog(g_rocjpeg_logger);
+                if (!ParseDQT())
                     return false;
-                }
                 dqt_marker_found = true;
                 break;
             case DRI:
-                if (!ParseDRI()) {
-                    FunctionExitLog(g_rocjpeg_logger);
+                if (!ParseDRI())
                     return false;
-                }
                 break;
             case SOS:
-                if (!ParseSOS()) {
-                    FunctionExitLog(g_rocjpeg_logger);
+                if (!ParseSOS())
                     return false;
-                }
                 sos_marker_found = true;
                 break;
             default:
@@ -122,22 +109,17 @@ bool RocJpegStreamParser::ParseJpegStream(const uint8_t *jpeg_stream, uint32_t j
     }
 
     if (!dht_marker_found) {
-        ErrorLog(g_rocjpeg_logger, "Didn't find any Huffman table!");
-        FunctionExitLog(g_rocjpeg_logger);
+        ERR("didn't find any Huffman table!");
         return false;
     }
     if (!dqt_marker_found) {
-        ErrorLog(g_rocjpeg_logger, "Didn't find any quantization table!");
-        FunctionExitLog(g_rocjpeg_logger);
+        ERR("didn't find any quantization table!");
         return false;
     }
 
-    if (!ParseEOI()) {
-        FunctionExitLog(g_rocjpeg_logger);
+    if (!ParseEOI())
         return false;
-    }
 
-    FunctionExitLog(g_rocjpeg_logger);
     return true;
 }
 
@@ -188,7 +170,7 @@ bool RocJpegStreamParser::ParseSOF() {
     jpeg_stream_parameters_.picture_parameter_buffer.num_components = stream_[7];
 
     if (jpeg_stream_parameters_.picture_parameter_buffer.num_components > NUM_COMPONENTS - 1) {
-        ErrorLog(g_rocjpeg_logger,"invalid number of JPEG components!");
+        ERR("invalid number of JPEG components!");
         return false;
     }
 
@@ -201,7 +183,7 @@ bool RocJpegStreamParser::ParseSOF() {
 
         jpeg_stream_parameters_.picture_parameter_buffer.components[i].component_id = component_id;
         if (quantiser_table_selector >= NUM_COMPONENTS) {
-            ErrorLog(g_rocjpeg_logger,"invalid number of the quantization table!");
+            ERR("invalid number of the quantization table!");
             return false;
         }
         jpeg_stream_parameters_.picture_parameter_buffer.components[i].v_sampling_factor = sampling_factor & 0xF;
@@ -246,11 +228,11 @@ bool RocJpegStreamParser::ParseDQT() {
     while (stream_ < dqt_block_end) {
         quantization_table_index = *stream_++;
         if (quantization_table_index >> 4) {
-            ErrorLog(g_rocjpeg_logger,"16 bits quantization table is not supported!");
+            ERR("16 bits quantization table is not supported!");
             return false;
         }
         if (quantization_table_index >= 4) {
-            ErrorLog(g_rocjpeg_logger,"invalid number of quantization table!");
+            ERR("invalid number of quantization table!");
             return false;
         }
 
@@ -290,7 +272,7 @@ bool RocJpegStreamParser::ParseDHT() {
         huffman_table_id = index & 0x0F;
 
         if (huffman_table_id >= HUFFMAN_TABLES) {
-            ErrorLog(g_rocjpeg_logger,"invalid number of Huffman table!");
+            ERR("invlaid number of Huffman table!");
             return false;
         }
 
@@ -307,14 +289,14 @@ bool RocJpegStreamParser::ParseDHT() {
 
         if (ac_huffman_table) {
             if (count > AC_HUFFMAN_TABLE_VALUES_SIZE) {
-                ErrorLog(g_rocjpeg_logger,"invalid AC Huffman table!");
+                ERR("invalid AC Huffman table!");
                 return false;
             }
             std::memcpy(jpeg_stream_parameters_.huffman_table_buffer.huffman_table[huffman_table_id].ac_values, stream_, count);
             jpeg_stream_parameters_.huffman_table_buffer.load_huffman_table[huffman_table_id] = 1;
         } else {
             if (count > DC_HUFFMAN_TABLE_VALUES_SIZE) {
-                ErrorLog(g_rocjpeg_logger, "Invalid DC Huffman table!");
+                ERR("invlaid DC Huffman table!")
                 return false;
             }
             std::memcpy(jpeg_stream_parameters_.huffman_table_buffer.huffman_table[huffman_table_id].dc_values, stream_, count);
@@ -349,7 +331,7 @@ bool RocJpegStreamParser::ParseSOS() {
     uint32_t num_components = stream_[2];
 
     if (num_components > NUM_COMPONENTS - 1 || num_components != jpeg_stream_parameters_.picture_parameter_buffer.num_components) {
-        ErrorLog(g_rocjpeg_logger, "Invalid number of component!");
+        ERR("invalid number of component!")
         return false;
     }
     jpeg_stream_parameters_.slice_parameter_buffer.num_components = num_components;
@@ -363,15 +345,15 @@ bool RocJpegStreamParser::ParseSOS() {
         jpeg_stream_parameters_.slice_parameter_buffer.components[i].ac_table_selector = (table & 0x0F);
 
         if ((table & 0xF) >= 4) {
-            ErrorLog(g_rocjpeg_logger,"invalid number of AC Huffman table!");
+            ERR("invalid number of AC Huffman table!");
             return false;
         }
         if ((table >> 4) >= 4) {
-            ErrorLog(g_rocjpeg_logger,"invalid number of DC Huffman table!");
+            ERR("invalid number of DC Huffman table!");
             return false;
         }
         if (component_id != jpeg_stream_parameters_.picture_parameter_buffer.components[i].component_id) {
-            ErrorLog(g_rocjpeg_logger,"component id mismatch between SOS and SOF marker!");
+            ERR("component id mismatch between SOS and SOF marker!");
             return false;
         }
     }
@@ -398,7 +380,7 @@ bool RocJpegStreamParser::ParseDRI() {
 
     length = swap_bytes(stream_);
     if (length != 4) {
-        ErrorLog(g_rocjpeg_logger,"invalid size for DRI marker");
+        ERR("invalid size for DRI marker");
         return false;
     }
 

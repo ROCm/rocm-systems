@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
+ *  Copyright (c) 2021-2025 Advanced Micro Devices, Inc. All Rights Reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -166,6 +166,7 @@ public:
     /// canceling the trace when ready.
     virtual Pal::Result OnTraceCanceled() = 0;
 
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 908
     /// Called by TraceSession to indicate that GPU work is required on the indicated GPU during the preparation phase.
     /// The command buffer must be ready to record commands; however, the trace controller should not submit it
     /// until the trace begins.
@@ -191,6 +192,7 @@ public:
     ///          Otherwise, one of the following errors may be returned:
     ///          + ErrorUnknown if an internal PAL error occurs.
     virtual Pal::Result OnPreparationGpuWork(Pal::uint32 gpuIndex, Pal::ICmdBuffer** ppCmdBuf) = 0;
+#endif
 
     /// Called by TraceSession to indicate that GPU work is required to begin a trace on the indicated GPU
     ///
@@ -267,28 +269,6 @@ public:
     virtual Pal::IQueue* GetTraceQueue() const = 0;
 };
 
-/**
-***********************************************************************************************************************
-* @interface IGlobalConfigListener
-* @brief Interface that allows a single global listener to receive trace configuration updates.
-*
-* This interface is designed for components that need to be notified of global trace configuration settings
-* that affect the entire driver behavior, rather than specific trace sources or controllers. Unlike
-* ITraceController and ITraceSource, this interface does not require registration/unregistration and is
-* intended for a single global listener (typically the DevDriverMgr layer).
-***********************************************************************************************************************
-*/
-class IGlobalConfigListener
-{
-public:
-    /// Called by the associated session to notify the listener of global configuration updates
-    ///
-    /// This is called when the "global" section is present in the trace configuration JSON.
-    ///
-    /// @param [in] pJsonConfig  Configuration data formatted as json and stored as DevDriver's StructuredValue object
-    virtual void OnGlobalConfigUpdated(DevDriver::StructuredValue* pJsonConfig) = 0;
-};
-
 #define COMPRESSION_ARG_VERSION 949
 
 /**
@@ -330,6 +310,7 @@ public:
     /// Called by the associated session to notify the source that a new trace has been accepted
     ///
     /// The source may use this notification to do any preparation work that might be required before the trace begins.
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 908
     /// A command buffer is provided for the trace source to insert any work into. Note that the work will not be
     /// submitted until the trace begins (at the same time as `OnTraceBegin`). This allows for frontloading of
     /// expensive operations, such as the construction of a GpaSession sample, that would affect runtime speed
@@ -339,6 +320,9 @@ public:
     /// @param [in] pCmdBuf  A command buffer that can be used to record any GPU work required during the
     ///                      preparation phase of the trace. Not submitted until `OnTraceBegin`.
     virtual void OnTraceAccepted(Pal::uint32 gpuIndex, Pal::ICmdBuffer* pCmdBuf) = 0;
+#else
+    virtual void OnTraceAccepted() = 0;
+#endif
 
     /// Called by the associated session to notify the source that it should begin a trace
     ///
@@ -448,7 +432,7 @@ public:
 
     /// Initialize the trace session before requesting a trace.
     ///
-    /// @returns Success if initialization was successful, or ErrorUnknown upon failure.
+    /// @returns Success if initalization was successful, or ErrorUnknown upon failure.
     Pal::Result Init();
 
     /// Returns whether tracing has been formally enabled via UberTrace or not.
@@ -754,9 +738,9 @@ public:
         return m_pConfigData;
     }
 
-    /// Indicates if a cancel-trace signal has been received and that a cancellation is in progress.
+    /// Indicates if a cancel-trace signal has been received and that a cancelation is in progress.
     ///
-    /// @return true if a cancellation is in progress.
+    /// @return true if a cancelation is in progress.
     bool IsCancelingTrace() const { return m_cancelingTrace; }
 
     /// Register a function to be called when the Trace Session state changes.
@@ -781,20 +765,6 @@ public:
     Pal::Result UnregisterTraceStateChangeCallback(
         TraceStateChangeCallback pfnCallback,
         void*                    pPrivateData);
-
-    /// Sets the global configuration listener for this trace session.
-    ///
-    /// This allows a single component (typically the DevDriverMgr layer) to receive notifications
-    /// about global trace configuration settings that affect the entire driver behavior.
-    /// Unlike trace sources and controllers, only one global listener is supported and no
-    /// registration/unregistration is needed.
-    ///
-    /// @param [in] pListener  The global config listener to set (can be nullptr to clear)
-    void SetGlobalConfigListener(IGlobalConfigListener* pListener)
-    {
-        m_pGlobalConfigListener = pListener;
-    }
-
 private:
     typedef Pal::IPlatform TraceAllocator;
 
@@ -828,16 +798,15 @@ private:
 
     ITraceController*   m_pActiveController; // The controller currently driving the TraceSession.
                                              // We can have only one active controller at a time.
-    Pal::uint32         m_activeGpuIndex;    // GPU index from the active controller's trace queue.
     TraceSessionState   m_sessionState;      // Current state of the TraceSession
     rdfChunkFileWriter* m_pChunkFileWriter;  // Helper struct that manages create chunk file streams
                                              // and write data chunks
     rdfStream*          m_pCurrentStream;    // Active RDF stream for writing chunks
     Pal::int32          m_currentChunkIndex; // The current chunk index of the RDF stream
     bool                m_tracingEnabled;    // Flag indicating UberTrace tracing is enabled tool-side
-    void*               m_pConfigData;       // Buffer containing the cached trace configuration
+    void*               m_pConfigData;       // Buffer containing the cached trace configurationn
     size_t              m_configDataSize;    // Size of the cached trace config buffer
-    bool                m_cancelingTrace;    // Indicates that a cancel signal has been received and trace cancellation
+    bool                m_cancelingTrace;    // Indicates that a cancel signal has been received and trace cancelation
                                              // is in progress.
 
     Util::Mutex         m_stateChangeCallbackLock; // RW lock for state change callbacks
@@ -856,6 +825,5 @@ private:
                                                       TraceStateChangeCallbacksVecDefaultCapacity,
                                                       TraceAllocator>;
     TraceStateChangeCallbacksVec m_traceStateChangeCallbacks; // Registered state change callbacks
-    IGlobalConfigListener*       m_pGlobalConfigListener;     // Config listener for driver-wide settings
 };
 } // GpuUtil

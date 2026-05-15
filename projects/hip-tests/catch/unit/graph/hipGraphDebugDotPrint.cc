@@ -1,8 +1,21 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 /**
  * @addtogroup hipGraphDebugDotPrint hipGraphDebugDotPrint
@@ -269,8 +282,9 @@ static void hipGraphDebugDotPrint_Functional(const char* fName, unsigned int fla
    Call hipGraphDebugDotPrint and provice path where to write the DOT file.
    Verify that DOT file get created or not for each flag passed. */
 
-HIP_TEST_CASE(Unit_hipGraphDebugDotPrint_Functional) {
+TEST_CASE("Unit_hipGraphDebugDotPrint_Functional") {
   CHECK_IMAGE_SUPPORT
+
   SECTION("Call with hipGraphDebugDotFlagsVerbose flag") {
     hipGraphDebugDotPrint_Functional("./graphDotFileFuncVerbose.dot", hipGraphDebugDotFlagsVerbose);
   }
@@ -329,7 +343,7 @@ HIP_TEST_CASE(Unit_hipGraphDebugDotPrint_Functional) {
 
 #define DOT_FILE_PATH_NEG "./graphDotFileNeg.dot"
 
-HIP_TEST_CASE(Unit_hipGraphDebugDotPrint_Argument_Check) {
+TEST_CASE("Unit_hipGraphDebugDotPrint_Argument_Check") {
   hipGraph_t graph;
   hipError_t ret;
 

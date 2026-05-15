@@ -8,13 +8,17 @@ The rocdec decode sample illustrates decoding of individual frames of video elem
 
 ## Prerequisites:
 
-* Install [rocDecode](https://rocm.docs.amd.com/projects/rocDecode/en/latest/install/rocDecode-build-and-install.html)
+* Install [rocDecode](../../README.md#build-and-install-instructions)
 
 * [FFMPEG](https://ffmpeg.org/about.html) for rocDecodeHost
+
+    * On `Ubuntu`
 
   ```shell
   sudo apt install libavcodec-dev libavformat-dev libavutil-dev
   ```
+  
+    * On `RHEL`/`SLES` - install ffmpeg development packages manually or use [rocDecode-setup.py](../../rocDecode-setup.py) script
 
 ## Build
 
@@ -36,5 +40,5 @@ make -j
               -m <output_surface_memory_type - decoded surface memory [optional - default: 0][0 : OUT_SURFACE_MEM_DEV_INTERNAL/ 1 : OUT_SURFACE_MEM_DEV_COPIED/ 2 : OUT_SURFACE_MEM_HOST_COPIED/3 : OUT_SURFACE_MEM_NOT_MAPPED]>
 ```
 ```shell
-./rocdecdecode -i ROCDECODE_DATA_FOLDER/frames -o output.yuv -b 0
+"./rocdecdecode -i ROCDECODE_DATA_FOLDER/frames -o <output.yuv> -b 0".
 ```

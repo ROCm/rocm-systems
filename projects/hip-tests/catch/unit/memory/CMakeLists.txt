@@ -1,6 +1,22 @@
-# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# Copyright (c) 2024 Advanced Micro Devices, Inc. All Rights Reserved.
 #
-# SPDX-License-Identifier: MIT
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
 
 # Common Tests - Test independent of all platforms
 set(COMMON_SHARED_SRC DriverContext.cc)
@@ -11,6 +27,8 @@ set(COMMON_SHARED_SRC DriverContext.cc)
 # But this exposes several problems with hipcc and build system on windows.
 # While those are fixed, this hack should allow us to pass windows CI.
 set(TEST_SRC
+    malloc.cc
+    hipMemsetBasic.cc
     hipMemcpy2DToArray.cc
     hipMemcpy2DToArray_old.cc
     hipMemcpy2DToArrayAsync.cc
@@ -20,6 +38,7 @@ set(TEST_SRC
     hipMemcpy3DAsync.cc
     hipMemcpy3DAsync_old.cc
     hipMemcpyParam2D.cc
+    hipMemcpyParam2D_old.cc
     hipMemcpyParam2DAsync.cc
     hipMemcpyParam2DAsync_old.cc
     hipMemcpy2D.cc
@@ -78,10 +97,14 @@ set(TEST_SRC
     hipMemsetD2D32Async.cc
     hipMemcpy3DPeer.cc
     hipMemcpy3DPeerAsync.cc
-    hipMemPoolExportPointer.cc
-    hipMemPoolExportToShareableHandle.cc
-    hipMemPoolImportFromShareableHandle.cc
-    hipMemPoolImportPointer.cc)
+    )
+
+if(UNIX)
+  set(TEST_SRC ${TEST_SRC} hipMemPoolExportPointer.cc
+  hipMemPoolExportToShareableHandle.cc
+  hipMemPoolImportFromShareableHandle.cc
+  hipMemPoolImportPointer.cc)
+endif()
 
 if(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC
@@ -117,23 +140,25 @@ if(UNIX)
     set(NUMA "${NUMA_LIBRARIES}")
   else()
     find_library(NUMA NAMES numa REQUIRED)
-    find_path(NUMA_INCLUDE_DIR NAMES numa.h)
-  endif()
-  if(NUMA_INCLUDE_DIR)
-    target_include_directories(MemoryTest1 PRIVATE ${NUMA_INCLUDE_DIR})
   endif()
   target_link_libraries(MemoryTest1 ${NUMA})
-  # link rt for shm_open/shm_unlink used by cross-platform IPC helpers
-  target_link_libraries(MemoryTest1 rt)
 endif()
 
-if(HIP_PLATFORM MATCHES "amd" AND UNIX)
+if(HIP_PLATFORM MATCHES "amd")
+  set_source_files_properties(hipHostRegister_exe.cc PROPERTIES LANGUAGE HIP)
+  add_executable(hipHostRegisterPerf EXCLUDE_FROM_ALL hipHostRegister_exe.cc)
+  set_target_properties(hipHostRegisterPerf PROPERTIES LINKER_LANGUAGE HIP)
+  add_dependencies(build_tests hipHostRegisterPerf)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipHostRegisterPerf)
+  target_link_libraries(hipHostRegisterPerf hip::host hip::device)
+if(UNIX)
   set_source_files_properties(hipMemAdvise_AlignedAllocMem_Exe.cc PROPERTIES LANGUAGE HIP)
   add_executable(hipMemAdviseTstAlignedAllocMem EXCLUDE_FROM_ALL hipMemAdvise_AlignedAllocMem_Exe.cc)
   set_target_properties(hipMemAdviseTstAlignedAllocMem PROPERTIES LINKER_LANGUAGE HIP)
   add_dependencies(MemoryTest1 hipMemAdviseTstAlignedAllocMem)
   set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipMemAdviseTstAlignedAllocMem)
   target_link_libraries(hipMemAdviseTstAlignedAllocMem hip::host hip::device)
+endif()
 endif()
 
 set(TEST_SRC
@@ -150,6 +175,7 @@ set(TEST_SRC
     hipMemPoolTrimTo.cc
     hipMallocFromPoolAsync.cc
     hipMemcpyPeer.cc
+    hipMemcpyPeer_old.cc
     hipMemcpyPeerAsync.cc
     hipMemcpyPeerAsync_old.cc
     hipMemcpyWithStream_old.cc
@@ -178,7 +204,6 @@ set(TEST_SRC
     hipPointerGetAttribute.cc
     hipDrvPtrGetAttributes.cc
     hipMemPrefetchAsync.cc
-    hipMemPrefetchBatchAsync.cc
     hipMemGetInfo.cc
     hipFree.cc
     hipFreeArray.cc
@@ -193,6 +218,7 @@ set(TEST_SRC
     hipFreeHost.cc
     hipMallocAsync.cc
     hipStreamAttachMemAsync.cc
+    hipMemRangeGetAttributes_old.cc
     hipMemGetAddressRange.cc
     hipMallocMipmappedArray.cc
     hipFreeMipmappedArray.cc
@@ -253,17 +279,17 @@ hip_add_exe_to_target(NAME MemoryTest2
   TEST_TARGET_NAME build_tests COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
 
 if(HIP_PLATFORM MATCHES "amd")
-  set(TEST_SRC
+set(TEST_SRC
   inlineVar.cc
   memoryCommon.cc
 )
 
-  #hip_add_exe_to_target(NAME InlineVarTest
-  #  TEST_SRC ${TEST_SRC}
-  #  TEST_TARGET_NAME build_tests COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
-  #
-  #  set_target_properties(InlineVarTest PROPERTIES COMPILE_FLAGS -fgpu-rdc)
-  #  set_target_properties(InlineVarTest PROPERTIES LINK_FLAGS -fgpu-rdc)
+#hip_add_exe_to_target(NAME InlineVarTest
+#  TEST_SRC ${TEST_SRC}
+#  TEST_TARGET_NAME build_tests COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
+#
+#  set_target_properties(InlineVarTest PROPERTIES COMPILE_FLAGS -fgpu-rdc)
+#  set_target_properties(InlineVarTest PROPERTIES LINK_FLAGS -fgpu-rdc)
 endif()
 
 set(TEST_SRC
@@ -277,11 +303,8 @@ hip_add_exe_to_target(NAME SVMAtomicTest
   TEST_SRC ${TEST_SRC}
   TEST_TARGET_NAME build_tests COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
 
-target_link_libraries(SVMAtomicTest hip::host hip::device)
-target_link_libraries(MemoryTest1 hip::host hip::device)
-target_link_libraries(MemoryTest2 hip::host hip::device)
 if(HIP_PLATFORM MATCHES "nvidia")
-  set_target_properties(SVMAtomicTest PROPERTIES COMPILE_FLAGS -arch=compute_75)
-  set_target_properties(MemoryTest1 PROPERTIES COMPILE_FLAGS -arch=compute_75)
-  set_target_properties(MemoryTest2 PROPERTIES COMPILE_FLAGS -arch=compute_75)
+  set_target_properties(SVMAtomicTest PROPERTIES COMPILE_FLAGS -arch=sm_70)
+  set_target_properties(MemoryTest1 PROPERTIES COMPILE_FLAGS -arch=sm_70)
+  set_target_properties(MemoryTest2 PROPERTIES COMPILE_FLAGS -arch=sm_70)
 endif()

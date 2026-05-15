@@ -1,9 +1,21 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
-
+Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 #include "cooperative_groups_common.hh"
 #include "cg_common_kernels.hh"
 
@@ -124,7 +136,7 @@ static uint64_t get_active_mask(unsigned int test_case, size_t warp_size) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_Coalesced_Group_Getters_Positive_Basic) {
+TEST_CASE("Unit_Coalesced_Group_Getters_Positive_Basic") {
   const int warp_size = getWarpSize();
 
   const auto blocks = GenerateBlockDimensionsForShuffle();
@@ -207,7 +219,7 @@ HIP_TEST_CASE(Unit_Coalesced_Group_Getters_Positive_Basic) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_Coalesced_Group_Getters_Via_Base_Type_Positive_Basic) {
+TEST_CASE("Unit_Coalesced_Group_Getters_Via_Base_Type_Positive_Basic") {
   const int warp_size = getWarpSize();
 
   const auto blocks = GenerateBlockDimensionsForShuffle();
@@ -291,7 +303,7 @@ HIP_TEST_CASE(Unit_Coalesced_Group_Getters_Via_Base_Type_Positive_Basic) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_Coalesced_Group_Getters_Via_Non_Member_Functions_Positive_Basic) {
+TEST_CASE("Unit_Coalesced_Group_Getters_Via_Non_Member_Functions_Positive_Basic") {
   const int warp_size = getWarpSize();
 
   const auto blocks = GenerateBlockDimensionsForShuffle();
@@ -441,7 +453,7 @@ template <typename T> void CoalescedGroupShflUpTestImpl() {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit_Coalesced_Group_Shfl_Up_Positive_Basic, int, unsigned int, long,
+TEMPLATE_TEST_CASE("Unit_Coalesced_Group_Shfl_Up_Positive_Basic", "", int, unsigned int, long,
                    unsigned long, long long, unsigned long long, float, double) {
   CoalescedGroupShflUpTestImpl<TestType>();
 }
@@ -535,7 +547,7 @@ template <typename T> void CoalescedGroupShflDownTest() {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit_Coalesced_Group_Shfl_Down_Positive_Basic, int, unsigned int, long,
+TEMPLATE_TEST_CASE("Unit_Coalesced_Group_Shfl_Down_Positive_Basic", "", int, unsigned int, long,
                    unsigned long, long long, unsigned long long, float, double) {
   CoalescedGroupShflDownTest<TestType>();
 }
@@ -634,7 +646,7 @@ template <typename T> void CoalescedGroupShflTest() {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit_Coalesced_Group_Shfl_Positive_Basic, int, unsigned int, long,
+TEMPLATE_TEST_CASE("Unit_Coalesced_Group_Shfl_Positive_Basic", "", int, unsigned int, long,
                    unsigned long, long long, unsigned long long, float, double) {
   CoalescedGroupShflTest<TestType>();
 }
@@ -779,7 +791,7 @@ template <bool global_memory, typename T> void CoalescedGroupSyncTest() {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit_Coalesced_Group_Sync_Positive_Basic, uint8_t, uint16_t, uint32_t) {
+TEMPLATE_TEST_CASE("Unit_Coalesced_Group_Sync_Positive_Basic", "", uint8_t, uint16_t, uint32_t) {
   SECTION("Global memory") { CoalescedGroupSyncTest<true, TestType>(); }
   SECTION("Shared memory") { CoalescedGroupSyncTest<false, TestType>(); }
 }

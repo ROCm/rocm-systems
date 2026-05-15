@@ -26,6 +26,7 @@
 #include "timer.h"
 #include "transport.h"
 
+#define NCCL_MAX_OPS (2048)
 #define OP_INDEX(op) ((op) ? (op) - state->pools->elems : -1)
 #define OP_SEEN 0x100000
 
@@ -80,7 +81,7 @@ namespace RcclUnitTesting
 TEST(ProxyTests, getOpIndex)
 { // Tests what is the index of the pool being passed within
   // the known valid pools in state ptr
-    TEST_INFO("[ProxyTests] Test Start");
+    INFO("[ProxyTests] Test Start \n");
 
     // Init Dummy structs
     struct ncclProxyArgs*          pool_ptr   = new ncclProxyArgs;
@@ -99,8 +100,8 @@ TEST(ProxyTests, getOpIndex)
     struct ncclProxyProgressState* y = state_ptr;
     y->pools->next                   = y->pools; // next points to self
 
-    TEST_INFO(
-        "[ProxyTests] x=%p y->pools=%p x-y=%ld",
+    INFO(
+        "[ProxyTests] x=%p y->pools=%p x-y=%ld \n",
         (void*)x,
         (void*)y->pools->elems,
         x - y->pools->elems
@@ -112,20 +113,20 @@ TEST(ProxyTests, getOpIndex)
     ASSERT_EQ(pool_idx, 0);
     ASSERT_EQ(opIndex, 5);
 
-    TEST_INFO("[ProxyTests] pool_idx %d opIndex %d", pool_idx, opIndex);
-    TEST_INFO("[ProxyTests] res %u", res);
+    INFO("[ProxyTests] pool_idx %d opIndex %d \n", pool_idx, opIndex);
+    INFO("[ProxyTests] res %u \n", res);
     assert(res == ncclSuccess);
 
     delete pool_ptr;
     delete pools_ptr;
     delete pools2_ptr;
     delete state_ptr;
-    TEST_INFO("[ProxyTests] Test Complete");
+    INFO("[ProxyTests] Test Complete \n");
 }
 
 TEST(ProxyTests, printProxyOp)
 {
-    TEST_INFO("[ProxyTests] Test Start");
+    INFO("[ProxyTests] Test Start \n");
     // Init Dummy structs
 
     struct ncclProxyArgs* pool_ptr = new ncclProxyArgs;
@@ -146,8 +147,8 @@ TEST(ProxyTests, printProxyOp)
     struct ncclProxyProgressState* y = state_ptr;
     y->pools->next                   = y->pools; // next points to self
 
-    TEST_INFO(
-        "[ProxyTests] x=%p y->pools=%p x-y=%ld",
+    INFO(
+        "[ProxyTests] x=%p y->pools=%p x-y=%ld \n",
         (void*)x,
         (void*)y->pools->elems,
         x - y->pools->elems
@@ -158,19 +159,19 @@ TEST(ProxyTests, printProxyOp)
     int          pool_idx = 2, opIndex = 3; // random vals
     ncclResult_t res = printProxyOp(pool_ptr, pool_idx, opIndex);
 
-    TEST_INFO("[ProxyTests] res %u", res);
+    INFO("[ProxyTests] res %u \n", res);
     assert(res == ncclSuccess);
 
     delete pools_ptr;
     delete pools2_ptr;
     delete pool_ptr;
     delete state_ptr;
-    TEST_INFO("[ProxyTests] Test Complete");
+    INFO("[ProxyTests] Test Complete \n");
 }
 
 TEST(ProxyTests, dumpProxyState)
 {
-    TEST_INFO("[ProxyTests] Test Start");
+    INFO("[ProxyTests] Test Start \n");
 
     // Init Dummy structs
     struct ncclProxyArgs* pool_ptr;
@@ -203,7 +204,7 @@ TEST(ProxyTests, dumpProxyState)
     int          pool_idx = 2, opIndex = 3; // random vals
     ncclResult_t res = dumpProxyState(state_ptr);
 
-    TEST_INFO("[ProxyTests] res %u", res);
+    INFO("[ProxyTests] res %u \n", res);
     ASSERT_EQ(res, ncclSuccess);
 
     delete pools_ptr;
@@ -211,12 +212,12 @@ TEST(ProxyTests, dumpProxyState)
     delete pools2_ptr;
 
     delete state_ptr;
-    TEST_INFO("[ProxyTests] Test Complete");
+    INFO("[ProxyTests] Test Complete \n");
 }
 
 TEST(ProxyTests, ncclProxyCallBlockingUDS)
 {
-    TEST_INFO("[ProxyTests] Test Start");
+    INFO("[ProxyTests] Test Start \n");
 
     // Init Dummy structs
     struct ncclComm* comm = new ncclComm;
@@ -243,12 +244,12 @@ TEST(ProxyTests, ncclProxyCallBlockingUDS)
         arr2[i] = 122567 + i; // random
     }
 
-    TEST_INFO("[ProxyTests] sizeof(ncclProxyConnector) = %zu", sizeof(ncclProxyConnector));
+    INFO("[ProxyTests] sizeof(ncclProxyConnector) = %zu\n", sizeof(ncclProxyConnector));
     struct ncclProxyConnector* proxyConn = new(std::nothrow) ncclProxyConnector[20];
     if(proxyConn == nullptr)
     {
         // Handle allocation failure
-        TEST_INFO("[ProxyTests] Allocation failed");
+        INFO("[ProxyTests] Allocation failed\n");
         ASSERT_NE(proxyConn, nullptr);
     }
 
@@ -261,9 +262,9 @@ TEST(ProxyTests, ncclProxyCallBlockingUDS)
     comm->abortFlag = NULL;
 
     int rank = comm->topParentLocalRanks[comm->localRank];
-    TEST_INFO("[ProxyTests] rank %d", rank);
+    INFO("[ProxyTests] rank %d\n", rank);
     uint64_t pidHash = sharedProxyState->peerAddressesUDS[proxyConn->tpRank];
-    TEST_INFO("[ProxyTests] pidHash %lu ", pidHash);
+    INFO("[ProxyTests] pidHash %lu \n", pidHash);
 
     int type = ncclProxyMsgGetFd;
     // some memory on stack for storing request and response buffers
@@ -289,7 +290,7 @@ TEST(ProxyTests, ncclProxyCallBlockingUDS)
     );
 
     bool bool_res = (res >= ncclSuccess && res <= ncclRemoteError);
-    TEST_INFO("[ProxyTests] res %u", bool_res);
+    INFO("[ProxyTests] res %u \n", bool_res);
     ASSERT_EQ(bool_res, true);
     delete comm;
     delete sharedProxyState;
@@ -300,7 +301,7 @@ TEST(ProxyTests, ncclProxyCallBlockingUDS)
     delete[] x_mem;
     delete[] x_mem2;
 
-    TEST_INFO("[ProxyTests] Test Complete");
+    INFO("[ProxyTests] Test Complete \n");
 }
 
 TEST(ProxyTests, ncclProxyClientGetFdBlocking)
@@ -309,7 +310,7 @@ TEST(ProxyTests, ncclProxyClientGetFdBlocking)
         "ncclProxyClientGetFdBlocking",
         []()
         {
-            TEST_INFO("[ProxyTests] Test Start");
+            INFO("[ProxyTests] Test Start \n");
 
             // Init Dummy structs
             struct ncclComm* comm = new ncclComm;
@@ -340,7 +341,7 @@ TEST(ProxyTests, ncclProxyClientGetFdBlocking)
             if(proxyConn == nullptr)
             {
                 // Handle allocation failure
-                TEST_INFO("[ProxyTests] Allocation failed");
+                INFO("[ProxyTests] Allocation failed\n");
                 ASSERT_NE(proxyConn, nullptr);
             }
 
@@ -350,9 +351,9 @@ TEST(ProxyTests, ncclProxyClientGetFdBlocking)
             comm->abortFlag                    = NULL;
 
             int rank = comm->topParentLocalRanks[comm->localRank];
-            TEST_INFO("[ProxyTests] rank %d", rank);
+            INFO("[ProxyTests] rank %d\n", rank);
             uint64_t pidHash = sharedProxyState->peerAddressesUDS[proxyConn->tpRank];
-            TEST_INFO("[ProxyTests] pidHash %lu", pidHash);
+            INFO("[ProxyTests] pidHash %lu \n", pidHash);
 
             int type = ncclProxyMsgGetFd;
             // some memory on stack for storing request and response buffers
@@ -371,7 +372,7 @@ TEST(ProxyTests, ncclProxyClientGetFdBlocking)
             ncclResult_t res = ncclProxyClientGetFdBlocking(comm, rank, reqBuff, respFd);
 
             bool bool_res = (res >= ncclSuccess && res <= ncclRemoteError);
-            TEST_INFO("[ProxyTests] res %u", bool_res);
+            INFO("[ProxyTests] res %u \n", bool_res);
             ASSERT_EQ(bool_res, true);
 
             delete comm;
@@ -382,8 +383,8 @@ TEST(ProxyTests, ncclProxyClientGetFdBlocking)
             delete[] arr2;
             delete[] x_mem;
             delete[] x_mem2;
-            TEST_INFO("[ProxyTests] Test Complete");
-            TEST_INFO("Test 'ncclProxyClientGetFdBlocking' PASSED");
+            INFO("[ProxyTests] Test Complete \n");
+            INFO("Test 'ncclProxyClientGetFdBlocking' PASSED\n");
         }
     );
 }
@@ -394,7 +395,7 @@ TEST(ProxyTests, ncclProxyClientQueryFdBlocking)
         "ncclProxyClientQueryFdBlocking",
         []()
         {
-            TEST_INFO("[ProxyTests] Test Start");
+            INFO("[ProxyTests] Test Start \n");
 
             // Init Dummy structs
             struct ncclComm* comm = new ncclComm;
@@ -426,7 +427,7 @@ TEST(ProxyTests, ncclProxyClientQueryFdBlocking)
             if(proxyConn == nullptr)
             {
                 // Handle allocation failure
-                TEST_INFO("[ProxyTests] Allocation failed");
+                INFO("[ProxyTests] Allocation failed\n");
                 ASSERT_NE(proxyConn, nullptr);
             }
 
@@ -439,9 +440,9 @@ TEST(ProxyTests, ncclProxyClientQueryFdBlocking)
             comm->abortFlag = NULL;
 
             int rank = comm->topParentLocalRanks[comm->localRank];
-            TEST_INFO("[ProxyTests] rank %d", rank);
+            INFO("[ProxyTests] rank %d\n", rank);
             uint64_t pidHash = sharedProxyState->peerAddressesUDS[proxyConn->tpRank];
-            TEST_INFO("[ProxyTests] pidHash %lu", pidHash);
+            INFO("[ProxyTests] pidHash %lu \n", pidHash);
 
             int type = ncclProxyMsgGetFd;
             // some memory on stack for storing request and response buffers
@@ -464,7 +465,7 @@ TEST(ProxyTests, ncclProxyClientQueryFdBlocking)
                 = ncclProxyClientQueryFdBlocking(comm, proxyConn, localFd, (int*)respBuff);
 
             bool bool_res = (res >= ncclSuccess && res <= ncclRemoteError);
-            TEST_INFO("[ProxyTests] res %u", bool_res);
+            INFO("[ProxyTests] res %u \n", bool_res);
             ASSERT_EQ(bool_res, true);
 
             delete comm;
@@ -475,8 +476,8 @@ TEST(ProxyTests, ncclProxyClientQueryFdBlocking)
             delete[] arr2;
             delete[] x_mem;
             delete[] x_mem2;
-            TEST_INFO("[ProxyTests] Test Complete");
-            TEST_INFO("Test 'ncclProxyClientQueryFdBlocking' PASSED");
+            INFO("[ProxyTests] Test Complete \n");
+            INFO("Test 'ncclProxyClientQueryFdBlocking' PASSED\n");
         }
     );
 }

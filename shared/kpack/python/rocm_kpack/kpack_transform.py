@@ -129,15 +129,13 @@ def read_kpack_ref_marker(binary_path: Path) -> dict | None:
 def is_fat_binary(binary_path: Path) -> bool:
     """Check if a binary contains HIP fat binary sections.
 
-    Fast-path: reads only headers (ELF section header table or PE section
-    headers), not the full binary. Works for both ELF and PE/COFF.
+    This is a quick check that doesn't require full parsing.
 
     Args:
         binary_path: Path to binary
 
     Returns:
-        True if binary contains a .hip_fatbin (ELF) or .hip_fat (COFF)
-        section, False otherwise (including non-ELF/non-PE files).
+        True if binary appears to contain device code, False otherwise
     """
     try:
         fmt = detect_binary_format(binary_path)
@@ -147,8 +145,10 @@ def is_fat_binary(binary_path: Path) -> bool:
     if fmt == "elf":
         from .elf.surgery import ElfSurgery
 
-        return ElfSurgery.has_fatbin_section(binary_path)
+        surgery = ElfSurgery.load(binary_path)
+        return surgery.find_section(".hip_fatbin") is not None
     else:
         from .coff.surgery import CoffSurgery
 
-        return CoffSurgery.has_fatbin_section(binary_path)
+        surgery = CoffSurgery.load(binary_path)
+        return surgery.find_section(".hip_fat") is not None
