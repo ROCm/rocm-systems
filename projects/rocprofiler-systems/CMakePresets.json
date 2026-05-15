@@ -68,6 +68,28 @@
             "displayName": "Official release build",
             "inherits": "default",
             "name": "release"
+        },
+        {
+            "binaryDir": "${sourceDir}/build/dev",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "ROCPROFSYS_BUILD_BOOST": "OFF",
+                "ROCPROFSYS_BUILD_DEVELOPER": "ON",
+                "ROCPROFSYS_BUILD_ELFUTILS": "OFF",
+                "ROCPROFSYS_BUILD_EXAMPLES": "ON",
+                "ROCPROFSYS_BUILD_LIBIBERTY": "OFF",
+                "ROCPROFSYS_BUILD_LIBUNWIND": "OFF",
+                "ROCPROFSYS_BUILD_NLOHMANN_JSON": "OFF",
+                "ROCPROFSYS_BUILD_SPDLOG": "OFF",
+                "ROCPROFSYS_BUILD_SQLITE3": "OFF",
+                "ROCPROFSYS_BUILD_TBB": "OFF",
+                "ROCPROFSYS_BUILD_TESTING": "ON",
+                "ROCPROFSYS_DISABLE_EXAMPLES": "parallel-overhead;code-coverage;user-api;openmp;mpi;python;lulesh;rccl;rewrite-caller;causal;trace-time-window;fork;videodecode;jpegdecode;roctx;thread-limit;transferBench;hpc;shmem;scratch-memory;sdma_test;unified-memory"
+            },
+            "description": "Developer build using system dependencies, transpose example only",
+            "displayName": "Developer build",
+            "inherits": "default",
+            "name": "dev"
         }
     ],
     "version": 3
