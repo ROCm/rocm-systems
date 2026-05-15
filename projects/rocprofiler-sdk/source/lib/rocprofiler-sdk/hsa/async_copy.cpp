@@ -1011,6 +1011,13 @@ async_batch_copy_impl(const hsa_amd_memory_copy_op_t* copy_ops,
         CHECK_NOTNULL(get_active_signals())->fetch_add(1);
     }
 
+    auto _start_ts = common::timestamp_ns();
+    for(auto& [_idx, _data] : _intercept_data)
+    {
+        _data->start_ts = _start_ts;
+        initialize_async_copy_tracing(_data);
+    }
+
     auto _status = _dispatch(_wrapped_copy_ops.data(), num_copy_ops, num_dep_signals, dep_signals);
 
     if(_corr_id_pop)
@@ -1024,13 +1031,6 @@ async_batch_copy_impl(const hsa_amd_memory_copy_op_t* copy_ops,
         _intercept_locks.clear();
         _cleanup(true, true);
         return _status;
-    }
-
-    auto _start_ts = common::timestamp_ns();
-    for(auto& [_idx, _data] : _intercept_data)
-    {
-        _data->start_ts = _start_ts;
-        initialize_async_copy_tracing(_data);
     }
 
     _intercept_locks.clear();
@@ -1126,6 +1126,9 @@ async_copy_impl(Args... args)
 
     CHECK_NOTNULL(get_active_signals())->fetch_add(1);
 
+    _data->start_ts = common::timestamp_ns();
+    initialize_async_copy_tracing(_data);
+
     auto _status = invoke(
         get_next_dispatch<TableIdx, OpIdx>(), std::move(_tied_args), std::make_index_sequence<N>{});
 
@@ -1143,9 +1146,6 @@ async_copy_impl(Args... args)
         destroy_async_copy_data(_data);
         return _status;
     }
-
-    _data->start_ts = common::timestamp_ns();
-    initialize_async_copy_tracing(_data);
 
     return _status;
 }
