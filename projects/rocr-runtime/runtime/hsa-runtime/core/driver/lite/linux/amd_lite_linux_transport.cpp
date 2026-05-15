@@ -31,6 +31,7 @@ constexpr uint32_t kNbioBase2 = 0xD20;
 
 constexpr uint32_t regMMMC_VM_FB_LOCATION_BASE = 0x0554;
 constexpr uint32_t regRCC_DEV0_EPF0_RCC_DOORBELL_APER_EN = 0x00c0;
+constexpr uint32_t regHDP_MEM_COHERENCY_FLUSH = 0x00f7;
 constexpr uint32_t regGDC_S2A0_S2A_DOORBELL_ENTRY_0_CTRL = 0x01cb;
 constexpr uint32_t regGDC_S2A0_S2A_DOORBELL_ENTRY_3_CTRL = 0x01ce;
 constexpr uint32_t regCP_MEC_DOORBELL_RANGE_LOWER = 0x1dfc;
@@ -334,9 +335,61 @@ hsa_status_t LinuxAmdgpuLiteTransport::WriteGpuMemory32(uint64_t offset,
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t LinuxAmdgpuLiteTransport::FlushHdp() const {
+  return WriteMmio32(kNbioBase2, regHDP_MEM_COHERENCY_FLUSH, 0);
+}
+
 void* LinuxAmdgpuLiteTransport::GpuMemoryCpuPointer(uint64_t offset) const {
   if (vram_bar_ == nullptr || offset >= vram_bar_size_) return nullptr;
   return static_cast<char*>(vram_bar_) + offset;
+}
+
+hsa_status_t LinuxAmdgpuLiteTransport::AllocateQueueMemory(
+    uint64_t size, DirectQueueMemory* memory) const {
+  if (memory == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  LinuxLiteBuffer buffer{};
+  hsa_status_t status = AllocGtt(size, &buffer);
+  if (status != HSA_STATUS_SUCCESS) return status;
+
+  status = MapGttToGpu(&buffer);
+  if (status != HSA_STATUS_SUCCESS) {
+    FreeGtt(&buffer);
+    return status;
+  }
+
+  *memory = {};
+  memory->size = buffer.size;
+  memory->gpu_addr = buffer.gpu_addr;
+  memory->cpu = buffer.cpu;
+  memory->platform_handle = buffer.handle;
+  memory->platform_bus_addr = buffer.bus_addr;
+  memory->platform_mmap_offset = buffer.mmap_offset;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t LinuxAmdgpuLiteTransport::FreeQueueMemory(
+    DirectQueueMemory* memory) const {
+  if (memory == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  if (memory->platform_handle == 0 && memory->cpu == nullptr) {
+    *memory = {};
+    return HSA_STATUS_SUCCESS;
+  }
+
+  LinuxLiteBuffer buffer{};
+  buffer.handle = memory->platform_handle;
+  buffer.size = memory->size;
+  buffer.bus_addr = memory->platform_bus_addr;
+  buffer.gpu_addr = memory->gpu_addr;
+  buffer.mmap_offset = memory->platform_mmap_offset;
+  buffer.cpu = memory->cpu;
+
+  hsa_status_t status = HSA_STATUS_SUCCESS;
+  if (buffer.gpu_addr != 0) status = UnmapGpu(buffer);
+  const hsa_status_t free_status = FreeGtt(&buffer);
+  if (status == HSA_STATUS_SUCCESS) status = free_status;
+  *memory = {};
+  return status;
 }
 
 volatile uint64_t* LinuxAmdgpuLiteTransport::DoorbellCpuPointer(

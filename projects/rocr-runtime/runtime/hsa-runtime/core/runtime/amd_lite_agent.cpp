@@ -165,10 +165,9 @@ hsa_status_t LiteGpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_typ
   if (queue_type != HSA_QUEUE_TYPE_SINGLE && queue_type != HSA_QUEUE_TYPE_MULTI) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
-  if ((flags & HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF) != 0 ||
-      (flags & HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR) != 0) {
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  }
+  const uint64_t queue_flags =
+      flags & ~(HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF |
+                HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR);
   if (!IsPowerOfTwo(size) || size < kMinAqlSize || size > kMaxAqlSize) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
@@ -181,7 +180,7 @@ hsa_status_t LiteGpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_typ
   std::memset(shared_queue, 0, sizeof(*shared_queue));
 
   try {
-    *queue = new LiteAqlQueue(shared_queue, this, size, flags, event_callback, data);
+    *queue = new LiteAqlQueue(shared_queue, this, size, queue_flags, event_callback, data);
   } catch (...) {
     core::Runtime::runtime_singleton_->system_deallocator()(shared_queue);
     throw;
@@ -322,14 +321,30 @@ hsa_status_t LiteGpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) cons
     case HSA_AMD_AGENT_INFO_MAX_CLOCK_FREQUENCY:
       *static_cast<uint32_t*>(value) = 2500;
       return HSA_STATUS_SUCCESS;
+    case HSA_AMD_AGENT_INFO_MEMORY_MAX_FREQUENCY:
+      *static_cast<uint32_t*>(value) = 1000;
+      return HSA_STATUS_SUCCESS;
+    case HSA_AMD_AGENT_INFO_MEMORY_WIDTH:
+      *static_cast<uint32_t*>(value) = 256;
+      return HSA_STATUS_SUCCESS;
     case HSA_AMD_AGENT_INFO_DRIVER_NODE_ID:
       *static_cast<uint32_t*>(value) = node_id();
+      return HSA_STATUS_SUCCESS;
+    case HSA_AMD_AGENT_INFO_MAX_ADDRESS_WATCH_POINTS:
+      *static_cast<uint32_t*>(value) = 1;
+      return HSA_STATUS_SUCCESS;
+    case HSA_AMD_AGENT_INFO_BDFID:
+      *static_cast<uint32_t*>(value) = 0;
       return HSA_STATUS_SUCCESS;
     case HSA_AMD_AGENT_INFO_PRODUCT_NAME:
       CopyHsaString(value, "AMD Radeon RX 9000 (amdgpu_lite)");
       return HSA_STATUS_SUCCESS;
     case HSA_AMD_AGENT_INFO_MAX_WAVES_PER_CU:
       *static_cast<uint32_t*>(value) = kDefaultSimdPerCu * kDefaultMaxWavesPerSimd;
+      return HSA_STATUS_SUCCESS;
+    case HSA_AMD_AGENT_INFO_UCODE_VERSION:
+    case HSA_AMD_AGENT_INFO_SDMA_UCODE_VERSION:
+      *static_cast<uint32_t*>(value) = 0;
       return HSA_STATUS_SUCCESS;
     case HSA_AMD_AGENT_INFO_NUM_SIMDS_PER_CU:
       *static_cast<uint32_t*>(value) = kDefaultSimdPerCu;
@@ -342,6 +357,12 @@ hsa_status_t LiteGpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) cons
       return HSA_STATUS_SUCCESS;
     case HSA_AMD_AGENT_INFO_HDP_FLUSH:
       std::memset(value, 0, sizeof(hsa_amd_hdp_flush_t));
+      return HSA_STATUS_SUCCESS;
+    case HSA_AMD_AGENT_INFO_DOMAIN:
+      *static_cast<uint32_t*>(value) = node_props_.Domain;
+      return HSA_STATUS_SUCCESS;
+    case HSA_AMD_AGENT_INFO_COOPERATIVE_QUEUES:
+      *static_cast<bool*>(value) = false;
       return HSA_STATUS_SUCCESS;
     case HSA_AMD_AGENT_INFO_SVM_DIRECT_HOST_ACCESS:
       *static_cast<bool*>(value) = true;

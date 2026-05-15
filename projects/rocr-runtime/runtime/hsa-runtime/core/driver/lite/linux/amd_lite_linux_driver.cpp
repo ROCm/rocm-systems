@@ -53,6 +53,12 @@ bool TraceDirectQueue() { return EnvEnabled("ROCR_AMDGPU_LITE_TRACE_DIRECT_QUEUE
 bool TraceDirectQueueVerbose() {
   return EnvEnabled("ROCR_AMDGPU_LITE_TRACE_DIRECT_QUEUE_VERBOSE");
 }
+bool UseMesQueue() {
+  if (EnvEnabled("ROCR_AMDGPU_LITE_DISABLE_MES_QUEUE")) return false;
+  const char* value = std::getenv("ROCR_AMDGPU_LITE_USE_MES_QUEUE");
+  if (value != nullptr && value[0] != '\0') return std::strcmp(value, "0") != 0;
+  return true;
+}
 bool UseDirectQueueDequeue() {
   if (EnvEnabled("ROCR_AMDGPU_LITE_DIRECT_QUEUE_DISABLE_DEQUEUE")) return false;
   const char* value = std::getenv("ROCR_AMDGPU_LITE_DIRECT_QUEUE_DEQUEUE");
@@ -78,6 +84,7 @@ uint32_t DirectQueueDequeueSettleUs() {
 lite::DirectQueueOptions LinuxDirectQueueOptions() {
   lite::DirectQueueOptions options;
   options.force_reclaim = EnvEnabled("ROCR_AMDGPU_LITE_FORCE_DIRECT_COMPUTE");
+  options.use_mes_queue = UseMesQueue();
   options.use_firmware_dequeue = UseDirectQueueDequeue();
   options.skip_destroy = SkipDirectQueueDestroy();
   options.trace = TraceDirectQueue();
@@ -378,13 +385,14 @@ hsa_status_t LinuxAmdgpuLiteDriver::CreateDirectComputeQueue(
 }
 
 hsa_status_t LinuxAmdgpuLiteDriver::DestroyDirectComputeQueue(
-    const DirectComputeQueue& queue) {
+    DirectComputeQueue& queue) {
   std::lock_guard<std::mutex> g(gpu_lock_);
+  const uint32_t queue_index = queue.queue_index;
   hsa_status_t status = lite::DestroyDirectQueue(transport_, queue,
                                                  LinuxDirectQueueOptions());
   if (status == HSA_STATUS_SUCCESS &&
-      queue.queue_index < direct_queue_in_use_.size()) {
-    direct_queue_in_use_[queue.queue_index] = false;
+      queue_index < direct_queue_in_use_.size()) {
+    direct_queue_in_use_[queue_index] = false;
   }
   return status;
 }

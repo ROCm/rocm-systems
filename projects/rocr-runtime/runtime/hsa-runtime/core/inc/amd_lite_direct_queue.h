@@ -27,8 +27,20 @@ constexpr uint32_t kDirectComputeEopSize = 0x1000;
 constexpr uint32_t kDirectComputeDoorbellBase = 0x20;
 constexpr uint32_t kDirectComputeDoorbellStride = 2;
 
+struct DirectQueueMemory {
+  uint64_t size = 0;
+  uint64_t gpu_addr = 0;
+  void* cpu = nullptr;
+  uint64_t platform_handle = 0;
+  uint64_t platform_bus_addr = 0;
+  uint64_t platform_mmap_offset = 0;
+};
+
 struct DirectQueueLayout {
   uint64_t base_offset = 0;
+  uint64_t base_gpu = 0;
+  void* cpu_base = nullptr;
+  uint64_t cpu_size = 0;
   uint64_t mqd_offset = 0;
   uint64_t ring_offset = 0;
   uint64_t eop_offset = 0;
@@ -48,8 +60,12 @@ struct DirectQueueState {
   uint32_t queue_index = 0;
   uint32_t doorbell_index = 0;
   uint32_t ring_size_bytes = 0;
+  uint32_t ring_align_mask = 0;
+  uint32_t ring_nop = 0;
   uint64_t ring_gpu = 0;
   uint64_t wptr = 0;
+  bool mes_backed = false;
+  DirectQueueMemory memory;
   volatile uint32_t* ring_cpu = nullptr;
   volatile uint64_t* wptr_cpu = nullptr;
   volatile uint64_t* rptr_cpu = nullptr;
@@ -58,6 +74,7 @@ struct DirectQueueState {
 
 struct DirectQueueOptions {
   bool force_reclaim = false;
+  bool use_mes_queue = false;
   bool use_firmware_dequeue = true;
   bool skip_destroy = false;
   bool trace = false;
@@ -78,7 +95,19 @@ class DirectQueuePlatform {
                                    uint32_t value) const = 0;
   virtual hsa_status_t ZeroGpuMemory(uint64_t offset, uint64_t size) const = 0;
   virtual hsa_status_t WriteGpuMemory32(uint64_t offset, uint32_t value) const = 0;
+  virtual hsa_status_t FlushHdp() const { return HSA_STATUS_SUCCESS; }
   virtual void* GpuMemoryCpuPointer(uint64_t offset) const = 0;
+  virtual bool PreferAllocatedQueueMemory() const { return false; }
+  virtual hsa_status_t AllocateQueueMemory(uint64_t size,
+                                           DirectQueueMemory* memory) const {
+    (void)size;
+    (void)memory;
+    return HSA_STATUS_ERROR;
+  }
+  virtual hsa_status_t FreeQueueMemory(DirectQueueMemory* memory) const {
+    if (memory != nullptr) *memory = {};
+    return HSA_STATUS_SUCCESS;
+  }
   virtual volatile uint64_t* DoorbellCpuPointer(uint32_t doorbell_index) const = 0;
   virtual void SleepUs(uint32_t usec) const = 0;
 };
@@ -98,7 +127,7 @@ hsa_status_t CreateDirectQueue(const DirectQueuePlatform& platform,
                                uint64_t framebuffer_base,
                                const DirectQueueOptions& options);
 hsa_status_t DestroyDirectQueue(const DirectQueuePlatform& platform,
-                                const DirectQueueState& queue,
+                                DirectQueueState& queue,
                                 const DirectQueueOptions& options);
 hsa_status_t SubmitDirectQueue(const DirectQueuePlatform& platform,
                                DirectQueueState& queue,

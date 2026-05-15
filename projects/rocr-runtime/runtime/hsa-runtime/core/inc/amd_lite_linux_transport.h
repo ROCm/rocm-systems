@@ -63,7 +63,12 @@ class LinuxAmdgpuLiteTransport final : public DirectQueuePlatform {
                            uint32_t value) const override;
   hsa_status_t ZeroGpuMemory(uint64_t offset, uint64_t size) const override;
   hsa_status_t WriteGpuMemory32(uint64_t offset, uint32_t value) const override;
+  hsa_status_t FlushHdp() const override;
   void* GpuMemoryCpuPointer(uint64_t offset) const override;
+  bool PreferAllocatedQueueMemory() const override { return true; }
+  hsa_status_t AllocateQueueMemory(uint64_t size,
+                                   DirectQueueMemory* memory) const override;
+  hsa_status_t FreeQueueMemory(DirectQueueMemory* memory) const override;
   volatile uint64_t* DoorbellCpuPointer(uint32_t doorbell_index) const override;
   void SleepUs(uint32_t usec) const override;
 

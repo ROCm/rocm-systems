@@ -136,7 +136,7 @@ class LinuxAmdgpuLiteDriver final : public core::Driver {
   hsa_status_t VramShadowAddress(const void* cpu_addr, size_t size,
                                  const void** shadow_addr) const;
   hsa_status_t CreateDirectComputeQueue(DirectComputeQueue* queue);
-  hsa_status_t DestroyDirectComputeQueue(const DirectComputeQueue& queue);
+  hsa_status_t DestroyDirectComputeQueue(DirectComputeQueue& queue);
   hsa_status_t SubmitDirectCompute(DirectComputeQueue& queue,
                                    const uint32_t* pm4,
                                    size_t dword_count) const;

@@ -44,6 +44,7 @@
  */
 #include <stdio.h>
 #include <inttypes.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -71,6 +72,11 @@
 #define COL_RESET "\033[0m"
 
 #define UNUSED(x) (void)(x)
+
+static bool EnvEnabled(const char* name) {
+  const char *value = getenv(name);
+  return value != nullptr && value[0] != '\0' && strcmp(value, "0") != 0;
+}
 
 #define RET_IF_HSA_ERR(err) { \
   if ((err) != HSA_STATUS_SUCCESS) { \
@@ -1139,6 +1145,15 @@ AcquireAndDisplayAgentInfo(hsa_agent_t agent, void* data) {
   hsa_status_t err;
   agent_info_t agent_i;
 
+  if (EnvEnabled("ROCR_AMDGPU_LITE_ONLY")) {
+    hsa_device_type_t device_type;
+    err = hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &device_type);
+    RET_IF_HSA_ERR(err);
+    if (device_type == HSA_DEVICE_TYPE_CPU) {
+      return HSA_STATUS_SUCCESS;
+    }
+  }
+
   int *agent_number = reinterpret_cast<int*>(data);
   (*agent_number)++;
 
@@ -1184,6 +1199,10 @@ int CheckInitialState(void) {
   // Darwin uses the DriverKit MacOsDriver backend, not Linux ROCk/KFD.
   return 0;
 #endif
+  if (EnvEnabled("ROCR_AMDGPU_LITE_ONLY")) {
+    return 0;
+  }
+
   // Check kernel module for ROCk is loaded
 
   std::ifstream amdgpu_initstate("/sys/module/amdgpu/initstate");

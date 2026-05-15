@@ -592,7 +592,7 @@ hsa_status_t MacOsDriver::CreateDirectComputeQueue(DirectComputeQueue* queue) {
   return status;
 }
 
-hsa_status_t MacOsDriver::DestroyDirectComputeQueue(const DirectComputeQueue& queue) {
+hsa_status_t MacOsDriver::DestroyDirectComputeQueue(DirectComputeQueue& queue) {
   std::lock_guard<std::mutex> g(gpu_lock_);
   return lite::DestroyDirectQueue(*this, queue, MacDirectQueueOptions());
 }

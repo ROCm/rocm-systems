@@ -1936,12 +1936,16 @@ bool VirtualGPU::create() {
   }
 
   device::BlitManager::Setup blitSetup;
+  const bool force_host_blit =
 #if defined(__APPLE__)
-  if (std::getenv("ROCR_MACOS_HOST_BLIT_ONLY") != nullptr) {
+      std::getenv("ROCR_MACOS_HOST_BLIT_ONLY") != nullptr;
+#else
+      std::getenv("ROCR_AMDGPU_LITE_HOST_BLIT_ONLY") != nullptr;
+#endif
+  if (force_host_blit) {
     blitSetup.disableAll();
     blitMgr_ = new HostOnlyBlitManager(*this, blitSetup);
   } else
-#endif
   {
     blitMgr_ = new KernelBlitManager(*this, blitSetup);
   }
