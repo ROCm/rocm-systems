@@ -36,7 +36,9 @@ def test_L1_cache_counters(
 
     # set up two apps: sequential and random access
     app_names = ["vseq", "vrand"]
-    options = ["-b", "16"]
+    # Scope to the relevant metric section and multiplex counters across
+    # kernel iterations so the app runs only once.
+    options = ["-b", "16.3", "--iteration-multiplexing"]
 
     result = {}
     metrics = ["Read Req", "Write Req", "Cache Hit Rate"]
