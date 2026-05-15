@@ -3369,103 +3369,6 @@ static ncclResult_t setCommAbortFlags(ncclComm_t comm, int value) {
   return ncclSuccess;
 }
 
-NCCL_API(ncclResult_t, ncclCommRevoke, ncclComm_t comm, int revokeFlags);
-struct ncclCommRevokeAsyncJob {
-  struct ncclAsyncJob base;
-  ncclComm_t comm;
-};
-
-static ncclResult_t commRevokeAsync(struct ncclAsyncJob* job_) {
-  struct ncclCommRevokeAsyncJob* job = (struct ncclCommRevokeAsyncJob*)job_;
-  ncclComm_t comm = job->comm;
-  ncclResult_t res = ncclSuccess;
-  NCCLCHECKGOTO(PtrCheck(comm, "CommRevokeAsync", "comm"), res, exit);
-  INFO(NCCL_INIT, "CommRevokeAsync START comm %p rank %d nRanks %d nNodes %d localRank %d cudaDev %d",
-      comm, comm->rank, comm->nRanks, comm->nNodes, comm->localRank, comm->cudaDev);
-  CUDACHECKGOTO(cudaSetDevice(comm->cudaDev), res, exit);
-  NCCLCHECKGOTO(ncclStrongStreamSynchronize(&comm->sharedRes->hostStream), res, exit);
-  NCCLCHECKGOTO(ncclStrongStreamSynchronize(&comm->sharedRes->deviceStream), res, exit);
-  NCCLCHECKGOTO(ncclCommPollEventCallbacks(comm, /*waitSome=*/true), res, exit);
-  NCCLCHECKGOTO(ncclCommPollCallbacks(comm, /*waitSome=*/false), res, exit);
-  {
-    ncclResult_t _tmpret = ncclSuccess;
-    if ((_tmpret = ncclProxyStop(comm)) != ncclSuccess) {
-      WARN("ncclProxyStop: comm %p (rank = %d) destroys proxy resource error %d", comm, comm->rank, _tmpret);
-    }
-    if (comm->proxyState && comm->proxyRefCountOld == 0 && comm->proxyState->thread) {
-      PTHREADCHECK(pthread_join(comm->proxyState->thread, nullptr), "pthread_join");
-      if (comm->proxyState->threadUDS) {
-        // UDS support
-        PTHREADCHECK(pthread_join(comm->proxyState->threadUDS, nullptr), "pthread_join");
-      }
-      // Mark threads as joined so later cleanup (e.g., commFree) won't join again
-      comm->proxyState->thread = 0;
-      comm->proxyState->threadUDS = 0;
-    }
-  }
-  NCCLCHECKGOTO(setCommAbortFlags(comm, 0), res, exit);
-exit:
-  (void)ncclCommSetAsyncError(comm, res);
-  INFO(NCCL_INIT, "CommRevokeAsync END comm %p result %d", comm, res);
-  return res;
-}
-
-ncclResult_t ncclCommRevoke(ncclComm_t comm, int revokeFlags) {
-  NVTX3_RANGE(NcclNvtxParamsCommRevoke);
-
-  if (comm == NULL) {
-    return ncclSuccess;
-  }
-  // For now only NCCL_REVOKE_DEFAULT (0) is supported
-  if (revokeFlags != 0) { // NCCL_REVOKE_DEFAULT = 0
-    return ncclInvalidArgument;
-  }
-  // Disallow revoke if destroy/finalize in progress
-  if (comm->destroyFlag || comm->finalizeCalled) {
-    return ncclInvalidArgument;
-  }
-  // Disallow revoke if revoke in progress
-  if (comm->revokedFlag) {
-    return ncclInvalidArgument;
-  }
-  INFO(NCCL_INIT, "comm %p rank %d nRanks %d cudaDev %d busId %lx - Revoke START",
-      comm, comm->rank, comm->nRanks, comm->cudaDev, comm->busId);
-
-  NCCLCHECK(ncclGroupStartInternal());
-  (void)setCommAbortFlags(comm,1);
-  comm->revokedFlag = 1;
-  (void)ncclCommEnsureReady(comm);
-  comm->finalizeCalled = true;
-
-  int rank = comm->rank, nranks = comm->nRanks, cudaDev = comm->cudaDev;
-  struct ncclCommRevokeAsyncJob *job = NULL;
-  ncclResult_t res = ncclSuccess;
-
-  NVTX3_RANGE_ADD_PAYLOAD(CommRevoke, NcclNvtxParamsCommInitRankSchema,
-    NVTX3_PAYLOAD(comm->commHash, nranks, rank, cudaDev));
-  TRACE(NCCL_INIT, "comm %p rank %d nRanks %d cudaDev %d busId %lx", comm, rank, nranks, cudaDev, comm->busId);
-
-  NCCLCHECKGOTO(ncclCalloc(&job, 1), res, fail);
-  job->comm = comm;
-  NCCLCHECKGOTO(ncclAsyncLaunch((struct ncclAsyncJob*)job, commRevokeAsync, NULL, free, comm), res, fail);
-
-exit:
-  ncclGroupErrCheck(res);
-  NCCLCHECK(ncclGroupEndInternal());
-  if (comm) {
-    if (!comm->config.blocking) {
-      NCCLCHECK(ncclCommGetAsyncError(comm, &res));
-    }
-    NVTX3_RANGE_ADD_PAYLOAD(CommRevoke, NcclNvtxParamsCommInitRankSchema,
-      NVTX3_PAYLOAD(comm->commHash, nranks, rank, cudaDev));
-  }
-  INFO(NCCL_INIT, "comm %p rank %d nRanks %d cudaDev %d busId %lx - Revoke COMPLETE, result %d", comm, rank, nranks, cudaDev, comm->busId, res);
-  return res;
-fail:
-  if (comm && !comm->config.blocking) (void) ncclCommSetAsyncError(comm, res);
-  goto exit;
-}
-
 NCCL_API(ncclResult_t, ncclCommAbort, ncclComm_t comm);
 ncclResult_t ncclCommAbort_impl(ncclComm_t comm) {
   NCCLCHECK(Recorder::instance().record(rrCommAbort, comm));
@@ -3545,9 +3448,11 @@ static ncclResult_t ncclCommInitChildComm(ncclComm_t comm, ncclComm_t* newcomm, 
     childComm->startMagic = childComm->endMagic = NCCL_MAGIC;
 
     // Set the shareResource field, this is used throughout the init and must be reset every time.
-    // Never share resources if the parent communicator has been revoked.
-    // If we shrink, we only reuse resources in default mode.
-    comm->shareResources = !comm->revokedFlag && (isShrink ? (!(flags & NCCL_SHRINK_ABORT) && comm->config.shrinkShare) : comm->config.splitShare);
+    // If we shrink, we only reuse resources if we shrink in the default mode
+    comm->shareResources = isShrink ? (!(flags & NCCL_SHRINK_ABORT) && comm->config.shrinkShare) : comm->config.splitShare;
+    if (__atomic_load_n(&comm->revokedFlag, __ATOMIC_ACQUIRE)) {
+      comm->shareResources = false;
+    }
     if (comm->shareResources) {
       childComm->abortFlag = comm->abortFlag;
       childComm->abortFlagDev = comm->abortFlagDev;
