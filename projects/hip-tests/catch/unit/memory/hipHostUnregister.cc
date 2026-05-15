@@ -17,22 +17,18 @@ constexpr unsigned int allFlags = hipHostRegisterDefault |   // 0
     ;
 #endif
 
-inline bool hipHostRegisterSupported() {
+inline void hipHostRegisterSupported() {
 #if HT_NVIDIA
   // unable to query for cudaDevAttrHostRegisterSupported equivalent
-  HipTest::HIP_SKIP_TEST("tracked issue EXSWCPHIPT-40.");
-  HipTest::HIP_SKIP_TEST("hipHostRegister is not supported on this device.");
-  return false;
-#else
-  return true;
+
+  HIP_SKIP_TEST("hipHostRegister is not supported on this device.");
 #endif
 }
 
 
 TEST_CASE("Unit_hipHostUnregister_MemoryNotAccessibleAfterUnregister") {
-  if (!hipHostRegisterSupported()) {
-    return;
-  }
+  hipHostRegisterSupported();
+
   // try all combinations of flags
   for (unsigned int flag = 0; flag <= allFlags; ++flag) {
 #if defined(_WIN32)
@@ -69,9 +65,8 @@ HIP_TEST_CASE(Unit_hipHostUnregister_NotRegisteredPointer) {
 }
 
 HIP_TEST_CASE(Unit_hipHostUnregister_AlreadyUnregisteredPointer) {
-  if (!hipHostRegisterSupported()) {
-    return;
-  }
+  hipHostRegisterSupported();
+
   // try all combinations of flags
   for (unsigned int flag = 0; flag <= allFlags; ++flag) {
 #if defined(_WIN32)

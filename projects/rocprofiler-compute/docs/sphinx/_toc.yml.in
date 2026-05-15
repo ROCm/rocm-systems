@@ -11,7 +11,9 @@ subtrees:
   - caption: Install
     entries:
     - file: install/core-install.rst
-      title: Installation and deployment
+      title: Install ROCm Compute Profiler
+    - file: install/source-install.rst
+      title: Install from source
     - file: install/quickstart.rst
       title: Quickstart
 

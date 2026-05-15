@@ -134,7 +134,6 @@ SKIPPABLE_PATH_PATTERNS = [
     "projects/rocr-runtime/libhsakmt/src/dxg/*",
     "shared/*/docs/*",
     "shared/*/.gitignore",
-    "experimental/rocjitsu/*",
     "experimental/python/perfxpert/*",
     ".github/label*.yml",
     ".github/workflows/labeler.yml",
@@ -158,6 +157,27 @@ def check_rccl_changes(modified_paths: Optional[Iterable[str]]) -> bool:
     if modified_paths is None:
         return False
     return any(path.startswith("projects/rccl/") for path in modified_paths)
+
+
+def is_rccl_path(path: str) -> bool:
+    """Returns true if path is under projects/rccl/."""
+    return path.startswith("projects/rccl/")
+
+
+def get_matched_subtree(path: str) -> Optional[str]:
+    """Returns the subtree that matches the path, or None if no match."""
+    for subtree in subtree_to_project_map:
+        if path.startswith(subtree):
+            return subtree
+    return None
+
+
+def check_only_rccl_changes(modified_paths: Iterable[str]) -> bool:
+    """Returns true if all modified paths are either RCCL or match known subtrees."""
+    for path in modified_paths:
+        if not is_rccl_path(path) and get_matched_subtree(path) is None:
+            return False
+    return check_rccl_changes(modified_paths)
 
 
 def retrieve_projects(args):
@@ -191,9 +211,29 @@ def retrieve_projects(args):
             logging.info("Only skippable paths were modified, skipping CI")
             return []
 
-    # Push event → evaluate all subtrees
+    # Push event → check which subtrees were modified
     if args.get("is_push"):
-        subtrees = list(subtree_to_project_map.keys())
+        matched_subtrees = {get_matched_subtree(p) for p in modified_paths} - {None}
+
+        # Change in CI workflow triggers full subtree evaluation
+        if check_for_workflow_file_related_to_ci(modified_paths):
+            logging.info("CI workflow files changed, evaluating all subtrees")
+            subtrees = list(subtree_to_project_map.keys())
+        elif matched_subtrees:
+            # Known subtrees changed - run CI for those subtrees
+            subtrees = list(matched_subtrees)
+        elif check_only_rccl_changes(modified_paths):
+            # Only RCCL changes - skip regular CI, RCCL CI will handle it
+            logging.info("Only RCCL changes detected on push, skipping regular CI")
+            subtrees = []
+        elif modified_paths:
+            # Files changed but no known subtree matched (and not RCCL-only)
+            logging.info(
+                "Modified files did not match known subtrees, evaluating all projects"
+            )
+            subtrees = list(subtree_to_project_map.keys())
+        else:
+            subtrees = []
 
     # Manual workflow dispatch: respect explicit project selection, bypass CI file change detection
     elif args.get("is_workflow_dispatch"):
