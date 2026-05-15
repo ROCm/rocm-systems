@@ -637,9 +637,12 @@ TEST_DEFINITIONS = [
         'description': 'Disassembly shows source lines only when debug info is present',
         'args': '1',
         'function': test_debug_info_comparison,
+        # Patterns target source lines emitted near the trap PC of
+        # vector_add_assert_trap.cpp (lines 53 and 55); line 52 is
+        # outside the disassembly's source-line window.
         'patterns': [
             r"c\[gid\] = a\[gid\] \+ b\[gid\] \+ \(lds_check\[0\] >> 32\);",
-            r"if \(gid == 0\)",
+            r"__builtin_trap \(\);",
         ],
     },
     {
