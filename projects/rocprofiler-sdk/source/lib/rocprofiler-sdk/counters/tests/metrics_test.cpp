@@ -22,6 +22,7 @@
 
 #include "metrics_test.h"
 
+#include "hsa_tables.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
@@ -32,6 +33,7 @@
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include <gtest/gtest.h>
+#include <hsa/hsa.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -40,6 +42,17 @@
 namespace
 {
 namespace counters = ::rocprofiler::counters;
+
+namespace tc = rocprofiler::counters::test_constants;
+
+void
+test_init()
+{
+    HsaApiTable table;
+    table.amd_ext_ = &tc::get_ext_table();
+    table.core_    = &tc::get_api_table();
+    rocprofiler::agent::construct_agent_cache(&table);
+}
 
 auto
 loadTestData(const std::unordered_map<std::string, std::vector<std::vector<std::string>>>& map)
@@ -314,6 +327,86 @@ TEST(metrics, check_public_api_query)
             }
             // Ex: Maximum index of XCC doesn't exceed or be equal to 8.
             ASSERT_EQ(index_to_count.rbegin()->first + 1, current_dimension_size);
+        }
+    }
+}
+
+TEST(metrics, has_spm_support)
+{
+    // Empty event always returns false — no HSA needed
+    counters::Metric       empty_evt("gfx9", "test_empty", "SQ", "", "desc", "", "", 99999);
+    rocprofiler_agent_id_t dummy_agent{.handle = 0};
+    EXPECT_FALSE(counters::has_spm_support(empty_evt, dummy_agent));
+
+    // With real agents
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    auto agents = rocprofiler::agent::get_agents();
+    for(const auto* agent : agents)
+    {
+        if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
+
+        auto metrics = counters::getMetricsForAgent(agent);
+        for(const auto& metric : metrics)
+        {
+            bool first  = counters::has_spm_support(metric, agent->id);
+            bool second = counters::has_spm_support(metric, agent->id);
+            EXPECT_EQ(first, second) << "Cache returned different results for " << metric.name();
+        }
+    }
+}
+
+TEST(metrics, counter_info_v1_size_field)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    auto agents = rocprofiler::agent::get_agents();
+    for(const auto* agent : agents)
+    {
+        if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
+
+        auto gpu_counters = std::vector<rocprofiler_counter_id_t>{};
+        auto status       = rocprofiler_iterate_agent_supported_counters(
+            agent->id,
+            [](rocprofiler_agent_id_t,
+               rocprofiler_counter_id_t* counters,
+               size_t                    num_counters,
+               void*                     user_data) {
+                auto* vec = static_cast<std::vector<rocprofiler_counter_id_t>*>(user_data);
+                for(size_t i = 0; i < num_counters; i++)
+                    vec->push_back(counters[i]);
+                return ROCPROFILER_STATUS_SUCCESS;
+            },
+            static_cast<void*>(&gpu_counters));
+        ASSERT_EQ(status, ROCPROFILER_STATUS_SUCCESS)
+            << "Failed to iterate counters for agent " << agent->id.handle;
+
+        ASSERT_FALSE(gpu_counters.empty())
+            << "No counters found for GPU agent " << agent->id.handle;
+
+        for(const auto& counter : gpu_counters)
+        {
+            auto info = rocprofiler_counter_info_v1_t{};
+            status    = rocprofiler_query_counter_info(
+                counter, ROCPROFILER_COUNTER_INFO_VERSION_1, static_cast<void*>(&info));
+
+            if(status == ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND ||
+               status == ROCPROFILER_STATUS_ERROR_DIM_NOT_FOUND)
+                continue;
+
+            ASSERT_EQ(status, ROCPROFILER_STATUS_SUCCESS)
+                << "Failed to query counter info for counter " << counter.handle;
+
+            EXPECT_EQ(info.size, offsetof(rocprofiler_counter_info_v1_t, reserved_padding))
+                << "size field must equal offsetof(rocprofiler_counter_info_v1_t, "
+                   "reserved_padding) for counter "
+                << (info.name ? info.name : "<null>") << " (handle=" << counter.handle << ")";
+
+            EXPECT_LT(info.size, sizeof(rocprofiler_counter_info_v1_t))
+                << "size field must be less than sizeof(rocprofiler_counter_info_v1_t) for counter "
+                << (info.name ? info.name : "<null>") << " (handle=" << counter.handle << ")";
         }
     }
 }
