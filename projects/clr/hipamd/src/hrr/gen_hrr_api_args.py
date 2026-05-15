@@ -1365,6 +1365,16 @@ def _playback_arg(p: Param, name: str, pre_lines: List[str]) -> str:
     if base in ('hipStreamCallback_t', 'hipHostFn_t'):
         return f"({t})a->{name}"
 
+    # Unhandled non-const pointer to a non-void scalar type — treat as output pointer.
+    # The captured value is the original process address (invalid at replay).
+    # Use a zero-initialised local so the call succeeds without crashing.
+    is_ptr = '*' in t
+    is_const_ptr = 'const' in t and is_ptr
+    if is_ptr and not is_const_ptr and base != 'void':
+        inner = t.replace('*', '', 1).strip()
+        pre_lines.append(f"  {inner} _out_{name}{{}};")
+        return f"&_out_{name}"
+
     # Scalar / enum / int-like handle — cast from stored field
     return f"({t})a->{name}"
 

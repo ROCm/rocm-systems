@@ -338,26 +338,30 @@ hipError_t capture_hipMemcpyHtoDAsync(hipDeviceptr_t dst, const void* src,
 // Module shims
 // ---------------------------------------------------------------------------
 
-// Helper: determine ELF image size from header
-static size_t elf_image_size(const void* image) {
-  const auto* bytes = static_cast<const uint8_t*>(image);
-  if (bytes[0] == 0x7f && bytes[1] == 'E' && bytes[2] == 'L' && bytes[3] == 'F') {
-    uint64_t shoff;     memcpy(&shoff,     bytes + 40, 8);
-    uint16_t shentsize; memcpy(&shentsize, bytes + 58, 2);
-    uint16_t shnum;     memcpy(&shnum,     bytes + 60, 2);
-    return static_cast<size_t>(shoff) + shentsize * shnum;
-  }
-  return 4 * 1024 * 1024;  // fallback: 4MB
+// Helper: get the actual device binary from a successfully loaded hipModule_t.
+// The caller passes an in-memory image (which may be a fat binary bundle, not
+// a raw ELF).  The runtime unbundles/extracts the device ELF internally and
+// stores it in the amd::Program.  We read it back from there so we always
+// capture the processed ELF, not the raw (possibly bundled) input image.
+static hrr_cap::Hash128 write_module_code_object(hipModule_t module) {
+  amd::Program* prog = as_amd(reinterpret_cast<cl_program>(module));
+  if (!prog) return {0, 0};
+  const int dev = hip::ihipGetDevice();
+  const amd::Device* device = hip::g_devices[dev]->devices()[0];
+  const auto& bin = prog->binary(*device);
+  const uint8_t* data = std::get<0>(bin);
+  const size_t   size = std::get<1>(bin).first;
+  if (!data || !size) return {0, 0};
+  return hrr_cap::writer::write_code_object(data, size);
 }
 
 hipError_t capture_hipModuleLoadData(hipModule_t* module, const void* image) {
   hipError_t r = g_real_table.hipModuleLoadData_fn(module, image);
   if (r == hipSuccess) {
-    size_t img_size = elf_image_size(image);
-    hrr_cap::Hash128 h = hrr_cap::writer::write_code_object(image, img_size);
+    hrr_cap::Hash128 h = write_module_code_object(*module);
     hrr_args_hipModuleLoadData a{};
     a.ret        = static_cast<int32_t>(r);
-    a.module     = reinterpret_cast<uint64_t>(*module);  // raw handle
+    a.module     = reinterpret_cast<uint64_t>(*module);
     a.image      = reinterpret_cast<uint64_t>(image);
     a.co_hash_lo = h.lo;
     a.co_hash_hi = h.hi;
@@ -368,17 +372,16 @@ hipError_t capture_hipModuleLoadData(hipModule_t* module, const void* image) {
 }
 
 hipError_t capture_hipModuleLoadDataEx(hipModule_t* module, const void* image,
-                                               unsigned int numOptions,
-                                               hipJitOption* options,
-                                               void** optionValues) {
+                                       unsigned int numOptions,
+                                       hipJitOption* options,
+                                       void** optionValues) {
   hipError_t r = g_real_table.hipModuleLoadDataEx_fn(
       module, image, numOptions, options, optionValues);
   if (r == hipSuccess) {
-    size_t img_size = elf_image_size(image);
-    hrr_cap::Hash128 h = hrr_cap::writer::write_code_object(image, img_size);
+    hrr_cap::Hash128 h = write_module_code_object(*module);
     hrr_args_hipModuleLoadDataEx a{};
     a.ret          = static_cast<int32_t>(r);
-    a.module       = reinterpret_cast<uint64_t>(*module);  // raw handle
+    a.module       = reinterpret_cast<uint64_t>(*module);
     a.image        = reinterpret_cast<uint64_t>(image);
     a.numOptions   = static_cast<uint32_t>(numOptions);
     a.options      = reinterpret_cast<uint64_t>(options);
