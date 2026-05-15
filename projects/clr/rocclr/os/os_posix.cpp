@@ -472,7 +472,7 @@ const void* Os::createOsThread(amd::Thread* thread) {
   pthread_t handle = 0;
   if (0 != ::pthread_create(&handle, &threadAttr, (void* (*)(void*)) & Thread::entry, thread)) {
     thread->setState(Thread::FAILED);
-    fatal("pthread_create() failed");
+    guarantee(false, "pthread_create() failed");
   }
 
   if (0 != ::pthread_attr_destroy(&threadAttr)) {
