@@ -279,8 +279,7 @@ class TestTransposeROCProfiler(RocprofsysTest):
 
     @pytest.mark.timeout(120)
     @pytest.mark.rocpd("rocprofiler_env")
-    def test(self, mode, rocprofiler_env, gpu_info, num_processes,
-             rocprofiler_rules):
+    def test(self, mode, rocprofiler_env, gpu_info, num_processes, rocprofiler_rules):
         result = self.run_test(
             mode,
             "transpose",
