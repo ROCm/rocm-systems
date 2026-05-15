@@ -2874,7 +2874,7 @@ class GraphMemAllocNode final : public GraphNode {
             // The old memory is in busy_heap_ (owned by whoever took it from free_heap_).
             // DecrementRefCount is lock-protected and checks both heaps.
             size_t old_offset = 0;
-            auto* old_memory = getMemoryObject(*phys_ptr_ref_, old_offset);
+            auto* old_memory = getMemoryObjectForCurrentDevice(*phys_ptr_ref_, old_offset);
             if (old_memory != nullptr) {
               pool->DecrementRefCount(old_memory);
             }
