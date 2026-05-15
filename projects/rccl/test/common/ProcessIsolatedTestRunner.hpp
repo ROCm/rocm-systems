@@ -61,6 +61,12 @@ public:
         std::chrono::seconds     timeout;              ///< Test timeout
         bool                     inheritParentEnv;     ///< Whether to inherit parent environment
         std::vector<std::string> clearEnvVars; ///< Environment variables to explicitly clear
+        bool                     useExec;              ///< Use fork()+execve() instead of plain
+                                                       ///<  fork(). Required for HIP-using tests
+                                                       ///<  when the binary may have initialized
+                                                       ///<  HIP in earlier tests of the same
+                                                       ///<  process (fork-after-init is unsafe
+                                                       ///<  for the HIP/ROCm runtime).
 
         /**
          * @brief Constructor
@@ -104,6 +110,26 @@ public:
          * @return Reference to this TestConfig for method chaining
          */
         TestConfig& setVariable(const std::string& name, const std::string& value);
+
+        /**
+         * @brief Run the isolated child via fork()+execve() of the same binary
+         *        rather than plain fork().
+         *
+         * This produces a fresh process image and is required when the test
+         * binary may have already initialized HIP/ROCm (or other resources
+         * that are unsafe to inherit across fork) in tests that ran earlier
+         * in the same process.
+         *
+         * The re-exec'd child is launched with --gtest_filter set to the
+         * currently running gtest TEST() name. Inside that fresh process,
+         * when the TEST() body calls RUN_ISOLATED_TESTS again, the runner
+         * detects a sentinel environment variable, runs the matching test
+         * lambda inline (no further fork/exec), and exits with the result.
+         *
+         * @param exec  Whether to enable exec mode (default true)
+         * @return Reference to this TestConfig for method chaining
+         */
+        TestConfig& withExec(bool exec = true);
     };
 
     /**

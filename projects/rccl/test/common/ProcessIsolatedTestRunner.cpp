@@ -44,11 +44,17 @@ ProcessIsolatedTestRunner::TestResult::TestResult()
     : passed(false), skipped(false), exitCode(-1), processId(-1), duration(0)
 {}
 
+// Sentinel environment variable used to mark a re-exec'd child process. When
+// set, executeAllTests() finds the matching TestConfig by name and runs its
+// lambda inline (no further fork/exec) before _exit()ing with the test result.
+// Only consulted when a TestConfig opts in via withExec(true).
+static constexpr const char* kReexecMarkerEnvVar = "RCCL_PIT_REEXEC_TEST";
+
 // TestConfig implementation
 ProcessIsolatedTestRunner::TestConfig::TestConfig(
     const std::string& testName, std::function<void()> logic
 )
-    : name(testName), testLogic(logic), timeout(30), inheritParentEnv(true)
+    : name(testName), testLogic(logic), timeout(30), inheritParentEnv(true), useExec(false)
 {}
 
 ProcessIsolatedTestRunner::TestConfig& ProcessIsolatedTestRunner::TestConfig::withEnvironment(
@@ -85,6 +91,13 @@ ProcessIsolatedTestRunner::TestConfig& ProcessIsolatedTestRunner::TestConfig::se
 )
 {
     environmentVariables[name] = value;
+    return *this;
+}
+
+ProcessIsolatedTestRunner::TestConfig&
+    ProcessIsolatedTestRunner::TestConfig::withExec(bool exec)
+{
+    useExec = exec;
     return *this;
 }
 
@@ -389,6 +402,31 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
         testResults_.clear();
     }
 
+    // Re-exec child entrypoint. When a TestConfig opts into withExec(true), the
+    // runner spawns the test via fork()+execve() of the same binary; the
+    // re-exec'd process restarts gtest under --gtest_filter so the same TEST()
+    // body runs again and calls RUN_ISOLATED_TESTS, which lands here. The
+    // sentinel env var tells us to run the matching lambda inline (no further
+    // fork/exec) and exit with its result.
+    if(const char* target = std::getenv(kReexecMarkerEnvVar))
+    {
+        // Unset so any nested RUN_ISOLATED_TESTS in the lambda doesn't recurse.
+        unsetenv(kReexecMarkerEnvVar);
+        for(const auto& testConfig : testsToRun)
+        {
+            if(testConfig.name == target)
+            {
+                int result = runTestInProcess(testConfig);
+                fflush(NULL);
+                _exit(result);
+            }
+        }
+        std::cerr << "ProcessIsolatedTestRunner: re-exec target '" << target
+                  << "' not found in registered tests" << std::endl;
+        fflush(NULL);
+        _exit(RCCL_TEST_INVALID);
+    }
+
     // Sequential execution
     for(const auto& testConfig : testsToRun)
     {
@@ -410,6 +448,37 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
         if(pid == 0)
         {
             redirectOutputToPipes(stdout_fd, stderr_fd);
+            if(testConfig.useExec)
+            {
+                // Fresh-process self-exec. Required for HIP-using tests when
+                // earlier tests in the same binary may have initialized HIP
+                // (fork-after-init leaves the HIP/ROCm runtime unusable in
+                // the child).
+                applyEnvironmentVariables(testConfig);
+                setenv(kReexecMarkerEnvVar, testConfig.name.c_str(), 1);
+
+                const ::testing::TestInfo* info
+                    = ::testing::UnitTest::GetInstance()->current_test_info();
+                if(info == nullptr)
+                {
+                    std::cerr << "ProcessIsolatedTestRunner: withExec() requires the "
+                                 "TEST() body to be running under gtest; "
+                                 "no current_test_info available."
+                              << std::endl;
+                    fflush(NULL);
+                    _exit(RCCL_TEST_INVALID);
+                }
+                std::string filterArg = std::string("--gtest_filter=")
+                                        + info->test_suite_name() + "." + info->name();
+                char  argv0[] = "/proc/self/exe";
+                char* argv[]  = {argv0, filterArg.data(), nullptr};
+                execv("/proc/self/exe", argv);
+                // execv only returns on error.
+                std::cerr << "ProcessIsolatedTestRunner: execv(/proc/self/exe) failed: "
+                          << strerror(errno) << std::endl;
+                fflush(NULL);
+                _exit(RCCL_TEST_INVALID);
+            }
             int result = runTestInProcess(testConfig);
             // Use _exit() instead of exit() to avoid atexit handlers
             // This prevents GPU runtime cleanup issues after fork
