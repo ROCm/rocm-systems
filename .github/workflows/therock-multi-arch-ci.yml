@@ -15,9 +15,6 @@
 name: TheRock Multi-Arch CI
 
 on:
-  push:
-    branches:
-      - users/geomin12/multi-arch
   workflow_dispatch:
     inputs:
       linux_amdgpu_families:
