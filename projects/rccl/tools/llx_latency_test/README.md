@@ -1,8 +1,13 @@
 # llx_latency_test
 
-Measures one-way latency and unidirectional bandwidth for three NCCL-style
-LL flag/data signaling protocols between two GPUs on the same node, sweeping
+Measures `T(GPU0 -> GPU1)` and one-way bandwidth for four NCCL-style LL
+flag/data signaling protocols between two GPUs on the same node, sweeping
 message sizes from 8 B to 128 MB.
+
+The send is one-way: GPU0 streams data, GPU1 polls each iteration's flag.
+A single 8-byte ACK per iteration from GPU1 back to GPU0 provides the
+minimum backpressure needed to keep GPU0 from overwriting unread flags.
+Per-iter cost ≈ `T(A->B) + ~1 µs` for the ACK round trip.
 
 ## Protocols
 
@@ -10,7 +15,8 @@ message sizes from 8 B to 128 MB.
 |---|---|---|---|
 | `LL` | 16 B | 50% | Data and flag packed into each 64-bit store; receiver checks both flag halves |
 | `LL<N>-sc` | N bytes | (N−8)/N | `s_waitcnt vmcnt(0)` drains the wavefront's data stores before the flag lane writes the flag; receiver uses `__any()` ballot |
-| `LL<N>-tf` | N bytes | (N−8)/N | `__threadfence_system()` orders all of a block's data stores before the flag lane writes the flag; receiver polls flag then re-reads data |
+| `LL<N>-sc+wb` | N bytes | (N−8)/N | Same as `sc` but adds `__threadfence_system()` per line between `s_waitcnt` and the flag store (extra cache writeback) |
+| `LL<N>-tf` | N bytes | (N−8)/N | One `__threadfence_system()` per iteration between a bulk data pass and a bulk flag pass; receiver polls flag then re-reads data |
 
 Wire efficiencies for supported line sizes:
 
@@ -33,7 +39,7 @@ make llx_latency_test_256
 ```
 
 Requires ROCm in `$ROCM_PATH` (default `/opt/rocm`). The arch is auto-detected
-via `--offload-arch=native`.
+via `--offload-arch=native`. The `.c` source is compiled as HIP via `-x hip`.
 
 ## Run
 
@@ -44,21 +50,22 @@ via `--offload-arch=native`.
 ```
 
 Defaults: warmup=10, iters=100, timeout=30 s, max_bytes=128M.
-`max_bytes` accepts K/M/G suffixes (e.g. `16M`, `1G`).
+`max_bytes` accepts K/M/G suffixes (e.g. `16M`, `1G`). `iters` and
+`warmup` must be ≤ 4096 (size of the per-iter ACK counter array).
 
 ## Output
 
 ```
-LL<N>-sc    16777216 B  nlines=299594  nb=64  RTT=  392.18 us  BW=42.76 GB/s  [OK]
+LL128-sc      16777216 B  nlines=139811  nb=64  T(A->B)=  377.65 us  BW= 44.426 GB/s  [OK]
 ```
 
-- `nlines` — number of wire lines transferred per direction
+- `nlines` — number of wire lines transferred per iteration
 - `nb` — thread blocks launched (scales with message size, capped at 64)
-- `RTT` — round-trip time averaged over `iters` iterations
-- `BW` — effective per-direction bandwidth: `data_bytes / RTT`. For pipelined protocols
-  (sc, sc+wb) both directions run simultaneously so RTT ≈ T\_one\_way and BW reflects
-  the true per-link throughput. For sequential protocols (LL baseline) RTT ≈ 2×T\_one\_way
-  so BW reflects half the link rate — the cost of serialization.
+- `T(A->B)` — average GPU0 -> GPU1 transfer time per iteration in microseconds
+  (includes the per-iter 8-byte ACK round trip; ≈1 µs of overhead, negligible
+  beyond ~1 KB)
+- `BW` — `data_bytes / T(A->B)` in GB/s. Bounded by the per-link unidirectional
+  rate by construction.
 - `[OK]` / `[ERRORS: N]` — result of the correctness verification pass
 
 ## Correctness verification
