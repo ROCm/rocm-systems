@@ -415,13 +415,16 @@ __device__ __forceinline__ void copy_bulk(uint8_t* dst_bytes, uint8_t* src_bytes
 
     #pragma unroll
     for (int u = 0; u < Unroll; ++u) {
+      if constexpr (LoadPolicy != CachePolicy::Standard) {
+        pipeline_wait_on_loads(Unroll - 1);
+      }
       regs[u] = Acc::load(src_bytes + (offset + tid + u * stride) * ChunkSize);
     }
 
     #pragma unroll
     for (int u = 0; u < Unroll; ++u) {
       if constexpr (LoadPolicy != CachePolicy::Standard) {
-        pipeline_wait_on_loads(Unroll - 1 - u);
+        pipeline_wait_on_loads(Unroll - 1);
         // __builtin_amdgcn_s_waitcnt(Unroll - 1);
       }
       Acc::store(dst_bytes + (offset + tid + u * stride) * ChunkSize, regs[u]);
@@ -509,9 +512,9 @@ template <MemcpyKind Kind = MemcpyKind::Put>
 
   constexpr int ChunkSize = 16;
   constexpr CachePolicy LP =
-      (Kind == MemcpyKind::Put) ? CachePolicy::Standard : CachePolicy::SystemScope;
+      (Kind == MemcpyKind::Put) ? CachePolicy::FlatCache : CachePolicy::SystemScope;
   constexpr CachePolicy SP =
-      (Kind == MemcpyKind::Put) ? CachePolicy::SystemScope : CachePolicy::Standard;
+      (Kind == MemcpyKind::Put) ? CachePolicy::SystemScope : CachePolicy::FlatCache;
 
   uint8_t* dst_bytes = static_cast<uint8_t*>(dst);
   uint8_t* src_bytes = static_cast<uint8_t*>(src);
@@ -532,9 +535,9 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   
   constexpr int ChunkSize = 16;
   constexpr CachePolicy LP =
-      (Kind == MemcpyKind::Put) ? CachePolicy::Standard : CachePolicy::SystemScope;
+      (Kind == MemcpyKind::Put) ? CachePolicy::FlatCache : CachePolicy::SystemScope;
   constexpr CachePolicy SP =
-      (Kind == MemcpyKind::Put) ? CachePolicy::SystemScope : CachePolicy::Standard;
+      (Kind == MemcpyKind::Put) ? CachePolicy::SystemScope : CachePolicy::FlatCache;
 
   int wave_tid = get_flat_block_id() % WF_SIZE;
   int wave_size{wave_SZ()};
@@ -561,9 +564,9 @@ template <MemcpyKind Kind = MemcpyKind::Put>
 
   constexpr int ChunkSize = 16;
   constexpr CachePolicy LP =
-      (Kind == MemcpyKind::Put) ? CachePolicy::Standard : CachePolicy::SystemScope;
+      (Kind == MemcpyKind::Put) ? CachePolicy::FlatCache : CachePolicy::SystemScope;
   constexpr CachePolicy SP =
-      (Kind == MemcpyKind::Put) ? CachePolicy::SystemScope : CachePolicy::Standard;
+      (Kind == MemcpyKind::Put) ? CachePolicy::SystemScope : CachePolicy::FlatCache;
 
   int thread_id = get_flat_block_id();
   int block_size = get_flat_block_size();
