@@ -347,8 +347,7 @@ inline T getEnvParam(const char* name, T ncclDefault)
 
 /** RAII scoped set/restore of a single env var; restores (or unsets) on destruction.
  *
- *  If the variable was already set to a *different* value (e.g. by the test runner's
- *  suite/test env_variables config), a one-line warning is printed to stderr so the
+ *  Warns on stderr (via getMpiRankStr()) when overriding an existing value so the
  *  caller knows the in-test override is active.  The original value is always restored
  *  on destruction regardless of test outcome.
  */
@@ -367,18 +366,9 @@ struct MpiEnvGuard
             saved = prev;
             if(saved != v)
             {
-                // Avoid <mpi.h> dependency; try common MPI rank env vars.
-                const char* rankEnv = nullptr;
-                for(const char* var :
-                    {"OMPI_COMM_WORLD_RANK", "PMI_RANK", "PMIX_RANK", "SLURM_PROCID"})
-                {
-                    rankEnv = std::getenv(var);
-                    if(rankEnv)
-                        break;
-                }
                 fprintf(stderr,
                         "[MpiEnvGuard rank %s] overriding %s: '%s' -> '%s' (will restore on scope exit)\n",
-                        rankEnv ? rankEnv : "?", n, saved.c_str(), v);
+                        getMpiRankStr(), n, saved.c_str(), v);
             }
         }
         ::setenv(n, v, /*overwrite=*/1);
