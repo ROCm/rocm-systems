@@ -304,18 +304,6 @@ class Bench_base(ABC):
     # -----------------------------------------------------------------------------
 
     def set_kernel_source(self) -> None:
-        # HBM Bandwidth benchmark
-        self.hbm_bw_src = """
-        template<typename T>
-        __global__ void HBM_bw(T *dst, const T *src)
-        {
-            const unsigned int gid = blockDim.x * blockIdx.x + threadIdx.x;
-            const unsigned int tid = threadIdx.x;
-
-            dst[gid] = src[gid];
-        }
-        """
-
         # Cache Bandwidth benchmark
         self.cache_bw_src = """
         template <typename T, int cacheSize, int workgroup_size>

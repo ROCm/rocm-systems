@@ -7,6 +7,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Added
 
 * Added ``--bench-only`` profile mode option to run the roofline microbenchmark standalone (without profiling an application or collecting performance counters). No application run is required. Useful for regenerating ``roofline.csv`` in an existing workload directory or running the microbenchmark on systems where only HIP is available but rocprofiler-sdk is not.
+
 * Added backward compatibility for live attach mode to work with older ROCm 7.x.x releases.
 
 ### Changed
@@ -43,6 +44,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Fixed empirical roofline benchmark to correctly produce double the Matrix BF16 Gflop/s on gfx90a (MI 200 series) GPUs
 
 ### Upcoming changes
+
+* Roofline support for RDNA 3.5 gfx1151 devices
+
+### Known issues
 
 ## ROCm Compute Profiler 3.6.0 for ROCm 7.13.0
 
