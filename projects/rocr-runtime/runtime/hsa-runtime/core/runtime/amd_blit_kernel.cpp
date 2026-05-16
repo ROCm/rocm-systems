@@ -50,6 +50,7 @@
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/hsa_internal.h"
 #include "core/util/utils.h"
+#include "core/util/rocr_logging.h"
 
 namespace rocr {
 namespace AMD {
@@ -633,8 +634,10 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(void* dst, const void* src,
   }
 
   if(agent_->profiling_enabled()) {
-    LogSignalDuration(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, completion_signal_,
-                      "BlitKernel::SubmitLinearCopyCommand");
+    amd_signal_t* amd_signal = reinterpret_cast<amd_signal_t*>(completion_signal_.handle);
+    RocrLogDebug(ROCR_LOG_BLIT, "BlitKernel::SubmitLinearCopyCommand Signal=0x%lx ticks=%lu/%lu elapsed=%lu",
+                 completion_signal_.handle, amd_signal->start_ts, amd_signal->end_ts,
+                 amd_signal->end_ts - amd_signal->start_ts);
   }
 
   return HSA_STATUS_SUCCESS;
@@ -680,7 +683,7 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(
       std::atomic_thread_fence(std::memory_order_release);
       queue_buffer[(write_index)&queue_bitmask_].header = kBarrierPacketHeader;
 
-      LogPrint(HSA_AMD_LOG_FLAG_AQL,
+      RocrLogDebug(ROCR_LOG_AQL,
       "HWq=%p, id=%lu, Barrier Header = "
       "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
       "dep_signal=[0x%zx 0x%zx 0x%zx 0x%zx 0x%zx], completion_signal=0x%zx "
@@ -906,7 +909,7 @@ void BlitKernel::PopulateQueue(uint64_t index, uint64_t code_handle, void* args,
   std::atomic_ref<uint32_t> atomic_header(queue_buffer[index & queue_bitmask_].full_header);
   atomic_header.store(kDispatchPacketHeader | packet.setup << 16, std::memory_order_release);
 #endif
-  LogPrint(HSA_AMD_LOG_FLAG_AQL,
+  RocrLogDebug(ROCR_LOG_AQL,
     "HWq=%p, id=%lu, Dispatch Header = "
     "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
     "setup=%d, grid=[%zu, %zu, %zu], workgroup=[%zu, %zu, %zu], private_seg_size=%zu, "

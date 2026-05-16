@@ -349,6 +349,23 @@ class Flag {
     var = os::GetEnvVar("HSA_SDMA_LINEAR_B2B");
     sdma_linear_b2b_ = (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
 
+    // Note: Logging configuration is handled by rocr_log_init() in rocr_logging.cpp.
+    // The Flag members below are kept for backward compatibility and query-only access.
+    // The authoritative logging state is in g_rocr_log_state (rocr_logging.h).
+    var = os::GetEnvVar("HSA_LOG_LEVEL");
+    hsa_log_level_ = var.empty() ? 0 : atoi(var.c_str());
+
+    var = os::GetEnvVar("HSA_LOG_MASK");
+    hsa_log_mask_ = var.empty() ? 0x7FFFFFFF : strtoull(var.c_str(), nullptr, 0);
+
+    hsa_log_file_ = os::GetEnvVar("HSA_LOG_FILE");
+
+    var = os::GetEnvVar("HSA_LOG_SIZE");
+    hsa_log_size_ = var.empty() ? 2048 : strtoul(var.c_str(), nullptr, 10);
+
+    var = os::GetEnvVar("HSA_LOG_ASYNC");
+    hsa_log_async_ = (var == "1");
+
   }
 
   void parse_masks(uint32_t maxGpu, uint32_t maxCU) {
@@ -493,6 +510,13 @@ class Flag {
 
   SDMA_OVERRIDE sdma_linear_b2b() const { return sdma_linear_b2b_; }
 
+  // Logging accessors
+  int hsa_log_level() const { return hsa_log_level_; }
+  uint64_t hsa_log_mask() const { return hsa_log_mask_; }
+  const std::string& hsa_log_file() const { return hsa_log_file_; }
+  size_t hsa_log_size() const { return hsa_log_size_; }
+  bool hsa_log_async() const { return hsa_log_async_; }
+
   [[nodiscard]]
   bool core_dump_disable() const { return core_dump_disable_; }
 
@@ -618,6 +642,13 @@ class Flag {
   std::map<uint32_t, std::vector<uint32_t>> cu_mask_;
 
   bool enable_sdma_fastpath_debug_;
+
+  // Logging configuration
+  int hsa_log_level_ = 0;           // Log level (0=none, 1-6=error through verbose)
+  uint64_t hsa_log_mask_ = 0x7FFFFFFF;  // Log category bitmask
+  std::string hsa_log_file_;        // Log file path (empty = stderr)
+  size_t hsa_log_size_ = 2048;      // Max log file size in MB
+  bool hsa_log_async_ = false;      // Enable async ring buffer logging
 
   void parse_masks(std::string& args, uint32_t maxGpu, uint32_t maxCU);
 

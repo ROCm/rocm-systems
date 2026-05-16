@@ -4935,7 +4935,8 @@ hsa_status_t HSA_API hsa_amd_counted_queue_acquire(hsa_agent_t agent, hsa_queue_
 hsa_status_t HSA_API hsa_amd_counted_queue_release(hsa_queue_t* queue);
 
 /**
- * @brief logging types
+ * @brief logging types (legacy flags for hsa_amd_enable_logging)
+ * For comprehensive logging, use HSA_LOG_LEVEL and HSA_LOG_MASK environment variables.
  */
 typedef enum hsa_amd_log_flag_s {
   /* Log AQL packets internally enqueued by ROCr */
@@ -4945,6 +4946,17 @@ typedef enum hsa_amd_log_flag_s {
   HSA_AMD_LOG_FLAG_SDMA = 1,
   /* Log INFO */
   HSA_AMD_LOG_FLAG_INFO = 2,
+  /* Extended logging flags (for use with HSA_LOG_MASK env var) */
+  HSA_AMD_LOG_FLAG_QUEUE = 3,
+  HSA_AMD_LOG_FLAG_MEM = 4,
+  HSA_AMD_LOG_FLAG_SIGNAL = 5,
+  HSA_AMD_LOG_FLAG_IPC = 6,
+  HSA_AMD_LOG_FLAG_AGENT = 7,
+  HSA_AMD_LOG_FLAG_COPY = 8,
+  HSA_AMD_LOG_FLAG_SCRATCH = 9,
+  HSA_AMD_LOG_FLAG_POOL = 10,
+  HSA_AMD_LOG_FLAG_FAULT = 11,
+  HSA_AMD_LOG_FLAG_EXCEPT = 12,
 } hsa_amd_log_flag_t;
 
 /**

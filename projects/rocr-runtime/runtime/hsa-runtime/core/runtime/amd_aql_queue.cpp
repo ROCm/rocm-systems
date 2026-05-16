@@ -72,6 +72,7 @@
 #include "core/inc/amd_gpu_pm4.h"
 #include "core/inc/hsa_amd_tool_int.hpp"
 #include "core/inc/amd_core_dump.hpp"
+#include "core/util/rocr_logging.h"
 
 namespace rocr {
 namespace AMD {
@@ -349,9 +350,16 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
   QueueGuard.Dismiss();
   EventGuard.Dismiss();
   SignalGuard.Dismiss();
+
+  RocrLogInfo(ROCR_LOG_QUEUE, "AqlQueue created: id=%u node=%u size=%u ring=%p doorbell=%p scratch_limit=%zu",
+              queue_id_, node_id, queue_size_pkts, ring_buf_,
+              signal_.hardware_doorbell_ptr, queue_scratch_.use_once_limit);
+
+  RocrLogVerbose(ROCR_LOG_QUEUE, "EXIT AqlQueue() -> queue_id=%u", queue_id_);
 }
 
 AqlQueue::~AqlQueue() {
+  RocrLogVerbose(ROCR_LOG_QUEUE, "ENTER ~AqlQueue() queue_id=%u", queue_id_);
   agent_->UnregisterAqlQueue(this);
 
   // Remove error handler synchronously.
@@ -406,14 +414,20 @@ AqlQueue::~AqlQueue() {
     }
   }
   agent_->system_deallocator()(pm4_ib_buf_);
+
+  RocrLogInfo(ROCR_LOG_QUEUE, "AqlQueue destroyed: id=%u", queue_id_);
 }
 
 void AqlQueue::Destroy() {
+  ROCR_TRACE_ENTER(ROCR_LOG_QUEUE, "queue_id=%u", queue_id_);
+
   if (amd_queue_.hsa_queue.type == HSA_QUEUE_TYPE_COOPERATIVE) {
     agent_->GWSRelease();
+    RocrLogVerbose(ROCR_LOG_QUEUE, "EXIT Destroy() -> cooperative release");
     return;
   }
   delete this;
+  // Note: can't log EXIT after delete this
 }
 
 uint64_t AqlQueue::LoadReadIndexAcquire() {
@@ -1119,6 +1133,10 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
   assert((pkt && dispatch_id != UINT64_MAX) &&
          "Could not find dispatch packet with private_segment_size > 0");
 
+  RocrLogDebug(ROCR_LOG_SCRATCH, "HandleInsufficientScratch: queue=%u dispatch_id=%llu private_seg=%u",
+               queue_id_, (unsigned long long)dispatch_id,
+               pkt ? pkt->dispatch.private_segment_size : 0);
+
   tool::notify_event_scratch_alloc_start(
       public_handle(), HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_NONE, dispatch_id);
 
@@ -1202,6 +1220,8 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
     dynamicScratchState |= ERROR_HANDLER_SCRATCH_RETRY;
     changeWait = true;
     waitVal = error_code;
+    RocrLogDebug(ROCR_LOG_SCRATCH, "HandleInsufficientScratch: queue=%u retry needed, requested=%zu",
+                 queue_id_, scratch.main_size);
   } else if (scratch.main_queue_base == nullptr) {
     // We could not allocate memory to fit even 1 wave
     tool::notify_event_scratch_alloc_end(public_handle(), HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_USE_ONCE,
@@ -1433,6 +1453,59 @@ bool AqlQueue::ExceptionHandler(hsa_signal_value_t error_code, void* arg) {
     if (error_code & (1UL << (error.code - 1))) {
       errorCode = error.status;
       break;
+    }
+  }
+
+  // Capture full queue state snapshot for debugging
+  uint64_t read_idx = queue->amd_queue_.read_dispatch_id;
+  uint64_t write_idx = queue->amd_queue_.write_dispatch_id;
+  uint64_t active_packets = write_idx - read_idx;
+
+  RocrLogError(ROCR_LOG_EXCEPT,
+    "EXCEPTION_SNAPSHOT: queue=%u error=0x%llx read_idx=%llu write_idx=%llu "
+    "active_packets=%llu scratch_base=%p scratch_size=%zu status=%d",
+    queue->queue_id_, (unsigned long long)error_code,
+    (unsigned long long)read_idx, (unsigned long long)write_idx,
+    (unsigned long long)active_packets,
+    queue->queue_scratch_.main_queue_base, queue->queue_scratch_.main_size,
+    errorCode);
+
+  // Dump scratch state for debugging (at DEBUG level)
+  if (ROCR_LOG_ENABLED(rocr::ROCR_LOG_DEBUG, rocr::ROCR_LOG_EXCEPT)) {
+    RocrLogDebug(ROCR_LOG_EXCEPT | ROCR_LOG_SCRATCH,
+      "Scratch state: main_base=%p main_size=%zu alt_base=%p alt_size=%zu "
+      "dispatch_size=%zu lanes_per_wave=%u async_reclaim=%d",
+      queue->queue_scratch_.main_queue_base,
+      queue->queue_scratch_.main_size,
+      queue->queue_scratch_.alt_queue_base,
+      queue->queue_scratch_.alt_size,
+      queue->queue_scratch_.dispatch_size,
+      queue->queue_scratch_.main_lanes_per_wave,
+      queue->queue_scratch_.async_reclaim ? 1 : 0);
+  }
+
+  // Check queue saturation at time of exception
+  uint32_t queue_size = queue->public_handle()->size;
+  float utilization = (queue_size > 0) ? (float)active_packets / queue_size * 100.0f : 0.0f;
+  if (utilization > 75.0f) {
+    RocrLogWarning(ROCR_LOG_QUEUE | ROCR_LOG_PERF,
+      "Queue near saturation at exception: id=%u depth=%llu/%u (%.1f%%) STALL_RISK=HIGH",
+      queue->queue_id_, (unsigned long long)active_packets, queue_size, utilization);
+  }
+
+  // Dump last few packets for forensics (only at VERBOSE level)
+  if (ROCR_LOG_ENABLED(rocr::ROCR_LOG_VERBOSE, rocr::ROCR_LOG_EXCEPT) && active_packets > 0) {
+    uint32_t queue_mask = queue->public_handle()->size - 1;
+    for (int i = -3; i <= 0 && (read_idx + i) < write_idx; i++) {
+      uint64_t idx = read_idx + i;
+      if (idx < write_idx) {
+        auto* pkt = reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(
+            queue->public_handle()->base_address) + (idx & queue_mask);
+        RocrLogVerbose(ROCR_LOG_EXCEPT,
+          "Recent packet[%d]: idx=%llu header=0x%x type=%u setup=0x%x grid=[%u,%u,%u]",
+          i, (unsigned long long)idx, pkt->header, pkt->header & 0xFF,
+          pkt->setup, pkt->grid_size_x, pkt->grid_size_y, pkt->grid_size_z);
+      }
     }
   }
 

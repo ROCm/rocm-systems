@@ -56,6 +56,7 @@
 #include "core/inc/signal.h"
 #include "core/inc/interrupt_signal.h"
 #include "core/inc/default_signal.h"
+#include "core/util/rocr_logging.h"
 
 namespace rocr {
 namespace AMD {
@@ -235,7 +236,7 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::Initialize(const core::Agent& agent,
   if (agent_->driver().CreateQueue(agent_->node_id(), kQueueType_, 100, HSA::HSA_AMD_QUEUE_PRIORITY_MAXIMUM,
                                    rec_eng, queue_start_addr_, kQueueSize, 0, nullptr,
                                    queue_resource_) != HSA_STATUS_SUCCESS) {
-    LogPrint(HSA_AMD_LOG_FLAG_INFO, "Failed to create queue, size=%d, type=%d,"
+    RocrLogWarning(ROCR_LOG_SDMA, "Failed to create queue, size=%d, type=%d,"
        " priority=%d, engine_id=%d", kQueueSize, kQueueType_, HSA_QUEUE_PRIORITY_MAXIMUM, rec_eng);
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
