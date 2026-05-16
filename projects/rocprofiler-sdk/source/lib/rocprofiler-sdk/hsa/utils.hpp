@@ -231,8 +231,7 @@ struct formatter<hsa_amd_external_semaphore_handle_descriptor_t>
         }();
         if(v.type == HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD)
             return fmt::format_to(ctx.out(), "type={}, fd={}", label, v.handle.fd);
-        return fmt::format_to(
-            ctx.out(), "type={}, win32_handle={}", label, v.handle.win32_handle);
+        return fmt::format_to(ctx.out(), "type={}, win32_handle={}", label, v.handle.win32_handle);
     }
 };
 }  // namespace fmt
