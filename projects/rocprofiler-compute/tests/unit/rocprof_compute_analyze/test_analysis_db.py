@@ -3,10 +3,12 @@
 
 """Unit tests for analysis_db.py static methods."""
 
+from unittest import mock
 from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from rocprof_compute_analyze.analysis_db import db_analysis
 
@@ -299,3 +301,79 @@ def test_calc_dataframe_expressions_with_builtin_vars():
     assert result.iloc[0] == 51
     # None from evaluate becomes NaN in pandas Series
     assert pd.isna(result.iloc[1])
+
+
+# =============================================================================
+# Tests merged from tests/test_utils.py (PR 4 split)
+# =============================================================================
+
+
+# =============================================================================
+# TESTS FOR Analysis DB mode: Analysis DB mode code path
+# =============================================================================
+
+
+def test_calc_roofline_data_early_exit_on_empty_roofline_df(monkeypatch):
+    """Test calc_roofline_data exits early when roofline data is empty.
+
+    This test verifies that when the roofline dataframe (ID 402) is empty
+    or filtered out, the function logs a warning and skips that workload
+    without adding it to the result dictionary.
+    """
+    from rocprof_compute_analyze.analysis_db import db_analysis
+
+    # Create mock db_analysis instance
+    analyzer = mock.MagicMock(spec=db_analysis)
+
+    # Mock workload data
+    workload_path = "/mock/workload/path"
+    mock_runs = {
+        workload_path: mock.MagicMock(sys_info=pd.DataFrame([{"gpu_arch": "gfx90a"}]))
+    }
+
+    # Mock PMC dataframe with kernel data
+    mock_pmc_df = pd.DataFrame({
+        "Kernel_Name": ["kernel1", "kernel2"],
+        "Start_Timestamp": [100, 200],
+        "End_Timestamp": [150, 300],
+    })
+
+    # Mock architecture config with EMPTY roofline dataframe (ID 402)
+    mock_arch_config = mock.MagicMock()
+    mock_arch_config.dfs = {
+        402: pd.DataFrame()  # Empty roofline dataframe triggers early exit
+    }
+
+    # Setup instance variables
+    analyzer._runs = mock_runs
+    analyzer._pmc_df_per_workload = {workload_path: mock_pmc_df}
+    analyzer._arch_configs = {"gfx90a": mock_arch_config}
+    analyzer.get_args = mock.MagicMock(return_value=mock.MagicMock(max_stat_num=10))
+
+    # Mock console_warning to verify it's called
+    warning_messages = []
+
+    def mock_warning(msg):
+        warning_messages.append(msg)
+
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_db.console_warning", mock_warning
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_db.console_debug", lambda msg: None
+    )
+
+    # Call the actual function
+    result = db_analysis.calc_roofline_data(analyzer)
+
+    # Verify early exit behavior
+    assert len(result[0]) == 0, (
+        "Should return empty kernel level dict when roofline data is empty"
+    )
+    assert len(result[1]) == 0, (
+        "Should return empty workload level dict when roofline data is empty"
+    )
+    assert len(warning_messages) == 1, "Should log one warning message"
+    assert "Roofline data is filtered out or not found" in warning_messages[0]
+    assert workload_path in warning_messages[0]
+

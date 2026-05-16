@@ -31,38 +31,6 @@ GFX942_CHIP_IDS_TO_NUM_XCDS = {
 }
 
 
-def parse_table_dict(output: str) -> dict:
-    """
-    Parse an ASCII table into a dict mapping Spec -> Value.
-    """
-    lines = [line for line in output.splitlines() if line.startswith("|")]
-    # locate header row (the one containing 'Spec' and 'Value')
-    header_idx = next(
-        (i for i, ln in enumerate(lines) if "Spec" in ln and "Value" in ln), None
-    )
-    if header_idx is None:
-        raise ValueError("Header row with Spec and Value not found")
-
-    header_cells = [c.strip() for c in lines[header_idx].strip("|").split("|")]
-
-    spec_i = header_cells.index("Spec")
-    value_i = header_cells.index("Value")
-
-    result = {}
-    for ln in lines[header_idx + 1 :]:
-        # Skip separator lines
-        if ln.startswith("+"):
-            continue
-        cells = [c.strip() for c in ln.strip("|").split("|")]
-        if len(cells) <= max(spec_i, value_i):
-            continue
-        spec = cells[spec_i]
-        value = cells[value_i]
-        if spec:
-            result[spec] = value
-    return result
-
-
 def get_num_xcds():
     num_xcds = None
 
@@ -106,51 +74,6 @@ def test_num_xcds_spec_class(monkeypatch):
     assert int(machine_spec.num_xcd) == num_xcds.get(
         machine_spec.compute_partition.lower(), -1
     )
-
-
-@pytest.mark.num_xcds_cli_output
-def test_num_xcds_cli_output():
-    # 1. Check if gfx942 soc
-    gpu_arch = common.gpu_soc()[0]
-    if gpu_arch is None or gpu_arch.lower() != "gfx942":
-        pytest.skip("Skipping num xcds test for non-gfx942 socs.")
-
-    num_xcds = get_num_xcds()
-
-    # 2. Run rocprof-compute -s and grab rocprof-compute num_xcd
-    try:
-        proc = subprocess.run(
-            ["src/rocprof-compute", "-s"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-    except Exception:
-        proc = subprocess.run(
-            ["./rocprof-compute", "-s"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-    assert proc.returncode == 0, (
-        f"Non-zero exit ({proc.returncode}), stderr:\n{proc.stderr}"
-    )
-
-    # 3. strip ANSI, parse table
-    clean = common.strip_ansi(proc.stdout)
-    return_dict = parse_table_dict(clean)
-
-    # 4. check results are expected
-    assert "Compute Partition" in return_dict, (
-        "Spec 'Compute Partition' not found in table"
-    )
-    assert "Num XCDs" in return_dict, "Spec 'Num XCDs' not found in table"
-
-    compute_partition_actual = return_dict["Compute Partition"]
-    num_xcd_actual = return_dict["Num XCDs"]
-
-    assert compute_partition_actual is not None
-    assert int(num_xcd_actual) == num_xcds.get(compute_partition_actual.lower(), -1)
 
 
 @pytest.mark.misc

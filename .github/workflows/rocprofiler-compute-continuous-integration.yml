@@ -79,9 +79,52 @@ jobs:
           fi
           echo "matrix=${MATRIX_CONTENT}" >> $GITHUB_OUTPUT
 
+  unit:
+    name: Unit tests (no GPU)
+    runs-on: ubuntu-latest
+    permissions:
+      packages: read
+    container:
+      image: ghcr.io/rocm/rocprofiler-ubuntu:22.04-compute-ci-amd64
+      options: --privileged --ipc host
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            projects/rocprofiler-compute
+            shared/ctest
+
+      - name: Install Python Requirements
+        working-directory: projects/rocprofiler-compute
+        run: |
+          for i in 1 2 3; do
+            pip install -r requirements.txt --break-system-packages --ignore-installed --timeout 60 && break
+            echo "⚠️ pip install attempt $i failed, retrying..."
+            sleep 10
+          done
+          for i in 1 2 3; do
+            pip install -r requirements-test.txt --break-system-packages --ignore-installed --timeout 60 && break
+            echo "⚠️ pip install attempt $i failed, retrying..."
+            sleep 10
+          done
+          echo "✅ pip requirements installed!"
+
+      - name: Configure
+        working-directory: projects/rocprofiler-compute
+        run: |
+          git config --global --add safe.directory ${GITHUB_WORKSPACE}
+          git config --global --add safe.directory ${PWD}
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTS=OFF -DPYTEST_NUMPROCS=4
+
+      - name: Run unit tests
+        timeout-minutes: 5
+        working-directory: projects/rocprofiler-compute/build
+        run: |
+          ctest -L unit --output-on-failure
+
   ubuntu:
     name: Ubuntu ${{ matrix.system.os-release }} • ${{ matrix.system.arch }}
-    needs: prepare_matrix
+    needs: [prepare_matrix, unit]
     strategy:
       fail-fast: false
       matrix:
