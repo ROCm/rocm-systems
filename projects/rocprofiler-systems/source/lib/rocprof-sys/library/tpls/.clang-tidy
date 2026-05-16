@@ -1,0 +1,6 @@
+---
+# Vendored third-party headers under tpls/ are synced from their
+# upstream projects (libva, etc.). Disable every clang-tidy check so
+# upstream diffs stay clean and so dual-use C/C++ headers do not get
+# rewritten with C++-only syntax (e.g. `using X = ...`).
+Checks: '-*'

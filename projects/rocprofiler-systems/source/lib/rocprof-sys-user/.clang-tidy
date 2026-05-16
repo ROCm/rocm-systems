@@ -1,0 +1,6 @@
+---
+# Public C API headers shipped to downstream consumers. The block sits
+# inside `extern "C"`, so any check that rewrites code into C++-only
+# syntax (e.g. `modernize-use-using`, `modernize-make-unique`) breaks C
+# callers. Disable every check to keep this surface portable.
+Checks: '-*'

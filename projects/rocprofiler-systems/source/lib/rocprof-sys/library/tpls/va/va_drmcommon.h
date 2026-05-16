@@ -122,7 +122,7 @@ struct drm_state
  * the file descriptor. Application should handle the release of the fd.
  * releasing the fd will not impact the existence of the surface.
  */
-using VADRMPRIMESurfaceDescriptor = struct _VADRMPRIMESurfaceDescriptor
+typedef struct _VADRMPRIMESurfaceDescriptor
 {
     /** Pixel format fourcc of the whole surface (VA_FOURCC_*). */
     uint32_t fourcc;
@@ -160,7 +160,7 @@ using VADRMPRIMESurfaceDescriptor = struct _VADRMPRIMESurfaceDescriptor
         /** Pitch of each plane. */
         uint32_t pitch[4];
     } layers[4];
-};
+} VADRMPRIMESurfaceDescriptor;
 
 /**
  * \brief List of DRM format modifiers.
@@ -172,12 +172,12 @@ using VADRMPRIMESurfaceDescriptor = struct _VADRMPRIMESurfaceDescriptor
  *
  * DRM format modifiers are defined in drm_fourcc.h in the Linux kernel.
  */
-using VADRMFormatModifierList = struct _VADRMFormatModifierList
+typedef struct _VADRMFormatModifierList
 {
     /** Number of modifiers. */
     uint32_t num_modifiers;
     /** Array of modifiers. */
     uint64_t* modifiers;
-};
+} VADRMFormatModifierList;
 
 #endif /* VA_DRM_COMMON_H */
