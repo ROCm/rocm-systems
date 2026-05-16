@@ -960,6 +960,24 @@ static ncclResult_t ncclTopoGetNchannels(struct ncclComm* comm, int g /*local gp
       *nChannels = 2;
     }
   } else {
+    // Remote rank — check for MNNVL fabric peer before falling back to NIC channel math.
+    // MNNVL cross-node peers are not in the local topology so RankToIndex fails, but their
+    // effective bandwidth matches intra-node XGMI; use the same formula as PATH_NVL.
+    if (comm && comm->MNNVL) {
+      bool isMnnvlPeer = false;
+      for (int ci = 0; ci < comm->clique.size; ci++) {
+        if (comm->clique.ranks[ci] == peerRank) { isMnnvlPeer = true; break; }
+      }
+      if (isMnnvlPeer) {
+        float nvlBw = ncclTopoXGMISpeed(system->nodes[GPU].nodes[g].gpu.gcn);
+        *nChannels = ((IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx942") ||
+                       IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx950") ||
+                       IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx1250")) ? 4 : 2);
+        // MNNVL fabric runs at one XGMI link width per direction; no bw multiplier here.
+        (void)nvlBw;
+        return ncclSuccess;
+      }
+    }
     // Remote rank, use network
     int nNetChannels = comm->config.nChannelsPerNetPeer;
     if (nNetChannels == NCCL_CONFIG_UNDEF_INT) {

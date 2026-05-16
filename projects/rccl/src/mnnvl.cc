@@ -30,11 +30,16 @@ ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) {
     if (comm->peerInfo[i].fabricInfo.state != NVML_GPU_FABRIC_STATE_COMPLETED) return ncclSuccess;
   }
 #else
-  // TODO: To check whether we need to check the accel_state/fabric state for AMD GPUs.
-  // For now, just check that it's not in an unconfigured/error state
+  // Require ACTIVE or READY state on all ranks before enabling MNNVL.
+  // AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_CONFIGURED means the vpod is provisioned but fabric handles
+  // are not yet exchangeable cross-process — equivalent to NCCL's NVML_GPU_FABRIC_STATE_COMPLETED gate.
   for (int i = 0; i < comm->nRanks; i++) {
-    if ((comm->peerInfo[i].fabricInfo.state == AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNCONFIGURED) ||
-        (comm->peerInfo[i].fabricInfo.state == AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ERROR)) return ncclSuccess;
+    if ((comm->peerInfo[i].fabricInfo.state != AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE) &&
+        (comm->peerInfo[i].fabricInfo.state != AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY)) {
+      INFO(NCCL_INIT, "MNNVL disabled: peer %d fabric state %d is not ACTIVE or READY; falling back to RDMA",
+           i, comm->peerInfo[i].fabricInfo.state);
+      return ncclSuccess;
+    }
   }
 #endif
   // Determine our MNNVL domain/clique
@@ -99,5 +104,4 @@ ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) {
 #endif
   return ncclSuccess;
 }
-
 
