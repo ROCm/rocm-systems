@@ -2180,8 +2180,7 @@ get_perfetto_annotations()
 std::uint64_t
 get_thread_pool_size()
 {
-    static std::uint64_t _v =
-        get_config()->get<std::uint64_t>("ROCPROFSYS_THREAD_POOL_SIZE");
+    static auto _v = get_config()->get<std::uint64_t>("ROCPROFSYS_THREAD_POOL_SIZE");
     return _v;
 }
 

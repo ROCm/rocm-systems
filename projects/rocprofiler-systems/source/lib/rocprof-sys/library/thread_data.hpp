@@ -624,7 +624,7 @@ struct component_bundle_cache_impl
     template <typename IterT>
     void destroy(IterT _v)
     {
-        iterator itr = begin();
+        auto itr = begin();
         if constexpr(std::is_same<IterT, reverse_iterator>::value)
         {
             if(_v == rend()) return;

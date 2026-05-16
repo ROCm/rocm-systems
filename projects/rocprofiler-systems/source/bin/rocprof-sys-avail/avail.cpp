@@ -730,7 +730,7 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
 
     auto         _available_column = !fmt_opts.force_brief && !fmt_opts.available_only;
     width_type   _widths           = width_type{ 30, 12, 20, 20, 20, 40, 20, 40, 10 };
-    width_bool   _wusing           = width_bool{ true, _available_column };
+    auto         _wusing           = width_bool{ true, _available_column };
     std::int64_t pad               = fmt_opts.padding;
     for(size_t i = 0; i < options.size(); ++i)
         _wusing[i + 2] = options[i];

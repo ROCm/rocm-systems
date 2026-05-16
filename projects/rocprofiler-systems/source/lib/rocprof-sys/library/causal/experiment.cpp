@@ -286,8 +286,8 @@ experiment::stop()
     _prog_vals.reserve(fini_progress.size());
     for(auto fitr : fini_progress)
     {
-        auto         _pt  = fitr.second - init_progress[fitr.first];
-        std::int64_t _num = std::max<std::int64_t>(
+        auto _pt  = fitr.second - init_progress[fitr.first];
+        auto _num = std::max<std::int64_t>(
             { _pt.get_laps(), _pt.get_arrival(), _pt.get_departure() });
         if(_num > 0) _prog_vals.emplace_back(_num);
     }

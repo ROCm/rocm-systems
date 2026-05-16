@@ -156,14 +156,12 @@ serialize_gpu_metrics(const gpu_metrics_t&              metrics,
         }
     }
 
-    std::uint8_t vcn_count      = static_cast<std::uint8_t>(vcn_data_flat.size());
-    std::uint8_t jpeg_count     = static_cast<std::uint8_t>(jpeg_data_flat.size());
-    std::uint8_t vcn_xcp_count  = static_cast<std::uint8_t>(vcn_xcp_sizes.size());
-    std::uint8_t jpeg_xcp_count = static_cast<std::uint8_t>(jpeg_xcp_sizes.size());
-    std::uint8_t xgmi_read_count =
-        static_cast<std::uint8_t>(metrics.xgmi_read_data_acc.size());
-    std::uint8_t xgmi_write_count =
-        static_cast<std::uint8_t>(metrics.xgmi_write_data_acc.size());
+    auto vcn_count        = static_cast<std::uint8_t>(vcn_data_flat.size());
+    auto jpeg_count       = static_cast<std::uint8_t>(jpeg_data_flat.size());
+    auto vcn_xcp_count    = static_cast<std::uint8_t>(vcn_xcp_sizes.size());
+    auto jpeg_xcp_count   = static_cast<std::uint8_t>(jpeg_xcp_sizes.size());
+    auto xgmi_read_count  = static_cast<std::uint8_t>(metrics.xgmi_read_data_acc.size());
+    auto xgmi_write_count = static_cast<std::uint8_t>(metrics.xgmi_write_data_acc.size());
 
     std::vector<std::uint8_t> result;
 
