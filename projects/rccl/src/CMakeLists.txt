@@ -926,6 +926,29 @@ if (ROCTX_ENABLE)
 endif()
 if(NOT ENABLE_DEVICE_LINKER)
   target_link_libraries(rccl PRIVATE   -fgpu-rdc)             # Required when linking relocatable device code
+elseif(ENABLE_ROCSHMEM)
+  # The device-linker pipeline normally avoids -fgpu-rdc because rccl's own
+  # device code is pre-built into fat objects (common.o / onerank.o / ...).
+  # However librocshmem.a is compiled with -fgpu-rdc and its host-side objects
+  # reference __hip_gpubin_handle_<hash> symbols that are only emitted by
+  # clang's --hip-link pass. Force the HIP link action so those symbols are
+  # resolved against rocSHMEM's device IR while leaving the already-bundled
+  # rccl fat objects untouched.
+  target_link_options(rccl PRIVATE --hip-link -fgpu-rdc)
+  # Build a deduplicated list of base GPU targets (strip :xnack-/:xnack+
+  # suffixes) and emit one --offload-arch per unique arch. rocSHMEM's device
+  # bitcode files are keyed on the bare arch name; emitting the xnack-flavored
+  # variant twice would just add the same --offload-arch=gfx<N> twice to the
+  # link line.
+  set(_dl_rocshmem_archs "")
+  foreach(_arch IN LISTS GPU_TARGETS)
+    string(REGEX REPLACE ":.*" "" _arch_clean "${_arch}")
+    list(APPEND _dl_rocshmem_archs "${_arch_clean}")
+  endforeach()
+  list(REMOVE_DUPLICATES _dl_rocshmem_archs)
+  foreach(_arch IN LISTS _dl_rocshmem_archs)
+    target_link_options(rccl PRIVATE --offload-arch=${_arch})
+  endforeach()
 endif()
 target_link_libraries(rccl PRIVATE   Threads::Threads)
 target_link_libraries(rccl INTERFACE hip::host)

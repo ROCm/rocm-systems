@@ -47,6 +47,24 @@ set(DEVICE_BUILD_DIR "${PROJECT_BINARY_DIR}/device_build")
 set(SPECIALIZED_DIR  "${GEN_DIR}/specialized")
 
 # ---------------------------------------------------------------------------
+# rocSHMEM device bitcode integration
+#
+# rocSHMEM ships a per-arch device bitcode file (librocshmem_device_<arch>.bc)
+# that defines the device-side rocshmem_* implementations referenced by
+# RCCL's GDA AlltoAll kernels. Under -fgpu-rdc this bitcode is auto-linked
+# by the HIP toolchain when the host-side static archive (librocshmem.a) is
+# pulled in. The device-linker pipeline bypasses --hip-link entirely and
+# links per-arch device.elf files directly via ld.lld, so the bitcode must
+# be compiled to a per-arch relocatable object and added to that link step.
+# ---------------------------------------------------------------------------
+set(DL_ROCSHMEM_ENABLED FALSE)
+if(ENABLE_ROCSHMEM AND ROCSHMEM_LIBRARY)
+  get_filename_component(DL_ROCSHMEM_LIB_DIR "${ROCSHMEM_LIBRARY}" DIRECTORY)
+  set(DL_ROCSHMEM_ENABLED TRUE)
+  message(STATUS "Device Linker: rocSHMEM device bitcode dir = ${DL_ROCSHMEM_LIB_DIR}")
+endif()
+
+# ---------------------------------------------------------------------------
 # Parse GPU_TARGETS: strip target features, build offload-arch flag list
 # ---------------------------------------------------------------------------
 set(DL_GPU_TARGETS "")
@@ -243,6 +261,44 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
   target_link_libraries(${_dev_target} PRIVATE rccl_device_defs)
 
   add_dependencies(${_dev_target} hipify_all)
+  # Specialized kernels include <rocshmem/rocshmem.hpp> via device.h when
+  # ENABLE_ROCSHMEM is set, so rocSHMEM must finish installing its headers
+  # before any of these compiles start.
+  if(DL_ROCSHMEM_ENABLED AND TARGET rocshmem_ext)
+    add_dependencies(${_dev_target} rocshmem_ext)
+  endif()
+
+  # =========================================================================
+  # rocSHMEM device bitcode -> per-arch relocatable object
+  # =========================================================================
+  set(_rocshmem_dev_obj "")
+  if(DL_ROCSHMEM_ENABLED)
+    set(_rocshmem_dev_bc "${DL_ROCSHMEM_LIB_DIR}/librocshmem_device_${DL_GPU_TARGET}.bc")
+    set(_rocshmem_dev_obj "${DL_ARCH_DIR}/rocshmem_device.o")
+    # When rocSHMEM is built from source (ExternalProject), depend on the
+    # rocshmem_ext target so the .bc file exists before we compile it. When
+    # rocSHMEM is pre-built (ROCSHMEM_INSTALL_DIR), rocshmem_ext is not a
+    # target and the .bc file is expected to exist on disk — depend on the
+    # file path itself in that case.
+    if(TARGET rocshmem_ext)
+      set(_rocshmem_dev_bc_dep rocshmem_ext)
+    else()
+      set(_rocshmem_dev_bc_dep "${_rocshmem_dev_bc}")
+    endif()
+    add_custom_command(
+      OUTPUT  ${_rocshmem_dev_obj}
+      COMMAND ${DL_CLANG}
+        --target=amdgcn-amd-amdhsa
+        -mcpu=${DL_GPU_TARGET}
+        ${DL_HIP_COMPILER_FLAGS}
+        -w
+        -c -o ${_rocshmem_dev_obj}
+        ${_rocshmem_dev_bc}
+      DEPENDS ${_rocshmem_dev_bc_dep}
+      COMMENT "DL [${DL_GPU_TARGET}] compile rocSHMEM device bitcode -> .o"
+      VERBATIM
+    )
+  endif()
 
   # =========================================================================
   # Link step: driver --link mode produces device.elf
@@ -287,6 +343,16 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
   file(GENERATE OUTPUT "${_link_rsp}"
     CONTENT "$<JOIN:$<TARGET_OBJECTS:${_dev_target}>,\n>\n")
 
+  # Extra positional inputs to the link step (currently: rocSHMEM device .o).
+  # These are appended after the response file so they're treated as positional
+  # object inputs by rccl-device-compile --link.
+  set(_link_extra_objs "")
+  set(_link_extra_deps "")
+  if(_rocshmem_dev_obj)
+    list(APPEND _link_extra_objs ${_rocshmem_dev_obj})
+    list(APPEND _link_extra_deps ${_rocshmem_dev_obj})
+  endif()
+
   add_custom_command(
     OUTPUT  ${ARCH_DEVICE_ELF}
     COMMAND ${CMAKE_RCCLDEV_COMPILER}
@@ -301,7 +367,8 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
       -std=c++17
       -o ${ARCH_DEVICE_ELF}
       @${_link_rsp}
-    DEPENDS ${_dev_target} ${HIPIFY_DIR}/src/device/common.cu.cpp
+      ${_link_extra_objs}
+    DEPENDS ${_dev_target} ${HIPIFY_DIR}/src/device/common.cu.cpp ${_link_extra_deps}
     COMMENT "DL [${DL_GPU_TARGET}] link: device.elf"
     VERBATIM
     COMMAND_EXPAND_LISTS
@@ -529,6 +596,13 @@ add_custom_target(device_linker_build ALL
   DEPENDS ${COMMON_FAT_OBJ} ${ONERANK_FAT_OBJ} ${COLLECTIVES_FAT_OBJ} ${SYM_FAT_OBJS}
 )
 add_dependencies(device_linker_build hipify_all)
+# common.cu.cpp / collectives.cc / sym kernels also see device.h, which pulls
+# in <rocshmem/rocshmem.hpp> when ENABLE_ROCSHMEM is set. Without an explicit
+# ordering dependency, these custom-command compilations race the rocSHMEM
+# external project install step and fail with "rocshmem/rocshmem.hpp not found".
+if(DL_ROCSHMEM_ENABLED AND TARGET rocshmem_ext)
+  add_dependencies(device_linker_build rocshmem_ext)
+endif()
 
 set(DEVICE_LINKER_OBJECTS
   ${COMMON_FAT_OBJ}
