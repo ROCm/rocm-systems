@@ -94,7 +94,7 @@ public:
         }
 
         current_value = nullptr;
-        output_stream->push_back(entry_type{});
+        output_stream->emplace_back();
         current_entry = &(output_stream->back());
 
         current_entry->insert({ "identifier", name });

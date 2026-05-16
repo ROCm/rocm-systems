@@ -203,10 +203,10 @@ client_data::initialize_event_info()
                     auto _sym = fmt::format("{}:device={}", ditr.name, _dev_index);
                     auto _short_desc =
                         fmt::format("Derived counter: {}", ditr.expression);
-                    events_info.emplace_back(hardware_counter_info(
-                        true, tim::hardware_counters::api::rocm, events_info.size(), 0,
-                        _sym, _pysym, _short_desc, _long_desc, _units,
-                        qualifier_vec_t{ _device_qualifier }));
+                    events_info.emplace_back(true, tim::hardware_counters::api::rocm,
+                                             events_info.size(), 0, _sym, _pysym,
+                                             _short_desc, _long_desc, _units,
+                                             qualifier_vec_t{ _device_qualifier });
                 }
                 else
                 {
@@ -228,10 +228,10 @@ client_data::initialize_event_info()
                     {
                         _short_desc += fmt::format("{}", fmt::join(_dim_info, ". "));
                     }
-                    events_info.emplace_back(hardware_counter_info(
-                        true, tim::hardware_counters::api::rocm, events_info.size(), 0,
-                        _sym, _pysym, _short_desc, _long_desc, _units,
-                        qualifier_vec_t{ _device_qualifier }));
+                    events_info.emplace_back(true, tim::hardware_counters::api::rocm,
+                                             events_info.size(), 0, _sym, _pysym,
+                                             _short_desc, _long_desc, _units,
+                                             qualifier_vec_t{ _device_qualifier });
                 }
             }
         }

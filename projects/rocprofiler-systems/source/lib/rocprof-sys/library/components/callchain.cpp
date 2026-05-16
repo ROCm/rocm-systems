@@ -125,7 +125,7 @@ callchain::filter_and_patch(const std::vector<ts_entry_vec_t>& _data)
     for(const auto& itr : _data)
     {
         auto _v = backtrace::filter_and_patch(itr.second);
-        if(!_v.empty()) _ret.emplace_back(ts_entry_vec_t{ itr.first, std::move(_v) });
+        if(!_v.empty()) _ret.emplace_back(itr.first, std::move(_v));
     }
 
     return _ret;

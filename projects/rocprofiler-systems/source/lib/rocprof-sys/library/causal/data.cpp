@@ -552,7 +552,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
                 auto _eligible_pc_hist = std::vector<std::pair<uintptr_t, size_t>>{};
                 for(const auto& itr : eligible_pc_history)
                 {
-                    _eligible_pc_hist.emplace_back(std::make_pair(itr.first, itr.second));
+                    _eligible_pc_hist.emplace_back(itr.first, itr.second);
                 }
 
                 std::sort(
@@ -567,7 +567,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
 
                 auto _samples = std::vector<std::pair<uintptr_t, size_t>>{};
                 for(const auto& itr : _samples_map)
-                    _samples.emplace_back(std::make_pair(itr.first, itr.second));
+                    _samples.emplace_back(itr.first, itr.second);
 
                 // sort by most samples
                 std::sort(_samples.begin(), _samples.end(),

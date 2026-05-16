@@ -486,9 +486,7 @@ extern "C"
         if(rocprofsys::kokkosp::is_paused()) return;
         ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
         kokkosp::logger_t{}.mark(1, __FUNCTION__, name);
-        kokkosp::get_profiler_stack<kokkosp_region>()
-            .emplace_back(kokkosp::profiler_t<kokkosp_region>(name))
-            .start();
+        kokkosp::get_profiler_stack<kokkosp_region>().emplace_back(name).start();
     }
 
     void kokkosp_pop_profile_region()

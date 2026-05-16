@@ -37,7 +37,7 @@ address_multirange::operator+=(uintptr_t _v)
     // for(auto&& itr : m_fine_ranges)
     //    if(itr.contains(_v)) return *this;
 
-    m_fine_ranges.emplace(address_range{ _v });
+    m_fine_ranges.emplace(_v);
     return *this;
 }
 

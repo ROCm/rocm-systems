@@ -66,13 +66,12 @@ parse_line_info(const std::string& _name, bool _process_dwarf, bool _process_bfd
         for(auto&& itr : _bfd->get_symbols())
         {
             if(!_include_all && itr.symsize == 0) continue;
-            auto& _sym = _info.symbols.emplace_back(symbol{ itr });
+            auto& _sym = _info.symbols.emplace_back(itr);
             // if(itr.symsize == 0) continue;
             auto* _section = static_cast<asection*>(itr.section);
             _section_set.emplace(_section);
             _processed.emplace(itr.address);
-            _info.ranges.emplace_back(
-                address_range{ itr.address, itr.address + itr.symsize });
+            _info.ranges.emplace_back(itr.address, itr.address + itr.symsize);
             if(_process_bfd) _sym.read_bfd_line_info(*_bfd);
         }
 
@@ -212,8 +211,7 @@ lookup_ipaddr_entry(uintptr_t _addr, unw_context_t* _context_p,
                     if(std::string_view{ filepath::basename(mitr.pathname) } == _base_v ||
                        _real_v == _v)
                     {
-                        _exclude_range_v.emplace(
-                            address_range{ mitr.load_address, mitr.last_address });
+                        _exclude_range_v.emplace(mitr.load_address, mitr.last_address);
                     }
                 }
             };
