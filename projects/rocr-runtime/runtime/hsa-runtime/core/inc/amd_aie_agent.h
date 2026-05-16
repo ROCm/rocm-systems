@@ -94,11 +94,11 @@ public:
    return system_allocator_;
  }
 
-  /// @brief Getter for the AIE system deallocator.
-  const std::function<void(void*)>& system_deallocator() const { return system_deallocator_; }
+ /// @brief Getter for the AIE system deallocator.
+ const std::function<void(void*)>& system_deallocator() const { return system_deallocator_; }
 
-  /// @brief Getter for the AIE node properties.
-  const HsaNodeProperties& properties() const { return node_props_; }
+ /// @brief Getter for the AIE node properties.
+ const HsaNodeProperties& properties() const { return node_props_; }
 
 private:
   /// @brief Query the driver to get the region list owned by this agent.
