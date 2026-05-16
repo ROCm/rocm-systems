@@ -37,6 +37,16 @@
 #include "handle.hpp"
 #include "trace_parser.hpp" // CSRegisterHandler, sqtt_token_reg_t, sqtt_event_type_t
 
+//#define GET_TIMING
+
+#ifdef GET_TIMING
+#    define TIMING(x)   auto x = std::chrono::steady_clock::now();
+#    define DELTA(x, y) " t" #    x << " " << (t##x - t##y).count() / 10000 / 100.0f <<
+#else
+#    define TIMING(x)
+#    define DELTA(x)
+#endif
+
 #define PUBLIC_API extern "C" __attribute__((visibility("default")))
 
 namespace
@@ -145,6 +155,8 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_quick
     if (!data || data_size < 8 || !trace_callback)
         return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
+    TIMING(t0);
+
     int gfxip = 0;
     // Local working copy of the entry-state register tracker. For chunk 0
     // this stays default-constructed; for later chunks we copy the
@@ -194,6 +206,8 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_quick
         gfxip = decoder->gfxip;
     }
 
+    TIMING(t1);
+
     data_size -= header_skip;
     buf += header_skip;
 
@@ -203,6 +217,8 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_quick
         raw.resize(raw.size() * 2);
         ntokens = gfx9::quick_scan::scan_gfx9(buf, data_size, raw.data(), raw.size());
     }
+
+    TIMING(t2);
 
     if (chunk_index != 0)
     {
@@ -231,14 +247,19 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_quick
                 }
             );
         }
+
         if (!ready) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_OUT_OF_RESOURCES;
     }
+
+    TIMING(t3);
 
     rocprofiler_thread_trace_decoder_status_t status;
     if (gfxip == 9)
         status = quick_scan_gfx9<true>(local, raw, ntokens, header_skip, trace_callback, userdata);
     else
         return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
+
+    TIMING(t4);
 
     std::condition_variable_any* cv = nullptr;
     {
@@ -249,6 +270,16 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_quick
         cv = &decoder->cv;
     }
     cv->notify_all();
+
+    TIMING(t5);
+
+#ifdef GET_TIMING
+    if ((t3 - t2).count() > data_size / 16 && (t3 - t2).count() > 1000)
+    {
+        std::cout << chunk_index << " - " << DELTA(3, 2) DELTA(1, 0) DELTA(2, 1) DELTA(4, 3) DELTA(5, 4) std::endl;
+    }
+#endif
+
     return status;
 }
 

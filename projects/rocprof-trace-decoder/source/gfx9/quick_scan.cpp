@@ -48,15 +48,10 @@ namespace
 //   - patch_time() lookahead in gfx9token.cpp only reorders TOKEN_TIME
 //     events; none of the rare types we capture are TIME, so output
 //     ordering is preserved by a strict left-to-right walk.
-//
-// Rare cluster captured by this scanner:
-//   REG (2), REG_CS (5), EVENT (7), EVENT_CS (8), REG_CS_PRIV (15)
-//   Bitmask:  (1<<2)|(1<<5)|(1<<7)|(1<<8)|(1<<15) = 0x81A4
-// All five types are <= 8 bytes (REG/REG_CS_PRIV are 8B; REG_CS/REG_CS_PRIV
-// are 6B; EVENT/EVENT_CS are 2B), so a single 8-byte memcpy at the token's
-// first-byte position captures the full payload for every rare type.
 
-constexpr uint16_t RARE_MASK = (1u << 2) | (1u << 5) | (1u << 7) | (1u << 8) | (1u << 15);
+constexpr uint16_t RARE_MASK = (1 << TOKEN_REG_CS) | (1 << TOKEN_REG) | (1 << TOKEN_REG_CS_PRIV) |
+                               (1 << TOKEN_EVENT_CS) |
+                               (1 << TOKEN_EVENT); // | (1 << TOKEN_WAVE_START) | (1 << TOKEN_WAVE_END);
 
 // Per-nibble combined info byte:
 //   bits 0-3 : token byte length (max 8 fits in 4 bits)
@@ -255,8 +250,8 @@ __attribute__((target("avx512vbmi,avx512bw,avx512f,bmi2"))) size_t scan_gfx9_avx
             {
                 uint64_t contents;
                 std::memcpy(&contents, buf + bp + pos, 8);
-                out[n_out++] = QuickToken{contents, static_cast<uint64_t>(buf[bp + pos] & 0x0F), bp + pos};
-                if (n_out >= out_cap) goto done;
+                if (__builtin_expect(n_out < out_cap, 1))
+                    out[n_out++] = QuickToken{contents, static_cast<uint64_t>(buf[bp + pos] & 0x0F), bp + pos};
             }
 
             pos += bytes ? bytes : 2;
@@ -268,7 +263,6 @@ __attribute__((target("avx512vbmi,avx512bw,avx512f,bmi2"))) size_t scan_gfx9_avx
 
     bp += entry;
 
-done:
     while (bp < size && n_out < out_cap)
     {
         const uint8_t nibble = buf[bp] & 0x0F;

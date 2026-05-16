@@ -124,10 +124,6 @@ jobs:
   # ---------------------------------------------------------------------------
   build-and-test-rocprofiler-sdk-deb:
     name: Build & Test rocprofiler-sdk • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
-    # Disabled: actions/checkout@v6 falls back to tarball mode in the
-    # rocprofiler-private:ubuntu-22.04 image (git 2.17 is too old to clone),
-    # so submodule operations fail. Re-enable once the image ships a newer
-    # git or a different workaround is in place.
     if: false
     strategy:
       fail-fast: false
