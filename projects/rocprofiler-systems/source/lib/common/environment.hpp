@@ -115,8 +115,10 @@ get_env_impl(std::string_view env_id, bool _default)
     if(env_var)
     {
         if(std::string_view{ env_var }.empty())
+        {
             throw std::runtime_error(std::string{ "No boolean value provided for " } +
                                      std::string{ env_id });
+        }
 
         if(std::string_view{ env_var }.find_first_not_of("0123456789") ==
            std::string_view::npos)
@@ -126,9 +128,13 @@ get_env_impl(std::string_view env_id, bool _default)
         else
         {
             for(size_t i = 0; i < strlen(env_var); ++i)
+            {
                 env_var[i] = tolower(env_var[i]);
+            }
             for(const auto& itr : { "off", "false", "no", "n", "f", "0" })
+            {
                 if(strcmp(env_var, itr) == 0) return false;
+            }
         }
         return true;
     }
@@ -204,7 +210,9 @@ discover_llvm_libdir_for_ompt(bool verbose = false)
     auto push_unique = [&](const std::string& p) {
         if(p.empty()) return;
         if(std::find(candidates.begin(), candidates.end(), p) == candidates.end())
+        {
             candidates.emplace_back(p);
+        }
     };
 
     if(!rocmv_dir.empty())
@@ -360,11 +368,17 @@ to_env_string(Tp&& val)
                   "to_env_string: unsupported type. Use string, bool, or numeric types.");
 
     if constexpr(std::is_same_v<T, std::string> || std::is_same_v<T, const char*>)
+    {
         return std::string{ val };
+    }
     else if constexpr(std::is_same_v<T, bool>)
+    {
         return val ? "true" : "false";
+    }
     else
+    {
         return std::to_string(val);
+    }
 }
 
 template <typename Tp, typename UpdatedEnvsT>
@@ -480,7 +494,9 @@ consolidate_env_entries(std::vector<std::string>& envp)
     auto get_delimiter = [](std::string_view key) -> char {
         if(key == "ROCPROFSYS_PAPI_EVENTS" ||
            key == "ROCPROFSYS_SAMPLING_OVERFLOW_EVENT" || key == "ROCPROFSYS_ROCM_EVENTS")
+        {
             return ',';
+        }
         return ':';
     };
 
@@ -495,7 +511,9 @@ consolidate_env_entries(std::vector<std::string>& envp)
         void add_unique(std::string part)
         {
             if(!part.empty() && seen.insert(part).second)
+            {
                 parts.emplace_back(std::move(part));
+            }
         }
     };
 
@@ -526,7 +544,9 @@ consolidate_env_entries(std::vector<std::string>& envp)
 
         std::size_t total_parts_length = 0;
         for(const auto& part : parts)
+        {
             total_parts_length += part.size();
+        }
 
         result.reserve(result.size() + total_parts_length + (parts.size() - 1));
 

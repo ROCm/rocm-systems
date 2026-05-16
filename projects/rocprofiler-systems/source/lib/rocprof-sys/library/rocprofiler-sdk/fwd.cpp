@@ -34,7 +34,9 @@ dimensions_info_callback(rocprofiler_counter_id_t /*id*/,
         static_cast<std::vector<rocprofiler_record_dimension_info_t>*>(user_data);
     dimensions_info->reserve(num_dims);
     for(size_t j = 0; j < num_dims; j++)
+    {
         dimensions_info->emplace_back(dim_info[j]);
+    }
 
     return ROCPROFILER_STATUS_SUCCESS;
 }
@@ -61,7 +63,9 @@ counters_supported_callback(rocprofiler_agent_id_t    agent_id,
             counters[i], dimensions_info_callback, &_dim_info));
 
         if(!_info.is_constant)
+        {
             data_v->at(agent_id).emplace_back(agent_id, _info, std::move(_dim_info));
+        }
     }
     return ROCPROFILER_STATUS_SUCCESS;
 }
@@ -141,7 +145,9 @@ client_data::initialize_event_info()
     }
 
     if(agent_counter_info.size() != gpu_agents.size())
+    {
         agent_counter_info = get_agent_counter_info(gpu_agents);
+    }
 
     try
     {
@@ -173,18 +179,30 @@ client_data::initialize_event_info()
                       [](const rocprofiler_tool_counter_info_t& lhs,
                          const rocprofiler_tool_counter_info_t& rhs) {
                           if(lhs.is_constant && rhs.is_constant)
+                          {
                               return lhs.id < rhs.id;
+                          }
                           else if(lhs.is_constant)
+                          {
                               return true;
+                          }
                           else if(rhs.is_constant)
+                          {
                               return false;
+                          }
 
                           if(!lhs.is_derived && !rhs.is_derived)
+                          {
                               return lhs.id < rhs.id;
+                          }
                           else if(!lhs.is_derived)
+                          {
                               return true;
+                          }
                           else if(!rhs.is_derived)
+                          {
                               return false;
+                          }
 
                           return lhs.id < rhs.id;
                       });

@@ -28,7 +28,9 @@ inline string_t
 to_lower(string_t s)
 {
     for(auto& itr : s)
+    {
         itr = tolower(itr);
+    }
     return s;
 }
 //
@@ -76,7 +78,9 @@ struct rocprofsys_call_expr
     {
         snippet_vec_t _ret;
         for(auto& itr : m_params)
+        {
             _ret.push_back(itr.get());
+        }
         return _ret;
     }
 
@@ -113,7 +117,9 @@ struct rocprofsys_snippet_vec
     void append(snippet_vec_t& _obj)
     {
         for(auto& itr : m_data)
+        {
             _obj.push_back(itr.get());
+        }
     }
 
 private:
@@ -189,7 +195,9 @@ rocprofsys_get_address_space(patch_pointer_t& _bpatch, int _cmdc, char** _cmdv,
         auto _get_env_pair = [](const std::string& _full) {
             auto _pos = _full.find('=');
             if(_pos < _full.length())
+            {
                 return std::make_pair(_full.substr(0, _pos), _full.substr(_pos + 1));
+            }
             return strpair_t{};
         };
 
@@ -197,7 +205,9 @@ rocprofsys_get_address_space(patch_pointer_t& _bpatch, int _cmdc, char** _cmdv,
         {
             size_t _idx = 0;
             while(environ[_idx] != nullptr)
+            {
                 _imported.emplace_back(_get_env_pair(environ[_idx++]));
+            }
         }
 
         for(const auto& itr : _cmdenv)
@@ -364,7 +374,9 @@ insert_instr(address_space_t* mutatee, const std::vector<point_t*>& _points, Tp 
     auto _names = [&_points]() {
         std::set<std::string> _v{};
         for(const auto& itr : _points)
+        {
             if(itr && itr->getFunction()) _v.emplace(get_name(itr->getFunction()));
+        }
         return _v;
     }();
 
@@ -421,9 +433,13 @@ insert_instr(address_space_t* mutatee, procedure_t* funcToInstr, Tp traceFunc,
     if(cfGraph && loopToInstrument)
     {
         if(traceLoc == BPatch_entry)
+        {
             _points = cfGraph->findLoopInstPoints(BPatch_locLoopEntry, loopToInstrument);
+        }
         else if(traceLoc == BPatch_exit)
+        {
             _points = cfGraph->findLoopInstPoints(BPatch_locLoopExit, loopToInstrument);
+        }
     }
     else
     {

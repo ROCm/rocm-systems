@@ -19,11 +19,15 @@ dump_info(std::ostream& _os, const fmodset_t& _data)
 {
     module_function::reset_width();
     for(const auto& itr : _data)
+    {
         module_function::update_width(itr);
+    }
 
     module_function::write_header(_os);
     for(const auto& itr : _data)
+    {
         _os << itr << '\n';
+    }
 
     module_function::reset_width();
 }
@@ -51,7 +55,9 @@ dump_info(const string_t& _label, string_t _oname, const string_t& _ext,
         _msg << "[dump_info] Error opening '" << _oname << " for output";
         verbprintf(_level, "%s\n", _msg.str().c_str());
         if(_fail)
+        {
             throw std::runtime_error(std::string{ "[rocprof-sys][exe]" } + _msg.str());
+        }
     };
 
     if(!debug_print && verbose_level < _level) return;
@@ -60,7 +66,9 @@ dump_info(const string_t& _label, string_t _oname, const string_t& _ext,
     {
         std::ofstream ofs{};
         if(!tim::filepath::open(ofs, _oname))
+        {
             _handle_error();
+        }
         else
         {
             verbprintf_bare(_level, "%s", ::tim::log::color::source());
@@ -89,7 +97,9 @@ dump_info(const string_t& _label, string_t _oname, const string_t& _ext,
 
         std::ofstream ofs{};
         if(!tim::filepath::open(ofs, _oname))
+        {
             _handle_error();
+        }
         else
         {
             verbprintf_bare(_level, "%s", ::tim::log::color::source());
@@ -117,7 +127,9 @@ dump_info(const string_t& _label, string_t _oname, const string_t& _ext,
 
         std::ofstream ofs{};
         if(!tim::filepath::open(ofs, _oname))
+        {
             _handle_error();
+        }
         else
         {
             verbprintf_bare(_level, "%s", ::tim::log::color::source());
@@ -140,7 +152,9 @@ dump_info(const string_t& _oname, const fmodset_t& _data, int _level, bool _fail
           const string_t& _type, const strset_t& _ext)
 {
     for(const auto& itr : _ext)
+    {
         dump_info(_type, _oname, itr, _data, _level, _fail);
+    }
 }
 //
 static inline void
@@ -165,7 +179,9 @@ load_info(const string_t& _label, const string_t& _iname, fmodset_t& _data, int 
         verbprintf(_level, "Reading '%s'... ", _iname.c_str());
         std::ifstream ifs{ _iname };
         if(!ifs)
+        {
             _handle_error();
+        }
         else
         {
             using input_policy = policy::input_archive<cereal::XMLInputArchive>;
@@ -187,7 +203,9 @@ load_info(const string_t& _label, const string_t& _iname, fmodset_t& _data, int 
         verbprintf(_level, "Reading '%s'... ", _iname.c_str());
         std::ifstream ifs{ _iname };
         if(!ifs)
+        {
             _handle_error();
+        }
         else
         {
             using input_policy = policy::input_archive<cereal::JSONInputArchive>;

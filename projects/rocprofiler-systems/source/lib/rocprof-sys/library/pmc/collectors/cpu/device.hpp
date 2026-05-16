@@ -209,19 +209,33 @@ private:
         auto snap = m_driver->read_rusage();
 
         if(m_supported_metrics.bits.page_rss && enabled.bits.page_rss)
+        {
             result.process_data.page_rss = snap.page_rss;
+        }
         if(m_supported_metrics.bits.virt_mem && enabled.bits.virt_mem)
+        {
             result.process_data.virt_mem = snap.virt_mem;
+        }
         if(m_supported_metrics.bits.peak_rss && enabled.bits.peak_rss)
+        {
             result.process_data.peak_rss = snap.peak_rss;
+        }
         if(m_supported_metrics.bits.ctx_switches && enabled.bits.ctx_switches)
+        {
             result.process_data.context_switches = snap.context_switches;
+        }
         if(m_supported_metrics.bits.page_faults && enabled.bits.page_faults)
+        {
             result.process_data.page_faults = snap.page_faults;
+        }
         if(m_supported_metrics.bits.user_time && enabled.bits.user_time)
+        {
             result.process_data.user_mode_time = snap.user_mode_time;
+        }
         if(m_supported_metrics.bits.kernel_time && enabled.bits.kernel_time)
+        {
             result.process_data.kernel_mode_time = snap.kernel_mode_time;
+        }
     }
 
     /**

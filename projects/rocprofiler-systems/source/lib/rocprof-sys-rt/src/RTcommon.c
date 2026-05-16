@@ -569,8 +569,10 @@ DYNINST_boundsCheck(void** boundsArray_, void* arrayLen_, void* writeTarget_)
     while(lowIdx < highIdx)
     {
         if(idx > arrayLen || idx < 0)
+        {
             rtdebug_printf("ERROR: out of bounds idx=%d, arrayLen = %ld [%d]\n", idx,
                            arrayLen, __LINE__);
+        }
         rtdebug_printf("D_bc: low=%d high=%d arr[%d]=%lx [%d]\n", lowIdx, highIdx, idx,
                        boundsArray[idx], __LINE__);
         if(writeTarget < boundsArray[idx])
@@ -777,9 +779,13 @@ dyninstTrapTranslate(void* source, volatile unsigned long* table_used,
                 prev = mid;
 
                 if((*trap_table)[mid].source < source)
+                {
                     min = mid;
+                }
                 else if((*trap_table)[mid].source > source)
+                {
                     max = mid;
+                }
                 else
                 {
                     target = (*trap_table)[mid].target;

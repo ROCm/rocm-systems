@@ -75,7 +75,9 @@ ensure_ci_timeout_backtrace(double             _ci_timeout_seconds,
 
     auto _factor = 3.0;
     while(_ci_timeout_seconds <= _factor)
+    {
         _factor /= 1.25;
+    }
 
     std::uint64_t _ci_timeout_nitr    = 0;
     std::int64_t  _ci_timeout_nanosec = (_ci_timeout_seconds - _factor) * units::sec;
@@ -128,8 +130,10 @@ ensure_ci_timeout_backtrace(double             _ci_timeout_seconds,
 
             // wait until the signal has been delivered
             while(ci_timeout_backtrace_global_done == _done_v && _n++ < 50)
+            {
                 std::this_thread::sleep_for(
                     std::chrono::nanoseconds{ _ci_timeout_pause });
+            }
         };
 
         _tids.erase(main_thread_native_handle);
@@ -138,7 +142,9 @@ ensure_ci_timeout_backtrace(double             _ci_timeout_seconds,
                     _ci_timeout_seconds, _tids.size() + 1);
 
         for(auto itr : _tids)
+        {
             _kill_thread(itr);
+        }
 
         _kill_thread(main_thread_native_handle);
 

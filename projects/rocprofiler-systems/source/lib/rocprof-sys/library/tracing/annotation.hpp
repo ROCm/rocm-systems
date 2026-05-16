@@ -140,7 +140,9 @@ add_perfetto_annotation(perfetto_event_context_t&      ctx,
     // the name to a null pointer, type to none, or value to a null pointer
     if(_annotation.name == nullptr || _annotation.type == 0 ||
        _annotation.value == nullptr)
+    {
         return;
+    }
 
     if(_annotation.type == Idx)
     {

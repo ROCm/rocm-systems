@@ -101,7 +101,9 @@ copy_timemory_hash_ids()
             if(_hitr)
             {
                 for(const auto& itr : *_hitr)
+                {
                     _hmain->emplace(itr.first, itr.second);
+                }
             }
         }
     }
@@ -115,7 +117,9 @@ copy_timemory_hash_ids()
             if(_aitr)
             {
                 for(const auto& itr : *_aitr)
+                {
                     _amain->emplace(itr.first, itr.second);
+                }
             }
         }
     }
@@ -171,13 +175,19 @@ thread_init()
         if(get_state() != State::Finalized)
         {
             if(get_use_causal())
+            {
                 causal::sampling::shutdown();
+            }
             else if(get_use_sampling())
+            {
                 sampling::shutdown();
+            }
             auto& _thr_bundle = thread_data<thread_bundle_t>::instance();
             if(_thr_bundle && _thr_bundle->get<comp::wall_clock>() &&
                _thr_bundle->get<comp::wall_clock>()->get_is_running())
+            {
                 _thr_bundle->stop();
+            }
         }
     } };
 
@@ -234,9 +244,13 @@ thread_init()
             {
                 ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
                 if(_use_causal)
+                {
                     causal::sampling::setup();
+                }
                 else if(_use_sampling)
+                {
                     sampling::setup();
+                }
             }
             return (_use_causal || _use_sampling);
         }

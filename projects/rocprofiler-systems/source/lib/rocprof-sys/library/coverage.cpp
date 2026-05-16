@@ -214,8 +214,10 @@ post_process()
         if(tim::filepath::open(ofs, _fname))
         {
             if(get_verbose() >= 0)
+            {
                 operation::file_output_message<code_coverage>{}(
                     _fname, std::string{ "coverage" });
+            }
             for(auto& itr : _coverage_data)
             {
                 // if(get_debug() && get_verbose() >= 2)
@@ -260,8 +262,10 @@ post_process()
         if(tim::filepath::open(ofs, _fname))
         {
             if(get_verbose() >= 0)
+            {
                 operation::file_output_message<code_coverage>{}(
                     _fname, std::string{ "coverage" });
+            }
             ofs << oss.str() << "\n";
         }
         else
@@ -313,9 +317,13 @@ rocprofsys_register_coverage_hidden(const char* file, const char* func, size_t a
     if(coverage::get_post_processed()) return;
     if(rocprofsys::get_state() < rocprofsys::State::Active &&
        !rocprofsys_init_tooling_hidden())
+    {
         return;
+    }
     else if(rocprofsys::get_state() >= rocprofsys::State::Finalized)
+    {
         return;
+    }
 
     (*coverage::get_coverage_count())[file][func][address] += 1;
 }

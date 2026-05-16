@@ -47,7 +47,9 @@ get_setting_name(std::string _v)
 {
     constexpr auto _prefix = tim::string_view_t{ "rocprofsys_" };
     for(auto& itr : _v)
+    {
         itr = tolower(itr);
+    }
     auto _pos = _v.find(_prefix);
     if(_pos == 0) return _v.substr(_prefix.length());
     return _v;
@@ -73,7 +75,9 @@ to_lower(const Tp& _val)
 {
     auto _v = std::string{ _val };
     for(auto& itr : _v)
+    {
         itr = ::tolower(itr);
+    }
     return _v;
 }
 
@@ -187,7 +191,9 @@ get_operations_impl(const std::unordered_set<std::int32_t>& _complete,
         auto _dret = std::vector<std::int32_t>{};
         _dret.reserve(_dset.size());
         for(auto itr : _dset)
+        {
             _dret.emplace_back(itr);
+        }
         std::sort(_dret.begin(), _dret.end());
         return _dret;
     };
@@ -196,7 +202,9 @@ get_operations_impl(const std::unordered_set<std::int32_t>& _complete,
 
     auto _ret = (_include.empty()) ? _complete : _include;
     for(auto itr : _exclude)
+    {
         _ret.erase(itr);
+    }
 
     return _convert(_ret);
 }
@@ -269,7 +277,9 @@ config_settings(const std::shared_ptr<settings>& _config)
 
         auto _op_choices = std::vector<std::string>{};
         for(auto itr : _domain.operations)
+        {
             _op_choices.emplace_back(std::string{ itr });
+        }
 
         if(_op_choices.empty()) return;
 
@@ -324,10 +334,14 @@ config_settings(const std::shared_ptr<settings>& _config)
 #endif
 
     for(const auto& itr : buffered_tracing_info)
+    {
         _add_domain(itr.name);
+    }
 
     for(const auto& itr : callback_tracing_info)
+    {
         _add_domain(itr.name);
+    }
 
     std::sort(_domain_choices.begin(), _domain_choices.end());
 
@@ -360,10 +374,14 @@ config_settings(const std::shared_ptr<settings>& _config)
         callback_operation_option_names);
 
     for(const auto& itr : callback_tracing_info)
+    {
         _add_operation_settings(itr.name, itr, callback_operation_option_names);
+    }
 
     for(const auto& itr : buffered_tracing_info)
+    {
         _add_operation_settings(itr.name, itr, buffered_operation_option_names);
+    }
 
     // Add the ROCPROFSYS_ROCM_GROUP_BY_QUEUE setting if the hip_stream domain is present
     // in supported ROCProfiler-SDK domains.
@@ -462,13 +480,17 @@ get_callback_domains()
                               ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API,
                               ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API,
                               ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API })
+            {
                 _data.emplace(eitr);
+            }
         }
         else if(itr == "hip_api")
         {
             for(auto eitr : { ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API,
                               ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API })
+            {
                 _data.emplace(eitr);
+            }
         }
         else if(itr == "marker_api" || itr == "roctx")
         {
@@ -543,13 +565,17 @@ get_buffered_domains()
                               ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API,
                               ROCPROFILER_BUFFER_TRACING_HSA_IMAGE_EXT_API,
                               ROCPROFILER_BUFFER_TRACING_HSA_FINALIZE_EXT_API })
+            {
                 _data.emplace(eitr);
+            }
         }
         else if(itr == "hip_api")
         {
             for(auto eitr : { ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API,
                               ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API })
+            {
                 _data.emplace(eitr);
+            }
         }
         else if(itr == "marker_api" || itr == "roctx")
         {
@@ -596,20 +622,34 @@ get_buffered_domains()
                                   ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE,
                                   ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
                                   ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS })
+                {
                     _data.emplace(eitr);
+                }
             }
             else if(itr == "kfd_page_fault")
+            {
                 _data.emplace(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT);
+            }
             else if(itr == "kfd_page_migrate")
+            {
                 _data.emplace(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE);
+            }
             else if(itr == "kfd_queue")
+            {
                 _data.emplace(ROCPROFILER_BUFFER_TRACING_KFD_QUEUE);
+            }
             else if(itr == "kfd_event_queue")
+            {
                 _data.emplace(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE);
+            }
             else if(itr == "kfd_event_unmap_from_gpu")
+            {
                 _data.emplace(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU);
+            }
             else if(itr == "kfd_event_dropped_events")
+            {
                 _data.emplace(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS);
+            }
         }
 #endif
         else
@@ -694,7 +734,9 @@ get_backtrace_operations(rocprofiler_callback_tracing_kind_t kindv)
     auto _ret = std::unordered_set<std::int32_t>{};
     _ret.reserve(_data.size());
     for(auto itr : _data)
+    {
         _ret.emplace(itr);
+    }
     return _ret;
 }
 
@@ -714,7 +756,9 @@ get_backtrace_operations(rocprofiler_buffer_tracing_kind_t kindv)
     auto _ret = std::unordered_set<std::int32_t>{};
     _ret.reserve(_data.size());
     for(auto itr : _data)
+    {
         _ret.emplace(itr);
+    }
     return _ret;
 }
 }  // namespace rocprofiler_sdk

@@ -40,7 +40,9 @@ get_filled_array(FuncT&& _func)
     using Tp = std::decay_t<decltype(_func())>;
     std::array<Tp, N> _v{};
     for(auto& itr : _v)
+    {
         itr = std::move(_func());
+    }
     return _v;
 }
 
@@ -183,7 +185,9 @@ inline LhsT&
 combine(LhsT& _lhs, RhsT&& _rhs)
 {
     for(auto&& itr : _rhs)
+    {
         _lhs.emplace_back(itr);
+    }
     return _lhs;
 }
 
@@ -201,7 +205,9 @@ get_regex_or(const ContainerT<Tp, TailT...>& _container, const std::string& _fal
     auto _idx = size_t{ 0 };
     _ss << "(";
     for(const auto& itr : _container)
+    {
         _ss << (_idx++ > 0 ? "|" : "") << itr;
+    }
     _ss << ")";
     return _ss.str();
 }
@@ -220,7 +226,9 @@ get_regex_or(const ContainerT<Tp, TailT...>& _container, PredicateT&& _predicate
     auto _dest = std::vector<std::string>{};
     _dest.reserve(_container.size());
     for(const auto& itr : _container)
+    {
         _dest.emplace_back(_predicate(itr));
+    }
 
     return get_regex_or(_dest, _fallback);
 }

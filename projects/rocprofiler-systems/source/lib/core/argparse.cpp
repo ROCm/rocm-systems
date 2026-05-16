@@ -35,7 +35,9 @@ get_clock_id_choices()
     auto clock_name = [](std::string _v) {
         constexpr auto _clock_prefix = std::string_view{ "clock_" };
         for(auto& itr : _v)
+        {
             itr = tolower(itr);
+        }
         auto _pos = _v.find(_clock_prefix);
         if(_pos == 0) _v = _v.substr(_pos + _clock_prefix.length());
         if(_v == "process_cputime_id") _v = "cputime";
@@ -134,7 +136,9 @@ add_ld_library_path(parser_data& _data)
 {
     auto _libdir = filepath::dirname(_data.env.dl_libpath);
     if(filepath::exists(_libdir))
+    {
         update_env(_data, "LD_LIBRARY_PATH", _libdir, update_mode::APPEND);
+    }
     return _data;
 }
 
@@ -583,8 +587,10 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 _update("ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS", _v.count("spin-locks") > 0);
 
                 if(_v.count("all") > 0 || _v.count("kokkosp") > 0)
+                {
                     update_env(_data, "KOKKOS_TOOLS_LIBS", _data.env.omni_libpath,
                                update_mode::PREPEND);
+                }
             });
 
         _data.reg.processed_environs.emplace("include");
@@ -612,7 +618,9 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 _update("ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS", _v.count("spin-locks") > 0);
 
                 if(_v.count("all") > 0 || _v.count("kokkosp") > 0)
+                {
                     remove_env(_data.env.current, "KOKKOS_TOOLS_LIBS", _data.env.initial);
+                }
             });
 
         _data.reg.processed_environs.emplace("exclude");
@@ -1090,10 +1098,12 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 {
                     if(p.exists("sampling-overflow-event") &&
                        _v.front() != p.get<std::string>("sampling-overflow-event"))
+                    {
                         throw exception<std::runtime_error>(fmt::format(
                             "'--sample-overflow {} ...' conflicts with "
                             "'--sampling-overflow-event {}' option",
                             _v.front(), p.get<std::string>("sampling-overflow-event")));
+                    }
                     update_env(_data, "ROCPROFSYS_SAMPLING_OVERFLOW_EVENT", _v.front());
                     _v.pop_front();
                 }
@@ -1207,7 +1217,9 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
         auto _name = itr->get_name();
         auto _pos  = std::string::npos;
         while((_pos = _name.find('_')) != std::string::npos)
+        {
             _name = _name.replace(_pos, 1, "-");
+        }
         return _name;
     };
 
@@ -1216,8 +1228,10 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
         if(!_data.reg.setting_filter(itr.get(), _data)) return false;
 
         if(_name.empty())
+        {
             throw exception<std::runtime_error>("Error! empty name for " +
                                                 itr->get_name());
+        }
 
         _data.reg.processed_settings.emplace(itr.get());
 
@@ -1231,7 +1245,9 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
                 if(_value.empty()) _value = p.get<std::string>(_name);
                 if(_value.empty()) _value = fmt::format("{}", p.get<bool>(_name));
                 if(_value.empty())
+                {
                     throw exception<std::runtime_error>("Error! no value for " + _name);
+                }
                 update_env(_data, itr->get_env_name(), _value);
             });
         }
@@ -1243,8 +1259,10 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
                     auto _value =
                         fmt::format("{}", fmt::join(p.get<strvec_t>(_name), " "));
                     if(_value.empty())
+                    {
                         throw exception<std::runtime_error>("Error! no value for " +
                                                             _name);
+                    }
                     update_env(_data, itr->get_env_name(), _value);
                 });
         }
@@ -1287,7 +1305,9 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
         auto _rhs_v = _rhs->get_name();
         if(_lhs_v.length() > 4 && _rhs_v.length() > 4 &&
            _lhs_v.substr(0, 4) == _rhs_v.substr(0, 4))
+        {
             return _lhs_v < _rhs_v;
+        }
         return _lhs_v.length() < _rhs_v.length();
     });
 
@@ -1295,7 +1315,9 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
     {
         auto _group_label = _group_name;
         for(auto& c : _group_label)
+        {
             c = toupper(c);
+        }
         _parser.start_group(_group_label);
     }
 
@@ -1346,14 +1368,18 @@ add_extended_arguments(parser_t& _parser, parser_data& _data)
         {
             if(std::regex_search(citr, std::regex{ "rocprofsys|timemory|^("
                                                    "native|custom|advanced|analysis)$" }))
+            {
                 continue;
+            }
             _category_count_map[citr] += 1;
         }
     }
 
     auto _category_count_vec = strvec_t{};
     for(const auto& itr : _category_count_map)
+    {
         _category_count_vec.emplace_back(itr.first);
+    }
 
     std::sort(_category_count_vec.begin(), _category_count_vec.end(),
               [&_category_count_map](const auto& _lhs, const auto& _rhs) {

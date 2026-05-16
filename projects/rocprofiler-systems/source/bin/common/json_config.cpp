@@ -37,7 +37,9 @@ split_csv_lowercase(const std::string& input)
         {
             token = token.substr(start, end - start + 1);
             for(auto& c : token)
+            {
                 c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            }
             tokens.push_back(std::move(token));
         }
     }
@@ -95,13 +97,21 @@ std::string
 json_value_to_string(const nlohmann::json& val)
 {
     if(val.is_string())
+    {
         return val.get<std::string>();
+    }
     else if(val.is_boolean())
+    {
         return val.get<bool>() ? "true" : "false";
+    }
     else if(val.is_number_integer())
+    {
         return std::to_string(val.get<std::int64_t>());
+    }
     else if(val.is_number_float())
+    {
         return std::to_string(val.get<double>());
+    }
     else if(val.is_array())
     {
         std::string result;
@@ -139,7 +149,9 @@ resolve_enabled(std::map<std::string, std::string>& result, const nlohmann::json
                 std::string_view json_key, std::string_view env_var)
 {
     if(section.contains(json_key))
+    {
         result[std::string{ env_var }] = section[json_key].get<bool>() ? "true" : "false";
+    }
 }
 
 void
@@ -149,7 +161,9 @@ resolve_value(std::map<std::string, std::string>& result, const nlohmann::json& 
     if(section.contains(json_key))
     {
         if(auto val = extract_setting_value(section[json_key]))
+        {
             result[std::string{ env_var }] = *val;
+        }
     }
 }
 
@@ -164,7 +178,9 @@ resolve_schema_config(const nlohmann::json& config)
         const auto& tracing = config["tracing"];
         resolve_enabled(result, tracing, "enabled", env_vars::TRACE);
         if(tracing.contains("legacy"))
+        {
             resolve_enabled(result, tracing["legacy"], "enabled", env_vars::TRACE_LEGACY);
+        }
         resolve_value(result, tracing, "buffer_size_kb",
                       env_vars::PERFETTO_BUFFER_SIZE_KB);
         resolve_value(result, tracing, "fill_policy", env_vars::PERFETTO_FILL_POLICY);
@@ -220,8 +236,10 @@ resolve_schema_config(const nlohmann::json& config)
                 {
                     auto enabled = collect_enabled_entry_names(gpu["metrics"]);
                     if(!enabled.empty())
+                    {
                         result[std::string{ env_vars::AMD_SMI_METRICS }] =
                             join_with(enabled, ',');
+                    }
                 }
 
                 resolve_value(result, gpu, "sampling_rate_hz", env_vars::AMD_SMI_FREQ);
@@ -230,7 +248,9 @@ resolve_schema_config(const nlohmann::json& config)
                 resolve_value(result, gpu, "process_sampling_duration",
                               env_vars::PROCESS_SAMPLING_DURATION);
                 if(gpu.contains("ainic"))
+                {
                     resolve_enabled(result, gpu["ainic"], "enabled", env_vars::USE_AINIC);
+                }
             }
         }
 
@@ -242,7 +262,9 @@ resolve_schema_config(const nlohmann::json& config)
             {
                 // Top-level rocm.enabled ensures tracing is on and default domains set
                 if(result.find(std::string{ env_vars::TRACE }) == result.end())
+                {
                     result[std::string{ env_vars::TRACE }] = "true";
+                }
             }
             if(rocm.contains("api_domains"))
             {
@@ -279,8 +301,10 @@ resolve_schema_config(const nlohmann::json& config)
         {
             const auto& cpu = domains["cpu"];
             if(cpu.contains("cpu_freq_enabled"))
+            {
                 resolve_enabled(result, cpu["cpu_freq_enabled"], "enabled",
                                 env_vars::CPU_FREQ_ENABLED);
+            }
             if(cpu.contains("enabled") && cpu["enabled"].get<bool>())
             {
                 result[std::string{ env_vars::USE_PROCESS_SAMPLING }] = "true";
@@ -295,8 +319,10 @@ resolve_schema_config(const nlohmann::json& config)
 
                     auto enabled = collect_enabled_entry_names(metrics, { "freq" });
                     if(!enabled.empty())
+                    {
                         result[std::string{ env_vars::CPU_METRICS }] =
                             join_with(enabled, ',');
+                    }
                 }
             }
         }
@@ -350,16 +376,24 @@ resolve_schema_config(const nlohmann::json& config)
         const auto& output = config["output"];
         resolve_value(result, output, "path", env_vars::OUTPUT_PATH);
         if(output.contains("time_output"))
+        {
             resolve_enabled(result, output["time_output"], "enabled",
                             env_vars::TIME_OUTPUT);
+        }
         if(output.contains("file_output"))
+        {
             resolve_enabled(result, output["file_output"], "enabled",
                             env_vars::FILE_OUTPUT);
+        }
         if(output.contains("rocpd_output"))
+        {
             resolve_enabled(result, output["rocpd_output"], "enabled",
                             env_vars::USE_ROCPD);
+        }
         if(output.contains("use_pid"))
+        {
             resolve_enabled(result, output["use_pid"], "enabled", env_vars::USE_PID);
+        }
     }
 
     // --- Causal profiling section ---
@@ -377,8 +411,10 @@ resolve_schema_config(const nlohmann::json& config)
         resolve_value(result, causal, "source_scope", env_vars::CAUSAL_SOURCE_SCOPE);
         resolve_value(result, causal, "source_exclude", env_vars::CAUSAL_SOURCE_EXCLUDE);
         if(causal.contains("end_to_end"))
+        {
             resolve_enabled(result, causal["end_to_end"], "enabled",
                             env_vars::CAUSAL_END_TO_END);
+        }
         resolve_value(result, causal, "delay_sec", env_vars::CAUSAL_DELAY);
         resolve_value(result, causal, "duration_sec", env_vars::CAUSAL_DURATION);
         resolve_value(result, causal, "random_seed", env_vars::CAUSAL_RANDOM_SEED);
@@ -394,8 +430,10 @@ resolve_schema_config(const nlohmann::json& config)
             resolve_value(result, hw, "papi_events", env_vars::PAPI_EVENTS);
         }
         if(hw.contains("papi_multiplexing"))
+        {
             resolve_enabled(result, hw["papi_multiplexing"], "enabled",
                             env_vars::PAPI_MULTIPLEXING);
+        }
     }
 
     // --- Advanced section ---
@@ -403,17 +441,23 @@ resolve_schema_config(const nlohmann::json& config)
     {
         const auto& adv = config["advanced"];
         if(adv.contains("cpu_affinity"))
+        {
             resolve_enabled(result, adv["cpu_affinity"], "enabled",
                             env_vars::CPU_AFFINITY);
+        }
         if(adv.contains("collapse_threads"))
+        {
             resolve_enabled(result, adv["collapse_threads"], "enabled",
                             env_vars::COLLAPSE_THREADS);
+        }
         resolve_value(result, adv, "max_depth", env_vars::MAX_DEPTH);
         resolve_value(result, adv, "trace_delay_sec", env_vars::TRACE_DELAY);
         resolve_value(result, adv, "trace_duration_sec", env_vars::TRACE_DURATION);
         resolve_value(result, adv, "verbose", env_vars::VERBOSE);
         if(adv.contains("debug"))
+        {
             resolve_enabled(result, adv["debug"], "enabled", env_vars::DEBUG);
+        }
         resolve_value(result, adv, "timemory_components", env_vars::TIMEMORY_COMPONENTS);
         resolve_value(result, adv, "network_interface", env_vars::NETWORK_INTERFACE);
         resolve_value(result, adv, "trace_periods", env_vars::TRACE_PERIODS);
@@ -457,7 +501,9 @@ get_config_metadata(const nlohmann::json& config)
     config_metadata result;
     if(meta.contains("name")) result.name = meta["name"].get<std::string>();
     if(meta.contains("description"))
+    {
         result.description = meta["description"].get<std::string>();
+    }
     if(meta.contains("use_case")) result.use_case = meta["use_case"].get<std::string>();
     if(meta.contains("category")) result.category = meta["category"].get<std::string>();
     if(meta.contains("cli_flag")) result.cli_flag = meta["cli_flag"].get<std::string>();
@@ -621,18 +667,26 @@ void
 set_json_int(nlohmann::json& target, const std::string& value)
 {
     if(auto n = safe_stoi(value))
+    {
         target = *n;
+    }
     else
+    {
         target = value;
+    }
 }
 
 void
 set_json_double(nlohmann::json& target, const std::string& value)
 {
     if(auto n = safe_stod(value))
+    {
         target = *n;
+    }
     else
+    {
         target = value;
+    }
 }
 
 bool
@@ -643,7 +697,9 @@ is_truthy(const std::string& v)
     std::string lower;
     lower.reserve(v.size());
     for(auto c : v)
+    {
         lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
     return lower == "true" || lower == "on" || lower == "yes";
 }
 
@@ -654,7 +710,9 @@ export_enabled(nlohmann::json& config, const std::map<std::string, std::string>&
 {
     auto it = env_map.find(std::string{ env_var });
     if(it != env_map.end())
+    {
         config[json_path_section][json_path_key]["enabled"] = is_truthy(it->second);
+    }
 }
 
 void
@@ -674,7 +732,9 @@ export_string_value(nlohmann::json&                           config,
 {
     auto it = env_map.find(std::string{ env_var });
     if(it != env_map.end())
+    {
         config[json_path_section][json_path_key]["value"] = it->second;
+    }
 }
 
 void
@@ -685,7 +745,9 @@ export_int_value(nlohmann::json&                           config,
 {
     auto it = env_map.find(std::string{ env_var });
     if(it != env_map.end())
+    {
         set_json_int(config[json_path_section][json_path_key]["value"], it->second);
+    }
 }
 
 void
@@ -696,7 +758,9 @@ export_double_value(nlohmann::json&                           config,
 {
     auto it = env_map.find(std::string{ env_var });
     if(it != env_map.end())
+    {
         set_json_double(config[json_path_section][json_path_key]["value"], it->second);
+    }
 }
 
 namespace
@@ -752,22 +816,34 @@ export_domain_gpu(nlohmann::json&                           config,
     auto& gpu = config["domains"]["gpu"];
 
     if(auto v = lookup(env_map, env_vars::USE_PROCESS_SAMPLING))
+    {
         gpu["process_sampling"]["enabled"] = is_truthy(*v);
+    }
 
     auto use_amd_smi = lookup(env_map, env_vars::USE_AMD_SMI);
     if(!use_amd_smi) return;
 
     gpu["enabled"] = is_truthy(*use_amd_smi);
     if(auto metrics = lookup(env_map, env_vars::AMD_SMI_METRICS))
+    {
         csv_to_json_enabled_flags(gpu["metrics"], *metrics);
+    }
     if(auto freq = lookup(env_map, env_vars::AMD_SMI_FREQ))
+    {
         set_json_int(gpu["sampling_rate_hz"]["value"], *freq);
+    }
     if(auto freq = lookup(env_map, env_vars::PROCESS_SAMPLING_FREQ))
+    {
         set_json_double(gpu["process_sampling_freq"]["value"], *freq);
+    }
     if(auto dur = lookup(env_map, env_vars::PROCESS_SAMPLING_DURATION))
+    {
         set_json_double(gpu["process_sampling_duration"]["value"], *dur);
+    }
     if(auto v = lookup(env_map, env_vars::USE_AINIC))
+    {
         gpu["ainic"]["enabled"] = is_truthy(*v);
+    }
 }
 
 void
@@ -782,7 +858,9 @@ export_domain_rocm(nlohmann::json&                           config,
         csv_to_json_enabled_flags(rocm["api_domains"], *v);
     }
     if(auto v = lookup(env_map, env_vars::ROCM_GROUP_BY_QUEUE))
+    {
         rocm["group_by_queue"]["enabled"] = is_truthy(*v);
+    }
 }
 
 void
@@ -792,7 +870,9 @@ export_domain_cpu(nlohmann::json&                           config,
     auto& cpu = config["domains"]["cpu"];
 
     if(auto v = lookup(env_map, env_vars::CPU_FREQ_ENABLED))
+    {
         cpu["cpu_freq_enabled"]["enabled"] = is_truthy(*v);
+    }
 
     auto use_proc = lookup(env_map, env_vars::USE_PROCESS_SAMPLING);
     auto cpu_freq = lookup(env_map, env_vars::CPU_FREQ);
@@ -826,7 +906,9 @@ export_domain_parallel(nlohmann::json&                           config,
     for(const auto& [env_var, runtime_name] : runtimes)
     {
         if(auto v = lookup(env_map, env_var))
+        {
             runtimes_obj[std::string{ runtime_name }]["enabled"] = is_truthy(*v);
+        }
     }
 }
 

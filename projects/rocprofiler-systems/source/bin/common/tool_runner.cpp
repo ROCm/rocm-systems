@@ -412,9 +412,13 @@ tool_runner::parse_command_fast_path()
         if(argv[arg_idx] == nullptr) continue;
 
         if(past_separator)
+        {
             data.out.command.emplace_back(argv[arg_idx]);
+        }
         else if(std::string_view{ argv[arg_idx] } == "--")
+        {
             past_separator = true;
+        }
     }
 }
 
@@ -432,8 +436,10 @@ tool_runner::configure_parser(parser_t& parser)
                           ROCPROFSYS_ARGPARSE_VERSION_INFO);
 
     if(auto cols = terminal_columns(); cols > parser.get_help_width() + HELP_PADDING)
+    {
         parser.set_description_width(
             std::min<int>(cols - parser.get_help_width() - HELP_PADDING, MAX_DESC_WIDTH));
+    }
 
     data.reg.processed_groups.emplace("causal");
     if(!config.show_sample_flag) data.reg.processed_environs.emplace("sampling");
@@ -467,12 +473,16 @@ tool_runner::apply_post_parse(parser_t& parser)
     if(config.disable_cputime_on_realtime_only)
     {
         if(parser.exists("sample-realtime") && !parser.exists("sample-cputime"))
+        {
             data.env.set(env::SAMPLING_CPUTIME, false);
+        }
     }
 
     if(parser.exists("profile") && parser.exists("flat-profile"))
-        throw std::runtime_error(
-            "Error! '--profile' argument conflicts with '--flat-profile' argument");
+    {
+        throw std::runtime_error("Error! '--profile' argument conflicts with "
+                                 "'--flat-profile' argument");
+    }
 
     if(domain_state.export_config_requested)
     {
@@ -506,8 +516,10 @@ tool_runner::do_full_parse()
     auto parse_err =
         parser.parse_args(static_cast<int>(args.argv_ptrs.size()), args.argv_ptrs.data());
     if(help_requested(parser, argc, argv))
+    {
         return rocprofsys::common_utils::dispatch_help(parser, config.tool_name,
                                                        EXIT_SUCCESS);
+    }
     if(parse_err) throw std::runtime_error(parse_err.what());
     if(domain_state.early_exit) return domain_state.early_exit;
 
@@ -557,8 +569,10 @@ try
     update_verbose_from_env();
     const auto verbose = data.out.verbose;
     if(verbose >= 0)
+    {
         utils::print_environment(data.env.current, data.env.updated, verbose >= 1,
                                  config.output_prefix);
+    }
     if(verbose >= 1) utils::print_command(data.out.command, config.output_prefix);
 
     auto argv_ptrs = utils::to_c_argv(data.out.command);

@@ -330,8 +330,10 @@ cache_sampling_data(std::int64_t                               _tid,
         const auto _overflow_prefix = std::string_view{ "PERF_COUNT_" };
         const auto _overflow_pos    = _overflow_event.find(_overflow_prefix);
         if(_overflow_pos != std::string::npos)
+        {
             _overflow_event =
                 _overflow_event.substr(_overflow_pos + _overflow_prefix.length());
+        }
     }
 
     for(const auto& itr : _overflow_data)
@@ -390,7 +392,9 @@ configure_sampler_allocators()
             _allocators.resize(std::ceil(config::get_num_threads_hint() /
                                          config::get_sampling_allocator_size()));
             for(auto& itr : _allocators)
+            {
                 configure_sampler_allocator(itr);
+            }
         }
     }
 }
@@ -437,7 +441,9 @@ get_signal_set(Tp&& _v)
     sigset_t _sigset;
     sigemptyset(&_sigset);
     for(auto itr : _v)
+    {
         sigaddset(&_sigset, itr);
+    }
     return _sigset;
 }
 
@@ -447,9 +453,11 @@ get_signal_names(Tp&& _v)
 {
     std::string _sig_names{};
     for(auto&& itr : _v)
+    {
         _sig_names += std::get<0>(tim::signals::signal_settings::get_info(
                           static_cast<tim::signals::sys_signal>(itr))) +
                       " ";
+    }
     return (_sig_names.empty()) ? _sig_names
                                 : _sig_names.substr(0, _sig_names.length() - 1);
 }
@@ -782,13 +790,17 @@ configure(bool _setup, std::int64_t _tid)
         // if the thread state is disabled or completed, return
         if(_info && _info->index_data->sequent_value == _tid &&
            get_thread_state() == ThreadState::Disabled)
+        {
             return std::set<int>{};
+        }
 
         (void) get_debug_sampling();  // make sure query in sampler does not allocate
         assert(_tid == threading::get_id());
 
         if(trait::runtime_enabled<backtrace_metrics>::get())
+        {
             backtrace_metrics::configure(_setup, _tid);
+        }
 
         // NOTE: signals need to be unblocked by calling function
         sampling::block_signals(*_signal_types);
@@ -825,7 +837,9 @@ configure(bool _setup, std::int64_t _tid)
         if(_signal_types->count(get_sampling_overflow_signal()) > 0)
         {
             if(_signal_types->size() == 1)
+            {
                 trait::runtime_enabled<backtrace_metrics>::set(false);
+            }
 
             _perf_sampler = std::make_unique<perf::perf_event>();
 
@@ -878,7 +892,9 @@ configure(bool _setup, std::int64_t _tid)
                 },
                 [](int, pid_t, long, std::int64_t _idx) {
                     if(!perf::get_instance(_idx) || !perf::get_instance(_idx)->is_open())
+                    {
                         return true;
+                    }
                     auto _stopped = perf::get_instance(_idx)->stop();
                     if(_stopped) perf::get_instance(_idx)->close();
                     return _stopped;
@@ -994,13 +1010,17 @@ configure(bool _setup, std::int64_t _tid)
 
             // wait for the samples to finish
             for(auto& itr : get_sampler_allocators())
+            {
                 if(itr) itr->flush();
+            }
 
             stop_duration_thread();
         }
 
         if(trait::runtime_enabled<backtrace_metrics>::get())
+        {
             backtrace_metrics::configure(_setup, _tid);
+        }
 
         LOG_DEBUG("Sampler destroyed for thread {}...", _tid);
     }
@@ -1069,7 +1089,9 @@ shutdown()
     if(is_child_process())
     {
         for(auto& itr : *sampler_instances::get())
+        {
             itr.release();
+        }
         return std::set<int>{};
     }
 
@@ -1145,7 +1167,9 @@ post_process()
     configure(false, 0);
 
     for(auto& itr : get_sampler_allocators())
+    {
         if(itr) itr->flush();
+    }
 
     for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
     {
@@ -1255,7 +1279,9 @@ post_process()
     get_offload_file().reset();  // remove the temporary file
 
     for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
+    {
         get_sampler(i).reset();
+    }
 
     for(auto& itr : get_sampler_allocators())
     {
@@ -1294,7 +1320,9 @@ parse_timer_data(std::int64_t _tid, const bundle_t* _init,
         const auto* _last_metrics = _last->get<backtrace_metrics>();
 
         if(!_bt_data || !_bt_time || _bt_data->empty() || _bt_time->get_tid() != _tid)
+        {
             continue;
+        }
 
         auto _ret  = timer_sampling_data{};
         _ret.m_tid = _bt_time->get_tid();
@@ -1344,7 +1372,9 @@ parse_overflow_data(std::int64_t                  _tid, const bundle_t*,
         auto* _bt_time = itr->get<backtrace_timestamp>();
 
         if(!_bt_call || !_bt_time || _bt_call->empty() || _bt_time->get_tid() != _tid)
+        {
             continue;
+        }
 
         for(const auto& pitr : callchain::filter_and_patch(_bt_call->get()))
         {
@@ -1395,7 +1425,9 @@ post_process_perfetto(std::int64_t                               _tid,
         }
         backtrace_metrics::init_perfetto(_tid, _valid_metrics);
         for(const auto& itr : _timer_data)
+        {
             itr.m_metrics.post_process_perfetto(_tid, 0.5 * (itr.m_beg + itr.m_end));
+        }
         backtrace_metrics::fini_perfetto(_tid, _valid_metrics);
     }
 
@@ -1422,8 +1454,10 @@ post_process_perfetto(std::int64_t                               _tid,
         const auto _overflow_prefix = std::string_view{ "PERF_COUNT_" };
         const auto _overflow_pos    = _overflow_event.find(_overflow_prefix);
         if(_overflow_pos != std::string::npos)
+        {
             _overflow_event =
                 _overflow_event.substr(_overflow_pos + _overflow_prefix.length());
+        }
 
         const auto* _main_name =
             static_strings
@@ -1560,8 +1594,10 @@ post_process_perfetto(std::int64_t                               _tid,
                         // current values when read
                         auto _hw_cnt_vals = itr.m_metrics.get_hw_counters();
                         for(size_t i = 0; i < _labels.size(); ++i)
+                        {
                             tracing::add_perfetto_annotation(ctx, _labels.at(i),
                                                              _hw_cnt_vals.at(i));
+                        }
                     }
                 };
 
@@ -1661,9 +1697,13 @@ post_process_timemory(std::int64_t                               _tid,
     // compute the total number of entries
     std::int64_t _sum = 0;
     for(const auto& itr : _overflow_data)
+    {
         _sum += itr.m_stack.size();
+    }
     for(const auto& itr : _timer_data)
+    {
         _sum += itr.m_stack.size();
+    }
 
     for(const auto& itr : _overflow_data)
     {
@@ -1839,7 +1879,9 @@ cache_backtrace_metrics(std::int64_t                            _tid,
         }
         backtrace_metrics::init_cache(_tid, _valid_metrics);  // move to setup
         for(const auto& itr : _timer_data)
+        {
             itr.m_metrics.cache_backtrace_data(_tid, 0.5 * (itr.m_beg + itr.m_end));
+        }
     }
 }
 
@@ -1921,35 +1963,45 @@ void
 postfork_parent_reinit()
 {
     if(config::get_use_process_sampling() && config::get_use_amd_smi())
+    {
         pmc::postfork_parent_reinit();
+    }
 }
 
 void
 postfork_child_cleanup()
 {
     if(config::get_use_process_sampling() && config::get_use_amd_smi())
+    {
         pmc::postfork_child_cleanup();
+    }
 }
 
 void
 prefork_lock_pmc_sampler()
 {
     if(config::get_use_process_sampling() && config::get_use_amd_smi())
+    {
         pmc::prefork_lock_sampler();
+    }
 }
 
 void
 postfork_parent_unlock_pmc_sampler()
 {
     if(config::get_use_process_sampling() && config::get_use_amd_smi())
+    {
         pmc::postfork_parent_unlock_sampler();
+    }
 }
 
 void
 postfork_child_reset_pmc_sampler_lock()
 {
     if(config::get_use_process_sampling() && config::get_use_amd_smi())
+    {
         pmc::postfork_child_reset_sampler_lock();
+    }
 }
 
 void

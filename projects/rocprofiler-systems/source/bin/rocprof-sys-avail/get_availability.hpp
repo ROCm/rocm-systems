@@ -112,14 +112,18 @@ get_availability<Type>::get_info()
     auto _cleanup = [](std::string _type, const std::string& _pattern) {
         auto _pos = std::string::npos;
         while((_pos = _type.find(_pattern)) != std::string::npos)
+        {
             _type.erase(_pos, _pattern.length());
+        }
         return _type;
     };
     auto _replace = [](std::string _type, const std::string& _pattern,
                        const std::string& _with) {
         auto _pos = std::string::npos;
         while((_pos = _type.find(_pattern)) != std::string::npos)
+        {
             _type.replace(_pos, _pattern.length(), _with);
+        }
         return _type;
     };
 
@@ -152,13 +156,19 @@ get_availability<Type>::get_info()
         if(has_metadata) description += ". " + metadata_t::extra_description();
         description += ".";
         while(itr->empty())
+        {
             ++itr;
+        }
         if(itr != ids_set.end())
+        {
             ids_str = TIMEMORY_JOIN("", TIMEMORY_JOIN("", db, *itr++, de));
+        }
         for(; itr != ids_set.end(); ++itr)
         {
             if(!itr->empty())
+            {
                 ids_str = TIMEMORY_JOIN(", ", ids_str, TIMEMORY_JOIN("", db, *itr, de));
+            }
         }
     }
 

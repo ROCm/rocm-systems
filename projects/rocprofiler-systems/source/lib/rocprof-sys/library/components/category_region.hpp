@@ -431,9 +431,11 @@ category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::outgoing,
 {
     stop<OptsT...>(_data.tool_id, [&](::perfetto::EventContext ctx) {
         if(config::get_perfetto_annotations())
+        {
             tracing::add_perfetto_annotation(
                 ctx, "return",
                 fmt::format("{}", fmt::join(std::forward_as_tuple(_args...), ", ")));
+        }
     });
 }
 
@@ -462,9 +464,11 @@ category_region<CategoryT>::audit(std::string_view _name, audit::outgoing,
 {
     stop<OptsT...>(_name.data(), [&](::perfetto::EventContext ctx) {
         if(config::get_perfetto_annotations())
+        {
             tracing::add_perfetto_annotation(
                 ctx, "return",
                 fmt::format("{}", fmt::join(std::forward_as_tuple(_args...), ", ")));
+        }
     });
 }
 

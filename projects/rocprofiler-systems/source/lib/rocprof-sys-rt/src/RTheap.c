@@ -103,7 +103,9 @@ trymmap(size_t len, Address beg, Address end, size_t inc, int fd)
             /* Success doesn't necessarily mean it actually mapped at the hinted
              * address.  Return if it's in range, else unmap and try again. */
             if((Address) result >= beg && (Address) result + len <= end)
+            {
                 return (Address) result;
+            }
             unmap_region(result, len);
         }
     }

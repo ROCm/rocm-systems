@@ -29,7 +29,9 @@ find_library_path(const std::string& _name, const std::vector<std::string>& _env
     {
         auto&& _path = itr.pathname;
         if(_path.find(_name) != std::string::npos && filepath::exists(_path))
+        {
             return _path;
+        }
     }
 
     auto _paths = std::vector<std::string>{};
@@ -37,7 +39,9 @@ find_library_path(const std::string& _name, const std::vector<std::string>& _env
     {
         auto _env_val = get_env(itr, std::string{});
         for(auto vitr : tim::delimit(_env_val, ":"))
+        {
             if(!vitr.empty()) _paths.emplace_back(vitr);
+        }
     }
 
     for(const std::string& itr : _hints)

@@ -569,7 +569,9 @@ parse_link_map(struct link_map* l)
     assert(sizeof(dynamic_ptr->d_un.d_ptr) == sizeof(void*));
     for(; dynamic_ptr->d_tag != DT_NULL && dynamic_ptr->d_tag != DT_DYNINST;
         dynamic_ptr++)
+    {
         ;
+    }
     if(dynamic_ptr->d_tag == DT_NULL)
     {
         return NOT_REWRITTEN;
@@ -593,10 +595,14 @@ parse_link_map(struct link_map* l)
             (void*) (((unsigned long) header->traps[i].target) + l->l_addr);
         if(!header->low_entry ||
            header->low_entry > (unsigned long) header->traps[i].source)
+        {
             header->low_entry = (unsigned long) header->traps[i].source;
+        }
         if(!header->high_entry ||
            header->high_entry < (unsigned long) header->traps[i].source)
+        {
             header->high_entry = (unsigned long) header->traps[i].source;
+        }
     }
 
     new_pos = get_next_free_bitmask(all_headers_last, -1);

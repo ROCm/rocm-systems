@@ -266,19 +266,25 @@ struct sample_processor_t
     ROCPROFSYS_INLINE void handle_sample(const SampleType& sample) const
     {
         for(const auto& view : m_processor_view_list)
+        {
             view.handle(sample);
+        }
     }
 
     ROCPROFSYS_INLINE void prepare_for_processing() const noexcept
     {
         for(const auto& view : m_processor_view_list)
+        {
             view.prepare_for_processing();
+        }
     }
 
     ROCPROFSYS_INLINE void finalize_processing() const noexcept
     {
         for(const auto& view : m_processor_view_list)
+        {
             view.finalize_processing();
+        }
     }
 
     ROCPROFSYS_INLINE bool is_empty() const noexcept

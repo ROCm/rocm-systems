@@ -232,7 +232,9 @@ try_again:
     if(-1 == res)
     {
         if(errno == EINTR || errno == EAGAIN)
+        {
             goto try_again;
+        }
         else
         {
             perror("write");

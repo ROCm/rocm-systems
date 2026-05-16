@@ -121,17 +121,21 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
 
     // exclude internal libraries used by rocprof-sys
     if(_scopes.count(sf::BINARY_FILTER) > 0)
+    {
         _filters.emplace_back(sf{ sf::FILTER_EXCLUDE, sf::BINARY_FILTER,
                                   "lib(rocprof-sys[-\\.]|dyninst|"
                                   "tbbmalloc|gotcha\\.|unwind\\.so\\.99)" });
+    }
 
     // in function mode, it generally doesn't help to experiment on main function since
     // telling the user to "make the main function" faster is literally useless since it
     // contains everything that could be made faster
     if(config::get_causal_mode() == CausalMode::Function &&
        _scopes.count(sf::FUNCTION_FILTER) > 0)
+    {
         _filters.emplace_back(sf{ sf::FILTER_EXCLUDE, sf::FUNCTION_FILTER,
                                   "( main\\(|^main$|^main\\.cold$)" });
+    }
 
     bool _use_default_excludes =
         config::get_setting_value<bool>("ROCPROFSYS_CAUSAL_FUNCTION_EXCLUDE_DEFAULTS")
@@ -177,25 +181,37 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
         if(_former_include != _current_include)
         {
             if(!_binary_include.empty())
+            {
                 LOG_DEBUG("[causal] binary scope     : {}", _binary_include);
+            }
             if(!_source_include.empty())
+            {
                 LOG_DEBUG("[causal] source scope     : {}", _source_include);
+            }
             if(!_function_include.empty())
+            {
                 LOG_DEBUG("[causal] function scope   : {}", _function_include);
+            }
             _former_include = _current_include;
         }
 
         if(!_binary_include.empty() && _scopes.count(sf::BINARY_FILTER) > 0)
+        {
             _filters.emplace_back(
                 sf{ sf::FILTER_INCLUDE, sf::BINARY_FILTER, _binary_include });
+        }
 
         if(!_source_include.empty() && _scopes.count(sf::SOURCE_FILTER) > 0)
+        {
             _filters.emplace_back(
                 sf{ sf::FILTER_INCLUDE, sf::SOURCE_FILTER, _source_include });
+        }
 
         if(!_function_include.empty() && _scopes.count(sf::FUNCTION_FILTER) > 0)
+        {
             _filters.emplace_back(
                 sf{ sf::FILTER_INCLUDE, sf::FUNCTION_FILTER, _function_include });
+        }
     }
 
     // exclude handling
@@ -212,25 +228,37 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
         if(_former_exclude != _current_exclude)
         {
             if(!_binary_exclude.empty())
+            {
                 LOG_DEBUG("[causal] binary exclude   : {}", _binary_exclude);
+            }
             if(!_source_exclude.empty())
+            {
                 LOG_DEBUG("[causal] source exclude   : {}", _source_exclude);
+            }
             if(!_function_exclude.empty())
+            {
                 LOG_DEBUG("[causal] function exclude : {}", _function_exclude);
+            }
             _former_exclude = _current_exclude;
         }
 
         if(!_binary_exclude.empty() && _scopes.count(sf::BINARY_FILTER) > 0)
+        {
             _filters.emplace_back(
                 sf{ sf::FILTER_EXCLUDE, sf::BINARY_FILTER, _binary_exclude });
+        }
 
         if(!_source_exclude.empty() && _scopes.count(sf::SOURCE_FILTER) > 0)
+        {
             _filters.emplace_back(
                 sf{ sf::FILTER_EXCLUDE, sf::SOURCE_FILTER, _source_exclude });
+        }
 
         if(!_function_exclude.empty() && _scopes.count(sf::FUNCTION_FILTER) > 0)
+        {
             _filters.emplace_back(
                 sf{ sf::FILTER_EXCLUDE, sf::FUNCTION_FILTER, _function_exclude });
+        }
     }
 
     return _filters;
@@ -246,7 +274,9 @@ get_cached_binary_info()
         auto _files    = std::vector<std::string>{};
         _files.reserve(_link_map.size());
         for(const auto& itr : _link_map)
+        {
             _files.emplace_back(itr.real());
+        }
 
         auto _discarded = std::vector<binary::binary_info>{};
         auto _requested = binary::get_binary_info(_files, get_filters());
@@ -381,7 +411,9 @@ save_line_info_impl(std::ostream&                           _ofs,
                  << "] :: " << itr.file;
             if(itr.line > 0) _ofs << ":" << itr.line;
             if(!itr.func.empty())
+            {
                 _ofs << " [" << rocprofsys::utility::demangle(itr.func) << "]";
+            }
             _ofs << "\n";
 
             if(std::get<0>(_info))
@@ -390,7 +422,9 @@ save_line_info_impl(std::ostream&                           _ofs,
                 {
                     _ofs << "        " << ditr.file << ":" << ditr.line;
                     if(!ditr.func.empty())
+                    {
                         _ofs << " [" << rocprofsys::utility::demangle(ditr.func) << "]";
+                    }
                     _ofs << "\n";
                 }
             }
@@ -422,7 +456,9 @@ save_line_info_impl(std::ostream&                           _ofs,
     };
 
     for(const auto& itr : _binary_data)
+    {
         _write_impl(itr);
+    }
 }
 
 void
@@ -457,7 +493,9 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
     }
 
     if(!perform_experiment_impl_completed)
+    {
         perform_experiment_impl_completed = std::make_unique<std::promise<void>>();
+    }
 
     perform_experiment_impl_completed->set_value_at_thread_exit();
 
@@ -567,7 +605,9 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
 
                 auto _samples = std::vector<std::pair<uintptr_t, size_t>>{};
                 for(const auto& itr : _samples_map)
+                {
                     _samples.emplace_back(itr.first, itr.second);
+                }
 
                 // sort by most samples
                 std::sort(_samples.begin(), _samples.end(),
@@ -676,7 +716,9 @@ auto latest_eligible_pc = []() {
     constexpr size_t array_size = unwind_depth;
     auto             _arr = std::array<std::unique_ptr<atomic_uintptr_t>, array_size>{};
     for(auto& itr : _arr)
+    {
         itr = std::make_unique<std::atomic<uintptr_t>>(0);
+    }
     return _arr;
 }();
 }  // namespace
@@ -698,8 +740,10 @@ save_line_info(const settings::compose_filename_config& _cfg, int _verbose)
         if(tim::filepath::open(_ofs, ofname))
         {
             if(_verbose >= 0)
+            {
                 operation::file_output_message<binary::symbol>{}(
                     ofname, std::string{ "causal_symbol_info" });
+            }
             save_line_info_impl(_ofs, _data, _info);
             save_maps_info_impl(_ofs);
         }
@@ -795,7 +839,9 @@ sample_selection(size_t _nitr, size_t _wait_ns)
             eligible_pc_history[_addr] += 1;
 
             if(get_causal_mode() == CausalMode::Function)
+            {
                 _sym_addr = (_dl_info.symbol) ? _dl_info.symbol.address() : _addr;
+            }
 
             // lookup the PC line info at either the address or the symbol address
             auto linfo = get_line_info(_lookup_addr, false);
@@ -919,10 +965,12 @@ get_line_info(uintptr_t _addr, bool _include_discarded)
                     for(const auto& itr : ditr.get_debug_line_info(_filters))
                     {
                         if(!_ipaddr.contains(itr.ipaddr()))
+                        {
                             throw std::runtime_error(
                                 fmt::format("Error! debug line info ipaddr ({}) is not "
                                                           "contained in symbol ipaddr ({})",
                                                    itr.ipaddr().as_hex(), _ipaddr.as_hex()));
+                        }
                         if(itr.ipaddr().contains(_addr)) _debug_data.emplace_back(itr);
                     }
                     utility::combine(_local_data, _debug_data);
@@ -939,9 +987,13 @@ get_line_info(uintptr_t _addr, bool _include_discarded)
     };
 
     if(_include_discarded)
+    {
         _get_line_info(get_cached_binary_info().first, _glob_filters);
+    }
     else
+    {
         _get_line_info(get_cached_binary_info().second, _scope_filters);
+    }
 
     return _data;
 }
@@ -1017,9 +1069,13 @@ std::uint16_t
 sample_virtual_speedup()
 {
     if(speedup_dist.empty())
+    {
         return 0;
+    }
     else if(speedup_dist.size() == 1)
+    {
         return speedup_dist.front();
+    }
     else
     {
         struct virtual_speedup

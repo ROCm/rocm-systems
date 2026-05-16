@@ -364,7 +364,9 @@ destroy_timemory(std::pair<instrumentation_bundle_t*, size_t> _data)
     {
         auto& _bundles = tracing::get_instrumentation_bundles();
         if(ROCPROFSYS_LIKELY(_bundles != nullptr))
+        {
             _bundles->destroy(_data.first, _data.second);
+        }
     }
 }
 

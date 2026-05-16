@@ -46,7 +46,9 @@ get_uncovered(const std::vector<Tp, Args...>& _covered,
     {
         if(!std::any_of(_covered.begin(), _covered.end(),
                         [itr](auto&& _entry) { return _entry == itr; }))
+        {
             _v.emplace_back(itr);
+        }
     }
     return _v;
 }
@@ -56,11 +58,17 @@ code_coverage::data&
 code_coverage::data::operator+=(const data& rhs)
 {
     for(auto&& itr : rhs.addresses)
+    {
         addresses.emplace(itr);
+    }
     for(auto&& itr : rhs.modules)
+    {
         modules.emplace(itr);
+    }
     for(auto&& itr : rhs.modules)
+    {
         modules.emplace(itr);
+    }
     return *this;
 }
 

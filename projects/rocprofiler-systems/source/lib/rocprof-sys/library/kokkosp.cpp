@@ -116,9 +116,13 @@ strlength(Tp&& _v)
     using type = ::tim::concepts::unqualified_type_t<Tp>;
     if constexpr(std::is_same<type, std::string_view>::value ||
                  std::is_same<type, std::string>::value)
+    {
         return _v.length();
+    }
     else
+    {
         return strnlen(_v, std::max<size_t>(_name_len_limit, 1));
+    }
 }
 
 template <typename Arg, typename... Args>
@@ -129,16 +133,22 @@ violates_name_rules(Arg&& _arg, Args&&... _args)
     if(rocprofsys::config::get_use_causal() &&
        (std::string_view{ _arg }.find("Kokkos::") == 0 ||
         std::string_view{ _arg }.find("Space::") != std::string_view::npos))
+    {
         return true;
+    }
 
     size_t _len =
         (strlength(std::forward<Arg>(_arg)) + ... + strlength(std::forward<Args>(_args)));
 
     // ignore labels without names
     if(_len == 0)
+    {
         return true;
+    }
     else if(_name_len_limit == 0)
+    {
         return false;
+    }
 
     return (_len >= _name_len_limit);
 }
@@ -292,7 +302,9 @@ extern "C"
                     auto&& _path = itr.pathname;
                     if(!_path.empty() && _path.at(0) != '[' &&
                        rocprofsys::filepath::exists(_path))
+                    {
                         _libs.emplace(_path);
+                    }
                 }
                 for(const auto& itr : _libs)
                 {
@@ -300,7 +312,9 @@ extern "C"
                     {
                         std::stringstream _libs_str{};
                         for(const auto& litr : _libs)
+                        {
                             _libs_str << "- " << litr << "\n";
+                        }
                         LOG_CRITICAL(
                             "{} was invoked with librocprof-sys.so as the "
                             "KOKKOS_TOOLS_LIBS."

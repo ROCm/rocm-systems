@@ -220,13 +220,20 @@ mpi_gotcha::update()
     for(const auto& itr : mpi_comm_records)
     {
         // skip null comms
-        if(itr.first == null_comm()) continue;
-        // if currently have null comm, replace
+        if(itr.first == null_comm())
+        {
+            continue;
+            // if currently have null comm, replace
+        }
         else if(_rank_data.comm == null_comm())
+        {
             _rank_data = itr.second;
-        // if
+            // if
+        }
         else if(itr.second > _rank_data)
+        {
             _rank_data = itr.second;
+        }
     }
 
     if(_rank_data.updated() && _rank_data != last_comm_record)
@@ -287,10 +294,14 @@ mpi_gotcha::audit([[maybe_unused]] const gotcha_data_t& _data, audit::incoming)
 
     auto _blocked = get_sampling_signals();
     if(!_blocked.empty())
+    {
         tim::signals::block_signals(_blocked, tim::signals::sigmask_scope::process);
+    }
 
     if(mpip_index != std::numeric_limits<std::uint64_t>::max())
+    {
         deactivate_mpip<mpip_bundle_t, project::rocprofsys>(mpip_index);
+    }
 
 #if !defined(ROCPROFSYS_USE_MPI) && defined(ROCPROFSYS_USE_MPI_HEADERS)
     rocprofsys::mpi::is_initialized_callback() = []() { return false; };

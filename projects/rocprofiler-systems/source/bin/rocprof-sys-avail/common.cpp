@@ -75,7 +75,9 @@ get_regex_pattern()
             lerr << "Adding regex key: '" << _local_pattern << "'...\n";
         }
         for(auto& itr : _v)
+        {
             if(!itr.empty()) itr = itr.substr(1);
+        }
 
         return _v;
     }();
@@ -96,7 +98,9 @@ bool
 regex_match(const std::string& _line)
 {
     if(get_regex_pattern().at(0).empty() && get_regex_pattern().at(1).empty())
+    {
         return true;
+    }
 
     static size_t lerr_width = 0;
     lerr_width               = std::max<size_t>(lerr_width, _line.length());
@@ -149,7 +153,9 @@ regex_replace(const std::string& _line)
 #if defined(TIMEMORY_UNIX)
     if(get_regex_pattern().empty()) return _line;
     if(regex_match(_line))
+    {
         return std::regex_replace(_line, get_regex().at(0), "\33[01;04;36;40m$&\33[0m");
+    }
 #endif
     return _line;
 }
@@ -176,7 +182,9 @@ get_category_regex_pattern()
             lerr << "Adding category regex key: '" << _local_pattern << "'...\n";
         }
         for(auto& itr : _v)
+        {
             if(!itr.empty()) itr = itr.substr(1);
+        }
 
         return _v;
     }();
@@ -198,7 +206,9 @@ category_regex_match(const std::string& _line)
 {
     if(get_category_regex_pattern().at(0).empty() &&
        get_category_regex_pattern().at(1).empty())
+    {
         return true;
+    }
 
     static size_t lerr_width = 0;
     lerr_width               = std::max<size_t>(lerr_width, _line.length());
@@ -351,7 +361,9 @@ process_categories(parser_t& p, const str_set_t& _category_options)
         }
     }
     for(auto&& itr : _shorthand_patches)
+    {
         itr();
+    }
 }
 
 //--------------------------------------------------------------------------------------//
@@ -409,7 +421,9 @@ file_exists(const std::string& _fname)
 {
     struct stat _buffer;
     if(stat(_fname.c_str(), &_buffer) == 0)
+    {
         return (S_ISREG(_buffer.st_mode) != 0 || S_ISLNK(_buffer.st_mode) != 0);
+    }
     return false;
 }
 

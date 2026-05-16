@@ -74,7 +74,9 @@ extract_metadata(const nlohmann::json& content)
         if(meta.contains("name")) info.name = meta["name"].get<std::string>();
         if(meta.contains("cli_flag")) info.cli_flag = meta["cli_flag"].get<std::string>();
         if(meta.contains("description"))
+        {
             info.description = meta["description"].get<std::string>();
+        }
         if(meta.contains("use_case")) info.use_case = meta["use_case"].get<std::string>();
         if(meta.contains("category")) info.category = meta["category"].get<std::string>();
     }
@@ -117,7 +119,9 @@ preset_registry::translate_legacy_flag(std::string_view arg) const
     // Must start with "--" and not contain "="
     if(arg.size() <= 2 || arg.compare(0, 2, "--") != 0 ||
        arg.find('=') != std::string_view::npos)
+    {
         return {};
+    }
 
     auto name = std::string{ arg.substr(2) };
     if(m_presets.count(name) == 0) return {};
@@ -141,7 +145,9 @@ preset_registry::load_file(const std::string& filepath)
         // Cache the raw JSON — move into primary key, copy to secondary if needed
         m_json_cache[filepath] = std::move(j);
         if(!info.name.empty() && info.name != filepath)
+        {
             m_json_cache[info.name] = m_json_cache[filepath];
+        }
 
         return info;
     } catch(const nlohmann::json::exception& e)
@@ -243,7 +249,9 @@ preset_registry::ensure_all_loaded()
         if(filename.size() <= json_ext.size() ||
            filename.compare(filename.size() - json_ext.size(), json_ext.size(),
                             json_ext) != 0)
+        {
             continue;
+        }
 
         if(filename == "schema.json") continue;
 
@@ -387,9 +395,13 @@ preset_registry::describe(std::string_view preset_name)
             constexpr int KB_PER_GB = 1024 * 1024;
             auto          buffer_kb = tracing["buffer_size_kb"].value("value", 0);
             if(buffer_kb >= KB_PER_GB)
+            {
                 entry += " (buffer: " + std::to_string(buffer_kb / KB_PER_GB) + " GB)";
+            }
             else if(buffer_kb > 0)
+            {
                 entry += " (buffer: " + std::to_string(buffer_kb) + " KB)";
+            }
         }
         lines.push_back(entry);
     }
@@ -402,7 +414,9 @@ preset_registry::describe(std::string_view preset_name)
         std::string entry = std::string("Profiling:       ") + (enabled ? "ON" : "OFF");
         if(enabled && profiling.contains("flat_profile") &&
            profiling["flat_profile"].value("enabled", false))
+        {
             entry += " (flat profile)";
+        }
         lines.push_back(entry);
     }
 
@@ -459,7 +473,9 @@ preset_registry::describe(std::string_view preset_name)
         {
             auto runtime_names = collect_enabled_names(parallel["runtimes"]);
             if(!runtime_names.empty())
+            {
                 lines.push_back("Parallel:        " + runtime_names);
+            }
         }
     }
 

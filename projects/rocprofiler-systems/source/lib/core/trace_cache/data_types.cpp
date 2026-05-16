@@ -60,19 +60,25 @@ enabled_formats_t::print() const
 {
     if(std::none_of(formats.begin(), formats.end(),
                     [](const auto& f) { return f.enabled; }))
+    {
         return;
+    }
 
     LOG_INFO("Generating [{}] format(s) with collected data from trace cache. "
              "This may take a while..",
              names().c_str());
 
     if(has_parallel_formats())
+    {
         LOG_INFO("  - Using parallel processing for: {}",
                  join_names(formats, parallel_pred));
+    }
 
     if(has_sequential_formats())
+    {
         LOG_INFO("  - Using sequential processing for: {}",
                  join_names(formats, sequential_pred));
+    }
 }
 
 bool

@@ -180,7 +180,9 @@ parse_proc_stat(std::string_view content)
         if(!starts_with(line, PROC_STAT_CPU_PREFIX) ||
            line.size() <= PROC_STAT_CPU_PREFIX.size() ||
            !std::isdigit(static_cast<unsigned char>(line[PROC_STAT_CPU_PREFIX.size()])))
+        {
             return;
+        }
 
         const auto space = line.find(' ');
         if(space == std::string_view::npos) return;

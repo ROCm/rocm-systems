@@ -155,9 +155,13 @@ log_level_to_verbose(std::string_view level) noexcept
     auto iequal = [](std::string_view lhs, std::string_view rhs) noexcept {
         if(lhs.size() != rhs.size()) return false;
         for(std::size_t idx = 0; idx < lhs.size(); ++idx)
+        {
             if(std::tolower(static_cast<unsigned char>(lhs[idx])) !=
                std::tolower(static_cast<unsigned char>(rhs[idx])))
+            {
                 return false;
+            }
+        }
         return true;
     };
     if(iequal(level, "trace")) return 2;

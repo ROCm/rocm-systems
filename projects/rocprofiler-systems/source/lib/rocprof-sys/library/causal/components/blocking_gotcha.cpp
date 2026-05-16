@@ -175,12 +175,18 @@ blocking_gotcha::operator()(gotcha_index<sigwait_idx>, int (*)(const sigset_t*, 
 
     // Woken up by another thread if the call did not fail and this is waking process
     if(_active && _ret != -1 && _info.si_pid == process::get_id())
+    {
         causal::delay::postblock(_delay_value);
+    }
 
     if(_ret == -1)
+    {
         return errno;  // If there was an error, return the error code
+    }
     else
+    {
         *_sig = _ret;  // sig is declared as non-null so skip check
+    }
 
     return 0;
 }
@@ -204,7 +210,9 @@ blocking_gotcha::operator()(gotcha_index<sigwaitinfo_idx>,
 
     // Woken up by another thread if the call did not fail and this is waking process
     if(_active && _ret > 0 && _info.si_pid == process::get_id())
+    {
         causal::delay::postblock(_delay_value);
+    }
 
     if(_ret > 0 && _info_v) *_info_v = _info;
 
@@ -232,7 +240,9 @@ blocking_gotcha::operator()(gotcha_index<sigtimedwait_idx>,
 
     // Woken up by another thread if the call did not fail and this is waking process
     if(_active && _ret > 0 && _info.si_pid == process::get_id())
+    {
         causal::delay::postblock(_delay_value);
+    }
 
     if(_ret > 0 && _info_v) *_info_v = _info;
 

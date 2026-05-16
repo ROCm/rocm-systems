@@ -94,8 +94,12 @@ check_regex_restrictions(const ContainerT<std::string, TailT...>& _names,
                          const regexvec_t&                        _regexes)
 {
     for(const auto& nitr : _names)
+    {
         for(const auto& ritr : _regexes)
+        {
             if(std::regex_search(nitr, ritr)) return true;
+        }
+    }
     return false;
 }
 
@@ -179,7 +183,9 @@ get_library_search_paths_impl()
 
     // search paths from environment variables
     for(const auto& itr : delimit(get_env("LD_LIBRARY_PATH", std::string{}, false), ":"))
+    {
         _emplace_if_exists(itr);
+    }
 
     for(const auto& itr : { get_env<std::string>("ROCPROFSYS_ROCM_PATH", ""),
                             get_env<std::string>("ROCM_PATH", ""),
@@ -213,7 +219,9 @@ get_library_search_paths_impl()
                 auto _paren_pos = _inp.find('(');
                 auto _arrow_pos = _inp.find("=>", _paren_pos);
                 if(_arrow_pos == std::string::npos || _paren_pos == std::string::npos)
+                {
                     return std::string{};
+                }
                 if(_arrow_pos + 2 < _inp.length())
                 {
                     auto _pos = _inp.find_first_not_of(" \t", _arrow_pos + 2);
@@ -432,7 +440,9 @@ get_internal_libs_data_impl()
         auto _fpath = filepath::realpath(itr, nullptr, false);
         // allow the user to request this library be considered for instrumentation
         if(check_regex_restrictions(strvec_t{ itr, _fpath }, file_internal_include))
+        {
             continue;
+        }
 
         _data.emplace(_fpath, module_func_map_t{});
     }
@@ -460,7 +470,9 @@ get_internal_libs_data_impl()
             // allow the user to request this library be considered for instrumentation
             if(check_regex_restrictions(strvec_t{ _mname, _mpath },
                                         file_internal_include))
+            {
                 continue;
+            }
 
             verbprintf(3, "[internal]     parsing module: '%s' (via '%s')...\n",
                        _mname.c_str(), filepath::basename(itr.first));
@@ -505,7 +517,9 @@ ordered(const std::unordered_set<Tp, TailT...>& _unordered)
 {
     auto _ordered = std::set<Tp>{};
     for(const auto& itr : _unordered)
+    {
         _ordered.emplace(itr);
+    }
     return _ordered;
 }
 
@@ -515,7 +529,9 @@ ordered(const std::unordered_map<KeyT, MappedT, TailT...>& _unordered)
 {
     auto _ordered = std::map<KeyT, MappedT>{};
     for(const auto& itr : _unordered)
+    {
         _ordered.emplace(itr.first, itr.second);
+    }
     return _ordered;
 }
 

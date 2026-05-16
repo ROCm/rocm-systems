@@ -47,7 +47,9 @@ tc_lock_lock(tc_lock_t* tc)
     if(me == tc->tid) return DYNINST_DEAD_LOCK;
 
     while(!atomic_set(&tc->mutex))
+    {
         ;
+    }
 
     tc->tid = me;
     return 0;

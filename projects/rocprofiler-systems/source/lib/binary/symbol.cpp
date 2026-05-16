@@ -50,8 +50,10 @@ read_inliner_info(bfd* _inp)
         if(bfd_find_inliner_info(_inp, &_file, &_func, &_line) != 0)
         {
             if(_file && _func && _line > 0)
+            {
                 _data.emplace_back(inlined_symbol{
                     _line, filepath::realpath(_file, nullptr, false), _func });
+            }
         }
         else
         {
@@ -82,11 +84,15 @@ symbol::operator<(const symbol& _rhs) const
     // if both have non-zero load addresses that are not equal, compare based on load
     // addresses
     if(load_address > 0 && _rhs.load_address > 0 && load_address != _rhs.load_address)
+    {
         return (load_address < _rhs.load_address);
+    }
 
     // if address is same and name is same, return true if load_address is higher
     if(address == _rhs.address && base_type::name == _rhs.base_type::name)
+    {
         return load_address > _rhs.load_address;
+    }
 
     return std::tie(address, base_type::binding, base_type::visibility, base_type::name) <
            std::tie(_rhs.address, _rhs.base_type::binding, base_type::visibility,
@@ -119,7 +125,9 @@ symbol::operator+=(const symbol& _rhs)
         if(_rhs.binding < binding) binding = _rhs.binding;
         if(_rhs.visibility < visibility) visibility = _rhs.visibility;
         if(load_address == 0 && _rhs.load_address > load_address)
+        {
             load_address = _rhs.load_address;
+        }
     }
     else
     {
@@ -165,8 +173,10 @@ symbol::read_dwarf_entries(const std::deque<dwarf_entry>& _info)
     {
         // if address is already a range, do not update it
         if(!itr->address.is_range())
+        {
             itr->address = address_range{ itr->address.low,
                                           _get_next_address(itr, itr->address.low) };
+        }
     }
 
     std::sort(dwarf_info.begin(), dwarf_info.end(),
@@ -228,9 +238,13 @@ symbol::read_bfd_line_info(bfd_file& _bfd)
             if(_file) file = _file;
             if(_func) func = _func;
             if(_file && strnlen(_file, 1) > 0)
+            {
                 file = _file;
+            }
             else if(!_file || strnlen(_file, 1) == 0)
+            {
                 file = bfd_get_filename(_inp);
+            }
             if(!func.empty())
             {
                 file    = filepath::realpath(file, nullptr, false);
@@ -348,7 +362,9 @@ symbol::serialize(ArchiveT& ar, const unsigned int)
        make_nvp("line", line), make_nvp("func", func), make_nvp("file", file),
        make_nvp("inlines", inlines), make_nvp("dwarf_info", dwarf_info));
     if constexpr(concepts::is_output_archive<ArchiveT>::value)
+    {
         ar(cereal::make_nvp("dfunc", rocprofsys::utility::demangle(func)));
+    }
 }
 
 template void

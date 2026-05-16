@@ -675,16 +675,24 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, size_t length
     if(get_use_perfetto())
     {
         if(is_put)
+        {
             write_perfetto_counter_track<ucx_send>(length);
+        }
         else
+        {
             write_perfetto_counter_track<ucx_recv>(length);
+        }
     }
 
     {
         if(is_put)
+        {
             cache_comm_data_events<ucx_send>(0, length);
+        }
         else
+        {
             cache_comm_data_events<ucx_recv>(0, length);
+        }
     }
 
     if(rocprofsys::get_use_timemory())
@@ -729,16 +737,24 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t
     if(get_use_perfetto())
     {
         if(is_send)
+        {
             write_perfetto_counter_track<ucx_send>(count);
+        }
         else
+        {
             write_perfetto_counter_track<ucx_recv>(count);
+        }
     }
 
     {
         if(is_send)
+        {
             cache_comm_data_events<ucx_send>(0, count);
+        }
         else
+        {
             cache_comm_data_events<ucx_recv>(0, count);
+        }
     }
 
     if(rocprofsys::get_use_timemory())

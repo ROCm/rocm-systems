@@ -140,7 +140,9 @@ public:
 
         auto _get_str = [](const std::string& _inc) {
             if(_inc.length() > absolute_max_width)
+            {
                 return _inc.substr(0, absolute_max_width - 3) + "...";
+            }
             return _inc;
         };
 
@@ -221,7 +223,9 @@ module_function::serialize(ArchiveT& ar, const unsigned)
         ar.setNextName("instruction_breakdown");
         ar.startNode();
         for(auto itr : instruction_types)
+        {
             ar(cereal::make_nvp(std::to_string(itr.first).c_str(), itr.second));
+        }
         ar.finishNode();
         // instructions can inflate JSON size so only output when verbosity is increased
         // above default

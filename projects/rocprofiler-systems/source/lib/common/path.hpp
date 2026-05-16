@@ -153,11 +153,17 @@ path_type::path_type(const std::string& _fname)
     if(lstat(_fname.c_str(), &_buffer) == 0)
     {
         if(S_ISDIR(_buffer.st_mode) != 0)
+        {
             m_type = directory;
+        }
         else if(S_ISREG(_buffer.st_mode) != 0)
+        {
             m_type = regular;
+        }
         else if(S_ISLNK(_buffer.st_mode) != 0)
+        {
             m_type = link;
+        }
     }
 }
 
@@ -166,8 +172,10 @@ exists(const std::string& _fname)
 {
     struct stat _buffer;
     if(lstat(_fname.c_str(), &_buffer) == 0)
+    {
         return (S_ISDIR(_buffer.st_mode) != 0 || S_ISREG(_buffer.st_mode) != 0 ||
                 S_ISLNK(_buffer.st_mode) != 0);
+    }
     return false;
 }
 
@@ -179,9 +187,13 @@ get_default_lib_search_paths()
         join(":", get_env("ROCPROFSYS_PATH", ""), get_env("LD_LIBRARY_PATH", ""),
              get_env("LIBRARY_PATH", ""), get_env("PWD", ""), ".");
     if constexpr(std::is_same<RetT, std::string>::value)
+    {
         return _paths;
+    }
     else
+    {
         return delimit(_paths, ":");
+    }
 }
 
 std::string
@@ -240,7 +252,9 @@ std::string
 dirname(const std::string& _fname)
 {
     if(_fname.find('/') != std::string::npos)
+    {
         return _fname.substr(0, _fname.find_last_of('/'));
+    }
     return std::string{};
 }
 
@@ -300,7 +314,9 @@ realpath(const std::string& _relpath, std::string* _resolved)
         _len = strnlen(_result, MaxLen);
         _resolved->resize(_len);
         for(size_t i = 0; i < _len; ++i)
+        {
             (*_resolved)[i] = _result[i];
+        }
     }
 
     return (_resolved) ? *_resolved : std::string{ _result };

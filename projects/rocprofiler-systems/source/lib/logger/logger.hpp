@@ -217,7 +217,9 @@ private:
         void sink_it_(const spdlog::details::log_msg& msg) override
         {
             while(m_log_lock.exchange(true, std::memory_order_acquire))
+            {
                 std::this_thread::yield();
+            }
             spdlog::logger::sink_it_(msg);
             m_log_lock.store(false, std::memory_order_release);
         }
@@ -225,7 +227,9 @@ private:
         void flush_() override
         {
             while(m_log_lock.exchange(true, std::memory_order_acquire))
+            {
                 std::this_thread::yield();
+            }
             spdlog::logger::flush_();
             m_log_lock.store(false, std::memory_order_release);
         }

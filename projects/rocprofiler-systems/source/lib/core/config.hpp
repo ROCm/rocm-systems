@@ -117,7 +117,9 @@ set_default_setting_value(const std::string& _name, Tp&& _v)
     if(!_setting->second) return false;
 
     if(_setting->second->get_config_updated() || _setting->second->get_environ_updated())
+    {
         return false;
+    }
     return _setting->second->set(std::forward<Tp>(_v));
 }
 

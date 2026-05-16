@@ -40,7 +40,9 @@ invoke_category_region_start(rocprofsys_category_t _category, const char* name,
                 if(_annotations && config::get_perfetto_annotations())
                 {
                     for(size_t i = 0; i < _annotation_count; ++i)
+                    {
                         tracing::add_perfetto_annotation(ctx, _annotations[i]);
+                    }
                 }
             });
     }
@@ -48,8 +50,10 @@ invoke_category_region_start(rocprofsys_category_t _category, const char* name,
     {
         constexpr size_t remaining = sizeof...(Tail);
         if constexpr(remaining > 0)
+        {
             invoke_category_region_start(_category, name, _annotations, _annotation_count,
                                          std::index_sequence<Tail...>{});
+        }
     }
 }
 
@@ -75,7 +79,9 @@ invoke_category_region_stop(rocprofsys_category_t _category, const char* name,
                 if(_annotations && config::get_perfetto_annotations())
                 {
                     for(size_t i = 0; i < _annotation_count; ++i)
+                    {
                         tracing::add_perfetto_annotation(ctx, _annotations[i]);
+                    }
                 }
             });
     }
@@ -83,8 +89,10 @@ invoke_category_region_stop(rocprofsys_category_t _category, const char* name,
     {
         constexpr size_t remaining = sizeof...(Tail);
         if constexpr(remaining > 0)
+        {
             invoke_category_region_stop(_category, name, _annotations, _annotation_count,
                                         std::index_sequence<Tail...>{});
+        }
     }
 }
 }  // namespace

@@ -119,8 +119,10 @@ ensure_gpu_track(std::uint32_t device_id, bool enabled, const char* track_suffix
 {
     if(!enabled) return false;
     if(!Track::exists(device_id))
+    {
         Track::emplace(device_id, fmt::format("GPU [{}] {} (S)", device_id, track_suffix),
                        units);
+    }
     return true;
 }
 
@@ -130,8 +132,10 @@ emit_gpu_scalar(std::uint32_t device_id, size_t ts, bool enabled,
                 const char* track_suffix, const char* units, ValueT value)
 {
     if(ensure_gpu_track<Track>(device_id, enabled, track_suffix, units))
+    {
         TRACE_COUNTER(trait::name<typename Track::category_type>::value,
                       Track::at(device_id, 0), ts, static_cast<double>(value));
+    }
 }
 
 template <typename Track, typename Array, typename Fn>
@@ -530,11 +534,13 @@ perfetto_processor_t::flush(bool& _perfetto_output_error)
         operation::file_output_message<tim::project::rocprofsys> _fom{};
         // Write the trace into a file.
         if(config::get_verbose() >= 0)
+        {
             _fom(_filename, std::string{ "perfetto" },
                  " (%.2f KB / %.2f MB / %.2f GB)... ",
                  static_cast<double>(trace_data.size()) / units::KB,
                  static_cast<double>(trace_data.size()) / units::MB,
                  static_cast<double>(trace_data.size()) / units::GB);
+        }
         std::ofstream ofs{};
         if(!filepath::open(ofs, _filename, std::ios::out | std::ios::binary))
         {
@@ -1006,43 +1012,57 @@ perfetto_processor_t::handle(const cpu_pmc_sample& _cpu_sample)
     if(_is_process_owner)
     {
         if(_em.bits.page_rss)
+        {
             TRACE_COUNTER(trait::name<category::process_page>::value,
                           process_page_track::at(0, 0), _ts,
                           static_cast<double>(_cpu_sample.process_data.page_rss) /
                               units::megabyte);
+        }
 
         if(_em.bits.virt_mem)
+        {
             TRACE_COUNTER(trait::name<category::process_virt>::value,
                           process_virt_track::at(0, 0), _ts,
                           static_cast<double>(_cpu_sample.process_data.virt_mem) /
                               units::megabyte);
+        }
         if(_em.bits.peak_rss)
+        {
             TRACE_COUNTER(trait::name<category::process_peak>::value,
                           process_peak_track::at(0, 0), _ts,
                           static_cast<double>(_cpu_sample.process_data.peak_rss) /
                               units::megabyte);
+        }
 
         if(_em.bits.ctx_switches)
+        {
             TRACE_COUNTER(trait::name<category::process_context_switch>::value,
                           process_cntx_track::at(0, 0), _ts,
                           static_cast<double>(_cpu_sample.process_data.context_switches));
+        }
 
         if(_em.bits.page_faults)
+        {
             TRACE_COUNTER(trait::name<category::process_page_fault>::value,
                           process_flts_track::at(0, 0), _ts,
                           static_cast<double>(_cpu_sample.process_data.page_faults));
+        }
 
         if(_em.bits.user_time)
+        {
             TRACE_COUNTER(trait::name<category::process_user_mode_time>::value,
                           process_user_track::at(0, 0), _ts,
                           static_cast<double>(_cpu_sample.process_data.user_mode_time) /
                               units::sec);
+        }
 
         if(_em.bits.kernel_time)
+        {
             TRACE_COUNTER(trait::name<category::process_kernel_mode_time>::value,
                           process_kern_track::at(0, 0), _ts,
                           static_cast<double>(_cpu_sample.process_data.kernel_mode_time) /
                               units::sec);
+        }
     }
 
     if(_em.bits.frequency)
@@ -1316,8 +1336,10 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
     if(_nic_sample.enabled_metric.bits.rx_rdma_ucast_bytes)
     {
         if(!amd_smi_nic_rx_ucast_bytes_track::exists(_device_id))
+        {
             amd_smi_nic_rx_ucast_bytes_track::emplace(
                 _device_id, make_track_name("RX RDMA Bytes"), "bytes");
+        }
         TRACE_COUNTER(trait::name<category::amd_smi_nic_rx_ucast_bytes>::value,
                       amd_smi_nic_rx_ucast_bytes_track::at(_device_id, 0), _ts,
                       static_cast<double>(_nic_sample.metric_values.rx_rdma_ucast_bytes));
@@ -1326,8 +1348,10 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
     if(_nic_sample.enabled_metric.bits.tx_rdma_ucast_bytes)
     {
         if(!amd_smi_nic_tx_ucast_bytes_track::exists(_device_id))
+        {
             amd_smi_nic_tx_ucast_bytes_track::emplace(
                 _device_id, make_track_name("TX RDMA Bytes"), "bytes");
+        }
         TRACE_COUNTER(trait::name<category::amd_smi_nic_tx_ucast_bytes>::value,
                       amd_smi_nic_tx_ucast_bytes_track::at(_device_id, 0), _ts,
                       static_cast<double>(_nic_sample.metric_values.tx_rdma_ucast_bytes));
@@ -1336,8 +1360,10 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
     if(_nic_sample.enabled_metric.bits.rx_rdma_ucast_pkts)
     {
         if(!amd_smi_nic_rx_ucast_pkts_track::exists(_device_id))
+        {
             amd_smi_nic_rx_ucast_pkts_track::emplace(
                 _device_id, make_track_name("RX RDMA Packets"), "packets");
+        }
         TRACE_COUNTER(trait::name<category::amd_smi_nic_rx_ucast_pkts>::value,
                       amd_smi_nic_rx_ucast_pkts_track::at(_device_id, 0), _ts,
                       static_cast<double>(_nic_sample.metric_values.rx_rdma_ucast_pkts));
@@ -1346,8 +1372,10 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
     if(_nic_sample.enabled_metric.bits.tx_rdma_ucast_pkts)
     {
         if(!amd_smi_nic_tx_ucast_pkts_track::exists(_device_id))
+        {
             amd_smi_nic_tx_ucast_pkts_track::emplace(
                 _device_id, make_track_name("TX RDMA Packets"), "packets");
+        }
         TRACE_COUNTER(trait::name<category::amd_smi_nic_tx_ucast_pkts>::value,
                       amd_smi_nic_tx_ucast_pkts_track::at(_device_id, 0), _ts,
                       static_cast<double>(_nic_sample.metric_values.tx_rdma_ucast_pkts));
@@ -1356,8 +1384,10 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
     if(_nic_sample.enabled_metric.bits.rx_rdma_cnp_pkts)
     {
         if(!amd_smi_nic_rx_cnp_pkts_track::exists(_device_id))
+        {
             amd_smi_nic_rx_cnp_pkts_track::emplace(
                 _device_id, make_track_name("RX CNP Packets"), "packets");
+        }
         TRACE_COUNTER(trait::name<category::amd_smi_nic_rx_cnp_pkts>::value,
                       amd_smi_nic_rx_cnp_pkts_track::at(_device_id, 0), _ts,
                       static_cast<double>(_nic_sample.metric_values.rx_rdma_cnp_pkts));
@@ -1366,8 +1396,10 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
     if(_nic_sample.enabled_metric.bits.tx_rdma_cnp_pkts)
     {
         if(!amd_smi_nic_tx_cnp_pkts_track::exists(_device_id))
+        {
             amd_smi_nic_tx_cnp_pkts_track::emplace(
                 _device_id, make_track_name("TX CNP Packets"), "packets");
+        }
         TRACE_COUNTER(trait::name<category::amd_smi_nic_tx_cnp_pkts>::value,
                       amd_smi_nic_tx_cnp_pkts_track::at(_device_id, 0), _ts,
                       static_cast<double>(_nic_sample.metric_values.tx_rdma_cnp_pkts));
@@ -1432,18 +1464,32 @@ perfetto_processor_t::handle(const kfd_sample& _kfd)
     };
 
     if(_category == trait::name<category::rocm_kfd_page_fault>::value)
+    {
         emit_kfd_event(category::rocm_kfd_page_fault{});
+    }
     else if(_category == trait::name<category::rocm_kfd_page_migrate>::value)
+    {
         emit_kfd_event(category::rocm_kfd_page_migrate{});
+    }
     else if(_category == trait::name<category::rocm_kfd_queue>::value)
+    {
         emit_kfd_event(category::rocm_kfd_queue{});
+    }
     else if(_category == trait::name<category::rocm_kfd_event_queue>::value)
+    {
         emit_kfd_event(category::rocm_kfd_event_queue{});
+    }
     else if(_category == trait::name<category::rocm_kfd_event_unmap_from_gpu>::value)
+    {
         emit_kfd_event(category::rocm_kfd_event_unmap_from_gpu{});
+    }
     else if(_category == trait::name<category::rocm_kfd_event_dropped_events>::value)
+    {
         emit_kfd_event(category::rocm_kfd_event_dropped_events{});
+    }
     else
+    {
         LOG_WARNING("Unknown KFD category: {}", _category);
+    }
 }
 }  // namespace rocprofsys::trace_cache

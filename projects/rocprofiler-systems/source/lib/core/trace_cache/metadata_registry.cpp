@@ -705,7 +705,9 @@ metadata_registry::overwrite_callback_names(
         operation_names.reserve(operations_data.size());
 
         for(const auto& [op_idx, op_name] : operations_data)
+        {
             operation_names.emplace_back(*op_name);
+        }
 
         return operation_names;
     };

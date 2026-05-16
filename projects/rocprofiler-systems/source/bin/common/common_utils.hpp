@@ -168,11 +168,28 @@ dispatch_help(ParserT& parser, std::string_view tool_name, int exit_code)
 
             std::cerr << "\n  Group topics:\n";
             for(const auto& [name, groups] : get_help_topic_map())
-                std::cerr << "    " << name << "\n";
+            {
+                {
+                    {
+                        {
+                            std::cerr << "    " << name << "\n";
+                        }
+                    }
+                }
+            }
 
             std::cerr << "\n  Domain topics:\n";
             for(const auto& [name, info] : get_domain_help_map())
-                std::cerr << "    " << name << "  - " << info.description << "\n";
+            {
+                {
+                    {
+                        {
+                            std::cerr << "    " << name << "  - " << info.description
+                                      << "\n";
+                        }
+                    }
+                }
+            }
 
             std::cerr << "\n  --help=all  Show all options\n";
         }

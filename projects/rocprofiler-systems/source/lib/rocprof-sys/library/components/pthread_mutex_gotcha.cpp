@@ -36,17 +36,23 @@ pthread_mutex_gotcha::get_hashes()
         if(!config::get_trace_thread_locks())
         {
             for(size_t i = 0; i < 3; ++i)
+            {
                 _skip.emplace(i);
+            }
         }
         if(!config::get_trace_thread_rwlocks())
         {
             for(size_t i = 3; i < 8; ++i)
+            {
                 _skip.emplace(i);
+            }
         }
         if(!config::get_trace_thread_spin_locks())
         {
             for(size_t i = 9; i < 12; ++i)
+            {
                 _skip.emplace(i);
+            }
         }
         if(!config::get_trace_thread_barriers()) _skip.emplace(8);
         if(!config::get_trace_thread_join()) _skip.emplace(12);
@@ -54,7 +60,9 @@ pthread_mutex_gotcha::get_hashes()
         {
             auto&& _id = _data.at(i).tool_id;
             if(!_id.empty())
+            {
                 _init.at(i) = tim::add_hash_id(_id);
+            }
             else
             {
                 if(_skip.count(i) > 0) continue;
@@ -235,7 +243,9 @@ pthread_mutex_gotcha::operator()(int (*_callee)(pthread_barrier_t*),
                                  pthread_barrier_t* _barrier) const
 {
     if(get_state() != ::rocprofsys::State::Active || m_protect)
+    {
         return (*_callee)(_barrier);
+    }
     return (*this)(reinterpret_cast<uintptr_t>(_barrier), _callee, _barrier);
 }
 
@@ -244,7 +254,9 @@ pthread_mutex_gotcha::operator()(int (*_callee)(pthread_t, void**), pthread_t _t
                                  void** _tinfo) const
 {
     if(get_state() != ::rocprofsys::State::Active || m_protect)
+    {
         return (*_callee)(_thr, _tinfo);
+    }
     return (*this)(static_cast<uintptr_t>(threading::get_id()), _callee, _thr, _tinfo);
 }
 

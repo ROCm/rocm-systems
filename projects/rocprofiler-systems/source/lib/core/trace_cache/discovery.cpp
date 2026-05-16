@@ -43,7 +43,9 @@ list_dir_files(const std::string& path)
     while((entry = readdir(dir.get())) != nullptr)
     {
         if(std::string(entry->d_name) != "." && std::string(entry->d_name) != "..")
+        {
             result.emplace_back(entry->d_name);
+        }
     }
 
     return result;
@@ -72,14 +74,18 @@ find_cache_files(const pid_t& root_pid, const data::directory_files_t& dir_conte
                 int parent_pid = std::stoi(match[1]);
                 int pid        = std::stoi(match[2]);
                 if(parent_pid == root_pid)
+                {
                     cache_map[pid].buff_storage = trace_cache::tmp_directory + filename;
+                }
             }
             else if(std::regex_match(filename, match, meta_regex))
             {
                 int parent_pid = std::stoi(match[1]);
                 int pid        = std::stoi(match[2]);
                 if(parent_pid == root_pid)
+                {
                     cache_map[pid].metadata = trace_cache::tmp_directory + filename;
+                }
             }
         } catch(const std::exception& e)
         {
@@ -103,10 +109,14 @@ clear(const data::mapped_cache_files_t& cache_files)
             if(fname->empty()) continue;
 
             if(std::remove(fname->c_str()) == 0)
+            {
                 LOG_DEBUG("Removed file: {}", *fname);
+            }
             else if(errno != ENOENT)
+            {
                 LOG_WARNING("Failed to remove file: {}: {}", *fname,
                             std::strerror(errno));
+            }
         }
     }
 }
@@ -146,7 +156,9 @@ merge_perfetto_files()
     auto _script_dir    = get_env("ROCPROFSYS_SCRIPT_PATH", std::string{}, false);
 
     if(!_script_dir.empty())
+    {
         _script_path = fmt::format("{}/{}", _script_dir, _script_path);
+    }
 
     if(!tim::filepath::exists(_script_path))
     {
@@ -158,9 +170,13 @@ merge_perfetto_files()
     int  result   = system(_command.c_str());
 
     if(result != 0)
+    {
         LOG_ERROR("Failed to execute merge script: {}", _command);
+    }
     else
+    {
         LOG_INFO("Successfully executed: {}", _command);
+    }
 }
 
 }  // namespace rocprofsys::trace_cache::discovery

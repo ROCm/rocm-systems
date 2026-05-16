@@ -169,7 +169,9 @@ std::string
 get_return_type(procedure_t* func)
 {
     if(func && func->isInstrumentable() && func->getReturnType())
+    {
         return func->getReturnType()->getName();
+    }
     return std::string{};
 }
 
@@ -281,7 +283,9 @@ get_loop_file_line_info(module_t* module, procedure_t* func, flow_graph_t*,
         }
 
         if(_row1 == 0 && _col1 == 0)
+        {
             return function_signature(_return_type, _func_name, _file_name, _param_types);
+        }
 
         int _row2 = 0;
         int _col2 = 0;
@@ -377,7 +381,9 @@ get_basic_block_file_line_info(module_t* module, procedure_t* func)
                        (unsigned long) _lines_end.size());
 
             if(module->getSourceLines(_last_addr, _lines_end))
+            {
                 _remove_line_zero(_lines_end);
+            }
 
             if(!_lines_end.empty())
             {
@@ -441,7 +447,9 @@ get_source_code(module_t* module, procedure_t* func)
             if(module->getSourceLines(_addr, _src))
             {
                 for(auto&& iitr : _src)
+                {
                     _lines.emplace_back(iitr);
+                }
             }
         }
     }
@@ -541,7 +549,9 @@ find_undefined_function_symbol(const std::unordered_set<object_t*>& _objects,
         {
             if(!symbol || symbol->getType() != SymTab::Symbol::ST_FUNCTION ||
                symbol->getRegion())
+            {
                 continue;
+            }
 
             // Try all possible symbol name representations
             std::string symbol_name = symbol->getPrettyName();
@@ -699,9 +709,13 @@ rocprofsys_get_link_map(const char* _lib, const std::string& _exclude_linked_by,
         if(!_found)
         {
             if(_exclude_re.empty() || !std::regex_search(itr, std::regex{ _exclude_re }))
+            {
                 _fini_chain.emplace_back(itr);
+            }
             else
+            {
                 _excl_chain.emplace_back(itr);
+            }
         }
     }
 
@@ -1028,7 +1042,9 @@ get_procedures(image_t* app_image, std::vector<module_t*>* app_modules,
         std::unique_ptr<std::vector<procedure_t*>> procs{ mod->getProcedures(
             include_uninstrumentable) };
         if(procs && !procs->empty())
+        {
             proclist.insert(proclist.end(), procs->begin(), procs->end());
+        }
     }
 
     _pr.stop();
@@ -1082,7 +1098,9 @@ process_modules(const std::vector<module_t*>& _app_modules)
         {
             _names.emplace(itr.first);
             for(const auto& ditr : itr.second)
+            {
                 _names.emplace(ditr.first);
+            }
         }
     }
 
@@ -1188,7 +1206,9 @@ std::string&&
 to_lower(std::string&& _v)
 {
     for(auto& itr : std::move(_v))
+    {
         itr = tolower(itr);
+    }
     return std::move(_v);
 }
 }  // namespace
@@ -1214,13 +1234,17 @@ from_string(std::string_view _v)
     {
         for(const auto& itr :
             { SV_UNKNOWN, SV_DEFAULT, SV_INTERNAL, SV_HIDDEN, SV_PROTECTED })
+        {
             if(_v == std::to_string(itr)) return itr;
+        }
         return SV_UNKNOWN;
     }
     else if constexpr(std::is_same<Tp, symbol_linkage_t>::value)
     {
         for(const auto& itr : { SL_UNKNOWN, SL_GLOBAL, SL_LOCAL, SL_WEAK, SL_UNIQUE })
+        {
             if(_v == std::to_string(itr)) return itr;
+        }
         return SL_UNKNOWN;
     }
     else

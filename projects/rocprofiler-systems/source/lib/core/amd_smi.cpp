@@ -26,7 +26,9 @@ get_setting_name(std::string_view input)
     std::string result;
     result.reserve(input.size());
     for(auto c : input)
+    {
         result.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+    }
 
     if(result.compare(0, prefix.size(), prefix) == 0) return result.substr(prefix.size());
 

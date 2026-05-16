@@ -233,7 +233,9 @@ private:
                 s_zero_entries.clear();
                 s_zero_entries.reserve(src.size());
                 for(const auto& cpu : src)
+                {
                     s_zero_entries.push_back({ cpu.cpu_id, 0.0f, 0.0 });
+                }
             }
             return src;
         }

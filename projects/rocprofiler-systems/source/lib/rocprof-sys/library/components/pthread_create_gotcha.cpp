@@ -90,7 +90,9 @@ stop_bundle(bundle_t& _bundle, std::int64_t _tid, Args&&... _args)
     auto _this_manager = tim::manager::instance();
     if(!_main_manager || !_this_manager || _main_manager->is_finalized() ||
        _this_manager->is_finalized())
+    {
         return;
+    }
 
     LOG_TRACE("Stopping bundle '{}' in thread {}...", _bundle.key(), _tid);
     if(get_use_timemory())
@@ -194,7 +196,9 @@ pthread_create_gotcha::wrapper::operator()() const
             auto& _thr_bundle = thread_bundle_data_t::instance();
             if(_thr_bundle && _thr_bundle->get<comp::wall_clock>() &&
                _thr_bundle->get<comp::wall_clock>()->get_is_running())
+            {
                 _thr_bundle->stop();
+            }
             if(_bundle) stop_bundle(*_bundle, _tid);
             pthread_create_gotcha::shutdown(_tid);
             LOG_DEBUG("[PID={}][rank={}] Thread {} (parent: {}) exited",
@@ -240,8 +244,10 @@ pthread_create_gotcha::wrapper::operator()() const
         {
             // children inherit the parent delay data
             if(_parent_info && _parent_info->index_data)
+            {
                 causal::delay::get_local(_tid) =
                     causal::delay::get_local(_parent_info->index_data->sequent_value);
+            }
             _is_sampling = true;
             ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
             _signals = causal::sampling::setup();
@@ -656,7 +662,9 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     }
 
     if(_use_bundle)
+    {
         stop_bundle(*_bundle, _info->index_data->sequent_value, audit::outgoing{}, _ret);
+    }
 
     // unblock the signals in the entire process
     if(_enable_sampling && !_blocked.empty())

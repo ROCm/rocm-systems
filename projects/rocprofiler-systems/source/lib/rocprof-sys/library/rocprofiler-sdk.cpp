@@ -169,7 +169,9 @@ ompt_get_unified_name(const rocprofiler_callback_tracing_record_t& record)
     // Forces omp_parallel begin and end to have same name, allowing track to connect
     if(record.operation == ROCPROFILER_OMPT_ID_parallel_begin ||
        record.operation == ROCPROFILER_OMPT_ID_parallel_end)
+    {
         _name = "omp_parallel";
+    }
 
     return _name;
 }
@@ -243,7 +245,9 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
 
     // check if already created
     if(data->agent_counter_profiles.find(agent_id) != data->agent_counter_profiles.end())
+    {
         return counter_vec_t{};
+    }
 
     auto        profile      = std::optional<rocprofiler_profile_config_id_t>{};
     auto        expected_v   = counters.size();
@@ -335,7 +339,9 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
         for(const auto& counter : counters)
         {
             if(std::find(found_v.begin(), found_v.end(), counter) == found_v.end())
+            {
                 missing_counters.emplace_back(counter);
+            }
         }
         auto missing_counters_str = fmt::format("{}", fmt::join(missing_counters, ", "));
 
@@ -397,9 +403,11 @@ iterate_args_callback(rocprofiler_callback_tracing_kind_t /*kind*/,
 {
     auto* _data = static_cast<function_args_t*>(data);
     if(arg_type && arg_name && arg_value_str)
+    {
         _data->emplace_back(argument_info{ arg_number,
                                            rocprofsys::utility::demangle(arg_type),
                                            arg_name, arg_value_str });
+    }
     return 0;
 }
 
@@ -734,10 +742,14 @@ tool_tracing_callback_stop(
                     tracing::add_perfetto_annotation(ctx, "stack_id",
                                                      record.correlation_id.internal);
                     if(stream_id.handle != 0)
+                    {
                         tracing::add_perfetto_annotation(ctx, "stream_id",
                                                          stream_id.handle);
+                    }
                     for(const auto& [key, val] : args)
+                    {
                         tracing::add_perfetto_annotation(ctx, key, val);
+                    }
 
                     if(_bt_data && !_bt_data->empty())
                     {
@@ -779,7 +791,9 @@ tool_tracing_callback_stop(
         tracing::pop_perfetto_ts(
             CategoryT{}, _name.data(), _end_ts, [&](::perfetto::EventContext ctx) {
                 if(config::get_perfetto_annotations())
+                {
                     tracing::add_perfetto_annotation(ctx, "end_ns", _end_ts);
+                }
             });
     }
 
@@ -878,11 +892,15 @@ ompt_iterate_operation_args(const rocprofiler_callback_tracing_record_t& record,
 
     // Perform standard iteration of arguments
     if constexpr(std::is_same_v<ArgsT, callback_arg_array_t>)
+    {
         rocprofiler_iterate_callback_tracing_kind_operation_args(record, save_args,
                                                                  max_deref, &args);
+    }
     else
+    {
         rocprofiler_iterate_callback_tracing_kind_operation_args(
             record, iterate_args_callback, max_deref, &args);
+    }
 
     static const auto ompt_has_flags = std::set<rocprofiler_ompt_operation_t>{
         ROCPROFILER_OMPT_ID_parallel_begin, ROCPROFILER_OMPT_ID_parallel_end,
@@ -894,10 +912,14 @@ ompt_iterate_operation_args(const rocprofiler_callback_tracing_record_t& record,
     auto append = [&args](const std::string& flag_type, const std::string& key,
                           const std::string& val) {
         if constexpr(std::is_same_v<ArgsT, callback_arg_array_t>)
+        {
             args.emplace_back(key, val);
+        }
         else
+        {
             args.emplace_back(argument_info{ static_cast<std::uint32_t>(args.size()),
                                              flag_type, key, val });
+        }
     };
 
     int   flags_val = 0;
@@ -934,27 +956,43 @@ ompt_iterate_operation_args(const rocprofiler_callback_tracing_record_t& record,
         {
             const auto ft = std::string{ "ompt_parallel_flag_t" };
             if(flags_val & ompt_parallel_invoker_program)
+            {
                 append(ft, "invoker", "program");
+            }
             else if(flags_val & ompt_parallel_invoker_runtime)
+            {
                 append(ft, "invoker", "runtime");
+            }
 
             if(flags_val & ompt_parallel_league)
+            {
                 append(ft, "invoker_cause", "teams_construct");
+            }
             else if(flags_val & ompt_parallel_team)
+            {
                 append(ft, "invoker_cause", "parallel_construct");
+            }
             break;
         }
         case ROCPROFILER_OMPT_ID_task_create:  // ompt_task_flag_t
         {
             const auto ft = std::string{ "ompt_task_flag_t" };
             if(flags_val & ompt_task_initial)
+            {
                 append(ft, "classification", "initial");
+            }
             else if(flags_val & ompt_task_implicit)
+            {
                 append(ft, "classification", "implicit");
+            }
             else if(flags_val & ompt_task_explicit)
+            {
                 append(ft, "classification", "explicit");
+            }
             else if(flags_val & ompt_task_target)
+            {
                 append(ft, "classification", "target");
+            }
 
             // Multiple/none can be set
             std::string task_properties;
@@ -966,9 +1004,13 @@ ompt_iterate_operation_args(const rocprofiler_callback_tracing_record_t& record,
             if(flags_val & ompt_task_merged) task_properties += "merged, ";
 
             if(!task_properties.empty())
+            {
                 task_properties.erase(task_properties.size() - 2);
+            }
             else
+            {
                 task_properties = "none";
+            }
             append(ft, "properties", task_properties);
             break;
         }
@@ -977,29 +1019,47 @@ ompt_iterate_operation_args(const rocprofiler_callback_tracing_record_t& record,
             const auto ft = std::string{ "flags" };
             // As of now, implicit_tasks with ompt_task_initial are filtered out
             if(flags_val & ompt_task_initial)
+            {
                 append(ft, "kind", "initial");
+            }
             else if(flags_val & ompt_task_implicit)
+            {
                 append(ft, "kind", "implicit");
+            }
             break;
         }
         case ROCPROFILER_OMPT_ID_cancel:  // ompt_cancel_flag_t
         {
             const auto ft = std::string{ "ompt_cancel_flag_t" };
             if(flags_val & ompt_cancel_parallel)
+            {
                 append(ft, "construct", "parallel");
+            }
             else if(flags_val & ompt_cancel_sections)
+            {
                 append(ft, "construct", "sections");
+            }
             else if(flags_val & ompt_cancel_loop)
+            {
                 append(ft, "construct", "loop");
+            }
             else if(flags_val & ompt_cancel_taskgroup)
+            {
                 append(ft, "construct", "taskgroup");
+            }
 
             if(flags_val & ompt_cancel_activated)
+            {
                 append(ft, "state", "activated");
+            }
             else if(flags_val & ompt_cancel_detected)
+            {
                 append(ft, "state", "detected");
+            }
             else if(flags_val & ompt_cancel_discarded_task)
+            {
                 append(ft, "state", "discarded_task");
+            }
             break;
         }
         default: break;
@@ -1205,8 +1265,10 @@ ompt_tracing_callback_start(rocprofiler_callback_tracing_record_t record,
                     tracing::add_perfetto_annotation(ctx, "stack_id",
                                                      record.correlation_id.internal);
                     if(stream_id.handle != 0)
+                    {
                         tracing::add_perfetto_annotation(ctx, "stream_id",
                                                          stream_id.handle);
+                    }
                     for(const auto& [key, val] : args)
                     {
                         tracing::add_perfetto_annotation(ctx, key, val);
@@ -1242,7 +1304,9 @@ ompt_tracing_callback_stop(
             category::rocm_ompt_api{}, _name.data(), _end_ts,
             [&](::perfetto::EventContext ctx) {
                 if(config::get_perfetto_annotations())
+                {
                     tracing::add_perfetto_annotation(ctx, "end_ns", _end_ts);
+                }
                 if(_bt_data && !_bt_data->empty())
                 {
                     const std::string _unk    = "??";
@@ -1585,7 +1649,9 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 auto ompt_operation_type =
                     static_cast<rocprofiler_ompt_operation_t>(record.operation);
                 if(ompt_no_process.find(ompt_operation_type) != ompt_no_process.end())
+                {
                     return;
+                }
 
                 populate_backtrace_data();
 
@@ -2210,7 +2276,9 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
     }
 
     if(_agent_counter_storage->count(_agent_id) == 0)
+    {
         _agent_counter_storage->emplace(_agent_id, counter_storage_map_t{});
+    }
 
     if(get_kernel_dispatch_timestamps().count(_dispatch_id) > 0)
     {
@@ -2420,7 +2488,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     std::stringstream _domains_ss;
     for(const auto& itr : domains->get_choices())
+    {
         _domains_ss << "- " << itr << "\n";
+    }
     LOG_DEBUG("Available ROCm Domains: \n {}", _domains_ss.str());
 
     auto _callback_domains = rocprofiler_sdk::get_callback_domains();
@@ -2855,7 +2925,9 @@ shutdown()
 
     // shutdown
     if(tool_data && tool_data->client_id && tool_data->client_fini)
+    {
         tool_data->client_fini(*tool_data->client_id);
+    }
 }
 
 void
@@ -2941,7 +3013,9 @@ tool_attach_fini(void* /* tool_data */)
         ::rocprofsys::perfetto::post_process(nullptr, _perfetto_output_error,
                                              _output_registry);
         if(_perfetto_output_error)
+        {
             LOG_ERROR("Perfetto output error occurred during attach finalization");
+        }
     }
 
     rocprofsys_finalize_hidden();
@@ -3025,8 +3099,10 @@ sdk_tool_configure(std::uint32_t version, const char* runtime_version,
     id->name = "rocprofsys";
 
     if(!rocprofsys::rocprofiler_sdk::tool_data)
+    {
         rocprofsys::rocprofiler_sdk::tool_data =
             new rocprofsys::rocprofiler_sdk::client_data{};
+    }
 
     // store client info
     rocprofsys::rocprofiler_sdk::tool_data->client_id = id;

@@ -100,7 +100,9 @@ get_setting_name(std::string _v)
 {
     constexpr auto _prefix = tim::string_view_t{ "rocprofsys_" };
     for(auto& itr : _v)
+    {
         itr = tolower(itr);
+    }
     auto _pos = _v.find(_prefix);
     if(_pos == 0) return _v.substr(_prefix.length());
     return _v;
@@ -112,7 +114,9 @@ get_available_categories()
 {
     auto _v = Tp{};
     for(auto itr : { ROCPROFSYS_PERFETTO_CATEGORIES })
+    {
         tim::utility::emplace(_v, itr.name);
+    }
     return _v;
 }
 
@@ -178,7 +182,9 @@ finalize()
     tim::signals::disable_signal_detection();
     _settings_are_configured() = false;
     for(const auto& itr : cfg_fini_callbacks)
+    {
         if(itr) itr();
+    }
 }
 
 bool
@@ -991,7 +997,9 @@ configure_settings(bool _init)
     auto* _cap_data          = &_cap_status.effective;
     bool  _has_cap_sys_admin = false;
     for(auto itr : timemory::linux::capability::cap_decode(*_cap_data))
+    {
         if(itr == CAP_SYS_ADMIN) _has_cap_sys_admin = true;
+    }
 
     if(_paranoid > 2 && !_has_cap_sys_admin)
     {
@@ -1086,7 +1094,9 @@ configure_settings(bool _init)
     if(auto opt = get_setting_value<bool>("ROCPROFSYS_DEBUG"); opt) debug_value = *opt;
 
     if(get_env("ROCPROFSYS_MONOCHROME", _config->get<bool>("ROCPROFSYS_MONOCHROME")))
+    {
         tim::log::monochrome() = true;
+    }
 
     if(_init)
     {
@@ -1125,15 +1135,19 @@ configure_settings(bool _init)
     settings::suppress_parsing()  = true;
     settings::use_output_suffix() = _config->get<bool>("ROCPROFSYS_USE_PID");
     if(settings::use_output_suffix())
+    {
         settings::default_process_suffix() = process::get_id();
+    }
 #if !defined(ROCPROFSYS_USE_MPI) && defined(ROCPROFSYS_USE_MPI_HEADERS)
     if(tim::dmp::is_initialized()) settings::default_process_suffix() = tim::dmp::rank();
 #endif
 
     auto _dl_verbose = _config->find("ROCPROFSYS_DL_VERBOSE");
     if(_dl_verbose->second->get_config_updated())
+    {
         tim::set_env(std::string{ _dl_verbose->first }, _dl_verbose->second->as_string(),
                      0);
+    }
 
     if(_config->get_papi_events().empty())
     {
@@ -1330,9 +1344,13 @@ configure_signal_handler(const std::shared_ptr<settings>& _config)
         signal_settings::check_environment();
         auto default_signals = signal_settings::get_default();
         for(const auto& itr : default_signals)
+        {
             signal_settings::enable(itr);
+        }
         if(_ignore_dyninst_trampoline)
+        {
             signal_settings::disable(static_cast<sys_signal>(_dyninst_trampoline_signal));
+        }
         auto enabled_signals = signal_settings::get_enabled();
         tim::signals::enable_signal_detection(enabled_signals);
     }
@@ -1405,12 +1423,16 @@ configure_disabled_settings(const std::shared_ptr<settings>& _config)
             auto _disabled = _config->disable_category(_category);
             _config->enable(_opt);
             for(auto&& itr : _disabled)
+            {
                 LOG_DEBUG("[{}=OFF]    disabled option :: '{}'", _opt, itr);
+            }
             return false;
         }
         auto _enabled = _config->enable_category(_category);
         for(auto&& itr : _enabled)
+        {
             LOG_DEBUG("[{}=ON]      enabled option :: '{}'", _opt, itr);
+        }
         return true;
     };
 
@@ -1427,7 +1449,9 @@ configure_disabled_settings(const std::shared_ptr<settings>& _config)
 #if defined(ROCPROFSYS_USE_OMPT) || ROCPROFSYS_USE_OMPT == 0
     _config->find("ROCPROFSYS_USE_OMPT")->second->set_hidden(true);
     for(const auto& itr : _config->disable_category("ompt"))
+    {
         _config->find(itr)->second->set_hidden(true);
+    }
 #endif
 
 #if !defined(ROCPROFSYS_USE_MPI) || ROCPROFSYS_USE_MPI == 0
@@ -1569,9 +1593,11 @@ print_banner(std::ostream& _os)
             for(const auto& itr : _data)
             {
                 if(!itr.second.empty())
+                {
                     _property_info.emplace_back(
                         itr.first.empty() ? itr.second
                                           : fmt::format("{}: {}", itr.first, itr.second));
+                }
             }
             return _property_info;
         };
@@ -1585,7 +1611,9 @@ print_banner(std::ostream& _os)
 
     // <NAME> <VERSION> (<PROPERTIES>)
     if(!_properties.empty())
+    {
         _version_info << fmt::format(" ({})", fmt::join(_properties, ", "));
+    }
 
     _os << _banner << "\n";
     _os << _version_info.str() << "\n";
@@ -1649,9 +1677,13 @@ print_settings(
 
     size_t _spacer_extra = 9;
     if(!_md)
+    {
         _spacer_extra += 2;
+    }
     else if(_md && _print_desc)
+    {
         _spacer_extra -= 1;
+    }
     std::stringstream _spacer{};
     _spacer.fill('-');
     _spacer << "#" << std::setw(tot_width + _spacer_extra) << "" << "#";
@@ -1753,7 +1785,9 @@ get_exe_realpath()
     static std::string _v = []() {
         auto _cmd_line = tim::read_command_line(process::get_id());
         if(!_cmd_line.empty())
+        {
             return filepath::realpath(_cmd_line.front(), nullptr, false);
+        }
         return std::string{};
     }();
     return _v;
@@ -1774,11 +1808,17 @@ get_mode()
         auto _mode = tim::get_env_choice<std::string>(
             "ROCPROFSYS_MODE", "trace", { "trace", "sampling", "causal", "coverage" });
         if(_mode == "sampling")
+        {
             return Mode::Sampling;
+        }
         else if(_mode == "causal")
+        {
             return Mode::Causal;
+        }
         else if(_mode == "coverage")
+        {
             return Mode::Coverage;
+        }
         return Mode::Trace;
     }
     static auto _m =
@@ -1795,7 +1835,9 @@ get_mode()
         auto _mode = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
         std::stringstream _ss{};
         for(const auto& itr : _v->second->get_choices())
+        {
             _ss << ", " << itr;
+        }
         auto _msg = (_ss.str().length() > 2) ? _ss.str().substr(2) : std::string{};
         throw std::runtime_error(
             fmt::format("[{}] invalid mode {}. Choices: {}", __FUNCTION__, _mode, _msg));
@@ -2682,7 +2724,9 @@ is_output_enabled_for_current_mpi_rank()
     auto enabled_ranks_str = get_rank_filter_output();
     rocprofsys::utility::trim_str(enabled_ranks_str);
     for(auto& ch : enabled_ranks_str)
+    {
         ch = std::tolower(ch);
+    }
 
     if(enabled_ranks_str.empty() || enabled_ranks_str == "all") return true;
     if(enabled_ranks_str == "none") return false;
@@ -2999,7 +3043,9 @@ get_causal_output_filename()
         auto _pos = _fname.find(itr);
         // if extension is found at end of string, remove
         if(_pos != std::string::npos && (_pos + itr.length()) == _fname.length())
+        {
             _fname = _fname.substr(0, _fname.length() - itr.length());
+        }
     }
     return _fname;
 }
@@ -3025,7 +3071,9 @@ format_causal_scopes(std::vector<std::string> _value, const std::string& _tag)
         }
         // trim leading and trailing spaces since we didn't delimit spaces
         if(std::regex_search(itr, _space_re))
+        {
             itr = std::regex_replace(itr, _space_re, "$2");
+        }
     }
     return _value;
 }

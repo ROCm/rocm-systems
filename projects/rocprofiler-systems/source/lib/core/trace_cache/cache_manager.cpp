@@ -74,7 +74,9 @@ cache_manager::post_process_bulk(output_file_registry& _output_registry,
         processor.process(processor_configs, enabled_formats);
 
         if(enabled_formats.is_perfetto_enabled() && get_merge_perfetto_files())
+        {
             discovery::merge_perfetto_files();
+        }
     }
 
     discovery::clear(cache_files);

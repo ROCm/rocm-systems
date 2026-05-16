@@ -165,7 +165,9 @@ private:
         trimmed.reserve(input.size());
         std::for_each(input.begin(), input.end(), [&trimmed](char ch) {
             if(ch != '\t' && ch != ' ')
+            {
                 trimmed.push_back(static_cast<char>(std::tolower(ch)));
+            }
         });
 
         if(trimmed.empty() || trimmed == "all")
@@ -185,7 +187,9 @@ private:
             [](std::initializer_list<std::uint8_t> positions) -> std::uint32_t {
             std::uint32_t v = 0;
             for(auto b : positions)
+            {
                 v |= (1u << b);
+            }
             return v;
         };
 

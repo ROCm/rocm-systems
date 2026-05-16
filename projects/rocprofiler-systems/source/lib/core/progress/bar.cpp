@@ -61,9 +61,13 @@ format_bar(bar_style style, std::size_t width, double frac)
         {
             out.push_back('[');
             if(filled == 0)
+            {
                 out.append(width, ' ');
+            }
             else if(filled >= width)
+            {
                 out.append(width, '=');
+            }
             else
             {
                 out.append(filled - 1, '=');
@@ -87,7 +91,9 @@ format_bar(bar_style style, std::size_t width, double frac)
 
             out.push_back('[');
             for(std::size_t i = 0; i < full; ++i)
+            {
                 out.append(BLOCK_CHARS[PARTS_PER_CELL]);
+            }
             if(remainder > 0) out.append(BLOCK_CHARS[remainder]);
             out.append(trailing_pad, ' ');
             out.push_back(']');
@@ -97,9 +103,13 @@ format_bar(bar_style style, std::size_t width, double frac)
         {
             // U+25CF (filled), U+25CB (empty). No surrounding brackets.
             for(std::size_t i = 0; i < filled; ++i)
+            {
                 out.append("\xe2\x97\x8f");
+            }
             for(std::size_t i = 0; i < empty; ++i)
+            {
                 out.append("\xe2\x97\x8b");
+            }
             break;
         }
         case bar_style::text_only: break;
@@ -177,7 +187,9 @@ bar::on_finish() noexcept
 {
     bool expected = false;
     if(!m_finished.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
+    {
         return;
+    }
     if(!m_visible) return;
 
     std::lock_guard<std::mutex> lock{ m_render_mtx };

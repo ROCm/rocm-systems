@@ -363,7 +363,9 @@ resize(stable_vector<Tp, ChunkSizeV, AlignN>& _v, size_t _n, Args&&... args)
     if(_n > _v.capacity()) _v.reserve(_n);
 
     while(_v.size() < _n)
+    {
         _v.emplace_back(std::forward<Args>(args)...);
+    }
 
     return _v.size();
 }

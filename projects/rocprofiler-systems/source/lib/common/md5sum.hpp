@@ -95,7 +95,9 @@ compute_md5sum(const ContainerT<Tp, TailT...>& inp,
 {
     auto _val = md5sum{};
     for(const auto& itr : inp)
+    {
         _val.update(std::string_view{ inp });
+    }
     _val.finalize();
     return _val.hexdigest();
 }
@@ -223,9 +225,11 @@ void
 decode(std::uint32_t output[], const std::uint8_t input[], size_type len)
 {
     for(unsigned int i = 0, j = 0; j < len; i++, j += 4)
+    {
         output[i] = ((std::uint32_t) input[j]) | (((std::uint32_t) input[j + 1]) << 8) |
                     (((std::uint32_t) input[j + 2]) << 16) |
                     (((std::uint32_t) input[j + 3]) << 24);
+    }
 }
 
 // encodes input (std::uint32_t) into output (unsigned char). Assumes len is
@@ -363,7 +367,9 @@ md5sum::update(const unsigned char input[], size_type length)
 
         // transform chunks of blocksize (64 bytes)
         for(i = firstpart; i + blocksize <= length; i += blocksize)
+        {
             transform(&input[i]);
+        }
 
         index = 0;
     }
@@ -427,7 +433,9 @@ md5sum::hexdigest() const
 
     char buf[33];
     for(int i = 0; i < 16; i++)
+    {
         snprintf(buf + i * 2, 3, "%02x", digest[i]);
+    }
     buf[32] = '\0';
 
     return std::string(buf);
@@ -441,7 +449,9 @@ md5sum::hexliteral() const
     auto _oss = std::ostringstream{};
     _oss << "X'";
     for(auto itr : rawdigest())
+    {
         _oss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(itr);
+    }
     _oss << "'";
     return _oss.str();
 }

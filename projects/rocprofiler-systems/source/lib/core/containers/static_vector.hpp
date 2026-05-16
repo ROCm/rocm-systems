@@ -111,7 +111,9 @@ static_vector<Tp, N, AtomicSizeV>::static_vector(c_array<Tp>&& _v)
 {
     auto _n = std::min<size_t>(N, _v.size());
     for(size_t i = 0; i < _n; ++i, ++m_size)
+    {
         m_data[i] = _v[i];
+    }
 }
 
 template <typename Tp, size_t N, bool AtomicSizeV>
@@ -120,7 +122,9 @@ static_vector<Tp, N, AtomicSizeV>::static_vector(std::array<Tp, M>&& _v)
 {
     auto _n = std::min<size_t>(N, M);
     for(size_t i = 0; i < _n; ++i, ++m_size)
+    {
         m_data[i] = _v[i];
+    }
 }
 
 template <typename Tp, size_t N, bool AtomicSizeV>
@@ -136,7 +140,9 @@ static_vector<Tp, N, AtomicSizeV>::operator=(std::initializer_list<Tp>&& _v)
 
     clear();
     for(auto&& itr : _v)
+    {
         m_data[m_size++] = itr;
+    }
     return *this;
 }
 
@@ -191,9 +197,13 @@ static_vector<Tp, N, AtomicSizeV>::emplace_back(Args&&... _v)
     }
 
     if constexpr(std::is_assignable<Tp, decltype(std::forward<Args>(_v))...>::value)
+    {
         m_data[_idx] = { std::forward<Args>(_v)... };
+    }
     else
+    {
         m_data[_idx] = Tp{ std::forward<Args>(_v)... };
+    }
     return m_data[_idx];
 }
 
@@ -202,9 +212,13 @@ void
 static_vector<Tp, N, AtomicSizeV>::update_size(size_t _n)
 {
     if constexpr(AtomicSizeV)
+    {
         m_size.store(_n);
+    }
     else
+    {
         m_size = _n;
+    }
 }
 }  // namespace container
 }  // namespace rocprofsys

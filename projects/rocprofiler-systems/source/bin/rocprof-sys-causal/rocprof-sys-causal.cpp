@@ -24,7 +24,9 @@ to_string_vec(const std::vector<char*>& argv)
     std::vector<std::string> out;
     out.reserve(argv.size());
     for(const auto* arg : argv)
+    {
         if(arg != nullptr) out.emplace_back(arg);
+    }
     return out;
 }
 }  // namespace
@@ -41,7 +43,9 @@ main(int argc, char** argv)
         auto _arg = std::string_view{ argv[arg_idx] };
         if(_arg == "--" || _arg == "-?" || _arg == "-h" || _arg == "--help" ||
            _arg == "--version")
+        {
             _has_double_hyphen = true;
+        }
     }
 
     std::vector<char*> _argv = {};
@@ -53,7 +57,9 @@ main(int argc, char** argv)
     {
         _argv.reserve(argc);
         for(int arg_idx = 1; arg_idx < argc; ++arg_idx)
+        {
             _argv.emplace_back(argv[arg_idx]);
+        }
         _causal_env.resize(1);
     }
 
@@ -68,7 +74,9 @@ main(int argc, char** argv)
         {
             auto _env = _base_env;
             for(const auto& eitr : citr)
+            {
                 update_env(_env, eitr.first, eitr.second);
+            }
             auto _prefix = std::to_string(_n++) + ":  ";
             utils::print_environment(_env, get_updated_envs(), true, _prefix);
         }
@@ -80,10 +88,14 @@ main(int argc, char** argv)
         {
             auto _env = _base_env;
             for(const auto& eitr : _causal_env.front())
+            {
                 update_env(_env, eitr.first, eitr.second);
+            }
             auto _verbose = get_verbose();
             if(_verbose >= 0)
+            {
                 utils::print_environment(_env, get_updated_envs(), _verbose >= 1, "0: ");
+            }
             if(_verbose >= 1) utils::print_command(to_string_vec(_argv), "0: ");
             _argv.emplace_back(nullptr);
             auto envp_ptrs = utils::to_c_argv(_env);
@@ -114,13 +126,19 @@ main(int argc, char** argv)
 
                 auto _env = _base_env;
                 for(const auto& eitr : citr)
+                {
                     update_env(_env, eitr.first, eitr.second);
+                }
                 auto _verbose = get_verbose();
                 if(_verbose >= 0)
+                {
                     utils::print_environment(_env, get_updated_envs(), _verbose >= 1,
                                              _prefix.str());
+                }
                 if(_verbose >= 1)
+                {
                     utils::print_command(to_string_vec(_argv), _prefix.str());
+                }
                 _argv.emplace_back(nullptr);
                 auto envp_ptrs = utils::to_c_argv(_env);
                 return execvpe(_argv.front(), _argv.data(), envp_ptrs.data());

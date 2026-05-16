@@ -52,7 +52,9 @@ prefork_setup()
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
 
     if(get_state() < State::Active && !config::settings_are_configured())
+    {
         rocprofsys_init_library_hidden();
+    }
 
     tim::set_env("ROCPROFSYS_PRELOAD", "0", 1);
     tim::set_env("ROCPROFSYS_ROOT_PROCESS", process::get_id(), 0);

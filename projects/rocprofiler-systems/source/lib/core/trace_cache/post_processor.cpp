@@ -42,8 +42,10 @@ sum_storage_bytes(const std::vector<std::shared_ptr<data::processor_config_t>>& 
 {
     std::uint64_t total = 0;
     for(const auto& cfg : configs)
+    {
         total += file_size_or_zero(
             utility::get_buffered_storage_filename(cfg->_ppid, cfg->_pid));
+    }
     return total;
 }
 
@@ -117,9 +119,13 @@ post_processor::process(
     const data::enabled_formats_t&                                formats)
 {
     if(formats.has_sequential_formats())
+    {
         run_sequential(configs, formats.get_sequential_formats());
+    }
     if(formats.has_parallel_formats())
+    {
         run_multithreaded(configs, formats.get_parallel_formats());
+    }
 }
 
 void
@@ -168,7 +174,9 @@ post_processor::run_multithreaded(
 
     LOG_TRACE("Waiting for {} processing threads to complete", processing_threads.size());
     for(auto& thread : processing_threads)
+    {
         thread.join();
+    }
     LOG_DEBUG("Multithreaded processing completed");
 }
 

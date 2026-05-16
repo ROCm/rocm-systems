@@ -67,7 +67,9 @@ module_function::module_function(module_t* mod, procedure_t* proc)
 
     // make sure all exist
     for(int i = 0; i <= instruction_category_t::c_NoCategory; ++i)
+    {
         instruction_types[static_cast<instruction_category_t>(i)] = 0;
+    }
 
     if(function->isInstrumentable())
     {
@@ -98,7 +100,9 @@ module_function::module_function(module_t* mod, procedure_t* proc)
                     }
                     // num_instructions += _instructions.size();
                     if(debug_print || verbose_level > 3 || instr_print)
+                    {
                         instructions.emplace_back(std::move(_instructions));
+                    }
                 }
                 else
                 {
@@ -424,26 +428,38 @@ module_function::is_internal_constrained() const
 
     if(std::regex_search(module_name,
                          std::regex{ "lib(rocprof-sys|rocprofsys|timemory|perfetto)" }))
+    {
         return _report("Excluding", "module", "rocprofsys", 3);
+    }
     else if(std::regex_match(module_name,
                              std::regex{ ".*/source/lib/"
                                          "(core|common|binary|"
                                          "rocprofsys|rocprofsys-dl|"
                                          "rocprofsys-user)/.*/.*\\.(h|c|cpp|hpp)$" }))
+    {
         return _report("Excluding", "module", "rocprofsys", 3);
+    }
 
     if(std::regex_search(function_name,
                          std::regex{ "10rocprofsys|rocprofsys|rocprofsys(::|_)" }))
+    {
         return _report("Excluding", "function", "rocprofsys", 3);
+    }
     else if(std::regex_search(function_name, std::regex{ "3tim|tim::|timemory(::|_)" }))
+    {
         return _report("Excluding", "function", "timemory", 3);
+    }
     else if(std::regex_search(function_name, std::regex{ "9perfetto|perfetto(::|_)" }))
+    {
         return _report("Excluding", "function", "perfetto", 3);
+    }
 
     if(_gnu_libs.find(module_name) != _gnu_libs.end() ||
        _gnu_libs.find(_module_real) != _gnu_libs.end() ||
        _gnu_libs.find(_module_base) != _gnu_libs.end())
+    {
         return _report("Excluding", "module", "internal library", 3);
+    }
 
     for(const auto& litr : _gnu_libs)
     {
@@ -452,15 +468,19 @@ module_function::is_internal_constrained() const
            _module_real == litr.first ||
            litr.second.find(_module_real) != litr.second.end() ||
            litr.second.find(module_name) != litr.second.end())
+        {
             return _report("Excluding", "module",
                            join(" ", "internal library", litr.first), 3);
+        }
 
         for(const auto& fitr : litr.second)
         {
             using ::timemory::join::join;
             if(fitr.second.find(function_name) != fitr.second.end())
+            {
                 return _report("Excluding", "function",
                                join(" ", "internal library", litr.first), 3);
+            }
         }
     }
 
@@ -480,8 +500,10 @@ module_function::is_module_constrained() const
 
     // always instrument these modules
     if(module_name == "DEFAULT_MODULE" || module_name == "LIBRARY_MODULE")
+    {
         // return _report("Skipping", "default module", 2);
         return false;
+    }
 
     static std::regex ext_regex{ "\\.(s|S)$", regex_opts };
     static std::regex sys_regex{ "^(s|k|e|w)_[A-Za-z_0-9\\-]+\\.(c|C)$", regex_opts };
@@ -500,25 +522,35 @@ module_function::is_module_constrained() const
 
     // file extensions that should not be instrumented
     if(std::regex_search(module_name, ext_regex))
+    {
         return _report("Excluding", "file extension", 3);
+    }
 
     // system modules that should not be instrumented (wastes time)
     if(std::regex_search(module_name, sys_regex) ||
        std::regex_search(module_name, sys_build_regex))
+    {
         return _report("Excluding", "system module", 3);
+    }
 
     // dyninst modules that must not be instrumented
     if(std::regex_search(module_name, dyninst_regex))
+    {
         return _report("Excluding", "dyninst module", 3);
+    }
 
     // modules used by rocprof-sys and dependent libraries
     if(std::regex_search(module_name, core_lib_regex) ||
        std::regex_search(module_name, core_cmod_regex))
+    {
         return _report("Excluding", "core module", 3);
+    }
 
     // modules used by rocprof-sys and dependent libraries
     if(std::regex_search(module_name, dependlib_regex))
+    {
         return _report("Excluding", "dependency module", 3);
+    }
 
     // known set of modules whose starting sequence of characters suggest it should not be
     // instrumented (wastes time)
@@ -576,8 +608,12 @@ module_function::is_routine_constrained() const
         auto _v   = get_whole_function_names();
         auto _ret = _v;
         for(std::string _ext : { "64", "_l", "_r" })
+        {
             for(const auto& itr : _v)
+            {
                 _ret.emplace(itr + _ext);
+            }
+        }
         return _ret;
     }();
 
@@ -691,7 +727,9 @@ module_function::is_instruction_constrained() const
         {
             auto _instrss = std::stringstream{};
             for(auto&& iitr : itr)
+            {
                 _instrss << " " << iitr.first.format();
+            }
 
             auto _instr = _instrss.str();
             if(!_instr.empty())
@@ -893,18 +931,26 @@ module_function::operator()(address_space_t* _addr_space, procedure_t* _entr_tra
         std::tie(_points, _ntraps) = query_instr(function, BPatch_entry, flow_graph, itr);
 
         if(_is_constrained(_points == 0, "no-instrumentable-loop-entry-point", _lname))
+        {
             continue;
+        }
         if(_is_constrained(!instr_loop_traps && _points == _ntraps,
                            "loop-entry-point-trap-instrumentation", _lname))
+        {
             continue;
+        }
 
         std::tie(_points, _ntraps) = query_instr(function, BPatch_exit, flow_graph, itr);
 
         if(_is_constrained(_points == 0, "no-instrumentable-loop-exit-point", _lname))
+        {
             continue;
+        }
         if(_is_constrained(!instr_loop_traps && _points == _ntraps,
                            "loop-exit-point-trap-instrumentation", _lname))
+        {
             continue;
+        }
 
         auto _ltrace_entr = rocprofsys_call_expr(_lname.c_str());
         auto _ltrace_exit = rocprofsys_call_expr(_lname.c_str());

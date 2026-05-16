@@ -20,7 +20,9 @@ get_categories(type_list<Tp...>)
     auto _cleanup = [](std::string _type, const std::string& _pattern) {
         auto _pos = std::string::npos;
         while((_pos = _type.find(_pattern)) != std::string::npos)
+        {
             _type.erase(_pos, _pattern.length());
+        }
         return _type;
     };
     (void) _cleanup;  // unused but set if sizeof...(Tp) == 0

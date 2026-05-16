@@ -48,7 +48,9 @@ parse_numeric_range(std::string _input_string, const std::string& _label, Up _in
     };
 
     for(auto& itr : _input_string)
+    {
         itr = tolower(itr);
+    }
     auto _result = ContainerT{};
     for(auto _v : tim::delimit(_input_string, ",; \t\n\r"))
     {
