@@ -464,6 +464,24 @@ class Runtime {
 
   const std::vector<Agent*>& disabled_gpu_agents() { return disabled_gpu_agents_; }
 
+  // Check if an agent handle corresponds to a known valid agent.
+  // Returns true if the handle is in the list of registered agents.
+  // Safe to call with garbage handles (e.g., 0xDEADBEEF).
+  // Thread-safety: Safe to call concurrently. Agent lists are populated
+  // during initialization and remain immutable until shutdown.
+  bool IsValidAgentHandle(hsa_agent_t agent_handle) {
+    Agent* ptr = Agent::Convert(agent_handle);
+    for (auto* a : cpu_agents_)
+      if (a == ptr) return true;
+    for (auto* a : gpu_agents_)
+      if (a == ptr) return true;
+    for (auto* a : aie_agents_)
+      if (a == ptr) return true;
+    for (auto* a : disabled_gpu_agents_)
+      if (a == ptr) return true;
+    return false;
+  }
+
   const std::vector<uint32_t>& gpu_ids() { return gpu_ids_; }
 
   Agent* agent_by_gpuid(uint32_t gpuid) { return agents_by_gpuid_[gpuid]; }

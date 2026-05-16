@@ -99,6 +99,55 @@ class BlitKernel : public core::Blit {
       std::vector<core::Signal*>& dep_signals,
       core::Signal& out_signal, std::vector<core::Signal*>& gang_signals) override;
 
+  /// @brief Submit a broadcast copy command using compute shader (single source
+  /// to multiple destinations). This is the fallback path for devices without
+  /// SDMA multicast support or when SDMA is disabled (MI300, Navi4).
+  ///
+  /// @param src Memory address of the copy source.
+  /// @param dst_list Array of destination memory addresses.
+  /// @param num_destinations Number of destinations (1-1024).
+  /// @param size Size of the data to be copied to each destination (max 4GB).
+  /// @param dep_signals Arrays of dependent signal.
+  /// @param out_signal Output signal.
+  /// @param gang_signals Array of gang signals.
+  virtual hsa_status_t SubmitBroadcastCopyCommand(
+      const void* src, void* const* dst_list, uint32_t num_destinations, size_t size,
+      std::vector<core::Signal*>& dep_signals, core::Signal& out_signal,
+      std::vector<core::Signal*>& gang_signals) override;
+
+  /// @brief Submit a swap copy command using compute shader (exchange contents
+  /// of two buffers). This is the fallback path for devices without SDMA swap
+  /// support (gfx9.4+ only) or when SDMA is disabled.
+  ///
+  /// @param addr_a First buffer address.
+  /// @param addr_b Second buffer address.
+  /// @param size Size of the data to be swapped in bytes (max 4GB).
+  /// @param dep_signals Arrays of dependent signal.
+  /// @param out_signal Output signal.
+  /// @param gang_signals Array of gang signals.
+  virtual hsa_status_t SubmitSwapCopyCommand(void* addr_a, void* addr_b, size_t size,
+                                             std::vector<core::Signal*>& dep_signals,
+                                             core::Signal& out_signal,
+                                             std::vector<core::Signal*>& gang_signals) override;
+
+  /// @brief Submit an indirect copy command using compute shader where source
+  /// and/or destination addresses are resolved via indirection (pointer-to-pointer).
+  /// This enables GPU kernels to specify copy addresses dynamically.
+  ///
+  /// @param src Source address (direct or void** if src_indirect is true).
+  /// @param dst Destination address (direct or void** if dst_indirect is true).
+  /// @param size Size of the data to be copied in bytes (max 4GB).
+  /// @param src_indirect If true, src is a pointer to the actual source address.
+  /// @param dst_indirect If true, dst is a pointer to the actual dest address.
+  /// @param dep_signals Arrays of dependent signal.
+  /// @param out_signal Output signal.
+  /// @param gang_signals Array of gang signals.
+  virtual hsa_status_t SubmitIndirectCopyCommand(const void* src, void* dst, size_t size,
+                                                 bool src_indirect, bool dst_indirect,
+                                                 std::vector<core::Signal*>& dep_signals,
+                                                 core::Signal& out_signal,
+                                                 std::vector<core::Signal*>& gang_signals) override;
+
   /// @brief Submit an AQL packet to perform memory fill. The call is blocking
   /// until the command execution is finished.
   ///
@@ -150,6 +199,28 @@ class BlitKernel : public core::Blit {
       uint32_t fill_value;
       uint32_t num_workitems;
     } fill;
+
+    struct __ALIGNED__(16) {
+      uint64_t src_addr;          // Source buffer address
+      uint64_t dst_list_addr;     // GPU-accessible array of destination addresses
+      uint32_t num_destinations;  // Number of destinations (1-1024)
+      uint32_t copy_size;         // Size to copy to each destination
+      uint32_t num_workitems;     // Total workitems for dispatch
+    } broadcast;
+
+    struct __ALIGNED__(16) {
+      uint64_t addr_a;     // First buffer address
+      uint64_t addr_b;     // Second buffer address
+      uint32_t swap_size;  // Size to swap in bytes
+    } swap;
+
+    struct __ALIGNED__(16) {
+      uint64_t src_addr;        // Source address (direct or pointer-to-source)
+      uint64_t dst_addr;        // Destination address (direct or pointer-to-dest)
+      uint32_t copy_size;       // Size to copy in bytes
+      uint32_t num_workitems;   // Total workitems for dispatch
+      uint32_t indirect_flags;  // bit0: src indirect, bit1: dst indirect
+    } indirect_copy;
   };
 
   // Index after which bytes will have been written.
@@ -179,6 +250,9 @@ class BlitKernel : public core::Blit {
     CopyAligned,
     CopyMisaligned,
     Fill,
+    BroadcastCopy,
+    SwapCopy,
+    IndirectCopy,
   };
 
   struct KernelCode {

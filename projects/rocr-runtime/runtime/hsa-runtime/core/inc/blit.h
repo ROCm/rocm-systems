@@ -101,6 +101,69 @@ class Blit {
   virtual hsa_status_t SubmitLinearFillCommand(void* ptr, uint32_t value,
                                                size_t num) = 0;
 
+  /// @brief Submit a broadcast copy command (single source to multiple destinations).
+  /// The call is non-blocking. The memory transfer will start after all dependent
+  /// signals are satisfied. After the transfer is completed, the out signal will
+  /// be decremented.
+  ///
+  /// @param src Memory address of the copy source.
+  /// @param dst_list Array of destination memory addresses.
+  /// @param num_destinations Number of destinations (1-1024).
+  /// @param size Size of the data to be copied to each destination.
+  /// @param dep_signals Arrays of dependent signal.
+  /// @param out_signal Output signal.
+  /// @param gang_signals Array of gang signals.
+  virtual hsa_status_t SubmitBroadcastCopyCommand(const void* src, void* const* dst_list,
+                                                  uint32_t num_destinations, size_t size,
+                                                  std::vector<core::Signal*>& dep_signals,
+                                                  core::Signal& out_signal,
+                                                  std::vector<core::Signal*>& gang_signals) {
+    // Default implementation: not supported
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  /// @brief Submit a swap copy command (exchange contents of two buffers).
+  /// The call is non-blocking. The memory transfer will start after all dependent
+  /// signals are satisfied. After the transfer is completed, the out signal will
+  /// be decremented.
+  ///
+  /// @param addr_a First buffer address.
+  /// @param addr_b Second buffer address.
+  /// @param size Size of the data to be swapped in bytes.
+  /// @param dep_signals Arrays of dependent signal.
+  /// @param out_signal Output signal.
+  /// @param gang_signals Array of gang signals.
+  virtual hsa_status_t SubmitSwapCopyCommand(void* addr_a, void* addr_b, size_t size,
+                                             std::vector<core::Signal*>& dep_signals,
+                                             core::Signal& out_signal,
+                                             std::vector<core::Signal*>& gang_signals) {
+    // Default implementation: not supported
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  /// @brief Submit an indirect copy command where source and/or destination
+  /// addresses are resolved via indirection (pointer-to-pointer).
+  /// The call is non-blocking. The memory transfer will start after all dependent
+  /// signals are satisfied. After the transfer is completed, the out signal will
+  /// be decremented.
+  ///
+  /// @param src Source address (direct or void** if src_indirect is true).
+  /// @param dst Destination address (direct or void** if dst_indirect is true).
+  /// @param size Size of the data to be copied in bytes.
+  /// @param src_indirect If true, src is a pointer to the actual source address.
+  /// @param dst_indirect If true, dst is a pointer to the actual dest address.
+  /// @param dep_signals Arrays of dependent signal.
+  /// @param out_signal Output signal.
+  /// @param gang_signals Array of gang signals.
+  virtual hsa_status_t SubmitIndirectCopyCommand(const void* src, void* dst, size_t size,
+                                                 bool src_indirect, bool dst_indirect,
+                                                 std::vector<core::Signal*>& dep_signals,
+                                                 core::Signal& out_signal,
+                                                 std::vector<core::Signal*>& gang_signals) {
+    // Default implementation: not supported
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
   /// @brief Enable profiling of the asynchronous copy command. The timestamp
   /// of each copy request will be stored in the completion signal structure.
   ///

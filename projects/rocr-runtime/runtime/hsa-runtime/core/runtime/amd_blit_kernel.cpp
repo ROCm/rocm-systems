@@ -491,6 +491,122 @@ static constexpr const char kBlitKernelSource_[] = R"(
   L_FILL_PHASE_2_DONE:
     s_endpgm
   end
+
+  // ====================================================================
+  // Broadcast Copy Kernel: Single source to multiple destinations
+  // Strategy: Each workgroup handles one destination
+  // ====================================================================
+  //
+  // Kernel argument buffer:
+  //   [DW  0, 1]  Source buffer address (64-bit)
+  //   [DW  2, 3]  Destination list address (GPU array of uint64_t[])
+  //   [DW  4   ]  Number of destinations (1-1024)
+  //   [DW  5   ]  Copy size (bytes to copy to each destination)
+  //   [DW  6   ]  Total number of workitems
+  //
+  // Note: dst_list must be a GPU-accessible buffer containing destination addresses.
+  // Each workgroup copies to one destination using all threads in parallel.
+
+  var kBroadcastCopyVecWidth = 4
+  var kBroadcastCopyUnroll = 4
+
+  shader BroadcastCopy
+    type(CS)
+    user_sgpr_count(2)
+    sgpr_count(24)
+    vgpr_count(16)
+
+    // Load kernel arguments
+    s_load_dwordx4          s[4:7], s[0:1], s_load_dword_offset(0x0)
+    s_load_dwordx2          s[8:9], s[0:1], s_load_dword_offset(0x10)
+    s_load_dword            s10, s[0:1], s_load_dword_offset(0x18)
+    s_waitcnt               lgkmcnt(0)
+
+    // Save local work-item ID (v0 at kernel entry contains local_id)
+    v_mov_b32               v14, v0
+
+    // Compute destination index from workgroup ID
+    v_mov_b32               v0, s2
+
+    // Load destination address from dst_list[workgroup_id]
+    v_lshlrev_b32           v1, 3, v0
+    v_mov_b32               v3, s7
+    v_add_u32               v2, vcc, v1, s6
+    v_addc_u32              v3, vcc, v3, 0, vcc
+
+    flat_load_dwordx2       v[4:5], v[2:3]
+    s_waitcnt               vmcnt(0)
+
+    // Compute global thread offset: local_id + workgroup_id * 64
+    s_lshl_b32              s11, s2, 6
+    v_add_u32               v0, vcc, v14, s11
+
+    // Main Loop: 16-byte vectorized copy
+    s_lshl_b32              s12, s10, 4
+
+    v_lshlrev_b32           v1, 4, v0
+    v_mov_b32               v7, s5
+    v_add_u32               v6, vcc, v1, s4
+    v_addc_u32              v7, vcc, v7, 0, vcc
+
+    v_add_u32               v8, vcc, v1, v4
+    v_addc_u32              v9, vcc, v5, 0, vcc
+
+    v_and_b32               v10, 0xFFFFFFF0, s9
+    v_mov_b32               v11, s5
+    v_add_u32               v10, vcc, v10, s4
+    v_addc_u32              v11, vcc, v11, 0, vcc
+
+  L_BROADCAST_VEC_LOOP:
+    v_cmp_lt_u64            vcc, v[6:7], v[10:11]
+    s_cbranch_vccz          L_BROADCAST_VEC_DONE
+
+    for var i = 0; i < kBroadcastCopyUnroll; i ++
+      flat_load_dwordx4     v[12:15], v[6:7]
+      s_waitcnt             vmcnt(0)
+      flat_store_dwordx4    v[8:9], v[12:15]
+
+      v_add_u32             v6, vcc, v6, s12
+      v_addc_u32            v7, vcc, v7, 0, vcc
+      v_add_u32             v8, vcc, v8, s12
+      v_addc_u32            v9, vcc, v9, 0, vcc
+    end
+
+    s_branch                L_BROADCAST_VEC_LOOP
+
+  L_BROADCAST_VEC_DONE:
+
+    // Tail Loop: Byte-by-byte copy
+    v_mov_b32               v7, s5
+    v_add_u32               v6, vcc, v0, s4
+    v_addc_u32              v7, vcc, v7, 0, vcc
+
+    v_add_u32               v8, vcc, v0, v4
+    v_addc_u32              v9, vcc, v5, 0, vcc
+
+    v_mov_b32               v11, s5
+    v_add_u32               v10, vcc, s9, s4
+    v_addc_u32              v11, vcc, v11, 0, vcc
+
+  L_BROADCAST_BYTE_LOOP:
+    v_cmp_lt_u64            vcc, v[6:7], v[10:11]
+    s_cbranch_vccz          L_BROADCAST_BYTE_DONE
+    s_and_b64               exec, exec, vcc
+
+    flat_load_ubyte         v1, v[6:7]
+    s_waitcnt               vmcnt(0)
+    flat_store_byte         v[8:9], v1
+
+    v_add_u32               v6, vcc, v6, s10
+    v_addc_u32              v7, vcc, v7, 0, vcc
+    v_add_u32               v8, vcc, v8, s10
+    v_addc_u32              v9, vcc, v9, 0, vcc
+
+    s_branch                L_BROADCAST_BYTE_LOOP
+
+  L_BROADCAST_BYTE_DONE:
+    s_endpgm
+  end
 )";
 
 // Search kernel source for variable definition and return value.
@@ -525,6 +641,8 @@ DEFINE_KERNEL_PARAM_FUNC(kCopyAlignedUnroll)
 DEFINE_KERNEL_PARAM_FUNC(kCopyMisalignedUnroll)
 DEFINE_KERNEL_PARAM_FUNC(kFillVecWidth)
 DEFINE_KERNEL_PARAM_FUNC(kFillUnroll)
+DEFINE_KERNEL_PARAM_FUNC(kBroadcastCopyVecWidth)
+DEFINE_KERNEL_PARAM_FUNC(kBroadcastCopyUnroll)
 
 static unsigned extractAqlBits(unsigned v, unsigned pos, unsigned width) {
   return (v >> pos) & ((1 << width) - 1);
@@ -568,10 +686,12 @@ hsa_status_t BlitKernel::Initialize(const core::Agent& agent) {
   num_cus_ = gpuAgent->properties().NumFComputeCores / 4;
 
   // Assemble shaders to AQL code objects.
-  std::map<KernelType, const char*> kernel_names = {
-      {KernelType::CopyAligned, "CopyAligned"},
-      {KernelType::CopyMisaligned, "CopyMisaligned"},
-      {KernelType::Fill, "Fill"}};
+  std::map<KernelType, const char*> kernel_names = {{KernelType::CopyAligned, "CopyAligned"},
+                                                    {KernelType::CopyMisaligned, "CopyMisaligned"},
+                                                    {KernelType::Fill, "Fill"},
+                                                    {KernelType::BroadcastCopy, "BroadcastCopy"},
+                                                    {KernelType::SwapCopy, "SwapCopy"},
+                                                    {KernelType::IndirectCopy, "IndirectCopy"}};
 
   for (auto kernel_name : kernel_names) {
     KernelCode& kernel = kernels_[kernel_name.first];
@@ -834,6 +954,294 @@ hsa_status_t BlitKernel::SubmitLinearFillCommand(void* ptr, uint32_t value,
     // Signal wait returned unexpected value.
     return HSA_STATUS_ERROR;
   }
+
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t BlitKernel::SubmitBroadcastCopyCommand(const void* src, void* const* dst_list,
+                                                    uint32_t num_destinations, size_t size,
+                                                    std::vector<core::Signal*>& dep_signals,
+                                                    core::Signal& out_signal,
+                                                    std::vector<core::Signal*>& gang_signals) {
+  if (src == nullptr || dst_list == nullptr || num_destinations == 0 || num_destinations > 1024) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  for (uint32_t i = 0; i < num_destinations; ++i) {
+    if (dst_list[i] == nullptr) {
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+  }
+
+  if (size == 0) {
+    return HSA_STATUS_SUCCESS;
+  }
+
+  // copy_size is uint32_t in kernel args, so limit to 4GB per destination
+  if (size > UINT32_MAX) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  // Allocate GPU-accessible memory for destination address list
+  void* dst_list_gpu = nullptr;
+  const size_t dst_list_size = num_destinations * sizeof(uint64_t);
+
+  const AMD::GpuAgent* gpuAgent = static_cast<const AMD::GpuAgent*>(agent_);
+  dst_list_gpu =
+      gpuAgent->system_allocator()(dst_list_size, 16, core::MemoryRegion::AllocateNoFlags);
+
+  if (dst_list_gpu == nullptr) {
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+
+  // Copy destination addresses to GPU buffer
+  uint64_t* dst_addrs_gpu = reinterpret_cast<uint64_t*>(dst_list_gpu);
+  for (uint32_t i = 0; i < num_destinations; ++i) {
+    dst_addrs_gpu[i] = reinterpret_cast<uint64_t>(dst_list[i]);
+  }
+
+  std::atomic_thread_fence(std::memory_order_release);
+
+  const uint32_t num_barrier_packet = uint32_t((dep_signals.size() + 4) / 5);
+  const uint32_t total_num_packet = num_barrier_packet + 1;
+
+  uint64_t write_index;
+  {
+    std::lock_guard<std::mutex> lock(reservation_lock_);
+    write_index = AcquireWriteIndex(total_num_packet);
+    RecordBlitHistory(size * num_destinations, write_index + total_num_packet - 1);
+  }
+
+  uint64_t write_index_temp = write_index;
+
+  const uint16_t kBarrierPacketHeader = (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE) |
+      (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+      (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+
+  hsa_barrier_and_packet_t barrier_packet = {0};
+  barrier_packet.header = HSA_PACKET_TYPE_INVALID;
+
+  hsa_barrier_and_packet_t* queue_buffer =
+      reinterpret_cast<hsa_barrier_and_packet_t*>(queue_->public_handle()->base_address);
+
+  const size_t dep_signal_count = dep_signals.size();
+  for (size_t i = 0; i < dep_signal_count; ++i) {
+    const size_t idx = i % 5;
+    barrier_packet.dep_signal[idx] = core::Signal::Convert(dep_signals[i]);
+    if (i == (dep_signal_count - 1) || idx == 4) {
+      std::atomic_thread_fence(std::memory_order_acquire);
+      queue_buffer[(write_index_temp)&queue_bitmask_] = barrier_packet;
+      std::atomic_thread_fence(std::memory_order_release);
+      queue_buffer[(write_index_temp)&queue_bitmask_].header = kBarrierPacketHeader;
+      write_index_temp++;
+      barrier_packet = {0};
+      barrier_packet.header = HSA_PACKET_TYPE_INVALID;
+    }
+  }
+
+  // Calculate dispatch parameters: 1 workgroup per destination, 64 threads per workgroup
+  const uint32_t threads_per_workgroup = 64;
+  const uint32_t num_workgroups = num_destinations;
+  const uint32_t total_workitems = threads_per_workgroup * num_workgroups;
+
+  KernelArgs* args = ObtainAsyncKernelCopyArg();
+  args->broadcast.src_addr = reinterpret_cast<uint64_t>(src);
+  args->broadcast.dst_list_addr = reinterpret_cast<uint64_t>(dst_list_gpu);
+  args->broadcast.num_destinations = num_destinations;
+  args->broadcast.copy_size = static_cast<uint32_t>(size);
+  args->broadcast.num_workitems = total_workitems;
+
+  const uint64_t dispatch_index = write_index + num_barrier_packet;
+
+  // Register async cleanup for dst_list_gpu BEFORE dispatch.
+  // Handler fires when signal reaches 0 (after kernel completion).
+  // Registering before dispatch allows us to fail fast if registration fails.
+  bool handler_registered = core::Runtime::runtime_singleton_->SetAsyncSignalHandler(
+      core::Signal::Convert(&out_signal), HSA_SIGNAL_CONDITION_EQ, 0,
+      [](hsa_signal_value_t, void* arg) -> bool {
+        void* buf = arg;
+        hsa_amd_memory_pool_free(buf);
+        return false;
+      },
+      dst_list_gpu);
+
+  if (!handler_registered) {
+    // Handler registration failed - free buffer and return error before dispatch
+    hsa_amd_memory_pool_free(dst_list_gpu);
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+
+  PopulateQueue(dispatch_index, uintptr_t(kernels_[KernelType::BroadcastCopy].code_buf_), args,
+                total_workitems, core::Signal::Convert(&out_signal));
+
+  ReleaseWriteIndex(write_index, total_num_packet);
+
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t BlitKernel::SubmitSwapCopyCommand(void* addr_a, void* addr_b, size_t size,
+                                               std::vector<core::Signal*>& dep_signals,
+                                               core::Signal& out_signal,
+                                               std::vector<core::Signal*>& gang_signals) {
+  if (addr_a == nullptr || addr_b == nullptr) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  if (size == 0) {
+    return HSA_STATUS_SUCCESS;
+  }
+
+  // swap_size is uint32_t in kernel args, so limit to 4GB
+  if (size > UINT32_MAX) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  const uint32_t num_barrier_packet = uint32_t((dep_signals.size() + 4) / 5);
+  const uint32_t total_num_packet = num_barrier_packet + 1;
+
+  uint64_t write_index;
+  {
+    std::lock_guard<std::mutex> lock(reservation_lock_);
+    write_index = AcquireWriteIndex(total_num_packet);
+    // Swap moves 2x the size (read both, write both)
+    RecordBlitHistory(size * 2, write_index + total_num_packet - 1);
+  }
+
+  uint64_t write_index_temp = write_index;
+
+  const uint16_t kBarrierPacketHeader = (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE) |
+      (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+      (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+
+  hsa_barrier_and_packet_t barrier_packet = {0};
+  barrier_packet.header = HSA_PACKET_TYPE_INVALID;
+
+  hsa_barrier_and_packet_t* queue_buffer =
+      reinterpret_cast<hsa_barrier_and_packet_t*>(queue_->public_handle()->base_address);
+
+  const size_t dep_signal_count = dep_signals.size();
+  for (size_t i = 0; i < dep_signal_count; ++i) {
+    const size_t idx = i % 5;
+    barrier_packet.dep_signal[idx] = core::Signal::Convert(dep_signals[i]);
+    if (i == (dep_signal_count - 1) || idx == 4) {
+      std::atomic_thread_fence(std::memory_order_acquire);
+      queue_buffer[(write_index_temp)&queue_bitmask_] = barrier_packet;
+      std::atomic_thread_fence(std::memory_order_release);
+      queue_buffer[(write_index_temp)&queue_bitmask_].header = kBarrierPacketHeader;
+      write_index_temp++;
+      barrier_packet = {0};
+      barrier_packet.header = HSA_PACKET_TYPE_INVALID;
+    }
+  }
+
+  // Calculate dispatch parameters: each thread handles 16 bytes
+  const uint32_t threads_per_workgroup = 64;
+  const uint32_t bytes_per_thread = 16;
+  // Align size up to 16 bytes, then divide to get thread count
+  const uint32_t aligned_size =
+      (static_cast<uint32_t>(size) + bytes_per_thread - 1) & ~(bytes_per_thread - 1);
+  const uint32_t total_workitems = aligned_size / bytes_per_thread;
+
+  KernelArgs* args = ObtainAsyncKernelCopyArg();
+  args->swap.addr_a = reinterpret_cast<uint64_t>(addr_a);
+  args->swap.addr_b = reinterpret_cast<uint64_t>(addr_b);
+  args->swap.swap_size = static_cast<uint32_t>(size);
+
+  const uint64_t dispatch_index = write_index + num_barrier_packet;
+
+  PopulateQueue(dispatch_index, uintptr_t(kernels_[KernelType::SwapCopy].code_buf_), args,
+                total_workitems, core::Signal::Convert(&out_signal));
+
+  ReleaseWriteIndex(write_index, total_num_packet);
+
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t BlitKernel::SubmitIndirectCopyCommand(const void* src, void* dst, size_t size,
+                                                   bool src_indirect, bool dst_indirect,
+                                                   std::vector<core::Signal*>& dep_signals,
+                                                   core::Signal& out_signal,
+                                                   std::vector<core::Signal*>& gang_signals) {
+  if (src == nullptr || dst == nullptr) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  // Indirect pointers must be 8-byte aligned (they point to 64-bit addresses)
+  if (src_indirect && (reinterpret_cast<uintptr_t>(src) & 0x7) != 0) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+  if (dst_indirect && (reinterpret_cast<uintptr_t>(dst) & 0x7) != 0) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  if (size == 0) {
+    return HSA_STATUS_SUCCESS;
+  }
+
+  // copy_size is uint32_t in kernel args, so limit to 4GB
+  if (size > UINT32_MAX) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  const uint32_t num_barrier_packet = uint32_t((dep_signals.size() + 4) / 5);
+  const uint32_t total_num_packet = num_barrier_packet + 1;
+
+  uint64_t write_index;
+  {
+    std::lock_guard<std::mutex> lock(reservation_lock_);
+    write_index = AcquireWriteIndex(total_num_packet);
+    RecordBlitHistory(size, write_index + total_num_packet - 1);
+  }
+
+  uint64_t write_index_temp = write_index;
+
+  const uint16_t kBarrierPacketHeader = (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE) |
+      (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+      (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+
+  hsa_barrier_and_packet_t barrier_packet = {0};
+  barrier_packet.header = HSA_PACKET_TYPE_INVALID;
+
+  hsa_barrier_and_packet_t* queue_buffer =
+      reinterpret_cast<hsa_barrier_and_packet_t*>(queue_->public_handle()->base_address);
+
+  const size_t dep_signal_count = dep_signals.size();
+  for (size_t i = 0; i < dep_signal_count; ++i) {
+    const size_t idx = i % 5;
+    barrier_packet.dep_signal[idx] = core::Signal::Convert(dep_signals[i]);
+    if (i == (dep_signal_count - 1) || idx == 4) {
+      std::atomic_thread_fence(std::memory_order_acquire);
+      queue_buffer[(write_index_temp)&queue_bitmask_] = barrier_packet;
+      std::atomic_thread_fence(std::memory_order_release);
+      queue_buffer[(write_index_temp)&queue_bitmask_].header = kBarrierPacketHeader;
+      write_index_temp++;
+      barrier_packet = {0};
+      barrier_packet.header = HSA_PACKET_TYPE_INVALID;
+    }
+  }
+
+  // Calculate dispatch parameters: single workgroup with 64 threads
+  const uint32_t threads_per_workgroup = 64;
+  const uint32_t total_workitems = threads_per_workgroup;
+
+  // Build indirect flags
+  uint32_t indirect_flags = 0;
+  if (src_indirect) indirect_flags |= 1;
+  if (dst_indirect) indirect_flags |= 2;
+
+  KernelArgs* args = ObtainAsyncKernelCopyArg();
+  args->indirect_copy.src_addr = reinterpret_cast<uint64_t>(src);
+  args->indirect_copy.dst_addr = reinterpret_cast<uint64_t>(dst);
+  args->indirect_copy.copy_size = static_cast<uint32_t>(size);
+  args->indirect_copy.num_workitems = total_workitems;
+  args->indirect_copy.indirect_flags = indirect_flags;
+
+  const uint64_t dispatch_index = write_index + num_barrier_packet;
+
+  PopulateQueue(dispatch_index, uintptr_t(kernels_[KernelType::IndirectCopy].code_buf_), args,
+                total_workitems, core::Signal::Convert(&out_signal));
+
+  ReleaseWriteIndex(write_index, total_num_packet);
 
   return HSA_STATUS_SUCCESS;
 }

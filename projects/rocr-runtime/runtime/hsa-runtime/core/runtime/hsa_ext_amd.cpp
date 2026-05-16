@@ -125,6 +125,13 @@ struct ValidityError<const T*> {
       return hsa_status_t(ValidityError<decltype(ptr)>::value); \
   } while (false)
 
+// Validate agent handle BEFORE dereferencing (safe for invalid handles)
+#define IS_VALID_AGENT_HANDLE(agent_handle)                                                        \
+  do {                                                                                             \
+    if (!core::Runtime::runtime_singleton_->IsValidAgentHandle(agent_handle))                      \
+      return HSA_STATUS_ERROR_INVALID_AGENT;                                                       \
+  } while (false)
+
 #define IS_NULL_OR_VALID(ptr)                                                                      \
   do {                                                                                             \
     if ((ptr) != NULL && !(ptr)->IsValid())                                                        \
@@ -376,13 +383,20 @@ hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* cop
     if (op.version != HSA_AMD_MEMORY_COPY_OP_VERSION)
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
-    core::Signal* sig = core::Signal::Convert(op.completion_signal);
-    IS_VALID(sig);
-
     IS_BAD_PTR(op.src);
+
+    // Validate source agent handle BEFORE dereferencing (safe for garbage handles)
+    IS_VALID_AGENT_HANDLE(op.src_agent);
 
     core::Agent* src_agent = core::Agent::Convert(op.src_agent);
     IS_VALID(src_agent);
+
+    // Allow null completion signal for fire-and-forget mode
+    core::Signal* sig = nullptr;
+    if (op.completion_signal.handle != 0) {
+      sig = core::Signal::Convert(op.completion_signal);
+      IS_VALID(sig);
+    }
 
     if (op.type > HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST) {
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
