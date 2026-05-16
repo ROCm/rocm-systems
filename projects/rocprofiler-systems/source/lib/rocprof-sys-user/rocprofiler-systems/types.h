@@ -32,16 +32,16 @@ extern "C"
 #endif
 
     struct rocprofsys_annotation;
-    typedef int (*rocprofsys_trace_func_t)(void);
-    typedef int (*rocprofsys_region_func_t)(const char*);
-    typedef int (*rocprofsys_annotated_region_func_t)(const char*, rocprofsys_annotation*,
-                                                      size_t);
+    using rocprofsys_trace_func_t            = int (*)();
+    using rocprofsys_region_func_t           = int (*)(const char*);
+    using rocprofsys_annotated_region_func_t = int (*)(const char*,
+                                                       rocprofsys_annotation*, size_t);
 
     /// @struct rocprofsys_user_callbacks
     /// @brief Struct containing the callbacks for the user API
     ///
     /// @typedef rocprofsys_user_callbacks rocprofsys_user_callbacks_t
-    typedef struct rocprofsys_user_callbacks
+    using rocprofsys_user_callbacks_t = struct rocprofsys_user_callbacks
     {
         rocprofsys_trace_func_t            start_trace;
         rocprofsys_trace_func_t            stop_trace;
@@ -59,9 +59,11 @@ extern "C"
         /// @var stop_trace
         /// @brief Callback for disabling user defined tracing globally.
         /// @var start_thread_trace
-        /// @brief Callback for enabling user defined tracing on the current thread.
+        /// @brief Callback for enabling user defined tracing on the current
+        /// thread.
         /// @var stop_thread_trace
-        /// @brief Callback for disabling user defined tracing on the current thread.
+        /// @brief Callback for disabling user defined tracing on the current
+        /// thread.
         /// @var push_region
         /// @brief Callback for starting a user defined trace region.
         /// @var pop_region
@@ -69,32 +71,32 @@ extern "C"
         /// @var progress
         /// @brief Callback for marking a causal profiling event.
         /// @var push_annotated_region
-        /// @brief Callback for starting a user defined trace region with annotations.
+        /// @brief Callback for starting a user defined trace region with
+        /// annotations.
         /// @var pop_annotated_region
-        /// @brief Callback for ending a user defined trace region with annotations.
+        /// @brief Callback for ending a user defined trace region with
+        /// annotations.
         /// @var annotated_progress
         /// @brief Callback for marking a causal profiling event with annotations.
-    } rocprofsys_user_callbacks_t;
+    };
 
     /// @enum ROCPROFSYS_USER_CONFIGURE_MODE
     /// @brief Identifier for errors
     /// @typedef ROCPROFSYS_USER_CONFIGURE_MODE rocprofsys_user_configure_mode_t
-    typedef enum ROCPROFSYS_USER_CONFIGURE_MODE
-    {
+    using rocprofsys_user_configure_mode_t = enum ROCPROFSYS_USER_CONFIGURE_MODE {
         // clang-format off
         ROCPROFSYS_USER_UNION_CONFIG = 0,    ///< Replace the callbacks in the current config with the non-null callbacks in the provided config
         ROCPROFSYS_USER_REPLACE_CONFIG,      ///< Replace the entire config even if the provided config has null callbacks
         ROCPROFSYS_USER_INTERSECT_CONFIG,    ///< Produce a config which is the intersection of the current config and the provided config
         ROCPROFSYS_USER_CONFIGURE_MODE_LAST
         // clang-format on
-    } rocprofsys_user_configure_mode_t;
+    };
 
     /// @enum ROCPROFSYS_USER_ERROR
     /// @brief Identifier for errors
     /// @typedef ROCPROFSYS_USER_ERROR rocprofsys_user_error_t
     ///
-    typedef enum ROCPROFSYS_USER_ERROR
-    {
+    using rocprofsys_user_error_t = enum ROCPROFSYS_USER_ERROR {
         ROCPROFSYS_USER_SUCCESS = 0,             ///< No error
         ROCPROFSYS_USER_ERROR_NO_BINDING,        ///< Function pointer was not assigned
         ROCPROFSYS_USER_ERROR_BAD_VALUE,         ///< Provided value was invalid
@@ -102,7 +104,7 @@ extern "C"
         ROCPROFSYS_USER_ERROR_INTERNAL,          ///< Internal error occurred within
                                                  ///< librocprof-sys
         ROCPROFSYS_USER_ERROR_LAST
-    } rocprofsys_user_error_t;
+    };
 
 #if defined(__cplusplus)
 }

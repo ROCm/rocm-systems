@@ -34,8 +34,7 @@ extern "C"
     /// @typedef rocprofsys_category_t
     /// @brief Identifier for categories
     ///
-    typedef enum ROCPROFSYS_CATEGORIES
-    {
+    using rocprofsys_category_t = enum ROCPROFSYS_CATEGORIES {
         // Do not use first enum value
         ROCPROFSYS_CATEGORY_NONE = 0,
         // arrange these in the order most likely to
@@ -125,15 +124,14 @@ extern "C"
         // the value of below enum is used for iterating
         // over the enum in C++ templates. It MUST
         // be the last enumerated id
-    } rocprofsys_category_t;
+    };
 
     /// @enum ROCPROFSYS_ANNOTATION_TYPE
     /// @brief Identifier for the data type of the annotation.
     /// if the data type is not a pointer, pass the address of
     /// data.
     /// @typedef ROCPROFSYS_ANNOTATION_TYPE rocprofsys_annotation_type_t
-    typedef enum ROCPROFSYS_ANNOTATION_TYPE
-    {
+    using rocprofsys_annotation_type_t = enum ROCPROFSYS_ANNOTATION_TYPE {
         // Do not use first enum value
         ROCPROFSYS_VALUE_NONE = 0,
         // arrange these in the order most likely to
@@ -173,10 +171,11 @@ extern "C"
         // over the enum in C++ templates. It MUST
         // be the last enumerated id
         ROCPROFSYS_VALUE_LAST
-    } rocprofsys_annotation_type_t;
+    };
 
     /// @struct rocprofsys_annotation
-    /// @brief A struct containing annotation data to be included in the perfetto trace.
+    /// @brief A struct containing annotation data to be included in the perfetto
+    /// trace.
     ///
     /// @code{.cpp}
     /// #include <cstddef>
@@ -213,7 +212,7 @@ extern "C"
     /// }
     /// @endcode
     /// @typedef rocprofsys_annotation rocprofsys_annotation_t
-    typedef struct rocprofsys_annotation
+    using rocprofsys_annotation_t = struct rocprofsys_annotation
     {
         /// label for annotation
         const char* name;
@@ -221,7 +220,7 @@ extern "C"
         uintptr_t type;
         /// data to annotate
         void* value;
-    } rocprofsys_annotation_t;
+    };
 
 #if defined(__cplusplus)
 }

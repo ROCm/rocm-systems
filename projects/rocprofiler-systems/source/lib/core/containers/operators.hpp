@@ -121,7 +121,7 @@ struct incrementable : B
     }
 
 private:  // The use of this typedef works around a Borland bug
-    typedef T incrementable_type;
+    using incrementable_type = T;
 };
 
 template <typename T, typename B = empty_base<T>>
@@ -135,7 +135,7 @@ struct decrementable : B
     }
 
 private:  // The use of this typedef works around a Borland bug
-    typedef T decrementable_type;
+    using decrementable_type = T;
 };
 
 template <typename T, typename P, typename B = empty_base<T>>
