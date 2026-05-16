@@ -1506,21 +1506,17 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM:
 #endif
             {
-                {
-                    LOG_CRITICAL("Unhandled callback record: {}",
-                                 static_cast<int>(record.kind));
-                    ::rocprofsys::set_state(::rocprofsys::State::Finalized);
-                    std::abort();
-                }
+                LOG_CRITICAL("Unhandled callback record: {}",
+                             static_cast<int>(record.kind));
+                ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+                std::abort();
                 break;
             }
             default:
             {
-                {
-                    LOG_CRITICAL("Unhandled callback record: {}", info.str());
-                    ::rocprofsys::set_state(::rocprofsys::State::Finalized);
-                    std::abort();
-                }
+                LOG_CRITICAL("Unhandled callback record: {}", info.str());
+                ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+                std::abort();
                 break;
             }
         }
@@ -1597,21 +1593,17 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM:
 #endif
             {
-                {
-                    LOG_CRITICAL("Unhandled callback record: {}",
-                                 static_cast<int>(record.kind));
-                    ::rocprofsys::set_state(::rocprofsys::State::Finalized);
-                    std::abort();
-                }
+                LOG_CRITICAL("Unhandled callback record: {}",
+                             static_cast<int>(record.kind));
+                ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+                std::abort();
                 break;
             }
             default:
             {
-                {
-                    LOG_CRITICAL("Unhandled callback record: {}", info.str());
-                    ::rocprofsys::set_state(::rocprofsys::State::Finalized);
-                    std::abort();
-                }
+                LOG_CRITICAL("Unhandled callback record: {}", info.str());
+                ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+                std::abort();
                 break;
             }
         }

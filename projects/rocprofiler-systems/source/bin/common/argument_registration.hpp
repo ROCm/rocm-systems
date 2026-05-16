@@ -68,9 +68,7 @@ register_preset_and_domain_arguments(argument_parser& parser, std::string_view t
             {
                 for(const auto& [key, val] : *settings)
                 {
-                    {
-                        env_updater(key, val);
-                    }
+                    env_updater(key, val);
                 }
             }
             else

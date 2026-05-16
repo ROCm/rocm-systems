@@ -211,10 +211,9 @@ rocpd_processor_t::handle([[maybe_unused]] const memory_allocate_sample& _mas)
     const auto invalid_context = ROCPROFILER_CONTEXT_NONE;
     if(_mas.agent_id_handle != invalid_context.handle)
     {
-        {
-            agent_primary_key =
-                m_agent_manager->get_agent_by_handle(_mas.agent_id_handle).base_id;
-        }
+        agent_primary_key =
+            m_agent_manager->get_agent_by_handle(_mas.agent_id_handle).base_id;
+
         const auto* _name = m_metadata->get_buffer_name_info().at(
             static_cast<rocprofiler_buffer_tracing_kind_t>(_mas.kind),
             static_cast<rocprofiler_tracing_operation_t>(_mas.operation));

@@ -155,17 +155,15 @@ cache_comm_data_events(const std::uint32_t device_id, int bytes)
 void
 comm_data::start()
 {
-    {
-        metadata_initialize_comm_data_categories();
-        metadata_initialize_comm_data_pmc();
+    metadata_initialize_comm_data_categories();
+    metadata_initialize_comm_data_pmc();
 
 #if defined(ROCPROFSYS_USE_MPI)
-        metadata_initialize_track<mpi_send>();
-        metadata_initialize_track<mpi_recv>();
+    metadata_initialize_track<mpi_send>();
+    metadata_initialize_track<mpi_recv>();
 #endif
-        metadata_initialize_track<ucx_send>();
-        metadata_initialize_track<ucx_recv>();
-    }
+    metadata_initialize_track<ucx_send>();
+    metadata_initialize_track<ucx_recv>();
 }
 
 void
