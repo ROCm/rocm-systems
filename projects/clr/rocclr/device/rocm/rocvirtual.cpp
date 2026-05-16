@@ -1371,7 +1371,7 @@ std::string VirtualGPU::AnalyzeAqlQueue() const {
 
 // ================================================================================================
 bool VirtualGPU::ShouldMigrateQueue() const {
-  if (dedicated_queue_ || gpu_queue_ == nullptr ||
+  if (dedicated_queue_ || queue_pinned_ || gpu_queue_ == nullptr ||
       roc_device_.settings().dynamic_queues_ < 2) {
     return false;
   }
@@ -1385,68 +1385,75 @@ bool VirtualGPU::ShouldMigrateQueue() const {
 
   uint qIndex;
   switch (priority_) {
-    case amd::CommandQueue::Priority::Low:  qIndex = Device::QueuePriority::Low;  break;
-    case amd::CommandQueue::Priority::High: qIndex = Device::QueuePriority::High; break;
-    default:                               qIndex = Device::QueuePriority::Normal; break;
+    case amd::CommandQueue::Priority::Low:
+      qIndex = Device::QueuePriority::Low;
+      break;
+    case amd::CommandQueue::Priority::High:
+      qIndex = Device::QueuePriority::High;
+      break;
+    default:
+      qIndex = Device::QueuePriority::Normal;
+      break;
   }
 
+  const uint32_t dynamic_queue_mode = roc_device_.settings().dynamic_queues_;
   auto& pool = roc_device_.queuePool_[qIndex];
+
   auto it = pool.find(gpu_queue_);
   if (it == pool.end()) {
     return false;
   }
-  uint64_t current_metric = it->second.GetLoadMetric(gpu_queue_,
-                                roc_device_.settings().dynamic_queues_);
+  uint64_t current_metric = it->second.GetLoadMetric(gpu_queue_, dynamic_queue_mode);
 
   std::unordered_set<uint64_t> excluded{gpu_queue_->id};
-  hsa_queue_t* best = roc_device_.getQueueFromPool(qIndex, /*force_reuse=*/true,
-                                                    /*preferred=*/nullptr, &excluded);
-  if (best == nullptr) {
+  hsa_queue_t* candidate = roc_device_.getQueueFromPool(qIndex, true, nullptr, &excluded);
+  if (candidate == nullptr) {
     return false;
   }
 
-  auto best_it = pool.find(best);
-  if (best_it != pool.end()) {
-    best_it->second.refCount--;
+  auto candidate_it = pool.find(candidate);
+  candidate_it->second.refCount--;
+  uint64_t candidate_metric = candidate_it->second.GetLoadMetric(candidate, dynamic_queue_mode);
+
+  bool should_migrate = (current_metric > candidate_metric + kMigrationMargin);
+  if (!should_migrate) {
+    // Pool changed but migration isn't worthwhile yet; clear the flag so future
+    // dispatches skip this expensive check until the pool changes again.
+    roc_device_.queue_pool_changed_.store(false, std::memory_order_release);
   }
-
-  uint64_t best_metric = (best_it != pool.end())
-      ? best_it->second.GetLoadMetric(best, roc_device_.settings().dynamic_queues_)
-      : 0;
-
-  return (current_metric > best_metric + kMigrationMargin);
+  return should_migrate;
 }
 
 // ================================================================================================
-void VirtualGPU::MigrateToNewQueue(hsa_queue_t* new_queue) {
+void VirtualGPU::MigrateToNewQueue(hsa_queue_t* new_queue, void* new_md_rb) {
   assert(new_queue != nullptr && new_queue != gpu_queue_);
   assert(!dedicated_queue_);
 
   hsa_queue_t* old_queue = gpu_queue_;
 
-  // Drain the previous migration's signal before reusing its slot. By the time migration
-  // fires again, the old queue has had time to drain, so this wait is practically zero.
-  // We use a fresh signal per migration to avoid the GPU-side circular dependency that
-  // arises when reusing the same signal handle across consecutive migrations on shared queues.
-  if (migration_signal_.handle != 0) {
+  if (migration_signal_.handle == 0) {
+    // First migration: create both signals.
+    if (Hsa::signal_create(1, 0, nullptr, &migration_signal_) != HSA_STATUS_SUCCESS ||
+        Hsa::signal_create(1, 0, nullptr, &wait_done_signal_) != HSA_STATUS_SUCCESS) {
+      ClPrint(amd::LOG_WARNING, amd::LOG_QUEUE,
+              "MigrateToNewQueue: signal_create failed, skipping migration");
+      return;
+    }
+  } else {
+    // wait on both signal completion to avoid race condition
     Hsa::signal_wait_scacquire(migration_signal_, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX,
                                 HSA_WAIT_STATE_BLOCKED);
-    Hsa::signal_destroy(migration_signal_);
-    migration_signal_.handle = 0;
+    Hsa::signal_wait_scacquire(wait_done_signal_, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX,
+                                HSA_WAIT_STATE_BLOCKED);
+    Hsa::signal_store_relaxed(migration_signal_, 1);
+    Hsa::signal_store_relaxed(wait_done_signal_, 1);
   }
 
-  hsa_signal_t rendezvous{};
-  if (Hsa::signal_create(1, 0, nullptr, &rendezvous) != HSA_STATUS_SUCCESS) {
-    ClPrint(amd::LOG_WARNING, amd::LOG_QUEUE,
-            "MigrateToNewQueue: signal_create failed, skipping migration");
-    return;
-  }
-
-  // Barrier on old_queue: fires rendezvous when all prior work completes.
+  // Barrier on old_queue: make sure all prior work completes.
   {
     const uint32_t queueMask = old_queue->size - 1;
     hsa_barrier_and_packet_t drain_barrier{};
-    drain_barrier.completion_signal = rendezvous;
+    drain_barrier.completion_signal = migration_signal_;
     uint64_t idx = Hsa::queue_add_write_index_screlease(old_queue, 1);
     while ((idx - Hsa::queue_load_read_index_scacquire(old_queue)) >= queueMask);
     hsa_barrier_and_packet_t* slot =
@@ -1456,11 +1463,12 @@ void VirtualGPU::MigrateToNewQueue(hsa_queue_t* new_queue) {
     Hsa::signal_store_screlease(old_queue->doorbell_signal, idx);
   }
 
-  // Barrier on new_queue: waits for rendezvous before any future work runs.
+  // Barrier on new_queue: waits for migration_signal_.
   {
     const uint32_t queueMask = new_queue->size - 1;
     hsa_barrier_and_packet_t wait_barrier{};
-    wait_barrier.dep_signal[0] = rendezvous;
+    wait_barrier.dep_signal[0] = migration_signal_;
+    wait_barrier.completion_signal = wait_done_signal_;
     uint64_t idx = Hsa::queue_add_write_index_screlease(new_queue, 1);
     while ((idx - Hsa::queue_load_read_index_scacquire(new_queue)) >= queueMask);
     hsa_barrier_and_packet_t* slot =
@@ -1470,14 +1478,9 @@ void VirtualGPU::MigrateToNewQueue(hsa_queue_t* new_queue) {
     Hsa::signal_store_screlease(new_queue->doorbell_signal, idx);
   }
 
-  gpu_queue_ = new_queue;
-  metadata_preloader_.Detach();
-  metadata_preloader_.Attach(new_queue);
+  SetGpuQueue(new_queue, new_md_rb);
 
   roc_device_.ReleaseActiveQueue(old_queue, priority_);
-
-  // Store for deferred wait+destroy at the start of the next migration (or destructor).
-  migration_signal_ = rendezvous;
 
   roc_device_.queue_pool_changed_.store(false, std::memory_order_release);
 
@@ -1493,19 +1496,25 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   if (ShouldMigrateQueue()) {
     uint qIndex;
     switch (priority_) {
-      case amd::CommandQueue::Priority::Low:  qIndex = Device::QueuePriority::Low;  break;
-      case amd::CommandQueue::Priority::High: qIndex = Device::QueuePriority::High; break;
-      default:                               qIndex = Device::QueuePriority::Normal; break;
+      case amd::CommandQueue::Priority::Low:
+        qIndex = Device::QueuePriority::Low;
+        break;
+      case amd::CommandQueue::Priority::High:
+        qIndex = Device::QueuePriority::High;
+        break;
+      default:
+        qIndex = Device::QueuePriority::Normal;
+        break;
     }
     std::unordered_set<uint64_t> excluded{gpu_queue_->id};
     hsa_queue_t* new_queue = nullptr;
+    void* new_md_rb = nullptr;
     {
       amd::ScopedLock l(roc_device_.active_queue_access_);
-      new_queue = roc_device_.getQueueFromPool(
-          qIndex, /*force_reuse=*/true, /*preferred=*/nullptr, &excluded);
+      new_queue = roc_device_.getQueueFromPool(qIndex, true, nullptr, &excluded, &new_md_rb);
     }  // release lock before MigrateToNewQueue — it calls releaseQueue which re-acquires it
     if (new_queue != nullptr) {
-      MigrateToNewQueue(new_queue);
+      MigrateToNewQueue(new_queue, new_md_rb);
     }
   }
 
@@ -2310,8 +2319,11 @@ VirtualGPU::~VirtualGPU() {
     SetCoalesceWindow(0, nullptr);
     if (migration_signal_.handle != 0) {
       Hsa::signal_wait_scacquire(migration_signal_, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX,
-                                 HSA_WAIT_STATE_BLOCKED);
+                                  HSA_WAIT_STATE_BLOCKED);
+      Hsa::signal_wait_scacquire(wait_done_signal_, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX,
+                                  HSA_WAIT_STATE_BLOCKED);
       Hsa::signal_destroy(migration_signal_);
+      Hsa::signal_destroy(wait_done_signal_);
     }
   }
 

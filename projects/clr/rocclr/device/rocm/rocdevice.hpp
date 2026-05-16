@@ -781,11 +781,9 @@ class Device : public NullDevice {
 
       uint64_t dedicated_queue_penalty = 0;
       if (hasDedicatedQueue_) {
-        // Scale from 0 (idle) to 2048 (fully loaded) over kDedicatedPenaltyDepth packets.
-        // At depth >= kDedicatedPenaltyDepth the dedicated queue is fully exclusive.
+        // Scale with depth<<4, capped at 2048, so idle queue has zero penalty.
         constexpr uint64_t kMaxPenalty = 2048;
-        constexpr uint64_t kDedicatedPenaltyDepth = 32;
-        dedicated_queue_penalty = std::min(kMaxPenalty, depth * (kMaxPenalty / kDedicatedPenaltyDepth));
+        dedicated_queue_penalty = std::min(kMaxPenalty, depth << 4);
       }
 
       // Advanced weighted metric: Give queue depth significantly more weight than refCount
