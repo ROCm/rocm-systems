@@ -41,6 +41,9 @@ struct ncclIbResiliencyDev {
   struct ibv_mr* probingResultMr;
   // CQ to get CQEs for recovery protocol messages.
   struct ibv_cq* portRecoveryCq;
+  // GRH buffer and MR for UD recovery QP receives (UD prepends 40-byte GRH).
+  uint8_t portRecoveryGrhBuf[40];
+  struct ibv_mr* portRecoveryGrhMr;
 };
 
 struct ncclIbResiliency {
@@ -72,12 +75,17 @@ struct ncclIbResiliency {
   // module.
   int outstandingRequests;
 
-  // QPs used for recovery protocol messages.
+  // QPs used for recovery protocol messages (UD — connectionless, survives link failures).
   struct ncclIbQp portRecoveryQps[NCCL_IB_MAX_DEVS_PER_NIC];
+  struct ibv_ah* portRecoveryAh[NCCL_IB_MAX_DEVS_PER_NIC];
+  uint32_t portRecoveryRemoteQpn[NCCL_IB_MAX_DEVS_PER_NIC];
   int nPortRecoveryQps;
 
   // Number of outstanding devices that are currently undergoing recovery.
   int outstandingRecovery;
+
+  // Counter for selective retransmits (IbCastResiliencyRepostRequest calls).
+  int repostCount;
 };
 
 enum ncclIbResiliencyRequestSendState {
