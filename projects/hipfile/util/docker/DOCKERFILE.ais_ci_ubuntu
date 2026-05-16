@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 ARG UBUNTU_CODENAME=noble
-FROM ubuntu:${UBUNTU_CODENAME}
+FROM ubuntu:${UBUNTU_CODENAME} AS base
 LABEL org.opencontainers.image.source=https://github.com/ROCm/hipFile
 ARG UBUNTU_CODENAME
 ARG UBUNTU_MAJOR_VERSION=24
@@ -62,10 +62,26 @@ RUN cat <<EOF > /etc/ld.so.conf.d/rocm.conf
 EOF
 RUN ldconfig
 
+# Add ROCm bin directory to the path
+ENV PATH=/opt/rocm/bin:${PATH}
+
+# Environment Build Arg for ROCm
+ENV ROCM_VERSION="${ROCM_VERSION}"
+
+# AIS Code Repository Mount Point
+VOLUME /mnt/ais
+
+# Generic Mount point for container to access AIS-capable storage.
+VOLUME /mnt/ais-fs
+
+# ---- Stage 2: NVIDIA (extends base with CUDA SDK) ----
+# The HIP runtime must be present to use hipFile with NVIDIA GPUs,
+# which is why this stage inherits from base rather than a bare CUDA image.
+FROM base AS nvidia
+ARG UBUNTU_MAJOR_VERSION=24
+ARG UBUNTU_MINOR_VERSION=04
+
 # Install a minimal CUDA SDK
-# HIP depends on the ROCm libraries being installed.
-# This means we are unable to have a separate CUDA+HIP image
-# without ROCm.
 RUN curl https://developer.download.nvidia.com/compute/cuda/repos/ubuntu${UBUNTU_MAJOR_VERSION}${UBUNTU_MINOR_VERSION}/x86_64/cuda-keyring_1.1-1_all.deb \
     -o cuda-repo-install.deb
 RUN apt install ./cuda-repo-install.deb
@@ -77,14 +93,5 @@ RUN apt update && \
     libcufile-dev-12-9 \
     libnvidia-compute-570-server
 
-# Add ROCm and CUDA bin directories to the path
-ENV PATH=/usr/local/cuda/bin:/opt/rocm/bin:${PATH}
-
-# Environment Build Arg for ROCm
-ENV ROCM_VERSION="${ROCM_VERSION}"
-
-# AIS Code Repository Mount Point
-VOLUME /mnt/ais
-
-# Generic Mount point for container to access AIS-capable storage.
-VOLUME /mnt/ais-fs
+# Add CUDA bin directory to the path
+ENV PATH=/usr/local/cuda/bin:${PATH}
