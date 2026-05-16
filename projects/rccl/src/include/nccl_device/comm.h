@@ -6,5 +6,5 @@
 
 #ifndef _NCCL_DEVICE_COMM_H_
 #define _NCCL_DEVICE_COMM_H_
-#include "core_tmp.h"
+#include "core.h"
 #endif

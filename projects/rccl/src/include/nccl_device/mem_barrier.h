@@ -7,7 +7,7 @@
 #ifndef _NCCL_DEVICE_MEM_BARRIER_H_
 #define _NCCL_DEVICE_MEM_BARRIER_H_
 #include "impl/core__types.h"
-#include "core_tmp.h"
+#include "core.h"
 
 struct ncclLsaBarrierHandle;
 
