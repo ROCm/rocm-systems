@@ -13,6 +13,9 @@
 #if !defined(__HIP_PLATFORM_AMD__)
 #include <cuda_runtime.h>
 #include <cooperative_groups.h>
+#else
+// HIP analog of CUDA __stwt: dwordx4 builtins, v4u typedefs, system sync scope.
+#include "nccl_device/rccl_ptr.h"
 #endif
 #include "nccl.h"
 #include "nccl_device/utility.h"
@@ -53,19 +56,26 @@ NCCL_DEVICE_INLINE void postGfd(Coop coop, ncclGinProxyGpuCtx_t* proxyCtx, ncclG
     }
     idx &= queueSize - 1;
 // 4x16 byte store
+// Cache-bypassing into the host-mapped queue: __stwt on NVIDIA,
+// system-scope dwordx4 (or NT-store fallback) on HIP - avoids a costly __threadfence_system().
 #pragma unroll
     for (uint8_t i = 0; i < 4; i++) {
 #if defined(__HIP_PLATFORM_AMD__)
-      *((uint4*)&q[idx] + i) = ((uint4*)gfd)[i];
+  #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+      union { v4u vec; uint4 u; } pkt;
+      pkt.u = ((uint4*)gfd)[i];
+      __builtin_amdgcn_global_store_b128((v4u_gptr)((uint4*)&q[idx] + i), pkt.vec,
+                                         RCCL_SYSTEM_SYNCSCOPE);
+  #else
+      uint64_t* p64 = reinterpret_cast<uint64_t*>((uint4*)&q[idx] + i);
+      const uint64_t* g64 = reinterpret_cast<const uint64_t*>((uint4*)gfd + i);
+      __builtin_nontemporal_store(g64[0], (u64_gptr)(p64 + 0));
+      __builtin_nontemporal_store(g64[1], (u64_gptr)(p64 + 1));
+  #endif
 #else
       __stwt((uint4*)&q[idx] + i, ((uint4*)gfd)[i]);
 #endif
     }
-#if defined(__HIP_PLATFORM_AMD__)
-    // HIP has no __stwt; without this fence GFD qwords land in L2 out-of-order and
-    // the host proxy spins forever on a partial descriptor (root cause of the GIN hang).
-    __threadfence_system();
-#endif
   }
 }
 
