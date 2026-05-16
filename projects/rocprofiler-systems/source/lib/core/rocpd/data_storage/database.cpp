@@ -185,17 +185,18 @@ database::initialize_schema()
             continue;
         }
 
-        validate_sqlite3_result(sqlite3_exec(_sqlite3_db_temp, query.c_str(), 0, 0, 0),
-                                query.c_str(),
-                                std::string("Invalid schema, init database failed!"));
+        validate_sqlite3_result(
+            sqlite3_exec(_sqlite3_db_temp, query.c_str(), nullptr, nullptr, nullptr),
+            query.c_str(), std::string("Invalid schema, init database failed!"));
     }
 }
 
 void
 database::execute_query(const std::string& query)
 {
-    validate_sqlite3_result(sqlite3_exec(_sqlite3_db_temp, query.c_str(), 0, 0, 0),
-                            "Failed to execute query - ", query);
+    validate_sqlite3_result(
+        sqlite3_exec(_sqlite3_db_temp, query.c_str(), nullptr, nullptr, nullptr),
+        "Failed to execute query - ", query);
 }
 
 std::string
