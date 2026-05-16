@@ -1397,7 +1397,7 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
   // deferred export will not run into this problem.
   int dmabuf_fd;
   uint64_t dmabufOffset;
-  
+
   auto err = hsaKmtExportDMABufHandle(ptr, len, &dmabuf_fd, &dmabufOffset);
   assert(dmabufOffset/pageSize == fragOffset && "DMA Buf inconsistent with pointer offset.");
   if (err != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
@@ -3539,9 +3539,8 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
         // Already on a CPU agent; skip prefetch for this region
         op->target_cpus.push_back(UINT32_MAX);
         continue;
-      } else if (agent->device_type() == core::Agent::kAmdGpuDevice) {
-        AMD::GpuAgent* gpu = static_cast<AMD::GpuAgent*>(agent);
-        cpu = static_cast<AMD::CpuAgent*>(gpu->GetNearestCpuAgent());
+      } else {
+        cpu = static_cast<AMD::CpuAgent*>(agent->GetNearestCpuAgent());
       }
     }
 
@@ -3717,7 +3716,7 @@ hsa_status_t Runtime::VMemoryAddressReserve(void** va, size_t size, uint64_t add
   }
 
   reserved_address_map_[addr] = AddressHandle(addr, size, true);
-  *va = addr; 
+  *va = addr;
   return HSA_STATUS_SUCCESS;
 }
 
@@ -3936,7 +3935,7 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
         *targetAgent, &driver_handle, ShareType::DMABUF_FD,
         &memHandle->driver_handle.dmabuf_fd);
   }
-  if (status != HSA_STATUS_SUCCESS) 
+  if (status != HSA_STATUS_SUCCESS)
     throw AMD::hsa_exception(status, "Failed to import memory");
 }
 
@@ -4013,7 +4012,7 @@ Runtime::MappedHandle::MappedHandle(MemoryHandle *mem_handle, AddressHandle *add
      * to look up the VA when sharing this BO to a third party driver. We only
      * need this in the process that owns this memory allocation.
      */
-    auto cpu_agent = static_cast<AMD::GpuAgent*>(agentOwner())->GetNearestCpuAgent();
+    auto cpu_agent = agentOwner()->GetNearestCpuAgent();
     auto agentPermsIt = allowed_agents.emplace(std::piecewise_construct,
                         std::forward_as_tuple(cpu_agent),
                         std::forward_as_tuple(this, cpu_agent, va,
