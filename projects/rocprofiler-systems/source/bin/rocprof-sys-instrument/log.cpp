@@ -19,7 +19,7 @@ std::vector<log_entry> log_entries = {};
 auto
 get_color_regex(std::string _v)
 {
-    auto _p = _v.find("[");
+    auto _p = _v.find('[');
     if(_p != std::string::npos) _v.insert(_p, "\\");
     return JOIN("", "\\", _v);
 }
