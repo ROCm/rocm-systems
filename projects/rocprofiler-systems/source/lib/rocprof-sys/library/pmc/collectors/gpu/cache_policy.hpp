@@ -72,8 +72,7 @@ struct cache_policy
                 auto name =
                     trace_cache::info::format_track_name<category::amd_smi_vcn_activity>(
                         xcp_idx, clk);
-                trace_cache::get_metadata_registry().add_track(
-                    { name.c_str(), thread_id, "{}" });
+                trace_cache::get_metadata_registry().add_track({ name, thread_id, "{}" });
             }
         };
 
@@ -83,8 +82,7 @@ struct cache_policy
                 auto name =
                     trace_cache::info::format_track_name<category::amd_smi_jpeg_activity>(
                         xcp_idx, clk);
-                trace_cache::get_metadata_registry().add_track(
-                    { name.c_str(), thread_id, "{}" });
+                trace_cache::get_metadata_registry().add_track({ name, thread_id, "{}" });
             }
         };
 
@@ -106,8 +104,7 @@ struct cache_policy
             auto vcn_name =
                 trace_cache::info::format_track_name<category::amd_smi_vcn_activity>(
                     std::nullopt, vcn);
-            trace_cache::get_metadata_registry().add_track(
-                { vcn_name.c_str(), thread_id, "{}" });
+            trace_cache::get_metadata_registry().add_track({ vcn_name, thread_id, "{}" });
         }
 
         for(size_t link = 0; link < MAX_NUM_XGMI_LINKS; ++link)
@@ -116,13 +113,13 @@ struct cache_policy
                 trace_cache::info::format_track_name<category::amd_smi_xgmi_read_data>(
                     std::nullopt, link);
             trace_cache::get_metadata_registry().add_track(
-                { read_name.c_str(), thread_id, "{}" });
+                { read_name, thread_id, "{}" });
 
             auto write_name =
                 trace_cache::info::format_track_name<category::amd_smi_xgmi_write_data>(
                     std::nullopt, link);
             trace_cache::get_metadata_registry().add_track(
-                { write_name.c_str(), thread_id, "{}" });
+                { write_name, thread_id, "{}" });
         }
 
         trace_cache::get_metadata_registry().add_track(
@@ -220,11 +217,10 @@ struct cache_policy
                 trace_cache::info::format_track_name<category::amd_smi_vcn_activity>(vcn);
 
             trace_cache::get_metadata_registry().add_pmc_info(
-                { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-                  vcn_name.c_str(), vcn_name.c_str(),
-                  "VCN (Video Decode) Engine Activity", LONG_DESCRIPTION, COMPONENT,
-                  trace_cache::PERCENTAGE, rocprofsys::trace_cache::ABSOLUTE, BLOCK,
-                  EXPRESSION, 0, 0, "{}" });
+                { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID, vcn_name,
+                  vcn_name, "VCN (Video Decode) Engine Activity", LONG_DESCRIPTION,
+                  COMPONENT, trace_cache::PERCENTAGE, rocprofsys::trace_cache::ABSOLUTE,
+                  BLOCK, EXPRESSION, 0, 0, "{}" });
         }
 
         for(size_t xcp = 0; xcp < MAX_NUM_XCP; ++xcp)
@@ -237,10 +233,9 @@ struct cache_policy
 
                 trace_cache::get_metadata_registry().add_pmc_info(
                     { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-                      vcn_name.c_str(), vcn_name.c_str(),
-                      "VCN (Video Decode) Engine Activity", LONG_DESCRIPTION, COMPONENT,
-                      trace_cache::PERCENTAGE, rocprofsys::trace_cache::ABSOLUTE, BLOCK,
-                      EXPRESSION, 0, 0, "{}" });
+                      vcn_name, vcn_name, "VCN (Video Decode) Engine Activity",
+                      LONG_DESCRIPTION, COMPONENT, trace_cache::PERCENTAGE,
+                      rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
             }
         }
 
@@ -253,10 +248,9 @@ struct cache_policy
                         xcp, jpeg);
                 trace_cache::get_metadata_registry().add_pmc_info(
                     { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-                      jpeg_name.c_str(), jpeg_name.c_str(),
-                      "JPEG (Image Decode) Engine Activity", LONG_DESCRIPTION, COMPONENT,
-                      trace_cache::PERCENTAGE, rocprofsys::trace_cache::ABSOLUTE, BLOCK,
-                      EXPRESSION, 0, 0, "{}" });
+                      jpeg_name, jpeg_name, "JPEG (Image Decode) Engine Activity",
+                      LONG_DESCRIPTION, COMPONENT, trace_cache::PERCENTAGE,
+                      rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
             }
         }
 

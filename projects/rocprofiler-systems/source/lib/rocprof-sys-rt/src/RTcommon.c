@@ -525,7 +525,6 @@ DYNINST_stopThread(void* pointAddr, void* callBackID, void* flags, void* calcula
     fflush(stOut);
     tc_lock_unlock(&DYNINST_trace_lock);
     reentrant = 0;
-    return;
 }
 
 // zeroes out the useCache flag if the call is interprocedural

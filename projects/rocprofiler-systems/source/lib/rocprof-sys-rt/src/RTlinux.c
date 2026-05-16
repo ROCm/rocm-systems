@@ -443,8 +443,6 @@ dyninstTrapHandler(int sig, siginfo_t* sg, ucontext_t* context)
 
 #    if defined(cap_binary_rewriter)
 
-extern struct r_debug _r_debug;
-
 /* Verify that the r_debug variable is visible */
 void
 r_debugCheck(void)
@@ -463,9 +461,6 @@ typedef Elf32_Dyn ElfX_Dyn;
 #        else
 typedef Elf64_Dyn ElfX_Dyn;
 #        endif
-
-struct trap_mapping_header*
-getStaticTrapMap(unsigned long addr);
 
 #        if !defined(arch_aarch64)
 static unsigned all_headers_current[NUM_LIBRARIES_BITMASK_SIZE];
@@ -734,8 +729,7 @@ get_next_set_bitmask(unsigned* bit_mask, int last_pos)
  * the binary. Leaving this code in would create a global constructor for the
  * function runDYNINSTBaseInit(). See DYNINSTglobal_ctors_handler.
  */
-extern void
-r_debugCheck(void);
+
 extern void
 DYNINSTBaseInit(void);
 void

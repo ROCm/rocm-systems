@@ -73,9 +73,6 @@ rocprofsys_init_tooling(void);
 extern void
 rocprofsys_init(const char*, bool, const char*);
 
-extern char*
-basename(const char*);
-
 extern void rocprofsys_set_main(main_func_t) ROCPROFSYS_INTERNAL_API;
 
 extern void

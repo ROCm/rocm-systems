@@ -109,9 +109,9 @@ init_parser(parser_data& _data)
     config::configure_settings(false);
 
     _data.env.dl_libpath =
-        path::realpath(path::get_internal_libpath("librocprof-sys-dl.so").c_str());
+        path::realpath(path::get_internal_libpath("librocprof-sys-dl.so"));
     _data.env.omni_libpath =
-        path::realpath(path::get_internal_libpath("librocprof-sys.so").c_str());
+        path::realpath(path::get_internal_libpath("librocprof-sys.so"));
 
     auto _libexecpath = path::realpath(path::get_internal_script_path());
     update_env(_data, "ROCPROFSYS_SCRIPT_PATH", _libexecpath, update_mode::REPLACE);

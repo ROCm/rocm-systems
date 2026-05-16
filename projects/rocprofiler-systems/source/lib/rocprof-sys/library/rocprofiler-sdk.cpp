@@ -610,9 +610,9 @@ cache_region(const rocprofiler_callback_tracing_record_t* record,
     }
 
     trace_cache::get_buffer_storage().store(trace_cache::region_sample{
-        record->thread_id, _name.c_str(), record->correlation_id.internal,
+        record->thread_id, _name, record->correlation_id.internal,
         get_parent_stack_id(record->correlation_id), start_timestamp, end_timestamp,
-        call_stack.c_str(), args_str.c_str(), category.c_str() });
+        call_stack, args_str, category });
 }
 
 void

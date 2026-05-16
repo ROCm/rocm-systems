@@ -44,9 +44,9 @@ cache_region(std::uint64_t thread_id, const std::string& name, std::uint64_t sta
     constexpr const char* CALLSTACK         = "{}";
     constexpr const char* ARGUMENTS         = "";
     rocprofsys::trace_cache::get_buffer_storage().store(
-        rocprofsys::trace_cache::region_sample{
-            thread_id, name.c_str(), NO_CORRELATION_ID, NO_CORRELATION_ID, start_ts,
-            end_ts, CALLSTACK, ARGUMENTS, category.c_str() });
+        rocprofsys::trace_cache::region_sample{ thread_id, name, NO_CORRELATION_ID,
+                                                NO_CORRELATION_ID, start_ts, end_ts,
+                                                CALLSTACK, ARGUMENTS, category });
 }
 
 struct entry_key
@@ -412,7 +412,7 @@ void
 category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::incoming,
                                   Args&&... _args)
 {
-    start<OptsT...>(_data.tool_id.c_str(), [&](::perfetto::EventContext ctx) {
+    start<OptsT...>(_data.tool_id, [&](::perfetto::EventContext ctx) {
         if(config::get_perfetto_annotations())
         {
             std::int64_t _n = 0;
@@ -429,7 +429,7 @@ void
 category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::outgoing,
                                   Args&&... _args)
 {
-    stop<OptsT...>(_data.tool_id.c_str(), [&](::perfetto::EventContext ctx) {
+    stop<OptsT...>(_data.tool_id, [&](::perfetto::EventContext ctx) {
         if(config::get_perfetto_annotations())
             tracing::add_perfetto_annotation(
                 ctx, "return",

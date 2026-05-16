@@ -279,31 +279,36 @@ config_settings(const std::shared_ptr<settings>& _config)
 
         if(_option_names.emplace(_op_option_name).second)
         {
-            ROCPROFSYS_CONFIG_SETTING(
-                std::string, _op_option_name.c_str(),
-                "Inclusive filter for domain operations (for API domains, this selects "
-                "the functions to trace) [regex supported]",
-                std::string{}, "rocm", "rocprofiler-sdk", "advanced")
+            ROCPROFSYS_CONFIG_SETTING(std::string, _op_option_name,
+                                      "Inclusive filter for domain operations "
+                                      "(for API domains, this selects "
+                                      "the functions to trace) [regex supported]",
+                                      std::string{}, "rocm", "rocprofiler-sdk",
+                                      "advanced")
                 ->set_choices(_op_choices);
         }
 
         if(_option_names.emplace(_eop_option_name).second)
         {
-            ROCPROFSYS_CONFIG_SETTING(
-                std::string, _eop_option_name.c_str(),
-                "Exclusive filter for domain operations applied after the inclusive "
-                "filter (for API domains, removes function from trace) [regex supported]",
-                std::string{}, "rocm", "rocprofiler-sdk", "advanced")
+            ROCPROFSYS_CONFIG_SETTING(std::string, _eop_option_name,
+                                      "Exclusive filter for domain operations "
+                                      "applied after the inclusive "
+                                      "filter (for API domains, removes function "
+                                      "from trace) [regex supported]",
+                                      std::string{}, "rocm", "rocprofiler-sdk",
+                                      "advanced")
                 ->set_choices(_op_choices);
         }
 
         if(_option_names.emplace(_bt_option_name).second)
         {
-            ROCPROFSYS_CONFIG_SETTING(
-                std::string, _bt_option_name.c_str(),
-                "Specification of domain operations which will record a backtrace (for "
-                "API domains, this is a list of function names) [regex supported]",
-                std::string{}, "rocm", "rocprofiler-sdk", "advanced")
+            ROCPROFSYS_CONFIG_SETTING(std::string, _bt_option_name,
+                                      "Specification of domain operations which "
+                                      "will record a backtrace (for "
+                                      "API domains, this is a list of function "
+                                      "names) [regex supported]",
+                                      std::string{}, "rocm", "rocprofiler-sdk",
+                                      "advanced")
                 ->set_choices(_op_choices);
         }
     };

@@ -118,7 +118,7 @@ public:
             { getppid(), getpid(), record.thread_id, UNKNOWN_TIME, UNKNOWN_TIME, "{}" });
 
         MarkerWriterPolicy::store_region(trace_cache::region_sample{
-            record.thread_id, std::string{ name }.c_str(), record.correlation_id.internal,
+            record.thread_id, std::string{ name }, record.correlation_id.internal,
             record.correlation_id.external.value, begin_ts, end_ts, "{}", args,
             tim::trait::name<tim::category::rocm_marker_api>::value });
     }

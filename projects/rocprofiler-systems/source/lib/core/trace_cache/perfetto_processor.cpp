@@ -253,8 +253,7 @@ write_sampling_track_data(const struct backtrace_region_sample& _sample,
                 auto backtrace = nlohmann::json::parse(_call_stack);
                 for(const auto& [key, val] : backtrace.items())
                 {
-                    annotations.push_back(
-                        { key.c_str(), val.template get<std::string>() });
+                    annotations.push_back({ key, val.template get<std::string>() });
                 }
             } catch(const std::exception& e)
             {
@@ -861,7 +860,7 @@ perfetto_processor_t::handle(const region_sample& _rs)
                                                       { "corr_id", _corr_id } };
         for(const auto& arg : args)
         {
-            annotations.push_back({ arg.arg_name.c_str(), arg.arg_value });
+            annotations.push_back({ arg.arg_name, arg.arg_value });
         }
 
         if(!_rs.call_stack.empty())
@@ -871,8 +870,7 @@ perfetto_processor_t::handle(const region_sample& _rs)
                 auto backtrace = nlohmann::json::parse(_rs.call_stack);
                 for(const auto& [key, val] : backtrace.items())
                 {
-                    annotations.push_back(
-                        { key.c_str(), val.template get<std::string>() });
+                    annotations.push_back({ key, val.template get<std::string>() });
                 }
             } catch(const std::exception& e)
             {
@@ -1413,7 +1411,7 @@ perfetto_processor_t::handle(const kfd_sample& _kfd)
             auto args = process_arguments_string(_kfd.args_str);
             for(const auto& arg : args)
             {
-                annotations.push_back({ arg.arg_name.c_str(), arg.arg_value });
+                annotations.push_back({ arg.arg_name, arg.arg_value });
             }
 
             annotate_perfetto(ctx, annotations);

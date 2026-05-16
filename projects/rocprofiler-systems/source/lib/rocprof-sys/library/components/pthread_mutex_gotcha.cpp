@@ -54,7 +54,7 @@ pthread_mutex_gotcha::get_hashes()
         {
             auto&& _id = _data.at(i).tool_id;
             if(!_id.empty())
-                _init.at(i) = tim::add_hash_id(_id.c_str());
+                _init.at(i) = tim::add_hash_id(_id);
             else
             {
                 if(_skip.count(i) > 0) continue;

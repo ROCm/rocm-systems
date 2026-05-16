@@ -144,11 +144,10 @@ cache_comm_data_events(const std::uint32_t device_id, int bytes)
     const std::string line_info       = "{}";
 
     trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
-        static_cast<size_t>(category_enum_id<category::comm_data>::value),
-        track_name.c_str(), timestamp_ns, event_metadata.c_str(), stack_id,
-        parent_stack_id, correlation_id, call_stack.c_str(), line_info.c_str(), device_id,
-        static_cast<std::uint8_t>(agent_type::CPU), track_name.c_str(),
-        static_cast<double>(value), std::nullopt });
+        static_cast<size_t>(category_enum_id<category::comm_data>::value), track_name,
+        timestamp_ns, event_metadata, stack_id, parent_stack_id, correlation_id,
+        call_stack, line_info, device_id, static_cast<std::uint8_t>(agent_type::CPU),
+        track_name, static_cast<double>(value), std::nullopt });
 }
 
 }  // namespace

@@ -35,13 +35,6 @@
 
 namespace rocprofsys
 {
-namespace sampling
-{
-std::set<int>
-setup();
-std::set<int>
-shutdown();
-}  // namespace sampling
 
 namespace component
 {

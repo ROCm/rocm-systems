@@ -1725,7 +1725,7 @@ main(int argc, char** argv)
     // symbol that has the same start address, allowing Dyninst to latch onto that.
     // However, if problems persist, users should specify their main with
     // "--main-function"
-    if(!main_func) main_func = find_function(filtered_modules, main_fname.c_str());
+    if(!main_func) main_func = find_function(filtered_modules, main_fname);
 
     if(!main_func && main_fname == "main")
         main_func = find_function(filtered_modules, "_main");
