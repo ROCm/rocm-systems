@@ -1,0 +1,104 @@
+name: rocprofiler-systems clang-tidy
+run-name: clang-tidy
+
+on:
+  push:
+    branches:
+      - develop
+    paths:
+      - '.github/workflows/rocprofiler-systems-clang-tidy.yml'
+      - 'projects/rocprofiler-systems/.clang-tidy'
+      - 'projects/rocprofiler-systems/CMakeLists.txt'
+      - 'projects/rocprofiler-systems/cmake/**'
+      - 'projects/rocprofiler-systems/source/**'
+      - '!projects/rocprofiler-systems/source/python/gui/**'
+  pull_request:
+    paths:
+      - '.github/workflows/rocprofiler-systems-clang-tidy.yml'
+      - 'projects/rocprofiler-systems/.clang-tidy'
+      - 'projects/rocprofiler-systems/CMakeLists.txt'
+      - 'projects/rocprofiler-systems/cmake/**'
+      - 'projects/rocprofiler-systems/source/**'
+      - '!projects/rocprofiler-systems/source/python/gui/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ROCPROFSYS_CI: ON
+
+jobs:
+  clang-tidy:
+    runs-on: ubuntu-latest
+    container:
+      image: dgaliffiamd/rocprofiler-systems:ci-rocm-${{ matrix.rocm-version }}-ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: ['g++']
+        build-type: ['RelWithDebInfo']
+        rocm-version: ['7.2']
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            projects/rocprofiler-systems/
+            .gitmodules
+
+      - name: Install clang-tidy
+        shell: bash
+        run: |
+          if ! command -v clang-tidy >/dev/null 2>&1; then
+            apt-get update
+            apt-get install -y --no-install-recommends clang-tidy
+          fi
+          clang-tidy --version
+
+      - name: Configure ROCm Environment
+        shell: bash
+        run: |
+          echo "/opt/rocm/bin" >> $GITHUB_PATH
+          echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV
+          echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
+
+      - name: Configure and Build with clang-tidy
+        timeout-minutes: 180
+        shell: bash
+        working-directory: projects/rocprofiler-systems/
+        env:
+          GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+        run: |
+          git config --global --add safe.directory ${GITHUB_WORKSPACE}
+          git config --global --add safe.directory ${PWD}
+          python3 ./scripts/run-ci.py -B build \
+            --name ${{ github.repository_owner }}-${{ github.ref_name }}-clang-tidy-${{ matrix.compiler }} \
+            --build-jobs $(nproc) \
+            --site GitHub \
+            --linter clang-tidy \
+            --stages Start Update Configure Build \
+            -- \
+            -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g') \
+            -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} \
+            -DROCPROFSYS_BUILD_TESTING=OFF \
+            -DROCPROFSYS_USE_PYTHON=OFF \
+            -DROCPROFSYS_BUILD_DYNINST=ON \
+            -DROCPROFSYS_BUILD_BOOST=ON \
+            -DROCPROFSYS_BUILD_TBB=ON \
+            -DROCPROFSYS_BUILD_ELFUTILS=ON \
+            -DROCPROFSYS_BUILD_LIBIBERTY=ON \
+            -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;openmp-vv-offload;lulesh" \
+            -DROCPROFSYS_BUILD_NUMBER=1 \
+            -DCMAKE_PREFIX_PATH=/opt/rocm \
+            -DUSE_CLANG_OMP=OFF
+
+      - name: Build Log Artifact
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: clang-tidy-${{ github.job }}-${{ strategy.job-index }}-log
+          path: |
+            projects/rocprofiler-systems/build/*.log

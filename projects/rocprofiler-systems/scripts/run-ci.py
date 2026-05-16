@@ -272,6 +272,13 @@ def parse_cdash_args(args):
         default=2,
         type=int,
     )
+    parser.add_argument(
+        "--linter",
+        help="Enable a static-analysis linter during the build",
+        default=None,
+        type=str,
+        choices=("clang-tidy",),
+    )
 
     return parser.parse_args(args)
 
@@ -301,6 +308,9 @@ def parse_args(args=None):
             "-DROCPROFSYS_BUILD_CODECOV=ON",
             "-DROCPROFSYS_STRIP_LIBRARIES=OFF",
         ]
+
+    if cdash_args.linter == "clang-tidy":
+        cmake_args += ["-DROCPROFSYS_USE_CLANG_TIDY=ON"]
 
     def get_repeat_val(_param):
         _value = getattr(cdash_args, f"repeat_{_param}".replace("-", "_"))
