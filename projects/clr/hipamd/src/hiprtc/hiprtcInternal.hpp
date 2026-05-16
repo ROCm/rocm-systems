@@ -72,10 +72,10 @@ template <typename T, typename... Args> inline std::string ToString(T first, Arg
 static amd::Monitor g_hiprtcInitlock{};
 #define HIPRTC_INIT_API_INTERNAL(...)                                                              \
   amd::ScopedLock lock(g_hiprtcInitlock);                                                          \
-  PRINT_HIPRTC_PATH()                                                                              \
   if (!amd::Flag::init()) {                                                                        \
     HIPRTC_RETURN(HIPRTC_ERROR_INTERNAL_ERROR);                                                    \
-  }
+  }                                                                                                \
+  PRINT_HIPRTC_PATH()
 
 #define HIPRTC_INIT_API(...)                                                                       \
   HIPRTC_INIT_API_INTERNAL(0, __VA_ARGS__)                                                         \
