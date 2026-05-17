@@ -128,6 +128,16 @@ TEST_F(NetIbMPITest, AsymmetricMerge_VNic) {
                                          false, kMinGpusPerNode, kNoNodeLimit))
         << "Test requires exactly " << kExactTwoProcesses << " processes";
 
+    // Skip when resiliency is enabled: asymmetric makeVDevice leaves stale
+    // entries in the global IbCastMergedDevs table (IbCastNMergedDevs is not
+    // reset by finalize), corrupting subsequent failover tests that also
+    // call makeVDevice. See docs/asymmetric-merge-test-isolation-bug.md.
+    const char* failoverEnv = getenv("NCCL_IB_RESILIENCY_PORT_FAILOVER");
+    if (failoverEnv && strcmp(failoverEnv, "1") == 0) {
+        GTEST_SKIP() << "Skipped: AsymmetricMerge_VNic corrupts global device table, "
+                     << "breaking subsequent failover tests (known test isolation bug)";
+    }
+
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
 

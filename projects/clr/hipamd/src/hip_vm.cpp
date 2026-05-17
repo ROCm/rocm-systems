@@ -330,8 +330,14 @@ hipError_t hipMemRetainAllocationHandle(hipMemGenericAllocationHandle_t* handle,
     HIP_RETURN(hipErrorInvalidValue);
   }
 
+  // hipMalloc and other non-VMM allocations do not have phys_mem_obj
+  amd::Memory* phys_mem_obj = mem->getUserData().phys_mem_obj;
+  if (phys_mem_obj == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
   auto ga = reinterpret_cast<hip::GenericAllocation*>(
-      mem->getUserData().phys_mem_obj->getUserData().data);
+      phys_mem_obj->getUserData().data);
   if (ga == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
