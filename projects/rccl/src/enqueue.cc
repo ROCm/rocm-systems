@@ -33,6 +33,7 @@
 #include <cinttypes> // PRIx64
 #include <cassert>
 #include <cfloat> // FLT_MAX
+#include <atomic> // std::atomic — lazy kernel init gate
 #include "latency_profiler/CollTraceFunc.h"
 
 #ifdef ENABLE_ROCSHMEM
@@ -94,6 +95,12 @@ constexpr int rcclShmemDynamicSize(int cudaArch = NCCL_CUDA_ARCH, int WarpSize =
 
 NCCL_PARAM(L1SharedMemoryCarveout, "L1_SHARED_MEMORY_CARVEOUT", 0);
 NCCL_PARAM(SymCeThreshold, "SYM_CE_THRESHOLD", 8*1024*1024);
+RCCL_PARAM_DECLARE(LazyKernelInit);
+
+// Per-process per-device gate for lazy kernel init.
+// 0 = uninitialized, 1 = initializing, 2 = done.
+// Sized for typical max GPUs per host; bumped above 8 for safety.
+static std::atomic<int> g_rcclLazyKernelInitState[16] = {};
 
 // Returns maximum kernel stack size of all CUDA kernels
 ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* maxStackSize) {
@@ -2014,6 +2021,28 @@ NCCL_PARAM(MemSyncDomain, "MEM_SYNC_DOMAIN", cudaLaunchMemSyncDomainRemote);
 
 ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan) {
   ncclResult_t ret = ncclSuccess;
+  // Lazy kernel init: if RCCL_LAZY_KERNEL_INIT=1, ncclInitKernelsForDevice was
+  // skipped during ncclCommInitRankFunc. Run it once-per-(process,device) here,
+  // before the first cuLaunchKernel that depends on those attributes.
+  if (rcclParamLazyKernelInit() && comm->cudaDev >= 0 &&
+      comm->cudaDev < (int)(sizeof(g_rcclLazyKernelInitState)/sizeof(g_rcclLazyKernelInitState[0]))) {
+    auto& gate = g_rcclLazyKernelInitState[comm->cudaDev];
+    int s = gate.load(std::memory_order_acquire);
+    if (__builtin_expect(s != 2, 0)) {
+      int expected = 0;
+      if (gate.compare_exchange_strong(expected, 1)) {
+        uint64_t t0 = clockNano();
+        NCCLCHECK(ncclInitKernelsForDevice(comm->cudaArch, comm->maxSharedMem, NULL));
+        gate.store(2, std::memory_order_release);
+        INFO(NCCL_INIT | NCCL_BOOTSTRAP | NCCL_PROFILE,
+             "LazyKernelInit fired rank %d dev %d kernels_us %llu",
+             comm->rank, comm->cudaDev,
+             (unsigned long long)((clockNano() - t0) / 1000));
+      } else {
+        while (gate.load(std::memory_order_acquire) != 2) { /* spin */ }
+      }
+    }
+  }
   struct ncclKernelPlanner* planner = &comm->planner;
   int nChannels = 0;
   for (int i = 0; i < MAXCHANNELS/64; i++)

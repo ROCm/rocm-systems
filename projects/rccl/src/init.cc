@@ -189,6 +189,11 @@ RCCL_PARAM(Gfx9CheapFenceOff, "GFX9_CHEAP_FENCE_OFF", 0);
  */
 RCCL_PARAM( InitChannels, "INIT_CHANNELS", -1) ;
 
+// Defer ncclInitKernelsForDevice from init to first ncclLaunchKernel.
+// On large-scale (32n+) the eager init triggers HSA code-object load (~1.2s);
+// deferring it amortizes that cost into the first collective launch.
+RCCL_PARAM(LazyKernelInit, "LAZY_KERNEL_INIT", 0);
+
 // GDRCOPY support: Off by default
 NCCL_PARAM(GdrCopyEnable, "GDRCOPY_ENABLE", 0);
 
@@ -2417,28 +2422,35 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     goto fail;
   }
 
+  comm->maxSharedMem = maxSharedMem; // saved for possible lazy kernel init
   timers[TIMER_INIT_KERNELS] = clockNano();
-  NCCLCHECK(ncclInitKernelsForDevice(cudaArch, maxSharedMem, &maxLocalSizeBytes));
-  // Set the maximum kernel stack size of all kernels to avoid
-  // a CUDA memory reconfig on load (c.f. NVSHMEM issue)
+  if (rcclParamLazyKernelInit() == 0) {
+    NCCLCHECK(ncclInitKernelsForDevice(cudaArch, maxSharedMem, &maxLocalSizeBytes));
+    // Set the maximum kernel stack size of all kernels to avoid
+    // a CUDA memory reconfig on load (c.f. NVSHMEM issue)
 #ifdef USE_INDIRECT_FUNCTION_CALL
-  if (ncclParamSetStackSize() == 1 && !IsArchMatch(archName,"gfx942") && !IsArchMatch(archName,"gfx950")) {
-    stackSize = rcclParamStackSizeOverride() ? rcclParamStackSizeOverride() : maxLocalSizeBytes;
-    if (stackSize == 0) {
-      if (IsArchMatch(archName,"gfx906"))
-        stackSize = 1024;
-      else
-        stackSize = 512;
+    if (ncclParamSetStackSize() == 1 && !IsArchMatch(archName,"gfx942") && !IsArchMatch(archName,"gfx950")) {
+      stackSize = rcclParamStackSizeOverride() ? rcclParamStackSizeOverride() : maxLocalSizeBytes;
+      if (stackSize == 0) {
+        if (IsArchMatch(archName,"gfx906"))
+          stackSize = 1024;
+        else
+          stackSize = 512;
+      }
+      INFO(NCCL_INIT, "Setting cudaLimitStackSize to %zi maxLocalSizeBytes %zi", stackSize, maxLocalSizeBytes);
+      CUDACHECKIGNORE(cudaDeviceSetLimit(cudaLimitStackSize, stackSize));
     }
-    INFO(NCCL_INIT, "Setting cudaLimitStackSize to %zi maxLocalSizeBytes %zi", stackSize, maxLocalSizeBytes);
-    CUDACHECKIGNORE(cudaDeviceSetLimit(cudaLimitStackSize, stackSize));
-  }
 #endif
-  if (maxLocalSizeBytes > 0 && ncclParamSetStackSize() == 1) {
-    TRACE(NCCL_INIT, "Setting cudaLimitStackSize to %zu", maxLocalSizeBytes);
-    CUDACHECKIGNORE(cudaDeviceSetLimit(cudaLimitStackSize, maxLocalSizeBytes));
+    if (maxLocalSizeBytes > 0 && ncclParamSetStackSize() == 1) {
+      TRACE(NCCL_INIT, "Setting cudaLimitStackSize to %zu", maxLocalSizeBytes);
+      CUDACHECKIGNORE(cudaDeviceSetLimit(cudaLimitStackSize, maxLocalSizeBytes));
+    }
   }
   timers[TIMER_INIT_KERNELS] = clockNano() - timers[TIMER_INIT_KERNELS];
+  INFO(NCCL_INIT | NCCL_BOOTSTRAP | NCCL_PROFILE,
+       "PreBoot timings rank %d kernels_us %llu lazy %d",
+       job->myrank, (unsigned long long)(timers[TIMER_INIT_KERNELS] / 1000),
+       (int)rcclParamLazyKernelInit());
 
   if (job->parent && !job->isGrow) {
     // SPLIT/SHRINK: use bootstrapSplit
