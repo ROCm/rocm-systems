@@ -334,8 +334,15 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_swap_cp) {
   attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
 
   size_t failIdx = 0;
-  HIP_CHECK(hipMemcpyBatchAsync(dsts, srcs, sizes, 1, &attr, attrsIdxs, 1,
-                                &failIdx, stream));
+  hipError_t err = hipMemcpyBatchAsync(dsts, srcs, sizes, 1, &attr, attrsIdxs, 1,
+                                       &failIdx, stream);
+  if (err == hipErrorNotSupported) {
+    HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipFree(d_a));
+    HIP_CHECK(hipFree(d_b));
+    HIP_SKIP_TEST(HipTest::SkipReason::kSdmaSwapUnsupported);
+  }
+  HIP_CHECK(err);
   HIP_CHECK(hipStreamSynchronize(stream));
 
   // Read back and verify swap
