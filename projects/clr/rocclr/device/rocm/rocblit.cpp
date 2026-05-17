@@ -2848,14 +2848,14 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
       // Swap ops cannot fall back to shader copy (it only does one-directional
       // copy, not a bidirectional swap). Fail the entire batch if any swap op
       // was in the SDMA batch that failed.
-      bool has_swap = false;
+      bool hasSwap = false;
       for (const auto& op : p2pCopyOps) {
         if (op.metadata.copyOpType_ == amd::CopyMetadata::kCopyOpSwap) {
-          has_swap = true;
+          hasSwap = true;
           break;
         }
       }
-      if (has_swap) {
+      if (hasSwap) {
         LogError("KernelBlitManager::copyBufferBatch: SDMA batch with swap ops failed");
         return false;
       }
