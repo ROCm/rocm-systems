@@ -3389,6 +3389,7 @@ static ncclResult_t commRevokeAsync(struct ncclAsyncJob* job_) {
 
 exit:
   (void) ncclCommSetAsyncError(comm, res);
+  INFO(NCCL_INIT, "CommRevokeAsync END comm %p result %d", comm, res);
   return res;
 }
 
@@ -3438,6 +3439,8 @@ exit:
   if (comm && !comm->config.blocking) {
     NCCLCHECK(ncclCommGetAsyncError(comm, &ret));
   }
+  INFO(NCCL_INIT, "comm %p rank %d nRanks %d cudaDev %d busId %lx - Revoke COMPLETE, result %d",
+       comm, comm->rank, comm->nRanks, comm->cudaDev, comm->busId, ret);
   return ret;
 fail:
   if (comm && !comm->config.blocking) (void) ncclCommSetAsyncError(comm, ret);
