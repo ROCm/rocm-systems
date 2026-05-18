@@ -2781,7 +2781,7 @@ write_perfetto()
     }();
 
     // environment settings
-    auto shmem_size_hint = size_t{64};
+    auto shmem_size_hint = size_t{8192};
     auto buffer_size_kb  = size_t{1024000};
 
     auto* buffer_config = cfg.add_buffers();
