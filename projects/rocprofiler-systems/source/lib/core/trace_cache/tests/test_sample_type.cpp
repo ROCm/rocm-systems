@@ -659,13 +659,14 @@ TEST_F(sample_type_test, wall_clock_event_sample_default_constructor)
 {
     wall_clock_event_sample sample;
     EXPECT_EQ(sample.type_identifier, type_identifier_t::wall_clock_scope_event);
+    EXPECT_EQ(sample.record_seq, 0u);
 }
 
 TEST_F(sample_type_test, wall_clock_event_sample_serialize_roundtrip)
 {
     wall_clock_event_sample original(
         1001, 2002, 42, static_cast<std::uint8_t>(wall_clock_scope_event_kind::enter), 7,
-        3, 5, 99, "my_region");
+        3, 5, 99, 500, "my_region");
 
     serialize(buffer.data(), original);
 
@@ -681,5 +682,6 @@ TEST_F(sample_type_test, wall_clock_event_sample_serialize_roundtrip)
     EXPECT_EQ(deserialized.parent_exec_id, 3u);
     EXPECT_EQ(deserialized.depth, 5u);
     EXPECT_EQ(deserialized.correlation_id, 99u);
+    EXPECT_EQ(deserialized.record_seq, 500u);
     EXPECT_EQ(deserialized.name, "my_region");
 }

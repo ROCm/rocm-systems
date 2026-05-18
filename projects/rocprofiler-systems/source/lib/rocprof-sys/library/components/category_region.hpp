@@ -284,7 +284,7 @@ category_region<CategoryT>::start(std::string_view name, Args&&... args)
         if(get_use_timemory())
         {
             tracing::push_timemory(CategoryT{}, name, std::forward<Args>(args)...);
-            wall_clock_event_trace::push_region(tim::threading::get_id(),
+            wall_clock_event_trace::push_region(tim::threading::get_sys_tid(),
                                                 std::string{ name });
         }
     }
@@ -349,8 +349,11 @@ category_region<CategoryT>::stop(std::string_view name, Args&&... args)
         {
             if(get_use_timemory())
             {
+                auto _wc_hash = tim::add_hash_id(name);
+                auto _wc_name = tim::get_hash_identifier_fast(_wc_hash);
                 tracing::pop_timemory(CategoryT{}, name, std::forward<Args>(args)...);
-                wall_clock_event_trace::pop_region(tim::threading::get_id(), name);
+                wall_clock_event_trace::pop_region(tim::threading::get_sys_tid(),
+                                                   _wc_name);
             }
         }
 

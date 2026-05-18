@@ -21,6 +21,7 @@
 #include <timemory/components/timing/wall_clock.hpp>
 #include <timemory/hash/types.hpp>
 #include <timemory/mpl/types.hpp>
+#include <timemory/process/threading.hpp>
 #include <timemory/sampling/allocator.hpp>
 #include <timemory/units.hpp>
 #include <timemory/utility/types.hpp>
@@ -66,7 +67,7 @@ auto  bundles_dtor  = scope::destructor{ []() {
 template <typename... Args>
 inline void
 start_bundle(bundle_t& _bundle, std::int64_t _tid,
-             std::optional<std::int64_t> _start_thread_parent_tid, Args&&... _args)
+             std::optional<std::int64_t> _wall_clock_parent_os_tid, Args&&... _args)
 {
     if(!get_use_timemory() && !get_use_perfetto()) return;
     LOG_TRACE("Starting bundle '{}' in thread {}...", _bundle.key(), _tid);
@@ -90,12 +91,13 @@ start_bundle(bundle_t& _bundle, std::int64_t _tid,
         const std::string _key = _bundle.key();
         if(_key == "pthread_create")
         {
-            wall_clock_event_trace::push_pthread_create(_tid, _key);
+            wall_clock_event_trace::push_pthread_create(tim::threading::get_sys_tid(),
+                                                        _key);
         }
-        else if(_key == "start_thread" && _start_thread_parent_tid)
+        else if(_key == "start_thread" && _wall_clock_parent_os_tid)
         {
-            wall_clock_event_trace::push_start_thread(*_start_thread_parent_tid, _tid,
-                                                      _key);
+            wall_clock_event_trace::push_start_thread(
+                *_wall_clock_parent_os_tid, tim::threading::get_sys_tid(), _key);
         }
     }
 }
@@ -127,11 +129,12 @@ stop_bundle(bundle_t& _bundle, std::int64_t _tid, Args&&... _args)
         const std::string _key = _bundle.key();
         if(_key == "pthread_create")
         {
-            wall_clock_event_trace::pop_pthread_create(_tid, _key);
+            wall_clock_event_trace::pop_pthread_create(tim::threading::get_sys_tid(),
+                                                       _key);
         }
         else if(_key == "start_thread")
         {
-            wall_clock_event_trace::pop_start_thread(_tid, _key);
+            wall_clock_event_trace::pop_start_thread(tim::threading::get_sys_tid(), _key);
         }
     }
     if constexpr(sizeof...(Args) > 0)
@@ -264,7 +267,10 @@ pthread_create_gotcha::wrapper::operator()() const
             _bundle = bundles->emplace(_tid, std::make_shared<bundle_t>("start_thread"))
                           .first->second;
         }
-        if(_bundle) start_bundle(*_bundle, _tid, m_config.parent_tid);
+        if(_bundle)
+            start_bundle(*_bundle, _tid,
+                         std::optional<std::int64_t>{ m_config.parent_sys_tid },
+                         audit::incoming{});
         get_cpu_cid_stack(_tid, m_config.parent_tid);
         if(m_config.enable_causal)
         {
@@ -653,8 +659,10 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     set_thread_state(ThreadState::Disabled);
     auto _blocked = get_sampling_signals();
     auto _promise = (_active) ? std::make_shared<std::promise<void>>() : promise_t{};
-    auto _config =
-        wrapper_config{ _enable_causal, _enable_sampling, _offset, _tid, _promise };
+    auto _config  = wrapper_config{
+        _enable_causal, _enable_sampling, _offset, _tid, tim::threading::get_sys_tid(),
+        _promise
+    };
     auto* _wrap = new wrapper{ func, arg, _config };
     set_thread_state(ThreadState::Internal);
 

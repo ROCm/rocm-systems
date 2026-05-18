@@ -34,6 +34,7 @@
 
 #include <timemory/components/timing/wall_clock.hpp>
 #include <timemory/hash/types.hpp>
+#include <timemory/process/threading.hpp>
 #include <timemory/unwind/processed_entry.hpp>
 #include <timemory/variadic/lightweight_tuple.hpp>
 #include <type_traits>
@@ -177,21 +178,14 @@ ompt_get_unified_name(const rocprofiler_callback_tracing_record_t& record)
 
 #endif
 
-std::int64_t
-rocprofiler_trace_thread_id(rocprofiler_thread_id_t rtid)
-{
-    const auto& tinfo = thread_info::get(rtid, SystemTID);
-    if(!tinfo || !tinfo->index_data) return 0;
-    return tinfo->index_data->sequent_value;
-}
-
 void
 wall_clock_trace_buffered_interval(std::int64_t tid, const std::string& name,
-                                   std::uint64_t beg_ns, std::uint64_t end_ns)
+                                   std::uint64_t beg_ns, std::uint64_t end_ns,
+                                   std::uint64_t rocprofiler_ancestor_internal)
 {
     if(!config::get_use_timemory()) return;
-    wall_clock_event_trace::push_region_ts(tid, name, beg_ns, beg_ns);
-    wall_clock_event_trace::pop_region_ts(tid, name, end_ns, end_ns);
+    wall_clock_event_trace::emit_buffered_wall_clock_interval(
+        tid, name, beg_ns, end_ns, rocprofiler_ancestor_internal);
 }
 
 auto&
@@ -722,9 +716,12 @@ tool_tracing_callback_start(CategoryT, rocprofiler_callback_tracing_record_t rec
     if(get_use_timemory())
     {
         tracing::push_timemory(CategoryT{}, _name);
-        const auto          tid = rocprofiler_trace_thread_id(record.thread_id);
+        const auto          tid = tim::threading::get_sys_tid();
         const std::uint64_t tns = static_cast<std::uint64_t>(ts);
-        wall_clock_event_trace::push_region_ts(tid, std::string{ _name }, tns, tns);
+        const std::uint64_t corr_internal =
+            static_cast<std::uint64_t>(record.correlation_id.internal);
+        wall_clock_event_trace::push_region_ts(tid, std::string{ _name }, tns, tns,
+                                               corr_internal);
     }
 }
 
@@ -742,9 +739,11 @@ tool_tracing_callback_stop(
     if(get_use_timemory())
     {
         tracing::pop_timemory(CategoryT{}, _name);
-        const auto          tid = rocprofiler_trace_thread_id(record.thread_id);
+        const auto          tid = tim::threading::get_sys_tid();
         const std::uint64_t ens = static_cast<std::uint64_t>(ts);
-        wall_clock_event_trace::pop_region_ts(tid, _name, ens, ens);
+        const std::uint64_t corr_internal =
+            static_cast<std::uint64_t>(record.correlation_id.internal);
+        wall_clock_event_trace::pop_region_ts(tid, _name, ens, ens, corr_internal);
     }
 
     if(get_use_perfetto())
@@ -1218,9 +1217,12 @@ ompt_tracing_callback_start(rocprofiler_callback_tracing_record_t record,
     if(get_use_timemory())
     {
         tracing::push_timemory(category::rocm_ompt_api{}, _name);
-        const auto          tid = rocprofiler_trace_thread_id(record.thread_id);
+        const auto          tid = tim::threading::get_sys_tid();
         const std::uint64_t tns = static_cast<std::uint64_t>(ts);
-        wall_clock_event_trace::push_region_ts(tid, std::string{ _name }, tns, tns);
+        const std::uint64_t corr_internal =
+            static_cast<std::uint64_t>(record.correlation_id.internal);
+        wall_clock_event_trace::push_region_ts(tid, std::string{ _name }, tns, tns,
+                                               corr_internal);
     }
 
     if(get_use_perfetto())
@@ -1266,9 +1268,11 @@ ompt_tracing_callback_stop(
     if(get_use_timemory())
     {
         tracing::pop_timemory(category::rocm_ompt_api{}, _name);
-        const auto          tid = rocprofiler_trace_thread_id(record.thread_id);
+        const auto          tid = tim::threading::get_sys_tid();
         const std::uint64_t ens = static_cast<std::uint64_t>(ts);
-        wall_clock_event_trace::pop_region_ts(tid, _name, ens, ens);
+        const std::uint64_t corr_internal =
+            static_cast<std::uint64_t>(record.correlation_id.internal);
+        wall_clock_event_trace::pop_region_ts(tid, _name, ens, ens, corr_internal);
     }
 
     if(get_use_perfetto())
@@ -1787,7 +1791,9 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                         });
                         _bundle.pop();
 
-                        wall_clock_trace_buffered_interval(_tid, _name, _beg_ns, _end_ns);
+                        wall_clock_trace_buffered_interval(
+                            _tinfo->index_data->system_value, _name, _beg_ns, _end_ns,
+                            get_parent_stack_id(record->correlation_id));
                     }
                 }
 
@@ -1913,7 +1919,8 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     _bundle.pop();
 
                     wall_clock_trace_buffered_interval(
-                        thread_id_sequent, std::string{ _name }, _beg_ns, _end_ns);
+                        t_info->index_data->system_value, std::string{ _name }, _beg_ns,
+                        _end_ns, get_parent_stack_id(record->correlation_id));
                 }
 
                 if(get_use_perfetto())
@@ -2037,8 +2044,10 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                         });
                         _bundle.pop();
 
-                        wall_clock_trace_buffered_interval(_tid, std::string{ _name },
-                                                           _beg_ns, _end_ns);
+                        wall_clock_trace_buffered_interval(
+                            _tinfo->index_data->system_value, std::string{ _name },
+                            _beg_ns, _end_ns,
+                            get_parent_stack_id(record->correlation_id));
                     }
                 }
 
@@ -2119,8 +2128,9 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                             ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION,
                             record->operation) };
                         wall_clock_trace_buffered_interval(
-                            _tinfo->index_data->sequent_value, _label,
-                            record->start_timestamp, record->end_timestamp);
+                            _tinfo->index_data->system_value, _label,
+                            record->start_timestamp, record->end_timestamp,
+                            get_parent_stack_id(record->correlation_id));
                     }
                 }
             }

@@ -693,6 +693,9 @@ get_size(const backtrace_region_sample& item)
 /// ENTER/EXIT pair for one scope invocation. \c parent_exec_id / \c depth / \c name
 /// are meaningful on ENTER; on EXIT \c exec_id matches ENTER and other snapshot fields
 /// may be zero / empty.
+///
+/// \c record_seq is a global monotonic id assigned at emission time so offline replay
+/// can follow processing order (timemory-like semantics) without re-ordering by clocks.
 struct wall_clock_event_sample : cacheable_t
 {
     static constexpr type_identifier_t type_identifier =
@@ -703,7 +706,7 @@ struct wall_clock_event_sample : cacheable_t
                             std::uint64_t _thread_id, std::uint8_t _event_kind,
                             std::uint64_t _exec_id, std::uint64_t _parent_exec_id,
                             std::uint32_t _depth, std::uint64_t _correlation_id,
-                            std::string _name)
+                            std::uint64_t _record_seq, std::string _name)
     : steady_ns(_steady_ns)
     , wall_ns(_wall_ns)
     , thread_id(_thread_id)
@@ -712,6 +715,7 @@ struct wall_clock_event_sample : cacheable_t
     , parent_exec_id(_parent_exec_id)
     , depth(_depth)
     , correlation_id(_correlation_id)
+    , record_seq(_record_seq)
     , name(std::move(_name))
     {}
 
@@ -726,6 +730,8 @@ struct wall_clock_event_sample : cacheable_t
     std::uint64_t parent_exec_id = 0;
     std::uint32_t depth          = 0;
     std::uint64_t correlation_id = 0;
+    /// Global emission order (0 in legacy traces without this field).
+    std::uint64_t record_seq = 0;
     std::string   name;
 };
 
@@ -735,7 +741,8 @@ serialize(std::uint8_t* buffer, const wall_clock_event_sample& item)
 {
     utility::store_value(buffer, item.steady_ns, item.wall_ns, item.thread_id,
                          item.event_kind, item.exec_id, item.parent_exec_id, item.depth,
-                         item.correlation_id, std::string_view(item.name));
+                         item.correlation_id, item.record_seq,
+                         std::string_view(item.name));
 }
 
 template <>
@@ -746,7 +753,7 @@ deserialize(std::uint8_t*& buffer)
     std::string_view        name_view;
     utility::parse_value(buffer, item.steady_ns, item.wall_ns, item.thread_id,
                          item.event_kind, item.exec_id, item.parent_exec_id, item.depth,
-                         item.correlation_id, name_view);
+                         item.correlation_id, item.record_seq, name_view);
     item.name = std::string(name_view);
     return item;
 }
@@ -757,7 +764,7 @@ get_size(const wall_clock_event_sample& item)
 {
     return utility::get_size(item.steady_ns, item.wall_ns, item.thread_id,
                              item.event_kind, item.exec_id, item.parent_exec_id,
-                             item.depth, item.correlation_id,
+                             item.depth, item.correlation_id, item.record_seq,
                              std::string_view(item.name));
 }
 
