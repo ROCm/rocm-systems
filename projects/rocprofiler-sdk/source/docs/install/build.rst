@@ -4,15 +4,23 @@
 
 .. _installing-rocprofiler-sdk:
 
-Installing ROCprofiler-SDK
-=============================
+*********************************
+Build ROCprofiler-SDK from source
+*********************************
 
-This document provides information required to install ROCprofiler-SDK from source.
+To build ROCprofiler-SDK as part of the ROCm Core SDK, see `TheRock build
+instructions
+<https://github.com/ROCm/TheRock/blob/main/docs/development/README.md>`__.
+TheRock is the recommended way to build ROCm components from source.
+
+Alternatively, you can build ROCprofiler-SDK standalone using the following
+instructions.
 
 Supported systems
------------------
+=================
 
-ROCprofiler-SDK is supported on the Linux distributions specified in the `system requirements <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html#supported-operating-systems>`_.
+ROCprofiler-SDK is supported on Linux. For more information, see :ref:`ROCm
+Core SDK components <rocm:release-components>`.
 
 Identifying the operating system
 --------------------------------
@@ -32,57 +40,65 @@ To identify the Linux distribution and version, see the ``/etc/os-release`` and 
 The relevant fields are ``ID`` and the ``VERSION_ID``.
 
 Build requirements
-------------------
+==================
 
-Install the following dependencies:
+To build on Linux, install the following dependencies:
 
-- Debian/Ubuntu
-.. code-block:: bash
+.. tab-set::
 
-    sudo apt install -y libdw-dev libsqlite3-dev
+   .. tab-item:: Debian-based distros
 
-- Red Hat Enterprise Linux/Alma Linux/Rocky Linux/Fedora
+      .. code-block:: bash
 
-.. code-block:: bash
+          sudo apt install -y libdw-dev libsqlite3-dev
 
-    sudo dnf install elfutils elfutils-devel sqlite-devel clang-tools-extra gcc gcc-c++ cmake make openssl-devel
-    python3 -m pip install --upgrade pip
-    python3 -m pip install scikit-build
+   .. tab-item:: RHEL-based distros
 
-- SUSE Linux Enterprise Server
+      .. code-block:: bash
 
-.. code-block:: bash
+          sudo dnf install elfutils elfutils-devel sqlite-devel clang-tools-extra gcc gcc-c++ cmake make openssl-devel
+          python3 -m pip install --upgrade pip
+          python3 -m pip install scikit-build
 
-    sudo zypper install gcc12 gcc12-c++ cmake make python3-devel elfutils sqlite3-devel libelf-devel libdw-devel
-    export CXX=/usr/bin/g++-12
-    export CC=/usr/bin/gcc-12
+   .. tab-item:: SLES
 
-.. note::
-   The above ``export`` statements set the compiler environment variables only for the current terminal session. If you open a new terminal or log out, these variables will be unset. To make these settings permanent, add the following lines to your ``~/.bashrc`` file:
+      .. code-block:: bash
 
-   .. code-block:: bash
+          sudo zypper install gcc12 gcc12-c++ cmake make python3-devel elfutils sqlite3-devel libelf-devel libdw-devel
+          export CXX=/usr/bin/g++-12
+          export CC=/usr/bin/gcc-12
 
-      export CXX=/usr/bin/g++-12
-      export CC=/usr/bin/gcc-12
+      .. note::
 
-   Alternatively, ensure these variables are set before building ROCprofiler-SDK.
+         The above ``export`` statements set the compiler environment variables only for the current terminal session. If you open a new terminal or log out, these variables will be unset. To make these settings permanent, add the following lines to your ``~/.bashrc`` file:
+
+         .. code-block:: bash
+
+            export CXX=/usr/bin/g++-12
+            export CC=/usr/bin/gcc-12
+
+         Alternatively, ensure these variables are set before building ROCprofiler-SDK.
+
 To build ROCprofiler-SDK, install ``CMake`` as explained in the following section.
 
 Install CMake
-++++++++++++++
+-------------
 
 Install `CMake <https://cmake.org/>`_ version 3.21 (or later).
 
 .. note::
-    If the ``CMake`` installed on the system is too old, you can install a new version using various methods. One of the easiest options is to use PyPi (Python's pip).
+
+   If the ``CMake`` installed on the system is too old, you can install a new
+   version using various methods. One of the easiest options is to use PyPi
+   (Python's pip).
 
 .. code-block:: bash
 
     /usr/local/bin/python -m pip install --user 'cmake==3.22.0'
     export PATH=${HOME}/.local/bin:${PATH}
 
-Building ROCprofiler-SDK from source
--------------------------------------
+Build ROCprofiler-SDK
+=====================
 
 .. code-block:: bash
 
@@ -125,22 +141,3 @@ To run the built tests, ``cd`` into the ``rocprofiler-sdk-build`` directory and 
 .. code-block:: bash
 
     /usr/local/bin/python -m pip install -r requirements.txt
-
-Install using package manager
-------------------------------
-
-If you have ROCm version 6.2 or later installed, you can use the package manager to install a prebuilt copy of ROCprofiler-SDK.
-
-.. tab-set::
-
-   .. tab-item:: Ubuntu
-
-      .. code-block:: shell
-
-         $ sudo apt install rocprofiler-sdk
-
-   .. tab-item:: Red Hat Enterprise Linux
-
-      .. code-block:: shell
-
-         $ sudo dnf install rocprofiler-sdk

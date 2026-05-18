@@ -269,6 +269,7 @@ def validate_perfetto_trace(
     key_counts: Optional[list[int]] = None,
     trace_processor_path: Optional[Path] = None,
     print_output: bool = False,
+    check_counter_pairing: bool = False,
     timeout: int = 120,
 ) -> ValidationResult:
     """Validate a Perfetto trace file using validate-perfetto-proto.py.
@@ -286,6 +287,7 @@ def validate_perfetto_trace(
         key_counts: Expected counts for debug keys (--key-counts flag)
         trace_processor_path: Path to trace_processor_shell (-t flag)
         print_output: Whether to print trace data (-p flag)
+        check_counter_pairing: Verify counter tracks have paired start/end entries
         timeout: Validation timeout in seconds
 
     Returns:
@@ -317,6 +319,9 @@ def validate_perfetto_trace(
 
     if counter_names:
         args.extend(["--counter-names"] + counter_names)
+
+    if check_counter_pairing:
+        args.append("--check-counter-pairing")
 
     if key_names:
         args.extend(["--key-names"] + key_names)
