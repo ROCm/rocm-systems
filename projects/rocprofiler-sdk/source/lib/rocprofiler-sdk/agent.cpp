@@ -40,9 +40,15 @@
 #include <fmt/ranges.h>
 #include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>
-#include <libdrm/amdgpu_drm.h>
 #include <libdrm/amdgpu.h>
 #include <xf86drm.h>
+// amdgpu_drm.h provides AMDGPU_INFO_DEV_INFO / drm_amdgpu_info_device for the
+// V2 cu_bitmap path below; only needed in internal-aqlprofile builds, but the
+// header is part of the same libdrm-dev package already required by the
+// pre-existing IP-discovery path above, so guarding it would be cosmetic.
+#if !ROCPROFILER_EXTERNAL_AQLPROFILE
+#    include <libdrm/amdgpu_drm.h>
+#endif
 
 #include <fstream>
 #include <iomanip>
@@ -1056,6 +1062,13 @@ get_bdf_info(const rocprofiler_agent_t* agent)
 
 // Attempt V2 agent registration with cu_bitmap from DRM for WGP harvesting support.
 // Returns true on success, false if any step fails (caller should fall back to V1).
+//
+// Only compiled for internal-aqlprofile builds. External-aqlprofile builds
+// (ROCPROFILER_BUILD_AQLPROFILE=OFF) link against the ROCm-release-shipped
+// libhsa-amd-aqlprofile64.so which neither exposes aqlprofile_register_agent_info
+// nor the AQLPROFILE_AGENT_VERSION_V2 enum value, so this function is omitted
+// there and the caller's #if branch takes the legacy aqlprofile_register_agent path.
+#if !ROCPROFILER_EXTERNAL_AQLPROFILE
 bool
 try_register_agent_v2(const rocprofiler_agent_t* agent, aqlprofile_agent_handle_t* handle)
 {
@@ -1091,6 +1104,7 @@ try_register_agent_v2(const rocprofiler_agent_t* agent, aqlprofile_agent_handle_
     drmClose(drm_fd);
     return success;
 }
+#endif  // !ROCPROFILER_EXTERNAL_AQLPROFILE
 
 const std::vector<aqlprofile_agent_handle_t>&
 get_aql_handles()
