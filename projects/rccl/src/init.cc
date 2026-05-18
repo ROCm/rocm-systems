@@ -3699,16 +3699,12 @@ ncclResult_t ncclCommGrow_impl(ncclComm_t comm, int nRanks, const ncclUniqueId* 
   job->newcomm = newcomm;
   job->nranks  = nRanks;
   job->isGrow  = true;
-  {
-    bool isBoundary = isExistingRank && (comm->rank == 0 || comm->rank == comm->nRanks - 1);
-    if (!isExistingRank || isBoundary) {
-      NCCLCHECKGOTO(ncclCalloc(&job->commId, 1), res, fail);
-      memcpy(job->commId, uniqueId, sizeof(ncclUniqueId));
-      job->nId = 1;
-    } else {
-      job->commId = NULL;
-      job->nId    = 0;
-    }
+  job->nId = (uniqueId != NULL) ? 1 : 0;
+  if (job->nId) {
+    NCCLCHECKGOTO(ncclCalloc(&job->commId, 1), res, fail);
+    memcpy(job->commId, uniqueId, sizeof(ncclUniqueId));
+  } else {
+    job->commId = NULL;
   }
   if (isExistingRank) {
     job->parent     = comm;
