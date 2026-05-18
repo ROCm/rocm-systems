@@ -45,3 +45,17 @@ target_include_directories(
     perfetto-sinks-tests
     PRIVATE ${PROJECT_SOURCE_DIR}/source/lib
 )
+
+add_library(
+    perfetto-processor-isolation-tests OBJECT test_perfetto_processor_isolation.cpp
+)
+
+target_link_libraries(
+    perfetto-processor-isolation-tests
+    PRIVATE rocprofiler-systems-googletest-library rocprofiler-systems-core-library
+)
+
+target_include_directories(
+    perfetto-processor-isolation-tests
+    PRIVATE ${PROJECT_SOURCE_DIR}/source/lib
+)

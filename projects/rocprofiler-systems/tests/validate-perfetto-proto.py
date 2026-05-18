@@ -155,6 +155,16 @@ if __name__ == "__main__":
         action="store_true",
         help="Verify each counter track has paired start/end entries (even count, last value is 0)",
     )
+    parser.add_argument(
+        "--per-pid-isolation",
+        action="store_true",
+        help=(
+            "Assert the trace contains exactly one pid in the process table. "
+            "Used by parallel-cached-perfetto R1 tests to prove no cross-pid "
+            "contamination in per-rank .proto files. Pid value is reported on "
+            "stdout for the caller to cross-check across files."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -175,6 +185,26 @@ if __name__ == "__main__":
 
     if tp is None:
         raise ValueError(f"trace {args.input} could not be loaded")
+
+    if args.per_pid_isolation:
+        # Native pid lives in the process table; SDK-emitted ProcessDescriptor
+        # tracks land here as one row per emitting pid. R1 invariant: exactly
+        # one pid per per-rank .proto under parallel cached perfetto.
+        pid_rows = list(tp.query("SELECT pid FROM process WHERE pid > 0"))
+        observed_pids = sorted({row.pid for row in pid_rows})
+        if len(observed_pids) != 1:
+            print(
+                f"Fail: {args.input} per-pid-isolation expected exactly one "
+                f"pid; observed pids={observed_pids}"
+            )
+            sys.exit(1)
+        slice_rows = list(tp.query("SELECT COUNT(*) AS n FROM slice"))
+        slice_count = slice_rows[0].n if slice_rows else 0
+        print(
+            f"{args.input} per-pid-isolation: pid={observed_pids[0]} "
+            f"slices={slice_count}"
+        )
+        sys.exit(0)
 
     pdata = {}
     # get data from perfetto

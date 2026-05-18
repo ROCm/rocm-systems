@@ -106,6 +106,20 @@ process_buffered_storage(const std::shared_ptr<data::processor_config_t>& _confi
         configure_processors(_coordinator, _config, _formats, _registry, _engine, _tracks);
     storage_parser_t _parser(_storage_filename);
 
+    // perfetto_processor_t::prepare_for_processing primes two thread_local
+    // values on this parser thread (active track_registry + emitting pid).
+    // Today std::thread instances are not reused across configs, so the TLS
+    // dies with the thread. If a future thread-pool migration reuses worker
+    // threads, this guard ensures the TLS does not carry into the next task.
+    struct tls_reset_guard
+    {
+        ~tls_reset_guard()
+        {
+            ::rocprofsys::set_active_track_registry(nullptr);
+            ::rocprofsys::core::perfetto_engine::set_emitting_pid(-1);
+        }
+    } _tls_guard;
+
     _coordinator->prepare_for_processing();
     try
     {

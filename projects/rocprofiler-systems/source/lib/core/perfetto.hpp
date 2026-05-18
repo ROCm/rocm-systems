@@ -20,6 +20,7 @@ PERFETTO_DEFINE_CATEGORIES(ROCPROFSYS_PERFETTO_CATEGORIES);
 
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -29,8 +30,11 @@ PERFETTO_DEFINE_CATEGORIES(ROCPROFSYS_PERFETTO_CATEGORIES);
 
 namespace rocprofsys
 {
-std::unique_ptr<::perfetto::TracingSession>& get_perfetto_session(
-    pid_t = process::get_id());
+// Forked-child cleanup: drop the inherited TracingSession pointer for the
+// parent's pid without destroying the session itself. The parent process
+// retains ownership; calling .reset() on the inherited unique_ptr in the
+// child would double-free. Used by fork_gotcha.
+void detach_inherited_perfetto_session(pid_t parent_pid);
 
 template <typename Tp>
 struct perfetto_counter_track
@@ -47,7 +51,15 @@ struct perfetto_counter_track
                         const char* _category = nullptr, std::int64_t _mult = 1,
                         bool _incr = false);
 
-    static auto& at(size_t _idx, size_t _n) { return get_data().second.at(_idx).at(_n); }
+    // The returned reference is only valid while no concurrent emplace fires
+    // on the same _idx. Production call sites guard emplace under std::call_once
+    // before the first at(), so the returned ref is stable for the duration of
+    // a single TRACE_COUNTER use. Do not stash the reference across emit calls.
+    static auto& at(size_t _idx, size_t _n)
+    {
+        std::lock_guard<std::mutex> _lk{ get_mutex() };
+        return get_data().second.at(_idx).at(_n);
+    }
 
 private:
     static data_t& get_data()
@@ -55,12 +67,18 @@ private:
         static auto _v = data_t{};
         return _v;
     }
+    static std::mutex& get_mutex()
+    {
+        static std::mutex _m{};
+        return _m;
+    }
 };
 
 template <typename Tp>
 auto
 perfetto_counter_track<Tp>::exists(size_t _idx, std::int64_t _n)
 {
+    std::lock_guard<std::mutex> _lk{ get_mutex() };
     bool _v = get_data().second.count(_idx) != 0;
     if(_n < 0 || !_v) return _v;
     return static_cast<size_t>(_n) < get_data().second.at(_idx).size();
@@ -70,6 +88,7 @@ template <typename Tp>
 size_t
 perfetto_counter_track<Tp>::size(size_t _idx)
 {
+    std::lock_guard<std::mutex> _lk{ get_mutex() };
     bool _v = get_data().second.count(_idx) != 0;
     if(!_v) return 0;
     return get_data().second.at(_idx).size();
@@ -81,6 +100,7 @@ perfetto_counter_track<Tp>::emplace(size_t _idx, const std::string& _v,
                                     const char* _units, const char* _category,
                                     std::int64_t _mult, bool _incr)
 {
+    std::lock_guard<std::mutex> _lk{ get_mutex() };
     auto& _name_data  = get_data().first[_idx];
     auto& _track_data = get_data().second[_idx];
     std::vector<std::tuple<std::string, const char*, bool>> _missing = {};

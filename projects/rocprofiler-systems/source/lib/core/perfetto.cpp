@@ -22,14 +22,13 @@ namespace perfetto
 {
 namespace
 {
-// Slice B: live-mode driver is a TU-scoped perfetto_engine instance plus a
-// paired live_fd_sink. Both replace the previous Meyer singletons
-// (get_perfetto_tmp_file, get_config, get_session) and are created on
-// setup() / start() and torn down by post_process(). Per-pid sessions are
-// tracked inside the engine and exposed via engine.session_ref(pid) so
-// fork_gotcha can still .release() the parent session in the child.
+// Live-mode driver is a TU-scoped perfetto_engine instance. The paired
+// live_fd_sink is constructed on the stack inside post_process() at the only
+// callsite that needs it. Per-pid sessions are tracked inside the engine;
+// fork_gotcha calls detach_inherited_perfetto_session() in the child to drop
+// the inherited session pointer without destroying it (the parent owns the
+// underlying session).
 std::unique_ptr<core::perfetto_engine>      g_engine{};
-std::unique_ptr<core::live_fd_sink>         g_live_sink{};
 std::shared_ptr<tmp_file>                   g_tmp_file{};
 
 std::vector<char>
@@ -135,24 +134,16 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error,
         g_tmp_file.reset();
     }
 
-    g_live_sink.reset();
     g_engine.reset();
 }
 
 }  // namespace perfetto
 
-std::unique_ptr<::perfetto::TracingSession>&
-get_perfetto_session(pid_t _pid)
+void
+detach_inherited_perfetto_session(pid_t parent_pid)
 {
-    if(!::rocprofsys::perfetto::g_engine)
-    {
-        // Engine not yet constructed (or already torn down). Return a static
-        // empty unique_ptr slot so callers like fork_gotcha can .release()
-        // without segfaulting.
-        static std::unique_ptr<::perfetto::TracingSession> s_empty{};
-        return s_empty;
-    }
-    return ::rocprofsys::perfetto::g_engine->session_ref(_pid);
+    if(!::rocprofsys::perfetto::g_engine) return;
+    ::rocprofsys::perfetto::g_engine->forget_session(parent_pid);
 }
 }  // namespace rocprofsys
 

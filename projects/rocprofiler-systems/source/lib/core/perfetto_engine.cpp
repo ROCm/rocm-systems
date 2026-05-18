@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cassert>
 #include <cstring>
 #include <exception>
 #include <mutex>
@@ -29,7 +30,10 @@ namespace
 // Thread-local pid tag consumed by the cached-mode interceptor TLS (D4).
 // Stored in TU scope so the static accessors can reach it without exposing
 // the TLS in the header.
-thread_local int t_emitting_pid = 0;
+// -1 marks "no parser thread has claimed this thread yet"; pid 0 is the
+// kernel/swapper on Linux but appears as init inside containers, so using
+// 0 as the sentinel would be ambiguous.
+thread_local int t_emitting_pid = -1;
 
 // Process-global pointer to the currently-active cached-mode engine. Set
 // on engine.start(cached_interceptor, ...), cleared on engine.stop(). The
@@ -99,13 +103,14 @@ public:
         // Cached at TLS-construction time (first emission on this thread).
         // Subsequent OnTracePacket calls use these without synchronisation.
         perfetto_engine* engine = nullptr;
-        int              pid    = 0;
+        int              pid    = -1;
     };
 
     static void OnTracePacket(InterceptorContext context)
     {
         auto& tls = context.GetThreadLocalState();
         if(tls.engine == nullptr) return;
+        if(tls.pid < 0) return;  // emitter never called set_emitting_pid
 
         tls.engine->collect_packet_bytes(tls.pid, context.packet_data.data,
                                          context.packet_data.size);
@@ -205,11 +210,8 @@ perfetto_engine::~perfetto_engine()
 void
 perfetto_engine::init_sdk()
 {
-    // build_trace_config defers mode selection to start(); init_sdk only
-    // needs the SDK Initialize/Register calls. Use live_fd here just to
-    // produce a valid base config; start() rebuilds with the correct mode.
-    p_->build_trace_config(mode::live_fd);
-
+    // init_sdk only needs the SDK Initialize/Register calls; the TraceConfig
+    // is built per-mode in start().
     std::call_once(impl::s_sdk_init_flag, [this]() {
         ::perfetto::TracingInitArgs args{};
         args.shmem_size_hint_kb = p_->cfg.shmem_size_hint_kb;
@@ -330,7 +332,19 @@ perfetto_engine::start(mode m, trace_sink& sink)
     p_->current_mode = mode::cached_interceptor;
     p_->active_sink  = &sink;
 
-    g_active_cached_engine.store(this, std::memory_order_release);
+    // Only one cached engine may be the SDK interceptor's drain target at a
+    // time. The interceptor's ThreadLocalState caches the engine pointer at
+    // first emit per thread; silently overwriting g_active_cached_engine here
+    // would leave already-running worker threads pointing at a stale engine.
+    perfetto_engine* prev =
+        g_active_cached_engine.exchange(this, std::memory_order_acq_rel);
+    if(prev != nullptr && prev != this)
+    {
+        LOG_WARNING(
+            "perfetto_engine: cached engine already active when start() was "
+            "called; replacing it. Worker threads attached to the prior engine "
+            "may emit into stale state until they exit.");
+    }
 }
 
 void
@@ -349,16 +363,22 @@ perfetto_engine::stop()
         if(it != p_->sessions.end()) session = it->second.get();
     }
 
-    p_->running     = false;
-    p_->active_pid  = 0;
-    p_->active_sink = nullptr;
-
+    // Stop the cached interceptor from steering new emissions through us
+    // BEFORE flush/stop, so worker threads observing g_active_cached_engine
+    // see a clean nullptr while we drain. running stays true until the
+    // session is actually stopped (below) — destructor catch-all checks it.
     if(current_mode == mode::cached_interceptor)
     {
         g_active_cached_engine.store(nullptr, std::memory_order_release);
     }
 
-    if(session == nullptr) return;
+    if(session == nullptr)
+    {
+        p_->running     = false;
+        p_->active_pid  = 0;
+        p_->active_sink = nullptr;
+        return;
+    }
 
     LOG_DEBUG("Flushing the perfetto trace data...");
     ::perfetto::TrackEvent::Flush();
@@ -366,6 +386,13 @@ perfetto_engine::stop()
 
     LOG_DEBUG("Stopping the perfetto trace session (blocking)...");
     session->StopBlocking();
+
+    // Clear running state only after StopBlocking() returns successfully —
+    // if FlushBlocking or StopBlocking threw, the destructor catch-all (which
+    // checks running) gets a second chance to force-stop the session.
+    p_->running     = false;
+    p_->active_pid  = 0;
+    p_->active_sink = nullptr;
 
     if(current_mode != mode::cached_interceptor) return;
 
@@ -427,11 +454,12 @@ perfetto_engine::is_running() const noexcept
     return p_->running;
 }
 
-std::unique_ptr<::perfetto::TracingSession>&
-perfetto_engine::session_ref(pid_t pid)
+void
+perfetto_engine::forget_session(pid_t pid)
 {
     std::lock_guard<std::mutex> lk{ p_->sessions_mutex };
-    return p_->sessions[pid];
+    auto                        it = p_->sessions.find(pid);
+    if(it != p_->sessions.end()) (void) it->second.release();
 }
 
 void
@@ -455,6 +483,7 @@ perfetto_engine::collect_packet_bytes(int pid, const void* data, std::size_t siz
     // field header so concatenation forms a valid Trace proto.
     // Trace.packets has field number 1, wire type 2 (LEN). Tag byte =
     // (1 << 3) | 2 = 0x0A. Length is varint-encoded.
+    // size_t on 64-bit takes at most 10 varint bytes; +1 for the tag.
     std::array<char, 11> header{};
     header[0]      = 0x0A;
     std::size_t hl = 1;
@@ -462,9 +491,11 @@ perfetto_engine::collect_packet_bytes(int pid, const void* data, std::size_t siz
         std::size_t v = size;
         while(v >= 0x80)
         {
+            assert(hl < header.size() && "varint header overflow");
             header[hl++] = static_cast<char>((v & 0x7F) | 0x80);
             v >>= 7;
         }
+        assert(hl < header.size() && "varint header overflow on final byte");
         header[hl++] = static_cast<char>(v);
     }
 

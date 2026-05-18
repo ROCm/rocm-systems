@@ -128,7 +128,7 @@ postfork_child()
     rocprofsys::categories::shutdown();
     set_thread_state(::rocprofsys::ThreadState::Disabled);
 
-    rocprofsys::get_perfetto_session(process::get_parent_id()).release();
+    rocprofsys::detach_inherited_perfetto_session(process::get_parent_id());
 
     // register these exit handlers to avoid cleaning up resources
     on_exit(&child_exit, nullptr);

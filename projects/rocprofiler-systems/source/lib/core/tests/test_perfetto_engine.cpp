@@ -85,7 +85,7 @@ TEST(perfetto_engine, set_emitting_pid_round_trip)
     EXPECT_EQ(rocprofsys::core::perfetto_engine::get_emitting_pid(), 4242);
 
     // Reset for subsequent test cases on this thread.
-    rocprofsys::core::perfetto_engine::set_emitting_pid(0);
+    rocprofsys::core::perfetto_engine::set_emitting_pid(-1);
 }
 
 TEST(perfetto_engine, emitting_pid_is_thread_local)
@@ -95,34 +95,30 @@ TEST(perfetto_engine, emitting_pid_is_thread_local)
     rocprofsys::core::perfetto_engine::set_emitting_pid(7777);
     EXPECT_EQ(rocprofsys::core::perfetto_engine::get_emitting_pid(), 7777);
 
-    int observed_on_other_thread = -1;
+    int observed_on_other_thread = 0;
     std::thread other{ [&observed_on_other_thread]() {
         observed_on_other_thread =
             rocprofsys::core::perfetto_engine::get_emitting_pid();
     } };
     other.join();
 
-    EXPECT_EQ(observed_on_other_thread, 0)
-        << "emitting pid must default to 0 on a fresh thread";
+    EXPECT_EQ(observed_on_other_thread, -1)
+        << "emitting pid must default to -1 on a fresh thread";
     EXPECT_EQ(rocprofsys::core::perfetto_engine::get_emitting_pid(), 7777)
         << "main thread's tag must be unchanged by other thread's read";
 
-    rocprofsys::core::perfetto_engine::set_emitting_pid(0);
+    rocprofsys::core::perfetto_engine::set_emitting_pid(-1);
 }
 
-TEST(perfetto_engine, session_ref_returns_empty_slot_for_unknown_pid)
+TEST(perfetto_engine, forget_session_on_unknown_pid_is_noop)
 {
-    // session_ref creates an empty slot on first access; bridge contract
-    // for fork_gotcha which calls .release() on the parent's slot from the
-    // child. Slot must exist (even if empty) so .release() is safe.
+    // forget_session is the fork_gotcha bridge for the child to drop the
+    // parent's inherited session pointer without destroying the underlying
+    // TracingSession. Unknown pid → no-op (no exception, no allocation).
     rocprofsys::core::perfetto_engine engine{ make_test_config() };
 
-    auto& slot = engine.session_ref(static_cast<pid_t>(54321));
-    EXPECT_EQ(slot.get(), nullptr);
-
-    // Calling again returns the same slot.
-    auto& slot2 = engine.session_ref(static_cast<pid_t>(54321));
-    EXPECT_EQ(&slot, &slot2);
+    EXPECT_NO_THROW(engine.forget_session(static_cast<pid_t>(54321)));
+    EXPECT_NO_THROW(engine.forget_session(static_cast<pid_t>(54321)));
 }
 
 // ----------------------------------------------------------------------------

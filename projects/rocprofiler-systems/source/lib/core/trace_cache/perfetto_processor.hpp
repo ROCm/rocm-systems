@@ -77,7 +77,7 @@ private:
 
     metadata_registry&          m_metadata;
     std::uint64_t               m_process_id;
-    std::uint64_t               m_parrent_pid;
+    std::uint64_t               m_parent_pid;
     agent_manager&              m_agent_manager;
     bool                        m_use_annotations{ false };
     bool                        m_default_group_by_queue{ true };

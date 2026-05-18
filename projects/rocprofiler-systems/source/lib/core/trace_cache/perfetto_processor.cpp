@@ -439,7 +439,7 @@ perfetto_processor_t::perfetto_processor_t(
 : processor_t<perfetto_processor_t>()
 , m_metadata(*metadata)
 , m_process_id(pid)
-, m_parrent_pid(ppid)
+, m_parent_pid(ppid)
 , m_agent_manager(*agent_mngr)
 , m_use_annotations(config::get_perfetto_annotations())
 , m_default_group_by_queue(config::get_group_by_queue())

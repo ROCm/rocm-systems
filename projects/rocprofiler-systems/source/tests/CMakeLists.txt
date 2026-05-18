@@ -8,6 +8,7 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:track-registry-tests>
     $<TARGET_OBJECTS:perfetto-engine-tests>
     $<TARGET_OBJECTS:perfetto-sinks-tests>
+    $<TARGET_OBJECTS:perfetto-processor-isolation-tests>
     $<TARGET_OBJECTS:progress-tests>
     $<TARGET_OBJECTS:logger-tests>
     $<TARGET_OBJECTS:lib-components-tests>

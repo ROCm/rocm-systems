@@ -12,10 +12,13 @@
 #include <timemory/manager/manager.hpp>
 #include <timemory/operations/types/file_output_message.hpp>
 
+#include <cerrno>
 #include <cstdlib>
 #include <fstream>
 #include <ios>
 #include <string>
+#include <sys/wait.h>
+#include <unistd.h>
 #include <utility>
 
 namespace rocprofsys
@@ -132,12 +135,34 @@ live_fd_sink::finalize()
         }
         else
         {
-            auto _command = _script_path + " '" + _output_folder + "'";
-            int  result   = std::system(_command.c_str());
-            if(result != 0)
-                LOG_ERROR("Failed to execute: {}", _command);
+            // fork+execlp avoids the shell-injection footprint of std::system
+            // when _output_folder contains characters that would terminate the
+            // single-quoted argument (a single quote, in particular).
+            pid_t pid = ::fork();
+            if(pid < 0)
+            {
+                LOG_ERROR("fork failed for merge script {}: errno={}", _script_path,
+                          errno);
+            }
+            else if(pid == 0)
+            {
+                ::execlp(_script_path.c_str(), _script_path.c_str(),
+                         _output_folder.c_str(), nullptr);
+                // execlp only returns on failure
+                ::_exit(127);
+            }
             else
-                LOG_INFO("Successfully executed: {}", _command);
+            {
+                int status = 0;
+                while(::waitpid(pid, &status, 0) < 0 && errno == EINTR)
+                {}
+                if(WIFEXITED(status) && WEXITSTATUS(status) == 0)
+                    LOG_INFO("Successfully executed: {} {}", _script_path,
+                             _output_folder);
+                else
+                    LOG_ERROR("Failed to execute: {} {} (status={})", _script_path,
+                              _output_folder, status);
+            }
         }
     }
 

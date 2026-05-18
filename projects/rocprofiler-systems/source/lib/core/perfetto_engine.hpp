@@ -112,20 +112,19 @@ public:
     // afterwards if desired.
     std::vector<char> read_trace(pid_t pid);
 
-    // Drops the per-pid session slot. After release the slot is empty;
-    // session_ref(pid) will return a fresh empty unique_ptr the next time
-    // it is asked for that pid.
+    // Destroys the per-pid session: equivalent to .reset() on the slot.
+    // Use this when the session is genuinely done (e.g. post-stop cleanup).
     void release_session(pid_t pid);
+
+    // Detaches the engine's ownership of the per-pid session without
+    // destroying the underlying TracingSession. Used by fork_gotcha in the
+    // forked child to drop the inherited session pointer that the PARENT
+    // process still owns; calling reset() in the child would corrupt the
+    // parent's state.
+    void forget_session(pid_t pid);
 
     // Whether a session is currently active.
     bool is_running() const noexcept;
-
-    // Per-pid TracingSession bridge for legacy callers (notably
-    // rocprofsys::get_perfetto_session(pid_t) used by fork_gotcha to release
-    // the parent's session in the child after fork). Returns the same
-    // unique_ptr slot the engine writes during start(); allocates an empty
-    // slot on first access for an unknown pid.
-    std::unique_ptr<::perfetto::TracingSession>& session_ref(pid_t pid);
 
     // Thread-local pid tag consumed by the cached-mode interceptor TLS to
     // key each thread's emissions to a pid (D4). Tagging threads is the
