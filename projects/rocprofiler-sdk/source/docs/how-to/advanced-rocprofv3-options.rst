@@ -154,22 +154,19 @@ You can also specify this option in YAML or JSON input files:
       ]
     }
 
-**When to use this option:**
+**Use this option when:**
 
- **Use when:**
 - Your application has custom signal handlers that must execute
 - You're integrating with testing frameworks that manage signals
 - Debugging applications where signal handling behavior is critical
 - Working with applications that implement custom crash reporting
 
- **Avoid when:**
+**Avoid this option when:**
 - You want ``rocprofv3`` to provide maximum protection against data loss
 - Your application doesn't have custom signal handlers
 - You're doing standard profiling where signal handling isn't a concern
 
-**Example: Application with custom SIGSEGV handler**
-
-If your application has a custom segmentation fault handler:
+**Example: Application with a custom segmentation fault (SIGSEGV) handler**
 
 .. code-block:: cpp
 
@@ -286,13 +283,13 @@ You can also specify this option in YAML or JSON input files:
 - MemorySanitizer (``libmsan.so``) for uninitialized memory detection
 - UndefinedBehaviorSanitizer (``libubsan.so``) for undefined behavior detection
 
- **Debugging and profiling tools:**
+**Debugging and profiling tools:**
 - Custom memory allocators (``jemalloc``, ``tcmalloc``)
 - Performance profiling libraries
 - Custom instrumentation libraries
 - Mock libraries for testing
 
- **Third-party analysis tools:**
+**Third-party analysis tools:**
 - Valgrind replacement libraries
 - Custom logging frameworks
 - Security analysis tools
@@ -561,22 +558,14 @@ While typically used from command line, it can be scripted:
     # Combine with custom ROCm root
     rocprofv3 --rocm-root /opt/rocm-6.0 --sdk-version 2.2.0 --sys-trace -- ./app
 
-**Environment integration:**
-
-.. code-block:: bash
-
-    # Use environment variable for version
-    export ROCPROF_SDK_VERSION="2.1.3"
-    rocprofv3 --sdk-version "$ROCPROF_SDK_VERSION" --kernel-trace -- ./app
-
 Agent index
 ------------
 
 The agent index is a unique identifier for each agent in the system. It is used to identify the agent in the output files. Since, each runtime or tool has an independent representation of the agent's indices, ``rocprofv3`` provides an option to configure the agent index in the output files.
 
-- **absolute** == *node_id* - Absolute index of the agent, regardless of cgroups masking. This is a monotonically increasing number, which is incremented for every folder in ``/sys/class/kfd/kfd/topology/nodes``. For example, Agent-0, Agent-2, Agent-4.
-- **relative** == *logical_node_id* - Relative index of the agent accounting for cgroups masking. This is a monotonically increasing number, which is incremented for every folder in ``/sys/class/kfd/kfd/topology/nodes/``, whose properties file is non-empty. For example, Agent-0, Agent-1, Agent-2.
-- **type-relative** == *logical_node_type_id* - Relative index of the agent accounting for cgroups masking, where indexing starts at zero for each agent type. For example, CPU-0, GPU-0, GPU-1.
+- **absolute == node_id:** Absolute index of the agent, regardless of cgroups masking. This is a monotonically increasing number, which is incremented for every folder in ``/sys/class/kfd/kfd/topology/nodes``. For example, Agent-0, Agent-2, Agent-4.
+- **relative == logical_node_id:** Relative index of the agent accounting for cgroups masking. This is a monotonically increasing number, which is incremented for every folder in ``/sys/class/kfd/kfd/topology/nodes/``, whose properties file is non-empty. For example, Agent-0, Agent-1, Agent-2.
+- **type-relative == logical_node_type_id:** Relative index of the agent accounting for cgroups masking, where indexing starts at zero for each agent type. For example, CPU-0, GPU-0, GPU-1.
 
 To set the agent index in the output files, use the ``--agent-index`` or ``-A {absolute,relative,type-relative}`` option. The default value is ``relative``.
 

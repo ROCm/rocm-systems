@@ -53,15 +53,15 @@ The attach function performs the entire attachment process, including attachment
 
 **Parameters**
 
-- **pid**: Required - PID of process to attach to
-- **attach_tool_library**: Colon delimited list of tool libraries to use
-- **attach_duration_msec**: Optional - Length of time in milliseconds to profile for
-   - If unspecified, attachment will run until Enter is pressed or SIGINT (Ctrl+C) is received
-- **attach_library**: Optional - Tool library to use for attachment and detachment
-   - Default will work for nearly all applications
-   - If unspecified, defaults to the absolute path of librocprofiler-sdk-rocattach.so
-- **attach_children**: Optional - Whether to attach to the target process and all of its descendant processes
-   - Defaults to ``True``; pass ``False`` to attach only to the specified PID
+- **pid**: Required - PID of process to attach to.
+- **attach_tool_library**: Colon delimited list of tool libraries to use.
+- **attach_duration_msec**: Optional - Profiling duration in milliseconds.
+   - If unspecified, attachment runs until Enter is pressed or SIGINT (Ctrl+C) is received.
+- **attach_library**: Optional - Tool library to use for attachment and detachment.
+   - Default works for nearly all applications.
+   - If unspecified, defaults to the absolute path of ``librocprofiler-sdk-rocattach.so``.
+- **attach_children**: Optional - Specifies whether to attach to the target process and all of its descendant processes.
+   - Defaults to ``True``; pass ``False`` to attach only to the specified PID.
 
 C Functions
 ===================================
@@ -86,27 +86,27 @@ The C library ``librocprofiler-sdk-rocattach.so`` defines attach and detach func
 
 **Function Details:**
 
-- **rocattach_attach_tree(int pid)**: Attach to a process and all of its descendants
-   - Enumerates the full process tree rooted at ``pid`` via ``/proc`` before attaching
-   - Attachment proceeds in breadth-first order from the root
-   - If attachment to an individual child process fails, the error is logged and attachment continues with the remaining processes; the return status reflects the last error seen
-   - The process tree is snapshotted at the time of the call; processes spawned after this point are not included
+- **rocattach_attach_tree(int pid)**: Attaches to a process and all of its descendants.
+   - Enumerates the full process tree rooted at ``pid`` via ``/proc`` before attaching.
+   - Attachment proceeds in breadth-first order from the root.
+   - If attachment to an individual child process fails, the error is logged and attachment continues with the remaining processes; the return status reflects the last error seen.
+   - The process tree is snapshotted at the time of the call; processes spawned after this point are not included.
 
-- **rocattach_attach(int pid)**: Attach to a single process only
-   - Takes the target process ID as parameter
-   - Does not attach to child processes
-   - Use ``rocattach_attach_tree`` instead when profiling applications that spawn child processes
+- **rocattach_attach(int pid)**: Attaches to a single process only.
+   - Takes the target process ID as parameter.
+   - Doesn't attach to child processes.
+   - When profiling applications that spawn child processes, use ``rocattach_attach_tree`` instead.
 
-- **rocattach_detach_tree(int pid)**: Detach from a process and all of its descendants
-   - Enumerates the process tree rooted at ``pid`` via ``/proc`` at the time of the call
-   - Only processes with an active attachment session are detached; others are silently skipped
-   - Symmetric counterpart to ``rocattach_attach_tree``; use these two together
-   - Reentrant: the sessions lock is acquired and released per-process and is not held across the ``/proc`` traversal, so concurrent calls from multiple threads are safe
+- **rocattach_detach_tree(int pid)**: Detaches from a process and all of its descendants.
+   - Enumerates the process tree rooted at ``pid`` via ``/proc`` at the time of the call.
+   - Only processes with an active attachment session are detached; others are silently skipped.
+   - Symmetric counterpart to ``rocattach_attach_tree``; use these two together.
+   - Reentrant: the sessions lock is acquired and released per-process and isn't held across the ``/proc`` traversal, so concurrent calls from multiple threads are safe.
 
-- **rocattach_detach(int pid)**: Detach from a single process
-   - Takes the target process ID as a parameter
-   - Cleans up attachment resources and terminates profiling
-   - A PID of 0 can be specified to detach from all current sessions
+- **rocattach_detach(int pid)**: Detaches from a single process.
+   - Takes the target process ID as a parameter.
+   - Cleans up attachment resources and terminates profiling.
+   - A PID of 0 can be specified to detach from all the current sessions.
 
 Function call sequence
 ======================

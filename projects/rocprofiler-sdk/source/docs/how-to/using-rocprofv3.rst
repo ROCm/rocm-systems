@@ -351,24 +351,21 @@ The trace output is captured in a rocpd database file and can be converted to pf
 
 .. code-block:: shell
 
-    rocprofv3 --rccl-trace --output-format csv -- <application_path>
+   rocprofv3 --rccl-trace --sys-trace -- <application_path>
 
-The preceding command generates a ``rccl_api_trace`` file prefixed with the process ID.
-
+The preceding command generates a rocpd database file prefixed with the process ID, which can be converted into PFTrace for visualization in the Perfetto UI.
 
 .. code-block:: shell
 
-    $ cat 197_rccl_api_trace.csv
+   $ /opt/rocm/bin/rocpd2pftrace -i 163852_results.db
 
 The following image visualizes the ``RCCL`` trace for the referenced `allreduce_rccl sample application <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-systems/examples/rccl/rccl-tests/src/all_reduce.cpp>`_ using the Perfetto UI.
-The host thread track and select compute streams have been pinned in the visualization to enhance readability.
+The host thread track and select compute streams are pinned in the visualization to enhance readability.
 This enables clear observation of the ``RCCL`` compute kernels launched during ``ncclAllReduce`` operations on the host thread.
 
-
-.. csv-table:: RCCL trace
-   :file: /data/rccl_trace.csv
-   :widths: 10,10,10,10,10,20,20
-   :header-rows: 1
+.. image:: /data/perfetto_rccl.png
+   :width: 100%
+   :align: center
 
 rocDecode trace
 ++++++++++++++++
@@ -739,16 +736,11 @@ For a comprehensive list of counters available on MI200, see `MI200 performance 
 
 .. note::
 
-   Counter Dimension Collection
-   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   **Counter dimension collection:** When collecting counters with multiple dimensions or instances, such as ``TCC_MISS`` with ``DIMENSION_INSTANCE[0:15]``, individual dimension values can't be collected separately using bracket notation, such as ``TCC_MISS[0]`` or ``TCC_MISS[15]`` in the input files.
 
-   When collecting counters with multiple dimensions or instances (e.g., ``TCC_MISS`` with ``DIMENSION_INSTANCE[0:15]``), individual dimension values cannot be collected separately using bracket notation such as ``TCC_MISS[0]`` or ``TCC_MISS[15]`` in input files.
+   **To collect aggregated values:** Specify the counter name without dimension specifiers, such as ``pmc: TCC_MISS``. The ``rocprofv3`` tool automatically collects accumulated values across all instances.
 
-   **To collect aggregated values:**
-      Specify the counter name without dimension specifiers (e.g., ``pmc: TCC_MISS``). The ``rocprofv3`` tool will automatically collect accumulated values across all instances.
-
-   **To collect per-instance values:**
-      Use JSON output format, which includes detailed dimension information for individual counter instances.
+   **To collect values per instance:** Use JSON output format, which includes detailed dimension information for individual counter instances.
 
 Counter collection using input file
 +++++++++++++++++++++++++++++++++++++
@@ -862,9 +854,9 @@ To supply the counters in the command line, use:
 Multi-pass counter collection
 ++++++++++++++++++++++++++++++
 
-When counters cannot be collected simultaneously due to hardware limitations, you can use multi-pass counter collection. This allows you to collect different sets of counters across multiple profiling passes of the same application.
+When counters can't be collected simultaneously due to hardware limitations, you can use multi-pass counter collection. This helps you collect different sets of counters across multiple profiling passes of the same application.
 
-**Using multiple --pmc flags**
+**Using multiple** ``--pmc`` **flags:**
 
 You can specify multiple ``--pmc`` flags to define different counter groups. Each ``--pmc`` flag represents a separate profiling pass:
 
@@ -872,14 +864,15 @@ You can specify multiple ``--pmc`` flags to define different counter groups. Eac
 
    rocprofv3 --pmc SQ_WAVES SQ_WAVE_CYCLES --pmc GRBM_COUNT GRBM_GUI_ACTIVE -- <application_path>
 
-This command creates two profiling passes:
+The preceding command creates two profiling passes:
 
-- Pass 1: Collects ``SQ_WAVES`` and ``SQ_WAVE_CYCLES``
-- Pass 2: Collects ``GRBM_COUNT`` and ``GRBM_GUI_ACTIVE``
+- Pass 1: Collects ``SQ_WAVES`` and ``SQ_WAVE_CYCLES``.
 
-**Combining CLI and input file**
+- Pass 2: Collects ``GRBM_COUNT`` and ``GRBM_GUI_ACTIVE``.
 
-You can combine command-line ``--pmc`` flags with an input file. The CLI counter groups and input file counter groups are combined, creating separate passes for each:
+**Combining CLI and input file:**
+
+You can combine ``--pmc`` flag with an input file. The counters specified in CLI and input file are combined, creating separate passes for each counter:
 
 .. code-block:: shell
 
@@ -892,16 +885,19 @@ If ``input.txt`` contains:
    pmc: FETCH_SIZE SQ_WAVES
    pmc: GRBM_GUI_ACTIVE
 
-This creates four profiling passes:
+The preceding command creates four profiling passes:
 
-- Pass 1: ``GRBM_COUNT`` (from CLI)
-- Pass 2: ``SQ_WAVES`` (from CLI)
-- Pass 3: ``FETCH_SIZE SQ_WAVE_CYCLES`` (from input file)
-- Pass 4: ``GRBM_GUI_ACTIVE`` (from input file)
+- Pass 1: ``GRBM_COUNT`` (from CLI).
 
-**Output organization**
+- Pass 2: ``SQ_WAVES`` (from CLI).
 
-For multi-pass counter collection, each pass generates its output in a separate ``pass_n`` subdirectory:
+- Pass 3: ``FETCH_SIZE SQ_WAVE_CYCLES`` (from input file).
+
+- Pass 4: ``GRBM_GUI_ACTIVE`` (from input file).
+
+**Output organization:**
+
+In multi-pass counter collection, each pass generates its output in a separate ``pass_n`` subdirectory:
 
 .. code-block:: text
 
@@ -917,9 +913,11 @@ For multi-pass counter collection, each pass generates its output in a separate 
 
 .. note::
 
-   - Multi-pass counter collection is not compatible with attach mode (``--pid``)
-   - Multi-pass counter collection is not compatible with ``--collection-period``
-   - Each pass runs the application from start to finish
+   - Multi-pass counter collection is not compatible with attach mode (``--pid``).
+
+   - Multi-pass counter collection is not compatible with ``--collection-period``.
+
+   - Each pass runs the application from start to finish.
 
 .. _extra-counters:
 
@@ -1153,18 +1151,6 @@ The following table lists the various fields or the columns in the output CSV fi
    <div class="pst-scrollable-table-container">
       <table id="rocprov3-output-fields" class="table">
          <thead>
-            <style>
-               table {
-                  border-collapse: collapse;
-                  border-spacing: 0;
-                  }
-               td, th {
-                  border: 1px solid black;
-                  }
-               tbody [rowspan] ~ td {
-                     border: 1px solid black;
-                     }
-            </style>
             <tr>
                <th>Information type</th>
                <th>Field</th>

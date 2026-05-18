@@ -15,18 +15,6 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
     <div class="pst-scrollable-table-container">
         <table id="rocprov3-cli-options" class="table">
             <thead>
-                <style>
-                    table {
-                        border-collapse: collapse;
-                        border-spacing: 0;
-                        }
-                    td, th {
-                        border: 1px solid black;
-                        }
-                    tbody [rowspan] ~ td {
-                        border: 1px solid black;
-                        }
-                </style>
                 <tr>
                     <th>Purpose</th>
                     <th>Option</th>
@@ -99,7 +87,7 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
                     <td>Specifies the PC sample generation frequency. For more details, see <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-pc-sampling.html">PC sampling.</a></td>
                 </tr>
                 <tr>
-                    <th rowspan="10">Basic tracing</th>
+                    <th rowspan="11">Basic tracing</th>
                     <td>--hip-trace [BOOL]</td>
                     <td>Combination of --hip-runtime-trace and --hip-compiler-trace. This option enables only the HIP API tracing. Unlike previous iterations of rocprofv3, this option doesn’t enable kernel tracing, memory copy tracing, and so on. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#hip-trace">Read more...</a></td>
                 </tr>
@@ -117,6 +105,10 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
                 <tr>
                     <td>--memory-allocation-trace [BOOL]</td>
                     <td>Collects memory allocation traces. Displays starting address, allocation size, and the agent where allocation occurs. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#memory-allocation-trace">Read more...</a></td>
+                </tr>
+                <tr>
+                    <td>--kfd-trace</td>
+                    <td>Collects --kfd-page-migration-trace, --kfd-page-mapping-trace, --kfd-queue-trace, and --kfd-dropped-events-trace. KFD (Kernel Fusion Driver) traces capture low-level driver routines including mapping, unmapping, and migration of data between GPU and system memories, as well as eviction or restoration of GPU queues to facilitate such routines.</td>
                 </tr>
                 <tr>
                     <td>--scratch-memory-trace [BOOL]</td>
@@ -139,7 +131,7 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
                     <td>Collects traces for rocDecode APIs. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#rocdecode-trace">Read more...</a></td>
                 </tr>
                 <tr>
-                    <th rowspan="6">Granular tracing</th>
+                    <th rowspan="10">Granular tracing</th>
                     <td>--hip-runtime-trace [BOOL]</td>
                     <td>Collects HIP Runtime API traces. For example, public HIP API functions starting with hip such as hipSetDevice.</td>
                 </tr>
@@ -164,9 +156,25 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
                     <td>Collects HSA API traces (Finalizer-extension API). For example, HSA functions prefixed with only hsa_ext_program_ such as hsa_ext_program_create. For more details, see <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#hsa-trace">HSA trace</a></td>
                 </tr>
                 <tr>
+                    <td>--kfd-page-migration-trace</td>
+                    <td>Collects traces of KFD events including migration of pages across device memories.</td>
+                </tr>
+                <tr>
+                    <td>--kfd-page-mapping-trace</td>
+                    <td>Collects traces of KFD events including faulting, mapping, and page validation.</td>
+                </tr>
+                <tr>
+                    <td>--kfd-queue-trace</td>
+                    <td>Collects traces of KFD events including GPU queue eviction and restoration operations.</td>
+                </tr>
+                <tr>
+                    <td>--kfd-dropped-events-trace</td>
+                    <td>Collects traces of KFD events dropped by the KFD device driver.</td>
+                </tr>
+                <tr>
                     <th>Counter collection</th>
                     <td>--pmc [PMC …]</td>
-                    <td>Specifies performance monitoring counters to be collected. Use comma or space to specify more than one counter. Also note that the job fails if the entire set of counters can’t be collected in single pass. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#counter-collection-using-command-line">Read more...</a></td>
+                    <td>Specifies performance monitoring counters to be collected. Use comma or space to specify more than one counter. For multi-pass collection, use multiple --pmc flags where each flag defines a separate counter group. The job fails if a counter group can't be collected in a single pass. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#counter-collection-using-command-line">Read more...</a></td>
                 </tr>
                 <tr>
                     <th rowspan="4">Post-processing tracing</th>
@@ -284,7 +292,7 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
                 </tr>
                 <tr>
                     <td>--selected-regions</td>
-                    <td>If set, rocprofv3 profiles only regions of code surrounded by roctxMark(name) and roctxMark(0).</td>
+                    <td>If set, rocprofv3 profiles only regions of code surrounded by roctxMark(name) and roctxMark(0). <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-sdk-roctx.html#using-selected-regions-option">Read more...</a></td>
                 </tr>
             </tbody>
         </table>

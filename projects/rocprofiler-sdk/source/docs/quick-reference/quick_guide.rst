@@ -68,7 +68,7 @@ Granular tracing options
    # HIP API, kernel dispatches, and memory operations tracing
    rocprofv3 --hip-trace --kernel-trace --memory-copy-trace -- ./your_app
 
-**Documentation:** `application-tracing`
+**Documentation:** :ref:`application-tracing`
 
 Performance counter collection
 -------------------------------

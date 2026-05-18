@@ -52,7 +52,7 @@ Output prefix keys are useful in multiple use cases but are most helpful when de
    * - ``%nid%``
      - ``%rank%`` if possible, otherwise ``%pid%``
    * - ``%launch_time%``
-     - Launch date and/or time according to ``ROCPROF_TIME_FORMAT``
+     - Launch date and/or time
    * - ``%env{NAME}%``
      - Value of ``NAME`` environment variable (``getenv(NAME)``)
    * - ``$env{NAME}``

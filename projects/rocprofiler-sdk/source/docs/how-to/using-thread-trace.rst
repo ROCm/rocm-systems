@@ -27,12 +27,11 @@ Supported devices:
 Thread trace profiling is performed in the following steps:
 
 1. Tracing (data collection) - Uses ROCprofiler-SDK thread trace service API
-2. Decoding (analysis) - Uses ROCprof Trace Decoder API
-3. Visualization - Requires ROCprof Compute Viewer
+2. Decoding (analysis) - Uses :ref:`ROCprof Trace Decoder API <thread-trace>`
+3. Visualization - Requires :doc:`ROCprof Compute Viewer <rocprof-compute-viewer:index>`
 
-Tracing and decoding is handled by ``rocprofv3`` while visualization is handled by the ROCprof Compute Viewer.
+Tracing and decoding is handled by ``rocprofv3`` while visualization is handled by the :doc:`ROCprof Compute Viewer <rocprof-compute-viewer:index>`.
 
-Prerequisites
 .. _thread-trace-parameters:
 
 rocprofv3 parameters for thread tracing
@@ -149,15 +148,15 @@ the profiler will restart profiling when encountering this new targeted kernel a
 Marker-controlled thread tracing
 =============================
 
-Using ``--att`` with ``--selected-regions`` enables application-controlled thread trace collection using the ``roctxProfilerResume(0)`` and ``roctxProfilerPause(0)`` APIs.
+Using ``--att`` with ``--selected-regions`` enables application-controlled thread trace collection with the help of ``roctxProfilerResume(0)`` and ``roctxProfilerPause(0)`` APIs.
 Instead of targeting specific kernels by name or dispatch index, the application explicitly starts and stops thread trace collection at runtime.
 
 When ``--att --selected-regions`` is used:
 
-* The profiler starts with thread tracing **disabled**. No kernels are traced until ``roctxProfilerResume(0)`` is called.
+* Thread tracing is **disabled** when the profiler starts. No kernels are traced until ``roctxProfilerResume(0)`` is called.
 * Calling ``roctxProfilerResume(0)`` starts GPU thread trace collection.
 * Calling ``roctxProfilerPause(0)`` stops GPU thread trace collection.
-* Multiple resume/pause cycles are supported. Each cycle produces a separate set of output files (ATT data, stats CSV, and UI output directory).
+* Multiple resume-pause cycles are supported. Each cycle produces a separate set of output files (ATT data, stats CSV, and UI output directory).
 * Incompatible with ``--att-consecutive-kernels``.
 
 **Example application:**
@@ -186,16 +185,16 @@ When ``--att --selected-regions`` is used:
     hipLaunchKernelGGL(cleanup_kernel, grid, block, 0, 0, out, in, width);
     hipDeviceSynchronize();
 
-**Run with:**
+To run, use:
 
 .. code-block:: bash
 
     rocprofv3 --att --selected-regions -d <output_dir> -- <application_path>
 
-Only ``compute_kernel_a`` and ``compute_kernel_b`` will appear in the thread trace output.
-The ``setup_kernel`` and ``cleanup_kernel`` dispatches are excluded because they fall outside the resume/pause region.
+For the preceding example code, the thread trace output will include only ``compute_kernel_a`` and ``compute_kernel_b``.
+The ``setup_kernel`` and ``cleanup_kernel`` dispatches will be excluded because they are outside the resume-pause region.
 
-For more details on ``--selected-regions`` and ``roctxProfilerPause``/``roctxProfilerResume``, see :ref:`using-rocprofiler-sdk-roctx`.
+For more details on ``--selected-regions``, ``roctxProfilerPause``, and ``roctxProfilerResume``, see :ref:`using-rocprofiler-sdk-roctx`.
 
 .. _output-files:
 
