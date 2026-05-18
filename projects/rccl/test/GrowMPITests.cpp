@@ -665,4 +665,128 @@ TEST_F(GrowMPITest, GetUniqueId_DistinctHandles)
     ASSERT_MPI_TRUE(runAllReduceAndVerify(grownComm_, phase2));
 }
 
+
+// --- Error guards: pre-GroupStart validation in ncclCommGrow_impl ---
+// newcomm==NULL, nRanks<=0, nRanks<=existing all return ncclInvalidArgument
+// immediately before ncclGroupStartInternal — safe to test on rank 0 only.
+
+TEST_F(GrowMPITest, Grow_InvalidArguments)
+{
+    const int wr        = MPIEnvironment::world_rank;
+    const int worldSize = MPIEnvironment::world_size;
+    const int existing  = worldSize - 1;
+
+    ASSERT_MPI_EQ(ncclSuccess, buildComm(existing, &initialComm_));
+    ASSERT_MPI_TRUE(wr >= existing || initialComm_ != nullptr);
+
+    // Only rank 0 runs the error checks; all checks return before GroupStart
+    // so no collective coordination is needed.
+    if (wr == 0 && initialComm_ != nullptr) {
+        ncclComm_t dummy = nullptr;
+
+        // newcomm == NULL
+        ASSERT_EQ(ncclInvalidArgument,
+            ncclCommGrow(initialComm_, worldSize, nullptr, -1, nullptr, nullptr));
+
+        // nRanks == 0 (non-positive)
+        ASSERT_EQ(ncclInvalidArgument,
+            ncclCommGrow(initialComm_, 0, nullptr, -1, &dummy, nullptr));
+
+        // nRanks == existing (not strictly greater than current size)
+        ASSERT_EQ(ncclInvalidArgument,
+            ncclCommGrow(initialComm_, existing, nullptr, -1, &dummy, nullptr));
+    }
+
+    ASSERT_MPI_SUCCESS(MPI_Barrier(MPI_COMM_WORLD));
+}
+
+// --- bcastGrowHandle: coordinator is the last rank of the parent comm ---
+// Exercises the self-send guard: when parent->rank == parent->nRanks-1,
+// bcastGrowHandle skips the send-to-self and sends only to rank 0.
+// Rank 0 (other boundary) receives the handle via bcastGrowHandle(isRoot=false).
+
+TEST_F(GrowMPITest, Grow_CoordinatorAtLastRank)
+{
+    if (!validateTestPrerequisites(3)) {
+        GTEST_SKIP() << "Grow_CoordinatorAtLastRank requires at least 3 MPI ranks";
+    }
+
+    const int wr        = MPIEnvironment::world_rank;
+    const int worldSize = MPIEnvironment::world_size;
+    const int existing  = worldSize - 1;   // parent comm has (worldSize-1) ranks
+    const int coordRank = existing - 1;    // last rank of parent comm = rank nRanks-1
+
+    ASSERT_MPI_EQ(ncclSuccess, buildComm(existing, &initialComm_));
+    ASSERT_MPI_TRUE(wr >= existing || initialComm_ != nullptr);
+
+    // Coordinator is the last rank of the parent comm (rank nRanks-1).
+    // Inside bcastGrowHandle(isRoot=true):
+    //   parent->rank == parent->nRanks-1 => skip send-to-self
+    //   parent->rank != 0               => send to rank 0 via bootstrap
+    ncclUniqueId growId{};
+    if (wr == coordRank) {
+        ASSERT_EQ(ncclSuccess, ncclCommGetUniqueId(initialComm_, &growId));
+    }
+
+    // Propagate uniqueId to the new rank (wr == existing) via point-to-point MPI.
+    // Existing ranks other than coordinator and new rank do NOT get growId:
+    //   - coordinator (wr==coordRank): already has it, passes it directly to ncclCommGrow
+    //   - rank 0 (other boundary):     passes nullptr => receives via bcastGrowHandle bootstrap
+    //   - other existing ranks:        pass nullptr  => non-boundary, no bootstrap interaction
+    if (wr == coordRank) {
+        MPI_Send(&growId, sizeof(growId), MPI_BYTE, existing, 0, MPI_COMM_WORLD);
+    } else if (wr == existing) {
+        MPI_Recv(&growId, sizeof(growId), MPI_BYTE, coordRank, 0,
+                 MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    }
+
+    // Each rank calls ncclCommGrow with the appropriate arguments:
+    if (wr == coordRank) {
+        // Coordinator (last rank): has uniqueId, copies it directly -- no bootstrap recv
+        ASSERT_EQ(ncclSuccess,
+            ncclCommGrow(initialComm_, worldSize, &growId, -1, &grownComm_, nullptr));
+    } else if (wr > 0 && wr < existing) {
+        // Non-boundary existing ranks: nullptr uniqueId, no bootstrap interaction
+        ASSERT_EQ(ncclSuccess,
+            ncclCommGrow(initialComm_, worldSize, nullptr, -1, &grownComm_, nullptr));
+    } else if (wr == 0) {
+        // Rank 0 (other boundary): nullptr uniqueId => receives via bcastGrowHandle(isRoot=false)
+        ASSERT_EQ(ncclSuccess,
+            ncclCommGrow(initialComm_, worldSize, nullptr, -1, &grownComm_, nullptr));
+    } else if (wr == existing) {
+        // New rank: has uniqueId from coordinator via MPI_Recv
+        ASSERT_EQ(ncclSuccess,
+            ncclCommGrow(nullptr, worldSize, &growId, existing, &grownComm_, nullptr));
+    }
+
+    ASSERT_MPI_NE(grownComm_, nullptr);
+    ASSERT_MPI_TRUE(runAllReduceAndVerify(grownComm_, worldSize));
+}
+
+// --- bootstrapGetUniqueId: NCCL_COMM_ID env rejects grow uniqueId creation ---
+// When NCCL_COMM_ID is set, ncclCommGetUniqueId must return ncclInvalidUsage.
+// This exercises the env-var guard in bootstrapGetUniqueId(handle, comm).
+
+TEST_F(GrowMPITest, GetUniqueId_NcclCommIdEnvRejection)
+{
+    const int wr        = MPIEnvironment::world_rank;
+    const int worldSize = MPIEnvironment::world_size;
+    const int existing  = worldSize - 1;
+
+    ASSERT_MPI_EQ(ncclSuccess, buildComm(existing, &initialComm_));
+    ASSERT_MPI_TRUE(wr >= existing || initialComm_ != nullptr);
+
+    // Single-rank check: no bootstrap or group operations are triggered
+    // when NCCL_COMM_ID is set (function returns immediately).
+    if (wr == 0 && initialComm_ != nullptr) {
+        setenv("NCCL_COMM_ID", "127.0.0.1:12345", 1);
+        ncclUniqueId id{};
+        ncclResult_t res = ncclCommGetUniqueId(initialComm_, &id);
+        unsetenv("NCCL_COMM_ID");
+        ASSERT_EQ(ncclInvalidUsage, res);
+    }
+
+    ASSERT_MPI_SUCCESS(MPI_Barrier(MPI_COMM_WORLD));
+}
+
 #endif // MPI_TESTS_ENABLED
