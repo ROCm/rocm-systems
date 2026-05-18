@@ -7,6 +7,8 @@
 #include <utility>
 #include <vector>
 
+#include <sys/types.h>
+
 namespace tim
 {
 class manager;
@@ -52,6 +54,26 @@ private:
     output_file_registry* m_registry{ nullptr };
     std::vector<char>     m_bytes{};
     bool                  m_drained{ false };
+};
+
+// Cached-mode sink: writes per-pid bytes to one .proto file per pid.
+// The parent_pid receives the default filename
+// (config::get_perfetto_output_filename()); every other pid receives the
+// suffix-stamped variant (get_perfetto_output_filename_with_suffix(pid))
+// — same contract perfetto_processor.cpp:524-527 has applied for the
+// cached path. Per-pid open failures are logged and the source is
+// dropped; other pids continue (RF5).
+class per_pid_file_sink final : public trace_sink
+{
+public:
+    per_pid_file_sink(pid_t parent_pid, output_file_registry& registry);
+
+    void on_source_drained(int source_id, std::vector<char> bytes) override;
+    void finalize() override;
+
+private:
+    pid_t                 m_parent_pid{ 0 };
+    output_file_registry* m_registry{ nullptr };
 };
 
 // Test-only sink: captures (source_id, bytes) tuples in arrival order so

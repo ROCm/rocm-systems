@@ -146,6 +146,53 @@ live_fd_sink::finalize()
 }
 
 // ----------------------------------------------------------------------------
+// per_pid_file_sink
+// ----------------------------------------------------------------------------
+
+per_pid_file_sink::per_pid_file_sink(pid_t parent_pid, output_file_registry& registry)
+: m_parent_pid{ parent_pid }
+, m_registry{ &registry }
+{}
+
+void
+per_pid_file_sink::on_source_drained(int source_id, std::vector<char> bytes)
+{
+    if(bytes.empty()) return;
+
+    const auto pid = static_cast<pid_t>(source_id);
+    auto       _filename =
+        (pid == m_parent_pid)
+            ? config::get_perfetto_output_filename()
+            : config::get_perfetto_output_filename_with_suffix(std::to_string(pid));
+
+    operation::file_output_message<tim::project::rocprofsys> _fom{};
+    if(config::get_verbose() >= 0)
+        _fom(_filename, std::string{ "perfetto" },
+             " (%.2f KB / %.2f MB / %.2f GB)... ",
+             static_cast<double>(bytes.size()) / units::KB,
+             static_cast<double>(bytes.size()) / units::MB,
+             static_cast<double>(bytes.size()) / units::GB);
+
+    std::ofstream ofs{};
+    if(!filepath::open(ofs, _filename, std::ios::out | std::ios::binary))
+    {
+        _fom.append("Error opening '%s'...", _filename.c_str());
+        LOG_ERROR("per_pid_file_sink: failed to open '{}' for pid {}", _filename,
+                  pid);
+        return;
+    }
+
+    ofs.write(bytes.data(), bytes.size());
+    if(config::get_verbose() >= 0) _fom.append("%s", "Done");  // NOLINT
+    if(m_registry) m_registry->register_file(_filename, output_format::perfetto);
+    ofs.close();
+}
+
+void
+per_pid_file_sink::finalize()
+{}
+
+// ----------------------------------------------------------------------------
 // recording_sink
 // ----------------------------------------------------------------------------
 

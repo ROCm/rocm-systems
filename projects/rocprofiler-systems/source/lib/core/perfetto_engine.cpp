@@ -5,13 +5,17 @@
 
 #include "core/config.hpp"
 #include "core/perfetto.hpp"  // brings ROCPROFSYS_PERFETTO_CATEGORIES (TrackEvent type)
+#include "core/perfetto_sinks.hpp"
 #include "logger/debug.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
+#include <exception>
 #include <mutex>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include <unistd.h>
 
@@ -21,10 +25,19 @@ namespace core
 {
 namespace
 {
-// Thread-local pid tag consumed by future cached-mode interceptor TLS (D4).
+// Thread-local pid tag consumed by the cached-mode interceptor TLS (D4).
 // Stored in TU scope so the static accessors can reach it without exposing
 // the TLS in the header.
 thread_local int t_emitting_pid = 0;
+
+// Process-global pointer to the currently-active cached-mode engine. Set
+// on engine.start(cached_interceptor, ...), cleared on engine.stop(). The
+// Interceptor TLS reads it at thread-local-state construction time (first
+// emission on a worker thread) and caches the pointer; subsequent
+// OnTracePacket calls dereference the per-thread cache. This is safe
+// because cached-mode use is single-engine-at-a-time per process (cached
+// and live are mutually exclusive via ROCPROFSYS_TRACE_LEGACY).
+std::atomic<perfetto_engine*> g_active_cached_engine{ nullptr };
 }  // namespace
 
 engine_config
@@ -56,6 +69,51 @@ build_engine_config_from_settings()
 }
 
 // ----------------------------------------------------------------------------
+// Cached-mode Interceptor
+// ----------------------------------------------------------------------------
+
+namespace
+{
+// Perfetto SDK keeps interceptors experimental: TracingMuxerImpl::
+// RegisterInterceptor (perfetto.cc:~37265) silently rejects descriptors
+// whose name is not one of {"test_interceptor", "console", "etwexport"}.
+// The check predates upstreamable knobs and lives inside vendored
+// submodule code we don't fork; using "test_interceptor" keeps the
+// engine wired up without patching the SDK. The name is an internal
+// binding key only — registration side and TraceConfig.interceptor_config
+// must agree, and that's its only effect.
+constexpr const char* k_cached_interceptor_name = "test_interceptor";
+
+class cached_interceptor
+: public ::perfetto::Interceptor<cached_interceptor>
+{
+public:
+    struct ThreadLocalState : ::perfetto::InterceptorBase::ThreadLocalState
+    {
+        ThreadLocalState(ThreadLocalStateArgs& /*args*/)
+        : engine{ g_active_cached_engine.load(std::memory_order_acquire) }
+        , pid{ t_emitting_pid }
+        {}
+
+        // Cached at TLS-construction time (first emission on this thread).
+        // Subsequent OnTracePacket calls use these without synchronisation.
+        perfetto_engine* engine = nullptr;
+        int              pid    = 0;
+    };
+
+    static void OnTracePacket(InterceptorContext context)
+    {
+        auto& tls = context.GetThreadLocalState();
+        if(tls.engine == nullptr) return;
+
+        tls.engine->collect_packet_bytes(tls.pid, context.packet_data.data,
+                                         context.packet_data.size);
+    }
+};
+
+}  // namespace
+
+// ----------------------------------------------------------------------------
 // perfetto_engine::impl
 // ----------------------------------------------------------------------------
 
@@ -70,6 +128,13 @@ struct perfetto_engine::impl
     pid_t                                                                  active_pid{ 0 };
     bool                                                                   running{ false };
 
+    perfetto_engine::mode current_mode{ perfetto_engine::mode::live_fd };
+    trace_sink*           active_sink{ nullptr };
+
+    // Cached-mode per-pid byte collector. Protected by collector_mutex.
+    std::mutex                                       collector_mutex{};
+    std::unordered_map<int, std::vector<char>>      collected_bytes{};
+
     static std::once_flag s_sdk_init_flag;
     static bool           s_sdk_init_succeeded;
 
@@ -78,7 +143,7 @@ struct perfetto_engine::impl
         return cfg.backend != engine_config::backend_t::inprocess;
     }
 
-    void build_trace_config()
+    void build_trace_config(perfetto_engine::mode m)
     {
         trace_cfg = ::perfetto::TraceConfig{};
 
@@ -102,6 +167,11 @@ struct perfetto_engine::impl
         auto* ds_cfg = trace_cfg.add_data_sources()->mutable_config();
         ds_cfg->set_name("track_event");
         ds_cfg->set_track_event_config_raw(track_event_cfg.SerializeAsString());
+
+        if(m == perfetto_engine::mode::cached_interceptor)
+        {
+            ds_cfg->mutable_interceptor_config()->set_name(k_cached_interceptor_name);
+        }
     }
 };
 
@@ -134,7 +204,10 @@ perfetto_engine::~perfetto_engine()
 void
 perfetto_engine::init_sdk()
 {
-    p_->build_trace_config();
+    // build_trace_config defers mode selection to start(); init_sdk only
+    // needs the SDK Initialize/Register calls. Use live_fd here just to
+    // produce a valid base config; start() rebuilds with the correct mode.
+    p_->build_trace_config(mode::live_fd);
 
     std::call_once(impl::s_sdk_init_flag, [this]() {
         ::perfetto::TracingInitArgs args{};
@@ -147,6 +220,11 @@ perfetto_engine::init_sdk()
 
         ::perfetto::Tracing::Initialize(args);
         ::perfetto::TrackEvent::Register();
+
+        ::perfetto::InterceptorDescriptor desc;
+        desc.set_name(k_cached_interceptor_name);
+        cached_interceptor::Register(desc);
+
         impl::s_sdk_init_succeeded = true;
     });
 }
@@ -154,7 +232,12 @@ perfetto_engine::init_sdk()
 void
 perfetto_engine::start(mode m, int fd)
 {
-    (void) m;  // only mode::live_fd defined in slice B
+    if(m != mode::live_fd)
+    {
+        LOG_WARNING("perfetto_engine::start(mode, fd) requires mode::live_fd; "
+                    "use start(mode, trace_sink&) for cached_interceptor");
+        return;
+    }
 
     if(p_->is_system_backend())
     {
@@ -169,6 +252,8 @@ perfetto_engine::start(mode m, int fd)
                     "already active; replacing it");
     }
 
+    p_->build_trace_config(mode::live_fd);
+
     const auto pid = static_cast<pid_t>(::getpid());
 
     std::lock_guard<std::mutex> lk{ p_->sessions_mutex };
@@ -181,8 +266,62 @@ perfetto_engine::start(mode m, int fd)
     slot->Setup(p_->trace_cfg, fd);
     slot->StartBlocking();
 
-    p_->active_pid = pid;
-    p_->running    = true;
+    p_->active_pid   = pid;
+    p_->running      = true;
+    p_->current_mode = mode::live_fd;
+    p_->active_sink  = nullptr;
+}
+
+void
+perfetto_engine::start(mode m, trace_sink& sink)
+{
+    if(m != mode::cached_interceptor)
+    {
+        LOG_WARNING("perfetto_engine::start(mode, sink) requires "
+                    "mode::cached_interceptor; use start(mode, fd) for live_fd");
+        return;
+    }
+
+    if(p_->is_system_backend())
+    {
+        // System backend can't drive an interceptor-routed cached session;
+        // mirror live-mode early return.
+        return;
+    }
+
+    if(p_->running)
+    {
+        LOG_WARNING("perfetto_engine::start() called while a session is "
+                    "already active; replacing it");
+    }
+
+    p_->build_trace_config(mode::cached_interceptor);
+
+    const auto pid = static_cast<pid_t>(::getpid());
+
+    {
+        std::lock_guard<std::mutex> lk{ p_->sessions_mutex };
+        auto&                       slot = p_->sessions[pid];
+        slot                             = ::perfetto::Tracing::NewTrace();
+        slot->SetOnErrorCallback([](::perfetto::TracingError err) {
+            if(err.code == ::perfetto::TracingError::kTracingFailed)
+                LOG_WARNING("Perfetto encountered a tracing error: {}", err.message);
+        });
+        slot->Setup(p_->trace_cfg);
+        slot->StartBlocking();
+    }
+
+    {
+        std::lock_guard<std::mutex> lk{ p_->collector_mutex };
+        p_->collected_bytes.clear();
+    }
+
+    p_->active_pid   = pid;
+    p_->running      = true;
+    p_->current_mode = mode::cached_interceptor;
+    p_->active_sink  = &sink;
+
+    g_active_cached_engine.store(this, std::memory_order_release);
 }
 
 void
@@ -190,7 +329,9 @@ perfetto_engine::stop()
 {
     if(!p_->running) return;  // RF6
 
-    auto pid = p_->active_pid;
+    const auto current_mode = p_->current_mode;
+    const auto pid          = p_->active_pid;
+    auto*      sink         = p_->active_sink;
 
     ::perfetto::TracingSession* session = nullptr;
     {
@@ -199,8 +340,14 @@ perfetto_engine::stop()
         if(it != p_->sessions.end()) session = it->second.get();
     }
 
-    p_->running    = false;
-    p_->active_pid = 0;
+    p_->running     = false;
+    p_->active_pid  = 0;
+    p_->active_sink = nullptr;
+
+    if(current_mode == mode::cached_interceptor)
+    {
+        g_active_cached_engine.store(nullptr, std::memory_order_release);
+    }
 
     if(session == nullptr) return;
 
@@ -210,6 +357,37 @@ perfetto_engine::stop()
 
     LOG_DEBUG("Stopping the perfetto trace session (blocking)...");
     session->StopBlocking();
+
+    if(current_mode != mode::cached_interceptor) return;
+
+    // Cached-mode drain: move collected bytes out under the lock, then
+    // feed them through the sink without holding the lock (sink calls can
+    // be slow / throw).
+    std::unordered_map<int, std::vector<char>> drained;
+    {
+        std::lock_guard<std::mutex> lk{ p_->collector_mutex };
+        drained.swap(p_->collected_bytes);
+    }
+
+    if(sink == nullptr) return;
+
+    std::exception_ptr first_exc{};
+    for(auto& [source_pid, bytes] : drained)
+    {
+        if(bytes.empty()) continue;
+        try
+        {
+            sink->on_source_drained(source_pid, std::move(bytes));
+        }
+        catch(...)
+        {
+            if(!first_exc) first_exc = std::current_exception();
+        }
+    }
+
+    sink->finalize();
+
+    if(first_exc) std::rethrow_exception(first_exc);
 }
 
 std::vector<char>
@@ -258,5 +436,17 @@ perfetto_engine::get_emitting_pid() noexcept
 {
     return t_emitting_pid;
 }
+
+void
+perfetto_engine::collect_packet_bytes(int pid, const void* data, std::size_t size)
+{
+    if(data == nullptr || size == 0) return;
+
+    std::lock_guard<std::mutex> lk{ p_->collector_mutex };
+    auto&                       bytes = p_->collected_bytes[pid];
+    bytes.insert(bytes.end(), static_cast<const char*>(data),
+                 static_cast<const char*>(data) + size);
+}
+
 }  // namespace core
 }  // namespace rocprofsys

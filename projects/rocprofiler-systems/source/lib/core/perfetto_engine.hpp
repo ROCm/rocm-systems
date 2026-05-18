@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -19,6 +20,8 @@ namespace rocprofsys
 {
 namespace core
 {
+class trace_sink;
+
 // POD snapshot of the perfetto-relevant configuration. Built once at engine
 // construction by build_engine_config_from_settings(); the engine never reads
 // rocprofsys::config::* again after that. Tests construct it with literals to
@@ -51,24 +54,23 @@ struct engine_config
 engine_config
 build_engine_config_from_settings();
 
-// Owns Perfetto SDK init + the per-pid TracingSession map for the live path.
-// Slice B exposes only mode::live_fd; mode::cached_interceptor lands in
-// slice C1.
+// Owns Perfetto SDK init + the per-pid TracingSession map.
 //
-// Live mode posture (slice B): the engine is stop-only — start() opens the
-// session, stop() flushes + StopBlocking. The drain (read bytes + push
-// through trace_sink) is orchestrated by the perfetto.cpp shim, which knows
-// whether the legacy tmp-file path is in use and must read from disk
-// instead of session->ReadTraceBlocking. Cached mode (slice C+) will drive
-// drain through the sink directly because bytes come from per-thread
-// interceptor TLS buffers, not a fd.
+// Two modes:
+// - live_fd: SDK writes to fd (optional) + internal buffer. stop() flushes
+//   and halts; bytes are read and pushed to a sink by the orchestrator
+//   (perfetto.cpp shim) because it owns the tmp-file vs ReadTraceBlocking
+//   selection. No engine-side sink reference.
+// - cached_interceptor: per-thread TLS interceptor copies packet bytes
+//   keyed by the thread's emitting_pid; stop() drains those into the
+//   bound sink via on_source_drained / finalize. Bytes never touch a fd.
 class perfetto_engine
 {
 public:
     enum class mode
     {
         live_fd,
-        // cached_interceptor — added in slice C1
+        cached_interceptor,
     };
 
     explicit perfetto_engine(engine_config cfg);
@@ -83,16 +85,25 @@ public:
     // Safe to call from every engine instance; only the first wins.
     void init_sdk();
 
-    // Starts a tracing session in the requested mode. fd >= 0 instructs the
-    // SDK to stream output to the file descriptor in addition to its
-    // internal buffer (legacy ROCPROFSYS_USE_TMP_FILES path); fd == -1
-    // disables on-disk capture. Calling start() while running warns and
-    // replaces the existing session.
+    // Live-mode start. fd >= 0 streams output to the file descriptor in
+    // addition to the SDK's internal buffer (legacy ROCPROFSYS_USE_TMP_FILES
+    // path); fd == -1 disables on-disk capture. Calling start() while
+    // running warns and replaces the existing session.
     void start(mode m, int fd);
 
-    // Flushes and stops the active session. No-op when no session is active
-    // (RF6). Bytes are not read or drained here — see the live-mode posture
-    // note above.
+    // Cached-mode start. Sink is bound for stop()-time drain via the
+    // per-thread interceptor; emitting threads must have
+    // set_emitting_pid(pid) called before their first TRACE_EVENT_*.
+    void start(mode m, trace_sink& sink);
+
+    // Flushes and stops the active session.
+    // - live_fd:           flush + StopBlocking only (orchestrator drains).
+    // - cached_interceptor: flush + StopBlocking, then drain per-pid
+    //                       collected bytes through the bound sink
+    //                       (on_source_drained per pid, then finalize();
+    //                       first per-source exception is rethrown after
+    //                       finalize per drain contract).
+    // No-op when no session is active (RF6).
     void stop();
 
     // Reads the trace bytes from the session for the given pid via
@@ -116,11 +127,18 @@ public:
     // slot on first access for an unknown pid.
     std::unique_ptr<::perfetto::TracingSession>& session_ref(pid_t pid);
 
-    // Thread-local pid tag used by future cached-mode interceptor TLS (D4).
-    // Exposed in slice B so tests can exercise the round-trip; live mode
-    // does not consume it.
+    // Thread-local pid tag consumed by the cached-mode interceptor TLS to
+    // key each thread's emissions to a pid (D4). Tagging threads is the
+    // emitter's responsibility — call set_emitting_pid(pid) before the
+    // first TRACE_EVENT_* on the thread.
     static void set_emitting_pid(int pid) noexcept;
     static int  get_emitting_pid() noexcept;
+
+    // Called by the cached-mode interceptor TLS to append per-pid bytes
+    // during emission. Public so the TU-private interceptor inside the
+    // .cpp can reach it without crossing the private-member boundary; not
+    // intended for outside callers.
+    void collect_packet_bytes(int pid, const void* data, std::size_t size);
 
 private:
     struct impl;

@@ -3,6 +3,7 @@
 
 #include "gtest/gtest.h"
 
+#include "core/output_file_registry.hpp"
 #include "core/perfetto_sinks.hpp"
 
 #include <vector>
@@ -49,3 +50,26 @@ TEST(recording_sink, finalize_without_drain_is_safe)
     EXPECT_TRUE(sink.finalized());
     EXPECT_TRUE(sink.records().empty());
 }
+
+// ----------------------------------------------------------------------------
+// per_pid_file_sink (slice C1)
+// ----------------------------------------------------------------------------
+
+TEST(per_pid_file_sink, empty_bytes_is_early_return)
+{
+    // Empty drains must not touch the filesystem or the registry —
+    // per_pid_file_sink::on_source_drained returns early on empty bytes
+    // so the (uninitialised in unit tests) config singleton is never
+    // queried for the output filename.
+    rocprofsys::output_file_registry registry;
+    rocprofsys::core::per_pid_file_sink sink{ static_cast<pid_t>(1), registry };
+
+    EXPECT_NO_THROW(sink.on_source_drained(1, std::vector<char>{}));
+    EXPECT_NO_THROW(sink.finalize());
+}
+
+// NOTE: file-IO and RF5 (per-pid open-failure isolation) coverage for
+// per_pid_file_sink is deferred to slice C2's integration tests, which
+// exercise the sink through cache_manager + the live config singleton.
+// Unit-level mocking of config::get_perfetto_output_filename(...) here
+// would require library-init machinery this test binary does not own.

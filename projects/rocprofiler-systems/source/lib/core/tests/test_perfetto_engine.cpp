@@ -4,8 +4,11 @@
 #include "gtest/gtest.h"
 
 #include "core/perfetto_engine.hpp"
+#include "core/perfetto_sinks.hpp"
 
+#include <algorithm>
 #include <thread>
+#include <vector>
 
 namespace
 {
@@ -120,4 +123,112 @@ TEST(perfetto_engine, session_ref_returns_empty_slot_for_unknown_pid)
     // Calling again returns the same slot.
     auto& slot2 = engine.session_ref(static_cast<pid_t>(54321));
     EXPECT_EQ(&slot, &slot2);
+}
+
+// ----------------------------------------------------------------------------
+// Cached-interceptor mode (slice C1)
+// ----------------------------------------------------------------------------
+
+// Helper: simulate the cached-mode interceptor pushing bytes for a pid.
+// Stand-in for `cached_interceptor::OnTracePacket -> collect_packet_bytes`,
+// avoiding the heavy perfetto.hpp / TRACE_EVENT include chain in test
+// scope. SDK-driven emission is covered E2E by slice C2 integration tests.
+namespace
+{
+void
+simulate_interceptor_emit(rocprofsys::core::perfetto_engine& engine, int pid,
+                          const std::vector<char>& bytes)
+{
+    engine.collect_packet_bytes(pid, bytes.data(), bytes.size());
+}
+}  // namespace
+
+TEST(perfetto_engine_cached, start_then_stop_with_no_emission_drains_empty)
+{
+    // Cached mode with zero emissions: engine.stop() must invoke
+    // sink.finalize() and produce zero records — verifies the drain
+    // pathway runs without crashing when no thread tagged itself.
+    rocprofsys::core::perfetto_engine engine{ make_test_config() };
+    engine.init_sdk();
+
+    rocprofsys::core::recording_sink sink;
+
+    engine.start(rocprofsys::core::perfetto_engine::mode::cached_interceptor, sink);
+    EXPECT_TRUE(engine.is_running());
+    engine.stop();
+
+    EXPECT_FALSE(engine.is_running());
+    EXPECT_TRUE(sink.finalized());
+    EXPECT_TRUE(sink.records().empty());
+}
+
+TEST(perfetto_engine_cached, drain_one_source_one_record)
+{
+    // Simulate one source emitting bytes keyed pid=42; engine.stop() must
+    // produce exactly one drained record with those bytes.
+    rocprofsys::core::perfetto_engine engine{ make_test_config() };
+    engine.init_sdk();
+
+    rocprofsys::core::recording_sink sink;
+    engine.start(rocprofsys::core::perfetto_engine::mode::cached_interceptor, sink);
+
+    simulate_interceptor_emit(engine, 42, { 'p', 'a', 'c', 'k', 'e', 't' });
+
+    engine.stop();
+
+    ASSERT_EQ(sink.records().size(), 1u);
+    EXPECT_EQ(sink.records()[0].first, 42);
+    EXPECT_EQ(sink.records()[0].second,
+              (std::vector<char>{ 'p', 'a', 'c', 'k', 'e', 't' }));
+    EXPECT_TRUE(sink.finalized());
+}
+
+TEST(perfetto_engine_cached, drain_two_sources_no_cross_bleed)
+{
+    // Two sources with different pids; engine.stop() must produce two
+    // records, each containing only its source's bytes (no cross-pid
+    // bleed in the engine's per-pid collector).
+    rocprofsys::core::perfetto_engine engine{ make_test_config() };
+    engine.init_sdk();
+
+    rocprofsys::core::recording_sink sink;
+    engine.start(rocprofsys::core::perfetto_engine::mode::cached_interceptor, sink);
+
+    simulate_interceptor_emit(engine, 101, { 'a', 'a', 'a' });
+    simulate_interceptor_emit(engine, 202, { 'b', 'b' });
+
+    engine.stop();
+
+    ASSERT_EQ(sink.records().size(), 2u);
+
+    std::vector<std::pair<int, std::vector<char>>> got = sink.records();
+    std::sort(got.begin(), got.end(),
+              [](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
+    EXPECT_EQ(got[0].first, 101);
+    EXPECT_EQ(got[0].second, (std::vector<char>{ 'a', 'a', 'a' }));
+    EXPECT_EQ(got[1].first, 202);
+    EXPECT_EQ(got[1].second, (std::vector<char>{ 'b', 'b' }));
+    EXPECT_TRUE(sink.finalized());
+}
+
+TEST(perfetto_engine_cached, multiple_emits_same_pid_concatenate)
+{
+    // Two emits for the same pid must concatenate into a single drained
+    // record — matches how OnTracePacket appends packet-after-packet into
+    // the per-pid byte buffer.
+    rocprofsys::core::perfetto_engine engine{ make_test_config() };
+    engine.init_sdk();
+
+    rocprofsys::core::recording_sink sink;
+    engine.start(rocprofsys::core::perfetto_engine::mode::cached_interceptor, sink);
+
+    simulate_interceptor_emit(engine, 7, { '1', '2' });
+    simulate_interceptor_emit(engine, 7, { '3', '4', '5' });
+
+    engine.stop();
+
+    ASSERT_EQ(sink.records().size(), 1u);
+    EXPECT_EQ(sink.records()[0].first, 7);
+    EXPECT_EQ(sink.records()[0].second,
+              (std::vector<char>{ '1', '2', '3', '4', '5' }));
 }
