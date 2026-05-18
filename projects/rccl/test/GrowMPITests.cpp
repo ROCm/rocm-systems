@@ -789,4 +789,90 @@ TEST_F(GrowMPITest, GetUniqueId_NcclCommIdEnvRejection)
     ASSERT_MPI_SUCCESS(MPI_Barrier(MPI_COMM_WORLD));
 }
 
+
+TEST_F(GrowMPITest, ShrinkThenGrow_Debug)
+{
+    if (MPIEnvironment::world_size < 4) GTEST_SKIP();
+    const int wr = MPIEnvironment::world_rank;
+    const int worldSize = MPIEnvironment::world_size;
+
+    ASSERT_MPI_EQ(ncclSuccess, buildComm(worldSize, &initialComm_));
+
+    int excludeRank = worldSize - 1;
+    ncclComm_t shrunkComm = nullptr;
+    bool shrinkOk = true;
+    if (wr != excludeRank) {
+        ncclResult_t sr = ncclCommShrink(initialComm_, &excludeRank, 1, &shrunkComm, nullptr, NCCL_SHRINK_DEFAULT);
+        shrinkOk = (sr == ncclSuccess) && (shrunkComm != nullptr);
+    }
+    ASSERT_MPI_TRUE(shrinkOk);
+    ASSERT_MPI_SUCCESS(MPI_Barrier(MPI_COMM_WORLD));
+
+    ncclUniqueId growId{};
+    if (wr == 0 && shrunkComm) {
+        ASSERT_EQ(ncclSuccess, ncclCommGetUniqueId(shrunkComm, &growId));
+    }
+    MPI_Bcast(&growId, sizeof(growId), MPI_BYTE, 0, MPI_COMM_WORLD);
+
+    if (wr != excludeRank && shrunkComm) {
+        ASSERT_EQ(ncclSuccess, ncclCommGrow(shrunkComm, worldSize, &growId, -1, &grownComm_, nullptr));
+    } else if (wr == excludeRank) {
+        ASSERT_EQ(ncclSuccess, ncclCommGrow(nullptr, worldSize, &growId, excludeRank, &grownComm_, nullptr));
+    }
+    ASSERT_MPI_NE(grownComm_, nullptr);
+    ASSERT_MPI_TRUE(runAllReduceAndVerify(grownComm_, worldSize));
+    if (shrunkComm) (void)ncclCommDestroy(shrunkComm);
+}
+
+
+// --- Full elastic cycle: grow N-1->N, shrink N->N-1, grow N-1->N again ---
+TEST_F(GrowMPITest, GrowShrinkGrowCycle)
+{
+    if (MPIEnvironment::world_size < 4) GTEST_SKIP();
+    const int wr        = MPIEnvironment::world_rank;
+    const int worldSize = MPIEnvironment::world_size;
+    const int existing  = worldSize - 1;
+
+    // Phase 1: build initial comm (N-1 ranks) and grow to N
+    ASSERT_MPI_EQ(ncclSuccess, buildComm(existing, &initialComm_));
+    ASSERT_MPI_TRUE(wr >= existing || initialComm_ != nullptr);
+
+    ASSERT_MPI_EQ(ncclSuccess, growByOne(initialComm_, existing, &grownComm_));
+    ASSERT_MPI_NE(grownComm_, nullptr);
+    ASSERT_MPI_TRUE(runAllReduceAndVerify(grownComm_, worldSize));
+
+    // Phase 2: shrink back to N-1 (exclude last rank)
+    int excludeRank = worldSize - 1;
+    ncclComm_t shrunkComm = nullptr;
+    bool shrinkOk = true;
+    if (wr != excludeRank) {
+        ncclResult_t sr = ncclCommShrink(grownComm_, &excludeRank, 1, &shrunkComm, nullptr, NCCL_SHRINK_DEFAULT);
+        shrinkOk = (sr == ncclSuccess) && (shrunkComm != nullptr);
+        if (shrinkOk) {
+            shrinkOk = runAllReduceAndVerify(shrunkComm, worldSize - 1);
+        }
+    }
+    ASSERT_MPI_TRUE(shrinkOk);
+    ASSERT_MPI_SUCCESS(MPI_Barrier(MPI_COMM_WORLD));
+
+    // Phase 3: grow again from N-1 back to N
+    ncclUniqueId growId{};
+    if (wr == 0 && shrunkComm) {
+        ASSERT_EQ(ncclSuccess, ncclCommGetUniqueId(shrunkComm, &growId));
+    }
+    MPI_Bcast(&growId, sizeof(growId), MPI_BYTE, 0, MPI_COMM_WORLD);
+
+    ncclComm_t regrown = nullptr;
+    if (wr != excludeRank && shrunkComm) {
+        ASSERT_EQ(ncclSuccess, ncclCommGrow(shrunkComm, worldSize, &growId, -1, &regrown, nullptr));
+    } else if (wr == excludeRank) {
+        ASSERT_EQ(ncclSuccess, ncclCommGrow(nullptr, worldSize, &growId, excludeRank, &regrown, nullptr));
+    }
+    ASSERT_MPI_NE(regrown, nullptr);
+    ASSERT_MPI_TRUE(runAllReduceAndVerify(regrown, worldSize));
+
+    if (shrunkComm) (void)ncclCommDestroy(shrunkComm);
+    if (regrown)    (void)ncclCommDestroy(regrown);
+}
+
 #endif // MPI_TESTS_ENABLED
