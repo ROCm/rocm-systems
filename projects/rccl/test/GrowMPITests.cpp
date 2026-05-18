@@ -875,4 +875,144 @@ TEST_F(GrowMPITest, GrowShrinkGrowCycle)
     if (regrown)    (void)ncclCommDestroy(regrown);
 }
 
+
+// Exercises bcastGrowHandle(parent->nRanks == 1) early-return path.
+// When the parent comm has exactly 1 rank, the coordinator IS both rank 0
+// and rank nRanks-1; bcastGrowHandle returns immediately without any
+// bootstrapSend. The unique ID is distributed via MPI_Bcast instead.
+TEST_F(GrowMPITest, Grow_SingleRankParent)
+{
+    if (MPIEnvironment::world_size < 2) GTEST_SKIP();
+    const int wr = MPIEnvironment::world_rank;
+
+    // Only rank 0 builds the 1-rank parent comm.
+    ASSERT_MPI_EQ(ncclSuccess, buildComm(1, &initialComm_));
+
+    ncclUniqueId growId{};
+    // bcastGrowHandle(isRoot=true) fires inside ncclCommGetUniqueId on rank 0,
+    // but parent->nRanks==1 causes it to return early — no socket send at all.
+    if (wr == 0) {
+        ASSERT_EQ(ncclSuccess, ncclCommGetUniqueId(initialComm_, &growId));
+    }
+    MPI_Bcast(&growId, sizeof(growId), MPI_BYTE, 0, MPI_COMM_WORLD);
+
+    if (wr == 0) {
+        ASSERT_EQ(ncclSuccess,
+                  ncclCommGrow(initialComm_, 2, &growId, -1, &grownComm_, nullptr));
+    } else if (wr == 1) {
+        ASSERT_EQ(ncclSuccess,
+                  ncclCommGrow(nullptr, 2, &growId, 1, &grownComm_, nullptr));
+    }
+
+    if (wr <= 1) {
+        ASSERT_NE(grownComm_, nullptr);
+        ASSERT_TRUE(runAllReduceAndVerify(grownComm_, 2));
+    }
+}
+
+// Exercises parseCommConfig for an existing rank (config != NULL path).
+// When an existing rank passes a non-NULL ncclConfig_t to ncclCommGrow,
+// the code calls parseCommConfig(newComm, config) rather than
+// copyCommConfig(newComm, comm) for that rank's new communicator setup.
+TEST_F(GrowMPITest, Grow_ExistingRankCustomConfig)
+{
+    if (MPIEnvironment::world_size < 2) GTEST_SKIP();
+    const int wr       = MPIEnvironment::world_rank;
+    const int existing = MPIEnvironment::world_size - 1;
+    const int newRank  = existing;
+
+    ASSERT_MPI_EQ(ncclSuccess, buildComm(existing, &initialComm_));
+    ASSERT_MPI_TRUE(wr >= existing || initialComm_ != nullptr);
+
+    ncclUniqueId growId{};
+    if (wr == 0) {
+        ASSERT_EQ(ncclSuccess, ncclCommGetUniqueId(initialComm_, &growId));
+    }
+    MPI_Bcast(&growId, sizeof(growId), MPI_BYTE, 0, MPI_COMM_WORLD);
+
+    // Existing ranks pass non-NULL config -> parseCommConfig path (not copyCommConfig).
+    // Use all-UNDEF fields so parseCommConfig applies defaults without validation errors.
+    ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+
+    if (wr < existing) {
+        ASSERT_EQ(ncclSuccess,
+                  ncclCommGrow(initialComm_, existing + 1, &growId, -1,
+                               &grownComm_, &cfg));
+    } else if (wr == newRank) {
+        ASSERT_EQ(ncclSuccess,
+                  ncclCommGrow(nullptr, existing + 1, &growId, newRank,
+                               &grownComm_, nullptr));
+    }
+
+    ASSERT_MPI_NE(grownComm_, nullptr);
+    ASSERT_MPI_TRUE(runAllReduceAndVerify(grownComm_, existing + 1));
+}
+
+// Exercises the magic chain across 3 sequential grow operations.
+// Each ncclCommGetUniqueId call must produce a unique magic derived from
+// hashCombine(comm->magic, childCount + 1); this extends GetUniqueId_DistinctHandles
+// to a third level. Every ncclCommGetUniqueId is consumed by a corresponding
+// ncclCommGrow so no bcastGrowHandle messages are left in the unex queue.
+TEST_F(GrowMPITest, GetUniqueId_MagicChainThree)
+{
+    if (MPIEnvironment::world_size < 4) GTEST_SKIP();
+    const int wr        = MPIEnvironment::world_rank;
+    const int worldSize = MPIEnvironment::world_size;
+    const int base      = worldSize - 3;  // initial comm: base ranks
+
+    ASSERT_MPI_EQ(ncclSuccess, buildComm(base, &initialComm_));
+
+    // Grow 1: base -> base+1, collect id1
+    ncclUniqueId id1{};
+    if (wr == 0) ASSERT_EQ(ncclSuccess, ncclCommGetUniqueId(initialComm_, &id1));
+    MPI_Bcast(&id1, sizeof(id1), MPI_BYTE, 0, MPI_COMM_WORLD);
+    if (wr < base) {
+        ASSERT_EQ(ncclSuccess,
+                  ncclCommGrow(initialComm_, base + 1, &id1, -1, &midComm_, nullptr));
+    } else if (wr == base) {
+        ASSERT_EQ(ncclSuccess,
+                  ncclCommGrow(nullptr, base + 1, &id1, base, &midComm_, nullptr));
+    }
+    ASSERT_MPI_TRUE(wr > base || midComm_ != nullptr);
+
+    // Grow 2: base+1 -> base+2, collect id2
+    ncclComm_t mid2 = nullptr;
+    ncclUniqueId id2{};
+    if (wr == 0) ASSERT_EQ(ncclSuccess, ncclCommGetUniqueId(midComm_, &id2));
+    MPI_Bcast(&id2, sizeof(id2), MPI_BYTE, 0, MPI_COMM_WORLD);
+    if (wr < base + 1) {
+        ASSERT_EQ(ncclSuccess,
+                  ncclCommGrow(midComm_, base + 2, &id2, -1, &mid2, nullptr));
+    } else if (wr == base + 1) {
+        ASSERT_EQ(ncclSuccess,
+                  ncclCommGrow(nullptr, base + 2, &id2, base + 1, &mid2, nullptr));
+    }
+    ASSERT_MPI_TRUE(wr > base + 1 || mid2 != nullptr);
+
+    // Grow 3: base+2 -> worldSize, collect id3
+    ncclUniqueId id3{};
+    if (wr == 0) ASSERT_EQ(ncclSuccess, ncclCommGetUniqueId(mid2, &id3));
+    MPI_Bcast(&id3, sizeof(id3), MPI_BYTE, 0, MPI_COMM_WORLD);
+    if (wr < base + 2) {
+        ASSERT_EQ(ncclSuccess,
+                  ncclCommGrow(mid2, worldSize, &id3, -1, &grownComm_, nullptr));
+    } else if (wr == base + 2) {
+        ASSERT_EQ(ncclSuccess,
+                  ncclCommGrow(nullptr, worldSize, &id3, base + 2, &grownComm_, nullptr));
+    }
+    ASSERT_MPI_NE(grownComm_, nullptr);
+    ASSERT_MPI_TRUE(runAllReduceAndVerify(grownComm_, worldSize));
+
+    // All 3 handles must have distinct magic (first 8 bytes = magic field of ncclBootstrapHandle)
+    uint64_t m1, m2, m3;
+    memcpy(&m1, &id1, sizeof(uint64_t));
+    memcpy(&m2, &id2, sizeof(uint64_t));
+    memcpy(&m3, &id3, sizeof(uint64_t));
+    ASSERT_NE(m1, m2) << "id1 and id2 must have distinct magic";
+    ASSERT_NE(m2, m3) << "id2 and id3 must have distinct magic";
+    ASSERT_NE(m1, m3) << "id1 and id3 must have distinct magic";
+
+    if (mid2) (void)ncclCommDestroy(mid2);
+}
+
 #endif // MPI_TESTS_ENABLED
