@@ -418,20 +418,23 @@ inline bool isManagedMemorySupportedOnDevice(int device) {
 // Prints all HMM-related device attributes for device 0
 inline int HmmAttrPrint() {
   int value = 0;
-  WARN(
-      "The following are the attribute values related to HMM for"
-      " device 0:\n");
-  HIP_CHECK(hipDeviceGetAttribute(&value, hipDeviceAttributeDirectManagedMemAccessFromHost, 0));
-  WARN("hipDeviceAttributeDirectManagedMemAccessFromHost: " << value);
-  HIP_CHECK(hipDeviceGetAttribute(&value, hipDeviceAttributeConcurrentManagedAccess, 0));
-  WARN("hipDeviceAttributeConcurrentManagedAccess: " << value);
-  HIP_CHECK(hipDeviceGetAttribute(&value, hipDeviceAttributePageableMemoryAccess, 0));
-  WARN("hipDeviceAttributePageableMemoryAccess: " << value);
+  CAPTURE("The following are the attribute values related to HMM for"
+          " device 0:\n");
+  HIP_CHECK(hipDeviceGetAttribute(
+      &value, hipDeviceAttributeDirectManagedMemAccessFromHost, 0));
+  CAPTURE("hipDeviceAttributeDirectManagedMemAccessFromHost: " << value);
+  HIP_CHECK(hipDeviceGetAttribute(
+      &value, hipDeviceAttributeConcurrentManagedAccess, 0));
+  CAPTURE("hipDeviceAttributeConcurrentManagedAccess: " << value);
   HIP_CHECK(
-      hipDeviceGetAttribute(&value, hipDeviceAttributePageableMemoryAccessUsesHostPageTables, 0));
-  WARN("hipDeviceAttributePageableMemoryAccessUsesHostPageTables: " << value);
+      hipDeviceGetAttribute(&value, hipDeviceAttributePageableMemoryAccess, 0));
+  CAPTURE("hipDeviceAttributePageableMemoryAccess: " << value);
+  HIP_CHECK(hipDeviceGetAttribute(
+      &value, hipDeviceAttributePageableMemoryAccessUsesHostPageTables, 0));
+  CAPTURE(
+      "hipDeviceAttributePageableMemoryAccessUsesHostPageTables: " << value);
   HIP_CHECK(hipDeviceGetAttribute(&value, hipDeviceAttributeManagedMemory, 0));
-  WARN("hipDeviceAttributeManagedMemory: " << value);
+  CAPTURE("hipDeviceAttributeManagedMemory: " << value);
   return value;
 }
 

@@ -101,9 +101,8 @@ HIP_TEST_CASE(Unit_malloc_CoherentTst) {
 
     // Allocating hipMallocManaged() memory
     Ptr = reinterpret_cast<int*>(malloc(SIZE));
-    auto ret = TstCoherency(Ptr, HmmMem);
+    REQUIRE(TstCoherency(Ptr, HmmMem));
     free(Ptr);
-    REQUIRE(ret);
   } else {
     HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
   }
@@ -149,22 +148,16 @@ HIP_TEST_CASE(Unit_mmap_CoherentTst) {
   CHECK_MANAGED_MEMORY_SUPPORT
   hipDeviceProp_t prop;
   HIPCHECK(hipGetDeviceProperties(&prop, 0));
-  char* p = NULL;
+  char *p = NULL;
   p = strstr(prop.gcnArchName, "xnack+");
   if (p) {
     bool HmmMem = true;
-    int* Ptr = reinterpret_cast<int*>(
-        mmap(NULL, sizeof(int), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, 0, 0));
-    if (Ptr == MAP_FAILED) {
-      WARN("Mapping Failed\n");
-      REQUIRE(false);
-    }
-    auto ret = TstCoherency(Ptr, HmmMem);
-    int err = munmap(Ptr, sizeof(int));
-    if (err != 0) {
-      WARN("munmap failed\n");
-    }
-    REQUIRE(ret);
+    int *Ptr =
+        reinterpret_cast<int *>(mmap(NULL, sizeof(int), PROT_READ | PROT_WRITE,
+                                     MAP_PRIVATE | MAP_ANONYMOUS, 0, 0));
+    REQUIRE(Ptr != MAP_FAILED);
+    REQUIRE(TstCoherency(Ptr, HmmMem));
+    REQUIRE(munmap(Ptr, sizeof(int)) == 0);
   } else {
     HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
   }
@@ -179,16 +172,13 @@ HIP_TEST_CASE(Unit_mmap_CoherentTstWthAdvise) {
   CHECK_MANAGED_MEMORY_SUPPORT
   hipDeviceProp_t prop;
   HIPCHECK(hipGetDeviceProperties(&prop, 0));
-  char* p = NULL;
+  char *p = NULL;
   p = strstr(prop.gcnArchName, "xnack+");
   if (p) {
     int SIZE = sizeof(int);
-    int* Ptr = reinterpret_cast<int*>(
-        mmap(NULL, SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, 0, 0));
-    if (Ptr == MAP_FAILED) {
-      WARN("Mapping Failed\n");
-      REQUIRE(false);
-    }
+    int *Ptr = reinterpret_cast<int *>(mmap(NULL, SIZE, PROT_READ | PROT_WRITE,
+                                            MAP_PRIVATE | MAP_ANONYMOUS, 0, 0));
+    REQUIRE(Ptr != MAP_FAILED);
     HIP_CHECK(hipMemAdvise(Ptr, SIZE, hipMemAdviseSetCoarseGrain, 0));
     // Initializing the value with 9
     *Ptr = 9;
@@ -196,15 +186,10 @@ HIP_TEST_CASE(Unit_mmap_CoherentTstWthAdvise) {
     HIP_CHECK(hipStreamCreate(&strm));
     SquareKrnl<<<1, 1, 0, strm>>>(Ptr);
     HIP_CHECK(hipStreamSynchronize(strm));
-    bool IfTstPassed = false;
-    if (*Ptr == 81) {
-      IfTstPassed = true;
-    }
-    int err = munmap(Ptr, SIZE);
-    if (err != 0) {
-      WARN("munmap failed\n");
-    }
-    REQUIRE(IfTstPassed);
+
+    REQUIRE(*Ptr == 81);
+    REQUIRE(munmap(Ptr, SIZE) == 0);
+
     HIP_CHECK(hipStreamDestroy(strm));
   } else {
     HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);

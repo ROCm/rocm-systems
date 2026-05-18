@@ -326,10 +326,7 @@ HIP_TEST_CASE(Unit_hipStreamPerThread_MangdMem) {
     }
   }
   HIP_CHECK(hipFree(Hmm));
-  if (MisMatch) {
-    WARN("Data mismatch observed!!\n");
-    REQUIRE(false);
-  }
+  REQUIRE(MisMatch == 0);
 }
 
 /*  To check the working of hipStreamPerThread in forked process*/
