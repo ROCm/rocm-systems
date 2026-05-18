@@ -383,6 +383,9 @@ get_output_absolute_path(std::string_view basename, std::string_view extension,
 std::string
 get_perfetto_output_filename_with_suffix(std::string_view suffix = "");
 
+std::string
+get_ump_absolute_path();
+
 bool&
 get_use_rocpd() ROCPROFSYS_HOT;
 

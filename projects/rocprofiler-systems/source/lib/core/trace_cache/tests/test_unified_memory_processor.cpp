@@ -64,6 +64,9 @@ struct recording_output_sink
     std::vector<registered_file> files = {};
 };
 
+// The processor reads output config from timemory globals at construction
+// time; these RAII guards isolate those globals so each test writes into
+// its own mkdtemp() directory.
 struct ScopedUseOutputSuffix
 {
     const bool previous;
@@ -73,6 +76,17 @@ struct ScopedUseOutputSuffix
         tim::settings::use_output_suffix() = desired;
     }
     ~ScopedUseOutputSuffix() { tim::settings::use_output_suffix() = previous; }
+};
+
+struct ScopedOutputPath
+{
+    const std::string previous;
+    explicit ScopedOutputPath(std::string desired)
+    : previous(tim::settings::output_path())
+    {
+        tim::settings::output_path() = std::move(desired);
+    }
+    ~ScopedOutputPath() { tim::settings::output_path() = previous; }
 };
 
 class UnifiedMemoryProcessorTest : public ::testing::Test
@@ -96,6 +110,8 @@ protected:
         const char* d      = mkdtemp(tmpl);
         ASSERT_NE(d, nullptr) << "mkdtemp failed";
         tmp_dir = d;
+
+        m_output_path_guard = std::make_unique<ScopedOutputPath>(tmp_dir);
 
         rebuild_processor();
     }
@@ -162,7 +178,7 @@ protected:
         agent_mgr->insert_agent(gpu1);
         agent_mgr->insert_agent(gpu2);
 
-        processor = std::make_unique<TestProcessor>(agent_mgr, kPid, tmp_dir,
+        processor = std::make_unique<TestProcessor>(agent_mgr, kPid,
                                                     output_file_sink_view{ registry });
     }
 
@@ -182,6 +198,7 @@ protected:
 
 private:
     std::unique_ptr<ScopedUseOutputSuffix> m_suffix_guard;
+    std::unique_ptr<ScopedOutputPath>      m_output_path_guard;
 };
 
 TEST(MigrationStats, ArithmeticAndSentinels)

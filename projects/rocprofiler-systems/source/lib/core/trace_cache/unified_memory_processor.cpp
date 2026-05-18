@@ -36,10 +36,8 @@ inline constexpr std::uint64_t kNsPerUs  = 1000ULL;
 inline constexpr std::uint64_t kNsPerMs  = kNsPerUs * 1000;
 inline constexpr std::uint64_t kNsPerSec = kNsPerMs * 1000;
 
-// Largest double < 2^64; equality would overflow on std::uint64_t cast (UB,
-// [conv.fpint]). nextafter isn't constexpr until C++23.
-inline const double kMaxSafeUint64 =
-    std::nextafter(static_cast<double>(std::numeric_limits<std::uint64_t>::max()), 0.0);
+// Largest double < 2^64; equality would overflow on std::uint64_t cast (UB).
+inline constexpr double kMaxSafeUint64 = 0x1.fffffffffffffp+63;
 
 [[nodiscard]] inline std::string
 format_size(std::uint64_t bytes)
@@ -95,12 +93,11 @@ format_time(std::uint64_t nanoseconds)
 }  // namespace detail
 
 unified_memory_processor_t::unified_memory_processor_t(
-    std::shared_ptr<agent_manager> agent_mgr, int pid, std::string output_dir,
-    output_file_sink_view output_sink)
+    std::shared_ptr<agent_manager> agent_mgr, int pid, output_file_sink_view output_sink)
 : processor_t<unified_memory_processor_t>()
 , m_agent_manager(std::move(agent_mgr))
 , m_pid(pid)
-, m_output_dir(std::move(output_dir))
+, m_output_dir(config::get_ump_absolute_path())
 , m_output_sink(std::move(output_sink))
 {
     const char* xnack    = std::getenv("HSA_XNACK");

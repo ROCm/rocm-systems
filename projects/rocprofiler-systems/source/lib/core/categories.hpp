@@ -250,10 +250,8 @@ using name = perfetto_category<Tp...>;
         ROCPROFSYS_PERFETTO_CATEGORY(category::vaapi),                                   \
         ROCPROFSYS_PERFETTO_CATEGORY(category::timer_sampling),                          \
         ROCPROFSYS_PERFETTO_CATEGORY(category::overflow_sampling),                       \
-        ::perfetto::Category("unified_memory_bandwidth")                                 \
-            .SetDescription("Unified Memory Bandwidth Counters"),                        \
-        ::perfetto::Category("unified_memory_fault_rate")                                \
-            .SetDescription("Unified Memory Page Fault Rate Counters"),                  \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::unified_memory_bandwidth),                \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::unified_memory_fault_rate),               \
         ::perfetto::Category("timemory").SetDescription("Events from the timemory API")
 
 #if defined(TIMEMORY_USE_PERFETTO)

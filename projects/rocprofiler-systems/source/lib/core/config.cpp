@@ -2550,7 +2550,8 @@ std::string
 get_output_absolute_path(std::string_view basename, std::string_view extension,
                          std::string_view tag, std::string_view dir)
 {
-    const auto* pwd = getenv("PWD");
+    const auto* pwd  = getenv("PWD");
+    const auto* base = (pwd != nullptr) ? pwd : ".";
 
     // compose_output_filename treats dir as a directory only if it ends in "/".
     std::string dir_str{ dir };
@@ -2563,7 +2564,7 @@ get_output_absolute_path(std::string_view basename, std::string_view extension,
                                                     std::string{ extension }, cfg);
 
     if(!result.empty() && result.at(0) != '/')
-        return settings::format(fmt::format("{}/{}", pwd, result),
+        return settings::format(fmt::format("{}/{}", base, result),
                                 get_config()->get_tag());
     return result;
 }
@@ -2630,6 +2631,21 @@ get_perfetto_output_filename_with_suffix(std::string_view suffix)
 
     LOG_DEBUG("Path is absolute, returning: '{}'", _val);
     return _val;
+}
+
+std::string
+get_ump_absolute_path()
+{
+    if(!settings_are_configured()) return settings::output_path();
+
+    // Co-locate UMP output with the active backend: rocpd's .db dir when
+    // rocpd is on and trace-cache Perfetto is not; otherwise the Perfetto
+    // file's dir (covers both trace-cache and legacy Perfetto).
+    const auto source =
+        (get_use_rocpd() && !get_caching_perfetto())
+            ? get_database_absolute_path("rocpd", std::to_string(process::get_id()))
+            : get_perfetto_output_filename();
+    return tim::filepath::dirname(source);
 }
 
 bool&

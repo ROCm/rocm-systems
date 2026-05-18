@@ -31,7 +31,7 @@ public:
     template <typename SinkT>
     // Non-owning sink view. The referenced sink object must outlive any
     // unified_memory_processor_t storing this view.
-    output_file_sink_view(SinkT& sink) noexcept
+    explicit output_file_sink_view(SinkT& sink) noexcept
     : m_object{ std::addressof(sink) }
     , m_register_file_impl{ +[](void* obj, std::string path, output_format format) {
         static_cast<SinkT*>(obj)->register_file(std::move(path), format);
@@ -76,8 +76,9 @@ struct migration_stats
     }
     [[nodiscard]] double bandwidth_gbps() const noexcept
     {
-        if(total_time_ns == 0) return 0.0;
-        return static_cast<double>(total_size_bytes) / total_time_ns;
+        // bytes / ns == GB/s (decimal)
+        return total_time_ns > 0 ? static_cast<double>(total_size_bytes) / total_time_ns
+                                 : 0.0;
     }
 };
 
@@ -146,7 +147,7 @@ class unified_memory_processor_t : public processor_t<unified_memory_processor_t
 {
 public:
     unified_memory_processor_t(std::shared_ptr<agent_manager> agent_mgr, int pid,
-                               std::string output_dir, output_file_sink_view output_sink);
+                               output_file_sink_view output_sink);
 
     unified_memory_processor_t(const unified_memory_processor_t&)            = delete;
     unified_memory_processor_t(unified_memory_processor_t&&)                 = delete;

@@ -39,7 +39,8 @@ struct cache_files_t
 enum class format_kind
 {
     rocpd,
-    perfetto
+    perfetto,
+    unified_memory
 };
 
 struct format_t
@@ -64,6 +65,7 @@ struct enabled_formats_t
     [[nodiscard]] enabled_formats_t get_sequential_formats() const;
     [[nodiscard]] bool              is_rocpd_enabled() const;
     [[nodiscard]] bool              is_perfetto_enabled() const;
+    [[nodiscard]] bool              is_unified_memory_enabled() const;
     [[nodiscard]] std::string       names() const;
 };
 
