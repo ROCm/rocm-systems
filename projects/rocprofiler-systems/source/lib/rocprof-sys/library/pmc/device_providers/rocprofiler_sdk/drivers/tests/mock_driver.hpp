@@ -29,6 +29,14 @@ public:
     using agent_id_t                   = rocprofiler_agent_id_t;
     using buffer_id_t                  = rocprofiler_buffer_id_t;
     using status_t                     = rocprofiler_status_t;
+    using user_data_t                  = rocprofiler_user_data_t;
+    using counter_flag_t               = rocprofiler_counter_flag_t;
+
+    static constexpr counter_flag_t flag_none      = ROCPROFILER_COUNTER_FLAG_NONE;
+    static constexpr status_t       status_success = ROCPROFILER_STATUS_SUCCESS;
+    static constexpr status_t       status_error   = ROCPROFILER_STATUS_ERROR;
+    static constexpr status_t       status_hsa_not_loaded =
+        ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED;
 
     static agent_id_t make_agent_id(std::uint64_t handle) { return agent_id_t{ handle }; }
 

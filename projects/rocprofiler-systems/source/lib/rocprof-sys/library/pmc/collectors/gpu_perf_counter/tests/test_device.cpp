@@ -26,8 +26,8 @@ class SdkPmcDeviceTest : public ::testing::Test
 protected:
     std::shared_ptr<MockDriver>        mock_driver;
     std::shared_ptr<rocprofsys::agent> test_agent;
-    rocprofiler_context_id_t           test_context{};
-    rocprofiler_counter_config_id_t    test_profile_config{};
+    MockDriver::context_id_t           test_context{};
+    MockDriver::counter_config_id_t    test_profile_config{};
 
     void SetUp() override
     {
@@ -94,30 +94,30 @@ TEST_F(SdkPmcDeviceTest, SampleWithScalarCounters)
     device<MockDriver> dev(mock_driver, test_context, test_agent, test_profile_config,
                            std::move(meta));
 
-    rocprofiler_counter_record_t records[2];
+    MockDriver::counter_record_t records[2];
     records[0].id            = 10;
     records[0].counter_value = 42.0;
     records[1].id            = 20;
     records[1].counter_value = 100.0;
 
     EXPECT_CALL(*mock_driver, sample_device_counting_service(_, _, _, _, _))
-        .WillOnce([&](rocprofiler_context_id_t, rocprofiler_user_data_t,
-                      rocprofiler_counter_flag_t, rocprofiler_counter_record_t* out,
+        .WillOnce([&](MockDriver::context_id_t, MockDriver::user_data_t,
+                      MockDriver::counter_flag_t, MockDriver::counter_record_t* out,
                       size_t* count) {
             out[0] = records[0];
             out[1] = records[1];
             *count = 2;
-            return ROCPROFILER_STATUS_SUCCESS;
+            return MockDriver::status_success;
         });
 
     EXPECT_CALL(*mock_driver, query_record_counter_id(_, _))
-        .WillOnce([](rocprofiler_counter_record_t record, rocprofiler_counter_id_t* out) {
+        .WillOnce([](MockDriver::counter_record_t record, MockDriver::counter_id_t* out) {
             out->handle = 10;
-            return ROCPROFILER_STATUS_SUCCESS;
+            return MockDriver::status_success;
         })
-        .WillOnce([](rocprofiler_counter_record_t record, rocprofiler_counter_id_t* out) {
+        .WillOnce([](MockDriver::counter_record_t record, MockDriver::counter_id_t* out) {
             out->handle = 20;
-            return ROCPROFILER_STATUS_SUCCESS;
+            return MockDriver::status_success;
         });
 
     enabled_metrics enabled{ {} };
@@ -170,7 +170,7 @@ TEST_F(SdkPmcDeviceTest, SampleWithMultiDimCounters)
     device<MockDriver> dev(mock_driver, test_context, test_agent, test_profile_config,
                            std::move(meta));
 
-    rocprofiler_counter_record_t records[4];
+    MockDriver::counter_record_t records[4];
     for(int i = 0; i < 4; ++i)
     {
         records[i].id            = static_cast<std::uint64_t>(100 + i);
@@ -178,21 +178,21 @@ TEST_F(SdkPmcDeviceTest, SampleWithMultiDimCounters)
     }
 
     EXPECT_CALL(*mock_driver, sample_device_counting_service(_, _, _, _, _))
-        .WillOnce([&](rocprofiler_context_id_t, rocprofiler_user_data_t,
-                      rocprofiler_counter_flag_t, rocprofiler_counter_record_t* out,
+        .WillOnce([&](MockDriver::context_id_t, MockDriver::user_data_t,
+                      MockDriver::counter_flag_t, MockDriver::counter_record_t* out,
                       size_t* count) {
             for(int i = 0; i < 4; ++i)
                 out[i] = records[i];
             *count = 4;
-            return ROCPROFILER_STATUS_SUCCESS;
+            return MockDriver::status_success;
         });
 
     EXPECT_CALL(*mock_driver, query_record_counter_id(_, _))
         .Times(4)
         .WillRepeatedly(
-            [](rocprofiler_counter_record_t record, rocprofiler_counter_id_t* out) {
+            [](MockDriver::counter_record_t record, MockDriver::counter_id_t* out) {
                 out->handle = record.id;
-                return ROCPROFILER_STATUS_SUCCESS;
+                return MockDriver::status_success;
             });
 
     enabled_metrics enabled{ {} };
@@ -224,23 +224,23 @@ TEST_F(SdkPmcDeviceTest, CounterIdDecodedFromInstanceId)
     device<MockDriver> dev(mock_driver, test_context, test_agent, test_profile_config,
                            std::move(meta));
 
-    rocprofiler_counter_record_t record{};
+    MockDriver::counter_record_t record{};
     record.id            = sdk_instance_id;
     record.counter_value = 99.0;
 
     EXPECT_CALL(*mock_driver, sample_device_counting_service(_, _, _, _, _))
-        .WillOnce([&](rocprofiler_context_id_t, rocprofiler_user_data_t,
-                      rocprofiler_counter_flag_t, rocprofiler_counter_record_t* out,
+        .WillOnce([&](MockDriver::context_id_t, MockDriver::user_data_t,
+                      MockDriver::counter_flag_t, MockDriver::counter_record_t* out,
                       size_t* count) {
             out[0] = record;
             *count = 1;
-            return ROCPROFILER_STATUS_SUCCESS;
+            return MockDriver::status_success;
         });
 
     EXPECT_CALL(*mock_driver, query_record_counter_id(_, _))
-        .WillOnce([](rocprofiler_counter_record_t, rocprofiler_counter_id_t* out) {
+        .WillOnce([](MockDriver::counter_record_t, MockDriver::counter_id_t* out) {
             out->handle = plain_counter_handle;
-            return ROCPROFILER_STATUS_SUCCESS;
+            return MockDriver::status_success;
         });
 
     enabled_metrics enabled{ {} };
@@ -262,26 +262,26 @@ TEST_F(SdkPmcDeviceTest, ResultCacheReusedAcrossSamples)
     device<MockDriver> dev(mock_driver, test_context, test_agent, test_profile_config,
                            std::move(meta));
 
-    rocprofiler_counter_record_t record{};
+    MockDriver::counter_record_t record{};
     record.id            = 5;
     record.counter_value = 1.0;
 
     // Two successive sample calls; each must return correct data.
     EXPECT_CALL(*mock_driver, sample_device_counting_service(_, _, _, _, _))
         .Times(2)
-        .WillRepeatedly([&](rocprofiler_context_id_t, rocprofiler_user_data_t,
-                            rocprofiler_counter_flag_t, rocprofiler_counter_record_t* out,
+        .WillRepeatedly([&](MockDriver::context_id_t, MockDriver::user_data_t,
+                            MockDriver::counter_flag_t, MockDriver::counter_record_t* out,
                             size_t* count) {
             out[0] = record;
             *count = 1;
-            return ROCPROFILER_STATUS_SUCCESS;
+            return MockDriver::status_success;
         });
 
     EXPECT_CALL(*mock_driver, query_record_counter_id(_, _))
         .Times(2)
-        .WillRepeatedly([](rocprofiler_counter_record_t, rocprofiler_counter_id_t* out) {
+        .WillRepeatedly([](MockDriver::counter_record_t, MockDriver::counter_id_t* out) {
             out->handle = 5;
-            return ROCPROFILER_STATUS_SUCCESS;
+            return MockDriver::status_success;
         });
 
     enabled_metrics enabled{ {} };
@@ -301,7 +301,7 @@ TEST_F(SdkPmcDeviceTest, SampleFailureReturnsEmpty)
                            {});
 
     EXPECT_CALL(*mock_driver, sample_device_counting_service(_, _, _, _, _))
-        .WillOnce(Return(ROCPROFILER_STATUS_ERROR));
+        .WillOnce(Return(MockDriver::status_error));
 
     enabled_metrics enabled{ {} };
     auto            result = dev.get_gpu_perf_counter_metrics(enabled, 1000000);
@@ -315,11 +315,11 @@ TEST_F(SdkPmcDeviceTest, SampleWithZeroRecords)
                            {});
 
     EXPECT_CALL(*mock_driver, sample_device_counting_service(_, _, _, _, _))
-        .WillOnce([](rocprofiler_context_id_t, rocprofiler_user_data_t,
-                     rocprofiler_counter_flag_t, rocprofiler_counter_record_t*,
+        .WillOnce([](MockDriver::context_id_t, MockDriver::user_data_t,
+                     MockDriver::counter_flag_t, MockDriver::counter_record_t*,
                      size_t* count) {
             *count = 0;
-            return ROCPROFILER_STATUS_SUCCESS;
+            return MockDriver::status_success;
         });
 
     enabled_metrics enabled{ {} };

@@ -118,7 +118,7 @@ make_agent(std::uint64_t handle, size_t device_type_index, const std::string& na
 
 struct counter_setup
 {
-    rocprofiler_counter_id_t id;
+    MockDriver::counter_id_t id;
     const char*              name;
 };
 
@@ -129,22 +129,22 @@ setup_provider_expectations(std::shared_ptr<MockDriver>& mock, std::uint64_t age
 {
     EXPECT_CALL(
         *mock, iterate_agent_supported_counters(
-                   ::testing::Field(&rocprofiler_agent_id_t::handle, agent_handle), _, _))
-        .WillOnce([&counters](rocprofiler_agent_id_t,
-                              rocprofiler_available_counters_cb_t cb, void* user_data) {
-            std::vector<rocprofiler_counter_id_t> ids;
+                   ::testing::Field(&MockDriver::agent_id_t::handle, agent_handle), _, _))
+        .WillOnce([&counters](MockDriver::agent_id_t,
+                              MockDriver::available_counters_cb_t cb, void* user_data) {
+            std::vector<MockDriver::counter_id_t> ids;
             ids.reserve(counters.size());
             for(auto& c : counters)
                 ids.push_back(c.id);
             cb({}, ids.data(), ids.size(), user_data);
-            return ROCPROFILER_STATUS_SUCCESS;
+            return MockDriver::status_success;
         });
 
     for(auto& c : counters)
     {
         EXPECT_CALL(*mock, query_counter_details(::testing::Field(
-                               &rocprofiler_counter_id_t::handle, c.id.handle)))
-            .WillRepeatedly([&c](rocprofiler_counter_id_t) {
+                               &MockDriver::counter_id_t::handle, c.id.handle)))
+            .WillRepeatedly([&c](MockDriver::counter_id_t) {
                 return std::vector<counter_metadata>{
                     { c.id.handle, c.name, "", "", "", false, false, {} }
                 };
@@ -154,32 +154,32 @@ setup_provider_expectations(std::shared_ptr<MockDriver>& mock, std::uint64_t age
     EXPECT_CALL(
         *mock,
         create_counter_config(
-            ::testing::Field(&rocprofiler_agent_id_t::handle, agent_handle), _, _, _))
-        .WillOnce([](rocprofiler_agent_id_t, rocprofiler_counter_id_t*, size_t,
-                     rocprofiler_counter_config_id_t* config_id) {
+            ::testing::Field(&MockDriver::agent_id_t::handle, agent_handle), _, _, _))
+        .WillOnce([](MockDriver::agent_id_t, MockDriver::counter_id_t*, size_t,
+                     MockDriver::counter_config_id_t* config_id) {
             config_id->handle = 200;
-            return ROCPROFILER_STATUS_SUCCESS;
+            return MockDriver::status_success;
         });
 
     EXPECT_CALL(*mock, create_context(_))
-        .WillOnce([context_handle_out](rocprofiler_context_id_t* ctx) {
+        .WillOnce([context_handle_out](MockDriver::context_id_t* ctx) {
             ctx->handle = context_handle_out;
-            return ROCPROFILER_STATUS_SUCCESS;
+            return MockDriver::status_success;
         });
 
     EXPECT_CALL(*mock, configure_device_counting_service(
-                           ::testing::Field(&rocprofiler_context_id_t::handle,
+                           ::testing::Field(&MockDriver::context_id_t::handle,
                                             context_handle_out),
                            _, _, _, _))
-        .WillOnce(Return(ROCPROFILER_STATUS_SUCCESS));
+        .WillOnce(Return(MockDriver::status_success));
 
-    EXPECT_CALL(*mock, start_context(::testing::Field(&rocprofiler_context_id_t::handle,
+    EXPECT_CALL(*mock, start_context(::testing::Field(&MockDriver::context_id_t::handle,
                                                       context_handle_out)))
-        .WillOnce(Return(ROCPROFILER_STATUS_SUCCESS));
+        .WillOnce(Return(MockDriver::status_success));
 
-    EXPECT_CALL(*mock, stop_context(::testing::Field(&rocprofiler_context_id_t::handle,
+    EXPECT_CALL(*mock, stop_context(::testing::Field(&MockDriver::context_id_t::handle,
                                                      context_handle_out)))
-        .WillOnce(Return(ROCPROFILER_STATUS_SUCCESS));
+        .WillOnce(Return(MockDriver::status_success));
 }
 
 // ============================================================================
@@ -198,10 +198,10 @@ protected:
         MockDriverFactory::set_mock(mock);
 
         ON_CALL(*mock, query_record_counter_id(_, _))
-            .WillByDefault([](rocprofiler_counter_record_t record,
-                              rocprofiler_counter_id_t*    counter_id) {
+            .WillByDefault([](MockDriver::counter_record_t record,
+                              MockDriver::counter_id_t*    counter_id) {
                 counter_id->handle = record.id;
-                return ROCPROFILER_STATUS_SUCCESS;
+                return MockDriver::status_success;
             });
         EXPECT_CALL(*mock, query_record_counter_id(_, _)).Times(::testing::AnyNumber());
     }
@@ -222,8 +222,8 @@ TEST_F(SdkPmcCollectorWorkflowTest, SingleGpuWorkflow)
     auto agent = make_agent(42, 0, "GPU 0");
 
     std::vector<counter_setup> counters = {
-        { rocprofiler_counter_id_t{ 10 }, "SQ_WAVES" },
-        { rocprofiler_counter_id_t{ 20 }, "SQ_BUSY_CYCLES" },
+        { MockDriver::counter_id_t{ 10 }, "SQ_WAVES" },
+        { MockDriver::counter_id_t{ 20 }, "SQ_BUSY_CYCLES" },
     };
 
     setup_provider_expectations(mock, 42, counters, /*context=*/100);
@@ -231,18 +231,18 @@ TEST_F(SdkPmcCollectorWorkflowTest, SingleGpuWorkflow)
     auto sample_call_count = std::make_shared<int>(0);
     EXPECT_CALL(
         *mock, sample_device_counting_service(
-                   ::testing::Field(&rocprofiler_context_id_t::handle, 100u), _, _, _, _))
+                   ::testing::Field(&MockDriver::context_id_t::handle, 100u), _, _, _, _))
         .WillRepeatedly(
-            [sample_call_count](rocprofiler_context_id_t, rocprofiler_user_data_t,
-                                rocprofiler_counter_flag_t,
-                                rocprofiler_counter_record_t* out, size_t* count) {
+            [sample_call_count](MockDriver::context_id_t, MockDriver::user_data_t,
+                                MockDriver::counter_flag_t,
+                                MockDriver::counter_record_t* out, size_t* count) {
                 ++(*sample_call_count);
                 out[0].id            = 10;
                 out[0].counter_value = 42.0 * (*sample_call_count);
                 out[1].id            = 20;
                 out[1].counter_value = 99.0 * (*sample_call_count);
                 *count               = 2;
-                return ROCPROFILER_STATUS_SUCCESS;
+                return MockDriver::status_success;
             });
 
     auto provider = std::make_shared<MockProvider>(
@@ -282,43 +282,43 @@ TEST_F(SdkPmcCollectorWorkflowTest, MultiGpuIsolation)
     auto agent1 = make_agent(11, 1, "GPU 1");
 
     std::vector<counter_setup> counters0 = {
-        { rocprofiler_counter_id_t{ 100 }, "SQ_WAVES" },
+        { MockDriver::counter_id_t{ 100 }, "SQ_WAVES" },
     };
     std::vector<counter_setup> counters1 = {
-        { rocprofiler_counter_id_t{ 200 }, "SQ_WAVES" },
+        { MockDriver::counter_id_t{ 200 }, "SQ_WAVES" },
     };
 
     // Agent 0
     EXPECT_CALL(*mock, iterate_agent_supported_counters(
-                           ::testing::Field(&rocprofiler_agent_id_t::handle, 10u), _, _))
-        .WillOnce([&](rocprofiler_agent_id_t, rocprofiler_available_counters_cb_t cb,
+                           ::testing::Field(&MockDriver::agent_id_t::handle, 10u), _, _))
+        .WillOnce([&](MockDriver::agent_id_t, MockDriver::available_counters_cb_t cb,
                       void* ud) {
-            rocprofiler_counter_id_t id = { 100 };
+            MockDriver::counter_id_t id = { 100 };
             cb({}, &id, 1, ud);
-            return ROCPROFILER_STATUS_SUCCESS;
+            return MockDriver::status_success;
         });
 
     // Agent 1
     EXPECT_CALL(*mock, iterate_agent_supported_counters(
-                           ::testing::Field(&rocprofiler_agent_id_t::handle, 11u), _, _))
-        .WillOnce([&](rocprofiler_agent_id_t, rocprofiler_available_counters_cb_t cb,
+                           ::testing::Field(&MockDriver::agent_id_t::handle, 11u), _, _))
+        .WillOnce([&](MockDriver::agent_id_t, MockDriver::available_counters_cb_t cb,
                       void* ud) {
-            rocprofiler_counter_id_t id = { 200 };
+            MockDriver::counter_id_t id = { 200 };
             cb({}, &id, 1, ud);
-            return ROCPROFILER_STATUS_SUCCESS;
+            return MockDriver::status_success;
         });
 
     EXPECT_CALL(*mock, query_counter_details(
-                           ::testing::Field(&rocprofiler_counter_id_t::handle, 100u)))
-        .WillRepeatedly([](rocprofiler_counter_id_t) {
+                           ::testing::Field(&MockDriver::counter_id_t::handle, 100u)))
+        .WillRepeatedly([](MockDriver::counter_id_t) {
             return std::vector<counter_metadata>{
                 { 100, "SQ_WAVES", "", "", "", false, false, {} }
             };
         });
 
     EXPECT_CALL(*mock, query_counter_details(
-                           ::testing::Field(&rocprofiler_counter_id_t::handle, 200u)))
-        .WillRepeatedly([](rocprofiler_counter_id_t) {
+                           ::testing::Field(&MockDriver::counter_id_t::handle, 200u)))
+        .WillRepeatedly([](MockDriver::counter_id_t) {
             return std::vector<counter_metadata>{
                 { 200, "SQ_WAVES", "", "", "", false, false, {} }
             };
@@ -326,54 +326,54 @@ TEST_F(SdkPmcCollectorWorkflowTest, MultiGpuIsolation)
 
     EXPECT_CALL(*mock, create_counter_config(_, _, _, _))
         .Times(2)
-        .WillRepeatedly([](rocprofiler_agent_id_t, rocprofiler_counter_id_t*, size_t,
-                           rocprofiler_counter_config_id_t* config_id) {
+        .WillRepeatedly([](MockDriver::agent_id_t, MockDriver::counter_id_t*, size_t,
+                           MockDriver::counter_config_id_t* config_id) {
             config_id->handle = 300;
-            return ROCPROFILER_STATUS_SUCCESS;
+            return MockDriver::status_success;
         });
 
     EXPECT_CALL(*mock, create_context(_))
-        .WillOnce([](rocprofiler_context_id_t* ctx) {
+        .WillOnce([](MockDriver::context_id_t* ctx) {
             ctx->handle = 50;
-            return ROCPROFILER_STATUS_SUCCESS;
+            return MockDriver::status_success;
         })
-        .WillOnce([](rocprofiler_context_id_t* ctx) {
+        .WillOnce([](MockDriver::context_id_t* ctx) {
             ctx->handle = 51;
-            return ROCPROFILER_STATUS_SUCCESS;
+            return MockDriver::status_success;
         });
 
     EXPECT_CALL(*mock, configure_device_counting_service(_, _, _, _, _))
         .Times(2)
-        .WillRepeatedly(Return(ROCPROFILER_STATUS_SUCCESS));
+        .WillRepeatedly(Return(MockDriver::status_success));
 
     EXPECT_CALL(*mock, start_context(_))
         .Times(2)
-        .WillRepeatedly(Return(ROCPROFILER_STATUS_SUCCESS));
+        .WillRepeatedly(Return(MockDriver::status_success));
     EXPECT_CALL(*mock, stop_context(_))
         .Times(2)
-        .WillRepeatedly(Return(ROCPROFILER_STATUS_SUCCESS));
+        .WillRepeatedly(Return(MockDriver::status_success));
 
     EXPECT_CALL(*mock,
                 sample_device_counting_service(
-                    ::testing::Field(&rocprofiler_context_id_t::handle, 50u), _, _, _, _))
-        .WillRepeatedly([](rocprofiler_context_id_t, rocprofiler_user_data_t,
-                           rocprofiler_counter_flag_t, rocprofiler_counter_record_t* out,
+                    ::testing::Field(&MockDriver::context_id_t::handle, 50u), _, _, _, _))
+        .WillRepeatedly([](MockDriver::context_id_t, MockDriver::user_data_t,
+                           MockDriver::counter_flag_t, MockDriver::counter_record_t* out,
                            size_t* count) {
             out[0].id            = 100;
             out[0].counter_value = 1000.0;
             *count               = 1;
-            return ROCPROFILER_STATUS_SUCCESS;
+            return MockDriver::status_success;
         });
     EXPECT_CALL(*mock,
                 sample_device_counting_service(
-                    ::testing::Field(&rocprofiler_context_id_t::handle, 51u), _, _, _, _))
-        .WillRepeatedly([](rocprofiler_context_id_t, rocprofiler_user_data_t,
-                           rocprofiler_counter_flag_t, rocprofiler_counter_record_t* out,
+                    ::testing::Field(&MockDriver::context_id_t::handle, 51u), _, _, _, _))
+        .WillRepeatedly([](MockDriver::context_id_t, MockDriver::user_data_t,
+                           MockDriver::counter_flag_t, MockDriver::counter_record_t* out,
                            size_t* count) {
             out[0].id            = 200;
             out[0].counter_value = 2000.0;
             *count               = 1;
-            return ROCPROFILER_STATUS_SUCCESS;
+            return MockDriver::status_success;
         });
 
     auto multi_gpu_enabled = enabled_metrics{ {
@@ -414,13 +414,13 @@ TEST_F(SdkPmcCollectorWorkflowTest, SampleFailureProducesEmptyMetrics)
     auto agent = make_agent(42, 0, "GPU 0");
 
     std::vector<counter_setup> counters = {
-        { rocprofiler_counter_id_t{ 10 }, "SQ_WAVES" },
+        { MockDriver::counter_id_t{ 10 }, "SQ_WAVES" },
     };
 
     setup_provider_expectations(mock, 42, counters, /*context=*/100);
 
     EXPECT_CALL(*mock, sample_device_counting_service(_, _, _, _, _))
-        .WillRepeatedly(Return(ROCPROFILER_STATUS_ERROR));
+        .WillRepeatedly(Return(MockDriver::status_error));
 
     auto provider = std::make_shared<MockProvider>(
         std::vector<std::shared_ptr<rocprofsys::agent>>{ agent },

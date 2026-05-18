@@ -8,9 +8,6 @@
 #include "library/pmc/collectors/gpu_perf_counter/types.hpp"
 #include "logger/debug.hpp"
 
-#include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/rocprofiler.h>
-
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
@@ -29,7 +26,7 @@ template <typename Driver>
 class device
 {
 public:
-    device(std::shared_ptr<Driver> driver, rocprofiler_context_id_t context,
+    device(std::shared_ptr<Driver> driver, typename Driver::context_id_t context,
            std::shared_ptr<rocprofsys::agent>   agent,
            typename Driver::counter_config_id_t profile_config,
            std::vector<counter_metadata>        counter_meta)
@@ -76,17 +73,16 @@ public:
         auto rec_count = m_record_buffer.size();
 
         const auto status = m_driver_api->sample_device_counting_service(
-            m_context, {}, ROCPROFILER_COUNTER_FLAG_NONE, m_record_buffer.data(),
-            &rec_count);
+            m_context, {}, Driver::flag_none, m_record_buffer.data(), &rec_count);
 
-        if(status == ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED)
+        if(status == Driver::status_hsa_not_loaded)
         {
             LOG_DEBUG("HSA not loaded for device {} (status={}). Ignoring error.",
                       m_agent->device_type_index, static_cast<int>(status));
             return std::move(m_result_cache);
         }
 
-        if(status != ROCPROFILER_STATUS_SUCCESS)
+        if(status != Driver::status_success)
         {
             LOG_WARNING("Sample failed for device {} (status={})",
                         m_agent->device_type_index, static_cast<int>(status));
@@ -122,7 +118,7 @@ public:
     void start()
     {
         auto status = m_driver_api->start_context(m_context);
-        if(status != ROCPROFILER_STATUS_SUCCESS)
+        if(status != Driver::status_success)
         {
             LOG_WARNING("Failed to start context for device {} (status={})",
                         m_agent->device_type_index, static_cast<int>(status));
@@ -132,7 +128,7 @@ public:
     void stop()
     {
         auto status = m_driver_api->stop_context(m_context);
-        if(status != ROCPROFILER_STATUS_SUCCESS)
+        if(status != Driver::status_success)
         {
             LOG_WARNING("Failed to stop context for device {} (status={})",
                         m_agent->device_type_index, static_cast<int>(status));
@@ -141,7 +137,7 @@ public:
 
 private:
     std::shared_ptr<Driver>                        m_driver_api;
-    rocprofiler_context_id_t                       m_context;
+    typename Driver::context_id_t                  m_context;
     std::shared_ptr<rocprofsys::agent>             m_agent;
     typename Driver::counter_config_id_t           m_profile_config;
     std::vector<counter_metadata>                  m_counter_meta;
