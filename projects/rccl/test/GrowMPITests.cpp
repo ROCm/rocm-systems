@@ -554,4 +554,115 @@ TEST_F(GrowMPITest, Grow_ErrorRecoveryRegrow)
     ASSERT_MPI_TRUE(runAllReduceAndVerify(grownComm_, worldSize));
 }
 
+
+// --- Grow by multiple ranks at once (N-4 -> N), AllReduce verification ---
+// Exercises bootstrapInit multi-root path: offset=parent->nRanks-1, isFirstFromRoot
+// with a larger new-rank segment that spans multiple root zones.
+
+TEST_F(GrowMPITest, Grow_MultiRankJump)
+{
+    constexpr int kJump = 4;
+    if (MPIEnvironment::world_size < kJump + 2) {
+        GTEST_SKIP() << "Grow_MultiRankJump requires at least " << kJump + 2 << " MPI ranks";
+    }
+
+    const int wr        = MPIEnvironment::world_rank;
+    const int worldSize = MPIEnvironment::world_size;
+    const int existing  = worldSize - kJump;   // e.g. 28 with 32 ranks
+    const int newTotal  = worldSize;            // e.g. 32
+
+    // Build initial communicator with (worldSize - kJump) ranks
+    ASSERT_MPI_EQ(ncclSuccess, buildComm(existing, &initialComm_));
+    ASSERT_MPI_TRUE(wr >= existing || initialComm_ != nullptr);
+
+    // Coordinator (rank 0 of existing comm) produces uniqueId; broadcast via MPI
+    ncclUniqueId growId{};
+    if (wr == 0) {
+        ASSERT_EQ(ncclSuccess, ncclCommGetUniqueId(initialComm_, &growId));
+    }
+    MPI_Bcast(&growId, sizeof(growId), MPI_BYTE, 0, MPI_COMM_WORLD);
+
+    // Grow: existing ranks pass nullptr uniqueId (non-boundary) or &growId (boundary/NCCL convention)
+    // New ranks (wr in [existing, newTotal-1]) pass their target rank = wr
+    if (wr < existing) {
+        ASSERT_EQ(ncclSuccess,
+            ncclCommGrow(initialComm_, newTotal, &growId, -1, &grownComm_, nullptr));
+    } else {
+        ASSERT_EQ(ncclSuccess,
+            ncclCommGrow(nullptr, newTotal, &growId, wr, &grownComm_, nullptr));
+    }
+
+    ASSERT_MPI_NE(grownComm_, nullptr);
+
+    // Verify rank count and AllReduce correctness
+    int grownCount = -1;
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommCount(grownComm_, &grownCount));
+    ASSERT_MPI_EQ(grownCount, newTotal);
+
+    ASSERT_MPI_TRUE(runAllReduceAndVerify(grownComm_, newTotal));
+}
+
+// --- GetUniqueId called twice on same parent; verify handles have distinct magic ---
+// Exercises the childCount-based magic chain: each call to ncclCommGetUniqueId must
+// produce a unique handle so concurrent grows don't collide.
+
+TEST_F(GrowMPITest, GetUniqueId_DistinctHandles)
+{
+    if (MPIEnvironment::world_size < 4) {
+        GTEST_SKIP() << "GetUniqueId_DistinctHandles requires at least 4 MPI ranks";
+    }
+
+    const int wr        = MPIEnvironment::world_rank;
+    const int worldSize = MPIEnvironment::world_size;
+    const int existing  = worldSize - 2;   // leave 2 slots for two sequential grows
+
+    ASSERT_MPI_EQ(ncclSuccess, buildComm(existing, &initialComm_));
+    ASSERT_MPI_TRUE(wr >= existing || initialComm_ != nullptr);
+
+    // --- First GetUniqueId call ---
+    ncclUniqueId growId1{};
+    if (wr == 0) {
+        ASSERT_EQ(ncclSuccess, ncclCommGetUniqueId(initialComm_, &growId1));
+    }
+    MPI_Bcast(&growId1, sizeof(growId1), MPI_BYTE, 0, MPI_COMM_WORLD);
+
+    // Use growId1 to perform first grow (N-2 -> N-1)
+    const int phase1 = existing + 1;
+    if (wr < existing) {
+        ASSERT_EQ(ncclSuccess,
+            ncclCommGrow(initialComm_, phase1, &growId1, -1, &midComm_, nullptr));
+    } else if (wr == existing) {
+        ASSERT_EQ(ncclSuccess,
+            ncclCommGrow(nullptr, phase1, &growId1, existing, &midComm_, nullptr));
+    }
+    ASSERT_MPI_TRUE(wr > existing || midComm_ != nullptr);
+
+    // --- Second GetUniqueId call on midComm_ ---
+    ncclUniqueId growId2{};
+    if (wr == 0) {
+        ASSERT_EQ(ncclSuccess, ncclCommGetUniqueId(midComm_, &growId2));
+    }
+    MPI_Bcast(&growId2, sizeof(growId2), MPI_BYTE, 0, MPI_COMM_WORLD);
+
+    // The two handles must have different magic (childCount was bumped between calls)
+    // Compare the first 8 bytes which hold the magic field
+    uint64_t magic1 = 0, magic2 = 0;
+    static_assert(sizeof(ncclUniqueId) >= 8, "ncclUniqueId too small");
+    memcpy(&magic1, &growId1, sizeof(magic1));
+    memcpy(&magic2, &growId2, sizeof(magic2));
+    ASSERT_MPI_NE(magic1, magic2);
+
+    // Use growId2 for second grow (N-1 -> N) to confirm handle is functional
+    const int phase2 = worldSize;
+    if (wr < phase1) {
+        ASSERT_EQ(ncclSuccess,
+            ncclCommGrow(midComm_, phase2, &growId2, -1, &grownComm_, nullptr));
+    } else if (wr == existing + 1) {
+        ASSERT_EQ(ncclSuccess,
+            ncclCommGrow(nullptr, phase2, &growId2, wr, &grownComm_, nullptr));
+    }
+    ASSERT_MPI_NE(grownComm_, nullptr);
+    ASSERT_MPI_TRUE(runAllReduceAndVerify(grownComm_, phase2));
+}
+
 #endif // MPI_TESTS_ENABLED
