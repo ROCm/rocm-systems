@@ -109,7 +109,9 @@ static uint32_t get_hwreg_size_per_cu(uint32_t gfxv)
 {
 	uint32_t hwreg_size = 0;
 
-	if (gfxv < GFX_VERSION_GFX1250)
+	if (gfxv == GFX_VERSION_GFX1250)
+		hwreg_size = 0x8000; /* 512 bytes per wave, 64 waves per CU */
+	else
 		hwreg_size = 0x1000; /* 128 bytes per wave, 32 waves per CU */
 
 	assert(hwreg_size);
@@ -133,7 +135,8 @@ uint32_t hsakmt_get_vgpr_size_per_cu(uint32_t gfxv)
 		vgpr_size = 0x40000;
 	else if (gfxv <= GFX_VERSION_GFX1201)
 		vgpr_size = 0x60000;
-
+	else if (gfxv <= GFX_VERSION_GFX1250)
+		vgpr_size = 0x80000;
 	assert(vgpr_size);
 
 	return vgpr_size;
@@ -145,6 +148,8 @@ uint32_t hsakmt_get_sgpr_size_per_cu(uint32_t gfxv)
 
 	if (gfxv < GFX_VERSION_GFX1250)
 		sgpr_size = 0x4000;
+	else if (gfxv == GFX_VERSION_GFX1250)
+		sgpr_size = 0x8000;
 
 	assert(sgpr_size);
 
