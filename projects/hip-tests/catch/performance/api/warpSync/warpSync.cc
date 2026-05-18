@@ -96,7 +96,7 @@ __global__ void reduceOpSync(T* __restrict__ output, const T* __restrict__ input
   int idx = threadIdx.x + blockIdx.x * kBlockDim;
   T result;
 
-  if (mask & (1ul << __lane_id())) {
+  if (mask & (1ull << __lane_id())) {
     if constexpr (std::is_same<Op<T>, std::plus<T>>::value)
       result = __reduce_add_sync(mask, input[idx]);
     else if constexpr (std::is_same<Op<T>, MinOp<T>>::value)
@@ -116,7 +116,7 @@ __global__ void reduceOpSync(T* __restrict__ output, const T* __restrict__ input
   }
 }
 
-template <size_t TileSize, bool ExcludeFirst, class Functor, class T, AggregationType aggType>
+template <size_t TileSize, class Functor, class T, AggregationType aggType>
 __global__ void reduceCoop(T* __restrict__ output, const T* __restrict__ input)
 {
   namespace cg = cooperative_groups;
@@ -126,12 +126,6 @@ __global__ void reduceCoop(T* __restrict__ output, const T* __restrict__ input)
   int idx = threadIdx.x + blockIdx.x * kBlockDim;
   const int numTiles = warpSize / TileSize;
   int laneId = threadIdx.x % warpSize;
-
-  if constexpr (ExcludeFirst) {
-    if (laneId == 0) {
-      return;
-    }
-  }
 
   if constexpr (aggType == AggregationType::Reduce) {
     result = cg::reduce(mytile, input[idx], Functor());
@@ -237,8 +231,8 @@ void checkResults(T* d_lhs, T* d_rhs,
 
 // in this case, instead of using masks, the TileSize would define the mask
 // at compile time
-template <size_t TileSize, bool ExcludeFirst, class T, template <typename> class Op, AggregationType aggType> class CoopBenchmark
-  : public Benchmark<CoopBenchmark<TileSize, ExcludeFirst, T, Op, aggType>> {
+template <size_t TileSize, class T, template <typename> class Op, AggregationType aggType> class CoopBenchmark
+  : public Benchmark<CoopBenchmark<TileSize, T, Op, aggType>> {
 public:
   void operator()(T* output, const T* input, int numItems)
   {
@@ -251,17 +245,17 @@ public:
 
     TIMED_SECTION(kTimerTypeEvent) {
       if constexpr (std::is_same<Op<T>, std::plus<T>>::value) {
-        reduceCoop<TileSize, ExcludeFirst, cg::plus<T>, T, aggType><<<gridDim, blockDim>>>(output, input);
+        reduceCoop<TileSize, cg::plus<T>, T, aggType><<<gridDim, blockDim>>>(output, input);
       } else if constexpr (std::is_same<Op<T>, MinOp<T>>::value) {
-        reduceCoop<TileSize, ExcludeFirst, cg::less<T>, T, aggType><<<gridDim, blockDim>>>(output, input);
+        reduceCoop<TileSize, cg::less<T>, T, aggType><<<gridDim, blockDim>>>(output, input);
       } else if constexpr (std::is_same<Op<T>, MaxOp<T>>::value) {
-        reduceCoop<TileSize, ExcludeFirst, cg::greater<T>, T, aggType><<<gridDim, blockDim>>>(output, input);
+        reduceCoop<TileSize, cg::greater<T>, T, aggType><<<gridDim, blockDim>>>(output, input);
       } else if constexpr (std::is_same<Op<T>, AndOp<T>>::value) {
-        reduceCoop<TileSize, ExcludeFirst, cg::bit_and<T>, T, aggType><<<gridDim, blockDim>>>(output, input);
+        reduceCoop<TileSize, cg::bit_and<T>, T, aggType><<<gridDim, blockDim>>>(output, input);
       } else if constexpr (std::is_same<Op<T>, OrOp<T>>::value) {
-        reduceCoop<TileSize, ExcludeFirst, cg::bit_or<T>, T, aggType><<<gridDim, blockDim>>>(output, input);
+        reduceCoop<TileSize, cg::bit_or<T>, T, aggType><<<gridDim, blockDim>>>(output, input);
       } else if constexpr (std::is_same<Op<T>, XorOp<T>>::value) {
-        reduceCoop<TileSize, ExcludeFirst, cg::bit_xor<T>, T, aggType><<<gridDim, blockDim>>>(output, input);
+        reduceCoop<TileSize, cg::bit_xor<T>, T, aggType><<<gridDim, blockDim>>>(output, input);
       } else {
         static_assert(std::is_void<T>::value, "Unsupported operator");
       }
@@ -321,23 +315,23 @@ void benchmarkCoop(LinearAllocGuard<T>* d_outputCoop,
 
     if (mask.second == (fullMask & warpMask)) {
       if (wavefrontSize == 64) {
-        CoopBenchmark<64, false, T, Op, aggType> benchmark;
+        CoopBenchmark<64, T, Op, aggType> benchmark;
         benchmark.Run((d_outputCoop++)->ptr(), d_input.ptr(), numItems);
       } else {
-        CoopBenchmark<32, false, T, Op, aggType> benchmark;
+        CoopBenchmark<32, T, Op, aggType> benchmark;
         benchmark.Run((d_outputCoop++)->ptr(), d_input.ptr(), numItems);
       }
     } else if (wavefrontSize == 64 && mask.second == (halfHighBitsOn & warpMask)) {
-      CoopBenchmark<32, false, T, Op, aggType> benchmark;
+      CoopBenchmark<32, T, Op, aggType> benchmark;
       benchmark.Run((d_outputCoop++)->ptr(), d_input.ptr(), numItems);
     } else if (mask.second == (high16BitsOn & warpMask)) {
-      CoopBenchmark<16, false, T, Op, aggType> benchmark;
+      CoopBenchmark<16, T, Op, aggType> benchmark;
       benchmark.Run((d_outputCoop++)->ptr(), d_input.ptr(), numItems);
     } else if (mask.second == (high8BitsOn & warpMask)) {
-      CoopBenchmark<8, false, T, Op, aggType> benchmark;
+      CoopBenchmark<8, T, Op, aggType> benchmark;
       benchmark.Run((d_outputCoop++)->ptr(), d_input.ptr(), numItems);
     } else if (mask.second == (high4BitsOn & warpMask)) {
-      CoopBenchmark<4, false, T, Op, aggType> benchmark;
+      CoopBenchmark<4, T, Op, aggType> benchmark;
       benchmark.Run((d_outputCoop++)->ptr(), d_input.ptr(), numItems);
     }
   }
