@@ -120,6 +120,7 @@ class IpcOnImpl {
     pes_with_ipc_avail = other.pes_with_ipc_avail;
     ipc_first_pe = other.ipc_first_pe;   // #5657 — add if members exist on class
     ipc_stride = other.ipc_stride;         // #5657
+  }
 
   void assignSdmaChannel([[maybe_unused]] unsigned int ctx_id) {}
 
