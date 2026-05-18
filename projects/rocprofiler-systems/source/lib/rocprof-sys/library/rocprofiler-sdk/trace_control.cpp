@@ -174,12 +174,12 @@ trace_control::shutdown()
 }
 
 void
-trace_control::register_region_pauser_resume_callbacks(callback_t start_callback,
-                                                       callback_t stop_callback)
+trace_control::register_region_pause_resume_callbacks(callback_t resume_callback,
+                                                      callback_t pause_callback)
 {
     std::scoped_lock const lk{ m_callback_mutex };
-    m_resume_callbacks.push_back(std::move(start_callback));
-    m_pause_callbacks.push_back(std::move(stop_callback));
+    m_resume_callbacks.push_back(std::move(resume_callback));
+    m_pause_callbacks.push_back(std::move(pause_callback));
 }
 
 bool

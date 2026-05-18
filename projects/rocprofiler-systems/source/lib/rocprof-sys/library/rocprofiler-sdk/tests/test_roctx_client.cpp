@@ -172,8 +172,8 @@ protected:
         auto                 client = std::make_unique<roctx_client_t>(config);
 
         auto ctrl = client->get_controller();
-        ctrl->register_region_pauser_resume_callbacks([this]() { start_count++; },
-                                                      [this]() { stop_count++; });
+        ctrl->register_region_pause_resume_callbacks([this]() { start_count++; },
+                                                     [this]() { stop_count++; });
 
         return client;
     }
@@ -716,7 +716,7 @@ protected:
     {
         const roctx_config_t config{ true, false, false, false, regions };
         auto                 client = std::make_unique<roctx_client_t>(config);
-        client->get_controller()->register_region_pauser_resume_callbacks(
+        client->get_controller()->register_region_pause_resume_callbacks(
             [this]() { start_count++; }, [this]() { stop_count++; });
         return client;
     }

@@ -30,8 +30,8 @@ public:
 
     void shutdown();
 
-    void register_region_pauser_resume_callbacks(callback_t resume_callback,
-                                                 callback_t pause_callback);
+    void register_region_pause_resume_callbacks(callback_t resume_callback,
+                                                callback_t pause_callback);
 
     bool region_filter_active() const
     {
