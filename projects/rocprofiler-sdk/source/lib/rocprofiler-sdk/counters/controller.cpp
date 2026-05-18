@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/counters/controller.hpp"
 #include "lib/common/environment.hpp"
+#include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
@@ -47,25 +48,54 @@ CounterController::CounterController()
     rocprofiler::counters::check_installed_firmware_restrictions();
 
     // Check if power_dpm_force_performance_level is set to profile_standard
-    // for all GPU agents. Navi3x requires profile_standard for stable counter collection.
-    for(const auto* agent : agent::get_agents()) {
-        if(!agent || agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
+    // for GPU agents that support counter collection. gfx11+ (Navi3x) requires
+    // profile_standard for stable counter collection; gfx10 and below do not.
+    constexpr auto gfx_version_major_scale   = 10000;
+    constexpr auto gfx_version_component_mod = 100;
+    constexpr auto min_gfx_major_power_check = 11;
 
-        auto card_num = agent->drm_render_minor - 128;
-        auto perf_path = fmt::format(
-            "/sys/class/drm/card{}/device/power_dpm_force_performance_level", card_num);
+    for(const auto* agent : agent::get_agents())
+    {
+        if(!agent || agent->type != ROCPROFILER_AGENT_TYPE_GPU ||
+           agent::get_agent_cache(agent) == nullptr)
+            continue;
 
-        std::ifstream perf_file(perf_path);
-        if(!perf_file.is_open()) continue;
+        auto gfx_major =
+            (agent->gfx_target_version / gfx_version_major_scale) % gfx_version_component_mod;
+        if(gfx_major < min_gfx_major_power_check) continue;
+
+        auto card_num  = agent->drm_render_minor - drm_render_node_minor_offset;
+        auto perf_path = common::filesystem::path{"/sys/class/drm"} /
+                         fmt::format("card{}", card_num) / "device" /
+                         "power_dpm_force_performance_level";
+
+        if(!common::filesystem::exists(perf_path)) continue;
+        std::ifstream perf_file(perf_path.string());
+        if(!perf_file.is_open())
+        {
+            ROCP_WARNING << fmt::format(
+                "Could not open path {} to get power_dpm_force_performance_level. ",
+                perf_path.string());
+            continue;
+        }
 
         std::string perf_level;
         std::getline(perf_file, perf_level);
-
-        if(!perf_level.empty() && perf_level != "profile_standard")
+        if(perf_level.empty())
+        {
+            ROCP_WARNING << fmt::format(
+                "Could not get power_dpm_force_performance_level for Agent {} (card{}). "
+                "Set to one of 'profile_standard, low, high, manual' for stable counter "
+                "collection.",
+                agent->node_id,
+                card_num);
+        }
+        else if(perf_level == "auto")
         {
             ROCP_WARNING << fmt::format(
                 "Agent {} (card{}) power_dpm_force_performance_level is '{}'. "
-                "Set to 'profile_standard' for stable counter collection.",
+                "Set to one of 'profile_standard, low, high, manual' for stable counter "
+                "collection.",
                 agent->node_id,
                 card_num,
                 perf_level);
