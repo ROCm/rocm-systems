@@ -292,13 +292,13 @@ __host__ void IpcOnImpl::ipcHostStop() {
 __host__ void IpcSdmaImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
                                        MPI_Comm thread_comm) {
   IpcOnImpl::ipcHostInit(my_pe, heap_bases, thread_comm);
-  sdmaImpl_.sdmaHostInit(my_pe, shm_size, thread_comm);
+  sdmaImpl_.sdmaHostInit(my_pe, shm_size, shm_rank);
 }
 
 __host__ void IpcSdmaImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
                                        TcpBootstrap *bootstrap) {
   IpcOnImpl::ipcHostInit(my_pe, heap_bases, bootstrap);
-  sdmaImpl_.sdmaHostInit(my_pe, shm_size, bootstrap);
+  sdmaImpl_.sdmaHostInit(my_pe, shm_size, shm_rank);
 }
 
 __host__ void IpcSdmaImpl::ipcHostStop() {

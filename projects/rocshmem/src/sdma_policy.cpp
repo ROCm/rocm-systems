@@ -36,19 +36,10 @@ namespace rocshmem {
 
 #if defined(USE_SDMA)
 
-__host__ void SdmaImpl::sdmaHostInit(int pe, [[maybe_unused]] int num_pes, MPI_Comm comm) {
+__host__ void SdmaImpl::sdmaHostInit(int pe, int num_pes, int rank) {
   my_pe = pe;
-
-  // Get local communicator for shared memory
-  MPI_Comm shmcomm;
-  mpilib_ftable_.Comm_split_type(comm, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &shmcomm);
-
-  int local_size;
-  mpilib_ftable_.Comm_size(shmcomm, &local_size);
-  shm_size = local_size;
-
-  mpilib_ftable_.Comm_rank(shmcomm, &local_rank);
-  mpilib_ftable_.Comm_free(&shmcomm);
+  shm_size = num_pes;
+  local_rank = rank;
 
   // Read configuration from environment variables
   sdmaEnabled = static_cast<bool>(envvar::sdma::enabled);
@@ -105,70 +96,6 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, [[maybe_unused]] int num_pes, MPI_C
   delete[] handles_h;
 
 }
-
-
-__host__ void SdmaImpl::sdmaHostInit(int pe, [[maybe_unused]] int num_pes, TcpBootstrap* bootstrap) {
-  my_pe = pe;
-  shm_size = bootstrap->getNranksPerNode();
-  auto local_ranks = bootstrap->getLocalRanks();
-  local_rank = std::find(local_ranks.begin(), local_ranks.end(), pe) - local_ranks.begin();
-
-  // Read configuration from environment variables
-  sdmaEnabled = static_cast<bool>(envvar::sdma::enabled);
-  sdmaThreshold = static_cast<size_t>(envvar::sdma::threshold);
-  numChannels = static_cast<int>(envvar::sdma::num_channels);
-  if (numChannels < 1 || numChannels > 8) {
-    LOG_ERROR_ABORT("ROCSHMEM_SDMA_NUM_CHANNELS=%d is out of range [1, 8]", numChannels);
-  }
-
-  if (!sdmaEnabled) {
-    LOG_INFO("SDMA disabled at runtime (ROCSHMEM_SDMA_ENABLED=0)");
-    return;
-  }
-
-  LOG_INFO("SDMA init with threshold=%zu, channels=%d, local_size=%d",
-           sdmaThreshold, numChannels, shm_size);
-
-  // Initialize the Anvil library
-  anvil::anvil.init();
-
-  // Get current device
-  int deviceId;
-  CHECK_HIP(hipGetDevice(&deviceId));
-
-  // Create SDMA connections to all local PEs including self
-  for (int i = 0; i < shm_size; i++) {
-    if (i != deviceId) {
-      anvil::EnablePeerAccess(deviceId, i);
-    }
-    anvil::anvil.connect(deviceId, i, numChannels);
-  }
-
-  // Total number of handles: shm_size * numChannels
-  // Indexed as: deviceHandles_d[local_pe * numChannels + channel_idx]
-  int total_handles = shm_size * numChannels;
-
-  // Allocate device-side array to hold SDMA queue device handles
-  CHECK_HIP(hipMalloc(&deviceHandles_d,
-                      total_handles * sizeof(anvil::SdmaQueueDeviceHandle*)));
-
-  // Copy device handles to device memory
-  anvil::SdmaQueueDeviceHandle** handles_h =
-      new anvil::SdmaQueueDeviceHandle*[total_handles];
-  for (int i = 0; i < shm_size; i++) {
-    for (int ch = 0; ch < numChannels; ch++) {
-      int idx = i * numChannels + ch;
-      anvil::SdmaQueue* queue = anvil::anvil.getSdmaQueue(deviceId, i, ch);
-      handles_h[idx] = queue ? queue->deviceHandle() : nullptr;
-    }
-  }
-  CHECK_HIP(hipMemcpy(deviceHandles_d, handles_h,
-                      total_handles * sizeof(anvil::SdmaQueueDeviceHandle*),
-                      hipMemcpyHostToDevice));
-  delete[] handles_h;
-
-}
-
 
 __host__ void SdmaImpl::sdmaHostStop() {
   LOG_TRACE("SDMA stop");

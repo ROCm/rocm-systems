@@ -28,8 +28,6 @@
 #include <hip/hip_runtime.h>
 
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
-#include "mpi_instance.hpp"
-#include "bootstrap/bootstrap.hpp"
 #include "util.hpp"
 
 #if defined(USE_SDMA)
@@ -60,8 +58,7 @@ class SdmaImpl {
   int local_rank{0};
 
   // Host initialization (called from IpcOnImpl::ipcHostInit)
-  __host__ void sdmaHostInit(int pe, int num_pes, MPI_Comm comm);
-  __host__ void sdmaHostInit(int pe, int num_pes, TcpBootstrap* bootstrap);
+  __host__ void sdmaHostInit(int pe, int num_pes, int local_rank);
   __host__ void sdmaHostStop();
 
   // Device-side copy with optional wavefront-affine channel spreading.
