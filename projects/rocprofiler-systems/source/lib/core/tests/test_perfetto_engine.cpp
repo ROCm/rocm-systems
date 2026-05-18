@@ -162,40 +162,66 @@ TEST(perfetto_engine_cached, start_then_stop_with_no_emission_drains_empty)
     EXPECT_TRUE(sink.records().empty());
 }
 
+// collect_packet_bytes wraps each raw TracePacket in the Trace.packets
+// length-delimited header (tag 0x0A + varint(size)). These helpers
+// compute the expected framed byte sequence so tests stay readable.
+namespace
+{
+std::vector<char>
+frame_packet(const std::vector<char>& payload)
+{
+    std::vector<char> out;
+    out.reserve(payload.size() + 2);
+    out.push_back(static_cast<char>(0x0A));  // field 1, wire type 2
+    std::size_t v = payload.size();
+    while(v >= 0x80)
+    {
+        out.push_back(static_cast<char>((v & 0x7F) | 0x80));
+        v >>= 7;
+    }
+    out.push_back(static_cast<char>(v));
+    out.insert(out.end(), payload.begin(), payload.end());
+    return out;
+}
+}  // namespace
+
 TEST(perfetto_engine_cached, drain_one_source_one_record)
 {
     // Simulate one source emitting bytes keyed pid=42; engine.stop() must
-    // produce exactly one drained record with those bytes.
+    // produce exactly one drained record whose contents are the original
+    // payload wrapped in the Trace.packets length-delimited frame.
     rocprofsys::core::perfetto_engine engine{ make_test_config() };
     engine.init_sdk();
 
     rocprofsys::core::recording_sink sink;
     engine.start(rocprofsys::core::perfetto_engine::mode::cached_interceptor, sink);
 
-    simulate_interceptor_emit(engine, 42, { 'p', 'a', 'c', 'k', 'e', 't' });
+    const std::vector<char> payload{ 'p', 'a', 'c', 'k', 'e', 't' };
+    simulate_interceptor_emit(engine, 42, payload);
 
     engine.stop();
 
     ASSERT_EQ(sink.records().size(), 1u);
     EXPECT_EQ(sink.records()[0].first, 42);
-    EXPECT_EQ(sink.records()[0].second,
-              (std::vector<char>{ 'p', 'a', 'c', 'k', 'e', 't' }));
+    EXPECT_EQ(sink.records()[0].second, frame_packet(payload));
     EXPECT_TRUE(sink.finalized());
 }
 
 TEST(perfetto_engine_cached, drain_two_sources_no_cross_bleed)
 {
     // Two sources with different pids; engine.stop() must produce two
-    // records, each containing only its source's bytes (no cross-pid
-    // bleed in the engine's per-pid collector).
+    // records, each containing only its source's framed bytes (no
+    // cross-pid bleed in the engine's per-pid collector).
     rocprofsys::core::perfetto_engine engine{ make_test_config() };
     engine.init_sdk();
 
     rocprofsys::core::recording_sink sink;
     engine.start(rocprofsys::core::perfetto_engine::mode::cached_interceptor, sink);
 
-    simulate_interceptor_emit(engine, 101, { 'a', 'a', 'a' });
-    simulate_interceptor_emit(engine, 202, { 'b', 'b' });
+    const std::vector<char> payload_a{ 'a', 'a', 'a' };
+    const std::vector<char> payload_b{ 'b', 'b' };
+    simulate_interceptor_emit(engine, 101, payload_a);
+    simulate_interceptor_emit(engine, 202, payload_b);
 
     engine.stop();
 
@@ -205,30 +231,35 @@ TEST(perfetto_engine_cached, drain_two_sources_no_cross_bleed)
     std::sort(got.begin(), got.end(),
               [](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
     EXPECT_EQ(got[0].first, 101);
-    EXPECT_EQ(got[0].second, (std::vector<char>{ 'a', 'a', 'a' }));
+    EXPECT_EQ(got[0].second, frame_packet(payload_a));
     EXPECT_EQ(got[1].first, 202);
-    EXPECT_EQ(got[1].second, (std::vector<char>{ 'b', 'b' }));
+    EXPECT_EQ(got[1].second, frame_packet(payload_b));
     EXPECT_TRUE(sink.finalized());
 }
 
 TEST(perfetto_engine_cached, multiple_emits_same_pid_concatenate)
 {
     // Two emits for the same pid must concatenate into a single drained
-    // record — matches how OnTracePacket appends packet-after-packet into
-    // the per-pid byte buffer.
+    // record — each emit's bytes get their own length-delimited frame
+    // header, and concatenation forms a valid Trace proto.
     rocprofsys::core::perfetto_engine engine{ make_test_config() };
     engine.init_sdk();
 
     rocprofsys::core::recording_sink sink;
     engine.start(rocprofsys::core::perfetto_engine::mode::cached_interceptor, sink);
 
-    simulate_interceptor_emit(engine, 7, { '1', '2' });
-    simulate_interceptor_emit(engine, 7, { '3', '4', '5' });
+    const std::vector<char> first{ '1', '2' };
+    const std::vector<char> second{ '3', '4', '5' };
+    simulate_interceptor_emit(engine, 7, first);
+    simulate_interceptor_emit(engine, 7, second);
 
     engine.stop();
 
     ASSERT_EQ(sink.records().size(), 1u);
     EXPECT_EQ(sink.records()[0].first, 7);
-    EXPECT_EQ(sink.records()[0].second,
-              (std::vector<char>{ '1', '2', '3', '4', '5' }));
+
+    auto expected = frame_packet(first);
+    auto second_framed = frame_packet(second);
+    expected.insert(expected.end(), second_framed.begin(), second_framed.end());
+    EXPECT_EQ(sink.records()[0].second, expected);
 }

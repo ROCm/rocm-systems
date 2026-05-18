@@ -5,6 +5,8 @@
 
 #include "core/agent_manager.hpp"
 #include "core/config.hpp"
+#include "core/perfetto_engine.hpp"
+#include "core/track_registry.hpp"
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/perfetto_processor.hpp"
@@ -53,7 +55,9 @@ sum_storage_bytes(const std::vector<std::shared_ptr<data::processor_config_t>>& 
 configure_processors(const std::shared_ptr<sample_processor_t>&       _coordinator,
                      const std::shared_ptr<data::processor_config_t>& _config,
                      const data::enabled_formats_t&                   _formats,
-                     output_file_registry&                            _registry)
+                     output_file_registry&                            _registry,
+                     core::perfetto_engine*      _engine,
+                     rocprofsys::track_registry* _tracks)
 {
     data::processor_storage_t storage;
     if(_formats.is_rocpd_enabled())
@@ -67,7 +71,7 @@ configure_processors(const std::shared_ptr<sample_processor_t>&       _coordinat
     {
         storage.perfetto_processor = std::make_shared<perfetto_processor_t>(
             _config->_metadata_registry, _config->_agent_manager, _config->_pid,
-            _config->_ppid, _registry);
+            _config->_ppid, _registry, _engine, _tracks);
         _coordinator->add_handler(*storage.perfetto_processor);
     }
 
@@ -87,7 +91,9 @@ process_buffered_storage(const std::shared_ptr<data::processor_config_t>& _confi
                          const std::string&             _storage_filename,
                          const data::enabled_formats_t& _formats,
                          output_file_registry&          _registry,
-                         progress::progress_callback    _progress_cb)
+                         progress::progress_callback    _progress_cb,
+                         core::perfetto_engine*         _engine,
+                         rocprofsys::track_registry*    _tracks)
 {
     LOG_DEBUG("Processing buffered storage: {} for pid={}", _storage_filename,
               _config->_pid);
@@ -97,7 +103,7 @@ process_buffered_storage(const std::shared_ptr<data::processor_config_t>& _confi
     // returned processors as handlers on _coordinator. Holding _storage in scope
     // keeps those processors alive until the parse + finalize is done.
     [[maybe_unused]] auto _storage =
-        configure_processors(_coordinator, _config, _formats, _registry);
+        configure_processors(_coordinator, _config, _formats, _registry, _engine, _tracks);
     storage_parser_t _parser(_storage_filename);
 
     _coordinator->prepare_for_processing();
@@ -121,6 +127,14 @@ post_processor::post_processor(progress::tracker&    tracker,
 : m_tracker(tracker)
 , m_registry(registry)
 {}
+
+void
+post_processor::set_perfetto_engine(core::perfetto_engine*      engine,
+                                    rocprofsys::track_registry* tracks) noexcept
+{
+    m_engine = engine;
+    m_tracks = tracks;
+}
 
 void
 post_processor::process(
@@ -147,7 +161,8 @@ post_processor::run_sequential(
         auto _progress_cb = m_tracker.begin(
             fmt::format("Generating trace-cache output for process [{}]", cfg->_pid),
             file_size_or_zero(_filename));
-        process_buffered_storage(cfg, _filename, formats, m_registry, _progress_cb);
+        process_buffered_storage(cfg, _filename, formats, m_registry, _progress_cb,
+                                 m_engine, m_tracks);
     }
     LOG_DEBUG("Sequential processing completed");
 }
@@ -173,7 +188,8 @@ post_processor::run_multithreaded(
         processing_threads.emplace_back([this, cfg, &formats, _progress_cb] {
             const auto _filename =
                 utility::get_buffered_storage_filename(cfg->_ppid, cfg->_pid);
-            process_buffered_storage(cfg, _filename, formats, m_registry, _progress_cb);
+            process_buffered_storage(cfg, _filename, formats, m_registry, _progress_cb,
+                                 m_engine, m_tracks);
         });
     }
 

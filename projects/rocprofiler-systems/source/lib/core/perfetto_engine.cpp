@@ -9,6 +9,7 @@
 #include "logger/debug.hpp"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstring>
 #include <exception>
@@ -221,12 +222,20 @@ perfetto_engine::init_sdk()
         ::perfetto::Tracing::Initialize(args);
         ::perfetto::TrackEvent::Register();
 
-        ::perfetto::InterceptorDescriptor desc;
-        desc.set_name(k_cached_interceptor_name);
-        cached_interceptor::Register(desc);
-
         impl::s_sdk_init_succeeded = true;
     });
+
+    // Interceptor registration lives OUTSIDE the SDK-init call_once: the
+    // SDK's TracingMuxerImpl::RegisterInterceptor is idempotent (it
+    // returns early when the name already exists), but our call_once
+    // would otherwise prevent a second engine instance (e.g. cached
+    // mode after a live engine already initialized the SDK) from ever
+    // requesting registration. Calling Register() per engine.init_sdk()
+    // is cheap and guarantees the interceptor is available regardless
+    // of which engine instance was first.
+    ::perfetto::InterceptorDescriptor desc;
+    desc.set_name(k_cached_interceptor_name);
+    cached_interceptor::Register(desc);
 }
 
 void
@@ -442,8 +451,27 @@ perfetto_engine::collect_packet_bytes(int pid, const void* data, std::size_t siz
 {
     if(data == nullptr || size == 0) return;
 
+    // Wrap each raw TracePacket in the length-delimited Trace.packets
+    // field header so concatenation forms a valid Trace proto.
+    // Trace.packets has field number 1, wire type 2 (LEN). Tag byte =
+    // (1 << 3) | 2 = 0x0A. Length is varint-encoded.
+    std::array<char, 11> header{};
+    header[0]      = 0x0A;
+    std::size_t hl = 1;
+    {
+        std::size_t v = size;
+        while(v >= 0x80)
+        {
+            header[hl++] = static_cast<char>((v & 0x7F) | 0x80);
+            v >>= 7;
+        }
+        header[hl++] = static_cast<char>(v);
+    }
+
     std::lock_guard<std::mutex> lk{ p_->collector_mutex };
     auto&                       bytes = p_->collected_bytes[pid];
+    bytes.reserve(bytes.size() + hl + size);
+    bytes.insert(bytes.end(), header.data(), header.data() + hl);
     bytes.insert(bytes.end(), static_cast<const char*>(data),
                  static_cast<const char*>(data) + size);
 }

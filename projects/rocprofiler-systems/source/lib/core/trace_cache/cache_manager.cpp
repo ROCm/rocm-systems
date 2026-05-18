@@ -7,6 +7,9 @@
 #include "core/agent_manager.hpp"
 #include "core/config.hpp"
 #include "core/output_file_registry.hpp"
+#include "core/perfetto_engine.hpp"
+#include "core/perfetto_sinks.hpp"
+#include "core/track_registry.hpp"
 #include "core/trace_cache/data_types.hpp"
 #include "core/trace_cache/discovery.hpp"
 #include "core/trace_cache/post_processor.hpp"
@@ -71,7 +74,58 @@ cache_manager::post_process_bulk(output_file_registry& _output_registry,
 
         LOG_INFO("Processing {} trace cache configurations", processor_configs.size());
         post_processor processor{ _tracker, _output_registry };
+
+        // Cached perfetto path: construct an engine + per-pid file sink +
+        // track_registry per post-process invocation. The engine drives
+        // the SDK interceptor; per-pid bytes drain through the sink at
+        // engine.stop(). RF4: on init_sdk failure, log + skip the
+        // perfetto block; RocPD processing continues unaffected.
+        std::unique_ptr<core::perfetto_engine>      engine;
+        std::unique_ptr<core::per_pid_file_sink>    perfetto_sink;
+        std::unique_ptr<rocprofsys::track_registry> tracks;
+        bool                                        engine_started = false;
+        if(enabled_formats.is_perfetto_enabled())
+        {
+            try
+            {
+                engine = std::make_unique<core::perfetto_engine>(
+                    core::build_engine_config_from_settings());
+                engine->init_sdk();
+                tracks        = std::make_unique<rocprofsys::track_registry>();
+                perfetto_sink = std::make_unique<core::per_pid_file_sink>(
+                    static_cast<pid_t>(root_pid), _output_registry);
+                engine->start(core::perfetto_engine::mode::cached_interceptor,
+                              *perfetto_sink);
+                processor.set_perfetto_engine(engine.get(), tracks.get());
+                engine_started = true;
+            } catch(const std::exception& exp)
+            {
+                LOG_ERROR("Perfetto engine initialization failed: {}. Skipping "
+                          "perfetto output; RocPD output unaffected.",
+                          exp.what());
+                engine.reset();
+                perfetto_sink.reset();
+                tracks.reset();
+            }
+        }
+
         processor.process(processor_configs, enabled_formats);
+
+        if(engine_started)
+        {
+            try
+            {
+                engine->stop();
+            } catch(const std::exception& exp)
+            {
+                LOG_ERROR("Perfetto engine stop/drain raised: {}", exp.what());
+            }
+            // Reset in declared-reverse order: sink last because the
+            // engine's stop() owns the final drain call into it.
+            engine.reset();
+            perfetto_sink.reset();
+            tracks.reset();
+        }
 
         if(enabled_formats.is_perfetto_enabled() && get_merge_perfetto_files())
             discovery::merge_perfetto_files();

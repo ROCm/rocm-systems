@@ -11,6 +11,8 @@
 #include "core/gpu_metrics.hpp"
 #include "core/output_file_registry.hpp"
 #include "core/perfetto.hpp"
+#include "core/perfetto_engine.hpp"
+#include "core/track_registry.hpp"
 #include "core/utility.hpp"
 #include "library/tracing.hpp"
 #include "trace_cache/metadata_registry.hpp"
@@ -432,16 +434,17 @@ emit_grouped_event(bool group_by_queue, QueueCategory queue_cat,
 perfetto_processor_t::perfetto_processor_t(
     const std::shared_ptr<metadata_registry>& metadata,
     const std::shared_ptr<agent_manager>& agent_mngr, int pid, int ppid,
-    output_file_registry& output_registry)
+    output_file_registry& output_registry, core::perfetto_engine* engine,
+    rocprofsys::track_registry* tracks)
 : processor_t<perfetto_processor_t>()
 , m_metadata(*metadata)
 , m_process_id(pid)
 , m_parrent_pid(ppid)
 , m_agent_manager(*agent_mngr)
-, m_tmp_file(nullptr)
-, m_tracing_session(nullptr)
 , m_use_annotations(config::get_perfetto_annotations())
 , m_default_group_by_queue(config::get_group_by_queue())
+, m_engine(engine)
+, m_tracks(tracks)
 , m_output_registry(output_registry)
 {
     for(const auto& agent_ptr : m_agent_manager.get_agents())
@@ -455,228 +458,15 @@ perfetto_processor_t::perfetto_processor_t(
 }
 
 void
-perfetto_processor_t::initialize_perfetto()
-{
-    static std::once_flag init_flag;
-    std::call_once(init_flag, []() {
-        LOG_DEBUG("Initializing perfetto tracing backend");
-        auto args               = ::perfetto::TracingInitArgs{};
-        args.backends           = ::perfetto::kInProcessBackend;
-        args.shmem_size_hint_kb = config::get_perfetto_shmem_size_hint();
-
-        ::perfetto::Tracing::Initialize(args);
-        ::perfetto::TrackEvent::Register();
-        LOG_TRACE("Perfetto tracing backend initialized");
-    });
-}
-
-void
-perfetto_processor_t::setup_perfetto()
-{
-    LOG_DEBUG("Setting up perfetto configuration for pid={}", m_process_id);
-
-    auto  track_event_cfg = ::perfetto::protos::gen::TrackEventConfig{};
-    auto& cfg             = m_session_config;
-
-    auto perfetto_buffer_size = config::get_perfetto_buffer_size();
-    auto flush_period         = config::get_perfetto_flush_period();
-
-    LOG_TRACE("Perfetto buffer size: {} KB, flush period: {} ms", perfetto_buffer_size,
-              flush_period);
-
-    auto _policy =
-        config::get_perfetto_fill_policy() == "discard"
-            ? ::perfetto::protos::gen::TraceConfig_BufferConfig_FillPolicy_DISCARD
-            : ::perfetto::protos::gen::TraceConfig_BufferConfig_FillPolicy_RING_BUFFER;
-    auto* buffer_config = cfg.add_buffers();
-    buffer_config->set_size_kb(perfetto_buffer_size);
-    buffer_config->set_fill_policy(_policy);
-
-    for(const auto& itr : config::get_disabled_categories())
-    {
-        LOG_TRACE("Disabling perfetto track event category: {}", itr);
-        track_event_cfg.add_disabled_categories(itr);
-    }
-
-    cfg.set_flush_period_ms(flush_period);
-
-    auto* ds_cfg = cfg.add_data_sources()->mutable_config();
-    ds_cfg->set_name("track_event");
-    ds_cfg->set_track_event_config_raw(track_event_cfg.SerializeAsString());
-
-    LOG_TRACE("Perfetto configuration setup complete");
-}
-
-void
-perfetto_processor_t::start_session()
-{
-    if(config::get_perfetto_backend() != "inprocess")
-    {
-        LOG_TRACE("Perfetto backend is not 'inprocess', skipping session start");
-        return;
-    }
-
-    LOG_DEBUG("Starting perfetto tracing session for pid={}", m_process_id);
-
-    if(!m_tracing_session)
-    {
-        m_tracing_session = ::perfetto::Tracing::NewTrace();
-        LOG_TRACE("Created new perfetto trace");
-    }
-
-    int temp_fd = -1;
-    if(config::get_use_tmp_files())
-    {
-        auto _base = fmt::format("cached-perfetto-trace-{}", m_process_id);
-        m_tmp_file = config::get_tmp_file(_base, "proto");
-        m_tmp_file->open(O_RDWR | O_CREAT | O_TRUNC, 0600);
-        temp_fd = m_tmp_file->fd;
-        LOG_TRACE("Using temp file for perfetto trace: {}", m_tmp_file->filename);
-    }
-    m_tracing_session->Setup(m_session_config, temp_fd);
-    m_tracing_session->StartBlocking();
-
-    LOG_TRACE("Perfetto tracing session started for pid={}", m_process_id);
-}
-
-void
-perfetto_processor_t::stop_session()
-{
-    if(!m_tracing_session)
-    {
-        LOG_TRACE("No active perfetto session to stop");
-        return;
-    }
-
-    LOG_DEBUG("Stopping perfetto tracing session for pid={}", m_process_id);
-    ::perfetto::TrackEvent::Flush();
-    m_tracing_session->FlushBlocking();
-    m_tracing_session->StopBlocking();
-    LOG_TRACE("Perfetto tracing session stopped");
-}
-
-char_vec_t
-perfetto_processor_t::get_session_data()
-{
-    auto _data = char_vec_t{};
-    if(m_tmp_file && *m_tmp_file)
-    {
-        m_tmp_file->close();
-        FILE* _fdata = ::fopen(m_tmp_file->filename.c_str(), "rb");
-
-        if(!_fdata)
-        {
-            LOG_ERROR("Perfetto temp trace file '{}' could not be read",
-                      m_tmp_file->filename);
-            return char_vec_t{ m_tracing_session->ReadTraceBlocking() };
-        }
-
-        ::fseek(_fdata, 0, SEEK_END);
-        size_t _fnum_elem = ::ftell(_fdata);
-        ::fseek(_fdata, 0, SEEK_SET);
-
-        _data.resize(_fnum_elem, '\0');
-        auto _fnum_read = ::fread(_data.data(), sizeof(char), _fnum_elem, _fdata);
-        ::fclose(_fdata);
-
-        if(_fnum_read != _fnum_elem)
-        {
-            throw std::runtime_error(fmt::format(
-                "Error! read {} elements from perfetto trace file '{}'. Expected {}",
-                _fnum_read, m_tmp_file->filename, _fnum_elem));
-        }
-    }
-    else
-    {
-        _data = char_vec_t{ m_tracing_session->ReadTraceBlocking() };
-    }
-
-    return _data;
-}
-
-void
-perfetto_processor_t::flush(bool& _perfetto_output_error)
-{
-    if(!m_tracing_session) return;
-
-    stop_session();
-
-    auto trace_data = char_vec_t{};
-    trace_data      = get_session_data();
-
-    // If processing parrent process, use default filename (respects MPI rank/USE_PID
-    // settings) Otherwise, use PID-based suffix for child process traces
-    auto _filename = (m_process_id == m_parrent_pid)
-                         ? config::get_perfetto_output_filename()
-                         : config::get_perfetto_output_filename_with_suffix(
-                               std::to_string(m_process_id));
-
-    if(!trace_data.empty())
-    {
-        operation::file_output_message<tim::project::rocprofsys> _fom{};
-        // Write the trace into a file.
-        if(config::get_verbose() >= 0)
-            _fom(_filename, std::string{ "perfetto" },
-                 " (%.2f KB / %.2f MB / %.2f GB)... ",
-                 static_cast<double>(trace_data.size()) / units::KB,
-                 static_cast<double>(trace_data.size()) / units::MB,
-                 static_cast<double>(trace_data.size()) / units::GB);
-        std::ofstream ofs{};
-        if(!filepath::open(ofs, _filename, std::ios::out | std::ios::binary))
-        {
-            _fom.append("Error opening '%s'...", _filename.c_str());
-            _perfetto_output_error = true;
-        }
-        else
-        {
-            // Write the trace into a file.
-            ofs.write(trace_data.data(), trace_data.size());
-            if(config::get_verbose() >= 0) _fom.append("%s", "Done");  // NOLINT
-            m_output_registry.register_file(_filename, output_format::perfetto);
-        }
-        ofs.close();
-    }
-    else
-    {
-        LOG_ERROR("Perfetto trace data is empty. File '{}' will not be written...",
-                  _filename.c_str());
-    }
-
-    if(m_tmp_file)
-    {
-        m_tmp_file->close();
-        m_tmp_file->remove();
-        m_tmp_file.reset();
-    }
-
-    m_tracing_session.reset();
-}
-
-void
 perfetto_processor_t::prepare_for_processing()
 {
     LOG_DEBUG("Preparing perfetto processor for pid={}", m_process_id);
-    initialize_perfetto();
-    setup_perfetto();
-    start_session();
-    LOG_TRACE("Perfetto processor prepared for processing");
-}
-
-void
-perfetto_processor_t::finalize_processing()
-{
-    LOG_DEBUG("Finalizing perfetto processor for pid={}", m_process_id);
-    bool _perfetto_output_error = false;
-    flush(_perfetto_output_error);
-
-    if(_perfetto_output_error)
-    {
-        LOG_ERROR("Perfetto trace generation failed for pid={}", m_process_id);
-    }
-    else
-    {
-        LOG_DEBUG("Perfetto processing finalized successfully for pid={}", m_process_id);
-    }
+    // Bind this parser thread to the engine-owned registry so track-uuid
+    // creates land in the engine's registry instead of the lazy
+    // process-global default. Tag the thread's emissions with our pid so
+    // the cached interceptor TLS keys them correctly.
+    if(m_tracks) set_active_track_registry(m_tracks);
+    if(m_engine) m_engine->set_emitting_pid(static_cast<int>(m_process_id));
 }
 
 template <typename CategoryT, typename FuncT, typename... Args>

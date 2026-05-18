@@ -17,6 +17,13 @@
 
 namespace rocprofsys
 {
+class track_registry;
+
+namespace core
+{
+class perfetto_engine;
+}
+
 namespace trace_cache
 {
 using char_vec_t = std::vector<char>;
@@ -34,10 +41,14 @@ class perfetto_processor_t : public processor_t<perfetto_processor_t>
 public:
     perfetto_processor_t(const std::shared_ptr<metadata_registry>& metadata,
                          const std::shared_ptr<agent_manager>& agent_mngr, int pid,
-                         int ppid, output_file_registry& output_registry);
+                         int ppid, output_file_registry& output_registry,
+                         core::perfetto_engine* engine,
+                         rocprofsys::track_registry* tracks);
 
     void prepare_for_processing();
-    void finalize_processing();
+    // Cached-mode drain runs at cache_manager scope (engine.stop());
+    // per-pid finalize has nothing to do.
+    void finalize_processing() {}
 
     void handle(const kernel_dispatch_sample& sample);
     void handle(const scratch_memory_sample& sample);
@@ -53,13 +64,6 @@ public:
     void handle(const kfd_sample& sample);
 
 private:
-    void       initialize_perfetto();
-    void       setup_perfetto();
-    void       start_session();
-    void       stop_session();
-    void       flush(bool& perfetto_output_error);
-    char_vec_t get_session_data();
-
     // Returns a cached ::perfetto::Track for the given (category, args...) key,
     // calling get_perfetto_track only on the first encounter to avoid the global
     // mutex on every event in high-frequency handle() paths.
@@ -71,15 +75,14 @@ private:
     void handle_kfd_page_fault(const kfd_sample& sample);
     void handle_kfd_page_migrate(const kfd_sample& sample);
 
-    metadata_registry&                          m_metadata;
-    std::uint64_t                               m_process_id;
-    std::uint64_t                               m_parrent_pid;
-    agent_manager&                              m_agent_manager;
-    ::perfetto::TraceConfig                     m_session_config;
-    std::shared_ptr<tmp_file>                   m_tmp_file{ nullptr };
-    std::unique_ptr<::perfetto::TracingSession> m_tracing_session{ nullptr };
-    bool                                        m_use_annotations{ false };
-    bool                                        m_default_group_by_queue{ true };
+    metadata_registry&          m_metadata;
+    std::uint64_t               m_process_id;
+    std::uint64_t               m_parrent_pid;
+    agent_manager&              m_agent_manager;
+    bool                        m_use_annotations{ false };
+    bool                        m_default_group_by_queue{ true };
+    core::perfetto_engine*      m_engine{ nullptr };
+    rocprofsys::track_registry* m_tracks{ nullptr };
 
     std::unordered_map<size_t, pmc_track_info> m_pmc_track_map;
     // Each perfetto_processor_t instance is owned by a single consumer thread
