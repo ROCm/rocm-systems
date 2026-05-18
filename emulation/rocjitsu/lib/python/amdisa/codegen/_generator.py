@@ -2406,6 +2406,7 @@ class CodeGenerator:
                             )
                             dst_idx += 1
                         private_members.append(cgen.Statement(f'Operand {opnd.name}'))
+                        # SADDR member added after the operand loop below
                         if is_smem and opnd.name == 'soffset':
                             opnd_ctor_init.append(
                                 f'{opnd.name}(make_smem_offset('
@@ -2426,6 +2427,16 @@ class CodeGenerator:
                                 f'{opnd.name}({opnd.size}, '
                                 f'OperandType::{opnd.operand_type}, 0)'
                             )
+                    # For flat encodings with a seg field, add saddr as an
+                    # optional operand. Declared and initialized LAST among
+                    # operands to avoid reorder warnings with data/addr.
+                    _has_flat_saddr = self.isa_spec.profile.mnemonic_rule(
+                        enc.enc_name
+                    ).use_flat_mnemonic
+                    if _has_flat_saddr:
+                        private_members.append(cgen.Statement('Operand saddr'))
+                        opnd_ctor_init.append('saddr(0, OperandType::OPR_SREG, 0)')
+
                     class_ctor_decl = cgen.FunctionDeclaration(
                         cgen.Value('', inst.fmt_name),
                         [cgen.Value('const MachineInst *', 'inst')],
@@ -2496,6 +2507,41 @@ class CodeGenerator:
                     ctor_body_parts = list(opnd_body)
                     ctor_body_parts.append(f'num_src_ = {src_idx};')
                     ctor_body_parts.append(f'num_dst_ = {dst_idx};')
+
+                    # Flat segment-aware operands: adjust addr width and add
+                    # saddr for SCRATCH (seg==1) and GLOBAL (seg==2) segments.
+                    if rule.use_flat_mnemonic:
+                        _has_addr = any(o.name == 'addr' for o in inst.operands)
+                        if _has_addr:
+                            ctor_body_parts.append('if (inst_.seg == 1) {')
+                            ctor_body_parts.append(
+                                '  addr = Operand(32, OperandType::OPR_VGPR, '
+                                'reinterpret_cast<const OpEncoding*>(&inst_)->addr);'
+                            )
+                            ctor_body_parts.append('  if (inst_.saddr != 0x7F) {')
+                            ctor_body_parts.append(
+                                '    saddr = Operand(32, OperandType::OPR_SREG, '
+                                'inst_.saddr);'
+                            )
+                            ctor_body_parts.append(
+                                '    src_operands_[num_src_++] = &saddr;'
+                            )
+                            ctor_body_parts.append('  }')
+                            ctor_body_parts.append(
+                                '} else if (inst_.seg == 2 && inst_.saddr != 0x7F) {'
+                            )
+                            ctor_body_parts.append(
+                                '  addr = Operand(32, OperandType::OPR_VGPR, '
+                                'reinterpret_cast<const OpEncoding*>(&inst_)->addr);'
+                            )
+                            ctor_body_parts.append(
+                                '  saddr = Operand(64, OperandType::OPR_SREG, '
+                                'inst_.saddr);'
+                            )
+                            ctor_body_parts.append(
+                                '  src_operands_[num_src_++] = &saddr;'
+                            )
+                            ctor_body_parts.append('}')
 
                     # Literal constant fixup: when src0/ssrc0/ssrc1 == 255,
                     # replace the operand with the 32-bit literal from the
