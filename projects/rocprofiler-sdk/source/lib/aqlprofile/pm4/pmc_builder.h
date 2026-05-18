@@ -146,8 +146,9 @@ private:
     //
     // Sized in the constructor from the chip's actual se_number_ x sarrays_per_se
     // so we never overrun on parts that exceed the DRM cu_bitmap[4][4] window
-    // (e.g. Navi31: 6 SE x 2 SA = 12 SAs; MI200: 8 SE x 1 SA = 8 SAs;
-    // MI400-class: 16 SE x 2 SA = 32 SAs).
+    // (e.g. Navi31: 6 SE x 2 SA = 12 SAs; MI200: 8 SE x 1 SA = 8 SAs), and so
+    // we remain forward-compatible with future GPUs whose SE x SA-per-SE
+    // topology is larger than any fixed compile-time bound.
     //
     // Outer: per-SE. Middle: per-SA. Inner: active (non-harvested) WGP indices
     // for that SA, in increasing order. The count is just inner.size().
@@ -251,11 +252,9 @@ public:
                            (se_number_ * sarrays_per_se);
 
         // Size the per-(SE, SA) WGP index tables to the actual chip topology.
-        // This fits Navi31 (6 x 2), MI200 (8 x 1), MI400-class (16 x 2), etc.,
-        // none of which fit in a hardcoded kMaxSA bound.
-        active_wgp_indices_.assign(
-            se_number_,
-            std::vector<std::vector<uint32_t>>(sarrays_per_se));
+        // This fits Navi31 (6 x 2), MI200 (8 x 1), and future GPUs with larger
+        // SE x SA-per-SE topologies, none of which fit in a hardcoded kMaxSA bound.
+        active_wgp_indices_.assign(se_number_, std::vector<std::vector<uint32_t>>(sarrays_per_se));
 
         // Build per-(SE, SA) active WGP index tables.
         //
@@ -286,9 +285,8 @@ public:
             {
                 auto& indices = active_wgp_indices_.at(se).at(sa);
 
-                uint32_t cu_bm = (se < drm_se_lim && sa < drm_sa_lim)
-                                     ? agent_info->cu_bitmap[se][sa]
-                                     : 0u;
+                uint32_t cu_bm =
+                    (se < drm_se_lim && sa < drm_sa_lim) ? agent_info->cu_bitmap[se][sa] : 0u;
                 if(cu_bm == 0)
                 {
                     // No bitmap for this SA. Guard wgp_per_sa==0 here so the
@@ -297,9 +295,7 @@ public:
                     // (1u << 32) is also UB; clamp when wgp_per_sa covers the
                     // full 32-bit window (16 WGPs * 2 CU bits).
                     if(wgp_per_sa == 0) continue;
-                    cu_bm = (wgp_per_sa >= kMaxWgpPerSa)
-                                ? ~0u
-                                : ((1u << (wgp_per_sa * 2u)) - 1u);
+                    cu_bm = (wgp_per_sa >= kMaxWgpPerSa) ? ~0u : ((1u << (wgp_per_sa * 2u)) - 1u);
                 }
 
                 const uint32_t max_cu_bit = 31u - __builtin_clz(cu_bm);

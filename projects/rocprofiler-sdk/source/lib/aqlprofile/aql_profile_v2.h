@@ -268,8 +268,7 @@ typedef struct
     uint32_t    shader_arrays_per_se; /**< Shader Arrays per SE */
     uint32_t    domain;               /**< PCI domain */
     uint32_t    location_id;          /**< BDF (Bus/Device/Function) */
-    uint32_t    cu_bitmap[AQLPROFILE_DRM_CU_BITMAP_NUM_SE]
-                         [AQLPROFILE_DRM_CU_BITMAP_NUM_SA_PER_SE];
+    uint32_t    cu_bitmap[AQLPROFILE_DRM_CU_BITMAP_NUM_SE][AQLPROFILE_DRM_CU_BITMAP_NUM_SA_PER_SE];
     /**< Per-SE/SA active CU bitmap; shape mirrors drm_amdgpu_info_device.cu_bitmap. */
 } aqlprofile_agent_info_v2_t;
 

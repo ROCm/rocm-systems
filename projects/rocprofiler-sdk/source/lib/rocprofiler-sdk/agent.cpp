@@ -1167,8 +1167,7 @@ get_aql_handles()
                     };
 
                     if(aqlprofile_register_agent_info(
-                           &handle, &agent_info, AQLPROFILE_AGENT_VERSION_V1) !=
-                       HSA_STATUS_SUCCESS)
+                           &handle, &agent_info, AQLPROFILE_AGENT_VERSION_V1) != HSA_STATUS_SUCCESS)
                     {
                         ROCP_WARNING << fmt::format(
                             "Failed to register agent {:04x}:{:02x}:{:02x}.{:x} :: {}",
