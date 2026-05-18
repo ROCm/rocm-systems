@@ -360,6 +360,17 @@ def validate_region_filter_leakage(
     return _validate(trace_path, selected_regions, **kwargs)
 
 
+def validate_region_filter_rocpd_leakage(
+    db_path: Path,
+    selected_regions: str | list[str],
+    **kwargs,
+) -> ValidationResult:
+    """Fail when ROCPD rows fall outside selected ROCTx region time windows."""
+    from .region_filter_rocpd import validate_region_filter_rocpd_leakage as _validate
+
+    return _validate(db_path, selected_regions, **kwargs)
+
+
 # ============================================================================
 # ROCpd Database Validation - wraps validate-rocpd.py
 # ============================================================================

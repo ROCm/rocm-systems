@@ -64,6 +64,7 @@ set(ROCTX_EXAMPLE_TARGETS
     selective_region_pause_1
     selective_region_pause_2
     selective_region_pause_3
+    selective_region_pushpop
 )
 
 set(ROCTX_KERNEL_HEADER_TARGETS
@@ -72,6 +73,7 @@ set(ROCTX_KERNEL_HEADER_TARGETS
     selective_region_pause_1
     selective_region_pause_2
     selective_region_pause_3
+    selective_region_pushpop
 )
 
 foreach(_target IN LISTS ROCTX_EXAMPLE_TARGETS)
@@ -121,3 +123,62 @@ foreach(_target IN LISTS ROCTX_EXAMPLE_TARGETS)
         )
     endif()
 endforeach()
+
+# OpenMP example for selective-region workflow tests (optional)
+find_package(OpenMP QUIET)
+if(OpenMP_CXX_FOUND)
+    add_executable(omp_app omp_app.cpp roctx_example_kernels.hpp)
+    target_link_libraries(omp_app PRIVATE Threads::Threads OpenMP::OpenMP_CXX)
+
+    if(
+        CMAKE_CXX_COMPILER_ID MATCHES "Clang"
+        AND NOT CMAKE_CXX_COMPILER_IS_HIPCC
+        AND NOT HIPCC_EXECUTABLE
+    )
+        target_link_libraries(
+            omp_app
+            PRIVATE
+                $<TARGET_NAME_IF_EXISTS:rocprofiler-systems::rocprofiler-systems-compile-options>
+                $<TARGET_NAME_IF_EXISTS:hip::host>
+                $<TARGET_NAME_IF_EXISTS:hip::device>
+        )
+    else()
+        target_compile_options(omp_app PRIVATE -W -Wall)
+    endif()
+
+    target_link_libraries(omp_app PRIVATE ${ROCTX_LIBRARY})
+
+    if("${CMAKE_BUILD_TYPE}" MATCHES "Release")
+        target_compile_options(omp_app PRIVATE -g1)
+    endif()
+
+    foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
+        target_compile_options(omp_app PRIVATE --offload-arch=${arch})
+        target_link_options(omp_app PUBLIC --offload-arch=${arch})
+    endforeach()
+
+    if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
+        rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET omp_app)
+    endif()
+
+    if(ROCPROFSYS_INSTALL_EXAMPLES)
+        install(
+            TARGETS omp_app
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
+            COMPONENT rocprofiler-systems-examples
+        )
+    endif()
+else()
+    message(
+        AUTHOR_WARNING
+        "OpenMP not found; skipping omp_app example"
+    )
+endif()
+
+if(ROCPROFSYS_INSTALL_EXAMPLES)
+    install(
+        FILES config/rocprof-sys-selected-region1.cfg
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples/roctx/config
+        COMPONENT rocprofiler-systems-examples
+    )
+endif()

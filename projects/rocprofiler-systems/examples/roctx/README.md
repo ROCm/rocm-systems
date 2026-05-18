@@ -13,6 +13,9 @@ This example suite demonstrates the ROCTx tracing API for annotating GPU workloa
 - `selective_region_pause_1.cpp` - Pause and resume both occur **inside** the target region. Expected profiled with `Region1` filter: `{CodeBlock_A, CodeBlock_C}`.
 - `selective_region_pause_2.cpp` - Pause occurs **before** the target region (ignored by region filtering). Expected profiled with `Region1` filter: `{CodeBlock_A, CodeBlock_B, CodeBlock_C}`.
 - `selective_region_pause_3.cpp` - Pause occurs **inside** the region, resume occurs **outside** after region stop. Expected profiled with `Region1` filter: `{CodeBlock_A}`.
+- `selective_region_pushpop.cpp` - Same region layout as `selective_region` but uses `roctxRangePushA`/`roctxRangePop` (push/pop workflow; region filter does not apply).
+- `omp_app.cpp` - OpenMP parallel team with `roctxRangeStartA("HotPhase")` around GPU work (OpenMP + region-filter workflow).
+- `config/rocprof-sys-selected-region1.cfg` - Sample preset JSON (`tracing.region = Region1`).
 
 ## Prerequisites
 

@@ -1,0 +1,43 @@
+{
+    "required_tables": [
+        {
+            "name": "regions",
+            "min_rows": 1,
+            "required_columns": [
+                "category",
+                "name",
+                "start",
+                "end",
+                "duration"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "ROCTx marker regions present",
+                    "error_message": "No rocm_marker_api regions in ROCPD",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM regions WHERE category LIKE '%marker%'"
+                }
+            ]
+        },
+        {
+            "name": "kernels",
+            "min_rows": 1,
+            "required_columns": [
+                "name",
+                "start",
+                "end",
+                "duration"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Kernel dispatches recorded under filter",
+                    "error_message": "No kernel rows in ROCPD",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM kernels"
+                }
+            ]
+        }
+    ]
+}
