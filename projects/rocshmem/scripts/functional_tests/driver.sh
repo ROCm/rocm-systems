@@ -131,11 +131,11 @@ declare -A TEST_NUMBERS=(
   ["teamctxsharedinfra"]="95"
   ["quiet_on_stream"]="96"
   ["sync_all_on_stream"]="97"
-  ["fence_putwavesignal"]="98"
-  ["fence_putlargesmall"]="99"
-  ["fence_fanout"]="100"
-  ["fence_putwavenbichunks"]="101"
-  ["teamctxsubsetparentinfra"]="102"
+  ["teamctxsubsetparentinfra"]="98"
+  ["fence_putwavesignal"]="99"
+  ["fence_putlargesmall"]="100"
+  ["fence_fanout"]="101"
+  ["fence_putwavenbichunks"]="102"
 )
 
 ExecTest() {

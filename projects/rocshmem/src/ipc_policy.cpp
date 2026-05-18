@@ -32,6 +32,7 @@
 #include "envvar.hpp"
 #include "util.hpp"
 #include "log.hpp"
+#include "sdma_policy.hpp"
 #include "memfabric/pod_detection.hpp"
 #if defined(USE_SDMA)
 #include "sdma_policy.hpp"

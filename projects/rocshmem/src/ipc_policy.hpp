@@ -120,7 +120,6 @@ class IpcOnImpl {
     pes_with_ipc_avail = other.pes_with_ipc_avail;
     ipc_first_pe = other.ipc_first_pe;   // #5657 — add if members exist on class
     ipc_stride = other.ipc_stride;         // #5657
-  }
 
   void assignSdmaChannel([[maybe_unused]] unsigned int ctx_id) {}
 
@@ -320,7 +319,7 @@ class IpcSdmaImpl : public IpcOnImpl {
       if constexpr (is_blocking(Kind)) handle->quietAll();
       return;
     }
-    memcpy_lane(dst, src, size);
+    memcpy_lane<Kind>(dst, src, size);
   }
 
   template <MemcpyKind Kind = MemcpyKind::Put>
@@ -334,7 +333,7 @@ class IpcSdmaImpl : public IpcOnImpl {
       }
       return;
     }
-    memcpy_wg(dst, src, size);
+    memcpy_wg<Kind>(dst, src, size);
   }
 
   template <MemcpyKind Kind = MemcpyKind::Put>
@@ -348,7 +347,7 @@ class IpcSdmaImpl : public IpcOnImpl {
       }
       return;
     }
-    memcpy_wave(dst, src, size);
+    memcpy_wave<Kind>(dst, src, size);
   }
 
   template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
@@ -434,15 +433,15 @@ class IpcOffImpl {
 
   template <MemcpyKind Kind = MemcpyKind::Put>
   __device__ void ipcCopy([[maybe_unused]] void *dst, [[maybe_unused]] void *src,
-                          [[maybe_unused]] size_t size) {}
+                          [[maybe_unused]] size_t size, [[maybe_unused]] int local_pe) {}
 
   template <MemcpyKind Kind = MemcpyKind::Put>
   __device__ void ipcCopy_wg([[maybe_unused]] void *dst, [[maybe_unused]] void *src,
-                             [[maybe_unused]] size_t size) {}
+                             [[maybe_unused]] size_t size, [[maybe_unused]] int local_pe) {}
 
   template <MemcpyKind Kind = MemcpyKind::Put>
   __device__ void ipcCopy_wave([[maybe_unused]] void *dst, [[maybe_unused]] void *src,
-                               [[maybe_unused]] size_t size) {}
+                               [[maybe_unused]] size_t size, [[maybe_unused]] int local_pe) {}
 
   __device__ void ipcQuiet() {}
 

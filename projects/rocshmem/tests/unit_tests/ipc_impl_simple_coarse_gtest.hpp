@@ -43,7 +43,6 @@ namespace rocshmem {
 //=============================================================================
 // Kernels — templated on IPC implementation type
 //=============================================================================
-
 template <typename IpcImplT>
 __global__
 void
@@ -76,7 +75,6 @@ kernel_simple_coarse_copy_warp(IpcImplT *ipc_impl, int *src, int *dest, size_t b
 //=============================================================================
 // Fixture — templated on Config trait
 //=============================================================================
-
 template <typename Config>
 class IPCImplSimpleCoarse : public ::testing::TestWithParam<std::tuple<int, int, int>> {
     using IpcImplT = typename Config::impl_type;
@@ -214,7 +212,6 @@ class IPCImplSimpleCoarse : public ::testing::TestWithParam<std::tuple<int, int,
 //=============================================================================
 // IPC load/store test classes
 //=============================================================================
-
 class DegenerateSimpleCoarse : public IPCImplSimpleCoarse<IpcOnTestConfig> {
   public:
     ~DegenerateSimpleCoarse() override {};
