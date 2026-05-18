@@ -33,6 +33,22 @@
 
 static constexpr int kBlockDim = 1024;
 
+unsigned long long fullMask, halfHighBitsOn, halfBitsOn, halfWaveSize, high16BitsOn,
+                   high8BitsOn, high4BitsOn, allButOne;
+
+static void initializeMasks()
+{
+  int wavefrontSize = getWarpSize();
+  int halfWaveSize = wavefrontSize / 2;
+
+  fullMask = (getWarpSize() == 64)? ~0ull : (1ull << 32) - 1;
+  halfBitsOn = (1ul << (wavefrontSize / 2)) - 1;
+  halfHighBitsOn = halfBitsOn << halfWaveSize,
+  high16BitsOn = halfBitsOn << (wavefrontSize - 16),
+  high8BitsOn = halfBitsOn << (wavefrontSize - 8),
+  high4BitsOn = halfBitsOn << (wavefrontSize - 4),
+  allButOne = fullMask & ~1;
+}
 template <class T> struct AtomicAddOp {
   __device__ T operator()(T* lhs, const T& rhs) { return atomicAdd(lhs, rhs); }
 };
@@ -234,6 +250,12 @@ void checkResults(T* d_lhs, T* d_rhs,
 template <size_t TileSize, class T, template <typename> class Op, AggregationType aggType> class CoopBenchmark
   : public Benchmark<CoopBenchmark<TileSize, T, Op, aggType>> {
 public:
+
+  CoopBenchmark()
+  {
+    initializeMasks();
+  }
+
   void operator()(T* output, const T* input, int numItems)
   {
     namespace cg = cooperative_groups;
@@ -302,12 +324,6 @@ void benchmarkCoop(LinearAllocGuard<T>* d_outputCoop,
                    int numItems)
 {
   int wavefrontSize = getWarpSize();
-  int halfWaveSize = wavefrontSize / 2;
-  unsigned long long halfBitsOn = (1ul << (wavefrontSize / 2)) - 1;
-  unsigned long long fullMask = -1ul, halfHighBitsOn = halfBitsOn << halfWaveSize,
-                     high16BitsOn = halfBitsOn << (wavefrontSize - 16),
-                     high8BitsOn = halfBitsOn << (wavefrontSize - 8),
-                     high4BitsOn = halfBitsOn << (wavefrontSize - 4);
 
   for (const auto& mask : masks) {
     printf("%s %llx\n", mask.first.c_str(), mask.second);
@@ -337,6 +353,11 @@ void benchmarkCoop(LinearAllocGuard<T>* d_outputCoop,
   }
 }
 template <class T, template <typename> class Op> struct ReduceBenchmark {
+  ReduceBenchmark()
+  {
+    initializeMasks();
+  }
+
   void Run() {
     static constexpr int numMasks = 6;
     using distribution = typename DistributionType<T>::type;
@@ -355,12 +376,6 @@ template <class T, template <typename> class Op> struct ReduceBenchmark {
     LinearAllocGuard<T>* d_outputCoop = &d_outputsCoop[0];
     std::mt19937_64 gen(123);
     distribution dist;
-    int halfWaveSize = wavefrontSize / 2;
-    unsigned long long halfBitsOn = (1ul << (wavefrontSize / 2)) - 1;
-    unsigned long long fullMask = -1ul, halfHighBitsOn = halfBitsOn << halfWaveSize,
-                       high16BitsOn = halfBitsOn << (wavefrontSize - 16),
-                       high8BitsOn = halfBitsOn << (wavefrontSize - 8),
-                       high4BitsOn = halfBitsOn << (wavefrontSize - 4), allButOne = -1 & ~1;
     const char* typeStr = typeToString<T>();
     const char* opStr = opToString<T, Op<T>>();
     std::map<std::string, unsigned long long> masks;
