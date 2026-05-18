@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
+#include <format>
 #include <linux/types.h>
 #include <sstream>
 #include <string_view>
@@ -263,10 +264,15 @@ int SimulatedDriver::open() {
   // The CP calls this after writing to a completion signal's event mailbox,
   // waking any thread blocked in wait_events_ioctl.
   cp_->set_interrupt_callback([this](uint32_t event_id) {
-    {
-      std::lock_guard<std::mutex> lock(event_mutex_);
-      if (auto it = events_.find(event_id); it != events_.end())
-        it->second.signaled = true;
+    std::lock_guard<std::mutex> lock(event_mutex_);
+    if (auto it = events_.find(event_id); it != events_.end() && !it->second.signaled) {
+      it->second.signaled = true;
+    }
+    if (event_page_) {
+      auto *slots = static_cast<uint64_t *>(event_page_);
+      uint32_t limit = static_cast<uint32_t>(event_page_size_ / sizeof(uint64_t));
+      if (event_id < limit)
+        std::atomic_ref<uint64_t>(slots[event_id]).store(1, std::memory_order_release);
     }
     event_cv_.notify_all();
   });
@@ -872,6 +878,11 @@ int SimulatedDriver::create_event_ioctl(void *arg) {
   args->event_trigger_data = ev.event_id;
   args->event_slot_index = ev.event_id;
   args->event_page_offset = KFD_MMAP_TYPE_EVENTS | kfd_mmap_gpu_id(gpu_id_);
+
+  util::Logger::vm([&](auto &os) {
+    os << std::format("CREATE_EVENT id={} slot={} type={} auto_reset={}", ev.event_id,
+                      args->event_slot_index, args->event_type, ev.auto_reset);
+  });
   return 0;
 }
 
@@ -1124,24 +1135,7 @@ int SimulatedDriver::wait_events_ioctl(void *arg) {
     return false;
   };
 
-  // One-shot trace: log what WAIT_EVENTS is looking for.
-  {
-    static thread_local int wait_trace_count = 0;
-    if (++wait_trace_count <= 3) {
-      for (uint32_t i = 0; i < args->num_events; ++i) {
-        uint32_t id = ev_data[i].event_id;
-        bool in_map = events_.count(id) > 0;
-        bool map_signaled = in_map && events_[id].signaled;
-        uint64_t slot_val = 0;
-        if (event_page_ && id < event_page_size_ / sizeof(uint64_t))
-          slot_val = static_cast<uint64_t *>(event_page_)[id];
-        util::Logger::vm("WAIT_EVENTS[", i, "] event_id=", id, " in_map=", in_map,
-                         " map_signaled=", map_signaled, " slot_val=", slot_val,
-                         " event_page_=", (event_page_ ? 1 : 0), " page_size=", event_page_size_,
-                         " wait_for_all=", args->wait_for_all, " timeout=", args->timeout);
-      }
-    }
-  }
+  static const bool sync_trace = std::getenv("RJ_SYNC_TRACE") != nullptr;
 
   auto pred = [this, args, ev_data, &is_signaled]() -> bool {
     if (closing_)
@@ -1191,6 +1185,9 @@ int SimulatedDriver::wait_events_ioctl(void *arg) {
       return -EBADF;
     args->wait_result = pred() ? 0 : 1;
   }
+
+  if (sync_trace && args->wait_result == 0)
+    util::Logger::vm("WAIT_EVENTS result=0 (signaled)");
 
   // Auto-reset signaled events from the requested set.
   for (uint32_t i = 0; i < args->num_events; ++i) {

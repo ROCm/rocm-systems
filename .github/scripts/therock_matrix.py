@@ -2,6 +2,8 @@
 This dictionary is used to map specific file directory changes to the corresponding build flag and tests
 """
 subtree_to_project_map = {
+    "emulation/rocjitsu": "emulation",
+    "emulation/mirage": "emulation",
     "projects/amdsmi": "core",
     "projects/aqlprofile": "profiler",
     "projects/clr": "runtimes",
@@ -33,6 +35,10 @@ project_map = {
     "core": {
         "cmake_options": ["-DTHEROCK_ENABLE_CORE=ON", "-DTHEROCK_ENABLE_ALL=OFF"],
         "projects_to_test": "",  # will run sanity test to cover rocminfo and amdsmi
+    },
+    "emulation": {
+        "cmake_options": ["-DTHEROCK_ENABLE_ALL=OFF", "-DTHEROCK_ENABLE_EMULATION=ON"],
+        "projects_to_test": "",
     },
     "dc_tools": {
         "cmake_options": ["-DTHEROCK_ENABLE_ALL=OFF", "-DTHEROCK_ENABLE_DC_TOOLS=ON"],

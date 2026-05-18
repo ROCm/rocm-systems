@@ -27,6 +27,7 @@
 #include "latency_profiler/CollTrace.h"
 #include "rccl_common.h"
 #include "recorder.h"
+#include "ipc_init_detail.h"
 #include "mem_manager.h"
 
 #ifdef ENABLE_ROCSHMEM
@@ -492,6 +493,7 @@ typedef enum ncclGroupTaskType {
 } ncclGroupTaskType_t;
 
 struct ncclCommSymTeams;
+class ncclIpcMemHandler;
 
 struct ncclComm {
   uint64_t startMagic;
@@ -519,6 +521,14 @@ struct ncclComm {
   ncclCollNet_t* ncclCollNet;
   void* collNetContext;
   void* bootstrap;
+
+  // DDA IPC all-reduce: per-rank device scratch + IPC handles (see ncclDdaIpcCommInit)
+  ncclIpcMemHandler* ddaIpcMemHandler;
+  void* ddaIpcScratch;
+  size_t ddaIpcScratchBytes;
+  void* ddaIpcPeerPtrsDev;
+  nccl_dda_ipc_detail::DdaIpcBarrierState* ddaIpcBarrierState; /* see ncclDdaIpcCommInit */
+
   // Bitmasks for ncclTransportP2pSetup
   struct channelMasks* connectSend;
   struct channelMasks* connectRecv;
@@ -626,6 +636,7 @@ struct ncclComm {
   uint32_t* childAbortFlag;
   uint32_t* childAbortFlagDev;
   uint32_t destroyFlag;
+  uint32_t revokedFlag;
 
   // Flags for enable P2P NET
   uint32_t p2pNet;
