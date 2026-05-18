@@ -418,7 +418,7 @@ class CodeGenerator:
                 class_members.append(cgen.Statement('std::string owned_mnemonic_'))
             # VOP1/VOP2 encoding bases store DPP control fields.
             # apply_dpp() is a free function in dpp_sdwa_ops.h.
-            if inst_enc.enc_name.upper() in ('ENC_VOP1', 'ENC_VOP2'):
+            if inst_enc.enc_name.upper() in ('ENC_VOP1', 'ENC_VOP2', 'ENC_VOPC'):
                 class_members.append(cgen.Statement('uint32_t dpp_ctrl_ = 0'))
                 class_members.append(cgen.Statement('uint32_t dpp_row_mask_ = 0xF'))
                 class_members.append(cgen.Statement('uint32_t dpp_bank_mask_ = 0xF'))
@@ -435,15 +435,25 @@ class CodeGenerator:
                     cgen.Statement('uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD')
                 )
                 class_members.append(cgen.Statement('bool sdwa_src0_sext_ = false'))
+                class_members.append(cgen.Statement('bool sdwa_src0_neg_ = false'))
+                class_members.append(cgen.Statement('bool sdwa_src0_abs_ = false'))
                 class_members.append(
                     cgen.Statement('uint32_t sdwa_src1_sel_ = amdgpu::sdwa::DWORD')
                 )
                 class_members.append(cgen.Statement('bool sdwa_src1_sext_ = false'))
-                class_members.append(
-                    cgen.Statement('uint32_t sdwa_dst_sel_ = amdgpu::sdwa::DWORD')
-                )
-                class_members.append(cgen.Statement('uint32_t sdwa_dst_unused_ = 0'))
-                class_members.append(cgen.Statement('bool sdwa_clamp_ = false'))
+                class_members.append(cgen.Statement('bool sdwa_src1_neg_ = false'))
+                class_members.append(cgen.Statement('bool sdwa_src1_abs_ = false'))
+                if inst_enc.enc_name.upper() != 'ENC_VOPC':
+                    class_members.append(
+                        cgen.Statement('uint32_t sdwa_dst_sel_ = amdgpu::sdwa::DWORD')
+                    )
+                    class_members.append(
+                        cgen.Statement('uint32_t sdwa_dst_unused_ = 0')
+                    )
+                    class_members.append(cgen.Statement('bool sdwa_clamp_ = false'))
+                else:
+                    class_members.append(cgen.Statement('uint32_t sdwa_sdst_ = 106'))
+                    class_members.append(cgen.Statement('bool sdwa_sd_ = false'))
             s = cgen.Struct(
                 f'{inst_enc.fmt_enc_name} : public IsaInstruction<Isa>',
                 [x for x in class_members],
