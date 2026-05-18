@@ -29,8 +29,8 @@ _REGION1_KERNELS_FAIL = ["CodeBlock_A", "CodeBlock_E", "CodeBlock_G"]
 
 
 @pytest.fixture
-def backend_sys_run_env(selective_region_env, sys_run_manual_env) -> dict[str, str]:
-    env = merge_selective_env("sys_run", selective_region_env, sys_run_manual_env)
+def backend_sys_run_env(selective_region_env, sys_run_base_env) -> dict[str, str]:
+    env = merge_selective_env("sys_run", selective_region_env, sys_run_base_env)
     env["ROCPROFSYS_SELECTED_REGIONS"] = "Region1"
     return env
 

@@ -55,8 +55,8 @@ def selective_region_env() -> dict[str, str]:
 
 
 @pytest.fixture
-def sys_run_manual_env() -> dict[str, str]:
-    """Match manual QA / AIPROFSYST-473 repro: rocprof-sys-run + rocpd, no CI sampling."""
+def sys_run_base_env() -> dict[str, str]:
+    """Base rocprof-sys-run env: CI/sampling off, ROCPD on."""
     return {
         "ROCPROFSYS_CI": "OFF",
         "ROCPROFSYS_USE_SAMPLING": "OFF",
@@ -65,13 +65,19 @@ def sys_run_manual_env() -> dict[str, str]:
     }
 
 
+@pytest.fixture
+def config_sys_run_env(selective_region_env, sys_run_base_env) -> dict[str, str]:
+    """Region domains + sys_run_base_env for test_selective_regions_config.py."""
+    return merge_selective_env("sys_run", selective_region_env, sys_run_base_env)
+
+
 def merge_selective_env(
-    mode: str, base: dict[str, str], sys_run_manual: dict[str, str]
+    mode: str, base: dict[str, str], sys_run_base: dict[str, str]
 ) -> dict[str, str]:
-    """Apply manual-repro overrides for sys_run; keep default pytest env for sampling."""
+    """Merge base env with sys_run_base_env when mode is sys_run."""
     env = base.copy()
     if mode == "sys_run":
-        env.update(sys_run_manual)
+        env.update(sys_run_base)
     return env
 
 

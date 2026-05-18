@@ -14,8 +14,6 @@ from rocprofsys.selective_region_config import (
     output_has_region_filter_log,
     output_indicates_successful_trace,
 )
-from selective_regions_conftest import merge_selective_env
-
 pytest_plugins = ["selective_regions_conftest"]
 
 pytestmark = [
@@ -45,11 +43,6 @@ _ALL_CODEBLOCKS = [
 
 
 @pytest.fixture
-def manual_sys_run_env(selective_region_env, sys_run_manual_env) -> dict[str, str]:
-    return merge_selective_env("sys_run", selective_region_env, sys_run_manual_env)
-
-
-@pytest.fixture
 def selective_regions_rocpd_rules(validation_rules_dir) -> list[Path]:
     rules = validation_rules_dir / "selective-regions" / "validation-rules.json"
     return [rules]
@@ -76,9 +69,9 @@ class TestSelectiveRegionsConfig(RocprofsysTest):
             fail_regex=["Region3"],
         )
 
-    def test_cli_selected_regions_flag(self, manual_sys_run_env):
+    def test_cli_selected_regions_flag(self, config_sys_run_env):
         """--selected-regions on rocprof-sys-run."""
-        env = manual_sys_run_env.copy()
+        env = config_sys_run_env.copy()
         env.pop("ROCPROFSYS_SELECTED_REGIONS", None)
         result = self.run_test(
             "sys_run",
@@ -94,10 +87,10 @@ class TestSelectiveRegionsConfig(RocprofsysTest):
         strict=False,
     )
     def test_preset_json_config_tracing_region(
-        self, manual_sys_run_env, selective_region_preset_json_path
+        self, config_sys_run_env, selective_region_preset_json_path
     ):
         """ROCPROFSYS_CONFIG_FILE with hierarchical tracing.region."""
-        env = manual_sys_run_env.copy()
+        env = config_sys_run_env.copy()
         env.pop("ROCPROFSYS_SELECTED_REGIONS", None)
         env["ROCPROFSYS_CONFIG_FILE"] = str(selective_region_preset_json_path)
         result = self.run_test(
@@ -109,10 +102,10 @@ class TestSelectiveRegionsConfig(RocprofsysTest):
         self._assert_region1_filtered(result, check_rocpd=False)
 
     def test_flat_text_config_selected_regions(
-        self, manual_sys_run_env, selective_region_flat_config
+        self, config_sys_run_env, selective_region_flat_config
     ):
         """Flat cfg file sets ROCPROFSYS_SELECTED_REGIONS."""
-        env = manual_sys_run_env.copy()
+        env = config_sys_run_env.copy()
         env.pop("ROCPROFSYS_SELECTED_REGIONS", None)
         env["ROCPROFSYS_CONFIG_FILE"] = str(selective_region_flat_config)
         result = self.run_test(
@@ -126,10 +119,10 @@ class TestSelectiveRegionsConfig(RocprofsysTest):
         self._assert_region1_filtered(result, check_rocpd=False)
 
     def test_xml_config_trace_completes(
-        self, manual_sys_run_env, selective_region_xml_config
+        self, config_sys_run_env, selective_region_xml_config
     ):
         """XML cfg from rocprof-sys-avail: run should finish and write Perfetto."""
-        env = manual_sys_run_env.copy()
+        env = config_sys_run_env.copy()
         env.pop("ROCPROFSYS_SELECTED_REGIONS", None)
         env["ROCPROFSYS_CONFIG_FILE"] = str(selective_region_xml_config)
         result = self.run_test(
@@ -149,10 +142,10 @@ class TestSelectiveRegionsConfig(RocprofsysTest):
         strict=False,
     )
     def test_xml_config_selected_regions_filter(
-        self, manual_sys_run_env, selective_region_xml_config
+        self, config_sys_run_env, selective_region_xml_config
     ):
         """XML cfg should honor ROCPROFSYS_SELECTED_REGIONS=Region1."""
-        env = manual_sys_run_env.copy()
+        env = config_sys_run_env.copy()
         env.pop("ROCPROFSYS_SELECTED_REGIONS", None)
         env["ROCPROFSYS_CONFIG_FILE"] = str(selective_region_xml_config)
         result = self.run_test(
@@ -165,8 +158,8 @@ class TestSelectiveRegionsConfig(RocprofsysTest):
         assert output_has_region_filter_log(combined)
         self._assert_region1_filtered(result, check_rocpd=False)
 
-    def test_binary_rewrite_with_region_filter(self, manual_sys_run_env):
-        env = manual_sys_run_env.copy()
+    def test_binary_rewrite_with_region_filter(self, config_sys_run_env):
+        env = config_sys_run_env.copy()
         env["ROCPROFSYS_SELECTED_REGIONS"] = "Region1"
         result = self.run_test(
             "binary_rewrite",
@@ -177,8 +170,8 @@ class TestSelectiveRegionsConfig(RocprofsysTest):
         self._assert_region1_filtered(result, check_rocpd=False)
 
     @pytest.mark.ci_disable("all")
-    def test_runtime_instrument_with_region_filter(self, manual_sys_run_env):
-        env = manual_sys_run_env.copy()
+    def test_runtime_instrument_with_region_filter(self, config_sys_run_env):
+        env = config_sys_run_env.copy()
         env["ROCPROFSYS_SELECTED_REGIONS"] = "Region1"
         inst = self.run_test(
             "runtime_instrument",
@@ -196,8 +189,8 @@ class TestSelectiveRegionsConfig(RocprofsysTest):
         )
         self._assert_region1_filtered(result, check_rocpd=False)
 
-    def test_unknown_region_name_excludes_kernels(self, manual_sys_run_env):
-        env = manual_sys_run_env.copy()
+    def test_unknown_region_name_excludes_kernels(self, config_sys_run_env):
+        env = config_sys_run_env.copy()
         env["ROCPROFSYS_SELECTED_REGIONS"] = "BadRegion"
         result = self.run_test(
             "sys_run",
@@ -219,8 +212,8 @@ class TestSelectiveRegionsConfig(RocprofsysTest):
         pass
 
     @pytest.mark.openmp
-    def test_openmp_hotphase_region_filter(self, manual_sys_run_env):
-        env = manual_sys_run_env.copy()
+    def test_openmp_hotphase_region_filter(self, config_sys_run_env):
+        env = config_sys_run_env.copy()
         env["ROCPROFSYS_USE_OMPT"] = "ON"
         env["ROCPROFSYS_SELECTED_REGIONS"] = "HotPhase"
         result = self.run_test(
@@ -246,8 +239,8 @@ class TestSelectiveRegionsConfig(RocprofsysTest):
             )
 
     @pytest.mark.mpi_optional("selective_region")
-    def test_mpi_multirank_region_filter(self, manual_sys_run_env):
-        env = manual_sys_run_env.copy()
+    def test_mpi_multirank_region_filter(self, config_sys_run_env):
+        env = config_sys_run_env.copy()
         env["ROCPROFSYS_USE_MPIP"] = "ON"
         env["ROCPROFSYS_SELECTED_REGIONS"] = "Region1"
         result = self.run_test(
@@ -260,8 +253,8 @@ class TestSelectiveRegionsConfig(RocprofsysTest):
         )
         self._assert_region1_filtered(result, check_rocpd=False)
 
-    def test_pushpop_ranges_ignore_region_filter(self, manual_sys_run_env):
-        env = manual_sys_run_env.copy()
+    def test_pushpop_ranges_ignore_region_filter(self, config_sys_run_env):
+        env = config_sys_run_env.copy()
         env["ROCPROFSYS_SELECTED_REGIONS"] = "Region1"
         result = self.run_test(
             "sys_run",
@@ -278,14 +271,14 @@ class TestSelectiveRegionsConfig(RocprofsysTest):
                 fail_regex=_REGION1_KERNELS_PASS,
             )
 
-    @pytest.mark.rocpd("manual_sys_run_env")
+    @pytest.mark.rocpd("config_sys_run_env")
     def test_rocpd_with_region_filter(
         self,
-        manual_sys_run_env,
+        config_sys_run_env,
         selective_regions_rocpd_rules,
         assert_no_leakage_outside_regions,
     ):
-        env = manual_sys_run_env.copy()
+        env = config_sys_run_env.copy()
         env["ROCPROFSYS_SELECTED_REGIONS"] = "Region1"
         result = self.run_test(
             "sys_run",
