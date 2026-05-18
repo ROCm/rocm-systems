@@ -199,11 +199,15 @@ template <class T, template <typename> class Op> class ReduceSyncBenchmark
 };
 
 template <class T, template <typename> class Op>
-void checkResults(T* d_lhs, T* d_rhs, size_t numBytes, unsigned long long mask) {
+void checkResults(T* d_lhs, T* d_rhs,
+                  size_t numBytes,
+                  unsigned long long mask,
+                  AggregationType aggType) {
   using namespace Catch::Matchers;
   LinearAllocGuard<T> h_lhs(LinearAllocs::malloc, numBytes);
   LinearAllocGuard<T> h_rhs(LinearAllocs::malloc, numBytes);
   bool memcmpResult;
+  std::string opName = opToString<T, Op<T>>();
 
   assert(numBytes % sizeof(T) == 0 && "numBytes needs to be a multiple of sizeof(T)");
   HIP_CHECK(hipMemcpy(h_lhs.ptr(), d_lhs, numBytes, hipMemcpyDeviceToHost));
@@ -214,6 +218,11 @@ void checkResults(T* d_lhs, T* d_rhs, size_t numBytes, unsigned long long mask) 
     for (int i = 0; i < numBytes / sizeof(T); i++) {
       auto& lhsResult = h_lhs.ptr()[i];
       auto& rhsResult = h_rhs.ptr()[i];
+      INFO(" mask: 0x" << std::hex << mask);
+      INFO(" index: " << i);
+      INFO(" operator: " << opName);
+      INFO(" when checking: " << aggregationTypeToStr(aggType));
+
 
       if constexpr (std::is_integral<T>::value || std::is_same<Op<T>, MinOp<T>>::value ||
                     std::is_same<Op<T>, MaxOp<T>>::value)
@@ -421,26 +430,32 @@ template <class T, template <typename> class Op> struct ReduceBenchmark {
       benchmarkReduce.Run((d_outputReduce++)->ptr(), d_input.ptr(), numItems, mask.second);
     }
 
+    printf("\n--- reduce cooperative groups %s %s--- \n", opStr, typeStr);
+    benchmarkCoop<T, Op, AggregationType::Reduce>(d_outputCoop, d_input, masks, numItems);
+    printf("\n");
+
     if constexpr (HasAtomicOps<T>::value) {
       printf("Checking results...\n");
 
       for (const auto& mask : masks) {
-        checkResults<T, Op>(d_outputsAtomic[pos].ptr(), d_outputsReduce[pos].ptr(), outputNumBytes,
-                            mask.second);
+        checkResults<T, Op>(d_outputsAtomic[pos].ptr(),
+                            d_outputsReduce[pos].ptr(),
+                            outputNumBytes,
+                            mask.second,
+                            AggregationType::Reduce);
 
-        // allButOne is not supported in tiled cooperative groups; all the threads of the tile must
-        // be active
         if (mask.second != allButOne) {
-          checkResults<T, Op>(d_outputsReduce[pos].ptr(), d_outputsCoop[pos].ptr(), outputNumBytes,
-                              mask.second);
+          // allButOne is not supported in tiled cooperative groups; all the threads of the tile must
+          // be active
+          checkResults<T, Op>(d_outputsReduce[pos].ptr(),
+                              d_outputsCoop[pos].ptr(),
+                              outputNumBytes,
+                              mask.second,
+                              AggregationType::Reduce);
         }
         pos++;
       }
     }
-
-    printf("\n--- reduce cooperative groups %s %s--- \n", opStr, typeStr);
-    benchmarkCoop<T, Op, AggregationType::Reduce>(d_outputCoop, d_input, masks, numItems);
-    printf("\n");
 
     printf("\n--- inclusive scan cooperative groups %s %s--- \n", opStr, typeStr);
     benchmarkCoop<T, Op, AggregationType::InclusiveScan>(d_outputCoop, d_input, masks, numItems);
