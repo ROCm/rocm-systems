@@ -5380,10 +5380,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisAddressRelated) {
  *  - HIP_VERSION >= 6.2
  */
 HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisManagedMemory) {
-  if (HipTest::HmmAttrPrint() != 1) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   void* hipMallocManaged_ptr = nullptr;
   void* hipMemPrefetchAsync_ptr = nullptr;
