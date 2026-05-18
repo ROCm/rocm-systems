@@ -964,13 +964,14 @@ void VCvtNearestI32F32Vop1::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     vdst.write_lane(wf, lane, [&]() -> uint32_t {
       float s = std::bit_cast<float>(static_cast<uint32_t>(src0.read_lane(wf, lane)));
-      if (std::isnan(s))
+      float r = std::ceil(s - 0.5f);
+      if (std::isnan(r))
         return 0u;
-      if (s >= 2147483648.0f)
+      if (r >= 2147483648.0f)
         return static_cast<uint32_t>(INT32_MAX);
-      if (s < -2147483648.0f)
+      if (r < -2147483648.0f)
         return static_cast<uint32_t>(INT32_MIN);
-      return static_cast<uint32_t>(static_cast<int32_t>(s));
+      return static_cast<uint32_t>(static_cast<int32_t>(r));
     }());
   }
   src0.clear_delegate();
@@ -1052,13 +1053,14 @@ void VCvtFloorI32F32Vop1::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     vdst.write_lane(wf, lane, [&]() -> uint32_t {
       float s = std::bit_cast<float>(static_cast<uint32_t>(src0.read_lane(wf, lane)));
-      if (std::isnan(s))
+      float r = std::floor(s);
+      if (std::isnan(r))
         return 0u;
-      if (s >= 2147483648.0f)
+      if (r >= 2147483648.0f)
         return static_cast<uint32_t>(INT32_MAX);
-      if (s < -2147483648.0f)
+      if (r < -2147483648.0f)
         return static_cast<uint32_t>(INT32_MIN);
-      return static_cast<uint32_t>(static_cast<int32_t>(s));
+      return static_cast<uint32_t>(static_cast<int32_t>(r));
     }());
   }
   src0.clear_delegate();
