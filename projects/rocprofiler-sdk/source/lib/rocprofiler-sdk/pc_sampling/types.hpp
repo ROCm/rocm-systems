@@ -77,7 +77,7 @@ struct PCSAgentSession
     // Returns true if this session was created via the v2 API
     bool is_v2_api() const { return !requested_record_kinds.empty(); }
 
-    // Returns the valid version record kind (V0-V5) if configured via v2 API,
+    // Returns the valid version record kind (V0-V4) if configured via v2 API,
     // or ROCPROFILER_PC_SAMPLING_RECORD_NONE if not applicable.
     rocprofiler_pc_sampling_record_kind_t get_valid_record_kind() const
     {

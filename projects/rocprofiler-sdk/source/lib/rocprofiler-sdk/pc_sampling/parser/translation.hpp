@@ -214,9 +214,8 @@ template <typename PcSamplingRecordT, typename SType>
 inline PcSamplingRecordT
 copySampleHeader(const SType& sample)
 {
-    PcSamplingRecordT ret;
-    // zero out all record fields
-    std::memset(&ret, 0, sizeof(PcSamplingRecordT));
+    // value-init zeroes out all record fields
+    PcSamplingRecordT ret{};
 
     // Decode fields common for all host-trap and stochastic on all architectures.
     ret.size          = sizeof(PcSamplingRecordT);
@@ -452,8 +451,8 @@ template <typename PcSamplingRecordT, typename SType>
 inline PcSamplingRecordT
 copySampleCommon(const SType& sample)
 {
-    PcSamplingRecordT ret;
-    std::memset(&ret, 0, sizeof(PcSamplingRecordT));
+    // value-init zeroes out all record fields
+    PcSamplingRecordT ret{};
     ret.exec_mask = sample.exec_mask;
     ret.timestamp = sample.timestamp;
     return ret;
@@ -837,7 +836,7 @@ copySample<GFX1250, rocprofiler_pc_sampling_record_v3_t>(const void* sample)
     ret.workgroup_position.x = s.workgroup_id_x;
     ret.workgroup_position.y = s.workgroup_id_y;
     ret.workgroup_position.z = s.workgroup_id_z;
-    // Cluster fields are zero-initialized by copySampleCommon (memset 0)
+    // Cluster fields are zero-initialized by copySampleCommon (value-init)
     // and will be populated when cluster support is available in the hardware.
     return ret;
 }
@@ -869,7 +868,7 @@ copySample<GFX1250, rocprofiler_pc_sampling_record_v4_t>(const void* sample)
     ret.workgroup_position.y = s.workgroup_id_y;
     ret.workgroup_position.z = s.workgroup_id_z;
 
-    // Cluster fields are zero-initialized by copySampleCommon (memset 0)
+    // Cluster fields are zero-initialized by copySampleCommon (value-init)
     // and will be populated when cluster support is available in the hardware.
 
     // Populate snapshot_information
