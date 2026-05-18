@@ -383,6 +383,12 @@ static ncclResult_t doLaunches(struct ncclComm* head) {
             CUDACHECKGOTO(cudaSetDevice(comm->cudaDev), result, failure);
             NCCLCHECKGOTO(ncclLaunchKernelBefore_NoUncapturedCuda(comm, plan), result, failure);
             if (plan->isCeColl) {
+              // CE collectives use copy-engine / DMA paths, not the compute
+              // kernels initialized by ncclInitKernelsForDevice. The lazy-init
+              // gate intentionally lives only in ncclLaunchKernel below: if a
+              // CE collective is the first launch on a (process, device), no
+              // lazy init runs (none is required), and any subsequent non-CE
+              // launch will still fire the gate normally.
               NCCLCHECKGOTO(ncclLaunchCeColl(comm, plan), result, failure);
             } else if (plan->isRma) {
               NCCLCHECKGOTO(ncclLaunchRma(comm, plan), result, failure);

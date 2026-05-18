@@ -21,6 +21,12 @@
 void* rcclGetKernelIndex(int unroll, bool useCollTrace, struct ncclTaskColl* task = NULL);
 
 ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* maxStackSize);
+// Applies cudaLimitStackSize on the current device using maxLocalSizeBytes
+// returned by ncclInitKernelsForDevice. Shared between the eager init path
+// in ncclCommInitRankFunc and the lazy init path in ncclLaunchKernel. No
+// comm pointer is needed: the call is purely device-scoped and runs on the
+// current CUDA device (set by the caller via cudaSetDevice/launch context).
+ncclResult_t applyKernelStackLimits(const char* archName, size_t maxLocalSizeBytes);
 ncclResult_t ncclEnqueueCheck(struct ncclInfo* info);
 ncclResult_t ncclLaunchPrepare(struct ncclComm* comm);
 ncclResult_t ncclLaunchKernelBefore_NoUncapturedCuda(struct ncclComm* comm, struct ncclKernelPlan* plan);

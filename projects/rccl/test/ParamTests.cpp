@@ -6,6 +6,10 @@
 #include <rccl/rccl.h>
 #include "common/ProcessIsolatedTestRunner.hpp"
 
+// Forward-declare rcclParamLazyKernelInit() in the global namespace so the
+// regression test below can call into the same symbol that init.cc defines.
+RCCL_PARAM_DECLARE(LazyKernelInit);
+
 namespace RcclUnitTesting {
 TEST(ParamTests, initEnv_ParseValidConfFile) {
   // Skip the test if NCCL_CONF_FILE is not set
@@ -54,5 +58,51 @@ TEST(ParamTests, ncclLoadParam_InvalidParam) {
           ASSERT_EQ(cache, defaultVal); // Cache should be set to default value
       }
   );
+}
+
+// Regression test for the lazy kernel-init env-var alias: the original PR
+// declared the param with RCCL_PARAM, which only honored RCCL_LAZY_KERNEL_INIT
+// even though the commit message advertised NCCL_LAZY_KERNEL_INIT as well.
+// The fix switches to RCCL_PARAM_NCCL_ALIAS; this test pins that contract.
+TEST(ParamTests, LazyKernelInit_NcclAlias_IsRead) {
+  // ncclLoadParam reads via getenv; since rcclParamLazyKernelInit caches its
+  // result in a function-local static, we run inside an isolated subprocess
+  // so each variant gets a clean cache.
+  RUN_ISOLATED_TEST(
+      "LazyKernelInit_NcclAlias_OnlyNcclSet",
+      []()
+      {
+          unsetenv("RCCL_LAZY_KERNEL_INIT");
+          setenv("NCCL_LAZY_KERNEL_INIT", "1", 1);
+          ASSERT_EQ(rcclParamLazyKernelInit(), 1);
+          unsetenv("NCCL_LAZY_KERNEL_INIT");
+      });
+  RUN_ISOLATED_TEST(
+      "LazyKernelInit_NcclAlias_OnlyRcclSet",
+      []()
+      {
+          unsetenv("NCCL_LAZY_KERNEL_INIT");
+          setenv("RCCL_LAZY_KERNEL_INIT", "1", 1);
+          ASSERT_EQ(rcclParamLazyKernelInit(), 1);
+          unsetenv("RCCL_LAZY_KERNEL_INIT");
+      });
+  RUN_ISOLATED_TEST(
+      "LazyKernelInit_NcclAlias_RcclWinsOverNccl",
+      []()
+      {
+          setenv("RCCL_LAZY_KERNEL_INIT", "0", 1);
+          setenv("NCCL_LAZY_KERNEL_INIT", "1", 1);
+          ASSERT_EQ(rcclParamLazyKernelInit(), 0);
+          unsetenv("RCCL_LAZY_KERNEL_INIT");
+          unsetenv("NCCL_LAZY_KERNEL_INIT");
+      });
+  RUN_ISOLATED_TEST(
+      "LazyKernelInit_NcclAlias_DefaultIsZero",
+      []()
+      {
+          unsetenv("RCCL_LAZY_KERNEL_INIT");
+          unsetenv("NCCL_LAZY_KERNEL_INIT");
+          ASSERT_EQ(rcclParamLazyKernelInit(), 0);
+      });
 }
 } // namespace RcclUnitTesting

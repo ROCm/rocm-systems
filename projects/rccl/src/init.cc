@@ -192,7 +192,15 @@ RCCL_PARAM( InitChannels, "INIT_CHANNELS", -1) ;
 // Defer ncclInitKernelsForDevice from init to first ncclLaunchKernel.
 // On large-scale (32n+) the eager init triggers HSA code-object load (~1.2s);
 // deferring it amortizes that cost into the first collective launch.
-RCCL_PARAM(LazyKernelInit, "LAZY_KERNEL_INIT", 0);
+// Accepts both NCCL_LAZY_KERNEL_INIT and RCCL_LAZY_KERNEL_INIT (RCCL_ wins
+// when both are set).
+// NOTE: not compatible with cudaDeviceReset() between communicator lifetimes
+// in the same process. The per-device CAS gate (g_rcclLazyKernelInitState) is
+// process-static and survives a device reset, while the underlying HSA code
+// objects do not — subsequent launches would skip re-init and surface as
+// opaque HSA errors. Workflows that rely on cudaDeviceReset must keep
+// RCCL_LAZY_KERNEL_INIT unset (default).
+RCCL_PARAM_NCCL_ALIAS(LazyKernelInit, "LAZY_KERNEL_INIT", 0);
 
 // GDRCOPY support: Off by default
 NCCL_PARAM(GdrCopyEnable, "GDRCOPY_ENABLE", 0);
@@ -2370,6 +2378,30 @@ fail:
   goto exit;
 }
 
+// Apply cudaLimitStackSize for the current device using the maxLocalSize
+// reported by ncclInitKernelsForDevice. Shared between the eager init path
+// and the lazy init path (called from ncclLaunchKernel) so the same stack
+// configuration is applied regardless of when kernel init actually runs.
+ncclResult_t applyKernelStackLimits(const char* archName, size_t maxLocalSizeBytes) {
+#ifdef USE_INDIRECT_FUNCTION_CALL
+  if (ncclParamSetStackSize() == 1 && !IsArchMatch(archName,"gfx942") && !IsArchMatch(archName,"gfx950")) {
+    int64_t stackSize = rcclParamStackSizeOverride() ? rcclParamStackSizeOverride() : (int64_t)maxLocalSizeBytes;
+    if (stackSize == 0) {
+      stackSize = IsArchMatch(archName,"gfx906") ? 1024 : 512;
+    }
+    INFO(NCCL_INIT, "Setting cudaLimitStackSize to %zi maxLocalSizeBytes %zi", (ssize_t)stackSize, maxLocalSizeBytes);
+    CUDACHECKIGNORE(cudaDeviceSetLimit(cudaLimitStackSize, stackSize));
+  }
+#else
+  (void)archName;
+#endif
+  if (maxLocalSizeBytes > 0 && ncclParamSetStackSize() == 1) {
+    TRACE(NCCL_INIT, "Setting cudaLimitStackSize to %zu", maxLocalSizeBytes);
+    CUDACHECKIGNORE(cudaDeviceSetLimit(cudaLimitStackSize, maxLocalSizeBytes));
+  }
+  return ncclSuccess;
+}
+
 static ncclResult_t getParentRanks(int parentRanks, int parentRank, int* excludeRanksList, int excludeRanksCount, int* nRanksRet, int* myRankRet, int* parentRanksRet) {
   int count = 0, j = 0;
   for (int i = 0; i < parentRanks; i++) {
@@ -2402,10 +2434,6 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   int cuCount;
   hipDeviceProp_t devProp;
 
-  #ifdef USE_INDIRECT_FUNCTION_CALL
-  int64_t stackSize;
-  #endif
-
   timers[TIMER_INIT_TOTAL] = clockNano();
   CUDACHECKGOTO(cudaSetDevice(cudaDev), res, fail);
   CUDACHECKGOTO(cudaDeviceGetAttribute(&maxSharedMem, cudaDevAttrMaxSharedMemoryPerBlockOptin, cudaDev), res, fail);
@@ -2422,36 +2450,10 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     goto fail;
   }
 
-  comm->maxSharedMem = maxSharedMem; // saved for possible lazy kernel init
-  timers[TIMER_INIT_KERNELS] = clockNano();
-  if (rcclParamLazyKernelInit() == 0) {
-    NCCLCHECK(ncclInitKernelsForDevice(cudaArch, maxSharedMem, &maxLocalSizeBytes));
-    // Set the maximum kernel stack size of all kernels to avoid
-    // a CUDA memory reconfig on load (c.f. NVSHMEM issue)
-#ifdef USE_INDIRECT_FUNCTION_CALL
-    if (ncclParamSetStackSize() == 1 && !IsArchMatch(archName,"gfx942") && !IsArchMatch(archName,"gfx950")) {
-      stackSize = rcclParamStackSizeOverride() ? rcclParamStackSizeOverride() : maxLocalSizeBytes;
-      if (stackSize == 0) {
-        if (IsArchMatch(archName,"gfx906"))
-          stackSize = 1024;
-        else
-          stackSize = 512;
-      }
-      INFO(NCCL_INIT, "Setting cudaLimitStackSize to %zi maxLocalSizeBytes %zi", stackSize, maxLocalSizeBytes);
-      CUDACHECKIGNORE(cudaDeviceSetLimit(cudaLimitStackSize, stackSize));
-    }
-#endif
-    if (maxLocalSizeBytes > 0 && ncclParamSetStackSize() == 1) {
-      TRACE(NCCL_INIT, "Setting cudaLimitStackSize to %zu", maxLocalSizeBytes);
-      CUDACHECKIGNORE(cudaDeviceSetLimit(cudaLimitStackSize, maxLocalSizeBytes));
-    }
-  }
-  timers[TIMER_INIT_KERNELS] = clockNano() - timers[TIMER_INIT_KERNELS];
-  INFO(NCCL_INIT | NCCL_BOOTSTRAP | NCCL_PROFILE,
-       "PreBoot timings rank %d kernels_us %llu lazy %d",
-       job->myrank, (unsigned long long)(timers[TIMER_INIT_KERNELS] / 1000),
-       (int)rcclParamLazyKernelInit());
-
+  // NOTE: kernel init (eager or lazy) and comm->maxSharedMem assignment are
+  // deferred until after the parent/NOCOLOR exit so we do not deref a NULL
+  // comm for NCCL_SPLIT_NOCOLOR child jobs, and so the PreBoot INFO line
+  // below sees the populated job->myrank for split children.
   if (job->parent && !job->isGrow) {
     // SPLIT/SHRINK: use bootstrapSplit
     NCCLCHECKGOTO(ncclCalloc(&parentRanks, job->parent->nRanks), res, fail);
@@ -2509,10 +2511,34 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   }
   comm->cudaArch = cudaArch;
   comm->archName = archName;
+  comm->maxSharedMem = maxSharedMem; // saved for possible lazy kernel init
   comm->cuCount = cuCount;
   // [RCCL] Host mirrors of device side NCCL_LL128_LINEELEMS / NCCL_LL128_DATAELEMS
   comm->ll128LineElems = rcclLL128LineElemsFromArch(comm->archName);
   comm->ll128DataElems = rcclLL128DataElemsFromArch(comm->archName);
+
+  timers[TIMER_INIT_KERNELS] = clockNano();
+  if (rcclParamLazyKernelInit() == 0) {
+    NCCLCHECK(ncclInitKernelsForDevice(cudaArch, maxSharedMem, &maxLocalSizeBytes));
+    // Set the maximum kernel stack size of all kernels to avoid
+    // a CUDA memory reconfig on load (c.f. NVSHMEM issue).
+    NCCLCHECK(applyKernelStackLimits(archName, maxLocalSizeBytes));
+  } else {
+    // Lazy mode: validate that comm->cudaDev fits in the per-device CAS-gate
+    // table here, at init time, so a misconfigured device fails fast with a
+    // clear error instead of surfacing later on the first ncclLaunchKernel.
+    if (comm->cudaDev < 0 || comm->cudaDev >= MAX_ALLOC_TRACK_NGPU) {
+      WARN("LazyKernelInit: cudaDev %d out of range [0,%d); cannot lazily init kernels",
+           comm->cudaDev, MAX_ALLOC_TRACK_NGPU);
+      res = ncclInvalidUsage;
+      goto fail;
+    }
+  }
+  timers[TIMER_INIT_KERNELS] = clockNano() - timers[TIMER_INIT_KERNELS];
+  INFO(NCCL_INIT | NCCL_BOOTSTRAP | NCCL_PROFILE,
+       "PreBoot timings rank %d kernels_us %llu lazy %d",
+       job->myrank, (unsigned long long)(timers[TIMER_INIT_KERNELS] / 1000),
+       (int)rcclParamLazyKernelInit());
 
   NCCLCHECKGOTO(initTransportsRank(comm, job->parent, timers), res, fail);
 
