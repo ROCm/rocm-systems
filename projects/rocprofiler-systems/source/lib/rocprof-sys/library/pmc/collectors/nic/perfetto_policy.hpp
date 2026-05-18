@@ -61,12 +61,12 @@ inline std::map<std::uint32_t, nic_track_description>
 make_default_nic_tracks()
 {
     return {
-        { RX_RDMA_UCAST_BYTES_VALUE, { "RX RDMA Bytes", "bytes", 0 } },
-        { TX_RDMA_UCAST_BYTES_VALUE, { "TX RDMA Bytes", "bytes", 0 } },
-        { RX_RDMA_UCAST_PKTS_VALUE, { "RX RDMA Pkts", "packets", 0 } },
-        { TX_RDMA_UCAST_PKTS_VALUE, { "TX RDMA Pkts", "packets", 0 } },
-        { RX_RDMA_CNP_PKTS_VALUE, { "RX CNP Pkts", "packets", 0 } },
-        { TX_RDMA_CNP_PKTS_VALUE, { "TX CNP Pkts", "packets", 0 } },
+        { RX_RDMA_UCAST_BYTES_VALUE, { "RX RDMA BYTES", "bytes", 0 } },
+        { TX_RDMA_UCAST_BYTES_VALUE, { "TX RDMA BYTES", "bytes", 0 } },
+        { RX_RDMA_UCAST_PKTS_VALUE, { "RX RDMA PACKETS", "packets", 0 } },
+        { TX_RDMA_UCAST_PKTS_VALUE, { "TX RDMA PACKETS", "packets", 0 } },
+        { RX_RDMA_CNP_PKTS_VALUE, { "RX CNP PACKETS", "packets", 0 } },
+        { TX_RDMA_CNP_PKTS_VALUE, { "TX CNP PACKETS", "packets", 0 } },
         { TX_RDMA_ACK_TIMEOUT_VALUE, { "TX ACK TIMEOUT", "timeouts", 0 } },
         { RESP_TX_PKT_SEQ_ERR_VALUE, { "RESP TX PKT SEQ ERR", "errors", 0 } },
         { REQ_RX_PKT_SEQ_ERR_VALUE, { "REQ RX PKT SEQ ERR", "errors", 0 } },
