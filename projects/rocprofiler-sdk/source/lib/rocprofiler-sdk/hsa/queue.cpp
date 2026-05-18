@@ -299,9 +299,9 @@ bit_extract(Integral x, int first, int last)
  * interceptor by invoking the writer function.
  */
 void
-WriteInterceptor(const void* packets,
-                 uint64_t    pkt_count,
-                 uint64_t,
+WriteInterceptor(const void*                           packets,
+                 uint64_t                              pkt_count,
+                 uint64_t                              user_pkt_index,
                  void*                                 data,
                  hsa_amd_queue_intercept_packet_writer writer)
 {
@@ -311,7 +311,8 @@ WriteInterceptor(const void* packets,
         return;
     }
 
-    ROCP_TRACE << fmt::format("WriteInterceptor called with pkt_count={}", pkt_count);
+    ROCP_TRACE << fmt::format(
+        "WriteInterceptor called with pkt_count={}, user_pkt_index={}", pkt_count, user_pkt_index);
 
     using callback_record_t = packet_data_t::callback_record_t;
     using packet_vector_t   = common::container::small_vector<rocprofiler_packet, 512>;
@@ -343,28 +344,70 @@ WriteInterceptor(const void* packets,
         return;
     }
 
-    const auto* packets_arr          = static_cast<const rocprofiler_packet*>(packets);
-    auto        num_dispatch_packets = size_t{0};
-    for(size_t i = 0; i < pkt_count; ++i)
+    // HSA queues are power-of-two ring buffers. When (user_pkt_index mod queue_size) + pkt_count
+    // exceeds queue_size, the batch wraps around to the start of the ring, so the linear
+    // `packets` pointer cannot be indexed past the wrap point — doing so reads unmapped memory.
+    const auto*    hsa_queue   = queue.intercept_queue();
+    const uint64_t queue_size  = hsa_queue->size;
+    const uint64_t queue_mask  = queue_size - 1;
+    const auto*    packets_arr = static_cast<const rocprofiler_packet*>(packets);
+    const uint64_t base_index  = user_pkt_index & queue_mask;
+    const bool     would_wrap  = (base_index + pkt_count) > queue_size;
+
+    // Fast path: no wrap, use packets_arr directly
+    auto num_dispatch_packets = size_t{0};
+    if(!would_wrap)
     {
-        const auto& original_packet = packets_arr[i].kernel_dispatch;
-        auto        packet_type     = bit_extract(original_packet.header,
-                                       HSA_PACKET_HEADER_TYPE,
-                                       HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
-        if(packet_type == HSA_PACKET_TYPE_KERNEL_DISPATCH)
+        for(size_t i = 0; i < pkt_count; ++i)
         {
-            ++num_dispatch_packets;
-        }
-#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
-        else if(packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC)
-        {
-            const auto& ext_packet = packets_arr[i].ext_kernel_dispatch;
-            if(ext_packet.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH)
+            const auto& original_packet = packets_arr[i].kernel_dispatch;
+            auto        packet_type =
+                bit_extract(original_packet.header,
+                            HSA_PACKET_HEADER_TYPE,
+                            HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
+            if(packet_type == HSA_PACKET_TYPE_KERNEL_DISPATCH)
             {
                 ++num_dispatch_packets;
             }
-        }
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
+            else if(packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC)
+            {
+                const auto& ext_packet = packets_arr[i].ext_kernel_dispatch;
+                if(ext_packet.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH)
+                {
+                    ++num_dispatch_packets;
+                }
+            }
 #endif
+        }
+    }
+    else
+    {
+        // Slow path: handle ring buffer wrap
+        const auto* queue_base = static_cast<const rocprofiler_packet*>(hsa_queue->base_address);
+        for(size_t i = 0; i < pkt_count; ++i)
+        {
+            const auto& original_packet = queue_base[(base_index + i) & queue_mask].kernel_dispatch;
+            auto        packet_type =
+                bit_extract(original_packet.header,
+                            HSA_PACKET_HEADER_TYPE,
+                            HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
+            if(packet_type == HSA_PACKET_TYPE_KERNEL_DISPATCH)
+            {
+                ++num_dispatch_packets;
+            }
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
+            else if(packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC)
+            {
+                const auto& ext_packet =
+                    queue_base[(base_index + i) & queue_mask].ext_kernel_dispatch;
+                if(ext_packet.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH)
+                {
+                    ++num_dispatch_packets;
+                }
+            }
+#endif
+        }
     }
 
     if(num_dispatch_packets == 0)
@@ -755,7 +798,20 @@ WriteInterceptor(const void* packets,
         ROCP_TRACE_IF(pkt_count > 1) << fmt::format(
             "[{}] Batching packets. Number of packets = {}", __FUNCTION__, pkt_count);
 
-        process_packet_batch(packets_arr, pkt_count, [&writer](packet_vector_t&& _packets) {
+        // process_packet_batch needs contiguous memory. Pass packets_arr directly when no wrap;
+        // otherwise stage the wrapped slice into a contiguous buffer first.
+        const rocprofiler_packet* batch_ptr = packets_arr;
+        auto                      staged    = packet_vector_t{};
+        if(would_wrap)
+        {
+            const auto* queue_base =
+                static_cast<const rocprofiler_packet*>(hsa_queue->base_address);
+            staged.reserve(pkt_count);
+            for(size_t i = 0; i < pkt_count; ++i)
+                staged.emplace_back(queue_base[(base_index + i) & queue_mask]);
+            batch_ptr = staged.data();
+        }
+        process_packet_batch(batch_ptr, pkt_count, [&writer](packet_vector_t&& _packets) {
             writer(_packets.data(), _packets.size());
         });
     }
@@ -768,15 +824,31 @@ WriteInterceptor(const void* packets,
                            pkt_count);
 
         auto transformed_packets = packet_vector_t{};
-
-        for(size_t i = 0; i < pkt_count; ++i)
+        if(!would_wrap)
         {
-            process_packet_batch(
-                &packets_arr[i], 1, [&transformed_packets](packet_vector_t&& _packets) {
+            for(size_t i = 0; i < pkt_count; ++i)
+            {
+                process_packet_batch(
+                    &packets_arr[i], 1, [&transformed_packets](packet_vector_t&& _packets) {
+                        transformed_packets.insert(transformed_packets.end(),
+                                                   std::make_move_iterator(_packets.begin()),
+                                                   std::make_move_iterator(_packets.end()));
+                    });
+            }
+        }
+        else
+        {
+            const auto* queue_base =
+                static_cast<const rocprofiler_packet*>(hsa_queue->base_address);
+            for(size_t i = 0; i < pkt_count; ++i)
+            {
+                const auto& pkt = queue_base[(base_index + i) & queue_mask];
+                process_packet_batch(&pkt, 1, [&transformed_packets](packet_vector_t&& _packets) {
                     transformed_packets.insert(transformed_packets.end(),
                                                std::make_move_iterator(_packets.begin()),
                                                std::make_move_iterator(_packets.end()));
                 });
+            }
         }
         writer(transformed_packets.data(), transformed_packets.size());
     }
@@ -854,11 +926,6 @@ Queue::Queue(const AgentCache&  agent,
             });
     }
 
-    ROCP_HSA_TABLE_CALL(
-        FATAL,
-        _ext_api.hsa_amd_queue_intercept_register_fn(_intercept_queue, WriteInterceptor, this))
-        << "Could not register interceptor";
-
     create_signal(0, &ready_signal, false);
     create_signal(0, &block_signal, false);
     create_signal(0, &_active_kernels, false);
@@ -867,6 +934,14 @@ Queue::Queue(const AgentCache&  agent,
     *queue = _intercept_queue;
 
     (void) get_signal_pool();  // ensure the signal pool is constructed for this queue
+
+    // The intercept queue may dispatch packets immediately once the interceptor is registered, so
+    // register it last — after all signals and the signal pool are fully constructed. Otherwise
+    // WriteInterceptor can race with construction and observe null/uninitialized signal state.
+    ROCP_HSA_TABLE_CALL(
+        FATAL,
+        _ext_api.hsa_amd_queue_intercept_register_fn(_intercept_queue, WriteInterceptor, this))
+        << "Could not register interceptor";
 }
 
 Queue::Queue(
@@ -909,8 +984,6 @@ Queue::Queue(
             });
     }
 
-    set_write_interceptor(WriteInterceptor, this);
-
     create_signal(0, &ready_signal, false);
     create_signal(0, &block_signal, false);
     create_signal(0, &_active_kernels, false);
@@ -918,6 +991,10 @@ Queue::Queue(
     _core_api.hsa_signal_store_screlease_fn(_active_kernels, 0);
 
     (void) get_signal_pool();  // ensure the signal pool is constructed for this queue
+
+    // Since this is an active queue, the write interceptor may be called immediately, so this needs
+    // to appear after signal construction.
+    set_write_interceptor(WriteInterceptor, this);
 }
 
 Queue::~Queue()

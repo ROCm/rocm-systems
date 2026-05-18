@@ -96,14 +96,21 @@ ring_buffer::init(size_t _size)
     m_read_count  = 0;
     m_write_count = 0;
 
-    // Map twice the buffer size.
     if((m_ptr =
             mmap(nullptr, m_size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0)) ==
        MAP_FAILED)
     {
-        destroy();
         auto _err = errno;
-        ROCP_FATAL << fmt::format("mmap failed with errno {} :: {}", _err, strerror(_err));
+        m_ptr     = nullptr;  // Set to nullptr before destroy() to avoid munmap(MAP_FAILED)
+        destroy();
+        // Leave the buffer in an empty/uninitialized state and let callers detect this
+        // via m_ptr == nullptr. Aborting the process here would lose every other piece
+        // of profiling data the tool already collected, which is much worse than
+        // skipping a single corrupt or missing on-disk record.
+        ROCP_WARNING << fmt::format("mmap failed with errno {} :: {} (requested size = {} bytes)",
+                                    _err,
+                                    strerror(_err),
+                                    _size);
     }
 }
 
@@ -234,11 +241,20 @@ ring_buffer::load(std::fstream& _fs)
     size_t _write_count = 0;
     size_t _size        = 0;
 
-    _fs.read(reinterpret_cast<char*>(&_size), sizeof(_size));
+    // A short/failed read, an empty record, or a corrupted size would feed an unusable
+    // value into init() and trip mmap(EINVAL) inside a FATAL log. Treat all of these as
+    // an empty buffer instead. The 16 GiB upper bound is generous: real buffers are
+    // sized to small multiples of the page size.
+    constexpr size_t k_max_reasonable_size = static_cast<size_t>(16) << 30;
+    if(!_fs.read(reinterpret_cast<char*>(&_size), sizeof(_size)) || _size == 0 ||
+       _size > k_max_reasonable_size)
+        return;
 
     init(_size);
 
-    if(!m_ptr) throw std::bad_alloc{};
+    // mmap may have failed inside init(); skip the rest of the load and let the buffer
+    // appear empty to the caller rather than aborting the whole tool.
+    if(!m_ptr) return;
 
     _fs.read(reinterpret_cast<char*>(&_read_count), sizeof(_read_count));
     _fs.read(reinterpret_cast<char*>(&_write_count), sizeof(_write_count));
