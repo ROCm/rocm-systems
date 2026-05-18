@@ -2570,11 +2570,9 @@ inline void execute_v_bfe_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
     if (!(exec & (1ULL << lane)))
       continue;
     inst.vdst.write_lane(wf, lane, [&]() -> uint32_t {
-      auto src = static_cast<int32_t>(static_cast<int32_t>(inst.src0.read_lane(wf, lane)));
-      auto off_w = static_cast<int32_t>(inst.src1.read_lane(wf, lane));
-      (void)static_cast<int32_t>(inst.src2.read_lane(wf, lane));
-      uint32_t off = off_w & 31u;
-      uint32_t w = (off_w >> 16) & 0x7Fu;
+      int32_t src = static_cast<int32_t>(static_cast<int32_t>(inst.src0.read_lane(wf, lane)));
+      uint32_t off = static_cast<int32_t>(inst.src1.read_lane(wf, lane)) & 31u;
+      uint32_t w = static_cast<int32_t>(inst.src2.read_lane(wf, lane)) & 31u;
       if (w == 0)
         return 0u;
       int32_t val = (src >> off) & ((1 << w) - 1);
@@ -2592,12 +2590,13 @@ inline void execute_v_bfe_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
     if (!(exec & (1ULL << lane)))
       continue;
     inst.vdst.write_lane(wf, lane, [&]() {
-      auto src = inst.src0.read_lane(wf, lane);
-      auto off_w = inst.src1.read_lane(wf, lane);
-      (void)inst.src2.read_lane(wf, lane);
-      uint32_t off = off_w & 31u;
-      uint32_t w = (off_w >> 16) & 0x7Fu;
-      return w == 0 ? 0u : (src >> off) & ((1u << w) - 1u);
+      uint32_t src = inst.src0.read_lane(wf, lane);
+      uint32_t off = inst.src1.read_lane(wf, lane) & 31u;
+      uint32_t w = inst.src2.read_lane(wf, lane) & 31u;
+      if (w == 0)
+        return 0u;
+      uint32_t mask = (w >= 32) ? ~0u : ((1u << w) - 1u);
+      return (src >> off) & mask;
     }());
   }
 }
