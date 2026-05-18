@@ -90,6 +90,7 @@
 #include "amd_smi/amdsmi.h"
 #include "common/common.h"
 #include "suites/functional/counted_queues.h"
+#include "suites/functional/queue_create.h"
 #include "suites/functional/cuid.h"
 #include "common/os.h"
 #include "common/platform_filter.h"
@@ -605,6 +606,34 @@ TEST(rocrtstFunc, Counted_Queue_Overflow_And_Wraparound_Test) {
   if (!RunCustomTestProlog(&cq)) return;
   cq.CountedQueuesOverflowWrapAroundTest();
   RunCustomTestEpilog(&cq);
+}
+
+TEST(rocrtstFunc, Queue_Create_SystemMem_Test) {
+  QueueCreateTest qt;
+  if (!RunCustomTestProlog(&qt)) return;
+  qt.SystemMemQueueTest();
+  RunCustomTestEpilog(&qt);
+}
+
+TEST(rocrtstFunc, Queue_Create_DeviceMem_RingBuf_Test) {
+  QueueCreateTest qt;
+  if (!RunCustomTestProlog(&qt)) return;
+  qt.DeviceMemRingBufQueueTest();
+  RunCustomTestEpilog(&qt);
+}
+
+TEST(rocrtstFunc, Queue_Create_Batch_Test) {
+  QueueCreateTest qt;
+  if (!RunCustomTestProlog(&qt)) return;
+  qt.BatchQueueCreateTest();
+  RunCustomTestEpilog(&qt);
+}
+
+TEST(rocrtstFunc, Queue_Create_Invalid_Args_Test) {
+  QueueCreateTest qt;
+  if (!RunCustomTestProlog(&qt)) return;
+  qt.InvalidArgsTest();
+  RunCustomTestEpilog(&qt);
 }
 
 #ifdef HSA_ENABLE_AMDCUID_SUPPORT

@@ -540,14 +540,19 @@ class Device : public NullDevice {
 
   VirtualGPU* xferQueue() const;
 
+  struct QueueExtras {
+    void* metadataRingBuffer = nullptr;
+    volatile uint64_t* doorbellPtr = nullptr;
+    bool deviceMemRingBuf = false;
+  };
+
   //! Acquire HSA queue. This method can create a new HSA queue or
   hsa_queue_t* acquireQueue(
       uint32_t queue_size_hint, bool coop_queue = false, const std::vector<uint32_t>& cuMask = {},
       amd::CommandQueue::Priority priority = amd::CommandQueue::Priority::Normal,
       bool managed = false, bool dedicated_queue = false,
       hsa_queue_t* preferred = nullptr,
-      const std::unordered_set<uint64_t>* excluded_ids = nullptr,
-      void** metadata_ring_buffer = nullptr);
+      const std::unordered_set<uint64_t>* excluded_ids = nullptr);
 
   //! Release HSA queue
   void releaseQueue(hsa_queue_t*, const std::vector<uint32_t>& cuMask = {}, bool coop_queue = false,
@@ -555,9 +560,11 @@ class Device : public NullDevice {
 
   hsa_queue_t* AcquireActiveQueue(amd::CommandQueue::Priority priority,
                                    hsa_queue_t* preferred = nullptr,
-                                   const std::unordered_set<uint64_t>* excluded_ids = nullptr,
-                                   void** metadata_ring_buffer = nullptr);
+                                   const std::unordered_set<uint64_t>* excluded_ids = nullptr);
   bool ReleaseActiveQueue(hsa_queue_t* queue, amd::CommandQueue::Priority priority);
+
+  //! Look up per-queue extras (metadata ring buffer, doorbell pointer).
+  QueueExtras GetQueueExtras(hsa_queue_t* queue);
 
   //! Return the pre-computed metadata packet version header bits
   uint32_t MetadataVersionHeader() const { return metadata_version_header_; }
@@ -683,10 +690,9 @@ class Device : public NullDevice {
   struct QueueInfo {
     int refCount;             //! Reference counter. Shows how many time the queue was shared
     bool hasDedicatedQueue_;  //! True if this queue is a dedicated queue (e.g., null stream)
-    void* metadataRingBuffer_; //! Metadata prefetch ring buffer base
 
     // Constructor
-    QueueInfo() : refCount(0), hasDedicatedQueue_(false), metadataRingBuffer_(nullptr) {}
+    QueueInfo() : refCount(0), hasDedicatedQueue_(false) {}
 
     //! Get the current hardware queue depth (wptr - rptr)
     static uint64_t GetHwQueueDepth(hsa_queue_t* queue) {
@@ -731,8 +737,11 @@ class Device : public NullDevice {
   //! Use dynamic queues mode to get a queue from pool
   hsa_queue_t* getQueueFromPool(const uint qIndex, bool force_reuse = false,
                                 hsa_queue_t* preferred = nullptr,
-                                const std::unordered_set<uint64_t>* excluded_ids = nullptr,
-                                void** metadata_ring_buffer = nullptr);
+                                const std::unordered_set<uint64_t>* excluded_ids = nullptr);
+
+  //! Per-queue extras (metadata ring buffer, doorbell pointer), keyed by queue pointer.
+  //! Populated at queue creation, erased when non-pooled queues are destroyed.
+  std::unordered_map<hsa_queue_t*, QueueExtras> queue_extras_;
 
   //! returns value for corresponding LinkAttrbutes in a vector given Memory pool.
   virtual bool findLinkInfo(const hsa_amd_memory_pool_t& pool,

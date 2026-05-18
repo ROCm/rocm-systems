@@ -22,6 +22,7 @@
 #include "hip_platform.hpp"
 #include "hip_mempool_impl.hpp"
 #include "hip_vm.hpp"
+#include "utils/nontemporal.hpp"
 
 typedef struct ihipExtKernelEvents {
   hipEvent_t startEvent_;
@@ -1065,12 +1066,13 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
     std::vector<const std::string*> enabledKernelNames;
 
     // Pre-built flat packet buffer for fast bulk dispatch (all nodes enabled).
-    std::vector<uint8_t> flatPacketData;
+    // 64-byte aligned so NT copies from this buffer can use aligned SIMD loads.
+    amd::AlignedVector64<uint8_t> flatPacketData;
     std::vector<uint32_t> validPacketFullHeaders;
 
     // Filtered flat buffer - built alongside enabledPackets when some nodes are disabled.
     // Allows the fast flat-dispatch path even in the partially-disabled case.
-    std::vector<uint8_t> filteredFlatPacketData;
+    amd::AlignedVector64<uint8_t> filteredFlatPacketData;
     std::vector<uint32_t> filteredValidPacketFullHeaders;
     bool filteredCacheValid = false;
 
@@ -1099,7 +1101,7 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
     // full_header dword, and invalidates the header. Zeroes completion_signal
     // (ApplyHwEventPatches re-patches it directly via flat_packet pointers at launch).
     static void appendPacketToFlatBuffer(const uint8_t* pkt_raw,
-                                         std::vector<uint8_t>& flatData,
+                                         amd::AlignedVector64<uint8_t>& flatData,
                                          std::vector<uint32_t>& fullHeaders);
   };
 
