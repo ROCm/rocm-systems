@@ -4,11 +4,15 @@
 #include "library/tracing.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
+#include "core/perfetto/engine.hpp"
 #include "core/state.hpp"
 #include "core/track_registry.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 #include <cstdint>
+#include <mutex>
+#include <unordered_map>
+#include <unordered_set>
 
 #include <timemory/hash/types.hpp>
 #include <timemory/process/threading.hpp>
@@ -85,6 +89,51 @@ std::mutex&
 get_perfetto_track_uuids_mutex()
 {
     return active_or_default_registry().mutex();
+}
+
+namespace
+{
+::perfetto::Track
+make_synthetic_process_track(int pid)
+{
+    // Deterministic uuid keyed on the logical pid so every parser thread
+    // emitting under the same pid resolves to the same track. The
+    // "rocprofsys_process" seed keeps this namespace disjoint from
+    // category track uuids (which are seeded "rocprofsys_<category>").
+    auto _uuid = tim::hash::get_hash_id(
+        tim::hash::get_hash_id(std::string{ "rocprofsys_process" }),
+        static_cast<std::int64_t>(pid));
+    return ::perfetto::Track{ static_cast<std::uint64_t>(_uuid) };
+}
+}  // namespace
+
+::perfetto::Track
+get_active_process_track()
+{
+    const auto pid = core::perfetto_engine::get_emitting_pid();
+    if(pid <= 0) return ::perfetto::ProcessTrack::Current();
+    // When the logical pid being replayed is the OS process's own pid (the
+    // common single-rank MPI case where each rank post-processes only its
+    // own cached pid), the SDK's auto-emitted ProcessTrack::Current() is
+    // already correctly attributed; using a synthetic track would surface
+    // as a duplicate process entry in ui.perfetto.dev.
+    if(pid == static_cast<int>(::getpid())) return ::perfetto::ProcessTrack::Current();
+    return make_synthetic_process_track(pid);
+}
+
+void
+ensure_synthetic_process_track_emitted(int pid)
+{
+    if(pid <= 0) return;
+    if(pid == static_cast<int>(::getpid())) return;
+
+    static thread_local std::unordered_set<int> s_emitted{};
+    if(!s_emitted.insert(pid).second) return;
+
+    auto _track = make_synthetic_process_track(pid);
+    auto _desc  = _track.Serialize();
+    _desc.mutable_process()->set_pid(pid);
+    ::perfetto::TrackEvent::SetTrackDescriptor(_track, _desc);
 }
 
 void

@@ -9,6 +9,7 @@
 #include "core/config.hpp"
 #include "core/demangler.hpp"
 #include "core/perfetto/driver.hpp"
+#include "core/perfetto/engine.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
 #include "core/utility.hpp"
@@ -71,6 +72,25 @@ get_perfetto_track_uuids();
 
 std::mutex&
 get_perfetto_track_uuids_mutex();
+
+// Returns the ProcessTrack the calling thread's emissions should parent
+// under. In the cached path, parser threads tag themselves with the
+// logical pid being replayed (perfetto_engine::set_emitting_pid); the
+// post-processing OS pid is unrelated to any cached pid, so deferring to
+// ProcessTrack::Current() would mis-attribute every cached event to the
+// post-processing process. Returns a synthetic ProcessTrack scoped to the
+// active logical pid in that case; falls back to ProcessTrack::Current()
+// when no pid is tagged (live path, unchanged).
+::perfetto::Track
+get_active_process_track();
+
+// Emits the synthetic ProcessTrack's TrackDescriptor packet for `pid` on
+// the calling thread, gated by a thread_local set so each parser thread
+// emits each pid's descriptor exactly once (per-pid sinks need their own
+// copy so per-pid output files carry the descriptor too). No-op when the
+// pid is non-positive (live path) or when already emitted on this thread.
+void
+ensure_synthetic_process_track_emitted(int pid);
 
 void
 copy_timemory_hash_ids();
@@ -146,9 +166,16 @@ template <typename CategoryT, typename... Args>
 auto
 get_perfetto_category_uuid(Args&&... _args)
 {
-    return tim::hash::get_hash_id(tim::hash::get_hash_id(fmt::format(
-                                      "rocprofsys_{}", trait::name<CategoryT>::value)),
-                                  std::forward<Args>(_args)...);
+    // Hashing the active emitting pid in keeps category UUIDs disjoint across
+    // logical pids in cached mode: two parser threads emitting the same
+    // category from different cached pids resolve to different tracks so the
+    // single_file concat doesn't merge them. Live mode passes -1 and behaves
+    // as a stable but distinct namespace.
+    return tim::hash::get_hash_id(
+        tim::hash::get_hash_id(
+            fmt::format("rocprofsys_{}", trait::name<CategoryT>::value)),
+        std::forward<Args>(_args)...,
+        static_cast<std::int64_t>(::rocprofsys::core::perfetto_engine::get_emitting_pid()));
 }
 
 template <typename CategoryT, typename TrackT = ::perfetto::Track, typename FuncT,
@@ -163,7 +190,7 @@ get_perfetto_track(CategoryT, FuncT&& _desc_generator, Args&&... _args)
 
     if(_track_uuids.find(_uuid) == _track_uuids.end())
     {
-        const auto _track = TrackT(_uuid, ::perfetto::ProcessTrack::Current());
+        const auto _track = TrackT(_uuid, get_active_process_track());
         auto       _desc  = _track.Serialize();
 
         auto _name = std::forward<FuncT>(_desc_generator)(std::forward<Args>(_args)...);
@@ -190,7 +217,7 @@ get_perfetto_track(CategoryT, FuncT&& _desc_generator, Args&&... _args)
     }
 #endif
 
-    return TrackT(_uuid, ::perfetto::ProcessTrack::Current());
+    return TrackT(_uuid, get_active_process_track());
 }
 
 template <typename Tp = std::uint64_t>

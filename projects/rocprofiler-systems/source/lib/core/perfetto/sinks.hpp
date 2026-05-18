@@ -4,6 +4,9 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
+#include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -74,6 +77,33 @@ public:
 private:
     pid_t                 m_parent_pid{ 0 };
     output_file_registry* m_registry{ nullptr };
+};
+
+// Cached-mode sink: concatenates per-pid bytes into one .proto file.
+//
+// The cached_interceptor exfiltrates TracePackets from the SDK before the
+// tracing service stamps trusted_packet_sequence_id, so every packet the
+// engine drains arrives with the SDK's placeholder value (1). Concatenating
+// per-pid streams that all claim seq_id=1 would make Perfetto interpret
+// every packet as belonging to a single producer and mis-apply incremental
+// state (TracePacketDefaults, default tracks) across pid boundaries. This
+// sink stands in for the missing service-side stamping: each source_id is
+// assigned a sequential trusted_packet_sequence_id on first arrival, and
+// every TracePacket from that source is rewritten with that id before
+// being appended to the in-memory buffer. finalize() writes the buffer.
+class single_file_sink final : public trace_sink
+{
+public:
+    explicit single_file_sink(output_file_registry& registry);
+
+    void on_source_drained(int source_id, std::vector<char> bytes) override;
+    void finalize() override;
+
+private:
+    output_file_registry*                 m_registry{ nullptr };
+    std::vector<char>                     m_buffer{};
+    std::unordered_map<int, std::uint32_t> m_source_seq_ids{};
+    std::uint32_t                         m_next_seq_id{ 1 };
 };
 
 // Test-only sink: captures (source_id, bytes) tuples in arrival order so

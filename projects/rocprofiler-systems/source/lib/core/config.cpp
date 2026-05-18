@@ -705,6 +705,14 @@ configure_settings(bool _init)
         "discard", "perfetto", "data")
         ->set_choices({ "fill", "discard" });
 
+    ROCPROFSYS_CONFIG_SETTING(
+        std::string, "ROCPROFSYS_PERFETTO_OUTPUT_LAYOUT",
+        "Output layout for cached perfetto traces. 'per_process' writes one "
+        ".proto per emitting pid; 'single_file' concatenates all pids into one "
+        ".proto and skips the merge script invocation",
+        "per_process", "perfetto", "io", "data")
+        ->set_choices({ "per_process", "single_file" });
+
     ROCPROFSYS_CONFIG_SETTING(std::string, "ROCPROFSYS_ENABLE_CATEGORIES",
                               "Enable collecting profiling and trace data for these "
                               "categories and disable all other categories",
@@ -2099,6 +2107,13 @@ std::string
 get_perfetto_fill_policy()
 {
     static auto _v = get_config()->find("ROCPROFSYS_PERFETTO_FILL_POLICY");
+    return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+}
+
+std::string
+get_perfetto_output_layout()
+{
+    static auto _v = get_config()->find("ROCPROFSYS_PERFETTO_OUTPUT_LAYOUT");
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 }
 

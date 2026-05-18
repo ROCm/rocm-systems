@@ -81,9 +81,12 @@ cache_manager::post_process_bulk(output_file_registry& _output_registry,
         // engine.stop(). RF4: on init_sdk failure, log + skip the
         // perfetto block; RocPD processing continues unaffected.
         std::unique_ptr<core::perfetto_engine>      engine;
-        std::unique_ptr<core::per_pid_file_sink>    perfetto_sink;
+        std::unique_ptr<core::trace_sink>           perfetto_sink;
         std::unique_ptr<rocprofsys::track_registry> tracks;
-        bool                                        engine_started = false;
+        bool                                        engine_started   = false;
+        const auto                                  output_layout    =
+            config::get_perfetto_output_layout();
+        const bool single_file_layout = (output_layout == "single_file");
         if(enabled_formats.is_perfetto_enabled())
         {
             try
@@ -91,9 +94,17 @@ cache_manager::post_process_bulk(output_file_registry& _output_registry,
                 engine = std::make_unique<core::perfetto_engine>(
                     core::build_engine_config_from_settings());
                 engine->init_sdk();
-                tracks        = std::make_unique<rocprofsys::track_registry>();
-                perfetto_sink = std::make_unique<core::per_pid_file_sink>(
-                    static_cast<pid_t>(root_pid), _output_registry);
+                tracks = std::make_unique<rocprofsys::track_registry>();
+                if(single_file_layout)
+                {
+                    perfetto_sink =
+                        std::make_unique<core::single_file_sink>(_output_registry);
+                }
+                else
+                {
+                    perfetto_sink = std::make_unique<core::per_pid_file_sink>(
+                        static_cast<pid_t>(root_pid), _output_registry);
+                }
                 engine->start(core::perfetto_engine::mode::cached_interceptor,
                               *perfetto_sink);
                 processor.set_perfetto_engine(engine.get(), tracks.get());
@@ -127,7 +138,11 @@ cache_manager::post_process_bulk(output_file_registry& _output_registry,
             tracks.reset();
         }
 
-        if(enabled_formats.is_perfetto_enabled() && get_merge_perfetto_files())
+        // single_file layout already produced exactly one .proto; running the
+        // merge script would create a redundant merged.proto in the output
+        // directory.
+        if(enabled_formats.is_perfetto_enabled() && get_merge_perfetto_files() &&
+           !single_file_layout)
             discovery::merge_perfetto_files();
     }
 

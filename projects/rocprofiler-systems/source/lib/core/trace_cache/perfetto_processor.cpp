@@ -132,9 +132,10 @@ get_track(CategoryT, std::string name, std::uint64_t hash_arg)
     std::lock_guard<std::mutex> _lk{ tracing::get_perfetto_track_uuids_mutex() };
     auto&                       _track_uuids = tracing::get_perfetto_track_uuids();
 
+    const auto _parent = tracing::get_active_process_track();
     if(_track_uuids.find(_uuid) == _track_uuids.end())
     {
-        const auto _track = ::perfetto::Track(_uuid, ::perfetto::ProcessTrack::Current());
+        const auto _track = ::perfetto::Track(_uuid, _parent);
         auto       _desc  = _track.Serialize();
 
         _desc.set_name(name);
@@ -142,7 +143,7 @@ get_track(CategoryT, std::string name, std::uint64_t hash_arg)
 
         _track_uuids.emplace(_uuid, name);
     }
-    return ::perfetto::Track(_uuid, ::perfetto::ProcessTrack::Current());
+    return ::perfetto::Track(_uuid, _parent);
 }
 
 using amd_smi_gfx_track   = perfetto_counter_track<category::amd_smi_gfx_busy>;
@@ -467,6 +468,10 @@ perfetto_processor_t::prepare_for_processing()
     // the cached interceptor TLS keys them correctly.
     if(m_tracks) set_active_track_registry(m_tracks);
     if(m_engine) m_engine->set_emitting_pid(static_cast<int>(m_process_id));
+    // Emit the per-pid ProcessTrack descriptor up front so every per-pid
+    // sink carries it (and so single_file concat shows the cached pid as
+    // its own process, not the post-processing OS pid).
+    tracing::ensure_synthetic_process_track_emitted(static_cast<int>(m_process_id));
 }
 
 template <typename CategoryT, typename FuncT, typename... Args>

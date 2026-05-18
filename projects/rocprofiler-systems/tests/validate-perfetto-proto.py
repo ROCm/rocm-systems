@@ -165,6 +165,19 @@ if __name__ == "__main__":
             "stdout for the caller to cross-check across files."
         ),
     )
+    parser.add_argument(
+        "--single-file-checks",
+        type=int,
+        nargs="*",
+        default=None,
+        help=(
+            "Validate a concatenated single-file perfetto trace: SELECT count(*) "
+            "FROM slice must be > 0 and SELECT DISTINCT pid FROM process must "
+            "equal the supplied pid set. When supplied with no pid arguments, "
+            "only the slice-count check runs (used when the exact pid set is "
+            "host-specific). Reports observed pids and slice count on stdout."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -185,6 +198,28 @@ if __name__ == "__main__":
 
     if tp is None:
         raise ValueError(f"trace {args.input} could not be loaded")
+
+    if args.single_file_checks is not None:
+        slice_rows = list(tp.query("SELECT COUNT(*) AS n FROM slice"))
+        slice_count = slice_rows[0].n if slice_rows else 0
+        pid_rows = list(tp.query("SELECT DISTINCT pid FROM process WHERE pid > 0"))
+        observed_pids = sorted({row.pid for row in pid_rows})
+        ret = 0
+        if slice_count <= 0:
+            print(f"Fail: {args.input} single-file-checks slice count = {slice_count}")
+            ret = 1
+        expected_pids = sorted(set(args.single_file_checks))
+        if expected_pids and observed_pids != expected_pids:
+            print(
+                f"Fail: {args.input} single-file-checks expected pids "
+                f"{expected_pids}; observed {observed_pids}"
+            )
+            ret = 1
+        print(
+            f"{args.input} single-file-checks: pids={observed_pids} "
+            f"slices={slice_count}"
+        )
+        sys.exit(ret)
 
     if args.per_pid_isolation:
         # Native pid lives in the process table; SDK-emitted ProcessDescriptor

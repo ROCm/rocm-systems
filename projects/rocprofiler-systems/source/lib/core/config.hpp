@@ -249,6 +249,9 @@ get_perfetto_combined_traces();
 std::string
 get_perfetto_fill_policy();
 
+std::string
+get_perfetto_output_layout();
+
 std::set<std::string>
 get_enabled_categories();
 

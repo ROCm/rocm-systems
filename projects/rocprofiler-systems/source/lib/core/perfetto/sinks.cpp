@@ -218,6 +218,195 @@ per_pid_file_sink::finalize()
 {}
 
 // ----------------------------------------------------------------------------
+// single_file_sink
+// ----------------------------------------------------------------------------
+
+namespace
+{
+// Trace.packets framing wire tag: field 1, wire type 2 (length-delimited).
+constexpr std::uint8_t k_trace_packets_tag = 0x0A;
+// TracePacket.trusted_packet_sequence_id wire tag: field 10, wire type 0 (varint).
+constexpr std::uint8_t k_trusted_seq_id_tag = 0x50;
+
+bool
+read_varint(const char* data, std::size_t size, std::size_t& pos, std::uint64_t& out)
+{
+    out                = 0;
+    std::uint32_t shift = 0;
+    while(pos < size)
+    {
+        auto b = static_cast<std::uint8_t>(data[pos++]);
+        out |= static_cast<std::uint64_t>(b & 0x7F) << shift;
+        if((b & 0x80) == 0) return true;
+        shift += 7;
+        if(shift >= 64) return false;
+    }
+    return false;
+}
+
+void
+append_varint(std::vector<char>& dst, std::uint64_t v)
+{
+    while(v >= 0x80)
+    {
+        dst.push_back(static_cast<char>((v & 0x7F) | 0x80));
+        v >>= 7;
+    }
+    dst.push_back(static_cast<char>(v));
+}
+
+// Walks one TracePacket payload, copies every field verbatim EXCEPT
+// trusted_packet_sequence_id (field 10), then appends a fresh field 10
+// with `new_seq_id`. Returns false on malformed input (the caller drops
+// the remainder of the source's bytes rather than risk emitting garbage).
+bool
+rewrite_trace_packet(std::vector<char>& dst, const char* packet, std::size_t size,
+                     std::uint32_t new_seq_id)
+{
+    std::vector<char> rewritten;
+    rewritten.reserve(size + 5);
+
+    std::size_t pos = 0;
+    while(pos < size)
+    {
+        std::size_t   tag_start = pos;
+        std::uint64_t tag       = 0;
+        if(!read_varint(packet, size, pos, tag)) return false;
+        const std::uint32_t wire = tag & 0x7;
+
+        std::size_t value_end = pos;
+        switch(wire)
+        {
+            case 0:  // varint
+            {
+                std::uint64_t v = 0;
+                if(!read_varint(packet, size, pos, v)) return false;
+                value_end = pos;
+                break;
+            }
+            case 2:  // length-delimited
+            {
+                std::uint64_t len = 0;
+                if(!read_varint(packet, size, pos, len)) return false;
+                if(len > size - pos) return false;
+                pos += static_cast<std::size_t>(len);
+                value_end = pos;
+                break;
+            }
+            case 1: pos += 8; value_end = pos; break;
+            case 5: pos += 4; value_end = pos; break;
+            default: return false;  // group/unknown wire types
+        }
+        if(value_end > size) return false;
+
+        if(tag == k_trusted_seq_id_tag) continue;  // re-emitted below
+        rewritten.insert(rewritten.end(), packet + tag_start, packet + value_end);
+    }
+
+    rewritten.push_back(static_cast<char>(k_trusted_seq_id_tag));
+    append_varint(rewritten, new_seq_id);
+
+    dst.push_back(static_cast<char>(k_trace_packets_tag));
+    append_varint(dst, rewritten.size());
+    dst.insert(dst.end(), rewritten.begin(), rewritten.end());
+    return true;
+}
+}  // namespace
+
+single_file_sink::single_file_sink(output_file_registry& registry)
+: m_registry{ &registry }
+{}
+
+void
+single_file_sink::on_source_drained(int source_id, std::vector<char> bytes)
+{
+    if(bytes.empty()) return;
+
+    auto [it, inserted] = m_source_seq_ids.try_emplace(source_id, m_next_seq_id);
+    if(inserted) ++m_next_seq_id;
+    const auto seq_id = it->second;
+
+    std::size_t pos = 0;
+    while(pos < bytes.size())
+    {
+        auto tag = static_cast<std::uint8_t>(bytes[pos]);
+        if(tag != k_trace_packets_tag)
+        {
+            LOG_ERROR("single_file_sink: source {} has malformed Trace.packets "
+                      "framing at offset {} (tag=0x{:02x}); dropping remainder",
+                      source_id, pos, static_cast<unsigned>(tag));
+            return;
+        }
+        ++pos;
+
+        std::uint64_t len = 0;
+        if(!read_varint(bytes.data(), bytes.size(), pos, len) ||
+           len > bytes.size() - pos)
+        {
+            LOG_ERROR("single_file_sink: source {} has truncated Trace.packets "
+                      "frame at offset {}; dropping remainder",
+                      source_id, pos);
+            return;
+        }
+
+        if(!rewrite_trace_packet(m_buffer, bytes.data() + pos,
+                                 static_cast<std::size_t>(len), seq_id))
+        {
+            LOG_ERROR("single_file_sink: source {} TracePacket malformed at "
+                      "offset {}; dropping remainder",
+                      source_id, pos);
+            return;
+        }
+        pos += static_cast<std::size_t>(len);
+    }
+}
+
+void
+single_file_sink::finalize()
+{
+    auto _filename = config::get_perfetto_output_filename();
+
+    if(!config::output_filtering::is_output_enabled_for_current_mpi_rank())
+    {
+        m_buffer.clear();
+        m_source_seq_ids.clear();
+        return;
+    }
+
+    if(m_buffer.empty())
+    {
+        if(dmp::rank() == 0)
+            LOG_ERROR("Perfetto trace data is empty. File '{}' will not be written...",
+                      _filename);
+        return;
+    }
+
+    operation::file_output_message<tim::project::rocprofsys> _fom{};
+    if(config::get_verbose() >= 0)
+        _fom(_filename, std::string{ "perfetto" },
+             " (%.2f KB / %.2f MB / %.2f GB)... ",
+             static_cast<double>(m_buffer.size()) / units::KB,
+             static_cast<double>(m_buffer.size()) / units::MB,
+             static_cast<double>(m_buffer.size()) / units::GB);
+
+    std::ofstream ofs{};
+    if(!filepath::open(ofs, _filename, std::ios::out | std::ios::binary))
+    {
+        _fom.append("Error opening '%s'...", _filename.c_str());
+        LOG_ERROR("single_file_sink: failed to open '{}'", _filename);
+        return;
+    }
+
+    ofs.write(m_buffer.data(), m_buffer.size());
+    if(config::get_verbose() >= 0) _fom.append("%s", "Done");  // NOLINT
+    if(m_registry) m_registry->register_file(_filename, output_format::perfetto);
+    ofs.close();
+
+    m_buffer.clear();
+    m_source_seq_ids.clear();
+}
+
+// ----------------------------------------------------------------------------
 // recording_sink
 // ----------------------------------------------------------------------------
 
