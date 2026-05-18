@@ -35,6 +35,27 @@ def selective_region_env() -> dict[str, str]:
     }
 
 
+@pytest.fixture
+def sys_run_manual_env() -> dict[str, str]:
+    """Match manual QA / AIPROFSYST-473 repro: rocprof-sys-run + rocpd, no CI sampling."""
+    return {
+        "ROCPROFSYS_CI": "OFF",
+        "ROCPROFSYS_USE_SAMPLING": "OFF",
+        "ROCPROFSYS_USE_PROCESS_SAMPLING": "OFF",
+        "ROCPROFSYS_USE_ROCPD": "ON",
+    }
+
+
+def merge_selective_env(
+    mode: str, base: dict[str, str], sys_run_manual: dict[str, str]
+) -> dict[str, str]:
+    """Apply manual-repro overrides for sys_run; keep default pytest env for sampling."""
+    env = base.copy()
+    if mode == "sys_run":
+        env.update(sys_run_manual)
+    return env
+
+
 # pthread gotcha labels that must not appear when region filtering is active
 # (thread create/join at example boundaries occur outside selected regions).
 PTHREAD_LEAKAGE_APIS = ("pthread_join", "pthread_create")
@@ -98,14 +119,16 @@ class TestPauseResume(RocprofsysTest):
     When marker_api is disabled, pause/resume is IGNORED — ALL kernels profiled.
     """
 
-    def test(self, mode, marker_api, selective_region_env, no_marker_env):
+    def test(
+        self, mode, marker_api, selective_region_env, no_marker_env, sys_run_manual_env
+    ):
         if marker_api == "enabled":
-            env = selective_region_env.copy()
+            env = merge_selective_env(mode, selective_region_env, sys_run_manual_env)
             subtest_name = "Pause/Resume kernel presence"
             pass_regex = ["CodeBlock_Z", "CodeBlock_A", "CodeBlock_C", "CodeBlock_D"]
             fail_regex = ["CodeBlock_B"]
         else:
-            env = no_marker_env.copy()
+            env = merge_selective_env(mode, no_marker_env, sys_run_manual_env)
             subtest_name = "Pause/Resume ignored without marker_api"
             pass_regex = [
                 "CodeBlock_Z",
@@ -150,12 +173,12 @@ class TestSelectiveRegion(RocprofsysTest):
         CodeBlock_G (outside)
     """
 
-    def test_no_filter(self, mode, selective_region_env):
+    def test_no_filter(self, mode, selective_region_env, sys_run_manual_env):
         """No ROCPROFSYS_SELECTED_REGIONS — all regions traced."""
         result = self.run_test(
             mode,
             "selective_region",
-            env=selective_region_env,
+            env=merge_selective_env(mode, selective_region_env, sys_run_manual_env),
             check_target_arch=True,
         )
         self.assert_regex(result)
@@ -181,7 +204,11 @@ class TestSelectiveRegion(RocprofsysTest):
         )
 
     def test_region_1_filter(
-        self, mode, selective_region_env, assert_no_pthread_outside_regions
+        self,
+        mode,
+        selective_region_env,
+        sys_run_manual_env,
+        assert_no_pthread_outside_regions,
     ):
         """ROCPROFSYS_SELECTED_REGIONS='Region1' — only Region1 content traced.
 
@@ -189,7 +216,7 @@ class TestSelectiveRegion(RocprofsysTest):
                         CodeBlock_F (second Region1 open)
         Outside Region1: CodeBlock_A (before), CodeBlock_E (Region3), CodeBlock_G (after)
         """
-        env = selective_region_env.copy()
+        env = merge_selective_env(mode, selective_region_env, sys_run_manual_env)
         env["ROCPROFSYS_SELECTED_REGIONS"] = "Region1"
         result = self.run_test(
             mode,
@@ -215,7 +242,11 @@ class TestSelectiveRegion(RocprofsysTest):
         assert_no_pthread_outside_regions(result)
 
     def test_region_2_and_3_filter(
-        self, mode, selective_region_env, assert_no_pthread_outside_regions
+        self,
+        mode,
+        selective_region_env,
+        sys_run_manual_env,
+        assert_no_pthread_outside_regions,
     ):
         """ROCPROFSYS_SELECTED_REGIONS='Region2,Region3' — only Region2+3 content traced.
 
@@ -223,7 +254,7 @@ class TestSelectiveRegion(RocprofsysTest):
         Region3 spans: CodeBlock_E
         Outside: CodeBlock_A, B, D, F, G and Region1
         """
-        env = selective_region_env.copy()
+        env = merge_selective_env(mode, selective_region_env, sys_run_manual_env)
         env["ROCPROFSYS_SELECTED_REGIONS"] = "Region2,Region3"
         result = self.run_test(
             mode,
@@ -288,12 +319,12 @@ class TestSelectiveRegionPause(RocprofsysTest):
         Region1 stop, CodeBlock_D, resume
     """
 
-    def test_no_filter(self, mode, target, selective_region_env):
+    def test_no_filter(self, mode, target, selective_region_env, sys_run_manual_env):
         """Without filter, pause/resume apply globally."""
         result = self.run_test(
             mode,
             target,
-            env=selective_region_env,
+            env=merge_selective_env(mode, selective_region_env, sys_run_manual_env),
             check_target_arch=True,
         )
         self.assert_regex(result)
@@ -326,10 +357,15 @@ class TestSelectiveRegionPause(RocprofsysTest):
         )
 
     def test_filtered(
-        self, mode, target, selective_region_env, assert_no_pthread_outside_regions
+        self,
+        mode,
+        target,
+        selective_region_env,
+        sys_run_manual_env,
+        assert_no_pthread_outside_regions,
     ):
         """With Region1 filter: region filtering combined with pause/resume."""
-        env = selective_region_env.copy()
+        env = merge_selective_env(mode, selective_region_env, sys_run_manual_env)
         env["ROCPROFSYS_SELECTED_REGIONS"] = "Region1"
         result = self.run_test(
             mode,
@@ -367,9 +403,9 @@ class TestSelectiveRegionPause(RocprofsysTest):
         )
         assert_no_pthread_outside_regions(result)
 
-    def test_no_marker(self, mode, target, no_marker_env):
+    def test_no_marker(self, mode, target, no_marker_env, sys_run_manual_env):
         """With Region1 filter but no marker_api: pause/resume ignored."""
-        env = no_marker_env.copy()
+        env = merge_selective_env(mode, no_marker_env, sys_run_manual_env)
         env["ROCPROFSYS_SELECTED_REGIONS"] = "Region1"
         result = self.run_test(
             mode,
@@ -423,10 +459,14 @@ class TestSelectiveRegionNoMarker(RocprofsysTest):
     """
 
     def test_region_1_filter(
-        self, mode, no_marker_env, assert_no_pthread_outside_regions
+        self,
+        mode,
+        no_marker_env,
+        sys_run_manual_env,
+        assert_no_pthread_outside_regions,
     ):
         """ROCPROFSYS_SELECTED_REGIONS='Region1' without marker_api."""
-        env = no_marker_env.copy()
+        env = merge_selective_env(mode, no_marker_env, sys_run_manual_env)
         env["ROCPROFSYS_SELECTED_REGIONS"] = "Region1"
         result = self.run_test(
             mode,
