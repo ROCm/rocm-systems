@@ -22,7 +22,8 @@
 #include "core/locking.hpp"
 #include "core/node_info.hpp"
 #include "core/output_file_registry.hpp"
-#include "core/perfetto_fwd.hpp"
+#include "core/perfetto/driver.hpp"
+#include "core/perfetto/fwd.hpp"
 #include "core/progress/bar.hpp"
 #include "core/progress/callback.hpp"
 #include "core/rocpd/data_processor.hpp"
@@ -110,6 +111,8 @@ std::atomic<pid_t> rocprofsys_init_tooling_done{ 0 };
 std::atomic<bool>  rocprofsys_finalization_done{ false };
 auto               _timemory_manager  = tim::manager::instance();
 auto               _timemory_settings = tim::settings::shared_instance();
+
+std::unique_ptr<rocprofsys::perfetto::live_perfetto_driver> g_perfetto_driver{};
 
 void
 set_metadata_process_start_timestamp(std::int64_t _ts)
@@ -726,7 +729,9 @@ rocprofsys_init_tooling_hidden(void)
     if(get_use_perfetto())
     {
         LOG_DEBUG("Setting up Perfetto...");
-        rocprofsys::perfetto::setup();
+        g_perfetto_driver =
+            std::make_unique<rocprofsys::perfetto::live_perfetto_driver>();
+        g_perfetto_driver->setup();
     }
 
     if(get_use_causal()) causal::start_experimenting();
@@ -760,10 +765,10 @@ rocprofsys_init_tooling_hidden(void)
         }
     }
 
-    if(get_use_perfetto())
+    if(get_use_perfetto() && g_perfetto_driver)
     {
         LOG_DEBUG("Starting Perfetto...");
-        rocprofsys::perfetto::start();
+        g_perfetto_driver->start();
     }
 
     categories::setup();
@@ -1163,11 +1168,11 @@ rocprofsys_finalize_hidden(void)
     rocprofsys_flush_pending_region_cache_hidden();
 
     bool _perfetto_output_error = false;
-    if(get_use_perfetto())
+    if(get_use_perfetto() && g_perfetto_driver)
     {
         LOG_DEBUG("Finalizing perfetto...");
-        rocprofsys::perfetto::post_process(_timemory_manager.get(),
-                                           _perfetto_output_error, _output_registry);
+        g_perfetto_driver->post_process(_timemory_manager.get(),
+                                        _perfetto_output_error, _output_registry);
     }
 
     {

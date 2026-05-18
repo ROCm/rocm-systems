@@ -3,8 +3,8 @@
 
 #include "gtest/gtest.h"
 
-#include "core/perfetto_engine.hpp"
-#include "core/perfetto_sinks.hpp"
+#include "core/perfetto/engine.hpp"
+#include "core/perfetto/sinks.hpp"
 
 #include <algorithm>
 #include <thread>
@@ -66,15 +66,15 @@ TEST(perfetto_engine, read_trace_without_session_returns_empty)
     EXPECT_TRUE(bytes.empty());
 }
 
-TEST(perfetto_engine, release_session_idempotent)
+TEST(perfetto_engine, destroy_session_idempotent)
 {
-    // release_session on an unknown pid is a no-op; calling it twice on
-    // the same pid is also fine. Mirrors fork_gotcha .release()/.reset()
-    // call patterns from the child process.
+    // destroy_session on an unknown pid is a no-op; calling it twice on
+    // the same pid is also fine. Used for post-stop cleanup of a
+    // genuinely-finished session.
     rocprofsys::core::perfetto_engine engine{ make_test_config() };
 
-    EXPECT_NO_THROW(engine.release_session(static_cast<pid_t>(11111)));
-    EXPECT_NO_THROW(engine.release_session(static_cast<pid_t>(11111)));
+    EXPECT_NO_THROW(engine.destroy_session(static_cast<pid_t>(11111)));
+    EXPECT_NO_THROW(engine.destroy_session(static_cast<pid_t>(11111)));
 }
 
 TEST(perfetto_engine, set_emitting_pid_round_trip)

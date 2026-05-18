@@ -5,7 +5,7 @@
 #include "agent_manager.hpp"
 #include "config.hpp"
 #include "core/output_file_registry.hpp"
-#include "core/perfetto_fwd.hpp"
+#include "core/perfetto/fwd.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_processor.hpp"
 #include <cstdint>

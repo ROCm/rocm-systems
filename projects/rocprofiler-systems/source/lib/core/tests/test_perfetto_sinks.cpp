@@ -4,7 +4,7 @@
 #include "gtest/gtest.h"
 
 #include "core/output_file_registry.hpp"
-#include "core/perfetto_sinks.hpp"
+#include "core/perfetto/sinks.hpp"
 
 #include <vector>
 

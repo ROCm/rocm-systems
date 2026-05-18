@@ -10,7 +10,7 @@
 #include "logger/logger.hpp"
 #include "mproc.hpp"
 #include "perf.hpp"
-#include "perfetto.hpp"
+#include "perfetto/driver.hpp"
 #include "rocprofiler-sdk.hpp"
 #include "utility.hpp"
 

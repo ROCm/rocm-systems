@@ -5,7 +5,7 @@
 
 #include "core/agent_manager.hpp"
 #include "core/config.hpp"
-#include "core/perfetto_engine.hpp"
+#include "core/perfetto/engine.hpp"
 #include "core/track_registry.hpp"
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/metadata_registry.hpp"

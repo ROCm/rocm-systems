@@ -5,7 +5,7 @@
 
 #include "common/synchronized.hpp"
 #include "core/agent_manager.hpp"
-#include "core/perfetto.hpp"
+#include "core/perfetto/driver.hpp"
 #include "core/timemory.hpp"
 #include <cstdint>
 

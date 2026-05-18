@@ -3,7 +3,7 @@
 
 #include "gtest/gtest.h"
 
-#include "core/perfetto_engine.hpp"
+#include "core/perfetto/engine.hpp"
 #include "core/track_registry.hpp"
 
 #include <thread>

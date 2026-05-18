@@ -4,8 +4,8 @@
 #include "api.hpp"
 
 #include "core/config.hpp"
-#include "core/perfetto.hpp"
-#include "core/perfetto_fwd.hpp"
+#include "core/perfetto/driver.hpp"
+#include "core/perfetto/fwd.hpp"
 #include "core/state.hpp"
 #include "library/components/fork_gotcha.hpp"
 #include "library/runtime.hpp"

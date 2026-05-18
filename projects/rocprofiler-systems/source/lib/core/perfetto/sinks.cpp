@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "core/perfetto_sinks.hpp"
+#include "core/perfetto/sinks.hpp"
 
 #include "core/config.hpp"
 #include "core/output_file_registry.hpp"

@@ -4,7 +4,7 @@
 #pragma once
 
 #include "common/synchronized.hpp"
-#include "core/perfetto.hpp"
+#include "core/perfetto/driver.hpp"
 #include "core/timemory.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
 #include <cstdint>

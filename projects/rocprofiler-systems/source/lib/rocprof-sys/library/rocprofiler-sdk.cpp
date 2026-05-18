@@ -12,8 +12,8 @@
 #include "core/demangler.hpp"
 #include "core/gpu.hpp"
 #include "core/output_file_registry.hpp"
-#include "core/perfetto.hpp"
-#include "core/perfetto_fwd.hpp"
+#include "core/perfetto/driver.hpp"
+#include "core/perfetto/fwd.hpp"
 #include "core/state.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
@@ -2936,12 +2936,15 @@ tool_attach_fini(void* /* tool_data */)
     // Write Perfetto trace output
     if(get_use_perfetto())
     {
-        bool                             _perfetto_output_error = false;
-        rocprofsys::output_file_registry _output_registry{};
-        ::rocprofsys::perfetto::post_process(nullptr, _perfetto_output_error,
-                                             _output_registry);
-        if(_perfetto_output_error)
-            LOG_ERROR("Perfetto output error occurred during attach finalization");
+        if(auto* drv = ::rocprofsys::perfetto::active_driver())
+        {
+            bool                             _perfetto_output_error = false;
+            rocprofsys::output_file_registry _output_registry{};
+            drv->post_process(nullptr, _perfetto_output_error, _output_registry);
+            if(_perfetto_output_error)
+                LOG_ERROR(
+                    "Perfetto output error occurred during attach finalization");
+        }
     }
 
     rocprofsys_finalize_hidden();
@@ -2962,7 +2965,10 @@ tool_attach_init([[maybe_unused]] rocprofiler_client_detach_t detach_func,
         reset_sdk_session_guards();
 
         // Restart Perfetto for a new tracing session
-        if(get_use_perfetto()) ::rocprofsys::perfetto::start();
+        if(get_use_perfetto())
+        {
+            if(auto* drv = ::rocprofsys::perfetto::active_driver()) drv->start();
+        }
 
         trace_cache::get_buffer_storage().start(getpid());
 

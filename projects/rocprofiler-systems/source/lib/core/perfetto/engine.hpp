@@ -108,19 +108,20 @@ public:
 
     // Reads the trace bytes from the session for the given pid via
     // ReadTraceBlocking. Returns an empty vector when no session exists.
-    // Caller is responsible for releasing the session via release_session
+    // Caller is responsible for disposing the session via destroy_session
     // afterwards if desired.
     std::vector<char> read_trace(pid_t pid);
 
     // Destroys the per-pid session: equivalent to .reset() on the slot.
     // Use this when the session is genuinely done (e.g. post-stop cleanup).
-    void release_session(pid_t pid);
+    // Paired with forget_session() which DETACHES without destroying.
+    void destroy_session(pid_t pid);
 
     // Detaches the engine's ownership of the per-pid session without
     // destroying the underlying TracingSession. Used by fork_gotcha in the
     // forked child to drop the inherited session pointer that the PARENT
     // process still owns; calling reset() in the child would corrupt the
-    // parent's state.
+    // parent's state. Paired with destroy_session() which DESTROYS.
     void forget_session(pid_t pid);
 
     // Whether a session is currently active.

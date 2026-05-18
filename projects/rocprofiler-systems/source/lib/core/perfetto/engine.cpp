@@ -1,11 +1,11 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "core/perfetto_engine.hpp"
+#include "core/perfetto/engine.hpp"
 
 #include "core/config.hpp"
-#include "core/perfetto.hpp"  // brings ROCPROFSYS_PERFETTO_CATEGORIES (TrackEvent type)
-#include "core/perfetto_sinks.hpp"
+#include "core/perfetto/driver.hpp"  // brings ROCPROFSYS_PERFETTO_CATEGORIES (TrackEvent type)
+#include "core/perfetto/sinks.hpp"
 #include "logger/debug.hpp"
 
 #include <algorithm>
@@ -363,13 +363,14 @@ perfetto_engine::stop()
         if(it != p_->sessions.end()) session = it->second.get();
     }
 
-    // Stop the cached interceptor from steering new emissions through us
-    // BEFORE flush/stop, so worker threads observing g_active_cached_engine
-    // see a clean nullptr while we drain. running stays true until the
-    // session is actually stopped (below) — destructor catch-all checks it.
+    // Clear the active-engine pointer only if we are still the active engine;
+    // a sibling engine that took over via start() owns its own slot.
     if(current_mode == mode::cached_interceptor)
     {
-        g_active_cached_engine.store(nullptr, std::memory_order_release);
+        auto* expected = this;
+        g_active_cached_engine.compare_exchange_strong(
+            expected, nullptr, std::memory_order_acq_rel,
+            std::memory_order_acquire);
     }
 
     if(session == nullptr)
@@ -441,7 +442,7 @@ perfetto_engine::read_trace(pid_t pid)
 }
 
 void
-perfetto_engine::release_session(pid_t pid)
+perfetto_engine::destroy_session(pid_t pid)
 {
     std::lock_guard<std::mutex> lk{ p_->sessions_mutex };
     auto                        it = p_->sessions.find(pid);
