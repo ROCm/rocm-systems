@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/perfetto/engine.hpp"
+#include <cstdint>
 
 #include "core/config.hpp"
 #include "core/perfetto/driver.hpp"  // brings ROCPROFSYS_PERFETTO_CATEGORIES (TrackEvent type)
@@ -89,8 +90,7 @@ namespace
 // must agree, and that's its only effect.
 constexpr const char* k_cached_interceptor_name = "test_interceptor";
 
-class cached_interceptor
-: public ::perfetto::Interceptor<cached_interceptor>
+class cached_interceptor : public ::perfetto::Interceptor<cached_interceptor>
 {
 public:
     struct ThreadLocalState : ::perfetto::InterceptorBase::ThreadLocalState
@@ -125,21 +125,23 @@ public:
 
 struct perfetto_engine::impl
 {
-    explicit impl(engine_config c) : cfg{ std::move(c) } {}
+    explicit impl(engine_config c)
+    : cfg{ std::move(c) }
+    {}
 
     engine_config           cfg;
     ::perfetto::TraceConfig trace_cfg{};
     std::mutex              sessions_mutex{};
     std::unordered_map<pid_t, std::unique_ptr<::perfetto::TracingSession>> sessions{};
-    pid_t                                                                  active_pid{ 0 };
-    bool                                                                   running{ false };
+    pid_t active_pid{ 0 };
+    bool  running{ false };
 
     perfetto_engine::mode current_mode{ perfetto_engine::mode::live_fd };
     trace_sink*           active_sink{ nullptr };
 
     // Cached-mode per-pid byte collector. Protected by collector_mutex.
-    std::mutex                                       collector_mutex{};
-    std::unordered_map<int, std::vector<char>>      collected_bytes{};
+    std::mutex                                 collector_mutex{};
+    std::unordered_map<int, std::vector<char>> collected_bytes{};
 
     static std::once_flag s_sdk_init_flag;
     static bool           s_sdk_init_succeeded;
@@ -156,7 +158,8 @@ struct perfetto_engine::impl
         const auto policy =
             (cfg.fill_policy == engine_config::fill_policy_t::discard)
                 ? ::perfetto::protos::gen::TraceConfig_BufferConfig_FillPolicy_DISCARD
-                : ::perfetto::protos::gen::TraceConfig_BufferConfig_FillPolicy_RING_BUFFER;
+                : ::perfetto::protos::gen::
+                      TraceConfig_BufferConfig_FillPolicy_RING_BUFFER;
         auto* buffer_config = trace_cfg.add_buffers();
         buffer_config->set_size_kb(cfg.buffer_size_kb);
         buffer_config->set_fill_policy(policy);
@@ -201,8 +204,7 @@ perfetto_engine::~perfetto_engine()
         try
         {
             stop();
-        }
-        catch(...)
+        } catch(...)
         {}
     }
 }
@@ -340,10 +342,9 @@ perfetto_engine::start(mode m, trace_sink& sink)
         g_active_cached_engine.exchange(this, std::memory_order_acq_rel);
     if(prev != nullptr && prev != this)
     {
-        LOG_WARNING(
-            "perfetto_engine: cached engine already active when start() was "
-            "called; replacing it. Worker threads attached to the prior engine "
-            "may emit into stale state until they exit.");
+        LOG_WARNING("perfetto_engine: cached engine already active when start() was "
+                    "called; replacing it. Worker threads attached to the prior engine "
+                    "may emit into stale state until they exit.");
     }
 }
 
@@ -369,8 +370,7 @@ perfetto_engine::stop()
     {
         auto* expected = this;
         g_active_cached_engine.compare_exchange_strong(
-            expected, nullptr, std::memory_order_acq_rel,
-            std::memory_order_acquire);
+            expected, nullptr, std::memory_order_acq_rel, std::memory_order_acquire);
     }
 
     if(session == nullptr)
@@ -415,8 +415,7 @@ perfetto_engine::stop()
         try
         {
             sink->on_source_drained(source_pid, std::move(bytes));
-        }
-        catch(...)
+        } catch(...)
         {
             if(!first_exc) first_exc = std::current_exception();
         }
@@ -500,12 +499,15 @@ perfetto_engine::collect_packet_bytes(int pid, const void* data, std::size_t siz
         header[hl++] = static_cast<char>(v);
     }
 
+    std::vector<char> framed;
+    framed.reserve(hl + size);
+    framed.insert(framed.end(), header.data(), header.data() + hl);
+    framed.insert(framed.end(), static_cast<const char*>(data),
+                  static_cast<const char*>(data) + size);
+
     std::lock_guard<std::mutex> lk{ p_->collector_mutex };
     auto&                       bytes = p_->collected_bytes[pid];
-    bytes.reserve(bytes.size() + hl + size);
-    bytes.insert(bytes.end(), header.data(), header.data() + hl);
-    bytes.insert(bytes.end(), static_cast<const char*>(data),
-                 static_cast<const char*>(data) + size);
+    bytes.insert(bytes.end(), framed.begin(), framed.end());
 }
 
 }  // namespace core

@@ -17,10 +17,7 @@ target_link_libraries(
     PRIVATE rocprofiler-systems-googletest-library rocprofiler-systems-core-library
 )
 
-target_include_directories(
-    track-registry-tests
-    PRIVATE ${PROJECT_SOURCE_DIR}/source/lib
-)
+target_include_directories(track-registry-tests PRIVATE ${PROJECT_SOURCE_DIR}/source/lib)
 
 add_library(perfetto-engine-tests OBJECT test_perfetto_engine.cpp)
 
@@ -29,10 +26,7 @@ target_link_libraries(
     PRIVATE rocprofiler-systems-googletest-library rocprofiler-systems-core-library
 )
 
-target_include_directories(
-    perfetto-engine-tests
-    PRIVATE ${PROJECT_SOURCE_DIR}/source/lib
-)
+target_include_directories(perfetto-engine-tests PRIVATE ${PROJECT_SOURCE_DIR}/source/lib)
 
 add_library(perfetto-sinks-tests OBJECT test_perfetto_sinks.cpp)
 
@@ -41,13 +35,12 @@ target_link_libraries(
     PRIVATE rocprofiler-systems-googletest-library rocprofiler-systems-core-library
 )
 
-target_include_directories(
-    perfetto-sinks-tests
-    PRIVATE ${PROJECT_SOURCE_DIR}/source/lib
-)
+target_include_directories(perfetto-sinks-tests PRIVATE ${PROJECT_SOURCE_DIR}/source/lib)
 
 add_library(
-    perfetto-processor-isolation-tests OBJECT test_perfetto_processor_isolation.cpp
+    perfetto-processor-isolation-tests
+    OBJECT
+    test_perfetto_processor_isolation.cpp
 )
 
 target_link_libraries(

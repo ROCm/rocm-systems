@@ -133,6 +133,6 @@ class TestCachedPerfettoLayout(RocprofsysTest):
                     f"stdout: {completed.stdout}"
                 )
                 slices = int(match.group(2))
-                assert slices >= _MIN_SLICES_PER_RANK, (
-                    f"{proto} slice count {slices} below floor {_MIN_SLICES_PER_RANK}"
-                )
+                assert (
+                    slices >= _MIN_SLICES_PER_RANK
+                ), f"{proto} slice count {slices} below floor {_MIN_SLICES_PER_RANK}"

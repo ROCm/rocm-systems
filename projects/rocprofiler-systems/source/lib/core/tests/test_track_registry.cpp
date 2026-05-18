@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "gtest/gtest.h"
+#include <cstdint>
 
 #include "core/track_registry.hpp"
 
@@ -49,26 +50,25 @@ TEST(track_registry, two_instances_no_shared_state)
 
     {
         std::lock_guard<std::mutex> _lk{ first.mutex() };
-        first.map().emplace(uint64_t{ 0xABC }, std::string{ "first-track" });
+        first.map().emplace(std::uint64_t{ 0xABC }, std::string{ "first-track" });
     }
 
     EXPECT_EQ(first.map().size(), 1u);
-    EXPECT_TRUE(second.map().empty())
-        << "second registry must not see first's mutation";
+    EXPECT_TRUE(second.map().empty()) << "second registry must not see first's mutation";
 }
 
 TEST(track_registry, set_active_round_trip)
 {
-    rocprofsys::track_registry  reg;
-    scoped_active_registry      guard{ &reg };
+    rocprofsys::track_registry reg;
+    scoped_active_registry     guard{ &reg };
 
     EXPECT_EQ(rocprofsys::get_active_track_registry(), &reg);
 }
 
 TEST(track_registry, set_active_null_clears)
 {
-    rocprofsys::track_registry  reg;
-    scoped_active_registry      guard{ &reg };
+    rocprofsys::track_registry reg;
+    scoped_active_registry     guard{ &reg };
     EXPECT_EQ(rocprofsys::get_active_track_registry(), &reg);
 
     rocprofsys::set_active_track_registry(nullptr);
@@ -77,12 +77,12 @@ TEST(track_registry, set_active_null_clears)
 
 TEST(track_registry, active_is_thread_local)
 {
-    rocprofsys::track_registry  main_reg;
-    scoped_active_registry      guard{ &main_reg };
+    rocprofsys::track_registry main_reg;
+    scoped_active_registry     guard{ &main_reg };
     EXPECT_EQ(rocprofsys::get_active_track_registry(), &main_reg);
 
     rocprofsys::track_registry* other_thread_view = nullptr;
-    std::thread other{ [&other_thread_view]() {
+    std::thread                 other{ [&other_thread_view]() {
         // Active pointer is thread-local; a fresh thread starts with nullptr.
         other_thread_view = rocprofsys::get_active_track_registry();
     } };
@@ -98,10 +98,10 @@ TEST(track_registry, concurrent_emplace_under_mutex_is_race_free)
 {
     rocprofsys::track_registry reg;
 
-    constexpr int           thread_count   = 8;
-    constexpr int           inserts_each   = 256;
-    std::atomic<int>        ready_counter{ 0 };
-    std::atomic<bool>       go{ false };
+    constexpr int            thread_count = 8;
+    constexpr int            inserts_each = 256;
+    std::atomic<int>         ready_counter{ 0 };
+    std::atomic<bool>        go{ false };
     std::vector<std::thread> threads;
     threads.reserve(thread_count);
 
@@ -109,24 +109,27 @@ TEST(track_registry, concurrent_emplace_under_mutex_is_race_free)
     {
         threads.emplace_back([&, t]() {
             ++ready_counter;
-            while(!go.load(std::memory_order_acquire)) {}
+            while(!go.load(std::memory_order_acquire))
+            {
+            }
             for(int i = 0; i < inserts_each; ++i)
             {
-                const auto uuid = static_cast<uint64_t>(t) * inserts_each +
-                                  static_cast<uint64_t>(i);
+                const auto uuid = static_cast<std::uint64_t>(t) * inserts_each +
+                                  static_cast<std::uint64_t>(i);
                 std::lock_guard<std::mutex> _lk{ reg.mutex() };
-                reg.map().emplace(uuid, std::string{ "track-" } +
-                                            std::to_string(uuid));
+                reg.map().emplace(uuid, std::string{ "track-" } + std::to_string(uuid));
             }
         });
     }
 
-    while(ready_counter.load() < thread_count) {}
+    while(ready_counter.load() < thread_count)
+    {
+    }
     go.store(true, std::memory_order_release);
-    for(auto& th : threads) th.join();
+    for(auto& th : threads)
+        th.join();
 
-    EXPECT_EQ(reg.map().size(),
-              static_cast<size_t>(thread_count * inserts_each));
+    EXPECT_EQ(reg.map().size(), static_cast<size_t>(thread_count * inserts_each));
 }
 
 TEST(track_registry, scoped_guard_restores_previous_active)

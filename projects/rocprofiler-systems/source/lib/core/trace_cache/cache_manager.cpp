@@ -9,10 +9,10 @@
 #include "core/output_file_registry.hpp"
 #include "core/perfetto/engine.hpp"
 #include "core/perfetto/sinks.hpp"
-#include "core/track_registry.hpp"
 #include "core/trace_cache/data_types.hpp"
 #include "core/trace_cache/discovery.hpp"
 #include "core/trace_cache/post_processor.hpp"
+#include "core/track_registry.hpp"
 #include "library/runtime.hpp"
 #include "logger/debug.hpp"
 
@@ -83,9 +83,8 @@ cache_manager::post_process_bulk(output_file_registry& _output_registry,
         std::unique_ptr<core::perfetto_engine>      engine;
         std::unique_ptr<core::trace_sink>           perfetto_sink;
         std::unique_ptr<rocprofsys::track_registry> tracks;
-        bool                                        engine_started   = false;
-        const auto                                  output_layout    =
-            config::get_perfetto_output_layout();
+        bool                                        engine_started = false;
+        const auto output_layout      = config::get_perfetto_output_layout();
         const bool single_file_layout = (output_layout == "single_file");
         if(enabled_formats.is_perfetto_enabled())
         {

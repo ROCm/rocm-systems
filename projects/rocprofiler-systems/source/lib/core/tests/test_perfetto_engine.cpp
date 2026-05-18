@@ -30,7 +30,7 @@ TEST(perfetto_engine, construct_from_config_literal_no_config_access)
     // RQ3: engine instantiable in unit tests with no global pollution.
     // Construction must not touch rocprofsys::config::*; passing a literal
     // engine_config exercises this.
-    rocprofsys::core::engine_config cfg = make_test_config();
+    rocprofsys::core::engine_config   cfg = make_test_config();
     rocprofsys::core::perfetto_engine engine{ cfg };
 
     EXPECT_FALSE(engine.is_running());
@@ -95,10 +95,9 @@ TEST(perfetto_engine, emitting_pid_is_thread_local)
     rocprofsys::core::perfetto_engine::set_emitting_pid(7777);
     EXPECT_EQ(rocprofsys::core::perfetto_engine::get_emitting_pid(), 7777);
 
-    int observed_on_other_thread = 0;
+    int         observed_on_other_thread = 0;
     std::thread other{ [&observed_on_other_thread]() {
-        observed_on_other_thread =
-            rocprofsys::core::perfetto_engine::get_emitting_pid();
+        observed_on_other_thread = rocprofsys::core::perfetto_engine::get_emitting_pid();
     } };
     other.join();
 
@@ -254,7 +253,7 @@ TEST(perfetto_engine_cached, multiple_emits_same_pid_concatenate)
     ASSERT_EQ(sink.records().size(), 1u);
     EXPECT_EQ(sink.records()[0].first, 7);
 
-    auto expected = frame_packet(first);
+    auto expected      = frame_packet(first);
     auto second_framed = frame_packet(second);
     expected.insert(expected.end(), second_framed.begin(), second_framed.end());
     EXPECT_EQ(sink.records()[0].second, expected);

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/perfetto/sinks.hpp"
+#include <cstdint>
 
 #include "core/config.hpp"
 #include "core/output_file_registry.hpp"
@@ -29,8 +30,7 @@ namespace core
 // live_fd_sink
 // ----------------------------------------------------------------------------
 
-live_fd_sink::live_fd_sink(tim::manager*         timemory_manager,
-                           bool*                 perfetto_output_error,
+live_fd_sink::live_fd_sink(tim::manager* timemory_manager, bool* perfetto_output_error,
                            output_file_registry& registry)
 : m_manager{ timemory_manager }
 , m_output_error{ perfetto_output_error }
@@ -155,7 +155,8 @@ live_fd_sink::finalize()
             {
                 int status = 0;
                 while(::waitpid(pid, &status, 0) < 0 && errno == EINTR)
-                {}
+                {
+                }
                 if(WIFEXITED(status) && WEXITSTATUS(status) == 0)
                     LOG_INFO("Successfully executed: {} {}", _script_path,
                              _output_folder);
@@ -187,13 +188,12 @@ per_pid_file_sink::on_source_drained(int source_id, std::vector<char> bytes)
     const auto pid = static_cast<pid_t>(source_id);
     auto       _filename =
         (pid == m_parent_pid)
-            ? config::get_perfetto_output_filename()
-            : config::get_perfetto_output_filename_with_suffix(std::to_string(pid));
+                  ? config::get_perfetto_output_filename()
+                  : config::get_perfetto_output_filename_with_suffix(std::to_string(pid));
 
     operation::file_output_message<tim::project::rocprofsys> _fom{};
     if(config::get_verbose() >= 0)
-        _fom(_filename, std::string{ "perfetto" },
-             " (%.2f KB / %.2f MB / %.2f GB)... ",
+        _fom(_filename, std::string{ "perfetto" }, " (%.2f KB / %.2f MB / %.2f GB)... ",
              static_cast<double>(bytes.size()) / units::KB,
              static_cast<double>(bytes.size()) / units::MB,
              static_cast<double>(bytes.size()) / units::GB);
@@ -202,8 +202,7 @@ per_pid_file_sink::on_source_drained(int source_id, std::vector<char> bytes)
     if(!filepath::open(ofs, _filename, std::ios::out | std::ios::binary))
     {
         _fom.append("Error opening '%s'...", _filename.c_str());
-        LOG_ERROR("per_pid_file_sink: failed to open '{}' for pid {}", _filename,
-                  pid);
+        LOG_ERROR("per_pid_file_sink: failed to open '{}' for pid {}", _filename, pid);
         return;
     }
 
@@ -231,7 +230,7 @@ constexpr std::uint8_t k_trusted_seq_id_tag = 0x50;
 bool
 read_varint(const char* data, std::size_t size, std::size_t& pos, std::uint64_t& out)
 {
-    out                = 0;
+    out                 = 0;
     std::uint32_t shift = 0;
     while(pos < size)
     {
@@ -293,8 +292,14 @@ rewrite_trace_packet(std::vector<char>& dst, const char* packet, std::size_t siz
                 value_end = pos;
                 break;
             }
-            case 1: pos += 8; value_end = pos; break;
-            case 5: pos += 4; value_end = pos; break;
+            case 1:
+                pos += 8;
+                value_end = pos;
+                break;
+            case 5:
+                pos += 4;
+                value_end = pos;
+                break;
             default: return false;  // group/unknown wire types
         }
         if(value_end > size) return false;
@@ -340,8 +345,7 @@ single_file_sink::on_source_drained(int source_id, std::vector<char> bytes)
         ++pos;
 
         std::uint64_t len = 0;
-        if(!read_varint(bytes.data(), bytes.size(), pos, len) ||
-           len > bytes.size() - pos)
+        if(!read_varint(bytes.data(), bytes.size(), pos, len) || len > bytes.size() - pos)
         {
             LOG_ERROR("single_file_sink: source {} has truncated Trace.packets "
                       "frame at offset {}; dropping remainder",
@@ -383,8 +387,7 @@ single_file_sink::finalize()
 
     operation::file_output_message<tim::project::rocprofsys> _fom{};
     if(config::get_verbose() >= 0)
-        _fom(_filename, std::string{ "perfetto" },
-             " (%.2f KB / %.2f MB / %.2f GB)... ",
+        _fom(_filename, std::string{ "perfetto" }, " (%.2f KB / %.2f MB / %.2f GB)... ",
              static_cast<double>(m_buffer.size()) / units::KB,
              static_cast<double>(m_buffer.size()) / units::MB,
              static_cast<double>(m_buffer.size()) / units::GB);

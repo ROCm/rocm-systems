@@ -24,8 +24,7 @@ TEST(recording_sink, on_source_drained_captures_records_in_order)
 
     ASSERT_EQ(sink.records().size(), 2u);
     EXPECT_EQ(sink.records()[0].first, 11);
-    EXPECT_EQ(sink.records()[0].second,
-              (std::vector<char>{ 'a', 'b', 'c' }));
+    EXPECT_EQ(sink.records()[0].second, (std::vector<char>{ 'a', 'b', 'c' }));
     EXPECT_EQ(sink.records()[1].first, 22);
     EXPECT_EQ(sink.records()[1].second, (std::vector<char>{ 'x', 'y' }));
 
@@ -61,7 +60,7 @@ TEST(per_pid_file_sink, empty_bytes_is_early_return)
     // per_pid_file_sink::on_source_drained returns early on empty bytes
     // so the (uninitialised in unit tests) config singleton is never
     // queried for the output filename.
-    rocprofsys::output_file_registry registry;
+    rocprofsys::output_file_registry    registry;
     rocprofsys::core::per_pid_file_sink sink{ static_cast<pid_t>(1), registry };
 
     EXPECT_NO_THROW(sink.on_source_drained(1, std::vector<char>{}));

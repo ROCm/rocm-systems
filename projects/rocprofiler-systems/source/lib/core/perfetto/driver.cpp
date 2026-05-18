@@ -69,8 +69,7 @@ live_perfetto_driver::live_perfetto_driver() noexcept
 live_perfetto_driver::~live_perfetto_driver()
 {
     auto* expected = this;
-    g_active_driver.compare_exchange_strong(expected, nullptr,
-                                            std::memory_order_acq_rel,
+    g_active_driver.compare_exchange_strong(expected, nullptr, std::memory_order_acq_rel,
                                             std::memory_order_acquire);
 }
 
@@ -132,8 +131,7 @@ live_perfetto_driver::post_process(tim::manager*         timemory_manager,
 
     m_engine->destroy_session(pid);
 
-    auto sink =
-        core::live_fd_sink{ timemory_manager, &perfetto_output_error, registry };
+    auto sink = core::live_fd_sink{ timemory_manager, &perfetto_output_error, registry };
     sink.on_source_drained(static_cast<int>(pid), std::move(bytes));
     sink.finalize();
 

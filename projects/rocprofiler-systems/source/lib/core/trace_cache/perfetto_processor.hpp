@@ -12,6 +12,7 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <perfetto.h>
 #include <unordered_map>
 
@@ -42,7 +43,7 @@ public:
     perfetto_processor_t(const std::shared_ptr<metadata_registry>& metadata,
                          const std::shared_ptr<agent_manager>& agent_mngr, int pid,
                          int ppid, output_file_registry& output_registry,
-                         core::perfetto_engine* engine,
+                         core::perfetto_engine*      engine,
                          rocprofsys::track_registry* tracks);
 
     void prepare_for_processing();
@@ -84,7 +85,6 @@ private:
     core::perfetto_engine*      m_engine{ nullptr };
     rocprofsys::track_registry* m_tracks{ nullptr };
 
-    std::unordered_map<size_t, pmc_track_info> m_pmc_track_map;
     // Each perfetto_processor_t instance is owned by a single consumer thread
     // for its entire lifetime (see process_buffered_storage in cache_manager.cpp).
     // No synchronization is required for instance-local state below.
@@ -95,6 +95,8 @@ private:
     // KFD node_id -> per-type GPU index matching kfd_sample.device_id.
     std::unordered_map<std::uint32_t, std::uint32_t> m_kfd_node_to_gpu_index_cache;
     std::map<std::uint32_t, std::uint64_t>           m_unified_memory_fault_counts;
+    bool                                             m_cpu_pmc_initialized{ false };
+    std::optional<std::uint32_t>                     m_cpu_pmc_owner_device_id{};
     output_file_registry&                            m_output_registry;
 };
 }  // namespace trace_cache

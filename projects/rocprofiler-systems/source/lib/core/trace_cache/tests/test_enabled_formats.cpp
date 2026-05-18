@@ -12,9 +12,9 @@ namespace rocprofsys::trace_cache::data
 namespace
 {
 enabled_formats_t
-make_with(bool rocpd_enabled, bool perfetto_enabled,
-          bool unified_memory_enabled = false, bool rocpd_parallel = true,
-          bool perfetto_parallel = true, bool unified_memory_parallel = false)
+make_with(bool rocpd_enabled, bool perfetto_enabled, bool unified_memory_enabled = false,
+          bool rocpd_parallel = true, bool perfetto_parallel = true,
+          bool unified_memory_parallel = false)
 {
     return enabled_formats_t{ std::vector<format_t>{
         { format_kind::rocpd, rocpd_parallel, rocpd_enabled, "rocpd" },

@@ -20,7 +20,7 @@ class track_registry
 public:
     using hash_value_t = std::uint64_t;
 
-    track_registry() = default;
+    track_registry()  = default;
     ~track_registry() = default;
 
     track_registry(const track_registry&)            = delete;

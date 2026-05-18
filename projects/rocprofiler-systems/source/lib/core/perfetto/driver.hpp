@@ -58,8 +58,7 @@ public:
     void setup();
     void start();
     void stop();
-    void post_process(tim::manager*         timemory_manager,
-                      bool&                 perfetto_output_error,
+    void post_process(tim::manager* timemory_manager, bool& perfetto_output_error,
                       output_file_registry& registry);
 
     // Drop the inherited TracingSession for parent_pid without destroying
@@ -73,10 +72,12 @@ private:
 };
 
 // Returns the active driver instance, or nullptr if none has been constructed.
-live_perfetto_driver* active_driver() noexcept;
+live_perfetto_driver*
+active_driver() noexcept;
 }  // namespace perfetto
 
-void detach_inherited_perfetto_session(pid_t parent_pid);
+void
+detach_inherited_perfetto_session(pid_t parent_pid);
 
 template <typename Tp>
 struct perfetto_counter_track
@@ -121,7 +122,7 @@ auto
 perfetto_counter_track<Tp>::exists(size_t _idx, std::int64_t _n)
 {
     std::lock_guard<std::mutex> _lk{ get_mutex() };
-    bool _v = get_data().second.count(_idx) != 0;
+    bool                        _v = get_data().second.count(_idx) != 0;
     if(_n < 0 || !_v) return _v;
     return static_cast<size_t>(_n) < get_data().second.at(_idx).size();
 }
@@ -131,7 +132,7 @@ size_t
 perfetto_counter_track<Tp>::size(size_t _idx)
 {
     std::lock_guard<std::mutex> _lk{ get_mutex() };
-    bool _v = get_data().second.count(_idx) != 0;
+    bool                        _v = get_data().second.count(_idx) != 0;
     if(!_v) return 0;
     return get_data().second.at(_idx).size();
 }
@@ -143,8 +144,8 @@ perfetto_counter_track<Tp>::emplace(size_t _idx, const std::string& _v,
                                     std::int64_t _mult, bool _incr)
 {
     std::lock_guard<std::mutex> _lk{ get_mutex() };
-    auto& _name_data  = get_data().first[_idx];
-    auto& _track_data = get_data().second[_idx];
+    auto&                       _name_data  = get_data().first[_idx];
+    auto&                       _track_data = get_data().second[_idx];
     std::vector<std::tuple<std::string, const char*, bool>> _missing = {};
 
     for(const auto& itr : _name_data)

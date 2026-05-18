@@ -6,7 +6,6 @@
 #include "core/agent_manager.hpp"
 #include "core/config.hpp"
 #include "core/perfetto/engine.hpp"
-#include "core/track_registry.hpp"
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/perfetto_processor.hpp"
@@ -14,6 +13,7 @@
 #include "core/trace_cache/sample_processor.hpp"
 #include "core/trace_cache/storage_parser_alias.hpp"
 #include "core/trace_cache/unified_memory_processor.hpp"
+#include "core/track_registry.hpp"
 #include "library/runtime.hpp"
 #include "logger/debug.hpp"
 
@@ -55,8 +55,7 @@ sum_storage_bytes(const std::vector<std::shared_ptr<data::processor_config_t>>& 
 configure_processors(const std::shared_ptr<sample_processor_t>&       _coordinator,
                      const std::shared_ptr<data::processor_config_t>& _config,
                      const data::enabled_formats_t&                   _formats,
-                     output_file_registry&                            _registry,
-                     core::perfetto_engine*      _engine,
+                     output_file_registry& _registry, core::perfetto_engine* _engine,
                      rocprofsys::track_registry* _tracks)
 {
     data::processor_storage_t storage;
@@ -102,9 +101,9 @@ process_buffered_storage(const std::shared_ptr<data::processor_config_t>& _confi
     // RAII lifetime guard: configure_processors registers raw references to the
     // returned processors as handlers on _coordinator. Holding _storage in scope
     // keeps those processors alive until the parse + finalize is done.
-    [[maybe_unused]] auto _storage =
-        configure_processors(_coordinator, _config, _formats, _registry, _engine, _tracks);
-    storage_parser_t _parser(_storage_filename);
+    [[maybe_unused]] auto _storage = configure_processors(_coordinator, _config, _formats,
+                                                          _registry, _engine, _tracks);
+    storage_parser_t      _parser(_storage_filename);
 
     // perfetto_processor_t::prepare_for_processing primes two thread_local
     // values on this parser thread (active track_registry + emitting pid).
@@ -189,8 +188,8 @@ post_processor::run_multithreaded(
     LOG_DEBUG("Starting multithreaded processing with {} configs", configs.size());
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
 
-    auto _progress_cb = m_tracker.begin("Generating ROCpd output database file",
-                                        sum_storage_bytes(configs));
+    auto _progress_cb = m_tracker.begin(
+        fmt::format("Generating {} output", formats.names()), sum_storage_bytes(configs));
 
     std::vector<std::thread> processing_threads;
     processing_threads.reserve(configs.size());
@@ -203,7 +202,7 @@ post_processor::run_multithreaded(
             const auto _filename =
                 utility::get_buffered_storage_filename(cfg->_ppid, cfg->_pid);
             process_buffered_storage(cfg, _filename, formats, m_registry, _progress_cb,
-                                 m_engine, m_tracks);
+                                     m_engine, m_tracks);
         });
     }
 

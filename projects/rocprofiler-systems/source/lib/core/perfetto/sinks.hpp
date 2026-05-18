@@ -44,8 +44,7 @@ public:
 class live_fd_sink final : public trace_sink
 {
 public:
-    live_fd_sink(tim::manager*         timemory_manager,
-                 bool*                 perfetto_output_error,
+    live_fd_sink(tim::manager* timemory_manager, bool* perfetto_output_error,
                  output_file_registry& registry);
 
     void on_source_drained(int source_id, std::vector<char> bytes) override;
@@ -100,10 +99,10 @@ public:
     void finalize() override;
 
 private:
-    output_file_registry*                 m_registry{ nullptr };
-    std::vector<char>                     m_buffer{};
+    output_file_registry*                  m_registry{ nullptr };
+    std::vector<char>                      m_buffer{};
     std::unordered_map<int, std::uint32_t> m_source_seq_ids{};
-    std::uint32_t                         m_next_seq_id{ 1 };
+    std::uint32_t                          m_next_seq_id{ 1 };
 };
 
 // Test-only sink: captures (source_id, bytes) tuples in arrival order so

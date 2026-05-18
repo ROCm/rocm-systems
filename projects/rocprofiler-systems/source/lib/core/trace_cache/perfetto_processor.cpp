@@ -866,8 +866,8 @@ perfetto_processor_t::handle(const cpu_pmc_sample& _cpu_sample)
         return result;
     };
 
-    static std::once_flag init_flag;
-    std::call_once(init_flag, []() {
+    if(!m_cpu_pmc_initialized)
+    {
         process_page_track::emplace(0, "CPU Memory Usage (S)", "MB");
         process_virt_track::emplace(0, "CPU Virtual Memory (S)", "MB");
         process_peak_track::emplace(0, "CPU Peak Memory (S)", "MB");
@@ -875,15 +875,15 @@ perfetto_processor_t::handle(const cpu_pmc_sample& _cpu_sample)
         process_flts_track::emplace(0, "CPU Page Faults (S)", "");
         process_user_track::emplace(0, "CPU User Time (S)", "sec");
         process_kern_track::emplace(0, "CPU Kernel Time (S)", "sec");
-    });
+        m_cpu_pmc_initialized = true;
+    }
 
     const auto  _ts        = _cpu_sample.timestamp;
     const auto& _em        = _cpu_sample.enabled_metric;
     const auto  _device_id = _cpu_sample.device_id;
 
-    // Process-level metrics are global — emit once from the lowest selected socket
-    static auto s_process_device_id = _device_id;
-    const bool  _is_process_owner   = (_device_id == s_process_device_id);
+    if(!m_cpu_pmc_owner_device_id.has_value()) m_cpu_pmc_owner_device_id = _device_id;
+    const bool _is_process_owner = (_device_id == *m_cpu_pmc_owner_device_id);
 
     if(_is_process_owner)
     {
@@ -987,7 +987,7 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
         perfetto_counter_track<category::thread_hardware_counter>;
     using comm_data_track = perfetto_counter_track<category::comm_data>;
 
-    m_pmc_track_map = {
+    static const std::unordered_map<size_t, pmc_track_info> kPmcTrackMap = {
         { ROCPROFSYS_CATEGORY_ROCM_COUNTER_COLLECTION,
           { "Unit Count", [](auto id) { return counter_collection_track::exists(id); },
             [](auto id, auto& n, auto& u) {
@@ -1072,8 +1072,8 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
 
     auto track_key = std::hash<std::string>{}(_track_name + std::to_string(_device_id));
 
-    auto track_it = m_pmc_track_map.find(_pmc.category_enum_id);
-    if(track_it != m_pmc_track_map.end())
+    auto track_it = kPmcTrackMap.find(_pmc.category_enum_id);
+    if(track_it != kPmcTrackMap.end())
     {
         const auto& track_info = track_it->second;
 

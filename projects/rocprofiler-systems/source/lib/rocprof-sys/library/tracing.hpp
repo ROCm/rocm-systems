@@ -175,7 +175,8 @@ get_perfetto_category_uuid(Args&&... _args)
         tim::hash::get_hash_id(
             fmt::format("rocprofsys_{}", trait::name<CategoryT>::value)),
         std::forward<Args>(_args)...,
-        static_cast<std::int64_t>(::rocprofsys::core::perfetto_engine::get_emitting_pid()));
+        static_cast<std::int64_t>(
+            ::rocprofsys::core::perfetto_engine::get_emitting_pid()));
 }
 
 template <typename CategoryT, typename TrackT = ::perfetto::Track, typename FuncT,
