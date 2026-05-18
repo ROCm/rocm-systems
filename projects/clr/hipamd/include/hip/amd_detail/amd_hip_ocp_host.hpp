@@ -771,31 +771,31 @@ __OCP_FP_HOST_DEVICE_STATIC__ __hip_uint32_t from_float(T f, __hip_int8_t scale_
 // ------------
 template <typename InType, typename OutType, typename float_base_t, Encoding in_encode,
           Encoding out_encode, bool sr = false>
-__OCP_FP_HOST_DEVICE_STATIC__ OutType fp6_cvt_packedx16(InType in, int8_t scale = 0,
-                                                        uint32_t seed = 0) {
+__OCP_FP_HOST_DEVICE_STATIC__ OutType fp6_cvt_packedx16(InType in, __hip_int8_t scale = 0,
+                                                        __hip_uint32_t seed = 0) {
   // This is tightly coupled with the definitions of the amd_ocp_types
-  constexpr bool in_float = std::is_same<InType, __amd_floatx16_storage_t>::value ||
-      std::is_same<InType, __amd_fp16x16_storage_t>::value ||
-      std::is_same<InType, __amd_bf16x16_storage_t>::value;
-  using other_type = std::conditional<in_float, OutType, InType>::type;
+  constexpr bool in_float = __hip_internal::is_same<InType, __amd_floatx16_storage_t>::value ||
+      __hip_internal::is_same<InType, __amd_fp16x16_storage_t>::value ||
+      __hip_internal::is_same<InType, __amd_bf16x16_storage_t>::value;
+  using other_type = __hip_internal::conditional<in_float, OutType, InType>::type;
 
   struct fp6x16_packed {
-    uint8_t val1 : 6;
-    uint8_t val2 : 6;
-    uint8_t val3 : 6;
-    uint8_t val4 : 6;
-    uint8_t val5 : 6;
-    uint8_t val6 : 6;
-    uint8_t val7 : 6;
-    uint8_t val8 : 6;
-    uint8_t val9 : 6;
-    uint8_t val10 : 6;
-    uint8_t val11 : 6;
-    uint8_t val12 : 6;
-    uint8_t val13 : 6;
-    uint8_t val14 : 6;
-    uint8_t val15 : 6;
-    uint8_t val16 : 6;
+    __hip_uint8_t val1 : 6;
+    __hip_uint8_t val2 : 6;
+    __hip_uint8_t val3 : 6;
+    __hip_uint8_t val4 : 6;
+    __hip_uint8_t val5 : 6;
+    __hip_uint8_t val6 : 6;
+    __hip_uint8_t val7 : 6;
+    __hip_uint8_t val8 : 6;
+    __hip_uint8_t val9 : 6;
+    __hip_uint8_t val10 : 6;
+    __hip_uint8_t val11 : 6;
+    __hip_uint8_t val12 : 6;
+    __hip_uint8_t val13 : 6;
+    __hip_uint8_t val14 : 6;
+    __hip_uint8_t val15 : 6;
+    __hip_uint8_t val16 : 6;
     unsigned int padded;
   } __attribute__((packed));
 
@@ -809,37 +809,37 @@ __OCP_FP_HOST_DEVICE_STATIC__ OutType fp6_cvt_packedx16(InType in, int8_t scale 
   if constexpr (in_float) {
     if constexpr (sr) {
       u.fp6.val1 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[0], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[0], seed, scale));
       u.fp6.val2 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[1], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[1], seed, scale));
       u.fp6.val3 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[2], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[2], seed, scale));
       u.fp6.val4 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[3], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[3], seed, scale));
       u.fp6.val5 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[4], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[4], seed, scale));
       u.fp6.val6 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[5], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[5], seed, scale));
       u.fp6.val7 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[6], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[6], seed, scale));
       u.fp6.val8 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[7], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[7], seed, scale));
       u.fp6.val9 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[8], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[8], seed, scale));
       u.fp6.val10 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[9], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[9], seed, scale));
       u.fp6.val11 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[10], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[10], seed, scale));
       u.fp6.val12 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[11], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[11], seed, scale));
       u.fp6.val13 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[12], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[12], seed, scale));
       u.fp6.val14 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[13], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[13], seed, scale));
       u.fp6.val15 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[14], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[14], seed, scale));
       u.fp6.val16 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[15], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[15], seed, scale));
     } else {
       u.fp6.val1 = from_float<float_base_t, out_encode, true>(in[0], scale);
       u.fp6.val2 = from_float<float_base_t, out_encode, true>(in[1], scale);
