@@ -403,6 +403,15 @@ RocJpegStatus RocJpegVappiDecoder::InitializeDecoder(std::string device_name, in
     int render_node_id = (gpu_uuids_to_render_nodes_map_.find(gpu_uuid) != gpu_uuids_to_render_nodes_map_.end()) ? gpu_uuids_to_render_nodes_map_[gpu_uuid] : 128;
     drm_node += std::to_string(render_node_id + offset);
 
+    std::string render_nodes_map_str = "{";
+    for (const auto& entry : gpu_uuids_to_render_nodes_map_) {
+        render_nodes_map_str += entry.first + ": " + std::to_string(entry.second) + ", ";
+    }
+    if (!gpu_uuids_to_render_nodes_map_.empty()) render_nodes_map_str.resize(render_nodes_map_str.size() - 2);
+    render_nodes_map_str += "}";
+    InfoLog(g_rocjpeg_logger, "gpu_uuids_to_render_nodes_map_: " + render_nodes_map_str);
+    InfoLog(g_rocjpeg_logger, "Selected GPU UUID: " + gpu_uuid);
+
     CHECK_ROCJPEG(InitVAAPI(drm_node));
     CHECK_ROCJPEG(CreateDecoderConfig());
     CHECK_ROCJPEG(CreateDecoderContext());
@@ -458,6 +467,7 @@ void RocJpegVappiDecoder::GetNumJpegCores() {
  *         - ROCJPEG_STATUS_NOT_INITIALIZED if the initialization fails.
  */
 RocJpegStatus RocJpegVappiDecoder::InitVAAPI(std::string drm_node) {
+    InfoLog(g_rocjpeg_logger, "Opening DRM node: " + drm_node);
     drm_fd_ = open(drm_node.c_str(), O_RDWR);
     if (drm_fd_ < 0) {
         ErrorLog(g_rocjpeg_logger, "failed to open drm node " + drm_node);
