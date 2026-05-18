@@ -189,6 +189,197 @@ TEST_F(DuplicatedEnvironmentEntriesTest, RocmEventsPreservesDeviceSyntax)
         "ROCPROFSYS_ROCM_EVENTS=GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU,TA_TA_BUSY:device=0");
 }
 
+// ── get_env ──────────────────────────────────────────────────────────────────
+
+class GetEnvTest : public ::testing::Test
+{
+protected:
+    void SetUp() override { unsetenv("ROCPROFSYS_TEST_VAR"); }
+    void TearDown() override { unsetenv("ROCPROFSYS_TEST_VAR"); }
+};
+
+TEST_F(GetEnvTest, StringReturnsDefaultWhenUnset)
+{
+    EXPECT_EQ(get_env("ROCPROFSYS_TEST_VAR", std::string{ "fallback" }), "fallback");
+}
+
+TEST_F(GetEnvTest, StringReturnsValueWhenSet)
+{
+    setenv("ROCPROFSYS_TEST_VAR", "hello", 1);
+    EXPECT_EQ(get_env("ROCPROFSYS_TEST_VAR", std::string{ "fallback" }), "hello");
+}
+
+TEST_F(GetEnvTest, StringEmptyVarNameReturnsDefault)
+{
+    EXPECT_EQ(get_env("", std::string{ "fallback" }), "fallback");
+}
+
+TEST_F(GetEnvTest, IntReturnsDefaultWhenUnset)
+{
+    EXPECT_EQ(get_env("ROCPROFSYS_TEST_VAR", 42), 42);
+}
+
+TEST_F(GetEnvTest, IntReturnsValueWhenSet)
+{
+    setenv("ROCPROFSYS_TEST_VAR", "7", 1);
+    EXPECT_EQ(get_env("ROCPROFSYS_TEST_VAR", 42), 7);
+}
+
+TEST_F(GetEnvTest, IntReturnsDefaultOnInvalidValue)
+{
+    setenv("ROCPROFSYS_TEST_VAR", "not_a_number", 1);
+    EXPECT_EQ(get_env("ROCPROFSYS_TEST_VAR", 42), 42);
+}
+
+TEST_F(GetEnvTest, IntHandlesNegativeValue)
+{
+    setenv("ROCPROFSYS_TEST_VAR", "-5", 1);
+    EXPECT_EQ(get_env("ROCPROFSYS_TEST_VAR", 0), -5);
+}
+
+TEST_F(GetEnvTest, BoolReturnsDefaultWhenUnset)
+{
+    EXPECT_FALSE(get_env("ROCPROFSYS_TEST_VAR", false));
+    EXPECT_TRUE(get_env("ROCPROFSYS_TEST_VAR", true));
+}
+
+TEST_F(GetEnvTest, BoolTrueVariants)
+{
+    for(const char* v : { "1", "true", "TRUE", "yes", "on" })
+    {
+        setenv("ROCPROFSYS_TEST_VAR", v, 1);
+        EXPECT_TRUE(get_env("ROCPROFSYS_TEST_VAR", false)) << "value: " << v;
+    }
+}
+
+TEST_F(GetEnvTest, BoolFalseVariants)
+{
+    for(const char* v : { "0", "false", "FALSE", "no", "off" })
+    {
+        setenv("ROCPROFSYS_TEST_VAR", v, 1);
+        EXPECT_FALSE(get_env("ROCPROFSYS_TEST_VAR", true)) << "value: " << v;
+    }
+}
+
+TEST_F(GetEnvTest, SizeTReturnsDefaultWhenUnset)
+{
+    EXPECT_EQ(get_env("ROCPROFSYS_TEST_VAR", size_t{ 100 }), size_t{ 100 });
+}
+
+TEST_F(GetEnvTest, SizeTReturnsValueWhenSet)
+{
+    setenv("ROCPROFSYS_TEST_VAR", "512", 1);
+    EXPECT_EQ(get_env("ROCPROFSYS_TEST_VAR", size_t{ 1 }), size_t{ 512 });
+}
+
+TEST_F(GetEnvTest, DoubleReturnsDefaultWhenUnset)
+{
+    EXPECT_DOUBLE_EQ(get_env("ROCPROFSYS_TEST_VAR", -1.0), -1.0);
+}
+
+TEST_F(GetEnvTest, DoubleReturnsValueWhenSet)
+{
+    setenv("ROCPROFSYS_TEST_VAR", "3.14", 1);
+    EXPECT_NEAR(get_env("ROCPROFSYS_TEST_VAR", 0.0), 3.14, 1e-9);
+}
+
+TEST_F(GetEnvTest, DoubleHandlesNegativeValue)
+{
+    setenv("ROCPROFSYS_TEST_VAR", "-2.5", 1);
+    EXPECT_DOUBLE_EQ(get_env("ROCPROFSYS_TEST_VAR", 0.0), -2.5);
+}
+
+TEST_F(GetEnvTest, OneArgFormReturnsEmptyStringWhenUnset)
+{
+    EXPECT_EQ(get_env<std::string>("ROCPROFSYS_TEST_VAR"), "");
+}
+
+TEST_F(GetEnvTest, OneArgFormReturnsValueWhenSet)
+{
+    setenv("ROCPROFSYS_TEST_VAR", "found", 1);
+    EXPECT_EQ(get_env<std::string>("ROCPROFSYS_TEST_VAR"), "found");
+}
+
+// ── set_env ───────────────────────────────────────────────────────────────────
+
+class SetEnvTest : public ::testing::Test
+{
+protected:
+    void SetUp() override { unsetenv("ROCPROFSYS_TEST_VAR"); }
+    void TearDown() override { unsetenv("ROCPROFSYS_TEST_VAR"); }
+};
+
+TEST_F(SetEnvTest, SetsStringValue)
+{
+    set_env("ROCPROFSYS_TEST_VAR", std::string{ "val" }, 1);
+    EXPECT_EQ(get_env("ROCPROFSYS_TEST_VAR", std::string{}), "val");
+}
+
+TEST_F(SetEnvTest, SetsIntValue)
+{
+    set_env("ROCPROFSYS_TEST_VAR", 99, 1);
+    EXPECT_EQ(get_env("ROCPROFSYS_TEST_VAR", 0), 99);
+}
+
+TEST_F(SetEnvTest, OverrideZeroDoesNotOverwriteExisting)
+{
+    setenv("ROCPROFSYS_TEST_VAR", "original", 1);
+    set_env("ROCPROFSYS_TEST_VAR", std::string{ "new" }, 0);
+    EXPECT_EQ(get_env("ROCPROFSYS_TEST_VAR", std::string{}), "original");
+}
+
+TEST_F(SetEnvTest, OverrideOneOverwritesExisting)
+{
+    setenv("ROCPROFSYS_TEST_VAR", "original", 1);
+    set_env("ROCPROFSYS_TEST_VAR", std::string{ "new" }, 1);
+    EXPECT_EQ(get_env("ROCPROFSYS_TEST_VAR", std::string{}), "new");
+}
+
+// ── get_env_choice ───────────────────────────────────────────────────────────
+
+class GetEnvChoiceTest : public ::testing::Test
+{
+protected:
+    void SetUp() override { unsetenv("ROCPROFSYS_TEST_VAR"); }
+    void TearDown() override { unsetenv("ROCPROFSYS_TEST_VAR"); }
+};
+
+TEST_F(GetEnvChoiceTest, ReturnsDefaultWhenUnset)
+{
+    auto result = get_env_choice<std::string>("ROCPROFSYS_TEST_VAR", "trace",
+                                              { "trace", "sampling", "causal" });
+    EXPECT_EQ(result, "trace");
+}
+
+TEST_F(GetEnvChoiceTest, ReturnsValueWhenValidChoiceSet)
+{
+    setenv("ROCPROFSYS_TEST_VAR", "sampling", 1);
+    auto result = get_env_choice<std::string>("ROCPROFSYS_TEST_VAR", "trace",
+                                              { "trace", "sampling", "causal" });
+    EXPECT_EQ(result, "sampling");
+}
+
+TEST_F(GetEnvChoiceTest, ReturnsDefaultWhenInvalidChoiceSet)
+{
+    setenv("ROCPROFSYS_TEST_VAR", "invalid_mode", 1);
+    auto result = get_env_choice<std::string>("ROCPROFSYS_TEST_VAR", "trace",
+                                              { "trace", "sampling", "causal" });
+    EXPECT_EQ(result, "trace");
+}
+
+TEST_F(GetEnvChoiceTest, AllValidChoicesAccepted)
+{
+    const std::set<std::string> choices = { "inprocess", "system", "all" };
+    for(const auto& choice : choices)
+    {
+        setenv("ROCPROFSYS_TEST_VAR", choice.c_str(), 1);
+        EXPECT_EQ(
+            get_env_choice<std::string>("ROCPROFSYS_TEST_VAR", "inprocess", choices),
+            choice)
+            << "choice: " << choice;
+    }
+}
+
 class AddTorchLibraryPathTest : public ::testing::Test
 {
 protected:

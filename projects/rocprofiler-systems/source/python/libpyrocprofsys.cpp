@@ -8,9 +8,9 @@
 #include "rocprofiler-systems/categories.h"
 #include "rocprofiler-systems/user.h"
 
+#include "common/environment.hpp"
 #include <timemory/backends/process.hpp>
 #include <timemory/backends/threading.hpp>
-#include <timemory/environment.hpp>
 #include <timemory/mpl/apply.hpp>
 #include <timemory/mpl/policy.hpp>
 #include <timemory/operations/types/file_output_message.hpp>
@@ -135,7 +135,7 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
             if(!_cmd_line.empty())
             {
                 _cmd_line = _cmd_line.substr(_cmd_line.find_first_not_of(' '));
-                tim::set_env("ROCPROFSYS_COMMAND_LINE", _cmd_line, 0);
+                rocprofsys::set_env("ROCPROFSYS_COMMAND_LINE", _cmd_line, 0);
             }
             rocprofsys_init("trace", false, _cmd.c_str());
         },
@@ -155,11 +155,11 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
     pycoverage::generate(omni);
     pyuser::generate(omni);
 
-    auto _python_path = tim::get_env("ROCPROFSYS_PATH", std::string{}, false);
+    auto _python_path = rocprofsys::get_env("ROCPROFSYS_PATH", std::string{});
     auto _libpath     = std::string{ "librocprof-sys-dl.so" };
     if(!_python_path.empty()) _libpath = TIMEMORY_JOIN("/", _python_path, _libpath);
     // permit env override if default path fails/is wrong
-    _libpath = tim::get_env("ROCPROFSYS_DL_LIBRARY", _libpath);
+    _libpath = rocprofsys::get_env("ROCPROFSYS_DL_LIBRARY", _libpath);
     // this is necessary when building with -static-libstdc++
     // without it, loading librocprof-sys.so within librocprof-sys-dl.so segfaults
     if(!dlopen(_libpath.c_str(), RTLD_NOW | RTLD_GLOBAL))

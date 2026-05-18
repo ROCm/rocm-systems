@@ -13,8 +13,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <set>
 #include <sstream>
 #include <stdexcept>
+#include <stdlib.h>
 #include <string>
 #include <string_view>
 #include <timemory/utility/filepath.hpp>
@@ -134,6 +136,52 @@ get_env_impl(std::string_view env_id, bool _default)
     }
     return _default;
 }
+template <typename Tp>
+inline std::enable_if_t<std::is_floating_point_v<Tp>, Tp>
+get_env_impl(std::string_view env_id, Tp _default)
+{
+    if(env_id.empty()) return _default;
+    char* env_var = ::std::getenv(env_id.data());
+    if(env_var)
+    {
+        try
+        {
+            return static_cast<Tp>(std::stod(env_var));
+        } catch(std::exception& _e)
+        {
+            fprintf(stderr,
+                    "[rocprof-sys][get_env] Exception thrown converting getenv(\"%s\") = "
+                    "%s to float: %s\n",
+                    env_id.data(), env_var, _e.what());
+        }
+        return _default;
+    }
+    return _default;
+}
+
+template <typename Tp>
+inline std::enable_if_t<
+    std::is_integral_v<Tp> && !std::is_same_v<Tp, bool> && !std::is_same_v<Tp, int>, Tp>
+get_env_impl(std::string_view env_id, Tp _default)
+{
+    if(env_id.empty()) return _default;
+    char* env_var = ::std::getenv(env_id.data());
+    if(env_var)
+    {
+        try
+        {
+            return static_cast<Tp>(std::stoll(env_var));
+        } catch(std::exception& _e)
+        {
+            fprintf(stderr,
+                    "[rocprof-sys][get_env] Exception thrown converting getenv(\"%s\") = "
+                    "%s to integer: %s\n",
+                    env_id.data(), env_var, _e.what());
+        }
+        return _default;
+    }
+    return _default;
+}
 }  // namespace
 
 template <typename Tp>
@@ -150,6 +198,39 @@ get_env(std::string_view env_id, Tp&& _default)
     {
         return get_env_impl(env_id, std::forward<Tp>(_default));
     }
+}
+
+template <typename Tp = std::string>
+inline auto
+get_env(std::string_view env_id)
+{
+    return get_env(env_id, Tp{});
+}
+
+template <typename Tp>
+void
+set_env(const std::string& env_var, const Tp& _val, int override)
+{
+    std::stringstream ss_val;
+    ss_val << _val;
+
+    setenv(env_var.c_str(), ss_val.str().c_str(), override);
+}
+
+template <typename Tp>
+inline auto
+get_env_choice(std::string_view env_id, Tp _default, std::set<Tp> _choices)
+{
+    auto _val = get_env(env_id, _default);
+    if(_choices.find(_val) == _choices.end())
+    {
+        fprintf(stderr,
+                "[rocprof-sys][get_env] Environment variable \"%s\" has invalid value "
+                "\"%s\". Reverting to default.\n",
+                env_id.data(), get_env<std::string>(env_id).c_str());
+        return _default;
+    }
+    return _val;
 }
 
 struct ROCPROFSYS_INTERNAL_API env_config
