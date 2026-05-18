@@ -20,52 +20,18 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-
 #pragma once
 
-#define ROCTX_VERSION_MAJOR 4
-#define ROCTX_VERSION_MINOR 6
-#define ROCTX_VERSION_PATCH 1
-
-#include <cstdint>
-
-#include "../common/mock_export.hpp"
-
-extern "C" {
-ROCP_REG_TEST_MOCK_EXPORT void
-roctxRangePush(const char*);
-ROCP_REG_TEST_MOCK_EXPORT void
-roctxRangePop(const char*);
-}
-
-namespace roctx
-{
-struct ROCTxApiTable
-{
-    uint64_t                    size              = 0;
-    decltype(::roctxRangePush)* roctxRangePush_fn = nullptr;
-    decltype(::roctxRangePop)*  roctxRangePop_fn  = nullptr;
-};
-
-void
-roctx_range_push(const char*);
-
-void
-roctx_range_pop(const char*);
-
-// populates roctx api table with function pointers
-inline void
-initialize_roctx_api_table(ROCTxApiTable* dst)
-{
-    dst->size              = sizeof(ROCTxApiTable);
-    dst->roctxRangePush_fn = &::roctx::roctx_range_push;
-    dst->roctxRangePop_fn  = &::roctx::roctx_range_pop;
-}
-
-// copies the api table from src to dst
-inline void
-copy_roctx_api_table(ROCTxApiTable* dst, const ROCTxApiTable* src)
-{
-    *dst = *src;
-}
-}  // namespace roctx
+// WINDOWS-DIVERGENCE: GCC's __attribute__((visibility("default"))) is not
+// understood by MSVC; the equivalent for symbols exported from a DLL is
+// __declspec(dllexport). The Linux side relies on default visibility being
+// off via -fvisibility=hidden so this attribute makes the symbol resolvable
+// via dlsym; on Windows GetProcAddress requires the symbol to be in the
+// DLL's export table, which __declspec(dllexport) accomplishes.
+#ifndef ROCP_REG_TEST_MOCK_EXPORT
+#    if defined(_WIN32)
+#        define ROCP_REG_TEST_MOCK_EXPORT __declspec(dllexport)
+#    else
+#        define ROCP_REG_TEST_MOCK_EXPORT __attribute__((visibility("default")))
+#    endif
+#endif

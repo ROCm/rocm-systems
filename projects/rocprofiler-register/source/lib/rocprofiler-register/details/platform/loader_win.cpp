@@ -269,6 +269,7 @@ module_sym_default(const char* sym) noexcept
 
     for(std::size_t i = 0; i < count; ++i)
     {
+        if(modules[i] == nullptr) continue;  // snapshot race — slot not filled
         auto* proc = ::GetProcAddress(modules[i], sym);
         if(proc != nullptr) return reinterpret_cast<void*>(proc);
     }
@@ -348,9 +349,14 @@ get_segment_addresses(std::uint32_t pid)
     data.reserve(count);
     for(std::size_t i = 0; i < count; ++i)
     {
+        if(modules[i] == nullptr) continue;  // snapshot race — slot not filled
         auto info = MODULEINFO{};
         if(::GetModuleInformation(process_handle, modules[i], &info, sizeof(info)) == 0)
             continue;
+        // Skip forwarder DLLs and zero-image MEM_IMAGE entries. Without this
+        // guard, last = start + 0 - 1 wraps to UINTPTR_MAX and the resulting
+        // [start, UINTPTR_MAX) range matches every address, breaking secure mode.
+        if(info.SizeOfImage == 0) continue;
 
         auto name_buffer = std::wstring(MAX_PATH, L'\0');
         auto written     = DWORD{ 0 };
@@ -375,7 +381,9 @@ get_segment_addresses(std::uint32_t pid)
         auto entry     = module_segments{};
         entry.filepath = wide_to_utf8(name_buffer.data(), static_cast<int>(written));
         auto start     = reinterpret_cast<std::uintptr_t>(info.lpBaseOfDll);
-        auto last      = start + static_cast<std::uintptr_t>(info.SizeOfImage) - 1;
+        // Exclusive upper bound: matches the half-open [start, last) semantics
+        // used by _in_address_range (addr >= start && addr < last).
+        auto last      = start + static_cast<std::uintptr_t>(info.SizeOfImage);
         entry.ranges.emplace_back(module_address_range{ start, last });
         data.emplace_back(std::move(entry));
     }

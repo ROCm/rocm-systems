@@ -31,7 +31,9 @@
 // The Linux pattern is identical (std::call_once from the public entry
 // points); the constraint is just stricter on Windows.
 
-#define GNU_SOURCE 1
+#if !defined(_WIN32)
+#    define GNU_SOURCE 1
+#endif
 
 #include <rocprofiler-register/rocprofiler-register.h>
 
