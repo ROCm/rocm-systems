@@ -312,7 +312,7 @@ struct perfetto_policy
                 }
             }
 
-            // TX RDMA ACK TIMEOUT
+            // TX RDMA ACK timeouts
             if(effective_metrics.bits.tx_rdma_ack_timeout)
             {
                 auto it = device_tracks.find(TX_RDMA_ACK_TIMEOUT_VALUE);
@@ -325,7 +325,7 @@ struct perfetto_policy
                 }
             }
 
-            // RESP TX PKT SEQ ERR
+            // RESP TX PKT SEQ errors
             if(effective_metrics.bits.resp_tx_pkt_seq_err)
             {
                 auto it = device_tracks.find(RESP_TX_PKT_SEQ_ERR_VALUE);
@@ -338,7 +338,7 @@ struct perfetto_policy
                 }
             }
 
-            // REQ RX PKT SEQ ERR VALUE
+            // REQ RX PKT SEQ errors
             if(effective_metrics.bits.req_rx_pkt_seq_err)
             {
                 auto it = device_tracks.find(REQ_RX_PKT_SEQ_ERR_VALUE);
@@ -351,7 +351,7 @@ struct perfetto_policy
                 }
             }
 
-            // REQ RX IMPL NAK SEQ ERR VALUE
+            // REQ RX IMPL NAK SEQ errors
             if(effective_metrics.bits.req_rx_impl_nak_seq_err)
             {
                 auto it = device_tracks.find(REQ_RX_IMPL_NAK_SEQ_ERR_VALUE);
