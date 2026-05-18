@@ -31,6 +31,7 @@ from .runners import (
 from .validators import (
     ValidationResult,
     validate_perfetto_trace,
+    validate_pthread_outside_region_filter,
     validate_rocpd_database,
     validate_timemory_json,
     validate_causal_json,
@@ -68,6 +69,7 @@ __all__ = [
     # Validators
     "ValidationResult",
     "validate_perfetto_trace",
+    "validate_pthread_outside_region_filter",
     "validate_rocpd_database",
     "validate_timemory_json",
     "validate_causal_json",

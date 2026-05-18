@@ -12,7 +12,8 @@ Validates that:
 
 from __future__ import annotations
 import pytest
-from conftest import RocprofsysTest
+from conftest import RocprofsysTest, check_use_perfetto
+from rocprofsys.validators import validate_pthread_outside_region_filter
 
 pytestmark = [
     pytest.mark.gpu,
@@ -32,6 +33,38 @@ def selective_region_env() -> dict[str, str]:
     return {
         "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api,marker_api,kernel_dispatch,marker_core_range_api",
     }
+
+
+# pthread gotcha labels that must not appear when region filtering is active
+# (thread create/join at example boundaries occur outside selected regions).
+PTHREAD_LEAKAGE_APIS = ("pthread_join", "pthread_create")
+
+
+@pytest.fixture
+def assert_no_pthread_outside_regions(subtests, record_subtest_failure, request):
+    """Assert pthread gotcha events are absent under ROCPROFSYS_SELECTED_REGIONS."""
+
+    def _assert(
+        result,
+        subtest_name: str = "No pthread APIs outside selected regions",
+        api_names: tuple[str, ...] = PTHREAD_LEAKAGE_APIS,
+    ) -> None:
+        with subtests.test(subtest_name):
+            if not check_use_perfetto():
+                pytest.skip("Perfetto is disabled")
+
+            perfetto = result.perfetto_file
+            validation = validate_pthread_outside_region_filter(
+                perfetto, api_names=api_names
+            )
+            if not validation.is_valid:
+                record_subtest_failure(subtest_name)
+                pytest.fail(
+                    f"pthread leakage with region filter:\n{validation.message}",
+                    pytrace=False,
+                )
+
+    return _assert
 
 
 @pytest.fixture
@@ -147,7 +180,9 @@ class TestSelectiveRegion(RocprofsysTest):
             pass_regex=["Region1", "Region2", "Region3"],
         )
 
-    def test_region_1_filter(self, mode, selective_region_env):
+    def test_region_1_filter(
+        self, mode, selective_region_env, assert_no_pthread_outside_regions
+    ):
         """ROCPROFSYS_SELECTED_REGIONS='Region1' — only Region1 content traced.
 
         Region1 spans: CodeBlock_B, CodeBlock_C (nested Region2), CodeBlock_D,
@@ -177,8 +212,11 @@ class TestSelectiveRegion(RocprofsysTest):
             pass_regex=["Region1", "Region2"],
             fail_regex=["Region3"],
         )
+        assert_no_pthread_outside_regions(result)
 
-    def test_region_2_and_3_filter(self, mode, selective_region_env):
+    def test_region_2_and_3_filter(
+        self, mode, selective_region_env, assert_no_pthread_outside_regions
+    ):
         """ROCPROFSYS_SELECTED_REGIONS='Region2,Region3' — only Region2+3 content traced.
 
         Region2 spans: CodeBlock_C (nested inside Region1)
@@ -214,6 +252,7 @@ class TestSelectiveRegion(RocprofsysTest):
             pass_regex=["Region2", "Region3"],
             fail_regex=["Region1"],
         )
+        assert_no_pthread_outside_regions(result)
 
 
 # =============================================================================
@@ -286,7 +325,9 @@ class TestSelectiveRegionPause(RocprofsysTest):
             pass_regex=["Region1"],
         )
 
-    def test_filtered(self, mode, target, selective_region_env):
+    def test_filtered(
+        self, mode, target, selective_region_env, assert_no_pthread_outside_regions
+    ):
         """With Region1 filter: region filtering combined with pause/resume."""
         env = selective_region_env.copy()
         env["ROCPROFSYS_SELECTED_REGIONS"] = "Region1"
@@ -324,6 +365,7 @@ class TestSelectiveRegionPause(RocprofsysTest):
             categories=["rocm_marker_api"],
             pass_regex=["Region1"],
         )
+        assert_no_pthread_outside_regions(result)
 
     def test_no_marker(self, mode, target, no_marker_env):
         """With Region1 filter but no marker_api: pause/resume ignored."""
@@ -380,7 +422,9 @@ class TestSelectiveRegionNoMarker(RocprofsysTest):
         CodeBlock_G (outside)
     """
 
-    def test_region_1_filter(self, mode, no_marker_env):
+    def test_region_1_filter(
+        self, mode, no_marker_env, assert_no_pthread_outside_regions
+    ):
         """ROCPROFSYS_SELECTED_REGIONS='Region1' without marker_api."""
         env = no_marker_env.copy()
         env["ROCPROFSYS_SELECTED_REGIONS"] = "Region1"
@@ -398,3 +442,4 @@ class TestSelectiveRegionNoMarker(RocprofsysTest):
             pass_regex=["CodeBlock_B", "CodeBlock_C", "CodeBlock_D", "CodeBlock_F"],
             fail_regex=["CodeBlock_A", "CodeBlock_E", "CodeBlock_G"],
         )
+        assert_no_pthread_outside_regions(result)
