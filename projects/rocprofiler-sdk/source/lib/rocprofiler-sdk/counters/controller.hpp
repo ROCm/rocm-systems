@@ -38,6 +38,8 @@ namespace rocprofiler
 {
 namespace counters
 {
+// DRM render node minors start at 128; subtract to get the card index.
+inline constexpr auto drm_render_node_minor_offset = 128;
 // Stores counter profiling information such as the agent
 // to collect counters on, the metrics to collect, the hw
 // counters needed to evaluate the metrics, and the ASTs.
