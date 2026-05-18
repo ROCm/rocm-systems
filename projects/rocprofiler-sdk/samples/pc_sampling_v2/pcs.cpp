@@ -51,12 +51,12 @@ query_v2_configs(rocprofiler_agent_id_t                agent_id,
 {
     auto configs = std::vector<rocprofiler_pc_sampling_configuration_v2_t>{};
 
-    auto cb = [](const rocprofiler_pc_sampling_configuration_v2_t* cfgs,
-                 size_t                                            num,
-                 void*                                             ud) {
+    auto cb = [](const rocprofiler_pc_sampling_configuration_v2_t** cfgs,
+                 size_t                                             num,
+                 void*                                              ud) {
         auto* out = static_cast<std::vector<rocprofiler_pc_sampling_configuration_v2_t>*>(ud);
         for(size_t i = 0; i < num; i++)
-            out->emplace_back(cfgs[i]);
+            out->emplace_back(*cfgs[i]);
         return ROCPROFILER_STATUS_SUCCESS;
     };
 

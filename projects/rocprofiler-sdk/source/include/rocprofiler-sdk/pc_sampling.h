@@ -136,30 +136,53 @@ rocprofiler_configure_pc_sampling_service(rocprofiler_context_id_t         conte
  * the method. The runtime selects the best method based on the requested record kinds,
  * unit, interval, and these flags.
  *
- * PREFER flags are soft hints: the runtime tries to honor them but falls back to the
- * other method if the preferred one is unavailable on the agent.
+ * PREFER flags are soft hints. When applied to
+ * ::rocprofiler_pc_sampling_configure_service_v2, the runtime first tries to honor the
+ * preferred method and, if it is not available on the agent, transparently falls back to
+ * the other method. When applied to
+ * ::rocprofiler_pc_sampling_query_agent_configurations_v2, the query returns only the
+ * configurations matching the preferred method if any exist; if none exist, all available
+ * configurations are returned so the caller can still pick the available method.
  *
- * REQUIRE flags are hard constraints: the runtime fails the call if the required method
- * is not available.
+ * REQUIRE flags are hard constraints. The runtime fails the configure call (and
+ * filters all configurations from the query) if the required method is not available on
+ * the agent.
  *
- * If no flags are set (NONE), the runtime uses internal heuristics:
+ * If no flags are set (NONE), the runtime uses internal heuristics driven by the requested
+ * record kinds:
  * - V1 records -> host-trap
  * - V2 records -> stochastic
  * - V0 records -> prefer stochastic, fall back to host-trap
  *
- * Note: V3-V5 record kinds are reserved for future use.
- *
- * Conflicting flags (e.g., REQUIRE_HOST_TRAP | REQUIRE_STOCHASTIC) are rejected with
+ * Conflicting flags (e.g., REQUIRE_HOST_TRAP | REQUIRE_STOCHASTIC, or mixing PREFER_* and
+ * REQUIRE_* for opposite methods) are rejected with
  * ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT.
  */
 typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_api_flags_t
 {
-    ROCPROFILER_PC_SAMPLING_API_FLAG_NONE              = 0,
-    ROCPROFILER_PC_SAMPLING_API_FLAG_PREFER_HOST_TRAP  = (1 << 0),
-    ROCPROFILER_PC_SAMPLING_API_FLAG_PREFER_STOCHASTIC = (1 << 1),
+    ROCPROFILER_PC_SAMPLING_API_FLAG_NONE               = 0,
+    ROCPROFILER_PC_SAMPLING_API_FLAG_PREFER_HOST_TRAP   = (1 << 0),
+    ROCPROFILER_PC_SAMPLING_API_FLAG_PREFER_STOCHASTIC  = (1 << 1),
     ROCPROFILER_PC_SAMPLING_API_FLAG_REQUIRE_HOST_TRAP  = (1 << 2),
     ROCPROFILER_PC_SAMPLING_API_FLAG_REQUIRE_STOCHASTIC = (1 << 3),
     ROCPROFILER_PC_SAMPLING_API_FLAG_LAST
+
+    /// @var ROCPROFILER_PC_SAMPLING_API_FLAG_NONE
+    /// @brief No flag set. Runtime infers the method purely from the requested record kinds.
+    /// @var ROCPROFILER_PC_SAMPLING_API_FLAG_PREFER_HOST_TRAP
+    /// @brief Soft preference for the host-trap method; falls back to stochastic when
+    /// host-trap is unavailable on the agent.
+    /// @var ROCPROFILER_PC_SAMPLING_API_FLAG_PREFER_STOCHASTIC
+    /// @brief Soft preference for the stochastic method; falls back to host-trap when
+    /// stochastic is unavailable on the agent.
+    /// @var ROCPROFILER_PC_SAMPLING_API_FLAG_REQUIRE_HOST_TRAP
+    /// @brief Hard requirement for the host-trap method; the call fails when host-trap
+    /// is not available on the agent.
+    /// @var ROCPROFILER_PC_SAMPLING_API_FLAG_REQUIRE_STOCHASTIC
+    /// @brief Hard requirement for the stochastic method; the call fails when stochastic
+    /// is not available on the agent.
+    /// @var ROCPROFILER_PC_SAMPLING_API_FLAG_LAST
+    /// @brief Sentinel value. Not a valid flag; used internally to delimit the enum range.
 } rocprofiler_pc_sampling_api_flags_t;
 
 /**
@@ -188,7 +211,7 @@ typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_api_flags_t
  * Instead, the runtime selects the best method (host-trap or stochastic) based on:
  * - The requested @p record_kinds (V1 -> host-trap, V2 -> stochastic,
  *   V0 -> prefer stochastic with fallback to host-trap;
- *   V3-V5 are reserved for future use)
+ *   V3 -> host-trap; V4 -> stochastic)
  * - The @p flags parameter which allows soft preferences (PREFER_*) or hard
  *   requirements (REQUIRE_*) for a specific method
  *
@@ -242,6 +265,22 @@ typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_api_flags_t
  * rocprofiler_pc_sampling_configure_service_v2(
  *     context_id, agent_id, unit, interval, buffer_id,
  *     record_kinds, 2, ROCPROFILER_PC_SAMPLING_API_FLAG_REQUIRE_HOST_TRAP);
+ * @endcode
+ *
+ * Example 4 - REJECTED (INVALID_ARGUMENT): Conflicting flags.
+ * @code
+ * rocprofiler_pc_sampling_record_kind_t record_kinds[] = {
+ *     ROCPROFILER_PC_SAMPLING_RECORD_V0_SAMPLE
+ * };
+ *
+ * // REQUIRE_HOST_TRAP and REQUIRE_STOCHASTIC are mutually exclusive; the call returns
+ * // ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT. Mixing PREFER_HOST_TRAP with
+ * // REQUIRE_STOCHASTIC (or any other contradicting combination) is rejected the same way.
+ * rocprofiler_pc_sampling_configure_service_v2(
+ *     context_id, agent_id, unit, interval, buffer_id,
+ *     record_kinds, 1,
+ *     ROCPROFILER_PC_SAMPLING_API_FLAG_REQUIRE_HOST_TRAP |
+ *     ROCPROFILER_PC_SAMPLING_API_FLAG_REQUIRE_STOCHASTIC);
  * @endcode
  *
  * Rocprofiler-SDK checks whether the requested configuration is actually supported
@@ -433,6 +472,12 @@ rocprofiler_query_pc_sampling_agent_configurations(
  * Unlike ::rocprofiler_pc_sampling_configuration_t, this struct does not expose
  * the sampling method. The method is abstracted away and selected by the runtime
  * based on the requested record kinds and flags.
+ *
+ * This struct is output-only: instances are populated by the rocprofiler SDK and
+ * delivered to the caller through ::rocprofiler_available_pc_sampling_configurations_v2_cb_t.
+ * The caller does not construct or pass these structs back into rocprofiler APIs.
+ * ::rocprofiler_pc_sampling_configure_service_v2 takes the chosen @c unit / @c interval as
+ * standalone arguments (no configuration handle is passed back in).
  */
 typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_configuration_v2_t
 {
@@ -457,8 +502,18 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_configuratio
  * sampling configurations upon the call to the
  * ::rocprofiler_pc_sampling_query_agent_configurations_v2.
  *
- * @param[out] configs - The array of v2 PC sampling configurations supported by the agent.
- * @param[out] num_config - The number of configurations contained in the array @p configs.
+ * The configurations are delivered as a contiguous array of pointers
+ * (``const rocprofiler_pc_sampling_configuration_v2_t** configs``) so the callee can iterate
+ * via ``configs[i]``. This mirrors the convention used by
+ * ::rocprofiler_query_available_agents_cb_t for agent enumeration.
+ *
+ * The pointed-to objects and the pointer array itself are owned by the rocprofiler SDK and
+ * are only valid for the duration of the callback. The callee must copy any data it needs
+ * to retain.
+ *
+ * @param[out] configs - Pointer to an array of @p num_config pointers to v2 PC sampling
+ * configurations supported by the agent (i.e. @c configs[i] yields the i-th configuration).
+ * @param[out] num_config - The number of configuration pointers in the array @p configs.
  * In case the GPU agent does not support PC sampling, the value is 0.
  * @param[in] user_data - client's private data passed via
  * ::rocprofiler_pc_sampling_query_agent_configurations_v2
@@ -466,9 +521,9 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_configuratio
  */
 ROCPROFILER_SDK_EXPERIMENTAL
 typedef rocprofiler_status_t (*rocprofiler_available_pc_sampling_configurations_v2_cb_t)(
-    const rocprofiler_pc_sampling_configuration_v2_t* configs,
-    size_t                                            num_config,
-    void*                                             user_data);
+    const rocprofiler_pc_sampling_configuration_v2_t** configs,
+    size_t                                             num_config,
+    void*                                              user_data);
 
 /**
  * @brief (experimental) Query PC Sampling Configuration (v2).
@@ -478,7 +533,58 @@ typedef rocprofiler_status_t (*rocprofiler_available_pc_sampling_configurations_
  * and @p flags to filter configurations by the caller's requirements.
  *
  * The returned configurations do not expose the sampling method (host-trap vs stochastic);
- * the method is abstracted away.
+ * the method is abstracted away. The agent may report multiple configurations for the
+ * same effective (method, unit) combination (e.g. different valid interval ranges); the
+ * caller iterates the array and picks the one that matches its needs.
+ *
+ * Filtering by @p flags (see ::rocprofiler_pc_sampling_api_flags_t for the full semantics):
+ * - ::ROCPROFILER_PC_SAMPLING_API_FLAG_NONE — no method filtering; the callback receives
+ *   every configuration the agent supports (subject to @p record_kinds validation).
+ * - ::ROCPROFILER_PC_SAMPLING_API_FLAG_PREFER_HOST_TRAP /
+ *   ::ROCPROFILER_PC_SAMPLING_API_FLAG_PREFER_STOCHASTIC — soft preference. If at least
+ *   one configuration of the preferred method exists, the callback receives only those.
+ *   Otherwise the callback receives all configurations so the caller can still fall back.
+ * - ::ROCPROFILER_PC_SAMPLING_API_FLAG_REQUIRE_HOST_TRAP /
+ *   ::ROCPROFILER_PC_SAMPLING_API_FLAG_REQUIRE_STOCHASTIC — hard requirement. The
+ *   callback receives only configurations of the required method; if none exist the
+ *   callback is invoked with @c num_config == 0.
+ *
+ * When the requested @p record_kinds contain a kind unsupported by the agent (e.g. a V3
+ * or V4 kind queried on a non-GFX12 agent), the callback is invoked with @c num_config
+ * == 0 so the caller can transparently fall through to a lower record kind.
+ *
+ * Example 1 — Enumerate every configuration the agent supports:
+ * @code
+ * rocprofiler_pc_sampling_record_kind_t record_kinds[] = {
+ *     ROCPROFILER_PC_SAMPLING_RECORD_V0_SAMPLE,
+ *     ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE
+ * };
+ * rocprofiler_pc_sampling_query_agent_configurations_v2(
+ *     agent_id, record_kinds, 2,
+ *     ROCPROFILER_PC_SAMPLING_API_FLAG_NONE, cb, user_data);
+ * @endcode
+ *
+ * Example 2 — Prefer stochastic; transparently fall back to host-trap when stochastic
+ * is unavailable on the agent:
+ * @code
+ * rocprofiler_pc_sampling_record_kind_t record_kinds[] = {
+ *     ROCPROFILER_PC_SAMPLING_RECORD_V0_SAMPLE
+ * };
+ * rocprofiler_pc_sampling_query_agent_configurations_v2(
+ *     agent_id, record_kinds, 1,
+ *     ROCPROFILER_PC_SAMPLING_API_FLAG_PREFER_STOCHASTIC, cb, user_data);
+ * @endcode
+ *
+ * Example 3 — Require host-trap (callback receives only host-trap configs, or 0 if none):
+ * @code
+ * rocprofiler_pc_sampling_record_kind_t record_kinds[] = {
+ *     ROCPROFILER_PC_SAMPLING_RECORD_V1_SAMPLE,
+ *     ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE
+ * };
+ * rocprofiler_pc_sampling_query_agent_configurations_v2(
+ *     agent_id, record_kinds, 2,
+ *     ROCPROFILER_PC_SAMPLING_API_FLAG_REQUIRE_HOST_TRAP, cb, user_data);
+ * @endcode
  *
  * @param [in] agent_id  - id of the agent for which available configurations will be listed
  * @param [in] record_kinds - array of record kinds the caller intends to use
@@ -495,6 +601,8 @@ typedef rocprofiler_status_t (*rocprofiler_available_pc_sampling_configurations_
  * does not support the PC sampling feature.
  * @retval ::ROCPROFILER_STATUS_ERROR a general error caused by the amdgpu driver
  * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT invalid record_kinds, flags, or null callback
+ * @retval ::ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED PC sampling v2 is not explicitly enabled
+ * (set ``ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1`` to opt-in while the API is experimental)
  */
 ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t

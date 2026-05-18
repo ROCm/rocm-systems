@@ -153,7 +153,17 @@ PCSamplingParserContext::_get_parse_func_for_method(rocprofiler_pc_sampling_meth
 
 /**
  * @brief Get the appropriate parse function based on the GFXIP and requested v2 record kind.
- * V3/V4 record kinds are only available on GFX1250.
+ *
+ * V3/V4 record kinds are only available on GFX1250; on every other @c GFXIP this function
+ * returns @c nullptr for ::ROCPROFILER_PC_SAMPLING_RECORD_V3_SAMPLE and
+ * ::ROCPROFILER_PC_SAMPLING_RECORD_V4_SAMPLE. It also returns @c nullptr for any record
+ * kind that is not one of V0/V1/V2/V3/V4 (i.e. the @c default case of the switch),
+ * including ::ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE and any future / unknown
+ * record kind values.
+ *
+ * The caller MUST check the return value before dispatching; a @c nullptr return means
+ * "no parser available for this (GFXIP, record_kind) pair" and the sample should be
+ * skipped (the dispatching code in @ref parse treats this as an internal error).
  */
 template <typename GFXIP>
 PCSamplingParserContext::parse_funct_ptr_t

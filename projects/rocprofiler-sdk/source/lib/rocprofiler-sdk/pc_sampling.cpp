@@ -707,17 +707,39 @@ rocprofiler_pc_sampling_query_agent_configurations_v2(
     auto status = rocprofiler::pc_sampling::ioctl::ioctl_query_pcs_configs(agent, v1_configs);
     if(status != ROCPROFILER_STATUS_SUCCESS) return status;
 
-    // Filter v1 configs by the inferred method and convert to v2
+    // PREFER vs REQUIRE semantics (mirrors rocprofiler_pc_sampling_configure_v2):
+    //   - REQUIRE: only return configs that match the inferred method (drop the rest).
+    //   - PREFER:  if at least one config matches the inferred method, return only those
+    //              (preferred-method configs only); if none match, fall back to returning
+    //              all configs so the caller can still pick the available method.
+    //   - NONE:    no filtering (return all configs).
+    bool filter_by_method = false;
+    if(method != ROCPROFILER_PC_SAMPLING_METHOD_NONE)
+    {
+        if(is_required)
+        {
+            filter_by_method = true;
+        }
+        else
+        {
+            // PREFER: filter only if a preferred-method config actually exists.
+            for(auto const& cfg : v1_configs)
+            {
+                if(cfg.method == method)
+                {
+                    filter_by_method = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    // Translate v1 -> v2, applying the method filter when set.
     std::vector<rocprofiler_pc_sampling_configuration_v2_t> v2_configs;
+    v2_configs.reserve(v1_configs.size());
     for(auto const& cfg : v1_configs)
     {
-        if(is_required && cfg.method != method) continue;
-
-        if(!is_required)
-        {
-            // For soft preferences, put the preferred method configs first,
-            // but include all
-        }
+        if(filter_by_method && cfg.method != method) continue;
 
         auto v2_cfg          = rocprofiler_pc_sampling_configuration_v2_t{};
         v2_cfg.size          = sizeof(rocprofiler_pc_sampling_configuration_v2_t);
@@ -731,36 +753,14 @@ rocprofiler_pc_sampling_query_agent_configurations_v2(
         v2_configs.push_back(v2_cfg);
     }
 
-    // If preferred method is set and not required, sort preferred method configs first
-    if(!is_required && method != ROCPROFILER_PC_SAMPLING_METHOD_NONE)
-    {
-        // Stable partition: configs matching the preferred method come first
-        auto preferred_method = method;
-        size_t preferred_end = 0;
-        // Walk v1_configs in parallel to know which method each v2_config came from
-        std::vector<rocprofiler_pc_sampling_configuration_v2_t> sorted_configs;
-        // First pass: add configs matching preferred method
-        for(size_t i = 0; i < v1_configs.size(); i++)
-        {
-            if(v1_configs[i].method == preferred_method)
-            {
-                sorted_configs.push_back(v2_configs[i]);
-            }
-        }
-        preferred_end = sorted_configs.size();
-        // Second pass: add remaining configs
-        for(size_t i = 0; i < v1_configs.size(); i++)
-        {
-            if(v1_configs[i].method != preferred_method)
-            {
-                sorted_configs.push_back(v2_configs[i]);
-            }
-        }
-        (void) preferred_end;
-        v2_configs = std::move(sorted_configs);
-    }
+    // The callback receives a `const T**` array of pointers (matches the convention used by
+    // ::rocprofiler_query_available_agents_cb_t). Build the pointer array from v2_configs.
+    std::vector<const rocprofiler_pc_sampling_configuration_v2_t*> v2_config_ptrs;
+    v2_config_ptrs.reserve(v2_configs.size());
+    for(auto const& cfg : v2_configs)
+        v2_config_ptrs.push_back(&cfg);
 
-    return cb(v2_configs.data(), v2_configs.size(), user_data);
+    return cb(v2_config_ptrs.data(), v2_config_ptrs.size(), user_data);
 #else
     (void) agent_id;
     (void) record_kinds;

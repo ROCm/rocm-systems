@@ -650,10 +650,10 @@ copySample<GFX9, rocprofiler_pc_sampling_record_v2_t>(const void* sample)
                                    ~EXTRACT_BITS(perf_snapshot_data, 26, 26));
     if(!valid)
     {
-        // Invalid sample: zero-init with dispatch_id = 0 as sentinel
-        rocprofiler_pc_sampling_record_v2_t invalid{};
-        std::memset(&invalid, 0, sizeof(invalid));
-        return invalid;
+        // Invalid sample: value-initialize all fields to zero.
+        // is_invalid_sample<rocprofiler_pc_sampling_record_v2_t>() relies on
+        // timestamp == 0 as the invalid sentinel (see parser/correlation.hpp).
+        return rocprofiler_pc_sampling_record_v2_t{};
     }
 
     auto ret          = copySampleCommon<rocprofiler_pc_sampling_record_v2_t>(s);
@@ -711,9 +711,8 @@ copySample<GFX12, rocprofiler_pc_sampling_record_v2_t>(const void* sample)
     auto valid              = static_cast<bool>(EXTRACT_BITS(perf_snapshot_data, 0, 0));
     if(!valid)
     {
-        rocprofiler_pc_sampling_record_v2_t invalid{};
-        std::memset(&invalid, 0, sizeof(invalid));
-        return invalid;
+        // See GFX9 specialization above for the zero-init / timestamp == 0 sentinel rationale.
+        return rocprofiler_pc_sampling_record_v2_t{};
     }
 
     auto ret          = copySampleCommon<rocprofiler_pc_sampling_record_v2_t>(s);
@@ -777,9 +776,8 @@ copySample<GFX1250, rocprofiler_pc_sampling_record_v2_t>(const void* sample)
     auto valid = static_cast<bool>(EXTRACT_BITS(perf_snapshot_data, 0, 0));
     if(!valid)
     {
-        rocprofiler_pc_sampling_record_v2_t invalid{};
-        std::memset(&invalid, 0, sizeof(invalid));
-        return invalid;
+        // See GFX9 specialization above for the zero-init / timestamp == 0 sentinel rationale.
+        return rocprofiler_pc_sampling_record_v2_t{};
     }
 
     auto ret          = copySampleCommon<rocprofiler_pc_sampling_record_v2_t>(s);
@@ -808,12 +806,16 @@ copySample<GFX1250, rocprofiler_pc_sampling_record_v2_t>(const void* sample)
     bool lock_contention    = EXTRACT_BITS(perf_snapshot_data, 14, 14);
     ret.snapshot_information.ext_data = pack_snapshot_ext_data_gfx1250(arb_state, lock_contention);
 
-    // Verify that the wave_id of snapshot_data matches the hw_id.wave_id
+    // Sanity check: the wave_id of snapshot_data should match hw_id.wave_id. A mismatch
+    // indicates a malformed HW record; drop the sample (zero-init makes is_invalid_sample()
+    // filter it) rather than killing the entire process with ROCP_FATAL.
     auto sampled_wave_id = EXTRACT_BITS(perf_snapshot_data, 13, 9);
     if(sampled_wave_id != ret.hw_id.wave_id)
     {
-        ROCP_FATAL << "sampled_wave_id: " << sampled_wave_id
-                   << " mismatches the hw_id.wave_id: " << ret.hw_id.wave_id;
+        ROCP_ERROR << "sampled_wave_id: " << sampled_wave_id
+                   << " mismatches the hw_id.wave_id: " << ret.hw_id.wave_id
+                   << "; marking sample invalid";
+        return rocprofiler_pc_sampling_record_v2_t{};
     }
 
     return ret;
@@ -853,9 +855,8 @@ copySample<GFX1250, rocprofiler_pc_sampling_record_v4_t>(const void* sample)
     auto valid = static_cast<bool>(EXTRACT_BITS(perf_snapshot_data, 0, 0));
     if(!valid)
     {
-        rocprofiler_pc_sampling_record_v4_t invalid{};
-        std::memset(&invalid, 0, sizeof(invalid));
-        return invalid;
+        // See GFX9 specialization above for the zero-init / timestamp == 0 sentinel rationale.
+        return rocprofiler_pc_sampling_record_v4_t{};
     }
 
     auto ret          = copySampleCommon<rocprofiler_pc_sampling_record_v4_t>(s);
@@ -900,12 +901,16 @@ copySample<GFX1250, rocprofiler_pc_sampling_record_v4_t>(const void* sample)
     ret.memory_counters.tensor_count = EXTRACT_BITS(perf_snapshot_data, 31, 26);
     ret.memory_counters.xnack_count  = EXTRACT_BITS(perf_snapshot_data1, 31, 26);
 
-    // Verify that the wave_id of snapshot_data matches the hw_id.wave_id
+    // Sanity check: the wave_id of snapshot_data should match hw_id.wave_id. A mismatch
+    // indicates a malformed HW record; drop the sample (zero-init makes is_invalid_sample()
+    // filter it) rather than killing the entire process with ROCP_FATAL.
     auto sampled_wave_id = EXTRACT_BITS(perf_snapshot_data, 13, 9);
     if(sampled_wave_id != ret.hw_id.wave_id)
     {
-        ROCP_FATAL << "sampled_wave_id: " << sampled_wave_id
-                   << " mismatches the hw_id.wave_id: " << ret.hw_id.wave_id;
+        ROCP_ERROR << "sampled_wave_id: " << sampled_wave_id
+                   << " mismatches the hw_id.wave_id: " << ret.hw_id.wave_id
+                   << "; marking sample invalid";
+        return rocprofiler_pc_sampling_record_v4_t{};
     }
 
     return ret;
@@ -1021,12 +1026,18 @@ copySample<GFX1250, rocprofiler_pc_sampling_record_stochastic_v0_t>(const void* 
     // counters available in perf_snapshot_data1
     ret.memory_counters.xnack_cnt = EXTRACT_BITS(perf_snapshot_data1, 31, 26);
 
-    // ensure that the wave_id of snapshot_data matches the hw_id.wave_id
+    // Sanity check: the wave_id of snapshot_data should match hw_id.wave_id. A mismatch
+    // indicates a malformed HW record; drop the sample (size == 0 makes is_invalid_sample()
+    // filter it) rather than killing the entire process with ROCP_FATAL.
     auto sampled_wave_id = EXTRACT_BITS(perf_snapshot_data, 13, 9);
     if(sampled_wave_id != ret.hw_id.wave_id)
     {
-        ROCP_FATAL << "sampled_wave_id: " << sampled_wave_id
-                   << " mismatches the hw_id.wave_id: " << ret.hw_id.wave_id;
+        ROCP_ERROR << "sampled_wave_id: " << sampled_wave_id
+                   << " mismatches the hw_id.wave_id: " << ret.hw_id.wave_id
+                   << "; marking sample invalid";
+        rocprofiler_pc_sampling_record_stochastic_v0_t invalid{};
+        invalid.size = 0;
+        return invalid;
     }
 
     return ret;
