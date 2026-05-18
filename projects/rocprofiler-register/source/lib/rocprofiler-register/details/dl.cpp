@@ -55,17 +55,21 @@ get_segment_addresses()
 }
 
 std::optional<std::string>
-get_linked_path(std::string_view name, open_modes_vec_t&& /*open_modes*/)
+get_linked_path(std::string_view name, open_modes_vec_t&& open_modes)
 {
     if(name.empty()) return fs::current_path().string();
 
     auto name_str = std::string{ name };
 
-    // Prefer the already-loaded handle (no refcount bump); fall back to a
-    // transient open + close on Windows / a noload + lazy retry on Linux.
+    // Prefer the already-loaded handle (no refcount bump). A non-empty
+    // open_modes signals a noload-only lookup (e.g. get_this_library_path
+    // passes { RTLD_NOLOAD | RTLD_LAZY } to avoid loading a second copy of
+    // the rocprofiler-register DSO when its soname is missing or renamed);
+    // in that case do not fall back to a transient open. When open_modes is
+    // empty the caller has no preference and a transient open is acceptable.
     auto* handle = platform::module_open_already_loaded(name_str.c_str());
     auto  opened = false;
-    if(handle == nullptr)
+    if(handle == nullptr && open_modes.empty())
     {
         handle = platform::module_open(name_str.c_str());
         opened = (handle != nullptr);

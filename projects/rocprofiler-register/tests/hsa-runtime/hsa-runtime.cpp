@@ -36,11 +36,13 @@
 ROCPROFILER_REGISTER_DEFINE_IMPORT(hsa, ROCP_REG_VERSION)
 
 #ifndef ROCP_REG_FILE_NAME
-// WINDOWS-DIVERGENCE: __FILE__ uses '\\' separators on MSVC by default. Match
-// either separator so produced PASS_REGEX-able log lines render the bare
-// basename on both platforms.
+// WINDOWS-DIVERGENCE: __FILE__ can contain either separator on Windows --
+// MSVC's default is '\\', but CMake/Ninja routinely pass source paths with
+// '/' even when compiling with MSVC, in which case __FILE__ comes through
+// with forward slashes. Match against the set of both characters on Windows
+// so the PASS_REGEX-able log lines always render just the bare basename.
 #    if defined(_WIN32)
-#        define ROCP_REG_FILE_NAME_SEP '\\'
+#        define ROCP_REG_FILE_NAME_SEP "\\/"
 #    else
 #        define ROCP_REG_FILE_NAME_SEP '/'
 #    endif

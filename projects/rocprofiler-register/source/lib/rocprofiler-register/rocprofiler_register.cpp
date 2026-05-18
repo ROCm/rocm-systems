@@ -980,8 +980,19 @@ rocprofiler_register_library_api_table(
         {
             if(_in_address_range(_import_func_addr, itr.ranges))
             {
-                if(std::regex_search(fs::path{ itr.filepath }.filename().string(),
-                                     std::regex{ _import_match->library_name.data() }))
+                // WINDOWS-DIVERGENCE: PE module filenames are case-insensitive
+                // (e.g. AMDHIP64.DLL and amdhip64.dll name the same DLL), so the
+                // library_name regex must match case-insensitively on Windows.
+                // Linux ELF sonames are case-sensitive, so default flags apply.
+#if defined(_WIN32)
+                constexpr auto _re_flags =
+                    std::regex::ECMAScript | std::regex::icase;
+#else
+                constexpr auto _re_flags = std::regex::ECMAScript;
+#endif
+                if(std::regex_search(
+                       fs::path{ itr.filepath }.filename().string(),
+                       std::regex{ _import_match->library_name.data(), _re_flags }))
                 {
                     _valid_addr = true;
                 }

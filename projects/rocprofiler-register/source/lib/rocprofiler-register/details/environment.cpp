@@ -84,22 +84,18 @@ read_env_string(std::string_view env_id)
     if(env_id.empty()) return std::nullopt;
 
     auto wide_name = utf8_to_wide(env_id);
-    // Probe for required size; returns 0 with last-error ERROR_ENVVAR_NOT_FOUND
-    // when unset, or the required buffer size (including NUL) when set.
+    // Probe for required buffer size (including NUL). Returns 0 only on error;
+    // an empty value returns 1 (just the NUL terminator).
     ::SetLastError(ERROR_SUCCESS);
     auto required = ::GetEnvironmentVariableW(wide_name.c_str(), nullptr, 0);
-    if(required == 0)
-    {
-        // Either unset or empty value. Differentiate via GetLastError.
-        if(::GetLastError() == ERROR_ENVVAR_NOT_FOUND) return std::nullopt;
-        // Fall through: treat any other error as "not present".
-        return std::nullopt;
-    }
+    if(required == 0) return std::nullopt;  // ERROR_ENVVAR_NOT_FOUND or other error
 
     auto buffer = std::wstring(static_cast<size_t>(required), L'\0');
+    ::SetLastError(ERROR_SUCCESS);
     auto written =
         ::GetEnvironmentVariableW(wide_name.c_str(), buffer.data(), required);
-    if(written == 0) return std::nullopt;
+    // written == 0 can mean empty value (success) or failure; use GetLastError to tell apart.
+    if(written == 0 && ::GetLastError() != ERROR_SUCCESS) return std::nullopt;
     // 'written' is character count excluding NUL.
     return wide_to_utf8(buffer.data(), static_cast<int>(written));
 }

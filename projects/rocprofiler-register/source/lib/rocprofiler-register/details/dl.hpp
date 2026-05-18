@@ -32,10 +32,11 @@ namespace rocprofiler_register
 {
 namespace binary
 {
-// open_modes_vec_t is a vestigial Linux concept (vector of dlopen flags)
-// preserved here so the get_linked_path overload signature stays stable for
-// callers. The platform::loader implementation does not consult these flags
-// on Windows (PE/COFF has no RTLD_LAZY/RTLD_NOLOAD analogue).
+// Vector of dlopen flags. The Windows platform::loader has no RTLD_LAZY /
+// RTLD_NOLOAD analogue and does not consult individual flag values, but a
+// non-empty vector is still meaningful: get_linked_path interprets it as a
+// noload-only request (do not fall back to a transient open that could load
+// a second copy of the requested module).
 using open_modes_vec_t = std::vector<int>;
 
 struct address_range
@@ -61,8 +62,9 @@ get_segment_addresses();
 // loadable. Linux: dlopen(name, RTLD_LAZY | RTLD_NOLOAD) then dlinfo. Windows:
 // GetModuleHandleW(name) (preferred) then a transient LoadLibraryW(name) +
 // GetModuleFileNameW + FreeLibrary fallback. Returns nullopt if the library
-// cannot be located. The open_modes argument is preserved for source
-// compatibility with prior Linux code; it is unused on Windows.
+// cannot be located. A non-empty open_modes vector suppresses the transient
+// open fallback so callers (e.g. get_this_library_path) cannot accidentally
+// pull in a second copy of the requested module.
 std::optional<std::string>
 get_linked_path(std::string_view, open_modes_vec_t&& = {});
 
