@@ -343,57 +343,21 @@ def validate_pthread_outside_region_filter(
     api_names: tuple[str, ...] = ("pthread_join", "pthread_create"),
     timeout: int = 120,
 ) -> ValidationResult:
-    """Fail if pthread gotcha slices appear when selective region filtering is active.
+    """Fail if pthread gotcha slices appear when selective region filtering is active."""
+    from .region_filter_leakage import validate_pthread_outside_region_filter as _validate
 
-    With ROCPROFSYS_SELECTED_REGIONS, host pthread APIs (e.g. thread join at teardown)
-    must not be recorded outside active ROCTx region windows (AIPROFSYST-473).
-    """
-    if not trace_path.exists():
-        return ValidationResult(False, f"Trace file not found: {trace_path}")
+    return _validate(trace_path, api_names=api_names, timeout=timeout)
 
-    try:
-        from perfetto.trace_processor import TraceProcessor, TraceProcessorConfig
-    except ImportError as e:
-        return ValidationResult(
-            False, f"perfetto Python bindings not available: {e}"
-        )
 
-    env_path = os.environ.get("ROCPROFSYS_TRACE_PROC_SHELL")
-    config = TraceProcessorConfig(bin_path=env_path) if env_path else None
+def validate_region_filter_leakage(
+    trace_path: Path,
+    selected_regions: str | list[str],
+    **kwargs,
+) -> ValidationResult:
+    """Fail when traced events fall outside selected ROCTx region time windows."""
+    from .region_filter_leakage import validate_region_filter_leakage as _validate
 
-    name_filters = " OR ".join(f"name GLOB '*{n}*'" for n in api_names)
-    query = f"""
-        SELECT name, COUNT(*) AS cnt
-        FROM slice
-        WHERE category = 'pthread' AND ({name_filters})
-        GROUP BY name
-        ORDER BY name
-    """
-
-    try:
-        tp = (
-            TraceProcessor(trace=str(trace_path), config=config)
-            if config
-            else TraceProcessor(trace=str(trace_path))
-        )
-        rows = list(tp.query(query))
-    except Exception as e:
-        return ValidationResult(False, f"Perfetto query failed: {e}")
-
-    if not rows:
-        return ValidationResult(
-            True,
-            "No pthread join/create slices found (expected with region filter)",
-        )
-
-    lines = [
-        "pthread APIs recorded while ROCPROFSYS_SELECTED_REGIONS is set "
-        "(expected none outside active regions):"
-    ]
-    for row in rows:
-        lines.append(f"  - {row.name}: {row.cnt}")
-
-    return ValidationResult(False, "\n".join(lines))
+    return _validate(trace_path, selected_regions, **kwargs)
 
 
 # ============================================================================

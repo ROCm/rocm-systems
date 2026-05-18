@@ -13,7 +13,11 @@ Validates that:
 from __future__ import annotations
 import pytest
 from conftest import RocprofsysTest, check_use_perfetto
-from rocprofsys.validators import validate_pthread_outside_region_filter
+from rocprofsys.region_filter_leakage import (
+    DEFAULT_LEAKAGE_CHECKS,
+    LeakageCheck,
+    validate_region_filter_leakage,
+)
 
 pytestmark = [
     pytest.mark.gpu,
@@ -56,34 +60,57 @@ def merge_selective_env(
     return env
 
 
-# pthread gotcha labels that must not appear when region filtering is active
-# (thread create/join at example boundaries occur outside selected regions).
-PTHREAD_LEAKAGE_APIS = ("pthread_join", "pthread_create")
-
-
 @pytest.fixture
-def assert_no_pthread_outside_regions(subtests, record_subtest_failure, request):
-    """Assert pthread gotcha events are absent under ROCPROFSYS_SELECTED_REGIONS."""
+def assert_no_leakage_outside_regions(subtests, record_subtest_failure, request):
+    """Assert Perfetto slices are inside ROCPROFSYS_SELECTED_REGIONS time windows."""
 
     def _assert(
         result,
-        subtest_name: str = "No pthread APIs outside selected regions",
-        api_names: tuple[str, ...] = PTHREAD_LEAKAGE_APIS,
+        selected_regions: str,
+        *,
+        checks: tuple[LeakageCheck, ...] = DEFAULT_LEAKAGE_CHECKS,
+        check_counters: bool = True,
+        counter_max_outside: int = 0,
     ) -> None:
-        with subtests.test(subtest_name):
-            if not check_use_perfetto():
-                pytest.skip("Perfetto is disabled")
+        if not check_use_perfetto():
+            pytest.skip("Perfetto is disabled")
 
-            perfetto = result.perfetto_file
-            validation = validate_pthread_outside_region_filter(
-                perfetto, api_names=api_names
-            )
-            if not validation.is_valid:
-                record_subtest_failure(subtest_name)
-                pytest.fail(
-                    f"pthread leakage with region filter:\n{validation.message}",
-                    pytrace=False,
+        perfetto = result.perfetto_file
+        if not perfetto or not perfetto.exists():
+            pytest.fail(f"Perfetto trace file not found for {result.output_dir}")
+
+        for check in checks:
+            subtest_name = f"No leakage: {check.label}"
+            with subtests.test(subtest_name):
+                validation = validate_region_filter_leakage(
+                    perfetto,
+                    selected_regions,
+                    checks=(check,),
+                    check_counters=False,
                 )
+                if not validation.is_valid:
+                    record_subtest_failure(subtest_name)
+                    pytest.fail(
+                        f"Region-filter leakage ({check.label}):\n{validation.message}",
+                        pytrace=False,
+                    )
+
+        if check_counters:
+            subtest_name = "No leakage: GPU PMC / AMD-SMI counters"
+            with subtests.test(subtest_name):
+                validation = validate_region_filter_leakage(
+                    perfetto,
+                    selected_regions,
+                    checks=(),
+                    check_counters=True,
+                    counter_max_outside=counter_max_outside,
+                )
+                if not validation.is_valid:
+                    record_subtest_failure(subtest_name)
+                    pytest.fail(
+                        f"Region-filter leakage (counters):\n{validation.message}",
+                        pytrace=False,
+                    )
 
     return _assert
 
@@ -208,7 +235,7 @@ class TestSelectiveRegion(RocprofsysTest):
         mode,
         selective_region_env,
         sys_run_manual_env,
-        assert_no_pthread_outside_regions,
+        assert_no_leakage_outside_regions,
     ):
         """ROCPROFSYS_SELECTED_REGIONS='Region1' — only Region1 content traced.
 
@@ -239,14 +266,16 @@ class TestSelectiveRegion(RocprofsysTest):
             pass_regex=["Region1", "Region2"],
             fail_regex=["Region3"],
         )
-        assert_no_pthread_outside_regions(result)
+        assert_no_leakage_outside_regions(
+            result, "Region1", check_counters=(mode == "sys_run")
+        )
 
     def test_region_2_and_3_filter(
         self,
         mode,
         selective_region_env,
         sys_run_manual_env,
-        assert_no_pthread_outside_regions,
+        assert_no_leakage_outside_regions,
     ):
         """ROCPROFSYS_SELECTED_REGIONS='Region2,Region3' — only Region2+3 content traced.
 
@@ -283,7 +312,9 @@ class TestSelectiveRegion(RocprofsysTest):
             pass_regex=["Region2", "Region3"],
             fail_regex=["Region1"],
         )
-        assert_no_pthread_outside_regions(result)
+        assert_no_leakage_outside_regions(
+            result, "Region2,Region3", check_counters=(mode == "sys_run")
+        )
 
 
 # =============================================================================
@@ -362,7 +393,7 @@ class TestSelectiveRegionPause(RocprofsysTest):
         target,
         selective_region_env,
         sys_run_manual_env,
-        assert_no_pthread_outside_regions,
+        assert_no_leakage_outside_regions,
     ):
         """With Region1 filter: region filtering combined with pause/resume."""
         env = merge_selective_env(mode, selective_region_env, sys_run_manual_env)
@@ -401,7 +432,9 @@ class TestSelectiveRegionPause(RocprofsysTest):
             categories=["rocm_marker_api"],
             pass_regex=["Region1"],
         )
-        assert_no_pthread_outside_regions(result)
+        assert_no_leakage_outside_regions(
+            result, "Region1", check_counters=(mode == "sys_run")
+        )
 
     def test_no_marker(self, mode, target, no_marker_env, sys_run_manual_env):
         """With Region1 filter but no marker_api: pause/resume ignored."""
@@ -463,7 +496,7 @@ class TestSelectiveRegionNoMarker(RocprofsysTest):
         mode,
         no_marker_env,
         sys_run_manual_env,
-        assert_no_pthread_outside_regions,
+        assert_no_leakage_outside_regions,
     ):
         """ROCPROFSYS_SELECTED_REGIONS='Region1' without marker_api."""
         env = merge_selective_env(mode, no_marker_env, sys_run_manual_env)
@@ -482,4 +515,6 @@ class TestSelectiveRegionNoMarker(RocprofsysTest):
             pass_regex=["CodeBlock_B", "CodeBlock_C", "CodeBlock_D", "CodeBlock_F"],
             fail_regex=["CodeBlock_A", "CodeBlock_E", "CodeBlock_G"],
         )
-        assert_no_pthread_outside_regions(result)
+        assert_no_leakage_outside_regions(
+            result, "Region1", check_counters=(mode == "sys_run")
+        )
