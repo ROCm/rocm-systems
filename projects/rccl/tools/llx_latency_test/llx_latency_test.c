@@ -46,6 +46,8 @@ THE SOFTWARE.
  *            flags. Recv polls flags then re-reads data.
  *
  * Set the line size at compile time with -DLINE_BYTES=64 (default), 128, or 256.
+ * Override the per-block thread count with -DNTHREADS=<N> (default 256;
+ * must be a multiple of LINE_BYTES/8).
  *
  * Each run does warmup, then a 1-iter verify pass (with checks), then timed
  * iters. Per-iter timing = (kernel time / iters), where the per-iter ACK
@@ -85,7 +87,6 @@ THE SOFTWARE.
 
 static_assert(LINE_BYTES % 8 == 0,         "LINE_BYTES must be a multiple of 8");
 static_assert(LINE_BYTES >= 16,            "LINE_BYTES must be at least 16");
-static_assert(256 % LINE_ELEMS == 0,       "NTHREADS (256) must be divisible by LINE_ELEMS");
 // SC variants use s_waitcnt vmcnt(0) and __any() to order/poll within a single
 // wavefront. LINE_ELEMS must fit in one wave; cap at 32 for wave32 portability.
 static_assert(LINE_ELEMS <= 32,            "LINE_ELEMS must fit in one wavefront (LINE_BYTES <= 256)");
@@ -98,10 +99,15 @@ static_assert(LINE_ELEMS <= 32,            "LINE_ELEMS must fit in one wavefront
 // Tuning constants
 // ---------------------------------------------------------------------------
 
+#ifndef NTHREADS
 #define NTHREADS    256
+#endif
 #define NBLOCKS_MAX  64
 #define ITERS_MAX  4096
 #define MIN_SWEEP_BYTES 8
+
+static_assert(NTHREADS > 0,                "NTHREADS must be positive");
+static_assert(NTHREADS % LINE_ELEMS == 0,  "NTHREADS must be divisible by LINE_ELEMS");
 
 // ---------------------------------------------------------------------------
 // Watchdog
