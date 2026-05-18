@@ -340,7 +340,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_swap_cp) {
     HIP_CHECK(hipStreamDestroy(stream));
     HIP_CHECK(hipFree(d_a));
     HIP_CHECK(hipFree(d_b));
-    HIP_SKIP_TEST(HipTest::SkipReason::kSdmaSwapUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kSdmaSwapUnsupported);
   }
   HIP_CHECK(err);
   HIP_CHECK(hipStreamSynchronize(stream));
