@@ -3645,8 +3645,8 @@ ncclResult_t ncclCommGrow_impl(ncclComm_t comm, int nRanks, const ncclUniqueId* 
       NCCLCHECKGOTO(bcastGrowHandle(&recvHandle, comm, /*isRoot=*/false), res, exit);
       uint64_t expectedMagic = hashCombine(comm->magic, (uint64_t)comm->childCount);
       if (recvHandle.magic != expectedMagic) {
-        WARN("ncclCommGrow: magic mismatch from root, got 0x%lx expected 0x%lx",
-             (unsigned long)recvHandle.magic, (unsigned long)expectedMagic);
+        WARN("ncclCommGrow: magic mismatch computed by the root, got %lx expected %lx",
+             recvHandle.magic, expectedMagic);
         res = ncclInvalidArgument;
         goto exit;
       }
