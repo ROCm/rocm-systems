@@ -2972,7 +2972,6 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
   std::vector<size_t> hostToHostIndices;
   std::vector<size_t> writeBufferIndices;
   std::vector<size_t> readBufferIndices;
-  std::vector<size_t> p2pIndices;
 
   for (size_t i = 0; i < count; ++i) {
     hip::MemcpyType type;
@@ -2988,6 +2987,7 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
     switch (type) {
       case hipCopyBuffer:
       case hipCopyBufferSDMA:
+      case hipCopyBufferP2P:
         bufferCopyIndices.push_back(i);
         break;
       case hipHostToHost:
@@ -2998,9 +2998,6 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
         break;
       case hipReadBuffer:
         readBufferIndices.push_back(i);
-        break;
-      case hipCopyBufferP2P:
-        p2pIndices.push_back(i);
         break;
     }
   }
@@ -3059,14 +3056,6 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
 
   // Handle read buffer (device to host) copies
   for (size_t idx : readBufferIndices) {
-    status = ihipMemcpy(dsts[idx], srcs[idx], sizes[idx], hipMemcpyDefault, stream, isAsync, true);
-    if (status != hipSuccess) {
-      return status;
-    }
-  }
-
-  // Handle P2P copies
-  for (size_t idx : p2pIndices) {
     status = ihipMemcpy(dsts[idx], srcs[idx], sizes[idx], hipMemcpyDefault, stream, isAsync, true);
     if (status != hipSuccess) {
       return status;
