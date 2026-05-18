@@ -1341,7 +1341,7 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
     {
         if(!amd_smi_nic_resp_tx_pkt_seq_err_track::exists(_device_id))
             amd_smi_nic_resp_tx_pkt_seq_err_track::emplace(
-                _device_id, make_track_name("RESP TX PKT SEQ ERR"), "packets");
+                _device_id, make_track_name("RESP TX PKT SEQ ERR"), "errors");
         TRACE_COUNTER(trait::name<category::amd_smi_nic_resp_tx_pkt_seq_err>::value,
                       amd_smi_nic_resp_tx_pkt_seq_err_track::at(_device_id, 0), _ts,
                       static_cast<double>(_nic_sample.metric_values.resp_tx_pkt_seq_err));
@@ -1351,7 +1351,7 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
     {
         if(!amd_smi_nic_req_rx_pkt_seq_err_track::exists(_device_id))
             amd_smi_nic_req_rx_pkt_seq_err_track::emplace(
-                _device_id, make_track_name("REQ RX PKT SEQ ERR"), "packets");
+                _device_id, make_track_name("REQ RX PKT SEQ ERR"), "errors");
         TRACE_COUNTER(trait::name<category::amd_smi_nic_req_rx_pkt_seq_err>::value,
                       amd_smi_nic_req_rx_pkt_seq_err_track::at(_device_id, 0), _ts,
                       static_cast<double>(_nic_sample.metric_values.req_rx_pkt_seq_err));
@@ -1361,7 +1361,7 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
     {
         if(!amd_smi_nic_req_rx_impl_nak_seq_err_track::exists(_device_id))
             amd_smi_nic_req_rx_impl_nak_seq_err_track::emplace(
-                _device_id, make_track_name("REQ RX IMPL NAK SEQ ERR"), "packets");
+                _device_id, make_track_name("REQ RX IMPL NAK SEQ ERR"), "errors");
         TRACE_COUNTER(
             trait::name<category::amd_smi_nic_req_rx_impl_nak_seq_err>::value,
             amd_smi_nic_req_rx_impl_nak_seq_err_track::at(_device_id, 0), _ts,
