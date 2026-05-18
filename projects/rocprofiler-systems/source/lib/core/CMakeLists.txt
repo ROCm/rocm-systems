@@ -18,6 +18,8 @@ set(core_sources
     ${CMAKE_CURRENT_LIST_DIR}/output_file_registry.cpp
     ${CMAKE_CURRENT_LIST_DIR}/perf.cpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/perfetto_engine.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/perfetto_sinks.cpp
     ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.cpp
     ${CMAKE_CURRENT_LIST_DIR}/state.cpp
     ${CMAKE_CURRENT_LIST_DIR}/timemory.cpp
@@ -50,6 +52,8 @@ set(core_headers
     ${CMAKE_CURRENT_LIST_DIR}/output_file_registry.hpp
     ${CMAKE_CURRENT_LIST_DIR}/perf.hpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/perfetto_engine.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/perfetto_sinks.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.hpp
     ${CMAKE_CURRENT_LIST_DIR}/state.hpp
     ${CMAKE_CURRENT_LIST_DIR}/timemory.hpp
