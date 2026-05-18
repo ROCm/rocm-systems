@@ -39,10 +39,10 @@ using namespace rocshmem;
  *****************************************************************************/
 
 template <typename T>
-class rocshmemAllocation {
+class SymmetricTensorBuffer {
 public:
-    rocshmemAllocation() = default;
-    ~rocshmemAllocation() { dealloc(); }
+    SymmetricTensorBuffer() = default;
+    ~SymmetricTensorBuffer() { dealloc(); }
 
     void reset(size_t capacity) {
         dealloc();
@@ -379,8 +379,8 @@ TileRMATester::TileRMATester(TesterArguments args) : Tester(args) {
   size_t num_elements = buffer_elements_per_thread * total_threads;
 
   // Allocate using rocshmem symmetric heap
-  local_alloc = new rocshmemAllocation<float>();
-  remote_alloc = new rocshmemAllocation<float>();
+  local_alloc = new SymmetricTensorBuffer<float>();
+  remote_alloc = new SymmetricTensorBuffer<float>();
 
   local_alloc->reset(num_elements);
   remote_alloc->reset(num_elements);
