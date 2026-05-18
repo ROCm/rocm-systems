@@ -375,6 +375,8 @@ class Device : public NullDevice {
 
   void checkAtomicSupport();  //!< Check the support for pcie atomics
 
+  void recreateXferQueue() override;
+
   //! Destructor for the physical HSA device
   virtual ~Device();
 

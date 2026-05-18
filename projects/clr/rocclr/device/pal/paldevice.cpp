@@ -2826,4 +2826,21 @@ amd::Memory* Device::ImportShareableVMMHandle(void* osHandle) {
   return amd_mem_obj;
 }
 
+void Device::recreateXferQueue() {
+  delete xferQueue_;
+  xferQueue_ = nullptr;
+
+  // PAL's xferQueue() is a bare getter with no lazy re-creation, so recreate explicitly.
+  // Finalize() was already called during initializeHeapResources() and must not be called
+  // again, but creating a new VirtualGPU is safe at this point.
+  xferQueue_ = new VirtualGPU(*this);
+  if (!(xferQueue_ && xferQueue_->create(false))) {
+    delete xferQueue_;
+    xferQueue_ = nullptr;
+    LogError("Couldn't recreate the device transfer manager after reset!");
+    return;
+  }
+  xferQueue_->enableSyncedBlit();
+}
+
 }  // namespace amd::pal

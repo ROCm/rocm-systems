@@ -526,6 +526,8 @@ class Device : public NullDevice {
 
   VirtualGPU* xferQueue() const { return xferQueue_; }
 
+  void recreateXferQueue() override;
+
   //! Retrieves the internal format from the OCL format
   Pal::ChNumFormat getPalFormat(const amd::Image::Format& format,  //! OCL image format
                                 Pal::ChannelMapping* channel) const;
