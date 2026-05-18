@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 import pytest
 from pathlib import Path
-from conftest import RocprofsysTest
+from conftest import RocprofsysTest, check_use_rocpd
 
 pytestmark = [
     pytest.mark.mpi,
@@ -42,7 +42,9 @@ def assert_per_rank_outputs(
 ) -> None:
     """Assert per-rank file presence/absence for each rank in the given lists.
     Note: `.db` files are PID-named, not rank-named, so they are verified by
-    count == len(ranks_with_output) since each producing rank emits one)
+    count == len(ranks_with_output) since each producing rank emits one.
+    The `.db` check only runs when RocPD is available
+    (`check_use_rocpd()` — requires GPU and ROCm >= 7.0)
     """
     per_rank_files = [
         "perfetto-trace-{rank}.proto",
@@ -62,12 +64,13 @@ def assert_per_rank_outputs(
                 not path.exists()
             ), f"Unexpected file present for rank {rank}: {path.name}"
 
-    db_files = sorted(output_dir.glob("*.db"))
-    expected_db = len(ranks_with_output)
-    assert len(db_files) == expected_db, (
-        f"Expected {expected_db} .db file(s), got {len(db_files)}: "
-        f"{[p.name for p in db_files]}"
-    )
+    if check_use_rocpd():
+        db_files = sorted(output_dir.glob("*.db"))
+        expected_db = len(ranks_with_output)
+        assert len(db_files) == expected_db, (
+            f"Expected {expected_db} .db file(s), got {len(db_files)}: "
+            f"{[p.name for p in db_files]}"
+        )
 
 
 # =============================================================================
