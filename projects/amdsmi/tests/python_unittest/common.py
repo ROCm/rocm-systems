@@ -305,14 +305,24 @@ class GTestSummaryRunner(unittest.TextTestRunner):
         """Return the GTest-format label for *test*.
 
         ``TestCase.id()`` is the public API for a test's full dotted name
-        (e.g. ``"__main__.ClassName.method_name"``).  We keep only the last
-        two components so the label matches GTest's ``ClassName.method_name``
-        format and does not expose the Python module path.
+        (e.g. ``"__main__.ClassName.method_name"``).  When the id starts with
+        the standard ``__main__.`` prefix we strip it, yielding
+        ``ClassName.method_name`` without risking label collisions between
+        tests from different modules that share a class name.
         """
-        return ".".join(test.id().split(".")[-2:])
+        test_id = test.id()
+        if test_id.startswith("__main__."):
+            return test_id[len("__main__.") :]
+        return test_id
 
     def _color(self, code, text):
-        """Wrap *text* in *code* only when the output stream is a real TTY."""
+        """Wrap *text* in *code* only when colors are appropriate.
+
+        Colors are suppressed when the ``NO_COLOR`` environment variable is set
+        (https://no-color.org/) or when the output stream is not a real TTY.
+        """
+        if os.environ.get("NO_COLOR"):
+            return text
         underlying = getattr(self.stream, "stream", self.stream)
         if hasattr(underlying, "isatty") and underlying.isatty():
             return f"{code}{text}{self._RESET}"
@@ -356,6 +366,13 @@ class GTestSummaryRunner(unittest.TextTestRunner):
                 stream.writeln(self._color(self._RED, f"[  FAILED  ] {self._test_label(t)}"))
             for t, _ in result.errors:
                 stream.writeln(self._color(self._RED, f"[  FAILED  ] {self._test_label(t)}"))
+            # unexpectedSuccesses items are bare TestCase instances (not (test, traceback) tuples).
+            for t in getattr(result, "unexpectedSuccesses", []):
+                stream.writeln(
+                    self._color(
+                        self._RED, f"[  FAILED  ] {self._test_label(t)} (unexpected success)"
+                    )
+                )
         if skipped:
             stream.writeln(
                 self._color(
