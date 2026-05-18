@@ -47,21 +47,27 @@ struct ncclKernelMatch {
 
 
 #ifdef ENABLE_COLLTRACE
-#define ncclGetKernelIndex(p_comm) ((p_comm)->unroll + ((p_comm)->collTraceEnabled ? 3 : 0))
-static ncclKernelMatch const ncclKerns[6] = {
+#define ncclGetKernelIndex(p_comm) ((p_comm)->unroll + ((p_comm)->collTraceEnabled ? 5 : 0))
+static ncclKernelMatch const ncclKerns[10] = {
   {(void *)ncclDevKernel_Generic_1, true},
   {(void *)ncclDevKernel_Generic_2, true},
   {(void *)ncclDevKernel_Generic_4, true},
+  {(void *)ncclDevKernel_Generic_8, true},
+  {(void *)ncclDevKernel_Generic_16, true},
   {(void *)ncclDevKernelDebug_Generic_1, true},
   {(void *)ncclDevKernelDebug_Generic_2, true},
-  {(void *)ncclDevKernelDebug_Generic_4, true}
+  {(void *)ncclDevKernelDebug_Generic_4, true},
+  {(void *)ncclDevKernelDebug_Generic_8, true},
+  {(void *)ncclDevKernelDebug_Generic_16, true}
 };
 #else
 #define ncclGetKernelIndex(p_comm) ((p_comm)->unroll)
-static ncclKernelMatch const ncclKerns[3] = {
+static ncclKernelMatch const ncclKerns[5] = {
   {(void*)ncclDevKernel_Generic_1, true},
   {(void*)ncclDevKernel_Generic_2, true},
-  {(void*)ncclDevKernel_Generic_4, true}
+  {(void*)ncclDevKernel_Generic_4, true},
+  {(void*)ncclDevKernel_Generic_8, true},
+  {(void*)ncclDevKernel_Generic_16, true}
 };
 #endif
 
