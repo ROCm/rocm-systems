@@ -350,7 +350,7 @@ hsa_status_t Device::iterateAgentCallback(hsa_agent_t agent, void* data) {
   return stat;
 }
 
-hsa_ven_amd_loader_1_00_pfn_t Device::amd_loader_ext_table = {nullptr};
+hsa_ven_amd_loader_1_03_pfn_t Device::amd_loader_ext_table = {nullptr};
 
 hsa_status_t Device::loaderQueryHostAddress(const void* device, const void** host) {
   return amd_loader_ext_table.hsa_ven_amd_loader_query_host_address
