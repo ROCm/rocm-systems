@@ -29,7 +29,7 @@
 
 // Forward declaration
 template <typename T>
-class rocshmemAllocation;
+class SymmetricTensorBuffer;
 
 /******************************************************************************
  * HOST TESTER CLASS
@@ -51,8 +51,8 @@ class TileRMATester : public Tester {
   float *dest = nullptr;
 
   // Symmetric heap allocations
-  rocshmemAllocation<float> *local_alloc = nullptr;
-  rocshmemAllocation<float> *remote_alloc = nullptr;
+  SymmetricTensorBuffer<float> *local_alloc = nullptr;
+  SymmetricTensorBuffer<float> *remote_alloc = nullptr;
 };
 
 #endif
