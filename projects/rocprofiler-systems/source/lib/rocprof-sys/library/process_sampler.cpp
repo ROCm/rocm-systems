@@ -137,16 +137,16 @@ sampler::setup()
 
     polling_finished = std::make_unique<promise_t>();
 
-    auto          _freq      = get_process_sampling_freq();
-    std::uint64_t _msec_freq = (1.0 / _freq) * 1.0e3;
-
-    polling_finished = std::make_unique<promise_t>();
+    const auto _freq = get_process_sampling_freq();
+    const auto _interval =
+        nsec_t{ static_cast<std::uint64_t>((1.0 / _freq) * units::sec) };
 
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
 
     set_state(State::PreInit);
-    get_thread() = std::make_unique<std::thread>(&poll<msec_t>, &get_sampler_state(),
-                                                 msec_t{ _msec_freq }, nullptr);
+    using poll_fn = void (*)(std::atomic<State>*, nsec_t, promise_t*);
+    get_thread()  = std::make_unique<std::thread>(
+        static_cast<poll_fn>(&poll), &get_sampler_state(), _interval, nullptr);
 
     set_state(State::Active);
 }

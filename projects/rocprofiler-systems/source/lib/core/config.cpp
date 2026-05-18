@@ -1490,7 +1490,7 @@ configure_disabled_settings(const std::shared_ptr<settings>& _config)
     {
         auto _v = itr.second->get_env_name();
         if(_hidden_exact.count(_v) > 0 ||
-           std ::regex_match(_v, std::regex{ _hidden_exact_re }) ||
+           std::regex_match(_v, std::regex{ _hidden_exact_re }) ||
            std::regex_match(_v, std::regex{ _hidden_begin_re }))
         {
             itr.second->set_enabled(false);
@@ -2383,11 +2383,16 @@ get_sampling_allocator_size()
 double
 get_process_sampling_freq()
 {
-    static auto _v = get_config()->find("ROCPROFSYS_PROCESS_SAMPLING_FREQ");
-    auto        _val =
-        std::min<double>(static_cast<tim::tsettings<double>&>(*_v->second).get(), 1000.0);
-    if(_val < 1.0e-9) return std::min<double>(get_sampling_freq(), 100.0);
-    return _val;
+    static auto _v   = get_config()->find("ROCPROFSYS_PROCESS_SAMPLING_FREQ");
+    const auto  _val = static_cast<tim::tsettings<double>&>(*_v->second).get();
+
+    constexpr auto effective_zero = 1.0e-9;
+    if(_val < effective_zero)
+    {
+        return std::min<double>(get_sampling_freq(), 100.0);
+    }
+
+    return std::min<double>(_val, 1000.0);
 }
 
 double

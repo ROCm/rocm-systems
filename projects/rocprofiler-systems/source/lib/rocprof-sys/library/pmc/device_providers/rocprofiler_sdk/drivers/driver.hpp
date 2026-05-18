@@ -46,41 +46,54 @@ struct driver
     using agent_id_t                   = rocprofiler_agent_id_t;
     using buffer_id_t                  = rocprofiler_buffer_id_t;
     using status_t                     = rocprofiler_status_t;
+    using counter_instance_id_t        = rocprofiler_counter_instance_id_t;
+    using user_data_t                  = rocprofiler_user_data_t;
+    using counter_flag_t               = rocprofiler_counter_flag_t;
 
     static agent_id_t make_agent_id(std::uint64_t handle) { return agent_id_t{ handle }; }
 
-    static rocprofiler_status_t create_context(rocprofiler_context_id_t* context)
+    static status_t create_context(context_id_t* context)
     {
         return rocprofiler_create_context(context);
     }
 
-    static rocprofiler_status_t start_context(rocprofiler_context_id_t context)
+    static status_t start_context(context_id_t context)
     {
         return rocprofiler_start_context(context);
     }
 
-    static rocprofiler_status_t stop_context(rocprofiler_context_id_t context)
+    static status_t stop_context(context_id_t context)
     {
         return rocprofiler_stop_context(context);
     }
 
-    static rocprofiler_status_t sample_device_counting_service(
-        rocprofiler_context_id_t context, rocprofiler_user_data_t user_data,
-        rocprofiler_counter_flag_t flags, rocprofiler_counter_record_t* output_records,
-        size_t* record_count)
+    static status_t sample_device_counting_service(context_id_t      context,
+                                                   user_data_t       user_data,
+                                                   counter_flag_t    flags,
+                                                   counter_record_t* output_records,
+                                                   size_t*           record_count)
     {
         return rocprofiler_sample_device_counting_service(context, user_data, flags,
                                                           output_records, record_count);
     }
 
-    static rocprofiler_status_t query_record_counter_id(
-        rocprofiler_counter_instance_id_t record_id, rocprofiler_counter_id_t* counter_id)
+    static status_t query_record_counter_id(counter_record_t record,
+                                            counter_id_t*    counter_id)
     {
-        return rocprofiler_query_record_counter_id(record_id, counter_id);
+#if ROCPROFSYS_ROCM_VERSION < 70000
+        return rocprofiler_query_record_counter_id(record.id, counter_id);
+#else
+        if(counter_id == nullptr)
+        {
+            return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+        }
+
+        counter_id->handle = record.id;
+        return ROCPROFILER_STATUS_SUCCESS;
+#endif
     }
 
-    static std::vector<counter_metadata> query_counter_details(
-        rocprofiler_counter_id_t counter_id)
+    static std::vector<counter_metadata> query_counter_details(counter_id_t counter_id)
     {
         auto safe_str = [](const char* str) {
             return str != nullptr ? std::string{ str } : std::string{};
@@ -129,17 +142,18 @@ struct driver
 #endif
     }
 
-    static rocprofiler_status_t iterate_agent_supported_counters(
-        rocprofiler_agent_id_t agent_id, rocprofiler_available_counters_cb_t callback,
-        void* user_data)
+    static status_t iterate_agent_supported_counters(agent_id_t              agent_id,
+                                                     available_counters_cb_t callback,
+                                                     void*                   user_data)
     {
         return rocprofiler_iterate_agent_supported_counters(agent_id, callback,
                                                             user_data);
     }
 
-    static rocprofiler_status_t create_counter_config(
-        rocprofiler_agent_id_t agent_id, rocprofiler_counter_id_t* counters_list,
-        size_t counters_count, rocprofiler_counter_config_id_t* config_id)
+    static status_t create_counter_config(agent_id_t           agent_id,
+                                          counter_id_t*        counters_list,
+                                          size_t               counters_count,
+                                          counter_config_id_t* config_id)
     {
 #if ROCPROFSYS_ROCM_VERSION >= 70000
         return rocprofiler_create_counter_config(agent_id, counters_list, counters_count,
@@ -150,10 +164,9 @@ struct driver
 #endif
     }
 
-    static rocprofiler_status_t configure_device_counting_service(
-        rocprofiler_context_id_t context_id, rocprofiler_buffer_id_t buffer_id,
-        rocprofiler_agent_id_t                   agent_id,
-        rocprofiler_device_counting_service_cb_t callback, void* user_data)
+    static status_t configure_device_counting_service(
+        context_id_t context_id, buffer_id_t buffer_id, agent_id_t agent_id,
+        device_counting_service_cb_t callback, void* user_data)
     {
         return rocprofiler_configure_device_counting_service(
             context_id, buffer_id, agent_id, callback, user_data);

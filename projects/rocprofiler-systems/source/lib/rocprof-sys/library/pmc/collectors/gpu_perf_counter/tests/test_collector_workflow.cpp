@@ -197,13 +197,10 @@ protected:
         mock = std::make_shared<MockDriver>();
         MockDriverFactory::set_mock(mock);
 
-        // On ROCm < 7.0, device.hpp decodes record.id via query_record_counter_id.
-        // Tests use record.id equal to counter_id.handle, so the mock mirrors that.
-        // Not invoked on ROCm >= 7.0 (different code path in device.hpp).
         ON_CALL(*mock, query_record_counter_id(_, _))
-            .WillByDefault([](rocprofiler_counter_instance_id_t record_id,
-                              rocprofiler_counter_id_t*         counter_id) {
-                counter_id->handle = record_id;
+            .WillByDefault([](rocprofiler_counter_record_t record,
+                              rocprofiler_counter_id_t*    counter_id) {
+                counter_id->handle = record.id;
                 return ROCPROFILER_STATUS_SUCCESS;
             });
         EXPECT_CALL(*mock, query_record_counter_id(_, _)).Times(::testing::AnyNumber());
@@ -231,19 +228,22 @@ TEST_F(SdkPmcCollectorWorkflowTest, SingleGpuWorkflow)
 
     setup_provider_expectations(mock, 42, counters, /*context=*/100);
 
+    auto sample_call_count = std::make_shared<int>(0);
     EXPECT_CALL(
         *mock, sample_device_counting_service(
                    ::testing::Field(&rocprofiler_context_id_t::handle, 100u), _, _, _, _))
-        .WillRepeatedly([](rocprofiler_context_id_t, rocprofiler_user_data_t,
-                           rocprofiler_counter_flag_t, rocprofiler_counter_record_t* out,
-                           size_t* count) {
-            out[0].id            = 10;
-            out[0].counter_value = 42.0;
-            out[1].id            = 20;
-            out[1].counter_value = 99.0;
-            *count               = 2;
-            return ROCPROFILER_STATUS_SUCCESS;
-        });
+        .WillRepeatedly(
+            [sample_call_count](rocprofiler_context_id_t, rocprofiler_user_data_t,
+                                rocprofiler_counter_flag_t,
+                                rocprofiler_counter_record_t* out, size_t* count) {
+                ++(*sample_call_count);
+                out[0].id            = 10;
+                out[0].counter_value = 42.0 * (*sample_call_count);
+                out[1].id            = 20;
+                out[1].counter_value = 99.0 * (*sample_call_count);
+                *count               = 2;
+                return ROCPROFILER_STATUS_SUCCESS;
+            });
 
     auto provider = std::make_shared<MockProvider>(
         std::vector<std::shared_ptr<rocprofsys::agent>>{ agent },

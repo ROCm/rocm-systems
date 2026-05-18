@@ -45,8 +45,8 @@ public:
                  rocprofiler_counter_record_t* output_records, size_t* record_count));
 
     MOCK_METHOD(rocprofiler_status_t, query_record_counter_id,
-                (rocprofiler_counter_instance_id_t record_id,
-                 rocprofiler_counter_id_t*         counter_id));
+                (rocprofiler_counter_record_t record,
+                 rocprofiler_counter_id_t*    counter_id));
 
     MOCK_METHOD((std::vector<collectors::gpu_perf_counter::counter_metadata>),
                 query_counter_details, (rocprofiler_counter_id_t counter_id));

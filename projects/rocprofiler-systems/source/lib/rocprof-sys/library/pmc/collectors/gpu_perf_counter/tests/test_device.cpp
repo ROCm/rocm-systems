@@ -110,22 +110,15 @@ TEST_F(SdkPmcDeviceTest, SampleWithScalarCounters)
             return ROCPROFILER_STATUS_SUCCESS;
         });
 
-#if ROCPROFSYS_ROCM_VERSION < 70000
-    // On ROCm < 7.0, record.id is an encoded instance_id; the device layer decodes
-    // it via query_record_counter_id to obtain the plain counter handle.
-    EXPECT_CALL(*mock_driver,
-                query_record_counter_id(rocprofiler_counter_instance_id_t{ 10 }, _))
-        .WillOnce([](rocprofiler_counter_instance_id_t, rocprofiler_counter_id_t* out) {
+    EXPECT_CALL(*mock_driver, query_record_counter_id(_, _))
+        .WillOnce([](rocprofiler_counter_record_t record, rocprofiler_counter_id_t* out) {
             out->handle = 10;
             return ROCPROFILER_STATUS_SUCCESS;
-        });
-    EXPECT_CALL(*mock_driver,
-                query_record_counter_id(rocprofiler_counter_instance_id_t{ 20 }, _))
-        .WillOnce([](rocprofiler_counter_instance_id_t, rocprofiler_counter_id_t* out) {
+        })
+        .WillOnce([](rocprofiler_counter_record_t record, rocprofiler_counter_id_t* out) {
             out->handle = 20;
             return ROCPROFILER_STATUS_SUCCESS;
         });
-#endif
 
     enabled_metrics enabled{ {} };
     auto            result = dev.get_gpu_perf_counter_metrics(enabled, 1000000);
@@ -194,21 +187,13 @@ TEST_F(SdkPmcDeviceTest, SampleWithMultiDimCounters)
             return ROCPROFILER_STATUS_SUCCESS;
         });
 
-#if ROCPROFSYS_ROCM_VERSION < 70000
-    // On ROCm < 7.0, the device layer decodes each instance_id to a counter handle.
-    for(int i = 0; i < 4; ++i)
-    {
-        const std::uint64_t expected_handle = static_cast<std::uint64_t>(100 + i);
-        EXPECT_CALL(*mock_driver,
-                    query_record_counter_id(
-                        rocprofiler_counter_instance_id_t{ expected_handle }, _))
-            .WillOnce([expected_handle](rocprofiler_counter_instance_id_t,
-                                        rocprofiler_counter_id_t* out) {
-                out->handle = expected_handle;
+    EXPECT_CALL(*mock_driver, query_record_counter_id(_, _))
+        .Times(4)
+        .WillRepeatedly(
+            [](rocprofiler_counter_record_t record, rocprofiler_counter_id_t* out) {
+                out->handle = record.id;
                 return ROCPROFILER_STATUS_SUCCESS;
             });
-    }
-#endif
 
     enabled_metrics enabled{ {} };
     auto            result = dev.get_gpu_perf_counter_metrics(enabled, 1000000);
@@ -225,21 +210,11 @@ TEST_F(SdkPmcDeviceTest, SampleWithMultiDimCounters)
 }
 
 // Verify that the encoded instance_id returned by the SDK is decoded to the plain
-// counter handle that matches the metadata key used by find_gpu_perf_counter_by_id.
-// On ROCm < 7.0 this requires a call to query_record_counter_id.
-// On ROCm >= 7.0 the instance_id IS the metadata key, so no decode is needed.
+// counter handle via query_record_counter_id.
 TEST_F(SdkPmcDeviceTest, CounterIdDecodedFromInstanceId)
 {
-    // counter_id.handle = 7 is the plain counter handle stored in metadata.
-    // On ROCm < 7.0, the SDK encodes this into instance_id = 0xDEAD0007 (synthetic).
-    // On ROCm >= 7.0, instance_id is used directly as the metadata key.
     constexpr std::uint64_t plain_counter_handle = 7;
-
-#if ROCPROFSYS_ROCM_VERSION < 70000
-    constexpr std::uint64_t sdk_instance_id = 0xDEAD0007ULL;
-#else
-    constexpr std::uint64_t sdk_instance_id = plain_counter_handle;
-#endif
+    constexpr std::uint64_t sdk_instance_id      = 0xDEAD0007ULL;
 
     auto meta = std::vector<counter_metadata>{
         counter_metadata{
@@ -262,23 +237,16 @@ TEST_F(SdkPmcDeviceTest, CounterIdDecodedFromInstanceId)
             return ROCPROFILER_STATUS_SUCCESS;
         });
 
-#if ROCPROFSYS_ROCM_VERSION < 70000
-    // The driver decodes the encoded instance_id to the plain counter handle.
-    EXPECT_CALL(
-        *mock_driver,
-        query_record_counter_id(rocprofiler_counter_instance_id_t{ sdk_instance_id }, _))
-        .WillOnce([](rocprofiler_counter_instance_id_t, rocprofiler_counter_id_t* out) {
+    EXPECT_CALL(*mock_driver, query_record_counter_id(_, _))
+        .WillOnce([](rocprofiler_counter_record_t, rocprofiler_counter_id_t* out) {
             out->handle = plain_counter_handle;
             return ROCPROFILER_STATUS_SUCCESS;
         });
-#endif
 
     enabled_metrics enabled{ {} };
     auto            result = dev.get_gpu_perf_counter_metrics(enabled, 1000000);
 
     ASSERT_EQ(result.size(), 1U);
-    // The emitted counter_id must equal the plain handle stored in counter_metadata,
-    // which is what find_gpu_perf_counter_by_id looks up.
     EXPECT_EQ(result[0].counter_id, plain_counter_handle);
     EXPECT_DOUBLE_EQ(result[0].value, 99.0);
 }
@@ -309,16 +277,12 @@ TEST_F(SdkPmcDeviceTest, ResultCacheReusedAcrossSamples)
             return ROCPROFILER_STATUS_SUCCESS;
         });
 
-#if ROCPROFSYS_ROCM_VERSION < 70000
-    EXPECT_CALL(*mock_driver,
-                query_record_counter_id(rocprofiler_counter_instance_id_t{ 5 }, _))
+    EXPECT_CALL(*mock_driver, query_record_counter_id(_, _))
         .Times(2)
-        .WillRepeatedly(
-            [](rocprofiler_counter_instance_id_t, rocprofiler_counter_id_t* out) {
-                out->handle = 5;
-                return ROCPROFILER_STATUS_SUCCESS;
-            });
-#endif
+        .WillRepeatedly([](rocprofiler_counter_record_t, rocprofiler_counter_id_t* out) {
+            out->handle = 5;
+            return ROCPROFILER_STATUS_SUCCESS;
+        });
 
     enabled_metrics enabled{ {} };
 

@@ -18,6 +18,7 @@
 #include <iterator>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -101,19 +102,18 @@ public:
         {
             const auto& record = m_record_buffer[idx];
 
-            // On ROCm < 7.0, record.id is rocprofiler_counter_instance_id_t (an
-            // encoded value combining counter handle + dimension positions). The
-            // metadata key stored by query_counter_details is counter_id.handle (a
-            // plain counter handle), so we must decode via query_record_counter_id.
-            // On ROCm >= 7.0, metadata is keyed by dim_inst->instance_id which equals
-            // record.id directly, so no decode is required.
-#if ROCPROFSYS_ROCM_VERSION < 70000
-            typename Driver::counter_id_t cid{};
-            m_driver_api->query_record_counter_id(record.id, &cid);
-            m_result_cache.push_back({ cid.handle, record.counter_value });
-#else
-            m_result_cache.push_back({ record.id, record.counter_value });
-#endif
+            typename Driver::counter_id_t config_id{};
+            m_driver_api->query_record_counter_id(record, &config_id);
+            auto   id      = config_id.handle;
+            auto   raw     = record.counter_value;
+            auto   prev_it = m_prev_values.find(id);
+            double delta   = raw;
+            if(prev_it != m_prev_values.end())
+            {
+                delta = raw - prev_it->second;
+            }
+            m_prev_values[id] = raw;
+            m_result_cache.push_back({ id, delta });
         }
 
         return std::move(m_result_cache);
@@ -147,6 +147,7 @@ private:
     std::vector<counter_metadata>                  m_counter_meta;
     std::vector<typename Driver::counter_record_t> m_record_buffer;
     metrics                                        m_result_cache;
+    std::unordered_map<counter_id_t, double>       m_prev_values;
 };
 
 }  // namespace rocprofsys::pmc::collectors::gpu_perf_counter
