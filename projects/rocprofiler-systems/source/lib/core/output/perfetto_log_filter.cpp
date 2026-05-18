@@ -10,28 +10,39 @@
 namespace rocprofsys::output::perfetto_log_filter
 {
 
+filter_action
+classify(::perfetto::base::LogLev level)
+{
+    switch(level)
+    {
+        case ::perfetto::base::LogLev::kLogDebug:
+        case ::perfetto::base::LogLev::kLogInfo: return filter_action::drop;
+        case ::perfetto::base::LogLev::kLogImportant: return filter_action::warning;
+        case ::perfetto::base::LogLev::kLogError: return filter_action::error;
+    }
+    return filter_action::unknown;
+}
+
 void
 filter_fn(::perfetto::base::LogMessageCallbackArgs args)
 {
     const char* file = (args.filename != nullptr) ? args.filename : "<unknown>";
     const char* msg  = (args.message != nullptr) ? args.message : "";
 
-    switch(args.level)
+    switch(classify(args.level))
     {
-        case ::perfetto::base::LogLev::kLogDebug:
-        case ::perfetto::base::LogLev::kLogInfo: return;
-        case ::perfetto::base::LogLev::kLogImportant:
+        case filter_action::drop: return;
+        case filter_action::warning:
             LOG_WARNING("[perfetto] {}:{} {}", file, args.line, msg);
             return;
-        case ::perfetto::base::LogLev::kLogError:
+        case filter_action::error:
             LOG_ERROR("[perfetto] {}:{} {}", file, args.line, msg);
             return;
+        case filter_action::unknown:
+            LOG_WARNING("[perfetto] unknown severity {}: {}:{} {}",
+                        static_cast<int>(args.level), file, args.line, msg);
+            return;
     }
-
-    // Warn-and-drop on future SDK enum additions instead of silently
-    // missing the message.
-    LOG_WARNING("[perfetto] unknown severity {}: {}:{} {}", static_cast<int>(args.level),
-                file, args.line, msg);
 }
 
 void

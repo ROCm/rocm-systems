@@ -31,7 +31,7 @@ is_helper(const process_node& node)
     // Unknown size -> not a helper, so a transient try_file_size
     // failure can't silently demote a large output into a helper.
     if(!any_known) return false;
-    return max_size < HELPER_SIZE_THRESHOLD_BYTES;
+    return max_size < HELPER_MAX_SIZE_BYTES;
 }
 
 process_node
@@ -51,12 +51,12 @@ make_range_node(const std::vector<process_node>& group)
     return node;
 }
 
-std::vector<process_node>
-collapse_siblings(std::vector<process_node> siblings)
+// Restructures one level of children: identifies helper siblings,
+// removes them in-place, and (if >= 2) appends a single synthetic
+// range node representing the collapsed group.
+void
+fold_helper_siblings(std::vector<process_node>& siblings)
 {
-    for(auto& s : siblings)
-        s.children = collapse_siblings(std::move(s.children));
-
     std::vector<process_node> kept_non_helpers;
     std::vector<process_node> helper_pool;
     kept_non_helpers.reserve(siblings.size());
@@ -75,22 +75,28 @@ collapse_siblings(std::vector<process_node> siblings)
         out.push_back(std::move(k));
 
     if(helper_pool.size() >= 2)
-    {
         out.push_back(make_range_node(helper_pool));
-    }
     else if(helper_pool.size() == 1)
-    {
         out.push_back(std::move(helper_pool.front()));
-    }
 
-    return out;
+    siblings = std::move(out);
 }
 }  // namespace
 
 std::vector<process_node>
 collapse_helpers(std::vector<process_node> roots)
 {
-    return collapse_siblings(std::move(roots));
+    // Bottom-up: fold each subtree's children first, then fold the
+    // root level. for_each_post visits each node after its children,
+    // so when we reach a node its children are already folded and
+    // we apply the sibling-group folding to that node's now-final
+    // children vector.
+    for(auto& r : roots)
+    {
+        for_each_post(r, [](process_node& node) { fold_helper_siblings(node.children); });
+    }
+    fold_helper_siblings(roots);
+    return roots;
 }
 
 }  // namespace rocprofsys::output

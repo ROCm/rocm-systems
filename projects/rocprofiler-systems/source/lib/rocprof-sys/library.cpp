@@ -110,10 +110,15 @@ setup() ROCPROFSYS_INTERNAL_API;
 
 namespace
 {
-// rocprofsys_init_library() warms it up so the timestamp reflects
-// library-init time, not finalize time. Used for the Output Summary
-// duration because metadata_registry's start/end fields are
-// std::uint32_t and lose precision for runs longer than ~4.29 s.
+// Library-load timestamp captured on first access. Process-scoped
+// (one library load per process, one timestamp), so a function-local
+// static is the right form — same cardinality argument as
+// output_file_registry::instance(). rocprofsys_init_library() warms
+// it up so the value reflects library-init time, not finalize time.
+//
+// Used for the Output Summary duration: metadata_registry's start /
+// end fields are std::uint32_t and lose precision for runs longer
+// than ~4.29 s, which is most real workloads.
 const std::chrono::steady_clock::time_point&
 lib_load_steady_time()
 {
@@ -1149,7 +1154,7 @@ rocprofsys_finalize_hidden(void)
         sampling::post_process();
     }
 
-    auto& _output_registry = rocprofsys::registry();
+    auto& _output_registry = rocprofsys::output_file_registry::instance();
 
     if(get_use_causal())
     {
@@ -1251,16 +1256,17 @@ rocprofsys_finalize_hidden(void)
         _timemory_manager->write_metadata(settings::get_global_output_prefix(),
                                           "rocprofsys", _cfg);
 
-        // Register the metadata.json + functions.json that timemory's
-        // internal_write_metadata just produced
-        for(const auto& _meta_name : { "metadata", "functions" })
+        // Register functions.json (the symbol table that timemory's
+        // internal_write_metadata just produced). metadata.json
+        // carries run-level info already surfaced by the Output
+        // Summary header, so it is intentionally NOT registered —
+        // keeping the summary focused on trace artifacts.
+        auto _functions_path =
+            settings::compose_output_filename("functions", "json", _cfg);
+        if(std::filesystem::exists(_functions_path))
         {
-            auto _path = settings::compose_output_filename(_meta_name, "json", _cfg);
-            if(std::filesystem::exists(_path))
-            {
-                _output_registry.register_file(std::move(_path), output_format::json,
-                                               _meta_name, getpid());
-            }
+            _output_registry.register_file(std::move(_functions_path),
+                                           output_format::json, "functions", getpid());
         }
 
         if(config::get_use_timemory())
@@ -1294,25 +1300,10 @@ rocprofsys_finalize_hidden(void)
     }
 
     {
-        rocprofsys::output::run_metadata _meta{};
-
-        const auto _now = std::chrono::system_clock::now();
-        const auto _t   = std::chrono::system_clock::to_time_t(_now);
-        std::tm    _tm{};
-        if(::gmtime_r(&_t, &_tm) != nullptr)
-        {
-            char _buf[32];
-            if(std::strftime(_buf, sizeof(_buf), "%Y-%m-%dT%H:%M:%SZ", &_tm) > 0)
-                _meta.run_label = _buf;
-        }
-
-        _meta.duration = std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now() - lib_load_steady_time());
-
         // output_dir_abs left empty: the renderer derives it from a
         // registered row's parent_path. settings::get_global_output_prefix()
         // returns the unresolved %tag%/%timestamp% template.
-
+        auto _meta = rocprofsys::output::run_metadata::capture(lib_load_steady_time());
         rocprofsys::output::print_summary(std::cout, _output_registry, _meta);
     }
 

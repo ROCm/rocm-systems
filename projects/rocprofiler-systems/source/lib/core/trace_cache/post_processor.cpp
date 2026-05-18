@@ -59,6 +59,16 @@ configure_processors(const std::shared_ptr<sample_processor_t>&       _coordinat
     // Per-PID metadata into the registry so the Output Summary tree
     // builder gets parent/child structure and the role classifier
     // can fire the *gpu* hint for PIDs that registered GPU agents.
+    //
+    // Field mapping (info::process -> output::process_metadata):
+    //   pid     -> pid
+    //   ppid    -> ppid
+    //   command -> command
+    //   (info::process has 4 more fields — environment, extdata,
+    //    start, end — irrelevant to summary rendering.)
+    //   gpu_ids populated separately from the agent manager.
+    // If a new field is added to either side, update both this map
+    // and the renderer that consumes process_metadata.
     if(_config->_metadata_registry)
     {
         const auto info = _config->_metadata_registry->get_process_info();

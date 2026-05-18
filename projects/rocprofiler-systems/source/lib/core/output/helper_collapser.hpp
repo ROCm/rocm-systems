@@ -11,8 +11,13 @@
 namespace rocprofsys::output
 {
 
-// Helper if no GPU agents AND largest row size < threshold.
-inline constexpr std::uintmax_t HELPER_SIZE_THRESHOLD_BYTES = 16ULL * 1024;
+// A childless, GPU-agent-free process whose largest registered row
+// is smaller than this is treated as a short-lived helper fork
+// (e.g. a setup script, a launcher subprocess) and collapsed with
+// its siblings into a single range-summary line. Real GPU worker
+// processes routinely emit traces orders of magnitude larger; the
+// 16 KiB ceiling separates "noise" from "signal" comfortably.
+inline constexpr std::uintmax_t HELPER_MAX_SIZE_BYTES = 16ULL * 1024;
 
 // Sibling helpers of count >= 2 collapse into one synthetic node
 // with `collapsed` set. Singletons render normally.

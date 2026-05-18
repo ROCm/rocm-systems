@@ -34,4 +34,11 @@ print_summary(std::ostream& os, const output_file_registry& registry,
 [[nodiscard]] std::vector<std::string>
 wrap_to_width(std::string_view content, std::size_t width);
 
+// Exposed for unit testing. Renders a sort-unique GPU-id list as a
+// `:N` suffix, compressing contiguous runs of length >= 3 into
+// `:min-max`. Empty input returns empty string. Pathological lists
+// (more than 16 rendered tokens) are truncated with `,...(+K more)`.
+[[nodiscard]] std::string
+format_gpu_ids(const std::vector<int>& gpu_ids);
+
 }  // namespace rocprofsys::output

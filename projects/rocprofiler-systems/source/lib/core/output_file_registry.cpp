@@ -4,15 +4,14 @@
 #include "output_file_registry.hpp"
 
 #include "logger/debug.hpp"
-#include "output/process_tree_builder.hpp"
-#include "output/summary_renderer.hpp"
+
+#include <spdlog/fmt/fmt.h>
 
 #include <unistd.h>
 
 #include <algorithm>
 #include <cstdint>
 #include <filesystem>
-#include <iostream>
 #include <system_error>
 #include <utility>
 
@@ -68,25 +67,25 @@ try_file_size(const std::string& path)
 }  // namespace
 
 void
-output_file_registry::push_entry(output_file&& entry, pid_t pid)
+output_file_registry::push_entry(output_file&& entry, std::optional<pid_t> pid)
 {
-    entry.pid        = (pid == DEFAULT_PID) ? getpid() : pid;
+    entry.pid        = pid.value_or(getpid());
     entry.size_bytes = try_file_size(entry.path);
 
     std::lock_guard<std::mutex> lock(m_mutex);
-    entry.session_id = m_session_id;
-    m_files.push_back(std::move(entry));
+    m_files.push_back({ m_session_id, std::move(entry) });
 }
 
 void
-output_file_registry::register_file(std::string path, output_format format, pid_t pid)
+output_file_registry::register_file(std::string path, output_format format,
+                                    std::optional<pid_t> pid)
 {
     push_entry(make_entry(std::move(path), format), pid);
 }
 
 void
 output_file_registry::register_file(std::string path, output_format format,
-                                    std::string component_name, pid_t pid)
+                                    std::string component_name, std::optional<pid_t> pid)
 {
     push_entry(make_entry(std::move(path), format, component_name), pid);
 }
@@ -98,9 +97,9 @@ output_file_registry::rows() const
     const auto                  current = m_session_id;
     std::vector<output_file>    out;
     out.reserve(m_files.size());
-    for(const auto& f : m_files)
+    for(const auto& v : m_files)
     {
-        if(f.session_id == current) out.push_back(f);
+        if(v.session_id == current) out.push_back(v.value);
     }
     return out;
 }
@@ -108,18 +107,16 @@ output_file_registry::rows() const
 void
 output_file_registry::record_process(output::process_metadata meta)
 {
-    auto stored = std::make_shared<output::process_metadata>(std::move(meta));
-
     std::lock_guard<std::mutex> lock(m_mutex);
     for(auto& rec : m_processes)
     {
-        if(rec.session_id == m_session_id && rec.meta && rec.meta->pid == stored->pid)
+        if(rec.session_id == m_session_id && rec.value.pid == meta.pid)
         {
-            rec.meta = std::move(stored);
+            rec.value = std::move(meta);
             return;
         }
     }
-    m_processes.push_back({ m_session_id, std::move(stored) });
+    m_processes.push_back({ m_session_id, std::move(meta) });
 }
 
 std::vector<output::process_metadata>
@@ -129,9 +126,9 @@ output_file_registry::processes() const
     const auto                            current = m_session_id;
     std::vector<output::process_metadata> out;
     out.reserve(m_processes.size());
-    for(const auto& rec : m_processes)
+    for(const auto& v : m_processes)
     {
-        if(rec.session_id == current && rec.meta) out.push_back(*rec.meta);
+        if(v.session_id == current) out.push_back(v.value);
     }
     return out;
 }
@@ -141,28 +138,23 @@ output_file_registry::bump_session()
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     ++m_session_id;
-    const auto current = m_session_id;
-    m_files.erase(std::remove_if(m_files.begin(), m_files.end(),
-                                 [current](const output_file& f) {
-                                     return f.session_id != current;
-                                 }),
+    const auto current           = m_session_id;
+    auto       not_current_files = [current](const versioned<output_file>& v) {
+        return v.session_id != current;
+    };
+    auto not_current_procs = [current](const versioned<output::process_metadata>& v) {
+        return v.session_id != current;
+    };
+    m_files.erase(std::remove_if(m_files.begin(), m_files.end(), not_current_files),
                   m_files.end());
-    m_processes.erase(std::remove_if(m_processes.begin(), m_processes.end(),
-                                     [current](const process_record& r) {
-                                         return r.session_id != current;
-                                     }),
-                      m_processes.end());
+    m_processes.erase(
+        std::remove_if(m_processes.begin(), m_processes.end(), not_current_procs),
+        m_processes.end());
     return m_session_id;
 }
 
-void
-output_file_registry::print_summary() const
-{
-    output::print_summary(std::cout, *this);
-}
-
 output_file_registry&
-registry()
+output_file_registry::instance()
 {
     static output_file_registry s_instance{};
     return s_instance;

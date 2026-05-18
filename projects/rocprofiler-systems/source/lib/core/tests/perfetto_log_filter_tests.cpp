@@ -1,0 +1,46 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#include "gtest/gtest.h"
+
+#include "core/output/perfetto_log_filter.hpp"
+
+#include <perfetto.h>
+
+namespace pblog  = ::perfetto::base;
+namespace filter = rocprofsys::output::perfetto_log_filter;
+
+TEST(perfetto_log_filter, classify_drops_debug_and_info)
+{
+    EXPECT_EQ(filter::classify(pblog::kLogDebug), filter::filter_action::drop);
+    EXPECT_EQ(filter::classify(pblog::kLogInfo), filter::filter_action::drop);
+}
+
+TEST(perfetto_log_filter, classify_warning_for_important)
+{
+    EXPECT_EQ(filter::classify(pblog::kLogImportant), filter::filter_action::warning);
+}
+
+TEST(perfetto_log_filter, classify_error_for_error)
+{
+    EXPECT_EQ(filter::classify(pblog::kLogError), filter::filter_action::error);
+}
+
+TEST(perfetto_log_filter, classify_unknown_for_out_of_range)
+{
+    // Cast through the enum's underlying type to construct a value
+    // outside the defined cases — exercises the fallback path so
+    // future SDK enum additions render with "unknown severity" rather
+    // than being silently dropped.
+    const auto unknown_level = static_cast<pblog::LogLev>(255);
+    EXPECT_EQ(filter::classify(unknown_level), filter::filter_action::unknown);
+}
+
+TEST(perfetto_log_filter, install_is_idempotent)
+{
+    // Double-install must not crash; std::call_once guards the
+    // underlying SetLogMessageCallback so the second call is a no-op.
+    filter::install();
+    filter::install();
+    SUCCEED();
+}
