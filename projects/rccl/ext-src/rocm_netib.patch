@@ -258,7 +258,7 @@
    qpInitAttr.cap.max_recv_wr = MAX_REQUESTS;
    qpInitAttr.cap.max_send_sge = 1;
    qpInitAttr.cap.max_recv_sge = 1;
--  qpInitAttr.cap.max_inline_data = ncclParamIbUseInline() ? sizeof(struct ncclIbSendFifo) : 0;
+-  qpInitAttr.cap.max_inline_data = ncclParamIbUseInline() ? NCCL_NET_IB_MAX_RECVS*sizeof(struct ncclIbSendFifo) : 0;
 +  if (qpCtsOffload) {
 +    qpInitAttr.cap.max_inline_data = MAX_INLINE_DATA_SIZE;
 +  } else {
