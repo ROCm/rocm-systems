@@ -24,7 +24,7 @@
 #include <utility>
 #include <errno.h>     /* program_invocation_short_name */
 #include <dlfcn.h>
-//#define DEBUG_PRINT
+#define DEBUG_PRINT
 
 #include "verifiable.h"
 #include "util.h"
@@ -593,16 +593,49 @@ testResult_t CheckData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
       cudaMemcpy(expectedHost, args->expected[i], args->expectedBytes, cudaMemcpyDeviceToHost);
       cudaMemcpy(dataHost, data, args->expectedBytes, cudaMemcpyDeviceToHost);
 
-      for(int j=0; j<args->expectedBytes/eltsz; j++) {
-        unsigned long long want, got;
-        want = 0;
-        memcpy(&want, expectedHost + j*eltsz, eltsz);
-        got = 0;
-        memcpy(&got, dataHost + j*eltsz, eltsz);
-        if(want != got) {
-          printf(" rank=%d elt[%d]: want=0x%llx got=0x%llx\n", rank, j, want, got);
-        }
+      int i = 0, gap = 0, start = -1, end = -1;
+      unsigned long long want, got, sum;
+      while (i < args->expectedBytes/eltsz) {
+          want = 0;
+          memcpy(&want, expectedHost + i*eltsz, eltsz);
+          got = 0;
+          memcpy(&got, dataHost + i*eltsz, eltsz);
+
+          if (want != got && want != 0) {
+              start = i;
+              sum = got;
+              while (i < args->expectedBytes/eltsz && (want != got || want == 0)) {
+                  i++;
+                  memcpy(&want, expectedHost + i*eltsz, eltsz);
+                  memcpy(&got, dataHost + i*eltsz, eltsz);
+                  if (want != got && want != 0) sum += got;
+              }
+              end = i - 1;
+              if (start == end) {
+                  printf("rank=%d, start=%10d end=%10d count=%10d sum=%10llu hexStart=%10X hexEnd=%10X want=%u got=%u gap=%4d\n",
+		         rank, start, start, 1, sum, start, start, expectedHost + i*eltsz, dataHost + i*eltsz, gap);
+              } else {
+                  printf("rank=%d, start=%10d end=%10d count=%10d sum=%10llu hexStart=%10X hexEnd=%10X want=%u got=%u gap=%4d\n",
+		         rank, start, end, end-start+1, sum, start, end, expectedHost + i*eltsz, dataHost + i*eltsz, gap);
+              }
+              gap = 0;  // reset: no correct elements seen since this run ended
+              start = -1;
+          } else {
+              i++;
+              gap++;
+          }
       }
+
+      if(start != -1) {
+          if (start == end) {
+              printf("rank=%d, start=%10d end=%10d count=%10d sum=%10llu hexStart=%10X hexEnd=%10X want=%u got=%u gap=%4d\n",
+                     rank, start, start, 1, sum, start, start, expectedHost + i*eltsz, dataHost + i*eltsz, gap);
+          } else {
+              printf("rank=%d, start=%10d end=%10d count=%10d sum=%10llu hexStart=%10X hexEnd=%10X want=%u got=%u gap=%4d\n",
+                     rank, start, end, end-start+1, sum, start, end, expectedHost + i*eltsz, dataHost + i*eltsz, gap);
+          }
+      }
+
       free(expectedHost);
       free(dataHost);
     }
