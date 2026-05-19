@@ -316,6 +316,9 @@ void TesterArguments::get_arguments() {
     case TileBroadcastTestType:
     case TileBroadcastWaveTestType:
     case TileBroadcastWGTestType:
+    case TileAllgatherTestType:
+    case TileAllgatherWaveTestType:
+    case TileAllgatherWGTestType:
       requires_two_pes = false;
       break;
     default:

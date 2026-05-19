@@ -153,6 +153,9 @@ declare -A TEST_NUMBERS=(
   ["tile_broadcast"]="117"
   ["tile_broadcast_wave"]="118"
   ["tile_broadcast_wg"]="119"
+  ["tile_allgather"]="120"
+  ["tile_allgather_wave"]="121"
+  ["tile_allgather_wg"]="122"
 )
 
 ExecTest() {
@@ -694,6 +697,12 @@ TestTiles() {
   ExecTest  "tile_broadcast_wave"       4       1            $WAVE_SIZE
   ExecTest  "tile_broadcast_wg"         2       4            $WAVE_SIZE
   ExecTest  "tile_broadcast_wg"         4       4            $WAVE_SIZE
+  ExecTest  "tile_allgather"            2       1            1
+  ExecTest  "tile_allgather"            4       1            1
+  ExecTest  "tile_allgather_wave"       2       1            $WAVE_SIZE
+  ExecTest  "tile_allgather_wave"       4       1            $WAVE_SIZE
+  ExecTest  "tile_allgather_wg"         2       4            $WAVE_SIZE
+  ExecTest  "tile_allgather_wg"         4       4            $WAVE_SIZE
 }
 
 TestHeatMapRMA() {

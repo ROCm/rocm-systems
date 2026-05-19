@@ -161,7 +161,10 @@
   X(TileGetArbitrary,          116)  \
   X(TileBroadcast,             117)  \
   X(TileBroadcastWave,         118)  \
-  X(TileBroadcastWG,           119)
+  X(TileBroadcastWG,           119)  \
+  X(TileAllgather,             120)  \
+  X(TileAllgatherWave,         121)  \
+  X(TileAllgatherWG,           122)
 
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
 enum TestType {

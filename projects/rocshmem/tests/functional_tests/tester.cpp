@@ -73,6 +73,7 @@
 #include "fence_ordering_tester.hpp"
 #include "tile_rma_tester.hpp"
 #include "tile_broadcast_tester.hpp"
+#include "tile_allgather_tester.hpp"
 
 #include "backend_bc.hpp"
 extern Backend* backend;
@@ -720,6 +721,18 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "Tile Broadcast Workgroup-Collective Multi-Team";
       testers.push_back(new TileBroadcastTester(args));
       break;
+    case TileAllgatherTestType:
+      test_name = "Tile Allgather Thread-Level Single-WG";
+      testers.push_back(new TileAllgatherTester(args));
+      break;
+    case TileAllgatherWaveTestType:
+      test_name = "Tile Allgather Wave-Collective Single-WG";
+      testers.push_back(new TileAllgatherTester(args));
+      break;
+    case TileAllgatherWGTestType:
+      test_name = "Tile Allgather Workgroup-Collective Multi-Team";
+      testers.push_back(new TileAllgatherTester(args));
+      break;
     default:
       test_name = "Empty";
       break;
@@ -875,6 +888,9 @@ bool Tester::peLaunchesKernel() {
     case TileBroadcastTestType:
     case TileBroadcastWaveTestType:
     case TileBroadcastWGTestType:
+    case TileAllgatherTestType:
+    case TileAllgatherWaveTestType:
+    case TileAllgatherWGTestType:
       is_launcher = true;
       break;
     default:
