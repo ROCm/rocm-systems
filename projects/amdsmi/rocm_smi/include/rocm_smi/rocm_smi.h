@@ -3186,7 +3186,7 @@ rsmi_status_t rsmi_dev_fan_speed_max_get(uint32_t dv_ind, uint32_t sensor_ind, u
  *  @param[in] sensor_ind a 0-based sensor index. Normally, this will be 0.
  *  If a device has more than one sensor, it could be greater than 0.
  *
- *  @param[inout] min_speed a pointer to uint64_t to which the minimum speed
+ *  @param[out] min_speed a pointer to uint64_t to which the minimum speed
  *  will be written
  *  If this parameter is nullptr, this function will return
  *  ::RSMI_STATUS_INVALID_ARGS if the function is supported with the provided
@@ -3213,7 +3213,7 @@ rsmi_status_t rsmi_dev_fan_speed_min_get(uint32_t dv_ind, uint32_t sensor_ind, u
  *
  *  @param[in] dv_ind a device index
  *
- *  @param[inout] is_enabled a pointer to bool to which the gpu_od enablement
+ *  @param[out] is_enabled a pointer to bool to which the gpu_od enablement
  *  status will be written (true if gpu_od is available, false for legacy hwmon)
  *  If this parameter is nullptr, this function will return
  *  ::RSMI_STATUS_INVALID_ARGS.

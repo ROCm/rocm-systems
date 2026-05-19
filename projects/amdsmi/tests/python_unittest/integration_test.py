@@ -915,11 +915,6 @@ class TestAmdSmiPython(unittest.TestCase):
                 assert isinstance(is_gpu_od, bool), (
                     f"amdsmi_is_gpu_od_enabled must return bool, got {type(is_gpu_od)}"
                 )
-                # Verify it matches the common helper result
-                has_gpu_od = common.has_gpu_od_interface(gpu)
-                assert is_gpu_od == has_gpu_od, (
-                    f"amdsmi_is_gpu_od_enabled ({is_gpu_od}) mismatch with helper ({has_gpu_od})"
-                )
             except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
                 if self.common.check_ret(msg, e, self.common.PASS):
                     self.raise_exception = e

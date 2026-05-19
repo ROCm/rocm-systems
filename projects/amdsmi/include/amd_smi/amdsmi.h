@@ -4531,10 +4531,10 @@ amdsmi_status_t amdsmi_get_gpu_fan_speed_max(amdsmi_processor_handle processor_h
  *  @param[in] sensor_ind a 0-based sensor index. Normally, this will be 0.
  *  If a device has more than one sensor, it could be greater than 0.
  *
- *  @param[in,out] min_speed a pointer to uint64_t to which the minimum speed
+ *  @param[out] min_speed a pointer to uint64_t to which the minimum speed
  *  will be written
  *  If this parameter is nullptr, this function will return
- *  ::AMDSMI_STATUS_INVAL if the function is supported with the provided,
+ *  ::AMDSMI_STATUS_INVAL if the function is supported with the provided
  *  arguments and ::AMDSMI_STATUS_NOT_SUPPORTED if it is not supported with the
  *  provided arguments.
  *
@@ -4559,10 +4559,10 @@ amdsmi_status_t amdsmi_get_gpu_fan_speed_min(amdsmi_processor_handle processor_h
  *
  *  @param[in] processor_handle a processor handle
  *
- *  @param[in,out] is_enabled a pointer to bool to which the gpu_od enablement
+ *  @param[out] is_enabled a pointer to bool to which the gpu_od enablement
  *  status will be written (true if gpu_od is available, false for legacy hwmon)
  *  If this parameter is nullptr, this function will return
- *  ::AMDSMI_STATUS_INVAL if the function is supported with the provided,
+ *  ::AMDSMI_STATUS_INVAL if the function is supported with the provided
  *  arguments and ::AMDSMI_STATUS_NOT_SUPPORTED if it is not supported with the
  *  provided arguments.
  *

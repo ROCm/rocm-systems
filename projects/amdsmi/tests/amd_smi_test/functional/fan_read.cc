@@ -121,8 +121,8 @@ void TestFanRead::Run(void) {
       DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_speed_min", "gpu=" + std::to_string(i),
                          VERB(STANDARD));
       err = amdsmi_get_gpu_fan_speed_min(processor_handles_[i], 0, nullptr);
-      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_NOT_SUPPORTED);
-      ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+      ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 
       bool is_gpu_od = false;
       DISPLAY_AMDSMI_API("amdsmi_is_gpu_od_enabled", "gpu=" + std::to_string(i),
