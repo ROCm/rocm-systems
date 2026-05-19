@@ -34,6 +34,8 @@ set(data_storage_sources
     ${CMAKE_CURRENT_LIST_DIR}/vtable/pmc_event_buffer_vtab.cpp
     ${CMAKE_CURRENT_LIST_DIR}/vtable/arg_buffer.cpp
     ${CMAKE_CURRENT_LIST_DIR}/vtable/arg_buffer_vtab.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/vtable/event_buffer.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/vtable/event_buffer_vtab.cpp
 )
 
 target_sources(profiler-hub-objects PRIVATE ${data_storage_sources})

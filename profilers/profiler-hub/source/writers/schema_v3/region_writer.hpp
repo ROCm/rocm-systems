@@ -73,9 +73,18 @@ public:
                 std::string(data.name));
 
         std::optional<primary_key_t> event_pk = std::nullopt;
+        // insert_event_guarded pushes to the in-memory event buffer and
+        // returns an RAII guard. If any subsequent throwing operation
+        // propagates, the guard pops the buffered event row so it is not
+        // flushed to disk (mirrors the SQLite ROLLBACK that undoes the rest).
+        std::optional<
+            common_insert_operations<data_storage::schema_v3_tag>::event_push_guard>
+            event_guard;
         if(data.event.has_value())
         {
-            event_pk = m_common_ops->insert_event(data.event.value());
+            auto guard = m_common_ops->insert_event_guarded(data.event.value());
+            event_pk   = guard.pk();
+            event_guard.emplace(std::move(guard));
         }
 
         const auto pk = m_ctx->key_providers->region_data().get_primary_key_value();
