@@ -1,3 +1,0 @@
-# LSan suppressions for rocpdsna (paired with ASan).
-# Format: leak:<symbol-or-lib>
-# See https://github.com/google/sanitizers/wiki/AddressSanitizerLeakSanitizer
