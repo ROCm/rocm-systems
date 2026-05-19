@@ -26,18 +26,13 @@ THE SOFTWARE.
 #include <hip/hiprtc.h>
 #include <hip/hip_fp4.h>
 
-// FP4 has only one OCP encoding: E2M1.
-// Representable magnitudes in E2M1: {0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0}.
-// We feed only exactly-representable values so GPU output (which may take the
-// gfx950 hardware path) matches CPU output (which always takes the software
-// fcbx::* fallback) bit-for-bit, with no rounding ambiguity.
 TEST_CASE("Unit_hiprtc_fp4_simple") {
   constexpr const char* source = R"(
 extern "C" __global__ void float_to_fp4_to_float(float* out, float* in, size_t size) {
   size_t i = threadIdx.x;
   if (i < size) {
     __hip_fp4_e2m1 tmp = __hip_fp4_e2m1(in[i]);
-    out[i] = float(tmp);
+    out[i] = tmp;
   }
 }
 )";
@@ -72,7 +67,7 @@ extern "C" __global__ void float_to_fp4_to_float(float* out, float* in, size_t s
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
 
   // Inputs: every value below is exactly representable in FP4 E2M1, so no
-  // rounding occurs in either direction of the round-trip.
+  // rounding occurs in either direction.
   std::vector<float> in = {0.0f,  0.5f, -0.5f, 1.0f, -1.0f,
                            1.5f, -1.5f,  2.0f, 3.0f,  4.0f};
   const size_t size = in.size();
@@ -106,7 +101,7 @@ extern "C" __global__ void float_to_fp4_to_float(float* out, float* in, size_t s
 
   for (size_t i = 0; i < size; i++) {
     __hip_fp4_e2m1 tmp = __hip_fp4_e2m1(in[i]);
-    float cpu_out = float(tmp);
+    float cpu_out = tmp;
     INFO("Index: " << i << " in: " << in[i] << " GPU: " << out[i] << " cpu: " << cpu_out);
     REQUIRE(cpu_out == out[i]);
   }

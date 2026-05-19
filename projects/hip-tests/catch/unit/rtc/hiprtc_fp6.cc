@@ -26,11 +26,6 @@ THE SOFTWARE.
 #include <hip/hiprtc.h>
 #include <hip/hip_fp6.h>
 
-// FP6 has two OCP encodings: E2M3 and E3M2.
-// Inputs below are exactly representable in BOTH encodings (and also in
-// FP4 E2M1, in case the test is reused as a reference). This eliminates
-// rounding ambiguity, so the round-trip is equal regardless of whether the
-// kernel takes the gfx950 hardware path or the fcbx::* software fallback.
 TEST_CASE("Unit_hiprtc_fp6_simple") {
   constexpr const char* source = R"(
 extern "C" __global__ void float_to_fp6_to_float(float* out, float* in, bool e2m3, size_t size) {
@@ -38,10 +33,10 @@ extern "C" __global__ void float_to_fp6_to_float(float* out, float* in, bool e2m
   if (i < size) {
     if (e2m3) {
       __hip_fp6_e2m3 tmp = __hip_fp6_e2m3(in[i]);
-      out[i] = float(tmp);
+      out[i] = tmp;
     } else {
       __hip_fp6_e3m2 tmp = __hip_fp6_e3m2(in[i]);
-      out[i] = float(tmp);
+      out[i] = tmp;
     }
   }
 }
@@ -112,7 +107,7 @@ extern "C" __global__ void float_to_fp6_to_float(float* out, float* in, bool e2m
 
   for (size_t i = 0; i < size; i++) {
     __hip_fp6_e2m3 tmp = __hip_fp6_e2m3(in[i]);
-    float cpu_out = float(tmp);
+    float cpu_out = tmp;
     INFO("E2M3 Index: " << i << " in: " << in[i] << " GPU: " << out[i] << " cpu: " << cpu_out);
     REQUIRE(cpu_out == out[i]);
   }
@@ -125,7 +120,7 @@ extern "C" __global__ void float_to_fp6_to_float(float* out, float* in, bool e2m
   HIP_CHECK(hipMemcpy(out.data(), d_out, size * sizeof(float), hipMemcpyDeviceToHost));
   for (size_t i = 0; i < size; i++) {
     __hip_fp6_e3m2 tmp = __hip_fp6_e3m2(in[i]);
-    float cpu_out = float(tmp);
+    float cpu_out = tmp;
     INFO("E3M2 Index: " << i << " in: " << in[i] << " GPU: " << out[i] << " cpu: " << cpu_out);
     REQUIRE(cpu_out == out[i]);
   }

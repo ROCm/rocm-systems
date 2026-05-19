@@ -357,12 +357,28 @@ struct NumericLimits<double> {
 
 template <typename T, size_t N> struct array {
   T __elements[N];
+#if __cplusplus >= 201402L
   constexpr T& operator[](size_t i) { return __elements[i]; }
+#else
+  T& operator[](size_t i) { return __elements[i]; }
+#endif
   constexpr const T& operator[](size_t i) const { return __elements[i]; }
   constexpr size_t size() const { return N; }
 };
 
+#if defined(_MSC_VER) && !defined(__clang__)
+// MSVC lacks __builtin_copysignf. Copy the sign bit of y onto x bit-for-bit;
+// this matches the behavior of the GCC/Clang intrinsic exactly.
+inline float copysign(float x, float y) {
+  union { float f; unsigned int u; } ux, uy;
+  ux.f = x;
+  uy.f = y;
+  ux.u = (ux.u & 0x7FFFFFFFu) | (uy.u & 0x80000000u);
+  return ux.f;
+}
+#else
 inline constexpr float copysign(float x, float y) { return __builtin_copysignf(x, y); }
+#endif
 
 }  // namespace __hip_internal
 typedef __hip_internal::uint8_t __hip_uint8_t;
