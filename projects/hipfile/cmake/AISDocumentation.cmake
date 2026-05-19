@@ -3,13 +3,9 @@
 # SPDX-License-Identifier: MIT
 
 #-----------------------------------------------------------------------------
-# Option to build the hipFile documentation
-#
-# TODO: Consider turning this into two options, one of which just requires
-#       Doxygen and produces API docs, the other produces Sphinx/Breathe
-#       output
+# Option to build the hipFile API documentation
 #-----------------------------------------------------------------------------
-option(AIS_BUILD_DOCS "Build the hipFile docs (requires Doxygen, Sphinx, and Breathe)" OFF)
+option(AIS_BUILD_DOCS "Build hipFile API docs (requires Doxygen)" OFF)
 
 if(AIS_BUILD_DOCS)
     find_package(Doxygen REQUIRED)
@@ -24,7 +20,7 @@ if(AIS_BUILD_DOCS)
     set(AIS_DOXYFILE ${AIS_DOC_PATH}/Doxyfile)
 
     # Create the Doxyfile from the input file
-    configure_file("docs/Doxyfile.in" ${AIS_DOXYFILE})
+    configure_file("docs/doxygen/Doxyfile.in" ${AIS_DOXYFILE})
 
     # Set the output directory
     set(DOXYGEN_OUT ${AIS_DOC_PATH})

@@ -83,6 +83,7 @@ private:
     if (nthreads == WARP_SIZE)
       __syncwarp();
     else
+      // To be revisited for correctness on gfx1250
       #if defined(__gfx942__) || defined(__gfx950__)
         barrier_generic(__threadfence_block(), nworkers, barrier_next, barriers);
       #else
@@ -96,6 +97,7 @@ private:
   }
 
   inline __device__ void patBarrier() {
+    // To be revisited for correctness on gfx1250
     #if defined(__gfx942__) || defined(__gfx950__)
       barrier_generic(__threadfence_block(), NCCL_PAT_NWORKERS, barrier_next_pat, barriers_pat);
     #else
@@ -121,6 +123,8 @@ private:
     #endif
     // volatile is faster than acquire but not as correct. Make sure reduceCopy
     // loads data using volatile so it doesn't see stale data in L1.
+    //
+    // To be revisited for correctness on gfx1250
 #if defined(__gfx1200__) || defined(__gfx1201__)
     return __atomic_load_n(ptr, __ATOMIC_ACQUIRE);
 #else
@@ -177,17 +181,20 @@ private:
       } else if ((flags & ConnFifoEnabled) && connFifo[step%NCCL_STEPS].mode == NCCL_MODE_OFFSET) {
         ptrs[index] = connEltsFifo + loadInt(&connFifo[step%NCCL_STEPS].offset)/sizeof(T);
       } else if (isSendNotRecv && DirectSend) {
-        if (flags & DirectWrite) {
+        // directBuff is only assigned by setDataPtrs when (Direct && ipcReg);
+        // when Direct=1 but no buffer was registered, it stays NULL and using
+        // it as a base would compute an invalid GPU address.
+        if ((flags & DirectWrite) && directBuff != nullptr) {
           ptrs[index] = directBuff + dstIx + offset;
-        } else if (flags & DirectRead) {  // empty send
+        } else if ((flags & DirectRead) && directBuff != nullptr) {  // empty send
           ptrs[index] = nullptr;
         } else {
           ptrs[index] = connEltsFifo + (step%NCCL_STEPS)*connStepSize;
         }
       } else if (!isSendNotRecv && DirectRecv) {
-        if (flags & DirectRead) {
+        if ((flags & DirectRead) && directBuff != nullptr) {
           ptrs[index] = directBuff + srcIx + offset;
-        } else if (flags & DirectWrite) {
+        } else if ((flags & DirectWrite) && directBuff != nullptr) {
           ptrs[index] = directBuff + dstIx + offset;  // send to next from my output buffer
         } else {
           ptrs[index] = connEltsFifo + (step%NCCL_STEPS)*connStepSize;
@@ -215,7 +222,12 @@ private:
   inline __device__ void postPeer(bool dataStored) {
     if (skip_fence) {
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
+#if defined(__gfx1250__)
+      // To be revisited for correctness and performance on gfx1250
+      barrier_generic(asm volatile("s_wait_loadcnt 0x0\n\ts_wait_storecnt 0x0"), nworkers, barrier_next, barriers);
+#else
       barrier_generic(asm volatile("s_waitcnt lgkmcnt(0) vmcnt(0)"), nworkers, barrier_next, barriers);
+#endif
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
     }
 

@@ -63,15 +63,12 @@ bool isAbortOnErrorEnabled() {
 HIP_TEST_CASE(Unit_Assert_Positive_Basic_KernelPass) {
 
 #ifdef NDEBUG
-  HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kAssertionsDisabled);
-  return;
+  HIP_SKIP_TEST(HipTest::SkipReason::kAssertionsDisabled);
 #endif
 
 #if HT_AMD
   if (isAbortOnErrorEnabled()) {
-    HipTest::HIP_SKIP_TEST(
-        "Test incompatible with aborts enabled through HIP_SKIP_ABORT_ON_GPU_ERROR.");
-    return;
+    HIP_SKIP_TEST("Test incompatible with aborts enabled through HIP_SKIP_ABORT_ON_GPU_ERROR.");
   }
 #endif
 
@@ -105,15 +102,12 @@ HIP_TEST_CASE(Unit_Assert_Positive_Basic_KernelPass) {
 HIP_TEST_CASE(Unit_Assert_Positive_Basic_KernelFail) {
 
 #ifdef NDEBUG
-  HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kAssertionsDisabled);
-  return;
+  HIP_SKIP_TEST(HipTest::SkipReason::kAssertionsDisabled);
 #endif
 
 #if HT_AMD
   if (isAbortOnErrorEnabled()) {
-    HipTest::HIP_SKIP_TEST(
-        "Test incompatible with aborts enabled through HIP_SKIP_ABORT_ON_GPU_ERROR.");
-    return;
+    HIP_SKIP_TEST("Test incompatible with aborts enabled through HIP_SKIP_ABORT_ON_GPU_ERROR.");
   }
 #endif
 

@@ -37,6 +37,62 @@ rocprofiler-sdk:
         - architectures:
             - gfx90a
           expression: reduce(SQ_THREAD_CYCLES_VALU,sum)/reduce(SQ_ACTIVE_INST_VALU,sum)
+    - name: CHA_BUSY
+      description: Count busy cyles. Not windowable.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: CHA
+          event: 0
+    - name: CHA_CYCLE
+      description: Number of cycles. Not windowable.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: CHA
+          event: 15
+    - name: CHC_REQ_READ
+      description: Sum of REQ_READ_32B, REQ_READ_64B, REQ_READ_128B, REQ_READ_256B
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: CHC
+          event: 11
+    - name: CHC_REQ_READ_32B
+      description: Number of read requests with logical size 32B
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: CHC
+          event: 12
+    - name: CHC_REQ_READ_64B
+      description: Number of read requests with logical size 64B
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: CHC
+          event: 13
+    - name: CHC_REQ_READ_128B
+      description: Number of read requests with logical size 128B
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: CHC
+          event: 14
+    - name: CHC_REQ_READ_256B
+      description: Number of read requests with logical size 256B
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: CHC
+          event: 15
     - name: CPC_CPC_STAT_BUSY
       description: CPC Busy.
       properties: []
@@ -48,6 +104,7 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
+            - gfx1250
           block: CPC
           event: 25
     - name: CPC_CPC_STAT_IDLE
@@ -61,6 +118,7 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
+            - gfx1250
           block: CPC
           event: 26
     - name: CPC_CPC_STAT_STALL
@@ -74,6 +132,7 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
+            - gfx1250
           block: CPC
           event: 27
     - name: CPC_CPC_TCIU_BUSY
@@ -87,6 +146,7 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
+            - gfx1250
           block: CPC
           event: 28
     - name: CPC_CPC_TCIU_IDLE
@@ -100,6 +160,7 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
+            - gfx1250
           block: CPC
           event: 29
     - name: CPC_CPC_UTCL2IU_BUSY
@@ -113,6 +174,7 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
+            - gfx1250
           block: CPC
           event: 30
     - name: CPC_CPC_UTCL2IU_IDLE
@@ -126,6 +188,7 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
+            - gfx1250
           block: CPC
           event: 31
     - name: CPC_CPC_UTCL2IU_STALL
@@ -152,6 +215,7 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
+            - gfx1250
           block: CPC
           event: 13
     - name: CPC_ME1_DC0_SPI_BUSY
@@ -165,6 +229,7 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
+            - gfx1250
           block: CPC
           event: 33
     - name: CPC_UTCL1_STALL_ON_TRANSLATION
@@ -344,6 +409,10 @@ rocprofiler-sdk:
             - gfx950
           block: CPF
           event: 23
+        - architectures:
+            - gfx1250
+          block: CPF
+          event: 24
     - name: CPF_CPF_STAT_IDLE
       description: CPF Idle.
       properties: []
@@ -722,6 +791,56 @@ rocprofiler-sdk:
             - gfx1031
             - gfx1032
           expression: 100*reduce(GRBM_GDS_BUSY,max)/reduce(GRBM_GUI_ACTIVE,max)
+    - name: GLARBC_CYCLE
+      description: Number of cycles. Not windowable.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GLARBC
+          event: 0
+    - name: GLARBC_BUSY
+      description: Number of cycles with a request pending. Not Windowed.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GLARBC
+          event: 1
+    - name: GL1A_BUSY
+      description: Number of cycles. Not windowable.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GL1A
+          event: 0
+    - name: GL1A_CYCLE
+      description: Number of cycles. Not windowable.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GL1A
+          event: 77
+    - name: GL1C_GL2_REQ_READ_LEVEL
+      description: Number of cycles in-flight for reads, atomics with return, NOP_RTN0. Average GL2 
+        read latency = GL1C_PERF_SEL_GL2_REQ_READ_LEVEL/SUM_OF_REQ_COUNTERS
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GL1C
+          event: 10
+    - name: GL1C_GL2_REQ_WRITE_LEVEL
+      description: Number of cycles in-flight for writes, atomics without return, NOP_ACK. Average 
+        GL2 read latency = GL1C_PERF_SEL_GL2_REQ_WRITE_LEVEL/SUM_OF_REQ_COUNTERS
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GL1C
+          event: 19
     - name: GL2C_EA_RDREQ
       description: Number of GL2C/EA read requests (either 32-byte or 64-byte or 128-byte) for all 
         clients.
@@ -1321,6 +1440,7 @@ rocprofiler-sdk:
             - gfx12
             - gfx1200
             - gfx1201
+            - gfx1250
             - gfx9
             - gfx900
             - gfx906
@@ -1343,6 +1463,7 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
+            - gfx1250
           block: GRBM
           event: 30
     - name: GRBM_CPF_BUSY
@@ -1439,6 +1560,7 @@ rocprofiler-sdk:
             - gfx12
             - gfx1200
             - gfx1201
+            - gfx1250
             - gfx9
             - gfx900
             - gfx906
@@ -1512,6 +1634,38 @@ rocprofiler-sdk:
             - gfx950
           block: GRBM
           event: 34
+    - name: GRBMA_COUNT
+      description: Tie High - Count Number of Clocks
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GRBMA
+          event: 0
+    - name: GRBMA_SPI_BUSY
+      description: Any of the Shader Pipe Interpolators (SPI OR SQG) are busy.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GRBMA
+          event: 9
+    - name: GRBMH_COUNT
+      description: Tie High - Count Number of Clocks
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GRBMH
+          event: 0
+    - name: GRBMH_SPI_BUSY
+      description: Any of the Shader Pipe Interpolators (SPI OR SQG) are busy.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: GRBMH
+          event: 9
     - name: GpuUtil
       description: 'Unit: percent'
       properties: []
@@ -2132,6 +2286,10 @@ rocprofiler-sdk:
             - gfx950
           block: SPI
           event: 79
+        - architectures:
+            - gfx1250
+          block: SPI
+          event: 144
     - name: SPI_RA_REQ_NO_ALLOC_CSN
       description: Arb cycles with CSn req and no CSn alloc. Source is RA0
       properties: []
@@ -2972,6 +3130,10 @@ rocprofiler-sdk:
             - gfx1201
           block: SQ
           event: 302
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 642
     - name: SQC_ICACHE_MISSES
       description: Number of cache misses, includes uncached requests. {per-Bank, nondeterministic, 
         C2}
@@ -2983,6 +3145,10 @@ rocprofiler-sdk:
             - gfx1201
           block: SQ
           event: 303
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 643
     - name: SQC_ICACHE_INPUT_VALID_READYB
       description: ' Input stalled by SQC (per-SQ, nondeterministic, unwindowed)'
       properties: []
@@ -3022,6 +3188,10 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 273
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 644
     - name: SQC_ICACHE_REQ
       description: Number of requests. (per-SQ, per-Bank)
       properties: []
@@ -3041,6 +3211,10 @@ rocprofiler-sdk:
             - gfx1201
           block: SQ
           event: 301
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 641
     - name: SQC_LDS_BANK_CONFLICT
       description: Number of cycles LDS is stalled by bank conflicts. (emulated, C1)
       properties: []
@@ -3492,6 +3666,7 @@ rocprofiler-sdk:
             - gfx12
             - gfx1200
             - gfx1201
+            - gfx1250
             - gfx90a
             - gfx908
             - gfx940
@@ -3511,6 +3686,7 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
+            - gfx1250
           block: SQ
           event: 2
     - name: SQ_IFETCH
@@ -3897,6 +4073,7 @@ rocprofiler-sdk:
             - gfx940
             - gfx941
             - gfx942
+            - gfx1250
           block: SQ
           event: 70
         - architectures:
@@ -4991,6 +5168,10 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 14
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 7
     - name: SQ_LDS_ADDR_CONFLICT
       description: Number of cycles LDS (local data store) is stalled by address conflicts. This 
         value is returned on a per-SE (aggregate of values in SIMDs in the SE) basis.
@@ -5422,6 +5603,7 @@ rocprofiler-sdk:
             - gfx12
             - gfx1200
             - gfx1201
+            - gfx1250
             - gfx9
             - gfx900
             - gfx906
@@ -5667,6 +5849,10 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 95
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 32
     - name: SQ_INSTS_VALU_FLOPS_FP16
       description: Counts FLOPS per instruction on float 16 excluding MFMA/SMFMA.
       properties: []
@@ -5741,6 +5927,99 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 74
+    - name: SQ_INST_CYCLES_VALU_WMMA
+      description: Number of cycles of work sent for wmma. {emulated}
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 359
+    - name: SQ_INSTS_VEC32_VALU_WMMA
+      description: Number of valu WMMA instructions issued per vec32. {emulated}
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 237
+    - name: SQ_VALU_WMMA_FLOP_FP32
+      description: SGEMM flop, only report 1 per issue cycle, it stands for 128 Ops per SIMD32. 
+        {emulated, windowed, deterministic}
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 288
+    - name: SQ_VALU_WMMA_FLOP_FP16
+      description: HPGEMM flop, only report 1 per issue cycle, it stands for 2048 Ops per SIMD32, 
+        sparse will report 2 per issue cycle.. {emulated, windowed, deterministic}
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 290
+    - name: SQ_VALU_WMMA_FLOP_FP8
+      description: FP8 GEMM flop, only report 1 per issue cycle, it stands for 4096 Ops per SIMD32, 
+        sparse will report 2 per issue cycle. Count as FP8 is the largest input data type (other 
+        input is FP4, FP6 or FP8).. {emulated, windowed, deterministic}
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 292
+    - name: SQ_VALU_WMMA_FLOP_FP6
+      description: FP6 GEMM flop, only report 1 per issue cycle, it stands for 8192 Ops per SIMD32, 
+        sparse will report 2 per issue cycle (but there is no sparse currently). Count as FP6 is the
+        largest input data type (other input is FP4 or FP6).. {emulated, windowed, deterministic}
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 293
+    - name: SQ_VALU_WMMA_FLOP_FP4
+      description: FP4 GEMM flop, only report 1 per issue cycle, it stands for 8192 Ops per SIMD32, 
+        sparse will report 2 per issue cycle (but there is no sparse currently). Count as FP4 if 
+        both sources are FP4.. {emulated, windowed, deterministic}
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 294
+    - name: SQ_VALU_WMMA_FLOP_F6F4
+      description: F6 or F4 GEMM flop, only report 1 per issue cycle, it stands for 4096 Ops per 
+        SIMD32, sparse will report 2 per issue cycle. Mixed precision WMMA counts as FLOP_F6F4 if 
+        input operands are only F6 and F4 (not F8). If any are F8, it counts as FLOP_F8. {emulated, 
+        windowed, deterministic}
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 297
+    - name: SQ_VALU_WMMA_FLOP_BF16
+      description: BF16GEMM flop, only report 1 per issue cycle, it stands for 2048 Ops per SIMD32, 
+        sparse will report 2 per issue cycle.. {emulated, windowed, deterministic}
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 291
+    - name: SQ_VALU_WMMA_FLOP_I8
+      description: I8GEMM flop, only report 1 per issue cycle, it stands for 4096 Ops per SIMD32, 
+        sparse will report 2 per issue cycle.. {emulated, windowed, deterministic}
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 295
     - name: SQ_INSTS_LDS_LOAD
       description: Number of LDS load instructions issued . (per-simd, emulated)
       properties: []

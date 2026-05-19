@@ -749,9 +749,12 @@ kfd_driver_base_t::queue_snapshot (
       queue_info.queue_type = os_queue_type (entry.queue_type);
       queue_info.exception_status
         = kfd_to_os_exception_mask (entry.exception_status);
-      queue_info.ring_base_address = entry.ring_base_address;
-      queue_info.write_pointer_address = entry.write_pointer_address;
-      queue_info.read_pointer_address = entry.read_pointer_address;
+      queue_info.ring_base_address
+        = static_cast<host_address_t> (entry.ring_base_address);
+      queue_info.write_pointer_address
+        = static_cast<host_address_t> (entry.write_pointer_address);
+      queue_info.read_pointer_address
+        = static_cast<host_address_t> (entry.read_pointer_address);
       queue_info.ctx_save_restore_address = entry.ctx_save_restore_address;
       queue_info.ctx_save_restore_area_size = entry.ctx_save_restore_area_size;
       queue_info.ring_size = entry.ring_size;
@@ -1950,6 +1953,9 @@ kfd_driver_t::xfer_global_memory_partial (global_address_t address, void *read,
   dbgapi_assert (is_valid ());
 
   ++(read != nullptr ? m_read_request_count : m_write_request_count);
+
+  if (address > std::numeric_limits<off_t>::max ())
+    return AMD_DBGAPI_STATUS_ERROR_MEMORY_ACCESS;
 
   auto offset = utils::narrow<off_t> (address);
   ssize_t ret = read != nullptr

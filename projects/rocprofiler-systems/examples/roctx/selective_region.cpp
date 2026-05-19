@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Demonstrates the ROCPROFSYS_TRACE_REGION selective region tracing feature.
+// Demonstrates the ROCPROFSYS_SELECTED_REGIONS selective region tracing feature.
 // Uses roctxRangeStartA/roctxRangeStop (process-wide markers) for region filtering.
 // Multiple threads run concurrently, synchronized at region boundaries via barriers
 // because roctxRangeStartA/roctxRangeStop are process-wide operations.
@@ -27,7 +27,7 @@
 //   rocprof-sys -- ./selective_region
 //
 // Run with filter (only traces inside "Region 1"):
-//   ROCPROFSYS_TRACE_REGION="Region 1" rocprof-sys -- ./selective_region
+//   ROCPROFSYS_SELECTED_REGIONS="Region 1" rocprof-sys -- ./selective_region
 //
 // Expected with filter: profiling data recorded for {CodeBlock_B, CodeBlock_C,
 //                        CodeBlock_D, CodeBlock_F} on each thread

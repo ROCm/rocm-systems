@@ -60,6 +60,7 @@ file(
     ${CMAKE_CURRENT_SOURCE_DIR}/gfx10/*.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/gfx11/*.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/gfx12/*.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mi400/*.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/stitch/stitch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/stitch/pctranslator.cpp)
 

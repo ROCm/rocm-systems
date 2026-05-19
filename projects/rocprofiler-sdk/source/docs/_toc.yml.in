@@ -8,7 +8,10 @@ root: index
 subtrees:
   - caption: Install
     entries:
-    - file: install/installation
+    - file: install/install
+      title: Install ROCprofiler-SDK
+    - file: install/build
+      title: Build from source
   - caption: Quick Reference
     entries:
     - file: quick_guide
@@ -25,6 +28,7 @@ subtrees:
     - file: how-to/using-rocprofv3-with-mpi
     - file: how-to/using-rocprofv3-with-openmp
     - file: how-to/using-pc-sampling
+    - file: how-to/cdna3-cdna4-pc-sampling
     - file: how-to/using-thread-trace
   - caption: API reference
     entries:

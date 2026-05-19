@@ -51,6 +51,8 @@
 
 namespace rocr {
 namespace AMD {
+  const uint8_t METADATA_PREFETCH_VERSION_INVALID = 0xFF;
+
 /// @brief Encapsulates HW Aql Command Processor functionality. It
 /// provide the interface for things such as Doorbell register, read,
 /// write pointers and a buffer.
@@ -65,7 +67,7 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   // Acquires/releases queue resources and requests HW schedule/deschedule.
   AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_size_pkts,
            HSAuint32 node_id, ScratchInfo& scratch, core::HsaEventCallback callback, void* err_data,
-           uint64_t flags);
+           bool metadata_prefetch, uint64_t flags);
 
   ~AqlQueue();
 
@@ -77,6 +79,30 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
 
   /// @brief Destroy ref counted queue
   void Destroy() override;
+
+  /// @brief Invoke the per-queue error callback if one is registered
+  /// and it is not the default handler.
+  void InvokeErrorCallback(hsa_status_t error) {
+    if (errors_callback_ != nullptr &&
+        errors_callback_ != core::Queue::DefaultErrorHandler) {
+      errors_callback_(error, public_handle(), errors_data_);
+    }
+  }
+
+  /// @brief Mark this queue as having experienced a VM fault.
+  /// Called by the per-queue ExceptionHandler thread on memory-fault exceptions.
+  void MarkVMFaulted() { vm_faulted_.store(true, std::memory_order_release); }
+
+  /// @brief Check whether this queue has been marked as VM-faulted.
+  bool IsVMFaulted() const { return vm_faulted_.load(std::memory_order_acquire); }
+
+  /// @brief Store the fault address and reason bitmask on this queue.
+  /// Called by VMFaultHandler after it identifies which queues faulted,
+  /// so that hsa_amd_queue_get_info() can report the details.
+  void SetVMFaultDetails(uint64_t address, uint32_t reason) {
+    vm_fault_address_ = address;
+    vm_fault_reason_ = reason;
+  }
 
   /// @brief Atomically reads the Read index of with Acquire semantics
   ///
@@ -283,12 +309,21 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   /// @brief Handler for KFD exceptions.
   static bool ExceptionHandler(hsa_signal_value_t error_code, void* arg);
 
+  /// @brief Fill queue properties
+  void GetInfoProperties(uint8_t value[8]) const;
+
   // AQL packet ring buffer
   void* ring_buf_;
 
   // Size of ring_buf_ allocation.
   // This may be larger than (amd_queue_.hsa_queue.size * sizeof(AqlPacket)).
   uint32_t ring_buf_alloc_bytes_;
+
+  // AQL metadata prefetch ring buffer
+  void* ring_buf_metadata_;
+
+  // Size of ring_buf_ allocation.
+  uint32_t ring_buf_metadata_alloc_bytes_;
 
   // Id of the Queue used in communication with thunk
   HSA_QUEUEID queue_id_;
@@ -324,6 +359,12 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   // Exception notification signal
   Signal* exception_signal_;
 
+  // Per-queue VM fault state, set by ExceptionHandler and stamped
+  // with address/reason by VMFaultHandler.
+  std::atomic<bool> vm_faulted_{false};
+  uint64_t          vm_fault_address_{0};
+  uint32_t          vm_fault_reason_{0};
+
   // CU mask lock
   std::mutex mask_lock_;
 
@@ -333,6 +374,30 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
 
   // Current CU mask
   std::vector<uint32_t> cu_mask_;
+
+  class metadata_prefetch_pkt_version {
+    public:
+    metadata_prefetch_pkt_version()
+      : major_(METADATA_PREFETCH_VERSION_INVALID),
+        minor_(METADATA_PREFETCH_VERSION_INVALID) {}
+
+    void set_version(uint8_t major, uint8_t minor) {
+      /* major is 3-bits and minor is 5 bits */
+      assert(major <= 0x7 && minor <= 0x1F);
+      major_ = major;
+      minor_ = minor;
+    }
+
+    uint8_t major_version() { return major_;}
+    uint8_t minor_version() { return minor_;}
+
+    private:
+    uint8_t major_;
+    uint8_t minor_;
+  };
+
+  struct metadata_prefetch_pkt_version dispatch_version_;
+  struct metadata_prefetch_pkt_version barrier_version_;
 
   // Shared event used for queue errors
   static __forceinline HsaEvent*& queue_event() {

@@ -811,6 +811,18 @@ bool NumaNode::SchedSetAffinity() {
   return true;
 }
 
+// ================================================================================================
+bool NumaNode::SchedSetAffinityIfAllowed() {
+  // Windows keeps the previous behavior for now. The Linux implementation avoids
+  // overriding application-provided affinity masks.
+  return SchedSetAffinity();
+}
+
+// ================================================================================================
+bool resetThreadAffinity() {
+  return false;
+}
+
 }  // namespace numa
 
 }  // namespace amd

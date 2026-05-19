@@ -2541,17 +2541,19 @@ rsmi_status_t rsmi_dev_pci_bandwidth_set(uint32_t dv_ind, uint64_t bw_bitmask) {
 
   int32_t ret_i;
   ret_i = dev->writeDevInfo(amd::smi::kDevPCIEClk, freq_enable_str);
-  //
-  // NOTE:  kDevPCIEClk sysfs file may not exist for all cases.
-  //        If it doesn't exist (pp_dpm_pcie), it shouldn't be an error
-  //        and will get translated to RSMI_STATUS_NOT_SUPPORTED.
-  //        On some devices, writing to pp_dpm_pcie may fail
-  //        with EOPNOTSUPP or an unmapped errno because the kernel driver
-  //        exposes the file but does not support PCIe bandwidth control.
+  // kDevPCIEClk (pp_dpm_pcie) may be missing or read-only; map to a clear
+  // status. ENOTSUP/EOPNOTSUPP are the same value on Linux
+  // (see <asm-generic/errno.h>); EROFS is handled in ErrnoToRsmiStatus.
   ret = amd::smi::ErrnoToRsmiStatus(ret_i);
   if (ret != RSMI_STATUS_SUCCESS) {
-    // Restore perf level to AUTO since we set it to MANUAL above
-    rsmi_dev_perf_level_set_v1(dv_ind, RSMI_DEV_PERF_LEVEL_AUTO);
+    rsmi_status_t restore_ret = rsmi_dev_perf_level_set_v1(dv_ind, RSMI_DEV_PERF_LEVEL_AUTO);
+    if (restore_ret != RSMI_STATUS_SUCCESS) {
+      std::ostringstream restore_ss;
+      restore_ss << __PRETTY_FUNCTION__
+                 << " | perf level restore to AUTO failed (restore_ret=" << restore_ret
+                 << ", original_ret=" << ret << "). Device may remain in MANUAL.";
+      LOG_ERROR(restore_ss);
+    }
     if (ret == RSMI_STATUS_UNKNOWN_ERROR) {
       return RSMI_STATUS_NOT_SUPPORTED;
     }

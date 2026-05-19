@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2015-2025 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,9 +21,9 @@ THE SOFTWARE.
 */
 
 #include <hip/hip_runtime.h>
-#include <rocprofiler-sdk-roctx/roctx.h>
 
 #include <chrono>
+#include <cstdlib>
 #include <iomanip>
 #include <iostream>
 #include <vector>
@@ -33,47 +33,93 @@ THE SOFTWARE.
         hipError_t error = cmd;                                                                    \
         if(error != hipSuccess)                                                                    \
         {                                                                                          \
-            std::cerr << "HIP error: " << hipGetErrorString(error) << " at " << __FILE__ << ":"    \
-                      << __LINE__ << " :: " << #cmd << std::endl;                                  \
+            std::cerr << "HIP error: '" << #cmd << "' returned " << hipGetErrorString(error)       \
+                      << " (" << error << ") at " << __FILE__ << ":" << __LINE__ << std::endl;     \
             exit(EXIT_FAILURE);                                                                    \
         }                                                                                          \
     }
 
 // Simple kernel that does minimal work
 __global__ void
-simpleKernel(int* data, int value)
+simpleKernel(int* data, int value, int size)
 {
-    int idx   = blockIdx.x * blockDim.x + threadIdx.x;
-    data[idx] = value + idx;
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if(idx < size)
+    {
+        data[idx] = value + idx;
+    }
 }
+
+namespace
+{
+struct config
+{
+    int num_kernels       = 2000;
+    int num_iterations    = 200;
+    int array_size        = 256;
+    int progress_interval = 50;
+};
+
+void
+print_usage(const char* argv0)
+{
+    std::cerr << "Usage: " << argv0
+              << " [num_kernels] [num_iterations] [array_size] [progress_interval]" << std::endl;
+}
+
+int
+parse_positive_integer(const char* arg_name, const char* value)
+{
+    char* end = nullptr;
+    auto  ret = std::strtol(value, &end, 10);
+    if(end == value || (end != nullptr && *end != '\0') || ret <= 0)
+    {
+        std::cerr << "Invalid " << arg_name << ": " << value << std::endl;
+        exit(EXIT_FAILURE);
+    }
+
+    return static_cast<int>(ret);
+}
+
+config
+parse_args(int argc, char** argv)
+{
+    config cfg{};
+
+    if(argc > 5)
+    {
+        print_usage(argv[0]);
+        exit(EXIT_FAILURE);
+    }
+
+    if(argc > 1) cfg.num_kernels = parse_positive_integer("num_kernels", argv[1]);
+    if(argc > 2) cfg.num_iterations = parse_positive_integer("num_iterations", argv[2]);
+    if(argc > 3) cfg.array_size = parse_positive_integer("array_size", argv[3]);
+    if(argc > 4) cfg.progress_interval = parse_positive_integer("progress_interval", argv[4]);
+
+    if(cfg.array_size < 256)
+    {
+        std::cerr << "array_size must be at least 256, got " << cfg.array_size << std::endl;
+        exit(EXIT_FAILURE);
+    }
+
+    return cfg;
+}
+}  // namespace
 
 int
 main(int argc, char** argv)
 {
-    int       NUM_KERNELS    = 2000;
-    int       NUM_ITERATIONS = 200;
-    const int ARRAY_SIZE     = 256;
+    const auto cfg = parse_args(argc, argv);
 
-    for(int i = 1; i < argc; i++)
-    {
-        if(std::string_view{argv[i]} == "--help" || std::string_view{argv[i]} == "-h" ||
-           std::string_view{argv[i]} == "-?")
-        {
-            std::cout << "Usage: " << argv[0] << " [num_kernels (default=" << NUM_KERNELS
-                      << ")] [num_iterations (default=" << NUM_ITERATIONS << ")]" << std::endl;
-            return 0;
-        }
-    }
-
-    if(argc > 1) NUM_KERNELS = std::stoi(argv[1]);
-    if(argc > 2) NUM_ITERATIONS = std::stoi(argv[2]);
-
-    std::cout << "Creating HIP graph with " << NUM_KERNELS << " kernel launches" << std::endl;
-    std::cout << "Will execute graph " << NUM_ITERATIONS << " times" << std::endl;
+    std::cout << "Creating HIP graph with " << cfg.num_kernels << " kernel launches" << std::endl;
+    std::cout << "Will execute graph " << cfg.num_iterations << " times" << std::endl;
+    std::cout << "Array size: " << cfg.array_size << std::endl;
+    std::cout << "Progress interval: " << cfg.progress_interval << std::endl;
 
     // Allocate device memory
     int* d_data;
-    HIP_CHECK(hipMalloc(&d_data, ARRAY_SIZE * sizeof(int)));
+    HIP_CHECK(hipMalloc(&d_data, cfg.array_size * sizeof(int)));
 
     // Create graph
     hipGraph_t graph;
@@ -87,12 +133,15 @@ main(int argc, char** argv)
     HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
 
     // Launch many kernels
-    dim3 blockSize(ARRAY_SIZE, 1, 1);
-    dim3 gridSize(1, 1, 1);
+    // Use fixed block size and derive grid size from array_size to prevent out-of-bounds access
+    constexpr int BLOCK_SIZE = 256;
+    dim3          blockSize(BLOCK_SIZE);
+    dim3          gridSize((cfg.array_size + BLOCK_SIZE - 1) / BLOCK_SIZE);
 
-    for(int i = 0; i < NUM_KERNELS; i++)
+    for(int i = 0; i < cfg.num_kernels; i++)
     {
-        hipLaunchKernelGGL(simpleKernel, gridSize, blockSize, 0, stream, d_data, i);
+        hipLaunchKernelGGL(simpleKernel, gridSize, blockSize, 0, stream, d_data, i, cfg.array_size);
+        HIP_CHECK(hipGetLastError());
     }
 
     // End graph capture
@@ -109,24 +158,14 @@ main(int argc, char** argv)
     auto start = std::chrono::high_resolution_clock::now();
 
     // Execute the graph multiple times
-    for(int iter = 0; iter < NUM_ITERATIONS; iter++)
+    for(int iter = 0; iter < cfg.num_iterations; iter++)
     {
-        roctxRangePush("graph_launch");
         HIP_CHECK(hipGraphLaunch(graphExec, stream));
-        roctxRangePop();
 
-        if((iter + 1) % 50 == 0)
+        if((iter + 1) % cfg.progress_interval == 0 || (iter + 1) == cfg.num_iterations)
         {
             std::cout << "Completed " << (iter + 1) << " iterations" << std::endl;
         }
-
-        // Wait for completion
-        // if(iter % 5 == 4)
-        HIP_CHECK(hipStreamSynchronize(stream));
-
-        // std::cout << "Synchronized after iteration " << (iter + 1) << std::endl;
-        // std::this_thread::sleep_for(std::chrono::milliseconds(100));  // Sleep to simulate work
-        // between iterations
     }
 
     // Wait for completion
@@ -140,9 +179,9 @@ main(int argc, char** argv)
     std::cout << std::fixed << std::setprecision(4);
     std::cout << "\n=== Timing Results ===" << std::endl;
     std::cout << "Total execution time: " << elapsed.count() << " seconds" << std::endl;
-    std::cout << "Total kernel launches: " << (NUM_KERNELS * NUM_ITERATIONS) << std::endl;
-    std::cout << "Average time per iteration: " << (elapsed.count() / NUM_ITERATIONS) << " seconds"
-              << std::endl;
+    std::cout << "Total kernel launches: " << (cfg.num_kernels * cfg.num_iterations) << std::endl;
+    std::cout << "Average time per iteration: " << (elapsed.count() / cfg.num_iterations)
+              << " seconds" << std::endl;
     std::cout << "======================" << std::endl;
 
     // Cleanup

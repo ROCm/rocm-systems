@@ -27,9 +27,9 @@
 #include <array>
 #include <unordered_map>
 
-#include "util/hsa_rsrc_factory.h"
-#include "util/reg_offsets.h"
-#include "ip_offset_table_init.h"
+#include "lib/aqlprofile/util/hsa_rsrc_factory.h"
+#include "lib/aqlprofile/util/reg_offsets.h"
+#include "lib/aqlprofile/core/ip_offset_table_init.h"
 
 // Pair of pcie domain, bdf
 using domain_bdf_t = std::pair<uint32_t, uint32_t>;

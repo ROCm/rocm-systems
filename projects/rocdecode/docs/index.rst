@@ -17,9 +17,8 @@ rocDecode is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. 
 
   .. grid-item-card:: Install
 
-    * :doc:`rocDecode prerequisites <./install/rocDecode-prerequisites>`
-    * :doc:`Cloning the rocDecode project <./install/rocDecode-clone-project>`
-    * :doc:`Building and installing rocDecode from source code <./install/rocDecode-build-and-install>`
+    * :doc:`Install rocDecode <./install/rocDecode-install>`
+    * :doc:`Build from source <./install/rocDecode-build-and-install>`
 
 .. grid:: 2
   :gutter: 3
@@ -49,8 +48,15 @@ rocDecode is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. 
       * :doc:`The rocDecode parser API <./reference/rocDecode-parser>`
       * :doc:`The rocDecode hardware decoder API <./reference/rocDecode-hw-decoder>`
       * :doc:`The rocDecode software decoder API <./reference/rocDecode-sw-decoder>`
-      
+    
+    * :doc:`The rocDecode utility classes <./reference/rocDecode-utility-classes>`
+
+      * :doc:`The rocDecode RocVideoDecoder<./reference/rocDecode-util-decoder>`
+      * :doc:`The rocDecode demultiplexer <./reference/rocDecode-demux>`
+      * :doc:`The rocDecode FFMpeg decoder <./reference/rocDecode-ffmpeg-decoder>`
+
     * :doc:`rocDecode logging levels <./reference/rocDecode-logging-control>`
+    * :doc:`rocDecode environment variables <./reference/rocDecode-env-vars>`
     * :doc:`rocDecode codec support and hardware capabilities <./reference/rocDecode-formats-and-architectures>`
     * :doc:`API library <../doxygen/html/files>`
     * :doc:`Functions <../doxygen/html/globals>`

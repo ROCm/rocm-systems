@@ -50,7 +50,6 @@ static void RunBenchmark(size_t width, size_t height) {
  *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemset2D) {
-  CHECK_IMAGE_SUPPORT
   const auto width = GENERATE(4_KB, 4_MB, 16_MB);
   RunBenchmark(width, 32);
 }

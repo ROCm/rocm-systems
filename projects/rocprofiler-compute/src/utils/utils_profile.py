@@ -274,10 +274,19 @@ def run_prof(
             csv_ops.write_csv_from_dicts(
                 workload_dir + f"/results_{fbase}.csv", combined_rows
             )
+            console_warning(
+                "Intermediate results_*.csv generation from rocpd databases is "
+                "deprecated and will be replaced with automatic .db file "
+                "retention in a future release."
+            )
         if torch_trace_enabled:
             # move counter collection and marker trace to workload dir
             save_torch_trace_inputs(workload_dir, fbase, format_rocprof_output)
         if retain_rocpd_output:
+            console_warning(
+                "--retain-rocpd-output is deprecated and will be removed in "
+                "a future release. .db files will be retained automatically."
+            )
             for db_path in glob.glob(workload_dir + "/out/pmc_1/*/*.db"):
                 pid = Path(db_path).stem.split("_")[0]
                 shutil.copyfile(

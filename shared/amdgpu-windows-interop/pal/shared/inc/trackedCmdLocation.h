@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -145,7 +145,7 @@ struct TrackedCmdLocation
 };
 
 // =====================================================================================================================
-/// @brief  Helper funcion to obtain DeltaInDwords from TrackedCmdLocation
+/// @brief  Helper function to obtain DeltaInDwords from TrackedCmdLocation
 ///
 /// @detail m_correlateInternal.m_deltaInDWords is only used when m_mode == TrackedCmdLocationMode::Delta
 ///             And describes a TrackedCmdLocationMode::Before, TrackedCmdLocationMode::After pair
@@ -173,7 +173,7 @@ constexpr uint64_t TrackedCmdLocationGetDeltaInDwords(
 }
 
 // =====================================================================================================================
-/// @brief  Helper funcion to convert DeltaInDwords from TrackedCmdLocation to "InBytes"
+/// @brief  Helper function to convert DeltaInDwords from TrackedCmdLocation to "InBytes"
 ///
 /// @returns 0 in m_mode != TrackedCmdLocationMode::Delta
 ///         m_correlateInternal.m_deltaInDWords * sizeof(DWORD) otherwise - where DWORD is uint32_t

@@ -274,8 +274,7 @@ void DefaultPT2_StrmWaitEvent() {
   int device;
   HIP_CHECK(hipGetDevice(&device));
   if (!DeviceAttributesSupport(device, hipDeviceAttributeManagedMemory)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
   hipEvent_t evt;
@@ -698,7 +697,6 @@ void DefaultPT2_hipMemcpy3D() {
 
 HIP_TEST_CASE(Unit_hipStrmPerThrdDefault) {
   CHECK_IMAGE_SUPPORT
-
   SECTION("Testing hipMemset/Memcpy() and their async version") {
     REQUIRE(DefaultPT2_Memcpy_MemSet(1, 0));
     REQUIRE(DefaultPT2_Memcpy_MemSet(1, 1));

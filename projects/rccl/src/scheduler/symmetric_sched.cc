@@ -16,6 +16,7 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
   int fnOpTySymIndices[ncclNumFuncs * ncclNumDevRedOps * ncclNumTypes];
   struct ncclKernelPlanner* planner = &comm->planner;
   struct ncclTaskColl* remainTasksTail = nullptr;
+  bool foundSymm = false;
 
   memset(tasksSymByFnOpTy, 0, sizeof(tasksSymByFnOpTy));
   *remainTasksHead = nullptr;
@@ -31,6 +32,7 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
       task->next = tasksSymByFnOpTy[index];
       tasksSymByFnOpTy[index] = task;
       planner->nTasksColl--;
+      foundSymm = true;
     } else {
       if (*remainTasksHead) {
         remainTasksTail->next = task;
@@ -42,6 +44,8 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
     task = next;
   }
   if (remainTasksTail) remainTasksTail->next = nullptr;
+
+  if (!foundSymm) goto exit;
 
   // make sure kernel args space can hold at least a single work
   assert(comm->workArgsBytes >= ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 1));
@@ -123,7 +127,11 @@ ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm* comm, struct ncclIntruQ
   struct ncclSymkDevWorkArgs* argsBuf = NULL;
 
   plan->isSymColl = true;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  plan->threadPerBlock = headTask->nWarps * comm->WarpSize;
+#else
   plan->threadPerBlock = headTask->nWarps * WARP_SIZE;
+#endif
   plan->hasProxyOps = false;
   plan->kernelFn = ncclSymkGetKernelPtr((ncclSymkKernelId)headTask->devFuncId, headTask->opDev.op, headTask->datatype);
   task = headTask;
@@ -136,6 +144,7 @@ ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm* comm, struct ncclIntruQ
   }
 
   plan->kernelArgsSize = ncclSymkDevWorkArgs::calcArgsSize(nMaxChannels, workCount);
+  plan->kernelArgsSize = max(plan->kernelArgsSize, sizeof(ncclSymkDevWorkArgs4K));
   argsBuf = (struct ncclSymkDevWorkArgs*)calloc(1, plan->kernelArgsSize);
 
   remainCell = cellPerChannel = DIVUP(DIVUP(totalCount, nMaxChannels), cellCount);
@@ -217,7 +226,9 @@ ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm* comm, struct ncclIntruQ
 
   memcpy(&argsBuf->kcomm, &comm->symkState.kcomm, sizeof(comm->symkState.kcomm));
   plan->workBytes = totalCount * ncclTypeSize(headTask->datatype);
-  // plan->channelMask = uint64_t(-1) >> (64 - curChannel);
+  for (int c = 0; c < curChannel; c++) {
+    plan->channelMask.masks[c / 64] |= (uint64_t(1) << (c % 64));
+  }
   plan->kernelSymArgs = (void*)argsBuf;
   plan->workStorageType = ncclDevWorkStorageTypeArgs;
 

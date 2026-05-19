@@ -124,7 +124,7 @@ hipError_t LibraryContainer::BuildIt() {
   // Process Functions and create kernel handles
   std::vector<std::string> function_names;
   program->getGlobalFuncFromCodeObj(&function_names);
-  for (auto& name : function_names) {
+  for (const auto& name : function_names) {
     functions_.emplace(std::make_pair(name, std::make_shared<hip::Function>(name)));
   }
 

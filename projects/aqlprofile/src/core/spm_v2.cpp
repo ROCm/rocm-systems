@@ -170,11 +170,11 @@ bool is_agent_supported_for_spm(const AgentInfo* agentInfo) {
 
 std::vector<aqlprofile_spm_parameter_t> default_spm_params = {
     {AQLPROFILE_SPM_PARAMETER_TYPE_BUFFER_SIZE,     1<<26}, // 64MB
-    {AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES, 1<<13}, // 4us
-    {AQLPROFILE_SPM_PARAMETER_TYPE_TIMEOUT,         0},   // 100ms
+    {AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL, 1<<13}, // 4us
+    {AQLPROFILE_SPM_PARAMETER_TYPE_TIMEOUT,         100},   // 100ms
     {AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_MODE,     AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_SCLK}
 };
-static_assert(AQLPROFILE_SPM_PARAMETER_TYPE_LAST == 6 && "Dont forget to add default param!");
+static_assert(AQLPROFILE_SPM_PARAMETER_TYPE_LAST == 4 && "Dont forget to add default param!");
 
 counter_des_t GetCounter(
     aql_profile::Pm4Factory* pm4_factory,
@@ -246,7 +246,11 @@ private:
     std::map<aqlprofile_handle_t, std::unique_ptr<ManagerThread>> threads{};
 };
 
-auto* spm_state_map = new SpmStateMap{};
+SpmStateMap* spm_state_map()
+{
+    static SpmStateMap* instance = new SpmStateMap{};
+    return instance;
+}
 
 hsa_status_t _internal_aqlprofile_spm_create_packets(
     aqlprofile_handle_t*                 handle,
@@ -285,7 +289,7 @@ hsa_status_t _internal_aqlprofile_spm_create_packets(
     handle->handle = memory->GetHandler();
     out_desc->data = memory->GetOutputBuf();
     out_desc->size = SPM_DESC_SIZE;
-    spm_state_map->insert(*handle, s);
+    spm_state_map()->insert(*handle, s);
 
     {
         aql_profile::Pm4Factory* pm4_factory = nullptr;
@@ -304,7 +308,7 @@ hsa_status_t _internal_aqlprofile_spm_create_packets(
         trace_config.spm_has_core1 = (pm4_factory->GetGpuId() == aql_profile::MI100_GPU_ID) ||
                                     (pm4_factory->GetGpuId() == aql_profile::MI200_GPU_ID);
         trace_config.spm_sample_delay_max = pm4_factory->GetSpmSampleDelayMax();
-        trace_config.sampleRate = (s->parameters.at(AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES) + 16) & ~31ul;
+        trace_config.sampleRate = (s->parameters.at(AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL) + 16) & ~31ul;
         if (trace_config.sampleRate == 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
         if (s->parameters.at(AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_MODE) != AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_SCLK)
@@ -375,7 +379,7 @@ PUBLIC_API hsa_status_t aqlprofile_spm_start(
     aqlprofile_spm_data_callback_t data_cb,
     void*                          userdata
 ) {
-    auto s = aqlprofile::spm::spm_state_map->query(handle);
+    auto s = aqlprofile::spm::spm_state_map()->query(handle);
     if (!s) return HSA_STATUS_ERROR_NOT_INITIALIZED;
 
     // The first page of output_buffer is reserved for SpmBufferDesc
@@ -409,7 +413,7 @@ PUBLIC_API hsa_status_t aqlprofile_spm_start(
         auto manager = std::make_unique<ManagerThread>(s, data_cb, userdata);
 
         CHECKHSA(manager->status, return manager->status);
-        aqlprofile::spm::spm_state_map->setthread(handle, std::move(manager));
+        aqlprofile::spm::spm_state_map()->setthread(handle, std::move(manager));
     }
     catch(...) { return HSA_STATUS_ERROR; }
     return HSA_STATUS_SUCCESS;
@@ -417,13 +421,13 @@ PUBLIC_API hsa_status_t aqlprofile_spm_start(
 
 PUBLIC_API hsa_status_t aqlprofile_spm_stop(aqlprofile_handle_t handle)
 {
-    bool b = aqlprofile::spm::spm_state_map->setthread(handle, nullptr);
+    bool b = aqlprofile::spm::spm_state_map()->setthread(handle, nullptr);
     return b ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_NOT_INITIALIZED;
 }
 
 PUBLIC_API void aqlprofile_spm_delete_packets(aqlprofile_handle_t handle)
 {
-    aqlprofile::spm::spm_state_map->remove(handle);
+    aqlprofile::spm::spm_state_map()->remove(handle);
 }
 
 struct consumer_thread_handle_t
@@ -572,14 +576,4 @@ aqlprofile_spm_is_event_supported(aqlprofile_agent_handle_t agent, aqlprofile_pm
     if (event.block_name >= blocks.size()) return false;
 
     return blocks.at(event.block_name);
-}
-
-PUBLIC_API hsa_status_t
-aqlprofile_spm_query_agent_capabilities(aqlprofile_agent_handle_t agent, aqlprofile_spm_available_configurations_cb_t cb, void* userdata)
-{
-  const aqlprofile_spm_available_configuration_t sample_internel_caps[] = {
-      AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES, 32, (1 << 16) - 32};
-  size_t num_caps = 1;
-  hsa_status_t status = cb(sample_internel_caps, num_caps, userdata);
-  return status;
 }

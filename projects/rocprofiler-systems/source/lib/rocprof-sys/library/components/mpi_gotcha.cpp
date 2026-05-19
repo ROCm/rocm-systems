@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "library/components/mpi_gotcha.hpp"
 #include "api.hpp"
@@ -78,7 +59,7 @@ struct comm_rank_data
 
     friend bool operator>(const comm_rank_data& _lhs, const comm_rank_data& _rhs)
     {
-        if(get_is_continuous_integration() && !_lhs.updated() && !_rhs.updated())
+        if(!_lhs.updated() && !_rhs.updated())
         {
             throw std::runtime_error("Error! Comparing rank data that is not updated");
         }
@@ -99,10 +80,10 @@ struct comm_rank_data
     }
 };
 
-uint64_t mpip_index        = std::numeric_limits<uint64_t>::max();
-auto     last_comm_record  = comm_rank_data{};
-auto     mproc_comm_record = comm_rank_data{};
-auto     mpi_comm_records  = std::map<uintptr_t, comm_rank_data>{};
+std::uint64_t mpip_index        = std::numeric_limits<std::uint64_t>::max();
+auto          last_comm_record  = comm_rank_data{};
+auto          mproc_comm_record = comm_rank_data{};
+auto          mpi_comm_records  = std::map<uintptr_t, comm_rank_data>{};
 
 using tim::auto_lock_t;
 using tim::type_mutex;
@@ -121,7 +102,7 @@ rocprofsys_mpi_fini(MPI_Comm, int, void*, void*)
     auto _blocked = get_sampling_signals();
     if(!_blocked.empty())
         tim::signals::block_signals(_blocked, tim::signals::sigmask_scope::process);
-    if(mpip_index != std::numeric_limits<uint64_t>::max())
+    if(mpip_index != std::numeric_limits<std::uint64_t>::max())
         deactivate_mpip<mpip_bundle_t, project::rocprofsys>(mpip_index);
     if(is_root_process()) rocprofsys_finalize_hidden();
     return MPI_SUCCESS;
@@ -308,7 +289,7 @@ mpi_gotcha::audit([[maybe_unused]] const gotcha_data_t& _data, audit::incoming)
     if(!_blocked.empty())
         tim::signals::block_signals(_blocked, tim::signals::sigmask_scope::process);
 
-    if(mpip_index != std::numeric_limits<uint64_t>::max())
+    if(mpip_index != std::numeric_limits<std::uint64_t>::max())
         deactivate_mpip<mpip_bundle_t, project::rocprofsys>(mpip_index);
 
 #if !defined(ROCPROFSYS_USE_MPI) && defined(ROCPROFSYS_USE_MPI_HEADERS)

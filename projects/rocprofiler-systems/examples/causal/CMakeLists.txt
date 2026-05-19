@@ -17,10 +17,7 @@ if(NOT TARGET rocprofiler-systems::rocprofiler-systems-user-library)
 endif()
 
 add_library(causal-interface-library INTERFACE)
-target_compile_options(
-    causal-interface-library
-    INTERFACE -g3 -gdwarf-3 -fno-omit-frame-pointer
-)
+target_compile_options(causal-interface-library INTERFACE -g3 -fno-omit-frame-pointer)
 target_link_libraries(
     causal-interface-library
     INTERFACE Threads::Threads ${CMAKE_DL_LIBS}

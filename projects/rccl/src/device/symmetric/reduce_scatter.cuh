@@ -33,7 +33,7 @@ static __device__ void reduceDeep(
     }
   }
 
-  if (waitNeeded) bar.wait(ncclCoopCta(), cuda::memory_order_relaxed);
+  if (waitNeeded) bar.wait(ncclCoopCta(), NCCL_MEM_ORDER_RELAXED);
 
   if (0 < nIters) {
     while (true) {
@@ -216,7 +216,8 @@ static __device__ void reduce(
     }
   }
 
-  if (waitNeeded) bar.wait(ncclCoopCta(), cuda::memory_order_relaxed);
+  if (waitNeeded)
+    bar.wait(ncclCoopCta(), NCCL_MEM_ORDER_RELAXED);
 
   constexpr int UnrollPeers = 8;
   size_t nSufElts = (nBytes-cursor)/sizeof(T);
@@ -232,7 +233,7 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_LD(ncclSymkDevWorkArgs
   Red<typename ncclSymkAccumType<Red, T, /*nvls=*/false>::Type> red(handler.devWork->redOpArg);
   int const& rank = handler.comm.rank;
 
-  bar.arrive(ncclCoopCta(), cuda::memory_order_relaxed);
+  bar.arrive(ncclCoopCta(), NCCL_MEM_ORDER_RELAXED);
 
   bool waitNeeded = true;
   handler.forEachWork<T>(
@@ -244,13 +245,13 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_LD(ncclSymkDevWorkArgs
                           threadIdx.x/WARP_SIZE, blockDim.x/WARP_SIZE);
         int tn = nBlocks*blockDim.x;
 
-        reduce(handler, tn, t, nBlocks, waitNeeded, bar, red, input + rank*nElts, output, nElts);
+        reduce(handler, tn, t, nBlocks, waitNeeded, bar, red, input + rank*nAllElts, output, nElts);
 
         waitNeeded = false;
       }
     );
 
-  bar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
+  bar.sync(ncclCoopCta(), NCCL_MEM_ORDER_RELEASE);
 }
 
 template<typename Red, typename T>
@@ -315,7 +316,7 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_LDMC(ncclSymkDevWorkAr
   int const& rank = handler.comm.rank;
   auto const& multimem = handler.comm.lsaMultimem;
 
-  bar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
+  bar.sync(ncclCoopCta(), NCCL_MEM_ORDER_RELEASE);
 
   handler.forEachWork<T>(
       [&]__device__(int block, int nBlocks, size_t nElts, size_t nAllElts,
@@ -326,11 +327,11 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_LDMC(ncclSymkDevWorkAr
                           threadIdx.x/WARP_SIZE, blockDim.x/WARP_SIZE);
         int tn = nBlocks*blockDim.x;
 
-        reduceMultimem(tn, t, red, input.multimemPtr(multimem) + rank*nElts, output.localPtr(), nElts);
+        reduceMultimem(tn, t, red, input.multimemPtr(multimem) + rank*nAllElts, output.localPtr(), nElts);
       }
     );
 
-  bar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
+  bar.sync(ncclCoopCta(), NCCL_MEM_ORDER_RELEASE);
 }
 
 // T is user type, EltType is the most aligned type
@@ -405,7 +406,7 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_LL(ncclSymkDevWorkArgs
         T* input = (T*)inputPtr.localPtr();
         T* output = (T*)outputPtr.localPtr();
 
-        uint32_t lowBits = nElts*sizeof(T);
+        uint32_t lowBits = nAllElts*sizeof(T);
         lowBits |= (uintptr_t)input;
         lowBits |= (uintptr_t)output;
         if (__builtin_expect(lowBits%8 == 0, true)) {

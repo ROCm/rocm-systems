@@ -44,20 +44,28 @@ public:
     explicit Gfx9CmdBuilder(const void* table = nullptr)
     : CmdBuilder(table)
     {}
-    void BuildBarrierCommand(CmdBuffer* cmdBuf);
-    void BuildWriteWaitIdlePacket(CmdBuffer* cmdBuf);
-    void BuildWriteShRegPacket(CmdBuffer* cmdBuf, uint32_t addr, uint32_t value);
-    void BuildCacheFlushPacket(CmdBuffer* cmdBuf, size_t addr, size_t size);
-    void BuildNopPacket(CmdBuffer* cmdBuf, uint32_t num_dwords);
+    template <typename Tp>
+    static void BuildBarrierCommand(Tp* cmdBuf);
+    template <typename Tp>
+    static void BuildWriteWaitIdlePacket(Tp* cmdBuf);
+    template <typename Tp>
+    static void BuildWriteShRegPacket(Tp* cmdBuf, uint32_t addr, uint32_t value);
+    template <typename Tp>
+    static void BuildCacheFlushPacket(Tp* cmdBuf, size_t addr, size_t size);
+    template <typename Tp>
+    static void BuildNopPacket(Tp* cmdBuf, uint32_t num_dwords);
 };
 
 namespace
 {
 // Simple mock command buffer for testing
-class TestCmdBuffer : public pm4_builder::CmdBuffer
+class TestCmdBuffer
 {
 public:
-    void Append(const void* data, size_t size) override
+    TestCmdBuffer()  = default;
+    ~TestCmdBuffer() = default;
+
+    void Append(const void* data, size_t size)
     {
         const uint32_t* words      = static_cast<const uint32_t*>(data);
         size_t          word_count = size / sizeof(uint32_t);
@@ -67,48 +75,58 @@ public:
         }
     }
 
-    size_t      Size() const override { return commands.size() * sizeof(uint32_t); }
-    const void* Data() const override { return commands.data(); }
-    void        Clear() override { commands.clear(); }
+    size_t      Size() const { return commands.size() * sizeof(uint32_t); }
+    const void* Data() const { return commands.data(); }
+    void        Clear() { commands.clear(); }
 
-    std::vector<uint32_t> commands;
+    std::vector<uint32_t> commands = {};
 };
 
 class Gfx9CmdBuilderTest : public ::testing::Test
 {
 protected:
-    void SetUp() override { builder = std::make_unique<pm4_builder::Gfx9CmdBuilder>(nullptr); }
+    void SetUp() override
+    {
+        cmd_buffer = std::make_unique<TestCmdBuffer>();
+        builder    = std::make_unique<pm4_builder::Gfx9CmdBuilder>(nullptr);
+    }
 
-    TestCmdBuffer                                cmd_buffer;
-    std::unique_ptr<pm4_builder::Gfx9CmdBuilder> builder;
+    void TearDown() override
+    {
+        cmd_buffer.reset();
+        builder.reset();
+    }
 
     // Helper to verify packet header
     void VerifyPacketHeader(uint32_t opcode, size_t packet_size_dwords)
     {
-        ASSERT_FALSE(cmd_buffer.commands.empty());
-        uint32_t header          = cmd_buffer.commands[0];
+        ASSERT_FALSE(cmd_buffer->commands.empty());
+        uint32_t header          = cmd_buffer->commands[0];
         uint32_t expected_count  = packet_size_dwords - 2;
         uint32_t expected_header = (3u << 30) | (opcode << 8) | expected_count;
         EXPECT_EQ(header, expected_header);
     }
+
+    std::unique_ptr<TestCmdBuffer>               cmd_buffer = nullptr;
+    std::unique_ptr<pm4_builder::Gfx9CmdBuilder> builder    = nullptr;
 };
 
 // Test barrier command generation
 TEST_F(Gfx9CmdBuilderTest, BarrierCommand)
 {
-    builder->BuildBarrierCommand(&cmd_buffer);
+    builder->BuildBarrierCommand(cmd_buffer.get());
 
-    ASSERT_EQ(cmd_buffer.commands.size(), 2u);
-    VerifyPacketHeader(0x14, 2);                    // EVENT_WRITE opcode
-    EXPECT_EQ(cmd_buffer.commands[1] & 0x3f, 0x4);  // CS_PARTIAL_FLUSH event type
+    ASSERT_EQ(cmd_buffer->commands.size(), 2u);
+    VerifyPacketHeader(0x14, 2);                     // EVENT_WRITE opcode
+    EXPECT_EQ(cmd_buffer->commands[1] & 0x3f, 0x4);  // CS_PARTIAL_FLUSH event type
 }
 
 // Test wait idle packet generation
 TEST_F(Gfx9CmdBuilderTest, WaitIdlePacket)
 {
-    builder->BuildWriteWaitIdlePacket(&cmd_buffer);
+    builder->BuildWriteWaitIdlePacket(cmd_buffer.get());
 
-    ASSERT_EQ(cmd_buffer.commands.size(), 2u);
+    ASSERT_EQ(cmd_buffer->commands.size(), 2u);
     VerifyPacketHeader(0x14, 2);  // EVENT_WRITE opcode
 }
 
@@ -118,11 +136,11 @@ TEST_F(Gfx9CmdBuilderTest, WriteShRegPacket)
     const uint32_t test_addr  = 0x2000;
     const uint32_t test_value = 0x12345678;
 
-    builder->BuildWriteShRegPacket(&cmd_buffer, test_addr, test_value);
+    builder->BuildWriteShRegPacket(cmd_buffer.get(), test_addr, test_value);
 
-    ASSERT_EQ(cmd_buffer.commands.size(), 3u);
+    ASSERT_EQ(cmd_buffer->commands.size(), 3u);
     VerifyPacketHeader(0x4, 3);  // SET_SH_REG opcode
-    EXPECT_EQ(cmd_buffer.commands[2], test_value);
+    EXPECT_EQ(cmd_buffer->commands[2], test_value);
 }
 
 // Test cache flush packet generation
@@ -131,9 +149,9 @@ TEST_F(Gfx9CmdBuilderTest, CacheFlushPacket)
     const size_t test_addr = 0x1000;
     const size_t test_size = 0x100;
 
-    builder->BuildCacheFlushPacket(&cmd_buffer, test_addr, test_size);
+    builder->BuildCacheFlushPacket(cmd_buffer.get(), test_addr, test_size);
 
-    ASSERT_EQ(cmd_buffer.commands.size(), 7u);
+    ASSERT_EQ(cmd_buffer->commands.size(), 7u);
     VerifyPacketHeader(0x49, 7);  // ACQUIRE_MEM opcode
 }
 
@@ -142,23 +160,24 @@ TEST_F(Gfx9CmdBuilderTest, NopPacket)
 {
     const uint32_t num_dwords = 3;
 
-    builder->BuildNopPacket(&cmd_buffer, num_dwords);
+    builder->BuildNopPacket(cmd_buffer.get(), num_dwords);
 
-    ASSERT_EQ(cmd_buffer.commands.size(), num_dwords);
+    ASSERT_EQ(cmd_buffer->commands.size(), num_dwords);
     VerifyPacketHeader(0x10, num_dwords);  // NOP opcode
 
     // Verify remaining dwords are zeros
     for(uint32_t i = 1; i < num_dwords; ++i)
     {
-        EXPECT_EQ(cmd_buffer.commands[i], 0u);
+        EXPECT_EQ(cmd_buffer->commands[i], 0u);
     }
 }
 
 }  // namespace
 
 // Implementations for testing
+template <typename Tp>
 void
-pm4_builder::Gfx9CmdBuilder::BuildBarrierCommand(CmdBuffer* cmdBuf)
+pm4_builder::Gfx9CmdBuilder::BuildBarrierCommand(Tp* cmdBuf)
 {
     uint32_t packet[2] = {
         (3u << 30) | (0x14u << 8) | 0u,  // header: type3, EVENT_WRITE, count=0
@@ -167,14 +186,16 @@ pm4_builder::Gfx9CmdBuilder::BuildBarrierCommand(CmdBuffer* cmdBuf)
     cmdBuf->Append(packet, sizeof(packet));
 }
 
+template <typename Tp>
 void
-pm4_builder::Gfx9CmdBuilder::BuildWriteWaitIdlePacket(CmdBuffer* cmdBuf)
+pm4_builder::Gfx9CmdBuilder::BuildWriteWaitIdlePacket(Tp* cmdBuf)
 {
     BuildBarrierCommand(cmdBuf);
 }
 
+template <typename Tp>
 void
-pm4_builder::Gfx9CmdBuilder::BuildWriteShRegPacket(CmdBuffer* cmdBuf, uint32_t addr, uint32_t value)
+pm4_builder::Gfx9CmdBuilder::BuildWriteShRegPacket(Tp* cmdBuf, uint32_t addr, uint32_t value)
 {
     uint32_t packet[3] = {
         (3u << 30) | (0x4u << 8) | 1u,  // header: type3, SET_SH_REG, count=1
@@ -184,8 +205,9 @@ pm4_builder::Gfx9CmdBuilder::BuildWriteShRegPacket(CmdBuffer* cmdBuf, uint32_t a
     cmdBuf->Append(packet, sizeof(packet));
 }
 
+template <typename Tp>
 void
-pm4_builder::Gfx9CmdBuilder::BuildCacheFlushPacket(CmdBuffer* cmdBuf, size_t addr, size_t size)
+pm4_builder::Gfx9CmdBuilder::BuildCacheFlushPacket(Tp* cmdBuf, size_t addr, size_t size)
 {
     uint32_t packet[7] = {
         (3u << 30) | (0x49u << 8) | 5u,  // header: type3, ACQUIRE_MEM, count=5
@@ -199,8 +221,9 @@ pm4_builder::Gfx9CmdBuilder::BuildCacheFlushPacket(CmdBuffer* cmdBuf, size_t add
     cmdBuf->Append(packet, sizeof(packet));
 }
 
+template <typename Tp>
 void
-pm4_builder::Gfx9CmdBuilder::BuildNopPacket(CmdBuffer* cmdBuf, uint32_t num_dwords)
+pm4_builder::Gfx9CmdBuilder::BuildNopPacket(Tp* cmdBuf, uint32_t num_dwords)
 {
     uint32_t header = (3u << 30) | (0x10u << 8) | (num_dwords - 2u);  // type3, NOP
     cmdBuf->Append(&header, sizeof(header));

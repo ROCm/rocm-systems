@@ -690,9 +690,6 @@ bool KernelBlitManager::createProgram(Device& device) {
     }
   }
 
-  std::vector<amd::Device*> devices;
-  devices.push_back(&device);
-
   // Save context and program for this device
   context_ = device.blitProgram()->context_;
   context_->retain();
