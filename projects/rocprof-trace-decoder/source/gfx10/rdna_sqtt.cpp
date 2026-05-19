@@ -30,6 +30,8 @@
 #include "gfx10wave.h"
 #include "gfx11/gfx11wave.h"
 #include "gfx12/gfx12wave.h"
+#include "mi400/mi400token.h"
+#include "mi400/mi400wave.h"
 #include "segment.hpp"
 #include "stitch/stitch.hpp"
 
@@ -51,16 +53,6 @@ typedef gfx10::Token Token;
 
 #define empty_wave_check(waveslot_size)                                                                                \
     if (waveslot_size == 0) { continue; }
-
-std::pair<WaveInstCategory, uint16_t> get_other_simd(int einst, int tt_version)
-{
-    if (tt_version == 3)
-        return gfx11::wave_t::get_other_simd(einst);
-    else if (tt_version == 4)
-        return gfx12::wave_t::get_other_simd(einst);
-    else
-        return {};
-}
 
 void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen, Stitcher& stitch)
 {
@@ -91,6 +83,13 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
             case RdnaType::MISC_GFX10:
             {
                 bool bCtxSave = false;
+                if (tt_version >= 5)
+                {
+                    mi400::misc_type misc{.raw = token.contents};
+                    DEBUGPRINT(misc);
+                    bCtxSave = misc.save_context;
+                }
+                else
                 {
                     gfx10::misc_type misc{.raw = token.contents};
                     DEBUGPRINT(misc);
@@ -116,6 +115,15 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
 
                 if (tt_version >= 4) double_buffer = (token.contents >> 43) & 1;
 
+                if (tt_version >= 5)
+                {
+                    mi400::header_type header{.raw = token.contents};
+                    DEBUGPRINT(header);
+                    target_sa_wgp = get_sa_wgp(header.DSA, header.DWGP);
+                    target_simd = header.DSIMD;
+                    derate = header.trans2;
+                }
+                else
                 {
                     header_type header{.raw = token.contents};
                     DEBUGPRINT(header);
@@ -234,7 +242,9 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
             case RdnaType::WAVE_END:
             {
                 wend_type_common end;
-                if (tt_version == 4)
+                if (tt_version >= 5)
+                    end = mi400::wend_type{.raw = token.contents}.get();
+                else if (tt_version == 4)
                     end = gfx12::wend_type{.raw = token.contents}.get();
                 else
                     end = gfx10::wend_type{.raw = token.contents}.get();
@@ -260,20 +270,45 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
             case RdnaType::INST:
             {
                 inst_type_common inst;
-                if (tt_version == 4)
+                auto mapped = mapped_inst_t{WaveInstCategory::NONE, 0};
+
+                if (tt_version >= 5)
+                {
+                    inst = mi400::inst_type{.raw = token.contents}.get();
+                    try
+                    {
+                        mapped = mi400::map_to_common_type(inst.inst, derate);
+                    }
+                    catch (std::exception&)
+                    {
+                        auto& simd = SIMD[inst.wid];
+                        if (simd.size()) mi400::handle_xnack_rewind(simd.back());
+                        break;
+                    }
+                }
+                else if (tt_version == 4)
+                {
                     inst = gfx12::inst_type{.raw = token.contents}.get();
+                    mapped = gfx12::map_to_common_type(inst.inst, dprate, derate);
+                }
                 else
+                {
                     inst = gfx10::inst_type{.raw = token.contents}.get();
+                    if (tt_version == 3)
+                        mapped = gfx11::map_to_common_type(inst.inst, dprate, derate);
+                    else
+                        mapped = gfx10::map_to_common_type(inst.inst, dprate, derate);
+                }
                 DEBUGPRINT(inst);
 
-                if (auto other = get_other_simd(inst.inst, tt_version); other.first != WaveInstCategory::NONE)
+                if (mapped.category & OTHER_SIMD_BIT)
                 {
                     other_simd.push_back(
                         {sizeof(rocprofiler_thread_trace_decoder_inst_other_simd_t),
                          token.time,
-                         (uint16_t) other.second,
+                         (uint16_t) mapped.cycles,
                          (uint8_t) target_sa_wgp,
-                         (uint8_t) other.first}
+                         (uint8_t) (mapped.category ^ OTHER_SIMD_BIT)}
                     );
                     if (other_simd.size() >= MAX_ACCUM_RECORDS) stitch.sendOtherSimd(other_simd);
                 }
@@ -281,7 +316,23 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                 {
                     auto& simd = SIMD[inst.wid];
                     empty_wave_check(simd.size());
-                    simd.back().apply_inst(token, inst, tt_version, dprate, derate);
+                    auto& wave = simd.back();
+
+                    if (mapped.category == WaveInstCategory::LD_SCALE)
+                    {
+                        wave.next_ld_scale = true;
+                        break;
+                    }
+
+                    int64_t inst_time = token.time;
+                    if (wave.next_ld_scale)
+                    {
+                        wave.next_ld_scale = false;
+                        inst_time -= 1;
+                        mapped.cycles++;
+                    }
+
+                    wave.apply_inst(inst_time, inst.inst, mapped, tt_version);
                 }
                 break;
             }
@@ -291,12 +342,19 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                 DEBUGPRINT(vinst);
                 auto& simd = SIMD[vinst.wid];
                 empty_wave_check(simd.size());
-                simd.back().apply_valu_inst(token, vinst.w64h);
+                simd.back().apply_valu_inst(token.time);
                 break;
             }
             case RdnaType::IMM_ONE:
             {
                 int wid;
+                if (tt_version >= 5)
+                {
+                    mi400::immed_one_type immed_one{.raw = token.contents};
+                    DEBUGPRINT(immed_one);
+                    wid = immed_one.wid;
+                }
+                else
                 {
                     immed_one_type immed_one{.raw = token.contents};
                     DEBUGPRINT(immed_one);

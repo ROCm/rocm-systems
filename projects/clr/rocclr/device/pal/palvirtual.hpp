@@ -1,22 +1,8 @@
-/* Copyright (c) 2015 - 2025 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -82,7 +68,7 @@ enum class BarrierType : uint8_t {
 //! Virtual GPU
 class VirtualGPU : public device::VirtualDevice {
  public:
-  class Queue : public amd::HeapObject {
+  class Queue {
    public:
     static constexpr uint MaxCommands = 256;
     static constexpr uint StartCmdBufIdx = 1;
@@ -92,6 +78,15 @@ class VirtualGPU : public device::VirtualDevice {
 
     Queue(const Queue&) = delete;
     Queue& operator=(const Queue&) = delete;
+
+    // This type is allocated exclusively via amd::AllocWithTrailing<Queue>(extSize, ...) so
+    // that a single block holds the wrapper plus PAL's IQueue / ICmdBuffer / IFence objects
+    // placed in the trailing region.
+    void* operator new(size_t) = delete;
+    void operator delete(void*) = delete;
+    // Placement new overloads required by MSVC when operator new(size_t) is deleted
+    void* operator new(size_t, void* p) noexcept { return p; }
+    void* operator new(size_t, std::align_val_t, void* p) noexcept { return p; }
 
     static Queue* Create(VirtualGPU& gpu,                       //!< ROCCLR virtual GPU object
                          Pal::QueueType queueType,              //!< PAL queue type
@@ -194,7 +189,7 @@ class VirtualGPU : public device::VirtualDevice {
 
     static uint32_t AllocedQueues(const VirtualGPU& gpu, Pal::EngineType type);
 
-    amd::Monitor* lock_;                       //!< Lock PAL queue for access
+    std::recursive_mutex* lock_;               //!< Lock PAL queue for access
     Pal::IQueue* iQueue_;                      //!< PAL queue object
     std::vector<Pal::ICmdBuffer*> iCmdBuffs_;  //!< PAL command buffers
     std::vector<Pal::IFence*> iCmdFences_;     //!< PAL fences, associated with CMD
@@ -222,7 +217,7 @@ class VirtualGPU : public device::VirtualDevice {
     uint max_command_buffers_;
   };
 
-  struct CommandBatch : public amd::HeapObject {
+  struct CommandBatch {
     amd::Command* head_;           //!< Command batch head
     GpuEvent events_[AllEngines];  //!< Last known GPU events
     TimeStamp* lastTS_;            //!< TS associated with command batch
@@ -362,13 +357,6 @@ class VirtualGPU : public device::VirtualDevice {
   bool isFenceDirty() const { return false; }
 
   void HiddenHeapInit() {}
-
-  //! Dispatches multiple AQL packets in a single batch operation
-  bool dispatchAqlPacketBatch(const std::vector<uint8_t*>& packets,
-                              const std::vector<std::string>& kernelNames,
-                              amd::AccumulateCommand* vcmd = nullptr, bool attach_signal = false) {
-    return false;
-  }
 
   void resetFenceDirty() {}
 

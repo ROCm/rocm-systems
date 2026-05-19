@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "metadata_registry.hpp"
 #include "agent_manager.hpp"
@@ -98,8 +79,8 @@ from_json_process(const nlohmann::json& _json)
     p.pid     = _json["pid"].get<pid_t>();
     p.ppid    = _json["ppid"].get<pid_t>();
     p.command = _json["command"].get<std::string>();
-    p.start   = _json["start"].get<int32_t>();
-    p.end     = _json["end"].get<int32_t>();
+    p.start   = _json["start"].get<std::int32_t>();
+    p.end     = _json["end"].get<std::int32_t>();
     return p;
 }
 
@@ -107,7 +88,7 @@ nlohmann::json
 to_json(const info::pmc& pmc)
 {
     nlohmann::json result;
-    result["type"]             = static_cast<int32_t>(pmc.type);
+    result["type"]             = static_cast<std::int32_t>(pmc.type);
     result["agent_type_index"] = static_cast<int>(pmc.agent_type_index);
     result["target_arch"]      = pmc.target_arch;
     result["event_code"]       = static_cast<int>(pmc.event_code);
@@ -131,11 +112,11 @@ info::pmc
 from_json_pmc(const nlohmann::json& _json)
 {
     info::pmc p;
-    p.type             = static_cast<agent_type>(_json["type"].get<int32_t>());
-    p.agent_type_index = _json["agent_type_index"].get<int32_t>();
+    p.type             = static_cast<agent_type>(_json["type"].get<std::int32_t>());
+    p.agent_type_index = _json["agent_type_index"].get<std::int32_t>();
     p.target_arch      = _json["target_arch"].get<std::string>();
-    p.event_code       = _json["event_code"].get<int32_t>();
-    p.instance_id      = _json["instance_id"].get<int32_t>();
+    p.event_code       = _json["event_code"].get<std::int32_t>();
+    p.instance_id      = _json["instance_id"].get<std::int32_t>();
     p.name             = _json["name"].get<std::string>();
     p.symbol           = _json["symbol"].get<std::string>();
     p.description      = _json["description"].get<std::string>();
@@ -145,8 +126,8 @@ from_json_pmc(const nlohmann::json& _json)
     p.value_type       = _json["value_type"].get<std::string>();
     p.block            = _json["block"].get<std::string>();
     p.expression       = _json["expression"].get<std::string>();
-    p.is_constant      = _json["is_constant"].get<int32_t>();
-    p.is_derived       = _json["is_derived"].get<int32_t>();
+    p.is_constant      = _json["is_constant"].get<std::int32_t>();
+    p.is_derived       = _json["is_derived"].get<std::int32_t>();
     p.extdata          = _json["extdata"].get<std::string>();
     return p;
 }
@@ -157,7 +138,7 @@ to_json(const info::thread& thread)
     nlohmann::json result;
     result["parent_process_id"] = thread.parent_process_id;
     result["process_id"]        = thread.process_id;
-    result["thread_id"]         = static_cast<int32_t>(thread.thread_id);
+    result["thread_id"]         = static_cast<std::int32_t>(thread.thread_id);
     result["start"]             = thread.start;
     result["end"]               = thread.end;
     result["extdata"]           = thread.extdata;
@@ -168,11 +149,11 @@ info::thread
 from_json_thread(const nlohmann::json& _json)
 {
     info::thread t;
-    t.parent_process_id = _json["parent_process_id"].get<int32_t>();
-    t.process_id        = _json["process_id"].get<int32_t>();
-    t.thread_id         = _json["thread_id"].get<int32_t>();
-    t.start             = _json["start"].get<int32_t>();
-    t.end               = _json["end"].get<int32_t>();
+    t.parent_process_id = _json["parent_process_id"].get<std::int32_t>();
+    t.process_id        = _json["process_id"].get<std::int32_t>();
+    t.thread_id         = _json["thread_id"].get<std::int32_t>();
+    t.start             = _json["start"].get<std::int32_t>();
+    t.end               = _json["end"].get<std::int32_t>();
     t.extdata           = _json["extdata"].get<std::string>();
     return t;
 }
@@ -184,7 +165,7 @@ to_json(const info::track& track)
     result["track_name"] = track.track_name;
     if(track.thread_id.has_value())
     {
-        result["thread_id"] = static_cast<int32_t>(track.thread_id.value());
+        result["thread_id"] = static_cast<std::int32_t>(track.thread_id.value());
     }
     else
     {
@@ -205,13 +186,11 @@ from_json_track(const nlohmann::json& _json)
     }
     else
     {
-        t.thread_id = _json["thread_id"].get<int32_t>();
+        t.thread_id = _json["thread_id"].get<std::int32_t>();
     }
     t.extdata = _json["extdata"].get<std::string>();
     return t;
 }
-
-#if ROCPROFSYS_USE_ROCM
 
 nlohmann::json
 to_json(const rocprofiler_callback_tracing_code_object_load_data_t& code_object)
@@ -223,11 +202,11 @@ to_json(const rocprofiler_callback_tracing_code_object_load_data_t& code_object)
     result["load_size"]      = static_cast<long long>(code_object.load_size);
     result["load_delta"]     = static_cast<long long>(code_object.load_delta);
     result["storage_type"]   = static_cast<int>(code_object.storage_type);
-#    if(ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
     result["agent_id_handle"] = static_cast<long long>(code_object.agent_id.handle);
-#    else
+#else
     result["agent_id_handle"] = static_cast<long long>(code_object.rocp_agent.handle);
-#    endif
+#endif
     return result;
 }
 
@@ -244,11 +223,11 @@ from_json_code_object(const nlohmann::json& _json)
     co.storage_type   = static_cast<rocprofiler_code_object_storage_type_t>(
         _json["storage_type"].get<int>());
     auto handle = _json["agent_id_handle"].get<long long>();
-#    if(ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
     co.agent_id.handle = handle;
-#    else
+#else
     co.rocp_agent.handle = handle;
-#    endif
+#endif
     return co;
 }
 
@@ -290,7 +269,6 @@ from_json_kernel_symbol(const nlohmann::json& _json)
     ks.accum_vgpr_count          = _json["accum_vgpr_count"].get<int>();
     return ks;
 }
-#endif
 
 nlohmann::json
 to_json(const agent& _agent)
@@ -315,16 +293,16 @@ from_json_agent(const nlohmann::json& _json)
 {
     auto a                  = std::make_shared<agent>();
     a->type                 = _json["type"].get<agent_type>();
-    a->handle               = _json["handle"].get<uint64_t>();
-    a->device_id            = _json["device_id"].get<int32_t>();
-    a->node_id              = _json["node_id"].get<int32_t>();
-    a->logical_node_id      = _json["logical_node_id"].get<int32_t>();
-    a->logical_node_type_id = _json["logical_node_type_id"].get<int32_t>();
+    a->handle               = _json["handle"].get<std::uint64_t>();
+    a->device_id            = _json["device_id"].get<std::int32_t>();
+    a->node_id              = _json["node_id"].get<std::int32_t>();
+    a->logical_node_id      = _json["logical_node_id"].get<std::int32_t>();
+    a->logical_node_type_id = _json["logical_node_type_id"].get<std::int32_t>();
     a->name                 = _json["name"].get<std::string>();
     a->model_name           = _json["model_name"].get<std::string>();
     a->vendor_name          = _json["vendor_name"].get<std::string>();
     a->product_name         = _json["product_name"].get<std::string>();
-    a->device_type_index    = _json["device_type_index"].get<int32_t>();
+    a->device_type_index    = _json["device_type_index"].get<std::int32_t>();
     return a;
 }
 
@@ -379,7 +357,6 @@ to_json(const metadata_registry&                   _registry,
         result["strings"].push_back(str);
     }
 
-#if ROCPROFSYS_USE_ROCM
     auto           code_object_list  = _registry.get_code_object_list();
     nlohmann::json code_object_array = nlohmann::json::array();
     for(const auto& code_object : code_object_list)
@@ -395,7 +372,6 @@ to_json(const metadata_registry&                   _registry,
         kernel_symbol_array.push_back(to_json(kernel_symbol));
     }
     result["kernel_symbols"] = kernel_symbol_array;
-#endif
 
     for(const auto& agent : _agents)
     {
@@ -444,19 +420,18 @@ from_json(metadata_registry& _registry, std::vector<std::shared_ptr<agent>>& _ag
 
     fill_from_json("queues", [&_registry](const auto& item) {
         auto handle = item.template get<long long>();
-        _registry.add_queue(static_cast<uint64_t>(handle));
+        _registry.add_queue(static_cast<std::uint64_t>(handle));
     });
 
     fill_from_json("streams", [&_registry](const auto& item) {
         auto handle = item.template get<long long>();
-        _registry.add_stream(static_cast<uint64_t>(handle));
+        _registry.add_stream(static_cast<std::uint64_t>(handle));
     });
 
     fill_from_json("strings", [&_registry](const auto& item) {
         _registry.add_string(item.template get<std::string>());
     });
 
-#if ROCPROFSYS_USE_ROCM
     fill_from_json("code_objects", [&_registry](const auto& item) {
         auto code_object = from_json_code_object(item);
         _registry.add_code_object(code_object);
@@ -466,7 +441,6 @@ from_json(metadata_registry& _registry, std::vector<std::shared_ptr<agent>>& _ag
         auto kernel_symbol = from_json_kernel_symbol(item);
         _registry.add_kernel_symbol(kernel_symbol);
     });
-#endif
 
     if(!_agents.empty())
     {
@@ -525,7 +499,7 @@ metadata_registry::add_track(const info::track& track_info)
 }
 
 void
-metadata_registry::add_queue(const uint64_t& queue_handle)
+metadata_registry::add_queue(const std::uint64_t& queue_handle)
 {
     m_queues.wlock([&queue_handle](auto& _data) {
         if(_data.count(queue_handle) > 0)
@@ -537,7 +511,7 @@ metadata_registry::add_queue(const uint64_t& queue_handle)
 }
 
 void
-metadata_registry::add_stream(const uint64_t& stream_handle)
+metadata_registry::add_stream(const std::uint64_t& stream_handle)
 {
     m_streams.wlock([&stream_handle](auto& _data) {
         if(_data.count(stream_handle) > 0)
@@ -577,7 +551,7 @@ metadata_registry::get_pmc_info(const std::string_view& unique_name) const
 }
 
 std::optional<info::thread>
-metadata_registry::get_thread_info(const uint32_t& thread_id) const
+metadata_registry::get_thread_info(const std::uint32_t& thread_id) const
 {
     return get_type_info<info::thread>(m_threads, [&thread_id](const info::thread& val) {
         return val.thread_id == thread_id;
@@ -616,18 +590,18 @@ metadata_registry::get_track_info_list() const
     return result;
 }
 
-std::vector<uint64_t>
+std::vector<std::uint64_t>
 metadata_registry::get_queue_list() const
 {
-    std::vector<uint64_t> result;
+    std::vector<std::uint64_t> result;
     m_queues.rlock(assign_set_to_vector(result));
     return result;
 }
 
-std::vector<uint64_t>
+std::vector<std::uint64_t>
 metadata_registry::get_stream_list() const
 {
-    std::vector<uint64_t> result;
+    std::vector<std::uint64_t> result;
     m_streams.rlock(assign_set_to_vector(result));
     return result;
 }
@@ -639,8 +613,6 @@ metadata_registry::get_string_list() const
     m_strings.rlock(assign_set_to_vector(result));
     return result;
 }
-
-#if ROCPROFSYS_USE_ROCM > 0
 
 void
 metadata_registry::add_code_object(
@@ -670,7 +642,7 @@ metadata_registry::add_kernel_symbol(
 }
 
 std::optional<rocprofiler_callback_tracing_code_object_load_data_t>
-metadata_registry::get_code_object(uint64_t code_object_id) const
+metadata_registry::get_code_object(std::uint64_t code_object_id) const
 {
     return get_type_info<rocprofiler_callback_tracing_code_object_load_data_t>(
         m_code_objects,
@@ -681,7 +653,7 @@ metadata_registry::get_code_object(uint64_t code_object_id) const
 }
 
 std::optional<rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t>
-metadata_registry::get_kernel_symbol(uint64_t kernel_id) const
+metadata_registry::get_kernel_symbol(std::uint64_t kernel_id) const
 {
     return get_type_info<
         rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t>(
@@ -762,15 +734,13 @@ metadata_registry::overwrite_callback_names(
             modified_ops[i] = extract_operations(i);
         }
 
-        if(get_is_continuous_integration() &&
-           modified_ops.find(callback_kind) != modified_ops.end())
+        if(modified_ops.find(callback_kind) != modified_ops.end())
         {
             throw std::runtime_error(
                 "Overwriting a previously overwritten entry is forbidden");
         }
 
-        if(get_is_continuous_integration() && !modified_ops.empty() &&
-           callback_kind >= modified_ops.begin()->first)
+        if(!modified_ops.empty() && callback_kind >= modified_ops.begin()->first)
         {
             throw std::runtime_error(
                 "Category must have a larger enum value than all previously "
@@ -781,8 +751,7 @@ metadata_registry::overwrite_callback_names(
         auto operation_names = extract_operations(callback_kind);
         for(const auto& [index, new_value] : category_info.second)
         {
-            if(get_is_continuous_integration() &&
-               (index < 0 || static_cast<size_t>(index) >= operation_names.size()))
+            if((index < 0 || static_cast<size_t>(index) >= operation_names.size()))
             {
                 throw std::runtime_error("Index is invalid");
             }
@@ -799,7 +768,7 @@ metadata_registry::overwrite_callback_names(
     {
         auto renaming_entry = modified_ops.find(i);
 
-        if(get_is_continuous_integration() && renaming_entry == modified_ops.end())
+        if(renaming_entry == modified_ops.end())
         {
             throw std::runtime_error("A category that needs to be emplaced is missing");
         }
@@ -827,19 +796,15 @@ metadata_registry::get_callback_tracing_info() const
     return m_callback_tracing_info;
 }
 
-#endif
-
 metadata_registry::metadata_registry()
 {
-#if ROCPROFSYS_USE_ROCM > 0
     overwrite_callback_names({
-#    if(ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
         { ROCPROFILER_CALLBACK_TRACING_OMPT,
           { { ROCPROFILER_OMPT_ID_parallel_begin, "omp_parallel" },
             { ROCPROFILER_OMPT_ID_parallel_end, "omp_parallel" } } }
-#    endif
-    });
 #endif
+    });
 }
 
 bool

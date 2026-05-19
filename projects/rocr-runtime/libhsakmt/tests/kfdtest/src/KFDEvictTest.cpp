@@ -73,12 +73,12 @@ void KFDEvictTest::AllocBuffers(bool m_IsParent, HSAuint32 defaultGPUNode, HSAui
     m_Flags.ui32.NonPaged = 1;
 
     for (HSAuint32 i = 0; i < count; ) {
-        ret = hsaKmtAllocMemory(defaultGPUNode, vramBufSize, m_Flags, &m_pBuf);
+        ret = HSAKMT_CALL(hsaKmtAllocMemory, m_hsakmt_current_ctx, defaultGPUNode, vramBufSize, m_Flags, &m_pBuf);
         if (ret == HSAKMT_STATUS_SUCCESS) {
             if (hsakmt_is_dgpu()) {
-                if (hsaKmtMapMemoryToGPUNodes(m_pBuf, vramBufSize, NULL,
+                if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, m_hsakmt_current_ctx, m_pBuf, vramBufSize, NULL,
                        mapFlags, 1, reinterpret_cast<HSAuint32 *>(&defaultGPUNode)) == HSAKMT_STATUS_ERROR) {
-                    EXPECT_SUCCESS(hsaKmtFreeMemory(m_pBuf, vramBufSize));
+                    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtFreeMemory, m_hsakmt_current_ctx, m_pBuf, vramBufSize));
                     LOG() << "Map failed for " << i << "/" << count << " buffer. Retrying allocation" << std::endl;
                     goto retry;
                 }
@@ -104,8 +104,8 @@ void KFDEvictTest::FreeBuffers(std::vector<void *> &pBuffers, HSAuint64 vramBufS
         m_pBuf = pBuffers[i];
         if (m_pBuf != NULL) {
             if (hsakmt_is_dgpu())
-                EXPECT_SUCCESS(hsaKmtUnmapMemoryToGPU(m_pBuf));
-            EXPECT_SUCCESS(hsaKmtFreeMemory(m_pBuf, vramBufSize));
+                EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, m_pBuf));
+            EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtFreeMemory, m_hsakmt_current_ctx, m_pBuf, vramBufSize));
         }
     }
 }

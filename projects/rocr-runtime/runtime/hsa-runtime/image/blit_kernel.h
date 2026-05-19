@@ -88,7 +88,7 @@ class BlitKernel {
 
   hsa_status_t Cleanup();
 
-  hsa_status_t BuildBlitCode(hsa_agent_t agent,
+  hsa_status_t BuildImageBlitCode(hsa_agent_t agent,
                              std::vector<BlitCodeInfo>& blit_code_catalog);
 
   hsa_status_t CopyBufferToImage(

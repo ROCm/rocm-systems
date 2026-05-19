@@ -1,0 +1,22 @@
+defaults:
+  numbered: false
+root: index
+subtrees:
+- caption: Install
+  entries:
+  - file: install/install.md
+    title: Build and install from source
+
+- caption: Reference
+  entries:
+  - file: reference/amdcuid-c-api.md
+    title: C API
+    entries:
+    - file: doxygen/docBin/html/files
+      title: Files
+    - file: doxygen/docBin/html/globals
+      title: Globals
+    - file: doxygen/docBin/html/annotated
+      title: Data structures
+    - file: doxygen/docBin/html/functions_data_fields
+      title: Data fields

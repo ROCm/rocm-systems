@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
+#include <cinttypes>
 #include <sys/types.h>
 #if defined(__linux__)
 #include <sys/mman.h>
@@ -448,7 +449,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAvailableMemory(HSAuint32 Node,
   if (!dev)
     return HSAKMT_STATUS_ERROR;
 
-  *AvailableBytes = dev->VramAvail();
+  if (dev->VramAvail(AvailableBytes) != HSA_STATUS_SUCCESS) {
+    return HSAKMT_STATUS_ERROR;
+  }
+
   return HSAKMT_STATUS_SUCCESS;
 }
 
@@ -503,8 +507,7 @@ bool is_ipc_sysmemfd(uint64_t fd) {
   linkTarget[bytes] = '\0';
   return strstr(linkTarget, "rocr4wsl_gtt") != nullptr;
 #else
-  assert(!"Unimplemeted!");
-  return true;
+  return false;
 #endif
 }
 
@@ -548,14 +551,14 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterGraphicsHandleToNodesExt(HSAuint64 Graphic
     RegisterFlags.ui32.requiresVAddr = 1;
   }
 
-  pr_debug("number of nodes %lu\n", NumberOfNodes);
+  pr_debug("number of nodes %" PRIu64 "\n", NumberOfNodes);
   wsl::thunk::GpuMemoryHandle mem_handle;
 
   ret = import_dmabuf_fd(GraphicsResourceHandle, NodeArray[0], RegisterFlags.ui32.requiresVAddr,
                          false, &mem_handle, RegisterFlags.ui32.kmtHandle);
   if (ret != HSAKMT_STATUS_SUCCESS) {
     pr_err("hsaKmtRegisterGraphicsHandleToNodesExt: import_dmabuf_fd failed, "
-           "GraphicsResourceHandle: %lu, NodeId: %u\n",
+           "GraphicsResourceHandle: %" PRIu64 ", NodeId: %u\n",
            GraphicsResourceHandle, NodeArray[0]);
     return ret;
   }
@@ -592,8 +595,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtExportDMABufHandle(void *MemoryAddress,
       if (code != ErrorCode::Success)
         return HSAKMT_STATUS_ERROR;
       it->second.dmabuf_fd = *DMABufFd;
-      *Offset = reinterpret_cast<uint64_t>(MemoryAddress) - it->second.gpu_addr;
     }
+    *Offset = reinterpret_cast<uint64_t>(MemoryAddress) - it->second.gpu_addr;
 #if defined(__linux__)
     *DMABufFd = dup(it->second.dmabuf_fd);
 #else
@@ -639,7 +642,7 @@ HSAKMT_STATUS import_dmabuf_fd(uint64_t DMABufFd, uint32_t NodeId, bool alloc_va
     std::lock_guard<std::mutex> gard(*allocation_map_lock_);
     auto it = allocation_map_->find((void*)gpu_va);
     if (it == allocation_map_->end()) {
-      pr_err("where's the conflict buffer? va %#lx\n", create_info.va_hint);
+      pr_err("where's the conflict buffer? va %#" PRIx64 "\n", create_info.va_hint);
       return HSAKMT_STATUS_ERROR;
     }
     wsl::thunk::GpuMemory *conflict_mem = wsl::thunk::GpuMemory::Convert(it->second.handle);
@@ -1097,16 +1100,17 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtHandleImport(const HsaExternalHandleDesc* import_d
   if (import_desc->mem != nullptr) {
     void *memaddr = import_desc->mem;
     auto phys_mem = GetGpuMemoryFromAddress(memaddr);
-    if (!phys_mem) return HSAKMT_STATUS_INVALID_HANDLE;
-    if (!phys_mem->IsPhysicalCreated()) {
-      auto code = phys_mem->CreatePhysicalMemory();
-      if (code != ErrorCode::Success) {
-        return HSAKMT_STATUS_OUT_OF_RESOURCES;
+    if (phys_mem) {
+      if (!phys_mem->IsPhysicalCreated()) {
+        auto code = phys_mem->CreatePhysicalMemory();
+        if (code != ErrorCode::Success) {
+          return HSAKMT_STATUS_OUT_OF_RESOURCES;
+        }
       }
+      import_res->buf_handle = reinterpret_cast<HsaMemoryObjectHandle>(
+                               phys_mem->GetGpuMemoryHandle());
+      return HSAKMT_STATUS_SUCCESS;
     }
-    import_res->buf_handle = reinterpret_cast<HsaMemoryObjectHandle>(
-                             phys_mem->GetGpuMemoryHandle());
-    return HSAKMT_STATUS_SUCCESS;
   }
 
   if (import_desc->type != HSA_EXTERNAL_HANDLE_DMA_BUF) {

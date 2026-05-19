@@ -5,7 +5,6 @@ device: 0
 dispatch: null
 filter_blocks: []
 format_rocprof_output: rocpd
-hip_trace: false
 iteration_multiplexing: kernel
 join_type: grid
 kernel: null

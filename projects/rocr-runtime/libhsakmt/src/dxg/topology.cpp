@@ -589,7 +589,7 @@ hsaKmtGetNodeWallclockFrequency(HSAuint32 NodeId, uint64_t* Frequency) {
   HsaNodeProperties *NodeProperties = &(dxg_topology->g_props[NodeId].node);
   *Frequency = NodeProperties->WallClockKHz * 1000ull;
 
-  return HSAKMT_STATUS_NOT_IMPLEMENTED;
+  return HSAKMT_STATUS_SUCCESS;
 }
 
 uint16_t get_device_id_by_node_id(HSAuint32 node_id) {
@@ -745,7 +745,8 @@ HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id, HsaNodeProperties&
   props.LocalMemSize = 0;
   props.MaxEngineClockMhzFCompute = device->MaxEngineClockMhz();
   props.DrmRenderMinor = node_id;
-  props.Capability2.ui32.AqlEmulationPm4_ = device->IsAqlSupported() ? 0 : 1;
+  props.Capability2.ui32.AqlEmulationPm4_ =
+      (device->IsAqlSupported() && device->DeviceInfo().hwsInfo.hwsMask.computeHwsEnabled) ? 0 : 1;
 
   {
     const char* name = device->ProductName();
@@ -812,6 +813,8 @@ HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id, HsaNodeProperties&
   if (props.NumFComputeCores) {
     assert(props.EngineId.ui32.Major && "HSA_OVERRIDE_GFX_VERSION may be needed");
   }
+
+  props.WallClockKHz = device->GPUCounterFrequency() / 1000ull;
 
   return HSAKMT_STATUS_SUCCESS;
 }

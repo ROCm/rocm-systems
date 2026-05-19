@@ -20,17 +20,20 @@
  * THE SOFTWARE.
  */
 
+#include "rocm_smi/rocm_smi_kfd_data_manager.h"
+
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <signal.h>
+#include <sys/inotify.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
-#include <sys/inotify.h>
 #include <unistd.h>
-#include <poll.h>
-#include <dirent.h>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -38,17 +41,15 @@
 #include <fstream>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <set>
+#include <shared_mutex>
 #include <sstream>
 #include <string>
 #include <thread>
-#include <vector>
-#include <optional>
-#include <shared_mutex>
 #include <unordered_map>
-#include <array>
+#include <vector>
 
-#include "rocm_smi/rocm_smi_kfd_data_manager.h"
 #include "rocm_smi/kfd_ioctl.h"
 #include "rocm_smi/rocm_smi_logger.h"
 
@@ -100,9 +101,9 @@ struct BatchIpcPayload {
 
 // Updated StoreBatch - also returns target result to avoid second loop
 struct StoreBatchResult {
-  bool success;           // true if all results were successful
-  bool target_found;      // true if target_gpu_id was in the batch
-  QueryResult target;     // result for target_gpu_id (if found)
+  bool success;        // true if all results were successful
+  bool target_found;   // true if target_gpu_id was in the batch
+  QueryResult target;  // result for target_gpu_id (if found)
 };
 
 //=============================================================================
@@ -115,8 +116,7 @@ struct CachedEntry {
 
   bool IsValid(int64_t ttl_ms) const {
     if (ttl_ms <= 0) return false;
-    auto age = std::chrono::duration_cast<Milliseconds>(
-        SteadyClock::now() - fetched_at);
+    auto age = std::chrono::duration_cast<Milliseconds>(SteadyClock::now() - fetched_at);
     return age.count() < ttl_ms;
   }
 };
@@ -147,8 +147,7 @@ struct CacheState {
   // Returns: success=true if all GPUs succeeded (cache updated)
   //          success=false if any GPU failed (cache cleared)
   //          target contains result for target_gpu_id regardless of success
-  StoreBatchResult StoreBatch(OpType op, const BatchIpcPayload& payload,
-                              uint32_t target_gpu_id) {
+  StoreBatchResult StoreBatch(OpType op, const BatchIpcPayload& payload, uint32_t target_gpu_id) {
     std::unique_lock lock(mutex);
     auto& cache = caches[static_cast<size_t>(op)];
     TimePoint now = SteadyClock::now();
@@ -291,31 +290,29 @@ void WaitForEntryRemoval(const std::string& entry_name, int poll_ms) {
         timed_out = true;
         break;
       }
-      std::this_thread::sleep_for(
-          std::chrono::microseconds(GetKFDManagerConfig().cleanup_poll_us));
+      std::this_thread::sleep_for(std::chrono::microseconds(GetKFDManagerConfig().cleanup_poll_us));
     }
   }
 
-  auto elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(
-      SteadyClock::now() - start_time).count();
+  auto elapsed_us =
+      std::chrono::duration_cast<std::chrono::microseconds>(SteadyClock::now() - start_time)
+          .count();
 
   if (timed_out) {
     std::ostringstream ss;
-    ss << __PRETTY_FUNCTION__ << " | Entry " << entry_name
-       << " NOT removed after " << elapsed_us << " us (TIMEOUT)";
+    ss << __PRETTY_FUNCTION__ << " | Entry " << entry_name << " NOT removed after " << elapsed_us
+       << " us (TIMEOUT)";
     LOG_WARN(ss);
   } else {
     std::ostringstream ss;
-    ss << __PRETTY_FUNCTION__ << " | Entry " << entry_name
-       << " removed after " << elapsed_us << " us ("
-       << (use_inotify ? "inotify" : "stat-poll") << ")";
+    ss << __PRETTY_FUNCTION__ << " | Entry " << entry_name << " removed after " << elapsed_us
+       << " us (" << (use_inotify ? "inotify" : "stat-poll") << ")";
     LOG_DEBUG(ss);
   }
 }
 
 void WaitForKfdProcRemoval(pid_t pid) {
-  WaitForEntryRemoval(std::to_string(pid),
-                      static_cast<int>(GetKFDManagerConfig().inotify_poll_ms));
+  WaitForEntryRemoval(std::to_string(pid), static_cast<int>(GetKFDManagerConfig().inotify_poll_ms));
 }
 
 KfdProcSnapshot CaptureKfdProcEntries() {
@@ -372,10 +369,8 @@ bool DetectPidNamespace() {
   if (cgroup_file.is_open()) {
     std::string line;
     while (std::getline(cgroup_file, line)) {
-      if (line.find("docker") != std::string::npos ||
-          line.find("kubepods") != std::string::npos ||
-          line.find("containerd") != std::string::npos ||
-          line.find("lxc") != std::string::npos ||
+      if (line.find("docker") != std::string::npos || line.find("kubepods") != std::string::npos ||
+          line.find("containerd") != std::string::npos || line.find("lxc") != std::string::npos ||
           line.find("podman") != std::string::npos) {
         return true;
       }
@@ -423,8 +418,7 @@ bool IsInPidNamespace() {
       case OpType::kQueryAvailableVram: {
         struct kfd_ioctl_get_available_memory_args args{};
         args.gpu_id = gpu_id;
-        result.status = (ioctl(fd, AMDKFD_IOC_AVAILABLE_MEMORY, &args) != 0)
-                        ? errno : 0;
+        result.status = (ioctl(fd, AMDKFD_IOC_AVAILABLE_MEMORY, &args) != 0) ? errno : 0;
         result.data = args.available;
         break;
       }
@@ -442,9 +436,7 @@ bool IsInPidNamespace() {
   _exit(result.status ? 1 : 0);
 }
 
-[[noreturn]] void ChildExecuteBatch(OpType op,
-                                    const uint32_t* gpu_ids,
-                                    uint32_t count,
+[[noreturn]] void ChildExecuteBatch(OpType op, const uint32_t* gpu_ids, uint32_t count,
                                     int write_fd) {
   BatchIpcPayload payload{};
   payload.count = 0;
@@ -559,9 +551,7 @@ ForkResult ExecuteBatchFork(OpType op, const std::vector<uint32_t>& gpu_ids) {
 
   if (child_pid == 0) {
     close(pipe_fds[0]);
-    ChildExecuteBatch(op, gpu_ids.data(),
-                      static_cast<uint32_t>(gpu_ids.size()),
-                      pipe_fds[1]);
+    ChildExecuteBatch(op, gpu_ids.data(), static_cast<uint32_t>(gpu_ids.size()), pipe_fds[1]);
   }
 
   // Parent
@@ -613,8 +603,8 @@ ForkResult ExecuteBatchFork(OpType op, const std::vector<uint32_t>& gpu_ids) {
       std::string new_entry = DetectNewKfdProcEntry(pre_fork_snapshot);
       if (!new_entry.empty()) {
         std::ostringstream ss;
-        ss << __PRETTY_FUNCTION__ << " | Container PID translation: "
-           << child_pid << " -> " << new_entry;
+        ss << __PRETTY_FUNCTION__ << " | Container PID translation: " << child_pid << " -> "
+           << new_entry;
         LOG_DEBUG(ss);
         WaitForEntryRemoval(new_entry, poll_ms);
       }
@@ -651,19 +641,13 @@ KFDManagerConfig GetCurrentConfig() {
 
 void LoadConfigFromEnvironment(KFDManagerConfig& cfg) {  // NOLINT(runtime/references)
   cfg.use_original_vram_fcn = static_cast<bool>(
-      ReadEnvInt64("AMDSMI_KFD_USE_ORIG_VRAM",
-                   cfg.use_original_vram_fcn ? 1 : 0));
+      ReadEnvInt64("AMDSMI_KFD_USE_ORIG_VRAM", cfg.use_original_vram_fcn ? 1 : 0));
   cfg.disable_inotify_polling = static_cast<bool>(
-      ReadEnvInt64("AMDSMI_KFD_DISABLE_INOTIFY_POLLING",
-                   cfg.disable_inotify_polling ? 1 : 0));
-  cfg.inotify_poll_ms = ReadEnvInt64(
-      "AMDSMI_KFD_INOTIFY_POLL_MS", cfg.inotify_poll_ms);
-  cfg.cleanup_poll_us = ReadEnvInt64(
-      "AMDSMI_KFD_CLEANUP_POLL_US", cfg.cleanup_poll_us);
-  cfg.cache_ttl_ms = ReadEnvInt64(
-      "AMDSMI_KFD_CACHE_TTL_MS", cfg.cache_ttl_ms);
-  cfg.max_cleanup_wait_ms = ReadEnvInt64(
-    "AMDSMI_KFD_MAX_CLEANUP_WAIT_MS", cfg.max_cleanup_wait_ms);
+      ReadEnvInt64("AMDSMI_KFD_DISABLE_INOTIFY_POLLING", cfg.disable_inotify_polling ? 1 : 0));
+  cfg.inotify_poll_ms = ReadEnvInt64("AMDSMI_KFD_INOTIFY_POLL_MS", cfg.inotify_poll_ms);
+  cfg.cleanup_poll_us = ReadEnvInt64("AMDSMI_KFD_CLEANUP_POLL_US", cfg.cleanup_poll_us);
+  cfg.cache_ttl_ms = ReadEnvInt64("AMDSMI_KFD_CACHE_TTL_MS", cfg.cache_ttl_ms);
+  cfg.max_cleanup_wait_ms = ReadEnvInt64("AMDSMI_KFD_MAX_CLEANUP_WAIT_MS", cfg.max_cleanup_wait_ms);
 }
 
 int InitializeManager(const KFDManagerConfig& cfg) {
@@ -758,8 +742,8 @@ QueryResult ExecuteIsolatedQuery(OpType op, uint32_t gpu_id) {
     } else {
       std::string new_entry = DetectNewKfdProcEntry(pre_fork_snapshot);
       if (!new_entry.empty()) {
-        ss << __PRETTY_FUNCTION__ << " | Container PID translation: "
-           << child_pid << " -> " << new_entry;
+        ss << __PRETTY_FUNCTION__ << " | Container PID translation: " << child_pid << " -> "
+           << new_entry;
         LOG_INFO(ss);
         WaitForEntryRemoval(new_entry, poll_ms);
       }
@@ -780,8 +764,7 @@ QueryResult ExecuteIsolatedQuery(OpType op, uint32_t gpu_id) {
   return out;
 }
 
-QueryResult ExecuteBatchQueryCached(OpType op,
-                                    const std::vector<uint32_t>& gpu_ids,
+QueryResult ExecuteBatchQueryCached(OpType op, const std::vector<uint32_t>& gpu_ids,
                                     uint32_t target_gpu_id) {
   EnsureInitialized();
   int64_t ttl_ms = GetKFDManagerConfig().cache_ttl_ms;
@@ -802,7 +785,6 @@ QueryResult ExecuteBatchQueryCached(OpType op,
   // A few open-source C++ libraries have implementations, try:
   // "folly Singleton" or "folly futures coalescing"
   // or "C++ promise shared future" (to see  underlying mechanism)
-
 
   // Cache miss - execute batch fork for all GPUs
   auto fork_result = ExecuteBatchFork(op, gpu_ids);
@@ -832,8 +814,8 @@ QueryResult ExecuteBatchQueryCached(OpType op,
 void PurgeCacheEntries(OpType op, int32_t gpu_id) {
   GetGlobalCache().Purge(op, gpu_id);
   std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << " | Purged cache for op="
-     << static_cast<uint32_t>(op) << " gpu_id=" << gpu_id;
+  ss << __PRETTY_FUNCTION__ << " | Purged cache for op=" << static_cast<uint32_t>(op)
+     << " gpu_id=" << gpu_id;
   LOG_DEBUG(ss);
 }
 
@@ -852,12 +834,10 @@ int QueryAvailableVram(uint32_t gpu_id, uint64_t* out_available) {
   return 0;
 }
 
-int QueryAvailableVramBatch(const std::vector<uint32_t>& gpu_ids,
-                            uint32_t target_gpu_id,
+int QueryAvailableVramBatch(const std::vector<uint32_t>& gpu_ids, uint32_t target_gpu_id,
                             uint64_t* out_available) {
   if (!out_available) return EINVAL;
-  QueryResult res = ExecuteBatchQueryCached(OpType::kQueryAvailableVram,
-                                            gpu_ids, target_gpu_id);
+  QueryResult res = ExecuteBatchQueryCached(OpType::kQueryAvailableVram, gpu_ids, target_gpu_id);
   if (res.err_code != 0) return res.err_code;
   *out_available = res.value;
   return 0;

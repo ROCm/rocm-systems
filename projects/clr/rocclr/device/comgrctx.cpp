@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "os/os.hpp"
 #include "utils/flags.hpp"
@@ -27,41 +13,18 @@ std::once_flag Comgr::initialized;
 ComgrEntryPoints Comgr::cep_;
 bool Comgr::is_ready_ = false;
 
-bool Comgr::LoadLib(bool is_versioned) {
+bool Comgr::LoadLib() {
 #if defined(COMGR_DYN_DLL)
-
-  if (is_versioned) {
-#if defined(HIP_MAJOR_VERSION) && defined(HIP_MAJOR_VERSION)
-    std::string comgr_versioned_name, major_version, minor_version;
-    const std::string kComgrPrefix = "amd_comgr";
-
-    if (HIP_MAJOR_VERSION > 9) {
-      major_version = std::to_string(HIP_MAJOR_VERSION);
-    } else {
-      major_version = "0" + std::to_string(HIP_MAJOR_VERSION);
-    }
-
-    if (HIP_MINOR_VERSION > 9) {
-      minor_version = std::to_string(HIP_MINOR_VERSION);
-    } else {
-      minor_version = "0" + std::to_string(HIP_MINOR_VERSION);
-    }
-
-    comgr_versioned_name = kComgrPrefix + major_version + minor_version + std::string(".dll");
-
-    static const char* comgr_lib_name =
-        LP64_SWITCH(WINDOWS_SWITCH("amd_comgr32.dll", "libamd_comgr32.so.3"),
-                    WINDOWS_SWITCH(comgr_versioned_name.c_str(), "libamd_comgr.so.3"));
-    cep_.handle = Os::loadLibrary(comgr_lib_name);
+#if defined(_WIN64) && defined(COMGR_DLL_NAME)
+  // Use CMake-configured DLL name on 64-bit Windows
+  static const char* comgr_lib_name = COMGR_DLL_NAME;
+#else
+  // Default names for other platforms
+  static const char* comgr_lib_name =
+      LP64_SWITCH(WINDOWS_SWITCH("amd_comgr32.dll", "libamd_comgr32.so.3"),
+                  WINDOWS_SWITCH("amd_comgr.dll", "libamd_comgr.so.3"));
 #endif
-  } else {
-    std::string comgr_major_dll =
-        "amd_comgr_" + std::to_string(AMD_COMGR_INTERFACE_VERSION_MAJOR) + ".dll";
-    static const char* comgr_lib_name =
-        LP64_SWITCH(WINDOWS_SWITCH("amd_comgr32.dll", "libamd_comgr32.so.3"),
-                    WINDOWS_SWITCH(comgr_major_dll.c_str(), "libamd_comgr.so.3"));
-    cep_.handle = Os::loadLibrary(comgr_lib_name);
-  }
+  cep_.handle = Os::loadLibrary(comgr_lib_name);
   if (nullptr == cep_.handle) {
     ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "Failed to load COMGR library.");
     return false;

@@ -1,27 +1,5 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 import argparse
 import importlib
@@ -29,12 +7,11 @@ import socket
 import sys
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import config
 from argparser import omniarg_parser
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils import file_io, parser, schema
 from utils.logger import (
     console_debug,
     console_error,
@@ -46,20 +23,26 @@ from utils.logger import (
     setup_logging_priority,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.specs import MachineSpecs, generate_machine_specs
-from utils.utils import (
+from utils.specs import (
+    MachineSpecs,
+    generate_machine_specs,
+)
+from utils.utils_common import (
+    build_metric_list,
     detect_rocprof,
     get_panel_alias,
     get_rank,
-    get_submodules,
     get_version,
     get_version_display,
+    load_panel_configs,
     parse_sets_yaml,
     replace_env,
     replace_rank,
     resolve_rocm_library_path,
     set_locale_encoding,
 )
+from utils.utils_exceptions import WorkloadCommandError
+from utils.utils_profile import get_submodules
 
 
 class RocProfCompute:
@@ -88,7 +71,15 @@ class RocProfCompute:
 
         self.sanitize()
 
-        if self.__mode != "analyze":
+        # Skip machine specs generation for general list options that don't need it
+        # or will generate it themselves
+        skip_machine_specs = (
+            getattr(self.__args, "specs", False)
+            or self.__args.list_metrics is not None
+            or self.__args.list_blocks is not None
+        )
+
+        if self.__mode != "analyze" and not skip_machine_specs:
             self.generate_machine_specs()
 
         self.handle_list_args()
@@ -365,10 +356,8 @@ class RocProfCompute:
             sys.exit(0)
         elif self.__args.list_metrics is not None:
             self.list_metrics()
-            sys.exit(0)
         elif self.__args.list_blocks is not None:
             self.list_blocks()
-            sys.exit(0)
 
         if self.__mode == "profile":
             if self.__args.list_sets:
@@ -379,19 +368,12 @@ class RocProfCompute:
     @demarcate
     def list_metrics(self) -> None:
         for_current_arch = getattr(self.__args, "list_available_metrics", False)
-
         arch = self.__mspec.gpu_arch if for_current_arch else self.__args.list_metrics
 
         if arch in self.__supported_archs.keys():
-            ac = schema.ArchConfig()
-            ac.panel_configs = file_io.load_panel_configs([
-                str(Path(self.__args.config_dir) / arch)
-            ])
-            sys_info = (
-                self.__mspec.get_class_members().iloc[0] if for_current_arch else None
-            )
-            parser.build_dfs(arch_configs=ac, filter_metrics=[], sys_info=sys_info)
-            for key, value in ac.metric_list.items():
+            sys_info = self.__mspec.get_class_members() if for_current_arch else None
+            metric_list = self._build_arch_metric_list(arch, sys_info)
+            for key, value in metric_list.items():
                 prefix = "\t" * min(key.count("."), 2)
                 print(f"{prefix}{key} -> {value}")
             sys.exit(0)
@@ -403,21 +385,26 @@ class RocProfCompute:
         arch = self.__args.list_blocks
 
         if arch in self.__supported_archs.keys():
-            ac = schema.ArchConfig()
-            ac.panel_configs = file_io.load_panel_configs([
-                str(Path(self.__args.config_dir) / arch)
-            ])
-            parser.build_dfs(arch_configs=ac, filter_metrics=[], sys_info=None)
-
+            metric_list = self._build_arch_metric_list(arch, sys_info=None)
             print(f"{'INDEX':<8} {'BLOCK ALIAS':<16} {'BLOCK NAME'}")
             panel_alias_dict = {value: key for key, value in get_panel_alias().items()}
-            for key, value in ac.metric_list.items():
+            for key, value in metric_list.items():
                 if key.count(".") > 0:
                     continue
                 print(f"{key:<8} {panel_alias_dict[key]:<16} {value}")
             sys.exit(0)
         else:
             console_error("Unsupported arch")
+
+    def _build_arch_metric_list(
+        self,
+        arch: str,
+        sys_info: Optional[dict[str, Any]],
+    ) -> dict[str, str]:
+        """Load panel configs for arch and build metric_list.
+        Returns the metric_list dictionary."""
+        panel_configs = load_panel_configs([str(Path(self.__args.config_dir) / arch)])
+        return build_metric_list(panel_configs, sys_info)
 
     @demarcate
     def list_sets(self) -> None:
@@ -514,7 +501,10 @@ class RocProfCompute:
 
         # instantiate desired profiler
         profiler = self.create_profiler()
-        profiler.sanitize()
+        try:
+            profiler.sanitize()
+        except WorkloadCommandError as e:
+            console_error(str(e))
 
         # Create workload directory if it does not exist
         p = Path(self.__args.path)
@@ -528,6 +518,7 @@ class RocProfCompute:
         setup_file_handler(self.__args.loglevel, self.__args.path)
 
         profiler.pre_processing()
+
         console_debug('starting "run_profiling" and about to start rocprof\'s workload')
 
         time_start_prof = time.time()
@@ -545,10 +536,14 @@ class RocProfCompute:
 
         post_duration = int(time_end_post - time_end_prof)
         console_debug(f'time taken for "post_processing" was {post_duration} seconds')
-        self.__soc[self.__mspec.gpu_arch].post_profiling()
 
     @demarcate
     def run_analysis(self) -> None:
+        # Lazy import file_io since its only used in analysis mode
+        # This will prevent analysis dependencies
+        # leakage into profile mode path
+        from utils import file_io
+
         self.print_graphic()
         console_log(f"Analysis mode = {self.__analyze_mode}")
 

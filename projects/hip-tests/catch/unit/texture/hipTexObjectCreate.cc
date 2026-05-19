@@ -1,27 +1,14 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 
 #define N 256
 
-TEST_CASE("Unit_TexObjectCreate_NullptrParams") {
+HIP_TEST_CASE(Unit_TexObjectCreate_NullptrParams) {
   CHECK_IMAGE_SUPPORT
   CTX_CREATE();
 
@@ -48,7 +35,7 @@ TEST_CASE("Unit_TexObjectCreate_NullptrParams") {
   CTX_DESTROY();
 }
 
-TEST_CASE("Unit_TexObjectCreate_TypeLinear") {
+HIP_TEST_CASE(Unit_TexObjectCreate_TypeLinear) {
   CHECK_IMAGE_SUPPORT
   CTX_CREATE();
 
@@ -86,7 +73,7 @@ TEST_CASE("Unit_TexObjectCreate_TypeLinear") {
   CTX_DESTROY();
 }
 
-TEST_CASE("Unit_TexObjectCreate_TypeLinear_IncompleteInit") {
+HIP_TEST_CASE(Unit_TexObjectCreate_TypeLinear_IncompleteInit) {
   CHECK_IMAGE_SUPPORT
   CTX_CREATE();
 
@@ -159,7 +146,7 @@ TEST_CASE("Unit_TexObjectCreate_TypeLinear_IncompleteInit") {
   CTX_DESTROY();
 }
 
-TEST_CASE("Unit_TexObjectCreate_TypeLinear_EdgeCases") {
+HIP_TEST_CASE(Unit_TexObjectCreate_TypeLinear_EdgeCases) {
   CHECK_IMAGE_SUPPORT
   CTX_CREATE();
 
@@ -200,7 +187,7 @@ TEST_CASE("Unit_TexObjectCreate_TypeLinear_EdgeCases") {
   CTX_DESTROY();
 }
 
-TEST_CASE("Unit_TexObjectCreate_TypeArray") {
+HIP_TEST_CASE(Unit_TexObjectCreate_TypeArray) {
   CHECK_IMAGE_SUPPORT
   CTX_CREATE();
 
@@ -227,7 +214,7 @@ TEST_CASE("Unit_TexObjectCreate_TypeArray") {
   CTX_DESTROY();
 }
 
-TEST_CASE("Unit_TexObjectCreate_TypeArray_NullptrArray") {
+HIP_TEST_CASE(Unit_TexObjectCreate_TypeArray_NullptrArray) {
   CHECK_IMAGE_SUPPORT
   CTX_CREATE();
 
@@ -245,7 +232,7 @@ TEST_CASE("Unit_TexObjectCreate_TypeArray_NullptrArray") {
 }
 
 #if 0
-TEST_CASE("Unit_TexObjectCreate_TypeMipmapped") {
+HIP_TEST_CASE(Unit_TexObjectCreate_TypeMipmapped) {
   CHECK_IMAGE_SUPPORT
 
   hipMipmappedArray_t mipmapped_array;
@@ -272,7 +259,7 @@ TEST_CASE("Unit_TexObjectCreate_TypeMipmapped") {
   HIP_CHECK(hipFreeMipmappedArray(mipmapped_array));
 }
 
-TEST_CASE("Unit_TexObjectCreate_TypeMipmaped_IncompleteInit") {
+HIP_TEST_CASE(Unit_TexObjectCreate_TypeMipmaped_IncompleteInit) {
   CHECK_IMAGE_SUPPORT
   CTX_CREATE();
 
@@ -306,7 +293,7 @@ TEST_CASE("Unit_TexObjectCreate_TypeMipmaped_IncompleteInit") {
 }
 #endif
 
-TEST_CASE("Unit_TexObjectCreate_TypePitch2D") {
+HIP_TEST_CASE(Unit_TexObjectCreate_TypePitch2D) {
   CHECK_IMAGE_SUPPORT
   CTX_CREATE();
 
@@ -349,7 +336,7 @@ TEST_CASE("Unit_TexObjectCreate_TypePitch2D") {
   CTX_DESTROY();
 }
 
-TEST_CASE("Unit_TexObjectCreate_TypePitch2D_IncompleteInit") {
+HIP_TEST_CASE(Unit_TexObjectCreate_TypePitch2D_IncompleteInit) {
   CHECK_IMAGE_SUPPORT
   CTX_CREATE();
 
@@ -415,7 +402,7 @@ TEST_CASE("Unit_TexObjectCreate_TypePitch2D_IncompleteInit") {
   CTX_DESTROY();
 }
 
-TEST_CASE("Unit_TexObjectCreate_TypePitch2D_EdgeCases") {
+HIP_TEST_CASE(Unit_TexObjectCreate_TypePitch2D_EdgeCases) {
   CHECK_IMAGE_SUPPORT
   CTX_CREATE();
 

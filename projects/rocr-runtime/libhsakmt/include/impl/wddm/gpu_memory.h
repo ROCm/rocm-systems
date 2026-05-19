@@ -47,7 +47,7 @@
 #include "util/utils.h"
 #include "impl/wddm/types.h"
 #include "impl/wddm/thunks.h"
-#include "wkmi/wkmi.h"
+#include "wkmi.h"
 
 namespace wsl {
 namespace thunk {

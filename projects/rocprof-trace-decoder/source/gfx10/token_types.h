@@ -1,4 +1,7 @@
+#pragma once
+
 #include <cstdint>
+#include "trace_decoder_types.h"
 
 inline uint64_t get_sa_wgp(uint64_t sa, uint64_t wgp)
 {
@@ -38,6 +41,10 @@ enum RdnaType
     EXEC_POPCOUNT3,
     NEW_PC_GFX12,
     LAST_GFX12_TYPE = NEW_PC_GFX12,
+    // New MI400
+    LDS_CONFIG,
+    MEDIUM_TIME,
+    LAST_MI400_TYPE = MEDIUM_TIME,
     NAVI_TYPE_LAST
 };
 

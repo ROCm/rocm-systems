@@ -30,14 +30,14 @@
 #include "json_util.h"
 #include "ras_decode_constants.h"
 
-int decode_afid(const uint64_t *register_array, size_t array_len, uint32_t flag,
+int decode_afid(const uint64_t* register_array, size_t array_len, uint32_t flag,
                 uint16_t hw_revision, uint16_t register_context_type) {
   if (!register_array) {
     return -1;
   }
 
   // Use decode_error_info to get the JSON result
-  JsonValue *json_result =
+  JsonValue* json_result =
       decode_error_info(register_array, array_len, flag, hw_revision, register_context_type);
   if (!json_result) {
     return -1;
@@ -50,7 +50,7 @@ int decode_afid(const uint64_t *register_array, size_t array_len, uint32_t flag,
   return afid;
 }
 
-JsonValue *decode_error_info(const uint64_t *register_array, size_t array_len, uint32_t flag,
+JsonValue* decode_error_info(const uint64_t* register_array, size_t array_len, uint32_t flag,
                              uint16_t hw_revision, uint16_t register_context_type) {
   if (!register_array) {
     return NULL;
@@ -90,21 +90,21 @@ JsonValue *decode_error_info(const uint64_t *register_array, size_t array_len, u
   }
 }
 
-int decode_error_info_afid(JsonValue *error_json) {
+int decode_error_info_afid(JsonValue* error_json) {
   if (!error_json || error_json->type != JSON_OBJECT) {
     return -1;  // Invalid AFID for null or invalid JSON
   }
 
   // Check if this is MCA error
-  JsonValue *category_value = json_object_get(error_json, "error_category");
-  JsonValue *type_value = json_object_get(error_json, "error_type");
-  JsonValue *severity_value = json_object_get(error_json, "severity");
+  JsonValue* category_value = json_object_get(error_json, "error_category");
+  JsonValue* type_value = json_object_get(error_json, "error_type");
+  JsonValue* severity_value = json_object_get(error_json, "severity");
 
   if (category_value && type_value && severity_value && category_value->type == JSON_STRING &&
       type_value->type == JSON_STRING && severity_value->type == JSON_STRING) {
-    const char *error_category = category_value->data.string;
-    const char *error_type = type_value->data.string;
-    const char *error_severity = severity_value->data.string;
+    const char* error_category = category_value->data.string;
+    const char* error_type = type_value->data.string;
+    const char* error_severity = severity_value->data.string;
 
     // Check for the specific case: HBM Errors + Bad Page Retirement Threshold + Fatal
     if (strcmp(error_category, RAS_DECODE_CATEGORY_HBM_ERRORS) == 0 &&
@@ -116,11 +116,11 @@ int decode_error_info_afid(JsonValue *error_json) {
 
     // For other cases, we need to determine the service_error_type based on the logic
     // from get_service_error_type function
-    const char *service_error = NULL;
+    const char* service_error = NULL;
 
     // Extract bank if needed for service error type determination
-    JsonValue *bank_value = json_object_get(error_json, "bank");
-    const char *error_bank =
+    JsonValue* bank_value = json_object_get(error_json, "bank");
+    const char* error_bank =
         (bank_value && bank_value->type == JSON_STRING) ? bank_value->data.string : "";
 
     if (strcmp(error_type, RAS_DECODE_ERROR_TYPE_BAD_PAGE_RETIREMENT_THRESHOLD) == 0) {
@@ -160,8 +160,8 @@ int decode_error_info_afid(JsonValue *error_json) {
 
   // Check if this is a boot error
   // Find the first msg<i> key to get the error_type
-  JsonPair *current_pair = error_json->data.object;
-  JsonValue *first_msg = NULL;
+  JsonPair* current_pair = error_json->data.object;
+  JsonValue* first_msg = NULL;
   int lowest_msg_index = INT_MAX;
 
   while (current_pair) {
@@ -178,9 +178,9 @@ int decode_error_info_afid(JsonValue *error_json) {
 
   if (first_msg && first_msg->type == JSON_OBJECT) {
     // This is a boot error - extract error_type from the first message
-    JsonValue *boot_error_type = json_object_get(first_msg, "error_type");
+    JsonValue* boot_error_type = json_object_get(first_msg, "error_type");
     if (boot_error_type && boot_error_type->type == JSON_STRING) {
-      const char *service_error = NULL;
+      const char* service_error = NULL;
       service_error = boot_error_type->data.string;
 
       // For boot errors, always use Boot-Time Errors category and Fail-to-init severity

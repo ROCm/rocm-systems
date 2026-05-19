@@ -1,5 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier:  MIT
+# SPDX-License-Identifier: MIT
 
 from __future__ import annotations
 import re
@@ -39,16 +39,27 @@ class GPUInfo:
         return False
 
     @property
+    def _is_gfx1250(self) -> bool:
+        """Check if any detected GPU uses the gfx1250 architecture."""
+        return "gfx1250" in self.architectures
+
+    @property
     def rocm_events_for_test(self) -> str:
         """Get appropriate ROCm events for testing based on architecture."""
+        if self._is_gfx1250:
+            return "GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU,TX_VCA_VCA_BUSY"
+
         mi300_or_later = self._is_mi300_or_later
         if mi300_or_later:
-            return "GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU,TA_TA_BUSY:device=0"
+            return "GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU,TA_TA_BUSY"
         return "SQ_WAVES"
 
     @property
     def counter_names(self) -> list[str]:
         """Get counter names for validation based on architecture"""
+        if self._is_gfx1250:
+            return ["GRBM_COUNT", "SQ_WAVES", "SQ_INSTS_VALU", "TX_VCA_VCA_BUSY"]
+
         mi300_or_later = self._is_mi300_or_later
         if mi300_or_later:
             return ["GRBM_COUNT", "SQ_WAVES", "SQ_INSTS_VALU", "TA_TA_BUSY"]
@@ -56,8 +67,13 @@ class GPUInfo:
 
     @property
     def expected_counter_files(self) -> list[str]:
-        """Get expected counter output files based on architecture."""
-        return [f"rocprof-device-0-{name}.txt" for name in self.counter_names]
+        """Get expected counter output file patterns based on architecture.
+
+        Returns glob patterns that match any device ID (0-9), since the device
+        number in the filename depends on device_type_index which varies by
+        GPU topology.
+        """
+        return [f"rocprof-device-[0-9]-{name}.txt" for name in self.counter_names]
 
 
 def get_rocminfo(rocm_path: Optional[Path] = None) -> Optional[Path]:
@@ -85,8 +101,6 @@ def detect_gpu(rocm_path: Optional[Path] = None) -> GPUInfo:
 
     Uses rocminfo to get the list of GPU architectures.
     Regex avoids matching "gfxX-X-generic" which may appear.
-
-    Disabled if ROCPROFSYS_USE_ROCM=OFF
     """
     categories: set[str] = set()
     architectures: list[str] = []
@@ -97,7 +111,7 @@ def detect_gpu(rocm_path: Optional[Path] = None) -> GPUInfo:
     rocminfo = None
     if rocm_path:
         rocminfo = rocm_path / "bin" / "rocminfo"
-    if not rocminfo and os.environ.get("ROCPROFSYS_USE_ROCM") != "OFF":
+    if not rocminfo:
         rocminfo = shutil.which("rocminfo")
 
     if rocminfo:
@@ -382,23 +396,31 @@ def get_target_gpu_arch(rocm_path: Path, target_path: Path) -> list[str]:
 
 @lru_cache(maxsize=1)
 def get_xnack_support(rocm_path: Optional[Path] = None) -> bool:
-    """Check if a current GPU supports XNACK.
+    """Check whether the current GPU is XNACK-capable.
 
-    Runs rocminfo and checks if 'xnack' appears in the output.
+    Run ``rocminfo`` with ``HSA_XNACK=1`` injected into the subprocess
+    environment and return True only if the output reports ``xnack+``.
+
+    This keeps the check independent of the caller's shell environment:
+    ``xnack-`` remains unsupported for test gating, and GPUs with no
+    XNACK qualifier also return False.
     """
     rocminfo = get_rocminfo(rocm_path)
     if not rocminfo:
         return False
 
     try:
+        env = os.environ.copy()
+        env["HSA_XNACK"] = "1"
         result = subprocess.run(
             [str(rocminfo)],
             capture_output=True,
             text=True,
             timeout=30,
+            env=env,
         )
         if result.returncode == 0:
-            return "xnack" in result.stdout
+            return "xnack+" in result.stdout
     except (subprocess.TimeoutExpired, OSError):
         pass
 

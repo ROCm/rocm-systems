@@ -99,7 +99,9 @@ if(BUILD_INTEGRATION_TESTS)
                    WORKING_DIRECTORY
                    ${TEST_BIN_DIR}
                    FIXTURES_SETUP
-                   unpack_data)
+                   unpack_data
+                   DEPENDS
+                   ${DATA}_execute)
 
     set(FAIL_EXP "\\.h|\\.cpp|arning|Error|bort|egmentation|xception")
 
@@ -186,7 +188,9 @@ if(BUILD_INTEGRATION_TESTS)
                            WORKING_DIRECTORY
                            ${TEST_BIN_DIR}
                            FIXTURES_REQUIRED
-                           unpack_data)
+                           unpack_data
+                           DEPENDS
+                           ${DATA}_execute)
         endif()
     endforeach(DATA)
 endif()

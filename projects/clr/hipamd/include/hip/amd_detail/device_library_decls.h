@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2015 - 2023 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
  *  @file  amd_detail/device_library_decls.h
@@ -115,13 +99,6 @@ extern "C" __device__ __hip_uint64_t __ockl_fprintf_append_string_n(__hip_uint64
                                                                     const char* data,
                                                                     __hip_uint64_t length,
                                                                     __hip_uint32_t is_last);
-
-// Introduce local address space
-#define __local __attribute__((address_space(3)))
-
-#ifdef __HIP_DEVICE_COMPILE__
-__device__ inline static __local void* __to_local(unsigned x) { return (__local void*)x; }
-#endif  //__HIP_DEVICE_COMPILE__
 
 // Using hip.amdgcn.bc - sync threads
 #define __CLK_LOCAL_MEM_FENCE  0x01

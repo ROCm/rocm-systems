@@ -1,10 +1,26 @@
 ---
 library:
-  Unit_library_negative: *level_2
-  Unit_hip_library_load_co: *level_2
-  Unit_hipKernelGetParamInfo_Negative: *level_2
-  Unit_hip_library_load_rtc: *level_2
-  Unit_hipKernelGetAttribute_Positive_Basic: *level_2
-  Unit_hipKernelGetAttribute_Negative_Parameters: *level_2
-  Unit_hipKernelSetAttribute_Negative_Parameters: *level_2
-  Unit_hipKernelGetFunction_Negative_Parameters: *level_2
+  Unit_library_negative:
+    <<: *level_2
+    tags: [module]
+  Unit_hip_library_load_co:
+    <<: *level_2
+    tags: [module]
+  Unit_hipKernelGetParamInfo_Negative:
+    <<: *level_2
+    tags: [module]
+  Unit_hip_library_load_rtc:
+    <<: *level_2
+    tags: [module]
+  Unit_hipKernelGetAttribute_Positive_Basic:
+    <<: *level_2
+    tags: [module]
+  Unit_hipKernelGetAttribute_Negative_Parameters:
+    <<: *level_2
+    tags: [module]
+  Unit_hipKernelSetAttribute_Negative_Parameters:
+    <<: *level_2
+    tags: [module]
+  Unit_hipKernelGetFunction_Negative_Parameters:
+    <<: *level_2
+    tags: [module]

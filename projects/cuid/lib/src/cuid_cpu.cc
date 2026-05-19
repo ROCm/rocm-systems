@@ -204,8 +204,8 @@ amdcuid_status_t CuidCpu::discover(std::vector<DevicePtr> &cpus) {
     
     // Create CPU device for each logical processor
     for (const auto& proc_info : proc_cpus) {
-        amdcuid_cpu_info info;
-        std::memset(&info, 0, sizeof(info));
+        amdcuid_cpu_info info{};
+        std::memset(&info.header, 0, sizeof(info.header));
         
         // Set device type
         info.header.device_type = AMDCUID_DEVICE_TYPE_CPU;
@@ -232,6 +232,10 @@ amdcuid_status_t CuidCpu::discover(std::vector<DevicePtr> &cpus) {
         // Core and physical_id from /proc/cpuinfo
         info.header.fields.cpu.core = static_cast<uint16_t>(proc_info.core_id);
         info.header.fields.cpu.physical_id = static_cast<uint16_t>(proc_info.physical_id);
+
+        // Store the sysfs device path using the logical processor number
+        // (not the APIC ID, which may differ on SMT systems)
+        info.device_node = "/sys/devices/system/cpu/cpu" + std::to_string(proc_info.processor);
         
         auto cpu = std::make_shared<CuidCpu>(info);
         cpus.emplace_back(cpu);
@@ -267,7 +271,9 @@ amdcuid_status_t CuidCpu::discover_single(amdcuid_cpu_info* cpu_info, const std:
         return AMDCUID_STATUS_DEVICE_NOT_FOUND;
     }
 
-    std::memset(cpu_info, 0, sizeof(amdcuid_cpu_info));
+    // Zero only the POD header; preserve std::string device_node
+    std::memset(&cpu_info->header, 0, sizeof(cpu_info->header));
+    cpu_info->device_node.clear();
     cpu_info->header.device_type = AMDCUID_DEVICE_TYPE_CPU;
 
     // Get CPU info from CPUID instruction
@@ -294,6 +300,9 @@ amdcuid_status_t CuidCpu::discover_single(amdcuid_cpu_info* cpu_info, const std:
         int processor_id = std::stoi(device_path.substr(num_start));
         cpu_info->header.fields.cpu.unit_id = static_cast<uint16_t>(processor_id);
     }
+
+    // Store the device path for later lookup
+    cpu_info->device_node = device_path;
 
     return AMDCUID_STATUS_SUCCESS;
 }
@@ -398,6 +407,21 @@ amdcuid_status_t CuidCpu::get_primary_cuid(amdcuid_primary_id& id) const {
     std::vector<CuidFileEntry> entries = primary_file.get_entries();
 
     CuidFileEntry entry;
+
+    // First, try lookup by device_node which is unique per logical CPU
+    // (package_core_id is not unique on SMT systems where sibling threads
+    // share the same physical_id:core_id)
+    if (!m_info.device_node.empty()) {
+        amdcuid_status_t status = primary_file.find_by_device_node(m_info.device_node, entry);
+        if (status == AMDCUID_STATUS_SUCCESS) {
+            id.UUIDv8_representation = entry.primary_cuid;
+            CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
+            return AMDCUID_STATUS_SUCCESS;
+        }
+    }
+
+    // Fallback: try lookup by package_core_id for backward compatibility
+    // with files that don't have device_node for CPU entries
     std::string package_core_id = std::to_string(m_info.header.fields.cpu.physical_id) + 
                                   ":" + std::to_string(m_info.header.fields.cpu.core);
     amdcuid_status_t status = primary_file.find_by_package_core_id(package_core_id, entry);
@@ -477,7 +501,12 @@ amdcuid_status_t CuidCpu::get_physical_id(uint16_t& physical_id) const {
 }
 
 amdcuid_status_t CuidCpu::get_device_path(std::string& path) const {
-    // Construct device path based on unit_id (APIC ID)
+    // Use stored device_node (set from processor number during discovery or file load)
+    if (!m_info.device_node.empty()) {
+        path = m_info.device_node;
+        return AMDCUID_STATUS_SUCCESS;
+    }
+    // Fallback: construct from unit_id (APIC ID) for backward compatibility
     path = "/sys/devices/system/cpu/cpu" + std::to_string(m_info.header.fields.cpu.unit_id);
     return AMDCUID_STATUS_SUCCESS;
 }

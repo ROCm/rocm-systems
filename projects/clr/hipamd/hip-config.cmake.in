@@ -1,22 +1,6 @@
-# Copyright (c) 2020 - 2021 Advanced Micro Devices, Inc. All Rights Reserved.
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 
 @PACKAGE_INIT@
 include(CheckCXXCompilerFlag)
@@ -96,6 +80,18 @@ if("@HIP_INSTALLS_HIPCC@")
     set_and_check(hip_HIPCC_EXECUTABLE "${hip_BIN_INSTALL_DIR}/hipcc")
     set_and_check(hip_HIPCONFIG_EXECUTABLE "${hip_BIN_INSTALL_DIR}/hipconfig")
   endif()
+else()
+  # Fallback: find hipcc relative to this config (e.g. when /opt/rocm/bin did not exist at build time).
+  # hip-config.cmake is in <prefix>/lib/cmake/hip/, so bin is ../../bin
+  # hip-config.cmake is in <prefix>/lib/cmake/hip/, so bin is at <prefix>/bin
+  set(_hip_prefix "${HIP_PACKAGE_PREFIX_DIR}")
+  find_program(hip_HIPCC_EXECUTABLE hipcc PATHS "${_hip_prefix}/bin" NO_DEFAULT_PATH)
+  if(hip_HIPCC_EXECUTABLE)
+    message(STATUS "HIP: Using hipcc from relative path: ${hip_HIPCC_EXECUTABLE}")
+  endif()
+  find_program(hip_HIPCONFIG_EXECUTABLE hipconfig PATHS "${_hip_prefix}/bin" NO_DEFAULT_PATH)
+  unset(_hip_prefix)
+  unset(_hip_config_dir)
 endif()
 
 if(NOT DEFINED HIP_PLATFORM)
@@ -159,7 +155,5 @@ set(HIP_LIB_INSTALL_DIR ${hip_LIB_INSTALL_DIR})
 set(HIP_BIN_INSTALL_DIR ${hip_BIN_INSTALL_DIR})
 set(HIP_LIBRARIES ${hip_LIBRARIES})
 set(HIP_LIBRARY ${hip_LIBRARY})
-if("@HIP_INSTALLS_HIPCC@")
-  set(HIP_HIPCC_EXECUTABLE ${hip_HIPCC_EXECUTABLE})
-  set(HIP_HIPCONFIG_EXECUTABLE ${hip_HIPCONFIG_EXECUTABLE})
-endif()
+set(HIP_HIPCC_EXECUTABLE ${hip_HIPCC_EXECUTABLE})
+set(HIP_HIPCONFIG_EXECUTABLE ${hip_HIPCONFIG_EXECUTABLE})

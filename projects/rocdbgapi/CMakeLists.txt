@@ -57,13 +57,12 @@
 # libbacktrace (optional)
 # GIT (optional)
 # Doxygen (optional)
-# hsa-runtime64 headers
 # Threads (on request, see THE_ROCK_BUILD)
 
 
 cmake_minimum_required(VERSION 3.8)
 
-project(amd-dbgapi VERSION 0.78.0)
+project(amd-dbgapi VERSION 0.80.0)
 
 include(CheckIncludeFile)
 include(CheckIncludeFiles)
@@ -120,6 +119,15 @@ else()
   endif()
 endif()
 
+# Define this before amd-dbgapi.h is generated.  amd-dbgapi.h.in uses
+# this to define the right export/import decorators in amd-dbgapi.h
+# for clients to use.
+if(NOT BUILD_SHARED_LIBS)
+  set(AMD_DBGAPI_STATIC_LIB "1")
+else()
+  set(AMD_DBGAPI_STATIC_LIB "0")
+endif()
+
 configure_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/include/amd-dbgapi.h.in
   ${CMAKE_CURRENT_BINARY_DIR}/include/amd-dbgapi/amd-dbgapi.h @ONLY)
@@ -166,8 +174,17 @@ set_target_properties(amd-dbgapi PROPERTIES
   VERSION ${PROJECT_VERSION}
   SOVERSION ${PROJECT_VERSION_MAJOR})
 
-target_compile_options(amd-dbgapi PRIVATE
-  -fno-rtti -Werror -Wall -Wextra -Wshadow -Wno-attributes) #-pedantic)
+if(MSVC)
+  # CMake adds /GR to CMAKE_CXX_FLAGS, remove it to avoid:
+  #  cl : Command line warning D9025 : overriding '/GR' with '/GR-'
+  string(REPLACE "/GR" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+
+  target_compile_options(amd-dbgapi PRIVATE
+    /GR- /permissive-)
+else()
+  target_compile_options(amd-dbgapi PRIVATE
+    -fno-rtti -Werror -Wall -Wextra -Wshadow -Wno-attributes -Wconversion) #-pedantic)
+endif()
 
 target_compile_definitions(amd-dbgapi
   PRIVATE __STDC_LIMIT_MACROS __STDC_CONSTANT_MACROS __STDC_FORMAT_MACROS)
@@ -200,26 +217,30 @@ if(libbacktrace_FOUND)
   target_link_libraries(amd-dbgapi PRIVATE libbacktrace::libbacktrace)
 else()
   message(STATUS "[libbacktrace check] Could not find libbacktrace through find_package.")
-  message(STATUS "[libbacktrace check] Trying compiler fallback.")
+  if(NOT MSVC)
+    message(STATUS "[libbacktrace check] Trying compiler fallback.")
 
-  message(STATUS "[libbacktrace check] Executing command: ${CMAKE_CXX_COMPILER} ${CMAKE_CXX_FLAGS} --print-file-name libbacktrace.a")
+    message(STATUS "[libbacktrace check] Executing command: ${CMAKE_CXX_COMPILER} ${CMAKE_CXX_FLAGS} --print-file-name libbacktrace.a")
 
-  # See if the compiler knows where libbacktrace.a is. It is worth mentioning
-  # that both gcc and llvm have the same behavior when --print-file-name is used
-  # but the compiler cannot locate the file anywhere. They output the filename
-  # passed as argument to --print-file-name unchanged.
-  #
-  # This makes it so the libbacktrace_check below will always pass. Though
-  # incorrect, this is somewhat harmless as we will call find_path and
-  # find_library later and we could end up finding includes and library
-  # depending on the system environment variables.
-  execute_process(
-    COMMAND ${CMAKE_CXX_COMPILER} ${CMAKE_CXX_FLAGS} --print-file-name libbacktrace.a
-    RESULT_VARIABLE libbacktrace_check
-    OUTPUT_VARIABLE libbacktrace_path
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-  )
-  message(STATUS "[libbacktrace check] Command output: ${libbacktrace_path}")
+    # See if the compiler knows where libbacktrace.a is. It is worth mentioning
+    # that both gcc and llvm have the same behavior when --print-file-name is
+    # used but the compiler cannot locate the file anywhere. They output the
+    # filename passed as argument to --print-file-name unchanged.
+    #
+    # This makes it so the libbacktrace_check below will always pass. Though
+    # incorrect, this is somewhat harmless as we will call find_path and
+    # find_library later and we could end up finding includes and library
+    # depending on the system environment variables.
+    execute_process(
+      COMMAND ${CMAKE_CXX_COMPILER} ${CMAKE_CXX_FLAGS} --print-file-name libbacktrace.a
+      RESULT_VARIABLE libbacktrace_check
+      OUTPUT_VARIABLE libbacktrace_path
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    message(STATUS "[libbacktrace check] Command output: ${libbacktrace_path}")
+  else()
+    set(libbacktrace_check 1)
+  endif()
 
   if(${libbacktrace_check} EQUAL 0)
     get_filename_component(BACKTRACE_PREFIX ${libbacktrace_path} DIRECTORY)
@@ -285,19 +306,18 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
 
   target_include_directories(amd-dbgapi PRIVATE
     src/windows/imported
-    ${D3DKMT_INCLUDE_PATH}
+    ${D3DKMT_INCLUDE_PATH})
+
+  # Including libdxg raises some warnings (unknown pragmas) as well as
+  # "X too small to hold all values of Y".  The latter warning cannot
+  # be silenced, so tell the compiler to treat the libdxg directory as
+  # a system headers include path, so that warnings are disabled for
+  # that directory's headers.
+  target_include_directories(amd-dbgapi SYSTEM PRIVATE
     third_party/libdxg/include)
 
   target_compile_definitions(amd-dbgapi
     PRIVATE D3DKMDT_SPECIAL_MULTIPLATFORM_TOOL)
-
-  # Including libdxg raises some warnings (unknown pargmas) as well us
-  # "X too small to hold all values of Y".  The latter warning cannot be
-  # silenced, se we need to disable -Werror for this file.
-  set_source_files_properties(
-    src/os_driver_kmd.cpp
-    PROPERTIES
-      COMPILE_OPTIONS "-Wno-error;-Wno-unknown-pragmas")
 else()
   message(FATAL_ERROR "Platform ${CMAKE_SYSTEM_NAME} is not supported")
 endif()
@@ -400,8 +420,7 @@ if(DEFINED ENV{ROCM_BUILD_ID})
   # ROCM_BUILD_ID is set by the ROCm-CI build environment.
   set(build_info $ENV{ROCM_BUILD_ID})
 else()
-  string(TIMESTAMP NOW "%Y%m%dT%H%M%S")
-  set(build_info developer-build-${NOW})
+  set(build_info developer-build)
 
   if(DEFINED ENV{USER})
     set(build_info ${build_info}-$ENV{USER})
@@ -430,39 +449,15 @@ target_link_libraries(amd-dbgapi PRIVATE amd_comgr ${CMAKE_DL_LIBS})
 set_source_files_properties(src/versioning.cpp src/initialization.cpp PROPERTIES
   COMPILE_DEFINITIONS "AMD_DBGAPI_VERSION_PATCH=${PROJECT_VERSION_PATCH};AMD_DBGAPI_BUILD_INFO=\"${PROJECT_VERSION}-${build_info}\"")
 
-# We are using the HSA runtime headers, but not the runtime library.
-# Attempt to locate the HSA runtime headers, either via the
-# hsa-runtime64 package or through a user-specified path.
-
-set(HSA_RUNTIME_INCLUDE_DIRECTORIES "" CACHE PATH "Path to the HSA runtime headers")
-
-if ("${HSA_RUNTIME_INCLUDE_DIRECTORIES}" STREQUAL "" )
-  find_package(hsa-runtime64 CONFIG PATHS "/opt/rocm")
-  if(hsa-runtime64_FOUND)
-    get_target_property(HSA_RUNTIME_INCLUDE_DIRECTORIES hsa-runtime64::hsa-runtime64 INTERFACE_INCLUDE_DIRECTORIES)
-  endif()
-endif()
-
-if (HSA_RUNTIME_INCLUDE_DIRECTORIES)
-  # For check_include_headers.
-  set(CMAKE_REQUIRED_INCLUDES APPEND "${HSA_RUNTIME_INCLUDE_DIRECTORIES}")
-endif()
-
-check_include_files("hsa/hsa.h;hsa/amd_hsa_queue.h" HSA_HEADERS_FOUND)
-
-if (NOT HSA_HEADERS_FOUND)
-  message(FATAL_ERROR "Cannot find required HSA header files")
-endif()
-
 target_include_directories(amd-dbgapi
-  PRIVATE
-    ${HSA_RUNTIME_INCLUDE_DIRECTORIES}
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include/amd-dbgapi>
     $<INSTALL_INTERFACE:include>)
 
-target_link_libraries(amd-dbgapi
-  PRIVATE -Wl,--version-script=${CMAKE_CURRENT_BINARY_DIR}/src/exportmap -Wl,--no-undefined)
+if(NOT WIN32)
+  target_link_libraries(amd-dbgapi
+    PRIVATE -Wl,--version-script=${CMAKE_CURRENT_BINARY_DIR}/src/exportmap -Wl,--no-undefined)
+endif()
 
 set(AMD_DBGAPI_CONFIG_NAME amd-dbgapi-config.cmake)
 set(AMD_DBGAPI_TARGETS_NAME amd-dbgapi-targets.cmake)

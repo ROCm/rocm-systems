@@ -56,6 +56,26 @@ def pytest_addoption(parser):
         default=None,
         help="Target CU for perfcounter validation.",
     )
+    parser.addoption(
+        "--att-other-simd-out-dir",
+        action="store",
+        help="Path to Output directory.",
+    )
+    parser.addoption(
+        "--att-shaderdata-out-dir",
+        action="store",
+        help="Path to Output directory.",
+    )
+    parser.addoption(
+        "--att-multi-gpu-out-dir",
+        action="store",
+        help="Path to multi-GPU ATT output directory.",
+    )
+    parser.addoption(
+        "--att-marker-trace-out-dir",
+        action="store",
+        help="Path to ATT marker trace output directory.",
+    )
 
 
 @pytest.fixture
@@ -86,3 +106,35 @@ def code_object_file_path(request):
                 code_object_memory.append(filename)
     code_object_files["hsa_memory_load"] = code_object_memory
     return code_object_files
+
+
+@pytest.fixture
+def att_other_simd_out_dir_path(request):
+    output_dir_path = request.config.getoption("--att-other-simd-out-dir")
+    if not output_dir_path:
+        pytest.skip("--att-other-simd-out-dir not provided")
+    return output_dir_path
+
+
+@pytest.fixture
+def att_shaderdata_out_dir_path(request):
+    output_dir_path = request.config.getoption("--att-shaderdata-out-dir")
+    if not output_dir_path:
+        pytest.skip("--att-shaderdata-out-dir not provided")
+    return output_dir_path
+
+
+@pytest.fixture
+def att_multi_gpu_out_dir_path(request):
+    output_dir_path = request.config.getoption("--att-multi-gpu-out-dir")
+    if not output_dir_path:
+        pytest.skip("--att-multi-gpu-out-dir not provided")
+    return output_dir_path
+
+
+@pytest.fixture
+def att_marker_trace_out_dir_path(request):
+    output_dir_path = request.config.getoption("--att-marker-trace-out-dir")
+    if not output_dir_path:
+        pytest.skip("--att-marker-trace-out-dir not provided")
+    return output_dir_path

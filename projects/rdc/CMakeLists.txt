@@ -437,7 +437,7 @@ install(
 )
 
 #Identify between SLES and Centos for setting symlink for rdc.service
-#SLES need serice file in /usr/lib/systemd/system/rdc.service
+#SLES need service file in /usr/lib/systemd/system/rdc.service
 #CENTOS/RHEL Require file in /lib/systemd/system/rdc.service
 file(STRINGS /etc/os-release LINUX_DISTRO LIMIT_COUNT 1 REGEX "NAME=")
 message("Using Linux Distro: ${LINUX_DISTRO}")
@@ -546,8 +546,7 @@ set(CPACK_RPM_PACKAGE_REQUIRES "amd-smi-lib")
 # rdc-tests need rdc
 set(CPACK_RPM_TESTS_PACKAGE_REQUIRES "${CPACK_PACKAGE_NAME}")
 list(
-    APPEND
-    CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
+    APPEND CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
     "/lib"
     "/usr/sbin"
     "/lib/systemd"

@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "memcpy_performance_common.hh"
 
@@ -50,9 +37,6 @@ static void RunBenchmark(size_t width, size_t height, hipMemcpyKind kind,
     // hipMemcpyDeviceToDevice
     int src_device = std::get<0>(GetDeviceIds(enable_peer_access));
     int dst_device = std::get<1>(GetDeviceIds(enable_peer_access));
-    if (src_device == -1 && dst_device == -1) {
-      return;
-    }
 
     LinearAllocGuard2D<int> device_allocation(width, height);
     HIP_CHECK(hipSetDevice(dst_device));
@@ -78,7 +62,7 @@ static void RunBenchmark(size_t width, size_t height, hipMemcpyKind kind,
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Performance_hipMemcpy2DFromArray_DeviceToHost) {
+HIP_TEST_CASE(Performance_hipMemcpy2DFromArray_DeviceToHost) {
   CHECK_IMAGE_SUPPORT
 
   const auto width = GENERATE(4_KB, 8_KB, 16_KB);
@@ -100,7 +84,7 @@ TEST_CASE(Performance_hipMemcpy2DFromArray_DeviceToHost) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Performance_hipMemcpy2DFromArray_DeviceToDevice_DisablePeerAccess) {
+HIP_TEST_CASE(Performance_hipMemcpy2DFromArray_DeviceToDevice_DisablePeerAccess) {
   CHECK_IMAGE_SUPPORT
 
   const auto width = GENERATE(4_KB, 8_KB, 16_KB);
@@ -124,12 +108,11 @@ TEST_CASE(Performance_hipMemcpy2DFromArray_DeviceToDevice_DisablePeerAccess) {
  *  - Device supports Peer-to-Peer access
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Performance_hipMemcpy2DFromArray_DeviceToDevice_EnablePeerAccess) {
+HIP_TEST_CASE(Performance_hipMemcpy2DFromArray_DeviceToDevice_EnablePeerAccess) {
   CHECK_IMAGE_SUPPORT
 
   if (HipTest::getDeviceCount() < 2) {
-    HipTest::HIP_SKIP_TEST("This test requires 2 GPUs. Skipping.");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
   const auto width = GENERATE(4_KB, 8_KB, 16_KB);
   RunBenchmark(width, 32, hipMemcpyDeviceToDevice, true);

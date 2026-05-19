@@ -9,7 +9,7 @@
 #
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
-#``
+# ``
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
 # FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
@@ -31,14 +31,15 @@ from .amdsmi_interface import amdsmi_get_socket_handles
 from .amdsmi_interface import amdsmi_get_socket_info
 from .amdsmi_interface import amdsmi_get_processor_count_from_handles
 from .amdsmi_interface import amdsmi_get_processor_handles_by_type
+from .amdsmi_interface import amdsmi_get_processor_info
 from .amdsmi_interface import amdsmi_get_node_handle
 from .amdsmi_interface import amdsmi_get_npm_info
 
 # ESMI Dependent Functions
 try:
-    from .amdsmi_interface import amdsmi_get_cpusocket_handles
+    from .amdsmi_interface import amdsmi_get_cpu_handles
+    from .amdsmi_interface import amdsmi_get_cpusocket_handles  # Deprecate in 8.0
     from .amdsmi_interface import amdsmi_get_cpucore_handles
-    from .amdsmi_interface import amdsmi_get_processor_info
     from .amdsmi_interface import amdsmi_get_cpu_hsmp_proto_ver
     from .amdsmi_interface import amdsmi_get_cpu_smu_fw_version
     from .amdsmi_interface import amdsmi_get_cpu_core_energy
@@ -83,7 +84,6 @@ try:
     from .amdsmi_interface import amdsmi_get_cpu_family
     from .amdsmi_interface import amdsmi_get_cpu_model
     from .amdsmi_interface import amdsmi_get_cpu_model_name
-    from .amdsmi_interface import amdsmi_get_cpu_handles
     from .amdsmi_interface import amdsmi_set_cpu_xgmi_pstate_range
     from .amdsmi_interface import amdsmi_get_cpu_xgmi_pstate_range
     from .amdsmi_interface import amdsmi_set_cpu_rail_isofreq_policy
@@ -172,6 +172,7 @@ from .amdsmi_interface import amdsmi_get_gpu_board_info
 from .amdsmi_interface import amdsmi_get_gpu_ras_feature_info
 from .amdsmi_interface import amdsmi_get_gpu_ras_block_features_enabled
 from .amdsmi_interface import amdsmi_get_gpu_cper_entries
+from .amdsmi_interface import amdsmi_get_afids_from_cper
 from .amdsmi_interface import amdsmi_gpu_validate_ras_eeprom
 
 # # Unsupported Functions In Virtual Environment
@@ -343,6 +344,12 @@ from .amdsmi_interface import AmdSmiVirtualizationMode
 from .amdsmi_interface import AmdSmiVramType
 from .amdsmi_interface import AmdSmiAffinityScope
 from .amdsmi_interface import AmdSmiPtlData
+
+from .amdsmi_interface import amdsmi_get_gpu_uma_carveout_info
+from .amdsmi_interface import amdsmi_set_gpu_uma_carveout
+from .amdsmi_interface import amdsmi_get_ttm_info
+from .amdsmi_interface import amdsmi_set_ttm_pages_limit
+from .amdsmi_interface import amdsmi_reset_ttm_pages_limit
 
 # Exceptions
 from .amdsmi_exception import AmdSmiLibraryException

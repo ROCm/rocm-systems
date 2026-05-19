@@ -110,7 +110,7 @@ void KFDRASTest::SetUp() {
     eventDesc.SyncVar.SyncVar.UserData = NULL;
     eventDesc.SyncVar.SyncVarSize = 0;
 
-    ASSERT_SUCCESS(hsaKmtCreateEvent(&eventDesc, true, false, &m_pRasEvent));
+    ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtCreateEvent, m_hsakmt_current_ctx, &eventDesc, true, false, &m_pRasEvent));
 
     m_setupStatus = true;
 
@@ -121,7 +121,7 @@ void KFDRASTest::TearDown() {
     ROUTINE_START
 
     if (m_pRasEvent != NULL) {
-        EXPECT_SUCCESS(hsaKmtDestroyEvent(m_pRasEvent));
+        EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, m_pRasEvent));
     }
 
     fclose(m_pFile);
@@ -142,7 +142,7 @@ TEST_F(KFDRASTest, DISABLED_BasicTest) {
     fwrite("inject umc ue 0 0", sizeof(char), 17, m_pFile);
     fflush(m_pFile);
 
-    EXPECT_SUCCESS(hsaKmtWaitOnEvent(m_pRasEvent, g_TestTimeOut));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtWaitOnEvent, g_baseTest->m_hsakmt_current_ctx, m_pRasEvent, g_TestTimeOut));
 
     EXPECT_EQ(1, m_pRasEvent->EventData.EventData.MemoryAccessFault.Failure.ErrorType);
 
@@ -169,17 +169,17 @@ TEST_F(KFDRASTest, DISABLED_MixEventsTest) {
 
     queue.Wait4PacketConsumption();
 
-    EXPECT_SUCCESS(hsaKmtWaitOnEvent(pHsaEvent, g_TestTimeOut));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtWaitOnEvent, g_baseTest->m_hsakmt_current_ctx, pHsaEvent, g_TestTimeOut));
 
     fwrite("inject umc ue 0 0", sizeof(char), 17, m_pFile);
     fflush(m_pFile);
 
-    EXPECT_SUCCESS(hsaKmtWaitOnEvent(m_pRasEvent, g_TestTimeOut));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtWaitOnEvent, g_baseTest->m_hsakmt_current_ctx, m_pRasEvent, g_TestTimeOut));
 
     EXPECT_EQ(1, m_pRasEvent->EventData.EventData.MemoryAccessFault.Failure.ErrorType);
 
     EXPECT_SUCCESS(queue.Destroy());
-    EXPECT_SUCCESS(hsaKmtDestroyEvent(pHsaEvent));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtDestroyEvent, g_baseTest->m_hsakmt_current_ctx, pHsaEvent));
 
     TEST_END;
 }

@@ -1,22 +1,8 @@
-/* Copyright (c) 2021 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "top.hpp"
 #include "hip_graph_internal.hpp"
@@ -99,11 +85,12 @@ hipError_t ihipGraphAddKernelNode(hip::GraphNode** pGraphNode, hip::Graph* graph
     return hipErrorInvalidDeviceFunction;
   }
 
+  const amd::Device* device = g_devices[ihipGetDevice()]->devices()[0];
   amd::HIPLaunchParams launch_params(pNodeParams->gridDim.x, pNodeParams->gridDim.y,
                                      pNodeParams->gridDim.z, pNodeParams->blockDim.x,
                                      pNodeParams->blockDim.y, pNodeParams->blockDim.z,
-                                     pNodeParams->sharedMemBytes, globalWorkSizeX_remainder,
-                                     globalWorkSizeY_remainder, globalWorkSizeZ_remainder);
+                                     pNodeParams->sharedMemBytes, *device, globalWorkSizeX_remainder,
+                                     globalWorkSizeY_remainder, globalWorkSizeZ_remainder, 1, 1, 1);
   if (!launch_params.IsValidConfig()) {
     return hipErrorInvalidConfiguration;
   }
@@ -1134,7 +1121,7 @@ hipError_t hipStreamBeginCapture_common(hipStream_t stream, hipStreamCaptureMode
   } else {
     s->SetCaptureGraph(reinterpret_cast<hip::Graph*>(graph));
   }
-  s->SetCaptureId();
+  s->SetCaptureID();
   s->SetCaptureMode(mode);
   s->SetOriginStream();
   if (mode != hipStreamCaptureModeRelaxed) {
@@ -1629,9 +1616,13 @@ hipError_t hipGraphExecDestroy(hipGraphExec_t pGraphExec) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   hip::GraphExec* ge = reinterpret_cast<hip::GraphExec*>(pGraphExec);
+  {
+    // Erase from the set before releasing, so that concurrent
+    // hipDeviceGraphMemTrim cannot retain a dangling pointer.
+    std::scoped_lock lock(GraphExec::graphExecSetLock_);
+    GraphExec::graphExecSet_.erase(ge);
+  }
   ge->release();
-  amd::ScopedLock lock(GraphExec::graphExecSetLock_);
-  GraphExec::graphExecSet_.erase(ge);
   HIP_RETURN(hipSuccess);
 }
 
@@ -2949,7 +2940,45 @@ hipError_t hipDeviceGraphMemTrim(int device) {
   if ((static_cast<size_t>(device) >= g_devices.size()) || device < 0) {
     HIP_RETURN(hipErrorInvalidDevice);
   }
-  g_devices[device]->GetGraphMemoryPool()->TrimTo(0);
+  auto* pool = g_devices[device]->GetGraphMemoryPool();
+
+  std::vector<hip::GraphExec*> retained_graph_execs;
+  // Phase 1: Collect eligible graph execs under graphExecSetLock_ and retain them
+  // so they remain valid after dropping the lock. Do not call ReleaseCachedMapping()
+  // while holding graphExecSetLock_ because it may enqueue/await GPU work and take
+  // the graph memory pool lock.
+  {
+    std::scoped_lock lock(hip::GraphExec::graphExecSetLock_);
+    for (auto* ge : hip::GraphExec::graphExecSet_) {
+      if (ge->Device() != g_devices[device]) {
+        continue;
+      }
+      ge->retain();
+      retained_graph_execs.push_back(ge);
+    }
+  }
+  // Phase 2: Release idle graph-cached VA mappings and decrement refcounts
+  // outside graphExecSetLock_. Skip graph execs that are currently executing:
+  // GraphExec::Run() retains the object for the duration of GPU work, so
+  // refcount > 2 (1 owner + 1 trim-retain + 1+ in-flight) means active.
+  for (auto* ge : retained_graph_execs) {
+    if (ge->referenceCount() > 2) {
+      continue;
+    }
+    for (auto* node : ge->GetNodes()) {
+      if (node->GetType() != hipGraphNodeTypeMemAlloc) {
+        continue;
+      }
+      auto* alloc_node = static_cast<hip::GraphMemAllocNode*>(node);
+      alloc_node->ReleaseCachedMapping(pool);
+    }
+  }
+  for (auto* ge : retained_graph_execs) {
+    ge->release();
+  }
+  // Phase 3: All previously-refcounted entries now have refcount==0.
+  pool->TrimTo(0);
+
   HIP_RETURN(hipSuccess);
 }
 
@@ -3508,7 +3537,7 @@ hipError_t ihipGraphNodeSetParams(hip::GraphNode* n, hipGraphNodeParams* nodePar
           reinterpret_cast<hip::GraphMemcpyNode*>(n)->SetParams(&nodeParams->memcpy.copyParams);
       break;
     case hipGraphNodeTypeMemset:
-      status = reinterpret_cast<hip::GraphMemsetNode*>(n)->SetParams(&nodeParams->memset);
+      status = reinterpret_cast<hip::GraphMemsetNode*>(n)->SetParams(&nodeParams->memset, exec);
       break;
     case hipGraphNodeTypeHost:
       if (nodeParams->host.fn == nullptr || nodeParams->host.userData == nullptr) {

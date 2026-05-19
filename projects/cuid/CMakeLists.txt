@@ -48,7 +48,11 @@ add_subdirectory(lib)
 add_subdirectory(cli)
 add_subdirectory(daemon)
 add_subdirectory(example)
-add_subdirectory(tests)
+
+option(BUILD_TESTS "Build test suite" OFF)
+if(BUILD_TESTS)
+    add_subdirectory(tests)
+endif()
 
 # ==============================================================================
 # CPack Configuration for Portable Packages

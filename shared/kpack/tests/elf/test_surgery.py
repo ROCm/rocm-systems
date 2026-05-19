@@ -21,7 +21,21 @@ from rocm_kpack.elf import (
     PT_LOAD,
     SHF_ALLOC,
 )
-from rocm_kpack.elf.types import ProgramHeader, page_align_offset
+from rocm_kpack.elf.types import (
+    ElfHeader,
+    ProgramHeader,
+    ProgramHeader as PH,
+    SectionHeader as SH,
+    ELF64_EHDR_SIZE,
+    ELF64_PHDR_SIZE,
+    ELF64_SHDR_SIZE,
+    PF_R,
+    PF_X,
+    SHT_NULL,
+    SHT_STRTAB,
+    PAGE_SIZE,
+    page_align_offset,
+)
 
 
 class TestElfSurgery:
@@ -244,6 +258,142 @@ class TestZeroPage:
         assert verify_result.passed, f"Errors: {verify_result.errors}"
 
 
+def _build_synthetic_elf(phdr_capacity: int, phdr_count: int = 2) -> bytearray:
+    """Build a minimal valid ELF binary with controllable spare phdr slots.
+
+    Creates an ELF with:
+    - ELF header at offset 0
+    - phdr table at offset 64 with room for `phdr_capacity` entries
+    - `phdr_count` actual program headers (PT_LOAD covering ehdr+phdr, PT_LOAD for content)
+    - A .shstrtab section and section header table
+    - Content placed after the phdr gap so get_min_content_offset() works
+
+    Such ELF files with spare phdr slots are common in practice — prior ELF
+    transformations (notably patchelf) often enlarge the PHDR table, leaving
+    unused slots between e_phnum and the allocated capacity.
+
+    This is intentionally gross — it exists to test one specific corner case
+    in _write_in_place() where e_phnum < phdr_capacity.
+    """
+    assert phdr_count <= phdr_capacity
+
+    phdr_table_size = phdr_capacity * ELF64_PHDR_SIZE
+    # Content starts right after the phdr region (page-aligned)
+    content_offset = ELF64_EHDR_SIZE + phdr_table_size
+    # Pad to 8-byte alignment for section data
+    content_offset = (content_offset + 7) & ~7
+
+    # Section string table: "\0.shstrtab\0"
+    shstrtab_data = b"\x00.shstrtab\x00"
+    shstrtab_offset = content_offset
+    shstrtab_size = len(shstrtab_data)
+
+    # Some dummy content to act as a loadable segment
+    dummy_content = b"\xcc" * 64  # int3 padding
+    dummy_offset = shstrtab_offset + shstrtab_size
+    dummy_offset = (dummy_offset + 7) & ~7  # align
+
+    # Section headers go after all content
+    shdr_offset = dummy_offset + len(dummy_content)
+    shdr_offset = (shdr_offset + 7) & ~7  # align
+
+    # 3 section headers: SHT_NULL, .shstrtab, (we keep it minimal)
+    num_shdrs = 2
+
+    total_size = shdr_offset + num_shdrs * ELF64_SHDR_SIZE
+    data = bytearray(total_size)
+
+    # -- ELF Header --
+    e_ident = bytearray(16)
+    e_ident[0:4] = b"\x7fELF"
+    e_ident[4] = 2  # ELFCLASS64
+    e_ident[5] = 1  # ELFDATA2LSB
+    e_ident[6] = 1  # EV_CURRENT
+    ehdr = ElfHeader(
+        e_ident=bytes(e_ident),
+        e_type=3,  # ET_DYN (shared/PIE)
+        e_machine=0x3E,  # EM_X86_64
+        e_version=1,
+        e_entry=0,
+        e_phoff=ELF64_EHDR_SIZE,
+        e_shoff=shdr_offset,
+        e_flags=0,
+        e_ehsize=ELF64_EHDR_SIZE,
+        e_phentsize=ELF64_PHDR_SIZE,
+        e_phnum=phdr_count,
+        e_shentsize=ELF64_SHDR_SIZE,
+        e_shnum=num_shdrs,
+        e_shstrndx=1,  # .shstrtab is section 1
+    )
+    ehdr.write_to(data, 0)
+
+    # -- Program headers --
+    # PT_LOAD 0: covers ELF header + phdr table (vaddr 0x0)
+    ph0 = PH(
+        p_type=PT_LOAD,
+        p_flags=PF_R,
+        p_offset=0,
+        p_vaddr=0x0,
+        p_paddr=0x0,
+        p_filesz=content_offset,
+        p_memsz=content_offset,
+        p_align=PAGE_SIZE,
+    )
+    ph0.write_to(data, ELF64_EHDR_SIZE)
+
+    # PT_LOAD 1: covers dummy content
+    ph1 = PH(
+        p_type=PT_LOAD,
+        p_flags=PF_R | PF_X,
+        p_offset=dummy_offset,
+        p_vaddr=PAGE_SIZE + dummy_offset,  # at next page + same page offset
+        p_paddr=PAGE_SIZE + dummy_offset,
+        p_filesz=len(dummy_content),
+        p_memsz=len(dummy_content),
+        p_align=PAGE_SIZE,
+    )
+    ph1.write_to(data, ELF64_EHDR_SIZE + ELF64_PHDR_SIZE)
+
+    # Remaining phdr slots are zero (PT_NULL) — this is valid
+
+    # -- Section content --
+    data[shstrtab_offset : shstrtab_offset + shstrtab_size] = shstrtab_data
+    data[dummy_offset : dummy_offset + len(dummy_content)] = dummy_content
+
+    # -- Section headers --
+    # Section 0: SHT_NULL (required)
+    sh_null = SH(
+        sh_name=0,
+        sh_type=SHT_NULL,
+        sh_flags=0,
+        sh_addr=0,
+        sh_offset=0,
+        sh_size=0,
+        sh_link=0,
+        sh_info=0,
+        sh_addralign=0,
+        sh_entsize=0,
+    )
+    sh_null.write_to(data, shdr_offset)
+
+    # Section 1: .shstrtab
+    sh_strtab = SH(
+        sh_name=1,  # offset of ".shstrtab" in shstrtab_data
+        sh_type=SHT_STRTAB,
+        sh_flags=0,
+        sh_addr=0,
+        sh_offset=shstrtab_offset,
+        sh_size=shstrtab_size,
+        sh_link=0,
+        sh_info=0,
+        sh_addralign=1,
+        sh_entsize=0,
+    )
+    sh_strtab.write_to(data, shdr_offset + ELF64_SHDR_SIZE)
+
+    return data
+
+
 class TestProgramHeaderManager:
     """Tests for ProgramHeaderManager."""
 
@@ -280,6 +430,55 @@ class TestProgramHeaderManager:
         # Should be page-aligned and after all existing segments
         assert vaddr % 0x1000 == 0
         assert vaddr >= manager.get_max_vaddr()
+
+    def test_apply_in_place_with_added_header(self, tmp_path: Path):
+        """Adding a phdr when spare slots exist must write in place.
+
+        Regression test: _write_in_place() used to call
+        surgery.update_program_header(i) for the new index before updating
+        e_phnum, causing 'Invalid program header index' on binaries where
+        phdr capacity > phdr count (e.g. librccl.so with 13 headers and
+        418 available slots).
+        """
+        # Build a synthetic ELF: 2 phdrs used, room for 8
+        data = _build_synthetic_elf(phdr_capacity=8, phdr_count=2)
+        surgery = ElfSurgery(data)
+
+        assert surgery.ehdr.e_phnum == 2
+
+        manager = ProgramHeaderManager(surgery)
+
+        # Verify spare capacity exists (should not need relocation)
+        capacity = manager._get_current_capacity()
+        assert capacity >= 3, f"Expected spare slots, got capacity={capacity}"
+
+        # Add a new PT_LOAD
+        vaddr = manager.allocate_vaddr()
+        file_offset = page_align_offset(len(surgery.data), vaddr)
+        new_phdr = create_load_segment(
+            vaddr=vaddr, file_offset=file_offset, size=0x1000
+        )
+        manager.add_program_header(new_phdr)
+
+        # This is the line that fails without the fix:
+        # ValueError: Invalid program header index: 2
+        result = manager.apply()
+
+        assert not result.relocated, "Should have written in place, not relocated"
+        assert surgery.ehdr.e_phnum == 3
+
+        # Round-trip: save, reload, verify the new header persists
+        output = tmp_path / "synthetic.so"
+        surgery.save(output)
+        surgery2 = ElfSurgery.load(output)
+        assert surgery2.ehdr.e_phnum == 3
+
+        # Verify the new phdr was actually written
+        phdrs2 = list(surgery2.iter_program_headers())
+        assert len(phdrs2) == 3
+        _, written_phdr = phdrs2[2]
+        assert written_phdr.p_type == PT_LOAD
+        assert written_phdr.p_vaddr == vaddr
 
 
 class TestVerifyAll:

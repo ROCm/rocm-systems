@@ -26,10 +26,11 @@ package goamdsmi
 /*
 #cgo CFLAGS: -Wall -I/opt/rocm/include
 #cgo LDFLAGS: -L/opt/rocm/lib -L/opt/rocm/lib64 -lgoamdsmi_shim64 -Wl,--unresolved-symbols=ignore-in-object-files
-#include <cstdint>
+#include <stdint.h>
 #include <amdsmi_go_shim.h>
 */
 import "C"
+import "unsafe"
 
 // ``GO_gpu_init`` initializes the GPU and reports whether the initialization was
 // successful. This function must be called before using other AMD SMI
@@ -39,7 +40,7 @@ import "C"
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       GPU initialization is successful...
@@ -54,7 +55,7 @@ func GO_gpu_init() (bool) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_shutdown() {
 //       GPU shutdown is successful...
@@ -71,7 +72,7 @@ func GO_gpu_shutdown() (bool) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_shutdown() {
 //       GPU shutdown is successful...
@@ -89,7 +90,7 @@ func GO_gpu_num_monitor_devices() (uint) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -110,7 +111,7 @@ func GO_gpu_dev_name_get(i int) (*C.char) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -132,7 +133,7 @@ func GO_gpu_dev_id_get(i int) (C.uint16_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       dev_pci_id := int(goamdsmi.GO_gpu_dev_pci_id_get())
@@ -150,7 +151,7 @@ func GO_gpu_dev_pci_id_get(i int) (C.uint64_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       dev_pci_id := int(goamdsmi.GO_gpu_dev_pci_id_get())
@@ -168,7 +169,7 @@ func GO_gpu_dev_vbios_version_get(i int) (*C.char) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -190,7 +191,7 @@ func GO_gpu_dev_vendor_name_get(i int) (*C.char) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -210,7 +211,7 @@ func GO_gpu_dev_power_cap_get(i int) (C.uint64_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -235,7 +236,7 @@ func GO_gpu_dev_power_get(i int) (C.uint64_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -256,7 +257,7 @@ func GO_gpu_dev_temp_metric_get(i int, sensor int, metric int) (C.uint64_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -277,7 +278,7 @@ func GO_gpu_dev_perf_level_get(i int) (C.uint32_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -298,7 +299,7 @@ func GO_gpu_dev_overdrive_level_get(i int) (C.uint32_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -320,7 +321,7 @@ func GO_gpu_dev_mem_overdrive_level_get(i int) (C.uint32_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -342,7 +343,7 @@ func GO_gpu_dev_gpu_clk_freq_get_sclk(i int) (C.uint64_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -364,7 +365,7 @@ func GO_gpu_dev_gpu_clk_freq_get_mclk(i int) (C.uint64_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -386,7 +387,7 @@ func GO_gpu_od_volt_freq_range_min_get_sclk(i int) (C.uint64_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -408,7 +409,7 @@ func GO_gpu_od_volt_freq_range_min_get_mclk(i int) (C.uint64_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -430,7 +431,7 @@ func GO_gpu_od_volt_freq_range_max_get_sclk(i int) (C.uint64_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -451,7 +452,7 @@ func GO_gpu_od_volt_freq_range_max_get_mclk(i int) (C.uint64_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -473,7 +474,7 @@ func GO_gpu_dev_gpu_busy_percent_get(i int) (C.uint32_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -495,7 +496,7 @@ func GO_gpu_dev_gpu_memory_busy_percent_get(i int) (C.uint64_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -517,7 +518,7 @@ func GO_gpu_dev_gpu_memory_usage_get (i int) (C.uint64_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_gpu_init() {
 //       num_gpus := int(goamdsmi.GO_gpu_num_monitor_devices())
@@ -538,7 +539,7 @@ func GO_gpu_dev_gpu_memory_total_get (i int) (C.uint64_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_cpu_init() {
 //       CPU initialization is successful...
@@ -553,7 +554,7 @@ func GO_cpu_init() (bool) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_cpu_init() {
 //       num_sockets := int(goamdsmi.GO_cpu_number_of_sockets_get())
@@ -568,7 +569,7 @@ func GO_cpu_number_of_sockets_get() (uint) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_cpu_init() {
 //       num_threads := int(goamdsmi.GO_cpu_number_of_threads_get())
@@ -583,7 +584,7 @@ func GO_cpu_number_of_threads_get() (uint) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_cpu_init() {
 //       num_threads_per_core := int(goamdsmi.GO_cpu_threads_per_core_get())
@@ -602,7 +603,7 @@ func GO_cpu_threads_per_core_get() (uint) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_cpu_init() {
 //       num_threads := int(goamdsmi.GO_cpu_number_of_threads_get())
@@ -624,7 +625,7 @@ func GO_cpu_core_energy_get(i int) (C.uint64_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_cpu_init() {
 //       num_threads := int(goamdsmi.GO_cpu_number_of_threads_get())
@@ -646,7 +647,7 @@ func GO_cpu_core_boostlimit_get(i int) (C.uint32_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_cpu_init() {
 //       num_sockets := int(goamdsmi.GO_cpu_number_of_sockets_get())
@@ -668,7 +669,7 @@ func GO_cpu_socket_energy_get(i int) (C.uint64_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_cpu_init() {
 //       num_sockets := int(goamdsmi.GO_cpu_number_of_sockets_get())
@@ -690,7 +691,7 @@ func GO_cpu_socket_power_get(i int) (C.uint32_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_cpu_init() {
 //       num_sockets := int(goamdsmi.GO_cpu_number_of_sockets_get())
@@ -711,7 +712,7 @@ func GO_cpu_socket_power_cap_get(i int) (C.uint32_t) {
 //
 // Example:
 //
-//   import "github.com/ROCm/amdsmi"
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
 //
 //   if true == goamdsmi.GO_cpu_init() {
 //       num_sockets := int(goamdsmi.GO_cpu_number_of_sockets_get())
@@ -721,4 +722,130 @@ func GO_cpu_socket_power_cap_get(i int) (C.uint32_t) {
 //   }
 func GO_cpu_prochot_status_get(i int) (C.uint32_t) {
 	return C.goamdsmi_cpu_prochot_status_get(C.uint(i))
+}
+
+// ``GO_gpu_uma_carveout_info_get`` retrieves the UMA carveout configuration
+// information for the specified GPU device.
+//
+// Note: This is a kernel UAPI feature (sysfs), not libdrm.
+//
+// Input parameters:
+//   - ``device_index int``: GPU device index
+//   - ``current_index *uint32``: pointer to store current carveout option index
+//   - ``num_options *uint32``: pointer to store number of available options
+//   - ``options *[16][256]byte``: pointer to array for option descriptions
+//     (16 == AMDSMI_MAX_CARVEOUT_OPTIONS, 256 == AMDSMI_MAX_STRING_LENGTH from amdsmi.h)
+//
+// Output: ``int32``, returns ``0`` on success or ``-1`` on fail.
+//
+// Example:
+//
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
+//
+//   if true == goamdsmi.GO_gpu_init() {
+//       var currentIdx, numOpts uint32
+//       var opts [16][256]byte
+//       ret := goamdsmi.GO_gpu_uma_carveout_info_get(0, &currentIdx, &numOpts, &opts)
+//       if ret == 0 {
+//           // Process UMA carveout info...
+//       }
+//   }
+func GO_gpu_uma_carveout_info_get(device_index int, current_index *uint32, num_options *uint32, options *[16][256]byte) int32 {
+	return int32(C.goamdsmi_gpu_uma_carveout_info_get(
+		C.uint32_t(device_index),
+		(*C.uint32_t)(current_index),
+		(*C.uint32_t)(num_options),
+		(*[16][256]C.char)(unsafe.Pointer(options))))
+}
+
+// ``GO_gpu_uma_carveout_set`` sets the UMA carveout size for the specified GPU
+// device by option index. Requires system reboot to take effect.
+//
+// Note: This is a kernel UAPI feature (sysfs), not libdrm.
+//
+// Input parameters:
+//   - ``device_index int``: GPU device index
+//   - ``option_index uint32``: carveout option index to set
+//
+// Output: ``int32``, returns ``0`` on success or ``-1`` on fail.
+//
+// Example:
+//
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
+//
+//   if true == goamdsmi.GO_gpu_init() {
+//       ret := goamdsmi.GO_gpu_uma_carveout_set(0, 3)
+//       if ret == 0 {
+//           // UMA carveout set successfully, reboot required
+//       }
+//   }
+func GO_gpu_uma_carveout_set(device_index int, option_index uint32) int32 {
+	return int32(C.goamdsmi_gpu_uma_carveout_set(C.uint32_t(device_index), C.uint32_t(option_index)))
+}
+
+// ``GO_ttm_info_get`` retrieves the TTM (shared GPU memory) pages limit.
+// This is a system-wide setting, not per-GPU.
+//
+// Note: This is a kernel UAPI feature (modprobe.d), not libdrm.
+//
+// Input parameter:
+//   - ``current_pages *uint64``: pointer to store current TTM pages limit
+//
+// Output: ``int32``, returns ``0`` on success or ``-1`` on fail.
+//
+// Example:
+//
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
+//
+//   var pages uint64
+//   ret := goamdsmi.GO_ttm_info_get(&pages)
+//   if ret == 0 {
+//       // Process TTM pages info...
+//   }
+func GO_ttm_info_get(current_pages *uint64) int32 {
+	return int32(C.goamdsmi_ttm_info_get((*C.uint64_t)(current_pages)))
+}
+
+// ``GO_ttm_pages_limit_set`` sets the TTM (shared GPU memory) pages limit.
+// This is a system-wide setting, not per-GPU. Requires system reboot to take effect.
+//
+// Note: This is a kernel UAPI feature (modprobe.d), not libdrm.
+//
+// Input parameter:
+//   - ``pages uint64``: TTM pages limit to set
+//
+// Output: ``int32``, returns ``0`` on success or ``-1`` on fail.
+//
+// Example:
+//
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
+//
+//   ret := goamdsmi.GO_ttm_pages_limit_set(3104239)
+//   if ret == 0 {
+//       // TTM pages limit set successfully, reboot required
+//   }
+func GO_ttm_pages_limit_set(pages uint64) int32 {
+	return int32(C.goamdsmi_ttm_pages_limit_set(C.uint64_t(pages)))
+}
+
+// ``GO_ttm_pages_limit_reset`` resets the TTM (shared GPU memory) pages limit
+// to its default value.
+//
+// This is a system-wide setting, not per-GPU. A system reboot may be required
+// for the change to take effect.
+//
+// Note: This is a kernel UAPI feature (modprobe.d), not libdrm.
+//
+// Output: ``int32``, returns ``0`` on success or ``-1`` on fail.
+//
+// Example:
+//
+//   import "github.com/ROCm/rocm-systems/projects/amdsmi"
+//
+//   ret := goamdsmi.GO_ttm_pages_limit_reset()
+//   if ret == 0 {
+//       // TTM pages limit reset successfully, reboot may be required
+//   }
+func GO_ttm_pages_limit_reset() int32 {
+	return int32(C.goamdsmi_ttm_pages_limit_reset())
 }

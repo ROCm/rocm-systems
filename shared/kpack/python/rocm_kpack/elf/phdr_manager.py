@@ -176,12 +176,20 @@ class ProgramHeaderManager:
     def _write_in_place(self) -> PhdrResizeResult:
         """Write program headers in place at current location."""
         ehdr = self._surgery.ehdr
+        new_count = len(self._phdrs)
+
+        # Update e_phnum BEFORE the write loop so that
+        # surgery.update_program_header() accepts new indices.
+        # Also extend surgery's internal phdr list to match — otherwise
+        # the list assignment in update_program_header() would IndexError.
+        self._surgery._ehdr.e_phnum = new_count
+        while len(self._surgery._phdrs) < new_count:
+            self._surgery._phdrs.append(self._phdrs[len(self._surgery._phdrs)])
 
         for i, phdr in enumerate(self._phdrs):
             self._surgery.update_program_header(i, phdr)
 
-        # Update e_phnum in ELF header
-        self._surgery._ehdr.e_phnum = len(self._phdrs)
+        # Flush the updated e_phnum to the binary buffer
         self._surgery.update_elf_header()
 
         spare = self._get_current_capacity() - len(self._phdrs)

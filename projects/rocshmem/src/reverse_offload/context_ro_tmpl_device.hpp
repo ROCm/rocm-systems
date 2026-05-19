@@ -30,6 +30,7 @@
 #include "context_ro_device.hpp"
 #include "queue_proxy.hpp"
 #include "ro_net_team.hpp"
+#include "log.hpp"
 
 namespace rocshmem {
 
@@ -148,8 +149,8 @@ __device__ void ROContext::p(T *dest, T value, int pe) {
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
     long L_offset{reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank]};
-    ipcImpl_.ipcCopy(ipcImpl_.ipc_bases[local_pe] + L_offset,
-                     reinterpret_cast<void *>(&value), sizeof(T));
+    ipcImpl_.ipcCopy<MemcpyKind::Put>(ipcImpl_.ipc_bases[local_pe] + L_offset,
+                     reinterpret_cast<void *>(&value), sizeof(T), local_pe);
   } else {
     build_queue_element(RO_NET_P, dest, &value, sizeof(T), pe, 0, 0, 0, nullptr,
                         nullptr, NULL, ro_net_win_id,
@@ -164,7 +165,7 @@ __device__ T ROContext::g(const T *source, int pe) {
     const char *src_typed{reinterpret_cast<const char *>(source)};
     long L_offset{const_cast<char *>(src_typed) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank]};
     T dest;
-    ipcImpl_.ipcCopy(&dest, ipcImpl_.ipc_bases[local_pe] + L_offset, sizeof(T));
+    ipcImpl_.ipcCopy<MemcpyKind::Get>(&dest, ipcImpl_.ipc_bases[local_pe] + L_offset, sizeof(T), local_pe);
     return dest;
   } else {
     auto dest{get_g_ret_buf()};
@@ -227,7 +228,7 @@ __device__ T ROContext::amo_fetch_add(void *dst, T value, int pe) {
 
 template <typename T>
 __device__ void ROContext::amo_add(void *dst, T value, int pe) {
-  T ret{amo_fetch_add(dst, value, pe)};
+  [[maybe_unused]] T ret{amo_fetch_add(dst, value, pe)};
 }
 
 template <typename T>
@@ -246,7 +247,7 @@ __device__ T ROContext::amo_swap(void *dst, T value, int pe) {
 
 template <typename T>
 __device__ void ROContext::amo_set(void *dst, T value, int pe) {
-  T ret{amo_swap(dst, value, pe)};
+  [[maybe_unused]] T ret{amo_swap(dst, value, pe)};
 }
 
 template <typename T>
@@ -265,7 +266,7 @@ __device__ T ROContext::amo_fetch_and(void *dst, T value, int pe) {
 
 template <typename T>
 __device__ void ROContext::amo_and(void *dst, T value, int pe) {
-  T ret{amo_fetch_and(dst, value, pe)};
+  [[maybe_unused]] T ret{amo_fetch_and(dst, value, pe)};
 }
 
 template <typename T>
@@ -284,7 +285,7 @@ __device__ T ROContext::amo_fetch_or(void *dst, T value, int pe) {
 
 template <typename T>
 __device__ void ROContext::amo_or(void *dst, T value, int pe) {
-  T ret{amo_fetch_or(dst, value, pe)};
+  [[maybe_unused]] T ret{amo_fetch_or(dst, value, pe)};
 }
 
 template <typename T>
@@ -303,7 +304,7 @@ __device__ T ROContext::amo_fetch_xor(void *dst, T value, int pe) {
 
 template <typename T>
 __device__ void ROContext::amo_xor(void *dst, T value, int pe) {
-  T ret{amo_fetch_xor(dst, value, pe)};
+  [[maybe_unused]] T ret{amo_fetch_xor(dst, value, pe)};
 }
 
 template <typename T>
@@ -345,13 +346,12 @@ __device__ void ROContext::alltoall(rocshmem_team_t team, T *dest,
 }
 
 template <typename T>
-__device__ void ROContext::alltoallv(rocshmem_team_t team,
-                                     T *dest, const size_t dest_nelems[],
-                                     const size_t dest_displs[],
-                                     T *source, const size_t source_nelems[],
-                                     const size_t source_displs[]) {
-  printf("rocshmem::ipc:alltoallv not implemented\n");
-  abort();
+__device__ void ROContext::alltoallv([[maybe_unused]] rocshmem_team_t team,
+                                     [[maybe_unused]] T *dest, [[maybe_unused]] const size_t dest_nelems[],
+                                     [[maybe_unused]] const size_t dest_displs[],
+                                     [[maybe_unused]] T *source, [[maybe_unused]] const size_t source_nelems[],
+                                     [[maybe_unused]] const size_t source_displs[]) {
+  LOGD_ERROR_ABORT("rocshmem::ipc:alltoallv not implemented");
 }
 
 template <typename T>

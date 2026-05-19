@@ -8,7 +8,7 @@ from typing import Any
 
 import msgpack
 
-from rocm_kpack.ccob_parser import extract_code_objects_from_fatbin
+from rocm_kpack.ccob_parser import ExtractedCodeObject, extract_code_objects_from_fatbin
 from rocm_kpack.coff.surgery import CoffSurgery
 from rocm_kpack.format_detect import detect_binary_format, UnsupportedBinaryFormat
 
@@ -226,17 +226,20 @@ class BundledBinary:
         to hold the unbundled files open for as long as needed.
         """
         if dest_dir is None:
-            dest_dir = Path(tempfile.TemporaryDirectory(delete=False).name)
-        target_list = self._list_bundled_targets(self.file_path)
+            dest_dir = Path(tempfile.mkdtemp())
+
+        # Extract code objects once, then derive both the target list and
+        # write the files from the same extraction result.
+        code_objects = self._extract_code_objects()
+        target_list = self._build_target_list(code_objects)
+
         contents = UnbundledContents(
             self, dest_dir, delete_on_close=delete_on_close, target_list=target_list
         )
         try:
             dest_dir.mkdir(parents=True, exist_ok=True)
-            self._unbundle(
-                targets=[kv[0] for kv in target_list],
-                outputs=[dest_dir / kv[1] for kv in target_list],
-            )
+            outputs = [dest_dir / kv[1] for kv in target_list]
+            self._write_code_objects(code_objects, outputs)
         except:
             contents.close()
             raise
@@ -342,20 +345,23 @@ class BundledBinary:
 
         return fatbin_path
 
-    def _list_bundled_targets(self, file_path: Path) -> list[tuple[str, str]]:
-        """Returns a list of (target_name, file_name) for all bundles.
+    def _extract_code_objects(self) -> list[ExtractedCodeObject]:
+        """Extract code objects from the fatbin data.
 
-        Uses our own bundle parser for all formats: CCOB-compressed, single
-        uncompressed, and concatenated uncompressed (RDC case).
+        Reads the bundler input once and parses all code objects.
+        """
+        bundler_input = self._get_bundler_input()
+        data = bundler_input.read_bytes()
+        return extract_code_objects_from_fatbin(data)
+
+    def _build_target_list(
+        self, code_objects: list[ExtractedCodeObject]
+    ) -> list[tuple[str, str]]:
+        """Build a list of (target_name, file_name) from extracted code objects.
 
         For concatenated bundles (RDC), filenames are indexed to distinguish
         multiple code objects with the same target triple.
         """
-        bundler_input = self._get_bundler_input()
-        data = bundler_input.read_bytes()
-        code_objects = extract_code_objects_from_fatbin(data)
-
-        # Check if we need indexed filenames (duplicate targets from RDC)
         targets = [obj.target for obj in code_objects]
         needs_indexing = len(targets) != len(set(targets))
 
@@ -370,28 +376,26 @@ class BundledBinary:
 
         return result
 
-    def _unbundle(self, *, targets: list[str], outputs: list[Path]):
-        """Unbundle targets from the binary.
-
-        Args:
-            targets: List of target names to unbundle
-            outputs: List of output paths (must match length of targets)
-        """
-        if not targets:
-            return
-
-        bundler_input = self._get_bundler_input()
-        data = bundler_input.read_bytes()
-        code_objects = extract_code_objects_from_fatbin(data)
-
+    def _write_code_objects(
+        self, code_objects: list[ExtractedCodeObject], outputs: list[Path]
+    ) -> None:
+        """Write extracted code objects to output files."""
         if len(code_objects) != len(outputs):
             raise ValueError(
                 f"Output count mismatch: {len(code_objects)} code objects "
                 f"but {len(outputs)} output paths"
             )
-
         for obj, output_path in zip(code_objects, outputs):
             output_path.write_bytes(obj.data)
+
+    def _list_bundled_targets(self, file_path: Path) -> list[tuple[str, str]]:
+        """Returns a list of (target_name, file_name) for all bundles.
+
+        Uses our own bundle parser for all formats: CCOB-compressed, single
+        uncompressed, and concatenated uncompressed (RDC case).
+        """
+        code_objects = self._extract_code_objects()
+        return self._build_target_list(code_objects)
 
     def list_bundles(self) -> list[str]:
         """List all architecture bundles in the binary.

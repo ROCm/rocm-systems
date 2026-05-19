@@ -12,7 +12,6 @@
 #include <cctype>
 #include <string_view>
 
-#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
 namespace rocprofsys
 {
 namespace amd_smi
@@ -34,20 +33,19 @@ get_setting_name(std::string_view input)
     return result;
 }
 
-#    define ROCPROFSYS_CONFIG_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE, ...)   \
-        [&]() {                                                                          \
-            auto _ret = _config->insert<TYPE, TYPE>(                                     \
-                ENV_NAME, get_setting_name(ENV_NAME), DESCRIPTION,                       \
-                TYPE{ INITIAL_VALUE },                                                   \
-                std::set<std::string>{ "custom", "rocprofsys", "librocprof-sys",         \
-                                       __VA_ARGS__ });                                   \
-            if(!_ret.second)                                                             \
-            {                                                                            \
-                LOG_WARNING("Duplicate setting: {} / {}", get_setting_name(ENV_NAME),    \
-                            ENV_NAME);                                                   \
-            }                                                                            \
-            return _config->find(ENV_NAME)->second;                                      \
-        }()
+#define ROCPROFSYS_CONFIG_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE, ...)       \
+    [&]() {                                                                              \
+        auto _ret = _config->insert<TYPE, TYPE>(                                         \
+            ENV_NAME, get_setting_name(ENV_NAME), DESCRIPTION, TYPE{ INITIAL_VALUE },    \
+            std::set<std::string>{ "custom", "rocprofsys", "librocprof-sys",             \
+                                   __VA_ARGS__ });                                       \
+        if(!_ret.second)                                                                 \
+        {                                                                                \
+            LOG_WARNING("Duplicate setting: {} / {}", get_setting_name(ENV_NAME),        \
+                        ENV_NAME);                                                       \
+        }                                                                                \
+        return _config->find(ENV_NAME)->second;                                          \
+    }()
 }  // namespace
 
 void
@@ -55,7 +53,8 @@ config_settings(const std::shared_ptr<settings>& _config)
 {
     if(!get_use_amd_smi() || !gpu::initialize_amdsmi()) return;
 
-    std::string default_metrics = "busy, temp, power, mem_usage, sdma_usage";
+    std::string default_metrics =
+        "busy, temp, power, mem_usage, sdma_usage, gfx_clock, mem_clock";
     // No distinction between busy and activity shown in description
     std::string jpeg_activity_support{};
     std::string vcn_activity_support{};
@@ -97,9 +96,9 @@ config_settings(const std::shared_ptr<settings>& _config)
         }
     }
 
-#    if AMD_SMI_SDMA_SUPPORTED == 1
+#if AMD_SMI_SDMA_SUPPORTED == 1
     sdma_support += ", sdma_usage";
-#    endif
+#endif
 
     ROCPROFSYS_CONFIG_SETTING(
         std::string, "ROCPROFSYS_AMD_SMI_METRICS",
@@ -110,15 +109,3 @@ config_settings(const std::shared_ptr<settings>& _config)
 }
 }  // namespace amd_smi
 }  // namespace rocprofsys
-
-#else
-namespace rocprofsys
-{
-namespace amd_smi
-{
-void
-config_settings(const std::shared_ptr<settings>&)
-{}
-}  // namespace amd_smi
-}  // namespace rocprofsys
-#endif

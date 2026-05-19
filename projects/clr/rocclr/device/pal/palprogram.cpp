@@ -1,22 +1,8 @@
-/* Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "os/os.hpp"
 #include "utils/flags.hpp"
@@ -143,7 +129,7 @@ void Segment::copy(size_t offset, const void* src, size_t size) {
     if (cpuMem_ != nullptr) {
       std::memcpy(cpuAddress(offset), src, size);
     }
-    amd::ScopedLock k(gpuAccess_->dev().xferMgr().lockXfer());
+    std::scoped_lock k(*(gpuAccess_->dev().xferMgr().lockXfer()));
     VirtualGPU& gpu = *gpuAccess_->dev().xferQueue();
     Memory& xferBuf = gpu.xferWrite().Acquire(size);
     size_t tmpSize = std::min(static_cast<size_t>(xferBuf.size()), size);
@@ -165,7 +151,7 @@ bool Segment::freeze(bool destroySysmem) {
   bool result = true;
   if (cpuAccess_ != nullptr) {
     assert(gpuAccess_->size() == cpuAccess_->size() && "Backing store size mismatch!");
-    amd::ScopedLock k(gpuAccess_->dev().xferMgr().lockXfer());
+    std::scoped_lock k(*(gpuAccess_->dev().xferMgr().lockXfer()));
     result = cpuAccess_->partialMemCopyTo(gpu, 0, 0, gpuAccess_->size(), *gpuAccess_, false, true);
     gpu.waitAllEngines();
   }

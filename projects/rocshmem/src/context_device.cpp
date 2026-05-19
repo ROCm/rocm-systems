@@ -56,24 +56,7 @@ __device__ Context::Context(Backend* handle)
  *****************************************************************************/
 
 __device__ void Context::threadfence_system() {
-  DISPATCH(threadfence_system());
-}
-
-__device__ void Context::ctx_create() {
-  if (is_thread_zero_in_block()) {
-    ctxStats.incStat(NUM_CREATE);
-  }
-
-  DISPATCH(ctx_create());
-}
-
-__device__ void Context::ctx_destroy() {
-  if (is_thread_zero_in_block()) {
-    ctxStats.incStat(NUM_FINALIZE);
-    device_backend_proxy->globalStats.accumulateStats(ctxStats);
-  }
-
-  DISPATCH(ctx_destroy());
+  __threadfence_system();
 }
 
 __device__ void Context::putmem(void* dest, const void* source, size_t nelems,

@@ -20,6 +20,8 @@
  * THE SOFTWARE.
  */
 
+#include "rocm_smi/rocm_smi_io_link.h"
+
 #include <dirent.h>
 #include <sys/stat.h>
 
@@ -30,48 +32,45 @@
 #include <string>
 
 #include "rocm_smi/rocm_smi_utils.h"
-#include "rocm_smi/rocm_smi_io_link.h"
 
-
-#define CRAT_IOLINK_FLAGS_ENABLED                 (1 << 0)
-#define CRAT_IOLINK_FLAGS_NON_COHERENT            (1 << 1)
-#define CRAT_IOLINK_FLAGS_NO_ATOMICS_32_BIT       (1 << 2)
-#define CRAT_IOLINK_FLAGS_NO_ATOMICS_64_BIT       (1 << 3)
-#define CRAT_IOLINK_FLAGS_NO_PEER_TO_PEER_DMA     (1 << 4)
-#define CRAT_IOLINK_FLAGS_BI_DIRECTIONAL          (1 << 31)
-#define CRAT_IOLINK_FLAGS_RESERVED_MASK           0x7fffffe0
+#define CRAT_IOLINK_FLAGS_ENABLED (1 << 0)
+#define CRAT_IOLINK_FLAGS_NON_COHERENT (1 << 1)
+#define CRAT_IOLINK_FLAGS_NO_ATOMICS_32_BIT (1 << 2)
+#define CRAT_IOLINK_FLAGS_NO_ATOMICS_64_BIT (1 << 3)
+#define CRAT_IOLINK_FLAGS_NO_PEER_TO_PEER_DMA (1 << 4)
+#define CRAT_IOLINK_FLAGS_BI_DIRECTIONAL (1 << 31)
+#define CRAT_IOLINK_FLAGS_RESERVED_MASK 0x7fffffe0
 
 namespace amd::smi {
 
-static const char *kKFDNodesPathRoot = "/sys/class/kfd/kfd/topology/nodes";
-static const char *kKFDLinkPath[] = {"io_links", "p2p_links"};
+static const char* kKFDNodesPathRoot = "/sys/class/kfd/kfd/topology/nodes";
+static const char* kKFDLinkPath[] = {"io_links", "p2p_links"};
 
 // IO Link Property strings
-static const char *kIOLinkPropTYPEStr =  "type";
+static const char* kIOLinkPropTYPEStr = "type";
 // static const char *kIOLinkPropVERSION_MAJORStr = "version_major";
 // static const char *kIOLinkPropVERSION_MINORStr = "version_minor";
-static const char *kIOLinkPropNODE_FROMStr = "node_from";
-static const char *kIOLinkPropNODE_TOStr = "node_to";
-static const char *kIOLinkPropWEIGHTStr = "weight";
+static const char* kIOLinkPropNODE_FROMStr = "node_from";
+static const char* kIOLinkPropNODE_TOStr = "node_to";
+static const char* kIOLinkPropWEIGHTStr = "weight";
 // static const char *kIOLinkPropMIN_LATENCYStr = "min_latency";
 // static const char *kIOLinkPropMAX_LATENCYStr = "max_latency";
-static const char *kIOLinkPropMIN_BANDWIDTHStr = "min_bandwidth";
-static const char *kIOLinkPropMAX_BANDWIDTHStr = "max_bandwidth";
+static const char* kIOLinkPropMIN_BANDWIDTHStr = "min_bandwidth";
+static const char* kIOLinkPropMAX_BANDWIDTHStr = "max_bandwidth";
 // static const char *kIOLinkPropRECOMMENDED_TRANSFER_SIZEStr =
 // "recommended_transfer_size";
-static const char *kIOLinkPropFLAGSStr = "flags";
+static const char* kIOLinkPropFLAGSStr = "flags";
 
-static bool is_number(const std::string &s) {
+static bool is_number(const std::string& s) {
   return !s.empty() && std::all_of(s.begin(), s.end(), ::isdigit);
 }
 
-static std::string LinkPathRoot(uint32_t node_indx,
-                                LINK_DIRECTORY_TYPE directory) {
+static std::string LinkPathRoot(uint32_t node_indx, LINK_DIRECTORY_TYPE directory) {
   std::string link_path_root = kKFDNodesPathRoot;
   link_path_root += '/';
   link_path_root += std::to_string(node_indx);
   link_path_root += '/';
-  if (directory < sizeof(kKFDLinkPath)/sizeof(kKFDLinkPath[0])) {
+  if (directory < sizeof(kKFDLinkPath) / sizeof(kKFDLinkPath[0])) {
     link_path_root += kKFDLinkPath[directory];
   } else {
     link_path_root = "";
@@ -79,16 +78,14 @@ static std::string LinkPathRoot(uint32_t node_indx,
   return link_path_root;
 }
 
-static std::string LinkPath(uint32_t node_indx, uint32_t link_indx,
-                            LINK_DIRECTORY_TYPE directory) {
+static std::string LinkPath(uint32_t node_indx, uint32_t link_indx, LINK_DIRECTORY_TYPE directory) {
   std::string link_path = LinkPathRoot(node_indx, directory);
   link_path += '/';
   link_path += std::to_string(link_indx);
   return link_path;
 }
 
-static int OpenLinkProperties(uint32_t node_indx, uint32_t link_indx,
-                              std::ifstream *fs,
+static int OpenLinkProperties(uint32_t node_indx, uint32_t link_indx, std::ifstream* fs,
                               LINK_DIRECTORY_TYPE directory) {
   int ret;
   std::string f_path;
@@ -122,8 +119,7 @@ static int OpenLinkProperties(uint32_t node_indx, uint32_t link_indx,
 }
 
 static int ReadLinkProperties(uint32_t node_indx, uint32_t link_indx,
-                              std::vector<std::string> *retVec,
-                              LINK_DIRECTORY_TYPE directory) {
+                              std::vector<std::string>* retVec, LINK_DIRECTORY_TYPE directory) {
   std::string line;
   int ret;
   std::ifstream fs;
@@ -157,8 +153,7 @@ static int ReadLinkProperties(uint32_t node_indx, uint32_t link_indx,
   return 0;
 }
 
-static int DiscoverLinks(std::map<std::pair<uint32_t, uint32_t>,
-                         std::shared_ptr<IOLink>> *links,
+static int DiscoverLinks(std::map<std::pair<uint32_t, uint32_t>, std::shared_ptr<IOLink>>* links,
                          LINK_DIRECTORY_TYPE directory) {
   assert(links != nullptr);
   if (links == nullptr) {
@@ -214,8 +209,7 @@ static int DiscoverLinks(std::map<std::pair<uint32_t, uint32_t>,
       }
 
       link_indx = static_cast<uint32_t>(std::stoi(dentry_io_link->d_name));
-      link = std::make_shared<IOLink>(node_indx, link_indx,
-                                                directory);
+      link = std::make_shared<IOLink>(node_indx, link_indx, directory);
 
       link->Initialize();
 
@@ -241,18 +235,16 @@ static int DiscoverLinks(std::map<std::pair<uint32_t, uint32_t>,
   return 0;
 }
 
-int DiscoverIOLinks(std::map<std::pair<uint32_t, uint32_t>,
-                    std::shared_ptr<IOLink>> *links) {
+int DiscoverIOLinks(std::map<std::pair<uint32_t, uint32_t>, std::shared_ptr<IOLink>>* links) {
   return DiscoverLinks(links, IO_LINK_DIRECTORY);
 }
 
-int DiscoverP2PLinks(std::map<std::pair<uint32_t, uint32_t>,
-                    std::shared_ptr<IOLink>> *links) {
+int DiscoverP2PLinks(std::map<std::pair<uint32_t, uint32_t>, std::shared_ptr<IOLink>>* links) {
   return DiscoverLinks(links, P2P_LINK_DIRECTORY);
 }
 
-static int DiscoverLinksPerNode(uint32_t node_indx, std::map<uint32_t,
-                                std::shared_ptr<IOLink>> *links,
+static int DiscoverLinksPerNode(uint32_t node_indx,
+                                std::map<uint32_t, std::shared_ptr<IOLink>>* links,
                                 LINK_DIRECTORY_TYPE directory) {
   assert(links != nullptr);
   if (links == nullptr) {
@@ -285,8 +277,7 @@ static int DiscoverLinksPerNode(uint32_t node_indx, std::map<uint32_t,
     }
 
     link_indx = static_cast<uint32_t>(std::stoi(dentry->d_name));
-    link = std::make_shared<IOLink>(node_indx, link_indx,
-                                              directory);
+    link = std::make_shared<IOLink>(node_indx, link_indx, directory);
 
     link->Initialize();
 
@@ -301,13 +292,12 @@ static int DiscoverLinksPerNode(uint32_t node_indx, std::map<uint32_t,
   return 0;
 }
 
-int DiscoverIOLinksPerNode(uint32_t node_indx, std::map<uint32_t,
-                           std::shared_ptr<IOLink>> *links) {
+int DiscoverIOLinksPerNode(uint32_t node_indx, std::map<uint32_t, std::shared_ptr<IOLink>>* links) {
   return DiscoverLinksPerNode(node_indx, links, IO_LINK_DIRECTORY);
 }
 
-int DiscoverP2PLinksPerNode(uint32_t node_indx, std::map<uint32_t,
-                            std::shared_ptr<IOLink>> *links) {
+int DiscoverP2PLinksPerNode(uint32_t node_indx,
+                            std::map<uint32_t, std::shared_ptr<IOLink>>* links) {
   return DiscoverLinksPerNode(node_indx, links, P2P_LINK_DIRECTORY);
 }
 
@@ -323,8 +313,7 @@ int IOLink::ReadProperties(void) {
     return 0;
   }
 
-  ret = ReadLinkProperties(node_indx_, link_indx_, &propVec,
-                           link_dir_type_);
+  ret = ReadLinkProperties(node_indx_, link_indx_, &propVec, link_dir_type_);
 
   if (ret) {
     return ret;
@@ -334,7 +323,7 @@ int IOLink::ReadProperties(void) {
   uint64_t val_int;  // Assume all properties are unsigned integers for now
   std::istringstream fs;
 
-  for (const auto & i : propVec) {
+  for (const auto& i : propVec) {
     fs.str(i);
     fs >> key_str;
     fs >> val_int;
@@ -348,45 +337,56 @@ int IOLink::ReadProperties(void) {
   return 0;
 }
 
-int
-IOLink::Initialize(void) {
+int IOLink::Initialize(void) {
   int ret = 0;
   uint64_t tmp64 = 0;
   ret = ReadProperties();
-  if (ret) {return ret;}
+  if (ret) {
+    return ret;
+  }
 
-  ret = get_property_value(kIOLinkPropTYPEStr,
-                           reinterpret_cast<uint64_t *>(&type_));
-  if (ret) {return ret;}
+  ret = get_property_value(kIOLinkPropTYPEStr, reinterpret_cast<uint64_t*>(&type_));
+  if (ret) {
+    return ret;
+  }
 
-  ret = get_property_value(kIOLinkPropNODE_FROMStr,
-                           reinterpret_cast<uint64_t *>(&node_from_));
-  if (ret) {return ret;}
+  ret = get_property_value(kIOLinkPropNODE_FROMStr, reinterpret_cast<uint64_t*>(&node_from_));
+  if (ret) {
+    return ret;
+  }
 
-  ret = get_property_value(kIOLinkPropNODE_TOStr,
-                           reinterpret_cast<uint64_t *>(&node_to_));
-  if (ret) {return ret;}
+  ret = get_property_value(kIOLinkPropNODE_TOStr, reinterpret_cast<uint64_t*>(&node_to_));
+  if (ret) {
+    return ret;
+  }
 
   ret = get_property_value(kIOLinkPropWEIGHTStr, &weight_);
-  if (ret) {return ret;}
+  if (ret) {
+    return ret;
+  }
 
   ret = get_property_value(kIOLinkPropFLAGSStr, &tmp64);
-  if (ret) {return ret;}
+  if (ret) {
+    return ret;
+  }
   flags_ = static_cast<uint32_t>(tmp64);
 
   ret = UpdateP2pCapability();
-  if (ret) {return ret;}
+  if (ret) {
+    return ret;
+  }
 
   ret = get_property_value(kIOLinkPropMIN_BANDWIDTHStr, &min_bandwidth_);
-  if (ret) {return ret;}
+  if (ret) {
+    return ret;
+  }
 
   ret = get_property_value(kIOLinkPropMAX_BANDWIDTHStr, &max_bandwidth_);
 
   return ret;
 }
 
-int
-IOLink::get_property_value(std::string property, uint64_t *value) {
+int IOLink::get_property_value(std::string property, uint64_t* value) {
   assert(value != nullptr);
   if (value == nullptr) {
     return EINVAL;
@@ -399,62 +399,61 @@ IOLink::get_property_value(std::string property, uint64_t *value) {
 }
 
 int IOLink::UpdateP2pCapability(void) {
-    const uint8_t cap_true = 1;
-    const uint8_t cap_false = 0;
+  const uint8_t cap_true = 1;
+  const uint8_t cap_false = 0;
 
-    if (!(flags_ & CRAT_IOLINK_FLAGS_ENABLED)) {
-        return 0;
-    }
+  if (!(flags_ & CRAT_IOLINK_FLAGS_ENABLED)) {
+    return 0;
+  }
 
-    link_cap_.is_iolink_coherent =
-      (flags_ & CRAT_IOLINK_FLAGS_NON_COHERENT) ? cap_false : cap_true;
+  link_cap_.is_iolink_coherent = (flags_ & CRAT_IOLINK_FLAGS_NON_COHERENT) ? cap_false : cap_true;
 
-    link_cap_.is_iolink_atomics_32bit =
+  link_cap_.is_iolink_atomics_32bit =
       (flags_ & CRAT_IOLINK_FLAGS_NO_ATOMICS_32_BIT) ? cap_false : cap_true;
 
-    link_cap_.is_iolink_atomics_64bit =
+  link_cap_.is_iolink_atomics_64bit =
       (flags_ & CRAT_IOLINK_FLAGS_NO_ATOMICS_64_BIT) ? cap_false : cap_true;
 
-    link_cap_.is_iolink_bi_directional =
+  link_cap_.is_iolink_bi_directional =
       (flags_ & CRAT_IOLINK_FLAGS_BI_DIRECTIONAL) ? cap_true : cap_false;
 
-    link_cap_.is_iolink_dma =
-      (flags_ & CRAT_IOLINK_FLAGS_NO_PEER_TO_PEER_DMA) ? cap_false : cap_true;
+  link_cap_.is_iolink_dma = (flags_ & CRAT_IOLINK_FLAGS_NO_PEER_TO_PEER_DMA) ? cap_false : cap_true;
 
-    return 0;
+  return 0;
 }
 
-IOLinkDirectionType_t DiscoverIOLinkPerNodeDirection(uint32_t src_node_idx, uint32_t dst_node_idx)
-{
-    /*  Note: Lets look at the IOLinks of the source node and see if there is a link to the target node
-     *        Then we do the same inverting the actors (source and target) and see if there is a link
-     */
-    auto direction_type(IOLinkDirectionType_t::kNonDirectional);
-    auto src_links_list = IOLinksPerNodeList_t();
-    auto dst_links_list = IOLinksPerNodeList_t();
-    if (auto src_discover_result = DiscoverLinksPerNode(src_node_idx, &src_links_list, IO_LINK_DIRECTORY);
-        src_discover_result == 0) {
-        for (const auto& [key, value] : src_links_list) {
-            if (key == dst_node_idx) {
-                direction_type = IOLinkDirectionType_t::kUniDirectional;
-                break;
-            }
-        }
+IOLinkDirectionType_t DiscoverIOLinkPerNodeDirection(uint32_t src_node_idx, uint32_t dst_node_idx) {
+  /*  Note: Lets look at the IOLinks of the source node and see if there is a link to the target
+   * node Then we do the same inverting the actors (source and target) and see if there is a link
+   */
+  auto direction_type(IOLinkDirectionType_t::kNonDirectional);
+  auto src_links_list = IOLinksPerNodeList_t();
+  auto dst_links_list = IOLinksPerNodeList_t();
+  if (auto src_discover_result =
+          DiscoverLinksPerNode(src_node_idx, &src_links_list, IO_LINK_DIRECTORY);
+      src_discover_result == 0) {
+    for (const auto& [key, value] : src_links_list) {
+      if (key == dst_node_idx) {
+        direction_type = IOLinkDirectionType_t::kUniDirectional;
+        break;
+      }
     }
+  }
 
-    if (auto dst_discover_result = DiscoverLinksPerNode(dst_node_idx, &dst_links_list, IO_LINK_DIRECTORY);
-        dst_discover_result == 0) {
-        for (const auto& [key, value] : dst_links_list) {
-            if (key == src_node_idx) {
-                direction_type = (direction_type == IOLinkDirectionType_t::kUniDirectional ?
-                                 IOLinkDirectionType_t::kBiDirectional : IOLinkDirectionType_t::kUniDirectional);
-                break;
-            }
-        }
+  if (auto dst_discover_result =
+          DiscoverLinksPerNode(dst_node_idx, &dst_links_list, IO_LINK_DIRECTORY);
+      dst_discover_result == 0) {
+    for (const auto& [key, value] : dst_links_list) {
+      if (key == src_node_idx) {
+        direction_type = (direction_type == IOLinkDirectionType_t::kUniDirectional
+                              ? IOLinkDirectionType_t::kBiDirectional
+                              : IOLinkDirectionType_t::kUniDirectional);
+        break;
+      }
     }
+  }
 
-    return direction_type;
+  return direction_type;
 }
 
-
-} // namespace amd::smi
+}  // namespace amd::smi

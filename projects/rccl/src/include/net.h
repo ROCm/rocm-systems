@@ -17,6 +17,7 @@
 typedef char ncclNetHandle_t[NCCL_NET_HANDLE_MAXSIZE];
 
 ncclResult_t ncclNetInit(struct ncclComm* comm);
+ncclResult_t ncclNetInitFromParent(struct ncclComm* comm, struct ncclComm* parent);
 ncclResult_t ncclNetFinalize(struct ncclComm* comm);
 ncclResult_t ncclNetGetDevCount(int netPluginIndex, int* nPhysDev, int* nVirtDev);
 ncclResult_t ncclNetSetVirtDevCount(int netPluginIndex, int nVirtDev);
@@ -28,13 +29,45 @@ ncclResult_t ncclGpuGdrSupport(struct ncclComm* comm, int* gdrSupport);
 
 extern ncclNet_t ncclNetIb;
 extern ncclNet_t ncclNetSocket;
+extern ncclGin_t ncclGinIbGdaki;
+extern ncclGin_t ncclGinIbProxy;
 
 extern ncclResult_t rcclNetP2pPolicy(void* handle, int isP2p);
 extern int64_t ncclParamDmaBufEnable();
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 extern ncclNet_t rocmNetIb;
+extern ncclNet_t netIbCast;
 extern ncclResult_t rcclRocmNetP2pPolicy(void* handle, int isP2p);
+extern ncclResult_t rcclCastNetP2pPolicy(void* handle, int isP2p);
+
+enum rcclIBNicType {
+    rcclIBNicTypeUnknown = -1,
+    rcclIBNicTypeDefault = 0,
+    rcclIBNicTypeMLX = 1,
+    rcclIBNicTypeAINIC = 2,
+    rcclIBNicTypeBNXT2 = 3,
+    rcclIBNicTypeMax = 4
+};
+
+struct rcclIBNicInfo {
+    rcclIBNicType type;
+    int rate;
+    int count;
+};
+
+/**
+  * @brief Get the primary NIC info
+  * 
+  * @return rcclIBNicInfo (type, rate, count)
+  */
+extern rcclIBNicInfo rcclPrimaryNic();
+/**
+  * @brief Check if the primary NIC is AINIC
+  * 
+  * @return bool
+  */
+extern bool rcclUseAinic();
 #endif
 
 #endif

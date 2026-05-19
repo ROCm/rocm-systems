@@ -31,8 +31,11 @@ foreach(_NAMESPACE rocprofiler-sdk rocprofiler-sdk-rocattach)
     endforeach()
 endforeach()
 
-target_sources(rocprofiler-sdk-rocattach-shared-library
-               PRIVATE rocattach.cpp auxv.cpp ptrace_session.cpp symbol_lookup.cpp)
+target_sources(
+    rocprofiler-sdk-rocattach-shared-library
+    PRIVATE rocattach.cpp auxv.cpp ptrace_runner.cpp ptrace_session.cpp symbol_lookup.cpp)
+add_subdirectory(common)
+
 target_include_directories(
     rocprofiler-sdk-rocattach-shared-library
     INTERFACE $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/source/include>

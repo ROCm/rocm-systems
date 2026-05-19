@@ -1,4 +1,8 @@
 ---
 gcc:
-  Unit_LaunchKernelgccTests: *level_2
-  Unit_hipMallocgccTests: *level_2
+  Unit_LaunchKernelgccTests:
+    <<: *level_2
+    tags: [compiler]
+  Unit_hipMallocgccTests:
+    <<: *level_2
+    tags: [compiler]

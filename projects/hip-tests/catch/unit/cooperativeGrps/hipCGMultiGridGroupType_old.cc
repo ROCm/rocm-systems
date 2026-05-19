@@ -1,24 +1,9 @@
 /*
-Copyright (c) 2020 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
 #include <hip_test_common.hh>
 #include <hip/hip_cooperative_groups.h>
 
@@ -378,7 +363,7 @@ template <typename F> static void test_cg_multi_grid_group_type(F kernel_func, i
   }
 }
 
-TEST_CASE("Unit_hipCGMultiGridGroupType_Basic", "[multigpu]") {
+HIP_TEST_CASE(Unit_hipCGMultiGridGroupType_Basic) {
   int num_devices = 0;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
   num_devices = min(num_devices, MaxGPUs);
@@ -389,8 +374,7 @@ TEST_CASE("Unit_hipCGMultiGridGroupType_Basic", "[multigpu]") {
   for (int i = 0; i < num_devices; i++) {
     HIP_CHECK(hipGetDeviceProperties(&device_properties, i));
     if (!device_properties.cooperativeMultiDeviceLaunch) {
-      HipTest::HIP_SKIP_TEST("Device doesn't support cooperative launch!");
-      return;
+      HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
     }
     max_threads_per_blk = min(max_threads_per_blk, device_properties.maxThreadsPerBlock);
   }
@@ -425,7 +409,7 @@ TEST_CASE("Unit_hipCGMultiGridGroupType_Basic", "[multigpu]") {
   }
 }
 
-TEST_CASE("Unit_hipCGMultiGridGroupType_Barrier", "[multigpu]") {
+HIP_TEST_CASE(Unit_hipCGMultiGridGroupType_Barrier) {
   int num_devices = 0;
   uint32_t loops = GENERATE(1, 2, 3, 4);
   uint32_t warps = GENERATE(4, 8, 16, 32);
@@ -433,16 +417,14 @@ TEST_CASE("Unit_hipCGMultiGridGroupType_Barrier", "[multigpu]") {
 
   HIP_CHECK(hipGetDeviceCount(&num_devices));
   if (num_devices < 2) {
-    HipTest::HIP_SKIP_TEST("Device number is < 2");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   std::vector<hipDeviceProp_t> device_properties(num_devices);
   for (int i = 0; i < num_devices; i++) {
     HIP_CHECK(hipGetDeviceProperties(&device_properties[i], i));
     if (!device_properties[i].cooperativeMultiDeviceLaunch) {
-      HipTest::HIP_SKIP_TEST("Device doesn't support cooperative launch!");
-      return;
+      HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
     }
   }
 

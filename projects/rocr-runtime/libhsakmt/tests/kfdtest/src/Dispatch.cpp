@@ -31,6 +31,7 @@
 #include "KFDBaseComponentTest.hpp"
 
 #define mmCOMPUTE_PGM_RSRC3                                                     0x2e2d
+#define mmCOMPUTE_TMPRING_SIZE_GFX1250                                          0x2e16
 
 Dispatch::Dispatch(const HsaMemoryBuffer& isaBuf, const bool eventAutoReset)
     :m_IsaBuf(isaBuf), m_IndirectBuf(PACKETTYPE_PM4, PAGE_SIZE / sizeof(unsigned int), isaBuf.Node()),
@@ -42,7 +43,7 @@ Dispatch::Dispatch(const HsaMemoryBuffer& isaBuf, const bool eventAutoReset)
     eventDesc.SyncVar.SyncVar.UserData = NULL;
     eventDesc.SyncVar.SyncVarSize = 0;
 
-    hsaKmtCreateEvent(&eventDesc, !eventAutoReset, false, &m_pEop);
+    HSAKMT_CALL(hsaKmtCreateEvent, g_baseTest->m_hsakmt_current_ctx, &eventDesc, !eventAutoReset, false, &m_pEop);
 
     m_FamilyId  = g_baseTest->GetFamilyIdFromNodeId(isaBuf.Node());
     m_NeedCwsrWA = g_baseTest->NeedCwsrWA(isaBuf.Node());
@@ -50,7 +51,7 @@ Dispatch::Dispatch(const HsaMemoryBuffer& isaBuf, const bool eventAutoReset)
 
 Dispatch::~Dispatch() {
     if (m_pEop != NULL)
-        hsaKmtDestroyEvent(m_pEop);
+        HSAKMT_CALL(hsaKmtDestroyEvent, g_baseTest->m_hsakmt_current_ctx, m_pEop);
 }
 
 void Dispatch::SetArgs(void* pArg1, void* pArg2) {
@@ -99,14 +100,14 @@ void Dispatch::Submit(BaseQueue& queue) {
 }
 
 void Dispatch::Sync(unsigned int timeout) {
-    ASSERT_SUCCESS(hsaKmtWaitOnEvent(m_pEop, timeout));
+    ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtWaitOnEvent, g_baseTest->m_hsakmt_current_ctx, m_pEop, timeout));
 }
 
 // Returning with status in order to allow actions to be performed before process termination
 int Dispatch::SyncWithStatus(unsigned int timeout) {
     int stat;
 
-    return ((stat = hsaKmtWaitOnEvent(m_pEop, timeout)) != HSAKMT_STATUS_SUCCESS);
+    return ((stat = HSAKMT_CALL(hsaKmtWaitOnEvent, g_baseTest->m_hsakmt_current_ctx, m_pEop, timeout)) != HSAKMT_STATUS_SUCCESS);
 }
 
 void Dispatch::BuildIb() {
@@ -248,7 +249,10 @@ void Dispatch::BuildIb() {
 
     m_IndirectBuf.AddPacket(PM4SetShaderRegPacket(mmCOMPUTE_RESOURCE_LIMITS, COMPUTE_RESOURCE_LIMITS,
                                                   ARRAY_SIZE(COMPUTE_RESOURCE_LIMITS)));
-    m_IndirectBuf.AddPacket(PM4SetShaderRegPacket(mmCOMPUTE_TMPRING_SIZE, COMPUTE_TMPRING_SIZE,
+    m_IndirectBuf.AddPacket(PM4SetShaderRegPacket(m_FamilyId >= FAMILY_GFX125X ?
+                                                  mmCOMPUTE_TMPRING_SIZE_GFX1250 :
+                                                  mmCOMPUTE_TMPRING_SIZE,
+                                                  COMPUTE_TMPRING_SIZE,
                                                   ARRAY_SIZE(COMPUTE_TMPRING_SIZE)));
     m_IndirectBuf.AddPacket(PM4SetShaderRegPacket(mmCOMPUTE_RESTART_X, COMPUTE_RESTART_VALUES,
                                                   ARRAY_SIZE(COMPUTE_RESTART_VALUES)));

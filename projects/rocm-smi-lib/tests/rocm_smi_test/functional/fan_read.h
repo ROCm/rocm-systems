@@ -49,7 +49,7 @@
 
 class TestFanRead : public TestBase {
  public:
-    TestFanRead();
+  TestFanRead();
 
   // @Brief: Destructor for test case of TestFanRead
   virtual ~TestFanRead();
@@ -60,7 +60,7 @@ class TestFanRead : public TestBase {
   // @Brief: Core measurement execution
   virtual void Run();
 
-  // @Brief: Clean up and retrive the resource
+  // @Brief: Clean up and retrieve the resource
   virtual void Close();
 
   // @Brief: Display  results

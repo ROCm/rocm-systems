@@ -1,23 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <tuple>
 
@@ -87,14 +72,14 @@ static void HipGetSymbolSizeAddressTest(const void* symbol) {
   HipGetSymbolSizeAddressTest<type, kArraySize, type##_arr_address_validation_kernel>(             \
       SYMBOL(type##_arr));
 
-TEST_CASE("Unit_hipGetSymbolSizeAddress_Positive_Basic") {
+HIP_TEST_CASE(Unit_hipGetSymbolSizeAddress_Positive_Basic) {
   SECTION("int") { HIP_GET_SYMBOL_SIZE_ADDRESS_TEST(int); }
   SECTION("float") { HIP_GET_SYMBOL_SIZE_ADDRESS_TEST(float); }
   SECTION("char") { HIP_GET_SYMBOL_SIZE_ADDRESS_TEST(char); }
   SECTION("double") { HIP_GET_SYMBOL_SIZE_ADDRESS_TEST(double); }
 }
 
-TEST_CASE("Unit_hipGetSymbolAddress_Negative_Parameters") {
+HIP_TEST_CASE(Unit_hipGetSymbolAddress_Negative_Parameters) {
 // Causes a segfault in CUDA
 #if HT_AMD
   SECTION("devPtr == nullptr") {
@@ -108,7 +93,7 @@ TEST_CASE("Unit_hipGetSymbolAddress_Negative_Parameters") {
   }
 }
 
-TEST_CASE("Unit_hipGetSymbolSize_Negative_Parameters") {
+HIP_TEST_CASE(Unit_hipGetSymbolSize_Negative_Parameters) {
 // Causes a segfault in CUDA
 #if HT_AMD
   SECTION("size == nullptr") {

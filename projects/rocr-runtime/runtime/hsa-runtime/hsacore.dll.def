@@ -147,6 +147,7 @@ EXPORTS
   hsa_amd_memory_fill
   hsa_amd_memory_async_copy
   hsa_amd_memory_async_copy_on_engine
+  hsa_amd_memory_async_batch_copy
   hsa_amd_memory_copy_engine_status
   hsa_amd_memory_get_preferred_copy_engine
   hsa_amd_memory_async_copy_rect
@@ -230,3 +231,4 @@ EXPORTS
   hsa_ext_image_create_v2
   hsa_ext_image_data_get_info_v2
   hsa_ext_image_destroy_v2
+  hsa_amd_agent_preload

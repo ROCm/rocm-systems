@@ -41,11 +41,3 @@ target_include_directories(
 # Set the VERSION and SOVERSION values
 set_property(TARGET ${RDCCLIENT_LIB} PROPERTY SOVERSION "${VERSION_MAJOR}")
 set_property(TARGET ${RDCCLIENT_LIB} PROPERTY VERSION "${SO_VERSION_STRING}")
-
-if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
-    add_custom_command(
-        TARGET ${RDCCLIENT_LIB}
-        POST_BUILD
-        COMMAND ${CMAKE_STRIP} ${RDCCLIENT_LIB_COMPONENT}.so
-    )
-endif()

@@ -3445,8 +3445,29 @@ typedef union rocprofiler_hip_api_args_t
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 26
     struct
     {
-        hipModuleLoadingMode_t* mode;
-    } hipModuleGetLoadingMode;
+        void**             dev_ptrs;
+        size_t*            sizes;
+        size_t             count;
+        hipMemLocation*    prefetch_locs;
+        size_t*            prefetch_loc_idxs;
+        size_t             num_prefetch_locs;
+        unsigned long long flags;
+        hipStream_t        stream;
+    } hipMemPrefetchBatchAsync;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 27
+    struct
+    {
+        int*                     clusterSize;
+        const void*              f;
+        const hipLaunchConfig_t* config;
+    } hipOccupancyMaxPotentialClusterSize;
+    struct
+    {
+        int*                     numClusters;
+        const void*              f;
+        const hipLaunchConfig_t* config;
+    } hipOccupancyMaxActiveClusters;
 #endif
 } rocprofiler_hip_api_args_t;
 

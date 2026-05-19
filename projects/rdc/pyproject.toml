@@ -1,0 +1,20 @@
+[tool.ruff]
+line-length = 100
+
+extend-exclude = [
+    "build",
+    "build-*",
+    "_build",
+    "docs",
+    "third_party",
+]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I"]
+ignore = ["E501", "E401", "F403", "F405"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = true
+line-ending = "auto"

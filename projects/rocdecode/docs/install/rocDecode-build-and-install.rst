@@ -2,60 +2,76 @@
   :description: Build and install rocDecode with the source code
   :keywords: install, building, rocDecode, AMD, ROCm, source code, developer
 
-********************************************************************
-Building and installing rocDecode from source code
-********************************************************************
+***************************************
+Build and install rocDecode from source
+***************************************
 
-If you will be contributing to the rocDecode code base, or if you want to preview new features, build rocDecode from its source code.
+To build rocDecode as part of the ROCm Core SDK, see `TheRock build
+instructions
+<https://github.com/ROCm/TheRock/blob/main/docs/development/README.md>`__.
+TheRock is the recommended way to build ROCm components from source.
 
-If you will not be previewing features or contributing to the code base, use the :doc:`package installers <./rocDecode-package-install>` to install rocDecode. 
+Alternatively, you can build rocDecode standalone using the following
+instructions.
 
-:doc:`Clone the rocDecode project <./rocDecode-clone-project>`.
+Prerequisites
+=============
 
-Change directory to the rocDecode project directory.
+rocDecode requires a supported AMD GPU. For more information, see :ref:`ROCm
+Core SDK components <rocm:release-components>`.
 
-.. code:: shell
+* HIP runtime and development libraries
+* AMD Clang++ compiler (C++17 required)
+* Libva and VA-API drivers
+* Libdrm (amdgpu)
+* CMake and pkg-config
 
-  cd rocm-systems/projects/rocdecode
+To build and run samples and extended tests, FFmpeg development libraries must be installed separately.
+For example, on Ubuntu:
 
-Use `rocDecode-setup.py <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/rocDecode-setup.py>`_ to install the required prerequisites:
+.. code-block:: shell
 
-.. code:: shell
+   sudo apt install libavcodec-dev libavformat-dev libavutil-dev
 
-  python3 rocDecode-setup.py  [--rocm_path ROCM_INSTALLATION_PATH; default=/opt/rocm]
-                              [--runtime {ON|OFF}; default=ON]
-                              [--developer {ON|OFF}; default=OFF]
+Build and install
+=================
 
-.. note:: 
+rocDecode is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. For TheRock installation details, refer to the `TheRock documentation <https://github.com/ROCm/TheRock#readme>`_.
 
-  Never run ``rocDecode-setup.py`` with ``--runtime OFF``.  
-  
-  ``--developer ON`` is required to use the code samples.
+1. The rocDecode source code is available from the `ROCm systems GitHub repository <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocjpeg>`__. Use sparse checkout when cloning the rocJPEG project. Clone the repo using `sparse-checkout`.
 
-Build and install rocDecode using the following commands:
+   .. code-block:: bash
 
-.. code:: shell
+      git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git
+      cd rocm-systems
+      git sparse-checkout init --cone
+      git sparse-checkout set projects/rocdecode
 
-  mkdir build && cd build
-  cmake ../
-  make -j8
-  sudo make install
+2. Then use ``git checkout`` to check out the branch you need.
 
-After installation, the rocDecode libraries will be copied to ``/opt/rocm/lib`` and the rocDecode header files will be copied to ``/opt/rocm/include/rocdecode``.
+   .. code-block:: bash
 
-Build and install the rocDecode test module. This module is required if you'll be using the rocDecode samples, and can only be installed if ``rocDecode-setup.py`` was run with ``--developer ON``.
+      git checkout develop
+      cd projects/rocdecode
 
-.. code:: shell
+3. Build and install rocDecode using the following commands:
 
-  mkdir rocdecode-test && cd rocdecode-test
-  cmake /opt/rocm/share/rocdecode/test/
-  ctest -VV
+   .. code-block:: bash
 
-Run ``make test`` to test your build. To run the test with the verbose option, run ``make test ARGS="-VV"``. 
+      mkdir build && cd build
+      cmake ../
+      make -j8
+      sudo make install
 
-To create a package installer for rocDecode, run:
+   After installation, the rocDecode libraries will be copied to ``/opt/rocm/lib`` and the rocDecode header files will be copied to ``/opt/rocm/include/rocdecode``.
 
-.. code:: shell
+4. To run the installed CTest-based verification:
 
-  sudo make package
+   .. code-block:: bash
+
+      mkdir rocdecode-test && cd rocdecode-test
+      cmake /opt/rocm/share/rocdecode/test/
+      ctest -VV
+
+   Run ``make test`` to test your build. To run the test with the verbose option, run ``make test ARGS="-VV"``.
 

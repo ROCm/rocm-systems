@@ -213,8 +213,7 @@ def build_agent_id_string(agent_index_value, prefix=""):
         return ""
 
 
-def write_kernel_csv(importData, config) -> None:
-
+def get_kernel_csv_query(config) -> str:
     agent_id = build_agent_id_string(config.agent_index_value)
 
     if config.kernel_rename:
@@ -235,6 +234,7 @@ def write_kernel_csv(importData, config) -> None:
         "stack_id AS Correlation_Id",
         "start AS Start_Timestamp",
         "end AS End_Timestamp",
+        "(end - start) AS Duration",
         "lds_size AS Lds_Block_Size",
         "scratch_size",
         "vgpr_count",
@@ -248,19 +248,19 @@ def write_kernel_csv(importData, config) -> None:
         "grid_z AS Grid_Size_Z",
     ]
 
-    aliased_headers = []
-    for column in select_columns:
-        aliased_headers.append(column)
+    select_clause = ",\n".join(select_columns)
 
-    select_clause = ",\n".join(aliased_headers)
-
-    query = f"""
+    return f"""
         SELECT
             {select_clause}
         FROM "kernels"
         ORDER BY
             guid ASC, start ASC, end DESC
     """
+
+
+def write_kernel_csv(importData, config) -> None:
+    query = get_kernel_csv_query(config)
     write_sql_query_to_csv(importData, config, query, "kernel")
 
 

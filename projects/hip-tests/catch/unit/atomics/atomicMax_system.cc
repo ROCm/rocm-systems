@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "min_max_common.hh"
 
@@ -85,7 +69,7 @@ static void runAtomicMaxSystemScatteredAddressesTest() {
  *  - Multi-device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_atomicMax_system_Positive_Peer_GPUs_Same_Address", "[multigpu]") {
+HIP_TEST_CASE(Unit_atomicMax_system_Positive_Peer_GPUs_Same_Address) {
   SECTION("int") { runAtomicMaxSystemSameAddressTest<int>(); }
   SECTION("unsigned int") { runAtomicMaxSystemSameAddressTest<unsigned int>(); }
   SECTION("unsigned long") { runAtomicMaxSystemSameAddressTest<unsigned long>(); }
@@ -109,7 +93,7 @@ TEST_CASE("Unit_atomicMax_system_Positive_Peer_GPUs_Same_Address", "[multigpu]")
  *  - Multi-device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_atomicMax_system_Positive_Peer_GPUs_Adjacent_Addresses", "[multigpu]") {
+HIP_TEST_CASE(Unit_atomicMax_system_Positive_Peer_GPUs_Adjacent_Addresses) {
   SECTION("int") { runAtomicMaxSystemAdjacentAddressesTest<int>(); }
   SECTION("unsigned int") { runAtomicMaxSystemAdjacentAddressesTest<unsigned int>(); }
   SECTION("unsigned long") { runAtomicMaxSystemAdjacentAddressesTest<unsigned long>(); }
@@ -133,7 +117,7 @@ TEST_CASE("Unit_atomicMax_system_Positive_Peer_GPUs_Adjacent_Addresses", "[multi
  *  - Multi-device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_atomicMax_system_Positive_Peer_GPUs_Scattered_Addresses", "[multigpu]") {
+HIP_TEST_CASE(Unit_atomicMax_system_Positive_Peer_GPUs_Scattered_Addresses) {
   SECTION("int") { runAtomicMaxSystemScatteredAddressesTest<int>(); }
   SECTION("unsigned int") { runAtomicMaxSystemScatteredAddressesTest<unsigned int>(); }
   SECTION("unsigned long") { runAtomicMaxSystemScatteredAddressesTest<unsigned long>(); }

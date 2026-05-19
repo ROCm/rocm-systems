@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2023 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "device/device.hpp"
 #include "thread/monitor.hpp"
@@ -87,7 +73,7 @@ static_assert(static_cast<uint32_t>(device::Memory::MemAccess::kMemAccessReadWri
 
 namespace amd {
 
-amd::Monitor Device::lockP2P_("Lock P2P ON/OFF");
+std::recursive_mutex Device::lockP2P_;
 std::pair<const Isa*, const Isa*> Isa::supportedIsas() {
   constexpr amd::Isa::Feature NONE = amd::Isa::Feature::Unsupported;
   constexpr amd::Isa::Feature ANY = amd::Isa::Feature::Any;
@@ -259,6 +245,7 @@ std::pair<const Isa*, const Isa*> Isa::supportedIsas() {
       {"gfx11-generic", true, true, 11, 0, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
       {"gfx1200", true, true, 12, 0, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
       {"gfx1201", true, true, 12, 0, 1, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1250", true, true, 12, 5, 0, NONE, NONE, 4, 32, 1, 256, 320* Ki, 64, 1024},
       {"gfx12-generic", true, true, 12, 0, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
   };
   return std::make_pair(std::begin(supportedIsas_), std::end(supportedIsas_));
@@ -346,7 +333,7 @@ AppProfile Device::appProfile_;
 
 Context* Device::glb_ctx_ = nullptr;
 // P2P Staging Lock
-Monitor Device::p2p_stage_ops_(true);
+std::recursive_mutex Device::p2p_stage_ops_;
 Memory* Device::p2p_stage_ = nullptr;
 
 cl_int Device::gpu_error_ = CL_SUCCESS;
@@ -373,11 +360,10 @@ void MemObjMap::RemoveMemObj(const void* k) {
   guarantee(rval == 1, "Memobj map does not have ptr: 0x%x", reinterpret_cast<uintptr_t>(k));
 }
 
-amd::Memory* MemObjMap::FindMemObj(const void* k, size_t* offset, Device* dev) {
-  std::shared_lock lock(AllocatedLock_);
-  uintptr_t key = reinterpret_cast<uintptr_t>(k);
+MemObjMap::LookupResult MemObjMap::findMemObjNoLock(const void* ptr, Device* dev) {
+  uintptr_t key = reinterpret_cast<uintptr_t>(ptr);
 
-  // First search the global map
+  // First search the global map using upper_bound
   auto it = MemObjMap_.upper_bound(key);
   if (it != MemObjMap_.begin()) {
     --it;
@@ -386,19 +372,115 @@ amd::Memory* MemObjMap::FindMemObj(const void* k, size_t* offset, Device* dev) {
                           ? sizeof(mem->getUserData().hsa_handle)
                           : mem->getSize();
     if (key >= it->first && key < (it->first + mem_size)) {
-      if (offset != nullptr) {
-        *offset = key - it->first;
-      }
-      return mem;
+      return {it->second, key - it->first};
     }
   }
 
   // Search per-device va maps on Windows (due to overlapping ranges)
   if (IS_WINDOWS && dev != nullptr) {
-    return dev->FindDevMemObj(k, offset);
+    size_t offset = 0;
+    amd::Memory* mem = dev->FindDevMemObj(ptr, &offset);
+    return {mem, offset};
   }
 
-  return nullptr;
+  return {nullptr, 0};
+}
+
+amd::Memory* MemObjMap::FindMemObj(const void* k, size_t* offset, Device* dev) {
+  std::shared_lock lock(AllocatedLock_);
+  auto result = findMemObjNoLock(k, dev);
+  if (offset != nullptr) {
+    *offset = result.offset;
+  }
+  return result.memory;
+}
+
+amd::Memory* MemObjMap::FindAndRemoveMemObj(const void* k) {
+  std::unique_lock lock(AllocatedLock_);
+  uintptr_t key = reinterpret_cast<uintptr_t>(k);
+
+  // Find the memory object in the map using upper_bound
+  auto it = MemObjMap_.upper_bound(key);
+  if (it == MemObjMap_.begin()) {
+    return nullptr;
+  }
+  --it;
+  amd::Memory* mem = it->second;
+  size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM)
+                        ? sizeof(mem->getUserData().hsa_handle)
+                        : mem->getSize();
+  if (key < it->first || key >= (it->first + mem_size)) {
+    return nullptr;
+  }
+
+  // Found - remove and return
+  MemObjMap_.erase(it);
+  return mem;
+}
+
+void MemObjMap::FindMemObjBatch(const void* const* ptrs, size_t count,
+                                 std::vector<amd::Memory*>& memories,
+                                 std::vector<size_t>& offsets, Device* dev) {
+  if (memories.size() != count) {
+    memories.resize(count);
+  }
+  if (offsets.size() != count) {
+    offsets.resize(count);
+  }
+
+  std::shared_lock lock(AllocatedLock_);
+
+  for (size_t i = 0; i < count; ++i) {
+    auto result = findMemObjNoLock(ptrs[i], dev);
+    memories[i] = result.memory;
+    offsets[i] = result.offset;
+  }
+}
+
+void MemObjMap::FindMemObjBatchPairs(const void* const* srcs, const void* const* dsts,
+                                      size_t count,
+                                      std::vector<amd::Memory*>& src_memories,
+                                      std::vector<amd::Memory*>& dst_memories,
+                                      std::vector<size_t>& src_offsets,
+                                      std::vector<size_t>& dst_offsets, Device* dev) {
+  if (src_memories.size() != count) {
+    src_memories.resize(count);
+  }
+  if (dst_memories.size() != count) {
+    dst_memories.resize(count);
+  }
+  if (src_offsets.size() != count) {
+    src_offsets.resize(count);
+  }
+  if (dst_offsets.size() != count) {
+    dst_offsets.resize(count);
+  }
+
+  std::shared_lock lock(AllocatedLock_);
+
+  for (size_t i = 0; i < count; ++i) {
+    auto src_result = findMemObjNoLock(srcs[i], dev);
+    src_memories[i] = src_result.memory;
+    src_offsets[i] = src_result.offset;
+
+    auto dst_result = findMemObjNoLock(dsts[i], dev);
+    dst_memories[i] = dst_result.memory;
+    dst_offsets[i] = dst_result.offset;
+  }
+}
+
+void MemObjMap::FindMemObjPairs(const void* src, const void* dst,
+                                 amd::Memory*& src_memory, amd::Memory*& dst_memory,
+                                 size_t& src_offset, size_t& dst_offset, Device* dev) {
+  std::shared_lock lock(AllocatedLock_);
+
+  auto src_result = findMemObjNoLock(src, dev);
+  src_memory = src_result.memory;
+  src_offset = src_result.offset;
+
+  auto dst_result = findMemObjNoLock(dst, dev);
+  dst_memory = dst_result.memory;
+  dst_offset = dst_result.offset;
 }
 
 void MemObjMap::UpdateAccess(amd::Device* peerDev) {
@@ -422,17 +504,27 @@ void MemObjMap::UpdateAccess(amd::Device* peerDev) {
 
 void MemObjMap::Purge(amd::Device* dev) {
   assert(dev != nullptr);
-  std::unique_lock lock(AllocatedLock_);
-  for (auto it = MemObjMap_.cbegin(); it != MemObjMap_.cend();) {
-    amd::Memory* memObj = it->second;
-    unsigned int flags = memObj->getMemFlags();
-    const std::vector<Device*>& devices = memObj->getContext().devices();
-    if (devices.size() == 1 && devices[0] == dev && !(flags & ROCCLR_MEM_INTERNAL_MEMORY)) {
-      memObj->release();
-      it = MemObjMap_.erase(it);
-    } else {
-      ++it;
+  std::vector<amd::Memory*> toRelease{};
+  {
+    std::unique_lock lock(AllocatedLock_);
+    for (auto it = MemObjMap_.cbegin(); it != MemObjMap_.cend();) {
+      amd::Memory* memObj = it->second;
+      unsigned int flags = memObj->getMemFlags();
+      const std::vector<Device*>& devices = memObj->getContext().devices();
+      if (devices.size() == 1 && devices[0] == dev && !(flags & ROCCLR_MEM_INTERNAL_MEMORY)) {
+        toRelease.push_back(memObj);
+        it = MemObjMap_.erase(it);
+      } else {
+        ++it;
+      }
     }
+  }
+
+  // Release memObjs outside the locked region
+  // memObj->release() may trigger RemoveIpcHandleMemObj() call if memObj is an IpcBuffer
+  // where the lock would be acquired a second time
+  for (auto* memObj : toRelease) {
+    memObj->release();
   }
 }
 
@@ -618,8 +710,7 @@ Device::BlitProgram::~BlitProgram() {
 
 bool Device::BlitProgram::create(amd::Device* device, const std::string& extraKernels,
                                  const std::string& extraOptions) {
-  std::vector<amd::Device*> devices;
-  devices.push_back(device);
+  std::vector<amd::Device*> devices{device};
   int32_t retval = CL_SUCCESS;
   std::string kernels(device::BlitLinearSourceCode);
   std::string image_kernels(device::BlitImageSourceCode);
@@ -678,12 +769,17 @@ bool Device::init() {
   devices_ = nullptr;
   appProfile_.init();
 
+  if (IS_WINDOWS && flagIsDefault(GPU_ENABLE_PAL)) {
+    // On Windows by default keep PAL path for now, until we completely switch to ROCr backend
+    // Without this, roc::Device::init() returns true & disables PAL path in below code
+    GPU_ENABLE_PAL = 1;
+  }
 
 // IMPORTANT: Note that we are initialiing HSA stack first and then
 // GPU stack. The order of initialization is signiicant and if changed
 // amd::Device::registerDevice() must be accordingly modified.
 #if defined(WITH_HSA_DEVICE)
-  if ((GPU_ENABLE_PAL != 1) || flagIsDefault(GPU_ENABLE_PAL)) {
+  if ((GPU_ENABLE_PAL == 0) || (GPU_ENABLE_PAL == 2)) {
     // Return value of roc::Device::init()
     // If returned false, error initializing HSA stack.
     // If returned true, either HSA not installed or HSA stack
@@ -701,10 +797,8 @@ bool Device::init() {
       }
       GPU_ENABLE_PAL = 1;
     } else {
-      // ROC initialization successful, enable direct dispatch
-      if (flagIsDefault(AMD_DIRECT_DISPATCH)) {
-        AMD_DIRECT_DISPATCH = true;
-      }
+      // ROC initialization was successful, force direct dispatch
+      AMD_DIRECT_DISPATCH = true;
       // Disable PAL path
       GPU_ENABLE_PAL = 0;
     }
@@ -799,9 +893,7 @@ Device::~Device() {
 }
 
 bool Device::ValidateComgr() {
-  // Check if Lightning compiler was requested
-  constexpr bool kComgrVersioned = false;
-  std::call_once(amd::Comgr::initialized, amd::Comgr::LoadLib, kComgrVersioned);
+  std::call_once(amd::Comgr::initialized, amd::Comgr::LoadLib);
   return amd::Comgr::IsReady();
 }
 
@@ -820,7 +912,7 @@ bool Device::create(const Isa& isa) {
   assert(!vaCacheAccess_ && !vaCacheMap_);
   isa_ = &isa;
   // VA Cache Ops Lock
-  vaCacheAccess_ = new amd::Monitor(true);
+  vaCacheAccess_ = new std::recursive_mutex();
   if (nullptr == vaCacheAccess_) {
     return false;
   }
@@ -864,7 +956,7 @@ void Device::addVACache(device::Memory* memory) const {
   // Make sure system memory has direct access
   if (memory->isHostMemDirectAccess()) {
     // VA cache access must be serialised
-    amd::ScopedLock lk(*vaCacheAccess_);
+    std::scoped_lock lk(*vaCacheAccess_);
     void* start = memory->owner()->getHostMem();
     size_t offset;
     device::Memory* doubleMap = findMemoryFromVA(start, &offset);
@@ -883,7 +975,7 @@ void Device::removeVACache(const device::Memory* memory) const {
   // Make sure system memory has direct access
   if (memory->isHostMemDirectAccess() && memory->owner()) {
     // VA cache access must be serialised
-    amd::ScopedLock lk(*vaCacheAccess_);
+    std::scoped_lock lk(*vaCacheAccess_);
     void* start = memory->owner()->getHostMem();
     vaCacheMap_->erase(reinterpret_cast<uintptr_t>(start));
   }
@@ -891,7 +983,7 @@ void Device::removeVACache(const device::Memory* memory) const {
 
 device::Memory* Device::findMemoryFromVA(const void* ptr, size_t* offset) const {
   // VA cache access must be serialised
-  amd::ScopedLock lk(*vaCacheAccess_);
+  std::scoped_lock lk(*vaCacheAccess_);
 
   uintptr_t key = reinterpret_cast<uintptr_t>(ptr);
   auto it = vaCacheMap_->upper_bound(reinterpret_cast<uintptr_t>(ptr));
@@ -984,7 +1076,7 @@ bool Device::getDeviceIDs(cl_device_type deviceType, uint32_t numEntries, cl_dev
 
 bool Device::enableP2P(amd::Device* ptrDev) {
   assert(ptrDev != nullptr);
-  amd::ScopedLock lock(lockP2P_);
+  std::scoped_lock lock(lockP2P_);
   Device* peerDev = static_cast<Device*>(ptrDev);
   if (std::find(enabled_p2p_devices_.begin(), enabled_p2p_devices_.end(), peerDev) ==
       enabled_p2p_devices_.end()) {
@@ -997,7 +1089,7 @@ bool Device::enableP2P(amd::Device* ptrDev) {
 
 bool Device::disableP2P(amd::Device* ptrDev) {
   assert(ptrDev != nullptr);
-  amd::ScopedLock lock(lockP2P_);
+  std::scoped_lock lock(lockP2P_);
   Device* peerDev = static_cast<Device*>(ptrDev);
   // if device is present then remove
   auto it = std::find(enabled_p2p_devices_.begin(), enabled_p2p_devices_.end(), peerDev);
@@ -1056,6 +1148,13 @@ bool Device::IpcCreate(void* dev_ptr, size_t* mem_size, char* handle, size_t* me
     return false;
   }
 
+  // VMM allocations must use hipMemExportToShareableHandle for IPC.
+  if (amd_mem_obj->getMemFlags() & CL_MEM_VA_RANGE_AMD) {
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+             "IPC is not supported for VMM allocations (dev_ptr: %p)", dev_ptr);
+    return false;
+  }
+
   // Get the original pointer from the amd::Memory object
   void* orig_dev_ptr = nullptr;
   if (amd_mem_obj->getSvmPtr() != nullptr) {
@@ -1108,6 +1207,23 @@ bool Device::IpcAttach(const char* handle, size_t mem_size, size_t mem_offset, u
   if (mem_obj_exist == nullptr) {
     // Add the original mem_ptr to the MemObjMap with newly created amd_mem_obj
     amd::MemObjMap::AddMemObj(amd_mem_obj->getSvmPtr(), amd_mem_obj);
+  } else if (mem_obj_exist->ipcShared()) {
+    // Stale IPC import at the same VA. The app freed memory on the
+    // exporter side and reallocated at the same VA without the importer calling
+    // hipIpcCloseMemHandle. Replace the stale object with the new mapping.
+    void* old_ptr = mem_obj_exist->getSvmPtr();
+    void* new_ptr = amd_mem_obj->getSvmPtr();
+    amd::MemObjMap::RemoveIpcHandleMemObj(mem_obj_exist);
+    amd::MemObjMap::RemoveMemObj(old_ptr);
+
+    if (old_ptr == new_ptr) {
+      // Clear ipcShared to prevent the destructor from calling ipc_memory_detach,
+      // which would unmap the new (valid) mapping at this VA.
+      mem_obj_exist->setIpcShared(false);
+    }
+    // Different VA: destructor will call ipc_memory_detach to unmap the old VA.
+    mem_obj_exist->release();
+    amd::MemObjMap::AddMemObj(new_ptr, amd_mem_obj);
   } else {
     amd_mem_obj->release();
     amd_mem_obj = mem_obj_exist;
@@ -1137,19 +1253,29 @@ void Device::IpcDetach(amd::Memory* amd_mem_obj) const {
 }
 
 std::vector<amd::CommandQueue*> Device::getActiveQueues() {
+  std::vector<amd::CommandQueue*> result;
+  result.reserve(activeQueues.size());
+
   amd::ScopedLock lock(activeQueuesLock_);
-  for (auto it = activeQueues.begin(); it != activeQueues.end();) {
-    if ((*it)->referenceCount() == 0) {
+  for (auto it = activeQueues.begin(); it != activeQueues.end(); ++it) {
+    if (!it->second) {
+      // An inactive queue might have been releeased already, so dereferencing
+      // it->first isn't safe
+      continue;
+    }
+    if (it->first->referenceCount() == 0) {
       // It is being terminated in HostQueue::terminate().
       // We should not wait for commands in a queue being terminated.
-      it = activeQueues.erase(it);
+      it->second = false;
     } else {
+      assert(it->second);
       // In case the queue will be destroyed in Stream::Destroy().
-      (*it)->retain();
-      ++it;
+      it->first->retain();
+      result.push_back(it->first);
     }
   }
-  return std::vector<amd::CommandQueue*>(activeQueues.begin(), activeQueues.end());
+
+  return result;
 }
 
 // =================================================================================================
@@ -1184,6 +1310,8 @@ void Device::RemoveHostcallMemory(amd::Memory* memory) {
     hostcall_allocated_memories_.erase(it);
   }
 }
+
+void Device::ClearHostcallMemories() { hostcall_allocated_memories_.clear(); }
 
 // ================================================================================================
 void Device::AddDevMemObj(const void* k, amd::Memory* memObj) {
@@ -1248,13 +1376,14 @@ Settings::Settings() : value_(0) {
   }
 
   gwsInitSupported_ = true;
+  groupMemCarveout_ = false;
 }
 
 void Memory::saveMapInfo(const void* mapAddress, const amd::Coord3D origin,
                          const amd::Coord3D region, uint mapFlags, bool entire,
                          amd::Image* baseMip) {
   // Map/Unmap must be serialized.
-  amd::ScopedLock lock(owner()->lockMemoryOps());
+  std::scoped_lock lock(owner()->lockMemoryOps());
 
   WriteMapInfo info = {};
   WriteMapInfo* pInfo = &info;
