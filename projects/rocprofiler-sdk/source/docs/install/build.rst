@@ -13,8 +13,7 @@ instructions
 <https://github.com/ROCm/TheRock/blob/main/docs/development/README.md>`__.
 TheRock is the recommended way to build ROCm components from source.
 
-Alternatively, you can build ROCprofiler-SDK standalone using the following
-instructions.
+Alternatively, you can build ROCprofiler-SDK standalone using the instructions given in the following sections.
 
 Supported systems
 =================
