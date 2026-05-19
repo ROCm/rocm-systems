@@ -43,7 +43,11 @@ add_executable(rocjitsu_tests
     transcendental_test.cpp
     analysis/liveness_test.cpp
     patch/spill_manager_test.cpp
-    dbt/translate_test.cpp
+    dbt/dbt_test_utils.cpp
+    dbt/dbt_encoding_test.cpp
+    dbt/dbt_patcher_test.cpp
+    dbt/dbt_waitcnt_test.cpp
+    dbt/dbt_binary_e2e_test.cpp
     mtype_flags_test.cpp
     kfd_ioctl_test.cpp
     waitcnt_counter_test.cpp
@@ -150,7 +154,7 @@ if(HSA_RUNTIME64)
         TIMEOUT 30)
     message(STATUS "HSA init test enabled (found ${HSA_RUNTIME64})")
 
-    # --- HSA translate test: CDNA4→RDNA4 on-device verification ---
+    # --- HSA translate test: CDNA4->RDNA4 on-device verification ---
     # Requires both compiled device kernels AND an RDNA4 GPU on the host.
     if(HAS_DEVICE_KERNELS)
         # Detect RDNA4 GPU at configure time via rocm_agent_enumerator.
@@ -166,14 +170,18 @@ if(HSA_RUNTIME64)
             endif()
         endif()
 
-        add_executable(hsa_translate_test dbt/hsa_translate_test.cpp)
+        add_executable(hsa_translate_test
+            dbt/hsa_test_utils.cpp
+            dbt/hsa_translate_test.cpp)
         target_include_directories(hsa_translate_test PRIVATE
             ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
             ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
             ${CMAKE_SOURCE_DIR}/lib/util/include
+            ${CMAKE_SOURCE_DIR}
+            ${CMAKE_SOURCE_DIR}/tools
             /opt/rocm/include)
         target_link_libraries(hsa_translate_test PRIVATE
-            ${RJ_OBJECT_LIBS} ${HSA_RUNTIME64} GTest::gtest GTest::gtest_main)
+            rocjitsu_tooling rocjitsu_hsa_tooling ${HSA_RUNTIME64} GTest::gtest GTest::gtest_main)
         target_link_options(hsa_translate_test PRIVATE -Wl,-rpath,/opt/rocm/lib)
         target_compile_definitions(hsa_translate_test PRIVATE
             HAS_HOST_AMDGPU=1
@@ -275,8 +283,8 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
             Rect_64x1x64 Rect_7x11x13 AlphaBeta BetaZero)
             rj_add_hip_test_case(hip_gemm_test "RocblasGemmTest.${TC}")
         endforeach()
-        # Large SDMA stress test — 48 MB H2D transfer, needs extended timeout.
-        # Large GEMM stress test — validates SDMA + LDS isolation for big K.
+        # Large SDMA stress test: 48 MB H2D transfer, needs extended timeout.
+        # Large GEMM stress test: validates SDMA + LDS isolation for big K.
         add_test(NAME "RocblasGemmTest.Large_2048x2048"
             COMMAND ${GEMM_BIN} --gtest_filter=RocblasGemmTest.Large_2048x2048)
         set_tests_properties("RocblasGemmTest.Large_2048x2048" PROPERTIES

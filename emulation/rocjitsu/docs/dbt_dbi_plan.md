@@ -5332,7 +5332,7 @@ Phase 16: RDNA translation pairs (post-MVP; decoders done in Phase A)
 - `lib/python/amdisa/legalization.py` — legalization table generator
 - `lib/python/amdisa/legalization_codegen.py` — legalization table codegen
 - `lib/python/amdisa/encoding_translator_codegen.py` — encoding translator codegen
-- `tests/dbt/translate_test.cpp` — encoding, coherency, waitcnt, and legalization tests
+- `tests/dbt/dbt_*_test.cpp` — grouped encoding, coherency, waitcnt, patcher, legalization, and binary end-to-end tests
 
 **ROCR (read-only reference headers, paths relative to the rocr-runtime project root):**
 - `runtime/hsa-runtime/inc/hsa_api_trace.h` — `HsaApiTable`, `CoreApiTable`, `AmdExtTable`, `hsa_amd_queue_intercept_handler`, intercept marker packet structs
