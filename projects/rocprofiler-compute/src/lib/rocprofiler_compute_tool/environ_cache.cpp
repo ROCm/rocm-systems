@@ -12,8 +12,7 @@ constexpr std::string_view kRocprofPrefix{"ROCPROF_"};
 
 bool has_rocprof_prefix(std::string_view name)
 {
-    return name.size() >= kRocprofPrefix.size() &&
-           name.substr(0, kRocprofPrefix.size()) == kRocprofPrefix;
+    return name.size() >= kRocprofPrefix.size() && name.substr(0, kRocprofPrefix.size()) == kRocprofPrefix;
 }
 
 }  // namespace

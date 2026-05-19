@@ -25,7 +25,7 @@ TEST_F(TestEnvironCache, Instance_ReturnsSameSingleton_AcrossCalls)
 
 TEST_F(TestEnvironCache, RocprofKeyInEnviron_ReturnsValue)
 {
-    Envp envp{{"ROCPROF_OUTPUT_PATH=/tmp/x"}};
+    Envp         envp{{"ROCPROF_OUTPUT_PATH=/tmp/x"}};
     EnvironCache cache{envp.data()};
     EXPECT_EQ(cache.get("ROCPROF_OUTPUT_PATH"),
               std::optional<std::string_view>{std::string_view{"/tmp/x"}});
@@ -33,40 +33,39 @@ TEST_F(TestEnvironCache, RocprofKeyInEnviron_ReturnsValue)
 
 TEST_F(TestEnvironCache, MissingRocprofKey_ReturnsNullopt)
 {
-    Envp envp{{}};
+    Envp         envp{{}};
     EnvironCache cache{envp.data()};
     EXPECT_EQ(cache.get("ROCPROF_OUTPUT_PATH"), std::nullopt);
 }
 
 TEST_F(TestEnvironCache, NonRocprofKeyInEnviron_NotCaptured)
 {
-    Envp envp{{"FOO=bar"}};
+    Envp         envp{{"FOO=bar"}};
     EnvironCache cache{envp.data()};
     EXPECT_EQ(cache.get("FOO"), std::nullopt);
 }
 
 TEST_F(TestEnvironCache, EmptyValueRocprofKey_ReturnsEmptyView)
 {
-    Envp envp{{"ROCPROF_OUTPUT_PATH="}};
+    Envp         envp{{"ROCPROF_OUTPUT_PATH="}};
     EnvironCache cache{envp.data()};
-    EXPECT_EQ(cache.get("ROCPROF_OUTPUT_PATH"),
-              std::optional<std::string_view>{std::string_view{}});
+    EXPECT_EQ(cache.get("ROCPROF_OUTPUT_PATH"), std::optional<std::string_view>{std::string_view{}});
 }
 
 TEST_F(TestEnvironCache, PrefixOnlyMatchInEnviron_ReturnsNullopt)
 {
-    Envp envp{{"ROCPROF_OUTPUT_PATH_EXTRA=junk"}};
+    Envp         envp{{"ROCPROF_OUTPUT_PATH_EXTRA=junk"}};
     EnvironCache cache{envp.data()};
     EXPECT_EQ(cache.get("ROCPROF_OUTPUT_PATH"), std::nullopt);
 }
 
 TEST_F(TestEnvironCache, MultipleRocprofKeys_AllCaptured)
 {
-    Envp envp{{"ROCPROF_OUTPUT_PATH=/tmp/p",
-               "ROCPROF_COUNTERS=SQ_WAVES",
-               "ROCPROF_ITERATION_MULTIPLEXING=kernel",
-               "ROCPROF_KERNEL_FILTER_INCLUDE_REGEX=.*conv.*",
-               "ROCPROF_KERNEL_FILTER_RANGE=1-5"}};
+    Envp         envp{{"ROCPROF_OUTPUT_PATH=/tmp/p",
+                       "ROCPROF_COUNTERS=SQ_WAVES",
+                       "ROCPROF_ITERATION_MULTIPLEXING=kernel",
+                       "ROCPROF_KERNEL_FILTER_INCLUDE_REGEX=.*conv.*",
+                       "ROCPROF_KERNEL_FILTER_RANGE=1-5"}};
     EnvironCache cache{envp.data()};
     EXPECT_EQ(cache.get("ROCPROF_OUTPUT_PATH"),
               std::optional<std::string_view>{std::string_view{"/tmp/p"}});
@@ -82,8 +81,7 @@ TEST_F(TestEnvironCache, MultipleRocprofKeys_AllCaptured)
 
 TEST_F(TestEnvironCache, DuplicateEnvironEntries_FirstWins)
 {
-    Envp envp{{"ROCPROF_OUTPUT_PATH=/tmp/first",
-               "ROCPROF_OUTPUT_PATH=/tmp/second"}};
+    Envp         envp{{"ROCPROF_OUTPUT_PATH=/tmp/first", "ROCPROF_OUTPUT_PATH=/tmp/second"}};
     EnvironCache cache{envp.data()};
     EXPECT_EQ(cache.get("ROCPROF_OUTPUT_PATH"),
               std::optional<std::string_view>{std::string_view{"/tmp/first"}});
@@ -91,11 +89,11 @@ TEST_F(TestEnvironCache, DuplicateEnvironEntries_FirstWins)
 
 TEST_F(TestEnvironCache, EnvInputParametersInjectedCache_ReturnsInjectedValues)
 {
-    Envp envp{{"ROCPROF_OUTPUT_PATH=/tmp/injected",
-               "ROCPROF_COUNTERS=SQ_WAVES",
-               "ROCPROF_ITERATION_MULTIPLEXING=kernel",
-               "ROCPROF_KERNEL_FILTER_INCLUDE_REGEX=.*gemm.*",
-               "ROCPROF_KERNEL_FILTER_RANGE=3-7"}};
+    Envp               envp{{"ROCPROF_OUTPUT_PATH=/tmp/injected",
+                             "ROCPROF_COUNTERS=SQ_WAVES",
+                             "ROCPROF_ITERATION_MULTIPLEXING=kernel",
+                             "ROCPROF_KERNEL_FILTER_INCLUDE_REGEX=.*gemm.*",
+                             "ROCPROF_KERNEL_FILTER_RANGE=3-7"}};
     EnvInputParameters input_parameters{std::make_shared<EnvironCache>(envp.data())};
 
     EXPECT_EQ(input_parameters.get_output_path(),
