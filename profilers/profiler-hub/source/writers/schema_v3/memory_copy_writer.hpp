@@ -9,12 +9,15 @@
 
 #include "data_storage/schema_v3/insert_statements.hpp"
 #include "data_storage/schema_version.hpp"
+#include "data_storage/vtable/memory_copy_buffer.hpp"
 #include "profiler-hub/writer_types.hpp"
 
 #include "spdlog/fmt/bundled/core.h"
 
+#include <cstdint>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 
 namespace profiler_hub
 {
@@ -33,7 +36,16 @@ public:
     : m_ctx(std::move(ctx))
     , m_stmts(std::move(stmts))
     , m_common_ops(std::move(common_ops))
-    {}
+    {
+        const auto real_table_name = fmt::format("rocpd_memory_copy_{}", m_ctx->uuid);
+        m_buffer = data_storage::vtable::memory_copy_buffer::get_active_instance(
+            real_table_name);
+        if(m_buffer == nullptr)
+        {
+            throw std::runtime_error("memory_copy buffer not registered for table " +
+                                     real_table_name);
+        }
+    }
 
     void insert_impl(const writer_types::memory_copy_data_t&  data,
                      const writer_types::trace_environment_t& trace_env)
@@ -83,25 +95,33 @@ public:
 
         const auto pk = m_ctx->key_providers->memory_copy_data().get_primary_key_value();
 
-        m_stmts->memory_copy_statement()(pk,
-                                         trace_env.node_id.value(),
-                                         process_pk,
-                                         thread_pk,
-                                         data.start_timestamp,
-                                         data.end_timestamp,
-                                         name_pk,
-                                         dst_agent_pk,
-                                         data.dst_address,
-                                         src_agent_pk,
-                                         data.src_address,
-                                         data.size,
-                                         queue_pk,
-                                         stream_pk,
-                                         region_name_pk,
-                                         event_pk,
-                                         data.extdata);
-
+        // Run all throwing operations first so the row commits to the buffer
+        // only when the surrounding transaction would have committed too.
         m_common_ops->maybe_insert_sample(trace_env, data.start_timestamp, event_pk);
+
+        auto to_opt_int64 = [](const std::optional<size_t>& v) {
+            return v.has_value() ? std::make_optional(static_cast<int64_t>(*v))
+                                 : std::nullopt;
+        };
+
+        m_buffer->push(data_storage::vtable::memory_copy_row{
+            .id             = static_cast<int64_t>(pk),
+            .nid            = static_cast<int64_t>(trace_env.node_id.value()),
+            .pid            = static_cast<int64_t>(process_pk),
+            .tid            = to_opt_int64(thread_pk),
+            .start          = static_cast<int64_t>(data.start_timestamp),
+            .end            = static_cast<int64_t>(data.end_timestamp),
+            .name_id        = static_cast<int64_t>(name_pk),
+            .dst_agent_id   = to_opt_int64(dst_agent_pk),
+            .dst_address    = to_opt_int64(data.dst_address),
+            .src_agent_id   = to_opt_int64(src_agent_pk),
+            .src_address    = to_opt_int64(data.src_address),
+            .size           = static_cast<int64_t>(data.size),
+            .queue_id       = to_opt_int64(queue_pk),
+            .stream_id      = to_opt_int64(stream_pk),
+            .region_name_id = to_opt_int64(region_name_pk),
+            .event_id       = to_opt_int64(event_pk),
+            .extdata        = data.extdata });
     }
 
 private:
@@ -110,6 +130,7 @@ private:
         data_storage::schema_v3::insert_statements<data_storage::sqlite_backend>>
                                                                            m_stmts;
     std::shared_ptr<common_insert_operations<data_storage::schema_v3_tag>> m_common_ops;
+    data_storage::vtable::memory_copy_buffer* m_buffer = nullptr;
 };
 
 }  // namespace profiler_hub
