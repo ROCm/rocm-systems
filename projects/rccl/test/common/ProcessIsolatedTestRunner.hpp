@@ -61,6 +61,12 @@ public:
         std::chrono::seconds     timeout;              ///< Test timeout
         bool                     inheritParentEnv;     ///< Whether to inherit parent environment
         std::vector<std::string> clearEnvVars; ///< Environment variables to explicitly clear
+        size_t                   numGpus; ///< GPU slots this test needs.
+                                         ///< 0 = no GPU slot needed; test runs without any
+                                         ///<     HIP_VISIBLE_DEVICES restriction and does not
+                                         ///<     consume a pool slot (use for CPU-only tests).
+                                         ///< 1 = one dedicated GPU from the pool (default).
+                                         ///< N = exactly N GPUs from the pool.
 
         /**
          * @brief Constructor
@@ -104,6 +110,22 @@ public:
          * @return Reference to this TestConfig for method chaining
          */
         TestConfig& setVariable(const std::string& name, const std::string& value);
+
+        /**
+         * @brief Declare how many GPU slots this test requires during parallel execution.
+         *
+         * When the runner executes tests in parallel it partitions the GPU pool
+         * (see ExecutionOptions::gpuPool) into non-overlapping subsets and injects
+         * HIP_VISIBLE_DEVICES / ROCR_VISIBLE_DEVICES into each child so that
+         * concurrent tests never share a physical device.
+         *
+         * @param n Number of GPUs needed.
+         *          0 = CPU-only test, no GPU slot acquired (runs freely in parallel).
+         *          1 = one dedicated GPU from the pool (default).
+         *          N = exactly N GPUs from the pool.
+         * @return Reference to this TestConfig for method chaining
+         */
+        TestConfig& withNumGpus(size_t n);
     };
 
     /**
@@ -111,8 +133,26 @@ public:
      */
     struct ExecutionOptions
     {
-        bool stopOnFirstFailure; ///< Stop execution on first test failure
-        bool verboseLogging;     ///< Enable verbose logging
+        bool   stopOnFirstFailure; ///< Stop execution on first test failure
+        bool   verboseLogging;     ///< Enable verbose logging
+        size_t maxParallelJobs;    ///< Maximum number of concurrent child processes.
+                                   ///< 1 = sequential (default).
+                                   ///< 0 = std::thread::hardware_concurrency().
+                                   ///< N > 1 = up to N tests run simultaneously.
+                                   ///< Results are always reported in registration order.
+
+        /// Physical GPU device indices available for distribution across parallel
+        /// test processes.  Each concurrent child is assigned a non-overlapping
+        /// subset and sees only its assigned GPUs via HIP_VISIBLE_DEVICES /
+        /// ROCR_VISIBLE_DEVICES so tests never contend on the same device.
+        ///
+        /// Empty (default): auto-detect from HIP_VISIBLE_DEVICES /
+        /// ROCR_VISIBLE_DEVICES environment variables; if those are unset, count
+        /// /dev/dri/renderD* nodes and build a pool [0, 1, ..., N-1].
+        ///
+        /// Only used when maxParallelJobs > 1.  Sequential runs (default) leave
+        /// device selection to the test itself.
+        std::vector<int> gpuPool;
 
         /**
          * @brief Default constructor with sensible defaults
@@ -120,7 +160,6 @@ public:
         ExecutionOptions();
     };
 
-private:
     /**
      * @brief Structure to hold captured process output
      */
@@ -130,6 +169,7 @@ private:
         std::string stderrContent; ///< Captured stderr content
     };
 
+private:
     // Thread-safe static members for test management
     static std::mutex              testConfigsMutex_;
     static std::vector<TestConfig> testConfigs_;
@@ -225,10 +265,13 @@ public:
 
     /**
      * @brief Generate and display test report
-     * @param options Execution options used for the test run
-     * @return True if all tests passed, false otherwise
+     * @param options          Execution options used for the test run
+     * @param totalRegistered  Total number of tests that were registered (may
+     *                         differ from the number actually run when
+     *                         stopOnFirstFailure is active)
+     * @return True if all tests passed and none were left unrun, false otherwise
      */
-    static bool generateReport(const ExecutionOptions& options);
+    static bool generateReport(const ExecutionOptions& options, size_t totalRegistered);
 
     /**
      * @brief Get detailed test results (thread-safe)

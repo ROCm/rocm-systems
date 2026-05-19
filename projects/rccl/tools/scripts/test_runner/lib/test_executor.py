@@ -801,6 +801,11 @@ class TestExecutor:
         # an instrumented binary, writing per-PID profraw files on every process
         # exit is a significant overhead when many short-lived test processes
         # are spawned.
+        #
+        # %p  — unique per child PID (ProcessIsolatedTestRunner re-execs each
+        #        test as a separate process, so each gets its own file).
+        # %m  — binary/module signature (keeps test-binary and librccl.so
+        #        profiles in separate files since each has its own runtime).
         if self.args.coverage_report:
             env['LLVM_PROFILE_FILE'] = "rccl_tests_%p_%m.profraw"
 
