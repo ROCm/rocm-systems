@@ -22,36 +22,16 @@
 
 #pragma once
 
-#include "lib/rocprofiler-sdk/hsa/queue_info_session.hpp"
-#include "lib/rocprofiler-sdk/tracing/profiling_time.hpp"
-
-#include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa.h>
-
-#include <hsa/hsa.h>
-
-#include <cstdint>
 
 namespace rocprofiler
 {
-namespace context
+namespace hsa
 {
-struct context;
-}
-
-namespace kernel_dispatch
+// pair of hsa signal and user data pointer for async handler
+struct signal_t
 {
-using context_t              = context::context;
-using user_data_map_t        = tracing::external_correlation_id_map_t;
-using external_corr_id_map_t = user_data_map_t;
-using queue_info_session_t   = hsa::queue_info_session_t;
-using packet_data_t          = hsa::packet_data_t;
-using profiling_time         = tracing::profiling_time;
-
-profiling_time
-get_dispatch_time(const queue_info_session_t& session, packet_data_t& packet_data);
-
-void
-dispatch_complete(queue_info_session_t& session, packet_data_t& packet_data, profiling_time);
-}  // namespace kernel_dispatch
+    hsa_signal_t value = {.handle = 0};
+};
+}  // namespace hsa
 }  // namespace rocprofiler
