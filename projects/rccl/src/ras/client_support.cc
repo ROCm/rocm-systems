@@ -525,25 +525,34 @@ static ncclResult_t rasClientRunInit(struct rasClient* client) {
   int firstIdx, nPeers;
   struct rasValCount valCounts[NCCL_MAX_LOCAL_RANKS];
   int nValCounts;
-  static int hipRuntime = -1, amdgpuDriver = -1;
 
   TRACE(NCCL_RAS, "RAS: rasClientRunInit: starting");
 
   rasOutReset();
-  rasOutAppend("RCCL version " STR(NCCL_MAJOR) "." STR(NCCL_MINOR) "." STR(NCCL_PATCH) NCCL_SUFFIX
-               " compiled with ROCm " STR(ROCM_BUILD_INFO) "\n");
-  if (hipRuntime == -1)
-    CUDACHECKIGNORE(hipRuntimeGetVersion(&hipRuntime));
-  if (amdgpuDriver == -1)
-    CUDACHECKIGNORE(hipDriverGetVersion(&amdgpuDriver));
-    //Find a better way to query amdgpu driver version, as hipDriverGetVersion() reports the same as hipRuntimeGetVersion()
-    //Else, cudaRuntimeGetVersion() and cudaDriverGetVersion() are anyways hipified, so no need of this mod
-  rasOutAppend("HIP runtime version %d, amdgpu driver version %d\n\n", hipRuntime, amdgpuDriver);
-  msgLen = rasOutLength();
-  NCCLCHECKGOTO(rasClientAllocMsg(&msg, msgLen), ret, fail);
-  rasOutExtract(msg);
-  rasClientEnqueueMsg(client, msg, msgLen);
-  msg = nullptr;
+
+  // Query HIP runtime/driver versions once and cache them in the file-scope
+  // cudaRuntimeVersion/cudaDriverVersion globals so both the TEXT banner and
+  // the JSON header (rasDumpCommsToJSON) report consistent, populated values.
+  // hipDriverGetVersion currently returns the same value as hipRuntimeGetVersion;
+  // when that limitation is fixed in HIP, no change is needed here.
+  if (cudaRuntimeVersion == -1)
+    CUDACHECKIGNORE(hipRuntimeGetVersion(&cudaRuntimeVersion));
+  if (cudaDriverVersion == -1)
+    CUDACHECKIGNORE(hipDriverGetVersion(&cudaDriverVersion));
+
+  // For structured formats (JSON), skip the initial text banner; the version
+  // information is included in the JSON header by rasDumpCommsToJSON.
+  if (client->outputFormat == RAS_OUTPUT_TEXT) {
+    rasOutAppend("RCCL version " STR(NCCL_MAJOR) "." STR(NCCL_MINOR) "." STR(NCCL_PATCH) NCCL_SUFFIX
+                 " compiled with ROCm " STR(ROCM_BUILD_INFO) "\n");
+    rasOutAppend("HIP runtime version %d, amdgpu driver version %d\n\n",
+                 cudaRuntimeVersion, cudaDriverVersion);
+    msgLen = rasOutLength();
+    NCCLCHECKGOTO(rasClientAllocMsg(&msg, msgLen), ret, fail);
+    rasOutExtract(msg);
+    rasClientEnqueueMsg(client, msg, msgLen);
+    msg = nullptr;
+  }
 
   totalGpus = totalNodes = 0;
   firstNGpusNode = 0; // #GPUs on the first peer of a node.
@@ -1956,7 +1965,7 @@ static void jsonWriteMissingRank(int rank, const char* host, int pid, int cudaDe
   rasOutAppend("          \"host\": \"%s\",\n", host);
   rasOutAppend("          \"pid\": %d,\n", pid);
   rasOutAppend("          \"cuda_dev\": %d,\n", cudaDev);
-  rasOutAppend("          \"nvml_dev\": %d\n", nvmlDev);
+  rasOutAppend("          \"nvml_dev\": %d,\n", nvmlDev);
 
   // Status object.
   rasOutAppend("          \"status\": {\n");
