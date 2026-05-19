@@ -1301,6 +1301,9 @@ ROCPROFILER_ENUM_LABEL(ROCPROFILER_RCCL_API_ID_ncclCommWindowDeregister);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_RCCL_API_ID_ncclAlltoAll);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_RCCL_API_ID_ncclAlltoAllv);
 #endif
+#if RCCL_API_TRACE_VERSION_PATCH >= 4
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_RCCL_API_ID_ncclCommRevoke);
+#endif
 
 #if RCCL_API_TRACE_VERSION_PATCH == 0
 static_assert(ROCPROFILER_RCCL_API_ID_LAST == 37);
@@ -1310,6 +1313,8 @@ static_assert(ROCPROFILER_RCCL_API_ID_LAST == 38);
 static_assert(ROCPROFILER_RCCL_API_ID_LAST == 41);
 #elif RCCL_API_TRACE_VERSION_PATCH == 3
 static_assert(ROCPROFILER_RCCL_API_ID_LAST == 43);
+#elif RCCL_API_TRACE_VERSION_PATCH == 4
+static_assert(ROCPROFILER_RCCL_API_ID_LAST == 44);
 #else
 #    if !defined(ROCPROFILER_UNSAFE_NO_VERSION_CHECK) &&                                           \
         (defined(ROCPROFILER_CI) && ROCPROFILER_CI > 0)
@@ -1406,22 +1411,27 @@ ROCPROFILER_ENUM_INFO(rocprofiler_code_object_operation_t,
                       ROCPROFILER_CODE_OBJECT_NONE,
                       ROCPROFILER_CODE_OBJECT_LAST,
                       false,
-                      not_operation);
+                      is_operation);
+ROCPROFILER_ENUM_INFO(rocprofiler_hip_stream_operation_t,
+                      ROCPROFILER_HIP_STREAM_NONE,
+                      ROCPROFILER_HIP_STREAM_LAST,
+                      false,
+                      is_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_memory_copy_operation_t,
                       ROCPROFILER_MEMORY_COPY_NONE,
                       ROCPROFILER_MEMORY_COPY_LAST,
                       false,
-                      not_operation);
+                      is_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_memory_allocation_operation_t,
                       ROCPROFILER_MEMORY_ALLOCATION_NONE,
                       ROCPROFILER_MEMORY_ALLOCATION_LAST,
                       false,
-                      not_operation);
+                      is_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_kernel_dispatch_operation_t,
                       ROCPROFILER_KERNEL_DISPATCH_NONE,
                       ROCPROFILER_KERNEL_DISPATCH_LAST,
                       false,
-                      not_operation);
+                      is_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_pc_sampling_method_t,
                       ROCPROFILER_PC_SAMPLING_METHOD_NONE,
                       ROCPROFILER_PC_SAMPLING_METHOD_LAST,
@@ -1714,6 +1724,13 @@ ROCPROFILER_ENUM_LABEL(ROCPROFILER_CODE_OBJECT_LOAD);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_CODE_OBJECT_HOST_KERNEL_SYMBOL_REGISTER);
 static_assert(ROCPROFILER_CODE_OBJECT_LAST == 4);
+
+// rocprofiler_hip_stream_operation_t
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_STREAM_NONE);
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_STREAM_CREATE);
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_STREAM_DESTROY);
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_STREAM_SET);
+static_assert(ROCPROFILER_HIP_STREAM_LAST == 4);
 
 // rocprofiler_memory_copy_operation_t
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_MEMORY_COPY_NONE);

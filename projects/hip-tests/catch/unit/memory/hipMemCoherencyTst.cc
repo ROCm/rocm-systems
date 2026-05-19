@@ -25,6 +25,9 @@ __global__ void CoherentTst(int* ptr) {  // ptr was set to 1
   atomicAdd_system(ptr, 1);              // now ptr is 2
   while (atomicCAS_system(ptr, 3, 4) != 3) {
     // wait till ptr is updated to 3 in host, then change it to 4
+#if HT_AMD
+    __builtin_amdgcn_s_sleep(100);
+#endif
   }
 }
 
@@ -138,7 +141,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_CoherentTst) {
     HIP_CHECK(hipFree(Ptr));
     REQUIRE(YES_COHERENT);
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }
 #endif
@@ -177,7 +180,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_CoherentTstWthAdvise) {
     HIP_CHECK(hipStreamDestroy(strm));
     REQUIRE(YES_COHERENT);
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }
 
@@ -218,12 +221,10 @@ HIP_TEST_CASE(Unit_hipExtMallocWithFlags_CoherentTst) {
   HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, 0));
   INFO("hipDeviceAttributeManagedMemory: " << managed);
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
   if (Pageable != 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPageableMemoryAccessUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kPageableMemoryAccessUnsupported);
   }
 
   // Allocating hipExtMallocWithFlags() memory with flags
