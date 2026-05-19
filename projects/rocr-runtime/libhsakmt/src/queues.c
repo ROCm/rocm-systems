@@ -721,6 +721,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueV2Ctx(
 	q->gfxv = hsakmt_get_gfxv_by_node_id(ctx, NodeId);
 	q->use_ats = false;
 
+	/* All currently-supported ASICs are gfx9 or later. AQUA_VANJARAM uses
+	 * eop_buffer_size = 4096 only for compute queues; everything else uses
+	 * 4096 unconditionally.
+	 */
 	if ((q->gfxv & ~(0xff)) == GFX_VERSION_AQUA_VANJARAM)
 		q->eop_buffer_size = ((Type == HSA_QUEUE_COMPUTE) ? 4096 : 0);
 	else

@@ -843,9 +843,9 @@ hsa_status_t ImageRuntime::GetMipmapArrayLevelHandle(
 
   hsa_status_t status = HSA_STATUS_SUCCESS;
   auto format = image_descriptor ? &image_descriptor->format : nullptr;
-   if (format &&
-       (array->desc.format.channel_type != format->channel_type ||
-        array->desc.format.channel_order != format->channel_order)) {
+  if (format &&
+      (array->desc.format.channel_type != format->channel_type ||
+       array->desc.format.channel_order != format->channel_order)) {
     MipmappedArray tempArray = *array;
     tempArray.desc.format.channel_type = format->channel_type;
     tempArray.desc.format.channel_order = format->channel_order;

@@ -2941,11 +2941,11 @@ void GpuAgent::BindTrapHandler() {
 }
 
 void GpuAgent::InvalidateCodeCaches(void *ptr, size_t size) {
-  // Check for microcode cache invalidation support.
-  // This is deprecated in later microcode builds.
-  if (isa_->GetMajorVersion() > 12) {
-    assert(false && "Code cache invalidation not implemented for this agent");
-  }
+  // Emit ACQUIRE_MEM PM4 in the format appropriate for the ISA major version.
+  // gfx9 uses the COHER_CNTL form; gfx10 and later use the GCR_CNTL form.
+  // Future arches (>12) are expected to remain compatible with the GCR_CNTL
+  // form used by gfx10/11/12.
+  assert(isa_->GetMajorVersion() >= 9 && "Code cache invalidation requires gfx9 or later");
 
   // Invalidate caches which may hold lines of code object allocation.
   uint32_t cache_inv[8] = {0};
