@@ -13,7 +13,7 @@ from ctypes import (
     c_void_p,
 )
 
-from utils_common import resolve_rocm_library_path
+from utils.utils_common import resolve_rocm_library_path
 
 _lib = ctypes.CDLL(
     resolve_rocm_library_path(f"{os.getenv('ROCM_PATH', '/opt/rocm')}/lib/libhiprtc.so")
