@@ -4259,7 +4259,7 @@ hsa_status_t GpuAgent::GetSdmaQueueInfo(AMD::BlitSdmaBase* sdma,
       *static_cast<bool*>(value) = sdma->HdpFlushSupport();
       break;
     case HSA_AMD_SDMA_QUEUE_INFO_GCR_REQUIRED:
-      *static_cast<bool*>(value) = sdma->GcrRequired();
+      *static_cast<bool*>(value) = sdma->UsesGCR();
       break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT; 

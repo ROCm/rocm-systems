@@ -94,9 +94,8 @@ class BlitSdmaBase : public core::Blit {
 
   virtual bool BroadcastSupported() const = 0;
   virtual bool PlatformAtomicSupport() const = 0;
-  virtual bool HdpFlushSupport() const = 0;
-  virtual bool GcrRequired() const = 0;
   virtual bool IsGfx1250() const = 0;
+  virtual bool HdpFlushSupport() const = 0;
 
   virtual hsa_status_t SubmitPrologue(const std::vector<core::Signal*>& dep_signals,
                                       core::Signal& out_signal,
@@ -297,7 +296,6 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
   uint32_t sdma_engine_id() const override { return sdma_engine_id_; }
   bool is_xgmi() const override { return is_xgmi_; }
   size_t min_submission_size() const override { return min_submission_size_; }
-  bool GcrRequired() const override { return useGCR; }
   bool UsesGCR() const override { return useGCR; }
 
  private:
