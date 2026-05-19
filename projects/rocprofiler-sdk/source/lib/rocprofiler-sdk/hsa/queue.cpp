@@ -261,9 +261,9 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
             _corr_id->sub_kern_count();
             _corr_id->sub_ref_count();
         }
-    }
 
-    queue_info_session.queue.async_complete();
+        queue_info_session.queue.async_complete();
+    }
 
     return false;
 }
@@ -439,11 +439,6 @@ WriteInterceptor(const void* packets,
                                                   .enqueue_ts     = common::timestamp_ns(),
                                                   .correlation_id = corr_id,
                                                   .packet_data    = packet_data_array_t{}};
-
-        // mark the queue as having at least one packet which will be assigned a callback to
-        // AsyncSignalHandler. This is used to determine whether we need to wait for the signal
-        // handler to complete during finalization.
-        queue.async_started();
 
         // Searching accross all the packets given during this write
         for(size_t i = 0; i < _num_packets; ++i)
@@ -669,6 +664,13 @@ WriteInterceptor(const void* packets,
                 auto barrier   = hsa_barrier_and_packet_t{};
                 barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
                 barrier.header |= (1 << HSA_PACKET_HEADER_BARRIER);
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
+                barrier.dep_signal[0] = is_ext_kernel_dispatch
+                                            ? kernel_packet.ext_kernel_dispatch.completion_signal
+                                            : kernel_packet.kernel_dispatch.completion_signal;
+#else
+                barrier.dep_signal[0] = kernel_packet.kernel_dispatch.completion_signal;
+#endif
                 barrier.completion_signal = original_completion_signal;
                 transformed_packets.emplace_back(barrier);
             }
@@ -712,6 +714,8 @@ WriteInterceptor(const void* packets,
                     tracer_data);
             }
 
+            // One async handler registration per intercepted kernel; balance in AsyncSignalHandler.
+            queue.async_started();
             _info_session.packet_data.emplace_back(std::move(_packet_data));
         }
 
@@ -1013,6 +1017,15 @@ Queue::sync() const
 
         ROCP_WARNING_IF(_value != 0)
             << fmt::format("Timeout while waiting for queue sync: {} kernels still active", _value);
+
+        // HIP graphs and other apps may supply a pre-existing completion signal. If that signal
+        // is released without waiting on the profiler's pooled kernel completion, the async
+        // handler never runs and _active_kernels never drains. During finalization, unblock teardown.
+        if(_value != 0 && registration::get_fini_status() > 0)
+        {
+            while(_core_api.hsa_signal_load_scacquire_fn(_active_kernels) > 0)
+                _core_api.hsa_signal_subtract_relaxed_fn(_active_kernels, 1);
+        }
     }
 }
 
