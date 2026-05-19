@@ -114,6 +114,25 @@ add_stream(hipStream_t stream, bool reindex_existing = true)
         reindex_existing);
 }
 
+void
+remove_stream(hipStream_t stream)
+{
+    get_stream_map()->wlock(
+        [](stream_map_t& _data, hipStream_t _stream) {
+            auto itr = _data.find(_stream);
+            if(itr != _data.end())
+            {
+                ROCP_INFO << fmt::format("hipStream_t={} :: removing stream id={}.handle={}{}",
+                                         static_cast<void*>(_stream),
+                                         '{',
+                                         itr->second.handle,
+                                         '}');
+                _data.erase(itr);
+            }
+        },
+        stream);
+}
+
 auto
 get_stream_id(hipStream_t stream)
 {
@@ -319,6 +338,8 @@ FuncT create_destroy_functor(RetT (*func)(Args...))
                                                   ROCPROFILER_HIP_STREAM_DESTROY,
                                                   tracer_data);
         }
+
+        remove_stream(stream);
 
         if constexpr(!std::is_void<RetT>::value) return _ret;
     };
