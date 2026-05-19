@@ -1424,6 +1424,9 @@ bool Device::populateOCLDeviceConstants() {
     return false;
   }
 
+  // hipMallocPitch/hipMalloc3D align pitch by this value regardless of image support
+  info_.imagePitchAlignment_ = 256;
+
   assert(HSA_EXTENSION_IMAGES < 8);
   const bool image_is_supported = ((hsa_extensions[0] & (1 << HSA_EXTENSION_IMAGES)) != 0);
   if (image_is_supported) {
@@ -1522,16 +1525,11 @@ bool Device::populateOCLDeviceConstants() {
     }
     info_.imageMaxBufferSize_ = (amd::IS_HIP) ? image_max_dim[0] : (1 << 27);
 
-    info_.imagePitchAlignment_ = 256;
-
     info_.imageBaseAddressAlignment_ = 256;
 
     info_.bufferFromImageSupport_ = false;
 
     info_.imageSupport_ = (info_.maxReadWriteImageArgs_ > 0) ? true : false;
-  } else {
-    // hipMallocPitch/hipMalloc3D align pitch by this value regardless of image support
-    info_.imagePitchAlignment_ = 256;
   }
 
   // Enable SVM Capabilities of Hsa device. Ensure
