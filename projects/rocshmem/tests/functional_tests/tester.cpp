@@ -70,6 +70,7 @@
 #include "hipmodule_init_tester.hpp"
 #include "device_bitcode_tester.hpp"
 #include "library_info_tester.hpp"
+#include "fence_ordering_tester.hpp"
 
 #include "backend_bc.hpp"
 extern Backend* backend;
@@ -633,6 +634,22 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "Library Info Test";
       testers.push_back(new LibraryInfoTester(args));
       break;
+    case FenceOrderPutWaveSignalTestType:
+      test_name = "Fence PutWaveSignal Ordering";
+      testers.push_back(new FenceOrderingTester(args));
+      break;
+    case FenceOrderPutLargeSmallTestType:
+      test_name = "Fence PutLargeSmall Ordering";
+      testers.push_back(new FenceOrderingTester(args));
+      break;
+    case FenceOrderFanoutTestType:
+      test_name = "Fence Fanout Ordering";
+      testers.push_back(new FenceOrderingTester(args));
+      break;
+    case FenceOrderPutWaveNbiChunksTestType:
+      test_name = "Fence PutWaveNbiChunks Ordering";
+      testers.push_back(new FenceOrderingTester(args));
+      break;
     default:
       test_name = "Empty";
       break;
@@ -781,6 +798,10 @@ bool Tester::peLaunchesKernel() {
     case FloodFAddTestType:
     case FloodWaitAmoTestType:
     case DeviceBitcodeTestType:
+    case FenceOrderPutWaveSignalTestType:
+    case FenceOrderPutLargeSmallTestType:
+    case FenceOrderFanoutTestType:
+    case FenceOrderPutWaveNbiChunksTestType:
       is_launcher = true;
       break;
     default:
