@@ -33,6 +33,47 @@ THE SOFTWARE.
 RCCL_PARAM(IntraGraphGen, "INTRA_GRAPH_GEN", 0);
 RCCL_PARAM(InterGraphGen, "INTER_GRAPH_GEN", 0);
 
+void permute_array_inplace(int* input, int length, int* permutation) {
+    for (int i = 0; i < length; i++) {
+        // Skip if this index is already processed (marked negative)
+        if (permutation[i] < 0) continue;
+
+        // If the element is already in the right place, just mark and move on
+        if (permutation[i] == i) {
+            permutation[i] = -permutation[i] - 1;
+            continue;
+        }
+
+        // Standard cycle-following for a "Gather" operation
+        int current_hole = i;
+        int save_val = input[i]; // Take the value out to create a 'hole'
+        
+        while (true) {
+            int source_idx = permutation[current_hole];
+            
+            // Mark the current index as done
+            permutation[current_hole] = -permutation[current_hole] - 1;
+
+            if (source_idx == i) {
+                // The cycle is complete; plug the hole with the saved value
+                input[current_hole] = save_val;
+                break;
+            }
+
+            // Pull the value from the source into the current hole
+            input[current_hole] = input[source_idx];
+            
+            // The source_idx is now the new hole we need to fill
+            current_hole = source_idx;
+        }
+    }
+
+    // Restore the permutation array
+    for (int i = 0; i < length; i++) {
+        permutation[i] = -permutation[i] - 1;
+    }
+}
+
 static void generateWalecki(int nNodes, int channel, int* order) {
   if (nNodes <= 0 || !order) return;
 
