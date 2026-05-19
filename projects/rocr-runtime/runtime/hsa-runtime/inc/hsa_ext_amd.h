@@ -2212,18 +2212,18 @@ typedef enum {
  *
  * LINEAR (multi-copy when num_entries > 0, one signal for all entries):
  *   src_list         -- caller-owned array of num_entries source pointers
- *   src_agent        -- common source agent (must be GPU)
+ *   src_agent        -- common source agent (GPU or CPU); if CPU, all dst_agent_list entries must be GPU
  *   dst_list         -- caller-owned array of num_entries destination pointers
  *   dst_agent_list   -- caller-owned array of num_entries destination agents
  *   size_list        -- caller-owned array of num_entries copy sizes in bytes
- *   num_entries         -- number of entries (>= 1, <= 1024)
+ *   num_entries         -- number of entries (>= 1, <= 65536)
  *
  * LINEAR_BROADCAST (single source -> multiple destinations):
  *   src, src_agent    -- source pointer and agent (must be GPU)
  *   dst_list          -- caller-owned array of num_entries destination pointers
  *   dst_agent_list    -- caller-owned array of num_entries destination agents
  *   size              -- copy size in bytes (same for every destination)
- *   num_entries          -- number of entries in dst_list / dst_agent_list (>= 1, <= 1024)
+ *   num_entries          -- number of entries in dst_list / dst_agent_list (>= 1, <= 65536)
  *
  * LINEAR_SWAP (exchange contents of two buffers, multi-entry when num_entries > 0):
  *   src_list         -- caller-owned array of num_entries source pointers
@@ -2231,7 +2231,7 @@ typedef enum {
  *   dst_list         -- caller-owned array of num_entries destination pointers
  *   dst_agent_list   -- caller-owned array of num_entries destination agents
  *   size_list        -- caller-owned array of num_entries swap sizes in bytes
- *   num_entries      -- number of entries (>= 1, <= 1024)
+ *   num_entries      -- number of entries (>= 1, <= 65536)
  *
  * LINEAR_SWAP (single, when num_entries == 0):
  *   src, src_agent  -- first buffer pointer and agent (modified in place)

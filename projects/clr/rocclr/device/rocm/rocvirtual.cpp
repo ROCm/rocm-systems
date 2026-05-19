@@ -3118,12 +3118,10 @@ void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
   }
 
   // Synchronize the launch (compute) stream with SDMA engines.
-  // Reset active engine to Compute before the barrier — the barrier runs on the
-  // AQL compute queue, not an SDMA engine.  Without this, the barrier's profiling
-  // signal inherits an SDMA engine type, causing CacheTimingData to call
-  // hsa_amd_profiling_get_async_copy_time (wrong API) and corrupt the timestamps.
+  // WaitingSignal(Compute) inside dispatchBarrierPacket detects the engine switch
+  // from SDMA→Compute, collects the SDMA completion signal as a barrier dependency,
+  // and updates engine_ to Compute before ActiveSignal tags the profiling signal.
   if (result) {
-    Barriers().SetActiveEngine(HwQueueEngine::Compute);
     dispatchBarrierPacket(kNopPacketHeader);
   }
 
