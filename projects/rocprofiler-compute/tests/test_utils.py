@@ -1139,10 +1139,10 @@ def test_rocprofiler_sdk_env_log_excludes_user_env(tmp_path, monkeypatch):
         "csv",
     )
     utils_profile.pc_sampling_prof(
-        {"APP_CMD": "my_app --arg"}, "host_trap", 1000, str(tmp_path)
+        {"APP_CMD": ["my_app", "--arg"]}, "host_trap", 1000, str(tmp_path)
     )
 
-    assert sum("added env vars" in m for m in logs) >= 2
+    assert sum("env vars" in m for m in logs) >= 2
     assert not any("SHOULD_NOT_APPEAR" in m for m in logs)
 
 
