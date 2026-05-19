@@ -71,10 +71,11 @@ clock. They anchor the percentage of peak reported for the FLOPs related rows.
 Scaling and clocks
 ------------------
 
-``$cu_per_gpu`` is the total Compute Unit count from system info, not the WGP
-count. On RDNA 3.5 each WGP pairs two CUs, so the CU count is about twice the
-WGP count, and peak FLOPs scale with the CU count. ``$max_sclk`` is the shader
-engine clock in MHz from system info.
+``$cu_per_gpu`` is the total CU count from system info, not WGP count. On RDNA 3.5,
+each WGP pairs two CUs, so CU count is roughly twice the WGP count - since
+``$cu_per_gpu`` reflects active CUs discovered at runtime (rather than just doubling
+a fixed WGP count). Peak FLOPs scale with CUs. ``$max_sclk`` is the shader/engine
+clock in MHz from profiler system specs.
 
 Bandwidth and cache rows
 ------------------------
