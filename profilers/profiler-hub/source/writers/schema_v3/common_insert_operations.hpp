@@ -8,6 +8,7 @@
 
 #include "data_storage/schema_v3/insert_statements.hpp"
 #include "data_storage/schema_version.hpp"
+#include "data_storage/vtable/arg_buffer.hpp"
 #include "json_serializers.hpp"
 #include "profiler-hub/writer_types.hpp"
 
@@ -31,7 +32,16 @@ public:
             stmts)
     : m_ctx(std::move(ctx))
     , m_stmts(std::move(stmts))
-    {}
+    {
+        const auto real_table_name = fmt::format("rocpd_arg_{}", m_ctx->uuid);
+        m_arg_buffer =
+            data_storage::vtable::arg_buffer::get_active_instance(real_table_name);
+        if(m_arg_buffer == nullptr)
+        {
+            throw std::runtime_error("arg buffer not registered for table " +
+                                     real_table_name);
+        }
+    }
 
     primary_key_t insert_event(const writer_types::event_data_t& event_data)
     {
@@ -107,13 +117,14 @@ public:
 
         const auto pk = m_ctx->key_providers->arg().get_primary_key_value();
 
-        m_stmts->arg_statement()(pk,
-                                 event_id,
-                                 arg_data.position,
-                                 arg_data.type,
-                                 arg_data.name,
-                                 arg_data.value,
-                                 arg_data.extdata);
+        m_arg_buffer->push(data_storage::vtable::arg_row{
+            .id       = static_cast<int64_t>(pk),
+            .event_id = static_cast<int64_t>(event_id),
+            .position = static_cast<int64_t>(arg_data.position),
+            .type     = arg_data.type,
+            .name     = arg_data.name,
+            .value    = arg_data.value,
+            .extdata  = arg_data.extdata });
     }
 
     void register_string(std::string_view str)
@@ -182,7 +193,8 @@ private:
     std::shared_ptr<writer_context> m_ctx;
     std::shared_ptr<
         data_storage::schema_v3::insert_statements<data_storage::sqlite_backend>>
-        m_stmts;
+                                      m_stmts;
+    data_storage::vtable::arg_buffer* m_arg_buffer = nullptr;
 };
 
 }  // namespace profiler_hub
