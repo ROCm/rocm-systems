@@ -79,12 +79,12 @@ struct cache_policy
     static void store_sample(size_t device_id, const std::string& /*device_name*/,
                              const enabled_metrics& /*enabled_metrics_cfg*/,
                              const enabled_metrics& /*supported_metrics*/,
-                             metrics metric_values, std::uint64_t timestamp)
+                             const metrics& metric_values, std::uint64_t timestamp)
     {
         if(metric_values.empty()) return;
 
         trace_cache::get_buffer_storage().store(trace_cache::gpu_perf_counter_sample{
-            static_cast<std::uint32_t>(device_id), timestamp, std::move(metric_values) });
+            static_cast<std::uint32_t>(device_id), timestamp, metric_values });
     }
 };
 

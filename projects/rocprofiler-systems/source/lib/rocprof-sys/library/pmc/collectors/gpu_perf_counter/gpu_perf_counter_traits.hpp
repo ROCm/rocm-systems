@@ -63,9 +63,9 @@ struct gpu_perf_counter_traits
         Perfetto::post_process(enabled);
     }
 
-    [[nodiscard]] static metrics_t get_metrics(const device_ptr_t&      dev,
-                                               const enabled_metrics_t& enabled,
-                                               std::uint64_t            timestamp)
+    [[nodiscard]] static const metrics_t& get_metrics(const device_ptr_t&      dev,
+                                                      const enabled_metrics_t& enabled,
+                                                      std::uint64_t            timestamp)
     {
         return dev->get_gpu_perf_counter_metrics(enabled, timestamp);
     }

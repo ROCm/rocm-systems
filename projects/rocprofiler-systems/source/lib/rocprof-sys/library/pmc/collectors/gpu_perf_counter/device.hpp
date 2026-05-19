@@ -65,8 +65,8 @@ public:
         return m_counter_meta;
     }
 
-    [[nodiscard]] metrics get_gpu_perf_counter_metrics(const enabled_metrics& /*enabled*/,
-                                                       std::uint64_t /*timestamp*/)
+    [[nodiscard]] const metrics& get_gpu_perf_counter_metrics(
+        const enabled_metrics& /*enabled*/, std::uint64_t /*timestamp*/)
     {
         m_result_cache.clear();
 
@@ -85,14 +85,14 @@ public:
         {
             LOG_DEBUG("HSA not loaded for device {} (status={}). Ignoring error.",
                       m_agent->device_type_index, static_cast<int>(status));
-            return std::move(m_result_cache);
+            return m_result_cache;
         }
 
         if(status != Driver::status_success)
         {
             LOG_WARNING("Sample failed for device {} (status={})",
                         m_agent->device_type_index, static_cast<int>(status));
-            return std::move(m_result_cache);
+            return m_result_cache;
         }
 
         // SDK writes back the actual number of records filled; it must not exceed

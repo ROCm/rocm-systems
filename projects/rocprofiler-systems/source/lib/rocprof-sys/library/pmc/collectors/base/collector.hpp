@@ -134,14 +134,13 @@ struct collector
 
                 try
                 {
-                    auto _metrics =
+                    const auto& _metrics =
                         Traits::get_metrics(entry.device, m_enabled_metrics, _timestamp);
                     const auto  _device_id   = entry.device->get_index();
                     const auto& _device_name = entry.device->get_name();
 
                     CacheApi::store_sample(_device_id, _device_name, m_enabled_metrics,
-                                           entry.supported_metrics, std::move(_metrics),
-                                           _timestamp);
+                                           entry.supported_metrics, _metrics, _timestamp);
 
                     if(SettingsApi::get_use_perfetto_legacy_metrics())
                     {

@@ -187,6 +187,9 @@ sample()
     {
         slice.sample(timestamp);
     }
+#if ROCPROFSYS_ROCM_VERSION >= 60400
+    if(g_gpu_perf_counter_collector) g_gpu_perf_counter_collector->sample(timestamp);
+#endif
 }
 
 void
@@ -261,10 +264,8 @@ shutdown()
     }
 
     is_initialized() = false;
-    // Reset SDK PMC globals so that postfork_parent_reinit() (shutdown→setup) does
-    // not leave dangling shared_ptr/unique_ptr views into the destroyed collector.
-    // Guard matches the construction site to keep the build matrix consistent.
 #if ROCPROFSYS_ROCM_VERSION >= 60400
+    if(g_gpu_perf_counter_collector) g_gpu_perf_counter_collector->shutdown();
     g_gpu_perf_counter_collector.reset();
     g_gpu_perf_counter_provider.reset();
 #endif
@@ -280,6 +281,7 @@ post_process()
     }
     g_collector_slices.clear();
 #if ROCPROFSYS_ROCM_VERSION >= 60400
+    if(g_gpu_perf_counter_collector) g_gpu_perf_counter_collector->post_process();
     g_gpu_perf_counter_collector.reset();
     g_gpu_perf_counter_provider.reset();
 #endif
@@ -304,6 +306,9 @@ pause()
     {
         slice.pause(timestamp);
     }
+#if ROCPROFSYS_ROCM_VERSION >= 60400
+    if(g_gpu_perf_counter_collector) g_gpu_perf_counter_collector->pause(timestamp);
+#endif
 }
 
 void
@@ -317,13 +322,9 @@ postfork_child_cleanup()
     }
     g_collector_slices.clear();
 #if ROCPROFSYS_ROCM_VERSION >= 60400
-    // Stop the SDK context (via provider) before resetting the globals so the
-    // child process does not inherit a running rocprofiler context.
-    // slice.shutdown() above already invoked provider->shutdown()->stop() for any
-    // slices that were registered; the explicit stop here handles the case where
-    // register_gpu_perf_counter_source ran but setup()/shutdown() were never called
-    // in the child (globals set, no slice present).
-    if(g_gpu_perf_counter_provider) g_gpu_perf_counter_provider->stop();
+    // Do not call shutdown() or stop() — rocprofiler SDK / HSA mutexes may be
+    // inherited locked from the parent. The parent owns SDK context shutdown.
+    // gpu_perf_counter is not in g_collector_slices so the loop above is safe.
     g_gpu_perf_counter_collector.reset();
     g_gpu_perf_counter_provider.reset();
 #endif
@@ -412,7 +413,6 @@ register_gpu_perf_counter_source(const std::vector<std::shared_ptr<agent>>& agen
 
         g_gpu_perf_counter_collector->setup();
         g_gpu_perf_counter_collector->config();
-        g_collector_slices.emplace_back(*g_gpu_perf_counter_collector);
 
         LOG_DEBUG("Registered GPU Perf Counter PMC source, total slices={}",
                   g_collector_slices.size());

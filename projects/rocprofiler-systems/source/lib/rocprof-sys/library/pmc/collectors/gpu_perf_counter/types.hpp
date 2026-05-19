@@ -88,7 +88,7 @@ struct enabled_metrics
 {
     enabled_metrics() = default;
 
-    explicit enabled_metrics(std::vector<counter_definition> counters) noexcept
+    explicit enabled_metrics(std::vector<counter_definition> counters)
     : m_counters{ counters.begin(), counters.end() }
     {}
 
@@ -102,13 +102,13 @@ private:
 };
 
 inline enabled_metrics
-to_enabled_metrics(enabled_metrics enabled) noexcept
+to_enabled_metrics(enabled_metrics enabled)
 {
     return enabled;
 }
 
 inline enabled_metrics
-to_enabled_metrics(gpu_perf_counter_settings settings) noexcept
+to_enabled_metrics(gpu_perf_counter_settings settings)
 {
     return enabled_metrics{ std::move(settings.explicit_counters) };
 }
