@@ -29,6 +29,7 @@
 #include <dirent.h>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <set>
 #include <sstream>
 #include <sys/types.h>
@@ -75,6 +76,14 @@ amdcuid_status_t CuidGpu::discover(std::vector<DevicePtr> &gpus) {
   // create duplicates of GPUs that are also visible via /sys/class/drm.
   std::set<std::string> seen_bdfs;
 
+  // Create one GimClient up front and share it across every discover_single
+  // call as well as the GIM enumeration loop below. This avoids the per-GPU
+  // ioctl handshake overhead that a fresh client incurs on construction.
+  std::unique_ptr<cuid::gim::GimClient> gim_client;
+  if (cuid::gim::GimClient::is_available()) {
+    gim_client.reset(new cuid::gim::GimClient());
+  }
+
   const char *drm_path = "/sys/class/drm";
   DIR *dir = opendir(drm_path);
   if (dir != nullptr) {
@@ -88,7 +97,7 @@ amdcuid_status_t CuidGpu::discover(std::vector<DevicePtr> &gpus) {
         std::string device_path =
             std::string(drm_path) + "/" + card_name + "/device";
         amdcuid_gpu_info info = {};
-        discover_single(&info, device_path);
+        discover_single(&info, device_path, gim_client.get());
         if (!info.bdf.empty()) {
           seen_bdfs.insert(info.bdf);
         }
@@ -101,17 +110,24 @@ amdcuid_status_t CuidGpu::discover(std::vector<DevicePtr> &gpus) {
   // When the GIM driver is loaded, GPUs may not show up under /sys/class/drm
   // at all. Enumerate them via the GIM SMI ioctl interface and add any BDFs
   // we have not already discovered.
-  if (cuid::gim::GimClient::is_available()) {
-    cuid::gim::GimClient client;
+  if (gim_client) {
     std::vector<cuid::gim::GimDeviceEntry> gim_devices;
-    if (client.get_devices(gim_devices) == AMDCUID_STATUS_SUCCESS) {
+    if (gim_client->get_devices(gim_devices) == AMDCUID_STATUS_SUCCESS) {
       for (const auto &dev : gim_devices) {
         if (dev.bdf.empty() || seen_bdfs.count(dev.bdf) > 0) {
           continue;
         }
+        // Skip devices the GIM driver reports as failed: such devices are
+        // either not present, not initialized, or otherwise unable to
+        // provide useful identifying information, so they should not be
+        // surfaced to consumers as discoverable GPUs.
+        if (dev.failed) {
+          LOG(DEBUG, "GIM: skipping failed device at BDF " << dev.bdf);
+          continue;
+        }
         std::string sys_device_path = "/sys/bus/pci/devices/" + dev.bdf;
         amdcuid_gpu_info info = {};
-        discover_single(&info, sys_device_path);
+        discover_single(&info, sys_device_path, gim_client.get());
         // Ensure BDF is populated even if the sysfs node is missing entirely;
         // discover_single relies on the device symlink which may not exist
         // for GIM-only devices.
@@ -139,7 +155,8 @@ amdcuid_status_t CuidGpu::discover(std::vector<DevicePtr> &gpus) {
 }
 
 amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info *gpu_info,
-                                          const std::string &device_path) {
+                                          const std::string &device_path,
+                                          cuid::gim::GimClient *gim_client) {
 
   amdcuid_gpu_info info = {};
   std::string bdf = CuidUtilities::readlink_bdf(device_path);
@@ -252,15 +269,15 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info *gpu_info,
   // Final fallback: when sysfs and PCI config space were both unable to
   // populate the core PCI identifiers (typical of hosts running the GIM
   // SR-IOV driver where the PCI device files are not exposed to userspace),
-  // query the same fields via the GIM SMI ioctl interface.
-  const bool needs_gim_fallback = !info.bdf.empty() &&
-                                  cuid::gim::GimClient::is_available() &&
+  // query the same fields via the GIM SMI ioctl interface. The caller is
+  // expected to share a single GimClient across all discover_single calls
+  // so the ioctl handshake only happens once per discovery pass.
+  const bool needs_gim_fallback = !info.bdf.empty() && gim_client != nullptr &&
                                   (info.header.fields.gpu.vendor_id == 0 ||
                                    info.header.fields.gpu.device_id == 0);
   if (needs_gim_fallback) {
-    cuid::gim::GimClient client;
     cuid::gim::GimAsicInfo asic;
-    if (client.get_asic_info_for_bdf(info.bdf, asic) ==
+    if (gim_client->get_asic_info_for_bdf(info.bdf, asic) ==
         AMDCUID_STATUS_SUCCESS) {
       if (info.header.fields.gpu.vendor_id == 0) {
         info.header.fields.gpu.vendor_id =

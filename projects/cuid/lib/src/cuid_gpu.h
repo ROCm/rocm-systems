@@ -30,6 +30,12 @@
 #include <string>
 #include <vector>
 
+namespace cuid {
+namespace gim {
+class GimClient;
+} // namespace gim
+} // namespace cuid
+
 struct amdcuid_gpu_info {
   amdcuid_cuid_public_fields header;
   // DRM device node: /sys/class/drm/renderDXXX or /sys/class/drm/cardN
@@ -47,8 +53,15 @@ public:
   amdcuid_status_t
   get_hardware_fingerprint(uint64_t &fingerprint) const override;
   static amdcuid_status_t discover(std::vector<DevicePtr> &gpus);
-  static amdcuid_status_t discover_single(amdcuid_gpu_info *gpu_info,
-                                          const std::string &device_path);
+  // discover_single populates `gpu_info` from `device_path`. When the host
+  // runs the GIM SR-IOV driver, sysfs/PCI config space may not expose the
+  // device, in which case the caller can pass an already-initialized
+  // GimClient via `gim_client` to be used as a fallback. Passing nullptr
+  // disables the GIM fallback for that call (used by code paths that have
+  // no GimClient handy, e.g. amdcuid_get_handle_by_dev_path).
+  static amdcuid_status_t
+  discover_single(amdcuid_gpu_info *gpu_info, const std::string &device_path,
+                  cuid::gim::GimClient *gim_client = nullptr);
 
   // Virtual accessor overrides
   amdcuid_status_t get_vendor_id(uint16_t &vendor_id) const override;
