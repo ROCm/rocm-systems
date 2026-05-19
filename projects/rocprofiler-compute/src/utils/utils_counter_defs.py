@@ -41,44 +41,53 @@ SUPPORTED_DENOM: dict[str, str] = {
     "per_kernel": "1",
 }
 
-BUILD_IN_VARS: dict[str, dict[str, str]] = {
-    "cdna": {
-        "GRBM_GUI_ACTIVE_PER_XCD": "(GRBM_GUI_ACTIVE / $num_xcd)",
-        "GRBM_COUNT_PER_XCD": "(GRBM_COUNT / $num_xcd)",
-        "GRBM_SPI_BUSY_PER_XCD": "(GRBM_SPI_BUSY / $num_xcd)",
-        "numActiveCUs": (
-            "TO_INT(MIN(ROUND(SUM(4 * SQ_BUSY_CU_CYCLES) / "
-            "SUM($GRBM_GUI_ACTIVE_PER_XCD), 0) / $max_waves_per_cu * 8 + "
-            "MIN(MOD(ROUND(SUM(4 * SQ_BUSY_CU_CYCLES) / "
-            "SUM($GRBM_GUI_ACTIVE_PER_XCD), 0), $max_waves_per_cu), 8), $cu_per_gpu))"
-        ),
-        "kernelBusyCycles": (
-            "ROUND(AVG((((End_Timestamp - Start_Timestamp) / 1000) * $max_sclk)), 0)"
-        ),
-        "hbmBandwidth": "($max_mclk / 1000 * 32 * $num_hbm_channels)",
-    },
-    "rdna": {
-        "GRBM_GUI_ACTIVE_PER_XCD": "(GRBM_GUI_ACTIVE / $num_xcd)",
-        "GRBM_COUNT_PER_XCD": "(GRBM_COUNT / $num_xcd)",
-        "GRBM_SPI_BUSY_PER_XCD": "(GRBM_SPI_BUSY / $num_xcd)",
-    },
-}
 
-_ARCH_TO_FAMILY: dict[str, str] = {
-    "gfx908": "cdna",
-    "gfx90a": "cdna",
-    "gfx940": "cdna",
-    "gfx941": "cdna",
-    "gfx942": "cdna",
-    "gfx950": "cdna",
-    "gfx1151": "rdna",
-}
+def get_build_in_vars(gpu_series: str) -> dict[str, str]:
+    """Return the architecture-specific built-in variables for *gpu_series*.
 
+    Args:
+        gpu_series: GPU series string from mi_gpu_specs.get_gpu_series()
 
-def get_build_in_vars(arch: Optional[str]) -> dict[str, str]:
-    """Return the BUILD_IN_VARS for *arch*. Unknown arch falls back to CDNA."""
-    family = _ARCH_TO_FAMILY.get(arch or "", "cdna")
-    return BUILD_IN_VARS[family]
+    Returns:
+        Dictionary mapping built-in variable names to their formulas.
+
+    Raises:
+        ValueError: If gpu_series is not recognized (not MI* or NAVI*).
+    """
+    build_in_vars: dict[str, dict[str, str]] = {
+        "cdna": {
+            "GRBM_GUI_ACTIVE_PER_XCD": "(GRBM_GUI_ACTIVE / $num_xcd)",
+            "GRBM_COUNT_PER_XCD": "(GRBM_COUNT / $num_xcd)",
+            "GRBM_SPI_BUSY_PER_XCD": "(GRBM_SPI_BUSY / $num_xcd)",
+            "numActiveCUs": (
+                "TO_INT(MIN(ROUND(SUM(4 * SQ_BUSY_CU_CYCLES) / "
+                "SUM($GRBM_GUI_ACTIVE_PER_XCD), 0) / $max_waves_per_cu * 8 + "
+                "MIN(MOD(ROUND(SUM(4 * SQ_BUSY_CU_CYCLES) / "
+                "SUM($GRBM_GUI_ACTIVE_PER_XCD), 0), "
+                "$max_waves_per_cu), 8), $cu_per_gpu))"
+            ),
+            "kernelBusyCycles": (
+                "ROUND(AVG((((End_Timestamp - Start_Timestamp) / 1000) * "
+                "$max_sclk)), 0)"
+            ),
+            "hbmBandwidth": "($max_mclk / 1000 * 32 * $num_hbm_channels)",
+        },
+        "rdna35": {
+            "GRBM_GUI_ACTIVE_PER_XCD": "(GRBM_GUI_ACTIVE / $num_xcd)",
+            "GRBM_COUNT_PER_XCD": "(GRBM_COUNT / $num_xcd)",
+            "GRBM_SPI_BUSY_PER_XCD": "(GRBM_SPI_BUSY / $num_xcd)",
+        },
+    }
+
+    if gpu_series.startswith("MI"):
+        return build_in_vars["cdna"]
+    elif gpu_series.startswith("NAVI"):
+        return build_in_vars["rdna35"]
+    else:
+        raise ValueError(
+            f"Unknown GPU series '{gpu_series}' - cannot determine built-in variables. "
+            f"Expected series starting with 'MI' (CDNA) or 'NAVI' (RDNA)."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -107,7 +116,7 @@ def parse_counters_text(text: str) -> tuple[set[str], set[str]]:
     return hw_counter_matches, variable_matches
 
 
-def extract_counters(text: str, arch: Optional[str] = None) -> set[str]:
+def extract_counters(text: str, gpu_series: Optional[str] = None) -> set[str]:
     """Return the full set of HW counters referenced by *text*.
 
     Resolves ``$variable`` references and supported denominators
@@ -122,7 +131,7 @@ def extract_counters(text: str, arch: Optional[str] = None) -> set[str]:
         variables.update(var_d)
 
     # Recursively resolve built-in variables
-    build_in_vars = get_build_in_vars(arch)
+    build_in_vars = get_build_in_vars(gpu_series) if gpu_series else {}
     seen: set[str] = set()
     while variables - seen:
         new_vars: set[str] = set()

@@ -20,6 +20,7 @@ from utils.metrics.noise_clamper import (
     get_noise_clamp_warnings,
     print_noise_clamp_summary,
 )
+from utils.mi_gpu_spec import mi_gpu_specs
 from utils.utils_common import SUPPORTED_FIELD, calc_builtin_var
 from utils.utils_counter_defs import get_build_in_vars
 
@@ -107,7 +108,7 @@ def calc_builtin_vars(
     # TODO: fix all $normUnit in Unit column or title
     # build and eval all derived build-in global variables
     builtin_vars_collection = {}
-    build_in_vars = get_build_in_vars(gpu_arch)
+    build_in_vars = get_build_in_vars(mi_gpu_specs.get_gpu_series(gpu_arch))
 
     # First pass: calculate per-XCD values
     for variable_key, variable_value in build_in_vars.items():

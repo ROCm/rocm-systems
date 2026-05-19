@@ -44,6 +44,7 @@ from utils.metrics.noise_clamper import (
     print_noise_clamp_summary,
     to_noise_clamp,
 )
+from utils.mi_gpu_spec import mi_gpu_specs
 from utils.parser import (
     PC_SAMPLING_NOT_ISSUE_PREFIX,
 )
@@ -558,7 +559,26 @@ class db_analysis(OmniAnalyze_Base):
     @staticmethod
     def calc_builtin_vars(pmc_df: pd.DataFrame, sys_info: dict) -> pd.DataFrame:
         """Calculate arch-specific built-in variables (numActiveCUs, etc.)"""
-        build_in_vars = get_build_in_vars(sys_info.get("gpu_arch"))
+        gpu_arch = sys_info.get("gpu_arch")
+        if gpu_arch is None:
+            console_warning(
+                "GPU architecture not found in sys_info. "
+                "Metrics requiring architecture-specific variables (numActiveCUs, "
+                "kernelBusyCycles, etc.) may be incorrect."
+            )
+            build_in_vars = {}
+        else:
+            gpu_series = mi_gpu_specs.get_gpu_series(gpu_arch)
+            try:
+                build_in_vars = get_build_in_vars(gpu_series)
+            except (ValueError, TypeError) as e:
+                console_warning(
+                    "Unable to determine built-in variables for GPU series "
+                    f"'{gpu_series}': {e}. "
+                    "Metrics requiring architecture-specific variables (numActiveCUs, "
+                    "kernelBusyCycles, etc.) may be incorrect."
+                )
+                build_in_vars = {}
         # Calculate PER_XCD variables first
         for key, value in build_in_vars.items():
             if "PER_XCD" in key:
