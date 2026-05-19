@@ -3,9 +3,20 @@
 
 #include "sqlite_backend.hpp"
 
+#include "data_storage/vtable/kernel_dispatch_buffer.hpp"
+#include "data_storage/vtable/kernel_dispatch_buffer_vtab.hpp"
+#include "data_storage/vtable/memory_alloc_buffer.hpp"
+#include "data_storage/vtable/memory_alloc_buffer_vtab.hpp"
+#include "data_storage/vtable/memory_copy_buffer.hpp"
+#include "data_storage/vtable/memory_copy_buffer_vtab.hpp"
+#include "data_storage/vtable/pmc_event_buffer.hpp"
+#include "data_storage/vtable/pmc_event_buffer_vtab.hpp"
+#include "data_storage/vtable/region_buffer.hpp"
+#include "data_storage/vtable/region_buffer_vtab.hpp"
 #include "debug.hpp"
 #include "directory.hpp"
 
+#include <cctype>
 #include <filesystem>
 #include <stdexcept>
 #include <string>
@@ -197,6 +208,59 @@ sqlite_backend::sqlite_backend(std::string db_path, std::string uuid, storage_mo
             sqlite3_open(m_db_path.c_str(), &m_sqlite3), "", "database open failed!");
     }
 
+    // Tune PRAGMAs for write throughput. Done before any other queries.
+    // WAL is a no-op for :memory: databases but is harmless to request.
+    auto exec_pragma = [this](const char* sql) {
+        char* err_msg = nullptr;
+        int   rc      = sqlite3_exec(m_sqlite3, sql, nullptr, nullptr, &err_msg);
+        if(rc != SQLITE_OK)
+        {
+            LOG_ERROR("Failed to apply PRAGMA '{}': {}",
+                      sql,
+                      err_msg != nullptr ? err_msg : "unknown error");
+            sqlite3_free(err_msg);
+        }
+    };
+    exec_pragma("PRAGMA journal_mode=WAL");
+    exec_pragma("PRAGMA synchronous=NORMAL");
+    exec_pragma("PRAGMA cache_size=-65536");  // 64 MiB page cache
+    exec_pragma("PRAGMA temp_store=MEMORY");
+
+    // Verify WAL was actually engaged when on disk. PRAGMA journal_mode
+    // returns the active mode; on :memory: it reports "memory" and is
+    // accepted. Anything else means the throughput tuning silently failed.
+    if(m_mode == storage_mode_t::on_disk)
+    {
+        sqlite3_stmt* stmt = nullptr;
+        std::string   active_mode;
+        if(sqlite3_prepare_v2(m_sqlite3, "PRAGMA journal_mode", -1, &stmt, nullptr) ==
+           SQLITE_OK)
+        {
+            if(sqlite3_step(stmt) == SQLITE_ROW)
+            {
+                const auto* text =
+                    reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
+                if(text != nullptr) active_mode = text;
+            }
+            sqlite3_finalize(stmt);
+        }
+
+        std::string lowered;
+        lowered.reserve(active_mode.size());
+        for(char ch : active_mode)
+        {
+            lowered.push_back(static_cast<char>(std::tolower(ch)));
+        }
+
+        if(lowered != "wal")
+        {
+            throw std::runtime_error(
+                "profiler_hub: PRAGMA journal_mode=WAL did not engage; active mode is '" +
+                active_mode + "' for db_path '" + m_db_path + "'");
+        }
+        LOG_DEBUG("profiler_hub: WAL journal_mode engaged for db_path '{}'", m_db_path);
+    }
+
     sqlite3_prepare_v2(m_sqlite3, "BEGIN TRANSACTION", -1, &m_begin_stmt, nullptr);
     sqlite3_prepare_v2(m_sqlite3, "COMMIT", -1, &m_commit_stmt, nullptr);
     sqlite3_prepare_v2(m_sqlite3, "ROLLBACK", -1, &m_rollback_stmt, nullptr);
@@ -206,10 +270,26 @@ sqlite_backend::sqlite_backend(std::string db_path, std::string uuid, storage_mo
 
 sqlite_backend::~sqlite_backend()
 {
+    // Drain any pending vtable buffers BEFORE closing the SQLite connection.
+    // If sqlite3_close runs first, the vtables xDisconnect during close,
+    // which destroys each buffer; the buffer's flush() then issues
+    // BEGIN/INSERT/COMMIT on a connection that is mid-close. Doing the
+    // drain here guarantees the buffers reach the underlying tables while
+    // the connection is fully usable.
+    try
+    {
+        flush();
+    } catch(...)
+    {}
+
     sqlite3_finalize(m_begin_stmt);
     sqlite3_finalize(m_commit_stmt);
     sqlite3_finalize(m_rollback_stmt);
-    sqlite3_close(m_sqlite3);
+
+    // sqlite3_close_v2 marks the connection as zombie if any prepared
+    // statements / blobs are still outstanding and cleans up once they
+    // are released, instead of returning SQLITE_BUSY and leaking.
+    sqlite3_close_v2(m_sqlite3);
 }
 
 std::vector<std::string>
@@ -276,6 +356,60 @@ sqlite_backend::initialize_schema()
     }
 
     m_initialized = true;
+
+    // Disable foreign-key validation on the writer connection. Applied after
+    // initialize_schema() because the schema SQL contains
+    // 'PRAGMA foreign_keys = ON' which would otherwise re-enable it.
+    {
+        char* err_msg = nullptr;
+        int   rc      = sqlite3_exec(
+            m_sqlite3, "PRAGMA foreign_keys=OFF", nullptr, nullptr, &err_msg);
+        if(rc != SQLITE_OK)
+        {
+            LOG_ERROR("Failed to apply PRAGMA foreign_keys=OFF: {}",
+                      err_msg != nullptr ? err_msg : "unknown error");
+            sqlite3_free(err_msg);
+        }
+    }
+
+    // Register the per-table buffer vtable modules and create virtual tables
+    // that front the real rocpd_<table>_<uuid> tables.
+    vtable::register_kernel_dispatch_buffer_module(m_sqlite3);
+    vtable::register_memory_copy_buffer_module(m_sqlite3);
+    vtable::register_memory_alloc_buffer_module(m_sqlite3);
+    vtable::register_region_buffer_module(m_sqlite3);
+    vtable::register_pmc_event_buffer_module(m_sqlite3);
+
+    auto create_buf_vtab = [&](const char*        vtab_name,
+                               const char*        module_name,
+                               const std::string& real_table) {
+        std::string sql = "CREATE VIRTUAL TABLE IF NOT EXISTS ";
+        sql += vtab_name;
+        sql += " USING ";
+        sql += module_name;
+        sql += "('";
+        sql += real_table;
+        sql += "')";
+        char* err = nullptr;
+        int   rc  = sqlite3_exec(m_sqlite3, sql.c_str(), nullptr, nullptr, &err);
+        if(rc != SQLITE_OK)
+        {
+            LOG_ERROR("Failed to create {} vtable: {}",
+                      vtab_name,
+                      err != nullptr ? err : "unknown");
+            sqlite3_free(err);
+        }
+    };
+
+    create_buf_vtab("kernel_dispatch_buf",
+                    "kernel_dispatch_buffer",
+                    "rocpd_kernel_dispatch_" + m_uuid);
+    create_buf_vtab(
+        "memory_copy_buf", "memory_copy_buffer", "rocpd_memory_copy_" + m_uuid);
+    create_buf_vtab(
+        "memory_alloc_buf", "memory_alloc_buffer", "rocpd_memory_allocate_" + m_uuid);
+    create_buf_vtab("region_buf", "region_buffer", "rocpd_region_" + m_uuid);
+    create_buf_vtab("pmc_event_buf", "pmc_event_buffer", "rocpd_pmc_event_" + m_uuid);
 }
 
 void
@@ -290,10 +424,32 @@ sqlite_backend::execute(const std::string& query)
 void
 sqlite_backend::flush()
 {
-    if(m_mode != storage_mode_t::in_memory)
+    // Drain the per-table column buffers so pending rows reach the real
+    // rocpd_<table>_<uuid> tables. Without this, rows inserted via the
+    // *_buf vtables stay in C++ memory until the buffer instance is destroyed.
+    const auto drain_buffer = [](auto* buffer) {
+        if(buffer != nullptr)
+        {
+            buffer->flush();
+        }
+    };
+    drain_buffer(vtable::kernel_dispatch_buffer::get_active_instance(
+        "rocpd_kernel_dispatch_" + m_uuid));
+    drain_buffer(
+        vtable::memory_copy_buffer::get_active_instance("rocpd_memory_copy_" + m_uuid));
+    drain_buffer(vtable::memory_alloc_buffer::get_active_instance(
+        "rocpd_memory_allocate_" + m_uuid));
+    drain_buffer(vtable::region_buffer::get_active_instance("rocpd_region_" + m_uuid));
+    drain_buffer(
+        vtable::pmc_event_buffer::get_active_instance("rocpd_pmc_event_" + m_uuid));
+
+    if(m_mode == storage_mode_t::on_disk)
     {
-        LOG_WARNING("Flushing database is not supported for database type: {}",
-                    static_cast<int>(m_mode));
+        // Already on disk. Just checkpoint the WAL so the main file holds the
+        // committed state and the WAL/SHM files shrink. No-op for non-WAL
+        // journal modes.
+        sqlite3_wal_checkpoint_v2(
+            m_sqlite3, nullptr, SQLITE_CHECKPOINT_TRUNCATE, nullptr, nullptr);
         return;
     }
 

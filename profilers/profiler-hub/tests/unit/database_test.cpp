@@ -47,7 +47,12 @@ protected:
         m_uuid = "test_uuid_12345";
     }
 
-    void TearDown() override { std::remove(m_database_path.c_str()); }
+    void TearDown() override
+    {
+        std::remove(m_database_path.c_str());
+        std::remove((m_database_path + "-wal").c_str());
+        std::remove((m_database_path + "-shm").c_str());
+    }
 
     std::string m_database_path;
     std::string m_uuid;
@@ -212,6 +217,16 @@ TEST_F(sqlite_backend_test, multiple_backends_independent)
     std::string path1 = m_database_path + "_1";
     std::string path2 = m_database_path + "_2";
 
+    // Pre-clean any WAL/SHM sidecars left by a prior run so the test
+    // always starts with a fresh database.
+    auto remove_with_sidecars = [](const std::string& path) {
+        std::remove(path.c_str());
+        std::remove((path + "-wal").c_str());
+        std::remove((path + "-shm").c_str());
+    };
+    remove_with_sidecars(path1);
+    remove_with_sidecars(path2);
+
     auto db1 = sqlite_backend::create(path1, "uuid1");
     auto db2 = sqlite_backend::create(path2, "uuid2");
 
@@ -224,8 +239,12 @@ TEST_F(sqlite_backend_test, multiple_backends_independent)
     db1->execute("INSERT INTO tbl1 (id) VALUES (1)");
     db2->execute("INSERT INTO tbl2 (id) VALUES (100)");
 
-    std::remove(path1.c_str());
-    std::remove(path2.c_str());
+    // Reset db handles before removing files so WAL is checkpointed.
+    db1.reset();
+    db2.reset();
+
+    remove_with_sidecars(path1);
+    remove_with_sidecars(path2);
 }
 
 TEST_F(sqlite_backend_test, check_is_uuid_correct)
