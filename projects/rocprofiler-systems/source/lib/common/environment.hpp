@@ -4,6 +4,7 @@
 #pragma once
 
 #include "common/defines.h"
+#include "common/env_vars.hpp"
 #include "common/join.hpp"
 #include "logger/debug.hpp"
 
@@ -800,8 +801,8 @@ consolidate_env_entries(std::vector<std::string>& envp)
     /// - ROCPROFSYS_SAMPLING_OVERFLOW_EVENT: uses perf::EVENT_NAME syntax
     /// - ROCPROFSYS_ROCM_EVENTS: uses EVENT_NAME:device=N syntax
     auto get_delimiter = [](std::string_view key) -> char {
-        if(key == "ROCPROFSYS_PAPI_EVENTS" ||
-           key == "ROCPROFSYS_SAMPLING_OVERFLOW_EVENT" || key == "ROCPROFSYS_ROCM_EVENTS")
+        if(key == env_vars::PAPI_EVENTS || key == env_vars::SAMPLING_OVERFLOW_EVENT ||
+           key == env_vars::ROCM_EVENTS)
             return ',';
         return ':';
     };

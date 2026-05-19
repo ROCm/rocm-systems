@@ -3,6 +3,7 @@
 
 #include "rocprof-sys-instrument.hpp"
 #include "common/defines.h"
+#include "common/env_vars.hpp"
 #include "common/join.hpp"
 #include "common/path.hpp"
 #include "core/demangler.hpp"
@@ -60,7 +61,8 @@ auto
 get_default_min_instructions()
 {
     // default to 1024
-    return tim::get_env<size_t>("ROCPROFSYS_DEFAULT_MIN_INSTRUCTIONS", (1 << 10), false);
+    return tim::get_env<size_t>(rocprofsys::env_vars::DEFAULT_MIN_INSTRUCTIONS.data(),
+                                (1 << 10), false);
 }
 auto
 get_default_min_address_range()
@@ -92,9 +94,10 @@ bool   instr_print                  = false;
 bool   simulate                     = false;
 bool   include_uninstr              = false;
 bool   include_internal_linked_libs = false;
-int    verbose_level   = tim::get_env<int>("ROCPROFSYS_VERBOSE_INSTRUMENT", 0);
-int    num_log_entries = tim::get_env<int>(
-    "ROCPROFSYS_LOG_COUNT", tim::get_env<bool>("ROCPROFSYS_CI", false) ? 20 : 50);
+int verbose_level = tim::get_env<int>(rocprofsys::env_vars::VERBOSE_INSTRUMENT.data(), 0);
+int num_log_entries = tim::get_env<int>(
+    rocprofsys::env_vars::LOG_COUNT.data(),
+    tim::get_env<bool>(rocprofsys::env_vars::CI.data(), false) ? 20 : 50);
 string_t main_fname     = "main";
 string_t argv0          = {};
 string_t cmdv0          = {};
@@ -287,7 +290,8 @@ main(int argc, char** argv)
     argv0 = argv[0];
 
     auto _omni_root = tim::get_env<std::string>(
-        "rocprofiler_systems_ROOT", tim::get_env<std::string>("ROCPROFSYS_ROOT", ""));
+        "rocprofiler_systems_ROOT",
+        tim::get_env<std::string>(rocprofsys::env_vars::ROOT.data(), ""));
     if(!_omni_root.empty() && exists(_omni_root))
     {
         bin_search_paths.emplace_back(JOIN('/', _omni_root, "bin"));
@@ -1275,25 +1279,34 @@ main(int argc, char** argv)
                 regex_array.emplace_back(std::regex(regex_expr, regex_opts));
         };
 
-        add_regex(func_include, tim::get_env<string_t>("ROCPROFSYS_REGEX_INCLUDE", ""));
-        add_regex(func_exclude, tim::get_env<string_t>("ROCPROFSYS_REGEX_EXCLUDE", ""));
-        add_regex(func_restrict, tim::get_env<string_t>("ROCPROFSYS_REGEX_RESTRICT", ""));
-        add_regex(caller_include,
-                  tim::get_env<string_t>("ROCPROFSYS_REGEX_CALLER_INCLUDE"));
+        add_regex(func_include,
+                  tim::get_env<string_t>(rocprofsys::env_vars::REGEX_INCLUDE.data(), ""));
+        add_regex(func_exclude,
+                  tim::get_env<string_t>(rocprofsys::env_vars::REGEX_EXCLUDE.data(), ""));
+        add_regex(func_restrict, tim::get_env<string_t>(
+                                     rocprofsys::env_vars::REGEX_RESTRICT.data(), ""));
+        add_regex(caller_include, tim::get_env<string_t>(
+                                      rocprofsys::env_vars::REGEX_CALLER_INCLUDE.data()));
         add_regex(func_internal_include,
-                  tim::get_env<string_t>("ROCPROFSYS_REGEX_INTERNAL_INCLUDE", ""));
+                  tim::get_env<string_t>(
+                      rocprofsys::env_vars::REGEX_INTERNAL_INCLUDE.data(), ""));
 
         add_regex(file_include,
-                  tim::get_env<string_t>("ROCPROFSYS_REGEX_MODULE_INCLUDE", ""));
+                  tim::get_env<string_t>(
+                      rocprofsys::env_vars::REGEX_MODULE_INCLUDE.data(), ""));
         add_regex(file_exclude,
-                  tim::get_env<string_t>("ROCPROFSYS_REGEX_MODULE_EXCLUDE", ""));
+                  tim::get_env<string_t>(
+                      rocprofsys::env_vars::REGEX_MODULE_EXCLUDE.data(), ""));
         add_regex(file_restrict,
-                  tim::get_env<string_t>("ROCPROFSYS_REGEX_MODULE_RESTRICT", ""));
+                  tim::get_env<string_t>(
+                      rocprofsys::env_vars::REGEX_MODULE_RESTRICT.data(), ""));
         add_regex(file_internal_include,
-                  tim::get_env<string_t>("ROCPROFSYS_REGEX_MODULE_INTERNAL_INCLUDE", ""));
+                  tim::get_env<string_t>(
+                      rocprofsys::env_vars::REGEX_MODULE_INTERNAL_INCLUDE.data(), ""));
 
         add_regex(instruction_exclude,
-                  tim::get_env<string_t>("ROCPROFSYS_REGEX_INSTRUCTION_EXCLUDE", ""));
+                  tim::get_env<string_t>(
+                      rocprofsys::env_vars::REGEX_INSTRUCTION_EXCLUDE.data(), ""));
 
         //  Helper function for parsing the regex options
         auto _parse_regex_option = [&parser, &add_regex](const string_t& _option,
@@ -1418,12 +1431,12 @@ main(int argc, char** argv)
     env_vars.reserve(env_vars.size() + env_config_variables.size());
     for(auto&& itr : env_config_variables)
         env_vars.emplace_back(itr);
-    env_vars.emplace_back(TIMEMORY_JOIN('=', "ROCPROFSYS_MODE", instr_mode));
+    env_vars.emplace_back(TIMEMORY_JOIN('=', rocprofsys::env_vars::MODE, instr_mode));
     env_vars.emplace_back(
-        TIMEMORY_JOIN('=', "ROCPROFSYS_INSTRUMENT_MODE", instr_mode_v_int));
-    env_vars.emplace_back(TIMEMORY_JOIN('=', "ROCPROFSYS_MPI_INIT", "OFF"));
-    env_vars.emplace_back(TIMEMORY_JOIN('=', "ROCPROFSYS_MPI_FINALIZE", "OFF"));
-    env_vars.emplace_back(TIMEMORY_JOIN('=', "ROCPROFSYS_USE_CODE_COVERAGE",
+        TIMEMORY_JOIN('=', rocprofsys::env_vars::INSTRUMENT_MODE, instr_mode_v_int));
+    env_vars.emplace_back(TIMEMORY_JOIN('=', rocprofsys::env_vars::MPI_INIT, "OFF"));
+    env_vars.emplace_back(TIMEMORY_JOIN('=', rocprofsys::env_vars::MPI_FINALIZE, "OFF"));
+    env_vars.emplace_back(TIMEMORY_JOIN('=', rocprofsys::env_vars::USE_CODE_COVERAGE,
                                         (coverage_mode != CODECOV_NONE) ? "ON" : "OFF"));
     addr_space = rocprofsys_get_address_space(bpatch, _cmdc, _cmdv, env_vars,
                                               binary_rewrite, _pid, mutname);
@@ -2026,14 +2039,15 @@ main(int argc, char** argv)
     if(!binary_rewrite && !is_attached) env_vars.clear();
 
     env_vars.emplace_back(
-        TIMEMORY_JOIN('=', "ROCPROFSYS_INIT_ENABLED",
+        TIMEMORY_JOIN('=', rocprofsys::env_vars::INIT_ENABLED,
                       (user_start_func && user_stop_func) ? "OFF" : "ON"));
-    env_vars.emplace_back(TIMEMORY_JOIN('=', "ROCPROFSYS_USE_MPIP",
+    env_vars.emplace_back(TIMEMORY_JOIN('=', rocprofsys::env_vars::USE_MPIP,
                                         (binary_rewrite && use_mpi) ? "ON" : "OFF"));
-    if(use_mpi) env_vars.emplace_back(TIMEMORY_JOIN('=', "ROCPROFSYS_USE_PID", "ON"));
+    if(use_mpi)
+        env_vars.emplace_back(TIMEMORY_JOIN('=', rocprofsys::env_vars::USE_PID, "ON"));
 
-    env_vars.emplace_back(
-        TIMEMORY_JOIN('=', "ROCPROFSYS_SCRIPT_PATH", _omni_internal_libexec_path));
+    env_vars.emplace_back(TIMEMORY_JOIN('=', rocprofsys::env_vars::SCRIPT_PATH,
+                                        _omni_internal_libexec_path));
 
     for(auto& itr : env_vars)
     {

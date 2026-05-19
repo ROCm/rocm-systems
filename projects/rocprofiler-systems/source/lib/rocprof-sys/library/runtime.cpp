@@ -4,6 +4,7 @@
 #include "library/runtime.hpp"
 #include "api.hpp"
 #include "common/defines.h"
+#include "common/env_vars.hpp"
 #include "core/config.hpp"
 #include "core/utility.hpp"
 #include "library/thread_data.hpp"
@@ -37,7 +38,7 @@ namespace rocprofsys
 {
 namespace
 {
-auto root_process_id = get_env<pid_t>("ROCPROFSYS_ROOT_PROCESS", process::get_id());
+auto root_process_id = get_env<pid_t>(env_vars::ROOT_PROCESS, process::get_id());
 
 auto&
 get_sampling_on_child_threads_history(std::int64_t _idx = utility::get_thread_index())

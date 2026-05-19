@@ -11,6 +11,7 @@
 #include <vector>
 
 using namespace rocprofsys::common;
+namespace env_vars = rocprofsys::env_vars;
 
 namespace
 {
@@ -158,15 +159,18 @@ TEST_F(RemoveEnvTest, RealWorld_LD_PRELOAD)
 
 TEST_F(RemoveEnvTest, RealWorld_RestoreROCPROFSYS_Variable)
 {
-    m_original_envs.insert("ROCPROFSYS_TRACE=false");
+    m_original_envs.insert(std::string{ env_vars::TRACE } + "=false");
 
-    m_env_vars = { "ROCPROFSYS_TRACE=true", "ROCPROFSYS_PROFILE=true" };
+    m_env_vars = { std::string{ env_vars::TRACE } + "=true",
+                   std::string{ env_vars::PROFILE } + "=true" };
 
-    remove_env(m_env_vars, "ROCPROFSYS_TRACE", m_original_envs);
+    remove_env(m_env_vars, env_vars::TRACE, m_original_envs);
 
     ASSERT_EQ(m_env_vars.size(), 2);
-    EXPECT_EQ(find_env_var(m_env_vars, "ROCPROFSYS_TRACE"), "ROCPROFSYS_TRACE=false");
-    EXPECT_EQ(find_env_var(m_env_vars, "ROCPROFSYS_PROFILE"), "ROCPROFSYS_PROFILE=true");
+    EXPECT_EQ(find_env_var(m_env_vars, env_vars::TRACE),
+              std::string{ env_vars::TRACE } + "=false");
+    EXPECT_EQ(find_env_var(m_env_vars, env_vars::PROFILE),
+              std::string{ env_vars::PROFILE } + "=true");
 }
 
 TEST_F(RemoveEnvTest, EmptyVariableName)

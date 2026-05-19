@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "perfetto.hpp"
+#include "common/env_vars.hpp"
 #include "common/units.hpp"
 #include "config.hpp"
 #include "library/runtime.hpp"
@@ -278,7 +279,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error,
     {
         auto _output_folder = filepath::dirname(_filename);
         auto _script_path   = std::string{ "rocprof-sys-merge-output.sh" };
-        auto _script_dir    = get_env("ROCPROFSYS_SCRIPT_PATH", std::string{});
+        auto _script_dir    = get_env(env_vars::SCRIPT_PATH, std::string{});
 
         if(!_script_dir.empty())
         {

@@ -9,6 +9,7 @@
 #include <unordered_map>
 
 using namespace rocprofsys::common;
+namespace env_vars = rocprofsys::env_vars;
 
 // ── fake_env ─────────────────────────────────────────────────────────────────
 // In-memory environment backend for unit tests.
@@ -108,62 +109,65 @@ TEST_F(DuplicatedEnvironmentEntriesTest, HandlesEmptyValues)
 TEST_F(DuplicatedEnvironmentEntriesTest, PapiEventsUsesCommaDelimiter)
 {
     std::vector<std::string> env_vars = {
-        "ROCPROFSYS_PAPI_EVENTS=perf::INSTRUCTIONS",
-        "ROCPROFSYS_PAPI_EVENTS=perf::CACHE_MISSES",
+        std::string{ env_vars::PAPI_EVENTS } + "=perf::INSTRUCTIONS",
+        std::string{ env_vars::PAPI_EVENTS } + "=perf::CACHE_MISSES",
     };
     consolidate_env_entries(env_vars);
     ASSERT_EQ(env_vars.size(), 1);
-    EXPECT_EQ(env_vars[0],
-              "ROCPROFSYS_PAPI_EVENTS=perf::INSTRUCTIONS,perf::CACHE_MISSES");
+    EXPECT_EQ(env_vars[0], std::string{ env_vars::PAPI_EVENTS } +
+                               "=perf::INSTRUCTIONS,perf::CACHE_MISSES");
 }
 
 TEST_F(DuplicatedEnvironmentEntriesTest, PapiEventsPreservesColonInValue)
 {
     std::vector<std::string> env_vars = {
-        "ROCPROFSYS_PAPI_EVENTS=perf::PERF_COUNT_SW_CPU_CLOCK",
+        std::string{ env_vars::PAPI_EVENTS } + "=perf::PERF_COUNT_SW_CPU_CLOCK",
     };
     consolidate_env_entries(env_vars);
     ASSERT_EQ(env_vars.size(), 1);
-    EXPECT_EQ(env_vars[0], "ROCPROFSYS_PAPI_EVENTS=perf::PERF_COUNT_SW_CPU_CLOCK");
+    EXPECT_EQ(env_vars[0],
+              std::string{ env_vars::PAPI_EVENTS } + "=perf::PERF_COUNT_SW_CPU_CLOCK");
 }
 
 TEST_F(DuplicatedEnvironmentEntriesTest, PapiEventsDeduplicates)
 {
     std::vector<std::string> env_vars = {
-        "ROCPROFSYS_PAPI_EVENTS=perf::INSTRUCTIONS",
-        "ROCPROFSYS_PAPI_EVENTS=perf::CACHE_MISSES",
-        "ROCPROFSYS_PAPI_EVENTS=perf::INSTRUCTIONS",
+        std::string{ env_vars::PAPI_EVENTS } + "=perf::INSTRUCTIONS",
+        std::string{ env_vars::PAPI_EVENTS } + "=perf::CACHE_MISSES",
+        std::string{ env_vars::PAPI_EVENTS } + "=perf::INSTRUCTIONS",
     };
     consolidate_env_entries(env_vars);
     ASSERT_EQ(env_vars.size(), 1);
-    EXPECT_EQ(env_vars[0],
-              "ROCPROFSYS_PAPI_EVENTS=perf::INSTRUCTIONS,perf::CACHE_MISSES");
+    EXPECT_EQ(env_vars[0], std::string{ env_vars::PAPI_EVENTS } +
+                               "=perf::INSTRUCTIONS,perf::CACHE_MISSES");
 }
 
 TEST_F(DuplicatedEnvironmentEntriesTest, SamplingOverflowEventUsesCommaDelimiter)
 {
     std::vector<std::string> env_vars = {
-        "ROCPROFSYS_SAMPLING_OVERFLOW_EVENT=perf::INSTRUCTIONS",
-        "ROCPROFSYS_SAMPLING_OVERFLOW_EVENT=perf::CYCLES",
+        std::string{ env_vars::SAMPLING_OVERFLOW_EVENT } + "=perf::INSTRUCTIONS",
+        std::string{ env_vars::SAMPLING_OVERFLOW_EVENT } + "=perf::CYCLES",
     };
     consolidate_env_entries(env_vars);
     ASSERT_EQ(env_vars.size(), 1);
-    EXPECT_EQ(env_vars[0],
-              "ROCPROFSYS_SAMPLING_OVERFLOW_EVENT=perf::INSTRUCTIONS,perf::CYCLES");
+    EXPECT_EQ(env_vars[0], std::string{ env_vars::SAMPLING_OVERFLOW_EVENT } +
+                               "=perf::INSTRUCTIONS,perf::CYCLES");
 }
 
 TEST_F(DuplicatedEnvironmentEntriesTest, MixedDelimiterVariables)
 {
     std::vector<std::string> env_vars = {
-        "PATH=/usr/bin",        "ROCPROFSYS_PAPI_EVENTS=perf::INSTRUCTIONS",
-        "PATH=/usr/local/bin",  "ROCPROFSYS_PAPI_EVENTS=perf::CACHE_MISSES",
+        "PATH=/usr/bin",
+        std::string{ env_vars::PAPI_EVENTS } + "=perf::INSTRUCTIONS",
+        "PATH=/usr/local/bin",
+        std::string{ env_vars::PAPI_EVENTS } + "=perf::CACHE_MISSES",
         "LD_LIBRARY_PATH=/lib",
     };
     consolidate_env_entries(env_vars);
     ASSERT_EQ(env_vars.size(), 3);
     EXPECT_EQ(env_vars[0], "PATH=/usr/bin:/usr/local/bin");
-    EXPECT_EQ(env_vars[1],
-              "ROCPROFSYS_PAPI_EVENTS=perf::INSTRUCTIONS,perf::CACHE_MISSES");
+    EXPECT_EQ(env_vars[1], std::string{ env_vars::PAPI_EVENTS } +
+                               "=perf::INSTRUCTIONS,perf::CACHE_MISSES");
     EXPECT_EQ(env_vars[2], "LD_LIBRARY_PATH=/lib");
 }
 
@@ -184,38 +188,37 @@ TEST_F(DuplicatedEnvironmentEntriesTest, PreservesKeyOrder)
 TEST_F(DuplicatedEnvironmentEntriesTest, PapiEventsWithCommaInValue)
 {
     std::vector<std::string> env_vars = {
-        "ROCPROFSYS_PAPI_EVENTS=perf::INSTRUCTIONS,perf::CYCLES",
-        "ROCPROFSYS_PAPI_EVENTS=perf::CACHE_MISSES",
+        std::string{ env_vars::PAPI_EVENTS } + "=perf::INSTRUCTIONS,perf::CYCLES",
+        std::string{ env_vars::PAPI_EVENTS } + "=perf::CACHE_MISSES",
     };
     consolidate_env_entries(env_vars);
     ASSERT_EQ(env_vars.size(), 1);
-    EXPECT_EQ(
-        env_vars[0],
-        "ROCPROFSYS_PAPI_EVENTS=perf::INSTRUCTIONS,perf::CYCLES,perf::CACHE_MISSES");
+    EXPECT_EQ(env_vars[0], std::string{ env_vars::PAPI_EVENTS } +
+                               "=perf::INSTRUCTIONS,perf::CYCLES,perf::CACHE_MISSES");
 }
 
 TEST_F(DuplicatedEnvironmentEntriesTest, RocmEventsUsesCommaDelimiter)
 {
     std::vector<std::string> env_vars = {
-        "ROCPROFSYS_ROCM_EVENTS=SQ_WAVES:device=0",
-        "ROCPROFSYS_ROCM_EVENTS=TA_TA_BUSY:device=1",
+        std::string{ env_vars::ROCM_EVENTS } + "=SQ_WAVES:device=0",
+        std::string{ env_vars::ROCM_EVENTS } + "=TA_TA_BUSY:device=1",
     };
     consolidate_env_entries(env_vars);
     ASSERT_EQ(env_vars.size(), 1);
-    EXPECT_EQ(env_vars[0],
-              "ROCPROFSYS_ROCM_EVENTS=SQ_WAVES:device=0,TA_TA_BUSY:device=1");
+    EXPECT_EQ(env_vars[0], std::string{ env_vars::ROCM_EVENTS } +
+                               "=SQ_WAVES:device=0,TA_TA_BUSY:device=1");
 }
 
 TEST_F(DuplicatedEnvironmentEntriesTest, RocmEventsPreservesDeviceSyntax)
 {
     std::vector<std::string> env_vars = {
-        "ROCPROFSYS_ROCM_EVENTS=GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU,TA_TA_BUSY:device=0",
+        std::string{ env_vars::ROCM_EVENTS } +
+            "=GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU,TA_TA_BUSY:device=0",
     };
     consolidate_env_entries(env_vars);
     ASSERT_EQ(env_vars.size(), 1);
-    EXPECT_EQ(
-        env_vars[0],
-        "ROCPROFSYS_ROCM_EVENTS=GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU,TA_TA_BUSY:device=0");
+    EXPECT_EQ(env_vars[0], std::string{ env_vars::ROCM_EVENTS } +
+                               "=GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU,TA_TA_BUSY:device=0");
 }
 
 class AddTorchLibraryPathTest : public ::testing::Test

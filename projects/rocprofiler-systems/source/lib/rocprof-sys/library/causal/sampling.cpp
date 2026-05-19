@@ -3,6 +3,7 @@
 
 #include "library/causal/sampling.hpp"
 #include "binary/analysis.hpp"
+#include "common/env_vars.hpp"
 #include "core/common.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
@@ -322,7 +323,7 @@ configure(bool _setup, std::int64_t _tid)
             auto _perf_error = _activate_perf_backend();
             if(!_perf_error)
             {
-                config::set_setting_value("ROCPROFSYS_CAUSAL_BACKEND",
+                config::set_setting_value(std::string{ env_vars::CAUSAL_BACKEND },
                                           std::string{ "perf" });
             }
             else
@@ -336,7 +337,7 @@ configure(bool _setup, std::int64_t _tid)
                     std::exit(1);
                 }
 
-                config::set_setting_value("ROCPROFSYS_CAUSAL_BACKEND",
+                config::set_setting_value(std::string{ env_vars::CAUSAL_BACKEND },
                                           std::string{ "timer" });
             }
         }
