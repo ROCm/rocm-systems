@@ -12,6 +12,8 @@
 #include "api_trace.h"
 #include "nvtx_payload_schemas.h"
 #include "device/hierarchical_ag_shuffle.h"
+#include "dda_all_reduce_ipc.h"
+
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
 #endif
@@ -107,6 +109,7 @@ static ncclResult_t rcclDirectAllGather(const void* sendbuff, void* recvbuff, si
 }
 
 RCCL_PARAM(HierarchicalAllGather, "HIERARCHICAL_ALLGATHER", 0);
+RCCL_PARAM(DdaEnable, "DDA_ENABLE", 1);
 
 static bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize) {
   if (comm->nNodes < 8) return false;
@@ -230,6 +233,7 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
 }
 
 RCCL_PARAM(AlltoAllPivotEnable, "ALL_TO_ALL_PIVOT_ENABLE", 0);
+RCCL_PARAM(DdaThreshold, "DDA_THRESHOLD", (size_t)(67108864));
 
 NCCL_API(ncclResult_t, ncclAlltoAll, const void* sendbuff, void* recvbuff, size_t count,
     ncclDataType_t datatype, ncclComm* comm, cudaStream_t stream);
@@ -368,6 +372,7 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
 
   // RCCL update slice steps for AllReduce if single node
   const bool isGfx950 = IsArchMatch(comm->archName, "gfx950");
+  const bool isGfx942 = IsArchMatch(comm->archName, "gfx942");
   int chunkSteps = (isGfx950 && comm->rcclUseOneSlice)? 1 : ALLREDUCE_CHUNKSTEPS;
   int sliceSteps = comm->rcclUseOneSlice
       ? (isGfx950 ? 1 : ALLREDUCE_SLICESTEPS_SINGLE_NODE)
@@ -378,6 +383,25 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
     chunkSteps, sliceSteps, nullptr };
 
   NCCLCHECK(Recorder::instance().record(rrAllReduce, info));
+
+  size_t ddaThreshold =  rcclParamDdaThreshold();
+  if (isGfx942) {
+     ddaThreshold = (size_t)(8388608);
+  } else if (!isGfx950) {
+     ddaThreshold = 0;	
+  }
+
+  if (rcclParamDdaEnable() && (count * ncclTypeSize(datatype) <= ddaThreshold) && (ddaThreshold > 0) && ncclAllReduceDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype, op) && ncclGroupDepth == 0) {
+    NCCLCHECK(ncclAllReduceDdaIpc(
+        sendbuff,
+        recvbuff,
+        count,
+        datatype,
+        op,
+        comm,
+        stream));
+    return ncclSuccess;
+  }
 
   return ncclEnqueueCheck(&info);
 }

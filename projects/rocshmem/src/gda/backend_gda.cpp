@@ -279,7 +279,7 @@ void GDABackend::setup_host_ctx() {
 
 void GDABackend::setup_default_ctx() {
   TeamInfo *tinfo = team_tracker.get_team_world()->tinfo_wrt_world;
-  default_context_proxy_ = GDADefaultContextProxy(this, tinfo, gda_provider);
+  default_context_proxy_ = GDADefaultContextProxy(this, tinfo);
 }
 
 void GDABackend::log_ctx_nics([[maybe_unused]] unsigned int ctx_id,
@@ -305,7 +305,7 @@ void GDABackend::setup_ctxs() {
   // 0th context is default context
   for (size_t i = 0; i < envvar::max_num_contexts; i++) {
     unsigned int cid = static_cast<unsigned int>(i + 1);
-    new (&ctx_array[i]) GDAContext(this, cid, gda_provider);
+    new (&ctx_array[i]) GDAContext(this, cid);
     ctx_free_list.get()->push_back(ctx_array + i);
 
     if (verbose) {
@@ -567,15 +567,51 @@ void GDABackend::ctx_destroy(Context *ctx) {
   delete gda_host_ctx;
 }
 
-int GDABackend::buffer_register([[maybe_unused]] void *addr,
-                                [[maybe_unused]] size_t length) {
-  LOG_ERROR("GDABackend::buffer_register not supported");
-  return ROCSHMEM_ERROR;
+int GDABackend::buffer_register(void *addr, size_t length) {
+  int err = ROCSHMEM_SUCCESS;
+  bool qp_registration_failed = false;
+
+  /* Register in ptr cache */
+  err = Backend::buffer_register(addr, length);
+
+  if (ROCSHMEM_SUCCESS != err) {
+    return ROCSHMEM_ERROR;
+  }
+
+  /* Register with QPs */
+  for (size_t i = 0; i < num_qps; i++) {
+    err = host_qps[i].buffer_register((uintptr_t)addr, length);
+    if (ROCSHMEM_SUCCESS != err) {
+      qp_registration_failed = true;
+    }
+  }
+
+  if (qp_registration_failed) {
+    Backend::buffer_unregister(addr);
+    return ROCSHMEM_ERROR;
+  }
+  return ROCSHMEM_SUCCESS;
 }
 
-int GDABackend::buffer_unregister([[maybe_unused]] void *addr) {
-  LOG_ERROR("GDABackend::buffer_unregister not supported");
-  return ROCSHMEM_ERROR;
+int GDABackend::buffer_unregister(void *addr) {
+  int err = ROCSHMEM_SUCCESS;
+
+  /* Deregister in ptr cache */
+  err = Backend::buffer_unregister(addr);
+
+  if (ROCSHMEM_SUCCESS != err) {
+    return ROCSHMEM_ERROR;
+  }
+
+  /* Deregister with QPs */
+  for (size_t i = 0; i < num_qps; i++) {
+    err = host_qps[i].buffer_unregister((uintptr_t)addr);
+    if (ROCSHMEM_SUCCESS != err) {
+      return ROCSHMEM_ERROR;
+    }
+  }
+
+  return err;
 }
 
 void GDABackend::reset_backend_stats() {
@@ -890,6 +926,12 @@ bool GDABackend::has_active_ib_interface(GDAProvider provider) {
 int GDABackend::backend_can_run() {
   void *handle{nullptr};
   GDAProvider requested = requested_provider();
+
+  /* Libnuma ? */
+  if (!numa.is_available()) {
+    LOG_WARN("GDA backend unavailable: libnuma support is missing");
+    return ROCSHMEM_ERROR;
+  }
 
   /* Basic verbs? */
   if (!ibv.is_initialized) return ROCSHMEM_ERROR;

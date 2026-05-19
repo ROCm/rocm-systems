@@ -208,7 +208,19 @@ namespace envvar {
       "NIC-to-QP binding mode. ROUND_ROBIN: QPs within a context spread across NICs; "
       "PER_CONTEXT: all QPs in a context use one NIC, multi-NIC via multiple contexts",
       "ROUND_ROBIN");
+    const var<size_t> num_user_buffers("MAX_NUM_USER_BUFFERS",
+      "Maximum number of user buffers an application can register with "
+      "rocshmem_buffer_register. The default value is 4", 4);
   }  // namespace gda
+
+  namespace sdma {
+    const var<bool> enabled("ENABLED", "Enable SDMA transport at runtime", true);
+    const var<size_t> threshold("THRESHOLD", "SDMA transfer size threshold in bytes", 256);
+    const var<int32_t> num_channels("NUM_CHANNELS", "Number of SDMA channels per destination [1, 8]", 1);
+    const var<bool> spread_channels("SPREAD_CHANNELS",
+        "Apply wf_id round-robin channel offset for all contexts (default: only for default ctx)",
+        false);
+  }  // namespace sdma
 
   namespace _detail {
     std::tuple<var_map_t&, std::mutex&> get_var_map() {

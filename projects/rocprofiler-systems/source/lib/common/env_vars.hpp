@@ -71,15 +71,15 @@ constexpr std::string_view USE_AMD_SMI          = "ROCPROFSYS_USE_AMD_SMI";
 constexpr std::string_view USE_PROCESS_SAMPLING = "ROCPROFSYS_USE_PROCESS_SAMPLING";
 constexpr std::string_view AMD_SMI_METRICS      = "ROCPROFSYS_AMD_SMI_METRICS";
 constexpr std::string_view AMD_SMI_FREQ         = "ROCPROFSYS_AMD_SMI_FREQ";
-constexpr std::string_view CPU_FREQ_ENABLED     = "ROCPROFSYS_CPU_FREQ_ENABLED";
 
 // --- Domains: ROCm ---
 constexpr std::string_view ROCM_DOMAINS        = "ROCPROFSYS_ROCM_DOMAINS";
 constexpr std::string_view ROCM_GROUP_BY_QUEUE = "ROCPROFSYS_ROCM_GROUP_BY_QUEUE";
 
 // --- Domains: CPU ---
-constexpr std::string_view CPU_FREQ    = "ROCPROFSYS_CPU_FREQ";
-constexpr std::string_view CPU_METRICS = "ROCPROFSYS_CPU_METRICS";
+constexpr std::string_view CPU_FREQ         = "ROCPROFSYS_CPU_FREQ";
+constexpr std::string_view CPU_FREQ_ENABLED = "ROCPROFSYS_CPU_FREQ_ENABLED";
+constexpr std::string_view CPU_METRICS      = "ROCPROFSYS_CPU_METRICS";
 
 // --- Domains: Parallel runtimes ---
 constexpr std::string_view USE_MPIP    = "ROCPROFSYS_USE_MPIP";
@@ -103,6 +103,8 @@ constexpr std::string_view DIFF_OUTPUT   = "ROCPROFSYS_DIFF_OUTPUT";
 constexpr std::string_view INPUT_PATH    = "ROCPROFSYS_INPUT_PATH";
 constexpr std::string_view INPUT_PREFIX  = "ROCPROFSYS_INPUT_PREFIX";
 constexpr std::string_view USE_ROCPD     = "ROCPROFSYS_USE_ROCPD";
+constexpr std::string_view USE_UNIFIED_MEMORY_PROFILING =
+    "ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING";
 
 // --- Process sampling ---
 constexpr std::string_view PROCESS_SAMPLING_FREQ  = "ROCPROFSYS_PROCESS_SAMPLING_FREQ";
