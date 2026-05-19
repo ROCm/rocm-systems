@@ -92,6 +92,8 @@ ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kfd_queue, ROCPROFSYS_CATEGORY_ROCM_KF
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kfd_event_queue, ROCPROFSYS_CATEGORY_ROCM_KFD_EVENT_QUEUE, "rocm_kfd_event_queue", "KFD Event Queue Operations")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kfd_event_unmap_from_gpu, ROCPROFSYS_CATEGORY_ROCM_KFD_EVENT_UNMAP_FROM_GPU, "rocm_kfd_event_unmap_from_gpu", "KFD Unmap from GPU Events")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kfd_event_dropped_events, ROCPROFSYS_CATEGORY_ROCM_KFD_EVENT_DROPPED_EVENTS, "rocm_kfd_event_dropped_events", "KFD Dropped Events")
+ROCPROFSYS_DEFINE_CATEGORY(category, unified_memory_bandwidth, ROCPROFSYS_CATEGORY_UNIFIED_MEMORY_BANDWIDTH, "unified_memory_bandwidth", "Unified Memory Migration Bandwidth")
+ROCPROFSYS_DEFINE_CATEGORY(category, unified_memory_fault_rate, ROCPROFSYS_CATEGORY_UNIFIED_MEMORY_FAULT_RATE, "unified_memory_fault_rate", "Unified Memory Page Fault Rate")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi, ROCPROFSYS_CATEGORY_AMD_SMI, "amd_smi", "AMD-SMI data")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC, "amd_smi_nic", "AMD-SMI NIC data")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_rx_cnp_pkts, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_RX_CNP_PKTS, "nic_rx_cnp_pkts", "AI NIC RX CNP Packets")
@@ -248,6 +250,8 @@ using name = perfetto_category<Tp...>;
         ROCPROFSYS_PERFETTO_CATEGORY(category::vaapi),                                   \
         ROCPROFSYS_PERFETTO_CATEGORY(category::timer_sampling),                          \
         ROCPROFSYS_PERFETTO_CATEGORY(category::overflow_sampling),                       \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::unified_memory_bandwidth),                \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::unified_memory_fault_rate),               \
         ::perfetto::Category("timemory").SetDescription("Events from the timemory API")
 
 #if defined(TIMEMORY_USE_PERFETTO)

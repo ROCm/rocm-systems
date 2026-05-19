@@ -29,6 +29,9 @@ list(APPEND CMAKE_MODULE_PATH ${HIP_COMMON_DIR}/cmake)
 #############################
 option(__HIP_ENABLE_PCH "Enable/Disable pre-compiled hip headers" ON)
 option(BUILD_SHARED_LIBS "Build the shared library" ON)
+option(THEROCK_FLAG_STAMP_LIBRARY_GIT_VERSIONS
+  "Stamp git revisions into generated library version metadata"
+  ON)
 
 if(MSVC)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zi")
@@ -97,10 +100,11 @@ list(GET VERSION_LIST 2 HIP_VERSION_PATCH)
 
 set(HIP_VERSION_UNIXDATE 0)
 set(HIP_VERSION_GITDATE 0)
+set(HIP_VERSION_GITHASH "0000000")
 
 # FIXME: Two different version strings used.
 # Below we use UNIX commands, not compatible with Windows.
-if(GIT_FOUND)
+if(THEROCK_FLAG_STAMP_LIBRARY_GIT_VERSIONS AND GIT_FOUND)
   # use the commit date, instead of build date
   execute_process(COMMAND ${GIT_EXECUTABLE} show -s --format=%ct
     RESULT_VARIABLE git_result
@@ -132,26 +136,22 @@ if(GIT_FOUND)
     set(HIP_VERSION_GITHASH ${git_output})
   endif()
 
-  if(HIP_VERSION_PATCH EQUAL 0 AND HIP_VERSION_UNIXDATE GREATER 0)
-    set(HIP_VERSION_PATCH ${HIP_VERSION_GITDATE})
-    message(STATUS "Using HIP major, minor versions from VERSION file & patch version from git commit date: ${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}.${HIP_VERSION_PATCH}")
-  else()
-    message(STATUS "Using HIP version from VERSION file: ${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}.${HIP_VERSION_PATCH}")
-  endif()
+endif()
 
-  set(HIP_VERSION_BUILD_ID 0)
-  set(HIP_VERSION_BUILD_NAME "")
-
-  if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
-    set(HIP_PACKAGING_VERSION_PATCH ${HIP_VERSION_PATCH}.$ENV{ROCM_LIBPATCH_VERSION})
-  else()
-    set(HIP_PACKAGING_VERSION_PATCH ${HIP_VERSION_PATCH}-${HIP_VERSION_GITHASH})
-  endif()
+if(THEROCK_FLAG_STAMP_LIBRARY_GIT_VERSIONS AND HIP_VERSION_PATCH EQUAL 0 AND HIP_VERSION_UNIXDATE GREATER 0)
+  set(HIP_VERSION_PATCH ${HIP_VERSION_GITDATE})
+  message(STATUS "Using HIP major, minor versions from VERSION file & patch version from git commit date: ${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}.${HIP_VERSION_PATCH}")
 else()
-  set(HIP_VERSION_BUILD_ID 0)
-  set(HIP_VERSION_BUILD_NAME "")
-  # FIXME: Some parts depend on this being set.
-  set(HIP_PACKAGING_VERSION_PATCH "0")
+  message(STATUS "Using HIP version from VERSION file: ${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}.${HIP_VERSION_PATCH}")
+endif()
+
+set(HIP_VERSION_BUILD_ID 0)
+set(HIP_VERSION_BUILD_NAME "")
+
+if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
+  set(HIP_PACKAGING_VERSION_PATCH ${HIP_VERSION_PATCH}.$ENV{ROCM_LIBPATCH_VERSION})
+else()
+  set(HIP_PACKAGING_VERSION_PATCH ${HIP_VERSION_PATCH}-${HIP_VERSION_GITHASH})
 endif()
 
 ## Debian package specific variables

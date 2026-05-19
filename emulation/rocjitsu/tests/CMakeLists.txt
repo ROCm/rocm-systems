@@ -42,6 +42,7 @@ add_executable(rocjitsu_tests
     shared_infra_test.cpp
     transcendental_test.cpp
     analysis/liveness_test.cpp
+    patch/spill_manager_test.cpp
     dbt/translate_test.cpp
     mtype_flags_test.cpp
     kfd_ioctl_test.cpp
@@ -309,6 +310,9 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     else()
         message(STATUS "rocBLAS GEMM test disabled (librocblas not found)")
     endif()
+
+    rj_add_hip_test(hip_bfe_2d_test)
+    rj_add_hip_test_case(hip_bfe_2d_test "BfeRegressionTest.ThreadIdxY")
 
     message(STATUS "HIP tests enabled (found ${HIPCC_EXECUTABLE})")
 else()

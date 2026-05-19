@@ -844,21 +844,26 @@ hipError_t hipModuleLaunchCooperativeKernelMultiDevice(hipFunctionLaunchParams* 
        amd::NDRangeKernelCommand::CooperativeMultiDeviceGroups)));
 }
 
-hipError_t hipGetFuncBySymbol(hipFunction_t* functionPtr, const void* symbolPtr) {
-  HIP_INIT_API(hipGetFuncBySymbol, functionPtr, symbolPtr);
-
+hipError_t ihipGetFuncBySymbol(hipFunction_t* functionPtr, const void* symbolPtr) {
   hipError_t hip_error =
       PlatformState::Instance().StatCO().GetFunc(functionPtr, symbolPtr, ihipGetDevice());
-
   if ((hip_error != hipSuccess) || (functionPtr == nullptr)) {
-    HIP_RETURN(hipErrorInvalidDeviceFunction);
+    return hipErrorInvalidDeviceFunction;
   }
-  HIP_RETURN(hipSuccess);
+  return hipSuccess;
+}
+
+hipError_t hipGetFuncBySymbol(hipFunction_t* functionPtr, const void* symbolPtr) {
+  HIP_INIT_API(hipGetFuncBySymbol, functionPtr, symbolPtr);
+  HIP_RETURN(ihipGetFuncBySymbol(functionPtr, symbolPtr));
 }
 
 hipError_t hipLaunchKernel_common(const void* hostFunction, dim3 gridDim, dim3 blockDim,
                                   void** args, size_t sharedMemBytes, hipStream_t stream,
                                   dim3 clusterDim = {1, 1, 1}) {
+  if (!hip::isValid(stream)) {
+    return hipErrorInvalidValue;
+  }
   STREAM_CAPTURE(hipLaunchKernel, stream, hostFunction, gridDim, blockDim, args, sharedMemBytes);
   return ihipLaunchKernel(hostFunction, gridDim, blockDim, args, sharedMemBytes, stream, nullptr,
                           nullptr, 0, clusterDim);

@@ -61,8 +61,9 @@ static void hipTestWithGraph() {
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
   HIP_CHECK(hipGraphInstantiate(&instance, graph, nullptr, nullptr, 0));
 
+  const int nstep = isQuickLevel() ? 10 : NSTEP;
   auto start1 = std::chrono::high_resolution_clock::now();
-  for (int istep = 0; istep < NSTEP; istep++) {
+  for (int istep = 0; istep < nstep; istep++) {
     HIP_CHECK(hipGraphLaunch(instance, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
   }
@@ -115,8 +116,9 @@ static void hipTestWithoutGraph() {
   HIP_CHECK(hipMemcpy(in_d, in_h, N * sizeof(float), hipMemcpyHostToDevice));
 
   // start CPU wallclock timer
+  const int nstep2 = isQuickLevel() ? 10 : NSTEP;
   auto start = std::chrono::high_resolution_clock::now();
-  for (int istep = 0; istep < NSTEP; istep++) {
+  for (int istep = 0; istep < nstep2; istep++) {
     for (int ikrnl = 0; ikrnl < NKERNEL; ikrnl++) {
       simpleKernel<<<dim3(N / 512, 1, 1), dim3(512, 1, 1), 0, stream>>>(out_d, in_d);
     }
@@ -146,8 +148,7 @@ static void hipTestWithoutGraph() {
 #ifdef KERNEL_ARG_PREFETCH
 TEST_CASE("Unit_hipGraph_SimpleGraphWithKernel_kernel_arg_prefetch") {
   if (!HipTest::isKernelArgPrefetchSupported()) {
-    HipTest::HIP_SKIP_TEST("Kernel arg prefetch is not supported on the device. Skipped.");
-    return;
+    HIP_SKIP_TEST("Kernel arg prefetch is not supported on the device. Skipped.");
   }
 #else
 TEST_CASE("Unit_hipGraph_SimpleGraphWithKernel") {
