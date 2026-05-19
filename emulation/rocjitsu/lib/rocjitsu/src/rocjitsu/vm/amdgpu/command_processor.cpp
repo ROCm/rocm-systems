@@ -18,6 +18,8 @@ RJ_DIAGNOSTIC_POP
 #include <chrono>
 #include <cstring>
 #include <elf.h>
+#include <format>
+#include <limits>
 #include <set>
 #include <string>
 #include <sys/mman.h>
@@ -27,7 +29,7 @@ namespace rocjitsu {
 namespace amdgpu {
 
 void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
-                                           const InternalDispatch &pkt, uint32_t global_wg_id,
+                                           const DispatchEntry &pkt, uint32_t global_wg_id,
                                            uint32_t wf_index_in_wg) {
   using namespace rocr::llvm::amdhsa;
   uint32_t sbase = wf->sgpr_alloc().base;
@@ -111,19 +113,6 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
       cu->write_sgpr(sbase + sys_idx++, global_wg_id / (gx * gy));
   }
 
-  util::Logger::vm([&](auto &os) {
-    static thread_local uint64_t init_count = 0;
-    if (++init_count <= 200 && wf_index_in_wg == 0)
-      os << std::format("CP: init_wf #{} cu={} global_wg={} s[{}]=({},{},{})"
-                        " grid_wgs=({},{},{}) enable_x={} enable_y={} enable_z={}",
-                        init_count, cu->name(), global_wg_id, pkt.num_user_sgprs,
-                        cu->read_sgpr(sbase + pkt.num_user_sgprs),
-                        pkt.enable_wg_id_y ? cu->read_sgpr(sbase + pkt.num_user_sgprs + 1) : 0u,
-                        pkt.enable_wg_id_z ? cu->read_sgpr(sbase + pkt.num_user_sgprs + 2) : 0u,
-                        pkt.grid_wgs_x, pkt.grid_wgs_y, pkt.grid_wgs_z, pkt.enable_wg_id_x,
-                        pkt.enable_wg_id_y, pkt.enable_wg_id_z);
-  });
-
   // Workitem IDs per AMDHSA ABI. The SPI decomposes the flat thread index
   // into (x, y, z) using the AQL packet's workgroup dimensions.
   // enable_vgpr_workitem_id (TIDIG_COMP_CNT from compute_pgm_rsrc2):
@@ -133,7 +122,6 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
   // On CDNA3/4 (PackedTID): v0[9:0]=X, v0[19:10]=Y, v0[29:20]=Z.
   // v1/v2 are not written. Kernel extracts components via bit masks.
   uint32_t vbase = wf->vgpr_alloc().base;
-  uint32_t sbase_dbg = wf->sgpr_alloc().base;
   uint32_t workitem_base = wf_index_in_wg * cu->wf_size();
   uint32_t wg_x = pkt.workgroup_size_x > 0 ? pkt.workgroup_size_x : 1;
   uint32_t wg_y = pkt.workgroup_size_y > 0 ? pkt.workgroup_size_y : 1;
@@ -154,11 +142,6 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
         cu->write_vgpr(vbase + 2, lane, id_z);
     }
   }
-  util::Logger::vm([&](auto &os) {
-    os << std::format("{} wg[{}] wf[{}] init: wf_idx_in_wg={} vbase={} sbase={} workitem_base={}",
-                      cu->full_path(), global_wg_id, wf->wf_id(), wf_index_in_wg, vbase, sbase_dbg,
-                      workitem_base);
-  });
 
   // Scratch (private segment) setup.
   // Each wavefront gets a unique slice of scratch memory. The per-lane
@@ -189,13 +172,23 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
 void CommandProcessor::startup() {
   doorbell_event_.set_handler(
       [this](simdojo::Tick ts, simdojo::Message *) { handle_doorbell(ts); });
+  completion_ = std::make_unique<CompletionTracker>(memory_, cus_);
+  if (interrupt_cb_)
+    completion_->set_interrupt_callback(interrupt_cb_);
 }
 
 void CommandProcessor::register_queue(HwQueue queue) {
+  util::Logger::vm([&](auto &os) {
+    os << std::format("REGISTER_QUEUE id={} ring={:#x} size={} rptr={:#x} wptr={:#x} "
+                      "doorbell_off={} is_sdma={}",
+                      queue.queue_id, queue.ring_base_va, queue.ring_size, queue.read_ptr_va,
+                      queue.write_ptr_va, queue.doorbell_offset, queue.is_sdma);
+  });
   bool start_poll = queue.host_accessible;
   {
     std::lock_guard<std::mutex> lock(hw_queue_mutex_);
     hw_queues_.push_back(std::move(queue));
+    new_queue_states_.push_back(HwQueueState{});
     if (!is_primary_ && engine()) {
       engine()->register_as_primary();
       is_primary_ = true;
@@ -215,7 +208,13 @@ void CommandProcessor::unregister_queue(uint32_t queue_id) {
   bool empty = false;
   {
     std::lock_guard<std::mutex> lock(hw_queue_mutex_);
-    std::erase_if(hw_queues_, [queue_id](const HwQueue &q) { return q.queue_id == queue_id; });
+    for (size_t i = 0; i < hw_queues_.size(); ++i) {
+      if (hw_queues_[i].queue_id == queue_id) {
+        hw_queues_.erase(hw_queues_.begin() + static_cast<ptrdiff_t>(i));
+        new_queue_states_.erase(new_queue_states_.begin() + static_cast<ptrdiff_t>(i));
+        break;
+      }
+    }
     empty = hw_queues_.empty();
   }
   if (empty)
@@ -292,239 +291,151 @@ void CommandProcessor::doorbell_poll_loop(std::stop_token stop) {
   }
 }
 
-bool CommandProcessor::step() {
-  if (dispatched_ >= dispatch_queue_.size())
-    return false;
-
-  assert(!cus_.empty() && "command processor has no compute units");
-  util::Logger::vm([&](auto &os) {
-    static bool first = true;
-    if (first) {
-      first = false;
-      os << std::format("CP: {} CUs registered:", cus_.size());
-      for (size_t i = 0; i < cus_.size(); ++i) {
-        os << std::format("\n[rj log VM]   cu[{}] = {} wf_slots={}", i, cus_[i]->name(),
-                          cus_[i]->num_wf_slots());
-      }
+HwQueueState *CommandProcessor::schedule_next_queue() {
+  if (new_queue_states_.empty())
+    return nullptr;
+  size_t start = next_queue_idx_;
+  for (size_t i = 0; i < new_queue_states_.size(); ++i) {
+    size_t idx = (start + i) % new_queue_states_.size();
+    auto &qs = new_queue_states_[idx];
+    if (hw_queues_[idx].is_sdma)
+      continue;
+    if (qs.next_dispatch_idx < qs.entries.size()) {
+      next_queue_idx_ = (idx + 1) % new_queue_states_.size();
+      return &qs;
     }
-  });
+  }
+  return nullptr;
+}
 
-  const InternalDispatch &pkt = dispatch_queue_[dispatched_++];
+bool CommandProcessor::barrier_satisfied(const HwQueueState &qs, size_t idx) const {
+  if (idx == 0 && !qs.implicit_barrier_next)
+    return true;
+
+  // Barrier bit: all prior entries must be fully completed.
+  for (size_t i = 0; i < idx; ++i) {
+    if (!qs.entries[i].fully_completed())
+      return false;
+  }
+  return true;
+}
+
+uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
+  assert(!cus_.empty() && "command processor has no compute units");
 
   // Activate wavefront slots for each workgroup, distributing across CUs.
   // Entire workgroups must land on a single CU (programming model requirement:
   // LDS is per-CU and s_barrier synchronises within a CU). Query each CU for
   // capacity before dispatching to guarantee all-or-nothing placement.
-  for (uint32_t wg = 0; wg < pkt.workgroup_count; ++wg) {
-    uint32_t global_wg_id = wg + pkt.workgroup_id_offset;
-    bool wg_dispatched = false;
+  uint32_t dispatched = 0;
+  while (entry.dispatched_wgs < entry.total_wgs) {
+    uint32_t global_wg_id = entry.dispatched_wgs + entry.workgroup_id_offset;
+    bool placed = false;
 
-    for (size_t attempt = 0; attempt < cus_.size() && !wg_dispatched; ++attempt) {
+    for (size_t attempt = 0; attempt < cus_.size() && !placed; ++attempt) {
       size_t cu_idx = (next_cu_ + attempt) % cus_.size();
       ComputeUnitCore *cu = cus_[cu_idx];
       cu->retire_halted_wfs();
-      if (!cu->can_accept_workgroup(pkt.wfs_per_workgroup, pkt.group_segment_fixed_size))
+      if (!cu->can_accept_workgroup(entry.wfs_per_workgroup, entry.group_segment_fixed_size))
         continue;
-      uint32_t lds_base = cu->allocate_lds(pkt.group_segment_fixed_size);
+
+      uint32_t lds_base = cu->allocate_lds(entry.group_segment_fixed_size);
+      cu->begin_workgroup(entry.dispatch_id, global_wg_id, entry.wfs_per_workgroup);
+
       std::vector<Wavefront *> wg_wavefronts;
-      wg_wavefronts.reserve(pkt.wfs_per_workgroup);
-      for (uint32_t w = 0; w < pkt.wfs_per_workgroup; ++w) {
-        Wavefront *wf =
-            cu->dispatch_wf(global_wg_id, pkt.kernel_entry_pc, pkt.sgprs_per_wf, pkt.vgprs_per_wf);
+      wg_wavefronts.reserve(entry.wfs_per_workgroup);
+      for (uint32_t w = 0; w < entry.wfs_per_workgroup; ++w) {
+        Wavefront *wf = cu->dispatch_wf(global_wg_id, entry.kernel_entry_pc, entry.sgprs_per_wf,
+                                        entry.vgprs_per_wf);
         assert(wf && "dispatch_wf failed after can_accept_workgroup returned true");
         wf->set_lds_base(lds_base);
-        init_wavefront_regs(cu, wf, pkt, global_wg_id, w);
+        wf->set_dispatch_id(entry.dispatch_id);
+        init_wavefront_regs(cu, wf, entry, global_wg_id, w);
         wg_wavefronts.push_back(wf);
       }
-      plugin_group_->onAmdgpuDispatchWorkgroup(global_wg_id, pkt.vgprs_per_wf, pkt.sgprs_per_wf,
+      plugin_group_->onAmdgpuDispatchWorkgroup(global_wg_id, entry.vgprs_per_wf, entry.sgprs_per_wf,
                                                std::span<Wavefront *>(wg_wavefronts));
       next_cu_ = (cu_idx + 1) % cus_.size();
-      wg_dispatched = true;
+      placed = true;
     }
 
-    if (!wg_dispatched) {
-      util::Logger::vm("CP step: all CUs full at wg=", wg, " global_wg=", global_wg_id,
-                       " total=", pkt.workgroup_count, " offset=", pkt.workgroup_id_offset);
-      InternalDispatch retry_pkt = pkt;
-      retry_pkt.workgroup_count = pkt.workgroup_count - wg;
-      retry_pkt.workgroup_id_offset = pkt.workgroup_id_offset + wg;
-      dispatch_queue_[dispatched_ - 1].completion_signal = 0;
-      retry_queue_.push_back(std::move(retry_pkt));
-      break;
-    }
+    if (!placed)
+      break; // Backpressure: all CUs full. Will resume when WG completes.
+
+    ++entry.dispatched_wgs;
+    ++dispatched;
   }
-
-  return dispatched_ < dispatch_queue_.size();
+  return dispatched;
 }
 
-void CommandProcessor::check_all_idle() {
-  for (auto *cu : cus_)
-    if (!cu->is_idle())
-      return;
+// ---------------------------------------------------------------------------
+// Completion notification from CU
+// ---------------------------------------------------------------------------
 
-  // If retry queue has pending workgroups, move them to the dispatch queue and
-  // process immediately. This avoids scheduling a future event which requires the
-  // engine event loop to advance — in direct-activate mode (functional, quantum=0)
-  // the engine may not process future events between doorbell callbacks.
-  if (!retry_queue_.empty()) {
-    util::Logger::vm("CP: retry ", retry_queue_.size(),
-                     " entries, total_wgs=", retry_queue_[0].workgroup_count,
-                     " offset=", retry_queue_[0].workgroup_id_offset);
-    for (auto &rpkt : retry_queue_)
-      dispatch_queue_.push_back(std::move(rpkt));
-    retry_queue_.clear();
-    // Dispatch and activate CUs for the retry workgroups.
-    while (dispatched_ < dispatch_queue_.size()) {
-      step();
-      uint32_t activated = 0;
-      for (auto *cu : cus_) {
-        if (cu->has_active_wfs()) {
-          cu->activate();
-          ++activated;
-        }
-      }
-      // Wait for CUs to finish (in direct mode, activate() calls advance() synchronously).
-      bool any_active = false;
-      for (auto *cu : cus_)
-        if (!cu->is_idle()) {
-          any_active = true;
-          break;
-        }
-      util::Logger::vm("CP: retry inner: activated=", activated, " any_active=", any_active,
-                       " retry_q=", retry_queue_.size());
-      if (!any_active)
-        continue; // All idle, try next dispatch.
-      break;      // CUs still running (shouldn't happen in sync mode).
-    }
-    // Recurse to handle further retries or signal completion.
-    check_all_idle();
-    return;
-  }
+void CommandProcessor::notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id) {
+  if (completion_)
+    completion_->notify_wg_complete(dispatch_id, wg_id, new_queue_states_);
+  // In functional mode (quantum=0), the handle_doorbell loop handles dispatch
+  // resume. In quantum>0 mode, CU work events will call on_cu_idle which can
+  // trigger further dispatch via the engine event loop.
+}
 
-  // Flush all CU caches to backing memory. Real hardware does this implicitly
-  // (L2 writeback on kernel completion). Without this, stores using RW (write-
-  // back) mtype remain in L2 and never reach host-mapped GpuMemory pages.
-  for (auto *cu : cus_)
-    cu->flush_all();
-
-  util::Logger::vm([&](auto &os) {
-    if (dispatched_ > 0 && memory_) {
-      auto &dp0 = dispatch_queue_[0];
-      if (dp0.kernarg_addr != 0) {
-        uint64_t ka0 = memory_->read64(dp0.kernarg_addr);
-        uint64_t ka1 = memory_->read64(dp0.kernarg_addr + 8);
-        os << std::format("CP: post-flush kernarg[0]={:#x} kernarg[1]={:#x}", ka0, ka1);
-      }
-    }
-  });
-
-  // Signal completion for all dispatched kernel packets whose wavefronts have
-  // finished. In real hardware, the CP microcode does this automatically.
-  for (size_t i = 0; i < dispatched_; ++i) {
-    auto &dp = dispatch_queue_[i];
-    if (dp.completion_signal == 0)
-      continue;
-    constexpr uint32_t SIG_VAL_OFF = 8;
-    constexpr uint32_t MAILBOX_PTR_OFF = 16;
-    constexpr uint32_t EVENT_ID_OFF = 24;
-    if (dp.host_signal) {
-      auto *val = reinterpret_cast<int64_t *>(dp.completion_signal + SIG_VAL_OFF);
-      auto old_val = std::atomic_ref<int64_t>(*val).fetch_sub(1, std::memory_order_release);
-      util::Logger::vm("CP: signal 0x", std::hex, dp.completion_signal, std::dec, " val ", old_val,
-                       " -> ", old_val - 1);
-      // Write event mailbox and fire interrupt so ROCR's signal wait wakes up.
-      auto mailbox_ptr = *reinterpret_cast<uint64_t *>(dp.completion_signal + MAILBOX_PTR_OFF);
-      util::Logger::vm("CP: signal mailbox_ptr=0x", std::hex, mailbox_ptr, std::dec,
-                       " has_interrupt_cb=", (interrupt_cb_ ? 1 : 0));
-      if (mailbox_ptr != 0) {
-        auto event_id = *reinterpret_cast<uint32_t *>(dp.completion_signal + EVENT_ID_OFF);
-        util::Logger::vm("CP: writing event_id=", event_id, " to mailbox 0x", std::hex, mailbox_ptr,
-                         std::dec);
-        std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(mailbox_ptr))
-            .store(uint64_t(event_id), std::memory_order_release);
-        if (interrupt_cb_)
-          interrupt_cb_(event_id);
-      }
-    } else if (memory_) {
-      auto old = static_cast<int64_t>(memory_->read64(dp.completion_signal + SIG_VAL_OFF));
-      memory_->write64(dp.completion_signal + SIG_VAL_OFF, static_cast<uint64_t>(old - 1));
-    }
-    dp.completion_signal = 0; // Signal only once.
-  }
-
-  // Enforce in-order dispatch for ordered (KFD) queue entries: start the next
-  // pending kernel only after all wavefronts from the previous dispatch have
-  // completed. This mirrors real hardware where an ordered AQL queue executes
-  // dispatches sequentially. Unordered (test) dispatches are not re-dispatched
-  // here; they were already all submitted in handle_doorbell.
+void CommandProcessor::on_cu_idle() {
+  // In quantum=0 mode, handle_doorbell drives the dispatch-execute-complete
+  // loop synchronously. on_cu_idle fires INSIDE activate(), which is INSIDE
+  // handle_doorbell's dispatch loop. Dispatching more WGs here would re-enter
+  // dispatch_workgroups and cause double-dispatch. So skip in quantum=0.
   //
-  // Loop (not recursion) to handle consecutive zero-workgroup dispatches
-  // (e.g. back-to-back BARRIER_AND packets) without growing the call stack.
-  while (dispatched_ < dispatch_queue_.size() && dispatch_queue_[dispatched_].ordered) {
-    size_t prev = dispatched_;
-    step();
-    if (dispatched_ <= prev)
-      break;
-    std::set<ComputeUnitCore *> new_cus;
-    for (auto *cu : cus_)
-      if (cu->has_active_wfs())
-        new_cus.insert(cu);
-    for (size_t i = 0; i < cus_.size(); ++i) {
-      if (new_cus.count(cus_[i]) == 0)
-        continue;
-      if (dispatch_ports_[i]->link())
-        dispatch_ports_[i]->send(std::make_unique<simdojo::Message>(simdojo::MessageHeader{}));
-      else
-        cus_[i]->activate();
-    }
-    if (!new_cus.empty())
-      return; // CUs have work; they call check_all_idle when done.
-    // Zero-workgroup dispatch (e.g. BARRIER_AND): no CUs activated so no
-    // on_idle callback will ever fire for this entry. Signal its completion
-    // now before looping to the next ordered entry.
-    for (size_t i = prev; i < dispatched_; ++i) {
-      auto &dp = dispatch_queue_[i];
-      if (dp.completion_signal == 0)
-        continue;
-      constexpr uint32_t SIG_VAL_OFF = 8;
-      auto *val = reinterpret_cast<int64_t *>(dp.completion_signal + SIG_VAL_OFF);
-      if (dp.host_signal) {
-        std::atomic_ref<int64_t>(*val).fetch_sub(1, std::memory_order_release);
-        // Write the event mailbox and fire the interrupt so WAIT_EVENTS wakes.
-        constexpr uint32_t MAILBOX_PTR_OFF = 16, EVENT_ID_OFF = 24;
-        auto mailbox_ptr = *reinterpret_cast<uint64_t *>(dp.completion_signal + MAILBOX_PTR_OFF);
-        if (mailbox_ptr != 0) {
-          auto event_id = *reinterpret_cast<uint32_t *>(dp.completion_signal + EVENT_ID_OFF);
-          std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(mailbox_ptr))
-              .store(uint64_t(event_id), std::memory_order_release);
-          if (interrupt_cb_)
-            interrupt_cb_(event_id);
-        }
-      } else if (memory_) {
-        auto old = static_cast<int64_t>(memory_->read64(dp.completion_signal + SIG_VAL_OFF));
-        memory_->write64(dp.completion_signal + SIG_VAL_OFF, static_cast<uint64_t>(old - 1));
+  // In quantum>0 mode, CU execution is asynchronous (via work events). When
+  // a CU finishes its quantum and goes idle, we should drain completions and
+  // resume stalled dispatches. This is safe because we're not inside
+  // handle_doorbell's dispatch loop.
+  if (!cus_.empty() && cus_[0]->config().functional_quantum == 0)
+    return;
+
+  if (completion_)
+    completion_->drain_completions(new_queue_states_);
+
+  for (auto &qs : new_queue_states_) {
+    if (qs.next_dispatch_idx < qs.entries.size()) {
+      auto &entry = qs.entries[qs.next_dispatch_idx];
+      if (!entry.is_non_kernel() && !entry.fully_dispatched()) {
+        uint32_t sent = dispatch_workgroups(entry);
+        if (sent > 0 && entry.fully_dispatched())
+          ++qs.next_dispatch_idx;
       }
-      dp.completion_signal = 0;
     }
   }
+}
 
-  if (pending_dispatches() == 0 && is_primary_) {
-    // Only release primary if no host-accessible (KFD) queues are registered.
-    // KFD queues can receive new work at any time; the doorbell poll must stay
-    // active to detect future dispatches.
-    bool has_kfd_queues = false;
-    {
-      std::lock_guard<std::mutex> lock(hw_queue_mutex_);
-      for (const auto &q : hw_queues_)
-        if (q.host_accessible) {
-          has_kfd_queues = true;
-          break;
-        }
-    }
-    if (!has_kfd_queues) {
-      stop_doorbell_monitor();
-      engine()->primary_release();
-      is_primary_ = false;
+bool CommandProcessor::step() {
+  // Process dispatches across all queues.
+  process_queues();
+  return pending_entries() > 0;
+}
+
+void CommandProcessor::process_queues() {
+  for (size_t qi = 0; qi < new_queue_states_.size(); ++qi) {
+    if (hw_queues_[qi].is_sdma)
+      continue;
+    auto &qs = new_queue_states_[qi];
+    while (qs.next_dispatch_idx < qs.entries.size()) {
+      auto &entry = qs.entries[qs.next_dispatch_idx];
+
+      if (entry.barrier_bit && !barrier_satisfied(qs, qs.next_dispatch_idx))
+        break; // Stalled on barrier bit.
+
+      if (entry.is_non_kernel()) {
+        entry.completed_wgs = entry.total_wgs; // 0 == 0, immediately complete.
+        ++qs.next_dispatch_idx;
+        continue;
+      }
+
+      uint32_t sent = dispatch_workgroups(entry);
+      if (entry.fully_dispatched())
+        ++qs.next_dispatch_idx;
+      if (sent == 0)
+        break; // CU backpressure.
     }
   }
 }
@@ -566,12 +477,6 @@ static std::string find_kernel_symbol(uint64_t kernel_object, GpuMemory *mem) {
     return {};
 
   auto *phdrs = reinterpret_cast<const Elf64_Phdr *>(elf_base + ehdr->e_phoff);
-
-  // Read the kernel descriptor at kernel_object for matching fields.
-  auto *ko = reinterpret_cast<const uint8_t *>(kernel_object);
-  uint32_t kd_group_seg = 0, kd_private_seg = 0;
-  std::memcpy(&kd_group_seg, ko, 4);
-  std::memcpy(&kd_private_seg, ko + 4, 4);
 
   // Find PT_NOTE containing AMDHSA metadata.
   for (uint16_t i = 0; i < ehdr->e_phnum; ++i) {
@@ -620,7 +525,8 @@ static std::string find_kernel_symbol(uint64_t kernel_object, GpuMemory *mem) {
 }
 
 void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pkt,
-                                          const HwQueue &queue, uint64_t pkt_addr) {
+                                          const HwQueue &queue, uint64_t pkt_addr,
+                                          HwQueueState &qs) {
   bool host_accessible = queue.host_accessible;
   using namespace rocr::llvm::amdhsa;
   kernel_descriptor_t kd = read_kernel_descriptor(pkt.kernel_object, host_accessible);
@@ -630,10 +536,6 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
       AMDHSA_BITS_GET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
   uint32_t vgprs = (vgpr_gran + 1) * vgpr_granularity_;
   uint32_t sgprs = (sgpr_gran + 1) * 8;
-  util::Logger::vm([&](auto &os) {
-    os << std::format("CP: rsrc1={:#x} vgpr_gran={} vgprs={} sgpr_gran={} sgprs={} gran={}",
-                      kd.compute_pgm_rsrc1, vgpr_gran, vgprs, sgpr_gran, sgprs, vgpr_granularity_);
-  });
   uint32_t user_sgprs = AMDHSA_BITS_GET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT);
   uint64_t entry_pc = pkt.kernel_object + static_cast<uint64_t>(kd.kernel_code_entry_byte_offset);
 
@@ -647,25 +549,6 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
     constexpr size_t CODE_MAP_SIZE = 2 << 20;           // 2MB to cover large code objects.
     memory_->map_host_pages(code_base, reinterpret_cast<void *>(code_base), CODE_MAP_SIZE);
 
-    util::Logger::vm([&](auto &os) {
-      auto *host_ptr = reinterpret_cast<const uint32_t *>(entry_pc);
-      uint32_t gpu_w0 = memory_->fetch32(entry_pc);
-      os << std::format("CP: entry_pc code: host=[{:#x},{:#x},{:#x},{:#x}] gpu=[{:#x}]",
-                        host_ptr[0], host_ptr[1], host_ptr[2], host_ptr[3], gpu_w0);
-      auto *ko_ptr = reinterpret_cast<const uint32_t *>(pkt.kernel_object);
-      os << std::format("\n[rj log VM] CP: kernel_obj data: [{:#x},{:#x},{:#x},{:#x}] code_off={}",
-                        ko_ptr[0], ko_ptr[1], ko_ptr[2], ko_ptr[3],
-                        kd.kernel_code_entry_byte_offset);
-      auto karg_ptr = reinterpret_cast<const uint64_t *>(pkt.kernarg_address);
-      if (karg_ptr) {
-        os << std::format("\n[rj log VM] CP: kernarg q[0:5]={:#x} {:#x} {:#x} {:#x} {:#x} {:#x}",
-                          karg_ptr[0], karg_ptr[1], karg_ptr[2], karg_ptr[3], karg_ptr[4],
-                          karg_ptr[5]);
-        auto karg_dw = reinterpret_cast<const uint32_t *>(pkt.kernarg_address);
-        os << std::format("\n[rj log VM] CP: kernarg dw[16:20]={} {} {} {} {}", karg_dw[16],
-                          karg_dw[17], karg_dw[18], karg_dw[19], karg_dw[20]);
-      }
-    });
     // Register the kernarg region. Map enough pages to cover the full kernarg
     // buffer. PyTorch reduction kernels can have kernarg buffers exceeding 4KB
     // (TensorIterator packs many pointers, strides, and flags).
@@ -674,21 +557,6 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
       uint64_t karg_base = karg & ~0xFFFULL;
       constexpr size_t KARG_MAP_SIZE = 8 * 4096; // 32KB covers large kernarg buffers.
       memory_->map_host_pages(karg_base, reinterpret_cast<void *>(karg_base), KARG_MAP_SIZE);
-      // Verify: read back from GpuMemory and compare to host.
-      util::Logger::vm([&](auto &os) {
-        uint32_t host_val = *reinterpret_cast<const uint32_t *>(karg + 0x50);
-        uint32_t gpu_val = 0;
-        for (int b = 0; b < 4; ++b)
-          reinterpret_cast<uint8_t *>(&gpu_val)[b] = memory_->read8(karg + 0x50 + b);
-        os << std::format("CP: kernarg verify @0x50: host={:#x} gpu={:#x} {}", host_val, gpu_val,
-                          host_val == gpu_val ? "MATCH" : "MISMATCH!");
-        uint32_t host14 = *reinterpret_cast<const uint32_t *>(karg + 0x14);
-        uint32_t gpu14 = 0;
-        for (int b = 0; b < 4; ++b)
-          reinterpret_cast<uint8_t *>(&gpu14)[b] = memory_->read8(karg + 0x14 + b);
-        os << std::format("\n[rj log VM] CP: kernarg verify @0x14: host={:#x} gpu={:#x} {}", host14,
-                          gpu14, host14 == gpu14 ? "MATCH" : "MISMATCH!");
-      });
     }
   }
 
@@ -702,9 +570,14 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   uint32_t grid_wgs_y = pkt.workgroup_size_y > 0 ? pkt.grid_size_y / pkt.workgroup_size_y : 1;
   uint32_t grid_wgs_z = pkt.workgroup_size_z > 0 ? pkt.grid_size_z / pkt.workgroup_size_z : 1;
   uint32_t total_wgs = grid_wgs_x * grid_wgs_y * grid_wgs_z;
-  InternalDispatch dp{};
+
+  DispatchEntry dp{};
+  dp.dispatch_id = next_dispatch_id_++;
+  dp.queue_id = queue.queue_id;
   dp.kernel_entry_pc = entry_pc;
-  dp.workgroup_count = total_wgs;
+  dp.total_wgs = total_wgs;
+  dp.dispatched_wgs = 0;
+  dp.completed_wgs = 0;
   dp.wfs_per_workgroup = wfs_per_wg;
   dp.sgprs_per_wf = sgprs > 0 ? sgprs : 104;
   dp.vgprs_per_wf = vgprs > 0 ? vgprs : 256;
@@ -743,38 +616,7 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   dp.workgroup_size_z = pkt.workgroup_size_z;
   dp.completion_signal = pkt.completion_signal.handle;
   dp.host_signal = host_accessible;
-  dp.ordered = host_accessible;
-
-  // Dump first 32 dwords of kernarg for all host-accessible dispatches.
-  util::Logger::vm([&](auto &os) {
-    if (host_accessible && dp.kernarg_addr != 0) {
-      auto *ka = reinterpret_cast<const uint32_t *>(dp.kernarg_addr);
-      os << "CP: kernarg dump";
-      for (int i = 0; i < 256; i += 4)
-        os << std::format("\n[rj log VM]   dw[{:3d}:{:3d}] = {:08x} {:08x} {:08x} {:08x}", i, i + 3,
-                          ka[i], ka[i + 1], ka[i + 2], ka[i + 3]);
-    }
-  });
-  util::Logger::vm([&](auto &os) {
-    std::string sym = find_kernel_symbol(pkt.kernel_object, memory_);
-    os << std::format("CP: dispatch \"{}\" entry_pc={:#x} kernarg={:#x}"
-                      " wgs={} wfs/wg={} grid=[{},{},{}] wg=[{},{},{}]"
-                      " sgprs={} vgprs={} user_sgprs={} kcp={:#x} signal={:#x}"
-                      " setup={} grid_wgs=({},{},{})"
-                      " enable_vgpr_wid={} packed_tid={}",
-                      sym.empty() ? "?" : sym, entry_pc,
-                      reinterpret_cast<uint64_t>(pkt.kernarg_address), total_wgs, wfs_per_wg,
-                      pkt.grid_size_x, pkt.grid_size_y, pkt.grid_size_z, pkt.workgroup_size_x,
-                      pkt.workgroup_size_y, pkt.workgroup_size_z, dp.sgprs_per_wf, dp.vgprs_per_wf,
-                      dp.num_user_sgprs, dp.kernel_code_properties, dp.completion_signal, num_dims,
-                      dp.grid_wgs_x, dp.grid_wgs_y, dp.grid_wgs_z, dp.enable_vgpr_workitem_id,
-                      packed_tid_);
-    os << std::format("\n[rj log VM] CP: LDS: kd.group_seg={} pkt.group_seg={} dp.group_seg={}"
-                      " kd.private_seg={} pkt.private_seg={}",
-                      kd.group_segment_fixed_size, pkt.group_segment_size,
-                      dp.group_segment_fixed_size, kd.private_segment_fixed_size,
-                      pkt.private_segment_size);
-  });
+  dp.barrier_bit = (pkt.header >> HSA_PACKET_HEADER_BARRIER) & 1;
 
   // Process AQL acquire fence: invalidate caches so the kernel sees the
   // latest host/agent writes (kernarg data, input buffers, etc.).
@@ -783,16 +625,47 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   if (acquire_scope >= HSA_FENCE_SCOPE_AGENT && !cus_.empty()) {
     for (auto *cu : cus_)
       cu->flush_all();
-    util::Logger::vm("CP: acquire fence scope=", acquire_scope, " → L1+L2 flush+invalidate (",
-                     cus_.size(), " CUs)");
   }
 
   plugin_group_->onAmdgpuKernelDispatch(pkt.kernel_object, entry_pc);
+  util::Logger::vm([&](auto &os) {
+    os << std::format("DISPATCH d={} pc={:#x} grid=[{},{},{}] wg=[{},{},{}] total_wgs={} "
+                      "sgprs={} vgprs={} lds={} kernarg={:#x}",
+                      dp.dispatch_id, entry_pc, dp.grid_wgs_x, dp.grid_wgs_y, dp.grid_wgs_z,
+                      pkt.workgroup_size_x, pkt.workgroup_size_y, pkt.workgroup_size_z, total_wgs,
+                      dp.sgprs_per_wf, dp.vgprs_per_wf, dp.group_segment_fixed_size,
+                      dp.kernarg_addr);
+  });
 
-  dispatch_queue_.push_back(std::move(dp));
+  {
+    static uint32_t dispatch_count = 0;
+    ++dispatch_count;
+    util::Logger::vm([&](auto &os) {
+      std::string sym = find_kernel_symbol(pkt.kernel_object, memory_);
+      os << std::format("dispatch #{} d={} \"{}\" grid=[{},{},{}] wg=[{},{},{}] wgs={} "
+                        "lds={} sgpr={} vgpr={} sig={:#x}",
+                        dispatch_count, dp.dispatch_id, sym.empty() ? "?" : sym, pkt.grid_size_x,
+                        pkt.grid_size_y, pkt.grid_size_z, pkt.workgroup_size_x,
+                        pkt.workgroup_size_y, pkt.workgroup_size_z, total_wgs,
+                        kd.group_segment_fixed_size, dp.sgprs_per_wf, dp.vgprs_per_wf,
+                        dp.completion_signal);
+    });
+  }
+
+  // Register with completion tracker for fast dispatch_id -> queue lookup.
+  for (size_t qi = 0; qi < hw_queues_.size(); ++qi) {
+    if (&hw_queues_[qi] == &queue) {
+      if (completion_)
+        completion_->register_dispatch(dp.dispatch_id, qi);
+      break;
+    }
+  }
+
+  ++total_dispatched_;
+  qs.entries.push_back(std::move(dp));
 }
 
-void CommandProcessor::fetch_from_queue(HwQueue &queue) {
+void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs) {
   if (!memory_)
     return;
   // For KFD queues, skip until the doorbell aperture base has been set.
@@ -814,15 +687,15 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue) {
     read_idx = read_gpu_u64(queue.read_ptr_va);
   }
 
-  if (queue.host_accessible)
-    if (read_idx >= write_idx)
-      return;
+  util::Logger::vm([&](auto &os) {
+    static uint64_t fetch_count = 0;
+    if (write_idx != read_idx && ++fetch_count <= 50)
+      os << std::format("FETCH q={} w={} r={} delta={} sdma={}", queue.queue_id, write_idx,
+                        read_idx, write_idx - read_idx, queue.is_sdma);
+  });
 
-  // SDMA queues use a different packet format — process them as direct
-  // memory operations (memcpy, fence, trap) without CU dispatch.
-  // For SDMA queues, use the doorbell value as the write pointer (in bytes).
-  // ROCR writes *queue_wptr_ = *queue_doorbell_ = cached_commit_index_ (bytes).
-  // If the write pointer from write_ptr_va seems too small, use the doorbell value.
+  // SDMA queues use byte-granularity pointers and have their own doorbell
+  // semantics — skip the AQL doorbell clamping that assumes packet indices.
   if (queue.is_sdma) {
     // Also try reading the doorbell directly.
     void *base = doorbell_base_.load(std::memory_order_acquire);
@@ -840,10 +713,25 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue) {
     return;
   }
 
+  // AQL doorbell clamping (compute queues only).
+  uint64_t process_limit = write_idx;
+  if (queue.host_accessible) {
+    const uint64_t doorbell = queue.last_doorbell;
+    if (doorbell != std::numeric_limits<uint64_t>::max()) {
+      uint64_t doorbell_limit = doorbell + 1;
+      if (doorbell_limit < process_limit)
+        process_limit = doorbell_limit;
+    }
+    if (read_idx >= process_limit)
+      return;
+  } else if (read_idx >= process_limit) {
+    return;
+  }
+
   constexpr uint32_t AQL_PACKET_SIZE = 64;
   uint32_t num_slots = queue.ring_size / AQL_PACKET_SIZE;
 
-  while (read_idx < write_idx) {
+  while (read_idx < process_limit) {
     uint32_t slot = static_cast<uint32_t>(read_idx % num_slots);
     uint64_t pkt_addr = queue.ring_base_va + slot * AQL_PACKET_SIZE;
 
@@ -858,82 +746,137 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue) {
     }
 
     uint8_t pkt_type = pkt.header & 0xFF;
+    util::Logger::vm([&](auto &os) {
+      os << std::format("PKT q={} slot={} type={} header={:#x} read_idx={}", queue.queue_id, slot,
+                        pkt_type, pkt.header, read_idx);
+    });
+
+    // INVALID packet: the producer reserved this slot but hasn't written the
+    // header yet. Stop fetching — the doorbell poll thread will fire another
+    // event when the producer commits. Non-blocking to avoid deadlocking when
+    // the host thread is blocked on a CP completion signal.
+    if (pkt_type == HSA_PACKET_TYPE_INVALID) {
+      process_limit = read_idx;
+      break;
+    }
+
     if (pkt_type == HSA_PACKET_TYPE_KERNEL_DISPATCH) {
-      process_aql_packet(pkt, queue, pkt_addr);
+      process_aql_packet(pkt, queue, pkt_addr, qs);
     } else if (pkt_type == HSA_PACKET_TYPE_BARRIER_AND || pkt_type == HSA_PACKET_TYPE_BARRIER_OR) {
-      // Barriers must wait for all preceding packets to complete before
-      // signaling. Enqueue a zero-workgroup dispatch entry so check_all_idle()
-      // fires the completion signal only after all CUs are idle (i.e., after
-      // all preceding kernel dispatches have finished).
+      constexpr uint32_t DEP_OFF = 8;
+      constexpr uint32_t SIG_OFF = 56;
+      constexpr uint32_t SIG_VAL_OFF = 8;
+      bool is_and = (pkt_type == HSA_PACKET_TYPE_BARRIER_AND);
+
+      // Non-blocking dependency check: if any dependency is unsatisfied,
+      // stop fetching from this queue. The next doorbell event will retry.
+      // This prevents blocking the CP from processing other queues (SDMA)
+      // that may be responsible for satisfying these dependencies.
+      bool deps_satisfied =
+          is_and; // AND: assume true until a dep fails; OR: assume false until one passes
+      bool has_deps = false;
+      for (int dep = 0; dep < 5; ++dep) {
+        uint64_t dep_sig = 0;
+        if (queue.host_accessible)
+          std::memcpy(&dep_sig, reinterpret_cast<const void *>(pkt_addr + DEP_OFF + dep * 8),
+                      sizeof(dep_sig));
+        else
+          dep_sig = read_gpu_u64(pkt_addr + DEP_OFF + dep * 8);
+        if (dep_sig == 0)
+          continue;
+        has_deps = true;
+        auto *val = reinterpret_cast<int64_t *>(dep_sig + SIG_VAL_OFF);
+        int64_t v = std::atomic_ref<int64_t>(*val).load(std::memory_order_acquire);
+        if (v > 0) {
+          if (is_and) {
+            deps_satisfied = false;
+            break;
+          }
+        } else {
+          if (!is_and) {
+            deps_satisfied = true;
+            break;
+          }
+        }
+      }
+      if (!has_deps)
+        deps_satisfied = true;
+      if (!deps_satisfied) {
+        // Dependencies not ready. Stop fetching — don't advance read pointer
+        // past this packet. Schedule a re-check via doorbell event.
+        process_limit = read_idx;
+        engine()->schedule_event_now(&doorbell_event_);
+        break;
+      }
+
+      uint64_t sig = 0;
+      if (queue.host_accessible)
+        std::memcpy(&sig, reinterpret_cast<const void *>(pkt_addr + SIG_OFF), sizeof(sig));
+      else
+        sig = read_gpu_u64(pkt_addr + SIG_OFF);
+
+      DispatchEntry dp{};
+      dp.dispatch_id = next_dispatch_id_++;
+      dp.queue_id = queue.queue_id;
+      dp.total_wgs = 0;
+      dp.completed_wgs = 0;
+      dp.dispatched_wgs = 0;
+      dp.completion_signal = sig;
+      dp.host_signal = queue.host_accessible;
+
+      for (size_t qi = 0; qi < hw_queues_.size(); ++qi) {
+        if (&hw_queues_[qi] == &queue) {
+          if (completion_)
+            completion_->register_dispatch(dp.dispatch_id, qi);
+          break;
+        }
+      }
+      qs.entries.push_back(std::move(dp));
+    } else if (pkt_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC) {
       constexpr uint32_t SIG_OFF = 56;
       uint64_t sig = 0;
       if (queue.host_accessible)
         std::memcpy(&sig, reinterpret_cast<const void *>(pkt_addr + SIG_OFF), sizeof(sig));
       else
         sig = read_gpu_u64(pkt_addr + SIG_OFF);
-      if (sig != 0) {
-        InternalDispatch dp{};
-        dp.workgroup_count = 0;
-        dp.completion_signal = sig;
-        dp.host_signal = queue.host_accessible;
-        dp.ordered = queue.host_accessible;
-        dispatch_queue_.push_back(std::move(dp));
-      }
-    } else if (pkt_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC) {
-      // In functional mode, vendor-specific packets (PM4 cache invalidation)
-      // have no data dependencies and complete immediately.
-      if (queue.host_accessible) {
-        constexpr uint32_t SIG_OFF = 56, SIG_VAL_OFF = 8;
-        constexpr uint32_t MAILBOX_PTR_OFF = 16, EVENT_ID_OFF = 24;
-        uint64_t sig = 0;
-        std::memcpy(&sig, reinterpret_cast<const void *>(pkt_addr + SIG_OFF), sizeof(sig));
-        if (sig != 0) {
-          auto *val = reinterpret_cast<int64_t *>(sig + SIG_VAL_OFF);
-          std::atomic_ref<int64_t>(*val).fetch_sub(1, std::memory_order_release);
-          // Write event mailbox and fire interrupt for blocked-wait signals.
-          auto mailbox_ptr = *reinterpret_cast<uint64_t *>(sig + MAILBOX_PTR_OFF);
-          if (mailbox_ptr != 0) {
-            auto event_id = *reinterpret_cast<uint32_t *>(sig + EVENT_ID_OFF);
-            std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(mailbox_ptr))
-                .store(uint64_t(event_id), std::memory_order_release);
-            if (interrupt_cb_)
-              interrupt_cb_(event_id);
-          }
-          util::Logger::vm("CP: vendor pkt signal 0x", std::hex, sig, std::dec, " fired");
+
+      DispatchEntry dp{};
+      dp.dispatch_id = next_dispatch_id_++;
+      dp.queue_id = queue.queue_id;
+      dp.total_wgs = 0;
+      dp.completed_wgs = 0;
+      dp.dispatched_wgs = 0;
+      dp.completion_signal = sig;
+      dp.host_signal = queue.host_accessible;
+
+      for (size_t qi = 0; qi < hw_queues_.size(); ++qi) {
+        if (&hw_queues_[qi] == &queue) {
+          if (completion_)
+            completion_->register_dispatch(dp.dispatch_id, qi);
+          break;
         }
-      } else {
-        signal_aql_completion(pkt_addr);
       }
+      qs.entries.push_back(std::move(dp));
     }
 
     ++read_idx;
   }
 
-  // Write updated read pointer back.
+  // Write updated read pointer.
   if (queue.host_accessible) {
     std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(queue.read_ptr_va))
-        .store(read_idx, std::memory_order_release);
+        .store(process_limit, std::memory_order_release);
   } else {
-    auto *src = reinterpret_cast<const uint8_t *>(&read_idx);
+    auto *src = reinterpret_cast<const uint8_t *>(&process_limit);
     for (uint32_t i = 0; i < sizeof(read_idx); ++i)
       memory_->write8(queue.read_ptr_va + i, src[i]);
   }
-
-  // NOTE: Do NOT update queue.last_doorbell here. The doorbell poll thread
-  // manages last_doorbell and compares it against the actual doorbell value
-  // (written by ROCR via StoreRelease on the doorbell signal). The doorbell
-  // value is write_index + num_packet - 1, which is one LESS than write_idx.
-  // If we set last_doorbell = write_idx here, the poll thread will miss the
-  // next doorbell write because the next doorbell value equals this write_idx
-  // (for single-packet submissions), causing the second submission to hang.
 }
 
 void CommandProcessor::fetch_packets() {
-  // Hold hw_queue_mutex_ to prevent register_queue / unregister_queue (called
-  // from the ROCR app thread) from mutating hw_queues_ while we iterate it.
   std::lock_guard<std::mutex> lock(hw_queue_mutex_);
-  for (auto &queue : hw_queues_)
-    fetch_from_queue(queue);
+  for (size_t i = 0; i < hw_queues_.size(); ++i)
+    fetch_from_queue(hw_queues_[i], new_queue_states_[i]);
 }
 
 void CommandProcessor::signal_aql_completion(uint64_t pkt_addr) {
@@ -972,73 +915,151 @@ void CommandProcessor::signal_aql_completion(uint64_t pkt_addr) {
 }
 
 void CommandProcessor::handle_doorbell(simdojo::Tick) {
-  // Fetch AQL packets from registered hardware queues.
-  fetch_packets();
+  // Hold hw_queue_mutex_ for the entire handler. register_queue/unregister_queue
+  // from the host thread can resize hw_queues_/new_queue_states_ at any time;
+  // iterating without the lock risks use-after-realloc. The host thread blocks
+  // on queue registration until handle_doorbell returns, which is acceptable
+  // because queue creation only happens during HSA init (not during dispatch).
+  // Use unique_lock so we can unlock before stop_doorbell_monitor() (which
+  // joins the doorbell thread that also acquires this mutex).
+  std::unique_lock<std::mutex> lock(hw_queue_mutex_);
 
-  // Re-enqueue any retry packets from previous doorbell cycles.
-  for (auto &rpkt : retry_queue_)
-    dispatch_queue_.push_back(std::move(rpkt));
-  retry_queue_.clear();
+  // Fetch packets (uses last_doorbell values set by the poll thread).
+  for (size_t i = 0; i < hw_queues_.size(); ++i)
+    fetch_from_queue(hw_queues_[i], new_queue_states_[i]);
 
-  // For ordered (KFD/host-accessible) dispatches, enforce in-order execution:
-  // dispatch N+1 must not start until dispatch N completes. If CUs are still
-  // running, skip and let check_all_idle() start the next dispatch when idle.
-  // For unordered (internal test) dispatches, dispatch all pending in parallel
-  // so tests like RoundRobinScheduling can put multiple wavefronts on the CU.
-  size_t prev_dispatched = dispatched_;
-  {
-    bool next_is_ordered =
-        (dispatched_ < dispatch_queue_.size() && dispatch_queue_[dispatched_].ordered);
-    if (next_is_ordered) {
-      bool any_cu_active = false;
-      for (auto *cu : cus_)
-        if (!cu->is_idle()) {
-          any_cu_active = true;
+  // Ensure interrupt callback is set on completion tracker.
+  if (completion_ && interrupt_cb_)
+    completion_->set_interrupt_callback(interrupt_cb_);
+
+  // Phase 1: Dispatch-Execute-Complete loop (functional mode).
+  bool progress = true;
+  while (progress) {
+    progress = false;
+
+    for (size_t qi = 0; qi < hw_queues_.size(); ++qi) {
+      if (hw_queues_[qi].is_sdma)
+        continue;
+      auto &qs = new_queue_states_[qi];
+
+      while (qs.next_dispatch_idx < qs.entries.size()) {
+        auto &entry = qs.entries[qs.next_dispatch_idx];
+
+        if (entry.barrier_bit && !barrier_satisfied(qs, qs.next_dispatch_idx))
           break;
+
+        if (entry.is_non_kernel()) {
+          entry.completed_wgs = entry.total_wgs;
+          ++qs.next_dispatch_idx;
+          if (completion_)
+            completion_->drain_completions(new_queue_states_);
+          progress = true;
+          continue;
         }
-      if (!any_cu_active)
-        step();
-    } else {
-      while (step()) {
+
+        // Dispatch-execute-retire loop: keep dispatching WGs, activating CUs,
+        // and retiring WFs until the entry is fully dispatched and completed,
+        // or we hit genuine backpressure (no CU can accept any WG).
+        // NOTE: drain_completions may pop entries, so we must re-check indices
+        // after each drain and not hold stale references.
+        uint32_t dispatch_id = entry.dispatch_id;
+        for (;;) {
+          if (qs.next_dispatch_idx >= qs.entries.size())
+            break;
+          auto &cur = qs.entries[qs.next_dispatch_idx];
+          if (cur.dispatch_id != dispatch_id)
+            break; // Entry was popped (completed).
+
+          uint32_t sent = dispatch_workgroups(cur);
+          if (sent > 0)
+            progress = true;
+
+          // Activate CUs synchronously (functional mode, quantum=0).
+          for (auto *cu : cus_) {
+            if (cu->has_active_wfs())
+              cu->activate();
+          }
+
+          // WG completion notifications fire automatically from
+          // Wavefront::halt() → CU::release_wf() → CP::notify_wg_complete().
+          // Drain completions to pop fully-completed entries and fire signals.
+          if (completion_)
+            completion_->drain_completions(new_queue_states_);
+
+          // Re-check: entry may have been popped by drain.
+          if (qs.next_dispatch_idx >= qs.entries.size())
+            break;
+          auto &post = qs.entries[qs.next_dispatch_idx];
+          if (post.dispatch_id != dispatch_id)
+            break; // Entry completed and was popped.
+
+          if (post.fully_dispatched()) {
+            ++qs.next_dispatch_idx;
+            break;
+          }
+          if (sent == 0)
+            break; // CU backpressure.
+        }
       }
     }
   }
 
-  // Register as primary on first real dispatch so the engine stays alive.
-  if (!is_primary_ && dispatched_ > prev_dispatched) {
+  // Final drain: catch any entries that became fully_completed during the
+  // last iteration but weren't drained by the re-entrant path.
+  if (completion_)
+    completion_->drain_completions(new_queue_states_);
+
+  // Re-fetch: pick up any packets the host submitted while we were executing
+  // (e.g., barrier packets queued after a kernel dispatch). Process them
+  // immediately so host signal waits see completed barriers before returning.
+  for (size_t i = 0; i < hw_queues_.size(); ++i)
+    fetch_from_queue(hw_queues_[i], new_queue_states_[i]);
+  // Process any new non-kernel entries (barriers with total_wgs==0).
+  for (size_t qi = 0; qi < hw_queues_.size(); ++qi) {
+    auto &qs = new_queue_states_[qi];
+    while (qs.next_dispatch_idx < qs.entries.size()) {
+      auto &entry = qs.entries[qs.next_dispatch_idx];
+      if (!entry.is_non_kernel())
+        break;
+      entry.completed_wgs = entry.total_wgs;
+      ++qs.next_dispatch_idx;
+    }
+  }
+  if (completion_)
+    completion_->drain_completions(new_queue_states_);
+
+  // Register as primary on first dispatch.
+  if (!is_primary_ && pending_entries() > 0) {
     engine()->register_as_primary();
     is_primary_ = true;
   }
 
-  // Collect CUs that have active wavefronts (received work from dispatch).
-  std::set<ComputeUnitCore *> activated_cus;
-  if (dispatched_ > prev_dispatched) {
-    for (auto *cu : cus_) {
-      if (cu->has_active_wfs())
-        activated_cus.insert(cu);
+  // For quantum>0 mode: activate CUs via port messages.
+  for (size_t i = 0; i < cus_.size(); ++i) {
+    if (cus_[i]->has_active_wfs()) {
+      if (dispatch_ports_[i]->link())
+        dispatch_ports_[i]->send(std::make_unique<simdojo::Message>(simdojo::MessageHeader{}));
+      else
+        cus_[i]->activate();
     }
   }
 
-  // Activate CUs that have work. Send through dispatch ports so the link's
-  // exec_mode governs delivery: FUNCTIONAL = synchronous direct call,
-  // CLOCKED = event-based with propagation latency.
-  for (size_t i = 0; i < cus_.size(); ++i) {
-    if (activated_cus.count(cus_[i]) == 0)
-      continue;
-    if (dispatch_ports_[i]->link())
-      dispatch_ports_[i]->send(std::make_unique<simdojo::Message>(simdojo::MessageHeader{}));
-    else
-      cus_[i]->activate(); // Fallback if port not yet wired.
+  // Primary release check. Determine teardown need under lock, then unlock
+  // before stop_doorbell_monitor() — which joins the doorbell thread that also
+  // acquires hw_queue_mutex_ (avoids deadlock).
+  bool do_teardown = false;
+  if (completion_ && completion_->all_complete(new_queue_states_) && !has_kfd_queues()) {
+    if (is_primary_)
+      do_teardown = true;
   }
 
-  // If retry queue has pending workgroups, schedule another doorbell.
-  if (!retry_queue_.empty())
-    schedule_event(&doorbell_event_, engine()->context(partition_id()).current_tick() + 1);
-  // If no CUs were activated (barrier-only entries or no new packets),
-  // check idle immediately so barrier completion signals fire without
-  // waiting for a CU on_idle callback that will never come.
-  else if (activated_cus.empty())
-    check_all_idle();
+  lock.unlock();
+
+  if (do_teardown) {
+    stop_doorbell_monitor();
+    engine()->primary_release();
+    is_primary_ = false;
+  }
 }
 
 // SDMA packet processor
@@ -1098,6 +1119,17 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
       uint32_t count = (dw(1) & 0x3FFFFFF) + 1;
       uint64_t src = static_cast<uint64_t>(dw(3)) | (static_cast<uint64_t>(dw(4)) << 32);
       uint64_t dst = static_cast<uint64_t>(dw(5)) | (static_cast<uint64_t>(dw(6)) << 32);
+      util::Logger::vm("SDMA COPY: src=", std::hex, src, " dst=", dst, std::dec, " count=", count,
+                       " (", count / 1024, " KB)");
+      if (dst <= 0x4d08242f10 && dst + count > 0x4d08242f00) {
+        uint64_t off = 0x4d08242f08 - dst;
+        if (off + 4 <= count) {
+          uint32_t val = 0;
+          std::memcpy(&val, reinterpret_cast<const uint8_t *>(src) + off, 4);
+          util::Logger::vm("SDMA WATCHPOINT: copying ", std::hex, val, std::dec,
+                           " to NaN address 0x4d08242f08");
+        }
+      }
       if (header & (1u << 28)) {
         // Broadcast copy (2 destinations) — 9 dwords.
         uint64_t dst2 = static_cast<uint64_t>(dw(7)) | (static_cast<uint64_t>(dw(8)) << 32);
@@ -1108,7 +1140,6 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         std::memcpy(reinterpret_cast<void *>(dst), reinterpret_cast<const void *>(src), count);
         pkt_dwords = sdma::COPY_LINEAR_SIZE;
       }
-      util::Logger::vm("SDMA: copy 0x", std::hex, src, " -> 0x", dst, std::dec, " size=", count);
       break;
     }
     case sdma::OP_FENCE: {
@@ -1128,17 +1159,49 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
     }
     case sdma::OP_POLL_REGMEM: {
       bool mem_poll = (header >> 31) & 1;
+      bool hdp_flush = (header >> 26) & 1;
+      uint32_t func = (header >> 28) & 0x7;
       uint64_t addr = static_cast<uint64_t>(dw(1)) | (static_cast<uint64_t>(dw(2)) << 32);
       uint32_t ref = dw(3);
       uint32_t mask = dw(4);
-      if (mem_poll && addr > 0x1000) {
+      if (!mem_poll) {
+        // Register poll / HDP flush — no-op in functional sim.
+      } else if (addr > 0x1000) {
         auto *ptr = reinterpret_cast<uint32_t *>(addr);
-        for (int i = 0; i < 10000; ++i) {
-          uint32_t val = std::atomic_ref<uint32_t>(*ptr).load(std::memory_order_acquire);
-          if ((val & mask) == ref)
-            break;
+        auto compare = [func](uint32_t val, uint32_t reference) -> bool {
+          switch (func) {
+          case 0:
+            return true;
+          case 1:
+            return val < reference;
+          case 2:
+            return val <= reference;
+          case 3:
+            return val == reference;
+          case 4:
+            return val != reference;
+          case 5:
+            return val >= reference;
+          case 6:
+            return val > reference;
+          default:
+            return true;
+          }
+        };
+        uint32_t val = std::atomic_ref<uint32_t>(*ptr).load(std::memory_order_acquire);
+        if (!compare(val & mask, ref)) {
+          // Condition not satisfied. Stop processing this SDMA ring and
+          // schedule a retry. Non-blocking to avoid deadlocking when the
+          // condition depends on a compute dispatch or another queue.
+          if (queue.host_accessible) {
+            std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(queue.read_ptr_va))
+                .store(rpos * sizeof(uint32_t), std::memory_order_release);
+          }
+          engine()->schedule_event_now(&doorbell_event_);
+          return;
         }
       }
+      (void)hdp_flush;
       pkt_dwords = sdma::POLL_REGMEM_SIZE;
       break;
     }
@@ -1147,10 +1210,20 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
       uint64_t src_data = static_cast<uint64_t>(dw(3)) | (static_cast<uint64_t>(dw(4)) << 32);
       uint32_t atomic_op = (header >> 25) & 0x7F;
       // SDMA_ATOMIC_ADD64 = 47
-      if (atomic_op == 47) {
+      if (atomic_op == 47 && addr > 0x1000) {
         auto *ptr = reinterpret_cast<int64_t *>(addr);
         std::atomic_ref<int64_t>(*ptr).fetch_add(static_cast<int64_t>(src_data),
                                                  std::memory_order_release);
+        if (static_cast<int64_t>(src_data) < 0 && interrupt_cb_) {
+          uint64_t sig_base = addr - 8;
+          auto mailbox_ptr = *reinterpret_cast<uint64_t *>(sig_base + 16);
+          auto event_id = *reinterpret_cast<uint32_t *>(sig_base + 24);
+          if (mailbox_ptr != 0) {
+            std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(mailbox_ptr))
+                .store(uint64_t(event_id), std::memory_order_release);
+          }
+          interrupt_cb_(event_id);
+        }
       }
       pkt_dwords = sdma::ATOMIC_SIZE;
       break;
@@ -1170,9 +1243,18 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
       pkt_dwords = sdma::CONST_FILL_SIZE;
       break;
     }
-    case sdma::OP_TIMESTAMP:
+    case sdma::OP_TIMESTAMP: {
+      uint64_t addr = static_cast<uint64_t>(dw(1)) | (static_cast<uint64_t>(dw(2)) << 32);
+      if (addr > 0x1000) {
+        auto now = std::chrono::steady_clock::now().time_since_epoch();
+        uint64_t ts = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
+        std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(addr))
+            .store(ts, std::memory_order_release);
+      }
       pkt_dwords = sdma::TIMESTAMP_SIZE;
       break;
+    }
     case sdma::OP_GCR:
       pkt_dwords = 5; // GCR request is 5 dwords on GFX9.
       break;

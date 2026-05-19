@@ -1021,10 +1021,13 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_partition_field_(uint32_t gpu_index
     return RDC_ST_UNKNOWN_ERROR;
   }
 
+  // Always use the physical device handle (raw device index) for gpu_metrics,
+  // since xcp_stats[] is indexed by partition from the whole-GPU metrics table.
+  // Partition handles may not support amdsmi_get_gpu_metrics_info.
   amdsmi_processor_handle processor_handle = {};
-  amdsmi_status_t ret = get_processor_handle_from_id(gpu_index, &processor_handle);
+  amdsmi_status_t ret = get_processor_handle_from_id(info.device_index, &processor_handle);
   if (ret != AMDSMI_STATUS_SUCCESS) {
-    RDC_LOG(RDC_ERROR, "Cannot get processor handle for partition " << info.instance_index);
+    RDC_LOG(RDC_ERROR, "Cannot get processor handle for device " << info.device_index);
     return Smi2RdcError(ret);
   }
 
@@ -1129,6 +1132,42 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_partition_field_(uint32_t gpu_index
       value->type = INTEGER;
       value->status = RDC_ST_OK;
       return RDC_ST_OK;
+    }
+    case RDC_FI_GPU_MEMORY_USAGE: {
+      // Use the partition-specific handle for memory queries
+      amdsmi_processor_handle part_handle = {};
+      ret = get_processor_handle_from_id(gpu_index, &part_handle);
+      if (ret != AMDSMI_STATUS_SUCCESS) {
+        return Smi2RdcError(ret);
+      }
+      uint64_t u64 = 0;
+      ret = amdsmi_get_gpu_memory_usage(part_handle, AMDSMI_MEM_TYPE_VRAM, &u64);
+      value->type = INTEGER;
+      value->status = ret;
+      if (ret == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = static_cast<int64_t>(u64);
+      }
+      return ret == AMDSMI_STATUS_SUCCESS ? RDC_ST_OK : Smi2RdcError(ret);
+    }
+    case RDC_FI_GPU_MEMORY_TOTAL: {
+      amdsmi_processor_handle part_handle = {};
+      ret = get_processor_handle_from_id(gpu_index, &part_handle);
+      if (ret != AMDSMI_STATUS_SUCCESS) {
+        return Smi2RdcError(ret);
+      }
+      uint64_t u64 = 0;
+      ret = amdsmi_get_gpu_memory_total(part_handle, AMDSMI_MEM_TYPE_VRAM, &u64);
+      value->type = INTEGER;
+      value->status = ret;
+      if (ret == AMDSMI_STATUS_SUCCESS) {
+        // Partition 0 (primary handle) reports whole-GPU total.
+        // Correct to per-partition by dividing by num_partitions.
+        if (info.instance_index == 0 && num_partitions > 1) {
+          u64 /= num_partitions;
+        }
+        value->value.l_int = static_cast<int64_t>(u64);
+      }
+      return ret == AMDSMI_STATUS_SUCCESS ? RDC_ST_OK : Smi2RdcError(ret);
     }
     default:
       // All other fields => N/A for partition IN AMDSMI
