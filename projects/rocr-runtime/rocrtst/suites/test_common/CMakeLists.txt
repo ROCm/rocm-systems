@@ -132,25 +132,25 @@ endif()
 
 # Required Defines first:
 # Handle two cases
-# 1 - rocrtst is being built separately (defailt, BUILD_ROCRTST = OFF)
+# 1 - rocrtst is being built separately (default, BUILD_ROCRTST = OFF)
 # 2 - rocrtst is being built together with runtime and libhsakmt (BUILD_ROCRTST = ON)
 # In case 2, it might be built on other archs than amd64. If that is the case, do not
 # break the entire build, but just skip building rocrtst as it depends amd_smi which is
-# available only for amd64 for the timebeing
+# available only for amd64 for the time being
 
 if (BUILD_ROCRTST)
-    message("STATUS: using in-tree hsa-runtime64.")
+    message(STATUS "Using in-tree hsa-runtime64")
     set(ROCRTST_LIBS ${ROCRTST_LIBS} hsa-runtime64)
 else()
   find_package(hsa-runtime64 REQUIRED)
-  message("STATUS: using system hsa-runtime64 library.")
+  message(STATUS "Using system hsa-runtime64 library")
   set(ROCRTST_LIBS ${ROCRTST_LIBS} hsa-runtime64::hsa-runtime64)
 endif()
 
 if (BUILD_ROCRTST)
   find_package(amd_smi QUIET)
   if(NOT amd_smi_FOUND)
-    message("WARNING: amd_smi missing. Tests building will be skipped.")
+    message(WARNING "Tests (rocrtst) building will be skipped due to amd_smi missing.")
     return()
   else()
   endif()
@@ -381,7 +381,7 @@ set(ROCRTST_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../..)
 find_package(GTest)
 if(GTest_FOUND)
   set(ROCRTST_LIBS ${ROCRTST_LIBS} GTest::GTest GTest::Main)
-  message(STATUS "Using system GTest library.")
+  message(STATUS "Using system GTest library")
 else()
   set(GOOGLE_TEST_FRWK_NAME "google-test-frwk${ONLY64STR}")
   add_subdirectory(${ROCRTST_ROOT}/gtest "${PROJECT_BINARY_DIR}/gtest" EXCLUDE_FROM_ALL)
@@ -684,8 +684,6 @@ if(NOT HAVE_HWLOC)
       PATH_SUFFIXES lib lib64
       NO_DEFAULT_PATH
     )
-  else()
-    SET(HWLOC_BUNDLED TRUE)
   endif()
 
   if(HWLOC_LIBRARY)
