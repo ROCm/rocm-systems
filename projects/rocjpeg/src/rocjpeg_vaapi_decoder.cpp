@@ -403,6 +403,20 @@ RocJpegStatus RocJpegVappiDecoder::InitializeDecoder(std::string device_name, in
     int render_node_id = (gpu_uuids_to_render_nodes_map_.find(gpu_uuid) != gpu_uuids_to_render_nodes_map_.end()) ? gpu_uuids_to_render_nodes_map_[gpu_uuid] : 128;
     drm_node += std::to_string(render_node_id + offset);
 
+    if (g_rocjpeg_logger.GetLogLevel() >= kRocJpegLogInfo) {
+        std::ostringstream oss;
+        oss << '{';
+        bool first = true;
+        for (const auto& entry : gpu_uuids_to_render_nodes_map_) {
+            if (!first) oss << ", ";
+            oss << entry.first << ": " << entry.second;
+            first = false;
+        }
+        oss << '}';
+        InfoLog(g_rocjpeg_logger, "gpu_uuids_to_render_nodes_map_: " + oss.str());
+        InfoLog(g_rocjpeg_logger, "Selected GPU UUID: " + gpu_uuid);
+    }
+
     CHECK_ROCJPEG(InitVAAPI(drm_node));
     CHECK_ROCJPEG(CreateDecoderConfig());
     CHECK_ROCJPEG(CreateDecoderContext());
@@ -458,9 +472,10 @@ void RocJpegVappiDecoder::GetNumJpegCores() {
  *         - ROCJPEG_STATUS_NOT_INITIALIZED if the initialization fails.
  */
 RocJpegStatus RocJpegVappiDecoder::InitVAAPI(std::string drm_node) {
+    InfoLog(g_rocjpeg_logger, "Opening DRM node: " + drm_node);
     drm_fd_ = open(drm_node.c_str(), O_RDWR);
     if (drm_fd_ < 0) {
-        ErrorLog(g_rocjpeg_logger, "failed to open drm node " + drm_node);
+        ErrorLog(g_rocjpeg_logger, "Failed to open drm node: " + drm_node);
         return ROCJPEG_STATUS_NOT_INITIALIZED;
     }
     va_display_ = vaGetDisplayDRM(drm_fd_);
@@ -468,9 +483,26 @@ RocJpegStatus RocJpegVappiDecoder::InitVAAPI(std::string drm_node) {
         ErrorLog(g_rocjpeg_logger, "failed to create va_display!");
         return ROCJPEG_STATUS_NOT_INITIALIZED;
     }
-    vaSetInfoCallback(va_display_, NULL, NULL);
+    std::string va_driver_path;
+    vaSetInfoCallback(va_display_, [](void* user_context, const char* message) {
+        std::string msg(message);
+        if (msg.find("Trying to open") != std::string::npos) {
+            *static_cast<std::string*>(user_context) = msg;
+        }
+    }, &va_driver_path);
     int major_version = 0, minor_version = 0;
-    CHECK_VAAPI(vaInitialize(va_display_, &major_version, &minor_version))
+    VAStatus va_status = vaInitialize(va_display_, &major_version, &minor_version);
+    vaSetInfoCallback(va_display_, nullptr, nullptr);
+    if (va_status != VA_STATUS_SUCCESS) {
+        ErrorLog(g_rocjpeg_logger, std::string("vaInitialize failed: ") + vaErrorStr(va_status));
+        return ROCJPEG_STATUS_NOT_INITIALIZED;
+    }
+    InfoLog(g_rocjpeg_logger, "VA-API version " + std::to_string(major_version) + "." + std::to_string(minor_version));
+    const char* vendor_str = vaQueryVendorString(va_display_);
+    InfoLog(g_rocjpeg_logger, "VA-API vendor: " + std::string(vendor_str ? vendor_str : ""));
+    if (!va_driver_path.empty()) {
+        InfoLog(g_rocjpeg_logger, va_driver_path);
+    }
     return ROCJPEG_STATUS_SUCCESS;
 }
 
