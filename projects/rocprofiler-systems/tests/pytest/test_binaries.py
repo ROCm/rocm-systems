@@ -706,7 +706,8 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
             run_args=["--list-domains"],
         )
         self.assert_regex(
-            result, pass_regex=["Available ROCm domains with operations:", "ompt"]
+            result,
+            pass_regex=["Available ROCm domains with operations:", "scratch_memory"],
         )
 
     @pytest.mark.timeout(45)
@@ -719,8 +720,8 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
                 id="no-domain",
             ),
             pytest.param(
-                ["--list-operations", "ompt"],
-                ["omp_thread_begin"],
+                ["--list-operations", "scratch_memory"],
+                ["SCRATCH_MEMORY_ALLOC"],
                 id="found",
             ),
             pytest.param(
