@@ -14,7 +14,6 @@
 #include <string_view>
 #include <sys/stat.h>
 #include <unordered_map>
-#include <unordered_set>
 
 using settings = ::tim::settings;
 
