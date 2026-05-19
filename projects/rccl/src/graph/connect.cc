@@ -154,9 +154,9 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
         topoRanks->ringSend[c] = ringIntra[localRanks-1];
         topoRanks->ringPrev[c] = (i == 0) ? -1 : ringIntra[i-1];
         topoRanks->ringNext[c] = (i == localRanks-1) ? -1 : ringIntra[i+1];
-        if ( rcclParamInterGraphGen() ) {
-          topoRanks->ringRecv[c] = ringIntra[cutIndices[c]];
-          topoRanks->ringSend[c] = ringIntra[ ( cutIndices[c] + 1 ) % localRanks] ;
+        if ( rcclParamIntraGraphGen() && rcclParamInterGraphGen() ) {
+          topoRanks->ringRecv[c] = ringIntra[ ( cutIndices[c] + 1 ) % localRanks] ; 
+          topoRanks->ringSend[c] = ringIntra[cutIndices[c]];
           topoRanks->ringPrev[c] = ringIntra[ ( localRanks  +  i-1 ) % localRanks];
           topoRanks->ringNext[c] = ringIntra[(i+1) % localRanks];
         }
