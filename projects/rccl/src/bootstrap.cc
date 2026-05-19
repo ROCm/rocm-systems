@@ -1235,8 +1235,13 @@ ncclResult_t bootstrapSplit(uint64_t magic, struct ncclComm* comm, struct ncclCo
   int prev, next;
   struct ringConnectInfo info = {};
   struct ringConnectInfo nextPeer = {};
+  struct ringConnectInfo prevPeer = {};
   struct ncclSocket* proxySocket = NULL;
   struct bootstrapState* state;
+  union ncclSocketAddress peerSocketAddress;
+  bool useBidirBootstrap = bootstrapNetEnabledEffective(nranks) && bootstrapBidirEnabled(nranks, 1);
+  char prevRevHandle[NCCL_NET_HANDLE_MAXSIZE];
+  memset(prevRevHandle, 0, NCCL_NET_HANDLE_MAXSIZE);
 
   NCCLCHECKGOTO(ncclCalloc(&state, 1), ret, fail);
   state->rank = rank;
@@ -1255,12 +1260,18 @@ ncclResult_t bootstrapSplit(uint64_t magic, struct ncclComm* comm, struct ncclCo
     NCCLCHECKGOTO(netGetDevice(rank, comm, &STATE_LISTEN(state, net.dev)), ret, fail);
     NCCLCHECKGOTO(state->net->listen(comm->netContext, STATE_LISTEN(state, net.dev), STATE_LISTEN(state, net.handle), &STATE_LISTEN(state, net.comm)), ret, fail);
     memcpy(info.fwd.handle, STATE_LISTEN(state, net.handle), NCCL_NET_HANDLE_MAXSIZE);
+    // For bidirectional bootstrap, create the reverse listener now and include its handle
+    // in the exchange. This avoids the blocking netSendRecv fallback that deadlocks at scale.
+    if (useBidirBootstrap) {
+      NCCLCHECKGOTO(state->net->listen(comm->netContext, STATE_LISTEN(state, net.dev),
+                                       STATE_LISTEN(state, net.revHandle), &STATE_LISTEN(state, net.revComm)), ret, fail);
+      memcpy(info.revHandle, STATE_LISTEN(state, net.revHandle), NCCL_NET_HANDLE_MAXSIZE);
+    }
   } else {
     // create socket for ring neighbor to contact me
     NCCLCHECK(createListenSocket(comm, comm->magic, &STATE_LISTEN(state, socket.fwd), &info.fwd.addr, ncclSocketTypeBootstrap));
   }
   // create a socket for others to reach out (P2P)
-  union ncclSocketAddress peerSocketAddress;
   NCCLCHECK(createListenSocket(comm, comm->magic, &STATE_LISTEN(state, peerSocket), &peerSocketAddress, ncclSocketTypeBootstrap));
 
   if (ncclParamRasEnable() == 1) {
@@ -1271,6 +1282,14 @@ ncclResult_t bootstrapSplit(uint64_t magic, struct ncclComm* comm, struct ncclCo
   // Get addr from next rank using the parent's connections
   NCCLCHECKGOTO(bootstrapSend(parent->bootstrap, prev, BOOTSTRAP_TAG_COMMSPLIT, &info, sizeof(struct ringConnectInfo)), ret, fail);
   NCCLCHECKGOTO(bootstrapRecv(parent->bootstrap, next, BOOTSTRAP_TAG_COMMSPLIT, &nextPeer, sizeof(struct ringConnectInfo)), ret, fail);
+  // For bidirectional bootstrap, do a second exchange in the opposite direction to get
+  // prev's revHandle. Use a distinct tag to avoid message matching issues at scale.
+  if (useBidirBootstrap) {
+    NCCLCHECKGOTO(bootstrapSend(parent->bootstrap, next, BOOTSTRAP_TAG_COMMSPLIT + 1, &info, sizeof(struct ringConnectInfo)), ret, fail);
+    NCCLCHECKGOTO(bootstrapRecv(parent->bootstrap, prev, BOOTSTRAP_TAG_COMMSPLIT + 1, &prevPeer, sizeof(struct ringConnectInfo)), ret, fail);
+    memcpy(prevRevHandle, prevPeer.revHandle, NCCL_NET_HANDLE_MAXSIZE);
+  }
+
   if (bootstrapNetEnabledEffective(nranks)) {
     NCCLCHECKGOTO(netRingConnect(comm->netContext, state->net, &state->listen, nextPeer.fwd.handle,
                                  &STATE_RING(state, net.sendComm), &STATE_RING(state, net.sendDevHandle),
@@ -1281,10 +1300,9 @@ ncclResult_t bootstrapSplit(uint64_t magic, struct ncclComm* comm, struct ncclCo
   }
 
   // Mirror the bidirectional ring setup done in bootstrapInit so that split communicators
-  // can also benefit from the N/2-step AllGather. bootstrapSplit doesn't go through the
-  // root rendezvous, so no piggybacked revHandle is available — pass NULL to use the
-  // legacy in-place handle exchange.
-  NCCLCHECKGOTO(bootstrapBidirRingSetup(comm, state, NULL), ret, fail);
+  // can also benefit from the N/2-step AllGather. Pass the piggybacked prevRevHandle if available,
+  // otherwise NULL falls back to the legacy (potentially blocking) in-place handle exchange.
+  NCCLCHECKGOTO(bootstrapBidirRingSetup(comm, state, useBidirBootstrap ? prevRevHandle : NULL), ret, fail);
 
   NCCLCHECKGOTO(ncclCalloc(&state->peerP2pAddresses, nranks), ret, fail);
   memcpy(state->peerP2pAddresses + rank, &peerSocketAddress, sizeof(union ncclSocketAddress));
