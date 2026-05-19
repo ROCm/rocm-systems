@@ -16,6 +16,50 @@ pytestmark = [
     pytest.mark.ci_enable,  # TODO: Deprecate once TheRock switches to CTest
 ]
 
+MINIMAL_RUNTIME_ENV = {
+    "ROCPROFSYS_TRACE": "OFF",
+    "ROCPROFSYS_PROFILE": "OFF",
+    "ROCPROFSYS_USE_SAMPLING": "OFF",
+    "ROCPROFSYS_USE_PROCESS_SAMPLING": "OFF",
+    "ROCPROFSYS_USE_AMD_SMI": "OFF",
+    "ROCPROFSYS_MONOCHROME": "ON",
+}
+
+INVALID_TYPED_VALUE_CASES = [
+    pytest.param(
+        {"ROCPROFSYS_MODE": "banana"},
+        r"[Ii]nvalid value.*ROCPROFSYS_MODE",
+        id="mode",
+    ),
+    pytest.param(
+        {"ROCPROFSYS_PERFETTO_BACKEND": "banana"},
+        r"[Ii]nvalid value.*ROCPROFSYS_PERFETTO_BACKEND",
+        id="perfetto-backend",
+    ),
+    pytest.param(
+        {"ROCPROFSYS_TRACE": "maybe"},
+        r"[Ii]nvalid value.*ROCPROFSYS_TRACE",
+        id="boolean",
+    ),
+    pytest.param(
+        {"ROCPROFSYS_TRACE_DURATION": "abc"},
+        r"[Ii]nvalid value.*ROCPROFSYS_TRACE_DURATION",
+        id="numeric-parse",
+    ),
+    pytest.param(
+        {"ROCPROFSYS_USE_SAMPLING": "ON", "ROCPROFSYS_SAMPLING_FREQ": "-1"},
+        r"[Ii]nvalid value.*ROCPROFSYS_SAMPLING_FREQ",
+        id="numeric-range",
+    ),
+]
+
+VALID_BOOLEAN_VALUES = [
+    pytest.param("on", id="on"),
+    pytest.param("1", id="one"),
+    pytest.param("true", id="true"),
+    pytest.param("Y", id="Y"),
+]
+
 
 # =============================================================================
 # Config fixtures
@@ -42,6 +86,15 @@ def config_target(rocprof_config) -> str:
 class TestConfig(RocprofsysTest):
     """Tests for configuration file tests."""
 
+    def run_invalid_config_test(self, config_target, env):
+        """Run the target through the runtime path expected to reject bad config."""
+        return self.run_test(
+            "sys_run",
+            target=config_target,
+            env=env,
+            fail_on_pass=True,
+        )
+
     def test_invalid(self, config_target, create_config_file):
         """Test that invalid config file causes failure."""
         # Write invalid configuration file to test output directory
@@ -51,18 +104,73 @@ class TestConfig(RocprofsysTest):
         }
         config_file = create_config_file(config_env, "invalid.cfg", skip_filter=True)
 
-        env = {"ROCPROFSYS_CONFIG_FILE": str(config_file)}
+        env = MINIMAL_RUNTIME_ENV.copy()
+        env["ROCPROFSYS_CONFIG_FILE"] = str(config_file)
 
-        result = self.run_test(
-            "runtime_instrument",
-            target=config_target,
-            env=env,
-            fail_on_pass=True,  # Expected to fail
-        )
+        result = self.run_invalid_config_test(config_target, env)
 
         self.assert_regex(
             result,
             pass_regex=[r"Unknown setting 'FOOBAR' \(value = 'ON'\)"],
+            use_abort_fail_regex=False,
+        )
+
+    @pytest.mark.parametrize("env_overrides, pass_regex", INVALID_TYPED_VALUE_CASES)
+    def test_invalid_typed_environment_values(
+        self, config_target, env_overrides, pass_regex
+    ):
+        """Test that invalid strongly typed environment values fail clearly."""
+        env = MINIMAL_RUNTIME_ENV.copy()
+        env.update(env_overrides)
+
+        result = self.run_invalid_config_test(config_target, env)
+
+        self.assert_regex(
+            result,
+            pass_regex=[pass_regex],
+            use_abort_fail_regex=False,
+        )
+
+    @pytest.mark.parametrize("config_env, pass_regex", INVALID_TYPED_VALUE_CASES)
+    def test_invalid_typed_config_values(
+        self, config_target, create_config_file, config_env, pass_regex
+    ):
+        """Test that invalid strongly typed config-file values fail clearly."""
+        config_name = f"invalid_{next(iter(config_env)).lower()}.cfg"
+        config_file = create_config_file(config_env, config_name, skip_filter=True)
+        env = MINIMAL_RUNTIME_ENV.copy()
+        env["ROCPROFSYS_CONFIG_FILE"] = str(config_file)
+
+        result = self.run_invalid_config_test(config_target, env)
+
+        self.assert_regex(
+            result,
+            pass_regex=[pass_regex],
+            use_abort_fail_regex=False,
+        )
+
+    @pytest.mark.parametrize("value", VALID_BOOLEAN_VALUES)
+    def test_valid_boolean_environment_values_are_not_rejected(
+        self, config_target, create_config_file, value
+    ):
+        """Test accepted boolean spellings are not rejected by strict validation."""
+        # Force a later MODE error so this checks TRACE parsing without running
+        # a traced workload, which is not stable in this debug build.
+        config_file = create_config_file(
+            {"ROCPROFSYS_MODE": "banana"},
+            f"valid_bool_trace_{value}.cfg",
+            skip_filter=True,
+        )
+        env = MINIMAL_RUNTIME_ENV.copy()
+        env["ROCPROFSYS_CONFIG_FILE"] = str(config_file)
+        env["ROCPROFSYS_TRACE"] = value
+
+        result = self.run_invalid_config_test(config_target, env)
+
+        self.assert_regex(
+            result,
+            pass_regex=[r"[Ii]nvalid value.*ROCPROFSYS_MODE"],
+            fail_regex=[r"[Ii]nvalid value.*ROCPROFSYS_TRACE"],
             use_abort_fail_regex=False,
         )
 
@@ -72,14 +180,10 @@ class TestConfig(RocprofsysTest):
         # Use a path to a config file that doesn't exist
         missing_config = test_output_dir / "missing.cfg"
 
-        env = {"ROCPROFSYS_CONFIG_FILE": str(missing_config)}
+        env = MINIMAL_RUNTIME_ENV.copy()
+        env["ROCPROFSYS_CONFIG_FILE"] = str(missing_config)
 
-        result = self.run_test(
-            "runtime_instrument",
-            target=config_target,
-            env=env,
-            fail_on_pass=True,  # Expected to fail
-        )
+        result = self.run_invalid_config_test(config_target, env)
 
         self.assert_regex(
             result,
