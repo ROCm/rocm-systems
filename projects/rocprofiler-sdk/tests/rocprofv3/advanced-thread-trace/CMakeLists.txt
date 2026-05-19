@@ -404,8 +404,8 @@ set(SHADERDATA_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-rocprofv3-shaderdata")
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-shaderdata
     COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d ${SHADERDATA_OUT_DIR} --att --
-            $<TARGET_FILE:thread-trace-api-multi-test>
-    DEPENDS thread-trace-api-multi-test
+            $<TARGET_FILE:thread-trace-test-app>
+    DEPENDS thread-trace-test-app
     TIMEOUT 45
     LABELS "integration-tests"
     DISABLED ${IS_DISABLED}

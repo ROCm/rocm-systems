@@ -18,8 +18,7 @@ __global__ void MallcMangdFlgTst(int n, float* x, float* y) {
 HIP_TEST_CASE(Unit_hipMallocManaged_FlgParam) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
   std::atomic<int> DataMismatch{0};
@@ -106,8 +105,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_FlgParam) {
 HIP_TEST_CASE(Unit_hipMallocManaged_AccessMultiStream) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
   std::atomic<int> DataMismatch{0};

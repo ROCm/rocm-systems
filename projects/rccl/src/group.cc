@@ -381,10 +381,31 @@ static void reclaimPlannerState(struct ncclComm* comm) {
     (void)cb->fn(comm, cb);
   }
   comm->preconnectNext = reinterpret_cast<struct ncclComm*>(0x1);
-  for (int i = 0; i < comm->nRanks; i++) {
+  // connectSend/connectRecv are allocated as comm->nRanks * NCCL_MAX_CONNS
+  for (int i = 0; i < comm->nRanks * NCCL_MAX_CONNS; i++) {
     for (int j = 0; j < MAXCHANNELS/64; j++) {
       comm->connectSend[i].masks[j] = 0UL;
       comm->connectRecv[i].masks[j] = 0UL;
+    }
+  }
+  for (int c = 0; c < MAXCHANNELS; c++) {
+    struct ncclChannelPeer** peers = comm->channels[c].peers;
+    if (peers == NULL) continue;
+    for (int p = 0; p < comm->nRanks; p++) {
+      struct ncclChannelPeer* peerComm = peers[p];
+      if (peerComm == NULL) continue;
+      for (int i = 0; i < NCCL_MAX_CONNS; i++) {
+        struct ncclConnector* sendConn = &peerComm->send[i];
+        struct ncclConnector* recvConn = &peerComm->recv[i];
+        if (sendConn->p2pOnly && sendConn->transportComm == NULL) {
+          sendConn->hasSeen = 0;
+          sendConn->p2pOnly = 0;
+        }
+        if (recvConn->p2pOnly && recvConn->transportComm == NULL) {
+          recvConn->hasSeen = 0;
+          recvConn->p2pOnly = 0;
+        }
+      }
     }
   }
   while (!ncclIntruQueueEmpty(&comm->planner.planQueue)) {

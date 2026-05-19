@@ -181,6 +181,10 @@ static inline size_t rasMsgLength(rasMsgType type, rasCollectiveType collType = 
 // How much to enlarge any RAS array by if we run out of space.
 #define RAS_INCREMENT 4
 
+// Magic file descriptor number when we want poll() to ignore an entry.  Anything negative would do, but
+// I didn't want to use -1 because it has a special meaning for us.
+#define POLL_FD_IGNORE -2
+
 // Our clock has nanosecond resolution.
 #define CLOCK_UNITS_PER_SEC 1000000000L
 
@@ -437,6 +441,13 @@ typedef enum {
   RAS_CLIENT_FINISHED = 99
 } rasClientStatus;
 
+// Output format enum for different data export types.
+// This is shared between client and server.
+typedef enum {
+  RAS_OUTPUT_TEXT = 0,    // Default human-readable format.
+  RAS_OUTPUT_JSON = 1     // JSON format (always verbose).
+} rasOutputFormat;
+
 // Describes a RAS client.
 struct rasClient {
   struct rasClient* next;
@@ -456,6 +467,8 @@ struct rasClient {
 
   int verbose;
   int64_t timeout;
+
+  rasOutputFormat outputFormat;  // TEXT or JSON output format.
 
   // State stored during asynchronous operations such as collectives.
   struct rasCollective* coll;

@@ -20,15 +20,18 @@ RDNA2 / RDNA3.
 ![install](assets/gifs/01-install.gif)
 
 *Install in a clean ROCm container, then verify the CLI surfaces. The
-pip build hook bootstraps bun when needed so the bundled patched
-`perfxpert-code` build completes during install.*
+pip build hook compiles the bundled patched `perfxpert-code` binary
+when bun is already on PATH; bun bootstrap is available only as an
+explicit developer opt-in with `PERFXPERT_AUTO_INSTALL_BUN=1`.*
 
 PerfXpert ships as a single Python wheel. The `setuptools` build hook
 in `setup.py` compiles the AMD-branded bundled opencode binary during
-`pip install`. If bun is missing, pip bootstraps it into the user's home
-directory. If OS prerequisites such as `curl`, `git`, or `unzip` are
-missing, pip fails with the missing package-manager pieces instead of
-silently producing a broken `perfxpert-code`.
+`pip install`. If bun is missing, pip fails closed unless
+`PERFXPERT_AUTO_INSTALL_BUN=1` is set; that explicit opt-in lets
+setup.py bootstrap bun into the user's home directory for this build.
+If OS prerequisites such as `curl`, `git`, or `unzip` are missing, pip
+fails with the missing package-manager pieces instead of silently
+producing a broken `perfxpert-code`.
 
 ### Prerequisites
 
@@ -36,8 +39,9 @@ silently producing a broken `perfxpert-code`.
 - `curl`, `git`, `unzip`, `python3-venv`, and `python3-pip` for GitHub installs.
 - On Ubuntu 24+ and other externally managed Python environments,
   create and activate a virtual environment before invoking pip.
-- `bun` on PATH, or `curl` + `unzip` so pip can bootstrap bun into the
-  user's home directory during install.
+- `bun` on PATH. If you explicitly allow automatic bun bootstrap, also
+  make sure `curl` and `unzip` are present and set
+  `PERFXPERT_AUTO_INSTALL_BUN=1`.
 - The repo-pinned `experimental/python/perfxpert/opencode` submodule
   populated if you are installing from a checkout without using the
   wrapper. The setup hook may attempt a scoped `git submodule update
@@ -64,10 +68,9 @@ backend CLI instead.
 
 ### Distro package setup
 
-Use a virtual environment for the supported install flow. The GitHub
-wrapper path has been validated in clean containers for Ubuntu 22.04,
-Ubuntu 24.04, UBI/RHEL 9, UBI/RHEL 10, and SLES 15.6. Package setup
-differs slightly by distro:
+Use a virtual environment for the supported install flow. Package
+examples are provided for Ubuntu 22.04, Ubuntu 24.04, UBI/RHEL 9,
+UBI/RHEL 10, and SLES 15.6. Package setup differs slightly by distro:
 
 ```bash
 # SKIP-SAMPLE — Ubuntu 22.04 / 24.04
@@ -93,14 +96,14 @@ python3 -m venv .venv
 ```
 
 ```bash
-# SKIP-SAMPLE — SLES 15
+# SKIP-SAMPLE — SLES 15.6
 zypper install -y curl git unzip python311 python311-pip
 python3.11 -m venv .venv
 . .venv/bin/activate
 ```
 
 UBI/RHEL base images can provide `curl` through `curl-minimal`. That is
-valid for the wrapper and for pip's bun bootstrap; do not force dnf to
+valid for the wrapper and for opt-in bun bootstrap; do not force dnf to
 replace it with the full `curl` package unless `command -v curl` fails.
 
 If the venv's pip/setuptools are too old and metadata preparation fails
@@ -123,7 +126,8 @@ pip install -e "experimental/python/perfxpert[all]"
 wrapper (see §1.2 for why):
 
 ```bash
-# SKIP-SAMPLE — latest develop branch, no local clone needed
+# SKIP-SAMPLE — latest develop branch, no local clone needed.
+# Requires bun on PATH; install bun from your approved package source first.
 REF=develop; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${REF}/experimental/python/perfxpert/scripts/pip-install-from-git.sh" | bash -s -- "${REF}"
 # Pin a tag or commit hash:
 # REF=v0.2.0; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${REF}/experimental/python/perfxpert/scripts/pip-install-from-git.sh" | bash -s -- "${REF}"
@@ -133,16 +137,17 @@ REF=develop; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${R
 ```
 
 The GitHub install paths require `git` because pip shells out to
-`git clone`. The wrapper installs missing OS prerequisites with the host
-package manager when it is running as root or when sudo is available;
-otherwise it prints the exact package-manager command to run first. On
-externally managed system Python it tells the user to create a virtual
-environment first. It prefers the active `python`, then `python3`, and
-only falls back to another already-installed `python3.10+` binary on
-PATH when the distro default is too old; it never downloads a separate
-Python runtime. During the pip build, `setup.py` bootstraps bun when it
-is missing so the bundled patched opencode binary is built from the
-pinned perfxpert submodule.
+`git clone`. The wrapper prints missing OS prerequisites and exits by
+default; it only runs `apt`, `dnf`, `zypper`, or `sudo` when
+`PERFXPERT_AUTO_INSTALL_PREREQS=1` or `--auto-install-prereqs` is
+explicitly supplied. On externally managed system Python it tells the
+user to create a virtual environment first. It prefers the active
+`python`, then `python3`, and only falls back to another
+already-installed `python3.10+` binary on PATH when the distro default
+is too old; it never downloads a separate Python runtime. During the
+pip build, `setup.py` builds from the pinned perfxpert opencode
+submodule; if bun is missing, it only bootstraps bun when
+`PERFXPERT_AUTO_INSTALL_BUN=1` is explicitly set.
 
 Pass the ref as the first argument after `bash -s --` when you need to
 pin a specific tag or commit hash.
@@ -163,9 +168,10 @@ launcher/build flow. Omit `[all]` if you only want deterministic
 air-gap analysis (wrapper: pass `--extras ''` to skip extras entirely).
 On the GitHub wrapper path, the wrapper exits non-zero if the bundled
 patched `perfxpert-code` binary is still absent after install. Direct
-pip/editable paths use the same `setup.py` build hook: pip bootstraps
-bun when the OS prerequisites are available, or fails with a
-distro-specific prerequisite message when they are not.
+pip/editable paths use the same `setup.py` build hook: bun must be on
+PATH, or `PERFXPERT_AUTO_INSTALL_BUN=1` must be set to allow setup.py to
+bootstrap it. Otherwise pip fails with an actionable prerequisite
+message.
 
 ### 1.2 Why the wrapper: scoped submodule init
 
@@ -241,9 +247,11 @@ sandboxed CI that intentionally skips the interactive TUI build.
 Default `perfxpert-code` requires the bundled binary built from the
 pinned submodule.
 
-**Bun missing:** pip bootstraps bun into the user's home directory when
-`curl` and `unzip` are available. If those OS prerequisites are missing,
-pip exits with distro-specific package-manager guidance.
+**Bun missing:** pip fails closed by default. Install bun from an
+approved package source, or explicitly set `PERFXPERT_AUTO_INSTALL_BUN=1`
+to allow setup.py to bootstrap bun into the user's home directory for
+this build. If bootstrap prerequisites are missing, pip exits with
+distro-specific package-manager guidance.
 
 ## 2. Verify
 
@@ -260,7 +268,8 @@ perfxpert doctor
 ![doctor](assets/gifs/03-doctor.gif)
 
 *`perfxpert doctor` end-to-end: Python check, MCP server reachable
-(56 tools registered), 3/5 LLM providers configured, `ALL CLEAN`.*
+(56 tools registered), hosted/local/private LLM provider readiness,
+bundled opencode availability, `ALL CLEAN`.*
 
 Expected output ends with `ALL CLEAN` when everything is wired. The
 doctor checks:
@@ -270,11 +279,12 @@ doctor checks:
 - MCP server reachable (`perfxpert-mcp` boots + 56 tools registered — 8 agent-hierarchy + 47 classifier/knowledge + 1 `trace_diff.diff_runs`)
 - task store (`~/.perfxpert` or `$PERFXPERT_TASK_ROOT`)
 - patched opencode binary resolution + bundled opencode config dir
-- LLM providers configured (counts `N/5` against
+- LLM providers configured (counts hosted/local/private providers against
   `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
   `PERFXPERT_LLM_LOCAL_URL` or `OLLAMA_HOST`,
-  `PERFXPERT_LLM_PRIVATE_URL` or `PRIVATE_LLM_ENDPOINT`,
-  plus always-present `opencode`)
+  and `PERFXPERT_LLM_PRIVATE_URL` or `PRIVATE_LLM_ENDPOINT` plus
+  `PERFXPERT_LLM_PRIVATE_API_KEY`)
+- bundled opencode availability; opencode handles its own provider auth
 
 If `opencode binary` reports missing, the install skipped or failed the
 bundled build. Reinstall through the GitHub wrapper so the pinned
@@ -379,10 +389,23 @@ New in Phase 8 (Confluence roadmap row #29). A single guided wizard
 that chains the four things every new user asks about into one flow
 so you don't have to discover them separately:
 
-1. **GPU detection** — `rocm-smi --showproductname --showmeminfo vram
-   --json` (fallback: `rocminfo`; manual `--arch gfx942` when neither
-   is available), looked up against the architecture catalog in
-   `perfxpert/knowledge/gpu_specs.yaml`.
+1. **GPU detection** — runtime discovery runs `rocminfo`, `rocm-smi`,
+   and `amd-smi` when they are present, with read-only KFD topology as a
+   fallback for ROCm environments where `rocminfo` cannot open the
+   device node. The local init wizard uses GPU facts such as gfx id, CU
+   count, clocks, wave size, LDS size, VRAM, PCIe, and power limits.
+   Theoretical peak FLOPS are derived for newly discovered local
+   architectures when enough topology is available;
+   `perfxpert/knowledge/gpu_specs.yaml` remains the offline fallback for
+   non-local architectures and for fields a ROCm tool does not expose on
+   that stack.
+   Runtime discovery is scoped to the machine where the command runs. If
+   an agent is optimizing a workload over SSH, run the ROCm discovery
+   commands on that remote target host or run PerfXpert on the remote host
+   itself; do not use the controller machine's local GPU facts for remote
+   roofline or SoL analysis. If local runtime specs would describe the
+   wrong machine, set `PERFXPERT_DISABLE_RUNTIME_GPU_SPECS=1` and pass
+   explicit remote facts / `--arch`.
 2. **Framework detection** — Tier-0 source scan (same scanner as
    `analyze --source-dir`, same `.git` / `node_modules` filters) plus a
    Python import probe for `torch`, `tensorflow`, `jax`, `cupy`.
@@ -490,7 +513,7 @@ drive from scripts or dashboards.*
 
 ![analyze webview](assets/gifs/07-analyze-webview.gif)
 
-*`--format webview` produces a self-contained `analysis.html` with the
+*`--format webview -o report` produces a self-contained `report.html` with the
 fixed 7 top-level sections (Overview, Summary, Execution, Hotspots,
 Hardware Counters, Recommendations, Tier-0 when `--source-dir` is
 set). AMD dark theme, SVG gauges, collapsible cards — email-ready.*
@@ -569,7 +592,9 @@ ceilings per dtype — FP32 / FP16 / BF16 / FP8 / INT8 — are overlaid
 with the dominant dtype at full opacity and others dimmed. The HBM
 bandwidth diagonal (slope 1 in log-log space) and the ridge-point
 annotation (`gfx942 · 163 TF/s · 5.3 TB/s · ridge @ 30.8 FLOPs/B`) are
-drawn from `perfxpert/knowledge/gpu_specs.yaml`.
+drawn from `perfxpert/knowledge/gpu_specs.yaml`. Runtime discovery is
+used for local-only GPU initialization and for runtime-only local
+architectures that are not yet present in the static catalog.
 
 Click any dot to jump straight to the matching recommendation card
 (`id="rec-<kernel_basename>"`) — same anchor convention as the ATT
@@ -945,9 +970,9 @@ perfxpert analyze -i trace.db --llm openai
 An LLM analysis can take 1-5 minutes per call — PerfXpert draws a live
 progress spinner on stderr so you can see each agent phase as it
 enters / exits (`entering root`, `entering analysis`, etc.) and if the
-fallback chain cascades across providers. The spinner is stderr-only,
-so piping stdout to a file (e.g. `--format json > out.json`) still
-captures clean output.
+fallback chain cascades across providers. The spinner is stderr-only.
+For non-text formats, reports write to files by default; use
+`--format json -o - > out.json` when a pipeline needs stdout.
 
 ![progress spinner](assets/gifs/10-progress-spinner.gif)
 
@@ -980,8 +1005,8 @@ a one-line stderr WARNING so you know which credential is active):
 |---------|-----------------|-----------------|-------|
 | `anthropic` | `ANTHROPIC_API_KEY` | `PERFXPERT_LLM_ANTHROPIC_KEY` | Either works; alias kept for migration parity |
 | `openai` | `OPENAI_API_KEY` | `PERFXPERT_LLM_OPENAI_KEY` | Either works |
-| `private` | `PERFXPERT_LLM_PRIVATE_API_KEY` | — | Plus `PERFXPERT_LLM_PRIVATE_URL` (required) and normally `PERFXPERT_LLM_PRIVATE_MODEL` |
-| `ollama` | — (no key) | — | Plus `PERFXPERT_LLM_LOCAL_URL` (default `http://localhost:11434`) |
+| `private` | `PERFXPERT_LLM_PRIVATE_API_KEY` | — | Plus `PERFXPERT_LLM_PRIVATE_URL` or `PRIVATE_LLM_ENDPOINT` and normally `PERFXPERT_LLM_PRIVATE_MODEL` |
+| `ollama` | — (no key) | — | Plus `PERFXPERT_LLM_LOCAL_URL` or `OLLAMA_HOST` (default `http://localhost:11434`) |
 | `opencode` | — (no key) | — | Default `perfxpert-code` uses the bundled binary; `PERFXPERT_OPENCODE_PATH` is only for `perfxpert-code opencode ...` |
 
 ```bash
@@ -1242,8 +1267,8 @@ optional; all analysis runs locally without internet when you omit
 | `anthropic` | `ANTHROPIC_API_KEY` | Claude API (production default) |
 | `openai` | `OPENAI_API_KEY` | OpenAI hosted API |
 | `ollama` | `PERFXPERT_LLM_LOCAL_URL` (compat: `OLLAMA_HOST`, default `http://localhost:11434`) | Local Ollama daemon — fully offline once the model is pulled |
-| `private` | `PERFXPERT_LLM_PRIVATE_URL`, `PERFXPERT_LLM_PRIVATE_MODEL`, `PERFXPERT_LLM_PRIVATE_API_KEY` or `--llm-api-key`, optional `PERFXPERT_LLM_PRIVATE_HEADERS` (JSON), optional `PERFXPERT_LLM_PRIVATE_VERIFY_SSL=false` | Any OpenAI-compatible endpoint (enterprise / self-hosted) |
-| `opencode` | none required (bundled) | Bundled opencode CLI — subprocess wrapper; recursion-guarded inside `perfxpert-code` |
+| `private` | `PERFXPERT_LLM_PRIVATE_URL` (compat: `PRIVATE_LLM_ENDPOINT`), `PERFXPERT_LLM_PRIVATE_API_KEY` or `--llm-api-key`, optional `PERFXPERT_LLM_PRIVATE_MODEL`, optional `PERFXPERT_LLM_PRIVATE_HEADERS` (JSON), optional `PERFXPERT_LLM_PRIVATE_VERIFY_SSL=false` | Any OpenAI-compatible endpoint (enterprise / self-hosted) |
+| `opencode` | bundled binary; provider auth is handled by opencode | Bundled opencode CLI — subprocess wrapper; recursion-guarded inside `perfxpert-code` |
 
 ```bash
 # SKIP-SAMPLE — requires a real trace.db and an LLM credential

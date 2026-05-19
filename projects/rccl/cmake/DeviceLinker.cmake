@@ -476,6 +476,32 @@ add_custom_command(
 )
 
 # ===========================================================================
+# dda_all_reduce_ipc.cu.cpp: contains device kernels and kernel launches.
+# Like collectives.cc, it cannot be built with --offload-host-only on the
+# main rccl target or __hip_fatbin_* stays undefined in librccl.so.
+# ===========================================================================
+set(DDA_ALL_REDUCE_IPC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_all_reduce_ipc.o")
+
+add_custom_command(
+  OUTPUT  ${DDA_ALL_REDUCE_IPC_FAT_OBJ}
+  COMMAND ${DL_CLANG}
+    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
+    ${DL_HIP_COMPILER_FLAGS}
+    -DRCCL_DEVICE_LINKER
+    ${_link_def_flags}
+    ${_host_inc_flags}
+    ${DL_OPT_FLAGS}
+    -std=c++17
+    -fPIC
+    -w
+    -c -o ${DDA_ALL_REDUCE_IPC_FAT_OBJ}
+    ${HIPIFY_DIR}/src/dda_all_reduce_ipc.cu.cpp
+  DEPENDS ${HIPIFY_DIR}/src/dda_all_reduce_ipc.cu.cpp
+  COMMENT "DL compile: dda_all_reduce_ipc.cu.cpp (has device kernels)"
+  VERBATIM
+)
+
+# ===========================================================================
 # Symmetric kernels: per-instantiation device TUs from gensrc/symmetric/.
 # Each instantiation file defines a handful of __global__ ncclSymkDevKernel_*
 # entries. Compiled standalone as multi-arch fat objects, mirroring onerank.o.
@@ -526,7 +552,7 @@ endif()
 # Top-level target
 # ===========================================================================
 add_custom_target(device_linker_build ALL
-  DEPENDS ${COMMON_FAT_OBJ} ${ONERANK_FAT_OBJ} ${COLLECTIVES_FAT_OBJ} ${SYM_FAT_OBJS}
+  DEPENDS ${COMMON_FAT_OBJ} ${ONERANK_FAT_OBJ} ${COLLECTIVES_FAT_OBJ} ${DDA_ALL_REDUCE_IPC_FAT_OBJ} ${SYM_FAT_OBJS}
 )
 add_dependencies(device_linker_build hipify_all)
 
@@ -534,6 +560,7 @@ set(DEVICE_LINKER_OBJECTS
   ${COMMON_FAT_OBJ}
   ${ONERANK_FAT_OBJ}
   ${COLLECTIVES_FAT_OBJ}
+  ${DDA_ALL_REDUCE_IPC_FAT_OBJ}
   ${SYM_FAT_OBJS}
 )
 

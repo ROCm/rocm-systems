@@ -30,6 +30,8 @@
 #include <hsa/hsa_ext_amd.h>
 #include <hsa/hsa_ven_amd_aqlprofile.h>
 
+#include <optional>
+
 namespace rocprofiler
 {
 namespace aql
@@ -233,6 +235,35 @@ protected:
     aqlprofile_att_control_aql_packets_t packets;
 
     std::unordered_map<code_object_id_t, std::shared_ptr<CodeobjMarkerAQLPacket>> loaded_codeobj;
+};
+
+struct sqtt_buffer_status_t
+{
+    void*                        data{};
+    uint64_t                     size{};
+    hsa_ext_amd_aql_pm4_packet_t packet{};
+    bool                         gpu_full{};
+};
+
+// Virtual members for mocking in tests
+class SQTTBufferingPackets
+{
+public:
+    SQTTBufferingPackets(aqlprofile_handle_t handle, int shader_engine_id);
+    virtual ~SQTTBufferingPackets() = default;
+
+    hsa_ext_amd_aql_pm4_packet_t                query_status{};
+    virtual std::optional<sqtt_buffer_status_t> query_buffer_status();
+
+    void reset_current_buffer() { current_buffer = 0; };
+
+    const aqlprofile_handle_t handle;
+    const int                 shader_engine_id;
+    uint64_t                  header{0};
+
+private:
+    size_t                                    current_buffer{0};
+    std::vector<hsa_ext_amd_aql_pm4_packet_t> buffer_swap{};
 };
 
 }  // namespace hsa

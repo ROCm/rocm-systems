@@ -238,7 +238,7 @@ HIP_TEST_CASE(Perf_hipPerfSharedMemReadSpeed_test) {
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
   if (numDevices <= 0) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
+    HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   } else {
     REQUIRE(true == hipPerfSharedMemReadSpeed_test());
   }

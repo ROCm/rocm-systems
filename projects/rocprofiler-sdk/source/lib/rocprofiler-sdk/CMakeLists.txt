@@ -48,6 +48,7 @@ add_subdirectory(aql)
 add_subdirectory(pc_sampling)
 add_subdirectory(marker)
 add_subdirectory(thread_trace)
+add_subdirectory(spm)
 add_subdirectory(tracing)
 add_subdirectory(kernel_dispatch)
 add_subdirectory(kfd)
@@ -69,7 +70,10 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-drm
             rocprofiler-sdk::rocprofiler-sdk-dw)
 
-target_compile_definitions(rocprofiler-sdk-object-library PRIVATE rocprofiler_EXPORTS=1)
+target_compile_definitions(
+    rocprofiler-sdk-object-library
+    PRIVATE rocprofiler_EXPORTS=1
+            $<$<BOOL:${ROCPROFILER_BUILD_AQLPROFILE}>:ROCPROFILER_BUILD_AQLPROFILE=1>)
 
 set_target_properties(rocprofiler-sdk-object-library PROPERTIES POSITION_INDEPENDENT_CODE
                                                                 ON)
