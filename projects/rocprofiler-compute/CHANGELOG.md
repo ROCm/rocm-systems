@@ -31,6 +31,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Removed redundant `if (X != 0) else None` divide-by-zero guards from metric equations across all analysis YAML configurations. Division by zero is already handled by the metric evaluation engine, which returns `"N/A"` for `inf` and `NaN` results.
 
+* Removed the request-count metrics ``HBM Read``, ``Remote Read``, ``HBM Write and Atomic``, ``Remote Write and Atomic``, and ``Atomic - HBM`` from the L2 - Fabric interface detailed metrics panel (table ``17.6``) on **gfx950 (MI350) only**. On MI350 the byte-bandwidth equivalents (``Read Bandwidth - HBM``, ``Write Bandwidth - HBM``, ``Atomic Bandwidth - HBM``) are now available in the same panel and give a size-aware view of traffic, making the request-count metrics misleading. The metrics remain on gfx908/gfx90a/gfx940/gfx941/gfx942 where no per-destination bandwidth counters exist. Note: the row indices of metrics below these in ``17.6`` shift accordingly on gfx950 - any saved analyze invocation using ``-b 17.6.<n>`` for the affected rows will need to be re-checked against ``--list-metrics gfx950``.
+
 ### Optimized
 
 * Flattened the analyze-mode PMC dataframe to a single-index frame.
