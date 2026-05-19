@@ -23,7 +23,7 @@ fi
 
 # Default directories if none provided.
 if [ $# -eq 0 ]; then
-  set -- "$PROJECT_ROOT/lib" "$PROJECT_ROOT/tests" "$PROJECT_ROOT/tools"
+  set -- "$PROJECT_ROOT/lib" "$PROJECT_ROOT/tests"
 fi
 
 # Find all .cpp and .h files under the given directories.

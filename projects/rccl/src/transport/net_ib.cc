@@ -1164,7 +1164,7 @@ ncclResult_t ncclIbGetProperties(int dev, ncclNetProperties_t* props) {
 #define MAX_REQUESTS (NCCL_NET_MAX_REQUESTS*NCCL_NET_IB_MAX_RECVS)
 static_assert(MAX_REQUESTS <= 256, "request id are encoded in wr_id and we need up to 8 requests ids per completion");
 
-#define NCCL_IB_MAX_QPS 128
+#include "net_ib_limits.h"
 
 // Per-QP connection metatdata
 struct ncclIbQpInfo {

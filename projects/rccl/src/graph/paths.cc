@@ -980,6 +980,9 @@ static ncclResult_t ncclTopoGetNchannels(struct ncclComm* comm, int g /*local gp
 
 NCCL_PARAM(MinP2pNChannels, "MIN_P2P_NCHANNELS", 1);
 NCCL_PARAM(MaxP2pNChannels, "MAX_P2P_NCHANNELS", MAXCHANNELS);
+// When enabled, caps p2pnChannels to 16 on gfx950 (MI350) for large-scale jobs
+// (nNodes >= 16) to reduce P2P CU usage. Disabled by default.
+NCCL_PARAM(P2pCuReduceScaleEnable, "P2P_CU_REDUCE_SCALE_ENABLE", 0);
 extern int64_t ncclParamWorkArgsBytes();
 
 ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
@@ -1023,6 +1026,8 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     if (((comm->nNodes == 2 && comm->topo->nRanks == 16) || (comm->nNodes == 4 && comm->topo->nRanks == 32)) && (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950"))) comm->p2pnChannels = std::min(comm->p2pnChannels, 32);
     // Capping the comm->p2pnChannels to 16 for send/recv based collectives with half-subscription (4 GPUs per node) multi-node MI350 (2 and 4 nodes)
     if (((comm->nNodes == 2 && comm->topo->nRanks == 8) || (comm->nNodes == 4 && comm->topo->nRanks == 16)) && (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950"))) comm->p2pnChannels = std::min(comm->p2pnChannels, 16);
+    // Opt-in P2P CU reduction on gfx950 (MI350) at scale: cap p2pnChannels to 16 when nNodes >= 16
+    if (ncclParamP2pCuReduceScaleEnable() && comm->nNodes >= 16 && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")) comm->p2pnChannels = std::min(comm->p2pnChannels, 16);
     comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, MAXCHANNELS);
   }
 

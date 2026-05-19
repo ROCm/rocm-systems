@@ -15,7 +15,7 @@ class Device;
 namespace amd::device {
 
 // Light abstraction over HSA/PAL signals
-class Signal : public amd::HeapObject {
+class Signal {
  public:
   enum class Condition : uint32_t {
     Eq = 0,
