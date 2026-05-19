@@ -66,19 +66,18 @@ public:
         : m_backend{ std::move(backend) }
         , m_uncaught_on_entry{ std::uncaught_exceptions() }
         {
-            sqlite3_exec(
-                m_backend->m_sqlite3, "BEGIN TRANSACTION", nullptr, nullptr, nullptr);
+            run_prepared(m_backend->m_begin_stmt);
         }
 
         ~transaction_guard()
         {
             if(std::uncaught_exceptions() > m_uncaught_on_entry)
             {
-                sqlite3_exec(m_backend->m_sqlite3, "ROLLBACK", nullptr, nullptr, nullptr);
+                run_prepared(m_backend->m_rollback_stmt);
             }
             else
             {
-                sqlite3_exec(m_backend->m_sqlite3, "COMMIT", nullptr, nullptr, nullptr);
+                run_prepared(m_backend->m_commit_stmt);
             }
         }
 
@@ -88,6 +87,13 @@ public:
         transaction_guard& operator=(transaction_guard&&)      = delete;
 
     private:
+        static void run_prepared(sqlite3_stmt* stmt) noexcept
+        {
+            if(stmt == nullptr) return;
+            sqlite3_step(stmt);
+            sqlite3_reset(stmt);
+        }
+
         std::shared_ptr<sqlite_backend> m_backend;
         int                             m_uncaught_on_entry;
     };
@@ -526,6 +532,9 @@ private:
     }
 
     sqlite3*       m_sqlite3{ nullptr };
+    sqlite3_stmt*  m_begin_stmt{ nullptr };
+    sqlite3_stmt*  m_commit_stmt{ nullptr };
+    sqlite3_stmt*  m_rollback_stmt{ nullptr };
     std::string    m_db_path;
     std::string    m_uuid;
     storage_mode_t m_mode;

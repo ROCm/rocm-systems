@@ -197,10 +197,20 @@ sqlite_backend::sqlite_backend(std::string db_path, std::string uuid, storage_mo
             sqlite3_open(m_db_path.c_str(), &m_sqlite3), "", "database open failed!");
     }
 
+    sqlite3_prepare_v2(m_sqlite3, "BEGIN TRANSACTION", -1, &m_begin_stmt, nullptr);
+    sqlite3_prepare_v2(m_sqlite3, "COMMIT", -1, &m_commit_stmt, nullptr);
+    sqlite3_prepare_v2(m_sqlite3, "ROLLBACK", -1, &m_rollback_stmt, nullptr);
+
     LOG_INFO("profiler_hub database initialized (uuid: {}, path: {})", m_uuid, m_db_path);
 }
 
-sqlite_backend::~sqlite_backend() { sqlite3_close(m_sqlite3); }
+sqlite_backend::~sqlite_backend()
+{
+    sqlite3_finalize(m_begin_stmt);
+    sqlite3_finalize(m_commit_stmt);
+    sqlite3_finalize(m_rollback_stmt);
+    sqlite3_close(m_sqlite3);
+}
 
 std::vector<std::string>
 sqlite_backend::discover_uuids()
