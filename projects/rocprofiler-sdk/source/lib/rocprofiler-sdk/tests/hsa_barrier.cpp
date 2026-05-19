@@ -388,3 +388,61 @@ TEST(hsa_barrier, block_multi)
     registration::set_init_status(1);
     registration::finalize();
 }
+
+// Mirrors WriteInterceptor batch behavior: N intercepted kernels -> N async_started calls,
+// one AsyncSignalHandler pass -> N async_complete calls (one per packet in the session).
+TEST(hsa_barrier, per_kernel_async_balance)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+
+    auto queues = create_queue_map(1);
+    auto* queue = queues.begin()->second.get();
+
+    constexpr size_t num_kernels = 8;
+    for(size_t i = 0; i < num_kernels; ++i)
+        queue->async_started();
+
+    EXPECT_EQ(queue->active_async_packets(), static_cast<int64_t>(num_kernels));
+
+    for(size_t i = 0; i < num_kernels; ++i)
+        queue->async_complete();
+
+    EXPECT_EQ(queue->active_async_packets(), 0);
+
+    registration::set_init_status(1);
+    registration::finalize();
+}
+
+// Safety net used during finalization when async handlers never fire (e.g. HIP graph signals).
+TEST(hsa_barrier, sync_drains_stale_count_on_finalize)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+
+    auto queues = create_queue_map(1);
+    auto* queue = queues.begin()->second.get();
+
+    constexpr size_t num_kernels = 6;
+    for(size_t i = 0; i < num_kernels; ++i)
+        queue->async_started();
+
+    EXPECT_EQ(queue->active_async_packets(), static_cast<int64_t>(num_kernels));
+
+    registration::set_fini_status(1);
+    queue->sync();
+
+    EXPECT_EQ(queue->active_async_packets(), 0);
+
+    registration::set_fini_status(0);
+    registration::set_init_status(1);
+    registration::finalize();
+}
