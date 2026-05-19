@@ -1278,11 +1278,12 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     'mad_i24': '[&]() {{ auto a = static_cast<int32_t>({0} << 8) >> 8;'
                ' auto b = static_cast<int32_t>({1} << 8) >> 8;'
                ' return static_cast<uint32_t>(a * b + static_cast<int32_t>({2})); }}()',
-    'bfe_u': '[&]() {{ auto src={0}; auto off_w={1}; (void){2};'
-             ' uint32_t off = off_w & 31u; uint32_t w = (off_w >> 16) & 0x7Fu;'
-             ' return w == 0 ? 0u : (src >> off) & ((1u << w) - 1u); }}()',
-    'bfe_i': '[&]() -> uint32_t {{ auto src=static_cast<int32_t>({0}); auto off_w={1}; (void){2};'
-             ' uint32_t off = off_w & 31u; uint32_t w = (off_w >> 16) & 0x7Fu;'
+    'bfe_u': '[&]() {{ uint32_t src={0}; uint32_t off={1} & 31u; uint32_t w={2} & 31u;'
+             ' if (w == 0) return 0u;'
+             ' uint32_t mask = (w >= 32) ? ~0u : ((1u << w) - 1u);'
+             ' return (src >> off) & mask; }}()',
+    'bfe_i': '[&]() -> uint32_t {{ int32_t src=static_cast<int32_t>({0});'
+             ' uint32_t off={1} & 31u; uint32_t w={2} & 31u;'
              ' if (w == 0) return 0u; int32_t val = (src >> off) & ((1 << w) - 1);'
              ' if (val & (1 << (w-1))) val |= -(1 << w);'
              ' return static_cast<uint32_t>(val); }}()',

@@ -12,11 +12,12 @@ namespace rocprofsys::trace_cache::data
 namespace
 {
 enabled_formats_t
-make_with(bool rocpd_enabled, bool perfetto_enabled)
+make_with(bool rocpd_enabled, bool perfetto_enabled, bool unified_memory_enabled = false)
 {
     return enabled_formats_t{ std::vector<format_t>{
         { format_kind::rocpd, true, rocpd_enabled, "rocpd" },
         { format_kind::perfetto, false, perfetto_enabled, "perfetto" },
+        { format_kind::unified_memory, false, unified_memory_enabled, "unified_memory" },
     } };
 }
 }  // namespace
@@ -29,8 +30,10 @@ TEST(enabled_formats_test, names_empty_when_no_formats_enabled)
 TEST(enabled_formats_test, names_joins_enabled_formats_with_comma)
 {
     EXPECT_EQ(make_with(true, true).names(), "rocpd, perfetto");
+    EXPECT_EQ(make_with(false, true, true).names(), "perfetto, unified_memory");
     EXPECT_EQ(make_with(true, false).names(), "rocpd");
     EXPECT_EQ(make_with(false, true).names(), "perfetto");
+    EXPECT_EQ(make_with(false, false, true).names(), "unified_memory");
 }
 
 TEST(enabled_formats_test, has_parallel_formats_true_when_rocpd_enabled)
@@ -43,6 +46,7 @@ TEST(enabled_formats_test, has_parallel_formats_true_when_rocpd_enabled)
 TEST(enabled_formats_test, has_sequential_formats_true_when_perfetto_enabled)
 {
     EXPECT_TRUE(make_with(false, true).has_sequential_formats());
+    EXPECT_TRUE(make_with(false, false, true).has_sequential_formats());
     EXPECT_FALSE(make_with(true, false).has_sequential_formats());
     EXPECT_FALSE(make_with(false, false).has_sequential_formats());
 }
@@ -59,12 +63,15 @@ TEST(enabled_formats_test, get_parallel_formats_filters_out_sequential)
 
 TEST(enabled_formats_test, get_sequential_formats_filters_out_parallel)
 {
-    auto sub = make_with(true, true).get_sequential_formats();
+    auto sub = make_with(true, true, true).get_sequential_formats();
 
-    EXPECT_EQ(sub.formats.size(), 1U);
+    EXPECT_EQ(sub.formats.size(), 2U);
     EXPECT_EQ(sub.formats.front().kind, format_kind::perfetto);
     EXPECT_FALSE(sub.formats.front().process_parallel);
     EXPECT_TRUE(sub.formats.front().enabled);
+    EXPECT_EQ(sub.formats.back().kind, format_kind::unified_memory);
+    EXPECT_FALSE(sub.formats.back().process_parallel);
+    EXPECT_TRUE(sub.formats.back().enabled);
 }
 
 TEST(enabled_formats_test, is_rocpd_enabled_uses_format_kind)
@@ -77,6 +84,12 @@ TEST(enabled_formats_test, is_perfetto_enabled_uses_format_kind)
 {
     EXPECT_TRUE(make_with(false, true).is_perfetto_enabled());
     EXPECT_FALSE(make_with(true, false).is_perfetto_enabled());
+}
+
+TEST(enabled_formats_test, is_unified_memory_enabled_uses_format_kind)
+{
+    EXPECT_TRUE(make_with(false, false, true).is_unified_memory_enabled());
+    EXPECT_FALSE(make_with(true, false, false).is_unified_memory_enabled());
 }
 
 }  // namespace rocprofsys::trace_cache::data
