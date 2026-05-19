@@ -415,19 +415,28 @@ __device__ __forceinline__ void copy_bulk(uint8_t* dst_bytes, uint8_t* src_bytes
 
     #pragma unroll
     for (int u = 0; u < Unroll; ++u) {
-      if constexpr (LoadPolicy != CachePolicy::Standard) {
-        pipeline_wait_on_loads(Unroll - 1);
-      }
-      regs[u] = Acc::load(src_bytes + (offset + tid + u * stride) * ChunkSize);
+      // if constexpr (LoadPolicy != CachePolicy::Standard) {
+      //   pipeline_wait_on_loads(Unroll - 1);
+      // }
+      // regs[u] = Acc::load(src_bytes + (offset + tid + u * stride) *
+      // ChunkSize);
+      regs[u] = Acc::load_buffer(
+          src_bytes, static_cast<uint32_t>(n_chunks * ChunkSize),
+          static_cast<uint32_t>((offset + tid + u * stride) * ChunkSize));
     }
 
     #pragma unroll
     for (int u = 0; u < Unroll; ++u) {
-      if constexpr (LoadPolicy != CachePolicy::Standard) {
-        pipeline_wait_on_loads(Unroll - 1);
-        // __builtin_amdgcn_s_waitcnt(Unroll - 1);
-      }
-      Acc::store(dst_bytes + (offset + tid + u * stride) * ChunkSize, regs[u]);
+      // if constexpr (LoadPolicy != CachePolicy::Standard) {
+      //   pipeline_wait_on_loads(Unroll - 1);
+      //   // __builtin_amdgcn_s_waitcnt(Unroll - 1);
+      // }
+      // Acc::store(dst_bytes + (offset + tid + u * stride) * ChunkSize,
+      // regs[u]);
+      Acc::store_buffer(
+          dst_bytes, static_cast<uint32_t>(n_chunks * ChunkSize),
+          static_cast<uint32_t>((offset + tid + u * stride) * ChunkSize),
+          regs[u]);
     }
   }
 

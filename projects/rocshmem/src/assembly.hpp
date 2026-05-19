@@ -674,6 +674,26 @@ __device__ __forceinline__ void get_asm([[maybe_unused]] uint8_t* src,
 }
 
 // ==============================================================================
+// BUFFER RESOURCE INTRINSICS
+// Using LLVM raw-buffer intrinsics rather than inline asm "s" constraints:
+//   - The resource descriptor must occupy 4 consecutive SGPRs (<4 x i32>).
+//   - ext_vector_type(4) maps to <4 x i32> in LLVM IR; the compiler places
+//     uniform values in SGPRs automatically when passed to these intrinsics.
+//   - Inline asm "s" on HIP's struct int4 is UB (struct != ext_vector register
+//     class); going through the intrinsics avoids the VGPR→SGPR hazard.
+// ==============================================================================
+
+using i32x4_t = int32_t __attribute__((ext_vector_type(4)));
+
+__device__ __uint128_t llvm_amdgcn_raw_buffer_load_b128(
+    i32x4_t srsrc, uint32_t voffset, uint32_t soffset,
+    uint32_t aux) __asm("llvm.amdgcn.raw.buffer.load.i128");
+
+__device__ void llvm_amdgcn_raw_buffer_store_b128(
+    __uint128_t vdata, i32x4_t srsrc, uint32_t voffset, uint32_t soffset,
+    uint32_t aux) __asm("llvm.amdgcn.raw.buffer.store.i128");
+
+// ==============================================================================
 // CACHE POLICIES
 // ==============================================================================
 enum class CachePolicy {
@@ -772,6 +792,97 @@ struct AsmAccess<16, LoadPolicy, StorePolicy> {
       *reinterpret_cast<type*>(dst) = val;
 #endif
     }
+  }
+
+  // --------------------------------------------------------------------------
+  // Buffer instructions (MUBUF / MTBUF family)
+  //
+  // The buffer resource descriptor is four SGPRs (128 bits) laid out as:
+  //   [63:0]  BASE_ADDRESS  – 64-bit byte address of the buffer base
+  //   [95:64] NUM_RECORDS   – buffer size in bytes (range check limit)
+  //   [127:96] CONFIG word:
+  //     [18]    STRIDE == 0  (byte-addressed, no struct stride)
+  //     [15:14] DST_SEL_*   (default 0 → pass-through)
+  //     [21:20] INDEX_STRIDE (unused when STRIDE==0)
+  //     Bit 17 set → "raw" (swizzle disabled), bit 16 = cache_swizzle
+  //   We use 0x00020000 which sets bit 17 (DATA_FORMAT=BUF_DATA_FORMAT_INVALID
+  //   in older ISAs, raw-buffer enable in GFX9+). This is the standard recipe
+  //   used by every ROCm raw-buffer helper (see HipKittens, rocWMMA, etc.).
+  //
+  // The voffset (VGPR offset) is per-lane; soffset is a scalar added on top.
+  // Together they address: BASE + voffset + soffset.
+  //
+  // Cache modifier encoding for buffer_load/store_b128 on GFX942/GFX950:
+  //   bit 0 (sc0 / GLC) – bypass L1 (global coherence)
+  //   bit 1 (sc1 / SLC) – bypass L2 (system coherence)
+  //   bit 4 (NT)        – non-temporal / streaming hint
+  //   0b00000 = L1+L2 cached (FlatCache)
+  //   0b00001 = bypass L1    (BypassL1)
+  //   0b00011 = bypass L1+L2 (SystemScope)
+  //   0b10011 = bypass L1+L2 + NT (SystemScopeNT)
+  //   0b10001 = NT only (NonTemporal)
+  // --------------------------------------------------------------------------
+
+  // Build a raw buffer resource descriptor for a contiguous byte buffer.
+  // Returns i32x4_t (<4 x i32>) so the "s" asm constraint and the LLVM
+  // raw-buffer intrinsics both receive the correct SGPR-friendly ext_vector.
+  // Layout per GFX9+ ISA:
+  //   [63:0]   BASE_ADDRESS
+  //   [95:64]  NUM_RECORDS  (byte count; range-check limit when STRIDE == 0)
+  //   [127:96] 0x00020000   (bit 17 = raw/unswizzled, STRIDE = 0)
+  static __device__ __forceinline__ i32x4_t
+  make_buffer_resource(const void *base, uint32_t num_bytes) {
+    uint64_t addr = reinterpret_cast<uint64_t>(base);
+    i32x4_t rsrc;
+    rsrc[0] = static_cast<int32_t>(addr & 0xFFFFFFFFu);  // BASE_ADDRESS[31:0]
+    rsrc[1] = static_cast<int32_t>(addr >> 32);          // BASE_ADDRESS[63:32]
+    rsrc[2] = static_cast<int32_t>(num_bytes);           // NUM_RECORDS
+    rsrc[3] = 0x00020000;  // raw, no stride/swizzle
+    return rsrc;
+  }
+
+  // Load 16 bytes via llvm.amdgcn.raw.buffer.load.i128.
+  // ptr      – base address of the buffer (alignment ≥ 16)
+  // buf_size – byte size of the buffer (hardware range-check limit)
+  // offset   – per-lane byte offset from ptr (voffset; added per-thread)
+  //
+  // aux cachepolicy bits: bit0=sc0(GLC), bit1=sc1(SLC), bit4=nt
+  static __device__ __forceinline__ type load_buffer(const void *ptr,
+                                                     uint32_t buf_size,
+                                                     uint32_t offset) {
+    i32x4_t rsrc = make_buffer_resource(ptr, buf_size);
+    constexpr uint32_t aux =
+        (LoadPolicy == CachePolicy::Standard)     ? 0b00000 :
+        (LoadPolicy == CachePolicy::FlatCache)    ? 0b00000 :
+        (LoadPolicy == CachePolicy::BypassL1)     ? 0b00001 :
+        (LoadPolicy == CachePolicy::NonTemporal)  ? 0b00010 :
+        (LoadPolicy == CachePolicy::SystemScope)  ? 0b10001 :
+      /*(LoadPolicy == CachePolicy::SystemScopeNT)*/ 0b10011;
+    return static_cast<type>(
+        llvm_amdgcn_raw_buffer_load_b128(rsrc, offset, 0, aux));
+  }
+
+  // Store 16 bytes via llvm.amdgcn.raw.buffer.store.i128.
+  // ptr      – base address of the buffer
+  // buf_size – byte size of the buffer (hardware range-check limit)
+  // offset   – per-lane byte offset from ptr (voffset)
+  // val      – 128-bit value to write
+  //
+  // aux cachepolicy bits: bit0=sc0(GLC), bit1=sc1(SLC), bit4=nt
+  static __device__ __forceinline__ void store_buffer(void *ptr,
+                                                      uint32_t buf_size,
+                                                      uint32_t offset,
+                                                      type val) {
+    i32x4_t rsrc = make_buffer_resource(ptr, buf_size);
+    constexpr uint32_t aux =
+        (StorePolicy == CachePolicy::Standard)     ? 0b00000 :
+        (StorePolicy == CachePolicy::FlatCache)    ? 0b00000 :
+        (StorePolicy == CachePolicy::BypassL1)     ? 0b00001 :
+        (StorePolicy == CachePolicy::NonTemporal)  ? 0b00010 :
+        (StorePolicy == CachePolicy::SystemScope)  ? 0b10001 :
+      /*(StorePolicy == CachePolicy::SystemScopeNT)*/ 0b10011;
+    llvm_amdgcn_raw_buffer_store_b128(static_cast<__uint128_t>(val),
+                                      rsrc, offset, 0, aux);
   }
 };
 
