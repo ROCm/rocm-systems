@@ -1110,6 +1110,14 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm, s
     if (parent != NULL) {
       offset = parent->nRanks - 1;
     } else if (handles != NULL) {
+      // nRanks is set by bootstrapGetUniqueId(comm, ...) only;
+      // a handle from the legacy ncclGetUniqueId() would have nRanks==0
+      // and silently produce offset=-1, corrupting rank distribution.
+      if (BOOTSTRAP_HANDLE(handles, 0)->nRanks <= 0) {
+        WARN("bootstrapInit: handle->nRanks=%d, pass a handle from ncclCommGetUniqueId not ncclGetUniqueId",
+             BOOTSTRAP_HANDLE(handles, 0)->nRanks);
+        return ncclInvalidArgument;
+      }
       offset = BOOTSTRAP_HANDLE(handles, 0)->nRanks - 1;
     }
   }

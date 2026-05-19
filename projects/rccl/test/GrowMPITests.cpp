@@ -9,7 +9,9 @@
 #include "ResourceGuards.hpp"
 #include "TestChecks.hpp"
 #include "DeviceBufferHelpers.hpp"
+#include <cstddef>
 #include <cstring>
+#include <unistd.h>
 #include <vector>
 
 #ifdef MPI_TESTS_ENABLED
@@ -398,6 +400,7 @@ TEST_F(GrowMPITest, Grow_NonBlocking)
     constexpr int kMaxPollIter = 1000000;
     for (int i = 0; i < kMaxPollIter && asyncErr == ncclInProgress; ++i) {
         ASSERT_EQ(ncclSuccess, ncclCommGetAsyncError(grownComm_, &asyncErr));
+        usleep(1000);  // 1 ms — avoid busy-spinning the core
     }
     ASSERT_MPI_EQ(asyncErr, ncclSuccess);
 
@@ -648,6 +651,8 @@ TEST_F(GrowMPITest, GetUniqueId_DistinctHandles)
     // Compare the first 8 bytes which hold the magic field
     uint64_t magic1 = 0, magic2 = 0;
     static_assert(sizeof(ncclUniqueId) >= 8, "ncclUniqueId too small");
+static_assert(offsetof(ncclBootstrapHandle, magic) == 0,
+              "magic must be the first field of ncclBootstrapHandle");
     memcpy(&magic1, &growId1, sizeof(magic1));
     memcpy(&magic2, &growId2, sizeof(magic2));
     ASSERT_MPI_NE(magic1, magic2);
@@ -701,9 +706,9 @@ TEST_F(GrowMPITest, Grow_InvalidArguments)
 }
 
 // --- bcastGrowHandle: coordinator is the last rank of the parent comm ---
-// Exercises the self-send guard: when parent->rank == parent->nRanks-1,
-// bcastGrowHandle skips the send-to-self and sends only to rank 0.
-// Rank 0 (other boundary) receives the handle via bcastGrowHandle(isRoot=false).
+// Exercises the boundary case where parent->rank == parent->nRanks-1.
+// bcastGrowHandle sends unconditionally to rank 0 and to itself (rank nRanks-1);
+// the self-send is buffered in the unex queue and drained when the new rank joins.
 
 TEST_F(GrowMPITest, Grow_CoordinatorAtLastRank)
 {
@@ -720,9 +725,9 @@ TEST_F(GrowMPITest, Grow_CoordinatorAtLastRank)
     ASSERT_MPI_TRUE(wr >= existing || initialComm_ != nullptr);
 
     // Coordinator is the last rank of the parent comm (rank nRanks-1).
-    // Inside bcastGrowHandle(isRoot=true):
-    //   parent->rank == parent->nRanks-1 => skip send-to-self
-    //   parent->rank != 0               => send to rank 0 via bootstrap
+    // bcastGrowHandle(isRoot=true) sends unconditionally to rank 0 and
+    // to rank nRanks-1 (itself); the self-message is buffered in the unex
+    // queue and consumed when the new rank's bootstrapInit drains it.
     ncclUniqueId growId{};
     if (wr == coordRank) {
         ASSERT_EQ(ncclSuccess, ncclCommGetUniqueId(initialComm_, &growId));
@@ -790,7 +795,7 @@ TEST_F(GrowMPITest, GetUniqueId_NcclCommIdEnvRejection)
 }
 
 
-TEST_F(GrowMPITest, ShrinkThenGrow_Debug)
+TEST_F(GrowMPITest, ShrinkThenGrow)
 {
     if (MPIEnvironment::world_size < 4) GTEST_SKIP();
     const int wr = MPIEnvironment::world_rank;
