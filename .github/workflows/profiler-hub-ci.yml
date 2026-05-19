@@ -6,7 +6,6 @@ on:
   push:
     branches:
       - develop
-      - sna-develop
     paths:
       - '.github/workflows/profiler-hub-ci.yml'
       - 'profilers/profiler-hub/**'
@@ -16,7 +15,6 @@ on:
   pull_request:
     branches:
       - develop
-      - sna-develop
     paths:
       - '.github/workflows/profiler-hub-ci.yml'
       - 'profilers/profiler-hub/**'

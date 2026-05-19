@@ -6,7 +6,6 @@ on:
   push:
     branches:
       - develop
-      - sna-develop
     paths:
       - '.github/workflows/profiler-hub-formatting.yml'
       - 'profilers/profiler-hub/**'
