@@ -484,7 +484,9 @@ class Device : public NullDevice {
   virtual void ReleaseGlobalSignal(void* signal) const override;
   virtual void RetainGlobalSignal(void* signal) const override;
   virtual bool CreateHwEvents(int count, std::vector<void*>& hw_events) const override;
+  virtual void ResetHwEvents(std::vector<void*>& hw_events) const override;
   virtual void DestroyHwEvent(void* hw_event) const override;
+  virtual void ClearHwEvent(void* hw_event) const override;
   virtual uint8_t* CreateBarrierPacket() const override;
   virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
                                    const std::vector<void*>& hw_events) const override;

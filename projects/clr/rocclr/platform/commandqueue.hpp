@@ -298,6 +298,7 @@ class HostQueue : public CommandQueue {
   void SetForceDestroy(bool forceDestroy) { forceDestroy_ = forceDestroy; }
 
   uint64_t getQueueID() { return thread_.vdev()->getQueueID(); }
+  uint64_t getQueueIDIfActive() const { return thread_.vdev()->getQueueIDIfActive(); }
 
   //! Returns Synchronization Policy for the current stream
   amd::SyncPolicy GetSyncPolicy() const { return sync_policy_; }

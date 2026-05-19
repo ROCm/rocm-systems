@@ -115,6 +115,8 @@ target_sources(rocclr PRIVATE
   ${ROCCLR_SRC_DIR}/device/rocm/rocsettings.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/rocsignal.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/rocvirtual.cpp
+  ${ROCCLR_SRC_DIR}/device/rocm/rocvirtual_graph.cpp
+  ${ROCCLR_SRC_DIR}/device/rocm/rocdevice_graph.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/rocurilocator.cpp)
 
 if(UNIX)

@@ -3693,10 +3693,32 @@ bool Device::CreateHwEvents(int count, std::vector<void*>& hw_events) const {
   return true;
 }
 
+#ifndef HIP_GRAPH_DISPATCH_OPTIMIZED
+// ================================================================================================
+void Device::ResetHwEvents(std::vector<void*>& hw_events) const {
+  for (auto* hw_event : hw_events) {
+    if (hw_event != nullptr) {
+      Hsa::signal_silent_store_relaxed(
+          reinterpret_cast<ProfilingSignal*>(hw_event)->signal_, kInitSignalValueOne);
+    }
+  }
+}
+#endif  // !HIP_GRAPH_DISPATCH_OPTIMIZED
+
 // ================================================================================================
 void Device::DestroyHwEvent(void* hw_event) const {
   ReleaseGlobalSignal(hw_event);
 }
+
+#ifndef HIP_GRAPH_DISPATCH_OPTIMIZED
+// ================================================================================================
+void Device::ClearHwEvent(void* hw_event) const {
+  if (hw_event != nullptr) {
+    Hsa::signal_store_relaxed(
+        reinterpret_cast<ProfilingSignal*>(hw_event)->signal_, 0);
+  }
+}
+#endif  // !HIP_GRAPH_DISPATCH_OPTIMIZED
 
 // ================================================================================================
 uint8_t* Device::CreateBarrierPacket() const {

@@ -104,6 +104,7 @@ target_sources(amdhip64 PRIVATE
   hip_global.cpp
   hip_executionctx.cpp
   hip_graph_internal.cpp
+  hip_graph_dispatch.cpp
   hip_graph.cpp
   hip_hmm.cpp
   hip_intercept.cpp
@@ -173,6 +174,13 @@ target_include_directories(amdhip64
     ${PROJECT_BINARY_DIR}/include)
 
 target_compile_definitions(amdhip64 PRIVATE __HIP_PLATFORM_AMD__)
+
+option(HIP_GRAPH_DISPATCH_OPTIMIZED "Use optimized graph dispatch implementation" ON)
+if(HIP_GRAPH_DISPATCH_OPTIMIZED)
+  target_compile_definitions(amdhip64 PRIVATE HIP_GRAPH_DISPATCH_OPTIMIZED)
+  target_compile_definitions(rocclr PRIVATE HIP_GRAPH_DISPATCH_OPTIMIZED)
+endif()
+
 target_link_libraries(amdhip64 PRIVATE ${OPENGL_LIBRARIES})
 target_link_libraries(amdhip64 PRIVATE ${CMAKE_DL_LIBS})
 # Add link to comgr, hsa-runtime and other required libraries in target files

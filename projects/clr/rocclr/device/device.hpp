@@ -1366,9 +1366,20 @@ class VirtualDevice : public amd::ReferenceCountedObject {
                                           bool attach_signal = false,
                                           const std::vector<const std::string*>* kernelNames = nullptr,
                                           bool pre_patched = false,
-                                          bool blocking = false) {
+                                          bool blocking = false,
+                                          bool execution_locked = false,
+                                          bool skip_profiling = false) {
     return false;
   }
+
+  //! Returns the HW queue ID without locking, or 0 if no queue is active.
+  virtual uint64_t getQueueIDIfActive() const { return 0; }
+
+  //! Emit a lightweight completion barrier with a cached signal and register
+  //! an async callback, bypassing the full Command/Marker stack.
+  virtual bool EmitCompletionCallback(void* hw_event,
+                                       void (*callback)(void*),
+                                       void* user_data) { return false; }
 
   //! Returns the number of outstanding HSA async handlers
   std::atomic<uint64_t>& QueuedAsyncHandlers() const { return queued_async_handlers_; }
@@ -2115,7 +2126,9 @@ class Device : public RuntimeObject {
   virtual void RetainGlobalSignal(void* signal) const {}
 
   virtual bool CreateHwEvents(int count, std::vector<void*>& hw_events) const { return false; }
+  virtual void ResetHwEvents(std::vector<void*>& hw_events) const {}
   virtual void DestroyHwEvent(void* hw_event) const {}
+  virtual void ClearHwEvent(void* hw_event) const {}
 
   struct HwEventPatch {
     static constexpr int kCompletionSignal = -1;

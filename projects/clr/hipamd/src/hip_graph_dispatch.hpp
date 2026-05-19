@@ -1,7 +1,3 @@
-#ifdef HIP_GRAPH_DISPATCH_OPTIMIZED
-#include "hip_graph_dispatch.hpp"
-#else
-
 /*
  * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
  *
@@ -15,7 +11,6 @@
 #include <iostream>
 #include <unordered_map>
 #include <unordered_set>
-#include <shared_mutex>
 #include <vector>
 
 #include "hip/hip_runtime.h"
@@ -36,6 +31,7 @@ class Graph;
 class GraphNode;
 class GraphExec;
 class UserObject;
+struct DispatchState;
 class GraphKernelNode;
 typedef GraphNode* Node;
 hipError_t ihipGraphAddNode(hip::GraphNode* graphNode, hip::Graph* graph,
@@ -185,8 +181,10 @@ class GraphNode : public hipGraphNodeDOTAttribute {
     visited_ = false;
     id_ = node.id_;
     parentGraph_ = nullptr;
-    amd::ScopedLock lock(nodeSetLock_);
-    nodeSet_.insert(this);
+    if (!skipNodeSetInsert_) {
+      amd::ScopedLock lock(nodeSetLock_);
+      nodeSet_.insert(this);
+    }
     isEnabled_ = node.isEnabled_;
     dev_id_ = ihipGetDevice();
   }
@@ -204,8 +202,10 @@ class GraphNode : public hipGraphNodeDOTAttribute {
         isEnabled_(1),
         dev_id_(ihipGetDevice()),
         hipGraphNodeDOTAttribute(style, shape, label) {
-    amd::ScopedLock lock(nodeSetLock_);
-    nodeSet_.insert(this);
+    if (!skipNodeSetInsert_) {
+      amd::ScopedLock lock(nodeSetLock_);
+      nodeSet_.insert(this);
+    }
   }
 
   virtual ~GraphNode() {
@@ -230,6 +230,13 @@ class GraphNode : public hipGraphNodeDOTAttribute {
     }
     return true;
   }
+
+  static void batchInsertNodes(const std::vector<GraphNode*>& nodes) {
+    amd::ScopedLock lock(nodeSetLock_);
+    for (auto* node : nodes) {
+      nodeSet_.insert(node);
+    }
+  }
   // Return gpu packet address to update with actual packet under capture.
   std::vector<uint8_t*>& GetAqlPackets() { return gpuPackets_; }
   void SetKernelName(const std::string* kernelName) { capturedKernelName_ = kernelName; }
@@ -241,9 +248,14 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   //! Capture packets and accumulate them into a batch if provided
   hipError_t CaptureAndFormPacket(GraphKernelArgManager* kernArgMgr,
                                   std::vector<uint8_t*>* batchPackets = nullptr,
-                                  std::vector<const std::string*>* batchKernelNames = nullptr) {
-    auto capture_stream = hip::getNullStream(g_devices[dev_id_]->devices()[0]->context(), false);
+                                  std::vector<const std::string*>* batchKernelNames = nullptr,
+                                  hip::Stream* capture_stream = nullptr) {
+    if (capture_stream == nullptr) {
+      capture_stream = hip::getNullStream(g_devices[dev_id_]->devices()[0]->context(), false);
+    }
+    capture_mode_ = true;
     hipError_t status = CreateCommand(capture_stream);
+    capture_mode_ = false;
     if (status != hipSuccess) {
       return status;
     }
@@ -255,8 +267,6 @@ class GraphNode : public hipGraphNodeDOTAttribute {
 
     for (auto& command : commands_) {
       command->setPktCapturingState(true, &gpuPackets_, kernArgMgr, &capturedKernelName_);
-      // Enqueue command to capture GPU Packet. The packet is not submitted to the device.
-      // The packet is stored in gpuPacket_ and submitted during graph launch.
       command->submit(*(command->queue())->vdev());
       command->release();
     }
@@ -474,6 +484,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   Graph* parentGraph_;
   static std::unordered_set<GraphNode*> nodeSet_;
   static amd::Monitor nodeSetLock_;
+  static thread_local bool skipNodeSetInsert_;
   static amd::Monitor WorkerThreadLock_;
   unsigned int isEnabled_;
   bool signal_is_required_ = false;   //!< This node requires a signal on the command
@@ -485,6 +496,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   int dev_id_;  //!< Device Id when node is created(dev id from capture stream/current device
                 //!< when explicitly added)
   bool wait_ = false;
+  bool capture_mode_ = false;
 };
 
 class GraphEventWaitNode : public GraphNode {
@@ -876,6 +888,12 @@ class Graph {
   std::vector<Node> topoOrder_;
 
   // Segment dependency structures
+  enum class SegmentDispatchType : uint8_t {
+    kBatch,     // Fast path: dispatch pre-captured AQL packets
+    kEnqueue,   // Slow path: enqueue commands one-by-one
+    kSkip,      // No valid batch — skip this segment
+  };
+
   struct Segment {
     int id = -1;
     int dev_id = -1;                            // Device this segment runs on (derived from first node)
@@ -891,16 +909,18 @@ class Graph {
     Graph* child_graph_ptr = nullptr;           // Direct pointer to child graph for quick access
 
     bool needs_completion_signal = false;        // True if any downstream segment is on a different stream/device, or this is a leaf
+    SegmentDispatchType dispatch_type = SegmentDispatchType::kSkip;
   };
 
   //! Segment information for batch scheduling
   std::vector<Segment> segments_;
-  //! Map of node to segment ID
-  std::unordered_map<Node, int> node_to_segment_id_;
+  // node_to_segment_id_ removed — use node->segment_id_ directly (set in CreateSegmentsFromPaths)
   //! Maximum dependency level in the segment graph
   int max_dependency_level_ = -1;
   //!< Map of dependency level to list of segment IDs at that level
-  std::unordered_map<int, std::vector<int>> segments_per_level_;
+  std::vector<std::vector<int>> segments_per_level_;
+  //!< Flattened segment execution order for single-stream dispatch
+  std::vector<int> flatSegmentOrder_;
 
   std::unordered_map<Node, Node> clonedNodes_;
 
@@ -919,6 +939,7 @@ class Graph {
   //!< to reduce the stack pressure in recursion
   std::vector<Node> wait_order_;
   std::vector<hip::Stream*> streams_;  //!< The list of streams, used in the execution
+  bool streams_valid_ = false;  //!< Cached streams are valid (skip UpdateStreams rebuild)
   int32_t current_id_ = 0;             //!< The current node ID in the graph execution sequence
   hip::Device* device_;                //!< HIP device object
   hip::MemoryPool* mem_pool_;          //!< Memory pool, associated with this graph
@@ -953,15 +974,18 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   static std::unordered_set<GraphExec*> graphExecSet_;
   static std::recursive_mutex graphExecSetLock_;
   static std::recursive_mutex graphExecStreamCreateLock_;
-  static std::shared_mutex graphExecTrimLock_;
   bool graph_dumped_ = false;
+  static constexpr uint64_t kGraphExecMagic = 0x47524150'48455843ULL;  // "GRAPHEXC"
+
   GraphExec(uint64_t flags = 0)
-      : ReferenceCountedObject(), Graph(hip::getCurrentDevice()), flags_(flags) {
+      : ReferenceCountedObject(), Graph(hip::getCurrentDevice()), flags_(flags),
+        magic_(kGraphExecMagic) {
     std::scoped_lock lock(graphExecSetLock_);
     graphExecSet_.insert(this);
   }
 
   ~GraphExec() {
+    magic_ = 0;
     for (auto& streams : parallel_streams_) {
       for (auto stream : streams.second) {
         if (stream != nullptr) {
@@ -978,6 +1002,8 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
         kernArgManager_->release();
       }
     }
+
+    CleanupDispatchState();
 
     segmentBatches_.clear();
   }
@@ -1026,6 +1052,11 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   hipError_t EnqueueSegment(const Segment& segment, hip::Stream* stream,
                             amd::AccumulateCommand* accumulate);
 
+  hipError_t RunOptimized(hip::Stream* launch_stream);
+  void CleanupDispatchState();
+  hipError_t EnqueueCompletionCallback(hip::Stream* stream,
+                                      const std::vector<void*>* dep_hw_events = nullptr);
+  static void GraphExecReleaseCallback(void* data);
   bool TopologicalOrder() { return Graph::TopologicalOrder(topoOrder_); }
   //! Update streams for the graph execution with launch stream from application
   void UpdateStreams(hip::Stream* launch_stream);
@@ -1051,6 +1082,7 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   bool hasHiddenHeap_ = false;  //!< Hidden heap indicator for Kernel node
   std::unordered_set<int> hiddenHeapInitializedDevices_;
   bool repeatLaunch_ = false;
+  uint64_t magic_ = 0;
 
   // PacketBatch structure
   struct PacketBatch {
@@ -1069,10 +1101,15 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
     std::vector<uint8_t> flatPacketData;
     std::vector<uint32_t> validPacketFullHeaders;
 
+    // Pre-computed fence-optimized headers (FENCE_SCOPE_NONE for middle packets).
+    // Built once at instantiate time; avoids per-dispatch copy + ApplyMinimalFenceHeaders.
+    std::vector<uint32_t> fenceOptimizedHeaders;
+
     // Filtered flat buffer - built alongside enabledPackets when some nodes are disabled.
     // Allows the fast flat-dispatch path even in the partially-disabled case.
     std::vector<uint8_t> filteredFlatPacketData;
     std::vector<uint32_t> filteredValidPacketFullHeaders;
+    std::vector<uint32_t> filteredFenceOptimizedHeaders;
     bool filteredCacheValid = false;
 
     // Node tracking
@@ -1093,6 +1130,8 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
     void rebuildFilteredLists(std::vector<amd::Device::HwEventPatch>& patch_list);
     // Rebuild the flat buffer from the current dispatchPackets contents.
     void rebuildFlatBuffer();
+    // Build fence-optimized headers from validPacketFullHeaders.
+    void buildFenceOptimizedHeaders();
     // Restore flat_packet pointers in patch_list back to flatPacketData when
     // all nodes are re-enabled (disabledNodeCount == 0).
     void restorePatchListPointers(std::vector<amd::Device::HwEventPatch>& patch_list);
@@ -1107,20 +1146,26 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   //! Structure linking packet batches to segments
   struct SegmentBatch {
     int segment_id;           // Segment this batch belongs to
-    std::vector<bool> node_capture_status; // Capture status for each node in this segment
+    std::vector<uint8_t> node_capture_status; // Capture status for each node in this segment
     std::vector<PacketBatch> packet_batches; // All packet batches for this segment
     bool has_uncaptured_nodes = false;  // At least one node was not AQL-captured
 
-    SegmentBatch(int seg_id) : segment_id(seg_id) {}
+    SegmentBatch() : segment_id(-1) {}
+    explicit SegmentBatch(int seg_id) : segment_id(seg_id) {}
   };
 
   //! Batches of accumulated packets and kernel names for batch dispatch optimization
-  //! Map from segment ID to SegmentBatch for O(1) lookup
-  std::unordered_map<int, SegmentBatch> segmentBatches_;
+  //! Flat vector indexed by segment ID for O(1) lookup (segment IDs are sequential from 0)
+  std::vector<SegmentBatch> segmentBatches_;
+
+  hipError_t DispatchSegmentBatches(SegmentBatch& segBatch, const Segment& segment,
+                                    hip::Stream* stream, amd::AccumulateCommand* accumulate,
+                                    bool execution_locked);
 
   struct SyncPlan {
     int num_segments = 0;   // total segment count (used for bounds checks)
     int num_hw_events = 0;  // HW event slots to allocate (one per ncs=true segment)
+    bool needs_hw_events = false;
 
     // Dense index into segment_hw_events for each segment.
     // seg_to_hw_event[seg_id] == -1  ->  no completion signal emitted.
@@ -1130,13 +1175,29 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
     std::vector<amd::Device::HwEventPatch> patch_list;
     std::vector<uint8_t*> barrier_packets;
     std::vector<int> leaf_segment_ids;
+    std::vector<int> cross_stream_leaf_seg_ids;
 
-    ~SyncPlan() {
-      for (auto* p : barrier_packets) { delete[] p; }
+    std::unique_ptr<uint8_t[]> barrier_pool;
+    int barrier_pool_capacity = 0;
+    int barrier_pool_used = 0;
+
+    void AllocBarrierPool(int count) {
+      barrier_pool.reset(new uint8_t[count * 64]());
+      barrier_pool_capacity = count;
+      barrier_pool_used = 0;
     }
+
+    uint8_t* AllocBarrierFromPool() {
+      uint8_t* p = barrier_pool.get() + barrier_pool_used * 64;
+      barrier_pool_used++;
+      return p;
+    }
+
+    ~SyncPlan() = default;
   };
 
   SyncPlan sync_plan_;
+  DispatchState* dispatch_state_ = nullptr;
 
   void BuildSyncPlan();
 };
@@ -1246,6 +1307,7 @@ class GraphKernelNode : public GraphNode {
   unsigned int kernelAttrInUse_;       //!< Kernel attributes in use
   ihipExtKernelEvents kernelEvents_;   //!< Events for Ext launch kernel
   bool hasHiddenHeap_;                 //!< Kernel has hidden heap(device side allocation)
+  bool contiguousParams_ = false;      //!< copyParams used a single contiguous allocation
   int coopKernel_;                     //!< Launch cooperative kernel
   int globalWorkSizeX_remainder_;
   int globalWorkSizeY_remainder_;
@@ -1412,24 +1474,29 @@ class GraphKernelNode : public GraphNode {
     const amd::KernelSignature& signature = kernel->signature();
     numParams_ = signature.numParameters();
 
-    // Copy gridDim, blockDim, sharedMemBytes and func
     kernelParams_ = *pNodeParams;
 
-    // Allocate/assign memory if params are passed part of 'kernelParams'
     if (pNodeParams->kernelParams != nullptr) {
-      kernelParams_.kernelParams = (void**)malloc(numParams_ * sizeof(void*));
-      if (kernelParams_.kernelParams == nullptr) {
+      // Single contiguous allocation: pointer array + all param data
+      size_t ptrs_size = numParams_ * sizeof(void*);
+      size_t data_size = 0;
+      for (uint32_t i = 0; i < numParams_; ++i) {
+        data_size += signature.at(i).size_;
+      }
+      char* block = static_cast<char*>(malloc(ptrs_size + data_size));
+      if (block == nullptr) {
         return hipErrorOutOfMemory;
       }
-
+      kernelParams_.kernelParams = reinterpret_cast<void**>(block);
+      char* data_cursor = block + ptrs_size;
       for (uint32_t i = 0; i < numParams_; ++i) {
         const amd::KernelParameterDescriptor& desc = signature.at(i);
-        kernelParams_.kernelParams[i] = malloc(desc.size_);
-        if (kernelParams_.kernelParams[i] == nullptr) {
-          return hipErrorOutOfMemory;
-        }
-        ::memcpy(kernelParams_.kernelParams[i], (pNodeParams->kernelParams[i]), desc.size_);
+        kernelParams_.kernelParams[i] = data_cursor;
+        ::memcpy(data_cursor, pNodeParams->kernelParams[i], desc.size_);
+        data_cursor += desc.size_;
       }
+      contiguousParams_ = true;
+
       for (uint32_t i = signature.numParameters(); i < signature.numParametersAll(); ++i) {
         if (signature.at(i).info_.oclObject_ == amd::KernelParameterDescriptor::HiddenHeap) {
           hasHiddenHeap_ = true;
@@ -1437,31 +1504,26 @@ class GraphKernelNode : public GraphNode {
       }
     }
 
-    // Allocate/assign memory if params are passed as part of 'extra'
     else if (pNodeParams->extra != nullptr) {
-      // 'extra' is a struct that contains the following info: {
-      // HIP_LAUNCH_PARAM_BUFFER_POINTER, kernargs,
-      // HIP_LAUNCH_PARAM_BUFFER_SIZE, &kernargs_size,
-      // HIP_LAUNCH_PARAM_END }
       unsigned int numExtra = 5;
-      kernelParams_.extra = (void**)malloc(numExtra * sizeof(void*));
-      if (kernelParams_.extra == nullptr) {
-        return hipErrorOutOfMemory;
-      }
-      kernelParams_.extra[0] = pNodeParams->extra[0];
       size_t kernargs_size = *((size_t*)pNodeParams->extra[3]);
-      kernelParams_.extra[1] = malloc(kernargs_size);
-      if (kernelParams_.extra[1] == nullptr) {
+      // Single contiguous allocation: extra array + kernargs buffer + size storage
+      size_t total = numExtra * sizeof(void*) + kernargs_size + sizeof(size_t);
+      char* block = static_cast<char*>(malloc(total));
+      if (block == nullptr) {
         return hipErrorOutOfMemory;
       }
+      kernelParams_.extra = reinterpret_cast<void**>(block);
+      char* cursor = block + numExtra * sizeof(void*);
+      kernelParams_.extra[0] = pNodeParams->extra[0];
+      kernelParams_.extra[1] = cursor;
+      ::memcpy(cursor, pNodeParams->extra[1], kernargs_size);
+      cursor += kernargs_size;
       kernelParams_.extra[2] = pNodeParams->extra[2];
-      kernelParams_.extra[3] = malloc(sizeof(void*));
-      if (kernelParams_.extra[3] == nullptr) {
-        return hipErrorOutOfMemory;
-      }
-      *((size_t*)kernelParams_.extra[3]) = kernargs_size;
-      ::memcpy(kernelParams_.extra[1], (pNodeParams->extra[1]), kernargs_size);
+      kernelParams_.extra[3] = cursor;
+      *((size_t*)cursor) = kernargs_size;
       kernelParams_.extra[4] = pNodeParams->extra[4];
+      contiguousParams_ = true;
     }
     return hipSuccess;
   }
@@ -1491,25 +1553,24 @@ class GraphKernelNode : public GraphNode {
   ~GraphKernelNode() { freeParams(); }
 
   void freeParams() {
-    // Deallocate memory allocated for kernargs passed via 'kernelParams'
     if (kernelParams_.kernelParams != nullptr) {
-      for (size_t i = 0; i < numParams_; ++i) {
-        if (kernelParams_.kernelParams[i] != nullptr) {
+      // Single free for contiguous allocation, per-element free for legacy
+      if (!contiguousParams_) {
+        for (size_t i = 0; i < numParams_; ++i) {
           free(kernelParams_.kernelParams[i]);
         }
-        kernelParams_.kernelParams[i] = nullptr;
       }
       free(kernelParams_.kernelParams);
       kernelParams_.kernelParams = nullptr;
-    }
-    // Deallocate memory allocated for kernargs passed via 'extra'
-    else if (kernelParams_.extra != nullptr) {
-      free(kernelParams_.extra[1]);
-      free(kernelParams_.extra[3]);
-      memset(kernelParams_.extra, 0, 5 * sizeof(kernelParams_.extra[0]));  // 5 items
+    } else if (kernelParams_.extra != nullptr) {
+      if (!contiguousParams_) {
+        free(kernelParams_.extra[1]);
+        free(kernelParams_.extra[3]);
+      }
       free(kernelParams_.extra);
       kernelParams_.extra = nullptr;
     }
+    contiguousParams_ = false;
   }
 
   // Delete copy-assignment operator to prevent accidental copies causing unexpected behaviors.
@@ -1518,7 +1579,6 @@ class GraphKernelNode : public GraphNode {
   GraphNode* clone() const override { return new GraphKernelNode(*this); }
 
   hipError_t CreateCommand(hip::Stream* stream) override {
-    // Clear commands_ first, even if node is disabled
     hipError_t status = GraphNode::CreateCommand(stream);
     if (status != hipSuccess) {
       return status;
@@ -1534,18 +1594,21 @@ class GraphKernelNode : public GraphNode {
       }
       resolvedFunc_ = func;
     }
-    status = validateKernelParams(&kernelParams_, func, dev_id_);
-    if (hipSuccess != status) {
-      return status;
+
+    // In capture mode, params were already validated at node creation or SetParams time.
+    if (!capture_mode_) {
+      status = validateKernelParams(&kernelParams_, func, dev_id_);
+      if (hipSuccess != status) {
+        return status;
+      }
     }
+
     commands_.reserve(1);
     amd::Command* command;
     uint32_t flags = 0;
     if (DEBUG_HIP_FORCE_ASYNC_QUEUE) {
-      // If there is one dependency, but many edges, then execute this node in any order
       if (((dependencies_.size() == 1) && (dependencies_[0]->GetEdges().size() > 1) &&
            (DEBUG_HIP_FORCE_GRAPH_QUEUES == 1))) {
-        // Makes sure the first node in the edges will have a barrier always
         if (dependencies_[0]->GetEdges()[0] != this) {
           flags = hipExtAnyOrderLaunch;
         }
@@ -1559,7 +1622,7 @@ class GraphKernelNode : public GraphNode {
                                        kernelParams_.sharedMemBytes, *device, globalWorkSizeX_remainder_,
                                        globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_, 1, 1, 1);
 
-    if (!launch_params.IsValidConfig()) {
+    if (!capture_mode_ && !launch_params.IsValidConfig()) {
       return hipErrorInvalidConfiguration;
     }
 
@@ -1567,7 +1630,6 @@ class GraphKernelNode : public GraphNode {
         command, func, launch_params, stream, kernelParams_.kernelParams, kernelParams_.extra,
         kernelEvents_.startEvent_, kernelEvents_.stopEvent_, flags, coopKernel_, 0, 0, 0, 0, 0);
     if (signal_is_required_) {
-      // Optimize the barriers by adding a signal into the dispatch packet directly
       command->SetProfiling();
     }
     commands_.emplace_back(command);
@@ -3354,5 +3416,3 @@ class hipGraphBatchMemOpNode : public GraphNode {
 };
 
 }  // namespace hip
-
-#endif  // HIP_GRAPH_DISPATCH_OPTIMIZED

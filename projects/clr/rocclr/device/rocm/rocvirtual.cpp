@@ -1440,11 +1440,13 @@ bool VirtualGPU::dispatchAqlPacket(hsa_barrier_and_packet_t* packet, uint16_t he
 // For graphs that fit in the queue the yield never fires.  For oversized graphs the GPU drains
 // earlier chunks while the CPU copies later ones, avoiding a deadlock.  Packet-0's header is
 // committed last in the first chunk per the AQL protocol.
+#ifndef HIP_GRAPH_DISPATCH_OPTIMIZED
 bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPacketData,
                                             const std::vector<uint32_t>& validFullHeaders,
                                             amd::AccumulateCommand* vcmd, bool attach_signal,
                                             const std::vector<const std::string*>* kernelNames,
-                                            bool pre_patched, bool blocking) {
+                                            bool pre_patched, bool blocking,
+                                            bool execution_locked, bool skip_profiling) {
   if (vcmd == nullptr || flatPacketData.empty() || validFullHeaders.empty()) {
     return false;
   }
@@ -1634,6 +1636,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
   profilingEnd();
   return true;
 }
+#endif  // !HIP_GRAPH_DISPATCH_OPTIMIZED
 
 // ================================================================================================
 bool VirtualGPU::dispatchCounterAqlPacket(hsa_ext_amd_aql_pm4_packet_t* packet,
@@ -4001,6 +4004,7 @@ void VirtualGPU::HiddenHeapInit() {
   const_cast<Device&>(dev()).HiddenHeapInit(*this);
 }
 
+#ifndef HIP_GRAPH_DISPATCH_OPTIMIZED
 // ================================================================================================
 bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const amd::Kernel& kernel,
                                       const_address parameters, void* event_handle,
@@ -4414,33 +4418,35 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
       }
     }
 
-  // Output printf buffer
-  if (!printfDbg()->output(*this, printfEnabled, gpuKernel.printfInfo())) {
-    LogError("\nCould not print data from the printf buffer!");
-    return false;
-  }
-
-  if (gpuKernel.dynamicParallelism()) {
-    dispatchBarrierPacket(kBarrierPacketHeader, true);
-    if (virtualQueue_ != nullptr) {
-      static_cast<KernelBlitManager&>(blitMgr()).runScheduler(
-          getVQVirtualAddress(), schedulerQueue_, schedulerThreads_, spVA);
+  if (!isGraphCapture) {
+    // Output printf buffer
+    if (!printfDbg()->output(*this, printfEnabled, gpuKernel.printfInfo())) {
+      LogError("\nCould not print data from the printf buffer!");
+      return false;
     }
-  }
 
-  // Check if image buffer write back is required
-  if (imageBufferWrtBack) {
-    // Make sure the original kernel execution is done
-    releaseGpuMemoryFence();
-    for (const auto imageBuffer : wrtBackImageBuffer) {
-      Memory* buffer = dev().getGpuMemory(imageBuffer->owner()->parent());
-      amd::Image* image = imageBuffer->owner()->asImage();
-      Image* devImage = static_cast<Image*>(dev().getGpuMemory(imageBuffer->owner()));
-      Memory* cpyImage = dev().getGpuMemory(devImage->CopyImageBuffer());
-      amd::Coord3D offs(0);
-      // Copy memory from the the backing store image into original buffer
-      bool result = blitMgr().copyImageToBuffer(*cpyImage, *buffer, offs, offs, image->getRegion(),
-                                                true, image->getRowPitch(), image->getSlicePitch());
+    if (gpuKernel.dynamicParallelism()) {
+      dispatchBarrierPacket(kBarrierPacketHeader, true);
+      if (virtualQueue_ != nullptr) {
+        static_cast<KernelBlitManager&>(blitMgr()).runScheduler(
+            getVQVirtualAddress(), schedulerQueue_, schedulerThreads_, spVA);
+      }
+    }
+
+    // Check if image buffer write back is required
+    if (imageBufferWrtBack) {
+      // Make sure the original kernel execution is done
+      releaseGpuMemoryFence();
+      for (const auto imageBuffer : wrtBackImageBuffer) {
+        Memory* buffer = dev().getGpuMemory(imageBuffer->owner()->parent());
+        amd::Image* image = imageBuffer->owner()->asImage();
+        Image* devImage = static_cast<Image*>(dev().getGpuMemory(imageBuffer->owner()));
+        Memory* cpyImage = dev().getGpuMemory(devImage->CopyImageBuffer());
+        amd::Coord3D offs(0);
+        // Copy memory from the the backing store image into original buffer
+        bool result = blitMgr().copyImageToBuffer(*cpyImage, *buffer, offs, offs, image->getRegion(),
+                                                  true, image->getRowPitch(), image->getSlicePitch());
+      }
     }
   }
   return true;
@@ -4524,6 +4530,7 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
     profilingEnd();
   }
 }
+#endif  // !HIP_GRAPH_DISPATCH_OPTIMIZED
 
 // ================================================================================================
 void VirtualGPU::submitNativeFn(amd::NativeFnCommand& cmd) {}

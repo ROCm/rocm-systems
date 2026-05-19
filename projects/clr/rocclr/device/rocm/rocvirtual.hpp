@@ -471,6 +471,9 @@ class VirtualGPU : public device::VirtualDevice {
       bool attach_signal = false);
   void submitNativeFn(amd::NativeFnCommand& cmd);
   void submitMarker(amd::Marker& cmd);
+  bool EmitCompletionCallback(void* hw_event,
+                              void (*callback)(void*),
+                              void* user_data) override;
   void submitAccumulate(amd::AccumulateCommand& cmd);
   void submitAcquireExtObjects(amd::AcquireExtObjectsCommand& cmd);
   void submitReleaseExtObjects(amd::ReleaseExtObjectsCommand& cmd);
@@ -636,7 +639,13 @@ class VirtualGPU : public device::VirtualDevice {
                                   bool attach_signal = false,
                                   const std::vector<const std::string*>* kernelNames = nullptr,
                                   bool pre_patched = false,
-                                  bool blocking = false) override;
+                                  bool blocking = false,
+                                  bool execution_locked = false,
+                                  bool skip_profiling = false) override;
+
+  uint64_t getQueueIDIfActive() const override {
+    return (gpu_queue_ != nullptr) ? gpu_queue_->id : 0;
+  }
 
   template <typename AqlPacket> bool dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header,
                                                               uint16_t rest, bool blocking,
