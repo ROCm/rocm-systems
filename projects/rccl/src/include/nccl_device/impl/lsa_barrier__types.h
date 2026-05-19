@@ -6,8 +6,10 @@
 
 #ifndef _NCCL_DEVICE_MEM_BARRIER__TYPES_H_
 #define _NCCL_DEVICE_MEM_BARRIER__TYPES_H_
-#include "../mem_barrier.h"
+#include "../lsa_barrier.h"
 #include "core__types.h"
+
+#define __CUDACC__ 0
 
 struct ncclLsaBarrierHandle {
   ncclDevResourceHandle_t bufHandle;

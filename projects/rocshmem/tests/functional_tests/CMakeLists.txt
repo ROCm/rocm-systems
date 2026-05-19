@@ -70,6 +70,7 @@ target_sources(
     flood_amo_tester.cpp
     device_bitcode_tester.cpp
     library_info_tester.cpp
+    fence_ordering_tester.cpp
 )
 
 ###############################################################################

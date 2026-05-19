@@ -597,6 +597,8 @@ typedef enum hipDeviceAttribute_t {
   hipDeviceAttributePciChipId,                   ///< GPU Manufacturer device id
   hipDeviceAttributeExpertSchedMode,             ///< '1' if Device supports expert scheduling mode,
                                                  ///< '0' otherwise.
+  hipDeviceAttributeMaxDynDataPrefetchRegions,   ///< Maximum number of dynamic data prefetch regions
+                                                 ///< per kernel launch (0 if unsupported).
 
   hipDeviceAttributeAmdSpecificEnd = 19999,
   hipDeviceAttributeVendorSpecificBegin = 20000,
@@ -1594,6 +1596,52 @@ typedef enum hipClusterSchedulingPolicy {
 } hipClusterSchedulingPolicy;
 
 /**
+ * @brief Temporal locality hint for dynamic data prefetch.
+ */
+typedef enum hipExtDynDataPrefetchTemporal {
+  hipExtDynDataPrefetchTemporalRegular = 0, ///< Regular temporal locality
+  hipExtDynDataPrefetchTemporalHigh = 1,    ///< High temporal locality (prefer caching)
+} hipExtDynDataPrefetchTemporal;
+
+/**
+ * @brief Describes one 2D memory region to prefetch into L2 cache.
+ *
+ * @p address must be aligned to the device's L2 cache line size.
+ * @p width is measured in bytes and must be a multiple of the cache line size.
+ * @p height is the number of rows to prefetch.
+ * @p stride is the byte stride between the start of consecutive rows.
+ */
+typedef struct hipExtDynDataPrefetchRegion {
+  void*  address;      ///< Base address (must be cache-line aligned)
+  size_t stride;       ///< Stride between row starts in bytes
+  size_t width;        ///< Width of each row in bytes (must be a multiple of cache line size)
+  size_t height;       ///< Number of rows to prefetch
+} hipExtDynDataPrefetchRegion;
+
+/**
+ * Compile-time upper bound for the number of prefetch regions in
+ * @ref hipExtDynDataPrefetchConfig.  The actual device limit is queried at
+ * runtime via @ref hipDeviceAttributeMaxDynDataPrefetchRegions.
+ */
+#define HIP_EXT_DYN_DATA_PREFETCH_MAX_REGIONS 2
+
+/**
+ * @brief Configuration for dynamic data prefetch.
+ *
+ * Pointed to by a launch attribute via @ref hipLaunchAttributeExtDynDataPrefetch.
+ * @p numRegions must not exceed the device limit queried via
+ * @ref hipDeviceAttributeMaxDynDataPrefetchRegions (use @ref hipDeviceGetAttribute).
+ *
+ * Cooperative prefetch is always enabled internally; the user only controls
+ * the temporal policy.
+ */
+typedef struct hipExtDynDataPrefetchConfig {
+  unsigned int                  numRegions; ///< Number of valid regions (1-max)
+  hipExtDynDataPrefetchTemporal temporal;   ///< Cache retention policy for prefetched data
+  hipExtDynDataPrefetchRegion   regions[HIP_EXT_DYN_DATA_PREFETCH_MAX_REGIONS]; ///< Prefetch regions
+} hipExtDynDataPrefetchConfig;
+
+/**
  *  Launch Attribute ID
  */
 typedef enum hipLaunchAttributeID {
@@ -1606,6 +1654,7 @@ typedef enum hipLaunchAttributeID {
   hipLaunchAttributePriority = 8, ///< Valid for graph node, streams, launches
   hipLaunchAttributeMemSyncDomainMap = 9,       ///< Valid for streams, graph nodes, launches
   hipLaunchAttributeMemSyncDomain = 10,         ///< Valid for streams, graph nodes, launches
+  hipLaunchAttributeExtDynDataPrefetch = 1024,  ///< Valid for launches. Prefetch data into L2 before kernel execution.
   hipLaunchAttributeMax
 } hipLaunchAttributeID;
 
@@ -1648,6 +1697,7 @@ typedef union hipLaunchAttributeValue {
 
   hipClusterSchedulingPolicy clusterSchedulingPolicyPreference;  ///< Value of launch attribute :: hipLaunchAttributeClusterSchedulingPolicyPreference
                                                                  ///< determines the preferred strategy for distributing blocks within a compute cluster
+  const hipExtDynDataPrefetchConfig* dynDataPrefetch;  ///< Value of launch attribute ::hipLaunchAttributeExtDynDataPrefetch
 } hipLaunchAttributeValue;
 
 /**
