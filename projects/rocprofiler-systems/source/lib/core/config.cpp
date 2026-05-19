@@ -44,8 +44,8 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
-#include <cerrno>
 #include <cctype>
+#include <cerrno>
 #include <cmath>
 #include <csignal>
 #include <cstdint>
@@ -145,21 +145,19 @@ struct config_value_validation
 // ROCPROFSYS_TRACE_DURATION=abc -> 0.0. If timemory callbacks become
 // unconditional and available before constructor parsing, the explicit env and
 // config-file validation paths can be removed.
-const auto strict_config_value_validations =
-    std::array<config_value_validation, 5>{ {
-        { env_vars::MODE, config_value_rule::choice,
-          "one of the registered choices" },
-        { env_vars::PERFETTO_BACKEND, config_value_rule::choice,
-          "one of the registered choices" },
-        { env_vars::TRACE, config_value_rule::boolean,
-          "a boolean value (0, non-zero integer, true, false, on, off, yes, no)" },
-        { env_vars::TRACE_DURATION, config_value_rule::floating_point,
-          "a finite floating-point value" },
-        // Only validate positive ranges for settings without sentinel values.
-        // CPUTIME/REALTIME sampling frequencies intentionally default to -1.0.
-        { env_vars::SAMPLING_FREQ, config_value_rule::positive_floating_point,
-          "a positive finite floating-point value" },
-    } };
+const auto strict_config_value_validations = std::array<config_value_validation, 5>{ {
+    { env_vars::MODE, config_value_rule::choice, "one of the registered choices" },
+    { env_vars::PERFETTO_BACKEND, config_value_rule::choice,
+      "one of the registered choices" },
+    { env_vars::TRACE, config_value_rule::boolean,
+      "a boolean value (0, non-zero integer, true, false, on, off, yes, no)" },
+    { env_vars::TRACE_DURATION, config_value_rule::floating_point,
+      "a finite floating-point value" },
+    // Only validate positive ranges for settings without sentinel values.
+    // CPUTIME/REALTIME sampling frequencies intentionally default to -1.0.
+    { env_vars::SAMPLING_FREQ, config_value_rule::positive_floating_point,
+      "a positive finite floating-point value" },
+} };
 
 std::string
 trim_config_value(std::string_view value)
@@ -201,8 +199,8 @@ parse_floating_point_config_value(std::string_view raw_value, double& parsed_val
     auto value = trim_config_value(raw_value);
     if(value.empty()) return false;
 
-    char* end = nullptr;
-    errno     = 0;
+    char* end    = nullptr;
+    errno        = 0;
     parsed_value = std::strtod(value.c_str(), &end);
 
     if(end == value.c_str()) return false;
@@ -234,23 +232,20 @@ get_setting_choices(const std::shared_ptr<settings>& _config, std::string_view n
 const config_value_validation*
 find_config_value_validation(std::string_view name)
 {
-    auto itr = std::find_if(strict_config_value_validations.begin(),
-                            strict_config_value_validations.end(),
-                            [name](const auto& validation) {
-                                return validation.name == name;
-                            });
+    auto itr = std::find_if(
+        strict_config_value_validations.begin(), strict_config_value_validations.end(),
+        [name](const auto& validation) { return validation.name == name; });
     return (itr != strict_config_value_validations.end()) ? &*itr : nullptr;
 }
 
 void
-validate_config_setting_value(std::string_view                    name,
-                              std::string_view                    raw_value,
+validate_config_setting_value(std::string_view name, std::string_view raw_value,
                               const std::vector<std::string>* choices = nullptr)
 {
     auto* validation = find_config_value_validation(name);
     if(!validation) return;
 
-    auto valid = false;
+    auto valid       = false;
     auto expectation = std::string{ validation->expectation };
     switch(validation->rule)
     {
@@ -274,10 +269,9 @@ validate_config_setting_value(std::string_view                    name,
             auto value = trim_config_value(raw_value);
             if(choices)
             {
-                valid = std::any_of(choices->begin(), choices->end(),
-                                    [&value](const auto& choice) {
-                                        return value == choice;
-                                    });
+                valid =
+                    std::any_of(choices->begin(), choices->end(),
+                                [&value](const auto& choice) { return value == choice; });
                 expectation = format_config_choices(*choices);
             }
             break;
@@ -286,9 +280,9 @@ validate_config_setting_value(std::string_view                    name,
 
     if(!valid)
     {
-        throw std::runtime_error(fmt::format(
-            "Error! Invalid value \"{}\" for {}. Expected {}", raw_value, name,
-            expectation));
+        throw std::runtime_error(
+            fmt::format("Error! Invalid value \"{}\" for {}. Expected {}", raw_value,
+                        name, expectation));
     }
 }
 
@@ -298,9 +292,8 @@ validate_environment_config_values(const std::shared_ptr<settings>& _config)
     for(const auto& validation : strict_config_value_validations)
     {
         if(auto* raw_value = std::getenv(std::string{ validation.name }.c_str()))
-            validate_config_setting_value(
-                validation.name, raw_value,
-                get_setting_choices(_config, validation.name));
+            validate_config_setting_value(validation.name, raw_value,
+                                          get_setting_choices(_config, validation.name));
     }
 }
 
@@ -322,29 +315,32 @@ validate_config_file_values(const std::string& config_file, const std::string& t
         auto trimmed_line = trim_config_value(line);
         if(trimmed_line.empty() || trimmed_line.front() == '#') continue;
 
-        auto key = std::string{};
+        auto key       = std::string{};
         auto raw_value = std::string{};
 
         if(auto equal_pos = trimmed_line.find('='); equal_pos != std::string::npos)
         {
-            key       = trim_config_value(std::string_view{ trimmed_line }.substr(0, equal_pos));
-            raw_value = trim_config_value(
-                std::string_view{ trimmed_line }.substr(equal_pos + 1));
+            key =
+                trim_config_value(std::string_view{ trimmed_line }.substr(0, equal_pos));
+            raw_value =
+                trim_config_value(std::string_view{ trimmed_line }.substr(equal_pos + 1));
         }
         else
         {
             auto split_pos = trimmed_line.find_first_of(" \t");
             if(split_pos == std::string::npos) continue;
 
-            key       = trim_config_value(std::string_view{ trimmed_line }.substr(0, split_pos));
-            raw_value = trim_config_value(
-                std::string_view{ trimmed_line }.substr(split_pos + 1));
+            key =
+                trim_config_value(std::string_view{ trimmed_line }.substr(0, split_pos));
+            raw_value =
+                trim_config_value(std::string_view{ trimmed_line }.substr(split_pos + 1));
         }
 
         if(raw_value.empty()) continue;
 
         if(auto comment_pos = raw_value.find('#'); comment_pos != std::string::npos)
-            raw_value = trim_config_value(std::string_view{ raw_value }.substr(0, comment_pos));
+            raw_value =
+                trim_config_value(std::string_view{ raw_value }.substr(0, comment_pos));
 
         try
         {
@@ -352,8 +348,8 @@ validate_config_file_values(const std::string& config_file, const std::string& t
                                           get_setting_choices(_config, key));
         } catch(std::runtime_error& exc)
         {
-            throw std::runtime_error(fmt::format("{} in {}:{}", exc.what(), filepath,
-                                                 line_number));
+            throw std::runtime_error(
+                fmt::format("{} in {}:{}", exc.what(), filepath, line_number));
         }
     }
 }
@@ -366,13 +362,12 @@ install_strict_config_value_callbacks(const std::shared_ptr<settings>& _config)
         auto itr = _config->find(std::string{ validation.name });
         if(itr == _config->end() || !itr->second) continue;
 
-        itr->second->set_parse_callback([](tim::vsettings* setting,
+        itr->second->set_parse_callback([](tim::vsettings*  setting,
                                            std::string_view raw_value,
                                            settings::update_type) {
             if(!setting) return;
             const auto& choices = setting->get_choices();
-            validate_config_setting_value(setting->get_env_name(), raw_value,
-                                          &choices);
+            validate_config_setting_value(setting->get_env_name(), raw_value, &choices);
         });
     }
 }
@@ -383,9 +378,9 @@ install_strict_config_value_callbacks(const std::shared_ptr<settings>& _config)
     [&]() {                                                                                  \
         auto _env_name = std::string{ ENV_NAME };                                            \
         auto _ret      = _config->insert<TYPE, TYPE>(                                        \
-            _env_name, get_setting_name(_env_name), DESCRIPTION, TYPE{ INITIAL_VALUE },      \
-            std::set<std::string>{ "custom", "rocprofsys", "librocprof-sys",               \
-                                   __VA_ARGS__ });                                           \
+            _env_name, get_setting_name(_env_name), DESCRIPTION, TYPE{ INITIAL_VALUE }, \
+            std::set<std::string>{ "custom", "rocprofsys", "librocprof-sys",            \
+                                        __VA_ARGS__ });                                      \
         if(!_ret.second)                                                                     \
         {                                                                                    \
             LOG_WARNING("Duplicate setting: {} / {}", get_setting_name(_env_name),           \
