@@ -222,6 +222,10 @@ cooperativeGrps:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
     disabled: [amd_windows, amd_wsl]
+  Unit_Thread_Block_Tile_Scan_All_Parameter_Sizes:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows, amd_wsl]
   Unit_Thread_Block_Tile_Reduce_Basic:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151

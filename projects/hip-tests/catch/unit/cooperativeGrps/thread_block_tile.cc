@@ -933,8 +933,6 @@ void __global__ maxMagnitude(Vector* result, AggregationType* aggregationType)
   }
 }
 
-// TODO g-h-c write a particular case for trivially copyable parameters for scans
-
 // tests that we can pass trivially copyable structs as values to reduce
 HIP_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Trivially_Copyable_Parameters)
 {
@@ -1054,8 +1052,7 @@ struct Max {
 };
 
 template <size_t NumElems, class Functor>
-__global__ void applyFunctor(ArrayContainer<NumElems>* result,
-                             AggregationType aggType)
+__global__ void applyFunctor(ArrayContainer<NumElems>* result)
 {
   cg::thread_block mygroup = cg::this_thread_block();
   auto mytile = cg::tiled_partition<NumElems>(mygroup);
@@ -1065,16 +1062,30 @@ __global__ void applyFunctor(ArrayContainer<NumElems>* result,
   if (threadIdx.x < NumElems) {
     input[threadIdx.x] = threadIdx.x;
     __syncwarp();
+    *result = cg::reduce(mytile, input, op);
+  }
+}
 
-    switch (aggType) {
-    case AggregationType::Reduce:
-      *result = cg::reduce(mytile, input, op);
-      break;
+template <size_t NumElems, class Functor>
+__global__ void applyScanFunctor(ArrayContainer<NumElems>** result,
+                                 AggregationType* aggType)
+{
+  cg::thread_block mygroup = cg::this_thread_block();
+  auto mytile = cg::tiled_partition<NumElems>(mygroup);
+  __shared__ ArrayContainer<NumElems> input;
+  Functor op;
+  unsigned int laneId = __lane_id();
+
+  if (threadIdx.x < NumElems) {
+    input[threadIdx.x] = threadIdx.x;
+    __syncwarp();
+
+    switch (*aggType) {
     case AggregationType::InclusiveScan:
-      *result = cg::inclusive_scan(mytile, input, op);
+      *(result[laneId]) = cg::inclusive_scan(mytile, input, op);
       break;
     case AggregationType::ExclusiveScan:
-      *result = cg::exclusive_scan(mytile, input, op);
+      *(result[laneId]) = cg::exclusive_scan(mytile, input, op);
       break;
     default:
       assert(false && "AggregationType not supported");
@@ -1084,14 +1095,14 @@ __global__ void applyFunctor(ArrayContainer<NumElems>* result,
 
 // tests aggregations of arguments of different sizes (types <= 32 bytes are accepted)
 template <size_t NumElems, template <size_t> class Functor>
-void testArgsDifferentSizes(AggregationType aggType)
+void testArgsDifferentSizesReduce()
 {
   LinearAllocGuard<ArrayContainer<NumElems>> h_result(LinearAllocs::malloc, sizeof(ArrayContainer<NumElems>));
   LinearAllocGuard<ArrayContainer<NumElems>> d_result(LinearAllocs::hipMalloc, sizeof(ArrayContainer<NumElems>));
   dim3 gridDim = { 1 };
   dim3 blockDim = { 32 };
   void* devicePtr = d_result.ptr();
-  void* args[] = { &devicePtr, &aggType };
+  void* args[] = { &devicePtr };
   ArrayContainer<NumElems>* result;
 
   HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(applyFunctor<NumElems, Functor<NumElems>>),
@@ -1116,7 +1127,99 @@ void testArgsDifferentSizes(AggregationType aggType)
   }
 
   if constexpr (NumElems > 1) {
-    testArgsDifferentSizes<NumElems / 2, Functor>(aggType);
+    testArgsDifferentSizesReduce<NumElems / 2, Functor>();
+  }
+}
+
+// in this case, as opposed to the reduction, were we were only saving one result per reduction,
+// we save one result per lane. i.e. we save one ArrayContainer per lane, as each lane will return
+// a different ArrayContainer value
+template <size_t NumElems, template <size_t> class Functor>
+void testArgsDifferentSizesScan(AggregationType aggType)
+{
+  int wavefrontSize = getWarpSize();
+  // one per lane
+  LinearAllocGuard<ArrayContainer<NumElems>> h_result[64];
+  LinearAllocGuard<ArrayContainer<NumElems>> d_result[64];
+
+  // as we cannot pass d_result directly (because it is an array of 
+  // LinearAllocGuards), we convert to an array of raw device pointers
+  ArrayContainer<NumElems>* h_devicePtrs[64];
+  LinearAllocGuard<ArrayContainer<NumElems>*> d_devicePtrs(LinearAllocs::hipMalloc, sizeof(void*) * 64);
+  LinearAllocGuard<AggregationType> d_aggType(LinearAllocs::hipMalloc, sizeof(AggregationType));
+  dim3 gridDim = { 1 };
+  dim3 blockDim = { 32 };
+  ArrayContainer<NumElems>* result;
+
+  for (int i = 0; i < wavefrontSize; i++) {
+    h_result[i] = LinearAllocGuard<ArrayContainer<NumElems>>(LinearAllocs::malloc,
+                                                             sizeof(ArrayContainer<NumElems>));
+    d_result[i] = LinearAllocGuard<ArrayContainer<NumElems>>(LinearAllocs::hipMalloc,
+                                                             sizeof(ArrayContainer<NumElems>));
+  }
+
+  for (int i = 0; i < wavefrontSize; i++) {
+    h_devicePtrs[i] = d_result[i].ptr();
+  }
+
+  HIP_CHECK(hipMemcpy(d_aggType.ptr(), &aggType, sizeof(aggType), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d_devicePtrs.ptr(),
+                      h_devicePtrs,
+                      d_devicePtrs.size_bytes(),
+                      hipMemcpyHostToDevice));
+
+  std::array<void*, 2> devicePtrs = { d_devicePtrs.ptr(), d_aggType.ptr() };
+  void* args[devicePtrs.size()];
+
+  for (int i = 0; i < devicePtrs.size(); i++) {
+    args[i] = &devicePtrs[i];
+  }
+  HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(applyScanFunctor<NumElems, Functor<NumElems>>),
+                                       gridDim, blockDim, args, 0, nullptr));
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError());
+
+  for (int i = 0; i < wavefrontSize; i++) {
+    HIP_CHECK(hipMemcpy(h_result[i].host_ptr(), d_result[i].ptr(),
+                        h_result[i].size_bytes(), hipMemcpyDeviceToHost));
+  }
+
+  INFO("T is of size: " << NumElems);
+
+  for (int laneId = 0; laneId < NumElems; laneId++) {
+    result = &(h_result[laneId].host_ptr()[0]);
+
+    if (aggType == AggregationType::InclusiveScan) {
+      INFO("lane: " << laneId);
+      if (std::is_same<Functor<NumElems>, Sum<NumElems>>::value) {
+        // the result can be calculated with an arithmetic series formula, modulo 256
+        // (we do overflow unsigned char for some indices, but that is defined behaviour)
+        REQUIRE((*result)[laneId] == (((laneId + 1) * (laneId + laneId) / 2) % 256));
+      } else {
+        REQUIRE((*result)[laneId] == laneId);
+      }
+    } else if (aggType == AggregationType::ExclusiveScan) {
+      if (std::is_same<Functor<NumElems>, Sum<NumElems>>::value) {
+        INFO("lane: " << laneId);
+        // the result can be calculated with an arithmetic series formula, modulo 256
+        // (we do overflow unsigned char for some indices, but that is defined behaviour)
+        if (laneId == 0) {
+          REQUIRE((*result)[laneId] == 0);
+        } else {
+          REQUIRE((*result)[laneId] == (((laneId) * (laneId + laneId) / 2) % 256));
+        }
+      } else {
+        if (laneId == 0) {
+          REQUIRE((*result)[laneId] == 0);
+        } else {
+          REQUIRE((*result)[laneId] == laneId);
+        }
+      }
+    }
+  }
+
+  if constexpr (NumElems > 1) {
+    testArgsDifferentSizesScan<NumElems / 2, Functor>(aggType);
   }
 }
 
@@ -1125,11 +1228,24 @@ void testArgsDifferentSizes(AggregationType aggType)
 HIP_TEST_CASE(Unit_Thread_Block_Tile_Reduce_All_Parameter_Sizes)
 {
   SECTION("sum") {
-    testArgsDifferentSizes<32, Sum>(AggregationType::Reduce);
+    testArgsDifferentSizesReduce<32, Sum>();
   }
 
   SECTION("max") {
-    testArgsDifferentSizes<32, Max>(AggregationType::Reduce);
+    testArgsDifferentSizesReduce<32, Max>();
+  }
+}
+
+TEST_CASE(Unit_Thread_Block_Tile_Scan_All_Parameter_Sizes)
+{
+  SECTION("sum") {
+    testArgsDifferentSizesScan<32, Sum>(AggregationType::InclusiveScan);
+    testArgsDifferentSizesScan<32, Sum>(AggregationType::ExclusiveScan);
+  }
+
+  SECTION("max") {
+    testArgsDifferentSizesScan<32, Max>(AggregationType::InclusiveScan);
+    testArgsDifferentSizesScan<32, Max>(AggregationType::ExclusiveScan);
   }
 }
 
@@ -1306,7 +1422,6 @@ TEST_CASE(Unit_Thread_Block_Tile_Exclusive_Scan_Basic)
 
 // for all the tile sizes and all input types, using random input values, calculates the scan
 // values. Additionally, randomly make some threads not participate for the coalesced_threads case
-// TODO g-h-c add more types
 TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Scan_Random_arithmetic,  int, unsigned int, long long,
                    unsigned long long, float, half, double)
 {
