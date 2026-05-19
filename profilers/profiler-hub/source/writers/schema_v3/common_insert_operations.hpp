@@ -10,6 +10,7 @@
 #include "data_storage/schema_version.hpp"
 #include "data_storage/vtable/arg_buffer.hpp"
 #include "data_storage/vtable/event_buffer.hpp"
+#include "data_storage/vtable/sample_buffer.hpp"
 #include "json_serializers.hpp"
 #include "profiler-hub/writer_types.hpp"
 
@@ -51,6 +52,15 @@ public:
         {
             throw std::runtime_error("event buffer not registered for table " +
                                      event_table_name);
+        }
+
+        const auto sample_table_name = fmt::format("rocpd_sample_{}", m_ctx->uuid);
+        m_sample_buffer =
+            data_storage::vtable::sample_buffer::get_active_instance(sample_table_name);
+        if(m_sample_buffer == nullptr)
+        {
+            throw std::runtime_error("sample buffer not registered for table " +
+                                     sample_table_name);
         }
     }
 
@@ -131,8 +141,12 @@ public:
             track_info_utility.get_primary_key_value_for_entity(sample_data.track);
         const auto pk = m_ctx->key_providers->sample_data().get_primary_key_value();
 
-        m_stmts->sample_statement()(
-            pk, track_pk, sample_data.timestamp, event_pk, sample_data.extdata);
+        m_sample_buffer->push(data_storage::vtable::sample_row{
+            .id        = static_cast<int64_t>(pk),
+            .track_id  = static_cast<int64_t>(track_pk),
+            .timestamp = static_cast<int64_t>(sample_data.timestamp),
+            .event_id  = std::make_optional(static_cast<int64_t>(event_pk)),
+            .extdata   = sample_data.extdata });
     }
 
     void insert_arg(const writer_types::arg_data_t& arg_data, primary_key_t event_id)
@@ -260,9 +274,10 @@ private:
     std::shared_ptr<writer_context> m_ctx;
     std::shared_ptr<
         data_storage::schema_v3::insert_statements<data_storage::sqlite_backend>>
-                                        m_stmts;
-    data_storage::vtable::arg_buffer*   m_arg_buffer   = nullptr;
-    data_storage::vtable::event_buffer* m_event_buffer = nullptr;
+                                         m_stmts;
+    data_storage::vtable::arg_buffer*    m_arg_buffer    = nullptr;
+    data_storage::vtable::event_buffer*  m_event_buffer  = nullptr;
+    data_storage::vtable::sample_buffer* m_sample_buffer = nullptr;
 };
 
 }  // namespace profiler_hub

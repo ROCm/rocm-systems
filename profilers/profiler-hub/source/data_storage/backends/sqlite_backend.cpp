@@ -17,6 +17,8 @@
 #include "data_storage/vtable/pmc_event_buffer_vtab.hpp"
 #include "data_storage/vtable/region_buffer.hpp"
 #include "data_storage/vtable/region_buffer_vtab.hpp"
+#include "data_storage/vtable/sample_buffer.hpp"
+#include "data_storage/vtable/sample_buffer_vtab.hpp"
 #include "debug.hpp"
 #include "directory.hpp"
 
@@ -385,6 +387,7 @@ sqlite_backend::initialize_schema()
     vtable::register_pmc_event_buffer_module(m_sqlite3);
     vtable::register_arg_buffer_module(m_sqlite3);
     vtable::register_event_buffer_module(m_sqlite3);
+    vtable::register_sample_buffer_module(m_sqlite3);
 
     auto create_buf_vtab = [&](const char*        vtab_name,
                                const char*        module_name,
@@ -418,6 +421,7 @@ sqlite_backend::initialize_schema()
     create_buf_vtab("pmc_event_buf", "pmc_event_buffer", "rocpd_pmc_event_" + m_uuid);
     create_buf_vtab("arg_buf", "arg_buffer", "rocpd_arg_" + m_uuid);
     create_buf_vtab("event_buf", "event_buffer", "rocpd_event_" + m_uuid);
+    create_buf_vtab("sample_buf", "sample_buffer", "rocpd_sample_" + m_uuid);
 }
 
 void
@@ -452,6 +456,7 @@ sqlite_backend::flush()
         vtable::pmc_event_buffer::get_active_instance("rocpd_pmc_event_" + m_uuid));
     drain_buffer(vtable::arg_buffer::get_active_instance("rocpd_arg_" + m_uuid));
     drain_buffer(vtable::event_buffer::get_active_instance("rocpd_event_" + m_uuid));
+    drain_buffer(vtable::sample_buffer::get_active_instance("rocpd_sample_" + m_uuid));
 
     if(m_mode == storage_mode_t::on_disk)
     {
