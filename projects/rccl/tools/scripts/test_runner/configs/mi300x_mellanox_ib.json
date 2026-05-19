@@ -11,6 +11,7 @@
   "env_variables": {
     "HSA_NO_SCRATCH_RECLAIM": "1",
     "NCCL_SOCKET_IFNAME": "eth0,eth1",
+    "NCCL_IB_HCA": "^mlx5_1,mlx5_6",
     "NCCL_DEBUG": "INFO"
   },
   "build_configuration": {
@@ -797,7 +798,10 @@
         {
           "name": "Cast_EnableDisableSched",
           "description": "Toggle schedEnable mid-connection: enabled=1 token, disabled=0 tokens, re-enabled=1 token",
-          "test_filter": "NetIbMPITest.CastEnableDisableSched"
+          "test_filter": "NetIbMPITest.CastEnableDisableSched",
+          "env_variables": {
+            "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "60000000"
+          }
         },
         {
           "name": "Cast_SendRecvMultipleSizes",
@@ -828,7 +832,10 @@
         {
           "name": "Cast_WeightsDistributionOneRound",
           "description": "Two-phase WRR distribution: equal then triangular weights — both exhaust all active tokens after one full round",
-          "test_filter": "NetIbMPITest.CastWeightsDistributionOneRound"
+          "test_filter": "NetIbMPITest.CastWeightsDistributionOneRound",
+          "env_variables": {
+            "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "60000000"
+          }
         },
         {
           "name": "Cast_SchedParmsReflectEnvVars",
@@ -838,12 +845,18 @@
         {
           "name": "Cast_AlternatingWrrNonWrr",
           "description": "Toggle doWrr mid-connection (3×10 sends): WRR consumes tokens in phases 1&3, zero in phase 2",
-          "test_filter": "NetIbMPITest.CastAlternatingWrrNonWrr"
+          "test_filter": "NetIbMPITest.CastAlternatingWrrNonWrr",
+          "env_variables": {
+            "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "60000000"
+          }
         },
         {
           "name": "Cast_EnableDisableSplitData",
           "description": "Toggle splitData mid-connection at threshold boundary: WRR/split path alternates, 1/0/1 tokens consumed",
-          "test_filter": "NetIbMPITest.CastEnableDisableSplitData"
+          "test_filter": "NetIbMPITest.CastEnableDisableSplitData",
+          "env_variables": {
+            "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "60000000"
+          }
         }
       ]
     },
@@ -985,6 +998,113 @@
           "description": "AllReduce graph capture with buffer registration on multi-node",
           "test_filter": "GraphCapture_AllReduce.MultiNode"
         }
+      ]
+    },
+
+    "net_ib_stress": {
+      "extends": "net_ib_base",
+      "timeout": 600,
+      "tests": [
+        { "name": "NetIB_Stress_TagZeroReuse",                "description": "50 messages with tag=0, verify FIFO ordering",                          "test_filter": "NetIbMPITest.TagZeroReuse" },
+        { "name": "NetIB_Stress_FifoPressureSenderFast",      "description": "Receiver slow, sender tight loop, verify FIFO backpressure",            "test_filter": "NetIbMPITest.FifoPressureSenderFast" },
+        { "name": "NetIB_Stress_MixedSizeBarrage",            "description": "25 sizes from 1B to 64MB on single connection",                         "test_filter": "NetIbMPITest.MixedSizeBarrage" },
+        { "name": "NetIB_Stress_RequestSlotExhaustion",       "description": "Post 32 concurrent irecvs, drain, verify recycling",                    "test_filter": "NetIbMPITest.RequestSlotExhaustion" },
+        { "name": "NetIB_Stress_MemoryRegistrationStorm",     "description": "512 reg/dereg cycles in various orders",                                "test_filter": "NetIbMPITest.MemoryRegistrationStorm" },
+        { "name": "NetIB_Stress_ConcurrentMultiConnection",   "description": "4 parallel connections, concurrent I/O",                                "test_filter": "NetIbMPITest.ConcurrentMultiConnectionStress" },
+        { "name": "NetIB_Stress_ConnectionChurn",             "description": "1000 connect/transfer/close cycles, RDMA leak detection",               "test_filter": "NetIbMPITest.ConnectionChurnUnderLoad" },
+        { "name": "NetIB_Stress_ConnectionBatch",             "description": "100 batches x 10 connections, RDMA checkpoints",                        "test_filter": "NetIbMPITest.ConnectionBatchCreateDestroy" },
+        { "name": "NetIB_Stress_BidirectionalSaturation",     "description": "Two opposing connections, full-duplex, 50 iterations",                   "test_filter": "NetIbMPITest.BidirectionalSaturation" },
+        { "name": "NetIB_Stress_LongRunningEndurance",        "description": "10000 transfers, tag cycling, RDMA checkpoints",                        "test_filter": "NetIbMPITest.LongRunningEndurance" },
+        { "name": "NetIB_Stress_GpuMemoryTransfer",           "description": "5 GPU alloc/transfer/flush/verify/free cycles",                         "test_filter": "NetIbMPITest.GpuMemoryTransferStress" },
+        { "name": "NetIB_Stress_RapidRecvPostDrain",          "description": "100 cycles of post-32-recv/drain (6400 ops)",                           "test_filter": "NetIbMPITest.RapidRecvPostDrain" }
+      ]
+    },
+
+    "net_ib_stress_4rank": {
+      "extends": "net_ib_base",
+      "num_ranks": 4,
+      "timeout": 600,
+      "tests": [
+        { "name": "NetIB_Stress_FanIn",                 "description": "Fan-in 3->1, 100 iterations",            "test_filter": "NetIbMPITest.FanInStress" },
+        { "name": "NetIB_Stress_FanOut",                "description": "Fan-out 1->3, 100 iterations",           "test_filter": "NetIbMPITest.FanOutStress" },
+        { "name": "NetIB_Stress_AllToAll",              "description": "Full mesh, 50 iterations",               "test_filter": "NetIbMPITest.AllToAllStress" },
+        { "name": "NetIB_Stress_BidirectionalMultiRank","description": "All pairs bidirectional, 50 iterations",  "test_filter": "NetIbMPITest.BidirectionalMultiRank" },
+        { "name": "NetIB_Stress_LongRunningMultiRank",  "description": "Fan-in 3->1, 1000 iterations",           "test_filter": "NetIbMPITest.LongRunningMultiRank" }
+      ]
+    },
+
+    "net_ib_stress_multi_qp_split": {
+      "extends": "net_ib_base",
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_IB_MERGE_NICS": "1",
+        "NCCL_IB_MERGE_VFS": "1",
+        "NCCL_DMABUF_ENABLE": "1",
+        "NCCL_IB_QPS_PER_CONNECTION": "8",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
+      },
+      "tests": [
+        { "name": "NetIB_Stress_MultiQpSplitData", "description": "Multi-QP split alignment boundaries (QPS=8, SPLIT=1)", "test_filter": "NetIbMPITest.MultiQpSplitDataStress" }
+      ]
+    },
+
+    "net_ib_stress_multi_qp_nosplit": {
+      "extends": "net_ib_base",
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_IB_MERGE_NICS": "1",
+        "NCCL_IB_MERGE_VFS": "1",
+        "NCCL_DMABUF_ENABLE": "1",
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "0"
+      },
+      "tests": [
+        { "name": "NetIB_Stress_MultiQpNoSplit", "description": "Multi-QP no-split path (QPS=4, SPLIT=0)", "test_filter": "NetIbMPITest.MultiQpNoSplitStress" }
+      ]
+    },
+
+    "net_ib_stress_multi_qp_fanin": {
+      "extends": "net_ib_base",
+      "num_ranks": 4,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_IB_MERGE_NICS": "1",
+        "NCCL_IB_MERGE_VFS": "1",
+        "NCCL_DMABUF_ENABLE": "1",
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
+      },
+      "tests": [
+        { "name": "NetIB_Stress_MultiQpFanIn", "description": "Multi-QP fan-in 3->1 (QPS=4, SPLIT=1)", "test_filter": "NetIbMPITest.MultiQpFanIn" }
+      ]
+    },
+
+    "net_ib_stress_ar": {
+      "extends": "net_ib_base",
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_IB_MERGE_NICS": "1",
+        "NCCL_IB_MERGE_VFS": "1",
+        "NCCL_DMABUF_ENABLE": "1",
+        "NCCL_IB_ADAPTIVE_ROUTING": "1",
+        "NCCL_IB_AR_THRESHOLD": "8192"
+      },
+      "tests": [
+        { "name": "NetIB_Stress_ARThreshold", "description": "AR threshold boundary (sizes around 8192)", "test_filter": "NetIbMPITest.AdaptiveRoutingThresholdBoundary" }
+      ]
+    },
+
+    "net_ib_stress_inline": {
+      "extends": "net_ib_base",
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_IB_MERGE_NICS": "1",
+        "NCCL_IB_MERGE_VFS": "1",
+        "NCCL_DMABUF_ENABLE": "1",
+        "NCCL_IB_USE_INLINE": "1"
+      },
+      "tests": [
+        { "name": "NetIB_Stress_InlineSend", "description": "CTS inline send boundary (USE_INLINE=1)", "test_filter": "NetIbMPITest.InlineSendBoundary" }
       ]
     }
   },
@@ -1149,6 +1269,54 @@
       "name": "NET IB - Fault Injection (CAST path, QPS=4, splitData=1)",
       "description": "Per-QP fault injection on CAST multi-QP path: error propagation, RTT rebalancing, data integrity under delay",
       "config": "fault_inject_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Stress (2-rank)",
+      "description": "Resource exhaustion, connection lifecycle, endurance, bidirectional, GPU stress",
+      "config": "net_ib_stress",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Branch Coverage",
+      "description": "Targeted branch-coverage tests: irecv overflow, MR cache ref-count, send-size clamping, null-comm close, setAttr no-op",
+      "config": "net_ib_branch_coverage",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Stress (4-rank)",
+      "description": "Fan-in, fan-out, all-to-all, multi-rank endurance",
+      "config": "net_ib_stress_4rank",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Stress Multi-QP Split",
+      "description": "Multi-QP striping with split alignment boundaries",
+      "config": "net_ib_stress_multi_qp_split",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Stress Multi-QP NoSplit",
+      "description": "Multi-QP no-split (nDataQps) path",
+      "config": "net_ib_stress_multi_qp_nosplit",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Stress Multi-QP Fan-In",
+      "description": "Multi-QP fan-in 3->1 with 4 ranks",
+      "config": "net_ib_stress_multi_qp_fanin",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Stress AR Threshold",
+      "description": "Adaptive routing threshold boundary tests",
+      "config": "net_ib_stress_ar",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Stress Inline CTS",
+      "description": "CTS inline send boundary tests",
+      "config": "net_ib_stress_inline",
       "enabled": true
     }
   ]

@@ -106,12 +106,15 @@ set(SRC_FILES
   include/debug.h
   include/dev_runtime.h
   include/device.h
+  include/env.h
   include/device_buffer.h
   include/enqueue.h
   include/gdrwrap.h
   include/git_version.h
   include/graph.h
   include/group.h
+  include/gin/gin_host.h
+  include/gin/gin_host_proxy.h
   include/hip_rocm_version_info.h
   include/ibvcore.h
   include/ibvsymbols.h
@@ -126,7 +129,7 @@ set(SRC_FILES
   include/mnnvl.h
   include/nccl_common.h
   include/nccl_device.h
-  include/net_device.h
+  include/nccl_device/net_device.h
   include/net.h
   include/nvmlwrap.h
   include/nvtx.h
@@ -166,8 +169,18 @@ set(SRC_FILES
   include/nccl_device/comm.h
   include/nccl_device/coop.h
   include/nccl_device/core.h
+  include/nccl_device/barrier.h
+  include/nccl_device/gin.h
+  include/nccl_device/gin_barrier.h
+  include/nccl_device/gin/gdaki/gin_gdaki.h
+  include/nccl_device/gin/gdaki/gin_gdaki_device_host_common.h
+  include/nccl_device/gin/gin_device_api.h
+  include/nccl_device/gin/gin_device_common.h
+  include/nccl_device/gin/gin_device_host_common.h
+  include/nccl_device/gin/proxy/gin_proxy.h
+  include/nccl_device/gin/proxy/gin_proxy_device_host_common.h
   include/nccl_device/ll_a2a.h
-  include/nccl_device/mem_barrier.h
+  include/nccl_device/lsa_barrier.h
   include/nccl_device/ptr.h
   include/nccl_device/rccl_ptr.h
   include/nccl_device/utility.h
@@ -175,10 +188,16 @@ set(SRC_FILES
   include/nccl_device/impl/comm__types.h
   include/nccl_device/impl/core__funcs.h
   include/nccl_device/impl/core__types.h
+  include/nccl_device/impl/barrier__funcs.h
+  include/nccl_device/impl/barrier__types.h
+  include/nccl_device/impl/gin__funcs.h
+  include/nccl_device/impl/gin__types.h
+  include/nccl_device/impl/gin_barrier__funcs.h
+  include/nccl_device/impl/gin_barrier__types.h
   include/nccl_device/impl/ll_a2a__funcs.h
   include/nccl_device/impl/ll_a2a__types.h
-  include/nccl_device/impl/mem_barrier__funcs.h
-  include/nccl_device/impl/mem_barrier__types.h
+  include/nccl_device/impl/lsa_barrier__funcs.h
+  include/nccl_device/impl/lsa_barrier__types.h
   include/nccl_device/impl/ptr__funcs.h
   include/nccl_device/impl/ptr__types.h
   include/npkit/npkit.h
@@ -222,6 +241,8 @@ set(SRC_FILES
   include/plugin/nccl_net.h
   include/plugin/nccl_profiler.h
   include/plugin/nccl_tuner.h
+  include/plugin/nccl_env.h
+  include/plugin/env/env_v1.h
   include/plugin/plugin.h
   include/plugin/net/net_v6.h
   include/plugin/net/net_v7.h
@@ -270,9 +291,12 @@ set(SRC_FILES
   misc/utils.cc
   misc/proxy_trace/proxy_trace.cc
   nccl_device/core.cc
+  nccl_device/gin_barrier.cc
   nccl_device/ll_a2a.cc
-  nccl_device/mem_barrier.cc
+  nccl_device/lsa_barrier.cc
   plugin/net.cc
+  plugin/env.cc
+  plugin/env/env_v1.cc
   plugin/plugin_open.cc
   plugin/profiler.cc
   plugin/tuner.cc
@@ -307,6 +331,7 @@ set(SRC_FILES
   transport/generic.cc
   transport/net.cc
   transport/net_ib.cc
+  transport/net_ib_gin.h
   transport/net_ib_limits.h
   transport/net_ib_cast/net_ib_cast_inspect.h
   transport/net_ib_cast/net_ib_fault_inject.h
@@ -317,6 +342,9 @@ set(SRC_FILES
   transport/p2p.cc
   transport/profiler.cc
   transport/shm.cc
+  gin/gin_host.cc
+  gin/gin_host_proxy.cc
+  transport/gdaki/gin_host_gdaki.h
   include/latency_profiler/CollTrace.h
   include/latency_profiler/CollTraceEvent.h
   include/latency_profiler/CollTraceFunc.h
@@ -340,6 +368,8 @@ if(USE_AMDSMI)
   )
 else()
   set(SMI_SOURCES
+    src/include/amdsmi_wrap.h
+    src/misc/amdsmi_wrap.cc
     src/include/rocm_smi_wrap.h
     src/misc/rocm_smi_wrap.cc
   )
@@ -405,6 +435,18 @@ foreach(SRC_FILE ${SRC_FILES})
 endforeach()
 
 set(NCCL_DEVICE_HEADER "${PROJECT_BINARY_DIR}/include/rccl/nccl_device.h")
+# Copy hip_compat.h as-is (no hipification — contains both CUDA and HIP paths)
+set(HIP_COMPAT_SRC "${RCCL_SOURCE_DIR}/src/include/nccl_device/hip_compat.h")
+set(HIP_COMPAT_DST "${HIPIFY_DIR}/src/include/nccl_device/hip_compat.h")
+add_custom_command(
+  OUTPUT ${HIP_COMPAT_DST}
+  COMMAND ${CMAKE_COMMAND} -E copy ${HIP_COMPAT_SRC} ${HIP_COMPAT_DST}
+  MAIN_DEPENDENCY ${HIP_COMPAT_SRC}
+  COMMENT "Copying hip_compat.h (no hipification)"
+)
+list(APPEND HIP_SOURCES ${HIP_COMPAT_DST})
+list(APPEND NCCL_DEVICE_HIP_FILES ${HIP_COMPAT_DST})
+
 add_custom_command(
   OUTPUT ${NCCL_DEVICE_HEADER}
   COMMAND ${CMAKE_COMMAND} -E make_directory "${PROJECT_BINARY_DIR}/include"
@@ -1040,6 +1082,10 @@ else()
 endif()
 if (HAVE_KERNARG_PRELOAD AND NOT ENABLE_DEVICE_LINKER)
   target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker -mllvm=-amdgpu-kernarg-preload-count=16")
+endif()
+
+if(ENABLE_MSCCLPP)
+  include(${RCCL_SOURCE_DIR}/cmake/MSCCLPP.cmake)
 endif()
 
 ## Track linking time

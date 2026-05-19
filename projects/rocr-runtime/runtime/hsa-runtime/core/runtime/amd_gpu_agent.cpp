@@ -2429,14 +2429,17 @@ hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
     shared_queue = static_cast<core::SharedQueue*>(finegrain_allocator()(
         sizeof(core::SharedQueue),
         core::MemoryRegion::AllocateUncached | MemoryRegion::AllocateQueueObject));
-  } else {
+  } else if (isMES()) {
     shared_queue =
         static_cast<core::SharedQueue*>(core::Runtime::runtime_singleton_->system_allocator()(
             sizeof(core::SharedQueue), MemoryRegion::GetPageSize(),
-            isMES() ? (MemoryRegion::AllocateGTTAccess | MemoryRegion::AllocateNonPaged |
-                       MemoryRegion::AllocateQueueObject)
-                    : MemoryRegion::AllocateQueueObject,
+            MemoryRegion::AllocateGTTAccess | MemoryRegion::AllocateNonPaged |
+                MemoryRegion::AllocateQueueObject,
             node_id()));
+  } else {
+    shared_queue = static_cast<core::SharedQueue*>(system_allocator()(
+        sizeof(core::SharedQueue), MemoryRegion::GetPageSize(),
+        MemoryRegion::AllocateQueueObject));
   }
 
   if (!shared_queue) {

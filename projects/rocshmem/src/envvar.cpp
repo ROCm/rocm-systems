@@ -208,6 +208,9 @@ namespace envvar {
       "NIC-to-QP binding mode. ROUND_ROBIN: QPs within a context spread across NICs; "
       "PER_CONTEXT: all QPs in a context use one NIC, multi-NIC via multiple contexts",
       "ROUND_ROBIN");
+    const var<size_t> num_user_buffers("MAX_NUM_USER_BUFFERS",
+      "Maximum number of user buffers an application can register with "
+      "rocshmem_buffer_register. The default value is 4", 4);
   }  // namespace gda
 
   namespace sdma {

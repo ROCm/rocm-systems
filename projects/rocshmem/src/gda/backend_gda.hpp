@@ -146,7 +146,7 @@ class GDABackend : public Backend {
    *        Populates nic_devices_ (always at least 1 entry).
    */
   void select_nics();
-  
+
   void configure_nic_policy();
   void log_ctx_nics(unsigned int ctx_id, size_t qps_per_pe, int qp_offset);
 

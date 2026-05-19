@@ -64,10 +64,6 @@ __host__ GDAContext::GDAContext(Backend *b, unsigned int ctx_id)
                       num_qps * sizeof(QueuePair),
                       hipMemcpyDefault));
 
-  for (uint32_t i = 0; i < num_qps; i++) {
-    qps[i].base_heap = base_heap;
-  }
-
   ipcImpl_.ipc_bases = backend->ipcImpl.ipc_bases;
   ipcImpl_.shm_size = backend->ipcImpl.shm_size;
   ipcImpl_.shm_rank = backend->ipcImpl.shm_rank;

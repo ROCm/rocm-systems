@@ -417,6 +417,40 @@ void DeviceBitcodeTester::execute() {
 
   rocshmem_barrier_all();
 
+  { // test_int_sum_reduce: source[i]=1 on every PE, expect dest[i]==n_pes
+    constexpr int COUNT = 4;
+    int* sym_src = static_cast<int*>(rocshmem_malloc(COUNT * sizeof(int)));
+    int* sym_dst = static_cast<int*>(rocshmem_malloc(COUNT * sizeof(int)));
+    for (int i = 0; i < COUNT; i++) {
+      sym_src[i] = 1;
+      sym_dst[i] = 0;
+    }
+    rocshmem_barrier_all();
+
+    int nreduce = COUNT;
+    int team = 0;
+    void* kargs[] = {&sym_dst, &sym_src, &nreduce, &team};
+    launch("test_int_sum_reduce", kargs);
+    rocshmem_barrier_all();
+
+    bool pass = true;
+    for (int i = 0; i < COUNT; i++) {
+      if (sym_dst[i] != n_pes) {
+        printf("[PE %d] test_int_sum_reduce: [%d] got=%d expect=%d FAIL\n",
+               my_pe, i, sym_dst[i], n_pes);
+        pass = false;
+      }
+    }
+    if (pass)
+      printf("[PE %d] test_int_sum_reduce: %d elements OK PASS\n", my_pe, COUNT);
+    if (!pass) all_pass = false;
+
+    rocshmem_free(sym_src);
+    rocshmem_free(sym_dst);
+  }
+
+  rocshmem_barrier_all();
+
   if (my_pe == 0)
     printf("\n=== %s ===\n",
            all_pass ? "ALL TESTS PASSED" : "SOME TESTS FAILED");

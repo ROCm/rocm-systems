@@ -902,6 +902,8 @@ double Tester::timerAvgInMicroseconds() {
 
 void* Tester::alloc_test_buffer(size_t size, enum UserBufType user_buf_type) {
   void *buffer;
+  int err = ROCSHMEM_SUCCESS;
+
   switch (user_buf_type) {
     case USER_BUF_TYPE_HOST:
       CHECK_HIP(hipHostMalloc(&buffer, size));
@@ -932,25 +934,40 @@ void* Tester::alloc_test_buffer(size_t size, enum UserBufType user_buf_type) {
         std::cerr << "buffer: " << (uintptr_t) buffer << std::endl;
         exit(-1);
       }
-      break;
+      return buffer;
   }
+
+  err = rocshmem_buffer_register(buffer, size);
+
+  if (ROCSHMEM_SUCCESS != err) {
+    return nullptr;
+  }
+
   return buffer;
 }
 
 void Tester::free_test_buffer(void *buffer, enum UserBufType user_buf_type) {
+  int err = ROCSHMEM_SUCCESS;
+
   switch (user_buf_type) {
     case USER_BUF_TYPE_HOST:
+      err = rocshmem_buffer_unregister(buffer);
       CHECK_HIP(hipHostFree(buffer));
       break;
     case USER_BUF_TYPE_DEVICE:
     case USER_BUF_TYPE_FINE:
     case USER_BUF_TYPE_UNCACHED:
     case USER_BUF_TYPE_MANAGED:
+      err = rocshmem_buffer_unregister(buffer);
       CHECK_HIP(hipFree(buffer));
       break;
     case USER_BUF_TYPE_HEAP:
     default:
       rocshmem_free(buffer);
       break;
+  }
+
+  if (ROCSHMEM_SUCCESS != err) {
+    fprintf(stderr, "Deregistration Error");
   }
 }

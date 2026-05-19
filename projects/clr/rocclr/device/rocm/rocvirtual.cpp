@@ -264,8 +264,9 @@ void Timestamp::checkGpuTime(ProfilingSignal* single_signal) {
         ExtractSignalTiming(sig, start, end, sdmaStart, sdmaEnd);
       }
 
-      if (command().GetBatchHead() == nullptr || command().profilingInfo().marker_ts_ ||
-          command().type() == CL_COMMAND_TASK) {
+      if (IsLogEnabled(amd::LOG_INFO, amd::LOG_TS) &&
+          (command().GetBatchHead() == nullptr || command().profilingInfo().marker_ts_ ||
+           command().type() == CL_COMMAND_TASK)) {
         uint64_t sig_start, sig_end;
         sig->GetCachedTiming(sig_start, sig_end);
         amd_signal_t* amdSignal = reinterpret_cast<amd_signal_t*>(sig->signal_.handle);
@@ -296,26 +297,37 @@ void Timestamp::checkGpuTime(ProfilingSignal* single_signal) {
       signals_.clear();
     }
 
-    // Update member timing variables from local accumulators
-    // When processing single signal, merge with existing timing
-    // When processing all signals, replace timing
+    // Aggregate timing based on command type
     if (end != 0 || sdmaEnd != 0) {
-      const bool merge_with_existing = (single_signal != nullptr);
-      uint64_t final_start = ((sdmaEnd != 0) ? sdmaStart : start) * ticksToTime_;
-      uint64_t final_end = ((sdmaEnd != 0) ? sdmaEnd : end) * ticksToTime_;
+      uint64_t final_start, final_end;
+      const auto cmd_type = command().type();
+
+      if (cmd_type == CL_COMMAND_COPY_BUFFER || cmd_type == CL_COMMAND_READ_BUFFER ||
+          cmd_type == CL_COMMAND_WRITE_BUFFER || cmd_type == CL_COMMAND_COPY_BUFFER_RECT ||
+          cmd_type == CL_COMMAND_READ_BUFFER_RECT || cmd_type == CL_COMMAND_WRITE_BUFFER_RECT) {
+        // Copy/Read/Write — prefer SDMA timing, fall back to compute
+        final_start = ((sdmaEnd != 0) ? sdmaStart : start) * ticksToTime_;
+        final_end = ((sdmaEnd != 0) ? sdmaEnd : end) * ticksToTime_;
+      } else {
+        // Batch copy and all other commands — min/max across all engines
+        final_start = std::min(sdmaEnd != 0 ? sdmaStart : start,
+                               end != 0 ? start : sdmaStart) * ticksToTime_;
+        final_end = std::max(sdmaEnd, end) * ticksToTime_;
+      }
+
       if (!accum_ena_) {
         start_ = final_start;
         accum_ena_ = true;
-      } else if (merge_with_existing) {
+      } else {
         start_ = std::min(start_, final_start);
       }
-      end_ = merge_with_existing ? std::max(end_, final_end) : final_end;
+      end_ = std::max(end_, final_end);
     }
   }
 }
 
 // ================================================================================================
-// Extract timing from a single signal
+// Extract timing from a single signal and update accumulators
 void Timestamp::ExtractSignalTiming(ProfilingSignal* signal,
                                     uint64_t& start, uint64_t& end,
                                     uint64_t& sdmaStart, uint64_t& sdmaEnd) {
@@ -2232,7 +2244,6 @@ void VirtualGPU::profilingBegin(amd::Command& command, bool sdmaProfiling) {
     timestamp_ = new Timestamp(this, command);
     command.data().emplace_back(timestamp_);
     timestamp_->start();
-
     // Enable SDMA profiling on the first access if profiling is set
     // Its not per command basis
     if (sdmaProfiling && !Barriers().GetSDMAProfiling()) {
@@ -3103,7 +3114,12 @@ void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
   }
 
   // Synchronize the launch (compute) stream with SDMA engines.
+  // Reset active engine to Compute before the barrier — the barrier runs on the
+  // AQL compute queue, not an SDMA engine.  Without this, the barrier's profiling
+  // signal inherits an SDMA engine type, causing CacheTimingData to call
+  // hsa_amd_profiling_get_async_copy_time (wrong API) and corrupt the timestamps.
   if (result) {
+    Barriers().SetActiveEngine(HwQueueEngine::Compute);
     dispatchBarrierPacket(kNopPacketHeader);
   }
 

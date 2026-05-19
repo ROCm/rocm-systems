@@ -494,6 +494,18 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   }
 }
 
+/* Is ptr_b in range [ptr_a, ptr_a + len_a) */
+[[maybe_unused]]
+__host__ __device__ static bool
+is_ptr_in_range(uintptr_t ptr_a, size_t len_a, uintptr_t ptr_b) {
+
+  if ((len_a == 0) || (ptr_b < ptr_a)) {
+    return false;
+  }
+
+  return static_cast<size_t>(ptr_b - ptr_a) < len_a;
+}
+
 int rocm_init();
 
 void rocm_memory_lock_to_fine_grain(void* ptr, size_t size, void** gpu_ptr, int gpu_id);

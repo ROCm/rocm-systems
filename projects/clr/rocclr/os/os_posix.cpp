@@ -49,6 +49,61 @@
 
 namespace amd {
 
+namespace {
+thread_local std::vector<uint64_t> runtime_set_affinity_mask;
+thread_local bool runtime_set_affinity_mask_valid = false;
+thread_local uint32_t runtime_set_affinity_node = static_cast<uint32_t>(-1);
+thread_local std::vector<uint64_t> original_affinity_mask;
+thread_local bool original_affinity_mask_valid = false;
+
+bool GetCurrentThreadAffinity(std::vector<uint64_t>* affinity) {
+  const uint32_t size = CPU_ALLOC_SIZE(amd::Os::processorCount());
+  affinity->assign((size + sizeof(uint64_t) - 1) / sizeof(uint64_t), 0);
+  if (syscall(__NR_sched_getaffinity, 0, size, affinity->data()) < 0) {
+    ClPrint(amd::LOG_DEBUG, amd::LOG_RESOURCE,
+            "syscall(__NR_sched_getaffinity, size=%u) failed", size);
+    return false;
+  }
+  return true;
+}
+
+bool SetCurrentThreadAffinity(const std::vector<uint64_t>& affinity) {
+  const uint32_t size = static_cast<uint32_t>(affinity.size() * sizeof(uint64_t));
+  if (syscall(__NR_sched_setaffinity, 0, size, affinity.data()) < 0) {
+    ClPrint(amd::LOG_DEBUG, amd::LOG_RESOURCE,
+            "syscall(__NR_sched_setaffinity, size=%u) failed", size);
+    return false;
+  }
+  return true;
+}
+
+bool IsCpuSet(const std::vector<uint64_t>& affinity, uint32_t cpu) {
+  const uint32_t index = cpu / numa::kBitsPerUInt64;
+  return index < affinity.size() && ((affinity[index] >> (cpu % numa::kBitsPerUInt64)) & 1);
+}
+
+bool IsUnrestrictedAffinity(const std::vector<uint64_t>& affinity) {
+  for (uint32_t cpu = 0; cpu < static_cast<uint32_t>(amd::Os::processorCount()); ++cpu) {
+    if (!IsCpuSet(affinity, cpu)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool IsSameAffinity(const std::vector<uint64_t>& lhs, const std::vector<uint64_t>& rhs) {
+  const size_t size = std::max(lhs.size(), rhs.size());
+  for (size_t i = 0; i < size; ++i) {
+    const uint64_t l = (i < lhs.size()) ? lhs[i] : 0;
+    const uint64_t r = (i < rhs.size()) ? rhs[i] : 0;
+    if (l != r) {
+      return false;
+    }
+  }
+  return true;
+}
+}  // namespace
+
 // Crash signal handling
 static const int kCrashSignals[] = {SIGSEGV, SIGABRT, SIGBUS, SIGILL, SIGFPE};
 static constexpr size_t kNumCrashSignals = sizeof(kCrashSignals) / sizeof(kCrashSignals[0]);
@@ -1091,6 +1146,70 @@ bool NumaNode::SchedSetAffinity() {
   return true;
 }
 
+// ================================================================================================
+bool NumaNode::SchedSetAffinityIfAllowed() {
+  if (runtime_set_affinity_mask_valid && runtime_set_affinity_node == node_index_) {
+    return true;
+  }
+
+  std::vector<uint64_t> current_affinity;
+  if (!GetCurrentThreadAffinity(&current_affinity)) {
+    return false;
+  }
+
+  const bool current_mask_is_runtime_set =
+      runtime_set_affinity_mask_valid &&
+      IsSameAffinity(current_affinity, runtime_set_affinity_mask);
+  if (!current_mask_is_runtime_set && !IsUnrestrictedAffinity(current_affinity)) {
+    // Respect application, launcher, or cpuset affinity masks.
+    return false;
+  }
+
+  if (!original_affinity_mask_valid) {
+    original_affinity_mask = current_affinity;
+    original_affinity_mask_valid = true;
+  }
+
+  if (!SchedSetAffinity()) {
+    return false;
+  }
+
+  runtime_set_affinity_mask_valid = GetCurrentThreadAffinity(&runtime_set_affinity_mask);
+  if (runtime_set_affinity_mask_valid) {
+    runtime_set_affinity_node = node_index_;
+  }
+  return runtime_set_affinity_mask_valid;
+}
+
+// ================================================================================================
+bool resetThreadAffinity() {
+  if (!runtime_set_affinity_mask_valid || !original_affinity_mask_valid) {
+    return false;
+  }
+
+  std::vector<uint64_t> current_affinity;
+  if (!GetCurrentThreadAffinity(&current_affinity)) {
+    return false;
+  }
+
+  if (!IsSameAffinity(current_affinity, runtime_set_affinity_mask)) {
+    // The application changed affinity after ROCclr. Leave it intact.
+    runtime_set_affinity_mask_valid = false;
+    runtime_set_affinity_node = static_cast<uint32_t>(-1);
+    original_affinity_mask_valid = false;
+    original_affinity_mask.clear();
+    runtime_set_affinity_mask.clear();
+    return false;
+  }
+
+  const bool restored = SetCurrentThreadAffinity(original_affinity_mask);
+  runtime_set_affinity_mask_valid = false;
+  runtime_set_affinity_node = static_cast<uint32_t>(-1);
+  original_affinity_mask_valid = false;
+  original_affinity_mask.clear();
+  runtime_set_affinity_mask.clear();
+  return restored;
+}
 }  // namespace numa
 
 }  // namespace amd

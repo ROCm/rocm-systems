@@ -120,7 +120,10 @@ ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* ma
       if (fn == nullptr) continue;
 
       cudaError_t errcode = cudaFuncGetAttributes(&attr, fn);
-      if (errcode != cudaSuccess) continue; // Silently ignore failures
+      if (errcode != cudaSuccess) {
+		  cudaGetLastError(); // Drain error code
+		  continue; // Silently ignore failures
+	  }
       if (maxStackSize) {
         if (attr.localSizeBytes > *maxStackSize) *maxStackSize = attr.localSizeBytes;
       }
@@ -207,6 +210,9 @@ static void addWorkBatchToPlan(
       newBatch |= (comm->nNodes > 2 && batchP2P)? (chan->wipBatch.nP2ps == NCCL_MAX_DEV_WORK_P2P_PER_BATCH) : (chan->wipBatch.nP2ps == 1);
       for (int i=0; i < chan->wipBatch.nP2ps; i++) {
         newBatch |= p2pRound == chan->wipBatch.p2pRounds[i];
+        // Make sure we only aggregate p2p operations within the same p2p round epoch (one epoch is NCCL_MAX_DEV_WORK_P2P_PER_BATCH ops).
+        // This enforces uniform batching accross ranks in the communicator and prevents hangs.
+        newBatch |= (p2pRound / NCCL_MAX_DEV_WORK_P2P_PER_BATCH) != (chan->wipBatch.p2pRounds[i] / NCCL_MAX_DEV_WORK_P2P_PER_BATCH);
       }
     }
   }
@@ -3175,16 +3181,21 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
 }
 
 ncclResult_t ncclEnqueueCheck(struct ncclInfo* info) {
+  // Early-out on invalid or revoked communicator
+  ncclResult_t ret = CommCheck(info->comm, info->opName, "comm");
+  if (ret != ncclSuccess) return ncclGroupErrCheck(ret);
+  if (info->comm->revokedFlag) {
+    WARN("%s: communicator was revoked", info->opName);
+    return ncclGroupErrCheck(ncclInvalidUsage);
+  }
   // Profiler - If a group API event has already started, update the profilerGroupDepth so that the depth
   // updates correctly for implicit ncclGroupStartInternal and ncclGroupEndInternal calls
   if (ncclProfilerApiState.profilerGroupDepth > 0) {
     ncclProfilerApiState.profilerGroupDepth++;
   }
   NCCLCHECK(ncclGroupStartInternal());
-  ncclResult_t ret = ncclSuccess;
+  ret = ncclSuccess;
   int devOld = -1;
-
-  NCCLCHECKGOTO(CommCheck(info->comm, info->opName, "comm"), ret, fail);
   // Check whether communicator is ready to communicate
   NCCLCHECKGOTO(ncclCommEnsureReady(info->comm), ret, fail);
 
