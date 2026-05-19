@@ -336,3 +336,56 @@ ncclResult_t generateRings(int nNodes, uint8_t nChannels, int* nodeOrder) {
     ncclResult_t res = greedyRingGen(nNodes, nChannels, nodeOrder);
     return res;
 }
+
+
+/**
+ * findRingCutIndices
+ * Calculates the optimal index to cut within each ring to maintain load balance.
+ * 
+ * @param nChannels          Number of channels (rings)
+ * @param nNodes             Number of nodes per ring
+ * @param flattenedRings     Input array of size (k * n) containing the rings
+ * @param cutIndices         Output array of size (k) allocated by caller.
+ *                           The cut happens AFTER cutIndices[ch], making:
+ *                           Exit  = currentRing[cutIndices[ch]]
+ *                           Entry = currentRing[(cutIndices[ch] + 1) % n]
+ */
+void findRingCutIndices(int nChannels, int nNodes /*nodes in the ring graph*/, const int* flattenedRings /* Hamiltonian rings*/, int* cutIndices) {
+    if (nChannels <= 0 || nNodes <= 0 || !flattenedRings || !cutIndices) return;
+
+    // Track historical balancing state across all allocations
+    std::vector<int> exitCounts(nNodes, 0);
+    std::vector<int> entryCounts(nNodes, 0);
+
+    for (int channel = 0; channel < nChannels; channel++) {
+        const int* currentRing = &flattenedRings[channel * nNodes];
+
+        int bestCutIdx = 0;
+        int minScore = 2e9; // Sentinel high value
+
+        // Evaluate each possible edge cut inside the current ring
+        for (int i = 0; i < nNodes; i++) {
+            int u = currentRing[i];            // Potential Exit Node
+            int v = currentRing[(i + 1) % nNodes];  // Potential Entry Node
+
+            // Quadratic penalty function to enforce strict balance
+            int potentialExitScore  = (exitCounts[u] + 1) * (exitCounts[u] + 1);
+            int potentialEntryScore = (entryCounts[v] + 1) * (entryCounts[v] + 1);
+            int totalCost = potentialExitScore + potentialEntryScore;
+
+            if (totalCost < minScore) {
+                minScore = totalCost;
+                bestCutIdx = i;
+            }
+        }
+
+        // Commit the index for this channel
+        cutIndices[channel] = bestCutIdx;
+
+        // Keep our internal balance metrics updated
+        int finalExit = currentRing[bestCutIdx];
+        int finalEntry = currentRing[(bestCutIdx + 1) % nNodes];
+        exitCounts[finalExit]++;
+        entryCounts[finalEntry]++;
+    }
+}

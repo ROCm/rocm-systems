@@ -124,13 +124,19 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
     } 
   }
   int* localRankOrder = nullptr;
+  int* cutIndices = nullptr;
   if ( rcclParamIntraGraphGen() ) {
      NCCLCHECK(ncclCalloc(&localRankOrder, nChannels * localRanks));
      NCCLCHECK(generateRings(localRanks, nChannels, localRankOrder));
      for ( int c = 1; c < nChannels ; c++ ) {
       memcpy(graphs[NCCL_ALGO_RING]->intra+c*localRanks, graphs[NCCL_ALGO_RING]->intra, localRanks*sizeof(int));
     }
+    if ( rcclParamInterGraphGen() ) {
+      NCCLCHECK(ncclCalloc(&cutIndices,nChannels));
+      findRingCutIndices(nChannels, localRanks, localRankOrder,cutIndices);
+    }
   }
+
 
   for (int c=0; c<nChannels; c++) {
     struct ncclChannel* channel = comm->channels+c;
@@ -148,6 +154,12 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
         topoRanks->ringSend[c] = ringIntra[localRanks-1];
         topoRanks->ringPrev[c] = (i == 0) ? -1 : ringIntra[i-1];
         topoRanks->ringNext[c] = (i == localRanks-1) ? -1 : ringIntra[i+1];
+        if ( rcclParamInterGraphGen() ) {
+          topoRanks->ringRecv[c] = ringIntra[cutIndices[c]];
+          topoRanks->ringSend[c] = ringIntra[ ( cutIndices[c] + 1 ) % localRanks] ;
+          topoRanks->ringPrev[c] = ringIntra[ ( localRanks  +  i-1 ) % localRanks];
+          topoRanks->ringNext[c] = ringIntra[(i+1) % localRanks];
+        }
       }
       if (treeIntra[i] == rank) {
         int parentIndex = 0;
@@ -167,6 +179,7 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
     }
   }
   free(localRankOrder);
+  free(cutIndices);
   // Duplicate channels trees
   struct ncclChannel* channel0 = comm->channels;
   struct ncclChannel* channel1 = (nChannels > MAXCHANNELS/2) ? 0 : channel0+nChannels;
