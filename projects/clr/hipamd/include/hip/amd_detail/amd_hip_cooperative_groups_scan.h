@@ -261,7 +261,7 @@ namespace impl {
       } else {
         Val tmp;
 
-        std::memset(&tmp, 0, sizeof(tmp));
+        __builtin_memset(&tmp, 0, sizeof(tmp));
         return tmp;
       }
     }
