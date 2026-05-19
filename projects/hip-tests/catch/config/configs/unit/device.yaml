@@ -284,6 +284,12 @@ device:
     # (nvidia_windows) Disabling tests which no longer behave the same on nvidia platform
     disabled: [amd_wsl, nvidia_windows]
     tags: [synchronization]
+  Unit_hipDeviceReset_Positive_BeforeHeapInit:
+    <<: *level_2
+    tags: [synchronization]
+  Unit_hipDeviceReset_Positive_XferQueueRecreation:
+    <<: *level_2
+    tags: [synchronization]
   Unit_hipDeviceSetMemPool_Positive_Basic:
     <<: *level_2
     tags: [config]

@@ -145,6 +145,81 @@ HIP_TEST_CASE(Unit_hipDeviceReset_Positive_Threaded) {
 }
 
 /**
+ * Test Description
+ * ------------------------
+ *  - Validates that hipDeviceReset succeeds when called immediately after
+ *    hipSetDevice, before any queue or memory operation has initialized
+ *    heap resources. This exercises the early-reset path where the internal
+ *    transfer queue has never been created.
+ * Test source
+ * ------------------------
+ *  - unit/device/hipDeviceReset.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.13
+ */
+HIP_TEST_CASE(Unit_hipDeviceReset_Positive_BeforeHeapInit) {
+  const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
+  HIP_CHECK(hipSetDevice(device));
+  INFO("Current device is: " << device);
+
+  // Reset immediately — no malloc, stream, or kernel before this point.
+  // Heap resources (and the internal transfer queue) have never been initialized.
+  HIP_CHECK(hipDeviceReset());
+
+  // Verify the device is fully usable after the early reset.
+  void* ptr = nullptr;
+  HIP_CHECK(hipMalloc(&ptr, 1024));
+  HIP_CHECK(hipMemset(ptr, 0, 1024));
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipFree(ptr));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Validates that the device is fully usable after a reset that follows
+ *    real work. Specifically, allocates memory and performs a memcpy after
+ *    the reset to exercise the lazy re-creation of the internal transfer
+ *    queue (xferQueue_).
+ * Test source
+ * ------------------------
+ *  - unit/device/hipDeviceReset.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.13
+ */
+HIP_TEST_CASE(Unit_hipDeviceReset_Positive_XferQueueRecreation) {
+  const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
+  HIP_CHECK(hipSetDevice(device));
+  INFO("Current device is: " << device);
+
+  // Do real work first to ensure heap resources and the transfer queue are initialized.
+  void* ptr = nullptr;
+  HIP_CHECK(hipMalloc(&ptr, 1024));
+  HIP_CHECK(hipMemset(ptr, 0xAB, 1024));
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipFree(ptr));
+
+  HIP_CHECK(hipDeviceReset());
+
+  // After reset, xferQueue_ is null and must be lazily recreated on the
+  // next transfer operation. Perform a copy to trigger that path.
+  constexpr size_t kSize = 1024;
+  void* dev_ptr = nullptr;
+  HIP_CHECK(hipMalloc(&dev_ptr, kSize));
+
+  std::vector<uint8_t> host_src(kSize, 0xCD);
+  std::vector<uint8_t> host_dst(kSize, 0);
+
+  HIP_CHECK(hipMemcpy(dev_ptr, host_src.data(), kSize, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(host_dst.data(), dev_ptr, kSize, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipFree(dev_ptr));
+
+  CHECK(host_dst == host_src);
+}
+
+/**
  * End doxygen group DeviceTest.
  * @}
  */
