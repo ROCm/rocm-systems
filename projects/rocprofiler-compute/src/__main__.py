@@ -27,6 +27,7 @@
 
 import re
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 try:
@@ -48,16 +49,17 @@ except ImportError as e:
 
         from importlib import metadata
 
-        from rocprof_compute_base import RocProfCompute
         from utils.utils import console_error
+
+        from rocprof_compute_base import RocProfCompute
     except ImportError:
         pass
 
 
-def check_version(local_ver, desired_ver, operator) -> bool:
+def check_version(local_ver: str, desired_ver: str, operator: str | None) -> bool:
     """Check package version strings with simple operators used in companion
     requirements.txt file"""
-    ops = {
+    ops: dict[str, Callable[[str, str], bool]] = {
         "==": lambda loc, des: loc == des,
         ">=": lambda loc, des: loc >= des,
         "<=": lambda loc, des: loc <= des,
@@ -72,14 +74,6 @@ def verify_deps() -> None:
     to load them within current execution environment.
     Used in top-level rocprofiler-compute to provide error messages if necessary
     dependencies are not available."""
-
-    # Check which version of python is being used
-    if sys.version_info < (3, 8):
-        print(
-            f"[ERROR] Python 3.8 or higher is required to run rocprofiler-compute. "
-            f"The current version is {sys.version_info[0]}.{sys.version_info[1]}."
-        )
-        sys.exit(1)
 
     bindir = str(Path(__file__).resolve().parent)
     deps_locations = ["requirements.txt", "../requirements.txt"]
