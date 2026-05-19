@@ -11,6 +11,17 @@ repos:
       - id: trailing-whitespace
         files: ^projects/rocprofiler-compute/
 
+  # Block committed secrets
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args:
+          - --baseline
+          - projects/rocprofiler-compute/.secrets.baseline
+        files: ^projects/rocprofiler-compute/
+        exclude: ^projects/rocprofiler-compute/\.secrets\.baseline$
+
   # Python import sorting and formatting
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # Ruff version. Check https://github.com/astral-sh/ruff-pre-commit#version-compatibility
