@@ -22,6 +22,7 @@
 #define BOOTSTRAP_TAG_CONNECT             (0x1 << 31)
 #define BOOTSTRAP_TAG_ALLGATHER           (0x1 << 30)
 #define BOOTSTRAP_TAG_COMMSPLIT           (0x1 << 29)
+#define BOOTSTRAP_TAG_COMMSPLIT_REV       (BOOTSTRAP_TAG_COMMSPLIT | 0x1)
 #define BOOTSTRAP_TAG_INTRANODE_ALLGATHER (0x1 << 28)
 // Tag used to exchange reverse-ring listen handles during bidirectional NET
 // bootstrap setup (fallback path when no piggybacked handle is available).
@@ -1239,7 +1240,7 @@ ncclResult_t bootstrapSplit(uint64_t magic, struct ncclComm* comm, struct ncclCo
   struct ncclSocket* proxySocket = NULL;
   struct bootstrapState* state;
   union ncclSocketAddress peerSocketAddress;
-  bool useBidirBootstrap = bootstrapNetEnabledEffective(nranks) && bootstrapBidirEnabled(nranks, 1);
+  bool useBidirBootstrap = bootstrapBidirEnabled(nranks, 1);
   char prevRevHandle[NCCL_NET_HANDLE_MAXSIZE];
   memset(prevRevHandle, 0, NCCL_NET_HANDLE_MAXSIZE);
 
@@ -1285,9 +1286,9 @@ ncclResult_t bootstrapSplit(uint64_t magic, struct ncclComm* comm, struct ncclCo
   // For bidirectional bootstrap, do a second exchange in the opposite direction to get
   // prev's revHandle. Use a distinct tag to avoid message matching issues at scale.
   if (useBidirBootstrap) {
-    NCCLCHECKGOTO(bootstrapSend(parent->bootstrap, next, BOOTSTRAP_TAG_COMMSPLIT + 1, &info, sizeof(struct ringConnectInfo)), ret, fail);
-    NCCLCHECKGOTO(bootstrapRecv(parent->bootstrap, prev, BOOTSTRAP_TAG_COMMSPLIT + 1, &prevPeer, sizeof(struct ringConnectInfo)), ret, fail);
-    memcpy(prevRevHandle, prevPeer.revHandle, NCCL_NET_HANDLE_MAXSIZE);
+    NCCLCHECKGOTO(bootstrapSend(parent->bootstrap, next, BOOTSTRAP_TAG_COMMSPLIT_REV, &info, sizeof(struct ringConnectInfo)), ret, fail);
+    NCCLCHECKGOTO(bootstrapRecv(parent->bootstrap, prev, BOOTSTRAP_TAG_COMMSPLIT_REV, &prevPeer, sizeof(struct ringConnectInfo)), ret, fail);
+    memcpy(prevRevHandle, prevPeer.revHandle, NCCL_NET_HANDLE_MAXSIZE); // only revHandle is consumed from prevPeer
   }
 
   if (bootstrapNetEnabledEffective(nranks)) {
