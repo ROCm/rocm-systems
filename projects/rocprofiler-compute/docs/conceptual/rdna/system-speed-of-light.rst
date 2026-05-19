@@ -80,7 +80,7 @@ clock in MHz from profiler system specs.
 Bandwidth and cache rows
 ------------------------
 
-The throughput rows for TCP, GL1, GL2, and SQC use heuristic ceilings that are
+The throughput rows for GL0 (TCP Cache), GL1, GL2, and SQC use heuristic ceilings that are
 not anchored to a single public RDNA 3.5 table, so the percentage of peak
 reported for these rows is indicative rather than exact. The memory hierarchy
 runs GL0 (TCP Cache) -> GL1 -> GL2 -> system memory via GCEA. Each level's
