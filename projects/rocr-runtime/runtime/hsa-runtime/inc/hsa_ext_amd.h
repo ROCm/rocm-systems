@@ -4582,9 +4582,9 @@ typedef enum hsa_amd_sdma_queue_info_attribute_e {
   HSA_AMD_SDMA_QUEUE_INFO_AGENT = 5,
 
   /**
-   * Minimum submission size in bytes. Some ASICs (MI100/MI200) require
-   * 256-byte minimum. User MUST pad submissions below this with NOP packets.
-   * Type: uint32_t.
+   * Minimum submission size in bytes. Some gfx9 devices require
+   * 256-byte minimum. User must pad submissions below this with NOP packets.
+   * Type: size_t.
    */
   HSA_AMD_SDMA_QUEUE_INFO_MIN_SUBMISSION_SIZE = 6,
 

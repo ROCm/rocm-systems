@@ -134,7 +134,7 @@ void SdmaQueuesTest::SubmitLinearCopy() {
     EXPECT_NE(queue_info.write_ptr, nullptr);
     EXPECT_NE(queue_info.doorbell, nullptr);
 
-    uint32_t min_submission = 0;
+    size_t min_submission = 0;
     ASSERT_SUCCESS(hsa_amd_sdma_queue_get_info(queue, HSA_AMD_SDMA_QUEUE_INFO_MIN_SUBMISSION_SIZE,
                                                &min_submission));
 
@@ -162,8 +162,8 @@ void SdmaQueuesTest::SubmitLinearCopy() {
     };
 
     const uint32_t kPacketDwords = 7;
-    const uint32_t kPacketSize = kPacketDwords * sizeof(uint32_t);
-    uint32_t submission_size = std::max(kPacketSize, min_submission);
+    const size_t kPacketSize = kPacketDwords * sizeof(uint32_t);
+    size_t submission_size = std::max(kPacketSize, min_submission);
     ASSERT_LE(submission_size, queue_info.ring_size);
 
     uint8_t* ring = static_cast<uint8_t*>(queue_info.ring_base);
