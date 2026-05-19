@@ -37,3 +37,4 @@ int hsakmt_page_shift;
 
 /* zfb is mainly used during emulation */
 int hsakmt_zfb_support;
+int hsakmt_pm4_target_xcc;

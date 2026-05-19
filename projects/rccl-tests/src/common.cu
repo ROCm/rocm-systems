@@ -222,7 +222,7 @@ void Reporter::writeFile() {
     _out << "numCycle,";
     _out << "collective,";
 #ifdef MPI_SUPPORT
-    _out << "ranks,rankspernode,gpusperrank,";
+    _out << "nodes,ranks,ranksPerNode,gpusPerRank,";
 #else
     _out << "gpus,";
 #endif

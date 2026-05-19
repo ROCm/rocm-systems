@@ -1,20 +1,23 @@
 /*************************************************************************
- * Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
 
-#pragma once
+#ifndef RCCL_TEST_NET_IB_MPI_TEST_BASE_HPP_
+#define RCCL_TEST_NET_IB_MPI_TEST_BASE_HPP_
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include "MPITestBase.hpp"
+#include "NetIbCastInspect.hpp"
 #include "ResourceGuards.hpp"
 #include "TestChecks.hpp"
 #include "DeviceBufferHelpers.hpp"
 #include "HostBufferHelpers.hpp"
 #include "nccl.h"
 #include "net.h"
+#include "plugin/nccl_net.h"
 #include <vector>
 #include <memory>
 #include <cstring>
@@ -22,6 +25,14 @@
 #include <cstdio>
 #include <cstdlib>
 #include <algorithm>
+#include <cctype>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <map>
+#include <string>
+#include <dirent.h>
+#include <unistd.h>
 
 #ifdef MPI_TESTS_ENABLED
 
@@ -29,10 +40,55 @@
 using namespace RCCLTestGuards;
 using namespace RCCLTestHelpers;
 
+// Skip a Cast test when any required WRR scheduler env var is absent or wrong.
+// Must be called from the test body (not a helper), because GTEST_SKIP() only
+// interrupts execution when expanded inline in the test scope.
+// All vars below are set by the cast_base section in net_ib_transport.json.
+#define CAST_ENV_CHECK_OR_SKIP()                                                         \
+    do {                                                                                 \
+        struct { const char* name; const char* required; } _vars[] = {                  \
+            { "RCCL_IB_QP_SCHED_ENABLE",          "1"      },                           \
+            { "RCCL_IB_QP_SCHED_WRR_ENABLE",      "1"      },                           \
+            { "RCCL_IB_QP_SCHED_WEIGHT",          nullptr  },                           \
+            { "RCCL_IB_QP_SCHED_UPDATE_INTERVAL", nullptr  },                           \
+            { "RCCL_IB_QP_SCHED_RESET_INTERVAL",  nullptr  },                           \
+            { "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN",  nullptr  },                           \
+            { "NCCL_IB_QPS_PER_CONNECTION",        nullptr  },                           \
+            { "NCCL_IB_SPLIT_DATA_ON_QPS",         nullptr  },                           \
+        };                                                                               \
+        for (auto& _v : _vars) {                                                         \
+            const char* _val = getenv(_v.name);                                          \
+            bool _missing = !_val || _val[0] == '\0';                                    \
+            bool _wrong   = _v.required && (!_val || strcmp(_val, _v.required) != 0);   \
+            if (_missing || _wrong) {                                                    \
+                GTEST_SKIP() << "Cast tests require all WRR scheduler env vars. "       \
+                                "Missing or wrong: " << _v.name                         \
+                             << " (expected: " << (_v.required ? _v.required : "<any>") \
+                             << "). Use cast_* configs in net_ib_transport.json.";       \
+            }                                                                            \
+        }                                                                                \
+    } while (0)
+
 // External NET IB plugin
 extern ncclNet_t ncclNetIb;
 // External NET IB-CAST plugin (WRR scheduler, multi-QP)
 extern ncclNet_t netIbCast;
+
+// Select plugin by NCCL_NET env var name; falls back to ncclNetIb.
+inline ncclNet_t* GetPlugin() {
+    static ncclNet_t* plugins[] = {&ncclNetIb, &netIbCast};
+    const char* env = getenv("NCCL_NET");
+    if (env) {
+        for (auto* p : plugins) {
+            if (strcmp(env, p->name) == 0) {
+                TEST_INFO("Rank %d: Using plugin %s", MPIEnvironment::world_rank, p->name);
+                return p;
+            }
+        }
+    }
+    TEST_INFO("Rank %d: Using default plugin %s", MPIEnvironment::world_rank, ncclNetIb.name);
+    return &ncclNetIb;
+}
 
 // NET IB-specific resource deleters
 struct NetMHandleDeleter {
@@ -94,9 +150,6 @@ protected:
     static constexpr bool kRequirePowerOfTwo = true;
     static constexpr int kNoNodeLimit = MPITestConstants::kNoNodeLimit;
 
-    // Buffer pattern constants
-    static constexpr int kBytePatternModulo = 256;
-
     // Timing constants
     static constexpr int kDefaultTimeoutMs = 5000;
     static constexpr int kLargeTransferTimeoutMs = 30000;
@@ -136,7 +189,7 @@ protected:
 
     void SetUp() override {
         MPITestBase::SetUp();
-        net_ = &ncclNetIb;
+        net_ = GetPlugin();
         numDevices_ = 0;
         initCtx_ = nullptr;
     }
@@ -283,42 +336,6 @@ protected:
         return ncclSuccess;
     }
 
-    // Helper: Initialize device buffer with pattern using DeviceBufferHelpers
-    hipError_t InitializeBuffer(void* buffer, size_t size, int pattern) {
-        // Use template-based helper with custom pattern: (pattern + i) % kBytePatternModulo
-        return initializeBufferWithPattern<uint8_t>(
-            buffer, size,
-            [pattern](size_t i) { return static_cast<uint8_t>((pattern + i) % kBytePatternModulo); }
-        );
-    }
-
-    // Helper: Verify device buffer pattern using DeviceBufferHelpers
-    bool VerifyBuffer(void* buffer, size_t size, int pattern) {
-        // Use template-based helper with pattern verification
-        return verifyBufferData<uint8_t>(
-            buffer, size,
-            [pattern](size_t i) {
-                return static_cast<uint8_t>((pattern + i) % kBytePatternModulo);
-            }
-        );
-    }
-
-    // Helper: Fill host buffer with pattern using HostBufferHelpers
-    void FillHostBuffer(void* buffer, size_t size, int seed) {
-        fillHostBufferWithPattern<uint8_t>(
-            buffer, size,
-            [seed](size_t i) { return static_cast<uint8_t>((seed + i) % kBytePatternModulo); }
-        );
-    }
-
-    // Helper: Verify host buffer pattern using HostBufferHelpers
-    bool VerifyHostBuffer(const void* buffer, size_t size, int seed) {
-        return verifyHostBufferData<uint8_t>(
-            buffer, size,
-            [seed](size_t i) { return static_cast<uint8_t>((seed + i) % kBytePatternModulo); }
-        );
-    }
-
     // Helper: Retry until the receiver's FIFO slot is ready.
     void PostSendWithRetry(void* sendComm, void* data, size_t size, int tag,
                            void* mhandle, void** request) {
@@ -458,6 +475,363 @@ protected:
 
         return outMergedDev;
     }
+
+
+    // On return: rank 0 owns listenComm+recvComm, rank 1 owns sendComm.
+    // Caller is responsible for closing all comms.
+    void SetupCastConnection(int dev,
+                             void** listenComm, void** sendComm, void** recvComm) {
+        const int rank = MPIEnvironment::world_rank;
+        const int peer = 1 - rank;
+        ncclNetHandle_t handle;
+        memset(&handle, 0, sizeof(handle));
+
+        if (rank == 0) {
+            ASSERT_EQ(CreateListenComm(dev, &handle, listenComm), ncclSuccess);
+            ASSERT_NE(*listenComm, nullptr);
+
+            MPI_Send(&handle, sizeof(handle), MPI_BYTE, peer, 0, MPI_COMM_WORLD);
+
+            for (int i = 0; i < kMaxRetryAttempts && *recvComm == nullptr; i++) {
+                ASSERT_EQ(AcceptConnection(*listenComm, recvComm), ncclSuccess);
+                if (*recvComm == nullptr) usleep(kPollIntervalUs);
+            }
+            ASSERT_NE(*recvComm, nullptr);
+        } else {
+            MPI_Recv(&handle, sizeof(handle), MPI_BYTE, peer, 0, MPI_COMM_WORLD,
+                     MPI_STATUS_IGNORE);
+
+            for (int i = 0; i < kMaxRetryAttempts && *sendComm == nullptr; i++) {
+                ncclResult_t r = ConnectToRemote(dev, &handle, sendComm);
+                ASSERT_EQ(r, ncclSuccess);
+                if (*sendComm == nullptr) usleep(kPollIntervalUs);
+            }
+            ASSERT_NE(*sendComm, nullptr);
+        }
+
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+
+    // Composite block: Warmup send + read real nqps from sendComm on rank 1.
+    // Both ranks call this together. actualNqps is broadcast so rank 0 can coordinate.
+    // buf/mhandle must already be registered against the caller's comm.
+    int GetActualNqps(void* sendComm, void* recvComm,
+                      void* buf, size_t size, int tag, void* mhandle) {
+        const int rank = MPIEnvironment::world_rank;
+        CastDoSendRecv(rank, sendComm, recvComm, buf, size, tag, mhandle);
+        int nqps = 0;
+        if (rank == 1) {
+            struct ncclIbCastSchedState probe = {};
+            EXPECT_EQ(ncclIbCastGetSchedState(sendComm, &probe), ncclSuccess);
+            nqps = probe.nqps;
+        }
+        MPI_Bcast(&nqps, 1, MPI_INT, 1, MPI_COMM_WORLD);
+        EXPECT_GT(nqps, 0);
+        return nqps;
+    }
+
+    // Read RCCL_IB_QP_SCHED_SPLIT_DATA_MIN from the environment.
+    // Falls back to 65536 if unset (matches the RCCL default).
+    static uint32_t GetSplitDataMin() {
+        const char* v = getenv("RCCL_IB_QP_SCHED_SPLIT_DATA_MIN");
+        return (v && v[0]) ? static_cast<uint32_t>(std::stoul(v)) : 65536u;
+    }
+
+    // Build an equal-weight token vector summing to totTokens for nqps QPs.
+    // Remainder distributed to the first slots.
+    static std::vector<int> EqualTokens(int nqps, int totTokens = 100) {
+        std::vector<int> t(nqps, totTokens / nqps);
+        for (int i = 0; i < totTokens % nqps; i++) t[i]++;
+        return t;
+    }
+
+    // Composite block: Single-message send/recv pair for CAST tests.
+    // rank 0 posts irecv and waits; rank 1 posts isend (with retry) and waits.
+    // Both sides must have already registered buf/mhandle against their comm.
+    void CastDoSendRecv(int rank, void* sendComm, void* recvComm,
+                        void* buf, size_t size, int tag, void* mhandle) {
+        void* req = nullptr;
+        if (rank == 0) {
+            void*  bufs[1]    = {buf};
+            size_t sizes[1]   = {size};
+            int    tags[1]    = {tag};
+            void*  handles[1] = {mhandle};
+            ASSERT_EQ(PostRecv(recvComm, 1, bufs, sizes, tags, handles, &req), ncclSuccess);
+            ASSERT_NE(req, nullptr);
+            int sz = 0;
+            ASSERT_EQ(WaitForCompletion(req, &sz, 10000), ncclSuccess);
+        } else {
+            PostSendWithRetry(sendComm, buf, size, tag, mhandle, &req);
+            int sz = 0;
+            ASSERT_EQ(WaitForCompletion(req, &sz, 10000), ncclSuccess);
+        }
+    }
+
+    // Composite block: Concurrent N-message send/recv for CAST tests.
+    // All N sends/recvs are posted before any completion is waited on, allowing
+    // the transport to pipeline multiple WRs in flight simultaneously.
+    //
+    // bufs[i] / baseTag+i must be pre-registered via mhandle (a single MR
+    // covering the whole multi-message buffer is fine).
+    //
+    // rank 0: posts N irecvs, then waits for all N completions.
+    // rank 1: posts N isends (with per-message retry), then waits for all N.
+    void CastDoBatchSendRecv(int rank, void* sendComm, void* recvComm,
+                             char* sendBuf, char* recvBuf,
+                             size_t msgSz, int nMsgs, int baseTag, void* mhandle) {
+        std::vector<void*> reqs(nMsgs, nullptr);
+        if (rank == 0) {
+            for (int i = 0; i < nMsgs; i++) {
+                void*  bufs[1]    = {recvBuf + i * msgSz};
+                size_t sizes[1]   = {msgSz};
+                int    tags[1]    = {baseTag + i};
+                void*  handles[1] = {mhandle};
+                ASSERT_EQ(PostRecv(recvComm, 1, bufs, sizes, tags, handles, &reqs[i]), ncclSuccess);
+                ASSERT_NE(reqs[i], nullptr);
+            }
+            for (int i = 0; i < nMsgs; i++) {
+                int sz = 0;
+                ASSERT_EQ(WaitForCompletion(reqs[i], &sz, 10000), ncclSuccess);
+            }
+        } else {
+            for (int i = 0; i < nMsgs; i++) {
+                PostSendWithRetry(sendComm, sendBuf + i * msgSz, msgSz, baseTag + i, mhandle, &reqs[i]);
+            }
+            for (int i = 0; i < nMsgs; i++) {
+                int sz = 0;
+                ASSERT_EQ(WaitForCompletion(reqs[i], &sz, 10000), ncclSuccess);
+            }
+        }
+    }
+
+    // Poll req until done or maxPolls exhausted. Safe to call with req==nullptr.
+    // Does not assert completion — the recv may legitimately time out when
+    // the sender faulted.
+    void DrainRecvRequest(void* req, int maxPolls = 500) {
+        if (req == nullptr) return;
+        for (int poll = 0; poll < maxPolls; ++poll) {
+            int done = 0, sz = 0;
+            if (TestRequest(req, &done, &sz) != ncclSuccess) break;
+            if (done) break;
+            usleep(kPollIntervalUs);
+        }
+    }
+
+    // Deregister mhandle, close comms rank-conditionally, barrier.
+    // rank 0 closes recvComm + listenComm; rank 1 closes sendComm.
+    // Call after any pre-teardown MPI_Barrier the test needs.
+    void TeardownConnection(void* recvComm, void* listenComm,
+                            void* sendComm, void* mhandle) {
+        const int rank = MPIEnvironment::world_rank;
+        void* comm = (rank == 0) ? recvComm : sendComm;
+        ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
+        if (rank == 0) {
+            ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
+            ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
+        } else {
+            ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+
+    // Assert WRR scheduler has been initialised with equal-weight tokens.
+    // Checks: schedInit==true, nqps==expectedNqps, initTotTokens==100,
+    //         each QP >= floor(100/nqps), sum(initQpTokens)==initTotTokens.
+    // Call from rank 1 (sender) — state comes from sendComm.
+    void ExpectEqualWeightInitTokens(const ncclIbCastSchedState& state, int expectedNqps) {
+        ASSERT_TRUE(state.schedInit);
+        EXPECT_EQ(state.nqps, expectedNqps);
+        EXPECT_EQ(state.initTotTokens, 100);
+        const int base = 100 / expectedNqps;
+        for (int i = 0; i < state.nqps; i++)
+            EXPECT_GE(state.initQpTokens[i], base)
+                << "QP " << i << " initToken below equal-weight floor";
+        int sum = 0;
+        for (int i = 0; i < state.nqps; i++) sum += state.initQpTokens[i];
+        EXPECT_EQ(sum, state.initTotTokens);
+    }
+
+    // Assert sum(activeQpTokens) == activeTotTokens.
+    void ExpectActiveTokenSumInvariant(const ncclIbCastSchedState& state) {
+        int activeSum = 0;
+        for (int i = 0; i < state.nqps; i++) activeSum += state.activeQpTokens[i];
+        EXPECT_EQ(activeSum, state.activeTotTokens);
+    }
 };
 
-#endif // MPI_TESTS_ENABLED
+// ============================================================================
+// CTS hw_counters helpers (for CtsDepthStress and friends).
+// Snapshots /sys/class/infiniband/<dev>/ports/<N>/hw_counters/ and the
+// device-level /sys/class/infiniband/<dev>/hw_counters/ for CTS deltas.
+// ============================================================================
+namespace NetIbCts {
+
+using CounterMap = std::map<std::string, long long>;
+
+inline const std::vector<std::string>& kCtsKeywords() {
+    static const std::vector<std::string> v = {
+        "cts_pkts", "cts_bytes",
+        "cts_retx",          // retransmit = overflow signal
+        "cts_ack_timeout",   // ACK timeout = overflow signal
+        "cts_miss", "cts_cache", "cts_match",
+        "nak", "rdma_ccl",
+    };
+    return v;
+}
+
+inline bool isCtsRelevant(const std::string& name) {
+    std::string lower(name.size(), '\0');
+    std::transform(name.begin(), name.end(), lower.begin(),
+                   [](char c) { return static_cast<char>(
+                       std::tolower(static_cast<unsigned char>(c))); });
+    for (const auto& kw : kCtsKeywords())
+        if (lower.find(kw) != std::string::npos) return true;
+    return false;
+}
+
+inline void readCountersDir(const std::string& dir,
+                            const std::string& keyPrefix,
+                            CounterMap& out) {
+    DIR* d = opendir(dir.c_str());
+    if (!d) return;
+    struct dirent* ent;
+    while ((ent = readdir(d)) != nullptr) {
+        if (ent->d_name[0] == '.') continue;
+        std::ifstream f(dir + "/" + ent->d_name);
+        long long val = 0;
+        if (f >> val)
+            out[keyPrefix + "/" + ent->d_name] = val;
+    }
+    closedir(d);
+}
+
+inline std::vector<std::string> listDirEntries(const std::string& dir) {
+    std::vector<std::string> entries;
+    DIR* d = opendir(dir.c_str());
+    if (!d) return entries;
+    struct dirent* ent;
+    while ((ent = readdir(d)) != nullptr)
+        if (ent->d_name[0] != '.') entries.push_back(ent->d_name);
+    closedir(d);
+    std::sort(entries.begin(), entries.end());
+    return entries;
+}
+
+inline CounterMap readHwCounters(const std::string& ibdev) {
+    CounterMap result;
+    const std::string devBase = "/sys/class/infiniband/" + ibdev;
+    for (const auto& portName : listDirEntries(devBase + "/ports")) {
+        readCountersDir(devBase + "/ports/" + portName + "/hw_counters",
+                        ibdev + "/port" + portName, result);
+    }
+    readCountersDir(devBase + "/hw_counters", ibdev + "/dev", result);
+    return result;
+}
+
+inline std::vector<std::string> listIbDevices() {
+    return listDirEntries("/sys/class/infiniband");
+}
+
+inline CounterMap takeSnapshot() {
+    CounterMap snap;
+    for (const auto& dev : listIbDevices()) {
+        auto m = readHwCounters(dev);
+        snap.insert(m.begin(), m.end());
+    }
+    return snap;
+}
+
+inline std::string formatSignedDelta(long long delta) {
+    return (delta >= 0 ? "+" : "") + std::to_string(delta);
+}
+
+inline void printDelta(int rank,
+                       const std::string& fromLabel,
+                       const std::string& toLabel,
+                       const CounterMap& before,
+                       const CounterMap& after) {
+    struct Row { std::string name; long long vb, va, delta; };
+    std::vector<Row> rows;
+    for (const auto& kv : after) {
+        if (!isCtsRelevant(kv.first)) continue;
+        long long vb = 0;
+        auto it = before.find(kv.first);
+        if (it != before.end()) vb = it->second;
+        long long delta = kv.second - vb;
+        if (delta != 0)
+            rows.push_back({kv.first, vb, kv.second, delta});
+    }
+
+    const int wName = 55, wVal = 12, wDelta = 12;
+    std::cout << "\n[Rank " << rank << "] "
+              << fromLabel << " -> " << toLabel << "\n";
+    if (rows.empty()) {
+        std::cout << "  (no CTS-relevant changes)\n" << std::flush;
+        return;
+    }
+    std::cout << "  " << std::left  << std::setw(wName)  << "counter"
+              <<         std::right << std::setw(wVal)   << "before"
+              <<         std::right << std::setw(wVal)   << "after"
+              <<         std::right << std::setw(wDelta) << "delta"
+              << "\n  " << std::string(wName + wVal + wVal + wDelta, '-') << "\n";
+    for (const auto& r : rows)
+        std::cout << "  " << std::left  << std::setw(wName)  << r.name
+                  <<         std::right << std::setw(wVal)   << r.vb
+                  <<         std::right << std::setw(wVal)   << r.va
+                  <<         std::right << std::setw(wDelta) << formatSignedDelta(r.delta)
+                  << "\n";
+    std::cout << std::flush;
+}
+
+struct SnapSummary {
+    long long pkts        = 0;
+    long long bytes       = 0;
+    long long retx_pkts   = 0;  // cts_retx_pkts   - overflow signal
+    long long ack_timeout = 0;  // cts_ack_timeout - overflow signal
+};
+
+inline SnapSummary calcSummary(const CounterMap& before, const CounterMap& after) {
+    SnapSummary s;
+    for (const auto& kv : after) {
+        auto it = before.find(kv.first);
+        long long d = kv.second - (it != before.end() ? it->second : 0LL);
+        if (d == 0) continue;
+        const std::string& n = kv.first;
+        if (n.find("cts_retx_pkts")    != std::string::npos) s.retx_pkts   += d;
+        if (n.find("cts_ack_timeout")  != std::string::npos) s.ack_timeout += d;
+        if (n.find("cts_pkts")         != std::string::npos &&
+            n.find("retx")             == std::string::npos) s.pkts        += d;
+        if (n.find("cts_bytes")        != std::string::npos &&
+            n.find("retx")             == std::string::npos) s.bytes       += d;
+    }
+    return s;
+}
+
+inline void printSummary(int rank,
+                         const std::string& label,
+                         int connsDone,
+                         int qpDepth,
+                         const CounterMap& before,
+                         const CounterMap& after) {
+    auto s = calcSummary(before, after);
+    long long bpp = s.pkts > 0 ? s.bytes / s.pkts : 0;
+
+    std::cout << "[Rank " << rank << "]"
+              << "  conns=" << std::setw(4) << connsDone
+              << "  entries=" << std::setw(6) << (connsDone * qpDepth)
+              << "  cts_pkts=" << std::setw(6) << s.pkts
+              << "  bytes/pkt=" << bpp
+              << "  retx=" << s.retx_pkts
+              << "  ack_timeout=" << s.ack_timeout;
+    if (s.retx_pkts > 0 || s.ack_timeout > 0) {
+        std::cout << "  <<< OVERFLOW at ~"
+                  << connsDone * qpDepth << " entries >>>";
+    }
+    std::cout << "  [" << label << "]\n" << std::flush;
+}
+
+}  // namespace NetIbCts
+
+#endif /* MPI_TESTS_ENABLED */
+
+#endif /* RCCL_TEST_NET_IB_MPI_TEST_BASE_HPP_ */

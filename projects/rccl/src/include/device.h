@@ -19,6 +19,8 @@
     #define _HIP_BFLOAT16_H_
     #include <hip/hip_bf16.h>
     typedef __hip_bfloat16 hip_bfloat16;
+  #elif ROCM_VERSION >= 70000
+    #include <hip/hip_bf16.h>
   #else
     #error "RCCL is not using the correct hip_bf16.h file. Please make sure that the correct header is included!"
   #endif
@@ -166,7 +168,21 @@ union ncclLLFifoLine {
 // Make sure the clean mask will last for at least NCCL_NSTEPS
 static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK value");
 
+ /* Note regarding LL128 macros settings in RCCL below:
+  * Device code: NCCL_LL128_LINESIZE is arch-dependent (128 for gfx1250, 64 otherwise).
+  * Host code: Must NOT use these macros for logic as they default to 64. Instead use
+  * rcclLL128LineElemsFromArch() / rcclLL128DataElemsFromArch() (archinfo.h) or
+  * comm->ll128LineElems / comm->ll128DataElems (and proxyState->* in the net proxy). */
+
+#if __HIP_DEVICE_COMPILE__
+#if defined (__gfx1250__)
+#define NCCL_LL128_LINESIZE 128
+#else
 #define NCCL_LL128_LINESIZE 64
+#endif
+#else
+#define NCCL_LL128_LINESIZE 64
+#endif
 #define NCCL_LL128_LINEELEMS (NCCL_LL128_LINESIZE/sizeof(uint64_t))
 #define NCCL_LL128_DATAELEMS (NCCL_LL128_LINEELEMS-1)
 

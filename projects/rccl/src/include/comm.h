@@ -27,6 +27,8 @@
 #include "latency_profiler/CollTrace.h"
 #include "rccl_common.h"
 #include "recorder.h"
+#include "ipc_init_detail.h"
+#include "mem_manager.h"
 
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
@@ -116,6 +118,7 @@ struct cliqueInfo {
 struct ncclDestructor {
   struct ncclDestructor* next;
   void* obj;
+  struct ncclComm* comm;
   ncclResult_t(*fn)(struct ncclDestructor* me);
 };
 
@@ -490,6 +493,7 @@ typedef enum ncclGroupTaskType {
 } ncclGroupTaskType_t;
 
 struct ncclCommSymTeams;
+class ncclIpcMemHandler;
 
 struct ncclComm {
   uint64_t startMagic;
@@ -517,6 +521,14 @@ struct ncclComm {
   ncclCollNet_t* ncclCollNet;
   void* collNetContext;
   void* bootstrap;
+
+  // DDA IPC all-reduce: per-rank device scratch + IPC handles (see ncclDdaIpcCommInit)
+  ncclIpcMemHandler* ddaIpcMemHandler;
+  void* ddaIpcScratch;
+  size_t ddaIpcScratchBytes;
+  void* ddaIpcPeerPtrsDev;
+  nccl_dda_ipc_detail::DdaIpcBarrierState* ddaIpcBarrierState; /* see ncclDdaIpcCommInit */
+
   // Bitmasks for ncclTransportP2pSetup
   struct channelMasks* connectSend;
   struct channelMasks* connectRecv;
@@ -624,6 +636,7 @@ struct ncclComm {
   uint32_t* childAbortFlag;
   uint32_t* childAbortFlagDev;
   uint32_t destroyFlag;
+  uint32_t revokedFlag;
 
   // Flags for enable P2P NET
   uint32_t p2pNet;
@@ -706,6 +719,10 @@ struct ncclComm {
 
   hipEvent_t doneEvent;
   hipStream_t lastStream;
+  // False until the first kernel launch on this comm. Distinguishes "no prior launch"
+  // from "prior launch on the default stream (lastStream==nullptr)" so ncclLaunchPrepare
+  // can correctly detect a stream change in either case.
+  bool lastStreamValid;
   latency_profiler::CollTrace* ctrace;
 
 #ifdef ENABLE_COLLTRACE
@@ -770,6 +787,9 @@ struct ncclComm {
   char* archName;
   // multiProcessorCount from hipDeviceProp_t [RCCL]
   int cuCount;
+  // [RCCL] Host mirrors of device side NCCL_LL128_LINEELEMS / NCCL_LL128_DATAELEMS
+  int ll128LineElems;
+  int ll128DataElems;
 
 #ifdef ENABLE_ROCSHMEM
   // circular ring buffer in rocshmem symmetric heap
@@ -788,6 +808,8 @@ struct ncclComm {
   bool enableDirectReduceScatter;
   // Temporary Buffer [RCCL]
   void* tempBuff;
+
+  struct ncclMemManager* memManager;  // Memory manager
 
   uint64_t endMagic;
 };

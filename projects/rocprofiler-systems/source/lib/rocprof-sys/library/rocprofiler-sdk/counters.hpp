@@ -7,6 +7,7 @@
 #include "core/perfetto.hpp"
 #include "core/timemory.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
+#include <cstdint>
 
 #include <timemory/utility/types.hpp>
 
@@ -60,8 +61,8 @@ struct counter_event
 struct counter_storage
 {
     const client_data*                    tool_data          = nullptr;
-    uint64_t                              device_id          = 0;
-    int64_t                               index              = 0;
+    std::uint64_t                         device_id          = 0;
+    std::int64_t                          index              = 0;
     std::string                           metric_name        = {};
     std::string                           metric_description = {};
     std::string                           storage_name       = {};
@@ -70,7 +71,7 @@ struct counter_storage
     std::unique_ptr<counter_storage_type> storage            = {};
     std::unique_ptr<counter_track_type>   track              = {};
 
-    counter_storage(const client_data* _tool_data, uint64_t _devid, size_t _idx,
+    counter_storage(const client_data* _tool_data, std::uint64_t _devid, size_t _idx,
                     std::string_view _name);
 
     ~counter_storage()                                 = default;
