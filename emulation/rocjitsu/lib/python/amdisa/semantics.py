@@ -155,6 +155,8 @@ def _scalar_binop_scc(op: str, dtype: str) -> str:
     """Determine SCC semantics for a scalar binary operation."""
     if op in _SCC_NONE_OPS:
         return 'none'
+    if dtype in ('f16', 'f32', 'f64', 'bf16'):
+        return 'none'
     if op in _SCC_COMPARE_OPS:
         return 'compare'
     # add/addc/lshl*_add on unsigned → carry
@@ -439,7 +441,14 @@ def _derive_sopk(name: str) -> InstructionSemantics | None:
                                        operation=op,
                                        data_type=_DTYPE_MAP[dt_raw])
 
-    # Everything else (GETREG, SETREG, CBRANCH_I_FORK, …) → nop
+    if name == 'S_GETREG_B32':
+        return InstructionSemantics(name, 'scalar_getreg')
+    if name == 'S_SETREG_B32':
+        return InstructionSemantics(name, 'scalar_setreg')
+    if name == 'S_SETREG_IMM32_B32':
+        return InstructionSemantics(name, 'scalar_setreg_imm')
+
+    # Everything else (CBRANCH_I_FORK, …) → nop
     return InstructionSemantics(name, 'nop')
 
 # Map mnemonic stem → operation.
@@ -928,7 +937,7 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
 
     # CDNA4 scaled FP8/BF8/FP6/FP4 conversions
     if 'CVT_SCALEF32' in name.upper():
-        return InstructionSemantics(name, 'nop')  # TODO: Phase 3 scaled conversions
+        return InstructionSemantics(name, 'nop')  # scaled conversions not yet implemented
 
     # V_PK_FMAC_F16 VOP2 form — the VOP3P form is handled via _VOP3P_PK16_MAP.
     if name == 'V_PK_FMAC_F16':

@@ -59,7 +59,6 @@ jobs:
         strip: ['OFF']
         hidden: ['ON']
         build-type: ['Release']
-        mpi-headers: ['OFF']
         build-dyninst: ['ON']
         rocm-version: ['6.3', '6.4', '7.0', '7.1', '7.2']
 
@@ -146,7 +145,6 @@ jobs:
         append-tagname() { if [ "${1}" == "ON" ]; then TAG="${TAG}-${2}"; fi; }
         append-tagname ${{ matrix.rocm }} rocm-${{ matrix.rocm-version }}
         append-tagname ${{ matrix.python }} python
-        append-tagname ${{ matrix.mpi-headers }} mpip
         append-tagname ${{ matrix.build-dyninst }} internal-dyninst
         append-tagname ${{ matrix.strip }} strip
         append-tagname ${{ matrix.hidden }} hidden-viz
@@ -161,7 +159,6 @@ jobs:
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev \
           -DROCPROFSYS_BUILD_TESTING=ON \
           -DROCPROFSYS_USE_PYTHON=${{ matrix.python }} \
-          -DROCPROFSYS_USE_MPI_HEADERS=${{ matrix.mpi-headers }} \
           -DROCPROFSYS_BUILD_DYNINST=${{ matrix.build-dyninst }} \
           -DROCPROFSYS_BUILD_BOOST=${{ matrix.build-dyninst }} \
           -DROCPROFSYS_BUILD_TBB=${{ matrix.build-dyninst }} \
@@ -336,7 +333,6 @@ jobs:
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev \
           -DROCPROFSYS_BUILD_TESTING=ON \
           -DROCPROFSYS_USE_PYTHON=ON \
-          -DROCPROFSYS_USE_MPI_HEADERS=OFF \
           -DROCPROFSYS_BUILD_DYNINST=ON \
           -DROCPROFSYS_BUILD_BOOST=OFF \
           -DROCPROFSYS_BUILD_TBB=OFF \

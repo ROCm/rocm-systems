@@ -148,11 +148,13 @@ class TestGenVectorCmpxWriteBacks:
     def test_writeback_invariants(
         self, profile_cls, is_vop3, dst, expect_sdst_write, expect_vcc_write
     ):
-        cg = _make_codegen(profile_cls())
-        body = cg._gen_vector_cmpx(
+        from amdisa.codegen.execute.vector_cmp import gen_vector_cmpx
+        profile = profile_cls()
+        body = gen_vector_cmpx(
             src=['s0', 's1'],
             op='t',  # bypasses _cmp_condition; see class docstring
             dtype='u32',
+            cmpx_writes_vcc=profile.cmpx_writes_vcc,
             is_vop3=is_vop3,
             dst=dst,
         )
