@@ -359,9 +359,9 @@ _SOP1_SPECIAL = {
     # RDNA4-exclusive SOP1 instructions:
     'S_CTZ_I32': ('scalar_unary', 'ctz'),
     'S_CLZ_I32_U32': ('scalar_unary', 'clz'),
-    'S_CLZ_I32_U64': ('scalar_unary', 'clz64'),
+    'S_CLZ_I32_U64': ('scalar_unary', 'clz64', 'u64'),
     'S_CLS_I32': ('scalar_unary', 'cls'),
-    'S_CLS_I32_I64': ('scalar_unary', 'cls64'),
+    'S_CLS_I32_I64': ('scalar_unary', 'cls64', 'i64'),
     'S_MOVRELSD2': ('nop', None),
     'S_MOVRELSD2_B32': ('nop', None),
     'S_MOVRELSD_2': ('nop', None),
@@ -449,8 +449,10 @@ def _derive_sop1(name: str) -> InstructionSemantics | None:
         stem, dtype = _split_dtype(name)
     entry = _SOP1_SPECIAL.get(stem)
     if entry is not None:
-        cls, op = entry
-        # SCC for unary ops: bitset0/1 produce no SCC, most others → nonzero
+        cls, op = entry[0], entry[1]
+        entry_dtype = entry[2] if len(entry) > 2 else None
+        if entry_dtype:
+            dtype = entry_dtype
         scc = None
         if cls == 'scalar_unary':
             if op in ('bitset0', 'bitset1'):

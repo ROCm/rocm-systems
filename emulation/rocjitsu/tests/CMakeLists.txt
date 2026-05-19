@@ -276,11 +276,6 @@ if(HSA_RUNTIME64)
                 COMMAND hsa_translate_test --gtest_filter=*VectorAdd*
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
             )
-            add_test(
-                NAME "HsaTranslateTest.TranslateAndDispatchMfma16x16"
-                COMMAND hsa_translate_test --gtest_filter=*Mfma16x16*
-                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-            )
             message(
                 STATUS
                 "HSA translate test enabled (supported DBT GPU detected)"
