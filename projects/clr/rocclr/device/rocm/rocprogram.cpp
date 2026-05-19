@@ -239,7 +239,6 @@ bool Program::setKernels(void* binary, size_t binSize, amd::Os::FileDesc fdesc,
     return false;
   }
 
-#if !defined(_WIN32)
   // If we received a file descriptor, hand the code object's file region to
   // rocr via the vendor extension so it can mmap it itself (and resolve the
   // URI directly from the fd). Fall back to from_memory when the fd is
@@ -250,9 +249,7 @@ bool Program::setKernels(void* binary, size_t binSize, amd::Os::FileDesc fdesc,
           .hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size;
   if (fdesc != amd::Os::FDescInit() && create_from_file != nullptr) {
     status = create_from_file(fdesc, foffset, binSize, &hsaCodeObjectReader_);
-  } else
-#endif // !defined(_WIN32)
-  {
+  } else {
     status = Hsa::code_object_reader_create_from_memory(binary, binSize, &hsaCodeObjectReader_);
   }
   if (fdesc != amd::Os::FDescInit()) {
