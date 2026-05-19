@@ -26,6 +26,7 @@ import json
 import os
 import pathlib
 import sys
+import time
 
 import unittest
 
@@ -329,11 +330,13 @@ class GTestSummaryRunner(unittest.TextTestRunner):
         return text
 
     def run(self, test):
+        start = time.perf_counter()
         result = super().run(test)
-        self._print_gtest_summary(result)
+        elapsed_ms = round((time.perf_counter() - start) * 1000)
+        self._print_gtest_summary(result, elapsed_ms)
         return result
 
-    def _print_gtest_summary(self, result):
+    def _print_gtest_summary(self, result, elapsed_ms):
         """Write the GTest-style pass/skip/fail block to *self.stream*."""
         stream = self.stream  # unittest._WritelnDecorator, supports .writeln()
         skipped = len(result.skipped)
@@ -348,7 +351,7 @@ class GTestSummaryRunner(unittest.TextTestRunner):
         stream.writeln(
             self._color(
                 self._CYAN,
-                f"[----------] {result.testsRun} test{self._plural(result.testsRun)} ran.",
+                f"[----------] {result.testsRun} test{self._plural(result.testsRun)} ran. ({elapsed_ms} ms total)",
             )
         )
         stream.writeln(
