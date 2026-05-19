@@ -65,7 +65,12 @@
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#if __has_include(<numa.h>)
 #include <numa.h>
+#define HAS_NUMA 1
+#else
+#define HAS_NUMA 0
+#endif
 #if defined(__i386__) || defined(__x86_64__)
 #include <cpuid.h>
 #endif
@@ -92,6 +97,7 @@ void* __stdcall ThreadTrampoline(void* arg) {
   return nullptr;
 }
 
+#if HAS_NUMA
 // Helper function to get NUMA node mask for allowed CPUs.
 // Returns a bitmask where each bit represents whether the corresponding NUMA node
 // is allowed based on the current process's CPU affinity.
@@ -200,6 +206,7 @@ static void FillCpuSetFromNumaNodes(cpu_set_t* cpuset, int cores, unsigned long 
 
   numa_free_cpumask(node_cpus);
 }
+#endif  // HAS_NUMA
 
 
 // Thread container allows multiple waits and separate close (destroy).
@@ -250,9 +257,16 @@ class os_thread {
         return;
       }
 
+#if HAS_NUMA
       // Get the NUMA node mask based on main thread's CPU affinity
       unsigned long allowed_node_mask = GetAllowedNumaNodeMask();
       FillCpuSetFromNumaNodes(cpuset, cores, allowed_node_mask);
+#else
+      // NUMA not available - allow all CPU cores
+      for (int i = 0; i < cores; i++) {
+        CPU_SET_S(i, CPU_ALLOC_SIZE(cores), cpuset);
+      }
+#endif
 
 #ifdef HAVE_PTHREAD_ATTR_SETAFFINITY_NP
       err = pthread_attr_setaffinity_np(&attrib, CPU_ALLOC_SIZE(cores), cpuset);
@@ -289,8 +303,15 @@ class os_thread {
       // We need to recreate the cpuset since it was freed above
       cpuset = CPU_ALLOC(cores);
       if (cpuset != nullptr) {
+#if HAS_NUMA
         unsigned long allowed_node_mask = GetAllowedNumaNodeMask();
         FillCpuSetFromNumaNodes(cpuset, cores, allowed_node_mask);
+#else
+        // NUMA not available - allow all CPU cores
+        for (int i = 0; i < cores; i++) {
+          CPU_SET_S(i, CPU_ALLOC_SIZE(cores), cpuset);
+        }
+#endif
 
         err = pthread_setaffinity_np(thread, CPU_ALLOC_SIZE(cores), cpuset);
         CPU_FREE(cpuset);
