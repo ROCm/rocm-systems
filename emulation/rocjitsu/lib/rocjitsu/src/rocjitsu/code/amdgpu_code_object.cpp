@@ -171,10 +171,11 @@ AmdGpuCodeObject::AmdGpuCodeObject(const uint8_t *elf_bytes, size_t elf_size) {
 
     if (sec_name == ".text")
       text_sections_.push_back(sections_.back().get());
-    if (is_executable_section(shdr))
-      code_sections_.push_back(sections_.back().get());
     else if (sec_name == ".rodata")
       rodata_sections_.push_back(sections_.back().get());
+
+    if (is_executable_section(shdr))
+      code_sections_.push_back(sections_.back().get());
   }
 
   target_id_ = target_from_machine_flags(header_->flags());
@@ -266,10 +267,11 @@ void AmdGpuCodeObject::load_sections(std::ifstream &elf_file) {
 
     if (sec_name == ".text")
       text_sections_.push_back(sections_.back().get());
-    if (is_executable_section(shdr))
-      code_sections_.push_back(sections_.back().get());
     else if (sec_name == ".rodata")
       rodata_sections_.push_back(sections_.back().get());
+
+    if (is_executable_section(shdr))
+      code_sections_.push_back(sections_.back().get());
   }
 
   // Parse symbol table for kernel descriptor offsets.

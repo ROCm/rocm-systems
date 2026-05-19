@@ -362,9 +362,149 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_descriptor_after_text() {
 
   std::array<Elf64_Sym, sym_count> syms{};
   syms[1].st_name = kd_symbol_name;
+  syms[1].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeObject);
   syms[1].st_shndx = 2;
   syms[1].st_value = rodata_vaddr;
   syms[1].st_size = sizeof(KD);
+  std::memcpy(image.data() + symtab_offset, syms.data(), syms.size() * sizeof(Elf64_Sym));
+
+  std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
+
+  std::array<Elf64_Shdr, section_count> shdrs{};
+  shdrs[1].sh_name = text_name;
+  shdrs[1].sh_type = SHT_PROGBITS;
+  shdrs[1].sh_flags = SHF_ALLOC | SHF_EXECINSTR;
+  shdrs[1].sh_addr = text_vaddr;
+  shdrs[1].sh_offset = text_offset;
+  shdrs[1].sh_size = text_size;
+  shdrs[1].sh_addralign = sizeof(uint32_t);
+
+  shdrs[2].sh_name = rodata_name;
+  shdrs[2].sh_type = SHT_PROGBITS;
+  shdrs[2].sh_flags = SHF_ALLOC;
+  shdrs[2].sh_addr = rodata_vaddr;
+  shdrs[2].sh_offset = rodata_offset;
+  shdrs[2].sh_size = rodata_size;
+  shdrs[2].sh_addralign = 64;
+
+  shdrs[3].sh_name = symtab_name;
+  shdrs[3].sh_type = SHT_SYMTAB;
+  shdrs[3].sh_offset = symtab_offset;
+  shdrs[3].sh_size = syms.size() * sizeof(Elf64_Sym);
+  shdrs[3].sh_link = 4;
+  shdrs[3].sh_info = 1;
+  shdrs[3].sh_addralign = 8;
+  shdrs[3].sh_entsize = sizeof(Elf64_Sym);
+
+  shdrs[4].sh_name = strtab_name;
+  shdrs[4].sh_type = SHT_STRTAB;
+  shdrs[4].sh_offset = strtab_offset;
+  shdrs[4].sh_size = strtab.size();
+  shdrs[4].sh_addralign = 1;
+
+  shdrs[5].sh_name = shstrtab_name;
+  shdrs[5].sh_type = SHT_STRTAB;
+  shdrs[5].sh_offset = shstrtab_offset;
+  shdrs[5].sh_size = shstrtab.size();
+  shdrs[5].sh_addralign = 1;
+
+  std::memcpy(image.data() + shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
+  return image;
+}
+
+std::vector<uint8_t> make_minimal_amdgpu_elf_with_two_kernel_descriptors() {
+  using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
+  constexpr uint64_t text_offset = 0x100;
+  constexpr uint64_t text_vaddr = 0x1100;
+  constexpr uint64_t text_size = 8;
+  constexpr uint64_t load_align = 0x1000;
+  constexpr uint64_t rodata_size = 2 * sizeof(KD);
+
+  std::vector<uint8_t> shstrtab{'\0'};
+  const uint32_t text_name = add_elf_name(shstrtab, ".text");
+  const uint32_t rodata_name = add_elf_name(shstrtab, ".rodata");
+  const uint32_t symtab_name = add_elf_name(shstrtab, ".symtab");
+  const uint32_t strtab_name = add_elf_name(shstrtab, ".strtab");
+  const uint32_t shstrtab_name = add_elf_name(shstrtab, ".shstrtab");
+
+  std::vector<uint8_t> strtab{'\0'};
+  const uint32_t kernel0_name = add_elf_name(strtab, "kernel0.kd");
+  const uint32_t kernel1_name = add_elf_name(strtab, "kernel1.kd");
+
+  const uint64_t rodata_offset = text_offset + text_size;
+  const uint64_t rodata_vaddr = text_vaddr + text_size + load_align;
+  const uint64_t strtab_offset = rodata_offset + rodata_size;
+  const uint64_t symtab_offset = align_up_for_test(strtab_offset + strtab.size(), 8);
+  constexpr size_t sym_count = 3;
+  const uint64_t shstrtab_offset = symtab_offset + sym_count * sizeof(Elf64_Sym);
+  const uint64_t shoff = align_up_for_test(shstrtab_offset + shstrtab.size(), 8);
+  constexpr uint16_t section_count = 6;
+  constexpr uint16_t phdr_count = 2;
+
+  std::vector<uint8_t> image(shoff + section_count * sizeof(Elf64_Shdr), 0);
+
+  Elf64_Ehdr ehdr{};
+  std::memcpy(ehdr.e_ident, EI_MAGIC, EI_MAGIC_SIZE);
+  ehdr.e_ident[EI_CLASS] = ELFCLASS64;
+  ehdr.e_ident[EI_OSABI] = ELFOSABI_AMDGPU_HSA;
+  ehdr.e_type = ET_DYN;
+  ehdr.e_machine = EM_AMDGPU;
+  ehdr.e_version = 1;
+  ehdr.e_phoff = sizeof(Elf64_Ehdr);
+  ehdr.e_shoff = shoff;
+  ehdr.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX950;
+  ehdr.e_ehsize = sizeof(Elf64_Ehdr);
+  ehdr.e_phentsize = sizeof(Elf64_Phdr);
+  ehdr.e_phnum = phdr_count;
+  ehdr.e_shentsize = sizeof(Elf64_Shdr);
+  ehdr.e_shnum = section_count;
+  ehdr.e_shstrndx = 5;
+  std::memcpy(image.data(), &ehdr, sizeof(ehdr));
+
+  std::array<Elf64_Phdr, phdr_count> phdrs{};
+  phdrs[0].p_type = PT_LOAD;
+  phdrs[0].p_flags = 0x5; // PF_R | PF_X
+  phdrs[0].p_offset = text_offset;
+  phdrs[0].p_vaddr = text_vaddr;
+  phdrs[0].p_paddr = text_vaddr;
+  phdrs[0].p_filesz = text_size;
+  phdrs[0].p_memsz = text_size;
+  phdrs[0].p_align = load_align;
+
+  phdrs[1].p_type = PT_LOAD;
+  phdrs[1].p_flags = 0x4; // PF_R
+  phdrs[1].p_offset = rodata_offset;
+  phdrs[1].p_vaddr = rodata_vaddr;
+  phdrs[1].p_paddr = rodata_vaddr;
+  phdrs[1].p_filesz = rodata_size;
+  phdrs[1].p_memsz = rodata_size;
+  phdrs[1].p_align = load_align;
+  std::memcpy(image.data() + ehdr.e_phoff, phdrs.data(), phdrs.size() * sizeof(Elf64_Phdr));
+
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const std::array<uint32_t, 2> text_words = {kCdna4SEndpgm, kCdna4SEndpgm};
+  std::memcpy(image.data() + text_offset, text_words.data(), text_size);
+
+  std::array<KD, 2> descriptors{};
+  descriptors[0].kernel_code_entry_byte_offset =
+      static_cast<int64_t>(text_vaddr) - static_cast<int64_t>(rodata_vaddr);
+  descriptors[1].kernel_code_entry_byte_offset =
+      static_cast<int64_t>(text_vaddr + sizeof(uint32_t)) -
+      static_cast<int64_t>(rodata_vaddr + sizeof(KD));
+  std::memcpy(image.data() + rodata_offset, descriptors.data(), rodata_size);
+  std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
+
+  std::array<Elf64_Sym, sym_count> syms{};
+  syms[1].st_name = kernel0_name;
+  syms[1].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeObject);
+  syms[1].st_shndx = 2;
+  syms[1].st_value = rodata_vaddr;
+  syms[1].st_size = sizeof(KD);
+  syms[2].st_name = kernel1_name;
+  syms[2].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeObject);
+  syms[2].st_shndx = 2;
+  syms[2].st_value = rodata_vaddr + sizeof(KD);
+  syms[2].st_size = sizeof(KD);
   std::memcpy(image.data() + symtab_offset, syms.data(), syms.size() * sizeof(Elf64_Sym));
 
   std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
@@ -599,6 +739,7 @@ std::vector<uint8_t> make_large_amdgpu_elf_with_waitcnt_entry() {
 
   std::array<Elf64_Sym, sym_count> syms{};
   syms[1].st_name = kd_symbol_name;
+  syms[1].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeObject);
   syms[1].st_shndx = 1;
   syms[1].st_value = rodata_vaddr;
   syms[1].st_size = sizeof(KD);
@@ -893,7 +1034,7 @@ TEST(CodeObjectPatcher, CaveBodyMaterializesInRjTranslationsAfterText) {
   patcher.set_cave_start(co.text_sections()[0]->size());
   const std::array<uint32_t, 2> cave_words = {0xDEADBEEFu, 0xCAFEBABEu};
   patcher.append_cave_body(cave_words);
-  patcher.append_cave_section();
+  ASSERT_TRUE(patcher.append_cave_section());
 
   auto patched_bytes = patcher.emit();
   AmdGpuCodeObject patched(patched_bytes.data(), patched_bytes.size());
@@ -936,7 +1077,7 @@ TEST(CodeObjectPatcher, CaveInsertionPreservesLoadSegmentAlignment) {
   patcher.set_cave_start(co.text_sections()[0]->size());
   const std::vector<uint32_t> cave_words(load_align / sizeof(uint32_t) + 1, 0xDEADBEEFu);
   patcher.append_cave_body(cave_words);
-  patcher.append_cave_section();
+  ASSERT_TRUE(patcher.append_cave_section());
 
   auto patched_bytes = patcher.emit();
   AmdGpuCodeObject patched(patched_bytes.data(), patched_bytes.size());
@@ -1006,7 +1147,7 @@ TEST(CodeObjectPatcher, CaveInsertionPreservesMovedKernelDescriptorEntryAddress)
   patcher.set_cave_start(co.text_sections()[0]->size());
   const std::vector<uint32_t> cave_words(load_align / sizeof(uint32_t) + 1, 0xDEADBEEFu);
   patcher.append_cave_body(cave_words);
-  patcher.append_cave_section();
+  ASSERT_TRUE(patcher.append_cave_section());
 
   auto patched_bytes = patcher.emit();
   AmdGpuCodeObject patched(patched_bytes.data(), patched_bytes.size());
@@ -1038,7 +1179,7 @@ TEST(CodeObjectPatcher, CaveInsertionUpdatesRelocationOffsetsIntoMovedSections) 
   patcher.set_cave_start(co.text_sections()[0]->size());
   const std::vector<uint32_t> cave_words(load_align / sizeof(uint32_t) + 1, 0xDEADBEEFu);
   patcher.append_cave_body(cave_words);
-  patcher.append_cave_section();
+  ASSERT_TRUE(patcher.append_cave_section());
 
   auto patched_bytes = patcher.emit();
   AmdGpuCodeObject patched(patched_bytes.data(), patched_bytes.size());
@@ -1230,6 +1371,71 @@ TEST(BinaryTranslatorE2E, TranslateVectorAddCdna4ToRdna4) {
   constexpr uint32_t kEfAmdgpuMachGfx1200 = 0x48;
   EXPECT_EQ(e_flags & 0xFF, kEfAmdgpuMachGfx1200)
       << "ELF e_flags should contain GFX1200 machine type";
+}
+
+TEST(BinaryTranslatorE2E, TranslatesMultiKernelCodeObject) {
+  using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
+
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_two_kernel_descriptors();
+  rocjitsu::AmdGpuCodeObject co(image.data(), image.size());
+  ASSERT_TRUE(co.is_valid());
+  ASSERT_FALSE(co.text_sections().empty());
+  const auto *text = co.text_sections()[0];
+  const auto *rodata = rocjitsu::find_section(co, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+
+  rocjitsu::KernelDescriptorTranslator original_parser(ROCJITSU_CODE_ARCH_CDNA4,
+                                                       ROCJITSU_CODE_ARCH_RDNA4);
+  const auto original_infos = original_parser.translate_image(
+      image, text->sectionOffset(), text->size(), rocjitsu::KernelDescriptorTranslationOptions{});
+  ASSERT_EQ(original_infos.size(), 2u);
+
+  std::vector<uint64_t> original_entries;
+  std::vector<uint64_t> original_descriptor_offsets;
+  for (const auto &info : original_infos) {
+    original_entries.push_back(info.entry_text_offset);
+    original_descriptor_offsets.push_back(info.descriptor_file_offset);
+  }
+  std::ranges::sort(original_entries);
+  std::ranges::sort(original_descriptor_offsets);
+  EXPECT_EQ(original_entries, (std::vector<uint64_t>{0, sizeof(uint32_t)}));
+  EXPECT_EQ(original_descriptor_offsets,
+            (std::vector<uint64_t>{rodata->sectionOffset(), rodata->sectionOffset() + sizeof(KD)}));
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+  auto result = translator.translate(co);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.warnings.empty());
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+  EXPECT_EQ(translated.text_sections()[0]->size(), text->size());
+  EXPECT_EQ(rocjitsu::find_section(translated, ".rj_translations"), nullptr)
+      << "this fixture should exercise multi-kernel descriptor handling without code caves";
+
+  const auto *translated_header =
+      reinterpret_cast<const rocjitsu::Elf64_Ehdr *>(result.elf_bytes.data());
+  EXPECT_EQ(translated_header->e_flags & rocjitsu::EF_AMDGPU_MACH,
+            rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1200);
+
+  rocjitsu::KernelDescriptorTranslator translated_parser(ROCJITSU_CODE_ARCH_RDNA4,
+                                                         ROCJITSU_CODE_ARCH_RDNA4);
+  const auto translated_infos = translated_parser.translate_image(
+      result.elf_bytes, translated.text_sections()[0]->sectionOffset(),
+      translated.text_sections()[0]->size(), rocjitsu::KernelDescriptorTranslationOptions{});
+  ASSERT_EQ(translated_infos.size(), 2u);
+
+  std::vector<uint64_t> translated_entries;
+  std::vector<uint64_t> translated_descriptor_offsets;
+  for (const auto &info : translated_infos) {
+    translated_entries.push_back(info.entry_text_offset);
+    translated_descriptor_offsets.push_back(info.descriptor_file_offset);
+  }
+  std::ranges::sort(translated_entries);
+  std::ranges::sort(translated_descriptor_offsets);
+  EXPECT_EQ(translated_entries, (std::vector<uint64_t>{0, sizeof(uint32_t)}));
+  EXPECT_EQ(translated_descriptor_offsets, original_descriptor_offsets);
 }
 
 TEST(KernelDescriptorTranslator, Cdna4ToRdna4MaterializesWorkgroupIdsFromTtmpGridPayload) {

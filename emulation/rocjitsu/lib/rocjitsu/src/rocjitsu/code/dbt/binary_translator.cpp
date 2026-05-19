@@ -21,8 +21,8 @@
 
 #include <algorithm>
 #include <cassert>
-#include <climits>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <span>
 #include <unordered_set>
@@ -69,7 +69,15 @@ LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t ho
                                               int16_t &offset_dwords) {
   // SOPP branches encode a signed dword offset from the next instruction. Keep
   // the range check shared so both cave entry and return branches fail closed.
-  if (branch_pc > static_cast<uint64_t>(INT64_MAX - 4) || target > static_cast<uint64_t>(INT64_MAX))
+  constexpr int64_t kBranchPcBiasBytes = static_cast<int64_t>(sizeof(uint32_t));
+  constexpr uint64_t kMaxSignedTarget =
+      static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
+  constexpr uint64_t kMaxSignedBranchPc =
+      static_cast<uint64_t>(std::numeric_limits<int64_t>::max() - kBranchPcBiasBytes);
+  // The PCs are unsigned until this check passes. Compare against the casted
+  // signed int64_t limits so the later signed conversion, and branch_pc + 4,
+  // cannot overflow.
+  if (branch_pc > kMaxSignedBranchPc || target > kMaxSignedTarget)
     return false;
 
   const int64_t delta_bytes = static_cast<int64_t>(target) - (static_cast<int64_t>(branch_pc) + 4);
@@ -77,7 +85,8 @@ LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t ho
     return false;
 
   const int64_t delta_dwords = delta_bytes / static_cast<int64_t>(sizeof(uint32_t));
-  if (delta_dwords < INT16_MIN || delta_dwords > INT16_MAX)
+  if (delta_dwords < std::numeric_limits<int16_t>::min() ||
+      delta_dwords > std::numeric_limits<int16_t>::max())
     return false;
 
   offset_dwords = static_cast<int16_t>(delta_dwords);
@@ -332,7 +341,11 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   }
 
   patcher.overwrite_text(translated_text);
-  patcher.append_cave_section();
+  if (!patcher.append_cave_section()) {
+    result.warnings.push_back(
+        "code cave section could not be materialized safely; leaving code object unchanged");
+    return leave_unchanged();
+  }
 
   if (target_mach_)
     patcher.update_elf_flags(target_mach_);

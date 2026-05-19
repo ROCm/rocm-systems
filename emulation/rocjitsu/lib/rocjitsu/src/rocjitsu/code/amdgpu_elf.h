@@ -96,6 +96,15 @@ inline constexpr uint32_t SHT_NOBITS = 8; // ELF spec: section occupies no file 
 inline constexpr uint32_t SHT_REL = 9;
 inline constexpr uint32_t SHT_DYNSYM = 11;
 
+inline constexpr uint8_t kElfSymbolBindGlobal = 1;
+inline constexpr uint8_t kElfSymbolTypeObject = 1;
+
+inline constexpr uint8_t elf_symbol_bind(uint8_t info) { return info >> 4; }
+inline constexpr uint8_t elf_symbol_type(uint8_t info) { return info & 0xf; }
+inline constexpr uint8_t elf_symbol_info(uint8_t bind, uint8_t type) {
+  return static_cast<uint8_t>((bind << 4) | (type & 0xf));
+}
+
 inline constexpr uint64_t SHF_WRITE = 1u << 0;
 inline constexpr uint64_t SHF_ALLOC = 1u << 1;
 inline constexpr uint64_t SHF_EXECINSTR = 1u << 2;

@@ -17,9 +17,9 @@ RJ_DIAGNOSTIC_POP
 #include <algorithm>
 #include <array>
 #include <cassert>
-#include <climits>
 #include <cstddef>
 #include <cstring>
+#include <limits>
 #include <numeric>
 #include <optional>
 // Standard library
@@ -78,7 +78,8 @@ void write_elf_tables(std::vector<uint8_t> &image, const Elf64_Ehdr &ehdr,
 void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
                        std::vector<Elf64_Shdr> &shdrs, std::vector<Elf64_Phdr> &phdrs,
                        uint64_t file_offset, std::span<const uint8_t> bytes,
-                       int grown_section_index, bool grow_load_at_segment_end) {
+                       std::optional<size_t> grown_section_index,
+                       bool grow_load_at_segment_end) {
   assert(file_offset <= image.size() && "ELF insertion offset out of bounds");
   if (bytes.empty())
     return;
@@ -95,7 +96,7 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
   // Sections at or after the insertion point move forward, except for the one
   // section that the caller is explicitly extending in place.
   for (size_t i = 0; i < shdrs.size(); ++i) {
-    if (static_cast<int>(i) == grown_section_index)
+    if (grown_section_index && i == *grown_section_index)
       continue;
     if (shdrs[i].sh_type == SHT_NULL)
       continue;
@@ -126,7 +127,8 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
   const uint64_t gcd = std::gcd(lhs, rhs);
   if (gcd == 0)
     return 0;
-  assert(lhs / gcd <= UINT64_MAX / rhs && "ELF load alignment LCM overflow");
+  assert(lhs / gcd <= std::numeric_limits<uint64_t>::max() / rhs &&
+         "ELF load alignment LCM overflow");
   return std::lcm(lhs, rhs);
 }
 
@@ -165,7 +167,7 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
   name_bytes.push_back('\0');
 
   insert_file_bytes(image, ehdr, shdrs, phdrs, shstrtab.sh_offset + shstrtab.sh_size, name_bytes,
-                    ehdr.e_shstrndx, false);
+                    static_cast<size_t>(ehdr.e_shstrndx), false);
   shstrtab.sh_size += name_bytes.size();
   return name_offset;
 }
@@ -236,7 +238,8 @@ void shift_symbols_in_moved_sections(std::vector<uint8_t> &image, const Elf64_Eh
       if (!shift_section_vaddr[symbol.st_shndx])
         continue;
 
-      assert(symbol.st_value <= UINT64_MAX - delta && "ELF symbol value overflow");
+      assert(symbol.st_value <= std::numeric_limits<uint64_t>::max() - delta &&
+             "ELF symbol value overflow");
       symbol.st_value += delta;
       std::memcpy(image.data() + symbol_offset, &symbol, sizeof(symbol));
     }
@@ -289,7 +292,8 @@ void shift_relocation_offsets_in_moved_sections(std::vector<uint8_t> &image, con
         std::memcpy(&rela, image.data() + offset, sizeof(rela));
         if (!relocation_place_was_moved(rela.r_offset, shdrs, shift_section_vaddr, delta))
           continue;
-        assert(rela.r_offset <= UINT64_MAX - delta && "ELF relocation offset overflow");
+        assert(rela.r_offset <= std::numeric_limits<uint64_t>::max() - delta &&
+               "ELF relocation offset overflow");
         rela.r_offset += delta;
         std::memcpy(image.data() + offset, &rela, sizeof(rela));
       }
@@ -305,7 +309,8 @@ void shift_relocation_offsets_in_moved_sections(std::vector<uint8_t> &image, con
       std::memcpy(&rel, image.data() + offset, sizeof(rel));
       if (!relocation_place_was_moved(rel.r_offset, shdrs, shift_section_vaddr, delta))
         continue;
-      assert(rel.r_offset <= UINT64_MAX - delta && "ELF relocation offset overflow");
+      assert(rel.r_offset <= std::numeric_limits<uint64_t>::max() - delta &&
+             "ELF relocation offset overflow");
       rel.r_offset += delta;
       std::memcpy(image.data() + offset, &rel, sizeof(rel));
     }
@@ -316,8 +321,16 @@ void shift_relocation_offsets_in_moved_sections(std::vector<uint8_t> &image, con
                                             size_t strtab_size) {
   if (symbol.st_size != sizeof(KD))
     return false;
-  // Stripped objects can leave descriptors unnamed; the descriptor size is the
-  // durable signal in that case.
+
+  // AMDHSA kernel descriptors are global object symbols. This keeps other
+  // sizeof(KD) data objects from being treated as descriptors by accident.
+  if (elf_symbol_type(symbol.st_info) != kElfSymbolTypeObject ||
+      elf_symbol_bind(symbol.st_info) != kElfSymbolBindGlobal)
+    return false;
+
+  // Named descriptors must use the AMDHSA ".kd" suffix. Stripped objects can
+  // leave descriptors unnamed; after the ABI type/bind checks above, accepting
+  // unnamed symbols preserves support for those minimized objects.
   if (strtab == nullptr || strtab_size == 0 || symbol.st_name == 0)
     return true;
   if (symbol.st_name >= strtab_size)
@@ -325,7 +338,7 @@ void shift_relocation_offsets_in_moved_sections(std::vector<uint8_t> &image, con
 
   const char *name = strtab + symbol.st_name;
   const size_t len = strnlen(name, strtab_size - symbol.st_name);
-  return len < 3 || std::strcmp(name + len - 3, ".kd") == 0;
+  return len >= 3 && std::strcmp(name + len - 3, ".kd") == 0;
 }
 
 void adjust_kernel_descriptor_entry_offsets_in_moved_sections(
@@ -383,7 +396,8 @@ void adjust_kernel_descriptor_entry_offsets_in_moved_sections(
 
       KD desc{};
       std::memcpy(&desc, image.data() + file_offset, sizeof(desc));
-      assert(delta <= static_cast<uint64_t>(INT64_MAX) && "kernel descriptor shift too large");
+      assert(delta <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) &&
+             "kernel descriptor shift too large");
       desc.kernel_code_entry_byte_offset -= static_cast<int64_t>(delta);
       std::memcpy(image.data() + file_offset, &desc, sizeof(desc));
     }
@@ -519,7 +533,8 @@ std::optional<uint64_t> CodeObjectPatcher::append_kernel_entry_prologue(
     return std::nullopt;
 
   const int64_t target_dwords = target_delta_bytes / static_cast<int64_t>(sizeof(uint32_t));
-  if (target_dwords < INT16_MIN || target_dwords > INT16_MAX)
+  if (target_dwords < std::numeric_limits<int16_t>::min() ||
+      target_dwords > std::numeric_limits<int16_t>::max())
     return std::nullopt;
 
   if (alignment_padding != 0) {
@@ -554,9 +569,11 @@ void CodeObjectPatcher::append_cave_body(std::span<const uint32_t> words) {
   cave_body_.insert(cave_body_.end(), bytes, bytes + words.size() * 4);
 }
 
-void CodeObjectPatcher::append_cave_section(std::string_view section_name) {
+bool CodeObjectPatcher::append_cave_section(std::string_view section_name) {
   if (cave_body_.empty())
-    return;
+    return true;
+  if (text_size_ == 0)
+    return false;
 
   assert(cave_start_ == text_size_ &&
          "separate cave sections must start immediately after original .text");
@@ -571,7 +588,7 @@ void CodeObjectPatcher::append_cave_section(std::string_view section_name) {
   const auto text_index = find_text_section(shdrs, text_offset_, text_size_);
   if (!text_index) {
     assert(false && "text section header not found");
-    return;
+    return false;
   }
 
   const auto text_header = shdrs[*text_index];
@@ -587,6 +604,10 @@ void CodeObjectPatcher::append_cave_section(std::string_view section_name) {
   // LOAD segment but not part of the .rj_translations section.
   const uint64_t file_delta_alignment = shifted_load_delta_alignment(phdrs, cave_file_offset);
   const uint64_t padded_file_delta = align_up(cave_body_.size(), file_delta_alignment);
+  assert(padded_file_delta >= cave_body_.size() && "aligned cave delta underflowed");
+  assert((file_delta_alignment <= 1 || padded_file_delta % file_delta_alignment == 0) &&
+         "padded cave delta is not load-aligned");
+  assert(padded_file_delta % sizeof(uint32_t) == 0 && "padded cave delta must stay word-aligned");
   std::vector<uint8_t> cave_file_bytes(cave_body_.begin(), cave_body_.end());
   cave_file_bytes.resize(padded_file_delta, 0);
 
@@ -606,11 +627,18 @@ void CodeObjectPatcher::append_cave_section(std::string_view section_name) {
       shift_segment_vaddr[i] = true;
   }
 
-  insert_file_bytes(image_, header, shdrs, phdrs, cave_file_offset, cave_file_bytes, -1, true);
+  insert_file_bytes(image_, header, shdrs, phdrs, cave_file_offset, cave_file_bytes, std::nullopt,
+                    true);
 
   for (size_t i = 0; i < shdrs.size(); ++i) {
-    if (shift_section_vaddr[i])
+    if (shift_section_vaddr[i]) {
+      const uint64_t old_addr = shdrs[i].sh_addr;
       shdrs[i].sh_addr += padded_file_delta;
+      assert((shdrs[i].sh_addralign <= 1 ||
+              shdrs[i].sh_addr % shdrs[i].sh_addralign ==
+                  old_addr % shdrs[i].sh_addralign) &&
+             "shifted allocated section lost its address alignment residue");
+    }
   }
   shift_symbols_in_moved_sections(image_, header, shdrs, shift_section_vaddr, padded_file_delta);
   shift_relocation_offsets_in_moved_sections(image_, header, shdrs, shift_section_vaddr,
@@ -623,8 +651,13 @@ void CodeObjectPatcher::append_cave_section(std::string_view section_name) {
   for (size_t i = 0; i < phdrs.size(); ++i) {
     if (!shift_segment_vaddr[i])
       continue;
+    assert((phdrs[i].p_align <= 1 || padded_file_delta % phdrs[i].p_align == 0) &&
+           "cave padding does not preserve shifted LOAD alignment");
     phdrs[i].p_vaddr += padded_file_delta;
     phdrs[i].p_paddr += padded_file_delta;
+    assert((phdrs[i].p_align <= 1 ||
+            phdrs[i].p_offset % phdrs[i].p_align == phdrs[i].p_vaddr % phdrs[i].p_align) &&
+           "shifted LOAD lost file/virtual address congruence");
   }
 
   const uint32_t name_offset = append_section_name(image_, header, shdrs, phdrs, section_name);
@@ -637,18 +670,42 @@ void CodeObjectPatcher::append_cave_section(std::string_view section_name) {
   cave_header.sh_offset = cave_file_offset;
   cave_header.sh_size = cave_body_.size();
   cave_header.sh_addralign = sizeof(uint32_t);
+  assert(cave_header.sh_offset % cave_header.sh_addralign == 0 &&
+         "cave section file offset is not word-aligned");
+  assert(cave_header.sh_addr % cave_header.sh_addralign == 0 &&
+         "cave section virtual address is not word-aligned");
 
-  const uint64_t new_shdr_offset =
+  const uint64_t section_header_table_end =
       header.e_shoff + static_cast<uint64_t>(shdrs.size()) * sizeof(Elf64_Shdr);
+  assert(section_header_table_end <= image_.size() && "section header table end out of bounds");
+
+  // Reserve the next contiguous section-header slot, not necessarily EOF:
+  //
+  //   old table: [e_shoff, e_shoff + N * sizeof(Elf64_Shdr))
+  //   new slot:                         ^ here
+  //
+  // insert_file_bytes shifts any later file contents to make room; then
+  // write_elf_tables rewrites the expanded N + 1 section-header table at
+  // e_shoff.
+  const uint64_t new_shdr_offset = section_header_table_end;
   const std::array<uint8_t, sizeof(Elf64_Shdr)> blank_header{};
-  // Make room in the file before appending the matching in-memory section
-  // header; write_elf_tables will fill this slot.
-  insert_file_bytes(image_, header, shdrs, phdrs, new_shdr_offset, blank_header, -1, false);
+  insert_file_bytes(image_, header, shdrs, phdrs, new_shdr_offset, blank_header, std::nullopt,
+                    false);
+  assert(header.e_shoff + (static_cast<uint64_t>(shdrs.size()) + 1) * sizeof(Elf64_Shdr) <=
+             image_.size() &&
+         "expanded section header table out of bounds");
 
   shdrs.push_back(cave_header);
-  assert(shdrs.size() <= UINT16_MAX && "ELF section count overflow");
+  assert(shdrs.size() <= std::numeric_limits<uint16_t>::max() && "ELF section count overflow");
+  for (const Elf64_Phdr &phdr : phdrs) {
+    if (phdr.p_type != PT_LOAD || phdr.p_align <= 1)
+      continue;
+    assert(phdr.p_offset % phdr.p_align == phdr.p_vaddr % phdr.p_align &&
+           "patched LOAD lost file/virtual address congruence");
+  }
   header.e_shnum = static_cast<uint16_t>(shdrs.size());
   write_elf_tables(image_, header, shdrs, phdrs);
+  return true;
 }
 
 std::vector<uint8_t> CodeObjectPatcher::emit() const { return image_; }

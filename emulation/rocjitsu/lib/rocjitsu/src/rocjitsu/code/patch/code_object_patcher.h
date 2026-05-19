@@ -74,7 +74,11 @@ public:
   /// original .text occupies [0, text_size_) and this section starts at
   /// text_size_. The caller must therefore set cave_start() to text_size()
   /// before emitting branch stubs.
-  void append_cave_section(std::string_view section_name = ".rj_translations");
+  ///
+  /// @returns true if there was no cave body to emit or the section was
+  ///          materialized successfully; false if the original .text section
+  ///          header could not be found.
+  [[nodiscard]] bool append_cave_section(std::string_view section_name = ".rj_translations");
 
   /// @brief Set the .text-relative byte offset where the cave body will be placed.
   /// This must be called before any apply_semantic() calls so branch offsets
