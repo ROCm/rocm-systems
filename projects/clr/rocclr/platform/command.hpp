@@ -1173,7 +1173,7 @@ class BatchCopyMemoryCommand : public Command {
   virtual void submit(device::VirtualDevice& device) { device.submitBatchCopyMemory(*this); }
 
   //! Return the vector of copy operations
-  std::vector<BatchCopyOp>& copyOps() { return copyOps_; }
+  const std::vector<BatchCopyOp>& copyOps() const { return copyOps_; }
 
   //! Return the number of copy operations in the batch
   size_t count() const { return copyOps_.size(); }
