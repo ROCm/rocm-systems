@@ -356,6 +356,9 @@ cpack_add_component(asan
 
 # Build clients of the library
 if( BUILD_ROCRTST )
+  if( NOT BUILD_ROCR )
+    message(FATAL_ERROR "BUILD_ROCRTST requires BUILD_ROCR to be ON because rocrtst/suites/test_common depends on the in-tree hsa-runtime64 target.")
+  endif()
   message(STATUS "Adding test_common subdir")
   add_subdirectory(rocrtst/suites/test_common)
 endif()
