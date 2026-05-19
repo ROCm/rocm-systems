@@ -1,0 +1,131 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier:  MIT
+//
+// kernel_dispatch_buffer holds the per-column vectors used to amortize
+// per-row INSERTs. Writers push rows directly via push() and bypass the
+// SQLite virtual table xUpdate trampoline (sqlite3_step / xUpdate /
+// sqlite3_value unpacking).
+//
+// The vtable wrapper still exists for SELECT compatibility and for the
+// flush trigger reachable via storage_t. Its xUpdate path is unused on
+// the writer hot path.
+
+#pragma once
+
+#include <sqlite3.h>
+
+#include <array>
+#include <cstdint>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace profiler_hub::data_storage::vtable
+{
+
+// Named-field row for kernel_dispatch_buffer::push. Replaces the old
+// 22-positional-argument push() so callers cannot silently swap any of
+// the workgroup/grid coordinates (clang-tidy
+// bugprone-easily-swappable-parameters).
+struct kernel_dispatch_row
+{
+    int64_t                id;
+    int64_t                nid;
+    int64_t                pid;
+    std::optional<int64_t> tid;
+    int64_t                agent_id;
+    int64_t                kernel_id;
+    int64_t                dispatch_id;
+    int64_t                queue_id;
+    int64_t                stream_id;
+    int64_t                start;
+    int64_t                end;
+    std::optional<int64_t> private_segment_size;
+    std::optional<int64_t> group_segment_size;
+    int64_t                workgroup_size_x;
+    int64_t                workgroup_size_y;
+    int64_t                workgroup_size_z;
+    int64_t                grid_size_x;
+    int64_t                grid_size_y;
+    int64_t                grid_size_z;
+    std::optional<int64_t> region_name_id;
+    std::optional<int64_t> event_id;
+    std::string_view       extdata;
+};
+
+class kernel_dispatch_buffer
+{
+public:
+    static constexpr size_t k_int_column_count  = 21;
+    static constexpr size_t k_text_column_index = 21;
+    static constexpr size_t k_total_columns     = 22;
+
+    // The writer_conn is owned by sqlite_backend and outlives this buffer.
+    // The buffer reuses it for bulk INSERT; it does NOT close it.
+    kernel_dispatch_buffer(std::string real_table_name, sqlite3* writer_conn);
+    ~kernel_dispatch_buffer();
+
+    kernel_dispatch_buffer(const kernel_dispatch_buffer&)            = delete;
+    kernel_dispatch_buffer& operator=(const kernel_dispatch_buffer&) = delete;
+    kernel_dispatch_buffer(kernel_dispatch_buffer&&)                 = delete;
+    kernel_dispatch_buffer& operator=(kernel_dispatch_buffer&&)      = delete;
+
+    // Direct push - no SQLite trampoline. Column order is fixed by
+    // kernel_dispatch_row's declaration order, which matches the SQL column
+    // list: id, nid, pid, tid, agent_id, kernel_id, dispatch_id, queue_id,
+    // stream_id, start, end, private_segment_size, group_segment_size,
+    // workgroup_size_{x,y,z}, grid_size_{x,y,z}, region_name_id, event_id,
+    // extdata.
+    void push(const kernel_dispatch_row& row);
+
+    // Trampoline path used by the vtable's xUpdate; kept for SELECT-side
+    // compatibility, not exercised by the writer hot path.
+    void push_from_values(sqlite3_value** argv);
+
+    // Bulk-write the buffered rows to the real table.
+    int flush();
+
+    // Pre-size all per-column vectors to avoid reallocation thrashing on the
+    // hot insert path. Bench-driven hint; safe to call before any push().
+    void reserve(std::size_t expected_rows);
+
+    [[nodiscard]] size_t row_count() const noexcept { return m_row_count; }
+
+    // Returns the writer connection used by flush(). All buffers share the
+    // single writer connection owned by sqlite_backend.
+    [[nodiscard]] sqlite3* writer_connection() const noexcept { return m_writer_conn; }
+
+    // Static registry: lets the writer reach the active buffer instance for
+    // a given real table without plumbing through storage_t.
+    static void register_instance(const std::string&      real_table_name,
+                                  kernel_dispatch_buffer* buffer);
+    static void unregister_instance(const std::string& real_table_name);
+    [[nodiscard]] static kernel_dispatch_buffer* get_active_instance(
+        const std::string& real_table_name);
+
+private:
+    int prepare_insert_stmt();
+
+    struct int_column_t
+    {
+        std::vector<int64_t> values;
+        std::vector<uint8_t> is_null;
+    };
+
+    struct text_column_t
+    {
+        std::vector<std::string> values;
+        std::vector<uint8_t>     is_null;
+    };
+
+    std::string                                  m_real_table_name;
+    std::string                                  m_insert_sql;
+    sqlite3*                                     m_writer_conn = nullptr;
+    sqlite3_stmt*                                m_insert_stmt = nullptr;
+    std::array<int_column_t, k_int_column_count> m_int_cols{};
+    text_column_t                                m_text_col{};
+    size_t                                       m_row_count = 0;
+};
+
+}  // namespace profiler_hub::data_storage::vtable
