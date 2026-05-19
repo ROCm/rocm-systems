@@ -150,6 +150,11 @@ if __name__ == "__main__":
         default=[],
         nargs="*",
     )
+    parser.add_argument(
+        "--check-counter-pairing",
+        action="store_true",
+        help="Verify each counter track has paired start/end entries (even count, last value is 0)",
+    )
 
     args = parser.parse_args()
 
@@ -279,6 +284,32 @@ if __name__ == "__main__":
         if total_value <= 0:
             print(f"Fail: Counter {counter_name} is not found in the traces")
             ret = 1
+
+    if args.check_counter_pairing and args.counter_names:
+        for counter_name in args.counter_names:
+            tracks = tp.query(f"""SELECT counter_track.id, counter_track.name,
+                  COUNT(counter.id) AS num_entries
+                  FROM counter_track JOIN counter ON counter.track_id = counter_track.id
+                  WHERE counter_track.name LIKE '%{counter_name}%'
+                  GROUP BY counter_track.id""")
+            for row in tracks:
+                if row.num_entries % 2 != 0:
+                    print(
+                        f"Fail: Counter track '{row.name}' has {row.num_entries} entries "
+                        f"(expected even number for paired start/end)"
+                    )
+                    ret = 1
+                else:
+                    last_value = tp.query(f"""SELECT counter.value FROM counter
+                          WHERE counter.track_id = {row.id}
+                          ORDER BY counter.ts DESC LIMIT 1""")
+                    for val_row in last_value:
+                        if val_row.value != 0:
+                            print(
+                                f"Fail: Counter track '{row.name}' last value is "
+                                f"{val_row.value} (expected 0 for end marker)"
+                            )
+                            ret = 1
 
     if ret == 0:
         print(f"{args.input} validated")

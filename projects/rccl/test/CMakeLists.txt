@@ -7,6 +7,7 @@ if(BUILD_TESTS)
 
   option(OPENMP_TESTS_ENABLED "Enable OpenMP for unit tests" OFF)
   option(ENABLE_MPI_TESTS "Enable MPI-based tests" OFF)
+  option(RCCL_HAS_GIN_IB_PROXY "Build the IB Proxy GIN transport-level tests" OFF)
 
   message("Building rccl unit tests (Installed in /test/rccl-UnitTests)")
   if(ENABLE_MPI_TESTS)
@@ -93,6 +94,8 @@ if(BUILD_TESTS)
     ${PROJECT_BINARY_DIR}/hipify/gensrc # for rccl_bfloat16.h
     ${PROJECT_BINARY_DIR}/hipify/src # for graph/topo.h
     ${PROJECT_BINARY_DIR}/hipify/src/include/plugin # for recorder tests, nccl_tuner.h
+    ${PROJECT_BINARY_DIR}/hipify/src/transport/net_ib_cast # for net_ib_fault_inject.h, net_ib_cast_inspect.h
+    ${PROJECT_BINARY_DIR}/hipify/src/transport             # for net_ib_limits.h
     ${ROCM_PATH}/include
     ${ROCM_PATH}
   )
@@ -112,6 +115,9 @@ if(BUILD_TESTS)
   endif()
   if(ENABLE_MPI_TESTS)
     list(APPEND RCCL_COMMON_COMPILE_DEFS MPI_TESTS_ENABLED)
+    if(RCCL_HAS_GIN_IB_PROXY)
+      list(APPEND RCCL_COMMON_COMPILE_DEFS RCCL_HAS_GIN_IB_PROXY)
+    endif()
   endif()
   list(APPEND RCCL_COMMON_COMPILE_DEFS __HIP_PLATFORM_AMD__)
 
@@ -199,8 +205,8 @@ if(BUILD_TESTS)
 
     set(TEST_FIXTURE_SOURCE_FILES
       BitOpsTests.cpp
+      MiscTests.cpp
       RomeTopoConsensusTests.cpp
-      CommTests.cpp
       EnqueueCountTests.cpp
       device/TestOp128.cpp
       common/main_fixtures.cpp
@@ -231,6 +237,7 @@ if(BUILD_TESTS)
       ProxyTests.cpp
       RcclWrapTests.cpp
       TransportTests.cpp
+      mem_manager/MemManagerTests.cpp
       graph/XmlTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
@@ -238,18 +245,19 @@ if(BUILD_TESTS)
     )
 
     add_executable(rccl-UnitTestsFixturesDebug ${TEST_FIXTURE_DEBUG_SOURCE_FILES})
+  endif()
 
-    # rccl-UnitTestsAltRsmi: Uses TEST BUILD alt_rsmi.cc (ARSMI_TEST_BUILD)
-    # This separate executable compiles alt_rsmi.cc with ARSMI_TEST_BUILD,
-    # enabling external linkage of internal variables so that
-    # tests can access and manipulate them for testing.
+  # rccl-UnitTestsAltRsmi: Compiles alt_rsmi.cc directly (not via librccl.so) with
+  # ARSMI_TEST_BUILD, which gives external linkage to thread_local sysfs root variables
+  # so tests can redirect them to a temp directory. No librccl.so symbols needed,
+  # so this target works in both Release and Debug builds.
+  if (ROCM_VERSION VERSION_GREATER_EQUAL "60400")
     list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsAltRsmi)
 
     set(TEST_ALTRSMI_SOURCE_FILES
       AltRsmiTests.cpp
       ../src/misc/alt_rsmi.cc
-      common/main_fixtures.cpp
-      common/EnvVars.cpp
+      common/main_altrsmi.cpp
       common/ProcessIsolatedTestRunner.cpp
     )
 
@@ -257,6 +265,14 @@ if(BUILD_TESTS)
 
     # Define ARSMI_TEST_BUILD specifically for rccl-UnitTestsAltRsmi
     target_compile_definitions(rccl-UnitTestsAltRsmi PRIVATE ARSMI_TEST_BUILD)
+
+    # amdsmi_wrap.h is compiled directly into this target (via alt_rsmi.cc), so it
+    # needs the amdsmi include path that the rccl library target gets but doesn't
+    # propagate (PRIVATE scope). Without this, __has_include(<amd_smi/amdsmi.h>)
+    # returns false in test TUs even when AMDSMI_FABRIC_DIRECT is set.
+    if(DEFINED SMI_INCLUDE_DIR)
+      target_include_directories(rccl-UnitTestsAltRsmi PRIVATE ${SMI_INCLUDE_DIR})
+    endif()
   endif()
 
   # Create separate MPI test binary if MPI tests are enabled
@@ -274,8 +290,13 @@ if(BUILD_TESTS)
       transport/NetIbMPI/GeneralTests.cpp
       transport/NetIbMPI/NicFusionTests.cpp
       transport/NetIbMPI/CastTests.cpp
+      transport/NetIbMPI/FaultInjectTests.cpp
+      transport/GinMPI/GinMPITests.cpp
       ImplicitLaunchOrderMPITests.cpp
+      CommMPITests.cpp
       RegistrationMPITests.cpp
+      mem_manager/SuspendResumeMPITests.cpp
+      RevokeMPITests.cpp
     )
 
     add_executable(rccl-UnitTestsMPI ${MPI_TEST_SOURCE_FILES})

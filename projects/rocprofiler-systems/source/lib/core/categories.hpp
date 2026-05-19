@@ -92,6 +92,8 @@ ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kfd_queue, ROCPROFSYS_CATEGORY_ROCM_KF
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kfd_event_queue, ROCPROFSYS_CATEGORY_ROCM_KFD_EVENT_QUEUE, "rocm_kfd_event_queue", "KFD Event Queue Operations")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kfd_event_unmap_from_gpu, ROCPROFSYS_CATEGORY_ROCM_KFD_EVENT_UNMAP_FROM_GPU, "rocm_kfd_event_unmap_from_gpu", "KFD Unmap from GPU Events")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kfd_event_dropped_events, ROCPROFSYS_CATEGORY_ROCM_KFD_EVENT_DROPPED_EVENTS, "rocm_kfd_event_dropped_events", "KFD Dropped Events")
+ROCPROFSYS_DEFINE_CATEGORY(category, unified_memory_bandwidth, ROCPROFSYS_CATEGORY_UNIFIED_MEMORY_BANDWIDTH, "unified_memory_bandwidth", "Unified Memory Migration Bandwidth")
+ROCPROFSYS_DEFINE_CATEGORY(category, unified_memory_fault_rate, ROCPROFSYS_CATEGORY_UNIFIED_MEMORY_FAULT_RATE, "unified_memory_fault_rate", "Unified Memory Page Fault Rate")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi, ROCPROFSYS_CATEGORY_AMD_SMI, "amd_smi", "AMD-SMI data")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC, "amd_smi_nic", "AMD-SMI NIC data")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_rx_cnp_pkts, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_RX_CNP_PKTS, "nic_rx_cnp_pkts", "AI NIC RX CNP Packets")
@@ -117,6 +119,8 @@ ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_pcie_link_speed, ROCPROFSYS_CATEGOR
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_pcie_bandwidth_acc, ROCPROFSYS_CATEGORY_AMD_SMI_PCIE_BANDWIDTH_ACC, "device_pcie_bandwidth_acc", "PCIe Bandwidth Accumulated")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_pcie_bandwidth_inst, ROCPROFSYS_CATEGORY_AMD_SMI_PCIE_BANDWIDTH_INST, "device_pcie_bandwidth_inst", "PCIe Bandwidth Instantaneous")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_sdma_usage, ROCPROFSYS_CATEGORY_AMD_SMI_SDMA_USAGE, "device_sdma_usage", "SDMA Utilization percentage of a GPU device")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_gfx_clock, ROCPROFSYS_CATEGORY_AMD_SMI_GFX_CLOCK, "device_gfx_clock", "GFX clock frequency of a GPU device")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_mem_clock, ROCPROFSYS_CATEGORY_AMD_SMI_MEM_CLOCK, "device_mem_clock", "Memory clock frequency of a GPU device")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_rccl, ROCPROFSYS_CATEGORY_ROCM_RCCL, "rccl", "ROCm Communication Collectives Library (RCCL) regions")
 ROCPROFSYS_DEFINE_CATEGORY(category, pthread, ROCPROFSYS_CATEGORY_PTHREAD, "pthread", "POSIX threading functions")
 ROCPROFSYS_DEFINE_CATEGORY(category, kokkos, ROCPROFSYS_CATEGORY_KOKKOS, "kokkos", "KokkosTools regions")
@@ -214,6 +218,8 @@ using name = perfetto_category<Tp...>;
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_pcie_bandwidth_acc),              \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_pcie_bandwidth_inst),             \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_sdma_usage),                      \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_gfx_clock),                       \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_mem_clock),                       \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_rccl),                               \
         ROCPROFSYS_PERFETTO_CATEGORY(category::pthread),                                 \
         ROCPROFSYS_PERFETTO_CATEGORY(category::kokkos),                                  \
@@ -244,6 +250,8 @@ using name = perfetto_category<Tp...>;
         ROCPROFSYS_PERFETTO_CATEGORY(category::vaapi),                                   \
         ROCPROFSYS_PERFETTO_CATEGORY(category::timer_sampling),                          \
         ROCPROFSYS_PERFETTO_CATEGORY(category::overflow_sampling),                       \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::unified_memory_bandwidth),                \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::unified_memory_fault_rate),               \
         ::perfetto::Category("timemory").SetDescription("Events from the timemory API")
 
 #if defined(TIMEMORY_USE_PERFETTO)
