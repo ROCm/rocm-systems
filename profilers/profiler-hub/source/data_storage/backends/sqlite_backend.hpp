@@ -299,9 +299,9 @@ private:
     {
         LOG_TRACE("bind_null: position={}", position);
         validate_sqlite3_result(
-            sqlite3_bind_null(stmt, position),
-            query.c_str(),
-            fmt::format("Failed to bind NULL at position {}", position));
+            sqlite3_bind_null(stmt, position), query.c_str(), [position] {
+                return fmt::format("Failed to bind NULL at position {}", position);
+            });
     }
 
     void bind_text(sqlite3_stmt*      stmt,
@@ -314,7 +314,10 @@ private:
             sqlite3_bind_text(
                 stmt, position, val.data(), static_cast<int>(val.size()), SQLITE_STATIC),
             query.c_str(),
-            fmt::format("Failed to bind text at position {}, value: {}", position, val));
+            [position, val] {
+                return fmt::format(
+                    "Failed to bind text at position {}, value: {}", position, val);
+            });
     }
 
     void bind_double(sqlite3_stmt*      stmt,
@@ -324,10 +327,10 @@ private:
     {
         LOG_TRACE("bind_double: position={}, value={}", position, val);
         validate_sqlite3_result(
-            sqlite3_bind_double(stmt, position, val),
-            query.c_str(),
-            fmt::format(
-                "Failed to bind double at position {}, value: {}", position, val));
+            sqlite3_bind_double(stmt, position, val), query.c_str(), [position, val] {
+                return fmt::format(
+                    "Failed to bind double at position {}, value: {}", position, val);
+            });
     }
 
     void bind_int64(sqlite3_stmt*      stmt,
@@ -337,9 +340,10 @@ private:
     {
         LOG_TRACE("bind_int64: position={}, value={}", position, val);
         validate_sqlite3_result(
-            sqlite3_bind_int64(stmt, position, val),
-            query.c_str(),
-            fmt::format("Failed to bind int64 at position {}, value: {}", position, val));
+            sqlite3_bind_int64(stmt, position, val), query.c_str(), [position, val] {
+                return fmt::format(
+                    "Failed to bind int64 at position {}, value: {}", position, val);
+            });
     }
 
     void bind_int32(sqlite3_stmt*      stmt,
@@ -349,9 +353,10 @@ private:
     {
         LOG_TRACE("bind_int32: position={}, value={}", position, val);
         validate_sqlite3_result(
-            sqlite3_bind_int(stmt, position, val),
-            query.c_str(),
-            fmt::format("Failed to bind int32 at position {}, value: {}", position, val));
+            sqlite3_bind_int(stmt, position, val), query.c_str(), [position, val] {
+                return fmt::format(
+                    "Failed to bind int32 at position {}, value: {}", position, val);
+            });
     }
 
     template <typename T>
@@ -475,7 +480,35 @@ private:
         {
             return;
         }
+        throw_sqlite_error(sqlite3_error_code, query, context);
+    }
 
+    /**
+     * Overload that builds the context message lazily.
+     *
+     * The callable is invoked only on failure, so per-call fmt::format and
+     * the string allocation it requires are skipped on the SQLITE_OK fast
+     * path (the dominant case for bulk inserts).
+     */
+    template <
+        typename ContextFn,
+        std::enable_if_t<!std::is_convertible_v<ContextFn, std::string_view>, int> = 0>
+    void validate_sqlite3_result(int         sqlite3_error_code,
+                                 const char* query,
+                                 ContextFn&& context_fn)
+    {
+        if(sqlite3_error_code == SQLITE_OK || sqlite3_error_code == SQLITE_DONE)
+        {
+            return;
+        }
+        throw_sqlite_error(
+            sqlite3_error_code, query, std::forward<ContextFn>(context_fn)());
+    }
+
+    [[noreturn]] void throw_sqlite_error(int              sqlite3_error_code,
+                                         const char*      query,
+                                         std::string_view context)
+    {
         auto message =
             fmt::format("\n===========================================================\n"
                         "Database Error: {}\n"
