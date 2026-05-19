@@ -46,6 +46,13 @@ GpuMemory::GpuMemory(WDDMDevice *device) : device_(device) {
 }
 
 GpuMemory::~GpuMemory() {
+  if (GpuAddress() != 0 &&
+      alloc_handles_ptr_ != nullptr && !(NumChunks() == 1 && *alloc_handles_ptr_ == 0) &&
+      !IsVirtual() && !IsPhysicalOnly()) {
+    // In WSL, destroying a still-resident allocation can block in
+    // dxgallocation_destroy while Hyper-V tears down the GPADL.
+    Evict();
+  }
   FreeGpuVirtualAddress(GpuAddress(), Size());
   FreePhysicalMemory();
   if (desc_.handle_ape_addr > 0)
