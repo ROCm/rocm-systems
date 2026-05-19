@@ -1529,6 +1529,9 @@ bool Device::populateOCLDeviceConstants() {
     info_.bufferFromImageSupport_ = false;
 
     info_.imageSupport_ = (info_.maxReadWriteImageArgs_ > 0) ? true : false;
+  } else {
+    // hipMallocPitch/hipMalloc3D align pitch by this value regardless of image support
+    info_.imagePitchAlignment_ = 256;
   }
 
   // Enable SVM Capabilities of Hsa device. Ensure
