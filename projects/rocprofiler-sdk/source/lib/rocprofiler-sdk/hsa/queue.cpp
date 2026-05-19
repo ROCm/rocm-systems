@@ -658,6 +658,23 @@ WriteInterceptor(const void* packets,
             if(inserted_before)
                 transformed_packets.back().kernel_dispatch.header |= 1 << HSA_PACKET_HEADER_BARRIER;
 
+            // Release the application's completion signal only after the instrumented kernel finishes.
+            if(existing_completion_signal)
+            {
+                auto barrier   = hsa_barrier_and_packet_t{};
+                barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
+                barrier.header |= (1 << HSA_PACKET_HEADER_BARRIER);
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
+                barrier.dep_signal[0] = is_ext_kernel_dispatch
+                                            ? kernel_packet.ext_kernel_dispatch.completion_signal
+                                            : kernel_packet.kernel_dispatch.completion_signal;
+#else
+                barrier.dep_signal[0] = kernel_packet.kernel_dispatch.completion_signal;
+#endif
+                barrier.completion_signal = original_completion_signal;
+                transformed_packets.emplace_back(barrier);
+            }
+
             bool injected_end_pkt = false;
             for(const auto& pkt_injection : _packet_data.instrumentation_packets)
             {
@@ -682,32 +699,6 @@ WriteInterceptor(const void* packets,
             {
                 completion_signal = kernel_packet.kernel_dispatch.completion_signal;
                 get_core_table()->hsa_signal_store_screlease_fn(completion_signal, 0);
-            }
-
-            // Release the application's completion signal only after profiler work finishes.
-            // When PMC injects after_krn packets, wait on the interrupt signal (full chain).
-            // Otherwise wait on the pooled kernel completion signal.
-            if(existing_completion_signal)
-            {
-                auto barrier   = hsa_barrier_and_packet_t{};
-                barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
-                barrier.header |= (1 << HSA_PACKET_HEADER_BARRIER);
-                if(injected_end_pkt)
-                {
-                    barrier.dep_signal[0] = interrupt_signal;
-                }
-                else
-                {
-#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
-                    barrier.dep_signal[0] = is_ext_kernel_dispatch
-                                                ? kernel_packet.ext_kernel_dispatch.completion_signal
-                                                : kernel_packet.kernel_dispatch.completion_signal;
-#else
-                    barrier.dep_signal[0] = kernel_packet.kernel_dispatch.completion_signal;
-#endif
-                }
-                barrier.completion_signal = original_completion_signal;
-                transformed_packets.emplace_back(barrier);
             }
 
             ROCP_FATAL_IF(!(is_kernel_dispatch || is_ext_kernel_dispatch))
@@ -737,10 +728,20 @@ WriteInterceptor(const void* packets,
 
             auto shared = std::make_shared<info_session_t>(std::move(_info_session));
 
+            // PMC after_krn uses interrupt_signal (1 -> 0); handler must wait for 0, not -1.
+            auto wait_value = static_cast<hsa_signal_value_t>(-1);
+            if(const auto& last_pkt = _info_session.packet_data.back();
+               last_pkt.interrupt_signal.handle != 0 &&
+               last_pkt.completion_signal.handle == last_pkt.interrupt_signal.handle)
+            {
+                wait_value = 0;
+            }
+
             // Enqueue the signal into the handler. Will call completed_cb when signal completes.
             queue.signal_async_handler(last_pooled_signal,
                                        last_completion_signal,
-                                       new std::shared_ptr<info_session_t>(shared));
+                                       new std::shared_ptr<info_session_t>(shared),
+                                       wait_value);
         }
 
         // Command is only executed if GLOG_v=2 or higher, otherwise it is a no-op
@@ -940,7 +941,10 @@ Queue::~Queue()
 }
 
 void
-Queue::signal_async_handler(pooled_signal_t* signal, hsa_signal_t raw_signal, void* data) const
+Queue::signal_async_handler(pooled_signal_t*   signal,
+                            hsa_signal_t       raw_signal,
+                            void*              data,
+                            hsa_signal_value_t wait_value) const
 {
 #if !defined(NDEBUG)
     CHECK_NOTNULL(hsa::get_queue_controller())->_debug_signals.wlock([&](auto& signals) {
@@ -953,7 +957,7 @@ Queue::signal_async_handler(pooled_signal_t* signal, hsa_signal_t raw_signal, vo
                        signal->get().value.handle);
 
     hsa_status_t status = _ext_api.hsa_amd_signal_async_handler_fn(
-        raw_signal, HSA_SIGNAL_CONDITION_EQ, -1, AsyncSignalHandler, data);
+        raw_signal, HSA_SIGNAL_CONDITION_EQ, wait_value, AsyncSignalHandler, data);
 
     ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
         << fmt::format("Error: hsa_amd_signal_async_handler (signal={{.handle={}}}) failed with "

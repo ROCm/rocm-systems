@@ -145,7 +145,10 @@ public:
     const hsa_queue_t*        intercept_queue() const { return _intercept_queue; };
     virtual const AgentCache& get_agent() const { return _agent; }
 
-    void signal_async_handler(pooled_signal_t* _signal, hsa_signal_t raw_signal, void* data) const;
+    void signal_async_handler(pooled_signal_t*    _signal,
+                            hsa_signal_t        raw_signal,
+                            void*               data,
+                            hsa_signal_value_t  wait_value = -1) const;
     static pooled_signal_t* create_signal(uint32_t attribute, hsa_signal_t* _signal, bool use_pool);
     static void             release_signal(pooled_signal_t* signal);
     static void             destroy_signal(pooled_signal_t* signal);
