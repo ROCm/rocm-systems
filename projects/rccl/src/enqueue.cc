@@ -120,7 +120,10 @@ ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* ma
       if (fn == nullptr) continue;
 
       cudaError_t errcode = cudaFuncGetAttributes(&attr, fn);
-      if (errcode != cudaSuccess) continue; // Silently ignore failures
+      if (errcode != cudaSuccess) {
+		  cudaGetLastError(); // Drain error code
+		  continue; // Silently ignore failures
+	  }
       if (maxStackSize) {
         if (attr.localSizeBytes > *maxStackSize) *maxStackSize = attr.localSizeBytes;
       }
@@ -207,6 +210,9 @@ static void addWorkBatchToPlan(
       newBatch |= (comm->nNodes > 2 && batchP2P)? (chan->wipBatch.nP2ps == NCCL_MAX_DEV_WORK_P2P_PER_BATCH) : (chan->wipBatch.nP2ps == 1);
       for (int i=0; i < chan->wipBatch.nP2ps; i++) {
         newBatch |= p2pRound == chan->wipBatch.p2pRounds[i];
+        // Make sure we only aggregate p2p operations within the same p2p round epoch (one epoch is NCCL_MAX_DEV_WORK_P2P_PER_BATCH ops).
+        // This enforces uniform batching accross ranks in the communicator and prevents hangs.
+        newBatch |= (p2pRound / NCCL_MAX_DEV_WORK_P2P_PER_BATCH) != (chan->wipBatch.p2pRounds[i] / NCCL_MAX_DEV_WORK_P2P_PER_BATCH);
       }
     }
   }
@@ -1812,11 +1818,13 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
       NCCLCHECKGOTO(ncclStreamWaitStream(launchStream, deviceStream, comm->sharedRes->scratchEvent), result, failure);
     } else if (comm->lastStreamValid && comm->lastStream != launchStream) {
       // Stream changed from last call. The new launchStream has no implicit edge to the
-      // previous kernel's completion; install a direct event-based dependency on doneEvent
-      // (which the fast/slow path now records after every kernel launch). This bypasses
-      // deviceStream entirely so we don't depend on Finish-side advance to keep deviceStream
-      // fresh — the fast path skips that advance, which is why the deviceStream-mediated
-      // sync hangs in this scenario.
+      // previous kernel's completion; install a direct event-based dependency on doneEvent.
+      // Record lazily here on lastStream — HIP's per-stream FIFO guarantees the record
+      // sequences after the prior cuLaunchKernel — then wait on it from launchStream.
+      // Recording only on detected stream change (instead of after every ncclLaunchKernel)
+      // avoids a per-launch HIP runtime cost. Bypasses deviceStream, which the fast path
+      // leaves stale by skipping Finish-side advance.
+      CUDACHECKGOTO(hipEventRecord(comm->doneEvent, comm->lastStream), result, failure);
       CUDACHECKGOTO(hipStreamWaitEvent(launchStream, comm->doneEvent, 0), result, failure);
     }
 
@@ -1915,11 +1923,9 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   if (planner->numStreams == 1 && !plan->persistent) {
     latency_profiler::collTraceRecordStartEvent(comm, launchStream, event.get());
     CUCHECKGOTO(cuLaunchKernel(fn, grid.x, grid.y, grid.z, block.x, block.y, block.z, smem, launchStream, nullptr, extra), ret, do_return);
-    // Record doneEvent so a future ncclLaunchPrepare on a different stream can wait on it.
-    // Cheap (one event record per fast-path launch) and load-bearing for stream-change correctness.
-    CUDACHECKGOTO(hipEventRecord(comm->doneEvent, launchStream), ret, do_return);
-    // Update bookkeeping only after both launch and event-record succeed, so a partial
-    // failure does not leave lastStreamValid asserting a doneEvent that was never recorded.
+    // doneEvent is recorded lazily by ncclLaunchPrepare on a detected stream change; no
+    // per-launch hipEventRecord is needed here. lastStream/lastStreamValid bookkeeping is
+    // still required so the next call's ncclLaunchPrepare can detect that change.
     comm->lastStream = launchStream;
     comm->lastStreamValid = true;
     latency_profiler::collTraceRecordEndEvent(comm, plan, launchStream, std::move(event));
@@ -2008,10 +2014,8 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   latency_profiler::collTraceRecordStartEvent(comm, launchStream, event.get());
   CUCHECKGOTO(cuLaunchKernel(fn, grid.x, grid.y, grid.z, block.x, block.y, block.z, smem, launchStream, nullptr, extra), ret, do_return);
   latency_profiler::collTraceRecordEndEvent(comm, plan, launchStream, std::move(event));
-  // Mirror fast-path bookkeeping so the next ncclLaunchPrepare can detect stream-change
-  // and find a fresh doneEvent to wait on. Update only after the event-record succeeds
-  // so a partial failure does not leave lastStreamValid asserting an unrecorded event.
-  CUDACHECKGOTO(hipEventRecord(comm->doneEvent, launchStream), ret, do_return);
+  // Mirror fast-path bookkeeping so the next ncclLaunchPrepare can detect stream-change.
+  // doneEvent is recorded lazily by ncclLaunchPrepare in the stream-change branch.
   comm->lastStream = launchStream;
   comm->lastStreamValid = true;
 
@@ -3177,16 +3181,21 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
 }
 
 ncclResult_t ncclEnqueueCheck(struct ncclInfo* info) {
+  // Early-out on invalid or revoked communicator
+  ncclResult_t ret = CommCheck(info->comm, info->opName, "comm");
+  if (ret != ncclSuccess) return ncclGroupErrCheck(ret);
+  if (info->comm->revokedFlag) {
+    WARN("%s: communicator was revoked", info->opName);
+    return ncclGroupErrCheck(ncclInvalidUsage);
+  }
   // Profiler - If a group API event has already started, update the profilerGroupDepth so that the depth
   // updates correctly for implicit ncclGroupStartInternal and ncclGroupEndInternal calls
   if (ncclProfilerApiState.profilerGroupDepth > 0) {
     ncclProfilerApiState.profilerGroupDepth++;
   }
   NCCLCHECK(ncclGroupStartInternal());
-  ncclResult_t ret = ncclSuccess;
+  ret = ncclSuccess;
   int devOld = -1;
-
-  NCCLCHECKGOTO(CommCheck(info->comm, info->opName, "comm"), ret, fail);
   // Check whether communicator is ready to communicate
   NCCLCHECKGOTO(ncclCommEnsureReady(info->comm), ret, fail);
 

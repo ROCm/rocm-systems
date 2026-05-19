@@ -797,7 +797,7 @@ struct VmmPosixAllocation
 // Allocates a chunk of device memory via the HIP VMM API with a POSIX-fd
 // shareable handle. Mirrors the prop layout of ncclCuMemAlloc:
 //   - Pinned + Device location
-//   - requestedHandleTypes = POSIX_FILE_DESCRIPTOR
+//   - requestedHandleType = POSIX_FILE_DESCRIPTOR
 //   - allocFlags.gpuDirectRDMACapable = 1 (ROCM-2550 workaround; without it
 //     hipMemMap can SIGSEGV on AMD)
 // `requestedSize` is rounded up to the minimum granularity reported by HIP.
@@ -810,7 +810,7 @@ inline void AllocateVmmPosixFd(int dev, size_t requestedSize, VmmPosixAllocation
     prop.type                            = hipMemAllocationTypePinned;
     prop.location.type                   = hipMemLocationTypeDevice;
     prop.location.id                     = dev;
-    prop.requestedHandleTypes            = hipMemHandleTypePosixFileDescriptor;
+    prop.requestedHandleType             = hipMemHandleTypePosixFileDescriptor;
     prop.allocFlags.gpuDirectRDMACapable = 1;
 
     size_t granularity = 0;

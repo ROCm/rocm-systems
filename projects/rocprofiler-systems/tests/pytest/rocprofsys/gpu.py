@@ -396,23 +396,31 @@ def get_target_gpu_arch(rocm_path: Path, target_path: Path) -> list[str]:
 
 @lru_cache(maxsize=1)
 def get_xnack_support(rocm_path: Optional[Path] = None) -> bool:
-    """Check if a current GPU supports XNACK.
+    """Check whether the current GPU is XNACK-capable.
 
-    Runs rocminfo and checks if 'xnack' appears in the output.
+    Run ``rocminfo`` with ``HSA_XNACK=1`` injected into the subprocess
+    environment and return True only if the output reports ``xnack+``.
+
+    This keeps the check independent of the caller's shell environment:
+    ``xnack-`` remains unsupported for test gating, and GPUs with no
+    XNACK qualifier also return False.
     """
     rocminfo = get_rocminfo(rocm_path)
     if not rocminfo:
         return False
 
     try:
+        env = os.environ.copy()
+        env["HSA_XNACK"] = "1"
         result = subprocess.run(
             [str(rocminfo)],
             capture_output=True,
             text=True,
             timeout=30,
+            env=env,
         )
         if result.returncode == 0:
-            return "xnack" in result.stdout
+            return "xnack+" in result.stdout
     except (subprocess.TimeoutExpired, OSError):
         pass
 

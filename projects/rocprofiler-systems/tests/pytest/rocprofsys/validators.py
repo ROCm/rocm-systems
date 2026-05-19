@@ -269,6 +269,7 @@ def validate_perfetto_trace(
     key_counts: Optional[list[int]] = None,
     trace_processor_path: Optional[Path] = None,
     print_output: bool = False,
+    check_counter_pairing: bool = False,
     timeout: int = 120,
 ) -> ValidationResult:
     """Validate a Perfetto trace file using validate-perfetto-proto.py.
@@ -286,6 +287,7 @@ def validate_perfetto_trace(
         key_counts: Expected counts for debug keys (--key-counts flag)
         trace_processor_path: Path to trace_processor_shell (-t flag)
         print_output: Whether to print trace data (-p flag)
+        check_counter_pairing: Verify counter tracks have paired start/end entries
         timeout: Validation timeout in seconds
 
     Returns:
@@ -317,6 +319,9 @@ def validate_perfetto_trace(
 
     if counter_names:
         args.extend(["--counter-names"] + counter_names)
+
+    if check_counter_pairing:
+        args.append("--check-counter-pairing")
 
     if key_names:
         args.extend(["--key-names"] + key_names)
@@ -454,3 +459,37 @@ def validate_causal_json(
         args.extend(additional_args)
 
     return _run_validation_script("validate-causal-json.py", args, tests_dir, timeout)
+
+
+def validate_unified_memory_outputs(
+    output_dir: Path,
+    tests_dir: Path,
+    timeout: int = 60,
+) -> ValidationResult:
+    """Validate unified-memory text and JSON outputs in a test output tree."""
+    txt_matches = sorted(output_dir.rglob("unified_memory*.txt"))
+    json_matches = sorted(output_dir.rglob("unified_memory*.json"))
+
+    if not txt_matches:
+        return ValidationResult(False, f"No unified_memory*.txt found under {output_dir}")
+    if not json_matches:
+        return ValidationResult(
+            False, f"No unified_memory*.json found under {output_dir}"
+        )
+
+    txt_file = txt_matches[0]
+    json_file = json_matches[0]
+
+    if txt_file.parent != json_file.parent:
+        return ValidationResult(
+            False,
+            "Unified-memory outputs landed in different directories: "
+            f"{txt_file.parent} vs {json_file.parent}",
+        )
+
+    return _run_validation_script(
+        "validate-unified-memory.py",
+        ["--output-dir", str(txt_file.parent)],
+        tests_dir,
+        timeout,
+    )
