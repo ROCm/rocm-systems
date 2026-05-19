@@ -313,27 +313,25 @@ TestRMAPut() {
   ExecTest  "waveputnbi"       2       16           128       8
 
   ################################ User Buffer Tests ################################
-  if [[ $TEST != gda* ]]; then # AIROCSHMEM-383
-    export LOCALBUFTYPE=host
-    ExecTest  "putnbi"           2       32           128       512
-    unset LOCALBUFTYPE
+  export LOCALBUFTYPE=host
+  ExecTest  "putnbi"           2       32           128       512
+  unset LOCALBUFTYPE
 
-    export LOCALBUFTYPE=device
-    ExecTest  "putnbi"           2       32           128       512
-    unset LOCALBUFTYPE
+  export LOCALBUFTYPE=device
+  ExecTest  "putnbi"           2       32           128       512
+  unset LOCALBUFTYPE
 
-    export LOCALBUFTYPE=fine
-    ExecTest  "putnbi"           2       32           128       512
-    unset LOCALBUFTYPE
+  export LOCALBUFTYPE=fine
+  ExecTest  "putnbi"           2       32           128       512
+  unset LOCALBUFTYPE
 
-    export LOCALBUFTYPE=uncached
-    ExecTest  "putnbi"           2       32           128       512
-    unset LOCALBUFTYPE
+  export LOCALBUFTYPE=uncached
+  ExecTest  "putnbi"           2       32           128       512
+  unset LOCALBUFTYPE
 
-    export LOCALBUFTYPE=managed
-    ExecTest  "putnbi"           2       32           128       512
-    unset LOCALBUFTYPE
-  fi
+  export LOCALBUFTYPE=managed
+  ExecTest  "putnbi"           2       32           128       512
+  unset LOCALBUFTYPE
 }
 
 TestRMAGet() {
@@ -391,9 +389,8 @@ TestRMAGet() {
   else echo "Skip:   get_* (AIROCSHMEM-120: RO get tests abort)"; fi
 
   ################################ User Buffer Tests ################################
-  # AIROCSHMEM-383 for GDA
   # AIROCSHMEM-120 for RO
-  if [[ $TEST != gda* && $TEST != ro* ]]; then
+  if [[ $TEST != ro* ]]; then
     export LOCALBUFTYPE=host
     ExecTest  "getnbi"           2       32           128       512
     unset LOCALBUFTYPE
