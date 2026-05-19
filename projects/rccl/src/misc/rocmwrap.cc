@@ -182,6 +182,8 @@ static void initOnceFunc() {
   if (hsaLib == NULL) {
     WARN("Failed to find ROCm runtime library in %s (RCCL_ROCR_PATH=%s)", ncclCudaPath, ncclCudaPath);
     goto error;
+  } else {
+    INFO(NCCL_INIT, "Using ROCr runtime at %s%s", path, ncclCudaPath ? " (RCCL_ROCR_PATH set)" : "");
   }
 
   /*

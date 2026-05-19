@@ -2004,6 +2004,10 @@ bool VirtualGPU::create() {
                                        dedicated_queue_, nullptr, nullptr, &md_rb), md_rb);
   if (!gpu_queue_) return false;
 
+  if (dev().isa().versionMajor() == 12 && dev().isa().versionMinor() >= 5) {
+    metadata_preloader_.SetLaunchDescriptorVersion(AMD_LAUNCH_DESCRIPTOR_VERSION_GFX1250);
+  }
+
   if (!managed_kernarg_buffer_.Create(Device::MemorySegment::kKernArg)) {
     LogError("Couldn't allocate arguments/signals for the queue");
     return false;
@@ -4505,6 +4509,10 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
 
     profilingBegin(vcmd);
 
+    if (vcmd.dynDataPrefetchConfig().isEnabled()) {
+      metadata_preloader_.SetDynDataPrefetchRegions(vcmd.dynDataPrefetchConfig());
+    }
+
     // Submit kernel to HW
     if (!submitKernelInternal(vcmd.sizes(), vcmd.kernel(), vcmd.parameters(),
                               static_cast<void*>(as_cl(&vcmd.event())), vcmd.sharedMemBytes(),
@@ -4512,6 +4520,8 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
       LogError("AQL dispatch failed!");
       vcmd.setStatus(CL_INVALID_OPERATION);
     }
+
+    metadata_preloader_.ClearDynDataPrefetchConfig();
 
     profilingEnd();
   }
@@ -4762,15 +4772,46 @@ void *VirtualGPU::getOrCreateHostcallBuffer() {
 }
 
 // ================================================================================================
+static void convertDynDataPrefetchToHsa(const amd::DynDataPrefetchRegion* regions,
+                                        uint8_t hints,
+                                        amd_data_prefetch_t* hw,
+                                        uint32_t numRegions) {
+  for (uint32_t i = 0; i < numRegions && i < amd::kDynDataPrefetchMaxRegions; ++i) {
+    const auto& r = regions[i];
+
+    uintptr_t addr = reinterpret_cast<uintptr_t>(r.baseAddress);
+    // addr_lo is VA[31:8] (256B aligned), addr_hi is VA[56:32]
+    hw[i].addr_lo = static_cast<uint32_t>((addr >> 8) & 0xFFFFFFu);
+    hw[i].addr_hi = static_cast<uint32_t>((addr >> 32) & 0x1FFFFFFu);
+    // 256B is the hardware prefetch engine request unit
+    hw[i].burst_size = static_cast<uint32_t>((r.burstSize / 256u) - 1u);
+    hw[i].num_burst = r.numBursts - 1u;
+    hw[i].stride = static_cast<uint32_t>(r.stride / 256u);
+    hw[i].cooperative = 1;
+    hw[i].temporal = hints & 0x3u;
+    hw[i].scope = 2; // DEVICE
+    hw[i].mode = 1; // ABSOLUTE_VA
+  }
+}
+
 void VirtualGPU::MetaDataPreloader::SetPacket(
     hsa_kernel_dispatch_packet_t* aql,  uint16_t header,
-    hsa_amd_metadata_kernel_dispatch_packet_t* metadata) const {
+    hsa_amd_metadata_kernel_dispatch_packet_t* metadata) {
   assert(pending_descriptor_ != nullptr);
 
   // Headers must remain HSA_PACKET_TYPE_INVALID until we publish valid metadata headers
   // at the end. Only clear fields that could otherwise contain stale required-zero data.
   std::memset(metadata->reserved0, 0, sizeof(metadata->reserved0));
-  std::memset(metadata->reserved1, 0, sizeof(metadata->reserved1));
+  std::memset(&metadata->launch_descriptor, 0, sizeof(metadata->launch_descriptor));
+
+  if (dyn_data_prefetch_enabled_ && dyn_data_prefetch_num_regions_ > 0) {
+    metadata->launch_descriptor.version = launch_descriptor_version_;
+    convertDynDataPrefetchToHsa(
+        dyn_data_prefetch_regions_,
+        dyn_data_prefetch_hints_,
+        metadata->launch_descriptor.prefetch,
+        dyn_data_prefetch_num_regions_);
+  }
 
   // Write event_id from amd_signal_t directly (non-interrupt signals have event_id == 0).
   if (aql->completion_signal.handle) {

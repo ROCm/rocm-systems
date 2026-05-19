@@ -767,6 +767,18 @@ hsa_status_t write_to_pipe_handler(const std::string& pattern,
     fprintf(stderr, "GPU coredump: Invalid pipe pattern\n");
     return HSA_STATUS_ERROR;
   }
+
+  // Verify the handler binary exists before forking, otherwise, the child
+  // would exit immediately and the parent would receive SIGPIPE.
+  // Only check absolute paths; bare names (e.g. "sh") rely on execvp's PATH
+  // lookup and are handled by the waitpid error path after fork.
+  if (args[0][0] == '/' && access(args[0].c_str(), X_OK) != 0) {
+    fprintf(stderr,
+            "GPU coredump: pipe handler '%s' not found or not executable, "
+            "skipping core dump\n", args[0].c_str());
+    return HSA_STATUS_ERROR;
+  }
+
   // Create pipe for communication
   int pipefd[2];
   if (pipe(pipefd) == -1) {
