@@ -70,6 +70,12 @@ public:
     {
         m_result_cache.clear();
 
+        // start_context requires HSA to be live. It is called eagerly in start(), but
+        // tool_init runs before the application's hsa_init, so the first call may fail.
+        // Retry here until it succeeds; once m_context_started is true this is a single
+        // branch-predicted branch with no further work.
+        if(!m_context_started) start();
+
         auto rec_count = m_record_buffer.size();
 
         const auto status = m_driver_api->sample_device_counting_service(
@@ -117,11 +123,22 @@ public:
 
     void start()
     {
+        if(m_context_started) return;
+
         auto status = m_driver_api->start_context(m_context);
-        if(status != Driver::status_success)
+        if(status == Driver::status_success)
         {
-            LOG_WARNING("Failed to start context for device {} (status={})",
-                        m_agent->device_type_index, static_cast<int>(status));
+            m_context_started = true;
+            m_prev_values.clear();
+            LOG_DEBUG("GPU PMC context started for device {}.",
+                      m_agent->device_type_index);
+        }
+        else
+        {
+            // HSA may not be initialized yet at this call site. The hsa_init callback
+            // registered in tool_init will call start() again once HSA is live.
+            LOG_DEBUG("GPU PMC context start deferred for device {} (status={}).",
+                      m_agent->device_type_index, static_cast<int>(status));
         }
     }
 
@@ -144,6 +161,7 @@ private:
     std::vector<typename Driver::counter_record_t> m_record_buffer;
     metrics                                        m_result_cache;
     std::unordered_map<counter_id_t, double>       m_prev_values;
+    bool                                           m_context_started = false;
 };
 
 }  // namespace rocprofsys::pmc::collectors::gpu_perf_counter
