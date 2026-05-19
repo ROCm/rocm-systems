@@ -658,23 +658,6 @@ WriteInterceptor(const void* packets,
             if(inserted_before)
                 transformed_packets.back().kernel_dispatch.header |= 1 << HSA_PACKET_HEADER_BARRIER;
 
-            // Release the application's completion signal only after the instrumented kernel finishes.
-            if(existing_completion_signal)
-            {
-                auto barrier   = hsa_barrier_and_packet_t{};
-                barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
-                barrier.header |= (1 << HSA_PACKET_HEADER_BARRIER);
-#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
-                barrier.dep_signal[0] = is_ext_kernel_dispatch
-                                            ? kernel_packet.ext_kernel_dispatch.completion_signal
-                                            : kernel_packet.kernel_dispatch.completion_signal;
-#else
-                barrier.dep_signal[0] = kernel_packet.kernel_dispatch.completion_signal;
-#endif
-                barrier.completion_signal = original_completion_signal;
-                transformed_packets.emplace_back(barrier);
-            }
-
             bool injected_end_pkt = false;
             for(const auto& pkt_injection : _packet_data.instrumentation_packets)
             {
@@ -699,6 +682,23 @@ WriteInterceptor(const void* packets,
             {
                 completion_signal = kernel_packet.kernel_dispatch.completion_signal;
                 get_core_table()->hsa_signal_store_screlease_fn(completion_signal, 0);
+            }
+
+            // Release the application's completion signal after profiler work.
+            // Hardware PMC (after_krn): wait on interrupt so the full chain completes first.
+            // Agent-info / constant counters: no dep_signal (matches legacy behavior; dep causes
+            // HIP graph deadlock when the graph already owns the completion signal).
+            if(existing_completion_signal)
+            {
+                auto barrier   = hsa_barrier_and_packet_t{};
+                barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
+                barrier.header |= (1 << HSA_PACKET_HEADER_BARRIER);
+                if(injected_end_pkt)
+                {
+                    barrier.dep_signal[0] = interrupt_signal;
+                }
+                barrier.completion_signal = original_completion_signal;
+                transformed_packets.emplace_back(barrier);
             }
 
             ROCP_FATAL_IF(!(is_kernel_dispatch || is_ext_kernel_dispatch))
