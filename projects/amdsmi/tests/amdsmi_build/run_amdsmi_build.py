@@ -147,20 +147,18 @@ def _bootstrap_python():
     )
     if pkg_mgr == "apt":
         try:
+            # Keep stdout quiet but let stderr surface install diagnostics.
             subprocess.check_call(
                 ["apt-get", "update"],
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
             )
         except subprocess.CalledProcessError:
             pass
     for pkgs in pkg_candidates:
         try:
-            subprocess.check_call(
-                install_cmd + pkgs,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            # Surface stderr so an operator can see *why* every candidate
+            # failed if we fall through the loop with no interpreter installed.
+            subprocess.check_call(install_cmd + pkgs, stdout=subprocess.DEVNULL)
             break
         except subprocess.CalledProcessError:
             continue
@@ -176,7 +174,6 @@ def _bootstrap_python():
         subprocess.check_call(
             ["alternatives", "--set", "python3", new_py],
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
         )
     except (subprocess.CalledProcessError, FileNotFoundError, OSError):
         link = "/usr/bin/python3"
@@ -260,7 +257,7 @@ def run_command(
                 text=True,
                 bufsize=1,
             )
-            assert proc.stdout is not None
+            # proc.stdout is guaranteed non-None because stdout=PIPE above.
             for line in proc.stdout:
                 sys.stdout.write(line)
                 for fh in handles:
@@ -349,7 +346,7 @@ def detect_package_format(pkg_manager: str, explicit: Optional[str]) -> str:
     raise ValueError(f"Unsupported package manager {pkg_manager}")
 
 
-def detect_os_profile() -> dict:
+def detect_os_profile(os_release: Optional[Path] = None) -> dict:
     """Parse /etc/os-release and return a dict of derived runner settings.
 
     Returned keys:
@@ -357,8 +354,10 @@ def detect_os_profile() -> dict:
       debian10_sources, qa_rpaths,
       skip_setuptools_upgrade, install_more_itertools
     Returns an empty dict if /etc/os-release is missing/unrecognized.
+
+    *os_release* may be overridden in tests.
     """
-    osr = Path("/etc/os-release")
+    osr = os_release if os_release is not None else Path("/etc/os-release")
     if not osr.exists():
         return {}
     fields = {}
@@ -751,6 +750,8 @@ def install_package(cfg: "RunnerConfig", package_path: Path) -> None:
         rpm_list = [str(package_path)]
         if tests_pkg.exists() and tests_pkg != package_path:
             rpm_list.append(str(tests_pkg))
+        # --no-gpg-checks is safe here because rpm_list contains local file
+        # paths we just built ourselves, not repo-resolved package names.
         run_command(
             ["zypper", "--no-refresh", "--no-gpg-checks", "install", "-y", *rpm_list],
             name="zypper-install",
@@ -883,7 +884,7 @@ class RunnerConfig:
     refresh_apt: bool
     debian10_sources: bool
     skip_setuptools_upgrade: bool
-    do_install_more_itertools: bool
+    install_more_itertools: bool
     qa_rpaths: bool
     skip_build: bool
     skip_install: bool
@@ -939,11 +940,6 @@ def parse_args() -> RunnerConfig:
         action="store_true",
         help="Disable auto-detection of OS profile from /etc/os-release",
     )
-    parser.add_argument(
-        "--install-cli",
-        action="store_true",
-        help="Symlink this script to /usr/local/bin/run_amdsmi_build (so you can call it from anywhere) and exit",
-    )
     args = parser.parse_args()
 
     profile = {} if args.no_autodetect else detect_os_profile()
@@ -980,7 +976,7 @@ def parse_args() -> RunnerConfig:
         refresh_apt=not args.no_apt_update,
         debian10_sources=args.debian10_sources or profile.get("debian10_sources", False),
         skip_setuptools_upgrade=args.skip_setuptools_upgrade or profile.get("skip_setuptools_upgrade", False),
-        do_install_more_itertools=args.install_more_itertools or profile.get("install_more_itertools", False),
+        install_more_itertools=args.install_more_itertools or profile.get("install_more_itertools", False),
         qa_rpaths=args.qa_rpaths or profile.get("qa_rpaths", False),
         skip_build=args.skip_build,
         skip_install=args.skip_install,
@@ -993,65 +989,156 @@ def _write_result(results_dir: Path, filename: str, message: str) -> None:
     (results_dir / filename).write_text(message + "\n", encoding="utf-8")
 
 
-def _maybe_install_cli() -> bool:
-    """If --install-cli was passed, symlink this script into /usr/local/bin and return True.
+# ---------------------------------------------------------------------------
+# CI summary rendering (replaces the duplicated bash block in amdsmi-build.yml)
+# ---------------------------------------------------------------------------
 
-    Run before parse_args so we don't require --package-manager etc. just to install.
+
+def _fenced(text: str) -> str:
+    """Wrap *text* in a markdown fenced code block."""
+    return "```\n" + text + "\n```"
+
+
+def summarize_results(results_dir: Path, os_label: str, summary_file: Optional[Path]) -> int:
+    """Render a CI summary for *results_dir*.
+
+    Returns the number of failures detected (0 == clean). When *summary_file*
+    is given the rendered markdown is appended to it (used with
+    ``$GITHUB_STEP_SUMMARY``).
     """
-    if "--install-cli" not in sys.argv:
-        return False
-    target = Path("/usr/local/bin/run_amdsmi_build")
-    src = Path(__file__).resolve()
-    try:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if target.exists() or target.is_symlink():
-            target.unlink()
-        target.symlink_to(src)
-        os.chmod(src, os.stat(src).st_mode | 0o111)
-        print(f"Installed CLI shim: {target} -> {src}")
-        print("You can now run 'run_amdsmi_build' from anywhere.")
-        return True
-    except OSError as exc:
-        print(f"ERROR: could not install CLI shim at {target}: {exc}", file=sys.stderr)
-        print("Hint: re-run with sudo, or set up a symlink manually.", file=sys.stderr)
-        sys.exit(1)
+    failures: List[str] = []
+    details: List[str] = []
 
+    if not results_dir.exists():
+        print(f"summarize: results dir {results_dir} does not exist")
 
-def _reexec_under_sudo_if_needed() -> None:
-    """If not root, re-exec the same command line under sudo.
+    # 1. build/install/verify stage results
+    for result_file in sorted(results_dir.glob("*_result.txt")):
+        content = result_file.read_text(encoding="utf-8", errors="replace")
+        if "FAILED" in content:
+            stage = result_file.stem.replace("_result", "").replace("_", " ")
+            failures.append(stage)
+            details.append(f"#### {stage}\n\n" + _fenced(content))
+            print(f"FAILED: {stage}")
 
-    The build/install/ldconfig steps all require root. Rather than failing
-    cryptically (e.g. PermissionError on a root-owned build dir, or
-    apt install failing), transparently elevate. Skip if --install-cli (handled
-    earlier) or --skip-install + --skip-build (read-only modes) are active.
-    """
-    if hasattr(os, "geteuid") and os.geteuid() == 0:
-        return
-    if "--install-cli" in sys.argv:
-        return
-    if "--skip-install" in sys.argv and "--skip-build" in sys.argv:
-        return
-    sudo = shutil.which("sudo")
-    if not sudo:
-        print(
-            "ERROR: this script needs root (for apt/dnf/zypper install, "
-            "/opt/rocm, and ldconfig) and 'sudo' is not on PATH.",
-            file=sys.stderr,
+    # 2. amd-smi command test logs -- logged but non-fatal
+    cmd_fails: List[str] = []
+    for log in sorted(results_dir.glob("amd-smi_*.log")):
+        log_text = log.read_text(encoding="utf-8", errors="replace")
+        if any(token in log_text for token in ("Traceback", "AmdSmiException", "Error code:")):
+            cmd_fails.append(log.stem.replace("amd-smi_", ""))
+    if cmd_fails:
+        joined = " ".join(cmd_fails)
+        details.append(f"#### Command Tests (non-fatal)\n\nFailed: `{joined}`")
+
+    # 3. AMDSMI gtest output
+    gtest_log = results_dir / "amdsmi_tests.log"
+    if gtest_log.exists():
+        text = gtest_log.read_text(encoding="utf-8", errors="replace")
+        gtest_fails = text.count("[  FAILED  ]")
+        if gtest_fails > 0:
+            failures.append(f"AMDSMI Tests ({gtest_fails})")
+            details.append(
+                f"#### AMDSMI Tests \u2014 {gtest_fails} failure(s)\n\n" + _fenced(text)
+            )
+
+    # 4. Python test outputs
+    import re as _re
+
+    fail_re = _re.compile(r"^(FAIL|ERROR):", _re.MULTILINE)
+    for test_file in ("integration_test_output.txt", "unit_test_output.txt", "perf_test_output.txt"):
+        full = results_dir / test_file
+        if not full.exists():
+            continue
+        text = full.read_text(encoding="utf-8", errors="replace")
+        py_fails = len(fail_re.findall(text))
+        if py_fails > 0:
+            name = test_file.replace("_output.txt", "").replace("_", " ")
+            failures.append(f"{name} ({py_fails})")
+            details.append(
+                f"#### {name} \u2014 {py_fails} failure(s)\n\n" + _fenced(text)
+            )
+
+    # 5. example test results (segfault detection)
+    crash_re = _re.compile(r"segfault|SIGSEGV|abort", _re.IGNORECASE)
+    for ex_log in ("amd_smi_drm_ex.log", "amd_smi_nodrm_ex.log"):
+        full = results_dir / ex_log
+        if not full.exists():
+            continue
+        text = full.read_text(encoding="utf-8", errors="replace")
+        if crash_re.search(text):
+            name = ex_log.replace(".log", "")
+            failures.append(f"Example {name}")
+            details.append(f"#### Example {name}\n\n" + _fenced(text))
+
+    # Render. Hard failures (build/install/verify/gtest/python/examples) drive
+    # the exit status; command-test failures are surfaced only as a warning so
+    # transient amd-smi CLI flakes do not fail the whole job.
+    cmd_summary = ""
+    if cmd_fails:
+        cmd_summary = (
+            f"\n\n:warning: Command tests (non-fatal): `{' '.join(cmd_fails)}`\n"
         )
-        print("Re-run as root, e.g. 'su -c \"python3 ...\"'.", file=sys.stderr)
-        sys.exit(1)
-    print("Re-executing under sudo (root required for build/install)...")
-    # Resolve the script path so the sudo'd process points at the same file.
-    script = str(Path(__file__).resolve())
-    # Use the same python interpreter currently running.
-    python = sys.executable or "python3"
-    os.execvp(sudo, [sudo, "-E", python, script, *sys.argv[1:]])
+
+    if failures:
+        header = [
+            f"## :x: CI Failed \u2014 {os_label}",
+            "",
+            f"**{len(failures)} failure(s) detected:**",
+            "",
+        ]
+        header += [f"- :red_circle: {f}" for f in failures]
+        body = "\n".join(header) + cmd_summary + "\n\n" + "\n\n".join(details) + "\n"
+    else:
+        body = (
+            f"## :white_check_mark: CI Passed \u2014 {os_label}\n\n"
+            "All stages and tests passed successfully.\n"
+        )
+        if cmd_fails:
+            body += cmd_summary + "\n" + "\n\n".join(details) + "\n"
+
+    if summary_file is not None:
+        with summary_file.open("a", encoding="utf-8") as fh:
+            fh.write(body)
+
+    # Always print to stdout so the step log is self-contained.
+    print("=" * 42)
+    print(f"CI SUMMARY for {os_label}")
+    print("=" * 42)
+    print(body)
+
+    if failures:
+        joined = ", ".join(failures)
+        print(f"::error::{len(failures)} failure(s) for {os_label}: {joined}")
+    elif cmd_fails:
+        print(f"::warning::Command tests failed (non-fatal) for {os_label}: {' '.join(cmd_fails)}")
+        print(f"All hard stages PASSED for {os_label}")
+    else:
+        print(f"All stages and tests PASSED for {os_label}")
+    return len(failures)
+
+
+def _summarize_cli(argv: List[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="run_amdsmi_build.py summarize",
+        description="Render CI step summary from a test-results directory.",
+    )
+    parser.add_argument("--results-dir", type=Path, required=True)
+    parser.add_argument("--os-label", default="local")
+    parser.add_argument(
+        "--summary-file",
+        type=Path,
+        default=None,
+        help="Append markdown to this file (e.g. $GITHUB_STEP_SUMMARY).",
+    )
+    args = parser.parse_args(argv)
+    return summarize_results(args.results_dir, args.os_label, args.summary_file)
 
 
 def main() -> None:
-    if _maybe_install_cli():
-        return
-    _reexec_under_sudo_if_needed()
+    # `summarize` subcommand short-circuits before parse_args/sudo logic.
+    if len(sys.argv) > 1 and sys.argv[1] == "summarize":
+        sys.exit(0 if _summarize_cli(sys.argv[2:]) == 0 else 1)
     cfg = parse_args()
 
     print(f"Using project directory: {cfg.project_dir}")
@@ -1067,7 +1154,7 @@ def main() -> None:
         update_debian10_sources(cfg.log_dir, cfg.retries)
 
     # 2. Install more_itertools if requested (e.g. AzureLinux3)
-    if cfg.do_install_more_itertools:
+    if cfg.install_more_itertools:
         install_more_itertools(cfg.log_dir, cfg.retries)
 
     # 3. Upgrade setuptools (skip on AzureLinux3)
