@@ -59,13 +59,17 @@ class OperandMap:
         dst_ops: list[str],
         exec_model: ExecModel,
         dtype: str | None = None,
+        src_width: int | None = None,
+        dst_width: int | None = None,
     ) -> OperandMap:
         is_64 = dtype in ('b64', 'i64', 'u64', 'f64')
         is_scalar = exec_model == ExecModel.SCALAR
         reg = RegClass.SGPR if is_scalar else RegClass.VGPR
-        width = 64 if is_64 else 32
-        src_b = {i: OperandBinding(name, reg, width) for i, name in enumerate(src_ops)}
-        dst_b = {i: OperandBinding(name, reg, width) for i, name in enumerate(dst_ops)}
+        default_width = 64 if is_64 else 32
+        sw = src_width if src_width is not None else default_width
+        dw = dst_width if dst_width is not None else default_width
+        src_b = {i: OperandBinding(name, reg, sw) for i, name in enumerate(src_ops)}
+        dst_b = {i: OperandBinding(name, reg, dw) for i, name in enumerate(dst_ops)}
         return OperandMap(src_bindings=src_b, dst_bindings=dst_b)
 
 
@@ -506,6 +510,13 @@ def _lower_expr(node: SemaNode, ctx: LoweringContext) -> str:
 
     if kind == SemaNodeKind.ABS:
         arg = _lower_expr(node.children[0], ctx)
+        if node.ty and node.ty.base == 'I':
+            return (
+                f'[&]() {{ int{node.ty.size}_t v = {arg};'
+                f' return static_cast<uint{node.ty.size}_t>'
+                f'(v < 0 ? (0u - static_cast<uint{node.ty.size}_t>(v))'
+                f' : static_cast<uint{node.ty.size}_t>(v)); }}()'
+            )
         return f'std::abs({arg})'
 
     if kind == SemaNodeKind.UMINUS:
@@ -914,12 +925,24 @@ def _lower_arrayderef(node: SemaNode, ctx: LoweringContext) -> str:
 
 
 _INLINE_UNARY_OPS: dict[str, str] = {
-    'rcp': '1.0f / {0}',
-    'rcp_iflag': '1.0f / {0}',
-    'rsq': '1.0f / std::sqrt({0})',
+    'rcp': 'amdgpu::transcendental::rcp_f32({0})',
+    'rcp_iflag': 'amdgpu::transcendental::rcp_f32({0})',
+    'rsq': 'amdgpu::transcendental::rsq_f32({0})',
+    'sqrt': 'amdgpu::transcendental::sqrt_f32({0})',
+    'sin': 'amdgpu::transcendental::sin_f32({0})',
+    'cos': 'amdgpu::transcendental::cos_f32({0})',
+    'log': 'amdgpu::transcendental::log_f32({0})',
+    'exp': 'amdgpu::transcendental::exp_f32({0})',
+    'rcp_f64': 'amdgpu::transcendental::rcp_f64({0})',
+    'rsq_f64': 'amdgpu::transcendental::rsq_f64({0})',
+    'sqrt_f64': 'amdgpu::transcendental::sqrt_f64({0})',
+    'abs': '[&]() {{ int32_t v = static_cast<int32_t>({0});'
+    ' return static_cast<uint32_t>'
+    '(v < 0 ? (0u - static_cast<uint32_t>(v))'
+    ' : static_cast<uint32_t>(v)); }}()',
     'rndne': 'std::nearbyint({0})',
     'ceil': 'std::ceil({0})',
-    'exp2': 'std::exp2({0})',
+    'exp2': 'amdgpu::transcendental::exp_f32({0})',
     'bcnt': 'static_cast<uint32_t>(std::popcount({0}))',
     'bcnt1': 'static_cast<uint32_t>(std::popcount({0}))',
     'bcnt0': 'static_cast<uint32_t>(std::popcount(~{0}))',
@@ -1009,8 +1032,12 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     'cls_i32': '[&]() {{ auto s = static_cast<int32_t>({0});'
     ' uint32_t a = s < 0 ? ~static_cast<uint32_t>(s) : static_cast<uint32_t>(s);'
     ' return a == 0 ? 31u : static_cast<uint32_t>(std::countl_zero(a)) - 1; }}()',
-    'frexp_exp_f32': 'std::ilogb({0}) + 1',
-    'frexp_exp_f16': 'std::ilogb({0}) + 1',
+    'frexp_exp_f32': '[&]() {{ float s = {0}; int exp = 0;'
+    ' if (s != 0.0f && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);'
+    ' return static_cast<uint32_t>(exp); }}()',
+    'frexp_exp_f16': '[&]() {{ float s = {0}; int exp = 0;'
+    ' if (s != 0.0f && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);'
+    ' return static_cast<uint32_t>(exp); }}()',
     'frexp_exp_f64': '[&]() {{ double s = {0};'
     ' int exp = 0;'
     ' if (s != 0.0 && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);'
@@ -1019,7 +1046,7 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     ' int exp = 0;'
     ' return std::frexp(s, &exp); }}()',
     'frexp_mant_f32': '[&]() {{ int e; return std::frexp(static_cast<float>({0}), &e); }}()',
-    'log2': 'std::log2({0})',
+    'log2': 'amdgpu::transcendental::log_f32({0})',
     'cvt_f32_i32': 'std::bit_cast<uint32_t>(static_cast<float>(static_cast<int32_t>({0})))',
     'cvt_f32_u32': 'std::bit_cast<uint32_t>(static_cast<float>({0}))',
     'cvt_i32_f32': '[&]() -> uint32_t {{ float s = std::bit_cast<float>(static_cast<uint32_t>({0}));'
@@ -1093,7 +1120,13 @@ _INLINE_BINARY_OPS: dict[str, str] = {
     ' return static_cast<uint32_t>((a * b) >> 32); }}()',
     'util::arithmetic_shr': '[&]() {{ auto v = static_cast<int32_t>({0});'
     ' return static_cast<uint32_t>(v >> ({1} & 31u)); }}()',
+    'util::arithmetic_shr_i16': '[&]() {{ auto v = static_cast<int16_t>({0});'
+    ' return static_cast<uint32_t>(static_cast<uint16_t>(v >> ({1} & 15u))); }}()',
+    'bitset0': '({0} & ~(1u << ({0} & 31u)))',
+    'bitset1': '({0} | (1u << ({0} & 31u)))',
     'bfm': '(((1u << ({0} & 31u)) - 1u) << ({1} & 31u))',
+    'bfm64': '[&]() {{ uint64_t cnt = {0} & 63u; uint64_t off = {1} & 63u;'
+    ' return cnt == 0 ? 0ULL : ((1ULL << cnt) - 1ULL) << off; }}()',
     'ashr': '[&]() {{ auto v = static_cast<int32_t>({0});'
     ' return static_cast<uint32_t>(v >> ({1})); }}()',
     'ashr_i64': '[&]() {{ auto v = static_cast<int64_t>({0});'
@@ -1119,8 +1152,8 @@ _INLINE_BINARY_OPS: dict[str, str] = {
     'is_ordered': '(!std::isnan({0}) && !std::isnan({1}))',
     'is_unordered': '(std::isnan({0}) || std::isnan({1}))',
     'fp_class_test': '[&]() -> bool {{'
-    ' float s0 = std::bit_cast<float>(static_cast<uint32_t>({0}));'
-    ' uint32_t mask = {1}; bool match = false;'
+    ' float s0 = {0};'
+    ' uint32_t mask = static_cast<uint32_t>({1}); bool match = false;'
     ' if ((mask & 0x001u) && std::isnan(s0)'
     ' && (std::bit_cast<uint32_t>(s0) & 0x00400000u) == 0) match = true;'
     ' if ((mask & 0x002u) && std::isnan(s0)'
@@ -1133,6 +1166,24 @@ _INLINE_BINARY_OPS: dict[str, str] = {
     ' if ((mask & 0x040u) && s0 == 0.0f && !std::signbit(s0)) match = true;'
     ' if ((mask & 0x080u) && !std::isnormal(s0) && !std::isinf(s0)'
     ' && !std::isnan(s0) && s0 != 0.0f && !std::signbit(s0)) match = true;'
+    ' if ((mask & 0x100u) && std::isnormal(s0) && s0 > 0) match = true;'
+    ' if ((mask & 0x200u) && std::isinf(s0) && s0 > 0) match = true;'
+    ' return match; }}()',
+    'fp_class_test_f64': '[&]() -> bool {{'
+    ' double s0 = {0};'
+    ' uint32_t mask = static_cast<uint32_t>({1}); bool match = false;'
+    ' if ((mask & 0x001u) && std::isnan(s0)'
+    ' && (std::bit_cast<uint64_t>(s0) & 0x0008000000000000ULL) == 0) match = true;'
+    ' if ((mask & 0x002u) && std::isnan(s0)'
+    ' && (std::bit_cast<uint64_t>(s0) & 0x0008000000000000ULL) != 0) match = true;'
+    ' if ((mask & 0x004u) && std::isinf(s0) && s0 < 0) match = true;'
+    ' if ((mask & 0x008u) && std::isnormal(s0) && s0 < 0) match = true;'
+    ' if ((mask & 0x010u) && !std::isnormal(s0) && !std::isinf(s0)'
+    ' && !std::isnan(s0) && s0 != 0.0 && std::signbit(s0)) match = true;'
+    ' if ((mask & 0x020u) && s0 == 0.0 && std::signbit(s0)) match = true;'
+    ' if ((mask & 0x040u) && s0 == 0.0 && !std::signbit(s0)) match = true;'
+    ' if ((mask & 0x080u) && !std::isnormal(s0) && !std::isinf(s0)'
+    ' && !std::isnan(s0) && s0 != 0.0 && !std::signbit(s0)) match = true;'
     ' if ((mask & 0x100u) && std::isnormal(s0) && s0 > 0) match = true;'
     ' if ((mask & 0x200u) && std::isinf(s0) && s0 > 0) match = true;'
     ' return match; }}()',
@@ -1201,18 +1252,18 @@ _INLINE_BINARY_OPS: dict[str, str] = {
     ' if (width < 64 && (extracted & (1ULL << (width - 1))))'
     '   extracted |= ~mask;'
     ' return static_cast<int64_t>(extracted); }}()',
-    'ABSDIFF': '[&]() {{ auto a = static_cast<int32_t>({0});'
-    ' auto b = static_cast<int32_t>({1});'
+    'ABSDIFF': '[&]() {{ auto a = static_cast<int64_t>(static_cast<int32_t>({0}));'
+    ' auto b = static_cast<int64_t>(static_cast<int32_t>({1}));'
     ' return static_cast<uint32_t>(a > b ? a - b : b - a); }}()',
     'pack_b32_f16': '(({0} & 0xFFFFu) | (({1} & 0xFFFFu) << 16))',
     'v_readlane': '{0}',
 }
 
 _INLINE_TERNARY_OPS: dict[str, str] = {
-    'min3': 'std::min(std::min({0}, {1}), {2})',
-    'max3': 'std::max(std::max({0}, {1}), {2})',
+    'min3': 'std::fmin(std::fmin({0}, {1}), {2})',
+    'max3': 'std::fmax(std::fmax({0}, {1}), {2})',
     'med3': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
-    ' return std::max(std::min(std::max(a, b), c), std::min(a, b)); }}()',
+    ' return std::fmax(std::fmin(std::fmax(a, b), c), std::fmin(a, b)); }}()',
     'lerp_u8': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
     ' uint32_t r = 0;'
     ' for (int i = 0; i < 4; ++i) {{'
@@ -1273,14 +1324,14 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     ' : (sel == 0xC) ? 0u : (sel == 0xD) ? 0xFFu : 0u;'
     ' r |= static_cast<uint32_t>(byte) << (i*8);'
     ' }} return r; }}()',
-    'minimum3': 'std::min(std::min({0}, {1}), {2})',
-    'maximum3': 'std::max(std::max({0}, {1}), {2})',
-    'maxmin': 'std::min(std::max({0}, {1}), {2})',
-    'minmax': 'std::max(std::min({0}, {1}), {2})',
-    'maxmin_num': 'std::min(std::max({0}, {1}), {2})',
-    'minmax_num': 'std::max(std::min({0}, {1}), {2})',
-    'maximumminimum': 'std::min(std::max({0}, {1}), {2})',
-    'minimummaximum': 'std::max(std::min({0}, {1}), {2})',
+    'minimum3': 'std::fmin(std::fmin({0}, {1}), {2})',
+    'maximum3': 'std::fmax(std::fmax({0}, {1}), {2})',
+    'maxmin': 'std::fmin(std::fmax({0}, {1}), {2})',
+    'minmax': 'std::fmax(std::fmin({0}, {1}), {2})',
+    'maxmin_num': 'std::fmin(std::fmax({0}, {1}), {2})',
+    'minmax_num': 'std::fmax(std::fmin({0}, {1}), {2})',
+    'maximumminimum': 'std::fmin(std::fmax({0}, {1}), {2})',
+    'minimummaximum': 'std::fmax(std::fmin({0}, {1}), {2})',
     'addc_co': '[&]() {{ uint64_t w = static_cast<uint64_t>({0})'
     ' + static_cast<uint64_t>({1})'
     ' + static_cast<uint64_t>({2});'
@@ -1331,6 +1382,9 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     ' auto b = static_cast<int32_t>({1} << 8) >> 8;'
     ' return static_cast<uint32_t>(a * b + static_cast<int32_t>({2})); }}()',
     'bfe_u': '[&]() {{ uint32_t src={0}; uint32_t off={1} & 31u; uint32_t w={2} & 31u;'
+    ' auto b = static_cast<int32_t>({1} << 8) >> 8;'
+    ' return static_cast<uint32_t>(a * b + static_cast<int32_t>({2})); }}()',
+    'bfe_u': '[&]() {{ uint32_t src={0}; uint32_t off={1} & 31u; uint32_t w={2} & 31u;'
     ' if (w == 0) return 0u;'
     ' uint32_t mask = (w >= 32) ? ~0u : ((1u << w) - 1u);'
     ' return (src >> off) & mask; }}()',
@@ -1356,7 +1410,7 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     ' return -y; }}()',
     'cubema': '[&]() {{ auto x={0}; auto y={1}; auto z={2};'
     ' float ax=std::fabs(x), ay=std::fabs(y), az=std::fabs(z);'
-    ' return 2.0f * std::max({{ax, ay, az}}); }}()',
+    ' return 2.0f * std::fmax(ax, std::fmax(ay, az)); }}()',
 }
 
 
@@ -1417,10 +1471,26 @@ def _lower_apply_src_mod(node: SemaNode, ctx: LoweringContext) -> str:
     if not has_neg and not has_abs:
         return src_expr
 
-    is_f64 = node.ty and node.ty.base == 'F' and node.ty.size == 64
-    fp_type = 'double' if is_f64 else 'float'
+    src_child = node.children[1]
+    src_ty = src_child.ty
+    if src_ty and src_ty.base in ('I', 'U'):
+        return src_expr
 
-    parts = [f'[&]() {{ {fp_type} sv = {src_expr};']
+    is_64 = node.ty and node.ty.size == 64
+    fp_type = 'double' if is_64 else 'float'
+
+    src_is_raw = src_child.kind == SemaNodeKind.INSTOPERAND or (
+        src_child.kind == SemaNodeKind.CAST
+        and src_child.children
+        and src_child.children[0].kind == SemaNodeKind.INSTOPERAND
+        and src_child.ty
+        and src_child.ty.base == 'B'
+    )
+    if src_is_raw and node.ty and node.ty.size in (32, 64):
+        init = f'std::bit_cast<{fp_type}>({src_expr})'
+    else:
+        init = src_expr
+    parts = [f'[&]() {{ {fp_type} sv = {init};']
     if has_abs:
         parts.append(f' if (inst_.abs & (1u << {src_idx})) sv = std::fabs(sv);')
     if has_neg:
@@ -1440,7 +1510,7 @@ def _lower_apply_omod(node: SemaNode, ctx: LoweringContext) -> str:
     if len(node.children) < 2:
         return '0'
     rhs = _lower_expr(node.children[1], ctx)
-    is_f64 = node.ty and node.ty.base == 'F' and node.ty.size == 64
+    is_f64 = node.ty and node.ty.size == 64
     fp_type = 'double' if is_f64 else 'float'
     suffix = '' if is_f64 else 'f'
     return (
@@ -1464,7 +1534,7 @@ def _lower_apply_clamp(node: SemaNode, ctx: LoweringContext) -> str:
     if len(node.children) < 2:
         return '0'
     rhs = _lower_expr(node.children[1], ctx)
-    is_f64 = node.ty and node.ty.base == 'F' and node.ty.size == 64
+    is_f64 = node.ty and node.ty.size == 64
     fp_type = 'double' if is_f64 else 'float'
     suffix = '' if is_f64 else 'f'
     return (
