@@ -8,6 +8,16 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ### Added
 
+### Changed
+
+- Remove Boost as a Dyninst dependency by replacing Boost usage with in-tree dyncompat shims and C++17 standard library equivalents.
+
+### Resolved issues
+
+## ROCm Systems Profiler 1.6.0 for ROCm 7.13.0
+
+### Added
+
 - GPU graphics and memory clock frequency metrics (`gfx_clock`, `mem_clock`) via
   AMD SMI, exposing `current_gfxclk` and `current_uclk` in MHz as PMC samples.
   Configure via `ROCPROFSYS_AMD_SMI_METRICS=gfx_clock,mem_clock`.
