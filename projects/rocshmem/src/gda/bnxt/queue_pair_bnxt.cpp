@@ -288,6 +288,85 @@ __device__ void QueuePair::bnxt_write_rma_wqe(uintptr_t raddr, uintptr_t laddr, 
   bnxt_re_incr_tail(&bnxt_sq, GDA_BNXT_WQE_SLOT_COUNT);
 }
 
+__device__ void QueuePair::bnxt_write_rma_wqe_with_keys(uintptr_t raddr, uintptr_t laddr,
+    int32_t length, uint8_t opcode, uint32_t override_rkey, uint32_t override_lkey) {
+  struct bnxt_re_bsqe hdr;
+  struct bnxt_re_rdma rdma;
+  struct bnxt_re_sge sge;
+  struct bnxt_re_bsqe *hdr_ptr;
+  struct bnxt_re_rdma *rdma_ptr;
+  struct bnxt_re_sge *sge_ptr;
+  uint32_t wqe_size;
+  uint32_t wqe_type;
+  uint32_t hdr_flags;
+  uint32_t inline_msg;
+
+  inline_msg = static_cast<int32_t>(length) <= static_cast<int32_t>(inline_threshold) &&
+               opcode == gda_op_rdma_write;
+
+  bnxt_poll_cq_until(GDA_BNXT_WQE_SLOT_COUNT);
+
+  hdr_ptr  = (struct bnxt_re_bsqe*) bnxt_re_get_hwqe(&bnxt_sq, 0);
+  rdma_ptr = (struct bnxt_re_rdma*) bnxt_re_get_hwqe(&bnxt_sq, 1);
+  sge_ptr  = (struct bnxt_re_sge*)  bnxt_re_get_hwqe(&bnxt_sq, 2);
+
+  wqe_type  = BNXT_RE_HDR_WT_MASK & opcode;
+  wqe_size  = BNXT_RE_HDR_WS_MASK & GDA_BNXT_WQE_SLOT_COUNT;
+  hdr_flags = ((uint32_t) BNXT_RE_HDR_FLAGS_MASK)
+            & ((uint32_t) BNXT_RE_WR_FLAGS_SIGNALED);
+
+  if (inline_msg) {
+    hdr_flags |= ((uint32_t) BNXT_RE_WR_FLAGS_INLINE);
+  }
+
+  hdr.rsv_ws_fl_wt  = (wqe_size  << BNXT_RE_HDR_WS_SHIFT)
+                    | (hdr_flags << BNXT_RE_HDR_FLAGS_SHIFT)
+                    | wqe_type;
+  hdr.key_immd      = 0;
+  hdr.lhdr.qkey_len = length;
+
+  rdma.rva  = raddr;
+  rdma.rkey = override_rkey;
+
+  if (!inline_msg) {
+    sge.pa     = laddr;
+    sge.lkey   = override_lkey;
+    sge.length = length;
+  }
+
+  memcpy(hdr_ptr,  &hdr,  sizeof(struct bnxt_re_bsqe));
+  memcpy(rdma_ptr, &rdma, sizeof(struct bnxt_re_rdma));
+
+  if (inline_msg) {
+    memcpy(sge_ptr,  reinterpret_cast<const void*>(laddr),  length);
+  } else {
+    memcpy(sge_ptr,  &sge,  sizeof(struct bnxt_re_sge));
+  }
+
+  bnxt_re_fill_psns_for_msntbl(&bnxt_sq, length);
+  bnxt_re_incr_tail(&bnxt_sq, GDA_BNXT_WQE_SLOT_COUNT);
+}
+
+__device__ void QueuePair::bnxt_post_wqe_rma_with_keys(int32_t length,
+    uintptr_t laddr, uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info,
+    uint32_t override_rkey, uint32_t override_lkey) {
+  if (wf_info.is_pe_group_first) {
+    lock(&bnxt_sq.lock);
+  }
+
+  for (int i = 0; i < wf_info.num_pe_group_lanes; i++) {
+    if (i == wf_info.pe_group_logical_lane_id) {
+      bnxt_write_rma_wqe_with_keys(raddr, laddr, length, opcode,
+                                    override_rkey, override_lkey);
+      bnxt_ring_doorbell(bnxt_sq.tail);
+    }
+  }
+
+  if (wf_info.is_pe_group_first) {
+    unlock(&bnxt_sq.lock);
+  }
+}
+
 __device__ void QueuePair::bnxt_post_wqe_rma(int32_t length,
     uintptr_t laddr, uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info) {
   if (wf_info.is_pe_group_first) {
