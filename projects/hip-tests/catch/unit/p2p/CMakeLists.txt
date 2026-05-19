@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 # Common Tests - Test independent of all platforms
 # moved hipDeviceGetP2PAttribute.cc from /catch/unit/device to
 # /catch/unit/p2p folder and its dependent files.
@@ -14,9 +18,7 @@ if(HIP_PLATFORM MATCHES "amd")
 endif()
 
 add_executable(hipDeviceGetP2PAttribute_exe EXCLUDE_FROM_ALL hipDeviceGetP2PAttribute_exe.cc)
-set_source_files_properties(hipDeviceGetP2PAttribute_exe.cc PROPERTIES LANGUAGE HIP)
-set_target_properties(hipDeviceGetP2PAttribute_exe PROPERTIES LINKER_LANGUAGE HIP)
-target_link_libraries(hipDeviceGetP2PAttribute_exe hip::host hip::device)
+set_source_files_properties(hipDeviceGetP2PAttribute_exe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
 
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipDeviceGetP2PAttribute_exe)
 

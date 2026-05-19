@@ -25,6 +25,7 @@
 #include "src/cuid_gpu.h"
 #include "src/cuid_cpu.h"
 #include "src/cuid_nic.h"
+#include "src/cuid_npu.h"
 #include "src/cuid_platform.h"
 #include "src/hmac.h"
 #include "src/cuid_internal.h"
@@ -60,9 +61,38 @@ bool CuidFileLock::acquire() {
         return true;  // Already locked
     }
 
-    // Open or create the lock file
-    // Use O_CREAT to create if doesn't exist, O_RDWR for both read and write locks
-    lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_CREAT, 0666);
+    // For shared (read) locks, we only need O_RDONLY access.
+    // For exclusive (write) locks, first open existing file with O_RDWR.
+    // Only create if missing to avoid sticky-dir O_CREAT restrictions in /tmp.
+    if (lock_type_ == CuidLockType::EXCLUSIVE) {
+        lock_fd_ = open(lock_file_path_.c_str(), O_RDWR, 0666);
+        if (lock_fd_ < 0 && errno == ENOENT) {
+            mode_t old_umask = umask(0);
+            lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_CREAT, 0666);
+            umask(old_umask);
+            if (lock_fd_ >= 0) {
+                fchmod(lock_fd_, 0666);
+            }
+        }
+    } else {
+        // Try to open existing file for shared (read) lock
+        lock_fd_ = open(lock_file_path_.c_str(), O_RDONLY, 0666);
+    }
+    
+    // If file doesn't exist and we need a shared lock, try to create it
+    if (lock_fd_ < 0 && lock_type_ == CuidLockType::SHARED && errno == ENOENT) {
+        // Try to create the lock file - may fail if not privileged, which is OK
+        // The file should be created by root when generating CUIDs
+        mode_t old_umask = umask(0);  // Temporarily clear umask for proper permissions
+        lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_CREAT, 0666);
+        umask(old_umask);  // Restore umask
+        
+        // If created successfully, also chmod to ensure permissions are correct
+        if (lock_fd_ >= 0) {
+            fchmod(lock_fd_, 0666);
+        }
+    }
+    
     if (lock_fd_ < 0) {
         LOG(ERROR, "CuidFileLock: Failed to open lock file " << lock_file_path_ 
             << ": " << strerror(errno));
@@ -106,8 +136,33 @@ bool CuidFileLock::acquire_with_timeout(int timeout_seconds) {
         return true;  // Already locked
     }
 
-    // Open or create the lock file
-    lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_CREAT, 0666);
+    // For shared (read) locks, we only need O_RDONLY access.
+    // For exclusive (write) locks, first open existing file with O_RDWR.
+    // Only create if missing to avoid sticky-dir O_CREAT restrictions in /tmp.
+    if (lock_type_ == CuidLockType::EXCLUSIVE) {
+        lock_fd_ = open(lock_file_path_.c_str(), O_RDWR, 0666);
+        if (lock_fd_ < 0 && errno == ENOENT) {
+            mode_t old_umask = umask(0);
+            lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_CREAT, 0666);
+            umask(old_umask);
+            if (lock_fd_ >= 0) {
+                fchmod(lock_fd_, 0666);
+            }
+        }
+    } else {
+        lock_fd_ = open(lock_file_path_.c_str(), O_RDONLY, 0666);
+    }
+    
+    // If file doesn't exist and we need a shared lock, try to create it
+    if (lock_fd_ < 0 && lock_type_ == CuidLockType::SHARED && errno == ENOENT) {
+        mode_t old_umask = umask(0);
+        lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_CREAT, 0666);
+        umask(old_umask);
+        if (lock_fd_ >= 0) {
+            fchmod(lock_fd_, 0666);
+        }
+    }
+    
     if (lock_fd_ < 0) {
         LOG(ERROR, "CuidFileLock: Failed to open lock file " << lock_file_path_ 
             << ": " << strerror(errno));
@@ -164,8 +219,33 @@ bool CuidFileLock::try_acquire() {
         return true;  // Already locked
     }
 
-    // Open or create the lock file
-    lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_CREAT, 0666);
+    // For shared (read) locks, we only need O_RDONLY access.
+    // For exclusive (write) locks, first open existing file with O_RDWR.
+    // Only create if missing to avoid sticky-dir O_CREAT restrictions in /tmp.
+    if (lock_type_ == CuidLockType::EXCLUSIVE) {
+        lock_fd_ = open(lock_file_path_.c_str(), O_RDWR, 0666);
+        if (lock_fd_ < 0 && errno == ENOENT) {
+            mode_t old_umask = umask(0);
+            lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_CREAT, 0666);
+            umask(old_umask);
+            if (lock_fd_ >= 0) {
+                fchmod(lock_fd_, 0666);
+            }
+        }
+    } else {
+        lock_fd_ = open(lock_file_path_.c_str(), O_RDONLY, 0666);
+    }
+    
+    // If file doesn't exist and we need a shared lock, try to create it
+    if (lock_fd_ < 0 && lock_type_ == CuidLockType::SHARED && errno == ENOENT) {
+        mode_t old_umask = umask(0);
+        lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_CREAT, 0666);
+        umask(old_umask);
+        if (lock_fd_ >= 0) {
+            fchmod(lock_fd_, 0666);
+        }
+    }
+    
     if (lock_fd_ < 0) {
         LOG(ERROR, "CuidFileLock: Failed to open lock file " << lock_file_path_ 
             << ": " << strerror(errno));
@@ -253,6 +333,7 @@ amdcuid_device_type_t CuidFile::string_to_device_type(const std::string& str) co
     if (str == "CPU") return AMDCUID_DEVICE_TYPE_CPU;
     if (str == "GPU") return AMDCUID_DEVICE_TYPE_GPU;
     if (str == "NIC") return AMDCUID_DEVICE_TYPE_NIC;
+    if (str == "NPU") return AMDCUID_DEVICE_TYPE_NPU;
     return AMDCUID_DEVICE_TYPE_NONE;
 }
 
@@ -373,7 +454,7 @@ amdcuid_status_t CuidFile::load() {
                 } else if (key == "mac_address") {
                     current_entry.mac_address = value;
                 } else if (key == "hardware_fingerprint") {
-                    current_entry.hardware_fingerprint = std::stoull(value);
+                    current_entry.hardware_fingerprint = static_cast<uint64_t>(std::stoull(value, nullptr, 16));
                 } else if (key == "vendor_id") {
                     current_entry.vendor_id = static_cast<uint16_t>(std::stoul(value, nullptr, 16));
                 } else if (key == "device_id") {
@@ -389,7 +470,7 @@ amdcuid_status_t CuidFile::load() {
                 } else if (key == "unit_id") {
                     current_entry.unit_id = static_cast<uint16_t>(std::stoul(value, nullptr, 16));
                 } else if (key == "last_update") {
-                    current_entry.last_update = std::stol(value);
+                    current_entry.last_update = std::stol(value, nullptr, 10);
                 }
             }
         }
@@ -443,6 +524,7 @@ amdcuid_status_t CuidFile::save() {
         AMDCUID_DEVICE_TYPE_GPU,
         AMDCUID_DEVICE_TYPE_CPU,
         AMDCUID_DEVICE_TYPE_NIC,
+        AMDCUID_DEVICE_TYPE_NPU,
         AMDCUID_DEVICE_TYPE_PLATFORM
     };
     
@@ -469,7 +551,7 @@ amdcuid_status_t CuidFile::save() {
             // Write hardware fingerprint (privileged file only)
             if (is_privileged_)
             {
-                file << "hardware_fingerprint=" << entry.hardware_fingerprint << "\n";
+                file << "hardware_fingerprint=" << std::hex << std::setw(16) << std::setfill('0') << entry.hardware_fingerprint << "\n";
             }
 
             // Write device-specific fields
@@ -508,7 +590,7 @@ amdcuid_status_t CuidFile::save() {
             }
             
             // Write timestamp
-            file << "last_update=" << entry.last_update << "\n";
+            file << std::dec << "last_update=" << entry.last_update << "\n";
             file << "\n";
         }
     }
@@ -690,6 +772,17 @@ amdcuid_status_t CuidFileGenerator::generate_from_devices(
         }
         entry.derived_cuid = derived_id.UUIDv8_representation;
 
+        // get hardware fingerprint
+        uint64_t fingerprint = 0;
+        status = device->get_hardware_fingerprint(fingerprint);
+        if (status != AMDCUID_STATUS_SUCCESS) {
+            std::cerr << "Warning: Failed to get hardware fingerprint for device type " 
+                      << entry.device_type << " status: " << status << std::endl;
+            entry.hardware_fingerprint = 0;
+        } else {
+            entry.hardware_fingerprint = fingerprint;
+        }
+
         // Fill in device-specific information
         switch (entry.device_type) {
             case AMDCUID_DEVICE_TYPE_GPU: {
@@ -719,6 +812,11 @@ amdcuid_status_t CuidFileGenerator::generate_from_devices(
                     // Format: package:core
                     entry.package_core_id = std::to_string(info.header.fields.cpu.physical_id) + 
                                           ":" + std::to_string(info.header.fields.cpu.core);
+                    // Store device path (unique per logical CPU, needed for SMT)
+                    std::string cpu_device_path;
+                    if (cpu->get_device_path(cpu_device_path) == AMDCUID_STATUS_SUCCESS) {
+                        entry.device_node = cpu_device_path;
+                    }
                 }
                 break;
             }
@@ -735,6 +833,19 @@ amdcuid_status_t CuidFileGenerator::generate_from_devices(
                     if (nic->get_mac_address(mac_address) == AMDCUID_STATUS_SUCCESS) {
                         entry.mac_address = mac_address;
                     }
+                    entry.bdf = info.bdf;
+                }
+                break;
+            }
+            case AMDCUID_DEVICE_TYPE_NPU: {
+                auto npu = std::dynamic_pointer_cast<CuidNpu>(device);
+                if (npu) {
+                    const auto& info = npu->get_info();
+                    entry.vendor_id = info.header.fields.npu.vendor_id;
+                    entry.device_id = info.header.fields.npu.device_id;
+                    entry.revision_id = info.header.fields.npu.revision_id;
+                    entry.pci_class = info.header.fields.npu.pci_class;
+                    entry.device_node = info.accel_node;
                     entry.bdf = info.bdf;
                 }
                 break;

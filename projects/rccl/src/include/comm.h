@@ -18,6 +18,7 @@
 #include "register.h"
 #include "graph.h"
 #include "nvmlwrap.h"
+#include "amdsmi_wrap.h"
 #include "profiler.h"
 #include "allocator.h"
 #include "dev_runtime.h"
@@ -26,6 +27,8 @@
 #include "latency_profiler/CollTrace.h"
 #include "rccl_common.h"
 #include "recorder.h"
+#include "ipc_init_detail.h"
+#include "mem_manager.h"
 
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
@@ -115,6 +118,7 @@ struct cliqueInfo {
 struct ncclDestructor {
   struct ncclDestructor* next;
   void* obj;
+  struct ncclComm* comm;
   ncclResult_t(*fn)(struct ncclDestructor* me);
 };
 
@@ -153,8 +157,16 @@ struct ncclSharedResources {
 
   /* proxy related shared res */
   struct ncclProxyState* proxyState;
+
+  // GIN state
+  struct ncclGinState ginState;
 };
 
+ /**
+  * NOTE: This struct contains pointer members. Shallow copies are only intended during early initialization,
+  * before these pointers are populated or before ownership/lifetime of the pointed-to resources matters.
+  * Do not treat an initialized ncclChannel as generally safe to shallow copy.
+  */
 struct ncclChannel {
   struct ncclChannelPeer** peers;
   struct ncclDevChannelPeer** devPeers;
@@ -217,6 +229,9 @@ struct ncclTaskColl {
   bool useWarpSpeed;
 #else
   int32_t nMaxChannels:8;
+#endif
+#ifdef ENABLE_ROCSHMEM
+  size_t* sizes;
 #endif
   int32_t nWarps:8;
   int32_t algorithm:8, protocol:8, pipeline:8;
@@ -400,6 +415,8 @@ struct ncclKernelPlanner {
   bool persistent;
   // The list of user streams aggregated over all tasks present.
   struct ncclCudaStreamList* streams;
+  // Keep track of the number of user streams
+  int numStreams;
   // The most recent user stream. Ignored if streams==nullptr
   cudaStream_t streamRecent;
   // The graph capturing all user streams or invalid if none. Thus we restrict the
@@ -429,6 +446,7 @@ struct ncclKernelPlanner {
         int workBytes; // Sum size of work metadata referenced by this batch.
         int nP2ps; // Number of p2p works in this batch
         int p2pRounds[NCCL_MAX_DEV_WORK_P2P_PER_BATCH]; // which rounds are present in this batch.
+        bool batchP2P; // whether this batch is eligible for batching multiple p2p operations.
       } wipBatch; // work-in-progress batch which will be next tail of workBatchQueue
       int nWorkBatchesP2p; // number of p2p batches for this channel.
       struct ncclIntruQueue<struct ncclWorkBatchList, &ncclWorkBatchList::next> workBatchQueue;
@@ -461,8 +479,12 @@ struct ncclPeerInfo {
   struct ncclComm* comm;
   int cudaCompCap;
   size_t totalGlobalMem;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  amdsmiFabricDeviceInfo fabricInfo;
+#else
   // MNNVL support
   nvmlGpuFabricInfoV_t fabricInfo;
+#endif
   int cuMemSupport;
   int version;
 };
@@ -474,6 +496,7 @@ typedef enum ncclGroupTaskType {
 } ncclGroupTaskType_t;
 
 struct ncclCommSymTeams;
+class ncclIpcMemHandler;
 
 struct ncclComm {
   uint64_t startMagic;
@@ -495,12 +518,21 @@ struct ncclComm {
 
   ncclNet_t* ncclNet;
   void* netContext;
+  void* ginContext;
   int netPluginIndex;
   int ncclNetVer;
   ncclNetDeviceType netDeviceType;
   ncclCollNet_t* ncclCollNet;
   void* collNetContext;
   void* bootstrap;
+
+  // DDA IPC all-reduce: per-rank device scratch + IPC handles (see ncclDdaIpcCommInit)
+  ncclIpcMemHandler* ddaIpcMemHandler;
+  void* ddaIpcScratch;
+  size_t ddaIpcScratchBytes;
+  void* ddaIpcPeerPtrsDev;
+  nccl_dda_ipc_detail::DdaIpcBarrierState* ddaIpcBarrierState; /* see ncclDdaIpcCommInit */
+
   // Bitmasks for ncclTransportP2pSetup
   struct channelMasks* connectSend;
   struct channelMasks* connectRecv;
@@ -508,7 +540,7 @@ struct ncclComm {
   int maxTreePattern;
   bool initAlgoChannels[NCCL_NUM_ALGORITHMS];
   bool runtimeConn; // if dynamic connection is supported
-  bool directMode;
+  bool directMode; // if any process manages more than one local rank
   int cuMemSupport;
 
   uint64_t magic; // Magic number for all network communication. Not a security key -- only goal is to detect mismatches.
@@ -541,6 +573,18 @@ struct ncclComm {
   int* localRankToRank;
   // localRanks and localRanktoRank for all nodes
   struct ncclNodeRanks* nodeRanks;
+
+  // Hierarchical AG sub-communicators
+  struct ncclComm* hierarchicalIntraComm;
+  struct ncclComm* hierarchicalInterComm;
+  bool hierarchicalCommsInitialized;
+
+  // Hierarchical AG temporary buffers
+  void* hierarchicalAGTempBuffer;
+
+  // Force PAT algorithm for this communicator
+  bool forcePatEnable;
+
   // MNNVL: Multi-Node NVLink
   int MNNVL; // true when MNNVL is available
   struct cliqueInfo clique; // Our MNNVL clique information
@@ -566,6 +610,7 @@ struct ncclComm {
   // Channels (per peer) for p2p
   int p2pnChannels;
   int p2pnChannelsPerPeer;
+  int p2pChannelShiftSize;
 
   // Should this comm allocate LL buffers for network P2P connections?
   bool allocP2pNetLLBuffers;
@@ -595,6 +640,7 @@ struct ncclComm {
   uint32_t* childAbortFlag;
   uint32_t* childAbortFlagDev;
   uint32_t destroyFlag;
+  uint32_t revokedFlag;
 
   // Flags for enable P2P NET
   uint32_t p2pNet;
@@ -677,7 +723,11 @@ struct ncclComm {
 
   hipEvent_t doneEvent;
   hipStream_t lastStream;
-  std::unique_ptr<latency_profiler::CollTrace> ctrace;
+  // False until the first kernel launch on this comm. Distinguishes "no prior launch"
+  // from "prior launch on the default stream (lastStream==nullptr)" so ncclLaunchPrepare
+  // can correctly detect a stream change in either case.
+  bool lastStreamValid;
+  latency_profiler::CollTrace* ctrace;
 
 #ifdef ENABLE_COLLTRACE
   struct ncclCollTrace* collTrace;
@@ -701,16 +751,6 @@ struct ncclComm {
   // shared structures for finalization
   int finalizeRankCnt;
 
-#if defined(ENABLE_MSCCLPP)
-  // Whether this comm is compatible with MSCCLPP
-  bool mscclppCompatible;
-  struct mscclppComm* mscclpp_comm;
-  size_t mscclpp_threshold;
-  bool mscclppForceEnable;
-#endif
-
-  // Whether this comm is compatible with MSCCL
-  bool mscclCompatible;
   // group job to support multi-thread FT
   struct ncclGroupJob *groupJob;
 
@@ -730,11 +770,12 @@ struct ncclComm {
   // CE Collective
   struct ncclCeColl ceColl;
   struct ncclIntruQueue<struct ncclCeInitTask, &ncclCeInitTask::next> ceInitTaskQueue;
-  
+
   // buffer registration cache
   struct ncclRegCache regCache;
   int isAllNvlink;
-  bool isAllDirectP2p;
+  bool isAllDirectP2p; // Subject to NCCL_P2P_LEVEL (for local ranks only).
+  bool isAllCudaP2p; // Raw CUDA capability (for local ranks only).
   int symmetricSupport;
   bool useNetPXN;
   bool useGdr;
@@ -751,22 +792,29 @@ struct ncclComm {
   char* archName;
   // multiProcessorCount from hipDeviceProp_t [RCCL]
   int cuCount;
+  // [RCCL] Host mirrors of device side NCCL_LL128_LINEELEMS / NCCL_LL128_DATAELEMS
+  int ll128LineElems;
+  int ll128DataElems;
 
 #ifdef ENABLE_ROCSHMEM
   // circular ring buffer in rocshmem symmetric heap
-  void** sourceRshmem;
-  void** destRshmem;
+  void* sourceRshmem;
+  void* destRshmem;
+
   rocshmem::rocshmem_team_t team_reduce_world_dup;
   int enableRocshmem;
   int rocshmemThreshold;
   int numSymBuf;
   int symId;
+  size_t bufThreshold;
 #endif
 
   // Direct Reduce Scatter [RCCL]
   bool enableDirectReduceScatter;
   // Temporary Buffer [RCCL]
   void* tempBuff;
+
+  struct ncclMemManager* memManager;  // Memory manager
 
   uint64_t endMagic;
 };

@@ -82,6 +82,9 @@ typedef struct { char internal[NCCL_UNIQUE_ID_BYTES]; /*!< Opaque array>*/} nccl
 #define NCCL_SHRINK_DEFAULT 0x00 /* shrink the parent communicator */
 #define NCCL_SHRINK_ABORT 0x01   /* First, terminate ongoing parent operations, and then shrink the parent communicator */
 
+/* ncclCommRevoke flags */
+#define NCCL_REVOKE_DEFAULT 0x00 /* default revoke behavior: quiesce in-flight work, reject new ops */
+
 /*! @defgroup   rccl_config_type Communicator Configuration
     @details    Structure that allows for customizing Communicator behavior via ncclCommInitRankConfig
     @{ */
@@ -281,6 +284,30 @@ ncclResult_t  ncclCommAbort(ncclComm_t comm);
 ncclResult_t pncclCommAbort(ncclComm_t comm);
 /*! @endcond */
 
+/*! @brief      Revoke a communicator without destroying it.
+    @details    Aborts in-flight collectives by raising the comm's abort flag,
+                stops the proxy service, and rejects subsequently enqueued
+                collectives with ncclInvalidUsage. The abort flag is cleared
+                once the asynchronous revoke job completes, so the communicator
+                remains valid as a parent for ncclCommSplit / ncclCommShrink /
+                ncclCommGrow, and may be torn down via ncclCommDestroy /
+                ncclCommAbort.
+                Because in-flight collectives are aborted (not drained), revoke
+                can recover from peers that have failed mid-collective; output
+                buffers of an aborted collective contain undefined data.
+                ncclCommFinalize on a revoked communicator is invalid and returns
+                ncclInvalidUsage.
+                Pass NCCL_REVOKE_DEFAULT for revokeFlags; other values are rejected
+                with ncclInvalidArgument.
+    @return     Result code. See @ref rccl_result_code for more details.
+
+    @param[in]  comm          Communicator to revoke
+    @param[in]  revokeFlags   Reserved; must be NCCL_REVOKE_DEFAULT */
+ncclResult_t  ncclCommRevoke(ncclComm_t comm, int revokeFlags);
+/*! @cond       include_hidden */
+ncclResult_t pncclCommRevoke(ncclComm_t comm, int revokeFlags);
+/*! @endcond */
+
 /*! @brief      Create one or more communicators from an existing one.
     @details    Creates one or more communicators from an existing one.
                 Ranks with the same color will end up in the same communicator.
@@ -372,6 +399,13 @@ ncclResult_t  ncclCommGetAsyncError(ncclComm_t comm, ncclResult_t *asyncError);
 /*! @cond       include_hidden */
 ncclResult_t pncclCommGetAsyncError(ncclComm_t comm, ncclResult_t *asyncError);
 /*! @endcond */
+
+typedef enum {
+  ncclStatGpuMemSuspend      = 0,  // Allocated GPU memory that can be suspended (bytes)
+  ncclStatGpuMemSuspended    = 1,   // GPU memory suspended? (0=active, 1=suspended)
+  ncclStatGpuMemPersist      = 2,  // Allocated GPU memory that cannot be suspended (bytes)
+  ncclStatGpuMemTotal        = 3  // Total allocated GPU memory tracked by NCCL (bytes)
+} ncclCommMemStat_t;
 /*! @} */
 
 /*! @defgroup   rccl_api_comminfo Communicator Information

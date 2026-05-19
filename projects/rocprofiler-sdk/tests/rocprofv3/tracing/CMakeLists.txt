@@ -23,9 +23,9 @@ rocprofiler_add_integration_execute_test(
     rocprofv3-test-trace
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -M --hsa-trace --kernel-trace
-        --memory-copy-trace --marker-trace -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace -o
-        cmdl-input/out --output-format pftrace csv json rocpd --log-level ${LOG_LEVEL} --
-        $<TARGET_FILE:simple-transpose>
+        --memory-copy-trace --marker-trace --kfd-trace -d
+        ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace -o cmdl-input/out --output-format pftrace
+        csv json rocpd --log-level ${LOG_LEVEL} -- $<TARGET_FILE:simple-transpose>
     DEPENDS simple-transpose
     TIMEOUT 45
     LABELS "integration-tests"

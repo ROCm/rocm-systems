@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
@@ -93,7 +80,7 @@ static hipGraphNode_t add_kernel_node(hipGraph_t graph, hipGraphNode_t* deps, si
   return node;
 }
 
-static hipGraphNode_t add_memcpy_node(hipGraph_t graph, hipGraphNode_t* deps, size_t numDeps, 
+static hipGraphNode_t add_memcpy_node(hipGraph_t graph, hipGraphNode_t* deps, size_t numDeps,
                                       void* dst, void* src, size_t size) {
   hipMemcpy3DParms p{};
   p.srcPtr = make_hipPitchedPtr(src, size, 1, 1);
@@ -105,7 +92,7 @@ static hipGraphNode_t add_memcpy_node(hipGraph_t graph, hipGraphNode_t* deps, si
   return node;
 }
 
-static hipGraphNode_t add_memset_node(hipGraph_t graph, hipGraphNode_t* deps, size_t numDeps, 
+static hipGraphNode_t add_memset_node(hipGraph_t graph, hipGraphNode_t* deps, size_t numDeps,
                                       void* ptr, int value, size_t size) {
   hipMemsetParams p{};
   p.dst = ptr;
@@ -159,7 +146,7 @@ static void run_graph_topology_test(const TestOptions& opt) {
   }
 
   int width = (opt.topology == "straight" || opt.topology == "hexagon") ? 1 : opt.width;
-  const long long nodes_total = (opt.topology == "hexagon") ? 
+  const long long nodes_total = (opt.topology == "hexagon") ?
     opt.straight_nodes + 2 * opt.parallel_nodes : (1LL * width * opt.length);
 
   if (opt.topology == "straight") {
@@ -190,11 +177,11 @@ static void run_graph_topology_test(const TestOptions& opt) {
     std::vector<std::string> node_types;
     std::vector<int> kernel_batches;
     hipGraphNode_t prev{};
-    
+
     int kernel_count = 0;
     int current_batch_size = 0;
-    int batch_number = 0;
-    
+    [[maybe_unused]] int batch_number = 0;
+
     for (int i = 0; i < opt.length; ++i) {
       std::string node_type;
       if (i == 0) {
@@ -259,11 +246,11 @@ static void run_graph_topology_test(const TestOptions& opt) {
       }
       node_types.push_back(node_type);
     }
-    
+
     if (current_batch_size > 0) {
       kernel_batches.push_back(current_batch_size);
     }
-    
+
     CONSOLE_PRINT("\nMixed topology summary:");
     CONSOLE_PRINT("Total nodes: %d", opt.length);
     CONSOLE_PRINT("Kernel nodes: %d", kernel_count);
@@ -271,16 +258,16 @@ static void run_graph_topology_test(const TestOptions& opt) {
   } else if (opt.topology == "hexagon") {
     CONSOLE_PRINT("Building hexagon topology: %d straight + %d parallel +  %d straight nodes",
            opt.straight_nodes, opt.parallel_nodes, opt.straight_nodes);
-    
-    const int parallel_path_length = opt.parallel_nodes; 
-    const int parallel_paths = 2;       
-    
+
+    const int parallel_path_length = opt.parallel_nodes;
+    const int parallel_paths = 2;
+
     int straight_nodes = opt.straight_nodes;
     int before_split = straight_nodes / 2;
     int after_join = straight_nodes - before_split;
-    
+
     std::vector<hipGraphNode_t> nodes;
-    
+
     // Step 1: straight line before split
     hipGraphNode_t last_before_split = {};
     for (int i = 0; i < before_split; ++i) {
@@ -292,33 +279,33 @@ static void run_graph_topology_test(const TestOptions& opt) {
       }
       nodes.push_back(last_before_split);
     }
-    
+
     // Step 2: parallel paths
     std::vector<hipGraphNode_t> path_ends(parallel_paths);
     for (int path = 0; path < parallel_paths; ++path) {
       hipGraphNode_t prev = last_before_split;
-      
+
       for (int i = 0; i < parallel_path_length; ++i) {
         hipGraphNode_t* deps = (before_split > 0) ? &prev : nullptr;
         size_t numDeps = (before_split > 0) ? 1 : 0;
-        
+
         if (i == 0 && before_split > 0) {
           deps = &last_before_split;
           numDeps = 1;
         }
-        
+
         hipGraphNode_t n = add_kernel_node(graph, deps, numDeps, opt.kernel_duration_us);
         nodes.push_back(n);
         prev = n;
       }
       path_ends[path] = prev;
     }
-    
+
     // Step 3: straight line after join
     if (after_join > 0) {
       hipGraphNode_t join_node = add_kernel_node(graph, path_ends.data(), path_ends.size(), opt.kernel_duration_us);
       nodes.push_back(join_node);
-      
+
       hipGraphNode_t prev = join_node;
       for (int i = 1; i < after_join; ++i) {
         hipGraphNode_t n = add_kernel_node(graph, &prev, 1, opt.kernel_duration_us);
@@ -326,7 +313,7 @@ static void run_graph_topology_test(const TestOptions& opt) {
         prev = n;
       }
     }
-    
+
     CONSOLE_PRINT("Hexagon topology created: %d total nodes", (int)nodes.size());
   }
 
@@ -358,7 +345,7 @@ static void run_graph_topology_test(const TestOptions& opt) {
   double first_e2e_us = std::chrono::duration<double, std::micro>(t_e2e_end - t_first_begin).count();
 
   // Repeat launches
-  std::vector<double> cpu_over_us; 
+  std::vector<double> cpu_over_us;
   cpu_over_us.reserve(opt.repeats);
   double device_us_sum = 0.0;
   hipEvent_t evt_start{}, evt_stop{};
@@ -372,7 +359,7 @@ static void run_graph_topology_test(const TestOptions& opt) {
     auto t1 = std::chrono::steady_clock::now();
     HIP_CHECK(hipEventRecord(evt_stop, stream));
     HIP_CHECK(hipEventSynchronize(evt_stop));
-    float ms = 0.0f; 
+    float ms = 0.0f;
     HIP_CHECK(hipEventElapsedTime(&ms, evt_start, evt_stop));
     device_us_sum += (double)ms * 1000.0;
     cpu_over_us.push_back(std::chrono::duration<double, std::micro>(t1 - t0).count());
@@ -431,7 +418,7 @@ static void run_graph_topology_test(const TestOptions& opt) {
 /**
  * Test straight topology graph performance
  */
-TEST_CASE("Perf_GraphTopology_Straight") {
+HIP_TEST_CASE(Perf_GraphTopology_Straight) {
   TestOptions opt;
   opt.topology = "straight";
   opt.length = 50;
@@ -443,7 +430,7 @@ TEST_CASE("Perf_GraphTopology_Straight") {
 /**
  * Test parallel topology graph performance
  */
-TEST_CASE("Perf_GraphTopology_Parallel") {
+HIP_TEST_CASE(Perf_GraphTopology_Parallel) {
   TestOptions opt;
   opt.topology = "parallel";
   opt.length = 25;
@@ -456,7 +443,7 @@ TEST_CASE("Perf_GraphTopology_Parallel") {
 /**
  * Test hexagon topology graph performance
  */
-TEST_CASE("Perf_GraphTopology_Hexagon") {
+HIP_TEST_CASE(Perf_GraphTopology_Hexagon) {
   TestOptions opt;
   opt.topology = "hexagon";
   opt.straight_nodes = 20;
@@ -469,10 +456,10 @@ TEST_CASE("Perf_GraphTopology_Hexagon") {
 /**
  * Test mixed topology graph performance
  */
-TEST_CASE("Perf_GraphTopology_Mixed") {
+HIP_TEST_CASE(Perf_GraphTopology_Mixed) {
   TestOptions opt;
   opt.topology = "mixed";
-  opt.length = 27; // 3 cycles of 9-step pattern  
+  opt.length = 27; // 3 cycles of 9-step pattern
   opt.repeats = 5;
   opt.warmup = 2;
   run_graph_topology_test(opt);

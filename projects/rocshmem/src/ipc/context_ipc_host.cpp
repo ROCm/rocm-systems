@@ -105,6 +105,15 @@ __host__ void IPCHostContext::barrier_all_on_stream(hipStream_t stream) {
   host_interface->barrier_all_on_stream(stream);
 }
 
+__host__ void IPCHostContext::quiet_on_stream(hipStream_t stream) {
+  LOG_TRACE("IPC backend: quiet_on_stream");
+  host_interface->quiet_on_stream(stream);
+}
+
+__host__ void IPCHostContext::sync_all_on_stream(hipStream_t stream) {
+  host_interface->sync_all_on_stream(stream);
+}
+
 __host__ void IPCHostContext::alltoallmem_on_stream(rocshmem_team_t team,
                                                     void *dest,
                                                     const void *source,
@@ -131,6 +140,7 @@ __host__ void IPCHostContext::getmem_on_stream(void *dest, const void *source,
 __host__ void IPCHostContext::putmem_on_stream(void *dest, const void *source,
                                                size_t nelems, int pe,
                                                hipStream_t stream) {
+  LOG_TRACE("IPC backend: putmem_on_stream (pe=%d, size=%zu)", pe, nelems);
   host_interface->putmem_on_stream(dest, source, nelems, pe, stream);
 }
 

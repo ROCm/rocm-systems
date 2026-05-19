@@ -45,10 +45,10 @@ Once the stream is fully decoded, ``rocDecDestroyVideoParser()`` must be called 
 
 
 .. |rocparser| replace:: ``rocparser.h``
-.. _rocparser: https://github.com/ROCm/rocDecode/tree/develop/api/rocdecode/rocparser.h
+.. _rocparser: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/api/rocdecode/rocparser.h
 
 .. |utilsfolder| replace:: ``utils`` folder
-.. _utilsfolder: https://github.com/ROCm/rocDecode/tree/develop/utils
+.. _utilsfolder: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/utils
 
 .. |rocdecdecode| replace:: ``rocdecdecode.cpp``
-.. _rocdecdecode: https://github.com/ROCm/rocDecode/tree/develop/samples/rocdecDecode/rocdecdecode.cpp
+.. _rocdecdecode: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/samples/rocdecDecode/rocdecdecode.cpp

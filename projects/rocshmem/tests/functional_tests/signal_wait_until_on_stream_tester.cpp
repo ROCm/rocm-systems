@@ -50,16 +50,10 @@ SignalWaitUntilOnStreamTester::SignalWaitUntilOnStreamTester(
 
   // Allocate signal addresses on symmetric heap
   sig_addr =
-      static_cast<uint64_t *>(rocshmem_malloc(num_streams * sizeof(uint64_t)));
+      static_cast<uint64_t *>(alloc_test_buffer(num_streams * sizeof(uint64_t)));
   source_buf =
-      static_cast<uint64_t *>(rocshmem_malloc(num_streams * sizeof(uint64_t)));
-
-  if (sig_addr == nullptr || source_buf == nullptr) {
-    std::cerr << "Error allocating memory from symmetric heap" << std::endl;
-    std::cerr << "sig_addr: " << sig_addr << ", source_buf: " << source_buf
-              << std::endl;
-    rocshmem_global_exit(1);
-  }
+      static_cast<uint64_t *>(alloc_test_buffer((num_streams * sizeof(uint64_t)),
+                                                args.local_buf_type));
 
   streams.resize(num_streams);
   start_events_timed.resize(num_streams);
@@ -77,8 +71,8 @@ SignalWaitUntilOnStreamTester::~SignalWaitUntilOnStreamTester() {
     CHECK_HIP(hipEventDestroy(start_events_timed[i]));
     CHECK_HIP(hipStreamDestroy(streams[i]));
   }
-  rocshmem_free(sig_addr);
-  rocshmem_free(source_buf);
+  free_test_buffer(sig_addr);
+  free_test_buffer(source_buf, args.local_buf_type);
 }
 
 void SignalWaitUntilOnStreamTester::preLaunchKernel() {
@@ -92,7 +86,7 @@ void SignalWaitUntilOnStreamTester::postLaunchKernel() {
   }
 
   // Get elapsed time for each stream from HIP events
-  for (int stream_id = 0; stream_id < num_streams && stream_id < num_timers;
+  for (uint32_t stream_id = 0; stream_id < static_cast<uint32_t>(num_streams) && stream_id < static_cast<uint32_t>(num_timers);
        stream_id++) {
     float elapsed_time_ms = 0.0f;
     CHECK_HIP(hipEventElapsedTime(&elapsed_time_ms,
@@ -109,24 +103,24 @@ void SignalWaitUntilOnStreamTester::postLaunchKernel() {
   }
 
   // Fill remaining timers with zero if num_timers > num_streams
-  for (int i = num_streams; i < num_timers; i++) {
+  for (uint32_t i = num_streams; i < static_cast<uint32_t>(num_timers); i++) {
     start_time[i] = 0;
     end_time[i] = 0;
   }
 }
 
-void SignalWaitUntilOnStreamTester::resetBuffers(size_t size) {
+void SignalWaitUntilOnStreamTester::resetBuffers([[maybe_unused]] size_t size) {
   // Clear signal addresses
   std::memset(sig_addr, 0, num_streams * sizeof(uint64_t));
 }
 
-void SignalWaitUntilOnStreamTester::launchKernel(dim3 gridSize, dim3 blockSize,
-                                                  int loop, size_t size) {
+void SignalWaitUntilOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize, [[maybe_unused]] dim3 blockSize,
+                                                  int loop, [[maybe_unused]] size_t size) {
   // Execute warmup + timed iterations
   for (int i = 0; i < args.skip + loop; i++) {
     // Increment signal value for each iteration
     uint64_t signal_value = i + 1;
-    
+
     for (int stream_id = 0; stream_id < num_streams; stream_id++) {
       // Record start event after warmup on first timed iteration for all streams
       if (i == args.skip) {
@@ -168,7 +162,7 @@ void SignalWaitUntilOnStreamTester::launchKernel(dim3 gridSize, dim3 blockSize,
     for (int j = 0; j < num_streams; j++) {
       CHECK_HIP(hipStreamSynchronize(streams[j]));
     }
-    
+
     // Barrier to ensure all RMA operations completed across all PEs
     rocshmem_barrier_all();
   }
@@ -177,13 +171,13 @@ void SignalWaitUntilOnStreamTester::launchKernel(dim3 gridSize, dim3 blockSize,
   num_timed_msgs = loop * num_streams;
 }
 
-void SignalWaitUntilOnStreamTester::verifyResults(size_t size) {
+void SignalWaitUntilOnStreamTester::verifyResults([[maybe_unused]] size_t size) {
   // Synchronize to ensure all operations completed
   rocshmem_barrier_all();
 
   // Verify signal values
   // All PEs except PE 0 should have received the final signal value
-  uint64_t expected_signal = args.skip + args.loop;
+  uint64_t expected_signal = args.skip + num_loops;
 
   for (int stream_id = 0; stream_id < num_streams; stream_id++) {
     // PE 0 doesn't receive signals (it initiates), so skip verification

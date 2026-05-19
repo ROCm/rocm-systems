@@ -29,6 +29,9 @@
 #include <memory>
 #include <utility>
 
+#include "hip_allocator.hpp"
+#include "default_allocator.hpp"
+
 /**
  * @file heap_memory.hpp
  *
@@ -39,32 +42,47 @@
 
 namespace rocshmem {
 
-template <typename ALLOCATOR>
-class HeapMemory {
+  class HeapMemory {
+   public:
+    virtual ~HeapMemory() = default;
+
+    virtual __host__ __device__ char* get_ptr() = 0;
+    virtual __host__ __device__ size_t get_size() = 0;
+
+    AllocatorType type_;
+  };
+
+
+class HeapMemoryType : public HeapMemory {
  public:
   /**
    * @brief Primary constructor type
    *
    * Uses default heap size specified in class body.
    */
-  HeapMemory() : HeapMemory(gibibyte_) {}
+  explicit HeapMemoryType(const MemoryAllocator& alloc = *get_default_allocator())
+      : HeapMemoryType(alloc, gibibyte_) {}
 
   /**
    * @brief Secondary constructor type
    *
-   * @param[in] User-specified size used as heap size
+   * @param[in] alloc Allocator to use for heap allocation
+   * @param[in] size User-specified size used as heap size
    */
-  explicit HeapMemory(size_t size) : size_{size} {
+  explicit HeapMemoryType(const MemoryAllocator& alloc, size_t size)
+      : allocator_{alloc}, up_{nullptr, Deleter(alloc)}, size_{size} {
     char* temp;
     allocator_.allocate(reinterpret_cast<void**>(&temp), size_);
     assert(temp);
-    std::unique_ptr<char, Deleter> up{temp};
-    up_ = std::move(up);
+    up_.reset(temp);
 
     /*
      * Set a c-style ptr for access by the device.
      */
     ptr_ = up_.get();
+
+    // Get allocator type from the base class without unsafe casting
+    type_ = allocator_.get_type();
   }
 
   /**
@@ -72,43 +90,42 @@ class HeapMemory {
    *
    * @return Raw memory pointer
    */
-  __host__ __device__ char* get_ptr() { return ptr_; }
+  __host__ __device__ char* get_ptr() override { return ptr_; }
 
   /**
    * @brief Accessor for heap size
    *
    * @return Heap size
    */
-  __host__ __device__ size_t get_size() { return size_; }
-
-  /**
-   * @brief Returns is the heap is allocated with managed memory
-   *
-   * @return bool
-   */
-  bool is_managed() { return allocator_.is_managed(); }
+  __host__ __device__ size_t get_size() override { return size_; }
 
  private:
   /**
-   * @brief Template type member with allocate and deallocate methods.
-   */
-  ALLOCATOR allocator_{};
-
-  /**
    * @brief Wrap deallocator into a functor for up_ template.
+   *
+   * Stores allocator by value to avoid dangling pointer issues during move.
    */
   class Deleter {
    public:
-    void operator()(void* x) { a_.deallocate(x); }
+    Deleter() = default;
+    explicit Deleter(const MemoryAllocator& alloc) : a_{alloc} {}
+    void operator()(void* x) {
+      a_.deallocate(x);
+    }
 
    private:
-    ALLOCATOR a_;
+    MemoryAllocator a_{};
   };
+
+  /**
+   * @brief Memory allocator with allocate and deallocate methods.
+   */
+  MemoryAllocator allocator_{};
 
   /**
    * @brief Owning pointer to heap memory.
    */
-  std::unique_ptr<char, Deleter> up_{nullptr};
+  std::unique_ptr<char, Deleter> up_;
 
   /**
    * @brief Named constant for a gibibyte.

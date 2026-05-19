@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -66,9 +66,16 @@
  * - 1.13 - hsa_amd_pointer_info: Added new registered field to hsa_amd_pointer_info_t
  * - 1.14 - hsa_amd_ais_file_write, hsa_amd_ais_file_read
  * - 1.15 - hsa_amd_register_system_event_handler: HSA_AMD_SYSTEM_SHUTDOWN
+ * - 1.16 - hsa_amd_counted_queue APIs
+ * - 1.17 - hsa_amd_memory_async_batch_copy
+ * - 1.18 - hsa_amd_pointer_info: Added alloc_flags field to hsa_amd_pointer_info_t
+ * - 1.19 - hsa_amd_agent_preload
+ * - 1.20 - Memory batch discard API: hsa_amd_svm_discard_batch_async
+ * - 1.21 - hsa_amd_signal_get_event_id
+ * - 1.22 - hsa_amd_queue_get_info: per-queue VM fault state queries
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 16
+#define HSA_AMD_INTERFACE_VERSION_MINOR 21
 
 #ifdef __cplusplus
 extern "C" {
@@ -111,12 +118,15 @@ typedef enum {
    * queues created from AMD GPU Agents support this packet.
    */
   HSA_AMD_PACKET_TYPE_BARRIER_VALUE = 2,
+
   /**
-   * Packet used to send commands to an AIE agent's embedded runtime (ERT). The
-   * ERT is responsible for, among other things, handling dispatches. Only
-   * queues created on AIE agents support this packet.
+   * Extended kernel dispatch packet that supports clusters, an explicit
+   * dependency signal, and additional performance-oriented features.
    */
-  HSA_AMD_PACKET_TYPE_AIE_ERT = 3
+  HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH = 3,
+
+  /* Reserved for a packet that is not yet released */
+  HSA_AMD_PACKET_TYPE_RESERVED200 = 200,
 } hsa_amd_packet_type_t;
 
 /**
@@ -140,7 +150,9 @@ typedef struct hsa_amd_packet_header_s {
   hsa_amd_packet_type8_t AmdFormat;
 
   /**
-   * Reserved. Must be 0.
+   * Reserved. Must be 0 unless explicitly stated otherwise per packet.
+   *
+   * HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH uses this for the setup field.
    */
   uint8_t reserved;
 } hsa_amd_vendor_packet_header_t;
@@ -206,208 +218,372 @@ typedef struct hsa_amd_barrier_value_packet_s {
 } hsa_amd_barrier_value_packet_t;
 
 /**
- * State of an AIE ERT command.
+ * @brief Enumeration constants corresponding to the sub-fields of
+ * @ref hsa_amd_ext_perf_hint_t. Their values are equal to the offset (in bits)
+ * inside the overall hint structure.
  */
 typedef enum {
-  /**
-   * Set by the host before submitting a command to the scheduler.
-   */
-  HSA_AMD_AIE_ERT_STATE_NEW = 1,
-  /**
-   * Internal scheduler state.
-   */
-  HSA_AMD_AIE_ERT_STATE_QUEUED = 2,
-  /**
-   * Internal scheduler state.
-   */
-  HSA_AMD_AIE_ERT_STATE_RUNNING = 3,
-  /**
-   * Set by the scheduler when a command completes.
-   */
-  HSA_AMD_AIE_ERT_STATE_COMPLETED = 4,
-  /**
-   * Set by the scheduler if a command failed.
-   */
-  HSA_AMD_AIE_ERT_STATE_ERROR = 5,
-  /**
-   * Set by the scheduler if a command aborted.
-   */
-  HSA_AMD_AIE_ERT_STATE_ABORT = 6,
-  /**
-   * Internal scheduler state.
-   */
-  HSA_AMD_AIE_ERT_STATE_SUBMITTED = 7,
-  /**
-   * Set by the scheduler on a timeout and reset.
-   */
-  HSA_AMD_AIE_ERT_STATE_TIMEOUT = 8,
-  /**
-   * Set by the scheduler on a timeout and fail to reset.
-   */
-  HSA_AMD_AIE_ERT_STATE_NORESPONSE = 9,
-  HSA_AMD_AIE_ERT_STATE_SKERROR = 10,
-  HSA_AMD_AIE_ERT_STATE_SKCRASHED = 11,
-  HSA_AMD_AIE_ERT_STATE_MAX
-} hsa_amd_aie_ert_state;
+  HSA_AMD_EXT_PERF_HINT_GROUP_MEM_CARVEOUT = 0,
+  HSA_AMD_EXT_PERF_HINT_REVERSE_DISPATCH_ORDER = 7,
+} hsa_amd_ext_perf_hint_subfield_t;
 
 /**
- * Opcode types for HSA AIE ERT commands.
+ * @brief Width (in bits) of the sub-fields in @ref hsa_amd_ext_perf_hint_t.
  */
 typedef enum {
-  /**
-   * Start a workgroup on a compute unit (CU).
-   */
-  HSA_AMD_AIE_ERT_START_CU = 0,
-  /**
-   * Currently aliased to HSA_AMD_AIE_ERT_START_CU.
-   */
-  HSA_AMD_AIE_ERT_START_KERNEL = 0,
-  /**
-   * Configure command scheduler.
-   */
-  HSA_AMD_AIE_ERT_CONFIGURE = 2,
-  HSA_AMD_AIE_ERT_EXIT = 3,
-  HSA_AMD_AIE_ERT_ABORT = 4,
-  /**
-   * Execute a specified CU after writing.
-   */
-  HSA_AMD_AIE_ERT_EXEC_WRITE = 5,
-  /**
-   * Get stats about a CU's execution.
-   */
-  HSA_AMD_AIE_ERT_CU_STAT = 6,
-  /**
-   * Start KDMA CU or P2P.
-   */
-  HSA_AMD_AIE_ERT_START_COPYBO = 7,
-  /**
-   * Configure a soft kernel.
-   */
-  HSA_AMD_AIE_ERT_SK_CONFIG = 8,
-  /**
-   * Start a soft kernel.
-   */
-  HSA_AMD_AIE_ERT_SK_START = 9,
-  /**
-   * Unconfigure a soft kernel.
-   */
-  HSA_AMD_AIE_ERT_SK_UNCONFIG = 10,
-  /**
-   * Initialize a CU.
-   */
-  HSA_AMD_AIE_ERT_INIT_CU = 11,
-  HSA_AMD_AIE_ERT_START_FA = 12,
-  HSA_AMD_AIE_ERT_CLK_CALIB = 13,
-  HSA_AMD_AIE_ERT_MB_VALIDATE = 14,
-  /**
-   * Same as HSA_AMD_AIE_ERT_START_CU but with a key-value pair.
-   */
-  HSA_AMD_AIE_ERT_START_KEY_VAL = 15,
-  HSA_AMD_AIE_ERT_ACCESS_TEST_C = 16,
-  HSA_AMD_AIE_ERT_ACCESS_TEST = 17,
-  /**
-   * Instruction buffer command format.
-   */
-  HSA_AMD_AIE_ERT_START_DPU = 18,
-  /**
-   * Command chain.
-   */
-  HSA_AMD_AIE_ERT_CMD_CHAIN = 19,
-  /**
-   * Instruction buffer command format on NPU.
-   */
-  HSA_AMD_AIE_ERT_START_NPU = 20,
-  /**
-   * Instruction buffer command with pre-emption format on the NPU.
-   */
-  HSA_AMD_AIE_ERT_START_NPU_PREEMPT = 21
-} hsa_amd_aie_ert_cmd_opcode_t;
+  HSA_AMD_EXT_PERF_HINT_WIDTH_GROUP_MEM_CARVEOUT = 7,
+  HSA_AMD_EXT_PERF_HINT_WIDTH_REVERSE_DISPATCH_ORDER = 1,
+} hsa_amd_ext_perf_hint_subfield_width_t;
 
 /**
- * Payload data for AIE ERT start kernel packets (i.e., when the opcode is
- * HSA_AMD_AIE_ERT_START_KERNEL).
+ * @brief Performance hints used by @ref hsa_amd_ext_kernel_dispatch_packet_t.
+ *
+ * The sub-fields of this packet give performance optimization hints to
+ * an agent, associated with a grid dispatch. The values of the sub-fields in
+ * this packet are only hints; the agent may choose to ignore them.
  */
-typedef struct hsa_amd_aie_ert_start_kernel_data_s {
-  /**
-   * Address to the PDI.
-   */
-  void* pdi_addr;
-  /**
-   * Opcode, instructions and kernel arguments.
-   */
-  uint32_t data[];
-} hsa_amd_aie_ert_start_kernel_data_t;
-
-/**
- * AMD AIE ERT packet. Used for sending a command to an AIE agent.
- */
-typedef struct hsa_amd_aie_ert_packet_s {
-  /**
-   * AMD vendor specific packet header.
-   */
-  hsa_amd_vendor_packet_header_t header;
-  /**
-   * Format for packets interpreted by the ERT to understand the command and
-   * payload data.
-   */
+typedef union {
   struct {
     /**
-     * Current state of a command.
+     * Group-memory-available storage in each compute unit that is requested to
+     * be reserved for group memory. In agents that can reconfigure CU storage
+     * to be used for other purposes (e.g., caches), this hints to the agent
+     * what fraction of that storage should be reserved for group memory.
+     * Increasing this value may increase the number of workgroups that can be
+     * simultaneously active on a compute unit.
+     *
+     * This 7b field can hold 0-127. A value of 0 allows the agent to decide
+     * the configuration. The remaining encodings [1, 127] represent a range
+     * from 0% (no group memory) to 100% (maximum group memory).
+     *
+     * Setting the requested amount lower than the group memory a single
+     * workgroup needs will not cause the dispatch to fail; the hint may
+     * instead be ignored or raised by the agent to a level necessary to allow
+     * at least one workgroup to run in the compute units.​
      */
-    uint32_t state : 4;
+    uint8_t group_mem_carveout : 7;
+
     /**
-     * Flexible field that can be interpreted on a per-command basis.
+     * Boolean that hints to the hardware that the agent may benefit from
+     * making workgroups active in reverse order.
+     *
+     * The HSA Platform System Architecture Specification Version 1.2
+     * (Section 2.11) implies that agents generally launch from lowest flattened
+     * workgroup ID to higher. Setting this hint to 1 indicates that this
+     * dispatch may benefit from launching highest-to-lower.
+     *
+     * Setting this bit to 1 will remove kernel dispatch forward progress
+     * guarantees from the associated dispatch.
+     *
+     * Legal values are 0 and 1.​
      */
-    uint32_t custom : 8;
-    /**
-     * Number of DWORDs in the payload data.
-     */
-    uint32_t count : 11;
-    /**
-     * Opcode identifying the command.
-     */
-    uint32_t opcode : 5;
-    /**
-     * Type of a command (currently 0).
-     */
-    uint32_t type : 4;
+    uint8_t reverse_dispatch_order : 1;
   };
+
+  uint8_t hint_val;
+} hsa_amd_ext_perf_hint_t;
+
+/**
+ * @brief AMD extended kernel dispatch packet.
+ */
+typedef struct hsa_amd_ext_kernel_dispatch_packet_s {
   /**
-   * Reserved. Must be 0.
+   * Packet header. Used to configure multiple packet parameters such as the
+   * packet type. The parameters are described by hsa_packet_header_t.
+   *
+   * The hsa_packet_type_t in this header must be
+   * HSA_PACKET_TYPE_VENDOR_SPECIFIC.​
    */
-  uint64_t reserved0;
+  uint16_t header;
+
   /**
-   * Reserved. Must be 0.
+   * AMD vendor-specific packet type. Used to configure which vendor packet this
+   * is. The parameters are described by hsa_amd_packet_type_t. This packet is
+   * of type HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH.​
    */
-  uint64_t reserved1;
+  hsa_amd_packet_type8_t amd_format;
+
   /**
-   * Reserved. Must be 0.
+   * Dispatch setup parameters. Used to configure kernel dispatch parameters
+   * such as the number of dimensions in the grid. The parameters are described
+   * by hsa_kernel_dispatch_packet_setup_t.​
    */
-  uint64_t reserved2;
+  uint8_t setup;
+
   /**
-   * Reserved. Must be 0.
+   * X dimension of work-group, in work-items. Must be greater than 0.​
    */
-  uint64_t reserved3;
+  uint16_t workgroup_size_x;
+
   /**
-   * Reserved. Must be 0.
+   * Y dimension of work-group, in work-items. Must be greater than 0. If the
+   * grid has 1 dimension, the only valid value is 1.​
    */
-  uint64_t reserved4;
+  uint16_t workgroup_size_y;
+
   /**
-   * Reserved. Must be 0.
+   * Z dimension of work-group, in work-items. Must be greater than 0. If the
+   * grid has 1 or 2 dimensions, the only valid value is 1.​
    */
-  uint64_t reserved5;
+  uint16_t workgroup_size_z;
+
   /**
-   * Address of packet data payload. ERT commands contain arbitrarily sized
-   * data payloads.
+   * Reserved. Must be 0.​
    */
-  uint64_t payload_data;
-} hsa_amd_aie_ert_packet_t;
+  uint16_t reserved0;
+
+  /**
+   * X dimension of grid, in clusters. Must be greater than 0.​
+   */
+  uint32_t cluster_count_x;
+
+  /**
+   * Y dimension of grid, in clusters. Must be greater than 0.​ If the grid has
+   * 1 dimension, the only valid value is 1.​
+   */
+  uint16_t cluster_count_y;
+
+  /**
+   * Z dimension of grid, in clusters. Must be greater than 0.​ If the grid has
+   * 1 or 2 dimensions, the only valid value is 1.​
+   */
+  uint16_t cluster_count_z;
+
+  /**
+   * X dimension of cluster, in workgroups. Must be greater than 0.​
+   */
+  uint8_t cluster_size_x;
+
+  /**
+   * Y dimension of cluster, in workgroups. Must be greater than 0.​​ If the grid
+   * has 1 dimension, the only valid value is 1.​
+   */
+  uint8_t cluster_size_y;
+
+  /**
+   * Z dimension of cluster, in workgroups. Must be greater than 0.​​ If the grid
+   * has 1 or 2 dimensions, the only valid value is 1.​
+   */
+  uint8_t cluster_size_z;
+
+  /**
+   * Performance hints for the grid dispatched using this packet. The values in
+   * these fields are only hints, and the agent may choose to do nothing with
+   * them. The parameters are described by hsa_amd_ext_perf_hint_t.​
+   */
+  hsa_amd_ext_perf_hint_t perf_hint;
+
+  /**
+   * Size in bytes of private memory allocation request (per work-item).​
+   */
+  uint32_t private_segment_size;
+
+  /**
+   * Size in bytes of group memory allocation request (per work-group).
+   *
+   * Must not be less than the sum of the group memory used by the kernel (and
+   * the functions it calls directly or indirectly) and the dynamically
+   * allocated group segment variables.​
+   */
+  uint32_t group_segment_size;
+
+  /**
+   * Opaque handle to a code object that includes an implementation-defined
+   * executable code for the kernel.​
+   */
+  uint64_t kernel_object;
+
+  /**
+   * Pointer to a buffer containing the kernel arguments. May be NULL. The
+   * buffer must be allocated using hsa_memory_allocate, and must not be
+   * modified once the kernel dispatch packet is enqueued until the dispatch
+   * has completed execution.​
+   */
+  void* kernarg_address;
+
+  /**
+   * Dependent signal object. This signal is read in the launch phase.​
+   *
+   * The packet processor does not exit the launch phase for this packet, and
+   * thus does not perform the requested acquire fence scope’s actions, until
+   * the signal has been observed with the value 0.​
+   *
+   * A signal handle value of 0 is allowed and is interpreted by the packet
+   * processor as a satisfied dependency.​
+   */
+  hsa_signal_t dep_signal;
+
+  /**
+   * Signal used to indicate completion of the job. The application can use the
+   * special signal handle 0 to indicate that no signal is used.​
+   */
+  hsa_signal_t completion_signal;
+} hsa_amd_ext_kernel_dispatch_packet_t;
 
 /** @} */
 
 /** \defgroup error-codes Error codes
  *  @{
  */
+
+/**
+ * @brief Sub-fields of the @a header field that is present in any metadata
+ * packet. The offset (with respect to the address of @a header) of a sub-field
+ * is identical to its enumeration constant. The width of each sub-field is
+ * determined by the corresponding value in ::hsa_packet_header_width_t. The
+ * offset and the width are expressed in bits.
+ */
+typedef enum {
+  /**
+   * Packet type. The value of this sub-field must be one of
+   * ::hsa_packet_type_t. If the type is ::HSA_PACKET_TYPE_VENDOR_SPECIFIC, the
+   * packet layout is vendor-specific.
+   */
+  HSA_AMD_METADATA_PACKET_HEADER_TYPE = 0,
+  /**
+   * Reserved
+   */
+  HSA_AMD_METADATA_PACKET_HEADER_RESERVED = 8,
+  /**
+   * Packet version major.
+   */
+  HSA_AMD_METADATA_PACKET_HEADER_VERSION_MAJOR = 24,
+  /**
+   * Packet version minor.
+   */
+  HSA_AMD_METADATA_PACKET_HEADER_VERSION_MINOR = 27,
+} hsa_amd_metadata_packet_header_t;
+
+/**
+ * @brief Width (in bits) of the sub-fields in ::hsa_amd_metadata_packet_header_t.
+ */
+typedef enum hsa_amd_metadata_packet_header_width_s {
+  HSA_AMD_METADATA_PACKET_HEADER_WIDTH_TYPE = 8,
+  HSA_AMD_METADATA_PACKET_HEADER_WIDTH_RESERVED = 16,
+  HSA_AMD_METADATA_PACKET_HEADER_WIDTH_VERSION_MAJOR = 3,
+  HSA_AMD_METADATA_PACKET_HEADER_WIDTH_VERSION_MINOR = 5,
+} hsa_amd_metadata_packet_header_width_t;
+
+/**
+ * @brief Number of valid kernarg preload d-words in meta-data packet
+ */
+typedef struct hsa_amd_metadata_preload_s {
+  /* The number of dwords from the kernarg segment to preload into User SGPRs */
+  uint16_t length : 7;
+  /* Offset in dwords into the kernarg segment to begin preloading data into User SGPRs */
+  uint16_t offset : 9;
+} hsa_amd_metadata_preload_t;
+
+/**
+ * @brief AMD meta-data Kernel Dispatch Descriptor fields
+ */
+typedef struct hsa_amd_metadata_kernel_descriptor_s {
+  int64_t kernel_code_entry_byte_offset;
+  uint8_t reserved1[20];
+  uint32_t compute_pgm_rsrc3;
+  uint32_t compute_pgm_rsrc1;
+  uint32_t compute_pgm_rsrc2;
+  uint16_t kernel_code_properties;
+  hsa_amd_metadata_preload_t kernarg_preload;
+  uint8_t reserved2[4];
+} hsa_amd_metadata_kernel_descriptor_t;
+
+/**
+ * @brief AMD meta-data Kernel Dispatch packet.
+ */
+typedef struct hsa_amd_metadata_kernel_dispatch_packet_s {
+  /**
+   * Packet header. Used to configure multiple packet parameters such as the
+   * packet type. The parameters are described by hsa_amd_metadata_packet_header_t.
+   */
+  uint32_t header0;
+  /**
+   * Event ID. HW ID of the completion signal. This corresponds to the event_id
+   * of amd_signal_t
+   */
+  uint32_t event_id;
+  /**
+   * Kernel descriptor pre-load fields
+   */
+  hsa_amd_metadata_kernel_descriptor_t kernel_descriptor;
+  /**
+   * Reserved. Must be 0.
+   */
+  uint8_t reserved0[8];
+  /**
+   * Packet header. Must be same value as header0
+   */
+  uint32_t header1;
+  /**
+   * Kernarg preload 0 through 14
+   */
+  uint32_t kernarg_preload_0_14[15];
+  /**
+   * Packet header. Must be same value as header0
+   */
+  uint32_t header2;
+  /**
+   * Kernarg preload 15 through 29
+   */
+  uint32_t kernarg_preload_15_29[15];
+  /**
+   * Packet header. Must be same value as header0
+   */
+  uint32_t header3;
+  /**
+   * Kernarg preload 30 through 31
+   */
+  uint32_t kernarg_preload_30_31[2];
+  /**
+   * Reserved. Must be 0.
+   */
+  uint8_t reserved1[52];
+} hsa_amd_metadata_kernel_dispatch_packet_t;
+
+/**
+ * @brief AMD meta-data Kernel Dispatch packet.
+ */
+typedef struct hsa_amd_metadata_barrier_packet_s {
+  /**
+   * Packet header. Used to configure multiple packet parameters such as the
+   * packet type. The parameters are described by hsa_amd_metadata_packet_header_t.
+   */
+  uint32_t header0;
+  /**
+   * Event ID. HW ID of the completion signal. This corresponds to the event_id
+   * of amd_signal_t
+   */
+  uint32_t event_id;
+  /**
+   * Reserved. Must be 0.
+   */
+  uint8_t reserved0[56];
+
+  /**
+   * Packet header. Must be same value as header0
+   */
+  uint32_t header1;
+  /**
+   * Reserved. Must be 0.
+   */
+  uint8_t reserved1[60];
+  /**
+   * Packet header. Must be same value as header0
+   */
+  uint32_t header2;
+  /**
+   * Reserved. Must be 0.
+   */
+  uint8_t reserved2[60];
+  /**
+   * Packet header. Must be same value as header0
+   */
+  uint32_t header3;
+  /**
+   * Reserved. Must be 0.
+   */
+  uint8_t reserved3[60];
+} hsa_amd_metadata_barrier_packet_t;
 
 /**
  * @brief Enumeration constants added to ::hsa_status_t.
@@ -458,6 +634,19 @@ enum {
    * Request is not supported by this system
    */
   HSA_STATUS_ERROR_NOT_SUPPORTED = 47,
+
+  /**
+   * Xnack is disabled on this system, but required
+   * by the requested operation.
+   */
+  HSA_STATUS_ERROR_XNACK_DISABLED = 48,
+
+  /**
+   * The kernel dispatch packet parameters exceed hardware limits for this
+   * agent (e.g. register usage, work-group dimensions, or other dispatch
+   * constraints enforced by the command processor).
+   */
+  HSA_STATUS_ERROR_INVALID_DISPATCH_PARAMETERS = 49,
 };
 
 /** @} */
@@ -465,6 +654,15 @@ enum {
 /** \addtogroup memory Memory
  *  @{
  */
+
+/**
+ * @brief Dispatch dimension limits
+ */
+typedef struct hsa_amd_dim3_s {
+    uint64_t x;
+    uint64_t y;
+    uint64_t z;
+} hsa_amd_dim3_t;
 
 /**
  * @brief IOMMU version supported
@@ -681,7 +879,7 @@ typedef enum hsa_amd_agent_info_s {
    * bit is set at that position. User may use the hsa_flag_isset64 macro to verify whether a flag
    * is set. The type of this attribute is uint8_t[8].
    */
-  HSA_AMD_AGENT_INFO_AQL_EXTENSIONS = 0xA115, /* Not implemented yet */
+  HSA_AMD_AGENT_INFO_AQL_EXTENSIONS = 0xA115,
   /**
    * Maximum allowed value in bytes for scratch limit for this agent. This amount
    * is shared accross all queues created on this agent.
@@ -719,6 +917,41 @@ typedef enum hsa_amd_agent_info_s {
    * The agent supports expert scheduling mode. The type of this attribute is bool.
    */
   HSA_AMD_AGENT_INFO_HAS_EXPERT_SCHED_MODE = 0xA11B,
+  /**
+   * Queries the secondary CUID (128-bit UUID (16 bytes) in UUIDv8 format)
+   * of a CPU/GPU agent. The type of this attribute is uint8_t[16].
+   */
+  HSA_AMD_AGENT_INFO_CUID = 0xA11C,
+  /*
+   * Maximum number of work-groups across all dimensions for non-clustered dispatches.
+   * Returns uint64_t into value output
+   */
+  HSA_AMD_AGENT_INFO_KERNEL_WG_MAX_SIZE = 0xA11D,
+  /**
+   * Maximum number of clusters in each dimension for clustered dispatches.
+   * Returns hsa_amd_dim3_t into value output.
+   */
+  HSA_AMD_AGENT_INFO_KERNEL_CLUSTER_MAX_DIM = 0xA11E,
+  /*
+   * Maximum number of clusters across all dimensions for clustered dispatches
+   * Returns uint64_t into value output
+   */
+  HSA_AMD_AGENT_INFO_KERNEL_CLUSTER_MAX_SIZE = 0xA11F,
+  /*
+   * Maximum number of workgroups in a cluster in each dimension
+   * Returns hsa_amd_dim3_t into value output
+   */
+  HSA_AMD_AGENT_INFO_CLUSTER_MAX_DIM = 0xA120,
+  /*
+   * Maximum number of workgroups in a cluster across all dimensions
+   * Returns uint64_t into value output
+   */
+  HSA_AMD_AGENT_INFO_CLUSTER_MAX_SIZE = 0xA121,
+  /*
+   * Maximum number of work-groups in each dimension for non-clustered dispatches.
+   * Returns hsa_amd_dim3_t into value output.
+   */
+  HSA_AMD_AGENT_INFO_KERNEL_WG_MAX_DIM = 0xA122,
 } hsa_amd_agent_info_t;
 
 /**
@@ -727,6 +960,13 @@ typedef enum hsa_amd_agent_info_s {
 typedef enum hsa_amd_agent_memory_properties_s {
   HSA_AMD_MEMORY_PROPERTY_AGENT_IS_APU = (1 << 0),
 } hsa_amd_agent_memory_properties_t;
+
+/**
+ * @brief Agent AQL info properties attributes
+ */
+typedef enum hsa_amd_agent_aql_properties_s {
+  HSA_AMD_AQL_PROPERTY_EXT_DISPATCH = (1 << 0),
+} hsa_amd_agent_aql_properties_t;
 
 /**
  * @brief SDMA engine IDs unique by single set bit position.
@@ -932,6 +1172,43 @@ hsa_status_t HSA_API
  */
 hsa_status_t HSA_API
     hsa_amd_profiling_async_copy_enable(bool enable);
+
+/**
+ * @brief Flags for hsa_amd_agent_preload.
+ *
+ * @details By default, hsa_amd_agent_preload preloads all resources.
+ * These flags can be used to skip specific resources.
+ */
+typedef enum hsa_amd_agent_preload_flag_s {
+  /**
+   * Skip preloading clock synchronization data.
+   */
+  HSA_AMD_AGENT_PRELOAD_SKIP_CLOCK_SYNC = (1 << 0),
+  /**
+   * Skip preloading blit kernel objects.
+   */
+  HSA_AMD_AGENT_PRELOAD_SKIP_BLITS = (1 << 1)
+} hsa_amd_agent_preload_flag_t;
+
+/**
+ * @brief Performance hint to preload agent resources.
+ *
+ * @details Trigger early initialization of agent resources. By default,
+ * all resources are preloaded. Use flags to skip specific resources.
+ *
+ * @param[in] agent The agent to preload resources for. Must be a GPU agent.
+ *
+ * @param[in] flags A bitwise OR of ::hsa_amd_agent_preload_flag_t values
+ * specifying which resources to skip.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been
+ * initialized.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_AGENT The agent is invalid or not a GPU.
+ */
+hsa_status_t HSA_API hsa_amd_agent_preload(hsa_agent_t agent, uint64_t flags);
 
 /**
  * @brief Retrieve packet processing time stamps.
@@ -1215,6 +1492,21 @@ uint32_t HSA_API
                             hsa_signal_value_t* values, uint64_t timeout_hint,
                             hsa_wait_state_t wait_hint,
                             hsa_signal_value_t* satisfying_value);
+
+/**
+ * @brief Get the underlying event-id for a HSA signal
+ *
+ * @details Returns the underlying HW event ID for an existing HSA signal.
+ *
+ * @param[in] signal The HSA signal
+ * @param[out] event_id The returned event_id. The returned event_id may be 0
+ * if the HSA signal is not a HW backed signal.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT The signal is invalid
+ */
+hsa_status_t HSA_API
+  hsa_amd_signal_get_event_id(hsa_signal_t signal, uint32_t *event_id);
 
 /** @} */
 
@@ -1812,6 +2104,242 @@ hsa_status_t HSA_API
                               hsa_signal_t completion_signal,
                               hsa_amd_sdma_engine_id_t engine_id,
                               bool force_copy_on_sdma);
+
+/**
+ * @brief Type of memory copy operation within a batch.
+ */
+typedef enum {
+  HSA_AMD_MEMORY_COPY_OP_LINEAR               = 0,  /**< Linear copy (num_entries==0: single; num_entries>0: multi) */
+  HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST     = 1,  /**< Linear broadcast: single src -> multiple dsts */
+  HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP          = 2,  /**< Linear swap: exchange contents of src and dst */
+  HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC     = 3,  /**< Source address resolved via indirection */
+  HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST     = 4,  /**< Destination address resolved via indirection */
+  HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST  = 5,  /**< Both src and dst resolved via indirection */
+} hsa_amd_memory_copy_op_type_t;
+
+/**
+ * @brief Wait comparison functions for copy operations.
+ *
+ * Maps to the SDMA WAIT_FUNCTION field. The SDMA engine polls
+ * (*wait.addr & wait.mask) against wait.value using the specified
+ * comparison before starting the copy.  Orthogonal to operation type:
+ * any copy can optionally wait.
+ */
+typedef enum {
+  HSA_AMD_MEMORY_COPY_WAIT_ALWAYS = 0,  /**< Always pass (no wait) */
+  HSA_AMD_MEMORY_COPY_WAIT_LT     = 1,  /**< Less than */
+  HSA_AMD_MEMORY_COPY_WAIT_LE     = 2,  /**< Less than or equal */
+  HSA_AMD_MEMORY_COPY_WAIT_EQ     = 3,  /**< Equal */
+  HSA_AMD_MEMORY_COPY_WAIT_NE     = 4,  /**< Not equal */
+  HSA_AMD_MEMORY_COPY_WAIT_GE     = 5,  /**< Greater than or equal */
+  HSA_AMD_MEMORY_COPY_WAIT_GT     = 6,  /**< Greater than */
+} hsa_amd_memory_copy_wait_function_t;
+
+/**
+ * @brief Signal operations for copy completion notification.
+ *
+ * Maps to the SDMA SIGNAL_OPERATION field. After the copy completes,
+ * the SDMA engine performs the specified atomic operation on signal.addr.
+ * This is a raw GPU-side signal, separate from the HSA completion_signal.
+ */
+typedef enum {
+  HSA_AMD_MEMORY_COPY_SIGNAL_NONE  = 0,   /**< No signal operation */
+  HSA_AMD_MEMORY_COPY_SIGNAL_WRITE = 1,   /**< 64b write: *addr = data */
+  HSA_AMD_MEMORY_COPY_SIGNAL_ADD   = 2,   /**< 64b add: *addr += data */
+  HSA_AMD_MEMORY_COPY_SIGNAL_SUB   = 3,   /**< 64b sub: *addr -= data */
+} hsa_amd_memory_copy_signal_op_t;
+
+/**
+ * @brief Version of the hsa_amd_memory_copy_op_t structure.
+ *
+ * Callers must set the @c version field to this value.  The runtime rejects
+ * operations whose version it does not recognise.
+ */
+#define HSA_AMD_MEMORY_COPY_OP_VERSION 1
+
+/**
+ * @brief Describes a single copy operation within a batch.
+ *
+ * The @c version field must be set to @c HSA_AMD_MEMORY_COPY_OP_VERSION.
+ *
+ * Common fields (all operation types):
+ *   version         -- must be HSA_AMD_MEMORY_COPY_OP_VERSION
+ *   type            -- one of hsa_amd_memory_copy_op_type_t
+ *   completion_signal -- per-operation completion signal
+ *   traffic_class   -- QoS traffic class (0 = default/unspecified)
+ *   reserved[]      -- must be zero
+ *
+ * Wait-before-copy (orthogonal, any operation type):
+ *   wait.function   -- comparison function (hsa_amd_memory_copy_wait_function_t).
+ *                      SDMA polls (*wait.addr & wait.mask) against wait.value using
+ *                      this comparison before starting the copy.  ALWAYS (0) = no wait.
+ *   wait.scope      -- coherency scope (hsa_fence_scope_t) for pre-copy memory reads:
+ *                      wait address polling and indirect address resolution.
+ *                      Must be 0 when function is ALWAYS and type is not INDIRECT_*.
+ *   wait.addr       -- address to poll (NULL when function is ALWAYS)
+ *   wait.value      -- reference value for the comparison
+ *   wait.mask       -- AND mask applied to the polled value before comparison
+ *
+ * Signal-after-copy (orthogonal, any operation type):
+ *   signal.operation -- signal operation (hsa_amd_memory_copy_signal_op_t).
+ *                       NONE (0) = no signal.  This is a raw GPU-side atomic,
+ *                       separate from the HSA completion_signal.
+ *   signal.scope     -- coherency scope for the signal write (hsa_fence_scope_t)
+ *   signal.addr      -- target address for the atomic (NULL when operation is NONE)
+ *   signal.data      -- data value for the atomic operation
+ *
+ * Field usage per operation type:
+ *
+ * LINEAR (default, single copy when num_entries == 0):
+ *   src, src_agent  -- source pointer and agent
+ *   dst, dst_agent  -- destination pointer and agent
+ *   size            -- copy size in bytes
+ *   num_entries        -- 0
+ *
+ * LINEAR (multi-copy when num_entries > 0, one signal for all entries):
+ *   src_list         -- caller-owned array of num_entries source pointers
+ *   src_agent        -- common source agent (must be GPU)
+ *   dst_list         -- caller-owned array of num_entries destination pointers
+ *   dst_agent_list   -- caller-owned array of num_entries destination agents
+ *   size_list        -- caller-owned array of num_entries copy sizes in bytes
+ *   num_entries         -- number of entries (>= 1, <= 1024)
+ *
+ * LINEAR_BROADCAST (single source -> multiple destinations):
+ *   src, src_agent    -- source pointer and agent (must be GPU)
+ *   dst_list          -- caller-owned array of num_entries destination pointers
+ *   dst_agent_list    -- caller-owned array of num_entries destination agents
+ *   size              -- copy size in bytes (same for every destination)
+ *   num_entries          -- number of entries in dst_list / dst_agent_list (>= 1, <= 1024)
+ *
+ * LINEAR_SWAP (exchange contents of two buffers, multi-entry when num_entries > 0):
+ *   src_list         -- caller-owned array of num_entries source pointers
+ *   src_agent        -- common agent for routing
+ *   dst_list         -- caller-owned array of num_entries destination pointers
+ *   dst_agent_list   -- caller-owned array of num_entries destination agents
+ *   size_list        -- caller-owned array of num_entries swap sizes in bytes
+ *   num_entries      -- number of entries (>= 1, <= 1024)
+ *
+ * LINEAR_SWAP (single, when num_entries == 0):
+ *   src, src_agent  -- first buffer pointer and agent (modified in place)
+ *   dst, dst_agent  -- second buffer pointer and agent (modified in place)
+ *   src_size        -- size of the source region in bytes
+ *   dst_size        -- size of the destination region in bytes
+ *   num_entries     -- 0
+ *
+ * LINEAR_INDIRECT_SRC (source address resolved via indirection):
+ *   src             -- void** pointing to the actual source address
+ *   dst             -- regular destination pointer
+ *   wait.scope      -- hsa_fence_scope_t for indirect address reads
+ *
+ * LINEAR_INDIRECT_DST (destination address resolved via indirection):
+ *   src             -- regular source pointer
+ *   dst             -- void** pointing to the actual destination address
+ *   wait.scope      -- hsa_fence_scope_t for indirect address reads
+ *
+ * LINEAR_INDIRECT_SRCDST (both addresses resolved via indirection):
+ *   src             -- void** pointing to the actual source address
+ *   dst             -- void** pointing to the actual destination address
+ *   wait.scope      -- hsa_fence_scope_t for indirect address reads
+ *
+ * For all INDIRECT_* types:
+ *   src_agent, dst_agent -- source and destination agents
+ *   size            -- copy size in bytes
+ *   num_entries        -- must be 0
+ *
+ * Future-proofing unions (reserved, must not be used):
+ *   src_agent_list           -- reserved for future gather operations
+ *   unused_size              -- must be 0 for non-SWAP types; for LINEAR multi, use size_list instead
+ */
+typedef struct hsa_amd_memory_copy_op_s {
+  uint16_t version;                       /**< Struct version. Must be HSA_AMD_MEMORY_COPY_OP_VERSION. */
+  uint16_t type;                          /**< Operation type (hsa_amd_memory_copy_op_type_t) */
+  uint16_t num_entries;                    /**< LINEAR multi / BROADCAST / SWAP: number of entries; others: must be 0 */
+  uint16_t traffic_class;                 /**< QoS traffic class. 0 = default/unspecified. */
+  hsa_signal_t completion_signal;         /**< Completion signal for this operation */
+  union {
+    void* src;                            /**< Source pointer (or void** for INDIRECT_SRC/SRCDST) */
+    void** src_list;                      /**< LINEAR multi: caller-owned array of num_entries source pointers */
+  };
+  union {
+    hsa_agent_t src_agent;                /**< Source agent */
+    hsa_agent_t* src_agent_list;          /**< Reserved for future use */
+  };
+  union {
+    hsa_agent_t dst_agent;                /**< Destination agent (single-dst types) */
+    hsa_agent_t* dst_agent_list;          /**< LINEAR multi / BROADCAST: caller-owned array of num_entries destination agents */
+  };
+  union {
+    void* dst;                            /**< Destination pointer (or void** for INDIRECT_DST/SRCDST) */
+    void** dst_list;                      /**< LINEAR multi / BROADCAST: caller-owned array of num_entries destination pointers */
+  };
+  union {
+    struct {
+      size_t size;                        /**< Copy size in bytes (LINEAR single / BROADCAST / INDIRECT) */
+      size_t unused_size;                 /**< Must be 0 for non-SWAP types; unused for LINEAR multi */
+    };
+    struct {
+      size_t src_size;                    /**< SWAP: source region size in bytes */
+      size_t dst_size;                    /**< SWAP: destination region size in bytes */
+    };
+    struct {
+      size_t* size_list;                  /**< LINEAR multi: caller-owned array of num_entries copy sizes */
+      size_t reserved0;                   /**< Must be 0 for LINEAR multi */
+    };
+  };
+  /** Wait-before-copy. Set to {0} to disable. */
+  struct {
+    uint16_t function;                    /**< Comparison (hsa_amd_memory_copy_wait_function_t) */
+    uint16_t scope;                       /**< Scope (hsa_fence_scope_t) */
+    uint32_t reserved;                    /**< Must be 0 */
+    void*    addr;                        /**< Address to poll (NULL = no wait) */
+    uint64_t value;                       /**< Reference value for wait comparison */
+    uint64_t mask;                        /**< AND mask applied before comparison */
+  } wait;                                 /**< Wait-before-copy descriptor */
+  /** Signal-after-copy (raw GPU-side atomic, separate from completion_signal). Set to {0} to disable. */
+  struct {
+    uint16_t operation;                   /**< Signal op (hsa_amd_memory_copy_signal_op_t) */
+    uint16_t scope;                       /**< Scope for signal write (hsa_fence_scope_t) */
+    uint32_t reserved;                    /**< Must be 0 */
+    void*    addr;                        /**< Target address for atomic (NULL = no signal) */
+    uint64_t data;                        /**< Data value for the atomic operation */
+  } signal;                               /**< Signal-after-copy descriptor */
+  uint64_t reserved1[1];                  /**< Reserved for future use. Must be zero. */
+} hsa_amd_memory_copy_op_t;
+
+/**
+ * @brief Submits a batch of asynchronous memory copy operations.
+ *
+ * @details Submits multiple memory copy operations as a batch. Each operation
+ * carries its own completion signal in @c hsa_amd_memory_copy_op_t.completion_signal.
+ * All operations within a single batch must share the same completion signal.
+ * The caller must initialise the signal value to @p num_copy_ops before calling
+ * this function; the runtime decrements it once per completed operation.
+ *
+ * Each operation is self-describing via its @c type field. A BROADCAST operation
+ * is a single op that copies one source to multiple destinations via @c dst_list
+ * and @c num_entries. A SWAP operation exchanges two buffers using @c src_size and
+ * @c dst_size.
+ *
+ * @param[in] copy_ops Array of copy operation descriptors.
+ *
+ * @param[in] num_copy_ops Number of copy operations in the array.
+ *
+ * @param[in] num_dep_signals Number of dependent signals.
+ *
+ * @param[in] dep_signals Array of dependent signals that all copy operations
+ * must wait on before starting.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The batch copy was submitted successfully.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT copy_ops is NULL, num_copy_ops
+ * is 0, any src/dst pointers are NULL, or completion_signal is invalid.
+ */
+hsa_status_t HSA_API
+    hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* copy_ops,
+                              uint32_t num_copy_ops,
+                              uint32_t num_dep_signals,
+                              const hsa_signal_t* dep_signals);
+
 /**
  * @brief Reports the availability of SDMA copy engines.
  *
@@ -2383,13 +2911,50 @@ typedef enum {
 } hsa_amd_pointer_type_t;
 
 /**
+ * @brief Allocation flags reported by hsa_amd_pointer_info.
+ *
+ * These flags describe properties of the memory allocation as reported by
+ * the kernel driver.  The value of this attribute is a bitmask.
+ */
+typedef enum hsa_amd_pointer_info_alloc_flag_s {
+  /**
+   * Memory was allocated with executable permission.
+   */
+  HSA_AMD_POINTER_INFO_ALLOC_FLAG_EXECUTABLE = (1 << 0),
+  /**
+   * Memory was allocated as physically contiguous.
+   */
+  HSA_AMD_POINTER_INFO_ALLOC_FLAG_CONTIGUOUS = (1 << 1),
+  /**
+   * Memory is non-paged (pinned/page-locked).
+   */
+  HSA_AMD_POINTER_INFO_ALLOC_FLAG_NONPAGED = (1 << 2),
+  /**
+   * Memory has read-only access.
+   */
+  HSA_AMD_POINTER_INFO_ALLOC_FLAG_READONLY = (1 << 3),
+  /**
+   * Memory is accessible by the host CPU.
+   */
+  HSA_AMD_POINTER_INFO_ALLOC_FLAG_HOST_ACCESS = (1 << 4),
+  /**
+   * Memory supports full system-scope atomic operations.
+   */
+  HSA_AMD_POINTER_INFO_ALLOC_FLAG_ATOMIC_FULL = (1 << 5),
+  /**
+   * Memory supports partial (PCIe) atomic operations.
+   */
+  HSA_AMD_POINTER_INFO_ALLOC_FLAG_ATOMIC_PARTIAL = (1 << 6),
+} hsa_amd_pointer_info_alloc_flag_t;
+
+/**
  * @brief Describes a memory allocation known to ROCr.
  * Within a ROCr major version this structure can only grow.
  */
 typedef struct hsa_amd_pointer_info_s {
   /*
   Size in bytes of this structure.  Used for version control within a major ROCr
-  revision.  Set to sizeof(hsa_amd_pointer_t) prior to calling
+  revision.  Set to sizeof(hsa_amd_pointer_info_t) prior to calling
   hsa_amd_pointer_info.  If the runtime supports an older version of pointer
   info then size will be smaller on return.  Members starting after the return
   value of size will not be updated by hsa_amd_pointer_info.
@@ -2441,6 +3006,15 @@ typedef struct hsa_amd_pointer_info_s {
   HSA_EXT_POINTER_TYPE_UNKNOWN.
   */
   bool registered;
+
+  /*
+  Contains a bitmask of hsa_amd_pointer_info_alloc_flag_t values.
+  Reports the allocation property flags for the memory as reported by the
+  kernel driver.  This field is not meaningful if the type of the allocation
+  is HSA_EXT_POINTER_TYPE_UNKNOWN.
+  Added in version 1.18.
+  */
+  uint32_t alloc_flags;
 } hsa_amd_pointer_info_t;
 
 /**
@@ -3135,6 +3709,47 @@ hsa_status_t hsa_amd_svm_prefetch_async(void* ptr, size_t size, hsa_agent_t agen
                                         uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
                                         hsa_signal_t completion_signal);
 
+/**
+ * @brief Discards a batch of SVM memory ranges asynchronously.
+ *
+ * Schedules the discard of multiple SVM ranges in a single batched operation.
+ * The physical pages backing the virtual address ranges may be released and reclaimed
+ * by the system under memory pressure. The discard will be scheduled when all @p dep_signals
+ * have been resolved.
+ *
+ * Only pointers allocated using ::hsa_amd_vmem_address_reserve can be discarded.
+ *
+ *
+ * @param[in] ptrs Array of @p count pointers to SVM memory ranges to discard.
+ * Must not be NULL.
+ *
+ * @param[in] sizes Array of @p ptr sizes, specifying the length of each memory range
+ * to discard. Must not be NULL.
+ *
+ * @param[in] count Number of memory ranges in the @p ptrs and @p sizes arrays. Must not be 0.
+ *
+ * @param[in] num_dep_signals Number of dependent signals. Can be 0.
+ *
+ * @param[in] dep_signals List of dependency signals to wait for before the discard operation
+ * starts. Can be NULL.
+ *
+ * @param[in] completion_signal Signal used to indicate completion of the discard operation.
+ * May be a NULL signal if no completion signal is required.
+ *
+ * @retval ::HSA_STATUS_SUCCESS Discard operation was successfully scheduled.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED HSA runtime has not been initialized.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p ptrs is NULL, @p sizes is
+ * NULL, @p count is 0, @p dep_signals and @p num_dep_signals are inconsistent.
+ *
+ * @retval ::HSA_STATUS_ERROR_XNACK_DISABLED Cannot run this API on a system with XNACK disabled.
+ */
+hsa_status_t HSA_API hsa_amd_svm_discard_batch_async(void** ptrs, size_t* sizes, uint32_t count,
+                                                     uint32_t num_dep_signals,
+                                                     const hsa_signal_t* dep_signals,
+                                                     hsa_signal_t completion_signal);
+
 /** @} */
 
 /** \addtogroup profile Profiling
@@ -3410,7 +4025,7 @@ typedef enum {
  * To minimize internal memory fragmentation, align the size to the recommended allocation granule
  * size, see HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE
  *
- * @param[in] pool memory to use
+ * @param[in] pool memory to use. Only GPU agent pools are supported.
  * @param[in] size of the memory allocation
  * @param[in] type of memory
  * @param[in] flags - currently unsupported
@@ -3667,17 +4282,73 @@ typedef enum {
    */
   HSA_AMD_QUEUE_INFO_DOORBELL_ID,
   /*
-  * Returns how many times the underlying hardware queue has been shared.
-  * @p value will be set to -1 if this queue was not allocated using 
-  * hsa_amd_counted_queue_acquire. The type of this attribute is uint32_t.
-  */
+   * Returns how many times the underlying hardware queue has been shared.
+   * @p value will be set to -1 if this queue was not allocated using
+   * hsa_amd_counted_queue_acquire. The type of this attribute is uint32_t.
+   */
   HSA_QUEUE_INFO_USE_COUNT,
   /*
-  * Returns a unique ID representing the HW resource used by a counted queue. Two queues
-  * with the same HW_ID use the same underlying hardware queue. This query can be
-  * used on counted and non-counted queues. The type of this attribute is uint32_t.
-  */
+   * Returns a unique ID representing the HW resource used by a counted queue. Two queues
+   * with the same HW_ID use the same underlying hardware queue. This query can be
+   * used on counted and non-counted queues. The type of this attribute is uint32_t.
+   */
   HSA_QUEUE_INFO_HW_ID,
+  /*
+   * Major version of metadata prefetch dispatch packet. The versioning starts at 0.
+   * Returns 0xFF if metadata prefetch is not supported.
+   * The type of this attribute is uint8_t.
+   */
+  HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_DISPATCH_PKT_VERSION_MAJOR,
+  /*
+   * Minor version of metadata prefetch dispatch packet. The versioning starts at 0.
+   * Returns 0xFF if metadata prefetch is not supported.
+   * The type of this attribute is uint8_t.
+   */
+  HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_DISPATCH_PKT_VERSION_MINOR,
+  /*
+   * Major version of metadata prefetch barrier packet. The versioning starts at 0.
+   * Returns 0xFF if metadata prefetch is not supported.
+   * The type of this attribute is uint8_t.
+   */
+  HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_BARRIER_PKT_VERSION_MAJOR,
+  /*
+   * Minor version of metadata prefetch barrier packet. The versioning starts at 0.
+   * Returns 0xFF if metadata prefetch is not supported.
+   * The type of this attribute is uint8_t.
+   */
+  HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_BARRIER_PKT_VERSION_MINOR,
+  /*
+   * If supported by the underlying HW, returns the address of the metadata ring
+   * buffer. The type of this attribute is uint64_t.
+   */
+  HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_RING_BUFFER,
+  /*
+   * Bit-mask indicating properties of this queue.
+   * The type of this attribute is uint8_t[8].
+   */
+  HSA_AMD_QUEUE_INFO_PROPERTIES,
+
+  /*
+   * Per-queue VM fault state — populated after a GPU memory fault.
+   */
+
+  /*
+   * Whether this queue has experienced a VM fault.
+   * The type of this attribute is bool.
+   */
+  HSA_AMD_QUEUE_INFO_VM_FAULT_STATUS,
+  /*
+   * The virtual address that caused the VM fault on this queue.
+   * Only valid when HSA_AMD_QUEUE_INFO_VM_FAULT_STATUS is true.
+   * The type of this attribute is uint64_t.
+   */
+  HSA_AMD_QUEUE_INFO_VM_FAULT_ADDRESS,
+  /*
+   * A bitmask of HSA_AMD_MEMORY_FAULT_* flags describing the reason for the
+   * VM fault on this queue.  Only valid when HSA_AMD_QUEUE_INFO_VM_FAULT_STATUS
+   * is true.  The type of this attribute is uint32_t.
+   */
+  HSA_AMD_QUEUE_INFO_VM_FAULT_REASON,
 } hsa_queue_info_attribute_t;
 
 hsa_status_t hsa_amd_queue_get_info(hsa_queue_t* queue, hsa_queue_info_attribute_t attribute,
@@ -3787,7 +4458,7 @@ hsa_status_t HSA_API hsa_amd_ais_file_read(hsa_amd_ais_file_handle_t handle, voi
  *
  * For each successful call, hsa_amd_counted_queue_release should be called to release the
  * HSA_QUEUE_INFO_USE_COUNT. After release, the queue handle becomes invalid and must not be used.
- * 
+ *
  * hsa_amd_queue_set_priority and hsa_amd_queue_cu_set_mask cannot be used on counted queues.
  *
  * @param[in] agent Agent where to create the queue
@@ -3818,7 +4489,7 @@ hsa_status_t HSA_API hsa_amd_ais_file_read(hsa_amd_ais_file_handle_t handle, voi
  * @retval ::HSA_STATUS_ERROR_INVALID_AGENT The agent is invalid or not a GPU agent.
  *
  * @retval ::HSA_STATUS_ERROR_INVALID_QUEUE_CREATION @p type is not HSA_QUEUE_TYPE_MULTI.
- * 
+ *
  * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT Invalid priority or NULL queue pointer.
  */
 hsa_status_t HSA_API hsa_amd_counted_queue_acquire(hsa_agent_t agent, hsa_queue_type_t type,
@@ -3829,13 +4500,13 @@ hsa_status_t HSA_API hsa_amd_counted_queue_acquire(hsa_agent_t agent, hsa_queue_
 
 /**
  * @brief Release a counted queue and decrements its use count.
- * 
+ *
  * Releases a queue that was previously acquired using hsa_amd_counted_queue_acquire.
- * Each call to this API decrements the internal use count HSA_QUEUE_INFO_USE_COUNT 
+ * Each call to this API decrements the internal use count HSA_QUEUE_INFO_USE_COUNT
  * of the underlying hardware. After this call, queue handle is invalid and must not be used.
  * Once created, the hardware queue is retained until hsa_shutdown is called to avoid costly
- * overhead of repeatedly creating new hardware queues, allowing them to be reused. 
- * 
+ * overhead of repeatedly creating new hardware queues, allowing them to be reused.
+ *
  *
  * @param[in] queue Counted queue handle returned from hsa_amd_counted_queue_acquire.
  * Must not be NULL.

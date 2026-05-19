@@ -10,7 +10,6 @@ add_library(nccl-profiler-example SHARED ${SRC_FILES})
 # Set include directories
 target_include_directories(nccl-profiler-example PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/nccl
-    ${CUDAToolkit_INCLUDE_DIRS}
 )
 
 # Set output name to match Makefile

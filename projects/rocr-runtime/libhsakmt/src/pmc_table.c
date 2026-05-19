@@ -25,9 +25,6 @@
 
 #include <sys/types.h>
 #include <dirent.h>
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
 #include "libhsakmt.h"
 #include "pmc_table.h"
 

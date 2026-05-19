@@ -115,7 +115,12 @@ if(RDC_LIB_MODULES)
         EXPORT rdcTargets
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${RDC} COMPONENT ${CLIENT_COMPONENT}
     )
-    set_target_properties(${RDC_LIB_MODULES} PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/..")
+    set_target_properties(
+        ${RDC_LIB_MODULES}
+        PROPERTIES
+            INSTALL_RPATH "\$ORIGIN:\$ORIGIN/.."
+            THEROCK_INSTALL_RPATH_ORIGIN "${CMAKE_INSTALL_LIBDIR}/${RDC}"
+    )
 endif()
 
 install(

@@ -19,5 +19,6 @@ venv/
 # Ignore build artifacts
 build/
 
-# Ignore profiler dump folders
+# Ignore dump folders
 profiler_dumps/
+inspector_dumps/

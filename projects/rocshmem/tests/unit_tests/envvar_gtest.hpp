@@ -28,6 +28,7 @@
 #include <cstdlib>
 #include <sstream>
 #include <string>
+#include <type_traits>
 
 #include "gtest/gtest.h"
 #include "../src/envvar.hpp"
@@ -87,8 +88,16 @@ class EnvVarSetTestFixture : public EnvVarTestFixture
     const envvar::var<T> var_{var_name_, var_doc_};
 
     static void SetUpTestSuite() {
+      using namespace envvar::parser::_type_traits;
       std::ostringstream oss{};
-      oss << T{};
+      // operator<<(std::ostream&, {un}signed char) prints output as a character
+      // so signed or unsigned char need to be widened to a larger type
+      if constexpr (is_standard_integer_v<T> && is_narrow_character_v<T>) {
+        using parsechar_t = std::conditional_t<std::is_signed_v<T>, signed int, unsigned int>;
+        oss << static_cast<parsechar_t>(T{});
+      } else {
+        oss << T{};
+      }
       setenv(oss.str());
     }
 };

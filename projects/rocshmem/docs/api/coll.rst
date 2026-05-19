@@ -36,8 +36,8 @@ across all PEs in the system. The operation is enqueued on the specified stream 
 asynchronously. The caller must synchronize the stream (e.g., using ``hipStreamSynchronize``)
 to ensure completion.
 
-ROCSHMEM_BARRIER
-----------------
+ROCSHMEM_CTX_BARRIER
+--------------------
 
 .. cpp:function:: __device__ void rocshmem_ctx_barrier(rocshmem_ctx_t ctx, rocshmem_team_t team)
 .. cpp:function:: __device__ void rocshmem_ctx_barrier_wave(rocshmem_ctx_t ctx, rocshmem_team_t team)
@@ -47,11 +47,26 @@ ROCSHMEM_BARRIER
   :returns:   None.
 
 **Description:**
-This routine performs a collective barrier between all PEs in the system.
-The caller is blocked until the barrier is resolved.
+This routine performs a collective barrier between all PEs in the specified team using
+the provided rocshmem context. The caller is blocked until all PEs in the team have
+entered the barrier and the synchronization is complete.
 
-ROCSHMEM_TEAM_SYNC
-------------------
+ROCSHMEM_BARRIER
+----------------
+
+.. cpp:function:: __device__ void rocshmem_barrier()
+.. cpp:function:: __device__ void rocshmem_barrier_wave()
+.. cpp:function:: __device__ void rocshmem_barrier_wg()
+
+  :returns:   None.
+
+**Description:**
+This routine performs a collective barrier between all PEs in the system. This is equivalent
+to calling ``rocshmem_ctx_barrier*`` on default context and team world. The caller is blocked
+until the barrier is resolved.
+
+ROCSHMEM_CTX_SYNC
+-----------------
 
 .. cpp:function:: __device__ void rocshmem_ctx_sync(rocshmem_ctx_t ctx, rocshmem_team_t team)
 .. cpp:function:: __device__ void rocshmem_ctx_sync_wave(rocshmem_ctx_t ctx, rocshmem_team_t team)
@@ -65,8 +80,8 @@ ROCSHMEM_TEAM_SYNC
 This routine registers the arrival of a PE at a barrier.
 The caller is blocked until the synchronization is resolved.
 
-Unlike the ``shmem_barrier_all`` routine, ``shmem_team_sync`` only ensures the
-completion and visibility of previously issued memory stores, but does not
+Unlike the ``rocshmem_ctx_barrier*`` routines, ``rocshmem_ctx_sync*`` only ensure the
+completion and visibility of previously issued memory stores, but it does not
 ensure the completion of remote memory updates issued via OpenSHMEM routines.
 
 ROCSHMEM_SYNC_ALL
@@ -79,7 +94,7 @@ ROCSHMEM_SYNC_ALL
   :returns:    None.
 
 **Description:**
-These routines behaves the same way as ``rocshmem_team_sync_*`` when called on the world team.
+These routines behaves the same way as ``rocshmem_ctx_sync*`` when called on the world team.
 These APIs should be called from only one thread/wavefront/workgroup within the grid to avoid undefined behavior.
 
 ROSHMEM_ALLTOALL
@@ -124,6 +139,27 @@ execute asynchronously. The caller must synchronize the stream (e.g., using
 
 This function creates a separate context for each workgroup to avoid contention on the
 default context, allowing parallel execution across multiple streams.
+
+ROCSHMEM_ALLTOALLV
+------------------
+
+.. cpp:function:: __device__ void rocshmem_TYPENAME_alltoallv_wg(rocshmem_team_t team, TYPE *dest, const size_t dest_nelems[], const size_t dest_displs[], TYPE *source, const size_t source_nelems[], const size_t source_displs[]);
+
+  :param team:          The team participating in the collective.
+  :param dest:          Destination address. Must be an address on the symmetric heap.
+  :param dest_nelems:   Array containing number of elements to receive from each participating PE
+  :param dest_displs:   Array of offsets into dest buffer for each participating PE
+  :param source:        Source address. Must be an address on the symmetric heap.
+  :param source_nelems: Array containing number of elements to send from each participating PE
+  :param source_displs: Array of offsets into source buffer for each participating PE
+
+  :returns:      None.
+
+**Description:**
+PE i sends source_nelems[j] of data from source + source_displs[j] to PE j.
+At the same time, PE i receives dest_nelems[j] of data from PE j to be placed at dest + dest_displs[j].
+This function must be called as a work-group collective.
+Valid TYPENAME and TYPE values are listed in :ref:`RMA_TYPES`.
 
 ROCSHMEM_BROADCAST
 ------------------

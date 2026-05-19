@@ -21,8 +21,13 @@
 #
 ################################################################################
 
+# Search super-project (e.g. libdrm) sysdeps first when building in TheRock
+if(DEFINED THEROCK_SUPERPROJECT_INCLUDE_DIRS)
+  list(APPEND _libdrm_amdgpu_include_hints ${THEROCK_SUPERPROJECT_INCLUDE_DIRS})
+endif()
+
 find_library(LIBDRM_AMDGPU_LIBRARY NAMES drm_amdgpu HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib /opt/amdgpu/lib/x86_64-linux-gnu /opt/amdgpu/lib64 /usr/lib/x86_64-linux-gnu /usr/lib64)
-find_path(LIBDRM_AMDGPU_INCLUDE_DIR NAMES libdrm/amdgpu.h libdrm/amdgpu_drm.h PATHS ${ROCM_PATH}/lib/rocm_sysdeps/include /opt/amdgpu/include /usr/include /usr/ /usr/local/include NO_DEFAULT_PATH)
+find_path(LIBDRM_AMDGPU_INCLUDE_DIR NAMES libdrm/amdgpu.h libdrm/amdgpu_drm.h PATHS ${_libdrm_amdgpu_include_hints} ${ROCM_PATH}/lib/rocm_sysdeps/include /opt/amdgpu/include /usr/include /usr/ /usr/local/include NO_DEFAULT_PATH)
 
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(Libdrm_amdgpu DEFAULT_MSG LIBDRM_AMDGPU_INCLUDE_DIR LIBDRM_AMDGPU_LIBRARY)

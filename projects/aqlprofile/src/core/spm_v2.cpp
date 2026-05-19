@@ -1,4 +1,4 @@
-#include "hsa/hsa_ext_amd.h"
+#include "hsa_includes.h"
 #include "include/aqlprofile-sdk/aql_profile_v2.h"
 #include "include/spm_common.hpp"
 #include "memorymanager.hpp"
@@ -13,9 +13,15 @@
 #include <map>
 #include <array>
 #include <shared_mutex>
+#include <filesystem>
 
+// On Windows the .def file controls symbol export; no declspec needed.
+// On Linux use visibility("default") to mark public API symbols.
+#ifdef _WIN32
+#define PUBLIC_API
+#else
 #define PUBLIC_API __attribute__((visibility("default")))
-
+#endif
 
 static void producer(std::shared_ptr<class spm_state_t> s);
 static void consumer(std::shared_ptr<class spm_state_t> s, aqlprofile_spm_data_callback_t callback, void* userdata);
@@ -118,6 +124,50 @@ namespace aqlprofile
 namespace spm
 {
 
+bool is_virtualization_enabled() {
+  // Check if GPU virtualization (SR-IOV) is enabled by looking for virtual function indicators
+  //
+  // In SR-IOV GPU virtualization:
+  // - Physical Function (PF): The actual GPU hardware device
+  // - Virtual Function (VF): Virtualized GPU instances derived from the PF
+  //
+  // The /sys/class/drm/card*/device/physfn symlink exists ONLY on VF devices
+  // and points back to their corresponding PF device. If this link exists,
+  // the GPU is running as a virtual function (virtualization enabled).
+
+  try {
+    for (const auto& entry : std::filesystem::directory_iterator("/sys/class/drm")) {
+      if (entry.path().filename().string().substr(0, 4) == "card" &&
+          std::filesystem::exists(entry.path() / "device" / "physfn")) {
+        return true;
+      }
+    }
+  } catch (...) {
+    // If filesystem access fails, assume no virtualization; fall-through
+  }
+  return false;
+}
+
+bool is_agent_supported_for_spm(const AgentInfo* agentInfo) {
+  const char* env_val = getenv("AQLPROFILE_SPM_OVERRIDE_AGENT_CHECK");
+  if (env_val && *env_val != '0' && *env_val != '\0') return true;
+
+  // if the device is gfx90a, then spm is not supported
+  if (strncmp(agentInfo->gfxip, "gfx90a", 6) == 0) {
+    printf("Streaming Performance Monitor (SPM) is not supported on gfx90a devices\n");
+    return false;
+  } else if (strncmp(agentInfo->gfxip, "gfx942", 6) == 0) {
+    // if the device is gfx942, check if virtualization is enabled
+    if (is_virtualization_enabled()) {
+      printf(
+          "Streaming Performance Monitor (SPM) is not supported on gfx942 devices "
+          "when GPU virtualization (SR-IOV) is enabled\n");
+      return false;
+    }
+  }
+  return true;
+}
+
 std::vector<aqlprofile_spm_parameter_t> default_spm_params = {
     {AQLPROFILE_SPM_PARAMETER_TYPE_BUFFER_SIZE,     1<<26}, // 64MB
     {AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL, 1<<13}, // 4us
@@ -196,7 +246,11 @@ private:
     std::map<aqlprofile_handle_t, std::unique_ptr<ManagerThread>> threads{};
 };
 
-auto* spm_state_map = new SpmStateMap{};
+SpmStateMap* spm_state_map()
+{
+    static SpmStateMap* instance = new SpmStateMap{};
+    return instance;
+}
 
 hsa_status_t _internal_aqlprofile_spm_create_packets(
     aqlprofile_handle_t*                 handle,
@@ -205,6 +259,9 @@ hsa_status_t _internal_aqlprofile_spm_create_packets(
     aqlprofile_spm_profile_t             profile,
     size_t                               flags
 ) {
+    if (!is_agent_supported_for_spm(aql_profile::GetAgentInfo(profile.aql_agent)))
+      return HSA_STATUS_ERROR_INVALID_AGENT;
+
     auto s = std::make_shared<spm_state_t>();
     s->aql_agent = profile.aql_agent;
     s->hsa_agent = profile.hsa_agent;
@@ -232,7 +289,7 @@ hsa_status_t _internal_aqlprofile_spm_create_packets(
     handle->handle = memory->GetHandler();
     out_desc->data = memory->GetOutputBuf();
     out_desc->size = SPM_DESC_SIZE;
-    spm_state_map->insert(*handle, s);
+    spm_state_map()->insert(*handle, s);
 
     {
         aql_profile::Pm4Factory* pm4_factory = nullptr;
@@ -322,7 +379,7 @@ PUBLIC_API hsa_status_t aqlprofile_spm_start(
     aqlprofile_spm_data_callback_t data_cb,
     void*                          userdata
 ) {
-    auto s = aqlprofile::spm::spm_state_map->query(handle);
+    auto s = aqlprofile::spm::spm_state_map()->query(handle);
     if (!s) return HSA_STATUS_ERROR_NOT_INITIALIZED;
 
     // The first page of output_buffer is reserved for SpmBufferDesc
@@ -356,7 +413,7 @@ PUBLIC_API hsa_status_t aqlprofile_spm_start(
         auto manager = std::make_unique<ManagerThread>(s, data_cb, userdata);
 
         CHECKHSA(manager->status, return manager->status);
-        aqlprofile::spm::spm_state_map->setthread(handle, std::move(manager));
+        aqlprofile::spm::spm_state_map()->setthread(handle, std::move(manager));
     }
     catch(...) { return HSA_STATUS_ERROR; }
     return HSA_STATUS_SUCCESS;
@@ -364,13 +421,13 @@ PUBLIC_API hsa_status_t aqlprofile_spm_start(
 
 PUBLIC_API hsa_status_t aqlprofile_spm_stop(aqlprofile_handle_t handle)
 {
-    bool b = aqlprofile::spm::spm_state_map->setthread(handle, nullptr);
+    bool b = aqlprofile::spm::spm_state_map()->setthread(handle, nullptr);
     return b ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_NOT_INITIALIZED;
 }
 
 PUBLIC_API void aqlprofile_spm_delete_packets(aqlprofile_handle_t handle)
 {
-    aqlprofile::spm::spm_state_map->remove(handle);
+    aqlprofile::spm::spm_state_map()->remove(handle);
 }
 
 struct consumer_thread_handle_t

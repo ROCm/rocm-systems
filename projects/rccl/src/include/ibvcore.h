@@ -491,6 +491,20 @@ struct ibv_srq_init_attr_ex {
 	struct ibv_cq	       *cq;
 };
 
+/*
+ * Receive Work Queue Indirection Table.
+ * It's used in order to distribute incoming packets between different
+ * Receive Work Queues. Associating Receive WQs with different CPU cores
+ * allows one to distribute the traffic load across different CPU cores.
+ * The Indirection Table can contain only WQs of type IBV_WQT_RQ.
+*/
+struct ibv_rwq_ind_table {
+	struct ibv_context *context;
+	int ind_tbl_handle;
+	int ind_tbl_num;
+	uint32_t comp_mask;
+};
+
 enum ibv_qp_type {
 	IBV_QPT_RC = 2,
 	IBV_QPT_UC,
@@ -535,6 +549,15 @@ enum ibv_qp_init_attr_mask {
 	IBV_QP_INIT_ATTR_RESERVED	= 1 << 2
 };
 
+struct ibv_rx_hash_conf {
+	/* enum ibv_rx_hash_function_flags */
+	uint8_t    rx_hash_function;
+	uint8_t    rx_hash_key_len;
+	uint8_t    *rx_hash_key;
+	/* enum ibv_rx_hash_fields */
+	uint64_t   rx_hash_fields_mask;
+};
+
 struct ibv_qp_init_attr_ex {
 	void		       *qp_context;
 	struct ibv_cq	       *send_cq;
@@ -547,6 +570,13 @@ struct ibv_qp_init_attr_ex {
 	uint32_t		comp_mask;
 	struct ibv_pd	       *pd;
 	struct ibv_xrcd	       *xrcd;
+	uint32_t    create_flags;
+	uint16_t		max_tso_header;
+	struct ibv_rwq_ind_table       *rwq_ind_tbl;
+	struct ibv_rx_hash_conf	rx_hash_conf;
+	uint32_t		source_qpn;
+	/* See enum ibv_qp_create_send_ops_flags */
+	uint64_t send_ops_flags;
 };
 
 enum ibv_qp_open_attr_mask {

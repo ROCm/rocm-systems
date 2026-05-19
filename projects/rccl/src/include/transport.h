@@ -40,13 +40,9 @@ struct ncclComm;
 #define CHANNEL_MASK_OFFSET(nranks, connIndex) (nranks * (connIndex == NCCL_CONN_IDX_P2P_NET ? NCCL_CONN_IDX_P2P_NET : 0))
 
 #define CONNECT_SIZE 256
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-#define NCCL_MAX_PAGE_SIZE (512L * 1024L)
-#define NCCL_REC_PAGE_SIZE (4L * 1024L)
-#else
 #define NCCL_MAX_PAGE_SIZE (512L * 1024L * 1024L)
 #define NCCL_REC_PAGE_SIZE (2L * 1024L * 1024L)
-#endif
+
 struct ncclConnect {
   char data[CONNECT_SIZE];
 };
@@ -114,8 +110,9 @@ struct ncclTransport {
 
 ncclResult_t ncclTransportP2pConnect(struct ncclComm* comm, int channelId, int nrecv, int* peerRecv, int nsend, int* peerSend, int connIndex);
 ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* graph, int connIndex, bool* needsProxy=NULL);
-ncclResult_t ncclTransportCheckP2pType(struct ncclComm* comm, bool* isAllDirectP2p, bool* directMode);
+ncclResult_t ncclTransportCheckP2pType(struct ncclComm* comm, bool* isAllDirectP2p, bool* directMode, bool* isAllCudaP2p);
 ncclResult_t ncclTransportIsAllDirectP2p(struct ncclComm* comm, int* isAllDirectP2p);
+bool ncclP2pUsesMemcpy();
 
 ncclResult_t ncclNvlsInit(struct ncclComm* comm);
 ncclResult_t ncclNvlsSetup(struct ncclComm* comm, struct ncclComm* parent);
@@ -156,5 +153,14 @@ ncclResult_t ncclNvlsRegResourcesQuery(struct ncclComm* comm, struct ncclTaskCol
 ncclResult_t ncclNvlsGroupCreate(struct ncclComm *comm, CUmulticastObjectProp *prop, int rank, unsigned int nranks, CUmemGenericAllocationHandle *mcHandle, char *shareableHandle);
 ncclResult_t ncclNvlsGroupConnect(struct ncclComm *comm, char *shareableHandle, int rank, CUmemGenericAllocationHandle *mcHandle);
 #endif
+
+ncclResult_t ncclIpcSymmetricInit(struct ncclComm* comm);
+ncclResult_t ncclIpcMapSymmetric(struct ncclComm* comm, size_t offset, size_t size, CUmemGenericAllocationHandle memHandle, void** symPtr);
+ncclResult_t ncclIpcFreeSymmetric(struct ncclComm* comm, size_t size, void* symPtr);
+ncclResult_t ncclIpcSymmetricFinalize(struct ncclComm* comm);
+ncclResult_t ncclNvlsSymmetricInit(struct ncclComm* comm);
+ncclResult_t ncclNvlsMapSymmetric(struct ncclComm* comm, size_t offset, size_t ucsize, void* ucaddr);
+ncclResult_t ncclNvlsFreeSymmetric(struct ncclComm* comm, size_t ucsize, void* ucaddr);
+ncclResult_t ncclNvlsSymmetricFinalize(struct ncclComm* comm);
 
 #endif

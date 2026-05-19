@@ -58,7 +58,7 @@ class LLMoEData {
     int num_experts_, InitMode init_mode_ = InitMode::Deterministic)
       : num_tokens(num_tokens_), hidden(hidden_),
         num_topk(num_topk_), num_experts(num_experts_),
-        init_mode(init_mode_), expert_token_count(num_experts, 0) {}
+        expert_token_count(num_experts, 0), init_mode(init_mode_) {}
 
   ~LLMoEData() {
     if (X) {
@@ -77,8 +77,6 @@ class LLMoEData {
 
     CHECK_HIP(hipMalloc(&X, x_size_bytes));
     CHECK_HIP(hipMalloc(&topk_idx, topk_idx_size_bytes));
-
-    size_t x_size = num_tokens * hidden;
 
     // Launch kernel to fill input data (X)
     int threads_per_block = 1024;
@@ -131,7 +129,7 @@ class LLMoEData {
               topk_idx_size * sizeof(int64_t), hipMemcpyDeviceToHost));
 
     std::cout << "Input Data (X):" << std::endl;
-    for (size_t i = 0; i < num_tokens; i++) {
+    for (int i = 0; i < num_tokens; i++) {
       std::cout << "Token " << i << ": ";
       for (int j = 0; j < hidden; j++) {
         std::cout << h_X[i * hidden + j] << " ";
@@ -140,7 +138,7 @@ class LLMoEData {
     }
 
     std::cout << "Top-k Indices:" << std::endl;
-    for (size_t i = 0; i < num_tokens; i++) {
+    for (int i = 0; i < num_tokens; i++) {
       std::cout << "Token " << i << ": ";
       for (int k = 0; k < num_topk; k++) {
         std::cout << h_topk_idx[i * num_topk + k] << " ";
@@ -179,9 +177,9 @@ class LLMoEData {
       expert_indices[j] = j;
     }
 
-    for (size_t i = 0; i < num_tokens; i++) {
+    for (int i = 0; i < num_tokens; i++) {
       std::shuffle(expert_indices.begin(), expert_indices.end(), gen);
-      for (int k = 0; k < num_topk; k++) {
+      for (size_t k = 0; k < static_cast<size_t>(num_topk); k++) {
         h_topk_idx[i * num_topk + k] = expert_indices[k];
         expert_token_count[expert_indices[k]]++;
       }
@@ -195,7 +193,7 @@ class LLMoEData {
   void generate_topk_deterministic() {
     size_t topk_idx_size = num_tokens * num_topk;
     std::vector<int64_t> h_topk_idx(topk_idx_size);
-    for (size_t i = 0; i < num_tokens; i++) {
+    for (int i = 0; i < num_tokens; i++) {
       for (int k = 0; k < num_topk; k++) {
         h_topk_idx[i * num_topk + k] = (i * num_topk + k) % num_experts;
         expert_token_count[h_topk_idx[i * num_topk + k]]++;

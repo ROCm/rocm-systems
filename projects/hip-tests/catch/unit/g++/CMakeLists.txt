@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 # AMD specific test
 if(HIP_PLATFORM MATCHES "amd" AND UNIX AND GPP_EXEC)
     set(TEST_SRC

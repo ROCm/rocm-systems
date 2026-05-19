@@ -1,28 +1,14 @@
 /*
-Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include <hip/hip_fp8.h>
 #include <cmath>
+#include <limits>
+#include <type_traits>
 
 void host_cvt_bfloat16raw_to_e8m0(const std::vector<__hip_bfloat16>& in,
                                   std::vector<unsigned char>& out, __hip_saturation_t sat,
@@ -58,7 +44,7 @@ void device_cvt_bfloat16raw_to_e8m0(const std::vector<__hip_bfloat16>& in,
       hipMemcpy(out.data(), out_d, sizeof(unsigned char) * out.size(), hipMemcpyDeviceToHost));
 }
 
-TEST_CASE("Unit__hip_cvt_bfloat16raw_to_e8m0") {
+HIP_TEST_CASE(Unit__hip_cvt_bfloat16raw_to_e8m0) {
   bool run_on_host = GENERATE(true, false);
   __hip_saturation_t saturation = GENERATE(__HIP_NOSAT, __HIP_SATFINITE);
   hipRoundMode rounding = GENERATE(hipRoundZero, hipRoundPosInf);
@@ -144,7 +130,7 @@ void device_cvt_float_to_e8m0(const std::vector<float>& in, std::vector<unsigned
       hipMemcpy(out.data(), out_d, sizeof(unsigned char) * out.size(), hipMemcpyDeviceToHost));
 }
 
-TEST_CASE("Unit__hip_cvt_float_to_e8m0") {
+HIP_TEST_CASE(Unit__hip_cvt_float_to_e8m0) {
   bool run_on_host = GENERATE(true, false);
   __hip_saturation_t saturation = GENERATE(__HIP_NOSAT, __HIP_SATFINITE);
   hipRoundMode rounding = GENERATE(hipRoundZero, hipRoundPosInf);
@@ -231,7 +217,7 @@ void device_cvt_double_to_e8m0(const std::vector<double>& in, std::vector<unsign
 }
 
 
-TEST_CASE("Unit__hip_cvt_double_to_e8m0") {
+HIP_TEST_CASE(Unit__hip_cvt_double_to_e8m0) {
   bool run_on_host = GENERATE(true, false);
   __hip_saturation_t saturation = GENERATE(__HIP_NOSAT, __HIP_SATFINITE);
   hipRoundMode rounding = GENERATE(hipRoundZero, hipRoundPosInf);
@@ -249,6 +235,22 @@ TEST_CASE("Unit__hip_cvt_double_to_e8m0") {
                             -8.0,
                             1e38,
                             -1e38,
+                            // tiny underflow example -> underflows to 0x00
+                            // rounding-to-+Inf promotes to 0x01
+                            1e-50,
+                            -1e-50,
+                            // smallest double-subnormal (denorm_min) -> underflows to 0x00;
+                            // rounding-to-+Inf does not promote (magnitude below half-step)
+                            std::numeric_limits<double>::denorm_min(),
+                            -std::numeric_limits<double>::denorm_min(),
+                            // smallest double-normal -> underflows to 0x00;
+                            // rounding-to-+Inf does not promote (fraction == 0)
+                            std::numeric_limits<double>::min(),
+                            -std::numeric_limits<double>::min(),
+                            // smallest float-normal (cast to double) -> E8M0 code 0x01;
+                            // rounding-to-+Inf does not promote (fraction == 0)
+                            static_cast<double>(std::numeric_limits<float>::min()),
+                            -static_cast<double>(std::numeric_limits<float>::min()),
                             std::nan("1"),
                             -std::nan("1"),
                             std::numeric_limits<double>::infinity(),
@@ -259,9 +261,11 @@ TEST_CASE("Unit__hip_cvt_double_to_e8m0") {
   std::vector<unsigned char> out(exp.size());
 
   if (rounding == hipRoundPosInf) {
-    exp = {0x00U, 0x7EU, 0x7FU, 0x81U, 0x82U, 0x82U, 0x7EU, 0x7FU, 0x81U, 0x82U, 0x82U, 0xFE, 0xFE};
+    exp = {0x00U, 0x7EU, 0x7FU, 0x81U, 0x82U, 0x82U, 0x7EU, 0x7FU, 0x81U, 0x82U, 0x82U, 0xFE, 0xFE,
+           0x01U, 0x01U, 0x00U, 0x00U, 0x00U, 0x00U, 0x01U, 0x01U};
   } else {
-    exp = {0x00U, 0x7EU, 0x7EU, 0x81U, 0x81U, 0x82U, 0x7EU, 0x7EU, 0x81U, 0x81U, 0x82U, 0xFD, 0xFD};
+    exp = {0x00U, 0x7EU, 0x7EU, 0x81U, 0x81U, 0x82U, 0x7EU, 0x7EU, 0x81U, 0x81U, 0x82U, 0xFD, 0xFD,
+           0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x01U, 0x01U};
   }
   if (saturation == __HIP_NOSAT) {
     std::vector<unsigned char> exp_append = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
@@ -317,7 +321,7 @@ void device_cvt_e8m0_to_bf16raw(const std::vector<unsigned char>& in, std::vecto
   HIP_CHECK(hipMemcpy(out.data(), out_d, sizeof(float) * out.size(), hipMemcpyDeviceToHost));
 }
 
-TEST_CASE("Unit__hip_cvt_e8m0_to_bf16raw") {
+HIP_TEST_CASE(Unit__hip_cvt_e8m0_to_bf16raw) {
   bool run_on_host = GENERATE(true, false);
 
   std::vector<unsigned char> in = {0x00u, 0x7EU, 0x81U, 0x82U, 0xFF};
@@ -337,8 +341,7 @@ TEST_CASE("Unit__hip_cvt_e8m0_to_bf16raw") {
     if (std::isnan(exp[i])) {
       REQUIRE(std::isnan(out[i]));
     } else {
-      REQUIRE_THAT(out[i], Catch::WithinAbs(exp[i], 1e-6f) || Catch::WithinRel(exp[i], 1e-3f));
+      REQUIRE_THAT(out[i], Catch::Matchers::WithinAbs(exp[i], 1e-6f) || Catch::Matchers::WithinRel(exp[i], 1e-3f));
     }
   }
 }
-

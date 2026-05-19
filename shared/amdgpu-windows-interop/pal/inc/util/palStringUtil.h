@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -122,7 +122,7 @@ extern void CopyUtf16String(
 /// @param [in]  dstSize    The length of pDst in bytes.
 /// @param [in]  pBuffer    The arbitrary data blob to turn into a string.
 /// @param [in]  bufferSize The length of pBuffer in bytes.
-/// @param [in]  blockSize  How many bytes to combine into one hexidecimal big endian string.
+/// @param [in]  blockSize  How many bytes to combine into one hexadecimal big endian string.
 ///
 /// @returns The number of bytes from pBuffer that were formatted into pDst.
 extern size_t BytesToStr(
@@ -138,13 +138,8 @@ extern size_t BytesToStr(
 constexpr uint32 StringLength(
     const char* pString)
 {
-    // TODO: On C++23 we can replace this with consteval-if.
-    // TODO: When we upgrade PAL_CPLUSPLUS then we can rely that std::is_constant_evaluated() is always defined.
-#if defined(__cpp_lib_is_constant_evaluated)
+    // TODO: On C++23 we can make this consteval-if.
     if (std::is_constant_evaluated())
-#else
-    if (__builtin_is_constant_evaluated())
-#endif
     {
         uint32 length = 0;
         while (pString[length] != '\0')
@@ -158,19 +153,15 @@ constexpr uint32 StringLength(
         return uint32(std::strlen(pString));
     }
 }
+
 /// Returns the length of the string.
 ///
 /// @returns String length.
 constexpr uint32 StringLength(
     const wchar_t* pString)
 {
-    // TODO: On C++23 we can replace this with consteval-if.
-    // TODO: When we upgrade PAL_CPLUSPLUS then we can rely that std::is_constant_evaluated() is always defined.
-#if defined(__cpp_lib_is_constant_evaluated)
+    // TODO: On C++23 we can make this consteval-if.
     if (std::is_constant_evaluated())
-#else
-    if (__builtin_is_constant_evaluated())
-#endif
     {
         uint32 length = 0;
         while (pString[length] != L'\0')

@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "arithmetic_common.hh"
 #include "atomicAdd_negative_kernels_rtc.hh"
@@ -30,6 +14,52 @@ THE SOFTWARE.
  * @{
  * @ingroup AtomicsTest
  */
+
+// Helper function to run atomicAdd tests (single kernel)
+template <typename TestType>
+static void runAtomicAddTest() {
+  int warp_size = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  const auto cache_line_size = 128u;
+
+  for (auto current = 0; current < cmd_options.iterations; ++current) {
+    DYNAMIC_SECTION("Same address " << current) {
+      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kAdd>(1, sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Adjacent addresses " << current) {
+      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kAdd>(warp_size, sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Scattered addresses " << current) {
+      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kAdd>(warp_size, cache_line_size);
+    }
+  }
+}
+
+// Helper function to run atomicAdd tests (multiple kernels)
+template <typename TestType>
+static void runAtomicAddMultiKernelTest() {
+  int warp_size = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  const auto cache_line_size = 128u;
+
+  for (auto current = 0; current < cmd_options.iterations; ++current) {
+    DYNAMIC_SECTION("Same address " << current) {
+      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kAdd>(2, 1, sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Adjacent addresses " << current) {
+      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kAdd>(2, warp_size,
+                                                                      sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Scattered addresses " << current) {
+      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kAdd>(2, warp_size,
+                                                                      cache_line_size);
+    }
+  }
+}
 
 /**
  * Test Description
@@ -56,25 +86,13 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicAdd_Positive", "", int, unsigned int, unsigned long,
-                   unsigned long long, float, double) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  const auto cache_line_size = 128u;
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kAdd>(1, sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Adjacent addresses " << current) {
-      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kAdd>(warp_size, sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Scattered addresses " << current) {
-      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kAdd>(warp_size, cache_line_size);
-    }
-  }
+HIP_TEST_CASE(Unit_atomicAdd_Positive) {
+  SECTION("int") { runAtomicAddTest<int>(); }
+  SECTION("unsigned int") { runAtomicAddTest<unsigned int>(); }
+  SECTION("unsigned long") { runAtomicAddTest<unsigned long>(); }
+  SECTION("unsigned long long") { runAtomicAddTest<unsigned long long>(); }
+  SECTION("float") { runAtomicAddTest<float>(); }
+  SECTION("double") { runAtomicAddTest<double>(); }
 }
 
 /**
@@ -101,27 +119,13 @@ TEMPLATE_TEST_CASE("Unit_atomicAdd_Positive", "", int, unsigned int, unsigned lo
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicAdd_Positive_Multi_Kernel", "", int, unsigned int, unsigned long,
-                   unsigned long long, float, double) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  const auto cache_line_size = 128u;
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kAdd>(2, 1, sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Adjacent addresses " << current) {
-      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kAdd>(2, warp_size,
-                                                                      sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Scattered addresses " << current) {
-      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kAdd>(2, warp_size,
-                                                                      cache_line_size);
-    }
-  }
+HIP_TEST_CASE(Unit_atomicAdd_Positive_Multi_Kernel) {
+  SECTION("int") { runAtomicAddMultiKernelTest<int>(); }
+  SECTION("unsigned int") { runAtomicAddMultiKernelTest<unsigned int>(); }
+  SECTION("unsigned long") { runAtomicAddMultiKernelTest<unsigned long>(); }
+  SECTION("unsigned long long") { runAtomicAddMultiKernelTest<unsigned long long>(); }
+  SECTION("float") { runAtomicAddMultiKernelTest<float>(); }
+  SECTION("double") { runAtomicAddMultiKernelTest<double>(); }
 }
 
 /**
@@ -136,7 +140,7 @@ TEMPLATE_TEST_CASE("Unit_atomicAdd_Positive_Multi_Kernel", "", int, unsigned int
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_atomicAdd_Negative_Parameters_RTC") {
+HIP_TEST_CASE(Unit_atomicAdd_Negative_Parameters_RTC) {
   hiprtcProgram program{};
 
   const auto program_source = GENERATE(kAtomicAdd_int, kAtomicAdd_uint, kAtomicAdd_ulong,

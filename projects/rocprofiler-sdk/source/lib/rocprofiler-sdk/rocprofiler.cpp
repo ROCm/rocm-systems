@@ -93,7 +93,7 @@ ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL,
                           "A service depends on a newer version of KFD (amdgpu kernel driver)")
 ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_OUT_OF_RESOURCES,
                           "The given resources are insufficient to complete operation")
-ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_PROFILE_NOT_FOUND,
+ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_CONFIG_NOT_FOUND,
                           "Could not find counter profile")
 ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_AGENT_DISPATCH_CONFLICT,
                           "Cannot have both an agent counter collection and a dispatch counter "
@@ -118,6 +118,9 @@ ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_AGENT_ARCH_NOT_SUPPORTED,
                           "Agent HW architecture is not supported, no counter metrics found.")
 ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_PERMISSION_DENIED,
                           "Required permission (CAP_PERFMON) is not set, permission denied")
+ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_REGISTER_VERSION,
+                          "rocprofiler-register version is incompatible. "
+                          "Late-start profiling requires ROCm 7.0+")
 
 template <size_t Idx, size_t... Tail>
 const char*

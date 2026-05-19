@@ -1,25 +1,7 @@
-/**
- * MIT License
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
  *
- * Copyright (c) 2019 - 2025 Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * SPDX-License-Identifier: MIT
  */
 
 /**
@@ -1699,7 +1681,7 @@ __BF16_DEVICE_STATIC__ __hip_bfloat16 hexp(const __hip_bfloat16 h) {
  * \brief Calculate exponential 10 of bfloat16
  */
 __BF16_DEVICE_STATIC__ __hip_bfloat16 hexp10(const __hip_bfloat16 h) {
-  return __float2bfloat16(__ocml_exp10_f32(__bfloat162float(h)));
+  return __float2bfloat16(__builtin_elementwise_exp10(__bfloat162float(h)));
 }
 
 /**
@@ -1914,8 +1896,41 @@ __BF16_DEVICE_STATIC__ __hip_bfloat162 h2trunc(const __hip_bfloat162 h) {
 }
 
 /**
+ * \ingroup HIP_INTRINSIC_BFLOAT16_MATH
+ * \brief Atomic add bfloat16
+ */
+inline __device__ __hip_bfloat16 atomicAdd(__hip_bfloat16* address, __hip_bfloat16 value) {
+  return static_cast<__hip_bfloat16>(__scoped_atomic_fetch_add(
+      (__bf16*)address, static_cast<__bf16>(value), __ATOMIC_ACQ_REL, __MEMORY_SCOPE_DEVICE));
+}
+
+/**
  * \ingroup HIP_INTRINSIC_BFLOAT162_MATH
  * \brief Atomic add bfloat162
+ */
+__BF16_DEVICE_STATIC__ __hip_bfloat162 atomicAdd(__hip_bfloat162* address, __hip_bfloat162 value) {
+  typedef __bf16 __bf16_2 __attribute__((ext_vector_type(2)));
+  static_assert(sizeof(__bf16_2) == sizeof(unsigned int));
+
+  union {
+    __bf16_2 vec;
+    unsigned int u32;
+  } expected, desired;
+
+  unsigned int* atomic_ptr = (unsigned int*)address;
+  expected.u32 = __scoped_atomic_load_n(atomic_ptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+
+  do {
+    desired.vec = expected.vec + static_cast<__bf16_2>(value);
+  } while (!__scoped_atomic_compare_exchange_n(atomic_ptr, &expected.u32, desired.u32, 0,
+                                               __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE,
+                                               __MEMORY_SCOPE_DEVICE));
+  return static_cast<__hip_bfloat162>(expected.vec);
+}
+
+/**
+ * \ingroup HIP_INTRINSIC_BFLOAT162_MATH
+ * \brief Unsafe Atomic add bfloat162
  */
 __BF16_DEVICE_STATIC__ __hip_bfloat162 unsafeAtomicAdd(__hip_bfloat162* address,
                                                        __hip_bfloat162 value) {

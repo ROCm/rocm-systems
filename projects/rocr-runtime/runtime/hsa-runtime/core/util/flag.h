@@ -242,7 +242,7 @@ class Flag {
     image_print_srd_ = (var == "1") ? true : false;
 
     var = os::GetEnvVar("HSA_ENABLE_MWAITX");
-    enable_mwaitx_ = (var == "1") ? true : false;
+    enable_mwaitx_ = (var == "0") ? false : true;
 
     var = os::GetEnvVar("HSA_ENABLE_IPC_MODE_LEGACY");
     enable_ipc_mode_legacy_ = (var == "1") ? true : false;
@@ -297,7 +297,7 @@ class Flag {
 
     // This allows detecting if the dxg driver is loaded.
     var = os::GetEnvVar("HSA_ENABLE_DXG_DETECTION");
-    enable_dxg_detection_ = (var == "1") ? true : false;
+    enable_dxg_detection_ = (var == "0") ? false : true;
 
     var = os::GetEnvVar("HSA_CO_DMACOPY_SIZE");
     co_dmacopy_size_ = var.empty() ? 1024*1024 : atoi(var.c_str());
@@ -310,6 +310,10 @@ class Flag {
 
     core_dump_pattern_ = os::GetEnvVar("HSA_COREDUMP_PATTERN");
 
+    // This enables generation of lightweight gpu coredumps (Scratch & CWSR).
+    var = os::GetEnvVar("HSA_ENABLE_LIGHTWEIGHT_COREDUMP");
+    lightweight_core_dump_enable_ = (var == "1");
+
     // This limits the maximum number of hardware queues that can be created per 
     // priority level for counted queues on every GPU agent. By default, the limit is set to 4.
     var = os::GetEnvVar("GPU_MAX_HW_QUEUES");
@@ -319,6 +323,11 @@ class Flag {
     // hsa_amd_counted_queue_acquire API. If not set, default queue size is set to 16384.
     var = os::GetEnvVar("HSA_COUNTED_QUEUE_SIZE");
     counted_queue_size_ = var.empty() ? DEFAULT_COUNTED_QUEUE_SIZE : atoi(var.c_str());
+
+    // HSA_SDMA_LINEAR_B2B: 1=force B2B, 0=force broadcast, unset=auto (size threshold)
+    var = os::GetEnvVar("HSA_SDMA_LINEAR_B2B");
+    sdma_linear_b2b_ = (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
+
   }
 
   void parse_masks(uint32_t maxGpu, uint32_t maxCU) {
@@ -455,6 +464,8 @@ class Flag {
 
   bool enable_dxg_detection() const { return enable_dxg_detection_; }
 
+  SDMA_OVERRIDE sdma_linear_b2b() const { return sdma_linear_b2b_; }
+
   [[nodiscard]]
   bool core_dump_disable() const { return core_dump_disable_; }
 
@@ -465,6 +476,11 @@ class Flag {
   [[nodiscard]]
   const std::string& core_dump_pattern() const {
                                          return core_dump_pattern_; }
+
+  [[nodiscard]]
+  bool lightweight_core_dump_enable() const { 
+    return lightweight_core_dump_enable_; 
+  } 
 
   void set_sdma(bool peer_sdma, bool sdma_gang) {
     enable_peer_sdma_ = peer_sdma ? SDMA_ENABLE : SDMA_DISABLE;
@@ -489,6 +505,8 @@ class Flag {
   void disable_dev_mem_queue_buf() { dev_mem_queue_buf_ = false; }
 
   void disable_sdma_hdp_flush() { enable_sdma_hdp_flush_ = false; }
+
+  void set_disable_tool_register(bool disable) { disable_tool_register_ = disable; }
 
   private:
   bool check_flat_scratch_;
@@ -525,6 +543,7 @@ class Flag {
   bool enable_3d_swizzle_ = false;
   bool enable_dtif_;
   bool enable_dxg_detection_;
+  SDMA_OVERRIDE sdma_linear_b2b_ = SDMA_DEFAULT;
 
   SDMA_OVERRIDE enable_sdma_;
   SDMA_OVERRIDE enable_peer_sdma_;
@@ -561,6 +580,7 @@ class Flag {
   bool core_dump_disable_ = false;
   bool enable_core_dump_progress_ = false;
   std::string core_dump_pattern_;
+  bool lightweight_core_dump_enable_ = false;
 
   uint32_t cp_queues_limit_;
   size_t counted_queue_size_;

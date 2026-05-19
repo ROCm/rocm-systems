@@ -24,7 +24,7 @@ size_t GpuMemory::CalcChunkNumbers(gpusize size) {
 gpusize GpuMemory::AdjustSize(gpusize size) const {
   const auto &device_info = device_->DeviceInfo();
 
-  if (device_info.enable_big_page_alignment && desc_.domain == thunk_proxy::kLocal) {
+  if (device_info.enable_big_page_alignment && desc_.domain == Wkmi::kLocal) {
     uint32_t alignment = device_info.big_page_alignment_size;
     // BigPage is only supported for allocations > bigPageMinAlignment.
     // Also, if bigPageMinAlignment == 0, BigPage optimization is not supported per KMD.
@@ -79,7 +79,7 @@ ErrorCode GpuMemory::Init(const GpuMemoryCreateInfo &create_info) {
      they share same creation parameters, so forcing all vram allocations to
      sharable to support IPC mem */
   if (create_info.flags.interprocess ||
-      desc_.domain == thunk_proxy::AllocDomain::kLocal)
+      desc_.domain == Wkmi::AllocDomain::kLocal)
     desc_.flags.is_shared = true;
 
   desc_.flags.is_locked = create_info.flags.locked;
@@ -285,7 +285,7 @@ ErrorCode GpuMemory::ReserveGpuVirtualAddress(gpusize base_virt_addr, gpusize si
   ErrorCode status;
   gpusize gpu_virt_addr = 0;
   if ((desc_.flags.is_sysmem_exporter || desc_.flags.is_imported_sys_memfd)
-      && desc_.domain == thunk_proxy::AllocDomain::kSystem) {
+      && desc_.domain == Wkmi::AllocDomain::kSystem) {
     int mfd = (mem_fd_ > -1)? mem_fd_ : -1;
     status = dxg_runtime->ReserveIPCSysMem(Size(), &gpu_virt_addr, desc_.alignment, mfd, desc_.flags.is_locked);
     if (status == ErrorCode::Success)
@@ -323,7 +323,7 @@ ErrorCode GpuMemory::CreatePhysicalMemory() {
   int priv_drv_data_size;
   int priv_alloc_data_size;
 
-  thunk_proxy::GetAllocPrivDataSize(&priv_drv_data_size, &priv_alloc_data_size);
+  Wkmi::GetAllocPrivDataSize(&priv_drv_data_size, &priv_alloc_data_size);
   int total_size = priv_drv_data_size +
     num_allocations * priv_alloc_data_size +
     num_allocations * sizeof(D3DDDI_ALLOCATIONINFO2);
@@ -332,7 +332,7 @@ ErrorCode GpuMemory::CreatePhysicalMemory() {
     return ErrorCode::OutOfMemory;
 
   memset(priv_drv_data, 0, total_size);
-  thunk_proxy::FillinAllocPrivDrvData(priv_drv_data, priv_alloc_data_size);
+  Wkmi::FillinAllocPrivDrvData(priv_drv_data, priv_alloc_data_size);
 
   priv_alloc_data = static_cast<unsigned char*>(priv_drv_data) + priv_drv_data_size;
   auto alloc_info = reinterpret_cast<D3DDDI_ALLOCATIONINFO2*>(
@@ -349,11 +349,11 @@ ErrorCode GpuMemory::CreatePhysicalMemory() {
     size_t block_size = std::min(size, WDDMDevice::GpuMemoryChunkSize);
 
     if (IsUserMemory() || IsSystem()) {
-      thunk_proxy::SetAllocationInfo(priv_data, block_size, desc_.domain, 0, desc_.mem_flags, desc_.engine_flag, device_info);
+      Wkmi::SetAllocationInfo(priv_data, block_size, desc_.domain, 0, desc_.mem_flags, desc_.engine_flag, device_info);
       alloc_info[i].pSystemMem = static_cast<void *>(cpu_addr);
       cpu_addr += block_size;
     } else {
-      thunk_proxy::SetAllocationInfo(priv_data, block_size, desc_.domain, addr, desc_.mem_flags, desc_.engine_flag, device_info);
+      Wkmi::SetAllocationInfo(priv_data, block_size, desc_.domain, addr, desc_.mem_flags, desc_.engine_flag, device_info);
     }
 
     size -= block_size;
@@ -450,7 +450,6 @@ ErrorCode GpuMemory::Evict() {
 ErrorCode GpuMemory::OpenResourceFromKMTHandle(D3DKMT_HANDLE buffer_handle,
                                                D3DKMT_HANDLE device_handle,
                                                D3DKMT_OPENRESOURCE** out_open_resource) {
-#if defined(WIN32)
   D3DKMT_QUERYRESOURCEINFO query_args{};
   query_args.hDevice = device_handle;
   query_args.hGlobalShare = buffer_handle;
@@ -464,7 +463,7 @@ ErrorCode GpuMemory::OpenResourceFromKMTHandle(D3DKMT_HANDLE buffer_handle,
   const size_t data_size = sizeof(D3DKMT_OPENRESOURCE) + query_args.PrivateRuntimeDataSize +
       query_args.TotalPrivateDriverDataSize + query_args.ResourcePrivateDriverDataSize +
       sizeof(D3DDDI_OPENALLOCATIONINFO) * query_args.NumAllocations +
-      thunk_proxy::GetProxyResourceInfoSize();  // for extra room for pTotalPrivateDriverDataBuffer
+      Wkmi::GetProxyResourceInfoSize();  // for extra room for pTotalPrivateDriverDataBuffer
   D3DKMT_OPENRESOURCE* open_resource = reinterpret_cast<D3DKMT_OPENRESOURCE*>(calloc(1, data_size));
 
   if (open_resource == nullptr) {
@@ -494,7 +493,7 @@ ErrorCode GpuMemory::OpenResourceFromKMTHandle(D3DKMT_HANDLE buffer_handle,
 
     // NOTE: We need to trick the function calls into allocating enough room for the
     // proxy resource info structure, which is tacked onto the end of pTotalPrivateDriverDataBuffer.
-    offset += thunk_proxy::GetProxyResourceInfoSize();
+    offset += Wkmi::GetProxyResourceInfoSize();
   }
 
   if (query_args.ResourcePrivateDriverDataSize != 0) {
@@ -513,10 +512,6 @@ ErrorCode GpuMemory::OpenResourceFromKMTHandle(D3DKMT_HANDLE buffer_handle,
   }
 
   return ret;
-#else
-  assert(!"Unimplemented!");
-  return ErrorCode::UnSupported;
-#endif
 }
 
 ErrorCode GpuMemory::OpenResourceFromNTHandle(HANDLE buffer_handle, D3DKMT_HANDLE device_handle,
@@ -605,7 +600,7 @@ ErrorCode GpuMemory::ImportPhysicalFD(const GpuMemoryCreateInfo& create_info, gp
 
   desc_.client_size = create_info.size;
   desc_.size = AdjustSize(desc_.client_size);
-  desc_.domain = thunk_proxy::AllocDomain::kSystem;
+  desc_.domain = Wkmi::AllocDomain::kSystem;
   desc_.adapter_luid = device_->GetLuid();
   desc_.alignment = 0x1000;
   desc_.mem_flags = create_info.mem_flags;
@@ -650,143 +645,100 @@ ErrorCode GpuMemory::ImportPhysicalFD(const GpuMemoryCreateInfo& create_info, gp
   return code;
 }
 
-ErrorCode GpuMemory::ImportPhysicalKMTHandle(const GpuMemoryCreateInfo& create_info,
-                                             gpusize* gpu_addr) {
-#if defined(WIN32)                                            
-  D3DKMT_OPENRESOURCE* open_resource = nullptr;
-  ErrorCode ret = OpenResourceFromKMTHandle(static_cast<D3DKMT_HANDLE>(create_info.dmabuf_fd),
-                                            device_->DeviceHandle(), &open_resource);
-  auto guard_data = rocr::MakeScopeGuard([open_resource]() { free(open_resource); });
-
-  if (ret != ErrorCode::Success) {
-    pr_err("open resource failed %d\n", static_cast<int>(ret));
-    return ErrorCode::InvalidateParams;
-  }
-
+ErrorCode GpuMemory::ImportPhysicalAllocHandle(const GpuMemoryCreateInfo& create_info,
+                                               gpusize* gpu_addr) {
+  ErrorCode ret = ErrorCode::Success;
   SharedHandleInfo shared_info{};
   SharedHandleInfo* shared_info_ptr = &shared_info;
-  if (open_resource->PrivateRuntimeDataSize > 0)
-    shared_info_ptr = static_cast<SharedHandleInfo*>(open_resource->pPrivateRuntimeData);
+  auto finalize_import = [&](SharedHandleInfo* shared_info_ptr) {
+    desc_.size = shared_info_ptr->size;
+    desc_.client_size = shared_info_ptr->client_size;
+    desc_.domain = shared_info_ptr->domain;
+    desc_.flags.reserved = shared_info_ptr->flags;
+    desc_.mem_flags = shared_info_ptr->mem_flags;
+    desc_.adapter_luid = shared_info_ptr->adapter_luid;
+    is_phymem_created = 1;
 
-  if (open_resource->NumAllocations > 1)
-    alloc_handles_ptr_ = new WinAllocationHandle[open_resource->NumAllocations];
+    desc_.flags.is_va_required = create_info.flags.alloc_va;
+    if (desc_.flags.is_va_required) {
+      desc_.flags.is_imported_vram_ipc = 1;
+      ret = ReserveGpuVirtualAddress(create_info.va_hint, desc_.size, create_info.alignment);
+      if (ret != ErrorCode::Success)
+        pr_err("failed to allocate svm range, error:%d\n", static_cast<int>(ret));
 
-  // Update shared_info_ptr if OpenResourceFromNtHandle skips populating it.
-  if (open_resource->PrivateRuntimeDataSize == 0) {
-    for (auto alloc_index = 0U; alloc_index < open_resource->NumAllocations; alloc_index++) {
-      const auto* const pPrivateDriverData =
-          open_resource->pOpenAllocationInfo[alloc_index].pPrivateDriverData;
-      auto alloc_size = thunk_proxy::GetMemoryAllocationSize(pPrivateDriverData);
-      shared_info_ptr->size += alloc_size;
-      shared_info_ptr->client_size += alloc_size;
+      return ret;
     }
-  }
 
-  if (shared_info_ptr->pid == dxg_runtime->parent_pid && create_info.flags.alloc_va &&
-      IsSameAdapter(shared_info_ptr->adapter_luid) && shared_info_ptr->gpu_addr) {
-    pr_info(
-        "import from same device and same process, va is required. "
-        "a buffer can't be mapped to 2 va. delete the imported buffer, use the existing one.\n");
-    if (gpu_addr) *gpu_addr = shared_info_ptr->gpu_addr;
-    return ErrorCode::SameProcessSameDevice;
-  }
-
-  desc_.size = shared_info_ptr->size;
-  desc_.client_size = shared_info_ptr->client_size;
-  desc_.domain = shared_info_ptr->domain;
-  desc_.flags.reserved = shared_info_ptr->flags;
-  desc_.mem_flags = shared_info_ptr->mem_flags;
-  desc_.adapter_luid = shared_info_ptr->adapter_luid;
-  resource_ = open_resource->hResource;
-  num_allocations_ = open_resource->NumAllocations;
-  for (auto i = 0; i < num_allocations_; i++)
-    alloc_handles_ptr_[i] = open_resource->pOpenAllocationInfo[i].hAllocation;
-
-  desc_.flags.is_va_required = create_info.flags.alloc_va;
-  if (desc_.flags.is_va_required) {
-    desc_.flags.is_imported_vram_ipc = 1;
-    ret = ReserveGpuVirtualAddress(create_info.va_hint, desc_.size, create_info.alignment);
-    if (ret != ErrorCode::Success)
-      pr_err("failed to allocate svm range, error:%d\n", static_cast<int>(ret));
-
-    return ret;
-  } else {
     desc_.flags.is_imported_vram_vmem = 1;
     return dxg_runtime->HandleApertureAlloc(desc_.size, &desc_.handle_ape_addr);
-  }
-#else
-  assert(!"Unimplemented!");
-  return ErrorCode::UnSupported;
-#endif
-}
+  };
 
-ErrorCode GpuMemory::ImportPhysicalNTHandle(const GpuMemoryCreateInfo& create_info,
-                                            gpusize* gpu_addr) {
-  D3DKMT_OPENRESOURCEFROMNTHANDLE* open_resource = nullptr;
-  ErrorCode ret = OpenResourceFromNTHandle(reinterpret_cast<HANDLE>(create_info.dmabuf_fd),
-                                           device_->DeviceHandle(), &open_resource);
-  auto guard_data = rocr::MakeScopeGuard([open_resource]() { free(open_resource); });
+  if (create_info.flags.kmt_handle_importer) {
+    D3DKMT_OPENRESOURCE* open_resource = nullptr;
+    ret = OpenResourceFromKMTHandle(static_cast<D3DKMT_HANDLE>(create_info.dmabuf_fd),
+                                    device_->DeviceHandle(), &open_resource);
+    auto guard_data = rocr::MakeScopeGuard([open_resource]() { free(open_resource); });
 
-  if (ret != ErrorCode::Success) {
-    pr_err("open resource failed %d\n", static_cast<int>(ret));
-    return ErrorCode::InvalidateParams;
-  }
-
-  SharedHandleInfo shared_info{};
-  SharedHandleInfo* shared_info_ptr = &shared_info;
-  if (open_resource->PrivateRuntimeDataSize > 0)
-    shared_info_ptr = static_cast<SharedHandleInfo*>(open_resource->pPrivateRuntimeData);
-
-  if (open_resource->NumAllocations > 1)
-    alloc_handles_ptr_ = new WinAllocationHandle[open_resource->NumAllocations];
-
-  // Update shared_info if OpenResourceFromNtHandle skips populating it.
-  if (open_resource->PrivateRuntimeDataSize == 0) {
-#if defined(WIN32)
-    for (auto alloc_index = 0U; alloc_index < open_resource->NumAllocations; alloc_index++) {
-      const auto* const pPrivateDriverData =
-          open_resource->pOpenAllocationInfo2[alloc_index].pPrivateDriverData;
-      auto alloc_size = thunk_proxy::GetMemoryAllocationSize(pPrivateDriverData);
-      shared_info_ptr->size += alloc_size;
-      shared_info_ptr->client_size += alloc_size;
+    if (ret != ErrorCode::Success) {
+      pr_err("open resource failed %d\n", static_cast<int>(ret));
+      return ErrorCode::InvalidateParams;
     }
-#else
-    assert(!"Unimplemented!");
-#endif
-  }
 
-  if (shared_info_ptr->pid == dxg_runtime->parent_pid && create_info.flags.alloc_va &&
-      IsSameAdapter(shared_info_ptr->adapter_luid) && shared_info_ptr->gpu_addr) {
-    pr_info(
-        "import from same device and same process, va is required. "
-        "a buffer can't be mapped to 2 va. delete the imported buffer, use the existing one.\n");
-    if (gpu_addr) *gpu_addr = shared_info_ptr->gpu_addr;
-    return ErrorCode::SameProcessSameDevice;
-  }
+    if (open_resource->PrivateRuntimeDataSize > 0)
+      shared_info = *static_cast<SharedHandleInfo*>(open_resource->pPrivateRuntimeData);
 
-  desc_.size = shared_info_ptr->size;
-  desc_.client_size = shared_info_ptr->client_size;
-  desc_.domain = shared_info_ptr->domain;
-  desc_.flags.reserved = shared_info_ptr->flags;
-  desc_.mem_flags = shared_info_ptr->mem_flags;
-  desc_.adapter_luid = shared_info_ptr->adapter_luid;
-  resource_ = open_resource->hResource;
-  num_allocations_ = open_resource->NumAllocations;
-  for (auto i = 0; i < num_allocations_; i++)
-    alloc_handles_ptr_[i] = open_resource->pOpenAllocationInfo2[i].hAllocation;
+    if (open_resource->NumAllocations > 1)
+      alloc_handles_ptr_ = new WinAllocationHandle[open_resource->NumAllocations];
 
-  desc_.flags.is_va_required = create_info.flags.alloc_va;
-  if (desc_.flags.is_va_required) {
-    desc_.flags.is_imported_vram_ipc = 1;
-    ret = ReserveGpuVirtualAddress(create_info.va_hint, desc_.size, create_info.alignment);
-    if (ret != ErrorCode::Success)
-      pr_err("failed to allocate svm range, error:%d\n", static_cast<int>(ret));
+    // Update shared_info if OpenResourceFromKMTHandle skips populating it.
+    if (open_resource->PrivateRuntimeDataSize == 0) {
+      for (auto alloc_index = 0U; alloc_index < open_resource->NumAllocations; alloc_index++) {
+        const auto* const pPrivateDriverData =
+            open_resource->pOpenAllocationInfo[alloc_index].pPrivateDriverData;
+        auto alloc_size = Wkmi::GetMemoryAllocationSize(pPrivateDriverData);
+        shared_info_ptr->size += alloc_size;
+        shared_info_ptr->client_size += alloc_size;
+      }
+    }
 
-    return ret;
+    resource_ = open_resource->hResource;
+    num_allocations_ = open_resource->NumAllocations;
+    for (auto i = 0U; i < num_allocations_; i++)
+      alloc_handles_ptr_[i] = open_resource->pOpenAllocationInfo[i].hAllocation;
   } else {
-    desc_.flags.is_imported_vram_vmem = 1;
-    return dxg_runtime->HandleApertureAlloc(desc_.size, &desc_.handle_ape_addr);
+    D3DKMT_OPENRESOURCEFROMNTHANDLE* open_resource = nullptr;
+    ret = OpenResourceFromNTHandle(reinterpret_cast<HANDLE>(create_info.dmabuf_fd),
+                                   device_->DeviceHandle(), &open_resource);
+    auto guard_data = rocr::MakeScopeGuard([open_resource]() { free(open_resource); });
+
+    if (ret != ErrorCode::Success) {
+      pr_err("open resource failed %d\n", static_cast<int>(ret));
+      return ErrorCode::InvalidateParams;
+    }
+
+    if (open_resource->PrivateRuntimeDataSize > 0)
+      shared_info = *static_cast<SharedHandleInfo*>(open_resource->pPrivateRuntimeData);
+
+    if (open_resource->NumAllocations > 1)
+      alloc_handles_ptr_ = new WinAllocationHandle[open_resource->NumAllocations];
+
+    // Update shared_info if OpenResourceFromNtHandle skips populating it.
+    if (open_resource->PrivateRuntimeDataSize == 0) {
+      for (auto alloc_index = 0U; alloc_index < open_resource->NumAllocations; alloc_index++) {
+        const auto* const pPrivateDriverData =
+            open_resource->pOpenAllocationInfo2[alloc_index].pPrivateDriverData;
+        auto alloc_size = Wkmi::GetMemoryAllocationSize(pPrivateDriverData);
+        shared_info_ptr->size += alloc_size;
+        shared_info_ptr->client_size += alloc_size;
+      }
+    }
+
+    resource_ = open_resource->hResource;
+    num_allocations_ = open_resource->NumAllocations;
+    for (auto i = 0U; i < num_allocations_; i++)
+      alloc_handles_ptr_[i] = open_resource->pOpenAllocationInfo2[i].hAllocation;
   }
+  return finalize_import(shared_info_ptr);
 }
 
 ErrorCode GpuMemory::ImportPhysicalHandle(const GpuMemoryCreateInfo& create_info,
@@ -795,9 +747,10 @@ ErrorCode GpuMemory::ImportPhysicalHandle(const GpuMemoryCreateInfo& create_info
 
   if (dmabuf_fd == 0 || dmabuf_fd == INVALID_DMABUF_FD) return ErrorCode::InvalidateParams;
 
+  desc_.adapter_luid = device_->GetLuid();
+
   if (create_info.flags.sysmem_ipc_sig_importer) return ImportPhysicalFD(create_info, gpu_addr);
-  if (create_info.flags.kmt_handle_importer) return ImportPhysicalKMTHandle(create_info, gpu_addr);
-  return ImportPhysicalNTHandle(create_info, gpu_addr);
+  return ImportPhysicalAllocHandle(create_info, gpu_addr);
 }
 
 } // namespace thunk

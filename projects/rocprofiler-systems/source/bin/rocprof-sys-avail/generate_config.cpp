@@ -1,30 +1,14 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "generate_config.hpp"
 #include "common.hpp"
 #include "defines.hpp"
 #include "info_type.hpp"
 
+#include "common/json_config.hpp"
+
+#include <nlohmann/json.hpp>
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/mpl/policy.hpp>
 #include <timemory/settings.hpp>
@@ -39,6 +23,7 @@
 
 #include <cstddef>
 #include <cstdlib>
+#include <fstream>
 #include <sstream>
 #include <string>
 
@@ -54,17 +39,18 @@ namespace
 struct custom_setting_serializer
 {
     static std::array<bool, TOTAL> options;
+    static const format_options*   fmt;
 };
 
 template <typename Tp>
 bool
-ignore_setting(const Tp& _v)
+ignore_setting(const Tp& _v, const format_options& fmt_opts)
 {
     if(_v->get_hidden()) return true;
     if(exclude_setting(_v->get_env_name())) return true;
     if(_v->get_config_updated() || _v->get_environ_updated()) return false;
     if(!is_selected(_v->get_env_name()) && !is_selected(_v->get_name())) return true;
-    if(available_only && !_v->get_enabled()) return true;
+    if(fmt_opts.available_only && !_v->get_enabled()) return true;
     if(!category_view.empty())
     {
         bool _found = false;
@@ -83,7 +69,7 @@ ignore_setting(const Tp& _v)
        category_view.count("settings::deprecated") == 0 &&
        _v->get_categories().count("deprecated") > 0)
         return true;
-    if(!print_advanced && category_view.count("advanced") == 0 &&
+    if(!fmt_opts.print_advanced && category_view.count("advanced") == 0 &&
        category_view.count("settings::advanced") == 0 &&
        _v->get_categories().count("advanced") > 0)
         return true;
@@ -92,6 +78,7 @@ ignore_setting(const Tp& _v)
 }  // namespace
 
 std::array<bool, TOTAL> custom_setting_serializer::options = { false };
+const format_options*   custom_setting_serializer::fmt     = nullptr;
 
 namespace tim
 {
@@ -120,7 +107,7 @@ struct setting_serialization<tsettings<Tp>, custom_setting_serializer>
         static_assert(concepts::is_output_archive<ArchiveT>::value,
                       "Requires an output archive");
 
-        if(ignore_setting(&_val)) return;
+        if(ignore_setting(&_val, *custom_setting_serializer::fmt)) return;
 
         auto _save = std::shared_ptr<value_type>{};
         if constexpr(concepts::is_string_type<Tp>::value)
@@ -134,7 +121,7 @@ struct setting_serialization<tsettings<Tp>, custom_setting_serializer>
             }
         }
 
-        if(all_info)
+        if(custom_setting_serializer::fmt->all_info)
         {
             _ar(cereal::make_nvp(_val.get_env_name().c_str(), _val));
         }
@@ -187,9 +174,10 @@ update_choices(const std::shared_ptr<settings>&);
 
 void
 generate_config(std::string _config_file, const std::set<std::string>& _config_fmts,
-                const std::array<bool, TOTAL>& _options)
+                const std::array<bool, TOTAL>& _options, const format_options& fmt_opts)
 {
     custom_setting_serializer::options = _options;
+    custom_setting_serializer::fmt     = &fmt_opts;
 
     auto _settings = tim::settings::shared_instance();
     tim::settings::push();
@@ -254,12 +242,12 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
     };
 
     auto _nout = 0;
-    auto _open = [&_nout](std::ofstream& _ofs, const std::string& _fname,
-                          const std::string& _type) -> std::ofstream& {
+    auto _open = [&_nout, &fmt_opts](std::ofstream& _ofs, const std::string& _fname,
+                                     const std::string& _type) -> std::ofstream& {
         ++_nout;
         if(file_exists(_fname))
         {
-            if(force_config)
+            if(fmt_opts.force_config)
             {
                 if(settings::verbose() >= 1)
                     std::cout << "[rocprof-sys-avail] File '" << _fname
@@ -291,13 +279,39 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
 
     if(_fmts.count("json") > 0)
     {
-        std::stringstream _ss{};
-        output_archive<cereal::PrettyJSONOutputArchive>::indent_length() = 4;
-        _serialize(output_archive<cereal::PrettyJSONOutputArchive>::get(_ss));
+        // JSON schema output includes all ROCPROFSYS_* settings regardless of
+        // --filter, --categories, or --advanced flags. This is intentional: the
+        // schema has a fixed hierarchical structure and is designed for reuse
+        // with --preset, so partial exports would produce incomplete configs.
+        std::map<std::string, std::string> env_map;
+        for(const auto& itr : *_settings)
+        {
+            if(exclude_setting(itr.second->get_env_name())) continue;
+            if(itr.second->get_hidden()) continue;
+
+            const auto& env_name = itr.second->get_env_name();
+            if(env_name.find("ROCPROFSYS_") != 0) continue;
+
+            // Include all vars, even empty ones — the schema function
+            // handles empty values appropriately (e.g., empty string fields
+            // are still valid and indicate the setting exists).
+            env_map[env_name] = itr.second->as_string();
+        }
+
+        // Convert to hierarchical preset JSON schema (compatible with --preset)
+        auto preset_json = rocprofsys::json_config::env_vars_to_json_schema(env_map);
+
+        // Add metadata
+        auto preset_name = fmt_opts.preset_name;
+        if(preset_name.empty()) preset_name = _config_file;
+        preset_json["metadata"]["name"] = preset_name;
+        if(!fmt_opts.preset_description.empty())
+            preset_json["metadata"]["description"] = fmt_opts.preset_description;
+
         auto _fname = settings::compose_output_filename(_config_file, ".json", false, -1,
                                                         true, _output_dir);
         std::ofstream ofs{};
-        _open(ofs, _fname, "JSON") << _ss.str() << "\n";
+        _open(ofs, _fname, "JSON") << preset_json.dump(4) << "\n";
     }
 
     if(_fmts.count("xml") > 0)
@@ -314,7 +328,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
     if(_fmts.count("txt") > 0 || _fmts.count("cfg") > 0 || _nout == 0)
     {
         std::stringstream _ss{};
-        size_t            _w = min_width;
+        size_t            _w = fmt_opts.min_width;
 
         std::vector<std::shared_ptr<tim::vsettings>> _data{};
         for(const auto& itr : *_settings)
@@ -322,11 +336,11 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
             if(exclude_setting(itr.second->get_env_name())) continue;
             for(const auto& citr : itr.second->get_categories())
                 if(citr == "deprecated") continue;
-            if(ignore_setting(itr.second)) continue;
+            if(ignore_setting(itr.second, fmt_opts)) continue;
             _data.emplace_back(itr.second);
         }
 
-        if(alphabetical)
+        if(fmt_opts.alphabetical)
             std::sort(_data.begin(), _data.end(), [](auto _lhs, auto _rhs) {
                 return _lhs->get_name() < _rhs->get_name();
             });
@@ -342,7 +356,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
                     { "ROCPROFSYS_CONFIG", "ROCPROFSYS_MODE", "ROCPROFSYS_TRACE",
                       "ROCPROFSYS_TRACE_LEGACY", "ROCPROFSYS_PROFILE",
                       "ROCPROFSYS_USE_SAMPLING", "ROCPROFSYS_USE_PROCESS_SAMPLING",
-                      "ROCPROFSYS_USE_ROCM", "ROCPROFSYS_USE_AMD_SMI",
+                      "ROCPROFSYS_USE_AMD_SMI", "ROCPROFSYS_USE_AINIC",
                       "ROCPROFSYS_USE_KOKKOSP", "ROCPROFSYS_USE_OMPT", "ROCPROFSYS_USE",
                       "ROCPROFSYS_OUTPUT" })
                 {
@@ -376,12 +390,12 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
         {
             if(exclude_setting(itr->get_env_name())) continue;
 
-            auto _has_info =
-                (all_info || _options[DESC] || _options[CATEGORY] || _options[VAL]);
+            auto _has_info = (fmt_opts.all_info || _options[DESC] || _options[CATEGORY] ||
+                              _options[VAL]);
 
             if(_has_info) _ss << "\n# name:\n#    " << itr->get_name() << "\n#\n";
 
-            if(_options[DESC] || all_info)
+            if(_options[DESC] || fmt_opts.all_info)
             {
                 _ss << "# description:\n";
                 auto              _desc = tim::delimit(itr->get_description(), " \n");
@@ -400,14 +414,14 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
                     _write(iitr);
                 _ss << _line.str() << "\n#\n";
             }
-            if(_options[CATEGORY] || all_info)
+            if(_options[CATEGORY] || fmt_opts.all_info)
             {
                 _ss << "# categories:\n";
                 for(const auto& iitr : itr->get_categories())
                     _ss << "#    " << iitr << "\n";
                 _ss << "#\n";
             }
-            if((_options[VAL] || all_info) && !itr->get_choices().empty())
+            if((_options[VAL] || fmt_opts.all_info) && !itr->get_choices().empty())
             {
                 _ss << "# choices:\n";
                 for(const auto& iitr : itr->get_choices())
@@ -418,7 +432,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
             _ss << std::left << std::setw(_w + 10) << itr->get_env_name() << " = ";
             auto _v = itr->as_string();
             if(itr->get_name() == "config_file") _v = {};
-            if(!_v.empty() && expand_keys && itr->get_name() != "time_format")
+            if(!_v.empty() && fmt_opts.expand_keys && itr->get_name() != "time_format")
                 _v = settings::format(_v, _settings->get_tag());
             _ss << _v << "\n";
         }

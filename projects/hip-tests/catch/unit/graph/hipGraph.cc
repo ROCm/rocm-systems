@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
 Testcase Scenarios :
@@ -29,6 +16,7 @@ Testcase Scenarios :
 
 #define THREADS_PER_BLOCK 512
 #define GRAPH_LAUNCH_ITERATIONS 1000
+#define GRAPH_LAUNCH_ITERS_QUICK 10
 
 static __global__ void reduce(float* d_in, double* d_out) {
   int myId = threadIdx.x + blockDim.x * blockIdx.x;
@@ -80,7 +68,7 @@ static void hipWithoutGraphs(float* inputVec_h, float* inputVec_d, double* outpu
   HIP_CHECK(hipEventCreate(&memsetEvent1));
   HIP_CHECK(hipEventCreate(&memsetEvent2));
   auto start = std::chrono::high_resolution_clock::now();
-  for (int i = 0; i < GRAPH_LAUNCH_ITERATIONS; i++) {
+  for (int i = 0, _iters = isQuickLevel() ? GRAPH_LAUNCH_ITERS_QUICK : GRAPH_LAUNCH_ITERATIONS; i < _iters; i++) {
     HIP_CHECK(hipMemcpyAsync(inputVec_d, inputVec_h, sizeof(float) * inputSize, hipMemcpyDefault,
                              stream1));
     HIP_CHECK(hipMemsetAsync(outputVec_d, 0, sizeof(double) * numOfBlocks, stream2));
@@ -165,7 +153,7 @@ static void hipGraphsUsingStreamCapture(float* inputVec_h, float* inputVec_d, do
 
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
   auto start1 = std::chrono::high_resolution_clock::now();
-  for (int i = 0; i < GRAPH_LAUNCH_ITERATIONS; i++) {
+  for (int i = 0, _iters = isQuickLevel() ? GRAPH_LAUNCH_ITERS_QUICK : GRAPH_LAUNCH_ITERATIONS; i < _iters; i++) {
     HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
   }
   HIP_CHECK(hipStreamSynchronize(streamForGraph));
@@ -184,6 +172,9 @@ static void hipGraphsUsingStreamCapture(float* inputVec_h, float* inputVec_d, do
   HIP_CHECK(hipStreamDestroy(stream2));
   HIP_CHECK(hipStreamDestroy(stream3));
   HIP_CHECK(hipStreamDestroy(streamForGraph));
+  HIP_CHECK(hipEventDestroy(forkStreamEvent));
+  HIP_CHECK(hipEventDestroy(memsetEvent1));
+  HIP_CHECK(hipEventDestroy(memsetEvent2));
   double result_h_cpu = 0.0;
   for (size_t i = 0; i < inputSize; i++) {
     result_h_cpu += inputVec_h[i];
@@ -268,7 +259,7 @@ static void hipGraphsManual(float* inputVec_h, float* inputVec_d, double* output
       << numNodes);
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
   auto start1 = std::chrono::high_resolution_clock::now();
-  for (int i = 0; i < GRAPH_LAUNCH_ITERATIONS; i++) {
+  for (int i = 0, _iters = isQuickLevel() ? GRAPH_LAUNCH_ITERS_QUICK : GRAPH_LAUNCH_ITERATIONS; i < _iters; i++) {
     HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
   }
   HIP_CHECK(hipStreamSynchronize(streamForGraph));
@@ -297,7 +288,7 @@ static void hipGraphsManual(float* inputVec_h, float* inputVec_d, double* output
  * Tests basic functionality of hipGraph APIs by
  * Execution Without HIPGraphs, Manual HIPGraph, HIPGraphs Using StreamCapture.
  */
-TEST_CASE("Unit_hipGraph_BasicFunctional") {
+HIP_TEST_CASE(Unit_hipGraph_BasicFunctional) {
   constexpr size_t size = 1 << 12;
   constexpr size_t maxBlocks = 512;
   float *inputVec_d{nullptr}, *inputVec_h{nullptr};

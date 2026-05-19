@@ -26,6 +26,8 @@
 
 #include <cstdlib>
 #include <iostream>
+#include <unordered_map>
+#include <algorithm>
 #include <rocshmem/rocshmem.hpp>
 
 #include "tester.hpp"
@@ -33,6 +35,9 @@
 using namespace rocshmem;
 
 TesterArguments::TesterArguments(int argc, char *argv[]) {
+  if (argc > 0 && argv[0] != nullptr) {
+    executable_name = argv[0];
+  }
   for (int i = 1; i < argc; i++) {
     std::string arg = argv[i];
     if (arg == "-t") {
@@ -46,7 +51,42 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
       max_msg_size = atoll(argv[i]);
     } else if (arg == "-a") {
       i++;
-      algorithm = atoi(argv[i]);
+      std::string a_arg = argv[i];
+
+      // If it's a pure integer, use it directly; otherwise look up by name
+      bool is_number = !a_arg.empty() && std::all_of(a_arg.begin(), a_arg.end(), ::isdigit);
+      if (is_number) {
+        algorithm = std::stoul(a_arg);
+      } else {
+        // Build map from lowercased CamelName to enum value.
+        // Generated automatically from ROCSHMEM_FOREACH_TEST_TYPE so it stays in
+        // sync with the enum without a separate hand-maintained list.
+        auto to_lower = [](std::string s) {
+          std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+          return s;
+        };
+        static const std::unordered_map<std::string, unsigned> name_to_algo = []() {
+          std::unordered_map<std::string, unsigned> m;
+#define _ADD_TEST_ENTRY(name, val) \
+          { std::string k = #name; \
+            std::transform(k.begin(), k.end(), k.begin(), ::tolower); \
+            m[k] = val; }
+          ROCSHMEM_FOREACH_TEST_TYPE(_ADD_TEST_ENTRY)
+#undef _ADD_TEST_ENTRY
+          return m;
+        }();
+
+        auto it = name_to_algo.find(to_lower(a_arg));
+        if (it == name_to_algo.end()) {
+          std::cerr << "Unknown test name: " << a_arg << "\n";
+          show_usage(argv[0]);
+          exit(-1);
+        }
+        algorithm = it->second;
+      }
+    } else if (arg == "-v") {
+      i++;
+      max_volume_size = atoi(argv[i]);
     } else if (arg == "-z") {
       i++;
       wg_size = atoi(argv[i]);
@@ -82,6 +122,34 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
     } else if (arg == "-nskip") {
       i++;
       skip = atoi(argv[i]);
+    } else if (arg == "-noverif") {
+      verif = false;
+    } else if (arg == "-localbuftype") {
+      i++;
+
+      if (argc < i + 1) {
+        fprintf(stderr, "Invalid arguments for -localbuftype.\n");
+        exit(-1);
+      }
+
+      if (std::string(argv[i]) == "heap") {
+        local_buf_type = USER_BUF_TYPE_HEAP;
+      } else if (std::string(argv[i]) == "host") {
+        local_buf_type = USER_BUF_TYPE_HOST;
+      } else if (std::string(argv[i]) == "device") {
+        local_buf_type = USER_BUF_TYPE_DEVICE;
+      } else if (std::string(argv[i]) == "fine") {
+        local_buf_type = USER_BUF_TYPE_FINE;
+      } else if (std::string(argv[i]) == "uncached") {
+        local_buf_type = USER_BUF_TYPE_UNCACHED;
+      } else if (std::string(argv[i]) == "managed") {
+        local_buf_type = USER_BUF_TYPE_MANAGED;
+      } else {
+        fprintf(stderr, "Invalid local buffer type. "
+                        "Please use one of [heap, host, device, fine, uncached, managed]. "
+                        "Defaulting to heap\n");
+        local_buf_type = USER_BUF_TYPE_HEAP;
+      }
     } else {
       show_usage(argv[0]);
       exit(-1);
@@ -122,6 +190,7 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
       max_msg_size = 8;
       break;
     case PingPongTestType:
+    case PingAllTestType:
     case ShmemPtrTestType:
       min_msg_size = 4;
       max_msg_size = 4;
@@ -133,14 +202,19 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
       break;
     case TeamFCollectTestType:
     case TeamAllToAllTestType:
+    case TeamAllToAllvTestType:
     case TeamBroadcastTestType:
       min_msg_size = 8;
       break;
     case TeamCtxInfraTestType:
-    case TeamCtxInfraTestSingleType:
-    case TeamCtxInfraTestBlockType:
-    case TeamCtxInfraTestOddEvenType:
+    case TeamCtxInfraSingleTestType:
+    case TeamCtxInfraBlockTestType:
+    case TeamCtxInfraOddEvenTestType:
+    case TeamCtxSubsetParentInfraTestType:
       max_msg_size = min_msg_size;
+      break;
+    case FenceOrderPutWaveNbiChunksTestType:
+      min_msg_size = 16;  // must be >= STRESS_NUM_CHUNKS for chunk_size >= 1
       break;
     case PutNBIMRTestType:
       min_msg_size = max_msg_size;
@@ -156,6 +230,9 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
     case FloodGetTestType:
     case FloodGetNBITestType:
     case FloodGTestType:
+    case FloodAddTestType:
+    case FloodFAddTestType:
+    case FloodWaitAmoTestType:
       min_msg_size = max_msg_size = 8;
       break;
     default:
@@ -168,7 +245,8 @@ void TesterArguments::show_usage(std::string executable_name) {
   std::cout << "\t-t <number of rocshmem service threads>\n";
   std::cout << "\t-w <number of workgroups>\n";
   std::cout << "\t-s <maximum message size (in bytes)>\n";
-  std::cout << "\t-a <algorithm number to test>\n";
+  std::cout << "\t-v <maximum per origin volume (in bytes)>\n";
+  std::cout << "\t-a <algorithm number or test name to test>\n";
   std::cout << "\t-z <WorkGroup Size>\n";
   std::cout << "\t-c <Coalescing Coefficient>\n";
   std::cout << "\t-o <Operation type for the random_access test>\n";
@@ -179,6 +257,7 @@ void TesterArguments::show_usage(std::string executable_name) {
   std::cout << "\t-nloop Set loop count\n";
   std::cout << "\t-nlarge Set loop_large count\n";
   std::cout << "\t-nskip Set skip/warmup count\n";
+  std::cout << "\t-noverif disable buffer verification\n";
 }
 
 void TesterArguments::get_arguments() {
@@ -201,6 +280,7 @@ void TesterArguments::get_arguments() {
     case TeamWAVESyncTestType:
     case TeamWGSyncTestType:
     case TeamAllToAllTestType:
+    case TeamAllToAllvTestType:
     case TeamFCollectTestType:
     case TeamReductionTestType:
     case TeamBroadcastTestType:
@@ -208,11 +288,14 @@ void TesterArguments::get_arguments() {
     case TeamBarrierTestType:
     case TeamWAVEBarrierTestType:
     case TeamWGBarrierTestType:
-    case TeamCtxInfraTestBlockType:
-    case TeamCtxInfraTestOddEvenType:
+    case TeamCtxInfraBlockTestType:
+    case TeamCtxInfraOddEvenTestType:
+    case TeamCtxSubsetParentInfraTestType:
     // On-stream tests - support any number of PEs
     case TeamAlltoallmemOnStreamTestType:
     case BarrierAllOnStreamTestType:
+    case QuietOnStreamTestType:
+    case SyncAllOnStreamTestType:
     case TeamBroadcastmemOnStreamTestType:
     case GetmemOnStreamTestType:
     case PutmemOnStreamTestType:
@@ -224,6 +307,12 @@ void TesterArguments::get_arguments() {
     case FloodGetTestType:
     case FloodGetNBITestType:
     case FloodGTestType:
+    case FloodAddTestType:
+    case FloodFAddTestType:
+    case FloodWaitAmoTestType:
+    case DeviceBitcodeTestType:
+    case TeamCtxSharedInfraTestType:
+    case FenceOrderFanoutTestType:
       requires_two_pes = false;
       break;
     default:

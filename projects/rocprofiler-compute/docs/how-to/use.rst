@@ -15,11 +15,13 @@ Command line profiler
 
 Launch and profile the target application using the command line profiler.
 
-The command line profiler launches the target application, calls the
-ROCProfiler API via the ``rocprof`` binary, and collects profile results for
-the specified kernels, dispatches, and hardware components. If not
-specified, ROCm Compute Profiler defaults to collecting all available counters for all
-kernels and dispatches launched by the your executable.
+The command line profiler launches the target application and collects
+hardware performance counter data for the specified kernels, dispatches, and
+hardware components. By default, ROCm Compute Profiler collects all available
+counters for all kernels and dispatches launched by the executable. Profiling
+is performed using :doc:`ROCprofiler-SDK <rocprofiler-sdk:index>`; see
+:ref:`core-install-rocprof-var` for details on backend selection and the
+native counter collection tool.
 
 To collect the default set of data for all kernels in the target
 application, launch, for example:
@@ -31,7 +33,15 @@ application, launch, for example:
 This runs the app, launches each kernel, and generates profiling results. By
 default, results are written to a subdirectory with your accelerator's name;
 for example, ``./workloads/vcopy_data/MI200/``, where name is configurable
-via the ``-n`` argument.
+via the ``-n`` argument. When an MPI rank is detected, the default output
+directory appends the rank (``./workloads/vcopy_data/<rank>/``) instead of
+the gpu model. Use ``--output-directory`` to override the output location.
+
+.. note::
+
+   ``--path`` and ``--subpath`` are deprecated for profile mode and will be
+   removed in a future release. Use ``--output-directory`` with parameterized
+   placeholders instead.
 
 .. note::
 
@@ -115,10 +125,10 @@ Profile mode
 
 ``profile``
    Launches the target application on the local system using
-   :doc:`ROCProfiler <rocprofiler:index>`. Depending on the profiling options
+   :doc:`ROCprofiler-SDK <rocprofiler-sdk:index>`. Depending on the profiling options
    chosen, selected kernels, dispatches, and or hardware components used by the
    application are profiled. It stores results locally in an output folder:
-   ``./workloads/\<name>``.
+   ``./workloads/\<name>`` (or rank-specific subdirectories when using MPI).
 
    .. code-block:: shell
 
@@ -200,11 +210,11 @@ The following table lists ROCm Compute Profiler's basic operations, their
 
    * - :doc:`Profile a workload </how-to/profile/mode>`
      - ``profile``
-     - ``--name``, ``-- <profile_cmd>``
+     - ``--name`` or ``--output-directory``, ``-- <profile_cmd>``
 
    * - :ref:`Standalone roofline analysis <standalone-roofline>`
      - ``profile``
-     - ``--name``, ``--roof-only``, ``--roofline-data-type <data_type>``, ``-- <profile_cmd>``
+     - ``--name`` or ``--output-directory``, ``--roof-only``, ``--roofline-data-type <data_type>``, ``-- <profile_cmd>``
 
    * - :doc:`Launch standalone GUI from CLI </how-to/analyze/standalone-gui>`
      - ``analyze``

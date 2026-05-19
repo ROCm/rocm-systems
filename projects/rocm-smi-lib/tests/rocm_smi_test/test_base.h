@@ -54,7 +54,7 @@ class TestBase {
 
   virtual ~TestBase(void);
 
-  enum VerboseLevel {VERBOSE_MIN = 0, VERBOSE_STANDARD, VERBOSE_PROGRESS};
+  enum VerboseLevel { VERBOSE_MIN = 0, VERBOSE_STANDARD, VERBOSE_PROGRESS };
 
   // @Brief: Before run the core measure codes, do something to set up
   // i.e. init runtime, prepare packet...
@@ -75,58 +75,34 @@ class TestBase {
   // @Brief: Display information about the test
   virtual void DisplayTestInfo(void);
 
-  const std::string & description(void) const {return description_;}
+  const std::string& description(void) const { return description_; }
 
   void set_description(std::string d);
 
-  void set_title(std::string name) {
-    title_ = name;
-  }
-  std::string title(void) const {
-    return title_;
-  }
-  void set_verbosity(uint32_t v) {
-    verbosity_ = v;
-  }
-  uint32_t verbosity(void) const {
-    return verbosity_;
-  }
-  void set_dont_fail(bool f) {
-    dont_fail_ = f;
-  }
-  bool dont_fail(void) const {
-    return dont_fail_;
-  }
-  void set_num_monitor_devs(uint32_t i) {
-    num_monitor_devs_ = i;
-  }
-  uint32_t num_monitor_devs(void) const {
-    return num_monitor_devs_;
-  }
-  void set_init_options(uint64_t x) {
-    init_options_ = x;
-  }
-  uint64_t init_options(void) const {
-    return init_options_;
-  }
-  void set_num_iterations(uint32_t x) {
-    num_iterations_ = x;
-  }
-  uint32_t num_iterations(void) const {
-    return num_iterations_;
-  }
+  void set_title(std::string name) { title_ = name; }
+  std::string title(void) const { return title_; }
+  void set_verbosity(uint32_t v) { verbosity_ = v; }
+  uint32_t verbosity(void) const { return verbosity_; }
+  void set_dont_fail(bool f) { dont_fail_ = f; }
+  bool dont_fail(void) const { return dont_fail_; }
+  void set_num_monitor_devs(uint32_t i) { num_monitor_devs_ = i; }
+  uint32_t num_monitor_devs(void) const { return num_monitor_devs_; }
+  void set_init_options(uint64_t x) { init_options_ = x; }
+  uint64_t init_options(void) const { return init_options_; }
+  void set_num_iterations(uint32_t x) { num_iterations_ = x; }
+  uint32_t num_iterations(void) const { return num_iterations_; }
 
  protected:
-  void MakeHeaderStr(const char *inStr, std::string *outStr) const;
+  void MakeHeaderStr(const char* inStr, std::string* outStr) const;
   void PrintDeviceHeader(uint32_t dv_ind);
-  bool setup_failed_;   ///< Record that setup failed to return ierr in Run
+  bool setup_failed_;          ///< Record that setup failed to return ierr in Run
   uint32_t num_monitor_devs_;  ///< Number of monitor devices found
 
  private:
   std::string description_;
-  std::string title_;   ///< Displayed title of test
-  uint32_t verbosity_;   ///< How much additional output to produce
-  bool dont_fail_;       ///< Don't quit test on individual failure if true
+  std::string title_;      ///< Displayed title of test
+  uint32_t verbosity_;     ///< How much additional output to produce
+  bool dont_fail_;         ///< Don't quit test on individual failure if true
   uint64_t init_options_;  ///< rsmi initialization options
   uint32_t num_iterations_;
 };
@@ -135,26 +111,25 @@ class TestBase {
 #define IF_NVERB(VB) if (verbosity() < (TestBase::VERBOSE_##VB))
 
 // Macros to be used within TestBase classes
-#define CHK_ERR_ASRT(RET) { \
-    if ((RET) != RSMI_STATUS_SUCCESS) { \
-        std::cout << std::endl << "\t===> TEST FAILURE." << std::endl; \
-        const char *err_str; \
-        std::cout << "\t===> ERROR: RSMI call returned " << (RET) << std::endl; \
-        rsmi_status_string((RET), &err_str); \
-        std::cout << "\t===> (" << err_str << ")" << std::endl; \
-        std::cout << "\t===> at " << __FILE__ << ":" << std::dec << __LINE__ << \
-                                                                      std::endl; \
-    } \
-    if (dont_fail() && ((RET) != RSMI_STATUS_SUCCESS)) { \
-        std::cout << \
-         "\t===> Abort is over-ridden due to dont_fail command line option." \
-                                                               << std::endl; \
-        return; \
-    } \
-    ASSERT_EQ(RSMI_STATUS_SUCCESS, (RET)); \
-}
+#define CHK_ERR_ASRT(RET)                                                                \
+  {                                                                                      \
+    if ((RET) != RSMI_STATUS_SUCCESS) {                                                  \
+      std::cout << std::endl << "\t===> TEST FAILURE." << std::endl;                     \
+      const char* err_str;                                                               \
+      std::cout << "\t===> ERROR: RSMI call returned " << (RET) << std::endl;            \
+      rsmi_status_string((RET), &err_str);                                               \
+      std::cout << "\t===> (" << err_str << ")" << std::endl;                            \
+      std::cout << "\t===> at " << __FILE__ << ":" << std::dec << __LINE__ << std::endl; \
+    }                                                                                    \
+    if (dont_fail() && ((RET) != RSMI_STATUS_SUCCESS)) {                                 \
+      std::cout << "\t===> Abort is over-ridden due to dont_fail command line option."   \
+                << std::endl;                                                            \
+      return;                                                                            \
+    }                                                                                    \
+    ASSERT_EQ(RSMI_STATUS_SUCCESS, (RET));                                               \
+  }
 
-void MakeHeaderStr(const char *inStr, std::string *outStr);
+void MakeHeaderStr(const char* inStr, std::string* outStr);
 extern const char kSetupLabel[];
 
 #endif  // TESTS_ROCM_SMI_TEST_TEST_BASE_H_

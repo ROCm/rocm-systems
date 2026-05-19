@@ -313,8 +313,7 @@ Panel Config:
       occupancy achievable on the specific accelerator.
     Theoretical LDS Bandwidth: Indicates the maximum amount of bytes that could have
       been loaded from, stored to, or atomically updated in the LDS per unit time
-      (see LDS Bandwidth example for more detail). This is also presented as a percent
-      of the peak theoretical F64 MFMA operations achievable on the specific accelerator.
+      (see LDS Bandwidth example for more detail).
     LDS Bank Conflicts/Access: The ratio of the number of cycles spent in the LDS
       scheduler due to bank conflicts (as determined by the conflict resolution hardware)
       to the base number of cycles that would be spent in the LDS scheduler in a completely

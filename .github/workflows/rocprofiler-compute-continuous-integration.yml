@@ -48,6 +48,10 @@ on:
       - '!projects/rocprofiler-compute/docker/**'
       - '!projects/rocprofiler-compute/CMakePresets.json'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   ROCPROFSYS_CI: ON
   ROCM_PATH: "/opt/rocm"
@@ -60,7 +64,7 @@ jobs:
       matrix: ${{ steps.generate_matrix.outputs.matrix }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           sparse-checkout: projects/rocprofiler-compute/.github
 
@@ -90,7 +94,8 @@ jobs:
     permissions:
       packages: read
     container:
-      image: ghcr.io/rocm/rocprofiler-ubuntu:${{ matrix.system.os-release }}-systems-ci-${{ matrix.system.arch }}
+      image: ghcr.io/rocm/rocprofiler-ubuntu:${{ matrix.system.os-release }}-compute-ci-${{ matrix.system.arch }}
+      # --env-file /etc/podinfo/gha-gpu-isolation-settings - Required for GPU isolation on OSSCI MIXXX runners
       options:
         --privileged
         --ipc host
@@ -98,11 +103,14 @@ jobs:
         --device /dev/kfd
         --device /dev/dri
         --cap-add CAP_SYS_ADMIN
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
-          sparse-checkout: projects/rocprofiler-compute/
+          sparse-checkout: |
+            projects/rocprofiler-compute
+            shared/ctest
 
       - name: Setup Environment
         id: setup_env

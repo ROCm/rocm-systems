@@ -57,7 +57,7 @@ __device__ static inline int __clz(int input) {
 }
 
 __device__ static inline int __clzll(long long int input) {
-  return input == 0u ? 64 : __builtin_clzl((__hip_uint64_t)input);
+  return input == 0u ? 64 : __builtin_clzll((__hip_uint64_t)input);
 }
 
 __device__ static inline int __ffs(unsigned int input) {
@@ -274,10 +274,10 @@ __device__ static inline long long __mul64hi(long long int x, long long int y) {
   return x1 * y1 + z2 + (z1 >> 32);
 }
 
-__device__ static inline int __mulhi(int x, int y) { return __ockl_mul_hi_i32(x, y); }
+__device__ static inline int __mulhi(int x, int y) { return (int)(((long)x * (long)y) >> 32); }
 
 __device__ static inline int __rhadd(int x, int y) {
-  return ((long long)x + (long long)y + 1) >> 1;
+  return ((__hip_int64_t)x + (__hip_int64_t)y + 1) >> 1;
 }
 
 __device__ static inline unsigned int __sad(int x, int y, unsigned int z) {
@@ -307,7 +307,7 @@ __device__ static inline unsigned long long __umul64hi(unsigned long long int x,
 }
 
 __device__ static inline unsigned int __umulhi(unsigned int x, unsigned int y) {
-  return __ockl_mul_hi_u32(x, y);
+  return (unsigned int)(((__hip_uint64_t)x * (__hip_uint64_t)y) >> 32);
 }
 
 __device__ static inline unsigned int __urhadd(unsigned int x, unsigned int y) {
@@ -662,20 +662,6 @@ __device__ inline __hip_uint64_t __lanemask_eq() {
   return mask;
 }
 
-
-__device__ inline void* __local_to_generic(void* p) { return p; }
-
-#ifdef __HIP_DEVICE_COMPILE__
-__device__ inline void* __get_dynamicgroupbaseptr() {
-  // Get group segment base pointer.
-  return (char*)__local_to_generic((void*)__to_local(__builtin_amdgcn_groupstaticsize()));
-}
-#else
-__device__ void* __get_dynamicgroupbaseptr();
-#endif  // __HIP_DEVICE_COMPILE__
-
-__device__ inline void* __amdgcn_get_dynamicgroupbaseptr() { return __get_dynamicgroupbaseptr(); }
-
 // Memory Fence Functions
 __device__ inline static void __threadfence() { __builtin_amdgcn_fence(__ATOMIC_SEQ_CST, "agent"); }
 
@@ -706,11 +692,7 @@ __device__ inline static void __work_group_barrier(__cl_mem_fence_flags flags) {
 
 __device__ inline static void __barrier(int n) { __work_group_barrier((__cl_mem_fence_flags)n); }
 
-__device__
-inline
-__attribute__((convergent))
-void __syncthreads()
-{
+__device__ inline __attribute__((convergent)) void __syncthreads() {
   __barrier(__CLK_GLOBAL_MEM_FENCE | __CLK_LOCAL_MEM_FENCE);
 }
 
@@ -755,33 +737,35 @@ __device__ inline __attribute__((convergent)) int __syncthreads_or(int predicate
   XCC_ID      3:0     XCC the wave is assigned to.
  */
 
-#if (defined(__GFX10__) || defined(__GFX11__))
-#define HW_ID 23
+#if (defined (__GFX10__) || defined (__GFX11__) || defined(__GFX12__))
+  #define HW_ID               23
+  #define HW_ID_WGP_ID_OFFSET 10
+  #define HW_ID_WGP_ID_SIZE    4
+  #if (defined(__AMDGCN_CUMODE__))
+    #define HW_ID_CU_ID_OFFSET  8
+    #define HW_ID_CU_ID_SIZE    1
+  #endif
+  #define HW_ID_SA_ID_OFFSET  16
+  #define HW_ID_SA_ID_SIZE     1
 #else
-#define HW_ID 4
+  #define HW_ID               4
+  #define HW_ID_CU_ID_SIZE    4
+  #define HW_ID_CU_ID_OFFSET  8
 #endif
 
-#if (defined(__GFX10__) || defined(__GFX11__))
-#define HW_ID_WGP_ID_SIZE 4
-#define HW_ID_WGP_ID_OFFSET 10
-#if (defined(__AMDGCN_CUMODE__))
-#define HW_ID_CU_ID_SIZE 1
-#define HW_ID_CU_ID_OFFSET 8
-#endif
-#else
-#define HW_ID_CU_ID_SIZE 4
-#define HW_ID_CU_ID_OFFSET 8
-#endif
-
-#if (defined(__gfx908__) || defined(__gfx90a__) || defined(__GFX11__))
-#define HW_ID_SE_ID_SIZE 3
-#else  // 4 SEs/XCC for 942
-#define HW_ID_SE_ID_SIZE 2
+#if (defined(__gfx908__) || defined(__gfx90a__) || \
+     defined(__GFX11__))
+  #define HW_ID_SE_ID_SIZE    3
+#elif (defined(__GFX12__))
+  #define SE_HW_ID_SE_ID_SIZE 4
+#else //4 SEs/XCC for gfx940-942
+  #define HW_ID_SE_ID_SIZE    2
 #endif
 #if (defined(__GFX10__) || defined(__GFX11__))
-#define HW_ID_SE_ID_OFFSET 18
-#define HW_ID_SA_ID_OFFSET 16
-#define HW_ID_SA_ID_SIZE 1
+  #define HW_ID_SE_ID_OFFSET  18
+#elif defined(__GFX12__)
+  #define RTN_GET_SE_HW_ID       0x87
+  #define SE_HW_ID_SE_ID_OFFSET  0
 #else
 #define HW_ID_SE_ID_OFFSET 13
 #endif
@@ -794,7 +778,7 @@ __device__ inline __attribute__((convergent)) int __syncthreads_or(int predicate
 #endif
 
 #if !defined(__HIP_NO_IMAGE_SUPPORT) && defined(__gfx94plus_clr__)
-#define __HIP_NO_IMAGE_SUPPORT 1
+  #define __HIP_NO_IMAGE_SUPPORT   1
 #endif
 
 /*
@@ -806,49 +790,79 @@ __device__ inline __attribute__((convergent)) int __syncthreads_or(int predicate
 
 #define GETREG_IMMED(SZ, OFF, REG) (((SZ) << 11) | ((OFF) << 6) | (REG))
 
+__device__ inline unsigned assemble_smid(unsigned xcc, unsigned se, unsigned sa,
+                                         unsigned wgp, unsigned cu,
+                                         unsigned se_bits, unsigned sa_bits,
+                                         unsigned wgp_bits, unsigned cu_bits)
+{
+  unsigned temp = xcc;
+  temp = (temp << se_bits) | se;
+  temp = (temp << sa_bits) | sa;
+  temp = (temp << wgp_bits) | wgp;
+  temp = (temp << cu_bits) | cu;
+  return temp;
+}
+
 /*
   __smid returns the wave's assigned Compute Unit and Shader Engine.
   The Compute Unit, CU_ID returned in bits 3:0, and Shader Engine, SE_ID in bits 5:4.
   Note: the results vary over time.
   SZ minus 1 since SIZE is 1-based.
 */
-__device__ inline unsigned __smid(void) {
-  unsigned se_id =
-      __builtin_amdgcn_s_getreg(GETREG_IMMED(HW_ID_SE_ID_SIZE - 1, HW_ID_SE_ID_OFFSET, HW_ID));
-#if (defined(__GFX10__) || defined(__GFX11__))
-  unsigned wgp_id =
-      __builtin_amdgcn_s_getreg(GETREG_IMMED(HW_ID_WGP_ID_SIZE - 1, HW_ID_WGP_ID_OFFSET, HW_ID));
-  unsigned sa_id =
-      __builtin_amdgcn_s_getreg(GETREG_IMMED(HW_ID_SA_ID_SIZE - 1, HW_ID_SA_ID_OFFSET, HW_ID));
-#if (defined(__AMDGCN_CUMODE__))
-  unsigned cu_id =
-      __builtin_amdgcn_s_getreg(GETREG_IMMED(HW_ID_CU_ID_SIZE - 1, HW_ID_CU_ID_OFFSET, HW_ID));
-#endif
-#else
-#if defined(__gfx94plus_clr__)
-  unsigned xcc_id =
-      __builtin_amdgcn_s_getreg(GETREG_IMMED(XCC_ID_XCC_ID_SIZE - 1, XCC_ID_XCC_ID_OFFSET, XCC_ID));
-#endif
-  unsigned cu_id =
-      __builtin_amdgcn_s_getreg(GETREG_IMMED(HW_ID_CU_ID_SIZE - 1, HW_ID_CU_ID_OFFSET, HW_ID));
-#endif
-#if (defined(__GFX10__) || defined(__GFX11__))
-  unsigned temp = se_id;
-  temp = (temp << HW_ID_SA_ID_SIZE) | sa_id;
-  temp = (temp << HW_ID_WGP_ID_SIZE) | wgp_id;
-#if (defined(__AMDGCN_CUMODE__))
-  temp = (temp << HW_ID_CU_ID_SIZE) | cu_id;
-#endif
-  return temp;
-  // TODO : CU Mode impl
-#elif defined(__gfx94plus_clr__)
-  unsigned temp = xcc_id;
-  temp = (temp << HW_ID_SE_ID_SIZE) | se_id;
-  temp = (temp << HW_ID_CU_ID_SIZE) | cu_id;
-  return temp;
-#else
-  return (se_id << HW_ID_CU_ID_SIZE) + cu_id;
-#endif
+__device__
+inline
+unsigned __smid(void)
+{
+  unsigned xcc{}, se{}, sa{}, wgp{}, cu{};
+  unsigned se_bits{}, sa_bits{}, wgp_bits{}, cu_bits{};
+
+  #if defined(__GFX12__)
+    unsigned msg = __builtin_amdgcn_s_sendmsg_rtn(RTN_GET_SE_HW_ID);
+    se       = (msg >> SE_HW_ID_SE_ID_OFFSET) & ((1 << SE_HW_ID_SE_ID_SIZE) - 1);
+    se_bits  = SE_HW_ID_SE_ID_SIZE;
+
+    unsigned hw = __builtin_amdgcn_s_getreg(GETREG_IMMED(31, 0, HW_ID));
+    wgp      = (hw >> HW_ID_WGP_ID_OFFSET) & ((1 << HW_ID_WGP_ID_SIZE) - 1);
+    sa       = (hw >> HW_ID_SA_ID_OFFSET) & ((1 << HW_ID_SA_ID_SIZE) - 1);
+    wgp_bits = HW_ID_WGP_ID_SIZE;
+    sa_bits  = HW_ID_SA_ID_SIZE;
+
+  #elif defined(__GFX10__) || defined(__GFX11__)
+    se   = __builtin_amdgcn_s_getreg(
+             GETREG_IMMED(HW_ID_SE_ID_SIZE - 1, HW_ID_SE_ID_OFFSET, HW_ID));
+    sa   = __builtin_amdgcn_s_getreg(
+             GETREG_IMMED(HW_ID_SA_ID_SIZE - 1, HW_ID_SA_ID_OFFSET, HW_ID));
+    wgp  = __builtin_amdgcn_s_getreg(
+             GETREG_IMMED(HW_ID_WGP_ID_SIZE - 1, HW_ID_WGP_ID_OFFSET, HW_ID));
+    se_bits  = HW_ID_SE_ID_SIZE;
+    sa_bits  = HW_ID_SA_ID_SIZE;
+    wgp_bits = HW_ID_WGP_ID_SIZE;
+    #if defined(__AMDGCN_CUMODE__)
+      cu = __builtin_amdgcn_s_getreg(
+             GETREG_IMMED(HW_ID_CU_ID_SIZE - 1, HW_ID_CU_ID_OFFSET, HW_ID));
+      cu_bits = HW_ID_CU_ID_SIZE;
+    #endif
+
+  #elif defined(__gfx94plus_clr__)
+    se   = __builtin_amdgcn_s_getreg(
+             GETREG_IMMED(HW_ID_SE_ID_SIZE - 1, HW_ID_SE_ID_OFFSET, HW_ID));
+    xcc  = __builtin_amdgcn_s_getreg(
+             GETREG_IMMED(XCC_ID_XCC_ID_SIZE - 1, XCC_ID_XCC_ID_OFFSET, XCC_ID));
+    cu   = __builtin_amdgcn_s_getreg(
+             GETREG_IMMED(HW_ID_CU_ID_SIZE - 1, HW_ID_CU_ID_OFFSET, HW_ID));
+    se_bits  = HW_ID_SE_ID_SIZE;
+    cu_bits  = HW_ID_CU_ID_SIZE;
+
+  #else
+    se = __builtin_amdgcn_s_getreg(
+           GETREG_IMMED(HW_ID_SE_ID_SIZE - 1, HW_ID_SE_ID_OFFSET, HW_ID));
+    cu = __builtin_amdgcn_s_getreg(
+           GETREG_IMMED(HW_ID_CU_ID_SIZE - 1, HW_ID_CU_ID_OFFSET, HW_ID));
+    se_bits = HW_ID_SE_ID_SIZE;
+    cu_bits = HW_ID_CU_ID_SIZE;
+  #endif
+
+  return assemble_smid(xcc, se, sa, wgp, cu, se_bits, sa_bits, wgp_bits, cu_bits);
 }
 
 /**
@@ -860,65 +874,23 @@ __device__ inline unsigned __smid(void) {
 
 #endif  // defined(__clang__) && defined(__HIP__)
 
-
-// loop unrolling
+// rely on `__builtin_* functions for memcpy/memset
 static inline __device__ void* __hip_hc_memcpy(void* dst, const void* src, size_t size) {
-  auto dstPtr = static_cast<unsigned char*>(dst);
-  auto srcPtr = static_cast<const unsigned char*>(src);
-
-  while (size >= 4u) {
-    dstPtr[0] = srcPtr[0];
-    dstPtr[1] = srcPtr[1];
-    dstPtr[2] = srcPtr[2];
-    dstPtr[3] = srcPtr[3];
-
-    size -= 4u;
-    srcPtr += 4u;
-    dstPtr += 4u;
-  }
-  switch (size) {
-    case 3:
-      dstPtr[2] = srcPtr[2];
-    case 2:
-      dstPtr[1] = srcPtr[1];
-    case 1:
-      dstPtr[0] = srcPtr[0];
-  }
-
-  return dst;
+  return __builtin_memcpy(dst, src, size);
 }
 
-static inline __device__ void* __hip_hc_memset(void* dst, unsigned char val, size_t size) {
-  auto dstPtr = static_cast<unsigned char*>(dst);
-
-  while (size >= 4u) {
-    dstPtr[0] = val;
-    dstPtr[1] = val;
-    dstPtr[2] = val;
-    dstPtr[3] = val;
-
-    size -= 4u;
-    dstPtr += 4u;
-  }
-  switch (size) {
-    case 3:
-      dstPtr[2] = val;
-    case 2:
-      dstPtr[1] = val;
-    case 1:
-      dstPtr[0] = val;
-  }
-
-  return dst;
+// change the value from unsigned char to int, what a builtin expects.
+static inline __device__ void* __hip_hc_memset(void* dst, int val, size_t size) {
+  return __builtin_memset(dst, val, size);
 }
+
 #ifndef __OPENMP_AMDGCN__
 static inline __device__ void* memcpy(void* dst, const void* src, size_t size) {
   return __hip_hc_memcpy(dst, src, size);
 }
 
 static inline __device__ void* memset(void* ptr, int val, size_t size) {
-  unsigned char val8 = static_cast<unsigned char>(val);
-  return __hip_hc_memset(ptr, val8, size);
+  return __hip_hc_memset(ptr, val, size);
 }
 #endif  // !__OPENMP_AMDGCN__
 

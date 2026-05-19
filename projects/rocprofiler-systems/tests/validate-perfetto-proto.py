@@ -1,26 +1,7 @@
 #!/usr/bin/env python3
 
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 import sys
 import os
@@ -169,6 +150,11 @@ if __name__ == "__main__":
         default=[],
         nargs="*",
     )
+    parser.add_argument(
+        "--check-counter-pairing",
+        action="store_true",
+        help="Verify each counter track has paired start/end entries (even count, last value is 0)",
+    )
 
     args = parser.parse_args()
 
@@ -253,7 +239,35 @@ if __name__ == "__main__":
         if key_count != count:
             ret = 1
 
+    if args.counter_names and args.print:
+        all_counter_tracks = tp.query(
+            "SELECT DISTINCT name FROM counter_track ORDER BY name"
+        )
+        track_names = [row.name for row in all_counter_tracks]
+        print(f"Available counter tracks ({len(track_names)}):")
+        for name in track_names:
+            print(f"  - {name}")
+
     for counter_name in args.counter_names:
+        if args.print:
+            matching_tracks = tp.query(
+                f"""SELECT counter_track.name, COUNT(counter.id) AS num_entries,
+                  SUM(counter.value) AS sum_value, MIN(counter.value) AS min_value,
+                  MAX(counter.value) AS max_value
+                  FROM counter_track JOIN counter ON counter.track_id = counter_track.id
+                  WHERE counter_track.name LIKE '%{counter_name}%'
+                  GROUP BY counter_track.name ORDER BY counter_track.name"""
+            )
+            track_rows = []
+            for row in matching_tracks:
+                track_rows.append(row)
+                print(
+                    f"  Track: {row.name} | entries={row.num_entries} "
+                    f"sum={row.sum_value} min={row.min_value} max={row.max_value}"
+                )
+            if not track_rows:
+                print(f"  No counter tracks matching '%{counter_name}%' found in trace")
+
         sum_counter_values = tp.query(
             f"""SELECT SUM(counter.value) AS total_value FROM counter_track JOIN counter ON
               counter.track_id = counter_track.id WHERE counter_track.name LIKE
@@ -270,6 +284,32 @@ if __name__ == "__main__":
         if total_value <= 0:
             print(f"Fail: Counter {counter_name} is not found in the traces")
             ret = 1
+
+    if args.check_counter_pairing and args.counter_names:
+        for counter_name in args.counter_names:
+            tracks = tp.query(f"""SELECT counter_track.id, counter_track.name,
+                  COUNT(counter.id) AS num_entries
+                  FROM counter_track JOIN counter ON counter.track_id = counter_track.id
+                  WHERE counter_track.name LIKE '%{counter_name}%'
+                  GROUP BY counter_track.id""")
+            for row in tracks:
+                if row.num_entries % 2 != 0:
+                    print(
+                        f"Fail: Counter track '{row.name}' has {row.num_entries} entries "
+                        f"(expected even number for paired start/end)"
+                    )
+                    ret = 1
+                else:
+                    last_value = tp.query(f"""SELECT counter.value FROM counter
+                          WHERE counter.track_id = {row.id}
+                          ORDER BY counter.ts DESC LIMIT 1""")
+                    for val_row in last_value:
+                        if val_row.value != 0:
+                            print(
+                                f"Fail: Counter track '{row.name}' last value is "
+                                f"{val_row.value} (expected 0 for end marker)"
+                            )
+                            ret = 1
 
     if ret == 0:
         print(f"{args.input} validated")

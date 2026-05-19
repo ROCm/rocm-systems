@@ -124,6 +124,9 @@ read_agent_ctx(const context::context*                    ctx,
                std::vector<rocprofiler_counter_record_t>* out_counters);
 
 uint64_t
+submitPackets(hsa_queue_t* queue, const void** packets, size_t num_packets);
+
+uint64_t
 submitPacket(hsa_queue_t* queue, const void* packet);
 
 }  // namespace counters

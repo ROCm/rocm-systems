@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /*
 Testcase Scenarios of hipGraphNodeFindInClone API:
@@ -58,7 +45,7 @@ again, then try to find the newly added graph node  from the cloned graph
  * - Finds a cloned version of a node.
  */
 
-TEST_CASE("Unit_hipGraphNodeFindInClone_Negative") {
+HIP_TEST_CASE(Unit_hipGraphNodeFindInClone_Negative) {
   hipGraph_t graph;
   hipGraph_t clonedgraph;
   hipGraphNode_t graphnode, newnode;
@@ -206,7 +193,7 @@ void hipGraphNodeFindInClone_Func(bool ModifyOrigGraph = false) {
   HIP_CHECK(hipGraphDestroy(clonedgraph));
 }
 
-TEST_CASE("Unit_hipGraphNodeFindInClone_Functional") {
+HIP_TEST_CASE(Unit_hipGraphNodeFindInClone_Functional) {
   SECTION("hipGraphNodeFindInClone Basic Functionality") { hipGraphNodeFindInClone_Func(); }
   SECTION("hipGraphNodeFindInClone Modify Original graph") { hipGraphNodeFindInClone_Func(true); }
 }
@@ -277,7 +264,7 @@ void hipGraphNodeFindInClone_DoubleClone(bool ModifyOrigGraph = false) {
  * ------------------------
  *    - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipGraphNodeFindInClone_MultipleClone") {
+HIP_TEST_CASE(Unit_hipGraphNodeFindInClone_MultipleClone) {
   SECTION("hipGraphNodeFindInClone Back to Back clone") { hipGraphNodeFindInClone_DoubleClone(); }
   SECTION("hipGraphNodeFindInClone Modify Orig Graph After 2nd Clone") {
     hipGraphNodeFindInClone_DoubleClone(true);

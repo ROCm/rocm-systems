@@ -43,8 +43,6 @@ class ROContext : public Context {
  public:
   __host__ ROContext(Backend *b, size_t block_id = 0, bool default_ctx = false);
 
-  __device__ void ctx_destroy();
-
   __device__ void putmem(void *dest, const void *source, size_t nelems, int pe);
 
   __device__ void getmem(void *dest, const void *source, size_t nelems, int pe);
@@ -159,6 +157,13 @@ class ROContext : public Context {
   template <typename T>
   __device__ void alltoall(rocshmem_team_t team, T *dest, const T *source,
                            int nelems);
+
+  template <typename T>
+  __device__ void alltoallv(rocshmem_team_t team,
+                            T *dest, const size_t dest_nelems[],
+                            const size_t dest_displs[],
+                            T *source, const size_t source_nelems[],
+                            const size_t source_displs[]);
 
   template <typename T>
   __device__ void fcollect(rocshmem_team_t team, T *dest, const T *source,

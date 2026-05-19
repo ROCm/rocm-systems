@@ -43,6 +43,7 @@
  */
 #include <hip/hip_runtime_api.h>
 
+#include "std_allocator.hpp"
 #include "remote_heap_info.hpp"
 #include "single_heap.hpp"
 #include "bootstrap/bootstrap.hpp"
@@ -51,6 +52,7 @@ namespace rocshmem {
 
 class RemoteHeapInfoAbstract {
 public:
+  virtual ~RemoteHeapInfoAbstract() = default;
   virtual WindowInfo* get_window_info() = 0;
   __host__ virtual const std::vector<char*, StdAllocatorHIP<char*>>& get_heap_bases() = 0;
   __device__ char** get_heap_bases() { return nullptr; }
@@ -93,6 +95,10 @@ class SymmetricHeap {
                                                 single_heap_.get_size(), bootstrap);
     }
   }
+
+  ~SymmetricHeap() {
+    delete remote_heap_info_;
+  }
   /**
    * @brief Allocates heap memory and returns ptr to caller
    *
@@ -119,13 +125,6 @@ class SymmetricHeap {
    * @brief Accessor method for heap size
    */
   auto get_size() { return single_heap_.get_size(); }
-
-  /**
-   * @brief Returns is the heap is allocated with managed memory
-   *
-   * @return bool
-   */
-  bool is_managed() { return single_heap_.is_managed(); }
 
   /**
    * @brief Accessor method for heap_window_info_

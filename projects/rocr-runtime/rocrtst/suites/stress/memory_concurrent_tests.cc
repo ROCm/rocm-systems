@@ -94,7 +94,7 @@ static void CallbackHSAMemoryFreeFunc(void *data) {
   hsa_status_t err;
   cb_t *cb = static_cast<cb_t*>(data);
 
-  err = hsa_memory_free(cb->alloc_pointer);
+  err = hsa_amd_memory_pool_free(cb->alloc_pointer);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   return;
@@ -171,6 +171,7 @@ void MemoryConcurrentTest::SetUp(void) {
   hsa_status_t err;
 
   TestBase::SetUp();
+  if (test_skipped_) return;
 
   err = rocrtst::SetDefaultAgents(this);
   ASSERT_EQ(HSA_STATUS_SUCCESS, err);
@@ -342,7 +343,7 @@ void MemoryConcurrentTest::MemoryConcurrentAllocate(hsa_agent_t agent,
     }
 
     for (uint32_t ii = 0; ii < kNumThreads; ii++) {
-      err = hsa_memory_free(cb[ii].alloc_pointer);
+      err = hsa_amd_memory_pool_free(cb[ii].alloc_pointer);
       ASSERT_EQ(err, HSA_STATUS_SUCCESS);
     }
   }

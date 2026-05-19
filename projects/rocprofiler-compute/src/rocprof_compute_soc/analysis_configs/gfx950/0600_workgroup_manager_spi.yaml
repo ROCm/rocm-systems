@@ -181,10 +181,15 @@ Panel Config:
           max: MAX(400 * SPI_RA_WVLIM_STALL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
           unit: Percent
   metrics_description:
+    Schedule-Pipe Wave Occupancy: Total number of waves occupying all scheduler-pipe
+      queues. The SPI has 4 scheduler-pipes, each with 8 hardware queues.
     Accelerator Utilization: The percent of cycles in the kernel where the accelerator
       was actively doing any work.
     Scheduler-Pipe Utilization: The percent of total scheduler-pipe cycles in the
       kernel where the scheduler-pipes were actively doing any work.
+    Scheduler-Pipe Wave Utilization: Percent of total scheduler-pipe cycles when waves
+      are actively resident in the scheduler-pipe structures. This measures wave presence
+      in the pipes before dispatch to compute units.
     Workgroup Manager Utilization: The percent of cycles in the kernel where the workgroup
       manager was actively doing any work.
     Shader Engine Utilization: The percent of total shader engine cycles in the kernel
@@ -208,6 +213,9 @@ Panel Config:
       The percent of total scheduler-pipe cycles in the kernel where a workgroup
       could not be scheduled to a CU due to a bottleneck within the scheduler-pipes
       rather than a lack of a CU or SIMD with sufficient resources.
+    Scheduler-Pipe FIFO Full Rate: Percent of workgroup manager busy cycles where
+      the event/wave order FIFO was full. High values indicate backpressure in the
+      scheduler-pipe dispatch ordering logic.
     Scheduler-Pipe Stall Rate: The percent of total scheduler-pipe cycles in the kernel
       where a workgroup could not be scheduled to a CU due to occupancy limitations
       (like a lack of a CU or SIMD with sufficient resources).

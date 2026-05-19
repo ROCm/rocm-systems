@@ -45,6 +45,7 @@
 #include <assert.h>
 
 #include <algorithm>
+#include <cinttypes>
 #include <climits>
 
 #include "core/inc/runtime.h"
@@ -652,6 +653,7 @@ uint32_t ImageManagerGfx11::GetAddrlibSurfaceInfoNv(
   in.height = height;
   in.numSlices = num_slice;
   in.numMipLevels = num_mipmap_levels;
+  in.pitchInElement = image_data_row_pitch / image_prop.element_size;
 
   switch (desc.geometry) {
     case HSA_EXT_IMAGE_GEOMETRY_1D:
@@ -1086,7 +1088,7 @@ void ImageManagerGfx11::printSRDDetailed(const uint32_t* srd) const {
   
   // Calculate full address (GFX11 uses 40-bit shifted by 8)
   uint64_t base_addr = ((uint64_t)word1.f.BASE_ADDRESS_HI << 32) | ((uint64_t)word0.f.BASE_ADDRESS << 8);
-  printf("        → Full Base Address    = 0x%016lx\n", base_addr);
+  printf("        → Full Base Address    = 0x%016" PRIx64 "\n", base_addr);
   
   // WORD 2: WIDTH_HI, HEIGHT
   SQ_IMG_RSRC_WORD2 word2;

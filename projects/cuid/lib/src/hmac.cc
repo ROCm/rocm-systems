@@ -85,22 +85,22 @@ amdcuid_status_t cuid_hmac::generate_hmac_sha256(
     params[0] = OSSL_PARAM_construct_utf8_string("digest", const_cast<char*>(digest_name), 0);
     params[1] = OSSL_PARAM_construct_end();
 
-    if (!EVP_MAC_CTX_set_params(ctx, params)) {
+    if (EVP_MAC_CTX_set_params(ctx, params) != 1) {
         std::cerr << "Error setting HMAC digest algorithm" << std::endl;
         return AMDCUID_STATUS_HMAC_ERROR;
     }
 
-    if (!EVP_MAC_init(ctx, reinterpret_cast<const unsigned char*>(key), key_len, NULL)) {
+    if (EVP_MAC_init(ctx, reinterpret_cast<const unsigned char*>(key), key_len, NULL) != 1) {
         std::cerr << "Error initializing MAC context" << std::endl;
         return AMDCUID_STATUS_HMAC_ERROR;
     }
 
-    if (!EVP_MAC_update(ctx, reinterpret_cast<const unsigned char*>(data), data_len)) {
+    if (EVP_MAC_update(ctx, reinterpret_cast<const unsigned char*>(data), data_len) != 1) {
         std::cerr << "Error updating MAC context" << std::endl;
         return AMDCUID_STATUS_HMAC_ERROR;
     }
 
-    if (!EVP_MAC_final(ctx, reinterpret_cast<unsigned char*>(out_hash), out_len, EVP_MAX_MD_SIZE)) {
+    if (EVP_MAC_final(ctx, reinterpret_cast<unsigned char*>(out_hash), out_len, EVP_MAX_MD_SIZE) != 1) {
         std::cerr << "Error finalizing MAC" << std::endl;
         return AMDCUID_STATUS_HMAC_ERROR;
     }
@@ -123,7 +123,7 @@ amdcuid_status_t cuid_hmac::set_hmac_algorithm(const EVP_MD* md)
     params[0] = OSSL_PARAM_construct_utf8_string("digest", const_cast<char*>(algorithm), 0);
     params[1] = OSSL_PARAM_construct_end();
 
-    if (!EVP_MAC_CTX_set_params(ctx, params)) {
+    if (EVP_MAC_CTX_set_params(ctx, params) != 1) {
         std::cerr << "Error setting HMAC algorithm" << std::endl;
         return AMDCUID_STATUS_HMAC_ERROR;
     }

@@ -136,6 +136,23 @@ hsaKmtGetNodeMemoryProperties(
     );
 
 /**
+  Retrieves the wall clock frequency of a specific HSA node.
+
+  The returned frequency is in hertz (Hz), i.e., KHz * 1000.
+  When possible, prefer using HsaNodeProperties.WallClockKHz from
+  hsaKmtGetNodeProperties(), as this function is mainly for compatibility
+  with clients that expect this API to exist.
+  Not all implementations are required to support this API.
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetNodeWallclockFrequency(
+    HSAuint32 NodeId,      // IN
+    uint64_t* Frequency    // OUT (Hz)
+    );
+
+/**
   Retrieves the cache properties of a specific HSA node and processor ID.
   ProcessorID refers to either a CPU core or a SIMD unit as enumerated earlier
   via the hsaKmtGetNodeProperties() call.
@@ -357,6 +374,26 @@ hsaKmtCreateQueueExt(
     );
 
 /**
+  Creates a GPU queue with user-mode access rights
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtCreateQueueV2(
+    HSAuint32           NodeId,                           //IN
+    HSA_QUEUE_TYPE      Type,                             //IN
+    HSAuint32           QueuePercentage,                  //IN
+    HSA_QUEUE_PRIORITY  Priority,                         //IN
+    HSAuint32           SdmaEngineId,                     //IN
+    void*               QueueAddress,                     //IN
+    HSAuint64           QueueSizeInBytes,                 //IN
+    HSAuint64           MetaDataPrefetchSizeInBytes,      //IN
+    HsaEvent*           Event,                            //IN
+    HsaQueueResource*   QueueResource                     //OUT
+    );
+
+
+/**
   Updates a queue
 */
 
@@ -556,6 +593,7 @@ hsaKmtExportDMABufHandle(
     HSAuint64 *Offset			//OUT
     );
 
+#if defined(_WIN32)
 /**
   Export GPU Memory handle
 */
@@ -567,6 +605,7 @@ hsaKmtGetMemoryHandle(
     HSAuint64 SizeInBytes,        // IN
     uint64_t* SharedMemoryHandle  // OUT
 );
+#endif
 
 /**
  Export a memory buffer for sharing with other processes

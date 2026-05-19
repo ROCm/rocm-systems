@@ -3,19 +3,25 @@
 # This GitHub Actions workflow runs on push commits. If it detects the push is from
 # a pull request merged into the super-repo, then it continues to run the workflow.
 # It identifies which subtrees (defined in .github/repos-config.json) were affected,
-# generates a patch from the merge commit, and applies that patch to the corresponding
-# sub-repositories by cloning them and committing the patch directly.
+# generates patch(es) from the merge commit, and applies those patches to the corresponding
+# sub-repositories by cloning them and committing the patches directly.
+#
+# Supports both "Squash and merge" and "Rebase and merge" PR merge types:
+# - Squash merges: Generates a single patch file and creates one commit in the sub-repo.
+# - Rebase merges: Generates multiple patch files (one per commit) and creates separate
+#   commits in the sub-repo for each patch, preserving individual commit history.
 #
 # Key Steps:
 # 1. Generate a GitHub App token for authentication.
 # 2. Checkout the super-repo at the merge commit.
 # 3. Use a Python script to detect which subtrees were modified.
 # 4. For each changed subtree:
-#    - Generate a patch from the merge commit for that subtree.
+#    - Generate patch(es) from the merge commit range for that subtree.
 #    - Determine the appropriate author (based on PR metadata or fallback).
-#    - Clone the target sub-repo and apply the patch.
-#    - Amend the commit message to include links to the super-repo PR and commit.
-#    - Push the commit directly to the sub-repo.
+#    - Clone the target sub-repo and apply the patch(es).
+#    - For multiple patches, create separate commits for each patch.
+#    - Amend commit messages to include links to the super-repo PR and commit.
+#    - Push the commit(s) directly to the sub-repo.
 #
 # This ensures downstream sub-repositories are updated to reflect changes
 # made in the super-repo immediately after merge.

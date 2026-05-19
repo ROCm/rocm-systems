@@ -19,7 +19,7 @@ namespace latency_profiler {
 struct CudaEventDeleter {
   void operator()(cudaEvent_t e) {
     // Ignore error at destroy
-    cudaEventDestroy(e);
+    (void)cudaEventDestroy(e);
   }
 };
 using CudaEventPtr = std::unique_ptr<

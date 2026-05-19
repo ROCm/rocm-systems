@@ -406,10 +406,10 @@ __host__ void rocshmem_ulonglong_p(
     unsigned long long *dest, unsigned long long value, int pe);
 
 __device__ ATTR_NO_INLINE void rocshmem_ctx_int64_p(
-    rocshmem_ctx_t ctx, unsigned long long *dest, unsigned long long value,
+    rocshmem_ctx_t ctx, int64_t *dest, int64_t value,
     int pe);
 __device__ ATTR_NO_INLINE void rocshmem_int64_p(
-    unsigned long long *dest, unsigned long long value, int pe);
+    int64_t *dest, int64_t value, int pe);
 
 /**
  * @name SHMEM_GET
@@ -1240,6 +1240,14 @@ __global__ ATTR_NO_INLINE void rocshmem_getmem_kernel(void *dest,
 __global__ ATTR_NO_INLINE void rocshmem_putmem_kernel(void *dest,
                                                       const void *source,
                                                       size_t nelems, int pe);
+
+/**
+ * @brief kernel for performing a quiet operation.
+ * Caller enqueues the kernel on given stream
+ *
+ * @return void
+ */
+__global__ ATTR_NO_INLINE void rocshmem_quiet_kernel();
 
 }  // namespace rocshmem
 

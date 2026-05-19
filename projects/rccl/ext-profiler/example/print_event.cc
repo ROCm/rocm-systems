@@ -29,7 +29,7 @@ __hidden void printGroupApiEventTrailer(FILE* fh, struct groupApi* event) {
 
 static __thread int p2pApiId;
 __hidden void printP2pApiEventHeader(FILE* fh, struct p2pApi* event) {
-  fprintf(fh, "{\"name\": \"%s\", \"cat\": \"P2P_API\", \"ph\": \"b\", \"id\": %d, \"pid\": %d, \"tid\": %d, \"ts\": %f, \"args\": {\"count\": %lu, \"datatype\": %s, \"GraphCaptured\":%d, \"Stream\": %p}},\n",
+  fprintf(fh, "{\"name\": \"%s\", \"cat\": \"P2P_API\", \"ph\": \"b\", \"id\": %d, \"pid\": %d, \"tid\": %d, \"ts\": %f, \"args\": {\"count\": %lu, \"datatype\": \"%s\", \"GraphCaptured\":%d, \"Stream\": \"%p\"}},\n",
       event->func, p2pApiId, getpid(), 1, event->startTs, event->count, event->datatype, event->graphCaptured, event->stream);
 }
 
@@ -40,7 +40,7 @@ __hidden void printP2pApiEventTrailer(FILE* fh, struct p2pApi* event) {
 
 static __thread int collApiId;
 __hidden void printCollApiEventHeader(FILE* fh, struct collApi* event) {
-  fprintf(fh, "{\"name\": \"%s\", \"cat\": \"COLL_API\", \"ph\": \"b\", \"id\": %d, \"pid\": %d, \"tid\": %d, \"ts\": %f, \"args\": {\"count\": %lu, \"datatype\": %s, \"root\": %d, \"GraphCaptured\":%d, \"Stream\": %p}},\n",
+  fprintf(fh, "{\"name\": \"%s\", \"cat\": \"COLL_API\", \"ph\": \"b\", \"id\": %d, \"pid\": %d, \"tid\": %d, \"ts\": %f, \"args\": {\"count\": %lu, \"datatype\": \"%s\", \"root\": %d, \"GraphCaptured\":%d, \"Stream\": \"%p\"}},\n",
       event->func, collApiId, getpid(), 1, event->startTs, event->count, event->datatype, event->root, event->graphCaptured, event->stream);
 }
 
@@ -51,7 +51,7 @@ __hidden void printCollApiEventTrailer(FILE* fh, struct collApi* event) {
 
 static __thread int kernelLaunchId;
 __hidden void printKernelLaunchEventHeader(FILE* fh, struct kernelLaunch* event) {
-  fprintf(fh, "{\"name\": \"%s\", \"cat\": \"KERNEL_LAUNCH\", \"ph\": \"b\", \"id\": %d, \"pid\": %d, \"tid\": %d, \"ts\": %f, \"args\": {\"groupId\": %d, \"Stream\": %p}},\n", "KernelLaunch", kernelLaunchId, getpid(), 1, event->startTs, event->kernelLaunchId, event->stream);
+  fprintf(fh, "{\"name\": \"%s\", \"cat\": \"KERNEL_LAUNCH\", \"ph\": \"b\", \"id\": %d, \"pid\": %d, \"tid\": %d, \"ts\": %f, \"args\": {\"groupId\": %d, \"Stream\": \"%p\"}},\n", "KernelLaunch", kernelLaunchId, getpid(), 1, event->startTs, event->kernelLaunchId, event->stream);
 }
 
 __hidden void printKernelLaunchEventTrailer(FILE* fh, struct kernelLaunch* event) {

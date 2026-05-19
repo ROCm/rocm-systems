@@ -1,0 +1,67 @@
+diff --git a/packages/opencode/src/cli/cmd/uninstall.ts b/packages/opencode/src/cli/cmd/uninstall.ts
+index c0517d491..29592a6b6 100644
+--- a/packages/opencode/src/cli/cmd/uninstall.ts
++++ b/packages/opencode/src/cli/cmd/uninstall.ts
+@@ -25,7 +25,7 @@ interface RemovalTargets {
+ 
+ export const UninstallCommand = {
+   command: "uninstall",
+-  describe: "uninstall opencode and remove all related files",
++  describe: "uninstall AMD ROCm PerfXpert / opencode engine and remove all related files",
+   builder: (yargs: Argv) =>
+     yargs
+       .option("keep-config", {
+@@ -56,7 +56,7 @@ export const UninstallCommand = {
+     UI.empty()
+     UI.println(UI.logo("  "))
+     UI.empty()
+-    prompts.intro("Uninstall OpenCode")
++    prompts.intro("Uninstall AMD ROCm PerfXpert")
+ 
+     const method = await AppRuntime.runPromise(Installation.Service.use((svc) => svc.method()))
+     prompts.log.info(`Installation method: ${method}`)
+@@ -230,7 +230,7 @@ async function executeUninstall(method: Installation.Method, targets: RemovalTar
+   }
+ 
+   UI.empty()
+-  prompts.log.success("Thank you for using OpenCode!")
++  prompts.log.success("Thank you for using AMD ROCm PerfXpert!")
+ }
+ 
+ async function getShellConfigFile(): Promise<string | null> {
+diff --git a/packages/opencode/src/cli/cmd/upgrade.ts b/packages/opencode/src/cli/cmd/upgrade.ts
+index b80648c24..ffe3dd7e2 100644
+--- a/packages/opencode/src/cli/cmd/upgrade.ts
++++ b/packages/opencode/src/cli/cmd/upgrade.ts
+@@ -7,7 +7,7 @@ import { InstallationVersion } from "../../installation/version"
+ 
+ export const UpgradeCommand = {
+   command: "upgrade [target]",
+-  describe: "upgrade opencode to the latest or a specific version",
++  describe: "upgrade AMD ROCm PerfXpert (opencode engine) to the latest or a specific version",
+   builder: (yargs: Argv) => {
+     return yargs
+       .positional("target", {
+@@ -25,11 +25,11 @@ export const UpgradeCommand = {
+     UI.empty()
+     UI.println(UI.logo("  "))
+     UI.empty()
+-    prompts.intro("Upgrade")
++    prompts.intro("Upgrade AMD ROCm PerfXpert")
+     const detectedMethod = await AppRuntime.runPromise(Installation.Service.use((svc) => svc.method()))
+     const method = (args.method as Installation.Method) ?? detectedMethod
+     if (method === "unknown") {
+-      prompts.log.error(`opencode is installed to ${process.execPath} and may be managed by a package manager`)
++      prompts.log.error(`PerfXpert (opencode engine) is installed to ${process.execPath} and may be managed by a package manager`)
+       const install = await prompts.select({
+         message: "Install anyways?",
+         options: [
+@@ -49,7 +49,7 @@ export const UpgradeCommand = {
+       : await AppRuntime.runPromise(Installation.Service.use((svc) => svc.latest()))
+ 
+     if (InstallationVersion === target) {
+-      prompts.log.warn(`opencode upgrade skipped: ${target} is already installed`)
++      prompts.log.warn(`PerfXpert upgrade skipped: ${target} is already installed`)
+       prompts.outro("Done")
+       return
+     }

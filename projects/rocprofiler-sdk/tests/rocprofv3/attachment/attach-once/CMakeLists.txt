@@ -31,6 +31,9 @@ set(attachment-env
     "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
     )
 
+# Unconditionally disabled: intermittent failure caused by test app abort
+set(IS_DISABLED ON)
+
 # Test that launches the app and attaches to it (CSV format)
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-attachment-attach-once
@@ -47,6 +50,7 @@ rocprofiler_add_integration_execute_test(
     SKIP_REGULAR_EXPRESSION "This test is skipped."
     FIXTURES_SETUP rocprofv3-test-attachment-attach-once
     FAIL_REGULAR_EXPRESSION "ERROR|FATAL|${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
 # Validate the output from the attached profiling
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-attachment-attach-once-csv

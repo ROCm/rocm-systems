@@ -14,6 +14,12 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/hip/**/*'
 
+"project: hipfile":
+- changed-files:
+  - any-glob-to-any-file:
+    - 'projects/hipfile/**/*'
+    - '.github/workflows/hipfile-*'
+
 "project: hipother":
 - changed-files:
   - any-glob-to-any-file: 'projects/hipother/**/*'
@@ -66,6 +72,10 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/rocprofiler-systems/**/*'
 
+"project: rocprof-trace-decoder":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rocprof-trace-decoder/**/*'
+
 "project: rocr-runtime":
 - changed-files:
   - any-glob-to-any-file: 'projects/rocr-runtime/**/*'
@@ -82,9 +92,17 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/rocjpeg/**/*'
 
-  "project: rocdecode":
+"project: rocdecode":
 - changed-files:
   - any-glob-to-any-file: 'projects/rocdecode/**/*'
+
+"project: rocr-debug-agent":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rocr-debug-agent/**/*'
+
+"project: rocdbgapi":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rocdbgapi/**/*'
 
 "shared: amdgpu-windows-interop":
 - changed-files:

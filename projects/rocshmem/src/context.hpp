@@ -115,10 +115,6 @@ class Context {
 
   __device__ void threadfence_system();
 
-  __device__ void ctx_create();
-
-  __device__ void ctx_destroy();
-
   __device__ void putmem(void* dest, const void* source, size_t nelems, int pe);
 
   __device__ void getmem(void* dest, const void* source, size_t nelems, int pe);
@@ -231,6 +227,13 @@ class Context {
   template <typename T>
   __device__ void alltoall(rocshmem_team_t team, T* dest, const T* source,
                            int nelems);
+
+  template <typename T>
+  __device__ void alltoallv(rocshmem_team_t team,
+                            T *dest, const size_t dest_nelems[],
+                            const size_t dest_displs[],
+                            T *source, const size_t source_nelems[],
+                            const size_t source_displs[]);
 
   template <typename T>
   __device__ void fcollect(rocshmem_team_t team, T* dest, const T* source,
@@ -396,6 +399,10 @@ class Context {
 
   __host__ void barrier_all_on_stream(hipStream_t stream);
 
+  __host__ void quiet_on_stream(hipStream_t stream);
+
+  __host__ void sync_all_on_stream(hipStream_t stream);
+
   __host__ void alltoallmem_on_stream(rocshmem_team_t team, void *dest,
                                       const void *source, size_t size,
                                       hipStream_t stream);
@@ -523,6 +530,13 @@ class Context {
    * communication through shared memory.
    */
   IpcImpl ipcImpl_{};
+
+  /**
+   * @brief Used to broadcast signal across wg.
+   *        Note: There are potentional issues where multiple wgs share the ctx (AIROCSHMEM-368)
+   */
+
+  uint64_t wg_signal_scratch = 0;
 };
 
 }  // namespace rocshmem

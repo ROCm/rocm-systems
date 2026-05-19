@@ -8,10 +8,13 @@
  * @file TestChecks.hpp
  * @brief Centralized test error checking and logging macros
  *
- * Provides all test-related macros for error checking, logging, and assertions:
- * - MPI error checking (MPICHECK with 3 overload variants)
+ * Common (always available):
+ * - HIP error checking (HIP_CHECK, HIP_EXPECT, HIP_TEST_CHECK_GTEST_FAIL,
+ *                        HIPCHECK, HIP_TEST_CHECK)
  * - NCCL error checking (RCCL_TEST_CHECK, RCCL_TEST_CHECK_GTEST_FAIL)
- * - HIP error checking (HIPCHECK, HIP_TEST_CHECK, HIP_TEST_CHECK_GTEST_FAIL)
+ *
+ * MPI-only (requires MPI_TESTS_ENABLED):
+ * - MPI error checking (MPICHECK with 3 overload variants)
  * - MPI-aware assertions (ASSERT_MPI_*)
  * - Debug logging (TEST_WARN, TEST_INFO, TEST_ABORT, TEST_TRACE)
  */
@@ -19,66 +22,135 @@
 #ifndef RCCL_TEST_CHECKS_HPP
 #define RCCL_TEST_CHECKS_HPP
 
-#ifdef MPI_TESTS_ENABLED
+// ============================================================================
+// Common macros — available to all test binaries (no MPI dependency)
+// ============================================================================
 
 #include "gtest/gtest.h"
 #include <cstdio>
-#include <cstring>
 #include <hip/hip_runtime.h>
-#include <mpi.h>
 #include <rccl/rccl.h>
-#include "utils.h" // For RCCL's getHostName utility
 
-// Forward declaration of MPIEnvironment class (defined in MPIEnvironment.hpp)
-class MPIEnvironment;
+// HIP Error Checking Macros (GTest-native)
 
-// Forward declarations for helper functions
-extern int         rcclTestDebugLevel;
-inline int         getTestDebugLevel();
-inline int         getTestMpiRank();
-inline const char* getTestHostname();
-inline bool        isMultiNodeTest();
+/**
+ * @def HIP_CHECK
+ * @brief Fatal HIP assertion for test bodies and void-returning helpers
+ *
+ * Consumes the [[nodiscard]] hipError_t and fails the current test on error.
+ * Uses ASSERT_EQ internally, so it aborts the current function on failure.
+ *
+ * @note Not suitable for destructors (use HIP_EXPECT there)
+ */
+#ifndef HIP_CHECK
+#define HIP_CHECK(cmd) ASSERT_EQ((cmd), hipSuccess)
+#endif
 
-// Helper function implementations
-inline int getTestDebugLevel()
-{
-    return rcclTestDebugLevel;
-}
+/**
+ * @def HIP_EXPECT
+ * @brief Non-fatal HIP check safe for destructors and non-void contexts
+ *
+ * Reports failure but continues execution.  Use in destructors where
+ * fatal assertions (ASSERT_*) must not be used.
+ */
+#ifndef HIP_EXPECT
+#define HIP_EXPECT(cmd) EXPECT_EQ((cmd), hipSuccess)
+#endif
 
-inline int getTestMpiRank()
-{
-    int rank = -1;
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    return rank;
-}
+/**
+ * @def HIP_TEST_CHECK_GTEST_FAIL
+ * @brief HIP error checking for GTest test bodies with detailed error output
+ *
+ * Checks HIP function calls and fails the test if an error occurs.
+ * Use in TEST_F/TEST_P test bodies.
+ *
+ * Behavior:
+ * - Checks HIP function result
+ * - Prints error with file/line to stdout
+ * - Calls FAIL() to mark test as failed
+ *
+ * @note For infrastructure code, use HIPCHECK or HIP_TEST_CHECK instead
+ */
+#define HIP_TEST_CHECK_GTEST_FAIL(cmd)                                                       \
+    do                                                                                       \
+    {                                                                                        \
+        hipError_t err = cmd;                                                                \
+        if(err != hipSuccess)                                                                \
+        {                                                                                    \
+            printf("HIP Error at %s:%d - %s\n", __FILE__, __LINE__, hipGetErrorString(err)); \
+            FAIL() << "HIP Error: " << hipGetErrorString(err);                               \
+        }                                                                                    \
+    }                                                                                        \
+    while(0)
 
-inline const char* getTestHostname()
-{
-    static char hostname[256] = {0};
-    static bool initialized   = false;
+// HIP Error Checking Macros (return-based, for ncclResult_t-returning functions)
 
-    if(!initialized)
-    {
-        // Use RCCL's getHostName utility to get short hostname (delimited by '.')
-        if(getHostName(hostname, sizeof(hostname), '.') != ncclSuccess)
-        {
-            strncpy(hostname, "unknown", sizeof(hostname) - 1);
-        }
-        initialized = true;
-    }
-    return hostname;
-}
+/**
+ * @def HIP_TEST_CHECK
+ * @brief HIP error checking macro for test infrastructure code
+ *
+ * Checks HIP function calls and returns ncclUnhandledCudaError if failed.
+ * Use in test setup/teardown and infrastructure code that returns ncclResult_t.
+ *
+ * Behavior:
+ * - Checks HIP function result
+ * - Logs error to stderr
+ * - Returns ncclUnhandledCudaError to caller
+ *
+ * @note Requires enclosing function to return ncclResult_t
+ * @note For test bodies, use HIP_CHECK or HIP_TEST_CHECK_GTEST_FAIL instead
+ */
+#define HIP_TEST_CHECK(cmd)                                      \
+    do                                                           \
+    {                                                            \
+        hipError_t err = cmd;                                    \
+        if(err != hipSuccess)                                    \
+        {                                                        \
+            fprintf(stderr,                                      \
+                    "HIP Error at %s:%d - %s (hipError_t=%d)\n", \
+                    __FILE__,                                    \
+                    __LINE__,                                    \
+                    hipGetErrorString(err),                      \
+                    static_cast<int>(err));                      \
+            return ncclUnhandledCudaError;                       \
+        }                                                        \
+    }                                                            \
+    while(0)
 
-// Forward declaration of helper function to access MPIEnvironment state
-// (Defined in MPIEnvironment.cpp to avoid circular dependency)
-int getMPIEnvironmentCachedMultiNodeResult();
-
-inline bool isMultiNodeTest()
-{
-    // Return cached result from global environment
-    // If not yet computed (== -1), assume single node to be safe
-    return getMPIEnvironmentCachedMultiNodeResult() == 1;
-}
+/**
+ * @def HIPCHECK
+ * @brief HIP error checking macro (library-style)
+ *
+ * Similar to RCCL library's CUDACHECK macro. Returns ncclUnhandledCudaError on error.
+ * Use in any code that returns ncclResult_t.
+ *
+ * Behavior:
+ * - Checks HIP function result
+ * - Logs error to stderr
+ * - Returns ncclUnhandledCudaError to caller
+ *
+ * @note Requires enclosing function to return ncclResult_t
+ * @note For GTest test bodies, use HIP_CHECK or HIP_TEST_CHECK_GTEST_FAIL instead
+ * @note This mirrors the library's CUDACHECK behavior
+ */
+#ifndef HIPCHECK
+    #define HIPCHECK(cmd)                                            \
+        do                                                           \
+        {                                                            \
+            hipError_t err = cmd;                                    \
+            if(err != hipSuccess)                                    \
+            {                                                        \
+                fprintf(stderr,                                      \
+                        "HIP Error at %s:%d - %s (hipError_t=%d)\n", \
+                        __FILE__,                                    \
+                        __LINE__,                                    \
+                        hipGetErrorString(err),                      \
+                        static_cast<int>(err));                      \
+                return ncclUnhandledCudaError;                       \
+            }                                                        \
+        }                                                            \
+        while(0)
+#endif // HIPCHECK
 
 // NCCL Error Checking Macros
 
@@ -138,100 +210,66 @@ inline bool isMultiNodeTest()
     }                                                                                          \
     while(0)
 
-// HIP Error Checking Macros
+// ============================================================================
+// MPI-only macros — require MPI_TESTS_ENABLED
+// ============================================================================
 
-/**
- * @def HIP_TEST_CHECK
- * @brief HIP error checking macro for test infrastructure code
- *
- * Checks HIP function calls and returns ncclUnhandledCudaError if failed.
- * Use in test setup/teardown and infrastructure code that returns ncclResult_t.
- *
- * Behavior:
- * - Checks HIP function result
- * - Logs error to stderr
- * - Returns ncclUnhandledCudaError to caller
- *
- * @note Requires enclosing function to return ncclResult_t
- * @note For test bodies, use HIP_TEST_CHECK_GTEST_FAIL instead
- */
-#define HIP_TEST_CHECK(cmd)                                      \
-    do                                                           \
-    {                                                            \
-        hipError_t err = cmd;                                    \
-        if(err != hipSuccess)                                    \
-        {                                                        \
-            fprintf(stderr,                                      \
-                    "HIP Error at %s:%d - %s (hipError_t=%d)\n", \
-                    __FILE__,                                    \
-                    __LINE__,                                    \
-                    hipGetErrorString(err),                      \
-                    static_cast<int>(err));                      \
-            return ncclUnhandledCudaError;                       \
-        }                                                        \
-    }                                                            \
-    while(0)
+#ifdef MPI_TESTS_ENABLED
 
-/**
- * @def HIPCHECK
- * @brief HIP error checking macro (library-style)
- *
- * Similar to RCCL library's CUDACHECK macro. Returns ncclUnhandledCudaError on error.
- * Use in any code that returns ncclResult_t.
- *
- * Behavior:
- * - Checks HIP function result
- * - Logs error to stderr
- * - Returns ncclUnhandledCudaError to caller
- *
- * @note Requires enclosing function to return ncclResult_t
- * @note For GTest test bodies, use HIP_TEST_CHECK_GTEST_FAIL instead
- * @note This mirrors the library's CUDACHECK behavior
- */
-#ifndef HIPCHECK
-    #define HIPCHECK(cmd)                                            \
-        do                                                           \
-        {                                                            \
-            hipError_t err = cmd;                                    \
-            if(err != hipSuccess)                                    \
-            {                                                        \
-                fprintf(stderr,                                      \
-                        "HIP Error at %s:%d - %s (hipError_t=%d)\n", \
-                        __FILE__,                                    \
-                        __LINE__,                                    \
-                        hipGetErrorString(err),                      \
-                        static_cast<int>(err));                      \
-                return ncclUnhandledCudaError;                       \
-            }                                                        \
-        }                                                            \
-        while(0)
-#endif // HIPCHECK
+#include <cstring>
+#include <mpi.h>
+#include "utils.h" // For RCCL's getHostName utility
 
-/**
- * @def HIP_TEST_CHECK_GTEST_FAIL
- * @brief HIP error checking for GTest test bodies
- *
- * Checks HIP function calls and fails the test if an error occurs.
- * Use in TEST_F/TEST_P test bodies.
- *
- * Behavior:
- * - Checks HIP function result
- * - Prints error to stdout
- * - Calls FAIL() to mark test as failed
- *
- * @note For infrastructure code, use HIPCHECK or HIP_TEST_CHECK instead
- */
-#define HIP_TEST_CHECK_GTEST_FAIL(cmd)                                                       \
-    do                                                                                       \
-    {                                                                                        \
-        hipError_t err = cmd;                                                                \
-        if(err != hipSuccess)                                                                \
-        {                                                                                    \
-            printf("HIP Error at %s:%d - %s\n", __FILE__, __LINE__, hipGetErrorString(err)); \
-            FAIL() << "HIP Error: " << hipGetErrorString(err);                               \
-        }                                                                                    \
-    }                                                                                        \
-    while(0)
+// Forward declaration of MPIEnvironment class (defined in MPIEnvironment.hpp)
+class MPIEnvironment;
+
+// Forward declarations for helper functions
+extern int         rcclTestDebugLevel;
+inline int         getTestDebugLevel();
+inline int         getTestMpiRank();
+inline const char* getTestHostname();
+inline bool        isMultiNodeTest();
+
+// Helper function implementations
+inline int getTestDebugLevel()
+{
+    return rcclTestDebugLevel;
+}
+
+inline int getTestMpiRank()
+{
+    int rank = -1;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    return rank;
+}
+
+inline const char* getTestHostname()
+{
+    static char hostname[256] = {0};
+    static bool initialized   = false;
+
+    if(!initialized)
+    {
+        // Use RCCL's getHostName utility to get short hostname (delimited by '.')
+        if(getHostName(hostname, sizeof(hostname), '.') != ncclSuccess)
+        {
+            strncpy(hostname, "unknown", sizeof(hostname) - 1);
+        }
+        initialized = true;
+    }
+    return hostname;
+}
+
+// Forward declaration of helper function to access MPIEnvironment state
+// (Defined in MPIEnvironment.cpp to avoid circular dependency)
+int getMPIEnvironmentCachedMultiNodeResult();
+
+inline bool isMultiNodeTest()
+{
+    // Return cached result from global environment
+    // If not yet computed (== -1), assume single node to be safe
+    return getMPIEnvironmentCachedMultiNodeResult() == 1;
+}
 
 // Debug Logging Macros (TEST_*)
 
@@ -348,19 +386,22 @@ inline bool isMultiNodeTest()
         while(0)
 
     // MPI-Aware Assertion Macros (ASSERT_MPI_*)
+    //
+    // These macros coordinate across MPI ranks using MPI_Allreduce so that
+    // if ANY rank's assertion fails, ALL ranks exit together (preventing
+    // deadlocks in subsequent collective operations).
+    //
+    // Failure semantics:
+    //   - Failing rank:  FAIL()       -> test marked FAILED with error details
+    //   - Passing ranks: GTEST_SKIP() -> clean exit to avoid MPI deadlock
 
 /**
  * @def ASSERT_MPI_TRUE
  * @brief MPI-aware version of ASSERT_TRUE
  *
- * Checks condition on all ranks. If ANY rank fails, ALL ranks skip together
- * to prevent deadlock. This is critical for MPI tests where collective
- * operations require all ranks to participate.
- *
- * Behavior:
- * - Evaluates condition on each rank
- * - Uses MPI_Allreduce to check if all ranks passed
- * - If any rank fails, all ranks call GTEST_SKIP() together
+ * Checks condition on all ranks. If ANY rank fails:
+ * - Failing rank calls FAIL() (test marked FAILED)
+ * - Passing ranks call GTEST_SKIP() (clean coordinated exit)
  *
  * @param condition The condition to test
  */
@@ -374,17 +415,15 @@ inline bool isMultiNodeTest()
                                                                                               \
         if(_global_status == 0)                                                               \
         {                                                                                     \
-            /* At least one rank failed */                                                    \
             if(!_local_pass)                                                                  \
             {                                                                                 \
-                /* This rank failed - show the actual error */                                \
-                EXPECT_TRUE(condition)                                                        \
-                    << "Rank " << MPIEnvironment::world_rank << " failed assertion";      \
+                FAIL()                                                                        \
+                    << "Rank " << MPIEnvironment::world_rank                                  \
+                    << ": ASSERT_MPI_TRUE(" << #condition << ") failed";                      \
             }                                                                                 \
-            /* All ranks skip together */                                                     \
             GTEST_SKIP()                                                                      \
-                << "Rank " << MPIEnvironment::world_rank                                  \
-                << ": Skipping test due to failure on at least one rank (synchronized exit)"; \
+                << "Rank " << MPIEnvironment::world_rank                                      \
+                << ": Aborting - assertion failed on another rank";                            \
         }                                                                                     \
     }                                                                                         \
     while(0)
@@ -393,14 +432,15 @@ inline bool isMultiNodeTest()
  * @def ASSERT_MPI_FALSE
  * @brief MPI-aware version of ASSERT_FALSE
  */
-    #define ASSERT_MPI_FALSE(condition) ASSERT_MPI_TRUE(!(condition))
+#define ASSERT_MPI_FALSE(condition) ASSERT_MPI_TRUE(!(condition))
 
 /**
  * @def ASSERT_MPI_EQ
  * @brief MPI-aware version of ASSERT_EQ
  *
- * Checks if val1 == val2 on all ranks. If ANY rank fails,
- * ALL ranks skip together to prevent deadlock.
+ * Checks if val1 == val2 on all ranks. If ANY rank fails:
+ * - Failing rank calls FAIL() (test marked FAILED)
+ * - Passing ranks call GTEST_SKIP() (clean coordinated exit)
  *
  * @param val1 First value
  * @param val2 Second value
@@ -419,12 +459,13 @@ inline bool isMultiNodeTest()
         {                                                                                     \
             if(!_local_pass)                                                                  \
             {                                                                                 \
-                EXPECT_EQ(_v1, _v2)                                                           \
-                    << "Rank " << MPIEnvironment::world_rank << " failed assertion";      \
+                FAIL()                                                                        \
+                    << "Rank " << MPIEnvironment::world_rank                                  \
+                    << ": ASSERT_MPI_EQ(" << #val1 << ", " << #val2 << ") failed";            \
             }                                                                                 \
             GTEST_SKIP()                                                                      \
-                << "Rank " << MPIEnvironment::world_rank                                  \
-                << ": Skipping test due to failure on at least one rank (synchronized exit)"; \
+                << "Rank " << MPIEnvironment::world_rank                                      \
+                << ": Aborting - assertion failed on another rank";                            \
         }                                                                                     \
     }                                                                                         \
     while(0)
@@ -450,12 +491,49 @@ inline bool isMultiNodeTest()
         {                                                                                     \
             if(!_local_pass)                                                                  \
             {                                                                                 \
-                EXPECT_NE(_v1, _v2)                                                           \
-                    << "Rank " << MPIEnvironment::world_rank << " failed assertion";      \
+                FAIL()                                                                        \
+                    << "Rank " << MPIEnvironment::world_rank                                  \
+                    << ": ASSERT_MPI_NE(" << #val1 << ", " << #val2 << ") failed";            \
             }                                                                                 \
             GTEST_SKIP()                                                                      \
-                << "Rank " << MPIEnvironment::world_rank                                  \
-                << ": Skipping test due to failure on at least one rank (synchronized exit)"; \
+                << "Rank " << MPIEnvironment::world_rank                                      \
+                << ": Aborting - assertion failed on another rank";                            \
+        }                                                                                     \
+    }                                                                                         \
+    while(0)
+
+/**
+ * @def ASSERT_MPI_GT
+ * @brief MPI-aware version of ASSERT_GT
+ *
+ * Checks if val1 > val2 on all ranks. If ANY rank fails:
+ * - Failing rank calls FAIL() (test marked FAILED)
+ * - Passing ranks call GTEST_SKIP() (clean coordinated exit)
+ *
+ * @param val1 First value (expected to be greater)
+ * @param val2 Second value
+ */
+#define ASSERT_MPI_GT(val1, val2)                                                             \
+    do                                                                                        \
+    {                                                                                         \
+        auto _v1            = (val1);                                                         \
+        auto _v2            = (val2);                                                         \
+        bool _local_pass    = (_v1 > _v2);                                                    \
+        int  _local_status  = _local_pass ? 1 : 0;                                            \
+        int  _global_status = 0;                                                              \
+        MPI_Allreduce(&_local_status, &_global_status, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);  \
+                                                                                              \
+        if(_global_status == 0)                                                               \
+        {                                                                                     \
+            if(!_local_pass)                                                                  \
+            {                                                                                 \
+                FAIL()                                                                        \
+                    << "Rank " << MPIEnvironment::world_rank                                  \
+                    << ": ASSERT_MPI_GT(" << #val1 << ", " << #val2 << ") failed";            \
+            }                                                                                 \
+            GTEST_SKIP()                                                                      \
+                << "Rank " << MPIEnvironment::world_rank                                      \
+                << ": Aborting - assertion failed on another rank";                            \
         }                                                                                     \
     }                                                                                         \
     while(0)
@@ -464,8 +542,9 @@ inline bool isMultiNodeTest()
  * @def ASSERT_MPI_SUCCESS
  * @brief MPI-aware assertion for MPI operations
  *
- * Checks if MPI operation succeeded on all ranks. If ANY rank fails,
- * ALL ranks skip together. Provides better error messages for MPI operations.
+ * Checks if MPI operation succeeded on all ranks. If ANY rank fails:
+ * - Failing rank calls FAIL() with MPI error string
+ * - Passing ranks call GTEST_SKIP() (clean coordinated exit)
  *
  * @param expr Expression that returns an MPI error code
  */
@@ -485,11 +564,11 @@ inline bool isMultiNodeTest()
                 char _error_string[MPI_MAX_ERROR_STRING];                                      \
                 int  _len;                                                                     \
                 MPI_Error_string(_result, _error_string, &_len);                               \
-                EXPECT_EQ(_result, MPI_SUCCESS) << "Rank " << MPIEnvironment::world_rank   \
-                                                << " failed MPI operation: " << _error_string; \
+                FAIL() << "Rank " << MPIEnvironment::world_rank                                \
+                       << ": MPI operation failed: " << _error_string;                         \
             }                                                                                  \
-            GTEST_SKIP() << "Rank " << MPIEnvironment::world_rank                          \
-                         << ": Skipping test due to MPI failure on at least one rank";         \
+            GTEST_SKIP() << "Rank " << MPIEnvironment::world_rank                              \
+                         << ": Aborting - MPI failure on another rank";                        \
         }                                                                                      \
     }                                                                                          \
     while(0)

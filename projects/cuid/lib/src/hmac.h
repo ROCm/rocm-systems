@@ -49,7 +49,7 @@ public:
     amdcuid_status_t set_hmac_key(const uint8_t key_data[key_length]);
     amdcuid_status_t generate_key(uint8_t key[key_length]);
 
-    std::string key_file_path = "/opt/cuid/hmac_key.bin";
+    std::string key_file_path = "/opt/amdcuid/etc/hmac_key.bin";
 };
 
 #endif // HMAC_H

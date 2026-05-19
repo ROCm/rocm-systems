@@ -73,7 +73,7 @@ jobs:
 
       - name: Install ROCm Packages
         timeout-minutes: 30
-        uses: nick-fields/retry@v3
+        uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 #v4.0.0
         with:
           retry_wait_seconds: 30
           timeout_minutes: 30
@@ -88,11 +88,17 @@ jobs:
               yum install -y https://repo.radeon.com/amdgpu-install/${ROCM_MAJOR}.${ROCM_MINOR}/rhel/9.4/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1.el9.noarch.rpm
             fi
             yum install -y rocm-dev
-            
+
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
-          sparse-checkout: projects/rocprofiler-compute
+          sparse-checkout: |
+            projects/rocprofiler-compute
+            shared/ctest
+          set-safe-directory: true
+
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory '*'
 
       - name: Install Python prereqs
         working-directory: projects/rocprofiler-compute

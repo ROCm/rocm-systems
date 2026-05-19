@@ -44,9 +44,10 @@
  * - 1.16 - Add contiguous VRAM allocation flag
  * - 1.17 - Add SDMA queue creation with target SDMA engine ID
  * - 1.18 - Rename pad in set_memory_policy_args to misc_process_flag
+ * - 1.19 - Add queue creation with metadata ring base address
  */
 #define KFD_IOCTL_MAJOR_VERSION 1
-#define KFD_IOCTL_MINOR_VERSION 18
+#define KFD_IOCTL_MINOR_VERSION 19
 
 struct kfd_ioctl_get_version_args {
 	__u32 major_version;	/* from KFD */
@@ -82,7 +83,7 @@ struct kfd_ioctl_create_queue_args {
 	__u32 ctx_save_restore_size;	/* to KFD */
 	__u32 ctl_stack_size;		/* to KFD */
 	__u32 sdma_engine_id;		/* to KFD */
-	__u32 pad;
+	__u32 metadata_ring_size;		/* to KFD */
 };
 
 struct kfd_ioctl_destroy_queue_args {
@@ -1691,6 +1692,17 @@ struct kfd_ioctl_ais_args {
 	};
 };
 
+/**
+ * kfd_ioctl_create_process_args
+ * Create secondary KFD context ioctl operations
+ *
+ * @flags not use at current.
+ */
+struct kfd_ioctl_create_process_args {
+	__u32 flags; 		/* [IN] */
+	__u32 pad;
+};
+
 #define AMDKFD_IOCTL_BASE 'K'
 #define AMDKFD_IO(nr)			_IO(AMDKFD_IOCTL_BASE, nr)
 #define AMDKFD_IOR(nr, type)		_IOR(AMDKFD_IOCTL_BASE, nr, type)
@@ -1811,8 +1823,11 @@ struct kfd_ioctl_ais_args {
 #define AMDKFD_IOC_DBG_TRAP			\
 		AMDKFD_IOWR(0x26, struct kfd_ioctl_dbg_trap_args)
 
+#define AMDKFD_IOC_CREATE_PROCESS		\
+		AMDKFD_IOWR(0x27, struct kfd_ioctl_create_process_args)
+
 #define AMDKFD_COMMAND_START		0x01
-#define AMDKFD_COMMAND_END		0x27
+#define AMDKFD_COMMAND_END		0x28
 
 /* non-upstream ioctls */
 #define AMDKFD_IOC_IPC_IMPORT_HANDLE                                    \

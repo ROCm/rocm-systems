@@ -1,22 +1,8 @@
-/* Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -26,6 +12,46 @@
 #include "palImage.h"
 #include "palFormatInfo.h"
 #include "util/palSysMemory.h"
+
+#include <cstdlib>
+#include <new>
+#include <utility>
+
+namespace amd {
+
+//! Allocate `sizeof(T) + extSize` bytes via std::malloc and placement-construct T at the
+//! start. The trailing `extSize` bytes are intended for caller-provided placement of
+//! supplementary data (e.g. a PAL object whose size is reported by IDevice::Get*Size()).
+//! Returns nullptr if allocation fails. If T's constructor throws, the storage is freed and
+//! the exception is rethrown — preserving the cleanup guarantee that HeapObject's matching
+//! placement-style operator delete used to provide.
+template <class T, class... Args>
+T* AllocWithTrailing(size_t extSize, Args&&... args) {
+  void* mem = std::malloc(sizeof(T) + extSize);
+  if (mem == nullptr) {
+    return nullptr;
+  }
+  try {
+    return new (mem) T(std::forward<Args>(args)...);
+  } catch (...) {
+    std::free(mem);
+    throw;
+  }
+}
+
+//! Counterpart to AllocWithTrailing: invokes T's destructor and frees the storage. Null-safe.
+//! Must be paired with AllocWithTrailing — calling it on memory obtained from any other
+//! allocator (including global ::operator new) is undefined behavior.
+template <class T>
+void DestroyWithTrailing(T* obj) {
+  if (obj == nullptr) {
+    return;
+  }
+  obj->~T();
+  std::free(obj);
+}
+
+}  // namespace amd
 
 //
 /// Memory Object Type

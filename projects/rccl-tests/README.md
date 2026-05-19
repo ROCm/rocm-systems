@@ -21,6 +21,14 @@ RCCL Tests rely on MPI to work on multiple processes, hence multiple nodes.
 $ make MPI=1 MPI_HOME=/path/to/mpi HIP_HOME=/path/to/hip NCCL_HOME=/path/to/rccl
 ```
 
+You can also add a suffix to the name of the generated binaries with `NAME_SUFFIX`. For example when compiling with the MPI versions you could use:
+
+```shell
+$ make MPI=1 NAME_SUFFIX=_mpi MPI_HOME=/path/to/mpi HIP_HOME=/path/to/hip NCCL_HOME=/path/to/rccl
+```
+
+This will generate test binaries with names such as `all_reduce_perf_mpi`.
+
 RCCL Tests can also be built using cmake. A typical sequence will be:
 
 ```shell
@@ -74,13 +82,14 @@ RCCL Tests can run on multiple processes, multiple threads, and multiple HIP dev
 
 ### Quick examples
 
-Run on single node with 8 GPUs (`-g 8`), scanning from 8 Bytes to 128MBytes :
+Run on single node with 8 GPUs (`-g 8`), scanning from 8 Bytes to 128MiB (Mebibytes), doubling between each test (`-f 2`) :
 
 ```shell
 $ ./build/all_reduce_perf -b 8 -e 128M -f 2 -g 8
 ```
 
-Run 64 MPI processes on nodes with 8 GPUs each, for a total of 64 GPUs spread across 8 nodes :
+Run 64 MPI processes on nodes with 8 GPUs each, for a total of 64 GPUs spread across 8 nodes.
+Scanning from 8 Bytes to 32GiB (Gibibytes), doubling between each test (`-f 2`).
 (NB: The rccl-tests binaries must be compiled with `MPI=1` for this case)
 
 ```shell
@@ -117,20 +126,20 @@ All tests support the same set of arguments :
   * `-t,--nthreads <num threads>` number of threads per process. Default : 1.
   * `-g,--ngpus <GPUs per thread>` number of gpus per thread. Default : 1.
 * Sizes to scan
-  * `-b,--minbytes <min size in bytes>` minimum size to start with. Default : 32M.
-  * `-e,--maxbytes <max size in bytes>` maximum size to end at. Default : 32M.
-  * Increments can be either fixed or a multiplication factor. Only one of those should be used
-    * `-i,--stepbytes <increment size>` fixed increment between sizes. Default : 1M.
+  * `-b,--minbytes <min size in bytes>` minimum size to start with. Default : 32M (Mebibytes).
+  * `-e,--maxbytes <max size in bytes>` maximum size to end at. Default : 32M (Mebibytes).
+  * Increments can be either fixed or a multiplication factor. Only one of those should be used.
+    * `-i,--stepbytes <increment size>` fixed increment between sizes. Default : 1M (Mebibytes).
     * `-f,--stepfactor <increment factor>` multiplication factor between sizes. Default : disabled.
 * RCCL operations arguments
   * `-o,--op <sum/prod/min/max/avg/all>` Specify which reduction operation to perform. Only relevant for reduction operations like Allreduce, Reduce or ReduceScatter. Default : Sum.
   * `-d,--datatype <nccltype/all>` Specify which datatype to use. Default : Float.
   * `-r,--root <root/all>` Specify which root to use. Only for operations with a root like broadcast or reduce. Default : 0.
-  * `-y,--memory_type <coarse/fine/host/managed>` Default: Coarse
-  * `-u,--cumask <d0,d1,d2,d3>` Default: None
+  * `-Y,--memory_type <coarse/fine/host/managed>` Specify memory type for buffer allocation. Default: Coarse
+  * `-u,--cumask <d0,d1,d2,d3>` CU mask for GPU selection (hexadecimal values). Default: None
 * Performance
   * `-n,--iters <iteration count>` number of iterations. Default : 20.
-  * `-w,--warmup_iters <warmup iteration count>` number of warmup iterations (not timed). Default : 5.
+  * `-w,--warmup_iters <warmup iteration count>` number of warmup iterations (not timed). Default : 1.
   * `-m,--agg_iters <aggregation count>` number of operations to aggregate together in each iteration. Default : 1.
   * `-N,--run_cycles <cycle count>` run & print each cycle. Default : 1; 0=infinite.
   * `-a,--average <0/1/2/3>` Report performance as an average across all ranks (MPI=1 only). <0=Rank0,1=Avg,2=Min,3=Max>. Default : 1.
@@ -138,17 +147,26 @@ All tests support the same set of arguments :
   * `-p,--parallel_init <0/1>` use threads to initialize NCCL in parallel. Default : 0.
   * `-c,--check <check iteration count>` perform count iterations, checking correctness of results on each iteration. This can be quite slow on large numbers of GPUs. Default : 1.
   * `-z,--blocking <0/1>` Make RCCL collective blocking, i.e. have CPUs wait and sync after each collective. Default : 0.
-  * `-G,--hipgraph <num graph launches>` Capture iterations as a HIP graph and then replay specified number of times. Default : 0.
-  * `-C,--report_cputime <0/1>]` Report CPU time instead of latency. Default : 0.
+  * `-y,--stream_null <0/1>` Use NULL stream instead of creating a new stream. Default : 0.
+  * `-G,--cudagraph <num graph launches>` Capture iterations as a HIP graph and then replay specified number of times. Default : 0.
+  * `-C,--report_cputime <0/1>` Report CPU time instead of latency. Default : 0.
   * `-R,--local_register <0/1/2>` enable local (1) or symmetric (2) buffer registration on send/recv buffers. Default : 0.
+  * `-S,--report_timestamps <0/1>` Add timestamp (`"%Y-%m-%d %H:%M:%S"`) to each performance report line. Default : 0.
+  * `-J,--output_file <file>` Write JSON output to filepath. Infer type from suffix (only `json` supported presently).
   * `-T,--timeout <time in seconds>` timeout each test after specified number of seconds. Default : disabled.
-  * `-F,--cache_flush <cache flush after every -F iteration>` Enable cache flush after every -F iteration. Default : 0 (No cache flush).
-  * `-O,--out_of_place <0=in-place only, 1=out-of-place only>`. Default: both.
-  * `-q,--delay <delay>` Delay between out-of-place and in-place runs (in microseconds). Default: 10.
-* Parsing RCCL-Tests output
-  * `-Z,--output_format <csv|json>` Parse RCCL-Tests output as a CSV or JSON. Default : disabled.
-  * `-x,--output_file <output file name>` RCCL-Tests output file name. Default : disabled.
-  * `-M,--output_algo_proto_channels <0/1>` Report Algorithm/Protocol/Channels for each message size. Default : 0.
+  * `-M,--memory_report <0/1>` enable memory usage report. Default : 0.
+  * `-F,--cache_flush <number of iterations between instruction cache flush>` Enable cache flush after specified number of iterations. Default : 0 (No cache flush).
+  * `-O,--out_of_place <0/1>` 0=in-place only, 1=out-of-place only. Default: both.
+  * `-q,--delay_inout_place <delay in microseconds>` Delay between out-of-place and in-place runs (in microseconds). Default: 10.
+  * `-E,--rotating_tensor <0/1>` Enable rotating tensor pattern. Default : 0.
+  * `-A,--output_algo_proto_channels <0/1>` Report Algorithm/Protocol/Channels for each message size. Default : 0.
+* Device API (RCCL 2.28+)
+  * `-D,--device_implementation <implementation number>` Enable device implementation (default: 0, use NCCL implementation; requires -R 2 if > 0).
+  * `-V,--device_cta_count <number>` Set number of CTAs for device implementation (default: 16).
+  * `-x,--cta_policy <0/1/2>` Set CTA policy (NCCL_CTA_POLICY_DEFAULT (0), NCCL_CTA_POLICY_EFFICIENCY (1), NCCL_CTA_POLICY_ZERO (2)) (default: do not set).
+* RCCL Reporter output
+  * `-X,--rccl_output_file <file>` RCCL Reporter output file for csv/json (used with -Z). Default : disabled.
+  * `-Z,--rccl_output_format <csv|json>` Set RCCL Reporter output format (csv or json). Default : disabled.
 
 ### Running multiple operations in parallel
 

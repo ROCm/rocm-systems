@@ -38,6 +38,22 @@
 
 namespace rocshmem {
 
+/**
+ * @brief Type of allocator
+ *
+ * Used to identify the memory allocation strategy at runtime.
+ */
+enum AllocatorType {
+  AllocatorTypeCoarsegrained = 0,
+  AllocatorTypeFinegrained,
+  AllocatorTypeUncached,
+  AllocatorTypeVMMPosix,
+  AllocatorTypeVMMFabric,
+  AllocatorTypeHost,
+  AllocatorTypePosix,
+  AllocatorTypeLast
+};
+
 class MemoryAllocator {
  public:
   /**
@@ -103,17 +119,23 @@ class MemoryAllocator {
   void deallocate(void* ptr);
 
   /**
-   * @brief Returns is memory is managed
+   * @brief Get allocator type
    *
-   * @return returns whether this memory is managed
+   * @return AllocatorType identifying the allocator strategy
    */
-  bool is_managed();
+  AllocatorType get_type() const { return type_; }
 
+ public:
  protected:
   /**
    * @brief is this memory allocated using managed memory
    */
   bool _managed{false};
+
+  /**
+   * @brief Type of allocator for runtime identification
+   */
+  AllocatorType type_{AllocatorTypeCoarsegrained};
 
  private:
   /**
@@ -158,11 +180,6 @@ class MemoryAllocator {
    * @brief a hip-specific free function
    */
   std::function<hipError_t(void*)> _hip_free{nullptr};
-
-  /**
-   * @brief a hip-specific return code
-   */
-  hipError_t _hip_return_value{hipSuccess};
 };
 
 }  // namespace rocshmem

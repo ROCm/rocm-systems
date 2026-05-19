@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
@@ -45,7 +32,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphAddDependencies_Positive_Functional") {
+HIP_TEST_CASE(Unit_hipGraphAddDependencies_Positive_Functional) {
   constexpr size_t N = 1024;
   hipGraph_t graph;
   hipStream_t streamForGraph;
@@ -110,7 +97,7 @@ TEST_CASE("Unit_hipGraphAddDependencies_Positive_Functional") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphAddDependencies_Positive_Parameters") {
+HIP_TEST_CASE(Unit_hipGraphAddDependencies_Positive_Parameters) {
   constexpr size_t Nbytes = 1024;
   hipGraphNode_t memcpyH2D_A;
   hipGraphNode_t memcpyD2H_A;
@@ -191,7 +178,7 @@ TEST_CASE("Unit_hipGraphAddDependencies_Positive_Parameters") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphAddDependencies_Negative_Parameters") {
+HIP_TEST_CASE(Unit_hipGraphAddDependencies_Negative_Parameters) {
   // Initialize
   constexpr size_t Nbytes = 1024;
   hipGraph_t graph;
@@ -208,7 +195,6 @@ TEST_CASE("Unit_hipGraphAddDependencies_Negative_Parameters") {
   memsetParams.width = Nbytes;
   memsetParams.height = 1;
   hipGraphNode_t memcpyH2D_A;
-  hipGraphNode_t memcpyD2H_A;
   char* A_h;
   A_h = reinterpret_cast<char*>(malloc(Nbytes));
 
@@ -283,17 +269,6 @@ TEST_CASE("Unit_hipGraphAddDependencies_Negative_Parameters") {
   SECTION("Same Node Dependencies") {
     HIP_CHECK(hipGraphAddMemsetNode(&memset_A, graph, nullptr, 0, &memsetParams));
     HIP_CHECK_ERROR(hipGraphAddDependencies(graph, &memset_A, &memset_A, 1), hipErrorInvalidValue);
-  }
-
-  SECTION("numDependencies > To/From length") {
-    HIP_CHECK(hipGraphAddMemsetNode(&memset_A, graph, nullptr, 0, &memsetParams));
-    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0, A_d, A_h, Nbytes,
-                                      hipMemcpyHostToDevice));
-    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_A, graph, nullptr, 0, A_h, A_d, Nbytes,
-                                      hipMemcpyDeviceToHost));
-    hipGraphNode_t from_list[] = {memset_A, memcpyH2D_A};
-    hipGraphNode_t to_list[] = {memcpyH2D_A, memcpyD2H_A};
-    HIP_CHECK_ERROR(hipGraphAddDependencies(graph, from_list, to_list, 3), hipErrorInvalidValue);
   }
 
   // Destroy

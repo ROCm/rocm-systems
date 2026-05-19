@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 
 #include <hip/hip_fp16.h>
@@ -42,8 +26,6 @@ __host__ __device__ constexpr __half makeHalfFromBits(unsigned short bits) {
 
 constexpr __half kConstTwo = makeHalfFromBits(kHalfTwo);
 constexpr __half kConstPi = makeHalfFromBits(kHalfPi);
-constexpr __half kConstInf = makeHalfFromBits(kHalfInf);
-
 
 /**
  * Device kernel that uses constexpr __half values.
@@ -66,7 +48,7 @@ __global__ void testConstexprHalfDevice(float* results) {
  * - This is the pattern used by libhipcxx for mathematical constants
  * - Verifies fix for union active member issue in constexpr evaluation
  */
-TEST_CASE("Unit_hipTestHalfConstexpr_HostConstexpr") {
+HIP_TEST_CASE(Unit_hipTestHalfConstexpr_HostConstexpr) {
   // Test that constexpr __half values have correct bit patterns on host
 
   SECTION("Two") {
@@ -102,7 +84,7 @@ TEST_CASE("Unit_hipTestHalfConstexpr_HostConstexpr") {
  * - Tests that constexpr __half values can be used in device kernels
  * - Verifies both file-scope and kernel-local constexpr values work
  */
-TEST_CASE("Unit_hipTestHalfConstexpr_DeviceConstexpr") {
+HIP_TEST_CASE(Unit_hipTestHalfConstexpr_DeviceConstexpr) {
   constexpr size_t numResults = 3;
   float* results_d = nullptr;
   std::vector<float> results_h(numResults, 0.0f);
@@ -122,5 +104,3 @@ TEST_CASE("Unit_hipTestHalfConstexpr_DeviceConstexpr") {
 
   HIP_CHECK(hipFree(results_d));
 }
-
-

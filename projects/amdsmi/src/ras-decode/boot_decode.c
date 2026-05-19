@@ -57,27 +57,27 @@ static const boot_decoder_entry_t boot_decoder_map_v1[] = {
     {0, NULL}  // Sentinel
 };
 
-int get_boot_version(OamBootMsg *msg) {
+int get_boot_version(OamBootMsg* msg) {
   if (!msg) return 0;
   return extract_byte(msg->value, 1) >> 5;
 }
 
-int get_error_encoding(OamBootMsg *msg) {
+int get_error_encoding(OamBootMsg* msg) {
   if (!msg) return 0;
   return (int)(extract_byte(msg->value, 1) & extract_bits(5));
 }
 
-bool error_present(OamBootMsg *msg) {
+bool error_present(OamBootMsg* msg) {
   if (!msg) return false;
   return extract_byte(msg->value, 0) == BOOT_ERROR_PRESENT_MARKER;
 }
 
-bool in_boot(OamBootMsg *msg) {
+bool in_boot(OamBootMsg* msg) {
   if (!msg) return false;
   return extract_byte(msg->value, 0) == BOOT_IN_BOOT_MARKER;
 }
 
-int get_socket(OamBootMsg *msg, int version) {
+int get_socket(OamBootMsg* msg, int version) {
   if (!msg) return 0;
 
   if (version == 0) {
@@ -87,7 +87,7 @@ int get_socket(OamBootMsg *msg, int version) {
   }
 }
 
-int get_aid(OamBootMsg *msg, int version) {
+int get_aid(OamBootMsg* msg, int version) {
   if (!msg) return 0;
 
   if (version == 0) {
@@ -108,13 +108,13 @@ int decode_hbm_stack(uint8_t stack) {
   }
 }
 
-JsonValue *create_failed_links_array(uint8_t byte_value, int max_links) {
-  JsonValue *array = json_create_array();
+JsonValue* create_failed_links_array(uint8_t byte_value, int max_links) {
+  JsonValue* array = json_create_array();
   if (!array) return NULL;
 
   for (int i = 0; i < max_links; i++) {
     if ((byte_value >> i) & 0x1) {
-      JsonValue *link_num = json_create_number(i);
+      JsonValue* link_num = json_create_number(i);
       if (link_num) {
         json_array_push(array, link_num);
       }
@@ -124,10 +124,10 @@ JsonValue *create_failed_links_array(uint8_t byte_value, int max_links) {
   return array;
 }
 
-char *create_hex_string(uint64_t value, int width) {
+char* create_hex_string(uint64_t value, int width) {
   if (width < 0) return NULL;
   size_t buffer_size = (size_t)width + 3U;  // '0' + 'x' + width digits + '\0'
-  char *hex_str = malloc(buffer_size);
+  char* hex_str = malloc(buffer_size);
   if (!hex_str) return NULL;
 
   snprintf(hex_str, buffer_size, "0x%0*llX", width, (unsigned long long)value);
@@ -135,10 +135,10 @@ char *create_hex_string(uint64_t value, int width) {
 }
 
 // Version 0 decoder implementations
-JsonValue *decode_hbm_training_v0(OamBootMsg *msg) {
+JsonValue* decode_hbm_training_v0(OamBootMsg* msg) {
   if (!msg) return NULL;
 
-  JsonValue *result = json_create_object();
+  JsonValue* result = json_create_object();
   if (!result) return NULL;
 
   int version = get_boot_version(msg);
@@ -154,10 +154,10 @@ JsonValue *decode_hbm_training_v0(OamBootMsg *msg) {
   return result;
 }
 
-JsonValue *decode_fw_load_v0(OamBootMsg *msg) {
+JsonValue* decode_fw_load_v0(OamBootMsg* msg) {
   if (!msg) return NULL;
 
-  JsonValue *result = json_create_object();
+  JsonValue* result = json_create_object();
   if (!result) return NULL;
 
   int version = get_boot_version(msg);
@@ -165,7 +165,7 @@ JsonValue *decode_fw_load_v0(OamBootMsg *msg) {
   uint8_t byte2 = extract_byte(msg->value, 2);
   uint16_t fw_id = (uint16_t)((byte3 << 8) | byte2);
 
-  char *fw_id_str = create_hex_string(fw_id, 4);
+  char* fw_id_str = create_hex_string(fw_id, 4);
 
   json_object_set(result, "error_type", json_create_string(RAS_DECODE_ERROR_TYPE_FW_LOAD));
   json_object_set(result, "socket", json_create_number(get_socket(msg, version)));
@@ -176,15 +176,15 @@ JsonValue *decode_fw_load_v0(OamBootMsg *msg) {
   return result;
 }
 
-JsonValue *decode_wafl_link_training_v0(OamBootMsg *msg) {
+JsonValue* decode_wafl_link_training_v0(OamBootMsg* msg) {
   if (!msg) return NULL;
 
-  JsonValue *result = json_create_object();
+  JsonValue* result = json_create_object();
   if (!result) return NULL;
 
   int version = get_boot_version(msg);
   uint8_t byte2 = extract_byte(msg->value, 2);
-  JsonValue *failed_links = create_failed_links_array(byte2, 2);
+  JsonValue* failed_links = create_failed_links_array(byte2, 2);
 
   json_object_set(result, "error_type",
                   json_create_string(RAS_DECODE_ERROR_TYPE_WAFL_LINK_TRAINING));
@@ -195,15 +195,15 @@ JsonValue *decode_wafl_link_training_v0(OamBootMsg *msg) {
   return result;
 }
 
-JsonValue *decode_xgmi_link_training_v0(OamBootMsg *msg) {
+JsonValue* decode_xgmi_link_training_v0(OamBootMsg* msg) {
   if (!msg) return NULL;
 
-  JsonValue *result = json_create_object();
+  JsonValue* result = json_create_object();
   if (!result) return NULL;
 
   int version = get_boot_version(msg);
   uint8_t byte2 = extract_byte(msg->value, 2);
-  JsonValue *failed_links = create_failed_links_array(byte2, 8);
+  JsonValue* failed_links = create_failed_links_array(byte2, 8);
 
   json_object_set(result, "error_type",
                   json_create_string(RAS_DECODE_ERROR_TYPE_XGMI_LINK_TRAINING));
@@ -214,15 +214,15 @@ JsonValue *decode_xgmi_link_training_v0(OamBootMsg *msg) {
   return result;
 }
 
-JsonValue *decode_usr_cp_link_training_v0(OamBootMsg *msg) {
+JsonValue* decode_usr_cp_link_training_v0(OamBootMsg* msg) {
   if (!msg) return NULL;
 
-  JsonValue *result = json_create_object();
+  JsonValue* result = json_create_object();
   if (!result) return NULL;
 
   int version = get_boot_version(msg);
   uint8_t byte2 = extract_byte(msg->value, 2);
-  JsonValue *failed_links = create_failed_links_array(byte2, 2);
+  JsonValue* failed_links = create_failed_links_array(byte2, 2);
 
   json_object_set(result, "error_type",
                   json_create_string(RAS_DECODE_ERROR_TYPE_USR_CP_LINK_TRAINING));
@@ -233,15 +233,15 @@ JsonValue *decode_usr_cp_link_training_v0(OamBootMsg *msg) {
   return result;
 }
 
-JsonValue *decode_usr_dp_link_training_v0(OamBootMsg *msg) {
+JsonValue* decode_usr_dp_link_training_v0(OamBootMsg* msg) {
   if (!msg) return NULL;
 
-  JsonValue *result = json_create_object();
+  JsonValue* result = json_create_object();
   if (!result) return NULL;
 
   int version = get_boot_version(msg);
   uint8_t byte2 = extract_byte(msg->value, 2);
-  JsonValue *failed_links = create_failed_links_array(byte2, 4);
+  JsonValue* failed_links = create_failed_links_array(byte2, 4);
 
   json_object_set(result, "error_type",
                   json_create_string(RAS_DECODE_ERROR_TYPE_USR_DP_LINK_TRAINING));
@@ -252,10 +252,10 @@ JsonValue *decode_usr_dp_link_training_v0(OamBootMsg *msg) {
   return result;
 }
 
-JsonValue *decode_hbm_mem_test_v0(OamBootMsg *msg) {
+JsonValue* decode_hbm_mem_test_v0(OamBootMsg* msg) {
   if (!msg) return NULL;
 
-  JsonValue *result = json_create_object();
+  JsonValue* result = json_create_object();
   if (!result) return NULL;
 
   int version = get_boot_version(msg);
@@ -271,10 +271,10 @@ JsonValue *decode_hbm_mem_test_v0(OamBootMsg *msg) {
   return result;
 }
 
-JsonValue *decode_hbm_bist_test_v0(OamBootMsg *msg) {
+JsonValue* decode_hbm_bist_test_v0(OamBootMsg* msg) {
   if (!msg) return NULL;
 
-  JsonValue *result = json_create_object();
+  JsonValue* result = json_create_object();
   if (!result) return NULL;
 
   int version = get_boot_version(msg);
@@ -290,10 +290,10 @@ JsonValue *decode_hbm_bist_test_v0(OamBootMsg *msg) {
   return result;
 }
 
-JsonValue *decode_boot_controller_generic_v0(OamBootMsg *msg) {
+JsonValue* decode_boot_controller_generic_v0(OamBootMsg* msg) {
   if (!msg) return NULL;
 
-  JsonValue *result = json_create_object();
+  JsonValue* result = json_create_object();
   if (!result) return NULL;
 
   int version = get_boot_version(msg);
@@ -307,10 +307,10 @@ JsonValue *decode_boot_controller_generic_v0(OamBootMsg *msg) {
 }
 
 // Version 1 decoder implementations
-JsonValue *decode_hbm_training_v1(OamBootMsg *msg) {
+JsonValue* decode_hbm_training_v1(OamBootMsg* msg) {
   if (!msg) return NULL;
 
-  JsonValue *result = json_create_object();
+  JsonValue* result = json_create_object();
   if (!result) return NULL;
 
   int version = get_boot_version(msg);
@@ -326,10 +326,10 @@ JsonValue *decode_hbm_training_v1(OamBootMsg *msg) {
   return result;
 }
 
-JsonValue *decode_fw_load_v1(OamBootMsg *msg) {
+JsonValue* decode_fw_load_v1(OamBootMsg* msg) {
   if (!msg) return NULL;
 
-  JsonValue *result = json_create_object();
+  JsonValue* result = json_create_object();
   if (!result) return NULL;
 
   int version = get_boot_version(msg);
@@ -337,7 +337,7 @@ JsonValue *decode_fw_load_v1(OamBootMsg *msg) {
   uint8_t byte4 = extract_byte(msg->value, 4);
   uint16_t fw_id = (uint16_t)((byte5 << 8) | byte4);
 
-  char *fw_id_str = create_hex_string(fw_id, 4);
+  char* fw_id_str = create_hex_string(fw_id, 4);
 
   json_object_set(result, "error_type", json_create_string(RAS_DECODE_ERROR_TYPE_FW_LOAD));
   json_object_set(result, "socket", json_create_number(get_socket(msg, version)));
@@ -348,15 +348,15 @@ JsonValue *decode_fw_load_v1(OamBootMsg *msg) {
   return result;
 }
 
-JsonValue *decode_wafl_link_training_v1(OamBootMsg *msg) {
+JsonValue* decode_wafl_link_training_v1(OamBootMsg* msg) {
   if (!msg) return NULL;
 
-  JsonValue *result = json_create_object();
+  JsonValue* result = json_create_object();
   if (!result) return NULL;
 
   int version = get_boot_version(msg);
   uint8_t byte4 = extract_byte(msg->value, 4);
-  JsonValue *failed_links = create_failed_links_array(byte4, 2);
+  JsonValue* failed_links = create_failed_links_array(byte4, 2);
 
   json_object_set(result, "error_type",
                   json_create_string(RAS_DECODE_ERROR_TYPE_WAFL_LINK_TRAINING));
@@ -367,15 +367,15 @@ JsonValue *decode_wafl_link_training_v1(OamBootMsg *msg) {
   return result;
 }
 
-JsonValue *decode_xgmi_link_training_v1(OamBootMsg *msg) {
+JsonValue* decode_xgmi_link_training_v1(OamBootMsg* msg) {
   if (!msg) return NULL;
 
-  JsonValue *result = json_create_object();
+  JsonValue* result = json_create_object();
   if (!result) return NULL;
 
   int version = get_boot_version(msg);
   uint8_t byte4 = extract_byte(msg->value, 4);
-  JsonValue *failed_links = create_failed_links_array(byte4, 8);
+  JsonValue* failed_links = create_failed_links_array(byte4, 8);
 
   json_object_set(result, "error_type",
                   json_create_string(RAS_DECODE_ERROR_TYPE_XGMI_LINK_TRAINING));
@@ -386,15 +386,15 @@ JsonValue *decode_xgmi_link_training_v1(OamBootMsg *msg) {
   return result;
 }
 
-JsonValue *decode_usr_cp_link_training_v1(OamBootMsg *msg) {
+JsonValue* decode_usr_cp_link_training_v1(OamBootMsg* msg) {
   if (!msg) return NULL;
 
-  JsonValue *result = json_create_object();
+  JsonValue* result = json_create_object();
   if (!result) return NULL;
 
   int version = get_boot_version(msg);
   uint8_t byte4 = extract_byte(msg->value, 4);
-  JsonValue *failed_links = create_failed_links_array(byte4, 2);
+  JsonValue* failed_links = create_failed_links_array(byte4, 2);
 
   json_object_set(result, "error_type",
                   json_create_string(RAS_DECODE_ERROR_TYPE_USR_CP_LINK_TRAINING));
@@ -405,15 +405,15 @@ JsonValue *decode_usr_cp_link_training_v1(OamBootMsg *msg) {
   return result;
 }
 
-JsonValue *decode_usr_dp_link_training_v1(OamBootMsg *msg) {
+JsonValue* decode_usr_dp_link_training_v1(OamBootMsg* msg) {
   if (!msg) return NULL;
 
-  JsonValue *result = json_create_object();
+  JsonValue* result = json_create_object();
   if (!result) return NULL;
 
   int version = get_boot_version(msg);
   uint8_t byte4 = extract_byte(msg->value, 4);
-  JsonValue *failed_links = create_failed_links_array(byte4, 4);
+  JsonValue* failed_links = create_failed_links_array(byte4, 4);
 
   json_object_set(result, "error_type",
                   json_create_string(RAS_DECODE_ERROR_TYPE_USR_DP_LINK_TRAINING));
@@ -424,10 +424,10 @@ JsonValue *decode_usr_dp_link_training_v1(OamBootMsg *msg) {
   return result;
 }
 
-JsonValue *decode_hbm_mem_test_v1(OamBootMsg *msg) {
+JsonValue* decode_hbm_mem_test_v1(OamBootMsg* msg) {
   if (!msg) return NULL;
 
-  JsonValue *result = json_create_object();
+  JsonValue* result = json_create_object();
   if (!result) return NULL;
 
   int version = get_boot_version(msg);
@@ -443,10 +443,10 @@ JsonValue *decode_hbm_mem_test_v1(OamBootMsg *msg) {
   return result;
 }
 
-JsonValue *decode_hbm_bist_test_v1(OamBootMsg *msg) {
+JsonValue* decode_hbm_bist_test_v1(OamBootMsg* msg) {
   if (!msg) return NULL;
 
-  JsonValue *result = json_create_object();
+  JsonValue* result = json_create_object();
   if (!result) return NULL;
 
   int version = get_boot_version(msg);
@@ -462,10 +462,10 @@ JsonValue *decode_hbm_bist_test_v1(OamBootMsg *msg) {
   return result;
 }
 
-JsonValue *decode_boot_controller_generic_v1(OamBootMsg *msg) {
+JsonValue* decode_boot_controller_generic_v1(OamBootMsg* msg) {
   if (!msg) return NULL;
 
-  JsonValue *result = json_create_object();
+  JsonValue* result = json_create_object();
   if (!result) return NULL;
 
   int version = get_boot_version(msg);
@@ -475,9 +475,9 @@ JsonValue *decode_boot_controller_generic_v1(OamBootMsg *msg) {
   uint8_t byte6 = extract_byte(msg->value, 6);
   uint8_t byte7 = extract_byte(msg->value, 7);
 
-  char *boot_step_str = create_hex_string(byte4, 2);
+  char* boot_step_str = create_hex_string(byte4, 2);
   uint32_t boot_status = (uint32_t)((byte7 << 24) | (byte6 << 16) | (byte5 << 8) | byte0);
-  char *boot_status_str = create_hex_string(boot_status, 8);
+  char* boot_status_str = create_hex_string(boot_status, 8);
 
   json_object_set(result, "error_type",
                   json_create_string(RAS_DECODE_ERROR_TYPE_BOOT_CONTROLLER_GENERIC));
@@ -493,10 +493,10 @@ JsonValue *decode_boot_controller_generic_v1(OamBootMsg *msg) {
   return result;
 }
 
-JsonValue *decode_data_abort_v1(OamBootMsg *msg) {
+JsonValue* decode_data_abort_v1(OamBootMsg* msg) {
   if (!msg) return NULL;
 
-  JsonValue *result = json_create_object();
+  JsonValue* result = json_create_object();
   if (!result) return NULL;
 
   int version = get_boot_version(msg);
@@ -506,9 +506,9 @@ JsonValue *decode_data_abort_v1(OamBootMsg *msg) {
   uint8_t byte6 = extract_byte(msg->value, 6);
   uint8_t byte7 = extract_byte(msg->value, 7);
 
-  char *boot_step_str = create_hex_string(byte3, 2);
+  char* boot_step_str = create_hex_string(byte3, 2);
   uint32_t exception_addr = (uint32_t)((byte7 << 24) | (byte6 << 16) | (byte5 << 8) | byte4);
-  char *exception_addr_str = create_hex_string(exception_addr, 8);
+  char* exception_addr_str = create_hex_string(exception_addr, 8);
 
   json_object_set(result, "error_type",
                   json_create_string(RAS_DECODE_ERROR_TYPE_BOOT_CONTROLLER_DATA_ABORT));
@@ -524,10 +524,10 @@ JsonValue *decode_data_abort_v1(OamBootMsg *msg) {
   return result;
 }
 
-JsonValue *decode_boot_success_v1(OamBootMsg *msg) {
+JsonValue* decode_boot_success_v1(OamBootMsg* msg) {
   if (!msg) return NULL;
 
-  JsonValue *result = json_create_object();
+  JsonValue* result = json_create_object();
   if (!result) return NULL;
 
   uint8_t byte4 = extract_byte(msg->value, 4);
@@ -536,9 +536,9 @@ JsonValue *decode_boot_success_v1(OamBootMsg *msg) {
   uint8_t byte6 = extract_byte(msg->value, 6);
   uint8_t byte7 = extract_byte(msg->value, 7);
 
-  char *boot_step_str = create_hex_string(byte4, 2);
+  char* boot_step_str = create_hex_string(byte4, 2);
   uint32_t boot_status = (uint32_t)((byte7 << 24) | (byte6 << 16) | (byte5 << 8) | byte0);
-  char *boot_status_str = create_hex_string(boot_status, 8);
+  char* boot_status_str = create_hex_string(boot_status, 8);
 
   json_object_set(result, "error_type", json_create_string(RAS_DECODE_ERROR_TYPE_BOOT_SUCCESS));
   json_object_set(result, "last_successful_boot_step_number",
@@ -552,9 +552,9 @@ JsonValue *decode_boot_success_v1(OamBootMsg *msg) {
 }
 
 // Unhandled error decoders
-JsonValue *decode_unhandled_error_v0(OamBootMsg *msg) {
+JsonValue* decode_unhandled_error_v0(OamBootMsg* msg) {
   (void)msg;  // Suppress unused parameter warning
-  JsonValue *result = json_create_object();
+  JsonValue* result = json_create_object();
   if (!result) return NULL;
 
   json_object_set(result, "error_type", json_create_string(RAS_DECODE_ERROR_TYPE_UNHANDLED));
@@ -562,10 +562,10 @@ JsonValue *decode_unhandled_error_v0(OamBootMsg *msg) {
   return result;
 }
 
-JsonValue *decode_unhandled_error_v1(OamBootMsg *msg) {
+JsonValue* decode_unhandled_error_v1(OamBootMsg* msg) {
   if (!msg) return NULL;
 
-  JsonValue *result = json_create_object();
+  JsonValue* result = json_create_object();
   if (!result) return NULL;
 
   uint8_t byte4 = extract_byte(msg->value, 4);
@@ -574,9 +574,9 @@ JsonValue *decode_unhandled_error_v1(OamBootMsg *msg) {
   uint8_t byte6 = extract_byte(msg->value, 6);
   uint8_t byte7 = extract_byte(msg->value, 7);
 
-  char *boot_step_str = create_hex_string(byte4, 2);
+  char* boot_step_str = create_hex_string(byte4, 2);
   uint32_t boot_status = (uint32_t)((byte7 << 24) | (byte6 << 16) | (byte5 << 8) | byte0);
-  char *boot_status_str = create_hex_string(boot_status, 8);
+  char* boot_status_str = create_hex_string(boot_status, 8);
 
   json_object_set(result, "error_type", json_create_string(RAS_DECODE_ERROR_TYPE_UNHANDLED));
   json_object_set(result, "last_successful_boot_step_number",
@@ -589,7 +589,7 @@ JsonValue *decode_unhandled_error_v1(OamBootMsg *msg) {
   return result;
 }
 
-boot_decoder_func_t get_decoder_function(OamBootMsg *msg) {
+boot_decoder_func_t get_decoder_function(OamBootMsg* msg) {
   if (!msg) return NULL;
 
   uint8_t byte0 = extract_byte(msg->value, 0);
@@ -603,7 +603,7 @@ boot_decoder_func_t get_decoder_function(OamBootMsg *msg) {
   int version = get_boot_version(msg);
   int encoding = get_error_encoding(msg);
 
-  const boot_decoder_entry_t *decoder_map =
+  const boot_decoder_entry_t* decoder_map =
       (version == 0) ? boot_decoder_map_v0 : boot_decoder_map_v1;
 
   for (int i = 0; decoder_map[i].decoder != NULL; i++) {
@@ -615,14 +615,14 @@ boot_decoder_func_t get_decoder_function(OamBootMsg *msg) {
   return NULL;  // No decoder found
 }
 
-JsonValue *boot_decode_orchestrator(const uint64_t *oam_boot_msgs, size_t count) {
+JsonValue* boot_decode_orchestrator(const uint64_t* oam_boot_msgs, size_t count) {
   if (!oam_boot_msgs || count == 0) return NULL;
 
-  JsonValue *results = json_create_object();
+  JsonValue* results = json_create_object();
   if (!results) return NULL;
 
   // Convert to OamBootMsg structures
-  OamBootMsg *msgs = malloc(count * sizeof(OamBootMsg));
+  OamBootMsg* msgs = malloc(count * sizeof(OamBootMsg));
   if (!msgs) {
     json_free(results);
     return NULL;
@@ -634,7 +634,7 @@ JsonValue *boot_decode_orchestrator(const uint64_t *oam_boot_msgs, size_t count)
 
   // Check error markers across all messages
   size_t messages_with_markers = 0;
-  bool *has_marker = malloc(count * sizeof(bool));
+  bool* has_marker = malloc(count * sizeof(bool));
   if (!has_marker) {
     free(msgs);
     json_free(results);
@@ -675,7 +675,7 @@ JsonValue *boot_decode_orchestrator(const uint64_t *oam_boot_msgs, size_t count)
       continue;
     }
 
-    JsonValue *msg_result = json_create_object();
+    JsonValue* msg_result = json_create_object();
     if (!msg_result) continue;
 
     boot_decoder_func_t decoder_func = NULL;
@@ -696,12 +696,12 @@ JsonValue *boot_decode_orchestrator(const uint64_t *oam_boot_msgs, size_t count)
     // If no decoder function is found, skip this message
 
     if (decoder_func) {
-      JsonValue *decoded = decoder_func(&msgs[i]);
+      JsonValue* decoded = decoder_func(&msgs[i]);
       if (decoded) {
         // Copy all fields from decoded result to msg_result
-        for (JsonPair *pair = decoded->data.object; pair != NULL; pair = pair->next) {
+        for (JsonPair* pair = decoded->data.object; pair != NULL; pair = pair->next) {
           // Create a copy of the value for the new object
-          JsonValue *value_copy = NULL;
+          JsonValue* value_copy = NULL;
           switch (pair->value->type) {
             case JSON_STRING:
               value_copy = json_create_string(pair->value->data.string);
@@ -720,8 +720,8 @@ JsonValue *boot_decode_orchestrator(const uint64_t *oam_boot_msgs, size_t count)
               value_copy = json_create_array();
               if (value_copy) {
                 for (size_t j = 0; j < pair->value->data.array.count; j++) {
-                  JsonValue *elem = pair->value->data.array.items[j];
-                  JsonValue *elem_copy = NULL;
+                  JsonValue* elem = pair->value->data.array.items[j];
+                  JsonValue* elem_copy = NULL;
                   if (elem->type == JSON_NUMBER) {
                     elem_copy = json_create_number(elem->data.number);
                   }

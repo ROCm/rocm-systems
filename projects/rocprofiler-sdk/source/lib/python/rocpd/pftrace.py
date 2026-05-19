@@ -2,7 +2,7 @@
 ###############################################################################
 # MIT License
 #
-# Copyright (c) 2023 Advanced Micro Devices, Inc.
+# Copyright (c) 2025 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -85,6 +85,28 @@ def add_args(parser):
         default=False,
     )
 
+    pftrace_options.add_argument(
+        "--annotate-args",
+        help="Add the function arguments (when available) to the Perfetto debug annotations",
+        action="store_true",
+        default=False,
+    )
+
+    pftrace_options.add_argument(
+        "--annotate-pmc",
+        help="Add the function PMC values (when available) to the Perfetto debug annotations",
+        action="store_true",
+        default=False,
+    )
+
+    pftrace_options.add_argument(
+        "--no-annotate-kfd",
+        help="Omit the KFD data (when available) from the Perfetto debug annotations",
+        action="store_false",
+        default=True,
+        dest="annotate_kfd",
+    )
+
     def process_args(input, args):
         valid_args = [
             "perfetto_backend",
@@ -92,6 +114,9 @@ def add_args(parser):
             "perfetto_buffer_size",
             "perfetto_shmem_size_hint",
             "group_by_queue",
+            "annotate_args",
+            "annotate_kfd",
+            "annotate_pmc",
         ]
         ret = {}
         for itr in valid_args:

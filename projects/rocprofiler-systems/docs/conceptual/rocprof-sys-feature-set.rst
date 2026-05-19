@@ -41,9 +41,11 @@ Parallelism API support
 * HSA
 * Pthreads
 * MPI
+* RCCL
+* UCX (Unified Communication X)
+* OpenSHMEM (SHMEM)
 * Kokkos-Tools (KokkosP)
 * OpenMP-Tools (OMPT)
-* UCX (Unified Communication X)
 
 GPU metrics
 ========================================

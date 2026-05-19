@@ -80,7 +80,7 @@ def test_validate_counter_collection_pmc1_json(json_data):
     counter_collection_data = data["callback_records"]["counter_collection"]
     dispatch_ids = []
     # at present, AQLProfile has bugs when reporting the counters for below architectures
-    skip_gfx = ("gfx1101", "gfx1102", "gfx1150", "gfx1151")
+    skip_gfx = ("gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1152", "gfx1153")
 
     def get_kernel_name(kernel_id):
         return data["kernel_symbols"][kernel_id]["formatted_kernel_name"]
