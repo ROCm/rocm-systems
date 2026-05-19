@@ -1,10 +1,10 @@
 # profiler-hub
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Build & Test](https://github.com/ROCm/rocm-systems/actions/workflows/profiler-hub-ci.yml/badge.svg?branch=sna-develop)](https://github.com/ROCm/rocm-systems/actions/workflows/profiler-hub-ci.yml?query=branch%3Asna-develop)
-[![Sanitizers](https://github.com/ROCm/rocm-systems/actions/workflows/profiler-hub-sanitizers.yml/badge.svg?branch=sna-develop)](https://github.com/ROCm/rocm-systems/actions/workflows/profiler-hub-sanitizers.yml?query=branch%3Asna-develop)
-[![Static Analysis](https://github.com/ROCm/rocm-systems/actions/workflows/profiler-hub-static-analysis.yml/badge.svg?branch=sna-develop)](https://github.com/ROCm/rocm-systems/actions/workflows/profiler-hub-static-analysis.yml?query=branch%3Asna-develop)
-[![Coverage](https://github.com/ROCm/rocm-systems/actions/workflows/profiler-hub-coverage.yml/badge.svg?branch=sna-develop)](https://github.com/ROCm/rocm-systems/actions/workflows/profiler-hub-coverage.yml?query=branch%3Asna-develop)
+[![Build & Test](https://github.com/ROCm/rocm-systems/actions/workflows/profiler-hub-ci.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/profiler-hub-ci.yml?query=branch%3Adevelop)
+[![Sanitizers](https://github.com/ROCm/rocm-systems/actions/workflows/profiler-hub-sanitizers.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/profiler-hub-sanitizers.yml?query=branch%3Adevelop)
+[![Static Analysis](https://github.com/ROCm/rocm-systems/actions/workflows/profiler-hub-static-analysis.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/profiler-hub-static-analysis.yml?query=branch%3Adevelop)
+[![Coverage](https://github.com/ROCm/rocm-systems/actions/workflows/profiler-hub-coverage.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/profiler-hub-coverage.yml?query=branch%3Adevelop)
 
 A C++ library for storing and retrieving ROCm profiling data using SQLite (rocpd database format).
 

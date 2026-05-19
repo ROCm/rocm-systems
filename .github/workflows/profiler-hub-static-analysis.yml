@@ -15,7 +15,6 @@ on:
   pull_request:
     branches:
       - develop
-      - sna-develop
     paths:
       - '.github/workflows/profiler-hub-static-analysis.yml'
       - 'profilers/profiler-hub/**'
