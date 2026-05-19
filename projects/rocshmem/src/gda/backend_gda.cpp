@@ -279,7 +279,7 @@ void GDABackend::setup_host_ctx() {
 
 void GDABackend::setup_default_ctx() {
   TeamInfo *tinfo = team_tracker.get_team_world()->tinfo_wrt_world;
-  default_context_proxy_ = GDADefaultContextProxy(this, tinfo, gda_provider);
+  default_context_proxy_ = GDADefaultContextProxy(this, tinfo);
 }
 
 void GDABackend::log_ctx_nics([[maybe_unused]] unsigned int ctx_id,
@@ -305,7 +305,7 @@ void GDABackend::setup_ctxs() {
   // 0th context is default context
   for (size_t i = 0; i < envvar::max_num_contexts; i++) {
     unsigned int cid = static_cast<unsigned int>(i + 1);
-    new (&ctx_array[i]) GDAContext(this, cid, gda_provider);
+    new (&ctx_array[i]) GDAContext(this, cid);
     ctx_free_list.get()->push_back(ctx_array + i);
 
     if (verbose) {
@@ -890,6 +890,12 @@ bool GDABackend::has_active_ib_interface(GDAProvider provider) {
 int GDABackend::backend_can_run() {
   void *handle{nullptr};
   GDAProvider requested = requested_provider();
+
+  /* Libnuma ? */
+  if (!numa.is_available()) {
+    LOG_WARN("GDA backend unavailable: libnuma support is missing");
+    return ROCSHMEM_ERROR;
+  }
 
   /* Basic verbs? */
   if (!ibv.is_initialized) return ROCSHMEM_ERROR;

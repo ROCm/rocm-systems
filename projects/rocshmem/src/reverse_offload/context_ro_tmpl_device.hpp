@@ -150,7 +150,7 @@ __device__ void ROContext::p(T *dest, T value, int pe) {
   if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
     long L_offset{reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank]};
     ipcImpl_.ipcCopy<MemcpyKind::Put>(ipcImpl_.ipc_bases[local_pe] + L_offset,
-                     reinterpret_cast<void *>(&value), sizeof(T));
+                     reinterpret_cast<void *>(&value), sizeof(T), local_pe);
   } else {
     build_queue_element(RO_NET_P, dest, &value, sizeof(T), pe, 0, 0, 0, nullptr,
                         nullptr, NULL, ro_net_win_id,
@@ -165,7 +165,7 @@ __device__ T ROContext::g(const T *source, int pe) {
     const char *src_typed{reinterpret_cast<const char *>(source)};
     long L_offset{const_cast<char *>(src_typed) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank]};
     T dest;
-    ipcImpl_.ipcCopy<MemcpyKind::Get>(&dest, ipcImpl_.ipc_bases[local_pe] + L_offset, sizeof(T));
+    ipcImpl_.ipcCopy<MemcpyKind::Get>(&dest, ipcImpl_.ipc_bases[local_pe] + L_offset, sizeof(T), local_pe);
     return dest;
   } else {
     auto dest{get_g_ret_buf()};

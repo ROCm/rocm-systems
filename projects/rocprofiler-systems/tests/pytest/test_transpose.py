@@ -71,6 +71,16 @@ def transpose_rules(validation_rules_dir: Path) -> list[Path]:
     ]
 
 
+@pytest.fixture
+def rocprofiler_rules(validation_rules_dir: Path) -> list[Path]:
+    """Get validation rules for GPU hardware counter RocPD output."""
+    rules_dir = validation_rules_dir / "transpose"
+    return [
+        validation_rules_dir / "default-rules.json",
+        rules_dir / "hw-counter-rules.json",
+    ]
+
+
 # ============================================================================
 # Test Class: Basic Transpose Tests
 # ============================================================================
@@ -268,7 +278,8 @@ class TestTransposeROCProfiler(RocprofsysTest):
     REWRITE_ARGS = ["-e", "-v", "2", "-E", "uniform_int_distribution"]
 
     @pytest.mark.timeout(120)
-    def test(self, mode, rocprofiler_env, gpu_info, num_processes):
+    @pytest.mark.rocpd("rocprofiler_env")
+    def test(self, mode, rocprofiler_env, gpu_info, num_processes, rocprofiler_rules):
         result = self.run_test(
             mode,
             "transpose",
@@ -294,4 +305,10 @@ class TestTransposeROCProfiler(RocprofsysTest):
                 result,
                 subtest_name="Perfetto counter validation",
                 counter_names=gpu_info.counter_names,
+                check_counter_pairing=True,
+            )
+            self.assert_rocpd(
+                result,
+                subtest_name="RocPD HW counter validation",
+                rules_files=rocprofiler_rules,
             )

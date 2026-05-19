@@ -72,6 +72,8 @@
 
 #include "latency_profiler/CollTrace.h"
 #include "latency_profiler/CollTraceFunc.h"
+#include "dda_all_reduce_ipc.h"
+#include "ipc_init.h"
 #include  <cpuid.h>
 
 #ifndef STR2
@@ -584,6 +586,8 @@ skip_profiling:
   free(comm->collNetHeads);
   free(comm->clique.ranks);
 
+  NCCLCHECK(ncclDdaIpcCommFini(comm));
+
   if (comm->bootstrap)
     NCCLCHECK(bootstrapClose(comm->bootstrap));
 
@@ -722,6 +726,13 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   ncclMemoryStackConstruct(&comm->memPermanent);
   ncclMemoryStackConstruct(&comm->memScoped);
   comm->destructorHead = nullptr;
+  
+  comm->ddaIpcMemHandler = nullptr;
+  comm->ddaIpcScratch = nullptr;
+  comm->ddaIpcScratchBytes = 0;
+  comm->ddaIpcPeerPtrsDev = nullptr;
+  comm->ddaIpcBarrierState = nullptr;
+  
   comm->rank = rank;
   comm->nRanks = ndev;
 
@@ -2418,6 +2429,7 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   }
 
   NCCLCHECKGOTO(latency_profiler::collTraceInit(comm), res, fail);
+  NCCLCHECKGOTO(ncclDdaIpcCommInit(comm), res, fail);
   // update communicator state
   comm->initState = ncclSuccess;
 
@@ -3377,6 +3389,7 @@ static ncclResult_t commRevokeAsync(struct ncclAsyncJob* job_) {
 
 exit:
   (void) ncclCommSetAsyncError(comm, res);
+  INFO(NCCL_INIT, "CommRevokeAsync END comm %p result %d", comm, res);
   return res;
 }
 
@@ -3426,6 +3439,8 @@ exit:
   if (comm && !comm->config.blocking) {
     NCCLCHECK(ncclCommGetAsyncError(comm, &ret));
   }
+  INFO(NCCL_INIT, "comm %p rank %d nRanks %d cudaDev %d busId %lx - Revoke COMPLETE, result %d",
+       comm, comm->rank, comm->nRanks, comm->cudaDev, comm->busId, ret);
   return ret;
 fail:
   if (comm && !comm->config.blocking) (void) ncclCommSetAsyncError(comm, ret);

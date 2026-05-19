@@ -25,8 +25,13 @@ set(SRC_FILES
   mem_manager.cc
   debug.cc
   dev_runtime.cc
+  dda_all_reduce_ipc.cu
+  device_buffer.cc
   enqueue.cc
   group.cc
+  ipc_gpu_barrier.cu
+  ipc_init.cu
+  ipc_mem_handler.cc
   init.cc
   init_nvtx.cc
   mnnvl.cc
@@ -79,6 +84,8 @@ set(SRC_FILES
   graph/xml.h
   include/alloc.h
   include/allocator.h
+  include/algorithms/CollCommon.h
+  include/algorithms/all_reduce/all_reduce_dda.h
   include/alt_rsmi.h
   include/archinfo.h
   include/api_trace.h
@@ -95,9 +102,11 @@ set(SRC_FILES
   include/core.h
   include/cpuset.h
 # include/cudawrap.h
+  include/dda_all_reduce_ipc.h
   include/debug.h
   include/dev_runtime.h
   include/device.h
+  include/device_buffer.h
   include/enqueue.h
   include/gdrwrap.h
   include/git_version.h
@@ -108,6 +117,10 @@ set(SRC_FILES
   include/ibvsymbols.h
   include/ibvwrap.h
   include/info.h
+  include/ipc_gpu_barrier.h
+  include/ipc_init.h
+  include/ipc_init_detail.h
+  include/ipc_mem_handler.h
   include/ipcsocket.h
   include/mem_manager.h
   include/mnnvl.h
@@ -482,7 +495,8 @@ if(ENABLE_DEVICE_LINKER)
   list(FILTER HIP_SOURCES EXCLUDE REGEX "common\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "onerank\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "collectives\\.cc$")
-  message(STATUS "Device Linker: filtered HIP_SOURCES (removed device .cpp under gensrc/ + subdirs, common.cu, onerank.cu, collectives.cc)")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_ipc\\.cu\\.cpp$")
+  message(STATUS "Device Linker: filtered HIP_SOURCES (removed device .cpp under gensrc/ + subdirs, common.cu, onerank.cu, collectives.cc, dda_all_reduce_ipc.cu.cpp)")
 endif()
 
 # Create an initial git_version.cpp file (that will be updated with latest git version)
