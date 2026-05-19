@@ -2942,11 +2942,11 @@ hipError_t hipDeviceGraphMemTrim(int device) {
   }
   auto* pool = g_devices[device]->GetGraphMemoryPool();
 
+  // Acquire exclusive lock — blocks new GraphExec::Run() retain calls.
+  std::unique_lock<std::shared_mutex> trim_lock(hip::GraphExec::graphExecTrimLock_);
+
   std::vector<hip::GraphExec*> retained_graph_execs;
-  // Phase 1: Collect eligible graph execs under graphExecSetLock_ and retain them
-  // so they remain valid after dropping the lock. Do not call ReleaseCachedMapping()
-  // while holding graphExecSetLock_ because it may enqueue/await GPU work and take
-  // the graph memory pool lock.
+  // Phase 1: Snapshot eligible graph execs under graphExecSetLock_ and retain them.
   {
     std::scoped_lock lock(hip::GraphExec::graphExecSetLock_);
     for (auto* ge : hip::GraphExec::graphExecSet_) {
@@ -2957,14 +2957,19 @@ hipError_t hipDeviceGraphMemTrim(int device) {
       retained_graph_execs.push_back(ge);
     }
   }
-  // Phase 2: Release idle graph-cached VA mappings and decrement refcounts
-  // outside graphExecSetLock_. Skip graph execs that are currently executing:
-  // GraphExec::Run() retains the object for the duration of GPU work, so
-  // refcount > 2 (1 owner + 1 trim-retain + 1+ in-flight) means active.
+
+  // Phase 2: Wait for all in-flight graph work to complete.
+  // With trim_lock held exclusively, no new Run() can retain, so refcounts
+  // can only decrease. Spin until each graph exec's refcount reaches 2
+  // (1 owner + 1 trim-retain = no in-flight work).
   for (auto* ge : retained_graph_execs) {
-    if (ge->referenceCount() > 2) {
-      continue;
+    while (ge->referenceCount() > 2) {
+      amd::Os::yield();
     }
+  }
+
+  // Phase 3: All graphs are idle — release cached VA mappings.
+  for (auto* ge : retained_graph_execs) {
     for (auto* node : ge->GetNodes()) {
       if (node->GetType() != hipGraphNodeTypeMemAlloc) {
         continue;
@@ -2973,10 +2978,13 @@ hipError_t hipDeviceGraphMemTrim(int device) {
       alloc_node->ReleaseCachedMapping(pool);
     }
   }
+
+  // Phase 4: Release trim-retain references.
   for (auto* ge : retained_graph_execs) {
     ge->release();
   }
-  // Phase 3: All previously-refcounted entries now have refcount==0.
+
+  // Phase 5: Free pool memory.
   pool->TrimTo(0);
 
   HIP_RETURN(hipSuccess);

@@ -4030,12 +4030,13 @@ void VBfeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     vdst.write_lane(wf, lane, [&]() {
-      auto src = src0.read_lane(wf, lane);
-      auto off_w = src1.read_lane(wf, lane);
-      (void)src2.read_lane(wf, lane);
-      uint32_t off = off_w & 31u;
-      uint32_t w = (off_w >> 16) & 0x7Fu;
-      return w == 0 ? 0u : (src >> off) & ((1u << w) - 1u);
+      uint32_t src = src0.read_lane(wf, lane);
+      uint32_t off = src1.read_lane(wf, lane) & 31u;
+      uint32_t w = src2.read_lane(wf, lane) & 31u;
+      if (w == 0)
+        return 0u;
+      uint32_t mask = (w >= 32) ? ~0u : ((1u << w) - 1u);
+      return (src >> off) & mask;
     }());
   }
 }
@@ -4060,11 +4061,9 @@ void VBfeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     vdst.write_lane(wf, lane, [&]() -> uint32_t {
-      auto src = static_cast<int32_t>(static_cast<int32_t>(src0.read_lane(wf, lane)));
-      auto off_w = static_cast<int32_t>(src1.read_lane(wf, lane));
-      (void)static_cast<int32_t>(src2.read_lane(wf, lane));
-      uint32_t off = off_w & 31u;
-      uint32_t w = (off_w >> 16) & 0x7Fu;
+      int32_t src = static_cast<int32_t>(static_cast<int32_t>(src0.read_lane(wf, lane)));
+      uint32_t off = static_cast<int32_t>(src1.read_lane(wf, lane)) & 31u;
+      uint32_t w = static_cast<int32_t>(src2.read_lane(wf, lane)) & 31u;
       if (w == 0)
         return 0u;
       int32_t val = (src >> off) & ((1 << w) - 1);
