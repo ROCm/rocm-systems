@@ -4,29 +4,31 @@
 
 #include "gsl_assert.h"
 
-const char* MockInputParameters::get_output_path()
+#include <utility>
+
+std::optional<std::string_view> MockInputParameters::get_output_path()
 {
-    return m_output_path.c_str();
+    return std::string_view{m_output_path};
 }
 
-const char* MockInputParameters::get_requested_counters()
+std::optional<std::string_view> MockInputParameters::get_requested_counters()
 {
-    return m_requested_counters.c_str();
+    return std::string_view{m_requested_counters};
 }
 
-const char* MockInputParameters::get_iteration_multiplexing_mode()
+std::optional<std::string_view> MockInputParameters::get_iteration_multiplexing_mode()
 {
-    return m_iteration_multiplexing_mode.c_str();
+    return std::string_view{m_iteration_multiplexing_mode};
 }
 
-const char* MockInputParameters::get_kernel_filter_include_regex()
+std::optional<std::string_view> MockInputParameters::get_kernel_filter_include_regex()
 {
-    return m_kernel_filter_include_regex.c_str();
+    return std::string_view{m_kernel_filter_include_regex};
 }
 
-const char* MockInputParameters::get_kernel_filter_range()
+std::optional<std::string_view> MockInputParameters::get_kernel_filter_range()
 {
-    return m_kernel_filter_range.c_str();
+    return std::string_view{m_kernel_filter_range};
 }
 
 void MockInputParameters::set_output_path(const std::string& output_path)

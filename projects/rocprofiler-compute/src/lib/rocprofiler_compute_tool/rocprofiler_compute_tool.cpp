@@ -13,6 +13,7 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <string_view>
 
 using namespace rocprofiler_compute_tool;
 
@@ -50,7 +51,7 @@ static rocprofiler_context_id_t& get_client_ctx()
     return ctx;
 }
 
-iteration_multiplexing_mode_t iteration_multiplexing_mode(const std::string& mode)
+iteration_multiplexing_mode_t iteration_multiplexing_mode(std::string_view mode)
 {
     if (mode == "kernel")
         return iteration_multiplexing_mode_t::KERNEL;
@@ -147,13 +148,13 @@ void tool_fini(void* user_data)
 
 }  // namespace rocprofiler_compute_tool
 
-static std::string generate_output_filename(const char* output_path)
+static std::string generate_output_filename(std::string_view output_path)
 {
-    if (!output_path || !*output_path)
+    if (output_path.empty())
     {
         throw std::runtime_error("Output path is empty");
     }
-    std::string filename = output_path;
+    std::string filename{output_path};
     if (filename.back() != '/')
         filename += '/';
 
@@ -165,33 +166,33 @@ std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
 {
     auto tool_data = std::make_unique<tool_data_t>();
 
-    tool_data->output_filename = generate_output_filename(g_input_parameters->get_output_path());
+    tool_data->output_filename =
+        generate_output_filename(g_input_parameters->get_output_path().value_or(std::string_view{}));
 
     // ROCPROF_COUNTERS env. var. is a string like "pmc: counter1 counter2 ..."
-    if (const char* v = g_input_parameters->get_requested_counters())
-        tool_data->requested_counters = v;
+    if (const auto v = g_input_parameters->get_requested_counters())
+        tool_data->requested_counters = std::string{*v};
 
-    if (const char* v = g_input_parameters->get_iteration_multiplexing_mode())
-        tool_data->iteration_multiplexing_mode = iteration_multiplexing_mode(v);
+    if (const auto v = g_input_parameters->get_iteration_multiplexing_mode())
+        tool_data->iteration_multiplexing_mode = iteration_multiplexing_mode(*v);
 
     // ROCPROF_KERNEL_FILTER_INCLUDE_REGEX env. var. is a regex string like
     // kernel_name_1|kernel_name_2|... Used to collect counters only for kernels
     // with names matching the regex
-    if (const char* v = g_input_parameters->get_kernel_filter_include_regex())
-        tool_data->kernel_filter_include_regex = v;
+    if (const auto v = g_input_parameters->get_kernel_filter_include_regex())
+        tool_data->kernel_filter_include_regex = std::string{*v};
 
     // ROCPROF_KERNEL_FILTER_RANGE env. var. is a string like "[4,7-9,...]"
-    if (const char* v = g_input_parameters->get_kernel_filter_range())
+    if (const auto v = g_input_parameters->get_kernel_filter_range())
     {
         // Remove square brackets at the ends if present
-        std::string v_str = v;
+        std::string v_str{*v};
         if (!v_str.empty() && v_str.front() == '[')
             v_str.erase(0, 1);
         if (!v_str.empty() && v_str.back() == ']')
             v_str.pop_back();
-        v = v_str.c_str();
         // Parse the range string into vector of pairs
-        std::istringstream ss(v);
+        std::istringstream ss{v_str};
         for (std::string token; std::getline(ss, token, ',');)
         {
             size_t dash_pos = token.find('-');

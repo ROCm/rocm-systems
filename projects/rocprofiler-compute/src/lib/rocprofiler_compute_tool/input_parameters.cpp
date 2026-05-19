@@ -2,31 +2,38 @@
 // SPDX-License-Identifier:  MIT
 #include "input_parameters.h"
 
-#include <stdlib.h>
+#include "environ_cache.h"
+
+#include <utility>
 
 using namespace rocprofiler_compute_tool;
 
-const char* EnvInputParameters::get_output_path()
+EnvInputParameters::EnvInputParameters(std::shared_ptr<const EnvironCache> environ)
+    : m_environ{std::move(environ)}
 {
-    return getenv("ROCPROF_OUTPUT_PATH");
 }
 
-const char* EnvInputParameters::get_requested_counters()
+std::optional<std::string_view> EnvInputParameters::get_output_path()
 {
-    return getenv("ROCPROF_COUNTERS");
+    return m_environ->get("ROCPROF_OUTPUT_PATH");
 }
 
-const char* EnvInputParameters::get_iteration_multiplexing_mode()
+std::optional<std::string_view> EnvInputParameters::get_requested_counters()
 {
-    return getenv("ROCPROF_ITERATION_MULTIPLEXING");
+    return m_environ->get("ROCPROF_COUNTERS");
 }
 
-const char* EnvInputParameters::get_kernel_filter_include_regex()
+std::optional<std::string_view> EnvInputParameters::get_iteration_multiplexing_mode()
 {
-    return getenv("ROCPROF_KERNEL_FILTER_INCLUDE_REGEX");
+    return m_environ->get("ROCPROF_ITERATION_MULTIPLEXING");
 }
 
-const char* EnvInputParameters::get_kernel_filter_range()
+std::optional<std::string_view> EnvInputParameters::get_kernel_filter_include_regex()
 {
-    return getenv("ROCPROF_KERNEL_FILTER_RANGE");
+    return m_environ->get("ROCPROF_KERNEL_FILTER_INCLUDE_REGEX");
+}
+
+std::optional<std::string_view> EnvInputParameters::get_kernel_filter_range()
+{
+    return m_environ->get("ROCPROF_KERNEL_FILTER_RANGE");
 }

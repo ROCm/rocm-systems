@@ -43,7 +43,7 @@ TEST_F(TestRocprofilerComputeTool, ProvidedNonEmptyOutputPath_ReturnsItExtended)
 {
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto tool_data = get_tool_data(cfg);
-    EXPECT_TRUE(tool_data->output_filename.find(m_input_parameters->get_output_path()) !=
+    EXPECT_TRUE(tool_data->output_filename.find(*m_input_parameters->get_output_path()) !=
                 std::string::npos);
     EXPECT_TRUE(tool_data->output_filename.find(
                     std::to_string(getpid()) + "_native_counter_collection.csv") != std::string::npos);
@@ -53,7 +53,7 @@ TEST_F(TestRocprofilerComputeTool, ProvidedRequestedCounters_ReturnsIt)
 {
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto tool_data = get_tool_data(cfg);
-    EXPECT_EQ(tool_data->requested_counters, m_input_parameters->get_requested_counters());
+    EXPECT_EQ(tool_data->requested_counters, *m_input_parameters->get_requested_counters());
 }
 
 TEST_F(TestRocprofilerComputeTool, ProvidedIncorrectIterationMultiplexingMode_ReturnsDisabled)
@@ -85,7 +85,7 @@ TEST_F(TestRocprofilerComputeTool, ProvidedKernelFilterIncludeRegex_ReturnsIt)
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto tool_data = get_tool_data(cfg);
     EXPECT_EQ(tool_data->kernel_filter_include_regex,
-              m_input_parameters->get_kernel_filter_include_regex());
+              *m_input_parameters->get_kernel_filter_include_regex());
 }
 
 TEST_F(TestRocprofilerComputeTool, ProvidedIncorrectKernelFilterRange_ReturnsEmpty)
