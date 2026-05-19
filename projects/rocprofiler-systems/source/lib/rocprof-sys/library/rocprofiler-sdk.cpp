@@ -2855,6 +2855,11 @@ get_session()
 void
 ensure_roctx_initialized()
 {
+    // Force lazy construction so the roctx trigger is attached to the session
+    // (via get_roctx_client -> roctx_client ctor -> session.attach) before
+    // library.cpp calls force_initial_pause. Without this, a SELECTED_REGIONS
+    // workload's initial-pause broadcast runs with no roctx trigger in the
+    // votes table and subscribers miss the initial paused state.
     (void) get_roctx_client();
 }
 

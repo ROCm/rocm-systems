@@ -16,6 +16,15 @@ namespace rocprofsys::control
 /// only to global-scope triggers (TRACE_DELAY/DURATION, roctx, etc.).
 /// Subsystems affected by narrower scopes (e.g. sampling for SAMPLING_DURATION)
 /// list those scopes in addition to global.
+///
+/// Callback lifetime contract: `on_pause` / `on_resume` are snapshot-copied
+/// under `session::m_subscribers_mutex` and invoked AFTER the lock is
+/// released (see session::dispatch_for_scope). Captures by reference whose
+/// lifetime is tied to the subscriber's registration are unsafe — a
+/// concurrent session::shutdown() could destroy the subscriber between the
+/// snapshot and the invocation. Prefer free functions or capture-by-value;
+/// avoid `[this]` lambdas on objects that may be destroyed concurrently
+/// with the session.
 struct subscriber
 {
     std::function<void()> on_pause;
