@@ -137,22 +137,59 @@ __device__ void GDAContext::getmem_nbi(void *dest, const void *source,
   qps[qp_index].get_nbi(dest, base_heap[pe] + L_offset, nelems, pe, wf_info);
 }
 
-__device__ void GDAContext::fence() { //TODO: optimize
-  ActiveWFInfo wf_info(ctx_id_);
-  for (uint32_t i = 0; i < num_qps; i++) {
-    qps[i].quiet(wf_info);
+__device__ void GDAContext::fence() {
+  /**
+   * Operations issued by this context may use two backends: RDMA QPs
+   * for remote PEs and the IPC fast path, when enabled, for shm-local
+   * peers. The fence must order writes across both paths.
+   *
+   * RDMA: A single QP already orders its own traffic through in-order
+   * delivery; only the multi-QP case requires an explicit per-QP quiet.
+   */
+  if (num_qps_per_pe > 1) {
+    ActiveWFInfo wf_info(ctx_id_);
+    for (uint32_t i = 0; i < num_qps; i++) {
+      qps[i].quiet(wf_info);
+    }
   }
-  ipcImpl_.ipcFence();
+
+  /**
+   * IPC: Skip when there are no shm-local peers. Otherwise, issue a
+   * system-scope release fence to ensure prior IPC writes are visible
+   * to peer ranks.
+   */
+  if (constmem.ipc_shm_size != 0) {
+    ipcImpl_.ipcFence();
+  }
 }
 
 __device__ void GDAContext::fence([[maybe_unused]] int pe) {
-  //TODO: optimize
-  ActiveWFInfo wf_info(ctx_id_);
-  for(uint32_t i = 0; i < num_qps_per_pe; i++) {
-    int qp_index = i * num_pes + pe;
-    qps[qp_index].quiet(wf_info);
+  /**
+   * Operations targeting `pe` may use two backends: RDMA QPs for remote
+   * PEs and the IPC fast path, when enabled, for shm-local peers. The
+   * fence must order writes to `pe` across both paths.
+   *
+   * RDMA: A single QP per PE already orders its own traffic through
+   * in-order delivery; only the multi-QP-per-PE case requires an explicit
+   * quiet on each QP associated with `pe`.
+   */
+  if (num_qps_per_pe > 1) {
+    ActiveWFInfo wf_info(ctx_id_);
+    for(uint32_t i = 0; i < num_qps_per_pe; i++) {
+      int qp_index = i * num_pes + pe;
+      qps[qp_index].quiet(wf_info);
+    }
   }
-  ipcImpl_.ipcFence();
+
+  /**
+   * IPC: Skip when IPC is unavailable. Otherwise, issue a system-scope
+   * release fence for the IPC fast path so prior IPC writes are visible
+   * to shm-local peer ranks.
+   */
+  int local_pe;
+  if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
+    ipcImpl_.ipcFence();
+  }
 }
 
 __device__ void GDAContext::quiet() {
