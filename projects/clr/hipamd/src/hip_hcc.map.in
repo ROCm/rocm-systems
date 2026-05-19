@@ -661,6 +661,16 @@ local:
     *;
 } hip_7.1;
 
+hip_profiler_ext {
+global:
+    hipProfilerEnableExt;
+    hipProfilerDisableExt;
+    hipProfilerGetRecordsExt;
+    hipProfilerRegisterChunkCallbackExt;
+local:
+    *;
+} hip_7.2;
+
 hip_7.14 {
 global:
     hipGreenCtxCreate;

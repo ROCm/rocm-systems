@@ -48,9 +48,17 @@
 #include "containers/free_list.hpp"
 #include "memory/hip_allocator.hpp"
 
+#include <map>
+
 namespace rocshmem {
 
 class GDABackend;
+
+struct user_buf_info_t {
+  uintptr_t addr;
+  size_t    length;
+  uint32_t  lkey;
+};
 
 /**
  * @brief Scope at which WQEs are issued and completed. This is used to
@@ -246,7 +254,8 @@ class QueuePair {
   __device__ int64_t atomic_cas_nofetch(void *dest, int64_t atomic_data,
       int64_t atomic_cmp, ActiveWFInfo &wf_info);
 
-  char *const *base_heap{nullptr};
+  uintptr_t base_heap = 0;
+  size_t base_heap_size = 0;
 
  private:
   /**
@@ -470,6 +479,17 @@ class QueuePair {
   uint8_t gda_op_rdma_read;
   uint8_t gda_op_atomic_fa;
   uint8_t gda_op_atomic_cs;
+
+  struct ibv_pd* pd_;
+  std::map<uintptr_t, struct ibv_mr*> user_buffer_mrs;
+
+  struct user_buf_info_t *user_buf_info = nullptr;
+  size_t num_user_buffers = 0;
+
+  int buffer_register(uintptr_t addr, size_t length);
+  int buffer_unregister(uintptr_t addr);
+
+  __device__ uint32_t get_lkey(uintptr_t addr);
 };
 
 }  // namespace rocshmem

@@ -40,18 +40,23 @@ ctest --test-dir <install-prefix>/share/rocprofiler-systems/tests
 
 Default output directory: `/tmp/$USER/rocprof-sys-pytest-output/`
 
+Installed-tree test runs require configuring with `-DROCPROFSYS_INSTALL_TESTING=ON`
+before `cmake --install`, otherwise the installed validator scripts under
+`share/rocprofiler-systems/tests/` will be missing and pytest-driven CTest runs will
+fail.
+
 Note: If the tests are picking up the wrong Python executable, set `ROCPROFSYS_TEST_EXECUTABLE`.
 For example, in a venv, passing `ROCPROFSYS_TEST_EXECUTABLE=$(which python3)` should suffice.
 
 ### Environment Variables
 
 | Variable | Description | Default |
-|----------|-------------|---------|
+| ---------- | ------------- | --------- |
 | `ROCPROFSYS_TEST_DIR` | Path to test package directory or .pyz file | Auto-detected |
 | `ROCPROFSYS_TEST_EXECUTABLE` | Python (install mode) or pytest (build mode) executable to use | Auto-detected |
 | `ROCPROFSYS_PYTHON_HINTS` | Additional search paths for versioned Python interpreters | Not set |
 | `ROCPROFSYS_BUILD_DIR` | Path to build directory | Auto-detected |
-| `ROCPROFSYS_INSTALL_DIR` | Path to install prefix (enables install mode) | Not set |
+| `ROCPROFSYS_INSTALL_DIR` | Path to install prefix (enables install mode and overrides build-tree autodetection) | Not set |
 | `ROCPROFSYS_SOURCE_DIR` | Path to source directory | Auto-detected |
 | `ROCPROFSYS_KEEP_TEST_OUTPUT` | Keep test output on success (`ON`/`OFF`) | `ON` |
 | `ROCPROFSYS_USE_ROCPD` | Enable/disable ROCpd validation (`ON`/`OFF`) | `ON` if available |

@@ -131,6 +131,11 @@ declare -A TEST_NUMBERS=(
   ["teamctxsharedinfra"]="95"
   ["quiet_on_stream"]="96"
   ["sync_all_on_stream"]="97"
+  ["teamctxsubsetparentinfra"]="98"
+  ["fence_putwavesignal"]="99"
+  ["fence_putlargesmall"]="100"
+  ["fence_fanout"]="101"
+  ["fence_putwavenbichunks"]="102"
 )
 
 ExecTest() {
@@ -308,27 +313,25 @@ TestRMAPut() {
   ExecTest  "waveputnbi"       2       16           128       8
 
   ################################ User Buffer Tests ################################
-  if [[ $TEST != gda* ]]; then # AIROCSHMEM-383
-    export LOCALBUFTYPE=host
-    ExecTest  "putnbi"           2       32           128       512
-    unset LOCALBUFTYPE
+  export LOCALBUFTYPE=host
+  ExecTest  "putnbi"           2       32           128       512
+  unset LOCALBUFTYPE
 
-    export LOCALBUFTYPE=device
-    ExecTest  "putnbi"           2       32           128       512
-    unset LOCALBUFTYPE
+  export LOCALBUFTYPE=device
+  ExecTest  "putnbi"           2       32           128       512
+  unset LOCALBUFTYPE
 
-    export LOCALBUFTYPE=fine
-    ExecTest  "putnbi"           2       32           128       512
-    unset LOCALBUFTYPE
+  export LOCALBUFTYPE=fine
+  ExecTest  "putnbi"           2       32           128       512
+  unset LOCALBUFTYPE
 
-    export LOCALBUFTYPE=uncached
-    ExecTest  "putnbi"           2       32           128       512
-    unset LOCALBUFTYPE
+  export LOCALBUFTYPE=uncached
+  ExecTest  "putnbi"           2       32           128       512
+  unset LOCALBUFTYPE
 
-    export LOCALBUFTYPE=managed
-    ExecTest  "putnbi"           2       32           128       512
-    unset LOCALBUFTYPE
-  fi
+  export LOCALBUFTYPE=managed
+  ExecTest  "putnbi"           2       32           128       512
+  unset LOCALBUFTYPE
 }
 
 TestRMAGet() {
@@ -386,9 +389,8 @@ TestRMAGet() {
   else echo "Skip:   get_* (AIROCSHMEM-120: RO get tests abort)"; fi
 
   ################################ User Buffer Tests ################################
-  # AIROCSHMEM-383 for GDA
   # AIROCSHMEM-120 for RO
-  if [[ $TEST != gda* && $TEST != ro* ]]; then
+  if [[ $TEST != ro* ]]; then
     export LOCALBUFTYPE=host
     ExecTest  "getnbi"           2       32           128       512
     unset LOCALBUFTYPE
@@ -612,12 +614,28 @@ TestOther() {
   ExecTest  "teamctxoddeveninfra" 5       1            1
   ExecTest  "teamctxsharedinfra"  2       1            1
   ExecTest  "teamctxsharedinfra"  5       1            1
+  ExecTest  "teamctxsubsetparentinfra" 4  1            1
+  ExecTest  "teamctxsubsetparentinfra" 5  1            1
   unset ROCSHMEM_MAX_NUM_CONTEXTS
 
   ExecTest  "shmemptr"         2       1            1         8
   ExecTest  "shmemptr"         2       1            1024      8
   ExecTest  "shmemptr"         2       8            1         8
   ExecTest  "shmemptr"         2       16           128       8
+
+  ########################### Fence ordering tests #############################
+  if [[ $TEST != ro* ]]; then #AIROCSHMEM-418: fence tests not supported on RO
+  ExecTest  "fence_putwavesignal"    2       1     64        1048576
+  ExecTest  "fence_putwavesignal"    2       8     256       1048576
+  ExecTest  "fence_putwavesignal"    2       32    1024      65536
+  ExecTest  "fence_putlargesmall"    2       1     64        4096
+  ExecTest  "fence_putlargesmall"    2       8     256       65536
+  ExecTest  "fence_fanout"           2       1     64        1048576
+  ExecTest  "fence_fanout"           4       4     256       65536
+  ExecTest  "fence_fanout"           8       8     256       65536
+  ExecTest  "fence_putwavenbichunks" 2       1     64        1048576
+  ExecTest  "fence_putwavenbichunks" 2       8     256       65536
+  else echo "Skip:   fence_* (AIROCSHMEM-418: fence tests not supported on RO)"; fi
 }
 
 TestHeatMapRMA() {
@@ -655,6 +673,7 @@ TestHeatMapColl() {
   ExecTest  "alltoall"         32      1            256        v1073741824
   ExecTest  "alltoall"         64      1            256        v1073741824
 }
+
 
 ValidateInput() {
   INPUT_COUNT=$1

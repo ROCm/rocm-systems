@@ -32,6 +32,7 @@
 #include "envvar.hpp"
 #include "util.hpp"
 #include "log.hpp"
+#include "sdma_policy.hpp"
 #include "memfabric/pod_detection.hpp"
 
 namespace rocshmem {
@@ -160,6 +161,7 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
 
     if (use_pod_detection) {
       // In pod detection path, ipc_ranks already contains global ranks
+      ipcDetectPattern(ipc_ranks.data(), shm_size);
       CHECK_HIP(hipMemcpy(pes_with_ipc_avail, ipc_ranks.data(), shm_size * sizeof(int), hipMemcpyHostToDevice));
     } else {
       // In fallback path, need to translate from shmcomm ranks to thread_comm ranks
@@ -173,6 +175,7 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
       for(int i = 0; i < shm_size; i++)
         seqranks[i] = i;
       mpilib_ftable_.Group_translate_ranks(shm_grp, shm_size, seqranks, thread_grp, host_pes_with_ipc_avail);
+      ipcDetectPattern(host_pes_with_ipc_avail, shm_size);
       CHECK_HIP(hipMemcpy(pes_with_ipc_avail, host_pes_with_ipc_avail, shm_size * sizeof(int), hipMemcpyHostToDevice));
       // since we delete host_pes_with_ipc_avail, want to make sure the data transfer is complete
       CHECK_HIP(hipStreamSynchronize(0));
@@ -262,8 +265,10 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
   auto disable_ipc = envvar::disable_mixed_ipc || envvar::ro::disable_ipc || envvar::disable_ipc;
   if (!disable_ipc) {
     CHECK_HIP(hipMalloc(reinterpret_cast<void**>(&pes_with_ipc_avail), shm_size * sizeof(int)));
+    ipcDetectPattern(shm_ranks.data(), shm_size);
     CHECK_HIP(hipMemcpy(pes_with_ipc_avail, shm_ranks.data(), shm_size * sizeof(int), hipMemcpyHostToDevice));
   }
+
 }
 
 __host__ void IpcOnImpl::ipcHostStop() {
@@ -281,16 +286,26 @@ __host__ void IpcOnImpl::ipcHostStop() {
   }
 }
 
-__device__ void IpcOnImpl::ipcCopy(void *dst, void *src, size_t size) {
-  memcpy_lane(dst, src, size);
+
+#if defined(USE_SDMA)
+
+__host__ void IpcSdmaImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
+                                       MPI_Comm thread_comm) {
+  IpcOnImpl::ipcHostInit(my_pe, heap_bases, thread_comm);
+  sdmaImpl_.sdmaHostInit(my_pe, shm_size, shm_rank);
 }
 
-__device__ void IpcOnImpl::ipcCopy_wave(void *dst, void *src, size_t size) {
-  memcpy_wave(dst, src, size);
+__host__ void IpcSdmaImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
+                                       TcpBootstrap *bootstrap) {
+  IpcOnImpl::ipcHostInit(my_pe, heap_bases, bootstrap);
+  sdmaImpl_.sdmaHostInit(my_pe, shm_size, shm_rank);
 }
 
-__device__ void IpcOnImpl::ipcCopy_wg(void *dst, void *src, size_t size) {
-  memcpy_wg(dst, src, size);
+__host__ void IpcSdmaImpl::ipcHostStop() {
+  sdmaImpl_.sdmaHostStop();
+  IpcOnImpl::ipcHostStop();
 }
+
+#endif  // USE_SDMA
 
 }  // namespace rocshmem
