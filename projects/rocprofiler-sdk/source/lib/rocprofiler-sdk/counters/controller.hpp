@@ -39,7 +39,6 @@ namespace rocprofiler
 namespace counters
 {
 // DRM render node minors start at 128; subtract to get the card index.
-inline constexpr auto drm_render_node_minor_offset = 128;
 // Stores counter profiling information such as the agent
 // to collect counters on, the metrics to collect, the hw
 // counters needed to evaluate the metrics, and the ASTs.
@@ -95,6 +94,7 @@ public:
         rocprofiler_agent_id_t                   agent_id,
         rocprofiler_device_counting_service_cb_t cb,
         void*                                    user_data);
+    void check_power_performance_level();
 
 private:
     common::Synchronized<std::unordered_map<uint64_t, std::shared_ptr<counter_config>>> _configs;

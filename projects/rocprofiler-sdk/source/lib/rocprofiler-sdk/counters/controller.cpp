@@ -41,12 +41,11 @@ namespace rocprofiler
 {
 namespace counters
 {
-CounterController::CounterController()
-{
-    // Pre-read metrics map file to catch faliures during initial setup.
-    rocprofiler::counters::loadMetrics();
-    rocprofiler::counters::check_installed_firmware_restrictions();
+constexpr auto drm_render_node_minor_offset = 128;
 
+void
+CounterController::check_power_performance_level()
+{
     // Check if power_dpm_force_performance_level is set to profile_standard
     // for GPU agents that support counter collection. gfx11+ (Navi3x) requires
     // profile_standard for stable counter collection; gfx10 and below do not.
@@ -79,14 +78,14 @@ CounterController::CounterController()
             continue;
         }
 
-        std::string perf_level;
+        std::string perf_level{};
         std::getline(perf_file, perf_level);
         if(perf_level.empty())
         {
             ROCP_WARNING << fmt::format(
                 "Could not get power_dpm_force_performance_level for Agent {} (card{}). "
                 "Set to one of 'profile_standard, low, high, manual' for stable counter "
-                "collection.",
+                "collection. You can try running rocm-smi.",
                 agent->node_id,
                 card_num);
         }
@@ -101,6 +100,13 @@ CounterController::CounterController()
                 perf_level);
         }
     }
+}
+
+CounterController::CounterController()
+{
+    // Pre-read metrics map file to catch faliures during initial setup.
+    rocprofiler::counters::loadMetrics();
+    rocprofiler::counters::check_installed_firmware_restrictions();
 }
 
 // Adds a counter collection profile to our global cache.
