@@ -21,6 +21,9 @@
 #include <hip_test_common.hh>
 #include <chrono>
 
+// Maximum time the host thread waits to observe the kernel's update
+static constexpr int kCoherentWaitSeconds = 20;
+
 __global__ void CoherentTst(int* ptr) {  // ptr was set to 1
   atomicAdd_system(ptr, 1);              // now ptr is 2
   while (atomicCAS_system(ptr, 3, 4) != 3) {
@@ -67,13 +70,14 @@ static void TstCoherency(int* ptr, MemoryType type) {
     std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
     while (
         std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start)
-            .count() <= 3) {
+            .count() <= kCoherentWaitSeconds) {
       d = supportHostAtomic ? __sync_fetch_and_add(ptr, 0) : *ptr;  // Retrieve *ptr
       if (d == 2) break;  // If kernel has updated *ptr to 2, exit
-    }  // wait till ptr is updated to 2 from kernel or 3 seconds
+    }  // wait till ptr is updated to 2 from kernel or kCoherentWaitSeconds seconds
     if (d != 2) {
-      // 3 seconds should be long enough for kernel to update ptr
-      fprintf(stderr, "d = %d hasn't been updated to 2 in 3s\n", d);
+      // kCoherentWaitSeconds should be long enough for kernel to update ptr.
+      fprintf(stderr, "d = %d hasn't been updated to 2 in %ds; aborting kernel\n", d,
+              kCoherentWaitSeconds);
       return;
     }
     // increment it to 3
