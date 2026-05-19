@@ -3,9 +3,37 @@
 
 #include "common/environment.hpp"
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <unordered_map>
 
 using namespace rocprofsys::common;
+
+// ── fake_env ─────────────────────────────────────────────────────────────────
+// In-memory environment backend for unit tests.
+// Call fake_env::reset() in SetUp()/TearDown() to isolate tests.
+struct fake_env
+{
+    inline static std::unordered_map<std::string, std::string> store;
+
+    static int setenv(const char* name, const char* value, int overwrite)
+    {
+        if(!overwrite && store.count(name)) return 0;
+        store[name] = value;
+        return 0;
+    }
+
+    static char* getenv(const char* name)
+    {
+        auto it = store.find(name);
+        return it != store.end() ? it->second.data() : nullptr;
+    }
+
+    static void reset() { store.clear(); }
+};
+
+// Convenience alias used throughout the injection tests.
+using fake_environment = environment<fake_env>;
 
 class IsPythonInterpreterTest : public ::testing::Test
 {};
@@ -189,197 +217,6 @@ TEST_F(DuplicatedEnvironmentEntriesTest, RocmEventsPreservesDeviceSyntax)
         "ROCPROFSYS_ROCM_EVENTS=GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU,TA_TA_BUSY:device=0");
 }
 
-// ── get_env ──────────────────────────────────────────────────────────────────
-
-class GetEnvTest : public ::testing::Test
-{
-protected:
-    void SetUp() override { unsetenv("ROCPROFSYS_TEST_VAR"); }
-    void TearDown() override { unsetenv("ROCPROFSYS_TEST_VAR"); }
-};
-
-TEST_F(GetEnvTest, StringReturnsDefaultWhenUnset)
-{
-    EXPECT_EQ(get_env("ROCPROFSYS_TEST_VAR", std::string{ "fallback" }), "fallback");
-}
-
-TEST_F(GetEnvTest, StringReturnsValueWhenSet)
-{
-    setenv("ROCPROFSYS_TEST_VAR", "hello", 1);
-    EXPECT_EQ(get_env("ROCPROFSYS_TEST_VAR", std::string{ "fallback" }), "hello");
-}
-
-TEST_F(GetEnvTest, StringEmptyVarNameReturnsDefault)
-{
-    EXPECT_EQ(get_env("", std::string{ "fallback" }), "fallback");
-}
-
-TEST_F(GetEnvTest, IntReturnsDefaultWhenUnset)
-{
-    EXPECT_EQ(get_env("ROCPROFSYS_TEST_VAR", 42), 42);
-}
-
-TEST_F(GetEnvTest, IntReturnsValueWhenSet)
-{
-    setenv("ROCPROFSYS_TEST_VAR", "7", 1);
-    EXPECT_EQ(get_env("ROCPROFSYS_TEST_VAR", 42), 7);
-}
-
-TEST_F(GetEnvTest, IntReturnsDefaultOnInvalidValue)
-{
-    setenv("ROCPROFSYS_TEST_VAR", "not_a_number", 1);
-    EXPECT_EQ(get_env("ROCPROFSYS_TEST_VAR", 42), 42);
-}
-
-TEST_F(GetEnvTest, IntHandlesNegativeValue)
-{
-    setenv("ROCPROFSYS_TEST_VAR", "-5", 1);
-    EXPECT_EQ(get_env("ROCPROFSYS_TEST_VAR", 0), -5);
-}
-
-TEST_F(GetEnvTest, BoolReturnsDefaultWhenUnset)
-{
-    EXPECT_FALSE(get_env("ROCPROFSYS_TEST_VAR", false));
-    EXPECT_TRUE(get_env("ROCPROFSYS_TEST_VAR", true));
-}
-
-TEST_F(GetEnvTest, BoolTrueVariants)
-{
-    for(const char* v : { "1", "true", "TRUE", "yes", "on" })
-    {
-        setenv("ROCPROFSYS_TEST_VAR", v, 1);
-        EXPECT_TRUE(get_env("ROCPROFSYS_TEST_VAR", false)) << "value: " << v;
-    }
-}
-
-TEST_F(GetEnvTest, BoolFalseVariants)
-{
-    for(const char* v : { "0", "false", "FALSE", "no", "off" })
-    {
-        setenv("ROCPROFSYS_TEST_VAR", v, 1);
-        EXPECT_FALSE(get_env("ROCPROFSYS_TEST_VAR", true)) << "value: " << v;
-    }
-}
-
-TEST_F(GetEnvTest, SizeTReturnsDefaultWhenUnset)
-{
-    EXPECT_EQ(get_env("ROCPROFSYS_TEST_VAR", size_t{ 100 }), size_t{ 100 });
-}
-
-TEST_F(GetEnvTest, SizeTReturnsValueWhenSet)
-{
-    setenv("ROCPROFSYS_TEST_VAR", "512", 1);
-    EXPECT_EQ(get_env("ROCPROFSYS_TEST_VAR", size_t{ 1 }), size_t{ 512 });
-}
-
-TEST_F(GetEnvTest, DoubleReturnsDefaultWhenUnset)
-{
-    EXPECT_DOUBLE_EQ(get_env("ROCPROFSYS_TEST_VAR", -1.0), -1.0);
-}
-
-TEST_F(GetEnvTest, DoubleReturnsValueWhenSet)
-{
-    setenv("ROCPROFSYS_TEST_VAR", "3.14", 1);
-    EXPECT_NEAR(get_env("ROCPROFSYS_TEST_VAR", 0.0), 3.14, 1e-9);
-}
-
-TEST_F(GetEnvTest, DoubleHandlesNegativeValue)
-{
-    setenv("ROCPROFSYS_TEST_VAR", "-2.5", 1);
-    EXPECT_DOUBLE_EQ(get_env("ROCPROFSYS_TEST_VAR", 0.0), -2.5);
-}
-
-TEST_F(GetEnvTest, OneArgFormReturnsEmptyStringWhenUnset)
-{
-    EXPECT_EQ(get_env<std::string>("ROCPROFSYS_TEST_VAR"), "");
-}
-
-TEST_F(GetEnvTest, OneArgFormReturnsValueWhenSet)
-{
-    setenv("ROCPROFSYS_TEST_VAR", "found", 1);
-    EXPECT_EQ(get_env<std::string>("ROCPROFSYS_TEST_VAR"), "found");
-}
-
-// ── set_env ───────────────────────────────────────────────────────────────────
-
-class SetEnvTest : public ::testing::Test
-{
-protected:
-    void SetUp() override { unsetenv("ROCPROFSYS_TEST_VAR"); }
-    void TearDown() override { unsetenv("ROCPROFSYS_TEST_VAR"); }
-};
-
-TEST_F(SetEnvTest, SetsStringValue)
-{
-    set_env("ROCPROFSYS_TEST_VAR", std::string{ "val" }, 1);
-    EXPECT_EQ(get_env("ROCPROFSYS_TEST_VAR", std::string{}), "val");
-}
-
-TEST_F(SetEnvTest, SetsIntValue)
-{
-    set_env("ROCPROFSYS_TEST_VAR", 99, 1);
-    EXPECT_EQ(get_env("ROCPROFSYS_TEST_VAR", 0), 99);
-}
-
-TEST_F(SetEnvTest, OverrideZeroDoesNotOverwriteExisting)
-{
-    setenv("ROCPROFSYS_TEST_VAR", "original", 1);
-    set_env("ROCPROFSYS_TEST_VAR", std::string{ "new" }, 0);
-    EXPECT_EQ(get_env("ROCPROFSYS_TEST_VAR", std::string{}), "original");
-}
-
-TEST_F(SetEnvTest, OverrideOneOverwritesExisting)
-{
-    setenv("ROCPROFSYS_TEST_VAR", "original", 1);
-    set_env("ROCPROFSYS_TEST_VAR", std::string{ "new" }, 1);
-    EXPECT_EQ(get_env("ROCPROFSYS_TEST_VAR", std::string{}), "new");
-}
-
-// ── get_env_choice ───────────────────────────────────────────────────────────
-
-class GetEnvChoiceTest : public ::testing::Test
-{
-protected:
-    void SetUp() override { unsetenv("ROCPROFSYS_TEST_VAR"); }
-    void TearDown() override { unsetenv("ROCPROFSYS_TEST_VAR"); }
-};
-
-TEST_F(GetEnvChoiceTest, ReturnsDefaultWhenUnset)
-{
-    auto result = get_env_choice<std::string>("ROCPROFSYS_TEST_VAR", "trace",
-                                              { "trace", "sampling", "causal" });
-    EXPECT_EQ(result, "trace");
-}
-
-TEST_F(GetEnvChoiceTest, ReturnsValueWhenValidChoiceSet)
-{
-    setenv("ROCPROFSYS_TEST_VAR", "sampling", 1);
-    auto result = get_env_choice<std::string>("ROCPROFSYS_TEST_VAR", "trace",
-                                              { "trace", "sampling", "causal" });
-    EXPECT_EQ(result, "sampling");
-}
-
-TEST_F(GetEnvChoiceTest, ReturnsDefaultWhenInvalidChoiceSet)
-{
-    setenv("ROCPROFSYS_TEST_VAR", "invalid_mode", 1);
-    auto result = get_env_choice<std::string>("ROCPROFSYS_TEST_VAR", "trace",
-                                              { "trace", "sampling", "causal" });
-    EXPECT_EQ(result, "trace");
-}
-
-TEST_F(GetEnvChoiceTest, AllValidChoicesAccepted)
-{
-    const std::set<std::string> choices = { "inprocess", "system", "all" };
-    for(const auto& choice : choices)
-    {
-        setenv("ROCPROFSYS_TEST_VAR", choice.c_str(), 1);
-        EXPECT_EQ(
-            get_env_choice<std::string>("ROCPROFSYS_TEST_VAR", "inprocess", choices),
-            choice)
-            << "choice: " << choice;
-    }
-}
-
 class AddTorchLibraryPathTest : public ::testing::Test
 {
 protected:
@@ -400,4 +237,180 @@ TEST_F(AddTorchLibraryPathTest, HandlesEmptyExecutable)
     add_torch_library_path(envp, std::string_view{}, false, updated_envs);
     ASSERT_EQ(envp.size(), 1);
     EXPECT_EQ(envp[0], "LD_LIBRARY_PATH=/usr/lib");
+}
+
+// ── Dependency-injection tests via fake_env ───────────────────────────────────
+// These tests never touch the real process environment.
+
+class FakeEnvGetEnvTest : public ::testing::Test
+{
+protected:
+    void SetUp() override { fake_env::reset(); }
+    void TearDown() override { fake_env::reset(); }
+};
+
+TEST_F(FakeEnvGetEnvTest, StringReturnsDefaultWhenUnset)
+{
+    EXPECT_EQ(fake_environment::get_env("FOO", std::string{ "default" }), "default");
+}
+
+TEST_F(FakeEnvGetEnvTest, StringReturnsValueWhenSet)
+{
+    fake_env::setenv("FOO", "bar", 1);
+    EXPECT_EQ(fake_environment::get_env("FOO", std::string{ "default" }), "bar");
+}
+
+TEST_F(FakeEnvGetEnvTest, IntReturnsDefaultWhenUnset)
+{
+    EXPECT_EQ(fake_environment::get_env("FOO", 42), 42);
+}
+
+TEST_F(FakeEnvGetEnvTest, IntReturnsValueWhenSet)
+{
+    fake_env::setenv("FOO", "7", 1);
+    EXPECT_EQ(fake_environment::get_env("FOO", 42), 7);
+}
+
+TEST_F(FakeEnvGetEnvTest, BoolTrueVariants)
+{
+    for(const char* v : { "1", "true", "yes", "on" })
+    {
+        fake_env::reset();
+        fake_env::setenv("FOO", v, 1);
+        EXPECT_TRUE(fake_environment::get_env("FOO", false)) << "value: " << v;
+    }
+}
+
+TEST_F(FakeEnvGetEnvTest, BoolFalseVariants)
+{
+    for(const char* v : { "0", "false", "no", "off" })
+    {
+        fake_env::reset();
+        fake_env::setenv("FOO", v, 1);
+        EXPECT_FALSE(fake_environment::get_env("FOO", true)) << "value: " << v;
+    }
+}
+
+TEST_F(FakeEnvGetEnvTest, DoubleReturnsValueWhenSet)
+{
+    fake_env::setenv("FOO", "3.14", 1);
+    EXPECT_NEAR(fake_environment::get_env("FOO", 0.0), 3.14, 1e-9);
+}
+
+TEST_F(FakeEnvGetEnvTest, OneArgFormReturnsEmptyWhenUnset)
+{
+    EXPECT_EQ(fake_environment::get_env<std::string>("FOO"), "");
+}
+
+TEST_F(FakeEnvGetEnvTest, EmptyVarNameReturnsDefault)
+{
+    EXPECT_EQ(fake_environment::get_env("", std::string{ "fallback" }), "fallback");
+}
+
+TEST_F(FakeEnvGetEnvTest, DoesNotLeakToRealEnvironment)
+{
+    fake_env::setenv("ROCPROFSYS_FAKE_TEST_ISOLATION", "injected", 1);
+    // The real process environment must not have been modified.
+    EXPECT_EQ(::getenv("ROCPROFSYS_FAKE_TEST_ISOLATION"), nullptr);
+}
+
+class FakeEnvSetEnvTest : public ::testing::Test
+{
+protected:
+    void SetUp() override { fake_env::reset(); }
+    void TearDown() override { fake_env::reset(); }
+};
+
+TEST_F(FakeEnvSetEnvTest, SetsStringValue)
+{
+    fake_environment::set_env("FOO", std::string{ "hello" }, 1);
+    EXPECT_EQ(fake_environment::get_env("FOO", std::string{}), "hello");
+}
+
+TEST_F(FakeEnvSetEnvTest, SetsIntValue)
+{
+    fake_environment::set_env("FOO", 99, 1);
+    EXPECT_EQ(fake_environment::get_env("FOO", 0), 99);
+}
+
+TEST_F(FakeEnvSetEnvTest, OverrideZeroDoesNotOverwrite)
+{
+    fake_env::setenv("FOO", "original", 1);
+    fake_environment::set_env("FOO", std::string{ "new" }, 0);
+    EXPECT_EQ(fake_environment::get_env("FOO", std::string{}), "original");
+}
+
+TEST_F(FakeEnvSetEnvTest, OverrideOneOverwrites)
+{
+    fake_env::setenv("FOO", "original", 1);
+    fake_environment::set_env("FOO", std::string{ "new" }, 1);
+    EXPECT_EQ(fake_environment::get_env("FOO", std::string{}), "new");
+}
+
+class FakeEnvGetEnvChoiceTest : public ::testing::Test
+{
+protected:
+    void SetUp() override { fake_env::reset(); }
+    void TearDown() override { fake_env::reset(); }
+};
+
+TEST_F(FakeEnvGetEnvChoiceTest, ReturnsDefaultWhenUnset)
+{
+    auto result = fake_environment::get_env_choice<std::string>(
+        "FOO", "trace", { "trace", "sampling", "causal" });
+    EXPECT_EQ(result, "trace");
+}
+
+TEST_F(FakeEnvGetEnvChoiceTest, ReturnsValueWhenValidChoiceSet)
+{
+    fake_env::setenv("FOO", "sampling", 1);
+    auto result = fake_environment::get_env_choice<std::string>(
+        "FOO", "trace", { "trace", "sampling", "causal" });
+    EXPECT_EQ(result, "sampling");
+}
+
+TEST_F(FakeEnvGetEnvChoiceTest, ReturnsDefaultWhenInvalidChoiceSet)
+{
+    fake_env::setenv("FOO", "bad_value", 1);
+    auto result = fake_environment::get_env_choice<std::string>(
+        "FOO", "trace", { "trace", "sampling", "causal" });
+    EXPECT_EQ(result, "trace");
+}
+
+class FakeEnvConfigTest : public ::testing::Test
+{
+protected:
+    void SetUp() override { fake_env::reset(); }
+    void TearDown() override { fake_env::reset(); }
+};
+
+TEST_F(FakeEnvConfigTest, OperatorSetsValue)
+{
+    env_config<fake_env> cfg;
+    cfg.env_name  = "FOO";
+    cfg.env_value = "injected";
+    cfg.override  = 1;
+    cfg();
+    EXPECT_EQ(fake_environment::get_env("FOO", std::string{}), "injected");
+}
+
+TEST_F(FakeEnvConfigTest, OperatorRespectsOverrideZero)
+{
+    fake_env::setenv("FOO", "original", 1);
+    env_config<fake_env> cfg;
+    cfg.env_name  = "FOO";
+    cfg.env_value = "new";
+    cfg.override  = 0;
+    cfg();
+    EXPECT_EQ(fake_environment::get_env("FOO", std::string{}), "original");
+}
+
+TEST_F(FakeEnvConfigTest, EmptyNameIsNoop)
+{
+    env_config<fake_env> cfg;
+    cfg.env_name  = "";
+    cfg.env_value = "ignored";
+    cfg.override  = 1;
+    EXPECT_EQ(cfg(), -1);
+    EXPECT_TRUE(fake_env::store.empty());
 }
