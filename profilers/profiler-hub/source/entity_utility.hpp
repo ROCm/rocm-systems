@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <functional>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -35,6 +36,7 @@ public:
     {
         std::lock_guard<std::mutex> const lock(m_mutex);
         m_entity_container.emplace(std::forward<Args>(args)...);
+        m_last_key.reset();
     }
 
     template <typename Entity>
@@ -45,7 +47,14 @@ public:
         if constexpr(common::traits::is_unordered_map_v<EntityContainerType>)
         {
             const typename EntityContainerType::key_type key{ entity };
-            return m_entity_container.at(key);
+            if(m_last_key && *m_last_key == key)
+            {
+                return m_last_value;
+            }
+            const auto value = m_entity_container.at(key);
+            m_last_key       = key;
+            m_last_value     = value;
+            return value;
         }
         else
         {
@@ -57,6 +66,12 @@ public:
 private:
     EntityContainerType m_entity_container;
     mutable std::mutex  m_mutex;
+
+    /// Single-slot last-resolved cache. Bulk inserts with an unchanging
+    /// trace_environment_t (the dominant pattern) hit this 100% on the hot
+    /// path and skip the unordered_map find/at.
+    mutable std::optional<typename EntityContainerType::key_type> m_last_key;
+    mutable PrimaryKey                                            m_last_value{};
 };
 
 /// Specialization for string-keyed maps enabling lookup from
@@ -93,18 +108,30 @@ public:
     {
         std::lock_guard<std::mutex> const lock(m_mutex);
         m_entity_container.emplace(std::forward<Args>(args)...);
+        m_last_key.reset();
     }
 
     [[nodiscard]] PrimaryKey get_primary_key_value_for_entity(
         const std::string& key) const noexcept
     {
         const std::lock_guard<std::mutex> lock(m_mutex);
-        return m_entity_container.at(key);
+        if(m_last_key && *m_last_key == key)
+        {
+            return m_last_value;
+        }
+        const auto value = m_entity_container.at(key);
+        m_last_key       = key;
+        m_last_value     = value;
+        return value;
     }
 
     [[nodiscard]] PrimaryKey get_primary_key_value_for_entity(std::string_view key) const
     {
         const std::lock_guard<std::mutex> lock(m_mutex);
+        if(m_last_key && *m_last_key == key)
+        {
+            return m_last_value;
+        }
         m_lookup_buffer.assign(key.data(), key.size());
         auto it = m_entity_container.find(m_lookup_buffer);
 
@@ -113,13 +140,17 @@ public:
             throw std::runtime_error(
                 fmt::format("Primary key not found for key: {}", key));
         }
+        m_last_key   = m_lookup_buffer;
+        m_last_value = it->second;
         return it->second;
     }
 
 private:
-    container_type_t    m_entity_container;
-    mutable std::string m_lookup_buffer;
-    mutable std::mutex  m_mutex;
+    container_type_t                   m_entity_container;
+    mutable std::string                m_lookup_buffer;
+    mutable std::mutex                 m_mutex;
+    mutable std::optional<std::string> m_last_key;
+    mutable PrimaryKey                 m_last_value{};
 };
 
 }  // namespace profiler_hub
