@@ -213,8 +213,7 @@ hsa_status_t ImageRuntime::CreateImageManager(hsa_agent_t agent, void* data) {
       image_manager = new ImageManagerAi();
       break;
     default:
-      debug_print("ERROR: Unsupported GFX major version %u (GFX7/GFX8 are no longer supported)\n",
-                  major_ver);
+      debug_print("ERROR: No image manager available for GFX major version %u\n", major_ver);
       return HSA_STATUS_ERROR_INVALID_AGENT;
     }
     hsa_error_code = image_manager->Initialize(agent);

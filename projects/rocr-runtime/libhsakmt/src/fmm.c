@@ -2307,12 +2307,6 @@ static int fmm_set_memory_policy(HsaKFDContext *ctx,
 	return hsakmt_ioctl(ctx->fd, AMDKFD_IOC_SET_MEMORY_POLICY, &args);
 }
 
-static uint32_t get_vm_alignment(uint32_t device_id)
-{
-	(void)device_id;
-	return PAGE_SIZE;
-}
-
 static HSAKMT_STATUS get_process_apertures(HsaKFDContext *ctx,
 	struct kfd_process_device_apertures *process_apertures,
 	uint32_t *num_of_nodes)
@@ -2946,8 +2940,7 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 			gpu_mem[gpu_mem_count].scratch_physical.ops = &reserved_aperture_ops;
 			pthread_mutex_init(&gpu_mem[gpu_mem_count].scratch_physical.fmm_mutex, NULL);
 
-			gpu_mem[gpu_mem_count].gpuvm_aperture.align =
-				get_vm_alignment(props.DeviceId);
+			gpu_mem[gpu_mem_count].gpuvm_aperture.align = PAGE_SIZE;
 			gpu_mem[gpu_mem_count].gpuvm_aperture.guard_pages = guardPages;
 			gpu_mem[gpu_mem_count].gpuvm_aperture.ops = &reserved_aperture_ops;
 			pthread_mutex_init(&gpu_mem[gpu_mem_count].gpuvm_aperture.fmm_mutex, NULL);
@@ -3052,11 +3045,8 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 			PORT_UINT64_TO_VPTR(process_apertures[i].scratch_limit);
 
 		if (IS_CANONICAL_ADDR(process_apertures[i].gpuvm_limit)) {
-			uint64_t vm_alignment = get_vm_alignment(
-				gpu_mem[gpu_mem_id].device_id);
-
 			/* Set proper alignment for scratch backing aperture */
-			gpu_mem[gpu_mem_id].scratch_physical.align = vm_alignment;
+			gpu_mem[gpu_mem_id].scratch_physical.align = PAGE_SIZE;
 
 			/* Non-canonical per-ASIC GPUVM aperture does
 			 * not exist on dGPUs in GPUVM64 address mode
@@ -3070,8 +3060,7 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 			if (process_apertures[i].gpuvm_limit < svm_limit ||
 			    svm_limit == 0)
 				svm_limit = process_apertures[i].gpuvm_limit;
-			if (vm_alignment > svm_alignment)
-				svm_alignment = vm_alignment;
+			svm_alignment = PAGE_SIZE;
 		} else {
 			gpu_mem[gpu_mem_id].gpuvm_aperture.base =
 				PORT_UINT64_TO_VPTR(process_apertures[i].gpuvm_base);
