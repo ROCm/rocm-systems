@@ -881,6 +881,16 @@ configure_settings(bool _init)
     }
 
     ROCPROFSYS_CONFIG_SETTING(
+        std::string, "ROCPROFSYS_GPU_PERF_COUNTERS",
+        "GPU hardware counters to collect via device counting service (PMC polled "
+        "sampling). Comma-separated list of counter names (e.g. "
+        "SQ_WAVES,SQ_BUSY_CYCLES). "
+        "Independent from ROCPROFSYS_ROCM_EVENTS which controls kernel dispatch "
+        "counters. "
+        "If empty, no PMC sampling is performed.",
+        "", "rocm", "hardware_counters", "pmc", "process_sampling");
+
+    ROCPROFSYS_CONFIG_SETTING(
         std::string, "ROCPROFSYS_RANK_FILTER_ID",
         "Name of environment variable to read rank from for MPI output filtering",
         std::string{}, "data", "io", "advanced");
