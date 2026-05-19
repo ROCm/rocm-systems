@@ -9,6 +9,8 @@
 
 #include <sqlite3.h>
 
+#include <atomic>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -18,6 +20,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <type_traits>
 #include <vector>
 
@@ -66,11 +69,13 @@ public:
         : m_backend{ std::move(backend) }
         , m_uncaught_on_entry{ std::uncaught_exceptions() }
         {
+            m_backend->assert_owner_thread();
             run_prepared(m_backend->m_begin_stmt);
         }
 
         ~transaction_guard()
         {
+            m_backend->assert_owner_thread();
             if(std::uncaught_exceptions() > m_uncaught_on_entry)
             {
                 run_prepared(m_backend->m_rollback_stmt);
@@ -308,6 +313,7 @@ private:
     // =========================================================================
     void bind_null(sqlite3_stmt* stmt, int position, const std::string& query)
     {
+        assert_owner_thread();
         LOG_TRACE("bind_null: position={}", position);
         validate_sqlite3_result(
             sqlite3_bind_null(stmt, position), query.c_str(), [position] {
@@ -320,6 +326,7 @@ private:
                    std::string_view   val,
                    const std::string& query)
     {
+        assert_owner_thread();
         LOG_TRACE("bind_text: position={}, value={}", position, val);
         validate_sqlite3_result(
             sqlite3_bind_text(
@@ -336,6 +343,7 @@ private:
                      double             val,
                      const std::string& query)
     {
+        assert_owner_thread();
         LOG_TRACE("bind_double: position={}, value={}", position, val);
         validate_sqlite3_result(
             sqlite3_bind_double(stmt, position, val), query.c_str(), [position, val] {
@@ -349,6 +357,7 @@ private:
                     int64_t            val,
                     const std::string& query)
     {
+        assert_owner_thread();
         LOG_TRACE("bind_int64: position={}, value={}", position, val);
         validate_sqlite3_result(
             sqlite3_bind_int64(stmt, position, val), query.c_str(), [position, val] {
@@ -362,6 +371,7 @@ private:
                     int32_t            val,
                     const std::string& query)
     {
+        assert_owner_thread();
         LOG_TRACE("bind_int32: position={}, value={}", position, val);
         validate_sqlite3_result(
             sqlite3_bind_int(stmt, position, val), query.c_str(), [position, val] {
@@ -536,6 +546,32 @@ private:
         throw std::runtime_error(message);
     }
 
+    /**
+     * Single-writer-per-backend invariant check (debug builds only).
+     *
+     * The vtable buffer push path and the cached entity_utility resolver
+     * are unprotected by design - profiler_hub's contract is one
+     * sqlite_backend per writer thread. This claim-on-first-use latch
+     * fires an assert if a second thread ever touches the same backend,
+     * surfacing misuse before SQLITE_THREADSAFE=2 turns it into silent
+     * memory corruption.
+     */
+    void assert_owner_thread() const noexcept
+    {
+#ifndef NDEBUG
+        const auto self     = std::this_thread::get_id();
+        auto       expected = std::thread::id{};
+        if(m_owner_thread.compare_exchange_strong(
+               expected, self, std::memory_order_acq_rel))
+        {
+            return;
+        }
+        assert(expected == self &&
+               "sqlite_backend accessed from a non-owner thread; profiler_hub "
+               "contract requires one writer thread per backend");
+#endif
+    }
+
     sqlite3*       m_sqlite3{ nullptr };
     sqlite3_stmt*  m_begin_stmt{ nullptr };
     sqlite3_stmt*  m_commit_stmt{ nullptr };
@@ -545,6 +581,10 @@ private:
     storage_mode_t m_mode;
     bool           m_initialized{ false };
     bool           m_flushed{ false };
+
+#ifndef NDEBUG
+    mutable std::atomic<std::thread::id> m_owner_thread{};
+#endif
 };
 
 }  // namespace profiler_hub::data_storage
