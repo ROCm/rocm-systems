@@ -85,8 +85,7 @@ def get_build_in_vars(gpu_series: str) -> dict[str, str]:
         return build_in_vars["rdna35"]
     else:
         raise ValueError(
-            f"Unknown GPU series '{gpu_series}' - cannot determine built-in variables. "
-            f"Expected series starting with 'MI' (CDNA) or 'NAVI' (RDNA)."
+            f"Unknown GPU series '{gpu_series}' - cannot determine built-in variables."
         )
 
 
