@@ -705,6 +705,60 @@ TEST_F(GrowMPITest, Grow_InvalidArguments)
     ASSERT_MPI_SUCCESS(MPI_Barrier(MPI_COMM_WORLD));
 }
 
+// Verifies that new-rank argument validation (rank<0, uniqueId==NULL, rank>=nRanks)
+// properly balances ncclGroupStart/End so a subsequent valid grow succeeds.
+// The three bad calls are local to the new rank (existing ranks are not involved);
+// after each rejection the group counter must be back to zero.
+TEST_F(GrowMPITest, Grow_NewRankInvalidArgsThenSuccess)
+{
+    if (!validateTestPrerequisites(GrowTestConfig::kMinRanks)) {
+        GTEST_SKIP() << "Requires at least " << GrowTestConfig::kMinRanks << " MPI ranks";
+    }
+
+    const int wr        = MPIEnvironment::world_rank;
+    const int worldSize = MPIEnvironment::world_size;
+    const int existing  = worldSize - 1;
+    const int newRank   = existing;  // the single new rank
+
+    ASSERT_MPI_EQ(ncclSuccess, buildComm(existing, &initialComm_));
+    ASSERT_MPI_TRUE(wr >= existing || initialComm_ != nullptr);
+
+    // Distribute the uniqueId to all ranks via rank 0
+    ncclUniqueId growId{};
+    if (wr == 0) ASSERT_EQ(ncclSuccess, ncclCommGetUniqueId(initialComm_, &growId));
+    MPI_Bcast(&growId, sizeof(growId), MPI_BYTE, 0, MPI_COMM_WORLD);
+
+    if (wr == newRank) {
+        ncclComm_t dummy = nullptr;
+
+        // Bad call 1: rank < 0 — new ranks must pass rank >= 0
+        ASSERT_EQ(ncclInvalidArgument,
+            ncclCommGrow(nullptr, worldSize, &growId, -1, &dummy, nullptr));
+        ASSERT_EQ(dummy, nullptr);
+
+        // Bad call 2: uniqueId == NULL — new ranks must pass non-NULL uniqueId
+        ASSERT_EQ(ncclInvalidArgument,
+            ncclCommGrow(nullptr, worldSize, nullptr, newRank, &dummy, nullptr));
+        ASSERT_EQ(dummy, nullptr);
+
+        // Bad call 3: rank >= nRanks — rank index out of range
+        ASSERT_EQ(ncclInvalidArgument,
+            ncclCommGrow(nullptr, worldSize, &growId, worldSize, &dummy, nullptr));
+        ASSERT_EQ(dummy, nullptr);
+
+        // Valid call: group counter must be balanced after the three rejections
+        ASSERT_EQ(ncclSuccess,
+            ncclCommGrow(nullptr, worldSize, &growId, newRank, &grownComm_, nullptr));
+    } else {
+        // Existing ranks call grow once with the valid uniqueId
+        ASSERT_EQ(ncclSuccess,
+            ncclCommGrow(initialComm_, worldSize, &growId, -1, &grownComm_, nullptr));
+    }
+
+    ASSERT_MPI_NE(grownComm_, nullptr);
+    ASSERT_MPI_TRUE(runAllReduceAndVerify(grownComm_, worldSize));
+}
+
 // --- bcastGrowHandle: coordinator is the last rank of the parent comm ---
 // Exercises the boundary case where parent->rank == parent->nRanks-1.
 // bcastGrowHandle sends unconditionally to rank 0 and to itself (rank nRanks-1);
