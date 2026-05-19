@@ -159,7 +159,6 @@
   X(TileGetRowMajor,           114)  \
   X(TileGetColumnMajor,        115)  \
   X(TileGetArbitrary,          116)
->>>>>>> 73e4e596fd (add functional tests for the tile API)
 
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
 enum TestType {

@@ -42,13 +42,11 @@
 // Only provide actual implementation when compiling device code
 #ifdef __HIP_DEVICE_COMPILE__
 
-// Bring types into scope for extern "C" declarations
-using rocshmem::rocshmem_ctx_t;
-using rocshmem::rocshmem_team_t;
-
-// Forward declarations of type-erased bitcode functions
-// These are implemented in src/rocshmem_tile_gpu.cpp
-extern "C" {
+// Forward declarations of type-erased namespace functions
+// These are implemented in src/rocshmem_tile_gpu.cpp and provide the actual
+// implementations. The extern "C" wrappers for JIT consumers are in
+// src/device/rocshmem_wrapper.cc
+namespace rocshmem {
   // RMA PUT operations
   __device__ int rocshmem_ctx_tile_put_internal(
       rocshmem_ctx_t ctx, void* dst_data, const void* src_data,
@@ -185,9 +183,6 @@ extern "C" {
   // Collective wait
   __device__ int rocshmem_tile_collective_wait_internal(
       rocshmem_team_t team, uint64_t flags);
-}
-
-namespace rocshmem {
 
 /******************************************************************************
  **************** RMA OPERATIONS - CONTEXT VERSIONS (5) ***********************
