@@ -1,7 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-import functools
 import glob
 import importlib
 import os
@@ -122,6 +121,7 @@ def run_prof(
         / "rocprof_compute_soc"
         / "profile_configs"
         / "sdk_config.yaml",
+        encoding="utf-8",
     ) as filename:
         sdk_config = yaml.safe_load(filename)
     # Extra counter definitions
@@ -131,7 +131,7 @@ def run_prof(
             "counter_def_" + fname_path.name[len("pmc_perf_") :]
         )
         if counter_def_fname.exists():
-            with open(Path(counter_def_fname)) as file:
+            with open(Path(counter_def_fname), encoding="utf-8") as file:
                 sdk_config["rocprofiler-sdk"]["counters"].extend(
                     yaml.safe_load(file)["rocprofiler-sdk"]["counters"]
                 )
@@ -212,10 +212,19 @@ def run_prof(
         ):
             for db_name in glob.glob(workload_dir + "/out/pmc_1/*/*.db"):
                 pid = Path(db_name).stem.split("_")[0]
-                # Read CSV as list of dicts instead of pandas DataFrame
-                counter_rows, _ = csv_ops.read_csv_as_dicts(
-                    f"{workload_dir}/out/pmc_1/{pid}_native_counter_collection.csv"
+                counter_csv = (
+                    Path(workload_dir)
+                    / "out"
+                    / "pmc_1"
+                    / f"{pid}_native_counter_collection.csv"
                 )
+                if not counter_csv.is_file():
+                    console_debug(
+                        f"No native counter CSV for pid {pid}; "
+                        f"skipping rocpd update for {db_name}."
+                    )
+                    continue
+                counter_rows, _ = csv_ops.read_csv_as_dicts(str(counter_csv))
                 rocpd_data.update_rocpd_pmc_events(
                     counter_rows,
                     db_name,
@@ -914,67 +923,3 @@ def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
             f"{workload_dir}/out/pmc_1/results_{fbase}_marker_api_trace.csv",
             f"{workload_dir}/{fbase}_marker_api_trace.csv",
         )
-
-
-SHELL_EXTS = frozenset({".sh", ".bash", ".zsh", ".ksh", ".csh"})
-ETC_SHELLS_PATH = Path("/etc/shells")
-WELL_KNOWN_SHELLS = frozenset({
-    "bash",
-    "sh",
-    "dash",
-    "zsh",
-    "ksh",
-    "fish",
-    "csh",
-    "tcsh",
-})
-
-
-def read_etc_shells_basenames() -> frozenset[str]:
-    """
-    Read and return shell basenames listed in /etc/shells (lowercased).
-
-    Returns an empty set when /etc/shells is missing or unreadable so callers
-    degrade gracefully on platforms that do not provide it.
-    """
-    try:
-        content = ETC_SHELLS_PATH.read_text()
-    except OSError:
-        return frozenset()
-
-    basenames: set[str] = set()
-    for raw_line in content.splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-
-        basename = Path(line).stem.lower()
-        if basename:
-            basenames.add(basename)
-    return frozenset(basenames)
-
-
-@functools.lru_cache(maxsize=1)
-def shell_basenames() -> frozenset[str]:
-    """Cached union of well-known shells with /etc/shells (lowercased)."""
-    return WELL_KNOWN_SHELLS | read_etc_shells_basenames()
-
-
-def is_shell_target(target: str) -> bool:
-    """
-    Check if ``target``'s argv[0] looks like a shell or shell script.
-
-    Shell basenames are sourced from /etc/shells; script extensions come from
-    SHELL_EXTS. ``target`` is parsed with ``shlex.split`` so quoted paths
-    (e.g. ``"/path with spaces/run.sh"``) are handled correctly.
-    """
-    try:
-        tokens = shlex.split(target)
-    except ValueError:
-        return False
-
-    if not tokens:
-        return False
-
-    argv0 = Path(tokens[0])
-    return argv0.stem.lower() in shell_basenames() or argv0.suffix.lower() in SHELL_EXTS

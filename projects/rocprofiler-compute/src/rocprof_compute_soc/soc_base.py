@@ -16,7 +16,7 @@ from typing import Any, Optional
 
 import config
 from roofline.run_benchmark import run_roofline_benchmark
-from utils.amdsmi_interface import amdsmi_ctx, get_gpu_model, get_mem_max_clock
+from utils import amdsmi_interface
 from utils.logger import (
     console_debug,
     console_error,
@@ -225,8 +225,8 @@ class OmniSoC_Base:
                 )
             )
 
-        with amdsmi_ctx():
-            self._mspec.max_mclk = str(get_mem_max_clock())
+        with amdsmi_interface.amdsmi_ctx():
+            self._mspec.max_mclk = str(amdsmi_interface.get_mem_max_clock())
 
         # These are just max values now, because the parsing was broken and this was
         # inconsistent with how we use the clocks elsewhere (all max, all the time)
@@ -257,10 +257,10 @@ class OmniSoC_Base:
         Detects the GPU model using various identifiers from 'amd-smi static'.
         Falls back through multiple methods if the primary method fails.
         """
-        with amdsmi_ctx():
+        with amdsmi_interface.amdsmi_ctx():
             gpu_model = "N/A"
             for model in mi_gpu_specs.get_all_gpu_models():
-                for amdsmi_gpu_model in get_gpu_model():
+                for amdsmi_gpu_model in amdsmi_interface.get_gpu_model():
                     if model.lower() in amdsmi_gpu_model.lower():
                         gpu_model = model
                         break
@@ -312,7 +312,7 @@ class OmniSoC_Base:
             )
             return
 
-        with open(config_filename_dict[file_id]) as stream:
+        with open(config_filename_dict[file_id], encoding="utf-8") as stream:
             file_config = yaml.safe_load(stream)
         if panel_id is None:
             texts.append(yaml.dump(file_config, sort_keys=False))
@@ -487,7 +487,7 @@ class OmniSoC_Base:
                 if file_id in exclude_file_ids:
                     continue
 
-                with open(filename) as stream:
+                with open(filename, encoding="utf-8") as stream:
                     texts.append(stream.read())
 
         for block_id in filter_blocks:
@@ -660,6 +660,7 @@ class OmniSoC_Base:
             / "rocprof_compute_soc"
             / "profile_configs"
             / "sdk_config.yaml",
+            encoding="utf-8",
         ) as filename:
             sdk_config = yaml.safe_load(filename)
         os.environ["ROCPROFILER_METRICS_PATH"] = create_temp_rocprofiler_metrics_path(
@@ -812,7 +813,7 @@ class OmniSoC_Base:
                             pmc.append(f"{ctr}:device={gpu_idx}")
 
                 # Write counters to file
-                with open(file_name, "w") as fd:
+                with open(file_name, "w", encoding="utf-8") as fd:
                     fd.write(yaml.dump({"jobs": [{"pmc": pmc}]}, sort_keys=False))
         else:
             # Output to files
@@ -855,12 +856,12 @@ class OmniSoC_Base:
                         )
 
                 # Write counters to file
-                with open(pmc_filename, "w") as fd:
+                with open(pmc_filename, "w", encoding="utf-8") as fd:
                     fd.write(yaml.dump({"jobs": [{"pmc": pmc}]}, sort_keys=False))
 
                 # Write counter definitions to file
                 if counter_def:
-                    with open(counter_def_filename, "w") as fp:
+                    with open(counter_def_filename, "w", encoding="utf-8") as fp:
                         fp.write(yaml.dump(counter_def, sort_keys=False))
 
     # ----------------------------------------------------
