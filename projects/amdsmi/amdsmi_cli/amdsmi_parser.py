@@ -2544,6 +2544,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 set_value_exclusive_group.add_argument(
                     "-C",
                     "--compute-partition",
+                    "--accelerator-partition",
                     action="store",
                     choices=accelerator_set_choices,
                     type=lambda value: self._is_command_supported(
