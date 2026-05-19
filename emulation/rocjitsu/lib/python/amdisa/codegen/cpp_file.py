@@ -20,7 +20,7 @@ class CppFile:
     declarations, and source code objects.
 
     The top-level namespace is currently hardcoded to ``rocjitsu``.
-    A follow-up will parameterize this via ``CodegenConfig.namespace``.
+    Namespace is configurable via ``CodegenConfig.namespace``.
 
     Attributes:
         name: File name without extension.

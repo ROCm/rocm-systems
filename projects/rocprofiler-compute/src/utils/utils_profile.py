@@ -212,10 +212,19 @@ def run_prof(
         ):
             for db_name in glob.glob(workload_dir + "/out/pmc_1/*/*.db"):
                 pid = Path(db_name).stem.split("_")[0]
-                # Read CSV as list of dicts instead of pandas DataFrame
-                counter_rows, _ = csv_ops.read_csv_as_dicts(
-                    f"{workload_dir}/out/pmc_1/{pid}_native_counter_collection.csv"
+                counter_csv = (
+                    Path(workload_dir)
+                    / "out"
+                    / "pmc_1"
+                    / f"{pid}_native_counter_collection.csv"
                 )
+                if not counter_csv.is_file():
+                    console_debug(
+                        f"No native counter CSV for pid {pid}; "
+                        f"skipping rocpd update for {db_name}."
+                    )
+                    continue
+                counter_rows, _ = csv_ops.read_csv_as_dicts(str(counter_csv))
                 rocpd_data.update_rocpd_pmc_events(
                     counter_rows,
                     db_name,

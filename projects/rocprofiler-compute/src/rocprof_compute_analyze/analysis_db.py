@@ -14,7 +14,7 @@ import pandas as pd
 import utils.analysis_orm as orm
 from config import rocprof_compute_home
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
-from utils import utils_analysis
+from utils import schema, utils_analysis
 from utils.analysis_orm import Database
 from utils.file_io import process_pc_sampling_kernel_trace
 from utils.logger import (
@@ -36,8 +36,14 @@ from utils.metrics.aggregation import (
     to_std,
     to_sum,
 )
+from utils.metrics.common import ValuDualIssueDetector
 from utils.metrics.expression import CodeTransformer
-from utils.metrics.noise_clamper import to_noise_clamp
+from utils.metrics.noise_clamper import (
+    clear_noise_clamp_warnings,
+    get_noise_clamp_warnings,
+    print_noise_clamp_summary,
+    to_noise_clamp,
+)
 from utils.parser import (
     PC_SAMPLING_NOT_ISSUE_PREFIX,
 )
@@ -472,6 +478,7 @@ class db_analysis(OmniAnalyze_Base):
         pmc_df: pd.DataFrame,
         sys_info: dict[str, Any],  # noqa ANN401
         parse: bool = False,
+        emit_variance_warnings: bool = False,
     ) -> Any:  # noqa ANN401
         if parse:
             value = re.sub(
@@ -493,6 +500,7 @@ class db_analysis(OmniAnalyze_Base):
                 value,
             )
         try:
+            prev_noise_clamp_count = get_noise_clamp_warnings()["count"]
             eval_result = eval(
                 compile(value, "<string>", "eval"),
                 {},  # no globals
@@ -536,8 +544,13 @@ class db_analysis(OmniAnalyze_Base):
                         "likely due to missing counter data."
                     )
                 return None
-            else:
-                return eval_result
+
+            if (
+                emit_variance_warnings
+                and get_noise_clamp_warnings()["count"] > prev_noise_clamp_count
+            ):
+                console_warning(f"Variance corrected for metric: {name}")
+            return eval_result
         except Exception as e:
             console_warning(f"Failed to evaluate expression for {name}: {value} - {e}")
             return None
@@ -561,7 +574,10 @@ class db_analysis(OmniAnalyze_Base):
 
     @staticmethod
     def calc_dataframe_expressions(
-        pmc_df: pd.DataFrame, sys_info: dict, expression_df: pd.DataFrame
+        pmc_df: pd.DataFrame,
+        sys_info: dict,
+        expression_df: pd.DataFrame,
+        emit_variance_warnings: bool = False,
     ) -> pd.Series:
         # Calculate built-in variables
         db_analysis.calc_builtin_vars(pmc_df, sys_info)
@@ -572,9 +588,58 @@ class db_analysis(OmniAnalyze_Base):
                 row["value"],
                 pmc_df,
                 sys_info,
+                emit_variance_warnings=emit_variance_warnings,
             ),
             axis=1,
         )
+
+    @staticmethod
+    def validate_dual_issue_metrics(
+        pmc_df: pd.DataFrame,
+        sys_info: dict,
+        workload_values_df: pd.DataFrame,
+        arch_config: schema.ArchConfig,
+    ) -> None:
+        """Warn when VALU metrics exceed peak in the workload-level results."""
+        detector = ValuDualIssueDetector(
+            gpu_arch=sys_info.get("gpu_arch", ""),
+            raw_pmc_df=pmc_df,
+        )
+
+        candidates: list[tuple[str, str, str]] = []
+        for df_id, df in arch_config.dfs.items():
+            if arch_config.dfs_type.get(df_id) != "metric_table":
+                continue
+            if "Metric" not in df.columns or "Value" not in df.columns:
+                continue
+            if "Peak (Empirical)" in df.columns:
+                peak_col = "Peak (Empirical)"
+            elif "Peak" in df.columns:
+                peak_col = "Peak"
+            else:
+                continue
+            for metric_id, row in df.iterrows():
+                metric_name = row.get("Metric", "")
+                if metric_name in ValuDualIssueDetector.candidate_metrics:
+                    candidates.append((metric_id, metric_name, peak_col))
+        if not candidates:
+            return
+
+        values_by_metric_id = {
+            metric_id: dict(zip(group["value_name"], group["value"]))
+            for metric_id, group in workload_values_df.groupby("metric_id")
+        }
+
+        for metric_id, metric_name, peak_col in candidates:
+            values = values_by_metric_id.get(metric_id)
+            if values is None:
+                continue
+            try:
+                value = float(values.get("Value", 0))
+                peak = float(values.get(peak_col, 0))
+            except (ValueError, TypeError):
+                continue
+            detector.check(metric_name, value, peak)
 
     def calc_expressions(
         self,
@@ -614,14 +679,24 @@ class db_analysis(OmniAnalyze_Base):
                 else pd.DataFrame()
             )
 
-            # Calculate workload-level metrics (aggregate across ALL dispatches)
+            # Variance warnings are emitted at workload-level, not per kernel.
+            console_debug(f"Processing workload: {workload_path}")
+            clear_noise_clamp_warnings()
             workload_values_data[workload_path] = expression_template.copy()
             workload_values_data[workload_path]["value"] = (
                 db_analysis.calc_dataframe_expressions(
                     pmc_df,
                     sys_info.copy(),
                     workload_values_data[workload_path],
+                    emit_variance_warnings=True,
                 )
+            )
+            print_noise_clamp_summary()
+            db_analysis.validate_dual_issue_metrics(
+                pmc_df,
+                sys_info,
+                workload_values_data[workload_path],
+                self._arch_configs[sys_info["gpu_arch"]],
             )
 
         if kernel_values_data or workload_values_data:
