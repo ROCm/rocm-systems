@@ -338,8 +338,9 @@ Examples:
         dest="dispatch",
         required=False,
         help=(
-            "\t\t\tWhich dispatch iterations of the kernel to filter \n"
-            "\t\t\t(e.g. 1 3:5 captures 1st, 3rd, 4th and 5th iterations)."
+            "\t\t\tWhich dispatch iterations of each kernel to filter \n"
+            "\t\t\t(1-based; positive integer or 'start:end' range, \n"
+            "\t\t\te.g. 1 3:5 captures 1st, 3rd, 4th and 5th iterations)."
         ),
     )
     profile_group.add_argument(
