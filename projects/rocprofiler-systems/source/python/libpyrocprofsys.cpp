@@ -11,6 +11,11 @@
 #include "common/environment.hpp"
 #include <timemory/backends/process.hpp>
 #include <timemory/backends/threading.hpp>
+// Provides inline tim::get_env<bool>/<std::string> specialization definitions before
+// mpl/policy.hpp pulls in mpl/type_traits.hpp, which calls get_env<bool> via
+// TIMEMORY_REPORT_ENV_QUERY. libpyrocprofsys.so does not link against timemory-cxx-static
+// so it cannot rely on librocprof-sys.so exporting these symbols.
+#include <timemory/environment/definition.hpp>
 #include <timemory/mpl/apply.hpp>
 #include <timemory/mpl/policy.hpp>
 #include <timemory/operations/types/file_output_message.hpp>
