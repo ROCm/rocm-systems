@@ -34,6 +34,7 @@
 #include <stdint.h>
 #include <limits.h>
 #include <stdio.h>
+#include <assert.h>
 
 extern int hsakmt_udmabuf_dev_fd;
 extern unsigned long hsakmt_kfd_open_count;
@@ -134,6 +135,15 @@ extern int hsakmt_debug_level;
         }                                       \
 })
 
+#define CHECK_CTX(ctx, ret_val) \
+	do { \
+		assert(ctx); \
+		if (!(ctx)) { \
+			pr_err("Expected a non-null ptr for HsaKFDContext"); \
+			return (ret_val); \
+		} \
+	} while (0)
+
 /* Expects gfxv (full) in decimal */
 #define HSA_GET_GFX_VERSION_MAJOR(gfxv)   (((gfxv) / 10000) % 100)
 #define HSA_GET_GFX_VERSION_MINOR(gfxv)   (((gfxv) / 100) % 100)
@@ -182,11 +192,7 @@ enum full_gfx_versions {
 	GFX_VERSION_GFX1151		= 0x0B0501,
 	GFX_VERSION_GFX1200		= 0x0C0000,
 	GFX_VERSION_GFX1201		= 0x0C0001,
-	GFX_VERSION_GFX1250		= 0x0C0500,
-	GFX_VERSION_GFX1251		= 0x0C0501,
-	GFX_VERSION_GFX1260		= 0x0C0600,
-	GFX_VERSION_GFX131F		= 0x0D010F,
-	GFX_VERSION_GFX1370		= 0x0D0700,
+	GFX_VERSION_GFX1250		= 0x0C0500
 };
 
 struct hsa_gfxip_table {

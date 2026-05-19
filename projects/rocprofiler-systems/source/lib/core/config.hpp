@@ -151,9 +151,6 @@ bool&
 is_binary_rewrite();
 
 bool
-get_is_continuous_integration() ROCPROFSYS_HOT;
-
-bool
 get_debug_env() ROCPROFSYS_HOT;
 
 bool
@@ -224,6 +221,9 @@ get_use_vaapi_tracing();
 
 bool
 get_use_ompt();
+
+bool
+get_group_by_queue();
 
 bool
 get_use_code_coverage();
@@ -374,10 +374,20 @@ void
 reset_database_path_memo();
 
 std::string
+get_output_absolute_path(std::string_view basename, std::string_view extension,
+                         std::string_view tag, std::string_view dir);
+
+std::string
 get_perfetto_output_filename_with_suffix(std::string_view suffix = "");
+
+std::string
+get_ump_absolute_path();
 
 bool&
 get_use_rocpd() ROCPROFSYS_HOT;
+
+bool&
+get_use_unified_memory_profiling() ROCPROFSYS_HOT;
 
 bool&
 get_caching_perfetto() ROCPROFSYS_HOT;

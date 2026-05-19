@@ -666,6 +666,7 @@ global:
     hipProfilerEnableExt;
     hipProfilerDisableExt;
     hipProfilerGetRecordsExt;
+    hipProfilerRegisterChunkCallbackExt;
 local:
     *;
 } hip_7.2;

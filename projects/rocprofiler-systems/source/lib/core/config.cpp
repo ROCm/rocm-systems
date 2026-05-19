@@ -67,7 +67,6 @@ namespace
 {
 int  verbose_value  = tim::get_env<int>("ROCPROFSYS_VERBOSE", 0, false);
 bool debug_value    = tim::get_env<bool>("ROCPROFSYS_DEBUG", false, false);
-bool is_ci_value    = tim::get_env<bool>("ROCPROFSYS_CI", false, false);
 auto configure_once = std::once_flag{};
 
 TIMEMORY_NOINLINE bool&
@@ -197,7 +196,7 @@ configure_settings(bool _init)
 
     if(settings_are_configured()) return;
 
-    if(is_ci_value && get_state() < State::Init)
+    if(get_state() < State::Init)
     {
         timemory_print_demangled_backtrace<64>();
 
@@ -324,6 +323,13 @@ configure_settings(bool _init)
 
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_ROCPD", "Enable rocpd backend", false,
                               "backend", "rocpd");
+
+    ROCPROFSYS_CONFIG_SETTING(
+        bool, "ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING",
+        "Enable unified memory profiling reports from KFD page fault and migration "
+        "events (requires HSA_XNACK=1 on a supported GPU; required KFD tracing is "
+        "enabled automatically)",
+        false, "backend", "unified_memory", "kfd");
 
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_AMD_SMI",
                               "Enable sampling GPU power, temp, utilization, "
@@ -1085,7 +1091,6 @@ configure_settings(bool _init)
 
     if(auto opt = get_setting_value<int>("ROCPROFSYS_VERBOSE"); opt) verbose_value = *opt;
     if(auto opt = get_setting_value<bool>("ROCPROFSYS_DEBUG"); opt) debug_value = *opt;
-    if(auto opt = get_setting_value<bool>("ROCPROFSYS_CI"); opt) is_ci_value = *opt;
 
     if(get_env("ROCPROFSYS_MONOCHROME", _config->get<bool>("ROCPROFSYS_MONOCHROME")))
         tim::log::monochrome() = true;
@@ -1153,7 +1158,6 @@ configure_settings(bool _init)
 
     if(auto opt = get_setting_value<int>("ROCPROFSYS_VERBOSE"); opt) verbose_value = *opt;
     if(auto opt = get_setting_value<bool>("ROCPROFSYS_DEBUG"); opt) debug_value = *opt;
-    if(auto opt = get_setting_value<bool>("ROCPROFSYS_CI"); opt) is_ci_value = *opt;
 
     _settings_are_configured() = true;
 }
@@ -1505,7 +1509,7 @@ handle_deprecated_setting(const std::string& _old, const std::string& _new,
 
     if(_old_setting == _config->end()) return;
 
-    if(get_is_continuous_integration() && _new_setting == _config->end())
+    if(_new_setting == _config->end())
     {
         throw std::runtime_error(
             fmt::format("New configuration setting not found: '{}'", _new));
@@ -1829,12 +1833,6 @@ get_debug_env()
 }
 
 bool
-get_is_continuous_integration()
-{
-    return is_ci_value;
-}
-
-bool
 get_debug_init()
 {
     return tim::get_env<bool>("ROCPROFSYS_DEBUG_INIT", get_debug_env());
@@ -2012,6 +2010,15 @@ get_use_ompt()
 }
 
 bool
+get_group_by_queue()
+{
+    // When the `hip_stream` domain is unavailable, the setting is not registered
+    // and there is no stream concept to attach to, so fall back to queue grouping.
+    return config::get_setting_value<bool>("ROCPROFSYS_ROCM_GROUP_BY_QUEUE")
+        .value_or(true);
+}
+
+bool
 get_use_code_coverage()
 {
     static auto _v = get_config()->find("ROCPROFSYS_USE_CODE_COVERAGE");
@@ -2144,8 +2151,7 @@ get_category_config()
             std::abort();
         }
 
-        if(get_is_continuous_integration() &&
-           _enabled.size() + _disabled.size() != _avail.size())
+        if(_enabled.size() + _disabled.size() != _avail.size())
         {
             throw std::runtime_error(
                 fmt::format("Error! Internal error for categories: {} (enabled) + {} "
@@ -2531,6 +2537,29 @@ reset_database_path_memo()
 }
 
 std::string
+get_output_absolute_path(std::string_view basename, std::string_view extension,
+                         std::string_view tag, std::string_view dir)
+{
+    const auto* pwd  = getenv("PWD");
+    const auto* base = (pwd != nullptr) ? pwd : ".";
+
+    // compose_output_filename treats dir as a directory only if it ends in "/".
+    std::string dir_str{ dir };
+    if(!dir_str.empty() && dir_str.back() != '/') dir_str.push_back('/');
+
+    auto cfg = settings::compose_filename_config{ settings::use_output_suffix(), tag,
+                                                  false, std::move(dir_str) };
+
+    auto result = settings::compose_output_filename(std::string{ basename },
+                                                    std::string{ extension }, cfg);
+
+    if(!result.empty() && result.at(0) != '/')
+        return settings::format(fmt::format("{}/{}", base, result),
+                                get_config()->get_tag());
+    return result;
+}
+
+std::string
 get_perfetto_output_filename_with_suffix(std::string_view suffix)
 {
     static auto _v   = get_config()->find("ROCPROFSYS_PERFETTO_FILE");
@@ -2594,10 +2623,32 @@ get_perfetto_output_filename_with_suffix(std::string_view suffix)
     return _val;
 }
 
+std::string
+get_ump_absolute_path()
+{
+    if(!settings_are_configured()) return settings::output_path();
+
+    // Co-locate UMP output with the active backend: rocpd's .db dir when
+    // rocpd is on and trace-cache Perfetto is not; otherwise the Perfetto
+    // file's dir (covers both trace-cache and legacy Perfetto).
+    const auto source =
+        (get_use_rocpd() && !get_caching_perfetto())
+            ? get_database_absolute_path("rocpd", std::to_string(process::get_id()))
+            : get_perfetto_output_filename();
+    return tim::filepath::dirname(source);
+}
+
 bool&
 get_use_rocpd()
 {
     static auto _v = get_config()->at("ROCPROFSYS_USE_ROCPD");
+    return static_cast<tim::tsettings<bool>&>(*_v).get();
+}
+
+bool&
+get_use_unified_memory_profiling()
+{
+    static auto _v = get_config()->at("ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING");
     return static_cast<tim::tsettings<bool>&>(*_v).get();
 }
 

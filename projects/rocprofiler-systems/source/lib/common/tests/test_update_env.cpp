@@ -3,8 +3,8 @@
 
 #include "common/environment.hpp"
 
-#include <cstring>
 #include <gtest/gtest.h>
+
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -13,16 +13,12 @@
 using namespace rocprofsys::common;
 
 static std::string
-find_env_var(const std::vector<char*>& env, std::string_view var_name)
+find_env_var(const std::vector<std::string>& env, std::string_view var_name)
 {
     std::string prefix = std::string(var_name) + "=";
-    for(auto* itr : env)
+    for(const auto& entry : env)
     {
-        if(!itr) continue;
-        if(std::string_view{ itr }.find(prefix) == 0)
-        {
-            return std::string{ itr };
-        }
+        if(std::string_view{ entry }.find(prefix) == 0) return entry;
     }
     return "";
 }
@@ -37,15 +33,7 @@ protected:
         m_original_envs.clear();
     }
 
-    void TearDown() override
-    {
-        for(auto* ptr : m_env_vars)
-        {
-            if(ptr) free(ptr);
-        }
-    }
-
-    std::vector<char*>                   m_env_vars;
+    std::vector<std::string>             m_env_vars;
     std::unordered_set<std::string_view> m_updated_envs;
     std::unordered_set<std::string>      m_original_envs;
 };
@@ -56,21 +44,53 @@ TEST_F(UpdateEnvTest, ReplaceMode_NewVariable)
                m_updated_envs, m_original_envs);
 
     ASSERT_EQ(m_env_vars.size(), 1);
-    EXPECT_STREQ(m_env_vars[0], "TEST_VAR=test_value");
+    EXPECT_EQ(m_env_vars[0], "TEST_VAR=test_value");
     EXPECT_EQ(m_updated_envs.count("TEST_VAR"), 1);
 }
 
 TEST_F(UpdateEnvTest, ReplaceMode_ExistingVariable)
 {
-    m_env_vars.push_back(strdup("TEST_VAR=old_value"));
+    m_env_vars.emplace_back("TEST_VAR=old_value");
     m_original_envs.insert("TEST_VAR=old_value");
 
     update_env(m_env_vars, "TEST_VAR", "new_value", update_mode::REPLACE, ":",
                m_updated_envs, m_original_envs);
 
     ASSERT_EQ(m_env_vars.size(), 1);
-    EXPECT_STREQ(m_env_vars[0], "TEST_VAR=new_value");
+    EXPECT_EQ(m_env_vars[0], "TEST_VAR=new_value");
     EXPECT_EQ(m_updated_envs.count("TEST_VAR"), 1);
+}
+
+TEST_F(UpdateEnvTest, ReplaceMode_RemovesDuplicateEntries)
+{
+    // Same key present twice (e.g. one from shell env, one from config file).
+    // REPLACE must leave exactly one entry; otherwise consolidate_env_entries
+    // later joins the parts and turns REPLACE into APPEND.
+    m_env_vars.emplace_back("ROCPROFSYS_TRACE=true");
+    m_env_vars.emplace_back("OTHER_VAR=keep");
+    m_env_vars.emplace_back("ROCPROFSYS_TRACE=true");
+
+    update_env(m_env_vars, "ROCPROFSYS_TRACE", false, update_mode::REPLACE, ":",
+               m_updated_envs, m_original_envs);
+
+    ASSERT_EQ(m_env_vars.size(), 2);
+    EXPECT_EQ(m_env_vars[0], "ROCPROFSYS_TRACE=false");
+    EXPECT_EQ(m_env_vars[1], "OTHER_VAR=keep");
+}
+
+TEST_F(UpdateEnvTest, ReplaceMode_RemovesAllDuplicatesWhenManyExist)
+{
+    m_env_vars.emplace_back("DUP=a");
+    m_env_vars.emplace_back("DUP=b");
+    m_env_vars.emplace_back("DUP=c");
+    m_env_vars.emplace_back("KEEP=x");
+
+    update_env(m_env_vars, "DUP", "final", update_mode::REPLACE, ":", m_updated_envs,
+               m_original_envs);
+
+    ASSERT_EQ(m_env_vars.size(), 2);
+    EXPECT_EQ(m_env_vars[0], "DUP=final");
+    EXPECT_EQ(m_env_vars[1], "KEEP=x");
 }
 
 TEST_F(UpdateEnvTest, AppendMode_NewVariable)
@@ -79,59 +99,58 @@ TEST_F(UpdateEnvTest, AppendMode_NewVariable)
                m_original_envs);
 
     ASSERT_EQ(m_env_vars.size(), 1);
-    EXPECT_STREQ(m_env_vars[0], "PATH=/new/path");
+    EXPECT_EQ(m_env_vars[0], "PATH=/new/path");
 }
 
 TEST_F(UpdateEnvTest, AppendMode_ExistingVariable)
 {
-    m_env_vars.push_back(strdup("PATH=/old/path"));
+    m_env_vars.emplace_back("PATH=/old/path");
     m_original_envs.insert("PATH=/old/path");
 
     update_env(m_env_vars, "PATH", "/new/path", update_mode::APPEND, ":", m_updated_envs,
                m_original_envs);
 
     ASSERT_EQ(m_env_vars.size(), 1);
-    EXPECT_STREQ(m_env_vars[0], "PATH=/old/path:/new/path");
+    EXPECT_EQ(m_env_vars[0], "PATH=/old/path:/new/path");
     EXPECT_EQ(m_updated_envs.count("PATH"), 1);
 }
 
 TEST_F(UpdateEnvTest, PrependMode_ExistingVariable)
 {
-    m_env_vars.push_back(strdup("LD_LIBRARY_PATH=/old/lib"));
+    m_env_vars.emplace_back("LD_LIBRARY_PATH=/old/lib");
     m_original_envs.insert("LD_LIBRARY_PATH=/old/lib");
 
     update_env(m_env_vars, "LD_LIBRARY_PATH", "/new/lib", update_mode::PREPEND, ":",
                m_updated_envs, m_original_envs);
 
     ASSERT_EQ(m_env_vars.size(), 1);
-    EXPECT_STREQ(m_env_vars[0], "LD_LIBRARY_PATH=/new/lib:/old/lib");
+    EXPECT_EQ(m_env_vars[0], "LD_LIBRARY_PATH=/new/lib:/old/lib");
 }
 
 TEST_F(UpdateEnvTest, WeakMode_OriginalValue)
 {
-    m_env_vars.push_back(strdup("WEAK_VAR=original"));
+    m_env_vars.emplace_back("WEAK_VAR=original");
     m_original_envs.insert("WEAK_VAR=original");
 
     update_env(m_env_vars, "WEAK_VAR", "new_value", update_mode::WEAK, ":",
                m_updated_envs, m_original_envs);
 
     ASSERT_EQ(m_env_vars.size(), 1);
-    EXPECT_STREQ(m_env_vars[0], "WEAK_VAR=new_value");
+    EXPECT_EQ(m_env_vars[0], "WEAK_VAR=new_value");
 }
 
 TEST_F(UpdateEnvTest, WeakMode_ModifiedValue)
 {
-    m_env_vars.push_back(strdup("WEAK_VAR=original"));
+    m_env_vars.emplace_back("WEAK_VAR=original");
     m_original_envs.insert("WEAK_VAR=original");
 
-    free(m_env_vars[0]);
-    m_env_vars[0] = strdup("WEAK_VAR=modified");
+    m_env_vars[0] = "WEAK_VAR=modified";
 
     update_env(m_env_vars, "WEAK_VAR", "new_value", update_mode::WEAK, ":",
                m_updated_envs, m_original_envs);
 
     ASSERT_EQ(m_env_vars.size(), 1);
-    EXPECT_STREQ(m_env_vars[0], "WEAK_VAR=modified");
+    EXPECT_EQ(m_env_vars[0], "WEAK_VAR=modified");
 }
 
 TEST_F(UpdateEnvTest, BooleanValue_True)
@@ -140,7 +159,7 @@ TEST_F(UpdateEnvTest, BooleanValue_True)
                m_original_envs);
 
     ASSERT_EQ(m_env_vars.size(), 1);
-    EXPECT_STREQ(m_env_vars[0], "BOOL_VAR=true");
+    EXPECT_EQ(m_env_vars[0], "BOOL_VAR=true");
 }
 
 TEST_F(UpdateEnvTest, BooleanValue_False)
@@ -149,7 +168,7 @@ TEST_F(UpdateEnvTest, BooleanValue_False)
                m_original_envs);
 
     ASSERT_EQ(m_env_vars.size(), 1);
-    EXPECT_STREQ(m_env_vars[0], "BOOL_VAR=false");
+    EXPECT_EQ(m_env_vars[0], "BOOL_VAR=false");
 }
 
 TEST_F(UpdateEnvTest, NumericValue)
@@ -158,56 +177,56 @@ TEST_F(UpdateEnvTest, NumericValue)
                m_original_envs);
 
     ASSERT_EQ(m_env_vars.size(), 1);
-    EXPECT_STREQ(m_env_vars[0], "NUM_VAR=42");
+    EXPECT_EQ(m_env_vars[0], "NUM_VAR=42");
 }
 
 TEST_F(UpdateEnvTest, AppendMode_AvoidsDuplicates)
 {
-    m_env_vars.push_back(strdup("PATH=/existing/path"));
+    m_env_vars.emplace_back("PATH=/existing/path");
     m_original_envs.insert("PATH=/existing/path");
 
     update_env(m_env_vars, "PATH", "/existing/path", update_mode::APPEND, ":",
                m_updated_envs, m_original_envs);
 
     ASSERT_EQ(m_env_vars.size(), 1);
-    EXPECT_STREQ(m_env_vars[0], "PATH=/existing/path");
+    EXPECT_EQ(m_env_vars[0], "PATH=/existing/path");
 }
 
 TEST_F(UpdateEnvTest, CustomDelimiter)
 {
-    m_env_vars.push_back(strdup("VAR=a"));
+    m_env_vars.emplace_back("VAR=a");
     m_original_envs.insert("VAR=a");
 
     update_env(m_env_vars, "VAR", "b", update_mode::APPEND, ",", m_updated_envs,
                m_original_envs);
 
     ASSERT_EQ(m_env_vars.size(), 1);
-    EXPECT_STREQ(m_env_vars[0], "VAR=a,b");
+    EXPECT_EQ(m_env_vars[0], "VAR=a,b");
 }
 
 TEST_F(UpdateEnvTest, RealWorld_LD_LIBRARY_PATH_Append)
 {
-    m_env_vars.push_back(strdup("LD_LIBRARY_PATH=/usr/lib:/usr/local/lib"));
+    m_env_vars.emplace_back("LD_LIBRARY_PATH=/usr/lib:/usr/local/lib");
     m_original_envs.insert("LD_LIBRARY_PATH=/usr/lib:/usr/local/lib");
 
     update_env(m_env_vars, "LD_LIBRARY_PATH", "/opt/rocm/lib", update_mode::APPEND, ":",
                m_updated_envs, m_original_envs);
 
     ASSERT_EQ(m_env_vars.size(), 1);
-    EXPECT_STREQ(m_env_vars[0], "LD_LIBRARY_PATH=/usr/lib:/usr/local/lib:/opt/rocm/lib");
+    EXPECT_EQ(m_env_vars[0], "LD_LIBRARY_PATH=/usr/lib:/usr/local/lib:/opt/rocm/lib");
 }
 
 TEST_F(UpdateEnvTest, RealWorld_LD_PRELOAD_Prepend)
 {
-    m_env_vars.push_back(strdup("LD_PRELOAD=/lib/existing.so"));
+    m_env_vars.emplace_back("LD_PRELOAD=/lib/existing.so");
     m_original_envs.insert("LD_PRELOAD=/lib/existing.so");
 
     update_env(m_env_vars, "LD_PRELOAD", "/opt/rocm/librocprof-sys-dl.so",
                update_mode::PREPEND, ":", m_updated_envs, m_original_envs);
 
     ASSERT_EQ(m_env_vars.size(), 1);
-    EXPECT_STREQ(m_env_vars[0],
-                 "LD_PRELOAD=/opt/rocm/librocprof-sys-dl.so:/lib/existing.so");
+    EXPECT_EQ(m_env_vars[0],
+              "LD_PRELOAD=/opt/rocm/librocprof-sys-dl.so:/lib/existing.so");
 }
 
 TEST_F(UpdateEnvTest, RealWorld_ROCPROFSYS_Environment_Variables)
@@ -220,12 +239,10 @@ TEST_F(UpdateEnvTest, RealWorld_ROCPROFSYS_Environment_Variables)
                m_updated_envs, m_original_envs);
 
     ASSERT_EQ(m_env_vars.size(), 3);
-    EXPECT_STREQ(find_env_var(m_env_vars, "ROCPROFSYS_TRACE").c_str(),
-                 "ROCPROFSYS_TRACE=true");
-    EXPECT_STREQ(find_env_var(m_env_vars, "ROCPROFSYS_PROFILE").c_str(),
-                 "ROCPROFSYS_PROFILE=false");
-    EXPECT_STREQ(find_env_var(m_env_vars, "ROCPROFSYS_USE_SAMPLING").c_str(),
-                 "ROCPROFSYS_USE_SAMPLING=true");
+    EXPECT_EQ(find_env_var(m_env_vars, "ROCPROFSYS_TRACE"), "ROCPROFSYS_TRACE=true");
+    EXPECT_EQ(find_env_var(m_env_vars, "ROCPROFSYS_PROFILE"), "ROCPROFSYS_PROFILE=false");
+    EXPECT_EQ(find_env_var(m_env_vars, "ROCPROFSYS_USE_SAMPLING"),
+              "ROCPROFSYS_USE_SAMPLING=true");
 }
 
 TEST_F(UpdateEnvTest, RealWorld_Timing_DoubleValues)
@@ -250,7 +267,7 @@ TEST_F(UpdateEnvTest, StringTypes_StdString)
                m_original_envs);
 
     ASSERT_EQ(m_env_vars.size(), 1);
-    EXPECT_STREQ(m_env_vars[0], "STRING_VAR=test_string_value");
+    EXPECT_EQ(m_env_vars[0], "STRING_VAR=test_string_value");
 }
 
 TEST_F(UpdateEnvTest, StringTypes_ConstCharPtr)
@@ -260,7 +277,7 @@ TEST_F(UpdateEnvTest, StringTypes_ConstCharPtr)
                m_original_envs);
 
     ASSERT_EQ(m_env_vars.size(), 1);
-    EXPECT_STREQ(m_env_vars[0], "CHAR_VAR=const_char_value");
+    EXPECT_EQ(m_env_vars[0], "CHAR_VAR=const_char_value");
 }
 
 TEST_F(UpdateEnvTest, EmptyStringValue)
@@ -269,7 +286,7 @@ TEST_F(UpdateEnvTest, EmptyStringValue)
                m_original_envs);
 
     ASSERT_EQ(m_env_vars.size(), 1);
-    EXPECT_STREQ(m_env_vars[0], "EMPTY_VAR=");
+    EXPECT_EQ(m_env_vars[0], "EMPTY_VAR=");
 }
 
 TEST_F(UpdateEnvTest, MultipleVariables_DifferentNames)
@@ -283,37 +300,23 @@ TEST_F(UpdateEnvTest, MultipleVariables_DifferentNames)
 
     ASSERT_EQ(m_env_vars.size(), 3);
     EXPECT_EQ(m_updated_envs.size(), 3);
-    EXPECT_STREQ(find_env_var(m_env_vars, "VAR1").c_str(), "VAR1=value1");
-    EXPECT_STREQ(find_env_var(m_env_vars, "VAR2").c_str(), "VAR2=value2");
-    EXPECT_STREQ(find_env_var(m_env_vars, "VAR3").c_str(), "VAR3=value3");
-}
-
-TEST_F(UpdateEnvTest, NullPointer_InEnvironmentVector)
-{
-    m_env_vars.push_back(strdup("VAR1=value1"));
-    m_env_vars.push_back(nullptr);
-    m_env_vars.push_back(strdup("VAR2=value2"));
-    m_original_envs.insert("VAR1=value1");
-    m_original_envs.insert("VAR2=value2");
-
-    update_env(m_env_vars, "VAR2", "new_value2", update_mode::REPLACE, ":",
-               m_updated_envs, m_original_envs);
-
-    EXPECT_STREQ(find_env_var(m_env_vars, "VAR2").c_str(), "VAR2=new_value2");
+    EXPECT_EQ(find_env_var(m_env_vars, "VAR1"), "VAR1=value1");
+    EXPECT_EQ(find_env_var(m_env_vars, "VAR2"), "VAR2=value2");
+    EXPECT_EQ(find_env_var(m_env_vars, "VAR3"), "VAR3=value3");
 }
 
 TEST_F(UpdateEnvTest, LongPath_Append)
 {
     std::string long_path = "/very/long/path/to/some/directory/with/many/subdirectories/"
                             "that/might/be/used/in/real/world";
-    m_env_vars.push_back(strdup("PATH=/usr/bin:/bin"));
+    m_env_vars.emplace_back("PATH=/usr/bin:/bin");
     m_original_envs.insert("PATH=/usr/bin:/bin");
 
     update_env(m_env_vars, "PATH", long_path, update_mode::APPEND, ":", m_updated_envs,
                m_original_envs);
 
     std::string expected = "PATH=/usr/bin:/bin:" + long_path;
-    EXPECT_STREQ(m_env_vars[0], expected.c_str());
+    EXPECT_EQ(m_env_vars[0], expected);
 }
 
 TEST_F(UpdateEnvTest, SpecialCharacters_InValue)
@@ -322,7 +325,7 @@ TEST_F(UpdateEnvTest, SpecialCharacters_InValue)
                update_mode::REPLACE, ":", m_updated_envs, m_original_envs);
 
     ASSERT_EQ(m_env_vars.size(), 1);
-    EXPECT_STREQ(m_env_vars[0], "SPECIAL_VAR=value-with_special.chars:123");
+    EXPECT_EQ(m_env_vars[0], "SPECIAL_VAR=value-with_special.chars:123");
 }
 
 TEST_F(UpdateEnvTest, IntegerValues_Positive)
@@ -331,7 +334,7 @@ TEST_F(UpdateEnvTest, IntegerValues_Positive)
                m_original_envs);
 
     ASSERT_EQ(m_env_vars.size(), 1);
-    EXPECT_STREQ(m_env_vars[0], "INT_VAR=12345");
+    EXPECT_EQ(m_env_vars[0], "INT_VAR=12345");
 }
 
 TEST_F(UpdateEnvTest, IntegerValues_Negative)
@@ -340,7 +343,7 @@ TEST_F(UpdateEnvTest, IntegerValues_Negative)
                m_updated_envs, m_original_envs);
 
     ASSERT_EQ(m_env_vars.size(), 1);
-    EXPECT_STREQ(m_env_vars[0], "NEGATIVE_VAR=-999");
+    EXPECT_EQ(m_env_vars[0], "NEGATIVE_VAR=-999");
 }
 
 TEST_F(UpdateEnvTest, IntegerValues_Zero)
@@ -349,7 +352,7 @@ TEST_F(UpdateEnvTest, IntegerValues_Zero)
                m_original_envs);
 
     ASSERT_EQ(m_env_vars.size(), 1);
-    EXPECT_STREQ(m_env_vars[0], "ZERO_VAR=0");
+    EXPECT_EQ(m_env_vars[0], "ZERO_VAR=0");
 }
 
 TEST_F(UpdateEnvTest, UpdateTracking_MultipleUpdates)
@@ -368,21 +371,20 @@ TEST_F(UpdateEnvTest, UpdateTracking_MultipleUpdates)
 
 TEST_F(UpdateEnvTest, WeakMode_SequentialUpdates)
 {
-    m_env_vars.push_back(strdup("CONFIG_VAR=initial"));
+    m_env_vars.emplace_back("CONFIG_VAR=initial");
     m_original_envs.insert("CONFIG_VAR=initial");
 
     update_env(m_env_vars, "CONFIG_VAR", "weak_update", update_mode::WEAK, ":",
                m_updated_envs, m_original_envs);
 
-    EXPECT_STREQ(m_env_vars[0], "CONFIG_VAR=weak_update");
+    EXPECT_EQ(m_env_vars[0], "CONFIG_VAR=weak_update");
 
-    free(m_env_vars[0]);
-    m_env_vars[0] = strdup("CONFIG_VAR=user_modified");
+    m_env_vars[0] = "CONFIG_VAR=user_modified";
 
     update_env(m_env_vars, "CONFIG_VAR", "another_weak_update", update_mode::WEAK, ":",
                m_updated_envs, m_original_envs);
 
-    EXPECT_STREQ(m_env_vars[0], "CONFIG_VAR=user_modified");
+    EXPECT_EQ(m_env_vars[0], "CONFIG_VAR=user_modified");
 }
 
 TEST_F(UpdateEnvTest, Append_MultiplePathsInSequence)
@@ -397,5 +399,5 @@ TEST_F(UpdateEnvTest, Append_MultiplePathsInSequence)
                m_updated_envs, m_original_envs);
 
     ASSERT_EQ(m_env_vars.size(), 1);
-    EXPECT_STREQ(m_env_vars[0], "BUILD_PATH=/path1:/path2:/path3:/path4");
+    EXPECT_EQ(m_env_vars[0], "BUILD_PATH=/path1:/path2:/path3:/path4");
 }
