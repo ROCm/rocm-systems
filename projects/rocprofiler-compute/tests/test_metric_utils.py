@@ -21,7 +21,10 @@ from utils.metrics.aggregation import (
     to_round,
     to_std,
 )
-from utils.metrics.evaluation_pipeline import eval_metric
+from utils.metrics.evaluation_pipeline import (
+    eval_metric,
+    validate_dual_issue_metrics,
+)
 from utils.metrics.expression import (
     CodeTransformer,
     build_eval_string,
@@ -30,6 +33,10 @@ from utils.metrics.expression import (
     update_normal_unit_string,
 )
 from utils.metrics.metric_evaluator import MetricEvaluator
+from utils.metrics.noise_clamper import (
+    clear_noise_clamp_warnings,
+    get_noise_clamp_warnings,
+)
 from utils.utils_common import calc_builtin_var
 
 # =============================================================================
@@ -392,6 +399,144 @@ class TestEvaluationPipeline:
                 debug=False,
             )
         assert metric_df.loc["1.1.0", "Average"] == ""
+
+    def test_eval_metric_noise_clamp(self):
+        """eval_metric emits per-metric variance warning + summary on clamp."""
+        # Negative DIFF over a positive REF crosses the 1% threshold and bumps
+        # the noise-clamp counter when to_noise_clamp evaluates the expression.
+        _, dfs, dfs_type, sys_info, _ = self._build_eval_metric_inputs(
+            metric_fields={
+                "Value": (
+                    "to_noise_clamp("
+                    "to_min(raw_pmc_df['DIFF']), "
+                    "to_max(raw_pmc_df['REF']))"
+                ),
+            }
+        )
+        raw_pmc_df = pd.DataFrame({
+            "GRBM_GUI_ACTIVE": [1000],
+            "DIFF": [-100.0],
+            "REF": [1000.0],
+        })
+
+        clear_noise_clamp_warnings()
+        with (
+            patch("utils.metrics.evaluation_pipeline.BUILD_IN_VARS", {}),
+            patch(
+                "utils.metrics.evaluation_pipeline.console_warning"
+            ) as mock_console_warning,
+            patch(
+                "utils.metrics.evaluation_pipeline.print_noise_clamp_summary"
+            ) as mock_print_summary,
+        ):
+            eval_metric(
+                dfs,
+                dfs_type,
+                sys_info,
+                pd.DataFrame(),
+                raw_pmc_df,
+                debug=False,
+            )
+
+        assert get_noise_clamp_warnings()["count"] >= 1
+        variance_calls = [
+            call_args
+            for call_args in mock_console_warning.call_args_list
+            if "Variance corrected for metric:" in call_args.args[0]
+        ]
+        assert len(variance_calls) == 1
+        assert "Test Metric" in variance_calls[0].args[0]
+        mock_print_summary.assert_called_once()
+
+    def make_dual_issue_dfs(
+        self, metric_name: str, value: float, peak: float, peak_col: str = "Peak"
+    ):
+        """Build the (dfs, dfs_type) fixture used by dual-issue tests."""
+        df = pd.DataFrame({
+            "Metric": [metric_name],
+            "Value": [value],
+            peak_col: [peak],
+        })
+        return {1: df}, {1: "metric_table"}
+
+    def test_validate_dual_issue_metrics_emits_valu_utilization_warning(self):
+        """VALU Utilization above peak triggers the dual-issue warning."""
+        dfs, dfs_type = self.make_dual_issue_dfs(
+            "VALU Utilization", value=150.0, peak=100.0
+        )
+        sys_info = pd.Series({"gpu_arch": "gfx942"})
+
+        with patch("utils.metrics.common.console_warning") as mock_warning:
+            validate_dual_issue_metrics(
+                dfs, dfs_type, sys_info, raw_pmc_df=pd.DataFrame()
+            )
+
+        mock_warning.assert_called_once()
+        msg = mock_warning.call_args.args[0]
+        assert "VALU Utilization can go up to 200%" in msg
+        assert "SQ_ACTIVE_INST_VALU2" not in msg
+
+    def test_validate_dual_issue_metrics_emits_valu_flops_warning(self):
+        """VALU FLOPs (F64) above peak triggers the FLOPs-flavored warning."""
+        dfs, dfs_type = self.make_dual_issue_dfs(
+            "VALU FLOPs (F64)", value=600.0, peak=400.0
+        )
+        sys_info = pd.Series({"gpu_arch": "gfx942"})
+
+        with patch("utils.metrics.common.console_warning") as mock_warning:
+            validate_dual_issue_metrics(
+                dfs, dfs_type, sys_info, raw_pmc_df=pd.DataFrame()
+            )
+
+        msg = mock_warning.call_args.args[0]
+        assert "VALU FLOPs can exceed the peak value" in msg
+
+    def test_validate_dual_issue_metrics_silent_below_peak(self):
+        """Below-peak VALU Utilization stays silent."""
+        dfs, dfs_type = self.make_dual_issue_dfs(
+            "VALU Utilization", value=80.0, peak=100.0
+        )
+        sys_info = pd.Series({"gpu_arch": "gfx942"})
+
+        with patch("utils.metrics.common.console_warning") as mock_warning:
+            validate_dual_issue_metrics(
+                dfs, dfs_type, sys_info, raw_pmc_df=pd.DataFrame()
+            )
+
+        mock_warning.assert_not_called()
+
+    def test_validate_dual_issue_metrics_appends_valu2_suffix_on_gfx950(self):
+        """gfx950 with non-zero SQ_ACTIVE_INST_VALU2 appends the confirmation."""
+        dfs, dfs_type = self.make_dual_issue_dfs(
+            "VALU Utilization", value=150.0, peak=100.0
+        )
+        sys_info = pd.Series({"gpu_arch": "gfx950"})
+        raw_pmc_df = pd.DataFrame({"SQ_ACTIVE_INST_VALU2": [1, 2, 3]})
+
+        with patch("utils.metrics.common.console_warning") as mock_warning:
+            validate_dual_issue_metrics(dfs, dfs_type, sys_info, raw_pmc_df)
+
+        msg = mock_warning.call_args.args[0]
+        assert "Dual-issue activity detected via SQ_ACTIVE_INST_VALU2 counter" in msg
+
+    def test_validate_dual_issue_metrics_uses_peak_empirical_fallback(self):
+        """Peak (Empirical) column is used when present alongside Value."""
+        dfs, dfs_type = self.make_dual_issue_dfs(
+            "VALU Utilization",
+            value=150.0,
+            peak=100.0,
+            peak_col="Peak (Empirical)",
+        )
+        sys_info = pd.Series({"gpu_arch": "gfx942"})
+
+        with patch("utils.metrics.common.console_warning") as mock_warning:
+            validate_dual_issue_metrics(
+                dfs, dfs_type, sys_info, raw_pmc_df=pd.DataFrame()
+            )
+
+        mock_warning.assert_called_once()
+        msg = mock_warning.call_args.args[0]
+        assert "VALU Utilization can go up to 200%" in msg
 
 
 # =============================================================================
