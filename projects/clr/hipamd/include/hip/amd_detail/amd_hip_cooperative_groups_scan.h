@@ -60,20 +60,6 @@ namespace impl {
   GENERATE_SCAN_FUNC(xor, i64, long long);
   GENERATE_SCAN_FUNC(xor, u64, unsigned long long);
 
-  // TODO g-h-c fp16
-
-  // TODO g-h-c all the arithmetic type have the same type support
-  // so divide this in:
-  // - has_arithmetic_scan
-  // - has_boolean_scan
-  // Add:
-  // - is_arithmetic
-  // - is_boolean
-  // - a generic has_scan
-  // the generated code will depend whether HIP_ENABLE_EXTRA_WARP_SYNC_TYPES is defined or not
-
-  // TODO g-h-c make sure it works correctly fp16, including using ockl intrinsics if applicable
-
   // not all types could be used with wfscan (e.g. user defined types), this predicate
   // indicates whether that is the case
   template <typename T, typename = void>
@@ -122,8 +108,6 @@ namespace impl {
     }
   }
 
-  // TODO g-h-c half
-
   template <bool Inclusive, typename TyGroup, typename TyVal, typename TyFn>
   __CG_QUALIFIER__ auto scan(const TyGroup& group, TyVal&& val, TyFn&& op) -> decltype(op(val, val))
   {
@@ -145,8 +129,6 @@ namespace impl {
       static_assert(__hip_internal::is_void<TyGroup>::value, "This group does not exclusively represent a tile");
     }
 
-    // TODO g-h-c we should be able to calculate the mask AT COMPILE TIME, and thusly
-    // do a loop unroll at compile time but only IF THE GROUP IS A BLOCK TILE of a compile-time size
     unsigned int maskNumBits;
     int numIterations;
     // next bit to aggregate with
