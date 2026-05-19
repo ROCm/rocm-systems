@@ -2830,6 +2830,14 @@ void Device::recreateXferQueue() {
   delete xferQueue_;
   xferQueue_ = nullptr;
 
+  // If the heap has never been initialized (e.g. hipDeviceReset called before any queue or
+  // memory operation), Finalize() has not been called yet and creating a VirtualGPU would
+  // use an uninitialized PAL device. Skip recreation here; xferQueue_ will be created lazily
+  // by the next caller that goes through initializeHeapResources().
+  if (!heapInitComplete_) {
+    return;
+  }
+
   // PAL's xferQueue() is a bare getter with no lazy re-creation, so recreate explicitly.
   // Finalize() was already called during initializeHeapResources() and must not be called
   // again, but creating a new VirtualGPU is safe at this point.

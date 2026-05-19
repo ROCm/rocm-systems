@@ -4161,8 +4161,10 @@ void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data) {
 }
 
 void Device::recreateXferQueue() {
-  delete xferQueue_;
-  xferQueue_ = nullptr;
+  if (xferQueue_) {
+    xferQueue_->release();
+    xferQueue_ = nullptr;
+  }
   // xferQueue() is a lazy accessor: it will recreate xferQueue_ on the next call.
   // Do not eagerly recreate here — creating an HSA queue inside the hipDeviceReset
   // call chain (where rocprofiler is already in a callback) causes reentrancy issues
