@@ -138,6 +138,7 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
   hsa_status_t err = driver().GetClockCounters(node_id(), &t0_);
   t1_ = t0_;
   historical_clock_ratio_ = 0.0;
+  gpu_clock_offset_ = 0;
   assert(err == HSA_STATUS_SUCCESS && "hsaGetClockCounters error");
 
   const core::Isa *isa_base;
@@ -2813,6 +2814,13 @@ Intervals larger than t0_ will be frequency adjusted.  This admits a numerical e
 than twice the frequency stability (~10^-5).
 */
 uint64_t GpuAgent::TranslateTime(uint64_t tick) {
+#ifdef _WIN32
+  // On Windows, AQL dispatch timestamps may have a fixed epoch offset from
+  // D3DKMTQueryClockCalibration's GPUClockCounter (same clock domain, different
+  // base).  Subtract the offset before interpolation (0 until first detection).
+  tick = uint64_t(int64_t(tick) - gpu_clock_offset_);
+#endif
+
   // Only allow short (error bounded) extrapolation for times during program execution.
   // Limit errors due to relative frequency drift to ~0.5us.  Sync clocks at 16Hz.
   const int64_t max_extrapolation = core::Runtime::runtime_singleton_->sys_clock_freq() >> 4;
@@ -2856,6 +2864,16 @@ uint64_t GpuAgent::TranslateTime(uint64_t tick) {
     system_tick = uint64_t(historical_clock_ratio_ * double(int64_t(tick - t0_.GPUClockCounter))) +
         t0_.SystemClockCounter;
   }
+
+#ifdef _WIN32
+  // Detect epoch mismatch on first call by comparing with current time (nanoseconds).
+  if (gpu_clock_offset_ == 0) {
+    gpu_clock_offset_ = int64_t(double(int64_t(system_tick) - int64_t(os::TimeNanos())) / ratio);
+    // Re-translate this first event with the corrected offset.
+    elapsed = int64_t(ratio * double(int64_t(tick - gpu_clock_offset_) - int64_t(t1_.GPUClockCounter)));
+    system_tick = uint64_t(elapsed) + t1_.SystemClockCounter;
+  }
+#endif
 
   return system_tick;
 }
