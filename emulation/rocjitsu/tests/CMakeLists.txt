@@ -311,6 +311,9 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
         message(STATUS "rocBLAS GEMM test disabled (librocblas not found)")
     endif()
 
+    rj_add_hip_test(hip_bfe_2d_test)
+    rj_add_hip_test_case(hip_bfe_2d_test "BfeRegressionTest.ThreadIdxY")
+
     message(STATUS "HIP tests enabled (found ${HIPCC_EXECUTABLE})")
 else()
     message(STATUS "HIP tests disabled (hipcc or libhsa-runtime64 not found)")
