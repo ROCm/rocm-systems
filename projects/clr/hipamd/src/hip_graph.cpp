@@ -1622,12 +1622,6 @@ hipError_t hipGraphExecDestroy(hipGraphExec_t pGraphExec) {
     std::scoped_lock lock(GraphExec::graphExecSetLock_);
     GraphExec::graphExecSet_.erase(ge);
   }
-  // Wait for all in-flight DecrementRefCount callbacks to fire.
-  // Each Run() retains and the async callback releases, so refcount > 1
-  // means GPU work is still completing. Spin until only the owner ref remains.
-  while (ge->referenceCount() > 1) {
-    amd::Os::yield();
-  }
   ge->release();
   HIP_RETURN(hipSuccess);
 }
