@@ -21,13 +21,13 @@ enum class vote
 /// - sampling_only: trigger affects only sampling-tagged subscribers; sampling
 ///   subscribers list this in addition to global
 ///
-/// Add new scopes by appending before count_; subscriber/trigger code that
+/// Add new scopes by appending before COUNT_; subscriber/trigger code that
 /// switches on scope must be updated accordingly.
 enum class scope : std::size_t
 {
     global = 0,
     sampling_only,
-    count_,  // sentinel: number of scopes
+    COUNT_,  // sentinel: number of scopes
 };
 
 class trigger

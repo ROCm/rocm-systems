@@ -75,6 +75,16 @@ private:
                                  rocprofiler_timestamp_t               ts);
     void handle_marker_control(rocprofiler_callback_tracing_record_t record);
 
+    // True iff the trigger says markers should be written AND no other
+    // trigger of the global scope is currently pausing the session. The
+    // exclusion is what prevents a roctx-internal pause/resume from
+    // tripping over its own should-write decision.
+    [[nodiscard]] bool marker_write_enabled() const
+    {
+        return m_trigger->should_write_markers() &&
+               m_session->is_active_excluding(m_trigger->name());
+    }
+
     static void marker_core_callback(rocprofiler_callback_tracing_record_t record,
                                      rocprofiler_user_data_t*              user_data,
                                      void*                                 callback_data);

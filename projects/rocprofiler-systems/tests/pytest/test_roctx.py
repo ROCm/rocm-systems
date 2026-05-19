@@ -24,11 +24,20 @@ pytestmark = [
 
 @pytest.fixture
 def roctx_env() -> dict[str, str]:
-    """Environment variables for rocTX tests."""
+    """Environment variables for rocTX tests.
+
+    SAMPLING_FREQ is bumped to 100Hz (default 50Hz) so the process_sampler
+    polling thread captures enough PMC ticks during the short rocTX
+    workload to clear the >=5 sample-count assertions in
+    rocpd-validation-rules/roctx/amd-smi-rules.json. Under -j4 ctest GPU
+    contention the workload occasionally finishes in ~80ms; at 50Hz that
+    yields only 4 ticks. 100Hz halves the per-tick window to 10ms.
+    """
     return {
         "ROCPROFSYS_TRACE_LEGACY": "ON",
         "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api,marker_api,kernel_dispatch",
         "ROCPROFSYS_AMD_SMI_METRICS": "busy,temp,power,mem_usage,gfx_clock,mem_clock",
+        "ROCPROFSYS_SAMPLING_FREQ": "100",
     }
 
 

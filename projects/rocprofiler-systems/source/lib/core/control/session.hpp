@@ -48,8 +48,11 @@ public:
 
     [[nodiscard]] bool is_active(scope event_scope = scope::global) const noexcept
     {
+        // acquire pairs with the release store under m_votes_mutex; ensures
+        // a reader that observes a transition also observes any subscriber-
+        // visible state writes ordered before the publish that caused it.
         return m_active[static_cast<std::size_t>(event_scope)].load(
-            std::memory_order_relaxed);
+            std::memory_order_acquire);
     }
 
     /// True iff every trigger of @p event_scope except @p name has voted
@@ -59,11 +62,11 @@ public:
         std::string_view name, scope event_scope = scope::global) const noexcept;
 
 private:
-    static constexpr std::size_t scope_count = static_cast<std::size_t>(scope::count_);
+    static constexpr std::size_t SCOPE_COUNT = static_cast<std::size_t>(scope::COUNT_);
 
     std::vector<vote_entry>                    m_votes;
     std::vector<subscriber>                    m_subscribers;
-    std::array<std::atomic<bool>, scope_count> m_active{};
+    std::array<std::atomic<bool>, SCOPE_COUNT> m_active{};
 
     mutable std::mutex m_votes_mutex;
     std::mutex         m_subscribers_mutex;

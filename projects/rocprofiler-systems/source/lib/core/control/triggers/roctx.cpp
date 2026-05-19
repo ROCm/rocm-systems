@@ -42,48 +42,53 @@ roctx::initial_vote() const noexcept
 }
 
 void
-roctx::on_range_start(uint64_t range_id, const char* message)
+roctx::on_range_start(std::uint64_t range_id, const char* message)
 {
     if(message == nullptr || m_trace_regions.count(message) == 0) return;
 
-    bool was_empty = false;
+    bool became_in_region = false;
     {
         std::scoped_lock const lk{ m_mutex };
-        was_empty = m_active_range_ids.empty();
+        const bool             was_empty = m_active_range_ids.empty();
         m_active_range_ids.insert(range_id);
-    }
-
-    if(was_empty)
-    {
-        m_in_region.store(true, std::memory_order_relaxed);
-        refresh_state();
-    }
-}
-
-void
-roctx::on_range_stop(uint64_t range_id)
-{
-    bool now_empty = false;
-    {
-        std::scoped_lock const lk{ m_mutex };
-        if(m_active_range_ids.erase(range_id) > 0)
+        if(was_empty)
         {
-            now_empty = m_active_range_ids.empty();
+            // store under the mutex so the atomic snapshot is consistent
+            // with the set (compute_vote / compute_should_write read both)
+            m_in_region.store(true, std::memory_order_relaxed);
+            became_in_region = true;
         }
     }
 
-    if(!now_empty) return;
+    if(became_in_region) refresh_state();
+}
 
-    // Region ended while paused: silently clear user_paused so a later region
-    // push behaves as a fresh start. Subsequent on_resume becomes a no-op.
-    if(m_user_paused.exchange(false, std::memory_order_relaxed))
+void
+roctx::on_range_stop(std::uint64_t range_id)
+{
+    bool became_out_of_region = false;
+    bool was_user_paused      = false;
+    {
+        std::scoped_lock const lk{ m_mutex };
+        if(m_active_range_ids.erase(range_id) == 0) return;
+        if(!m_active_range_ids.empty()) return;
+
+        // Region ended while paused: silently clear user_paused so a later
+        // region push behaves as a fresh start. Subsequent on_resume becomes
+        // a no-op. Both atomic stores happen under the mutex so the set,
+        // m_in_region, and m_user_paused snapshot consistently.
+        was_user_paused = m_user_paused.exchange(false, std::memory_order_relaxed);
+        m_in_region.store(false, std::memory_order_relaxed);
+        became_out_of_region = true;
+    }
+
+    if(was_user_paused)
     {
         LOG_WARNING(
             "Target region ended while paused. Subsequent resume will be ignored.");
     }
 
-    m_in_region.store(false, std::memory_order_relaxed);
-    refresh_state();
+    if(became_out_of_region) refresh_state();
 }
 
 void

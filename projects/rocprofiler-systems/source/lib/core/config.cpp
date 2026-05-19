@@ -2281,6 +2281,13 @@ get_sampling_overflow_freq()
 }
 
 double
+get_trace_delay()
+{
+    static auto _v = get_config()->find("ROCPROFSYS_TRACE_DELAY");
+    return static_cast<tim::tsettings<double>&>(*_v->second).get();
+}
+
+double
 get_sampling_delay()
 {
     static auto _v = get_config()->find("ROCPROFSYS_SAMPLING_DELAY");

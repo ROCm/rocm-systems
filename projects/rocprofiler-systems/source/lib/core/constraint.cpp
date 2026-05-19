@@ -134,39 +134,6 @@ clock_identifier::as_string() const
 
 //--------------------------------------------------------------------------------------//
 //
-//  spec implementation
-//
-//--------------------------------------------------------------------------------------//
-
-spec::spec(clock_identifier _id, double _delay, double _dur, std::uint64_t _n,
-           std::uint64_t _rep)
-: delay{ _delay }
-, duration{ _dur }
-, count{ _n }
-, repeat{ _rep }
-, clock_id{ std::move(_id) }
-{}
-
-spec::spec(int _clock_id, double _delay, double _dur, std::uint64_t _n,
-           std::uint64_t _rep)
-: delay{ _delay }
-, duration{ _dur }
-, count{ _n }
-, repeat{ _rep }
-, clock_id{ find_clock_identifier(_clock_id) }
-{}
-
-spec::spec(const std::string& _clock_id, double _delay, double _dur, std::uint64_t _n,
-           std::uint64_t _rep)
-: delay{ _delay }
-, duration{ _dur }
-, count{ _n }
-, repeat{ _rep }
-, clock_id{ find_clock_identifier(_clock_id) }
-{}
-
-//--------------------------------------------------------------------------------------//
-//
 //  global usage functions
 //
 //--------------------------------------------------------------------------------------//
@@ -187,19 +154,18 @@ get_trace_specs()
             config::get_setting_value<double>("ROCPROFSYS_TRACE_DELAY").value_or(0.0);
         auto _duration_v =
             config::get_setting_value<double>("ROCPROFSYS_TRACE_DURATION").value_or(0.0);
-        auto _clock_v = find_clock_identifier(
-            config::get_setting_value<std::string>("ROCPROFSYS_TRACE_PERIOD_CLOCK_ID")
-                .value_or("CLOCK_REALTIME"));
 
         if(_delay_v > 0.0 || _duration_v > 0.0)
         {
-            _v.emplace_back(_clock_v, _delay_v, _duration_v);
+            _v.push_back(spec{ _delay_v, _duration_v });
         }
     }
 
     // Each ROCPROFSYS_TRACE_PERIODS sub-string has the grammar:
     //   delay[:duration[:repeat[:clock_id]]]
-    // missing fields fall back to TRACE_DELAY/DURATION/PERIOD_CLOCK_ID.
+    // Only delay/duration are honored downstream; repeat and clock_id are
+    // still parsed for input validation but not applied (multi-window
+    // support is captured as a follow-up — see HANDOFF.md).
     if(auto _periods_v =
            config::get_setting_value<std::string>("ROCPROFSYS_TRACE_PERIODS")
                .value_or("");
@@ -209,22 +175,18 @@ get_trace_specs()
             config::get_setting_value<double>("ROCPROFSYS_TRACE_DELAY").value_or(0.0);
         const auto _default_dur =
             config::get_setting_value<double>("ROCPROFSYS_TRACE_DURATION").value_or(0.0);
-        const auto _default_clock = find_clock_identifier(
-            config::get_setting_value<std::string>("ROCPROFSYS_TRACE_PERIOD_CLOCK_ID")
-                .value_or("CLOCK_REALTIME"));
 
         for(const auto& _entry : rocprofsys::common::delimit(_periods_v, " ;\t\n"))
         {
             const auto _parts = rocprofsys::common::delimit(_entry, ":");
-            spec       _s{};
-            _s.delay    = _default_delay;
-            _s.duration = _default_dur;
-            _s.clock_id = _default_clock;
+            spec       _s{ _default_delay, _default_dur };
             if(!_parts.empty()) _s.delay = utility::convert<double>(_parts.at(0));
             if(_parts.size() > 1) _s.duration = utility::convert<double>(_parts.at(1));
-            if(_parts.size() > 2) _s.repeat = utility::convert<uint64_t>(_parts.at(2));
-            if(_parts.size() > 3) _s.clock_id = find_clock_identifier(_parts.at(3));
-            _v.push_back(std::move(_s));
+            // _parts.at(2) (repeat) and _parts.at(3) (clock_id) parsed and
+            // validated but discarded; spec carries only delay/duration.
+            if(_parts.size() > 2) (void) utility::convert<std::uint64_t>(_parts.at(2));
+            if(_parts.size() > 3) (void) find_clock_identifier(_parts.at(3));
+            _v.push_back(_s);
         }
     }
 

@@ -443,6 +443,82 @@ stop_time_windows()
     g_trace_window.reset();
 }
 
+void
+register_subsystem_subscribers(control::session& session)
+{
+    using shmem_t = component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>;
+
+    session.subscribe({ &rocprofiler_sdk::pause, &rocprofiler_sdk::resume, "rocm" });
+    session.subscribe({ &sampling::pause,
+                        &sampling::resume,
+                        "sampling",
+                        { control::scope::global, control::scope::sampling_only } });
+    session.subscribe(
+        { &component::mpi_gotcha::pause, &component::mpi_gotcha::resume, "mpi" });
+    session.subscribe(
+        { &component::ucx_gotcha::pause, &component::ucx_gotcha::resume, "ucx" });
+    session.subscribe({ &shmem_t::pause, &shmem_t::resume, "shmem" });
+    session.subscribe(
+        { &component::vaapi_gotcha::pause, &component::vaapi_gotcha::resume, "vaapi" });
+    session.subscribe({ &::rocprofsys::pthread_gotcha::pause,
+                        &::rocprofsys::pthread_gotcha::resume, "pthread" });
+    session.subscribe(
+        { &component::numa_gotcha::pause, &component::numa_gotcha::resume, "numa" });
+    session.subscribe(
+        { &rocprofsys::kokkosp::pause, &rocprofsys::kokkosp::resume, "kokkos" });
+    session.subscribe(
+        { &process_sampler::pause, &process_sampler::resume, "process_sampler" });
+    session.subscribe({ &invoke_external_pause_callbacks,
+                        &invoke_external_resume_callbacks, "external" });
+}
+
+std::chrono::nanoseconds
+seconds_to_ns(double _seconds) noexcept
+{
+    return std::chrono::nanoseconds{ static_cast<std::int64_t>(_seconds * 1.0e9) };
+}
+
+void
+build_time_windows(control::session& session)
+{
+    if(auto _trace_specs = constraint::get_trace_specs(); !_trace_specs.empty())
+    {
+        const auto& _spec = _trace_specs.front();
+        g_trace_window    = std::make_unique<trace_window_t>(
+            session, g_trace_window_clock,
+            trace_window_t::config{ seconds_to_ns(_spec.delay),
+                                    seconds_to_ns(_spec.duration) });
+
+        // Safety-net subscriber for category-traited recording paths
+        // (timemory storage, perfetto trace_events from callbacks not
+        // covered by a subsystem pause subscriber). Toggles the
+        // per-category runtime_enabled trait so those sites gate off
+        // during the delay/duration window. Only registered when a
+        // trace window is configured.
+        session.subscribe(
+            { []() { categories::disable_categories(config::get_enabled_categories()); },
+              []() { categories::enable_categories(config::get_enabled_categories()); },
+              "trace_categories" });
+
+        session.attach(*g_trace_window);
+        g_trace_window->start();
+    }
+
+    const auto _samp_delay = config::get_sampling_delay();
+    const auto _samp_dur   = config::get_sampling_duration();
+    if(_samp_delay > 0.0 || _samp_dur > 0.0)
+    {
+        g_sampling_dur_window = std::make_unique<trace_window_t>(
+            session, g_sampling_dur_window_clock,
+            trace_window_t::config{ seconds_to_ns(_samp_delay),
+                                    seconds_to_ns(_samp_dur) },
+            control::scope::sampling_only);
+
+        session.attach(*g_sampling_dur_window);
+        g_sampling_dur_window->start();
+    }
+}
+
 }  // namespace
 
 extern "C" void
@@ -688,76 +764,8 @@ rocprofsys_init_tooling_hidden(void)
         // enabled.
         auto session = rocprofiler_sdk::get_session();
 
-        using shmem_t = component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>;
-
-        session->subscribe({ &rocprofiler_sdk::pause, &rocprofiler_sdk::resume, "rocm" });
-        session->subscribe({ &sampling::pause,
-                             &sampling::resume,
-                             "sampling",
-                             { control::scope::global, control::scope::sampling_only } });
-        session->subscribe(
-            { &component::mpi_gotcha::pause, &component::mpi_gotcha::resume, "mpi" });
-        session->subscribe(
-            { &component::ucx_gotcha::pause, &component::ucx_gotcha::resume, "ucx" });
-        session->subscribe({ &shmem_t::pause, &shmem_t::resume, "shmem" });
-        session->subscribe({ &component::vaapi_gotcha::pause,
-                             &component::vaapi_gotcha::resume, "vaapi" });
-        session->subscribe({ &::rocprofsys::pthread_gotcha::pause,
-                             &::rocprofsys::pthread_gotcha::resume, "pthread" });
-        session->subscribe(
-            { &component::numa_gotcha::pause, &component::numa_gotcha::resume, "numa" });
-        session->subscribe(
-            { &rocprofsys::kokkosp::pause, &rocprofsys::kokkosp::resume, "kokkos" });
-        session->subscribe(
-            { &process_sampler::pause, &process_sampler::resume, "process_sampler" });
-        session->subscribe({ &invoke_external_pause_callbacks,
-                             &invoke_external_resume_callbacks, "external" });
-
-        if(auto _trace_specs = constraint::get_trace_specs(); !_trace_specs.empty())
-        {
-            const auto& _spec  = _trace_specs.front();
-            const auto  _delay = std::chrono::nanoseconds{ static_cast<std::int64_t>(
-                _spec.delay * 1.0e9) };
-            const auto  _dur   = std::chrono::nanoseconds{ static_cast<std::int64_t>(
-                _spec.duration * 1.0e9) };
-            g_trace_window     = std::make_unique<trace_window_t>(
-                *session, g_trace_window_clock, trace_window_t::config{ _delay, _dur });
-
-            // Safety-net subscriber for category-traited recording paths
-            // (timemory storage, perfetto trace_events from callbacks not
-            // covered by a subsystem pause subscriber). Toggles the
-            // per-category runtime_enabled trait so those sites gate off
-            // during the delay/duration window. Only registered when a
-            // trace window is configured.
-            session->subscribe(
-                { []() {
-                     categories::disable_categories(config::get_enabled_categories());
-                 },
-                  []() {
-                      categories::enable_categories(config::get_enabled_categories());
-                  },
-                  "trace_categories" });
-
-            session->attach(*g_trace_window);
-            g_trace_window->start();
-        }
-
-        const auto _samp_delay = config::get_sampling_delay();
-        const auto _samp_dur   = config::get_sampling_duration();
-        if(_samp_delay > 0.0 || _samp_dur > 0.0)
-        {
-            const auto _delay_ns = std::chrono::nanoseconds{ static_cast<std::int64_t>(
-                _samp_delay * 1.0e9) };
-            const auto _dur_ns =
-                std::chrono::nanoseconds{ static_cast<std::int64_t>(_samp_dur * 1.0e9) };
-            g_sampling_dur_window = std::make_unique<trace_window_t>(
-                *session, g_sampling_dur_window_clock,
-                trace_window_t::config{ _delay_ns, _dur_ns },
-                control::scope::sampling_only);
-
-            session->attach(*g_sampling_dur_window);
-            g_sampling_dur_window->start();
-        }
+        register_subsystem_subscribers(*session);
+        build_time_windows(*session);
 
         // Ensure the roctx trigger is attached to the session before the
         // initial broadcast — otherwise a configured region filter would
@@ -1102,6 +1110,10 @@ rocprofsys_finalize_hidden(void)
         component::vaapi_gotcha::shutdown();
     }
 
+    // Join time_window worker threads BEFORE the session is shut down so a
+    // worker can't publish() into already-cleared votes/subscribers.
+    stop_time_windows();
+
     LOG_DEBUG("Shutting down ROCm...");
     rocprofiler_sdk::shutdown();
 
@@ -1330,7 +1342,6 @@ rocprofsys_finalize_hidden(void)
 
     _output_registry.print_summary();
 
-    stop_time_windows();
     categories::shutdown();
 
     _finalization.stop();

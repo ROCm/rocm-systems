@@ -25,12 +25,19 @@ steady::sleep_until(clock_time_point deadline)
 }
 
 void
-steady::interrupt()
+steady::interrupt() noexcept
 {
     {
         std::scoped_lock const lk{ m_mutex };
         m_interrupted = true;
     }
     m_cv.notify_all();
+}
+
+void
+steady::reset() noexcept
+{
+    std::scoped_lock const lk{ m_mutex };
+    m_interrupted = false;
 }
 }  // namespace rocprofsys::control::clocks

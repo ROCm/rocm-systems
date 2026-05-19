@@ -28,7 +28,13 @@ public:
 
     [[nodiscard]] clock_time_point now() const noexcept;
     [[nodiscard]] bool             sleep_until(clock_time_point deadline);
-    void                           interrupt();
+    void                           interrupt() noexcept;
+
+    // Clear the interrupted flag so a new sleep_until cycle can begin. The
+    // clock is owned at file scope in library.cpp and outlives any single
+    // time_window instance; without reset, a fresh time_window over a
+    // previously-interrupted clock would bail on its first sleep_until.
+    void reset() noexcept;
 
 private:
     std::mutex              m_mutex;

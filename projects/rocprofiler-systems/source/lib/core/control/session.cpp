@@ -5,15 +5,17 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <functional>
 #include <mutex>
 #include <utility>
+#include <vector>
 
 namespace rocprofsys::control
 {
 session::session() noexcept
 {
     for(auto& a : m_active)
-        a.store(true, std::memory_order_relaxed);
+        a.store(true, std::memory_order_release);
 }
 
 void
@@ -29,20 +31,22 @@ session::shutdown()
         std::scoped_lock const lk{ m_votes_mutex };
         m_votes.clear();
         for(auto& a : m_active)
-            a.store(true, std::memory_order_relaxed);
+            a.store(true, std::memory_order_release);
     }
 }
 
 void
 session::subscribe(subscriber sub)
 {
-    // Seed the subscriber's resolved paused state from current session state
-    // so a subscribe-after-attach ordering observes the right transitions.
-    // No callback is fired here; force_initial_pause() is the explicit
-    // broadcast for the production ordering.
+    // Hold both mutexes (lock order matches publish: votes -> subscribers,
+    // and std::scoped_lock applies std::lock to avoid deadlock anyway). With
+    // m_votes_mutex held, no publish can write m_active during our seed
+    // read, so the seeded paused state is consistent with the votes table
+    // observed at insertion time. No callback is fired here;
+    // force_initial_pause() is the explicit broadcast for the production
+    // ordering.
+    std::scoped_lock const lk{ m_votes_mutex, m_subscribers_mutex };
     sub.paused = subscriber_should_be_paused(sub);
-
-    std::scoped_lock const lk{ m_subscribers_mutex };
     m_subscribers.push_back(std::move(sub));
 }
 
@@ -54,7 +58,7 @@ session::attach(trigger& trig)
     std::scoped_lock const lk{ m_votes_mutex };
     m_votes.push_back({ trig.name(), event_scope, trig.initial_vote() });
     m_active[static_cast<std::size_t>(event_scope)].store(resolve_locked(event_scope),
-                                                          std::memory_order_relaxed);
+                                                          std::memory_order_release);
 }
 
 void
@@ -69,13 +73,21 @@ session::force_initial_pause()
     // for runtime publish() but would silently skip subscribers whose seeded
     // state already matches the resolved state — we always want them to
     // observe the initial pause once.
-    std::scoped_lock const lk{ m_subscribers_mutex };
-    for(const auto& sub : m_subscribers)
+    std::vector<std::function<void()>> to_fire;
     {
-        if(!subscriber_should_be_paused(sub)) continue;
-        sub.paused = true;
-        if(sub.on_pause) sub.on_pause();
+        std::scoped_lock const lk{ m_subscribers_mutex };
+        to_fire.reserve(m_subscribers.size());
+        for(const auto& sub : m_subscribers)
+        {
+            if(!subscriber_should_be_paused(sub)) continue;
+            sub.paused = true;
+            if(sub.on_pause) to_fire.push_back(sub.on_pause);
+        }
     }
+    // Invoke callbacks unlocked so a callback that re-enters the session
+    // (e.g. is_active_excluding) cannot deadlock against another publisher.
+    for(const auto& cb : to_fire)
+        cb();
 }
 
 void
@@ -96,7 +108,7 @@ session::publish(const trigger& trig, vote new_vote)
         else
             it->current_vote = new_vote;
 
-        m_active[scope_idx].store(resolve_locked(event_scope), std::memory_order_relaxed);
+        m_active[scope_idx].store(resolve_locked(event_scope), std::memory_order_release);
     }
 
     // A subscriber's resolved paused state can change even when this scope's
@@ -141,25 +153,37 @@ session::subscriber_should_be_paused(const subscriber& sub) const noexcept
 void
 session::dispatch_for_scope(scope event_scope)
 {
-    std::scoped_lock const lk{ m_subscribers_mutex };
-    for(const auto& sub : m_subscribers)
+    // Snapshot the callbacks to fire under m_subscribers_mutex; flip
+    // sub.paused under the lock so a concurrent publish dedups correctly.
+    // Invoke callbacks AFTER releasing the lock so a subscriber callback
+    // that re-enters the session (e.g. is_active_excluding which takes
+    // m_votes_mutex) cannot deadlock against another publisher whose
+    // lock order is votes -> subscribers.
+    std::vector<std::function<void()>> to_fire;
     {
-        const bool listens = std::find(sub.scopes.begin(), sub.scopes.end(),
-                                       event_scope) != sub.scopes.end();
-        if(!listens) continue;
-
-        const bool should_be_paused = subscriber_should_be_paused(sub);
-        if(should_be_paused == sub.paused) continue;
-
-        sub.paused = should_be_paused;
-        if(should_be_paused)
+        std::scoped_lock const lk{ m_subscribers_mutex };
+        to_fire.reserve(m_subscribers.size());
+        for(const auto& sub : m_subscribers)
         {
-            if(sub.on_pause) sub.on_pause();
-        }
-        else
-        {
-            if(sub.on_resume) sub.on_resume();
+            const bool listens = std::find(sub.scopes.begin(), sub.scopes.end(),
+                                           event_scope) != sub.scopes.end();
+            if(!listens) continue;
+
+            const bool should_be_paused = subscriber_should_be_paused(sub);
+            if(should_be_paused == sub.paused) continue;
+
+            sub.paused = should_be_paused;
+            if(should_be_paused)
+            {
+                if(sub.on_pause) to_fire.push_back(sub.on_pause);
+            }
+            else
+            {
+                if(sub.on_resume) to_fire.push_back(sub.on_resume);
+            }
         }
     }
+    for(const auto& cb : to_fire)
+        cb();
 }
 }  // namespace rocprofsys::control

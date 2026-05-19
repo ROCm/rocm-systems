@@ -52,21 +52,8 @@ struct clock_identifier
 
 struct spec
 {
-    spec() = default;
-    spec(int, double, double, std::uint64_t = 0, std::uint64_t = 1);
-    spec(clock_identifier, double, double, std::uint64_t = 0, std::uint64_t = 1);
-    spec(const std::string&, double, double, std::uint64_t = 0, std::uint64_t = 1);
-
-    spec(const spec&)                = default;
-    spec(spec&&) noexcept            = default;
-    spec& operator=(const spec&)     = default;
-    spec& operator=(spec&&) noexcept = default;
-
-    double           delay    = 0.0;
-    double           duration = 0.0;
-    std::uint64_t    count    = 0;
-    std::uint64_t    repeat   = 1;
-    clock_identifier clock_id = {};
+    double delay    = 0.0;
+    double duration = 0.0;
 };
 
 const std::set<clock_identifier>&

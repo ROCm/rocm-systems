@@ -24,9 +24,10 @@ struct subscriber
     std::vector<scope>    scopes = { scope::global };
 
     // Net resolved paused state for this subscriber: true iff at least one of
-    // `scopes` is currently paused. Mutable so session::dispatch_for_scope()
-    // can update it under the subscribers mutex while iterating by const-ref.
-    // Reset by session::shutdown().
+    // `scopes` is currently paused. Owned by `session` — only read or written
+    // while holding `session::m_subscribers_mutex`. Mutable so
+    // dispatch_for_scope() can update it while iterating subscribers by
+    // const-ref. Reset by session::shutdown().
     mutable bool paused = false;
 };
 }  // namespace rocprofsys::control

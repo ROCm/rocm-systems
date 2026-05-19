@@ -95,19 +95,21 @@ std::shared_ptr<roctx_client<>> g_roctx_client = {};
 // All trigger types (roctx, time_window, ...) attach to the same session;
 // roctx_client is just one consumer.
 std::shared_ptr<control::session> g_session = {};
+std::once_flag                    g_session_once{};
+std::once_flag                    g_roctx_client_once{};
 
 std::shared_ptr<control::session>
 get_or_create_session()
 {
-    if(!g_session) g_session = std::make_shared<control::session>();
+    std::call_once(g_session_once,
+                   [] { g_session = std::make_shared<control::session>(); });
     return g_session;
 }
 
 std::shared_ptr<roctx_client<>>
 get_roctx_client()
 {
-    if(!g_roctx_client)
-    {
+    std::call_once(g_roctx_client_once, [] {
         const auto _domains =
             tim::delimit(config::get_setting_value<std::string>("ROCPROFSYS_ROCM_DOMAINS")
                              .value_or(std::string{}),
@@ -119,11 +121,7 @@ get_roctx_client()
         const auto roctx_traced_regions = config::get_trace_region();
         const auto has_trace_regions    = !roctx_traced_regions.empty();
 
-        // Case 1: no marker domain and no trace regions — nothing to do
-        if(!has_marker_domain && !has_trace_regions)
-        {
-            return nullptr;
-        }
+        if(!has_marker_domain && !has_trace_regions) return;
 
         const auto roctx_config = roctx_client_config{
             has_marker_domain,  // pause_resume_enabled
@@ -134,7 +132,7 @@ get_roctx_client()
         };
         g_roctx_client =
             std::make_shared<roctx_client<>>(roctx_config, get_or_create_session());
-    }
+    });
 
     return g_roctx_client;
 }
@@ -2424,6 +2422,25 @@ tool_hip_stream_callback(rocprofiler_callback_tracing_record_t record,
 }
 #endif
 
+// True when tool_init must skip starting primary_ctx / counter_ctx and leave
+// them for the rocm subscriber's on_resume to start later. Reasons (any):
+//   1. roctx region filter is gating tracing
+//   2. ROCPROFSYS_TRACE_DELAY is configured (eager probe — tool_init is
+//      dispatched async by rocprofiler-sdk and can run before the time_window
+//      trigger has been attached, so consulting session.is_active() alone
+//      would race with that attach)
+//   3. control session is otherwise paused (backstop for non-time-window
+//      pausing paths such as ROCPROFSYS_INIT_PAUSED)
+bool
+should_defer_main_contexts(roctx_client<>* client)
+{
+    const auto filtering_active = client && client->get_trigger().filter_active();
+    const auto delay_pending    = config::get_trace_delay() > 0.0;
+    const auto session_active   = get_session()->is_active(control::scope::global);
+
+    return filtering_active || delay_pending || !session_active;
+}
+
 int
 tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 {
@@ -2737,28 +2754,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     auto roctx_client = get_roctx_client();
     if(roctx_client) roctx_client->configure_services(_data->get_control_context());
 
-    const auto filtering_active =
-        roctx_client && roctx_client->get_trigger().filter_active();
-
-    // tool_init is dispatched asynchronously by rocprofiler-sdk and can run
-    // before the _dtor lambda in library.cpp has had a chance to attach the
-    // TRACE_DELAY/DURATION time_window trigger. Consulting session.is_active()
-    // alone would race with that attach. Probe the config directly for a
-    // configured delay — it is set at config load (well before tool_init) and
-    // is the reliable signal for "the session will be paused at startup". The
-    // is_active probe is kept as a backstop for non-time-window pausing paths.
-    const auto trace_delay =
-        config::get_setting_value<double>("ROCPROFSYS_TRACE_DELAY").value_or(0.0);
-    const auto session_active = get_session()->is_active(control::scope::global);
-    const auto delay_pending  = trace_delay > 0.0;
-
-    if(filtering_active || delay_pending || !session_active)
+    if(should_defer_main_contexts(roctx_client.get()))
     {
-        // Either the roctx region filter is gating tracing, or a TRACE_DELAY
-        // is configured, or the control session is otherwise paused. Start
-        // only the always-on contexts; the main contexts are started later
-        // by rocprofiler_sdk::resume() (the rocm subscriber's on_resume
-        // callback) when the session resumes.
         start_context(_data->get_code_obj_context());
         start_context(_data->get_control_context());
     }
@@ -2858,8 +2855,6 @@ get_session()
 void
 ensure_roctx_initialized()
 {
-    // Drive lazy construction so the roctx trigger attaches to the session
-    // before library.cpp's force_initial_pause runs. Discarded result.
     (void) get_roctx_client();
 }
 

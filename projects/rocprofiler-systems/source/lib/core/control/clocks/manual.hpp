@@ -46,13 +46,19 @@ public:
         return !m_interrupted;
     }
 
-    void interrupt()
+    void interrupt() noexcept
     {
         {
             std::scoped_lock const lk{ m_mutex };
             m_interrupted = true;
         }
         m_cv.notify_all();
+    }
+
+    void reset() noexcept
+    {
+        std::scoped_lock const lk{ m_mutex };
+        m_interrupted = false;
     }
 
     /// Advance virtual time by @p delta and wake any sleepers whose
@@ -64,9 +70,9 @@ public:
     }
 
 private:
-    std::atomic<int64_t>    m_now_ns;
-    std::mutex              m_mutex;
-    std::condition_variable m_cv;
-    bool                    m_interrupted{ false };
+    std::atomic<std::int64_t> m_now_ns;
+    std::mutex                m_mutex;
+    std::condition_variable   m_cv;
+    bool                      m_interrupted{ false };
 };
 }  // namespace rocprofsys::control::clocks

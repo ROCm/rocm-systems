@@ -7,7 +7,6 @@
 #include "core/control/session.hpp"
 #include "core/control/trigger.hpp"
 
-#include <atomic>
 #include <chrono>
 #include <string_view>
 #include <thread>
@@ -69,6 +68,7 @@ public:
     {
         if(!has_window()) return;
         if(m_thread.joinable()) return;
+        m_clock.reset();
         m_thread = std::thread{ [this]() { worker(); } };
     }
 

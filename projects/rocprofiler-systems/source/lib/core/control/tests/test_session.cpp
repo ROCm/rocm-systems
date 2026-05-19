@@ -1,16 +1,20 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "core/control/clocks/manual.hpp"
 #include "core/control/session.hpp"
 #include "core/control/subscriber.hpp"
 #include "core/control/trigger.hpp"
+#include "core/control/triggers/time_window.hpp"
 
 #include <atomic>
+#include <chrono>
 #include <gtest/gtest.h>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace
@@ -224,4 +228,52 @@ TEST_F(session_test, terminal_pause_does_not_double_fire)
     const auto events = log.snapshot();
     ASSERT_EQ(events.size(), 1u);
     EXPECT_EQ(events[0], "sub:pause");
+}
+
+TEST_F(session_test, time_window_with_manual_clock_drives_full_cycle)
+{
+    using namespace std::chrono_literals;
+    using clock_t          = rocprofsys::control::clocks::manual;
+    using time_window_t    = rocprofsys::control::triggers::time_window<clock_t>;
+    using clock_duration_t = rocprofsys::control::clock_duration;
+
+    clock_t clk{};
+    s.subscribe(make_logged_subscriber(log, "sub"));
+
+    constexpr auto delay = clock_duration_t{ 100'000'000 };  // 100 ms virtual
+    constexpr auto dur   = clock_duration_t{ 200'000'000 };  // 200 ms virtual
+    time_window_t  tw{ s, clk, time_window_t::config{ delay, dur } };
+    s.attach(tw);
+    s.force_initial_pause();
+
+    // Initial vote is paused (delay > 0); subscriber should observe one pause.
+    ASSERT_EQ(log.snapshot().size(), 1u);
+    EXPECT_EQ(log.snapshot()[0], "sub:pause");
+    EXPECT_FALSE(s.is_active(scope::global));
+
+    tw.start();
+
+    // The worker captures its t0 from clk.now() asynchronously after start().
+    // We don't know exactly when, so advance virtual time in chunks while
+    // polling — each advance() does cv.notify_all() which wakes any
+    // sleep_until that has captured a now-satisfied deadline.
+    auto wait_with_advance = [&](std::size_t expected_size, clock_duration_t step) {
+        for(int i = 0; i < 200; ++i)
+        {
+            if(log.snapshot().size() >= expected_size) return true;
+            clk.advance(step);
+            std::this_thread::sleep_for(2ms);
+        }
+        return false;
+    };
+
+    ASSERT_TRUE(wait_with_advance(2u, delay)) << "worker did not publish active";
+    EXPECT_EQ(log.snapshot()[1], "sub:resume");
+    EXPECT_TRUE(s.is_active(scope::global));
+
+    ASSERT_TRUE(wait_with_advance(3u, dur)) << "worker did not publish terminal pause";
+    EXPECT_EQ(log.snapshot()[2], "sub:pause");
+    EXPECT_FALSE(s.is_active(scope::global));
+
+    // Worker thread is joined by ~time_window; no explicit stop needed.
 }

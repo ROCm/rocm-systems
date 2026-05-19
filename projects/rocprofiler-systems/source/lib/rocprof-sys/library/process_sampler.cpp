@@ -22,7 +22,18 @@ namespace
 using promise_t                                         = std::promise<void>;
 std::unique_ptr<promise_t>             polling_finished = {};
 std::vector<std::unique_ptr<instance>> instances        = {};
-std::atomic<bool>                      sampler_paused{ false };
+
+// Two layers, two purposes (NOT redundant gates):
+//   sampler_paused — gates the polling loop's per-tick CPU work, skipping
+//     instance->sample() calls so we don't burn cycles or perturb the
+//     workload while paused.
+//   instance->pause() — emits a state-change marker (e.g. PMC writes a
+//     zero-valued sample so Perfetto counter tracks visibly drop to zero
+//     during the gap). Without this the counter would appear flat at the
+//     last value across the entire paused window.
+// Skip either layer and you lose either the CPU savings or the visual
+// gap. Don't conflate them.
+std::atomic<bool> sampler_paused{ false };
 
 bool&
 is_initialized()
