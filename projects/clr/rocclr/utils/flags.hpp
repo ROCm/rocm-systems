@@ -271,7 +271,7 @@ release(uint, HIP_SKIP_ABORT_ON_GPU_ERROR, true,                              \
         "Set this to true, to avoid host side abort for GPU errors")          \
 release(bool, HIP_FORCE_SPIRV_CODEOBJECT, false,                              \
         "Force use of SPIRV instead of device specific code object.")         \
-release(uint, DEBUG_CLR_BATCH_CPU_SYNC_SIZE, 8,                               \
+release(uint, DEBUG_CLR_BATCH_CPU_SYNC_SIZE, 16,                               \
         "Forces the minimum batch size for CPU sync")  // clang-format on
 
 namespace amd {
