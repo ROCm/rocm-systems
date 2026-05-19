@@ -25,6 +25,7 @@ const std::string kCodeFile = "library_code_load.code";
 
 // maxKernels == 0 must succeed without writing to the output buffer.
 HIP_TEST_CASE(Unit_hipLibraryEnumerateKernels_ZeroMax) {
+  HIP_TEST_DRIVER_INIT();
   hipLibrary_t lib = nullptr;
   HIP_CHECK(hipLibraryLoadFromFile(&lib, kCodeFile.c_str(), nullptr, nullptr, 0, nullptr, nullptr,
                                    0));
@@ -39,6 +40,7 @@ HIP_TEST_CASE(Unit_hipLibraryEnumerateKernels_ZeroMax) {
 // Enumerating exactly KernelCount slots fills every slot with a non-null
 // handle and leaves a trailing guard slot untouched.
 HIP_TEST_CASE(Unit_hipLibraryEnumerateKernels_PartialFill) {
+  HIP_TEST_DRIVER_INIT();
   hipLibrary_t lib = nullptr;
   HIP_CHECK(hipLibraryLoadFromFile(&lib, kCodeFile.c_str(), nullptr, nullptr, 0, nullptr, nullptr,
                                    0));
@@ -66,6 +68,7 @@ HIP_TEST_CASE(Unit_hipLibraryEnumerateKernels_PartialFill) {
 // Every enumerated handle must resolve to a hipFunction_t via
 // hipKernelGetFunction.
 HIP_TEST_CASE(Unit_hipLibraryEnumerateKernels_HandlesUsable) {
+  CTX_CREATE();
   hipLibrary_t lib = nullptr;
   HIP_CHECK(hipLibraryLoadFromFile(&lib, kCodeFile.c_str(), nullptr, nullptr, 0, nullptr, nullptr,
                                    0));
@@ -85,11 +88,13 @@ HIP_TEST_CASE(Unit_hipLibraryEnumerateKernels_HandlesUsable) {
   }
 
   HIP_CHECK(hipLibraryUnload(lib));
+  CTX_DESTROY();
 }
 
 // Repeated queries on the same library must be stable: KernelCount returns
 // the same value, and GetKernel for the same name returns the same handle.
 HIP_TEST_CASE(Unit_hipLibrary_RepeatedQueriesAreStable) {
+  HIP_TEST_DRIVER_INIT();
   hipLibrary_t lib = nullptr;
   HIP_CHECK(hipLibraryLoadFromFile(&lib, kCodeFile.c_str(), nullptr, nullptr, 0, nullptr, nullptr,
                                    0));
@@ -116,9 +121,10 @@ HIP_TEST_CASE(Unit_hipLibrary_RepeatedQueriesAreStable) {
 // hipLibraryGetGlobal must report identical sizes and non-null pointers
 // (pointers themselves may differ since each is a separate load).
 HIP_TEST_CASE(Unit_hipLibraryGetGlobal_MatchesModuleGetGlobal) {
+  CTX_CREATE();
   hipModule_t mod = nullptr;
   HIP_CHECK(hipModuleLoad(&mod, kCodeFile.c_str()));
-  hipDeviceptr_t mod_dptr = nullptr;
+  hipDeviceptr_t mod_dptr = 0;
   size_t mod_bytes = 0;
   HIP_CHECK(hipModuleGetGlobal(&mod_dptr, &mod_bytes, mod, "d_var"));
 
@@ -129,18 +135,20 @@ HIP_TEST_CASE(Unit_hipLibraryGetGlobal_MatchesModuleGetGlobal) {
   size_t lib_bytes = 0;
   HIP_CHECK(hipLibraryGetGlobal(&lib_dptr, &lib_bytes, lib, "d_var"));
 
-  REQUIRE(mod_dptr != nullptr);
+  REQUIRE(mod_dptr != 0);
   REQUIRE(lib_dptr != nullptr);
   REQUIRE(mod_bytes == lib_bytes);
   REQUIRE(mod_bytes == sizeof(float) * 32);
 
   HIP_CHECK(hipLibraryUnload(lib));
   HIP_CHECK(hipModuleUnload(mod));
+  CTX_DESTROY();
 }
 
 // Kernel and global lookup must compose in any order without one corrupting
 // the other's cache.
 HIP_TEST_CASE(Unit_hipLibrary_KernelGlobalLookupOrderIndependent) {
+  HIP_TEST_DRIVER_INIT();
   hipLibrary_t lib = nullptr;
   HIP_CHECK(hipLibraryLoadFromFile(&lib, kCodeFile.c_str(), nullptr, nullptr, 0, nullptr, nullptr,
                                    0));
@@ -167,6 +175,7 @@ HIP_TEST_CASE(Unit_hipLibrary_KernelGlobalLookupOrderIndependent) {
 // Repeated load/unload of the same code object must remain clean across
 // iterations (no leaked state, no stale managed-memory registrations).
 HIP_TEST_CASE(Unit_hipLibrary_LoadUnloadCycle) {
+  HIP_TEST_DRIVER_INIT();
   for (int iter = 0; iter < 4; ++iter) {
     INFO("iteration " << iter);
     hipLibrary_t lib = nullptr;

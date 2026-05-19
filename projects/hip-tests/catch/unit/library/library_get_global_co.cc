@@ -28,6 +28,7 @@ const std::string kCodeFile = "library_code_load.code";
 }  // namespace
 
 HIP_TEST_CASE(Unit_hipLibraryGetGlobal_CO_Negative) {
+  HIP_TEST_DRIVER_INIT();
   hipLibrary_t lib = nullptr;
   HIP_CHECK(hipLibraryLoadFromFile(&lib, kCodeFile.c_str(), nullptr, nullptr, 0, nullptr, nullptr,
                                    0));
@@ -56,6 +57,7 @@ HIP_TEST_CASE(Unit_hipLibraryGetGlobal_CO_Negative) {
 }
 
 HIP_TEST_CASE(Unit_hipLibraryGetGlobal_CO_Values) {
+  HIP_TEST_DRIVER_INIT();
   hipLibrary_t lib = nullptr;
   HIP_CHECK(hipLibraryLoadFromFile(&lib, kCodeFile.c_str(), nullptr, nullptr, 0, nullptr, nullptr,
                                    0));
@@ -146,6 +148,7 @@ HIP_TEST_CASE(Unit_hipLibraryGetGlobal_CO_Values) {
 
 HIP_TEST_CASE(Unit_hipLibraryGetManaged_CO_Negative) {
   CHECK_MANAGED_MEMORY_SUPPORT
+  HIP_TEST_DRIVER_INIT();
   hipLibrary_t lib = nullptr;
   HIP_CHECK(hipLibraryLoadFromFile(&lib, kCodeFile.c_str(), nullptr, nullptr, 0, nullptr, nullptr,
                                    0));
@@ -179,6 +182,7 @@ HIP_TEST_CASE(Unit_hipLibraryGetManaged_CO_Negative) {
 
 HIP_TEST_CASE(Unit_hipLibraryGetManaged_CO_Values) {
   CHECK_MANAGED_MEMORY_SUPPORT
+  HIP_TEST_DRIVER_INIT();
   hipLibrary_t lib = nullptr;
   HIP_CHECK(hipLibraryLoadFromFile(&lib, kCodeFile.c_str(), nullptr, nullptr, 0, nullptr, nullptr,
                                    0));
