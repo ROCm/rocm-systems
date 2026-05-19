@@ -983,12 +983,6 @@ __global__ void signalAddConsumerPhase3Kernel(
 }
 
 TEST_F(GinMPIDeviceTests, SignalAdd_AndShadow) {
-  // Skipped: the no-counter + SignalAdd path in P3 still hangs on the proxy
-  // backend even after the upstream "Gin Proxy fixes and tests" commit. Re-
-  // enable once that path is fixed (and remove this skip together with any
-  // CounterInc-based workaround in signalAddProducerNoCounterKernel).
-  GTEST_SKIP() << "SignalAdd_AndShadow disabled: P3 no-counter+SignalAdd path hangs";
-
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
 
