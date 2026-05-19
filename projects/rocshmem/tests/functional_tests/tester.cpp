@@ -72,6 +72,7 @@
 #include "library_info_tester.hpp"
 #include "fence_ordering_tester.hpp"
 #include "tile_rma_tester.hpp"
+#include "tile_broadcast_tester.hpp"
 
 #include "backend_bc.hpp"
 extern Backend* backend;
@@ -707,6 +708,18 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "Tile Get Arbitrary Strides";
       testers.push_back(new TileRMATester(args));
       break;
+    case TileBroadcastTestType:
+      test_name = "Tile Broadcast Thread-Level Single-WG";
+      testers.push_back(new TileBroadcastTester(args));
+      break;
+    case TileBroadcastWaveTestType:
+      test_name = "Tile Broadcast Wave-Collective Single-WG";
+      testers.push_back(new TileBroadcastTester(args));
+      break;
+    case TileBroadcastWGTestType:
+      test_name = "Tile Broadcast Workgroup-Collective Multi-Team";
+      testers.push_back(new TileBroadcastTester(args));
+      break;
     default:
       test_name = "Empty";
       break;
@@ -859,6 +872,9 @@ bool Tester::peLaunchesKernel() {
     case FenceOrderPutLargeSmallTestType:
     case FenceOrderFanoutTestType:
     case FenceOrderPutWaveNbiChunksTestType:
+    case TileBroadcastTestType:
+    case TileBroadcastWaveTestType:
+    case TileBroadcastWGTestType:
       is_launcher = true;
       break;
     default:

@@ -313,6 +313,9 @@ void TesterArguments::get_arguments() {
     case DeviceBitcodeTestType:
     case TeamCtxSharedInfraTestType:
     case FenceOrderFanoutTestType:
+    case TileBroadcastTestType:
+    case TileBroadcastWaveTestType:
+    case TileBroadcastWGTestType:
       requires_two_pes = false;
       break;
     default:
