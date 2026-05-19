@@ -103,7 +103,7 @@ else()
         profiler-hub-sqlite3-static
         PRIVATE
             SQLITE_DEFAULT_MEMSTATUS=0
-            SQLITE_THREADSAFE=1
+            SQLITE_THREADSAFE=2
             SQLITE_DEFAULT_WAL_SYNCHRONOUS=1
             SQLITE_LIKE_DOESNT_MATCH_BLOBS=1
             SQLITE_OMIT_DEPRECATED=1
