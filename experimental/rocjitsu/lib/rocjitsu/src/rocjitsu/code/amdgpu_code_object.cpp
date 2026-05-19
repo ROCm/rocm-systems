@@ -33,6 +33,7 @@ public:
       : Section(std::move(name), std::move(data)), shdr_(shdr) {}
 
   std::size_t size() const override { return shdr_.sh_size; }
+  uint64_t vaddr() const override { return shdr_.sh_addr; }
   uint32_t sectionHeaderNameIdx() const override { return shdr_.sh_name; }
   uint64_t sectionOffset() const override { return shdr_.sh_offset; }
 
@@ -108,6 +109,70 @@ AmdGpuCodeObject::AmdGpuCodeObject(const std::string &elf_path) {
   elf_file.close();
 }
 
+AmdGpuCodeObject::AmdGpuCodeObject(const uint8_t *elf_bytes, size_t elf_size) {
+  if (elf_size < sizeof(Elf64_Ehdr)) {
+    is_valid_ = false;
+    return;
+  }
+
+  image_.assign(reinterpret_cast<const char *>(elf_bytes),
+                reinterpret_cast<const char *>(elf_bytes) + elf_size);
+
+  Elf64_Ehdr ehdr;
+  std::memcpy(&ehdr, image_.data(), sizeof(Elf64_Ehdr));
+
+  if (!is_elf(ehdr) || ehdr.e_ident[EI_CLASS] != ELFCLASS64 ||
+      ehdr.e_ident[EI_OSABI] != ELFOSABI_AMDGPU_HSA) {
+    is_valid_ = false;
+    return;
+  }
+
+  header_ = std::make_unique<HsaHeader>(ehdr);
+
+  // Parse sections directly from the in-memory image (no file I/O needed).
+  auto shoff = header_->sectionHeaderOff();
+  auto num_shdrs = header_->numSectionHeaders();
+  if (shoff + num_shdrs * sizeof(Elf64_Shdr) > elf_size) {
+    is_valid_ = false;
+    return;
+  }
+
+  std::vector<Elf64_Shdr> section_hdrs(num_shdrs);
+  std::memcpy(section_hdrs.data(), image_.data() + shoff, num_shdrs * sizeof(Elf64_Shdr));
+
+  int shstrndx = header_->sectionHeaderStrIdx();
+  if (shstrndx < 0 || static_cast<size_t>(shstrndx) >= section_hdrs.size()) {
+    is_valid_ = false;
+    return;
+  }
+
+  auto &shstrtab = section_hdrs[shstrndx];
+  for (const auto &shdr : section_hdrs) {
+    if (shdr.sh_type == SHT_NULL)
+      continue;
+    if (shdr.sh_name >= shstrtab.sh_size)
+      continue;
+    if (shdr.sh_offset + shdr.sh_size > elf_size)
+      continue;
+
+    const char *strtab_base = image_.data() + shstrtab.sh_offset;
+    size_t max_len = shstrtab.sh_size - shdr.sh_name;
+    std::string sec_name(strtab_base + shdr.sh_name, strnlen(strtab_base + shdr.sh_name, max_len));
+
+    auto sec_data = std::make_unique<char[]>(shdr.sh_size);
+    std::memcpy(sec_data.get(), image_.data() + shdr.sh_offset, shdr.sh_size);
+    sections_.emplace_back(std::make_unique<HsaSection>(sec_name, std::move(sec_data), shdr));
+
+    if (sec_name == ".text")
+      text_sections_.push_back(sections_.back().get());
+    else if (sec_name == ".rodata")
+      rodata_sections_.push_back(sections_.back().get());
+  }
+
+  target_id_ = target_from_machine_flags(header_->flags());
+  is_valid_ = true;
+}
+
 AmdGpuCodeObject::AmdGpuCodeObject(uint64_t size, std::ifstream &elf_file, std::string offload_kind,
                                    std::string target_triple, int64_t fatbin_offset)
     : offload_kind_(std::move(offload_kind)), target_triple_(std::move(target_triple)),
@@ -169,7 +234,7 @@ void AmdGpuCodeObject::load_sections(std::ifstream &elf_file) {
   }
 
   for (const auto &shdr : section_hdrs) {
-    if (shdr.sh_type == SHT_NULL)
+    if (shdr.sh_type == SHT_NULL || shdr.sh_type == SHT_NOBITS)
       continue;
     if (shdr.sh_name >= shstrtab_data.size())
       continue;
@@ -196,6 +261,55 @@ void AmdGpuCodeObject::load_sections(std::ifstream &elf_file) {
     else if (sec_name == ".rodata")
       rodata_sections_.push_back(sections_.back().get());
   }
+
+  // Parse symbol table for kernel descriptor offsets.
+  // Scan both SHT_SYMTAB and SHT_DYNSYM — stripped code objects may
+  // only have the latter.
+  for (size_t i = 0; i < section_hdrs.size(); ++i) {
+    if (section_hdrs[i].sh_type != SHT_SYMTAB && section_hdrs[i].sh_type != SHT_DYNSYM)
+      continue;
+    auto &symtab_shdr = section_hdrs[i];
+    if (symtab_shdr.sh_entsize == 0)
+      continue;
+
+    // Read the string table linked to this symtab.
+    if (symtab_shdr.sh_link >= section_hdrs.size())
+      continue;
+    auto &strtab_shdr = section_hdrs[symtab_shdr.sh_link];
+    std::vector<char> sym_strtab(strtab_shdr.sh_size);
+    elf_file.seekg(static_cast<std::streamoff>(strtab_shdr.sh_offset + fatbin_offset_),
+                   std::ios::beg);
+    elf_file.read(sym_strtab.data(), static_cast<std::streamsize>(sym_strtab.size()));
+    if (!elf_file)
+      break;
+
+    // Read symbols.
+    size_t num_syms = symtab_shdr.sh_size / symtab_shdr.sh_entsize;
+    std::vector<Elf64_Sym> syms(num_syms);
+    elf_file.seekg(static_cast<std::streamoff>(symtab_shdr.sh_offset + fatbin_offset_),
+                   std::ios::beg);
+    elf_file.read(reinterpret_cast<char *>(syms.data()),
+                  static_cast<std::streamsize>(symtab_shdr.sh_size));
+    if (!elf_file)
+      break;
+
+    for (const auto &sym : syms) {
+      if (sym.st_name >= sym_strtab.size())
+        continue;
+      std::string sym_name(&sym_strtab[sym.st_name],
+                           strnlen(&sym_strtab[sym.st_name], sym_strtab.size() - sym.st_name));
+      // AMDHSA kernel descriptors have a ".kd" suffix symbol.
+      if (sym_name.size() > 3 && sym_name.substr(sym_name.size() - 3) == ".kd") {
+        std::string kernel_name = sym_name.substr(0, sym_name.size() - 3);
+        kd_offsets_[kernel_name] = sym.st_value;
+      }
+    }
+  }
+}
+
+uint64_t AmdGpuCodeObject::kernel_descriptor_offset(const std::string &kernel_name) const {
+  auto it = kd_offsets_.find(kernel_name);
+  return it != kd_offsets_.end() ? it->second : 0;
 }
 
 } // namespace rocjitsu

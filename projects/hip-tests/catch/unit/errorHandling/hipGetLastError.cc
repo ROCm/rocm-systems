@@ -84,7 +84,7 @@ HIP_TEST_CASE(Unit_hipGetLastError_Positive_Threaded) {
 HIP_TEST_CASE(Unit_hipGetLastError_with_hipMemcpyPeerAsync) {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
 
@@ -180,8 +180,6 @@ HIP_TEST_CASE(Unit_hipGetLastError_with_hipMemcpyDtoHAsync) {
  *  - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Unit_hipGetLastError_with_hipMemcpyParam2DAsync) {
-  CHECK_IMAGE_SUPPORT
-
   float *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr}, *A_d{nullptr};
   size_t pitch_A;
   size_t width{WIDTH * sizeof(float)};
@@ -439,8 +437,6 @@ HIP_TEST_CASE(Unit_hipGetLastError_with_hipMemPrefetchAsync) {
  */
 
 HIP_TEST_CASE(Unit_hipGetLastError_with_hipMemcpy2DAsync) {
-  CHECK_IMAGE_SUPPORT
-
   int *A_h{nullptr}, *A_d{nullptr};
   size_t pitch_A;
   size_t width{WIDTH * sizeof(int)};

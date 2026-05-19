@@ -6,6 +6,8 @@
 
 // Simple test for Fine Grained CPU-GPU coherency.
 
+#include <string>
+
 #include <hip_test_kernels.hh>
 #include <hip_test_common.hh>
 
@@ -111,14 +113,14 @@ static bool cpu_to_gpu_coherency() {
 
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < 1) {
-    HipTest::HIP_SKIP_TEST("Skipping because devices < 1");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
     return true;
   }
 
   SECTION("With device fine grained buffer") {
     HIP_CHECK(hipDeviceGetAttribute(&deviceFineGrain, hipDeviceAttributeFineGrainSupport, 0));
     if (deviceFineGrain == 0) {
-      HipTest::HIP_SKIP_TEST("The test skipped due to deviceFineGrain = 0");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
       return true;
     }
     fprintf(stderr, "info: allocate device mem (%zu bytes) on device 0\n", Nbytes);

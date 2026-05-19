@@ -27,6 +27,7 @@ enum class Mtype : uint8_t {
   CC = 1, ///< Coherently Cacheable - MOESI coherence, visible to all agents.
   RW = 2, ///< Read-Write - cached in L1/L2, not coherent with CPU, write-back.
   WB = 3, ///< Write-Back - same behavior as RW.
+  NT = 4, ///< Non-temporal - bypass L1, L2 only, evict soon.
 };
 
 } // namespace amdgpu

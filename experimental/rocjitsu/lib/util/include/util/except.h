@@ -6,12 +6,14 @@
 
 #include <exception>
 #include <string>
+#include <string_view>
 
 namespace util {
 
 class Exception : public std::exception {
 public:
   Exception(const std::string &msg) : msg_(msg) {}
+  Exception(std::string_view msg) : msg_(msg) {}
 
   const char *what() const noexcept override { return msg_.c_str(); }
 
@@ -27,8 +29,14 @@ public:
 
 class UnimplementedInst : public Exception {
 public:
-  explicit UnimplementedInst(const std::string &mnemonic)
-      : Exception("Unimplemented instruction: " + mnemonic) {}
+  explicit UnimplementedInst(std::string_view mnemonic)
+      : Exception(std::string("Unimplemented instruction: ").append(mnemonic)) {}
+};
+
+class ConfigError : public Exception {
+public:
+  explicit ConfigError(std::string_view msg)
+      : Exception(std::string("Config error: ").append(msg)) {}
 };
 
 } // namespace util

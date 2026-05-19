@@ -105,16 +105,14 @@ if(HIP_FOUND AND Threads_FOUND AND FFMPEG_FOUND)
 
   # install rocdecode-host libs -- {ROCM_PATH}/lib
   set_target_properties(${PROJECT_NAME} PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION ${PROJECT_VERSION_MAJOR})
-  install(TARGETS ${PROJECT_NAME} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT host NAMELINK_SKIP)
-  install(TARGETS ${PROJECT_NAME} EXPORT ${PROJECT_NAME}-targets LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT host NAMELINK_ONLY)
-  install(TARGETS ${PROJECT_NAME} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT host)
+  install(TARGETS ${PROJECT_NAME} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} NAMELINK_SKIP)
+  install(TARGETS ${PROJECT_NAME} EXPORT ${PROJECT_NAME}-targets LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} NAMELINK_ONLY)
   # install rocdecode include files -- {ROCM_PATH}/include/rocdecode
   install(FILES ${PROJECT_SOURCE_DIR}/../../api/rocdecode/rocdecode_host.h 
-      DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rocdecode COMPONENT host)
+      DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rocdecode)
   install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}_version.h
-          DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rocdecode COMPONENT host)
-  # TBD: NOTE the host utils are temp delivered with dev package, need to update downstream apps to move to host package
-  install(DIRECTORY ${PROJECT_SOURCE_DIR}/../../utils/ffmpegvideodecode DESTINATION ${CMAKE_INSTALL_DATADIR}/rocdecode/utils COMPONENT dev)
+          DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rocdecode)
+  install(DIRECTORY ${PROJECT_SOURCE_DIR}/../../utils/ffmpegvideodecode DESTINATION ${CMAKE_INSTALL_DATADIR}/rocdecode/utils)
   
   # Cmake module config file configurations
   set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake_modules/" CACHE INTERNAL "Default module path.")
@@ -151,26 +149,24 @@ if(HIP_FOUND AND Threads_FOUND AND FFMPEG_FOUND)
     "${PROJECT_BINARY_DIR}/${PROJECT_NAME}-config.cmake"
     "${PROJECT_BINARY_DIR}/${PROJECT_NAME}-config-version.cmake"
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}"
-    COMPONENT host
   )
 
   # Install the export set for use with the install-tree
   install(EXPORT ${PROJECT_NAME}-targets 
     FILE ${PROJECT_NAME}-targets.cmake
     NAMESPACE rocdecode::
-    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}" 
-    COMPONENT host
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}"
   )
 
 else()
-  message("-- ERROR!: ${PROJECT_NAME} excluded! please install all the dependencies and try again!")
+  message("-- ERROR!: ${PROJECT_NAME} excluded! unmet dependencies")
   if (NOT HIP_FOUND)
-      message(FATAL_ERROR "-- ERROR!: HIP Not Found! - please install ROCm and HIP!")
+      message(FATAL_ERROR "-- ERROR!: HIP Not Found!")
   endif()
   if (NOT Threads_FOUND)
-      message(FATAL_ERROR "-- ERROR!: Threads Not Found! - please install Threads!")
+      message(FATAL_ERROR "-- ERROR!: Threads Not Found!")
   endif()
   if (NOT FFMPEG_FOUND)
-      message(FATAL_ERROR "-- ERROR!: FFMPEG Not Found! - please install FFMPEG!")
+      message(FATAL_ERROR "-- ERROR!: FFMPEG Not Found!")
   endif()
 endif()

@@ -90,6 +90,10 @@ bool Link::is_cross_partition() const {
 
 void Link::send(std::unique_ptr<Message> msg) {
   if (exec_mode_ == ExecMode::FUNCTIONAL) {
+    // FUNCTIONAL mode: call the destination handler synchronously and return.
+    // This bypasses LBTS and cross-partition ordering — correct for single-
+    // partition functional simulation, but must not be used across partitions
+    // in future clocked-mode configurations where LBTS synchronization is needed.
     msg->set_latency(latency_);
     Event *port_event = dst_->recv_event();
     if (port_event->has_handler())

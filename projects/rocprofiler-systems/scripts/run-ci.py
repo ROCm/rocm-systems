@@ -79,9 +79,8 @@ def generate_custom(args, cmake_args, ctest_args):
         set(CTEST_UPDATE_VERSION_ONLY TRUE)
         set(CTEST_GIT_INIT_SUBMODULES TRUE)
 
-        set(CTEST_OUTPUT_ON_FAILURE TRUE)
         set(CTEST_USE_LAUNCHERS TRUE)
-        set(CMAKE_CTEST_ARGUMENTS --output-on-failure {CTEST_ARGS})
+        set(CMAKE_CTEST_ARGUMENTS {CTEST_ARGS})
 
         set(CTEST_CUSTOM_MAXIMUM_NUMBER_OF_ERRORS "100")
         set(CTEST_CUSTOM_MAXIMUM_NUMBER_OF_WARNINGS "100")
@@ -141,6 +140,46 @@ def generate_dashboard_script(args):
         safe_submit(PARTS Build)
 
         handle_error("Build" _build_ret)
+
+        set(_py_ver_flag "")
+        set(_py_dir_flag "")
+        set(_pytest_hints "")
+        file(STRINGS "{BINARY_DIR}/CMakeCache.txt" _cache_lines)
+        foreach(_line IN LISTS _cache_lines)
+            if(_line MATCHES "^ROCPROFSYS_PYTHON_VERSIONS:[A-Z]+=(.+)")
+                string(REPLACE ";" "\\\\;" _pv "${{CMAKE_MATCH_1}}")
+                set(_py_ver_flag "--python-versions=${{_pv}}")
+            elseif(_line MATCHES "^ROCPROFSYS_PYTHON_ROOT_DIRS:[A-Z]+=(.+)")
+                string(REPLACE ";" "\\\\;" _pd "${{CMAKE_MATCH_1}}")
+                set(_py_dir_flag "--python-root-dirs=${{_pd}}")
+                foreach(_root IN LISTS CMAKE_MATCH_1)
+                    list(APPEND _pytest_hints "${{_root}}/bin")
+                endforeach()
+            endif()
+        endforeach()
+
+        # Generate the config header before executing any tests
+        find_program(_pytest_exe NAMES pytest HINTS ${{_pytest_hints}} REQUIRED)
+        execute_process(
+            COMMAND ${{_pytest_exe}}
+                "{BINARY_DIR}/share/rocprofiler-systems/tests/pytest"
+                --show-config-only
+                -p no:cacheprovider
+                ${{_py_ver_flag}} ${{_py_dir_flag}}
+            WORKING_DIRECTORY "{BINARY_DIR}"
+            COMMAND_ERROR_IS_FATAL ANY
+        )
+
+        # Build ROCPROFSYS_PYTHON_HINTS from root dirs so CTestTestfile
+        # find_program calls can locate conda/venv pythons
+        set(ROCPROFSYS_PYTHON_HINTS "")
+        if(NOT "${{_py_dir_flag}}" STREQUAL "")
+            string(REGEX REPLACE "^--python-root-dirs=" "" _raw_roots "${{_py_dir_flag}}")
+            string(REPLACE "\\\\;" ";" _root_list "${{_raw_roots}}")
+            foreach(_root IN LISTS _root_list)
+                list(APPEND ROCPROFSYS_PYTHON_HINTS "${{_root}}/bin" "${{_root}}")
+            endforeach()
+        endif()
 
         ctest_test(BUILD "{BINARY_DIR}" RETURN_VALUE _test_ret)
         safe_submit(PARTS Test)
@@ -283,11 +322,29 @@ def run(*args, **kwargs):
     return subprocess.run(*args, **kwargs)
 
 
+def set_python_hints_from_cmake_args(cmake_args):
+    """Extract ROCPROFSYS_PYTHON_PREFIX and ROCPROFSYS_PYTHON_ENVS from cmake args
+    to build ROCPROFSYS_PYTHON_HINTS for CTest's find_program calls."""
+    prefix = None
+    envs = None
+    for arg in cmake_args:
+        if arg.startswith("-DROCPROFSYS_PYTHON_PREFIX="):
+            prefix = arg.split("=", 1)[1]
+        elif arg.startswith("-DROCPROFSYS_PYTHON_ENVS="):
+            envs = arg.split("=", 1)[1].split(";")
+    if prefix and envs:
+        hints = ";".join(f"{prefix}/{env}/bin" for env in envs)
+        os.environ["ROCPROFSYS_PYTHON_HINTS"] = hints
+        log(f"ROCPROFSYS_PYTHON_HINTS={hints}")
+
+
 if __name__ == "__main__":
     args, cmake_args, ctest_args = parse_args()
 
     if not os.path.exists(args.binary_dir):
         os.makedirs(args.binary_dir)
+
+    set_python_hints_from_cmake_args(cmake_args)
 
     from textwrap import dedent
 

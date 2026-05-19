@@ -35,7 +35,7 @@
 HIP_TEST_CASE(Unit_hipMemcpyPeer_Positive_Default) {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
 
@@ -102,7 +102,7 @@ HIP_TEST_CASE(Unit_hipMemcpyPeer_Positive_Synchronization_Behavior) {
 
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
 
@@ -148,7 +148,7 @@ HIP_TEST_CASE(Unit_hipMemcpyPeer_Positive_Synchronization_Behavior) {
 HIP_TEST_CASE(Unit_hipMemcpyPeer_Positive_ZeroSize) {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
 
@@ -231,7 +231,7 @@ HIP_TEST_CASE(Unit_hipMemcpyPeer_Positive_ZeroSize) {
 HIP_TEST_CASE(Unit_hipMemcpyPeer_Negative_Parameters) {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
 

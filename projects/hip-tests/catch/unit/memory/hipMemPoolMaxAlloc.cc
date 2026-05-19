@@ -36,7 +36,7 @@ hipError_t Test() {
   HIP_CHECK_LT(hipMemGetInfo(&free, &total));
   if (free < 30_GB) {
     std::cout << "Free memory is too low: " << free / 1_MB << " MiB" << std::endl;
-    HipTest::HIP_SKIP_TEST("HIP test requires >30 GiB of free memory!");
+    HipTest::HIP_SKIP_TEST("test requires more than 30 GiB of free memory.");
     return hipSuccess;
   }
 

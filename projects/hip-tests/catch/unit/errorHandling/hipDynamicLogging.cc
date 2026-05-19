@@ -83,7 +83,7 @@ HIP_TEST_CASE(Unit_hipDynamicLogging_Positive_Basic) {
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
   if (numDevices <= 0) {
-    HipTest::HIP_SKIP_TEST("Skipping hipDynamicLogging test - no devices available");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
     return;
   }
 
@@ -107,7 +107,7 @@ HIP_TEST_CASE(Unit_hipDynamicLogging_Positive_MultipleEnableDisable) {
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
   if (numDevices <= 0) {
-    HipTest::HIP_SKIP_TEST("Skipping hipDynamicLogging test - no devices available");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
     return;
   }
 

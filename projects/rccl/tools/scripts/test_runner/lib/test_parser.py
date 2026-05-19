@@ -100,7 +100,7 @@ Examples:
         self.parser.add_argument(
             '--skip-mpi-check',
             action='store_true',
-            help="Skip MPI installation check during environment validation"
+            help="Skip MPI: removes --enable-mpi-tests from build flags, skips MPI installation check, and skips tests with num_ranks > 1"
         )
         self.parser.add_argument(
             '--stop-on-rerun-failure',

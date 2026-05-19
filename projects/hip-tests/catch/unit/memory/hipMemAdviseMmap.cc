@@ -63,8 +63,6 @@ HIP_TEST_CASE(Unit_hipMemAdvise_MmapMem) {
     close(fd);
 #endif
   } else {
-    SUCCEED(
-        "GPU 0 doesn't support hipDeviceAttributePageableMemoryAccess "
-        "attribute. Hence skipping the testing with Pass result.\n");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPageableMemoryAccessUnsupported);
   }
 }

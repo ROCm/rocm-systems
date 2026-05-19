@@ -93,7 +93,7 @@ HIP_TEST_CASE(Unit_hipMemcpyHtoAAsync_Negative) {
  */
 HIP_TEST_CASE(Unit_hipMemcpyHtoAAsync_BasicTstsWithDiffStreams) {
 #if HT_NVIDIA
-  HipTest::HIP_SKIP_TEST("API currently unsupported on nvidia, skipping...");
+  HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kApiUnsupportedOnNvidia);
   return;
 #else
   CHECK_IMAGE_SUPPORT
@@ -155,7 +155,7 @@ HIP_TEST_CASE(Unit_hipMemcpyHtoAAsync_BasicTstsWithDiffStreams) {
  */
 HIP_TEST_CASE(Unit_hipMemcpyHtoAAsync_MultiDevice) {
 #if HT_NVIDIA
-  HipTest::HIP_SKIP_TEST("API currently unsupported on nvidia, skipping...");
+  HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kApiUnsupportedOnNvidia);
   return;
 #else
   CHECK_IMAGE_SUPPORT

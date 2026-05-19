@@ -11,7 +11,7 @@ This directory contains two OpenSHMEM examples. `shmem_hello` demonstrates basic
 
 ## Prerequisites
 
-- CMake 3.21+
+- CMake 3.25+
 - OpenSHMEM implementation with `oshcc` compiler wrapper
 
 ## Building

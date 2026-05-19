@@ -356,7 +356,7 @@ HIP_TEST_CASE(Unit_hipMallocMipmappedArray_Negative_NumericLimit) {
 HIP_TEMPLATE_TEST_CASE(Unit_hipMallocMipmappedArray_Negative_Non2DTextureGather, char, uchar2,
                    float2) {
 #if HT_AMD
-  HipTest::HIP_SKIP_TEST("Texture Gather arrays not supported using AMD backend");
+  HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureGatherUnsupportedAmd);
   return;
 #endif
   hipMipmappedArray_t array;

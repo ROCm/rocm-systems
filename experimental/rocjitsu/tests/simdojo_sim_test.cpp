@@ -229,10 +229,12 @@ TEST(PacingControllerTest, StateTransitions) {
   EXPECT_EQ(pc.state(), PacingController::State::TRACKING);
 
   // TRACKING → STABLE after stable_count low-offset calls.
-  // Pass sim_time slightly ahead of target to guarantee a small positive offset
-  // (wall clock advances between sim_tick_now() and the internal re-read in throttle).
+  // Pass sim_time well ahead of target to guarantee a positive offset even
+  // under sanitizer slowdown (TSan can add milliseconds between the caller's
+  // sim_tick_now() and the internal re-read in throttle).
   for (uint32_t i = 0; i < 8; ++i)
-    pc.throttle(pc.sim_tick_now() + 1'000'000); // +1us ensures positive offset.
+    pc.throttle(pc.sim_tick_now() +
+                100'000'000'000ULL); // +100ms wall-equivalent ensures positive offset under TSan.
   EXPECT_EQ(pc.state(), PacingController::State::STABLE);
 }
 
@@ -351,13 +353,13 @@ TEST(SpinlockTest, BasicLockUnlock) {
 TEST(SpinlockTest, ConcurrentIncrement) {
   util::Spinlock lock;
   uint64_t counter = 0;
-  constexpr int kThreads = 8;
-  constexpr int kIters = 100000;
+  constexpr int THREADS = 8;
+  constexpr int ITERS = 100000;
 
   std::vector<std::thread> threads;
-  for (int i = 0; i < kThreads; ++i) {
+  for (int i = 0; i < THREADS; ++i) {
     threads.emplace_back([&]() {
-      for (int j = 0; j < kIters; ++j) {
+      for (int j = 0; j < ITERS; ++j) {
         std::lock_guard<util::Spinlock> guard(lock);
         ++counter;
       }
@@ -366,23 +368,23 @@ TEST(SpinlockTest, ConcurrentIncrement) {
   for (auto &t : threads)
     t.join();
 
-  EXPECT_EQ(counter, static_cast<uint64_t>(kThreads) * kIters);
+  EXPECT_EQ(counter, static_cast<uint64_t>(THREADS) * ITERS);
 }
 
 TEST(SpinlockTest, CrossPartitionQueueHighContention) {
   CrossPartitionQueue queue;
-  constexpr int kWriters = 8;
-  constexpr int kPerWriter = 10000;
+  constexpr int WRITERS = 8;
+  constexpr int PER_WRITER = 10000;
   std::atomic<uint64_t> drained_total{0};
 
   // Each writer pushes entries with unique sequence numbers.
   std::vector<std::thread> writers;
-  for (int w = 0; w < kWriters; ++w) {
+  for (int w = 0; w < WRITERS; ++w) {
     writers.emplace_back([&, w]() {
-      for (int i = 0; i < kPerWriter; ++i) {
+      for (int i = 0; i < PER_WRITER; ++i) {
         Event dummy_event{nullptr, EventType::TIMER_CALLBACK};
         queue.push(
-            EventQueueEntry{static_cast<Tick>(w * kPerWriter + i), 0, &dummy_event, nullptr});
+            EventQueueEntry{static_cast<Tick>(w * PER_WRITER + i), 0, &dummy_event, nullptr});
       }
     });
   }
@@ -404,7 +406,7 @@ TEST(SpinlockTest, CrossPartitionQueueHighContention) {
   writers_done.store(true, std::memory_order_relaxed);
   reader.join();
 
-  EXPECT_EQ(drained_total.load(), static_cast<uint64_t>(kWriters) * kPerWriter);
+  EXPECT_EQ(drained_total.load(), static_cast<uint64_t>(WRITERS) * PER_WRITER);
 }
 
 TEST(SpinlockTest, CrossPartitionQueueEmptyDrain) {
@@ -635,15 +637,15 @@ TEST(AsyncCausalityTest, ScheduleEventNowProducesReasonableTimestamp) {
 // ============================================================================
 
 TEST(StressTest, FourPartitionRingStress) {
-  constexpr uint32_t kLaps = 10;
+  constexpr uint32_t LAPS = 10;
   SimulationEngine engine({.max_ticks = 10000, .num_threads = 4});
   auto root = std::make_unique<CompositeComponent>("root");
 
   // Create 4 ping-pong components in a ring (non-primary, rely on max_ticks).
-  auto *a = root->add_child(std::make_unique<PingPongComponent>("r0", kLaps, true, false));
-  auto *b = root->add_child(std::make_unique<PingPongComponent>("r1", kLaps, false, false));
-  auto *c = root->add_child(std::make_unique<PingPongComponent>("r2", kLaps, false, false));
-  auto *d = root->add_child(std::make_unique<PingPongComponent>("r3", kLaps, false, false));
+  auto *a = root->add_child(std::make_unique<PingPongComponent>("r0", LAPS, true, false));
+  auto *b = root->add_child(std::make_unique<PingPongComponent>("r1", LAPS, false, false));
+  auto *c = root->add_child(std::make_unique<PingPongComponent>("r2", LAPS, false, false));
+  auto *d = root->add_child(std::make_unique<PingPongComponent>("r3", LAPS, false, false));
   auto *pa = static_cast<PingPongComponent *>(a);
   auto *pb = static_cast<PingPongComponent *>(b);
   auto *pc = static_cast<PingPongComponent *>(c);
@@ -659,20 +661,20 @@ TEST(StressTest, FourPartitionRingStress) {
   auto exit = engine.run();
   EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
   // The initiator (r0) may stop replying on its last receive, causing
-  // downstream components to get one fewer message. Verify >=kLaps-1.
-  EXPECT_GE(pa->recv_count, kLaps - 1);
-  EXPECT_GE(pb->recv_count, kLaps - 1);
-  EXPECT_GE(pc->recv_count, kLaps - 1);
-  EXPECT_GE(pd->recv_count, kLaps - 1);
+  // downstream components to get one fewer message. Verify >=LAPS-1.
+  EXPECT_GE(pa->recv_count, LAPS - 1);
+  EXPECT_GE(pb->recv_count, LAPS - 1);
+  EXPECT_GE(pc->recv_count, LAPS - 1);
+  EXPECT_GE(pd->recv_count, LAPS - 1);
 }
 
 TEST(StressTest, LongRunningThousandsOfEvents) {
-  constexpr uint32_t kMessages = 10;
+  constexpr uint32_t MESSAGES = 10;
   SimulationEngine engine({.max_ticks = 1000, .num_threads = 2});
   auto root = std::make_unique<CompositeComponent>("root");
 
-  auto *a = root->add_child(std::make_unique<PingPongComponent>("pp0", kMessages, true, false));
-  auto *b = root->add_child(std::make_unique<PingPongComponent>("pp1", kMessages, false, false));
+  auto *a = root->add_child(std::make_unique<PingPongComponent>("pp0", MESSAGES, true, false));
+  auto *b = root->add_child(std::make_unique<PingPongComponent>("pp1", MESSAGES, false, false));
   auto *pa = static_cast<PingPongComponent *>(a);
   auto *pb = static_cast<PingPongComponent *>(b);
 

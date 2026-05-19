@@ -1,7 +1,11 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "common/env_vars.hpp"
 #include "common/path.hpp"
+#include "logger/debug.hpp"
+
+#include <spdlog/fmt/ranges.h>
 
 #include <algorithm>
 #include <cstdlib>
@@ -50,12 +54,22 @@ print_usage(const char* prog_name)
 void
 setup_tool_library_env()
 {
-    const auto* env_name = "ROCPROF_ATTACH_TOOL_LIBRARY";
+    const auto* attach_tool_library_env_name     = "ROCPROF_ATTACH_TOOL_LIBRARY";
+    const auto* rocp_tool_libraries_env_name     = "ROCP_TOOL_LIBRARIES";
+    const auto* output_use_current_time_env_name = "ROCPROFSYS_OUTPUT_USE_CURRENT_TIME";
+    const auto* reattach_add_session_id_env_name = "ROCPROFSYS_REATTACH_ADD_SESSION_ID";
 
-    const auto* existing = std::getenv(env_name);
+    // enable the use of the current time for the output path
+    setenv(output_use_current_time_env_name, "true", 1);
+
+    // enable the re-attach to add a session ID to the output path
+    setenv(reattach_add_session_id_env_name, "true", 1);
+
+    const auto* existing = std::getenv(attach_tool_library_env_name);
     if(existing != nullptr)
     {
-        std::cout << "[rocprof-sys-attach] Using tool library: " << existing << std::endl;
+        setenv(rocp_tool_libraries_env_name, existing, 0);
+        LOG_INFO("Using tool library: {}", existing);
         return;
     }
 
@@ -63,18 +77,28 @@ setup_tool_library_env()
         rocprofsys::common::path::get_internal_libpath("librocprof-sys-dl.so");
     if(!path.empty())
     {
-        setenv(env_name, path.c_str(), 0);
-        std::cout << "[rocprof-sys-attach] Using tool library: " << path << std::endl;
+        setenv(attach_tool_library_env_name, path.c_str(), 0);
+        setenv(rocp_tool_libraries_env_name, path.c_str(), 0);
+        LOG_INFO("Using tool library: {}", path);
     }
 }
 
 void
 setup_output_env(const std::string& output_path)
 {
-    if(output_path.empty()) return;
+    const auto* existing_output_path = getenv("ROCPROFSYS_OUTPUT_PATH");
+    if(output_path.empty() && existing_output_path != nullptr)
+    {
+        LOG_INFO("Output path: {}", existing_output_path);
+        return;
+    }
 
-    setenv("ROCPROFSYS_OUTPUT_PATH", output_path.c_str(), 1);
-    std::cout << "[rocprof-sys-attach] Output path: " << output_path << std::endl;
+    const auto* const pwd = getenv("PWD");
+    const auto        output =
+        output_path.empty() ? fmt::format("{}/rocprof-sys-output", pwd) : output_path;
+
+    setenv("ROCPROFSYS_OUTPUT_PATH", output.c_str(), 1);
+    LOG_INFO("Output path: {}", output);
 }
 
 void
@@ -86,20 +110,15 @@ setup_output_format_env(const std::vector<std::string>& formats)
         return std::find(formats.begin(), formats.end(), fmt) != formats.end();
     };
 
-    if(has_format("perfetto"))
+    // setenv("ROCPROFSYS_PROFILE", "false", 1);
+
+    if(has_format("perfetto") || has_format("rocpd"))
     {
-        setenv("ROCPROFSYS_TRACE", "true", 1);
+        setenv("ROCPROFSYS_TRACE", has_format("perfetto") ? "true" : "false", 1);
+        setenv("ROCPROFSYS_USE_ROCPD", has_format("rocpd") ? "true" : "false", 1);
     }
 
-    if(has_format("rocpd"))
-    {
-        setenv("ROCPROFSYS_USE_ROCPD", "true", 1);
-    }
-
-    std::cout << "[rocprof-sys-attach] Output format:";
-    for(const auto& fmt : formats)
-        std::cout << " " << fmt;
-    std::cout << std::endl;
+    LOG_INFO("Output format: {}", fmt::join(formats, " "));
 }
 
 bool
@@ -113,7 +132,7 @@ consume_arg(int& i, int argc, char* argv[], const char* opt_name)
 {
     if(i + 1 >= argc)
     {
-        std::cerr << "Error: " << opt_name << " requires an argument.\n";
+        LOG_ERROR("{} requires an argument.", opt_name);
         std::exit(EXIT_FAILURE);
     }
     return argv[++i];
@@ -127,12 +146,12 @@ parse_pid(attach_options& opts, const char* arg)
         opts.pid = std::stoi(arg);
         if(opts.pid <= 0)
         {
-            std::cerr << "Error: PID must be a positive integer.\n";
+            LOG_ERROR("PID must be a positive integer.");
             std::exit(EXIT_FAILURE);
         }
     } catch(const std::exception&)
     {
-        std::cerr << "Error: Invalid PID '" << arg << "'.\n";
+        LOG_ERROR("Invalid PID '{}'.", arg);
         std::exit(EXIT_FAILURE);
     }
 }
@@ -150,8 +169,7 @@ parse_formats(attach_options& opts, const char* arg)
         }
         else
         {
-            std::cerr << "Error: Invalid format '" << token
-                      << "'. Valid options: perfetto, rocpd\n";
+            LOG_ERROR("Invalid format '{}'. Valid options: perfetto, rocpd", token);
             std::exit(EXIT_FAILURE);
         }
     }
@@ -172,7 +190,7 @@ parse_args(int argc, char* argv[])
             std::exit(EXIT_SUCCESS);
         }
 
-        if(is_option(arg, "-p", "-p"))
+        if(is_option(arg, "-p", "--pid"))
         {
             parse_pid(opts, consume_arg(i, argc, argv, "-p"));
             continue;
@@ -190,18 +208,33 @@ parse_args(int argc, char* argv[])
             continue;
         }
 
-        std::cerr << "Error: Unknown option '" << arg << "'.\n";
+        LOG_ERROR("Unknown option '{}'.", arg);
         print_usage(argv[0]);
         std::exit(EXIT_FAILURE);
     }
 
     return opts;
 }
+
+void
+print_banner()
+{
+    std::cout << R"(
+  ____   ___   ____ __  __   ______   ______ _____ _____ __  __ ____       _  _____ _____  _    ____ _   _
+ |  _ \ / _ \ / ___|  \/  | / ___\ \ / / ___|_   _| ____|  \/  / ___|     / \|_   _|_   _|/ \  / ___| | | |
+ | |_) | | | | |   | |\/| | \___ \\ V /\___ \ | | |  _| | |\/| \___ \    / _ \ | |   | | / _ \| |   | |_| |
+ |  _ <| |_| | |___| |  | |  ___) || |  ___) || | | |___| |  | |___) |  / ___ \| |   | |/ ___ \ |___|  _  |
+ |_| \_\\___/ \____|_|  |_| |____/ |_| |____/ |_| |_____|_|  |_|____/  /_/   \_\_|   |_/_/   \_\____|_| |_|
+
+)" << "\n";
+}
+
 }  // namespace
 
 int
 main(int argc, char* argv[])
 {
+    print_banner();
     if(argc < 2)
     {
         print_usage(argv[0]);
@@ -212,7 +245,7 @@ main(int argc, char* argv[])
 
     if(opts.pid < 0)
     {
-        std::cerr << "Error: -p <pid> is required.\n\n";
+        LOG_ERROR("-p <pid> is required.");
         print_usage(argv[0]);
         return EXIT_FAILURE;
     }
@@ -223,52 +256,26 @@ main(int argc, char* argv[])
 
     const auto pid = opts.pid;
 
-    std::cout << "[rocprof-sys-attach] Trying to attach to process " << pid << std::endl;
+    LOG_INFO("Trying to attach to process {}", pid);
 
     auto result = rocattach_attach(pid);
     if(result != ROCATTACH_STATUS_SUCCESS)
     {
-        std::cerr << "[rocprof-sys-attach] Failed to attach to process " << pid
-                  << std::endl;
+        LOG_ERROR("Failed to attach to process {}", pid);
         return EXIT_FAILURE;
     }
 
-    std::cout << "[rocprof-sys-attach] Attached to process " << pid
-              << ". Press ENTER to detach." << std::endl;
+    LOG_INFO("Attached to process {}. Press ENTER to detach.", pid);
     std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 
     result = rocattach_detach(pid);
     if(result != ROCATTACH_STATUS_SUCCESS)
     {
-        std::cerr << "[rocprof-sys-attach] Failed to detach from process " << pid
-                  << std::endl;
+        LOG_ERROR("Failed to detach from process {}", pid);
         return EXIT_FAILURE;
     }
 
-    std::cout << "[rocprof-sys-attach] Detached from process " << pid << std::endl;
-
-    // Print output location info
-    if(!opts.profile_format.empty())
-    {
-        std::string output_dir =
-            opts.output_path.empty() ? "rocprof-sys-output/" : opts.output_path;
-        std::cout << "[rocprof-sys-attach] Output written to: " << output_dir
-                  << std::endl;
-
-        for(const auto& fmt : opts.profile_format)
-        {
-            if(fmt == "perfetto")
-            {
-                std::cout << "[rocprof-sys-attach]   - Perfetto trace: perfetto-trace-"
-                          << pid << ".proto" << std::endl;
-            }
-            else if(fmt == "rocpd")
-            {
-                std::cout << "[rocprof-sys-attach]   - RocPD database: rocpd-" << pid
-                          << ".db" << std::endl;
-            }
-        }
-    }
+    LOG_INFO("Detached from process {}", pid);
 
     return EXIT_SUCCESS;
 }

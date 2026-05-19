@@ -119,7 +119,10 @@ public:
     Tick max_ticks = 0;       ///< Simulation stops at this tick (0 = unlimited).
     uint32_t num_threads = 1; ///< Number of worker threads (one per partition).
     double wall_clock_ratio =
-        0.0; ///< Sim-time per wall-time ratio (0 = disabled, 1.0 = real-time).
+        0.0;                      ///< Sim-time per wall-time ratio (0 = disabled, 1.0 = real-time).
+    bool await_primaries = false; ///< If true, don't terminate on quiescence until at least one
+                                  ///< primary has registered. Used by the KFD driver to keep the
+                                  ///< engine alive while waiting for external stimuli (doorbells).
   };
 
   /// @brief Construct with config. Caller populates topology(), then calls build().

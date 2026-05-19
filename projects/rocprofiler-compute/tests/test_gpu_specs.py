@@ -148,7 +148,7 @@ def test_num_xcds_cli_output():
         )
     except Exception:
         proc = subprocess.run(
-            ["rocprof-compute", "-s"],
+            ["./rocprof-compute", "-s"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,

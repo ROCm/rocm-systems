@@ -99,7 +99,7 @@ HIP_TEST_CASE(Unit_Warp_Vote_Any_Positive_Basic) {
   HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
 
   if (!device_properties.arch.hasWarpVote) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support Warp Vote!");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kWarpVoteUnsupported);
     return;
   }
 

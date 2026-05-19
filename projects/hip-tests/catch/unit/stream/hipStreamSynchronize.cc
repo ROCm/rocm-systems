@@ -88,7 +88,7 @@ HIP_TEST_CASE(Unit_hipStreamSynchronize_NullStreamSynchronization) {
  */
 HIP_TEST_CASE(Unit_hipStreamSynchronize_SynchronizeStreamAndQueryNullStream) {
 #if HT_AMD
-  HipTest::HIP_SKIP_TEST("EXSWCPHIPT-22");
+  HipTest::HIP_SKIP_TEST("tracked issue EXSWCPHIPT-22.");
 #else
 
   hipStream_t stream1;

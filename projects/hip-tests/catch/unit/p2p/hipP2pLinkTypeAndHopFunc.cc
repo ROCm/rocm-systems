@@ -195,7 +195,13 @@ bool testhipLinkTypeHopcountDevice(int numDevices) {
   rsmi_status_t (*fntopo_init)(uint64_t);
   rsmi_status_t (*fntopo_shut_down)();
 
-  lib_rocm_smi_hdl = dlopen("/opt/rocm/lib/librocm_smi64.so", RTLD_LAZY);
+  // Use ROCM_SMI_LIB_DIR from CMake instead of hardcoding to /opt/rocm
+#ifdef ROCM_SMI_LIB_DIR
+  std::string rocm_smi_path = std::string(ROCM_SMI_LIB_DIR) + "/librocm_smi64.so";
+#else
+  std::string rocm_smi_path = "librocm_smi64.so";
+#endif
+  lib_rocm_smi_hdl = dlopen(rocm_smi_path.c_str(), RTLD_LAZY);
   REQUIRE(lib_rocm_smi_hdl);
 
   void* fnsym = dlsym(lib_rocm_smi_hdl, "rsmi_topo_get_link_type");
@@ -289,7 +295,7 @@ HIP_TEST_CASE(Unit_hipP2pLinkTypeAndHopFunc) {
   bool TestPassed = true;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
   SECTION("Test running for testhipInvalidDevice") {
@@ -299,7 +305,7 @@ HIP_TEST_CASE(Unit_hipP2pLinkTypeAndHopFunc) {
 #ifdef __linux__
   getDeviceCount(&numDevices);
   if (numDevices < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
+    WARN("Skipping Linux-only P2P sections: " << HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
   SECTION("Test running for testMaskedDevice") {
@@ -327,7 +333,7 @@ HIP_TEST_CASE(Unit_hipP2pLinkTypeAndHopFunc) {
     REQUIRE(TestPassed == true);
   }
 #else
-  printf("This test is skipped due to non linux environment.\n");
+  WARN("Skipping Linux-only P2P link scenarios: " << HipTest::SkipReason::kRequiresLinux);
 #endif
 }
 

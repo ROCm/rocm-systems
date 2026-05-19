@@ -1,6 +1,6 @@
-# ruff: noqa
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
+# ruff: noqa
 
 """
 ROCTX Injection Wrapper - Auto-discovers and intercepts ALL PyTorch operators

@@ -1004,7 +1004,10 @@ ncclResult_t ncclTopoFillGpu(struct ncclXml* xml, const char* busId, struct nccl
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   uint32_t devIndex = 0;
 #ifdef USE_AMDSMI
-  NCCLCHECK(amd_smi_init());
+  static int amdsmiInit = 0;
+  if (amdsmiInit == 0) {
+    NCCLCHECK(amd_smi_init());
+  }
   NCCLCHECK(amd_smi_getDeviceIndexByPciBusId(busId, &devIndex));
 #else
   static int rocmsmiInit = 0;

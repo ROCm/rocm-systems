@@ -138,9 +138,7 @@ HIP_TEST_CASE(Perf_hipPerfHostNumaAlloc_test) {
   CONSOLE_PRINT("Cpu count %d, Gpu count %d, page_size %d\n", cpuCount, gpuCount, page_size);
 
   if (cpuCount < 0 || gpuCount < 0) {
-    SUCCEED(
-        "Skipped testcase hipPerfHostNumaAlloc as "
-        "there is no device to test.\n");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
     return;
   }
 

@@ -29,12 +29,22 @@ typedef enum rj_code_arch_e {
   ROCJITSU_CODE_ARCH_CDNA3 = 2,
   /// @brief Compute Data Network Architecture 4 (CDNA4).
   ROCJITSU_CODE_ARCH_CDNA4 = 3,
+  /// @brief Radeon DNA Architecture 1 (RDNA1, GFX10.1).
+  ROCJITSU_CODE_ARCH_RDNA1 = 4,
+  /// @brief Radeon DNA Architecture 2 (RDNA2, GFX10.3).
+  ROCJITSU_CODE_ARCH_RDNA2 = 5,
+  /// @brief Radeon DNA Architecture 3 (RDNA3, GFX11).
+  ROCJITSU_CODE_ARCH_RDNA3 = 6,
+  /// @brief Radeon DNA Architecture 3.5 (RDNA3.5, GFX11.5).
+  ROCJITSU_CODE_ARCH_RDNA3_5 = 7,
+  /// @brief Radeon DNA Architecture 4 (RDNA4, GFX12).
+  ROCJITSU_CODE_ARCH_RDNA4 = 8,
   /// @brief RISC-V 32-bit integer base ISA.
-  ROCJITSU_CODE_ARCH_RV32I = 4,
+  ROCJITSU_CODE_ARCH_RV32I = 9,
   /// @brief RISC-V 64-bit integer base ISA.
-  ROCJITSU_CODE_ARCH_RV64I = 5,
+  ROCJITSU_CODE_ARCH_RV64I = 10,
   /// @brief Total number of supported architectures.
-  ROCJITSU_CODE_ARCH_NUM_ARCHS = 6,
+  ROCJITSU_CODE_ARCH_NUM_ARCHS = 11,
   /// @brief Sentinel value representing an invalid architecture.
   ROCJITSU_CODE_ARCH_INVALID = ROCJITSU_CODE_ARCH_NUM_ARCHS
 } rj_code_arch_t;
@@ -329,6 +339,25 @@ rj_code_basic_block_first_inst(const rj_code_basic_block_t *block);
 /// @param[in] inst Current instruction.
 /// @returns Pointer to the next instruction, or NULL if at the end of the block.
 RJ_API_EXPORT const rj_code_inst_t *rj_code_inst_next(const rj_code_inst_t *inst);
+
+/// @}
+
+/// @defgroup dbt Dynamic Binary Translation
+/// @{
+
+typedef struct rj_code_dbt_options_t {
+  rj_code_arch_t guest_arch;
+  rj_code_arch_t host_arch;
+} rj_code_dbt_options_t;
+
+/// @brief Translate a code object from guest_arch to host_arch.
+/// @param[in]  source     Source code object to translate.
+/// @param[in]  options    Translation options.
+/// @param[out] translated Newly created translated code object (refcount = 0; caller owns it).
+/// @returns ROCJITSU_STATUS_SUCCESS on success.
+[[nodiscard]] RJ_API_EXPORT rj_status_t rj_code_translate(const rj_code_object_t *source,
+                                                          const rj_code_dbt_options_t *options,
+                                                          rj_code_object_t **translated);
 
 /// @}
 

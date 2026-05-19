@@ -16,8 +16,8 @@
 #if defined(__HIP_PLATFORM_HCC__)
 // begin HCC
 
-#    include <roctracer_ext.h>
-#    include <roctx.h>
+#    include <roctracer/roctracer_ext.h>
+#    include <roctracer/roctx.h>
 
 #    define BEGIN_RANGE(name, group)                                                     \
         do                                                                               \

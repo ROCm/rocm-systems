@@ -42,7 +42,7 @@ HIP_TEST_CASE(Unit_hipModuleGetGlobal_Functional) {
     int managed_memory = 0;
     HIPCHECK(hipDeviceGetAttribute(&managed_memory, hipDeviceAttributeManagedMemory, i));
     if (!managed_memory) {
-      HipTest::HIP_SKIP_TEST("managed memory access not supported on device");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
       return;
     }
   }

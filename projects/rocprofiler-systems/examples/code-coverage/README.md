@@ -11,7 +11,7 @@ This example demonstrates code coverage analysis by providing two functionally i
 
 ## Prerequisites
 
-- CMake 3.21+
+- CMake 3.25+
 - C++ compiler with pthreads support
 
 ## Building

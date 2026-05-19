@@ -40,17 +40,20 @@ HIP_TEST_CASE(Unit_threadfence_system) {
   HIP_CHECK(hipGetDeviceCount(&num_gpus));
   REQUIRE(num_gpus > 0);
 
-  volatile int* data;
+  volatile int* data = nullptr;
   if (hipHostMalloc(&data, sizeof(int), hipHostMallocCoherent) != hipSuccess) {
-    SUCCEED("Memory allocation failed. Skip test. Is SVM atomic supported?");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCoherentHostAllocFailed);
+    return;
   }
 
   constexpr int init_data = 1000;
   *data = init_data;
 
-  volatile int* flag;
+  volatile int* flag = nullptr;
   if (hipHostMalloc(&flag, sizeof(int), hipHostMallocCoherent) != hipSuccess) {
-    SUCCEED("Memory allocation failed. Skip test. Is SVM atomic supported?");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCoherentHostAllocFailed);
+    HIP_CHECK(hipHostFree((void*)data));
+    return;
   }
   *flag = 0;
 

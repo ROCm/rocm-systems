@@ -1,18 +1,11 @@
 // Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/code/rj_code_internal.h"
 
-#include "rocjitsu/code/basic_block.h"
-#include "rocjitsu/code/executable.h"
-#include "rocjitsu/code/instruction_list.h"
 #include "rocjitsu/isa/decoder.h"
-#include "rocjitsu/isa/instruction.h"
-#include "rocjitsu/refcount.h"
 
 #include <cstring>
-#include <memory>
-#include <vector>
 
 using namespace rocjitsu;
 
@@ -37,27 +30,6 @@ Decoder *create_decoder_for_target(rj_code_target_id_t target) {
 }
 
 } // namespace
-
-struct rj_code_executable_t : RefCounted {
-  std::unique_ptr<Executable> exec;
-};
-
-struct rj_code_object_t : RefCounted {
-  AmdGpuCodeObject *co = nullptr;
-};
-
-struct rj_code_inst_list_t : RefCounted {
-  InstructionList list;
-  std::vector<std::unique_ptr<Instruction>> storage;
-};
-
-struct rj_code_basic_block_list_t : RefCounted {
-  std::vector<std::unique_ptr<BasicBlock>> blocks;
-};
-
-struct rj_code_basic_block_t : RefCounted {
-  BasicBlock *block = nullptr;
-};
 
 rj_status_t rj_code_executable_create(const char *path, rj_code_executable_t **exec) {
   if (!path || !exec)
@@ -149,7 +121,8 @@ rj_status_t rj_code_inst_list_create(rj_code_object_t *obj, rj_code_target_id_t 
     std::size_t inst_data_size = sec->size() / sizeof(uint32_t);
     uint64_t pc = 0;
     while (pc < inst_data_size) {
-      auto inst = decoder->decode(&inst_data[pc]);
+      auto *raw_inst = decoder->decode(&inst_data[pc]);
+      std::unique_ptr<Instruction> inst(raw_inst);
       owned->list.push_back(*inst);
       ++pc;
       if (inst->size() == 8)
@@ -273,7 +246,9 @@ uint32_t rj_code_basic_block_num_instructions(const rj_code_basic_block_t *block
 const char *rj_code_inst_mnemonic(const rj_code_inst_t *inst) {
   if (!inst)
     return nullptr;
-  return reinterpret_cast<const Instruction *>(inst)->mnemonic().c_str();
+  // Safe: mnemonic_ is always a string_view over a null-terminated string
+  // literal from the codegen (e.g., "s_add_u32"). The lifetime is static.
+  return reinterpret_cast<const Instruction *>(inst)->mnemonic().data();
 }
 
 uint32_t rj_code_inst_size(const rj_code_inst_t *inst) {

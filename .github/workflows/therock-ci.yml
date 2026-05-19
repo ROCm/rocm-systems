@@ -38,7 +38,7 @@ jobs:
     outputs:
       linux_projects: ${{ steps.linux_projects.outputs.projects }}
       windows_projects: ${{ steps.windows_projects.outputs.projects }}
-      run_linux_rccl_ci: ${{ steps.rccl_check.outputs.run_linux_rccl_ci }}
+      run_linux_rccl_ci: ${{ steps.linux_projects.outputs.run_linux_rccl_ci }}
     steps:
       - name: Checkout code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -86,39 +86,13 @@ jobs:
         run: |
           python .github/scripts/therock_configure_ci.py
 
-      - name: "Detect RCCL file changes"
-        id: rccl_check
-        shell: bash
-        run: |
-          # For workflow_dispatch, check if projects/rccl was explicitly selected
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            if echo "${{ inputs.projects }}" | grep -qw 'projects/rccl'; then
-              echo "run_linux_rccl_ci=true" >> "$GITHUB_OUTPUT"
-              echo "RCCL selected via workflow_dispatch"
-            else
-              echo "run_linux_rccl_ci=false" >> "$GITHUB_OUTPUT"
-              echo "RCCL not selected via workflow_dispatch"
-            fi
-          else
-            echo "Changed files:"
-            git diff --name-only HEAD^
-
-            if git diff --name-only HEAD^ | grep -q '^projects/rccl/'; then
-              echo "run_linux_rccl_ci=true" >> "$GITHUB_OUTPUT"
-              echo "RCCL changes detected"
-            else
-              echo "run_linux_rccl_ci=false" >> "$GITHUB_OUTPUT"
-              echo "No RCCL changes detected"
-            fi
-          fi
-
   therock-ci-linux:
     name: Linux (${{ matrix.projects.projects_to_test }})
     permissions:
       contents: read
       id-token: write
     needs: setup
-    if: ${{ needs.setup.outputs.linux_projects != '[]' && needs.setup.outputs.run_linux_rccl_ci != 'true' }}
+    if: ${{ needs.setup.outputs.linux_projects != '[]' }}
     strategy:
       fail-fast: false
       matrix:
@@ -146,10 +120,10 @@ jobs:
       amdgpu_families: ${{ matrix.amdgpu_family }}
       artifact_group: ${{ matrix.amdgpu_family }}
       cmake_options: >
-        -DTHEROCK_ENABLE_ALL=OFF 
-        -DTHEROCK_BUILD_TESTING=ON 
-        -DTHEROCK_BUNDLE_SYSDEPS=ON 
-        -DTHEROCK_ENABLE_COMM_LIBS=ON 
+        -DTHEROCK_ENABLE_ALL=OFF
+        -DTHEROCK_BUILD_TESTING=ON
+        -DTHEROCK_BUNDLE_SYSDEPS=ON
+        -DTHEROCK_ENABLE_COMM_LIBS=ON
         -DTHEROCK_ENABLE_ROCPROFV3=ON
         -DTHEROCK_ENABLE_MPI=ON
 
@@ -159,7 +133,7 @@ jobs:
       contents: read
       id-token: write
     needs: setup
-    if: ${{ needs.setup.outputs.windows_projects != '[]' && needs.setup.outputs.run_linux_rccl_ci != 'true' }}
+    if: ${{ needs.setup.outputs.windows_projects != '[]' }}
     strategy:
       fail-fast: false
       matrix:

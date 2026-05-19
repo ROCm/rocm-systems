@@ -184,6 +184,9 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
       break; // Single-threaded: safe to exit immediately.
 
     if (num_threads == 1) {
+      // Drain async events first (doorbells, external stimuli).
+      drain_async_events();
+
       // Single-threaded: drain all events in timestamp order.
       while (!ctx.event_queue.empty()) {
         auto entry = ctx.event_queue.pop();
@@ -222,8 +225,14 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
             std::this_thread::sleep_for(timeout);
           }
         } else {
-          // Unbounded idle wait: use atomic::wait for efficient blocking.
-          ctx.idle_wakeup_.wait(false, std::memory_order_acquire);
+          // Unbounded idle wait with periodic done_ check. Using a short
+          // sleep loop instead of atomic::wait avoids lost-notification races
+          // between request_exit() and the wait entry point.
+          using namespace std::chrono_literals;
+          while (!ctx.idle_wakeup_.load(std::memory_order_acquire) &&
+                 !done_.load(std::memory_order_acquire)) {
+            std::this_thread::sleep_for(1ms);
+          }
         }
       }
       if (done_.load(std::memory_order_acquire))
@@ -257,7 +266,7 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
       drain_async_for_partition(ctx);
 
       // Phase 2: Process all events with timestamp <= global LBTS.
-      Tick lbts = global_lbts_.load(std::memory_order_relaxed);
+      Tick lbts = global_lbts_.load(std::memory_order_acquire);
       while (!ctx.event_queue.empty() && ctx.event_queue.next_event_time() <= lbts) {
         auto entry = ctx.event_queue.pop();
         process_event(ctx, entry);
@@ -293,7 +302,7 @@ void SimulationEngine::barrier_completion() {
   }
 
   // Update global LBTS and current time.
-  global_lbts_.store(new_lbts, std::memory_order_relaxed);
+  global_lbts_.store(new_lbts, std::memory_order_release);
   if (new_lbts != TICK_MAX)
     current_time_.store(new_lbts, std::memory_order_release);
 
@@ -342,6 +351,12 @@ void SimulationEngine::register_as_primary() {
 void SimulationEngine::primary_release() {
   [[maybe_unused]] uint32_t prev = active_primaries_.fetch_sub(1, std::memory_order_release);
   assert(prev > 0 && "primary_release called without matching register_as_primary or retain");
+  // Wake idle engine so it can check termination (e.g., doorbell monitor releasing primary).
+  if (prev == 1 && config_.num_threads == 1 && !contexts_.empty()) {
+    auto &ctx = *contexts_[0];
+    ctx.idle_wakeup_.store(true, std::memory_order_release);
+    ctx.idle_wakeup_.notify_one();
+  }
 }
 
 void SimulationEngine::primary_retain() {
@@ -391,6 +406,11 @@ bool SimulationEngine::check_termination(Tick lbts) {
     // If primaries are still active, they are promising future work
     // (via async events). Don't terminate.
     if (active_primaries_.load(std::memory_order_acquire) > 0)
+      return false;
+    // If await_primaries is set (e.g., KFD driver mode), don't terminate on
+    // quiescence until at least one primary has registered. This keeps the
+    // engine alive while waiting for external stimuli (doorbells).
+    if (config_.await_primaries && !has_primaries_.load(std::memory_order_acquire))
       return false;
     set_exit(ExitReason::COMPLETED, current_time_.load(std::memory_order_acquire),
              "all partitions quiescent");
@@ -497,7 +517,7 @@ Tick SimulationEngine::compute_async_floor(const PartitionContext &ctx) const {
     return 0;
   // Floor at the global LBTS, clamped to at least the partition's current tick.
   Tick floor = ctx.event_queue.current_tick();
-  Tick lbts = global_lbts_.load(std::memory_order_relaxed);
+  Tick lbts = global_lbts_.load(std::memory_order_acquire);
   if (lbts != TICK_MAX)
     floor = std::max(floor, lbts);
   return floor;

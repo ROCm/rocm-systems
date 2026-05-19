@@ -34,10 +34,7 @@ if [ -z "$files" ]; then
   exit 0
 fi
 
-count=0
-for f in $files; do
-  clang-format -i -style=file:"$PROJECT_ROOT/.clang-format" "$f"
-  count=$((count + 1))
-done
+count=$(echo "$files" | wc -l)
+clang-format -i -style=file:"$PROJECT_ROOT/.clang-format" $files
 
 echo "Formatted $count files in: $*"

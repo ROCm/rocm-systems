@@ -88,8 +88,9 @@ private:
       auto *data = reinterpret_cast<uint8_t *>(msg->payload());
       if (hdr.op == simdojo::MessageOp::READ)
         read(hdr.addr, data, hdr.size_bytes);
-      else if (hdr.op == simdojo::MessageOp::WRITE)
+      else if (hdr.op == simdojo::MessageOp::WRITE) {
         write(hdr.addr, data, hdr.size_bytes);
+      }
       hdr.op = simdojo::MessageOp::RESPONSE;
     });
   }

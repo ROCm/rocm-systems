@@ -105,7 +105,7 @@ HIP_TEST_CASE(Unit_hipDeviceTotalMem_ValidateTotalMem) {
 HIP_TEST_CASE(Unit_hipDeviceTotalMem_NonSelectedDevice) {
   auto deviceCount = HipTest::getDeviceCount();
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST("Multi Device Test, will not run on single gpu systems. Skipping.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
 

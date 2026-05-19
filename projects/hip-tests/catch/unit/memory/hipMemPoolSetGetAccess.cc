@@ -88,7 +88,7 @@ int CheckP2PMemPoolSupport(int src_device, int dst_device) {
 HIP_TEST_CASE(Unit_hipMemPoolSetGetAccess_Positive_MultipleGPU) {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
   const auto src_device = GENERATE(range(0, HipTest::getDeviceCount()));
@@ -97,7 +97,7 @@ HIP_TEST_CASE(Unit_hipMemPoolSetGetAccess_Positive_MultipleGPU) {
 
   int mem_pool_support = CheckP2PMemPoolSupport(src_device, dst_device);
   if (!mem_pool_support) {
-    HipTest::HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
     return;
   }
 
@@ -121,7 +121,7 @@ void MemPoolSetGetAccess_P2P(const MemPools mempool_type) {
 
   int mem_pool_support = CheckP2PMemPoolSupport(src_device, dst_device);
   if (!mem_pool_support) {
-    HipTest::HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
     return;
   }
 
@@ -203,7 +203,7 @@ void MemPoolSetGetAccess_P2P(const MemPools mempool_type) {
 HIP_TEST_CASE(Unit_hipMemPoolSetGetAccess_Positive_P2P) {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
 

@@ -21,7 +21,7 @@ This directory contains NAS Parallel Benchmarks (NPB) implemented with OpenMP th
 
 ## Prerequisites
 
-- CMake 3.21+
+- CMake 3.25+
 - C++ compiler with OpenMP support (Clang with libomp or GCC)
 
 ## Building

@@ -51,7 +51,10 @@ public:
     for (size_t i = 0; i < free_blocks_.size(); ++i) {
       if (free_blocks_[i]) {
         free_blocks_[i] = false;
-        return static_cast<int32_t>(i * regs_per_block_);
+        uint32_t base = static_cast<uint32_t>(i * regs_per_block_);
+        for (uint32_t r = base; r < base + regs_per_block_; ++r)
+          data_[r] = RegType{};
+        return static_cast<int32_t>(base);
       }
     }
     return -1;
@@ -102,6 +105,16 @@ public:
   /// @brief Return the number of registers per allocation block.
   /// @returns Registers per block.
   uint32_t regs_per_block() const { return regs_per_block_; }
+
+  /// @brief Count the number of free allocation blocks.
+  /// @returns Number of blocks available for allocation.
+  uint32_t free_block_count() const {
+    uint32_t count = 0;
+    for (bool b : free_blocks_)
+      if (b)
+        ++count;
+    return count;
+  }
 
 private:
   std::vector<RegType> data_;     ///< One RegType per register.

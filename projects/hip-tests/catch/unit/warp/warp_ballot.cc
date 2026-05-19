@@ -98,7 +98,7 @@ HIP_TEST_CASE(Unit_Warp_Ballot_Positive_Basic) {
   HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
 
   if (!device_properties.arch.hasWarpBallot) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support Warp Ballot!");
+    HipTest::HIP_SKIP_TEST("warp ballot is not supported on this device.");
     return;
   }
 

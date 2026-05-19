@@ -10,7 +10,7 @@ This example measures the overhead of parallel synchronization by comparing two 
 
 ## Prerequisites
 
-- CMake 3.21+
+- CMake 3.25+
 - C++ compiler with pthreads support
 
 ## Building

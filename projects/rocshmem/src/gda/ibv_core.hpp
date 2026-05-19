@@ -491,6 +491,12 @@ struct ibv_qp {
 	uint32_t		events_completed;
 };
 
+struct ibv_ah {
+  struct ibv_context *context;
+  struct ibv_pd      *pd;
+  uint32_t            handle;
+};
+
 static inline struct ibv_cq *ibv_cq_ex_to_cq(struct ibv_cq_ex *cq)
 {
 	return (struct ibv_cq *)cq;

@@ -16,7 +16,7 @@ namespace detail {
 class CsrrwInst : public IType {
 public:
   explicit CsrrwInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -27,7 +27,7 @@ private:
 class CsrrsInst : public IType {
 public:
   explicit CsrrsInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -38,7 +38,7 @@ private:
 class CsrrcInst : public IType {
 public:
   explicit CsrrcInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -49,7 +49,7 @@ private:
 class CsrrwiInst : public IType {
 public:
   explicit CsrrwiInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -60,7 +60,7 @@ private:
 class CsrrsiInst : public IType {
 public:
   explicit CsrrsiInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -71,7 +71,7 @@ private:
 class CsrrciInst : public IType {
 public:
   explicit CsrrciInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;

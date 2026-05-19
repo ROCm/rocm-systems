@@ -11,7 +11,7 @@ This example demonstrates profiling across process boundaries by forking child p
 
 ## Prerequisites
 
-- CMake 3.21+
+- CMake 3.25+
 - C++ compiler with pthreads support
 - rocprofiler-systems user library
 - (Optional) HIP runtime for `hipMallocConcurrencyMproc`

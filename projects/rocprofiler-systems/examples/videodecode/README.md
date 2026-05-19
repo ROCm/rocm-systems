@@ -13,7 +13,7 @@ This example benchmarks video decoding performance using the AMD ROCDecode libra
 
 ## Prerequisites
 
-- CMake 3.21+
+- CMake 3.25+
 - HIP runtime
 - ROCDecode library
 - FFmpeg libraries (libavcodec, libavformat, libavutil)

@@ -1,5 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier:  MIT
+# SPDX-License-Identifier: MIT
 
 # ========================================================================================
 # DyninstExternals.cmake
@@ -59,11 +59,7 @@ if(TARGET rocprofiler-systems-tbb-build AND TARGET external-prebuild)
         rocprofiler-systems-tbb-build
         PROPERTIES JOB_POOL_COMPILE external_deps_pool JOB_POOL_LINK external_deps_pool
     )
-    if(TARGET rocprofiler-systems-tbb-install)
-        add_dependencies(external-prebuild rocprofiler-systems-tbb-install)
-    else()
-        add_dependencies(external-prebuild rocprofiler-systems-tbb-build)
-    endif()
+    add_dependencies(external-prebuild rocprofiler-systems-tbb-build)
 endif()
 
 include(DyninstElfUtils)

@@ -92,6 +92,9 @@ void SimulationPanel::render_wf_state(SoC *soc) {
             case amdgpu::WfState::BARRIER:
               state_str = "barrier";
               break;
+            case amdgpu::WfState::ENDING:
+              state_str = "ending";
+              break;
             }
             ImGui::Text("%s", state_str);
           }

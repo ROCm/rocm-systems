@@ -58,7 +58,7 @@ Julia language vector addition example demonstrating GPU profiling of Julia work
 
 ## Prerequisites
 
-- CMake 3.21+
+- CMake 3.25+
 - HIP runtime and `hipcc` compiler (for HIP examples)
 - rocBLAS (for matrix exponential)
 - Fortran compiler with OpenMP target support (for Fortran examples)

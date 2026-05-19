@@ -10,7 +10,7 @@ This example benchmarks SDMA (System DMA) engine performance by measuring bandwi
 
 ## Prerequisites
 
-- CMake 3.21+
+- CMake 3.25+
 - HIP runtime and `hipcc` compiler
 
 ## Building

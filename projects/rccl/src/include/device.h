@@ -97,7 +97,7 @@ struct ncclDevRedOpFull {
 };
 
 #ifdef __HIP_DEVICE_COMPILE__
-#include "device/rccl_ptr.h"
+#include "rccl_ptr.h"
 #endif
 
 union ncclLLFifoLine {
@@ -125,7 +125,7 @@ union ncclLLFifoLine {
   #define WARP_SIZE 32
   #endif
   #if defined (__gfx950__)
-  #define NCCL_MAX_NTHREADS 512
+  #define NCCL_MAX_NTHREADS 256
   #else
   #define NCCL_MAX_NTHREADS 256
   #endif
@@ -166,7 +166,21 @@ union ncclLLFifoLine {
 // Make sure the clean mask will last for at least NCCL_NSTEPS
 static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK value");
 
+ /* Note regarding LL128 macros settings in RCCL below:
+  * Device code: NCCL_LL128_LINESIZE is arch-dependent (128 for gfx1250, 64 otherwise).
+  * Host code: Must NOT use these macros for logic as they default to 64. Instead use
+  * rcclLL128LineElemsFromArch() / rcclLL128DataElemsFromArch() (archinfo.h) or
+  * comm->ll128LineElems / comm->ll128DataElems (and proxyState->* in the net proxy). */
+
+#if __HIP_DEVICE_COMPILE__
+#if defined (__gfx1250__)
+#define NCCL_LL128_LINESIZE 128
+#else
 #define NCCL_LL128_LINESIZE 64
+#endif
+#else
+#define NCCL_LL128_LINESIZE 64
+#endif
 #define NCCL_LL128_LINEELEMS (NCCL_LL128_LINESIZE/sizeof(uint64_t))
 #define NCCL_LL128_DATAELEMS (NCCL_LL128_LINEELEMS-1)
 

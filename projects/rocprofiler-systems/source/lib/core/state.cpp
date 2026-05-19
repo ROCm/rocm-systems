@@ -1,29 +1,11 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "state.hpp"
 #include "common/static_object.hpp"
 #include "config.hpp"
 #include "utility.hpp"
+#include <cstdint>
 
 #include "logger/debug.hpp"
 
@@ -50,7 +32,7 @@ get_thread_state_value()
 }
 
 auto&
-get_thread_state_history(int64_t _idx = utility::get_thread_index())
+get_thread_state_history(std::int64_t _idx = utility::get_thread_index())
 {
     static auto _v = utility::get_filled_array<ROCPROFSYS_MAX_THREADS>(
         []() { return utility::get_reserved_vector<ThreadState>(32); });
@@ -96,6 +78,18 @@ set_state(State _n)
     auto _v = get_state();
     get_state_value().store(_n, std::memory_order_relaxed);
     // std::swap(get_state_value(), _n);
+    return _v;
+}
+
+State
+reset_state()
+{
+    if(get_debug_init())
+    {
+        LOG_DEBUG("Resetting state :: {} -> PreInit", std::to_string(get_state()));
+    }
+    auto _v = get_state();
+    get_state_value().store(State::PreInit, std::memory_order_relaxed);
     return _v;
 }
 

@@ -68,10 +68,16 @@ watchpoint_t::watchpoint_t (amd_dbgapi_watchpoint_id_t watchpoint_id,
      ones, e.g.:
 
              47       39        Y       23       15        X     0
-     First:  01111111 11111110 11100111 00000100 00000000 01000100
+     First:  01111111 11111110 11100111 00000100 00000000 01000000
      Last:   01111111 11111110 11100111 00000100 00000000 01001000
 
-     Stable := ~(next_power_of_2 (Start ^ End) - 1)
+     Start ^ End:
+             00000000 00000000 00000000 00000000 00000000 00001000
+
+     Stable := ~(next_power_of_2 (Start ^ End + 1) - 1)
+
+     Note: the +1 is required when (Start ^ End) is already a power of
+     two.
 
              47       39        Y       23       15        X     0
      Stable: 11111111 11111111 11111111 11111111 11111111 11110000
@@ -89,11 +95,15 @@ watchpoint_t::watchpoint_t (amd_dbgapi_watchpoint_id_t watchpoint_id,
      aAddr:  01111111 11111110 11100111 00000100 00000000 01000000
    */
 
+  auto get_stable_bits = [] (uint64_t first, uint64_t last)
+  {
+    return ~(utils::next_power_of_two ((first ^ last) + 1) - 1);
+  };
+
   uint64_t first_address = requested_address;
   uint64_t last_address = first_address + requested_size - 1;
 
-  uint64_t stable_bits
-    = -utils::next_power_of_two ((first_address ^ last_address) + 1);
+  uint64_t stable_bits = get_stable_bits (first_address, last_address);
 
   /* programmable_mask_bits is the intersection of all the process' agents
      capabilities.  architecture_t::watchpoint_mask_bits returns a mask
@@ -118,13 +128,15 @@ watchpoint_t::watchpoint_t (amd_dbgapi_watchpoint_id_t watchpoint_id,
          boundary and compute the stable_bits again.  This time the stable_bits
          mask must be in the agent capabilities.  */
       last_address = ((first_address + ~field_A) & field_A) - 1;
-      stable_bits
-        = -utils::next_power_of_two ((first_address ^ last_address) + 1);
+      stable_bits = get_stable_bits (first_address, last_address);
       dbgapi_assert (stable_bits >= field_A);
     }
 
-  m_size = -(stable_bits & ~field_C);
-  m_address = requested_address & -m_size;
+  /* Mask out field_C.  */
+  uint64_t usable_bits = stable_bits & ~field_C;
+
+  m_size = utils::mask_to_alignment (usable_bits);
+  m_address = utils::align_down (requested_address, m_size);
 }
 
 void

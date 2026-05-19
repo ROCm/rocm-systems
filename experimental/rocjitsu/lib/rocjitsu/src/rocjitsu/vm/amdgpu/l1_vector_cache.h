@@ -73,6 +73,11 @@ public:
   /// writeback is needed. This simply invalidates the entire cache.
   void flush_all();
 
+  /// @brief Per-instance store counters for diagnostics.
+  uint64_t store_count() const { return store_count_; }
+  uint64_t store_active_count() const { return store_active_count_; }
+  uint64_t store_l2_writes() const { return store_l2_writes_; }
+
 private:
   /// @brief Read bytes from cache, handling L1 hit/miss based on mtype.
   void read_bytes(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype, bool non_temporal);
@@ -86,6 +91,9 @@ private:
 
   CacheStore cache_;
   L2Cache *l2_;
+  uint64_t store_count_ = 0;
+  uint64_t store_active_count_ = 0;
+  uint64_t store_l2_writes_ = 0;
 };
 
 } // namespace amdgpu

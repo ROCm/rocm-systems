@@ -136,9 +136,7 @@ HIP_TEST_CASE(Unit_hipTextureMipmapRef2D_Positive_Check) {
     }
   }
 #else
-  SUCCEED(
-      "Mipmaps are Supported only on windows on devices with image support,"
-      " skipping the test.");
+  HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMipmappedArraysUnsupported);
 #endif
 }
 
@@ -198,9 +196,7 @@ HIP_TEST_CASE(Unit_hipTextureMipmapRef2D_Negative_Parameters) {
 
   HIP_CHECK(hipFreeMipmappedArray(mip_array_ptr));
 #else
-  SUCCEED(
-      "Mipmaps are Supported only on windows on devices with image support,"
-      " skipping the test.");
+  HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMipmappedArraysUnsupported);
 #endif
 }
 #endif

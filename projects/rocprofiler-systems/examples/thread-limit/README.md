@@ -10,7 +10,7 @@ This example stress-tests the threading subsystem by creating a large number of 
 
 ## Prerequisites
 
-- CMake 3.21+
+- CMake 3.25+
 - C++ compiler with pthreads support
 
 ## Building

@@ -9,6 +9,58 @@ and data model do not encode schema knowledge in multiple places.
 """
 
 import xml.etree.ElementTree as elem_tree
+from typing import NamedTuple
+
+
+class SchemaVersion(NamedTuple):
+    """Parsed AMD ISA XML schema version triple (major.minor.patch).
+
+    Use ``SchemaVersion.parse('1.1.1')`` to construct from a version string.
+    All three known versions (1.0.0, 1.1.0, 1.1.1) are represented this way.
+    """
+
+    major: int
+    minor: int
+    patch: int
+
+    @classmethod
+    def parse(cls, s: str) -> 'SchemaVersion':
+        """Parse a dot-separated version string (e.g. '1.2.0') into a SchemaVersion."""
+        parts = s.strip().split('.')
+        if len(parts) != 3:
+            raise ValueError(
+                f"Expected 'major.minor.patch' version string, got {s!r}")
+        try:
+            return cls(int(parts[0]), int(parts[1]), int(parts[2]))
+        except ValueError as e:
+            raise ValueError(
+                f"Non-integer component in version string {s!r}") from e
+
+    def __str__(self) -> str:
+        return f'{self.major}.{self.minor}.{self.patch}'
+
+
+# Maps logical field names to the actual XML element name per schema version.
+# When an element name has a known typo in some versions, both the canonical
+# name and the typo are listed. ``get_node_with_fallback`` uses the primary
+# constant (COND_EXPR) as the first try and COND_EXPR_ALT as the fallback.
+#
+# All three known versions (1.0.0, 1.1.0, 1.1.1) use the typo'd names below;
+# the corrected names are included as comments for a future schema version.
+_VERSIONED_FIELDS: dict[str, dict[SchemaVersion, str]] = {
+    'COND_EXPR': {
+        SchemaVersion(1, 0, 0): 'CondtionExpression',   # typo: missing 'd'
+        SchemaVersion(1, 1, 0): 'CondtionExpression',
+        SchemaVersion(1, 1, 1): 'CondtionExpression',
+        # SchemaVersion(2, 0, 0): 'ConditionExpression',  # if/when fixed
+    },
+    'ENCODING_IDENTIFER': {
+        SchemaVersion(1, 0, 0): 'EncodingIdentifer',    # typo: missing 'i'
+        SchemaVersion(1, 1, 0): 'EncodingIdentifer',
+        SchemaVersion(1, 1, 1): 'EncodingIdentifer',
+        # SchemaVersion(2, 0, 0): 'EncodingIdentifier',  # if/when fixed
+    },
+}
 
 # Top-level structure.
 ARCH = 'Architecture'
@@ -138,14 +190,24 @@ def get_node_with_fallback(
     return node
 
 
-def get_node_text(node: elem_tree.Element | None) -> str:
+def get_node_text(node: elem_tree.Element | None, default: str | None = None) -> str:
     """Get the text content of an XML element.
 
+    When ``default`` is provided it is returned instead of raising for a None
+    node or a node with no text content. This handles CDNA4 schema version
+    1.1.1 XML bug where some ``<Value />`` elements are self-closing (empty)
+    to indicate an always-true literal (see ``_VERSIONED_FIELDS`` note).
+
     Raises:
-        SchemaValueError: If node is None or has no text content.
+        SchemaValueError: If node is None or has no text content and no
+            ``default`` was provided.
     """
     if node is None:
+        if default is not None:
+            return default
         raise SchemaValueError('expected XML element, got None')
     if node.text is None:
+        if default is not None:
+            return default
         raise SchemaValueError(f'expected text in <{node.tag}>, got None')
     return node.text

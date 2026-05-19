@@ -3,59 +3,69 @@
 
 """AMD machine-readable ISA specification parser and C++ code generator."""
 
-from amdisa.codegen import CodeGenerator, CppFile
+from amdisa.codegen import CodegenConfig, CodeGenerator, CppFile
 from amdisa.gpuisa import (
-    DecodeTableEntry,
-    InstBase,
     InstEncoding,
     Instruction,
     IsaSpec,
-    MicrocodeField,
     Operand,
-    OperandNamePattern,
-    OperandSelector,
 )
 from amdisa.isa_profile import (
+    Cdna1Profile,
+    Cdna2Profile,
     CdnaProfile,
     EncodingModifier,
     IsaProfile,
+    MemoryCoherencyModel,
     MnemonicRule,
     Rdna1Profile,
+    Rdna2Profile,
     Rdna3Profile,
+    Rdna3_5Profile,
     Rdna4Profile,
 )
 from amdisa.parser import Parser
-from amdisa.xml_schema import SchemaValueError
+from amdisa.xml_schema import SchemaValueError, SchemaVersion
 from amdisa.semantics import (
     InstructionSemantics,
     SemanticsSpec,
     derive_all_semantics,
     derive_semantics,
 )
+from amdisa.legalization import (
+    LegalizationAction,
+    LegalizationEntry,
+    LegalizationGenerator,
+)
 
 __all__ = [
+    'Cdna1Profile',
+    'Cdna2Profile',
     'CdnaProfile',
+    'CodegenConfig',
     'CodeGenerator',
     'CppFile',
-    'DecodeTableEntry',
     'EncodingModifier',
-    'InstBase',
     'InstEncoding',
     'Instruction',
     'IsaProfile',
+    'MemoryCoherencyModel',
     'MnemonicRule',
     'Rdna1Profile',
+    'Rdna2Profile',
     'Rdna3Profile',
+    'Rdna3_5Profile',
     'Rdna4Profile',
     'IsaSpec',
-    'MicrocodeField',
     'Operand',
-    'OperandNamePattern',
-    'OperandSelector',
     'Parser',
     'SchemaValueError',
+    'SchemaVersion',
     'InstructionSemantics',
     'SemanticsSpec',
     'derive_all_semantics',
     'derive_semantics',
+    'LegalizationAction',
+    'LegalizationEntry',
+    'LegalizationGenerator',
 ]

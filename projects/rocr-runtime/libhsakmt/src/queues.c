@@ -36,18 +36,21 @@
 #include <errno.h>
 #include <assert.h>
 
+static uint32_t get_hwreg_size_per_cu(uint32_t gfxv);
+
 /* 1024 doorbells, 4 or 8 bytes each doorbell depending on ASIC generation */
 #define DOORBELL_SIZE(gfxv)	(((gfxv) >= 0x90000) ? 8 : 4)
 #define DOORBELLS_PAGE_SIZE(ds)	(1024 * (ds))
 
-#define WG_CONTEXT_DATA_SIZE_PER_CU(gfxv, node) 		\
-	(hsakmt_get_vgpr_size_per_cu(gfxv) + SGPR_SIZE_PER_CU +	\
-	 (node.LDSSizeInKB << 10) + HWREG_SIZE_PER_CU)
+#define WG_CONTEXT_DATA_SIZE_PER_CU(gfxv, node)	\
+	(hsakmt_get_vgpr_size_per_cu(gfxv) +	\
+	 hsakmt_get_sgpr_size_per_cu(gfxv) +	\
+	 (node.LDSSizeInKB << 10) +		\
+	 get_hwreg_size_per_cu(gfxv))
 
 #define CNTL_STACK_BYTES_PER_WAVE(gfxv)	\
 	((gfxv) >= GFX_VERSION_NAVI10 ? 12 : 8)
 
-#define HWREG_SIZE_PER_CU	0x1000
 #define DEBUGGER_BYTES_ALIGN	64
 #define DEBUGGER_BYTES_PER_WAVE	32
 
@@ -107,23 +110,65 @@ struct hsa_kfd_queue_context *hsakmt_kfdcontext_get_queue_context(HsaKFDContext 
 	return ctx->queue_context;
 }
 
+static uint32_t get_hwreg_size_per_cu(uint32_t gfxv)
+{
+	uint32_t hwreg_size = 0;
+
+	if (gfxv < GFX_VERSION_GFX1250)
+		hwreg_size = 0x1000; /* 128 bytes per wave, 32 waves per CU */
+
+	assert(hwreg_size);
+
+	return hwreg_size;
+}
+
 uint32_t hsakmt_get_vgpr_size_per_cu(uint32_t gfxv)
 {
-	uint32_t vgpr_size = 0x40000;
+	uint32_t vgpr_size = 0;
 
-	if (gfxv == GFX_VERSION_GFX950 ||
-		(gfxv & ~(0xff)) == GFX_VERSION_AQUA_VANJARAM ||
-		 gfxv == GFX_VERSION_ALDEBARAN ||
-		 gfxv == GFX_VERSION_ARCTURUS)
+	if (gfxv < GFX_VERSION_ARCTURUS)
+		vgpr_size = 0x40000;
+	else if (gfxv <= GFX_VERSION_ALDEBARAN)
 		vgpr_size = 0x80000;
-
-	else if (gfxv == GFX_VERSION_PLUM_BONITO ||
-		 gfxv == GFX_VERSION_WHEAT_NAS ||
-		 gfxv == GFX_VERSION_GFX1200 ||
-		 gfxv == GFX_VERSION_GFX1201)
+	else if (gfxv <= GFX_VERSION_RENOIR)
+		vgpr_size = 0x40000;
+	else if (gfxv <= GFX_VERSION_GFX950)
+		vgpr_size = 0x80000;
+	else if (gfxv < GFX_VERSION_PLUM_BONITO)
+		vgpr_size = 0x40000;
+	else if (gfxv <= GFX_VERSION_GFX1201)
 		vgpr_size = 0x60000;
 
+	assert(vgpr_size);
+
 	return vgpr_size;
+}
+
+uint32_t hsakmt_get_sgpr_size_per_cu(uint32_t gfxv)
+{
+	uint32_t sgpr_size = 0;
+
+	if (gfxv < GFX_VERSION_GFX1250)
+		sgpr_size = 0x4000;
+
+	assert(sgpr_size);
+
+	return sgpr_size;
+}
+
+static uint32_t get_num_waves(HsaNodeProperties *node, uint32_t gfxv,
+			      uint32_t cu_num)
+{
+	uint32_t wave_num = 0;
+
+	if (gfxv < GFX_VERSION_NAVI10)
+		wave_num = MIN(cu_num * 40, node->NumShaderBanks / node->NumArrays * 512);
+	else if (gfxv < GFX_VERSION_GFX1250)
+		wave_num = cu_num * 32;
+
+	assert(wave_num);
+
+	return wave_num;
 }
 
 HSAKMT_STATUS hsakmt_init_process_doorbells(HsaKFDContext *ctx, unsigned int NumNodes)
@@ -327,9 +372,7 @@ static bool update_ctx_save_restore_size(HsaKFDContext *ctx, uint32_t nodeid, st
 	if (node.NumFComputeCores && node.NumSIMDPerCU) {
 		uint32_t ctl_stack_size, wg_data_size;
 		uint32_t cu_num = node.NumFComputeCores / node.NumSIMDPerCU / node.NumXcc;
-		uint32_t wave_num = (q->gfxv < GFX_VERSION_NAVI10)
-			? MIN(cu_num * 40, node.NumShaderBanks / node.NumArrays * 512)
-			: cu_num * 32;
+		uint32_t wave_num = get_num_waves(&node, q->gfxv, cu_num);
 
 		ctl_stack_size = wave_num * CNTL_STACK_BYTES_PER_WAVE(q->gfxv) + 8;
 		wg_data_size = cu_num * WG_CONTEXT_DATA_SIZE_PER_CU(q->gfxv, node);
@@ -640,34 +683,18 @@ static int handle_concrete_asic(HsaKFDContext *ctx,
  */
 static uint32_t priority_map[] = {0, 3, 5, 7, 9, 11, 15};
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueCtx(HsaKFDContext *ctx,
-						 HSAuint32 NodeId,
-						 HSA_QUEUE_TYPE Type,
-						 HSAuint32 QueuePercentage,
-						 HSA_QUEUE_PRIORITY Priority,
-						 void *QueueAddress,
-						 HSAuint64 QueueSizeInBytes,
-						 HsaEvent *Event,
-						 HsaQueueResource *QueueResource)
-{
-	if (Type == HSA_QUEUE_SDMA_BY_ENG_ID)
-		return HSAKMT_STATUS_ERROR;
-
-	return hsaKmtCreateQueueExtCtx(ctx, NodeId, Type, QueuePercentage, Priority, 0,
-				    QueueAddress, QueueSizeInBytes, Event,
-				    QueueResource);
-}
-
-HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueExtCtx(HsaKFDContext *ctx,
-						 HSAuint32 NodeId,
-					     HSA_QUEUE_TYPE Type,
-					     HSAuint32 QueuePercentage,
-					     HSA_QUEUE_PRIORITY Priority,
-					     HSAuint32 SdmaEngineId,
-					     void *QueueAddress,
-					     HSAuint64 QueueSizeInBytes,
-					     HsaEvent *Event,
-					     HsaQueueResource *QueueResource)
+HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueV2Ctx(
+							HsaKFDContext *ctx,
+							HSAuint32 NodeId,
+					        HSA_QUEUE_TYPE Type,
+					        HSAuint32 QueuePercentage,
+					        HSA_QUEUE_PRIORITY Priority,
+					        HSAuint32 SdmaEngineId,
+					        void *QueueAddress,
+					        HSAuint64 QueueSizeInBytes,
+					        HSAuint64 MetaDataQueueSizeInBytes,
+					        HsaEvent *Event,
+					        HsaQueueResource *QueueResource)
 {
 	HSAKMT_STATUS result;
 	uint32_t gpu_id;
@@ -680,6 +707,11 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueExtCtx(HsaKFDContext *ctx,
 	CHECK_KFD_OPEN();
 
 	struct hsa_kfd_queue_context *queue_ctx = hsakmt_kfdcontext_get_queue_context(ctx);
+	if (MetaDataQueueSizeInBytes) {
+		CHECK_KFD_MINOR_VERSION(19);
+		if (!IS_PAGE_ALIGNED(MetaDataQueueSizeInBytes))
+			return HSAKMT_STATUS_INVALID_PARAMETER;
+	}
 
 	if (Priority < HSA_QUEUE_PRIORITY_MINIMUM ||
 		Priority > HSA_QUEUE_PRIORITY_MAXIMUM)
@@ -761,6 +793,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueExtCtx(HsaKFDContext *ctx,
 	args.queue_percentage = QueuePercentage;
 	args.queue_priority = priority_map[Priority+3];
 	args.sdma_engine_id = SdmaEngineId;
+	args.metadata_ring_size = MetaDataQueueSizeInBytes;
 
 	err = hsakmt_ioctl(ctx->fd, AMDKFD_IOC_CREATE_QUEUE, &args);
 
@@ -801,6 +834,39 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueExtCtx(HsaKFDContext *ctx,
 						     doorbell_offset);
 
 	return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueCtx(HsaKFDContext *ctx,
+						 HSAuint32 NodeId,
+						 HSA_QUEUE_TYPE Type,
+						 HSAuint32 QueuePercentage,
+						 HSA_QUEUE_PRIORITY Priority,
+						 void *QueueAddress,
+						 HSAuint64 QueueSizeInBytes,
+						 HsaEvent *Event,
+						 HsaQueueResource *QueueResource)
+{
+	if (Type == HSA_QUEUE_SDMA_BY_ENG_ID)
+		return HSAKMT_STATUS_ERROR;
+
+	return hsaKmtCreateQueueV2Ctx(ctx, NodeId, Type, QueuePercentage, Priority, 0,
+				    QueueAddress, QueueSizeInBytes, 0, Event, QueueResource);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueExtCtx(HsaKFDContext *ctx,
+						 HSAuint32 NodeId,
+					     HSA_QUEUE_TYPE Type,
+					     HSAuint32 QueuePercentage,
+					     HSA_QUEUE_PRIORITY Priority,
+					     HSAuint32 SdmaEngineId,
+					     void *QueueAddress,
+					     HSAuint64 QueueSizeInBytes,
+					     HsaEvent *Event,
+					     HsaQueueResource *QueueResource)
+{
+	return hsaKmtCreateQueueV2Ctx(ctx, NodeId, Type, QueuePercentage, Priority,
+				      SdmaEngineId, QueueAddress, QueueSizeInBytes, 0,
+				      Event, QueueResource);
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtUpdateQueueCtx(HsaKFDContext *ctx,
@@ -1037,6 +1103,23 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueExt(HSAuint32 NodeId,
 	return hsaKmtCreateQueueExtCtx(&hsakmt_primary_kfd_ctx, NodeId, Type,
 					QueuePercentage, Priority, SdmaEngineId, QueueAddress,
 					QueueSizeInBytes, Event, QueueResource);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueV2(HSAuint32 NodeId,
+    					 HSA_QUEUE_TYPE Type,
+    					 HSAuint32 QueuePercentage,
+    					 HSA_QUEUE_PRIORITY Priority,
+    					 HSAuint32 SdmaEngineId,
+    					 void* QueueAddress,
+    					 HSAuint64 QueueSizeInBytes,
+    					 HSAuint64 MetaDataPrefetchSizeInBytes,
+    					 HsaEvent* Event,
+    					 HsaQueueResource* QueueResource)
+{
+	return hsaKmtCreateQueueV2Ctx(&hsakmt_primary_kfd_ctx, NodeId, Type,
+						 QueuePercentage, Priority, SdmaEngineId, QueueAddress,
+						 QueueSizeInBytes, MetaDataPrefetchSizeInBytes,
+						 Event, QueueResource);
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtUpdateQueue(HSA_QUEUEID QueueId,

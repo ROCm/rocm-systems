@@ -767,57 +767,27 @@ static void runDivFloatTest() {
 }
 
 /*
-This testcases perform the following scenario of atomic opearations on Uniform value
-for INT and UNSIGNED INT types
-  // 1. atomicAdd
-  // 2. atomicSub
-  // 3. atomicMax
-  // 4. atomicMin
-  // 5. atomicAnd
-  // 6. atomicOr
-  // 7. atomicXor
+This testcases perform the following scenario of atomic opearations on Uniform and Divergent values
+for INT, UNSIGNED INT, and FLOAT types:
+  Uniform and Divergent Integer (int, unsigned int):
+    // 1. atomicAdd
+    // 2. atomicSub
+    // 3. atomicMax
+    // 4. atomicMin
+    // 5. atomicAnd
+    // 6. atomicOr
+    // 7. atomicXor
+  Uniform and Divergent Float:
+    // 1. atomicAdd
+    // 2. atomicSub
+    // 3. atomicMax
+    // 4. atomicMin
 */
-HIP_TEST_CASE(Unit_AtomicsWithRandomActiveLanesInWavefront_UniformInteger) {
-  SECTION("test for int") { runIntTest<int>(); }
-  SECTION("test for unsigned int") { runIntTest<unsigned int>(); }
-}
-
-/*
-This testcases perform the following scenario of atomic opearations on Uniform value
-for FLOAT types
-  // 1. atomicAdd
-  // 2. atomicSub
-  // 3. atomicMax
-  // 4. atomicMin
-*/
-HIP_TEST_CASE(Unit_AtomicsWithRandomActiveLanesInWavefront_UniformFloat) {
-  SECTION("test for float") { runFloatTest(); }
-}
-
-/*
-This testcases perform the following scenario of atomic opearations on Divergent values
-for INT and UNSIGNED INT types
-  // 1. atomicAdd
-  // 2. atomicSub
-  // 3. atomicMax
-  // 4. atomicMin
-  // 5. atomicAnd
-  // 6. atomicOr
-  // 7. atomicXor
-*/
-HIP_TEST_CASE(Unit_AtomicsWithRandomActiveLanesInWavefront_DivergentInteger) {
-  SECTION("test for int") { runDivIntTest<int>(); }
-  SECTION("test for unsigned int") { runDivIntTest<unsigned int>(); }
-}
-
-/*
-This testcases perform the following scenario of atomic opearations on Divergent values
-for FLOAT types
-  // 1. atomicAdd
-  // 2. atomicSub
-  // 3. atomicMax
-  // 4. atomicMin
-*/
-HIP_TEST_CASE(Unit_AtomicsWithRandomActiveLanesInWavefront_DivergentFloat) {
-  SECTION("test for float") { runDivFloatTest(); }
+HIP_TEST_CASE(Unit_AtomicsWithRandomActiveLanesInWavefront) {
+  SECTION("Uniform Integer - int") { runIntTest<int>(); }
+  SECTION("Uniform Integer - unsigned int") { runIntTest<unsigned int>(); }
+  SECTION("Uniform Float") { runFloatTest(); }
+  SECTION("Divergent Integer - int") { runDivIntTest<int>(); }
+  SECTION("Divergent Integer - unsigned int") { runDivIntTest<unsigned int>(); }
+  SECTION("Divergent Float") { runDivFloatTest(); }
 }

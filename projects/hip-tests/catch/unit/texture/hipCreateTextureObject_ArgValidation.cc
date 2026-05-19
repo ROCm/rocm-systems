@@ -80,7 +80,7 @@ HIP_TEST_CASE(Unit_hipCreateTextureObject_ArgValidation) {
       // API expected to return failure. Test skipped
       // on nvidia as api returns success and would lead
       // to unexpected behavior with app.
-      WARN("Texture Desc(nullptr) skipped on nvidia");
+      WARN("Skipping section: " << HipTest::SkipReason::kApiUnsupportedOnNvidia);
     }
   }
 

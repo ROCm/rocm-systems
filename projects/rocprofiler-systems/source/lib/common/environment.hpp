@@ -1,9 +1,10 @@
 // Copyright (c) Advanced Micro Devices, Inc.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include "common/defines.h"
+#include <cstdint>
 
 #include "common/join.hpp"
 #include <algorithm>
@@ -357,7 +358,7 @@ discover_torch_libpath(const std::string& python_binary, bool verbose = false)
     return torch_libdir;
 }
 
-enum class update_mode : uint8_t
+enum class update_mode : std::uint8_t
 {
     REPLACE = 0,
     PREPEND,

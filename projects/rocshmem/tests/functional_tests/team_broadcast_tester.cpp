@@ -111,14 +111,8 @@ TeamBroadcastTester<T1>::TeamBroadcastTester(TesterArguments args)
   int total_elems = (max_msg_size / sizeof(T1)) * args.num_wgs ;
   int buff_size = total_elems * sizeof(T1);
 
-  source_buf = (T1 *)rocshmem_malloc(buff_size);
-  dest_buf = (T1 *)rocshmem_malloc(buff_size);
-
-  if (source_buf == nullptr || dest_buf == nullptr) {
-    std::cout << "Error allocating memory from symmetric heap" << std::endl;
-    std::cout << "source: " << source_buf << ", dest: " << dest_buf << std::endl;
-    rocshmem_global_exit(1);
-  }
+  source_buf = (T1 *)alloc_test_buffer(buff_size, args.local_buf_type);
+  dest_buf = (T1 *)alloc_test_buffer(buff_size);
 
   char* value{nullptr};
   if ((value = getenv("ROCSHMEM_MAX_NUM_TEAMS"))) {
@@ -131,8 +125,8 @@ TeamBroadcastTester<T1>::TeamBroadcastTester(TesterArguments args)
 
 template <typename T1>
 TeamBroadcastTester<T1>::~TeamBroadcastTester() {
-  rocshmem_free(source_buf);
-  rocshmem_free(dest_buf);
+  free_test_buffer(source_buf, args.local_buf_type);
+  free_test_buffer(dest_buf);
   CHECK_HIP(hipFree(team_bcast_world_dup));
 }
 

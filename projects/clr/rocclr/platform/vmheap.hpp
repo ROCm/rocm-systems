@@ -49,7 +49,7 @@ class HeapBlock : public amd::HeapObject {
 class VmHeap {
  public:
   friend VmHeapArray;
-  static const size_t kChunkSize = 32 * Mi;  //!< Chunk size, must be power of 2
+  static const size_t kChunkSize = 128 * Mi;  //!< Chunk size, must be power of 2
   static const size_t kMinBlockAlignment = 256;
   typedef std::function<amd::HostQueue&()> GetQueueFunc;
 

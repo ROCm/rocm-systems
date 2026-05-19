@@ -102,7 +102,7 @@ HIP_TEST_CASE(Unit_hipGraphLaunch_Functional_multidevice_test) {
       hipGraphLaunch_test();
     }
   } else {
-    SUCCEED("Skipped the testcase as there is no device to test.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
 }
 

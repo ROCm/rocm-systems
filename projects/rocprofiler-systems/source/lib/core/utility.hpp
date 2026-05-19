@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -46,8 +27,8 @@ namespace utility
 inline auto
 get_thread_index()
 {
-    static std::atomic<int64_t> _c{ 0 };
-    static thread_local int64_t _v = _c++;
+    static std::atomic<std::int64_t> _c{ 0 };
+    static thread_local std::int64_t _v = _c++;
     return _v;
 }
 
@@ -120,8 +101,9 @@ struct generate
 
             if constexpr(use_placement_new_when_generating_unique_ptr<value_type>::value)
             {
-                // create a thread-local buffer for placement-new
-                static thread_local auto _buffer = std::array<char, sizeof(value_type)>{};
+                // create a thread-local buffer for placement-new with proper alignment
+                alignas(value_type) static thread_local auto _buffer =
+                    std::array<char, sizeof(value_type)>{};
                 if constexpr(std::is_constructible<value_type, Args...>::value)
                 {
                     return type{ new(_buffer.data())
@@ -254,16 +236,24 @@ convert(std::string_view _inp)
     return _ret;
 }
 
-template <typename Tp = int64_t, typename ContainerT = std::set<Tp>, typename Up = Tp>
+template <typename Tp = std::int64_t, typename ContainerT = std::set<Tp>,
+          typename Up = Tp>
 ContainerT
 parse_numeric_range(std::string _input_string, const std::string& _label, Up _incr);
 
-extern template std::set<int64_t>
-parse_numeric_range<int64_t, std::set<int64_t>>(std::string, const std::string&, long);
-extern template std::vector<int64_t>
-parse_numeric_range<int64_t, std::vector<int64_t>>(std::string, const std::string&, long);
-extern template std::unordered_set<int64_t>
-parse_numeric_range<int64_t, std::unordered_set<int64_t>>(std::string, const std::string&,
+extern template std::set<std::int64_t>
+parse_numeric_range<std::int64_t, std::set<std::int64_t>>(std::string, const std::string&,
                                                           long);
+extern template std::vector<std::int64_t>
+parse_numeric_range<std::int64_t, std::vector<std::int64_t>>(std::string,
+                                                             const std::string&, long);
+extern template std::unordered_set<std::int64_t>
+parse_numeric_range<std::int64_t, std::unordered_set<std::int64_t>>(std::string,
+                                                                    const std::string&,
+                                                                    long);
+
+void
+trim_str(std::string& str);
+
 }  // namespace utility
 }  // namespace rocprofsys

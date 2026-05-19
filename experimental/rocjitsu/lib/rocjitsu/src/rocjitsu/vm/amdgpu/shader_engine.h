@@ -50,6 +50,12 @@ public:
 
   void add_compute_unit(ComputeUnitCore *cu) { cus_.push_back(cu); }
 
+  /// @brief Set the execution plugin group on all CUs (shared ownership).
+  void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
+    for (auto *cu : cus_)
+      cu->set_plugin_group(pg);
+  }
+
   /// @brief Return the number of compute units.
   /// @returns Number of CUs in this shader engine.
   uint32_t num_compute_units() const { return static_cast<uint32_t>(cus_.size()); }

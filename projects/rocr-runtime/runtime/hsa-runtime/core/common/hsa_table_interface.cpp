@@ -1373,6 +1373,16 @@ hsa_status_t HSA_API hsa_amd_counted_queue_release(hsa_queue_t* queue) {
   return amdExtTable->hsa_amd_counted_queue_release_fn(queue);
 }
 
+hsa_status_t HSA_API hsa_amd_svm_discard_batch_async(void** ptrs, size_t* sizes, uint32_t count, uint32_t num_dep_signals,
+                          const hsa_signal_t* dep_signals, hsa_signal_t completion_signal) {
+  return amdExtTable->hsa_amd_svm_discard_batch_async_fn(ptrs, sizes, count, num_dep_signals, dep_signals,
+                                                   completion_signal);
+}
+
+hsa_status_t HSA_API hsa_amd_signal_get_event_id(hsa_signal_t signal, uint32_t *event_id) {
+  return amdExtTable->hsa_amd_signal_get_event_id_fn(signal, event_id);
+}
+
 // Tools only table interfaces.
 namespace rocr {
 

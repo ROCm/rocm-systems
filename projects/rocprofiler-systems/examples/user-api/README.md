@@ -10,7 +10,7 @@ This example demonstrates the rocprofiler-systems user API for instrumenting app
 
 ## Prerequisites
 
-- CMake 3.21+
+- CMake 3.25+
 - C++17 compiler
 - rocprofiler-systems user library (`rocprofiler-systems::rocprofiler-systems-user-library`)
 
