@@ -1742,6 +1742,28 @@ def test_dispatch_2(binary_handler_profile_rocprof_compute):
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
+@pytest.mark.dispatch
+@pytest.mark.parametrize(
+    "bad_value",
+    ["0", "-1", "abc", "1:0", "5:3", "1:", ":3", "1:2:3"],
+)
+def test_dispatch_invalid_rejected(binary_handler_profile_rocprof_compute, bad_value):
+    workload_dir = common.get_output_dir(
+        param_id=f"dispatch_{bad_value}".replace(":", "_")
+    )
+    returncode, stdout, stderr = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        ["--dispatch", bad_value],
+        check_success=False,
+        capture_output=True,
+    )
+    assert returncode == 1
+    output = stdout + stderr
+    assert f"Invalid --dispatch value '{bad_value}'" in output
+    common.clean_output_dir(config["cleanup"], workload_dir)
+
+
 @pytest.mark.join
 def test_join_type_grid(binary_handler_profile_rocprof_compute):
     options = ["--join-type", "grid"]

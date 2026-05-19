@@ -1083,6 +1083,56 @@ def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
     )
 
 
+def test_run_prof_rocpd_skips_pid_without_native_csv(tmp_path, monkeypatch):
+    """run_prof skips per-pid rocpd update when its native counter CSV is missing."""
+    fname = tmp_path / "pmc_perf_test.yaml"
+    fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
+    workload_dir = tmp_path / "workload"
+
+    # rocprofiler-sdk backend with native-tool counter collection writes a
+    # per-pid .db here; child pids that never touched the GPU have no CSV.
+    pmc1 = workload_dir / "out" / "pmc_1"
+    (pmc1 / "12345").mkdir(parents=True)
+    (pmc1 / "12345" / "12345.db").touch()
+
+    options = {
+        "APP_CMD": ["./test_app"],
+        "ROCPROF_OUTPUT_PATH": str(workload_dir),
+        "ROCPROF_COUNTER_COLLECTION": "0",  # native tool collects, not SDK
+        "ROCP_TOOL_LIBRARIES": "",
+    }
+
+    update_calls: list = []
+    debug_msgs: list[str] = []
+
+    monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofiler-sdk")
+    monkeypatch.setattr(
+        "utils.utils_profile.capture_subprocess_output",
+        lambda *a, **k: (True, "success"),
+    )
+    monkeypatch.setattr(
+        "utils.utils_profile.rocpd_data.update_rocpd_pmc_events",
+        lambda *a, **k: update_calls.append(a),
+    )
+    monkeypatch.setattr(
+        "utils.utils_profile.rocpd_data.convert_dbs_to_csv",
+        lambda *a, **k: None,
+    )
+    monkeypatch.setattr(
+        "utils.utils_profile.console_debug",
+        lambda msg, *a, **k: debug_msgs.append(msg),
+    )
+    monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
+
+    utils_profile.run_prof(
+        str(fname), options, str(workload_dir), logging.INFO, "rocpd"
+    )
+
+    assert update_calls == []
+    assert any("No native counter CSV for pid 12345" in m for m in debug_msgs)
+
+
 def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
     """
     Test run_prof with additional YAML configuration file.
