@@ -11,8 +11,6 @@
 #include "data_storage/schema_version.hpp"
 #include "profiler-hub/writer_types.hpp"
 
-#include "spdlog/fmt/bundled/core.h"
-
 #include <memory>
 #include <optional>
 
@@ -64,8 +62,7 @@ public:
         const auto stream_pk =
             m_ctx->validator->resolve_optional_stream_key(trace_env.stream_id);
         const auto name_pk =
-            m_ctx->registry->string_info().get_primary_key_value_for_entity(
-                std::string(data.name));
+            m_ctx->registry->string_info().get_primary_key_value_for_entity(data.name);
 
         std::optional<primary_key_t> event_pk = std::nullopt;
         if(data.event.has_value())
@@ -78,7 +75,7 @@ public:
         {
             region_name_pk =
                 m_ctx->registry->string_info().get_primary_key_value_for_entity(
-                    std::string(data.region_name.value()));
+                    data.region_name.value());
         }
 
         const auto pk = m_ctx->key_providers->memory_copy_data().get_primary_key_value();

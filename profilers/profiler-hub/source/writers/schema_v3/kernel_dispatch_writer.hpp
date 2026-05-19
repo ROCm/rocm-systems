@@ -11,8 +11,6 @@
 #include "data_storage/schema_version.hpp"
 #include "profiler-hub/writer_types.hpp"
 
-#include "spdlog/fmt/bundled/core.h"
-
 #include <memory>
 #include <optional>
 
@@ -62,7 +60,7 @@ public:
             data.name.has_value()
                 ? std::make_optional(
                       m_ctx->registry->string_info().get_primary_key_value_for_entity(
-                          std::string(data.name.value())))
+                          data.name.value()))
                 : std::nullopt;
 
         std::optional<primary_key_t> event_pk = std::nullopt;
