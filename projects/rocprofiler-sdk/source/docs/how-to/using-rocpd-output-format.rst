@@ -950,7 +950,7 @@ The following table provides a detailed listing of the ``rocpd merge`` command-l
 
 .. warning::
 
-   **Consider alternatives to merging large databases**
+   **Consider alternatives to merging large databases.**
 
    Merging multiple large databases creates a single, very large output file that might be difficult to manage, transfer, or analyze. For large profiling datasets, consider these alternatives:
 
@@ -1090,10 +1090,10 @@ The ``.rpdb`` (ROCProfiler database) package is a standardized folder structure 
 
   **Advantages of using** ``rocpd package`` **over** ``rocpd merge``:
 
-   - **Large databases**: Packaging avoids creating a single large merged file while maintaining organized access to all the data.
-   - **Distributed storage**: When databases reside on different folders within the same filesystem, packaging can reference them in-place.
-   - **Iterative analysis**: Package databases once, then run multiple analysis operations without repeated merging overhead.
-   - **Flexible organization**: Easily add or remove databases from a package by updating the metadata file.
+  - **Large databases**: Packaging avoids creating a single large merged file while maintaining organized access to all the data.
+  - **Distributed storage**: When databases reside on different folders within the same filesystem, packaging can reference them in-place.
+  - **Iterative analysis**: Package databases once, then run multiple analysis operations without repeated merging overhead.
+  - **Flexible organization**: Easily add or remove databases from a package by updating the metadata file.
 
 **Usage examples:**
 

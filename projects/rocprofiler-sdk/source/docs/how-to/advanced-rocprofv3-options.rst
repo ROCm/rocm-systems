@@ -162,6 +162,7 @@ You can also specify this option in YAML or JSON input files:
 - Working with applications that implement custom crash reporting
 
 **Avoid this option when:**
+
 - You want ``rocprofv3`` to provide maximum protection against data loss
 - Your application doesn't have custom signal handlers
 - You're doing standard profiling where signal handling isn't a concern

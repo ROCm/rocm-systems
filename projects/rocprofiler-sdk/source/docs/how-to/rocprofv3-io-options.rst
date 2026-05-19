@@ -97,7 +97,7 @@ The following example shows how to use the output directory option with placehol
 
 The preceding command runs the application with ``rocprofv3`` and generates the trace file for each rank. The trace files are prefixed with hostname, process ID, and MPI rank.
 
-Assuming the hostname as `ubuntu-latest` and the process IDs as 3000020 and 3000019, the output file names are:
+Assuming the hostname as ``ubuntu-latest`` and the process IDs as 3000020 and 3000019, the output file names are:
 
 .. code-block:: bash
 
@@ -149,7 +149,7 @@ The collection period can be specified in different units, such as seconds, mill
 
 The available time units are:
 
-`--collection-period-unit`: `hour`, `min`, `sec`, `msec`, `usec`, `nsec`
+``--collection-period-unit``: ``hour``, ``min``, ``sec``, ``msec``, ``usec``, ``nsec``.
 
 To specify the time unit as milliseconds, use:
 
