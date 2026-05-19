@@ -34,7 +34,7 @@
 
 namespace rocshmem {
 
-__host__ GDAContext::GDAContext(Backend *b, unsigned int ctx_id, [[maybe_unused]] int gda_provider)
+__host__ GDAContext::GDAContext(Backend *b, unsigned int ctx_id)
     : Context(b) {
   GDABackend *backend{static_cast<GDABackend *>(b)};
   base_heap = backend->heap.get_heap_bases().data();
