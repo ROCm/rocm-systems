@@ -129,6 +129,7 @@ namespace envvar {
       BOOTSTRAP,
       REVERSE_OFFLOAD,
       GDA,
+      SDMA,
     };
 
     // env var string prefixes
@@ -139,6 +140,7 @@ namespace envvar {
     template <> inline constexpr const char* prefix<tag::BOOTSTRAP> = "ROCSHMEM_BOOTSTRAP";
     template <> inline constexpr const char* prefix<tag::REVERSE_OFFLOAD> = "ROCSHMEM_RO";
     template <> inline constexpr const char* prefix<tag::GDA> = "ROCSHMEM_GDA";
+    template <> inline constexpr const char* prefix<tag::SDMA> = "ROCSHMEM_SDMA";
   }  // namespace category
 
   namespace parser {
@@ -390,6 +392,7 @@ namespace envvar {
       const std::string name;
       const std::string doc;
       const value_type default_value;
+    public:
       value_type value;
       bool value_set;
     };
@@ -553,6 +556,14 @@ namespace envvar {
     extern const var<std::string> net_force_merge;
     extern const var<std::string> nic_policy;
   }  // namespace gda
+
+  namespace sdma {
+    template <typename T> using var = var<T, category::tag::SDMA>;
+    extern const var<bool> enabled;
+    extern const var<size_t> threshold;
+    extern const var<int32_t> num_channels;
+    extern const var<bool> spread_channels;
+  }  // namespace sdma
 
   /**
    * @brief Print mode for environment variables

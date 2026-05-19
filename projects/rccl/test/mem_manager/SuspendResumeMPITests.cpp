@@ -97,7 +97,7 @@ void allocateVmmPosixFd(int dev, size_t requestedSize, VmmAlloc* out)
     prop.type                            = hipMemAllocationTypePinned;
     prop.location.type                   = hipMemLocationTypeDevice;
     prop.location.id                     = dev;
-    prop.requestedHandleTypes            = hipMemHandleTypePosixFileDescriptor;
+    prop.requestedHandleType             = hipMemHandleTypePosixFileDescriptor;
     prop.allocFlags.gpuDirectRDMACapable = 1;
 
     size_t granularity = 0;
@@ -137,7 +137,7 @@ void reserveVaOnly(int dev, size_t requestedSize, VmmAlloc* out)
     prop.type                            = hipMemAllocationTypePinned;
     prop.location.type                   = hipMemLocationTypeDevice;
     prop.location.id                     = dev;
-    prop.requestedHandleTypes            = hipMemHandleTypePosixFileDescriptor;
+    prop.requestedHandleType             = hipMemHandleTypePosixFileDescriptor;
     prop.allocFlags.gpuDirectRDMACapable = 1;
 
     size_t granularity = 0;

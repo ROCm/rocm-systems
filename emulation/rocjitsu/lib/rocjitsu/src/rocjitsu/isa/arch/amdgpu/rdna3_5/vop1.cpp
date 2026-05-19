@@ -6087,8 +6087,10 @@ void VSwapB16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t tmp = vdst.read_lane(wf, lane);
-    vdst.write_lane(wf, lane, src0.read_lane(wf, lane));
+    uint16_t tmp = static_cast<uint16_t>(vdst.read_lane(wf, lane));
+    vdst.write_lane(wf, lane,
+                    static_cast<uint32_t>(
+                        static_cast<uint16_t>(static_cast<uint16_t>(src0.read_lane(wf, lane)))));
     src0.write_lane(wf, lane, tmp);
   }
   vdst.clear_delegate();

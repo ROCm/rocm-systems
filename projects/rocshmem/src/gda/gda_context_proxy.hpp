@@ -44,12 +44,11 @@ class GDADefaultContextProxy {
    * Placement new the memory which is allocated by proxy_
    */
   explicit GDADefaultContextProxy(GDABackend* backend, TeamInfo *tinfo,
-                                  int gda_provider,
                                   [[maybe_unused]] const HIPAllocator& alloc = HIPAllocator(),
                                   size_t num_elems = 1)
   : proxy_{num_elems}, constructed_{true} {
     auto ctx{proxy_.get()};
-    new (ctx) GDAContext(reinterpret_cast<Backend*>(backend), 0, gda_provider);
+    new (ctx) GDAContext(reinterpret_cast<Backend*>(backend), 0);
     ctx->tinfo = tinfo;
     rocshmem_ctx_t local{ctx, tinfo};
     set_internal_ctx(&local);
