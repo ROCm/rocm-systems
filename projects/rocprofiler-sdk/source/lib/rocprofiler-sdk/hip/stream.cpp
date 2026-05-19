@@ -84,7 +84,7 @@ add_stream(hipStream_t stream, bool reindex_existing = true)
 
             auto idx = _data.size() + idx_offset;
             ROCP_INFO << fmt::format(
-                "hipStream_t={} :: id={}.handle={}{}", static_cast<void*>(_stream), '{', idx, '}');
+                "hipStream_t={} :: id={{.handle={}}}", static_cast<void*>(_stream), idx);
 
             ROCP_CI_LOG_IF(WARNING, idx == 0 && _stream != nullptr)
                 << "null hip stream does not have index 0";
@@ -122,12 +122,17 @@ remove_stream(hipStream_t stream)
             auto itr = _data.find(_stream);
             if(itr != _data.end())
             {
-                ROCP_INFO << fmt::format("hipStream_t={} :: removing stream id={}.handle={}{}",
-                                         static_cast<void*>(_stream),
-                                         '{',
-                                         itr->second.handle,
-                                         '}');
+                ROCP_INFO << fmt::format(
+                    "remove_stream :: hipStream_t ({}, rocprofiler_stream_id_t{{.handle = {}}})",
+                    sdk::utility::as_hex(static_cast<void*>(_stream)),
+                    itr->second.handle);
                 _data.erase(itr);
+            }
+            else
+            {
+                ROCP_CI_LOG(WARNING) << fmt::format(
+                    "remove_stream :: hipStream_t ({}) not found in map after destroy",
+                    sdk::utility::as_hex(static_cast<void*>(_stream)));
             }
         },
         stream);
