@@ -10,7 +10,7 @@
 #include "impl/lsa_barrier__types.h"
 #include "impl/gin_barrier__types.h"
 
-#if __CUDACC__
+#if NCCL_DEVICE_COMPILE
 template<typename Coop>
 struct ncclBarrierSession_internal;
 
@@ -40,7 +40,11 @@ struct ncclBarrierSession: ncclBarrierSession_internal<Coop> {
   NCCL_DEVICE_INLINE ncclLsaBarrierSession<Coop>& lsaBarrier();
   NCCL_DEVICE_INLINE ncclGinBarrierSession<Coop>& ginBarrier();
 
+#if __HIP_PLATFORM_AMD__
+  NCCL_DEVICE_INLINE void sync(Coop, std::memory_order, ncclGinFenceLevel);
+#else
   NCCL_DEVICE_INLINE void sync(Coop, cuda::memory_order, ncclGinFenceLevel);
+#endif
 };
 #endif
 
