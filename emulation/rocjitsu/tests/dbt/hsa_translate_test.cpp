@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// @file hsa_translate_test.cpp
-/// @brief End-to-end hardware test: translate CDNA4 kernels to the host RDNA target,
+/// @brief End-to-end hardware test: translate CDNA4 kernels to the host GPU target,
 /// load via HSA, dispatch on the real GPU, and verify against CPU golden.
 
 #include "rocjitsu/base/rj_compiler.h"
@@ -107,7 +107,10 @@ HostTarget select_host_target(hsa_agent_t gpu) {
   hsa_isa_t isa{};
   hsa_agent_get_info(gpu, HSA_AGENT_INFO_ISA, &isa);
   hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, t.isa_name);
-  if (std::strstr(t.isa_name, "gfx1100")) {
+  if (std::strstr(t.isa_name, "gfx942")) {
+    t.arch = ROCJITSU_CODE_ARCH_CDNA3;
+    t.mach = 0x4C;
+  } else if (std::strstr(t.isa_name, "gfx1100")) {
     t.arch = ROCJITSU_CODE_ARCH_RDNA3;
     t.mach = 0x41;
   } else if (std::strstr(t.isa_name, "gfx1201")) {
@@ -136,7 +139,8 @@ TEST(HsaTranslateTest, TranslateAndDispatchVectorAdd) {
   ASSERT_NE(gpu.handle, 0u) << "No GPU agent found";
 
   auto target = select_host_target(gpu);
-  ASSERT_NE(target.mach, 0u) << "Test requires RDNA3 (gfx1100) or RDNA4 (gfx1200/1201) GPU, found: "
+  ASSERT_NE(target.mach, 0u) << "Test requires CDNA3 (gfx942), RDNA3 (gfx1100), or RDNA4 "
+                                "(gfx1200/1201) GPU, found: "
                              << target.isa_name;
 
   BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, target.arch, target.mach);

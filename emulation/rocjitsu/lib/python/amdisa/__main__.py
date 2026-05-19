@@ -28,6 +28,7 @@ from amdisa.legalization_codegen import emit_all as emit_legalization
 from amdisa.semantics import derive_all_semantics
 
 _ENCODING_TRANSLATOR_PAIRS = [
+    ('cdna4', 'cdna3'),
     ('cdna4', 'rdna4'),
     ('cdna4', 'rdna3'),
 ]

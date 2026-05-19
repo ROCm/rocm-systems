@@ -15,12 +15,13 @@
 ///     with valid RDNA4 instructions, correct ELF flags, no GFX9 waitcnt
 ///
 /// These tests complement the hardware tests in hsa_translate_test.cpp which
-/// verify correctness on real RDNA4 GPUs.
+/// verify correctness on real DBT host GPUs.
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/dbt/binary_translator.h"
 #include "rocjitsu/code/dbt/encoding_translator.h"
+#include "rocjitsu/code/dbt/generated/encoding_cdna4_to_cdna3.h"
 #include "rocjitsu/code/dbt/generated/encoding_cdna4_to_rdna4.h"
 #include "rocjitsu/code/dbt/generated/encoding_fields.h"
 #include "rocjitsu/code/dbt/generated/legalization_cdna1_to_cdna2.h"
@@ -37,6 +38,7 @@
 #include "rocjitsu/code/dbt/generated/legalization_cdna3_to_cdna4.h"
 #include "rocjitsu/code/dbt/generated/legalization_cdna3_to_rdna3.h"
 #include "rocjitsu/code/dbt/generated/legalization_cdna3_to_rdna4.h"
+#include "rocjitsu/code/dbt/generated/legalization_cdna4_to_cdna3.h"
 #include "rocjitsu/code/dbt/generated/legalization_cdna4_to_rdna3.h"
 #include "rocjitsu/code/dbt/generated/legalization_cdna4_to_rdna4.h"
 #include "rocjitsu/code/dbt/generated/legalization_rdna1_to_cdna3.h"
@@ -69,6 +71,7 @@ RJ_DIAGNOSTIC_POP
 #include <cstdio>
 #include <cstring>
 #include <iostream>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -940,6 +943,26 @@ TEST(EncodingTranslator, Vop3PreservesModifiers) {
   EXPECT_EQ(dst.abs, 3);
 }
 
+TEST(EncodingTranslator, Cdna4ToCdna3Vop2VectorAddPreservesOperands) {
+  cdna4::Vop2MachineInst src{};
+  src.src0 = 3;
+  src.vsrc1 = 4;
+  src.vdst = 5;
+  src.op = 1;       // V_ADD_F32 on CDNA3 and CDNA4.
+  src.encoding = 0; // GFX9-family VOP2 prefix.
+  uint32_t w0 = std::bit_cast<uint32_t>(src);
+
+  auto result = cdna4_to_cdna3::translate_encoding_cdna4_to_cdna3(kEnc_VOP2, w0, 0, 0, 1);
+
+  ASSERT_EQ(result.word_count, 1);
+  auto dst = std::bit_cast<cdna3::Vop2MachineInst>(result.words[0]);
+  EXPECT_EQ(dst.src0, 3);
+  EXPECT_EQ(dst.vsrc1, 4);
+  EXPECT_EQ(dst.vdst, 5);
+  EXPECT_EQ(dst.op, 1);
+  EXPECT_EQ(dst.encoding, 0);
+}
+
 TEST(EncodingTranslator, UnknownEncodingReturnsEmpty) {
   auto result = cdna4_to_rdna4::translate_encoding_cdna4_to_rdna4(0xFFFF, 0, 0, 0, 0);
   EXPECT_EQ(result.word_count, 0);
@@ -1009,6 +1032,7 @@ CHECK_NO_ILLEGAL(cdna2_to_rdna4)
 CHECK_NO_ILLEGAL(cdna3_to_cdna4)
 CHECK_NO_ILLEGAL(cdna3_to_rdna3)
 CHECK_NO_ILLEGAL(cdna3_to_rdna4)
+CHECK_NO_ILLEGAL(cdna4_to_cdna3)
 CHECK_NO_ILLEGAL(cdna4_to_rdna3)
 CHECK_NO_ILLEGAL(rdna1_to_cdna3)
 CHECK_NO_ILLEGAL(rdna1_to_cdna4)
@@ -1436,6 +1460,89 @@ TEST(BinaryTranslatorE2E, TranslatesMultiKernelCodeObject) {
   std::ranges::sort(translated_descriptor_offsets);
   EXPECT_EQ(translated_entries, (std::vector<uint64_t>{0, sizeof(uint32_t)}));
   EXPECT_EQ(translated_descriptor_offsets, original_descriptor_offsets);
+}
+
+TEST(BinaryTranslatorE2E, TranslateVectorAddCdna4ToCdna3) {
+  Executable exec(kernel_path("vector_add"));
+  ASSERT_TRUE(exec.is_valid()) << "Failed to load vector_add.o";
+  ASSERT_GT(exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX950), 0u);
+
+  const auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
+  ASSERT_NE(co, nullptr);
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(*co);
+
+  EXPECT_FALSE(result.elf_bytes.empty()) << "Translation produced empty ELF";
+  EXPECT_EQ(result.host_arch, ROCJITSU_CODE_ARCH_CDNA3);
+  EXPECT_TRUE(result.warnings.empty())
+      << "Vector-add CDNA4→CDNA3 translation should not require unhandled lowering";
+
+  ASSERT_GE(result.elf_bytes.size(), 48u);
+  uint32_t e_flags = 0;
+  std::memcpy(&e_flags, result.elf_bytes.data() + 48, sizeof(e_flags));
+  constexpr uint32_t kEfAmdgpuMachGfx942 = 0x4C;
+  EXPECT_EQ(e_flags & 0xFF, kEfAmdgpuMachGfx942)
+      << "ELF e_flags should contain GFX942 machine type";
+
+  ASSERT_FALSE(co->text_sections().empty());
+  const auto *original_text = co->text_sections()[0];
+  rocjitsu::AmdGpuCodeObject translated_co(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated_co.is_valid());
+  ASSERT_FALSE(translated_co.text_sections().empty());
+  const auto *translated_text = translated_co.text_sections()[0];
+  ASSERT_EQ(translated_text->size(), original_text->size());
+  const auto *original_text_bytes = reinterpret_cast<const uint8_t *>(original_text->data());
+  const auto *translated_text_bytes = reinterpret_cast<const uint8_t *>(translated_text->data());
+  const auto original_text_end = original_text_bytes + original_text->size();
+  const auto first_text_diff =
+      std::mismatch(original_text_bytes, original_text_end, translated_text_bytes);
+  EXPECT_EQ(first_text_diff.first, original_text_end)
+      << "The vector-add gfx950 and gfx942 codegen is byte-identical; CDNA4→CDNA3 DBT should "
+         "leave the instruction stream unchanged for this kernel. First differing byte offset is "
+      << std::distance(original_text_bytes, first_text_diff.first) << ", original word 0x"
+      << std::hex
+      << reinterpret_cast<const uint32_t *>(original_text_bytes)
+             [std::distance(original_text_bytes, first_text_diff.first) / sizeof(uint32_t)]
+      << ", translated word 0x"
+      << reinterpret_cast<const uint32_t *>(translated_text_bytes)
+             [std::distance(original_text_bytes, first_text_diff.first) / sizeof(uint32_t)]
+      << std::dec;
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+
+  int decode_failures = 0;
+  int inst_count = 0;
+  bool has_vector_add = false;
+  for (const auto *sec : translated_co.text_sections()) {
+    const auto *data = reinterpret_cast<const uint32_t *>(sec->data());
+    const size_t words = sec->size() / sizeof(uint32_t);
+    size_t pc = 0;
+    while (pc < words) {
+      try {
+        std::unique_ptr<rocjitsu::Instruction> inst(decoder->decode(&data[pc]));
+        if (!inst) {
+          ++decode_failures;
+          ++pc;
+          continue;
+        }
+        const std::string_view mnemonic(inst->mnemonic());
+        if (mnemonic.starts_with("v_add_"))
+          has_vector_add = true;
+        pc += inst->size() / 4;
+        ++inst_count;
+      } catch (const std::exception &e) {
+        std::cerr << "  decode fail at 0x" << std::hex << pc * 4 << " word=0x" << data[pc] << ": "
+                  << e.what() << "\n";
+        ++decode_failures;
+        ++pc;
+      }
+    }
+  }
+  EXPECT_GT(inst_count, 0) << "Translated text section should contain instructions";
+  EXPECT_EQ(decode_failures, 0) << decode_failures << " instructions failed to decode as CDNA3";
+  EXPECT_TRUE(has_vector_add) << "Translated vector_add should still contain a vector add";
 }
 
 TEST(KernelDescriptorTranslator, Cdna4ToRdna4MaterializesWorkgroupIdsFromTtmpGridPayload) {

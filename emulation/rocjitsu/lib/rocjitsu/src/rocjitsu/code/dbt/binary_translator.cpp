@@ -7,8 +7,10 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/basic_block.h"
+#include "rocjitsu/code/dbt/generated/encoding_cdna4_to_cdna3.h"
 #include "rocjitsu/code/dbt/generated/encoding_cdna4_to_rdna3.h"
 #include "rocjitsu/code/dbt/generated/encoding_cdna4_to_rdna4.h"
+#include "rocjitsu/code/dbt/generated/legalization_cdna4_to_cdna3.h"
 #include "rocjitsu/code/dbt/generated/legalization_cdna4_to_rdna3.h"
 #include "rocjitsu/code/dbt/generated/legalization_cdna4_to_rdna4.h"
 #include "rocjitsu/code/dbt/generated/legalization_types.h"
@@ -37,6 +39,8 @@ constexpr uint32_t kConservativeLoweringMinimumVgprs = 128;
 EncodingTranslateFn select_encoding_translator(rj_code_arch_t guest, rj_code_arch_t host) {
   if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA4)
     return cdna4_to_rdna4::translate_encoding_cdna4_to_rdna4;
+  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_CDNA3)
+    return cdna4_to_cdna3::translate_encoding_cdna4_to_cdna3;
   if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA3)
     return cdna4_to_rdna3::translate_encoding_cdna4_to_rdna3;
   return nullptr;
@@ -46,6 +50,11 @@ LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t ho
   if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA4) {
     return [](uint16_t enc_id, uint16_t opcode) -> const InstructionLegalization * {
       return lookup(kLegalization_cdna4_to_rdna4, enc_id, opcode);
+    };
+  }
+  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_CDNA3) {
+    return [](uint16_t enc_id, uint16_t opcode) -> const InstructionLegalization * {
+      return lookup(kLegalization_cdna4_to_cdna3, enc_id, opcode);
     };
   }
   if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA3) {

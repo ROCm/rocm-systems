@@ -12,15 +12,15 @@
 
 #include "encoding_fields.h"
 #include "rocjitsu/code/dbt/encoding_translator.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3/machine_insts.h"
 
 namespace rocjitsu {
 // Per-pair named namespace. Two pairs that share a source ISA
 // (e.g. cdna4->rdna3 and cdna4->rdna4) both emit decode_*_cdna4
 // helpers; isolating them per pair avoids ODR conflicts when
 // both headers are included in the same TU.
-namespace cdna4_to_rdna3 {
+namespace cdna4_to_cdna3 {
 
 inline Sop1Fields decode_sop1_cdna4(uint32_t w0) {
   auto src = std::bit_cast<rocjitsu::cdna4::Sop1MachineInst>(w0);
@@ -172,6 +172,28 @@ inline FlatScratchFields decode_flat_scratch_cdna4(uint32_t w0, uint32_t w1) {
   return f;
 }
 
+inline MtbufFields decode_mtbuf_cdna4(uint32_t w0, uint32_t w1) {
+  rocjitsu::cdna4::MtbufMachineInst src{};
+  const uint32_t src_words[] = {w0, w1};
+  std::memcpy(&src, src_words, sizeof(src));
+  MtbufFields f{};
+  f.ioffset = src.offset;
+  f.offen = src.offen;
+  f.idxen = src.idxen;
+  f.sc0 = src.sc0;
+  f.op = src.op;
+  f.dfmt = src.dfmt;
+  f.nfmt = src.nfmt;
+  f.vaddr = src.vaddr;
+  f.vdata = src.vdata;
+  f.rsrc = src.srsrc;
+  f.sc1 = src.sc1;
+  f.nt = src.nt;
+  f.acc = src.acc;
+  f.soffset = src.soffset;
+  return f;
+}
+
 inline MubufFields decode_mubuf_cdna4(uint32_t w0, uint32_t w1) {
   rocjitsu::cdna4::MubufMachineInst src{};
   const uint32_t src_words[] = {w0, w1};
@@ -264,8 +286,8 @@ inline Vop3SdstEncFields decode_vop3_sdst_enc_cdna4(uint32_t w0, uint32_t w1) {
   return f;
 }
 
-inline TranslationResult encode_sop1_rdna3(const Sop1Fields &f, uint16_t dst_op) {
-  rocjitsu::rdna3::Sop1MachineInst dst{};
+inline TranslationResult encode_sop1_cdna3(const Sop1Fields &f, uint16_t dst_op) {
+  rocjitsu::cdna3::Sop1MachineInst dst{};
   dst.encoding = 0x17D;
   dst.op = dst_op;
   dst.ssrc0 = f.ssrc0 & 0xFF;
@@ -273,8 +295,8 @@ inline TranslationResult encode_sop1_rdna3(const Sop1Fields &f, uint16_t dst_op)
   return TranslationResult{{std::bit_cast<uint32_t>(dst), 0u, 0u}, uint8_t{1}};
 }
 
-inline TranslationResult encode_sop2_rdna3(const Sop2Fields &f, uint16_t dst_op) {
-  rocjitsu::rdna3::Sop2MachineInst dst{};
+inline TranslationResult encode_sop2_cdna3(const Sop2Fields &f, uint16_t dst_op) {
+  rocjitsu::cdna3::Sop2MachineInst dst{};
   dst.encoding = 0x2;
   dst.op = dst_op;
   dst.ssrc0 = f.ssrc0 & 0xFF;
@@ -283,8 +305,8 @@ inline TranslationResult encode_sop2_rdna3(const Sop2Fields &f, uint16_t dst_op)
   return TranslationResult{{std::bit_cast<uint32_t>(dst), 0u, 0u}, uint8_t{1}};
 }
 
-inline TranslationResult encode_sopc_rdna3(const SopcFields &f, uint16_t dst_op) {
-  rocjitsu::rdna3::SopcMachineInst dst{};
+inline TranslationResult encode_sopc_cdna3(const SopcFields &f, uint16_t dst_op) {
+  rocjitsu::cdna3::SopcMachineInst dst{};
   dst.encoding = 0x17E;
   dst.op = dst_op;
   dst.ssrc0 = f.ssrc0 & 0xFF;
@@ -292,8 +314,8 @@ inline TranslationResult encode_sopc_rdna3(const SopcFields &f, uint16_t dst_op)
   return TranslationResult{{std::bit_cast<uint32_t>(dst), 0u, 0u}, uint8_t{1}};
 }
 
-inline TranslationResult encode_sopk_rdna3(const SopkFields &f, uint16_t dst_op) {
-  rocjitsu::rdna3::SopkMachineInst dst{};
+inline TranslationResult encode_sopk_cdna3(const SopkFields &f, uint16_t dst_op) {
+  rocjitsu::cdna3::SopkMachineInst dst{};
   dst.encoding = 0xB;
   dst.op = dst_op;
   dst.simm16 = f.simm16 & 0xFFFF;
@@ -301,16 +323,16 @@ inline TranslationResult encode_sopk_rdna3(const SopkFields &f, uint16_t dst_op)
   return TranslationResult{{std::bit_cast<uint32_t>(dst), 0u, 0u}, uint8_t{1}};
 }
 
-inline TranslationResult encode_sopp_rdna3(const SoppFields &f, uint16_t dst_op) {
-  rocjitsu::rdna3::SoppMachineInst dst{};
+inline TranslationResult encode_sopp_cdna3(const SoppFields &f, uint16_t dst_op) {
+  rocjitsu::cdna3::SoppMachineInst dst{};
   dst.encoding = 0x17F;
   dst.op = dst_op;
   dst.simm16 = f.simm16 & 0xFFFF;
   return TranslationResult{{std::bit_cast<uint32_t>(dst), 0u, 0u}, uint8_t{1}};
 }
 
-inline TranslationResult encode_vop1_rdna3(const Vop1Fields &f, uint16_t dst_op) {
-  rocjitsu::rdna3::Vop1MachineInst dst{};
+inline TranslationResult encode_vop1_cdna3(const Vop1Fields &f, uint16_t dst_op) {
+  rocjitsu::cdna3::Vop1MachineInst dst{};
   dst.encoding = 0x3F;
   dst.op = dst_op;
   dst.src0 = f.src0 & 0x1FF;
@@ -318,8 +340,8 @@ inline TranslationResult encode_vop1_rdna3(const Vop1Fields &f, uint16_t dst_op)
   return TranslationResult{{std::bit_cast<uint32_t>(dst), 0u, 0u}, uint8_t{1}};
 }
 
-inline TranslationResult encode_vop2_rdna3(const Vop2Fields &f, uint16_t dst_op) {
-  rocjitsu::rdna3::Vop2MachineInst dst{};
+inline TranslationResult encode_vop2_cdna3(const Vop2Fields &f, uint16_t dst_op) {
+  rocjitsu::cdna3::Vop2MachineInst dst{};
   dst.encoding = 0x0;
   dst.op = dst_op;
   dst.src0 = f.src0 & 0x1FF;
@@ -328,8 +350,8 @@ inline TranslationResult encode_vop2_rdna3(const Vop2Fields &f, uint16_t dst_op)
   return TranslationResult{{std::bit_cast<uint32_t>(dst), 0u, 0u}, uint8_t{1}};
 }
 
-inline TranslationResult encode_vopc_rdna3(const VopcFields &f, uint16_t dst_op) {
-  rocjitsu::rdna3::VopcMachineInst dst{};
+inline TranslationResult encode_vopc_cdna3(const VopcFields &f, uint16_t dst_op) {
+  rocjitsu::cdna3::VopcMachineInst dst{};
   dst.encoding = 0x3E;
   dst.op = dst_op;
   dst.src0 = f.src0 & 0x1FF;
@@ -337,13 +359,14 @@ inline TranslationResult encode_vopc_rdna3(const VopcFields &f, uint16_t dst_op)
   return TranslationResult{{std::bit_cast<uint32_t>(dst), 0u, 0u}, uint8_t{1}};
 }
 
-inline TranslationResult encode_ds_rdna3(const DsFields &f, uint16_t dst_op) {
-  rocjitsu::rdna3::DsMachineInst dst{};
+inline TranslationResult encode_ds_cdna3(const DsFields &f, uint16_t dst_op) {
+  rocjitsu::cdna3::DsMachineInst dst{};
   dst.encoding = 0x36;
   dst.op = dst_op;
   dst.offset0 = f.offset0 & 0xFF;
   dst.offset1 = f.offset1 & 0xFF;
   dst.gds = f.gds & 0x1;
+  dst.acc = f.acc & 0x1;
   dst.addr = f.vaddr & 0xFF;
   dst.data0 = f.data0 & 0xFF;
   dst.data1 = f.data1 & 0xFF;
@@ -354,118 +377,135 @@ inline TranslationResult encode_ds_rdna3(const DsFields &f, uint16_t dst_op) {
   return r;
 }
 
-inline TranslationResult encode_flat_rdna3(const FlatFields &f, uint16_t dst_op) {
-  rocjitsu::rdna3::FlatMachineInst dst{};
+inline TranslationResult encode_flat_cdna3(const FlatFields &f, uint16_t dst_op) {
+  rocjitsu::cdna3::FlatMachineInst dst{};
   dst.encoding = 0x37;
   dst.op = dst_op;
-  dst.offset = f.ioffset & 0x1FFF;
+  dst.offset = f.ioffset & 0xFFF;
+  dst.lds = f.lds & 0x1;
   dst.seg = f.seg & 0x3;
+  dst.sc0 = f.sc0 & 0x1;
+  dst.nt = f.nt & 0x1;
+  dst.sc1 = f.sc1 & 0x1;
   dst.addr = f.vaddr & 0xFF;
   dst.data = f.vsrc & 0xFF;
   dst.saddr = f.saddr & 0x7F;
+  dst.acc = f.acc & 0x1;
   dst.vdst = f.vdst & 0xFF;
-  dst.dlc = 0;
-  dst.glc = 0;
-  dst.slc = 0;
-  dst.sve = 0;
-  if (dst.saddr == 0x7F)
-    dst.saddr = 0x7C;
   TranslationResult r{};
   r.word_count = uint8_t{2};
   std::memcpy(r.words, &dst, sizeof(dst));
   return r;
 }
 
-inline TranslationResult encode_flat_glbl_rdna3(const FlatGlblFields &f, uint16_t dst_op) {
-  rocjitsu::rdna3::FlatGlobalMachineInst dst{};
-  dst.encoding = 0x37;
-  dst.op = dst_op;
-  dst.offset = f.ioffset & 0x1FFF;
-  dst.sve = f.sve & 0x1;
-  dst.seg = f.seg & 0x3;
-  dst.addr = f.vaddr & 0xFF;
-  dst.data = f.vsrc & 0xFF;
-  dst.saddr = f.saddr & 0x7F;
-  dst.vdst = f.vdst & 0xFF;
-  dst.dlc = 0;
-  dst.glc = 0;
-  dst.slc = 0;
-  if (dst.saddr == 0x7F)
-    dst.saddr = 0x7C;
-  TranslationResult r{};
-  r.word_count = uint8_t{2};
-  std::memcpy(r.words, &dst, sizeof(dst));
-  return r;
-}
-
-inline TranslationResult encode_flat_scratch_rdna3(const FlatScratchFields &f, uint16_t dst_op) {
-  rocjitsu::rdna3::FlatScratchMachineInst dst{};
+inline TranslationResult encode_flat_glbl_cdna3(const FlatGlblFields &f, uint16_t dst_op) {
+  rocjitsu::cdna3::FlatGlblMachineInst dst{};
   dst.encoding = 0x37;
   dst.op = dst_op;
   dst.offset = f.ioffset & 0x1FFF;
   dst.sve = f.sve & 0x1;
   dst.seg = f.seg & 0x3;
+  dst.sc0 = f.sc0 & 0x1;
+  dst.nt = f.nt & 0x1;
+  dst.sc1 = f.sc1 & 0x1;
   dst.addr = f.vaddr & 0xFF;
   dst.data = f.vsrc & 0xFF;
   dst.saddr = f.saddr & 0x7F;
+  dst.acc = f.acc & 0x1;
   dst.vdst = f.vdst & 0xFF;
-  dst.dlc = 0;
-  dst.glc = 0;
-  dst.slc = 0;
-  if (dst.saddr == 0x7F)
-    dst.saddr = 0x7C;
   TranslationResult r{};
   r.word_count = uint8_t{2};
   std::memcpy(r.words, &dst, sizeof(dst));
   return r;
 }
 
-inline TranslationResult encode_mubuf_rdna3(const MubufFields &f, uint16_t dst_op) {
-  rocjitsu::rdna3::MubufMachineInst dst{};
+inline TranslationResult encode_flat_scratch_cdna3(const FlatScratchFields &f, uint16_t dst_op) {
+  rocjitsu::cdna3::FlatScratchMachineInst dst{};
+  dst.encoding = 0x37;
+  dst.op = dst_op;
+  dst.offset = f.ioffset & 0x1FFF;
+  dst.sve = f.sve & 0x1;
+  dst.seg = f.seg & 0x3;
+  dst.sc0 = f.sc0 & 0x1;
+  dst.nt = f.nt & 0x1;
+  dst.sc1 = f.sc1 & 0x1;
+  dst.addr = f.vaddr & 0xFF;
+  dst.data = f.vsrc & 0xFF;
+  dst.saddr = f.saddr & 0x7F;
+  dst.acc = f.acc & 0x1;
+  dst.vdst = f.vdst & 0xFF;
+  TranslationResult r{};
+  r.word_count = uint8_t{2};
+  std::memcpy(r.words, &dst, sizeof(dst));
+  return r;
+}
+
+inline TranslationResult encode_mtbuf_cdna3(const MtbufFields &f, uint16_t dst_op) {
+  rocjitsu::cdna3::MtbufMachineInst dst{};
+  dst.encoding = 0x3A;
+  dst.op = dst_op;
+  dst.offset = f.ioffset & 0xFFF;
+  dst.offen = f.offen & 0x1;
+  dst.idxen = f.idxen & 0x1;
+  dst.sc0 = f.sc0 & 0x1;
+  dst.dfmt = f.dfmt & 0xF;
+  dst.nfmt = f.nfmt & 0x7;
+  dst.vaddr = f.vaddr & 0xFF;
+  dst.vdata = f.vdata & 0xFF;
+  dst.srsrc = f.rsrc & 0x1F;
+  dst.sc1 = f.sc1 & 0x1;
+  dst.nt = f.nt & 0x1;
+  dst.acc = f.acc & 0x1;
+  dst.soffset = f.soffset & 0xFF;
+  TranslationResult r{};
+  r.word_count = uint8_t{2};
+  std::memcpy(r.words, &dst, sizeof(dst));
+  return r;
+}
+
+inline TranslationResult encode_mubuf_cdna3(const MubufFields &f, uint16_t dst_op) {
+  rocjitsu::cdna3::MubufMachineInst dst{};
   dst.encoding = 0x38;
   dst.op = dst_op;
   dst.offset = f.ioffset & 0xFFF;
   dst.offen = f.offen & 0x1;
   dst.idxen = f.idxen & 0x1;
+  dst.sc0 = f.sc0 & 0x1;
+  dst.sc1 = f.sc1 & 0x1;
+  dst.lds = f.lds & 0x1;
+  dst.nt = f.nt & 0x1;
   dst.vaddr = f.vaddr & 0xFF;
   dst.vdata = f.vdata & 0xFF;
   dst.srsrc = f.rsrc & 0x1F;
+  dst.acc = f.acc & 0x1;
   dst.soffset = f.soffset & 0xFF;
-  dst.slc = 0;
-  dst.dlc = 0;
-  dst.glc = 0;
-  dst.tfe = 0;
-  if (dst.soffset == 0x7F)
-    dst.soffset = 0x7C;
   TranslationResult r{};
   r.word_count = uint8_t{2};
   std::memcpy(r.words, &dst, sizeof(dst));
   return r;
 }
 
-inline TranslationResult encode_smem_rdna3(const SmemFields &f, uint16_t dst_op) {
-  rocjitsu::rdna3::SmemMachineInst dst{};
-  dst.encoding = 0x3D;
+inline TranslationResult encode_smem_cdna3(const SmemFields &f, uint16_t dst_op) {
+  rocjitsu::cdna3::SmemMachineInst dst{};
+  dst.encoding = 0x30;
   dst.op = dst_op;
   dst.sbase = f.sbase & 0x3F;
   dst.sdata = f.sdata & 0x7F;
+  dst.soffset_en = f.soffset_en & 0x1;
+  dst.nv = f.nv & 0x1;
   dst.glc = f.glc & 0x1;
+  dst.imm = f.imm & 0x1;
   dst.offset = f.ioffset & 0x1FFFFF;
   dst.soffset = f.soffset & 0x7F;
-  dst.dlc = 0;
-  if (dst.soffset == 0x7F)
-    dst.soffset = 0x7C;
-  if (f.soffset_en == 0)
-    dst.soffset = 0x7C;
   TranslationResult r{};
   r.word_count = uint8_t{2};
   std::memcpy(r.words, &dst, sizeof(dst));
   return r;
 }
 
-inline TranslationResult encode_vop3_rdna3(const Vop3Fields &f, uint16_t dst_op) {
-  rocjitsu::rdna3::Vop3MachineInst dst{};
-  dst.encoding = 0x35;
+inline TranslationResult encode_vop3_cdna3(const Vop3Fields &f, uint16_t dst_op) {
+  rocjitsu::cdna3::Vop3MachineInst dst{};
+  dst.encoding = 0x34;
   dst.op = dst_op;
   dst.vdst = f.vdst & 0xFF;
   dst.abs = f.abs & 0x7;
@@ -482,9 +522,9 @@ inline TranslationResult encode_vop3_rdna3(const Vop3Fields &f, uint16_t dst_op)
   return r;
 }
 
-inline TranslationResult encode_vop3p_rdna3(const Vop3pFields &f, uint16_t dst_op) {
-  rocjitsu::rdna3::Vop3pMachineInst dst{};
-  dst.encoding = 0xCC;
+inline TranslationResult encode_vop3p_cdna3(const Vop3pFields &f, uint16_t dst_op) {
+  rocjitsu::cdna3::Vop3pMachineInst dst{};
+  dst.encoding = 0x1A7;
   dst.op = dst_op;
   dst.vdst = f.vdst & 0xFF;
   dst.neg_hi = f.neg_hi & 0x7;
@@ -502,9 +542,9 @@ inline TranslationResult encode_vop3p_rdna3(const Vop3pFields &f, uint16_t dst_o
   return r;
 }
 
-inline TranslationResult encode_vop3_sdst_enc_rdna3(const Vop3SdstEncFields &f, uint16_t dst_op) {
-  rocjitsu::rdna3::Vop3SdstEncMachineInst dst{};
-  dst.encoding = 0x35;
+inline TranslationResult encode_vop3_sdst_enc_cdna3(const Vop3SdstEncFields &f, uint16_t dst_op) {
+  rocjitsu::cdna3::Vop3SdstEncMachineInst dst{};
+  dst.encoding = 0x34;
   dst.op = dst_op;
   dst.vdst = f.vdst & 0xFF;
   dst.sdst = f.sdst & 0x7F;
@@ -520,80 +560,84 @@ inline TranslationResult encode_vop3_sdst_enc_rdna3(const Vop3SdstEncFields &f, 
   return r;
 }
 
-inline TranslationResult translate_encoding_cdna4_to_rdna3(uint32_t encoding_id, uint32_t w0,
+inline TranslationResult translate_encoding_cdna4_to_cdna3(uint32_t encoding_id, uint32_t w0,
                                                            uint32_t w1,
                                                            [[maybe_unused]] uint32_t w2,
                                                            uint16_t dst_op) {
   switch (encoding_id) {
   case kEnc_VOP2:
-    return encode_vop2_rdna3(decode_vop2_cdna4(w0), dst_op);
+    return encode_vop2_cdna3(decode_vop2_cdna4(w0), dst_op);
   case kEnc_VOPC:
-    return encode_vopc_rdna3(decode_vopc_cdna4(w0), dst_op);
+    return encode_vopc_cdna3(decode_vopc_cdna4(w0), dst_op);
   case kEnc_VOP1:
-    return encode_vop1_rdna3(decode_vop1_cdna4(w0), dst_op);
+    return encode_vop1_cdna3(decode_vop1_cdna4(w0), dst_op);
   case kEnc_SOP2:
-    return encode_sop2_rdna3(decode_sop2_cdna4(w0), dst_op);
+    return encode_sop2_cdna3(decode_sop2_cdna4(w0), dst_op);
   case kEnc_SOPK:
-    return encode_sopk_rdna3(decode_sopk_cdna4(w0), dst_op);
+    return encode_sopk_cdna3(decode_sopk_cdna4(w0), dst_op);
   case kEnc_SOP1:
-    return encode_sop1_rdna3(decode_sop1_cdna4(w0), dst_op);
+    return encode_sop1_cdna3(decode_sop1_cdna4(w0), dst_op);
   case kEnc_SOPC:
-    return encode_sopc_rdna3(decode_sopc_cdna4(w0), dst_op);
+    return encode_sopc_cdna3(decode_sopc_cdna4(w0), dst_op);
   case kEnc_SOPP:
-    return encode_sopp_rdna3(decode_sopp_cdna4(w0), dst_op);
+    return encode_sopp_cdna3(decode_sopp_cdna4(w0), dst_op);
   case kEnc_SMEM:
-    return encode_smem_rdna3(decode_smem_cdna4(w0, w1), dst_op);
+    return encode_smem_cdna3(decode_smem_cdna4(w0, w1), dst_op);
   case kEnc_VOP3:
-    return encode_vop3_rdna3(decode_vop3_cdna4(w0, w1), dst_op);
+    return encode_vop3_cdna3(decode_vop3_cdna4(w0, w1), dst_op);
   case kEnc_VOP3_SDST_ENC:
-    return encode_vop3_sdst_enc_rdna3(decode_vop3_sdst_enc_cdna4(w0, w1), dst_op);
+    return encode_vop3_sdst_enc_cdna3(decode_vop3_sdst_enc_cdna4(w0, w1), dst_op);
   case kEnc_VOP3P:
-    return encode_vop3p_rdna3(decode_vop3p_cdna4(w0, w1), dst_op);
+    return encode_vop3p_cdna3(decode_vop3p_cdna4(w0, w1), dst_op);
   case kEnc_DS:
-    return encode_ds_rdna3(decode_ds_cdna4(w0, w1), dst_op);
+    return encode_ds_cdna3(decode_ds_cdna4(w0, w1), dst_op);
   case kEnc_FLAT: {
     const uint8_t seg = (w0 >> 14) & 0x3;
     switch (seg) {
     case 0:
-      return encode_flat_rdna3(decode_flat_cdna4(w0, w1), dst_op);
+      return encode_flat_cdna3(decode_flat_cdna4(w0, w1), dst_op);
     case 1:
-      return encode_flat_scratch_rdna3(decode_flat_scratch_cdna4(w0, w1), dst_op);
+      return encode_flat_scratch_cdna3(decode_flat_scratch_cdna4(w0, w1), dst_op);
     case 2:
-      return encode_flat_glbl_rdna3(decode_flat_glbl_cdna4(w0, w1), dst_op);
+      return encode_flat_glbl_cdna3(decode_flat_glbl_cdna4(w0, w1), dst_op);
     default:
       break;
     }
     break;
   }
   case kEnc_MUBUF:
-    return encode_mubuf_rdna3(decode_mubuf_cdna4(w0, w1), dst_op);
+    return encode_mubuf_cdna3(decode_mubuf_cdna4(w0, w1), dst_op);
+  case kEnc_MTBUF:
+    return encode_mtbuf_cdna3(decode_mtbuf_cdna4(w0, w1), dst_op);
   default:
     break;
   }
   if ((encoding_id & 0x1FC) == kEnc_VOPC)
-    return translate_encoding_cdna4_to_rdna3(kEnc_VOPC, w0, w1, w2, dst_op);
+    return translate_encoding_cdna4_to_cdna3(kEnc_VOPC, w0, w1, w2, dst_op);
   if ((encoding_id & 0x1FC) == kEnc_VOP1)
-    return translate_encoding_cdna4_to_rdna3(kEnc_VOP1, w0, w1, w2, dst_op);
+    return translate_encoding_cdna4_to_cdna3(kEnc_VOP1, w0, w1, w2, dst_op);
   if ((encoding_id & 0x1F8) == kEnc_SMEM)
-    return translate_encoding_cdna4_to_rdna3(kEnc_SMEM, w0, w1, w2, dst_op);
+    return translate_encoding_cdna4_to_cdna3(kEnc_SMEM, w0, w1, w2, dst_op);
   if ((encoding_id & 0x1F8) == kEnc_VOP3)
-    return translate_encoding_cdna4_to_rdna3(kEnc_VOP3, w0, w1, w2, dst_op);
+    return translate_encoding_cdna4_to_cdna3(kEnc_VOP3, w0, w1, w2, dst_op);
   if ((encoding_id & 0x1F8) == kEnc_VOP3_SDST_ENC)
-    return translate_encoding_cdna4_to_rdna3(kEnc_VOP3_SDST_ENC, w0, w1, w2, dst_op);
+    return translate_encoding_cdna4_to_cdna3(kEnc_VOP3_SDST_ENC, w0, w1, w2, dst_op);
   if ((encoding_id & 0x1F8) == kEnc_DS)
-    return translate_encoding_cdna4_to_rdna3(kEnc_DS, w0, w1, w2, dst_op);
+    return translate_encoding_cdna4_to_cdna3(kEnc_DS, w0, w1, w2, dst_op);
   if ((encoding_id & 0x1F8) == kEnc_FLAT)
-    return translate_encoding_cdna4_to_rdna3(kEnc_FLAT, w0, w1, w2, dst_op);
+    return translate_encoding_cdna4_to_cdna3(kEnc_FLAT, w0, w1, w2, dst_op);
   if ((encoding_id & 0x1F8) == kEnc_MUBUF)
-    return translate_encoding_cdna4_to_rdna3(kEnc_MUBUF, w0, w1, w2, dst_op);
+    return translate_encoding_cdna4_to_cdna3(kEnc_MUBUF, w0, w1, w2, dst_op);
+  if ((encoding_id & 0x1F8) == kEnc_MTBUF)
+    return translate_encoding_cdna4_to_cdna3(kEnc_MTBUF, w0, w1, w2, dst_op);
   if ((encoding_id & 0x1E0) == kEnc_SOPK)
-    return translate_encoding_cdna4_to_rdna3(kEnc_SOPK, w0, w1, w2, dst_op);
+    return translate_encoding_cdna4_to_cdna3(kEnc_SOPK, w0, w1, w2, dst_op);
   if ((encoding_id & 0x180) == kEnc_SOP2)
-    return translate_encoding_cdna4_to_rdna3(kEnc_SOP2, w0, w1, w2, dst_op);
+    return translate_encoding_cdna4_to_cdna3(kEnc_SOP2, w0, w1, w2, dst_op);
   if ((encoding_id & 0x100) == kEnc_VOP2)
-    return translate_encoding_cdna4_to_rdna3(kEnc_VOP2, w0, w1, w2, dst_op);
+    return translate_encoding_cdna4_to_cdna3(kEnc_VOP2, w0, w1, w2, dst_op);
   return {};
 }
 
-} // namespace cdna4_to_rdna3
+} // namespace cdna4_to_cdna3
 } // namespace rocjitsu
