@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 from utils.logger import console_error, console_warning, demarcate
+from utils.metrics.common import ValuDualIssueDetector
 from utils.metrics.debug_row_tracker import DebugRowTracker, debug_row_tracker
 from utils.metrics.expression import build_eval_string
 from utils.metrics.metric_evaluator import MetricEvaluator
@@ -236,79 +237,32 @@ def validate_dual_issue_metrics(
     sys_info: pd.Series,
     raw_pmc_df: pd.DataFrame,
 ) -> None:
-    """
-    Check if VALU Utilization or VALU FLOPs metrics exceed theoretical peak.
-    Warns about dual-issue behavior.
-    For MI350 (gfx950), additionally verify SQ_ACTIVE_INST_VALU2 counter.
-    """
-    gpu_arch = sys_info.get("gpu_arch", "")
-
-    # Metrics to check for dual-issue warnings
-    valu_utilization_metrics = ["VALU Utilization"]
-    valu_flops_metrics = ["VALU FLOPs (F64)"]
+    """Warn when VALU metrics exceed peak in the eval_metric results."""
+    detector = ValuDualIssueDetector(
+        gpu_arch=sys_info.get("gpu_arch", ""),
+        raw_pmc_df=raw_pmc_df,
+    )
 
     for df_id, df in dfs.items():
         if dfs_type[df_id] != "metric_table":
             continue
         if "Metric" not in df.columns or "Value" not in df.columns:
             continue
-
-        has_peak_column = "Peak (Empirical)" in df.columns or "Peak" in df.columns
-        peak_col = "Peak (Empirical)" if "Peak (Empirical)" in df.columns else "Peak"
-
-        if not has_peak_column:
+        if "Peak (Empirical)" in df.columns:
+            peak_col = "Peak (Empirical)"
+        elif "Peak" in df.columns:
+            peak_col = "Peak"
+        else:
             continue
 
         for _, row in df.iterrows():
             metric_name = row.get("Metric", "")
-
-            if metric_name not in valu_utilization_metrics + valu_flops_metrics:
+            if metric_name not in ValuDualIssueDetector.candidate_metrics:
                 continue
-
             try:
                 value = float(row.get("Value", 0))
                 peak = float(row.get(peak_col, 0))
-
-                if peak > 0 and value > peak:
-                    dual_issue_confirmed = False
-                    if (
-                        gpu_arch == "gfx950"
-                        and "SQ_ACTIVE_INST_VALU2" in raw_pmc_df.columns
-                    ):
-                        valu2_sum = raw_pmc_df["SQ_ACTIVE_INST_VALU2"].sum()
-                        if valu2_sum > 0:
-                            dual_issue_confirmed = True
-
-                    # Determine warning message based on metric type
-                    faq_url = (
-                        "https://rocm.docs.amd.com/projects/"
-                        "rocprofiler-compute/en/latest/reference/"
-                        "faq.html#why-does-valu-utilization-exceed-"
-                        "the-theoretical-peak"
-                    )
-
-                    if metric_name in valu_utilization_metrics:
-                        warning_msg = (
-                            "VALU Utilization can go up to 200% "
-                            "because CU can dual-issue instructions. "
-                            f"See {faq_url} for more information."
-                        )
-                    else:  # VALU FLOPs metrics
-                        warning_msg = (
-                            "VALU FLOPs can exceed the peak value "
-                            "because these instructions can be "
-                            "dual-issued in specific circumstances. "
-                            f"See {faq_url} for more information."
-                        )
-
-                    if gpu_arch == "gfx950" and dual_issue_confirmed:
-                        warning_msg += (
-                            " (Dual-issue activity detected "
-                            "via SQ_ACTIVE_INST_VALU2 counter)"
-                        )
-
-                    console_warning(warning_msg)
-
             except (ValueError, TypeError):
-                # Skip if the value or peak cannot be converted to a float
+                # DB cells may be non-numeric (e.g. "N/A"); skip those.
                 continue
+            detector.check(metric_name, value, peak)
