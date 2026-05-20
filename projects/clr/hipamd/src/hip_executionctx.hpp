@@ -60,6 +60,9 @@ public:
   /// Copy the matching device resource from the resource descriptor into the output.
   hipError_t getDevResource(hipDevResource* resource, hipDevResourceType type);
 
+  /// Return SM co-scheduling alignment for the given device (2 in WGP mode, 1 otherwise).
+  static uint32_t getSmAlignment(int deviceId);
+
   /// Query the full device resource for a device (all CUs).
   static hipError_t deviceGetDevResource(int device, hipDevResource* resource,
                                          hipDevResourceType type);

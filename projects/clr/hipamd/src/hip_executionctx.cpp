@@ -103,6 +103,10 @@ std::vector<uint32_t> ExecutionCtx::buildCuMask(uint32_t startCU, uint32_t count
   return mask;
 }
 
+uint32_t ExecutionCtx::getSmAlignment(int deviceId) {
+  return g_devices[deviceId]->devices()[0]->settings().enableWgpMode_ ? 2 : 1;
+}
+
 void ExecutionCtx::tagResource(hipDevResource* res, uint32_t resourceId, int deviceId) {
   std::memcpy(&res->_internal_padding[0], &resourceId, sizeof(uint32_t));
   int32_t devId = static_cast<int32_t>(deviceId);
@@ -264,13 +268,13 @@ hipError_t ExecutionCtx::deviceGetDevResource(int device, hipDevResource* resour
   resource->type = type;
 
   hipDeviceProp_t prop{};
-  constexpr uint32_t kAlignment = 2;
   HIP_RETURN_ONFAIL(ihipGetDeviceProperties(&prop, device));
   uint32_t cuCount = static_cast<uint32_t>(prop.multiProcessorCount);
+  uint32_t alignment = getSmAlignment(device);
 
   resource->sm.smCount = cuCount;
-  resource->sm.minSmPartitionSize = kAlignment;
-  resource->sm.smCoscheduledAlignment =  kAlignment;
+  resource->sm.minSmPartitionSize = alignment;
+  resource->sm.smCoscheduledAlignment = alignment;
   resource->sm.flags = 0;
 
   resource->nextResource = nullptr;
@@ -351,7 +355,7 @@ hipError_t ExecutionCtx::devSmResourceSplit(
       groupParams[i].preferredCoscheduledSmCount = groupParams[i].coscheduledSmCount;
 
     if (groupParams[i].smCount != 0) {
-      if (groupParams[i].smCount < 2 || groupParams[i].smCount > totalCUs)
+      if (groupParams[i].smCount < defaultAlignment || groupParams[i].smCount > totalCUs)
         return hipErrorInvalidResourceConfiguration;
     }
   }
@@ -724,8 +728,9 @@ hipError_t hipStreamGetDevResource(hipStream_t hStream, hipDevResource* resource
         for (auto word : cuMask) cnt += amd::countBitsSet32(word);
         resource->sm.smCount = cnt;
       }
-      resource->sm.smCoscheduledAlignment = 2;
-      resource->sm.minSmPartitionSize = 2;
+      uint32_t alignment = ExecutionCtx::getSmAlignment(stream->DeviceId());
+      resource->sm.smCoscheduledAlignment = alignment;
+      resource->sm.minSmPartitionSize = alignment;
       resource->sm.flags = 0;
       resource->nextResource = nullptr;
       break;

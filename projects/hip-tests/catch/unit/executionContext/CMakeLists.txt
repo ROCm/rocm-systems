@@ -3,6 +3,7 @@ set(TEST_SRC
   hipExecutionCtxStreamCreate.cc
   hipExecutionCtxRecordEvent.cc
   hipExecutionCtxResourceSplit.cc
+  hipExecutionCtxSmAlignment.cc
 )
 
 hip_add_exe_to_target(

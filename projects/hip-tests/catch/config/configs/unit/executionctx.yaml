@@ -36,3 +36,13 @@ executionctx:
   Unit_hipExecutionCtxResourceSplit_Disjoint_Sets:
     <<: *level_2
     disabled: [nvidia_linux]
+  Unit_hipExecutionCtxSmAlignment_DeviceGetDevResource:
+    <<: *level_2
+  Unit_hipExecutionCtxSmAlignment_StreamGetDevResource:
+    <<: *level_2
+  Unit_hipExecutionCtxSmAlignment_PropagatesThroughSplit:
+    <<: *level_2
+  Unit_hipExecutionCtxSmAlignment_GreenCtxPreservesAlignment:
+    <<: *level_2
+  Unit_hipExecutionCtxSmAlignment_IgnoreCoschedulingFlag:
+    <<: *level_2
