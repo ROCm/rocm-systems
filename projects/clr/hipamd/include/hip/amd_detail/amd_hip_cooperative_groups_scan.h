@@ -152,7 +152,7 @@ namespace impl {
       // not; if the block tile is actually the whole warp
       if (impl::tiledGroupSize<TyGroup>::value == warpSize) {
         if constexpr (impl::isArithmeticFunc<Val, Op>::value && impl::has_arithmetic_scan<Val>::value ||
-                      impl::isBooleanFunc<Val, Op>::value && impl::has_boolean_scan<Val, Op>::value) {
+                      impl::isBooleanFunc<Val, Op>::value && impl::has_boolean_scan<Val>::value) {
           return impl::call_scan<Val, Op, Inclusive>(val);
         }
       }
@@ -161,7 +161,7 @@ namespace impl {
       // this branch
       if (maskNumBits == warpSize) {
         if constexpr (impl::isArithmeticFunc<Val, Op>::value && impl::has_arithmetic_scan<Val>::value ||
-                      impl::isBooleanFunc<Val, Op>::value && impl::has_boolean_scan<Val, Op>::value) {
+                      impl::isBooleanFunc<Val, Op>::value && impl::has_boolean_scan<Val>::value) {
           return impl::call_scan<Val, Op, Inclusive>(val);
         }
       }
