@@ -745,19 +745,29 @@ struct formatter<hipDevResource> : rocprofiler::hip::details::base_formatter
         switch(v.type)
         {
             case hipDevResourceTypeSm:
-                return fmt::format_to(
-                    ctx.out(), "{}type={}, sm={}, nextResource={}{}",
-                    '{', v.type, v.sm, static_cast<const void*>(v.nextResource), '}');
+                return fmt::format_to(ctx.out(),
+                                      "{}type={}, sm={}, nextResource={}{}",
+                                      '{',
+                                      v.type,
+                                      v.sm,
+                                      static_cast<const void*>(v.nextResource),
+                                      '}');
             case hipDevResourceTypeWorkqueueConfig:
-                return fmt::format_to(
-                    ctx.out(), "{}type={}, wqConfig={}, nextResource={}{}",
-                    '{', v.type, v.wqConfig, static_cast<const void*>(v.nextResource), '}');
-            default:
-                break;
+                return fmt::format_to(ctx.out(),
+                                      "{}type={}, wqConfig={}, nextResource={}{}",
+                                      '{',
+                                      v.type,
+                                      v.wqConfig,
+                                      static_cast<const void*>(v.nextResource),
+                                      '}');
+            default: break;
         }
-        return fmt::format_to(
-            ctx.out(), "{}type={}, nextResource={}{}",
-            '{', v.type, static_cast<const void*>(v.nextResource), '}');
+        return fmt::format_to(ctx.out(),
+                              "{}type={}, nextResource={}{}",
+                              '{',
+                              v.type,
+                              static_cast<const void*>(v.nextResource),
+                              '}');
     }
 };
 
