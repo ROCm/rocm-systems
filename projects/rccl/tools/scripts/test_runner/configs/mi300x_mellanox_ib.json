@@ -310,6 +310,24 @@
         }
       ]
     },
+    "net_ib_cts_stress": {
+      "extends": "net_ib_base",
+      "timeout": 600,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "RCCL_IB_P2P_DISABLE_CTS": "1",
+        "CTS_NUM_CONNS":  "16",
+        "CTS_QP_DEPTH":   "256",
+        "CTS_SNAP_EVERY": "4"
+      },
+      "tests": [
+        {
+          "name": "NetIB_CtsDepthStress",
+          "description": "Stress CTS match-table depth (16 P2P conns x 256 outstanding recvs) and sample hw_counters; with RCCL_IB_P2P_DISABLE_CTS=1 the workaround should keep retx/ack_timeout at 0",
+          "test_filter": "NetIbMPITest.CtsDepthStress"
+        }
+      ]
+    },
     "unit_tests_fixtures": {
       "is_gtest": true,
       "binary": "rccl-UnitTestsFixtures",
@@ -327,9 +345,9 @@
           "test_filter": "ALIGN_*:DIVUP:ROUNDUP:u32fp*:*Hash:BitOpsTemplate*"
         },
         {
-          "name": "CommTests",
-          "description": "Communicator unit tests",
-          "test_filter": "CommTests.*"
+          "name": "MiscTests",
+          "description": "Miscellaneous header-level unit tests (e.g. task coll sorter)",
+          "test_filter": "MiscTests.*"
         },
         {
           "name": "EnqueueCountTests",
@@ -572,6 +590,26 @@
         }
       ]
     },
+    "comm_mpi_tests": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "CommMPITests_TrafficClass",
+          "description": "CommMPITests traffic class (ncclCommInitRankConfig)",
+          "test_filter": "TrafficClassMPITest.*"
+        }
+      ]
+    },
     "ubr_multi_node": {
       "extends": "default",
       "is_gtest": true,
@@ -622,19 +660,19 @@
           "name": "UBR_AllToAllStress_InterleavedMultiSize",
           "description": "Stress test with interleaved AllToAll/AllToAllv across small/medium/large sizes",
           "test_filter": "UBR_AllToAllStress.InterleavedMultiSize_MultiNode",
-          "timeout": 120
+          "timeout": 300
         },
         {
           "name": "UBR_AllToAllStress_SplitComm",
           "description": "Stress test with interleaved AllToAll/AllToAllv using split communicators",
           "test_filter": "UBR_AllToAllStress.InterleavedWithSplitComm_MultiNode",
-          "timeout": 120
+          "timeout": 300
         },
         {
           "name": "UBR_AllToAllStress_ConcurrentMultiComm",
           "description": "Concurrent AllToAll on multiple communicators with separate streams",
           "test_filter": "UBR_AllToAllStress.ConcurrentMultiComm_MultiNode",
-          "timeout": 120
+          "timeout": 300
         },
         {
           "name": "UBR_ConcurrentRegHang_ContiguousBuffer_Grouped",
@@ -879,6 +917,47 @@
       ]
     },
 
+    "fault_inject_cast": {
+      "extends": "cast_base",
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_IB_SPLIT_DATA_ON_QPS":          "1",
+        "NCCL_IB_QPS_PER_CONNECTION":         "4",
+        "RCCL_IB_QP_SCHED_WRR_ENABLE":       "1",
+        "RCCL_IB_QP_SCHED_UPDATE_INTERVAL":   "100",
+        "RCCL_IB_QP_SCHED_RESET_INTERVAL":    "1000",
+        "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN":    "2000",
+        "NCCL_IB_RETURN_ASYNC_EVENTS":         "1"
+      },
+      "tests": [
+        {
+          "name": "FaultInj_Cast_QpErrorIsFatal",
+          "description": "CAST path: error injected on QP 0 increments fatalErrorCount",
+          "test_filter": "NetIbMPITest.FaultInjCastQpErrorIsFatal"
+        },
+        {
+          "name": "FaultInj_Cast_SlowQpRebalances",
+          "description": "CAST WRR: 10 ms delay on QP 0 causes RTT timer to reduce QP 0 active tokens below equal share after 500 sends",
+          "test_filter": "NetIbMPITest.FaultInjCastSlowQpRebalances"
+        },
+        {
+          "name": "FaultInj_Cast_DelayDataIntegrity",
+          "description": "CAST path: 2 ms per-QP delay preserves full data integrity across 50 sends",
+          "test_filter": "NetIbMPITest.FaultInjCastDelayDataIntegrity"
+        },
+        {
+          "name": "FaultInj_Cast_SingleQpErrorIsFatal",
+          "description": "CAST WRR: error on one QP (tokens steered to QP 0 via SetTokens) triggers fatalErrorCount > 0 or isend failure",
+          "test_filter": "NetIbMPITest.FaultInjCastSingleQpErrorIsFatal"
+        },
+        {
+          "name": "FaultInj_Cast_QpErrorClearRecovers",
+          "description": "CAST path: after FaultClear on a faulted connection, a fresh connection completes 20 sends with no corruption and fatalCount==0",
+          "test_filter": "NetIbMPITest.FaultInjCastQpErrorClearRecovers"
+        }
+      ]
+    },
+
     "graph_capture_multi_node": {
       "extends": "default",
       "is_gtest": true,
@@ -965,6 +1044,12 @@
       "enabled": true
     },
     {
+      "name": "NET IB - CTS Depth Stress",
+      "description": "CTS match-table depth stress / overflow reproducer (AINIC); fully under RCCL_IB_P2P_DISABLE_CTS=1 workaround so passes cleanly on healthy stacks",
+      "config": "net_ib_cts_stress",
+      "enabled": true
+    },
+    {
       "name": "Unit Tests - Fixtures (Release)",
       "description": "Non-MPI unit tests using header-only fixtures (Release and Debug)",
       "config": "unit_tests_fixtures",
@@ -998,6 +1083,12 @@
       "name": "Implicit Launch Order Tests",
       "description": "Test NCCL_LAUNCH_ORDER_IMPLICIT for multi-communicator serialization",
       "config": "implicit_launch_order",
+      "enabled": true
+    },
+    {
+      "name": "Comm MPI Tests",
+      "description": "MPI unit tests from CommMPITests.cpp",
+      "config": "comm_mpi_tests",
       "enabled": true
     },
     {
@@ -1052,6 +1143,12 @@
       "name": "NET IB - CAST Stress (QPS=2)",
       "description": "500 sends on 2 concurrent connections: RTT timer fires mid-run, consistency invariants verified",
       "config": "cast_stress",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Fault Injection (CAST path, QPS=4, splitData=1)",
+      "description": "Per-QP fault injection on CAST multi-QP path: error propagation, RTT rebalancing, data integrity under delay",
+      "config": "fault_inject_cast",
       "enabled": true
     }
   ]

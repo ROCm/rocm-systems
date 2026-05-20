@@ -41,6 +41,8 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <cassert>
+#include <chrono>
+#include <thread>
 #include <cstring>
 #include <regex>
 #include <string>
@@ -49,8 +51,6 @@
 #include <dlfcn.h>
 #include <amdgpu_drm.h>
 #include <sys/mman.h>
-#else
-#define debug_warning(__VA_ARGS__)
 #endif
 
 #include "core/inc/runtime.h"
@@ -65,6 +65,7 @@
 #include "core/inc/amd_core_dump.hpp"
 #include "core/inc/amd_cpu_agent.h"
 #include "core/inc/amd_gpu_agent.h"
+#include "core/inc/amd_aql_queue.h"
 #include "core/inc/amd_memory_region.h"
 #include "core/inc/amd_topology.h"
 #include "core/inc/exceptions.h"
@@ -1412,7 +1413,7 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
       runtime_singleton_->DmaBufClose(dmabuf_fd);
       return HSA_STATUS_ERROR;
     }
-    // Reuse token already stored on the BO 
+    // Reuse token already stored on the BO
     if (res.metadata != 0) handle->handle[7] = res.metadata;
     allocation_map_[ptr].thunk_bo = res.buf_handle;
   }
@@ -1512,14 +1513,17 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
         return -1;
       }
 
-      // Store the buffer object handle in allocation map for later use
+      // Store the buffer object handle in allocation map for later use.
+      // If a stale entry exists at this VA (from a previous import that was
+      // never detached), free the old BO first to avoid leaking it.
       if (status == HSAKMT_STATUS_SUCCESS) {
         std::lock_guard<std::shared_mutex> lock(memory_lock_);
         auto [it, inserted] = allocation_map_.try_emplace(
         *importAddress, nullptr, *importSize, *importSize, core::MemoryRegion::AllocateNoFlags);
-        if (inserted) {
-          it->second.thunk_bo = res.buf_handle;
+        if (!inserted && it->second.thunk_bo) {
+          HSAKMT_CALL(hsaKmtMemHandleFree(it->second.thunk_bo));
         }
+        it->second.thunk_bo = res.buf_handle;
       }
       runtime_singleton_->DmaBufClose(static_cast<int>(dmabuf_fd));
     }
@@ -1622,6 +1626,7 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
 
     // Create a shared cpu access pointer for user
     void *cpuPtr;
+    void* intermediateAddr = importAddress;
     HsaMemoryObjectHandle bo = allocation_map_[importAddress].thunk_bo;
     HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryCpuMap(bo, &cpuPtr));
     if (status != HSAKMT_STATUS_SUCCESS) {
@@ -1634,6 +1639,14 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
     }
     importAddress = cpuPtr;
     fixFragment(bo);
+
+    // Remove the stale intermediate entry created by IPCClientImport.
+    // The canonical entry now lives at cpuPtr (set by fixFragment above).
+    if (intermediateAddr != importAddress) {
+      std::lock_guard<std::shared_mutex> lock(memory_lock_);
+      allocation_map_.erase(intermediateAddr);
+    }
+
     *mapped_ptr = importAddress;
     return HSA_STATUS_SUCCESS;
   }
@@ -1929,7 +1942,7 @@ void Runtime::AsyncEventsPool::clear() {
     size_t capacity = 0;
     for (auto& block : block_list_) capacity += block.second;
     if (capacity != free_list_.size())
-      debug_print("Warning: Resource leak detected by AsyncEventsPool, %ld items leaked.\n",
+      debug_print("Warning: Resource leak detected by AsyncEventsPool, %zd items leaked.\n",
                   capacity - free_list_.size());
   }
 
@@ -2141,6 +2154,45 @@ bool Runtime::VMFaultHandler(hsa_signal_value_t val, void* arg) {
   HsaMemoryAccessFault& fault =
       vm_fault_event->EventData.EventData.MemoryAccessFault;
 
+  // The per-queue ExceptionHandler runs on a separate thread and marks the
+  // faulting queue.  Wait for it so we can stamp address/reason onto the
+  // correct queue before the system-event callback fires.
+  if (runtime_singleton_->KfdVersion().supports_exception_debugging) {
+    runtime_singleton_->WaitForVMFault(50);
+  }
+
+  // Build the fault-reason mask once.
+  auto buildReasonMask = [](const HsaAccessAttributeFailure& f) -> uint32_t {
+    uint32_t mask = 0;
+    if (f.NotPresent == 1) mask |= HSA_AMD_MEMORY_FAULT_PAGE_NOT_PRESENT;
+    if (f.ReadOnly == 1)   mask |= HSA_AMD_MEMORY_FAULT_READ_ONLY;
+    if (f.NoExecute == 1)  mask |= HSA_AMD_MEMORY_FAULT_NX;
+    if (f.GpuAccess == 1)  mask |= HSA_AMD_MEMORY_FAULT_HOST_ONLY;
+    if (f.Imprecise == 1)  mask |= HSA_AMD_MEMORY_FAULT_IMPRECISE;
+    if (f.ECC == 1 && f.ErrorType == 0) mask |= HSA_AMD_MEMORY_FAULT_DRAMECC;
+    if (f.ErrorType == 1)  mask |= HSA_AMD_MEMORY_FAULT_SRAMECC;
+    if (f.ErrorType == 2)  mask |= HSA_AMD_MEMORY_FAULT_DRAMECC;
+    if (f.ErrorType == 3)  mask |= HSA_AMD_MEMORY_FAULT_HANG;
+    return mask;
+  };
+  uint32_t reason_mask = buildReasonMask(fault.Failure);
+
+  // Stamp fault address and reason onto any queues that ExceptionHandler
+  // marked as faulted on this agent.
+  auto node_it = runtime_singleton_->agents_by_node_.find(fault.NodeId);
+  if (node_it != runtime_singleton_->agents_by_node_.end()) {
+    Agent* agent = node_it->second.front();
+    if (agent->device_type() == Agent::DeviceType::kAmdGpuDevice) {
+      AMD::GpuAgent* gpu_agent = static_cast<AMD::GpuAgent*>(agent);
+      for (auto* q : gpu_agent->GetAqlQueues()) {
+        auto* aql_q = static_cast<AMD::AqlQueue*>(q);
+        if (aql_q->IsVMFaulted()) {
+          aql_q->SetVMFaultDetails(fault.VirtualAddress, reason_mask);
+        }
+      }
+    }
+  }
+
   hsa_status_t custom_handler_status = HSA_STATUS_ERROR;
   auto system_event_handlers = runtime_singleton_->GetSystemEventHandlers();
   Agent* faulty_agent = nullptr;
@@ -2157,34 +2209,7 @@ bool Runtime::VMFaultHandler(hsa_signal_value_t val, void* arg) {
     fault_info.agent = Agent::Convert(faulty_agent);
 
     fault_info.virtual_address = fault.VirtualAddress;
-    fault_info.fault_reason_mask = 0;
-    if (fault.Failure.NotPresent == 1) {
-      fault_info.fault_reason_mask |= HSA_AMD_MEMORY_FAULT_PAGE_NOT_PRESENT;
-    }
-    if (fault.Failure.ReadOnly == 1) {
-      fault_info.fault_reason_mask |= HSA_AMD_MEMORY_FAULT_READ_ONLY;
-    }
-    if (fault.Failure.NoExecute == 1) {
-      fault_info.fault_reason_mask |= HSA_AMD_MEMORY_FAULT_NX;
-    }
-    if (fault.Failure.GpuAccess == 1) {
-      fault_info.fault_reason_mask |= HSA_AMD_MEMORY_FAULT_HOST_ONLY;
-    }
-    if (fault.Failure.Imprecise == 1) {
-      fault_info.fault_reason_mask |= HSA_AMD_MEMORY_FAULT_IMPRECISE;
-    }
-    if (fault.Failure.ECC == 1 && fault.Failure.ErrorType == 0) {
-      fault_info.fault_reason_mask |= HSA_AMD_MEMORY_FAULT_DRAMECC;
-    }
-    if (fault.Failure.ErrorType == 1) {
-      fault_info.fault_reason_mask |= HSA_AMD_MEMORY_FAULT_SRAMECC;
-    }
-    if (fault.Failure.ErrorType == 2) {
-      fault_info.fault_reason_mask |= HSA_AMD_MEMORY_FAULT_DRAMECC;
-    }
-    if (fault.Failure.ErrorType == 3) {
-      fault_info.fault_reason_mask |= HSA_AMD_MEMORY_FAULT_HANG;
-    }
+    fault_info.fault_reason_mask = reason_mask;
 
     for (auto& callback : system_event_handlers) {
       hsa_status_t err = callback.first(&memory_fault_event, callback.second);
@@ -2270,7 +2295,7 @@ void Runtime::PrintMemoryMapNear(void* ptr) {
       else if (region->IsLDS())
         kind = "LDS";
     }
-    fprintf(stderr, "%p, 0x%lx, %s\n", it->first, it->second.size, kind.c_str());
+    fprintf(stderr, "%p, 0x%zx, %s\n", it->first, it->second.size, kind.c_str());
     it++;
   }
   fprintf(stderr, "\n");
@@ -2287,14 +2312,14 @@ void Runtime::PrintMemoryMapNear(void* ptr) {
     hsa_status_t err = runtime_singleton_->PtrInfo(const_cast<void*>(it->first), &info, malloc,
                                                    &count, &canAccess, &block);
     if (err == HSA_STATUS_SUCCESS) {
-      fprintf(stderr, "PtrInfo:\n\tAddress: %p-%p/%p-%p\n\tSize: 0x%lx\n\tType: %u\n\tOwner: %p\n",
+      fprintf(stderr, "PtrInfo:\n\tAddress: %p-%p/%p-%p\n\tSize: 0x%zx\n\tType: %u\n\tOwner: %p\n",
               info.agentBaseAddress, (char*)info.agentBaseAddress + info.sizeInBytes,
               info.hostBaseAddress, (char*)info.hostBaseAddress + info.sizeInBytes, info.sizeInBytes,
               info.type, reinterpret_cast<void*>(info.agentOwner.handle));
       fprintf(stderr, "\tCanAccess: %u\n", count);
       for (int t = 0; t < count; t++)
         fprintf(stderr, "\t\t%p\n", reinterpret_cast<void*>(canAccess[t].handle));
-      fprintf(stderr, "\tIn block: %p, 0x%lx\n", block.base, block.length);
+      fprintf(stderr, "\tIn block: %p, 0x%zx\n", block.base, block.length);
       free(canAccess);
     }
     it++;
@@ -3430,7 +3455,7 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
   return HSA_STATUS_ERROR;
 #else
   const size_t kPageSize = os::PageSize();
-  
+
   // Get a CPU agent for migration target
   if (cpu_agents().empty()) return HSA_STATUS_ERROR;
 
@@ -3443,7 +3468,7 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
       debug_warning(false && "Retrieving SVM pointer information failed");
       return status;
     }
-    
+
     // Only SVM allocations that were reserved using hsa_amd_vmem_address_reserve are valid for discard
     if (ptr_info.type != HSA_EXT_POINTER_TYPE_RESERVED_ADDR || ptr_info.registered) {
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -3460,7 +3485,7 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
 
   DiscardOp* op = new DiscardOp();
   MAKE_NAMED_SCOPE_GUARD(OpGuard, [&]() { delete op; });
-  
+
   // Prepare memory regions with page alignment and store target cpu agent for each region
   op->regions.reserve(count);
   op->target_cpus.reserve(count);
@@ -3481,10 +3506,10 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
     AMD::CpuAgent* cpu = nullptr;
     HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtSVMGetAttr(base, len, 1, &attr));
 
-    if (status == HSAKMT_STATUS_SUCCESS && 
+    if (status == HSAKMT_STATUS_SUCCESS &&
         (attr.value != 0xFFFFFFFF && attr.value != INVALID_NODEID)) {
       core::Agent* agent = agents_by_node_[attr.value][0];
-      
+
       if (agent->device_type() == core::Agent::kAmdCpuDevice) {
         // Already on a CPU agent; skip prefetch for this region
         op->target_cpus.push_back(UINT32_MAX);
@@ -3543,7 +3568,7 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
     delete op;
   };
 
-  /* Each pending dep signal calls this handler when it reaches 0. 
+  /* Each pending dep signal calls this handler when it reaches 0.
   The last one to decrement remaining_deps to 0 will triggers the discard. */
   static hsa_amd_signal_handler signal_handler = [](hsa_signal_value_t value, void* arg) {
     DiscardOp* op = reinterpret_cast<DiscardOp*>(arg);
@@ -3567,15 +3592,15 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
     op->remaining_deps.store(static_cast<uint32_t>(pending_deps.size()),
                              std::memory_order_release);
     for (size_t i = 0; i < pending_deps.size(); i++) {
-      /* SetAsyncSignalHandler currently always returns HSA_STATUS_SUCCESS. If it is modified to 
-      return errors in the future, we need to handle the possibility of use-after-free and double deletion 
+      /* SetAsyncSignalHandler currently always returns HSA_STATUS_SUCCESS. If it is modified to
+      return errors in the future, we need to handle the possibility of use-after-free and double deletion
       of op if this call fails midway and leaves some handlers set but not others. */
       SetAsyncSignalHandler(pending_deps[i], HSA_SIGNAL_CONDITION_EQ, 0, signal_handler, op);
     }
   }
 
   OpGuard.Dismiss();
-  return HSA_STATUS_SUCCESS;  
+  return HSA_STATUS_SUCCESS;
 #endif
 }
 
@@ -3650,8 +3675,7 @@ hsa_status_t Runtime::VMemoryAddressReserve(void** va, size_t size, uint64_t add
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
 
   if (flags & HSA_AMD_VMEM_ADDRESS_NO_REGISTER) {
-    size_t requested = size + alignment - rocr::os::PageSize();
-    auto mem = rocr::os::ReserveMemory(addr, requested, alignment, rocr::os::MEM_PROT_RW);
+    auto mem = rocr::os::ReserveMemory(addr, size, alignment, rocr::os::MEM_PROT_RW);
     if (mem == nullptr)
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 

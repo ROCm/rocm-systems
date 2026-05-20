@@ -112,11 +112,16 @@ hsa_status_t CommonCleanUp(BaseRocR* test) {
   RET_IF_HSA_UTILS_ERR(err);
 
   // Ensure that HSA is actually closed.
+#ifndef ROCRTST_ASAN
+  // Under ASan, the sanitizer's hsa_init interceptor holds an extra reference
+  // count, so the runtime is still alive here.  Skip this check to avoid
+  // tearing down the runtime while ASan still expects it to be available.
   hsa_status_t check = hsa_shut_down();
   if (check != HSA_STATUS_ERROR_NOT_INITIALIZED) {
     EXPECT_EQ(HSA_STATUS_ERROR_NOT_INITIALIZED, check) << "hsa_init reference count was too high.";
     return HSA_STATUS_ERROR;
   }
+#endif
 
   std::string intr_val;
 

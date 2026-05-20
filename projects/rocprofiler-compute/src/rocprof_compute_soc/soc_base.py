@@ -16,7 +16,7 @@ from typing import Any, Optional
 
 import config
 from roofline.run_benchmark import run_roofline_benchmark
-from utils.amdsmi_interface import amdsmi_ctx, get_gpu_model, get_mem_max_clock
+from utils import amdsmi_interface
 from utils.logger import (
     console_debug,
     console_error,
@@ -39,7 +39,7 @@ from utils.utils_common import (
     validate_roofline_csv,
 )
 from utils.utils_counter_defs import (
-    BLOCK_REMAP,
+    counter_to_block,
     extract_counters,
 )
 from vendored import yaml
@@ -225,8 +225,8 @@ class OmniSoC_Base:
                 )
             )
 
-        with amdsmi_ctx():
-            self._mspec.max_mclk = str(get_mem_max_clock())
+        with amdsmi_interface.amdsmi_ctx():
+            self._mspec.max_mclk = str(amdsmi_interface.get_mem_max_clock())
 
         # These are just max values now, because the parsing was broken and this was
         # inconsistent with how we use the clocks elsewhere (all max, all the time)
@@ -257,10 +257,10 @@ class OmniSoC_Base:
         Detects the GPU model using various identifiers from 'amd-smi static'.
         Falls back through multiple methods if the primary method fails.
         """
-        with amdsmi_ctx():
+        with amdsmi_interface.amdsmi_ctx():
             gpu_model = "N/A"
             for model in mi_gpu_specs.get_all_gpu_models():
-                for amdsmi_gpu_model in get_gpu_model():
+                for amdsmi_gpu_model in amdsmi_interface.get_gpu_model():
                     if model.lower() in amdsmi_gpu_model.lower():
                         gpu_model = model
                         break
@@ -312,7 +312,7 @@ class OmniSoC_Base:
             )
             return
 
-        with open(config_filename_dict[file_id]) as stream:
+        with open(config_filename_dict[file_id], encoding="utf-8") as stream:
             file_config = yaml.safe_load(stream)
         if panel_id is None:
             texts.append(yaml.dump(file_config, sort_keys=False))
@@ -362,7 +362,7 @@ class OmniSoC_Base:
         output_files: list[CounterFile],
         file_count: int,
     ) -> tuple[set[str], list[CounterFile], int]:
-        """Greedy heuristic: place each metric’s counters into the first feasible
+        """Greedy heuristic: place each metric's counters into the first feasible
         pmc_perf bucket, else open a new one. Overflow stays for first-fit.
 
         Accepts:
@@ -420,7 +420,7 @@ class OmniSoC_Base:
                 continue
             placed = False
             for bucket_idx, bucket in enumerate(files):
-                if "LEVEL" in bucket.file_name_txt:
+                if bucket.name.endswith("_ACCUM"):
                     continue
                 trial = _trial_counter_file_with_extra(bucket, cfg, need_sorted)
                 if trial is not None:
@@ -487,7 +487,7 @@ class OmniSoC_Base:
                 if file_id in exclude_file_ids:
                     continue
 
-                with open(filename) as stream:
+                with open(filename, encoding="utf-8") as stream:
                     texts.append(stream.read())
 
         for block_id in filter_blocks:
@@ -527,9 +527,6 @@ class OmniSoC_Base:
             )
             return filter_blocks
 
-        # SQ_ACCUM_PREV_HIRES will be injected for level counters later on
-        counters = counters - {"SQ_ACCUM_PREV_HIRES"}
-
         # Coalesce and writeback workload specific perfmon
         self.perfmon_coalesce(counters)
 
@@ -542,23 +539,22 @@ class OmniSoC_Base:
 
         Returns (output_files, file_count, accu_file_count).
 
-        LEVEL counters get dedicated files first. If the arch has priority
-        metrics in profiling_counter_grouping_policy.yaml, a metric-aware
-        greedy pass runs before the final per-counter first-fit.
+        Accumulator counters (ending with _ACCUM) get dedicated files first.
+        If the arch has priority metrics in profiling_counter_grouping_policy.yaml,
+        a metric-aware greedy pass runs before the final per-counter first-fit.
         """
         output_files: list[CounterFile] = []
         accu_file_count = 0
         work = sorted(list(counters))
         for counter in work.copy():
-            if (
-                "LEVEL" in counter
-                and not counter.endswith("_sum")
-                and not is_tcc_channel_counter(counter)
-            ):
+            if counter.endswith("_ACCUM") and not is_tcc_channel_counter(counter):
                 work.remove(counter)
                 output_files.append(CounterFile(counter, self.__perfmon_config))
                 output_files[-1].add(counter)
-                output_files[-1].add(f"{counter}_ACCUM")
+                # Paired level-event slot: hardware programs the level counter
+                # alongside its accumulator, so hold one extra slot in the
+                # same block.
+                output_files[-1].reserve(counter, 1)
                 accu_file_count += 1
 
         file_count = 0
@@ -664,6 +660,7 @@ class OmniSoC_Base:
             / "rocprof_compute_soc"
             / "profile_configs"
             / "sdk_config.yaml",
+            encoding="utf-8",
         ) as filename:
             sdk_config = yaml.safe_load(filename)
         os.environ["ROCPROFILER_METRICS_PATH"] = create_temp_rocprofiler_metrics_path(
@@ -816,13 +813,15 @@ class OmniSoC_Base:
                             pmc.append(f"{ctr}:device={gpu_idx}")
 
                 # Write counters to file
-                with open(file_name, "w") as fd:
+                with open(file_name, "w", encoding="utf-8") as fd:
                     fd.write(yaml.dump({"jobs": [{"pmc": pmc}]}, sort_keys=False))
         else:
             # Output to files
             for f in output_files:
-                pmc_filename = workload_perfmon_dir / f.pmc_filename
-                counter_def_filename = workload_perfmon_dir / f.counter_def_filename
+                pmc_filename = workload_perfmon_dir / f"pmc_perf_{f.name}.yaml"
+                counter_def_filename = (
+                    workload_perfmon_dir / f"counter_def_{f.name}.yaml"
+                )
 
                 pmc = []
                 counter_def: dict[str, Any] = {}
@@ -857,12 +856,12 @@ class OmniSoC_Base:
                         )
 
                 # Write counters to file
-                with open(pmc_filename, "w") as fd:
+                with open(pmc_filename, "w", encoding="utf-8") as fd:
                     fd.write(yaml.dump({"jobs": [{"pmc": pmc}]}, sort_keys=False))
 
                 # Write counter definitions to file
                 if counter_def:
-                    with open(counter_def_filename, "w") as fp:
+                    with open(counter_def_filename, "w", encoding="utf-8") as fp:
                         fp.write(yaml.dump(counter_def, sort_keys=False))
 
     # ----------------------------------------------------
@@ -900,7 +899,9 @@ class OmniSoC_Base:
             )
             if not roofline_csv.is_file():
                 try:
-                    run_roofline_benchmark(self.get_args().device, roofline_csv)
+                    run_roofline_benchmark(
+                        self.get_args().device, roofline_csv, self._mspec.cache_sizes
+                    )
                 except Exception as e:
                     console_error(
                         "roofline",
@@ -949,22 +950,27 @@ class LimitedSet:
             return True
         return False
 
+    def reserve(self, n: int) -> bool:
+        if self.avail < n:
+            return False
+        self.avail -= n
+        return True
+
 
 # Represents a file that lists PMC counters. Number of counters for each
 # block limited according to perfmon config.
 class CounterFile:
     def __init__(self, name: str, perfmon_config: dict[str, int]) -> None:
-        self.file_name_txt: str = f"pmc_perf_{name}.txt"
-        self.pmc_filename: str = f"pmc_perf_{name}.yaml"
-        self.counter_def_filename: str = f"counter_def_{name}.yaml"
+        self.name: str = name
         self.blocks: dict[str, LimitedSet] = {
             block: LimitedSet(capacity) for block, capacity in perfmon_config.items()
         }
 
     def add(self, counter: str) -> bool:
-        block = counter.split("_")[0]
-        block = BLOCK_REMAP.get(block, block)
-        return self.blocks[block].add(counter)
+        return self.blocks[counter_to_block(counter)].add(counter)
+
+    def reserve(self, counter: str, n: int) -> bool:
+        return self.blocks[counter_to_block(counter)].reserve(n)
 
 
 def _trial_counter_file_with_extra(
@@ -973,11 +979,10 @@ def _trial_counter_file_with_extra(
     extra_counters_sorted: list[str],
 ) -> CounterFile | None:
     """Clone basis, try appending extras; None if any won't fit."""
-    original_name = basis.file_name_txt.removeprefix("pmc_perf_").removesuffix(".txt")
-    trial = CounterFile(original_name, perfmon_config)
+    trial = CounterFile(basis.name, perfmon_config)
     for ctr in flat_counters_in_perfmon_file(basis):
         if not trial.add(ctr):
-            msg = f"clone replay failed for {ctr!r} in {basis.file_name_txt}"
+            msg = f"clone replay failed for {ctr!r} in bucket {basis.name!r}"
             raise RuntimeError(msg)
     for ctr in extra_counters_sorted:
         if not trial.add(ctr):

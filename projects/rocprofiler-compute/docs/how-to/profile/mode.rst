@@ -512,8 +512,7 @@ To see a list of available hardware report blocks, use the ``--list-available-me
    2 -> System Speed-of-Light
          2.1 -> Speed-of-Light
                   2.1.0 -> VALU FLOPs
-                  2.1.1 -> VALU IOPs
-                  2.1.2 -> MFMA FLOPs (F8)
+                  2.1.1 -> MFMA FLOPs (F8)
    ...
    5 -> Command Processor (CPC/CPF)
          5.1 -> Command Processor Fetcher
@@ -600,8 +599,9 @@ Dispatch filtering
 
 Dispatch filtering selects which iterations of each kernel to profile.
 Indices are 1-based, so the first dispatch of a kernel is ``1``. Each
-value is a positive integer or a ``start:end`` range with
-``start <= end`` (for example, ``1`` or ``3:5``).
+value is a positive integer or a range with ``start <= end``, written as
+either ``start:end`` or ``start-end`` (for example, ``1``, ``3:5``, or
+``3-5``).
 
 The following example profiles the first dispatch of each kernel in the
 application.

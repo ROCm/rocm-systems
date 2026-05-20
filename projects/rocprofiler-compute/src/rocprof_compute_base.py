@@ -39,10 +39,10 @@ from utils.utils_common import (
     get_version_display,
     load_panel_configs,
     parse_sets_yaml,
+    reconfigure_stdio_utf8,
     replace_env,
     replace_rank,
     resolve_rocm_library_path,
-    set_locale_encoding,
     validate_roofline_csv,
 )
 from utils.utils_exceptions import WorkloadCommandError
@@ -71,7 +71,7 @@ class RocProfCompute:
             self.__args.verbose, self.__args.quiet, self.__mode, gui_value
         )
         setattr(self.__args, "loglevel", self.__loglevel)
-        set_locale_encoding()
+        reconfigure_stdio_utf8()
 
         self.sanitize()
 
@@ -135,7 +135,7 @@ class RocProfCompute:
             self.__analyze_mode = "web_ui"
         elif self.__args.tui:
             self.__analyze_mode = "tui"
-        elif self.__args.output_format == "db":
+        elif self.__args.output_format in ("db", "csv"):
             self.__analyze_mode = "db"
         else:
             self.__analyze_mode = "cli"
@@ -644,7 +644,9 @@ class RocProfCompute:
         with tempfile.TemporaryDirectory(prefix="rocprof_bench_") as tmp_dir:
             tmp_csv = Path(tmp_dir) / "roofline.csv"
             try:
-                run_roofline_benchmark(self.__args.device, tmp_csv)
+                run_roofline_benchmark(
+                    self.__args.device, tmp_csv, self.__mspec.cache_sizes
+                )
             except Exception as e:
                 console_error(f"Benchmark execution failed: {e}")
 

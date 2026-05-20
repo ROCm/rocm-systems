@@ -220,7 +220,7 @@ void
 metadata_initialize_thread_info(size_t tid)
 {
     const auto& _thread_info = thread_info::get(tid, SequentTID);
-    if(get_is_continuous_integration() && !_thread_info)
+    if(!_thread_info)
     {
         throw std::runtime_error(fmt::format("No valid thread info for tid={}", tid));
     }
@@ -237,7 +237,7 @@ void
 metadata_initialize_track(std::int64_t tid)
 {
     const auto& _thread_info = thread_info::get(tid, SequentTID);
-    if(get_is_continuous_integration() && !_thread_info)
+    if(!_thread_info)
     {
         throw std::runtime_error(fmt::format("No valid thread info for tid={}", tid));
     }
@@ -295,7 +295,7 @@ cache_sampling_data(std::int64_t                               _tid,
     }
 
     const auto& _thread_info = thread_info::get(_tid, SequentTID);
-    if(get_is_continuous_integration() && !_thread_info)
+    if(!_thread_info)
     {
         throw std::runtime_error(fmt::format("No valid thread info for tid={}", _tid));
     }
@@ -597,7 +597,7 @@ get_offload_file()
         if(get_use_tmp_files())
         {
             auto _success = _tmp_v->open();
-            if(get_is_continuous_integration() && !_success)
+            if(!_success)
             {
                 LOG_CRITICAL("Error opening sampling offload temporary file '{}'",
                              _tmp_v->filename);
@@ -1202,8 +1202,7 @@ post_process()
                       _raw_data.size());
         }
 
-        if(get_is_continuous_integration() &&
-           _sampler->get_sample_count() != _raw_data.size())
+        if(_sampler->get_sample_count() != _raw_data.size())
         {
             throw std::runtime_error(fmt::format(
                 "Error! sampler recorded {} samples but {} samples were returned",
@@ -1412,7 +1411,7 @@ post_process_perfetto(std::int64_t                               _tid,
     }
 
     const auto& _thread_info = thread_info::get(_tid, SequentTID);
-    if(get_is_continuous_integration() && !_thread_info)
+    if(!_thread_info)
     {
         throw std::runtime_error(fmt::format("No valid thread info for tid={}", _tid));
     }
@@ -1936,6 +1935,27 @@ postfork_child_cleanup()
 {
     if(config::get_use_process_sampling() && config::get_use_amd_smi())
         pmc::postfork_child_cleanup();
+}
+
+void
+prefork_lock_pmc_sampler()
+{
+    if(config::get_use_process_sampling() && config::get_use_amd_smi())
+        pmc::prefork_lock_sampler();
+}
+
+void
+postfork_parent_unlock_pmc_sampler()
+{
+    if(config::get_use_process_sampling() && config::get_use_amd_smi())
+        pmc::postfork_parent_unlock_sampler();
+}
+
+void
+postfork_child_reset_pmc_sampler_lock()
+{
+    if(config::get_use_process_sampling() && config::get_use_amd_smi())
+        pmc::postfork_child_reset_sampler_lock();
 }
 
 void

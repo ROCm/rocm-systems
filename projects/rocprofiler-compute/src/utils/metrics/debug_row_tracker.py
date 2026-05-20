@@ -69,48 +69,36 @@ def _print_debug_global_vars(row_expr: str, metric_evaluator: MetricEvaluator) -
 
 
 def _extract_column_data(
-    table_key: str,
     col_name: str,
-    raw_pmc_df: pd.DataFrame | dict,
+    raw_pmc_df: pd.DataFrame,
 ) -> Optional[list[Any]]:
-    """Extract column data from raw_pmc_df (dict or DataFrame)."""
-    if isinstance(raw_pmc_df, dict) and table_key in raw_pmc_df:
-        series = raw_pmc_df[table_key][col_name]
-        return series.tolist() if hasattr(series, "tolist") else list(series)
-    elif isinstance(raw_pmc_df, pd.DataFrame):
-        columns = raw_pmc_df.columns
-        # Handle MultiIndex columns by matching on the top-level table key
-        if isinstance(columns, pd.MultiIndex):
-            if table_key in columns.get_level_values(0):
-                series = raw_pmc_df[table_key][col_name]
-                return series.tolist() if hasattr(series, "tolist") else list(series)
-        # Fallback for flat (single-level) columns
-        if col_name in columns:
-            series = raw_pmc_df[col_name]
-            return series.tolist() if hasattr(series, "tolist") else list(series)
-    return None
+    """Extract column data from a dataframe raw_pmc_df."""
+    if col_name not in raw_pmc_df.columns:
+        return None
+    series = raw_pmc_df[col_name]
+    return series.tolist() if hasattr(series, "tolist") else list(series)
 
 
 def _collect_debug_column_data(
     row_expr: str,
-    raw_pmc_df: pd.DataFrame | dict,
+    raw_pmc_df: pd.DataFrame,
 ) -> tuple[list[tuple[str, Optional[list[Any]]]], int]:
     """Collect column data and compute alignment width for debug output."""
     matched_cols = re.findall(
-        r"raw_pmc_df\[[\"'](\w+)[\"']\]\[[\"'](\w+)[\"']\]",
+        r"raw_pmc_df\[[\"'](\w+)[\"']\]",
         row_expr,
     )
-    seen: set[tuple[str, str]] = set()
+    seen: set[str] = set()
     rows_to_print: list[tuple[str, Optional[list[Any]]]] = []
     global_width = 0
 
-    for table_key, col_name in matched_cols:
-        if (table_key, col_name) in seen:
+    for col_name in matched_cols:
+        if col_name in seen:
             continue
-        seen.add((table_key, col_name))
+        seen.add(col_name)
         try:
-            column_data = _extract_column_data(table_key, col_name, raw_pmc_df)
-            label = f"raw_pmc_df['{table_key}']['{col_name}']"
+            column_data = _extract_column_data(col_name, raw_pmc_df)
+            label = f"raw_pmc_df['{col_name}']"
             rows_to_print.append((label, column_data))
             if column_data is not None:
                 display = column_data[:_MAX_DEBUG_ROWS]
@@ -119,9 +107,7 @@ def _collect_debug_column_data(
                     max((len(str(v)) for v in display), default=0),
                 )
         except (KeyError, TypeError) as error:
-            console_warning(
-                f"Skipping entry for '{table_key}'['{col_name}']. Encountered: {error}"
-            )
+            console_warning(f"Skipping entry for '{col_name}'. Encountered: {error}")
 
     return rows_to_print, global_width
 
@@ -146,7 +132,7 @@ def _print_debug_column_data(
 def _print_debug_inputs(
     row_expr: str,
     metric_evaluator: MetricEvaluator,
-    raw_pmc_df: pd.DataFrame | dict,
+    raw_pmc_df: pd.DataFrame,
     show_inputs: bool,
 ) -> None:
     """Print input variables and column data for debug output."""
@@ -174,7 +160,7 @@ def debug_row_tracker(
     expr: str,
     row_expr: str,
     metric_evaluator: MetricEvaluator,
-    raw_pmc_df: pd.DataFrame | dict,
+    raw_pmc_df: pd.DataFrame,
     *,
     show_inputs: bool = True,
 ) -> None:
@@ -184,7 +170,7 @@ def debug_row_tracker(
         expr: The original metric expression (for display purposes).
         row_expr: The fully substituted expression to evaluate.
         metric_evaluator: The MetricEvaluator instance for expression evaluation.
-        raw_pmc_df: Raw PMC data (DataFrame or dict).
+        raw_pmc_df: Raw PMC data (flat single-index DataFrame).
         show_inputs: Whether to show input variable values (default: True).
     """
     print("~" * 40 + "\nExpression:")

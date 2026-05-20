@@ -55,7 +55,7 @@ rocprof-sys-run -- ./roctx
 ### Recommended Configuration
 
 | Variable | Value | Purpose |
-|----------|-------|---------|
+| ---------- | ------- | --------- |
 | `ROCPROFSYS_ROCM_DOMAINS` | `hip_runtime_api,marker_api,kernel_dispatch` | Trace HIP API, ROCTx markers, and kernel launches |
 | `ROCPROFSYS_TRACE` | `true` | Generate Perfetto trace with ROCTx annotations |
 | `ROCPROFSYS_PROFILE` | `true` | Generate call-stack profile |

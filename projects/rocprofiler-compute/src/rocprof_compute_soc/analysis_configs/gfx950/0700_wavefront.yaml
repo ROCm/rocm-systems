@@ -109,11 +109,10 @@ Panel Config:
           max: MAX(((4 * SQ_ACTIVE_INST_ANY) / $denom))
           unit: (Cycles + $normUnit)
         Wavefront Occupancy:
-          avg: SUM(SQ_ACCUM_PREV_HIRES) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
-          min: MIN((SQ_ACCUM_PREV_HIRES / $GRBM_GUI_ACTIVE_PER_XCD))
-          max: MAX((SQ_ACCUM_PREV_HIRES / $GRBM_GUI_ACTIVE_PER_XCD))
+          avg: SUM(SQ_LEVEL_WAVES_ACCUM) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+          min: MIN((SQ_LEVEL_WAVES_ACCUM / $GRBM_GUI_ACTIVE_PER_XCD))
+          max: MAX((SQ_LEVEL_WAVES_ACCUM / $GRBM_GUI_ACTIVE_PER_XCD))
           unit: Wavefronts
-          coll_level: SQ_LEVEL_WAVES
   metrics_description:
     Grid Size: The total number of work-items (or, threads) launched as a part of
       the kernel dispatch. In HIP, this is equivalent to the total grid size multiplied

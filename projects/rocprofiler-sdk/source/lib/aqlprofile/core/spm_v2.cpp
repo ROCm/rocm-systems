@@ -8,8 +8,9 @@
 #include "lib/aqlprofile/core/memorymanager.hpp"
 #include "lib/aqlprofile/core/commandbuffermgr.hpp"
 
-#include "lib/aqlprofile/core/logger.h"
+#include "lib/aqlprofile/core/logger.hpp"
 #include "lib/aqlprofile/core/pm4_factory.h"
+#include "lib/common/static_object.hpp"
 
 #include <thread>
 #include <condition_variable>
@@ -201,7 +202,7 @@ is_agent_supported_for_spm(const AgentInfo* agentInfo)
 std::vector<aqlprofile_spm_parameter_t> default_spm_params = {
     {AQLPROFILE_SPM_PARAMETER_TYPE_BUFFER_SIZE, 1 << 26},      // 64MB
     {AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL, 1 << 13},  // 4us
-    {AQLPROFILE_SPM_PARAMETER_TYPE_TIMEOUT, 100},              // 100ms
+    {AQLPROFILE_SPM_PARAMETER_TYPE_TIMEOUT, 0},                // 0ms
     {AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_MODE, AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_SCLK}};
 static_assert(AQLPROFILE_SPM_PARAMETER_TYPE_LAST == 4 && "Dont forget to add default param!");
 
@@ -276,7 +277,13 @@ private:
     std::map<aqlprofile_handle_t, std::unique_ptr<ManagerThread>> threads{};
 };
 
-auto* spm_state_map = new SpmStateMap{};
+// Lazy-init via rocprofiler::common::static_object; destroyed in destroy_static_objects() at exit.
+SpmStateMap*
+spm_state_map()
+{
+    static auto*& _v = rocprofiler::common::static_object<SpmStateMap>::construct();
+    return _v;
+}
 
 hsa_status_t
 _internal_aqlprofile_spm_create_packets(aqlprofile_handle_t*          handle,
@@ -325,7 +332,7 @@ _internal_aqlprofile_spm_create_packets(aqlprofile_handle_t*          handle,
     handle->handle = memory->GetHandler();
     out_desc->data = memory->GetOutputBuf();
     out_desc->size = SPM_DESC_SIZE;
-    spm_state_map->insert(*handle, s);
+    spm_state_map()->insert(*handle, s);
 
     {
         aql_profile::Pm4Factory* pm4_factory = nullptr;
@@ -424,7 +431,7 @@ aqlprofile_spm_start(aqlprofile_handle_t            handle,
                      aqlprofile_spm_data_callback_t data_cb,
                      void*                          userdata)
 {
-    auto s = aqlprofile::spm::spm_state_map->query(handle);
+    auto s = aqlprofile::spm::spm_state_map()->query(handle);
     if(!s) return HSA_STATUS_ERROR_NOT_INITIALIZED;
 
     // The first page of output_buffer is reserved for SpmBufferDesc
@@ -459,7 +466,7 @@ aqlprofile_spm_start(aqlprofile_handle_t            handle,
         auto manager = std::make_unique<ManagerThread>(s, data_cb, userdata);
 
         CHECKHSA(manager->status, return manager->status);
-        aqlprofile::spm::spm_state_map->setthread(handle, std::move(manager));
+        aqlprofile::spm::spm_state_map()->setthread(handle, std::move(manager));
     } catch(...)
     {
         return HSA_STATUS_ERROR;
@@ -470,14 +477,14 @@ aqlprofile_spm_start(aqlprofile_handle_t            handle,
 PUBLIC_API hsa_status_t
 aqlprofile_spm_stop(aqlprofile_handle_t handle)
 {
-    bool b = aqlprofile::spm::spm_state_map->setthread(handle, nullptr);
+    bool b = aqlprofile::spm::spm_state_map()->setthread(handle, nullptr);
     return b ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_NOT_INITIALIZED;
 }
 
 PUBLIC_API void
 aqlprofile_spm_delete_packets(aqlprofile_handle_t handle)
 {
-    aqlprofile::spm::spm_state_map->remove(handle);
+    aqlprofile::spm::spm_state_map()->remove(handle);
 }
 
 struct consumer_thread_handle_t
@@ -633,4 +640,37 @@ aqlprofile_spm_is_event_supported(aqlprofile_agent_handle_t agent, aqlprofile_pm
     if(event.block_name >= blocks.size()) return false;
 
     return blocks.at(event.block_name);
+}
+
+PUBLIC_API hsa_status_t
+aqlprofile_spm_query_agent_configurations(aqlprofile_agent_handle_t                    agent,
+                                          aqlprofile_spm_available_configurations_cb_t cb,
+                                          void*                                        userdata)
+{
+    if(!cb) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+    aql_profile::Pm4Factory* pm4_factory = nullptr;
+    try
+    {
+        pm4_factory = aql_profile::Pm4Factory::Create(agent);
+        if(!pm4_factory) return HSA_STATUS_ERROR_INVALID_AGENT;
+    } catch(...)
+    {
+        return HSA_STATUS_ERROR_INVALID_AGENT;
+    }
+
+    if(!aqlprofile::spm::is_agent_supported_for_spm(aql_profile::GetAgentInfo(agent)))
+        return HSA_STATUS_ERROR_INVALID_AGENT;
+
+    auto configs = std::vector<aqlprofile_spm_available_configuration_t>{};
+
+    auto& interval_config = configs.emplace_back();
+    interval_config.type  = AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL;
+    interval_config.interval.min_interval =
+        32;  // Sample interval time in sclks. Minimum is 32 clocks by HW design
+    interval_config.interval.max_interval =
+        (1 << 16) - 32;  // Maximum value by HW design. Must be multiples of 32.
+    interval_config.interval.mode = AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_SCLK;
+
+    return cb(configs.data(), configs.size(), userdata);
 }

@@ -289,11 +289,6 @@ Addition:
         unit: GFLOPs
         peak: (((($max_sclk * $cu_per_gpu) * 64) * 2) / 1000)
         pop: ((100 * SUM((((64 * (((SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16) + SQ_INSTS_VALU_TRANS_F16) + (2 * SQ_INSTS_VALU_FMA_F16))) + (64 * (((SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32) + SQ_INSTS_VALU_TRANS_F32) + (2 * SQ_INSTS_VALU_FMA_F32)))) + (64 * (((SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64) + SQ_INSTS_VALU_TRANS_F64) + (2 * SQ_INSTS_VALU_FMA_F64))))) / SUM((End_Timestamp - Start_Timestamp))) / (((($max_sclk * $cu_per_gpu) * 64) * 2) / 1000))
-    - VALU IOPs:
-        value: SUM(64 * (SQ_INSTS_VALU_INT32 + SQ_INSTS_VALU_INT64)) / SUM(End_Timestamp - Start_Timestamp)
-        unit: GIOPs
-        peak: (((($max_sclk * $cu_per_gpu) * 64) * 2) / 1000)
-        pop: 100 * SUM(64 * (SQ_INSTS_VALU_INT32 + SQ_INSTS_VALU_INT64)) / SUM(End_Timestamp - Start_Timestamp) / ($max_sclk * $cu_per_gpu * 64 * 2 / 1000)
     - MFMA FLOPs (F8):
         value: SUM(SQ_INSTS_VALU_MFMA_MOPS_F8 * 512) / SUM(End_Timestamp - Start_Timestamp)
         unit: GFLOPs
@@ -365,17 +360,15 @@ Addition:
         max: MAX(SQ_VALU_MFMA_BUSY_CYCLES / SQ_INSTS_MFMA)
         unit: Cycles per Instruction
     - VMEM Latency:
-        avg: SUM(SQ_ACCUM_PREV_HIRES) / SUM(SQ_INSTS_VMEM)
-        min: MIN(SQ_ACCUM_PREV_HIRES / SQ_INSTS_VMEM)
-        max: MAX(SQ_ACCUM_PREV_HIRES / SQ_INSTS_VMEM)
+        avg: SUM(SQ_INST_LEVEL_VMEM_ACCUM) / SUM(SQ_INSTS_VMEM)
+        min: MIN(SQ_INST_LEVEL_VMEM_ACCUM / SQ_INSTS_VMEM)
+        max: MAX(SQ_INST_LEVEL_VMEM_ACCUM / SQ_INSTS_VMEM)
         unit: Cycles
-        coll_level: SQ_INST_LEVEL_VMEM
     - SMEM Latency:
-        avg: SUM(SQ_ACCUM_PREV_HIRES) / SUM(SQ_INSTS_SMEM)
-        min: MIN(SQ_ACCUM_PREV_HIRES / SQ_INSTS_SMEM)
-        max: MAX(SQ_ACCUM_PREV_HIRES / SQ_INSTS_SMEM)
+        avg: SUM(SQ_INST_LEVEL_SMEM_ACCUM) / SUM(SQ_INSTS_SMEM)
+        min: MIN(SQ_INST_LEVEL_SMEM_ACCUM / SQ_INSTS_SMEM)
+        max: MAX(SQ_INST_LEVEL_SMEM_ACCUM / SQ_INSTS_SMEM)
         unit: Cycles
-        coll_level: SQ_INST_LEVEL_SMEM
 - Panel Config:
     id: 1100
   metric_table:
@@ -434,11 +427,6 @@ Addition:
       This is also presented as a percent of the peak theoretical FLOPs achievable
       on the specific accelerator. Note: this does not include any floating-point
       operations from MFMA instructions.
-    VALU IOPs: >-
-      The total integer operations executed per second on the VALU. This is
-      also presented as a percent of the peak theoretical IOPs achievable on the
-      specific accelerator. Note: this does not include any integer operations from
-      MFMA instructions.
     MFMA FLOPs (F8): >-
       The total number of 8-bit floating-point operations executed on MFMA units,
       per normalization unit. F8 (FP8) uses either E4M3 or E5M2 format.
@@ -1024,9 +1012,6 @@ Modification:
     - VALU FLOPs:
         value: SUM(64 * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + SQ_INSTS_VALU_TRANS_F16 + 2 * SQ_INSTS_VALU_FMA_F16) + 64 * (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + SQ_INSTS_VALU_TRANS_F32 + 2 * SQ_INSTS_VALU_FMA_F32) + 64 * (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + SQ_INSTS_VALU_TRANS_F64 + 2 * SQ_INSTS_VALU_FMA_F64)) / SUM(End_Timestamp - Start_Timestamp)
         pop: ((100 * SUM((((64 * (((SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16) + SQ_INSTS_VALU_TRANS_F16) + (2 * SQ_INSTS_VALU_FMA_F16))) + (64 * (((SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32) + SQ_INSTS_VALU_TRANS_F32) + (2 * SQ_INSTS_VALU_FMA_F32)))) + (64 * (((SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64) + SQ_INSTS_VALU_TRANS_F64) + (2 * SQ_INSTS_VALU_FMA_F64))))) / SUM((End_Timestamp - Start_Timestamp))) / (((($max_sclk * $cu_per_gpu) * 64) * 2) / 1000))
-    - VALU IOPs:
-        value: SUM(64 * (SQ_INSTS_VALU_INT32 + SQ_INSTS_VALU_INT64)) / SUM(End_Timestamp - Start_Timestamp)
-        pop: 100 * SUM(64 * (SQ_INSTS_VALU_INT32 + SQ_INSTS_VALU_INT64)) / SUM(End_Timestamp - Start_Timestamp) / ($max_sclk * $cu_per_gpu * 64 * 2 / 1000)
     - MFMA FLOPs (BF16):
         value: SUM(SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) / SUM(End_Timestamp - Start_Timestamp)
         peak: ((($max_sclk * $cu_per_gpu) * 4096) / 1000)

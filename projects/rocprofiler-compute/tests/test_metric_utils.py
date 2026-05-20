@@ -21,7 +21,10 @@ from utils.metrics.aggregation import (
     to_round,
     to_std,
 )
-from utils.metrics.evaluation_pipeline import eval_metric
+from utils.metrics.evaluation_pipeline import (
+    eval_metric,
+    validate_dual_issue_metrics,
+)
 from utils.metrics.expression import (
     CodeTransformer,
     build_eval_string,
@@ -30,6 +33,10 @@ from utils.metrics.expression import (
     update_normal_unit_string,
 )
 from utils.metrics.metric_evaluator import MetricEvaluator
+from utils.metrics.noise_clamper import (
+    clear_noise_clamp_warnings,
+    get_noise_clamp_warnings,
+)
 from utils.utils_common import calc_builtin_var
 
 # =============================================================================
@@ -149,14 +156,9 @@ class TestAggregation:
 class TestExpression:
     """Tests for utils.metrics.expression."""
 
-    def test_build_eval_string_raises_when_coll_level_is_none(self):
-        """build_eval_string raises when coll_level is None."""
-        with pytest.raises(Exception, match="coll_level can not be None"):
-            build_eval_string("AVG(SQ_WAVES)", None, config={})
-
     def test_build_eval_string_returns_empty_for_empty_equation(self):
         """build_eval_string returns the empty string when given an empty equation."""
-        assert build_eval_string("", "pmc_perf", config={}) == ""
+        assert build_eval_string("") == ""
 
     def test_update_denominator_string_returns_empty_for_empty_equation(self):
         """update_denominator_string returns the empty string when input is empty."""
@@ -267,7 +269,7 @@ class TestEvaluationPipeline:
         """
         if metric_fields is None:
             metric_fields = {
-                "Value": "to_sum(raw_pmc_df['pmc_perf']['SQ_WAVES'])",
+                "Value": "to_sum(raw_pmc_df['SQ_WAVES'])",
                 "Average": None,
             }
 
@@ -302,19 +304,17 @@ class TestEvaluationPipeline:
             "num_xcd": 1,
             "wave_size": 64,
         })
-        raw_pmc_df = {
-            "pmc_perf": pd.DataFrame({
-                "SQ_WAVES": [100, 200, 150],
-                "GRBM_GUI_ACTIVE": [1000, 2000, 1500],
-            })
-        }
+        raw_pmc_df = pd.DataFrame({
+            "SQ_WAVES": [100, 200, 150],
+            "GRBM_GUI_ACTIVE": [1000, 2000, 1500],
+        })
         return metric_df, dfs, dfs_type, sys_info, raw_pmc_df
 
     def test_eval_metric_in_debug_mode(self):
         """eval_metric with debug=True invokes debug_row_tracker and writes back."""
         metric_df, dfs, dfs_type, sys_info, raw_pmc_df = self._build_eval_metric_inputs(
             metric_fields={
-                "Value": "to_sum(raw_pmc_df['pmc_perf']['SQ_WAVES'])",
+                "Value": "to_sum(raw_pmc_df['SQ_WAVES'])",
             }
         )
         with (
@@ -330,7 +330,6 @@ class TestEvaluationPipeline:
                 pd.DataFrame(),
                 raw_pmc_df,
                 debug=True,
-                config={},
             )
 
         mock_debug_row_tracker.assert_called_once()
@@ -343,7 +342,7 @@ class TestEvaluationPipeline:
         """eval_metric writes the computed Value back to the metric DataFrame."""
         metric_df, dfs, dfs_type, sys_info, raw_pmc_df = self._build_eval_metric_inputs(
             metric_fields={
-                "Value": "to_sum(raw_pmc_df['pmc_perf']['SQ_WAVES'])",
+                "Value": "to_sum(raw_pmc_df['SQ_WAVES'])",
             }
         )
         with patch("utils.metrics.evaluation_pipeline.BUILD_IN_VARS", {}):
@@ -354,9 +353,34 @@ class TestEvaluationPipeline:
                 pd.DataFrame(),
                 raw_pmc_df,
                 debug=False,
-                config={},
             )
         assert metric_df.loc["1.1.0", "Value"] == 450
+
+    def test_eval_metric_resolves_accum_alias_column_end_to_end(self):
+        """eval_metric resolves YAML formulas that reference ACCUM alias columns."""
+        metric_df, dfs, dfs_type, sys_info, _ = self._build_eval_metric_inputs(
+            metric_fields={
+                "Value": (
+                    "to_sum(raw_pmc_df['SQ_INST_LEVEL_VMEM_ACCUM']) / "
+                    "to_sum(raw_pmc_df['SQ_INSTS_VMEM'])"
+                ),
+            }
+        )
+        flat_raw_pmc_df = pd.DataFrame({
+            "SQ_INST_LEVEL_VMEM_ACCUM": [100.0, 200.0, 300.0],
+            "SQ_INSTS_VMEM": [10.0, 20.0, 30.0],
+            "GRBM_GUI_ACTIVE": [1000, 2000, 1500],
+        })
+        with patch("utils.metrics.evaluation_pipeline.BUILD_IN_VARS", {}):
+            eval_metric(
+                dfs,
+                dfs_type,
+                sys_info,
+                pd.DataFrame(),
+                flat_raw_pmc_df,
+                debug=False,
+            )
+        assert metric_df.loc["1.1.0", "Value"] == 10.0
 
     def test_eval_metric_normalizes_falsey_average_to_empty_string(self):
         """eval_metric replaces a falsey Average value with the empty string."""
@@ -373,9 +397,146 @@ class TestEvaluationPipeline:
                 pd.DataFrame(),
                 raw_pmc_df,
                 debug=False,
-                config={},
             )
         assert metric_df.loc["1.1.0", "Average"] == ""
+
+    def test_eval_metric_noise_clamp(self):
+        """eval_metric emits per-metric variance warning + summary on clamp."""
+        # Negative DIFF over a positive REF crosses the 1% threshold and bumps
+        # the noise-clamp counter when to_noise_clamp evaluates the expression.
+        _, dfs, dfs_type, sys_info, _ = self._build_eval_metric_inputs(
+            metric_fields={
+                "Value": (
+                    "to_noise_clamp("
+                    "to_min(raw_pmc_df['DIFF']), "
+                    "to_max(raw_pmc_df['REF']))"
+                ),
+            }
+        )
+        raw_pmc_df = pd.DataFrame({
+            "GRBM_GUI_ACTIVE": [1000],
+            "DIFF": [-100.0],
+            "REF": [1000.0],
+        })
+
+        clear_noise_clamp_warnings()
+        with (
+            patch("utils.metrics.evaluation_pipeline.BUILD_IN_VARS", {}),
+            patch(
+                "utils.metrics.evaluation_pipeline.console_warning"
+            ) as mock_console_warning,
+            patch(
+                "utils.metrics.evaluation_pipeline.print_noise_clamp_summary"
+            ) as mock_print_summary,
+        ):
+            eval_metric(
+                dfs,
+                dfs_type,
+                sys_info,
+                pd.DataFrame(),
+                raw_pmc_df,
+                debug=False,
+            )
+
+        assert get_noise_clamp_warnings()["count"] >= 1
+        variance_calls = [
+            call_args
+            for call_args in mock_console_warning.call_args_list
+            if "Variance corrected for metric:" in call_args.args[0]
+        ]
+        assert len(variance_calls) == 1
+        assert "Test Metric" in variance_calls[0].args[0]
+        mock_print_summary.assert_called_once()
+
+    def make_dual_issue_dfs(
+        self, metric_name: str, value: float, peak: float, peak_col: str = "Peak"
+    ):
+        """Build the (dfs, dfs_type) fixture used by dual-issue tests."""
+        df = pd.DataFrame({
+            "Metric": [metric_name],
+            "Value": [value],
+            peak_col: [peak],
+        })
+        return {1: df}, {1: "metric_table"}
+
+    def test_validate_dual_issue_metrics_emits_valu_utilization_warning(self):
+        """VALU Utilization above peak triggers the dual-issue warning."""
+        dfs, dfs_type = self.make_dual_issue_dfs(
+            "VALU Utilization", value=150.0, peak=100.0
+        )
+        sys_info = pd.Series({"gpu_arch": "gfx942"})
+
+        with patch("utils.metrics.common.console_warning") as mock_warning:
+            validate_dual_issue_metrics(
+                dfs, dfs_type, sys_info, raw_pmc_df=pd.DataFrame()
+            )
+
+        mock_warning.assert_called_once()
+        msg = mock_warning.call_args.args[0]
+        assert "VALU Utilization can go up to 200%" in msg
+        assert "SQ_ACTIVE_INST_VALU2" not in msg
+
+    def test_validate_dual_issue_metrics_emits_valu_flops_warning(self):
+        """VALU FLOPs (F64) above peak triggers the FLOPs-flavored warning."""
+        dfs, dfs_type = self.make_dual_issue_dfs(
+            "VALU FLOPs (F64)", value=600.0, peak=400.0
+        )
+        sys_info = pd.Series({"gpu_arch": "gfx942"})
+
+        with patch("utils.metrics.common.console_warning") as mock_warning:
+            validate_dual_issue_metrics(
+                dfs, dfs_type, sys_info, raw_pmc_df=pd.DataFrame()
+            )
+
+        msg = mock_warning.call_args.args[0]
+        assert "VALU FLOPs can exceed the peak value" in msg
+
+    def test_validate_dual_issue_metrics_silent_below_peak(self):
+        """Below-peak VALU Utilization stays silent."""
+        dfs, dfs_type = self.make_dual_issue_dfs(
+            "VALU Utilization", value=80.0, peak=100.0
+        )
+        sys_info = pd.Series({"gpu_arch": "gfx942"})
+
+        with patch("utils.metrics.common.console_warning") as mock_warning:
+            validate_dual_issue_metrics(
+                dfs, dfs_type, sys_info, raw_pmc_df=pd.DataFrame()
+            )
+
+        mock_warning.assert_not_called()
+
+    def test_validate_dual_issue_metrics_appends_valu2_suffix_on_gfx950(self):
+        """gfx950 with non-zero SQ_ACTIVE_INST_VALU2 appends the confirmation."""
+        dfs, dfs_type = self.make_dual_issue_dfs(
+            "VALU Utilization", value=150.0, peak=100.0
+        )
+        sys_info = pd.Series({"gpu_arch": "gfx950"})
+        raw_pmc_df = pd.DataFrame({"SQ_ACTIVE_INST_VALU2": [1, 2, 3]})
+
+        with patch("utils.metrics.common.console_warning") as mock_warning:
+            validate_dual_issue_metrics(dfs, dfs_type, sys_info, raw_pmc_df)
+
+        msg = mock_warning.call_args.args[0]
+        assert "Dual-issue activity detected via SQ_ACTIVE_INST_VALU2 counter" in msg
+
+    def test_validate_dual_issue_metrics_uses_peak_empirical_fallback(self):
+        """Peak (Empirical) column is used when present alongside Value."""
+        dfs, dfs_type = self.make_dual_issue_dfs(
+            "VALU Utilization",
+            value=150.0,
+            peak=100.0,
+            peak_col="Peak (Empirical)",
+        )
+        sys_info = pd.Series({"gpu_arch": "gfx942"})
+
+        with patch("utils.metrics.common.console_warning") as mock_warning:
+            validate_dual_issue_metrics(
+                dfs, dfs_type, sys_info, raw_pmc_df=pd.DataFrame()
+            )
+
+        mock_warning.assert_called_once()
+        msg = mock_warning.call_args.args[0]
+        assert "VALU Utilization can go up to 200%" in msg
 
 
 # =============================================================================
@@ -446,14 +607,13 @@ class TestMetricEvaluator:
             assert metric_evaluator.eval_expression("Mock Metric") == "N/A"
 
     def _make_evaluator(self, columns, sys_vars=None):
-        """Build a MetricEvaluator from the given pmc_perf columns and sys_vars."""
-        pmc_perf_df = pd.DataFrame(columns)
-        raw_pmc_df = {"pmc_perf": pmc_perf_df}
+        """Build a MetricEvaluator from the given raw_pmc columns and sys_vars."""
+        raw_pmc_df = pd.DataFrame(columns)
         return MetricEvaluator(raw_pmc_df, sys_vars or {}, {})
 
     def _to_eval_str(self, equation):
-        """Run a YAML-style equation through build_eval_string for pmc_perf."""
-        return build_eval_string(equation, "pmc_perf", config={})
+        """Run a YAML-style equation through build_eval_string."""
+        return build_eval_string(equation)
 
     def test_eval_expression_returns_na_for_division_by_all_zero_series(self):
         """All-zero Series denominator yields inf, mapped to 'N/A'."""
@@ -539,6 +699,45 @@ class TestMetricEvaluator:
             f"SUM([100,200]) / 5 should be 60.0, got {result}"
         )
 
+    def test_eval_expression_divide_by_zero_silenced_and_logged_at_debug(self):
+        """
+        Divide-by-zero (x/0 -> inf, 0/0 -> NaN) emits a numpy RuntimeWarning
+        that is captured and logged via console_debug. The misleading
+        "missing counter data" console_warning must not fire; the function
+        still returns 'N/A' for both cases.
+        """
+        cases = [
+            # x/0 -> inf, taken by the np.isinf branch
+            (
+                {"NUMERATOR": [100.0, 200.0], "DENOMINATOR": [0.0, 0.0]},
+                "SUM(NUMERATOR) / SUM(DENOMINATOR)",
+            ),
+            # 0/0 -> NaN
+            (
+                {"NUMERATOR": [0.0, 0.0], "DENOMINATOR": [0.0, 0.0]},
+                "SUM(NUMERATOR) / SUM(DENOMINATOR)",
+            ),
+        ]
+
+        for columns, equation in cases:
+            evaluator = self._make_evaluator(columns)
+            eval_str = self._to_eval_str(equation)
+            with (
+                patch("utils.metrics.metric_evaluator.console_warning") as mock_warning,
+                patch("utils.metrics.metric_evaluator.console_debug") as mock_debug,
+            ):
+                result = evaluator.eval_expression(eval_str)
+
+            assert result == "N/A", (
+                f"Expected 'N/A' for '{equation}' with {columns}, got {result}"
+            )
+            mock_warning.assert_not_called()
+            debug_msgs = [str(call) for call in mock_debug.call_args_list]
+            assert any("RuntimeWarning" in m for m in debug_msgs), (
+                f"Expected RuntimeWarning in console_debug output for "
+                f"'{equation}', got {debug_msgs}"
+            )
+
     def test_eval_expression_aggregates_past_partial_zeros_in_denominator(self):
         """SUM aggregates past zero entries in the denominator without erroring."""
         evaluator = self._make_evaluator({
@@ -551,3 +750,37 @@ class TestMetricEvaluator:
         assert result == pytest.approx(40.0), (
             f"SUM([100,200,300]) / SUM([10,0,5]) should be 40.0, got {result}"
         )
+
+    def test_build_eval_string_rewrites_accum_alias_as_flat_column_lookup(self):
+        """`*_ACCUM` aliases become flat ``raw_pmc_df['<alias>']`` lookups."""
+        eval_str = self._to_eval_str(
+            "SUM(SQ_INST_LEVEL_VMEM_ACCUM) / SUM(SQ_INSTS_VMEM)"
+        )
+        assert "raw_pmc_df['SQ_INST_LEVEL_VMEM_ACCUM']" in eval_str
+        assert "raw_pmc_df['SQ_INSTS_VMEM']" in eval_str
+
+    def test_eval_expression_resolves_accum_alias_column(self):
+        """SUM(<alias>_ACCUM) / SUM(...) returns the expected ratio for flat data."""
+        evaluator = self._make_evaluator({
+            "SQ_INST_LEVEL_VMEM_ACCUM": [100.0, 200.0, 300.0],
+            "SQ_INSTS_VMEM": [10.0, 20.0, 30.0],
+        })
+        eval_str = self._to_eval_str(
+            "SUM(SQ_INST_LEVEL_VMEM_ACCUM) / SUM(SQ_INSTS_VMEM)"
+        )
+        result = evaluator.eval_expression(eval_str)
+        assert isinstance(result, float)
+        assert abs(result - 10.0) < 1e-9, (
+            f"SUM([100,200,300]) / SUM([10,20,30]) should be 10.0, got {result}"
+        )
+
+    def test_eval_expression_aggregates_per_row_accum_alias_with_min(self):
+        """MIN(<alias>_ACCUM / counter) computes the per-row minimum ratio."""
+        evaluator = self._make_evaluator({
+            "SQ_INST_LEVEL_VMEM_ACCUM": [100.0, 50.0, 300.0],
+            "SQ_INSTS_VMEM": [10.0, 25.0, 30.0],
+        })
+        eval_str = self._to_eval_str("MIN(SQ_INST_LEVEL_VMEM_ACCUM / SQ_INSTS_VMEM)")
+        result = evaluator.eval_expression(eval_str)
+        assert isinstance(result, float)
+        assert abs(result - 2.0) < 1e-9, f"MIN([10, 2, 10]) should be 2.0, got {result}"

@@ -51,7 +51,7 @@
 +
 +// AMD AINIC
 +RCCL_PARAM(CtsOffloadEnabled, "CTS_OFFLOAD_ENABLED", -1);
-+RCCL_PARAM(IbP2pDisableCts, "IB_P2P_DISABLE_CTS", 0);
++RCCL_PARAM(IbP2pDisableCts, "IB_P2P_DISABLE_CTS", 1);
 +
 +extern int64_t rcclParamAinicRoce();
 +
@@ -172,10 +172,11 @@
    struct ibv_sge sges[NCCL_NET_IB_MAX_RECVS];
    struct ibv_send_wr wrs[NCCL_NET_IB_MAX_RECVS + 1];
    // Each dev correlates to a mergedIbDev
-@@ -1370,6 +1457,7 @@
+@@ -1370,7 +1457,8 @@
    struct ncclIbRemSizesFifo remSizesFifo;
    uint64_t fifoHead;
    int ar; // Use adaptive routing when all merged devices have it enabled
+   uint64_t putSignalScratchpad;
 +  bool useCtsOffload;
  };
  // The SendFifo needs to be 32-byte aligned and each element needs
@@ -262,7 +263,7 @@
 +  if (qpCtsOffload) {
 +    qpInitAttr.cap.max_inline_data = MAX_INLINE_DATA_SIZE;
 +  } else {
-+    qpInitAttr.cap.max_inline_data = ncclIbUseInline ? sizeof(struct ncclIbSendFifo) : 0;
++    qpInitAttr.cap.max_inline_data = ncclIbUseInline ? NCCL_NET_IB_MAX_RECVS * sizeof(struct ncclIbSendFifo) : 0;
 +  }
    NCCLCHECK(wrap_ibv_create_qp(&qp->qp, base->pd, &qpInitAttr));
 +  if (rcclAinicRoce) {
@@ -393,8 +394,8 @@
      // Local ibDevN
      ibDevN = rComm->devs[devIndex].base.ibDevN;
      ibDev = ncclIbDevs + ibDevN;
--    NCCLCHECKGOTO(ncclIbCreateQp(ibDev->portNum, &rCommDev->base, IBV_ACCESS_REMOTE_WRITE, &rComm->base.stats, qp), ret, fail);
-+    NCCLCHECKGOTO(ncclIbCreateQp(ibDev->portNum, &rCommDev->base, IBV_ACCESS_REMOTE_WRITE, &rComm->base.stats, qp, channel_id, false, q, remMeta.isP2p), ret, fail);
+-    NCCLCHECKGOTO(ncclIbCreateQp(ibDev->portNum, &rCommDev->base, IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC, &rComm->base.stats, qp), ret, fail);
++    NCCLCHECKGOTO(ncclIbCreateQp(ibDev->portNum, &rCommDev->base, IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC, &rComm->base.stats, qp, channel_id, false, q, remMeta.isP2p), ret, fail);
      qp->devIndex = devIndex;
      devIndex = (devIndex + 1) % rComm->base.vProps.ndevs;
  

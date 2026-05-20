@@ -338,8 +338,10 @@ Examples:
         dest="dispatch",
         required=False,
         help=(
-            "\t\t\tWhich dispatch iterations of the kernel to filter \n"
-            "\t\t\t(e.g. 1 3:5 captures 1st, 3rd, 4th and 5th iterations)."
+            "\t\t\tWhich dispatch iterations of each kernel to filter \n"
+            "\t\t\t(1-based; positive integer or 'start:end'/'start-end' \n"
+            "\t\t\trange, e.g. 1 3:5 captures 1st, 3rd, 4th and 5th \n"
+            "\t\t\titerations)."
         ),
     )
     profile_group.add_argument(
@@ -711,12 +713,19 @@ Examples:
         choices=["stdout", "txt", "csv", "db"],
         default="stdout",
         help=(
-            "\t\tSet the format of output file or folder containing analysis data.\n"
-            "\t\tBy default, file or folder created will "
-            "have the name rocprof_compute_<uuid>.\n"
-            "\t\tFile or folder name can be overriden using --output-name.\n"
-            "\t\tDefault output format is stdout which will not "
-            "generate any file/folder.\n"
+            "\t\tFormat of the analysis output. One of: stdout, txt, csv, db.\n"
+            "\t\t  stdout - print report to the terminal (no file/folder created).\n"
+            "\t\t  txt    - write report to <name>.txt; disables terminal output.\n"
+            "\t\t  csv    - write one CSV per analysis view into a folder <name>/.\n"
+            "\t\t           Requires profiles collected with\n"
+            "\t\t           --format-rocprof-output rocpd. Disables terminal output.\n"
+            "\t\t  db     - write a SQLite database <name>.db (see analysis\n"
+            "\t\t           database schema in the docs). Requires profiles\n"
+            "\t\t           collected with --format-rocprof-output rocpd.\n"
+            "\t\t           Disables terminal output.\n"
+            "\t\tDefault <name> is rocprof_compute_<uuid>; override with"
+            " --output-name.\n"
+            "\t\tDefault format is stdout.\n"
         ),
     )
     analyze_group.add_argument(

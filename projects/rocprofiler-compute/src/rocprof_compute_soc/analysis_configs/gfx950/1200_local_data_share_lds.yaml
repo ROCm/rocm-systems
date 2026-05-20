@@ -79,11 +79,10 @@ Panel Config:
             / (End_Timestamp - Start_Timestamp)))
           unit: Gbps
         LDS Latency:
-          avg: SUM(SQ_ACCUM_PREV_HIRES) / SUM(SQ_INSTS_LDS)
-          min: MIN(SQ_ACCUM_PREV_HIRES / SQ_INSTS_LDS)
-          max: MAX(SQ_ACCUM_PREV_HIRES / SQ_INSTS_LDS)
+          avg: SUM(SQ_INST_LEVEL_LDS_ACCUM) / SUM(SQ_INSTS_LDS)
+          min: MIN(SQ_INST_LEVEL_LDS_ACCUM / SQ_INSTS_LDS)
+          max: MAX(SQ_INST_LEVEL_LDS_ACCUM / SQ_INSTS_LDS)
           unit: Cycles
-          coll_level: SQ_INST_LEVEL_LDS
         Bank Conflicts/Access:
           avg: SUM(SQ_LDS_BANK_CONFLICT) / SUM(SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT)
           min: MIN(SQ_LDS_BANK_CONFLICT / (SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT))
