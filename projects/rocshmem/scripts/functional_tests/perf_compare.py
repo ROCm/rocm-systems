@@ -402,7 +402,7 @@ def make_heatmap(
 
 def _resolve_dirs(pattern: str) -> list[Path]:
     """Resolve a path or glob pattern to a list of directories."""
-    p = Path(pattern)
+    p = Path(pattern).expanduser()
     if p.is_dir():
         return [p]
     # Try glob from parent
@@ -429,7 +429,7 @@ def main():
         help="Variant specs as name:path-or-glob (e.g. sdma-off:build-sdma-off/logs-heatmap-*)",
     )
     parser.add_argument(
-        "--outdir", type=Path, default=Path("plots"),
+        "--outdir", type=lambda p: Path(p).expanduser(), default=Path("plots"),
         help="Output directory for plots (default: plots/)",
     )
     args = parser.parse_args()

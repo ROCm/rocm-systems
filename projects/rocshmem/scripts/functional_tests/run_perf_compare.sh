@@ -25,10 +25,10 @@
 #                         Fetches the PR branch, builds it, and names it "pr<NUM>".
 #   --base-branch NAME    Base branch to compare against (default: origin/develop)
 #   --baseline-dir PATH   Use PATH as pre-built baseline (skips baseline build).
-#                         Required when using --skip-build with pre-built Docker dirs.
+#                         Use with --skip-baseline to also skip baseline test runs.
 #   --branch-dir PATH     Use PATH as pre-built branch build (skips branch build).
 #   --skip-build          Skip all build steps (reuse existing builds)
-#   --skip-baseline       Skip rebuilding the baseline
+#   --skip-baseline       Skip baseline build and test runs (reuse existing logs)
 #   --skip-develop        Alias for --skip-baseline
 #   --outdir DIR          Output directory for plots (default: auto-generated)
 #
@@ -93,7 +93,7 @@ ROCSHMEM_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 PROJECTS_DIR="$(cd "$ROCSHMEM_DIR/.." && pwd)"
 DRIVER="$ROCSHMEM_DIR/scripts/functional_tests/driver.sh"
 COMPARE="$ROCSHMEM_DIR/scripts/functional_tests/perf_compare.py"
-VENV_DIR="$PROJECTS_DIR/.perf-venv"
+VENV_DIR="$SCRIPT_DIR/.perf-venv"
 
 # Open MPI
 export PATH="${OMPI_HOME:-$HOME/ompi}/bin:$PATH"
@@ -163,13 +163,34 @@ fi
 echo ""
 echo ">>> Step 0: Setting up Python virtual environment"
 
+# Self-healing: if the venv exists but is missing required packages, recreate it.
+if [[ -d "$VENV_DIR" ]] && \
+   ! "$VENV_DIR/bin/python3" -c "import matplotlib, numpy, pandas, seaborn" &>/dev/null; then
+  echo "  Existing venv is missing dependencies, recreating..."
+  rm -rf "$VENV_DIR"
+fi
+
 if [[ ! -d "$VENV_DIR" ]]; then
-  python3 -m venv "$VENV_DIR" 2>/dev/null || {
-    echo "ERROR: Failed to create venv. On Debian/Ubuntu, install:" >&2
-    echo "  sudo apt install python3-venv" >&2
+  # Try a fully isolated venv first (requires python3-venv / ensurepip).
+  # Fall back to --system-site-packages --without-pip when ensurepip is
+  # unavailable (e.g. Debian/Ubuntu without python3.x-venv installed).
+  if python3 -m ensurepip --version &>/dev/null; then
+    python3 -m venv "$VENV_DIR" || { echo "ERROR: Failed to create venv." >&2; exit 1; }
+  else
+    python3 -m venv --system-site-packages --without-pip "$VENV_DIR" || {
+      echo "ERROR: Failed to create venv (even without pip)." >&2; exit 1
+    }
+  fi
+  # Activate so that pip (venv's own, or system pip via --system-site-packages)
+  # installs into the venv rather than the system.
+  # shellcheck disable=SC1091
+  . "$VENV_DIR/bin/activate"
+  python3 -m pip install --quiet matplotlib numpy pandas seaborn || {
+    echo "ERROR: Failed to install Python dependencies." >&2
+    echo "  If using system pip, try: sudo apt install python3-pip" >&2
     exit 1
   }
-  "$VENV_DIR/bin/pip" install --quiet matplotlib numpy pandas seaborn
+  deactivate
   echo "  Created venv and installed dependencies at $VENV_DIR"
 else
   echo "  Reusing existing venv at $VENV_DIR"
@@ -302,7 +323,11 @@ run_iterations() {
   done
 }
 
-run_iterations "$BUILD_BASELINE" "logs-${SUITE}" "baseline"
+if [[ $SKIP_BASELINE -eq 0 ]]; then
+  run_iterations "$BUILD_BASELINE" "logs-${SUITE}" "baseline"
+else
+  echo "  Skipping baseline test runs (--skip-baseline)"
+fi
 run_iterations "$BUILD_BRANCH"   "logs-${SUITE}" "${BRANCH_LABEL}"
 
 for spec in "${VARIANT_SPECS[@]}"; do
