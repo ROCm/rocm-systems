@@ -215,6 +215,7 @@ if(BUILD_TESTS)
 
     set(TEST_FIXTURE_SOURCE_FILES
       BitOpsTests.cpp
+      LazyInitGateTests.cpp
       MiscTests.cpp
       RomeTopoConsensusTests.cpp
       EnqueueCountTests.cpp
