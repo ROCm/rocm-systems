@@ -21,10 +21,7 @@ import pytest
 from pathlib import Path
 from conftest import RocprofsysTest, check_use_rocpd
 
-pytestmark = [
-    pytest.mark.mpi,
-    pytest.mark.rank_filter
-]
+pytestmark = [pytest.mark.mpi, pytest.mark.rank_filter]
 
 TARGET = "mpi-example"
 NUM_PROCS = 3
@@ -94,11 +91,14 @@ def rocpd_env() -> dict[str, str]:
 class TestRankFilter(RocprofsysTest):
     """End-to-end tests for the MPI rank-based output filtering feature."""
 
-    @pytest.mark.parametrize("filter_source", [
-    pytest.param("unset", id=""),
-    "via_cli",
-    "via_env",
-    ])
+    @pytest.mark.parametrize(
+        "filter_source",
+        [
+            pytest.param("unset", id=""),
+            "via_cli",
+            "via_env",
+        ],
+    )
     def test_no_filter(self, rocpd_env, filter_source):
         """Tests: filter not set + filter options are set (via cli or env) but empty.
         Every rank should produce both file and console output (filtering disabled).
@@ -231,9 +231,9 @@ class TestRankFilter(RocprofsysTest):
                 r"\[--rank-filter-logs, --rank-filter-output\]"
             ],
         )
-        assert banner_count(result.test_output) == 0, (
-            f"Expected 0 banners, got {banner_count(result.test_output)}"
-        )
+        assert (
+            banner_count(result.test_output) == 0
+        ), f"Expected 0 banners, got {banner_count(result.test_output)}"
         assert_per_rank_outputs(
             self.test_output_dir,
             ranks_with_output=[],
