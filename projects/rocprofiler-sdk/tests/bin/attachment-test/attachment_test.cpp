@@ -22,6 +22,7 @@
 
 #include <hip/hip_runtime.h>
 #include <rocprofiler-sdk-roctx/roctx.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include <chrono>
 #include <csignal>
@@ -193,20 +194,48 @@ main(int argc, char** argv)
 
     size_t nthreads{8};
     int    ndevices{0};
+    bool   fork_child{false};
+    int    positional{0};
     for(int i = 1; i < argc; ++i)
     {
         auto _arg = std::string{argv[i]};
-        if(_arg == "?" || _arg == "-h" || _arg == "--help")
+        if(_arg == "--fork-child")
         {
-            fprintf(stderr,
-                    "usage: attachment-test [NUM_THREADS (%zu)] [NUM_DEVICES (%d)]\n",
-                    nthreads,
-                    ndevices);
+            fork_child = true;
+        }
+        else if(_arg == "?" || _arg == "-h" || _arg == "--help")
+        {
+            fprintf(
+                stderr,
+                "usage: attachment-test [--fork-child] [NUM_THREADS (%zu)] [NUM_DEVICES (%d)]\n",
+                nthreads,
+                ndevices);
             exit(EXIT_SUCCESS);
         }
+        else if(positional == 0)
+        {
+            nthreads = std::atoll(argv[i]);
+            ++positional;
+        }
+        else if(positional == 1)
+        {
+            ndevices = std::stoi(argv[i]);
+            ++positional;
+        }
     }
-    if(argc > 1) nthreads = std::atoll(argv[1]);
-    if(argc > 2) ndevices = std::stoi(argv[2]);
+
+    // Fork a child process before HIP initialization so each process gets a
+    // clean HIP context. Used by the attach-tree test to exercise --attach-children.
+    pid_t child_pid = -1;
+    if(fork_child)
+    {
+        child_pid = fork();
+        if(child_pid < 0)
+        {
+            std::cerr << "fork failed\n";
+            return 1;
+        }
+    }
 
     std::cout << "Attachment test app started with PID: " << getpid() << std::endl;
 
@@ -242,6 +271,19 @@ main(int argc, char** argv)
                   << "\n";
     }
     std::cout << "Attachment test app finished" << std::endl;
+
+    if(child_pid > 0)
+    {
+        kill(child_pid, SIGINT);
+        int child_status = 0;
+        waitpid(child_pid, &child_status, 0);
+        if(child_status != 0)
+        {
+            std::cout << "Child process " << child_pid
+                      << " returned non-zero status: " << child_status << std::endl;
+            return 1;
+        }
+    }
 
     return 0;
 }

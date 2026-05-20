@@ -24,6 +24,23 @@
 
 set -e
 
+wait_for_attach_ready() {
+    local pid=$1
+    local max_wait=30
+    local elapsed=0
+    echo "Waiting for rocp-bg-attach thread in PID ${pid}..."
+    while [ $elapsed -lt $max_wait ]; do
+        if grep -ql "rocp-bg-attach" /proc/${pid}/task/*/comm 2>/dev/null; then
+            echo "Attachment ready (${elapsed}s elapsed)"
+            return 0
+        fi
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+    echo "Timed out after ${max_wait}s waiting for rocp-bg-attach thread"
+    return 1
+}
+
 # Arguments
 TEST_APP=$1
 ROCPROFV3=$2
@@ -35,7 +52,6 @@ OUTPUT_FILENAME=${5:-out}
 export ROCP_TOOL_ATTACH=1
 
 OUTPUT_SUBDIR="attachment-output"
-EXPECTED_FILES=("${OUTPUT_FILENAME}_results.json" "${OUTPUT_FILENAME}_results.db")
 OUTPUT_FORMAT="csv json rocpd"
 
 # Clean up any existing output
@@ -62,8 +78,8 @@ echo "Launching test application: ${TEST_APP}"
 LD_PRELOAD=${ROCPROF_PRELOAD} ${TEST_APP} &
 APP_PID=$!
 
-# Wait a moment for the application to start
-sleep 1
+# Wait for the application to be ready for attachment
+wait_for_attach_ready $APP_PID
 
 # Check if the application is still running
 if ! kill -0 $APP_PID 2>/dev/null; then
@@ -82,8 +98,9 @@ fi
 # Attachment
 echo "Attaching profiler to PID $APP_PID for 500 milliseconds..."
 
-# Run rocprofv3 with --attach option
-LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} --attach $APP_PID --attach-duration-msec 500 -s -f ${OUTPUT_FORMAT} --stats --summary --group-by-queue --attach-sync-output -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} --log-level ${LOG_LEVEL} -o ${OUTPUT_FILENAME:-out} &
+# Run rocprofv3 with --attach option.
+# No -o flag: the process uses the default %hostname%/%pid% naming.
+LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} --attach $APP_PID --attach-duration-msec 500 -s -f ${OUTPUT_FORMAT} --stats --summary --group-by-queue --attach-sync-output -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} --log-level ${LOG_LEVEL} &
 ROCPROF_PID=$!
 echo "rocprofv3 PID: $ROCPROF_PID"
 
@@ -112,9 +129,8 @@ fi
 
 echo "Test application completed successfully"
 
-# Files should be created directly in the expected location with the specified output name
-echo "Checking for generated ${OUTPUT_FORMAT} output files..."
-ls -la ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/
+echo "Checking for generated output files..."
+ls -laR ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/
 
 # Check if expected output files were created
 # For CSV format, check if at least one CSV file was generated
@@ -126,8 +142,29 @@ else
     echo "Found $CSV_COUNT CSV file(s)"
 fi
 
-# For other formats, check specific expected files
-for expected_file in "${EXPECTED_FILES[@]}"; do
+# Locate the process's output files. With default naming the files are under a
+# subdirectory named after the hostname and contain the PID in the filename,
+# e.g. attachment-output/<hostname>/<pid>_results.json
+APP_JSON=$(find ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/ -name "${APP_PID}_results.json" | head -1)
+if [ -z "$APP_JSON" ]; then
+    echo "Error: Could not find app (PID ${APP_PID}) JSON output in ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/"
+    exit 1
+fi
+echo "Found app JSON output: $APP_JSON"
+
+APP_OUTPUT_DIR=$(dirname "$APP_JSON")
+
+# Rename output files to well-known names so CMakeLists.txt can reference them
+# without knowing the hostname or PID at configure time.
+for src in "${APP_OUTPUT_DIR}/${APP_PID}"_*.csv "${APP_OUTPUT_DIR}/${APP_PID}"_*.json "${APP_OUTPUT_DIR}/${APP_PID}"_*.db; do
+    [ -f "$src" ] || continue
+    dst_name=$(basename "$src" | sed "s/^${APP_PID}_/${OUTPUT_FILENAME}_/")
+    cp "$src" "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${dst_name}"
+    echo "Copied $(basename $src) -> ${dst_name}"
+done
+
+# Verify the well-known files exist
+for expected_file in "${OUTPUT_FILENAME}_results.json" "${OUTPUT_FILENAME}_results.db"; do
     if [ ! -f "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${expected_file}" ]; then
         echo "Error: Expected output file ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${expected_file} not found"
         exit 1

@@ -24,6 +24,23 @@
 
 set -e
 
+wait_for_attach_ready() {
+    local pid=$1
+    local max_wait=30
+    local elapsed=0
+    echo "Waiting for rocp-bg-attach thread in PID ${pid}..."
+    while [ $elapsed -lt $max_wait ]; do
+        if grep -ql "rocp-bg-attach" /proc/${pid}/task/*/comm 2>/dev/null; then
+            echo "Attachment ready (${elapsed}s elapsed)"
+            return 0
+        fi
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+    echo "Timed out after ${max_wait}s waiting for rocp-bg-attach thread"
+    return 1
+}
+
 # Arguments
 TEST_APP=$1
 ROCPROFV3=$2
@@ -35,7 +52,6 @@ OUTPUT_FILENAME=${5:-out}
 export ROCP_TOOL_ATTACH=1
 
 OUTPUT_SUBDIR="attachment-output"
-EXPECTED_FILES=("${OUTPUT_FILENAME}_results.json" "${OUTPUT_FILENAME}_results.db")
 OUTPUT_FORMAT="csv json rocpd"
 
 # Clean up any existing output
@@ -57,14 +73,14 @@ if [ -e /proc/sys/kernel/yama/ptrace_scope ]                             \
     exit 0
 fi
 
-# Start the test application in the background. The test app forks a child
-# process, so attaching to the parent PID exercises tree attachment.
+# Start the test application in the background with --fork-child so it spawns
+# a child process, exercising rocprofv3 --attach-children tree attachment.
 echo "Launching test application: ${TEST_APP}"
-LD_PRELOAD=${ROCPROF_PRELOAD} ${TEST_APP} &
+LD_PRELOAD=${ROCPROF_PRELOAD} ${TEST_APP} --fork-child &
 APP_PID=$!
 
-# Wait a moment for the application and its children to start
-sleep 2
+# Wait for the parent to be ready for attachment
+wait_for_attach_ready $APP_PID
 
 # Check if the application is still running
 if ! kill -0 $APP_PID 2>/dev/null; then
@@ -72,7 +88,18 @@ if ! kill -0 $APP_PID 2>/dev/null; then
     exit 1
 fi
 
-echo "Test application started with PID: $APP_PID"
+# Find the child process PID
+CHILD_PID=$(pgrep -P $APP_PID | head -1)
+if [ -z "$CHILD_PID" ]; then
+    echo "Error: could not find child process of PID $APP_PID"
+    kill $APP_PID 2>/dev/null
+    exit 1
+fi
+
+# Wait for the child to be ready for attachment
+wait_for_attach_ready $CHILD_PID
+
+echo "Test application started with PID: $APP_PID, child PID: $CHILD_PID"
 
 if [ ! -f "${ROCPROFV3}" ]; then
     echo "Error: rocprofv3 not found at ${ROCPROFV3}"
@@ -82,8 +109,10 @@ fi
 
 echo "Attaching profiler to PID $APP_PID and children for 500 milliseconds..."
 
-# Run rocprofv3 with --attach and --attach-children options
-LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} --attach $APP_PID --attach-children --attach-duration-msec 500 -s -f ${OUTPUT_FORMAT}  --stats --summary --group-by-queue --attach-sync-output -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} --log-level ${LOG_LEVEL} -o ${OUTPUT_FILENAME:-out} &
+# Run rocprofv3 with --attach and --attach-children options.
+# No -o flag: each process uses the default %hostname%/%pid% naming so
+# parent and child get separate output files.
+LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} --attach $APP_PID --attach-children --attach-duration-msec 500 -s -f ${OUTPUT_FORMAT} --stats --summary --group-by-queue --attach-sync-output -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} --log-level ${LOG_LEVEL} &
 ROCPROF_PID=$!
 echo "rocprofv3 PID: $ROCPROF_PID"
 
@@ -112,9 +141,8 @@ fi
 
 echo "Test application completed successfully"
 
-# Files should be created directly in the expected location with the specified output name
-echo "Checking for generated ${OUTPUT_FORMAT} output files..."
-ls -la ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/
+echo "Checking for generated output files..."
+ls -laR ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/
 
 # Check if expected output files were created
 # For CSV format, check if at least one CSV file was generated
@@ -126,8 +154,29 @@ else
     echo "Found $CSV_COUNT CSV file(s)"
 fi
 
-# For other formats, check specific expected files
-for expected_file in "${EXPECTED_FILES[@]}"; do
+# Locate the child process's output files. With default naming the files are
+# under a subdirectory named after the hostname and contain the PID in the
+# filename, e.g. attachment-output/<hostname>/<child_pid>_results.json
+CHILD_JSON=$(find ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/ -name "${CHILD_PID}_results.json" | head -1)
+if [ -z "$CHILD_JSON" ]; then
+    echo "Error: Could not find child (PID ${CHILD_PID}) JSON output in ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/"
+    exit 1
+fi
+echo "Found child JSON output: $CHILD_JSON"
+
+CHILD_DIR=$(dirname "$CHILD_JSON")
+
+# Rename child output files to well-known names so CMakeLists.txt can
+# reference them without knowing the hostname or PID at configure time.
+for src in "${CHILD_DIR}/${CHILD_PID}"_*.csv "${CHILD_DIR}/${CHILD_PID}"_*.json "${CHILD_DIR}/${CHILD_PID}"_*.db; do
+    [ -f "$src" ] || continue
+    dst_name=$(basename "$src" | sed "s/^${CHILD_PID}_/out_/")
+    cp "$src" "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${dst_name}"
+    echo "Copied $(basename $src) -> ${dst_name}"
+done
+
+# Verify the well-known files exist
+for expected_file in "out_results.json" "out_results.db"; do
     if [ ! -f "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${expected_file}" ]; then
         echo "Error: Expected output file ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${expected_file} not found"
         exit 1
