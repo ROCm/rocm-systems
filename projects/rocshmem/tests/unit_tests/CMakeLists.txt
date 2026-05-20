@@ -135,3 +135,27 @@ target_link_libraries(
     gtest
     gtest_main
 )
+
+###############################################################################
+# CTEST INTEGRATION (replaces driver.sh with native CTest tests)
+###############################################################################
+# Enable testing
+enable_testing()
+
+# Include CTest-based unit tests
+# Set ROCSHMEM_USE_CTEST=ON to register unit tests
+if(ROCSHMEM_USE_CTEST)
+    message(STATUS "Registering CTest-based unit tests")
+    include(${CMAKE_CURRENT_SOURCE_DIR}/CTestUnitTests.cmake)
+    register_all_unit_tests()
+
+    # Print summary
+    get_directory_property(all_tests TESTS)
+    list(LENGTH all_tests num_tests)
+    message(STATUS "Registered ${num_tests} unit tests")
+    message(STATUS "Run with: ctest -L unit")
+endif()
+
+# For backward compatibility, the shell script is still available
+# Usage: rocshmem_unit_driver.sh <binary> all
+# Usage: rocshmem_unit_driver.sh <binary> custom <ranks> <filter>
