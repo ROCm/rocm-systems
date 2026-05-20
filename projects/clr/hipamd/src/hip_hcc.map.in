@@ -670,3 +670,24 @@ global:
 local:
     *;
 } hip_7.2;
+
+hip_7.14 {
+global:
+    hipGreenCtxCreate;
+    hipExecutionCtxDestroy;
+    hipExecutionCtxStreamCreate;
+    hipDeviceGetDevResource;
+    hipDevSmResourceSplitByCount;
+    hipDevSmResourceSplit;
+    hipDevResourceGenerateDesc;
+    hipDeviceGetExecutionCtx;
+    hipExecutionCtxGetDevResource;
+    hipExecutionCtxGetDevice;
+    hipExecutionCtxGetId;
+    hipStreamGetDevResource;
+    hipExecutionCtxRecordEvent;
+    hipExecutionCtxSynchronize;
+    hipExecutionCtxWaitEvent;
+local:
+    *;
+} hip_7.2;

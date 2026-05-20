@@ -3212,3 +3212,92 @@ hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel) {
   return hip::GetHipDispatchTable()->hipKernelGetFunction_fn(pFunc, kernel) ;
   CATCH;
 }
+hipError_t hipGreenCtxCreate(hipExecutionCtx_t* ctx, hipDevResourceDesc_t desc, int device,
+                             unsigned int flags) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipGreenCtxCreate_fn(ctx, desc, device, flags);
+  CATCH;
+}
+hipError_t hipExecutionCtxDestroy(hipExecutionCtx_t ctx) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipExecutionCtxDestroy_fn(ctx);
+  CATCH;
+}
+hipError_t hipExecutionCtxStreamCreate(hipStream_t* stream, hipExecutionCtx_t greenctx,
+                                        unsigned int flags, int priority) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipExecutionCtxStreamCreate_fn(stream, greenctx, flags,
+                                                                     priority);
+  CATCH;
+}
+hipError_t hipDeviceGetDevResource(hipDevice_t device, hipDevResource* resource,
+                                   hipDevResourceType type) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipDeviceGetDevResource_fn(device, resource, type);
+  CATCH;
+}
+hipError_t hipDevSmResourceSplitByCount(hipDevResource* result, unsigned int* nbGroups,
+                                        const hipDevResource* input, hipDevResource* remainder,
+                                        unsigned int flags, unsigned int minCount) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipDevSmResourceSplitByCount_fn(result, nbGroups, input,
+                                                                      remainder, flags, minCount);
+  CATCH;
+}
+hipError_t hipDevSmResourceSplit(hipDevResource* result, unsigned int nbGroups,
+                                 const hipDevResource* input, hipDevResource* remainder,
+                                 unsigned int flags,
+                                 hipDevSmResourceGroupParams* groupParams) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipDevSmResourceSplit_fn(result, nbGroups, input, remainder,
+                                                              flags, groupParams);
+  CATCH;
+}
+hipError_t hipDevResourceGenerateDesc(hipDevResourceDesc_t* phDesc, hipDevResource* resources,
+                                       unsigned int nbResources) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipDevResourceGenerateDesc_fn(phDesc, resources, nbResources);
+  CATCH;
+}
+hipError_t hipDeviceGetExecutionCtx(hipExecutionCtx_t* ctx, int device) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipDeviceGetExecutionCtx_fn(ctx, device);
+  CATCH;
+}
+hipError_t hipExecutionCtxGetDevResource(hipExecutionCtx_t ctx, hipDevResource* resource,
+                                          hipDevResourceType type) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipExecutionCtxGetDevResource_fn(ctx, resource, type);
+  CATCH;
+}
+hipError_t hipExecutionCtxGetDevice(int* device, hipExecutionCtx_t ctx) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipExecutionCtxGetDevice_fn(device, ctx);
+  CATCH;
+}
+hipError_t hipExecutionCtxGetId(hipExecutionCtx_t ctx, unsigned long long* ctxId) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipExecutionCtxGetId_fn(ctx, ctxId);
+  CATCH;
+}
+hipError_t hipStreamGetDevResource(hipStream_t hStream, hipDevResource* resource,
+                                    hipDevResourceType type) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipStreamGetDevResource_fn(hStream, resource, type);
+  CATCH;
+}
+hipError_t hipExecutionCtxRecordEvent(hipExecutionCtx_t ctx, hipEvent_t event) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipExecutionCtxRecordEvent_fn(ctx, event);
+  CATCH;
+}
+hipError_t hipExecutionCtxSynchronize(hipExecutionCtx_t ctx) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipExecutionCtxSynchronize_fn(ctx);
+  CATCH;
+}
+hipError_t hipExecutionCtxWaitEvent(hipExecutionCtx_t ctx, hipEvent_t event) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipExecutionCtxWaitEvent_fn(ctx, event);
+  CATCH;
+}

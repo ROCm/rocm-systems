@@ -134,9 +134,35 @@ _CDNA4_TO_RDNA3_ENC_MAP: dict[str, str] = {
     'VOP3_SDST_ENC': 'VOP3_SDST_ENC',
 }
 
+# Maps (src_enc_name -> dst_enc_name) for CDNA4 -> CDNA3. These are adjacent
+# CDNA generations, so the encoding-family names remain the same; field
+# positions and opcode substitutions are still handled through the generated
+# decode/encode functions and legalization table.
+_CDNA4_TO_CDNA3_ENC_MAP: dict[str, str] = {
+    'ENC_SOP1': 'ENC_SOP1',
+    'ENC_SOP2': 'ENC_SOP2',
+    'ENC_SOPC': 'ENC_SOPC',
+    'ENC_SOPK': 'ENC_SOPK',
+    'ENC_SOPP': 'ENC_SOPP',
+    'ENC_SMEM': 'ENC_SMEM',
+    'ENC_VOP1': 'ENC_VOP1',
+    'ENC_VOP2': 'ENC_VOP2',
+    'ENC_VOPC': 'ENC_VOPC',
+    'ENC_VOP3': 'ENC_VOP3',
+    'ENC_VOP3P': 'ENC_VOP3P',
+    'ENC_DS': 'ENC_DS',
+    'ENC_MTBUF': 'ENC_MTBUF',
+    'ENC_MUBUF': 'ENC_MUBUF',
+    'ENC_FLAT': 'ENC_FLAT',
+    'ENC_FLAT_GLBL': 'ENC_FLAT_GLBL',
+    'ENC_FLAT_SCRATCH': 'ENC_FLAT_SCRATCH',
+    'VOP3_SDST_ENC': 'VOP3_SDST_ENC',
+}
+
 # Lookup the right per-pair enc_map. New target ISAs are added by appending
 # entries here plus a corresponding _CDNA4_TO_<DST>_ENC_MAP definition above.
 _PAIR_ENC_MAPS: dict[tuple[str, str], dict[str, str]] = {
+    ('cdna4', 'cdna3'): _CDNA4_TO_CDNA3_ENC_MAP,
     ('cdna4', 'rdna4'): _CDNA4_TO_RDNA4_ENC_MAP,
     ('cdna4', 'rdna3'): _CDNA4_TO_RDNA3_ENC_MAP,
 }
@@ -264,10 +290,23 @@ def _is_pad_field(name: str) -> bool:
     return name.startswith('pad_')
 
 
+def _uses_rdna_null_sgpr_sentinel(dst_name: str) -> bool:
+    """True when the destination ISA uses RDNA's 0x7c null scalar-register sentinel.
+
+    CDNA encodings use 0x7f for null 7-bit scalar operands and SMEM has an
+    explicit ``soffset_en`` bit to disable scalar offsets. Rewriting those
+    fields while translating CDNA4->CDNA3 corrupts otherwise bit-compatible
+    instructions such as kernarg ``s_load_*`` loads.
+    """
+    return dst_name.startswith('rdna')
+
+
 def _classify_fields(
     src_enc: InstEncoding,
     dst_enc: InstEncoding,
     src_enc_name: str,
+    has_coherency_remap: bool,
+    has_glc_remap: bool,
 ) -> list[FieldMapping]:
     """Classify each field in the src/dst encoding pair."""
 
@@ -277,23 +316,20 @@ def _classify_fields(
     mappings: list[FieldMapping] = []
     matched_dst: set[str] = set()
 
-    has_coherency = src_enc_name in _COHERENCY_REMAP_ENCODINGS
-    has_glc = src_enc_name in _GLC_REMAP_ENCODINGS
-
     for sname, sf in src_fields.items():
         # Skip encoding field -- set separately with the target constant
         if sname == 'encoding':
             continue
 
         # Coherency fields handled specially
-        if has_coherency and sname in _COHERENCY_SRC_FIELDS:
+        if has_coherency_remap and sname in _COHERENCY_SRC_FIELDS:
             mappings.append(FieldMapping(
                 'coherency', sname, '', sf.bit_cnt, 0,
                 f'coherency remap: {sname} -> scope/th',
             ))
             continue
 
-        if has_glc and sname == 'glc':
+        if has_glc_remap and sname == 'glc':
             mappings.append(FieldMapping(
                 'glc_remap', sname, '', sf.bit_cnt, 0,
                 f'GLC remap: glc -> scope/th',
@@ -345,7 +381,7 @@ def _classify_fields(
         if dname in matched_dst:
             continue
         # Coherency destination fields are handled by the coherency remap
-        if (has_coherency or has_glc) and dname in _COHERENCY_DST_FIELDS:
+        if (has_coherency_remap or has_glc_remap) and dname in _COHERENCY_DST_FIELDS:
             continue
         mappings.append(FieldMapping(
             'insert', '', dname, 0, df.bit_cnt,
@@ -555,14 +591,18 @@ def _emit_encode_fn(trans, dst_ns, dst_name):
             lines.append(f'    dst.{m.dst_name} = 0;')
         # drop and coherency: nothing to encode
 
-    # Remap null register sentinels: CDNA uses 0x7F (7-bit max), RDNA uses 0x7C.
-    if any(m.src_name == 'saddr' or m.dst_name == 'saddr' for m in trans.mappings):
-        lines.append('    if (dst.saddr == 0x7F) dst.saddr = 0x7C;')
-    if any(m.src_name == 'soffset' or m.dst_name == 'soffset' for m in trans.mappings):
-        lines.append('    if (dst.soffset == 0x7F) dst.soffset = 0x7C;')
-        # CDNA SMEM uses soffset_en=0 to disable scalar offset. RDNA uses soffset=0x7C (null).
-        if any(m.src_name == 'soffset_en' for m in trans.mappings):
-            lines.append('    if (f.soffset_en == 0) dst.soffset = 0x7C;')
+    # Remap null register sentinels only when translating into RDNA encodings:
+    # CDNA uses 0x7F (7-bit max), while RDNA uses 0x7C. CDNA SMEM also has an
+    # explicit soffset_en bit; when the destination is another CDNA ISA, that
+    # bit must keep carrying the disabled-offset state without changing soffset.
+    if _uses_rdna_null_sgpr_sentinel(dst_name):
+        if any(m.src_name == 'saddr' or m.dst_name == 'saddr' for m in trans.mappings):
+            lines.append('    if (dst.saddr == 0x7F) dst.saddr = 0x7C;')
+        if any(m.src_name == 'soffset' or m.dst_name == 'soffset' for m in trans.mappings):
+            lines.append('    if (dst.soffset == 0x7F) dst.soffset = 0x7C;')
+            # CDNA SMEM uses soffset_en=0 to disable scalar offset. RDNA uses soffset=0x7C (null).
+            if any(m.src_name == 'soffset_en' for m in trans.mappings):
+                lines.append('    if (f.soffset_en == 0) dst.soffset = 0x7C;')
 
     # Return
     if bit_cnt <= 32:
@@ -721,13 +761,19 @@ def generate_encoding_translators(src_spec, dst_spec, src_name, dst_name, output
         # path handles glc/dlc directly.
         dst_field_names = {f.name for f in dst_enc.ucode_fields}
         dst_has_scope_th = ('scope' in dst_field_names and 'th' in dst_field_names)
+        has_coherency_remap = (se in _COHERENCY_REMAP_ENCODINGS) and dst_has_scope_th
+        has_glc_remap = (se in _GLC_REMAP_ENCODINGS) and dst_has_scope_th
         translations.append(EncodingTranslation(
             src_enc_name=se, dst_enc_name=de,
             src_struct=_struct_name(se), dst_struct=_struct_name(de),
             src_bit_cnt=src_enc.bit_cnt, dst_bit_cnt=dst_enc.bit_cnt,
-            mappings=_classify_fields(src_enc, dst_enc, se),
-            has_coherency_remap=(se in _COHERENCY_REMAP_ENCODINGS) and dst_has_scope_th,
-            has_glc_remap=(se in _GLC_REMAP_ENCODINGS) and dst_has_scope_th,
+            mappings=_classify_fields(
+                src_enc, dst_enc, se,
+                has_coherency_remap=has_coherency_remap,
+                has_glc_remap=has_glc_remap,
+            ),
+            has_coherency_remap=has_coherency_remap,
+            has_glc_remap=has_glc_remap,
             src_dt_index=src_dts.get(se, 0),
             src_enc_field_bit_cnt=src_enc.enc_field_bit_cnt,
             dst_enc_field_val=dst_evs.get(de, 0),
