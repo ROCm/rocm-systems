@@ -198,8 +198,7 @@ HIP_TEST_CASE(Unit_hipGetFuncBySymbol_MultiDev) {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   hipFunction_t funcPointer;
@@ -314,8 +313,7 @@ HIP_TEST_CASE(Unit_hipGetFuncBySymbol_MultiDevMultiThread) {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   ::std::vector< ::std::thread> threads;

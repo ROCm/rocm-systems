@@ -23,6 +23,7 @@
 #pragma once
 
 #include "disassembly.hpp"
+#include "funcmap.hpp"
 #include "segment.hpp"
 
 #include <dwarf.h>
@@ -39,6 +40,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace rocprofiler
@@ -204,7 +206,7 @@ public:
 
                 // Each row in the DWARF line table covers [addr, next_row_addr).
                 // The terminator of a contiguous code sequence is a row with the
-                // end_sequence flag set — its address is one past the last
+                // end_sequence flag set -- its address is one past the last
                 // instruction in the sequence. Using the next row's address
                 // (rather than the next *kept* row's address, or codeobj_size)
                 // ensures that ranges never extend across gaps in DWARF
@@ -223,7 +225,7 @@ public:
                     if(dwarf_lineaddr(next_line, &end_addr) != 0) continue;
                     if(end_addr <= addr) continue;
 
-                    // Skip end_sequence rows — they only mark the end boundary
+                    // Skip end_sequence rows -- they only mark the end boundary
                     // of the previous row, they aren't a real source location.
                     if(dwarf_lineendsequence(line, &end_sequence) == 0 && end_sequence) continue;
 
@@ -231,7 +233,7 @@ public:
                     // belongs to this source file but has no specific line"
                     // (typically compiler-synthesized code, prologue/epilogue,
                     // or optimizer-merged blocks). addr2line renders these as
-                    // "<file>:?" — keep them with the same convention so they
+                    // "<file>:?" -- keep them with the same convention so they
                     // are not silently dropped.
                     if(dwarf_lineno(line, &line_number) != 0) continue;
 
@@ -282,6 +284,78 @@ public:
             m_symbol_map = disassembly->GetKernelMap();  // Can throw
         } catch(...)
         {}
+
+        // .sqtt_funcmap is an ASCII section emitted by the sqtt_instrumentation
+        // pass. Each newline-terminated row assigns a marker ID (the value
+        // emitted by s_ttracedata{,_imm} at runtime -- see
+        // funcmap::decode_marker_value) to a function, kernel, user scope, or
+        // point marker. See funcmap.hpp for the full grammar.
+        //
+        //   .sqtt_funcmap (raw bytes -- one row per entry, '\n'-terminated):
+        //   +--------------------------------------------------------------+
+        //   | F:1:my_device_fn@/path/file.cpp:42                           |
+        //   | K:my_kernel@/path/file.cpp:8                                 |
+        //   | U:2:my_scope_marker                                          |
+        //   | P:3:vmem_load@/path/file.cpp:71                              |
+        //   | W:64                                                         |
+        //   +--------------------------------------------------------------+
+        //         |           |
+        //         |           +-- optional "@source_loc" tail (file[:line])
+        //         |
+        //         +-- F:id:name...  function -- enter/exit scope marker
+        //         +-- K:name...     kernel   -- name -> vaddr lookup, no id
+        //         +-- U:id:name     user-defined scope marker (enter/exit)
+        //         +-- P:id:name...  point marker (barrier, mem op, user pt)
+        //         +-- W:N           wave size (32 or 64)
+        //                          |
+        //                          v  funcmap::parse_funcmap_section
+        //   m_funcmap.entries   insertion-ordered list of FuncmapEntry rows
+        //   m_funcmap.by_id     id -> entry  (K: rows have no id; not indexed)
+        //   m_funcmap.wave_size value of the W: row (0 if absent)
+        //
+        // The pass below joins the freshly-parsed funcmap against
+        // m_symbol_map (which the disassembler already populated from
+        // .symtab) to back-fill `vaddr` on every F:/K: entry whose name
+        // matches a kernel symbol. This lets consumers resolve a marker to
+        // function-name to load address in one shot.
+        auto section_bytes =
+            funcmap::extract_elf_section(codeobj_data, codeobj_size, ".sqtt_funcmap");
+        if(section_bytes)
+        {
+            m_funcmap = funcmap::parse_funcmap_section(*section_bytes);
+
+            // m_symbol_map is vaddr-keyed; build the reverse index for the join.
+            std::unordered_map<std::string, uint64_t> name_to_vaddr;
+            name_to_vaddr.reserve(m_symbol_map.size());
+            for(const auto& [vaddr, sym] : m_symbol_map)
+                name_to_vaddr.emplace(sym.name, vaddr);
+
+            // FuncmapEntry is shared_ptr<const>, so we copy-on-write: clone,
+            // set vaddr, then swap the shared_ptr in entries[] (and by_id).
+            for(auto& entry_ptr : m_funcmap.entries)
+            {
+                if(!entry_ptr) continue;
+                if(entry_ptr->kind != funcmap::FuncmapEntryKind::Function &&
+                   entry_ptr->kind != funcmap::FuncmapEntryKind::Kernel)
+                    continue;
+
+                auto it = name_to_vaddr.find(entry_ptr->name);
+                if(it == name_to_vaddr.end()) continue;
+
+                auto updated   = std::make_shared<funcmap::FuncmapEntry>(*entry_ptr);
+                updated->vaddr = it->second;
+                // K: rows are not present in by_id by design (they carry no
+                // marker ID -- see parse_funcmap_section). The identity guard
+                // skips slots already overwritten by a later F:/U:/P: row.
+                if(updated->kind != funcmap::FuncmapEntryKind::Kernel)
+                {
+                    auto bid = m_funcmap.by_id.find(updated->id);
+                    if(bid != m_funcmap.by_id.end() && bid->second == entry_ptr)
+                        bid->second = updated;
+                }
+                entry_ptr = std::move(updated);
+            }
+        }
     }
     ~CodeobjDecoderComponent() = default;
 
@@ -306,7 +380,12 @@ public:
         return inst;
     }
 
+    // Parsed `.sqtt_funcmap` with vaddr back-filled on F:/K: rows. Empty
+    // when the code object has no .sqtt_funcmap section.
+    const funcmap::Funcmap& getFuncmap() const { return m_funcmap; }
+
     std::map<uint64_t, SymbolInfo>            m_symbol_map{};
+    funcmap::Funcmap                          m_funcmap{};
     std::vector<std::shared_ptr<Instruction>> instructions{};
     std::unique_ptr<DisassemblyInstance>      disassembly{};
 
@@ -385,7 +464,9 @@ public:
         if(!decoder) throw std::exception();
         return decoder->m_symbol_map;
     }
-    const uint64_t load_addr;
+    const funcmap::Funcmap& getFuncmap() const;
+    bool                    has_decoder() const noexcept { return bool(decoder); }
+    const uint64_t          load_addr;
 
 private:
     uint64_t load_end{0};
@@ -446,6 +527,15 @@ public:
         {}
         return nullptr;
     }
+
+    funcmap::Funcmap::EntryPtr getMarker(marker_id_t id, uint32_t funcmap_id) const;
+
+    // Returns nullopt if `id` has no registered decoder (or the decoder is
+    // uninitialized). Caller-side existence test replaces what used to be a
+    // try/catch on decoders.at(id). Funcmap is returned by value (copy of a
+    // vector + unordered_map of shared_ptrs) since std::optional cannot hold
+    // a reference in C++17.
+    std::optional<funcmap::Funcmap> getFuncmap(marker_id_t id) const;
 
 protected:
     std::unordered_map<marker_id_t, std::shared_ptr<LoadedCodeobjDecoder>> decoders{};
@@ -547,9 +637,90 @@ public:
         }
     }
 
+    std::vector<std::pair<marker_id_t, funcmap::Funcmap::EntryPtr>> findMarkerAny(
+        uint32_t funcmap_id) const;
+
+    uint32_t getWaveSize() const;
+
 private:
     segment::CodeobjTableTranslator table{};
 };
+
+inline const funcmap::Funcmap&
+LoadedCodeobjDecoder::getFuncmap() const
+{
+    if(!decoder) throw std::exception();
+    return decoder->getFuncmap();
+}
+
+inline funcmap::Funcmap::EntryPtr
+CodeobjMap::getMarker(marker_id_t id, uint32_t funcmap_id) const
+{
+    auto it = decoders.find(id);
+    if(it == decoders.end()) return nullptr;
+
+    try
+    {
+        return it->second->getFuncmap().find(funcmap_id);
+    } catch(...)
+    {
+        return nullptr;
+    }
+}
+
+inline std::optional<funcmap::Funcmap>
+CodeobjMap::getFuncmap(marker_id_t id) const
+{
+    auto it = decoders.find(id);
+    if(it == decoders.end() || !it->second || !it->second->has_decoder()) return std::nullopt;
+    return it->second->getFuncmap();
+}
+
+inline std::vector<std::pair<marker_id_t, funcmap::Funcmap::EntryPtr>>
+CodeobjAddressTranslate::findMarkerAny(uint32_t funcmap_id) const
+{
+    std::vector<std::pair<marker_id_t, funcmap::Funcmap::EntryPtr>> out;
+    for(const auto& [id, dec] : decoders)
+    {
+        try
+        {
+            if(auto entry = dec->getFuncmap().find(funcmap_id))
+                out.emplace_back(id, std::move(entry));
+        } catch(...)
+        {}
+    }
+    return out;
+}
+
+inline uint32_t
+CodeobjAddressTranslate::getWaveSize() const
+{
+    uint32_t agreed = 0;
+    for(const auto& [id, dec] : decoders)
+    {
+        uint32_t w = 0;
+        try
+        {
+            w = dec->getFuncmap().wave_size;
+        } catch(...)
+        {
+            continue;
+        }
+
+        if(w == 0) continue;
+        if(agreed == 0)
+        {
+            agreed = w;
+        }
+        else if(agreed != w)
+        {
+            std::cerr << "rocprofiler-sdk: .sqtt_funcmap wave size disagreement (" << agreed
+                      << " vs " << w << " from codeobj id " << id << ")\n";
+            return 0;
+        }
+    }
+    return agreed;
+}
 
 inline DIEInfo::DIEInfo(Dwarf_Die* die)
 {
