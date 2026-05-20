@@ -48,7 +48,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 1
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 27
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 28
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -1126,6 +1126,36 @@ typedef hipError_t (*t_hipMemGetMemPool)(hipMemPool_t* pool, hipMemLocation* loc
                                          hipMemAllocationType type);
 typedef hipError_t (*t_hipMipmappedArrayGetMemoryRequirements)(
     hipArrayMemoryRequirements* memoryRequirements, hipMipmappedArray_t mipmap, hipDevice_t device);
+typedef hipError_t (*t_hipGreenCtxCreate)(hipExecutionCtx_t* ctx, hipDevResourceDesc_t desc, int device,
+                                         unsigned int flags);
+typedef hipError_t (*t_hipExecutionCtxDestroy)(hipExecutionCtx_t ctx);
+typedef hipError_t (*t_hipExecutionCtxStreamCreate)(hipStream_t* stream, hipExecutionCtx_t greenctx,
+                                                     unsigned int flags, int priority);
+typedef hipError_t (*t_hipDeviceGetDevResource)(hipDevice_t device, hipDevResource* resource,
+                                                hipDevResourceType type);
+typedef hipError_t (*t_hipDevSmResourceSplitByCount)(hipDevResource* result,
+                                                     unsigned int* nbGroups,
+                                                     const hipDevResource* input,
+                                                     hipDevResource* remainder,
+                                                     unsigned int flags, unsigned int minCount);
+typedef hipError_t (*t_hipDevSmResourceSplit)(hipDevResource* result, unsigned int nbGroups,
+                                              const hipDevResource* input,
+                                              hipDevResource* remainder, unsigned int flags,
+                                              hipDevSmResourceGroupParams* groupParams);
+typedef hipError_t (*t_hipDevResourceGenerateDesc)(hipDevResourceDesc_t* phDesc,
+                                                    hipDevResource* resources,
+                                                    unsigned int nbResources);
+typedef hipError_t (*t_hipDeviceGetExecutionCtx)(hipExecutionCtx_t* ctx, int device);
+typedef hipError_t (*t_hipExecutionCtxGetDevResource)(hipExecutionCtx_t ctx, hipDevResource* resource,
+                                                      hipDevResourceType type);
+typedef hipError_t (*t_hipExecutionCtxGetDevice)(int* device, hipExecutionCtx_t ctx);
+typedef hipError_t (*t_hipExecutionCtxGetId)(hipExecutionCtx_t ctx, unsigned long long* ctxId);
+typedef hipError_t (*t_hipStreamGetDevResource)(hipStream_t hStream, hipDevResource* resource,
+                                                hipDevResourceType type);
+typedef hipError_t (*t_hipExecutionCtxRecordEvent)(hipExecutionCtx_t ctx, hipEvent_t event);
+typedef hipError_t (*t_hipExecutionCtxSynchronize)(hipExecutionCtx_t ctx);
+typedef hipError_t (*t_hipExecutionCtxWaitEvent)(hipExecutionCtx_t ctx, hipEvent_t event);
+
 // HIP Compiler dispatch table
 struct HipCompilerDispatchTable {
   // HIP_COMPILER_API_TABLE_STEP_VERSION == 0
@@ -1729,7 +1759,6 @@ struct HipDispatchTable {
 
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 23
   t_hipMipmappedArrayGetMemoryRequirements hipMipmappedArrayGetMemoryRequirements_fn;
-
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 24
   t_hipKernelGetAttribute hipKernelGetAttribute_fn;
 
@@ -1744,8 +1773,25 @@ struct HipDispatchTable {
   t_hipOccupancyMaxPotentialClusterSize hipOccupancyMaxPotentialClusterSize_fn;
   t_hipOccupancyMaxActiveClusters hipOccupancyMaxActiveClusters_fn;
 
-  // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 28
+  t_hipGreenCtxCreate hipGreenCtxCreate_fn;
+  t_hipExecutionCtxDestroy hipExecutionCtxDestroy_fn;
+  t_hipExecutionCtxStreamCreate hipExecutionCtxStreamCreate_fn;
+  t_hipDeviceGetDevResource hipDeviceGetDevResource_fn;
+  t_hipDevSmResourceSplitByCount hipDevSmResourceSplitByCount_fn;
+  t_hipDevSmResourceSplit hipDevSmResourceSplit_fn;
+  t_hipDevResourceGenerateDesc hipDevResourceGenerateDesc_fn;
+  t_hipDeviceGetExecutionCtx hipDeviceGetExecutionCtx_fn;
+  t_hipExecutionCtxGetDevResource hipExecutionCtxGetDevResource_fn;
+  t_hipExecutionCtxGetDevice hipExecutionCtxGetDevice_fn;
+  t_hipExecutionCtxGetId hipExecutionCtxGetId_fn;
+  t_hipStreamGetDevResource hipStreamGetDevResource_fn;
+  t_hipExecutionCtxRecordEvent hipExecutionCtxRecordEvent_fn;
+  t_hipExecutionCtxSynchronize hipExecutionCtxSynchronize_fn;
+  t_hipExecutionCtxWaitEvent hipExecutionCtxWaitEvent_fn;
+
+  // DO NOT EDIT ABOVE!
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 29
 
   // ******************************************************************************************* //
   //
