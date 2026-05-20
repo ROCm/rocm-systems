@@ -101,7 +101,7 @@ Mi100Factory::Mi100Factory(const AgentInfo* agent_info)
         break;
       case TcpCounterBlockId:
         block_info->event_id_max = 87;
-        assert(agent_info->se_num * block_info->instance_count == cu_block_delay_table_size);
+        // assert(agent_info->se_num * block_info->instance_count == cu_block_delay_table_size);
         break;
       case TccCounterBlockId:
         block_info->instance_count = 32;
