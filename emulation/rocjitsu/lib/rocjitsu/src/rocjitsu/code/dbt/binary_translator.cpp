@@ -28,6 +28,7 @@
 #include <memory>
 #include <span>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
@@ -100,6 +101,20 @@ LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t ho
 
   offset_dwords = static_cast<int16_t>(delta_dwords);
   return true;
+}
+
+[[nodiscard]] std::vector<uint32_t> raw_words_for_inst(const Instruction &inst) {
+  const uint32_t *raw = inst.raw_encoding();
+  if (!raw)
+    return {};
+  return {raw, raw + inst.size() / sizeof(uint32_t)};
+}
+
+[[nodiscard]] bool words_changed(std::span<const uint32_t> before,
+                                 std::span<const uint32_t> after) {
+  if (before.size() != after.size())
+    return true;
+  return !std::ranges::equal(before, after);
 }
 
 [[nodiscard]] std::vector<uint64_t> kernel_entry_offsets(std::span<const KdTranslation> kernels) {
@@ -193,6 +208,10 @@ BinaryTranslator::BinaryTranslator(rj_code_arch_t guest_arch, rj_code_arch_t hos
       encoding_translate_(select_encoding_translator(guest_arch, host_arch)),
       legalization_lookup_(select_legalization(guest_arch, host_arch)),
       semantic_translator_(std::make_unique<SemanticTranslator>(guest_arch, host_arch)) {}
+
+void BinaryTranslator::set_trace_callback(TranslationTraceCallback callback) {
+  trace_callback_ = std::move(callback);
+}
 
 TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   TranslatedCodeObject result;
@@ -297,6 +316,18 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         const uint32_t *raw = inst.raw_encoding();
         if (!raw) {
           std::memcpy(translated_text.data() + offset, text.data() + offset, inst_size);
+          if (trace_callback_) {
+            trace_callback_({.source_offset = offset,
+                             .source_size = inst_size,
+                             .source_words = {},
+                             .legalization = nullptr,
+                             .copied_original = true,
+                             .semantic_lowering = false,
+                             .changed = false,
+                             .emitted_in_cave = false,
+                             .target_offset = offset,
+                             .target_words = {}});
+          }
           offset += inst_size;
           continue;
         }
@@ -313,9 +344,25 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         {
           auto expansion = semantic_translator_->try_lower_expand(inst, offset, liveness);
           if (!expansion.empty()) {
+            const bool emitted_in_cave = expansion.size() * sizeof(uint32_t) > inst_size;
+            const uint64_t target_offset =
+                emitted_in_cave ? patcher.cave_start() + patcher.cave_body_size() : offset;
             SemanticReplacement repl{offset, offset + inst_size, std::move(expansion)};
             if (!apply_semantic(repl, translated_text, patcher))
               return leave_unchanged();
+            if (trace_callback_) {
+              const auto source_words = raw_words_for_inst(inst);
+              trace_callback_({.source_offset = offset,
+                               .source_size = inst_size,
+                               .source_words = source_words,
+                               .legalization = leg,
+                               .copied_original = false,
+                               .semantic_lowering = true,
+                               .changed = true,
+                               .emitted_in_cave = emitted_in_cave,
+                               .target_offset = target_offset,
+                               .target_words = repl.target_words});
+            }
             offset += inst_size;
             continue;
           }
@@ -325,13 +372,31 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           result.warnings.push_back("EXPAND not yet implemented for " +
                                     std::string(inst.mnemonic()));
           const uint32_t nop = build_s_nop(0, host_arch_);
+          std::vector<uint32_t> target_words;
+          if (trace_callback_)
+            target_words.reserve(inst_size / sizeof(uint32_t));
           for (uint32_t i = 0; i < inst_size; i += 4)
             std::memcpy(translated_text.data() + offset + i, &nop, 4);
+          if (trace_callback_) {
+            for (uint32_t i = 0; i < inst_size; i += sizeof(uint32_t))
+              target_words.push_back(nop);
+            const auto source_words = raw_words_for_inst(inst);
+            trace_callback_({.source_offset = offset,
+                             .source_size = inst_size,
+                             .source_words = source_words,
+                             .legalization = leg,
+                             .copied_original = false,
+                             .semantic_lowering = false,
+                             .changed = words_changed(source_words, target_words),
+                             .emitted_in_cave = false,
+                             .target_offset = offset,
+                             .target_words = target_words});
+          }
           offset += inst_size;
           continue;
         }
 
-        if (!handle_encoding(inst, offset, translated_text, dst_opcode, patcher, text))
+        if (!handle_encoding(inst, offset, translated_text, dst_opcode, patcher, text, leg))
           return leave_unchanged();
         offset += inst_size;
       }
@@ -418,11 +483,32 @@ bool BinaryTranslator::apply_semantic(const SemanticReplacement &repl, std::vect
 bool BinaryTranslator::handle_encoding(const Instruction &inst, uint64_t offset,
                                        std::vector<uint8_t> &text, uint16_t dst_opcode,
                                        CodeObjectPatcher &patcher,
-                                       std::span<const uint8_t> orig_text) {
+                                       std::span<const uint8_t> orig_text,
+                                       const InstructionLegalization *leg) {
   const uint32_t *raw = inst.raw_encoding();
   assert(raw && "handle_encoding called without raw encoding");
+  const bool tracing = static_cast<bool>(trace_callback_);
+  const auto source_words = tracing ? raw_words_for_inst(inst) : std::vector<uint32_t>{};
+
+  auto emit_trace = [&](bool copied_original, bool changed, bool emitted_in_cave,
+                        uint64_t target_offset, std::span<const uint32_t> target_words) {
+    if (!trace_callback_)
+      return;
+    trace_callback_({.source_offset = offset,
+                     .source_size = static_cast<uint32_t>(inst.size()),
+                     .source_words = source_words,
+                     .legalization = leg,
+                     .copied_original = copied_original,
+                     .semantic_lowering = false,
+                     .changed = changed,
+                     .emitted_in_cave = emitted_in_cave,
+                     .target_offset = target_offset,
+                     .target_words = target_words});
+  };
+
   if (!encoding_translate_) {
     std::memcpy(text.data() + offset, raw, inst.size());
+    emit_trace(true, false, false, offset, source_words);
     return true;
   }
 
@@ -434,6 +520,7 @@ bool BinaryTranslator::handle_encoding(const Instruction &inst, uint64_t offset,
 
   if (tr.word_count == 0) {
     std::memcpy(text.data() + offset, raw, inst.size());
+    emit_trace(true, false, false, offset, source_words);
     return true;
   }
 
@@ -453,6 +540,12 @@ bool BinaryTranslator::handle_encoding(const Instruction &inst, uint64_t offset,
   }
 
   const uint32_t target_size = tr.word_count * 4u;
+  const auto target_words = std::span<const uint32_t>(tr.words, tr.word_count);
+  const bool emitted_in_cave = target_size > orig_bytes;
+  const uint64_t target_offset =
+      emitted_in_cave ? patcher.cave_start() + patcher.cave_body_size() : offset;
+  const bool changed = tracing && words_changed(source_words, target_words);
+
   if (target_size <= orig_bytes) {
     std::memcpy(text.data() + offset, tr.words, target_size);
   } else {
@@ -460,6 +553,7 @@ bool BinaryTranslator::handle_encoding(const Instruction &inst, uint64_t offset,
     if (!apply_semantic(repl, text, patcher))
       return false;
   }
+  emit_trace(false, changed, emitted_in_cave, target_offset, target_words);
   return true;
 }
 

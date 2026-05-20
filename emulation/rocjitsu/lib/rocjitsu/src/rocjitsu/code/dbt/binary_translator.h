@@ -23,6 +23,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <span>
 #include <string>
@@ -67,6 +68,29 @@ using EncodingTranslateFn = TranslationResult (*)(uint32_t encoding_id, uint32_t
 using LegalizationLookupFn = const InstructionLegalization *(*)(uint16_t encoding_id,
                                                                 uint16_t opcode);
 
+/// @brief One source instruction trace event emitted by BinaryTranslator.
+///
+/// @details Offsets are .text-relative. When emitted_in_cave is true,
+/// target_offset points into the logical .text continuation that later becomes
+/// `.rj_translations`; subtracting the original .text size gives the offset in
+/// that cave section. source_words and target_words are only valid for the
+/// duration of the callback; callers that need to retain them must copy the
+/// spans.
+struct TranslationTraceEvent {
+  uint64_t source_offset = 0;
+  uint32_t source_size = 0;
+  std::span<const uint32_t> source_words;
+  const InstructionLegalization *legalization = nullptr;
+  bool copied_original = false;
+  bool semantic_lowering = false;
+  bool changed = false;
+  bool emitted_in_cave = false;
+  uint64_t target_offset = 0;
+  std::span<const uint32_t> target_words;
+};
+
+using TranslationTraceCallback = std::function<void(const TranslationTraceEvent &)>;
+
 /// @brief Result of translating a code object.
 struct TranslatedCodeObject {
   std::vector<uint8_t> elf_bytes;    ///< Translated ELF for the host ISA.
@@ -95,6 +119,9 @@ public:
   ///                      0 = auto-detect from host_arch (default GFX1200 for RDNA4).
   BinaryTranslator(rj_code_arch_t guest_arch, rj_code_arch_t host_arch, uint32_t target_mach = 0);
   ~BinaryTranslator();
+
+  /// @brief Install an optional callback for per-instruction debugging.
+  void set_trace_callback(TranslationTraceCallback callback);
 
   /// @brief Translate a decoded code object.
   /// @param obj  The guest code object to translate.
@@ -134,12 +161,13 @@ private:
   ///          the code cave.
   [[nodiscard]] bool handle_encoding(const Instruction &inst, uint64_t offset,
                                      std::vector<uint8_t> &text, uint16_t dst_opcode,
-                                     CodeObjectPatcher &patcher,
-                                     std::span<const uint8_t> orig_text);
+                                     CodeObjectPatcher &patcher, std::span<const uint8_t> orig_text,
+                                     const InstructionLegalization *leg);
 
   rj_code_arch_t guest_arch_;                               ///< Source ISA.
   rj_code_arch_t host_arch_;                                ///< Target ISA.
   uint32_t target_mach_;                                    ///< ELF MACH flag for target stepping.
+  TranslationTraceCallback trace_callback_;                  ///< Optional debug trace callback.
   EncodingTranslateFn encoding_translate_;                  ///< Per-pair encoding translator.
   LegalizationLookupFn legalization_lookup_;                ///< Per-pair legalization table.
   std::unique_ptr<SemanticTranslator> semantic_translator_; ///< Per-pair semantic rule engine.
