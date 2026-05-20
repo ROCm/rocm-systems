@@ -406,15 +406,32 @@ __device__ __forceinline__ void copy_bulk(uint8_t* __restrict__ dst_bytes,
                                           int n_chunks, int tid, int stride) {
   using Acc = AsmAccess<ChunkSize, LoadPolicy, StorePolicy>;
   using T = typename Acc::type;
-  // T regs[Unroll];
 
   int chunk_batch = stride * Unroll;
   int offset = 0;
 
   // Unrolled block copy to hide latency
   for (; offset + chunk_batch <= n_chunks; offset += chunk_batch) {
-    Acc::load_store_buffer(src_bytes, dst_bytes, n_chunks * ChunkSize, offset,
-                           tid, stride);
+    T regs[Unroll] = {};
+
+    #pragma unroll
+    for (int u = 0; u < Unroll; ++u) {
+      if constexpr (LoadPolicy != CachePolicy::Standard) {
+        pipeline_wait_on_loads(Unroll - 1);
+      }
+      regs[u] = Acc::load(src_bytes + (offset + tid + u * stride) * ChunkSize);
+    }
+
+    #pragma unroll
+    for (int u = 0; u < Unroll; ++u) {
+      if constexpr (LoadPolicy != CachePolicy::Standard) {
+        pipeline_wait_on_loads(Unroll - 1);
+        // __builtin_amdgcn_s_waitcnt(Unroll - 1);
+      }
+      Acc::store(dst_bytes + (offset + tid + u * stride) * ChunkSize, regs[u]);
+    }
+
+    __builtin_amdgcn_s_barrier();
   }
 
   // Tail loop for remaining ChunkSize-byte chunks
