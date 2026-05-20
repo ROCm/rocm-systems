@@ -288,7 +288,6 @@ jobs:
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev \
           -DROCPROFSYS_BUILD_TESTING=ON \
           -DROCPROFSYS_USE_PYTHON=ON \
-          -DROCPROFSYS_USE_MPI_HEADERS=OFF \
           -DROCPROFSYS_BUILD_DYNINST=ON \
           -DROCPROFSYS_BUILD_BOOST=OFF \
           -DROCPROFSYS_BUILD_TBB=OFF \

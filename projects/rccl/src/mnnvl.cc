@@ -30,11 +30,15 @@ ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) {
     if (comm->peerInfo[i].fabricInfo.state != NVML_GPU_FABRIC_STATE_COMPLETED) return ncclSuccess;
   }
 #else
-  // TODO: To check whether we need to check the accel_state/fabric state for AMD GPUs.
-  // For now, just check that it's not in an unconfigured/error state
+  // TODO: Verify ACTIVE/READY state correctly gates fabric handle exchangeability on AMD systems.
+  // Require ACTIVE or READY state on all ranks — mirrors NCCL's NVML_GPU_FABRIC_STATE_COMPLETED check.
+  // CONFIGURED means vpod is set up but fabric handles are not yet exchangeable cross-process.
   for (int i = 0; i < comm->nRanks; i++) {
-    if ((comm->peerInfo[i].fabricInfo.state == AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNCONFIGURED) ||
-        (comm->peerInfo[i].fabricInfo.state == AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ERROR)) return ncclSuccess;
+    if ((comm->peerInfo[i].fabricInfo.state != AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE) &&
+        (comm->peerInfo[i].fabricInfo.state != AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY)) {
+      WARN("MNNVL Fabric not ready for peer:%d (state=%d)", i, comm->peerInfo[i].fabricInfo.state);
+      return ncclSuccess;
+    }
   }
 #endif
   // Determine our MNNVL domain/clique
@@ -73,19 +77,25 @@ ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) {
     ncclResult_t ret = ncclCuMemAlloc(&ptr, &handle, CU_MEM_HANDLE_TYPE_FABRIC, CUDA_IPC_MIN);
     if (ret != ncclSuccess) {
       // Return an error if this is a MNNVL capable system but FABRIC handles are not supported
-      WARN("MNNVL (cliqueSize %d) is available but not working on this system. Check the IMEX channel configuration (/dev/nvidia-caps-imex-channels). Set NCCL_MNNVL_ENABLE=0 to ignore this issue.",
+      WARN("MNNVL (cliqueSize %d) is available but not working on this system. Check afmctl. Set NCCL_MNNVL_ENABLE=0 to ignore this issue.",
            comm->clique.size);
       return ncclSystemError;
     }
     err = cuMemExportToShareableHandle(&cuDesc, handle, CU_MEM_HANDLE_TYPE_FABRIC, 0);
-    if (err != CUDA_SUCCESS ||
-        (err = cuMemImportFromShareableHandle(&handle, &cuDesc, CU_MEM_HANDLE_TYPE_FABRIC)) != CUDA_SUCCESS) {
+    if (err != CUDA_SUCCESS) {
+    // || (err = cuMemImportFromShareableHandle(&handle, &cuDesc, CU_MEM_HANDLE_TYPE_FABRIC)) != CUDA_SUCCESS
+    // Note: cuMemImportFromShareableHandle is intentionally NOT tested here.
+    // Same-process round-trip of a fabric handle is not currently supported — the import call
+    // fails even on a correctly configured MNNVL system. Cross-process import is validated
+    // implicitly when the first actual P2P transfer succeeds after MNNVL is enabled.
+    // The ImportFromShareableHandle check above is preserved to document what was tried and why
+    // it was removed, so future maintainers don't re-add it expecting it to work.
       const char *errStr;
       (void) cuGetErrorString(err, &errStr);
       NCCLCHECK(ncclCuMemFree(ptr));
       // Return an error if this is a MNNVL capable system but it's not working
-      WARN("MNNVL (cliqueSize %d) is available but not working on this system. Check the IMEX configuration (nvidia-imex-ctl -N). Set NCCL_MNNVL_ENABLE=0 to ignore this issue.",
-          comm->clique.size);
+      WARN("MNNVL rank%d (cliqueSize %d) is available but not working on this system: cuMemExportToShareableHandle/cuMemImportFromShareableHandle failed: %s. Check afmctl. Set NCCL_MNNVL_ENABLE=0 to ignore this issue.",
+          comm->rank, comm->clique.size, errStr);
       return ncclSystemError;
     }
     NCCLCHECK(ncclCuMemFree(ptr));
@@ -99,5 +109,3 @@ ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) {
 #endif
   return ncclSuccess;
 }
-
-
