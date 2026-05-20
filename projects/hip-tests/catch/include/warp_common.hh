@@ -423,7 +423,8 @@ constexpr uint64_t nextPowerOf2(uint64_t v) {
 
 // given an operation produces the expected result of the warp-wide reduction
 // @mask indicates the lanes that will participate in the computation
-// @return the result in the highest lane
+// @return the result associated the lane with the highest index that is active according to the
+//         mask
 template <class T, class Op>
 T calculateExpected(T* output,
                     const T* input,
@@ -520,6 +521,13 @@ T calculateExpected(T* output,
       }
     }
   }
+
+  if (aggType == AggregationType::Reduce) {
+    for (int i = 0; i < lastLane + 1; i++) {
+      output[i] = result;
+    }
+  }
+
   return result;
 }
 
