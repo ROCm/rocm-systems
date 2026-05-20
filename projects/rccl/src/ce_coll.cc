@@ -285,10 +285,7 @@ ncclResult_t ncclPrepUCSync(struct ncclComm* comm, bool isComplete,
     batchParams[*opIdx].writeValue.operation = CU_STREAM_MEM_OP_WRITE_VALUE_32;
     batchParams[*opIdx].writeValue.address  = (CUdeviceptr)peerDstPtr;
     batchParams[*opIdx].writeValue.value = waitValue;
-    // CU_STREAM_WRITE_VALUE_DEFAULT is a CUDA-specific constant with no HIP equivalent.
-    // This field must be initialized to satisfy the CUDA-compatible struct definition,
-    // but the HIP runtime does not use this flag and treats it as 0.
-    batchParams[*opIdx].writeValue.flags = 0;
+    batchParams[*opIdx].writeValue.flags = CU_STREAM_WRITE_VALUE_DEFAULT;
     (*opIdx)++;
   }
 
