@@ -1,6 +1,16 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+"""SQLAlchemy ORM models and SQLite backend for the analysis database.
+
+The schema is documented visually in:
+    docs/data/analyze/analysis_data_dump_schema.png
+generated from its Mermaid source:
+    docs/data/analyze/analysis_data_dump_schema.mmd
+When changing the schema, update the .mmd file to match,
+then re-export the .png via draw.io.
+"""
+
 import csv
 import sqlite3
 from contextlib import closing
