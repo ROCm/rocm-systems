@@ -15,7 +15,7 @@ System Speed-of-Light:
     rst: 'Percentage of GL2 cache requests that are serviced from cache without accessing system memory. Higher hit rates reduce memory bandwidth pressure and improve performance. Low hit rates may indicate poor data locality or working sets that exceed cache capacity.'
     unit: Percent
   GL2-Fabric Read BW:
-    rst: 'Read bandwidth between the GL2 cache and the memory fabric/system memory. High bandwidth utilization indicates memory-intensive read patterns. This metric helps identify when memory bandwidth is a performance bottleneck. Requires $max_mclk populated in sysinfo (max MEM clock from amd-smi).'
+    rst: 'Read bandwidth between the GL2 cache and the memory fabric/system memory. High bandwidth utilization indicates memory-intensive read patterns. This metric helps identify when memory bandwidth is a performance bottleneck.'
     unit: Bytes/s
   GL2-Fabric Write BW:
     rst: 'Write bandwidth between the GL2 cache and the memory fabric/system memory. High values indicate write-intensive workloads. Combined with read bandwidth, this shows total memory traffic leaving the GPU caches.'
