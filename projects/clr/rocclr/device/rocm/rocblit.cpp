@@ -810,104 +810,146 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
       std::vector<size_t> sizes;
     };
 
-    MultiArrays swapPending;
-    hsa_agent_t swapSrcAgent = {};
+    std::vector<hsa_amd_memory_copy_op_t> finalOps;
 
-    for (const auto& op : ops) {
-      if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP) {
-        assert(op.src_size == op.dst_size && "Asymmetric swap not yet supported");
-        if (swapPending.srcs.empty()) swapSrcAgent = op.src_agent;
-        swapPending.srcs.push_back(op.src);
-        swapPending.dsts.push_back(op.dst);
-        swapPending.dst_agents.push_back(op.dst_agent);
-        swapPending.sizes.push_back(op.src_size);
-        continue;
+    bool use_linear_fast_path = engine != HwQueueEngine::SdmaD2D;
+    MultiArrays linear_pending;
+    hsa_agent_t linear_src_agent = {};
+
+    if (use_linear_fast_path) {
+      linear_src_agent = ops.front().src_agent;
+
+      for (const auto &op : ops) {
+        if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP ||
+            op.src_agent.handle != linear_src_agent.handle) {
+          use_linear_fast_path = false;
+          break;
+        }
+        linear_pending.srcs.push_back(const_cast<void *>(op.src));
+        linear_pending.dsts.push_back(op.dst);
+        linear_pending.dst_agents.push_back(op.dst_agent);
+        linear_pending.sizes.push_back(op.size);
       }
-      auto& ag = agent_groups[op.src_agent.handle];
-      ag.src_agent = op.src_agent;
-      BcastKey bkey{op.src, op.size};
-      auto& be = ag.sub_groups[bkey];
-      if (be.dsts.empty()) {
-        be.tmpl = op;
+    }
+
+    if (use_linear_fast_path) {
+      hsa_amd_memory_copy_op_t linear = {};
+      linear.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
+      linear.type = HSA_AMD_MEMORY_COPY_OP_LINEAR;
+      linear.src_agent = linear_src_agent;
+
+      if (linear_pending.srcs.size() > 1) {
+        linear.src_list = linear_pending.srcs.data();
+        linear.dst_list = linear_pending.dsts.data();
+        linear.dst_agent_list = linear_pending.dst_agents.data();
+        linear.size_list = linear_pending.sizes.data();
+        linear.num_entries = static_cast<uint16_t>(linear_pending.srcs.size());
+      } else if (linear_pending.srcs.size() == 1) {
+        linear.src = linear_pending.srcs[0];
+        linear.dst = linear_pending.dsts[0];
+        linear.dst_agent = linear_pending.dst_agents[0];
+        linear.size = linear_pending.sizes[0];
       }
-      be.dsts.push_back(op.dst);
-      be.dst_agents.push_back(op.dst_agent);
+
+      finalOps.push_back(linear);
+    } else {
+      MultiArrays swapPending;
+      hsa_agent_t swapSrcAgent = {};
+
+      for (const auto& op : ops) {
+        if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP) {
+          assert(op.src_size == op.dst_size && "Asymmetric swap not yet supported");
+          if (swapPending.srcs.empty()) swapSrcAgent = op.src_agent;
+          swapPending.srcs.push_back(op.src);
+          swapPending.dsts.push_back(op.dst);
+          swapPending.dst_agents.push_back(op.dst_agent);
+          swapPending.sizes.push_back(op.src_size);
+          continue;
+        }
+        auto& ag = agent_groups[op.src_agent.handle];
+        ag.src_agent = op.src_agent;
+        BcastKey bkey{op.src, op.size};
+        auto& be = ag.sub_groups[bkey];
+        if (be.dsts.empty()) {
+          be.tmpl = op;
+        }
+        be.dsts.push_back(op.dst);
+        be.dst_agents.push_back(op.dst_agent);
+      }
+
+      std::vector<MultiArrays> multiStore;
+      multiStore.reserve(agent_groups.size());
+
+      if (!swapPending.srcs.empty()) {
+        multiStore.push_back(std::move(swapPending));
+        auto& stored = multiStore.back();
+
+        hsa_amd_memory_copy_op_t swap = {};
+        swap.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
+        swap.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP;
+        swap.src_agent = swapSrcAgent;
+        swap.src_list = stored.srcs.data();
+        swap.dst_list = stored.dsts.data();
+        swap.dst_agent_list = stored.dst_agents.data();
+        swap.size_list = stored.sizes.data();
+        swap.num_entries = static_cast<uint16_t>(stored.srcs.size());
+        finalOps.push_back(swap);
+      }
+
+      for (auto& [agent_handle, ag] : agent_groups) {
+        MultiArrays pending;
+
+        for (auto& [bkey, be] : ag.sub_groups) {
+          if (be.dsts.size() > 1 && engine == HwQueueEngine::SdmaD2D) {
+            hsa_amd_memory_copy_op_t bcast = {};
+            bcast.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
+            bcast.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST;
+            bcast.src = be.tmpl.src;
+            bcast.src_agent = ag.src_agent;
+            bcast.dst_list = be.dsts.data();
+            bcast.dst_agent_list = be.dst_agents.data();
+            bcast.num_entries = static_cast<uint16_t>(be.dsts.size());
+            bcast.size = be.tmpl.size;
+            finalOps.push_back(bcast);
+          } else {
+            for (size_t i = 0; i < be.dsts.size(); ++i) {
+              pending.srcs.push_back(const_cast<void*>(be.tmpl.src));
+              pending.dsts.push_back(be.dsts[i]);
+              pending.dst_agents.push_back(be.dst_agents[i]);
+              pending.sizes.push_back(be.tmpl.size);
+            }
+          }
+        }
+
+        if (pending.srcs.size() > 1) {
+          multiStore.push_back(std::move(pending));
+          auto& stored = multiStore.back();
+
+          hsa_amd_memory_copy_op_t multi = {};
+          multi.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
+          multi.type = HSA_AMD_MEMORY_COPY_OP_LINEAR;
+          multi.src_list = stored.srcs.data();
+          multi.src_agent = ag.src_agent;
+          multi.dst_list = stored.dsts.data();
+          multi.dst_agent_list = stored.dst_agents.data();
+          multi.size_list = stored.sizes.data();
+          multi.num_entries = static_cast<uint16_t>(stored.srcs.size());
+          finalOps.push_back(multi);
+        } else if (pending.srcs.size() == 1) {
+          hsa_amd_memory_copy_op_t linear = {};
+          linear.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
+          linear.type = HSA_AMD_MEMORY_COPY_OP_LINEAR;
+          linear.src = pending.srcs[0];
+          linear.src_agent = ag.src_agent;
+          linear.dst = pending.dsts[0];
+          linear.dst_agent = pending.dst_agents[0];
+          linear.size = pending.sizes[0];
+          finalOps.push_back(linear);
+        }
+      }
     }
 
     gpu().Barriers().SetActiveEngine(engine);
-
-    std::vector<MultiArrays> multiStore;
-    multiStore.reserve(agent_groups.size());
-
-    std::vector<hsa_amd_memory_copy_op_t> finalOps;
-
-    if (!swapPending.srcs.empty()) {
-      multiStore.push_back(std::move(swapPending));
-      auto& stored = multiStore.back();
-
-      hsa_amd_memory_copy_op_t swap = {};
-      swap.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
-      swap.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP;
-      swap.src_agent = swapSrcAgent;
-      swap.src_list = stored.srcs.data();
-      swap.dst_list = stored.dsts.data();
-      swap.dst_agent_list = stored.dst_agents.data();
-      swap.size_list = stored.sizes.data();
-      swap.num_entries = static_cast<uint16_t>(stored.srcs.size());
-      finalOps.push_back(swap);
-    }
-
-    for (auto& [agent_handle, ag] : agent_groups) {
-      MultiArrays pending;
-
-      for (auto& [bkey, be] : ag.sub_groups) {
-        if (be.dsts.size() > 1 && engine == HwQueueEngine::SdmaD2D) {
-          hsa_amd_memory_copy_op_t bcast = {};
-          bcast.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
-          bcast.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST;
-          bcast.src = be.tmpl.src;
-          bcast.src_agent = ag.src_agent;
-          bcast.dst_list = be.dsts.data();
-          bcast.dst_agent_list = be.dst_agents.data();
-          bcast.num_entries = static_cast<uint16_t>(be.dsts.size());
-          bcast.size = be.tmpl.size;
-          finalOps.push_back(bcast);
-        } else {
-          for (size_t i = 0; i < be.dsts.size(); ++i) {
-            pending.srcs.push_back(const_cast<void*>(be.tmpl.src));
-            pending.dsts.push_back(be.dsts[i]);
-            pending.dst_agents.push_back(be.dst_agents[i]);
-            pending.sizes.push_back(be.tmpl.size);
-          }
-        }
-      }
-
-      if (pending.srcs.size() > 1) {
-        multiStore.push_back(std::move(pending));
-        auto& stored = multiStore.back();
-
-        hsa_amd_memory_copy_op_t multi = {};
-        multi.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
-        multi.type = HSA_AMD_MEMORY_COPY_OP_LINEAR;
-        multi.src_list = stored.srcs.data();
-        multi.src_agent = ag.src_agent;
-        multi.dst_list = stored.dsts.data();
-        multi.dst_agent_list = stored.dst_agents.data();
-        multi.size_list = stored.sizes.data();
-        multi.num_entries = static_cast<uint16_t>(stored.srcs.size());
-        finalOps.push_back(multi);
-      } else if (pending.srcs.size() == 1) {
-        hsa_amd_memory_copy_op_t linear = {};
-        linear.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
-        linear.type = HSA_AMD_MEMORY_COPY_OP_LINEAR;
-        linear.src = pending.srcs[0];
-        linear.src_agent = ag.src_agent;
-        linear.dst = pending.dsts[0];
-        linear.dst_agent = pending.dst_agents[0];
-        linear.size = pending.sizes[0];
-        finalOps.push_back(linear);
-      }
-    }
 
     // Assign one completion signal per op in a single place.
     for (auto& op : finalOps) {
@@ -915,45 +957,47 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
       groupSignals.push_back(gpu().Barriers().GetLastSignal());
     }
 
-    for (size_t i = 0; i < finalOps.size(); ++i) {
-      const auto& op = finalOps[i];
-      if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST) {
-        for (uint32_t d = 0; d < op.num_entries; ++d) {
+    if (IsLogEnabled(amd::LOG_DEBUG, amd::LOG_COPY2)) {
+      for (size_t i = 0; i < finalOps.size(); ++i) {
+        const auto& op = finalOps[i];
+        if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST) {
+          for (uint32_t d = 0; d < op.num_entries; ++d) {
+            ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
+                    "HSA BatchCopy Broadcast [%u/%u] engineOp=%s, src=%p, dst=%p, "
+                    "size=%zu, wait_event=0x%zx, completion_signal=0x%zx",
+                    d + 1, op.num_entries, EngineOpName(engine), op.src, op.dst_list[d],
+                    op.size, (wait_events.size() != 0) ? wait_events[0].handle : 0,
+                    op.completion_signal.handle);
+          }
+        } else if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP) {
+          for (uint32_t d = 0; d < op.num_entries; ++d) {
+            ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
+                    "HSA BatchCopy Swap [%u/%u] engineOp=%s, addr_a=%p, addr_b=%p, "
+                    "size=%zu, wait_event=0x%zx, completion_signal=0x%zx",
+                    d + 1, op.num_entries, EngineOpName(engine), op.src_list[d],
+                    op.dst_list[d], op.size_list[d],
+                    (wait_events.size() != 0) ? wait_events[0].handle : 0,
+                    op.completion_signal.handle);
+          }
+        } else if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR && op.num_entries > 0) {
+          for (uint32_t d = 0; d < op.num_entries; ++d) {
+            ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
+                    "HSA BatchCopy Multi [%u/%u] engineOp=%s, src=%p, dst=%p, "
+                    "size=%zu, wait_event=0x%zx, completion_signal=0x%zx",
+                    d + 1, op.num_entries, EngineOpName(engine), op.src_list[d],
+                    op.dst_list[d], op.size_list[d],
+                    (wait_events.size() != 0) ? wait_events[0].handle : 0,
+                    op.completion_signal.handle);
+          }
+        } else {
           ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
-                  "HSA BatchCopy Broadcast [%u/%u] engineOp=%s, src=%p, dst=%p, "
-                  "size=%zu, wait_event=0x%zx, completion_signal=0x%zx",
-                  d + 1, op.num_entries, EngineOpName(engine), op.src, op.dst_list[d],
-                  op.size, (wait_events.size() != 0) ? wait_events[0].handle : 0,
-                  op.completion_signal.handle);
-        }
-      } else if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP) {
-        for (uint32_t d = 0; d < op.num_entries; ++d) {
-          ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
-                  "HSA BatchCopy Swap [%u/%u] engineOp=%s, addr_a=%p, addr_b=%p, "
-                  "size=%zu, wait_event=0x%zx, completion_signal=0x%zx",
-                  d + 1, op.num_entries, EngineOpName(engine), op.src_list[d],
-                  op.dst_list[d], op.size_list[d],
+                  "HSA BatchCopy Linear [%zu/%zu] engineOp=%s, dst=%p, src=%p, size=%zu, "
+                  "src_agent=0x%zx, dst_agent=0x%zx, wait_event=0x%zx, completion_signal=0x%zx",
+                  i, finalOps.size(), EngineOpName(engine), op.dst, op.src, op.size,
+                  op.src_agent.handle, op.dst_agent.handle,
                   (wait_events.size() != 0) ? wait_events[0].handle : 0,
                   op.completion_signal.handle);
         }
-      } else if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR && op.num_entries > 0) {
-        for (uint32_t d = 0; d < op.num_entries; ++d) {
-          ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
-                  "HSA BatchCopy Multi [%u/%u] engineOp=%s, src=%p, dst=%p, "
-                  "size=%zu, wait_event=0x%zx, completion_signal=0x%zx",
-                  d + 1, op.num_entries, EngineOpName(engine), op.src_list[d],
-                  op.dst_list[d], op.size_list[d],
-                  (wait_events.size() != 0) ? wait_events[0].handle : 0,
-                  op.completion_signal.handle);
-        }
-      } else {
-        ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
-                "HSA BatchCopy Linear [%zu/%zu] engineOp=%s, dst=%p, src=%p, size=%zu, "
-                "src_agent=0x%zx, dst_agent=0x%zx, wait_event=0x%zx, completion_signal=0x%zx",
-                i, finalOps.size(), EngineOpName(engine), op.dst, op.src, op.size,
-                op.src_agent.handle, op.dst_agent.handle,
-                (wait_events.size() != 0) ? wait_events[0].handle : 0,
-                op.completion_signal.handle);
       }
     }
 
