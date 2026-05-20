@@ -208,7 +208,9 @@ TEST(perfetto_engine_cached, drain_two_sources_no_cross_bleed)
 {
     // Two sources with different pids; engine.stop() must produce two
     // records, each containing only its source's framed bytes (no
-    // cross-pid bleed in the engine's per-pid collector).
+    // cross-pid bleed in the engine's per-pid collector). Per-source
+    // drain order is intentionally unspecified — the engine iterates an
+    // unordered_map, so assertions accept either order.
     rocprofsys::core::perfetto_engine engine{ make_test_config() };
     engine.init_sdk();
 
@@ -225,13 +227,16 @@ TEST(perfetto_engine_cached, drain_two_sources_no_cross_bleed)
 
     ASSERT_EQ(sink.records().size(), 2u);
 
-    std::vector<std::pair<int, std::vector<char>>> got = sink.records();
-    std::sort(got.begin(), got.end(),
-              [](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
-    EXPECT_EQ(got[0].first, 101);
-    EXPECT_EQ(got[0].second, frame_packet(payload_a));
-    EXPECT_EQ(got[1].first, 202);
-    EXPECT_EQ(got[1].second, frame_packet(payload_b));
+    // Build the expected (source_id, framed_bytes) pairs and assert
+    // set-equality. EXPECT_THAT(UnorderedElementsAre) would be cleaner
+    // but the existing tests don't pull in <gmock/gmock.h>; manual
+    // 2-element check keeps the dependency set unchanged.
+    auto       got        = sink.records();
+    const auto expected_a = std::make_pair(101, frame_packet(payload_a));
+    const auto expected_b = std::make_pair(202, frame_packet(payload_b));
+    const bool ab         = got[0] == expected_a && got[1] == expected_b;
+    const bool ba         = got[0] == expected_b && got[1] == expected_a;
+    EXPECT_TRUE(ab || ba) << "records must contain both sources, order is unspecified";
     EXPECT_TRUE(sink.finalized());
 }
 
@@ -261,4 +266,91 @@ TEST(perfetto_engine_cached, multiple_emits_same_pid_concatenate)
     auto second_framed = frame_packet(second);
     expected.insert(expected.end(), second_framed.begin(), second_framed.end());
     EXPECT_EQ(sink.records()[0].second, expected);
+}
+
+// ----------------------------------------------------------------------------
+// engine.stop() exception contract
+// ----------------------------------------------------------------------------
+
+namespace
+{
+// Test double whose on_source_drained throws. Used to verify the engine's
+// drain contract:
+//   - finalize() is always called even if a per-source drain throws
+//   - the first thrown exception is rethrown after finalize()
+//   - other per-source drains still run after a throw
+class throwing_sink final : public rocprofsys::core::trace_sink
+{
+public:
+    explicit throwing_sink(std::vector<int> pids_to_throw_on)
+    : m_throw_pids{ std::move(pids_to_throw_on) }
+    {}
+
+    void on_source_drained(int source_id, std::vector<char> bytes) override
+    {
+        m_drained_count++;
+        if(std::find(m_throw_pids.begin(), m_throw_pids.end(), source_id) !=
+           m_throw_pids.end())
+        {
+            m_throw_count++;
+            throw std::runtime_error{ "throwing_sink on_source_drained: pid " +
+                                      std::to_string(source_id) };
+        }
+        m_kept.emplace_back(source_id, std::move(bytes));
+    }
+
+    void finalize() override { m_finalize_count++; }
+
+    int drained_count() const noexcept { return m_drained_count; }
+    int throw_count() const noexcept { return m_throw_count; }
+    int finalize_count() const noexcept { return m_finalize_count; }
+    const std::vector<std::pair<int, std::vector<char>>>& kept() const noexcept
+    {
+        return m_kept;
+    }
+
+private:
+    std::vector<int>                               m_throw_pids;
+    std::vector<std::pair<int, std::vector<char>>> m_kept;
+    int                                            m_drained_count{ 0 };
+    int                                            m_throw_count{ 0 };
+    int                                            m_finalize_count{ 0 };
+};
+}  // namespace
+
+TEST(perfetto_engine_cached, stop_calls_finalize_even_when_drain_throws)
+{
+    rocprofsys::core::perfetto_engine engine{ make_test_config() };
+    engine.init_sdk();
+    throwing_sink sink{ { 42 } };  // throws on pid 42
+
+    engine.start(rocprofsys::core::perfetto_engine::mode::cached_interceptor, sink);
+    engine.preregister_pids({ 42 });
+    simulate_interceptor_emit(engine, 42, std::vector<char>{ 'x' });
+
+    EXPECT_THROW(engine.stop(), std::runtime_error);
+    EXPECT_EQ(sink.throw_count(), 1);
+    EXPECT_EQ(sink.finalize_count(), 1)
+        << "finalize() must run even after on_source_drained threw";
+}
+
+TEST(perfetto_engine_cached, stop_rethrows_first_drain_exception_after_finalize)
+{
+    rocprofsys::core::perfetto_engine engine{ make_test_config() };
+    engine.init_sdk();
+    throwing_sink sink{ { 101, 202 } };  // both throw
+
+    engine.start(rocprofsys::core::perfetto_engine::mode::cached_interceptor, sink);
+    engine.preregister_pids({ 101, 202, 303 });  // 303 won't throw
+    simulate_interceptor_emit(engine, 101, std::vector<char>{ 'a' });
+    simulate_interceptor_emit(engine, 202, std::vector<char>{ 'b' });
+    simulate_interceptor_emit(engine, 303, std::vector<char>{ 'c' });
+
+    EXPECT_THROW(engine.stop(), std::runtime_error);
+    EXPECT_EQ(sink.drained_count(), 3)
+        << "all three sources must be attempted even after the first throw";
+    EXPECT_EQ(sink.throw_count(), 2);
+    EXPECT_EQ(sink.finalize_count(), 1);
+    ASSERT_EQ(sink.kept().size(), 1u) << "only the non-throwing source's bytes kept";
+    EXPECT_EQ(sink.kept()[0].first, 303);
 }

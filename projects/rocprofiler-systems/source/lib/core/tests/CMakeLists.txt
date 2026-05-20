@@ -19,6 +19,15 @@ target_link_libraries(
 
 target_include_directories(track-registry-tests PRIVATE ${PROJECT_SOURCE_DIR}/source/lib)
 
+add_library(packet-framing-tests OBJECT test_packet_framing.cpp)
+
+target_link_libraries(
+    packet-framing-tests
+    PRIVATE rocprofiler-systems-googletest-library rocprofiler-systems-core-library
+)
+
+target_include_directories(packet-framing-tests PRIVATE ${PROJECT_SOURCE_DIR}/source/lib)
+
 add_library(perfetto-engine-tests OBJECT test_perfetto_engine.cpp)
 
 target_link_libraries(
