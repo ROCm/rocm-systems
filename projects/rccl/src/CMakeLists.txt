@@ -779,6 +779,9 @@ else()
   message(STATUS "HIP_HOST_UNCACHED_MEMORY disabled")
 endif()
 if(HIP_FABRIC_API_FUNC AND HIP_FABRIC_HANDLE_TYPE)
+  # HIP_FABRIC_API is used as both a cmake variable (ON/OFF, for status messages below)
+  # and a compile definition (bare #define, for #ifdef guards in C++). The names are
+  # intentionally identical; the cmake variable is not queried by any downstream cmake logic.
   set(HIP_FABRIC_API ON)
   target_compile_definitions(rccl PRIVATE HIP_FABRIC_API)
   message(STATUS "HIP Fabric API enabled (hipMemImportFromShareableHandle and hipMemFabricHandle_t found)")

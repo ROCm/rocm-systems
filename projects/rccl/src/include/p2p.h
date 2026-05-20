@@ -20,6 +20,9 @@
 #define CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED hipDeviceAttributeHandleTypeFabricSupported
 #define CU_MEM_HANDLE_TYPE_FABRIC hipMemHandleTypeFabric
 typedef hipMemFabricHandle_t CUmemFabricHandle;
+// HIP equivalents for CU vmm attribute/location constants used across alloc.h and transport files
+#define CU_DEVICE_ATTRIBUTE_HOST_NUMA_ID hipDeviceAttributeHostNumaId
+#define CU_MEM_LOCATION_TYPE_DEVICE      hipMemLocationTypeDevice
 #elif CUDART_VERSION < 12030
 // MNNVL: FABRIC handle support lifted from CUDA 12.3
 #define CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED ((CUdevice_attribute)128)

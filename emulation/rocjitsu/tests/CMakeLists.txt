@@ -127,12 +127,21 @@ endif()
 # Standalone binary (not gtest) to avoid library initialization order issues
 # with the interposer on machines that have a real GPU.
 
-find_library(HSA_RUNTIME64 hsa-runtime64 PATHS /opt/rocm/lib ENV ROCM_PATH PATH_SUFFIXES lib)
+find_library(HSA_RUNTIME64 hsa-runtime64
+    HINTS ENV ROCM_PATH /opt/rocm
+    PATH_SUFFIXES lib)
 if(HSA_RUNTIME64)
+    # Keep include paths and rpaths tied to the HSA runtime that CMake actually
+    # found. Test machines often install ROCm under versioned roots such as
+    # /opt/rocm-7.2.0 without a /opt/rocm symlink.
+    get_filename_component(RJ_HSA_LIBRARY_DIR "${HSA_RUNTIME64}" DIRECTORY)
+    get_filename_component(RJ_HSA_ROCM_ROOT "${RJ_HSA_LIBRARY_DIR}" DIRECTORY)
+    set(RJ_HSA_INCLUDE_DIR "${RJ_HSA_ROCM_ROOT}/include")
+
     add_executable(hsa_init_test hsa_init_test.cpp)
-    target_include_directories(hsa_init_test PRIVATE /opt/rocm/include ${HSA_INCLUDE_DIR})
+    target_include_directories(hsa_init_test PRIVATE ${RJ_HSA_INCLUDE_DIR} ${HSA_INCLUDE_DIR})
     target_link_libraries(hsa_init_test PRIVATE ${HSA_RUNTIME64} GTest::gtest)
-    target_link_options(hsa_init_test PRIVATE -Wl,-rpath,/opt/rocm/lib)
+    target_link_options(hsa_init_test PRIVATE -Wl,-rpath,${RJ_HSA_LIBRARY_DIR})
     # Use explicit add_test rather than gtest_discover_tests: gtest_discover_tests
     # generates set_tests_properties with three separate bracket-quoted strings
     # after ENVIRONMENT, but CMake's PROPERTIES key-value parser only picks up
@@ -150,17 +159,22 @@ if(HSA_RUNTIME64)
         TIMEOUT 30)
     message(STATUS "HSA init test enabled (found ${HSA_RUNTIME64})")
 
-    # --- HSA translate test: CDNA4→RDNA4 on-device verification ---
-    # Requires both compiled device kernels AND an RDNA4 GPU on the host.
+    # --- HSA translate test: CDNA4→host on-device verification ---
+    # Requires compiled device kernels and a host GPU with a wired DBT target.
     if(HAS_DEVICE_KERNELS)
-        # Detect RDNA4 GPU at configure time via rocm_agent_enumerator.
+        # Detect supported DBT host GPUs at configure time via rocm_agent_enumerator.
         find_program(ROCM_AGENT_ENUM rocm_agent_enumerator
-            HINTS /opt/rocm/bin ENV ROCM_PATH)
+            HINTS ENV ROCM_PATH ${RJ_HSA_ROCM_ROOT} /opt/rocm
+            PATH_SUFFIXES bin)
+        set(HAS_DBT_VECTOR_ADD_GPU FALSE)
         set(HAS_RDNA4_GPU FALSE)
         if(ROCM_AGENT_ENUM)
             execute_process(COMMAND ${ROCM_AGENT_ENUM}
                 OUTPUT_VARIABLE _agents OUTPUT_STRIP_TRAILING_WHITESPACE
                 ERROR_QUIET RESULT_VARIABLE _agent_rc)
+            if(_agent_rc EQUAL 0 AND _agents MATCHES "gfx94[012]|gfx1100|gfx120[01]")
+                set(HAS_DBT_VECTOR_ADD_GPU TRUE)
+            endif()
             if(_agent_rc EQUAL 0 AND _agents MATCHES "gfx120[01]")
                 set(HAS_RDNA4_GPU TRUE)
             endif()
@@ -171,30 +185,38 @@ if(HSA_RUNTIME64)
             ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
             ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
             ${CMAKE_SOURCE_DIR}/lib/util/include
-            /opt/rocm/include)
+            ${RJ_HSA_INCLUDE_DIR})
         target_link_libraries(hsa_translate_test PRIVATE
             ${RJ_OBJECT_LIBS} ${HSA_RUNTIME64} GTest::gtest GTest::gtest_main)
-        target_link_options(hsa_translate_test PRIVATE -Wl,-rpath,/opt/rocm/lib)
+        target_link_options(hsa_translate_test PRIVATE -Wl,-rpath,${RJ_HSA_LIBRARY_DIR})
         target_compile_definitions(hsa_translate_test PRIVATE
             HAS_HOST_AMDGPU=1
             KERNEL_DIR="${KERNEL_OUTPUT_DIR}")
         add_dependencies(hsa_translate_test device_kernels)
         rj_configure_target(hsa_translate_test TEST)
 
-        if(HAS_RDNA4_GPU)
+        if(HAS_DBT_VECTOR_ADD_GPU)
             add_test(NAME "HsaTranslateTest.TranslateAndDispatchVectorAdd"
                 COMMAND hsa_translate_test --gtest_filter=*VectorAdd*
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
             set_tests_properties("HsaTranslateTest.TranslateAndDispatchVectorAdd" PROPERTIES
                 TIMEOUT 30)
+            message(STATUS "HSA translate vector_add test enabled (supported DBT GPU detected)")
+        else()
+            message(STATUS "HSA translate vector_add test built but NOT registered with CTest "
+                           "(no supported DBT GPU)")
+        endif()
+
+        if(HAS_RDNA4_GPU)
             add_test(NAME "HsaTranslateTest.TranslateAndDispatchMfma16x16"
                 COMMAND hsa_translate_test --gtest_filter=*Mfma16x16*
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
             set_tests_properties("HsaTranslateTest.TranslateAndDispatchMfma16x16" PROPERTIES
                 TIMEOUT 60)
-            message(STATUS "HSA translate test enabled (RDNA4 GPU detected)")
+            message(STATUS "HSA translate MFMA test enabled (RDNA4 GPU detected)")
         else()
-            message(STATUS "HSA translate test built but NOT registered with CTest (no RDNA4 GPU)")
+            message(STATUS "HSA translate MFMA test built but NOT registered with CTest "
+                           "(no RDNA4 GPU)")
         endif()
     endif()
 else()
