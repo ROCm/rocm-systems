@@ -795,6 +795,8 @@ hipError_t playback_hipHostUnregister(PlaybackContext& ctx, const uint8_t* pl) {
 hipError_t playback_hipHostGetDevicePointer(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipHostGetDevicePointer*>(pl);
 
+    // Check host_reg_bufs first (hipHostRegister path), then alloc_map
+    // (hipHostMalloc path — already pinned, no register step needed).
     void* live_host = nullptr;
     {
         std::unique_lock lk(ctx.map_mutex);
@@ -802,6 +804,9 @@ hipError_t playback_hipHostGetDevicePointer(PlaybackContext& ctx, const uint8_t*
         if (it != ctx.host_reg_bufs.end())
             live_host = it->second;
     }
+    if (!live_host)
+        live_host = ctx.translate_ptr(a->hstPtr);
+
     if (!live_host) {
         fprintf(stderr, "[HRR] hipHostGetDevicePointer: no live buf for recorded hstPtr %llx\n",
                 (unsigned long long)a->hstPtr);

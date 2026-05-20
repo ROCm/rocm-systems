@@ -710,8 +710,13 @@ struct HrrEarlyInstall {
     // Use getenv() directly: it is always safe at static-init time.
     const char* out = getenv("HIP_HRR_CAPTURE_OUTPUT");
     if (!out || out[0] == '\0') return;
-    hip_capture_build_table();           // snapshot real table, build cap table
-    hip_capture_build_compiler_table();  // same for compiler dispatch
+    // Only install the RUNTIME dispatch table shims at DLL load time.
+    // The COMPILER table (__hipRegisterFatBinary / __hipRegisterFunction) is
+    // installed later in hip_capture_init(), after hip::init() has fully set up
+    // the compiler dispatch table.  Installing it here (during DLL static init)
+    // can race with compiler-table initialization and cause ModuleInfo()==nullptr
+    // leading to hipErrorInvalidDeviceFunction on first kernel launch.
+    hip_capture_build_table();
     if (!hrr_cap::writer::open(out)) return;
     hip_capture_install();
   }
@@ -722,10 +727,14 @@ void hip_capture_init() {
   if (!hip_capture_enabled()) return;
   if (!g_installed) return;  // early install failed (writer didn't open)
 
-  // Shims and writer are already live from HrrEarlyInstall (DLL load time).
-  // __hipRegisterFatBinary calls from app static-init fire after DLL load and
-  // are captured in real time through the compiler shim — no retroactive sweep
-  // needed, and sweeping here would double-record those events.
+  // Install compiler dispatch shims now — hip::init() has completed so
+  // the compiler dispatch table is fully populated.
+  hip_capture_build_compiler_table();
+
+  // Retroactively record fat binaries that fired before our shims were live.
+  // __hipRegisterFatBinary fires at app static-init, before hip_capture_init().
+  hip::PlatformState::Instance().StatCO().ForEachFatBinaryBlob(record_fat_binary_blob);
+
   std::atexit(hip_capture_shutdown);
 }
 
