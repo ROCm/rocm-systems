@@ -66,9 +66,10 @@ const HipCompilerDispatchTable* GetHipCompilerDispatchTable();
 HipDispatchTable         g_real_table{};
 HipDispatchTable         g_cap_table{};
 std::atomic<bool>        g_installed{false};
+std::atomic<bool>        g_table_built{false};  // guard for hip_capture_build_table()
 
 HipCompilerDispatchTable g_real_compiler_table{};
-std::atomic<bool>        g_compiler_installed{false};
+std::atomic<bool>        g_compiler_installed{false};  // guard for hip_capture_build_compiler_table()
 
 // TLS dims saved by __hipPushCallConfiguration for use by hipLaunchByPtr
 static thread_local dim3        g_pushed_grid{};
@@ -693,18 +694,38 @@ static void record_fat_binary_blob(const void* blob_ptr) {
   hrr_cap::writer::write_event_raw(HRR_API_HIPREGISTERFATBINARY, &a.hdr, sizeof(a));
 }
 
+// ---------------------------------------------------------------------------
+// Early DLL-load install — runs at static-init time, before any extern "C"
+// hipFoo() can be dispatched through hip_table_interface.cpp.
+//
+// This guarantees the first API call is captured.  hip_capture_init() (called
+// later from hip_context.cpp after the runtime is up) only needs to do the
+// fat-binary sweep and register atexit — the shims and writer are already live.
+// ---------------------------------------------------------------------------
+namespace {
+struct HrrEarlyInstall {
+  HrrEarlyInstall() {
+    // hip_capture_enabled() uses the ROCclr flag system which requires
+    // Flag::init() — not called until amd::Runtime::init() inside hip::init().
+    // Use getenv() directly: it is always safe at static-init time.
+    const char* out = getenv("HIP_HRR_CAPTURE_OUTPUT");
+    if (!out || out[0] == '\0') return;
+    hip_capture_build_table();           // snapshot real table, build cap table
+    hip_capture_build_compiler_table();  // same for compiler dispatch
+    if (!hrr_cap::writer::open(out)) return;
+    hip_capture_install();
+  }
+} g_hrr_early_install;
+}  // namespace
+
 void hip_capture_init() {
   if (!hip_capture_enabled()) return;
-  hip_capture_build_table();  // defined in hip_capture_generated.cpp
+  if (!g_installed) return;  // early install failed (writer didn't open)
 
-  if (!hrr_cap::writer::open(hip_capture_output_dir())) return;
-
-  // Sweep all fat binaries already registered before our shims were installed.
-  // __hipRegisterFatBinary fires at static-init time, before hip_capture_init() runs.
-  hip::PlatformState::Instance().StatCO().ForEachFatBinaryBlob(record_fat_binary_blob);
-
-  hip_capture_install();
-  hip_capture_build_compiler_table();  // defined in hip_capture_generated.cpp
+  // Shims and writer are already live from HrrEarlyInstall (DLL load time).
+  // __hipRegisterFatBinary calls from app static-init fire after DLL load and
+  // are captured in real time through the compiler shim — no retroactive sweep
+  // needed, and sweeping here would double-record those events.
   std::atexit(hip_capture_shutdown);
 }
 

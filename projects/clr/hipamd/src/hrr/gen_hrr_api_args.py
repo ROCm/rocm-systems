@@ -158,9 +158,10 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     "hipEventDestroy",
     # Fat binary registration — load blob as module so kernel names resolve
     "__hipRegisterFatBinary",
-    # Host memory registration — need handle map + blob restore
+    # Host memory registration — need handle map + blob restore + device ptr recording
     "hipHostRegister",
     "hipHostUnregister",
+    "hipHostGetDevicePointer",
     # Graph stream-capture flow — hipStreamEndCapture output handle must be recorded,
     # hipGraphInstantiate must use the recorded graph handle and record exec handle.
     # hipStreamBeginCapture also handled manually for debug / stream-not-found safety.
@@ -910,6 +911,7 @@ _CPP_PREAMBLE = """\
 extern HipDispatchTable         g_real_table;
 extern HipDispatchTable         g_cap_table;
 extern std::atomic<bool>        g_installed;
+extern std::atomic<bool>        g_table_built;
 extern HipCompilerDispatchTable g_real_compiler_table;
 extern std::atomic<bool>        g_compiler_installed;
 
@@ -1153,6 +1155,9 @@ def generate_build_table(entries: List[ApiEntry]) -> str:
         lines.append("")
 
     lines.append("void hip_capture_build_table() {")
+    lines.append("  // Guard: safe to call only once. A second call after shims are installed")
+    lines.append("  // would snapshot shim ptrs into g_real_table, causing infinite recursion.")
+    lines.append("  if (g_table_built.exchange(true)) return;")
     lines.append("  // Snapshot the live real table; copy all slots as pass-through base")
     lines.append("  g_real_table = *hip::GetHipDispatchTable();")
     lines.append("  g_cap_table  = g_real_table;")
@@ -1164,13 +1169,16 @@ def generate_build_table(entries: List[ApiEntry]) -> str:
     lines.append("")
 
     lines.append("void hip_capture_build_compiler_table() {")
+    lines.append("  // Guard: a second call after shims are installed would snapshot shim ptrs")
+    lines.append("  // into g_real_compiler_table — __hipRegister* calls from the compiler")
+    lines.append("  // would then recurse back through themselves.")
+    lines.append("  if (g_compiler_installed.exchange(true)) return;")
     lines.append("  g_real_compiler_table = *hip::GetHipCompilerDispatchTable();")
     lines.append("  HipCompilerDispatchTable cap = g_real_compiler_table;")
     for e in compiler_entries:
         lines.append(f"  cap.{e.name}_fn = capture_{e.name};")
     lines.append("  std::memcpy(const_cast<HipCompilerDispatchTable*>(hip::GetHipCompilerDispatchTable()),")
     lines.append("              &cap, sizeof(HipCompilerDispatchTable));")
-    lines.append("  g_compiler_installed.store(true);")
     lines.append("}")
     lines.append("")
 

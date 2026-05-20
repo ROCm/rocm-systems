@@ -1313,12 +1313,7 @@ static hipError_t playback_hipHostFree(PlaybackContext& ctx, const uint8_t* payl
   return _r;
 }
 
-static hipError_t playback_hipHostGetDevicePointer(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipHostGetDevicePointer*>(payload);
-  void* _out_devPtr = nullptr;
-  hipError_t _r = (hipError_t)hipHostGetDevicePointer((void**)&_out_devPtr, ctx.translate_ptr(a->hstPtr), (unsigned int)a->flags);
-  return _r;
-}
+extern hipError_t playback_hipHostGetDevicePointer(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipHostGetFlags(PlaybackContext& ctx, const uint8_t* payload) {
   const auto* a = reinterpret_cast<const hrr_args_hipHostGetFlags*>(payload);

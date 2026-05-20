@@ -45,6 +45,7 @@
 extern HipDispatchTable         g_real_table;
 extern HipDispatchTable         g_cap_table;
 extern std::atomic<bool>        g_installed;
+extern std::atomic<bool>        g_table_built;
 extern HipCompilerDispatchTable g_real_compiler_table;
 extern std::atomic<bool>        g_compiler_installed;
 
@@ -7374,6 +7375,9 @@ extern hipError_t capture_hipExtModuleLaunchKernel(hipFunction_t f, uint32_t glo
 extern void** capture___hipRegisterFatBinary(const void* data);
 
 void hip_capture_build_table() {
+  // Guard: safe to call only once. A second call after shims are installed
+  // would snapshot shim ptrs into g_real_table, causing infinite recursion.
+  if (g_table_built.exchange(true)) return;
   // Snapshot the live real table; copy all slots as pass-through base
   g_real_table = *hip::GetHipDispatchTable();
   g_cap_table  = g_real_table;
@@ -7902,6 +7906,10 @@ void hip_capture_build_table() {
 }
 
 void hip_capture_build_compiler_table() {
+  // Guard: a second call after shims are installed would snapshot shim ptrs
+  // into g_real_compiler_table — __hipRegister* calls from the compiler
+  // would then recurse back through themselves.
+  if (g_compiler_installed.exchange(true)) return;
   g_real_compiler_table = *hip::GetHipCompilerDispatchTable();
   HipCompilerDispatchTable cap = g_real_compiler_table;
   cap.__hipPopCallConfiguration_fn = capture___hipPopCallConfiguration;
@@ -7915,5 +7923,4 @@ void hip_capture_build_compiler_table() {
   cap.__hipUnregisterFatBinary_fn = capture___hipUnregisterFatBinary;
   std::memcpy(const_cast<HipCompilerDispatchTable*>(hip::GetHipCompilerDispatchTable()),
               &cap, sizeof(HipCompilerDispatchTable));
-  g_compiler_installed.store(true);
 }

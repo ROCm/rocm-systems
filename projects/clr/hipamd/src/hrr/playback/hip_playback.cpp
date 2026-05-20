@@ -785,6 +785,38 @@ hipError_t playback_hipHostUnregister(PlaybackContext& ctx, const uint8_t* pl) {
 }
 
 // ---------------------------------------------------------------------------
+// Manual playback: hipHostGetDevicePointer
+// ---------------------------------------------------------------------------
+// The generated shim would pass the raw recorded host ptr to the real API,
+// which fails because it's a stale captured address.  We need to translate
+// it through host_reg_bufs first, then record the returned device pointer
+// in alloc_map so future translate_ptr calls work.
+
+hipError_t playback_hipHostGetDevicePointer(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipHostGetDevicePointer*>(pl);
+
+    void* live_host = nullptr;
+    {
+        std::unique_lock lk(ctx.map_mutex);
+        auto it = ctx.host_reg_bufs.find(a->hstPtr);
+        if (it != ctx.host_reg_bufs.end())
+            live_host = it->second;
+    }
+    if (!live_host) {
+        fprintf(stderr, "[HRR] hipHostGetDevicePointer: no live buf for recorded hstPtr %llx\n",
+                (unsigned long long)a->hstPtr);
+        return hipErrorInvalidValue;
+    }
+
+    void* dev_ptr = nullptr;
+    hipError_t r = hipHostGetDevicePointer(&dev_ptr, live_host, a->flags);
+    if (r == hipSuccess) {
+        ctx.record_alloc(a->devPtr, dev_ptr, 0);
+    }
+    return r;
+}
+
+// ---------------------------------------------------------------------------
 // Manual playback: hipFree / hipFreeAsync
 // ---------------------------------------------------------------------------
 // hipFree:       ret(4) ptr(8)
