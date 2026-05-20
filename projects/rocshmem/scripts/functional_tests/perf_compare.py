@@ -116,12 +116,19 @@ def _remove_outliers_iqr(values: np.ndarray) -> np.ndarray:
     return values[(values >= lo) & (values <= hi)]
 
 
-def collect_variant_multi(log_dirs: list[Path]) -> dict[str, pd.DataFrame]:
+def collect_variant_multi(
+    log_dirs: list[Path],
+) -> tuple[dict[str, pd.DataFrame], dict[str, dict]]:
     """Collect test results from multiple iteration directories.
 
     For each test_key and message size, gathers latency/bandwidth values
     across all iterations, removes outliers via IQR, and returns the
     median.  This produces a single clean DataFrame per test_key.
+
+    Also returns IQR filtering statistics:
+        iqr_stats[test_key][msg_size] = {
+            n_total, n_kept, lat_lo, lat_hi, lat_med, bw_med
+        }
     """
     # Step 1: gather all DataFrames per test_key across iterations
     raw: dict[str, list[pd.DataFrame]] = {}
@@ -132,28 +139,49 @@ def collect_variant_multi(log_dirs: list[Path]) -> dict[str, pd.DataFrame]:
 
     # Step 2: for each test_key, aggregate across iterations
     results: dict[str, pd.DataFrame] = {}
+    iqr_stats: dict[str, dict] = {}
     for key, dfs in raw.items():
         # Stack all iterations, group by msg_size
         combined = pd.concat(dfs, ignore_index=True)
         grouped = combined.groupby("msg_size")
 
         rows = []
+        size_stats: dict[int, dict] = {}
         for msg_size, grp in grouped:
-            lat_clean = _remove_outliers_iqr(grp["latency_us"].values)
-            bw_clean = _remove_outliers_iqr(grp["bandwidth_gbs"].values)
+            lat_vals = grp["latency_us"].values
+            bw_vals = grp["bandwidth_gbs"].values
+            lat_clean = _remove_outliers_iqr(lat_vals)
+            bw_clean = _remove_outliers_iqr(bw_vals)
+
+            q1, q3 = np.percentile(lat_vals, [25, 75])
+            iqr = q3 - q1
+            lat_lo, lat_hi = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+
+            lat_med = float(np.median(lat_clean)) if len(lat_clean) else float(grp["latency_us"].median())
+            bw_med = float(np.median(bw_clean)) if len(bw_clean) else float(grp["bandwidth_gbs"].median())
+
+            size_stats[int(msg_size)] = {
+                "n_total": len(lat_vals),
+                "n_kept":  len(lat_clean),
+                "lat_lo":  lat_lo,
+                "lat_hi":  lat_hi,
+                "lat_med": lat_med,
+                "bw_med":  bw_med,
+            }
             rows.append({
-                "msg_size": msg_size,
-                "volume": grp["volume"].iloc[0],
-                "num_msgs": grp["num_msgs"].iloc[0],
-                "latency_us": float(np.median(lat_clean)) if len(lat_clean) else grp["latency_us"].median(),
-                "bandwidth_gbs": float(np.median(bw_clean)) if len(bw_clean) else grp["bandwidth_gbs"].median(),
-                "msg_rate": grp["msg_rate"].median(),
+                "msg_size":      msg_size,
+                "volume":        grp["volume"].iloc[0],
+                "num_msgs":      grp["num_msgs"].iloc[0],
+                "latency_us":    lat_med,
+                "bandwidth_gbs": bw_med,
+                "msg_rate":      grp["msg_rate"].median(),
             })
 
         df_agg = pd.DataFrame(rows).sort_values("msg_size").reset_index(drop=True)
         results[key] = df_agg
+        iqr_stats[key] = size_stats
 
-    return results
+    return results, iqr_stats
 
 
 # ---------------------------------------------------------------------------
@@ -396,6 +424,69 @@ def make_heatmap(
     print(f"Raw data saved to {outdir / 'heatmap_data.csv'}")
 
 
+def write_per_test_txt(
+    test_key: str,
+    baseline_df: pd.DataFrame,
+    variant_dfs: dict[str, pd.DataFrame],
+    baseline_iqr: dict,           # msg_size -> stats (may be empty for single-iter)
+    variant_iqr: dict[str, dict], # variant -> msg_size -> stats
+    outdir: Path,
+) -> None:
+    """Write a per-test summary text file with salient metrics and IQR stats."""
+    lines = []
+    lines.append(f"Test: {test_key}")
+    lines.append("=" * 72)
+
+    # --- Salient metrics ---
+    lines.append("")
+    lines.append("Salient Metrics")
+    lines.append("-" * 40)
+    VAL_W, PCT_W = 12, 8
+    hdr = f"{'Metric':<14} {'baseline':>{VAL_W}}"
+    for vname in variant_dfs:
+        col_w = VAL_W + 1 + PCT_W
+        hdr += f"  {vname:>{col_w}}"
+    lines.append(hdr)
+    for metric_name, metric_fn in METRICS.items():
+        bval = metric_fn(baseline_df)
+        row = f"{metric_name:<14} {bval:>{VAL_W}.3f}"
+        for vname, vdf in variant_dfs.items():
+            vval = metric_fn(vdf)
+            if bval != 0:
+                pct = (vval - bval) / abs(bval) * 100
+                row += f"  {vval:>{VAL_W}.3f} {pct:>+{PCT_W}.1f}%"
+            else:
+                row += f"  {'N/A':>{VAL_W + 1 + PCT_W}}"
+        lines.append(row)
+
+    # --- IQR filtering tables ---
+    def _iqr_table(label: str, iqr: dict) -> None:
+        if not iqr:
+            return
+        n_iter = next(iter(iqr.values()))["n_total"]
+        lines.append("")
+        lines.append(f"IQR Filtering — {label} ({n_iter} sample{'s' if n_iter != 1 else ''} per size)")
+        lines.append("-" * 72)
+        lines.append(
+            f"  {'size':>8}  {'n_total':>7}  {'n_kept':>6}  "
+            f"{'lat_lo_us':>10}  {'lat_hi_us':>10}  {'lat_med_us':>10}  {'bw_med_gbs':>10}"
+        )
+        for msg_size in sorted(iqr):
+            s = iqr[msg_size]
+            lo = f"{s['lat_lo']:10.3f}"
+            hi = f"{s['lat_hi']:10.3f}"
+            lines.append(
+                f"  {_fmt_size(msg_size):>8}  {s['n_total']:>7}  {s['n_kept']:>6}  "
+                f"{lo}  {hi}  {s['lat_med']:>10.3f}  {s['bw_med']:>10.3f}"
+            )
+
+    _iqr_table("baseline", baseline_iqr)
+    for vname in variant_dfs:
+        _iqr_table(vname, variant_iqr.get(vname, {}))
+
+    (outdir / f"{test_key}.txt").write_text("\n".join(lines) + "\n")
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -445,23 +536,26 @@ def main():
         variant_dir_lists[name] = _resolve_dirs(path)
 
     # Collect data — use multi-iteration aggregation when multiple dirs
+    baseline_iqr: dict[str, dict] = {}
     baseline_dirs = _resolve_dirs(args.baseline)
     if len(baseline_dirs) > 1:
         print(f"Parsing baseline: {len(baseline_dirs)} iterations from {args.baseline}")
-        baseline_data = collect_variant_multi(baseline_dirs)
+        baseline_data, baseline_iqr = collect_variant_multi(baseline_dirs)
     else:
         print(f"Parsing baseline: {baseline_dirs[0]}")
         baseline_data = collect_variant(baseline_dirs[0])
     print(f"  Found {len(baseline_data)} tests")
 
     variant_datasets: dict[str, dict[str, pd.DataFrame]] = {}
+    variant_iqr: dict[str, dict[str, dict]] = {}
     for vname, vdirs in variant_dir_lists.items():
         if len(vdirs) > 1:
             print(f"Parsing variant '{vname}': {len(vdirs)} iterations")
-            variant_datasets[vname] = collect_variant_multi(vdirs)
+            variant_datasets[vname], variant_iqr[vname] = collect_variant_multi(vdirs)
         elif len(vdirs) == 1:
             print(f"Parsing variant '{vname}': {vdirs[0]}")
             variant_datasets[vname] = collect_variant(vdirs[0])
+            variant_iqr[vname] = {}
         else:
             print(f"Skipping variant '{vname}': no directories found")
             continue
@@ -474,19 +568,27 @@ def main():
 
     print(f"\n{len(all_test_names)} tests common across all variants")
 
-    # Generate per-test plots
+    # Generate per-test plots and text summaries
     plot_dir = args.outdir / "per_test"
     plot_dir.mkdir(parents=True, exist_ok=True)
     for test_name in sorted(all_test_names):
         vdfs = {vn: vd[test_name] for vn, vd in variant_datasets.items()
                 if test_name in vd}
         plot_latency(test_name, baseline_data[test_name], vdfs, plot_dir)
-    print(f"Generated {len(all_test_names)} per-test plots in {plot_dir}/")
+        write_per_test_txt(
+            test_name,
+            baseline_data[test_name],
+            vdfs,
+            baseline_iqr.get(test_name, {}),
+            {vn: variant_iqr.get(vn, {}).get(test_name, {}) for vn in vdfs},
+            plot_dir,
+        )
+    print(f"Generated {len(all_test_names)} per-test plots and summaries in {plot_dir}/")
 
     # Generate summary heatmap
     make_heatmap(baseline_data, variant_datasets, args.outdir)
 
-    # Print summary table to stdout
+    # Print summary table to stdout and save to file
     _RAW_FMT = {
         "latency_us":  "{:.3f}",
         "peak_bw_gbs": "{:.2f}",
@@ -497,14 +599,20 @@ def main():
     PCT_W = 7   # e.g. " +4.2%"  or "-100.0%" — sign + 5.1f + "%"
     COL_W = VAL_W + 1 + PCT_W  # variant columns; baseline uses VAL_W only
 
-    print("\n" + "=" * 80)
-    print("SUMMARY: metrics for tests common to all variants")
-    print("=" * 80)
+    summary_lines = []
+
+    def _p(line=""):
+        print(line)
+        summary_lines.append(line)
+
+    _p("\n" + "=" * 80)
+    _p("SUMMARY: metrics for tests common to all variants")
+    _p("=" * 80)
     header = f"{'Test':<30} {'Metric':<12} {'baseline':>{VAL_W}}"
     for vname in variant_datasets:
         header += f"  {vname:>{COL_W}}"
-    print(header)
-    print("-" * len(header))
+    _p(header)
+    _p("-" * len(header))
 
     for test_name in sorted(all_test_names):
         bdf = baseline_data[test_name]
@@ -531,7 +639,11 @@ def main():
                         row += f"  {'N/A':>{COL_W}}"
                 else:
                     row += f"  {'missing':>{COL_W}}"
-            print(row)
+            _p(row)
+
+    summary_path = args.outdir / "heatmap_summary.txt"
+    summary_path.write_text("\n".join(summary_lines) + "\n")
+    print(f"Summary saved to {summary_path}")
 
 
 if __name__ == "__main__":

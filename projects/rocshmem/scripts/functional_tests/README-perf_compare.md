@@ -12,8 +12,10 @@ The baseline is automatically set to the **merge-base** of your current branch w
 
 # Output:
 #   plots-heatmap-<branch>/heatmap_summary.png   summary heatmap (green = faster)
+#   plots-heatmap-<branch>/heatmap_data.csv       raw percentage data (CSV)
+#   plots-heatmap-<branch>/heatmap_summary.txt     summary % table (text)
 #   plots-heatmap-<branch>/per_test/*.png         per-test latency-vs-size curves
-#   plots-heatmap-<branch>/heatmap_data.csv       raw percentage data
+#   plots-heatmap-<branch>/per_test/*.txt         per-test salient metrics + IQR stats
 ```
 
 Run `--suite all` for the full functional test suite (slower):
@@ -24,16 +26,22 @@ Run `--suite all` for the full functional test suite (slower):
 
 ## Skip rebuild on second run
 
-After the first full run, use `--skip-build` and `--skip-baseline` to re-run just the tests (e.g. more iterations) without rebuilding:
+After the first full run, use `--skip-build` to re-run tests without rebuilding:
 
 ```bash
 ./scripts/functional_tests/run_perf_compare.sh --suite heatmap --iterations 20 --skip-build
 ```
 
-Or skip only the baseline rebuild (keep your branch build fresh):
+Skip only the baseline (build and test runs) when the baseline data is already available:
 
 ```bash
 ./scripts/functional_tests/run_perf_compare.sh --suite heatmap --skip-baseline
+```
+
+Skip everything and just regenerate plots from existing logs:
+
+```bash
+./scripts/functional_tests/run_perf_compare.sh --suite heatmap --skip-build --skip-baseline --skip-branch
 ```
 
 ## Multiple named variants (e.g. feature flag comparison)
@@ -185,5 +193,6 @@ $ROCSHMEM_DIR/scripts/functional_tests/run_perf_compare.sh \
 | `--baseline-dir PATH` | auto | Pre-built baseline directory |
 | `--branch-dir PATH` | auto | Pre-built branch directory |
 | `--skip-build` | — | Skip all builds |
-| `--skip-baseline` / `--skip-develop` | — | Skip baseline rebuild only |
+| `--skip-baseline` / `--skip-develop` | — | Skip baseline build and test runs (reuse existing logs) |
+| `--skip-branch` | — | Skip branch/PR build and test runs (reuse existing logs) |
 | `--outdir DIR` | auto | Output directory for plots |

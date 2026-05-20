@@ -30,6 +30,7 @@
 #   --skip-build          Skip all build steps (reuse existing builds)
 #   --skip-baseline       Skip baseline build and test runs (reuse existing logs)
 #   --skip-develop        Alias for --skip-baseline
+#   --skip-branch         Skip branch/PR build and test runs (reuse existing logs)
 #   --outdir DIR          Output directory for plots (default: auto-generated)
 #
 # Prerequisites:
@@ -57,6 +58,7 @@ VARIANT_SPECS=()   # array of "name:env1=v1,...:cmake-args"
 PR_NUM=""
 SKIP_BUILD=0
 SKIP_BASELINE=0
+SKIP_BRANCH=0
 BASE_BRANCH="origin/develop"
 BASELINE_DIR=""
 BRANCH_DIR=""
@@ -77,6 +79,7 @@ while [[ $# -gt 0 ]]; do
     --skip-build)    SKIP_BUILD=1;                         shift ;;
     --skip-baseline) SKIP_BASELINE=1;                      shift ;;
     --skip-develop)  SKIP_BASELINE=1;                      shift ;;
+    --skip-branch)   SKIP_BRANCH=1;                        shift ;;
     --outdir)        OUTDIR="$2";                          shift 2 ;;
     -h|--help)
       sed -n '2,/^###$/p' "$0" | head -n -1
@@ -257,7 +260,9 @@ if [[ $SKIP_BUILD -eq 0 ]]; then
   fi
 
   # Build branch
-  if [[ -z "$BRANCH_DIR" ]]; then
+  if [[ $SKIP_BRANCH -eq 1 ]]; then
+    echo "--- Skipping branch build ---"
+  elif [[ -z "$BRANCH_DIR" ]]; then
     if [[ -n "$PR_NUM" ]]; then
       echo "--- Fetching and building PR #${PR_NUM} ---"
       WORKTREE="/tmp/rocshmem-pr${PR_NUM}-$$"
@@ -328,7 +333,11 @@ if [[ $SKIP_BASELINE -eq 0 ]]; then
 else
   echo "  Skipping baseline test runs (--skip-baseline)"
 fi
-run_iterations "$BUILD_BRANCH"   "logs-${SUITE}" "${BRANCH_LABEL}"
+if [[ $SKIP_BRANCH -eq 0 ]]; then
+  run_iterations "$BUILD_BRANCH" "logs-${SUITE}" "${BRANCH_LABEL}"
+else
+  echo "  Skipping branch test runs (--skip-branch)"
+fi
 
 for spec in "${VARIANT_SPECS[@]}"; do
   IFS=':' read -r vname venv _vcmake <<< "$spec"
@@ -366,6 +375,7 @@ echo ""
 echo "================================================================================"
 echo "DONE"
 echo "  Heatmap:    $OUTDIR/heatmap_summary.png"
-echo "  Per-test:   $OUTDIR/per_test/"
+echo "  Summary:    $OUTDIR/heatmap_summary.txt"
 echo "  CSV data:   $OUTDIR/heatmap_data.csv"
+echo "  Per-test:   $OUTDIR/per_test/  (*.png + *.txt)"
 echo "================================================================================"
