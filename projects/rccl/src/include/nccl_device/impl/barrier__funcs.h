@@ -40,7 +40,7 @@ NCCL_DEVICE_INLINE ncclBarrierSession<Coop>::ncclBarrierSession(
 }
 #endif
 
-#if NCCL_DEVICE_COMPILE
+#if __CUDACC__
 template<typename Coop>
 NCCL_DEVICE_INLINE ncclBarrierSession<Coop>::ncclBarrierSession(
     Coop coop, ncclTeamTagLsa, ncclDevComm const& comm, uint32_t index, bool multimem
@@ -66,7 +66,7 @@ NCCL_DEVICE_INLINE ncclBarrierSession<Coop>::ncclBarrierSession(
 }
 #endif
 
-#if NCCL_DEVICE_COMPILE
+#if __CUDACC__
 template<typename Coop>
 NCCL_DEVICE_INLINE ncclLsaBarrierSession<Coop>& ncclBarrierSession<Coop>::lsaBarrier() {
   return this->innerLsaBar.thing;
@@ -82,20 +82,12 @@ NCCL_DEVICE_INLINE ncclGinBarrierSession<Coop>& ncclBarrierSession<Coop>::ginBar
 
 #if __CUDACC__
 template<typename Coop>
-#if __HIP_PLATFORM_AMD__
-NCCL_DEVICE_INLINE void ncclBarrierSession<Coop>::sync(Coop, std::memory_order ord, ncclGinFenceLevel fence) {
-#else
 NCCL_DEVICE_INLINE void ncclBarrierSession<Coop>::sync(Coop, cuda::memory_order ord, ncclGinFenceLevel fence) {
-#endif
   if (this->innerLsaBar.present) {
     this->innerLsaBar.thing.sync(this->coop, this->outerGinBar.present ? nccl::utility::releaseOrderOf(ord) : ord);
   }
   if (this->outerGinBar.present) {
-#if __HIP_PLATFORM_AMD__
-    auto ginOrd = nccl::utility::toCudaOrder(this->innerLsaBar.present ? nccl::utility::acquireOrderOf(ord) : ord);
-#else
     auto ginOrd = this->innerLsaBar.present ? nccl::utility::acquireOrderOf(ord) : ord;
-#endif
     this->outerGinBar.thing.sync(this->coop, ginOrd, fence);
   }
 }
