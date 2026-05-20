@@ -184,16 +184,11 @@ if [[ ! -d "$VENV_DIR" ]]; then
       echo "ERROR: Failed to create venv (even without pip)." >&2; exit 1
     }
   fi
-  # Activate so that pip (venv's own, or system pip via --system-site-packages)
-  # installs into the venv rather than the system.
-  # shellcheck disable=SC1091
-  . "$VENV_DIR/bin/activate"
-  python3 -m pip install --quiet matplotlib numpy pandas seaborn || {
+  "$VENV_DIR/bin/python3" -m pip install --quiet matplotlib numpy pandas seaborn || {
     echo "ERROR: Failed to install Python dependencies." >&2
     echo "  If using system pip, try: sudo apt install python3-pip" >&2
     exit 1
   }
-  deactivate
   echo "  Created venv and installed dependencies at $VENV_DIR"
 else
   echo "  Reusing existing venv at $VENV_DIR"

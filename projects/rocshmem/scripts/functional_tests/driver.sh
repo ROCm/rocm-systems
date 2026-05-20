@@ -910,15 +910,26 @@ if [[ -n "$ARTIFACT_DIR" && $EXIT_STATUS -eq 0 ]]; then
           --outdir "$ARTIFACT_DIR"
         echo ""
         echo "CI ARTIFACT: $ARTIFACT_DIR/heatmap_summary.png"
+        echo "CI ARTIFACT: $ARTIFACT_DIR/heatmap_summary.txt"
         echo "CI ARTIFACT: $ARTIFACT_DIR/heatmap_data.csv"
         echo "CI ARTIFACT: $ARTIFACT_DIR/per_test/"
       else
         # Single-build: generate per-test latency plots only (no baseline to compare against)
         COMPARE="$SCRIPT_DIR/perf_compare.py"
-        VENV_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)/.perf-venv"
+        VENV_DIR="$SCRIPT_DIR/.perf-venv"
+        # Self-healing: recreate venv if dependencies are missing
+        if [[ -d "$VENV_DIR" ]] && \
+           ! "$VENV_DIR/bin/python3" -c "import matplotlib, numpy, pandas, seaborn" &>/dev/null; then
+          rm -rf "$VENV_DIR"
+        fi
         if [[ ! -d "$VENV_DIR" ]]; then
-          python3 -m venv "$VENV_DIR" 2>/dev/null || { VENV_DIR=""; }
-          [[ -n "$VENV_DIR" ]] && "$VENV_DIR/bin/pip" install --quiet matplotlib numpy pandas seaborn
+          if python3 -m ensurepip --version &>/dev/null; then
+            python3 -m venv "$VENV_DIR" || { VENV_DIR=""; }
+          else
+            python3 -m venv --system-site-packages --without-pip "$VENV_DIR" || { VENV_DIR=""; }
+          fi
+          [[ -x "$VENV_DIR/bin/python3" ]] && \
+            "$VENV_DIR/bin/python3" -m pip install --quiet matplotlib numpy pandas seaborn || true
         fi
         PYTHON="${VENV_DIR:+$VENV_DIR/bin/}python3"
         # Use the single run log dir as both baseline and variant so per-test plots are produced.
