@@ -140,8 +140,6 @@ public:
         // First check and save the mode
         return Create(profile->agent, CheckConcurrent(profile));
     }
-    // Destroy factory
-    static void Destroy();
 
     // Return gpu id
     gpu_id_t GetGpuId() const { return gpu_id_; }
@@ -326,7 +324,7 @@ private:
 
     // Mutex for inter thread synchronization for the instances create/destroy
     static mutex_t mutex_;
-    // Factory instances container
+    // Process-lifetime factory cache; intentionally not destroyed during library unload.
     static instances_t* instances_;
     // Block info container
     const BlockInfoMap block_map_;
@@ -413,21 +411,6 @@ Pm4Factory::Create(aqlprofile_agent_handle_t agent_info, bool concurrent)
     if(info == nullptr) throw aql_profile_exc_val<uint64_t>("Bad agent handle", agent_info.handle);
     const gpu_id_t gpu_id = GetGpuId(info->gfxip);
     return Pm4Factory::Create(info, gpu_id, concurrent);
-}
-
-// Destroy PM4 factory
-inline void
-Pm4Factory::Destroy()
-{
-    std::lock_guard<mutex_t> lck(mutex_);
-
-    if(instances_ != nullptr)
-    {
-        for(auto& item : *instances_)
-            delete item.second;
-        delete instances_;
-        instances_ = nullptr;
-    }
 }
 
 // Check the setting of pmc profiling mode
