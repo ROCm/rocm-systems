@@ -1,6 +1,7 @@
 # RMA sources
 set(RMA_SOURCES
     src/rma/rma.cc
+    src/rma/rma_ce.cc
     src/rma/rma_proxy.cc
     src/rma/rma_proxy_progress.cc
     src/rma/rma_proxy_launch.cc
