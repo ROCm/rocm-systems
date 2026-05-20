@@ -23,7 +23,7 @@ from conftest import RocprofsysTest, check_use_rocpd
 
 pytestmark = [
     pytest.mark.mpi,
-    pytest.mark.rocprof_config,
+    pytest.mark.rank_filter
 ]
 
 TARGET = "mpi-example"
@@ -80,14 +80,6 @@ def assert_per_rank_outputs(
 
 @pytest.fixture
 def rocpd_env() -> dict[str, str]:
-    """Shared mutation target for @pytest.mark.rocpd.
-
-    The conftest's autouse `apply_rocpd_marker` looks up this fixture by
-    name and adds `ROCPROFSYS_USE_ROCPD=ON` to it (when RocPD is available).
-    Each test then layers its filter-specific env vars on top before
-    passing the dict to `run_test(env=...)`. Function-scoped, so each
-    test gets a fresh dict.
-    """
     return {}
 
 
@@ -97,42 +89,35 @@ def rocpd_env() -> dict[str, str]:
 
 
 @pytest.mark.class_name("rank-filter")
+@pytest.mark.rocpd("rocpd_env")
+@pytest.mark.sys_run
 class TestRankFilter(RocprofsysTest):
     """End-to-end tests for the MPI rank-based output filtering feature."""
 
-    @pytest.mark.rocpd("rocpd_env")
-    def test_no_filter_present(self, rocpd_env):
-        """No filter set anywhere → all 3 ranks produce console + all files."""
-        result = self.run_test(
-            "sys_run",
-            TARGET,
-            env=rocpd_env,
-            launcher="mpi",
-            num_procs=NUM_PROCS,
-        )
-        assert banner_count(result.test_output) == 3, (
-            f"Expected 3 banners (one per rank), got "
-            f"{banner_count(result.test_output)}"
-        )
-        assert_per_rank_outputs(
-            self.test_output_dir,
-            ranks_with_output=[0, 1, 2],
-            ranks_without_output=[],
-        )
+    @pytest.mark.parametrize("filter_source", [
+    pytest.param("unset", id=""),
+    "via_cli",
+    "via_env",
+    ])
+    def test_no_filter(self, rocpd_env, filter_source):
+        """Tests: filter not set + filter options are set (via cli or env) but empty.
+        Every rank should produce both file and console output (filtering disabled).
+        """
+        env = rocpd_env.copy()
+        sysrun_args = []
+        if filter_source == "unset":
+            pass
+        elif filter_source == "via_cli":
+            sysrun_args = ["--rank-filter-output", "", "--rank-filter-logs", ""]
+        elif filter_source == "via_env":
+            env["ROCPROFSYS_RANK_FILTER_OUTPUT"] = ""
+            env["ROCPROFSYS_RANK_FILTER_LOGS"] = ""
 
-    @pytest.mark.rocpd("rocpd_env")
-    def test_empty_filter_via_cli(self, rocpd_env):
-        """Empty filter via CLI flags → all 3 ranks produce console + all files."""
         result = self.run_test(
             "sys_run",
             TARGET,
-            env=rocpd_env,
-            sysrun_args=[
-                "--rank-filter-output",
-                "",
-                "--rank-filter-logs",
-                "",
-            ],
+            env=env,
+            sysrun_args=sysrun_args,
             launcher="mpi",
             num_procs=NUM_PROCS,
         )
@@ -145,28 +130,6 @@ class TestRankFilter(RocprofsysTest):
             ranks_without_output=[],
         )
 
-    @pytest.mark.rocpd("rocpd_env")
-    def test_empty_filter_via_env(self, rocpd_env):
-        """Empty filter via env vars → all 3 ranks produce console + all files."""
-        rocpd_env["ROCPROFSYS_RANK_FILTER_OUTPUT"] = ""
-        rocpd_env["ROCPROFSYS_RANK_FILTER_LOGS"] = ""
-        result = self.run_test(
-            "sys_run",
-            TARGET,
-            env=rocpd_env,
-            launcher="mpi",
-            num_procs=NUM_PROCS,
-        )
-        assert (
-            banner_count(result.test_output) == 3
-        ), f"Expected 3 banners, got {banner_count(result.test_output)}"
-        assert_per_rank_outputs(
-            self.test_output_dir,
-            ranks_with_output=[0, 1, 2],
-            ranks_without_output=[],
-        )
-
-    @pytest.mark.rocpd("rocpd_env")
     def test_mixed_env_output_cli_logs(self, rocpd_env):
         """OUTPUT=0 via env, LOGS=2 via CLI
         Rank 0: file output, no banner
@@ -191,7 +154,6 @@ class TestRankFilter(RocprofsysTest):
             ranks_without_output=[1, 2],
         )
 
-    @pytest.mark.rocpd("rocpd_env")
     def test_overlapping_ranges_cli_output_env_logs(self, rocpd_env):
         """OUTPUT=0-1 via CLI, LOGS=1,2 via env
         Rank 0: file output, no banner
@@ -216,8 +178,7 @@ class TestRankFilter(RocprofsysTest):
             ranks_without_output=[2],
         )
 
-    @pytest.mark.rocpd("rocpd_env")
-    def test_custom_rank_id_excludes_all(self, rocpd_env):
+    def test_custom_id_excludes_all(self, rocpd_env):
         """Custom rank-ID forces every rank to identify as 10; filter is 0-2.
         Since 10 is not in [0,2] for either filter, every rank is silenced
         for both console and file output.
@@ -240,6 +201,38 @@ class TestRankFilter(RocprofsysTest):
         )
         assert banner_count(result.test_output) == 0, (
             f"Expected 0 banners, got " f"{banner_count(result.test_output)}"
+        )
+        assert_per_rank_outputs(
+            self.test_output_dir,
+            ranks_with_output=[],
+            ranks_without_output=[0, 1, 2],
+        )
+
+    def test_custom_id_requires_output_or_logs(self, rocpd_env):
+        """--rank-filter-id is meaningless without at least one of
+        --rank-filter-output / --rank-filter-logs. rocprof-sys-run should
+        reject the args, print the required-options error, and refuse to
+        launch — no banner, no per-rank output files.
+        """
+        result = self.run_test(
+            "sys_run",
+            TARGET,
+            env=rocpd_env,
+            sysrun_args=["--rank-filter-id", "MY_CUSTOM_RANK"],
+            launcher="mpi",
+            num_procs=NUM_PROCS,
+            fail_on_pass=True,
+        )
+        self.assert_regex(
+            result,
+            "sys_run",
+            sys_run_pass_regex=[
+                r"--rank-filter-id requires one of the options: "
+                r"\[--rank-filter-logs, --rank-filter-output\]"
+            ],
+        )
+        assert banner_count(result.test_output) == 0, (
+            f"Expected 0 banners, got {banner_count(result.test_output)}"
         )
         assert_per_rank_outputs(
             self.test_output_dir,

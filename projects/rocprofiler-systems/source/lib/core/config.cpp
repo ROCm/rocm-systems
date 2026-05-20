@@ -2762,7 +2762,7 @@ is_rank_in_filter(std::string enabled_ranks_str)
 {
     rocprofsys::utility::trim_str(enabled_ranks_str);
     for(auto& ch : enabled_ranks_str)
-        ch = std::tolower(ch);
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
 
     if(enabled_ranks_str.empty() || enabled_ranks_str == "all") return true;
     if(enabled_ranks_str == "none") return false;
