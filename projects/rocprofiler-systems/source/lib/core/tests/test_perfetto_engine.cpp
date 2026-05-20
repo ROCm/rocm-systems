@@ -191,6 +191,7 @@ TEST(perfetto_engine_cached, drain_one_source_one_record)
 
     rocprofsys::core::recording_sink sink;
     engine.start(rocprofsys::core::perfetto_engine::mode::cached_interceptor, sink);
+    engine.preregister_pids({ 42 });
 
     const std::vector<char> payload{ 'p', 'a', 'c', 'k', 'e', 't' };
     simulate_interceptor_emit(engine, 42, payload);
@@ -213,6 +214,7 @@ TEST(perfetto_engine_cached, drain_two_sources_no_cross_bleed)
 
     rocprofsys::core::recording_sink sink;
     engine.start(rocprofsys::core::perfetto_engine::mode::cached_interceptor, sink);
+    engine.preregister_pids({ 101, 202 });
 
     const std::vector<char> payload_a{ 'a', 'a', 'a' };
     const std::vector<char> payload_b{ 'b', 'b' };
@@ -243,6 +245,7 @@ TEST(perfetto_engine_cached, multiple_emits_same_pid_concatenate)
 
     rocprofsys::core::recording_sink sink;
     engine.start(rocprofsys::core::perfetto_engine::mode::cached_interceptor, sink);
+    engine.preregister_pids({ 7 });
 
     const std::vector<char> first{ '1', '2' };
     const std::vector<char> second{ '3', '4', '5' };

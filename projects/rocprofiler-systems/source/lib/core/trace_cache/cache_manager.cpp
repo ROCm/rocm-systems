@@ -106,6 +106,14 @@ cache_manager::post_process_bulk(output_file_registry& _output_registry,
                 }
                 engine->start(core::perfetto_engine::mode::cached_interceptor,
                               *perfetto_sink);
+                // Pre-register every pid that will emit so the cached
+                // collector's hot path stays lock-free (each parser thread
+                // touches only its own pre-created byte buffer).
+                std::vector<int> source_pids;
+                source_pids.reserve(processor_configs.size());
+                for(const auto& cfg : processor_configs)
+                    source_pids.push_back(static_cast<int>(cfg->_pid));
+                engine->preregister_pids(source_pids);
                 processor.set_perfetto_engine(engine.get(), tracks.get());
                 engine_started = true;
             } catch(const std::exception& exp)

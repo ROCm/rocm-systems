@@ -475,9 +475,30 @@ get_emitting_pid() noexcept
 }
 
 void
+perfetto_engine::preregister_pids(const std::vector<int>& source_pids)
+{
+    std::lock_guard<std::mutex> lk{ m_impl->collector_mutex };
+    for(int pid : source_pids)
+        m_impl->collected_bytes.try_emplace(pid);
+}
+
+void
 perfetto_engine::collect_packet_bytes(int pid, const void* data, std::size_t size)
 {
     if(data == nullptr || size == 0) return;
+
+    auto it = m_impl->collected_bytes.find(pid);
+    if(it == m_impl->collected_bytes.end())
+    {
+        // pid was not preregistered. With the 1:1 parser-thread:pid
+        // invariant, lock-free append requires the map structure to be
+        // frozen before emission starts — so this branch indicates a
+        // setup bug (caller forgot to call preregister_pids). Drop the
+        // packet rather than risk a concurrent map mutation.
+        LOG_ERROR("perfetto cached collector dropped packet for unregistered pid {}",
+                  pid);
+        return;
+    }
 
     // Wrap each raw TracePacket in the length-delimited Trace.packets
     // field header so concatenation forms a valid Trace proto.
@@ -499,15 +520,14 @@ perfetto_engine::collect_packet_bytes(int pid, const void* data, std::size_t siz
         header[header_len++] = static_cast<char>(v);
     }
 
-    std::vector<char> framed;
-    framed.reserve(header_len + size);
-    framed.insert(framed.end(), header.data(), header.data() + header_len);
-    framed.insert(framed.end(), static_cast<const char*>(data),
-                  static_cast<const char*>(data) + size);
-
-    std::lock_guard<std::mutex> lk{ m_impl->collector_mutex };
-    auto&                       bytes = m_impl->collected_bytes[pid];
-    bytes.insert(bytes.end(), framed.begin(), framed.end());
+    // Lock-free hot path: the map structure is frozen (preregister_pids
+    // populated all entries before emission started), and this pid's
+    // vector has exactly one writer thread (the parser owning this pid).
+    auto& bytes = it->second;
+    bytes.reserve(bytes.size() + header_len + size);
+    bytes.insert(bytes.end(), header.data(), header.data() + header_len);
+    bytes.insert(bytes.end(), static_cast<const char*>(data),
+                 static_cast<const char*>(data) + size);
 }
 
 }  // namespace core

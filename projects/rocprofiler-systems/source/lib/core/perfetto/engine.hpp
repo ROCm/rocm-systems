@@ -127,6 +127,14 @@ public:
     // Whether a session is currently active.
     bool is_running() const noexcept;
 
+    // Pre-creates per-pid byte buffer slots so cached emission stays
+    // lock-free on the hot path. MUST be called between start(cached_…)
+    // and the first emit from any parser thread; callers know the full
+    // pid set up front (it comes from the cache_manager's processor
+    // configs). Subsequent collect_packet_bytes calls for unknown pids
+    // are dropped with an error log.
+    void preregister_pids(const std::vector<int>& source_pids);
+
     // Called by the cached-mode interceptor TLS to append per-pid bytes
     // during emission. Public so the TU-private interceptor inside the
     // .cpp can reach it without crossing the private-member boundary; not
