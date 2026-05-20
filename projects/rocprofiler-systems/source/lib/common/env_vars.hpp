@@ -138,7 +138,13 @@ constexpr std::string_view CAUSAL_DURATION         = "ROCPROFSYS_CAUSAL_DURATION
 constexpr std::string_view CAUSAL_RANDOM_SEED      = "ROCPROFSYS_CAUSAL_RANDOM_SEED";
 
 // --- Hardware counters ---
-constexpr std::string_view ROCM_EVENTS       = "ROCPROFSYS_ROCM_EVENTS";
+constexpr std::string_view ROCM_EVENTS      = "ROCPROFSYS_ROCM_EVENTS";
+constexpr std::string_view ROCM_SPM_ENABLED = "ROCPROFSYS_ROCM_SPM_ENABLED";
+constexpr std::string_view ROCM_SPM_EVENTS  = "ROCPROFSYS_ROCM_SPM_EVENTS";
+constexpr std::string_view ROCM_SPM_SAMPLE_INTERVAL =
+    "ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL";
+constexpr std::string_view ROCM_SPM_SAMPLE_INTERVAL_UNIT =
+    "ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL_UNIT";
 constexpr std::string_view PAPI_EVENTS       = "ROCPROFSYS_PAPI_EVENTS";
 constexpr std::string_view PAPI_MULTIPLEXING = "ROCPROFSYS_PAPI_MULTIPLEXING";
 

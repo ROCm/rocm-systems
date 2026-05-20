@@ -99,6 +99,10 @@ using counter_id_vec_t = std::vector<rocprofiler_counter_id_t>;
 using agent_counter_id_map_t =
     std::unordered_map<rocprofiler_agent_id_t, counter_id_vec_t>;
 
+using agent_spm_counter_config_map_t =
+    std::unordered_map<rocprofiler_agent_id_t,
+                       std::optional<rocprofiler_counter_config_id_t>>;
+
 using backtrace_operation_map_t =
     std::unordered_map<rocprofiler_callback_tracing_kind_t,
                        std::unordered_set<rocprofiler_tracing_operation_t>>;
@@ -106,7 +110,7 @@ using backtrace_operation_map_t =
 struct client_data
 {
     static constexpr size_t num_buffers  = 11;
-    static constexpr size_t num_contexts = 5;
+    static constexpr size_t num_contexts = 6;
 
     using buffer_name_info_t   = rocprofiler::sdk::buffer_name_info_t<std::string_view>;
     using callback_name_info_t = rocprofiler::sdk::callback_name_info_t<std::string_view>;
@@ -120,6 +124,7 @@ struct client_data
     rocprofiler_client_finalize_t             client_fini               = nullptr;
     rocprofiler_context_id_t                  primary_ctx               = { 0 };
     rocprofiler_context_id_t                  counter_ctx               = { 0 };
+    rocprofiler_context_id_t                  spm_ctx                   = { 0 };
     rocprofiler_context_id_t                  code_object_ctx           = { 0 };
     rocprofiler_context_id_t                  control_ctx               = { 0 };
     rocprofiler_buffer_id_t                   kernel_dispatch_buffer    = { 0 };
@@ -139,6 +144,7 @@ struct client_data
     agent_counter_id_map_t                    agent_events              = {};
     agent_counter_info_map_t                  agent_counter_info        = {};
     agent_counter_profile_map_t               agent_counter_profiles    = {};
+    agent_spm_counter_config_map_t            agent_spm_counter_configs = {};
     common::synchronized<code_object_vec_t>   code_object_records       = {};
     common::synchronized<kernel_symbol_vec_t> kernel_symbol_records     = {};
     buffer_name_info_t                        buffered_tracing_info     = {};
@@ -165,7 +171,8 @@ struct client_data
 inline client_data::context_id_vec_t
 client_data::get_all_contexts() const
 {
-    return context_id_vec_t{ primary_ctx, counter_ctx, code_object_ctx, control_ctx };
+    return context_id_vec_t{ primary_ctx, counter_ctx, spm_ctx, code_object_ctx,
+                             control_ctx };
 }
 
 inline client_data::context_id_vec_t
@@ -174,6 +181,7 @@ client_data::get_main_contexts() const
     return context_id_vec_t{
         primary_ctx,
         counter_ctx,
+        spm_ctx,
     };
 }
 

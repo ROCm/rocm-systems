@@ -177,6 +177,27 @@ TEST_F(json_config_test, rasolves_hw_counters_section)
     EXPECT_EQ(result.at("ROCPROFSYS_PAPI_EVENTS"), "PAPI_TOT_CYC,PAPI_TOT_INS");
 }
 
+TEST_F(json_config_test, resolves_spm_hardware_counters_section)
+{
+    auto j = nlohmann::json::parse(R"({
+        "hardware_counters": {
+            "spm": {
+                "enabled": true,
+                "events": {"value": ["SQ_WAVES"]},
+                "sample_interval": {"value": 4200},
+                "sample_interval_unit": {"value": "sclk_cycles"}
+            }
+        }
+    })");
+
+    auto result = resolve_config(j);
+
+    EXPECT_EQ(result.at("ROCPROFSYS_ROCM_SPM_ENABLED"), "true");
+    EXPECT_EQ(result.at("ROCPROFSYS_ROCM_SPM_EVENTS"), "SQ_WAVES");
+    EXPECT_EQ(result.at("ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL"), "4200");
+    EXPECT_EQ(result.at("ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL_UNIT"), "sclk_cycles");
+}
+
 // Test new schema format - causal section
 TEST_F(json_config_test, resolves_causal_section)
 {
@@ -386,6 +407,9 @@ TEST_F(json_config_test, handling_round_trip_for_new_values_in_json_schema)
         { "ROCPROFSYS_NETWORK_INTERFACE", "ib0" },
         { "ROCPROFSYS_TRACE_PERIODS", "1:5,10:20" },
         { "ROCPROFSYS_PAPI_MULTIPLEXING", "true" },
+        { "ROCPROFSYS_ROCM_SPM_EVENTS", "SQ_WAVES" },
+        { "ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL", "4200" },
+        { "ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL_UNIT", "sclk_cycles" },
     };
 
     auto j = env_vars_to_json_schema(env_vars);
@@ -394,6 +418,11 @@ TEST_F(json_config_test, handling_round_trip_for_new_values_in_json_schema)
     EXPECT_EQ(j["advanced"]["network_interface"]["value"], "ib0");
     EXPECT_EQ(j["advanced"]["trace_periods"]["value"], "1:5,10:20");
     EXPECT_EQ(j["hardware_counters"]["papi_multiplexing"]["enabled"], true);
+    EXPECT_EQ(j["hardware_counters"]["spm"]["enabled"], true);
+    EXPECT_EQ(j["hardware_counters"]["spm"]["events"]["value"], "SQ_WAVES");
+    EXPECT_EQ(j["hardware_counters"]["spm"]["sample_interval"]["value"], 4200);
+    EXPECT_EQ(j["hardware_counters"]["spm"]["sample_interval_unit"]["value"],
+              "sclk_cycles");
 }
 
 // Test env_vars constants match expected string values
@@ -404,6 +433,7 @@ TEST_F(json_config_test, validate_env_var_constants)
     EXPECT_EQ(rocprofsys::env_vars::USE_SAMPLING, "ROCPROFSYS_USE_SAMPLING");
     EXPECT_EQ(rocprofsys::env_vars::USE_AMD_SMI, "ROCPROFSYS_USE_AMD_SMI");
     EXPECT_EQ(rocprofsys::env_vars::ROCM_DOMAINS, "ROCPROFSYS_ROCM_DOMAINS");
+    EXPECT_EQ(rocprofsys::env_vars::ROCM_SPM_EVENTS, "ROCPROFSYS_ROCM_SPM_EVENTS");
     EXPECT_EQ(rocprofsys::env_vars::USE_MPIP, "ROCPROFSYS_USE_MPIP");
     EXPECT_EQ(rocprofsys::env_vars::OUTPUT_PATH, "ROCPROFSYS_OUTPUT_PATH");
     EXPECT_EQ(rocprofsys::env_vars::USE_CAUSAL, "ROCPROFSYS_USE_CAUSAL");
