@@ -12,6 +12,8 @@
 #include <memory>
 #include <vector>
 
+#include <rocprofiler-sdk/version.h>
+
 namespace rocprofsys::pmc
 {
 std::atomic<State>&
@@ -52,7 +54,7 @@ postfork_parent_unlock_sampler();
 void
 postfork_child_reset_sampler_lock();
 
-#if ROCPROFSYS_ROCM_VERSION >= 60400
+#if ROCPROFILER_VERSION >= 600
 void
 register_gpu_perf_counter_source(const std::vector<std::shared_ptr<agent>>& agent_list);
 #endif

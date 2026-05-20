@@ -2693,7 +2693,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             counter_record_callback, _data));
     }
 
-#if ROCPROFSYS_ROCM_VERSION >= 60400
+#if ROCPROFILER_VERSION >= 600
     const auto gpu_perf_counters_setting = get_gpu_perf_counters();
     if(!gpu_perf_counters_setting.empty() && !_data->gpu_agents.empty())
     {

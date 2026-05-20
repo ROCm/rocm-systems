@@ -17,7 +17,8 @@
 #include <rocprofiler-sdk/device_counting_service.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
-#if ROCPROFSYS_ROCM_VERSION >= 70000
+#include <rocprofiler-sdk/version.h>
+#if ROCPROFILER_VERSION >= 10000
 #    include <rocprofiler-sdk/counter_config.h>
 #else
 #    include <rocprofiler-sdk/profile_config.h>
@@ -86,7 +87,7 @@ struct driver
     static status_t query_record_counter_id(counter_record_t record,
                                             counter_id_t*    counter_id)
     {
-#if ROCPROFSYS_ROCM_VERSION < 70000
+#if ROCPROFILER_VERSION < 10000
         return rocprofiler_query_record_counter_id(record.id, counter_id);
 #else
         if(counter_id == nullptr)
@@ -105,7 +106,7 @@ struct driver
             return str != nullptr ? std::string{ str } : std::string{};
         };
 
-#if ROCPROFSYS_ROCM_VERSION >= 70000
+#if ROCPROFILER_VERSION >= 10000
         rocprofiler_counter_info_v1_t info{};
         auto                          status = rocprofiler_query_counter_info(
             counter_id, ROCPROFILER_COUNTER_INFO_VERSION_1, &info);
@@ -161,7 +162,7 @@ struct driver
                                           size_t               counters_count,
                                           counter_config_id_t* config_id)
     {
-#if ROCPROFSYS_ROCM_VERSION >= 70000
+#if ROCPROFILER_VERSION >= 10000
         return rocprofiler_create_counter_config(agent_id, counters_list, counters_count,
                                                  config_id);
 #else

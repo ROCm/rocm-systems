@@ -8,7 +8,8 @@
 #include "library/pmc/collectors/gpu/perfetto_policy.hpp"
 #include "library/pmc/device_providers/amd_smi/provider.hpp"
 #include <cstdint>
-#if ROCPROFSYS_ROCM_VERSION >= 60400
+#include <rocprofiler-sdk/version.h>
+#if ROCPROFILER_VERSION >= 600
 #    include "library/pmc/collectors/gpu_perf_counter/collector.hpp"
 #    include "library/pmc/device_providers/rocprofiler_sdk/provider.hpp"
 #endif
@@ -29,7 +30,7 @@
 #include "core/components/fwd.hpp"
 #include "core/state.hpp"
 #include "library/pmc/device_providers/amd_smi/drivers/driver.hpp"
-#if ROCPROFSYS_ROCM_VERSION >= 60400
+#if ROCPROFILER_VERSION >= 600
 #    include "library/pmc/device_providers/rocprofiler_sdk/drivers/driver.hpp"
 #endif
 #include "library/runtime.hpp"
@@ -104,7 +105,7 @@ using provider_factory_t =
 using provider_t      = provider_factory_t::provider_t;
 using gpu_collector_t = collectors::gpu::collector<provider_t, gpu_production_config>;
 
-#if ROCPROFSYS_ROCM_VERSION >= 60400
+#if ROCPROFILER_VERSION >= 600
 using gpu_perf_counter_provider_t =
     device_providers::rocprofiler_sdk::provider<drivers::rocprofiler_sdk::driver_factory>;
 using gpu_perf_counter_collector_t =
@@ -123,7 +124,7 @@ using cpu_collector_t = collectors::cpu::collector<cpu_provider_t, cpu_productio
 std::shared_ptr<provider_t> g_device_provider;
 
 std::unique_ptr<gpu_collector_t> g_gpu_collector;
-#if ROCPROFSYS_ROCM_VERSION >= 60400
+#if ROCPROFILER_VERSION >= 600
 std::shared_ptr<gpu_perf_counter_provider_t>  g_gpu_perf_counter_provider;
 std::unique_ptr<gpu_perf_counter_collector_t> g_gpu_perf_counter_collector;
 #endif
@@ -187,7 +188,7 @@ sample()
     {
         slice.sample(timestamp);
     }
-#if ROCPROFSYS_ROCM_VERSION >= 60400
+#if ROCPROFILER_VERSION >= 600
     if(g_gpu_perf_counter_collector) g_gpu_perf_counter_collector->sample(timestamp);
 #endif
 }
@@ -264,7 +265,7 @@ shutdown()
     }
 
     is_initialized() = false;
-#if ROCPROFSYS_ROCM_VERSION >= 60400
+#if ROCPROFILER_VERSION >= 600
     if(g_gpu_perf_counter_collector) g_gpu_perf_counter_collector->shutdown();
     g_gpu_perf_counter_collector.reset();
     g_gpu_perf_counter_provider.reset();
@@ -280,7 +281,7 @@ post_process()
         slice.post_process();
     }
     g_collector_slices.clear();
-#if ROCPROFSYS_ROCM_VERSION >= 60400
+#if ROCPROFILER_VERSION >= 600
     if(g_gpu_perf_counter_collector) g_gpu_perf_counter_collector->post_process();
     g_gpu_perf_counter_collector.reset();
     g_gpu_perf_counter_provider.reset();
@@ -306,7 +307,7 @@ pause()
     {
         slice.pause(timestamp);
     }
-#if ROCPROFSYS_ROCM_VERSION >= 60400
+#if ROCPROFILER_VERSION >= 600
     if(g_gpu_perf_counter_collector) g_gpu_perf_counter_collector->pause(timestamp);
 #endif
 }
@@ -321,7 +322,7 @@ postfork_child_cleanup()
         slice.shutdown();
     }
     g_collector_slices.clear();
-#if ROCPROFSYS_ROCM_VERSION >= 60400
+#if ROCPROFILER_VERSION >= 600
     // Do not call shutdown() or stop() — rocprofiler SDK / HSA mutexes may be
     // inherited locked from the parent. The parent owns SDK context shutdown.
     // gpu_perf_counter is not in g_collector_slices so the loop above is safe.
@@ -382,7 +383,7 @@ postfork_child_reset_sampler_lock()
     ::new(static_cast<void*>(&_m)) mutex_type{};
 }
 
-#if ROCPROFSYS_ROCM_VERSION >= 60400
+#if ROCPROFILER_VERSION >= 600
 void
 register_gpu_perf_counter_source(const std::vector<std::shared_ptr<agent>>& agent_list)
 {
