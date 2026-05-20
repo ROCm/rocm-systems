@@ -1,9 +1,9 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""R3 / R4 / RQ1: cached-perfetto single-file output layout.
+"""Cached-perfetto output-layout coverage.
 
-Runs mpi-example with -np 2 under the two values of
+Runs mpi-example with -np 2 under both values of
 ROCPROFSYS_PERFETTO_OUTPUT_LAYOUT. For 'single_file', asserts each rank
 produces exactly one .proto, the file is well-formed, and the recorded
 pid set matches the rank's logical pid (proves the seq_id rewrite +
@@ -26,6 +26,13 @@ _SINGLE_FILE_REPORT_RE = re.compile(
     r"single-file-checks: pids=\[([0-9, ]*)\] slices=(\d+)"
 )
 _PID_REPORT_RE = re.compile(r"per-pid-isolation: pid=(\d+) slices=(\d+)")
+
+# Floor on TrackEvent slice count per rank from mpi-example's instrumented
+# loop. The example emits ~70-120 slices per rank on a quiescent
+# workstation; 50 keeps headroom for slower runners while still catching
+# whole-rank attribution loss (which manifests as 0 or single-digit slices).
+# If mpi-example's loop count changes upstream, re-derive this value from a
+# fresh local run before lowering.
 _MIN_SLICES_PER_RANK = 50
 
 

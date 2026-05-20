@@ -5,9 +5,13 @@
 
 #include "core/categories.hpp"
 #include "core/common.hpp"
-#include <cstdint>
-
 #include "core/config.hpp"
+#include "core/perfetto/counter_track.hpp"
+
+#include <atomic>
+#include <memory>
+
+#include "logger/debug.hpp"
 
 #if defined(TIMEMORY_USE_PERFETTO)
 #    include <timemory/components/perfetto/backends.hpp>
@@ -17,18 +21,6 @@ PERFETTO_DEFINE_CATEGORIES(ROCPROFSYS_PERFETTO_CATEGORIES);
 #endif
 
 #include <timemory/process/process.hpp>
-
-#include <map>
-#include <memory>
-#include <mutex>
-#include <string>
-#include <tuple>
-#include <utility>
-#include <vector>
-
-#include "logger/debug.hpp"
-
-#include <atomic>
 
 namespace rocprofsys
 {
@@ -70,136 +62,10 @@ private:
     std::shared_ptr<config::tmp_file>      m_tmp_file;
 };
 
-// Returns the active driver instance, or nullptr if none has been constructed.
 live_perfetto_driver*
 active_driver() noexcept;
 }  // namespace perfetto
 
 void
 detach_inherited_perfetto_session(pid_t parent_pid);
-
-template <typename Tp>
-struct perfetto_counter_track
-{
-    using category_type = Tp;
-    using track_map_t   = std::map<std::uint32_t, std::vector<::perfetto::CounterTrack>>;
-    using name_map_t = std::map<std::uint32_t, std::vector<std::unique_ptr<std::string>>>;
-    using data_t     = std::pair<name_map_t, track_map_t>;
-
-    static auto   init() { (void) get_data(); }
-    static auto   exists(size_t _idx, std::int64_t _n = -1);
-    static size_t size(size_t _idx);
-    static auto emplace(size_t _idx, const std::string& _v, const char* _units = nullptr,
-                        const char* _category = nullptr, std::int64_t _mult = 1,
-                        bool _incr = false);
-
-    // The returned reference is only valid while no concurrent emplace fires
-    // on the same _idx. Production call sites guard emplace under std::call_once
-    // before the first at(), so the returned ref is stable for the duration of
-    // a single TRACE_COUNTER use. Do not stash the reference across emit calls.
-    static auto& at(size_t _idx, size_t _n)
-    {
-        std::lock_guard<std::mutex> _lk{ get_mutex() };
-        return get_data().second.at(_idx).at(_n);
-    }
-
-private:
-    static data_t& get_data()
-    {
-        static auto _v = data_t{};
-        return _v;
-    }
-    static std::mutex& get_mutex()
-    {
-        static std::mutex _m{};
-        return _m;
-    }
-};
-
-template <typename Tp>
-auto
-perfetto_counter_track<Tp>::exists(size_t _idx, std::int64_t _n)
-{
-    std::lock_guard<std::mutex> _lk{ get_mutex() };
-    bool                        _v = get_data().second.count(_idx) != 0;
-    if(_n < 0 || !_v) return _v;
-    return static_cast<size_t>(_n) < get_data().second.at(_idx).size();
-}
-
-template <typename Tp>
-size_t
-perfetto_counter_track<Tp>::size(size_t _idx)
-{
-    std::lock_guard<std::mutex> _lk{ get_mutex() };
-    bool                        _v = get_data().second.count(_idx) != 0;
-    if(!_v) return 0;
-    return get_data().second.at(_idx).size();
-}
-
-template <typename Tp>
-auto
-perfetto_counter_track<Tp>::emplace(size_t _idx, const std::string& _v,
-                                    const char* _units, const char* _category,
-                                    std::int64_t _mult, bool _incr)
-{
-    std::lock_guard<std::mutex> _lk{ get_mutex() };
-    auto&                       _name_data  = get_data().first[_idx];
-    auto&                       _track_data = get_data().second[_idx];
-    std::vector<std::tuple<std::string, const char*, bool>> _missing = {};
-
-    for(const auto& itr : _name_data)
-    {
-        _missing.emplace_back(*itr, itr->c_str(), false);
-    }
-
-    auto        _index     = _track_data.size();
-    auto&       _name      = _name_data.emplace_back(std::make_unique<std::string>(_v));
-    const char* _name_cstr = _name->c_str();
-    const char* _unit_name = nullptr;
-    if(_units && strlen(_units) > 0)
-    {
-        auto& _unit_str = _name_data.emplace_back(std::make_unique<std::string>(_units));
-        _unit_name      = _unit_str->c_str();
-    }
-    _track_data.emplace_back(
-        ::perfetto::CounterTrack{ ::perfetto::DynamicString{ _name_cstr } }
-            .set_unit_name(_unit_name)
-            .set_category(_category)
-            .set_unit_multiplier(_mult)
-            .set_is_incremental(_incr));
-
-    for(auto& itr : _missing)
-    {
-        const char* citr = std::get<1>(itr);
-        for(const auto& ditr : _name_data)
-        {
-            if(citr == ditr->c_str() && strcmp(citr, ditr->c_str()) == 0)
-            {
-                std::get<2>(itr) = true;
-                break;
-            }
-        }
-        if(!std::get<2>(itr))
-        {
-            std::set<void*> _prev = {};
-            std::set<void*> _curr = {};
-            for(const auto& eitr : _missing)
-                _prev.emplace(static_cast<void*>(const_cast<char*>(std::get<1>(eitr))));
-            for(const auto& eitr : _name_data)
-                _curr.emplace(static_cast<void*>(const_cast<char*>(eitr->c_str())));
-            std::stringstream _pss{};
-            for(auto&& eitr : _prev)
-                _pss << " " << std::hex << std::setw(12) << std::left << eitr;
-            std::stringstream _css{};
-            for(auto&& eitr : _curr)
-                _css << " " << std::hex << std::setw(12) << std::left << eitr;
-            throw std::runtime_error(fmt::format(
-                "perfetto_counter_track emplace method for '{}' ({:p}) "
-                "invalidated C-string '{}' ({p}).\nprevious: {}\ncurrent: {}\n",
-                _v, (void*) _name->c_str(), std::get<0>(itr),
-                (void*) std::get<0>(itr).c_str(), _pss.str(), _css.str()));
-        }
-    }
-    return _index;
-}
 }  // namespace rocprofsys

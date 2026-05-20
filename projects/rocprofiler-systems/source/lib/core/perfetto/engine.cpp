@@ -6,13 +6,12 @@
 
 #include "core/config.hpp"
 #include "core/perfetto/driver.hpp"  // brings ROCPROFSYS_PERFETTO_CATEGORIES (TrackEvent type)
+#include "core/perfetto/packet_framing.hpp"
 #include "core/perfetto/sinks.hpp"
 #include "logger/debug.hpp"
 
 #include <algorithm>
-#include <array>
 #include <atomic>
-#include <cassert>
 #include <cstring>
 #include <exception>
 #include <mutex>
@@ -379,6 +378,12 @@ perfetto_engine::stop()
         m_impl->running     = false;
         m_impl->active_pid  = 0;
         m_impl->active_sink = nullptr;
+        // Drive the sink's finalize() even when no session ever materialised,
+        // so cached-mode owners observe the same teardown contract as a
+        // session that ran to completion (e.g. the system backend short-circuit
+        // or an SDK init failure that left start() with no live session).
+        if(current_mode == mode::cached_interceptor && sink != nullptr)
+            std::visit([](auto& s) { s.finalize(); }, *sink);
         return;
     }
 
@@ -505,32 +510,17 @@ perfetto_engine::collect_packet_bytes(int pid, const void* data, std::size_t siz
         return;
     }
 
-    // Wrap each raw TracePacket in the length-delimited Trace.packets
-    // field header so concatenation forms a valid Trace proto.
-    // Trace.packets has field number 1, wire type 2 (LEN). Tag byte =
-    // (1 << 3) | 2 = 0x0A. Length is varint-encoded.
-    // size_t on 64-bit takes at most 10 varint bytes; +1 for the tag.
-    std::array<char, 11> header{};
-    header[0]              = 0x0A;
-    std::size_t header_len = 1;
-    {
-        std::size_t v = size;
-        while(v >= 0x80)
-        {
-            assert(header_len < header.size() && "varint header overflow");
-            header[header_len++] = static_cast<char>((v & 0x7F) | 0x80);
-            v >>= 7;
-        }
-        assert(header_len < header.size() && "varint header overflow on final byte");
-        header[header_len++] = static_cast<char>(v);
-    }
-
     // Lock-free hot path: the map structure is frozen (preregister_pids
     // populated all entries before emission started), and this pid's
     // vector has exactly one writer thread (the parser owning this pid).
-    auto& bytes = it->second;
-    bytes.reserve(bytes.size() + header_len + size);
-    bytes.insert(bytes.end(), header.data(), header.data() + header_len);
+    // The framing wraps each raw TracePacket in a length-delimited
+    // Trace.packets field so concatenation forms a valid Trace proto.
+    auto&          bytes             = it->second;
+    constexpr auto MAX_VARINT_BYTES  = std::size_t{ 10 };
+    constexpr auto PACKETS_TAG_BYTES = std::size_t{ 1 };
+    bytes.reserve(bytes.size() + PACKETS_TAG_BYTES + MAX_VARINT_BYTES + size);
+    bytes.push_back(static_cast<char>(TRACE_PACKETS_TAG));
+    append_varint(bytes, static_cast<std::uint64_t>(size));
     bytes.insert(bytes.end(), static_cast<const char*>(data),
                  static_cast<const char*>(data) + size);
 }

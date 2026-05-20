@@ -11,14 +11,10 @@
 #include "core/utility.hpp"
 #include "logger/debug.hpp"
 
-#include <cerrno>
 #include <cstdio>
-#include <cstdlib>
 #include <fstream>
 #include <ios>
 #include <string>
-#include <sys/wait.h>
-#include <unistd.h>
 #include <utility>
 
 namespace rocprofsys
@@ -74,41 +70,8 @@ live_fd_sink::finalize()
 {
     if(!m_drained) return;
 
-    using char_vec_t = std::vector<char>;
-
-    char_vec_t trace_data{};
-
-#if defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0
-    if(config::get_perfetto_combined_traces())
-    {
-        // Held pending a project-local mpi gather helper that handles
-        // variable-size byte buffers and the collapse_processes setting.
-        using perfetto_mpi_get_t = tim::operation::finalize::mpi_get<char_vec_t, true>;
-
-        auto _trace_data = std::move(m_bytes);
-        auto _rank_data  = std::vector<char_vec_t>{};
-        auto _combine    = [](char_vec_t& _dst, const char_vec_t& _src) -> char_vec_t& {
-            _dst.reserve(_dst.size() + _src.size());
-            for(auto&& itr : _src)
-                _dst.emplace_back(itr);
-            return _dst;
-        };
-
-        perfetto_mpi_get_t{ config::get_perfetto_combined_traces(),
-                            settings::node_count() }(_rank_data, _trace_data, _combine);
-        for(auto& itr : _rank_data)
-            trace_data =
-                (trace_data.empty()) ? std::move(itr) : _combine(trace_data, itr);
-    }
-    else
-    {
-        trace_data = std::move(m_bytes);
-    }
-#else
-    trace_data = std::move(m_bytes);
-#endif
-
-    auto _filename = config::get_perfetto_output_filename();
+    auto trace_data = std::move(m_bytes);
+    auto _filename  = config::get_perfetto_output_filename();
 
     if(config::output_filtering::is_output_enabled_for_current_mpi_rank())
     {
@@ -133,53 +96,6 @@ live_fd_sink::finalize()
         {
             LOG_ERROR("Perfetto trace data is empty. File '{}' will not be written...",
                       _filename);
-        }
-    }
-
-    if(dmp::rank() == 0)
-    {
-        auto _output_folder = filepath::dirname(_filename);
-        auto _script_path   = std::string{ "rocprof-sys-merge-output.sh" };
-        auto _script_dir    = get_env("ROCPROFSYS_SCRIPT_PATH", std::string{}, false);
-
-        if(!_script_dir.empty())
-            _script_path = fmt::format("{}/{}", _script_dir, _script_path);
-
-        if(!filepath::exists(_script_path))
-        {
-            LOG_WARNING("Script not found: {}", _script_path);
-        }
-        else
-        {
-            // fork+execlp avoids the shell-injection footprint of std::system
-            // when _output_folder contains characters that would terminate the
-            // single-quoted argument (a single quote, in particular).
-            pid_t pid = ::fork();
-            if(pid < 0)
-            {
-                LOG_ERROR("fork failed for merge script {}: errno={}", _script_path,
-                          errno);
-            }
-            else if(pid == 0)
-            {
-                ::execlp(_script_path.c_str(), _script_path.c_str(),
-                         _output_folder.c_str(), nullptr);
-                // execlp only returns on failure
-                ::_exit(127);
-            }
-            else
-            {
-                int status = 0;
-                while(::waitpid(pid, &status, 0) < 0 && errno == EINTR)
-                {
-                }
-                if(WIFEXITED(status) && WEXITSTATUS(status) == 0)
-                    LOG_INFO("Successfully executed: {} {}", _script_path,
-                             _output_folder);
-                else
-                    LOG_ERROR("Failed to execute: {} {} (status={})", _script_path,
-                              _output_folder, status);
-            }
         }
     }
 

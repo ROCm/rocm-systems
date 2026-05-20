@@ -29,10 +29,9 @@ class TestLivePerfettoCanary(RocprofsysTest):
     run_args = ["2", "100"]
 
     @pytest.mark.timeout(120)
-    @pytest.mark.parametrize("mode", ["sys_run"])
-    def test(self, mode, live_perfetto_env):
+    def test(self, live_perfetto_env):
         result = self.run_test(
-            mode,
+            "sys_run",
             target="transpose",
             env=live_perfetto_env,
             run_args=self.run_args,

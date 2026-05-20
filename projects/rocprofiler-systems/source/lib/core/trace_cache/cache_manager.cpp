@@ -23,6 +23,73 @@ namespace rocprofsys
 {
 namespace trace_cache
 {
+namespace
+{
+// RAII orchestrator for the cached-perfetto post-processing pipeline:
+// owns the perfetto_engine + trace_sink + track_registry trio, wires the
+// engine into the active post_processor on construction, and drives the
+// engine's stop()/teardown on destruction so the destructor catches any
+// drain exception. Construction may throw if init_sdk fails; partial
+// state is unwound by member destruction in declared-reverse order, so
+// callers do not need an explicit "engine_started" flag.
+class cached_perfetto_session
+{
+public:
+    cached_perfetto_session(output_file_registry& registry, pid_t root_pid,
+                            bool single_file_layout, const std::vector<int>& source_pids,
+                            post_processor& processor)
+    : m_engine{ std::make_unique<core::perfetto_engine>(
+          core::build_engine_config_from_settings()) }
+    {
+        m_engine->init_sdk();
+        m_tracks = std::make_unique<rocprofsys::track_registry>();
+        if(single_file_layout)
+        {
+            m_sink =
+                std::make_unique<core::trace_sink>(core::single_file_sink{ registry });
+        }
+        else
+        {
+            m_sink = std::make_unique<core::trace_sink>(
+                core::per_pid_file_sink{ root_pid, registry });
+        }
+        m_engine->start(core::perfetto_engine::mode::cached_interceptor, *m_sink);
+        m_engine->preregister_pids(source_pids);
+        processor.set_perfetto_engine(m_engine.get(), m_tracks.get());
+        m_started = true;
+    }
+
+    cached_perfetto_session(const cached_perfetto_session&)            = delete;
+    cached_perfetto_session& operator=(const cached_perfetto_session&) = delete;
+    cached_perfetto_session(cached_perfetto_session&&)                 = delete;
+    cached_perfetto_session& operator=(cached_perfetto_session&&)      = delete;
+
+    ~cached_perfetto_session()
+    {
+        if(m_started)
+        {
+            try
+            {
+                m_engine->stop();
+            } catch(const std::exception& exp)
+            {
+                LOG_ERROR("Perfetto engine stop/drain raised: {}", exp.what());
+            }
+        }
+        // Declared-reverse-order teardown: sink last because engine.stop()
+        // (above) owns the final drain call into it.
+        m_engine.reset();
+        m_sink.reset();
+        m_tracks.reset();
+    }
+
+private:
+    std::unique_ptr<core::perfetto_engine>      m_engine;
+    std::unique_ptr<core::trace_sink>           m_sink;
+    std::unique_ptr<rocprofsys::track_registry> m_tracks;
+    bool                                        m_started{ false };
+};
+}  // namespace
 
 cache_manager&
 cache_manager::get_instance()
@@ -75,76 +142,35 @@ cache_manager::post_process_bulk(output_file_registry& _output_registry,
         LOG_INFO("Processing {} trace cache configurations", processor_configs.size());
         post_processor processor{ _tracker, _output_registry };
 
-        // Cached perfetto path: construct an engine + per-pid file sink +
-        // track_registry per post-process invocation. The engine drives
-        // the SDK interceptor; per-pid bytes drain through the sink at
-        // engine.stop(). On init_sdk failure, log + skip the perfetto
-        // block; RocPD processing continues unaffected.
-        std::unique_ptr<core::perfetto_engine>      engine;
-        std::unique_ptr<core::trace_sink>           perfetto_sink;
-        std::unique_ptr<rocprofsys::track_registry> tracks;
-        bool                                        engine_started = false;
         const auto output_layout      = config::get_perfetto_output_layout();
         const bool single_file_layout = (output_layout == "single_file");
+
+        std::unique_ptr<cached_perfetto_session> session;
         if(enabled_formats.is_perfetto_enabled())
         {
+            std::vector<int> source_pids;
+            source_pids.reserve(processor_configs.size());
+            for(const auto& cfg : processor_configs)
+                source_pids.push_back(static_cast<int>(cfg->_pid));
+
             try
             {
-                engine = std::make_unique<core::perfetto_engine>(
-                    core::build_engine_config_from_settings());
-                engine->init_sdk();
-                tracks = std::make_unique<rocprofsys::track_registry>();
-                if(single_file_layout)
-                {
-                    perfetto_sink = std::make_unique<core::trace_sink>(
-                        core::single_file_sink{ _output_registry });
-                }
-                else
-                {
-                    perfetto_sink =
-                        std::make_unique<core::trace_sink>(core::per_pid_file_sink{
-                            static_cast<pid_t>(root_pid), _output_registry });
-                }
-                engine->start(core::perfetto_engine::mode::cached_interceptor,
-                              *perfetto_sink);
-                // Pre-register every pid that will emit so the cached
-                // collector's hot path stays lock-free (each parser thread
-                // touches only its own pre-created byte buffer).
-                std::vector<int> source_pids;
-                source_pids.reserve(processor_configs.size());
-                for(const auto& cfg : processor_configs)
-                    source_pids.push_back(static_cast<int>(cfg->_pid));
-                engine->preregister_pids(source_pids);
-                processor.set_perfetto_engine(engine.get(), tracks.get());
-                engine_started = true;
+                session = std::make_unique<cached_perfetto_session>(
+                    _output_registry, static_cast<pid_t>(root_pid), single_file_layout,
+                    source_pids, processor);
             } catch(const std::exception& exp)
             {
                 LOG_ERROR("Perfetto engine initialization failed: {}. Skipping "
                           "perfetto output; RocPD output unaffected.",
                           exp.what());
-                engine.reset();
-                perfetto_sink.reset();
-                tracks.reset();
             }
         }
 
         processor.process(processor_configs, enabled_formats);
 
-        if(engine_started)
-        {
-            try
-            {
-                engine->stop();
-            } catch(const std::exception& exp)
-            {
-                LOG_ERROR("Perfetto engine stop/drain raised: {}", exp.what());
-            }
-            // Reset in declared-reverse order: sink last because the
-            // engine's stop() owns the final drain call into it.
-            engine.reset();
-            perfetto_sink.reset();
-            tracks.reset();
-        }
+        // Triggers engine.stop() + drain via the session destructor before
+        // the merge script (below) reads what the sink wrote.
+        session.reset();
 
         // single_file layout already produced exactly one .proto; running the
         // merge script would create a redundant merged.proto in the output

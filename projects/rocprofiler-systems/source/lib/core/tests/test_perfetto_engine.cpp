@@ -28,8 +28,8 @@ make_test_config()
 
 TEST(perfetto_engine, construct_from_config_literal_no_config_access)
 {
-    // RQ3: engine instantiable in unit tests with no global pollution.
-    // Construction must not touch rocprofsys::config::*; passing a literal
+    // Engine must be instantiable in unit tests with no global pollution:
+    // construction must not touch rocprofsys::config::*. Passing a literal
     // engine_config exercises this.
     rocprofsys::core::engine_config   cfg = make_test_config();
     rocprofsys::core::perfetto_engine engine{ cfg };
@@ -39,7 +39,8 @@ TEST(perfetto_engine, construct_from_config_literal_no_config_access)
 
 TEST(perfetto_engine, two_instances_no_shared_running_state)
 {
-    // RQ3: a second engine constructed after the first sees pristine state.
+    // A second engine constructed after the first sees pristine state — no
+    // hidden global handed between instances.
     rocprofsys::core::perfetto_engine first{ make_test_config() };
     rocprofsys::core::perfetto_engine second{ make_test_config() };
 
@@ -49,7 +50,7 @@ TEST(perfetto_engine, two_instances_no_shared_running_state)
 
 TEST(perfetto_engine, stop_without_start_is_noop)
 {
-    // RF6: engine.stop() invoked before start() returns without error.
+    // engine.stop() invoked before start() returns without error.
     rocprofsys::core::perfetto_engine engine{ make_test_config() };
 
     EXPECT_NO_THROW(engine.stop());
