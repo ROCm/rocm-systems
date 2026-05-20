@@ -76,7 +76,11 @@ populate_cu_bitmap_from_drm(AgentInfo& agent_info)
            dev_info.num_shader_engines == agent_info.se_num &&
            dev_info.num_shader_arrays_per_engine == agent_info.shader_arrays_per_se)
         {
-            memcpy(agent_info.cu_bitmap, dev_info.cu_bitmap, sizeof(agent_info.cu_bitmap));
+            // Size from the (smaller, fixed) kernel uAPI side so this cannot
+            // over-read dev_info if the internal cu_bitmap layout ever grows.
+            static_assert(sizeof(agent_info.cu_bitmap.bits) >= sizeof(dev_info.cu_bitmap),
+                          "aqlprofile_cu_bitmap_t too small for drm_amdgpu_info_device.cu_bitmap");
+            memcpy(agent_info.cu_bitmap.bits, dev_info.cu_bitmap, sizeof(dev_info.cu_bitmap));
             return;
         }
     }
@@ -150,7 +154,7 @@ RegisterAgent(const aqlprofile_agent_info_v2_t* agent_info)
     int_agent_info.shader_arrays_per_se = agent_info->shader_arrays_per_se;
     int_agent_info.domain               = agent_info->domain;
     int_agent_info.bdf_id               = agent_info->location_id;
-    memcpy(int_agent_info.cu_bitmap, agent_info->cu_bitmap, sizeof(int_agent_info.cu_bitmap));
+    int_agent_info.cu_bitmap            = agent_info->cu_bitmap;
     populate_agent_name(int_agent_info, agent_info->agent_gfxip);
     get_cache().add(agent_id.handle, int_agent_info);
     return agent_id;

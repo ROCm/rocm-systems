@@ -28,13 +28,13 @@
 #include <set>
 #include <map>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
-#include "lib/aqlprofile/aqlprofile.hpp"  // brings in AQLPROFILE_DRM_CU_BITMAP_NUM_* via the gated aql_profile_v2.h
 #include "lib/aqlprofile/def/gpu_block_info.h"
 #include "lib/aqlprofile/pm4/cmd_config.h"
-#include "lib/aqlprofile/util/hsa_rsrc_factory.h"
+#include "lib/aqlprofile/util/hsa_rsrc_factory.h"  // aqlprofile_cu_bitmap_t (transitive)
 
 namespace pm4_builder
 {
@@ -271,14 +271,15 @@ public:
         // contiguous WGPs (two CU bits per WGP). That collapses the fallback
         // path into the same loop and preserves pre-fix sequential iteration.
         //
-        // The (se < NUM_SE && sa < NUM_SA_PER_SE) guard on the element read is
-        // a hard correctness requirement: aqlprofile_agent_info_v2_t::cu_bitmap
-        // is a C uint32_t[NUM_SE][NUM_SA_PER_SE] (kernel-ABI-fixed at [4][4]),
-        // so reading agent_info->cu_bitmap[se][sa] for out-of-window indices
-        // would be UB on the C array, not a guaranteed zero.
+        // The (se < drm_se_lim && sa < drm_sa_lim) guard on the element read is
+        // a hard correctness requirement: aqlprofile_cu_bitmap_t::bits is a C
+        // uint32_t array sized by the kernel-ABI-fixed dimensions, so reading
+        // agent_info->cu_bitmap.bits[se][sa] for out-of-window indices would be
+        // UB on the C array, not a guaranteed zero. Derive the iteration bounds
+        // from the type itself so they cannot drift from the bitmap layout.
         constexpr uint32_t kMaxWgpPerSa = 16;
-        const uint32_t     drm_se_lim   = AQLPROFILE_DRM_CU_BITMAP_NUM_SE;
-        const uint32_t     drm_sa_lim   = AQLPROFILE_DRM_CU_BITMAP_NUM_SA_PER_SE;
+        constexpr uint32_t drm_se_lim   = std::extent_v<decltype(aqlprofile_cu_bitmap_t::bits), 0>;
+        constexpr uint32_t drm_sa_lim   = std::extent_v<decltype(aqlprofile_cu_bitmap_t::bits), 1>;
         for(uint32_t se = 0; se < se_number_; ++se)
         {
             for(uint32_t sa = 0; sa < sarrays_per_se; ++sa)
@@ -286,7 +287,7 @@ public:
                 auto& indices = active_wgp_indices_.at(se).at(sa);
 
                 uint32_t cu_bm =
-                    (se < drm_se_lim && sa < drm_sa_lim) ? agent_info->cu_bitmap[se][sa] : 0u;
+                    (se < drm_se_lim && sa < drm_sa_lim) ? agent_info->cu_bitmap.bits[se][sa] : 0u;
                 if(cu_bm == 0)
                 {
                     // No bitmap for this SA. Guard wgp_per_sa==0 here so the

@@ -248,6 +248,20 @@ typedef struct
 #define AQLPROFILE_DRM_CU_BITMAP_NUM_SA_PER_SE 4
 
 /**
+ * @brief Per-(SE, SA) active CU bitmap; shape mirrors
+ * drm_amdgpu_info_device.cu_bitmap from the AMDGPU kernel uAPI.
+ *
+ * Defining the bitmap as a named type (rather than a bare 2D array embedded
+ * in each consumer) gives a single source of truth for its dimensions and
+ * makes struct-assignment well-defined for internal callers, so the layout
+ * cannot silently diverge between the public V2 ABI and internal caches.
+ */
+typedef struct
+{
+    uint32_t bits[AQLPROFILE_DRM_CU_BITMAP_NUM_SE][AQLPROFILE_DRM_CU_BITMAP_NUM_SA_PER_SE];
+} aqlprofile_cu_bitmap_t;
+
+/**
  * @brief Extended agent info with physical CU topology for WGP harvesting support.
  *
  * cu_bitmap allows aqlprofile to iterate only over active (non-harvested) WGP
@@ -261,15 +275,14 @@ typedef struct
  */
 typedef struct
 {
-    const char* agent_gfxip;          /**< Agent GFXIP string */
-    uint32_t    xcc_num;              /**< Number of XCCs */
-    uint32_t    se_num;               /**< Number of Shader Engines */
-    uint32_t    cu_num;               /**< Active CU count */
-    uint32_t    shader_arrays_per_se; /**< Shader Arrays per SE */
-    uint32_t    domain;               /**< PCI domain */
-    uint32_t    location_id;          /**< BDF (Bus/Device/Function) */
-    uint32_t    cu_bitmap[AQLPROFILE_DRM_CU_BITMAP_NUM_SE][AQLPROFILE_DRM_CU_BITMAP_NUM_SA_PER_SE];
-    /**< Per-SE/SA active CU bitmap; shape mirrors drm_amdgpu_info_device.cu_bitmap. */
+    const char*            agent_gfxip;          /**< Agent GFXIP string */
+    uint32_t               xcc_num;              /**< Number of XCCs */
+    uint32_t               se_num;               /**< Number of Shader Engines */
+    uint32_t               cu_num;               /**< Active CU count */
+    uint32_t               shader_arrays_per_se; /**< Shader Arrays per SE */
+    uint32_t               domain;               /**< PCI domain */
+    uint32_t               location_id;          /**< BDF (Bus/Device/Function) */
+    aqlprofile_cu_bitmap_t cu_bitmap;            /**< Per-SE/SA active CU bitmap. */
 } aqlprofile_agent_info_v2_t;
 
 /**

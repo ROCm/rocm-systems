@@ -23,6 +23,7 @@
 #ifndef SRC_UTIL_HSA_RSRC_FACTORY_H_
 #define SRC_UTIL_HSA_RSRC_FACTORY_H_
 
+#include "lib/aqlprofile/aqlprofile.hpp"  // aqlprofile_cu_bitmap_t (gated aql_profile_v2.h)
 #include "lib/aqlprofile/hsa_includes.h"
 
 #include <cstdint>
@@ -149,14 +150,10 @@ struct AgentInfo
 
     // Per-SE/SA active CU bitmap from DRM. Bit set = active CU. All-zero
     // means the bitmap is unavailable, in which case GFX11+ WGP iteration
-    // falls back to the legacy sequential formula based on cu_num.
-    //
-    // Dimensions mirror the DRM kernel uAPI (drm_amdgpu_info_device.cu_bitmap)
-    // and MUST stay in sync with AQLPROFILE_DRM_CU_BITMAP_NUM_SE /
-    // AQLPROFILE_DRM_CU_BITMAP_NUM_SA_PER_SE in lib/aqlprofile/aql_profile_v2.h
-    // (that header has an include guard preventing direct inclusion here,
-    // so we cannot reference the macros from this internal header).
-    uint32_t cu_bitmap[4][4]{};
+    // falls back to the legacy sequential formula based on cu_num. Uses the
+    // shared aqlprofile_cu_bitmap_t so this internal cache cannot drift
+    // from the public V2 ABI layout.
+    aqlprofile_cu_bitmap_t cu_bitmap{};
 
     uint32_t se_per_xcc() const { return se_num / xcc_num; }
 };

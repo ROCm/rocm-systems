@@ -1093,7 +1093,11 @@ try_register_agent_v2(const rocprofiler_agent_t* agent, aqlprofile_agent_handle_
             info_v2.shader_arrays_per_se       = agent->simd_arrays_per_engine;
             info_v2.domain                     = agent->domain;
             info_v2.location_id                = agent->location_id;
-            memcpy(info_v2.cu_bitmap, dev_info.cu_bitmap, sizeof(info_v2.cu_bitmap));
+            // Size from the (smaller, fixed) kernel uAPI side so this cannot
+            // over-read dev_info if the V2 cu_bitmap layout ever grows.
+            static_assert(sizeof(info_v2.cu_bitmap.bits) >= sizeof(dev_info.cu_bitmap),
+                          "aqlprofile_cu_bitmap_t too small for drm_amdgpu_info_device.cu_bitmap");
+            memcpy(info_v2.cu_bitmap.bits, dev_info.cu_bitmap, sizeof(dev_info.cu_bitmap));
 
             success = (aqlprofile_register_agent_info(
                            handle, &info_v2, AQLPROFILE_AGENT_VERSION_V2) == HSA_STATUS_SUCCESS);
