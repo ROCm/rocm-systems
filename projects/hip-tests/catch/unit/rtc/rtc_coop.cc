@@ -34,7 +34,7 @@ void compileProgram(hiprtcProgram& prog, const std::tuple<T, Types...>&) {
   std::string expression;
   std::tuple<Types...> remainingTypes;
 
-  expression = std::string("reduceCoopKernel<") +
+  expression = std::string("aggregationCoopKernel<") +
                functorToString<T, Op>() +
                ", " +
                typeToString<T>() +
@@ -64,7 +64,7 @@ void compileProgram(hiprtcProgram& prog, const std::tuple<>&) {
 }
 
 template <class T, template <typename> class Op>
-void runReduce(hiprtcProgram& prog) {
+void runAggregation(hiprtcProgram& prog, AggregationType aggType) {
   using distribution = typename DistributionType<T>::type;
 
   static constexpr std::array<int, 7> tileSizes = {1, 2, 4, 8, 16, 32, 64};
@@ -76,6 +76,7 @@ void runReduce(hiprtcProgram& prog) {
   LinearAllocGuard<T> input(LinearAllocs::malloc, d_input.size_bytes());
   LinearAllocGuard<T> d_output(LinearAllocs::hipMalloc, wavefrontSize * sizeof(T) * tileSizes.size());
   LinearAllocGuard<T> output(LinearAllocs::malloc, d_output.size_bytes());
+  LinearAllocGuard<AggregationType> d_aggType(LinearAllocs::hipMalloc, sizeof(AggregationType));
   std::mt19937_64 gen(Catch::rngSeed());
   // for float16, we generate any random unsigned short, but cap the exponent later on
   // to keep it in the range (-8.0..8.0) (just to avoid overflows)
@@ -84,15 +85,16 @@ void runReduce(hiprtcProgram& prog) {
   T b = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::max() : 1023;
   distribution dist(a, b);
 
+  HIP_CHECK(hipMemcpy(d_aggType.ptr(), &aggType, sizeof(aggType), hipMemcpyHostToDevice));
   genRandomBuffers(d_input, input, dist, gen, wavefrontSize);
-  std::vector<const void*> args = { d_output.ptr(), d_input.ptr() };
+  std::vector<const void*> args = { d_output.ptr(), d_input.ptr(), d_aggType.ptr() };
   std::size_t sizeBytes = args.size() * sizeof(void*);
   void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, args.data(), HIP_LAUNCH_PARAM_BUFFER_SIZE, &sizeBytes,
                     HIP_LAUNCH_PARAM_END};
   std::vector<char> code;
   size_t codeSize;
   std::string expression =
-      std::string("reduceCoopKernel<") +
+      std::string("aggregationCoopKernel<") +
       functorToString<T, Op>() +
       ", " +
       typeToString<T>() +
@@ -142,10 +144,19 @@ void runReduce(hiprtcProgram& prog) {
       if (tileSize <= wavefrontSize) {
         T expectedByLane[64];
         T expected;
-
+        T result = output.host_ptr()[numTile * wavefrontSize + laneId];
         Op<T> op;
-        expected = calculateExpected(expectedByLane, input.host_ptr(), op, mask, AggregationType::Reduce);
-        REQUIRE(output.host_ptr()[numTile * wavefrontSize + laneId] == expected);
+
+        expected = calculateExpected(expectedByLane, input.host_ptr(), op, mask, aggType);
+
+        if (aggType == AggregationType::Reduce) {
+          REQUIRE(result == expected);
+        } else {
+          for (int laneId = 0; laneId < wavefrontSize; laneId++) {
+            INFO("Lane: " << laneId);
+            REQUIRE(result == expectedByLane[laneId]);
+          }
+        }
       }
     }
 
@@ -154,61 +165,75 @@ void runReduce(hiprtcProgram& prog) {
 }
 
 template <template <typename> class Op, class Type = void>
-void runCoopTestReduceForTypes(hiprtcProgram&, const std::tuple<>) {}
+void runCoopAggregationForTypes(hiprtcProgram&, AggregationType, const std::tuple<>) {}
 
 template <template <typename> class Op, class T, typename... Types>
-void runCoopTestReduceForTypes(hiprtcProgram& prog, const std::tuple<T, Types...>) {
+void runCoopAggregationForTypes(hiprtcProgram& prog, AggregationType aggType, const std::tuple<T, Types...>) {
   std::tuple<Types...> remainingTypes;
 
-  runReduce<T, Op>(prog);
-  runCoopTestReduceForTypes<Op>(prog, remainingTypes);
+  runAggregation<T, Op>(prog, aggType);
+  runCoopAggregationForTypes<Op>(prog, aggType, remainingTypes);
 }
 
 template <template <typename> class Op, typename... Types>
-void runAndCompileTest(const std::tuple<Types...> types) {
+void runAndCompileTest(AggregationType aggType, const std::tuple<Types...> types) {
   std::string kernelStr;
   hiprtcProgram prog;
 
   kernelStr = R"(
     namespace cg = cooperative_groups;
 
+    enum class AggregationType { Reduce, InclusiveScan, ExclusiveScan};
+
     template <template <typename> class Op, class T>
-    __device__ void reduceTiles(T*, const T*, const __hip_internal::index_sequence<>) 
+    __device__ void aggregateTiles(T*,
+                                   const T*,
+                                   AggregationType* aggType,
+                                   const __hip_internal::index_sequence<>)
     {
     }
 
-    // run reduce for a specific type and for different tile sizes as a variadic template parameter
+    // run aggregation for a specific type and for different tile sizes as a variadic template parameter
     // @output the result, per lane
     template <template <typename> class Op, class T, size_t TileSize, size_t... TileSizes>
-    __device__ void reduceTiles(T* output, const T* input, const __hip_internal::index_sequence<TileSize, TileSizes...>) 
+    __device__ void aggregateTiles(T* output,
+                                   const T* input,
+                                   AggregationType* aggType,
+                                   const __hip_internal::index_sequence<TileSize, TileSizes...>)
     {
       const __hip_internal::index_sequence<TileSizes...> remainingTiles;
       cg::thread_block group = cg::this_thread_block();
       auto tile = cg::tiled_partition<TileSize>(group);
       Op<T> op;
 
-      output[threadIdx.x] = cg::reduce(tile, input[threadIdx.x], op);
-      reduceTiles<Op, T>(output + warpSize, input, remainingTiles);
+      if (*aggType == AggregationType::Reduce) {
+        output[threadIdx.x] = cg::reduce(tile, input[threadIdx.x], op);
+      } else if (*aggType == AggregationType::InclusiveScan) {
+        output[threadIdx.x] = cg::inclusive_scan(tile, input[threadIdx.x], op);
+      } else if (*aggType == AggregationType::ExclusiveScan) {
+        output[threadIdx.x] = cg::exclusive_scan(tile, input[threadIdx.x], op);
+      }
+      aggregateTiles<Op, T>(output + warpSize, input, aggType, remainingTiles);
     }
 
     // @output will receive a different result per tile size
     template <template <typename> class Op, class T, int WarpSize>
-    __global__ void reduceCoopKernel(T* output, const T* input)
+    __global__ void aggregationCoopKernel(T* output, const T* input, AggregationType* aggType)
     {
       if constexpr (WarpSize <= 32) {
         __hip_internal::index_sequence<1, 2, 4, 8, 16, 32> tileSizes;
-        reduceTiles<Op, T>(output, input, tileSizes);
+        aggregateTiles<Op, T>(output, input, aggType, tileSizes);
       } else {
         __hip_internal::index_sequence<1, 2, 4, 8, 16, 32, 64> tileSizes;
-        reduceTiles<Op, T>(output, input, tileSizes);
+        aggregateTiles<Op, T>(output, input, aggType, tileSizes);
       }
     }
   )";
 
   HIPRTC_CHECK(
-      hiprtcCreateProgram(&prog, kernelStr.c_str(), "coop_reduce.hip", 0, nullptr, nullptr));
+      hiprtcCreateProgram(&prog, kernelStr.c_str(), "coop_aggregation.hip", 0, nullptr, nullptr));
   compileProgram<Op>(prog, types);
-  runCoopTestReduceForTypes<Op>(prog, types);
+  runCoopAggregationForTypes<Op>(prog, aggType, types);
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
 }
 
@@ -218,26 +243,26 @@ HIP_TEST_CASE(Unit_Rtc_CoopReduce)
   const std::tuple<int, unsigned int, long long, unsigned long long> integralTypes;
 
   SECTION("add") {
-    runAndCompileTest<cooperative_groups::plus>(allTypes);
+    runAndCompileTest<cooperative_groups::plus>(AggregationType::Reduce, allTypes);
   }
 
   SECTION("less") {
-    runAndCompileTest<cooperative_groups::less>(allTypes);
+    runAndCompileTest<cooperative_groups::less>(AggregationType::Reduce, allTypes);
   }
 
   SECTION("greater") {
-    runAndCompileTest<cooperative_groups::greater>(allTypes);
+    runAndCompileTest<cooperative_groups::greater>(AggregationType::Reduce, allTypes);
   }
 
   SECTION("and") {
-    runAndCompileTest<cooperative_groups::bit_and>(integralTypes);
+    runAndCompileTest<cooperative_groups::bit_and>(AggregationType::Reduce, integralTypes);
   }
 
   SECTION("or") {
-    runAndCompileTest<cooperative_groups::bit_or>(integralTypes);
+    runAndCompileTest<cooperative_groups::bit_or>(AggregationType::Reduce, integralTypes);
   }
 
   SECTION("xor") {
-    runAndCompileTest<cooperative_groups::bit_xor>(integralTypes);
+    runAndCompileTest<cooperative_groups::bit_xor>(AggregationType::Reduce, integralTypes);
   }
 }
