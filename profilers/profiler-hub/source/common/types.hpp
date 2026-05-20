@@ -1,8 +1,11 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#pragma once
+
 #include <cstddef>
 #include <functional>
+#include <optional>
 #include <string>
 
 #include "profiler-hub/writer_types.hpp"
