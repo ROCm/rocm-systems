@@ -243,6 +243,11 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
   target_link_libraries(${_dev_target} PRIVATE rccl_device_defs)
 
   add_dependencies(${_dev_target} hipify_all)
+  if(ENABLE_ROCSHMEM AND TARGET rocshmem_static)
+    # rocSHMEM headers land in ext/rocshmem/include only after ExternalProject
+    # completes; ensure they are installed before device kernels start compiling.
+    add_dependencies(${_dev_target} rocshmem_static)
+  endif()
 
   # =========================================================================
   # Link step: driver --link mode produces device.elf
@@ -287,6 +292,23 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
   file(GENERATE OUTPUT "${_link_rsp}"
     CONTENT "$<JOIN:$<TARGET_OBJECTS:${_dev_target}>,\n>\n")
 
+  # When rocSHMEM is enabled, pass the per-arch device bitcode to the driver.
+  # rocSHMEM device API symbols have hidden visibility and must be statically
+  # present in the device ELF — they cannot be imported from a shared library.
+  set(_rocshmem_bitcode_arg "")
+  set(_rocshmem_link_depends "")
+  if(ENABLE_ROCSHMEM AND ROCSHMEM_INSTALL_DIR)
+    set(_rocshmem_bc "${ROCSHMEM_INSTALL_DIR}/lib/librocshmem_device_${DL_GPU_TARGET}.bc")
+    set(_rocshmem_bitcode_arg "--rocshmem-bitcode=${_rocshmem_bc}")
+    # Do NOT add _rocshmem_bc to DEPENDS: rocSHMEM only supports a subset of
+    # GPU_TARGETS (e.g. gfx90a, gfx942, gfx950) and the bitcode files don't
+    # exist at cmake configure time (ExternalProject).  The Python driver checks
+    # existence at build time and skips silently for unsupported arches.
+    if(TARGET rocshmem_static)
+      list(APPEND _rocshmem_link_depends rocshmem_static)
+    endif()
+  endif()
+
   add_custom_command(
     OUTPUT  ${ARCH_DEVICE_ELF}
     COMMAND ${CMAKE_RCCLDEV_COMPILER}
@@ -295,13 +317,14 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
       --clang=${DL_CLANG}
       ${DL_HIP_COMPILER_FLAGS}
       --dispatcher=${HIPIFY_DIR}/src/device/common.cu.cpp
+      ${_rocshmem_bitcode_arg}
       ${_link_def_flags}
       ${_link_inc_flags}
       ${DL_OPT_FLAGS}
       -std=c++17
       -o ${ARCH_DEVICE_ELF}
       @${_link_rsp}
-    DEPENDS ${_dev_target} ${HIPIFY_DIR}/src/device/common.cu.cpp
+    DEPENDS ${_dev_target} ${HIPIFY_DIR}/src/device/common.cu.cpp ${_rocshmem_link_depends}
     COMMENT "DL [${DL_GPU_TARGET}] link: device.elf"
     VERBATIM
     COMMAND_EXPAND_LISTS
@@ -476,6 +499,32 @@ add_custom_command(
 )
 
 # ===========================================================================
+# dda_all_reduce_ipc.cu.cpp: contains device kernels and kernel launches.
+# Like collectives.cc, it cannot be built with --offload-host-only on the
+# main rccl target or __hip_fatbin_* stays undefined in librccl.so.
+# ===========================================================================
+set(DDA_ALL_REDUCE_IPC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_all_reduce_ipc.o")
+
+add_custom_command(
+  OUTPUT  ${DDA_ALL_REDUCE_IPC_FAT_OBJ}
+  COMMAND ${DL_CLANG}
+    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
+    ${DL_HIP_COMPILER_FLAGS}
+    -DRCCL_DEVICE_LINKER
+    ${_link_def_flags}
+    ${_host_inc_flags}
+    ${DL_OPT_FLAGS}
+    -std=c++17
+    -fPIC
+    -w
+    -c -o ${DDA_ALL_REDUCE_IPC_FAT_OBJ}
+    ${HIPIFY_DIR}/src/dda_all_reduce_ipc.cu.cpp
+  DEPENDS ${HIPIFY_DIR}/src/dda_all_reduce_ipc.cu.cpp
+  COMMENT "DL compile: dda_all_reduce_ipc.cu.cpp (has device kernels)"
+  VERBATIM
+)
+
+# ===========================================================================
 # Symmetric kernels: per-instantiation device TUs from gensrc/symmetric/.
 # Each instantiation file defines a handful of __global__ ncclSymkDevKernel_*
 # entries. Compiled standalone as multi-arch fat objects, mirroring onerank.o.
@@ -526,7 +575,7 @@ endif()
 # Top-level target
 # ===========================================================================
 add_custom_target(device_linker_build ALL
-  DEPENDS ${COMMON_FAT_OBJ} ${ONERANK_FAT_OBJ} ${COLLECTIVES_FAT_OBJ} ${SYM_FAT_OBJS}
+  DEPENDS ${COMMON_FAT_OBJ} ${ONERANK_FAT_OBJ} ${COLLECTIVES_FAT_OBJ} ${DDA_ALL_REDUCE_IPC_FAT_OBJ} ${SYM_FAT_OBJS}
 )
 add_dependencies(device_linker_build hipify_all)
 
@@ -534,6 +583,7 @@ set(DEVICE_LINKER_OBJECTS
   ${COMMON_FAT_OBJ}
   ${ONERANK_FAT_OBJ}
   ${COLLECTIVES_FAT_OBJ}
+  ${DDA_ALL_REDUCE_IPC_FAT_OBJ}
   ${SYM_FAT_OBJS}
 )
 

@@ -134,7 +134,7 @@ class TestSelectiveRegion(RocprofsysTest):
         self.assert_perfetto(
             result,
             subtest_name="All kernels present",
-            categories=["rocm_kernel_dispatch"],
+            categories=["rocm_hip_stream"],
             pass_regex=[
                 "CodeBlock_A",
                 "CodeBlock_B",
@@ -172,7 +172,7 @@ class TestSelectiveRegion(RocprofsysTest):
         self.assert_perfetto(
             result,
             subtest_name="Region1 filtered kernels",
-            categories=["rocm_kernel_dispatch"],
+            categories=["rocm_hip_stream"],
             pass_regex=["CodeBlock_B", "CodeBlock_C", "CodeBlock_D", "CodeBlock_F"],
             fail_regex=["CodeBlock_A", "CodeBlock_E", "CodeBlock_G"],
         )
@@ -204,7 +204,7 @@ class TestSelectiveRegion(RocprofsysTest):
         self.assert_perfetto(
             result,
             subtest_name="Region2+3 filtered kernels",
-            categories=["rocm_kernel_dispatch"],
+            categories=["rocm_hip_stream"],
             pass_regex=["CodeBlock_C", "CodeBlock_E"],
             fail_regex=[
                 "CodeBlock_A",
@@ -425,7 +425,7 @@ class TestSelectiveRegionNoMarker(RocprofsysTest):
         self.assert_perfetto(
             result,
             subtest_name="Region1 filtered kernels (no marker_api)",
-            categories=["rocm_kernel_dispatch"],
+            categories=["rocm_hip_stream"],
             pass_regex=["CodeBlock_B", "CodeBlock_C", "CodeBlock_D", "CodeBlock_F"],
             fail_regex=["CodeBlock_A", "CodeBlock_E", "CodeBlock_G"],
         )

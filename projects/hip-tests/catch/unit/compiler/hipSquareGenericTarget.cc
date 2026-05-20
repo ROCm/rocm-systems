@@ -24,8 +24,7 @@ HIP_TEST_CASE(Unit_test_generic_target_in_compressed_fatbin) {
 HIP_TEST_CASE(Unit_test_generic_target_in_regular_fatbin) {
 #endif
   if (!isGenericTargetSupported()) {
-    HipTest::HIP_SKIP_TEST("generic target is not supported on this device.");
-    return;
+    HIP_SKIP_TEST("generic target is not supported on this device.");
   }
   float *A_d, *C_d;
   float *A_h, *C_h;

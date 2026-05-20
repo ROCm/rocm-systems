@@ -84,14 +84,12 @@ perfetto_counter_track<Tp>::emplace(size_t _idx, const std::string& _v,
     auto& _name_data  = get_data().first[_idx];
     auto& _track_data = get_data().second[_idx];
     std::vector<std::tuple<std::string, const char*, bool>> _missing = {};
-    if(config::get_is_continuous_integration())
+
+    for(const auto& itr : _name_data)
     {
-        for(const auto& itr : _name_data)
-        {
-            _missing.emplace_back(std::make_tuple(*itr, itr->c_str(), false));
-            // TODO: _missing.emplace_back(*itr, itr->c_str(), false);
-        }
+        _missing.emplace_back(*itr, itr->c_str(), false);
     }
+
     auto        _index     = _track_data.size();
     auto&       _name      = _name_data.emplace_back(std::make_unique<std::string>(_v));
     const char* _name_cstr = _name->c_str();
@@ -107,40 +105,37 @@ perfetto_counter_track<Tp>::emplace(size_t _idx, const std::string& _v,
             .set_category(_category)
             .set_unit_multiplier(_mult)
             .set_is_incremental(_incr));
-    if(config::get_is_continuous_integration())
+
+    for(auto& itr : _missing)
     {
-        for(auto& itr : _missing)
+        const char* citr = std::get<1>(itr);
+        for(const auto& ditr : _name_data)
         {
-            const char* citr = std::get<1>(itr);
-            for(const auto& ditr : _name_data)
+            if(citr == ditr->c_str() && strcmp(citr, ditr->c_str()) == 0)
             {
-                if(citr == ditr->c_str() && strcmp(citr, ditr->c_str()) == 0)
-                {
-                    std::get<2>(itr) = true;
-                    break;
-                }
+                std::get<2>(itr) = true;
+                break;
             }
-            if(!std::get<2>(itr))
-            {
-                std::set<void*> _prev = {};
-                std::set<void*> _curr = {};
-                for(const auto& eitr : _missing)
-                    _prev.emplace(
-                        static_cast<void*>(const_cast<char*>(std::get<1>(eitr))));
-                for(const auto& eitr : _name_data)
-                    _curr.emplace(static_cast<void*>(const_cast<char*>(eitr->c_str())));
-                std::stringstream _pss{};
-                for(auto&& eitr : _prev)
-                    _pss << " " << std::hex << std::setw(12) << std::left << eitr;
-                std::stringstream _css{};
-                for(auto&& eitr : _curr)
-                    _css << " " << std::hex << std::setw(12) << std::left << eitr;
-                throw std::runtime_error(fmt::format(
-                    "perfetto_counter_track emplace method for '{}' ({:p}) "
-                    "invalidated C-string '{}' ({p}).\nprevious: {}\ncurrent: {}\n",
-                    _v, (void*) _name->c_str(), std::get<0>(itr),
-                    (void*) std::get<0>(itr).c_str(), _pss.str(), _css.str()));
-            }
+        }
+        if(!std::get<2>(itr))
+        {
+            std::set<void*> _prev = {};
+            std::set<void*> _curr = {};
+            for(const auto& eitr : _missing)
+                _prev.emplace(static_cast<void*>(const_cast<char*>(std::get<1>(eitr))));
+            for(const auto& eitr : _name_data)
+                _curr.emplace(static_cast<void*>(const_cast<char*>(eitr->c_str())));
+            std::stringstream _pss{};
+            for(auto&& eitr : _prev)
+                _pss << " " << std::hex << std::setw(12) << std::left << eitr;
+            std::stringstream _css{};
+            for(auto&& eitr : _curr)
+                _css << " " << std::hex << std::setw(12) << std::left << eitr;
+            throw std::runtime_error(fmt::format(
+                "perfetto_counter_track emplace method for '{}' ({:p}) "
+                "invalidated C-string '{}' ({p}).\nprevious: {}\ncurrent: {}\n",
+                _v, (void*) _name->c_str(), std::get<0>(itr),
+                (void*) std::get<0>(itr).c_str(), _pss.str(), _css.str()));
         }
     }
     return _index;

@@ -222,7 +222,7 @@ void Reporter::writeFile() {
     _out << "numCycle,";
     _out << "collective,";
 #ifdef MPI_SUPPORT
-    _out << "ranks,rankspernode,gpusperrank,";
+    _out << "nodes,ranks,ranksPerNode,gpusPerRank,";
 #else
     _out << "gpus,";
 #endif
@@ -1447,7 +1447,10 @@ testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff, s
   else {
     // ROCM-2696:HIP_VERSION check added because ncclMemAlloc relies on hipMemRetainAllocationHandle, which had a bug
     // in older HIP versions that could cause use-after-free or segfaults due to premature allocation release.
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0) && HIP_VERSION >= 71260540
+    // The ROCm 7.0.2.x backport (HIP_VERSION in [70051831, 70060000)) carries the same hipMemRetainAllocationHandle
+    // fix, so extend the guard to cover that range as well.
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0) && \
+    (HIP_VERSION >= 71260540 || (HIP_VERSION >= 70051831 && HIP_VERSION < 70060000))
     NCCLCHECK(ncclMemAlloc(sendbuff, nbytes));
     NCCLCHECK(ncclMemAlloc(recvbuff, nbytes));
     if (bias) NCCLCHECK(ncclMemAlloc(bias, nbytes));
@@ -1963,6 +1966,13 @@ testResult_t run() {
   for (int i=0; i<nGpus*nThreads; i++) {
     gpus[i] = ((gpu0 != -1 ? gpu0 : localRank*nThreads*nGpus) + i)%numDevices;
     CUDACHECK(cudaSetDevice(gpus[i]));
+    if (parallel_init) {
+      if (test_bias) {
+        TESTCHECK(AllocateBuffs(sendbuffs.data()+i, sendBytes, recvbuffs.data()+i, recvBytes, expected.data()+i, (size_t)maxBytes, bias.data()+i));
+      } else {
+        TESTCHECK(AllocateBuffs(sendbuffs.data()+i, sendBytes, recvbuffs.data()+i, recvBytes, expected.data()+i, (size_t)maxBytes, NULL));
+      }
+    }
     if (streamnull) {
       streams[i] = NULL;
     }

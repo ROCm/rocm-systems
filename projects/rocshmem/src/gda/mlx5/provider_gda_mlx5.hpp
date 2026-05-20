@@ -304,7 +304,6 @@ struct gda_mlx5_device_sq : public gda_mlx5_device_queue<gda_mlx5_wqe> {
 struct mlx5_devx_qp {
   ibv_context*      ctx;
   struct ibv_pd*    pd;
-  struct ibv_ah*    ah;
   mlx5dv_devx_obj*  devx_cq_obj;
   mlx5dv_devx_obj*  devx_qp_obj;
   mlx5dv_devx_uar*  uar;

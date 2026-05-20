@@ -9,6 +9,7 @@ This directory contains example applications demonstrating various profiling sce
 | Example | Description | Dependencies |
 | --------- | ------------- | -------------- |
 | [transpose](transpose/) | Tiled matrix transpose on GPU with multi-threaded stream execution | HIP |
+| [unified-memory](unified-memory/) | Managed-memory workload that triggers KFD page fault and migration events and emits unified-memory profiling reports | HIP, XNACK-capable AMD GPU |
 | [scratch-memory](scratch-memory/) | GPU scratch memory allocation stress test across primary and overflow slots | HIP, HSA |
 | [sdma_test](sdma_test/) | SDMA engine bandwidth benchmark for H2D, D2D, and D2H transfers | HIP |
 | [transferBench](transferBench/) | All-to-all transfer benchmark across CPU, GPU, SDMA, and NIC executors | HIP, HSA |
@@ -69,10 +70,11 @@ This directory contains example applications demonstrating various profiling sce
 ## Building All Examples
 
 - The examples are built as part of the `rocprofiler-systems` CMake project.
-- There is an option to build them also as a **standalone** applications or as a part of **examples suite**
-- The following commands will focus on a building a whole **examples suite**:
+- They can also be built as **standalone** applications or as part of the full
+  **examples suite**.
+- The following commands build the full **examples suite**.
 
-- From `examples` directory run:
+From the `examples` directory run:
 
 ```bash
 cmake -B <build_dir> \
@@ -83,7 +85,7 @@ cmake -B <build_dir> \
 cmake --build <build_dir> --parallel
 ```
 
-- Or from the repository root:
+Or from the repository root:
 
 ```bash
 cmake -B <build_dir> \
@@ -93,7 +95,7 @@ cmake -B <build_dir> \
 cmake --build <build_dir> --parallel
 ```
 
-- Individual examples can be built by specifying the target:
+Individual examples can be built by specifying the target:
 
 ```bash
 cmake --build <build_dir> --target <example_name>

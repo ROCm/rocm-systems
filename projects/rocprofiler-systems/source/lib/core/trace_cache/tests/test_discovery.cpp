@@ -10,12 +10,14 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace rocprofsys::trace_cache::discovery
 {
