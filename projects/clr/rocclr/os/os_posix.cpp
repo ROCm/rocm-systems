@@ -50,11 +50,20 @@
 namespace amd {
 
 namespace {
-thread_local std::vector<uint64_t> runtime_set_affinity_mask;
-thread_local bool runtime_set_affinity_mask_valid = false;
-thread_local uint32_t runtime_set_affinity_node = static_cast<uint32_t>(-1);
-thread_local std::vector<uint64_t> original_affinity_mask;
-thread_local bool original_affinity_mask_valid = false;
+struct ThreadAffinityState {
+  std::vector<uint64_t> runtime_set_affinity_mask;
+  bool runtime_set_affinity_mask_valid = false;
+  uint32_t runtime_set_affinity_node = static_cast<uint32_t>(-1);
+  std::vector<uint64_t> original_affinity_mask;
+  bool original_affinity_mask_valid = false;
+};
+
+ThreadAffinityState& GetThreadAffinityState() {
+  // Runtime teardown can run after non-trivial TLS destructors at process exit.
+  // Keep the per-thread vectors alive so affinity reset never observes destroyed TLS storage.
+  thread_local ThreadAffinityState* state = new ThreadAffinityState();
+  return *state;
+}
 
 bool GetCurrentThreadAffinity(std::vector<uint64_t>* affinity) {
   const uint32_t size = CPU_ALLOC_SIZE(amd::Os::processorCount());
@@ -1148,7 +1157,9 @@ bool NumaNode::SchedSetAffinity() {
 
 // ================================================================================================
 bool NumaNode::SchedSetAffinityIfAllowed() {
-  if (runtime_set_affinity_mask_valid && runtime_set_affinity_node == node_index_) {
+  ThreadAffinityState& affinity_state = GetThreadAffinityState();
+  if (affinity_state.runtime_set_affinity_mask_valid &&
+      affinity_state.runtime_set_affinity_node == node_index_) {
     return true;
   }
 
@@ -1158,32 +1169,35 @@ bool NumaNode::SchedSetAffinityIfAllowed() {
   }
 
   const bool current_mask_is_runtime_set =
-      runtime_set_affinity_mask_valid &&
-      IsSameAffinity(current_affinity, runtime_set_affinity_mask);
+      affinity_state.runtime_set_affinity_mask_valid &&
+      IsSameAffinity(current_affinity, affinity_state.runtime_set_affinity_mask);
   if (!current_mask_is_runtime_set && !IsUnrestrictedAffinity(current_affinity)) {
     // Respect application, launcher, or cpuset affinity masks.
     return false;
   }
 
-  if (!original_affinity_mask_valid) {
-    original_affinity_mask = current_affinity;
-    original_affinity_mask_valid = true;
+  if (!affinity_state.original_affinity_mask_valid) {
+    affinity_state.original_affinity_mask = current_affinity;
+    affinity_state.original_affinity_mask_valid = true;
   }
 
   if (!SchedSetAffinity()) {
     return false;
   }
 
-  runtime_set_affinity_mask_valid = GetCurrentThreadAffinity(&runtime_set_affinity_mask);
-  if (runtime_set_affinity_mask_valid) {
-    runtime_set_affinity_node = node_index_;
+  affinity_state.runtime_set_affinity_mask_valid =
+      GetCurrentThreadAffinity(&affinity_state.runtime_set_affinity_mask);
+  if (affinity_state.runtime_set_affinity_mask_valid) {
+    affinity_state.runtime_set_affinity_node = node_index_;
   }
-  return runtime_set_affinity_mask_valid;
+  return affinity_state.runtime_set_affinity_mask_valid;
 }
 
 // ================================================================================================
 bool resetThreadAffinity() {
-  if (!runtime_set_affinity_mask_valid || !original_affinity_mask_valid) {
+  ThreadAffinityState& affinity_state = GetThreadAffinityState();
+  if (!affinity_state.runtime_set_affinity_mask_valid ||
+      !affinity_state.original_affinity_mask_valid) {
     return false;
   }
 
@@ -1192,22 +1206,22 @@ bool resetThreadAffinity() {
     return false;
   }
 
-  if (!IsSameAffinity(current_affinity, runtime_set_affinity_mask)) {
+  if (!IsSameAffinity(current_affinity, affinity_state.runtime_set_affinity_mask)) {
     // The application changed affinity after ROCclr. Leave it intact.
-    runtime_set_affinity_mask_valid = false;
-    runtime_set_affinity_node = static_cast<uint32_t>(-1);
-    original_affinity_mask_valid = false;
-    original_affinity_mask.clear();
-    runtime_set_affinity_mask.clear();
+    affinity_state.runtime_set_affinity_mask_valid = false;
+    affinity_state.runtime_set_affinity_node = static_cast<uint32_t>(-1);
+    affinity_state.original_affinity_mask_valid = false;
+    affinity_state.original_affinity_mask.clear();
+    affinity_state.runtime_set_affinity_mask.clear();
     return false;
   }
 
-  const bool restored = SetCurrentThreadAffinity(original_affinity_mask);
-  runtime_set_affinity_mask_valid = false;
-  runtime_set_affinity_node = static_cast<uint32_t>(-1);
-  original_affinity_mask_valid = false;
-  original_affinity_mask.clear();
-  runtime_set_affinity_mask.clear();
+  const bool restored = SetCurrentThreadAffinity(affinity_state.original_affinity_mask);
+  affinity_state.runtime_set_affinity_mask_valid = false;
+  affinity_state.runtime_set_affinity_node = static_cast<uint32_t>(-1);
+  affinity_state.original_affinity_mask_valid = false;
+  affinity_state.original_affinity_mask.clear();
+  affinity_state.runtime_set_affinity_mask.clear();
   return restored;
 }
 }  // namespace numa
