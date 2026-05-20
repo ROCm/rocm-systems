@@ -684,19 +684,14 @@ WriteInterceptor(const void* packets,
                 get_core_table()->hsa_signal_store_screlease_fn(completion_signal, 0);
             }
 
-            // Release the application's completion signal after profiler work.
-            // Hardware PMC (after_krn): wait on interrupt so the full chain completes first.
-            // Agent-info / constant counters: no dep_signal (matches legacy behavior; dep causes
-            // HIP graph deadlock when the graph already owns the completion signal).
+            // Release the application's completion signal after profiler packets (ordering
+            // above). Do not set dep_signal on the app barrier: HIP graphs already own the
+            // completion signal and an explicit dep on interrupt_signal deadlocks pmc_sq.
             if(existing_completion_signal)
             {
                 auto barrier   = hsa_barrier_and_packet_t{};
                 barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
                 barrier.header |= (1 << HSA_PACKET_HEADER_BARRIER);
-                if(injected_end_pkt)
-                {
-                    barrier.dep_signal[0] = interrupt_signal;
-                }
                 barrier.completion_signal = original_completion_signal;
                 transformed_packets.emplace_back(barrier);
             }
