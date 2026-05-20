@@ -89,17 +89,16 @@ class MetricEvaluator:
                     and (pd.isna(eval_result) or np.isinf(eval_result))
                 )
             ):
-                # Skip warning when None is explicit, or a RuntimeWarning already
-                # explained the NA (e.g. divide-by-zero)
-                if "None" not in expr and not caught:
+                # Skip warning when None is explicit or a RuntimeWarning
+                # already explained the NA
+                if "None" in expr:
+                    console_debug(
+                        f"Expression '{expr}' evaluated to None - explicitly specified."
+                    )
+                elif not caught:
                     console_warning(
                         f"Could not evaluate expression '{expr}' - likely "
                         "due to missing counter data."
-                    )
-                else:
-                    console_debug(
-                        f"Expression '{expr}' evaluated to None - likely "
-                        "explicitly specified."
                     )
                 return "N/A"
             else:

@@ -218,13 +218,13 @@ def test_evaluate_divide_by_zero_silenced_and_logged_at_debug():
     sys_info = {}
 
     cases = [
-        # x/0 yields scalar inf; evaluate() returns it as-is
-        ("to_sum(raw_pmc_df['Counter1']) / 0", float("inf")),
-        # 0/0 yields scalar NaN; evaluate() returns None
-        ("(to_sum(raw_pmc_df['Counter1']) * 0) / 0", None),
+        # x/0 yields scalar inf; evaluate() collapses to None
+        "to_sum(raw_pmc_df['Counter1']) / 0",
+        # 0/0 yields scalar NaN; evaluate() collapses to None
+        "(to_sum(raw_pmc_df['Counter1']) * 0) / 0",
     ]
 
-    for expr, expected in cases:
+    for expr in cases:
         with (
             patch(
                 "rocprof_compute_analyze.analysis_db.console_warning"
@@ -239,10 +239,7 @@ def test_evaluate_divide_by_zero_silenced_and_logged_at_debug():
                 parse=False,
             )
 
-        if expected is None:
-            assert result is None, f"Expected None for '{expr}', got {result}"
-        else:
-            assert result == expected, f"Expected {expected} for '{expr}', got {result}"
+        assert result is None, f"Expected None for '{expr}', got {result}"
 
         mock_warning.assert_not_called()
         debug_msgs = [str(call) for call in mock_debug.call_args_list]

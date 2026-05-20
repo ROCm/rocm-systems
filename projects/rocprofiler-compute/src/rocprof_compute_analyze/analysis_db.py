@@ -527,24 +527,32 @@ class db_analysis(OmniAnalyze_Base):
                 )
             # RuntimeWarnings (e.g. divide-by-zero) are surfaced only under --verbose
             for w in caught:
-                console_debug(f"RuntimeWarning evaluating {name}: {w.message}")
+                console_debug(
+                    f"RuntimeWarning evaluating {name}: {value} - {w.message}"
+                )
 
             # eval_result can be None if expression has None explicitly specified
             # Do not give warning for this case and simply return None
             if eval_result is None:
                 return None
 
-            # Only return None for scalar NA values (NaN, pd.NA)
+            # Only return None for scalar NA values (NaN, pd.NA, +/-inf).
             # For vectors/Series, return as-is to preserve shape for downstream
             # operations. Note: pd.NA is not detected as scalar by np.isscalar()
             is_scalar_na = eval_result is pd.NA or (
-                np.isscalar(eval_result) and pd.isna(eval_result)
+                np.isscalar(eval_result)
+                and (pd.isna(eval_result) or np.isinf(eval_result))
             )
 
             if is_scalar_na:
-                # Only warn if expression doesn't have "None" as an explicit fallback
-                # and no RuntimeWarning was emitted (e.g. divide-by-zero)
-                if "None" not in value and not caught:
+                # Skip warning when None is explicit or a RuntimeWarning
+                # already explained the NA
+                if "None" in value:
+                    console_debug(
+                        f"Expression for {name}: {value} evaluated to "
+                        "None - explicitly specified."
+                    )
+                elif not caught:
                     console_warning(
                         f"Could not evaluate expression for {name}: {value} - "
                         "likely due to missing counter data."
