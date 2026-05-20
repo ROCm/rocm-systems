@@ -1,6 +1,6 @@
 {
   "archs": {
-    "gfx1151": {
+    "gfx115x": {
       "delta_hash": null,
       "files": {
         "0000_top_stats.yaml": "e20b23bcf3d5d5f4d1fb30cb171850f3",
