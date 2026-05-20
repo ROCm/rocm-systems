@@ -121,6 +121,7 @@ class TestRankFilter(RocprofsysTest):
             launcher="mpi",
             num_procs=NUM_PROCS,
         )
+        self.assert_regex(result)
         assert (
             banner_count(result.test_output) == 3
         ), f"Expected 3 banners, got {banner_count(result.test_output)}"
@@ -145,6 +146,7 @@ class TestRankFilter(RocprofsysTest):
             launcher="mpi",
             num_procs=NUM_PROCS,
         )
+        self.assert_regex(result)
         assert (
             banner_count(result.test_output) == 1
         ), f"Expected 1 banner, got {banner_count(result.test_output)}"
@@ -169,6 +171,7 @@ class TestRankFilter(RocprofsysTest):
             launcher="mpi",
             num_procs=NUM_PROCS,
         )
+        self.assert_regex(result)
         assert banner_count(result.test_output) == 2, (
             f"Expected 2 banners, got " f"{banner_count(result.test_output)}"
         )
@@ -199,6 +202,7 @@ class TestRankFilter(RocprofsysTest):
             launcher="mpi",
             num_procs=NUM_PROCS,
         )
+        self.assert_regex(result)
         assert banner_count(result.test_output) == 0, (
             f"Expected 0 banners, got " f"{banner_count(result.test_output)}"
         )
