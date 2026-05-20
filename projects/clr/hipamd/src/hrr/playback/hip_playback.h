@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <atomic>
+#include <mutex>
 #include <shared_mutex>
 
 #include "hrr_api_args.h"  // for HRR_API_COUNT, hrr_api_id_t

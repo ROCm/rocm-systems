@@ -160,7 +160,7 @@ hipModule_t PlaybackContext::load_module(uint64_t hash_lo, uint64_t hash_hi) {
     std::unique_lock lk(map_mutex);
     auto [it, inserted] = co_modules.emplace(hex, mod);
     if (!inserted) {
-        hipModuleUnload(mod);
+        (void)hipModuleUnload(mod);
         return it->second;
     }
     if (verbose)
@@ -250,7 +250,7 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl) 
         }
         if (!func && (co_hash_lo || co_hash_hi)) {
             hipModule_t mod = ctx.load_module(co_hash_lo, co_hash_hi);
-            if (mod) hipModuleGetFunction(&func, mod, kernel_name.c_str());
+            if (mod) (void)hipModuleGetFunction(&func, mod, kernel_name.c_str());
         }
         if (!func) {
             fprintf(stderr, "[HRR] Kernel '%s' not found in any loaded module\n",
@@ -418,7 +418,7 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl) 
 
     if (ctx.sync_after_launch) {
         // Clear any pre-existing error before sync so we get a clean error code.
-        hipGetLastError();
+        (void)hipGetLastError();
         r = hipDeviceSynchronize();
         hipError_t last_r = hipGetLastError();
         if (r == hipSuccess && last_r != hipSuccess) r = last_r;
@@ -504,7 +504,7 @@ hipError_t playback___hipRegisterFatBinary(PlaybackContext& ctx,
         auto [it, inserted] = ctx.co_modules.emplace(hex, mod);
         if (!inserted) {
             // Another thread raced us between the shared_lock check and here — discard ours.
-            hipModuleUnload(mod);
+            (void)hipModuleUnload(mod);
         }
     }
     if (ctx.verbose)
@@ -933,7 +933,7 @@ static hipError_t replay_memcpy_impl(PlaybackContext& ctx,
                 // For async memcpy the stream may not yet have completed — sync it so
                 // all preceding GPU work has finished before reading back.
                 // Synchronous hipMemcpy already guarantees completion; no extra sync needed.
-                if (is_async) hipStreamSynchronize(stream);
+                if (is_async) (void)hipStreamSynchronize(stream);
                 r = hipMemcpy(actual.data(), src_dev, copy_sz, hipMemcpyDeviceToHost);
                 if (r != hipSuccess) {
                     fprintf(stderr, "[HRR] D2H validate: hipMemcpy failed: %d (%s)\n",

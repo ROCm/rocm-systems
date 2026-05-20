@@ -208,6 +208,12 @@ static bool atomic_write_file(const std::string& path,
 
 Hash128 write_blob(const void* data, size_t len) {
   Hash128 h = hash_buffer(data, len);
+  // Writer not open yet (called before hip_capture_init()) — return hash only,
+  // no disk write.  The caller records the hash in the event so the blob can
+  // be written later if needed, but in practice blobs are re-recorded by the
+  // fat-binary sweep in hip_capture_init().
+  if (!g_events_file) return h;
+
   char hex[33];
   hash_hex(h, hex);
   std::string key(hex);  // no prefix — plain blobs

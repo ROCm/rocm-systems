@@ -716,8 +716,11 @@ struct HrrEarlyInstall {
     // the compiler dispatch table.  Installing it here (during DLL static init)
     // can race with compiler-table initialization and cause ModuleInfo()==nullptr
     // leading to hipErrorInvalidDeviceFunction on first kernel launch.
+    //
+    // writer::open() is intentionally NOT called here — Flag::init() has not run
+    // yet so the flag value is unreliable.  The writer is opened in hip_capture_init()
+    // after the runtime is up, before any write_blob() call can occur.
     hip_capture_build_table();
-    if (!hrr_cap::writer::open(out)) return;
     hip_capture_install();
   }
 } g_hrr_early_install;
@@ -725,7 +728,11 @@ struct HrrEarlyInstall {
 
 void hip_capture_init() {
   if (!hip_capture_enabled()) return;
-  if (!g_installed) return;  // early install failed (writer didn't open)
+  if (!g_installed) return;  // early install failed
+
+  // Open the writer now — Flag::init() has run so HIP_HRR_CAPTURE_OUTPUT is valid.
+  // This must happen before the fat-binary sweep below which calls write_blob().
+  if (!hrr_cap::writer::open(hip_capture_output_dir())) return;
 
   // Install compiler dispatch shims now — hip::init() has completed so
   // the compiler dispatch table is fully populated.

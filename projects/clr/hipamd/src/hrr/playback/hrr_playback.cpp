@@ -228,9 +228,9 @@ static hipError_t handle_special(PlaybackContext& ctx, const hrr::Event& ev) {
       if (ev.raw_payload.size() >= sizeof(hrr_args_hipSetDevice)) {
         const auto* a = reinterpret_cast<const hrr_args_hipSetDevice*>(ev.raw_payload.data());
         int dev = a->deviceId;
-        int n = 0; hipGetDeviceCount(&n);
+        int n = 0; (void)hipGetDeviceCount(&n);
         if (dev >= n) dev = 0;
-        hipSetDevice(dev);
+        (void)hipSetDevice(dev);
       }
       return hipSuccess;
     }
@@ -426,7 +426,7 @@ static void replay_thread(PlaybackContext& ctx,
       fprintf(stderr, "[HRR] T%llu [%zu] %s\n",
               (unsigned long long)ev.header().thread_id, i,
               hrr::event_type_name(ev.header().event_type));
-    dispatch_event(ctx, ev, i, log);
+    (void)dispatch_event(ctx, ev, i, log);
   }
 }
 
@@ -529,7 +529,7 @@ static bool run_pass(PlaybackContext& ctx,
       if (log && ctx.verbose)
         fprintf(stderr, "[HRR] Event %zu: %s\n", i,
                 hrr::event_type_name(ev.header().event_type));
-      dispatch_event(ctx, ev, i, log);
+      (void)dispatch_event(ctx, ev, i, log);
     }
   }
 
@@ -725,10 +725,10 @@ int main(int argc, char** argv) {
   printf("[HRR] %s\n", ok ? "PASS" : "FAIL");
 
   // Cleanup
-  for (auto& [rec, entry] : ctx.alloc_map)   hipFree(entry.live_ptr);
-  for (auto& [rec, str]   : ctx.stream_map)  hipStreamDestroy(str);
-  for (auto& [rec, ev2]   : ctx.event_map)   hipEventDestroy(ev2);
-  for (hipEvent_t e : ctx.owned_timing_events) hipEventDestroy(e);
+  for (auto& [rec, entry] : ctx.alloc_map)   (void)hipFree(entry.live_ptr);
+  for (auto& [rec, str]   : ctx.stream_map)  (void)hipStreamDestroy(str);
+  for (auto& [rec, ev2]   : ctx.event_map)   (void)hipEventDestroy(ev2);
+  for (hipEvent_t e : ctx.owned_timing_events) (void)hipEventDestroy(e);
 
   // Unload all unique hipModule_t values across both maps.
   // co_modules holds modules loaded from code objects (by hash).
@@ -739,7 +739,7 @@ int main(int argc, char** argv) {
     std::unordered_set<hipModule_t> mods;
     for (auto& [hex, mod] : ctx.co_modules) mods.insert(mod);
     for (auto& [rec, mod] : ctx.module_map) mods.insert(mod);
-    for (hipModule_t m : mods) hipModuleUnload(m);
+    for (hipModule_t m : mods) (void)hipModuleUnload(m);
   }
 
   return ok ? 0 : 1;
