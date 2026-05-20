@@ -19,6 +19,14 @@ executionctx:
     <<: *level_2
   Unit_hipExecutionCtxRecordWait_Blocking:
     <<: *level_2
+  Unit_hipExecutionCtxRecordEvent_ElapsedTime_SingleStream:
+    <<: *level_2
+  Unit_hipExecutionCtxRecordEvent_ElapsedTime_MultiStream:
+    <<: *level_2
+  Unit_hipExecutionCtxRecordWaitEvent_Negative:
+    <<: *level_2
+  Unit_hipExecutionCtxWaitEvent_CrossCtx:
+    <<: *level_2
   Unit_hipExecutionCtxResourceSplit_Sanity:
     <<: *level_2
   Unit_hipExecutionCtxResourceSplit_By_Count_Sanity:
