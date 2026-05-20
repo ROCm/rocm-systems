@@ -6,6 +6,7 @@
 
 #ifndef _NCCL_DEVICE_MEM_BARRIER_H_
 #define _NCCL_DEVICE_MEM_BARRIER_H_
+#include "hip_compat.h"
 #include "impl/core__types.h"
 #include "core_tmp.h"
 
@@ -27,15 +28,9 @@ struct ncclLsaBarrierSession: ncclLsaBarrierSession_internal<Coop> {
 
   ncclLsaBarrierSession(ncclLsaBarrierSession const&) = delete; // Sessions are not copyable
 
-#if __HIP_PLATFORM_AMD__
-  NCCL_DEVICE_INLINE void arrive(Coop, std::memory_order);
-  NCCL_DEVICE_INLINE void wait(Coop, std::memory_order);
-  NCCL_DEVICE_INLINE void sync(Coop, std::memory_order);
-#else
   NCCL_DEVICE_INLINE void arrive(Coop, cuda::memory_order);
   NCCL_DEVICE_INLINE void wait(Coop, cuda::memory_order);
   NCCL_DEVICE_INLINE void sync(Coop, cuda::memory_order);
-#endif
 };
 #endif
 
