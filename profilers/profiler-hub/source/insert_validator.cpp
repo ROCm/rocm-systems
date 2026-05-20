@@ -76,6 +76,18 @@ resolve_optional_key(const Utility& utility, const std::optional<EntityId>& enti
     return { utility.get_primary_key_value_for_entity(entity_id.value()) };
 }
 
+template <typename EntityId>
+const EntityId&
+require_value(const std::optional<EntityId>& entity_id, std::string_view field_name)
+{
+    if(!entity_id.has_value())
+    {
+        throw std::invalid_argument(
+            fmt::format("Required entity id is not set: {}", field_name));
+    }
+    return entity_id.value();
+}
+
 }  // namespace
 
 insert_validator::insert_validator(const std::shared_ptr<entity_registry>& registry)
@@ -218,7 +230,7 @@ insert_validator::resolve_process_key(
     const std::optional<writer_types::process_id_t>& process_id) const
 {
     return m_registry->process_info().get_primary_key_value_for_entity(
-        process_id.value());
+        require_value(process_id, "process_id"));
 }
 
 primary_key_t
@@ -231,14 +243,16 @@ primary_key_t
 insert_validator::resolve_thread_key(
     const std::optional<writer_types::thread_id_t>& thread_id) const
 {
-    return m_registry->thread_info().get_primary_key_value_for_entity(thread_id.value());
+    return m_registry->thread_info().get_primary_key_value_for_entity(
+        require_value(thread_id, "thread_id"));
 }
 
 primary_key_t
 insert_validator::resolve_agent_key(
     const std::optional<writer_types::agent_unique_id_t>& agent_id) const
 {
-    return m_registry->agent_info().get_primary_key_value_for_entity(agent_id.value());
+    return m_registry->agent_info().get_primary_key_value_for_entity(
+        require_value(agent_id, "agent_id"));
 }
 
 primary_key_t
@@ -251,14 +265,16 @@ primary_key_t
 insert_validator::resolve_queue_key(
     const std::optional<writer_types::queue_id_t>& queue_id) const
 {
-    return m_registry->queue_info().get_primary_key_value_for_entity(queue_id.value());
+    return m_registry->queue_info().get_primary_key_value_for_entity(
+        require_value(queue_id, "queue_id"));
 }
 
 primary_key_t
 insert_validator::resolve_stream_key(
     const std::optional<writer_types::stream_id_t>& stream_id) const
 {
-    return m_registry->stream_info().get_primary_key_value_for_entity(stream_id.value());
+    return m_registry->stream_info().get_primary_key_value_for_entity(
+        require_value(stream_id, "stream_id"));
 }
 
 primary_key_t
