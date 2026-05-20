@@ -37,10 +37,17 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM> {
       uint32_t srcLkey = loadConst(&srcMh->lkey);
 
       qp->put_nbi_with_keys((void*)dstAddr, (void*)srcAddr, bytes, peer, wf_info, dstRkey, srcLkey);
+
+      // Track pending WQEs for granular flush
+      uint32_t* pending = loadConst(&rsCtx->pendingWqeCount);
+      if (pending) atomicAdd(&pending[peer], 1u);
     }
 
     if (hasSignal || hasCounter) {
       qp->quiet(wf_info);
+      // After quiet, no more pending WQEs for this peer
+      uint32_t* pending = loadConst(&rsCtx->pendingWqeCount);
+      if (pending) pending[peer] = 0;
     }
 
     if (hasSignal) {
@@ -128,10 +135,14 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ROCSHMEM> {
     using nccl::utility::loadConst;
     ncclGinRocshmemGPUContext* rsCtx = (ncclGinRocshmemGPUContext*)ctx.handle;
     rocshmem::QueuePair** qps = loadConst(&rsCtx->qps);
+    uint32_t* pending = loadConst(&rsCtx->pendingWqeCount);
 #pragma unroll 1
     for (int peer = coop.thread_rank(); peer < ctx.nRanks; peer += coop.size()) {
+      // Skip peers with no pending WQEs (granular flush)
+      if (pending && pending[peer] == 0) continue;
       rocshmem::ActiveWFInfo wf_info(peer, rocshmem::ThreadScope::thread);
       loadConst(qps + peer)->quiet(wf_info);
+      if (pending) pending[peer] = 0;
     }
   }
 };

@@ -48,6 +48,8 @@
 #include "containers/free_list.hpp"
 #include "memory/hip_allocator.hpp"
 
+struct rocshmem_gin_qp_set;
+
 namespace rocshmem {
 
 class GDABackend;
@@ -141,6 +143,8 @@ class ActiveWFInfo {
 class QueuePair {
  public:
   friend GDABackend;
+  // GIN QP factory needs access to set up GPU-side QP state
+  friend struct ::rocshmem_gin_qp_set;
 
   /**
    * @brief Constructor.
