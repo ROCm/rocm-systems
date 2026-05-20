@@ -80,13 +80,20 @@ clock in MHz from profiler system specs.
 Bandwidth and cache rows
 ------------------------
 
-The throughput rows for TCP, GL1, GL2, and SQC use heuristic ceilings (bytes
-per cycle, multiplied by instance count and clock). They are not anchored to a
-single public RDNA 3.5 table, so the percentage of peak reported for these
-rows is indicative rather than exact.
+The throughput rows for GL0 (TCP Cache), GL1, GL2, and SQC use heuristic ceilings that are
+not anchored to a single public RDNA 3.5 table, so the percentage of peak
+reported for these rows is indicative rather than exact. The memory hierarchy
+runs GL0 (TCP Cache) -> GL1 -> GL2 -> system memory via GCEA. Each level's
+ceiling is one peak transfer per cycle, scaled by instance count and
+``$max_sclk``:
 
-For context, the memory hierarchy is GL0 (TCP Cache), then GL1, then GL2, then
-system memory through GCEA and Data Fabric.
+* **GL0 (TCP Cache)**: one 128-byte cacheline per cycle per CU --
+  ``$cu_per_gpu * 128 B/cycle * $max_sclk``
+* **GL1**: one 128-byte request per cycle per GL1C instance -- ``($cu_per_gpu / 8) * 128 B/cycle * $max_sclk``
+* **GL2**: one 128-byte request per cycle per L2 bank --
+  ``$total_l2_chan * 128 B/cycle * $max_sclk``
+* **SQC (scalar data cache and instruction cache)**: one 64-byte TC request per
+  cycle per SQC instance -- ``$sqc_per_gpu * 64 B/cycle * $max_sclk``
 
 .. Note::
    For AMD Instinct accelerators (CDNA-CDNA4), see

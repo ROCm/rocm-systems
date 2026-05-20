@@ -49,6 +49,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Known issues
 
+* On gfx1151, `TCP_REQ_sum` is zero in single-pass counter collection, so the related `GL0` metrics always reports zero. This will be fixed in a future release.
+
+* On gfx1151, `$max_mclk` is not automatically populated in sysinfo, so the related bandwidth metrics may be incorrect. Use `amd-smi` to obtain the maximum memory clock and provide it via `--specs-correction`.
+
 ## ROCm Compute Profiler 3.6.0 for ROCm 7.13.0
 
 ### Added

@@ -1,45 +1,3 @@
-# =============================================================================
-# RDNA3.5 (gfx1151) - System Speed-of-Light
-# Layout aligned with gfx950/0200_system_speed_of_light.yaml (throughput first,
-# then core/memory, then cache hierarchy). RDNA 3.5: FLOP rows use SQ_INSTS_VALU*
-# (aggregate VALU instruction counter-does not differentiate FP16/FP32/FP64).
-# WMMA is a separate ISA path and is not split out here.
-#
-# RDNA 3.5 wavefront model:
-#   - Supports both Wave32 (primary) and Wave64 wavefronts
-#   - Wavefront size is determined per-kernel at compile time
-#   - $wave_size comes from hardware specs (rocminfo); actual kernel wave size may vary
-#   - VALU FLOPs formula: $wave_size * SQ_INSTS_VALU_sum / time
-#
-# Peak theoretical model (per-CU basis):
-#   - FP32 FMA single-issue: 128 FLOPs/CU/cycle = $simd_per_cu(2) * $wave_size(32) * 2 (FMA)
-#   - FP32 VOPD dual-issue: 256 FLOPs/CU/cycle (V_DUAL_ADD_F32 + V_DUAL_MUL_F32)
-#   - FP16 packed FMA single-issue: 256 FLOPs/CU/cycle (2* FP32 due to packed ops)
-#   - FP16 packed VOPD dual-issue: 512 FLOPs/CU/cycle (V_DUAL_*_F16 pairings)
-#   - FP64 FMA: 4 FLOPs/CU/cycle = FP32 FMA / 32 (1/32 rate on RDNA)
-#   - Mixed FP32+FP16 dual-issue: 128+256 = 384 FLOPs/CU/cycle combined
-#
-# $cu_per_gpu = total Compute Unit count from sysinfo (NOT WGP count). On RDNA 3.5,
-# one WGP contains two CUs - CU count ~ 2 * WGP count. Peaks scale with CUs.
-# $max_sclk = shader/engine clock in MHz (rocprofiler system specs).
-#
-# Cache BW peaks: instances * bytes/cycle * $max_sclk (heuristic ceilings).
-#   GL0 (TCP):  $cu_per_gpu * 128 B/cycle         (1 cacheline/cycle/CU)
-#   GL1:        ($cu_per_gpu/8) * 128 B/cycle      (1 req/cycle/GL1C, 8 CUs per GL1C)
-#   GL2:        $total_l2_chan * 128 B/cycle        (1 req/cycle/bank)
-#   SQC:        $sqc_per_gpu * 64 B/cycle          (1 TC req/cycle/SQC, 64B per TC req)
-# TODO(gfx1151 multi-SKU): the GL1 "/8" assumes 8 CUs per SA, which is true for
-# the 32-CU SKU but wrong for 40-CU and 16-CU gfx1151 variants. Proper fix needs
-# $sa_per_se (or num_gl1c) added to MachineSpecs / sysinfo; tracked as follow-up.
-# GL2-Fabric peak: $max_mclk * 4 (LPDDR5X QDR) * $num_hbm_channels * 4 bytes/ch.
-#   Requires $max_mclk populated in sysinfo (use max MEM clock from amd-smi).
-#   Note: $num_hbm_channels is a misnomer here - gfx1151 (Strix Halo) is an APU
-#   that uses LPDDR5X system memory, not HBM. The variable name is shared with
-#   HBM archs; rename to $num_memory_channels deferred to a follow-up PR.
-#
-# Cache: Cache hierarchy: GL0 Cache (TCP) -> GL1 Cache -> GL2 Cache -> System Memory via GCEA
-# =============================================================================
-
 Panel Config:
   id: 200
   title: System Speed-of-Light
@@ -54,8 +12,6 @@ Panel Config:
         peak: Peak
         pop: Pct of Peak
       metric:
-        # --- Throughput (gfx950-style: rates first) ---
-        # Note: RDNA 3.5 counters cannot differentiate FP16/FP32; uses aggregate VALU counter.
         VALU FLOPs:
           value: SUM(SQ_INSTS_VALU_sum * $wave_size) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
@@ -77,7 +33,6 @@ Panel Config:
           peak: ($max_waves_per_cu * $cu_per_gpu)
           pop: ((100 * SUM(SQ_WAVE_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_avr))
             / (($max_waves_per_cu * $cu_per_gpu)))
-        # --- L2 / fabric (EA) ---
         GL2 Cache Hit Rate:
           value: SUM(100 * GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum)
           unit: Percent
@@ -94,7 +49,6 @@ Panel Config:
           unit: Bytes/s
           peak: ($max_mclk * 4 * $num_hbm_channels * 4 * 1e6)
           pop: 100 * SUM((GL2C_MC_WRREQ_sum - GL2C_EA_WRREQ_64B_sum) * 32 + GL2C_EA_WRREQ_64B_sum * 64) / SUM((End_Timestamp - Start_Timestamp) / 1e9) / ($max_mclk * 4 * $num_hbm_channels * 4 * 1e6)
-        # --- LDS ---
         LDS Bank Conflicts:
           value: AVG(SQC_LDS_BANK_CONFLICT)
           unit: Conflicts
@@ -110,8 +64,6 @@ Panel Config:
           unit: Percent
           peak: 100
           pop: SUM(100 * SQ_WAIT_INST_ANY) / SUM(SQ_WAVE_CYCLES)
-        # --- Cache hierarchy: GL0 (L0) -> GL1 (L1) -> GL2 client / SQC ---
-        # BW formulas and counters match 0300_memory_chart.yaml.
         GL0 Cache Hit Rate (TCP Cache):
           value: SUM(100 * (TCP_REQ_sum - TCP_REQ_MISS_sum)) / SUM(TCP_REQ_sum)
           unit: Percent
@@ -120,7 +72,6 @@ Panel Config:
         GL0 Cache BW (TCP Cache):
           value: SUM(TCP_REQ_sum * 64) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
-          # peak: 1 cacheline (128B) per cycle per CU. Note: TCP_REQ_sum = 0 on gfx1151.
           peak: ($cu_per_gpu * 128 * $max_sclk * 1e6)
           pop: 100 * SUM(TCP_REQ_sum * 64) / SUM((End_Timestamp - Start_Timestamp) / 1e9) / ($cu_per_gpu * 128 * $max_sclk * 1e6)
         GL1 Cache Hit Rate:
@@ -129,16 +80,13 @@ Panel Config:
           peak: 100
           pop: SUM(100 * (GL1C_REQ_sum - GL1C_REQ_MISS_sum)) / SUM(GL1C_REQ_sum)
         GL1 Cache Read BW:
-          # Same bins as Memory Chart table 307 (GL1-GL2 read bandwidth).
           value: SUM(GL1C_GL2_REQ_READ_32B_sum*32 + GL1C_GL2_REQ_READ_64B_sum*64 + GL1C_GL2_REQ_READ_128B_sum*128) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
-          # peak: 1 req (128B) per cycle per GL1C instance; $cu_per_gpu/8 = GL1C count.
           peak: (($cu_per_gpu / 8) * 128 * $max_sclk * 1e6)
           pop: 100 * SUM(GL1C_GL2_REQ_READ_32B_sum*32 + GL1C_GL2_REQ_READ_64B_sum*64 + GL1C_GL2_REQ_READ_128B_sum*128) / SUM((End_Timestamp - Start_Timestamp) / 1e9) / (($cu_per_gpu / 8) * 128 * $max_sclk * 1e6)
         GL2 Cache BW:
           value: SUM(GL2C_READ_32_REQ_sum*32 + GL2C_READ_64_REQ_sum*64 + GL2C_READ_128_REQ_sum*128 + GL2C_COMPRESSED_READ_96_REQ_sum*96) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
-          # peak: 1 req (128B) per cycle per L2 bank.
           peak: ($total_l2_chan * 128 * $max_sclk * 1e6)
           pop: 100 * SUM(GL2C_READ_32_REQ_sum*32 + GL2C_READ_64_REQ_sum*64 + GL2C_READ_128_REQ_sum*128 + GL2C_COMPRESSED_READ_96_REQ_sum*96) / SUM((End_Timestamp - Start_Timestamp) / 1e9) / ($total_l2_chan * 128 * $max_sclk * 1e6)
         Scalar Data Cache Hit Rate:
@@ -147,10 +95,8 @@ Panel Config:
           peak: 100
           pop: SUM(100 * SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)
         Scalar Data Cache BW:
-          # Same as Memory Chart table 302 (Icache-GL1 uses sqc_tc_inst; Dcache uses TC data read).
           value: SUM(SQC_TC_DATA_READ_REQ_sum * 128) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
-          # peak: 1 TC req (64B) per cycle per SQC instance.
           peak: ($sqc_per_gpu * 64 * $max_sclk * 1e6)
           pop: 100 * SUM(SQC_TC_DATA_READ_REQ_sum * 128) / SUM((End_Timestamp - Start_Timestamp) / 1e9) / ($sqc_per_gpu * 64 * $max_sclk * 1e6)
         Instruction Cache Hit Rate:
@@ -161,7 +107,6 @@ Panel Config:
         Instruction Cache BW:
           value: SUM(SQC_TC_INST_REQ_sum * 128) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
-          # peak: 1 TC req (64B) per cycle per SQC instance.
           peak: ($sqc_per_gpu * 64 * $max_sclk * 1e6)
           pop: 100 * SUM(SQC_TC_INST_REQ_sum * 128) / SUM((End_Timestamp - Start_Timestamp) / 1e9) / ($sqc_per_gpu * 64 * $max_sclk * 1e6)
 
@@ -194,13 +139,11 @@ Panel Config:
       Read bandwidth between the GL2 cache and the memory fabric/system memory. High
       bandwidth utilization indicates memory-intensive read patterns. This metric helps
       identify when memory bandwidth is a performance bottleneck.
-      Peak: $max_mclk * 4 (LPDDR5X QDR) * $num_hbm_channels * 4 bytes/channel.
       Requires $max_mclk populated in sysinfo (max MEM clock from amd-smi).
     GL2-Fabric Write BW: >-
       Write bandwidth between the GL2 cache and the memory fabric/system memory. High
       values indicate write-intensive workloads. Combined with read bandwidth, this
       shows total memory traffic leaving the GPU caches.
-      Peak: same as GL2-Fabric Read BW (shared memory interface).
     LDS Bank Conflicts: >-
       Number of Local Data Share bank conflicts during execution. Bank conflicts occur
       when multiple work-items in a wavefront access the same LDS bank simultaneously,
@@ -222,7 +165,6 @@ Panel Config:
       Bandwidth of requests to the GL0 vector cache (TCP Cache). This represents the rate
       at which the shader cores are requesting data from the cache hierarchy.
       High bandwidth indicates memory-intensive workloads.
-      Peak: $cu_per_gpu * 128 B/cycle * $max_sclk. Note: TCP_REQ_sum = 0 on gfx1151.
     GL1 Cache Hit Rate: >-
       Percentage of L1 cache (GL1C) requests that hit in cache. GL1C is shared
       across multiple workgroup processors within a shader engine. Higher hit rates
@@ -231,11 +173,9 @@ Panel Config:
       Read bandwidth between L1 (GL1C) and L2 (GL2C) caches. This represents cache
       miss traffic from L1 that must be serviced by L2. Lower values indicate
       better L1 cache efficiency.
-      Peak: ($cu_per_gpu/8) GL1C instances * 128 B/cycle * $max_sclk.
     GL2 Cache BW: >-
       Bandwidth of read operations at the L2 cache level. This metric shows
       overall L2 cache utilization and helps identify memory subsystem bottlenecks.
-      Peak: $total_l2_chan L2 banks * 128 B/cycle * $max_sclk.
     Scalar Data Cache Hit Rate: >-
       Percentage of scalar data cache accesses that hit in cache. The scalar cache
       stores uniform data accessed by scalar instructions. High hit rates indicate
@@ -244,7 +184,6 @@ Panel Config:
       Bandwidth of scalar data cache requests to the GL1 cache. Scalar operations
       load uniform data shared across all threads in a wavefront, making efficient
       caching critical for performance.
-      Peak: $sqc_per_gpu SQC instances * 64 B/TC req * $max_sclk.
     Instruction Cache Hit Rate: >-
       Percentage of instruction fetch requests that hit in the instruction cache.
       High hit rates are essential for sustained instruction throughput. Low hit
@@ -253,4 +192,3 @@ Panel Config:
       Bandwidth of instruction cache requests to the GL1 cache. High values may
       indicate instruction cache pressure from large kernels or frequent
       instruction cache misses.
-      Peak: $sqc_per_gpu SQC instances * 64 B/TC req * $max_sclk.
