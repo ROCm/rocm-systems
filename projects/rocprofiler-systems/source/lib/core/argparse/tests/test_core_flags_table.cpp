@@ -28,13 +28,18 @@ using rocprofsys::common::update_mode;
 const std::vector<const flag_group*>&
 all_core_groups()
 {
-    namespace argparse = rocprofsys::argparse;
+    namespace argparse                                 = rocprofsys::argparse;
     static const std::vector<const flag_group*> groups = {
-        &argparse::debug_group(),     &argparse::general_group(),
-        &argparse::launcher_group(),  &argparse::tracing_group(),
-        &argparse::profile_group(),   &argparse::process_sampling_group(),
-        &argparse::general_sampling_group(), &argparse::sampling_timer_group(),
-        &argparse::hw_counter_group(), &argparse::misc_group(),
+        &argparse::debug_group(),
+        &argparse::general_group(),
+        &argparse::launcher_group(),
+        &argparse::tracing_group(),
+        &argparse::profile_group(),
+        &argparse::process_sampling_group(),
+        &argparse::general_sampling_group(),
+        &argparse::sampling_timer_group(),
+        &argparse::hw_counter_group(),
+        &argparse::misc_group(),
     };
     return groups;
 }
@@ -96,8 +101,7 @@ TEST(CoreFlagsTable, ListKindOrAppendModeDeclaresJoinExceptForCustom)
             {
                 EXPECT_NE(descriptor.join, join_with::none)
                     << "descriptor '" << last_name_or_unnamed(descriptor)
-                    << "' in group '" << group->title
-                    << "' needs an explicit join_with";
+                    << "' in group '" << group->title << "' needs an explicit join_with";
             }
         }
     }
@@ -114,7 +118,7 @@ TEST(CoreFlagsTable, ParserKeysAreUniqueAcrossAllGroups)
         for(const auto& descriptor : group->flags)
         {
             if(descriptor.names.empty()) continue;
-            auto       name = std::string{ descriptor.names.back() };
+            auto       name           = std::string{ descriptor.names.back() };
             const auto first_non_dash = name.find_first_not_of('-');
             if(first_non_dash != std::string::npos) name = name.substr(first_non_dash);
 
@@ -136,7 +140,7 @@ TEST(CoreFlagsTable, DedupKeysDoNotCollideWithDerivedEnvKey)
         for(const auto& descriptor : group->flags)
         {
             if(descriptor.names.empty()) continue;
-            auto       parser_key = std::string{ descriptor.names.back() };
+            auto       parser_key     = std::string{ descriptor.names.back() };
             const auto first_non_dash = parser_key.find_first_not_of('-');
             if(first_non_dash != std::string::npos)
                 parser_key = parser_key.substr(first_non_dash);

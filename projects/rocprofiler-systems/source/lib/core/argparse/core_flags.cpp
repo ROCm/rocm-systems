@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <set>
 #include <string>
 #include <vector>
@@ -162,7 +163,7 @@ tids_action(parsed_values& values, parser_data& data)
 {
     // Comma-space joiner is intentional and matches legacy behavior;
     // `--sample-cputime`/`--sample-realtime`/`--sample-overflow` use comma-only.
-    auto tids = values.get<std::vector<int64_t>>("tids");
+    auto tids = values.get<std::vector<std::int64_t>>("tids");
     data.env.set(env::SAMPLING_TIDS, fmt::format("{}", fmt::join(tids, ", ")));
 }
 

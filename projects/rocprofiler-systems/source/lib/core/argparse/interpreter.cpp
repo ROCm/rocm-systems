@@ -90,7 +90,7 @@ read_value(parser_t& parser, const std::string& key, const flag_descriptor& desc
     {
         case value_kind::flag: return parser.get<bool>(key) ? "true" : "false";
         case value_kind::scalar: return parser.get<std::string>(key);
-        case value_kind::scalar_int: return std::to_string(parser.get<int64_t>(key));
+        case value_kind::scalar_int: return std::to_string(parser.get<std::int64_t>(key));
         case value_kind::scalar_double: return std::to_string(parser.get<double>(key));
         case value_kind::list:
         {

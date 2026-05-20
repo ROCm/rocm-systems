@@ -150,7 +150,8 @@ TEST_F(ParsedValuesTest, GetInt64Vector)
 
 TEST_F(ParsedValuesTest, ExistsReturnsTrueForProvidedFlag)
 {
-    parser.add_argument({ std::string{ "--maybe" } }, std::string{ "maybe" }).max_count(1);
+    parser.add_argument({ std::string{ "--maybe" } }, std::string{ "maybe" })
+        .max_count(1);
     parse({ "--maybe" });
 
     parsed_values values{ parser };
@@ -159,7 +160,8 @@ TEST_F(ParsedValuesTest, ExistsReturnsTrueForProvidedFlag)
 
 TEST_F(ParsedValuesTest, ExistsReturnsFalseForOmittedFlag)
 {
-    parser.add_argument({ std::string{ "--maybe" } }, std::string{ "maybe" }).max_count(1);
+    parser.add_argument({ std::string{ "--maybe" } }, std::string{ "maybe" })
+        .max_count(1);
     parse({});  // do not provide --maybe
 
     parsed_values values{ parser };

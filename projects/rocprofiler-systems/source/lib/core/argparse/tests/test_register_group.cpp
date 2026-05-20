@@ -275,8 +275,12 @@ TEST_F(RegisterGroupTest, ValidatorRejectsListWithNoneJoinerWithoutCustom)
     flag_group group{
         "BAD",
         "",
-        { flag_descriptor{ { "--bad-list" }, "missing join", "items",
-                           count_spec::at_least(1), value_kind::list, join_with::none,
+        { flag_descriptor{ { "--bad-list" },
+                           "missing join",
+                           "items",
+                           count_spec::at_least(1),
+                           value_kind::list,
+                           join_with::none,
                            { "BAD_ENV" } } },
     };
     EXPECT_THROW(register_group(parser, data, group), std::runtime_error);
@@ -287,9 +291,14 @@ TEST_F(RegisterGroupTest, ValidatorRejectsAppendWithoutJoiner)
     flag_group group{
         "BAD",
         "",
-        { flag_descriptor{ { "--bad-append" }, "missing join", "string",
-                           count_spec::exactly(1), value_kind::scalar, join_with::none,
-                           { "BAD_ENV" }, update_mode::APPEND } },
+        { flag_descriptor{ { "--bad-append" },
+                           "missing join",
+                           "string",
+                           count_spec::exactly(1),
+                           value_kind::scalar,
+                           join_with::none,
+                           { "BAD_ENV" },
+                           update_mode::APPEND } },
     };
     EXPECT_THROW(register_group(parser, data, group), std::runtime_error);
 }
@@ -364,10 +373,20 @@ TEST_F(RegisterGroupTest, MultipleDescriptorsAllRegister)
         "MULTI",
         "subtitle",
         {
-            flag_descriptor{ { "--first" }, "first flag", {}, count_spec::at_most(1),
-                             value_kind::flag, join_with::none, { "FIRST_ENV" } },
-            flag_descriptor{ { "--second" }, "second flag", {}, count_spec::at_most(1),
-                             value_kind::flag, join_with::none, { "SECOND_ENV" } },
+            flag_descriptor{ { "--first" },
+                             "first flag",
+                             {},
+                             count_spec::at_most(1),
+                             value_kind::flag,
+                             join_with::none,
+                             { "FIRST_ENV" } },
+            flag_descriptor{ { "--second" },
+                             "second flag",
+                             {},
+                             count_spec::at_most(1),
+                             value_kind::flag,
+                             join_with::none,
+                             { "SECOND_ENV" } },
         },
     };
     register_group(parser, data, group);

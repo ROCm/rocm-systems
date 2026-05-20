@@ -22,7 +22,5 @@ target_link_libraries(
 
 target_include_directories(
     argparse-tests
-    PRIVATE
-        ${PROJECT_SOURCE_DIR}/source/lib
-        ${PROJECT_SOURCE_DIR}/source/lib/core
+    PRIVATE ${PROJECT_SOURCE_DIR}/source/lib ${PROJECT_SOURCE_DIR}/source/lib/core
 )

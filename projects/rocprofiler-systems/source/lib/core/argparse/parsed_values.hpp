@@ -77,20 +77,20 @@ template <>
 [[nodiscard]] std::string parsed_values::get<std::string>(std::string_view) const;
 
 template <>
-[[nodiscard]] std::set<std::string>
-parsed_values::get<std::set<std::string>>(std::string_view) const;
+[[nodiscard]] std::set<std::string> parsed_values::get<std::set<std::string>>(
+    std::string_view) const;
 
 template <>
-[[nodiscard]] std::vector<std::string>
-parsed_values::get<std::vector<std::string>>(std::string_view) const;
+[[nodiscard]] std::vector<std::string> parsed_values::get<std::vector<std::string>>(
+    std::string_view) const;
 
 template <>
-[[nodiscard]] std::deque<std::string>
-parsed_values::get<std::deque<std::string>>(std::string_view) const;
+[[nodiscard]] std::deque<std::string> parsed_values::get<std::deque<std::string>>(
+    std::string_view) const;
 
 template <>
-[[nodiscard]] std::vector<std::int64_t>
-parsed_values::get<std::vector<std::int64_t>>(std::string_view) const;
+[[nodiscard]] std::vector<std::int64_t> parsed_values::get<std::vector<std::int64_t>>(
+    std::string_view) const;
 
 }  // namespace argparse
 }  // namespace rocprofsys
