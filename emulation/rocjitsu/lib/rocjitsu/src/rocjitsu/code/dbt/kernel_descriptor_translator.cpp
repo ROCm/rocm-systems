@@ -210,17 +210,17 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
       elf_symbol_bind(sym.st_info) != kElfSymbolBindGlobal)
     return false;
 
-  // Named descriptors must use the AMDHSA ".kd" suffix. Stripped objects can
-  // leave descriptors unnamed; after the ABI type/bind checks above, accepting
-  // unnamed symbols preserves support for those minimized objects.
+  // AMDHSA descriptors are named "<kernel>.kd". An unnamed 64-byte global
+  // object is ambiguous, so require the ABI suffix instead of treating stripped
+  // or minimized symbol records as descriptors.
   if (strtab == nullptr || strtab_size == 0 || sym.st_name == 0)
-    return true;
+    return false;
   if (sym.st_name >= strtab_size)
     return false;
 
   const char *name = strtab + sym.st_name;
   const size_t len = strnlen(name, strtab_size - sym.st_name);
-  return len >= 3 && std::strcmp(name + len - 3, ".kd") == 0;
+  return len > 3 && std::strcmp(name + len - 3, ".kd") == 0;
 }
 
 [[nodiscard]] std::optional<uint64_t> text_vaddr_for_section(uint64_t text_offset,

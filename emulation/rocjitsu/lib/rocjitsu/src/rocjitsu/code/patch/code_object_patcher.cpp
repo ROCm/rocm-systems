@@ -328,17 +328,17 @@ void shift_relocation_offsets_in_moved_sections(std::vector<uint8_t> &image, con
       elf_symbol_bind(symbol.st_info) != kElfSymbolBindGlobal)
     return false;
 
-  // Named descriptors must use the AMDHSA ".kd" suffix. Stripped objects can
-  // leave descriptors unnamed; after the ABI type/bind checks above, accepting
-  // unnamed symbols preserves support for those minimized objects.
+  // AMDHSA descriptors are named "<kernel>.kd". An unnamed 64-byte global
+  // object is ambiguous, so require the ABI suffix instead of treating stripped
+  // or minimized symbol records as descriptors.
   if (strtab == nullptr || strtab_size == 0 || symbol.st_name == 0)
-    return true;
+    return false;
   if (symbol.st_name >= strtab_size)
     return false;
 
   const char *name = strtab + symbol.st_name;
   const size_t len = strnlen(name, strtab_size - symbol.st_name);
-  return len >= 3 && std::strcmp(name + len - 3, ".kd") == 0;
+  return len > 3 && std::strcmp(name + len - 3, ".kd") == 0;
 }
 
 void adjust_kernel_descriptor_entry_offsets_in_moved_sections(
@@ -632,7 +632,7 @@ bool CodeObjectPatcher::append_cave_section(std::string_view section_name) {
 
   for (size_t i = 0; i < shdrs.size(); ++i) {
     if (shift_section_vaddr[i]) {
-      const uint64_t old_addr = shdrs[i].sh_addr;
+      [[maybe_unused]] const uint64_t old_addr = shdrs[i].sh_addr;
       shdrs[i].sh_addr += padded_file_delta;
       assert((shdrs[i].sh_addralign <= 1 ||
               shdrs[i].sh_addr % shdrs[i].sh_addralign ==
