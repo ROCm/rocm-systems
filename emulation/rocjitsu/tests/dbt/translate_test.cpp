@@ -1219,7 +1219,7 @@ TEST(BinaryTranslator, CaveBranchOverflowLeavesCodeObjectUnchanged) {
 } // namespace rocjitsu
 
 // --- WaitcntTranslator tests ---
-#include "rocjitsu/code/dbt/semantic_translator.h"
+#include "rocjitsu/code/dbt/waitcnt_translator.h"
 
 using rocjitsu::decode_waitcnt_gfx9;
 using rocjitsu::encode_waitcnt_gfx12;
