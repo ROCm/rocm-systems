@@ -363,14 +363,15 @@ class GDAContext : public Context {
    * The mlx5 provider bypasses the take_turns code and calls F(Args...) directly.
    */
   template <typename F, typename... Args>
-  __device__ std::invoke_result_t<F, Args...> internal_amo_take_turns(F&& f, Args&&... args);
+  __device__ std::invoke_result_t<F, Args...>
+  internal_amo_take_turns(int gda_provider, F&& f, Args&&... args);
 
   /**
    * @brief Implement amo_fetch_op using a compare-and-swap loop.
    * op is a Callable returning T with arguments (T prior_value, T new_value).
    */
   template <typename T, typename Op>
-  __device__ T internal_amo_fetch_op(void *dst, T value, int pe, uint32_t qp_index,
+  __device__ T internal_amo_fetch_op(void *dst, T value, int pe, QueuePair& qp,
                                      [[maybe_unused]] const ActiveWFInfo& wf_info, Op&& op);
 
   /**

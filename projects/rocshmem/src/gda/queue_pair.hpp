@@ -55,6 +55,7 @@
 namespace rocshmem {
 
 class GDABackend;
+class GDAContext;
 
 struct user_buf_info_t {
   uintptr_t addr;
@@ -164,6 +165,7 @@ class ActiveWFInfo {
 class QueuePair {
  public:
   friend GDABackend;
+  friend GDAContext;
 
   /**
    * @brief Constructor.
