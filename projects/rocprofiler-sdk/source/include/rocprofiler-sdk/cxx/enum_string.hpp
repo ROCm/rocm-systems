@@ -1171,7 +1171,11 @@ static_assert(ROCPROFILER_HIP_RUNTIME_API_ID_LAST == 518);
 #elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 27
 static_assert(ROCPROFILER_HIP_RUNTIME_API_ID_LAST == 520);
 #elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 28
+<<<<<<< HEAD
 static_assert(ROCPROFILER_HIP_RUNTIME_API_ID_LAST == 535);
+=======
+static_assert(ROCPROFILER_HIP_RUNTIME_API_ID_LAST == 520);
+>>>>>>> 38108f2a1b (Support HIP launch attribute step 28 in rocprofiler-sdk. Bump the HIP runtime API table step version in CLR and rocprofiler-sdk to format the new dynamic data prefetch launch attribute without introducing a new runtime API ID.)
 #else
 #    if !defined(ROCPROFILER_UNSAFE_NO_VERSION_CHECK) &&                                           \
         (defined(ROCPROFILER_CI) && ROCPROFILER_CI > 0)
