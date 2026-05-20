@@ -37,7 +37,7 @@ digraph public_api_ownership {
         writer_types [label="writer_types\n(const char*, input)", shape=box, fillcolor="#ddd0f0"];
         reader_types [label="reader_types\n(std::string, output)", shape=box, fillcolor="#ddd0f0"];
         shared_types [label="shared_types\n(call_stack, source_context)", shape=box, fillcolor="#ddd0f0"];
-        storage_types [label="storage_types\n(version_t)", shape=box, fillcolor="#ddd0f0"];
+        version [label="version_t", shape=box, fillcolor="#ddd0f0"];
     }
 
     subgraph cluster_hidden {
@@ -63,5 +63,5 @@ digraph public_api_ownership {
     reader -> reader_types [style=dotted, color=gray50, arrowhead=none];
     writer_types -> shared_types [style=dotted, color=gray50, arrowhead=none];
     reader_types -> shared_types [style=dotted, color=gray50, arrowhead=none];
-    storage -> storage_types [style=dotted, color=gray50, arrowhead=none];
+    storage -> version [style=dotted, color=gray50, arrowhead=none];
 }

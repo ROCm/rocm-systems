@@ -23,7 +23,7 @@
 #include "profiler-hub/storage.hpp"
 #include "profiler-hub/writer.hpp"
 #include "profiler-hub/writer_types.hpp"
-#include <profiler-hub/storage_types.hpp>
+#include <profiler-hub/version.hpp>
 
 #include <benchmark/benchmark.h>
 

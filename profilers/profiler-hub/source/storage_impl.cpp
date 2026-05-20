@@ -3,7 +3,7 @@
 
 #include "storage_impl.hpp"
 #include "profiler-hub/storage.hpp"
-#include "profiler-hub/storage_types.hpp"
+#include "profiler-hub/version.hpp"
 
 #include "data_storage/backends/sqlite_backend.hpp"
 

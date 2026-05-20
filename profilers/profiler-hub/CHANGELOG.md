@@ -34,8 +34,7 @@ Initial release.
 - C++17 public API for storing and retrieving ROCm profiling data in the
   rocpd (SQLite) database format. Public types under `profiler-hub::` namespace:
   `storage_t`, `writer_t`, `reader_t`, `version_t`, plus the supporting
-  type families in `writer_types`, `reader_types`, `shared_types`,
-  `storage_types`.
+  type families in `writer_types`, `reader_types`, and `shared_types`.
 - Schema versions 3.0.0 and 4.0.0, runtime-selectable.
 - Both shared (`libprofiler-hub.so`) and static (`libprofiler-hub.a`) library
   variants built from a shared object set.
@@ -51,7 +50,7 @@ Initial release.
   spdlog and GoogleTest when the system version is too old.
 - Public install layout:
   - `<prefix>/lib/libprofiler-hub.{so,a}`
-  - `<prefix>/include/profiler-hub/{reader,reader_types,shared_types,storage,storage_types,writer,writer_types}.hpp`
+  - `<prefix>/include/profiler-hub/{reader,reader_types,shared_types,storage,version,writer,writer_types}.hpp`
   - `<prefix>/lib/cmake/profiler-hub/{profiler-hub-config,profiler-hub-config-version,profiler-hub-targets,Findprofiler-hub}.cmake`
 - Cobertura code coverage reports via the `coverage-xml` CMake target.
 - clang-tidy custom target using the bundled `.clang-tidy` configuration.

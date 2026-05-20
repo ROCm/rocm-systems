@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <profiler-hub/storage_types.hpp>
+#include <profiler-hub/version.hpp>
 
 #include <memory>
 #include <string>

@@ -3,7 +3,7 @@
 
 #include "profiler-hub/storage.hpp"
 
-#include "profiler-hub/storage_types.hpp"
+#include "profiler-hub/version.hpp"
 #include "storage_impl.hpp"
 
 #include <memory>

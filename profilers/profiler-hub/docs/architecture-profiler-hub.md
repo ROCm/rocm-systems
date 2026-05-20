@@ -4,7 +4,7 @@
 
 ## Chapter 1: Public API Design
 
-The profiler-hub public API consists of three classes -- storage_t, writer_t, and reader_t -- and four type namespaces -- storage_types, writer_types, reader_types, and shared_types. Together they form the only surface that users interact with. Everything behind these headers is hidden and must remain hidden.
+The profiler-hub public API consists of three classes -- storage_t, writer_t, and reader_t -- a version_t struct, and three type namespaces -- writer_types, reader_types, and shared_types. Together they form the only surface that users interact with. Everything behind these headers is hidden and must remain hidden.
 
 ![Public API Ownership Model](graphs/public_api_ownership.png)
 
@@ -42,7 +42,7 @@ The reader_types namespace contains output structures. These use std::string for
 
 The shared_types namespace contains structures used by both directions, such as call stack entries and source context records. These structures describe data that has the same logical shape regardless of whether it is being written or read.
 
-The storage_types namespace contains metadata about the storage system itself, currently limited to version information.
+The version_t struct exposes the schema version of the underlying storage. It is the only piece of storage-system metadata in the public surface.
 
 This separation means that a user who only writes never includes reader type definitions, and vice versa. It also means that the type representations can evolve independently: the writer types can be optimized for ingestion speed while the reader types can be optimized for caller convenience, without either constraining the other.
 
