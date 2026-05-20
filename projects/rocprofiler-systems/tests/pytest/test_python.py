@@ -94,12 +94,24 @@ class TestPython(RocprofsysTest):
         "depths": [0, 1, 2, 3, 4, 5, 6, 2, 3],
     }
 
-    # Perfetto (cached mode) aggregates entries by name
+    # Perfetto records every recursive frame at its own depth, mirroring the
+    # call tree captured by timemory: fib descends 5 levels (depths 2..6) with
+    # counts 3, 6, 12, 18, 6 across the 5 iterations.
     PYTHON_SOURCE_PERFETTO = {
         "categories": ["python", "user"],
-        "labels": ["main_loop", "run", "fib", "inefficient", "_sum"],
-        "counts": [5, 3, 24, 3, 3],
-        "depths": [0, 1, 2, 2, 3],
+        "labels": [
+            "main_loop",
+            "run",
+            "fib",
+            "fib",
+            "fib",
+            "fib",
+            "fib",
+            "inefficient",
+            "_sum",
+        ],
+        "counts": [5, 3, 3, 6, 12, 18, 6, 3, 3],
+        "depths": [0, 1, 2, 3, 4, 5, 6, 2, 3],
     }
 
     # Timemory validation for builtin profiling - hierarchical output with multiple entries at different depths
@@ -124,17 +136,27 @@ class TestPython(RocprofsysTest):
         "depths": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1],
     }
 
-    # Perfetto validation with trace caching aggregates all calls to the same function,
-    # so we only expect one entry per unique label rather than hierarchical entries.
+    # Perfetto records every recursive frame at its own depth, so the shape
+    # mirrors PYTHON_BUILTIN_TIMEMORY above (5 iterations of naive fib(10) =>
+    # 5, 10, 20, 40, 80, 160, 260, 220, 80, 10 calls at depths 1..10).
     PYTHON_BUILTIN_PERFETTO = {
         "categories": ["python"],
         "labels": [
             "[run][builtin.py:31]",
             "[fib][builtin.py:13]",
+            "[fib][builtin.py:13]",
+            "[fib][builtin.py:13]",
+            "[fib][builtin.py:13]",
+            "[fib][builtin.py:13]",
+            "[fib][builtin.py:13]",
+            "[fib][builtin.py:13]",
+            "[fib][builtin.py:13]",
+            "[fib][builtin.py:13]",
+            "[fib][builtin.py:13]",
             "[inefficient][builtin.py:17]",
         ],
-        "counts": [5, 445, 5],
-        "depths": [0, 1, 1],
+        "counts": [5, 5, 10, 20, 40, 80, 160, 260, 220, 80, 10, 5],
+        "depths": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1],
     }
 
     @pytest.mark.timeout(120)
