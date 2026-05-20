@@ -152,18 +152,13 @@ exit_:
     s->data_ready = true;
     s->work_cond.notify_one();
   }
-  {
-    std::unique_lock<std::mutex> lock(s->work_mutex);
-    s->stop_cons_thread = true;
-    s->work_cond.notify_one();
-  }
+  s->stop_cons_thread = true;
 }
 
 static void consumer(spm_state_t* s) {
   do {
     std::unique_lock<std::mutex> lock(s->work_mutex);
-    while (!s->data_ready && !s->stop_cons_thread) s->work_cond.wait(lock);
-    if (s->stop_cons_thread) break;
+    while (!s->data_ready) s->work_cond.wait(lock);
     s->data_ready = false;
 
     hsa_status_t status = HSA_STATUS_SUCCESS;
