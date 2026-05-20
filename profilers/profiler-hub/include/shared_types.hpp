@@ -16,7 +16,7 @@ using timestamp_ns_t = size_t;
 
 // --------------------- Call Stack & Line Info Abstract Data Types ------------------
 
-/***
+/**
  * @brief Memory address range representing a loaded code object region.
  */
 struct address_range_info_t
@@ -27,7 +27,7 @@ struct address_range_info_t
     std::string_view extdata = "{}";
 };
 
-/***
+/**
  * @brief Program counter information representing a location in executable code.
  */
 struct program_counter_info_t
@@ -39,7 +39,7 @@ struct program_counter_info_t
     std::string_view      extdata = "{}";
 };
 
-/***
+/**
  * @brief A single frame in a call stack.
  */
 struct stack_frame_t
@@ -50,7 +50,7 @@ struct stack_frame_t
     std::string_view                    extdata = "{}";
 };
 
-/***
+/**
  * @brief Complete call stack as an ordered collection of stack frames.
  * @note Front element (index 0) is the top of the stack (most recent call).
  * Back element is the bottom of the stack (e.g., main). Depth is implicit
@@ -58,7 +58,7 @@ struct stack_frame_t
  */
 using call_stack_t = std::deque<stack_frame_t>;
 
-/***
+/**
  * @brief Source code context containing actual source lines and disassembly.
  */
 struct source_code_info_t
@@ -72,7 +72,7 @@ struct source_code_info_t
     std::string_view extdata = "{}";
 };
 
-/***
+/**
  * @brief Line info entry linking source code context with program counter location.
  */
 struct line_info_entry_t
@@ -83,7 +83,7 @@ struct line_info_entry_t
         address_range;  ///< Code object for program_counter
 };
 
-/***
+/**
  * @brief Collection of line info entries for an event.
  * @note An event may have multiple source contexts (e.g., inlined functions,
  * multiple relevant source locations). Each entry provides source code and

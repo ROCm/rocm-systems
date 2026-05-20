@@ -37,48 +37,48 @@ namespace profiler_hub::writer_types
  *   - std::optional<std::string_view>: For nullable fields (can be NULL in DB)
  */
 
-/***
+/**
  * @brief Node id
  * @note This is a unique value which will be used to identify the node
  */
 using node_id_t = size_t;
-/***
+/**
  * @brief Process id
  * @note This is a unique value which will be used to identify the process
  */
 using process_id_t = size_t;
-/***
+/**
  * @brief Thread id
  * @note This is a unique value which will be used to identify the thread
  */
 using thread_id_t = size_t;
 
-/***
+/**
  * @brief Code object id
  * @note This is a unique value which will be used to identify the code object
  */
 using code_object_id_t = size_t;
-/***
+/**
  * @brief Kernel symbol id
  * @note This is a unique value which will be used to identify the kernel symbol
  */
 using kernel_symbol_id_t = size_t;
-/***
+/**
  * @brief Pmc description name
  * @note This is a unique value which will be used to identify the pmc description
  */
 using pmc_description_name_t = std::string_view;
-/***
+/**
  * @brief Stream id
  * @note This is a unique value which will be used to identify the stream
  */
 using stream_id_t = size_t;
-/***
+/**
  * @brief Queue id
  * @note This is a unique value which will be used to identify the queue
  */
 using queue_id_t = size_t;
-/***
+/**
  * @brief Track name
  * @note This is a unique value which will be used to identify the track
  */
@@ -88,7 +88,7 @@ using timestamp_ns_t = size_t;
 
 constexpr std::string_view empty_json = "{}";
 
-/***
+/**
  * @brief Agent unique id
  * @note This is a struct which will be used to identify the agent uniquely.
  * @param logical_index Logical index which will uniquely identify the agent.
@@ -105,7 +105,7 @@ struct agent_unique_id_t
     }
 };
 
-/***
+/**
  * @brief Trace environment
  * @note This is a struct which will be used to identify the trace environment.
  * Put whatever is available about trace environment. If not available, leave it empty.
@@ -125,7 +125,7 @@ struct trace_environment_t
 
 // --------------------- Info Tables ---------------------
 
-/***
+/**
  * @brief Node info
  * @note This is a struct which will be used to identify the node.
  * @param node_id Node id which will uniquely identify the node. Use this value to refer
@@ -145,7 +145,7 @@ struct node_info_t
     std::optional<std::string_view> domain_name;
 };
 
-/***
+/**
  * @brief Process info
  * @note This is a struct which will be used to identify the process.
  * @param pid Process id which will uniquely identify the process. Use this
@@ -169,7 +169,7 @@ struct process_info_t
     node_id_t node_id{};
 };
 
-/***
+/**
  * @brief Agent info
  * @note This is a struct which will be used to identify the agent.
  * @param unique_id Unique id which will uniquely identify the agent.
@@ -213,7 +213,7 @@ struct pmc_info_unique_id_t
     }
 };
 
-/***
+/**
  * @brief Pmc info
  * @note This is a struct which will be used to identify the pmc.
  * @param unique_id Unique id which will uniquely identify the pmc.
@@ -245,7 +245,7 @@ struct pmc_info_t
     process_id_t process_id{};
 };
 
-/***
+/**
  * @brief Thread info
  * @note This is a struct which will be used to identify the thread.
  * @param thread_id Thread id which will uniquely identify the thread.
@@ -268,7 +268,7 @@ struct thread_info_t
     process_id_t process_id{};
 };
 
-/***
+/**
  * @brief Stream info
  * @note This is a struct which will be used to identify the stream.
  * @param stream_id Stream id which will uniquely identify the stream.
@@ -288,7 +288,7 @@ struct stream_info_t
     process_id_t process_id{};
 };
 
-/***
+/**
  * @brief Queue info
  * @note This is a struct which will be used to identify the queue.
  * @param queue_id Queue id which will uniquely identify the queue.
@@ -308,7 +308,7 @@ struct queue_info_t
     process_id_t process_id{};
 };
 
-/***
+/**
  * @brief Code object info
  * @note This is a struct which will be used to identify the code object.
  * @param id Code object id which will uniquely identify the code object.
@@ -335,7 +335,7 @@ struct code_object_info_t
     std::optional<agent_unique_id_t> agent_id;
 };
 
-/***
+/**
  * @brief Kernel symbol info
  * @note This is a struct which will be used to identify the kernel symbol.
  * @param id Kernel symbol id which will uniquely identify the kernel symbol.
@@ -366,7 +366,7 @@ struct kernel_symbol_info_t
     code_object_id_t code_obj_id{};
 };
 
-/***
+/**
  * @brief Track info
  * @note This is a struct which will be used to identify the track.
  * @param name Track name which will uniquely identify the track.
@@ -394,7 +394,7 @@ struct track_info_t
 
 // --------------------- Data Tables ---------------------
 
-/***
+/**
  * @brief Function argument data for API tracing.
  */
 struct arg_data_t
@@ -407,7 +407,7 @@ struct arg_data_t
     std::string_view                extdata = empty_json;
 };
 
-/***
+/**
  * @brief Common event metadata shared by all profiling events.
  * @note Maps to rocpd_event table. This is the base event data embedded in all
  * data records (regions, kernel dispatches, memory operations). Contains call
@@ -430,7 +430,7 @@ struct event_data_t
     std::string_view extdata = empty_json;
 };
 
-/***
+/**
  * @brief A named time region representing a span of execution.
  * @note Maps to rocpd_region table. Represents user-annotated regions, API calls,
  * or any named time span.
@@ -447,7 +447,7 @@ struct region_data_t
     std::vector<arg_data_t> args;  ///< Optional function arguments
 };
 
-/***
+/**
  * @brief A point-in-time sample (instantaneous event).
  * @note Maps to rocpd_sample table. Used for counter samples, markers, or any
  * instantaneous event. Associated with a track for timeline visualization.
@@ -459,7 +459,7 @@ struct sample_data_t
     std::string_view extdata = empty_json;
 };
 
-/***
+/**
  * @brief Performance counter (PMC) event data.
  * @note Maps to rocpd_pmc_event table. Records a hardware performance counter
  * sample with its value. The sample provides the timestamp, and the event
@@ -473,7 +473,7 @@ struct pmc_event_data_t
     sample_data_t               sample;  ///< Timestamp information
 };
 
-/***
+/**
  * @brief GPU kernel dispatch event data.
  * @note Maps to rocpd_kernel_dispatch table. Records a GPU kernel execution
  * including launch configuration (grid/workgroup sizes), timing, and kernel
@@ -500,7 +500,7 @@ struct kernel_dispatch_data_t
     std::string_view                extdata = empty_json;
 };
 
-/***
+/**
  * @brief Memory copy operation event data.
  * @note Maps to rocpd_memory_copy table. Records a memory transfer operation
  * including source/destination addresses, size, and timing. Used for tracking
@@ -522,7 +522,7 @@ struct memory_copy_data_t
     std::string_view                extdata = empty_json;
 };
 
-/***
+/**
  * @brief Memory allocation event data.
  * @note Maps to rocpd_memory_allocate table. Records memory allocation and
  * deallocation operations including address, size, allocation type, and timing.
