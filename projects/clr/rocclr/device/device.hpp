@@ -109,12 +109,8 @@ enum MemRangeAttribute : uint32_t {
   CoherencyMode = 100,       ///< Current coherency mode for the specified range
 };
 
-enum FuncCache : uint32_t  {
-  kPreferNone = 0,   ///< Default function cache configuration, no preference
-  kPreferLDS = 1,    ///< Prefer larger shared memory and smaller L1 cache
-  kPreferCache = 2,  ///< Prefer larger L1 cache and smaller shared memory
-  kPreferEqual = 3   ///< Prefer equal size L1 cache and shared memory
-};
+//! hipFuncCache_t as index: 0=None, 1=Shared, 2=L1, 3=Equal -> carveout %.
+inline constexpr uint8_t kFuncCacheToGroupMemCarveoutPercent[] = {0, 100, 1, 50};
 
 constexpr int CpuDeviceId = static_cast<int>(-1);
 constexpr int InvalidDeviceId = static_cast<int>(-2);
@@ -731,13 +727,6 @@ class Settings : public amd::HeapObject {
   void enableExtension(uint name) { extensions_ |= static_cast<uint64_t>(1) << name; }
 
   size_t stagedXferSize_ = 0;     //!< Staged buffer size
-  typedef struct CarveoutPref {
-    uint8_t totalSharedBanks;
-    uint8_t preferLDSBanks;
-    uint8_t preferCacheLDSBanks;
-    uint8_t preferEqualLDSBanks;
-  } CarveoutPref;
-  CarveoutPref groupMemPref_;
 
  private:
   //! Disable copy constructor
@@ -2255,34 +2244,6 @@ class Device : public RuntimeObject {
 
   //! Sets the group memory carveout percentage hint for the device
   void UpdateGroupMemCarveout(uint8_t percent) { group_mem_carveout_hint_ = percent; }
-
-  uint8_t GetGroupMemCarveout(amd::FuncCache cacheConfig) const {
-    uint8_t totalSharedBanks = 0;
-    uint8_t LDSBanks = 0;
-    if (settings().groupMemCarveout_) {
-      totalSharedBanks = settings_->groupMemPref_.totalSharedBanks;
-      switch (cacheConfig) {
-        case kPreferLDS:
-          LDSBanks = settings_->groupMemPref_.preferLDSBanks;
-          break;
-        case kPreferCache:
-          LDSBanks = settings_->groupMemPref_.preferCacheLDSBanks;
-          break;
-        case kPreferEqual:
-          LDSBanks = settings_->groupMemPref_.preferEqualLDSBanks;
-          break;
-        case kPreferNone:
-        default:
-          break;
-      }
-    }
-    return (totalSharedBanks != 0) ? (static_cast<double>(LDSBanks) / totalSharedBanks) * 100 : 0;
-  }
-
-  //! Sets group memory carveout percentage hint for the device for respective cacheConfig
-  void UpdateGroupMemCarveout(amd::FuncCache cacheConfig) {
-    group_mem_carveout_hint_ = GetGroupMemCarveout(cacheConfig);
-  }
 
 #if defined(__clang__)
 #if __has_feature(address_sanitizer)
