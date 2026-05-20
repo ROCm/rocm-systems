@@ -3939,13 +3939,8 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
     case HIP_POINTER_ATTRIBUTE_MEMORY_TYPE: {
       if (memObj) {  // checks for host type or device type
         *reinterpret_cast<uint32_t*>(data) = getMemoryType(memObj);
-      } else {  // checks for array type
-        // ptr must be a host allocation using malloc since memObj is null and is
-        // not found in hipArraySet.
-        if (hip::hipArraySet.find(static_cast<hipArray*>(ptr)) == hip::hipArraySet.end()) {
-          *reinterpret_cast<uint32_t*>(data) = 0;
-          return hipErrorInvalidValue;
-        }
+      } else if (hip::hipArraySet.find(static_cast<hipArray*>(ptr)) != hip::hipArraySet.end()) {
+        // checks for array type
         cl_mem dstMemObj = reinterpret_cast<cl_mem>((static_cast<hipArray*>(ptr))->data);
         if (!is_valid(dstMemObj)) {
           *reinterpret_cast<uint32_t*>(data) = 0;
@@ -3958,6 +3953,9 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
           *reinterpret_cast<uint32_t*>(data) = 0;
           return hipErrorInvalidValue;
         }
+      } else {
+        // Unregistered host memory (allocated on stack, heap etc.)
+        *reinterpret_cast<uint32_t*>(data) = hipMemoryTypeUnregistered;
       }
       break;
     }
