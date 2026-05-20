@@ -30,12 +30,15 @@ import unittest
 import common
 import runcmd
 
-amdsmi_path = os.environ.get("AMDSMI_PATH", "/opt/rocm/share/amd_smi")
+amdsmi_path = os.environ.get("AMDSMI_PATH") or os.path.join(
+    os.environ.get("ROCM_HOME") or os.environ.get("ROCM_PATH") or "/opt/rocm", "share/amd_smi"
+)
 if not os.path.exists(amdsmi_path):
     raise FileNotFoundError(
-        f'AMDSMI_PATH "{amdsmi_path}" does not exist. Please set the correct path in your environment.'
+        f'amdsmi path "{amdsmi_path}" does not exist. '
+        "Set ROCM_HOME, ROCM_PATH, or AMDSMI_PATH to the correct install location."
     )
-sys.path.append(amdsmi_path)
+sys.path.insert(0, amdsmi_path)
 try:
     import amdsmi
 except ImportError:

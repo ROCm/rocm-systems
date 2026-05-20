@@ -27,16 +27,46 @@ import sys
 
 import unittest
 
-amdsmi_path = os.environ.get("AMDSMI_PATH", "/opt/rocm/share/amd_smi")
+_rocm_root = os.environ.get("AMDSMI_PATH") or os.path.join(
+    os.environ.get("ROCM_HOME") or os.environ.get("ROCM_PATH") or "/opt/rocm", "share/amd_smi"
+)
+amdsmi_path = _rocm_root
 if not os.path.exists(amdsmi_path):
     raise FileNotFoundError(
-        f'AMDSMI_PATH "{amdsmi_path}" does not exist. Please set the correct path in your environment.'
+        f'amdsmi path "{amdsmi_path}" does not exist. '
+        "Set ROCM_HOME, ROCM_PATH, or AMDSMI_PATH to the correct install location."
     )
-sys.path.append(amdsmi_path)
+sys.path.insert(0, amdsmi_path)
 try:
     import amdsmi
 except ImportError as e:
     raise ImportError(f'Could not import the "amdsmi" module from "{amdsmi_path}"') from e
+
+# Verify the imported amdsmi package came from amdsmi_path, not a system-installed
+# package in dist-packages. A stale system install wins over sys.path.append() because
+# dist-packages is already on sys.path at interpreter startup; insert(0,...) above
+# prevents this, but error explicitly in case amdsmi was already cached in sys.modules.
+#
+# Example of how to proc this error output (for test purposes):
+# sudo AMDSMI_PATH=/tmp /opt/rocm/share/amd_smi/tests/python_unittest/cli_unit_test.py -v
+_amdsmi_file = getattr(amdsmi, "__file__", "")
+if not os.path.abspath(_amdsmi_file).startswith(os.path.abspath(amdsmi_path)):
+    _script = os.path.basename(sys.argv[0]) or "unit_tests.py"
+    print(
+        f"ERROR: amdsmi loaded from '{_amdsmi_file}' instead of AMDSMI_PATH='{amdsmi_path}'.\n"
+        "A system-installed amdsmi package is shadowing the test target.\n"
+        "Fix with one of:\n"
+        "\t 1. Run the tests from the installed amd-lib-tests package location (recommended):\n"
+        f"\t\t `sudo $ROCM_PATH/share/amd_smi/tests/python_unittest/{_script} -v`\n"
+        f"\t\t e.g. `sudo /opt/rocm/share/amd_smi/tests/python_unittest/{_script} -v`\n\n"
+        "\t 2. Set AMDSMI_PATH to point at the correct build:\n"
+        "\t\t `export AMDSMI_PATH=$ROCM_PATH/share/amd_smi`\n\n"
+        "\t 3. Remove the stale system package:\n"
+        "\t\t `sudo pip uninstall amdsmi`\n\n"
+        f"Refer to `{_script} -h` for more details.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 
 #################################################
 # Module level functions, not part of the class #
