@@ -60,6 +60,9 @@ constexpr std::string_view OVERFLOW_HELP =
     %{INDENT}%   May be specified as index or range, e.g., '0 2-4' will be interpreted as:
     %{INDENT}%      sample the main thread (0), do not sample the first child thread but sample the 2nd, 3rd, and 4th child threads)";
 
+constexpr std::string_view LAUNCHER_HELP =
+    R"(When running MPI jobs, typically the associated '--' for this executable should be right before the target executable, e.g. `mpirun -n 2 <THIS_EXE> -- <TARGET_EXE> <TARGET_EXE_ARGS...>`. This options enables prefixing the entire command (i.e. before `mpirun`, `srun`, etc.). Pass the name of the target executable (or a regex for matching to the name of the target) as the argument to this option and this executable will insert itself a second time in the appropriate location, e.g. `<THIS_EXE> --launcher sleep -- mpirun -n 2 sleep 10` is equivalent to `mpirun -n 2 <THIS_EXE> -- sleep 10`)";
+
 constexpr std::string_view HSA_INTERRUPT_HELP =
     R"(Set the value of the HSA_ENABLE_INTERRUPT environment variable.
 %{INDENT}%  ROCm version 5.2 and older have a bug which will cause a deadlock if a sample is taken while waiting for the signal
@@ -249,6 +252,12 @@ profile_diff_action(parsed_values& values, parser_data& data)
     data.env.set(env::DIFF_OUTPUT, true);
     data.env.set(env::INPUT_PATH, paths.at(0));
     if(paths.size() > 1) data.env.set(env::INPUT_PREFIX, paths.at(1));
+}
+
+void
+launcher_action(parsed_values& values, parser_data& data)
+{
+    data.out.launcher = values.get<std::string>("launcher");
 }
 
 }  // namespace
@@ -540,6 +549,33 @@ general_group()
                 /* kind        */ value_kind::list,
                 /* join        */ join_with::comma,
                 /* env_vars    */ { env::RANK_FILTER_OUTPUT },
+            },
+        },
+    };
+    return group;
+}
+
+const flag_group&
+launcher_group()
+{
+    static const flag_group group{
+        "LAUNCHER OPTIONS",
+        "",
+        {
+            flag_descriptor{
+                /* names       */ { "-l", "--launcher" },
+                /* help        */ LAUNCHER_HELP,
+                /* dtype       */ "target-exe",
+                /* count       */ count_spec::exactly(1),
+                /* kind        */ value_kind::scalar,
+                /* join        */ join_with::none,
+                /* env_vars    */ {},
+                /* mode        */ update_mode::REPLACE,
+                /* dedup_keys  */ {},
+                /* choices     */ {},
+                /* conflicts   */ {},
+                /* requires_   */ {},
+                /* custom      */ &launcher_action,
             },
         },
     };

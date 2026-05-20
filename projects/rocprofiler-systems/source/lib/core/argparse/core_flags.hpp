@@ -17,6 +17,9 @@ const flag_group&
 general_group();
 
 const flag_group&
+launcher_group();
+
+const flag_group&
 tracing_group();
 
 const flag_group&

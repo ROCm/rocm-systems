@@ -15,7 +15,6 @@
 #include <spdlog/fmt/ranges.h>
 
 #include <algorithm>
-#include <cassert>
 #include <cstdint>
 #include <set>
 #include <string>
@@ -95,11 +94,7 @@ read_value(parser_t& parser, const std::string& key, const flag_descriptor& desc
         case value_kind::scalar_double: return std::to_string(parser.get<double>(key));
         case value_kind::list:
         {
-            // List values must declare a join. `join_with::none` is a caller
-            // bug — emit_env's delimiter would be empty and produce concatenated
-            // garbage like "abc-def" instead of "abc,def".
-            assert(descriptor.join != join_with::none &&
-                   "value_kind::list requires an explicit join_with");
+            // Invariant (asserted by validate_descriptor): list ⇒ join != none.
             auto values = parser.get<std::vector<std::string>>(key);
             return fmt::format("{}", fmt::join(values, delimiter_for(descriptor.join)));
         }
@@ -110,8 +105,11 @@ read_value(parser_t& parser, const std::string& key, const flag_descriptor& desc
 void
 emit_env(parser_data& data, const flag_descriptor& descriptor, const std::string& value)
 {
-    auto delim = delimiter_for(descriptor.join);
-    if(delim.empty()) delim = ":";  // safe scalar default for env-list joiners
+    // Invariant (asserted by validate_descriptor): if mode requires a
+    // delimiter (APPEND/PREPEND) or the kind is list, join != none.
+    // For REPLACE / WEAK on a scalar, update_env ignores the delimiter
+    // entirely, so an empty `delim` is fine.
+    const auto delim = delimiter_for(descriptor.join);
     for(auto env_var : descriptor.env_vars)
         common::update_env(data.env.current, env_var, value, descriptor.mode, delim,
                            data.env.updated, data.env.initial);
@@ -135,8 +133,29 @@ apply_count(parser_t::argument& arg, const count_spec& count) noexcept
 }
 
 void
+validate_descriptor(const flag_descriptor& descriptor)
+{
+    // Custom actions handle their own emission, so they're exempt from the
+    // join_with invariant — `--output` etc. parse a list of values then
+    // write them to separate env vars without ever calling emit_env.
+    if(descriptor.custom != nullptr) return;
+
+    const bool needs_delim = descriptor.kind == value_kind::list ||
+                             descriptor.mode == common::update_mode::APPEND ||
+                             descriptor.mode == common::update_mode::PREPEND;
+    if(needs_delim && descriptor.join == join_with::none)
+    {
+        throw exception<std::runtime_error>(fmt::format(
+            "flag descriptor for '{}' must declare an explicit join_with: "
+            "value_kind::list and update_mode::APPEND/PREPEND require a delimiter",
+            descriptor.names.empty() ? "<unnamed>" : descriptor.names.back()));
+    }
+}
+
+void
 register_flag(parser_t& parser, parser_data& data, const flag_descriptor& descriptor)
 {
+    validate_descriptor(descriptor);
     auto keys = keys_from(descriptor);
     if(!data.reg.environ_filter(keys.env_key, data)) return;
 

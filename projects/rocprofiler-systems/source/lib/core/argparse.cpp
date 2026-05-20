@@ -206,6 +206,11 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         _data.env.set(env::USE_AMD_SMI, false);
     }
 
+    // TODO(seam): the BACKEND `-I/-E` flags have runtime-computed choices
+    // (gpu::device_count + MPI/OMPT preprocessor flags decide which backend
+    // tokens are valid). Static flag_descriptor cannot express this without
+    // adding std::function-typed choices fields. Migrate together with the
+    // dynamic-choices follow-up.
     _parser.start_group("BACKEND OPTIONS",
                         "These options control region information captured "
                         "w/o sampling or instrumentation");
@@ -270,31 +275,14 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
     add_group_arguments(_parser, "backend", _data);
     add_group_arguments(_parser, "parallelism", _data, true);
 
-    if(_data.reg.environ_filter("launcher", _data))
-    {
-        _parser
-            .add_argument(
-                { "-l", "--launcher" },
-                "When running MPI jobs, typically the associated '--' for this "
-                "executable should be right before the target executable, e.g. `mpirun "
-                "-n 2 <THIS_EXE> -- <TARGET_EXE> <TARGET_EXE_ARGS...>`. This options "
-                "enables prefixing the entire command (i.e. before `mpirun`, `srun`, "
-                "etc.). Pass the name of the target executable (or a regex for matching "
-                "to the name of the target) as the argument to this option and this "
-                "executable will insert itself a second time in the appropriate "
-                "location, e.g. `<THIS_EXE> --launcher sleep -- mpirun -n 2 sleep 10` is "
-                "equivalent to `mpirun -n 2 <THIS_EXE> -- sleep 10`")
-            .count(1)
-            .dtype("target-exe")
-            .action([&](parser_t& p) {
-                _data.out.launcher = p.get<std::string>("launcher");
-            });
-
-        _data.reg.processed_environs.emplace("launcher");
-    }
+    register_group(_parser, _data, launcher_group());
 
     register_group(_parser, _data, tracing_group());
 
+    // TODO(seam): --trace-clock-id choices are runtime-computed from CLOCK_*
+    // macros via get_clock_id_choices(); flag_descriptor's static choices
+    // field cannot express this. Migrate alongside the dynamic-choices
+    // follow-up (same blocker as `-I/-E` above).
     if(_data.reg.environ_filter("trace_clock_id", _data))
     {
         auto _clock_id_choices = get_clock_id_choices();
@@ -349,6 +337,13 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
     return _data;
 }
 
+// TODO(seam): add_group_arguments / add_extended_arguments below iterate
+// rocprofsys::settings::instance() (returns tim::settings*) and bind directly
+// to tim::vsettings::add_argument(_parser). The descriptor seam does NOT
+// cover this path — these are the long tail of timemory-defined settings
+// auto-exposed as CLI flags. Lifting them needs a settings_to_descriptor()
+// adapter (and a vsettings wrapper) outside this branch's scope. Until then,
+// roughly ~20 flags still bind to the timemory engine through this path.
 parser_data&
 add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_data& _data,
                     bool _add_group)

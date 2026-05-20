@@ -260,15 +260,38 @@ TEST_F(RegisterGroupTest, UpdateModeAppendConcatenatesExisting)
         /* dtype    */ "string",
         /* count    */ count_spec::exactly(1),
         /* kind     */ value_kind::scalar,
-        /* join     */ join_with::none,
+        /* join     */ join_with::colon,  // APPEND requires an explicit join
         /* env_vars */ { "APPEND_ENV" },
         /* mode     */ update_mode::APPEND,
     });
 
     parse({ "--append-opt", "added" });
 
-    // APPEND uses the default ":" delimiter from emit_env's scalar branch.
     EXPECT_EQ(env_value("APPEND_ENV"), "base:added");
+}
+
+TEST_F(RegisterGroupTest, ValidatorRejectsListWithNoneJoinerWithoutCustom)
+{
+    flag_group group{
+        "BAD",
+        "",
+        { flag_descriptor{ { "--bad-list" }, "missing join", "items",
+                           count_spec::at_least(1), value_kind::list, join_with::none,
+                           { "BAD_ENV" } } },
+    };
+    EXPECT_THROW(register_group(parser, data, group), std::runtime_error);
+}
+
+TEST_F(RegisterGroupTest, ValidatorRejectsAppendWithoutJoiner)
+{
+    flag_group group{
+        "BAD",
+        "",
+        { flag_descriptor{ { "--bad-append" }, "missing join", "string",
+                           count_spec::exactly(1), value_kind::scalar, join_with::none,
+                           { "BAD_ENV" }, update_mode::APPEND } },
+    };
+    EXPECT_THROW(register_group(parser, data, group), std::runtime_error);
 }
 
 // -----------------------------------------------------------------------------
