@@ -262,6 +262,7 @@ def test_get_gpu_model_none_result():
 
 @pytest.mark.misc
 def test_canonical_config_arch_maps_gfx115_variants_to_shared_dir():
+    assert canonical_config_arch("gfx1150") == "gfx115x"
     assert canonical_config_arch("gfx1151") == "gfx115x"
     assert canonical_config_arch("gfx1152") == "gfx115x"
     assert canonical_config_arch("gfx942") == "gfx942"
@@ -272,7 +273,8 @@ def test_is_single_panel_config_accepts_shared_gfx115x_dir(tmp_path):
     (tmp_path / "gfx115x").mkdir()
 
     supported_archs = {
-        "gfx1151": "strix_halo",
+        "gfx1150": "rdna35_point1",
+        "gfx1151": "rdna35_halo",
         "gfx1152": "krackan",
     }
 

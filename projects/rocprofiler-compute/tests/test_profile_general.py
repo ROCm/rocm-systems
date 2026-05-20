@@ -580,12 +580,12 @@ def clear_rank_env(monkeypatch, *env_vars):
 
 
 def skip_unsupported_roofline_soc():
-    if soc in {"MI100", "RDNA35_HALO", "KRACKAN"}:
+    if soc in {"MI100", "RDNA35_POINT1", "RDNA35_HALO", "KRACKAN"}:
         pytest.skip(f"Roofline is not supported on {soc}")
 
 
 def is_gfx115x_soc():
-    return soc == "RDNA35_HALO" or soc == "KRACKAN"
+    return soc == "RDNA35_POINT1" or soc == "RDNA35_HALO" or soc == "KRACKAN"
 
 
 # --
