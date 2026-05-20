@@ -445,7 +445,7 @@ T calculateExpected(T* output,
   if constexpr (std::is_same<Op, std::plus<T>>::value ||
                 std::is_same<Op, cooperative_groups::plus<T>>::value ) {
     for (int i = 0; i < lastLane + 1; i++) {
-       if (mask & (1ul << i)) {
+       if (mask & (1ull << i)) {
          aggregation[i] = input[i];
          lastAggregation[i] = input[i];
        }
@@ -498,7 +498,7 @@ T calculateExpected(T* output,
     }
 
     for (int i = 0; i < lastLane + 1; i++) {
-      if (mask & (1ul << i)) {
+      if (mask & (1ull << i)) {
         if (initialized) {
           if (inclusive) {
             result = op(input[i], result);
@@ -535,7 +535,7 @@ void printMismatch(const T& result, const T& expected, const T* input, unsigned 
   std::cout.copyfmt(init);
 
   for (int i = 0; i < getWarpSize(); i++) {
-    if ((1ul << i) & mask) {
+    if ((1ull << i) & mask) {
       if constexpr (std::is_same<T, __half>::value) {
         const unsigned char* ptr = reinterpret_cast<const unsigned char*>(&input[i]);
 
@@ -652,7 +652,7 @@ void runTestReduce(int iteration, Reduce reduce)
       auto result = output.ptr()[numReduce * wavefrontSize + lane];
       unsigned long long mask = masks.ptr()[numReduce];
 
-      if ((1ul << lane) & mask) {
+      if ((1ull << lane) & mask) {
         if constexpr (std::is_integral<T>::value || std::is_same<Op<T>, MinOp<T>>::value ||
                       std::is_same<Op<T>, MaxOp<T>>::value) {
           // for integral types or min/max the result should match exactly
