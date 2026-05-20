@@ -163,7 +163,7 @@ __device__ void GDAContext::fence() {
   }
 }
 
-__device__ void GDAContext::fence([[maybe_unused]] int pe) {
+__device__ void GDAContext::fence(int pe) {
   /**
    * Operations targeting `pe` may use two backends: RDMA QPs for remote
    * PEs and the IPC fast path, when enabled, for shm-local peers. The
@@ -182,13 +182,15 @@ __device__ void GDAContext::fence([[maybe_unused]] int pe) {
   }
 
   /**
-   * IPC: Skip when IPC is unavailable. Otherwise, issue a system-scope
-   * release fence for the IPC fast path so prior IPC writes are visible
-   * to shm-local peer ranks.
+   * IPC: Skip when `pe` is not shm-local. Otherwise, issue a
+   * system-scope release fence so prior IPC writes to `pe` are visible
+   * to that peer rank. Passing `local_pe` lets the SDMA-enabled policy
+   * quiet only the channels associated with `pe` instead of falling
+   * back to sdmaQuietAll().
    */
   int local_pe;
   if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
-    ipcImpl_.ipcFence();
+    ipcImpl_.ipcFence(local_pe);
   }
 }
 
