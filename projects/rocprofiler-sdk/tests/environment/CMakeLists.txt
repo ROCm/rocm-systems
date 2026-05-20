@@ -15,8 +15,8 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
-# Test 1: Invalid ROCPROFILER_METRICS_PATH with bash should show warning
-# This verifies that the environment variable is actually read (not ignored).
+# Test 1: Invalid ROCPROFILER_METRICS_PATH with bash should show warning This verifies
+# that the environment variable is actually read (not ignored).
 rocprofiler_add_integration_execute_test(
     environment-bash-invalid-path
     COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES -- bash -c "exit 0"
@@ -29,8 +29,8 @@ rocprofiler_add_integration_execute_test(
         "Counter definitions file '/nonexistent/bash/test/path/config.yaml' does not exist"
     FIXTURES_SETUP environment-bash-invalid-path)
 
-# Test 2: Bash with path containing spaces
-# Validates that paths with special characters are handled correctly
+# Test 2: Bash with path containing spaces Validates that paths with special characters
+# are handled correctly
 rocprofiler_add_integration_execute_test(
     environment-bash-path-with-spaces
     COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES -- bash -c "exit 0"
@@ -42,8 +42,8 @@ rocprofiler_add_integration_execute_test(
     PASS_REGULAR_EXPRESSION "Counter definitions file '/path/with spaces/metrics"
     FIXTURES_SETUP environment-bash-spaces)
 
-# Test 3: Multiple environment variables under bash
-# Validates that multiple ROCPROFILER_* env vars are all readable
+# Test 3: Multiple environment variables under bash Validates that multiple ROCPROFILER_*
+# env vars are all readable
 rocprofiler_add_integration_execute_test(
     environment-bash-multiple-vars
     COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES -- bash -c "exit 0"
@@ -81,9 +81,9 @@ if(ZSH_EXECUTABLE)
         FIXTURES_SETUP environment-zsh-test)
 endif()
 
-# Test 6: Bash with inline script (mimics user wrapper scripts)
-# Real-world scenario: users often wrap profiling commands in bash -c
-# This test also validates normal operation (no spurious warnings)
+# Test 6: Bash with inline script (mimics user wrapper scripts) Real-world scenario: users
+# often wrap profiling commands in bash -c This test also validates normal operation (no
+# spurious warnings)
 rocprofiler_add_integration_execute_test(
     environment-bash-inline-script
     COMMAND
