@@ -275,7 +275,7 @@ directly via `getenv()`.
 | `SQTT_INSTRUMENT_BARRIERS` | `0`, `1` | `0` | Instrument barriers. Consecutive signal+wait pairs fuse to a single marker. |
 | `SQTT_INSTRUMENT_MEMORY` | `N:M` | off | Instrument memory ops. N = ops per marker, M = max gap. `2:5` = 1 marker per 2 ops, sequence breaks at gap > 5. Covers global, buffer, flat (not LDS/scratch). |
 | `SQTT_TRACE_ADDRESSES` | `memory`, `lds`, or both | off | Trace per-lane virtual addresses. Mutually exclusive with `SQTT_INSTRUMENT_MEMORY`. `memory` = global/buffer/flat, `lds` = LDS (AS=3). Expensive. |
-| `SQTT_MEM_BARRIER` | `none` / `asm` / `fence` (or `0` / `1` / `2`) | `fence` | Reordering boundary planted around every marker. `fence` (default) emits `fence syncscope("workgroup") acq_rel`, lowering to `s_waitcnt lgkmcnt(0)` -- free in non-LDS code, anchors markers against post-RA sinking and block placement. `asm` plants an empty `~{memory}` inline asm (IR/MIR-only constraint, no machine code). `none` disables both. Default favors marker accuracy; opt down for tight kernels. |
+| `SQTT_MEM_BARRIER` | `none` / `asm` / `fence` (or `0` / `1` / `2`) | `fence` | Reordering boundary planted around every marker. `fence` (default) emits `fence syncscope("workgroup") acq_rel` tagged with AMDGPU local/LDS synchronization metadata, anchoring markers against optimizer and scheduler movement without marker-generated global cache invalidation. `asm` plants an empty `~{memory}` inline asm (IR/MIR-only constraint, no machine code). `none` disables both. Default favors marker accuracy; opt down for tight kernels. |
 
 ## Examples
 

@@ -25,6 +25,7 @@
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/Metadata.h"
 #include "llvm/Support/AtomicOrdering.h"
 
 using namespace llvm;
@@ -56,8 +57,9 @@ static bool isHardSchedBoundary(Instruction* I)
 // Emit a memory-reordering barrier per Config.MemBarrier:
 //   None       — nothing
 //   AsmClobber — empty inline asm with "~{memory}" (compiler fence only)
-//   Fence      — fence syncscope("workgroup") acq_rel; lowers to
-//                s_waitcnt lgkmcnt(0) on AMDGPU. Free in non-LDS regions.
+//   Fence      — fence syncscope("workgroup") acq_rel with AMDGPU MMRA
+//                metadata limiting hardware synchronization to LDS/local.
+//                The IR fence remains a compiler-visible ordering boundary.
 static void emitMemBarrier(IRBuilder<>& B, MemBarrierMode mode)
 {
     if (mode == MemBarrierMode::None) return;
@@ -71,7 +73,15 @@ static void emitMemBarrier(IRBuilder<>& B, MemBarrierMode mode)
     }
     // MemBarrierMode::Fence
     SyncScope::ID WG = Ctx.getOrInsertSyncScopeID("workgroup");
-    B.CreateFence(AtomicOrdering::AcquireRelease, WG);
+    FenceInst* F = B.CreateFence(AtomicOrdering::AcquireRelease, WG);
+
+    // SQTT markers do not read or write global memory; the fence exists to
+    // keep optimizers and schedulers from moving markers away from nearby
+    // memory operations.  AMDGPU's amdgpu-synchronize-as MMRA lets the backend
+    // keep the fence as an ordering boundary while avoiding global cache
+    // invalidation for this marker-only fence.
+    Metadata* LocalSyncAS[] = {MDString::get(Ctx, "amdgpu-synchronize-as"), MDString::get(Ctx, "local")};
+    F->setMetadata(LLVMContext::MD_mmra, MDNode::get(Ctx, LocalSyncAS));
 }
 
 void SQTTInstrumentPass::insertTraceMarker(IRBuilder<>& B, uint32_t markerID, Function& F, GfxGen gen)

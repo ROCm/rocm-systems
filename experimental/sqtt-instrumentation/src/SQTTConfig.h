@@ -91,9 +91,9 @@ enum class CostMode
 //   AsmClobber: empty inline asm with "~{memory}" — IR/MIR-level memory
 //               reorder constraint, no machine code.
 //   Fence:      fence syncscope("workgroup") acq_rel before AND after the
-//               marker. Lowers to s_waitcnt lgkmcnt(0); free in non-LDS
-//               code, may serialize LDS pipelining. Most accurate marker
-//               position. Default.
+//               marker, tagged as AMDGPU local/LDS synchronization. Preserves
+//               the compiler-visible marker boundary while avoiding global
+//               cache invalidation for marker-only fences. Default.
 enum class MemBarrierMode
 {
     None,
