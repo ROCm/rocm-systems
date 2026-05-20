@@ -35,7 +35,7 @@ version_number = f"{version_major}.{version_minor}.{version_patch}"
 # -- Project information -----------------------------------------------------
 project = "CUID"
 author = "Advanced Micro Devices, Inc."
-copyright = "Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved."
+copyright = "Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved."
 version = version_number
 release = version_number
 
