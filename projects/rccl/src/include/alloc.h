@@ -376,6 +376,14 @@ static inline ncclResult_t ncclCuMemFreeAddr(void *ptr, struct ncclMemManager* m
     INFO(NCCL_ALLOC, "ncclCuMemFreeAddr: Skipping free (process shutdown) pointer %p", ptr);
     return ncclSuccess;
   }
+
+  // RCCL: Skip if Suspend already unmapped this VA. The reservation is kept by Suspend and
+  // will be released by ncclMemManagerDestroy walking the entry list.
+  if (ncclMemEntryAlreadyReleased(manager, ptr)) {
+    INFO(NCCL_ALLOC, "ncclCuMemFreeAddr: %p already released by Suspend", ptr);
+    return ncclSuccess;
+  }
+
   ncclResult_t result = ncclSuccess;
   size_t totalSize = 0;
   for (int segment = 0; segment < numSegments; segment++) {
