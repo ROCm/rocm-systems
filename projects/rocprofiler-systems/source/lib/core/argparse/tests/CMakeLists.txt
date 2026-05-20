@@ -4,7 +4,9 @@
 add_library(
     argparse-tests
     OBJECT
+    test_core_flags_table.cpp
     test_flag_descriptor.cpp
+    test_parsed_values.cpp
     test_register_group.cpp
 )
 
