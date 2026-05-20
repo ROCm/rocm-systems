@@ -661,6 +661,8 @@ def _default_pairs(
         ('cdna1', 'rdna4'), ('cdna2', 'rdna3'), ('cdna2', 'rdna4'),
         ('cdna3', 'rdna3'), ('cdna3', 'rdna4'), ('cdna4', 'rdna3'),
         ('cdna4', 'rdna4'),
+        # CDNA downgrade used to run CDNA4 code objects on CDNA3 hosts.
+        ('cdna4', 'cdna3'),
         # Intra-RDNA upgrades
         ('rdna1', 'rdna2'), ('rdna1', 'rdna3'), ('rdna1', 'rdna4'),
         ('rdna2', 'rdna3'), ('rdna2', 'rdna4'), ('rdna3', 'rdna4'),
