@@ -113,8 +113,9 @@ private:
     struct AddrTraceEntry
     {
         uint32_t ID;
-        std::string Kind;      // "addr_trace_load", "addr_trace_store", etc.
-        std::string SourceLoc; // "file.hip:42" or "" if no debug info
+        std::string Kind;             // "addr_trace_load", "addr_trace_store", etc.
+        std::string SourceLoc;        // "file.hip:42" or "" if no debug info
+        uint32_t ExtraPayloadCount;   // following s_ttracedata records after the header
     };
     std::vector<AddrTraceEntry> AddrTraceEntries;
     unsigned AddrTraceWaveSize = 0; // set once during instrumentAddressTraces

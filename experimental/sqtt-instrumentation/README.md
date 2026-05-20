@@ -12,11 +12,18 @@ Zero runtime cost when disabled.
 ## Building the pass plugin
 
 ```bash
-cmake -B build
+cmake -B build -DCMAKE_PREFIX_PATH=/opt/rocm
 cmake --build build
 ```
 
 This produces `build/SQTTInstrumentPass.so`.
+
+Use `CMAKE_PREFIX_PATH` to select a specific ROCm installation:
+
+```bash
+cmake -B build-rocm713 -DCMAKE_PREFIX_PATH=/opt/rocm-7.13.0
+cmake --build build-rocm713
+```
 
 ## Quick start
 
@@ -156,11 +163,13 @@ python3 tools/sqtt_memory_trace.py trace_output/ --summary
 ```
 
 The trace protocol emits a header marker, the EXEC mask, and then
-per-lane addresses for all lanes (wave size determined from the ISA target
-and stored in the funcmap as `W:64` or `W:32`). The decoder filters by
-the EXEC mask to report only active lanes. The parser demultiplexes
-interleaved records from concurrent waves by grouping on `(cu, simd, wave_id)`
-before parsing each wave's address block.
+per-lane addresses for all lanes. The funcmap records the wave size as
+`W:64` or `W:32`, and address-trace header IDs get `R:ID:extra_payload_count=N`
+metadata for the number of following payload records. Markers without an
+`R:` row have an implicit count of zero. The decoder filters by the EXEC mask
+to report only active lanes. The parser demultiplexes interleaved records from
+concurrent waves by grouping on `(cu, simd, wave_id)` before parsing each
+wave's address block.
 
 ### Everything together
 

@@ -95,6 +95,14 @@ void SQTTInstrumentPass::emitFuncMap(Module& M)
             mapData += entry.SourceLoc;
         }
         mapData += '\n';
+        if (entry.ExtraPayloadCount > 0)
+        {
+            mapData += "R:";
+            mapData += std::to_string(entry.ID);
+            mapData += ":extra_payload_count=";
+            mapData += std::to_string(entry.ExtraPayloadCount);
+            mapData += '\n';
+        }
     }
 
     LLVMContext& Ctx = M.getContext();
