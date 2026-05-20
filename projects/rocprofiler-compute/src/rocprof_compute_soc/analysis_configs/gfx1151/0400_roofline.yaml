@@ -57,14 +57,11 @@ Panel Config:
         value: Value
         unit: Unit
       metric:
-        AI GL2:
+        AI L2:
           # Note: GL1-GL2 reads can be 32B, 64B, or 128B. Writes can be 32B or 64B.
           value: ( SUM($wave_size * SQ_INSTS_VALU_sum) / SUM((GL1C_GL2_REQ_READ_32B_sum*32 + GL1C_GL2_REQ_READ_64B_sum*64 + GL1C_GL2_REQ_READ_128B_sum*128) + (GL1C_GL2_REQ_WRITE_32B_sum*32 + GL1C_GL2_REQ_WRITE_64B_sum*64)) )
           unit: FLOPs/Byte
-        AI GL1:
-          value: ( SUM($wave_size * SQ_INSTS_VALU_sum) / SUM((TCP_GL1_REQ_READ_sum * 64) + (TCP_GL1_REQ_WRITE_sum * 64)) )
-          unit: FLOPs/Byte
-        AI GL0:
+        AI L1:
           value: ( SUM($wave_size * SQ_INSTS_VALU_sum) / SUM(TCP_REQ_sum * 64) )
           unit: FLOPs/Byte
         Performance (GFLOPs):
@@ -97,18 +94,14 @@ Panel Config:
       Achieved bandwidth for Local Data Share memory operations. LDS provides
       high-bandwidth, low-latency shared memory within a workgroup. Compare against
       peak to identify if LDS bandwidth is limiting performance.
-    AI GL2: >-
-      Arithmetic Intensity relative to the GL2 cache. This metric shows compute
-      density relative to GL2 cache traffic. Higher values indicate better cache reuse
-      at GL1, while lower values suggest significant GL1 miss rates.
-    AI GL1: >-
-      Arithmetic Intensity relative to the GL1 cache. This metric shows compute
-      density relative to GL1 cache traffic. Kernels with high AI GL1 but low AI GL0
-      benefit from GL0 cache locality.
-    AI GL0: >-
-      Arithmetic Intensity relative to the GL0 cache (TCP Cache). Higher values indicate
+    AI L2: >-
+      Arithmetic Intensity relative to the L2 cache. This metric shows compute
+      density relative to L2 cache traffic. Higher values indicate better data
+      reuse upstream of L2, while lower values suggest heavy traffic into L2.
+    AI L1: >-
+      Arithmetic Intensity relative to the L1 cache (TCP). Higher values indicate
       more compute operations per byte of data loaded, suggesting compute-bound
-      behavior. Lower values suggest memory-bound behavior limited by GL0 bandwidth.
+      behavior. Lower values suggest memory-bound behavior limited by L1 bandwidth.
     Performance (GFLOPs): >-
       Achieved compute throughput measured in billions of floating-point operations
       per second. This value, combined with arithmetic intensity, determines the

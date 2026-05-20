@@ -240,17 +240,13 @@ Roofline Performance Rates:
     rst: Achieved bandwidth for Local Data Share memory operations. LDS provides high-bandwidth, low-latency shared memory within a workgroup. Compare against peak to identify if LDS bandwidth is limiting performance.
     unit: Bytes/s
 Roofline Plot Points:
-  AI GL2:
-    plain: Arithmetic Intensity relative to the GL2 cache. This metric shows compute density relative to GL2 cache traffic. Higher values indicate better cache reuse at GL1, while lower values suggest significant GL1 miss rates.
-    rst: Arithmetic Intensity relative to the GL2 cache. This metric shows compute density relative to GL2 cache traffic. Higher values indicate better cache reuse at GL1, while lower values suggest significant GL1 miss rates.
+  AI L2:
+    plain: Arithmetic Intensity relative to the L2 cache. This metric shows compute density relative to L2 cache traffic. Higher values indicate better data reuse upstream of L2, while lower values suggest heavy traffic into L2.
+    rst: Arithmetic Intensity relative to the L2 cache. This metric shows compute density relative to L2 cache traffic. Higher values indicate better data reuse upstream of L2, while lower values suggest heavy traffic into L2.
     unit: FLOPs/Byte
-  AI GL1:
-    plain: Arithmetic Intensity relative to the GL1 cache. This metric shows compute density relative to GL1 cache traffic. Kernels with high AI GL1 but low AI GL0 benefit from GL0 cache locality.
-    rst: Arithmetic Intensity relative to the GL1 cache. This metric shows compute density relative to GL1 cache traffic. Kernels with high AI GL1 but low AI GL0 benefit from GL0 cache locality.
-    unit: FLOPs/Byte
-  AI GL0:
-    plain: Arithmetic Intensity relative to the GL0 cache (TCP Cache). Higher values indicate more compute operations per byte of data loaded, suggesting compute-bound behavior. Lower values suggest memory-bound behavior limited by GL0 bandwidth.
-    rst: Arithmetic Intensity relative to the GL0 cache (TCP Cache). Higher values indicate more compute operations per byte of data loaded, suggesting compute-bound behavior. Lower values suggest memory-bound behavior limited by GL0 bandwidth.
+  AI L1:
+    plain: Arithmetic Intensity relative to the L1 cache (TCP). Higher values indicate more compute operations per byte of data loaded, suggesting compute-bound behavior. Lower values suggest memory-bound behavior limited by L1 bandwidth.
+    rst: Arithmetic Intensity relative to the L1 cache (TCP). Higher values indicate more compute operations per byte of data loaded, suggesting compute-bound behavior. Lower values suggest memory-bound behavior limited by L1 bandwidth.
     unit: FLOPs/Byte
   Performance (GFLOPs):
     plain: Achieved compute throughput measured in billions of floating-point operations per second. This value, combined with arithmetic intensity, determines the kernel's position on the roofline chart for performance analysis.
