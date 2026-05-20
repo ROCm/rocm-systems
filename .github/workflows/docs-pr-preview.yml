@@ -1,0 +1,212 @@
+# Create a documentation preview in the pull request
+# --------------------------------------------------
+# This GitHub Actions workflow triggers by commenting '/docs-preview' on a PR.
+# It creates a new Read the Docs version for the PR branch and triggers a build.
+#
+# Key Steps:
+# 1. Use the script (.github/scripts/pr_detect_changed_subtrees.py) to detect changed project
+# 2. Get the PR branch name and derive the RTD version slug
+# 3. Activate the branch as a new version on Read the Docs (key difference from update-docs.yml)
+# 4. Trigger a build for that version
+# 5. Comment the preview URL back on the PR
+#
+# Note: if multiple projects are changed in one PR, only the first detected project is previewed.
+
+name: Docs Preview
+
+on:
+  issue_comment:
+    types: [created, edited]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # Only run when '/docs-preview' is commented on a PR by a member or owner
+    if: >-
+      github.event.issue.pull_request != null &&
+      contains(github.event.comment.body, '/docs-preview') &&
+      (github.event.comment.author_association == 'MEMBER' ||
+      github.event.comment.author_association == 'OWNER')
+    steps:
+      - name: Generate a token
+        id: generate-token
+        uses: actions/create-github-app-token@a8d616148505b5069dccd32f177bb87d7f39123b # v2.1.1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Checkout config files only
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          sparse-checkout: .github
+          sparse-checkout-cone-mode: true
+          token: ${{ steps.generate-token.outputs.token }}
+
+      - name: Set up Python
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: '3.10'
+
+      - name: Install python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pydantic requests
+
+      - name: Set up Git user
+        run: |
+          git config user.name "assistant-librarian[bot]"
+          git config user.email "assistant-librarian[bot]@users.noreply.github.com"
+
+      - name: Detect changed subtrees from PR
+        id: detect
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          python .github/scripts/pr_detect_changed_subtrees.py \
+            --repo "${{ github.repository }}" \
+            --pr "${{ github.event.issue.number }}" \
+            --config ".github/repos-config.json" \
+            --require-auto-push
+
+      - name: Extract first project
+        id: extract
+        run: |
+          # pr_detect_changed_subtrees.py returns a string of project names
+          # separated by "\n", i.e. "projects/rocprim\nprojects/hipblaslt\nshared/tensile"
+          # head -n1: extracts the first project, i.e. "projects/rocprim"
+          # cut -d'/' -f2:  cuts the "projects/" prefix, leaving "rocprim" for project_name
+          project=$(echo "${{ steps.detect.outputs.subtrees }}" | head -n1)
+          echo "project=$project" >> $GITHUB_OUTPUT
+          echo "project_name=$(echo "$project" | cut -d'/' -f2)" >> $GITHUB_OUTPUT
+
+      - name: Get PR branch
+        if: steps.extract.outputs.project
+        id: pr
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          PR_DATA=$(gh api repos/${{ github.repository }}/pulls/${{ github.event.issue.number }})
+          echo "branch=$(echo $PR_DATA | jq -r .head.ref)" >> $GITHUB_OUTPUT
+
+      - name: Derive RTD slugs and verify project exists
+        if: steps.extract.outputs.project
+        id: rtd
+        env:
+          RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
+        run: |
+          branch_name="${{ steps.pr.outputs.branch }}"
+          # Generate slug like 'user-me-my_test_branch' from 'user/me/my_test_branch'
+          version_slug="${branch_name//\//-}"
+          project_slug="advanced-micro-devices-${{ steps.extract.outputs.project_name }}"
+
+          echo "version_slug=$version_slug" >> $GITHUB_OUTPUT
+          echo "project_slug=$project_slug" >> $GITHUB_OUTPUT
+
+          # The API call returns upto 300 projects information from RTD
+          # jq extracts the project slug from the list
+          project_list=$(curl \
+            --connect-timeout 180 \
+            --header "Authorization: Token $RTD_TOKEN" \
+            "https://app.readthedocs.com/api/v3/projects/?expand=advanced-micro-devices&limit=300" \
+            | jq -r '.results[].slug')
+
+          if echo "$project_list" | grep -Fxq "$project_slug"; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+
+            # Fetch documentation URL
+            doc_url=$(curl \
+              --connect-timeout 180 \
+              --silent \
+              --header "Authorization: Token $RTD_TOKEN" \
+              "https://app.readthedocs.com/api/v3/projects/$project_slug/" \
+              | jq --raw-output '.urls.documentation')
+
+            # Strip trailing version segment (e.g. "latest/") to get the base url
+            doc_base=$(echo "$doc_url" | sed 's|/[^/]\+/\?$||')
+            echo "doc_base=$doc_base" >> $GITHUB_OUTPUT
+          else
+            echo "${{ steps.extract.outputs.project_name }} does not exist on Read the Docs, skipping."
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Sync RTD versions to discover PR branch
+        # Without a GitHub webhook configured on the repo, RTD is unaware of new branches.
+        # Triggering a sync forces RTD to re-scan the repository and register the PR branch
+        # as a version before we attempt to activate it in the next step.
+        if: steps.rtd.outputs.exists == 'true'
+        env:
+          RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
+        run: |
+          curl \
+            --connect-timeout 180 \
+            --fail \
+            --request POST \
+            --header "Authorization: Token $RTD_TOKEN" \
+            "https://app.readthedocs.com/api/v3/projects/${{ steps.rtd.outputs.project_slug }}/sync-versions/"
+
+      - name: Wait for RTD to register PR branch version
+        if: steps.rtd.outputs.exists == 'true'
+        env:
+          RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
+        run: |
+          declare version_url="https://app.readthedocs.com/api/v3/projects/${{ steps.rtd.outputs.project_slug }}/versions/${{ steps.rtd.outputs.version_slug }}/"
+
+          declare -i MAXIMUM_NUMBER_OF_POLLS=20
+          declare -i SLEEP_BETWEEN_POLLS_SECONDS=15
+
+          echo "Polling for version to appear: $version_url"
+          for i in $(seq 1 ${MAXIMUM_NUMBER_OF_POLLS}); do
+            status=$(curl --silent --output /dev/null --write-out "%{http_code}" \
+              --header "Authorization: Token $RTD_TOKEN" \
+              "$version_url")
+            if [ "$status" = "200" ]; then
+              echo "Version found after $i attempt(s)."
+              exit 0
+            fi
+            echo "Attempt $i: version not yet registered (HTTP $status), waiting 15s..."
+            sleep ${SLEEP_BETWEEN_POLLS_SECONDS}
+          done
+          echo "Timed out waiting for RTD to register version."
+          exit 1
+
+      - name: Activate PR branch as a new RTD version
+        if: steps.rtd.outputs.exists == 'true'
+        env:
+          RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
+        run: |
+          curl \
+            --connect-timeout 180 \
+            --fail \
+            --request PATCH \
+            --header "Authorization: Token $RTD_TOKEN" \
+            --header "Content-Type: application/json" \
+            --data '{"active": true, "hidden": true, "privacy_level": "private"}' \
+            "https://app.readthedocs.com/api/v3/projects/${{ steps.rtd.outputs.project_slug }}/versions/${{ steps.rtd.outputs.version_slug }}/"
+
+      - name: Trigger RTD build for PR branch
+        if: steps.rtd.outputs.exists == 'true'
+        env:
+          RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
+        run: |
+          curl \
+            --fail \
+            --silent \
+            --request POST \
+            --header "Authorization: Token $RTD_TOKEN" \
+            "https://app.readthedocs.com/api/v3/projects/${{ steps.rtd.outputs.project_slug }}/versions/${{ steps.rtd.outputs.version_slug }}/builds/"
+
+      - name: Comment RTD preview URL on PR
+        if: steps.rtd.outputs.exists == 'true'
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          preview_url="${{ steps.rtd.outputs.doc_base }}/${{ steps.rtd.outputs.version_slug }}/"
+          gh pr comment ${{ github.event.issue.number }} \
+            --repo ${{ github.repository }} \
+            --body "Docs preview for **${{ steps.extract.outputs.project_name }}** is building on Read the Docs: $preview_url \
+            (Note: If a pull request includes multiple projects, only the preview for the first project will be built.)"
