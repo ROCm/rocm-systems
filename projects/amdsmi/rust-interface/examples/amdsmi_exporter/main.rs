@@ -26,7 +26,7 @@ mod collectors;
 mod http_server;
 
 use crate::amdsmi_collectors::*;
-use clap::{App, Arg, SubCommand};
+use clap::{Arg, Command};
 use http_server::run_http_server;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -36,50 +36,44 @@ const APP_VERSION_STR: &str = "1.0";
 
 #[tokio::main]
 async fn main() {
-    // Parse command line arguments
-    let cli_matches = App::new("AMDSMI Exporter")
+    let cli_matches = Command::new("AMDSMI Exporter")
         .version(APP_VERSION_STR)
         .author("AMD <amd-smi.support@amd.com>")
         .about("Exports AMD SMI metrics")
         .subcommand(
-            SubCommand::with_name("list")
-                .about("Lists the supported GPUs and metrics' information")
+            Command::new("list").about("Lists the supported GPUs and metrics' information"),
         )
         .subcommand(
-            SubCommand::with_name("metric")
+            Command::new("metric")
                 .about("Exports AMD SMI metrics and runs the HTTP server")
                 .arg(
                     Arg::new("port")
                         .short('p')
                         .long("port")
                         .value_name("PORT")
-                        .help("Sets the port to listen on")
-                        .takes_value(true),
+                        .help("Sets the port to listen on"),
                 )
                 .arg(
                     Arg::new("gpu")
                         .short('g')
                         .long("gpu")
                         .value_name("GPU")
-                        .help("Sets the GPU BDF or the zero-based index of the socket ID and processor ID for export. Example: --gpu 0000:03:00.0 or --gpu 0.0. You can specify multiple GPUs separated by commas")
-                        .takes_value(true)
+                        .help("Sets the GPU BDF or the zero-based index of the socket ID and processor ID for export. Example: --gpu 0000:03:00.0 or --gpu 0.0. You can specify multiple GPUs separated by commas"),
                 )
                 .arg(
                     Arg::new("whitelist")
                         .short('w')
                         .long("whitelist")
                         .value_name("METRIC")
-                        .help("Comma-separated list of metric field names to include")
-                        .takes_value(true),
+                        .help("Comma-separated list of metric field names to include"),
                 )
                 .arg(
                     Arg::new("blacklist")
                         .short('b')
                         .long("blacklist")
                         .value_name("METRIC")
-                        .help("Comma-separated list of metric field names to exclude")
-                        .takes_value(true),
-                )
+                        .help("Comma-separated list of metric field names to exclude"),
+                ),
         )
         .get_matches();
 
@@ -99,9 +93,10 @@ async fn main() {
 }
 
 async fn export_metrics(arg_options: &clap::ArgMatches, collectors: &Arc<Mutex<AmdsmiCollectors>>) {
+    let default_port = "9898".to_string();
     let port: u16 = arg_options
         .get_one::<String>("port")
-        .unwrap_or(&"9898".to_string())
+        .unwrap_or(&default_port)
         .parse::<u16>()
         .unwrap_or_else(|_| {
             eprintln!("Invalid port number provided. Using default port 9898.");
@@ -128,6 +123,5 @@ async fn export_metrics(arg_options: &clap::ArgMatches, collectors: &Arc<Mutex<A
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
-    // Run the HTTP server
-    run_http_server(&collectors, addr).await;
+    run_http_server(collectors, addr).await;
 }

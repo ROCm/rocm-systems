@@ -243,7 +243,7 @@ impl AmdsmiCollectors {
                 println!("{:-<30}-+-{:-<10}-+-{:-<10}-+-{:-<50}", "", "", "", "");
 
                 // Collect metrics
-                for (_, collector) in &self.collectors {
+                for collector in self.collectors.values() {
                     let results = collector(*processor_handle);
                     for metric in results {
                         let value_str = if metric.status == AmdsmiStatusT::AmdsmiStatusSuccess {
@@ -329,7 +329,7 @@ impl AmdsmiCollectors {
                 }
 
                 // Collect metrics
-                for (_, collector) in &self.collectors {
+                for collector in self.collectors.values() {
                     let results = collector(*processor_handle);
                     for metric in results {
                         if metric.status == AmdsmiStatusT::AmdsmiStatusSuccess {

@@ -5,6 +5,8 @@ This rust crate provides Rust bindings for the AMD System Management Interface (
 ## Table of Contents
 
 - [Overview](#overview)
+- [Prerequisites](#prerequisites)
+- [Install from crates.io](#install-from-cratesio)
 - [Hello World Example](#hello-world-example)
 - [Directory Structure](#directory-structure)
 - [Building](#building)
@@ -24,80 +26,61 @@ The AMD SMI Rust binding crate automates the generation of bindings and ensures 
 2. **Implementing Safe Rust Wrappers**:
    - The generated bindings are then wrapped in safe Rust functions. These safe wrappers handle error checking, resource management, and provide a more idiomatic Rust interface. This ensures that users of the library can interact with the AMD SMI functions without dealing with unsafe code directly.
 
+## Prerequisites
+
+- Linux with the `amdgpu` kernel driver.
+- `libamd_smi.so` installed on the target system. It is provided by ROCm or can be built from the AMD-SMI source in `projects/amdsmi`.
+- At runtime, ensure `libamd_smi.so` is visible to the dynamic linker, for example:
+
+```sh
+export LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH
+```
+
+At build time, the crate locates `libamd_smi.so` in the following order:
+
+1. `AMDSMI_LIB_DIR`
+2. `./lib/` relative to the build directory
+3. `pkg-config --libs-only-L amd_smi`
+4. The most recent `/opt/rocm*/lib` directory
+
+If auto-detection fails, point Cargo directly at the library:
+
+```sh
+AMDSMI_LIB_DIR=/opt/rocm/lib cargo build
+```
+
+## Install from crates.io
+
+Add the crate to your `Cargo.toml`:
+
+```toml
+[dependencies]
+amdsmi = "26"
+```
+
+The Rust crate does not vendor the native AMD-SMI shared library. Users must install AMD-SMI separately through ROCm packages or a source build.
+
 ## Hello World Example
 Here is a simple "Hello World" example to get you started with the AMD SMI Rust bindings. This example initializes the AMD SMI library, retrieves the GPU information, and prints it to the console.
-```
+```rust
 use amdsmi::*;
 
-fn main() {
-    // Initialize the AMD SMI library
-    if let Err(e) = amdsmi_init(AmdsmiInitFlagsT::AmdsmiInitAmdGpus) {
-        eprintln!("Failed to initialize AMD SMI: {}", e);
-        return;
-    }
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let _smi = AmdSmiGuard::new(AmdsmiInitFlagsT::AmdsmiInitAmdGpus)?;
 
-    // Get socket handles
-    let socket_handles = match amdsmi_get_socket_handles() {
-        Ok(handles) => handles,
-        Err(e) => {
-            eprintln!("Failed to get socket handles: {}", e);
-            amdsmi_shut_down().expect("Failed to shutdown AMD SMI");
-            return;
-        }
-    };
-
-    for socket_handle in socket_handles {
-        // Get processor handles for each socket handle
-        let processor_handles = match amdsmi_get_processor_handles(socket_handle) {
-            Ok(handles) => handles,
-            Err(e) => {
-                eprintln!(
-                    "Failed to get processor handles for socket {:?}: {}",
-                    socket_handle, e
-                );
-                continue;
-            }
-        };
-
-        for processor_handle in processor_handles {
-            // Get GPU ID using the processor handle
-            match amdsmi_get_gpu_id(processor_handle) {
-                Ok(gpu_id) => println!("GPU ID: {}", gpu_id),
-                Err(e) => eprintln!("Failed to get GPU ID: {}", e),
-            }
-
-            // Get GPU revision using the processor handle
-            match amdsmi_get_gpu_revision(processor_handle) {
-                Ok(gpu_revision) => println!("GPU Revision: {}", gpu_revision),
-                Err(e) => eprintln!("Failed to get GPU revision: {}", e),
-            }
-
-            // Get GPU vendor name using the processor handle
-            match amdsmi_get_gpu_vendor_name(processor_handle) {
-                Ok(gpu_vendor_name) => println!("GPU Vendor Name: {}", gpu_vendor_name),
-                Err(e) => eprintln!("Failed to get GPU vendor name: {}", e),
-            }
-
-            // Get GPU VRAM vendor using the processor handle
-            match amdsmi_get_gpu_vram_vendor(processor_handle) {
-                Ok(gpu_vram_vendor) => println!("GPU VRAM Vendor: {}", gpu_vram_vendor),
-                Err(e) => eprintln!("Failed to get GPU VRAM vendor: {}", e),
-            }
-
-            // Get GPU BDF using the processor handle
-            match amdsmi_get_gpu_device_bdf(processor_handle) {
-                Ok(gpu_bdf) => println!("GPU BDF: {}", gpu_bdf),
-                Err(e) => eprintln!("Failed to get GPU BDF: {}", e),
-            }
+    for socket_handle in amdsmi_get_socket_handles()? {
+        for processor_handle in amdsmi_get_processor_handles(socket_handle)? {
+            println!("GPU ID: {}", amdsmi_get_gpu_id(processor_handle)?);
+            println!("GPU Revision: {}", amdsmi_get_gpu_revision(processor_handle)?);
+            println!("GPU Vendor Name: {}", amdsmi_get_gpu_vendor_name(processor_handle)?);
+            println!("GPU VRAM Vendor: {}", amdsmi_get_gpu_vram_vendor(processor_handle)?);
+            println!("GPU BDF: {}", amdsmi_get_gpu_device_bdf(processor_handle)?);
 
             println!();
         }
     }
 
-    // Shutdown the AMD SMI library
-    if let Err(e) = amdsmi_shut_down() {
-        eprintln!("Failed to shutdown AMD SMI: {}", e);
-    }
+    Ok(())
 }
 ```
 

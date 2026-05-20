@@ -20,17 +20,20 @@
 use std::fmt;
 
 // Re-export all the alias type
-pub use crate::amdsmi_wrapper::{AmdsmiEventHandleT, AmdsmiProcessorHandle, AmdsmiSocketHandle};
+pub use crate::amdsmi_wrapper::{
+    AmdsmiEventHandleT, AmdsmiNodeHandle, AmdsmiProcessorHandle, AmdsmiSocketHandle,
+};
 
 // Re-export all the enums type
 pub use crate::amdsmi_wrapper::{
-    AmdsmiCachePropertyTypeT, AmdsmiCardFormFactorT, AmdsmiClkLimitTypeT, AmdsmiClkTypeT,
-    AmdsmiComputePartitionTypeT, AmdsmiCounterCommandT, AmdsmiDevPerfLevelT, AmdsmiEventGroupT,
-    AmdsmiEventTypeT, AmdsmiEvtNotificationTypeT, AmdsmiFreqIndT, AmdsmiFwBlockT, AmdsmiGpuBlockT,
-    AmdsmiInitFlagsT, AmdsmiLinkTypeT, AmdsmiMemoryPartitionTypeT, AmdsmiMemoryTypeT,
-    AmdsmiPowerProfilePresetMasksT, AmdsmiRasErrStateT, AmdsmiStatusT,
-    AmdsmiTemperatureMetricT, AmdsmiTemperatureTypeT, AmdsmiUtilizationCounterTypeT,
-    AmdsmiVoltageMetricT, AmdsmiVoltageTypeT, AmdsmiXgmiStatusT, ProcessorTypeT, AmdsmiAcceleratorPartitionTypeT
+    AmdsmiAcceleratorPartitionTypeT, AmdsmiCachePropertyTypeT, AmdsmiCardFormFactorT,
+    AmdsmiClkLimitTypeT, AmdsmiClkTypeT, AmdsmiComputePartitionTypeT, AmdsmiCounterCommandT,
+    AmdsmiDevPerfLevelT, AmdsmiEventGroupT, AmdsmiEventTypeT, AmdsmiEvtNotificationTypeT,
+    AmdsmiFreqIndT, AmdsmiFwBlockT, AmdsmiGpuBlockT, AmdsmiInitFlagsT, AmdsmiLinkTypeT,
+    AmdsmiMemoryPartitionTypeT, AmdsmiMemoryTypeT, AmdsmiPowerProfilePresetMasksT,
+    AmdsmiRasErrStateT, AmdsmiStatusT, AmdsmiTemperatureMetricT, AmdsmiTemperatureTypeT,
+    AmdsmiUtilizationCounterTypeT, AmdsmiVoltageMetricT, AmdsmiVoltageTypeT, AmdsmiXgmiStatusT,
+    ProcessorTypeT,
 };
 
 // Re-export all the struct type
@@ -40,14 +43,14 @@ pub use crate::amdsmi_wrapper::{
     AmdsmiDriverInfoT, AmdsmiEngineUsageT, AmdsmiErrorCountT, AmdsmiEvtNotificationDataT,
     AmdsmiFreqVoltRegionT, AmdsmiFrequenciesT, AmdsmiFrequencyRangeT, AmdsmiFwInfoT,
     AmdsmiGpuCacheInfoT, AmdsmiGpuCacheInfoTCache, AmdsmiGpuMetricsT, AmdsmiKfdInfoT,
-    AmdsmiLinkMetricsT, AmdsmiLinkMetricsTLinks, AmdsmiNameValueT,
-    AmdsmiOdVoltFreqDataT, AmdsmiP2pCapabilityT, AmdsmiPcieBandwidthT, AmdsmiPcieInfoT,
-    AmdsmiPcieInfoTPcieMetric, AmdsmiPcieInfoTPcieStatic, AmdsmiPowerCapInfoT, AmdsmiPowerInfoT,
-    AmdsmiPowerProfileStatusT, AmdsmiProcInfoT, AmdsmiProcInfoTEngineUsage,
+    AmdsmiLinkMetricsT, AmdsmiLinkMetricsTLinks, AmdsmiNameValueT, AmdsmiNpsCapsT,
+    AmdsmiNpsCapsTNpsFlags, AmdsmiOdVoltFreqDataT, AmdsmiP2pCapabilityT, AmdsmiPcieBandwidthT,
+    AmdsmiPcieInfoT, AmdsmiPcieInfoTPcieMetric, AmdsmiPcieInfoTPcieStatic, AmdsmiPowerCapInfoT,
+    AmdsmiPowerInfoT, AmdsmiPowerProfileStatusT, AmdsmiProcInfoT, AmdsmiProcInfoTEngineUsage,
     AmdsmiProcInfoTMemoryUsage, AmdsmiProcessInfoT, AmdsmiRangeT, AmdsmiRasFeatureT,
     AmdsmiRegTypeT, AmdsmiRetiredPageRecordT, AmdsmiTopologyNearestT, AmdsmiUtilizationCounterT,
     AmdsmiVbiosInfoT, AmdsmiVersionT, AmdsmiViolationStatusT, AmdsmiVramInfoT, AmdsmiVramUsageT,
-    AmdsmiXgmiInfoT, AmdsmiNpsCapsT, AmdsmiNpsCapsTNpsFlags
+    AmdsmiXgmiInfoT,
 };
 
 //Re-export all the union type
@@ -100,7 +103,7 @@ macro_rules! cstr_to_string {
 // * `$($field_name),+` - The names of the fields for which the getter methods are being generated.
 //
 // # Example
-///
+//
 // ```rust
 //
 // use std::ffi::c_char;
@@ -136,6 +139,21 @@ impl fmt::Display for AmdsmiStatusT {
     }
 }
 
+/// Marks [`AmdsmiStatusT`] as a [`std::error::Error`] so it composes with the
+/// `?` operator on functions returning `Result<_, Box<dyn std::error::Error>>`
+/// or [`anyhow::Result`](https://docs.rs/anyhow).
+///
+/// # Example
+///
+/// ```
+/// use amdsmi::AmdsmiStatusT;
+///
+/// // Compile-time proof that AmdsmiStatusT: std::error::Error.
+/// fn _accept(_: &dyn std::error::Error) {}
+/// _accept(&AmdsmiStatusT::AmdsmiStatusUnknownError);
+/// ```
+impl std::error::Error for AmdsmiStatusT {}
+
 impl fmt::Display for AmdsmiBdfT {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.to_human_readable_string())
@@ -156,7 +174,14 @@ impl AmdsmiBdfT {
 }
 
 // Implement the getters for the C string fields in AmdsmiVbiosInfoT
-impl_cstr_getters!(AmdsmiVbiosInfoT, name, build_date, part_number, version, boot_firmware);
+impl_cstr_getters!(
+    AmdsmiVbiosInfoT,
+    name,
+    build_date,
+    part_number,
+    version,
+    boot_firmware
+);
 
 // Implement the getters for the C string fields in AmdsmiAsicInfoT
 impl_cstr_getters!(AmdsmiAsicInfoT, market_name, vendor_name, asic_serial);

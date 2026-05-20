@@ -97,6 +97,26 @@ add_custom_target(
     COMMENT "Build the AMD SMI Rust library"
 )
 
+add_custom_target(
+    amdsmi_rust_package
+    COMMAND
+        ${CMAKE_COMMAND} -E env AMDSMI_LIB_DIR=${PROJECT_BINARY_DIR}/src ${CARGO_EXECUTABLE} package --no-verify
+        --target-dir ${RUST_BUILD_DIR}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    DEPENDS ${AMD_SMI}
+    COMMENT "Package the AMD SMI Rust crate"
+)
+
+add_custom_target(
+    amdsmi_rust_publish_dryrun
+    COMMAND
+        ${CMAKE_COMMAND} -E env AMDSMI_LIB_DIR=${PROJECT_BINARY_DIR}/src ${CARGO_EXECUTABLE} publish --dry-run
+        --target-dir ${RUST_BUILD_DIR}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    DEPENDS ${AMD_SMI}
+    COMMENT "Validate the AMD SMI Rust crate for crates.io publishing"
+)
+
 if(BUILD_RUST_EXAMPLES)
     # Determine the build command for examples if enabled
     set(CARGO_BUILD_EXAMPLES_COMMAND

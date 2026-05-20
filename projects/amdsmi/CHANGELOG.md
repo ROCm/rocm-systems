@@ -13,6 +13,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Published Rust bindings to crates.io as `amdsmi` v26.4.0**.
+  - Added crates.io metadata, package validation helpers, and a manual release checklist for the `projects/amdsmi/rust-interface` crate.
+  - Added `AmdSmiGuard` for RAII-based AMD-SMI initialization and shutdown.
+  - Improved build discovery for `libamd_smi.so` with `AMDSMI_LIB_DIR`, pkg-config, and `/opt/rocm*/lib` support.
+
 - **Added APU metrics support (table versions 2.4 and 3.0)**.  
   - New `amdsmi_apu_metrics_t` struct accessible via `amdsmi_gpu_metrics_t.apu_metrics` pointer (non-null when APU-specific metrics are available).
   - **v2.4 metrics**:

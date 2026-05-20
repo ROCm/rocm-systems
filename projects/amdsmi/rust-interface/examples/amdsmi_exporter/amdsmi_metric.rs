@@ -44,6 +44,14 @@ pub struct AmdsmiMetric {
 }
 
 pub type AmdsmiCollector = Box<dyn Fn(AmdsmiProcessorHandle) -> Vec<AmdsmiMetric> + Send + Sync>;
+type AmdsmiGaugeAccessor<T> = Arc<dyn Fn(&T) -> i64 + Send + Sync>;
+type AmdsmiGaugeInfo<T> = (AmdsmiInfo, AmdsmiGaugeAccessor<T>);
+type AmdsmiGaugeInfoInput<T> = (
+    &'static str,           /* name */
+    &'static str,           /* description */
+    Unit,                   /* unit */
+    AmdsmiGaugeAccessor<T>, /* field accessor */
+);
 
 pub struct AmdsmiGauge<T, F>
 where
@@ -74,10 +82,7 @@ where
     F: Fn(AmdsmiProcessorHandle) -> AmdsmiResult<T> + Send + Sync + Clone,
 {
     pub name: &'static str, /* name of the group */
-    pub info_list: Vec<(
-        AmdsmiInfo,
-        Arc<dyn Fn(&T) -> i64 + Send + Sync>, /* field accessor */
-    )>,
+    pub info_list: Vec<AmdsmiGaugeInfo<T>>,
     pub func: F,
 }
 
@@ -87,12 +92,7 @@ where
 {
     pub fn new(
         name: &'static str, /* name of the group */
-        info_list: Vec<(
-            &'static str,                         /* name */
-            &'static str,                         /* description */
-            Unit,                                 /* unit */
-            Arc<dyn Fn(&T) -> i64 + Send + Sync>, /* field accessor */
-        )>,
+        info_list: Vec<AmdsmiGaugeInfoInput<T>>,
         func: F,
     ) -> Self {
         Self {

@@ -20,6 +20,11 @@
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #![allow(non_upper_case_globals)]
+#![allow(non_camel_case_types)]
+#![allow(clippy::useless_transmute)]
+#![allow(clippy::unnecessary_cast)]
+#![allow(clippy::enum_variant_names)]
+#![allow(clippy::empty_docs)]
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
