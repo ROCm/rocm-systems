@@ -658,6 +658,48 @@ set_tests_properties(
     PROPERTIES TIMEOUT 1800 LABELS "profile" RESOURCE_GROUPS gpus:1
 )
 
+add_test(
+    NAME test_torch_trace_so_loader
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_torch_trace_so_loader.xml ${COV_OPTION}
+        tests/test_torch_trace_so_loader.py ${WORKING_DIR_OPTION}
+)
+set_tests_properties(test_torch_trace_so_loader PROPERTIES TIMEOUT 300)
+
+add_test(
+    NAME test_torch_trace_cpp_tier_signature
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_torch_trace_cpp_tier_signature.xml ${COV_OPTION}
+        tests/test_torch_trace_cpp_tier_signature.py ${WORKING_DIR_OPTION}
+)
+set_tests_properties(test_torch_trace_cpp_tier_signature PROPERTIES TIMEOUT 60)
+
+add_test(
+    NAME test_torch_trace_worker_thread
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_torch_trace_worker_thread.xml ${COV_OPTION}
+        tests/test_torch_trace_worker_thread.py ${WORKING_DIR_OPTION}
+)
+set_tests_properties(
+    test_torch_trace_worker_thread
+    PROPERTIES TIMEOUT 600 LABELS "profile" RESOURCE_GROUPS gpus:1
+)
+
+add_test(
+    NAME test_torch_trace_seqnr_correlation
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_torch_trace_seqnr_correlation.xml ${COV_OPTION}
+        tests/test_torch_trace_seqnr_correlation.py ${WORKING_DIR_OPTION}
+)
+set_tests_properties(
+    test_torch_trace_seqnr_correlation
+    PROPERTIES TIMEOUT 600 LABELS "profile" RESOURCE_GROUPS gpus:1
+)
+
 # ---------------------------------------
 # Pure csv compatibility layer for pandas
 # ---------------------------------------
@@ -745,6 +787,8 @@ if(${ENABLE_COVERAGE})
         test_tui_components
         test_torch_trace_analysis
         test_torch_trace_coverage
+        test_torch_trace_so_loader
+        test_torch_trace_cpp_tier_signature
     )
 
     string(REPLACE ";" ";" ALL_TESTS_STRING "${ALL_TEST_NAMES}")
@@ -821,6 +865,16 @@ install(
     PATTERN "rooflines*" EXCLUDE
     PATTERN "__pycache__" EXCLUDE
 )
+# Opt-in pre-built roctx_recordfn pybind11 extension used by
+# --torch-trace. OFF by default: rocprof-compute does NOT pull
+# PyTorch as an install-time dependency -- the --torch-trace
+# subcommand only matters at runtime, when the user has already
+# activated their training-stack torch env, and the install-time
+# Python is almost never the runtime PyTorch env anyway. Packagers
+# baking a docker image against a fixed rocm-pytorch wheel can opt
+# in with -DTORCH_TRACE_PREBUILT=ON -DTORCH_TRACE_PYTHON=<python>;
+# see the subdirectory CMakeLists.txt for the full contract.
+add_subdirectory(src/utils/roctx_recordfn)
 # src/roofline
 install(
     DIRECTORY src/roofline

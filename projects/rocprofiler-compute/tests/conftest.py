@@ -197,6 +197,53 @@ def pytest_addoption(parser):
             "only the random ATen sample (default: 100)."
         ),
     )
+    parser.addoption(
+        "--require-cpp-tier",
+        action="store_true",
+        default=False,
+        help=(
+            "Strict C++ RecordFunction tier validation in "
+            "test_random_operator_kernel_coverage. ON BY DEFAULT; "
+            "fails the test on loader fallback to the Python tier, "
+            "missing forward sentinels, or missing backward sentinels. "
+            "This flag exists for explicitness."
+        ),
+    )
+    parser.addoption(
+        "--no-require-cpp-tier",
+        action="store_true",
+        default=False,
+        help=(
+            "Relax strict C++ tier validation. Tier degradation is "
+            "still reported via stdout + UserWarning. Use on hosts "
+            "where the .so cannot be built and a degraded Python-tier "
+            "run is acceptable."
+        ),
+    )
+    parser.addoption(
+        "--torch-trace-match-verbose",
+        action="store_true",
+        default=False,
+        help=(
+            "Per-op match logging in test_random_operator_kernel_coverage. "
+            "Prints matched marker leaves, ground-truth kernels, ROCTX "
+            "kernels, and their intersection for every sampled op."
+        ),
+    )
+
+
+@pytest.fixture
+def require_torch():
+    """Skip the test when PyTorch is unavailable. GPU is not required.
+
+    Use this for CPU-only torch tests that would otherwise need a
+    module-level ``pytest.skip(..., allow_module_level=True)`` guard.
+    Module-level skips collect zero items and make pytest exit with code
+    5 ("no tests collected"), which CTest interprets as a test failure;
+    per-test skips via this fixture leave the session at exit 0.
+    """
+    if importlib.util.find_spec("torch") is None:
+        pytest.skip("PyTorch is not installed")
 
 
 @pytest.fixture
@@ -208,6 +255,40 @@ def require_torch_gpu():
 
     if not torch.cuda.is_available():
         pytest.skip("torch.cuda.is_available() is False")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _warm_roctx_recordfn_so():
+    """Pre-build the roctx_recordfn .so once per pytest session.
+
+    The first time rocprof-compute --torch-trace runs in a fresh
+    cache, the loader builds the .so via cmake (typically ~20-60s
+    on a stock host). Without this fixture that cold-build cost
+    lands inside whichever test invocation happens to be first --
+    typically test_torch_trace_coverage -- and inflates its wall
+    time confusingly (a ~190s coverage run becomes a ~230s run, and
+    the bulk of the extra time is invisible to anyone reading the
+    test log because it happens inside the rocprof-compute subprocess).
+
+    Best-effort by design: torch missing, cmake missing, or any
+    build failure leaves the fixture as a silent no-op and the
+    actual test surfaces any real symptom. We never fail the test
+    session here because plenty of tests in this suite do not
+    exercise --torch-trace at all and shouldn't be penalised for
+    being unable to pre-warm.
+    """
+    if importlib.util.find_spec("torch") is None:
+        return
+    try:
+        from utils import inject_roctx_loader
+
+        inject_roctx_loader.load()
+    except Exception:
+        # The loader itself is responsible for emitting any
+        # diagnostic; swallowing here is intentional. Real-symptom
+        # tests (e.g. test_torch_trace_coverage) will surface the
+        # underlying issue with full context.
+        pass
 
 
 @pytest.fixture(autouse=True)
