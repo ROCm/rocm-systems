@@ -6,7 +6,7 @@
       "branch": "amd-staging",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true,
+      "auto_subtree_push": false,
       "monorepo_source_of_truth": true
     },
     {
@@ -24,7 +24,7 @@
       "branch": "develop",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true,
+      "auto_subtree_push": false,
       "monorepo_source_of_truth": true
     },
     {
@@ -33,7 +33,7 @@
       "branch": "develop",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true,
+      "auto_subtree_push": false,
       "monorepo_source_of_truth": true
     },
     {
@@ -42,7 +42,7 @@
       "branch": "develop",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true,
+      "auto_subtree_push": false,
       "monorepo_source_of_truth": true
     },
     {
@@ -51,7 +51,7 @@
       "branch": "develop",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true,
+      "auto_subtree_push": false,
       "monorepo_source_of_truth": true
     },
     {
@@ -60,7 +60,7 @@
       "branch": "amd-staging",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true,
+      "auto_subtree_push": false,
       "monorepo_source_of_truth": true
     },
     {
@@ -69,7 +69,7 @@
       "branch": "amd-mainline",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true,
+      "auto_subtree_push": false,
       "monorepo_source_of_truth": true
     },
     {
@@ -78,7 +78,7 @@
       "branch": "amd-staging",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true,
+      "auto_subtree_push": false,
       "monorepo_source_of_truth": true
     },
     {
@@ -87,7 +87,7 @@
       "branch": "amd-staging",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true,
+      "auto_subtree_push": false,
       "monorepo_source_of_truth": true
     },
     {
@@ -141,7 +141,7 @@
       "branch": "develop",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true,
+      "auto_subtree_push": false,
       "monorepo_source_of_truth": true
     },
     {
@@ -159,7 +159,7 @@
       "branch": "develop",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true,
+      "auto_subtree_push": false,
       "monorepo_source_of_truth": true
     },
     {
@@ -168,7 +168,7 @@
       "branch": "develop",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true,
+      "auto_subtree_push": false,
       "monorepo_source_of_truth": true
     },
     {
@@ -177,7 +177,7 @@
       "branch": "develop",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true,
+      "auto_subtree_push": false,
       "monorepo_source_of_truth": true
     },
     {
@@ -186,7 +186,7 @@
       "branch": "develop",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true,
+      "auto_subtree_push": false,
       "monorepo_source_of_truth": true
     },
     {
@@ -195,7 +195,7 @@
       "branch": "develop",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true,
+      "auto_subtree_push": false,
       "monorepo_source_of_truth": true
     },
     {
@@ -204,7 +204,7 @@
       "branch": "amd-staging",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true,
+      "auto_subtree_push": false,
       "monorepo_source_of_truth": true
     },
     {
@@ -213,7 +213,7 @@
       "branch": "amd-staging",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true,
+      "auto_subtree_push": false,
       "monorepo_source_of_truth": true
     },
     {
@@ -222,7 +222,7 @@
       "branch": "develop",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true,
+      "auto_subtree_push": false,
       "monorepo_source_of_truth": true
     }
   ]
