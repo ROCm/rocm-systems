@@ -3,6 +3,7 @@
 #include <cassert>
 #include "impl/wddm/gpu_memory.h"
 #include "impl/wddm/device.h"
+#include "shared/include/platform.h"
 #include "util/utils.h"
 
 using namespace std;
@@ -46,14 +47,22 @@ GpuMemory::GpuMemory(WDDMDevice *device) : device_(device) {
 }
 
 GpuMemory::~GpuMemory() {
-  if (GpuAddress() != 0 &&
+  bool evicted_before_destroy = false;
+  if (Platform::instance().WddmVersion() < KMT_DRIVERVERSION_WDDM_3_0 &&
+      GpuAddress() != 0 &&
       alloc_handles_ptr_ != nullptr && !(NumChunks() == 1 && *alloc_handles_ptr_ == 0) &&
-      !IsVirtual() && !IsPhysicalOnly()) {
+      !IsVirtual() && !IsPhysicalOnly() && !IsImported()) {
     // In WSL, destroying a still-resident allocation can block in
     // dxgallocation_destroy while Hyper-V tears down the GPADL.
-    Evict();
+    ErrorCode code = Evict();
+    evicted_before_destroy = true;
+    if (code != ErrorCode::Success)
+      pr_err("Failed to evict allocation before destroy: %s\n",
+             ErrorCodeToString(code));
   }
   FreeGpuVirtualAddress(GpuAddress(), Size());
+  if (evicted_before_destroy && !device_->WaitOnPagingFenceFromCpu())
+    pr_err("Failed to wait on paging fence before destroy\n");
   FreePhysicalMemory();
   if (desc_.handle_ape_addr > 0)
     dxg_runtime->HandleApertureFree(desc_.handle_ape_addr);

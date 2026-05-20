@@ -180,6 +180,11 @@ public:
   inline bool IsVirtual() const { return desc_.flags.is_virtual; }
   inline bool IsShared() const { return desc_.flags.is_shared; }
   inline bool IsExternal() const { return desc_.flags.is_external; }
+  inline bool IsImported() const {
+    return desc_.flags.is_imported_sys_memfd ||
+      desc_.flags.is_imported_vram_vmem ||
+      desc_.flags.is_imported_vram_ipc;
+  }
   inline bool IsVaAllocated() const { return desc_.flags.is_va_required; }
   inline bool IsBlitKernelObject() const { return desc_.flags.is_blit_kernel_object; }
 
