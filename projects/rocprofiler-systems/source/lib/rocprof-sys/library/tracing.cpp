@@ -108,7 +108,7 @@ make_synthetic_process_track(int pid)
 ::perfetto::Track
 get_active_process_track()
 {
-    const auto pid = core::perfetto_engine::get_emitting_pid();
+    const auto pid = core::get_emitting_pid();
     if(pid <= 0) return ::perfetto::ProcessTrack::Current();
     // When the logical pid being replayed is the OS process's own pid (the
     // common single-rank MPI case where each rank post-processes only its

@@ -467,7 +467,7 @@ perfetto_processor_t::prepare_for_processing()
     // process-global default. Tag the thread's emissions with our pid so
     // the cached interceptor TLS keys them correctly.
     if(m_tracks) set_active_track_registry(m_tracks);
-    if(m_engine) m_engine->set_emitting_pid(static_cast<int>(m_process_id));
+    if(m_engine) core::set_emitting_pid(static_cast<int>(m_process_id));
     // Emit the per-pid ProcessTrack descriptor up front so every per-pid
     // sink carries it (and so single_file concat shows the cached pid as
     // its own process, not the post-processing OS pid).

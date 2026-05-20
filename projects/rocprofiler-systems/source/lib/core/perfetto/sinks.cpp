@@ -231,9 +231,9 @@ per_pid_file_sink::finalize()
 namespace
 {
 // Trace.packets framing wire tag: field 1, wire type 2 (length-delimited).
-constexpr std::uint8_t k_trace_packets_tag = 0x0A;
+constexpr std::uint8_t TRACE_PACKETS_TAG = 0x0A;
 // TracePacket.trusted_packet_sequence_id wire tag: field 10, wire type 0 (varint).
-constexpr std::uint8_t k_trusted_seq_id_tag = 0x50;
+constexpr std::uint8_t TRUSTED_SEQ_ID_TAG = 0x50;
 
 bool
 read_varint(const char* data, std::size_t size, std::size_t& pos, std::uint64_t& out)
@@ -312,14 +312,14 @@ rewrite_trace_packet(std::vector<char>& dst, const char* packet, std::size_t siz
         }
         if(value_end > size) return false;
 
-        if(tag == k_trusted_seq_id_tag) continue;  // re-emitted below
+        if(tag == TRUSTED_SEQ_ID_TAG) continue;  // re-emitted below
         rewritten.insert(rewritten.end(), packet + tag_start, packet + value_end);
     }
 
-    rewritten.push_back(static_cast<char>(k_trusted_seq_id_tag));
+    rewritten.push_back(static_cast<char>(TRUSTED_SEQ_ID_TAG));
     append_varint(rewritten, new_seq_id);
 
-    dst.push_back(static_cast<char>(k_trace_packets_tag));
+    dst.push_back(static_cast<char>(TRACE_PACKETS_TAG));
     append_varint(dst, rewritten.size());
     dst.insert(dst.end(), rewritten.begin(), rewritten.end());
     return true;
@@ -343,7 +343,7 @@ single_file_sink::on_source_drained(int source_id, std::vector<char> bytes)
     while(pos < bytes.size())
     {
         auto tag = static_cast<std::uint8_t>(bytes[pos]);
-        if(tag != k_trace_packets_tag)
+        if(tag != TRACE_PACKETS_TAG)
         {
             LOG_ERROR("single_file_sink: source {} has malformed Trace.packets "
                       "framing at offset {} (tag=0x{:02x}); dropping remainder",

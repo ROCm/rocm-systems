@@ -115,7 +115,7 @@ process_buffered_storage(const std::shared_ptr<data::processor_config_t>& _confi
         ~tls_reset_guard()
         {
             ::rocprofsys::set_active_track_registry(nullptr);
-            ::rocprofsys::core::perfetto_engine::set_emitting_pid(-1);
+            ::rocprofsys::core::set_emitting_pid(-1);
         }
     } _tls_guard;
 

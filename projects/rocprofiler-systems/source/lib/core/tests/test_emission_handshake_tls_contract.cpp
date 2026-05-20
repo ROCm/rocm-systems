@@ -8,13 +8,13 @@
 
 #include <thread>
 
-// R1 (cross-pid isolation, unit-level): perfetto_processor_t::prepare_for_processing
-// performs a two-step TLS handshake on each parser thread —
+// perfetto_processor_t::prepare_for_processing performs a two-step TLS
+// handshake on each parser thread —
 //   set_active_track_registry(m_tracks);
-//   perfetto_engine::set_emitting_pid(m_process_id);
-// before the cached interceptor sees any TRACE_EVENT_*. This file verifies the
-// CONTRACT that handshake relies on: two threads each issuing the pair see
-// only their own values, and the caller thread is unaffected.
+//   core::set_emitting_pid(m_process_id);
+// before the cached interceptor sees any TRACE_EVENT_*. This file verifies
+// the contract that handshake relies on: two threads each issuing the pair
+// see only their own values, and the caller thread is unaffected.
 //
 // Engine-byte isolation (drain bytes don't cross pids) is covered by
 // perfetto_engine_cached.drain_two_sources_no_cross_bleed. End-to-end
@@ -32,13 +32,13 @@ prepared_state
 prepare_on_this_thread(rocprofsys::track_registry* tracks, int pid)
 {
     rocprofsys::set_active_track_registry(tracks);
-    rocprofsys::core::perfetto_engine::set_emitting_pid(pid);
+    rocprofsys::core::set_emitting_pid(pid);
     return { rocprofsys::get_active_track_registry(),
-             rocprofsys::core::perfetto_engine::get_emitting_pid() };
+             rocprofsys::core::get_emitting_pid() };
 }
 }  // namespace
 
-TEST(perfetto_processor_isolation,
+TEST(emission_handshake_tls_contract,
      prepare_handshake_on_two_threads_sees_no_cross_contamination)
 {
     rocprofsys::track_registry tracks_a;
@@ -58,10 +58,10 @@ TEST(perfetto_processor_isolation,
     EXPECT_EQ(observed_b.emitting_pid, 202);
 }
 
-TEST(perfetto_processor_isolation, prepare_on_worker_does_not_leak_to_caller)
+TEST(emission_handshake_tls_contract, prepare_on_worker_does_not_leak_to_caller)
 {
     rocprofsys::set_active_track_registry(nullptr);
-    rocprofsys::core::perfetto_engine::set_emitting_pid(-1);
+    rocprofsys::core::set_emitting_pid(-1);
 
     rocprofsys::track_registry tracks_worker;
 
@@ -69,24 +69,24 @@ TEST(perfetto_processor_isolation, prepare_on_worker_does_not_leak_to_caller)
     worker.join();
 
     EXPECT_EQ(rocprofsys::get_active_track_registry(), nullptr);
-    EXPECT_EQ(rocprofsys::core::perfetto_engine::get_emitting_pid(), -1);
+    EXPECT_EQ(rocprofsys::core::get_emitting_pid(), -1);
 }
 
-TEST(perfetto_processor_isolation, the_two_tls_systems_are_independent)
+TEST(emission_handshake_tls_contract, the_two_tls_systems_are_independent)
 {
     rocprofsys::set_active_track_registry(nullptr);
-    rocprofsys::core::perfetto_engine::set_emitting_pid(-1);
+    rocprofsys::core::set_emitting_pid(-1);
 
     rocprofsys::track_registry tracks;
 
     rocprofsys::set_active_track_registry(&tracks);
     EXPECT_EQ(rocprofsys::get_active_track_registry(), &tracks);
-    EXPECT_EQ(rocprofsys::core::perfetto_engine::get_emitting_pid(), -1);
+    EXPECT_EQ(rocprofsys::core::get_emitting_pid(), -1);
 
-    rocprofsys::core::perfetto_engine::set_emitting_pid(42);
+    rocprofsys::core::set_emitting_pid(42);
     EXPECT_EQ(rocprofsys::get_active_track_registry(), &tracks);
-    EXPECT_EQ(rocprofsys::core::perfetto_engine::get_emitting_pid(), 42);
+    EXPECT_EQ(rocprofsys::core::get_emitting_pid(), 42);
 
     rocprofsys::set_active_track_registry(nullptr);
-    rocprofsys::core::perfetto_engine::set_emitting_pid(-1);
+    rocprofsys::core::set_emitting_pid(-1);
 }

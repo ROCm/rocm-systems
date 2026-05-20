@@ -98,7 +98,7 @@ get_perfetto_track_uuids_mutex();
 
 // Returns the ProcessTrack the calling thread's emissions should parent
 // under. In the cached path, parser threads tag themselves with the
-// logical pid being replayed (perfetto_engine::set_emitting_pid); the
+// logical pid being replayed (core::set_emitting_pid); the
 // post-processing OS pid is unrelated to any cached pid, so deferring to
 // ProcessTrack::Current() would mis-attribute every cached event to the
 // post-processing process. Returns a synthetic ProcessTrack scoped to the
@@ -196,9 +196,9 @@ get_perfetto_category_uuid(Args&&... _args)
     // as a stable but distinct namespace.
     const auto seed = std::hash<std::string>{}(
         fmt::format("rocprofsys_{}", trait::name<CategoryT>::value));
-    return hash_combine_all(seed, std::forward<Args>(_args)...,
-                            static_cast<std::int64_t>(
-                                ::rocprofsys::core::perfetto_engine::get_emitting_pid()));
+    return hash_combine_all(
+        seed, std::forward<Args>(_args)...,
+        static_cast<std::int64_t>(::rocprofsys::core::get_emitting_pid()));
 }
 
 template <typename CategoryT, typename TrackT = ::perfetto::Track, typename FuncT,

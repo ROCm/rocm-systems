@@ -38,17 +38,17 @@ target_link_libraries(
 target_include_directories(perfetto-sinks-tests PRIVATE ${PROJECT_SOURCE_DIR}/source/lib)
 
 add_library(
-    perfetto-processor-isolation-tests
+    emission-handshake-tls-contract-tests
     OBJECT
-    test_perfetto_processor_isolation.cpp
+    test_emission_handshake_tls_contract.cpp
 )
 
 target_link_libraries(
-    perfetto-processor-isolation-tests
+    emission-handshake-tls-contract-tests
     PRIVATE rocprofiler-systems-googletest-library rocprofiler-systems-core-library
 )
 
 target_include_directories(
-    perfetto-processor-isolation-tests
+    emission-handshake-tls-contract-tests
     PRIVATE ${PROJECT_SOURCE_DIR}/source/lib
 )

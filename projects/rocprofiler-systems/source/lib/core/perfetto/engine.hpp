@@ -127,13 +127,6 @@ public:
     // Whether a session is currently active.
     bool is_running() const noexcept;
 
-    // Thread-local pid tag consumed by the cached-mode interceptor TLS to
-    // key each thread's emissions to a pid. Tagging threads is the
-    // emitter's responsibility — call set_emitting_pid(pid) before the
-    // first TRACE_EVENT_* on the thread.
-    static void set_emitting_pid(int pid) noexcept;
-    static int  get_emitting_pid() noexcept;
-
     // Called by the cached-mode interceptor TLS to append per-pid bytes
     // during emission. Public so the TU-private interceptor inside the
     // .cpp can reach it without crossing the private-member boundary; not
@@ -142,7 +135,19 @@ public:
 
 private:
     struct impl;
-    std::unique_ptr<impl> p_;
+    std::unique_ptr<impl> m_impl;
 };
+
+// Thread-local pid tag consumed by the cached-mode interceptor TLS to key
+// each thread's emissions to a pid. Tagging threads is the emitter's
+// responsibility — call set_emitting_pid(pid) before the first
+// TRACE_EVENT_* on the thread. Free functions because they operate on a
+// TU-local thread_local; the class scope these previously lived under
+// implied non-existent object state.
+void
+set_emitting_pid(int pid) noexcept;
+
+int
+get_emitting_pid() noexcept;
 }  // namespace core
 }  // namespace rocprofsys

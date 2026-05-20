@@ -79,34 +79,34 @@ TEST(perfetto_engine, destroy_session_idempotent)
 
 TEST(perfetto_engine, set_emitting_pid_round_trip)
 {
-    // The thread_local pid tag set by static set_emitting_pid is read back
-    // by static get_emitting_pid on the same thread.
-    rocprofsys::core::perfetto_engine::set_emitting_pid(4242);
-    EXPECT_EQ(rocprofsys::core::perfetto_engine::get_emitting_pid(), 4242);
+    // The thread_local pid tag set by set_emitting_pid is read back by
+    // get_emitting_pid on the same thread.
+    rocprofsys::core::set_emitting_pid(4242);
+    EXPECT_EQ(rocprofsys::core::get_emitting_pid(), 4242);
 
     // Reset for subsequent test cases on this thread.
-    rocprofsys::core::perfetto_engine::set_emitting_pid(-1);
+    rocprofsys::core::set_emitting_pid(-1);
 }
 
 TEST(perfetto_engine, emitting_pid_is_thread_local)
 {
-    // D4: emitting pid is per-thread. Setting on one thread must not leak
+    // emitting pid is per-thread. Setting on one thread must not leak
     // to other threads.
-    rocprofsys::core::perfetto_engine::set_emitting_pid(7777);
-    EXPECT_EQ(rocprofsys::core::perfetto_engine::get_emitting_pid(), 7777);
+    rocprofsys::core::set_emitting_pid(7777);
+    EXPECT_EQ(rocprofsys::core::get_emitting_pid(), 7777);
 
     int         observed_on_other_thread = 0;
     std::thread other{ [&observed_on_other_thread]() {
-        observed_on_other_thread = rocprofsys::core::perfetto_engine::get_emitting_pid();
+        observed_on_other_thread = rocprofsys::core::get_emitting_pid();
     } };
     other.join();
 
     EXPECT_EQ(observed_on_other_thread, -1)
         << "emitting pid must default to -1 on a fresh thread";
-    EXPECT_EQ(rocprofsys::core::perfetto_engine::get_emitting_pid(), 7777)
+    EXPECT_EQ(rocprofsys::core::get_emitting_pid(), 7777)
         << "main thread's tag must be unchanged by other thread's read";
 
-    rocprofsys::core::perfetto_engine::set_emitting_pid(-1);
+    rocprofsys::core::set_emitting_pid(-1);
 }
 
 TEST(perfetto_engine, forget_session_on_unknown_pid_is_noop)
