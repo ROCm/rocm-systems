@@ -5,9 +5,6 @@
 
 #include "common/environment.hpp"
 
-#include <timemory/settings/vsettings.hpp>
-#include <timemory/utility/argparse.hpp>
-
 #include <functional>
 #include <set>
 #include <string>
@@ -15,6 +12,20 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+
+// Forward declarations only — the timemory engine lives behind
+// argparse/detail/parser_engine.hpp, included by TUs that need the
+// complete types (interpreter.cpp, core_flags.cpp, parsed_values.cpp,
+// argparse.cpp). Public consumers of this header pay no timemory
+// include cost and bind only to references / pointers.
+namespace tim
+{
+struct vsettings;
+namespace argparse
+{
+struct argument_parser;
+}  // namespace argparse
+}  // namespace tim
 
 namespace rocprofsys
 {

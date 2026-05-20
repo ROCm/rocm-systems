@@ -8,6 +8,7 @@
 // tim::argparse::argument_parser parses synthetic argv.
 
 #include "core/argparse.hpp"
+#include "core/argparse/detail/parser_engine.hpp"
 #include "core/argparse/flag_descriptor.hpp"
 #include "core/argparse/interpreter.hpp"
 

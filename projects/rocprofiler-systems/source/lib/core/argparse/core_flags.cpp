@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 #include "core_flags.hpp"
+
 #include "common/env_vars.hpp"
+#include "detail/parser_engine.hpp"
 #include "exception.hpp"
 #include "flag_descriptor.hpp"
 #include "interpreter.hpp"

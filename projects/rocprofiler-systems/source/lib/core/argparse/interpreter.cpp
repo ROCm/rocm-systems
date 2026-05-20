@@ -7,6 +7,8 @@
 // (e.g. CLI11) is a focused change confined to this translation unit.
 
 #include "interpreter.hpp"
+
+#include "detail/parser_engine.hpp"
 #include "exception.hpp"
 
 #include <spdlog/fmt/fmt.h>

@@ -6,9 +6,12 @@ target_sources(
     PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}/core_flags.cpp
         ${CMAKE_CURRENT_LIST_DIR}/core_flags.hpp
+        ${CMAKE_CURRENT_LIST_DIR}/detail/parser_engine.hpp
         ${CMAKE_CURRENT_LIST_DIR}/flag_descriptor.hpp
         ${CMAKE_CURRENT_LIST_DIR}/interpreter.hpp
         ${CMAKE_CURRENT_LIST_DIR}/interpreter.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/parsed_values.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/parsed_values.hpp
 )
 
 if(ROCPROFSYS_BUILD_TESTING)
