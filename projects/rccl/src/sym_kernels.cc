@@ -91,7 +91,7 @@ static uint32_t kernelMask_user() {
 }
 
 NCCL_PARAM(SymCTAs, "SYM_CTAS", 0)
-RCCL_PARAM(SymModel, "SYM_MODEL", -1)
+RCCL_PARAM(SymModel, "SYM_MODEL", 0)
 
 enum rcclSymkColl { rcclSymkColl_AllReduce = 0, rcclSymkColl_AllGather = 1, rcclSymkColl_ReduceScatter = 2, rcclSymkColl_Count = 3 };
 enum rcclSymkProto { rcclSymkProto_LL = 0, rcclSymkProto_Simple = 1, rcclSymkProto_Count = 2 };
@@ -170,7 +170,6 @@ static int rcclSymkTuningModelIndex() {
       // Respect user setting
       s_cache = (int)env;
     }
-    INFO(NCCL_ENV, "Using RCCL_SYM_MODEL %ld", (long)env);
   }
   return s_cache;
 }
