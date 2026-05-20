@@ -209,6 +209,17 @@ TEST_F(DuplicatedEnvironmentEntriesTest, RocmEventsUsesCommaDelimiter)
                                "=SQ_WAVES:device=0,TA_TA_BUSY:device=1");
 }
 
+TEST_F(DuplicatedEnvironmentEntriesTest, RocmSpmEventsUsesCommaDelimiter)
+{
+    std::vector<std::string> env_vars = {
+        "ROCPROFSYS_ROCM_SPM_EVENTS=SQ_WAVES",
+        "ROCPROFSYS_ROCM_SPM_EVENTS=SQ_BUSY_CYCLES",
+    };
+    consolidate_env_entries(env_vars);
+    ASSERT_EQ(env_vars.size(), 1);
+    EXPECT_EQ(env_vars[0], "ROCPROFSYS_ROCM_SPM_EVENTS=SQ_WAVES,SQ_BUSY_CYCLES");
+}
+
 TEST_F(DuplicatedEnvironmentEntriesTest, RocmEventsPreservesDeviceSyntax)
 {
     std::vector<std::string> env_vars = {

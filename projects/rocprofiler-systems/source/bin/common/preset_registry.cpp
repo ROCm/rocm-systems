@@ -481,6 +481,16 @@ preset_registry::describe(std::string_view preset_name)
                 json_config::json_value_to_string(counters["rocm_events"]["value"]);
             lines.push_back("ROCm Events:     " + events);
         }
+        if(counters.contains("spm"))
+        {
+            const auto& spm = counters["spm"];
+            if(spm.value("enabled", false)) lines.emplace_back("ROCm SPM:        ON");
+            if(spm.contains("events"))
+            {
+                auto events = json_config::json_value_to_string(spm["events"]["value"]);
+                lines.push_back("ROCm SPM Events: " + events);
+            }
+        }
     }
 
     // Output: rocPD

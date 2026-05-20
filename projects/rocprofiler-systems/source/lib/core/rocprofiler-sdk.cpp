@@ -351,6 +351,30 @@ config_settings(const std::shared_ptr<settings>& _config)
         "is collected on every available device",
         "", "rocm", "hardware_counters");
 
+    ROCPROFSYS_CONFIG_SETTING(
+        bool, "ROCPROFSYS_ROCM_SPM_ENABLED",
+        "Enable beta ROCprofiler-SDK Streaming Performance Monitor (SPM) counter "
+        "collection. SPM is mutually exclusive with ROCPROFSYS_ROCM_EVENTS in the "
+        "initial beta.",
+        false, "rocm", "hardware_counters", "spm");
+
+    ROCPROFSYS_CONFIG_SETTING(
+        std::string, "ROCPROFSYS_ROCM_SPM_EVENTS",
+        "ROCm SPM hardware counters to collect. Comma-separated list of SPM-capable "
+        "counter names, e.g. SQ_WAVES.",
+        "", "rocm", "hardware_counters", "spm");
+
+    ROCPROFSYS_CONFIG_SETTING(std::uint64_t, "ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL",
+                              "Sampling interval for SPM counter collection.", 0, "rocm",
+                              "hardware_counters", "spm");
+
+    ROCPROFSYS_CONFIG_SETTING(
+        std::string, "ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL_UNIT",
+        "Sampling interval unit for SPM counter collection. Currently supported: "
+        "sclk_cycles.",
+        "sclk_cycles", "rocm", "hardware_counters", "spm")
+        ->set_choices({ "sclk_cycles" });
+
     _skip_domains.emplace("kernel_dispatch");
     _skip_domains.emplace("page_migration");
 
@@ -674,6 +698,34 @@ get_rocm_events()
         get_setting_value<std::string>(std::string{ env_vars::ROCM_EVENTS })
             .value_or(std::string{}),
         " ,;\t\n");
+}
+
+std::vector<std::string>
+get_rocm_spm_events()
+{
+    return tim::delimit(get_setting_value<std::string>("ROCPROFSYS_ROCM_SPM_EVENTS")
+                            .value_or(std::string{}),
+                        " ,;\t\n");
+}
+
+bool
+get_rocm_spm_enabled()
+{
+    return get_setting_value<bool>("ROCPROFSYS_ROCM_SPM_ENABLED").value_or(false);
+}
+
+std::uint64_t
+get_rocm_spm_sample_interval()
+{
+    return get_setting_value<std::uint64_t>("ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL")
+        .value_or(0);
+}
+
+std::string
+get_rocm_spm_sample_interval_unit()
+{
+    return get_setting_value<std::string>("ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL_UNIT")
+        .value_or(std::string{ "sclk_cycles" });
 }
 
 std::vector<std::int32_t>

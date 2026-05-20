@@ -1215,6 +1215,58 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         _data.reg.processed_environs.emplace("rocm_events");
     }
 
+    if(_data.reg.environ_filter("spm_events", _data))
+    {
+        _parser
+            .add_argument({ "--spm-events" },
+                          "Set beta SPM GPU hardware counter events to record")
+            .min_count(1)
+            .dtype("[EVENT ...]")
+            .action([&](parser_t& p) {
+                auto _events =
+                    fmt::format("{}", fmt::join(p.get<strvec_t>("spm-events"), ","));
+                update_env(_data, "ROCPROFSYS_ROCM_SPM_ENABLED", true);
+                update_env(_data, "ROCPROFSYS_ROCM_SPM_EVENTS", _events);
+            });
+
+        _data.reg.processed_environs.emplace("spm_events");
+        _data.reg.processed_environs.emplace("rocm_spm_events");
+        _data.reg.processed_environs.emplace("rocm_spm_enabled");
+    }
+
+    if(_data.reg.environ_filter("spm_sample_interval", _data))
+    {
+        _parser
+            .add_argument({ "--spm-sample-interval" },
+                          "Set beta SPM counter sampling interval")
+            .count(1)
+            .dtype("integral")
+            .action([&](parser_t& p) {
+                update_env(_data, "ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL",
+                           p.get<std::uint64_t>("spm-sample-interval"));
+            });
+
+        _data.reg.processed_environs.emplace("spm_sample_interval");
+        _data.reg.processed_environs.emplace("rocm_spm_sample_interval");
+    }
+
+    if(_data.reg.environ_filter("spm_sample_interval_unit", _data))
+    {
+        _parser
+            .add_argument({ "--spm-sample-interval-unit" },
+                          "Set beta SPM counter sampling interval unit")
+            .count(1)
+            .dtype("string")
+            .choices({ "sclk_cycles" })
+            .action([&](parser_t& p) {
+                update_env(_data, "ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL_UNIT",
+                           p.get<std::string>("spm-sample-interval-unit"));
+            });
+
+        _data.reg.processed_environs.emplace("spm_sample_interval_unit");
+        _data.reg.processed_environs.emplace("rocm_spm_sample_interval_unit");
+    }
+
     add_group_arguments(_parser, "category", _data, true);
     add_group_arguments(_parser, "io", _data, true);
     add_group_arguments(_parser, "perfetto", _data, true);

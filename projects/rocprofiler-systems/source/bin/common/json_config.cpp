@@ -399,6 +399,19 @@ resolve_schema_config(const nlohmann::json& config)
             resolve_value(result, hw, "papi_events", env_vars::PAPI_EVENTS);
             resolve_value(result, hw, "gpu_perf_counters", env_vars::GPU_PERF_COUNTERS);
         }
+        if(hw.contains("spm"))
+        {
+            const auto& spm = hw["spm"];
+            resolve_enabled(result, spm, "enabled", env_vars::ROCM_SPM_ENABLED);
+            if(!spm.contains("enabled") || spm["enabled"].get<bool>())
+            {
+                resolve_value(result, spm, "events", env_vars::ROCM_SPM_EVENTS);
+                resolve_value(result, spm, "sample_interval",
+                              env_vars::ROCM_SPM_SAMPLE_INTERVAL);
+                resolve_value(result, spm, "sample_interval_unit",
+                              env_vars::ROCM_SPM_SAMPLE_INTERVAL_UNIT);
+            }
+        }
         if(hw.contains("papi_multiplexing"))
             resolve_enabled(result, hw["papi_multiplexing"], "enabled",
                             env_vars::PAPI_MULTIPLEXING_ENABLED);
@@ -859,6 +872,27 @@ export_hardware_counters(nlohmann::json&                           config,
     {
         hw["enabled"]                    = true;
         hw["gpu_perf_counters"]["value"] = *v;
+    }
+    if(auto v = lookup(env_map, env_vars::ROCM_SPM_ENABLED))
+    {
+        hw["enabled"]        = true;
+        hw["spm"]["enabled"] = is_truthy(*v);
+    }
+    if(auto v = lookup(env_map, env_vars::ROCM_SPM_EVENTS))
+    {
+        hw["enabled"]                = true;
+        hw["spm"]["enabled"]         = true;
+        hw["spm"]["events"]["value"] = *v;
+    }
+    if(auto v = lookup(env_map, env_vars::ROCM_SPM_SAMPLE_INTERVAL))
+    {
+        hw["enabled"] = true;
+        set_json_int(hw["spm"]["sample_interval"]["value"], *v);
+    }
+    if(auto v = lookup(env_map, env_vars::ROCM_SPM_SAMPLE_INTERVAL_UNIT))
+    {
+        hw["enabled"]                              = true;
+        hw["spm"]["sample_interval_unit"]["value"] = *v;
     }
     export_enabled(config, env_map, env_vars::PAPI_MULTIPLEXING_ENABLED,
                    "hardware_counters", "papi_multiplexing");

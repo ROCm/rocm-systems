@@ -28,6 +28,7 @@
 #include "library/rocprofiler-sdk/fwd.hpp"
 #include "library/rocprofiler-sdk/kfd_events.hpp"
 #include "library/rocprofiler-sdk/rccl.hpp"
+#include "library/rocprofiler-sdk/spm.hpp"
 #include "library/rocprofiler-sdk/trace_control.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
@@ -2473,6 +2474,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     auto _callback_domains = rocprofiler_sdk::get_callback_domains();
     auto _buffered_domain  = rocprofiler_sdk::get_buffered_domains();
     auto _counter_events   = rocprofiler_sdk::get_rocm_events();
+    auto _spm_request      = rocprofiler_sdk::spm::get_request();
     auto _version          = rocprofiler_sdk::get_version();
     if(_version.formatted == 0)
     {
@@ -2481,6 +2483,12 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     auto* _data        = as_client_data(user_data);
     _data->client_fini = fini_func;
+
+    if(!rocprofiler_sdk::spm::validate_beta_request(_spm_request, _counter_events))
+    {
+        return -1;
+    }
+    rocprofiler_sdk::spm::prepare_beta_environment(_spm_request);
 
     _data->initialize();
     if(!_counter_events.empty()) _data->initialize_event_info();

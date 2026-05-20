@@ -225,6 +225,12 @@ inline constexpr const char* CAUSAL_FILE_RESET = "ROCPROFSYS_CAUSAL_FILE_RESET";
 // PAPI's C header (papi.h). The identifiers carry a trailing suffix to avoid
 // preprocessor substitution; the env-var strings retain the original names.
 inline constexpr const char* ROCM_EVENTS               = "ROCPROFSYS_ROCM_EVENTS";
+inline constexpr const char* ROCM_SPM_ENABLED          = "ROCPROFSYS_ROCM_SPM_ENABLED";
+inline constexpr const char* ROCM_SPM_EVENTS           = "ROCPROFSYS_ROCM_SPM_EVENTS";
+inline constexpr const char* ROCM_SPM_SAMPLE_INTERVAL =
+    "ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL";
+inline constexpr const char* ROCM_SPM_SAMPLE_INTERVAL_UNIT =
+    "ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL_UNIT";
 inline constexpr const char* PAPI_EVENTS               = "ROCPROFSYS_PAPI_EVENTS";
 inline constexpr const char* PAPI_MULTIPLEXING_ENABLED = "ROCPROFSYS_PAPI_MULTIPLEXING";
 inline constexpr const char* PAPI_FAIL_ON_ERROR        = "ROCPROFSYS_PAPI_FAIL_ON_ERROR";
