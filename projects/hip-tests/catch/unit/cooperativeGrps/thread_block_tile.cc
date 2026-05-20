@@ -1064,7 +1064,7 @@ __global__ void applyFunctor(ArrayContainer<NumElems>* result)
     input[threadIdx.x] = threadIdx.x;
   }
 
-  mytile.sync()
+  mytile.sync();
 
   if (threadIdx.x < NumElems) {
     *result = cg::reduce(mytile, input, op);
