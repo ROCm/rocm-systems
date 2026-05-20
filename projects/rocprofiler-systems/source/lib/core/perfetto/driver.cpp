@@ -109,8 +109,7 @@ live_perfetto_driver::stop()
 }
 
 void
-live_perfetto_driver::post_process(tim::manager*         timemory_manager,
-                                   bool&                 perfetto_output_error,
+live_perfetto_driver::post_process(bool&                 perfetto_output_error,
                                    output_file_registry& registry)
 {
     if(!m_engine) return;
@@ -131,7 +130,7 @@ live_perfetto_driver::post_process(tim::manager*         timemory_manager,
 
     m_engine->destroy_session(pid);
 
-    auto sink = core::live_fd_sink{ timemory_manager, &perfetto_output_error, registry };
+    auto sink = core::live_fd_sink{ &perfetto_output_error, registry };
     sink.on_source_drained(static_cast<int>(pid), std::move(bytes));
     sink.finalize();
 

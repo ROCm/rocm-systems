@@ -3,11 +3,6 @@
 
 #pragma once
 
-namespace tim
-{
-class manager;
-}
-
 namespace rocprofsys
 {
 
@@ -25,6 +20,6 @@ void
 stop();
 
 void
-post_process(tim::manager*, bool&, output_file_registry&);
+post_process(bool&, output_file_registry&);
 }  // namespace perfetto
 }  // namespace rocprofsys

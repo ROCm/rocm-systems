@@ -99,10 +99,9 @@ make_synthetic_process_track(int pid)
     // emitting under the same pid resolves to the same track. The
     // "rocprofsys_process" seed keeps this namespace disjoint from
     // category track uuids (which are seeded "rocprofsys_<category>").
-    auto _uuid = tim::hash::get_hash_id(
-        tim::hash::get_hash_id(std::string{ "rocprofsys_process" }),
-        static_cast<std::int64_t>(pid));
-    return ::perfetto::Track{ static_cast<std::uint64_t>(_uuid) };
+    const auto seed  = std::hash<std::string>{}(std::string{ "rocprofsys_process" });
+    const auto _uuid = hash_combine_all(seed, static_cast<std::int64_t>(pid));
+    return ::perfetto::Track{ _uuid };
 }
 }  // namespace
 

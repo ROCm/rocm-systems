@@ -58,8 +58,7 @@ public:
     void setup();
     void start();
     void stop();
-    void post_process(tim::manager* timemory_manager, bool& perfetto_output_error,
-                      output_file_registry& registry);
+    void post_process(bool& perfetto_output_error, output_file_registry& registry);
 
     // Drop the inherited TracingSession for parent_pid without destroying
     // the underlying session (the parent process owns it; calling .reset()

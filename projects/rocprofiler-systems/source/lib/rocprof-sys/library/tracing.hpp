@@ -49,8 +49,31 @@ namespace rocprofsys
 {
 namespace tracing
 {
-using interval_data_instances           = thread_data<std::vector<bool>>;
-using hash_value_t                      = tim::hash_value_t;
+using interval_data_instances = thread_data<std::vector<bool>>;
+using hash_value_t            = tim::hash_value_t;
+
+// Boost-style hash combiner. Used to derive deterministic Perfetto track
+// UUIDs from a string seed plus disambiguators (typically the emitting
+// pid). The 0x9e3779b97f4a7c17 constant is the 64-bit fractional part
+// of the golden ratio — the same value Boost's hash_combine and the
+// Perfetto SDK use.
+constexpr std::uint64_t
+hash_combine(std::uint64_t seed, std::uint64_t value) noexcept
+{
+    constexpr std::uint64_t golden_ratio = 0x9e3779b97f4a7c17ULL;
+    return seed ^ (value + golden_ratio + (seed << 6) + (seed >> 2));
+}
+
+template <typename... Args>
+inline std::uint64_t
+hash_combine_all(std::uint64_t seed, Args&&... args) noexcept
+{
+    ((seed =
+          hash_combine(seed, std::hash<std::decay_t<Args>>{}(std::forward<Args>(args)))),
+     ...);
+    return seed;
+}
+
 using perfetto_annotate_component_types = tim::mpl::available_t<type_list<
     comp::cpu_clock, comp::cpu_util, comp::kernel_mode_time, comp::num_major_page_faults,
     comp::num_minor_page_faults, comp::page_rss, comp::peak_rss, comp::papi_array_t,
@@ -171,12 +194,11 @@ get_perfetto_category_uuid(Args&&... _args)
     // category from different cached pids resolve to different tracks so the
     // single_file concat doesn't merge them. Live mode passes -1 and behaves
     // as a stable but distinct namespace.
-    return tim::hash::get_hash_id(
-        tim::hash::get_hash_id(
-            fmt::format("rocprofsys_{}", trait::name<CategoryT>::value)),
-        std::forward<Args>(_args)...,
-        static_cast<std::int64_t>(
-            ::rocprofsys::core::perfetto_engine::get_emitting_pid()));
+    const auto seed = std::hash<std::string>{}(
+        fmt::format("rocprofsys_{}", trait::name<CategoryT>::value));
+    return hash_combine_all(seed, std::forward<Args>(_args)...,
+                            static_cast<std::int64_t>(
+                                ::rocprofsys::core::perfetto_engine::get_emitting_pid()));
 }
 
 template <typename CategoryT, typename TrackT = ::perfetto::Track, typename FuncT,

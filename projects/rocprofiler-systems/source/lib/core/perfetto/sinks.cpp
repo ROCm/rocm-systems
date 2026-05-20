@@ -10,10 +10,8 @@
 #include "core/utility.hpp"
 #include "logger/debug.hpp"
 
-#include <timemory/manager/manager.hpp>
-#include <timemory/operations/types/file_output_message.hpp>
-
 #include <cerrno>
+#include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <ios>
@@ -26,14 +24,38 @@ namespace rocprofsys
 {
 namespace core
 {
+namespace
+{
+// Emits the user-facing "[rocprofsys][<rank>]> <file> perfetto (...)... Done"
+// stderr line that announces a written output file. Local to the perfetto
+// sinks until a project-wide file-write notification helper exists.
+void
+emit_size_line(const std::string& filename, std::size_t bytes)
+{
+    if(config::get_verbose() < 0) return;
+    std::fprintf(
+        stderr, "[rocprofsys][%i]> %s perfetto (%.2f KB / %.2f MB / %.2f GB)... Done\n",
+        dmp::rank(), filename.c_str(), static_cast<double>(bytes) / units::KB,
+        static_cast<double>(bytes) / units::MB, static_cast<double>(bytes) / units::GB);
+    std::fflush(stderr);
+}
+
+void
+emit_open_error_line(const std::string& filename)
+{
+    if(config::get_verbose() < 0) return;
+    std::fprintf(stderr, "[rocprofsys][%i]> Error opening '%s'...\n", dmp::rank(),
+                 filename.c_str());
+    std::fflush(stderr);
+}
+}  // namespace
+
 // ----------------------------------------------------------------------------
 // live_fd_sink
 // ----------------------------------------------------------------------------
 
-live_fd_sink::live_fd_sink(tim::manager* timemory_manager, bool* perfetto_output_error,
-                           output_file_registry& registry)
-: m_manager{ timemory_manager }
-, m_output_error{ perfetto_output_error }
+live_fd_sink::live_fd_sink(bool* perfetto_output_error, output_file_registry& registry)
+: m_output_error{ perfetto_output_error }
 , m_registry{ &registry }
 {}
 
@@ -58,6 +80,8 @@ live_fd_sink::finalize()
 #if defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0
     if(config::get_perfetto_combined_traces())
     {
+        // Held pending a project-local mpi gather helper that handles
+        // variable-size byte buffers and the collapse_processes setting.
         using perfetto_mpi_get_t = tim::operation::finalize::mpi_get<char_vec_t, true>;
 
         auto _trace_data = std::move(m_bytes);
@@ -89,25 +113,16 @@ live_fd_sink::finalize()
     {
         if(!trace_data.empty())
         {
-            operation::file_output_message<tim::project::rocprofsys> _fom{};
-            if(config::get_verbose() >= 0)
-                _fom(_filename, std::string{ "perfetto" },
-                     " (%.2f KB / %.2f MB / %.2f GB)... ",
-                     static_cast<double>(trace_data.size()) / units::KB,
-                     static_cast<double>(trace_data.size()) / units::MB,
-                     static_cast<double>(trace_data.size()) / units::GB);
             std::ofstream ofs{};
             if(!filepath::open(ofs, _filename, std::ios::out | std::ios::binary))
             {
-                _fom.append("Error opening '%s'...", _filename.c_str());
+                emit_open_error_line(_filename);
                 if(m_output_error) *m_output_error = true;
             }
             else
             {
                 ofs.write(trace_data.data(), trace_data.size());
-                if(config::get_verbose() >= 0) _fom.append("%s", "Done");  // NOLINT
-                if(m_manager)
-                    m_manager->add_file_output("protobuf", "perfetto", _filename);
+                emit_size_line(_filename, trace_data.size());
                 if(m_registry)
                     m_registry->register_file(_filename, output_format::perfetto);
             }
@@ -191,23 +206,16 @@ per_pid_file_sink::on_source_drained(int source_id, std::vector<char> bytes)
                   ? config::get_perfetto_output_filename()
                   : config::get_perfetto_output_filename_with_suffix(std::to_string(pid));
 
-    operation::file_output_message<tim::project::rocprofsys> _fom{};
-    if(config::get_verbose() >= 0)
-        _fom(_filename, std::string{ "perfetto" }, " (%.2f KB / %.2f MB / %.2f GB)... ",
-             static_cast<double>(bytes.size()) / units::KB,
-             static_cast<double>(bytes.size()) / units::MB,
-             static_cast<double>(bytes.size()) / units::GB);
-
     std::ofstream ofs{};
     if(!filepath::open(ofs, _filename, std::ios::out | std::ios::binary))
     {
-        _fom.append("Error opening '%s'...", _filename.c_str());
+        emit_open_error_line(_filename);
         LOG_ERROR("per_pid_file_sink: failed to open '{}' for pid {}", _filename, pid);
         return;
     }
 
     ofs.write(bytes.data(), bytes.size());
-    if(config::get_verbose() >= 0) _fom.append("%s", "Done");  // NOLINT
+    emit_size_line(_filename, bytes.size());
     if(m_registry) m_registry->register_file(_filename, output_format::perfetto);
     ofs.close();
 }
@@ -385,23 +393,16 @@ single_file_sink::finalize()
         return;
     }
 
-    operation::file_output_message<tim::project::rocprofsys> _fom{};
-    if(config::get_verbose() >= 0)
-        _fom(_filename, std::string{ "perfetto" }, " (%.2f KB / %.2f MB / %.2f GB)... ",
-             static_cast<double>(m_buffer.size()) / units::KB,
-             static_cast<double>(m_buffer.size()) / units::MB,
-             static_cast<double>(m_buffer.size()) / units::GB);
-
     std::ofstream ofs{};
     if(!filepath::open(ofs, _filename, std::ios::out | std::ios::binary))
     {
-        _fom.append("Error opening '%s'...", _filename.c_str());
+        emit_open_error_line(_filename);
         LOG_ERROR("single_file_sink: failed to open '{}'", _filename);
         return;
     }
 
     ofs.write(m_buffer.data(), m_buffer.size());
-    if(config::get_verbose() >= 0) _fom.append("%s", "Done");  // NOLINT
+    emit_size_line(_filename, m_buffer.size());
     if(m_registry) m_registry->register_file(_filename, output_format::perfetto);
     ofs.close();
 

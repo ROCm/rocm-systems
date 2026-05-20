@@ -12,11 +12,6 @@
 
 #include <sys/types.h>
 
-namespace tim
-{
-class manager;
-}
-
 namespace rocprofsys
 {
 class output_file_registry;
@@ -38,19 +33,17 @@ public:
 // Live-mode sink: receives the engine's drained bytes for the current pid,
 // runs the existing MPI gather (when ROCPROFSYS_USE_MPI is set), writes the
 // concatenated trace to disk, and runs rocprof-sys-merge-output.sh on rank 0.
-// Holds borrowed references to tim::manager / output_file_registry / a
+// Holds borrowed references to output_file_registry and a
 // perfetto_output_error flag that the driver consults after finalize.
 class live_fd_sink final : public trace_sink
 {
 public:
-    live_fd_sink(tim::manager* timemory_manager, bool* perfetto_output_error,
-                 output_file_registry& registry);
+    live_fd_sink(bool* perfetto_output_error, output_file_registry& registry);
 
     void on_source_drained(int source_id, std::vector<char> bytes) override;
     void finalize() override;
 
 private:
-    tim::manager*         m_manager{ nullptr };
     bool*                 m_output_error{ nullptr };
     output_file_registry* m_registry{ nullptr };
     std::vector<char>     m_bytes{};

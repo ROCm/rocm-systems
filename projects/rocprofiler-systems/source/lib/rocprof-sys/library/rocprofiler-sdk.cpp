@@ -2940,7 +2940,7 @@ tool_attach_fini(void* /* tool_data */)
         {
             bool                             _perfetto_output_error = false;
             rocprofsys::output_file_registry _output_registry{};
-            drv->post_process(nullptr, _perfetto_output_error, _output_registry);
+            drv->post_process(_perfetto_output_error, _output_registry);
             if(_perfetto_output_error)
                 LOG_ERROR("Perfetto output error occurred during attach finalization");
         }

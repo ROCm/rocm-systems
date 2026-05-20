@@ -1171,8 +1171,7 @@ rocprofsys_finalize_hidden(void)
     if(get_use_perfetto() && g_perfetto_driver)
     {
         LOG_DEBUG("Finalizing perfetto...");
-        g_perfetto_driver->post_process(_timemory_manager.get(), _perfetto_output_error,
-                                        _output_registry);
+        g_perfetto_driver->post_process(_perfetto_output_error, _output_registry);
     }
 
     {
