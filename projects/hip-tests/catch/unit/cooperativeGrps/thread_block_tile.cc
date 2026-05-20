@@ -1498,9 +1498,9 @@ TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Scan_arithmetic, int, unsigned in
 TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Scan_boolean, int, unsigned int, long long,
                    unsigned long long)
 {
-  std::tuple<cooperative_groups::plus<TestType>,
-             cooperative_groups::less<TestType>,
-             cooperative_groups::greater<TestType>> ops;
+  std::tuple<cooperative_groups::bit_and<TestType>,
+             cooperative_groups::bit_or<TestType>,
+             cooperative_groups::bit_xor<TestType>> ops;
 
   SECTION("inclusive") {
     if (getWarpSize() == 32) {
