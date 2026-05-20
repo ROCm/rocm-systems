@@ -33,7 +33,7 @@
 namespace profiler_hub::common::traits
 {
 
-namespace
+namespace impl
 {
 template <typename T>
 struct is_string_literal_impl : std::false_type
@@ -46,14 +46,14 @@ struct is_string_literal_impl<const char*> : std::true_type
 template <typename T>
 inline constexpr bool is_string_literal_impl_v = is_string_literal_impl<T>::value;
 
-}  // namespace
+}  // namespace impl
 
 template <typename T>
 constexpr bool
 is_string_literal()
 {
     using tp_t = std::decay_t<T>;
-    return is_string_literal_impl_v<tp_t>;
+    return impl::is_string_literal_impl_v<tp_t>;
 }
 
 template <typename T>

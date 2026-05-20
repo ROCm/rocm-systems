@@ -1,10 +1,10 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 //
-// Downstream consumer smoke test for the installed profiler_hub package.
+// Downstream consumer smoke test for the installed profiler-hub package.
 // Verifies that:
-//   - public headers are installed under <prefix>/include/profiler_hub/
-//   - find_package(profiler_hub) resolves the profiler_hub::profiler_hub target
+//   - public headers are installed under <prefix>/include/profiler-hub/
+//   - find_package(profiler-hub) resolves the profiler-hub::profiler-hub target
 //   - the library links and a public API symbol is reachable at runtime
 
 #include <profiler-hub/storage.hpp>
