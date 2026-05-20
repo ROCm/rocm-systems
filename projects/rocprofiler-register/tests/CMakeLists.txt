@@ -74,6 +74,7 @@ add_subdirectory(roctx)
 add_subdirectory(rccl)
 add_subdirectory(rocdecode)
 add_subdirectory(rocjpeg)
+add_subdirectory(hipfile)
 add_subdirectory(rocprofiler)
 
 #
@@ -300,6 +301,35 @@ rocp_register_test_executable(
         ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.rocprofiler.cpp..push. thread-main\n.rocprofiler.cpp..pop. thread-main\n"
     PRELOAD_WRAP_PASS_REGEX
         ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.rocprofiler.cpp..push. thread-main\n.rocprofiler.cpp..pop. thread-main\n"
+    )
+
+rocp_register_test_executable(
+    test-hipfile
+    SECURE ON
+    SOURCES test-hipfile.cpp
+    LIBRARIES rocprofiler-register::tests-strong hipfile::hipfile
+    CORE_PASS_REGEX
+        ".hipfile.cpp. hipFileGetVersion\n"
+    PRELOAD_PASS_REGEX
+        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hipFile :: 200 :: 0 :: 1\n.hipfile.cpp. hipFile identifier 49\n.hipfile.cpp. hipFileGetVersion\n"
+    WRAP_PASS_REGEX
+        ".hipfile.cpp. hipFileGetVersion\n"
+    PRELOAD_WRAP_PASS_REGEX
+        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hipFile :: 200 :: 0 :: 1\n.hipfile.cpp. hipFile identifier 49\n.rocprofiler.cpp. hipFileGetVersion\n"
+    )
+
+rocp_register_test_executable(
+    test-hipfile-weak
+    SOURCES test-hipfile.cpp
+    LIBRARIES rocprofiler-register::tests-weak
+    CORE_PASS_REGEX
+        ".fwd.hpp. dlopen libhipfile.so, 1\n.hipfile.cpp. hipFileGetVersion\n"
+    PRELOAD_PASS_REGEX
+        ".fwd.hpp. dlopen libhipfile.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hipFile :: 200 :: 0 :: 1\n.hipfile.cpp. hipFile identifier 49\n.hipfile.cpp. hipFileGetVersion\n"
+    WRAP_PASS_REGEX
+        ".fwd.hpp. dlopen libhipfile.so, 1\n.hipfile.cpp. hipFileGetVersion\n"
+    PRELOAD_WRAP_PASS_REGEX
+        ".fwd.hpp. dlopen libhipfile.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hipFile :: 200 :: 0 :: 1\n.hipfile.cpp. hipFile identifier 49\n.rocprofiler.cpp. hipFileGetVersion\n"
     )
 
 # multithreaded

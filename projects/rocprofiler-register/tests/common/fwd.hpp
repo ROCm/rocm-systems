@@ -28,6 +28,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <string>
+#include <string_view>
 
 #ifndef ROCP_REG_FILE_NAME
 #    define ROCP_REG_FILE_NAME                                                           \
@@ -45,6 +47,7 @@ decltype(roctxRangePush)*      roctxRangePush_fn      = nullptr;
 decltype(roctxRangePush)*      roctxRangePop_fn       = nullptr;
 decltype(rocDecCreateDecoder)* rocDecCreateDecoder_fn = nullptr;
 decltype(rocJpegStreamCreate)* rocJpegStreamCreate_fn = nullptr;
+decltype(hipFileGetVersion)*   hipFileGetVersion_fn   = nullptr;
 
 enum rocp_reg_test_modes : uint8_t
 {
@@ -55,6 +58,7 @@ enum rocp_reg_test_modes : uint8_t
     ROCP_REG_TEST_RCCL      = (1 << 3),
     ROCP_REG_TEST_ROCDECODE = (1 << 4),
     ROCP_REG_TEST_ROCJPEG   = (1 << 5),
+    ROCP_REG_TEST_HIPFILE   = (1 << 6),
 };
 
 template <uint8_t Idx = ROCP_REG_TEST_NONE>
@@ -104,6 +108,7 @@ resolve_symbols(int _open_mode = RTLD_LOCAL | RTLD_LAZY)
     void* rccl_handle      = nullptr;
     void* rocdecode_handle = nullptr;
     void* rocjpeg_handle   = nullptr;
+    void* hipfile_handle   = nullptr;
 
     if constexpr((Idx & ROCP_REG_TEST_HIP) == ROCP_REG_TEST_HIP)
     {
@@ -148,6 +153,13 @@ resolve_symbols(int _open_mode = RTLD_LOCAL | RTLD_LAZY)
         rocJpegStreamCreate_fn = rocJpegStreamCreate;
         if(!rocJpegStreamCreate_fn) _resolve_dlopen(rocjpeg_handle, "librocjpeg.so");
         _resolve_dlsym(rocJpegStreamCreate_fn, rocjpeg_handle, "rocJpegStreamCreate");
+    }
+
+    if constexpr((Idx & ROCP_REG_TEST_HIPFILE) == ROCP_REG_TEST_HIPFILE)
+    {
+        hipFileGetVersion_fn = hipFileGetVersion;
+        if(!hipFileGetVersion_fn) _resolve_dlopen(hipfile_handle, "libhipfile.so");
+        _resolve_dlsym(hipFileGetVersion_fn, hipfile_handle, "hipFileGetVersion");
     }
 }
 }  // namespace
