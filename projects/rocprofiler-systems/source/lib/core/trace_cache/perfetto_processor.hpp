@@ -66,6 +66,11 @@ private:
     template <typename CategoryT, typename FuncT, typename... Args>
     ::perfetto::Track get_or_create_track(CategoryT, FuncT&& desc_gen, Args&&... args);
 
+    template <typename CategoryT>
+    void emit_kfd_event(const kfd_sample& sample);
+    void handle_kfd_page_fault(const kfd_sample& sample);
+    void handle_kfd_page_migrate(const kfd_sample& sample);
+
     metadata_registry&                          m_metadata;
     std::uint64_t                               m_process_id;
     std::uint64_t                               m_parrent_pid;
@@ -76,9 +81,18 @@ private:
     bool                                        m_use_annotations{ false };
     bool                                        m_default_group_by_queue{ true };
 
-    std::unordered_map<size_t, pmc_track_info>           m_pmc_track_map;
+    std::unordered_map<size_t, pmc_track_info> m_pmc_track_map;
+    // Each perfetto_processor_t instance is owned by a single consumer thread
+    // for its entire lifetime (see process_buffered_storage in cache_manager.cpp).
+    // No synchronization is required for instance-local state below.
+    // Note: m_output_registry is shared across threads; it must be internally
+    // thread-safe.
     std::unordered_map<std::uint64_t, ::perfetto::Track> m_track_cache;
-    output_file_registry&                                m_output_registry;
+    std::unordered_map<std::uint32_t, agent_type>        m_kfd_node_type_cache;
+    // KFD node_id -> per-type GPU index matching kfd_sample.device_id.
+    std::unordered_map<std::uint32_t, std::uint32_t> m_kfd_node_to_gpu_index_cache;
+    std::map<std::uint32_t, std::uint64_t>           m_unified_memory_fault_counts;
+    output_file_registry&                            m_output_registry;
 };
 }  // namespace trace_cache
 }  // namespace rocprofsys

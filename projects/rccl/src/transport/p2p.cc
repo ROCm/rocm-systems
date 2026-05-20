@@ -131,6 +131,7 @@ ncclResult_t p2pCanConnect(int* ret, struct ncclComm* comm, struct ncclTopoGraph
   initCeOperation();
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   if (!info1->hasFineGrain || !info2->hasFineGrain)  {
+    TRACE(NCCL_P2P, "p2pCanConnect rank%d->rank%d: ret=0 hasFineGrain info1=%d info2=%d", info1->rank, info2->rank, info1->hasFineGrain, info2->hasFineGrain);
     *ret = 0;
     return ncclSuccess;
   }
@@ -138,7 +139,7 @@ ncclResult_t p2pCanConnect(int* ret, struct ncclComm* comm, struct ncclTopoGraph
 
   // Check topology / p2p level.
   int intermediateRank;
-  NCCLCHECK(ncclTopoCheckP2p(comm, comm->topo, info1->rank, info2->rank, ret, NULL, &intermediateRank));
+  NCCLCHECK(ncclTopoCheckP2p(comm, comm->topo, info1->rank, info2->rank, ret, NULL, &intermediateRank, NULL));
   if (*ret == 0) return ncclSuccess;
   if (intermediateRank != -1) {
     if (useMemcpy) *ret = 0;
@@ -236,6 +237,21 @@ ncclResult_t ncclP2pAllocateShareableBuffer(size_t size, int refcount, ncclIpcDe
       memcpy(&ipcDesc->cuDesc.data, &handle, sizeof(handle));
     } else {
       CUCHECK(cuMemExportToShareableHandle(&ipcDesc->cuDesc, handle, type, 0));
+#ifdef ENABLE_TRACE
+      unsigned char *hbytes = (unsigned char*)&ipcDesc->cuDesc;
+      static_assert(sizeof(ipcDesc->cuDesc) == 64, "cuDesc size changed — update handle byte-dump indices");
+      TRACE(NCCL_P2P, "ncclP2pAllocateShareableBuffer: exported handle[0..31]= %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x type=%d",
+           hbytes[0],hbytes[1],hbytes[2],hbytes[3],hbytes[4],hbytes[5],hbytes[6],hbytes[7],
+           hbytes[8],hbytes[9],hbytes[10],hbytes[11],hbytes[12],hbytes[13],hbytes[14],hbytes[15],
+           hbytes[16],hbytes[17],hbytes[18],hbytes[19],hbytes[20],hbytes[21],hbytes[22],hbytes[23],
+           hbytes[24],hbytes[25],hbytes[26],hbytes[27],hbytes[28],hbytes[29],hbytes[30],hbytes[31],
+           (int)type);
+      TRACE(NCCL_P2P, "ncclP2pAllocateShareableBuffer: exported handle[32..63]= %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x",
+           hbytes[32],hbytes[33],hbytes[34],hbytes[35],hbytes[36],hbytes[37],hbytes[38],hbytes[39],
+           hbytes[40],hbytes[41],hbytes[42],hbytes[43],hbytes[44],hbytes[45],hbytes[46],hbytes[47],
+           hbytes[48],hbytes[49],hbytes[50],hbytes[51],hbytes[52],hbytes[53],hbytes[54],hbytes[55],
+           hbytes[56],hbytes[57],hbytes[58],hbytes[59],hbytes[60],hbytes[61],hbytes[62],hbytes[63]);
+#endif
     }
     if (refcount) {
       memcpy(&ipcDesc->memHandle, &handle, sizeof(handle));
@@ -300,6 +316,22 @@ ncclResult_t ncclP2pImportShareableBuffer(struct ncclComm *comm, int peer, size_
       CUCHECK(cuMemImportFromShareableHandle(&handle, (void*)(uintptr_t)fd, type));
       SYSCHECK(close(fd), "close");
     } else {
+#ifdef ENABLE_TRACE
+      // Log handle bytes to verify correct data received cross-node
+      unsigned char *hbytes = (unsigned char*)cuDesc;
+      static_assert(sizeof(*cuDesc) == 64, "cuDesc size changed — update handle byte-dump indices");
+      TRACE(NCCL_P2P, "ncclP2pImportShareableBuffer: handle[0..31]= %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x type=%d dev=%d size=%zu",
+           hbytes[0],hbytes[1],hbytes[2],hbytes[3],hbytes[4],hbytes[5],hbytes[6],hbytes[7],
+           hbytes[8],hbytes[9],hbytes[10],hbytes[11],hbytes[12],hbytes[13],hbytes[14],hbytes[15],
+           hbytes[16],hbytes[17],hbytes[18],hbytes[19],hbytes[20],hbytes[21],hbytes[22],hbytes[23],
+           hbytes[24],hbytes[25],hbytes[26],hbytes[27],hbytes[28],hbytes[29],hbytes[30],hbytes[31],
+           (int)type, comm->cudaDev, size);
+      TRACE(NCCL_P2P, "ncclP2pImportShareableBuffer: handle[32..63]= %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x",
+           hbytes[32],hbytes[33],hbytes[34],hbytes[35],hbytes[36],hbytes[37],hbytes[38],hbytes[39],
+           hbytes[40],hbytes[41],hbytes[42],hbytes[43],hbytes[44],hbytes[45],hbytes[46],hbytes[47],
+           hbytes[48],hbytes[49],hbytes[50],hbytes[51],hbytes[52],hbytes[53],hbytes[54],hbytes[55],
+           hbytes[56],hbytes[57],hbytes[58],hbytes[59],hbytes[60],hbytes[61],hbytes[62],hbytes[63]);
+#endif
       CUCHECK(cuMemImportFromShareableHandle(&handle, (void*)cuDesc, type));
     }
     CUCHECK(cuMemAddressReserve(&dptr, size, /* alignment */ 0, /* addr */ 0, /* flags */ 0));
@@ -339,7 +371,7 @@ static ncclResult_t p2pGetInfo(struct ncclComm* comm, struct ncclPeerInfo* info1
   int p2p;
   // Queries the topology to see if the GPUs are Ampere and
   // connected via NVLink, if so we enable P2P Read by default
-  NCCLCHECK(ncclTopoCheckP2p(comm, comm->topo, info1->rank, info2->rank, &p2p, read, intermediateRank));
+  NCCLCHECK(ncclTopoCheckP2p(comm, comm->topo, info1->rank, info2->rank, &p2p, read, intermediateRank, NULL));
 
   int readEnable = ncclParamP2pReadEnable();
   if (readEnable != -2) *read = readEnable;
@@ -1199,4 +1231,9 @@ static void initCeOperation() {
     }
     init = 1;
   }
+}
+
+bool ncclP2pUsesMemcpy() {
+  initCeOperation();
+  return useMemcpy != 0;
 }

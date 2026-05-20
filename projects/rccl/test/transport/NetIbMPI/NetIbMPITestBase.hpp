@@ -8,6 +8,18 @@
 #define RCCL_TEST_NET_IB_MPI_TEST_BASE_HPP_
 
 #include <gtest/gtest.h>
+// Pre-seed the bf16 guard macros and pull in the new hip_bf16.h before
+// hip_runtime.h transitively includes the old hip_bfloat16.h. Otherwise
+// device.h's #error guard fires during the device-pass compile (the test
+// include path exposes the hipified librccl device.h via
+// ${PROJECT_BINARY_DIR}/hipify/src/include).
+#if defined(ROCM_VERSION) && ROCM_VERSION >= 60000
+  #if !defined(_HIP_INCLUDE_HIP_AMD_DETAIL_HIP_BFLOAT16_H_) && !defined(_HIP_BFLOAT16_H_)
+    #define _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_BFLOAT16_H_
+    #define _HIP_BFLOAT16_H_
+    #include <hip/hip_bf16.h>
+  #endif
+#endif
 #include <hip/hip_runtime.h>
 #include "MPITestBase.hpp"
 #include "NetIbCastInspect.hpp"
@@ -25,11 +37,13 @@
 #include <cstdio>
 #include <cstdlib>
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <sstream>
 #include <string>
 #include <dirent.h>
 #include <unistd.h>
@@ -66,6 +80,18 @@ using namespace RCCLTestHelpers;
                              << " (expected: " << (_v.required ? _v.required : "<any>") \
                              << "). Use cast_* configs in net_ib_transport.json.";       \
             }                                                                            \
+        }                                                                                \
+    } while (0)
+
+// Skip when RCCL_IB_QP_SCHED_UPDATE_INTERVAL is below min_us: tests that
+// assert exact per-send token state need the RTT-driven update suspended.
+#define CAST_REQUIRE_UPDATE_INTERVAL_OR_SKIP(min_us)                                     \
+    do {                                                                                 \
+        const char* _ui = getenv("RCCL_IB_QP_SCHED_UPDATE_INTERVAL");                    \
+        long long _v = (_ui && _ui[0]) ? std::atoll(_ui) : 0;                            \
+        if (_v < (long long)(min_us)) {                                                  \
+            GTEST_SKIP() << "Requires RCCL_IB_QP_SCHED_UPDATE_INTERVAL >= "             \
+                         << (long long)(min_us) << " us (current: " << _v << ")";        \
         }                                                                                \
     } while (0)
 
@@ -412,13 +438,42 @@ protected:
         ASSERT_EQ(PostRecv(recvComm, 1, bufs, sizes, tags, handles, request), ncclSuccess);
     }
 
+    // Returns true if the IB device has at least one routable GID (non-zero IPv4-mapped
+    // or global-scope IPv6). NICs with only link-local GIDs cannot do cross-node RDMA.
+    static bool HasRoutableGid(const char* devName) {
+        char path[PATH_MAX];
+        if (snprintf(path, sizeof(path), "/sys/class/infiniband/%s/ports/1/gids", devName) >= PATH_MAX)
+            return false;
+        DIR* d = opendir(path);
+        if (!d) return false;
+        struct dirent* ent;
+        bool found = false;
+        while ((ent = readdir(d)) != nullptr) {
+            if (ent->d_name[0] == '.') continue;
+            char gidPath[PATH_MAX];
+            snprintf(gidPath, sizeof(gidPath), "%s/%s", path, ent->d_name);
+            FILE* f = fopen(gidPath, "r");
+            if (!f) continue;
+            char gid[64] = {};
+            fscanf(f, "%63s", gid);
+            fclose(f);
+            // Skip all-zero GIDs and link-local (fe80::) GIDs
+            bool allZero = (strcmp(gid, "0000:0000:0000:0000:0000:0000:0000:0000") == 0);
+            bool linkLocal = (strncmp(gid, "fe80:", 5) == 0);
+            if (!allZero && !linkLocal) { found = true; break; }
+        }
+        closedir(d);
+        return found;
+    }
+
     // Helper: create a merged device from N physical NICs.
-    // Returns merged device index, or -1 if not enough devices / merge failed.
-    // physDevs: indices of physical (non-merged) devices
-    // props: device properties (indexed by device index)
-    // nNicsToMerge: how many NICs to merge (e.g., 2, 3, 4)
+    // Returns merged device index, or -1 if no suitable group found.
+    // Iterates speed groups (fastest-first by enumeration order). Within each
+    // group, slides a window of nNicsToMerge; skips windows containing a NIC
+    // without a routable GID (those can set up QPs but drop RDMA traffic cross-node).
+    // speedGroupStart: index into physDevs indicating which speed group to try first.
     // rank: MPI rank of this process
-    int CreateMergedDevice(int nNicsToMerge, int rank, int offset = 0)
+    int CreateMergedDevice(int nNicsToMerge, int rank, int speedGroupStart = 0)
     {
         if (nNicsToMerge <= 0 || nNicsToMerge > NCCL_NET_MAX_DEVS_PER_NIC) {
             fprintf(stderr,
@@ -426,8 +481,6 @@ protected:
                     rank, nNicsToMerge, NCCL_NET_MAX_DEVS_PER_NIC);
             return -1;
         }
-
-        int outMergedDev = -1;
 
         int ndev = 0;
         RCCL_TEST_CHECK(GetDeviceCount(&ndev));
@@ -442,38 +495,41 @@ protected:
                 physDevs.push_back(i);
         }
 
-        if (physDevs.size() < offset + 1) {
-            return -1;
-        }
+        if (speedGroupStart >= (int)physDevs.size()) return -1;
 
-        int targetSpeed = props[physDevs[offset]].speed;
+        // Build the speed group starting at speedGroupStart
+        int targetSpeed = props[physDevs[speedGroupStart]].speed;
         std::vector<int> compat;
         for (int d : physDevs)
             if (props[d].speed == targetSpeed) compat.push_back(d);
 
-        if ((int)compat.size() < nNicsToMerge * 2) {
-            return CreateMergedDevice(nNicsToMerge, rank, offset + 1);
+        // Try each consecutive window of nNicsToMerge within this speed group
+        for (int w = 0; w + nNicsToMerge <= (int)compat.size(); w++) {
+            bool routable = true;
+            for (int i = 0; i < nNicsToMerge; i++) {
+                const char* name = props[compat[w + i]].name;
+                if (name && !HasRoutableGid(name)) { routable = false; break; }
+            }
+            if (!routable) continue;
+
+            ncclNetVDeviceProps_t vProps;
+            memset(&vProps, 0, sizeof(vProps));
+            vProps.ndevs = nNicsToMerge;
+            for (int i = 0; i < nNicsToMerge; i++)
+                vProps.devs[i] = compat[w + i];
+
+            int outMergedDev = -1;
+            if (MakeVirtualDevice(&outMergedDev, &vProps) == ncclSuccess && outMergedDev >= 0)
+                return outMergedDev;
         }
 
-        int baseOffset = (rank % 2) ? nNicsToMerge : 0;
-        int finalOffset = baseOffset + offset;
+        // This speed group exhausted — advance to the next one
+        int nextStart = speedGroupStart;
+        while (nextStart < (int)physDevs.size() &&
+               props[physDevs[nextStart]].speed == targetSpeed)
+            nextStart++;
 
-        if (finalOffset + nNicsToMerge > (int)compat.size()) return -1;
-
-        ncclNetVDeviceProps_t vProps;
-        memset(&vProps, 0, sizeof(vProps));
-        vProps.ndevs = nNicsToMerge;
-        for (int i = 0; i < nNicsToMerge; i++)
-            vProps.devs[i] = compat[finalOffset + i];
-
-        if (MakeVirtualDevice(&outMergedDev, &vProps) != ncclSuccess || outMergedDev < 0) {
-            fprintf(stderr,
-                    "Rank %d failed to create %d-NIC merged device at offset %d, retrying with offset %d\n",
-                    rank, nNicsToMerge, offset, offset + 1);
-            return CreateMergedDevice(nNicsToMerge, rank, offset + 1);
-        }
-
-        return outMergedDev;
+        return CreateMergedDevice(nNicsToMerge, rank, nextStart);
     }
 
 
@@ -564,6 +620,319 @@ protected:
             PostSendWithRetry(sendComm, buf, size, tag, mhandle, &req);
             int sz = 0;
             ASSERT_EQ(WaitForCompletion(req, &sz, 10000), ncclSuccess);
+        }
+    }
+
+    // ===============================================================
+    // Stress test infrastructure
+    // ===============================================================
+
+    // Process count for multi-rank tests
+    static constexpr int kMinFourProcesses = 4;
+    // Timeout for stress tests
+    static constexpr int kStressTimeoutMs  = 60000;   // 60s
+
+    // ── RDMA resource leak detection ─────────────────────────────────
+    struct RdmaResourceCounts {
+        int qp = -1;
+        int cq = -1;
+        int mr = -1;
+        int pd = -1;
+        bool valid() const { return qp >= 0 && cq >= 0 && mr >= 0 && pd >= 0; }
+    };
+
+    static std::string ExecShellCommand(const char* cmd) {
+        std::array<char, 256> buf{};
+        std::string out;
+        FILE* pipe = popen(cmd, "r");
+        if (!pipe) return out;
+        while (fgets(buf.data(), buf.size(), pipe) != nullptr)
+            out += buf.data();
+        pclose(pipe);
+        return out;
+    }
+
+    static int CountNonEmptyLines(const std::string& text) {
+        std::istringstream iss(text);
+        std::string line;
+        int count = 0;
+        while (std::getline(iss, line))
+            if (!line.empty()) count++;
+        return count;
+    }
+
+    RdmaResourceCounts CaptureRdmaResources() {
+        RdmaResourceCounts counts;
+        std::string probe =
+            ExecShellCommand("sh -c 'rdma resource show qp >/dev/null 2>&1 && "
+                             "rdma resource show cq >/dev/null 2>&1 && "
+                             "rdma resource show mr >/dev/null 2>&1 && "
+                             "rdma resource show pd >/dev/null 2>&1 && echo OK'");
+        if (probe.find("OK") == std::string::npos) return counts;
+        // Filter to objects owned by this PID so concurrent processes on shared
+        // nodes do not cause spurious leak reports.
+        // `rdma resource show` lines contain "pid <N>"; grep for our PID.
+        // If the output format doesn't include "pid", fall back to system-wide count.
+        const std::string pid = std::to_string(getpid());
+        const std::string pidFilter = " pid " + pid + " ";
+        auto countOwned = [&](const char* resource) -> int {
+            std::string raw = ExecShellCommand(
+                (std::string("rdma resource show ") + resource + " 2>/dev/null").c_str());
+            // If any line contains our pid, count only those lines.
+            if (raw.find(pidFilter) != std::string::npos) {
+                std::istringstream iss(raw);
+                std::string line;
+                int n = 0;
+                while (std::getline(iss, line))
+                    if (!line.empty() && line.find(pidFilter) != std::string::npos) n++;
+                return n;
+            }
+            // PID not in output — fall back to system-wide count.
+            return CountNonEmptyLines(raw);
+        };
+        counts.qp = countOwned("qp");
+        counts.cq = countOwned("cq");
+        counts.mr = countOwned("mr");
+        counts.pd = countOwned("pd");
+        return counts;
+    }
+
+    void AssertNoRdmaLeaks(const RdmaResourceCounts& before,
+                           const RdmaResourceCounts& after,
+                           const char* label = "") {
+        int rank = MPIEnvironment::world_rank;
+        if (!before.valid() || !after.valid()) {
+            GTEST_LOG_(WARNING) << "RDMA resource counting unavailable on this node; "
+                                << "leak check skipped for: " << label;
+            return;
+        }
+        EXPECT_EQ(after.qp, before.qp)
+            << label << " QP leak on rank " << rank
+            << ": before=" << before.qp << " after=" << after.qp;
+        EXPECT_EQ(after.cq, before.cq)
+            << label << " CQ leak on rank " << rank
+            << ": before=" << before.cq << " after=" << after.cq;
+        EXPECT_EQ(after.mr, before.mr)
+            << label << " MR leak on rank " << rank
+            << ": before=" << before.mr << " after=" << after.mr;
+        EXPECT_EQ(after.pd, before.pd)
+            << label << " PD leak on rank " << rank
+            << ": before=" << before.pd << " after=" << after.pd;
+    }
+
+    // ── DoSendRecv: single-iteration pattern-verified transfer ──────
+    // Both ranks call together. Rank 0 recvs, rank 1 sends.
+    // patternSeed is used for both fill and verify.
+    void DoSendRecv(void* sendComm, void* recvComm,
+                    void* sendBuf, void* recvBuf,
+                    size_t size, int tag,
+                    void* sendMh, void* recvMh,
+                    int patternSeed, int timeoutMs = kDefaultTimeoutMs) {
+        const int rank = MPIEnvironment::world_rank;
+        void* req = nullptr;
+
+        if (rank == 0) {
+            PostSingleRecv(recvComm, recvBuf, size, tag, recvMh, &req);
+        } else {
+            if (size > 0)
+                fillHostBufferWithPattern<uint8_t>(sendBuf, size, makeBytePattern(patternSeed));
+            PostSendWithRetry(sendComm, sendBuf, size, tag, sendMh, &req);
+        }
+
+        int sz = 0;
+        // Use EXPECT_ (non-fatal) so both ranks always reach MPI_Barrier.
+        // ASSERT_ here would exit the failing rank before the barrier,
+        // leaving the other rank hung indefinitely.
+        EXPECT_EQ(WaitForCompletion(req, &sz, timeoutMs), ncclSuccess)
+            << "WaitForCompletion failed on rank " << rank << " tag=" << tag;
+
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        if (rank == 0 && size > 0) {
+            size_t errIdx; uint8_t errExp, errGot;
+            bool ok = verifyHostBufferData<uint8_t>(
+                recvBuf, size, makeBytePattern(patternSeed),
+                0, 0.0, &errIdx, &errExp, &errGot);
+            EXPECT_TRUE(ok) << "Data mismatch at byte " << errIdx
+                            << " (tag=" << tag << " seed=" << patternSeed << ")";
+        }
+    }
+
+    // ── Multi-rank connection helpers ────────────────────────────────
+    struct DirectedConnection {
+        int senderRank   = -1;
+        int receiverRank = -1;
+        void* sendComm   = nullptr;  // non-null on senderRank
+        void* recvComm   = nullptr;  // non-null on receiverRank
+        void* listenComm = nullptr;  // non-null on receiverRank
+    };
+
+    // Setup a point-to-point connection between two specific ranks.
+    // All ranks must call this together; non-participating ranks only hit the barrier.
+    void SetupDirectedConnection(int dev, DirectedConnection& conn,
+                                 int senderRank, int receiverRank,
+                                 int mpiTag = 0) {
+        const int rank = MPIEnvironment::world_rank;
+        conn.senderRank   = senderRank;
+        conn.receiverRank = receiverRank;
+        ncclNetHandle_t handle;
+        memset(&handle, 0, sizeof(handle));
+
+        // Use EXPECT_/ADD_FAILURE instead of ASSERT_ so that all ranks always
+        // reach MPI_Barrier even when a connection step fails.  ASSERT_ returns
+        // immediately on the failing rank, which leaves the other ranks stuck
+        // at the barrier indefinitely.
+        bool ok = true;
+        if (rank == receiverRank) {
+            ncclResult_t r = CreateListenComm(dev, &handle, &conn.listenComm);
+            EXPECT_EQ(r, ncclSuccess) << "CreateListenComm failed, rank=" << rank;
+            EXPECT_NE(conn.listenComm, nullptr);
+            ok = (r == ncclSuccess && conn.listenComm != nullptr);
+            if (ok) {
+                MPI_Send(&handle, sizeof(handle), MPI_BYTE, senderRank, mpiTag, MPI_COMM_WORLD);
+                for (int i = 0; i < kMaxRetryAttempts && conn.recvComm == nullptr; i++) {
+                    r = AcceptConnection(conn.listenComm, &conn.recvComm);
+                    EXPECT_EQ(r, ncclSuccess) << "AcceptConnection failed, rank=" << rank;
+                    if (!conn.recvComm) usleep(kPollIntervalUs);
+                }
+                EXPECT_NE(conn.recvComm, nullptr);
+            } else {
+                // Send a zeroed handle so the sender doesn't block on MPI_Recv.
+                MPI_Send(&handle, sizeof(handle), MPI_BYTE, senderRank, mpiTag, MPI_COMM_WORLD);
+            }
+        } else if (rank == senderRank) {
+            MPI_Recv(&handle, sizeof(handle), MPI_BYTE, receiverRank, mpiTag,
+                     MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            for (int i = 0; i < kMaxRetryAttempts && conn.sendComm == nullptr; i++) {
+                ncclResult_t r = ConnectToRemote(dev, &handle, &conn.sendComm);
+                EXPECT_EQ(r, ncclSuccess) << "ConnectToRemote failed, rank=" << rank;
+                if (!conn.sendComm) usleep(kPollIntervalUs);
+            }
+            EXPECT_NE(conn.sendComm, nullptr);
+        }
+        // All ranks synchronize — must be reached unconditionally.
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+
+    void CloseDirectedConnection(DirectedConnection& conn) {
+        const int rank = MPIEnvironment::world_rank;
+        if (rank == conn.senderRank && conn.sendComm) {
+            CloseSendComm(conn.sendComm);
+            conn.sendComm = nullptr;
+        }
+        if (rank == conn.receiverRank) {
+            if (conn.recvComm) {
+                CloseRecvComm(conn.recvComm);
+                conn.recvComm = nullptr;
+            }
+            if (conn.listenComm) {
+                CloseListenComm(conn.listenComm);
+                conn.listenComm = nullptr;
+            }
+        }
+    }
+
+    // Fan-in: multiple senders → one receiver
+    void SetupFanIn(int dev, int receiverRank,
+                    const std::vector<int>& senderRanks,
+                    std::vector<DirectedConnection>& conns) {
+        conns.resize(senderRanks.size());
+        for (size_t i = 0; i < senderRanks.size(); i++) {
+            SetupDirectedConnection(dev, conns[i], senderRanks[i], receiverRank,
+                                    /*mpiTag=*/100 + static_cast<int>(i));
+        }
+    }
+
+    // Fan-out: one sender → multiple receivers
+    void SetupFanOut(int dev, int senderRank,
+                     const std::vector<int>& receiverRanks,
+                     std::vector<DirectedConnection>& conns) {
+        conns.resize(receiverRanks.size());
+        for (size_t i = 0; i < receiverRanks.size(); i++) {
+            SetupDirectedConnection(dev, conns[i], senderRank, receiverRanks[i],
+                                    /*mpiTag=*/200 + static_cast<int>(i));
+        }
+    }
+
+    // All-to-all: N*(N-1) directed connections among numRanks
+    void SetupAllToAll(int dev, int numRanks,
+                       std::vector<DirectedConnection>& conns) {
+        conns.clear();
+        for (int src = 0; src < numRanks; src++) {
+            for (int dst = 0; dst < numRanks; dst++) {
+                if (src == dst) continue;
+                DirectedConnection c;
+                SetupDirectedConnection(dev, c, src, dst,
+                                        /*mpiTag=*/300 + src * numRanks + dst);
+                conns.push_back(std::move(c));
+            }
+        }
+    }
+
+    // Do a send/recv on a DirectedConnection. Both ranks call together.
+    // senderBuf is used on senderRank; receiverBuf on receiverRank.
+    void DoDirectedSendRecv(DirectedConnection& conn,
+                            void* senderBuf, void* receiverBuf,
+                            size_t size, int tag,
+                            void* senderMh, void* receiverMh,
+                            int patternSeed, int timeoutMs = kStressTimeoutMs) {
+        const int rank = MPIEnvironment::world_rank;
+        void* req = nullptr;
+        bool postOk = true;
+
+        // Post recv/send with non-fatal checks so we always reach MPI_Barrier.
+        // Using ASSERT_ here would skip the barrier on failure, deadlocking
+        // all other ranks that are not sender/receiver for this connection.
+        if (rank == conn.receiverRank) {
+            void*  bufs[1]    = {receiverBuf};
+            size_t sizes[1]   = {size};
+            int    tags[1]    = {tag};
+            void*  handles[1] = {receiverMh};
+            ncclResult_t r = PostRecv(conn.recvComm, 1, bufs, sizes, tags, handles, &req);
+            EXPECT_EQ(r, ncclSuccess) << "PostRecv failed, rank=" << rank;
+            postOk = (r == ncclSuccess && req != nullptr);
+        }
+        if (rank == conn.senderRank) {
+            if (size > 0)
+                fillHostBufferWithPattern<uint8_t>(senderBuf, size, makeBytePattern(patternSeed));
+            // Retry until FIFO slot is available (receiver hasn't posted yet).
+            int attempts = 0;
+            ncclResult_t r = ncclSuccess;
+            do {
+                r = PostSend(conn.sendComm, senderBuf, size, tag, senderMh, &req);
+                if (r != ncclSuccess || req != nullptr) break;
+                if (++attempts >= kMaxRetryAttempts) {
+                    ADD_FAILURE() << "PostSend NULL after " << attempts
+                                  << " retries, rank=" << rank << " tag=" << tag;
+                    postOk = false;
+                    break;
+                }
+                usleep(kPollIntervalUs);
+            } while (req == nullptr);
+            if (r != ncclSuccess) {
+                ADD_FAILURE() << "PostSend error " << r << ", rank=" << rank;
+                postOk = false;
+            }
+        }
+
+        // Wait for completion — non-fatal so MPI_Barrier is always reached.
+        if (req && postOk) {
+            int sz = 0;
+            ncclResult_t r = WaitForCompletion(req, &sz, timeoutMs);
+            EXPECT_EQ(r, ncclSuccess)
+                << "DoDirectedSendRecv timeout, rank=" << rank << " tag=" << tag;
+        }
+
+        // Unconditional barrier — every rank must reach this even on failure.
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        if (rank == conn.receiverRank && size > 0 && postOk) {
+            size_t errIdx; uint8_t errExp, errGot;
+            bool ok = verifyHostBufferData<uint8_t>(
+                receiverBuf, size, makeBytePattern(patternSeed),
+                0, 0.0, &errIdx, &errExp, &errGot);
+            EXPECT_TRUE(ok) << "Data mismatch at byte " << errIdx
+                            << " (tag=" << tag << " seed=" << patternSeed << ")";
         }
     }
 

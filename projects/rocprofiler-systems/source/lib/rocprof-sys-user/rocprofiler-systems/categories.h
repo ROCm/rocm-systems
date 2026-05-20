@@ -121,6 +121,8 @@ extern "C"
         ROCPROFSYS_CATEGORY_VAAPI,
         ROCPROFSYS_CATEGORY_TIMER_SAMPLING,
         ROCPROFSYS_CATEGORY_OVERFLOW_SAMPLING,
+        ROCPROFSYS_CATEGORY_UNIFIED_MEMORY_BANDWIDTH,
+        ROCPROFSYS_CATEGORY_UNIFIED_MEMORY_FAULT_RATE,
         ROCPROFSYS_CATEGORY_LAST
         // the value of below enum is used for iterating
         // over the enum in C++ templates. It MUST

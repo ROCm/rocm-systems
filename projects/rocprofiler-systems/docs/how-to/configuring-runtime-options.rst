@@ -298,7 +298,11 @@ Use the following command to view the available domains:
 
    * ``hip_api`` which will enable both ``hip_runtime_api`` and ``hip_compiler_api``.
    * ``hsa_api`` which will enable all hsa domains, ``hsa_core_api``, ``hsa_amd_ext_api``, ``hsa_image_exit_api``, and ``hsa_finalize_ext_api``.
-   * ``kfd_events`` which will enable all Kernel Fusion Driver (KFD) domains, ``kfd_page_fault``, ``kfd_page_migrate``, ``kfd_queue``, ``kfd_event_queue``, ``kfd_event_unmap_from_gpu``, ``kfd_event_dropped_events``. Requires ``HSA_XNACK=1`` and an XNACK-capable GPU and ROCProfiler-SDK version 1.2.1 or above.
+   * ``kfd_events`` which will enable all Kernel Fusion Driver (KFD) domains,
+     ``kfd_page_fault``, ``kfd_page_migrate``, ``kfd_queue``,
+     ``kfd_event_queue``, ``kfd_event_unmap_from_gpu``, and
+     ``kfd_event_dropped_events``. Requires ``HSA_XNACK=1``, an XNACK-capable
+     GPU, and ROCProfiler-SDK version 1.2.2 or above.
 
 For example, the following is a valid configuration:
 
@@ -322,6 +326,31 @@ or on the command line. For example:
 .. code-block:: shell
 
    ROCPROFSYS_ROCM_DOMAINS=kfd_events
+
+ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Enables generation of unified-memory profiling reports from KFD page-fault and
+page-migration events. Two files are written alongside the usual Perfetto and
+ROCpd outputs:
+
+* ``unified_memory.txt`` -- human-readable per-GPU summary with fault counts,
+  trigger breakdown (``gpu_page_fault``, ``cpu_page_fault``, ``prefetch``), and
+  host-to-device / device-to-host migration bandwidth.
+* ``unified_memory.json`` -- machine-readable equivalent with the same fields
+  plus an ``xnack_enabled`` flag and an always-present
+  ``device_to_device`` direction bucket for schema stability.
+
+Requires an XNACK-capable AMD GPU with ``HSA_XNACK=1`` and
+ROCProfiler-SDK 1.2.2 or above. The KFD tracing domains
+(``kfd_page_fault``, ``kfd_page_migrate``) are enabled automatically when this
+setting is on -- you do not need to add ``kfd_events`` to
+``ROCPROFSYS_ROCM_DOMAINS`` separately.
+
+.. code-block:: shell
+
+   export HSA_XNACK=1
+   export ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON
 
 ROCPROFSYS_SELECTED_REGIONS
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
