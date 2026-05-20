@@ -1062,7 +1062,11 @@ __global__ void applyFunctor(ArrayContainer<NumElems>* result)
 
   if (threadIdx.x < NumElems) {
     input[threadIdx.x] = threadIdx.x;
-    __syncwarp();
+  }
+
+  mytile.sync()
+
+  if (threadIdx.x < NumElems) {
     *result = cg::reduce(mytile, input, op);
   }
 }
@@ -1079,8 +1083,11 @@ __global__ void applyScanFunctor(ArrayContainer<NumElems>** result,
 
   if (threadIdx.x < NumElems) {
     input[threadIdx.x] = threadIdx.x;
-    __syncwarp();
+  }
 
+  mytile.sync();
+
+  if (threadIdx.x < NumElems) {
     switch (*aggType) {
     case AggregationType::InclusiveScan:
       *(result[laneId]) = cg::inclusive_scan(mytile, input, op);
