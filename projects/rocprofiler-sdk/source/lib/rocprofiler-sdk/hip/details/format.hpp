@@ -563,6 +563,7 @@ struct formatter<hipLaunchAttributeID> : rocprofiler::hip::details::base_formatt
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipLaunchAttribute, Ignore);
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipLaunchAttribute, ClusterDimension);
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipLaunchAttribute, ClusterSchedulingPolicyPreference);
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipLaunchAttribute, ExtDynDataPrefetch);
 #    endif
             ROCP_SDK_HIP_FORMAT_DFLT_CASE(hipLaunchAttributeID);
         }
