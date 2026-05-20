@@ -495,7 +495,6 @@ class OmniSoC_Base:
                 block_id, config_filename_dict, config_root_dir, texts
             )
 
-        # Use cached gpu_series from mspec
         counters = extract_counters("\n".join(texts), self._mspec.gpu_series)
         counters = self._expand_tcc_template_counters(counters)
 

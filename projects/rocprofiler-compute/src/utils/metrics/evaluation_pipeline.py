@@ -102,7 +102,7 @@ def create_sys_vars(sys_info: pd.Series) -> dict[str, int | float]:
 def calc_builtin_vars(
     raw_pmc_df: pd.DataFrame,
     sys_vars: dict[str, int | float],
-    gpu_arch: Optional[str] = None,
+    gpu_arch: str,
 ) -> dict[str, Optional[str | float | int]]:
     """Calculate built-in variables."""
     # TODO: fix all $normUnit in Unit column or title
@@ -171,9 +171,7 @@ def eval_metric(
 
     sys_vars = create_sys_vars(sys_info)
     empirical_peaks = create_empirical_peaks_dict(empirical_peaks_df)
-    builtin_vars = calc_builtin_vars(
-        raw_pmc_df, sys_vars, gpu_arch=sys_info.get("gpu_arch")
-    )
+    builtin_vars = calc_builtin_vars(raw_pmc_df, sys_vars, sys_info["gpu_arch"])
     sys_vars.update(builtin_vars)
 
     # Clear any previous noise clamp warnings before this analysis

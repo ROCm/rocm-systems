@@ -3,13 +3,13 @@
 
 """Shared counter definitions for HW performance counter parsing.
 
-This module is intentionally dependency-free (only ``re``) so that it can be
-imported by both the main runtime code and lightweight tooling such as
+Imported by both the main runtime code and lightweight tooling such as
 ``tools/validate_sets_metric_ids.py``.
 """
 
 import re
-from typing import Optional
+
+from utils.logger import console_error
 
 # ---------------------------------------------------------------------------
 # Regex patterns for HW counter and variable extraction
@@ -51,9 +51,14 @@ def get_build_in_vars(gpu_series: str) -> dict[str, str]:
     Returns:
         Dictionary mapping built-in variable names to their formulas.
 
-    Raises:
-        ValueError: If gpu_series is not recognized (not MI* or NAVI*).
+    Exits via console_error if *gpu_series* is falsy or not recognized.
     """
+    if not gpu_series:
+        console_error(
+            "Cannot resolve built-in variables: no GPU series provided "
+            "(unknown GPU arch?)."
+        )
+
     build_in_vars: dict[str, dict[str, str]] = {
         "cdna": {
             "GRBM_GUI_ACTIVE_PER_XCD": "(GRBM_GUI_ACTIVE / $num_xcd)",
@@ -84,9 +89,10 @@ def get_build_in_vars(gpu_series: str) -> dict[str, str]:
     elif gpu_series.startswith("NAVI"):
         return build_in_vars["rdna35"]
     else:
-        raise ValueError(
-            f"Unknown GPU series '{gpu_series}' - cannot determine built-in variables."
+        console_error(
+            f"Unknown GPU series '{gpu_series}': cannot determine built-in variables."
         )
+        return {}
 
 
 # ---------------------------------------------------------------------------
@@ -115,7 +121,7 @@ def parse_counters_text(text: str) -> tuple[set[str], set[str]]:
     return hw_counter_matches, variable_matches
 
 
-def extract_counters(text: str, gpu_series: Optional[str] = None) -> set[str]:
+def extract_counters(text: str, gpu_series: str) -> set[str]:
     """Return the full set of HW counters referenced by *text*.
 
     Resolves ``$variable`` references and supported denominators
@@ -130,7 +136,7 @@ def extract_counters(text: str, gpu_series: Optional[str] = None) -> set[str]:
         variables.update(var_d)
 
     # Recursively resolve built-in variables
-    build_in_vars = get_build_in_vars(gpu_series) if gpu_series else {}
+    build_in_vars = get_build_in_vars(gpu_series)
     seen: set[str] = set()
     while variables - seen:
         new_vars: set[str] = set()

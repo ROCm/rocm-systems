@@ -133,7 +133,13 @@ def validate() -> list[str]:
 
     for sets_path in sorted(SETS_DIR.glob("gfx*_sets.yaml")):
         arch = sets_path.stem.replace("_sets", "")
-        gpu_series = gpu_series_map.get(arch, "UNKNOWN")
+        gpu_series = gpu_series_map.get(arch)
+        if not gpu_series:
+            errors.append(
+                f"[{arch}] arch missing from mi_gpu_spec.yaml; "
+                f"add it under mi_gpu_spec.<series>.gpu_archs"
+            )
+            continue
         sets_data = yaml.safe_load(sets_path.read_text())
 
         # Load analysis configs once per arch

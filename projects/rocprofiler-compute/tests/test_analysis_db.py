@@ -335,7 +335,7 @@ def test_calc_dataframe_expressions_applies_evaluate_to_rows():
         "Counter1": [10, 20, 30],
         "Counter2": [1, 2, 3],
     })
-    sys_info = {"scale": 100}
+    sys_info = {"scale": 100, "gpu_arch": "gfx942"}
 
     expression_df = pd.DataFrame({
         "metric_id": ["1.1", "1.2"],

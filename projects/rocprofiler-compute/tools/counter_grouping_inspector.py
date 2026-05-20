@@ -80,16 +80,10 @@ def parse_counters(config_text: str, gpu_series: str) -> set[str]:
 
     Args:
         config_text: Metric formula text
-        gpu_series: GPU series for resolving built-in vars (default: MI300 for CDNA)
+        gpu_series: GPU series for resolving built-in vars
     """
     hw_counters, variables = parse_counters_text(config_text)
-
-    # Get architecture-specific built-in variables
-    try:
-        build_in_vars = get_build_in_vars(gpu_series)
-    except (ValueError, TypeError):
-        # Fallback to empty dict if gpu_series is unknown
-        build_in_vars = {}
+    build_in_vars = get_build_in_vars(gpu_series)
 
     while variables:
         subvariables: set[str] = set()
