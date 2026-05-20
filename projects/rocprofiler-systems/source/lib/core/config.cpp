@@ -881,6 +881,16 @@ configure_settings(bool _init)
     }
 
     ROCPROFSYS_CONFIG_SETTING(
+        std::string, "ROCPROFSYS_GPU_PERF_COUNTERS",
+        "GPU hardware counters to collect via device counting service (PMC polled "
+        "sampling). Comma-separated list of counter names (e.g. "
+        "SQ_WAVES,SQ_BUSY_CYCLES). "
+        "Independent from ROCPROFSYS_ROCM_EVENTS which controls kernel dispatch "
+        "counters. "
+        "If empty, no PMC sampling is performed.",
+        "", "rocm", "hardware_counters", "pmc", "process_sampling");
+
+    ROCPROFSYS_CONFIG_SETTING(
         std::string, "ROCPROFSYS_RANK_FILTER_ID",
         "Name of environment variable to read rank from for MPI output filtering",
         std::string{}, "data", "io", "advanced");
@@ -1490,7 +1500,7 @@ configure_disabled_settings(const std::shared_ptr<settings>& _config)
     {
         auto _v = itr.second->get_env_name();
         if(_hidden_exact.count(_v) > 0 ||
-           std ::regex_match(_v, std::regex{ _hidden_exact_re }) ||
+           std::regex_match(_v, std::regex{ _hidden_exact_re }) ||
            std::regex_match(_v, std::regex{ _hidden_begin_re }))
         {
             itr.second->set_enabled(false);
@@ -2383,11 +2393,16 @@ get_sampling_allocator_size()
 double
 get_process_sampling_freq()
 {
-    static auto _v = get_config()->find("ROCPROFSYS_PROCESS_SAMPLING_FREQ");
-    auto        _val =
-        std::min<double>(static_cast<tim::tsettings<double>&>(*_v->second).get(), 1000.0);
-    if(_val < 1.0e-9) return std::min<double>(get_sampling_freq(), 100.0);
-    return _val;
+    static auto _v   = get_config()->find("ROCPROFSYS_PROCESS_SAMPLING_FREQ");
+    const auto  _val = static_cast<tim::tsettings<double>&>(*_v->second).get();
+
+    constexpr auto effective_zero = 1.0e-9;
+    if(_val < effective_zero)
+    {
+        return std::min<double>(get_sampling_freq(), 100.0);
+    }
+
+    return std::min<double>(_val, 1000.0);
 }
 
 double
@@ -2401,6 +2416,13 @@ std::string
 get_sampling_gpus()
 {
     static auto _v = get_config()->find("ROCPROFSYS_SAMPLING_GPUS");
+    return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+}
+
+std::string
+get_gpu_perf_counters()
+{
+    static auto _v = get_config()->find("ROCPROFSYS_GPU_PERF_COUNTERS");
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 }
 

@@ -8,6 +8,12 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ### Added
 
+- GPU Hardware Performance Counter (PMC) sampling via the ROCProfiler-SDK device
+  counting service. Periodic per-GPU hardware counters are collected alongside
+  existing PMC sources and exposed in both Perfetto and RocPD outputs. Specify
+  counters with `ROCPROFSYS_GPU_PERF_COUNTERS` (comma-separated; suffix
+  `:device=N` to target a specific GPU). Requires ROCProfiler-SDK 0.6.0 or
+  later (ROCm 6.4.0+).
 - GPU graphics and memory clock frequency metrics (`gfx_clock`, `mem_clock`) via
   AMD SMI, exposing `current_gfxclk` and `current_uclk` in MHz as PMC samples.
   Configure via `ROCPROFSYS_AMD_SMI_METRICS=gfx_clock,mem_clock`.

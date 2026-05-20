@@ -90,22 +90,30 @@ const char* ncclProtoToString(int proto) {
 NCCL_API(ncclResult_t, ncclAllGather, const void* sendbuff, void* recvbuff, size_t sendcount,
     ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream);
 
+// Direct AllGather: posts Send/Recv to every peer (including self) for every
+// rank using the same iteration order on all ranks. Mirrors the AlltoAll
+// scheduling path so that, when RCCL_P2P_BATCH_ENABLE=1, all ranks emit the
+// same sequence of (sendRank, recvRank) rounds and therefore the same fused
+// ncclDevWorkBatch composition.
+//
+// We deliberately keep this minimal:
+//   - No (rank + r) % nRanks rotation: all ranks visit peers in order 0..N-1.
+//   - No in-place self-peer skip: send/recv to self is always posted; the
+//     device kernel handles isCopy = (sendRank == self) as a local memcpy
+//     (see device/sendrecv.h).
+//   - Posting is delegated to taskAppend() via a single ncclEnqueueCheck
+//     call. taskAppend() then loops once and calls p2pTaskAppend directly,
+//     the same way ncclAlltoAll does, avoiding the per-peer ncclSend/ncclRecv
+//     overhead (ArgsCheck, Recorder, profiler events, group start/end
+//     internal) that previously made cross-rank batch composition fragile at
+//     scale.
 static ncclResult_t rcclDirectAllGather(const void* sendbuff, void* recvbuff, size_t sendcount,
-    ncclDataType_t datatype, int in_place, ncclComm_t comm, cudaStream_t stream) {
-  int nRanks = comm->nRanks;
-  int rank = comm->rank;
-  size_t rankOffset = sendcount * ncclTypeSize(datatype);
-
-  NCCLCHECK(ncclGroupStart());
-  for (int r = 0; r < nRanks; r++) {
-    int peer = (rank + r) % nRanks;
-    if (peer == rank && in_place) continue;
-    NCCLCHECK(ncclSend(((char*)sendbuff), sendcount, datatype, peer, comm, stream));
-    NCCLCHECK(ncclRecv(((char*)recvbuff) + peer * rankOffset, sendcount, datatype, peer, comm, stream));
-  }
-  NCCLCHECK(ncclGroupEnd());
-
-  return ncclSuccess;
+    ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream) {
+  struct ncclInfo info = { ncclFuncAllGather, "AllGather",
+    sendbuff, recvbuff, sendcount, datatype, ncclSum, 0, comm, stream,
+    ALLGATHER_CHUNKSTEPS, ALLGATHER_SLICESTEPS, nullptr };
+  info.useDirect = true;
+  return ncclEnqueueCheck(&info);
 }
 
 RCCL_PARAM(HierarchicalAllGather, "HIERARCHICAL_ALLGATHER", 0);
@@ -147,7 +155,7 @@ static ncclResult_t ncclHierarchicalAllGather_Impl(const void* sendbuff, void* r
   size_t interMsgSize = sendcount * nNodes * typeSize;
   if (rcclUseAllGatherDirect(interComm, interMsgSize)) {
     // Use direct allgather
-    NCCLCHECK(rcclDirectAllGather(interSendBuff, recvbuff, sendcount, datatype, 0, interComm, stream));
+    NCCLCHECK(rcclDirectAllGather(interSendBuff, recvbuff, sendcount, datatype, interComm, stream));
   } else {
     struct ncclInfo infoInterAG = { ncclFuncAllGather, "HierarchicalAllGather-Inter",
       interSendBuff, recvbuff, sendcount, datatype, ncclSum, 0, interComm, stream,
@@ -160,7 +168,7 @@ static ncclResult_t ncclHierarchicalAllGather_Impl(const void* sendbuff, void* r
   size_t intraMsgSize = intraSendCount * typeSize * localRanks;
   if (rcclUseAllGatherDirect(intraComm, intraMsgSize)) {
     // Use direct allgather
-    NCCLCHECK(rcclDirectAllGather(recvbuff, tempBuffer, intraSendCount, datatype, 0, intraComm, stream));
+    NCCLCHECK(rcclDirectAllGather(recvbuff, tempBuffer, intraSendCount, datatype, intraComm, stream));
   } else {
     struct ncclInfo infoIntraAG = { ncclFuncAllGather, "HierarchicalAllGather-Intra",
       recvbuff, tempBuffer, intraSendCount, datatype, ncclSum, 0, intraComm, stream,
@@ -196,9 +204,6 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
     sendbuff, recvbuff, sendcount, datatype, ncclSum, 0, comm, stream, /* Args */
     chunkSteps, sliceSteps, nullptr };
   int nRanks, rank;
-  int in_place = 0;
-  const void* srcBuf;
-  void* dstBuf;
   NCCLCHECK(ncclCommCount(comm, &nRanks));
   NCCLCHECK(ncclCommUserRank(comm, &rank));
   size_t msgSize = sendcount * ncclTypeSize(datatype) * nRanks;
@@ -210,22 +215,15 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
   }
 
   if (rcclUseAllGatherDirect(comm, msgSize) && ncclGroupDepth == 0) {
-     INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER count = %zu, msgSize = %zu, comm = %p, stream = %p, rank = %d, sendbuff = %p, recvbuff = %p",
-		     sendcount, msgSize, comm, stream, rank, sendbuff, recvbuff);
-     // use direct allgather (only when not in a group; in-group use Ring so ncclGroupSimulateEnd gets estimatedTime)
-     if (sendcount == 0) return ncclSuccess;
-     size_t rankOffset = sendcount * ncclTypeSize(datatype);
-     if (sendbuff == (((char*)recvbuff) + rank * rankOffset)) {
-        srcBuf = ((char*)recvbuff) + rank * rankOffset;
-        dstBuf = recvbuff;
-        in_place = 1;
-     } else {
-        srcBuf = sendbuff;
-        dstBuf = recvbuff;
-     }
-
-    NCCLCHECK(rcclDirectAllGather(srcBuf, dstBuf, sendcount, datatype, in_place, comm, stream));
-    return ncclSuccess;
+    INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER count = %zu, msgSize = %zu, comm = %p, stream = %p, rank = %d, sendbuff = %p, recvbuff = %p",
+        sendcount, msgSize, comm, stream, rank, sendbuff, recvbuff);
+    // Use direct allgather (only when not in a group; in-group use Ring so
+    // ncclGroupSimulateEnd gets estimatedTime).
+    if (sendcount == 0) return ncclSuccess;
+    // Mark the info so taskAppend posts this as A2A-style per-peer Send/Recv
+    // P2P tasks (no peer rotation, no in-place self skip).
+    info.useDirect = true;
+    return ncclEnqueueCheck(&info);
   } else {
      // use ring allgather
      return ncclEnqueueCheck(&info);
