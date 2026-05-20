@@ -1,8 +1,12 @@
 test_categories:
   quick:
     description: "Fast sanity checks - Run pre-commit (target: < 5 min)"
+    # TODO: refine to the actual fast subset once test timings are profiled.
+    # Current placeholder: basic positive / default-parameter tests only.
+    # These are the lightest smoke tests (no multi-GPU, no stress loops).
     test_patterns:
-      - "*"
+      - "Unit_[^_]+_Positive_Basic.*"
+      - "Unit_[^_]+_Positive_Default.*"
 
     exclude:
     labels:
@@ -10,8 +14,10 @@ test_categories:
 
   standard:
     description: "Core functionality - Run on every PR (target: < 30 min)"
+    # TODO: refine once timing data is available.
+    # Current placeholder: all Unit_ tests (excludes ABM / perf / stress).
     test_patterns:
-      - "*"
+      - "Unit_.*"
 
     exclude:
     labels:
@@ -19,8 +25,11 @@ test_categories:
 
   comprehensive:
     description: "Extended testing - Run nightly (target: < 2 hours)"
+    # TODO: refine once timing data is available.
+    # Current placeholder: Unit_ tests + ABM (assembly / binary module) tests.
     test_patterns:
-      - "*"
+      - "Unit_.*"
+      - "ABM_.*"
 
     exclude:
     labels:
@@ -28,14 +37,21 @@ test_categories:
 
   full:
     description: "Full testing - Run weekly (target: < 4 hours)"
+    # TODO: refine once timing data is available.
+    # Current placeholder: everything — all Unit_, ABM, multiproc, and
+    # TypeQualifiers tests.  Perf / stress tests will be added here once
+    # they are wired into the YAML configs.
     test_patterns:
-      - "*"
+      - "Unit_.*"
+      - "ABM_.*"
+      - "MultiProc_.*"
+      - "TypeQualifiers_.*"
 
     exclude:
     labels:
       - "full"
 
-exclude_gpu:
+exclude_arch:
   exclude_gpu_gfx110X_windows:
     # Windows-only: all gfx110X variants (gfx1100, gfx1101, gfx1102, ...)
     # this block is ignored entirely when configuring on Linux.
@@ -44,11 +60,7 @@ exclude_gpu:
       - "Unit_hipStreamValue_Wait_Blocking - uint32_t"
 
     labels:
-      - "ex_gpu_gfx110X"
-      - "quick"
-      - "standard"
-      - "comprehensive"
-      - "full"
+      - "gfx110X_windows_exclude"
 
   exclude_gpu_gfx94X_linux:
     # Linux-only
@@ -58,11 +70,7 @@ exclude_gpu:
       - "Unit_NonHost_Printf_multiple_Threads"
       - "Unit_NonHost_Printf_BufferAvailability"
     labels:
-      - "quick"
-      - "standard"
-      - "full"
-      - "comprehensive"
-      - "ex_gpu_gfx94X"
+      - "gfx94X_linux_exclude"
 
   exclude_gpu_gfx950_linux:
     # Linux-only
@@ -95,11 +103,7 @@ exclude_gpu:
       - "Unit_NonHost_Printf_multiple_Threads"
       - "Unit_NonHost_Printf_BufferAvailability"
     labels:
-      - "quick"
-      - "standard"
-      - "full"
-      - "comprehensive"
-      - "ex_gpu_gfx950"
+      - "gfx950_linux_exclude"
 
 
 execution_settings:

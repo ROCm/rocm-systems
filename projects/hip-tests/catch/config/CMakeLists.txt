@@ -33,10 +33,14 @@ endif()
 set(HIP_TESTS_CONFIGS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/configs)
 set(CONFIG_COMMON_MODULE ${CMAKE_CURRENT_SOURCE_DIR}/common.py)
 set(CONFIG_PARSER_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/parse_config.py)
+set(CONFIG_INJECT_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/inject_category_tags.py)
 set(CONFIG_CHECK_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/check_config.py)
 set(SOURCES_CHECK_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/check_sources.py)
 set(HIP_TEST_CONFIG_HEADER ${CATCH_INCLUDE_BINARY_DIR}/hip_test_config.hh)
 set(HIP_TEST_PARAMETERS_HEADER ${CATCH_INCLUDE_BINARY_DIR}/hip_test_parameters.hh)
+# test_categories.yaml drives tier and GPU-exclusion tag injection.
+# Listed in DEPENDS so any change to it triggers a full header rebuild.
+set(HIP_TEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories.yaml")
 
 file(GLOB HIP_TESTS_GROUP_CONFIGS ${HIP_TESTS_CONFIGS_DIR}/*.yaml)
 file(GLOB HIP_TESTS_UNIT_CONFIGS ${HIP_TESTS_CONFIGS_DIR}/unit/*.yaml)
@@ -53,9 +57,12 @@ if(ENABLE_YAML_TAGS)
     )
 endif()
 
-# Generate both test definitions and parameter headers from YAML
-# - hip_test_config.hh: TEST_CASE macros with tags
-# - hip_test_parameters.hh: Compile-time constants for level parameters
+# Step 1: parse_config.py generates hip_test_config.hh (basic group / level /
+#         per-test tags) and hip_test_parameters.hh.  Untouched from upstream.
+# Step 2: inject_category_tags.py post-processes hip_test_config.hh in-place,
+#         appending tier (quick / standard / comprehensive / full) and
+#         GPU-exclusion (ex_gpu_*) tags derived from test_categories.yaml.
+#         Any change to test_categories.yaml triggers a full rebuild via DEPENDS.
 add_custom_command(
     OUTPUT ${HIP_TEST_CONFIG_HEADER} ${HIP_TEST_PARAMETERS_HEADER}
     COMMAND "${Python3_EXECUTABLE}" "${CONFIG_PARSER_SCRIPT}"
@@ -65,8 +72,17 @@ add_custom_command(
             "${CONFIG_ARCH}"
             "${HIP_TEST_CONFIG_HEADER}"
             "${HIP_TEST_PARAMETERS_HEADER}"
-    DEPENDS ${CONFIG_COMMON_MODULE} ${CONFIG_PARSER_SCRIPT} ${HIP_TESTS_UNIT_CONFIGS} ${HIP_TESTS_GROUP_CONFIGS}
-    COMMENT "Generating hip_test_config.hh and hip_test_parameters.hh"
+    COMMAND "${Python3_EXECUTABLE}" "${CONFIG_INJECT_SCRIPT}"
+            "${HIP_TEST_CONFIG_HEADER}"
+            "${HIP_TEST_CATEGORIES_YAML}"
+    DEPENDS
+        ${CONFIG_COMMON_MODULE}
+        ${CONFIG_PARSER_SCRIPT}
+        ${CONFIG_INJECT_SCRIPT}
+        ${HIP_TESTS_UNIT_CONFIGS}
+        ${HIP_TESTS_GROUP_CONFIGS}
+        ${HIP_TEST_CATEGORIES_YAML}
+    COMMENT "Generating and categorising hip_test_config.hh"
 )
 
 # Ensure the generated header files are built before the main target
