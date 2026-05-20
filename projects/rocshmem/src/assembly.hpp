@@ -675,12 +675,6 @@ __device__ __forceinline__ void get_asm([[maybe_unused]] uint8_t* src,
 
 // ==============================================================================
 // BUFFER RESOURCE INTRINSICS
-// Using LLVM raw-buffer intrinsics rather than inline asm "s" constraints:
-//   - The resource descriptor must occupy 4 consecutive SGPRs (<4 x i32>).
-//   - ext_vector_type(4) maps to <4 x i32> in LLVM IR; the compiler places
-//     uniform values in SGPRs automatically when passed to these intrinsics.
-//   - Inline asm "s" on HIP's struct int4 is UB (struct != ext_vector register
-//     class); going through the intrinsics avoids the VGPR→SGPR hazard.
 // ==============================================================================
 
 using i32x4_t = int32_t __attribute__((ext_vector_type(4)));
@@ -794,59 +788,18 @@ struct AsmAccess<16, LoadPolicy, StorePolicy> {
     }
   }
 
-  // --------------------------------------------------------------------------
-  // Buffer instructions (MUBUF / MTBUF family)
-  //
-  // The buffer resource descriptor is four SGPRs (128 bits) laid out as:
-  //   [63:0]  BASE_ADDRESS  – 64-bit byte address of the buffer base
-  //   [95:64] NUM_RECORDS   – buffer size in bytes (range check limit)
-  //   [127:96] CONFIG word:
-  //     [18]    STRIDE == 0  (byte-addressed, no struct stride)
-  //     [15:14] DST_SEL_*   (default 0 → pass-through)
-  //     [21:20] INDEX_STRIDE (unused when STRIDE==0)
-  //     Bit 17 set → "raw" (swizzle disabled), bit 16 = cache_swizzle
-  //   We use 0x00020000 which sets bit 17 (DATA_FORMAT=BUF_DATA_FORMAT_INVALID
-  //   in older ISAs, raw-buffer enable in GFX9+). This is the standard recipe
-  //   used by every ROCm raw-buffer helper (see HipKittens, rocWMMA, etc.).
-  //
-  // The voffset (VGPR offset) is per-lane; soffset is a scalar added on top.
-  // Together they address: BASE + voffset + soffset.
-  //
-  // Cache modifier encoding for buffer_load/store_b128 on GFX942/GFX950:
-  //   bit 0 (sc0 / GLC) – bypass L1 (global coherence)
-  //   bit 1 (sc1 / SLC) – bypass L2 (system coherence)
-  //   bit 4 (NT)        – non-temporal / streaming hint
-  //   0b00000 = L1+L2 cached (FlatCache)
-  //   0b00001 = bypass L1    (BypassL1)
-  //   0b00011 = bypass L1+L2 (SystemScope)
-  //   0b10011 = bypass L1+L2 + NT (SystemScopeNT)
-  //   0b10001 = NT only (NonTemporal)
-  // --------------------------------------------------------------------------
-
-  // Build a raw buffer resource descriptor for a contiguous byte buffer.
-  // Returns i32x4_t (<4 x i32>) so the "s" asm constraint and the LLVM
-  // raw-buffer intrinsics both receive the correct SGPR-friendly ext_vector.
-  // Layout per GFX9+ ISA:
-  //   [63:0]   BASE_ADDRESS
-  //   [95:64]  NUM_RECORDS  (byte count; range-check limit when STRIDE == 0)
-  //   [127:96] 0x00020000   (bit 17 = raw/unswizzled, STRIDE = 0)
   static __device__ __forceinline__ i32x4_t
   make_buffer_resource(const void *base, uint32_t num_bytes) {
     uint64_t addr = reinterpret_cast<uint64_t>(base);
     i32x4_t rsrc;
-    rsrc[0] = static_cast<int32_t>(addr & 0xFFFFFFFFu);  // BASE_ADDRESS[31:0]
-    rsrc[1] = static_cast<int32_t>(addr >> 32);          // BASE_ADDRESS[63:32]
-    rsrc[2] = static_cast<int32_t>(num_bytes);           // NUM_RECORDS
+    rsrc[0] = static_cast<int32_t>(addr & 0xFFFFFFFFu);
+    rsrc[1] = static_cast<int32_t>(addr >> 32);
+    rsrc[2] = static_cast<int32_t>(num_bytes);
     rsrc[3] = 0x00020000;  // raw, no stride/swizzle
     return rsrc;
   }
-
-  // Load 16 bytes via llvm.amdgcn.raw.buffer.load.i128.
-  // ptr      – base address of the buffer (alignment ≥ 16)
-  // buf_size – byte size of the buffer (hardware range-check limit)
-  // offset   – per-lane byte offset from ptr (voffset; added per-thread)
-  //
-  // aux cachepolicy bits: bit0=sc0(GLC), bit1=sc1(SLC), bit4=nt
+  
+  //! The bits order might be different on various archs
   static __device__ __forceinline__ type load_buffer(const void *ptr,
                                                      uint32_t buf_size,
                                                      uint32_t offset) {
@@ -862,13 +815,7 @@ struct AsmAccess<16, LoadPolicy, StorePolicy> {
         llvm_amdgcn_raw_buffer_load_b128(rsrc, offset, 0, aux));
   }
 
-  // Store 16 bytes via llvm.amdgcn.raw.buffer.store.i128.
-  // ptr      – base address of the buffer
-  // buf_size – byte size of the buffer (hardware range-check limit)
-  // offset   – per-lane byte offset from ptr (voffset)
-  // val      – 128-bit value to write
-  //
-  // aux cachepolicy bits: bit0=sc0(GLC), bit1=sc1(SLC), bit4=nt
+  //! The bits order might be different on various archs
   static __device__ __forceinline__ void store_buffer(void *ptr,
                                                       uint32_t buf_size,
                                                       uint32_t offset,
@@ -1323,7 +1270,28 @@ struct AsmAccess<1, LoadPolicy, StorePolicy> {
   }
 };
 
-__device__ __forceinline__ void pipeline_wait_on_loads(int waits) {
+__device__ __forceinline__ void wait_on_vmem(int waits) {
+  switch (waits) {
+    case 15: asm volatile("s_waitcnt vmcnt(15)" ::: "memory"); break;
+    case 14: asm volatile("s_waitcnt vmcnt(14)" ::: "memory"); break;
+    case 13: asm volatile("s_waitcnt vmcnt(13)" ::: "memory"); break;
+    case 12: asm volatile("s_waitcnt vmcnt(12)" ::: "memory"); break;
+    case 11: asm volatile("s_waitcnt vmcnt(11)" ::: "memory"); break;
+    case 10: asm volatile("s_waitcnt vmcnt(10)" ::: "memory"); break;
+    case 9:  asm volatile("s_waitcnt vmcnt(9)"  ::: "memory"); break;
+    case 8:  asm volatile("s_waitcnt vmcnt(8)"  ::: "memory"); break;
+    case 7:  asm volatile("s_waitcnt vmcnt(7)"  ::: "memory"); break;
+    case 6:  asm volatile("s_waitcnt vmcnt(6)"  ::: "memory"); break;
+    case 5:  asm volatile("s_waitcnt vmcnt(5)"  ::: "memory"); break;
+    case 4:  asm volatile("s_waitcnt vmcnt(4)"  ::: "memory"); break;
+    case 3:  asm volatile("s_waitcnt vmcnt(3)"  ::: "memory"); break;
+    case 2:  asm volatile("s_waitcnt vmcnt(2)"  ::: "memory"); break;
+    case 1:  asm volatile("s_waitcnt vmcnt(1)"  ::: "memory"); break;
+    default: asm volatile("s_waitcnt vmcnt(0)"  ::: "memory"); break;
+  }
+}
+
+__device__ __forceinline__ void wait_on_vmem_loads(int waits) {
 #if defined(__gfx1201__)
   // GFX12 splits memory counters further; flat_load utilizes loadcnt
   switch (waits) {
@@ -1346,24 +1314,34 @@ __device__ __forceinline__ void pipeline_wait_on_loads(int waits) {
   }
 #else
   // GFX9/10/11 use vmcnt
+  wait_on_vmem(waits);
+#endif
+}
+
+__device__ __forceinline__ void wait_on_vmem_stores(int waits) {
+#if defined(__gfx1201__)
+  // GFX12 splits memory counters further; flat_store utilizes storecnt
   switch (waits) {
-    case 15: asm volatile("s_waitcnt vmcnt(15)" ::: "memory"); break;
-    case 14: asm volatile("s_waitcnt vmcnt(14)" ::: "memory"); break;
-    case 13: asm volatile("s_waitcnt vmcnt(13)" ::: "memory"); break;
-    case 12: asm volatile("s_waitcnt vmcnt(12)" ::: "memory"); break;
-    case 11: asm volatile("s_waitcnt vmcnt(11)" ::: "memory"); break;
-    case 10: asm volatile("s_waitcnt vmcnt(10)" ::: "memory"); break;
-    case 9:  asm volatile("s_waitcnt vmcnt(9)"  ::: "memory"); break;
-    case 8:  asm volatile("s_waitcnt vmcnt(8)"  ::: "memory"); break;
-    case 7:  asm volatile("s_waitcnt vmcnt(7)"  ::: "memory"); break;
-    case 6:  asm volatile("s_waitcnt vmcnt(6)"  ::: "memory"); break;
-    case 5:  asm volatile("s_waitcnt vmcnt(5)"  ::: "memory"); break;
-    case 4:  asm volatile("s_waitcnt vmcnt(4)"  ::: "memory"); break;
-    case 3:  asm volatile("s_waitcnt vmcnt(3)"  ::: "memory"); break;
-    case 2:  asm volatile("s_waitcnt vmcnt(2)"  ::: "memory"); break;
-    case 1:  asm volatile("s_waitcnt vmcnt(1)"  ::: "memory"); break;
-    default: asm volatile("s_waitcnt vmcnt(0)"  ::: "memory"); break;
+    case 15: asm volatile("s_wait_storecnt 15" ::: "memory"); break;
+    case 14: asm volatile("s_wait_storecnt 14" ::: "memory"); break;
+    case 13: asm volatile("s_wait_storecnt 13" ::: "memory"); break;
+    case 12: asm volatile("s_wait_storecnt 12" ::: "memory"); break;
+    case 11: asm volatile("s_wait_storecnt 11" ::: "memory"); break;
+    case 10: asm volatile("s_wait_storecnt 10" ::: "memory"); break;
+    case 9:  asm volatile("s_wait_storecnt 9"  ::: "memory"); break;
+    case 8:  asm volatile("s_wait_storecnt 8"  ::: "memory"); break;
+    case 7:  asm volatile("s_wait_storecnt 7"  ::: "memory"); break;
+    case 6:  asm volatile("s_wait_storecnt 6"  ::: "memory"); break;
+    case 5:  asm volatile("s_wait_storecnt 5"  ::: "memory"); break;
+    case 4:  asm volatile("s_wait_storecnt 4"  ::: "memory"); break;
+    case 3:  asm volatile("s_wait_storecnt 3"  ::: "memory"); break;
+    case 2:  asm volatile("s_wait_storecnt 2"  ::: "memory"); break;
+    case 1:  asm volatile("s_wait_storecnt 1"  ::: "memory"); break;
+    default: asm volatile("s_wait_storecnt 0"  ::: "memory"); break;
   }
+#else
+  // GFX9/10/11 use vmcnt for stores as well
+  wait_on_vmem(waits);
 #endif
 }
 
