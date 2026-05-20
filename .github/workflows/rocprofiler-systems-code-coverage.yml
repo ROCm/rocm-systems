@@ -43,7 +43,6 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  ROCPROFSYS_CI: ON
   ROCPROFSYS_TMPDIR: "%env{PWD}%/testing-tmp"
 
 jobs:
@@ -165,8 +164,7 @@ jobs:
           --build-dir build/coverage \
           --source-dir . \
           --output-dir .codecov \
-          --label unit-tests \
-          --low-coverage-count 20
+          --label unit-tests
 
     - name: E2E Tests
       timeout-minutes: 60
@@ -189,8 +187,7 @@ jobs:
           --build-dir build/coverage \
           --source-dir . \
           --output-dir .codecov \
-          --label e2e-tests \
-          --low-coverage-count 20
+          --label e2e-tests
 
     - name: Generate Coverage Comment
       if: always()

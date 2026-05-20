@@ -160,7 +160,6 @@ def generate_markdown(
     totals: dict,
     baseline_totals: Optional[dict],
     source_dir: Path,
-    low_coverage_count: int = 15,
 ) -> str:
     lines = []
     lines.append(f"## Code Coverage: {label}")
@@ -263,12 +262,6 @@ def main():
         help="Baseline coverage JSON for delta comparison",
     )
     parser.add_argument(
-        "--low-coverage-count",
-        type=int,
-        default=15,
-        help="Number of lowest-coverage files to show",
-    )
-    parser.add_argument(
         "--gcovr",
         type=str,
         default=None,
@@ -328,7 +321,6 @@ def main():
         totals=totals,
         baseline_totals=baseline_totals,
         source_dir=source_dir,
-        low_coverage_count=args.low_coverage_count,
     )
 
     md_path = output_dir / f"{args.label}.md"
