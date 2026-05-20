@@ -86,6 +86,12 @@ setup()
     if(get_perfetto_backend() != "inprocess") args.backends |= ::perfetto::kSystemBackend;
     if(get_perfetto_backend() != "system") args.backends |= ::perfetto::kInProcessBackend;
 
+    // Silence all Perfetto log output on log-disabled ranks with empty callback
+    if(!config::output_filtering::is_log_output_enabled_for_current_mpi_rank())
+    {
+        args.log_message_callback = +[](::perfetto::base::LogMessageCallbackArgs) {};
+    }
+
     ::perfetto::Tracing::Initialize(args);
     ::perfetto::TrackEvent::Register();
 }
@@ -227,7 +233,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error,
 
     auto _filename = config::get_perfetto_output_filename();
 
-    if(config::output_filtering::is_output_enabled_for_current_mpi_rank())
+    if(config::output_filtering::is_file_output_enabled_for_current_mpi_rank())
     {
         // In MPI combined-trace mode, only rank 0 has non-empty trace_data
         // after the gather, so only rank 0 writes and registers the file.

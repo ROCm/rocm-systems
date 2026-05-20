@@ -11,8 +11,13 @@
 # found the kernel targets are silently skipped and tests that depend on them
 # are disabled at runtime via the HAS_DEVICE_KERNELS compile definition.
 
+# Prefer the compiler from the ROCm tree selected by ROCM_PATH. Some systems
+# also expose /usr/bin/amdclang++ through alternatives; deriving --rocm-path
+# from that wrapper gives /usr, which mixes headers and device libraries from
+# different installs.
 find_program(AMDCLANG amdclang++
-    HINTS /opt/rocm/bin ENV ROCM_PATH
+    HINTS ENV ROCM_PATH /opt/rocm
+    PATH_SUFFIXES bin
     DOC "Path to the ROCm amdclang++ compiler"
 )
 

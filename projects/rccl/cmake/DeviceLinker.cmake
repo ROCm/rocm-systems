@@ -243,6 +243,11 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
   target_link_libraries(${_dev_target} PRIVATE rccl_device_defs)
 
   add_dependencies(${_dev_target} hipify_all)
+  if(ENABLE_ROCSHMEM AND TARGET rocshmem_static)
+    # rocSHMEM headers land in ext/rocshmem/include only after ExternalProject
+    # completes; ensure they are installed before device kernels start compiling.
+    add_dependencies(${_dev_target} rocshmem_static)
+  endif()
 
   # =========================================================================
   # Link step: driver --link mode produces device.elf
@@ -287,6 +292,23 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
   file(GENERATE OUTPUT "${_link_rsp}"
     CONTENT "$<JOIN:$<TARGET_OBJECTS:${_dev_target}>,\n>\n")
 
+  # When rocSHMEM is enabled, pass the per-arch device bitcode to the driver.
+  # rocSHMEM device API symbols have hidden visibility and must be statically
+  # present in the device ELF — they cannot be imported from a shared library.
+  set(_rocshmem_bitcode_arg "")
+  set(_rocshmem_link_depends "")
+  if(ENABLE_ROCSHMEM AND ROCSHMEM_INSTALL_DIR)
+    set(_rocshmem_bc "${ROCSHMEM_INSTALL_DIR}/lib/librocshmem_device_${DL_GPU_TARGET}.bc")
+    set(_rocshmem_bitcode_arg "--rocshmem-bitcode=${_rocshmem_bc}")
+    # Do NOT add _rocshmem_bc to DEPENDS: rocSHMEM only supports a subset of
+    # GPU_TARGETS (e.g. gfx90a, gfx942, gfx950) and the bitcode files don't
+    # exist at cmake configure time (ExternalProject).  The Python driver checks
+    # existence at build time and skips silently for unsupported arches.
+    if(TARGET rocshmem_static)
+      list(APPEND _rocshmem_link_depends rocshmem_static)
+    endif()
+  endif()
+
   add_custom_command(
     OUTPUT  ${ARCH_DEVICE_ELF}
     COMMAND ${CMAKE_RCCLDEV_COMPILER}
@@ -295,13 +317,14 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
       --clang=${DL_CLANG}
       ${DL_HIP_COMPILER_FLAGS}
       --dispatcher=${HIPIFY_DIR}/src/device/common.cu.cpp
+      ${_rocshmem_bitcode_arg}
       ${_link_def_flags}
       ${_link_inc_flags}
       ${DL_OPT_FLAGS}
       -std=c++17
       -o ${ARCH_DEVICE_ELF}
       @${_link_rsp}
-    DEPENDS ${_dev_target} ${HIPIFY_DIR}/src/device/common.cu.cpp
+    DEPENDS ${_dev_target} ${HIPIFY_DIR}/src/device/common.cu.cpp ${_rocshmem_link_depends}
     COMMENT "DL [${DL_GPU_TARGET}] link: device.elf"
     VERBATIM
     COMMAND_EXPAND_LISTS
