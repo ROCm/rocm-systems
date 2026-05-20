@@ -208,6 +208,47 @@ def test_evaluate_with_none_in_formula_does_not_nullify_valid_result():
     assert result == 10
 
 
+def test_evaluate_divide_by_zero_silenced_and_logged_at_debug():
+    """
+    Divide-by-zero (x/0 -> inf, 0/0 -> NaN) emits a numpy RuntimeWarning
+    that is captured and logged via console_debug. The misleading
+    "missing counter data" console_warning must not fire.
+    """
+    pmc_df = pd.DataFrame({"Counter1": [10, 20, 30]})
+    sys_info = {}
+
+    cases = [
+        # x/0 yields scalar inf; evaluate() collapses to None
+        "to_sum(raw_pmc_df['Counter1']) / 0",
+        # 0/0 yields scalar NaN; evaluate() collapses to None
+        "(to_sum(raw_pmc_df['Counter1']) * 0) / 0",
+    ]
+
+    for expr in cases:
+        with (
+            patch(
+                "rocprof_compute_analyze.analysis_db.console_warning"
+            ) as mock_warning,
+            patch("rocprof_compute_analyze.analysis_db.console_debug") as mock_debug,
+        ):
+            result = db_analysis.evaluate(
+                "test_metric",
+                expr,
+                pmc_df,
+                sys_info,
+                parse=False,
+            )
+
+        assert result is None, f"Expected None for '{expr}', got {result}"
+
+        mock_warning.assert_not_called()
+        debug_msgs = [str(call) for call in mock_debug.call_args_list]
+        assert any("RuntimeWarning" in m for m in debug_msgs), (
+            f"Expected RuntimeWarning in console_debug output for '{expr}', "
+            f"got {debug_msgs}"
+        )
+
+
 # =============================================================================
 # db_analysis.calc_builtin_vars() tests
 # =============================================================================

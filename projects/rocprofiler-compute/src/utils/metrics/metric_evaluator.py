@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import warnings
 from typing import Any
 
 import numpy as np
@@ -65,11 +66,16 @@ class MetricEvaluator:
                 "to_noise_clamp": to_noise_clamp,
             })
 
-            eval_result = eval(
-                compile(expr, "<string>", "eval"),
-                {},
-                local_expr_context,
-            )
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always", RuntimeWarning)
+                eval_result = eval(
+                    compile(expr, "<string>", "eval"),
+                    {},
+                    local_expr_context,
+                )
+            # RuntimeWarnings (e.g. divide-by-zero) are surfaced only under --verbose
+            for w in caught:
+                console_debug(f"RuntimeWarning evaluating '{expr}': {w.message}")
 
             # Only return "N/A" for scalar NA values
             # For vectors/Series, return as-is to preserve shape for
@@ -83,16 +89,16 @@ class MetricEvaluator:
                     and (pd.isna(eval_result) or np.isinf(eval_result))
                 )
             ):
-                # Do not give warning if None is explicitly specified in expression
-                if "None" not in expr:
+                # Skip warning when None is explicit or a RuntimeWarning
+                # already explained the NA
+                if "None" in expr:
+                    console_debug(
+                        f"Expression '{expr}' evaluated to None - explicitly specified."
+                    )
+                elif not caught:
                     console_warning(
                         f"Could not evaluate expression '{expr}' - likely "
                         "due to missing counter data."
-                    )
-                else:
-                    console_debug(
-                        f"Expression '{expr}' evaluated to None - likely "
-                        "explicitly specified."
                     )
                 return "N/A"
             else:
