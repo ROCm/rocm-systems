@@ -94,7 +94,7 @@ public:
         rocprofiler_agent_id_t                   agent_id,
         rocprofiler_device_counting_service_cb_t cb,
         void*                                    user_data);
-    void check_power_performance_level();
+    static void check_power_performance_level();
 
 private:
     common::Synchronized<std::unordered_map<uint64_t, std::shared_ptr<counter_config>>> _configs;
