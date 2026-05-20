@@ -29,6 +29,7 @@ set(UNIT_TEST_SOURCES
     table_insert_query_test.cpp
     table_select_query_test.cpp
     database_test.cpp
+    entity_utility_test.cpp
     json_serializer_test.cpp
 )
 

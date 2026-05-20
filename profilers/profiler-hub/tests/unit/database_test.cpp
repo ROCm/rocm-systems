@@ -254,4 +254,103 @@ TEST_F(sqlite_backend_test, statement_outlives_backend)
     EXPECT_NO_THROW(executor(42));
 }
 
+// ============================================================================
+// transaction_guard tests
+// ============================================================================
+//
+// transaction_guard issues BEGIN on construction and either COMMIT (when the
+// scope exits normally) or ROLLBACK (when std::uncaught_exceptions() grew
+// during the scope) on destruction. The guard is reachable through the public
+// sqlite_backend::begin_transaction() factory, which returns it by value.
+
+namespace
+{
+
+struct row_count
+{
+    int value{ 0 };
+};
+
+int
+query_row_count(const std::shared_ptr<sqlite_backend>& db, const std::string& table)
+{
+    auto reader = db->create_read_statement_executor<row_count, bind_types<>>(
+        "SELECT COUNT(*) FROM " + table, &row_count::value);
+    auto rows = reader().to_vector();
+    return rows.empty() ? 0 : rows.front().value;
+}
+
+}  // namespace
+
+TEST_F(sqlite_backend_test, transaction_guard_commits_on_normal_exit)
+{
+    auto db = sqlite_backend::create(m_database_path, m_uuid);
+    db->execute("CREATE TABLE tx_tbl (id INTEGER PRIMARY KEY, val INTEGER)");
+
+    auto insert = db->create_write_statement_executor<int32_t>(
+        "INSERT INTO tx_tbl (val) VALUES (?)");
+
+    {
+        auto guard = db->begin_transaction();
+        for(int i = 0; i < 5; ++i)
+        {
+            insert(i);
+        }
+    }
+
+    EXPECT_EQ(query_row_count(db, "tx_tbl"), 5);
+}
+
+TEST_F(sqlite_backend_test, transaction_guard_rolls_back_on_exception)
+{
+    auto db = sqlite_backend::create(m_database_path, m_uuid);
+    db->execute("CREATE TABLE tx_tbl (id INTEGER PRIMARY KEY, val INTEGER)");
+
+    auto insert = db->create_write_statement_executor<int32_t>(
+        "INSERT INTO tx_tbl (val) VALUES (?)");
+
+    EXPECT_THROW(
+        {
+            auto guard = db->begin_transaction();
+            for(int i = 0; i < 5; ++i)
+            {
+                insert(i);
+            }
+            throw std::runtime_error("simulated mid-transaction failure");
+        },
+        std::runtime_error);
+
+    EXPECT_EQ(query_row_count(db, "tx_tbl"), 0);
+}
+
+TEST_F(sqlite_backend_test, transaction_guard_independent_scopes)
+{
+    auto db = sqlite_backend::create(m_database_path, m_uuid);
+    db->execute("CREATE TABLE tx_tbl (id INTEGER PRIMARY KEY, val INTEGER)");
+
+    auto insert = db->create_write_statement_executor<int32_t>(
+        "INSERT INTO tx_tbl (val) VALUES (?)");
+
+    {
+        auto guard = db->begin_transaction();
+        for(int i = 0; i < 3; ++i)
+        {
+            insert(i);
+        }
+    }
+
+    EXPECT_THROW(
+        {
+            auto guard = db->begin_transaction();
+            for(int i = 100; i < 105; ++i)
+            {
+                insert(i);
+            }
+            throw std::runtime_error("rollback this scope only");
+        },
+        std::runtime_error);
+
+    EXPECT_EQ(query_row_count(db, "tx_tbl"), 3);
+}
+
 }  // namespace
