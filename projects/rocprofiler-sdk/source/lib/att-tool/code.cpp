@@ -25,6 +25,7 @@
 #include "lib/output/csv.hpp"
 #include "outputfile.hpp"
 
+#include <algorithm>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -53,6 +54,13 @@ CodeFile::CodeFile(Fspath _dir, std::shared_ptr<AddressTable> _table)
 : dir(std::move(_dir))
 , table(std::move(_table))
 {}
+
+void
+CodeFile::addCodeobj(uint64_t id)
+{
+    if(std::find(codeobj_ids.begin(), codeobj_ids.end(), id) == codeobj_ids.end())
+        codeobj_ids.emplace_back(id);
+}
 
 CodeFile::~CodeFile()
 {
@@ -174,6 +182,43 @@ CodeFile::~CodeFile()
     json["code"]    = jcode;
     json["version"] = TOOL_VERSION;
     json["header"]  = "ISA, _, LineNumber, Source, Codeobj, Vaddr, Hit, Latency, Stall, Idle";
+
+    nlohmann::json jfuncmap = nlohmann::json::array();
+    for(auto cid : codeobj_ids)
+    {
+        auto fmap = table->getFuncmap(cid);
+        if(!fmap) continue;
+
+        for(const auto& entry_ptr : fmap->entries)
+        {
+            if(!entry_ptr || entry_ptr->name.empty()) continue;
+
+            const char* kind_str = nullptr;
+            switch(entry_ptr->kind)
+            {
+                case rocprofiler::sdk::codeobj::funcmap::FuncmapEntryKind::Function:
+                    kind_str = "F";
+                    break;
+                case rocprofiler::sdk::codeobj::funcmap::FuncmapEntryKind::UserScope:
+                    kind_str = "U";
+                    break;
+                case rocprofiler::sdk::codeobj::funcmap::FuncmapEntryKind::Point:
+                    kind_str = "P";
+                    break;
+                case rocprofiler::sdk::codeobj::funcmap::FuncmapEntryKind::Kernel:
+                    kind_str = "K";
+                    break;
+            }
+
+            jfuncmap.push_back({cid,
+                                entry_ptr->id,
+                                kind_str,
+                                entry_ptr->name,
+                                entry_ptr->source_loc,
+                                entry_ptr->vaddr});
+        }
+    }
+    json["sqtt_funcmap"] = std::move(jfuncmap);
 
     OutputFile(dir / "code.json") << json;
 

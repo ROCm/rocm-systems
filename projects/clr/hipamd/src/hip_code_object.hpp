@@ -162,6 +162,9 @@ class StatCO : public CodeObject {
   // pointer to the alocated managed memory has to be copied to the address of symbol
   hipError_t InitManagedVarDevicePtr(int deviceId);
 
+  // Find a deferred managed var whose mmap address equals ptr
+  Var* FindDeferredManagedVar(const void* ptr);
+
   // Resize device-specific data structures for all registered functions and variables
   void ResizeForDevices(size_t device_count);
 

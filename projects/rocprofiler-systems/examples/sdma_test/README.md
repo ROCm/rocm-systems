@@ -45,7 +45,7 @@ cmake --build <build_dir> --target sdma_test
 **Flags:**
 
 | Flag | Description | Default |
-|------|-------------|---------|
+| ------ | ------------- | --------- |
 | `-s, --size` | Transfer size in MB (supports K/M/G suffixes) | 512 |
 | `-n, --iterations` | Number of iterations (0 = infinite) | 10 |
 | `-c, --copies` | Number of copies per iteration | 10 |
@@ -60,7 +60,7 @@ rocprof-sys-run -- ./sdma_test -s 256 -n 5
 ### Recommended Configuration
 
 | Variable | Value | Purpose |
-|----------|-------|---------|
+| ---------- | ------- | --------- |
 | `ROCPROFSYS_ROCM_DOMAINS` | `hip_runtime_api,kernel_dispatch,memory_copy` | Trace HIP API and memory copy operations |
 | `ROCPROFSYS_ROCM_EVENTS` | `SQ_WAVES,GRBM_COUNT` | Sample GPU hardware counters |
 | `ROCPROFSYS_TRACE` | `true` | Generate Perfetto trace for timeline analysis |

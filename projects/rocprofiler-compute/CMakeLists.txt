@@ -865,15 +865,15 @@ else()
     )
 endif()
 
-# top-level symlink for bin/rocprof-compute
+# top-level bin/rocprof-compute launcher (re-execs into libexec entrypoint)
+configure_file(
+    ${PROJECT_SOURCE_DIR}/cmake/${EXECUTABLE_NAME}.in
+    ${PROJECT_BINARY_DIR}/${EXECUTABLE_NAME}
+    @ONLY
+)
 install(
-    CODE
-        "execute_process(
-    COMMAND bash -c \"set -e
-    cd \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}
-    mkdir -p ${CMAKE_INSTALL_BINDIR}
-    ln -sf ../${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/${EXECUTABLE_NAME} ${CMAKE_INSTALL_BINDIR}/${EXECUTABLE_NAME}
-    \")"
+    PROGRAMS ${PROJECT_BINARY_DIR}/${EXECUTABLE_NAME}
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
     COMPONENT main
 )
 

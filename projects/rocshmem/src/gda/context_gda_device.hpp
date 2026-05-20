@@ -35,7 +35,7 @@ class QueuePair;
 
 class GDAContext : public Context {
  public:
-  __host__ GDAContext(Backend *b, unsigned int ctx_id, int gda_provider);
+  __host__ GDAContext(Backend *b, unsigned int ctx_id);
 
   __host__ ~GDAContext();
 
@@ -373,8 +373,6 @@ class GDAContext : public Context {
    * @brief Device context Id
    */
   unsigned int ctx_id_{};
-
-  int gda_provider_{0};
 
   /**
    * @brief Number of Queue Pairs allocated per PE
