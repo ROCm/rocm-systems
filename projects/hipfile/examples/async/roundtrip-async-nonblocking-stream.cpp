@@ -10,9 +10,11 @@
  *
  * Usage: ./roundtrip-async-nonblocking-stream READ_FILE WRITE_FILE [GPUID]
  *
- *   READ_FILE   Path to the input file. Created/truncated and seeded with
- *               RV_SIZE (default 1 MiB) bytes of generated test pattern via a
- *               plain POSIX write so the async path has known content to read.
+ *   READ_FILE   Path to the input file. Created/truncated and seeded via a
+ *               plain POSIX write with align_up(RV_SIZE, BLOCK_ALIGN) bytes of
+ *               generated test pattern so the O_DIRECT async read of the
+ *               aligned size has known content to pull. Only the first RV_SIZE
+ *               (default 1 MiB) bytes are treated as the logical payload.
  *   WRITE_FILE  Path to the output file. Opened O_RDWR|O_CREAT|O_DIRECT (the
  *               file is created if missing; existing contents past the write
  *               are left in place by ftruncate down to payload size).
@@ -86,8 +88,10 @@ main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    /* 2. Seed READ_FILE with a deterministic pattern */
-    if (seed_read_file(read_path, payload_size))
+    /* 2. Seed READ_FILE with a deterministic pattern. Seed alloc_size, not
+     * payload_size, so the O_DIRECT-aligned async read below has full content
+     * to pull even when RV_SIZE is overridden to a non-BLOCK_ALIGN multiple. */
+    if (seed_read_file(read_path, alloc_size))
         return EXIT_FAILURE;
 
     /* 3. Allocate the GPU buffer and register it with hipFile */
