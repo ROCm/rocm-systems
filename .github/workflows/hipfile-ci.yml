@@ -95,6 +95,19 @@ jobs:
       platform: ${{ inputs.platform }}
       rocm_version: ${{ inputs.rocm_version }}
 
+  python_bindings:
+    # cancelled() needed. Otherwise success() implicitly added and fails if the chained
+    # dependency build_AIS_CI_image is skipped.
+    if: ${{ !cancelled() && needs.build_and_test.result == 'success' }}
+    needs: [build_and_test]
+    uses: ./.github/workflows/hipfile-python-bindings.yml
+    with:
+      ais_hipfile_pkg_dev_filename: ${{ needs.build_and_test.outputs.ais_hipfile_pkg_dev_filename }}
+      ais_hipfile_pkg_filename: ${{ needs.build_and_test.outputs.ais_hipfile_pkg_filename }}
+      ci_image: ${{ needs.build_and_test.outputs.ci_image }}
+      platform: ${{ inputs.platform }}
+      rocm_version: ${{ inputs.rocm_version }}
+
   AIS_system_tests:
     # cancelled() needed. Otherwise success() implicitly added and fails if the chained
     # dependency build_AIS_CI_image is skipped.
@@ -113,6 +126,6 @@ jobs:
     needs: [AIS_CI_Pre-check, build_AIS_CI_image]
     uses: ./.github/workflows/hipfile-build-nvidia.yml
     with:
-      ci_image: ${{ needs.build_AIS_CI_image.outputs.ci_image }}
+      ci_image: ${{ needs.build_AIS_CI_image.outputs.ci_image_nvidia }}
       platform: ${{ inputs.platform }}
       rocm_version: ${{ inputs.rocm_version }}

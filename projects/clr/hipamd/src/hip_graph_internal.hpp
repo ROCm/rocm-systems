@@ -1043,6 +1043,7 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   uint64_t flags_ = 0;
   GraphKernelArgManager* kernArgManager_ = nullptr;  //!< Kernel Arg manager for graph.
   bool hasHiddenHeap_ = false;  //!< Hidden heap indicator for Kernel node
+  std::unordered_set<int> hiddenHeapInitializedDevices_;
   bool repeatLaunch_ = false;
 
   // PacketBatch structure
@@ -1066,6 +1067,7 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
     // Allows the fast flat-dispatch path even in the partially-disabled case.
     std::vector<uint8_t> filteredFlatPacketData;
     std::vector<uint32_t> filteredValidPacketFullHeaders;
+    bool filteredCacheValid = false;
 
     // Node tracking
     struct NodeRange {
@@ -1080,10 +1082,14 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
     PacketBatch() {}
     // O(1) enable/disable operations - just update state
     void setEnabled(GraphNode* node, bool enabled);
-    // Rebuild cached filtered lists if cache is stale
-    void rebuildFilteredLists();
+    // Rebuild cached filtered lists if cache is stale.
+    // Updates flat_packet pointers in patch_list to point into filteredFlatPacketData.
+    void rebuildFilteredLists(std::vector<amd::Device::HwEventPatch>& patch_list);
     // Rebuild the flat buffer from the current dispatchPackets contents.
     void rebuildFlatBuffer();
+    // Restore flat_packet pointers in patch_list back to flatPacketData when
+    // all nodes are re-enabled (disabledNodeCount == 0).
+    void restorePatchListPointers(std::vector<amd::Device::HwEventPatch>& patch_list);
     // Append one 64-byte AQL packet to a flat buffer: copies the body, saves the
     // full_header dword, and invalidates the header. Zeroes completion_signal
     // (ApplyHwEventPatches re-patches it directly via flat_packet pointers at launch).
@@ -1212,7 +1218,7 @@ class ChildGraphNode : public GraphNode, public GraphExec {
 
   hipError_t SetParams(GraphNode* node) override {
     const ChildGraphNode* childGraphNode = static_cast<ChildGraphNode const*>(node);
-    return SetParams((Graph*)this);
+    return SetParams(static_cast<const Graph*>(childGraphNode));
   }
 
   virtual std::string GetLabel(hipGraphDebugDotFlags flag) override {
@@ -1913,7 +1919,7 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
     amd::Memory* srcMemory = getMemoryObject(src_, sOffset);
     size_t dOffset = 0;
     amd::Memory* dstMemory = getMemoryObject(dst_, dOffset);
-    
+
     hip::MemcpyType memType = hipHostToHost;
     if (srcMemory != nullptr && dstMemory == nullptr) {
         memType = ihipGetMemcpyType(srcMemory, dst_);
@@ -2159,7 +2165,7 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
       // which is only valid for device to device copies.
       if (dstMemory != nullptr && srcMemory != nullptr) {
         return (hipCopyBuffer == ihipGetMemcpyType(srcMemory, dstMemory, kind_));
-      } 
+      }
       return false;
     }
     return false;

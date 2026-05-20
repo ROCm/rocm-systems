@@ -271,14 +271,18 @@ ncclResult_t ncclGetUserP2pLevel(int* level) {
   return ncclSuccess;
 }
 
+// Tests two ranks for CUDA P2P connectivity.
+// *cudaP2p returns 1 if CUDA P2P between the ranks is supported.
+// *p2p returns 1 only if the distance between the ranks is no greater than NCCL_P2P_LEVEL.  The connection may go through an intermediate rank.
 ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* system, int rank1, int rank2,
-                              int* p2p, int *read, int* intermediateRank) {
+                              int* p2p, int *read, int* intermediateRank, int* cudaP2p) {
   int mnnvl = 0;
   struct ncclPeerInfo* info1 = NULL;
   struct ncclPeerInfo* info2 = NULL;
   *p2p = 0;
   if (read) *read = 0;
   if (intermediateRank) *intermediateRank = -1;
+  if (cudaP2p) *cudaP2p = 0;
 
   // Rule out different nodes / isolated containers
   if (comm) {
@@ -341,10 +345,7 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* syst
 
 #if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
   if (*p2p == 1) {
-    // NCCL_IGNORE_DISABLED_P2P=2 is used by unit tests that don't want to
-    // validate against NVML at all since they are pretending to be on other hw.
-    if (g1 != g2 && (comm == NULL || (info1->hostHash == comm->peerInfo[comm->rank].hostHash &&
-                                      info1->hostHash == info2->hostHash)) && ncclParamIgnoreDisabledP2p() != 2) {
+    if (checkNvml) {
       int indexes[3] = {-1,-1,-1};
       int verticeN = 0;
       NCCLCHECK(ncclNvmlEnsureInitialized());
@@ -380,6 +381,26 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* syst
     // Enable P2P Read for Ampere/NVLink only
     if (read && (gpu1->gpu.cudaCompCap == gpu2->gpu.cudaCompCap) && (gpu1->gpu.cudaCompCap == 80)) *read = 1;
   }
+
+#if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
+  if (cudaP2p) {
+    if (checkNvml) {
+      int n1, n2;
+      n1 = system->nodes[GPU].nodes[g1].gpu.dev;
+      n2 = system->nodes[GPU].nodes[g2].gpu.dev;
+      *cudaP2p = (ncclNvmlDevicePairs[n1][n2].p2pStatusRead == NVML_P2P_STATUS_OK &&
+                  ncclNvmlDevicePairs[n1][n2].p2pStatusWrite == NVML_P2P_STATUS_OK);
+    } else {
+      // We assume P2P connectivity in case the ranks are connected using MNNVL or are on the same host.
+      *cudaP2p = (mnnvl || comm == NULL || info1->hostHash == info2->hostHash);
+    }
+  }
+#else
+  if (cudaP2p) {
+    // On AMD/HIP, assume P2P connectivity based on MNNVL or same host
+    *cudaP2p = (mnnvl || comm == NULL || info1->hostHash == info2->hostHash);
+  }
+#endif
 
   return ncclSuccess;
 }
@@ -632,7 +653,7 @@ ncclResult_t ncclTopoGetPxnRanks(struct ncclComm* comm, int** intermediateRanks,
   struct ncclTopoSystem* system = comm->topo;
   *nranks = 0;
   *intermediateRanks = NULL;
-  if (system->nodes[NET].count == 0) return ncclSuccess;
+  if (system->inter == 0) return ncclSuccess;
 
   int nr = 0;
   int* ranks = NULL;
@@ -715,7 +736,7 @@ ncclResult_t ncclTopoComputePaths(struct ncclTopoSystem* system, struct ncclComm
     for (int p=0; p<system->nodes[GPU].count; p++) {
       int p2p;
       NCCLCHECK(ncclTopoCheckP2p(comm, system, system->nodes[GPU].nodes[p].gpu.rank,
-                                 system->nodes[GPU].nodes[g].gpu.rank, &p2p, NULL, NULL));
+                                 system->nodes[GPU].nodes[g].gpu.rank, &p2p, NULL, NULL, NULL));
       if (p2p == 0) {
         // Divert all traffic through the CPU
         int cpu;
@@ -926,6 +947,7 @@ ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* 
     for (int n=system->nodes[NET].count-1; n>=0; n--)
       NCCLCHECKGOTO(ncclTopoRemoveNode(system, NET, n), ret, fail);
   }
+  system->inter = system->nodes[GPU].count == comm->nRanks ? 0 : 1;
 exit:
   free(domains);
   if (ids) free(ids);
