@@ -884,6 +884,43 @@ struct AsmAccess<16, LoadPolicy, StorePolicy> {
     llvm_amdgcn_raw_buffer_store_b128(static_cast<__uint128_t>(val),
                                       rsrc, offset, 0, aux);
   }
+
+  static __device__ __forceinline__ void load_store_buffer(void* __restrict__ src, 
+                                                           void* __restrict__ dst,
+                                                           uint32_t buf_size,
+                                                           int offset, int tid,
+                                                           int stride) {
+    constexpr int Unroll = 16;
+    type regs[Unroll];
+    i32x4_t rsrc = make_buffer_resource(src, buf_size);
+    i32x4_t rdst = make_buffer_resource(dst, buf_size);
+
+    constexpr uint32_t aux_load =
+        (LoadPolicy == CachePolicy::Standard)      ? 0b00000
+        : (LoadPolicy == CachePolicy::FlatCache)   ? 0b00000
+        : (LoadPolicy == CachePolicy::BypassL1)    ? 0b00001
+        : (LoadPolicy == CachePolicy::NonTemporal) ? 0b00010
+        : (LoadPolicy == CachePolicy::SystemScope) ? 0b10001
+                                                   : 0b10011;
+    constexpr uint32_t aux_store =
+        (StorePolicy == CachePolicy::Standard)      ? 0b00000
+        : (StorePolicy == CachePolicy::FlatCache)   ? 0b00000
+        : (StorePolicy == CachePolicy::BypassL1)    ? 0b00001
+        : (StorePolicy == CachePolicy::NonTemporal) ? 0b00010
+        : (StorePolicy == CachePolicy::SystemScope) ? 0b10001
+                                                    : 0b10011;
+
+#pragma unroll
+    for (int u = 0; u < Unroll; u++) {
+      regs[u] = llvm_amdgcn_raw_buffer_load_b128(rsrc, tid * 16,
+        (offset + u * stride) * 16, aux_load);
+    }
+#pragma unroll
+    for (int u = 0; u < Unroll; u++) {
+      llvm_amdgcn_raw_buffer_store_b128(regs[u], rdst, tid * 16,
+        (offset + u * stride) * 16, aux_store);
+    }
+  }
 };
 
 // ==============================================================================
