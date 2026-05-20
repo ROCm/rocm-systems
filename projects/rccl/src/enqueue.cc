@@ -15,7 +15,7 @@
 #include <hip/hip_ext.h>
 #include "gdrwrap.h"
 #include "bootstrap.h"
-#include <cstring>
+#include <cstring> // std::memcpy
 #include "channel.h"
 #include "rocmwrap.h"
 #include "rccl_vars.h"
@@ -29,7 +29,6 @@
 #include "api_trace.h"
 #include "rccl_common.h"
 
-#include <cstring> // std::memcpy
 #include <cinttypes> // PRIx64
 #include <cassert>
 #include <cfloat> // FLT_MAX
@@ -104,7 +103,7 @@ RCCL_PARAM_DECLARE(LazyKernelInit);
 // owner thread we propagate the error to all waiters instead of leaving the
 // gate stuck at LAZY_INITIALIZING and hanging every subsequent launch on
 // the same device.
-enum LazyInitState : int {
+enum class LazyInitState : int {
   LAZY_UNINIT       = 0,
   LAZY_INITIALIZING = 1,
   LAZY_DONE         = 2,
@@ -113,8 +112,16 @@ enum LazyInitState : int {
 
 // Sized to MAX_ALLOC_TRACK_NGPU (currently 128) to cover the maximum
 // number of devices RCCL tracks elsewhere; the previous hardcoded 16
-// would silently skip lazy init for cudaDev >= 16.
-static std::atomic<int> g_rcclLazyKernelInitState[MAX_ALLOC_TRACK_NGPU] = {};
+// would silently skip lazy init for cudaDev >= 16. Default-initialised
+// state is LazyInitState::LAZY_UNINIT (== 0) per the enum definition above.
+static std::atomic<LazyInitState> g_rcclLazyKernelInitState[MAX_ALLOC_TRACK_NGPU] = {};
+// Side table for the failing ncclResult_t so waiters surface the same error
+// the owner saw (e.g. ncclUnhandledCudaError from a real init failure)
+// instead of a generic ncclSystemError that loses the first-cause context.
+// Owner writes this BEFORE publishing LAZY_FAILED on the gate; the release
+// on the gate store makes the value visible to any waiter that acquire-loads
+// LAZY_FAILED, so a plain relaxed load on the err table is sufficient.
+static std::atomic<int> g_rcclLazyKernelInitErr[MAX_ALLOC_TRACK_NGPU] = {};
 
 // Spin window for the lazy-init waiter before yielding the core. Mirrors the
 // short tight-spin pattern used in comm.h wait loops: a few µs covers the
@@ -2048,79 +2055,98 @@ NCCL_PARAM(MemSyncDomain, "MEM_SYNC_DOMAIN", cudaLaunchMemSyncDomainRemote);
 // Once-per-(process,device) lazy kernel init driven by ncclLaunchKernel.
 // Caller must ensure rcclParamLazyKernelInit() is set; cudaDev range is
 // validated eagerly in ncclCommInitRankFunc so this fast-path only does the
-// CAS-gate dance. The launch stream is checked against graph capture because
-// both ncclInitKernelsForDevice (cudaFuncSetAttribute) and applyKernelStackLimits
-// (cudaDeviceSetLimit) are not stream-capturable and would either corrupt the
-// captured graph or fail with a non-obvious error; users wanting graph capture
-// must perform a warmup launch outside the capture region.
+// CAS-gate dance.
+//
+// Stream capture is checked AFTER the would-be owner wins the
+// UNINIT->INITIALIZING CAS. If the owner is then found to be inside a
+// capture, it releases ownership back to LAZY_UNINIT (release) and returns
+// ncclInvalidUsage; any concurrent waiter sees that release as "owner
+// abandoned" and restarts from the top of the function to retry the CAS
+// itself. Tying the precondition to CAS ownership (rather than to a stale
+// pre-CAS load of s) closes the race where a thread observed LAZY_UNINIT
+// but did not actually become the owner.
+//
+// On real init failure the gate is poisoned to LAZY_FAILED and the failing
+// ncclResult_t is published in g_rcclLazyKernelInitErr so every waiter
+// returns the same first-cause code instead of a generic ncclSystemError.
 static ncclResult_t lazyKernelInitOnce(struct ncclComm* comm, cudaStream_t launchStream) {
   auto& gate = g_rcclLazyKernelInitState[comm->cudaDev];
-  int s = gate.load(std::memory_order_acquire);
-  if (__builtin_expect(s == LAZY_DONE, 1)) return ncclSuccess;
-  if (s == LAZY_FAILED) return ncclSystemError;
+  auto& errSlot = g_rcclLazyKernelInitErr[comm->cudaDev];
 
-  int expected = LAZY_UNINIT;
-  if (gate.compare_exchange_strong(expected, LAZY_INITIALIZING,
-                                   std::memory_order_acq_rel,
-                                   std::memory_order_acquire)) {
-    // Owner: bail out early if we are inside a cuda graph capture — neither
-    // cudaFuncSetAttribute nor cudaDeviceSetLimit can be safely captured.
-    cudaStreamCaptureStatus captureStatus = cudaStreamCaptureStatusNone;
-    cudaError_t cerr = cudaStreamIsCapturing(launchStream, &captureStatus);
-    if (cerr == cudaSuccess && captureStatus != cudaStreamCaptureStatusNone) {
-      gate.store(LAZY_FAILED, std::memory_order_release);
-      WARN("LazyKernelInit: dev %d first launch is inside a stream capture "
-           "(status=%d); cudaFuncSetAttribute/cudaDeviceSetLimit are not "
-           "graph-capturable. Perform a warmup ncclAllReduce outside "
-           "cudaStreamBeginCapture/cudaStreamEndCapture, or unset "
-           "RCCL_LAZY_KERNEL_INIT for capture workloads.",
-           comm->cudaDev, (int)captureStatus);
-      return ncclInvalidUsage;
+  for (;;) {
+    LazyInitState s = gate.load(std::memory_order_acquire);
+    if (__builtin_expect(s == LazyInitState::LAZY_DONE, 1)) return ncclSuccess;
+    if (s == LazyInitState::LAZY_FAILED) {
+      return (ncclResult_t)errSlot.load(std::memory_order_relaxed);
     }
+
+    if (s == LazyInitState::LAZY_UNINIT) {
+      LazyInitState expected = LazyInitState::LAZY_UNINIT;
+      if (gate.compare_exchange_strong(expected, LazyInitState::LAZY_INITIALIZING,
+                                       std::memory_order_acq_rel,
+                                       std::memory_order_acquire)) {
+        // Owner path. Precondition (stream capture) is checked here, not
+        // before the CAS, so threads that did not actually become the
+        // owner never observe a precondition-driven error.
+        cudaStreamCaptureStatus captureStatus = cudaStreamCaptureStatusNone;
+        cudaError_t cerr = cudaStreamIsCapturing(launchStream, &captureStatus);
+        if (cerr == cudaSuccess && captureStatus != cudaStreamCaptureStatusNone) {
+          gate.store(LazyInitState::LAZY_UNINIT, std::memory_order_release);
+          WARN("LazyKernelInit: dev %d first launch is inside a stream capture "
+               "(status=%d); cudaFuncSetAttribute/cudaDeviceSetLimit are not "
+               "graph-capturable. Perform a warmup ncclAllReduce outside "
+               "cudaStreamBeginCapture/cudaStreamEndCapture, or unset "
+               "RCCL_LAZY_KERNEL_INIT for capture workloads.",
+               comm->cudaDev, (int)captureStatus);
+          return ncclInvalidUsage;
+        }
+
+        uint64_t t0 = clockNano();
+        size_t maxLocalSizeBytes = 0;
+        ncclResult_t r = ncclInitKernelsForDevice(comm->cudaArch, comm->maxSharedMem, &maxLocalSizeBytes);
+        if (r == ncclSuccess) {
+          r = applyKernelStackLimits(comm->archName, maxLocalSizeBytes);
+        }
+        if (r != ncclSuccess) {
+          errSlot.store((int)r, std::memory_order_relaxed);
+          gate.store(LazyInitState::LAZY_FAILED, std::memory_order_release);
+          WARN("LazyKernelInit: init failed on dev %d: %d", comm->cudaDev, (int)r);
+          return r;
+        }
+        gate.store(LazyInitState::LAZY_DONE, std::memory_order_release);
+        INFO(NCCL_INIT | NCCL_BOOTSTRAP | NCCL_PROFILE,
+             "LazyKernelInit fired rank %d dev %d kernels_us %llu",
+             comm->rank, comm->cudaDev,
+             (unsigned long long)((clockNano() - t0) / 1000));
+        return ncclSuccess;
+      }
+      // CAS lost: somebody else owns the gate now, fall through to wait.
+    }
+
+    // Waiter: short spin then yield until DONE / FAILED / UNINIT (the last
+    // means the owner aborted the precondition and released the gate, in
+    // which case we retry the CAS from the top of the loop). Emit one WARN
+    // if the wait exceeds LAZY_INIT_WAITER_WARN_NS so a stuck owner does
+    // not appear as a silent hang in user logs.
     uint64_t t0 = clockNano();
-    size_t maxLocalSizeBytes = 0;
-    ncclResult_t r = ncclInitKernelsForDevice(comm->cudaArch, comm->maxSharedMem, &maxLocalSizeBytes);
-    if (r != ncclSuccess) {
-      gate.store(LAZY_FAILED, std::memory_order_release);
-      WARN("LazyKernelInit: ncclInitKernelsForDevice failed on dev %d: %d",
-           comm->cudaDev, (int)r);
-      return r;
+    bool warned = false;
+    LazyInitState w;
+    while ((w = gate.load(std::memory_order_acquire)) == LazyInitState::LAZY_INITIALIZING) {
+      uint64_t elapsed = clockNano() - t0;
+      if (elapsed >= LAZY_INIT_SPIN_NS) sched_yield();
+      if (!warned && elapsed >= LAZY_INIT_WAITER_WARN_NS) {
+        WARN("LazyKernelInit: rank %d dev %d still waiting for owner after %llus; "
+             "owner thread may be stuck in ncclInitKernelsForDevice "
+             "(HSA code-object load) or crashed before publishing the gate",
+             comm->rank, comm->cudaDev,
+             (unsigned long long)(elapsed / 1000000000ULL));
+        warned = true;
+      }
     }
-    r = applyKernelStackLimits(comm->archName, maxLocalSizeBytes);
-    if (r != ncclSuccess) {
-      gate.store(LAZY_FAILED, std::memory_order_release);
-      WARN("LazyKernelInit: applyKernelStackLimits failed on dev %d: %d",
-           comm->cudaDev, (int)r);
-      return r;
-    }
-    gate.store(LAZY_DONE, std::memory_order_release);
-    INFO(NCCL_INIT | NCCL_BOOTSTRAP | NCCL_PROFILE,
-         "LazyKernelInit fired rank %d dev %d kernels_us %llu",
-         comm->rank, comm->cudaDev,
-         (unsigned long long)((clockNano() - t0) / 1000));
-    return ncclSuccess;
+    if (w == LazyInitState::LAZY_DONE)   return ncclSuccess;
+    if (w == LazyInitState::LAZY_FAILED) return (ncclResult_t)errSlot.load(std::memory_order_relaxed);
+    // w == LAZY_UNINIT: owner aborted; retry the CAS ourselves.
   }
-
-  // Waiter: short spin then yield until LAZY_DONE / LAZY_FAILED. Emit one
-  // WARN if the wait exceeds LAZY_INIT_WAITER_WARN_NS so a stuck owner does
-  // not appear as a silent hang in user logs.
-  uint64_t t0 = clockNano();
-  bool warned = false;
-  int w;
-  while ((w = gate.load(std::memory_order_acquire)) != LAZY_DONE) {
-    if (w == LAZY_FAILED) return ncclSystemError;
-    uint64_t elapsed = clockNano() - t0;
-    if (elapsed >= LAZY_INIT_SPIN_NS) sched_yield();
-    if (!warned && elapsed >= LAZY_INIT_WAITER_WARN_NS) {
-      WARN("LazyKernelInit: rank %d dev %d still waiting for owner after %llus; "
-           "owner thread may be stuck in ncclInitKernelsForDevice "
-           "(HSA code-object load) or crashed before publishing the gate",
-           comm->rank, comm->cudaDev,
-           (unsigned long long)(elapsed / 1000000000ULL));
-      warned = true;
-    }
-  }
-  return ncclSuccess;
 }
 
 ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan) {

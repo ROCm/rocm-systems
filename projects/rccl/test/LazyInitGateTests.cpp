@@ -15,11 +15,19 @@
  *       LAZY_UNINIT (0), LAZY_INITIALIZING (1), LAZY_DONE (2), LAZY_FAILED (3).
  *   - Exactly one caller wins the UNINIT->INITIALIZING CAS and runs initFn();
  *     all other callers wait until LAZY_DONE / LAZY_FAILED is observed.
- *   - LAZY_FAILED is REQUIRED so that an owner failure propagates to every
- *     waiter as ncclSystemError instead of leaving the gate stuck at
- *     LAZY_INITIALIZING and hanging every subsequent launch on that device.
- *   - LAZY_DONE / LAZY_FAILED short-circuit fresh callers without doing the
- *     CAS again (this is the common-case fast path after first launch).
+ *   - On owner failure, the owner first writes the failing ncclResult_t to a
+ *     per-device err side-table and THEN publishes LAZY_FAILED on the gate
+ *     (release). Waiters acquire-load LAZY_FAILED and return the same code,
+ *     so every rank sees the first-cause error instead of a generic
+ *     ncclSystemError.
+ *   - DONE / FAILED short-circuit fresh callers without re-running initFn
+ *     (this is the common-case fast path after first launch).
+ *   - A would-be owner that cannot legally run init right now (in production:
+ *     inside a stream capture) is detected AFTER winning the CAS. It then
+ *     releases ownership back to LAZY_UNINIT and returns the precondition
+ *     error. Any concurrent waiter sees that release and retries the CAS
+ *     itself, so a legal caller still completes init. Threads that never
+ *     became the owner never observe a precondition-driven error.
  ************************************************************************/
 
 #include <atomic>
@@ -37,7 +45,7 @@
 namespace RcclUnitTesting {
 namespace {
 
-enum LazyInitState : int {
+enum class LazyInitState : int {
   LAZY_UNINIT       = 0,
   LAZY_INITIALIZING = 1,
   LAZY_DONE         = 2,
@@ -45,31 +53,59 @@ enum LazyInitState : int {
 };
 
 // Inline mirror of src/enqueue.cc::lazyKernelInitOnce minus the HIP-specific
-// pieces (stream-capture check, INFO/WARN logging, clockNano). Behaviorally
-// identical for the CAS race and failure-propagation contract this file
-// pins. initFn is the test-supplied stand-in for ncclInitKernelsForDevice.
-static ncclResult_t testGateRun(std::atomic<int>& gate,
-                                std::function<ncclResult_t()> initFn) {
-  int s = gate.load(std::memory_order_acquire);
-  if (s == LAZY_DONE)   return ncclSuccess;
-  if (s == LAZY_FAILED) return ncclSystemError;
+// pieces (INFO/WARN logging, clockNano). Behaviorally identical for the CAS
+// race, owner/waiter handoff, post-CAS precondition with owner-abort retry,
+// and failure propagation this file pins.
+//
+// initFn  - test-supplied stand-in for ncclInitKernelsForDevice.
+// errSlot - mirror of g_rcclLazyKernelInitErr.
+// ownerPrecondition(err_out) - mirror of the stream-capture check; the
+//   thread invokes it ONLY AFTER it has won the UNINIT->INITIALIZING CAS.
+//   Return false to abort ownership: the gate is released back to
+//   LAZY_UNINIT and the caller returns err_out. Threads that did not win
+//   the CAS never invoke it -- that's the property we pin.
+static ncclResult_t testGateRun(
+    std::atomic<LazyInitState>& gate,
+    std::atomic<int>& errSlot,
+    std::function<ncclResult_t()> initFn,
+    std::function<bool(ncclResult_t&)> ownerPrecondition =
+        [](ncclResult_t&){ return true; }) {
+  for (;;) {
+    LazyInitState s = gate.load(std::memory_order_acquire);
+    if (s == LazyInitState::LAZY_DONE) return ncclSuccess;
+    if (s == LazyInitState::LAZY_FAILED) {
+      return (ncclResult_t)errSlot.load(std::memory_order_relaxed);
+    }
 
-  int expected = LAZY_UNINIT;
-  if (gate.compare_exchange_strong(expected, LAZY_INITIALIZING,
-                                   std::memory_order_acq_rel,
-                                   std::memory_order_acquire)) {
-    ncclResult_t r = initFn();
-    gate.store(r == ncclSuccess ? LAZY_DONE : LAZY_FAILED,
-               std::memory_order_release);
-    return r;
-  }
+    if (s == LazyInitState::LAZY_UNINIT) {
+      LazyInitState expected = LazyInitState::LAZY_UNINIT;
+      if (gate.compare_exchange_strong(expected, LazyInitState::LAZY_INITIALIZING,
+                                       std::memory_order_acq_rel,
+                                       std::memory_order_acquire)) {
+        ncclResult_t pre = ncclSuccess;
+        if (!ownerPrecondition(pre)) {
+          gate.store(LazyInitState::LAZY_UNINIT, std::memory_order_release);
+          return pre;
+        }
+        ncclResult_t r = initFn();
+        if (r != ncclSuccess) {
+          errSlot.store((int)r, std::memory_order_relaxed);
+          gate.store(LazyInitState::LAZY_FAILED, std::memory_order_release);
+          return r;
+        }
+        gate.store(LazyInitState::LAZY_DONE, std::memory_order_release);
+        return ncclSuccess;
+      }
+    }
 
-  int w;
-  while ((w = gate.load(std::memory_order_acquire)) != LAZY_DONE) {
-    if (w == LAZY_FAILED) return ncclSystemError;
-    sched_yield();
+    LazyInitState w;
+    while ((w = gate.load(std::memory_order_acquire)) == LazyInitState::LAZY_INITIALIZING) {
+      sched_yield();
+    }
+    if (w == LazyInitState::LAZY_DONE)   return ncclSuccess;
+    if (w == LazyInitState::LAZY_FAILED) return (ncclResult_t)errSlot.load(std::memory_order_relaxed);
+    // w == LAZY_UNINIT: owner aborted, retry the CAS ourselves.
   }
-  return ncclSuccess;
 }
 
 } // namespace
@@ -77,54 +113,60 @@ static ncclResult_t testGateRun(std::atomic<int>& gate,
 // Single-threaded happy path: UNINIT -> INITIALIZING -> DONE, initFn fires
 // exactly once, gate ends in LAZY_DONE.
 TEST(LazyInitGateTests, SingleThread_HappyPath_RunsInitOnce) {
-  std::atomic<int> gate{LAZY_UNINIT};
+  std::atomic<LazyInitState> gate{LazyInitState::LAZY_UNINIT};
+  std::atomic<int> err{(int)ncclSuccess};
   int calls = 0;
-  ncclResult_t r = testGateRun(gate, [&]{ ++calls; return ncclSuccess; });
+  ncclResult_t r = testGateRun(gate, err, [&]{ ++calls; return ncclSuccess; });
   EXPECT_EQ(r, ncclSuccess);
   EXPECT_EQ(calls, 1);
-  EXPECT_EQ(gate.load(), LAZY_DONE);
+  EXPECT_EQ(gate.load(), LazyInitState::LAZY_DONE);
 }
 
 // Re-entry after success must NOT run initFn again -- this is the steady-state
 // fast path that fires on every launch past the first.
 TEST(LazyInitGateTests, AlreadyDone_IsFastPath_NoReinit) {
-  std::atomic<int> gate{LAZY_DONE};
+  std::atomic<LazyInitState> gate{LazyInitState::LAZY_DONE};
+  std::atomic<int> err{(int)ncclSuccess};
   int calls = 0;
-  ncclResult_t r = testGateRun(gate, [&]{ ++calls; return ncclSuccess; });
+  ncclResult_t r = testGateRun(gate, err, [&]{ ++calls; return ncclSuccess; });
   EXPECT_EQ(r, ncclSuccess);
   EXPECT_EQ(calls, 0);
-  EXPECT_EQ(gate.load(), LAZY_DONE);
+  EXPECT_EQ(gate.load(), LazyInitState::LAZY_DONE);
 }
 
-// Once the gate has been poisoned (owner failed), every later caller must get
-// ncclSystemError WITHOUT re-running initFn. This is the contract that keeps
-// a misconfigured device from hanging every subsequent launch.
+// Once the gate has been poisoned (owner failed), every later caller must
+// receive the owner's exact ncclResult_t WITHOUT re-running initFn. This is
+// the contract that keeps a misconfigured device from hanging every
+// subsequent launch and from losing the first-cause error code.
 TEST(LazyInitGateTests, AlreadyFailed_IsFastPath_NoReinit) {
-  std::atomic<int> gate{LAZY_FAILED};
+  std::atomic<LazyInitState> gate{LazyInitState::LAZY_FAILED};
+  std::atomic<int> err{(int)ncclUnhandledCudaError};
   int calls = 0;
-  ncclResult_t r = testGateRun(gate, [&]{ ++calls; return ncclSuccess; });
-  EXPECT_EQ(r, ncclSystemError);
+  ncclResult_t r = testGateRun(gate, err, [&]{ ++calls; return ncclSuccess; });
+  EXPECT_EQ(r, ncclUnhandledCudaError);
   EXPECT_EQ(calls, 0);
-  EXPECT_EQ(gate.load(), LAZY_FAILED);
+  EXPECT_EQ(gate.load(), LazyInitState::LAZY_FAILED);
 }
 
-// Owner failure must publish LAZY_FAILED and surface initFn's exact error.
+// Owner failure must publish LAZY_FAILED, store the failing code in errSlot,
+// and surface initFn's exact error to the owner and any later caller.
 TEST(LazyInitGateTests, OwnerFailure_PoisonsGate_PropagatesError) {
-  std::atomic<int> gate{LAZY_UNINIT};
+  std::atomic<LazyInitState> gate{LazyInitState::LAZY_UNINIT};
+  std::atomic<int> err{(int)ncclSuccess};
   int calls = 0;
-  ncclResult_t r = testGateRun(gate, [&]{
+  ncclResult_t r = testGateRun(gate, err, [&]{
     ++calls;
     return ncclInternalError;
   });
   EXPECT_EQ(r, ncclInternalError);
   EXPECT_EQ(calls, 1);
-  EXPECT_EQ(gate.load(), LAZY_FAILED);
+  EXPECT_EQ(gate.load(), LazyInitState::LAZY_FAILED);
+  EXPECT_EQ((ncclResult_t)err.load(), ncclInternalError);
 
   // A second caller must not retry the failed init -- it gets the cached
-  // failure mapped to ncclSystemError (the gate has no room to store the
-  // exact error, by design).
-  ncclResult_t r2 = testGateRun(gate, [&]{ ++calls; return ncclSuccess; });
-  EXPECT_EQ(r2, ncclSystemError);
+  // first-cause code from the err side-table.
+  ncclResult_t r2 = testGateRun(gate, err, [&]{ ++calls; return ncclSuccess; });
+  EXPECT_EQ(r2, ncclInternalError);
   EXPECT_EQ(calls, 1);
 }
 
@@ -135,7 +177,8 @@ TEST(LazyInitGateTests, OwnerFailure_PoisonsGate_PropagatesError) {
 // path, not just the steady-state fast path.
 TEST(LazyInitGateTests, MultiThread_OnlyOneOwnerRunsInit_AllSucceed) {
   constexpr int kThreads = 16;
-  std::atomic<int> gate{LAZY_UNINIT};
+  std::atomic<LazyInitState> gate{LazyInitState::LAZY_UNINIT};
+  std::atomic<int> err{(int)ncclSuccess};
   std::atomic<int> initCalls{0};
   std::atomic<int> startGate{0};
   std::vector<ncclResult_t> results(kThreads, ncclInternalError);
@@ -145,7 +188,7 @@ TEST(LazyInitGateTests, MultiThread_OnlyOneOwnerRunsInit_AllSucceed) {
   for (int i = 0; i < kThreads; ++i) {
     threads.emplace_back([&, i]{
       while (startGate.load(std::memory_order_acquire) == 0) sched_yield();
-      results[i] = testGateRun(gate, [&]{
+      results[i] = testGateRun(gate, err, [&]{
         initCalls.fetch_add(1, std::memory_order_relaxed);
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
         return ncclSuccess;
@@ -157,18 +200,20 @@ TEST(LazyInitGateTests, MultiThread_OnlyOneOwnerRunsInit_AllSucceed) {
   for (auto& t : threads) t.join();
 
   EXPECT_EQ(initCalls.load(), 1) << "initFn must fire exactly once across all racing threads";
-  EXPECT_EQ(gate.load(), LAZY_DONE);
+  EXPECT_EQ(gate.load(), LazyInitState::LAZY_DONE);
   for (int i = 0; i < kThreads; ++i) {
     EXPECT_EQ(results[i], ncclSuccess) << "thread " << i << " saw a non-success result";
   }
 }
 
-// Same multi-thread race, but the owner FAILS. Every waiter must observe
-// LAZY_FAILED and return ncclSystemError -- no waiter may hang and no waiter
-// may silently re-run initFn after the failure is published.
-TEST(LazyInitGateTests, MultiThread_OwnerFails_AllWaitersGetSystemError) {
+// Same multi-thread race, but the owner FAILS. Every thread (owner and
+// waiters) must return the SAME ncclResult_t the owner produced -- no
+// generic ncclSystemError, no hangs, no silent re-run of initFn.
+TEST(LazyInitGateTests, MultiThread_OwnerFails_AllThreadsGetSameError) {
   constexpr int kThreads = 16;
-  std::atomic<int> gate{LAZY_UNINIT};
+  constexpr ncclResult_t kOwnerErr = ncclUnhandledCudaError;
+  std::atomic<LazyInitState> gate{LazyInitState::LAZY_UNINIT};
+  std::atomic<int> err{(int)ncclSuccess};
   std::atomic<int> initCalls{0};
   std::atomic<int> startGate{0};
   std::vector<ncclResult_t> results(kThreads, ncclInternalError);
@@ -178,10 +223,10 @@ TEST(LazyInitGateTests, MultiThread_OwnerFails_AllWaitersGetSystemError) {
   for (int i = 0; i < kThreads; ++i) {
     threads.emplace_back([&, i]{
       while (startGate.load(std::memory_order_acquire) == 0) sched_yield();
-      results[i] = testGateRun(gate, [&]{
+      results[i] = testGateRun(gate, err, [&]{
         initCalls.fetch_add(1, std::memory_order_relaxed);
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        return ncclUnhandledCudaError;
+        return kOwnerErr;
       });
     });
   }
@@ -190,22 +235,85 @@ TEST(LazyInitGateTests, MultiThread_OwnerFails_AllWaitersGetSystemError) {
   for (auto& t : threads) t.join();
 
   EXPECT_EQ(initCalls.load(), 1) << "initFn must fire exactly once even when it fails";
-  EXPECT_EQ(gate.load(), LAZY_FAILED);
-
-  // Exactly one thread saw the owner's raw error code; every other thread
-  // is a waiter and must see the cached ncclSystemError.
-  int ownerCount  = 0;
-  int waiterCount = 0;
+  EXPECT_EQ(gate.load(), LazyInitState::LAZY_FAILED);
+  EXPECT_EQ((ncclResult_t)err.load(), kOwnerErr);
   for (int i = 0; i < kThreads; ++i) {
-    if (results[i] == ncclUnhandledCudaError) {
-      ++ownerCount;
-    } else {
-      EXPECT_EQ(results[i], ncclSystemError) << "thread " << i << " saw an unexpected result";
-      ++waiterCount;
-    }
+    EXPECT_EQ(results[i], kOwnerErr) << "thread " << i << " did not receive the owner's first-cause error";
   }
-  EXPECT_EQ(ownerCount,  1);
-  EXPECT_EQ(waiterCount, kThreads - 1);
+}
+
+// Post-CAS precondition (in production: stream capture) must not poison
+// the gate on failure. A later caller for whom the precondition holds wins
+// a fresh CAS, runs init, and succeeds -- proving the precondition path is
+// retryable.
+TEST(LazyInitGateTests, OwnerPrecondition_FailsRetryable_NoGatePoison) {
+  std::atomic<LazyInitState> gate{LazyInitState::LAZY_UNINIT};
+  std::atomic<int> err{(int)ncclSuccess};
+  int calls = 0;
+
+  ncclResult_t r1 = testGateRun(gate, err,
+      [&]{ ++calls; return ncclSuccess; },
+      [](ncclResult_t& out){ out = ncclInvalidUsage; return false; });
+  EXPECT_EQ(r1, ncclInvalidUsage);
+  EXPECT_EQ(calls, 0);
+  EXPECT_EQ(gate.load(), LazyInitState::LAZY_UNINIT)
+      << "owner-abort must release the gate back to LAZY_UNINIT for retry";
+
+  ncclResult_t r2 = testGateRun(gate, err,
+      [&]{ ++calls; return ncclSuccess; });
+  EXPECT_EQ(r2, ncclSuccess);
+  EXPECT_EQ(calls, 1);
+  EXPECT_EQ(gate.load(), LazyInitState::LAZY_DONE);
+}
+
+// Owner aborts the precondition WHILE a second thread is already in the
+// waiter loop. The waiter must observe the LAZY_UNINIT release, retry the
+// CAS itself, run init, and return ncclSuccess. This pins the "waiter
+// retries on owner abort" branch -- a hang or a generic error here would
+// mean the state machine cannot recover from a legitimately-failing
+// precondition without dropping concurrent callers.
+TEST(LazyInitGateTests, MultiThread_OwnerAborts_WaiterRetriesAndSucceeds) {
+  std::atomic<LazyInitState> gate{LazyInitState::LAZY_UNINIT};
+  std::atomic<int> err{(int)ncclSuccess};
+  std::atomic<int> initCalls{0};
+  std::atomic<int> ownerEnteredPrecondition{0};
+  std::atomic<int> releaseOwner{0};
+
+  std::thread owner([&]{
+    ncclResult_t r = testGateRun(gate, err,
+        [&]{ initCalls.fetch_add(1); return ncclSuccess; },
+        [&](ncclResult_t& out){
+          // Park inside the precondition long enough for the second thread
+          // to enter the waiter loop with s == LAZY_INITIALIZING. Then
+          // abort -- this releases the gate back to LAZY_UNINIT.
+          ownerEnteredPrecondition.store(1, std::memory_order_release);
+          while (releaseOwner.load(std::memory_order_acquire) == 0) sched_yield();
+          out = ncclInvalidUsage;
+          return false;
+        });
+    EXPECT_EQ(r, ncclInvalidUsage);
+  });
+
+  while (ownerEnteredPrecondition.load(std::memory_order_acquire) == 0) sched_yield();
+
+  // Second thread: precondition passes, but it arrives while the first
+  // thread already owns the gate. It must wait, observe the owner's
+  // LAZY_UNINIT release, retry the CAS itself, run init, and succeed.
+  std::thread retrier([&]{
+    ncclResult_t r = testGateRun(gate, err,
+        [&]{ initCalls.fetch_add(1); return ncclSuccess; });
+    EXPECT_EQ(r, ncclSuccess) << "waiter must retry CAS on owner-abort and succeed";
+  });
+
+  // Let the second thread reach the waiter loop, then unblock the owner.
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  releaseOwner.store(1, std::memory_order_release);
+
+  owner.join();
+  retrier.join();
+
+  EXPECT_EQ(initCalls.load(), 1) << "init must fire exactly once across owner+retrier";
+  EXPECT_EQ(gate.load(), LazyInitState::LAZY_DONE);
 }
 
 } // namespace RcclUnitTesting
