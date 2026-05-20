@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 """
-These tests execise minimal examples to verify targeted behavior of the profiler.
+These tests exercise minimal examples to verify targeted behavior of the profiler.
 """
 
 from __future__ import annotations

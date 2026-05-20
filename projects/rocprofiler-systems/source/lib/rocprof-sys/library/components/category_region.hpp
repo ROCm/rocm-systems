@@ -34,22 +34,6 @@
 #include <string_view>
 #include <utility>
 
-namespace
-{
-
-void
-cache_region(std::uint64_t thread_id, const std::string& name, std::uint64_t start_ts,
-             std::uint64_t end_ts, const std::string& category)
-{
-    constexpr size_t      NO_CORRELATION_ID = 0;
-    constexpr const char* CALLSTACK         = "{}";
-    constexpr const char* ARGUMENTS         = "";
-    rocprofsys::trace_cache::get_buffer_storage().store(
-        rocprofsys::trace_cache::region_sample{
-            thread_id, name.c_str(), NO_CORRELATION_ID, NO_CORRELATION_ID, start_ts,
-            end_ts, CALLSTACK, ARGUMENTS, category.c_str() });
-}
-
 struct entry_key
 {
     std::string name;
@@ -68,7 +52,23 @@ struct entry_key
 
 using timestamp_t = std::uint64_t;
 
-thread_local std::map<entry_key, std::vector<timestamp_t>> map_name_to_args;
+inline thread_local std::map<entry_key, std::vector<timestamp_t>> map_name_to_args;
+
+namespace
+{
+
+void
+cache_region(std::uint64_t thread_id, const std::string& name, std::uint64_t start_ts,
+             std::uint64_t end_ts, const std::string& category)
+{
+    constexpr size_t      NO_CORRELATION_ID = 0;
+    constexpr const char* CALLSTACK         = "{}";
+    constexpr const char* ARGUMENTS         = "";
+    rocprofsys::trace_cache::get_buffer_storage().store(
+        rocprofsys::trace_cache::region_sample{
+            thread_id, name.c_str(), NO_CORRELATION_ID, NO_CORRELATION_ID, start_ts,
+            end_ts, CALLSTACK, ARGUMENTS, category.c_str() });
+}
 
 template <typename CategoryT, typename... Args>
 void
