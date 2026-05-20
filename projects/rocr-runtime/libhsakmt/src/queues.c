@@ -154,6 +154,8 @@ uint32_t hsakmt_get_sgpr_size_per_cu(uint32_t gfxv)
 
 	if (gfxv < GFX_VERSION_GFX1250)
 		sgpr_size = 0x4000;
+	else if (gfxv == GFX_VERSION_GFX1250)
+		sgpr_size = 0x8000;
 
 	assert(sgpr_size);
 
