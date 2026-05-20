@@ -19,6 +19,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
+from utils.specs import canonical_config_arch
 from utils.utils_common import normalize_filter_to_str_list
 
 # TODO: use pandas chunksize or dask to read really large csv file
@@ -410,7 +411,9 @@ def is_single_panel_config(
     archs, or one for each arch.
     """
     # If not single config, verify all supported archs have defined configs
-    arch_names = list(supported_archs.keys())
+    arch_names = {
+        canonical_config_arch(arch) or arch for arch in supported_archs.keys()
+    }
     root_path = Path(root_dir)
     arch_count = sum(1 for arch in arch_names if (root_path / arch).exists())
 
