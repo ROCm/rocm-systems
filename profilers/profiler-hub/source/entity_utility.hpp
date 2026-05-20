@@ -40,8 +40,7 @@ public:
     }
 
     template <typename Entity>
-    [[nodiscard]] PrimaryKey get_primary_key_value_for_entity(
-        const Entity& entity) const noexcept
+    [[nodiscard]] PrimaryKey get_primary_key_value_for_entity(const Entity& entity) const
     {
         const std::lock_guard<std::mutex> lock(m_mutex);
         if constexpr(common::traits::is_unordered_map_v<EntityContainerType>)
@@ -51,10 +50,14 @@ public:
             {
                 return m_last_value;
             }
-            const auto value = m_entity_container.at(key);
-            m_last_key       = key;
-            m_last_value     = value;
-            return value;
+            auto it = m_entity_container.find(key);
+            if(it == m_entity_container.end())
+            {
+                throw std::runtime_error(fmt::format("Primary key not found for entity"));
+            }
+            m_last_key   = key;
+            m_last_value = it->second;
+            return it->second;
         }
         else
         {
@@ -112,17 +115,22 @@ public:
     }
 
     [[nodiscard]] PrimaryKey get_primary_key_value_for_entity(
-        const std::string& key) const noexcept
+        const std::string& key) const
     {
         const std::lock_guard<std::mutex> lock(m_mutex);
         if(m_last_key && *m_last_key == key)
         {
             return m_last_value;
         }
-        const auto value = m_entity_container.at(key);
-        m_last_key       = key;
-        m_last_value     = value;
-        return value;
+        auto it = m_entity_container.find(key);
+        if(it == m_entity_container.end())
+        {
+            throw std::runtime_error(
+                fmt::format("Primary key not found for key: {}", key));
+        }
+        m_last_key   = key;
+        m_last_value = it->second;
+        return it->second;
     }
 
     [[nodiscard]] PrimaryKey get_primary_key_value_for_entity(std::string_view key) const
