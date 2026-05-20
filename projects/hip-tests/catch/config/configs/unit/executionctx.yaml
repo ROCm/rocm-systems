@@ -44,5 +44,3 @@ executionctx:
     <<: *level_2
   Unit_hipExecutionCtxSmAlignment_GreenCtxPreservesAlignment:
     <<: *level_2
-  Unit_hipExecutionCtxSmAlignment_IgnoreCoschedulingFlag:
-    <<: *level_2

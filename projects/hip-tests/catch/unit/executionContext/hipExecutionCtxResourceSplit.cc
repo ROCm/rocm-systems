@@ -131,10 +131,12 @@ HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Negative) {
           == hipErrorInvalidResourceType);
 
   // smCount < minSmPartitionSize (must be >= minSmPartitionSize)
-  hipDevSmResourceGroupParams tooSmall[1] = {};
-  tooSmall[0].smCount = input.sm.minSmPartitionSize - 1;
-  REQUIRE(hipDevSmResourceSplit(result, 1, &input, nullptr, 0, tooSmall)
-          == hipErrorInvalidResourceConfiguration);
+  if (input.sm.minSmPartitionSize > 1) {
+    hipDevSmResourceGroupParams tooSmall[1] = {};
+    tooSmall[0].smCount = input.sm.minSmPartitionSize - 1;
+    REQUIRE(hipDevSmResourceSplit(result, 1, &input, nullptr, 0, tooSmall)
+            == hipErrorInvalidResourceConfiguration);
+  }
 
   // smCount exceeds total SMs
   hipDevSmResourceGroupParams tooLarge[1] = {};

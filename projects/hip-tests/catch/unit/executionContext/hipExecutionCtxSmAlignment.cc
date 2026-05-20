@@ -46,8 +46,11 @@ HIP_TEST_CASE(Unit_hipExecutionCtxSmAlignment_DeviceGetDevResource) {
     INFO("Device " << dev << " (" << prop.gcnArchName << "): "
          << "smCoscheduledAlignment=" << alignment
          << " minSmPartitionSize=" << resource.sm.minSmPartitionSize);
-
+#if HT_AMD
+    REQUIRE((alignment == 1 || alignment == 2));
+#else
     REQUIRE((alignment >= 1));
+#endif
     REQUIRE(resource.sm.minSmPartitionSize == alignment);
     REQUIRE(resource.sm.smCount == static_cast<unsigned int>(prop.multiProcessorCount));
   }
@@ -91,8 +94,11 @@ HIP_TEST_CASE(Unit_hipExecutionCtxSmAlignment_StreamGetDevResource) {
  * Test Description
  * ------------------------
  *  - Verifies that alignment propagates correctly through resource splitting.
- *    After hipDevSmResourceSplitByCount, each result partition and the remainder
- *    must carry the same alignment as the input resource.
+ *    After hipDevSmResourceSplitByCount, each result partition must carry the
+ *    same alignment as the input resource. Remainder resource, if present,
+ *    must have minimum architectural alignment. On AMD this is same as WGP alignment,
+ *    but CUDA devices set remainder alignment to minimum architectural alignment which
+ *    may be less than the input alignment.
  */
 HIP_TEST_CASE(Unit_hipExecutionCtxSmAlignment_PropagatesThroughSplit) {
   HIP_CHECK(hipSetDevice(0));
@@ -122,8 +128,13 @@ HIP_TEST_CASE(Unit_hipExecutionCtxSmAlignment_PropagatesThroughSplit) {
   }
 
   if (remainder.type == hipDevResourceTypeSm) {
+#if HT_AMD
+    REQUIRE(remainder.sm.smCoscheduledAlignment == alignment);
+    REQUIRE(remainder.sm.minSmPartitionSize == alignment);
+#else 
     REQUIRE(remainder.sm.smCoscheduledAlignment >= 1);
     REQUIRE(remainder.sm.minSmPartitionSize >= 1);
+#endif
   }
 }
 
@@ -169,40 +180,6 @@ HIP_TEST_CASE(Unit_hipExecutionCtxSmAlignment_GreenCtxPreservesAlignment) {
   REQUIRE(ctxResource.sm.smCount == groupSize);
 
   HIP_CHECK(hipExecutionCtxDestroy(ctx));
-}
-
-/**
- * Test Description
- * ------------------------
- *  - When hipDevSmResourceSplitByCount is called with minCount=1 and the
- *    hipDevSmResourceSplitIgnoreSmCoscheduling flag, alignment should be
- *    treated as Architectural Minimum regardless of device arch,
- *    producing groups of minimum SM.
- */
-HIP_TEST_CASE(Unit_hipExecutionCtxSmAlignment_IgnoreCoschedulingFlag) {
-  HIP_CHECK(hipSetDevice(0));
-
-  hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, 0));
-
-  hipDevResource input{};
-  HIP_CHECK(hipDeviceGetDevResource(device, &input, hipDevResourceTypeSm));
-
-  unsigned int nbGroups = 0;
-  HIP_CHECK(hipDevSmResourceSplitByCount(nullptr, &nbGroups, &input, nullptr,
-                                         hipDevSmResourceSplitIgnoreSmCoscheduling, 1));
-  REQUIRE(nbGroups >= input.sm.smCount / input.sm.smCoscheduledAlignment);
-
-  unsigned int requestedGroups = std::min(nbGroups, 3u);
-  std::vector<hipDevResource> result(requestedGroups);
-  hipDevResource remainder{};
-  HIP_CHECK(hipDevSmResourceSplitByCount(result.data(), &requestedGroups, &input,
-                                         &remainder, hipDevSmResourceSplitIgnoreSmCoscheduling, 1));
-
-  for (unsigned int i = 0; i < requestedGroups; i++) {
-    REQUIRE(result[i].sm.smCount >= 1);
-    REQUIRE(result[i].sm.smCount <= input.sm.smCoscheduledAlignment);
-  }
 }
 
 /**

@@ -290,12 +290,10 @@ hipError_t ExecutionCtx::devSmResourceSplitByCount(
 
   if (nbGroups == nullptr || input == nullptr) return hipErrorInvalidValue;
   if (input->type != hipDevResourceTypeSm) return hipErrorInvalidResourceType;
+  if (flags & hipDevSmResourceSplitIgnoreSmCoscheduling) return hipErrorNotSupported;
 
   uint32_t totalCUs = input->sm.smCount;
   uint32_t alignment = input->sm.smCoscheduledAlignment;
-
-  if (flags & hipDevSmResourceSplitIgnoreSmCoscheduling)
-    alignment = 1;
 
   uint32_t alignedMin = ((minCount + alignment - 1) / alignment) * alignment;
   if (alignedMin == 0) alignedMin = alignment;
