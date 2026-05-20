@@ -97,7 +97,7 @@ Each ISA variant lives under `isa/arch/amdgpu/{isa}/`. As of Phase A (branch `ph
 | `{isa}/mfma_exec.h` | `input_loc()`, `output_loc_32()`, `output_loc_64()`, `exec_f32()`, `exec_i32_i8()`, `exec_f64()` — reference MFMA implementation including register layout; CDNA ISAs only (RDNA has no MFMA); used by DBI for AccVGPR clobber detection (CDNA2+ only — CDNA1 MFMA outputs to regular VGPRs, not AccVGPRs) and by DBT as the software fallback body |
 | `{isa}::Decoder` (`isa/decoder.h`, `isa/arch/amdgpu/{isa}/decoder.h`) | Factory that decodes raw `uint32_t` words into typed `Instruction` subclasses; serves as the **guest decoder** in DBT |
 | `BasicBlock` (`code/basic_block.h`) | Splits decoded instructions at branch terminators using `InstFlags::BRANCH`; provides `instructions()` iterator, `start_offset()` / `end_offset()`, and CFG predecessor/successor links for byte-level position in `.text` |
-| `AmdGpuCodeObject` (`code/amdgpu_code_object.h`) | ELF parser; `kernel_descriptor_offset()` looks up `.kd` symbols; `image_data()` / `image_size()` give the raw ELF bytes to the patcher |
+| `AmdGpuCodeObject` (`code/amdgpu_code_object.h`) | ELF parser; `kernel_descriptor_offset()` looks up `.kd` symbols; `image_data()` / `image_size()` give the raw ELF bytes to the patcher; `code_sections()` returns all executable sections, including DBT-generated `.rj_translations` |
 | `amdgpu_elf.h` | `Elf64_Ehdr`, `Elf64_Shdr`, `Elf64_Sym`, `EF_AMDGPU_MACH_*` constants — used by `CodeObjectPatcher` to locate and rewrite sections and by `detect_arch_from_elf()` for ISA detection |
 | `Executable` (`code/executable.h`) | HIP fat binary parser; `code_object(target, index)` extracts `AmdGpuCodeObject` per GFX target; used in Pillar 5 to parse application binaries before the pipeline runs |
 
@@ -2233,7 +2233,7 @@ After all instructions are processed, `translate()` calls `CodeObjectPatcher::ap
 
 #### 3.3.2 Code Cave Strategy
 
-> **Implementation note (current state):** The MVP implementation places cave bodies in the NOP padding after `s_endpgm` within the existing `.text` section, rather than in a separate `.rj_translations` section as described below. This works for kernels with sufficient NOP padding (typically 256+ bytes) but will not scale to large expansions. If the cave body exceeds available padding, translation emits a warning and returns the original ELF unchanged so no branch or descriptor entry points at missing cave bytes. The `.rj_translations` approach described below remains the target for production use.
+> **Implementation note (current state):** The DBT implementation now places cave bodies in a separate executable `.rj_translations` section immediately after `.text`, so expansion capacity no longer depends on compiler-emitted NOP padding after `s_endpgm`. Direct branch stubs are implemented; trampoline islands for exceptionally large kernels remain future work.
 
 Size-expanding legalization (LOWER with size growth, all EXPAND) uses **code caves** to preserve the original `.text` layout. The invariant is:
 
@@ -2261,6 +2261,8 @@ For an 8-byte source instruction (e.g., MFMA, FLAT load/store):
 The return address (`inst_byte_offset + inst.size()`) is the instruction immediately following the original in `.text`. Because `.text` is never shifted, this address is stable and can be computed at the time the cave entry is assembled.
 
 **Branch range.** `s_branch simm16` encodes a signed offset in dwords with a ±128 KB range. The range check is per-stub, computed as the distance from the stub's location in `.text` to the cave entry in `.rj_translations`. The `.rj_translations` section is appended immediately after `.text` in the output ELF, so for kernels whose `.text` is ≤ 128 KB, all stubs reach their cave entries with a direct `s_branch`.
+
+**ELF load alignment.** The section header for `.rj_translations` covers only the cave words. When later `PT_LOAD` segments would be shifted by the insertion, `CodeObjectPatcher` pads the inserted file range after `.rj_translations` so every shifted load segment still satisfies `p_offset % p_align == p_vaddr % p_align`. The padding may be part of the executable load segment, but it is outside the `.rj_translations` section.
 
 **Far stub constraint.** For larger kernels where the per-stub range exceeds ±128 KB, a far stub requires 16 bytes (`s_getpc_b64` [4B] + `s_add_u32` [4B] + `s_addc_u32` [4B] + `s_setpc_b64` [4B]). This is incompatible with 4-byte source instructions (e.g., `s_barrier`, `s_waitcnt`) that only provide 4 bytes in-place. The solution is a **trampoline island**: a short landing pad allocated within near-branch reach of the 4-byte stub containing the full 16-byte far stub sequence. The 4-byte in-place stub branches to the island (near `s_branch`); the island jumps to the cave entry (far indirect jump).
 

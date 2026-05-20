@@ -393,6 +393,10 @@ typedef enum __HIP_NODISCARD hipError_t {
                                            ///< update.
   hipErrorInvalidChannelDescriptor = 911,  ///< Invalid channel descriptor.
   hipErrorInvalidTexture = 912,            ///< Invalid texture.
+  hipErrorInvalidResourceType = 914,       ///< Resource type is not valid for the operation.
+  hipErrorInvalidResourceConfiguration = 915,  ///< Resource configuration is not valid for
+                                               ///< the operation.
+  hipErrorStreamDetached = 916,            ///< The stream is detached.                                              
   hipErrorUnknown = 999,                   ///< Unknown error.
   // HSA Runtime Error Codes start here.
   hipErrorRuntimeMemory = 1052,  ///< HSA runtime memory call returned error.  Typically not seen
@@ -683,6 +687,66 @@ extern "C" {
 //---
 // API-visible structures
 typedef struct ihipCtx_t* hipCtx_t;
+typedef struct ihipExecutionCtx_t* hipExecutionCtx_t;
+typedef struct ihipDevResourceDesc_t* hipDevResourceDesc_t;
+typedef enum hipDevResourceType {
+  hipDevResourceTypeInvalid = 0,
+  hipDevResourceTypeSm = 1,
+  hipDevResourceTypeWorkqueueConfig = 1000,
+  hipDevResourceTypeWorkqueue = 10000,
+} hipDevResourceType;
+typedef enum hipDevSmResourceGroup_flags {
+  hipDevSmResourceGroupDefault = 0,
+  hipDevSmResourceGroupBackfill = 0x1,
+} hipDevSmResourceGroup_flags;
+typedef enum hipDevSmResourceSplitByCount_flags {
+  hipDevSmResourceSplitIgnoreSmCoscheduling = 0x1,
+  hipDevSmResourceSplitMaxPotentialClusterSize = 0x2,
+} hipDevSmResourceSplitByCount_flags;
+typedef enum hipDevWorkqueueConfigScope {
+  hipDevWorkqueueConfigScopeDeviceCtx = 0,
+  hipDevWorkqueueConfigScopeGreenCtxBalanced = 1,
+} hipDevWorkqueueConfigScope;
+
+#define HIP_RESOURCE_ABI_BYTES 40
+
+typedef struct hipDevSmResource {
+  unsigned int smCount;
+  unsigned int minSmPartitionSize;
+  unsigned int smCoscheduledAlignment;
+  unsigned int flags;
+} hipDevSmResource;
+
+typedef struct hipDevWorkqueueConfigResource {
+  int device;
+  unsigned int wqConcurrencyLimit;
+  hipDevWorkqueueConfigScope sharingScope;
+} hipDevWorkqueueConfigResource;
+
+typedef struct hipDevWorkqueueResource {
+  unsigned char reserved[HIP_RESOURCE_ABI_BYTES];
+} hipDevWorkqueueResource;
+
+typedef struct hipDevResource_st {
+  hipDevResourceType type;
+  unsigned char _internal_padding[92];
+  union {
+    hipDevSmResource sm;
+    hipDevWorkqueueConfigResource wqConfig;
+    hipDevWorkqueueResource wq;
+    unsigned char _oversize[HIP_RESOURCE_ABI_BYTES];
+  };
+  struct hipDevResource_st* nextResource;
+} hipDevResource;
+
+typedef struct hipDevSmResourceGroupParams_st {
+  unsigned int smCount;
+  unsigned int coscheduledSmCount;
+  unsigned int preferredCoscheduledSmCount;
+  unsigned int flags;
+  unsigned int reserved[12];
+} hipDevSmResourceGroupParams;
+
 // Note many APIs also use integer deviceIds as an alternative to the device pointer:
 typedef int hipDevice_t;
 typedef enum hipDeviceP2PAttr {
@@ -6098,6 +6162,42 @@ hipError_t hipMemcpyPeerAsync(void* dst, int dstDeviceId, const void* src, int s
                               size_t sizeBytes, hipStream_t stream __dparm(0));
 
 // doxygen end PeerToPeer
+/**
+ * @}
+ */
+/**
+ *-------------------------------------------------------------------------------------------------
+ *-------------------------------------------------------------------------------------------------
+ *  @defgroup ExecutionContext Execution Context Management
+ *  @{
+ *  This section describes execution context management functions of HIP runtime API.
+ */
+hipError_t hipDeviceGetDevResource(hipDevice_t device, hipDevResource* resource,
+                                   hipDevResourceType type);
+hipError_t hipDevSmResourceSplitByCount(hipDevResource* result, unsigned int* nbGroups,
+                                        const hipDevResource* input, hipDevResource* remainder,
+                                        unsigned int flags, unsigned int minCount);
+hipError_t hipDevSmResourceSplit(hipDevResource* result, unsigned int nbGroups,
+                                 const hipDevResource* input, hipDevResource* remainder,
+                                 unsigned int flags,
+                                 hipDevSmResourceGroupParams* groupParams);
+hipError_t hipDevResourceGenerateDesc(hipDevResourceDesc_t* phDesc, hipDevResource* resources,
+                                       unsigned int nbResources);
+hipError_t hipGreenCtxCreate(hipExecutionCtx_t* ctx, hipDevResourceDesc_t desc, int device,
+                             unsigned int flags);
+hipError_t hipExecutionCtxDestroy(hipExecutionCtx_t ctx);
+hipError_t hipDeviceGetExecutionCtx(hipExecutionCtx_t* ctx, int device);
+hipError_t hipExecutionCtxStreamCreate(hipStream_t* stream, hipExecutionCtx_t greenctx,
+                                        unsigned int flags, int priority);
+hipError_t hipExecutionCtxGetDevResource(hipExecutionCtx_t ctx, hipDevResource* resource,
+                                          hipDevResourceType type);
+hipError_t hipExecutionCtxGetDevice(int* device, hipExecutionCtx_t ctx);
+hipError_t hipExecutionCtxGetId(hipExecutionCtx_t ctx, unsigned long long* ctxId);
+hipError_t hipStreamGetDevResource(hipStream_t hStream, hipDevResource* resource,
+                                    hipDevResourceType type);
+hipError_t hipExecutionCtxRecordEvent(hipExecutionCtx_t ctx, hipEvent_t event);
+hipError_t hipExecutionCtxSynchronize(hipExecutionCtx_t ctx);
+hipError_t hipExecutionCtxWaitEvent(hipExecutionCtx_t ctx, hipEvent_t event);
 /**
  * @}
  */
