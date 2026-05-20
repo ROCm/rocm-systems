@@ -139,7 +139,7 @@ namespace impl {
 
     mask = impl::groupMask(group);
     maskNumBits = __popcll(mask);
-    maskIdx = __popcll(((1ul << laneId) - 1) & mask);
+    maskIdx = __popcll(((1ull << laneId) - 1) & mask);
 
     if (laneId) {
       mask <<= 64 - laneId;
