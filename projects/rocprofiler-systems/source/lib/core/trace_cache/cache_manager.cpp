@@ -96,13 +96,14 @@ cache_manager::post_process_bulk(output_file_registry& _output_registry,
                 tracks = std::make_unique<rocprofsys::track_registry>();
                 if(single_file_layout)
                 {
-                    perfetto_sink =
-                        std::make_unique<core::single_file_sink>(_output_registry);
+                    perfetto_sink = std::make_unique<core::trace_sink>(
+                        core::single_file_sink{ _output_registry });
                 }
                 else
                 {
-                    perfetto_sink = std::make_unique<core::per_pid_file_sink>(
-                        static_cast<pid_t>(root_pid), _output_registry);
+                    perfetto_sink =
+                        std::make_unique<core::trace_sink>(core::per_pid_file_sink{
+                            static_cast<pid_t>(root_pid), _output_registry });
                 }
                 engine->start(core::perfetto_engine::mode::cached_interceptor,
                               *perfetto_sink);

@@ -11,6 +11,8 @@
 
 #include <sys/types.h>
 
+#include "sinks.hpp"
+
 namespace perfetto
 {
 class TracingSession;
@@ -20,7 +22,6 @@ namespace rocprofsys
 {
 namespace core
 {
-class trace_sink;
 
 // POD snapshot of the perfetto-relevant configuration. Built once at engine
 // construction by build_engine_config_from_settings(); the engine never reads

@@ -18,6 +18,7 @@
 #include <mutex>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <unistd.h>
@@ -414,14 +415,18 @@ perfetto_engine::stop()
         if(bytes.empty()) continue;
         try
         {
-            sink->on_source_drained(source_pid, std::move(bytes));
+            std::visit(
+                [source_pid, &bytes](auto& s) {
+                    s.on_source_drained(source_pid, std::move(bytes));
+                },
+                *sink);
         } catch(...)
         {
             if(!first_exc) first_exc = std::current_exception();
         }
     }
 
-    sink->finalize();
+    std::visit([](auto& s) { s.finalize(); }, *sink);
 
     if(first_exc) std::rethrow_exception(first_exc);
 }
