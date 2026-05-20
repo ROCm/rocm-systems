@@ -27,7 +27,11 @@
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/Passes/PassBuilder.h"
-#include "llvm/Passes/PassPlugin.h"
+#if __has_include("llvm/Plugins/PassPlugin.h")
+#    include "llvm/Plugins/PassPlugin.h"
+#else
+#    include "llvm/Passes/PassPlugin.h"
+#endif
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 

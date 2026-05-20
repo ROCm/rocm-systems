@@ -130,10 +130,10 @@ def demangle(name: str) -> str:
     return name
 
 
-# Entry: (id_or_none, symbol_name, entry_type, source_loc)
+# Entry: (id_or_none, symbol_name, entry_type, source_loc, extra_payload_count)
 # entry_type: "kernel", "func", "user", "point"
 # source_loc may be empty
-Entry = tuple[int | None, str, str, str]
+Entry = tuple[int | None, str, str, str, int]
 
 
 def _split_source_loc(s: str) -> tuple[str, str]:
@@ -146,7 +146,8 @@ def _split_source_loc(s: str) -> tuple[str, str]:
 
 def parse_funcmap(output: str) -> list[Entry]:
     """Parse funcmap content into entries."""
-    entries: list[Entry] = []
+    entries: list[tuple[int | None, str, str, str]] = []
+    extra_payload_counts: dict[int, int] = {}
 
     for line in output.splitlines():
         line = line.strip()
@@ -174,6 +175,21 @@ def parse_funcmap(output: str) -> list[Entry]:
         if prefix == "K":
             name, loc = _split_source_loc(rest)
             entries.append((None, name, "kernel", loc))
+        elif prefix == "R":
+            if ":" not in rest:
+                continue
+            id_str, attrs = rest.split(":", 1)
+            try:
+                mid = int(id_str)
+            except ValueError:
+                continue
+            for item in attrs.split(";"):
+                key, sep, value = item.partition("=")
+                if sep and key.strip() == "extra_payload_count":
+                    try:
+                        extra_payload_counts[mid] = int(value)
+                    except ValueError:
+                        pass
         elif prefix in ("F", "U", "P"):
             # Funcmap v2: "F:ID:name[@source_loc]", "U:ID:name", "P:ID:name[@source_loc]"
             if ":" not in rest:
@@ -187,7 +203,10 @@ def parse_funcmap(output: str) -> list[Entry]:
             name, loc = _split_source_loc(name)
             entries.append((mid, name, type_map[prefix], loc))
 
-    return entries
+    return [
+        (mid, name, etype, loc, extra_payload_counts.get(mid, 0) if mid is not None else 0)
+        for mid, name, etype, loc in entries
+    ]
 
 
 def main():
@@ -213,24 +232,24 @@ def main():
     sym_addrs = read_symbol_addrs(args.binary)
 
     # Print table
-    print(f"{'Type':>6}  {'ID':>8}  {'Vaddr':>18}  {'Name'}")
-    print(f"{'----':>6}  {'---':>8}  {'-----':>18}  {'----'}")
+    print(f"{'Type':>6}  {'ID':>8}  {'Extra':>8}  {'Vaddr':>18}  {'Name'}")
+    print(f"{'----':>6}  {'---':>8}  {'-----':>8}  {'-----':>18}  {'----'}")
 
     # Sort: kernels first, then funcs, then points, then user markers
     type_order = {"kernel": 0, "func": 1, "point": 2, "user": 3}
 
     def sort_key(e: Entry):
-        fid, name, etype, _loc = e
+        fid, name, etype, _loc, _extra = e
         return (type_order.get(etype, 3), fid if fid is not None else -1, name)
 
-    for fid, name, etype, loc in sorted(entries, key=sort_key):
+    for fid, name, etype, loc, extra in sorted(entries, key=sort_key):
         id_str = "-" if fid is None else str(fid)
         addr = sym_addrs.get(name)
         addr_str = f"0x{addr:016x}" if addr is not None else "-"
         display = demangle(name) if args.demangle else name
         if loc:
             display = f"{display}  @ {loc}"
-        print(f"{etype:>6}  {id_str:>8}  {addr_str:>18}  {display}")
+        print(f"{etype:>6}  {id_str:>8}  {extra:>8}  {addr_str:>18}  {display}")
 
 
 if __name__ == "__main__":

@@ -1,8 +1,16 @@
 cmake_minimum_required(VERSION 3.20)
 project(SQTTInstrument LANGUAGES C CXX)
 
-# Find ROCm LLVM (avoid system LLVM)
-find_package(LLVM REQUIRED CONFIG PATHS /opt/rocm/lib/llvm/lib/cmake/llvm NO_DEFAULT_PATH)
+# Find ROCm LLVM (avoid system LLVM). Set CMAKE_PREFIX_PATH to choose a
+# specific ROCm install, for example:
+#   cmake -S . -B build -DCMAKE_PREFIX_PATH=/opt/rocm-7.13.0
+set(SQTT_ROCM_PREFIX_HINTS ${CMAKE_PREFIX_PATH} /opt/rocm)
+find_package(
+    LLVM REQUIRED
+    CONFIG
+    PATHS ${SQTT_ROCM_PREFIX_HINTS}
+    PATH_SUFFIXES lib/llvm/lib/cmake/llvm lib/cmake/llvm
+    NO_DEFAULT_PATH)
 
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")

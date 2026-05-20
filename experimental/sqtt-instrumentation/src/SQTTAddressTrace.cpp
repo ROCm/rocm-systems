@@ -305,6 +305,7 @@ bool SQTTInstrumentPass::instrumentAddressTraces(Function& F, GfxGen gen)
     for (auto& op : Ops)
     {
         uint32_t opID = NextEventID++;
+        uint32_t extraPayloadCount = 2; // exec_lo + exec_hi
 
         // Determine funcmap name — for buffers, refine with struct prefix
         std::string kindName;
@@ -316,6 +317,7 @@ bool SQTTInstrumentPass::instrumentAddressTraces(Function& F, GfxGen gen)
             const char* base = addrTraceKindName(op.Kind, op.IsStore, op.IsAtomic);
             kindName =
                 isStruct ? std::string("addr_trace_struct_") + (base + strlen("addr_trace_")) : std::string(base);
+            extraPayloadCount += 3 + waveSize * (isStruct ? 2 : 1);
         }
         else if (op.Kind == AddrTraceKind::Permute)
         {
@@ -324,10 +326,15 @@ bool SQTTInstrumentPass::instrumentAddressTraces(Function& F, GfxGen gen)
             kindName = (IID == Intrinsic::amdgcn_ds_bpermute || IID == Intrinsic::amdgcn_ds_bpermute_fi_b32)
                          ? "addr_trace_ds_bpermute"
                          : "addr_trace_ds_permute";
+            extraPayloadCount += waveSize;
         }
-        else { kindName = addrTraceKindName(op.Kind, op.IsStore, op.IsAtomic); }
+        else
+        {
+            kindName = addrTraceKindName(op.Kind, op.IsStore, op.IsAtomic);
+            extraPayloadCount += waveSize * (op.Kind == AddrTraceKind::Memory ? 2 : 1);
+        }
         std::string srcLoc = getSourceLoc(op.I);
-        AddrTraceEntries.push_back({opID, kindName, srcLoc});
+        AddrTraceEntries.push_back({opID, kindName, srcLoc, extraPayloadCount});
 
         IRBuilder<> B(op.I);
         if (Config.needsScopeCheck())

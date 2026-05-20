@@ -54,7 +54,6 @@ def find_llvm_tool(name: str) -> Optional[str]:
     """Find an LLVM tool, preferring ROCm installation."""
     import shutil
     candidates = [
-        f"/opt/rocm-7.3.0/lib/llvm/bin/{name}",
         f"/opt/rocm/llvm/bin/{name}",
         f"/opt/rocm/lib/llvm/bin/{name}",
     ]
@@ -125,12 +124,18 @@ class FuncMap:
     kernels: list[str] = field(default_factory=list)
     kernel_source_locs: dict[str, str] = field(default_factory=dict)
     wave_size: int = 0  # from W: entry (32 or 64), 0 if unknown
+    # from R:id:extra_payload_count=N entries; absent means zero
+    extra_payload_counts: dict[int, int] = field(default_factory=dict)
 
     def resolve(self, marker_id: int) -> tuple[str, str]:
         """Returns (name, type). Type determines scope vs point behavior."""
         if marker_id in self.markers:
             return self.markers[marker_id]
         return (f"event#{marker_id}", "function")
+
+    def extra_payload_count(self, marker_id: int) -> int:
+        """Returns extra records after this marker header; default is zero."""
+        return self.extra_payload_counts.get(marker_id, 0)
 
 
 def _split_source_loc(s: str) -> tuple[str, str]:
@@ -154,6 +159,9 @@ def parse_funcmap(raw: str) -> FuncMap:
         P:id:name[@source_loc]  -- point marker; source_loc is set for
                                    addr_trace_* point markers
         K:name[@source_loc]     -- kernel (for vaddr lookup, not instrumented)
+        W:N                     -- wave size
+        R:id:extra_payload_count=N
+                                -- number of payload records after the header
 
     Source locations (when present) follow rocprofiler-sdk's inline chain
     format: "<inner_file>:<line> -> <outer_file>:<line>".
@@ -178,6 +186,21 @@ def parse_funcmap(raw: str) -> FuncMap:
             fm.kernels.append(name)
             if loc:
                 fm.kernel_source_locs[name] = loc
+        elif prefix == "R":
+            if ":" not in rest:
+                continue
+            id_str, attrs = rest.split(":", 1)
+            try:
+                mid = int(id_str)
+            except ValueError:
+                continue
+            for item in attrs.split(";"):
+                key, sep, value = item.partition("=")
+                if sep and key.strip() == "extra_payload_count":
+                    try:
+                        fm.extra_payload_counts[mid] = int(value)
+                    except ValueError:
+                        pass
         elif prefix in ("F", "U", "P"):
             if ":" not in rest:
                 continue
