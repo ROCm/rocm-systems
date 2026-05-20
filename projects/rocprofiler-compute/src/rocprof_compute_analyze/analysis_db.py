@@ -146,19 +146,20 @@ class db_analysis(OmniAnalyze_Base):
             for roofline_data in self._roofline_data_per_kernel.get(
                 workload_path, pd.DataFrame()
             ).itertuples():
-                if roofline_data.kernel_name not in kernel_objs:
+                kernel_name = getattr(roofline_data, "kernel_name", None)
+                if kernel_name not in kernel_objs:
                     console_warning(
-                        f"Kernel {roofline_data.kernel_name} from roofline data "
+                        f"Kernel {kernel_name} from roofline data "
                         "not found in dispatch data. Skipping roofline entry."
                     )
                     continue
                 Database.get_session().add(
                     orm.KernelRooflineData(
-                        total_flops=roofline_data.total_flops,
-                        l1_cache_data=roofline_data.l1_cache_data,
-                        l2_cache_data=roofline_data.l2_cache_data,
-                        hbm_cache_data=roofline_data.hbm_cache_data,
-                        kernel=kernel_objs[roofline_data.kernel_name],
+                        total_flops=getattr(roofline_data, "total_flops", None),
+                        l1_cache_data=getattr(roofline_data, "l1_cache_data", None),
+                        l2_cache_data=getattr(roofline_data, "l2_cache_data", None),
+                        hbm_cache_data=getattr(roofline_data, "hbm_cache_data", None),
+                        kernel=kernel_objs[kernel_name],
                     )
                 )
 
