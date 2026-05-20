@@ -513,6 +513,14 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_logger
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_logger.xml ${COV_OPTION} tests/test_logger.py
+        ${WORKING_DIR_OPTION}
+)
+
 # Memory chart CLI renderers (gfx9 plotille + gfx11 Rich) — no GPU required
 add_test(
     NAME test_mem_chart
@@ -710,6 +718,7 @@ if(${ENABLE_COVERAGE})
         test_num_xcds_spec_class
         test_num_xcds_cli_output
         test_utils
+        test_logger
         test_mem_chart
         test_roofline_calc_ai_analyze
         test_data_imputation

@@ -3,9 +3,12 @@
 
 import logging
 import os
+import re
 import sys
 from pathlib import Path
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, Callable, Optional, TextIO, TypeVar
+
+import config
 
 R = TypeVar("R")
 
@@ -25,6 +28,21 @@ COLORS = {
 
 # Constants
 TRACE_LEVEL = logging.DEBUG - 5
+ENV_ALLOWLIST_PATH = config.rocprof_compute_home / "utils" / "env_allowlist.yaml"
+ENV_PAIR_RE = re.compile(
+    r"""
+    (?P<qkey>['"]?)
+    (?P<key>[A-Z][A-Z0-9_]{1,})
+    (?P=qkey)
+    (?P<sep>\s*[:=]\s*)
+    (?:
+        (?P<qval>['"])(?P<val>.*?)(?P=qval)
+      | (?P<uval>[^\s,'"{}\[\]]+)
+    )
+    """,
+    re.VERBOSE,
+)
+REDACTED_VALUE = "<redacted>"
 
 LOG_LEVEL_MAPPING = {
     "DEBUG": logging.DEBUG,
@@ -36,6 +54,74 @@ LOG_LEVEL_MAPPING = {
     "ERROR": logging.ERROR,
     "error": logging.ERROR,
 }
+
+_env_allowlist_cache: Optional[tuple[frozenset[str], tuple[str, ...]]] = None
+
+
+def _safe_load_yaml(allowlist_file: TextIO) -> dict[str, Any]:
+    """Load YAML with vendored PyYAML when available."""
+    try:
+        from vendored import yaml
+    except ImportError:
+        import yaml
+
+    return yaml.safe_load(allowlist_file)
+
+
+def _read_env_allowlist() -> tuple[frozenset[str], tuple[str, ...]]:
+    """Read the logger env var allowlist from YAML."""
+    try:
+        with open(ENV_ALLOWLIST_PATH, encoding="utf-8") as allowlist_file:
+            allowlist_yaml = _safe_load_yaml(allowlist_file) or {}
+    except (ImportError, OSError):
+        allowlist_yaml = {}
+
+    env_allowlist = allowlist_yaml.get("env_allowlist", {}) or {}
+    exact_names = frozenset(env_allowlist.get("exact", []) or [])
+    prefixes = tuple(env_allowlist.get("prefixes", []) or [])
+    return (exact_names, prefixes)
+
+
+def _load_env_allowlist() -> tuple[frozenset[str], tuple[str, ...]]:
+    """Load and cache the logger env var allowlist."""
+    global _env_allowlist_cache
+    if _env_allowlist_cache is None:
+        _env_allowlist_cache = _read_env_allowlist()
+    return _env_allowlist_cache
+
+
+def _is_env_var_allowlisted(key: str) -> bool:
+    """Return True when an env var name should be logged verbatim."""
+    exact_names, prefixes = _load_env_allowlist()
+    return key in exact_names or any(key.startswith(prefix) for prefix in prefixes)
+
+
+def _redact_env_var_match(match: re.Match[str]) -> str:
+    """Redact one env-var regex match when its key is not allowlisted."""
+    if _is_env_var_allowlisted(match.group("key")):
+        return match.group(0)
+
+    value_quote = match.group("qval")
+    key_quote = match.group("qkey")
+    key_and_separator = (
+        f"{key_quote}{match.group('key')}{key_quote}{match.group('sep')}"
+    )
+    if value_quote:
+        return f"{key_and_separator}{value_quote}{REDACTED_VALUE}{value_quote}"
+    return f"{key_and_separator}{REDACTED_VALUE}"
+
+
+def _redact_env_vars(message: str) -> str:
+    """Redact env-var-shaped tokens whose key is not on the allowlist."""
+    return ENV_PAIR_RE.sub(_redact_env_var_match, message)
+
+
+def _format_log_message(message: str, args: tuple[Any, ...]) -> str:
+    """Apply logging-style interpolation before redaction."""
+    if not args:
+        return message
+    record = logging.LogRecord("", 0, "", 0, message, args, None)
+    return record.getMessage()
 
 
 def demarcate(function: Callable[..., R]) -> Callable[..., R]:
@@ -50,9 +136,9 @@ def demarcate(function: Callable[..., R]) -> Callable[..., R]:
 
 def console_error(*argv: Any, exit: bool = True) -> None:
     if len(argv) > 1:
-        logging.error(f"[{argv[0]}] {argv[1]}")
+        logging.error(_redact_env_vars(f"[{argv[0]}] {argv[1]}"))
     elif len(argv) == 1:
-        logging.error(f"{argv[0]}")
+        logging.error(_redact_env_vars(f"{argv[0]}"))
     else:
         logging.error("Empty error message")
     if exit:
@@ -65,33 +151,37 @@ def console_log(*argv: Any, indent_level: int = 0) -> None:
         indent = " " * (3 * indent_level) + "|-> "  # spaces per indent level
 
     if len(argv) > 1:
-        logging.info(indent + f"[{argv[0]}] {argv[1]}")
+        logging.info(_redact_env_vars(indent + f"[{argv[0]}] {argv[1]}"))
     elif len(argv) == 1:
-        logging.info(indent + f"{argv[0]}")
+        logging.info(_redact_env_vars(indent + f"{argv[0]}"))
     else:
         logging.info(indent + "Empty log message")
 
 
 def console_debug(*argv: Any) -> None:
     if len(argv) > 1:
-        logging.debug(f"[{argv[0]}] {argv[1]}")
+        logging.debug(_redact_env_vars(f"[{argv[0]}] {argv[1]}"))
     elif len(argv) == 1:
-        logging.debug(f"{argv[0]}")
+        logging.debug(_redact_env_vars(f"{argv[0]}"))
     else:
         logging.debug("Empty debug message")
 
 
 def console_warning(*argv: Any) -> None:
     if len(argv) > 1:
-        logging.warning(f"[{argv[0]}] {argv[1]}")
+        logging.warning(_redact_env_vars(f"[{argv[0]}] {argv[1]}"))
     elif len(argv) == 1:
-        logging.warning(f"{argv[0]}")
+        logging.warning(_redact_env_vars(f"{argv[0]}"))
     else:
         logging.warning("Empty warning message")
 
 
 def trace_logger(message: str, *args: Any, **kwargs: Any) -> None:
-    logging.log(TRACE_LEVEL, message, *args, **kwargs)
+    logging.log(
+        TRACE_LEVEL,
+        _redact_env_vars(_format_log_message(message, args)),
+        **kwargs,
+    )
 
 
 # Define the formatter

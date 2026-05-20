@@ -37,6 +37,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
+* `console_log`, `console_debug`, `console_warning`, `console_error`, and `trace_logger` now auto-redact environment-variable-shaped tokens (`KEY=value` / `'KEY': 'value'`) unless the key is on the allowlist in `utils/env_allowlist.yaml`. Previously, the profiler's debug log dumped the entire process environment, which could leak third-party API keys or other secrets.
+
 * Fixed `inf` display for metrics with zero-denominator counters (e.g., L2-Fabric Write Latency when no write requests are issued). The metric evaluation path now catches `inf` scalar results and returns `"N/A"`, consistent with existing `NaN` handling.
 
 * Kernels with missing counter data after iteration multiplexing imputation are now excluded from metrics calculations. A warning at analysis time lists the affected kernels. Their execution times remain visible in Top Stats.

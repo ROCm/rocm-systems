@@ -1,0 +1,16 @@
+env_allowlist:
+  exact:
+    - LD_PRELOAD
+    - LD_LIBRARY_PATH
+    - ROCM_PATH
+    - ROCM_VER
+    - ROCPROF
+  prefixes:
+    - HSA_
+    - HIP_
+    - ROCR_
+    - ROCM_
+    - ROCPROFILER_
+    - ROCPROF_
+    - ROCPROFCOMPUTE_
+    - AMDGPU_
