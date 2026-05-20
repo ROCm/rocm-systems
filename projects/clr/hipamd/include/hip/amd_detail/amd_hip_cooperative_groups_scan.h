@@ -89,7 +89,7 @@ namespace impl {
   // given cooperative_groups template parameter, calls the right impl::scan function (that would contain __ockl_wfscan_*)
   // and that is overloaded by type
   template <class TyVal, class Op, bool Inclusive>
-  __CG_QUALIFIER__ TyVal call_scan(const TyVal&& val)
+  __CG_QUALIFIER__ TyVal call_scan(const TyVal& val)
   {
     using Val = typename __hip_internal::remove_cvref<TyVal>::type;
 
@@ -151,8 +151,8 @@ namespace impl {
       // for tiled_groups we know at compile time that whether we can call the ockl intrinsics or
       // not; if the block tile is actually the whole warp
       if (impl::tiledGroupSize<TyGroup>::value == warpSize) {
-        if constexpr (impl::isArithmeticFunc<Val, TyFn >::value && impl::has_arithmetic_scan<Val>::value ||
-                      impl::isBooleanFunc<Val, TyFn >::value && impl::has_boolean_scan<Val, Op>::value) {
+        if constexpr (impl::isArithmeticFunc<Val, Op>::value && impl::has_arithmetic_scan<Val>::value ||
+                      impl::isBooleanFunc<Val, Op>::value && impl::has_boolean_scan<Val, Op>::value) {
           return impl::call_scan<Val, Op, Inclusive>(val);
         }
       }
@@ -160,8 +160,8 @@ namespace impl {
       // for the coalesced_group case we do need to check at runtime, adding a slight overhead on
       // this branch
       if (maskNumBits == warpSize) {
-        if constexpr (impl::isArithmeticFunc<Val, TyFn >::value && impl::has_arithmetic_scan<Val>::value ||
-                      impl::isBooleanFunc<Val, TyFn >::value && impl::has_boolean_scan<Val, Op>::value) {
+        if constexpr (impl::isArithmeticFunc<Val, Op>::value && impl::has_arithmetic_scan<Val>::value ||
+                      impl::isBooleanFunc<Val, Op>::value && impl::has_boolean_scan<Val, Op>::value) {
           return impl::call_scan<Val, Op, Inclusive>(val);
         }
       }
