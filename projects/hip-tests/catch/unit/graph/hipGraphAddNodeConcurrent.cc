@@ -192,9 +192,11 @@ HIP_TEST_CASE(Unit_hipGraph_ConcurrentConstruct_NextIDRace) {
 */
 HIP_TEST_CASE(Unit_hipGraph_ConcurrentConstruct_LaunchDropSmoke) {
   constexpr uint32_t kSentinel = 0xDEADBEEFu;
-  constexpr int kSmokeThreads = 32;
-  constexpr int kSmokeChainLen = 512;
-  constexpr int kSmokeIters = 30;
+  // Quick level keeps the test under a second; full run amps contention
+  // up to a config that catches the race ~100% in a single invocation.
+  const int kSmokeThreads = isQuickLevel() ? 4 : 32;
+  const int kSmokeChainLen = isQuickLevel() ? 128 : 512;
+  const int kSmokeIters = isQuickLevel() ? 5 : 30;
   std::atomic<int> start_gate{0};
   std::atomic<int> total_dropped{0};
 
