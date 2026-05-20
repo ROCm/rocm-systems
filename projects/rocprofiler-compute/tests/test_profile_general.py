@@ -2261,16 +2261,28 @@ def test_live_attach_detach_singlepass_launch_stats(
 
     # Check that launch-stat sets were applied
     config_file = f"{workload_dir}/profiling_config.yaml"
-    for tag in [
-        "7.1.0",
-        "7.1.1",
-        "7.1.2",
-        "7.1.5",
-        "7.1.6",
-        "7.1.7",
-        "7.1.8",
-        "7.1.9",
-    ]:
+    for tag in (
+        [
+            "7.2.0",
+            "7.2.1",
+            "7.2.2",
+            "7.2.3",
+            "7.2.4",
+            "7.2.5",
+            "7.3.0",
+        ]
+        if is_gfx115x_soc()
+        else [
+            "7.1.0",
+            "7.1.1",
+            "7.1.2",
+            "7.1.5",
+            "7.1.6",
+            "7.1.7",
+            "7.1.8",
+            "7.1.9",
+        ]
+    ):
         assert common.check_file_pattern(f"- {tag}", config_file)
 
     common.clean_output_dir(config["cleanup"], workload_dir)
