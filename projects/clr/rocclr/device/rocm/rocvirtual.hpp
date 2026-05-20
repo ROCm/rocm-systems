@@ -64,6 +64,7 @@ inline bool WaitForSignal(hsa_signal_t signal, bool active_wait = false, bool yi
 
     // This is unlimited wait, but we wait for 4 secs and check if the device is
     // unstable, if so we return, otherwise we continue to wait in the while loop.
+    auto wait_start = std::chrono::steady_clock::now();
     while (Hsa::signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, kInitSignalValueOne,
                                      kTimeout4Secs, wait_state) != 0) {
       if (HIP_SKIP_ABORT_ON_GPU_ERROR && amd::Device::IsGPUInError()) {
@@ -72,6 +73,17 @@ inline bool WaitForSignal(hsa_signal_t signal, bool active_wait = false, bool yi
                 "(0x%lx) for %d ns",
                 signal.handle, kTimeout4Secs);
         return true;
+      }
+
+      if (HIP_MAX_SIGNAL_WAIT > 0) {
+        const long max_wait_ms =
+            static_cast<long>(HIP_MAX_SIGNAL_WAIT) * 1000L;
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - wait_start).count();
+        if (elapsed >= max_wait_ms) {
+          Hsa::signal_silent_store_relaxed(signal, 0);
+          return true;
+        }
       }
       if (yield && wait_state == HSA_WAIT_STATE_ACTIVE) {
         amd::Os::yield();
