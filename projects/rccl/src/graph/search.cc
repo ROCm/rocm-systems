@@ -22,6 +22,7 @@ NCCL_PARAM(CrossNic, "CROSS_NIC", 2);
 // max bw.
 static float getMaxBw(struct ncclTopoSystem* system, struct ncclTopoNode* gpu, int type) {
   float maxBw = 0.0;
+  if (gpu->paths[type] == NULL) return maxBw; // no paths to nodes of this type (e.g. remote NICs in MNNVL)
   for (int i=0; i<system->nodes[type].count; i++) {
     struct ncclTopoLinkList* path = gpu->paths[type]+i;
     float bw = path->bw;
@@ -478,17 +479,25 @@ ncclResult_t ncclTopoCompareGraphs(struct ncclTopoSystem* system, struct ncclTop
 static ncclResult_t ncclTopoPrefNetsGpuFirst(struct ncclTopoSystem* system, int gpu, int nets[NCCL_TOPO_MAX_NODES], int* netCount) {
   const int nGpus = (gpu == -1) ? system->nodes[GPU].count : 1;
   int gpuCount = nGpus;
-  int gpuIds[NCCL_TOPO_MAX_NODES] = {gpu};
+  int gpuIds[NCCL_TOPO_MAX_NODES];
+  std::fill(gpuIds, gpuIds + NCCL_TOPO_MAX_NODES, -1);
   int firstNets[NCCL_TOPO_MAX_NODES];
+  std::fill(firstNets, firstNets + NCCL_TOPO_MAX_NODES, -1);
   if (gpu == -1)
     for (int g = 0; g < nGpus; g++) gpuIds[g] = g;
+  else
+    gpuIds[0] = gpu;
 
   for (int c = 0; c < MAXCHANNELS; c++) {
     for (int g = 0; g < nGpus; g++) {
-      if (gpuIds[g] == -1) continue;
+      if (gpuIds[g] == -1) continue; // gpuCount-decrement guard: already processed this GPU
       int localNet;
       int64_t netId;
       struct ncclTopoNode* gpu = system->nodes[GPU].nodes + gpuIds[g];
+      // Skip remote GPUs (MNNVL): paths[NET] is null, they have no local NICs on this node.
+      // gpuIds[g] is set to -1 before gpuCount-- so the guard above prevents double-decrement
+      // on subsequent channel iterations; gpuCount is decremented exactly once per GPU (≥ 0 always).
+      if (gpu->paths[NET] == NULL) { gpuIds[g] = -1; gpuCount--; continue; }
       NCCLCHECK(ncclTopoGetLocalNet(system, gpu->gpu.rank, c, &netId, NULL));
       NCCLCHECK(ncclTopoIdToIndex(system, NET, netId, &localNet));
       // store the first net found for each GPU in case of duplicates
@@ -515,6 +524,8 @@ static ncclResult_t ncclTopoPrefNetsChannelFirst(struct ncclTopoSystem* system, 
     if (gpu != -1 && gpu != g) continue;
     int localNetCount = 0, localNets[MAXCHANNELS];
     struct ncclTopoNode* gpu = system->nodes[GPU].nodes + g;
+    // Skip remote GPUs (MNNVL): paths[NET] is null, they have no local NICs on this node
+    if (gpu->paths[NET] == NULL) continue;
     for (int c = 0; c < MAXCHANNELS; c++) {
       int64_t netId;
       NCCLCHECK(ncclTopoGetLocalNet(system, gpu->gpu.rank, c, &netId, NULL));
@@ -572,6 +583,8 @@ ncclResult_t ncclTopoSelectNets(struct ncclTopoSystem* system, int typeInter, in
       int localNetCount = 0, localNets[MAXCHANNELS];
       struct ncclTopoNode* gpu = system->nodes[GPU].nodes+g;
       struct ncclTopoLinkList* paths = gpu->paths[NET];
+      // Skip remote GPUs (MNNVL): paths[NET] is null, they have no local NICs
+      if (paths == NULL) continue;
       for (int n=0; n<system->nodes[NET].count && n<MAXCHANNELS; n++) {
         if (paths[n].type == t) localNets[localNetCount++] = n;
       }

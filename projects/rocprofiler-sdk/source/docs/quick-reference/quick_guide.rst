@@ -4,14 +4,14 @@
 
 .. _quick-guide:
 
-==============================================
-ROCprofiler-SDK Quick Reference Guide
-==============================================
+=======================================
+ROCprofiler-SDK quick reference guide
+=======================================
 
-This quick reference guide provides an overview of the most commonly used ``rocprofv3`` commands and links to detailed documentation sections.
+This quick reference guide provides an overview of the most commonly used ``rocprofv3`` commands and documentation links to various useful functionalities. For comprehensive documentation on each feature, click on the respective link.
 
-Getting Started
-===============
+Getting started
+================
 
 Export the ROCm binary path:
 
@@ -26,10 +26,10 @@ Check rocprofv3 version and help:
    rocprofv3 --version
    rocprofv3 --help
 
-Essential Commands
-==================
+Essential commands
+===================
 
-Querying System Capabilities
+Querying system capabilities
 -----------------------------
 
 List available counters and capabilities:
@@ -39,14 +39,14 @@ List available counters and capabilities:
    # List all available features
    rocprofv3 --list-avail
 
-   # Using the dedicated tool for detailed queries
+   # Use the dedicated tool for detailed queries
    rocprofv3-avail list
    rocprofv3-avail info
 
 **Documentation:** :ref:`using-rocprofv3-avail`
 
-Basic Tracing
--------------
+Basic tracing
+--------------
 
 Application tracing (HIP API + kernel dispatches + memory operations):
 
@@ -58,21 +58,20 @@ Application tracing (HIP API + kernel dispatches + memory operations):
    # System-level tracing (includes HSA API)
    rocprofv3 --sys-trace -- ./your_app
 
-**Documentation:** :ref:`using-rocprofv3`
+**Documentation:** :ref:`application-tracing`
 
-Granular Tracing Options
-------------------------
+Granular tracing options
+-------------------------
 
 .. code-block:: bash
 
    # HIP API, kernel dispatches, and memory operations tracing
    rocprofv3 --hip-trace --kernel-trace --memory-copy-trace -- ./your_app
 
+**Documentation:** :ref:`application-tracing`
 
-**Documentation:** :ref:`using-rocprofv3` (Basic tracing section)
-
-Performance Counter Collection
-------------------------------
+Performance counter collection
+-------------------------------
 
 .. code-block:: bash
 
@@ -85,13 +84,13 @@ Performance Counter Collection
    # Collect specific counters
    rocprofv3 --pmc SQ_WAVES,SQ_INSTS_VALU -- ./your_app
 
-**Documentation:** :ref:`using-rocprofv3` (Counter collection section)
+**Documentation:** :ref:`kernel-counter-collection`
 
-Advanced Profiling Features
+Advanced profiling features
 ============================
 
-PC Sampling (Beta)
-------------------
+PC sampling (beta)
+-------------------
 
 .. code-block:: bash
 
@@ -103,8 +102,8 @@ PC Sampling (Beta)
 
 **Documentation:** :ref:`using-pc-sampling`
 
-Thread Trace
-------------
+Thread trace
+-------------
 
 .. code-block:: bash
 
@@ -113,7 +112,7 @@ Thread Trace
 
 **Documentation:** :ref:`using-thread-trace`
 
-Process Attachment
+Process attachment
 ------------------
 
 .. code-block:: bash
@@ -125,14 +124,14 @@ Process Attachment
    # Attach for a specific duration (10 seconds)
    rocprofv3 --pid 12345 --runtime-trace --attach-duration-msec 1000
 
-**Documentation:** :ref:`using-rocprofv3-process-attachment`
+**Documentation:** :ref:`rocprofv3-process-attachment`
 
-Output Formats and Post-processing
+Output formats and post-processing
 ===================================
 
-rocprofv3 supports multiple output formats for different analysis needs. The default format is ``rocpd``, which stores data in a structured SQLite3 database.
+``rocprofv3`` supports multiple output formats for different analytical requirements. The default format is ``rocpd``, which stores data in a structured SQLite3 database.
 
-Working with rocpd Database Format
+Working with rocpd database format
 -----------------------------------
 
 .. code-block:: bash
@@ -147,19 +146,20 @@ Working with rocpd Database Format
    # Convert rocpd database to other formats
    rocpd convert -i *.db -f csv pftrace otf2 --start 20% --end 80%
 
-Collecting and converting to Other Formats
--------------------------------------------
+**Documentation:** :ref:`using-rocpd-output-format`
+
+Collection in various formats
+------------------------------
 
 .. code-block:: bash
 
    # Multiple output formats in one run
    rocprofv3 --runtime-trace --output-format csv json pftrace otf2 -- ./your_app
 
-
 **Documentation:** :ref:`using-rocpd-output-format`
 
-Summary and Statistics
-----------------------
+Summary and statistics
+-----------------------
 
 .. code-block:: bash
 
@@ -168,31 +168,31 @@ Summary and Statistics
 
 **Documentation:** :ref:`using-rocprofv3` (Post-processing tracing section)
 
-Filtering and Selection
-=======================
+Filtering and selection
+========================
 
-Kernel Filtering
-----------------
+Kernel filtering
+-----------------
 
 .. code-block:: bash
 
    # Include specific kernels by regex
    rocprofv3 --kernel-trace --kernel-iteration-range 10-20 --kernel-include-regex "matmul.*" --kernel-exclude-regex ".*copy.*" -- ./your_app
 
-**Documentation:** :ref:`using-rocprofv3` (Filtering section)
+**Documentation:** :ref:`kernel-filtering`
 
-Time-based Collection
----------------------
+Time-based collection
+----------------------
 
 .. code-block:: bash
 
    # Collect for specific time periods (start_delay:collection_time:repeat)
    rocprofv3 --runtime-trace --collection-period 500:2000:0 --collection-period-unit msec -- ./your_app
 
-**Documentation:** :ref:`using-rocprofv3` (Filtering section)
+**Documentation:** :ref:`collection-period`
 
-Kernel Naming and Display
-=========================
+Kernel naming and display
+==========================
 
 .. code-block:: bash
 
@@ -205,9 +205,9 @@ Kernel Naming and Display
    # Use ROCTx regions to rename kernels
    rocprofv3 --kernel-trace --kernel-rename -- ./your_app
 
-**Documentation:** :ref:`using-rocprofv3` (Kernel naming section)
+**Documentation:** :ref:`kernel-naming-filtering`
 
-Code Annotation with ROCTx
+Code annotation with ROCTx
 ===========================
 
 .. code-block:: bash
@@ -217,11 +217,11 @@ Code Annotation with ROCTx
 
 **Documentation:** :ref:`using-rocprofiler-sdk-roctx`
 
-Parallel and Distributed Applications
+Parallel and distributed applications
 ======================================
 
-MPI Applications
-----------------
+MPI applications
+-----------------
 
 .. code-block:: bash
 
@@ -230,8 +230,8 @@ MPI Applications
 
 **Documentation:** :ref:`using-rocprofv3-with-mpi`
 
-OpenMP Applications
--------------------
+OpenMP applications
+--------------------
 
 .. code-block:: bash
 
@@ -240,11 +240,11 @@ OpenMP Applications
 
 **Documentation:** :ref:`using-rocprofv3-with-openmp`
 
-Output Management
-=================
+Output management
+==================
 
-File Organization
------------------
+File organization
+------------------
 
 .. code-block:: bash
 
@@ -254,43 +254,45 @@ File Organization
    # Generate configuration file
    rocprofv3 --runtime-trace --output-config -- ./your_app
 
-**Documentation:** :ref:`using-rocprofv3` (I/O options section)
+**Documentation:** :ref:`rocprofv3-io-options`
 
-Common Use Cases
-================
+Common use cases
+=================
 
-Basic Performance Analysis
---------------------------
+Basic performance analysis
+---------------------------
+
+**Use case:** To get a high-level view of application performance:
 
 .. code-block:: bash
 
    # Quick performance overview
    rocprofv3 --runtime-trace --summary -- ./your_app
 
-**Use case:** Get a high-level view of application performance
-
-Detailed Kernel Analysis
+Detailed kernel analysis
 -------------------------
+
+**Use case:** To analyze specific kernel performance bottlenecks:
 
 .. code-block:: bash
 
    # Detailed kernel profiling with counters
    rocprofv3 --kernel-trace --pmc SQ_WAVES,SQ_INSTS_VALU,TCP_PERF_SEL_TOTAL_CACHE_ACCESSES -- ./your_app
 
-**Use case:** Analyze specific kernel performance bottlenecks
+Memory transfer analysis
+-------------------------
 
-Memory Transfer Analysis
-------------------------
+**Use case:** To optimize data movement between CPU and GPU:
 
 .. code-block:: bash
 
    # Focus on memory operations
    rocprofv3 --memory-copy-trace --memory-allocation-trace -- ./your_app
 
-**Use case:** Optimize data movement between CPU and GPU
-
-Timeline Visualization
+Timeline visualization
 ----------------------
+
+**Use case:** To visualize execution timeline in Perfetto or similar tools:
 
 .. code-block:: bash
 
@@ -300,24 +302,24 @@ Timeline Visualization
    # Convert to Perfetto format
    rocpd2pftrace -i hostname/pid_results.db -o perfetto_trace
 
-**Use case:** Visualize execution timeline in Perfetto or similar tools
+Installation and setup
+=======================
 
-Installation and Setup
-======================
+**Installation documentation:** :ref:`installing-rocprofiler-sdk`
 
-**Installation Documentation:** :ref:`installing-rocprofiler-sdk`
+**API reference:** :doc:`Tool library <api-reference/tool_library>`
 
-**API Reference:** :doc:`Tool library <api-reference/tool_library>`
+**Samples and examples:** :doc:`Samples <how-to/samples>`
 
-**Samples and Examples:** :doc:`Samples <how-to/samples>`
+Quick troubleshooting tips
+===========================
 
-Troubleshooting Quick Tips
-==========================
+- **Permission issues:** Ensure proper access to GPU devices and ``/dev/kfd``.
 
-1. **Permission Issues:** Ensure proper access to GPU devices and ``/dev/kfd``
-2. **Counter Collection Fails:** Use ``rocprofv3-avail pmc-check`` to verify counter compatibility
-3. **Large Output Files:** Use ``--minimum-output-data`` to set file size thresholds
-4. **Signal Handling:** Use ``--disable-signal-handlers`` if conflicts with application handlers
-5. **ROCm Path Issues:** Use ``--rocm-root`` to specify custom ROCm installation paths
+- **Counter collection failure:** Use ``rocprofv3-avail pmc-check`` to verify counter compatibility.
 
-For comprehensive documentation on each feature, refer to the detailed sections linked throughout this guide.
+- **Large output files:** Use ``--minimum-output-data`` to set file size thresholds.
+
+- **Signal handling:** Use ``--disable-signal-handlers`` in case of conflicts with application handlers.
+
+- **ROCm path issues:** Use ``--rocm-root`` to specify custom ROCm installation paths.
