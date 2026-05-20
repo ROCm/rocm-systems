@@ -14,21 +14,157 @@ config = {}
 config["cleanup"] = True if "PYTEST_XDIST_WORKER_COUNT" in os.environ else False
 
 
-def test_analyze_vcopy_MI100(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/vcopy/MI100")
+@pytest.mark.parametrize(
+    "workload_type,expected_code",
+    [
+        ("device_filter", 0),
+        ("device_inv_int", 0),
+        ("dispatch_0", 0),
+        ("dispatch_0_1", 0),
+        ("dispatch_2", 0),
+        ("dispatch_6_8", 1),
+        ("dispatch_7", 1),
+        ("dispatch_inv", 0),
+        ("ipblocks_CPC", 0),
+        ("ipblocks_CPF", 0),
+        ("ipblocks_SPI", 0),
+        ("ipblocks_SQ", 0),
+        ("ipblocks_SQC", 0),
+        ("ipblocks_SQ_CPC", 0),
+        ("ipblocks_SQ_SPI", 0),
+        ("ipblocks_SQ_SPI_TA_TCC_CPF", 0),
+        ("ipblocks_SQ_SQC_TCP_CPC", 0),
+        ("ipblocks_SQ_TA", 0),
+        ("ipblocks_TA", 0),
+        ("ipblocks_TCC", 0),
+        ("ipblocks_TCP", 0),
+        ("ipblocks_TD", 0),
+        ("join_type_grid", 0),
+        ("join_type_kernel", 0),
+        ("kernel", 0),
+        ("kernel_inv_int", 1),
+        ("kernel_inv_str", 1),
+        ("kernel_substr", 0),
+        ("no_roof", 0),
+        ("path", 0),
+        ("vcopy", 0),
+    ],
+)
+def test_analyze_MI100(
+    binary_handler_analyze_rocprof_compute, workload_type, expected_code
+):
+    workload_dir = common.setup_workload_dir(f"tests/workloads/{workload_type}/MI100")
 
     code = binary_handler_analyze_rocprof_compute([
         "analyze",
         "--path",
         workload_dir,
     ])
-    assert code == 0
+    assert code == expected_code
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-def test_analyze_vcopy_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/vcopy/MI200")
+@pytest.mark.parametrize(
+    "workload_type,expected_code",
+    [
+        ("device_filter", 0),
+        ("device_inv_int", 0),
+        ("dispatch_0", 0),
+        ("dispatch_0_1", 0),
+        ("dispatch_2", 0),
+        ("dispatch_6_8", 1),
+        ("dispatch_7", 1),
+        ("dispatch_inv", 0),
+        ("ipblocks_CPC", 0),
+        ("ipblocks_CPF", 0),
+        ("ipblocks_SPI", 0),
+        ("ipblocks_SQ", 0),
+        ("ipblocks_SQC", 0),
+        ("ipblocks_SQ_CPC", 0),
+        ("ipblocks_SQ_SPI", 0),
+        ("ipblocks_SQ_SPI_TA_TCC_CPF", 0),
+        ("ipblocks_SQ_SQC_TCP_CPC", 0),
+        ("ipblocks_SQ_TA", 0),
+        ("ipblocks_TA", 0),
+        ("ipblocks_TCC", 0),
+        ("ipblocks_TCP", 0),
+        ("ipblocks_TD", 0),
+        ("join_type_grid", 0),
+        ("join_type_kernel", 0),
+        ("kernel", 0),
+        ("kernel_inv_int", 1),
+        ("kernel_inv_str", 1),
+        ("kernel_names", 0),
+        ("kernel_substr", 0),
+        ("mem_levels_HBM", 0),
+        ("mem_levels_HBM_LDS", 0),
+        ("mem_levels_L2", 0),
+        ("mem_levels_L2_vL1d_LDS", 0),
+        ("mem_levels_LDS", 0),
+        ("mem_levels_vL1D", 0),
+        ("mem_levels_vL1d_LDS", 0),
+        ("no_roof", 0),
+        ("path", 0),
+        ("sort_dispatches", 0),
+        ("sort_kernels", 0),
+        ("vcopy", 0),
+    ],
+)
+def test_analyze_MI200(
+    binary_handler_analyze_rocprof_compute, workload_type, expected_code
+):
+    workload_dir = common.setup_workload_dir(f"tests/workloads/{workload_type}/MI200")
+
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        workload_dir,
+    ])
+    assert code == expected_code
+
+    common.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.parametrize(
+    "workload_type",
+    [
+        "device_filter",
+        "device_inv_int",
+        "dispatch_0",
+        "dispatch_0_1",
+        "dispatch_2",
+        "dispatch_6_8",
+        "dispatch_7",
+        "dispatch_inv",
+        "ipblocks_CPC",
+        "ipblocks_CPF",
+        "ipblocks_SPI",
+        "ipblocks_SQ",
+        "ipblocks_SQC",
+        "ipblocks_SQ_CPC",
+        "ipblocks_SQ_SPI",
+        "ipblocks_SQ_SPI_TA_TCC_CPF",
+        "ipblocks_SQ_SQC_TCP_CPC",
+        "ipblocks_SQ_TA",
+        "ipblocks_TA",
+        "ipblocks_TCC",
+        "ipblocks_TCP",
+        "ipblocks_TD",
+        "join_type_grid",
+        "join_type_kernel",
+        "kernel",
+        "kernel_inv_int",
+        "kernel_inv_str",
+        "kernel_substr",
+        "no_roof",
+        "path",
+    ],
+)
+def test_analyze_MI300A_A1(binary_handler_analyze_rocprof_compute, workload_type):
+    workload_dir = common.setup_workload_dir(
+        f"tests/workloads/{workload_type}/MI300A_A1"
+    )
 
     code = binary_handler_analyze_rocprof_compute([
         "analyze",
@@ -42,1759 +178,81 @@ def test_analyze_vcopy_MI200(binary_handler_analyze_rocprof_compute):
 
 @pytest.mark.parametrize(
     "workload_type",
-    ["vcopy", "dispatch_0", "ipblocks_CU", "kernel", "no_roof", "path"],
+    [
+        "device_filter",
+        "device_inv_int",
+        "dispatch_0",
+        "dispatch_0_1",
+        "dispatch_2",
+        "dispatch_6_8",
+        "dispatch_7",
+        "dispatch_inv",
+        "ipblocks_CPC",
+        "ipblocks_CPF",
+        "ipblocks_SPI",
+        "ipblocks_SQ",
+        "ipblocks_SQC",
+        "ipblocks_SQ_CPC",
+        "ipblocks_SQ_SPI",
+        "ipblocks_SQ_SPI_TA_TCC_CPF",
+        "ipblocks_SQ_SQC_TCP_CPC",
+        "ipblocks_SQ_TA",
+        "ipblocks_TA",
+        "ipblocks_TCC",
+        "ipblocks_TCP",
+        "ipblocks_TD",
+        "join_type_grid",
+        "join_type_kernel",
+        "kernel",
+        "kernel_inv_int",
+        "kernel_inv_str",
+        "kernel_substr",
+        "no_roof",
+        "path",
+    ],
+)
+def test_analyze_MI300X_A1(binary_handler_analyze_rocprof_compute, workload_type):
+    workload_dir = common.setup_workload_dir(
+        f"tests/workloads/{workload_type}/MI300X_A1"
+    )
+
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        workload_dir,
+    ])
+    assert code == 0
+
+    common.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.parametrize(
+    "workload_type",
+    [
+        "no_roof",
+    ],
+)
+def test_analyze_MI350(binary_handler_analyze_rocprof_compute, workload_type):
+    workload_dir = common.setup_workload_dir(f"tests/workloads/{workload_type}/MI350")
+
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        workload_dir,
+    ])
+    assert code == 0
+
+    common.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.parametrize(
+    "workload_type",
+    ["dispatch_0", "ipblocks_CU", "kernel", "no_roof", "path", "vcopy"],
 )
 def test_analyze_RDNA35_HALO(binary_handler_analyze_rocprof_compute, workload_type):
     workload_dir = common.setup_workload_dir(
         f"tests/workloads/{workload_type}/RDNA35_HALO"
     )
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_TCP_MI300X_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_TCP/MI300X_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_TCP_MI100(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_TCP/MI100")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_TCP_MI300A_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_TCP/MI300A_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_TCP_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_TCP/MI200")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_SQC_MI300X_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_SQC/MI300X_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_SQC_MI100(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_SQC/MI100")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_SQC_MI300A_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_SQC/MI300A_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_SQC_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_SQC/MI200")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_mem_levels_HBM_LDS_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/mem_levels_HBM_LDS/MI200")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_TCC_MI300X_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_TCC/MI300X_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_TCC_MI100(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_TCC/MI100")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_TCC_MI300A_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_TCC/MI300A_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_TCC_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_TCC/MI200")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_no_roof_MI350(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/no_roof/MI350")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_no_roof_MI300X_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/no_roof/MI300X_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_no_roof_MI100(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/no_roof/MI100")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_no_roof_MI300A_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/no_roof/MI300A_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_no_roof_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/no_roof/MI200")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_SQ_CPC_MI300X_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir(
-        "tests/workloads/ipblocks_SQ_CPC/MI300X_A1"
-    )
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_SQ_CPC_MI100(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_SQ_CPC/MI100")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_SQ_CPC_MI300A_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir(
-        "tests/workloads/ipblocks_SQ_CPC/MI300A_A1"
-    )
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_SQ_CPC_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_SQ_CPC/MI200")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_dispatch_0_MI300X_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/dispatch_0/MI300X_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_dispatch_0_MI100(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/dispatch_0/MI100")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_dispatch_0_MI300A_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/dispatch_0/MI300A_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_dispatch_0_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/dispatch_0/MI200")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_join_type_grid_MI300X_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/join_type_grid/MI300X_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_join_type_grid_MI100(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/join_type_grid/MI100")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_join_type_grid_MI300A_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/join_type_grid/MI300A_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_join_type_grid_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/join_type_grid/MI200")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_kernel_MI300X_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/kernel/MI300X_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_kernel_MI100(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/kernel/MI100")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_kernel_MI300A_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/kernel/MI300A_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_kernel_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/kernel/MI200")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_kernel_substr_MI300X_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/kernel_substr/MI300X_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_kernel_substr_MI100(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/kernel_substr/MI100")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_kernel_substr_MI300A_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/kernel_substr/MI300A_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_kernel_substr_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/kernel_substr/MI200")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_dispatch_7_MI300X_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/dispatch_7/MI300X_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_dispatch_7_MI100(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/dispatch_7/MI100")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 1
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_dispatch_7_MI300A_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/dispatch_7/MI300A_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_dispatch_7_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/dispatch_7/MI200")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 1
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_kernel_inv_int_MI300X_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/kernel_inv_int/MI300X_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_kernel_inv_int_MI100(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/kernel_inv_int/MI100")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 1
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_kernel_inv_int_MI300A_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/kernel_inv_int/MI300A_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_kernel_inv_int_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/kernel_inv_int/MI200")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 1
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_mem_levels_vL1D_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/mem_levels_vL1D/MI200")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_sort_kernels_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/sort_kernels/MI200")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_kernel_inv_str_MI300X_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/kernel_inv_str/MI300X_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_kernel_inv_str_MI100(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/kernel_inv_str/MI100")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 1
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_kernel_inv_str_MI300A_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/kernel_inv_str/MI300A_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_kernel_inv_str_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/kernel_inv_str/MI200")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 1
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_SQ_SPI_MI300X_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir(
-        "tests/workloads/ipblocks_SQ_SPI/MI300X_A1"
-    )
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_SQ_SPI_MI100(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_SQ_SPI/MI100")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_SQ_SPI_MI300A_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir(
-        "tests/workloads/ipblocks_SQ_SPI/MI300A_A1"
-    )
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_SQ_SPI_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_SQ_SPI/MI200")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_dispatch_2_MI300X_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/dispatch_2/MI300X_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_dispatch_2_MI100(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/dispatch_2/MI100")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_dispatch_2_MI300A_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/dispatch_2/MI300A_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_dispatch_2_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/dispatch_2/MI200")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_dispatch_0_1_MI300X_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/dispatch_0_1/MI300X_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_dispatch_0_1_MI100(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/dispatch_0_1/MI100")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_dispatch_0_1_MI300A_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/dispatch_0_1/MI300A_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_dispatch_0_1_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/dispatch_0_1/MI200")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_mem_levels_LDS_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/mem_levels_LDS/MI200")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_TA_MI300X_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_TA/MI300X_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_TA_MI100(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_TA/MI100")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_TA_MI300A_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_TA/MI300A_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_TA_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_TA/MI200")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_dispatch_6_8_MI300X_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/dispatch_6_8/MI300X_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_dispatch_6_8_MI100(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/dispatch_6_8/MI100")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 1
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_dispatch_6_8_MI300A_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/dispatch_6_8/MI300A_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_dispatch_6_8_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/dispatch_6_8/MI200")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 1
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_device_inv_int_MI300X_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/device_inv_int/MI300X_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_device_inv_int_MI100(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/device_inv_int/MI100")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_device_inv_int_MI300A_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/device_inv_int/MI300A_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_device_inv_int_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/device_inv_int/MI200")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_SQ_TA_MI300X_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_SQ_TA/MI300X_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_SQ_TA_MI100(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_SQ_TA/MI100")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_SQ_TA_MI300A_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_SQ_TA/MI300A_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_SQ_TA_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_SQ_TA/MI200")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_TD_MI300X_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_TD/MI300X_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_TD_MI100(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_TD/MI100")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_TD_MI300A_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_TD/MI300A_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_TD_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_TD/MI200")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_device_filter_MI300X_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/device_filter/MI300X_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_device_filter_MI100(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/device_filter/MI100")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_device_filter_MI300A_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/device_filter/MI300A_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_device_filter_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/device_filter/MI200")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_join_type_kernel_MI300X_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir(
-        "tests/workloads/join_type_kernel/MI300X_A1"
-    )
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_join_type_kernel_MI100(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/join_type_kernel/MI100")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_join_type_kernel_MI300A_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir(
-        "tests/workloads/join_type_kernel/MI300A_A1"
-    )
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_join_type_kernel_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/join_type_kernel/MI200")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_SQ_SQC_TCP_CPC_MI300X_A1(
-    binary_handler_analyze_rocprof_compute,
-):
-    workload_dir = common.setup_workload_dir(
-        "tests/workloads/ipblocks_SQ_SQC_TCP_CPC/MI300X_A1"
-    )
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_SQ_SQC_TCP_CPC_MI100(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir(
-        "tests/workloads/ipblocks_SQ_SQC_TCP_CPC/MI100"
-    )
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_SQ_SQC_TCP_CPC_MI300A_A1(
-    binary_handler_analyze_rocprof_compute,
-):
-    workload_dir = common.setup_workload_dir(
-        "tests/workloads/ipblocks_SQ_SQC_TCP_CPC/MI300A_A1"
-    )
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_SQ_SQC_TCP_CPC_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir(
-        "tests/workloads/ipblocks_SQ_SQC_TCP_CPC/MI200"
-    )
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_mem_levels_L2_vL1d_LDS_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir(
-        "tests/workloads/mem_levels_L2_vL1d_LDS/MI200"
-    )
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_CPF_MI300X_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_CPF/MI300X_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_CPF_MI100(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_CPF/MI100")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_CPF_MI300A_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_CPF/MI300A_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_CPF_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_CPF/MI200")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_sort_dispatches_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/sort_dispatches/MI200")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_kernel_names_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/kernel_names/MI200")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_mem_levels_vL1d_LDS_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir(
-        "tests/workloads/mem_levels_vL1d_LDS/MI200"
-    )
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_SQ_MI300X_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_SQ/MI300X_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_SQ_MI100(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_SQ/MI100")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_SQ_MI300A_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_SQ/MI300A_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_SQ_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_SQ/MI200")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_mem_levels_L2_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/mem_levels_L2/MI200")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_dispatch_inv_MI300X_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/dispatch_inv/MI300X_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_dispatch_inv_MI100(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/dispatch_inv/MI100")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_dispatch_inv_MI300A_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/dispatch_inv/MI300A_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_dispatch_inv_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/dispatch_inv/MI200")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_path_MI300X_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/path/MI300X_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_path_MI100(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/path/MI100")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_path_MI300A_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/path/MI300A_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_path_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/path/MI200")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_CPC_MI300X_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_CPC/MI300X_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_CPC_MI100(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_CPC/MI100")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_CPC_MI300A_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_CPC/MI300A_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_CPC_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_CPC/MI200")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_SQ_SPI_TA_TCC_CPF_MI300X_A1(
-    binary_handler_analyze_rocprof_compute,
-):
-    workload_dir = common.setup_workload_dir(
-        "tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI300X_A1"
-    )
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_SQ_SPI_TA_TCC_CPF_MI100(
-    binary_handler_analyze_rocprof_compute,
-):
-    workload_dir = common.setup_workload_dir(
-        "tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI100"
-    )
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_SQ_SPI_TA_TCC_CPF_MI300A_A1(
-    binary_handler_analyze_rocprof_compute,
-):
-    workload_dir = common.setup_workload_dir(
-        "tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI300A_A1"
-    )
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_SQ_SPI_TA_TCC_CPF_MI200(
-    binary_handler_analyze_rocprof_compute,
-):
-    workload_dir = common.setup_workload_dir(
-        "tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200"
-    )
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_mem_levels_HBM_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/mem_levels_HBM/MI200")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_SPI_MI300X_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_SPI/MI300X_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_SPI_MI100(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_SPI/MI100")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_SPI_MI300A_A1(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_SPI/MI300A_A1")
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_ipblocks_SPI_MI200(binary_handler_analyze_rocprof_compute):
-    workload_dir = common.setup_workload_dir("tests/workloads/ipblocks_SPI/MI200")
 
     code = binary_handler_analyze_rocprof_compute([
         "analyze",
