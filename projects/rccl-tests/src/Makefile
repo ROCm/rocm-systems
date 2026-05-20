@@ -182,13 +182,13 @@ ${HIPIFY_DIR}/%.h: %.h
 
 .PRECIOUS: ${DST_DIR}/%.o
 
-${DST_DIR}/%.o: ${HIPIFY_DIR}/%.cu.cpp ${HIPIFY_DIR}/common.h ${HIPIFY_DIR}/util.h ${HIPIFY_DIR}/collector.h $(TEST_VERIFIABLE_HDRS) $(GIT_VERSION_FILE)
+${DST_DIR}/%.o: ${HIPIFY_DIR}/%.cu.cpp ${HIPIFY_DIR}/common.h ${HIPIFY_DIR}/util.h ${HIPIFY_DIR}/collector.h ${HIPIFY_DIR}/rccl_vector_types.h ${HIPIFY_DIR}/multimem_ops.h $(TEST_VERIFIABLE_HDRS) $(GIT_VERSION_FILE)
 	@printf "Compiling  %-35s > %s\n" $< $@
 	@mkdir -p ${DST_DIR}
 	echo "$(HIPCC) $(HIPCUFLAGS) -I. -c -o $@ $<"
 	$(HIPCC) $(HIPCUFLAGS) -I. -c -o $@ $<
 
-${DST_DIR}/%$(NAME_SUFFIX).o: ${HIPIFY_DIR}/%.cu.cpp ${HIPIFY_DIR}/common.h ${HIPIFY_DIR}/util.h ${HIPIFY_DIR}/collector.h $(TEST_VERIFIABLE_HDRS) $(GIT_VERSION_FILE)
+${DST_DIR}/%$(NAME_SUFFIX).o: ${HIPIFY_DIR}/%.cu.cpp ${HIPIFY_DIR}/common.h ${HIPIFY_DIR}/util.h ${HIPIFY_DIR}/collector.h ${HIPIFY_DIR}/rccl_vector_types.h ${HIPIFY_DIR}/multimem_ops.h $(TEST_VERIFIABLE_HDRS) $(GIT_VERSION_FILE)
 	@printf "Compiling  %-35s > %s\n" $< $@
 	@mkdir -p ${DST_DIR}
 	echo "$(HIPCC) $(HIPCUFLAGS) -I. -c -o $@ $<"

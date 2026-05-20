@@ -28,6 +28,7 @@
 #include <vector>
 #include "gfx11/gfx11wave.h"
 #include "gfx12/gfx12wave.h"
+#include "mi400/mi400wave.h"
 #include "segment.hpp"
 
 #define INST_JUMP_TYPE 5
@@ -209,7 +210,7 @@ static std::unordered_map<int, mapped_inst_t> table_map_to_common_type{
     {(int) EINST::subv_loop_end,     {WaveInstCategory::SALU, 1} }
 };
 
-mapped_inst_t wave_t::map_to_common_type(int einst, int dprate, int derate)
+mapped_inst_t map_to_common_type(int einst, int dprate, int derate)
 {
     auto it = table_map_to_common_type.find(einst);
     if (it != table_map_to_common_type.end())
@@ -246,7 +247,7 @@ void wave_t::complete_wave(Token& token)
 void wave_t::apply_wave_rdy(int64_t time)
 {
     update_barrier_gfx11(time - 1);
-    update_state(WaveslotState::WS_STALL, time);
+    if (last_xnack_cycle < time && !bIsXnack) update_state(WaveslotState::WS_STALL, time);
 }
 
 void wave_t::update_state(WaveslotState new_state, int64_t time)
@@ -381,6 +382,12 @@ void wave_t::apply_inst(int64_t token_time, int enum_inst, mapped_inst_t mapped,
         stall = time - last_state_cycle;
         duration += stall;
         time = last_state_cycle;
+
+        if (bIsXnack)
+        {
+            bIsXnack = false;
+            last_xnack_cycle = token_time;
+        }
     }
 
     this->instructions.push_back({time, mapped.category, duration, stall});

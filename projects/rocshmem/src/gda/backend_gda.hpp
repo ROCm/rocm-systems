@@ -146,7 +146,7 @@ class GDABackend : public Backend {
    *        Populates nic_devices_ (always at least 1 entry).
    */
   void select_nics();
-  
+
   void configure_nic_policy();
   void log_ctx_nics(unsigned int ctx_id, size_t qps_per_pe, int qp_offset);
 
@@ -233,6 +233,16 @@ class GDABackend : public Backend {
   void ctx_destroy(Context *ctx) override;
 
   /**
+   * @brief Register a user buffer.
+   */
+  int buffer_register(void *addr, size_t length) override;
+
+  /**
+   * @brief Unregister a user buffer.
+   */
+  int buffer_unregister(void *addr) override;
+
+  /**
    * @brief Abort the application.
    *
    * @param[in] status Exit code.
@@ -249,7 +259,7 @@ class GDABackend : public Backend {
   void create_new_team(Team *parent_team,
                        const TeamInfo& team_info_wrt_parent,
                        const TeamInfo& team_info_wrt_world, int num_pes,
-                       int my_pe_in_new_team, MPI_Comm team_comm,
+                       int my_pe_in_new_team, MPI_Comm new_team_comm,
                        rocshmem_team_t *new_team) override;
 
   /**
@@ -504,7 +514,7 @@ class GDABackend : public Backend {
    *
    * @note Internal data ownership is managed by the proxy
    */
-  GDADefaultContextProxyT default_context_proxy_;  // init handled in constructor
+  GDADefaultContextProxy default_context_proxy_;  // init handled in constructor
 
   /**
    * @brief An array of @ref ROContexts that backs the context FreeList.
@@ -514,7 +524,7 @@ class GDABackend : public Backend {
   /**
    * @brief A free-list containing contexts.
    */
-  FreeListProxy<HIPAllocator, GDAContext *> ctx_free_list{};
+  FreeListProxy<GDAContext *> ctx_free_list{};
 
   /**
    * @brief The bitmask representing the availability of teams in the pool
@@ -578,7 +588,9 @@ class GDABackend : public Backend {
   /**
    * @brief rte allreduce for teams
    */
-  void Allreduce_char_BAND (char* inbuf, char *outbuf, size_t num_bytes, Team *team);
+  void Allreduce_char_BAND (char* inbuf, char *outbuf, size_t num_bytes,
+                            const TeamInfo& new_team_info_wrt_world,
+                            int num_pes, int my_pe_in_new_team);
 
   /**
    * @brief rte barrier for initialization

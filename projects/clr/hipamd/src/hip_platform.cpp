@@ -8,6 +8,7 @@
 #include <hip/texture_types.h>
 #include "hip_platform.hpp"
 #include "hip_internal.hpp"
+#include "platform/command.hpp"
 #include "platform/program.hpp"
 #include "platform/runtime.hpp"
 #include "utils/flags.hpp"
@@ -126,7 +127,8 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_par
                                   uint32_t flags = 0, uint32_t params = 0,
                                   uint32_t gridId = 0, uint32_t numGrids = 0,
                                   uint64_t prevGridSum = 0, uint64_t allGridSum = 0,
-                                  uint32_t firstDevice = 0);
+                                  uint32_t firstDevice = 0,
+                                  const amd::DynDataPrefetchConfig* dynDataPrefetchConfig = nullptr);
 
 // ================================================================================================
 static bool isCompatibleCodeObject(const std::string& codeobj_target_id, const char* device_name) {
@@ -386,7 +388,7 @@ hipError_t hipLaunchByPtr(const void* hostFunction) {
   const amd::Device* device = g_devices[deviceId]->devices()[0];
   amd::HIPLaunchParams launch_params(exec.gridDim_.x, exec.gridDim_.y, exec.gridDim_.z,
                                            exec.blockDim_.x, exec.blockDim_.y, exec.blockDim_.z,
-                                           exec.sharedMem_);
+                                           exec.sharedMem_, *device, 0, 0, 0, 1, 1, 1);
   if (!launch_params.IsValidConfig() ||
       launch_params.local_.product() > device->info().maxWorkGroupSize_) {
     HIP_RETURN(hipErrorInvalidValue);
@@ -687,10 +689,8 @@ namespace hip {
 // ================================================================================================
 hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDim, void** args,
                             size_t sharedMemBytes, hipStream_t stream, hipEvent_t startEvent,
-                            hipEvent_t stopEvent, int flags, dim3 clusterDim = {1, 1, 1}) {
-  if (!hip::isValid(stream)) {
-    return hipErrorInvalidValue;
-  }
+                            hipEvent_t stopEvent, int flags, dim3 clusterDim = {1, 1, 1},
+                            const amd::DynDataPrefetchConfig* dynDataPrefetchConfig = nullptr) {
   if (hostFunction == nullptr) {
     return hipErrorInvalidDeviceFunction;
   }
@@ -722,21 +722,21 @@ hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDi
   }
 
   constexpr auto gridDimYZmax = static_cast<uint64_t>(std::numeric_limits<uint16_t>::max()) + 1;
-  const auto* device = g_devices[deviceId]->devices()[0];
+  const amd::Device* device = g_devices[deviceId]->devices()[0];
   if (device->isa().versionMajor() >= 12 &&
       (gridDim.y > gridDimYZmax || gridDim.z > gridDimYZmax)) {
     return hipErrorInvalidConfiguration;
   }
 
   amd::HIPLaunchParams launch_params(gridDim.x, gridDim.y, gridDim.z, blockDim.x, blockDim.y,
-                                     blockDim.z, sharedMemBytes, 0, 0, 0,
+                                     blockDim.z, sharedMemBytes, *device, 0, 0, 0,
                                      clusterDim.x, clusterDim.y, clusterDim.z);
   if (!launch_params.IsValidConfig()) {
     return hipErrorInvalidConfiguration;
   }
 
   return ihipModuleLaunchKernel(func, launch_params, stream, args, nullptr, startEvent, stopEvent,
-                                flags);
+                                flags, 0, 0, 0, 0, 0, 0, dynDataPrefetchConfig);
 }
 
 // ================================================================================================

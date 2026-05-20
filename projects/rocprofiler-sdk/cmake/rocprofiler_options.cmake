@@ -103,6 +103,9 @@ rocprofiler_add_option(
     ADVANCED)
 rocprofiler_add_option(ROCPROFILER_BUILD_DEPRECATED_WARNINGS
                        "Enable warnings for use of deprecated features" OFF ADVANCED)
+rocprofiler_add_option(
+    ROCPROFILER_BUILD_AQLPROFILE
+    "Enable building with internal AQLProfile library (recommended)" ON ADVANCED)
 
 # In the future, we will do this even with clang-tidy enabled
 foreach(_OPT ROCPROFILER_BUILD_WERROR)

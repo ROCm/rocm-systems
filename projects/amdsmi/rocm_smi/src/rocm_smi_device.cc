@@ -22,7 +22,6 @@
 
 #include "rocm_smi/rocm_smi_device.h"
 
-#include <pthread.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -1919,7 +1918,6 @@ std::string Device::readBootPartitionState<rsmi_memory_partition_type_t>(uint32_
 
 rsmi_status_t Device::get_smi_device_identifiers(uint32_t device_id,
                                                  rsmi_device_identifiers_t* device_identifiers) {
-  bool found_device = false;
   std::ostringstream ss;
   rsmi_status_t ret = RSMI_STATUS_NOT_SUPPORTED;
   if (device_identifiers == nullptr) {
@@ -1930,40 +1928,27 @@ rsmi_status_t Device::get_smi_device_identifiers(uint32_t device_id,
   auto devices = smi.devices();
   ss << __PRETTY_FUNCTION__ << " | device_id = " << device_id
      << "; devices.size() = " << devices.size();
-  // std::cout << ss.str() << "\n";
   LOG_DEBUG(ss);
 
-  for (uint32_t i = 0; i < devices.size(); i++) {
-    if (i != device_id) {
-      continue;
-    }
+  if (static_cast<size_t>(device_id) >= devices.size()) {
+    ss << __PRETTY_FUNCTION__ << " | Invalid device_id: " << device_id
+       << "; devices.size(): " << devices.size();
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
 
-    device_identifiers->card_index = devices[i]->index();
-    device_identifiers->drm_render_minor = devices[i]->drm_render_minor();
-    device_identifiers->bdfid = devices[i]->bdfid();
-    device_identifiers->kfd_gpu_id = devices[i]->kfd_gpu_id();
-    uint32_t temp_partition_id = 0;
-    rsmi_status_t ret = rsmi_dev_partition_id_get(i, &temp_partition_id);
-    if (ret != RSMI_STATUS_SUCCESS) {
-      temp_partition_id = 0;
-    }
-    device_identifiers->partition_id = temp_partition_id;
-    device_identifiers->smi_device_id = i;
-    found_device = true;
-    ss << __PRETTY_FUNCTION__ << " | Found device: "
-       << "card_index = " << device_identifiers->card_index
-       << "; drm_render_minor = " << device_identifiers->drm_render_minor
-       << "; bdfid = " << std::hex << "0x" << device_identifiers->bdfid
-       << "; kfd_gpu_id = " << std::dec << device_identifiers->kfd_gpu_id
-       << "; partition_id = " << device_identifiers->partition_id
-       << "; smi_device_id = " << device_identifiers->smi_device_id;
-    // std::cout << ss.str() << "\n";
-    LOG_DEBUG(ss);
-    break;
+  device_identifiers->card_index = devices[device_id]->index();
+  device_identifiers->drm_render_minor = devices[device_id]->drm_render_minor();
+  device_identifiers->bdfid = devices[device_id]->bdfid();
+  device_identifiers->kfd_gpu_id = devices[device_id]->kfd_gpu_id();
+  uint32_t temp_partition_id = 0;
+  rsmi_status_t partition_id_ret = rsmi_dev_partition_id_get(device_id, &temp_partition_id);
+  if (partition_id_ret != RSMI_STATUS_SUCCESS) {
+    temp_partition_id = 0;
   }
-  if (found_device) {
-    ret = RSMI_STATUS_SUCCESS;
-  }
+  device_identifiers->partition_id = temp_partition_id;
+  device_identifiers->smi_device_id = device_id;
+  ret = RSMI_STATUS_SUCCESS;
   return ret;
 }
 

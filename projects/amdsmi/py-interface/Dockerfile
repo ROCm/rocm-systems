@@ -16,6 +16,9 @@ RUN apt update --yes \
             git \
             gnupg \
             libdrm-dev \
+            libmnl-dev \
+            libnl-3-dev \
+            libnl-genl-3-dev \
             libpython3-dev \
             lsb-release \
             pkg-config \

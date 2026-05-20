@@ -1,11 +1,13 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include <cstdint>
 #include <timemory/log/color.hpp>
 //
 //  above should always be included first
 //
 #include "api.hpp"
+#include "common/defines.h"
 #include "common/setup.hpp"
 #include "common/static_object.hpp"
 #include "core/agent.hpp"
@@ -16,13 +18,13 @@
 #include "core/config.hpp"
 #include "core/constraint.hpp"
 #include "core/cpu.hpp"
-#include "core/defines.hpp"
-#include "core/dynamic_library.hpp"
 #include "core/gpu.hpp"
 #include "core/locking.hpp"
 #include "core/node_info.hpp"
 #include "core/output_file_registry.hpp"
 #include "core/perfetto_fwd.hpp"
+#include "core/progress/bar.hpp"
+#include "core/progress/callback.hpp"
 #include "core/rocpd/data_processor.hpp"
 #include "core/timemory.hpp"
 #include "core/trace_cache/cache_manager.hpp"
@@ -37,7 +39,7 @@
 #include "library/components/mpi_gotcha.hpp"
 #include "library/components/numa_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"
-#include "library/components/shmem_gotcha.hpp"
+#include "library/components/shmem_gotcha_policy.hpp"
 #include "library/components/ucx_gotcha.hpp"
 #include "library/components/vaapi_gotcha.hpp"
 #include "library/coverage.hpp"
@@ -110,7 +112,7 @@ auto               _timemory_manager  = tim::manager::instance();
 auto               _timemory_settings = tim::settings::shared_instance();
 
 void
-set_metadata_process_start_timestamp(int64_t _ts)
+set_metadata_process_start_timestamp(std::int64_t _ts)
 {
     auto process_info  = trace_cache::get_metadata_registry().get_process_info();
     process_info.start = _ts;
@@ -118,7 +120,7 @@ set_metadata_process_start_timestamp(int64_t _ts)
 }
 
 void
-set_metadata_process_end_timestamp(int64_t _ts)
+set_metadata_process_end_timestamp(std::int64_t _ts)
 {
     auto process_info = trace_cache::get_metadata_registry().get_process_info();
     process_info.end  = _ts;
@@ -146,7 +148,7 @@ escape_quotes(std::string str)
 }
 
 bool
-ensure_initialization(bool _offset, int64_t _glob_n, int64_t _offset_n)
+ensure_initialization(bool _offset, std::int64_t _glob_n, std::int64_t _offset_n)
 {
     auto _exit_info = component::exit_gotcha::get_exit_info();
     if(_exit_info.is_known && _exit_info.exit_code != EXIT_SUCCESS) return _offset;
@@ -198,14 +200,13 @@ ensure_finalization(bool _static_init = false)
     const auto& _tid  = _info->index_data;
     if(_tid)
     {
-        if(get_is_continuous_integration() && _tid->sequent_value != threading::get_id())
+        if(_tid->sequent_value != threading::get_id())
         {
             throw std::runtime_error(fmt::format("Error! internal tid != {} :: {}",
                                                  threading::get_id(),
                                                  _tid->sequent_value));
         }
-        if(get_is_continuous_integration() &&
-           _tid->system_value != threading::get_sys_tid())
+        if(_tid->system_value != threading::get_sys_tid())
         {
             throw std::runtime_error(fmt::format("Error! system tid != {} :: {}",
                                                  threading::get_sys_tid(),
@@ -223,7 +224,7 @@ ensure_finalization(bool _static_init = false)
     if(!tim::get_shared_ptr_pair_callback())
     {
         tim::get_shared_ptr_pair_callback() =
-            new tim::shared_ptr_pair_callback_t{ [](int64_t _n) {
+            new tim::shared_ptr_pair_callback_t{ [](std::int64_t _n) {
                 if(_n == 0) rocprofsys_finalize_hidden();
             } };
     }
@@ -251,7 +252,11 @@ struct fini_bundle
 {
     using data_type = std::tuple<Tp...>;
 
-    ROCPROFSYS_DEFAULT_OBJECT(fini_bundle)
+    fini_bundle()                                  = default;
+    fini_bundle(const fini_bundle&)                = default;
+    fini_bundle(fini_bundle&&) noexcept            = default;
+    fini_bundle& operator=(const fini_bundle&)     = default;
+    fini_bundle& operator=(fini_bundle&&) noexcept = default;
 
     fini_bundle(std::string_view _label)
     : m_label{ _label }
@@ -501,7 +506,7 @@ rocprofsys_init_library_hidden()
         LOG_DEBUG("State is {}...", std::to_string(get_state()));
     }
 
-    if(get_is_continuous_integration() && get_state() != State::PreInit)
+    if(get_state() != State::PreInit)
     {
         throw std::runtime_error(
             fmt::format("State is not PreInit :: {}", std::to_string(get_state())));
@@ -528,7 +533,7 @@ rocprofsys_init_library_hidden()
 
     set_state(State::Init);
 
-    if(get_is_continuous_integration() && get_state() != State::Init)
+    if(get_state() != State::Init)
     {
         throw std::runtime_error(fmt::format("set_state(State::Init) failed. state is {}",
                                              std::to_string(get_state())));
@@ -561,11 +566,6 @@ rocprofsys_init_tooling_hidden(void)
         rocprofsys_init_library_hidden();
         return false;
     }
-
-    dynamic_library _amdhip64{ "ROCPROFSYS_ROCTRACER_LIBAMDHIP64",
-                               find_library_path("libamdhip64.so",
-                                                 { "ROCPROFSYS_ROCM_PATH", "ROCM_PATH" },
-                                                 { ROCPROFSYS_DEFAULT_ROCM_PATH }) };
 
     auto _debug_init = get_debug_init();
 
@@ -825,7 +825,7 @@ rocprofsys_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _
     }
 
     tracing::get_finalization_functions().emplace_back([_argv0_c]() {
-        if(get_is_continuous_integration() && get_state() != State::Active)
+        if(get_state() != State::Active)
         {
             throw std::runtime_error(
                 fmt::format("Finalizer function for popping main invoked in non-active "
@@ -1025,6 +1025,12 @@ rocprofsys_finalize_hidden(void)
         component::vaapi_gotcha::shutdown();
     }
 
+    if(get_use_process_sampling())
+    {
+        LOG_DEBUG("Shutting down background sampler...");
+        process_sampler::shutdown();
+    }
+
     LOG_DEBUG("Shutting down ROCm...");
     rocprofiler_sdk::shutdown();
 
@@ -1067,12 +1073,6 @@ rocprofsys_finalize_hidden(void)
         LOG_DEBUG("Shutting down miscellaneous gotchas...");
         get_preinit_bundle()->stop();
         component::mpi_gotcha::shutdown();
-    }
-
-    if(get_use_process_sampling())
-    {
-        LOG_DEBUG("Shutting down background sampler...");
-        process_sampler::shutdown();
     }
 
     if(get_use_causal())
@@ -1173,7 +1173,20 @@ rocprofsys_finalize_hidden(void)
     {
         auto& _manager = rocprofsys::trace_cache::cache_manager::get_instance();
         _manager.shutdown();
-        _manager.post_process_bulk(_output_registry);
+
+        rocprofsys::progress::bar_options _bar_opts;
+        _bar_opts.verbose = config::get_verbose();
+
+        rocprofsys::progress::tracker _tracker{ [_bar_opts](std::string   _label,
+                                                            std::uint64_t _total) {
+            auto                      _bar = std::make_shared<rocprofsys::progress::bar>(std::move(_label),
+                                                                                         _total, _bar_opts);
+            return rocprofsys::progress::progress_callback{ [_bar](std::uint64_t _delta) {
+                _bar->on_advance(_delta);
+            } };
+        } };
+
+        _manager.post_process_bulk(_output_registry, _tracker);
     }
 
     if(_timemory_manager && _timemory_manager != nullptr)
@@ -1250,7 +1263,7 @@ rocprofsys_finalize_hidden(void)
                                              get_perfetto_output_filename()));
     }
 
-    if(get_is_continuous_integration() && _push_count > _pop_count &&
+    if(_push_count > _pop_count &&
        !get_env<bool>("ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK", false, false))
     {
         throw std::runtime_error(fmt::format(
@@ -1289,6 +1302,7 @@ rocprofsys_reset_for_reattach_hidden(void)
     rocprofsys_finalization_done.store(false);
     rocprofsys_init_library_done.store(false);
     rocprofsys_init_tooling_done.store(0);
+    ::rocprofsys::reset_database_path_memo();
     ::rocprofsys::reset_state();
 }
 

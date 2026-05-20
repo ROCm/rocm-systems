@@ -15,9 +15,12 @@ This directory contains NAS Parallel Benchmarks (NPB) implemented with OpenMP th
 - `target/main.cpp` - OpenMP target offloading example demonstrating GPU computation via `#pragma omp target`.
 - `target/library.cpp` - Companion library for target offloading tests.
 
-### OpenMP Validation and Verification (ompvv)
+### OpenMP Fortran Host and Offload Programs
 
-- `external/ompvv/` - Git submodule containing the [OpenMP V&V](https://github.com/OpenMP-Validation-and-Verification/OpenMP_VV) test suite for verifying OpenMP offloading correctness. Initialize with `git submodule update --init`.
+- `fortran/host.f90` - OpenMP host example that uses two CPU threads to update an integer array in round-robin order.
+- `fortran/offload.f90` - OpenMP target offload example that launches a GPU target region to transpose a matrix.
+
+These Fortran examples require `amdflang` version 20 or newer.
 
 ## Prerequisites
 
@@ -43,7 +46,7 @@ cmake --build <build_dir> --target openmp-cg openmp-lu
 **Targets:**
 
 | Target | Description |
-|--------|-------------|
+| -------- | ------------- |
 | `openmp-cg` | NAS Conjugate Gradient benchmark |
 | `openmp-lu` | NAS LU Gauss-Seidel benchmark |
 
@@ -63,7 +66,7 @@ export OMP_NUM_THREADS=4
 **Recommended OpenMP settings:**
 
 | Variable | Value | Purpose |
-|----------|-------|---------|
+| ---------- | ------- | --------- |
 | `OMP_NUM_THREADS` | `2`-`N` | Number of OpenMP threads |
 | `OMP_PROC_BIND` | `spread` | Thread placement policy |
 | `OMP_PLACES` | `threads` | Thread affinity granularity |
@@ -77,7 +80,7 @@ OMP_NUM_THREADS=4 rocprof-sys-run -- ./openmp-cg
 ### Recommended Configuration
 
 | Variable | Value | Purpose |
-|----------|-------|---------|
+| ---------- | ------- | --------- |
 | `ROCPROFSYS_TRACE` | `true` | Generate Perfetto trace with OpenMP regions |
 | `ROCPROFSYS_PROFILE` | `true` | Generate call-stack profile |
 | `ROCPROFSYS_USE_SAMPLING` | `ON` | Enable statistical sampling |

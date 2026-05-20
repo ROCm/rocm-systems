@@ -33,18 +33,21 @@ def fork_env() -> dict[str, str]:
 @pytest.mark.parametrize(
     "mode",
     [
-        "baseline",
-        "sampling",
-        "binary_rewrite",
-        "sys_run",
+        pytest.param("baseline", marks=pytest.mark.rocm),
+        pytest.param("sampling", marks=pytest.mark.rocm),
+        pytest.param("binary_rewrite", marks=pytest.mark.rocm),
+        pytest.param("sys_run", marks=pytest.mark.rocm),
         pytest.param("runtime_instrument", marks=pytest.mark.slow),
     ],
 )
 @pytest.mark.parametrize(
     "target",
     [
-        pytest.param("fork-example", id="example"),
-        pytest.param("hipMallocConcurrencyMproc", marks=pytest.mark.gpu),
+        pytest.param("fork-example", id=""),
+        pytest.param(
+            "hipMallocConcurrencyMproc",
+            marks=[pytest.mark.gpu, pytest.mark.rocm],
+        ),
     ],
 )
 class TestFork(RocprofsysTest):

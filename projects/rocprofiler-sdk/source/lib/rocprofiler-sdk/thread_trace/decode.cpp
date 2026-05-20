@@ -199,7 +199,7 @@ isa_callback(char*                                 isa_instruction,
 
     } catch(std::exception& e)
     {
-        ROCP_CI_LOG(INFO) << pc.code_object_id << ":" << pc.address << ' ' << e.what();
+        ROCP_INFO << pc.code_object_id << ":" << pc.address << ' ' << e.what();
         return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR;
     }
     return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;

@@ -12,7 +12,7 @@ You review documentation, comments, help text, and docstrings for the amd-smi pr
 
 ## Project Layout
 
-C/C++ → `src/`, `include/amd_smi/` | Python → `py-interface/`, `amdsmi_cli/` | Docs → `docs/`
+Project structure and API cascade path are stored in repo memories.
 
 ## Your Job
 
@@ -20,7 +20,8 @@ C/C++ → `src/`, `include/amd_smi/` | Python → `py-interface/`, `amdsmi_cli/`
 2. Verify CLI help text (`amdsmi_parser.py`) is accurate and complete
 3. Check that comments explain *why*, not *what*
 4. Identify stale or misleading docs/comments in changed code
-5. Verify API renames cascade to docs: header → C impl → wrapper → interface → CLI → docs
+5. Verify docs are updated when APIs are renamed or added (architecture subagent owns the full cascade — you only check the docs leg: CLI help text, docstrings, `docs/` content)
+6. **Load `changelog-automation` skill** — check `CHANGELOG.md` is updated for user-visible changes
 
 ## Severity
 

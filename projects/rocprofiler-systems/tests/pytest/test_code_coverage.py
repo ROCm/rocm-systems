@@ -17,7 +17,7 @@ pytestmark = [pytest.mark.code_coverage]
 # =============================================================================
 
 
-@pytest.mark.xdist_group(name="python_code_coverage")
+@pytest.mark.class_name("code-coverage")
 class TestCodeCoverage(RocprofsysTest):
     def get_rewrite_args(self, type) -> list[str]:
         ret = ["-e", "-v", "2", "--min-instructions=4", "-E", "^std::"]
@@ -58,11 +58,12 @@ class TestCodeCoverage(RocprofsysTest):
             return ["code coverage :: 66.67%"]
         return ["function coverage :: 66.67%"]
 
+    @pytest.mark.preserve("coverage.json")
     @pytest.mark.parametrize("mode", ["binary_rewrite", "runtime_instrument"])
     @pytest.mark.parametrize(
         "type", ["base", "base_hybrid", "basic_blocks", "basic_blocks_hybrid"]
     )
-    def test(self, mode, type, get_test_num_threads, collect_output_path):
+    def test(self, mode, type, get_test_num_threads):
         run_args = ["10", str(get_test_num_threads), "1000"]
         result = self.run_test(
             mode,
@@ -77,22 +78,41 @@ class TestCodeCoverage(RocprofsysTest):
             pass_regex=self.get_pass_regex(type),
         )
 
-        # Store the output path for the test_python test below
-        key = None
-        if type == "basic_blocks" and mode == "binary_rewrite":
-            key = "basic_blocks_coverage_brw"
-        elif type == "basic_blocks" and mode == "runtime_instrument":
-            key = "basic_blocks_hybrid_coverage_ri"
-        if key:
-            collect_output_path.store(key, result.output_dir)
+        if (type == "basic_blocks" and mode == "binary_rewrite") or (
+            type == "basic_blocks_hybrid" and mode == "runtime_instrument"
+        ):
+            self.assert_file_exists(
+                result.output_dir / "coverage.json",
+                subtest_name="Coverage JSON file existence validation",
+            )
 
+    @pytest.mark.timeout(120)
+    @pytest.mark.depends_on(
+        "code-coverage-basic-blocks-binary-rewrite",
+        "code-coverage-basic-blocks-hybrid-runtime-instrument",
+    )
     @pytest.mark.python_versions
-    def test_python(self, python_version, collect_output_path):
+    def test_python(self, python_version, test_output_base):
         # Get the coverage paths from the previously ran tests
-        brw_coverage_path = collect_output_path.get("basic_blocks_coverage_brw")
-        ri_coverage_path = collect_output_path.get("basic_blocks_hybrid_coverage_ri")
-        if not brw_coverage_path or not ri_coverage_path:
-            pytest.skip("coverage paths not found")
+        brw_coverage_path = (
+            test_output_base
+            / "code-coverage-basic-blocks-binary-rewrite"
+            / "coverage.json"
+        )
+        ri_coverage_path = (
+            test_output_base
+            / "code-coverage-basic-blocks-hybrid-runtime-instrument"
+            / "coverage.json"
+        )
+        missing = []
+        if not brw_coverage_path.exists():
+            missing.append("code-coverage-basic-blocks-binary-rewrite/coverage.json")
+        if not ri_coverage_path.exists():
+            missing.append(
+                "code-coverage-basic-blocks-hybrid-runtime-instrument/coverage.json"
+            )
+        if missing:
+            pytest.skip(f"Missing output from dependency tests: {', '.join(missing)}")
 
         run_args = [
             "-i",
@@ -106,6 +126,5 @@ class TestCodeCoverage(RocprofsysTest):
             target="code-coverage.py",
             run_args=run_args,
             python_version=python_version,
-            timeout=120,
         )
         self.assert_regex(result)

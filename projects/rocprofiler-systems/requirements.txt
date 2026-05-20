@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # Requirements for rocprofiler-systems
 #
 # Install with:
@@ -9,8 +12,6 @@
 # Core testing framework
 pytest>=7.4.0
 pytest-subtests>=0.10.0
-pytest-timeout>=2.0.0
-pytest-xdist>=3.0.0
 
 # Optional
 pytest-cov>=4.0.0

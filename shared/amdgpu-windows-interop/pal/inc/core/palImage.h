@@ -129,7 +129,7 @@ enum class MetadataSharingLevel : uint32
 /// Specifies the type of PRT map image being created.
 enum class PrtMapType : uint32
 {
-    None            = 0, ///< This is not an auxillary image used for PRT plus functionality.
+    None            = 0, ///< This is not an auxiliary image used for PRT plus functionality.
     Residency       = 1, ///< Image data is really a low-resolution map containing the finest populated LOD
                          ///  for a particular UV space region.
     SamplingStatus  = 2, ///< Indicates the validity of a given tile on a per-mip level basis.
@@ -207,7 +207,7 @@ union ImageCreateFlags
         uint32 sampleLocsAlwaysKnown   :  1; ///< Sample pattern is always known in client driver for MSAA depth image.
 #if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 963
         uint32 fullResolveDstOnly      :  1; ///< Indicates any ICmdBuffer::CmdResolveImage using this image as a
-                                             ///  desination will overwrite the entire image (width and height of
+                                             ///  designation will overwrite the entire image (width and height of
                                              ///  resolve region is same as width and height of resolve dst).
 #else
         uint32 reserved963             :  1;
@@ -621,7 +621,7 @@ struct ImageLayout
 /**
 ****************************************************************************************************
 * @brief
-*   Enumerates swizzle modes useable on any supported GPU.
+*   Enumerates swizzle modes usable on any supported GPU.
 * @note
 * For details please check _AddrSwizzleMode
 *

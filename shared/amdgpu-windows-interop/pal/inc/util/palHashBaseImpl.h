@@ -695,7 +695,7 @@ Result HashBase<Key, Entry, Allocator, HashFunc, EqualFunc, AllocFunc, GroupSize
 }
 
 // =====================================================================================================================
-// Returns pointer to the next group of the spcified group.
+// Returns pointer to the next group of the specified group.
 template<
     typename Key,
     typename Entry,

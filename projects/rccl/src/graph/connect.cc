@@ -13,32 +13,123 @@
 #include "rings.h"
 #include "topo.h"
 
+#include <stdio.h>      // For NULL and
+#include <stdlib.h>     // For malloc(), calloc(), and free()
+#include <stdint.h>     // For uint8_t and other fixed-width types
+#include <string.h>     // For memset()
+#include <limits.h>     // For INT_MAX
+
 
 /******************************************************************/
 /********************* Internode connection ***********************/
 /******************************************************************/
-
-ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph** graphs, struct ncclTopoRanks* topoRanks) {
+/**
+ * ncclTopoPreset: Maps high-level topology graphs to local channel resources.
+ *
+ * This function bridges the gap between hardware discovery and active communication.
+ * It populates the local rank's neighbor info (prev/next for Rings, up/down for Trees)
+ * for every communication channel based on pre-calculated optimal paths.
+ *
+ * PRE-CONDITIONS & ASSUMPTIONS:
+ * 1. Topology Detection: The hardware (PCIe/NVLink) must already be scanned into comm->topo.
+ * 2. Graph Calculation: graphs[algo]->intra must be pre-populated. This function assumes 
+ * the 'intra' array contains local global ranks in their optimal traversal order, 
+ * indexed by [channel * localRanks + i].
+ * 3. Rank Identity: comm->rank must be set. The function "finds" itself in the intra 
+ * list to identify its immediate neighbors.
+ * 4. Resource Allocation: comm->channels must be allocated with enough space for 
+ * channel duplication (typically 2 * nChannels).
+ *
+ * LOGIC DETAILS:
+ * - Intra-node Mapping: Iterates through local GPUs to identify neighbors for Ring, 
+ * Tree, and CollNet algorithms.
+ * - Channel Duplication (Factor of 2): Clones the first N channels into the next N 
+ * slots. This maximizes bandwidth by utilizing multiple SMs and hardware paths 
+ * for the same logical operation, pushing utilization closer to physical limits 
+ * without over-congesting hardware command queues.
+ * - NVLS Setup: Identifies unique "Head" ranks for NVLink Switch groups to coordinate 
+ * multi-GPU data movement.
+ *
+ * CAVEATS:
+ * - Unbalanced Ranks: Assumes 'localRanks' is consistent with the graph's 'intra' layout.
+ * - Tree Indexing: If localRanks < 2, ensure treeIntra indices don't overflow.
+ * - Scale: Logic is O(nChannels * localRanks).
+ *
+ * @param comm     [in,out] The local communicator instance.
+ * @param graphs   [in,out] Array of pre-computed topology templates (Ring, Tree, NVLS, etc.).
+ * @param topoRanks[out] Scratchpad structure to store identified neighbor ranks.
+ * @return          ncclSuccess on successful mapping, or internal error on failure.
+ */
+ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graphs)[NCCL_NUM_ALGORITHMS], struct ncclTopoRanks* topoRanks) {
+  // --- NULL Pointer & Basic State Checks ---
+  if (comm == NULL || graphs == NULL || topoRanks == NULL) return ncclInvalidArgument;
+  if (comm->topo == NULL) {
+    WARN("TopoPreset: Communicator state is incomplete");
+    return ncclInternalError;
+  }
+  
   int rank = comm->rank;
   int localRanks = comm->topo->nodes[GPU].count;
   int nChannels = comm->nChannels;
 
+  // --- Bounds & Resource Checks ---
+  if (nChannels > MAXCHANNELS) {
+    WARN("TopoPreset: nChannels (%d) exceeds MAXCHANNELS (%d)", nChannels, MAXCHANNELS);
+    return ncclInvalidUsage;
+  }
+
+  // Ensure mandatory algorithms are present in the graphs array
+  if (!graphs[NCCL_ALGO_RING] || !graphs[NCCL_ALGO_TREE]) {
+    WARN("TopoPreset: Required topology graphs (Ring/Tree) are missing");
+    return ncclInternalError;
+  }
+
+  // ---Pre-validation of Rank Presence ---
+  // We check the first channel of the Ring to ensure this rank is even part of the plan
+  bool rankFound = false;
+  int* firstRing = graphs[NCCL_ALGO_RING]->intra;
+  for (int i = 0; i < localRanks; i++) {
+    if (firstRing[i] == rank) { rankFound = true; break; }
+  }
+  if (!rankFound) {
+    WARN("TopoPreset: Local rank %d not found in intra-node graph. Topology misconfiguration.", rank);
+    return ncclInternalError;
+  }
+
   topoRanks->crossNicRing = graphs[NCCL_ALGO_RING]->crossNic;
   topoRanks->nvlsHeadNum = 0;
-  for (int c=0; c<nChannels; c++) {
+
+  // ---- POISONING / INITIALIZATION ---
+  // set all the uninitialized topoRanks rank values to -1 , 0 from calloc is ambiguous with rank 0
+  for (int c=0; c< MAXCHANNELS; c++) {
+    topoRanks->ringNext[c] = topoRanks->ringPrev[c] = -1;
+    topoRanks->ringSend[c] = topoRanks->ringRecv[c] = -1;
+    topoRanks->treeToParent[c] = -1;
+    topoRanks->treeToChild0[c] = -1;
+    topoRanks->treeToChild1[c] = -1;
+    topoRanks->nvlsHeads[c] = -1; // Align NVLS with Tree/Ring sentinels
+
     struct ncclChannel* channel = comm->channels+c;
     channel->ring.prev = channel->ring.next = -1;
     channel->tree.up = -1;
     channel->collnetChain.up = -1;
-    for (int i=0; i<NCCL_MAX_TREE_ARITY; i++) channel->tree.down[i] = -1;
-    for (int i=0; i<NCCL_MAX_TREE_ARITY; i++) channel->collnetChain.down[i] = -1;
+    for (int i=0; i<NCCL_MAX_TREE_ARITY; i++)  {
+      channel->tree.down[i] = -1;
+      channel->collnetChain.down[i] = -1;
+    }
     channel->collnetDirect.out = -1;
     channel->collnetDirect.headRank = -1;
     channel->collnetDirect.nHeads = 0;
     channel->collnetDirect.shift = 0;
     for (int i=0; i<NCCL_MAX_DIRECT_ARITY+1; i++) channel->collnetDirect.heads[i] = -1;
-    for (int i=0; i<NCCL_MAX_DIRECT_ARITY; i++) channel->collnetDirect.up[i] = -1;
-    for (int i=0; i<NCCL_MAX_DIRECT_ARITY; i++) channel->collnetDirect.down[i] = -1;
+    for (int i=0; i<NCCL_MAX_DIRECT_ARITY; i++)  {
+      channel->collnetDirect.up[i] = -1;
+      channel->collnetDirect.down[i] = -1;
+    } 
+  }
+
+  for (int c=0; c<nChannels; c++) {
+    struct ncclChannel* channel = comm->channels+c;
 
     int* ringIntra = graphs[NCCL_ALGO_RING]->intra+c*localRanks;
     int* treeIntra = graphs[NCCL_ALGO_TREE]->intra+c*localRanks;
@@ -53,18 +144,18 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph** graphs
       }
       if (treeIntra[i] == rank) {
         int parentIndex = 0;
-        int child0Index = graphs[NCCL_ALGO_TREE]->pattern == NCCL_TOPO_PATTERN_TREE ? 0 : 1;
-        int child1Index = graphs[NCCL_ALGO_TREE]->pattern == NCCL_TOPO_PATTERN_SPLIT_TREE ? 1 : 0;
+        int child0Index = ( graphs[NCCL_ALGO_TREE]->pattern == NCCL_TOPO_PATTERN_TREE ) ? 0 : 1;
+        int child1Index = ( graphs[NCCL_ALGO_TREE]->pattern == NCCL_TOPO_PATTERN_SPLIT_TREE ) ? 1 : 0;
 
         topoRanks->treeToParent[c] = treeIntra[parentIndex];
         topoRanks->treeToChild0[c] = treeIntra[child0Index];
         topoRanks->treeToChild1[c] = treeIntra[child1Index];
-        channel->tree.up         = i == 0 ? -1 : treeIntra[i-1];
-        channel->tree.down[0]    = i == localRanks-1 ? -1 : treeIntra[i+1];
+        channel->tree.up         = (i == 0) ? -1 : treeIntra[i-1];
+        channel->tree.down[0]    = (i == localRanks-1) ? -1 : treeIntra[i+1];
       }
       if (collNetIntra[i] == rank) {
-        channel->collnetChain.up      = i == 0 ? comm->nRanks : collNetIntra[i-1];
-        channel->collnetChain.down[0] = i == localRanks-1 ? -1 : collNetIntra[i+1];
+        channel->collnetChain.up      = (i == 0) ? comm->nRanks : collNetIntra[i-1];
+        channel->collnetChain.down[0] = (i == localRanks-1) ? -1 : collNetIntra[i+1];
       }
     }
   }
@@ -213,6 +304,225 @@ ncclResult_t ncclTreeBasePostset(struct ncclComm* comm,
   return ncclSuccess;
 }
 
+static void generateWalecki(int nNodes, int channel, int* order) {
+  if (nNodes <= 0 || !order) return;
+
+  // For Walecki, if N is even, we treat it as (N-1) nodes + 1 fixed pivot
+  int m = (nNodes % 2) ? nNodes : (nNodes - 1) ;
+  int left = 0;
+  int right = m - 1;
+
+  for (int i = 0; i < m; i++) {
+    int val;
+    if (i % 2 == 0) {
+      val = (left + channel) % m;
+      left++;
+    } else {
+      val = (right + channel) % m;
+      right--;
+    }
+    order[i] = val;
+  }
+  if( nNodes % 2 == 0) {
+    order[nNodes - 1] = nNodes - 1;
+  }
+}
+
+/**
+ * This function takes number of nodes in a fully connected graph and number target channels, and generates upto nChannel Hamiltonian cycles 
+ * In this function we initially generate Walecki Construction depending on (nNodes mod 2), upto nNodes / 2 channels. Then, based on edge usage
+ * heuristic, we construct rest of the cycles.
+ * 
+ * Assumptions : nodeOrder is pointer to flattened 2D array of size nNodes*nChannels*sizeof(int), and is pre-allocated before invoking this function.
+ */
+static ncclResult_t generateGreedyNodeOrder(int nNodes, uint8_t nChannels, int* nodeOrder) {
+    // --- SAFETY CHECK: Guard against invalid cluster sizes ---
+    if (nNodes <= 0 || nChannels <= 0 || nodeOrder == NULL) return ncclInvalidArgument;
+    // Handle degenerate cases (N=1, N=2) where Hamiltonian diversity is impossible
+    if (nNodes < 3) {
+        for (int c = 0; c < nChannels; c++) {
+            for (int n = 0; n < nNodes; n++) {
+                nodeOrder[c * nNodes + n] = n;
+            }
+        }
+        return ncclSuccess;
+    }
+
+    if (nChannels <= (nNodes / 2)) {
+        for (int c = 0; c < nChannels; c++) {
+            generateWalecki(nNodes, c, &nodeOrder[c * nNodes]);
+        }
+        return ncclSuccess;
+    }
+
+    // Choose to augment with Greedy approach only if nNodes/2 channels are not sufficient. Most systems 
+    // do not execute below code as we have MAXCHANNELS = 128.
+    // Optimization: uint8_t is sufficient for nChannels <= 255, In RCCL we limit it to 128 channels now. 
+    uint8_t* edgeUsage = (uint8_t*)calloc(nNodes * nNodes, sizeof(uint8_t));
+    uint8_t* visited = (uint8_t*)malloc(nNodes * sizeof(uint8_t));
+
+    if (!edgeUsage || !visited) {
+        if (edgeUsage) free(edgeUsage);
+        if (visited) free(visited);
+        WARN("Unable to allocate memory with malloc/calloc");
+        return ncclInternalError;
+    }
+
+    int startNode = 0;
+    for (int c = 0; c < nChannels; c++) {
+        if (c < nNodes / 2) {
+            generateWalecki(nNodes, c, &nodeOrder[c * nNodes]);
+            for (int i = 0; i < nNodes; i++) {
+                int u = nodeOrder[c * nNodes + i];
+                int v = nodeOrder[c * nNodes + ((i + 1) % nNodes)];
+                edgeUsage[u * nNodes + v]++;
+            }
+            continue;
+        }
+        //Set all non-visited
+        memset(visited, 0, nNodes * sizeof(uint8_t));
+        // Only to reduce the pressure on starting node 
+        startNode = (startNode + 1) % nNodes;
+        int curr = startNode;
+        nodeOrder[c * nNodes + 0] = curr;
+        visited[curr] = 1;
+
+        for (int step = 1; step < nNodes; step++) {
+            int bestNext = -1;
+            int minCost = INT_MAX;
+
+            for (int next = 0; next < nNodes; next++) {
+                if (!visited[next]) {
+                    int cost = (int)edgeUsage[curr * nNodes + next];
+
+                    // Without this check, a greedy algorithm might pick a "cheap" bestNext for the second-to-last
+                    // node, but that node might have a very "expensive" (heavily used) link back to the start.
+                    if (step == nNodes - 1) {
+                        cost += (int)edgeUsage[next * nNodes + startNode];
+                    }
+
+                    if (cost < minCost) {
+                        minCost = cost;
+                        bestNext = next;
+                    }
+                }
+            }
+            nodeOrder[c * nNodes + step] = bestNext;
+            visited[bestNext] = 1;
+            edgeUsage[curr * nNodes + bestNext]++;
+            curr = bestNext;
+        }
+        edgeUsage[curr * nNodes + startNode]++;
+    }
+    free(visited);
+    free(edgeUsage);
+    return ncclSuccess;
+}
+
+/**
+ * This is a helper function for debug logs
+ * 
+ * @param comm     [in] ncclComm, read only variable 
+ * @param ringRecv [in] integer array of size >= MAXCHANNELS*nNodes
+ * @param ringSend [in] integer array of size >= MAXCHANNELS*nNodes
+ */
+static  ncclResult_t printRecvSendLocalRanks(const struct ncclComm* comm, const int* ringRecv, const int* ringSend) {
+  int nChannels = comm->nChannels;
+  int nNodes = comm->nNodes;
+  char buff[2048] = "";
+  int offset = 0;
+  int inc;
+  int numChannels = (nChannels > MAXCHANNELS/2) ? 2 * nChannels : nChannels;
+
+  for (int c = 0; c < numChannels; c++) {
+    sprintf(buff + offset, "     %02d%n", c, &inc);
+    offset += inc;
+  }
+  INFO(NCCL_GRAPH, "[RINGS] %s", buff);
+
+  for (int n = 0; n < nNodes; n++) {
+    offset = 0;
+    for (int c = 0; c < nChannels; c++) {
+      int recvRank = comm->rankToLocalRank[ringRecv[c*comm->nNodes+n]];
+      int sendRank = comm->rankToLocalRank[ringSend[c*comm->nNodes+n]];
+      sprintf(buff + offset, " %02d->%02d%n",  recvRank, sendRank, &inc);
+      offset += inc;
+    }
+    INFO(NCCL_GRAPH, "[RINGS] %s", buff);
+  }
+  return ncclSuccess;
+}
+
+/**
+ * connectRingsLoadBalanced : Assumes every node has entry and exit ranks (ringRecv[channel][node] and ringSend[channel][node]) 
+ * among all the ranks its holds i.e local ranks. This function internally constructs Walecki + heuristic edge usage 
+ * based Hamiltonian cycles ( where node in the graph correspond to physical nodes )
+ * For example for a 4 node system with 6 channels, we create [[0,2,1,3],[1,0,2,3],[1,2,0,3],[2,0,1,3],[3,0,1,2],[0,3,2,1]] as rings
+ * Each of the edge is used twice. This roughly gives Good network load balancing, assuming that all the nodes is P2P connected (via Switch)
+ * Iterates over all nodes [0 to nNodes-1] 
+ */
+
+static ncclResult_t connectRingsLoadBalanced(struct ncclComm* comm, int* ringRecv, int* ringSend, int* ringPrev, int* ringNext) {
+  int nChannels = comm->nChannels;
+  int nNodes = comm->nNodes;
+  int nRanks = comm->nRanks;
+  if( nChannels <= 0 || nNodes <= 0 || nRanks <= 0 ) return ncclInvalidArgument;
+
+  // 1. Allocate flat memory for nodeOrder [nChannels * nNodes]
+  int* nodeOrder = nullptr;
+  NCCLCHECK(ncclCalloc(&nodeOrder, nChannels * nNodes));
+
+  // Note: generateGreedyNodeOrder needs to handle the flat indexing (c * nNodes + i)
+  if ( nChannels > MAXCHANNELS || nChannels >= 255 ) {
+    WARN(" generateGreedyNodeOrder is implemented with an assumption nChannels [=%d] < 255 as an optimization. Update the implementaion to accept uint16/32 for nChannels ",nChannels );
+  }
+
+  // 2. Populate the Diverse/Greedy Node Order
+  generateGreedyNodeOrder(nNodes, nChannels, nodeOrder);
+
+  for (int c = 0; c < nChannels; c++) {
+    // Correct offsets for global arrays
+    int* c_recv = ringRecv + c * nNodes;
+    int* c_send = ringSend + c * nNodes;
+    int* c_prev = ringPrev + c * nRanks;
+    int* c_next = ringNext + c * nRanks;
+    
+    // Current channel's node sequence
+    int* c_order = nodeOrder + (c * nNodes);
+
+    for (int i = 0; i < nNodes; i++) {
+      // Find the physical nodes in the logical ring sequence
+      int pNodeIdx = c_order[(i - 1 + nNodes) % nNodes]; // Physical Prev Node ID
+      int cNodeIdx = c_order[i];                         // Physical Curr Node ID
+      int nNodeIdx = c_order[(i + 1) % nNodes];          // Physical Next Node ID
+
+      // Link: Previous Node's EXIT rank -> Current Node's ENTRY rank
+      // recv[cNodeIdx] gives the rank on the current node that receives from outside
+      c_prev[c_recv[cNodeIdx]] = c_send[pNodeIdx];
+
+      // Link: Current Node's EXIT rank -> Next Node's ENTRY rank
+      c_next[c_send[cNodeIdx]] = c_recv[nNodeIdx];
+    }
+  }
+
+  // 3. Clean up internal allocation
+  free(nodeOrder);
+
+  // [RCCL] Print off the recv/send local ranks per node, per channel
+  if (comm->rank == 0)
+  {
+    printRecvSendLocalRanks(comm,ringRecv,ringSend);
+  }
+
+  return ncclSuccess;
+}
+
+/**
+ * connectRings: Assumes every node has entry and exit (ringRecv[channel][node] and ringSend[channel][node]) rank
+ * among all the ranks its holds i.e local ranks. This function assumes node i and ((i + 1) mod nNodes) as logically 
+ * adjacent and connects previous node exit -> current node entry  and current node exit to next node entry.
+ * Iterates over all nodes [0 to nNodes-1] 
+ */
 static ncclResult_t connectRings(struct ncclComm* comm, int* ringRecv, int* ringSend, int* ringPrev, int* ringNext) {
   int nChannels = comm->nChannels;
   int nNodes = comm->nNodes;
@@ -234,27 +544,7 @@ static ncclResult_t connectRings(struct ncclComm* comm, int* ringRecv, int* ring
   // [RCCL] Print off the recv/send local ranks per node, per channel
   if (comm->rank == 0)
   {
-    char buff[2048] = "";
-    int offset = 0;
-    int inc;
-    int numChannels = (nChannels > MAXCHANNELS/2) ? 2 * nChannels : nChannels;
-
-    for (int c = 0; c < numChannels; c++) {
-      sprintf(buff + offset, "     %02d%n", c, &inc);
-      offset += inc;
-    }
-    INFO(NCCL_GRAPH, "[RINGS] %s", buff);
-
-    for (int n = 0; n < nNodes; n++) {
-      offset = 0;
-      for (int c = 0; c < nChannels; c++) {
-        int recvRank = comm->rankToLocalRank[ringRecv[c*comm->nNodes+n]];
-        int sendRank = comm->rankToLocalRank[ringSend[c*comm->nNodes+n]];
-        sprintf(buff + offset, " %02d->%02d%n",  recvRank, sendRank, &inc);
-        offset += inc;
-      }
-      INFO(NCCL_GRAPH, "[RINGS] %s", buff);
-    }
+    printRecvSendLocalRanks(comm,ringRecv,ringSend);
   }
 
   return ncclSuccess;
@@ -705,6 +995,39 @@ ncclResult_t connectRailOptimizedTrees(struct ncclComm* comm, int* treeToParent,
   return ncclSuccess;
 }
 
+/**
+ * Check if search actually filled all requested channels
+ * It is expected that these structures are filled by individual ranks followed by bootstrap allgather.
+ * gfx1151 having 1-GPU/node communicating via ethernet is special case
+ * But call to this function is a safety net for all architectures, and is idempotent, This only 
+ * handles Ring and Trees
+ */ 
+static ncclResult_t repairMissingChannels(struct ncclTopoRanks** allTopoRanks, int nranks, int nChannels) {
+  for (int r = 0; r < nranks; r++) {
+    for (int c = 1; c < nChannels; c++) {
+      // 1. RING REPAIR: Handle uninitialized Ring data
+      // Check if current channel is 0 (uninitialized) but Channel 0 has data
+      if (allTopoRanks[r]->ringNext[c] == -1 && allTopoRanks[r]->ringPrev[c] == -1) {
+        allTopoRanks[r]->ringNext[c] = allTopoRanks[r]->ringNext[0];
+        allTopoRanks[r]->ringPrev[c] = allTopoRanks[r]->ringPrev[0];
+        allTopoRanks[r]->ringSend[c] = allTopoRanks[r]->ringSend[0];
+        allTopoRanks[r]->ringRecv[c] = allTopoRanks[r]->ringRecv[0];
+        INFO(NCCL_GRAPH, " ring graph copied from  channel 0 to %d  in repairMissingChannels", c);
+      }
+
+      // 2. TREE REPAIR: Trees use -1 as the 'None' sentinel
+      if (allTopoRanks[r]->treeToParent[c] == -1 && 
+          allTopoRanks[r]->treeToChild0[c] == -1) {
+        allTopoRanks[r]->treeToParent[c] = allTopoRanks[r]->treeToParent[0];
+        allTopoRanks[r]->treeToChild0[c] = allTopoRanks[r]->treeToChild0[0];
+        allTopoRanks[r]->treeToChild1[c] = allTopoRanks[r]->treeToChild1[0];
+        INFO(NCCL_GRAPH, " Tree graph copied from  channel 0 to %d in repairMissingChannels", c);
+      }
+    }
+  }
+  return ncclSuccess;
+}
+
 NCCL_PARAM(UnpackDoubleNChannels, "UNPACK_DOUBLE_NCHANNELS", 1);
 RCCL_PARAM(OutputTrees, "OUTPUT_TREES", 0);
 
@@ -736,18 +1059,21 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
   NCCLCHECKGOTO(ncclCalloc(&treeToChild0, nNodes*MAXCHANNELS), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&treeToChild1, nNodes*MAXCHANNELS), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&nvlsHeads, nNodes*MAXCHANNELS), ret, fail);
-
+  
+  NCCLCHECK(repairMissingChannels(allTopoRanks,nranks,nChannels));
   // Alternate rings to avoid crossing rails.
   // CrossNic values could be not the same on all nodes as it depends on the number of net devs and the NVLink bandwidth.
   // Therefore, it's only done if the rank obtained a solution with crossNic=2.
-  for (int r = 0; r < comm->nRanks; r++) {
-    if (allTopoRanks[r]->crossNicRing == 2 && (nChannels % 2) == 0 && (comm->rankToNode[r] % 2) == 1) {
-      // Exchange rings
-      for (int c=0; c<nChannels; c+=2) {
-        exchangeValues(allTopoRanks[r]->ringRecv+c, allTopoRanks[r]->ringRecv+(c^1));
-        exchangeValues(allTopoRanks[r]->ringSend+c, allTopoRanks[r]->ringSend+(c^1));
-        exchangeValues(allTopoRanks[r]->ringPrev+c, allTopoRanks[r]->ringPrev+(c^1));
-        exchangeValues(allTopoRanks[r]->ringNext+c, allTopoRanks[r]->ringNext+(c^1));
+  if ((nChannels % 2) == 0 && nChannels > 0) {
+    for (int r = 0; r < comm->nRanks; r++) {
+      if (allTopoRanks[r]->crossNicRing == 2 && (comm->rankToNode[r] % 2) == 1) {
+        // Exchange rings
+        for (int c=0; c<nChannels; c+=2) {
+          exchangeValues(allTopoRanks[r]->ringRecv+c, allTopoRanks[r]->ringRecv+(c^1));
+          exchangeValues(allTopoRanks[r]->ringSend+c, allTopoRanks[r]->ringSend+(c^1));
+          exchangeValues(allTopoRanks[r]->ringPrev+c, allTopoRanks[r]->ringPrev+(c^1));
+          exchangeValues(allTopoRanks[r]->ringNext+c, allTopoRanks[r]->ringNext+(c^1));
+        }
       }
     }
   }
@@ -779,9 +1105,18 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
       nvlsHeads[c * nNodes + n] = allTopoRanks[r]->nvlsHeads[c];
     }
   }
-
-  // Connect rings and trees. This should also duplicate the channels.
-  NCCLCHECK(connectRings(comm, ringRecv, ringSend, ringPrev, ringNext));
+ 
+  /**
+   * The following if/else assumes cluster is homogeneous w.r.t gfx arch
+   * Ideally All the ranks should have consensus on to graphs.
+   */
+  if ( IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1151") ) {
+    NCCLCHECK(connectRingsLoadBalanced(comm, ringRecv, ringSend, ringPrev, ringNext));
+  } else {
+    // Connect rings and trees. This should also duplicate the channels.
+    NCCLCHECK(connectRings(comm, ringRecv, ringSend, ringPrev, ringNext));
+  }
+  
 
   // [RCCL] Connect rail-optimized trees
   if (comm->topo->useRailOptimizedTrees) {
@@ -958,8 +1293,7 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
     comm->collChannels = std::min(comm->collChannels, comm->nChannels);
   }
 
-  // Create rings array and check all is fine
-  NCCLCHECKGOTO(ncclBuildRings(nChannels, rings, comm->rank, comm->nRanks, ringPrev, ringNext), ret, fail);
+  NCCLCHECKGOTO(rcclBuildRings(nChannels, rings, comm->rank, comm->nRanks, ringPrev, ringNext), ret, fail);
 
 exit:
   if (ringRecv) free(ringRecv);

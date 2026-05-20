@@ -158,9 +158,6 @@ void print_build_info(std::ostream& os) {
 
   print_entry(os, "Version", rocshmem::VERSION);
   print_entry(os, "Vendor String", ROCSHMEM_VENDOR_STRING);
-  print_entry(os, "Vendor Major Version", ROCSHMEM_VENDOR_MAJOR_VERSION);
-  print_entry(os, "Vendor Minor Version", ROCSHMEM_VENDOR_MINOR_VERSION);
-  print_entry(os, "Vendor Patch Version", ROCSHMEM_VENDOR_PATCH_VERSION);
   print_entry(os, "Git Hash", ROCSHMEM_GIT_HASH);
   print_entry(os, "Build Type", ROCSHMEM_BUILD_TYPE);
   print_entry(os, "Install Prefix", ROCSHMEM_INSTALL_PREFIX);

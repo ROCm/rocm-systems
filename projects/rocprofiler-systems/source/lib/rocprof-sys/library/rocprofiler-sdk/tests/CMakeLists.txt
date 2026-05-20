@@ -4,6 +4,7 @@
 set(rocprofiler_sdk_components_unit_tests_sources
     test_rccl_unit.cpp
     test_roctx_client.cpp
+    ${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys/library/rocprofiler-sdk/trace_control.cpp
 )
 
 add_library(
@@ -19,6 +20,8 @@ target_link_libraries(
         rocprofiler-systems::rocprofiler-systems-core
         rocprofiler-systems::rocprofiler-systems-interface-library
         rocprofiler-systems::rocprofiler-systems-timemory
+        rocprofiler-systems-common-library
+        rocprofiler-systems-logger
 )
 
 target_include_directories(

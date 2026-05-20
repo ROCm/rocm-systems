@@ -17,7 +17,6 @@ permissions:
   packages: read
 
 jobs:
-
   AIS_CI_Pre-check:
     outputs:
       changed_dockerfile: ${{ steps.ci-flags.outputs.changed_dockerfile }}
@@ -63,6 +62,20 @@ jobs:
       rocm_version: ${{ inputs.rocm_version }}
       upload_artifacts: true
 
+  build_and_test_cxx20:
+    # cancelled() needed. Otherwise success() implicitly added and fails if build_AIS_CI_image skipped.
+    if: ${{ !cancelled() && needs.build_AIS_CI_image.outputs.ci_image_build_satisfied == 'true' && inputs.platform != 'rocky8' }}
+    needs: [AIS_CI_Pre-check, build_AIS_CI_image]
+    uses: ./.github/workflows/hipfile-build.yml
+    with:
+      ci_image: ${{ needs.build_AIS_CI_image.outputs.ci_image }}
+      cxx_compiler: amdclang++
+      cxx_standard: 20
+      platform: ${{ inputs.platform }}
+      rocm_version: ${{ inputs.rocm_version }}
+      upload_artifacts: false
+      generate_coverage: false
+
   build_and_test_other_compilers:
     # Try building on other compilers, but keep as separate job.
     # Removes issues regarding matrix job overwriting outputs and
@@ -79,6 +92,19 @@ jobs:
     with:
       ci_image: ${{ needs.build_AIS_CI_image.outputs.ci_image }}
       cxx_compiler: ${{ matrix.cxx_compiler }}
+      platform: ${{ inputs.platform }}
+      rocm_version: ${{ inputs.rocm_version }}
+
+  python_bindings:
+    # cancelled() needed. Otherwise success() implicitly added and fails if the chained
+    # dependency build_AIS_CI_image is skipped.
+    if: ${{ !cancelled() && needs.build_and_test.result == 'success' }}
+    needs: [build_and_test]
+    uses: ./.github/workflows/hipfile-python-bindings.yml
+    with:
+      ais_hipfile_pkg_dev_filename: ${{ needs.build_and_test.outputs.ais_hipfile_pkg_dev_filename }}
+      ais_hipfile_pkg_filename: ${{ needs.build_and_test.outputs.ais_hipfile_pkg_filename }}
+      ci_image: ${{ needs.build_and_test.outputs.ci_image }}
       platform: ${{ inputs.platform }}
       rocm_version: ${{ inputs.rocm_version }}
 
@@ -100,6 +126,6 @@ jobs:
     needs: [AIS_CI_Pre-check, build_AIS_CI_image]
     uses: ./.github/workflows/hipfile-build-nvidia.yml
     with:
-      ci_image: ${{ needs.build_AIS_CI_image.outputs.ci_image }}
+      ci_image: ${{ needs.build_AIS_CI_image.outputs.ci_image_nvidia }}
       platform: ${{ inputs.platform }}
       rocm_version: ${{ inputs.rocm_version }}

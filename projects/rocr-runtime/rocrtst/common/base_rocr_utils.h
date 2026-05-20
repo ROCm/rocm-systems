@@ -57,6 +57,12 @@ namespace rocrtst {
 /// Locate kernel code object file and return path suitable for use with open().
 std::string LocateKernelFile(std::string filename, hsa_agent_t agent);
 
+/// Locate platform configuration file using search priority:
+/// 1. ROCRTST_PLATFORM_CONFIG environment variable
+/// 2. ./config/platform_config.yaml (current directory)
+/// 3. <exe_dir>/../share/rocrtst/platform_config.yaml (installed location)
+std::string LocateConfigFile();
+
 /// Open binary kernel object file and set all member data related to the
 /// kernel. Assumes that input test already has the kernel file name,
 /// agent name and kernel function specifed

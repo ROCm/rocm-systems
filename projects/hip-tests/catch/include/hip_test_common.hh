@@ -19,6 +19,7 @@
 #include <cstdlib>
 #include <thread>
 #include "hip_test_features.hh"
+#include "hip_test_params.hh"
 
 #ifdef ENABLE_YAML_TAGS
 #include "hip_test_config.hh"
@@ -33,6 +34,14 @@
 #define HIP_TEST_CASE(name) TEST_CASE(#name, "")
 #define HIP_TEMPLATE_TEST_CASE(name, ...) TEMPLATE_TEST_CASE(#name, "", __VA_ARGS__)
 #endif
+
+/**
+ * @brief Check if running at quick level (level_0).
+ * Use this to reduce test parameters for faster execution.
+ */
+inline bool isQuickLevel() {
+  return TestParameterStore::instance().currentTestLevel == "level_0";
+}
 
 #if HT_LINUX
 #include <sys/resource.h>
@@ -222,6 +231,13 @@
     abort();                                                                                       \
   }
 
+// Causes the test to stop and be skipped at runtime.
+#define HIP_SKIP_TEST(reason)                                                                      \
+  {                                                                                                \
+    std::cout << "HIP_SKIP_THIS_TEST" << std::endl;                                                \
+    SKIP(reason);                                                                                  \
+  }
+
 #if HT_NVIDIA
 #define CTX_CREATE()                                                                               \
   hipCtx_t context;                                                                                \
@@ -393,6 +409,12 @@ inline bool isImageSupported() {
   return imageSupport != 0;
 }
 
+inline bool isManagedMemorySupportedOnDevice(int device) {
+  int managed = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, device));
+  return managed != 0;
+}
+
 inline bool isPcieAtomicSupported() {
   int pcieAtomic = 1;
   int device;
@@ -467,7 +489,7 @@ inline bool isKernelArgPrefetchSupported() {
   HIP_CHECK(hipGetDeviceProperties(&props, deviceId));
   std::cout << "Device Id = " << deviceId << " props.major = " << props.major
             << " props.minor = " << props.minor << std::endl;
-  return (props.major == 12 && props.minor == 5) ? true : false;
+  return (props.major == 12 && props.minor >= 5) ? true : false;
 #else
   std::cout << "Only Supported for AMD in Linux" << std::endl;
   return false;
@@ -475,7 +497,7 @@ inline bool isKernelArgPrefetchSupported() {
 }
 
 /**
- * Canonical skip reasons for HipTest::HIP_SKIP_TEST (stable strings for logs / ctest filters).
+ * Canonical skip reasons for HIP_SKIP_TEST (stable strings for logs / ctest filters).
  * Use these instead of duplicating slightly different wording for the same condition.
  */
 namespace SkipReason {
@@ -539,15 +561,6 @@ inline constexpr char const kNotEnoughFreeHostMemory[] =
     "not enough free host memory";
 inline constexpr char const kRequiresLinux[] = "this test requires Linux.";
 }  // namespace SkipReason
-
-/**
- * Causes the test to stop and be skipped at runtime.
- * reason: Message describing the reason the test has been skipped.
- */
-static inline void HIP_SKIP_TEST(char const* const reason) noexcept {
-  // ctest is setup to parse for "HIP_SKIP_THIS_TEST", at which point it will skip the test.
-  std::cout << "Skipping test. Reason: " << reason << '\n' << "HIP_SKIP_THIS_TEST" << std::endl;
-}
 
 /**
  * @brief Helper template that returns the expected arguments of a kernel.
@@ -708,14 +721,21 @@ class BlockingContext {
 // is supported on the current device.
 #define CHECK_IMAGE_SUPPORT                                                                        \
   if (!HipTest::isImageSupported()) {                                                              \
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);                         \
-    return;                                                                                        \
+    HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);                                  \
+  }
+
+// Call at the start of tests that require managed memory support to indicate
+// whether it is supported on the current device.
+#define CHECK_MANAGED_MEMORY_SUPPORT                                           \
+  int current_device_ = 0;                                                     \
+  HIP_CHECK(hipGetDevice(&current_device_));                                   \
+  if (!HipTest::isManagedMemorySupportedOnDevice(current_device_)) {           \
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);             \
   }
 
 #define CHECK_PCIE_ATOMIC_SUPPORT                                                                 \
   if (!HipTest::isPcieAtomicSupported()) {                                                        \
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);                         \
-    return;                                                                                        \
+    HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);                                   \
   }
 
 #define CHECK_P2P_SUPPORT                                                                          \
@@ -723,15 +743,13 @@ class BlockingContext {
   if (!HipTest::isP2PSupported(d1,d2)) {                                                           \
     std::string msg = "P2P access check failed between dev1:" + std::to_string(d1) + ",dev2:" +    \
                                                                 std::to_string(d2);                \
-    HipTest::HIP_SKIP_TEST(msg.c_str());                                                           \
-    return;                                                                                        \
+    HIP_SKIP_TEST(msg.c_str());                                                                    \
   }                                                                                                \
 // Use this before running tests that rely on warp match functions to check device support and
 // skip the current test if they are not available.
 #define CHECK_WARP_MATCH_FUNCTIONS_SUPPORT                                                         \
   if (!HipTest::areWarpMatchFunctionsSupported()) {                                                \
-    HipTest::HIP_SKIP_TEST("warp match functions are not supported on this device.");      \
-    return;                                                                                        \
+    HIP_SKIP_TEST("warp match functions are not supported on this device.");                       \
   }
 
 // Call GENERATE_CAPTURE macro at the start of the test, before using BEGIN/END_CAPTURE.
