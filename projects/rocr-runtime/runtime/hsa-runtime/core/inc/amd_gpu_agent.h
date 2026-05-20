@@ -570,6 +570,9 @@ class GpuAgent : public GpuAgentInt {
   /// @brief Get list of AQL queues for core dump filtering
   const std::vector<core::Queue*>& GetAqlQueues() const { return aql_queues_; }
 
+  /// @brief Remove a destroyed AQL queue from agent-owned tracking.
+  void UnregisterAqlQueue(core::Queue* queue);
+
  protected:
   // Sizes are in packets.
   const uint32_t minAqlSize_ = 0x40;     // 4KB min
@@ -780,7 +783,7 @@ class GpuAgent : public GpuAgentInt {
   // @brief Register signal for notification when scratch may become available.
   // @p signal is notified by OR'ing with @p value.
   bool AddScratchNotifier(hsa_signal_t signal, hsa_signal_value_t value) {
-    if (signal.handle != 0) return false;
+    if (signal.handle == 0) return false;
     scratch_notifiers_[signal] = value;
     return true;
   }
@@ -878,8 +881,8 @@ class GpuAgent : public GpuAgentInt {
   // Sets and Tracks pending SDMA status check or request counts
   void SetCopyRequestRefCount(bool set);
   void SetCopyStatusCheckRefCount(bool set);
-  int pending_copy_req_ref_;
-  int pending_copy_stat_check_ref_;
+  std::atomic<int> pending_copy_req_ref_;
+  std::atomic<int> pending_copy_stat_check_ref_;
 
   // Tracks what SDMA blits have been used since initialization.
   uint32_t sdma_blit_used_mask_;

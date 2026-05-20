@@ -611,12 +611,15 @@ void GpuAgent::ReserveScratch()
   if (!scratch_cache_.reserved_bytes() && reserved_sz && available > 8 * reserved_sz) {
     HSAuint64 alt_va;
     void* reserved_base = scratch_pool_.alloc(reserved_sz);
-    assert(reserved_base && "Could not allocate reserved memory");
+    if (reserved_base == nullptr)
+      throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES, "Reserve scratch memory failed.");
 
     if (driver().MakeMemoryResident(reserved_base, reserved_sz, &alt_va) == HSA_STATUS_SUCCESS)
       scratch_cache_.reserve(reserved_sz, reserved_base);
-    else
+    else {
+      scratch_pool_.free(reserved_base);
       throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES, "Reserve scratch memory failed.");
+    }
   }
 }
 
@@ -668,7 +671,7 @@ void GpuAgent::InitDerivedCuid() {
   }
 
   // Query the derived CUID using the device handle
-  uint32_t cuid_length;
+  uint32_t cuid_length = sizeof(derived_cuid_);
   status = amdcuid_query_device_property(handle, AMDCUID_QUERY_DERIVED_CUID,
                                          derived_cuid_, &cuid_length);
 
@@ -2377,7 +2380,9 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
 
       for (const auto& r : regions()) availableBytes += ((AMD::MemoryRegion*)(r.get()))->GetCacheSize();
 
-      availableBytes += scratch_cache_.free_bytes() - scratch_cache_.reserved_bytes();
+      const size_t free_scratch = scratch_cache_.free_bytes();
+      const size_t reserved_scratch = scratch_cache_.reserved_bytes();
+      availableBytes += free_scratch - std::min(free_scratch, reserved_scratch);
 
       *((uint64_t*)value) = availableBytes;
       break;
@@ -2613,6 +2618,11 @@ hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
 
   scratchGuard.Dismiss();
   return HSA_STATUS_SUCCESS;
+}
+
+void GpuAgent::UnregisterAqlQueue(core::Queue* queue) {
+  auto queue_it = std::find(aql_queues_.begin(), aql_queues_.end(), queue);
+  if (queue_it != aql_queues_.end()) aql_queues_.erase(queue_it);
 }
 
 void GpuAgent::AcquireQueueMainScratch(ScratchInfo& scratch) {
@@ -3111,7 +3121,9 @@ void GpuAgent::BindTrapHandler() {
     auto doorbell_queue_map_size = MAX_NUM_DOORBELLS * sizeof(amd_queue_v2_t*);
 
     doorbell_queue_map_ = (amd_queue_v2_t**)system_allocator()(doorbell_queue_map_size, 0x1000, 0);
-    assert(doorbell_queue_map_ != NULL && "Doorbell queue map allocation failed");
+    if (doorbell_queue_map_ == NULL)
+      throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES,
+                               "Doorbell queue map allocation failed.");
 
     memset(doorbell_queue_map_, 0, doorbell_queue_map_size);
 
