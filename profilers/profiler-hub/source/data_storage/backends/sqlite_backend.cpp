@@ -85,10 +85,9 @@ get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& uuid)
 {
 #if defined(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD) &&                                    \
     USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD > 0
-    const auto                               jinja_size = 2 * uuid.size();
-    rocpd_sql_schema_jinja_variables_t const info{ jinja_size,
-                                                   uuid.c_str(),
-                                                   uuid.c_str() };
+    rocpd_sql_schema_jinja_variables_t const info{
+        sizeof(rocpd_sql_schema_jinja_variables_t), uuid.c_str(), uuid.c_str()
+    };
 
     std::string query;
     auto        status = rocpd_sql_load_schema(ROCPD_SQL_ENGINE_SQLITE3,
@@ -315,12 +314,27 @@ sqlite_backend::flush()
     validate_sqlite3_result(
         sqlite3_open(m_db_path.c_str(), &out_db), "", "database open failed!");
     auto* backup = sqlite3_backup_init(out_db, "main", m_sqlite3, "main");
-    if(backup != nullptr)
+    if(backup == nullptr)
     {
-        sqlite3_backup_step(backup, -1);
-        sqlite3_backup_finish(backup);
+        const std::string err = sqlite3_errmsg(out_db);
+        sqlite3_close(out_db);
+        throw std::runtime_error("sqlite3_backup_init failed: " + err);
     }
+
+    const auto step_rc   = sqlite3_backup_step(backup, -1);
+    const auto finish_rc = sqlite3_backup_finish(backup);
     sqlite3_close(out_db);
+
+    if(step_rc != SQLITE_DONE)
+    {
+        throw std::runtime_error("sqlite3_backup_step failed: rc=" +
+                                 std::to_string(step_rc));
+    }
+    if(finish_rc != SQLITE_OK)
+    {
+        throw std::runtime_error("sqlite3_backup_finish failed: rc=" +
+                                 std::to_string(finish_rc));
+    }
     m_flushed = true;
 }
 

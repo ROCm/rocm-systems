@@ -295,6 +295,7 @@ install(
 
 install(
     TARGETS ${PACKAGE_NAME}-static
+    EXPORT ${PACKAGE_NAME}
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT profiler-hub
 )
 
