@@ -119,3 +119,39 @@ target_link_libraries(
 # DEVICE BITCODE TESTER (put/get via HSACO + rocshmem_hipmodule_init)
 ###############################################################################
 include(${CMAKE_CURRENT_SOURCE_DIR}/CMakeDeviceBitcodeTester.cmake)
+
+###############################################################################
+# CTEST INTEGRATION (replaces driver.sh with native CTest tests)
+###############################################################################
+# Enable testing
+enable_testing()
+
+# Install the wrapper script and retry helper
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/test_wrapper.sh
+               ${CMAKE_CURRENT_BINARY_DIR}/test_wrapper.sh COPYONLY)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/ctest_with_retry.sh
+               ${CMAKE_CURRENT_BINARY_DIR}/ctest_with_retry.sh COPYONLY)
+rocm_install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/test_wrapper.sh
+             ${CMAKE_CURRENT_BINARY_DIR}/ctest_with_retry.sh
+             COMPONENT tests DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem)
+
+# Include CTest-based functional tests
+# Set ROCSHMEM_USE_CTEST=ON to register all tests (can be slow for large test suites)
+# By default, only the shell script is installed for compatibility
+if(ROCSHMEM_USE_CTEST)
+    message(STATUS "Registering CTest-based functional tests")
+    include(${CMAKE_CURRENT_SOURCE_DIR}/CTestFunctionalTests.cmake)
+    register_all_functional_tests()
+
+    # Print summary
+    get_directory_property(all_tests TESTS)
+    list(LENGTH all_tests num_tests)
+    message(STATUS "Registered ${num_tests} functional tests")
+    message(STATUS "Run with: ctest -L functional")
+    message(STATUS "Run with retry: ./ctest_with_retry.sh -L functional")
+    message(STATUS "Run specific suite: ctest -L RMA")
+    message(STATUS "Exclude RO-incompatible: ctest -LE fails_on_ro")
+endif()
+
+# For backward compatibility and development, also install the shell script
+# Usage: rocshmem_functional_driver.sh <executable> <test_suite> <log_dir> [hostfile]
