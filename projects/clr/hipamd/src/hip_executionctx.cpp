@@ -744,7 +744,8 @@ hipError_t hipExecutionCtxRecordEvent(hipExecutionCtx_t ctx, hipEvent_t event) {
   if (ctx == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  if (!isValid(event)) {
+  // hip::isValid(hipEvent_t) accepts nullptr; reject it explicitly.
+  if (event == nullptr || !isValid(event)) {
     HIP_RETURN(hipErrorInvalidHandle);
   }
   HIP_RETURN(reinterpret_cast<ExecutionCtx*>(ctx)->recordEvent(event));
@@ -763,7 +764,7 @@ hipError_t hipExecutionCtxWaitEvent(hipExecutionCtx_t ctx, hipEvent_t event) {
   if (ctx == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  if (!isValid(event)) {
+  if (event == nullptr || !isValid(event)) {
     HIP_RETURN(hipErrorInvalidHandle);
   }
   HIP_RETURN(reinterpret_cast<ExecutionCtx*>(ctx)->waitEvent(event));
