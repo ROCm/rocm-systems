@@ -38,14 +38,19 @@ writer_impl_core<Policy>::writer_impl_core(std::shared_ptr<writer_context> ctx)
 template class writer_impl_core<active_policy_t>;
 
 std::shared_ptr<writer_context>
-writer_t::impl::create_writer_context(storage_t& storage)
+writer_t::impl::create_writer_context(const std::unique_ptr<storage_t>& storage)
 {
+    if(!storage)
+    {
+        throw std::invalid_argument("Provided pointer to a non-existing storage!");
+    }
+
     auto ctx = std::make_shared<writer_context>();
     ctx->backend =
-        storage.m_impl->create_database(storage_t::impl::storage_type_t::write);
+        storage->m_impl->create_database(storage_t::impl::storage_type_t::write);
     ctx->registry      = std::make_shared<entity_registry>();
     ctx->key_providers = std::make_shared<primary_key_providers>();
-    ctx->uuid          = storage.m_impl->get_uuid();
+    ctx->uuid          = storage->m_impl->get_uuid();
 
     if(!ctx->backend)
     {
@@ -64,7 +69,7 @@ writer_t::impl::create_writer_context(storage_t& storage)
 }
 
 writer_t::impl::impl(std::unique_ptr<profiler_hub::storage_t> storage)
-: writer_impl_core<active_policy_t>(create_writer_context(*storage))
+: writer_impl_core<active_policy_t>(create_writer_context(storage))
 , m_storage(std::move(storage))
 {}
 

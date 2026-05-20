@@ -140,7 +140,8 @@ struct writer_t::impl : writer_impl_core<active_policy_t>
     explicit impl(std::unique_ptr<profiler_hub::storage_t> storage);
 
 private:
-    static std::shared_ptr<writer_context> create_writer_context(storage_t& storage);
+    static std::shared_ptr<writer_context> create_writer_context(
+        const std::unique_ptr<storage_t>& storage);
 
     std::unique_ptr<profiler_hub::storage_t> m_storage;
 };

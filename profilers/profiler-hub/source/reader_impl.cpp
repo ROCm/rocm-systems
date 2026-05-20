@@ -19,17 +19,14 @@ namespace profiler_hub
 {
 
 reader_t::impl::impl(std::unique_ptr<profiler_hub::storage_t> storage)
-: m_storage(std::move(storage))
+: m_storage(storage ? std::move(storage)
+                    : throw std::invalid_argument(
+                          "Provided pointer to a non-existing storage!"))
 , m_backend(m_storage->m_impl->create_database(storage_t::impl::storage_type_t::read))
 , m_read_statements(
       std::make_shared<data_storage::schema_v3::read_statements>(m_backend,
                                                                  m_backend->get_uuid()))
 {
-    if(!m_storage)
-    {
-        throw std::invalid_argument("Provided pointer to a non-existing storage!");
-    }
-
     initialize_all_info_lists();
 }
 
