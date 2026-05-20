@@ -4,7 +4,7 @@ bench_only: false
 config_dir: /home/rocprof/xuchen/rocm-systems/projects/rocprofiler-compute/src/rocprof_compute_soc/analysis_configs
 device: 0
 dispatch:
-- '0'
+- '1'
 experimental: false
 filter_blocks: []
 format_rocprof_output: rocpd
