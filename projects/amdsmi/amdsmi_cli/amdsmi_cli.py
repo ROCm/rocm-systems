@@ -69,9 +69,13 @@ except ImportError:
         from amdsmi_logger import AMDSMILogger
         import amdsmi_cli_exceptions
     except ImportError as e:
-        print(f"Unhandled import error: {e}")
-        print(f"Unable to import amdsmi_cli files. Check {cli_files_path} if they are present.")
-        sys.exit(1)
+        error_code = 192
+        print(
+            f"Unable to import amdsmi_cli files. Check {cli_files_path} if they are present",
+            file=sys.stderr,
+        )
+        print(f"Unhandled import error: {e}. Error code: {error_code}", file=sys.stderr)
+        sys.exit(error_code)
 
 
 def _print_error(e, destination):

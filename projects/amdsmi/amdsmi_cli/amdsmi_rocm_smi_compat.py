@@ -14,6 +14,8 @@ import sys
 import os
 import logging
 
+from amdsmi_cli_exceptions import AmdSmiInvalidFilePathException
+
 # Version information
 SMI_MAJ = 4
 SMI_MIN = 0
@@ -821,8 +823,9 @@ def showAllConcise(deviceList):
     import amdsmi
 
     if PRINT_JSON:
-        print("NOT_SUPPORTED: Cannot print JSON/CSV output for concise output")
-        sys.exit(1)
+        msg = "NOT_SUPPORTED: Cannot print JSON/CSV output for concise output"
+        print(msg)
+        raise AmdSmiInvalidFilePathException("", "json", msg)
 
     silent = True
 

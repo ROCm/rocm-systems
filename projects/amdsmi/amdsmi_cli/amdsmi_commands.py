@@ -35,12 +35,14 @@ import copy
 from _version import __version__
 
 from amdsmi_cli_exceptions import (
-    AmdSmiInvalidParameterException,
-    AmdSmiRequiredCommandException,
+    AmdSmiDeviceNotFoundException,
     AmdSmiInvalidCommandException,
-    AmdSmiParameterNotSupportedException,
+    AmdSmiInvalidFilePathException,
+    AmdSmiInvalidParameterException,
     AmdSmiInvalidParameterValueException,
     AmdSmiLibraryErrorException,
+    AmdSmiParameterNotSupportedException,
+    AmdSmiRequiredCommandException,
 )
 from amdsmi_helpers import AMDSMIHelpers
 from amdsmi_logger import AMDSMILogger
@@ -242,7 +244,7 @@ class AMDSMICommands:
             version_args.cpu_version = False
             version_args.nic_version = False
             self.version(version_args)
-            sys.exit(201)
+            raise PermissionError("Command requires elevation")
 
     def version(self, args, gpu_version=None, cpu_version=None, nic_version=None):
         """Print Version String
@@ -9774,12 +9776,12 @@ class AMDSMICommands:
         # Special GTT handling (system-wide, not per-GPU) — handle before device dispatch
         if hasattr(args, "gtt") and args.gtt is not None:
             if hasattr(args, "gpu") and args.gpu is not None:
-                print(
+                msg = (
                     "amd-smi set: error: argument --gtt/-G: not allowed with argument --gpu/-g "
-                    "(--gtt is a system-wide setting, not per-GPU)",
-                    file=sys.stderr,
+                    "(--gtt is a system-wide setting, not per-GPU)"
                 )
-                sys.exit(202)
+                output_format = self.helpers.get_output_format()
+                raise AmdSmiInvalidParameterException("set", None, output_format, msg)
             gb_value = args.gtt
             pages = self.helpers.gb_to_pages(gb_value)
             try:
@@ -10165,13 +10167,12 @@ class AMDSMICommands:
         # Special GTT handling (system-wide, not per-GPU) — handle before device dispatch
         if hasattr(args, "gtt") and args.gtt:
             if hasattr(args, "gpu") and args.gpu is not None:
-                error_code = 202
-                print(
+                msg = (
                     "amd-smi reset: error: argument --gtt: not allowed with argument --gpu/-g "
-                    f"(--gtt is a system-wide setting, not per-GPU). Error code: {error_code}",
-                    file=sys.stderr,
+                    f"(--gtt is a system-wide setting, not per-GPU)."
                 )
-                sys.exit(error_code)
+                output_format = self.helpers.get_output_format()
+                raise AmdSmiInvalidParameterException("reset", None, output_format, msg)
             try:
                 amdsmi_interface.amdsmi_reset_ttm_pages_limit()
                 self.logger.output["reset_gtt"] = (
@@ -10273,7 +10274,7 @@ class AMDSMICommands:
 
         if self.helpers.is_baremetal():
             if args.gpureset:
-                error_code = 0
+                found_error = False
                 if self.helpers.is_amd_device(args.gpu):
                     try:
                         amdsmi_interface.amdsmi_reset_gpu(args.gpu)
@@ -10293,13 +10294,15 @@ class AMDSMICommands:
                             output_format, error_msg, e.get_error_code()
                         )
                 else:
-                    error_code = 203
+                    found_error = True
                     result = "Unable to reset non-amd GPU."
+
                 self.logger.store_output(args.gpu, "gpu_reset", result)
                 self.logger.print_output()
                 self.logger.clear_multiple_devices_output()
-                if error_code > 0:
-                    sys.exit(error_code)
+                if found_error == True:
+                    output_format = self.helpers.get_output_format()
+                    raise AmdSmiDeviceNotFoundException("reset", output_format, True, False, False)
                 return
             if args.clocks:
                 reset_clocks_results = {"overdrive": "", "clocks": "", "performance": ""}
@@ -13362,10 +13365,20 @@ class AMDSMICommands:
                 except:
                     pass
 
+        except AmdSmiInvalidFilePathException as e:
+            print(f"{type(e).__module__}.{type(e).__name__}: {str(e)}", file=sys.stderr)
+            sys.exit(abs(e.value))
         except ImportError as e:
             logging.error(f"Could not import ROCm-SMI compatibility module: {e}")
             logging.error("Make sure amdsmi_rocm_smi_compat.py is in the amdsmi_cli directory")
-            print("ERROR: ROCm-SMI compatibility mode not available")
+            error_code = 192
+            print(
+                f"ERROR: ROCm-SMI compatibility mode not available. Error code: {error_code}",
+                file=sys.stderr,
+            )
+            sys.exit(error_code)
         except Exception as e:
             logging.error(f"Error in ROCm-SMI compatibility mode: {e}")
-            print(f"ERROR: {e}")
+            error_code = 255
+            print(f"ERROR: {e}. Error code: {error_code}", file=sys.stderr)
+            sys.exit(error_code)

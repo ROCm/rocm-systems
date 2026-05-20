@@ -52,6 +52,8 @@ AMDSMI_ERROR_MESSAGES = {
     33: "No more free slot",
     34: "Driver not loaded",
     # Reserved for future error messages
+    # Data and size errors
+    39: "There is more data than the buffer size the user passed",
     40: "No data was found for given input",
     41: "Insufficient size for operation",
     42: "Unexpected size of data was read",
@@ -68,6 +70,8 @@ AMDSMI_ERROR_MESSAGES = {
     53: "Parsed argument is invalid",
     54: "AMDGPU restart error",
     55: "Setting is not available",
+    56: "EEPROM is corrupted",
+    # General errors
     0xFFFFFFFE: "AMD-SMI Library error did not map to a status code",
     0xFFFFFFFF: "Unknown error",
 }
@@ -105,7 +109,7 @@ class AmdSmiInvalidCommandException(AmdSmiException):
     def __init__(self, command, outputformat: str, message=None):
         super().__init__()
 
-        self.value = 201
+        self.value = 193
         self.command = command
         self.output_format = outputformat
 
@@ -123,7 +127,7 @@ class AmdSmiInvalidCommandException(AmdSmiException):
 class AmdSmiInvalidParameterException(AmdSmiException):
     def __init__(self, command, arg, outputformat: str, hint: str = None):
         super().__init__()
-        self.value = 202
+        self.value = 194
         self.command = command
         self.arg = arg
         self.output_format = outputformat
@@ -135,7 +139,7 @@ class AmdSmiInvalidParameterException(AmdSmiException):
                 f"Parameter '{self.arg}' is invalid. Run 'amd-smi {self.command} -h' for more info."
             )
         if hint:
-            common_message = f"{common_message} {hint}. Error code: {self.value}"
+            common_message = f"{common_message} {hint}.".strip()
 
         self.json_message["error"] = common_message
         self.json_message["code"] = self.value
@@ -146,7 +150,7 @@ class AmdSmiInvalidParameterException(AmdSmiException):
 class AmdSmiDeviceNotFoundException(AmdSmiException):
     def __init__(self, command, outputformat: str, gpu: bool, cpu: bool, core: bool):
         super().__init__()
-        self.value = 203
+        self.value = 195
         self.command = command
         self.output_format = outputformat
 
@@ -170,7 +174,7 @@ class AmdSmiDeviceNotFoundException(AmdSmiException):
 class AmdSmiInvalidFilePathException(AmdSmiException):
     def __init__(self, command, outputformat: str, message=None):
         super().__init__()
-        self.value = 204
+        self.value = 196
         self.command = command
         self.output_format = outputformat
 
@@ -188,7 +192,7 @@ class AmdSmiInvalidFilePathException(AmdSmiException):
 class AmdSmiInvalidParameterValueException(AmdSmiException):
     def __init__(self, command, arg, outputformat: str, hint: str = None):
         super().__init__()
-        self.value = 205
+        self.value = 197
         self.command = command
         self.arg = arg
         self.output_format = outputformat
@@ -211,7 +215,7 @@ class AmdSmiInvalidParameterValueException(AmdSmiException):
 class AmdSmiMissingParameterValueException(AmdSmiException):
     def __init__(self, command, outputformat: str):
         super().__init__()
-        self.value = 206
+        self.value = 198
         self.command = command
         self.output_format = outputformat
 
@@ -226,7 +230,7 @@ class AmdSmiMissingParameterValueException(AmdSmiException):
 class AmdSmiCommandNotSupportedException(AmdSmiException):
     def __init__(self, command, outputformat: str):
         super().__init__()
-        self.value = 207
+        self.value = 199
         self.command = command
         self.output_format = outputformat
 
@@ -243,7 +247,7 @@ class AmdSmiCommandNotSupportedException(AmdSmiException):
 class AmdSmiParameterNotSupportedException(AmdSmiException):
     def __init__(self, command, outputformat: str):
         super().__init__()
-        self.value = 208
+        self.value = 200
         self.command = command
         self.output_format = outputformat
 
@@ -258,7 +262,7 @@ class AmdSmiParameterNotSupportedException(AmdSmiException):
 class AmdSmiRequiredCommandException(AmdSmiException):
     def __init__(self, command, outputformat: str):
         super().__init__()
-        self.value = 209
+        self.value = 201
         self.command = command
         self.output_format = outputformat
 
@@ -273,7 +277,7 @@ class AmdSmiRequiredCommandException(AmdSmiException):
 class AmdSmiInvalidSubcommandException(AmdSmiException):
     def __init__(self, command, outputformat: str):
         super().__init__()
-        self.value = 210
+        self.value = 202
         self.command = command
         self.output_format = outputformat
 
@@ -288,7 +292,7 @@ class AmdSmiInvalidSubcommandException(AmdSmiException):
 class AmdSmiPermissionDeniedException(AmdSmiException):
     def __init__(self, command, outputformat: str):
         super().__init__()
-        self.value = 211
+        self.value = 203
         self.command = command
         self.output_format = outputformat
 
