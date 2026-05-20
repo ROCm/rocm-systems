@@ -73,11 +73,11 @@ constexpr std::string_view HSA_INTERRUPT_HELP =
 // --- Custom actions: flags whose behavior cannot be expressed as pure data ---
 
 void
-monochrome_action(parser_t& parser, parser_data& data)
+monochrome_action(parsed_values& values, parser_data& data)
 {
-    auto enabled        = parser.get<bool>("monochrome");
+    auto enabled        = values.get<bool>("monochrome");
     data.out.monochrome = enabled;
-    parser.set_use_color(!enabled);
+    values.set_use_color(!enabled);
     data.env.set(env::MONOCHROME, enabled ? "1" : "0");
     // Bare MONOCHROME (non-ROCPROFSYS_) is consumed by other tools; intentionally
     // not in env_vars.hpp because it isn't part of our prefixed namespace.
@@ -85,15 +85,15 @@ monochrome_action(parser_t& parser, parser_data& data)
 }
 
 void
-debug_action(parser_t& /*parser*/, parser_data& data)
+debug_action(parsed_values& /*values*/, parser_data& data)
 {
     data.env.set(env::LOG_LEVEL, "debug");
 }
 
 void
-verbose_action(parser_t& parser, parser_data& data)
+verbose_action(parsed_values& values, parser_data& data)
 {
-    auto level       = parser.get<int>("verbose");
+    auto level       = values.get<int>("verbose");
     data.out.verbose = level;
     data.env.set(env::VERBOSE_OUTPUT, level);
     constexpr std::array<const char*, 5> log_levels = { "off", "info", "debug", "debug",
@@ -103,18 +103,18 @@ verbose_action(parser_t& parser, parser_data& data)
 }
 
 void
-output_action(parser_t& parser, parser_data& data)
+output_action(parsed_values& values, parser_data& data)
 {
-    auto values = parser.get<std::vector<std::string>>("output");
-    data.env.set(env::OUTPUT_PATH, values.at(0));
-    if(values.size() > 1) data.env.set(env::OUTPUT_PREFIX, values.at(1));
+    auto output = values.get<std::vector<std::string>>("output");
+    data.env.set(env::OUTPUT_PATH, output.at(0));
+    if(output.size() > 1) data.env.set(env::OUTPUT_PREFIX, output.at(1));
 }
 
 void
-sample_action(parser_t& parser, parser_data& data)
+sample_action(parsed_values& values, parser_data& data)
 {
     data.env.set(env::USE_SAMPLING, true);
-    auto modes = parser.get<std::set<std::string>>("sample");
+    auto modes = values.get<std::set<std::string>>("sample");
     if(modes.empty()) return;
     data.env.set(env::SAMPLING_CPUTIME, modes.count("cputime") > 0, update_mode::WEAK);
     data.env.set(env::SAMPLING_REALTIME, modes.count("realtime") > 0, update_mode::WEAK);
@@ -141,25 +141,25 @@ apply_host_device(parser_data& data, bool host_enabled, bool device_enabled,
 }
 
 void
-host_action(parser_t& parser, parser_data& data)
+host_action(parsed_values& values, parser_data& data)
 {
-    apply_host_device(data, parser.get<bool>("host"), parser.get<bool>("device"),
+    apply_host_device(data, values.get<bool>("host"), values.get<bool>("device"),
                       /*driving_flag_is_host=*/true);
 }
 
 void
-device_action(parser_t& parser, parser_data& data)
+device_action(parsed_values& values, parser_data& data)
 {
-    apply_host_device(data, parser.get<bool>("host"), parser.get<bool>("device"),
+    apply_host_device(data, values.get<bool>("host"), values.get<bool>("device"),
                       /*driving_flag_is_host=*/false);
 }
 
 void
-tids_action(parser_t& parser, parser_data& data)
+tids_action(parsed_values& values, parser_data& data)
 {
     // Comma-space joiner is intentional and matches legacy behavior;
     // `--sample-cputime`/`--sample-realtime`/`--sample-overflow` use comma-only.
-    auto tids = parser.get<std::vector<int64_t>>("tids");
+    auto tids = values.get<std::vector<int64_t>>("tids");
     data.env.set(env::SAMPLING_TIDS, fmt::format("{}", fmt::join(tids, ", ")));
 }
 
@@ -174,56 +174,57 @@ struct sample_consume_spec
 };
 
 void
-consume_sample_args(parser_t& parser, parser_data& data, const sample_consume_spec& spec)
+consume_sample_args(parsed_values& values, parser_data& data,
+                    const sample_consume_spec& spec)
 {
-    auto values = parser.get<std::deque<std::string>>(std::string{ spec.flag_key });
+    auto args = values.get<std::deque<std::string>>(spec.flag_key);
     data.env.set(spec.enable_env, true);
 
-    if(!values.empty())
+    if(!args.empty())
     {
         if(spec.check_overflow_event_conflict &&
-           parser.exists("sampling-overflow-event") &&
-           values.front() != parser.get<std::string>("sampling-overflow-event"))
+           values.exists("sampling-overflow-event") &&
+           args.front() != values.get<std::string>("sampling-overflow-event"))
         {
             throw exception<std::runtime_error>(fmt::format(
                 "'--sample-overflow {} ...' conflicts with "
                 "'--sampling-overflow-event {}' option",
-                values.front(), parser.get<std::string>("sampling-overflow-event")));
+                args.front(), values.get<std::string>("sampling-overflow-event")));
         }
-        data.env.set(spec.first_env, values.front());
-        values.pop_front();
+        data.env.set(spec.first_env, args.front());
+        args.pop_front();
     }
-    if(!values.empty())
+    if(!args.empty())
     {
-        data.env.set(spec.second_env, values.front());
-        values.pop_front();
+        data.env.set(spec.second_env, args.front());
+        args.pop_front();
     }
-    if(!values.empty())
-        data.env.set(spec.tail_env, fmt::format("{}", fmt::join(values, ",")));
+    if(!args.empty())
+        data.env.set(spec.tail_env, fmt::format("{}", fmt::join(args, ",")));
 }
 
 void
-sample_cputime_action(parser_t& parser, parser_data& data)
+sample_cputime_action(parsed_values& values, parser_data& data)
 {
-    consume_sample_args(parser, data,
+    consume_sample_args(values, data,
                         { "sample-cputime", env::SAMPLING_CPUTIME,
                           env::SAMPLING_CPUTIME_FREQ, env::SAMPLING_CPUTIME_DELAY,
                           env::SAMPLING_CPUTIME_TIDS });
 }
 
 void
-sample_realtime_action(parser_t& parser, parser_data& data)
+sample_realtime_action(parsed_values& values, parser_data& data)
 {
-    consume_sample_args(parser, data,
+    consume_sample_args(values, data,
                         { "sample-realtime", env::SAMPLING_REALTIME,
                           env::SAMPLING_REALTIME_FREQ, env::SAMPLING_REALTIME_DELAY,
                           env::SAMPLING_REALTIME_TIDS });
 }
 
 void
-sample_overflow_action(parser_t& parser, parser_data& data)
+sample_overflow_action(parsed_values& values, parser_data& data)
 {
-    consume_sample_args(parser, data,
+    consume_sample_args(values, data,
                         { "sample-overflow", env::SAMPLING_OVERFLOW,
                           env::SAMPLING_OVERFLOW_EVENT, env::SAMPLING_OVERFLOW_FREQ,
                           env::SAMPLING_OVERFLOW_TIDS,
@@ -231,9 +232,9 @@ sample_overflow_action(parser_t& parser, parser_data& data)
 }
 
 void
-profile_format_action(parser_t& parser, parser_data& data)
+profile_format_action(parsed_values& values, parser_data& data)
 {
-    auto formats = parser.get<std::set<std::string>>("profile-format");
+    auto formats = values.get<std::set<std::string>>("profile-format");
     data.env.set(env::PROFILE, true);
     if(formats.empty()) return;
     data.env.set(env::TEXT_OUTPUT, formats.count("text") != 0);
@@ -242,12 +243,12 @@ profile_format_action(parser_t& parser, parser_data& data)
 }
 
 void
-profile_diff_action(parser_t& parser, parser_data& data)
+profile_diff_action(parsed_values& values, parser_data& data)
 {
-    auto values = parser.get<std::vector<std::string>>("profile-diff");
+    auto paths = values.get<std::vector<std::string>>("profile-diff");
     data.env.set(env::DIFF_OUTPUT, true);
-    data.env.set(env::INPUT_PATH, values.at(0));
-    if(values.size() > 1) data.env.set(env::INPUT_PREFIX, values.at(1));
+    data.env.set(env::INPUT_PATH, paths.at(0));
+    if(paths.size() > 1) data.env.set(env::INPUT_PREFIX, paths.at(1));
 }
 
 }  // namespace

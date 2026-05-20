@@ -5,6 +5,7 @@
 
 #include "argparse.hpp"
 #include "common/environment.hpp"
+#include "parsed_values.hpp"
 
 #include <string_view>
 #include <vector>
@@ -44,10 +45,20 @@ struct count_spec
     static constexpr count_spec any() noexcept { return {}; }
 };
 
-using custom_action_t = void (*)(parser_t&, parser_data&);
+// Engine-agnostic action callback. Receives a parsed_values accessor that
+// hides the underlying parser library; descriptors never name the engine.
+using custom_action_t = void (*)(parsed_values&, parser_data&);
 
+// Lifetime contract for the embedded string_views:
+// `names`, `help`, `dtype`, `env_vars`, `dedup_keys`, `choices`, `conflicts`,
+// and `requires_` must reference storage that outlives the descriptor's use
+// by the parser. In practice every site that builds a flag_descriptor
+// references either string literals or `constexpr std::string_view` constants
+// in core_flags.cpp (static storage), and the flag_group factories return
+// `static const flag_group&`. Do not assign view fields from temporaries.
+//
 // Convention: when multiple names are provided, the LONG name must be last.
-// `parser_key_from` derives the parser lookup key from `names.back()`.
+// The interpreter derives the parser lookup key from `names.back()`.
 struct flag_descriptor
 {
     std::vector<std::string_view> names;

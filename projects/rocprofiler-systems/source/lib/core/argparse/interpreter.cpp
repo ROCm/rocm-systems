@@ -157,7 +157,8 @@ register_flag(parser_t& parser, parser_data& data, const flag_descriptor& descri
                 parser_key = std::move(keys.parser_key)](parser_t& parser_ref) {
         if(descriptor.custom != nullptr)
         {
-            descriptor.custom(parser_ref, data);
+            parsed_values values{ parser_ref };
+            descriptor.custom(values, data);
             return;
         }
         emit_env(data, descriptor, read_value(parser_ref, parser_key, descriptor));

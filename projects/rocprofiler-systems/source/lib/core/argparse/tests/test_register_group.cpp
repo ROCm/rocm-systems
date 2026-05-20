@@ -24,6 +24,7 @@ using rocprofsys::argparse::count_spec;
 using rocprofsys::argparse::flag_descriptor;
 using rocprofsys::argparse::flag_group;
 using rocprofsys::argparse::join_with;
+using rocprofsys::argparse::parsed_values;
 using rocprofsys::argparse::parser_data;
 using rocprofsys::argparse::parser_t;
 using rocprofsys::argparse::register_group;
@@ -300,7 +301,7 @@ TEST_F(RegisterGroupTest, MultipleEnvVarsAllWritten)
 namespace
 {
 void
-custom_writes_marker(parser_t& /*parser*/, parser_data& data)
+custom_writes_marker(parsed_values& /*values*/, parser_data& data)
 {
     data.env.set("CUSTOM_MARKER", "yes");
 }
