@@ -52,9 +52,8 @@ bool debug_user = tim::get_env("ROCPROFSYS_DEBUG_USER_REGIONS", false) || get_de
 namespace
 {
 // Process-global default registry used when no engine has set an active
-// registry on the calling thread. Slice A keeps this for backward-compat;
-// slice B's engine sets a real registry via set_active_track_registry() at
-// engine.start(), and this default becomes vestigial.
+// registry on the calling thread (e.g. the live-emission path that does
+// not construct a per-instance engine).
 track_registry&
 process_default_registry()
 {

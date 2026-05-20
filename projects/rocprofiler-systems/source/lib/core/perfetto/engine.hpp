@@ -25,7 +25,7 @@ class trace_sink;
 // POD snapshot of the perfetto-relevant configuration. Built once at engine
 // construction by build_engine_config_from_settings(); the engine never reads
 // rocprofsys::config::* again after that. Tests construct it with literals to
-// exercise the engine in isolation (RQ3, D6).
+// exercise the engine in isolation.
 struct engine_config
 {
     enum class fill_policy_t
@@ -50,7 +50,7 @@ struct engine_config
 };
 
 // Reads the live config::get_perfetto_* getters once and returns a snapshot.
-// Composition root calls this exactly once per process.
+// Called once per process by whoever constructs the perfetto_engine.
 engine_config
 build_engine_config_from_settings();
 
@@ -81,7 +81,7 @@ public:
     perfetto_engine(perfetto_engine&&)                 = delete;
     perfetto_engine& operator=(perfetto_engine&&)      = delete;
 
-    // Initialises the Perfetto SDK once per process via std::call_once (D5).
+    // Initialises the Perfetto SDK once per process via std::call_once.
     // Safe to call from every engine instance; only the first wins.
     void init_sdk();
 
@@ -103,7 +103,7 @@ public:
     //                       (on_source_drained per pid, then finalize();
     //                       first per-source exception is rethrown after
     //                       finalize per drain contract).
-    // No-op when no session is active (RF6).
+    // No-op when no session is active.
     void stop();
 
     // Reads the trace bytes from the session for the given pid via
@@ -128,7 +128,7 @@ public:
     bool is_running() const noexcept;
 
     // Thread-local pid tag consumed by the cached-mode interceptor TLS to
-    // key each thread's emissions to a pid (D4). Tagging threads is the
+    // key each thread's emissions to a pid. Tagging threads is the
     // emitter's responsibility — call set_emitting_pid(pid) before the
     // first TRACE_EVENT_* on the thread.
     static void set_emitting_pid(int pid) noexcept;

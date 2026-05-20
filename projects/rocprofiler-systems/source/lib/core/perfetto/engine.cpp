@@ -28,7 +28,7 @@ namespace core
 {
 namespace
 {
-// Thread-local pid tag consumed by the cached-mode interceptor TLS (D4).
+// Thread-local pid tag consumed by the cached-mode interceptor TLS.
 // Stored in TU scope so the static accessors can reach it without exposing
 // the TLS in the header.
 // -1 marks "no parser thread has claimed this thread yet"; pid 0 is the
@@ -351,7 +351,7 @@ perfetto_engine::start(mode m, trace_sink& sink)
 void
 perfetto_engine::stop()
 {
-    if(!p_->running) return;  // RF6
+    if(!p_->running) return;
 
     const auto current_mode = p_->current_mode;
     const auto pid          = p_->active_pid;

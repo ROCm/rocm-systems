@@ -61,8 +61,8 @@ std::atomic<live_perfetto_driver*> g_active_driver{ nullptr };
 
 live_perfetto_driver::live_perfetto_driver() noexcept
 {
-    // Single-instance invariant is enforced by the owning unique_ptr in the
-    // composition root; exchange publishes the pointer for cross-TU access.
+    // Single-instance invariant: callers that construct this hold the
+    // unique_ptr; the atomic publishes it so other TUs can reach it.
     g_active_driver.store(this, std::memory_order_release);
 }
 

@@ -25,7 +25,7 @@ namespace core
 {
 // Polymorphic destination for trace bytes drained by the engine. The engine
 // invokes on_source_drained() once per emitting source and finalize() once
-// after all sources have drained (D1).
+// after all sources have drained.
 class trace_sink
 {
 public:
@@ -38,9 +38,8 @@ public:
 // Live-mode sink: receives the engine's drained bytes for the current pid,
 // runs the existing MPI gather (when ROCPROFSYS_USE_MPI is set), writes the
 // concatenated trace to disk, and runs rocprof-sys-merge-output.sh on rank 0.
-// Holds borrowed references to the legacy plumbing
-// (tim::manager / output_file_registry / perfetto_output_error flag) so the
-// finalize body is a near-literal lift of perfetto.cpp:post_process().
+// Holds borrowed references to tim::manager / output_file_registry / a
+// perfetto_output_error flag that the driver consults after finalize.
 class live_fd_sink final : public trace_sink
 {
 public:
@@ -61,10 +60,9 @@ private:
 // Cached-mode sink: writes per-pid bytes to one .proto file per pid.
 // The parent_pid receives the default filename
 // (config::get_perfetto_output_filename()); every other pid receives the
-// suffix-stamped variant (get_perfetto_output_filename_with_suffix(pid))
-// — same contract perfetto_processor.cpp:524-527 has applied for the
-// cached path. Per-pid open failures are logged and the source is
-// dropped; other pids continue (RF5).
+// suffix-stamped variant (get_perfetto_output_filename_with_suffix(pid)),
+// matching the historical filename convention for cached output. Per-pid
+// open failures are logged and the source is dropped; other pids continue.
 class per_pid_file_sink final : public trace_sink
 {
 public:

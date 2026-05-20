@@ -121,13 +121,14 @@ TEST(perfetto_engine, forget_session_on_unknown_pid_is_noop)
 }
 
 // ----------------------------------------------------------------------------
-// Cached-interceptor mode (slice C1)
+// Cached-interceptor mode
 // ----------------------------------------------------------------------------
 
 // Helper: simulate the cached-mode interceptor pushing bytes for a pid.
 // Stand-in for `cached_interceptor::OnTracePacket -> collect_packet_bytes`,
 // avoiding the heavy perfetto.hpp / TRACE_EVENT include chain in test
-// scope. SDK-driven emission is covered E2E by slice C2 integration tests.
+// scope. SDK-driven emission is covered end-to-end by the pytest integration
+// suite in tests/pytest/.
 namespace
 {
 void

@@ -51,7 +51,7 @@ TEST(recording_sink, finalize_without_drain_is_safe)
 }
 
 // ----------------------------------------------------------------------------
-// per_pid_file_sink (slice C1)
+// per_pid_file_sink
 // ----------------------------------------------------------------------------
 
 TEST(per_pid_file_sink, empty_bytes_is_early_return)
@@ -67,8 +67,7 @@ TEST(per_pid_file_sink, empty_bytes_is_early_return)
     EXPECT_NO_THROW(sink.finalize());
 }
 
-// NOTE: file-IO and RF5 (per-pid open-failure isolation) coverage for
-// per_pid_file_sink is deferred to slice C2's integration tests, which
-// exercise the sink through cache_manager + the live config singleton.
-// Unit-level mocking of config::get_perfetto_output_filename(...) here
-// would require library-init machinery this test binary does not own.
+// File-IO and per-pid open-failure isolation coverage for per_pid_file_sink
+// is exercised by the integration tests in tests/pytest/. Unit-level
+// mocking of config::get_perfetto_output_filename(...) here would require
+// library-init machinery this test binary does not own.

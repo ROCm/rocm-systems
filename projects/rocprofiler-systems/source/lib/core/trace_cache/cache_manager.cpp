@@ -78,8 +78,8 @@ cache_manager::post_process_bulk(output_file_registry& _output_registry,
         // Cached perfetto path: construct an engine + per-pid file sink +
         // track_registry per post-process invocation. The engine drives
         // the SDK interceptor; per-pid bytes drain through the sink at
-        // engine.stop(). RF4: on init_sdk failure, log + skip the
-        // perfetto block; RocPD processing continues unaffected.
+        // engine.stop(). On init_sdk failure, log + skip the perfetto
+        // block; RocPD processing continues unaffected.
         std::unique_ptr<core::perfetto_engine>      engine;
         std::unique_ptr<core::trace_sink>           perfetto_sink;
         std::unique_ptr<rocprofsys::track_registry> tracks;
