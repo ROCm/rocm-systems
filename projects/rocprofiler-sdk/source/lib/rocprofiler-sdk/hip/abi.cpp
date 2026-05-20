@@ -654,6 +654,25 @@ ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipMemPrefetchBatchAsync_fn, 517);
 ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipOccupancyMaxPotentialClusterSize_fn, 518);
 ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipOccupancyMaxActiveClusters_fn, 519);
 #endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 28
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipGreenCtxCreate_fn, 520);
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipExecutionCtxDestroy_fn, 521);
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipExecutionCtxStreamCreate_fn, 522);
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipDeviceGetDevResource_fn, 523);
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipDevSmResourceSplitByCount_fn, 524);
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipDevSmResourceSplit_fn, 525);
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipDevResourceGenerateDesc_fn, 526);
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipDeviceGetExecutionCtx_fn, 527);
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipExecutionCtxGetDevResource_fn, 528);
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipExecutionCtxGetDevice_fn, 529);
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipExecutionCtxGetId_fn, 530);
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipStreamGetDevResource_fn, 531);
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipExecutionCtxRecordEvent_fn, 532);
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipExecutionCtxSynchronize_fn, 533);
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipExecutionCtxWaitEvent_fn, 534);
+#endif
+
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION == 0
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 442)
 #elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 1
@@ -710,6 +729,8 @@ ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 517)
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 518)
 #elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 27
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 520)
+#elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 28
+ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 535)
 #else
 INTERNAL_CI_ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 0)
 #endif
