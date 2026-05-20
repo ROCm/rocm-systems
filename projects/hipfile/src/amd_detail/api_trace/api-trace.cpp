@@ -5,6 +5,8 @@
 
 #include "hipfile-api-trace.h"
 
+#include <cstddef>
+
 #if defined(HIPFILE_ROCPROFILER_REGISTER) && HIPFILE_ROCPROFILER_REGISTER > 0
 #include <rocprofiler-register/rocprofiler-register.h>
 

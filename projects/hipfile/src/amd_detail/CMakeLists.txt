@@ -30,7 +30,7 @@ set(HIPFILE_SOURCES
     sys.cpp
 )
 
-if (AIS_ENABLE_PROFILING)
+if (HIPFILE_ROCPROFILER_REGISTER AND rocprofiler-register_FOUND)
     set(HIPFILE_SOURCES
         api_trace/api-dispatch-interface.cpp
         api_trace/api-trace.cpp
@@ -47,3 +47,15 @@ ais_add_libraries(
     LIBINCL  ${HIPFILE_INCLUDE_PATH}
     SYSINCLS ${HIPFILE_AMD_SOURCE_PATH}
 )
+
+if (HIPFILE_ROCPROFILER_REGISTER AND rocprofiler-register_FOUND)
+    target_link_libraries(hipfile PRIVATE rocprofiler-register::rocprofiler-register)
+    target_compile_definitions(
+        hipfile
+        PRIVATE
+            HIPFILE_ROCPROFILER_REGISTER=1
+            HIPFILE_ROCP_REG_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
+            HIPFILE_ROCP_REG_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+            HIPFILE_ROCP_REG_VERSION_PATCH=${PROJECT_VERSION_PATCH}
+    )
+endif()

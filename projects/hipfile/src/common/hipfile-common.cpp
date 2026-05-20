@@ -7,6 +7,10 @@
 
 #include <hip/hip_runtime_api.h>
 
+#if defined(HIPFILE_ROCPROFILER_REGISTER) && HIPFILE_ROCPROFILER_REGISTER > 0
+namespace hipFile {
+#endif
+
 const char *
 hipFileGetOpErrorString(hipFileOpError_t status)
 {
@@ -111,3 +115,7 @@ try {
 catch (...) {
     return {hipFileInternalError, hipSuccess};
 }
+
+#if defined(HIPFILE_ROCPROFILER_REGISTER) && HIPFILE_ROCPROFILER_REGISTER > 0
+} // namespace hipFile
+#endif

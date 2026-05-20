@@ -2,4 +2,4 @@
 #
 # SPDX-License-Identifier: MIT
 
-option(AIS_ENABLE_PROFILING "Turn API profiling on" OFF)
+option(HIPFILE_ROCPROFILER_REGISTER "Enable rocprofiler-register support" ON)

@@ -248,6 +248,12 @@ else()
     message(NOTICE "find_package did NOT find hip")
 endif()
 
+if(HIPFILE_ROCPROFILER_REGISTER)
+    find_package(rocprofiler-register QUIET
+        HINTS $ENV{rocprofiler_register_ROOT} $ENV{ROCPROFILER_REGISTER_ROOT} ${CMAKE_INSTALL_PREFIX}
+        PATHS ${ROCM_PATH})
+endif()
+
 # Find the cuFile library and headers on NVIDIA
 if(AIS_BUILD_NVIDIA_DETAIL)
     find_package(CUDAToolkit REQUIRED)

@@ -29,6 +29,10 @@
 using namespace hipFile;
 using namespace std;
 
+#if defined(HIPFILE_ROCPROFILER_REGISTER) && HIPFILE_ROCPROFILER_REGISTER > 0
+namespace hipFile {
+#endif
+
 /// Catch C++ exceptions from the hipFile code and convert
 /// them into error values that can be returned from public
 /// C API calls.
@@ -606,3 +610,7 @@ try {
 catch (...) {
     return handle_exception();
 }
+
+#if defined(HIPFILE_ROCPROFILER_REGISTER) && HIPFILE_ROCPROFILER_REGISTER > 0
+} // namespace hipFile
+#endif
