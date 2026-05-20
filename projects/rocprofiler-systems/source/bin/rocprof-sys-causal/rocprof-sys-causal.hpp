@@ -22,19 +22,19 @@ update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _
 int
 get_verbose();
 
-const std::unordered_set<std::string_view>&
+const std::unordered_set<std::string>&
 get_updated_envs();
 
 std::vector<std::string>
 get_initial_environment();
 
 void
-prepare_command_for_run(char*, std::vector<char*>&);
+prepare_command_for_run(const char*, std::vector<std::string>&);
 
 void
 prepare_environment_for_run(std::vector<std::string>&);
 
-std::vector<char*>
+std::vector<std::string>
 parse_args(int argc, char** argv, std::vector<std::string>&,
            std::vector<std::map<std::string_view, std::string>>&);
 

@@ -7,6 +7,7 @@
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
 #include "common/path.hpp"
+#include "core/argparse.hpp"
 #include "core/mproc.hpp"
 #include "core/utility.hpp"
 
@@ -49,11 +50,24 @@ using ::tim::log::stream;
 
 namespace
 {
-int  verbose       = 0;
-auto updated_envs  = std::unordered_set<std::string_view>{};
-auto original_envs = std::unordered_set<std::string>{};
-auto child_pids    = std::unordered_set<pid_t>{};
-auto launcher      = std::string{};
+struct causal_runtime_context
+{
+    int                                verbose_level = 0;
+    std::string                        launcher      = {};
+    rocprofsys::argparse::env_snapshot env           = {};
+};
+
+causal_runtime_context&
+runtime_context()
+{
+    // Temporary aggregation point while causal's free-function API is untangled.
+    // Signal-handler globals stay separate because POSIX callbacks need global
+    // reachability.
+    static auto ctx = causal_runtime_context{};
+    return ctx;
+}
+
+auto child_pids = std::unordered_set<pid_t>{};
 
 inline signal_handler&
 get_signal_handler(int _sig)
@@ -94,8 +108,9 @@ int
 get_verbose()
 {
     const auto* _log_level = std::getenv(env::LOG_LEVEL.data());
-    if(_log_level != nullptr) verbose = env::log_level_to_verbose(_log_level);
-    return verbose;
+    auto&       ctx        = runtime_context();
+    if(_log_level != nullptr) ctx.verbose_level = env::log_level_to_verbose(_log_level);
+    return ctx.verbose_level;
 }
 
 void
@@ -129,10 +144,10 @@ diagnose_status(pid_t _pid, int _status)
     return ::rocprofsys::mproc::diagnose_status(_pid, _status, get_verbose());
 }
 
-const std::unordered_set<std::string_view>&
+const std::unordered_set<std::string>&
 get_updated_envs()
 {
-    return updated_envs;
+    return runtime_context().env.updated;
 }
 
 std::vector<std::string>
@@ -141,9 +156,10 @@ get_initial_environment()
     auto _env = std::vector<std::string>{};
     if(environ != nullptr)
     {
+        auto& ctx = runtime_context();
         for(int idx = 0; environ[idx] != nullptr; ++idx)
         {
-            original_envs.emplace(environ[idx]);
+            ctx.env.initial.emplace(environ[idx]);
             _env.emplace_back(environ[idx]);
         }
     }
@@ -170,18 +186,20 @@ get_initial_environment()
 }
 
 void
-prepare_command_for_run(char* _exe, std::vector<char*>& _argv)
+prepare_command_for_run(const char* _exe, std::vector<std::string>& _argv)
 {
-    if(!launcher.empty())
+    auto& ctx = runtime_context();
+    if(!ctx.launcher.empty())
     {
         bool _injected = false;
-        auto _new_argv = std::vector<char*>{};
-        for(auto* itr : _argv)
+        auto _new_argv = std::vector<std::string>{};
+        _new_argv.reserve(_argv.size() + 2);
+        for(const auto& itr : _argv)
         {
-            if(!_injected && std::regex_search(itr, std::regex{ launcher }))
+            if(!_injected && std::regex_search(itr, std::regex{ ctx.launcher }))
             {
                 _new_argv.emplace_back(_exe);
-                _new_argv.emplace_back(strdup("--"));
+                _new_argv.emplace_back("--");
                 _injected = true;
             }
             _new_argv.emplace_back(itr);
@@ -190,7 +208,7 @@ prepare_command_for_run(char* _exe, std::vector<char*>& _argv)
         if(!_injected)
         {
             throw std::runtime_error(
-                join("", "rocprof-sys-causal was unable to match \"", launcher,
+                join("", "rocprof-sys-causal was unable to match \"", ctx.launcher,
                      "\" to any arguments on the command line: \"",
                      join(array_config{ " ", "", "" }, _argv), "\""));
         }
@@ -202,7 +220,7 @@ prepare_command_for_run(char* _exe, std::vector<char*>& _argv)
 void
 prepare_environment_for_run(std::vector<std::string>& _env)
 {
-    if(launcher.empty())
+    if(runtime_context().launcher.empty())
     {
         update_env(
             _env, "LD_PRELOAD",
@@ -219,9 +237,10 @@ void
 update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _env_val,
            bool _append, std::string_view _join_delim)
 {
-    auto _mode = _append ? update_mode::APPEND : update_mode::REPLACE;
+    auto  _mode = _append ? update_mode::APPEND : update_mode::REPLACE;
+    auto& ctx   = runtime_context();
     rocprofsys::common::update_env(_environ, _env_var, std::forward<Tp>(_env_val), _mode,
-                                   _join_delim, updated_envs, original_envs);
+                                   _join_delim, ctx.env.updated, ctx.env.initial);
 }
 
 template <typename Tp>
@@ -237,12 +256,13 @@ add_default_env(std::vector<std::string>& _environ, std::string_view _env_var,
 
     if(exists) return;
 
+    auto& ctx = runtime_context();
     rocprofsys::common::update_env(_environ, _env_var, std::forward<Tp>(_env_val),
-                                   update_mode::REPLACE, ":", updated_envs,
-                                   original_envs);
+                                   update_mode::REPLACE, ":", ctx.env.updated,
+                                   ctx.env.initial);
 }
 
-std::vector<char*>
+std::vector<std::string>
 parse_args(int argc, char** argv, std::vector<std::string>& _env,
            std::vector<std::map<std::string_view, std::string>>& _causal_envs)
 {
@@ -347,8 +367,8 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
                       "[DEPRECATED Use --log-level=trace] Verbose output")
         .count(1)
         .action([&](parser_t& p) {
-            auto _v = p.get<int>("verbose");
-            verbose = _v;
+            auto _v                         = p.get<int>("verbose");
+            runtime_context().verbose_level = _v;
             update_env(_env, "ROCPROFSYS_VERBOSE", _v);
 
             constexpr std::array<const char*, 5> log_levels = { "off", "info", "debug",
@@ -384,7 +404,9 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
             "proper target")
         .count(1)
         .dtype("executable")
-        .action([&](parser_t& p) { launcher = p.get<std::string>("launcher"); });
+        .action([&](parser_t& p) {
+            runtime_context().launcher = p.get<std::string>("launcher");
+        });
     parser
         .add_argument({ "-g", "--generate-configs" },
                       "Generate config files instead of passing environment variables "
@@ -629,7 +651,7 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
     parser.end_group();
 
     auto _inpv = std::vector<char*>{};
-    auto _outv = std::vector<char*>{};
+    auto _outv = std::vector<std::string>{};
     bool _hash = false;
     for(int i = 0; i < argc; ++i)
     {
