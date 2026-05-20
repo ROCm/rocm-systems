@@ -755,6 +755,10 @@ int main(int argc, char** argv)
     fprintf(stderr, "max_bytes must be >= %d\n", MIN_SWEEP_BYTES);
     return 1;
   }
+  if (max_data > SIZE_MAX / 2) {
+    fprintf(stderr, "max_bytes too large (max supported: %zu)\n", SIZE_MAX / 2);
+    return 1;
+  }
 
 
   int can01 = 0, can10 = 0;
@@ -762,9 +766,15 @@ int main(int argc, char** argv)
   HIP_CHECK(hipDeviceCanAccessPeer(&can10, 1, 0));
   if (!can01 || !can10) { fprintf(stderr, "No peer access\n"); return 1; }
   HIP_CHECK(hipSetDevice(0));
-  HIP_CHECK(hipDeviceEnablePeerAccess(1, 0));
+  { hipError_t e = hipDeviceEnablePeerAccess(1, 0);
+    if (e != hipSuccess && e != hipErrorPeerAccessAlreadyEnabled) {
+      fprintf(stderr, "HIP error %s at %s:%d\n", hipGetErrorString(e), __FILE__, __LINE__);
+      return 1; } }
   HIP_CHECK(hipSetDevice(1));
-  HIP_CHECK(hipDeviceEnablePeerAccess(0, 0));
+  { hipError_t e = hipDeviceEnablePeerAccess(0, 0);
+    if (e != hipSuccess && e != hipErrorPeerAccessAlreadyEnabled) {
+      fprintf(stderr, "HIP error %s at %s:%d\n", hipGetErrorString(e), __FILE__, __LINE__);
+      return 1; } }
 
   printf("LL one-way benchmark  LINE_BYTES=%d  DATA_BYTES=%d  "
          "warmup=%d  iters=%d  timeout=%.0fs  max=%zu B\n",
