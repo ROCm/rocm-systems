@@ -6,6 +6,7 @@
 
 #include <hip/hip_runtime.h>
 #include "hip_internal.hpp"
+#include "hip_executionctx.hpp"
 #include "hip_graph_internal.hpp"
 #include "hip_event.hpp"
 #include "thread/monitor.hpp"
@@ -61,6 +62,14 @@ bool Stream::Create() { return create(); }
 
 // ================================================================================================
 void Stream::Destroy(hip::Stream* stream, bool forceDestroy) {
+  // If this stream was created inside an hipExecutionCtx_t, unregister it
+  // so the context never keeps a dangling pointer after the stream is gone.
+  // If the ctx was already destroyed, Detach() has cleared executionCtx_
+  // and this is a no-op.
+  if (auto* ctx = stream->GetExecutionCtx()) {
+    ctx->removeStream(stream);
+    stream->SetExecutionCtx(nullptr);
+  }
   stream->device().removeFromActiveQueues(stream);
   stream->GetDevice()->RemoveStream(stream);
   stream->SetForceDestroy(forceDestroy);
@@ -365,6 +374,8 @@ hipError_t hipStreamSynchronize_common(hipStream_t stream) {
     return hipSuccess;
   }
 
+  CHECK_STREAM_DETACHED(stream);
+
   if (stream != hipStreamLegacy && hip::Stream::StreamCaptureOngoing(stream)) {
     HIP_RETURN(hipErrorStreamCaptureUnsupported);
   }
@@ -437,6 +448,7 @@ hipError_t hipStreamWaitEvent_common(hipStream_t stream, hipEvent_t event, unsig
     return hipErrorInvalidHandle;
   }
   getStreamPerThread(stream);
+  CHECK_STREAM_DETACHED(stream);
   hip::Stream* waitStream = hip::getStream(stream);
   hip::Event* e = reinterpret_cast<hip::Event*>(event);
   auto eventStreamHandle = reinterpret_cast<hipStream_t>(e->GetCaptureStream());
@@ -514,6 +526,8 @@ hipError_t hipStreamWaitEvent_spt(hipStream_t stream, hipEvent_t event, unsigned
 // ================================================================================================
 hipError_t hipStreamQuery_common(hipStream_t stream) {
   getStreamPerThread(stream);
+
+  CHECK_STREAM_DETACHED(stream);
 
   // If still capturing, return error.
   if (stream != nullptr && hip::Stream::StreamCaptureOngoing(stream)) {
@@ -619,6 +633,8 @@ hipError_t hipStreamAddCallback_common(hipStream_t stream, hipStreamCallback_t c
     return hipErrorInvalidValue;
   }
 
+  CHECK_STREAM_DETACHED(stream);
+
   if (stream != nullptr && stream != hipStreamLegacy && hip::isValid(stream)) {
     hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
     if (s->GetCaptureStatus() != hipStreamCaptureStatusNone) {
@@ -651,6 +667,7 @@ hipError_t hipStreamAddCallback_spt(hipStream_t stream, hipStreamCallback_t call
 
 // ================================================================================================
 hipError_t hipLaunchHostFunc_common(hipStream_t stream, hipHostFn_t fn, void* userData) {
+  CHECK_STREAM_DETACHED(stream);
   STREAM_CAPTURE(hipLaunchHostFunc, stream, fn, userData);
   if (fn == nullptr) {
     return hipErrorInvalidValue;

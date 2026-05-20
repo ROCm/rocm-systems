@@ -50,6 +50,9 @@ public:
 
   /// Register a stream created under this context.
   void addStream(hip::Stream* stream);
+  /// Removes a stream from this context's tracked set. Called by hipStreamDestroy
+  /// so that the context never keeps a dangling pointer after the stream is gone.
+  void removeStream(hip::Stream* stream);
 
   /// Block until all streams in this context have completed.
   hipError_t synchronize();

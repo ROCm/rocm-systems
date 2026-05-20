@@ -75,6 +75,7 @@ hipError_t hipMallocAsync(void** dev_ptr, size_t size, hipStream_t stream) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   getStreamPerThread(stream);
+  CHECK_STREAM_DETACHED(stream);
   if (size == 0) {
     *dev_ptr = nullptr;
     HIP_RETURN(hipSuccess);
@@ -135,6 +136,7 @@ hipError_t hipFreeAsync(void* dev_ptr, hipStream_t stream) {
   HIP_INIT_API(hipFreeAsync, dev_ptr, stream);
 
   getStreamPerThread(stream);
+  CHECK_STREAM_DETACHED(stream);
 
   hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
   auto hip_stream =
@@ -357,6 +359,7 @@ hipError_t hipMallocFromPoolAsync(void** dev_ptr, size_t size, hipMemPool_t mem_
     HIP_RETURN(hipErrorInvalidValue);
   }
   getStreamPerThread(stream);
+  CHECK_STREAM_DETACHED(stream);
   if (size == 0) {
     *dev_ptr = nullptr;
     HIP_RETURN(hipSuccess);

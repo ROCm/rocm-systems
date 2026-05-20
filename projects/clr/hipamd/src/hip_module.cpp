@@ -571,6 +571,7 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f, uint32_t gridDimX, uint32_t gr
   if (!hip::isValid(hStream)) {
     HIP_RETURN(hipErrorContextIsDestroyed);
   }
+  CHECK_STREAM_DETACHED(hStream);
 
   int deviceId = hip::Stream::DeviceId(hStream);
   const amd::Device* device = g_devices[deviceId]->devices()[0];
@@ -616,6 +617,7 @@ hipError_t hipExtModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX,
   if (!hip::isValid(hStream)) {
     HIP_RETURN(hipErrorContextIsDestroyed);
   }
+  CHECK_STREAM_DETACHED(hStream);
 
   int deviceId = hip::Stream::DeviceId(hStream);
   const amd::Device* device = g_devices[deviceId]->devices()[0];
@@ -661,6 +663,8 @@ hipError_t hipHccModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX,
                blockDimX, blockDimY, blockDimZ, sharedMemBytes, hStream, kernelParams, extra,
                startEvent, stopEvent);
 
+  CHECK_STREAM_DETACHED(hStream);
+
   int deviceId = hip::Stream::DeviceId(hStream);
   const amd::Device* device = g_devices[deviceId]->devices()[0];
   amd::LaunchParams launch_params(globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ, blockDimX,
@@ -682,6 +686,7 @@ hipError_t hipModuleLaunchCooperativeKernel(hipFunction_t f, unsigned int gridDi
   if (!hip::isValid(stream)) {
     HIP_RETURN(hipErrorContextIsDestroyed);
   }
+  CHECK_STREAM_DETACHED(stream);
 
   int deviceId = hip::Stream::DeviceId(stream);
   const amd::Device* device = g_devices[deviceId]->devices()[0];
@@ -844,6 +849,7 @@ hipError_t hipModuleLaunchCooperativeKernelMultiDevice(hipFunctionLaunchParams* 
     if (!hip::isValid(launchParamsList[i].hStream)) {
       HIP_RETURN(hipErrorInvalidValue);
     }
+    CHECK_STREAM_DETACHED(launchParamsList[i].hStream);
   }
 
   HIP_RETURN(ihipModuleLaunchCooperativeKernelMultiDevice(
@@ -873,6 +879,7 @@ hipError_t hipLaunchKernel_common(const void* hostFunction, dim3 gridDim, dim3 b
   if (!hip::isValid(stream)) {
     return hipErrorInvalidValue;
   }
+  CHECK_STREAM_DETACHED(stream);
   STREAM_CAPTURE(hipLaunchKernel, stream, hostFunction, gridDim, blockDim, args, sharedMemBytes);
   return ihipLaunchKernel(hostFunction, gridDim, blockDim, args, sharedMemBytes, stream, nullptr,
                           nullptr, 0, clusterDim, dynDataPrefetchConfig);
@@ -902,6 +909,7 @@ hipError_t hipExtLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 block
   if (!hip::isValid(stream) || !hip::isValid(startEvent) || !hip::isValid(stopEvent)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
+  CHECK_STREAM_DETACHED(stream);
 
   STREAM_CAPTURE(hipExtLaunchKernel, stream, hostFunction, gridDim, blockDim, args, sharedMemBytes,
                  startEvent, stopEvent, flags);
@@ -915,6 +923,7 @@ hipError_t hipLaunchCooperativeKernel_common(const void* f, dim3 gridDim, dim3 b
   if (!hip::isValid(hStream)) {
     return hipErrorInvalidValue;
   }
+  CHECK_STREAM_DETACHED(hStream);
 
   STREAM_CAPTURE(hipLaunchCooperativeKernel, hStream, f, gridDim, blockDim, kernelParams,
                  sharedMemBytes);
@@ -985,6 +994,7 @@ hipError_t ihipLaunchCooperativeKernelMultiDevice(hipLaunchParams* launchParamsL
     if (launch.stream == nullptr || launch.stream == hipStreamLegacy) {
       return hipErrorInvalidResourceHandle;
     }
+    CHECK_STREAM_DETACHED(launch.stream);
 
     // Not supported while stream is capturing
     hip::Stream* s = reinterpret_cast<hip::Stream*>(launch.stream);
@@ -1312,6 +1322,8 @@ hipError_t hipLaunchKernelExC(const hipLaunchConfig_t* config, const void* fPtr,
     HIP_RETURN(hipErrorInvalidConfiguration);
   }
 
+  CHECK_STREAM_DETACHED(config->stream);
+
   if (config->numAttrs == 0) {
     HIP_RETURN_DURATION(hipLaunchKernel_common(fPtr, config->gridDim, config->blockDim, args,
                                                config->dynamicSmemBytes, config->stream));
@@ -1376,6 +1388,8 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
   if (!hip::isValid(hStream)) {
     HIP_RETURN(hipErrorContextIsDestroyed);
   }
+  CHECK_STREAM_DETACHED(hStream);
+
   int drvDeviceId = hip::Stream::DeviceId(hStream);
   const amd::Device* drvDevice = g_devices[drvDeviceId]->devices()[0];
   amd::HIPLaunchParams launch_params(config->gridDimX, config->gridDimY, config->gridDimZ,

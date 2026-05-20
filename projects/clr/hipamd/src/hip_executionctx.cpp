@@ -51,9 +51,22 @@ hipError_t ExecutionCtx::Create() {
 }
 
 ExecutionCtx::~ExecutionCtx() {
+  // Any streams still attached to this ExecutionCtx become detached. After
+  // Detach() the stream handle is still valid for hipStreamDestroy, but any
+  // work-submit / sync API returns hipErrorStreamDetached, and any active
+  // capture is invalidated. Snapshot the set under the lock, then walk it
+  // outside the lock so each Detach() can touch per-stream state safely.
+  std::unordered_set<hip::Stream*> toDetach;
+  {
+    std::unique_lock lk(streamSetLock_);
+    toDetach.swap(streams_);
+  }
+  for (auto* s : toDetach) {
+    s->Detach();
+  }
+
   delete resourceDesc_;
   resourceDesc_ = nullptr;
-  streams_.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -62,6 +75,31 @@ ExecutionCtx::~ExecutionCtx() {
 void ExecutionCtx::addStream(hip::Stream* stream) {
   std::unique_lock lk(streamSetLock_);
   streams_.insert(stream);
+}
+
+void ExecutionCtx::removeStream(hip::Stream* stream) {
+  std::unique_lock lk(streamSetLock_);
+  streams_.erase(stream);
+}
+
+// ---------------------------------------------------------------------------
+// Stream::Detach implementation
+// ---------------------------------------------------------------------------
+// Defined here (rather than inline in hip_internal.hpp) so it sits next to the
+// ExecutionCtx lifecycle it pairs with. Invoked by ~ExecutionCtx().
+void Stream::Detach() {
+  // If this stream is currently driving an active capture, invalidate the
+  // capture on this stream and on every forked parallel branch (active
+  // stream captures on detached streams are invalidated).
+  if (captureStatus_ == hipStreamCaptureStatusActive) {
+    captureStatus_ = hipStreamCaptureStatusInvalidated;
+    for (auto s : parallelCaptureStreams_) {
+      reinterpret_cast<hip::Stream*>(s)->SetCaptureStatus(
+          hipStreamCaptureStatusInvalidated);
+    }
+  }
+  executionCtx_.store(nullptr, std::memory_order_release);
+  detached_.store(true, std::memory_order_release);
 }
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -651,6 +689,7 @@ hipError_t hipExecutionCtxStreamCreate(hipStream_t* stream, hipExecutionCtx_t gr
     HIP_RETURN(hipErrorOutOfMemory);
   }
 
+  hStream->SetExecutionCtx(ctx);
   ctx->addStream(hStream);
   *stream = reinterpret_cast<hipStream_t>(hStream);
   HIP_RETURN(hipSuccess);

@@ -13,6 +13,7 @@
 #include "rocclr/utils/debug.hpp"
 #include "hip_graph_capture.hpp"
 
+#include <atomic>
 #include <unordered_map>
 #include <unordered_set>
 #include <thread>
@@ -268,6 +269,17 @@ const char* ihipGetErrorName(hipError_t hip_error);
     stream = getPerThreadDefaultStream();                                                         \
   }
 
+// Detach guard. If the owning hipExecutionCtx_t has been destroyed, the
+// stream is flagged detached_; work-submit / sync / capture / graph-launch
+// APIs must early-return hipErrorStreamDetached. Default / legacy /
+// per-thread streams are never owned by an ExecutionCtx and therefore
+// never detach.
+#define CHECK_STREAM_DETACHED(stream)                                                              \
+  if ((stream) != nullptr && (stream) != hipStreamLegacy && (stream) != hipStreamPerThread &&      \
+      reinterpret_cast<hip::Stream*>(stream)->IsDetached()) {                                      \
+    return hipErrorStreamDetached;                                                                 \
+  }
+
 /// Stores the kernel launch configuration set by hipConfigureCall /
 /// __hipPushCallConfiguration and consumed by hipLaunchByPtr.
 /// Instances are managed on a per-thread stack (TlsAggregator::exec_stack_).
@@ -413,6 +425,32 @@ namespace hip {
     /// Remove a parallel capture stream
     void EraseParallelCaptureStream(hipStream_t s) { parallelCaptureStreams_.erase(s); }
 
+    // --- Execution context (green context) lifecycle ---
+
+    /// Records the ExecutionCtx that owns this stream. Set by
+    /// hipExecutionCtxStreamCreate; cleared back to nullptr by Stream::Destroy
+    /// or on detach.
+    void SetExecutionCtx(ExecutionCtx* ctx) {
+      executionCtx_.store(ctx, std::memory_order_release);
+    }
+    /// Returns the owning ExecutionCtx, or nullptr if none / already detached.
+    ExecutionCtx* GetExecutionCtx() const {
+      return executionCtx_.load(std::memory_order_acquire);
+    }
+    /// Marks the stream as detached: its owning ExecutionCtx has been
+    /// destroyed. Behavior:
+    ///   - Subsequent work-submit / sync APIs on this stream must return
+    ///     hipErrorStreamDetached (enforced by CHECK_STREAM_DETACHED).
+    ///   - If a stream capture is active on this stream, the capture is
+    ///     invalidated (status -> hipStreamCaptureStatusInvalidated) and every
+    ///     forked parallel branch is marked invalidated as well.
+    ///   - hipStreamDestroy continues to succeed on a detached stream.
+    void Detach();
+    /// Returns true once Detach() has been called.
+    bool IsDetached() const {
+      return detached_.load(std::memory_order_acquire);
+    }
+
   private:
     ~Stream() = default;
 
@@ -435,6 +473,15 @@ namespace hip {
     std::unordered_set<hipStream_t> parallelCaptureStreams_; //!< Forked parallel capture branches
     std::unordered_set<hipEvent_t> captureEvents_;        //!< Events tied to this capture
     uint64_t captureID_ = 0;                              //!< Unique ID for this capture sequence
+
+    // ----- Execution context (green context) state -----
+    /// Owning ExecutionCtx if the stream was created via
+    /// hipExecutionCtxStreamCreate; nullptr for regular streams and after detach.
+    std::atomic<ExecutionCtx*> executionCtx_{nullptr};
+    /// Set true when the owning ExecutionCtx is destroyed. Once detached,
+    /// work-submit / sync APIs on this stream return hipErrorStreamDetached;
+    /// hipStreamDestroy still succeeds.
+    std::atomic<bool> detached_{false};
 
     static CommandQueue::Priority convertToQueuePriority(Priority p) {
       return p == Priority::High  ? amd::CommandQueue::Priority::High
