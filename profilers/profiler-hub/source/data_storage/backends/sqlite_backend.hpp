@@ -90,7 +90,13 @@ public:
         static void run_prepared(sqlite3_stmt* stmt) noexcept
         {
             if(stmt == nullptr) return;
-            sqlite3_step(stmt);
+            int rc = sqlite3_step(stmt);
+            if(rc != SQLITE_DONE && rc != SQLITE_OK)
+            {
+                LOG_ERROR("transaction_guard: sqlite3_step failed ({}): {}",
+                          rc,
+                          sqlite3_errstr(rc));
+            }
             sqlite3_reset(stmt);
         }
 
