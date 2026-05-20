@@ -433,6 +433,15 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
               agentOwner->node_id(), reinterpret_cast<void*>(agentOwner->public_handle().handle),
               ptr);
 
+      // ROCR_SERVICE_SURVIVAL=1: return error to caller instead of
+      // taking down the process.  Lets the higher-level serving stack
+      // surface the failure to the affected request only.
+      if (runtime_singleton_->flag().rocr_service_survival()) {
+        fprintf(stderr,
+                "Memory Error: ROCR_SERVICE_SURVIVAL active, continuing.\n");
+        return HSA_STATUS_ERROR;
+      }
+
       assert(false && "GPU memory error.");
       std::abort();
     }
@@ -2131,6 +2140,15 @@ bool Runtime::HwExceptionHandler(hsa_signal_value_t val, void* arg) {
             reinterpret_cast<void*>(faultingAgent->public_handle().handle),
             (exception.ResetCause == HSA_EVENTID_HW_EXCEPTION_ECC) ? "ECC" : "GPU Hang");
 
+    // ROCR_SERVICE_SURVIVAL=1: non-abort path for non-ECC hangs.
+    // ECC errors stay abort-fatal because data integrity is at risk.
+    if (runtime_singleton_->flag().rocr_service_survival() &&
+        exception.ResetCause != HSA_EVENTID_HW_EXCEPTION_ECC) {
+      fprintf(stderr,
+              "HW Exception: ROCR_SERVICE_SURVIVAL active, continuing after GPU Hang.\n");
+      return false;
+    }
+
     assert(false && "GPU HW Exception");
     std::abort();
   }
@@ -2264,6 +2282,15 @@ bool Runtime::VMFaultHandler(hsa_signal_value_t val, void* arg) {
       else if (amd::coredump::dump_gpu_core())
         fprintf(stderr, "GPU core dump failed\n");
     }
+    // ROCR_SERVICE_SURVIVAL=1: surface VM fault as a recoverable
+    // error rather than aborting the host process.  The higher-level
+    // serving stack decides how to drain or reject in-flight work.
+    if (runtime_singleton_->flag().rocr_service_survival()) {
+      fprintf(stderr,
+              "VM Fault: ROCR_SERVICE_SURVIVAL active, continuing after memory fault.\n");
+      return false;
+    }
+
     assert(false && "GPU memory access fault.");
     std::abort();
   }

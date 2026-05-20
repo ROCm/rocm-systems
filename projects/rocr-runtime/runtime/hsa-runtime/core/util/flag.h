@@ -270,6 +270,30 @@ class Flag {
     var = os::GetEnvVar("HSA_SIGNAL_WAIT_ABORT_TIMEOUT");
     signal_abort_timeout_ = var.empty() ? 0 : atoi(var.c_str());
 
+    /* Non-abort per-call wait cap.  When set, WaitRelaxed returns
+     * the partial signal value at the configured ms deadline rather
+     * than blocking forever; complementary to (and distinct from)
+     * HSA_SIGNAL_WAIT_ABORT_TIMEOUT, which aborts the process.
+     * Default 0 = unbounded = stock behaviour. */
+    var = os::GetEnvVar("ROCR_SIGNAL_WAIT_MAX_MS");
+    rocr_signal_wait_max_ms_ = var.empty() ? 0 : atoi(var.c_str());
+
+    /* Service-survival master switch.  When 1, the runtime returns
+     * an error status from the memory-error / HW-exception / VM-fault
+     * handlers instead of calling std::abort(), so a serving stack can
+     * recover the affected request without taking the whole process
+     * down with it.  Default: 0 (stock abort()-on-fault behaviour). */
+    var = os::GetEnvVar("ROCR_SERVICE_SURVIVAL");
+    rocr_service_survival_ = (var == "1") ? true : false;
+
+    /* Wall-clock deadline (in ms) for the AcquireWriteAddress
+     * yield-loop in amd_blit_sdma.cpp.  When set and the SDMA ring
+     * stays full past the deadline, AcquireWriteAddress returns
+     * nullptr so the caller fails fast instead of spinning forever.
+     * Default 0 = legacy unbounded yield. */
+    var = os::GetEnvVar("ROCR_SDMA_WRITE_ADDR_FAIL_MS");
+    rocr_sdma_write_addr_fail_ms_ = var.empty() ? 0 : atoi(var.c_str());
+
     /* Valid inputs are 0-99, HIGH, MAX */
     var = os::GetEnvVar("HSA_ASYNCEVENTS_THREAD_PRIORITY");
     async_events_thread_priority_ = os::OS_THREAD_PRIORITY_DEFAULT;
@@ -456,6 +480,12 @@ class Flag {
 
   uint32_t signal_abort_timeout() const { return signal_abort_timeout_; }
 
+  uint32_t rocr_signal_wait_max_ms() const { return rocr_signal_wait_max_ms_; }
+
+  bool rocr_service_survival() const { return rocr_service_survival_; }
+
+  uint32_t rocr_sdma_write_addr_fail_ms() const { return rocr_sdma_write_addr_fail_ms_; }
+
   int async_events_thread_priority() const { return async_events_thread_priority_; }
 
   bool enable_3d_swizzle() const { return enable_3d_swizzle_; }
@@ -539,6 +569,9 @@ class Flag {
   bool wait_any_;
   bool dev_mem_queue_buf_;
   uint32_t signal_abort_timeout_;
+  uint32_t rocr_signal_wait_max_ms_ = 0;
+  bool     rocr_service_survival_ = false;
+  uint32_t rocr_sdma_write_addr_fail_ms_ = 0;
   int  async_events_thread_priority_;
   bool enable_3d_swizzle_ = false;
   bool enable_dtif_;

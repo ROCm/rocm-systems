@@ -154,6 +154,13 @@ hsa_signal_value_t InterruptSignal::WaitRelaxed(hsa_signal_condition_t condition
   const uint32_t &signal_abort_timeout =
     core::Runtime::runtime_singleton_->flag().signal_abort_timeout();
 
+  // ROCR_SIGNAL_WAIT_MAX_MS: optional non-abort per-call wait cap.
+  // 0 (default) preserves stock behaviour byte-identically.
+  const uint32_t rocr_signal_wait_max_ms =
+    core::Runtime::runtime_singleton_->flag().rocr_signal_wait_max_ms();
+  const timer::fast_clock::duration rocr_max_wait =
+    std::chrono::milliseconds(rocr_signal_wait_max_ms);
+
   while (true) {
     if (!IsValid()) return 0;
 
@@ -165,6 +172,14 @@ hsa_signal_value_t InterruptSignal::WaitRelaxed(hsa_signal_condition_t condition
 
     auto now = timer::fast_clock::now();
     if (now - start_time > fast_timeout) {
+      return value;
+    }
+
+    // ROCR_SIGNAL_WAIT_MAX_MS deadline check: return partial value
+    // rather than aborting the process (that is what the existing
+    // HSA_SIGNAL_WAIT_ABORT_TIMEOUT handles).
+    if (rocr_signal_wait_max_ms > 0 &&
+        now - start_time > rocr_max_wait) {
       return value;
     }
 

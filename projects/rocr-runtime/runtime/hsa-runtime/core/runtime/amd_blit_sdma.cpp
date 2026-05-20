@@ -57,6 +57,21 @@
 #include "core/inc/interrupt_signal.h"
 #include "core/inc/default_signal.h"
 
+// ROCR_SDMA_WRITE_ADDR_FAIL_MS: read once, cache forever.  Returns the
+// configured deadline in nanoseconds, or 0 if the env is unset / 0 (in
+// which case the AcquireWriteAddress yield loop is unbounded as before).
+namespace {
+static uint64_t SdmaWriteAddrFailNs() {
+  static std::atomic<uint64_t> cached{UINT64_MAX};
+  uint64_t v = cached.load(std::memory_order_relaxed);
+  if (v != UINT64_MAX) return v;
+  uint32_t ms = core::Runtime::runtime_singleton_->flag().rocr_sdma_write_addr_fail_ms();
+  v = static_cast<uint64_t>(ms) * 1000000ULL;
+  cached.store(v, std::memory_order_relaxed);
+  return v;
+}
+}  // namespace
+
 namespace rocr {
 namespace AMD {
 
@@ -1612,6 +1627,11 @@ char* BlitSdma<useGCR, scopeFields>::AcquireWriteAddress(uint32_t cmd_size, uint
 
   curr_index = atomic::Load(&cached_reserve_index_, std::memory_order_acquire);
 
+  // Optional wall-clock deadline gated by ROCR_SDMA_WRITE_ADDR_FAIL_MS.
+  // 0 (default) preserves the legacy unbounded yield-loop behaviour.
+  const uint64_t deadline_ns = SdmaWriteAddrFailNs();
+  const auto loop_start = std::chrono::steady_clock::now();
+
   while (true) {
     // Check whether a linear region of the requested size is available.
     // If == cmd_size: region is at beginning of ring.
@@ -1626,6 +1646,16 @@ char* BlitSdma<useGCR, scopeFields>::AcquireWriteAddress(uint32_t cmd_size, uint
     const uint64_t new_index = curr_index + cmd_size;
 
     if (CanWriteUpto(new_index) == false) {
+      // ROCR_SDMA_WRITE_ADDR_FAIL_MS: bail out if wall-clock deadline
+      // exceeded.  Caller treats nullptr as ring-not-available and
+      // surfaces the failure to higher-level survival policy.
+      if (deadline_ns) {
+        const auto elapsed_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - loop_start).count();
+        if (static_cast<uint64_t>(elapsed_ns) >= deadline_ns) {
+          return nullptr;
+        }
+      }
       // Wait for read index to move and try again.
       os::YieldThread();
       curr_index = atomic::Load(&cached_reserve_index_, std::memory_order_acquire);
@@ -1641,6 +1671,17 @@ char* BlitSdma<useGCR, scopeFields>::AcquireWriteAddress(uint32_t cmd_size, uint
 
     // CAS failed -- reuse the observed value directly, skip redundant atomic Load.
     curr_index = observed;
+
+    // ROCR_SDMA_WRITE_ADDR_FAIL_MS: same wall-clock cap on the
+    // CAS-collision spin path.
+    if (deadline_ns) {
+      const auto elapsed_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::steady_clock::now() - loop_start).count();
+      if (static_cast<uint64_t>(elapsed_ns) >= deadline_ns) {
+        return nullptr;
+      }
+    }
+
     _mm_pause();
   }
 
