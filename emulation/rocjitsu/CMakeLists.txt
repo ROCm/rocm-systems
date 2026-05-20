@@ -32,6 +32,38 @@ include(rj_log)
 # Sanitizer and static analysis options.
 option(RJ_SANITIZER "Enable sanitizer (asan, ubsan, tsan, or msan)" "")
 option(RJ_CLANG_TIDY "Enable clang-tidy static analysis" OFF)
+option(LTO "Enable link-time optimization (IPO) for Release / RelWithDebInfo" OFF)
+
+if(LTO)
+  if(RJ_SANITIZER)
+    message(FATAL_ERROR "LTO is incompatible with RJ_SANITIZER=${RJ_SANITIZER}. Disable one.")
+  endif()
+  include(CheckIPOSupported)
+  check_ipo_supported(RESULT _rj_ipo_ok OUTPUT _rj_ipo_err)
+  if(_rj_ipo_ok)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELWITHDEBINFO ON)
+    # Force parallel LTO. CMake's default IPO flag is a bare `-flto`, which
+    # makes GCC serialize LTRANS (warns: "using serial compilation of N
+    # LTRANS jobs"). Override per compiler:
+    #   GCC   : -flto=auto      — partition across all host cores.
+    #   Clang : -flto=thin      — ThinLTO is parallel by design.
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+      set(_rj_lto_flag "-flto=auto")
+    elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+      set(_rj_lto_flag "-flto=thin")
+    else()
+      set(_rj_lto_flag "")
+    endif()
+    if(_rj_lto_flag)
+      add_compile_options($<$<CONFIG:Release>:${_rj_lto_flag}> $<$<CONFIG:RelWithDebInfo>:${_rj_lto_flag}>)
+      add_link_options($<$<CONFIG:Release>:${_rj_lto_flag}> $<$<CONFIG:RelWithDebInfo>:${_rj_lto_flag}>)
+    endif()
+    message(STATUS "LTO enabled for Release and RelWithDebInfo (flag: ${_rj_lto_flag})")
+  else()
+    message(WARNING "LTO requested but IPO not supported: ${_rj_ipo_err}")
+  endif()
+endif()
 
 if(RJ_SANITIZER)
   message(STATUS "Sanitizer enabled: ${RJ_SANITIZER}")

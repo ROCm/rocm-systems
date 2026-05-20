@@ -324,6 +324,13 @@ configure_settings(bool _init)
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_ROCPD", "Enable rocpd backend", false,
                               "backend", "rocpd");
 
+    ROCPROFSYS_CONFIG_SETTING(
+        bool, "ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING",
+        "Enable unified memory profiling reports from KFD page fault and migration "
+        "events (requires HSA_XNACK=1 on a supported GPU; required KFD tracing is "
+        "enabled automatically)",
+        false, "backend", "unified_memory", "kfd");
+
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_AMD_SMI",
                               "Enable sampling GPU power, temp, utilization, "
                               "vcn_activity, jpeg_activity and memory usage",
@@ -872,6 +879,16 @@ configure_settings(bool _init)
     {
         kill_delay_config->set(0);
     }
+
+    ROCPROFSYS_CONFIG_SETTING(
+        std::string, "ROCPROFSYS_GPU_PERF_COUNTERS",
+        "GPU hardware counters to collect via device counting service (PMC polled "
+        "sampling). Comma-separated list of counter names (e.g. "
+        "SQ_WAVES,SQ_BUSY_CYCLES). "
+        "Independent from ROCPROFSYS_ROCM_EVENTS which controls kernel dispatch "
+        "counters. "
+        "If empty, no PMC sampling is performed.",
+        "", "rocm", "hardware_counters", "pmc", "process_sampling");
 
     ROCPROFSYS_CONFIG_SETTING(
         std::string, "ROCPROFSYS_RANK_FILTER_ID",
@@ -1483,7 +1500,7 @@ configure_disabled_settings(const std::shared_ptr<settings>& _config)
     {
         auto _v = itr.second->get_env_name();
         if(_hidden_exact.count(_v) > 0 ||
-           std ::regex_match(_v, std::regex{ _hidden_exact_re }) ||
+           std::regex_match(_v, std::regex{ _hidden_exact_re }) ||
            std::regex_match(_v, std::regex{ _hidden_begin_re }))
         {
             itr.second->set_enabled(false);
@@ -2376,11 +2393,16 @@ get_sampling_allocator_size()
 double
 get_process_sampling_freq()
 {
-    static auto _v = get_config()->find("ROCPROFSYS_PROCESS_SAMPLING_FREQ");
-    auto        _val =
-        std::min<double>(static_cast<tim::tsettings<double>&>(*_v->second).get(), 1000.0);
-    if(_val < 1.0e-9) return std::min<double>(get_sampling_freq(), 100.0);
-    return _val;
+    static auto _v   = get_config()->find("ROCPROFSYS_PROCESS_SAMPLING_FREQ");
+    const auto  _val = static_cast<tim::tsettings<double>&>(*_v->second).get();
+
+    constexpr auto effective_zero = 1.0e-9;
+    if(_val < effective_zero)
+    {
+        return std::min<double>(get_sampling_freq(), 100.0);
+    }
+
+    return std::min<double>(_val, 1000.0);
 }
 
 double
@@ -2394,6 +2416,13 @@ std::string
 get_sampling_gpus()
 {
     static auto _v = get_config()->find("ROCPROFSYS_SAMPLING_GPUS");
+    return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+}
+
+std::string
+get_gpu_perf_counters()
+{
+    static auto _v = get_config()->find("ROCPROFSYS_GPU_PERF_COUNTERS");
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 }
 
@@ -2530,6 +2559,29 @@ reset_database_path_memo()
 }
 
 std::string
+get_output_absolute_path(std::string_view basename, std::string_view extension,
+                         std::string_view tag, std::string_view dir)
+{
+    const auto* pwd  = getenv("PWD");
+    const auto* base = (pwd != nullptr) ? pwd : ".";
+
+    // compose_output_filename treats dir as a directory only if it ends in "/".
+    std::string dir_str{ dir };
+    if(!dir_str.empty() && dir_str.back() != '/') dir_str.push_back('/');
+
+    auto cfg = settings::compose_filename_config{ settings::use_output_suffix(), tag,
+                                                  false, std::move(dir_str) };
+
+    auto result = settings::compose_output_filename(std::string{ basename },
+                                                    std::string{ extension }, cfg);
+
+    if(!result.empty() && result.at(0) != '/')
+        return settings::format(fmt::format("{}/{}", base, result),
+                                get_config()->get_tag());
+    return result;
+}
+
+std::string
 get_perfetto_output_filename_with_suffix(std::string_view suffix)
 {
     static auto _v   = get_config()->find("ROCPROFSYS_PERFETTO_FILE");
@@ -2593,10 +2645,32 @@ get_perfetto_output_filename_with_suffix(std::string_view suffix)
     return _val;
 }
 
+std::string
+get_ump_absolute_path()
+{
+    if(!settings_are_configured()) return settings::output_path();
+
+    // Co-locate UMP output with the active backend: rocpd's .db dir when
+    // rocpd is on and trace-cache Perfetto is not; otherwise the Perfetto
+    // file's dir (covers both trace-cache and legacy Perfetto).
+    const auto source =
+        (get_use_rocpd() && !get_caching_perfetto())
+            ? get_database_absolute_path("rocpd", std::to_string(process::get_id()))
+            : get_perfetto_output_filename();
+    return tim::filepath::dirname(source);
+}
+
 bool&
 get_use_rocpd()
 {
     static auto _v = get_config()->at("ROCPROFSYS_USE_ROCPD");
+    return static_cast<tim::tsettings<bool>&>(*_v).get();
+}
+
+bool&
+get_use_unified_memory_profiling()
+{
+    static auto _v = get_config()->at("ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING");
     return static_cast<tim::tsettings<bool>&>(*_v).get();
 }
 

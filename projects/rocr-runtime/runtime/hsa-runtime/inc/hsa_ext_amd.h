@@ -48,6 +48,7 @@
 #include "hsa.h"
 #include "hsa_ext_image.h"
 #include "hsa_ven_amd_pc_sampling.h"
+#include "amd_launch_descriptor.h"
 
 /**
  * - 1.0 - initial version
@@ -73,9 +74,10 @@
  * - 1.20 - Memory batch discard API: hsa_amd_svm_discard_batch_async
  * - 1.21 - hsa_amd_signal_get_event_id
  * - 1.22 - hsa_amd_queue_get_info: per-queue VM fault state queries
+ * - 1.23 - hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_MAX_DATA_PREFETCH_REGIONS
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 21
+#define HSA_AMD_INTERFACE_VERSION_MINOR 23
 
 #ifdef __cplusplus
 extern "C" {
@@ -534,10 +536,17 @@ typedef struct hsa_amd_metadata_kernel_dispatch_packet_s {
    * Kernarg preload 30 through 31
    */
   uint32_t kernarg_preload_30_31[2];
-  /**
-   * Reserved. Must be 0.
-   */
-  uint8_t reserved1[52];
+  union {
+    /**
+     * Reserved. Must be 0.
+     */
+    uint8_t reserved1[52];
+    /**
+     * Launch descriptor. Overlays the former reserved1[52] area.
+     * Zero-initialised means version=0 (NONE) — CP treats as "no descriptor".
+     */
+    amd_launch_descriptor_t launch_descriptor;
+  };
 } hsa_amd_metadata_kernel_dispatch_packet_t;
 
 /**
@@ -952,6 +961,11 @@ typedef enum hsa_amd_agent_info_s {
    * Returns hsa_amd_dim3_t into value output.
    */
   HSA_AMD_AGENT_INFO_KERNEL_WG_MAX_DIM = 0xA122,
+  /*
+   * Maximum number of L2 data prefetch regions supported per kernel dispatch.
+   * Returns uint32_t. Zero if the device does not support dynamic data prefetch.
+   */
+  HSA_AMD_AGENT_INFO_MAX_DATA_PREFETCH_REGIONS = 0xA123,
 } hsa_amd_agent_info_t;
 
 /**

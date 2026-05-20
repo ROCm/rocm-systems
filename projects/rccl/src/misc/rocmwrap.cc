@@ -71,9 +71,15 @@ int ncclIsCuMemSupported() {
     supported = 0;
   }
   CUDACHECKGOTO(cudaDriverGetVersion(&cudaDriverVersion), ret, error);
-  if (cudaDriverVersion < 71260540) {
-    WARN("cuMem support requires HIP_VERSION >= 7.12.60540");
-    supported = 0;
+  {
+    // 70051831 = ROCm 7.0.2.2 backport build; [70051831, 70060000) covers 7.0.2.x range.
+    // Block scope prevents the goto in CUDACHECKGOTO from jumping over the bool initialization.
+    bool cuMemSupported = (cudaDriverVersion >= 71260540) ||
+                          (cudaDriverVersion >= 70051831 && cudaDriverVersion < 70060000);
+    if (!cuMemSupported) {
+      WARN("cuMem support requires HIP_VERSION >= 7.12.60540 (or ROCm 7.0.2.x backport)");
+      supported = 0;
+    }
   }
   CUDACHECKGOTO(cudaGetDevice(&cudaDev), ret, error);
   if (CUPFN(cuMemCreate) == NULL) supported = 0;
@@ -176,6 +182,8 @@ static void initOnceFunc() {
   if (hsaLib == NULL) {
     WARN("Failed to find ROCm runtime library in %s (RCCL_ROCR_PATH=%s)", ncclCudaPath, ncclCudaPath);
     goto error;
+  } else {
+    INFO(NCCL_INIT, "Using ROCr runtime at %s%s", path, ncclCudaPath ? " (RCCL_ROCR_PATH set)" : "");
   }
 
   /*

@@ -2147,8 +2147,7 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
         setFlag(HSA_EXTENSION_AMD_PC_SAMPLING);
       }
 
-      if (os::LibHandle lib = os::LoadLib(kAqlProfileLib)) {
-        os::CloseLib(lib);
+      if (core::Runtime::runtime_singleton_->AqlProfileAvailable()) {
         setFlag(HSA_EXTENSION_AMD_AQLPROFILE);
       }
 
@@ -2415,6 +2414,13 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
     case HSA_AMD_AGENT_INFO_CLUSTER_MAX_SIZE:
       *((uint64_t*)value) = cluster_max_dim_.x;
       break;
+    case HSA_AMD_AGENT_INFO_MAX_DATA_PREFETCH_REGIONS:
+      if (isa_->GetMajorVersion() == 12 && isa_->GetMinorVersion() >= 5) {
+        *((uint32_t*)value) = AMD_LAUNCH_DESCRIPTOR_MAX_PREFETCH_REGIONS;
+      } else {
+        *((uint32_t*)value) = 0;
+      }
+      break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       break;
@@ -2510,14 +2516,17 @@ hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
     shared_queue = static_cast<core::SharedQueue*>(finegrain_allocator()(
         sizeof(core::SharedQueue),
         core::MemoryRegion::AllocateUncached | MemoryRegion::AllocateQueueObject));
-  } else {
+  } else if (isMES()) {
     shared_queue =
         static_cast<core::SharedQueue*>(core::Runtime::runtime_singleton_->system_allocator()(
             sizeof(core::SharedQueue), MemoryRegion::GetPageSize(),
-            isMES() ? (MemoryRegion::AllocateGTTAccess | MemoryRegion::AllocateNonPaged |
-                       MemoryRegion::AllocateQueueObject)
-                    : MemoryRegion::AllocateQueueObject,
+            MemoryRegion::AllocateGTTAccess | MemoryRegion::AllocateNonPaged |
+                MemoryRegion::AllocateQueueObject,
             node_id()));
+  } else {
+    shared_queue = static_cast<core::SharedQueue*>(system_allocator()(
+        sizeof(core::SharedQueue), MemoryRegion::GetPageSize(),
+        MemoryRegion::AllocateQueueObject));
   }
 
   if (!shared_queue) {
