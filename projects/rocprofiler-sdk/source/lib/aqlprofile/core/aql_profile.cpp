@@ -195,12 +195,6 @@ is_read_api_enabled()
     return enabled;
 }
 
-CONSTRUCTOR_API void
-constructor()
-{
-    // Constructor intentionally empty - env reading deferred to first use
-}
-
 DESTRUCTOR_API void
 destructor()
 {
@@ -1029,11 +1023,9 @@ hsa_ven_amd_aqlprofile_att_marker(hsa_ven_amd_aqlprofile_profile_t*           pr
 extern "C" BOOL WINAPI
 DllMain(HINSTANCE /*hinstDLL*/, DWORD fdwReason, LPVOID /*lpvReserved*/)
 {
-    switch(fdwReason)
+    if(fdwReason == DLL_PROCESS_DETACH)
     {
-        case DLL_PROCESS_ATTACH: aql_profile::constructor(); break;
-        case DLL_PROCESS_DETACH: aql_profile::destructor(); break;
-        default: break;
+        aql_profile::destructor();
     }
     return TRUE;
 }
