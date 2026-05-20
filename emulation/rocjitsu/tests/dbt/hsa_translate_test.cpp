@@ -13,6 +13,7 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 RJ_DIAGNOSTIC_POP
 
 #include "rocjitsu/code/amdgpu_code_object.h"
+#include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/dbt/binary_translator.h"
 #include "rocjitsu/code/executable.h"
 
@@ -107,18 +108,27 @@ HostTarget select_host_target(hsa_agent_t gpu) {
   hsa_isa_t isa{};
   hsa_agent_get_info(gpu, HSA_AGENT_INFO_ISA, &isa);
   hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, t.isa_name);
-  if (std::strstr(t.isa_name, "gfx942")) {
+  // GFX940/941/942 are all CDNA3 ISA targets. Keep the DBT arch selection the
+  // same for all three, but preserve the exact ELF MACH value that HSA expects
+  // for the host agent's code object loader.
+  if (std::strstr(t.isa_name, "gfx940")) {
     t.arch = ROCJITSU_CODE_ARCH_CDNA3;
-    t.mach = 0x4C;
+    t.mach = EF_AMDGPU_MACH_AMDGCN_GFX940;
+  } else if (std::strstr(t.isa_name, "gfx941")) {
+    t.arch = ROCJITSU_CODE_ARCH_CDNA3;
+    t.mach = EF_AMDGPU_MACH_AMDGCN_GFX941;
+  } else if (std::strstr(t.isa_name, "gfx942")) {
+    t.arch = ROCJITSU_CODE_ARCH_CDNA3;
+    t.mach = EF_AMDGPU_MACH_AMDGCN_GFX942;
   } else if (std::strstr(t.isa_name, "gfx1100")) {
     t.arch = ROCJITSU_CODE_ARCH_RDNA3;
-    t.mach = 0x41;
+    t.mach = EF_AMDGPU_MACH_AMDGCN_GFX1100;
   } else if (std::strstr(t.isa_name, "gfx1201")) {
     t.arch = ROCJITSU_CODE_ARCH_RDNA4;
-    t.mach = 0x4E;
+    t.mach = EF_AMDGPU_MACH_AMDGCN_GFX1201;
   } else if (std::strstr(t.isa_name, "gfx1200")) {
     t.arch = ROCJITSU_CODE_ARCH_RDNA4;
-    t.mach = 0x48;
+    t.mach = EF_AMDGPU_MACH_AMDGCN_GFX1200;
   }
   return t;
 }
@@ -126,7 +136,7 @@ HostTarget select_host_target(hsa_agent_t gpu) {
 } // namespace
 
 TEST(HsaTranslateTest, TranslateAndDispatchVectorAdd) {
-  // 1. Translate CDNA4 to the host RDNA target.
+  // 1. Translate CDNA4 to the selected host target.
   Executable exec(kernel_path("vector_add"));
   ASSERT_TRUE(exec.is_valid());
   ASSERT_GT(exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX950), 0u);
@@ -139,7 +149,7 @@ TEST(HsaTranslateTest, TranslateAndDispatchVectorAdd) {
   ASSERT_NE(gpu.handle, 0u) << "No GPU agent found";
 
   auto target = select_host_target(gpu);
-  ASSERT_NE(target.mach, 0u) << "Test requires CDNA3 (gfx942), RDNA3 (gfx1100), or RDNA4 "
+  ASSERT_NE(target.mach, 0u) << "Test requires CDNA3 (gfx940/941/942), RDNA3 (gfx1100), or RDNA4 "
                                 "(gfx1200/1201) GPU, found: "
                              << target.isa_name;
 

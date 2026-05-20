@@ -172,7 +172,7 @@ if(HSA_RUNTIME64)
             execute_process(COMMAND ${ROCM_AGENT_ENUM}
                 OUTPUT_VARIABLE _agents OUTPUT_STRIP_TRAILING_WHITESPACE
                 ERROR_QUIET RESULT_VARIABLE _agent_rc)
-            if(_agent_rc EQUAL 0 AND _agents MATCHES "gfx942|gfx1100|gfx120[01]")
+            if(_agent_rc EQUAL 0 AND _agents MATCHES "gfx94[012]|gfx1100|gfx120[01]")
                 set(HAS_DBT_VECTOR_ADD_GPU TRUE)
             endif()
             if(_agent_rc EQUAL 0 AND _agents MATCHES "gfx120[01]")
