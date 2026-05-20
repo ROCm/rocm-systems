@@ -156,6 +156,9 @@ U:id:name               — user scope marker (enter/exit)
 P:id:name               — point marker (barrier, memory op, user point)
 P:id:name@source_loc    — point marker with source location (addr trace ops)
 W:N                     — wave size (32 or 64), present when address tracing is enabled
+R:id:extra_payload_count=N
+                        — optional record metadata; number of following
+                          s_ttracedata records consumed by this marker header
 ```
 
 `source_loc`, when present, follows rocprofiler-sdk's inline-chain format:
@@ -170,6 +173,9 @@ The decoder uses the funcmap type to determine behavior:
 - `P:` markers with `addr_trace_` prefix trigger address block parsing
 - `K:` entries are not instrumented; they provide vaddr lookup for kernels
 - `W:` entries communicate the wave size from the compiler to the decoder
+- `R:` entries attach optional metadata to a marker ID. Missing `R:` rows
+  imply `extra_payload_count=0`, which is the behavior for function markers,
+  user markers, barriers, and normal memory point markers.
 - User markers (`U:`) and the deduplicated point markers for barriers /
   vmem are intentionally source-loc-less: their IDs are shared across all
   call sites so any single source loc would be misleading.
@@ -234,18 +240,21 @@ can opt down.
 
 | Value | Synonyms | Boundary emitted | Machine cost | Drift protection |
 |-------|----------|------------------|--------------|------------------|
-| `fence` | `2`, `on`, `hw` | `fence syncscope("workgroup") acq_rel` | `s_waitcnt lgkmcnt(0)` (free in non-LDS code; serializes LDS pipelining) | Strongest — survives post-RA sinking, block placement, and machine scheduling |
+| `fence` | `2`, `on`, `hw` | `fence syncscope("workgroup") acq_rel, !mmra !{!"amdgpu-synchronize-as", !"local"}` | target-dependent local/LDS fence code; no marker-generated global cache invalidation | Strongest — survives post-RA sinking, block placement, and machine scheduling |
 | `asm`   | `1`, `compiler`, `clobber` | empty inline asm `~{memory}` | 0 (IR/MIR-only constraint) | Stops IR/MIR memory reorderings, does **not** constrain post-RA sinking |
 | `none`  | `0`, `off` | nothing | 0 | Only the cheap `sched_barrier(0)` hints survive — markers may drift in LDS-pipelined regions |
 
-**Why workgroup-scope `acq_rel`:** on AMDGPU, a workgroup-scope acq_rel fence
-lowers to a single `s_waitcnt lgkmcnt(0)`. In code that is not pipelining LDS
-traffic this waitcnt is **free** (lgkmcnt is already 0). When LDS traffic *is*
-in flight the fence forces drainage on each side of the marker, which is
-exactly the property that anchors the marker in the trace timeline. Symmetric
-`acq_rel` on both sides is used (rather than `release`-then-`acquire`) so the
-marker is a *true* boundary regardless of which direction the optimizer would
-otherwise sink instructions.
+**Why workgroup-scope `acq_rel`:** the marker fence is a compiler-visible
+boundary, not a data-sharing operation. It exists so optimizers and backend
+schedulers cannot move `s_ttracedata` away from the memory operation or barrier
+it is meant to timestamp. Symmetric `acq_rel` on both sides is used (rather
+than `release`-then-`acquire`) so the marker is a *true* boundary regardless of
+which direction the optimizer would otherwise sink instructions.
+
+**Why `amdgpu-synchronize-as:local`:** SQTT markers themselves do not access
+global memory. The AMDGPU MMRA tag lets codegen avoid treating this marker-only
+fence as a global-memory synchronization point, preventing marker-generated
+`global_inv` while keeping the IR fence in place for marker placement.
 
 The `none` mode is provided for kernels where SQTT timing fidelity is less
 important than peak throughput (e.g. measuring only call-graph shape, not
@@ -443,6 +452,7 @@ U:ID:marker_name                               -- named user scope marker (enter
 P:ID:marker_name                               -- point marker (barrier, memory op, user point)
 P:ID:addr_trace_load@kernel.hip:59 -> hip_runtime.h:264
                                                -- address trace op with inline chain source location
+R:ID:extra_payload_count=130                   -- following payload records for that header
 W:64                                           -- wave size (present when address tracing is enabled)
 ```
 
@@ -798,15 +808,25 @@ Example funcmap entries:
 ```
 W:64
 P:5:addr_trace_lds_store@test_auto.hip:45
+R:5:extra_payload_count=66
 P:6:addr_trace_lds_load@test_auto.hip:49
+R:6:extra_payload_count=66
 P:7:addr_trace_store@test_auto.hip:62
+R:7:extra_payload_count=130
 P:8:addr_trace_atomic@test_auto.hip:70
+R:8:extra_payload_count=130
 P:9:addr_trace_buffer_load@test_auto.hip:85
+R:9:extra_payload_count=69
 ```
 
 This allows the decoder to correlate each address trace back to the exact
 source line and distinguish between multiple memory operations of the same
 kind.
+
+The `extra_payload_count` value excludes the header marker itself and counts
+only subsequent records in the same `(cu, simd, wave_id)` stream. Existing
+parsers that do not understand `R:` rows can ignore them; all markers without
+an `R:` row have an implicit count of zero.
 
 ### IR generation
 

@@ -153,6 +153,8 @@ TESTS = [
         "mode": "ir",
         "expect_ir": [
             r'fence syncscope\("workgroup"\) acq_rel',
+            r"amdgpu-synchronize-as",
+            r"!\"local\"",
             r"ttracedata",
         ],
         "reject_ir": [
@@ -171,6 +173,8 @@ TESTS = [
         "mode": "ir",
         "expect_ir": [
             r'fence syncscope\("workgroup"\) acq_rel',
+            r"amdgpu-synchronize-as",
+            r"!\"local\"",
         ],
         "reject_ir": [
             r'call void asm sideeffect "", "~\{memory\}"',
@@ -228,6 +232,8 @@ TESTS = [
         "mode": "ir",
         "expect_ir": [
             r'fence syncscope\("workgroup"\) acq_rel',
+            r"amdgpu-synchronize-as",
+            r"!\"local\"",
         ],
         "reject_ir": [],
         "expect_funcmap": [],
@@ -488,6 +494,22 @@ TESTS = [
         "expect_funcmap": [],
         "reject_funcmap": [],
     },
+    {
+        "name": "gfx12_markers_no_global_inv",
+        "desc": "gfx12 marker fences do not generate global cache invalidates",
+        "env": {},
+        "mode": "asm",
+        "source": "marker",
+        "flags": ["--offload-arch=gfx1200"],
+        "expect_ir": [
+            r"s_ttracedata",
+        ],
+        "reject_ir": [
+            r"global_inv\b",
+        ],
+        "expect_funcmap": [],
+        "reject_funcmap": [],
+    },
     # --- User marker tests ---
     {
         "name": "user_markers",
@@ -733,18 +755,39 @@ def check_custom_asm(result: TestResult, asm: str, check: str):
 def check_custom_funcmap(result: TestResult, funcmap: str, check: str):
     """Run custom funcmap validation checks."""
     if check == "unique_addr_ids":
-        # Parse all P:id:addr_trace_* entries and verify IDs are unique
+        # Parse all P:id:addr_trace_* entries and verify IDs are unique.
+        # Address trace headers must also carry nonzero extra payload metadata.
         ids = []
+        payload_counts = {}
         for line in funcmap.splitlines():
             line = line.strip().rstrip("\x00")
             if line.startswith("P:") and "addr_trace_" in line:
                 parts = line.split(":", 2)
                 if len(parts) >= 3:
                     ids.append(int(parts[1]))
+            elif line.startswith("R:"):
+                parts = line.split(":", 2)
+                if len(parts) != 3:
+                    continue
+                try:
+                    mid = int(parts[1])
+                except ValueError:
+                    continue
+                for item in parts[2].split(";"):
+                    key, sep, value = item.partition("=")
+                    if sep and key == "extra_payload_count":
+                        try:
+                            payload_counts[mid] = int(value)
+                        except ValueError:
+                            pass
         if len(ids) < 2:
             result.fail(f"Expected at least 2 addr_trace entries, got {len(ids)}")
         elif len(ids) != len(set(ids)):
             result.fail(f"Addr trace IDs are not unique: {ids}")
+        missing_payloads = [mid for mid in ids if payload_counts.get(mid, 0) <= 0]
+        if missing_payloads:
+            result.fail(
+                f"Addr trace IDs missing nonzero extra_payload_count: {missing_payloads}")
 
 
 def main():
