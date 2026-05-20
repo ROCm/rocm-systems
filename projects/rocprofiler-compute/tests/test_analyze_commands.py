@@ -25,6 +25,7 @@ indirs = [
     "tests/workloads/vcopy/MI300A_A1",
     "tests/workloads/vcopy/MI300X_A1",
     "tests/workloads/vcopy/MI350",
+    "tests/workloads/vcopy/RDNA35_HALO",
 ]
 
 roofline_dir = "tests/workloads/mem_levels_HBM/MI200"
