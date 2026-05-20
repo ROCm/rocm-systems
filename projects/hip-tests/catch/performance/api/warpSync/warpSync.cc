@@ -327,7 +327,7 @@ void benchmarkCoop(LinearAllocGuard<T>* d_outputCoop,
 
   for (const auto& mask : masks) {
     printf("%s %llx\n", mask.first.c_str(), mask.second);
-    unsigned long warpMask = wavefrontSize == 64? ~0ull : 0xFFFFFFFF;
+    unsigned long long warpMask = wavefrontSize == 64? ~0ull : 0xFFFFFFFF;
 
     if (mask.second == (fullMask & warpMask)) {
       if (wavefrontSize == 64) {
