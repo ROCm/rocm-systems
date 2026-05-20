@@ -17,6 +17,23 @@ NCCL_PARAM(GinType, "GIN_TYPE", -1);
 NCCL_PARAM(GinSignalPoolSize, "GIN_SIGNAL_POOL_SIZE", 64 << 10);
 NCCL_PARAM(GinCounterPoolSize, "GIN_COUNTER_POOL_SIZE", 64 << 10);
 
+
+//RCCL: RCCL shortcat
+ncclResult_t setLocalGinType(struct ncclComm* comm) {
+  if (comm == nullptr || comm->sharedRes->ginState.ncclGin == nullptr) {
+    return ncclInternalError;
+  }
+  ncclGinState& ginState = comm->sharedRes->ginState;
+  ginState.ginType = NCCL_GIN_TYPE_NONE;
+
+  if (!ncclParamGinEnable()) {
+    return ncclSuccess;
+  }
+
+  ginState.ginType = NCCL_NET_DEVICE_GIN_PROXY;
+  return ncclSuccess;
+}
+
 void* ncclGinProgress(void* ginState_) {
   struct ncclGinState* ginState = (struct ncclGinState*)ginState_;
   while (1) {
@@ -126,8 +143,9 @@ ncclResult_t ncclGinConnectOnce(struct ncclComm* comm) {
                                               &ginState->ginCtx[n], &ginState->ginDevHandles[n]),
                     ret, fail);
     } else {
+      ncclGinConfig_t ginConfig = {ginState->signalSpaceSize, ginState->counterSpaceSize, 1, 0, 0};
       NCCLCHECKGOTO(ginState->ncclGin->createContext(
-                      ginState->ginComms[n], ginState->signalSpaceSize, ginState->counterSpaceSize,
+                      ginState->ginComms[n], &ginConfig,
                       &ginState->ginCtx[n], &ginState->ginDevHandles[n]),
                     ret, fail);
     }
@@ -163,7 +181,7 @@ fail:
   goto exit;
 }
 
-ncclResult_t ncclGinFinalize(struct ncclComm* comm) {
+ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) {
   struct ncclGinState* ginState = &comm->sharedRes->ginState;
   if (!ginState->connected) return ncclSuccess;
 

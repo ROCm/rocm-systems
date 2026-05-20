@@ -18,13 +18,15 @@
 
 struct ncclDevrMemory;
 struct ncclDevrWindow {
-  struct ncclDevrMemory* memory;
+  struct ncclDevrMemory* memory; // nullptr for proxy-only windows
   void* userPtr;
   size_t size;
   size_t bigOffset; // Offset in big VA space.
   int winFlags;
   void* localRegHandle;
   struct ncclWindow_vidmem* vidmem;
+  void* rmaHostWins[4]; // IB MR handles per GIN connection (proxy-only path)
+  ncclGinWindow_t rmaDevWins[4]; // device-side GIN window handles (proxy-only path)
 };
 struct ncclDevrWindowSorted;
 struct ncclDevrTeam;
@@ -53,6 +55,7 @@ struct ncclDevrState {
 
   size_t granularity; // cuMemGetAllocationGranularity
   bool ginEnabled;
+  bool rmaProxyEnabled;
   struct ncclDevrMemory* memHead;
   struct ncclDevrWindowSorted* winSorted;
   int winSortedCapacity, winSortedCount;
@@ -90,4 +93,6 @@ ncclResult_t ncclDevrGetLsaRankPtr(struct ncclComm* comm, struct ncclDevrWindow*
 
 // Get the multicast address for a given team
 ncclResult_t ncclDevrGetLsaTeamPtrMC(struct ncclComm* comm, struct ncclDevrWindow* winHost, size_t offset, struct ncclTeam lsaTeam, void** outPtr);
+
+ncclGinWindow_t ncclDevrGetRmaDevWin(struct ncclDevrWindow* winHost, int ctx);
 #endif

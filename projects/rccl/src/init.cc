@@ -9,6 +9,7 @@
 #include "nccl.h"
 #include "alloc.h"
 #include "channel.h"
+#include "dev_runtime.h"
 #include "nvmlwrap.h"
 #include "gdrwrap.h"
 #include "bootstrap.h"
@@ -50,6 +51,8 @@
 #include <unordered_map>
 #include "ce_coll.h"
 #include "nvtx.h"
+#include "gin.h"
+#include "nccl_merge_stubs.h"
 #include "env.h"
 
 // [RCCL]
@@ -110,6 +113,7 @@ NCCL_PARAM(WinEnable, "WIN_ENABLE", 1);
 NCCL_PARAM(CollnetEnable, "COLLNET_ENABLE", NCCL_CONFIG_UNDEF_INT);
 NCCL_PARAM(CtaPolicy, "CTA_POLICY", NCCL_CONFIG_UNDEF_INT);
 NCCL_PARAM(NvlsChannels, "NVLS_NCHANNELS", NCCL_CONFIG_UNDEF_INT);
+NCCL_PARAM(NumRmaCtx, "NUM_RMA_CTX", NCCL_CONFIG_UNDEF_INT);
 NCCL_PARAM(SetCpuStackSize, "SET_CPU_STACK_SIZE", 1);
 
 extern int64_t ncclParamSingleProcMemRegEnable();
@@ -610,11 +614,14 @@ skip_profiling:
   for (int channel=0; channel<MAXCHANNELS; channel++)
     NCCLCHECK(freeChannel(comm->channels+channel, comm->nRanks, 1, comm->localRanks));
 
+  // RMA proxy must be finalized before destroying the proxy.
+  NCCLCHECK(ncclRmaProxyFinalize(comm));
+
   if (comm->doneEvent != NULL)
     CUDACHECK(hipEventDestroy(comm->doneEvent));
 
   // GIN may use proxy. We need to finalize it before destroying the proxy.
-  NCCLCHECK(ncclGinFinalize(comm));
+  NCCLCHECK(ncclGinHostFinalize(comm));
 
   int sharedResRefCount = 0;
   if (comm->sharedRes) {
@@ -630,6 +637,7 @@ skip_profiling:
       CUDACHECK(cudaEventDestroy(comm->sharedRes->launchEvent));
       CUDACHECK(cudaEventDestroy(comm->sharedRes->scratchEvent));
       NCCLCHECK(ncclProxyDestroy(comm));
+      NCCLCHECK(ncclGinFinalize(comm));
       free(comm->sharedRes);
     }
   }
@@ -895,9 +903,11 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
     CUDACHECK(cudaEventCreateWithFlags(&sharedRes->scratchEvent, cudaEventDisableTiming));
     comm->sharedRes = sharedRes;
     sharedRes->refCount = 1;
+    NCCLCHECK(ncclGinInit(comm));
   } else {
     comm->sharedRes = parent->sharedRes;
     ncclAtomicRefCountIncrement(&parent->sharedRes->refCount);
+    NCCLCHECK(ncclGinInitFromParent(comm, parent));
   }
 
   CUDACHECK(hipDeviceGetAttribute(&comm->WarpSize, hipDeviceAttributeWarpSize, comm->cudaDev));
@@ -1216,6 +1226,14 @@ static ncclResult_t fillInfo(struct ncclComm* comm, struct ncclPeerInfo* info, u
     }
 #endif
 
+  NCCLCHECK(ncclTopoCheckCrossNicSupport(&info->crossNicSupport));
+  int cuMemGdrSupport = 1;
+  // Not needed for HIP
+  //CUCHECK(cuDeviceGetAttribute(&cuMemGdrSupport, CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_WITH_CUDA_VMM_SUPPORTED, comm->cudaDev));
+  info->cuMemGdrSupport = (cuMemGdrSupport == 1);
+  info->supportedGinType = (ncclGinType_t)comm->sharedRes->ginState.ginType;
+  info->rmaPluginAvailable = (comm->rmaState.rmaProxyState.ncclGin != nullptr);
+
   return ncclSuccess;
 }
 
@@ -1448,6 +1466,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     bool pivotA2AEnabled;
     bool ll128Enabled;
     char hostname[128];
+    bool nicFused;
   };
 
   int nChannelsOrig;
@@ -1460,6 +1479,12 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   int* pxnPeers = NULL;
   int *topParentLocalRanks = NULL;
   int p2pLevel = -1;
+  bool globalNicFused = false;
+  bool globalGinSupport = comm->sharedRes->ginState.ginType != NCCL_GIN_TYPE_NONE;
+  bool globalCrossNicSupport = true;
+  bool globalRmaPluginSupport = true;
+  bool globalCuMemGdrSupport = true;
+  bool isOneLsaTeams = false;
 
   timers[TIMER_INIT_ALLGATHER] = clockNano();
   // AllGather1 - begin
@@ -1478,6 +1503,10 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     }
     if (comm->peerInfo[i].hostHash != comm->peerInfo[rank].hostHash) nNodes++;
     if (!comm->peerInfo[i].cuMemSupport) comm->cuMemSupport = 0;
+    globalGinSupport &= (comm->peerInfo[i].supportedGinType == comm->sharedRes->ginState.ginType);
+    globalCrossNicSupport &= comm->peerInfo[i].crossNicSupport;
+    globalRmaPluginSupport &= comm->peerInfo[i].rmaPluginAvailable;
+    globalCuMemGdrSupport &= comm->peerInfo[i].cuMemGdrSupport;
     if ((i != rank) && (comm->peerInfo[i].hostHash == comm->peerInfo[rank].hostHash) && (comm->peerInfo[i].busId == comm->peerInfo[rank].busId)) {
       WARN("Duplicate GPU detected : rank %d and rank %d both on CUDA device %lx", rank, i, comm->peerInfo[rank].busId);
       ret = ncclInvalidUsage;
@@ -1833,6 +1862,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   allGather3Data[rank].romeTopoModelIdx = comm->topo->romeTopoModelIdx;
   (void) getHostName(allGather3Data[rank].hostname, sizeof(allGather3Data[rank].hostname), '\0');
 
+  NCCLCHECKGOTO(ncclTopoCheckNicFused(comm, &allGather3Data[rank].nicFused), ret, fail);
   comm->nChannels = std::min(treeGraph->nChannels, ringGraph->nChannels);
 
   //For a 1‑rank job there’s no topology constraint, so ncclTopoCompute drives the ring to its allowed maximum, which results 4 x MAXCHANNELS channels for single rank comms and causes issues.
@@ -1875,6 +1905,9 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     if (comm->cpuVendor != allGather3Data[r].cpuVendor &&
         comm->cpuVendor != NCCL_TOPO_CPU_VENDOR_MIXED) {
       comm->cpuVendor = NCCL_TOPO_CPU_VENDOR_MIXED;
+    }
+    if (allGather3Data[r].nicFused) {
+      globalNicFused = true;
     }
   }
 
@@ -2033,6 +2066,14 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   NCCLCHECKGOTO(ncclCalloc(&comm->gproxyConn, comm->nRanks), ret, fail);
 
   timers[TIMER_INIT_CONNECT] = clockNano();
+  if (comm->config.numRmaCtx > 0) {
+    comm->planner.rmaTaskQueues = ncclMemoryStackAlloc<ncclIntruQueue<ncclTaskRma, &ncclTaskRma::next>>(&comm->memPermanent, comm->config.numRmaCtx);
+    for (int i = 0; i < comm->config.numRmaCtx; i++) {
+      ncclIntruQueueConstruct(&comm->planner.rmaTaskQueues[i]);
+    }
+  } else {
+    comm->planner.rmaTaskQueues = NULL;
+  }
   // Build p2p schedule
   comm->p2pSchedule = ncclMemoryStackAlloc<ncclComm::P2pSchedulePair>(&comm->memPermanent, comm->nRanks);
   comm->planner.peers = ncclMemoryStackAlloc<ncclKernelPlanner::Peer>(&comm->memPermanent, comm->nRanks);
@@ -2159,6 +2200,23 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
 
   comm->symmetricSupport = comm->isAllCudaP2p && ncclParamWinEnable() && ncclCuMemEnable();
   comm->devrState.bigSize = 0;
+  
+  comm->globalRmaProxySupport = globalRmaPluginSupport && globalCrossNicSupport && !globalNicFused && globalCuMemGdrSupport;
+#ifdef  RCCL_RMA_CU_PATH_ENABLED
+  isOneLsaTeams = ncclDevrIsOneLsaTeam(comm);
+#endif
+  // Fix 1: store fully-reduced globalGinSupport bool into the comm field
+  comm->globalGinSupport = globalGinSupport ? NCCL_GIN_CONNECTION_FULL : NCCL_GIN_CONNECTION_NONE;
+  comm->symmetricSupport = comm->isAllCudaP2p && ncclParamWinEnable() && ncclCuMemEnable() && (comm->globalGinSupport != NCCL_GIN_CONNECTION_NONE || isOneLsaTeams);
+  // Fix 2: proxy GIN path does not require cuMem/symmetric memory
+  comm->hostRmaSupport = ncclParamWinEnable() && (isOneLsaTeams || (comm->globalGinSupport != NCCL_GIN_CONNECTION_NONE && comm->globalRmaProxySupport));
+  INFO(NCCL_INIT, "hostRmaSupport %d: WinEnable %ld, LsaTeams %d, globalGinSupport %d, globalRmaProxySupport %d (plugin %d, crossNic %d, nicFused %d, gdrSupport %d)",
+    comm->hostRmaSupport, ncclParamWinEnable(), (int)isOneLsaTeams, comm->globalGinSupport, comm->globalRmaProxySupport,
+    (int)globalRmaPluginSupport, (int)globalCrossNicSupport, (int)globalNicFused, (int)globalCuMemGdrSupport);
+  if (!comm->symmetricSupport) {
+    INFO(NCCL_INIT, "Symmetric memory is not supported. cuMemEnable %d, "
+      "globalGinSupport %d, globalNicFused %d cuMemGdrSupport %d", ncclCuMemEnable(), comm->globalGinSupport, globalNicFused, globalCuMemGdrSupport);
+  }
 
   comm->ceColl.baseUCSymReadyPtr = NULL;
   comm->ceColl.baseUCSymComplPtr = NULL;
@@ -2584,6 +2642,15 @@ static ncclResult_t envConfigOverride(ncclComm_t comm) {
   int nvlsCTAsEnv;
   int nChannelsPerNetPeerEnv;
   int nvlinkUtilCentricSchedEnableEnv;
+  int numRmaCtxEnv;
+
+  numRmaCtxEnv = ncclParamNumRmaCtx();
+  if (numRmaCtxEnv != NCCL_CONFIG_UNDEF_INT) {
+    if (numRmaCtxEnv <= 0)
+      INFO(NCCL_ENV, "NCCL_NUM_RMA_CTX %d is too low, leaving it set at %d", numRmaCtxEnv, comm->config.numRmaCtx);
+    else
+      comm->config.numRmaCtx = numRmaCtxEnv;
+  }
 
   /* override configuration with env variable. */
   blockingEnv = ncclParamCommBlocking();
@@ -2793,6 +2860,10 @@ static ncclResult_t parseCommConfig(ncclComm_t comm, ncclConfig_t *config) {
       internalConfigPtr->nChannelsPerNetPeer = defaultConfig.nChannelsPerNetPeer;
       internalConfigPtr->nvlinkCentricSched = defaultConfig.nvlinkCentricSched;
     }
+    if (internalConfigPtr->version < NCCL_VERSION(2, 29, 0)) {
+      internalConfigPtr->graphUsageMode = defaultConfig.graphUsageMode;
+      internalConfigPtr->numRmaCtx = defaultConfig.numRmaCtx;
+    }
   }
 
   /* check input config attributes, -1 means user-undefined and we should use default value from NCCL. */
@@ -2861,6 +2932,12 @@ static ncclResult_t parseCommConfig(ncclComm_t comm, ncclConfig_t *config) {
     goto fail;
   }
 
+  if (internalConfigPtr->numRmaCtx != NCCL_CONFIG_UNDEF_INT && internalConfigPtr->numRmaCtx <= 0) {
+    WARN("Invalid config numRmaCtx attribute value %d", internalConfigPtr->numRmaCtx);
+    ret = ncclInvalidArgument;
+    goto fail;
+  }
+
   /* default config value can be tuned on different platform. */
   NCCL_CONFIG_DEFAULT(internalConfigPtr, blocking, NCCL_CONFIG_UNDEF_INT, 1, "Blocking", "%d");
   NCCL_CONFIG_DEFAULT(internalConfigPtr, cgaClusterSize, NCCL_CONFIG_UNDEF_INT, 4, "CGA cluster size", "%d");
@@ -2877,6 +2954,7 @@ static ncclResult_t parseCommConfig(ncclComm_t comm, ncclConfig_t *config) {
   NCCL_CONFIG_DEFAULT(internalConfigPtr, nChannelsPerNetPeer, NCCL_CONFIG_UNDEF_INT,
                       NCCL_CONFIG_UNDEF_INT, "nChannelsPerNetPeer", "%d");
   NCCL_CONFIG_DEFAULT(internalConfigPtr, nvlinkCentricSched, NCCL_CONFIG_UNDEF_INT, 0, "nvlinkCentricSched", "%d");
+  NCCL_CONFIG_DEFAULT(internalConfigPtr, numRmaCtx, NCCL_CONFIG_UNDEF_INT, 1, "numRmaCtx", "%d");
 
   /* assign config to communicator */
   comm->config.blocking = internalConfigPtr->blocking;
@@ -2893,6 +2971,7 @@ static ncclResult_t parseCommConfig(ncclComm_t comm, ncclConfig_t *config) {
   comm->config.nvlsCTAs = internalConfigPtr->nvlsCTAs;
   comm->config.nChannelsPerNetPeer = internalConfigPtr->nChannelsPerNetPeer;
   comm->config.nvlinkCentricSched = internalConfigPtr->nvlinkCentricSched;
+  comm->config.numRmaCtx = internalConfigPtr->numRmaCtx;
   NCCLCHECKGOTO(envConfigOverride(comm), ret, fail);
 
 exit:

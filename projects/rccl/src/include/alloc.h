@@ -125,8 +125,17 @@ static inline ncclResult_t getSideStream(cudaStream_t *stream) {
   return ncclSuccess;
 }
 
-#if CUDART_VERSION >= 12020
+#ifndef CU_DEVICE_ATTRIBUTE_HOST_NUMA_ID
+#define CU_DEVICE_ATTRIBUTE_HOST_NUMA_ID hipDeviceAttributeHostNumaId
+#endif
+#ifndef CU_MEM_LOCATION_TYPE_HOST_NUMA
+#define CU_MEM_LOCATION_TYPE_HOST_NUMA hipMemLocationTypeHostNuma
+#endif
+#ifndef CU_MEM_ALLOCATION_TYPE_PINNED
+#define CU_MEM_ALLOCATION_TYPE_PINNED hipMemAllocationTypePinned
+#endif
 
+#if CUDART_VERSION >= 12020 || HIP_VERSION >= 70253090
 static inline ncclResult_t ncclCuMemHostAlloc(void** ptr, CUmemGenericAllocationHandle *handlep, size_t size) {
   ncclResult_t result = ncclSuccess;
   size_t granularity = 0;
@@ -173,7 +182,7 @@ static inline ncclResult_t ncclCuMemHostAlloc(void** ptr, CUmemGenericAllocation
   CUCHECKGOTO(cuMemSetAccess((CUdeviceptr)*ptr, size, &accessDesc, 1), result, fail);
 
   if (handlep) *handlep = handle;
-  INFO(NCCL_ALLOC, "CUMEM Host Alloc Size %zi pointer %p handle %llx numa %d dev %d granularity %ld", size, *ptr, handle, cpuNumaNodeId, cudaDev, granularity);
+  INFO(NCCL_ALLOC, "CUMEM Host Alloc Size %zi pointer %p handle %llx numa %d dev %d granularity %ld", size, *ptr, (unsigned long long)handle, cpuNumaNodeId, cudaDev, granularity);
   return result;
 fail:
   WARN("ncclCuMemHostAlloc failed (size %zu, dev %d): cleaning up partial allocation", size, cudaDev);

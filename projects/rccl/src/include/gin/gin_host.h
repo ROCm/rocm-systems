@@ -10,6 +10,7 @@
 #include "allocator.h"
 #include "nccl.h"
 #include "nccl_net.h"
+#include "nccl_gin.h"
 #include "nccl_device/gin/gin_device_host_common.h"
 #include <pthread.h>
 
@@ -28,6 +29,7 @@ struct ncclGinState {
   pthread_mutex_t threadLock;
   pthread_cond_t threadCond;
   ncclResult_t asyncResult;
+  int ginVersion;
 
   int signalSpaceSize;
   int counterSpaceSize;
@@ -39,7 +41,7 @@ extern int64_t ncclParamGinType();
 
 // FIXME change to ncclGinState instead of ncclComm, no need to pass comm
 ncclResult_t ncclGinConnectOnce(struct ncclComm* comm);
-ncclResult_t ncclGinFinalize(struct ncclComm* comm);
+ncclResult_t ncclGinHostFinalize(struct ncclComm* comm);
 ncclResult_t ncclGinProgress(struct ncclGinState* ginState);
 ncclResult_t ncclGinRegister(struct ncclComm* comm, void* address, size_t size,
                              void* ginHostWins[NCCL_GIN_MAX_CONTEXTS],
@@ -51,4 +53,5 @@ ncclResult_t ncclGinFreeSignalsCounters(struct ncclComm* comm, uint32_t signal0,
                                         uint32_t counter0, int nCounters);
 ncclResult_t ncclGinQueryLastError(struct ncclGinState* ginState, bool* hasError);
 
+ncclResult_t setLocalGinType(struct ncclComm* comm);
 #endif

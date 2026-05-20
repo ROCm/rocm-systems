@@ -9,6 +9,7 @@ set(TRANSPORT_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/coll_net.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/shm.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/generic.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/gin.cc
 )
 
 add_subdirectory(gdaki)

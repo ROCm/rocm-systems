@@ -340,6 +340,7 @@ struct ncclIpcHdr {
 
 struct ncclProxyState {
   int refCount;
+  struct ncclComm* comm;
   int tpRank;
   int tpnRanks;
   int tpLocalnRanks;

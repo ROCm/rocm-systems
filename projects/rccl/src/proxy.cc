@@ -1956,6 +1956,7 @@ ncclResult_t ncclProxyCreate(struct ncclComm* comm) {
   struct ncclProxyState* proxyState = comm->proxyState;
   if (proxyState->refCount == 1) {
     /* we have to make sure all following fields in comm have been initialized. */
+    proxyState->comm = comm;
     proxyState->tpRank = comm->rank;
     proxyState->tpnRanks = comm->nRanks;
     proxyState->tpLocalnRanks = comm->localRanks;
@@ -1967,6 +1968,7 @@ ncclResult_t ncclProxyCreate(struct ncclComm* comm) {
     proxyState->allocP2pNetLLBuffers = comm->allocP2pNetLLBuffers;
     proxyState->dmaBufSupport = comm->dmaBufSupport;
     proxyState->ncclNet = comm->ncclNet;
+    proxyState->ginState = &comm->sharedRes->ginState;
     proxyState->ncclCollNet = comm->ncclCollNet;
     proxyState->ginState = &comm->sharedRes->ginState;
     proxyState->netContext = comm->netContext;

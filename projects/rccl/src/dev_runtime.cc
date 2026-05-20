@@ -10,6 +10,7 @@
 #include "transport.h"
 #include "group.h"
 #include "nccl_device.h"
+#include "rma/rma_proxy.h"
 
 NCCL_PARAM(WinStride, "WIN_STRIDE", -1);
 
@@ -23,6 +24,9 @@ struct ncclDevrMemory {
   size_t bigOffset; // offset in big VA space
   void* ginHostWins[NCCL_GIN_MAX_CONTEXTS];
   ncclGinWindow_t ginDevWins[NCCL_GIN_MAX_CONTEXTS];
+
+  void* rmaHostWins[NCCL_GIN_MAX_CONNECTIONS];
+  ncclGinWindow_t rmaDevWins[NCCL_GIN_MAX_CONNECTIONS];
 };
 
 struct ncclDevrWindowSorted {
@@ -79,29 +83,33 @@ ncclResult_t ncclDevrInitOnce(struct ncclComm* comm) {
     devr->lsaRankList[i] = comm->rank + (i - devr->lsaSelf);
   }
 
-  CUmemAllocationProp memProp = {};
+  if (comm->symmetricSupport) {
+    CUmemAllocationProp memProp = {};
 #if defined(HIP_VMM_UNCACHED_MEMORY)
-  memProp.type = hipMemAllocationTypeUncached;
+    memProp.type = hipMemAllocationTypeUncached;
 #else
-  memProp.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+    memProp.type = CU_MEM_ALLOCATION_TYPE_PINNED;
 #endif
-  memProp.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-  memProp.requestedHandleType = ncclCuMemHandleType;
-  memProp.location.id = comm->cudaDev;
-  CUCHECKGOTO(cuMemGetAllocationGranularity(&devr->granularity, &memProp, CU_MEM_ALLOC_GRANULARITY_RECOMMENDED), ret, fail_lsaRankList);
+    memProp.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+    memProp.requestedHandleType = ncclCuMemHandleType;
+    memProp.location.id = comm->cudaDev;
+    CUCHECKGOTO(cuMemGetAllocationGranularity(&devr->granularity, &memProp, CU_MEM_ALLOC_GRANULARITY_RECOMMENDED), ret, fail_lsaRankList);
 
-  devr->bigSize = ncclParamWinStride();
-  if (-devr->bigSize <= 1) {
-    devr->bigSize = 1;
-    for (int r=0; r < comm->nRanks; ++r) {
-      devr->bigSize = std::max<size_t>(devr->bigSize, comm->peerInfo[r].totalGlobalMem);
+    devr->bigSize = ncclParamWinStride();
+    if (-devr->bigSize <= 1) {
+      devr->bigSize = 1;
+      for (int r=0; r < comm->nRanks; ++r) {
+        devr->bigSize = std::max<size_t>(devr->bigSize, comm->peerInfo[r].totalGlobalMem);
+      }
     }
-  }
-  devr->bigSize = alignUp(devr->bigSize, size_t(1)<<32);
-  INFO(NCCL_INIT, "Symmetric VA size=%ldGB", (long)devr->bigSize>>30);
+    devr->bigSize = alignUp(devr->bigSize, size_t(1)<<32);
+    INFO(NCCL_INIT, "Symmetric VA size=%ldGB", (long)devr->bigSize>>30);
 
-  ncclSpaceConstruct(&devr->bigSpace);
-  ncclShadowPoolConstruct(&devr->shadows);
+    ncclSpaceConstruct(&devr->bigSpace);
+    ncclShadowPoolConstruct(&devr->shadows);
+  } else {
+    devr->bigSize = 1; // proxy-only sentinel: marks devrState as initialized
+  }
   return ncclSuccess;
 
 fail_lsaRankList:
@@ -121,38 +129,40 @@ ncclResult_t ncclDevrFinalize(struct ncclComm* comm) {
     free(task);
   }
 
-  symTeamDestroyAll(comm);
-  { // delete windowTable
-    cudaStream_t stream;
-    if (cudaSuccess == cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking)) {
-      struct ncclDevCommWindowTable* tableDev = devr->windowTable;
-      while (tableDev != nullptr) {
-        struct ncclDevCommWindowTable* tableHost;
-        if (ncclSuccess != ncclShadowPoolToHost(&devr->shadows, tableDev, &tableHost)) break;
-        struct ncclDevCommWindowTable* next = tableHost->next;
-        ncclShadowPoolFree(&devr->shadows, tableDev, stream);
-        tableDev = next;
+  if (comm->symmetricSupport) {
+    symTeamDestroyAll(comm);
+    { // delete windowTable
+      cudaStream_t stream;
+      if (cudaSuccess == cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking)) {
+        struct ncclDevCommWindowTable* tableDev = devr->windowTable;
+        while (tableDev != nullptr) {
+          struct ncclDevCommWindowTable* tableHost;
+          if (ncclSuccess != ncclShadowPoolToHost(&devr->shadows, tableDev, &tableHost)) break;
+          struct ncclDevCommWindowTable* next = tableHost->next;
+          ncclShadowPoolFree(&devr->shadows, tableDev, stream);
+          tableDev = next;
+        }
+        CUDACHECKIGNORE(cudaStreamSynchronize(stream));
+        CUDACHECKIGNORE(cudaStreamDestroy(stream));
       }
-      CUDACHECKIGNORE(cudaStreamSynchronize(stream));
-      CUDACHECKIGNORE(cudaStreamDestroy(stream));
     }
+    // Drain leaked windows so every per-peer slice is unmapped before VA free.
+    // Without this, on HIP cuMemAddressFree over a still-mapped range returns
+    // hipErrorInvalidValue, which then cascades into ibv_dealloc_pd EBUSY at teardown.
+    while (devr->memHead != nullptr) {
+      struct ncclDevrMemory* m = devr->memHead;
+      m->refCount = 1; // force drop on the next call
+      symMemoryDropRef(comm, m);
+    }
+    if (devr->lsaFlatBase != nullptr) {
+      CUdeviceptr flatAddr = reinterpret_cast<CUdeviceptr>(devr->lsaFlatBase);
+    // Returns error: invalid argument. Already unmapped by symMemoryDropRef
+    // CUCHECKIGNORE(cuMemUnmap(flatAddr, devr->lsaSize*devr->bigSize));
+      CUCHECKIGNORE(cuMemAddressFree(flatAddr, devr->lsaSize*devr->bigSize));
+    }
+    ncclShadowPoolDestruct(&devr->shadows);
+    ncclSpaceDestruct(&devr->bigSpace);
   }
-  // Drain leaked windows so every per-peer slice is unmapped before VA free.
-  // Without this, on HIP cuMemAddressFree over a still-mapped range returns
-  // hipErrorInvalidValue, which then cascades into ibv_dealloc_pd EBUSY at teardown.
-  while (devr->memHead != nullptr) {
-    struct ncclDevrMemory* m = devr->memHead;
-    m->refCount = 1; // force drop on the next call
-    symMemoryDropRef(comm, m);
-  }
-  if (devr->lsaFlatBase != nullptr) {
-    CUdeviceptr flatAddr = reinterpret_cast<CUdeviceptr>(devr->lsaFlatBase);
-  // Returns error: invalid argument. Already unmapped by symMemoryDropRef
-  // CUCHECKIGNORE(cuMemUnmap(flatAddr, devr->lsaSize*devr->bigSize));
-    CUCHECKIGNORE(cuMemAddressFree(flatAddr, devr->lsaSize*devr->bigSize));
-  }
-  ncclShadowPoolDestruct(&devr->shadows);
-  ncclSpaceDestruct(&devr->bigSpace);
   free(devr->lsaRankList);
   free(devr->winSorted);
   return ncclSuccess;
@@ -372,6 +382,12 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
   return ncclSuccess;
 }
 
+static ncclResult_t symMemoryRegisterRma(struct ncclComm* comm, struct ncclDevrMemory* mem) {
+  NCCLCHECK(ncclRmaProxyConnectOnce(comm));
+  NCCLCHECK(ncclRmaProxyRegister(comm, mem->primaryAddr, mem->size, mem->rmaHostWins, mem->rmaDevWins));
+  return ncclSuccess;
+}
+
 // On success we take caller's reference on memHandle.
 // Due to multicast binds for each pre-exiting team, this function requires
 // caller do a world barrier before returning to user.
@@ -420,6 +436,13 @@ static ncclResult_t symMemoryObtain(
     NCCLCHECKGOTO(symMemoryRegisterGin(comm, mem), ret, fail_mem_space_teams);
   }
 
+  // ginEnabled is set in ncclDevrCommCreateInternal, which might not be called for RMA proxy
+  // so we introduce rmaProxyEnabled to track if RMA proxy is enabled
+  devr->rmaProxyEnabled = comm->globalRmaProxySupport;
+  if (devr->rmaProxyEnabled) {
+    NCCLCHECKGOTO(symMemoryRegisterRma(comm, mem), ret, fail_mem_space_teams);
+  }
+
   // Add to list of mems.
   mem->next = devr->memHead;
   devr->memHead = mem;
@@ -448,6 +471,9 @@ static void symMemoryDropRef(
     struct ncclDevrState* devr = &comm->devrState;
     if (devr->ginEnabled) {
       ncclGinDeregister(comm, mem->ginHostWins);
+    }
+    if (devr->rmaProxyEnabled) {
+      ncclRmaProxyDeregister(comm, mem->rmaHostWins);
     }
     for (struct ncclDevrTeam* t = devr->teamHead; t != nullptr; t = t->next) {
       symUnbindTeamMemory(comm, t, mem);
@@ -611,10 +637,36 @@ ncclResult_t ncclDevrWindowRegisterInGroup(
   NCCLCHECKGOTO(ncclCommRegister(comm, userPtr, userSize, &localRegHandle), ret, fail);
 
   if (!comm->symmetricSupport) {
-    // We just return the local registration handle directly in this case, as there's no reason to allocate the
-    // ncclWindow_vidmem structure on the device, etc.
-    *outWinDev = reinterpret_cast<struct ncclWindow_vidmem*>(localRegHandle);
-    return ncclSuccess;
+    if (comm->hostRmaSupport) {
+      INFO(NCCL_INIT, "ncclDevrWindowRegisterInGroup: proxy path userPtr=%p size=%zu", userPtr, userSize);
+      struct ncclDevrWindow* win = (struct ncclDevrWindow*)malloc(sizeof(struct ncclDevrWindow));
+      if (win == nullptr) { ret = ncclSystemError; goto fail_locReg; }
+      memset(win, 0, sizeof(*win));
+      win->memory = nullptr;
+      win->userPtr = userPtr;
+      win->size = userSize;
+      win->winFlags = winFlags;
+      win->localRegHandle = localRegHandle;
+      ncclResult_t connRet = ncclRmaProxyConnectOnce(comm);
+      INFO(NCCL_INIT, "ncclDevrWindowRegisterInGroup: ncclRmaProxyConnectOnce ret=%d", (int)connRet);
+      NCCLCHECKGOTO(connRet, ret, fail_locReg_proxywin);
+      INFO(NCCL_INIT, "ncclDevrWindowRegisterInGroup: proxy connected, registering MR");
+      NCCLCHECKGOTO(ncclRmaProxyRegister(comm, userPtr, userSize, win->rmaHostWins, win->rmaDevWins), ret, fail_locReg_proxywin);
+      INFO(NCCL_INIT, "ncclDevrWindowRegisterInGroup: MR registered, win=%p", (void*)win);
+      {
+        struct ncclDevrState* devr = &comm->devrState;
+        uintptr_t userAddr = reinterpret_cast<uintptr_t>(userPtr);
+        int idx = listFindSortedLub(&ncclDevrWindowSorted::userAddr, devr->winSorted, devr->winSortedCount, userAddr);
+        struct ncclDevrWindowSorted winSort;
+        winSort.userAddr = userAddr; winSort.size = userSize; winSort.win = win;
+        listInsert(&devr->winSorted, &devr->winSortedCapacity, &devr->winSortedCount, idx, winSort);
+      }
+      *outWinDev = reinterpret_cast<struct ncclWindow_vidmem*>(win);
+      return ncclSuccess;
+    fail_locReg_proxywin:
+      free(win);
+    }
+    goto fail_locReg;
   }
   if (winFlags & NCCL_WIN_COLL_SYMMETRIC) {
     // Defer symmetric kernel init until at least one window with that flag exists.
@@ -731,6 +783,7 @@ ncclResult_t ncclDevrCommCreateInternal(
     struct ncclComm* comm,
     struct ncclDevCommRequirements const* reqs, struct ncclDevComm* outDevComm
   ) {
+
   ncclResult_t ret = ncclSuccess;
   struct ncclDevrState* devr = &comm->devrState;
   struct ncclTeam world = ncclTeamWorld(comm);
@@ -920,11 +973,10 @@ ncclResult_t ncclCommWindowRegister_impl(
   ncclResult_t ret = ncclSuccess;
   int saveDev;
   struct ncclDevrRegTask* task;
-
   CUDACHECK(cudaGetDevice(&saveDev));
   NCCLCHECK(ncclGroupStartInternal());
 
-  if (userPtr == nullptr || userSize == 0 || !(comm->symmetricSupport || ncclParamLocalRegister())) goto exit;
+  if (userPtr == nullptr || userSize == 0 || !(comm->symmetricSupport || comm->hostRmaSupport || ncclParamLocalRegister())) goto exit;
 
   NCCLCHECKGOTO(ncclCommEnsureReady(comm), ret, fail);
   CUDACHECKGOTO(cudaSetDevice(comm->cudaDev), ret, fail);
@@ -957,7 +1009,21 @@ ncclResult_t ncclCommWindowDeregister_impl(struct ncclComm* comm, struct ncclWin
   if (winDev == nullptr) goto exit;
 
   if (!comm->symmetricSupport) {
-    NCCLCHECKGOTO(ncclCommDeregister(comm, winDev), ret, fail);
+    if (comm->hostRmaSupport) {
+      struct ncclDevrWindow* win = reinterpret_cast<struct ncclDevrWindow*>(winDev);
+      NCCLCHECKGOTO(ncclRmaProxyDeregister(comm, win->rmaHostWins), ret, fail);
+      NCCLCHECKGOTO(ncclCommDeregister(comm, win->localRegHandle), ret, fail);
+      {
+        struct ncclDevrState* devr = &comm->devrState;
+        int i = listFindSortedLub(&ncclDevrWindowSorted::userAddr, devr->winSorted, devr->winSortedCount,
+                                   reinterpret_cast<uintptr_t>(win->userPtr));
+        i -= 1;
+        listRemove(devr->winSorted, &devr->winSortedCount, i);
+      }
+      free(win);
+    } else {
+      NCCLCHECKGOTO(ncclCommDeregister(comm, winDev), ret, fail);
+    }
     goto exit;
   }
   CUDACHECKGOTO(cudaGetDevice(&saveDev), ret, fail);
@@ -1126,3 +1192,13 @@ static void listRemove(Obj* list, int* count, int index) {
   *count -= 1;
 }
 
+// Get the RMA device window handle for a specific context
+ncclGinWindow_t ncclDevrGetRmaDevWin(struct ncclDevrWindow* winHost, int ctx) {
+  if (winHost == nullptr) {
+    return nullptr;
+  }
+  if (ctx < 0 || ctx >= NCCL_GIN_MAX_CONNECTIONS) {
+    return nullptr;
+  }
+  return winHost->rmaDevWins[ctx];
+}

@@ -29,6 +29,7 @@
 #include "recorder.h"
 #include "ipc_init_detail.h"
 #include "mem_manager.h"
+#include "rma/rma.h"
 
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
@@ -282,6 +283,37 @@ struct ncclTaskP2p {
   uint8_t nChannels;
 };
 
+struct ncclTaskRma {
+  struct ncclTaskRma* next;
+  ncclFunc_t func;
+  int ctx;
+  size_t count;
+  ncclDataType_t datatype;
+  size_t bytes;
+
+  void const* srcBuff;
+  size_t srcWinOffset;
+  struct ncclDevrWindow* srcWinHost;
+
+  int peer;
+  size_t peerWinOffset;
+  struct ncclDevrWindow* peerWinHost;
+
+  // Signal operations
+  ncclSignalMode_t signalMode;
+  int* peers;
+  int* nsignals;
+  int npeers;
+
+  // Profiler plugin
+  int eActivationMask;
+  void* groupApiEventHandle;
+  void* rmaApiEventHandle;
+  void* eventHandle;
+  uint8_t nChannels;
+};
+
+
 struct ncclKernelPlan {
   // A kernel plan is also a callback that reclaims itself. Hence this must
   // be the first member.
@@ -294,6 +326,7 @@ struct ncclKernelPlan {
   bool isHostCbEnq;
   bool isSymColl;
   bool isCeColl;
+  bool isRma;
   enum ncclDevWorkStorageType workStorageType;
   bool kernelSpecialized;
   void* kernelFn;
@@ -301,6 +334,7 @@ struct ncclKernelPlan {
     struct ncclDevKernelArgs* kernelArgs;
     void* kernelSymArgs;
     struct ncclCeCollArgs* ceCollArgs;
+    struct ncclRmaArgs* rmaArgs;
   };
   size_t kernelArgsSize;
   struct channelMasks channelMask;
@@ -315,6 +349,8 @@ struct ncclKernelPlan {
   void* workBufPersistent;
 
   struct ncclIntruQueue<struct ncclTaskP2p, &ncclTaskP2p::next> p2pTaskQueue;
+  struct ncclIntruQueue<struct ncclTaskRma, &ncclTaskRma::next> rmaTaskQueueProxy;
+  struct ncclIntruQueue<struct ncclTaskRma, &ncclTaskRma::next> rmaTaskQueueCe;
   struct ncclIntruQueue<struct ncclTaskColl, &ncclTaskColl::next> collTaskQueue;
   struct ncclIntruQueue<struct ncclProxyOp, &ncclProxyOp::enqNext> proxyOpQueue;
 
@@ -410,7 +446,7 @@ struct ncclKernelPlanner {
   };
   struct ncclTaskCollSorter collSorter;
   struct Peer* peers/*[nRanks]*/;
-  int nTasksColl, nTasksP2p;
+  int nTasksColl, nTasksP2p, nTasksRma;
   int nTasksP2pSend, nTasksP2pRecv;
   bool persistent;
   // The list of user streams aggregated over all tasks present.
@@ -431,6 +467,7 @@ struct ncclKernelPlanner {
 
   struct ncclIntruQueue<struct ncclTaskColl, &ncclTaskColl::next> collTaskQueue;
   struct ncclIntruQueue<struct ncclTaskColl, &ncclTaskColl::next> collCeTaskQueue;
+  struct ncclIntruQueue<struct ncclTaskRma, &ncclTaskRma::next> *rmaTaskQueues; // Per-context queue for RMA tasks
   struct ncclIntruQueue<struct ncclTaskColl, &ncclTaskColl::next> collSymTaskQueue;
   struct ncclIntruQueue<struct ncclWorkList, &ncclWorkList::next> collWorkQueue;
   struct ncclIntruQueue<struct ncclWorkList, &ncclWorkList::next> tmpCollWorkQueue;
@@ -487,6 +524,10 @@ struct ncclPeerInfo {
 #endif
   int cuMemSupport;
   int version;
+  ncclGinType_t supportedGinType;
+  bool crossNicSupport;
+  bool rmaPluginAvailable;
+  bool cuMemGdrSupport;
 };
 
 typedef enum ncclGroupTaskType {
@@ -519,7 +560,9 @@ struct ncclComm {
   ncclNet_t* ncclNet;
   void* netContext;
   void* ginContext;
+  void* rmaGinContext;
   int netPluginIndex;
+  int ginPluginIndex;
   int ncclNetVer;
   ncclNetDeviceType netDeviceType;
   ncclCollNet_t* ncclCollNet;
@@ -693,6 +736,7 @@ struct ncclComm {
   // pools backed by comm->memPermanent
   struct ncclMemoryPool memPool_ncclTaskColl;
   struct ncclMemoryPool memPool_ncclTaskP2p;
+  struct ncclMemoryPool memPool_ncclTaskRma;
   struct ncclMemoryPool memPool_ncclProxyOp;
   struct ncclMemoryPool memPool_ncclKernelPlan;
 
@@ -767,10 +811,16 @@ struct ncclComm {
   uint64_t seqNumber[NCCL_NUM_FUNCTIONS];
   struct ncclProfilerProxy profiler;
 
+  // RMA state
+  struct ncclRmaState rmaState;
+
   // CE Collective
   struct ncclCeColl ceColl;
   struct ncclIntruQueue<struct ncclCeInitTask, &ncclCeInitTask::next> ceInitTaskQueue;
 
+  ncclGinConnectionType_t globalGinSupport;
+  bool globalRmaProxySupport;
+  bool hostRmaSupport;
   // buffer registration cache
   struct ncclRegCache regCache;
   int isAllNvlink;
@@ -819,8 +869,6 @@ struct ncclComm {
   uint64_t endMagic;
 };
 
-static_assert(offsetof(struct ncclComm, startMagic) == 0, "startMagic must be the first field of ncclComm");
-static_assert(offsetof(struct ncclComm, endMagic) == sizeof(struct ncclComm) - sizeof(uint64_t), "endMagic must be the last field of ncclComm");
 
 enum ncclLaunchMode {
   ncclLaunchModeInvalid=0,

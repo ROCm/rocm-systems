@@ -1061,6 +1061,29 @@ float sm100SpeedArrayInter[] = { 96.0, 48.0, 45.1, 42.0, 40.0, 30.0, 24.0, 22.0,
 #define NSPEEDSINTRA_SM100 (sizeof(sm100SpeedArrayIntra)/sizeof(float))
 #define NSPEEDSINTER_SM100 (sizeof(sm100SpeedArrayInter)/sizeof(float))
 
+ncclResult_t ncclTopoCheckCrossNicSupport(bool* supported) {
+  *supported = (ncclParamCrossNic() != 0);
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoCheckNicFused(struct ncclComm* comm, bool* fused) {
+  int nDev = 0;
+  int devId = 0;
+  ncclNetProperties_t props;
+  *fused = false;
+  NCCLCHECK(comm->ncclNet->devices(&nDev));
+  while (devId < nDev) {
+    NCCLCHECK(comm->ncclNet->getProperties(devId, &props));
+    if (props.vProps.ndevs > 1) {
+      *fused = true;
+      goto exit;
+    }
+    devId++;
+  }
+exit:
+  return ncclSuccess;
+}
+
 ncclResult_t ncclTopoCompute(ncclTopoSystem* system, struct ncclTopoGraph* graph) {
   int ngpus = system->nodes[GPU].count;
   int crossNic = (system->nodes[NET].count > 1) &&

@@ -12,6 +12,10 @@ set(RCCL_SOURCE_DIR "${PROJECT_SOURCE_DIR}")
 # net_ib_cast: populate NET_IB_CAST_SOURCES and NET_IB_CAST_INCLUDE_DIRS
 add_subdirectory(transport/net_ib_cast)
 
+# gin/rma: populate GIN_SOURCES and RMA_SOURCES
+add_subdirectory(gin)
+add_subdirectory(rma)
+
 # Collect list of all source files
 #==================================================================================================
 # E.g: find src -type f \( -name "*.cc" -o -name "*.h" -o -name "*.hpp" \) | sort
@@ -166,6 +170,18 @@ set(SRC_FILES
   include/ionic/ionicdvcore.h
   include/ionic/ionicdvsymbols.h
   include/ionic/ionicdvwrap.h
+  include/nccl_merge_stubs.h
+  include/plugin/nccl_gin.h
+  include/plugin/gin/gin_v11.h
+  include/plugin/gin/gin_v12.h
+  include/plugin/gin/gin_v13.h
+  include/rma/rma.h
+  include/rma/rma_proxy.h
+  include/gin.h
+  include/gin/gin_host.h
+  include/gin/gin_host_proxy.h
+  include/nccl_device/gin/gin_device_host_common.h
+  include/nccl_device/gin/proxy/gin_proxy_device_host_common.h
   include/nccl_device/comm.h
   include/nccl_device/coop.h
   include/nccl_device/core.h
@@ -316,6 +332,10 @@ set(SRC_FILES
   plugin/tuner/tuner_v4.cc
   plugin/tuner/tuner_v5.cc
   plugin/tuner/csv_tuner.cc
+  plugin/gin.cc
+  plugin/gin/gin_v11.cc
+  plugin/gin/gin_v12.cc
+  plugin/gin/gin_v13.cc
   ras/client.cc
   ras/client_support.cc
   ras/collectives.cc
@@ -342,8 +362,6 @@ set(SRC_FILES
   transport/p2p.cc
   transport/profiler.cc
   transport/shm.cc
-  gin/gin_host.cc
-  gin/gin_host_proxy.cc
   transport/gdaki/gin_host_gdaki.h
   include/latency_profiler/CollTrace.h
   include/latency_profiler/CollTraceEvent.h
@@ -377,6 +395,8 @@ endif()
 list(APPEND SRC_FILES ${SMI_SOURCES})
 # NET_IB_CAST_SOURCES already carry the src/ prefix (set by transport/net_ib_cast/CMakeLists.txt)
 list(APPEND SRC_FILES ${NET_IB_CAST_SOURCES})
+list(APPEND SRC_FILES ${GIN_SOURCES})
+list(APPEND SRC_FILES ${RMA_SOURCES})
 
 # Hipify source files (copy of source generated into hipify directory)
 #==================================================================================================

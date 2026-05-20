@@ -7,7 +7,7 @@
 #ifndef _NCCL_DEVICE_GIN_BARRIER_H_
 #define _NCCL_DEVICE_GIN_BARRIER_H_
 #include "core_tmp.h"
-#include "gin.h"
+#include "gin_tmp.h"
 
 struct ncclGinBarrierHandle;
 

@@ -74,7 +74,10 @@ typedef enum {
   ncclFuncAlltoAllPivot = 11,
   ncclFuncAlltoAllGda = 12,
   ncclFuncAlltoAllvGda = 13,
-  ncclNumFuncs = 14
+  ncclFuncPutSignal = 14,
+  ncclFuncSignal = 15,
+  ncclFuncWaitSignal = 16,
+  ncclNumFuncs = 17
 } ncclFunc_t;
 
 

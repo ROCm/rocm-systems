@@ -95,6 +95,7 @@ static ncclResult_t freeMemCPUAccessible(T *ptr, void *gdrHandle) {
   return ncclSuccess;
 }
 
+#if !defined(__HIP_PLATFORM_AMD__)
 static ncclResult_t getDmaBufFd(void *addr, size_t length, int *fd,
                                 bool forceNonDataDirect = false) {
   if (ncclParamDmaBufEnable() == 0) return ncclInvalidUsage;
@@ -119,7 +120,8 @@ static ncclResult_t getDmaBufFd(void *addr, size_t length, int *fd,
 
   return ncclInvalidUsage;
 }
-
+#endif // !defined(__HIP_PLATFORM_AMD__)
+      
 static ncclResult_t proxyGinPollCompletions(ncclGin_t *ginComm, void *collComm,
                                             struct ginProxyCtx *ctx,
                                             struct ginProxyHostGpuCtx *hostGpuCtx) {
@@ -264,7 +266,7 @@ static ncclResult_t proxyGinProcessGfd(ncclGin_t *ginComm, void *collComm, struc
       signalOp = mapGfdOpToCollNetOp(gfd);
       if (signalOp == -1) {
         // First cast from 63 bits to 64 bits and then to void * to avoid warnings
-        NCCLCHECK(ginComm->iput(collComm, srcOff, srcHandle, size, dstOff, dstHandle,
+        NCCLCHECK(ginComm->iput(collComm, 0, srcOff, srcHandle, size, dstOff, dstHandle,
                                 targetRank, &state->request));
       } else {
         // reconstruct the signal value from the two qwords
@@ -273,7 +275,7 @@ static ncclResult_t proxyGinProcessGfd(ncclGin_t *ginComm, void *collComm, struc
         signalVal |= (uint64_t)gfd->qword[ncclGinProxyGfdSignalVal].signalVal.signalValHigh << 32;
         uint64_t signalOff =
           gfd->qword[ncclGinProxyGfdCompletion].completion.signalId * sizeof(uint64_t);
-        NCCLCHECK(ginComm->iputSignal(collComm, srcOff, srcHandle, size, dstOff, dstHandle,
+        NCCLCHECK(ginComm->iputSignal(collComm, 0, srcOff, srcHandle, size, dstOff, dstHandle,
                                       targetRank, signalOff, ctx->signalsGinHandle, signalVal,
                                       signalOp, &state->request));
       }

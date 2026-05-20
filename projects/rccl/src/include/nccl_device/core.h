@@ -50,6 +50,18 @@ struct ncclTeamTagLsa {};
 struct ncclTeamTagRail {};
 #endif
 
+typedef enum {
+  NCCL_GIN_CONNECTION_NONE,
+  NCCL_GIN_CONNECTION_FULL,
+  NCCL_GIN_CONNECTION_RAIL,
+} ncclGinConnectionType_t;
+
+typedef enum {
+  NCCL_GIN_TYPE_NONE = 0,
+  NCCL_GIN_TYPE_PROXY = 2, // intentially not 1. Must match NCCL_NET_DEVICE_GIN_PROXY for backward compatibility
+  NCCL_GIN_TYPE_GDAKI = 3, // intentially not 2. Must match NCCL_NET_DEVICE_GIN_GDAKI for backward compatibility
+} ncclGinType_t;
+
 struct ncclDevCommRequirements;
 typedef struct ncclDevCommRequirements ncclDevCommRequirements_t;
 
@@ -72,9 +84,12 @@ struct ncclDevCommRequirements {
   int lsaLLA2ABlockCount, lsaLLA2ASlotCount;
 
   bool ginForceEnable;
-  int ginContextCount; // This is a hint, the actual context count in the devcomm may not match.
-  int ginSignalCount; // Guaranteed to start at id=0
-  int ginCounterCount; // Guaranteed to start at id=0
+  int ginContextCount;
+  int ginSignalCount;
+  int ginCounterCount;
+  bool ginExclusiveContexts;
+  int ginQueueDepth;
+  int ginTrafficClass;
 };
 
 struct ncclDevResourceRequirements {
