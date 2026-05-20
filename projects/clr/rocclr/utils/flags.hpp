@@ -262,6 +262,9 @@ release(bool, DEBUG_HIP_IGNORE_STREAM_PRIORITY, false,                        \
         "Ignore priority streams")                                            \
 release(uint, HIP_SKIP_ABORT_ON_GPU_ERROR, true,                              \
         "Set this to true, to avoid host side abort for GPU errors")          \
+release(uint, HIP_MAX_SIGNAL_WAIT, 60,                                        \
+        "Maximum seconds to wait for HSA signal before forcing completion "  \
+        "(0 = no cap, original indefinite-wait behaviour)")                  \
 release(bool, HIP_FORCE_SPIRV_CODEOBJECT, false,                              \
         "Force use of SPIRV instead of device specific code object.")         \
 release(uint, DEBUG_CLR_BATCH_CPU_SYNC_SIZE, 16,                               \
