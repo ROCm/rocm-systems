@@ -120,11 +120,35 @@ struct DeviceApiResources
     std::vector<DeviceApiRankResources> ranks;
 };
 
+// Intentionally leaked: see TODO below.
 static DeviceApiResources& createProcessLifetimeResources(int rankCount)
 {
-    // These tests run in a fresh exec-isolated child process and exit immediately
-    // after the test body completes. Keep resources process-lifetime to avoid the
-    // known communicator teardown crash tracked separately in the debugging notes.
+    // TODO(AICOMRCCL-835): Restore normal RAII cleanup once the Device API
+    // teardown segfault is fixed.
+    //
+    // ncclCommDestroy() currently crashes in the Device API teardown path:
+    //
+    //     ncclCommDestroy_impl
+    //       -> ncclGroupEndInternal
+    //         -> groupLaunch
+    //           -> asyncJobLaunch
+    //             -> commReclaim
+    //               -> ncclCudaFree<void>
+    //                 -> ncclCuMemFree
+    //                   -> hipMemRetainAllocationHandle  <-- SIGSEGV
+    //
+    // Reproduces on rccl-tests positive Device API runs too (not unit-test
+    // specific). The DeviceApi tests work around this by:
+    //   1. Running each test in a fresh fork()+execve() child process (see
+    //      ProcessIsolatedTestRunner::TestConfig::withExec()), and
+    //   2. Allocating DeviceApiResources with `new` and never deleting them
+    //      so DeviceApiResources::~DeviceApiResources() never calls
+    //      ncclCommDestroy(). The child process _exit()s immediately after
+    //      the test body, so the OS reclaims everything.
+    //
+    // When AICOMRCCL-835 is resolved, delete this helper, give each test a
+    // stack-allocated DeviceApiResources, and re-enable the destructor's
+    // ncclDevCommDestroy / ncclCommWindowDeregister / ncclCommDestroy path.
     return *new DeviceApiResources(rankCount);
 }
 

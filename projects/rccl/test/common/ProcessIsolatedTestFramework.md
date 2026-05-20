@@ -7,6 +7,7 @@ A lightweight C++ testing framework for running Google Test cases in isolated pr
 - [Why Use Process Isolation?](#why-use-process-isolation)
 - [Quick Start](#quick-start)
 - [Core Concepts](#core-concepts)
+- [Isolation Modes: `fork()` vs `fork()+execve()`](#isolation-modes-fork-vs-forkexecve)
 - [API Reference](#api-reference)
 - [Examples](#examples)
 - [Best Practices](#best-practices)
@@ -18,8 +19,11 @@ A lightweight C++ testing framework for running Google Test cases in isolated pr
 
 `ProcessIsolatedTestRunner` is a framework that executes tests in separate processes using `fork()`. This ensures complete isolation between tests, particularly useful when testing code with static variables or environment-dependent behavior.
 
+By default the child is created with plain `fork()`. For tests that need a *fresh process image* (e.g. HIP-using tests when the binary may have already initialized HIP in earlier tests of the same process), opt in to `fork()+execve()` mode by adding `.withExec()` to the `TestConfig`. See [Mode 2: fork() + execve() (`.withExec()`)](#mode-2-fork--execve-withexec) and [Best Practice 9 (HIP/ROCm: prefer `.withExec()`)](#9-hiproccm-using-tests-prefer-withexec-over-plain-fork).
+
 **Key Features:**
 - ✅ Process-based test isolation (each test runs in its own process)
+- ✅ Two isolation modes: plain `fork()` (default) and `fork()+execve()` for fresh process images (`.withExec()`)
 - ✅ Per-test environment variable management
 - ✅ Configurable timeouts
 - ✅ Sequential or stop-on-failure execution
@@ -263,6 +267,67 @@ struct TestResult {
 
 ---
 
+## Isolation Modes: `fork()` vs `fork()+execve()`
+
+`ProcessIsolatedTestRunner` supports two ways of spawning the per-test child. They differ only in *how* the child process is created; everything else (env vars, timeout, result reporting, gtest integration) is identical.
+
+### Mode 1: `fork()` (default)
+
+The runner forks the test-runner process. The child inherits the parent's full address space (copy-on-write), open file descriptors, and any runtime state the parent has already established.
+
+- ✅ Cheap: no relink, no static init, no gtest re-discovery.
+- ✅ Sufficient for host-only tests: env-var-driven behavior, static-variable resets, configuration caches, etc.
+- ⚠️ Fragile when the parent has touched runtime state that is *not safe to inherit across `fork()`*. The canonical case in RCCL is the **HIP/ROCm runtime**: if any earlier test in the same binary initialized HIP (e.g. via `hipSetDevice` / `hipMalloc` / launching a kernel), the forked child inherits an inconsistent HIP context and its first GPU allocation will typically fail with `HIP failure: 'out of memory'` followed by a crash.
+
+Default behavior — nothing to enable.
+
+### Mode 2: `fork()+execve()` (`.withExec()`)
+
+Opt in via `TestConfig::withExec()`. The runner still forks, but the child immediately `execve()`s `/proc/self/exe` with `--gtest_filter` set to the currently running TEST(). The new process image:
+
+- starts gtest from scratch (no inherited HIP/ROCm state, no inherited address-space pollution),
+- re-runs the same `TEST()` body, which calls `RUN_ISOLATED_TESTS(...)` / `executeAllTests()` again,
+- detects an internal sentinel env var (`RCCL_PIT_REEXEC_TEST=<config-name>`) set by the runner, finds the matching test lambda, runs it inline (no further fork/exec), and `_exit()`s with the test result.
+
+```cpp
+ProcessIsolatedTestRunner::TestConfig("DeviceApi.LsaRemoteRead",
+    []() { runPositiveLsaRemoteReadTest(); })
+    .withEnvironment({{"NCCL_CUMEM_ENABLE", "1"},
+                      {"NCCL_WIN_ENABLE",   "1"}})
+    .withExec()                                  // <-- fresh process image
+    .withTimeout(std::chrono::seconds(60))
+```
+
+When you need it:
+
+- The test uses HIP/ROCm (or any other runtime/library that is unsafe to inherit across `fork()`) **and** the same binary contains earlier tests that already initialized that runtime in the parent process.
+- A concrete example in this repo: `DeviceApiTests.cpp` shares `rccl-UnitTestsFixtures` with `PackRoundtripTest` (`device/TestOp128.cpp`). `PackRoundtripTest` runs `TEST_F`s inline in the parent and calls `hipSetDevice(0)` + `hipMalloc` / `hipFree`. Without `.withExec()`, the DeviceApi tests' forked child inherits that HIP context and crashes.
+
+What it costs:
+
+- Each isolated child pays the cost of a fresh process startup (relink, gtest init, banner). On this codebase that's a few hundred milliseconds per test, dominated by gtest startup.
+- The new process re-runs the same `TEST()` body, so its stdout/stderr (gtest "[ RUN ]" / "[ OK ]" lines, banner, env-var summary) appears in the captured child output. The parent then prints its own "[ RUN ]" / "[ OK ]" for the outer TEST. Slightly noisier logs; nothing else changes.
+
+What it does **not** do:
+
+- It does not change the test-discovery mechanism — tests are still discovered by gtest in the usual way.
+- It does not affect any other test in the binary that doesn't opt in.
+- It does not enable parallel execution; tests still run sequentially.
+
+### Cheat sheet
+
+| Situation                                          | Use            |
+| -------------------------------------------------- | -------------- |
+| Host-only test, env-var / static-variable behavior | plain `fork()` |
+| Code under test reads env into static state        | plain `fork()` |
+| Test uses HIP/ROCm and is the **only** test in the binary that does | plain `fork()` |
+| Test uses HIP/ROCm and other tests in the same binary may have already initialized HIP | `.withExec()` |
+| Test relies on a fresh address space or pristine library state for any other reason | `.withExec()` |
+
+When in doubt for a HIP-using test that lives alongside other HIP-using tests in the same binary, prefer `.withExec()`.
+
+---
+
 ## API Reference
 
 ### Macros (Recommended)
@@ -453,6 +518,21 @@ TestConfig& withCleanEnvironment(bool inherit = true);
 
 **Default:** `true` (inherits parent environment)
 
+#### `withExec()`
+Run the isolated child via `fork()+execve()` of the same binary instead of plain `fork()`. The child starts as a fresh process image (no inherited HIP/ROCm state, no inherited address-space pollution). See [Isolation Modes](#isolation-modes-fork-vs-forkexecve) for the full mechanism and trade-offs.
+
+```cpp
+TestConfig& withExec(bool exec = true);
+```
+
+**Default:** `false` (plain `fork()`).
+
+**Requires:** the calling `TEST()` body must be running under gtest at the time `executeAllTests()` is invoked. The runner reads the current `::testing::TestInfo` to build the `--gtest_filter` for the re-exec'd process. (This is true for all normal `RUN_ISOLATED_TESTS` / `RUN_ISOLATED_TEST_*` callers; you only need to worry about this if you are driving the runner manually from somewhere other than a gtest TEST body.)
+
+**Reserved environment variable:** the runner uses `RCCL_PIT_REEXEC_TEST` internally to mark the re-exec'd child and route it back to the right test lambda. Don't set it yourself.
+
+**When to use:** HIP/ROCm-using tests that share a binary with other tests that may have already initialized HIP in the parent process. Concrete example: `test/DeviceApiTests.cpp` in `rccl-UnitTestsFixtures` (which also runs `PackRoundtripTest`, an inline HIP user).
+
 ---
 
 ## Examples
@@ -626,6 +706,47 @@ TEST(Rcclwrap, CriticalTests) {
   bool passed = ProcessIsolatedTestRunner::executeAllTests(options);
   EXPECT_TRUE(passed) << "Critical test suite failed";
 }
+```
+
+### Example 5: HIP-using test sharing a binary with other HIP tests (`.withExec()`)
+
+`rccl-UnitTestsFixtures` runs `PackRoundtripTest` (from `device/TestOp128.cpp`) before the DeviceApi tests. `PackRoundtripTest` calls `hipSetDevice(0)` and `hipMalloc`/`hipFree` inline in the parent process, so by the time the DeviceApi tests run, the parent already has a live HIP context. Plain `fork()` is unsafe in that situation; use `.withExec()` to give each DeviceApi test a fresh process image.
+
+```cpp
+// From test/DeviceApiTests.cpp
+static ProcessIsolatedTestRunner::TestConfig makeDeviceApiEnabledConfig(
+    const std::string& name, std::function<void()> testFn)
+{
+    return ProcessIsolatedTestRunner::TestConfig(name, testFn)
+        .withEnvironment({{"NCCL_CUMEM_ENABLE",  "1"},
+                          {"NCCL_WIN_ENABLE",    "1"},
+                          {"NCCL_SOCKET_IFNAME", "lo"}})
+        .withTimeout(std::chrono::seconds(60))
+        .withExec();  // fresh process image, HIP runtime starts clean
+}
+
+TEST(DeviceApi, LsaRemoteRead) {
+    RUN_ISOLATED_TESTS(
+        makeDeviceApiEnabledConfig(
+            "DeviceApi.LsaRemoteRead",
+            []() { runPositiveLsaRemoteReadTest(); }
+        )
+    );
+}
+```
+
+Without `.withExec()`, the first GPU allocation in the forked child fails:
+
+```
+cv350-rck-g03-e06-08:33002:33003 [0] [FATAL ERROR]: HIP failure: 'out of memory'
+[ INFO     ] Test 'DeviceApi.LsaRemoteRead' (PID: 33002) terminated by signal 11 after 382 ms
+```
+
+With `.withExec()` the same test passes:
+
+```
+[ INFO     ] Running isolated test 'DeviceApi.LsaRemoteRead' (PID: 48083) with env: NCCL_SOCKET_IFNAME=lo, NCCL_WIN_ENABLE=1, NCCL_CUMEM_ENABLE=1
+[ INFO     ] Test 'DeviceApi.LsaRemoteRead' PASSED (4399 ms)
 ```
 
 ---
@@ -827,35 +948,52 @@ RUN_ISOLATED_TEST("GPUTest", []() {
 });
 ```
 
-### 9. Avoid GPU Initialization in Test Fixtures
+### 9. HIP/ROCm-using tests: prefer `.withExec()` over plain `fork()`
 
-When using process isolation, avoid initializing GPU resources in test fixture `SetUp()` methods:
+When the test binary contains *any* test that initializes HIP in the parent process (typically inline `TEST_F`s that call `hipSetDevice` / `hipMalloc` / launch a kernel), every other HIP-using test in the same binary that uses plain `fork()` will inherit that HIP context and fail. The symptoms are usually:
+
+- `HIP failure: 'out of memory'` on the first GPU allocation in the child, or
+- corrupted heap diagnostics like `malloc(): unaligned tcache chunk detected` / `free(): invalid pointer`, or
+- `duplicate GPU detection` during `ncclCommInitAll`,
+
+all followed by a SIGSEGV / SIGABRT in the child.
+
+There are two complementary ways to defend against this:
 
 ```cpp
-// ❌ BAD: GPU initialization in fixture (runs in parent process)
-class GPUTests : public ::testing::Test {
-protected:
-  void SetUp() override {
-    hipMalloc(&gpuBuffer, 1024);  // Parent process - will pollute fork()!
-  }
-  void* gpuBuffer;
-};
-
-// ✅ GOOD: GPU initialization inside isolated test
-class GPUTests : public ::testing::Test {
-  // Empty fixture or only CPU resources in SetUp()
-};
+// (a) Keep HIP out of the parent process. Don't init HIP in fixture SetUp()
+//     or at static-init time. Initialize inside the isolated child instead.
+class GPUTests : public ::testing::Test { /* no GPU work in SetUp() */ };
 
 TEST_F(GPUTests, MyTest) {
   RUN_ISOLATED_TEST("GPUOperation", []() {
     void* gpuBuffer;
-    hipMalloc(&gpuBuffer, 1024);  // Child process only - safe!
+    hipMalloc(&gpuBuffer, 1024);   // Child process only
     // ... test logic ...
     hipFree(gpuBuffer);
   });
 }
 
-// ✅ EVEN BETTER: Use RAII + helper structure
+// (b) When you can't control the rest of the binary -- e.g. the suite is
+//     pinned to rccl-UnitTestsFixtures which includes other tests that DO
+//     initialize HIP in the parent (PackRoundtripTest etc.) -- opt your
+//     test into fork()+execve() isolation.
+TEST(DeviceApi, LsaRemoteRead) {
+  RUN_ISOLATED_TESTS(
+    ProcessIsolatedTestRunner::TestConfig(
+        "DeviceApi.LsaRemoteRead",
+        []() { runPositiveLsaRemoteReadTest(); })
+      .withEnvironment({{"NCCL_CUMEM_ENABLE", "1"}, {"NCCL_WIN_ENABLE", "1"}})
+      .withExec()                  // <-- fresh process image; immune to parent HIP state
+      .withTimeout(std::chrono::seconds(60))
+  );
+}
+```
+
+(a) is the cheapest and should always be your first choice. Reach for (b) when (a) is not under your control, or when you specifically need a pristine process image for any other reason (loaded shared libraries, atexit handlers, global constructors, etc.). See [Isolation Modes](#isolation-modes-fork-vs-forkexecve) for details.
+
+```cpp
+// ✅ EVEN BETTER: Use RAII + helper structure for resource lifetime
 struct GPUTestEnvironment {
   void* buffer;
   void setup() { hipMalloc(&buffer, 1024); }
@@ -919,6 +1057,26 @@ TEST_F(GPUTests, MyTest) {
 1. Check system resource limits: `ulimit -u` (max processes)
 2. Reduce number of tests or run in smaller batches
 3. Check for resource leaks in parent process
+
+### Child crashes immediately with HIP / heap errors
+
+**Symptom:** The isolated child terminates almost instantly (a few hundred ms) with one or more of:
+
+- `[FATAL ERROR]: HIP failure: 'out of memory'` on the first `hipMalloc` / `ncclMemAlloc`,
+- `malloc(): unaligned tcache chunk detected` or `free(): invalid pointer`,
+- `duplicate GPU detection` during `ncclCommInitAll`,
+- terminated by signal 6 (SIGABRT) or 11 (SIGSEGV) shortly after launch.
+
+**Cause:** The parent test-runner process initialized HIP / ROCm runtime state before this test forked. Plain `fork()` inherits that state, but the inherited HIP context is not usable in the child.
+
+This commonly happens when your test sits in a binary alongside other tests that touch HIP inline in the parent (e.g. `TEST_F`s with `hipSetDevice` in `SetUp()` or `DeviceTestBase`-style fixtures).
+
+**Solution:** Add `.withExec()` to the offending `TestConfig` so the child is created via `fork()+execve()` and starts from a fresh process image with no inherited HIP state. See [Isolation Modes](#isolation-modes-fork-vs-forkexecve) and [Best Practice 9](#9-hiproccm-using-tests-prefer-withexec-over-plain-fork).
+
+```cpp
+ProcessIsolatedTestRunner::TestConfig("MyHipTest", []() { /* ... */ })
+    .withExec()    // <-- adds fresh process image
+```
 
 ### Test Results Not Available
 
@@ -991,10 +1149,10 @@ EXPECT_EQ(results.size(), expectedTestCount)
    - Parent process iterates through registered tests
    - For each test:
      - `fork()` creates a child process
-     - Child applies environment variables
-     - Child executes test logic
-     - Parent waits for child to complete
-     - Result is collected and stored
+     - **If `withExec()` is NOT set (default):** child applies environment variables and executes the test logic directly, then `_exit()`s with the result.
+     - **If `withExec()` is set:** child applies environment variables, sets a sentinel env var (`RCCL_PIT_REEXEC_TEST=<config-name>`), then `execve("/proc/self/exe", { "/proc/self/exe", "--gtest_filter=<current_test>" })`. The re-exec'd process starts gtest from scratch, re-runs the same `TEST()` body, which calls `RUN_ISOLATED_TESTS` / `executeAllTests()` again; the runner detects the sentinel at the top of `executeAllTests()`, finds the matching `TestConfig` by name, runs its lambda inline (no further fork/exec), and `_exit()`s with the result.
+     - Parent waits for child to complete (in both modes).
+     - Result is collected and stored.
 
 3. **Result Collection:**
    - Exit codes are captured from child processes
@@ -1028,11 +1186,12 @@ The framework uses mutexes for thread-safe operations:
 
 ## Limitations
 
-1. **Process Overhead:** Each test creates a new process (fork overhead)
-2. **Sequential Execution:** Tests run one at a time (not parallel)
-3. **Linux/Unix Only:** Uses `fork()` - not available on Windows
-4. **Memory Duplication:** Each forked process duplicates memory
-5. **No Shared State:** Tests cannot share data between processes
+1. **Process Overhead:** Each test creates a new process (`fork()` overhead, plus a relink / gtest re-init if `.withExec()` is enabled).
+2. **Sequential Execution:** Tests run one at a time (not parallel).
+3. **Linux/Unix Only:** Uses `fork()` and `execve()` — not available on Windows.
+4. **Memory Duplication:** Each forked process duplicates memory (less of an issue with `.withExec()` since the child's memory image is the freshly-loaded binary).
+5. **No Shared State:** Tests cannot share data between processes.
+6. **`.withExec()` requires a gtest context:** `withExec()` reads the currently-running `::testing::TestInfo` to build the re-exec'd child's `--gtest_filter`. If you call `executeAllTests()` outside a gtest TEST body, `.withExec()` will fail. This is rarely a concern — all the `RUN_ISOLATED_TEST*` macros are designed to be used from inside `TEST()` / `TEST_F()` bodies.
 
 ---
 
@@ -1064,6 +1223,14 @@ A:
 3. Temporarily run the test logic outside the framework
 4. Use GDB
 
+**Q: My HIP test crashes immediately with `HIP failure: 'out of memory'` or `duplicate GPU detection`. Why?**
+
+A: Another test in the same binary almost certainly initialized HIP/ROCm in the parent process before yours forked. Plain `fork()` inherits that state, but the inherited HIP context isn't usable in the child. Add `.withExec()` to your `TestConfig` so the child is created via `fork()+execve()` with a fresh process image. See [Best Practice 9](#9-hiproccm-using-tests-prefer-withexec-over-plain-fork) and [Isolation Modes](#isolation-modes-fork-vs-forkexecve) for the full mechanism.
+
+**Q: When should I prefer `.withExec()` over plain `fork()`?**
+
+A: Whenever the test binary contains *any* code that may have already initialized a runtime that is unsafe to inherit across `fork()` — most commonly HIP/ROCm, but also some GPU driver shims, MPI runtimes (when not using the MPI test runner), and certain library global constructors. If your test is the only HIP-using test in the binary, plain `fork()` is fine; if it shares a binary with others, use `.withExec()`. See the cheat sheet under [Isolation Modes](#isolation-modes-fork-vs-forkexecve).
+
 **Q: Can I run tests in parallel?**
 
 A: No, the current implementation only supports sequential execution.
@@ -1078,6 +1245,10 @@ A: Use the macros (`RUN_ISOLATED_TEST`, `RUN_ISOLATED_TESTS`, etc.) for most cas
 - Dynamically generating test configurations at runtime
 - Sharing test registration logic across multiple TEST blocks
 - Advanced control flow scenarios
+
+**Q: Does `withExec()` affect other tests in my suite that don't use it?**
+
+A: No. `withExec()` is a per-`TestConfig` opt-in. Every other test continues to use plain `fork()` as before. The runner's default behavior is unchanged; the only thing that's new is that you can ask for a fresh process image on a per-test basis.
 
 **Q: Do tests run automatically after registration, or do I need to call executeAllTests()?**
 
