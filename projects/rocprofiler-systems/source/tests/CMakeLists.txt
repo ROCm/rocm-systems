@@ -11,6 +11,7 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:rocprofiler-sdk-components-unit-tests>
     $<$<TARGET_EXISTS:rccl-unit-tests>:$<TARGET_OBJECTS:rccl-unit-tests>>
     $<$<TARGET_EXISTS:bin-common-tests>:$<TARGET_OBJECTS:bin-common-tests>>
+    $<$<TARGET_EXISTS:argparse-tests>:$<TARGET_OBJECTS:argparse-tests>>
 )
 
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-common-tests>)

@@ -10,3 +10,7 @@ target_sources(
         ${CMAKE_CURRENT_LIST_DIR}/interpreter.hpp
         ${CMAKE_CURRENT_LIST_DIR}/interpreter.cpp
 )
+
+if(ROCPROFSYS_BUILD_TESTING)
+    add_subdirectory(tests)
+endif()
