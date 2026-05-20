@@ -699,6 +699,45 @@ class TestMetricEvaluator:
             f"SUM([100,200]) / 5 should be 60.0, got {result}"
         )
 
+    def test_eval_expression_divide_by_zero_silenced_and_logged_at_debug(self):
+        """
+        Divide-by-zero (x/0 -> inf, 0/0 -> NaN) emits a numpy RuntimeWarning
+        that is captured and logged via console_debug. The misleading
+        "missing counter data" console_warning must not fire; the function
+        still returns 'N/A' for both cases.
+        """
+        cases = [
+            # x/0 -> inf, taken by the np.isinf branch
+            (
+                {"NUMERATOR": [100.0, 200.0], "DENOMINATOR": [0.0, 0.0]},
+                "SUM(NUMERATOR) / SUM(DENOMINATOR)",
+            ),
+            # 0/0 -> NaN
+            (
+                {"NUMERATOR": [0.0, 0.0], "DENOMINATOR": [0.0, 0.0]},
+                "SUM(NUMERATOR) / SUM(DENOMINATOR)",
+            ),
+        ]
+
+        for columns, equation in cases:
+            evaluator = self._make_evaluator(columns)
+            eval_str = self._to_eval_str(equation)
+            with (
+                patch("utils.metrics.metric_evaluator.console_warning") as mock_warning,
+                patch("utils.metrics.metric_evaluator.console_debug") as mock_debug,
+            ):
+                result = evaluator.eval_expression(eval_str)
+
+            assert result == "N/A", (
+                f"Expected 'N/A' for '{equation}' with {columns}, got {result}"
+            )
+            mock_warning.assert_not_called()
+            debug_msgs = [str(call) for call in mock_debug.call_args_list]
+            assert any("RuntimeWarning" in m for m in debug_msgs), (
+                f"Expected RuntimeWarning in console_debug output for "
+                f"'{equation}', got {debug_msgs}"
+            )
+
     def test_eval_expression_aggregates_past_partial_zeros_in_denominator(self):
         """SUM aggregates past zero entries in the denominator without erroring."""
         evaluator = self._make_evaluator({
