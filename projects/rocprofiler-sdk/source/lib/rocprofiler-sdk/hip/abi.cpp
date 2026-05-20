@@ -730,11 +730,7 @@ ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 518)
 #elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 27
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 520)
 #elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 28
-<<<<<<< HEAD
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 535)
-=======
-ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 520)
->>>>>>> 38108f2a1b (Support HIP launch attribute step 28 in rocprofiler-sdk. Bump the HIP runtime API table step version in CLR and rocprofiler-sdk to format the new dynamic data prefetch launch attribute without introducing a new runtime API ID.)
 #else
 INTERNAL_CI_ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 0)
 #endif
