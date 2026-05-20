@@ -37,6 +37,9 @@
 
 #include "lib/aqlprofile/version.h"
 
+#include <assert.h>  // static_assert / _Static_assert for ABI size locks
+#include <stddef.h>  // offsetof for ABI offset locks
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -261,6 +264,19 @@ typedef struct
     uint32_t bits[AQLPROFILE_DRM_CU_BITMAP_NUM_SE][AQLPROFILE_DRM_CU_BITMAP_NUM_SA_PER_SE];
 } aqlprofile_cu_bitmap_t;
 
+/* ABI lock: size of aqlprofile_cu_bitmap_t is part of the V2 ABI. Any change
+ * here is a binary-incompatible break for V2 consumers and MUST be paired with
+ * a V2 ABI version bump. Bumping AQLPROFILE_DRM_CU_BITMAP_NUM_SE or
+ * AQLPROFILE_DRM_CU_BITMAP_NUM_SA_PER_SE intentionally widens the bitmap and
+ * will trip this assert at every consumer's build until they recompile against
+ * the new size; that is the desired behaviour. */
+static_assert(sizeof(aqlprofile_cu_bitmap_t) == AQLPROFILE_DRM_CU_BITMAP_NUM_SE *
+                                                    AQLPROFILE_DRM_CU_BITMAP_NUM_SA_PER_SE *
+                                                    sizeof(uint32_t),
+              "aqlprofile_cu_bitmap_t size locked to "
+              "AQLPROFILE_DRM_CU_BITMAP_NUM_SE * AQLPROFILE_DRM_CU_BITMAP_NUM_SA_PER_SE uint32_t; "
+              "do NOT change without bumping the V2 ABI version");
+
 /**
  * @brief Extended agent info with physical CU topology for WGP harvesting support.
  *
@@ -284,6 +300,23 @@ typedef struct
     uint32_t               location_id;          /**< BDF (Bus/Device/Function) */
     aqlprofile_cu_bitmap_t cu_bitmap;            /**< Per-SE/SA active CU bitmap. */
 } aqlprofile_agent_info_v2_t;
+
+/* ABI lock: layout of aqlprofile_agent_info_v2_t. cu_bitmap was appended at the
+ * end of the V2 struct; the offset assertion pins it to "all the prior V2
+ * members" so any reordering or insertion of fields fails the build. The total
+ * size assertion catches accidental padding changes (e.g. switching a member to
+ * a wider type) that would silently break binary compat with already-compiled
+ * V2 consumers. Any intentional change to the V2 layout MUST bump the V2 ABI
+ * version. */
+static_assert(offsetof(aqlprofile_agent_info_v2_t, cu_bitmap) ==
+                  sizeof(const char*) + 6 * sizeof(uint32_t),
+              "aqlprofile_agent_info_v2_t::cu_bitmap offset changed; "
+              "prior V2 members were reordered or resized - this is a V2 ABI break");
+
+static_assert(sizeof(aqlprofile_agent_info_v2_t) ==
+                  sizeof(const char*) + 6 * sizeof(uint32_t) + sizeof(aqlprofile_cu_bitmap_t),
+              "aqlprofile_agent_info_v2_t total size changed; "
+              "padding or member layout drifted - this is a V2 ABI break");
 
 /**
  * @brief Struct containing a handle to a registered agent

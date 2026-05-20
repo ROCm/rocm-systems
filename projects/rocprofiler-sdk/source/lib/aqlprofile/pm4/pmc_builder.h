@@ -32,9 +32,10 @@
 #include <utility>
 #include <vector>
 
+#include "lib/aqlprofile/aqlprofile.hpp"  // aqlprofile_cu_bitmap_t (gated aql_profile_v2.h)
 #include "lib/aqlprofile/def/gpu_block_info.h"
 #include "lib/aqlprofile/pm4/cmd_config.h"
-#include "lib/aqlprofile/util/hsa_rsrc_factory.h"  // aqlprofile_cu_bitmap_t (transitive)
+#include "lib/aqlprofile/util/hsa_rsrc_factory.h"  // AgentInfo
 
 namespace pm4_builder
 {
@@ -145,8 +146,9 @@ private:
     // WGP harvesting support (GFX11+): per-(SE, SA) active WGP physical indices.
     //
     // Sized in the constructor from the chip's actual se_number_ x sarrays_per_se
-    // so we never overrun on parts that exceed the DRM cu_bitmap[4][4] window
-    // (e.g. Navi31: 6 SE x 2 SA = 12 SAs; MI200: 8 SE x 1 SA = 8 SAs), and so
+    // so we never overrun on parts that exceed the aqlprofile_cu_bitmap_t window
+    // (AQLPROFILE_DRM_CU_BITMAP_NUM_SE x AQLPROFILE_DRM_CU_BITMAP_NUM_SA_PER_SE,
+    // e.g. Navi31: 6 SE x 2 SA = 12 SAs; MI200: 8 SE x 1 SA = 8 SAs), and so
     // we remain forward-compatible with future GPUs whose SE x SA-per-SE
     // topology is larger than any fixed compile-time bound.
     //
@@ -271,23 +273,25 @@ public:
         // contiguous WGPs (two CU bits per WGP). That collapses the fallback
         // path into the same loop and preserves pre-fix sequential iteration.
         //
-        // The (se < drm_se_lim && sa < drm_sa_lim) guard on the element read is
-        // a hard correctness requirement: aqlprofile_cu_bitmap_t::bits is a C
-        // uint32_t array sized by the kernel-ABI-fixed dimensions, so reading
-        // agent_info->cu_bitmap.bits[se][sa] for out-of-window indices would be
-        // UB on the C array, not a guaranteed zero. Derive the iteration bounds
-        // from the type itself so they cannot drift from the bitmap layout.
-        constexpr uint32_t kMaxWgpPerSa = 16;
-        constexpr uint32_t drm_se_lim   = std::extent_v<decltype(aqlprofile_cu_bitmap_t::bits), 0>;
-        constexpr uint32_t drm_sa_lim   = std::extent_v<decltype(aqlprofile_cu_bitmap_t::bits), 1>;
+        // The (se < bitmap_se_lim && sa < bitmap_sa_lim) guard on the element
+        // read is a hard correctness requirement: aqlprofile_cu_bitmap_t::bits
+        // is a C uint32_t array sized by the kernel-ABI-fixed dimensions, so
+        // reading agent_info->cu_bitmap.bits[se][sa] for out-of-window indices
+        // would be UB on the C array, not a guaranteed zero. Derive the
+        // iteration bounds from the type itself so they cannot drift from the
+        // bitmap layout.
+        constexpr uint32_t kMaxWgpPerSa  = 16;
+        constexpr uint32_t bitmap_se_lim = std::extent_v<decltype(aqlprofile_cu_bitmap_t::bits), 0>;
+        constexpr uint32_t bitmap_sa_lim = std::extent_v<decltype(aqlprofile_cu_bitmap_t::bits), 1>;
         for(uint32_t se = 0; se < se_number_; ++se)
         {
             for(uint32_t sa = 0; sa < sarrays_per_se; ++sa)
             {
                 auto& indices = active_wgp_indices_.at(se).at(sa);
 
-                uint32_t cu_bm =
-                    (se < drm_se_lim && sa < drm_sa_lim) ? agent_info->cu_bitmap.bits[se][sa] : 0u;
+                uint32_t cu_bm = (se < bitmap_se_lim && sa < bitmap_sa_lim)
+                                     ? agent_info->cu_bitmap.bits[se][sa]
+                                     : 0u;
                 if(cu_bm == 0)
                 {
                     // No bitmap for this SA. Guard wgp_per_sa==0 here so the
