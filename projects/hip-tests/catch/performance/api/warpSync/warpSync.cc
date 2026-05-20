@@ -42,11 +42,11 @@ static void initializeMasks()
   int halfWaveSize = wavefrontSize / 2;
 
   fullMask = (getWarpSize() == 64)? ~0ull : (1ull << 32) - 1;
-  halfBitsOn = (1ul << (wavefrontSize / 2)) - 1;
-  halfHighBitsOn = halfBitsOn << halfWaveSize,
-  high16BitsOn = halfBitsOn << (wavefrontSize - 16),
-  high8BitsOn = halfBitsOn << (wavefrontSize - 8),
-  high4BitsOn = halfBitsOn << (wavefrontSize - 4),
+  halfBitsOn = (1ull << (wavefrontSize / 2)) - 1;
+  halfHighBitsOn = halfBitsOn << halfWaveSize;
+  high16BitsOn = halfBitsOn << (wavefrontSize - 16);
+  high8BitsOn = halfBitsOn << (wavefrontSize - 8);
+  high4BitsOn = halfBitsOn << (wavefrontSize - 4);
   allButOne = fullMask & ~1;
 }
 template <class T> struct AtomicAddOp {
@@ -99,7 +99,7 @@ __global__ void reduceAtomics(T* __restrict__ output, const T* __restrict__ inpu
 
   uint lane = __lane_id();
 
-  if (mask & (1ul << lane)) op(&result[numWarp], input[idx]);
+  if (mask & (1ull << lane)) op(&result[numWarp], input[idx]);
 
   __syncthreads();
 
