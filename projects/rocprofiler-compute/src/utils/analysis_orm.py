@@ -7,7 +7,7 @@ The schema is documented visually in:
     docs/data/analyze/analysis_data_dump_schema.png
 generated from its Mermaid source:
     docs/data/analyze/analysis_data_dump_schema.mmd
-When changing the schema, ask an AI agent to update the .mmd file to match,
+When changing the schema, update the .mmd file to match,
 then re-export the .png via draw.io.
 """
 
