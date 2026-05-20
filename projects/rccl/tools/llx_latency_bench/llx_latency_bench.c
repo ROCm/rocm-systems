@@ -54,9 +54,9 @@ THE SOFTWARE.
  * adds ~1 µs of overhead independent of message size.
  *
  * Build:
- *   hipcc -O3 --offload-arch=<arch> -std=c++17 -x hip llx_latency_test.c -o llx_latency_test
+ *   hipcc -O3 --offload-arch=<arch> -std=c++17 -x hip llx_latency_bench.c -o llx_latency_bench
  *
- * Run:  ./llx_latency_test_<N> [warmup [iters [timeout_s [max_bytes]]]]
+ * Run:  ./llx_latency_bench_<N> [warmup [iters [timeout_s [max_bytes]]]]
  *        max_bytes accepts K/M/G suffixes, e.g. 16M, 1G (default: 128M)
  */
 

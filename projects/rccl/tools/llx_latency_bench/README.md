@@ -1,4 +1,4 @@
-# llx_latency_test
+# llx_latency_bench
 
 Measures `T(GPU0 -> GPU1)` and one-way bandwidth for four RCCL-style LL
 flag/data signaling protocols between two GPUs on the same node, sweeping
@@ -33,9 +33,9 @@ Wire efficiencies for supported line sizes:
 make -j
 
 # Single line size
-make llx_latency_test_64
-make llx_latency_test_128
-make llx_latency_test_256
+make llx_latency_bench_64
+make llx_latency_bench_128
+make llx_latency_bench_256
 ```
 
 Requires ROCm in `$ROCM_PATH` (default `/opt/rocm`). The arch is auto-detected
@@ -44,9 +44,9 @@ via `--offload-arch=native`. The `.c` source is compiled as HIP via `-x hip`.
 ## Run
 
 ```bash
-./llx_latency_test_64  [warmup [iters [timeout_s [max_bytes]]]]
-./llx_latency_test_128 [warmup [iters [timeout_s [max_bytes]]]]
-./llx_latency_test_256 [warmup [iters [timeout_s [max_bytes]]]]
+./llx_latency_bench_64  [warmup [iters [timeout_s [max_bytes]]]]
+./llx_latency_bench_128 [warmup [iters [timeout_s [max_bytes]]]]
+./llx_latency_bench_256 [warmup [iters [timeout_s [max_bytes]]]]
 ```
 
 Defaults: warmup=10, iters=100, timeout=30 s, max_bytes=128M.
