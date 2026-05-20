@@ -1,0 +1,23 @@
+---
+hrr:
+  Unit_HRR_Format_Roundtrip:
+    <<: *level_2
+    tags: [format]
+  Unit_HRR_Format_BadMagic:
+    <<: *level_2
+    tags: [format]
+  Unit_HRR_Format_TruncatedEvent:
+    <<: *level_2
+    tags: [format]
+  Unit_HRR_Format_HashHex:
+    <<: *level_2
+    tags: [format]
+  Unit_HRR_Format_EventTypeName:
+    <<: *level_2
+    tags: [format]
+  Unit_HRR_CaptureReplayRoundtrip:
+    <<: *level_2
+    tags: [capture, playback, roundtrip]
+  Unit_HRR_GraphRoundtrip:
+    <<: *level_2
+    tags: [capture, graph, playback, roundtrip]
