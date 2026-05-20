@@ -3764,11 +3764,7 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile(
   }
 
   std::ostringstream ss_2;
-  const uint32_t kMaxPartitions = 8;
-  uint32_t copy_partition_ids[kMaxPartitions] = {0};  // initialize all to 0s
-  std::copy(partition_id, partition_id + kMaxPartitions, copy_partition_ids);
-  std::copy(std::begin(copy_partition_ids), std::end(copy_partition_ids),
-            amd::smi::make_ostream_joiner(&ss_2, ", "));
+  ss_2 << partition_id[0];
 
   auto it_profile_type = partition_types_map.find(profile->profile_type);
   std::string partition_type_str = "N/A";

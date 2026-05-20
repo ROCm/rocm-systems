@@ -46,9 +46,8 @@ packed FP16 from 256 to 512 FLOPs/CU/cycle.
 The aggregate ``VALU FLOPs`` row in this panel uses the FP32 single-issue FMA
 ceiling (128 FLOPs/CU/cycle) as the peak. A workload that issues VOPD heavily,
 or that runs packed FP16, can therefore report a percentage of peak above
-100%. To gauge how much of the throughput is coming from VOPD, inspect the
-``Instructions - Dual VALU (VOPD)`` row on the :doc:`wgp` panel, which counts
-``SQ_INSTS_DUAL_VALU_WAVE32``.
+100%. Use VALU FLOPs against the ceilings below together with ISA-level VOPD
+pairing to reason about how much throughput is coming from dual-issue paths.
 
 Peak theoretical VALU rates
 ---------------------------
@@ -72,21 +71,29 @@ clock. They anchor the percentage of peak reported for the FLOPs related rows.
 Scaling and clocks
 ------------------
 
-``$cu_per_gpu`` is the total Compute Unit count from system info, not the WGP
-count. On RDNA 3.5 each WGP pairs two CUs, so the CU count is about twice the
-WGP count, and peak FLOPs scale with the CU count. ``$max_sclk`` is the shader
-engine clock in MHz from system info.
+``$cu_per_gpu`` is the total CU count from system info, not WGP count. On RDNA 3.5,
+each WGP pairs two CUs, so CU count is roughly twice the WGP count - since
+``$cu_per_gpu`` reflects active CUs discovered at runtime (rather than just doubling
+a fixed WGP count). Peak FLOPs scale with CUs. ``$max_sclk`` is the shader/engine
+clock in MHz from profiler system specs.
 
 Bandwidth and cache rows
 ------------------------
 
-The throughput rows for TCP, GL1, GL2, and SQC use heuristic ceilings (bytes
-per cycle, multiplied by instance count and clock). They are not anchored to a
-single public RDNA 3.5 table, so the percentage of peak reported for these
-rows is indicative rather than exact.
+The throughput rows for GL0 (TCP Cache), GL1, GL2, and SQC use heuristic ceilings that are
+not anchored to a single public RDNA 3.5 table, so the percentage of peak
+reported for these rows is indicative rather than exact. The memory hierarchy
+runs GL0 (TCP Cache) -> GL1 -> GL2 -> system memory via GCEA. Each level's
+ceiling is one peak transfer per cycle, scaled by instance count and
+``$max_sclk``:
 
-For context, the memory hierarchy is GL0 (TCP Cache), then GL1, then GL2, then
-system memory through GCEA and Data Fabric.
+* **GL0 (TCP Cache)**: one 128-byte cacheline per cycle per CU --
+  ``$cu_per_gpu * 128 B/cycle * $max_sclk``
+* **GL1**: one 128-byte request per cycle per GL1C instance -- ``($cu_per_gpu / 8) * 128 B/cycle * $max_sclk``
+* **GL2**: one 128-byte request per cycle per L2 bank --
+  ``$total_l2_chan * 128 B/cycle * $max_sclk``
+* **SQC (scalar data cache and instruction cache)**: one 64-byte TC request per
+  cycle per SQC instance -- ``$sqc_per_gpu * 64 B/cycle * $max_sclk``
 
 .. Note::
    For AMD Instinct accelerators (CDNA-CDNA4), see

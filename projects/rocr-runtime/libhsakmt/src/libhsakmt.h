@@ -34,6 +34,7 @@
 #include <stdint.h>
 #include <limits.h>
 #include <stdio.h>
+#include <assert.h>
 
 extern int hsakmt_udmabuf_dev_fd;
 extern unsigned long hsakmt_kfd_open_count;
@@ -133,6 +134,15 @@ extern int hsakmt_debug_level;
                 pr_warn(fmt, ##__VA_ARGS__);    \
         }                                       \
 })
+
+#define CHECK_CTX(ctx, ret_val) \
+	do { \
+		assert(ctx); \
+		if (!(ctx)) { \
+			pr_err("Expected a non-null ptr for HsaKFDContext"); \
+			return (ret_val); \
+		} \
+	} while (0)
 
 /* Expects gfxv (full) in decimal */
 #define HSA_GET_GFX_VERSION_MAJOR(gfxv)   (((gfxv) / 10000) % 100)

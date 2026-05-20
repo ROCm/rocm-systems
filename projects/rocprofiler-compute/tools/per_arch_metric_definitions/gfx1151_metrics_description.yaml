@@ -378,10 +378,6 @@ Wave Instruction Mix:
     plain: Transcendental VALU instructions (SQ_INSTS_VALU_TRANS) per normalization unit. These cover hardware approximations such as sin, cos, and log on the vector ALU.
     rst: Transcendental VALU instructions (SQ_INSTS_VALU_TRANS) per normalization unit. These cover hardware approximations such as sin, cos, and log on the vector ALU.
     unit: Count per Normalization Unit
-  Instructions - Dual VALU (VOPD):
-    plain: Dual-issue VALU instructions executed in wave32 mode (SQ_INSTS_DUAL_VALU_WAVE32) per normalization unit. The VOPD encoding pairs two independent VALU operations that issue in the same cycle.
-    rst: Dual-issue VALU instructions executed in wave32 mode (SQ_INSTS_DUAL_VALU_WAVE32) per normalization unit. The VOPD encoding pairs two independent VALU operations that issue in the same cycle.
-    unit: Count per Normalization Unit
   Instructions - VMEM:
     plain: Number of vector memory instructions executed, including global, buffer, and texture operations. High VMEM counts relative to VALU may indicate memory-bound workloads.
     rst: Number of vector memory instructions executed, including global, buffer, and texture operations. High VMEM counts relative to VALU may indicate memory-bound workloads.

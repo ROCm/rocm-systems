@@ -599,8 +599,9 @@ Dispatch filtering
 
 Dispatch filtering selects which iterations of each kernel to profile.
 Indices are 1-based, so the first dispatch of a kernel is ``1``. Each
-value is a positive integer or a ``start:end`` range with
-``start <= end`` (for example, ``1`` or ``3:5``).
+value is a positive integer or a range with ``start <= end``, written as
+either ``start:end`` or ``start-end`` (for example, ``1``, ``3:5``, or
+``3-5``).
 
 The following example profiles the first dispatch of each kernel in the
 application.

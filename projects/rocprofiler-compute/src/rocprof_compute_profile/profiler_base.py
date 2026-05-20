@@ -184,16 +184,16 @@ class RocProfCompute_Base:
                     "options."
                 )
 
-        # Each --dispatch token must be a positive integer or a 'start:end'
-        # range with start <= end (1-based indexing).
+        # Each --dispatch token must be a positive integer or a range
+        # ('start:end' or 'start-end') with start <= end (1-based indexing).
         if args.dispatch:
             for token in args.dispatch:
-                m = re.fullmatch(r"([1-9]\d*)(?::([1-9]\d*))?", token)
+                m = re.fullmatch(r"([1-9]\d*)(?:[-:]([1-9]\d*))?", token)
                 if not m or (m.group(2) and int(m.group(2)) < int(m.group(1))):
                     console_error(
                         f"Invalid --dispatch value '{token}'. Expected a "
-                        "positive integer or 'start:end' range with "
-                        "start <= end (e.g. 1, 3:5)."
+                        "positive integer or 'start:end'/'start-end' "
+                        "range with start <= end (e.g. 1, 3:5, 3-5)."
                     )
 
         # verify correct formatting for application binary

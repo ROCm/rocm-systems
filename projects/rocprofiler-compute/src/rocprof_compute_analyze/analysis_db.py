@@ -4,6 +4,7 @@
 import ast
 import json
 import re
+import warnings
 from pathlib import Path
 from typing import Any, Callable, Optional, Union
 
@@ -501,44 +502,57 @@ class db_analysis(OmniAnalyze_Base):
             )
         try:
             prev_noise_clamp_count = get_noise_clamp_warnings()["count"]
-            eval_result = eval(
-                compile(value, "<string>", "eval"),
-                {},  # no globals
-                {
-                    # only locals
-                    "pmc_df": pmc_df,
-                    "sys_info": sys_info,
-                    "to_avg": to_avg,
-                    "to_concat": to_concat,
-                    "to_int": to_int,
-                    "to_max": to_max,
-                    "to_median": to_median,
-                    "to_min": to_min,
-                    "to_mod": to_mod,
-                    "to_quantile": to_quantile,
-                    "to_round": to_round,
-                    "to_std": to_std,
-                    "to_sum": to_sum,
-                    "to_noise_clamp": to_noise_clamp,
-                },
-            )
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always", RuntimeWarning)
+                eval_result = eval(
+                    compile(value, "<string>", "eval"),
+                    {},  # no globals
+                    {
+                        # only locals
+                        "pmc_df": pmc_df,
+                        "sys_info": sys_info,
+                        "to_avg": to_avg,
+                        "to_concat": to_concat,
+                        "to_int": to_int,
+                        "to_max": to_max,
+                        "to_median": to_median,
+                        "to_min": to_min,
+                        "to_mod": to_mod,
+                        "to_quantile": to_quantile,
+                        "to_round": to_round,
+                        "to_std": to_std,
+                        "to_sum": to_sum,
+                        "to_noise_clamp": to_noise_clamp,
+                    },
+                )
+            # RuntimeWarnings (e.g. divide-by-zero) are surfaced only under --verbose
+            for w in caught:
+                console_debug(
+                    f"RuntimeWarning evaluating {name}: {value} - {w.message}"
+                )
 
             # eval_result can be None if expression has None explicitly specified
             # Do not give warning for this case and simply return None
             if eval_result is None:
                 return None
 
-            # Only return None for scalar NA values (NaN, pd.NA)
+            # Only return None for scalar NA values (NaN, pd.NA, +/-inf).
             # For vectors/Series, return as-is to preserve shape for downstream
             # operations. Note: pd.NA is not detected as scalar by np.isscalar()
             is_scalar_na = eval_result is pd.NA or (
-                np.isscalar(eval_result) and pd.isna(eval_result)
+                np.isscalar(eval_result)
+                and (pd.isna(eval_result) or np.isinf(eval_result))
             )
 
             if is_scalar_na:
-                # Only warn if expression doesn't have "None" as an explicit fallback
-                # Expressions with .where(..., None) are expected to return NA
-                if "None" not in value:
+                # Skip warning when None is explicit or a RuntimeWarning
+                # already explained the NA
+                if "None" in value:
+                    console_debug(
+                        f"Expression for {name}: {value} evaluated to "
+                        "None - explicitly specified."
+                    )
+                elif not caught:
                     console_warning(
                         f"Could not evaluate expression for {name}: {value} - "
                         "likely due to missing counter data."

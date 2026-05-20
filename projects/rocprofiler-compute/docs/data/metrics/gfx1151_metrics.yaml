@@ -32,7 +32,7 @@ System Speed-of-Light:
   GL0 Cache Hit Rate (TCP Cache):
     rst: 'Percentage of GL0 vector cache (TCP Cache) requests that hit in cache. The TCP cache is the first-level cache for vector memory operations. High hit rates reduce traffic to the GL1 cache and improve memory access latency.'
     unit: Percent
-  GL0 Cache BW:
+  GL0 Cache BW (TCP Cache):
     rst: 'Bandwidth of requests to the GL0 vector cache (TCP Cache). This represents the rate at which the shader cores are requesting data from the cache hierarchy. High bandwidth indicates memory-intensive workloads.'
     unit: Bytes/s
   GL1 Cache Hit Rate:
@@ -287,9 +287,6 @@ Wave Instruction Mix:
     unit: Count per Normalization Unit
   Instructions - Transcendental:
     rst: 'Transcendental VALU instructions (SQ_INSTS_VALU_TRANS) per normalization unit. These cover hardware approximations such as sin, cos, and log on the vector ALU.'
-    unit: Count per Normalization Unit
-  Instructions - Dual VALU (VOPD):
-    rst: 'Dual-issue VALU instructions executed in wave32 mode (SQ_INSTS_DUAL_VALU_WAVE32) per normalization unit. The VOPD encoding pairs two independent VALU operations that issue in the same cycle.'
     unit: Count per Normalization Unit
   Instructions - VMEM:
     rst: 'Number of vector memory instructions executed, including global, buffer, and texture operations. High VMEM counts relative to VALU may indicate memory-bound workloads.'
