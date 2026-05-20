@@ -77,7 +77,7 @@ VALIDATE_METRICS = {
         ],
         # Ignore warmup dispatch
         # Collect roofline block
-        "profile_options": ["-d", "2-1001", "-b", "4"],
+        "profile_options": ["-d", "2:1001", "-b", "4"],
         "roof": True,
     }
 }
