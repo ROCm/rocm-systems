@@ -52,8 +52,11 @@ bool debug_user = tim::get_env("ROCPROFSYS_DEBUG_USER_REGIONS", false) || get_de
 namespace
 {
 // Process-global default registry used when no engine has set an active
-// registry on the calling thread (e.g. the live-emission path that does
-// not construct a per-instance engine).
+// registry on the calling thread. The live-emission path runs on arbitrary
+// application threads that the engine cannot enumerate in advance, so they
+// fall back to this shared registry; concurrency is guarded by the
+// registry's own mutex. Cached parser threads always have an
+// engine-owned registry set explicitly via prepare_for_processing.
 track_registry&
 process_default_registry()
 {
@@ -61,20 +64,14 @@ process_default_registry()
     return _v;
 }
 
-// Returns the active registry, lazily seeding the calling thread to the
-// process-global default if no registry is set. Hot-path callers
-// (get_perfetto_track_uuids / _mutex) invoke this and pay the seed cost
-// exactly once per thread per process.
+// Returns the active registry, or the process-wide default when no engine
+// has set one on the calling thread. Read-only on the calling thread's TLS;
+// the default is shared across every live-emission thread.
 track_registry&
 active_or_default_registry()
 {
     auto* reg = get_active_track_registry();
-    if(reg == nullptr)
-    {
-        reg = &process_default_registry();
-        set_active_track_registry(reg);
-    }
-    return *reg;
+    return reg ? *reg : process_default_registry();
 }
 }  // namespace
 
