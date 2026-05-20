@@ -331,6 +331,7 @@ class TestTransposeROCProfiler(RocprofsysTest):
 
 @pytest.mark.mpi_optional("transpose")
 @pytest.mark.rocprofiler
+@pytest.mark.class_name("transpose-gpu-perf-counters")
 class TestTransposeGPUPerfCounters(RocprofsysTest):
 
     @pytest.mark.rocpd("gpu_perf_counter_env")

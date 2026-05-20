@@ -414,8 +414,7 @@ register_gpu_perf_counter_source(const std::vector<std::shared_ptr<agent>>& agen
         g_gpu_perf_counter_collector->setup();
         g_gpu_perf_counter_collector->config();
 
-        LOG_DEBUG("Registered GPU Perf Counter PMC source, total slices={}",
-                  g_collector_slices.size());
+        LOG_DEBUG("Registered GPU Perf Counter PMC source");
     } catch(const std::runtime_error& runtime_exception)
     {
         LOG_ERROR("Failed to register SDK PMC source: {}", runtime_exception.what());
