@@ -148,15 +148,7 @@ void runAggregation(hiprtcProgram& prog, AggregationType aggType) {
         Op<T> op;
 
         expected = calculateExpected(expectedByLane, input.host_ptr(), op, mask, aggType);
-
-        if (aggType == AggregationType::Reduce) {
-          REQUIRE(result == expected);
-        } else {
-          for (int laneId = 0; laneId < wavefrontSize; laneId++) {
-            INFO("Lane: " << laneId);
-            REQUIRE(result == expectedByLane[laneId]);
-          }
-        }
+        REQUIRE(result == expectedByLane[laneId]);
       }
     }
 
@@ -264,5 +256,41 @@ HIP_TEST_CASE(Unit_Rtc_CoopReduce)
 
   SECTION("xor") {
     runAndCompileTest<cooperative_groups::bit_xor>(AggregationType::Reduce, integralTypes);
+  }
+}
+
+TEST_CASE("Unit_Rtc_CoopScan")
+{
+  const std::tuple<int, unsigned int, long long, unsigned long long, float, half, double> allTypes;
+  const std::tuple<int, unsigned int, long long, unsigned long long> integralTypes;
+
+  SECTION("add") {
+    runAndCompileTest<cooperative_groups::plus>(AggregationType::InclusiveScan, allTypes);
+    runAndCompileTest<cooperative_groups::plus>(AggregationType::ExclusiveScan, allTypes);
+  }
+
+  SECTION("less") {
+    runAndCompileTest<cooperative_groups::less>(AggregationType::InclusiveScan, allTypes);
+    runAndCompileTest<cooperative_groups::less>(AggregationType::ExclusiveScan, allTypes);
+  }
+
+  SECTION("greater") {
+    runAndCompileTest<cooperative_groups::greater>(AggregationType::InclusiveScan, allTypes);
+    runAndCompileTest<cooperative_groups::greater>(AggregationType::ExclusiveScan, allTypes);
+  }
+
+  SECTION("and") {
+    runAndCompileTest<cooperative_groups::bit_and>(AggregationType::InclusiveScan, integralTypes);
+    runAndCompileTest<cooperative_groups::bit_and>(AggregationType::ExclusiveScan, integralTypes);
+  }
+
+  SECTION("or") {
+    runAndCompileTest<cooperative_groups::bit_or>(AggregationType::InclusiveScan, integralTypes);
+    runAndCompileTest<cooperative_groups::bit_or>(AggregationType::ExclusiveScan, integralTypes);
+  }
+
+  SECTION("xor") {
+    runAndCompileTest<cooperative_groups::bit_xor>(AggregationType::InclusiveScan, integralTypes);
+    runAndCompileTest<cooperative_groups::bit_xor>(AggregationType::ExclusiveScan, integralTypes);
   }
 }
