@@ -83,7 +83,7 @@ jobs:
           python ./TheRock/build_tools/health_status.py
 
       - name: Fetch sources
-        timeout-minutes: 45
+        timeout-minutes: 30
         run: |
           git config --global core.longpaths true
           python ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems
