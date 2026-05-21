@@ -41,27 +41,48 @@ class InstructionProperty(Flag):
     IS_ENDPGM = auto()
 
 
-_CROSS_LANE_CALLS: frozenset[str] = frozenset({
-    'v_permlane16', 'v_permlanex16', 'v_readfirstlane', 'v_readlane',
-    'v_writelane', 'ds_bpermute', 'ds_swizzle',
-})
+_CROSS_LANE_CALLS: frozenset[str] = frozenset(
+    {
+        "v_permlane16",
+        "v_permlanex16",
+        "v_readfirstlane",
+        "v_readlane",
+        "v_writelane",
+        "ds_bpermute",
+        "ds_swizzle",
+    }
+)
 
-_MATRIX_CALLS: frozenset[str] = frozenset({
-    'mfma_compute',
-})
+_MATRIX_CALLS: frozenset[str] = frozenset(
+    {
+        "mfma_compute",
+    }
+)
 
-_BARRIER_CALLS: frozenset[str] = frozenset({
-    'barrier', 'CheckBarrierComplete',
-})
+_BARRIER_CALLS: frozenset[str] = frozenset(
+    {
+        "barrier",
+        "CheckBarrierComplete",
+    }
+)
 
-_WAITCNT_CALLS: frozenset[str] = frozenset({
-    'waitcnt',
-})
+_WAITCNT_CALLS: frozenset[str] = frozenset(
+    {
+        "waitcnt",
+    }
+)
 
-_ADDR_CALC_CALLS: frozenset[str] = frozenset({
-    'CalcBufferAddr', 'CalcFlatAddr', 'CalcGlobalAddr', 'CalcDsAddr',
-    'CalcScalarGlobalAddr', 'CalcScalarBufferAddr', 'CalcScratchAddr',
-})
+_ADDR_CALC_CALLS: frozenset[str] = frozenset(
+    {
+        "CalcBufferAddr",
+        "CalcFlatAddr",
+        "CalcGlobalAddr",
+        "CalcDsAddr",
+        "CalcScalarGlobalAddr",
+        "CalcScalarBufferAddr",
+        "CalcScratchAddr",
+    }
+)
 
 
 def derive_properties(block: SemaBlock) -> InstructionProperty:
@@ -88,16 +109,16 @@ def derive_properties(block: SemaBlock) -> InstructionProperty:
         if node.kind == SemaNodeKind.ASSIGN and node.children:
             lhs = _unwrap_cast(node.children[0])
             if lhs.kind == SemaNodeKind.ID and lhs.id_name:
-                if lhs.id_name == 'SCC':
+                if lhs.id_name == "SCC":
                     props |= InstructionProperty.WRITES_SCC
-                elif lhs.id_name == 'EXEC':
+                elif lhs.id_name == "EXEC":
                     props |= InstructionProperty.WRITES_EXEC
             if lhs.kind == SemaNodeKind.ARRAYDEREF and lhs.children:
                 arr = _unwrap_cast(lhs.children[0])
                 if arr.kind == SemaNodeKind.ID:
-                    if arr.id_name == 'VCC':
+                    if arr.id_name == "VCC":
                         props |= InstructionProperty.WRITES_VCC
-                    elif arr.id_name == 'EXEC':
+                    elif arr.id_name == "EXEC":
                         props |= InstructionProperty.WRITES_EXEC
 
         if node.kind == SemaNodeKind.CALL and node.call_name:
@@ -112,19 +133,19 @@ def derive_properties(block: SemaBlock) -> InstructionProperty:
                 props |= InstructionProperty.IS_WAITCNT
             if cn in _ADDR_CALC_CALLS:
                 props |= InstructionProperty.IS_MEMORY
-            if cn == 'endpgm':
+            if cn == "endpgm":
                 props |= InstructionProperty.IS_ENDPGM
 
         if node.kind == SemaNodeKind.ARRAYDEREF and node.children:
             arr = _unwrap_cast(node.children[0])
             if arr.kind == SemaNodeKind.ID:
-                if arr.id_name == 'MEM':
+                if arr.id_name == "MEM":
                     props |= InstructionProperty.IS_MEMORY
-                elif arr.id_name == 'LDS':
+                elif arr.id_name == "LDS":
                     props |= InstructionProperty.IS_MEMORY
-                elif arr.id_name == 'VCC':
+                elif arr.id_name == "VCC":
                     props |= InstructionProperty.READS_VCC
-                elif arr.id_name == 'EXEC':
+                elif arr.id_name == "EXEC":
                     props |= InstructionProperty.READS_EXEC
 
     return props

@@ -29,22 +29,47 @@ from amdisa.sema_ast import SemaBlock, SemaNode, SemaNodeKind
 
 _log = logging.getLogger(__name__)
 
-_CONTEXT_IDS: frozenset[str] = frozenset({
-    'SCC', 'VCC', 'EXEC', 'EXEC_LO', 'MEM', 'LDS',
-    'VGPR', 'SGPR', 'laneId', 'M0',
-    'PC', 'TRAPSTS', 'VCCZ', 'EXECZ', 'MODE', 'WAVE64',
-    'TBA', 'TTMP', 'SHADER_CYCLES_HI', 'SHADER_CYCLES_LO', 'WAVE_STATUS',
-    'ROUND_MODE', 'DENORM', 'OPSEL', 'OPSEL_HI',
-    'BARRIER_STATE', 'HW_REGISTERS',
-})
+_CONTEXT_IDS: frozenset[str] = frozenset(
+    {
+        "SCC",
+        "VCC",
+        "EXEC",
+        "EXEC_LO",
+        "MEM",
+        "LDS",
+        "VGPR",
+        "SGPR",
+        "laneId",
+        "M0",
+        "PC",
+        "TRAPSTS",
+        "VCCZ",
+        "EXECZ",
+        "MODE",
+        "WAVE64",
+        "TBA",
+        "TTMP",
+        "SHADER_CYCLES_HI",
+        "SHADER_CYCLES_LO",
+        "WAVE_STATUS",
+        "ROUND_MODE",
+        "DENORM",
+        "OPSEL",
+        "OPSEL_HI",
+        "BARRIER_STATE",
+        "HW_REGISTERS",
+    }
+)
 
-_OPERAND_TAGS: frozenset[str] = frozenset({'S', 'D'})
+_OPERAND_TAGS: frozenset[str] = frozenset({"S", "D"})
 
-_LIT_HASH_PARENTS: frozenset[SemaNodeKind] = frozenset({
-    SemaNodeKind.INSTOPERAND,
-    SemaNodeKind.ARRAYSLICE,
-    SemaNodeKind.ARRAYSLICESIZE,
-})
+_LIT_HASH_PARENTS: frozenset[SemaNodeKind] = frozenset(
+    {
+        SemaNodeKind.INSTOPERAND,
+        SemaNodeKind.ARRAYSLICE,
+        SemaNodeKind.ARRAYSLICESIZE,
+    }
+)
 
 
 def fingerprint(block: SemaBlock) -> bytes:
@@ -60,7 +85,7 @@ def fingerprint(block: SemaBlock) -> bytes:
         "call fingerprint() before sema_enrich.enrich_block()"
     )
     h = hashlib.sha256()
-    h.update(b'v1')
+    h.update(b"v1")
     h.update(block.pragma.value.encode())
     _hash_node(h, block.body, parent_kind=None)
     return h.digest()
@@ -74,21 +99,20 @@ def _hash_node(
     h.update(node.kind.value.encode())
 
     if node.ty:
-        h.update(f'{node.ty.base}{node.ty.size}'.encode())
+        h.update(f"{node.ty.base}{node.ty.size}".encode())
 
     if node.cast_target:
-        h.update(f'cast:{node.cast_target.base}{node.cast_target.size}'.encode())
+        h.update(f"cast:{node.cast_target.base}{node.cast_target.size}".encode())
 
     if node.call_name:
-        h.update(f'call:{node.call_name}'.encode())
+        h.update(f"call:{node.call_name}".encode())
 
     if node.kind == SemaNodeKind.ID and node.id_name:
         if node.id_name in _CONTEXT_IDS or node.id_name in _OPERAND_TAGS:
-            h.update(f'id:{node.id_name}'.encode())
+            h.update(f"id:{node.id_name}".encode())
 
-    if (node.kind == SemaNodeKind.LIT
-            and parent_kind in _LIT_HASH_PARENTS):
-        h.update(f'lit:{node.lit_value}'.encode())
+    if node.kind == SemaNodeKind.LIT and parent_kind in _LIT_HASH_PARENTS:
+        h.update(f"lit:{node.lit_value}".encode())
 
     for child in node.children:
         _hash_node(h, child, parent_kind=node.kind)
@@ -123,8 +147,11 @@ def build_equivalence_map(
         fp = fingerprint(block)
         if fp in dst_by_fp:
             _log.debug(
-                'fingerprint collision: %s and %s have identical semantics; '
-                'keeping %s', dst_by_fp[fp], mnemonic, dst_by_fp[fp],
+                "fingerprint collision: %s and %s have identical semantics; "
+                "keeping %s",
+                dst_by_fp[fp],
+                mnemonic,
+                dst_by_fp[fp],
             )
         else:
             dst_by_fp[fp] = mnemonic

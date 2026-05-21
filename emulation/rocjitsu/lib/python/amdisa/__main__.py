@@ -22,28 +22,31 @@ from amdisa import (
 )
 from amdisa import xml_schema as xs
 from amdisa.cross_isa import CrossIsaAnalyzer
-from amdisa.encoding_translator_codegen import generate_encoding_fields, generate_encoding_translators
+from amdisa.encoding_translator_codegen import (
+    generate_encoding_fields,
+    generate_encoding_translators,
+)
 from amdisa.legalization import LegalizationGenerator
 from amdisa.legalization_codegen import emit_all as emit_legalization
 from amdisa.semantics import derive_all_semantics
 
 _ENCODING_TRANSLATOR_PAIRS = [
-    ('cdna4', 'cdna3'),
-    ('cdna4', 'rdna4'),
-    ('cdna4', 'rdna3'),
+    ("cdna4", "cdna3"),
+    ("cdna4", "rdna4"),
+    ("cdna4", "rdna3"),
 ]
 
 _PROFILES = {
-    'cdna': CdnaProfile,
-    'cdna1': Cdna1Profile,
-    'cdna2': Cdna2Profile,
-    'cdna3': CdnaProfile,
-    'cdna4': CdnaProfile,
-    'rdna1': Rdna1Profile,
-    'rdna2': Rdna2Profile,
-    'rdna3': Rdna3Profile,
-    'rdna3.5': Rdna3_5Profile,
-    'rdna4': Rdna4Profile,
+    "cdna": CdnaProfile,
+    "cdna1": Cdna1Profile,
+    "cdna2": Cdna2Profile,
+    "cdna3": CdnaProfile,
+    "cdna4": CdnaProfile,
+    "rdna1": Rdna1Profile,
+    "rdna2": Rdna2Profile,
+    "rdna3": Rdna3Profile,
+    "rdna3.5": Rdna3_5Profile,
+    "rdna4": Rdna4Profile,
 }
 
 
@@ -60,33 +63,36 @@ def _detect_profile(isa_xml: str) -> str:
     parts = arch_name_raw.split()
     family = parts[1].lower()
     version = parts[2]
-    key = f'{family}{version}'
+    key = f"{family}{version}"
     if key in _PROFILES:
         return key
     key_underscore = f'{family}{version.replace(".", "_")}'
     if key_underscore in _PROFILES:
         return key_underscore
-    if family == 'cdna':
-        return 'cdna'
-    if family == 'rdna':
-        major = int(version.split('.')[0])
+    if family == "cdna":
+        return "cdna"
+    if family == "rdna":
+        major = int(version.split(".")[0])
         if major >= 4:
-            return 'rdna4'
+            return "rdna4"
         if major >= 3:
-            return 'rdna3'
-        return 'rdna1'
-    return 'cdna'
+            return "rdna3"
+        return "rdna1"
+    return "cdna"
 
 
 def _run_multi(args) -> None:
     """Multi-ISA mode: parse all XMLs, run CrossIsaAnalyzer, generate shared + per-ISA."""
     specs = []
     for entry in args.multi:
-        if ':' not in entry:
-            print(f'error: --multi entry must be name:xml_path, got: {entry}', file=sys.stderr)
+        if ":" not in entry:
+            print(
+                f"error: --multi entry must be name:xml_path, got: {entry}",
+                file=sys.stderr,
+            )
             sys.exit(1)
-        name, xml_path = entry.split(':', 1)
-        profile_key = name.replace('.', '_')
+        name, xml_path = entry.split(":", 1)
+        profile_key = name.replace(".", "_")
         if profile_key not in _PROFILES:
             profile_key = _detect_profile(xml_path)
         profile = _PROFILES[profile_key]()
@@ -97,9 +103,12 @@ def _run_multi(args) -> None:
     analyzer = CrossIsaAnalyzer()
     plan = analyzer.analyze(specs)
 
-    print(f'Cross-ISA analysis: {plan.total_universal} universal, '
-          f'{plan.total_family_shared} family-shared, '
-          f'{plan.total_exclusive} exclusive', file=sys.stderr)
+    print(
+        f"Cross-ISA analysis: {plan.total_universal} universal, "
+        f"{plan.total_family_shared} family-shared, "
+        f"{plan.total_exclusive} exclusive",
+        file=sys.stderr,
+    )
 
     config = CodegenConfig()
 
@@ -107,8 +116,9 @@ def _run_multi(args) -> None:
     if args.gen_isas:
         all_shared_bodies: dict[tuple[str, str], tuple] = {}
         for name, spec, sem in specs:
-            code_gen = CodeGenerator(spec, args.isa_output, sem, config=config,
-                                     shared_plan=plan)
+            code_gen = CodeGenerator(
+                spec, args.isa_output, sem, config=config, shared_plan=plan
+            )
             code_gen.gen_all()
             for key, data in code_gen._shared_execute_bodies.items():
                 if key not in all_shared_bodies:
@@ -117,25 +127,29 @@ def _run_multi(args) -> None:
         if all_shared_bodies:
             first_spec = specs[0][1]
             first_sem = specs[0][2]
-            writer = CodeGenerator(first_spec, args.isa_output, first_sem,
-                                   config=config, shared_plan=plan)
+            writer = CodeGenerator(
+                first_spec, args.isa_output, first_sem, config=config, shared_plan=plan
+            )
             writer._shared_execute_bodies = all_shared_bodies
             writer._write_shared_execute_templates()
 
     # DBT legalization tables and encoding translators.
     if args.gen_dbt:
-        dbt_output = args.dbt_output or args.isa_output or '.'
+        dbt_output = args.dbt_output or args.isa_output or "."
 
         leg_gen = LegalizationGenerator(specs)
         results = leg_gen.generate_all()
         generated = emit_legalization(dbt_output, results)
         for src, dst, entries in results:
             counts = leg_gen.summary(entries)
-            print(f'  {src} -> {dst}: {len(entries)} entries '
-                  f'({counts["identity"]} identity, {counts["substitute"]} substitute, '
-                  f'{counts["lower"]} lower, {counts["expand"]} expand, '
-                  f'{counts["illegal"]} illegal)', file=sys.stderr)
-        print(f'Generated {len(generated)} files in {dbt_output}', file=sys.stderr)
+            print(
+                f"  {src} -> {dst}: {len(entries)} entries "
+                f'({counts["identity"]} identity, {counts["substitute"]} substitute, '
+                f'{counts["lower"]} lower, {counts["expand"]} expand, '
+                f'{counts["illegal"]} illegal)',
+                file=sys.stderr,
+            )
+        print(f"Generated {len(generated)} files in {dbt_output}", file=sys.stderr)
 
         generate_encoding_fields(specs, dbt_output)
         spec_map = {name: (spec, sem) for name, spec, sem in specs}
@@ -144,7 +158,8 @@ def _run_multi(args) -> None:
                 src_spec, _ = spec_map[src_n]
                 dst_spec, _ = spec_map[dst_n]
                 generate_encoding_translators(
-                    src_spec, dst_spec, src_n, dst_n, dbt_output)
+                    src_spec, dst_spec, src_n, dst_n, dbt_output
+                )
 
 
 def main() -> None:
@@ -153,20 +168,28 @@ def main() -> None:
         description="Parse a machine-readable AMD GPU ISA specification and generate C++ sources"
     )
     arg_parser.add_argument(
-        "isafile", nargs='?', default=None,
-        help="XML file with machine-readable AMD GPU ISA specification"
+        "isafile",
+        nargs="?",
+        default=None,
+        help="XML file with machine-readable AMD GPU ISA specification",
     )
     arg_parser.add_argument(
-        "--multi", nargs='+', metavar='NAME:XML',
+        "--multi",
+        nargs="+",
+        metavar="NAME:XML",
         help="Multi-ISA mode: parse all XMLs and generate shared execute() templates. "
-             "Each argument is name:xml_path (e.g., cdna1:/path/to/cdna1.xml)."
+        "Each argument is name:xml_path (e.g., cdna1:/path/to/cdna1.xml).",
     )
     arg_parser.add_argument(
-        "--gen-isas", action="store_true", default=True,
+        "--gen-isas",
+        action="store_true",
+        default=True,
         help="Generate ISA C++ files (decoders, encodings, execute bodies). Default.",
     )
     arg_parser.add_argument(
-        "--gen-dbt", action="store_true", default=True,
+        "--gen-dbt",
+        action="store_true",
+        default=True,
         help="Generate DBT legalization tables and encoding translators. Default.",
     )
     arg_parser.add_argument(
@@ -185,7 +208,7 @@ def main() -> None:
         return
 
     if not args.isafile:
-        print('error: isafile required in single-ISA mode', file=sys.stderr)
+        print("error: isafile required in single-ISA mode", file=sys.stderr)
         sys.exit(1)
 
     profile_key = _detect_profile(args.isafile)
@@ -198,5 +221,5 @@ def main() -> None:
         code_gen.gen_all()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

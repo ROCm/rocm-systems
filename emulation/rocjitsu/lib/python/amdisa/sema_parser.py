@@ -41,8 +41,7 @@ _log = logging.getLogger(__name__)
 _SUPPORTED_SCHEMA_MAJOR = 1
 
 _OP_TYPE_MAP: dict[str, SemaNodeKind] = {
-    k.value: k for k in SemaNodeKind
-    if not k.value.startswith('_')
+    k.value: k for k in SemaNodeKind if not k.value.startswith("_")
 }
 
 
@@ -63,9 +62,9 @@ def parse_semantics_xml(path: str) -> dict[str, SemaBlock]:
     tree = ET.parse(path)
     root = tree.getroot()
 
-    version_elem = root.find('.//SchemaVersion')
+    version_elem = root.find(".//SchemaVersion")
     if version_elem is not None and version_elem.text:
-        major = int(version_elem.text.split('.')[0])
+        major = int(version_elem.text.split(".")[0])
         if major > _SUPPORTED_SCHEMA_MAJOR:
             raise ValueError(
                 f"Unsupported schema version {version_elem.text} "
@@ -73,12 +72,12 @@ def parse_semantics_xml(path: str) -> dict[str, SemaBlock]:
             )
 
     result: dict[str, SemaBlock] = {}
-    for inst_elem in root.iter('Instruction'):
-        name_elem = inst_elem.find('InstructionName')
+    for inst_elem in root.iter("Instruction"):
+        name_elem = inst_elem.find("InstructionName")
         if name_elem is None or not name_elem.text:
             continue
         name = name_elem.text.strip()
-        sema_elem = inst_elem.find('InstructionSemantics')
+        sema_elem = inst_elem.find("InstructionSemantics")
         if sema_elem is None:
             continue
         block = _parse_instruction(name, sema_elem)
@@ -89,22 +88,24 @@ def parse_semantics_xml(path: str) -> dict[str, SemaBlock]:
 
 def _parse_instruction(name: str, sema_elem: ET.Element) -> SemaBlock | None:
     """Parse one instruction's ``<InstructionSemantics>`` into a SemaBlock."""
-    ops = [c for c in sema_elem if c.tag == 'op']
+    ops = [c for c in sema_elem if c.tag == "op"]
     if not ops:
         return None
 
     root_op = ops[0]
-    op_type = root_op.get('type', '')
+    op_type = root_op.get("type", "")
     if not op_type:
         return SemaBlock(
-            name, ExecModel.UNKNOWN,
+            name,
+            ExecModel.UNKNOWN,
             SemaNode(SemaNodeKind.SEQ, children=()),
         )
 
     root_node = _parse_node(root_op)
     if root_node is None:
         return SemaBlock(
-            name, ExecModel.UNKNOWN,
+            name,
+            ExecModel.UNKNOWN,
             SemaNode(SemaNodeKind.SEQ, children=()),
         )
 
@@ -117,8 +118,11 @@ def _parse_instruction(name: str, sema_elem: ET.Element) -> SemaBlock | None:
                 pragma = ExecModel(first.lit_value)
             except ValueError:
                 pragma = ExecModel.UNKNOWN
-        body = root_node.children[1] if len(root_node.children) >= 2 else \
-            SemaNode(SemaNodeKind.SEQ, children=())
+        body = (
+            root_node.children[1]
+            if len(root_node.children) >= 2
+            else SemaNode(SemaNodeKind.SEQ, children=())
+        )
     else:
         body = root_node
 
@@ -139,48 +143,48 @@ def _parse_type(elem: ET.Element) -> SemaType | None:
     Handles compound type forms: ``<t>`` (scalar), ``<lambda>`` (function),
     ``<arr>`` (array), ``<rec>`` (record/struct — returns None with warning).
     """
-    ty_elem = elem.find('ty')
+    ty_elem = elem.find("ty")
     if ty_elem is None:
         return None
 
-    t_elem = ty_elem.find('t')
+    t_elem = ty_elem.find("t")
     if t_elem is not None:
         return SemaType(
-            t_elem.get('base', 'B'),
-            int(t_elem.get('size', '0')),
+            t_elem.get("base", "B"),
+            int(t_elem.get("size", "0")),
         )
 
-    lambda_elem = ty_elem.find('lambda')
+    lambda_elem = ty_elem.find("lambda")
     if lambda_elem is not None:
-        ret = lambda_elem.find('ret/t')
+        ret = lambda_elem.find("ret/t")
         if ret is not None:
             return SemaType(
-                ret.get('base', 'B'),
-                int(ret.get('size', '0')),
+                ret.get("base", "B"),
+                int(ret.get("size", "0")),
             )
-        ret_direct = lambda_elem.find('ret')
+        ret_direct = lambda_elem.find("ret")
         if ret_direct is not None:
-            t_in_ret = ret_direct.find('t')
+            t_in_ret = ret_direct.find("t")
             if t_in_ret is not None:
                 return SemaType(
-                    t_in_ret.get('base', 'B'),
-                    int(t_in_ret.get('size', '0')),
+                    t_in_ret.get("base", "B"),
+                    int(t_in_ret.get("size", "0")),
                 )
 
-    arr_elem = ty_elem.find('arr')
+    arr_elem = ty_elem.find("arr")
     if arr_elem is not None:
-        arr_t = arr_elem.find('t')
+        arr_t = arr_elem.find("t")
         if arr_t is not None:
             return SemaType(
-                arr_t.get('base', 'B'),
-                int(arr_t.get('size', '0')),
+                arr_t.get("base", "B"),
+                int(arr_t.get("size", "0")),
             )
 
-    rec_elem = ty_elem.find('rec')
+    rec_elem = ty_elem.find("rec")
     if rec_elem is not None:
         _log.debug(
             "Unhandled <rec> type in element '%s'; treating as untyped.",
-            elem.get('type', '<unknown>'),
+            elem.get("type", "<unknown>"),
         )
         return None
 
@@ -191,16 +195,16 @@ def _parse_node(elem: ET.Element) -> SemaNode | None:
     """Recursively parse an XML element into a SemaNode."""
     tag = elem.tag
 
-    if tag == 'op':
+    if tag == "op":
         return _parse_op(elem)
-    elif tag == 'lit':
+    elif tag == "lit":
         return _parse_lit(elem)
-    elif tag == 'id':
+    elif tag == "id":
         return _parse_id(elem)
     else:
         children: list[SemaNode] = []
         for child in elem:
-            if child.tag in ('ty', 'type'):
+            if child.tag in ("ty", "type"):
                 continue
             child_node = _parse_node(child)
             if child_node is not None:
@@ -214,7 +218,7 @@ def _parse_node(elem: ET.Element) -> SemaNode | None:
 
 def _parse_op(elem: ET.Element) -> SemaNode | None:
     """Parse an ``<op type="...">`` element."""
-    op_type = elem.get('type', '')
+    op_type = elem.get("type", "")
     if not op_type:
         return None
 
@@ -229,18 +233,18 @@ def _parse_op(elem: ET.Element) -> SemaNode | None:
 
     cast_target: SemaType | None = None
     if kind == SemaNodeKind.CAST:
-        type_child = elem.find('type')
+        type_child = elem.find("type")
         if type_child is not None:
-            t_elem = type_child.find('t')
+            t_elem = type_child.find("t")
             if t_elem is not None:
                 cast_target = SemaType(
-                    t_elem.get('base', 'B'),
-                    int(t_elem.get('size', '0')),
+                    t_elem.get("base", "B"),
+                    int(t_elem.get("size", "0")),
                 )
 
     parsed_children: list[SemaNode] = []
     for child in elem:
-        if child.tag in ('ty', 'type'):
+        if child.tag in ("ty", "type"):
             continue
         child_node = _parse_node(child)
         if child_node is not None:
@@ -252,7 +256,7 @@ def _parse_op(elem: ET.Element) -> SemaNode | None:
         first = parsed_children[0]
         if first.kind == SemaNodeKind.ID:
             call_name = first.id_name
-            if first.ty and first.ty.base != 'B':
+            if first.ty and first.ty.base != "B":
                 call_lambda = first.ty
 
     if kind in _STATEMENT_KINDS:
@@ -271,15 +275,15 @@ def _parse_op(elem: ET.Element) -> SemaNode | None:
 
 def _parse_lit(elem: ET.Element) -> SemaNode:
     """Parse a ``<lit val="...">`` leaf element."""
-    val = elem.get('val', '')
+    val = elem.get("val", "")
     ty = _parse_type(elem)
     return SemaNode(kind=SemaNodeKind.LIT, ty=ty, lit_value=val)
 
 
 def _parse_id(elem: ET.Element) -> SemaNode:
     """Parse an ``<id val="...">`` leaf element."""
-    name = elem.get('val', '')
-    if name == 'laneID':
-        name = 'laneId'
+    name = elem.get("val", "")
+    if name == "laneID":
+        name = "laneId"
     ty = _parse_type(elem)
     return SemaNode(kind=SemaNodeKind.ID, ty=ty, id_name=name)

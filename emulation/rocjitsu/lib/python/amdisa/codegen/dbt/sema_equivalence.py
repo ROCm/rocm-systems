@@ -88,8 +88,11 @@ def build_sema_equivalences(
         else:
             rename += 1
             _log.debug(
-                '%s→%s: %s is equivalent to %s (renamed)',
-                src_isa, dst_isa, src_name, dst_name,
+                "%s→%s: %s is equivalent to %s (renamed)",
+                src_isa,
+                dst_isa,
+                src_name,
+                dst_name,
             )
 
     return SemaEquivalence(

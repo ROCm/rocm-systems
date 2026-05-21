@@ -92,53 +92,64 @@ def generate_rules(
         dst_name = equiv.equivalences.get(src_name)
 
         if src_block.is_empty:
-            rules.append(TranslationRule(
-                src_mnemonic=src_name,
-                action=RuleAction.EXPAND,
-                expansion=ExpansionStrategy.GENERIC,
-                src_properties=src_props,
-            ))
+            rules.append(
+                TranslationRule(
+                    src_mnemonic=src_name,
+                    action=RuleAction.EXPAND,
+                    expansion=ExpansionStrategy.GENERIC,
+                    src_properties=src_props,
+                )
+            )
             continue
 
         if dst_name is not None:
             dst_block = dst_blocks.get(dst_name)
-            dst_props = derive_properties(dst_block) if dst_block else InstructionProperty.NONE
+            dst_props = (
+                derive_properties(dst_block) if dst_block else InstructionProperty.NONE
+            )
 
             if dst_name == src_name:
-                rules.append(TranslationRule(
-                    src_mnemonic=src_name,
-                    action=RuleAction.IDENTITY,
-                    dst_mnemonic=dst_name,
-                    src_properties=src_props,
-                    dst_properties=dst_props,
-                ))
+                rules.append(
+                    TranslationRule(
+                        src_mnemonic=src_name,
+                        action=RuleAction.IDENTITY,
+                        dst_mnemonic=dst_name,
+                        src_properties=src_props,
+                        dst_properties=dst_props,
+                    )
+                )
             else:
-                rules.append(TranslationRule(
-                    src_mnemonic=src_name,
-                    action=RuleAction.SUBSTITUTE,
-                    dst_mnemonic=dst_name,
-                    src_properties=src_props,
-                    dst_properties=dst_props,
-                ))
+                rules.append(
+                    TranslationRule(
+                        src_mnemonic=src_name,
+                        action=RuleAction.SUBSTITUTE,
+                        dst_mnemonic=dst_name,
+                        src_properties=src_props,
+                        dst_properties=dst_props,
+                    )
+                )
             continue
 
         expansion = _classify_no_match(src_name, src_props)
-        rules.append(TranslationRule(
-            src_mnemonic=src_name,
-            action=RuleAction.EXPAND if expansion else RuleAction.LOWER,
-            expansion=expansion,
-            src_properties=src_props,
-        ))
+        rules.append(
+            TranslationRule(
+                src_mnemonic=src_name,
+                action=RuleAction.EXPAND if expansion else RuleAction.LOWER,
+                expansion=expansion,
+                src_properties=src_props,
+            )
+        )
 
     return rules
 
 
 def _classify_no_match(
-    name: str, props: InstructionProperty,
+    name: str,
+    props: InstructionProperty,
 ) -> ExpansionStrategy | None:
     """Classify an unmatched instruction by its properties."""
     if InstructionProperty.IS_MATRIX in props:
-        if 'WMMA' in name:
+        if "WMMA" in name:
             return ExpansionStrategy.WMMA_TO_MFMA
         return ExpansionStrategy.MFMA_TO_WMMA
 
@@ -148,7 +159,7 @@ def _classify_no_match(
     if InstructionProperty.CROSS_LANE in props:
         return ExpansionStrategy.CROSS_LANE_ADJUST
 
-    if 'ACCVGPR' in name:
+    if "ACCVGPR" in name:
         return ExpansionStrategy.ACCVGPR
 
     return None
@@ -184,10 +195,11 @@ def summarize_rules(rules: list[TranslationRule]) -> RuleSummary:
 # Matrix expand rule generation from layout catalog
 # =========================================================================
 
+
 def _extract_src_type(mnemonic: str) -> str:
     """Extract the source element type from a matrix mnemonic."""
-    parts = mnemonic.split('_')
-    return parts[-1] if parts else ''
+    parts = mnemonic.split("_")
+    return parts[-1] if parts else ""
 
 
 def _find_best_target(
@@ -259,24 +271,26 @@ def generate_matrix_expand_rules(
             continue
 
         xor_byte, start, end = xor_result
-        rules.append(MatrixExpandRule(
-            src_mnemonic=src_mn,
-            dst_mnemonic=dst_mn,
-            xor_byte_mask=xor_byte,
-            range_start=start,
-            range_end=end,
-            src_m=src_desc.m,
-            src_n=src_desc.n,
-            src_k=src_desc.k,
-            dst_vgprs=src_desc.dst_vgprs,
-        ))
+        rules.append(
+            MatrixExpandRule(
+                src_mnemonic=src_mn,
+                dst_mnemonic=dst_mn,
+                xor_byte_mask=xor_byte,
+                range_start=start,
+                range_end=end,
+                src_m=src_desc.m,
+                src_n=src_desc.n,
+                src_k=src_desc.k,
+                dst_vgprs=src_desc.dst_vgprs,
+            )
+        )
 
     return rules
 
 
 def emit_matrix_conversions_header(
     rules: list[MatrixExpandRule],
-    guard: str = 'ROCJITSU_MATRIX_CONVERSIONS_H',
+    guard: str = "ROCJITSU_MATRIX_CONVERSIONS_H",
 ) -> str:
     """Generate a C++ header with a constexpr lookup table of matrix conversions.
 
@@ -284,23 +298,23 @@ def emit_matrix_conversions_header(
     The runtime BinaryTranslator uses this for ds_bpermute address computation.
     """
     lines = [
-        f'#pragma once',
-        f'// Auto-generated by amdisa layout_catalog — do not edit.',
-        f'',
-        f'#include <cstdint>',
-        f'',
-        f'namespace rocjitsu {{',
-        f'',
-        f'struct MatrixConversion {{',
-        f'  const char* src_mnemonic;',
-        f'  const char* dst_mnemonic;',
-        f'  uint32_t xor_byte_mask;',
-        f'  uint8_t range_start;',
-        f'  uint8_t range_end;',
-        f'  uint8_t dst_vgprs;',
-        f'}};',
-        f'',
-        f'inline constexpr MatrixConversion kMatrixConversions[] = {{',
+        f"#pragma once",
+        f"// Auto-generated by amdisa layout_catalog — do not edit.",
+        f"",
+        f"#include <cstdint>",
+        f"",
+        f"namespace rocjitsu {{",
+        f"",
+        f"struct MatrixConversion {{",
+        f"  const char* src_mnemonic;",
+        f"  const char* dst_mnemonic;",
+        f"  uint32_t xor_byte_mask;",
+        f"  uint8_t range_start;",
+        f"  uint8_t range_end;",
+        f"  uint8_t dst_vgprs;",
+        f"}};",
+        f"",
+        f"inline constexpr MatrixConversion kMatrixConversions[] = {{",
     ]
 
     for r in sorted(rules, key=lambda r: r.src_mnemonic):
@@ -308,18 +322,20 @@ def emit_matrix_conversions_header(
         dst = r.dst_mnemonic.lower()
         lines.append(
             f'    {{"{src}", "{dst}", '
-            f'{r.xor_byte_mask}u, {r.range_start}, {r.range_end}, '
-            f'{r.dst_vgprs}}},'
+            f"{r.xor_byte_mask}u, {r.range_start}, {r.range_end}, "
+            f"{r.dst_vgprs}}},"
         )
 
-    lines.extend([
-        f'}};',
-        f'',
-        f'inline constexpr size_t kMatrixConversionCount = '
-        f'sizeof(kMatrixConversions) / sizeof(kMatrixConversions[0]);',
-        f'',
-        f'}}  // namespace rocjitsu',
-        f'',
-    ])
+    lines.extend(
+        [
+            f"}};",
+            f"",
+            f"inline constexpr size_t kMatrixConversionCount = "
+            f"sizeof(kMatrixConversions) / sizeof(kMatrixConversions[0]);",
+            f"",
+            f"}}  // namespace rocjitsu",
+            f"",
+        ]
+    )
 
-    return '\n'.join(lines)
+    return "\n".join(lines)

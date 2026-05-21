@@ -28,10 +28,21 @@ from amdisa.sema_ast import (
 )
 
 _DS_ATOMIC_PREFIXES = (
-    'DS_ADD_', 'DS_SUB_', 'DS_RSUB_', 'DS_MIN_', 'DS_MAX_',
-    'DS_AND_', 'DS_OR_', 'DS_XOR_', 'DS_MSKOR_', 'DS_CMPSTORE_',
-    'DS_INC_', 'DS_DEC_', 'DS_PK_ADD_', 'DS_COND_SUB_',
-    'DS_SUB_CLAMP_',
+    "DS_ADD_",
+    "DS_SUB_",
+    "DS_RSUB_",
+    "DS_MIN_",
+    "DS_MAX_",
+    "DS_AND_",
+    "DS_OR_",
+    "DS_XOR_",
+    "DS_MSKOR_",
+    "DS_CMPSTORE_",
+    "DS_INC_",
+    "DS_DEC_",
+    "DS_PK_ADD_",
+    "DS_COND_SUB_",
+    "DS_SUB_CLAMP_",
 )
 
 
@@ -40,7 +51,7 @@ def _is_ds_atomic(name: str) -> bool:
 
 
 def _is_ds_load_addtid(name: str) -> bool:
-    return name.startswith('DS_LOAD_ADDTID_') or name.startswith('DS_STORE_ADDTID_')
+    return name.startswith("DS_LOAD_ADDTID_") or name.startswith("DS_STORE_ADDTID_")
 
 
 def enrich_block(
@@ -85,7 +96,7 @@ def enrich_block(
 
 def _fix_non_rtn_atomics(name: str, body: SemaNode) -> SemaNode:
     """Strip spurious RETURN_DATA write from non-RTN DS atomics."""
-    if '_RTN_' in name:
+    if "_RTN_" in name:
         return body
     if not (_is_ds_atomic(name) or _is_ds_load_addtid(name)):
         return body
@@ -93,8 +104,7 @@ def _fix_non_rtn_atomics(name: str, body: SemaNode) -> SemaNode:
         return body
 
     new_children = tuple(
-        stmt for stmt in body.children
-        if not _is_return_data_assign(stmt)
+        stmt for stmt in body.children if not _is_return_data_assign(stmt)
     )
 
     if len(new_children) == len(body.children):
@@ -110,7 +120,7 @@ def _is_return_data_assign(node: SemaNode) -> bool:
     lhs = node.children[0]
     while lhs.kind == SemaNodeKind.CAST and lhs.children:
         lhs = lhs.children[0]
-    return (lhs.kind == SemaNodeKind.ID and lhs.id_name == 'RETURN_DATA')
+    return lhs.kind == SemaNodeKind.ID and lhs.id_name == "RETURN_DATA"
 
 
 def _add_vop3_modifiers(
@@ -132,10 +142,10 @@ def _add_vop3_modifiers(
     apply_clamp helper functions, which the lowering pass emits as
     inline C++.
     """
-    has_neg = 'neg' in enc_fields
-    has_abs = 'abs' in enc_fields
-    has_clamp = 'clamp' in enc_fields
-    has_omod = 'omod' in enc_fields
+    has_neg = "neg" in enc_fields
+    has_abs = "abs" in enc_fields
+    has_clamp = "clamp" in enc_fields
+    has_omod = "omod" in enc_fields
 
     if not (has_neg or has_abs or has_clamp or has_omod):
         return body
@@ -150,30 +160,34 @@ def _add_vop3_modifiers(
 
 
 def _wrap_src_modifiers(
-    node: SemaNode, has_neg: bool, has_abs: bool,
+    node: SemaNode,
+    has_neg: bool,
+    has_abs: bool,
 ) -> SemaNode:
     """Recursively wrap INSTOPERAND(S, N) reads with src modifier application."""
-    if (node.kind == SemaNodeKind.CAST
-            and node.children
-            and node.children[0].kind == SemaNodeKind.INSTOPERAND):
+    if (
+        node.kind == SemaNodeKind.CAST
+        and node.children
+        and node.children[0].kind == SemaNodeKind.INSTOPERAND
+    ):
         inner = node.children[0]
-        if (inner.children
-                and inner.children[0].kind == SemaNodeKind.ID
-                and inner.children[0].id_name == 'S'):
+        if (
+            inner.children
+            and inner.children[0].kind == SemaNodeKind.ID
+            and inner.children[0].id_name == "S"
+        ):
             idx_node = inner.children[1] if len(inner.children) > 1 else None
-            idx_lit = idx_node.lit_value if idx_node else '0'
+            idx_lit = idx_node.lit_value if idx_node else "0"
             return SemaNode(
                 kind=SemaNodeKind.CALL,
                 ty=node.ty,
-                call_name='apply_src_mod',
+                call_name="apply_src_mod",
                 children=(
-                    SemaNode(SemaNodeKind.ID, id_name='apply_src_mod'),
+                    SemaNode(SemaNodeKind.ID, id_name="apply_src_mod"),
                     node,
                     SemaNode(SemaNodeKind.LIT, lit_value=idx_lit),
-                    SemaNode(SemaNodeKind.LIT,
-                             lit_value='1' if has_neg else '0'),
-                    SemaNode(SemaNodeKind.LIT,
-                             lit_value='1' if has_abs else '0'),
+                    SemaNode(SemaNodeKind.LIT, lit_value="1" if has_neg else "0"),
+                    SemaNode(SemaNodeKind.LIT, lit_value="1" if has_abs else "0"),
                 ),
             )
 
@@ -189,7 +203,9 @@ def _wrap_src_modifiers(
 
 
 def _wrap_dst_modifiers(
-    node: SemaNode, has_clamp: bool, has_omod: bool,
+    node: SemaNode,
+    has_clamp: bool,
+    has_omod: bool,
 ) -> SemaNode:
     """Wrap the RHS of the top-level ASSIGN with OMOD then CLAMP."""
     if node.kind == SemaNodeKind.ASSIGN and len(node.children) == 2:
@@ -199,9 +215,9 @@ def _wrap_dst_modifiers(
                 rhs = SemaNode(
                     kind=SemaNodeKind.CALL,
                     ty=rhs.ty,
-                    call_name='apply_omod',
+                    call_name="apply_omod",
                     children=(
-                        SemaNode(SemaNodeKind.ID, id_name='apply_omod'),
+                        SemaNode(SemaNodeKind.ID, id_name="apply_omod"),
                         rhs,
                     ),
                 )
@@ -209,9 +225,9 @@ def _wrap_dst_modifiers(
                 rhs = SemaNode(
                     kind=SemaNodeKind.CALL,
                     ty=rhs.ty,
-                    call_name='apply_clamp',
+                    call_name="apply_clamp",
                     children=(
-                        SemaNode(SemaNodeKind.ID, id_name='apply_clamp'),
+                        SemaNode(SemaNodeKind.ID, id_name="apply_clamp"),
                         rhs,
                     ),
                 )
@@ -231,7 +247,7 @@ def _is_dst_operand(node: SemaNode) -> bool:
     """Check if a node is a destination operand (.instoperand(D, N))."""
     if node.kind == SemaNodeKind.INSTOPERAND:
         if node.children and node.children[0].kind == SemaNodeKind.ID:
-            return node.children[0].id_name == 'D'
+            return node.children[0].id_name == "D"
     if node.kind == SemaNodeKind.CAST and node.children:
         return _is_dst_operand(node.children[0])
     return False

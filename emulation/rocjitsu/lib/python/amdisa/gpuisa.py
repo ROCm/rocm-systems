@@ -65,19 +65,19 @@ class OperandNamePattern:
         enum_name: OpSel enum name for single-value patterns.
     """
 
-    REG_RANGE = 'reg_range'
-    POS_INT = 'pos_int'
-    NEG_INT = 'neg_int'
-    FLOAT_CONST = 'float_const'
-    NAMED = 'named'
-    LITERAL = 'literal'
+    REG_RANGE = "reg_range"
+    POS_INT = "pos_int"
+    NEG_INT = "neg_int"
+    FLOAT_CONST = "float_const"
+    NAMED = "named"
+    LITERAL = "literal"
 
     kind: str
-    prefix: str = ''
-    min_enum: str = ''
-    max_enum: str = ''
-    operand_name: str = ''
-    enum_name: str = ''
+    prefix: str = ""
+    min_enum: str = ""
+    max_enum: str = ""
+    operand_name: str = ""
+    enum_name: str = ""
 
 
 @dataclass
@@ -108,20 +108,16 @@ class InstBase:
             name back to the parent encoding format.
     """
 
-    def __init__(
-        self, enc_name: str, is_implied_literal_enc: bool = False
-    ) -> None:
+    def __init__(self, enc_name: str, is_implied_literal_enc: bool = False) -> None:
         self.enc_name = enc_name
         self.is_implied_literal_enc = is_implied_literal_enc
 
     @cached_property
     def fmt_enc_name(self) -> str:
         """Encoding name formatted to C++ PascalCase style."""
-        if self.enc_name.split('_')[0] == 'ENC':
-            return ''.join(
-                x.capitalize() for x in self.enc_name.split('_')[1:]
-            )
-        return ''.join(x.capitalize() for x in self.enc_name.split('_'))
+        if self.enc_name.split("_")[0] == "ENC":
+            return "".join(x.capitalize() for x in self.enc_name.split("_")[1:])
+        return "".join(x.capitalize() for x in self.enc_name.split("_"))
 
     @cached_property
     def fmt_true_enc_name(self) -> str:
@@ -132,7 +128,7 @@ class InstBase:
         hierarchy inherits from the parent encoding class.
         """
         if self.is_implied_literal_enc:
-            return self.enc_name.split('_')[0].capitalize()
+            return self.enc_name.split("_")[0].capitalize()
         return self.fmt_enc_name
 
 
@@ -208,7 +204,7 @@ class Instruction(InstBase):
         """Instruction name formatted to C++ PascalCase style."""
         return (
             f'{"".join(x.capitalize() for x in self.name.split("_"))}'
-            f'{self.fmt_true_enc_name}'
+            f"{self.fmt_true_enc_name}"
         )
 
     @cached_property
@@ -264,9 +260,7 @@ class IsaSpec:
             ``is_implied_literal_encoding()`` method.
     """
 
-    def __init__(
-        self, arch_name: str, version: str, profile: IsaProfile
-    ) -> None:
+    def __init__(self, arch_name: str, version: str, profile: IsaProfile) -> None:
         self.profile = profile
         self.arch_name = arch_name
         self.version = version
@@ -274,11 +268,11 @@ class IsaSpec:
         self.inst_encodings: list[InstEncoding] = []
         self.operand_types: list[str] = []
         self.opnd_selectors: list[OperandSelector] = []
-        self.primary_decode_table: list[DecodeTableEntry | None] = [
-            None
-        ] * pow(2, profile.max_enc_bits)
+        self.primary_decode_table: list[DecodeTableEntry | None] = [None] * pow(
+            2, profile.max_enc_bits
+        )
         self.alt_encs_with_implied_literal: set[str] = set()
         if self.version not in profile.supported_versions:
             raise ValueError(
-                f'Unsupported machine-readable ISA spec version: {self.version}'
+                f"Unsupported machine-readable ISA spec version: {self.version}"
             )

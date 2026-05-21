@@ -48,7 +48,7 @@
 
 // Gets offset of specified member in specified type.
 #ifndef offsetof
-#define offsetof(TYPE, MEMBER) ((size_t)&((TYPE *)0)->MEMBER)
+#define offsetof(TYPE, MEMBER) ((size_t) & ((TYPE *)0)->MEMBER)
 #endif // offsetof
 
 // Creates enumeration entries used for packing bits into integers. Enumeration

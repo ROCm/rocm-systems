@@ -458,8 +458,7 @@ CommandProcessor::read_kernel_descriptor(uint64_t kernel_object, bool host_acces
 /// Scan backward from ptr to find the ELF header (\x7fELF) at a page boundary.
 /// Both ptr and limit must be readable host memory.
 static const uint8_t *find_elf_base(const uint8_t *ptr, const uint8_t *limit) {
-  auto *page = reinterpret_cast<const uint8_t *>(
-      reinterpret_cast<uintptr_t>(ptr) & ~0xFFFULL);
+  auto *page = reinterpret_cast<const uint8_t *>(reinterpret_cast<uintptr_t>(ptr) & ~0xFFFULL);
   for (; page >= limit; page -= 0x1000) {
     if (page[0] == 0x7f && page[1] == 'E' && page[2] == 'L' && page[3] == 'F')
       return page;
@@ -600,9 +599,8 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
     util::Logger::vm([&](auto &os) {
       os << std::format("dispatch #{} d={} \"{}\" grid=[{},{},{}] wg=[{},{},{}] wgs={} "
                         "lds={} sgpr={} vgpr={} sig={:#x}",
-                        dispatch_count, dp.dispatch_id,
-                        kernel_sym.empty() ? "?" : kernel_sym, pkt.grid_size_x,
-                        pkt.grid_size_y, pkt.grid_size_z, pkt.workgroup_size_x,
+                        dispatch_count, dp.dispatch_id, kernel_sym.empty() ? "?" : kernel_sym,
+                        pkt.grid_size_x, pkt.grid_size_y, pkt.grid_size_z, pkt.workgroup_size_x,
                         pkt.workgroup_size_y, pkt.workgroup_size_z, total_wgs,
                         kd.group_segment_fixed_size, dp.sgprs_per_wf, dp.vgprs_per_wf,
                         dp.completion_signal);

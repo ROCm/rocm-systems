@@ -54,8 +54,7 @@ class TestComputeXorMask:
         assert end == 48
 
     def test_identity_returns_none(self):
-        assert compute_xor_mask(
-            MFMA_F32_16X16X16_F16, MFMA_F32_16X16X16_F16) is None
+        assert compute_xor_mask(MFMA_F32_16X16X16_F16, MFMA_F32_16X16X16_F16) is None
 
     def test_symmetric(self):
         fwd = compute_xor_mask(MFMA_F32_16X16X16_F16, WMMA_F32_16X16X16_F16)
@@ -65,72 +64,72 @@ class TestComputeXorMask:
 
 class TestFindDescriptor:
     def test_exact_match(self):
-        d = find_descriptor('V_MFMA_F32_16X16X16_BF16')
+        d = find_descriptor("V_MFMA_F32_16X16X16_BF16")
         assert d is not None
-        assert d.kind == 'mfma'
+        assert d.kind == "mfma"
 
     def test_wildcard_match(self):
-        d = find_descriptor('V_MFMA_F32_16X16X16_F16')
+        d = find_descriptor("V_MFMA_F32_16X16X16_F16")
         assert d is not None
-        assert d.kind == 'mfma'
+        assert d.kind == "mfma"
         assert d.m == 16
 
     def test_wmma_match(self):
-        d = find_descriptor('V_WMMA_F32_16X16X16_F16')
+        d = find_descriptor("V_WMMA_F32_16X16X16_F16")
         assert d is not None
-        assert d.kind == 'wmma'
+        assert d.kind == "wmma"
 
     def test_unknown_returns_none(self):
-        assert find_descriptor('V_SOME_UNKNOWN_INST') is None
+        assert find_descriptor("V_SOME_UNKNOWN_INST") is None
 
 
 class TestDeriveLayoutDescriptor:
     def test_mfma_f32_16x16x16_f16(self):
-        d = derive_layout_descriptor('V_MFMA_F32_16X16X16_F16')
+        d = derive_layout_descriptor("V_MFMA_F32_16X16X16_F16")
         assert d is not None
         assert d.row_group_lanes == MFMA_F32_16X16X16_F16.row_group_lanes
         assert d.dst_vgprs == MFMA_F32_16X16X16_F16.dst_vgprs
-        assert d.kind == 'mfma'
+        assert d.kind == "mfma"
 
     def test_mfma_f32_32x32x8_f16(self):
-        d = derive_layout_descriptor('V_MFMA_F32_32X32X8_F16')
+        d = derive_layout_descriptor("V_MFMA_F32_32X32X8_F16")
         assert d is not None
         assert d.row_group_lanes == MFMA_F32_32X32X8_F16.row_group_lanes
         assert d.dst_vgprs == MFMA_F32_32X32X8_F16.dst_vgprs
 
     def test_mfma_f32_16x16x32_f16(self):
-        d = derive_layout_descriptor('V_MFMA_F32_16X16X32_F16')
+        d = derive_layout_descriptor("V_MFMA_F32_16X16X32_F16")
         assert d is not None
         assert d.row_group_lanes == MFMA_F32_16X16X32_F16.row_group_lanes
 
     def test_mfma_i32_16x16x32_i8(self):
-        d = derive_layout_descriptor('V_MFMA_I32_16X16X32_I8')
+        d = derive_layout_descriptor("V_MFMA_I32_16X16X32_I8")
         assert d is not None
         assert d.row_group_lanes == MFMA_I32_16X16X32_I8.row_group_lanes
 
     def test_wmma_f32_16x16x16_f16(self):
-        d = derive_layout_descriptor('V_WMMA_F32_16X16X16_F16')
+        d = derive_layout_descriptor("V_WMMA_F32_16X16X16_F16")
         assert d is not None
         assert d.row_group_lanes == WMMA_F32_16X16X16_F16.row_group_lanes
-        assert d.kind == 'wmma'
+        assert d.kind == "wmma"
 
     def test_wmma_i32_16x16x32_i8(self):
-        d = derive_layout_descriptor('V_WMMA_I32_16X16X32_I8')
+        d = derive_layout_descriptor("V_WMMA_I32_16X16X32_I8")
         assert d is not None
         assert d.row_group_lanes == WMMA_I32_16X16X32_I8.row_group_lanes
 
     def test_auto_derived_xor_matches_catalog(self):
-        mfma = derive_layout_descriptor('V_MFMA_F32_16X16X16_F16')
-        wmma = derive_layout_descriptor('V_WMMA_F32_16X16X16_F16')
+        mfma = derive_layout_descriptor("V_MFMA_F32_16X16X16_F16")
+        wmma = derive_layout_descriptor("V_WMMA_F32_16X16X16_F16")
         assert mfma is not None and wmma is not None
         result = compute_xor_mask(mfma, wmma)
         assert result == (192, 16, 48)
 
     def test_unknown_returns_none(self):
-        assert derive_layout_descriptor('V_ADD_F32') is None
+        assert derive_layout_descriptor("V_ADD_F32") is None
 
     def test_bf16_mfma(self):
-        d = derive_layout_descriptor('V_MFMA_F32_16X16X16_BF16')
+        d = derive_layout_descriptor("V_MFMA_F32_16X16X16_BF16")
         assert d is not None
         assert d.src_elem_bits == 16
         assert d.dst_elem_bits == 32
@@ -143,4 +142,4 @@ class TestCatalogCompleteness:
     def test_all_entries_have_valid_lanes(self):
         for name, desc in LAYOUT_CATALOG.items():
             for lane in desc.row_group_lanes:
-                assert 0 <= lane < desc.wave_size, f'{name}: invalid lane {lane}'
+                assert 0 <= lane < desc.wave_size, f"{name}: invalid lane {lane}"

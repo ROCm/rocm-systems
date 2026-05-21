@@ -38,6 +38,7 @@ if TYPE_CHECKING:
 # Legalization action types
 # ---------------------------------------------------------------------------
 
+
 class LoweringKind(Enum):
     WAITCNT = auto()
     BARRIER = auto()
@@ -62,27 +63,30 @@ class LegalizationAction:
 
     @staticmethod
     def identity() -> LegalizationAction:
-        return LegalizationAction('identity')
+        return LegalizationAction("identity")
 
     @staticmethod
     def substitute(target_opcode: int) -> LegalizationAction:
-        return LegalizationAction('substitute', target_opcode=target_opcode)
+        return LegalizationAction("substitute", target_opcode=target_opcode)
 
     @staticmethod
-    def lower(kind: LoweringKind = LoweringKind.GENERIC,
-              target_opcode: int = 0) -> LegalizationAction:
-        return LegalizationAction('lower', target_opcode=target_opcode, lowering_kind=kind)
+    def lower(
+        kind: LoweringKind = LoweringKind.GENERIC, target_opcode: int = 0
+    ) -> LegalizationAction:
+        return LegalizationAction(
+            "lower", target_opcode=target_opcode, lowering_kind=kind
+        )
 
     @staticmethod
     def expand(kind: ExpansionKind) -> LegalizationAction:
-        return LegalizationAction('expand', expansion_kind=kind)
+        return LegalizationAction("expand", expansion_kind=kind)
 
     @staticmethod
     def illegal() -> LegalizationAction:
         # Retained for API compatibility but should never appear in
         # generated tables.  All unmatched instructions route through
         # _no_match_action() which returns LOWER or EXPAND.
-        return LegalizationAction('illegal')
+        return LegalizationAction("illegal")
 
 
 @dataclass
@@ -98,6 +102,7 @@ class LegalizationEntry:
 # ---------------------------------------------------------------------------
 # Mnemonic rename map — cross-generation name changes that preserve semantics
 # ---------------------------------------------------------------------------
+
 
 def _build_rename_map() -> dict[str, str]:
     """Build canonical mnemonic rename map.
@@ -115,19 +120,35 @@ def _build_rename_map() -> dict[str, str]:
 
     # --- Memory size nomenclature: DWORD → B32 ---
     _dword_to_b = {
-        'DWORD': 'B32', 'DWORDX2': 'B64', 'DWORDX3': 'B96',
-        'DWORDX4': 'B128', 'DWORDX8': 'B256', 'DWORDX16': 'B512',
+        "DWORD": "B32",
+        "DWORDX2": "B64",
+        "DWORDX3": "B96",
+        "DWORDX4": "B128",
+        "DWORDX8": "B256",
+        "DWORDX16": "B512",
     }
-    for prefix in ('S_LOAD_', 'S_STORE_', 'S_BUFFER_LOAD_', 'S_BUFFER_STORE_',
-                    'S_ATOMIC_', 'S_BUFFER_ATOMIC_',
-                    'BUFFER_LOAD_', 'BUFFER_STORE_',
-                    'SCRATCH_LOAD_', 'SCRATCH_STORE_',
-                    'DS_LOAD_', 'DS_STORE_',
-                    'DS_READ_', 'DS_WRITE_',
-                    'FLAT_LOAD_', 'FLAT_STORE_',
-                    'GLOBAL_LOAD_', 'GLOBAL_STORE_'):
+    for prefix in (
+        "S_LOAD_",
+        "S_STORE_",
+        "S_BUFFER_LOAD_",
+        "S_BUFFER_STORE_",
+        "S_ATOMIC_",
+        "S_BUFFER_ATOMIC_",
+        "BUFFER_LOAD_",
+        "BUFFER_STORE_",
+        "SCRATCH_LOAD_",
+        "SCRATCH_STORE_",
+        "DS_LOAD_",
+        "DS_STORE_",
+        "DS_READ_",
+        "DS_WRITE_",
+        "FLAT_LOAD_",
+        "FLAT_STORE_",
+        "GLOBAL_LOAD_",
+        "GLOBAL_STORE_",
+    ):
         for old_suffix, new_suffix in _dword_to_b.items():
-            _add(f'{prefix}{old_suffix}', f'{prefix}{new_suffix}')
+            _add(f"{prefix}{old_suffix}", f"{prefix}{new_suffix}")
 
     # NOTE: FLAT_LOAD_/FLAT_STORE_ instructions canonicalize within the FLAT
     # family (FLAT_LOAD_DWORD -> FLAT_LOAD_B32) via the prefix sweep above,
@@ -137,137 +158,212 @@ def _build_rename_map() -> dict[str, str]:
 
     # --- Sub-dword type nomenclature: UBYTE→U8, SBYTE→I8, etc. ---
     _sub_dword = {
-        'UBYTE': 'U8', 'SBYTE': 'I8', 'USHORT': 'U16', 'SSHORT': 'I16',
-        'BYTE': 'B8', 'SHORT': 'B16',
-        'UBYTE_D16': 'U8_D16', 'SBYTE_D16': 'I8_D16',
-        'USHORT_D16': 'U16_D16', 'SSHORT_D16': 'I16_D16',
-        'UBYTE_D16_HI': 'U8_D16_HI', 'SBYTE_D16_HI': 'I8_D16_HI',
-        'USHORT_D16_HI': 'U16_D16_HI', 'SSHORT_D16_HI': 'I16_D16_HI',
-        'SHORT_D16': 'B16_D16', 'BYTE_D16_HI': 'B8_D16_HI',
-        'SHORT_D16_HI': 'B16_D16_HI',
+        "UBYTE": "U8",
+        "SBYTE": "I8",
+        "USHORT": "U16",
+        "SSHORT": "I16",
+        "BYTE": "B8",
+        "SHORT": "B16",
+        "UBYTE_D16": "U8_D16",
+        "SBYTE_D16": "I8_D16",
+        "USHORT_D16": "U16_D16",
+        "SSHORT_D16": "I16_D16",
+        "UBYTE_D16_HI": "U8_D16_HI",
+        "SBYTE_D16_HI": "I8_D16_HI",
+        "USHORT_D16_HI": "U16_D16_HI",
+        "SSHORT_D16_HI": "I16_D16_HI",
+        "SHORT_D16": "B16_D16",
+        "BYTE_D16_HI": "B8_D16_HI",
+        "SHORT_D16_HI": "B16_D16_HI",
     }
-    for prefix in ('FLAT_LOAD_', 'FLAT_STORE_',
-                    'GLOBAL_LOAD_', 'GLOBAL_STORE_',
-                    'SCRATCH_LOAD_', 'SCRATCH_STORE_',
-                    'BUFFER_LOAD_', 'BUFFER_STORE_'):
+    for prefix in (
+        "FLAT_LOAD_",
+        "FLAT_STORE_",
+        "GLOBAL_LOAD_",
+        "GLOBAL_STORE_",
+        "SCRATCH_LOAD_",
+        "SCRATCH_STORE_",
+        "BUFFER_LOAD_",
+        "BUFFER_STORE_",
+    ):
         for old_suffix, new_suffix in _sub_dword.items():
-            _add(f'{prefix}{old_suffix}', f'{prefix}{new_suffix}')
+            _add(f"{prefix}{old_suffix}", f"{prefix}{new_suffix}")
     # NOTE: see comment above on the dword sweep - FLAT sub-dword should
     # canonicalize within the FLAT family, not cross to GLOBAL.
 
     # --- BUFFER_LOAD/STORE format renames ---
-    for suffix in ('D16_X', 'D16_XY', 'D16_XYZ', 'D16_XYZW',
-                    'D16_HI_X',
-                    'X', 'XY', 'XYZ', 'XYZW'):
-        _add(f'BUFFER_LOAD_FORMAT_{suffix}', f'BUFFER_LOAD_FORMAT_{suffix}')
-        _add(f'BUFFER_STORE_FORMAT_{suffix}', f'BUFFER_STORE_FORMAT_{suffix}')
-        _add(f'BUFFER_LOAD_FORMAT_D16_{suffix}', f'BUFFER_LOAD_D16_FORMAT_{suffix}')
-        _add(f'BUFFER_STORE_FORMAT_D16_{suffix}', f'BUFFER_STORE_D16_FORMAT_{suffix}')
-        _add(f'BUFFER_LOAD_FORMAT_D16_HI_{suffix}', f'BUFFER_LOAD_D16_HI_FORMAT_{suffix}')
-        _add(f'BUFFER_STORE_FORMAT_D16_HI_{suffix}', f'BUFFER_STORE_D16_HI_FORMAT_{suffix}')
+    for suffix in (
+        "D16_X",
+        "D16_XY",
+        "D16_XYZ",
+        "D16_XYZW",
+        "D16_HI_X",
+        "X",
+        "XY",
+        "XYZ",
+        "XYZW",
+    ):
+        _add(f"BUFFER_LOAD_FORMAT_{suffix}", f"BUFFER_LOAD_FORMAT_{suffix}")
+        _add(f"BUFFER_STORE_FORMAT_{suffix}", f"BUFFER_STORE_FORMAT_{suffix}")
+        _add(f"BUFFER_LOAD_FORMAT_D16_{suffix}", f"BUFFER_LOAD_D16_FORMAT_{suffix}")
+        _add(f"BUFFER_STORE_FORMAT_D16_{suffix}", f"BUFFER_STORE_D16_FORMAT_{suffix}")
+        _add(
+            f"BUFFER_LOAD_FORMAT_D16_HI_{suffix}", f"BUFFER_LOAD_D16_HI_FORMAT_{suffix}"
+        )
+        _add(
+            f"BUFFER_STORE_FORMAT_D16_HI_{suffix}",
+            f"BUFFER_STORE_D16_HI_FORMAT_{suffix}",
+        )
 
     # --- Atomic operation type suffixes ---
     # GFX9/GFX10 atomics have no type suffix; GFX12 adds _U32/_U64/_B32/_B64/_I32/_I64
     _atomic_type_suffixes = {
-        'ADD': 'ADD_U32', 'ADD_X2': 'ADD_U64',
-        'SUB': 'SUB_U32', 'SUB_X2': 'SUB_U64',
-        'INC': 'INC_U32', 'INC_X2': 'INC_U64',
-        'DEC': 'DEC_U32', 'DEC_X2': 'DEC_U64',
-        'SMIN': 'MIN_I32', 'SMIN_X2': 'MIN_I64',
-        'SMAX': 'MAX_I32', 'SMAX_X2': 'MAX_I64',
-        'UMIN': 'MIN_U32', 'UMIN_X2': 'MIN_U64',
-        'UMAX': 'MAX_U32', 'UMAX_X2': 'MAX_U64',
-        'AND': 'AND_B32', 'AND_X2': 'AND_B64',
-        'OR': 'OR_B32', 'OR_X2': 'OR_B64',
-        'XOR': 'XOR_B32', 'XOR_X2': 'XOR_B64',
-        'SWAP': 'SWAP_B32', 'SWAP_X2': 'SWAP_B64',
-        'CMPSWAP': 'CMPSWAP_B32', 'CMPSWAP_X2': 'CMPSWAP_B64',
+        "ADD": "ADD_U32",
+        "ADD_X2": "ADD_U64",
+        "SUB": "SUB_U32",
+        "SUB_X2": "SUB_U64",
+        "INC": "INC_U32",
+        "INC_X2": "INC_U64",
+        "DEC": "DEC_U32",
+        "DEC_X2": "DEC_U64",
+        "SMIN": "MIN_I32",
+        "SMIN_X2": "MIN_I64",
+        "SMAX": "MAX_I32",
+        "SMAX_X2": "MAX_I64",
+        "UMIN": "MIN_U32",
+        "UMIN_X2": "MIN_U64",
+        "UMAX": "MAX_U32",
+        "UMAX_X2": "MAX_U64",
+        "AND": "AND_B32",
+        "AND_X2": "AND_B64",
+        "OR": "OR_B32",
+        "OR_X2": "OR_B64",
+        "XOR": "XOR_B32",
+        "XOR_X2": "XOR_B64",
+        "SWAP": "SWAP_B32",
+        "SWAP_X2": "SWAP_B64",
+        "CMPSWAP": "CMPSWAP_B32",
+        "CMPSWAP_X2": "CMPSWAP_B64",
     }
-    for prefix in ('BUFFER_ATOMIC_', 'FLAT_ATOMIC_', 'GLOBAL_ATOMIC_',
-                    'SCRATCH_ATOMIC_', 'IMAGE_ATOMIC_', 'DS_'):
+    for prefix in (
+        "BUFFER_ATOMIC_",
+        "FLAT_ATOMIC_",
+        "GLOBAL_ATOMIC_",
+        "SCRATCH_ATOMIC_",
+        "IMAGE_ATOMIC_",
+        "DS_",
+    ):
         for old_suffix, new_suffix in _atomic_type_suffixes.items():
-            _add(f'{prefix}{old_suffix}', f'{prefix}{new_suffix}')
+            _add(f"{prefix}{old_suffix}", f"{prefix}{new_suffix}")
     # FLAT_ATOMIC → GLOBAL_ATOMIC
     for old_suffix, new_suffix in _atomic_type_suffixes.items():
-        _add(f'FLAT_ATOMIC_{old_suffix}', f'GLOBAL_ATOMIC_{new_suffix}')
+        _add(f"FLAT_ATOMIC_{old_suffix}", f"GLOBAL_ATOMIC_{new_suffix}")
 
     # DS atomics also have return variants
     for old_suffix, new_suffix in _atomic_type_suffixes.items():
-        _add(f'DS_{old_suffix}_RTN', f'DS_{new_suffix}_RTN')
-        _add(f'DS_RTN_{old_suffix}', f'DS_{new_suffix}_RTN')
+        _add(f"DS_{old_suffix}_RTN", f"DS_{new_suffix}_RTN")
+        _add(f"DS_RTN_{old_suffix}", f"DS_{new_suffix}_RTN")
 
     # --- DS compare-store rename: CMPST → CMPSTORE ---
-    for suffix in ('B32', 'B64', 'F32', 'F64',
-                    'RTN_B32', 'RTN_B64', 'RTN_F32', 'RTN_F64'):
-        _add(f'DS_CMPST_{suffix}', f'DS_CMPSTORE_{suffix}')
+    for suffix in (
+        "B32",
+        "B64",
+        "F32",
+        "F64",
+        "RTN_B32",
+        "RTN_B64",
+        "RTN_F32",
+        "RTN_F64",
+    ):
+        _add(f"DS_CMPST_{suffix}", f"DS_CMPSTORE_{suffix}")
 
     # --- DS read/write → load/store ---
-    for suffix in ('B32', 'B64', 'B128', 'B96',
-                    'U8', 'I8', 'U16', 'I16', 'U8_D16', 'U8_D16_HI',
-                    'I8_D16', 'I8_D16_HI', 'U16_D16', 'U16_D16_HI',
-                    'I16_D16', 'I16_D16_HI', 'ADDTID_B32'):
-        _add(f'DS_READ_{suffix}', f'DS_LOAD_{suffix}')
-        _add(f'DS_WRITE_{suffix}', f'DS_STORE_{suffix}')
+    for suffix in (
+        "B32",
+        "B64",
+        "B128",
+        "B96",
+        "U8",
+        "I8",
+        "U16",
+        "I16",
+        "U8_D16",
+        "U8_D16_HI",
+        "I8_D16",
+        "I8_D16_HI",
+        "U16_D16",
+        "U16_D16_HI",
+        "I16_D16",
+        "I16_D16_HI",
+        "ADDTID_B32",
+    ):
+        _add(f"DS_READ_{suffix}", f"DS_LOAD_{suffix}")
+        _add(f"DS_WRITE_{suffix}", f"DS_STORE_{suffix}")
     # 2-address variants
-    for suffix in ('B32', 'B64'):
-        _add(f'DS_READ2_B32', f'DS_LOAD_2ADDR_B32')
-        _add(f'DS_READ2_B64', f'DS_LOAD_2ADDR_B64')
-        _add(f'DS_READ2ST64_B32', f'DS_LOAD_2ADDR_STRIDE64_B32')
-        _add(f'DS_READ2ST64_B64', f'DS_LOAD_2ADDR_STRIDE64_B64')
-        _add(f'DS_WRITE2_B32', f'DS_STORE_2ADDR_B32')
-        _add(f'DS_WRITE2_B64', f'DS_STORE_2ADDR_B64')
-        _add(f'DS_WRITE2ST64_B32', f'DS_STORE_2ADDR_STRIDE64_B32')
-        _add(f'DS_WRITE2ST64_B64', f'DS_STORE_2ADDR_STRIDE64_B64')
+    for suffix in ("B32", "B64"):
+        _add(f"DS_READ2_B32", f"DS_LOAD_2ADDR_B32")
+        _add(f"DS_READ2_B64", f"DS_LOAD_2ADDR_B64")
+        _add(f"DS_READ2ST64_B32", f"DS_LOAD_2ADDR_STRIDE64_B32")
+        _add(f"DS_READ2ST64_B64", f"DS_LOAD_2ADDR_STRIDE64_B64")
+        _add(f"DS_WRITE2_B32", f"DS_STORE_2ADDR_B32")
+        _add(f"DS_WRITE2_B64", f"DS_STORE_2ADDR_B64")
+        _add(f"DS_WRITE2ST64_B32", f"DS_STORE_2ADDR_STRIDE64_B32")
+        _add(f"DS_WRITE2ST64_B64", f"DS_STORE_2ADDR_STRIDE64_B64")
 
     # --- Float min/max → min_num/max_num (IEEE 754-2019 quiet NaN) ---
-    for size in ('F16', 'F32', 'F64'):
-        _add(f'V_MIN_{size}', f'V_MIN_NUM_{size}')
-        _add(f'V_MAX_{size}', f'V_MAX_NUM_{size}')
-        _add(f'DS_MIN_{size}', f'DS_MIN_NUM_{size}')
-        _add(f'DS_MAX_{size}', f'DS_MAX_NUM_{size}')
-        _add(f'DS_MIN_RTN_{size}', f'DS_MIN_NUM_RTN_{size}')
-        _add(f'DS_MAX_RTN_{size}', f'DS_MAX_NUM_RTN_{size}')
+    for size in ("F16", "F32", "F64"):
+        _add(f"V_MIN_{size}", f"V_MIN_NUM_{size}")
+        _add(f"V_MAX_{size}", f"V_MAX_NUM_{size}")
+        _add(f"DS_MIN_{size}", f"DS_MIN_NUM_{size}")
+        _add(f"DS_MAX_{size}", f"DS_MAX_NUM_{size}")
+        _add(f"DS_MIN_RTN_{size}", f"DS_MIN_NUM_RTN_{size}")
+        _add(f"DS_MAX_RTN_{size}", f"DS_MAX_NUM_RTN_{size}")
     # Packed
-    _add('V_PK_MIN_F16', 'V_PK_MIN_NUM_F16')
-    _add('V_PK_MAX_F16', 'V_PK_MAX_NUM_F16')
-    _add('V_PK_MIN_F32', 'V_PK_MIN_NUM_F32')
-    _add('V_PK_MAX_F32', 'V_PK_MAX_NUM_F32')
+    _add("V_PK_MIN_F16", "V_PK_MIN_NUM_F16")
+    _add("V_PK_MAX_F16", "V_PK_MAX_NUM_F16")
+    _add("V_PK_MIN_F32", "V_PK_MIN_NUM_F32")
+    _add("V_PK_MAX_F32", "V_PK_MAX_NUM_F32")
     # Buffer/global/flat atomic min/max float
-    for prefix in ('BUFFER_ATOMIC_', 'FLAT_ATOMIC_', 'GLOBAL_ATOMIC_'):
-        _add(f'{prefix}FMIN', f'{prefix}MIN_NUM_F32')
-        _add(f'{prefix}FMAX', f'{prefix}MAX_NUM_F32')
-        _add(f'{prefix}MIN_F32', f'{prefix}MIN_NUM_F32')
-        _add(f'{prefix}MAX_F32', f'{prefix}MAX_NUM_F32')
+    for prefix in ("BUFFER_ATOMIC_", "FLAT_ATOMIC_", "GLOBAL_ATOMIC_"):
+        _add(f"{prefix}FMIN", f"{prefix}MIN_NUM_F32")
+        _add(f"{prefix}FMAX", f"{prefix}MAX_NUM_F32")
+        _add(f"{prefix}MIN_F32", f"{prefix}MIN_NUM_F32")
+        _add(f"{prefix}MAX_F32", f"{prefix}MAX_NUM_F32")
 
     # --- Scalar bitwise renames (GFX9→GFX11): S_ANDN2→S_AND_NOT1, etc. ---
-    for w in ('32', '64'):
-        _add(f'S_ANDN2_B{w}', f'S_AND_NOT1_B{w}')
-        _add(f'S_ORN2_B{w}', f'S_OR_NOT1_B{w}')
-        _add(f'S_NAND_B{w}', f'S_NAND_B{w}')
-        _add(f'S_NOR_B{w}', f'S_NOR_B{w}')
-        _add(f'S_XNOR_B{w}', f'S_XNOR_B{w}')
-    _add('S_ANDN1_SAVEEXEC_B64', 'S_AND_NOT0_SAVEEXEC_B64')
-    _add('S_ANDN2_SAVEEXEC_B64', 'S_AND_NOT1_SAVEEXEC_B64')
-    _add('S_ORN1_SAVEEXEC_B64', 'S_OR_NOT0_SAVEEXEC_B64')
-    _add('S_ORN2_SAVEEXEC_B64', 'S_OR_NOT1_SAVEEXEC_B64')
+    for w in ("32", "64"):
+        _add(f"S_ANDN2_B{w}", f"S_AND_NOT1_B{w}")
+        _add(f"S_ORN2_B{w}", f"S_OR_NOT1_B{w}")
+        _add(f"S_NAND_B{w}", f"S_NAND_B{w}")
+        _add(f"S_NOR_B{w}", f"S_NOR_B{w}")
+        _add(f"S_XNOR_B{w}", f"S_XNOR_B{w}")
+    _add("S_ANDN1_SAVEEXEC_B64", "S_AND_NOT0_SAVEEXEC_B64")
+    _add("S_ANDN2_SAVEEXEC_B64", "S_AND_NOT1_SAVEEXEC_B64")
+    _add("S_ORN1_SAVEEXEC_B64", "S_OR_NOT0_SAVEEXEC_B64")
+    _add("S_ORN2_SAVEEXEC_B64", "S_OR_NOT1_SAVEEXEC_B64")
 
     # --- EXP → EXPORT ---
-    _add('EXP', 'EXPORT')
+    _add("EXP", "EXPORT")
 
     # --- Conditional subtract: CSUB → COND_SUB ---
-    for prefix in ('BUFFER_ATOMIC_', 'FLAT_ATOMIC_', 'GLOBAL_ATOMIC_',
-                    'SCRATCH_ATOMIC_', 'DS_'):
-        _add(f'{prefix}CSUB_U32', f'{prefix}COND_SUB_U32')
-        _add(f'{prefix}CSUB_RTN_U32', f'{prefix}COND_SUB_RTN_U32')
+    for prefix in (
+        "BUFFER_ATOMIC_",
+        "FLAT_ATOMIC_",
+        "GLOBAL_ATOMIC_",
+        "SCRATCH_ATOMIC_",
+        "DS_",
+    ):
+        _add(f"{prefix}CSUB_U32", f"{prefix}COND_SUB_U32")
+        _add(f"{prefix}CSUB_RTN_U32", f"{prefix}COND_SUB_RTN_U32")
 
     # --- BUFFER_WBL2 / BUFFER_INV / BUFFER_GL0_INV etc. ---
-    _add('BUFFER_WBL2', 'BUFFER_GL1_INV')
-    _add('BUFFER_INV', 'BUFFER_INV')
+    _add("BUFFER_WBL2", "BUFFER_GL1_INV")
+    _add("BUFFER_INV", "BUFFER_INV")
 
     # --- V_INTERP renames (GFX9→GFX11) ---
-    _add('V_INTERP_P1_F32', 'V_INTERP_P10_F32_INREG')
-    _add('V_INTERP_P2_F32', 'V_INTERP_P2_F32_INREG')
-    _add('V_INTERP_MOV_F32', 'V_INTERP_P10_F32_INREG')
+    _add("V_INTERP_P1_F32", "V_INTERP_P10_F32_INREG")
+    _add("V_INTERP_P2_F32", "V_INTERP_P2_F32_INREG")
+    _add("V_INTERP_MOV_F32", "V_INTERP_P10_F32_INREG")
 
     # --- V_CMP / V_CMPX: F (false) and T/TRU (true) are removed in GFX11+ ---
     # These always-false/always-true comparisons are trivially emulated with
@@ -306,6 +402,7 @@ def canonical_mnemonic(name: str) -> str:
 # Minimal e-graph (union-find over mnemonic equivalence classes)
 # ---------------------------------------------------------------------------
 
+
 class _UnionFind:
     """Path-compressing union-find for transitive mnemonic equivalence."""
 
@@ -333,6 +430,7 @@ class _UnionFind:
 # ISA capability queries (used by domain-specific rules)
 # ---------------------------------------------------------------------------
 
+
 class WaitcntModel(Enum):
     GFX9_CLASSIC = auto()
     GFX10_PLUS_VSCNT = auto()
@@ -341,32 +439,42 @@ class WaitcntModel(Enum):
 
 
 _WAITCNT_MODELS: dict[str, WaitcntModel] = {
-    'cdna1': WaitcntModel.GFX9_CLASSIC,
-    'cdna2': WaitcntModel.GFX9_CLASSIC,
-    'cdna3': WaitcntModel.GFX9_CLASSIC,
-    'cdna4': WaitcntModel.GFX9_CLASSIC,
-    'rdna1': WaitcntModel.GFX10_PLUS_VSCNT,
-    'rdna2': WaitcntModel.GFX10_PLUS_VSCNT,
-    'rdna3': WaitcntModel.GFX11_SPLIT,
-    'rdna3_5': WaitcntModel.GFX11_SPLIT,
-    'rdna4': WaitcntModel.GFX12_SPLIT,
+    "cdna1": WaitcntModel.GFX9_CLASSIC,
+    "cdna2": WaitcntModel.GFX9_CLASSIC,
+    "cdna3": WaitcntModel.GFX9_CLASSIC,
+    "cdna4": WaitcntModel.GFX9_CLASSIC,
+    "rdna1": WaitcntModel.GFX10_PLUS_VSCNT,
+    "rdna2": WaitcntModel.GFX10_PLUS_VSCNT,
+    "rdna3": WaitcntModel.GFX11_SPLIT,
+    "rdna3_5": WaitcntModel.GFX11_SPLIT,
+    "rdna4": WaitcntModel.GFX12_SPLIT,
 }
 
-_SPLIT_BARRIER_ISAS = frozenset({'cdna4', 'rdna3', 'rdna3_5', 'rdna4'})
-_SEPARATE_GLOBAL_ISAS = frozenset({
-    'cdna3', 'cdna4', 'rdna1', 'rdna2', 'rdna3', 'rdna3_5', 'rdna4',
-})
-_MFMA_ISAS = frozenset({'cdna1', 'cdna2', 'cdna3', 'cdna4'})
-_ACCVGPR_ISAS = frozenset({'cdna2', 'cdna3', 'cdna4'})
+_SPLIT_BARRIER_ISAS = frozenset({"cdna4", "rdna3", "rdna3_5", "rdna4"})
+_SEPARATE_GLOBAL_ISAS = frozenset(
+    {
+        "cdna3",
+        "cdna4",
+        "rdna1",
+        "rdna2",
+        "rdna3",
+        "rdna3_5",
+        "rdna4",
+    }
+)
+_MFMA_ISAS = frozenset({"cdna1", "cdna2", "cdna3", "cdna4"})
+_ACCVGPR_ISAS = frozenset({"cdna2", "cdna3", "cdna4"})
 
 
 # ---------------------------------------------------------------------------
 # Core classifier
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class _InstRecord:
     """Internal record for one instruction on one ISA."""
+
     mnemonic: str
     canonical: str
     isa_name: str
@@ -410,7 +518,8 @@ class LegalizationGenerator:
             parent_name = spec.profile.derive_parent_enc_name(enc.enc_name)
             if parent_name in spec.encoding_map:
                 return LegalizationGenerator._dt_index(
-                    spec.encoding_map[parent_name], spec)
+                    spec.encoding_map[parent_name], spec
+                )
             return 0
         for ptr in enc.primary_dt_ptrs:
             if ptr != -1:
@@ -470,7 +579,9 @@ class LegalizationGenerator:
         return self._uf.find(a.eclass_id) == self._uf.find(b.eclass_id)
 
     def classify(
-        self, src_isa: str, dst_isa: str,
+        self,
+        src_isa: str,
+        dst_isa: str,
     ) -> list[LegalizationEntry]:
         """Classify every source instruction for a (src, dst) pair."""
         src_records = self._records.get(src_isa, [])
@@ -491,27 +602,30 @@ class LegalizationGenerator:
             else:
                 action = self._best_match_action(src_rec, candidates)
 
-            entries.append(LegalizationEntry(
-                src_mnemonic=src_rec.mnemonic,
-                src_encoding=src_rec.enc_name,
-                src_encoding_order=src_rec.enc_order,
-                src_encoding_bits=src_rec.enc_bits,
-                src_opcode=src_rec.opcode,
-                action=action,
-            ))
+            entries.append(
+                LegalizationEntry(
+                    src_mnemonic=src_rec.mnemonic,
+                    src_encoding=src_rec.enc_name,
+                    src_encoding_order=src_rec.enc_order,
+                    src_encoding_bits=src_rec.enc_bits,
+                    src_opcode=src_rec.opcode,
+                    action=action,
+                )
+            )
 
         _apply_domain_rules(entries, src_isa, dst_isa)
         return entries
 
     @staticmethod
     def _best_match_action(
-        src: _InstRecord, candidates: list[_InstRecord],
+        src: _InstRecord,
+        candidates: list[_InstRecord],
     ) -> LegalizationAction:
         for dst in candidates:
             if src.field_sig == dst.field_sig and src.opnd_sig == dst.opnd_sig:
                 if src.opcode == dst.opcode:
-                    return LegalizationAction('identity', target_opcode=dst.opcode)
-                return LegalizationAction('substitute', target_opcode=dst.opcode)
+                    return LegalizationAction("identity", target_opcode=dst.opcode)
+                return LegalizationAction("substitute", target_opcode=dst.opcode)
         # Encoding differs — LOWER.  Prefer a candidate in the same encoding
         # format; fall back to any candidate; if none has a valid opcode, Expand.
         same_enc = [c for c in candidates if c.enc_name == src.enc_name]
@@ -519,7 +633,7 @@ class LegalizationGenerator:
         if best:
             if best.opcode == 0 and src.opcode != 0:
                 return LegalizationAction.expand(ExpansionKind.CMP_REMOVED)
-            return LegalizationAction('lower', target_opcode=best.opcode)
+            return LegalizationAction("lower", target_opcode=best.opcode)
         return LegalizationAction.expand(ExpansionKind.CMP_REMOVED)
 
     @staticmethod
@@ -531,19 +645,19 @@ class LegalizationGenerator:
         handler based on the action kind and lowering/expansion tag.
         """
         name = src.mnemonic
-        if name.startswith('V_MFMA_') or name.startswith('V_SMFMAC_'):
+        if name.startswith("V_MFMA_") or name.startswith("V_SMFMAC_"):
             return LegalizationAction.expand(ExpansionKind.MFMA)
-        if name.startswith('V_ACCVGPR_'):
+        if name.startswith("V_ACCVGPR_"):
             return LegalizationAction.expand(ExpansionKind.ACCVGPR)
-        if name.startswith('V_WMMA_'):
+        if name.startswith("V_WMMA_"):
             return LegalizationAction.expand(ExpansionKind.WMMA)
-        if name.startswith('DS_GWS_'):
+        if name.startswith("DS_GWS_"):
             return LegalizationAction.lower(LoweringKind.GENERIC)
-        if name.startswith('V_MAD_'):
+        if name.startswith("V_MAD_"):
             return LegalizationAction.lower(LoweringKind.GENERIC)
-        if name.startswith('V_INTERP_'):
+        if name.startswith("V_INTERP_"):
             return LegalizationAction.lower(LoweringKind.GENERIC)
-        if name.startswith('IMAGE_'):
+        if name.startswith("IMAGE_"):
             return LegalizationAction.lower(LoweringKind.GENERIC)
         # All remaining unmatched instructions are EXPAND — no target
         # equivalent exists. BinaryTranslator emits s_nop placeholder.
@@ -563,12 +677,16 @@ class LegalizationGenerator:
         return results
 
     def summary(
-        self, entries: list[LegalizationEntry],
+        self,
+        entries: list[LegalizationEntry],
     ) -> dict[str, int]:
         """Count entries by action kind."""
         counts: dict[str, int] = {
-            'identity': 0, 'substitute': 0, 'lower': 0,
-            'expand': 0, 'illegal': 0,
+            "identity": 0,
+            "substitute": 0,
+            "lower": 0,
+            "expand": 0,
+            "illegal": 0,
         }
         for e in entries:
             counts[e.action.kind] += 1
@@ -579,9 +697,11 @@ class LegalizationGenerator:
 # Domain-specific override rules
 # ---------------------------------------------------------------------------
 
+
 def _apply_domain_rules(
     entries: list[LegalizationEntry],
-    src_isa: str, dst_isa: str,
+    src_isa: str,
+    dst_isa: str,
 ) -> None:
     src_wc = _WAITCNT_MODELS.get(src_isa)
     dst_wc = _WAITCNT_MODELS.get(dst_isa)
@@ -598,47 +718,69 @@ def _apply_domain_rules(
         # when the action is overridden to flag a domain-specific lowering.
         prev_op = entry.action.target_opcode
 
-        if name in ('S_WAITCNT', 'S_WAITCNT_VSCNT',
-                     'S_WAITCNT_VMCNT', 'S_WAITCNT_LGKMCNT',
-                     'S_WAITCNT_EXPCNT'):
-            if src_wc != dst_wc:
-                entry.action = LegalizationAction.lower(
-                    LoweringKind.WAITCNT, target_opcode=prev_op)
-
-        if name.startswith('S_WAIT_') and name not in (
-            'S_WAITCNT', 'S_WAITCNT_VSCNT', 'S_WAITCNT_VMCNT',
-            'S_WAITCNT_LGKMCNT', 'S_WAITCNT_EXPCNT',
+        if name in (
+            "S_WAITCNT",
+            "S_WAITCNT_VSCNT",
+            "S_WAITCNT_VMCNT",
+            "S_WAITCNT_LGKMCNT",
+            "S_WAITCNT_EXPCNT",
         ):
             if src_wc != dst_wc:
                 entry.action = LegalizationAction.lower(
-                    LoweringKind.WAITCNT, target_opcode=prev_op)
+                    LoweringKind.WAITCNT, target_opcode=prev_op
+                )
 
-        if name == 'S_BARRIER':
+        if name.startswith("S_WAIT_") and name not in (
+            "S_WAITCNT",
+            "S_WAITCNT_VSCNT",
+            "S_WAITCNT_VMCNT",
+            "S_WAITCNT_LGKMCNT",
+            "S_WAITCNT_EXPCNT",
+        ):
+            if src_wc != dst_wc:
+                entry.action = LegalizationAction.lower(
+                    LoweringKind.WAITCNT, target_opcode=prev_op
+                )
+
+        if name == "S_BARRIER":
             if not src_has_split_barrier and dst_has_split_barrier:
                 entry.action = LegalizationAction.lower(
-                    LoweringKind.BARRIER, target_opcode=prev_op)
-        if name in ('S_BARRIER_SIGNAL', 'S_BARRIER_WAIT'):
+                    LoweringKind.BARRIER, target_opcode=prev_op
+                )
+        if name in ("S_BARRIER_SIGNAL", "S_BARRIER_WAIT"):
             if src_has_split_barrier and not dst_has_split_barrier:
                 entry.action = LegalizationAction.lower(
-                    LoweringKind.BARRIER, target_opcode=prev_op)
+                    LoweringKind.BARRIER, target_opcode=prev_op
+                )
 
-        if name.startswith('FLAT_LOAD_') or name.startswith('FLAT_STORE_'):
-            if dst_isa in _SEPARATE_GLOBAL_ISAS and src_isa not in _SEPARATE_GLOBAL_ISAS:
+        if name.startswith("FLAT_LOAD_") or name.startswith("FLAT_STORE_"):
+            if (
+                dst_isa in _SEPARATE_GLOBAL_ISAS
+                and src_isa not in _SEPARATE_GLOBAL_ISAS
+            ):
                 entry.action = LegalizationAction.lower(
-                    LoweringKind.FLAT_MEMORY, target_opcode=prev_op)
+                    LoweringKind.FLAT_MEMORY, target_opcode=prev_op
+                )
 
-        if name.startswith('V_MFMA_') and not dst_has_mfma:
+        if name.startswith("V_MFMA_") and not dst_has_mfma:
             entry.action = LegalizationAction.expand(ExpansionKind.MFMA)
 
-        if name.startswith('V_ACCVGPR_') and not dst_has_accvgpr:
+        if name.startswith("V_ACCVGPR_") and not dst_has_accvgpr:
             entry.action = LegalizationAction.expand(ExpansionKind.ACCVGPR)
 
         # V_CMP_F_* (always-false) and V_CMP_TRU_* / V_CMPX_TRU_* (always-true)
         # are removed on GFX11+ (RDNA3/3.5/4). They have no target equivalent
         # and must be expanded to s_mov_b32 vcc, 0 / s_mov_b64 vcc, exec.
-        if name.startswith(('V_CMP_F_', 'V_CMPX_F_',
-                            'V_CMP_TRU_', 'V_CMPX_TRU_',
-                            'V_CMP_T_', 'V_CMPX_T_')):
+        if name.startswith(
+            (
+                "V_CMP_F_",
+                "V_CMPX_F_",
+                "V_CMP_TRU_",
+                "V_CMPX_TRU_",
+                "V_CMP_T_",
+                "V_CMPX_T_",
+            )
+        ):
             if entry.action.target_opcode == 0:
                 entry.action = LegalizationAction.expand(ExpansionKind.CMP_REMOVED)
 
@@ -647,6 +789,7 @@ def _apply_domain_rules(
 # Default translation pairs
 # ---------------------------------------------------------------------------
 
+
 def _default_pairs(
     specs: list[tuple[str, IsaSpec, SemanticsSpec | None]],
 ) -> list[tuple[str, str]]:
@@ -654,21 +797,37 @@ def _default_pairs(
     names = {name for name, _, _ in specs}
     all_pairs = [
         # Intra-CDNA upgrades
-        ('cdna1', 'cdna2'), ('cdna1', 'cdna3'), ('cdna1', 'cdna4'),
-        ('cdna2', 'cdna3'), ('cdna2', 'cdna4'), ('cdna3', 'cdna4'),
+        ("cdna1", "cdna2"),
+        ("cdna1", "cdna3"),
+        ("cdna1", "cdna4"),
+        ("cdna2", "cdna3"),
+        ("cdna2", "cdna4"),
+        ("cdna3", "cdna4"),
         # CDNA → RDNA
-        ('cdna1', 'rdna1'), ('cdna1', 'rdna2'), ('cdna1', 'rdna3'),
-        ('cdna1', 'rdna4'), ('cdna2', 'rdna3'), ('cdna2', 'rdna4'),
-        ('cdna3', 'rdna3'), ('cdna3', 'rdna4'), ('cdna4', 'rdna3'),
-        ('cdna4', 'rdna4'),
+        ("cdna1", "rdna1"),
+        ("cdna1", "rdna2"),
+        ("cdna1", "rdna3"),
+        ("cdna1", "rdna4"),
+        ("cdna2", "rdna3"),
+        ("cdna2", "rdna4"),
+        ("cdna3", "rdna3"),
+        ("cdna3", "rdna4"),
+        ("cdna4", "rdna3"),
+        ("cdna4", "rdna4"),
         # CDNA downgrade used to run CDNA4 code objects on CDNA3 hosts.
-        ('cdna4', 'cdna3'),
+        ("cdna4", "cdna3"),
         # Intra-RDNA upgrades
-        ('rdna1', 'rdna2'), ('rdna1', 'rdna3'), ('rdna1', 'rdna4'),
-        ('rdna2', 'rdna3'), ('rdna2', 'rdna4'), ('rdna3', 'rdna4'),
-        ('rdna3_5', 'rdna4'),
+        ("rdna1", "rdna2"),
+        ("rdna1", "rdna3"),
+        ("rdna1", "rdna4"),
+        ("rdna2", "rdna3"),
+        ("rdna2", "rdna4"),
+        ("rdna3", "rdna4"),
+        ("rdna3_5", "rdna4"),
         # RDNA → CDNA
-        ('rdna1', 'cdna3'), ('rdna1', 'cdna4'), ('rdna3', 'cdna4'),
-        ('rdna4', 'cdna4'),
+        ("rdna1", "cdna3"),
+        ("rdna1", "cdna4"),
+        ("rdna3", "cdna4"),
+        ("rdna4", "cdna4"),
     ]
     return [(s, d) for s, d in all_pairs if s in names and d in names]

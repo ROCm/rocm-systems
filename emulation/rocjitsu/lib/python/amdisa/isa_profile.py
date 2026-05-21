@@ -20,15 +20,15 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 
 _FLOAT_NAME_MAP: dict[float, str] = {
-    -0.5: 'NEG_HALF',
-    -1.0: 'NEG_ONE',
-    -2.0: 'NEG_TWO',
-    -4.0: 'NEG_FOUR',
-    0.5: 'HALF',
-    1.0: 'ONE',
-    2.0: 'TWO',
-    4.0: 'FOUR',
-    0.15915494: 'ONE_OVER_TWO_PI',
+    -0.5: "NEG_HALF",
+    -1.0: "NEG_ONE",
+    -2.0: "NEG_TWO",
+    -4.0: "NEG_FOUR",
+    0.5: "HALF",
+    1.0: "ONE",
+    2.0: "TWO",
+    4.0: "FOUR",
+    0.15915494: "ONE_OVER_TWO_PI",
 }
 
 
@@ -43,11 +43,11 @@ class MemoryCoherencyModel(Enum):
     CDNA3/4. GFX10/11/12 cover RDNA generations.
     """
 
-    GFX9_GLC        = auto()  # CDNA1, CDNA2 — GLC bit only, all memory
+    GFX9_GLC = auto()  # CDNA1, CDNA2 — GLC bit only, all memory
     GFX940_SC0_SC1_NT = auto()  # CDNA3, CDNA4 — SC0/SC1+NT vector; GLC scalar
     GFX10_GLC_DLC_SLC = auto()  # RDNA1, RDNA2 — GLC + DLC + SLC
-    GFX11_SC0_SC1_TH  = auto()  # RDNA3, RDNA3.5 — SC0+SC1 scope + TH hint
-    GFX12_SCOPE_TH    = auto()  # RDNA4 — 2-bit SCOPE + TH hint
+    GFX11_SC0_SC1_TH = auto()  # RDNA3, RDNA3.5 — SC0+SC1 scope + TH hint
+    GFX12_SCOPE_TH = auto()  # RDNA4 — 2-bit SCOPE + TH hint
 
 
 @dataclass
@@ -75,14 +75,14 @@ class EncodingModifier:
     """
 
     field: str
-    display: str = ''
+    display: str = ""
     is_offset: bool = False
-    condition: str = ''
-    preamble: str = ''
+    condition: str = ""
+    preamble: str = ""
 
     def __post_init__(self) -> None:
         if not self.display:
-            self.display = f' {self.field}'
+            self.display = f" {self.field}"
 
 
 @dataclass
@@ -96,7 +96,7 @@ class MnemonicRule:
             field (e.g., ``flat_load`` to ``global_load``).
     """
 
-    suffix: str = ''
+    suffix: str = ""
     use_flat_mnemonic: bool = False
 
 
@@ -210,10 +210,10 @@ class IsaProfile(ABC):
         lgkmcnt at [13:8]. Subclasses may override for different layouts.
         """
         return (
-            'uint32_t vmcnt = (encoding_value_ & 0xF) | '
-            '(((encoding_value_ >> 14) & 0x3) << 4);\n'
-            f'uint32_t expcnt = (encoding_value_ >> 4) & 0x7;\n'
-            f'uint32_t lgkmcnt = (encoding_value_ >> 8) & {self.waitcnt_lgkmcnt_mask};\n'
+            "uint32_t vmcnt = (encoding_value_ & 0xF) | "
+            "(((encoding_value_ >> 14) & 0x3) << 4);\n"
+            f"uint32_t expcnt = (encoding_value_ >> 4) & 0x7;\n"
+            f"uint32_t lgkmcnt = (encoding_value_ >> 8) & {self.waitcnt_lgkmcnt_mask};\n"
         )
 
     @property
@@ -225,7 +225,7 @@ class IsaProfile(ABC):
         RDNA3/3.5 (GFX11): layout changed; use Isa::WAITCNT_LGKMCNT_MASK.
         RDNA4 (GFX12): S_WAITCNT removed; this property is unused.
         """
-        return '0x0F'
+        return "0x0F"
 
     def has_src_modifiers(self, enc_name: str) -> bool:
         """True if the encoding format has source input modifiers.
@@ -354,123 +354,127 @@ class IsaProfile(ABC):
         """
         ...
 
-_VOP_E32_RULE = MnemonicRule(suffix='_e32')
+
+_VOP_E32_RULE = MnemonicRule(suffix="_e32")
 
 # GFX940 (CDNA3/4): SC0+SC1+NT coherency model.
 _SMEM_MODIFIERS = [
     EncodingModifier(
-        'offset', is_offset=True,
-        condition='inst->soffset_en && inst->imm',
+        "offset",
+        is_offset=True,
+        condition="inst->soffset_en && inst->imm",
     ),
-    EncodingModifier('glc'),
-    EncodingModifier('nv'),
+    EncodingModifier("glc"),
+    EncodingModifier("nv"),
 ]
 
 _MUBUF_MODIFIERS = [
-    EncodingModifier('offen'),
-    EncodingModifier('idxen'),
-    EncodingModifier('offset', is_offset=True),
-    EncodingModifier('sc0'),
-    EncodingModifier('sc1'),
-    EncodingModifier('nt'),
-    EncodingModifier('lds'),
+    EncodingModifier("offen"),
+    EncodingModifier("idxen"),
+    EncodingModifier("offset", is_offset=True),
+    EncodingModifier("sc0"),
+    EncodingModifier("sc1"),
+    EncodingModifier("nt"),
+    EncodingModifier("lds"),
 ]
 
 _MTBUF_MODIFIERS = [
-    EncodingModifier('offen'),
-    EncodingModifier('offset', is_offset=True),
-    EncodingModifier('sc0'),
-    EncodingModifier('sc1'),
-    EncodingModifier('nt'),
+    EncodingModifier("offen"),
+    EncodingModifier("offset", is_offset=True),
+    EncodingModifier("sc0"),
+    EncodingModifier("sc1"),
+    EncodingModifier("nt"),
 ]
 
 _FLAT_MODIFIERS = [
     EncodingModifier(
-        'flat_offset', is_offset=True,
+        "flat_offset",
+        is_offset=True,
         preamble=(
-            'int flat_offset = (inst->seg != 0) ?'
-            ' (inst->offset | (inst->pad_12 << 12)) : inst->offset;'
+            "int flat_offset = (inst->seg != 0) ?"
+            " (inst->offset | (inst->pad_12 << 12)) : inst->offset;"
         ),
     ),
-    EncodingModifier('sc0'),
-    EncodingModifier('sc1'),
-    EncodingModifier('nt'),
+    EncodingModifier("sc0"),
+    EncodingModifier("sc1"),
+    EncodingModifier("nt"),
 ]
 
 # GFX9 (CDNA1/2): GLC+SLC coherency model; SMEM unchanged (soffset_en/imm present).
 _MUBUF_MODIFIERS_GLC = [
-    EncodingModifier('offen'),
-    EncodingModifier('idxen'),
-    EncodingModifier('offset', is_offset=True),
-    EncodingModifier('glc'),
-    EncodingModifier('slc'),
-    EncodingModifier('lds'),
+    EncodingModifier("offen"),
+    EncodingModifier("idxen"),
+    EncodingModifier("offset", is_offset=True),
+    EncodingModifier("glc"),
+    EncodingModifier("slc"),
+    EncodingModifier("lds"),
 ]
 
 _MTBUF_MODIFIERS_GLC = [
-    EncodingModifier('offen'),
-    EncodingModifier('offset', is_offset=True),
-    EncodingModifier('glc'),
-    EncodingModifier('slc'),
+    EncodingModifier("offen"),
+    EncodingModifier("offset", is_offset=True),
+    EncodingModifier("glc"),
+    EncodingModifier("slc"),
 ]
 
 _FLAT_MODIFIERS_GLC = [
     EncodingModifier(
-        'flat_offset', is_offset=True,
+        "flat_offset",
+        is_offset=True,
         preamble=(
-            'int flat_offset = (inst->seg != 0) ?'
-            ' (inst->offset | (inst->pad_12 << 12)) : inst->offset;'
+            "int flat_offset = (inst->seg != 0) ?"
+            " (inst->offset | (inst->pad_12 << 12)) : inst->offset;"
         ),
     ),
-    EncodingModifier('glc'),
-    EncodingModifier('slc'),
+    EncodingModifier("glc"),
+    EncodingModifier("slc"),
 ]
 
 # GFX10/GFX11 (RDNA1/2/3/3.5): GLC+DLC+SLC; SMEM has no soffset_en/imm.
 _SMEM_MODIFIERS_GLC_DLC = [
-    EncodingModifier('glc'),
-    EncodingModifier('dlc'),
+    EncodingModifier("glc"),
+    EncodingModifier("dlc"),
 ]
 
 _MUBUF_MODIFIERS_GLC_DLC = [
-    EncodingModifier('offen'),
-    EncodingModifier('idxen'),
-    EncodingModifier('offset', is_offset=True),
-    EncodingModifier('glc'),
-    EncodingModifier('dlc'),
-    EncodingModifier('slc'),
-    EncodingModifier('lds'),
+    EncodingModifier("offen"),
+    EncodingModifier("idxen"),
+    EncodingModifier("offset", is_offset=True),
+    EncodingModifier("glc"),
+    EncodingModifier("dlc"),
+    EncodingModifier("slc"),
+    EncodingModifier("lds"),
 ]
 
 _MTBUF_MODIFIERS_GLC_DLC = [
-    EncodingModifier('offen'),
-    EncodingModifier('offset', is_offset=True),
-    EncodingModifier('glc'),
-    EncodingModifier('dlc'),
-    EncodingModifier('slc'),
+    EncodingModifier("offen"),
+    EncodingModifier("offset", is_offset=True),
+    EncodingModifier("glc"),
+    EncodingModifier("dlc"),
+    EncodingModifier("slc"),
 ]
 
 _FLAT_MODIFIERS_GLC_DLC = [
-    EncodingModifier('offset', is_offset=True),
-    EncodingModifier('glc'),
-    EncodingModifier('dlc'),
-    EncodingModifier('slc'),
+    EncodingModifier("offset", is_offset=True),
+    EncodingModifier("glc"),
+    EncodingModifier("dlc"),
+    EncodingModifier("slc"),
 ]
 
 # GFX12 (RDNA4): SCOPE+TH model; flag modifier is NV only.
 _SMEM_MODIFIERS_RDNA4 = [
-    EncodingModifier('nv'),
+    EncodingModifier("nv"),
 ]
 
 _VBUFFER_MODIFIERS_RDNA4 = [
-    EncodingModifier('offen'),
-    EncodingModifier('idxen'),
-    EncodingModifier('ioffset', is_offset=True),
-    EncodingModifier('nv'),
+    EncodingModifier("offen"),
+    EncodingModifier("idxen"),
+    EncodingModifier("ioffset", is_offset=True),
+    EncodingModifier("nv"),
 ]
 
 _VFLAT_MODIFIERS_RDNA4 = [
-    EncodingModifier('nv'),
+    EncodingModifier("nv"),
 ]
 
 
@@ -513,22 +517,21 @@ class _AmdgpuProfileBase(IsaProfile):
         * The encoding name contains ``LITERAL`` and the encoding is
           wider than its parent (indicating the extra DWORD).
         """
-        if any('has_lit' in name.lower() for name, _ in enc_conds):
+        if any("has_lit" in name.lower() for name, _ in enc_conds):
             return True
-        if 'LITERAL' in enc_name.upper() and bit_cnt > parent_bit_cnt:
+        if "LITERAL" in enc_name.upper() and bit_cnt > parent_bit_cnt:
             return True
         return False
 
     def has_src_modifiers(self, enc_name: str) -> bool:
         """VOP3 (excluding VOP3P) has source modifiers."""
         upper = enc_name.upper()
-        return 'VOP3' in upper and 'VOP3P' not in upper
+        return "VOP3" in upper and "VOP3P" not in upper
 
     def has_abs_modifier(self, enc_name: str) -> bool:
         """VOP3 has abs, but VOP3_SDST_ENC does not."""
         upper = enc_name.upper()
-        return ('VOP3' in upper and 'VOP3P' not in upper
-                and 'SDST_ENC' not in upper)
+        return "VOP3" in upper and "VOP3P" not in upper and "SDST_ENC" not in upper
 
     def mnemonic_rule(self, enc_name: str) -> MnemonicRule:
         """Default AMDGPU mnemonic rules.
@@ -539,40 +542,42 @@ class _AmdgpuProfileBase(IsaProfile):
         * All others: no transformation.
         """
         upper = enc_name.upper()
-        if upper in ('ENC_VOP1', 'ENC_VOP2', 'ENC_VOPC'):
+        if upper in ("ENC_VOP1", "ENC_VOP2", "ENC_VOPC"):
             return _VOP_E32_RULE
-        if upper == 'ENC_FLAT':
+        if upper == "ENC_FLAT":
             return MnemonicRule(use_flat_mnemonic=True)
         return MnemonicRule()
 
     def is_alt_encoding(self, enc_name: str) -> bool:
-        parts = enc_name.split('_')
-        if parts[0] != 'ENC':
+        parts = enc_name.split("_")
+        if parts[0] != "ENC":
             return True
         return (
-            len(parts) == 3
-            and parts[1] == 'FLAT'
-            and parts[2] in self._FLAT_SEGMENTS
+            len(parts) == 3 and parts[1] == "FLAT" and parts[2] in self._FLAT_SEGMENTS
         )
 
     def derive_parent_enc_name(self, enc_name: str) -> str:
-        parts = enc_name.split('_')
-        if (parts[0] == 'ENC' and len(parts) >= 3
-                and parts[1] == 'FLAT' and parts[2] in self._FLAT_SEGMENTS):
-            return 'ENC_FLAT'
-        return f'ENC_{parts[0]}'
+        parts = enc_name.split("_")
+        if (
+            parts[0] == "ENC"
+            and len(parts) >= 3
+            and parts[1] == "FLAT"
+            and parts[2] in self._FLAT_SEGMENTS
+        ):
+            return "ENC_FLAT"
+        return f"ENC_{parts[0]}"
 
     def skip_inst_encoding(self, enc_name: str, enc_cond: str) -> bool:
-        if enc_cond != 'default':
+        if enc_cond != "default":
             return True
         if self._SKIP_DPP_SDWA:
-            if '_VOP_DPP' in enc_name or '_VOP_SDWA' in enc_name:
+            if "_VOP_DPP" in enc_name or "_VOP_SDWA" in enc_name:
                 return True
-        parts = enc_name.split('_')
+        parts = enc_name.split("_")
         return (
-            parts[0] == 'ENC'
+            parts[0] == "ENC"
             and len(parts) == 3
-            and parts[1] == 'FLAT'
+            and parts[1] == "FLAT"
             and parts[2] in self._FLAT_SEGMENTS
         )
 
@@ -582,13 +587,13 @@ class _AmdgpuProfileBase(IsaProfile):
         Returns modifier field lists for SMEM, MUBUF, MTBUF, and FLAT.
         """
         upper = enc_name.upper()
-        if upper == 'ENC_SMEM':
+        if upper == "ENC_SMEM":
             return _SMEM_MODIFIERS
-        if upper == 'ENC_MUBUF':
+        if upper == "ENC_MUBUF":
             return _MUBUF_MODIFIERS
-        if upper == 'ENC_MTBUF':
+        if upper == "ENC_MTBUF":
             return _MTBUF_MODIFIERS
-        if upper == 'ENC_FLAT':
+        if upper == "ENC_FLAT":
             return _FLAT_MODIFIERS
         return []
 
@@ -634,7 +639,7 @@ class _AmdgpuProfileBase(IsaProfile):
         'gfx12' — S_WAITCNT removed; replaced by split S_WAIT_* instructions.
                    ISAs: RDNA4.
         """
-        return 'gfx9'
+        return "gfx9"
 
     @property
     def has_mfma(self) -> bool:
@@ -649,7 +654,7 @@ class _AmdgpuProfileBase(IsaProfile):
     @property
     def flat_scratch_mechanism(self) -> str:
         """How scratch base is located: 'hwreg' (CDNA3/4) or 'sgpr_pair'."""
-        return 'sgpr_pair'
+        return "sgpr_pair"
 
     @property
     def has_vopd(self) -> bool:
@@ -672,7 +677,7 @@ class _AmdgpuProfileBase(IsaProfile):
 
         Default (CDNA3/4): ``('sc0', 'sc1', 'nt')``.
         """
-        return ('sc0', 'sc1', 'nt')
+        return ("sc0", "sc1", "nt")
 
     @property
     def vop3p_opsel_fields(self) -> tuple[str, str]:
@@ -681,7 +686,7 @@ class _AmdgpuProfileBase(IsaProfile):
         Default: ``('op_sel', 'op_sel_hi')``.
         RDNA4 renames these to ``('opsel', 'opsel_hi')`` (no underscores).
         """
-        return ('op_sel', 'op_sel_hi')
+        return ("op_sel", "op_sel_hi")
 
     @property
     def smem_direct_offset_field(self) -> str | None:
@@ -706,7 +711,7 @@ class _AmdgpuProfileBase(IsaProfile):
         CDNA3/4 and older flat: ``'data'``.
         RDNA4 vflat/vglobal/vscratch: ``'vsrc'``.
         """
-        return 'data'
+        return "data"
 
 
 class CdnaProfile(_AmdgpuProfileBase):
@@ -748,24 +753,24 @@ class CdnaProfile(_AmdgpuProfileBase):
       struct already spans the full instruction width.
     """
 
-    _FLAT_SEGMENTS = frozenset({'GLBL', 'SCRATCH'})
+    _FLAT_SEGMENTS = frozenset({"GLBL", "SCRATCH"})
 
     # XML bug (P1): CDNA3/4 ENC_FLAT lists field 'SVE' at bit 13 but the
     # ISA PDF (CDNA3 Table 100, CDNA4 Table 101) names the field 'LDS'.
     # The LDS field controls whether FLAT accesses local data store vs. VGPR.
-    _FLAT_FIELD_RENAMES: dict[str, str] = {'sve': 'lds'}
+    _FLAT_FIELD_RENAMES: dict[str, str] = {"sve": "lds"}
 
     # XML bug (P2): CDNA4 ENC_VOP3P lists bit 14 as 'PAD' but the ISA PDF
     # names it 'OP_SEL_HI_2' (the third bit of op_sel_hi for src2 hi/lo
     # half selection in packed FP16/BF16 instructions). CDNA3's XML already
     # uses the correct name; the rename is a no-op there.
-    _VOP3P_FIELD_RENAMES: dict[str, str] = {'pad_14': 'op_sel_hi_2'}
+    _VOP3P_FIELD_RENAMES: dict[str, str] = {"pad_14": "op_sel_hi_2"}
 
     def field_renames(self, enc_name: str) -> dict[str, str]:
         upper = enc_name.upper()
-        if upper == 'ENC_FLAT':
+        if upper == "ENC_FLAT":
             return self._FLAT_FIELD_RENAMES
-        if upper == 'ENC_VOP3P':
+        if upper == "ENC_VOP3P":
             return self._VOP3P_FIELD_RENAMES
         return {}
 
@@ -775,7 +780,7 @@ class CdnaProfile(_AmdgpuProfileBase):
 
     @property
     def supported_versions(self) -> list[str]:
-        return ['1.0.0', '1.1.0', '1.1.1']
+        return ["1.0.0", "1.1.0", "1.1.1"]
 
     @property
     def max_enc_bits(self) -> int:
@@ -787,7 +792,7 @@ class CdnaProfile(_AmdgpuProfileBase):
 
     @property
     def skip_encodings(self) -> frozenset[str]:
-        return frozenset({'ENC_VOP3PX2'})
+        return frozenset({"ENC_VOP3PX2"})
 
     @property
     def inst_size_overrides(self) -> dict[str, int]:
@@ -795,8 +800,8 @@ class CdnaProfile(_AmdgpuProfileBase):
         # the 64-bit VOP3P_MFMA encoding. Override their size so the PC
         # advances correctly past the 128-bit instruction.
         return {
-            'V_MFMA_F32_16X16X128_F8F6F4': 16,
-            'V_MFMA_F32_32X32X64_F8F6F4': 16,
+            "V_MFMA_F32_16X16X128_F8F6F4": 16,
+            "V_MFMA_F32_32X32X64_F8F6F4": 16,
         }
 
     # ISA dimension properties for CDNA3/4 (the two ISAs this profile covers).
@@ -820,7 +825,7 @@ class CdnaProfile(_AmdgpuProfileBase):
 
     @property
     def flat_scratch_mechanism(self) -> str:
-        return 'hwreg'  # CDNA3/4 use HW register for scratch base
+        return "hwreg"  # CDNA3/4 use HW register for scratch base
 
     @property
     def coherency_model(self) -> MemoryCoherencyModel:
@@ -851,7 +856,7 @@ class Cdna1Profile(CdnaProfile):
 
     @property
     def flat_scratch_mechanism(self) -> str:
-        return 'sgpr_pair'
+        return "sgpr_pair"
 
     @property
     def coherency_model(self) -> MemoryCoherencyModel:
@@ -859,17 +864,17 @@ class Cdna1Profile(CdnaProfile):
 
     @property
     def coherency_field_names(self) -> tuple[str, str, str | None]:
-        return ('glc', 'slc', None)
+        return ("glc", "slc", None)
 
     def encoding_modifiers(self, enc_name: str) -> list[EncodingModifier]:
         upper = enc_name.upper()
-        if upper == 'ENC_SMEM':
+        if upper == "ENC_SMEM":
             return _SMEM_MODIFIERS  # soffset_en/imm/glc/nv present in CDNA1
-        if upper == 'ENC_MUBUF':
+        if upper == "ENC_MUBUF":
             return _MUBUF_MODIFIERS_GLC
-        if upper == 'ENC_MTBUF':
+        if upper == "ENC_MTBUF":
             return _MTBUF_MODIFIERS_GLC
-        if upper == 'ENC_FLAT':
+        if upper == "ENC_FLAT":
             return _FLAT_MODIFIERS_GLC
         return []
 
@@ -894,7 +899,7 @@ class Cdna2Profile(CdnaProfile):
 
     @property
     def flat_scratch_mechanism(self) -> str:
-        return 'sgpr_pair'
+        return "sgpr_pair"
 
     @property
     def coherency_model(self) -> MemoryCoherencyModel:
@@ -902,17 +907,17 @@ class Cdna2Profile(CdnaProfile):
 
     @property
     def coherency_field_names(self) -> tuple[str, str, str | None]:
-        return ('glc', 'slc', None)
+        return ("glc", "slc", None)
 
     def encoding_modifiers(self, enc_name: str) -> list[EncodingModifier]:
         upper = enc_name.upper()
-        if upper == 'ENC_SMEM':
+        if upper == "ENC_SMEM":
             return _SMEM_MODIFIERS  # soffset_en/imm/glc/nv present in CDNA2
-        if upper == 'ENC_MUBUF':
+        if upper == "ENC_MUBUF":
             return _MUBUF_MODIFIERS_GLC
-        if upper == 'ENC_MTBUF':
+        if upper == "ENC_MTBUF":
             return _MTBUF_MODIFIERS_GLC
-        if upper == 'ENC_FLAT':
+        if upper == "ENC_FLAT":
             return _FLAT_MODIFIERS_GLC
         return []
 
@@ -942,17 +947,17 @@ class Rdna1Profile(_AmdgpuProfileBase):
       padding fields for gaps in the MicrocodeFormat bitfield layout.
     """
 
-    _FLAT_SEGMENTS = frozenset({'GLBL', 'SCRATCH'})
+    _FLAT_SEGMENTS = frozenset({"GLBL", "SCRATCH"})
     _SKIP_DPP_SDWA = True
 
     @property
     def waitcnt_lgkmcnt_mask(self) -> str:
         # RDNA1/2 uses a 6-bit lgkmcnt field at bits [13:8].
-        return '0x3F'
+        return "0x3F"
 
     @property
     def supported_versions(self) -> list[str]:
-        return ['1.0.0']
+        return ["1.0.0"]
 
     @property
     def max_enc_bits(self) -> int:
@@ -972,7 +977,7 @@ class Rdna1Profile(_AmdgpuProfileBase):
 
     @property
     def waitcnt_family(self) -> str:
-        return 'gfx10'
+        return "gfx10"
 
     @property
     def coherency_model(self) -> MemoryCoherencyModel:
@@ -980,21 +985,21 @@ class Rdna1Profile(_AmdgpuProfileBase):
 
     @property
     def coherency_field_names(self) -> tuple[str, str, str | None]:
-        return ('glc', 'slc', None)
+        return ("glc", "slc", None)
 
     @property
     def smem_direct_offset_field(self) -> str | None:
-        return 'offset'
+        return "offset"
 
     def encoding_modifiers(self, enc_name: str) -> list[EncodingModifier]:
         upper = enc_name.upper()
-        if upper == 'ENC_SMEM':
+        if upper == "ENC_SMEM":
             return _SMEM_MODIFIERS_GLC_DLC
-        if upper == 'ENC_MUBUF':
+        if upper == "ENC_MUBUF":
             return _MUBUF_MODIFIERS_GLC_DLC
-        if upper == 'ENC_MTBUF':
+        if upper == "ENC_MTBUF":
             return _MTBUF_MODIFIERS_GLC_DLC
-        if upper == 'ENC_FLAT':
+        if upper == "ENC_FLAT":
             return _FLAT_MODIFIERS_GLC_DLC
         return []
 
@@ -1034,15 +1039,15 @@ class Rdna3Profile(_AmdgpuProfileBase):
     - Reserved field omissions (version 1.0.0): synthesized by the parser.
     """
 
-    _FLAT_SEGMENTS = frozenset({'GLOBAL', 'SCRATCH'})
+    _FLAT_SEGMENTS = frozenset({"GLOBAL", "SCRATCH"})
     _SKIP_DPP_SDWA = True
-    _SKIP = frozenset({'VOPDXY', 'VOPDXY_INST_LITERAL'})
+    _SKIP = frozenset({"VOPDXY", "VOPDXY_INST_LITERAL"})
 
     @property
     def waitcnt_lgkmcnt_mask(self) -> str:
         # GFX11 layout differs from GFX10; this mask applies to the
         # lgkmcnt field at bits [9:4] in the new S_WAITCNT encoding.
-        return '0x3F'
+        return "0x3F"
 
     @property
     def waitcnt_decode(self) -> str:
@@ -1053,14 +1058,14 @@ class Rdna3Profile(_AmdgpuProfileBase):
         vmcnt[5:0]   = bits [15:10]
         """
         return (
-            'uint32_t expcnt = encoding_value_ & 0x7;\n'
-            'uint32_t lgkmcnt = (encoding_value_ >> 4) & 0x3F;\n'
-            'uint32_t vmcnt = (encoding_value_ >> 10) & 0x3F;\n'
+            "uint32_t expcnt = encoding_value_ & 0x7;\n"
+            "uint32_t lgkmcnt = (encoding_value_ >> 4) & 0x3F;\n"
+            "uint32_t vmcnt = (encoding_value_ >> 10) & 0x3F;\n"
         )
 
     @property
     def supported_versions(self) -> list[str]:
-        return ['1.0.0', '1.1.0']
+        return ["1.0.0", "1.1.0"]
 
     @property
     def max_enc_bits(self) -> int:
@@ -1084,7 +1089,7 @@ class Rdna3Profile(_AmdgpuProfileBase):
 
     @property
     def waitcnt_family(self) -> str:
-        return 'gfx11'
+        return "gfx11"
 
     @property
     def has_wmma(self) -> bool:
@@ -1101,21 +1106,21 @@ class Rdna3Profile(_AmdgpuProfileBase):
     @property
     def coherency_field_names(self) -> tuple[str, str, str | None]:
         # RDNA3/3.5 MubufMachineInst uses glc+slc (not sc0+sc1).
-        return ('glc', 'slc', None)
+        return ("glc", "slc", None)
 
     @property
     def smem_direct_offset_field(self) -> str | None:
-        return 'offset'
+        return "offset"
 
     def encoding_modifiers(self, enc_name: str) -> list[EncodingModifier]:
         upper = enc_name.upper()
-        if upper == 'ENC_SMEM':
+        if upper == "ENC_SMEM":
             return _SMEM_MODIFIERS_GLC_DLC
-        if upper == 'ENC_MUBUF':
+        if upper == "ENC_MUBUF":
             return _MUBUF_MODIFIERS_GLC_DLC
-        if upper == 'ENC_MTBUF':
+        if upper == "ENC_MTBUF":
             return _MTBUF_MODIFIERS_GLC_DLC
-        if upper == 'ENC_FLAT':
+        if upper == "ENC_FLAT":
             return _FLAT_MODIFIERS_GLC_DLC
         return []
 
@@ -1154,17 +1159,17 @@ class Rdna4Profile(_AmdgpuProfileBase):
     """
 
     _SKIP_DPP_SDWA = True
-    _SKIP = frozenset({'VOPDXY', 'VOPDXY_INST_LITERAL'})
+    _SKIP = frozenset({"VOPDXY", "VOPDXY_INST_LITERAL"})
 
     @property
     def waitcnt_lgkmcnt_mask(self) -> str:
         # RDNA4 removed S_WAITCNT; this property is unused but kept for
         # completeness. Returns 0x3F as a safe no-op default.
-        return '0x3F'
+        return "0x3F"
 
     @property
     def supported_versions(self) -> list[str]:
-        return ['1.1.0']
+        return ["1.1.0"]
 
     @property
     def max_enc_bits(self) -> int:
@@ -1188,7 +1193,7 @@ class Rdna4Profile(_AmdgpuProfileBase):
 
     @property
     def waitcnt_family(self) -> str:
-        return 'gfx12'
+        return "gfx12"
 
     @property
     def has_wmma(self) -> bool:
@@ -1210,7 +1215,7 @@ class Rdna4Profile(_AmdgpuProfileBase):
         ``ENC_VFLAT``, ``ENC_VGLOBAL``, ``ENC_VSCRATCH``).
         """
         upper = enc_name.upper()
-        if upper in ('ENC_VOP1', 'ENC_VOP2', 'ENC_VOPC'):
+        if upper in ("ENC_VOP1", "ENC_VOP2", "ENC_VOPC"):
             return _VOP_E32_RULE
         return MnemonicRule()
 
@@ -1218,19 +1223,19 @@ class Rdna4Profile(_AmdgpuProfileBase):
     def coherency_field_names(self) -> tuple[str, str, str | None]:
         # RDNA4 VbufferMachineInst/VflatMachineInst use nv (no sc0/sc1).
         # mtype_from_bits is called with (nv, 0) as a placeholder.
-        return ('nv', 'nv', None)
+        return ("nv", "nv", None)
 
     @property
     def vop3p_opsel_fields(self) -> tuple[str, str]:
-        return ('opsel', 'opsel_hi')
+        return ("opsel", "opsel_hi")
 
     @property
     def smem_direct_offset_field(self) -> str | None:
-        return 'ioffset'
+        return "ioffset"
 
     @property
     def flat_store_src_field(self) -> str:
-        return 'vsrc'
+        return "vsrc"
 
     def encoding_modifiers(self, enc_name: str) -> list[EncodingModifier]:
         """RDNA4 encoding modifiers.
@@ -1238,10 +1243,10 @@ class Rdna4Profile(_AmdgpuProfileBase):
         Uses GFX12 SCOPE+TH model: SMEM/VBUFFER/VFLAT show only NV.
         """
         upper = enc_name.upper()
-        if upper == 'ENC_SMEM':
+        if upper == "ENC_SMEM":
             return _SMEM_MODIFIERS_RDNA4
-        if upper in ('ENC_VBUFFER', 'ENC_MUBUF'):
+        if upper in ("ENC_VBUFFER", "ENC_MUBUF"):
             return _VBUFFER_MODIFIERS_RDNA4
-        if upper in ('ENC_VFLAT', 'ENC_VGLOBAL', 'ENC_VSCRATCH'):
+        if upper in ("ENC_VFLAT", "ENC_VGLOBAL", "ENC_VSCRATCH"):
             return _VFLAT_MODIFIERS_RDNA4
         return []
