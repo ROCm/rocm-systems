@@ -27,6 +27,63 @@ import sys
 
 import unittest
 
+
+def print_amdsmi_path_help(script=None, loaded_from=None, expected_path=None, file=sys.stdout):
+    """Print amdsmi path help and remediation steps.
+
+    Without error context (script/loaded_from/expected_path), prints the env-var
+    table followed by the remediation list; used for -h output.
+    With error context, prints an ERROR header and appends a 'Refer to -h' footer;
+    used when the wrong amdsmi package was loaded at import time.
+    """
+    _script = script or os.path.basename(sys.argv[0]) or "<script>"
+    if loaded_from is not None and expected_path is not None:
+        print(
+            f"ERROR: amdsmi loaded from '{loaded_from}' instead of AMDSMI_PATH='{expected_path}'.",
+            file=file,
+        )
+    else:
+        print("\nAdditional options:", file=file)
+        print("  -l, --list           List all available tests and exit", file=file)
+        print(file=file)
+        print("Environment variables:", file=file)
+        print(
+            "  AMDSMI_PATH   Path to amd_smi share dir (overrides ROCM_HOME/ROCM_PATH)", file=file
+        )
+        print("  ROCM_HOME     ROCm install root, used when AMDSMI_PATH is unset", file=file)
+        print("  ROCM_PATH     Fallback ROCm install root (default: /opt/rocm)", file=file)
+        print(file=file)
+    print(
+        "A system-installed amdsmi package is shadowing the test target.\n"
+        "Fix with one of:\n"
+        "\t 1. Run the tests from the installed amd-smi-lib-tests package location (RECOMMENDED):\n"
+        f"\t\t `sudo $ROCM_PATH/share/amd_smi/tests/python_unittest/{_script} -v`\n"
+        f"\t\t e.g. `sudo /opt/rocm/share/amd_smi/tests/python_unittest/{_script} -v`\n\n"
+        "\t 2. Set AMDSMI_PATH to point at the correct build:\n"
+        "\t\t `export AMDSMI_PATH=$ROCM_PATH/share/amd_smi`\n\n"
+        "\t 3. Reinstall the correct amd-smi-lib package (removes the stale Python package too):\n"
+        "\t\t `sudo apt remove amd-smi-lib && sudo apt install amd-smi-lib`\n"
+        "\t\t or, if amdsmi was installed directly via pip:\n"
+        "\t\t `sudo pip uninstall amdsmi`",
+        file=file,
+    )
+    if loaded_from is not None:
+        print(f"\nRefer to `{_script} -h` for more details.", file=file)
+    else:
+        _full = "sudo " + (sys.argv[0] or _script)
+        _cmds = [
+            (_full + " -l", "list all available tests"),
+            (_full + " -v", "run all tests, verbose with print statements (RECOMMENDED)"),
+            (_full + ' -k "test_name" -v', "run only tests matching substring"),
+            (_full + " -q", "run all tests, quiet with no print statements"),
+        ]
+        _w = max(len(cmd) for cmd, _ in _cmds) + 2
+        print(file=file)
+        print("Examples:", file=file)
+        for cmd, desc in _cmds:
+            print(f"  {cmd:<{_w}} - {desc}", file=file)
+
+
 _rocm_root = os.environ.get("AMDSMI_PATH") or os.path.join(
     os.environ.get("ROCM_HOME") or os.environ.get("ROCM_PATH") or "/opt/rocm", "share/amd_smi"
 )
@@ -52,19 +109,8 @@ except ImportError as e:
 _amdsmi_file = getattr(amdsmi, "__file__", "")
 if not os.path.abspath(_amdsmi_file).startswith(os.path.abspath(amdsmi_path)):
     _script = os.path.basename(sys.argv[0]) or "unit_tests.py"
-    print(
-        f"ERROR: amdsmi loaded from '{_amdsmi_file}' instead of AMDSMI_PATH='{amdsmi_path}'.\n"
-        "A system-installed amdsmi package is shadowing the test target.\n"
-        "Fix with one of:\n"
-        "\t 1. Run the tests from the installed amd-lib-tests package location (recommended):\n"
-        f"\t\t `sudo $ROCM_PATH/share/amd_smi/tests/python_unittest/{_script} -v`\n"
-        f"\t\t e.g. `sudo /opt/rocm/share/amd_smi/tests/python_unittest/{_script} -v`\n\n"
-        "\t 2. Set AMDSMI_PATH to point at the correct build:\n"
-        "\t\t `export AMDSMI_PATH=$ROCM_PATH/share/amd_smi`\n\n"
-        "\t 3. Remove the stale system package:\n"
-        "\t\t `sudo pip uninstall amdsmi`\n\n"
-        f"Refer to `{_script} -h` for more details.",
-        file=sys.stderr,
+    print_amdsmi_path_help(
+        script=_script, loaded_from=_amdsmi_file, expected_path=amdsmi_path, file=sys.stderr
     )
     sys.exit(1)
 
@@ -77,10 +123,10 @@ VERBOSITY_NORMAL = 1  # default (dot-per-test)
 VERBOSITY_VERBOSE = 2  # -v / --verbose (per-test result lines)
 
 
-def print_test_ids(suite):
+def _print_test_ids(suite):
     for test in suite:
         if isinstance(test, unittest.TestSuite):
-            print_test_ids(test)
+            _print_test_ids(test)
         else:
             test = str(test).split()[0]
             print(f"\t{test}", file=sys.stderr)
@@ -88,20 +134,54 @@ def print_test_ids(suite):
 
 
 def print_tests(module_name):
+    """Print all test IDs in the given module to stderr and return.
+
+    Loads every test discovered by unittest.TestLoader from the named module
+    (pass __name__ from the script's __main__ block) and prints each ID,
+    one per line, indented by a tab.  Output goes to stderr so it can be
+    captured independently of normal stdout test output.
+    """
     loader = unittest.TestLoader()
     suite = loader.loadTestsFromModule(sys.modules[module_name])
-    print("=" * 70, file=sys.stderr)
     print("Available tests:", file=sys.stderr)
-    print_test_ids(suite)
+    _print_test_ids(suite)
     return
 
 
 def print_legend():
-    # Provide Legend for test results, otherwise it is not clear what the output means
+    """Print the dot-character legend for unittest output to stderr.
+
+    Call this before running tests in non-verbose mode so users know what
+    the single-character result indicators (., s, F, E) mean.
+    """
     print("=" * 70, file=sys.stderr)
     print("Legend: . = pass, s = skipped, F = fail, E = error", file=sys.stderr)
     print("=" * 70, file=sys.stderr)
     return
+
+
+def print_unittest_help():
+    """Print unittest's -h output with its built-in Examples epilog stripped.
+
+    unittest (via argparse) appends its own Examples block; we capture stdout,
+    remove everything from the last 'Examples:' onward, and reprint — leaving
+    our print_amdsmi_path_help() as the sole Examples section at the bottom.
+    """
+    import contextlib
+    import io
+
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            unittest.main()
+    except SystemExit:
+        pass
+    output = buf.getvalue()
+    examples_idx = output.rfind("\nExamples:")
+    if examples_idx != -1:
+        output = output[:examples_idx]
+    sys.stdout.write(output)
+    sys.stdout.flush()
 
 
 def make_runner_verbosity(verbose):

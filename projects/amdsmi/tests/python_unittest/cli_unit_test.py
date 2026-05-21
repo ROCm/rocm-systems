@@ -1402,23 +1402,39 @@ class TestAmdSmiCli(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    verbose = 1
+    verbose = common.VERBOSITY_NORMAL
     if "-q" in sys.argv or "--quiet" in sys.argv:
-        verbose = 0
+        verbose = common.VERBOSITY_QUIET
     elif "-v" in sys.argv or "--verbose" in sys.argv:
-        verbose = 2
+        verbose = common.VERBOSITY_VERBOSE
 
-    if verbose:
-        print("AMD SMI CLI Tests")
+    if "-h" in sys.argv or "--help" in sys.argv:
+        common.print_unittest_help()
+        common.print_amdsmi_path_help()
+        sys.exit(0)
 
-    # Detect if ran without sudo or root privileges
+    if "-l" in sys.argv or "--list" in sys.argv:
+        common.print_tests(__name__)
+        sys.exit(0)
+
     if os.geteuid() != 0:
         print(
-            "Warning: Some tests may require elevated privileges (sudo/root) to run completely.\n"
+            "Warning: Some tests may require elevated privileges (sudo/root) to run completely.\n",
+            file=sys.stderr,
         )
-        print("Please relaunch with elevated privileges.\n")
+        print("Please relaunch with elevated privileges.\n", file=sys.stderr)
         sys.exit(1)
 
-    runner = unittest.TextTestRunner(verbosity=verbose)
+    # Only show the dot-character legend when not in verbose mode; in verbose
+    # mode each test prints its own result line so the dot legend is irrelevant.
+    if verbose < common.VERBOSITY_VERBOSE:
+        common.print_legend()
+
+    if verbose > common.VERBOSITY_QUIET:
+        print("AMD SMI CLI Tests")
+
+    runner = unittest.TextTestRunner(
+        stream=sys.stderr, verbosity=common.make_runner_verbosity(verbose)
+    )
     unittest.main(testRunner=runner)
     sys.exit(0)

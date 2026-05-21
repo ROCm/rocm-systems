@@ -1552,15 +1552,15 @@ if __name__ == "__main__":
     elif any(a in ("-v", "-vv", "--verbose") for a in sys.argv):
         verbose = common.VERBOSITY_VERBOSE
 
-    # If no -k or --keyword argument is given, print all available tests.
-    # Do this before the -h check so the test list appears above unittest's help output.
-    if not ("-k" in sys.argv or "--keyword" in sys.argv):
-        if verbose > common.VERBOSITY_QUIET:
-            common.print_tests(__name__)
-
     # Skip legend/title/"Running" preamble when the user just wants help text.
     if "-h" in sys.argv or "--help" in sys.argv:
-        unittest.main()
+        common.print_unittest_help()
+        common.print_amdsmi_path_help()
+        sys.exit(0)
+
+    if "-l" in sys.argv or "--list" in sys.argv:
+        common.print_tests(__name__)
+        sys.exit(0)
 
     # Only show the dot-character legend when not in verbose mode; in verbose
     # mode each test prints its own result line so the dot legend is irrelevant.
