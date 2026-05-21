@@ -132,6 +132,7 @@ struct config : output_config
     bool   rccl_api_trace                = get_env("ROCPROF_RCCL_API_TRACE", false);
     bool   rocdecode_api_trace           = get_env("ROCPROF_ROCDECODE_API_TRACE", false);
     bool   rocjpeg_api_trace             = get_env("ROCPROF_ROCJPEG_API_TRACE", false);
+    bool   hipfile_api_trace             = get_env("ROCPROF_HIPFILE_API_TRACE", false);
     bool   list_metrics                  = get_env("ROCPROF_LIST_METRICS", false);
     bool   list_metrics_output_file      = get_env("ROCPROF_OUTPUT_LIST_METRICS_FILE", false);
     bool   advanced_thread_trace         = get_env("ROCPROF_ADVANCED_THREAD_TRACE", false);
@@ -213,6 +214,7 @@ config::get_attach_invariants() const
                            rccl_api_trace,
                            rocdecode_api_trace,
                            rocjpeg_api_trace,
+                           hipfile_api_trace,
                            advanced_thread_trace,
                            att_serialize_all,
                            att_param_shader_engine_mask,
@@ -281,6 +283,7 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(rccl_api_trace);
     CFG_SERIALIZE_MEMBER(rocdecode_api_trace);
     CFG_SERIALIZE_MEMBER(rocjpeg_api_trace);
+    CFG_SERIALIZE_MEMBER(hipfile_api_trace);
 
     CFG_SERIALIZE_MEMBER(mpi_rank);
     CFG_SERIALIZE_MEMBER(mpi_size);
