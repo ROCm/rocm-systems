@@ -117,4 +117,59 @@ format_duration(std::chrono::nanoseconds dur)
     return fmt::format("{:.2f}s", seconds);
 }
 
+std::string
+escape_for_shell_single_quotes(std::string_view s)
+{
+    std::string out;
+    out.reserve(s.size() + 2);
+    out.push_back('\'');
+    for(char c : s)
+    {
+        if(c == '\'')
+            out += "'\\''";
+        else
+            out.push_back(c);
+    }
+    out.push_back('\'');
+    return out;
+}
+
+std::string
+strip_terminal_control_chars(std::string_view s)
+{
+    std::string out;
+    out.reserve(s.size());
+    for(std::size_t i = 0; i < s.size();)
+    {
+        const auto byte = static_cast<unsigned char>(s[i]);
+        // CSI sequence: ESC [ ... <final byte in 0x40..0x7E>
+        if(byte == 0x1B && i + 1 < s.size() && s[i + 1] == '[')
+        {
+            std::size_t j = i + 2;
+            while(j < s.size())
+            {
+                const auto fb = static_cast<unsigned char>(s[j]);
+                if(fb >= 0x40 && fb <= 0x7E)
+                {
+                    ++j;
+                    break;
+                }
+                ++j;
+            }
+            i = j;
+            continue;
+        }
+        // Drop other C0 controls + DEL; keep tab (0x09) and newline (0x0A)
+        // so wrap_to_width still sees structure.
+        if((byte < 0x20 && byte != 0x09 && byte != 0x0A) || byte == 0x7F)
+        {
+            ++i;
+            continue;
+        }
+        out.push_back(static_cast<char>(byte));
+        ++i;
+    }
+    return out;
+}
+
 }  // namespace rocprofsys::output

@@ -27,8 +27,8 @@ namespace rocprofsys::output
 
 namespace
 {
-const char*
-role_token(role_hint r)
+constexpr const char*
+role_token(role_hint r) noexcept
 {
     switch(r)
     {
@@ -67,7 +67,8 @@ emit_diagnostics(const build_diagnostics& diag)
 std::string
 basename_of(const std::string& path)
 {
-    return std::filesystem::path{ path }.filename().string();
+    return strip_terminal_control_chars(
+        std::filesystem::path{ path }.filename().string());
 }
 
 std::string
@@ -85,7 +86,8 @@ node_label(const process_node& node)
     }
     else
     {
-        label = fmt::format("[{}] {}", node.meta.pid, node.meta.command);
+        label = fmt::format("[{}] {}", node.meta.pid,
+                            strip_terminal_control_chars(node.meta.command));
     }
     if(node.role)
     {

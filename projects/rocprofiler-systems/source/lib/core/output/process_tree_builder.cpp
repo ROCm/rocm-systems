@@ -155,10 +155,7 @@ build_tree(const std::vector<output_file>&      rows,
         std::unordered_map<pid_t, process_node> built;
         built.reserve(walk.order.size());
         for(pid_t pid : walk.order)
-        {
-            built.emplace(pid, std::move(nodes.at(pid)));
-            nodes.erase(pid);
-        }
+            built.insert(nodes.extract(pid));
 
         attach_children_bottom_up(walk, built, root_pid);
         return std::move(built.at(root_pid));

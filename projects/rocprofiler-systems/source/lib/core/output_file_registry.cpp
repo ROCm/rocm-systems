@@ -4,6 +4,7 @@
 #include "output_file_registry.hpp"
 
 #include "logger/debug.hpp"
+#include "output/text_layout.hpp"
 
 #include <spdlog/fmt/fmt.h>
 
@@ -34,15 +35,19 @@ output_file_registry::make_entry(std::string path, output_format format,
         case output_format::json:
             return { component_name.empty() ? "JSON output"
                                             : fmt::format("JSON ({})", component_name),
-                     path, fmt::format("jq . {}", path) };
+                     path,
+                     fmt::format("jq . {}", output::escape_for_shell_single_quotes(path)) };
         case output_format::text:
             return { component_name.empty() ? "Text profile"
                                             : fmt::format("Profile ({})", component_name),
-                     path, fmt::format("cat {}", path) };
+                     path,
+                     fmt::format("cat {}", output::escape_for_shell_single_quotes(path)) };
         case output_format::causal_json:
-            return { "Causal profile (JSON)", path, fmt::format("jq . {}", path) };
+            return { "Causal profile (JSON)", path,
+                     fmt::format("jq . {}", output::escape_for_shell_single_quotes(path)) };
         case output_format::causal_text:
-            return { "Causal profile (text)", path, fmt::format("cat {}", path) };
+            return { "Causal profile (text)", path,
+                     fmt::format("cat {}", output::escape_for_shell_single_quotes(path)) };
     }
     return { "Unknown", std::move(path), "" };
 }
@@ -69,6 +74,8 @@ try_file_size(const std::string& path)
 void
 output_file_registry::push_entry(output_file&& entry, std::optional<pid_t> pid)
 {
+    // stat() runs before the lock so filesystem latency never blocks
+    // concurrent register_file calls on the registry mutex.
     entry.pid        = pid.value_or(getpid());
     entry.size_bytes = try_file_size(entry.path);
 
