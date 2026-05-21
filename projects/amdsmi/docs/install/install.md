@@ -28,7 +28,7 @@ hardware support <rocm:release-supported-hw>` for more information.
 ## Requirements
 
 Before installing AMD SMI, make sure your system meets the following
-requirements depending on your needs.
+requirements.
 
 (install_amdgpu_driver)=
 ### Driver requirements
