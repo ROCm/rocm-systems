@@ -907,8 +907,8 @@ endfunction()
 
 # Stream Tests
 function(add_stream_tests)
-    # putmem_on_stream with test-specific variant
-    begin_test_group(CATEGORY "RMA;PUT;STREAM" TIER full BACKENDS "all" GPUS "all")
+    # putmem_on_stream with test-specific variant - standard tier for stream coverage
+    begin_test_group(CATEGORY "RMA;PUT;STREAM" TIER standard BACKENDS "all" GPUS "all")
         add_rocshmem_functional_test(
             NAME putmem_on_stream
             RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576
@@ -930,8 +930,13 @@ function(add_stream_tests)
         add_rocshmem_functional_test(NAME putmem_signal_on_stream RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576)
     end_test_group()
 
-    begin_test_group(CATEGORY "COLLECTIVE;STREAM" TIER full BACKENDS "all" GPUS "all")
+    # barrier_all_on_stream - standard tier for collective stream coverage
+    begin_test_group(CATEGORY "COLLECTIVE;STREAM" TIER standard BACKENDS "all" GPUS "all")
         add_rocshmem_functional_test(NAME barrier_all_on_stream RANKS 2 WORKGROUPS 1 THREADS 1)
+    end_test_group()
+
+    # Other collective stream tests - full tier
+    begin_test_group(CATEGORY "COLLECTIVE;STREAM" TIER full BACKENDS "all" GPUS "all")
         add_rocshmem_functional_test(NAME quiet_on_stream RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME sync_all_on_stream RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME alltoallmem_on_stream RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 1048576)
@@ -941,13 +946,18 @@ endfunction()
 
 # Other Tests
 function(add_other_tests)
-    begin_test_group(CATEGORY "OTHER" TIER full BACKENDS "all" GPUS "all")
-        add_rocshmem_functional_test(NAME library_info RANKS 2 WORKGROUPS 1 THREADS 1)
-        add_rocshmem_functional_test(NAME hipmodule_init RANKS 2 WORKGROUPS 1 THREADS 1)
+    # Device bitcode tests - quick tier for early validation
+    begin_test_group(CATEGORY "OTHER" TIER quick BACKENDS "all" GPUS "all")
         add_rocshmem_functional_test(NAME device_bitcode RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME device_bitcode RANKS 2 WORKGROUPS 32 THREADS 1024)
         add_rocshmem_functional_test(NAME device_bitcode RANKS 4 WORKGROUPS 16 THREADS 256)
         add_rocshmem_functional_test(NAME device_bitcode RANKS 8 WORKGROUPS 16 THREADS 128)
+    end_test_group()
+
+    # Other miscellaneous tests - full tier
+    begin_test_group(CATEGORY "OTHER" TIER full BACKENDS "all" GPUS "all")
+        add_rocshmem_functional_test(NAME library_info RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME hipmodule_init RANKS 2 WORKGROUPS 1 THREADS 1)
 
         add_rocshmem_functional_test(NAME pingpong RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME pingpong RANKS 2 WORKGROUPS 8 THREADS 1)
