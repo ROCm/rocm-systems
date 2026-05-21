@@ -28,7 +28,7 @@ GPU_SPEC_PATH = PROJECT_ROOT / "src" / "utils" / "mi_gpu_spec.yaml"
 
 # Make src/ importable so we can reuse the canonical counter definitions.
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
-from utils.specs import canonical_config_arch  # noqa: E402
+from utils.gpu_arch import canonical_config_arch  # noqa: E402
 from utils.utils_counter_defs import (  # noqa: E402
     counter_to_block,
     extract_counters,

@@ -19,6 +19,7 @@ from typing import Any, Optional, TypeVar
 
 import config
 from utils import amdsmi_interface
+from utils.gpu_arch import canonical_gpu_arch
 from utils.logger import (
     console_debug,
     console_error,
@@ -32,24 +33,6 @@ from utils.utils_common import format_table_ascii, get_version
 T = TypeVar("T")
 
 
-def canonical_gpu_arch(gpu_arch: Optional[str]) -> Optional[str]:
-    """Map LLVM GPU targets that share one SoC and analysis config tree."""
-    if gpu_arch is None:
-        return None
-    if gpu_arch == "gfx1152":
-        return "gfx1151"
-    return gpu_arch
-
-
-def canonical_config_arch(gpu_arch: Optional[str]) -> Optional[str]:
-    """Map GPU architectures to the shared analysis-config directory name."""
-    if gpu_arch is None:
-        return None
-    if gpu_arch.startswith("gfx115"):
-        return "gfx115x"
-    return canonical_gpu_arch(gpu_arch)
-
-
 VERSION_LOC: list[str] = [
     "version",
     "version-dev",
@@ -60,6 +43,30 @@ VERSION_LOC: list[str] = [
     "version-libs",
     "version-utils",
 ]
+
+
+def run(cmd: list[str]) -> Optional[str]:
+    """Run a command and return stdout, or None if it fails."""
+    try:
+        completed = subprocess.run(
+            cmd,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except (FileNotFoundError, OSError):
+        return None
+    if completed.returncode != 0:
+        return None
+    return completed.stdout
+
+
+def search(pattern: str, string: str) -> Optional[str]:
+    """Return the first multiline regex capture group, if present."""
+    match = re.search(pattern, string, re.MULTILINE)
+    if match is not None:
+        return match.group(1)
+    return None
 
 
 def detect_arch(rocminfo_lines: list[str]) -> Optional[tuple[str, int]]:
@@ -908,27 +915,6 @@ def get_rocm_ver() -> str:
     )
     console_error("Ensure you have valid ROCm installation.", exit=False)
     return ""
-
-
-def run(cmd: list[str], exit_on_error: bool = False) -> str:
-    try:
-        p = subprocess.run(cmd, capture_output=True)
-    except FileNotFoundError as e:
-        console_error(
-            f"Unable to parse specs. Can't find ROCm asset: {e.filename}\n"
-            'Try passing a path to an existing workload results in "analyze" mode.'
-        )
-
-    if exit_on_error and p.returncode != 0:  # type: ignore
-        console_error(f"Command {cmd} failed with non-zero exit code")
-    return p.stdout.decode("utf-8")  # type: ignore
-
-
-def search(pattern: str, string: str) -> Optional[str]:
-    m = re.search(pattern, string, re.MULTILINE)
-    if m is not None:
-        return m.group(1)
-    return None
 
 
 def total_sqc(archname: str, num_compute_units: str, num_shader_engines: str) -> int:

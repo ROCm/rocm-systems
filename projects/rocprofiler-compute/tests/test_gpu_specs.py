@@ -15,11 +15,13 @@ import pytest
 try:
     from src.rocprof_compute_soc.soc_base import OmniSoC_Base
     from src.utils.file_io import is_single_panel_config
-    from src.utils.specs import canonical_config_arch, generate_machine_specs
+    from src.utils.gpu_arch import canonical_config_arch
+    from src.utils.specs import generate_machine_specs
 except Exception:
     from rocprof_compute_soc.soc_base import OmniSoC_Base
     from utils.file_io import is_single_panel_config
-    from utils.specs import canonical_config_arch, generate_machine_specs
+    from utils.gpu_arch import canonical_config_arch
+    from utils.specs import generate_machine_specs
 
 # NOTE: Only testing gfx942 for now.
 GFX942_CHIP_IDS_TO_NUM_XCDS = {

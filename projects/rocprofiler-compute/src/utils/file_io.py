@@ -11,6 +11,7 @@ import yaml
 
 import config
 from utils import schema, utils_analysis
+from utils.gpu_arch import canonical_config_arch, canonical_gpu_arch
 from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import (
     console_debug,
@@ -19,7 +20,6 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.specs import canonical_config_arch
 from utils.utils_common import normalize_filter_to_str_list
 
 # TODO: use pandas chunksize or dask to read really large csv file
@@ -30,8 +30,6 @@ def load_sys_info(f: str) -> pd.DataFrame:
     """
     Load sys running info from csv file to a df.
     """
-    from utils.specs import canonical_gpu_arch
-
     df = pd.read_csv(f)
     if "gpu_arch" in df.columns and not df.empty:
         df["gpu_arch"] = df["gpu_arch"].map(

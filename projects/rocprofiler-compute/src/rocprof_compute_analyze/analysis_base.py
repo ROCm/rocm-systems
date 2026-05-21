@@ -16,6 +16,7 @@ import pandas as pd
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils import file_io, parser, schema
+from utils.gpu_arch import canonical_config_arch
 from utils.logger import (
     console_debug,
     console_error,
@@ -24,7 +25,6 @@ from utils.logger import (
     demarcate,
 )
 from utils.metrics.expression import build_metric_value_string
-from utils.specs import canonical_config_arch
 from utils.utils_analysis import (
     impute_counters_iteration_multiplex,
     is_workload_empty,

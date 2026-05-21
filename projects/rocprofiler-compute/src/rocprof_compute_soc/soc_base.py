@@ -17,6 +17,7 @@ from typing import Any, Optional
 import config
 from roofline.run_benchmark import run_roofline_benchmark
 from utils import amdsmi_interface
+from utils.gpu_arch import canonical_config_arch
 from utils.logger import (
     console_debug,
     console_error,
@@ -25,7 +26,7 @@ from utils.logger import (
     demarcate,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.specs import MachineSpecs, canonical_config_arch
+from utils.specs import MachineSpecs
 from utils.utils_common import (
     METRIC_ID_RE,
     add_counter_extra_config_input_yaml,
