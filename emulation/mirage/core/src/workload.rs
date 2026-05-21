@@ -1,0 +1,4 @@
+struct Workload {
+    profile : Profile,
+    
+}

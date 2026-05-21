@@ -6,4 +6,4 @@ edition = "2024"
 [dependencies]
 
 [workspace]
-members = ["dashboard","rocjitsu"]
+members = ["core","dashboard","rocjitsu", "rocjitsu_sys"]
