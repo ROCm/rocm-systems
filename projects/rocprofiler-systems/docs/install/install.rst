@@ -69,7 +69,7 @@ is already installed.
 Build requirements
 -----------------------------------
 
-* GCC compiler v7+
+* GCC compiler v10+
 
   * Older GCC compilers may be supported but are not tested
   * Clang compilers are generally supported for ROCm Systems Profiler but not Dyninst
