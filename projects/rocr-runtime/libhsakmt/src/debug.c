@@ -741,7 +741,7 @@ static HSAKMT_STATUS hsaKmtGetCoreDeviceInfoCtx(HsaKFDContext *ctx,
 	}
 
 	/* GPUVM aperture */
-	if (hsakmt_fmm_get_aperture_base_and_limit(ctx, FMM_GPUVM, gpu_id, &base, &limit) == HSAKMT_STATUS_SUCCESS) {
+	if (hsakmt_fmm_get_aperture_base_and_limit(ctx, FMM_GPUVM_DBG, gpu_id, &base, &limit) == HSAKMT_STATUS_SUCCESS) {
 		device_info->gpuvm_base = base;
 		device_info->gpuvm_limit = limit;
 	}

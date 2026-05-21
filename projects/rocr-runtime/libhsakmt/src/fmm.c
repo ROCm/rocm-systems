@@ -3229,6 +3229,35 @@ HSAKMT_STATUS hsakmt_fmm_get_aperture_base_and_limit(HsaKFDContext *ctx,
 		}
 		break;
 
+	case FMM_GPUVM_DBG:
+		if (aperture_is_valid(fmm_ctx->gpu_mem[slot].gpuvm_aperture.base,
+			fmm_ctx->gpu_mem[slot].gpuvm_aperture.limit)) {
+			*aperture_base = PORT_VPTR_TO_UINT64(fmm_ctx->gpu_mem[slot].gpuvm_aperture.base);
+			*aperture_limit = PORT_VPTR_TO_UINT64(fmm_ctx->gpu_mem[slot].gpuvm_aperture.limit);
+			err = HSAKMT_STATUS_SUCCESS;
+		} else {
+			struct kfd_process_device_apertures *process_apertures;
+			uint32_t num_nodes = fmm_ctx->gpu_mem_count;
+			uint32_t i;
+
+			process_apertures = calloc(num_nodes, sizeof(struct kfd_process_device_apertures));
+			if (!process_apertures)
+				break;
+
+			if (get_process_apertures(ctx, process_apertures, &num_nodes) == HSAKMT_STATUS_SUCCESS) {
+				for (i = 0; i < num_nodes; i++) {
+					if (process_apertures[i].gpu_id == gpu_id) {
+						*aperture_base = process_apertures[i].gpuvm_base;
+						*aperture_limit = process_apertures[i].gpuvm_limit;
+						err = HSAKMT_STATUS_SUCCESS;
+						break;
+					}
+				}
+			}
+			free(process_apertures);
+		}
+		break;
+
 	case FMM_SCRATCH:
 		if (aperture_is_valid(fmm_ctx->gpu_mem[slot].scratch_aperture.base,
 			fmm_ctx->gpu_mem[slot].scratch_aperture.limit)) {

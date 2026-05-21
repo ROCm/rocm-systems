@@ -36,6 +36,7 @@ typedef enum {
 	FMM_SCRATCH,
 	FMM_SVM,
 	FMM_MMIO,
+	FMM_GPUVM_DBG,
 	FMM_LAST_APERTURE_TYPE
 } aperture_type_e;
 
