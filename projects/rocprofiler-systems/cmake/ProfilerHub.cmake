@@ -183,7 +183,6 @@ if(NOT _PROFILER_HUB_IS_EXTERNAL)
     add_subdirectory(
         ${_PROFILER_HUB_SOURCE_DIR}
         ${PROJECT_BINARY_DIR}/external/profiler-hub/build
-        EXCLUDE_FROM_ALL
     )
 endif()
 
