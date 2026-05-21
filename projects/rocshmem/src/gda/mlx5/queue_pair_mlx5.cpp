@@ -247,6 +247,7 @@ __device__ void QueuePair::mlx5_quiet_single() {
 // can be called with all active lanes using any number of different QPs, don't assume anything
 __device__ void QueuePair::mlx5_post_wqe_rma(int32_t length, uintptr_t laddr, uintptr_t raddr,
                                              uint8_t opcode, const ActiveWFInfo& wf_info) {
+  __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
   uint64_t reserve_idx_base = 0;
   uint64_t reserve_count = 0;
   /* since the leader needs to write the first 8 bytes of the LAST WQE to the
@@ -305,11 +306,13 @@ __device__ void QueuePair::mlx5_post_wqe_rma(int32_t length, uintptr_t laddr, ui
     amdgcn_s_wakeup();
 #endif
   }
+  __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
 }
 
 // precondition: called with all active lanes using different QPs
 __device__ void QueuePair::mlx5_post_wqe_rma_single(int32_t length, uintptr_t laddr, uintptr_t raddr,
                                                     uint8_t opcode, bool ring_db) {
+  __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
   // reserve 1 slot in SQ
   uint64_t reserve_idx = __hip_atomic_fetch_add(&mlx5_sq.reserve_idx, 1,
                                                 __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
@@ -353,6 +356,7 @@ __device__ void QueuePair::mlx5_post_wqe_rma_single(int32_t length, uintptr_t la
   // wake up any other sleeping waves (in the same workgroup)
   amdgcn_s_wakeup();
 #endif
+  __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
 }
 
 /* can be called with all active lanes using any number of different QPs, don't assume anything
@@ -362,6 +366,7 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo([[maybe_unused]] int32_t length
                                                  uintptr_t raddr, uint8_t opcode,
                                                  int64_t atomic_data, int64_t atomic_cmp,
                                                  bool fetching, const ActiveWFInfo& wf_info) {
+  __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
   uint64_t reserve_idx_base = 0;
   uint64_t reserve_count = 0;
   /* since the leader needs to write the first 8 bytes of the LAST WQE to the
@@ -438,6 +443,7 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo([[maybe_unused]] int32_t length
     ret_val = __hip_atomic_load(atomic_laddr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
   }
 
+  __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
   return ret_val;
 }
 
@@ -446,6 +452,7 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo_single([[maybe_unused]] int32_t
                                                         uintptr_t raddr, uint8_t opcode,
                                                         int64_t atomic_data, int64_t atomic_cmp,
                                                         bool fetching) {
+  __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
   // reserve 1 slot in SQ
   uint64_t reserve_idx = __hip_atomic_fetch_add(&mlx5_sq.reserve_idx, 1,
                                                 __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
@@ -504,6 +511,7 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo_single([[maybe_unused]] int32_t
     ret_val = __hip_atomic_load(atomic_laddr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
   }
 
+  __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
   return ret_val;
 }
 
