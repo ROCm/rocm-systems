@@ -68,6 +68,11 @@ endif()
 # AMD ROCm Runtime + Dev Dependencies
 if(CMAKE_HIP_PLATFORM STREQUAL "amd")
     string(REGEX MATCH "^([0-9]+)\\.([0-9]+)" _rocm_mm "${ROCM_VERSION}")
+    if(NOT _rocm_mm)
+        message(FATAL_ERROR
+            "ROCM_VERSION='${ROCM_VERSION}' does not match the expected "
+            "MAJOR.MINOR[.PATCH] form (e.g., 7.13.0).")
+    endif()
     set(_rocm_major "${CMAKE_MATCH_1}")
     set(_rocm_minor "${CMAKE_MATCH_2}")
     if(_rocm_major GREATER 7 OR (_rocm_major EQUAL 7 AND _rocm_minor GREATER_EQUAL 11))
