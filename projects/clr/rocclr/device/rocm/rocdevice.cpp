@@ -3750,6 +3750,16 @@ void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
     } else if (patch.dep_slot == HwEventPatch::kCompletionSignal) {
       auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);
       pkt->completion_signal = sig;
+
+      // Prepare this signal for profiling: mark it as active and classify
+      // the packet type so checkGpuTime → addTimestamps only fires for
+      // kernel dispatches (not synthetic barriers).
+      ps->flags_.done_ = false;
+      uint16_t hdr;
+      memcpy(&hdr, raw, sizeof(hdr));
+      uint8_t pktType = hdr & ((1 << HSA_PACKET_HEADER_WIDTH_TYPE) - 1);
+      ps->flags_.isPacketDispatch_ =
+          (pktType == HSA_PACKET_TYPE_KERNEL_DISPATCH);
     } else {
       // dep_slot >= 0: patch a barrier's dependency signal slot (cross-segment wait)
       auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);
