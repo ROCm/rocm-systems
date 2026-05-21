@@ -22,6 +22,9 @@
 # IN THE SOFTWARE.
 ###############################################################################
 
+# Enable testing at the top level
+enable_testing()
+
 IF (BUILD_FUNCTIONAL_TESTS)
     add_subdirectory(functional_tests)
 ENDIF()
@@ -29,6 +32,48 @@ ENDIF()
 IF (BUILD_UNIT_TESTS)
     add_subdirectory(unit_tests)
 ENDIF()
+
+# Print top-level test summary if CTest is enabled
+if(ROCSHMEM_USE_CTEST AND (BUILD_FUNCTIONAL_TESTS OR BUILD_UNIT_TESTS))
+    # Get all tests from this directory and subdirectories
+    get_directory_property(all_tests TESTS)
+    list(LENGTH all_tests total_tests)
+
+    message(STATUS "")
+    message(STATUS "====================================================================")
+    message(STATUS "ROCshmem CTest Summary")
+    message(STATUS "====================================================================")
+    message(STATUS "Total tests registered: ${total_tests}")
+    message(STATUS "")
+    message(STATUS "CI Test Tiers (run from: build_all_backends/tests)")
+    message(STATUS "  ctest -L quick           # Quick smoke test (~9 tests, ~1-2 min)")
+    message(STATUS "  ctest -L standard        # Standard suite (~121 tests, ~15-20 min)")
+    message(STATUS "  ctest -L comprehensive   # Comprehensive (~208 tests, ~30-40 min)")
+    message(STATUS "  ctest -L full            # Full suite (all 229 tests, ~45-60 min)")
+    message(STATUS "")
+    message(STATUS "Test Category Filters:")
+    message(STATUS "  ctest -L functional      # Functional tests only (228)")
+    message(STATUS "  ctest -L unit            # Unit tests only (1)")
+    message(STATUS "  ctest -L RMA             # RMA functional tests")
+    message(STATUS "  ctest -L AMO             # Atomic operations")
+    message(STATUS "  ctest -L COLLECTIVE      # Collective operations")
+    message(STATUS "  ctest -L HEATMAP         # Performance/heatmap tests")
+    message(STATUS "")
+    message(STATUS "Backend-Specific Testing:")
+    message(STATUS "  ROCSHMEM_BACKEND_TYPE=ipc ctest -L quick")
+    message(STATUS "  ROCSHMEM_BACKEND_TYPE=ro ctest -L standard")
+    message(STATUS "  ROCSHMEM_BACKEND_TYPE=gda ctest -L comprehensive")
+    message(STATUS "")
+    message(STATUS "Or run from subdirectories:")
+    if(BUILD_FUNCTIONAL_TESTS)
+        message(STATUS "  cd tests/functional_tests && ctest -L functional")
+    endif()
+    if(BUILD_UNIT_TESTS)
+        message(STATUS "  cd tests/unit_tests && ctest -L unit")
+    endif()
+    message(STATUS "====================================================================")
+    message(STATUS "")
+endif()
 
 IF (BUILD_PYTHON_TESTS)
     # Canonical source of truth is projects/rocshmem/python/tests.
