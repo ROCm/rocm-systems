@@ -27,3 +27,44 @@ TEST(P2pScratchSmoke, BinaryLinksAndRuns)
 {
     EXPECT_EQ(1 + 1, 2);
 }
+
+// ---------------------------------------------------------------------------
+// ipcRegisterBuffer: cheapest real path -- regRecord == nullptr.
+//
+// With no registration record to consult, the function should fall through
+// the whole per-peer loop without touching the proxy or driver and just
+// zero out the OUT params. This confirms the static symbol is reachable
+// from the test TU (via the #include of p2p.cc above) without needing any
+// of the fakes' "real" behaviour.
+// ---------------------------------------------------------------------------
+TEST(IpcRegisterBuffer, NullRegRecordIsNoOp)
+{
+    // Comm is never dereferenced on this path, but pass a non-null pointer
+    // to be safe against future defensive null-checks.
+    ncclComm dummyComm{};
+
+    int       peerRanks[1]    = {0};
+    int       regBufFlag      = 0xdead;
+    uintptr_t offsetOut       = 0xdead;
+    uintptr_t* peerRmtAddrs   = reinterpret_cast<uintptr_t*>(0xdead);
+    bool      isLegacyIpc     = true;
+
+    ncclResult_t r = ipcRegisterBuffer(
+        /*comm=*/        &dummyComm,
+        /*userbuff=*/    reinterpret_cast<const void*>(0x1000),
+        /*buffSize=*/    4096,
+        /*peerRanks=*/   peerRanks,
+        /*nPeers=*/      1,
+        /*type=*/        NCCL_IPC_COLLECTIVE,
+        /*regRecord=*/   nullptr,
+        /*regBufFlag=*/  &regBufFlag,
+        /*offsetOut=*/   &offsetOut,
+        /*peerRmtAddrsOut=*/ &peerRmtAddrs,
+        /*isLegacyIpc=*/ &isLegacyIpc);
+
+    EXPECT_EQ(r,             ncclSuccess);
+    EXPECT_EQ(regBufFlag,    0);
+    EXPECT_EQ(offsetOut,     0u);
+    EXPECT_EQ(peerRmtAddrs,  nullptr);
+    EXPECT_FALSE(isLegacyIpc);
+}
