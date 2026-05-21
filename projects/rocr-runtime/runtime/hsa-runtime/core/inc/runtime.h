@@ -45,8 +45,10 @@
 #ifndef HSA_RUNTME_CORE_INC_RUNTIME_H_
 #define HSA_RUNTME_CORE_INC_RUNTIME_H_
 
+#include <cstdint>
 #include <vector>
 #include <map>
+#include <set>
 #include <memory>
 #include <tuple>
 #include <utility>
@@ -994,15 +996,17 @@ class Runtime {
   struct MemoryHandle {
     MemoryHandle(const MemoryRegion* region, size_t size, uint64_t flags_unused,
                  ShareableHandle shareable_handle, int dmabuf_fd, uint64_t mmap_offset,
-                 bool imported, MemoryRegion::AllocateFlags alloc_flag);
+                 MemoryRegion::AllocateFlags alloc_flag);
+    MemoryHandle(int dmabuf_fd);
+    MemoryHandle(hsa_fabric_handle_t fabric_handle);
     ~MemoryHandle();
 
-    static __forceinline hsa_amd_vmem_alloc_handle_t Convert(ShareableHandle handle) {
-      return hsa_amd_vmem_alloc_handle_t{handle.handle};
+    static __forceinline hsa_amd_vmem_alloc_handle_t Convert(MemoryHandle* memHandle) {
+      return hsa_amd_vmem_alloc_handle_t{ .handle = reinterpret_cast<uint64_t>(memHandle) };
     }
 
-    static __forceinline ShareableHandle Convert(hsa_amd_vmem_alloc_handle_t handle) {
-      return ShareableHandle{handle.handle};
+    static __forceinline MemoryHandle* Convert(hsa_amd_vmem_alloc_handle_t handle) {
+      return reinterpret_cast<MemoryHandle*>(handle.handle);
     }
 
     __forceinline core::Agent* agentOwner() const { return region->owner(); }
@@ -1014,12 +1018,12 @@ class Runtime {
     ShareableHandle shareable_handle;  // handle returned by Driver::Allocate(NoAddress = 1)
     int dmabuf_fd;
     uint64_t mmap_offset;
-    bool imported; /* True is this BO belongs to another process */
+    bool imported; /* True is this BO was imported from another process */
+    bool is_fabric_handle;
+    hsa_fabric_handle_t fabric_handle;
     MemoryRegion::AllocateFlags alloc_flag;
   };
-
-
-  std::map<ShareableHandle, MemoryHandle, ShareableHandle> memory_handle_map_;
+  std::set<MemoryHandle*> memory_handles;
 
   struct MappedHandle;
   struct MappedHandleAllowedAgent {
