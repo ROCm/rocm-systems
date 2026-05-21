@@ -1,0 +1,1 @@
+// gfx90a and gfx1201 are safe
