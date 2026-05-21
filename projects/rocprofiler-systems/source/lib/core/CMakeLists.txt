@@ -16,12 +16,15 @@ set(core_sources
     ${CMAKE_CURRENT_LIST_DIR}/mproc.cpp
     ${CMAKE_CURRENT_LIST_DIR}/node_info.cpp
     ${CMAKE_CURRENT_LIST_DIR}/output_file_registry.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/output/emit_summary.cpp
     ${CMAKE_CURRENT_LIST_DIR}/output/helper_collapser.cpp
     ${CMAKE_CURRENT_LIST_DIR}/output/perfetto_log_filter.cpp
     ${CMAKE_CURRENT_LIST_DIR}/output/process_tree_builder.cpp
     ${CMAKE_CURRENT_LIST_DIR}/output/role_classifier.cpp
     ${CMAKE_CURRENT_LIST_DIR}/output/run_metadata.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/output/summary_model.cpp
     ${CMAKE_CURRENT_LIST_DIR}/output/summary_renderer.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/output/text_layout.cpp
     ${CMAKE_CURRENT_LIST_DIR}/perf.cpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto.cpp
     ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.cpp
@@ -53,13 +56,16 @@ set(core_headers
     ${CMAKE_CURRENT_LIST_DIR}/mproc.hpp
     ${CMAKE_CURRENT_LIST_DIR}/node_info.hpp
     ${CMAKE_CURRENT_LIST_DIR}/output_file_registry.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/output/emit_summary.hpp
     ${CMAKE_CURRENT_LIST_DIR}/output/helper_collapser.hpp
     ${CMAKE_CURRENT_LIST_DIR}/output/perfetto_log_filter.hpp
     ${CMAKE_CURRENT_LIST_DIR}/output/process_metadata.hpp
     ${CMAKE_CURRENT_LIST_DIR}/output/process_tree_builder.hpp
     ${CMAKE_CURRENT_LIST_DIR}/output/role_classifier.hpp
     ${CMAKE_CURRENT_LIST_DIR}/output/run_metadata.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/output/summary_model.hpp
     ${CMAKE_CURRENT_LIST_DIR}/output/summary_renderer.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/output/text_layout.hpp
     ${CMAKE_CURRENT_LIST_DIR}/perf.hpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.hpp

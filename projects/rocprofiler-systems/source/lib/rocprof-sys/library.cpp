@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #include <cstdint>
-#include <ctime>
 #include <timemory/log/color.hpp>
 //
 //  above should always be included first
@@ -22,9 +21,7 @@
 #include "core/gpu.hpp"
 #include "core/locking.hpp"
 #include "core/node_info.hpp"
-#include "core/output/process_tree_builder.hpp"
-#include "core/output/run_metadata.hpp"
-#include "core/output/summary_renderer.hpp"
+#include "core/output/emit_summary.hpp"
 #include "core/output_file_registry.hpp"
 #include "core/perfetto_fwd.hpp"
 #include "core/progress/bar.hpp"
@@ -110,15 +107,9 @@ setup() ROCPROFSYS_INTERNAL_API;
 
 namespace
 {
-// Library-load timestamp captured on first access. Process-scoped
-// (one library load per process, one timestamp), so a function-local
-// static is the right form — same cardinality argument as
-// output_file_registry::instance(). rocprofsys_init_library() warms
-// it up so the value reflects library-init time, not finalize time.
-//
-// Used for the Output Summary duration: metadata_registry's start /
-// end fields are std::uint32_t and lose precision for runs longer
-// than ~4.29 s, which is most real workloads.
+// Library-load timestamp captured on first access. Used for the
+// Output Summary duration because metadata_registry's start/end
+// fields are std::uint32_t and lose precision for runs > ~4.29 s.
 const std::chrono::steady_clock::time_point&
 lib_load_steady_time()
 {
@@ -1154,7 +1145,8 @@ rocprofsys_finalize_hidden(void)
         sampling::post_process();
     }
 
-    auto& _output_registry = rocprofsys::output_file_registry::instance();
+    auto& _output_registry =
+        rocprofsys::output_file_registry::instance_for_top_level_attach_finalize();
 
     if(get_use_causal())
     {
@@ -1289,23 +1281,7 @@ rocprofsys_finalize_hidden(void)
         }
     }
 
-    {
-        // Ensure the parent appears at the root of the tree even when
-        // its per-PID metadata file isn't loaded by cache_manager.
-        rocprofsys::output::process_metadata _self{};
-        _self.pid     = getpid();
-        _self.ppid    = getppid();
-        _self.command = config::get_exe_name();
-        _output_registry.record_process(std::move(_self));
-    }
-
-    {
-        // output_dir_abs left empty: the renderer derives it from a
-        // registered row's parent_path. settings::get_global_output_prefix()
-        // returns the unresolved %tag%/%timestamp% template.
-        auto _meta = rocprofsys::output::run_metadata::capture(lib_load_steady_time());
-        rocprofsys::output::print_summary(std::cout, _output_registry, _meta);
-    }
+    rocprofsys::output::emit_summary(std::cout, _output_registry, lib_load_steady_time());
 
     categories::shutdown();
 

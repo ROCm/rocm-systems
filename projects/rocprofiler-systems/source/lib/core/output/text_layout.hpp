@@ -1,0 +1,38 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include <chrono>
+#include <cstddef>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace rocprofsys::output
+{
+
+// Layout widths shared by the renderer and its helpers.
+inline constexpr std::size_t PROCESS_TREE_COL_WIDTH = 56;
+inline constexpr std::size_t SIZE_COL_WIDTH         = 10;
+inline constexpr std::size_t MIN_INNER              = 60;
+inline constexpr std::size_t MAX_INNER              = 96;  // also caps SEPARATOR_WIDTH
+inline constexpr std::size_t SEPARATOR_WIDTH        = 80;
+inline constexpr std::size_t MAX_RENDERED_GPU_IDS   = 16;
+
+// Word-boundary preferred; falls back to byte chunking with UTF-8
+// continuation-byte backoff so multi-byte code points never split.
+[[nodiscard]] std::vector<std::string>
+wrap_to_width(std::string_view content, std::size_t width);
+
+// Renders a sort-unique GPU-id list as `:N`, compressing contiguous
+// runs of length >= 3 into `:min-max`. Empty input returns empty.
+// Truncates rendered output to MAX_RENDERED_GPU_IDS tokens.
+[[nodiscard]] std::string
+format_gpu_ids(const std::vector<int>& gpu_ids);
+
+// Two-decimal seconds; "?" for non-positive durations.
+[[nodiscard]] std::string
+format_duration(std::chrono::nanoseconds dur);
+
+}  // namespace rocprofsys::output

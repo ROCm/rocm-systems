@@ -36,11 +36,11 @@ TEST(perfetto_log_filter, classify_unknown_for_out_of_range)
     EXPECT_EQ(filter::classify(unknown_level), filter::filter_action::unknown);
 }
 
-TEST(perfetto_log_filter, install_is_idempotent)
+TEST(perfetto_log_filter, register_with_perfetto_logger_is_idempotent)
 {
-    // Double-install must not crash; std::call_once guards the
+    // Double-register must not crash; std::call_once guards the
     // underlying SetLogMessageCallback so the second call is a no-op.
-    filter::install();
-    filter::install();
+    filter::register_with_perfetto_logger();
+    filter::register_with_perfetto_logger();
     SUCCEED();
 }

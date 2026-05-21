@@ -458,7 +458,7 @@ perfetto_processor_t::perfetto_processor_t(
 void
 perfetto_processor_t::initialize_perfetto()
 {
-    rocprofsys::output::perfetto_log_filter::install();
+    rocprofsys::output::perfetto_log_filter::register_with_perfetto_logger();
 
     static std::once_flag init_flag;
     std::call_once(init_flag, []() {

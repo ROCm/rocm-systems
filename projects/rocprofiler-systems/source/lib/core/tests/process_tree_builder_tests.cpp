@@ -132,30 +132,7 @@ TEST(tree_visitor, for_each_post_visits_children_before_parent)
     n1.children = { n2, n3 };
 
     std::vector<pid_t> visited;
-    rocprofsys::output::for_each_post(n1, [&](const rocprofsys::output::process_node& n) {
-        visited.push_back(n.meta.pid);
-    });
+    rocprofsys::output::for_each_post(
+        n1, [&](rocprofsys::output::process_node& n) { visited.push_back(n.meta.pid); });
     EXPECT_EQ(visited, (std::vector<pid_t>{ 4, 5, 2, 3, 1 }));
-}
-
-TEST(tree_visitor, for_each_pre_visits_parent_before_children)
-{
-    rocprofsys::output::process_node n4{};
-    n4.meta = make_meta(4, 2);
-    rocprofsys::output::process_node n5{};
-    n5.meta = make_meta(5, 2);
-    rocprofsys::output::process_node n2{};
-    n2.meta     = make_meta(2, 1);
-    n2.children = { n4, n5 };
-    rocprofsys::output::process_node n3{};
-    n3.meta = make_meta(3, 1);
-    rocprofsys::output::process_node n1{};
-    n1.meta     = make_meta(1, -1);
-    n1.children = { n2, n3 };
-
-    std::vector<pid_t> visited;
-    rocprofsys::output::for_each_pre(n1, [&](const rocprofsys::output::process_node& n) {
-        visited.push_back(n.meta.pid);
-    });
-    EXPECT_EQ(visited, (std::vector<pid_t>{ 1, 2, 4, 5, 3 }));
 }

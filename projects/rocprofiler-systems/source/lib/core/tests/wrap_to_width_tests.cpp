@@ -3,7 +3,7 @@
 
 #include "gtest/gtest.h"
 
-#include "core/output/summary_renderer.hpp"
+#include "core/output/text_layout.hpp"
 
 #include <cstddef>
 #include <string>

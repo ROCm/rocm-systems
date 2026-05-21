@@ -154,7 +154,7 @@ output_file_registry::bump_session()
 }
 
 output_file_registry&
-output_file_registry::instance()
+output_file_registry::instance_for_top_level_attach_finalize()
 {
     static output_file_registry s_instance{};
     return s_instance;

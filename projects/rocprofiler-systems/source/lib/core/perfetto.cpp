@@ -53,7 +53,7 @@ get_session(pid_t _pid = process::get_id())
 void
 setup()
 {
-    rocprofsys::output::perfetto_log_filter::install();
+    rocprofsys::output::perfetto_log_filter::register_with_perfetto_logger();
 
     auto  args            = ::perfetto::TracingInitArgs{};
     auto  track_event_cfg = ::perfetto::protos::gen::TrackEventConfig{};

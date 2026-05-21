@@ -46,7 +46,7 @@ filter_fn(::perfetto::base::LogMessageCallbackArgs args)
 }
 
 void
-install()
+register_with_perfetto_logger()
 {
     static std::once_flag once;
     std::call_once(once, []() { ::perfetto::base::SetLogMessageCallback(&filter_fn); });

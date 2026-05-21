@@ -35,35 +35,24 @@ enum class output_format
     causal_text
 };
 
-// One registry per process. Cardinality matches the user-facing model:
-// one output directory, one Output Summary block, one finalize per
-// process. Multiple registries would mean files registered in one are
-// invisible to the other's summary.
+// One registry per process: one output dir, one Output Summary, one
+// finalize. Process-singleton, not SDK-session-scoped, because the
+// rocprofiler-sdk attach/detach protocol can leak its client_data
+// blob and there is no natural shared owner across the registration
+// sites (perfetto, rocpd, library finalize).
 //
-// Registration sites span perfetto.cpp, perfetto_processor.cpp,
-// rocpd_processor.cpp, and library.cpp finalize — there is no natural
-// shared owner across them. The rocprofiler-sdk client_data blob is
-// one candidate, but its lifetime is governed by the SDK's
-// attach/detach protocol, which does not invoke tool_fini on
-// attach-only runs and leaks the blob accordingly. A per-tool-session
-// owner would inherit that leak. Process-singleton storage sidesteps
-// the lifecycle question — the registry lives for the process,
-// regardless of which SDK sessions come and go inside it.
-//
-// Attach/detach resets are handled by bump_session() — see its
-// comment for the race-safety argument.
-//
-// Access discipline: call instance() only from top-level
-// finalize/attach entry points. Downstream consumers (processors,
-// post-processing pipelines) receive the registry by reference; this
-// preserves the test seam where tests construct their own
-// output_file_registry instances and pass them to the consumer under
-// test.
+// Access discipline: only the top-level attach/finalize entry points
+// call the singleton accessor; downstream consumers take a reference
+// so tests can substitute their own instance. Attach/detach resets go
+// through bump_session() — see its declaration for the race argument.
 class output_file_registry
 {
 public:
-    // Process-singleton accessor. See class-level comment.
-    [[nodiscard]] static output_file_registry& instance();
+    // Process-singleton accessor. The ugly name documents the
+    // constraint: only call this from a top-level attach or finalize
+    // entry point.
+    [[nodiscard]] static output_file_registry&
+    instance_for_top_level_attach_finalize();
 
     output_file_registry() = default;
 
@@ -99,8 +88,8 @@ private:
     template <typename T>
     struct versioned
     {
-        std::uint64_t session_id;
-        T             value;
+        std::uint64_t session_id{ 0 };
+        T             value{};
     };
 
     mutable std::mutex                               m_mutex;

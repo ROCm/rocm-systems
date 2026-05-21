@@ -30,9 +30,12 @@ classify(::perfetto::base::LogLev level);
 void
 filter_fn(::perfetto::base::LogMessageCallbackArgs args);
 
-// Idempotent (std::call_once); must run before any
-// perfetto::Tracing::Initialize on the owning process.
+// Registers filter_fn as perfetto's log message callback so all
+// subsequent perfetto-side log emissions flow through classify() and
+// either drop or forward via the rocprof-sys logger. Idempotent
+// (std::call_once); must run before any perfetto::Tracing::Initialize
+// on the owning process.
 void
-install();
+register_with_perfetto_logger();
 
 }  // namespace rocprofsys::output::perfetto_log_filter

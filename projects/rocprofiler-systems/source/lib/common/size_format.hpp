@@ -3,46 +3,33 @@
 
 #pragma once
 
+#include <spdlog/fmt/fmt.h>
+
 #include <cstdint>
-#include <cstdio>
 #include <optional>
 #include <string>
 
 namespace rocprofsys::common
 {
 
-inline std::string
-format_size_human(std::optional<std::uintmax_t> size_bytes)
+[[nodiscard]] inline std::string
+format_size_human(std::uintmax_t bytes)
 {
-    if(!size_bytes) return "?";
-
     constexpr std::uintmax_t KIB = 1024ULL;
     constexpr std::uintmax_t MIB = KIB * 1024ULL;
     constexpr std::uintmax_t GIB = MIB * 1024ULL;
 
-    const auto value = *size_bytes;
+    if(bytes < KIB) return fmt::format("{} B", bytes);
+    if(bytes < MIB) return fmt::format("{:.2f} KiB", static_cast<double>(bytes) / KIB);
+    if(bytes < GIB) return fmt::format("{:.2f} MiB", static_cast<double>(bytes) / MIB);
+    return fmt::format("{:.2f} GiB", static_cast<double>(bytes) / GIB);
+}
 
-    double      scaled = 0.0;
-    const char* unit   = nullptr;
-    if(value < MIB)
-    {
-        scaled = static_cast<double>(value) / static_cast<double>(KIB);
-        unit   = "KB";
-    }
-    else if(value < GIB)
-    {
-        scaled = static_cast<double>(value) / static_cast<double>(MIB);
-        unit   = "MB";
-    }
-    else
-    {
-        scaled = static_cast<double>(value) / static_cast<double>(GIB);
-        unit   = "GB";
-    }
-
-    char buffer[32];
-    std::snprintf(buffer, sizeof(buffer), "%.2f %s", scaled, unit);
-    return std::string{ buffer };
+[[nodiscard]] inline std::string
+format_size_human(std::optional<std::uintmax_t> size_bytes)
+{
+    if(!size_bytes) return "?";
+    return format_size_human(*size_bytes);
 }
 
 }  // namespace rocprofsys::common

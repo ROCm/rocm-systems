@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/trace_cache/unified_memory_processor.hpp"
+#include "common/size_format.hpp"
 #include "core/common_types.hpp"
 #include "core/config.hpp"
 #include "logger/debug.hpp"
@@ -28,34 +29,12 @@ namespace trace_cache
 
 namespace detail
 {
-inline constexpr std::uint64_t kKiB = 1024ULL;
-inline constexpr std::uint64_t kMiB = kKiB * 1024;
-inline constexpr std::uint64_t kGiB = kMiB * 1024;
-
 inline constexpr std::uint64_t kNsPerUs  = 1000ULL;
 inline constexpr std::uint64_t kNsPerMs  = kNsPerUs * 1000;
 inline constexpr std::uint64_t kNsPerSec = kNsPerMs * 1000;
 
 // Largest double < 2^64; equality would overflow on std::uint64_t cast (UB).
 inline constexpr double kMaxSafeUint64 = 0x1.fffffffffffffp+63;
-
-[[nodiscard]] inline std::string
-format_size(std::uint64_t bytes)
-{
-    std::ostringstream oss;
-    oss << std::fixed << std::setprecision(4);
-
-    if(bytes >= kGiB)
-        oss << (static_cast<double>(bytes) / kGiB) << "GB";
-    else if(bytes >= kMiB)
-        oss << (static_cast<double>(bytes) / kMiB) << "MB";
-    else if(bytes >= kKiB)
-        oss << (static_cast<double>(bytes) / kKiB) << "KB";
-    else
-        oss << bytes << "B";
-
-    return oss.str();
-}
 
 [[nodiscard]] inline std::string
 generate_unified_memory_output_path(int pid, const std::string& output_dir,
@@ -426,12 +405,18 @@ unified_memory_processor_t::write_text_output(std::ostream& out) const
             if(stats.count > 0)
             {
                 out << std::setw(9) << stats.count << "  " << std::setw(8)
-                    << detail::format_size(
-                           static_cast<std::uint64_t>(stats.avg_size_bytes()))
-                    << "  " << std::setw(8) << detail::format_size(stats.min_size_bytes)
-                    << "  " << std::setw(8) << detail::format_size(stats.max_size_bytes)
+                    << common::format_size_human(
+                           static_cast<std::uintmax_t>(stats.avg_size_bytes()))
+                    << "  " << std::setw(8)
+                    << common::format_size_human(
+                           static_cast<std::uintmax_t>(stats.min_size_bytes))
+                    << "  " << std::setw(8)
+                    << common::format_size_human(
+                           static_cast<std::uintmax_t>(stats.max_size_bytes))
                     << "  " << std::setw(10)
-                    << detail::format_size(stats.total_size_bytes) << "  "
+                    << common::format_size_human(
+                           static_cast<std::uintmax_t>(stats.total_size_bytes))
+                    << "  "
                     << std::setw(11) << detail::format_time(stats.total_time_ns) << "  "
                     << std::setw(9) << std::fixed << std::setprecision(2)
                     << stats.bandwidth_gbps() << " GB/s  " << name << "\n";

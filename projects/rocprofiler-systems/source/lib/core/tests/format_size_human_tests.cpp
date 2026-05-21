@@ -30,11 +30,11 @@ TEST_P(format_size_human_test, formats_at_threshold_boundaries)
 INSTANTIATE_TEST_SUITE_P(
     boundaries, format_size_human_test,
     ::testing::Values(size_format_case{ std::nullopt, "?" },
-                      size_format_case{ 0u, "0.00 KB" },
-                      size_format_case{ 1023u, "1.00 KB" },
-                      size_format_case{ 1024u, "1.00 KB" },
-                      size_format_case{ 1024ULL * 1024 - 1, "1024.00 KB" },
-                      size_format_case{ 1024ULL * 1024, "1.00 MB" },
-                      size_format_case{ 1024ULL * 1024 * 1024 - 1, "1024.00 MB" },
-                      size_format_case{ 1024ULL * 1024 * 1024, "1.00 GB" },
-                      size_format_case{ 5ULL * 1024 * 1024 * 1024, "5.00 GB" }));
+                      size_format_case{ 0u, "0 B" },
+                      size_format_case{ 1023u, "1023 B" },
+                      size_format_case{ 1024u, "1.00 KiB" },
+                      size_format_case{ 1024ULL * 1024 - 1, "1024.00 KiB" },
+                      size_format_case{ 1024ULL * 1024, "1.00 MiB" },
+                      size_format_case{ 1024ULL * 1024 * 1024 - 1, "1024.00 MiB" },
+                      size_format_case{ 1024ULL * 1024 * 1024, "1.00 GiB" },
+                      size_format_case{ 5ULL * 1024 * 1024 * 1024, "5.00 GiB" }));

@@ -29,6 +29,55 @@ sort_rows_desc_by_size(process_node& node)
                   return a.size_bytes.has_value() && !b.size_bytes.has_value();
               });
 }
+
+struct subtree_walk
+{
+    std::vector<pid_t>               order;
+    std::unordered_map<pid_t, pid_t> parent_of;
+};
+
+// Stack-based pre-order enumeration. Iterative so deep parent chains
+// (MPI fork generations) do not blow the call stack.
+subtree_walk
+collect_subtree_order(
+    pid_t                                                root_pid,
+    const std::unordered_map<pid_t, std::vector<pid_t>>& children_by_ppid)
+{
+    subtree_walk      walk{};
+    std::vector<pid_t> stack{ root_pid };
+    while(!stack.empty())
+    {
+        const pid_t pid = stack.back();
+        stack.pop_back();
+        walk.order.push_back(pid);
+        auto it = children_by_ppid.find(pid);
+        if(it == children_by_ppid.end()) continue;
+        for(pid_t cp : it->second)
+        {
+            walk.parent_of[cp] = pid;
+            stack.push_back(cp);
+        }
+    }
+    return walk;
+}
+
+// Bottom-up child attach. Reverse-walks the pre-order so each child
+// is moved into its parent before the parent itself is moved out.
+void
+attach_children_bottom_up(const subtree_walk&                      walk,
+                          std::unordered_map<pid_t, process_node>& built,
+                          pid_t                                    root_pid)
+{
+    for(auto rit = walk.order.rbegin(); rit != walk.order.rend(); ++rit)
+    {
+        const pid_t pid = *rit;
+        if(pid == root_pid) continue;
+        const pid_t ppid = walk.parent_of.at(pid);
+        auto&       dst  = built.at(ppid);
+        auto&       src  = built.at(pid);
+        dst.children.push_back(std::move(src));
+    }
+}
 }  // namespace
 
 build_result
@@ -100,49 +149,18 @@ build_tree(const std::vector<output_file>&      rows,
             root_pids.push_back(pid);
     }
 
-    // Iterative subtree construction: avoids deep recursion blowing
-    // the stack on long parent chains (real workloads can fork many
-    // generations under MPI launchers). Two passes per root: the
-    // first pre-creates every node and records each child's parent
-    // pointer; the second walks parent pointers from leaves up to
-    // attach children into their parent's children vector.
     auto take_subtree = [&](pid_t root_pid) -> process_node {
-        std::vector<pid_t>               order;
-        std::unordered_map<pid_t, pid_t> parent_of;
-
-        std::vector<pid_t> stack{ root_pid };
-        while(!stack.empty())
-        {
-            const pid_t pid = stack.back();
-            stack.pop_back();
-            order.push_back(pid);
-            auto it = children_by_ppid.find(pid);
-            if(it == children_by_ppid.end()) continue;
-            for(pid_t cp : it->second)
-            {
-                parent_of[cp] = pid;
-                stack.push_back(cp);
-            }
-        }
+        auto walk = collect_subtree_order(root_pid, children_by_ppid);
 
         std::unordered_map<pid_t, process_node> built;
-        built.reserve(order.size());
-        for(pid_t pid : order)
+        built.reserve(walk.order.size());
+        for(pid_t pid : walk.order)
         {
             built.emplace(pid, std::move(nodes.at(pid)));
             nodes.erase(pid);
         }
 
-        // Attach children bottom-up so each child is moved into its
-        // parent before the parent itself is moved.
-        for(auto rit = order.rbegin(); rit != order.rend(); ++rit)
-        {
-            const pid_t pid = *rit;
-            if(pid == root_pid) continue;
-            const pid_t ppid = parent_of.at(pid);
-            built.at(ppid).children.push_back(std::move(built.at(pid)));
-        }
-
+        attach_children_bottom_up(walk, built, root_pid);
         return std::move(built.at(root_pid));
     };
 

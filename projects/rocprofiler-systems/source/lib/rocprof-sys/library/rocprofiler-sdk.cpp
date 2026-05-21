@@ -2938,7 +2938,8 @@ tool_attach_fini(void* /* tool_data */)
     if(get_use_perfetto())
     {
         bool  _perfetto_output_error = false;
-        auto& _output_registry       = rocprofsys::output_file_registry::instance();
+        auto& _output_registry =
+            rocprofsys::output_file_registry::instance_for_top_level_attach_finalize();
         ::rocprofsys::perfetto::post_process(nullptr, _perfetto_output_error,
                                              _output_registry);
         if(_perfetto_output_error)
@@ -2959,7 +2960,8 @@ tool_attach_init([[maybe_unused]] rocprofiler_client_detach_t detach_func,
     // Bump unconditionally so each attach (including the first) owns
     // a unique session id; bump_session() compacts prior-session rows.
     const auto _attach_session_id =
-        rocprofsys::output_file_registry::instance().bump_session();
+        rocprofsys::output_file_registry::instance_for_top_level_attach_finalize()
+            .bump_session();
     LOG_DEBUG("Output registry bumped to session {} for attach (pid={})",
               _attach_session_id, getpid());
 
