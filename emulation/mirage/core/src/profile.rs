@@ -1,6 +1,6 @@
 use crate::emulator::EmulatorDef;
 
 pub struct ProfileDef {
-    name: String,
-    emulator: EmulatorDef,
+    pub name: String,
+    pub emulator: EmulatorDef,
 }

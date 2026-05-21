@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::common::MaybeRef;
+
 /// Concrete process arguments for one program invocation.
 ///
 /// Describes the program, its arguments, and any extra environment
@@ -34,4 +36,23 @@ pub struct ExecDef {
     /// run any command.
     #[serde(default)]
     pub worker_exec: Option<ExecArgs>,
+}
+
+
+/// modifcations to an exec
+pub struct InjectionDef {
+    /// wraper program to launch all programs with
+    pub wrapper: Option<String>,
+
+    /// inject a libary to the LD_PRELOAD variable
+    pub ld_preload: Option<String>,
+
+    /// ensure that the given files are available in the environment
+    pub files: BTreeMap<String, MaybeRef<Vec<u8>>>,
+
+    /// sockets
+    pub sockets: Vec<String>,
+
+    /// env varibles
+    pub env: BTreeMap<String, String>,
 }
