@@ -363,8 +363,8 @@ class ArtifactSplitter:
                                 code_object_index[arch] += 1
                                 if self.verbose:
                                     print(
-                                        f"    Skipping kernel for {arch} "
-                                        f"(not in gpu_targets)"
+                                        f"    Skipping kernel for {arch}: "
+                                        f"{file_name} (not in gpu_targets)"
                                     )
                                 continue
 
