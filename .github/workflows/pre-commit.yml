@@ -1,5 +1,6 @@
 # Goal: extend to all projects using a single root .pre-commit-config.yaml.
-# Currently only checks emulation/rocjitsu/ with its own config.
+# Currently only checks emulation/rocjitsu/ and .github/ with its own config.
+# test: trailing whitespace on this line 
 name: "Pre-commit (rocjitsu)"
 
 on:
@@ -16,7 +17,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          sparse-checkout: emulation/rocjitsu
+          # Sparse checkout controls which files are on disk, and therefore
+          # which files pre-commit can check. To add a new project to this
+          # CI job, add its path here. That's the only change needed.
+          sparse-checkout: |
+            emulation/rocjitsu
+            .github
 
       - uses: actions/setup-python@v5
         with:
@@ -24,14 +30,23 @@ jobs:
 
       - run: pip install pre-commit
 
-      - name: Run pre-commit on changed rocjitsu files
+      - name: Run pre-commit on changed files
         run: |
+          # Find the common ancestor between the PR base and head.
           MERGE_BASE=$(git merge-base ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})
-          FILES=$(git diff --name-only --diff-filter=ACMR "$MERGE_BASE" HEAD -- 'emulation/rocjitsu/')
+
+          # List files that were added, copied, modified, or renamed in
+          # the PR, then keep only those present on disk. The sparse
+          # checkout determines which files are on disk, so this is how
+          # we scope the check to the projects listed above.
+          FILES=$(git diff --name-only --diff-filter=ACMR "$MERGE_BASE" HEAD \
+            | while IFS= read -r f; do if [ -f "$f" ]; then echo "$f"; fi; done)
+
           if [ -z "$FILES" ]; then
-            echo "No rocjitsu files changed, skipping."
+            echo "No checked-in files changed in sparse checkout, skipping."
             exit 0
           fi
+
           echo "Checking files:"
           echo "$FILES"
           pre-commit run --config emulation/rocjitsu/.pre-commit-config.yaml --files $FILES
