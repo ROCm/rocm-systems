@@ -432,8 +432,39 @@ void GraphExec::BuildSyncPlan() {
   sync_plan_.patch_list.clear();
   sync_plan_.barrier_packets.clear();
   sync_plan_.leaf_segment_ids.clear();
+  sync_plan_.seg_to_hw_event.assign(segments_.size(), -1);
+  sync_plan_.num_hw_events = 0;
 
   auto* device = g_devices[instantiateDeviceId_]->devices()[0];
+
+  // PASS 1: Assign a compact HW-event slot only to segments whose completion
+  // signal is consumed — cross-device/stream successor, or leaf when
+  // leaf-sync is required. Same-stream successors are ordered by the
+  // in-order queue and need no signal;
+  for (size_t i = 0; i < segments_.size(); ++i) {
+    const auto& segment = segments_[i];
+    bool needed = false;
+    for (int succ_id : segment.segment_ids_edges) {
+      if (succ_id < 0 || succ_id >= static_cast<int>(segments_.size())) continue;
+      const auto& succ_seg = segments_[succ_id];
+      if (succ_seg.dev_id != segment.dev_id ||
+          succ_seg.stream_id != segment.stream_id) {
+        needed = true;
+        break;
+      }
+    }
+    // Every leaf gets a signal when leaf-sync is required, including leaves
+    // on stream_id == 0. Needed for child-graph nesting: a parent's
+    // per-segment completion barrier must observe the child's leaves on
+    // every sub-stream, not just rely on in-order semantics of the parent's
+    // per-segment stream.
+    if (!needed && segment.segment_ids_edges.empty() && IsLeafNodeSyncRequired()) {
+      needed = true;
+    }
+    if (needed) {
+      sync_plan_.seg_to_hw_event[i] = sync_plan_.num_hw_events++;
+    }
+  }
 
   // Barrier packets are sentinel-marked with nullptr in dispatchKernelNames so that
   // activity.cpp can distinguish them from kernel/blit dispatch packets (which use "" or a
@@ -441,6 +472,8 @@ void GraphExec::BuildSyncPlan() {
   // be dropped when a copy/blit node also contributed an empty-string entry.
   static const std::string* const kBarrierKernelNamePtr = nullptr;
 
+  // PASS 2: Materialize barrier packets and patch entries using the compact
+  // hw_event slot indices computed in PASS 1.
   for (const auto& segment : segments_) {
     // Collect cross-stream/device dependency IDs for this segment.
     // barrier_dep_indices is local per iteration — no cross-iteration access needed.
@@ -488,8 +521,10 @@ void GraphExec::BuildSyncPlan() {
 
       if (use_ext_dep) {
         uint8_t* first_dispatch = firstBatch.dispatchPackets[0];
+        // hw_event_index uses the compact slot; dep producer always has one (PASS 1).
         sync_plan_.patch_list.push_back(
-            {first_dispatch, nullptr, barrier_dep_indices[0],
+            {first_dispatch, nullptr,
+             sync_plan_.seg_to_hw_event[barrier_dep_indices[0]],
              amd::Device::HwEventPatch::kExtDispatchDepSignal});
       } else {
         int barrier_count = (num_deps + 4) / 5;
@@ -502,7 +537,9 @@ void GraphExec::BuildSyncPlan() {
           int end_dep = std::min(start_dep + 5, num_deps);
           for (int d = start_dep; d < end_dep; ++d) {
             sync_plan_.patch_list.push_back(
-                {barrier_pkt, nullptr, barrier_dep_indices[d], d - start_dep});
+                {barrier_pkt, nullptr,
+                 sync_plan_.seg_to_hw_event[barrier_dep_indices[d]],
+                 d - start_dep});
           }
 
           firstBatch.dispatchPackets.insert(firstBatch.dispatchPackets.begin(), barrier_pkt);
@@ -521,8 +558,13 @@ void GraphExec::BuildSyncPlan() {
     bool last_node_uncaptured = segBatch.has_uncaptured_nodes &&
         !segment.nodes.empty() && !segBatch.node_capture_status.back();
 
+    // hw_slot >= 0 => some consumer observes this signal (set by PASS 1).
+    // Otherwise skip both the completion barrier packet and its patch entry.
+    const int hw_slot = sync_plan_.seg_to_hw_event[segment.id];
+    const bool completion_signal_needed = (hw_slot >= 0);
+
     auto& lastBatch = segBatch.packet_batches.back();
-    if (last_node_uncaptured) {
+    if (last_node_uncaptured && completion_signal_needed) {
       uint8_t* completion_barrier = device->CreateBarrierPacket();
       sync_plan_.barrier_packets.push_back(completion_barrier);
 
@@ -530,9 +572,9 @@ void GraphExec::BuildSyncPlan() {
       lastBatch.dispatchKernelNames.push_back(kBarrierKernelNamePtr);
 
       sync_plan_.patch_list.push_back(
-          {completion_barrier, nullptr, segment.id,
+          {completion_barrier, nullptr, hw_slot,
            amd::Device::HwEventPatch::kCompletionSignal});
-    } else if (!lastBatch.dispatchPackets.empty()) {
+    } else if (!lastBatch.dispatchPackets.empty() && completion_signal_needed) {
       // All nodes are capturable — append a real completion barrier packet so that
       // ApplyHwEventPatches patches the barrier's completion signal, not the last
       // kernel dispatch's. Patching the last kernel dispatch directly causes
@@ -545,7 +587,7 @@ void GraphExec::BuildSyncPlan() {
       lastBatch.dispatchKernelNames.push_back(kBarrierKernelNamePtr);
 
       sync_plan_.patch_list.push_back(
-          {completion_barrier, nullptr, segment.id,
+          {completion_barrier, nullptr, hw_slot,
            amd::Device::HwEventPatch::kCompletionSignal});
     }
 
@@ -1804,10 +1846,10 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
 
   auto* device = g_devices[launch_stream->DeviceId()]->devices()[0];
 
-  // Allocate HW events for all segments
+  // Sparse: one slot per segment whose signal is consumed (PASS 1 in BuildSyncPlan).
   std::vector<void*> segment_hw_events;
-  if (sync_plan_.num_segments > 0) {
-    if (!device->CreateHwEvents(sync_plan_.num_segments, segment_hw_events)) {
+  if (sync_plan_.num_hw_events > 0) {
+    if (!device->CreateHwEvents(sync_plan_.num_hw_events, segment_hw_events)) {
       if (out_status != nullptr) {
         *out_status = hipErrorOutOfMemory;
       }
@@ -1834,9 +1876,7 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
   // and serves as the dispatch anchor for all segments across all streams.
   auto* graph_accumulate = new amd::AccumulateCommand(*launch_stream, {}, nullptr);
 
-  // Register HW events with graph_accumulate for lifetime tracking.
-  // addHwEvent does not retain — ownership transfers from CreateHwEvents
-  // to graph_accumulate. ~AccumulateCommand releases them after graph completion.
+  // Transfer HW-event ownership to graph_accumulate (~AccumulateCommand releases them).
   for (auto& hw_event : segment_hw_events) {
     if (hw_event != nullptr) {
       graph_accumulate->addHwEvent(hw_event, device);
@@ -1891,18 +1931,16 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
     }
   }
 
-  // Synchronize parallel streams back to the launch stream.
-  // Each leaf segment already has a completion HW event signal patched onto its
-  // last packet. Add those HW events as dependencies on graph_accumulate so
-  // the runtime emits barrier packets when it is enqueued on the launch stream.
+  // Sync parallel-stream leaves back to launch_stream via graph_accumulate's
+  // dep_signal[]. Same-stream leaves rely on in-order queue semantics instead.
   if (IsLeafNodeSyncRequired()) {
     for (int seg_id : sync_plan_.leaf_segment_ids) {
-      if (seg_id >= 0 && seg_id < static_cast<int>(segments_.size())) {
-        hip::Stream* seg_stream = resolveSegmentStream(segments_[seg_id]);
-        if (seg_stream != launch_stream) {
-          graph_accumulate->addDepHwEvent(segment_hw_events[seg_id]);
-        }
-      }
+      if (seg_id < 0 || seg_id >= static_cast<int>(segments_.size())) continue;
+      hip::Stream* seg_stream = resolveSegmentStream(segments_[seg_id]);
+      if (seg_stream == launch_stream) continue;
+      int hw_slot = sync_plan_.seg_to_hw_event[seg_id];  // PASS 1 guarantees >= 0; guard defensively.
+      if (hw_slot < 0 || hw_slot >= static_cast<int>(segment_hw_events.size())) continue;
+      graph_accumulate->addDepHwEvent(segment_hw_events[hw_slot]);
     }
   }
 
@@ -1929,8 +1967,14 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
 
   size_t batchIndex = 0;
 
-  // Lambda to dispatch the current batch at batchIndex
-  auto dispatchCurrentBatch = [&]() -> hipError_t {
+  // Lambda to dispatch the current batch at batchIndex.
+  // attach_signal=true asks the dispatcher to give the last packet a real
+  // completion signal (via Barriers().ActiveSignal) so a downstream
+  // uncaptured node — typically an SDMA memcpy on a different engine — can
+  // wait on it directly through HwQueueTracker::WaitingSignal, avoiding
+  // the otherwise-required pre/post Marker barriers around the uncaptured
+  // node.
+  auto dispatchCurrentBatch = [&](bool attach_signal = false) -> hipError_t {
     if (!segBatch || batchIndex >= segBatch->packet_batches.size()) {
       return hipSuccess;
     }
@@ -1959,7 +2003,7 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
 
     if (!flatData->empty()) {
       bool batchStatus = stream->vdev()->dispatchAqlPacketBatchFlat(
-          *flatData, *flatHdrs, accumulate, false, kernelNamesToDispatch, true);
+          *flatData, *flatHdrs, accumulate, attach_signal, kernelNamesToDispatch, true);
       if (!batchStatus) {
         return hipErrorUnknown;
       }
@@ -2012,6 +2056,18 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
     return hipSuccess;
   }
 
+  // If the first node is uncaptured, dispatch the leading PacketBatch
+  // (cross-dep barriers parked by BuildSyncPlan) BEFORE the node so the
+  // cross-dep wait physically precedes the node's own AQL packet. Without
+  // this the node's packet could fire on in-order semantics alone and
+  // appear to complete before cross-stream deps are satisfied.
+  if (segBatch && !segBatch->node_capture_status.empty() &&
+      !segBatch->node_capture_status[0] &&
+      batchIndex < segBatch->packet_batches.size()) {
+    status = dispatchCurrentBatch();
+    if (status != hipSuccess) return status;
+  }
+
   // Process all nodes in this segment
   for (size_t i = 0; i < segment.nodes.size(); ++i) {
     auto& node = segment.nodes[i];
@@ -2029,24 +2085,29 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
         }
         // Skip all consecutive captured nodes that belong to this batch
         i += packetBatch.nodeRanges.size() - 1;
-
-        status = dispatchCurrentBatch();
+        // Check if the next uncaptured node is an SDMA memcpy that needs handoff.
+        // Only set sdma_follows if that's the case and the node will use SDMA.
+        // Otherwise, staging-blit or other paths do not need the signal.
+        bool sdma_follows = false;
+        size_t next = i + 1;
+        if (next < segment.nodes.size() &&
+            next < segBatch->node_capture_status.size() &&
+            !segBatch->node_capture_status[next] &&
+            segment.nodes[next]->GetType() == hipGraphNodeTypeMemcpy) {
+          auto* memcpyNode = dynamic_cast<GraphMemcpyNode*>(segment.nodes[next]);
+          // Memcpy node types that don't derive from GraphMemcpyNode
+          // (e.g. GraphDrvMemcpyNode) fall back to the conservative
+          // "assume SDMA" behavior.
+          sdma_follows = (memcpyNode == nullptr) || !memcpyNode->WillUseStagingBlitPath();
+        }
+        if (sdma_follows) {
+          stream->vdev()->addSystemScope();
+        }
+        status = dispatchCurrentBatch(sdma_follows);
         if (status != hipSuccess) return status;
       }
     } else {
       // Node doesn't support capture - execute individually.
-      // Flat dispatch bypasses the Barriers() tracker (ActiveSignal is skipped).
-      // Enqueue Markers before and after the non-captured node to:
-      //   Before: resync the Barriers() tracker so releaseGpuMemoryFence/WaitCurrent
-      //           can track queue progress for the node's internal operations.
-      //   After:  ensure the node's commands (e.g. host node blocking callbacks) are
-      //           fully flushed to the HW queue before the next flat batch is
-      //           dispatched, which writes directly to the HW queue.
-      auto pre_marker = new amd::Marker(*stream, kMarkerDisableFlush, {});
-      if (pre_marker != nullptr) {
-        pre_marker->enqueue();
-        pre_marker->release();
-      }
       if (DEBUG_HIP_GRAPH_DOT_PRINT) {
         node->stream_id_ = stream->GetStreamId();
         node->hw_queue_id_ = stream->getQueueID();
@@ -2055,11 +2116,6 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
       status = node->CreateCommand(node->GetQueue());
       if (status != hipSuccess) return status;
       node->EnqueueCommands(stream);
-      auto post_marker = new amd::Marker(*stream, kMarkerDisableFlush, {});
-      if (post_marker != nullptr) {
-        post_marker->enqueue();
-        post_marker->release();
-      }
     }
   }
 

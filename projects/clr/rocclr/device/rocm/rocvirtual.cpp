@@ -1529,8 +1529,16 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
              (thisChunk - firstCount) * kPacketSize);
     }
 
-    // Per-packet fixups: profiling signals and kernel-name printing.
-    if (timestamp_ != nullptr || IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2)) {
+    // Attach signal to the last packet when requested (before per-packet logging).
+    auto* lastSlotPtr = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
+        queueBase + ((startIndex + chunkEnd - 1) & queueMask) * kPacketSize);
+    if (isLastChunk && (attach_signal || blocking) && timestamp_ == nullptr) {
+      lastSlotPtr->completion_signal = Barriers().ActiveSignal();
+    }
+
+    // Per-packet fixups: profiling signals, kernel-name printing, and inline barrier logging.
+    if (timestamp_ != nullptr || IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2) ||
+        IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) {
       for (size_t i = chunkStart; i < chunkEnd; ++i) {
         const uint64_t slotIdx = (startIndex + i) & queueMask;
         auto* slot = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
@@ -1578,14 +1586,27 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
                   slot->kernel_object, slot->kernarg_address,
                   slot->completion_signal, slot->reserved2,
                   Hsa::queue_load_read_index_scacquire(gpu_queue_), slotIdx);
+        } else if (pktType == HSA_PACKET_TYPE_BARRIER_AND ||
+                   pktType == HSA_PACKET_TYPE_BARRIER_OR) {
+          // Inline barriers placed in the batch by BuildSyncPlan never go
+          // through dispatchBarrierPacket, so log them here. Classify by
+          // patched fields: dep_signal set -> cross-dep barrier, else
+          // completion_signal set -> per-segment completion barrier.
+          const auto* bpkt = reinterpret_cast<const hsa_barrier_and_packet_t*>(slot);
+          bool has_dep = false;
+          for (int k = 0; k < 5 && !has_dep; ++k) {
+            if (bpkt->dep_signal[k].handle != 0) has_dep = true;
+          }
+          const char* tag = has_dep
+              ? " [Graph cross dep barrier]"
+              : (bpkt->completion_signal.handle != 0 ? " [Graph completion barrier]"
+                                                     : " [Graph batch barrier]");
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2,
+                  "Graph ShaderName :%s, device id : %u", tag, dev().index());
+          logAqlBarrierPacket(gpu_queue_, hdr, bpkt,
+                              Hsa::queue_load_read_index_scacquire(gpu_queue_), slotIdx, tag);
         }
       }
-    }
-
-    auto* lastSlotPtr = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
-        queueBase + ((startIndex + chunkEnd - 1) & queueMask) * kPacketSize);
-    if (isLastChunk && (attach_signal || blocking) && timestamp_ == nullptr) {
-      lastSlotPtr->completion_signal = Barriers().ActiveSignal();
     }
 
     // Write valid headers and ring the doorbell for this chunk.
