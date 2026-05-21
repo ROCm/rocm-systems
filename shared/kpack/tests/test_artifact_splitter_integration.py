@@ -1075,6 +1075,12 @@ class TestArtifactSplitterIntegration:
         assert "gfx1100" in result_filtered, (
             "gfx1100 should be in filtered results (in gpu_targets)"
         )
+        assert len(result_filtered["gfx1100"]) == 1, (
+            "gfx1100 kernel should be preserved intact"
+        )
+        assert result_filtered["gfx1100"][0].kernel_data == b"\x00" * 100, (
+            "gfx1100 kernel data should be unchanged by filtering"
+        )
         assert "gfx906" not in result_filtered, (
             "gfx906 should not be in filtered results (not in gpu_targets)"
         )
