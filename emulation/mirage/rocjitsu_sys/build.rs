@@ -68,7 +68,7 @@ fn emit_rerun_directives(include_dir: &Path, schema_dir: &Path) {
 
 fn emit_link_directives(rocjitsu_root: &Path) {
     if let Some(lib_dir) = env_path("ROCJITSU_LIB_DIR") {
-        println!("cargo:rustc-link-search=native={}", lib_dir.display());
+        emit_link_search(&lib_dir);
     }
 
     for lib_dir in [
@@ -79,18 +79,29 @@ fn emit_link_directives(rocjitsu_root: &Path) {
         rocjitsu_root.join("artifacts").join("lib"),
     ] {
         if lib_dir.exists() {
-            println!("cargo:rustc-link-search=native={}", lib_dir.display());
+            emit_link_search(&lib_dir);
         }
     }
 
     if let Some(rocm_path) = env_path("ROCM_PATH") {
         let rocm_lib_dir = rocm_path.join("lib");
         if rocm_lib_dir.exists() {
-            println!("cargo:rustc-link-search=native={}", rocm_lib_dir.display());
+            emit_link_search(&rocm_lib_dir);
         }
     }
 
     println!("cargo:rustc-link-lib=dylib=rocjitsu");
+}
+
+fn emit_link_search(lib_dir: &Path) {
+    println!("cargo:rustc-link-search=native={}", lib_dir.display());
+
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
+        println!(
+            "cargo:rustc-link-arg-tests=-Wl,-rpath,{}",
+            lib_dir.display()
+        );
+    }
 }
 
 fn generate_bindings(manifest_dir: &Path, out_dir: &Path, include_dir: &Path) {

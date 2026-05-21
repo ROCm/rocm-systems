@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 links = "rocjitsu"
 build = "build.rs"
+readme = "README.md"
 
 [dependencies]
 flatbuffers = "=24.3.25"
