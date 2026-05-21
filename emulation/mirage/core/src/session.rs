@@ -1,3 +1,7 @@
+use serde::{Deserialize, Serialize};
+
+use crate::profile::ProfileDef;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 enum SessionHealth {
     #[default]
