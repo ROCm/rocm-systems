@@ -79,8 +79,6 @@ jobs:
         if: always()
         run: |
           echo "Cleaning up orphan processes..."
-
-          pkill -9 -f gather_perf || true
           pkill -9 -f prterun || true
           pkill -9 -f mpirun || true
           pkill -9 -f "_perf" || true
