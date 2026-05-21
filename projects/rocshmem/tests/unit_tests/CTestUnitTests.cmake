@@ -95,9 +95,9 @@ function(register_all_unit_tests)
     set(TEST_WITH_TWO_PES "IPCImplSimpleCoarseTestFixture/*:IPCImplSimpleFineTestFixture/*:IPCImplTiledFineTestFixture/*:DegenerateTiledFine.*")
     set(TEST_WITH_TWO_PES "${TEST_WITH_TWO_PES}:SdmaSimpleCoarse/*:SdmaSimpleFine/*:SdmaTiledFine/*")
 
-    # All tests (4 ranks) - runs everything EXCEPT the 2-PE specific tests
+    # All unit tests (4 ranks) - runs everything EXCEPT the 2-PE specific tests
     add_rocshmem_unit_test(
-        NAME all_tests
+        NAME unit_tests
         RANKS 4
         GTEST_FILTER "-${TEST_WITH_TWO_PES}"
         LABELS "ALL;IPC;SDMA;quick;standard;comprehensive;full"
