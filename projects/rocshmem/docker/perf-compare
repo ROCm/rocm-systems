@@ -1,0 +1,20 @@
+#!/bin/bash
+# Run rocSHMEM performance comparison inside the container.
+# Usage: docker run ... IMAGE perf-compare [run_perf_compare.sh options]
+# All extra args are forwarded to run_perf_compare.sh (--suite, --iterations, etc.)
+# Results land in /results (bind-mount a host directory there with -v host:/results)
+RESULTS_DIR="${RESULTS_DIR:-/results}"
+mkdir -p "$RESULTS_DIR"
+BASELINE_DIR=/app/build
+BRANCH_DIR=$(ls -d /app/build[0-9]* 2>/dev/null | head -1)
+if [[ -z "$BRANCH_DIR" ]]; then
+  echo "ERROR: No PR branch build found in this image." >&2
+  echo "       Rebuild with: docker build --build-arg PR_NUM=<N> ..." >&2
+  exit 1
+fi
+exec bash /app/rocm-systems/projects/rocshmem/scripts/functional_tests/run_perf_compare.sh \
+  --skip-build \
+  --baseline-dir "$BASELINE_DIR" \
+  --branch-dir   "$BRANCH_DIR" \
+  --outdir       "$RESULTS_DIR" \
+  "$@"
