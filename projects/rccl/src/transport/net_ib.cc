@@ -2101,7 +2101,7 @@ ib_recv:
       rCommDev->gpuFlush.dmabuf_fd = -1;
 
       if (rcclParamIbGdrFlushGpuMemNoRelaxedOrdering()) {
-        #if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
+        #if CUDA_VERSION >= 11070 || HIP_VERSION >= 70200000
         if (ncclCuMemEnable()) {
           NCCLCHECKGOTO(ncclMemAlloc((void**)&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int)), ret, fail);
           CUCHECKGOTO(cuMemGetHandleForAddressRange((void*)&rCommDev->gpuFlush.dmabuf_fd,

@@ -1450,7 +1450,7 @@ testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff, s
     // The ROCm 7.0.2.x backport (HIP_VERSION in [70051831, 70060000)) carries the same hipMemRetainAllocationHandle
     // fix, so extend the guard to cover that range as well.
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0) && \
-    (HIP_VERSION >= 71260540 || (HIP_VERSION >= 70051831 && HIP_VERSION < 70060000))
+    (HIP_VERSION >= 70200000 || (HIP_VERSION >= 70051831 && HIP_VERSION < 70060000))
     NCCLCHECK(ncclMemAlloc(sendbuff, nbytes));
     NCCLCHECK(ncclMemAlloc(recvbuff, nbytes));
     if (bias) NCCLCHECK(ncclMemAlloc(bias, nbytes));
@@ -2238,7 +2238,7 @@ testResult_t run() {
 
   // Free off CUDA allocated memory
   for (int i=0; i<nGpus*nThreads; i++) {
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0) && HIP_VERSION >= 71260540
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0) && HIP_VERSION >= 70200000
     if (sendbuffs[i]) NCCLCHECK(ncclMemFree((char*)sendbuffs[i]));
     if (recvbuffs[i]) NCCLCHECK(ncclMemFree((char*)recvbuffs[i]));
     if (bias[i]) NCCLCHECK(ncclMemFree((char*)bias[i]));
