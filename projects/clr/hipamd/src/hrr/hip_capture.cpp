@@ -659,6 +659,197 @@ hipError_t capture_hipHostUnregister(void* hostPtr) {
 }
 
 // ---------------------------------------------------------------------------
+// hipMemPoolSetAttribute — value is void* to a scalar; copy 8 bytes inline.
+// ---------------------------------------------------------------------------
+
+hipError_t capture_hipMemPoolSetAttribute(hipMemPool_t mem_pool,
+                                          hipMemPoolAttr attr,
+                                          void* value) {
+  hipError_t r = g_real_table.hipMemPoolSetAttribute_fn(mem_pool, attr, value);
+  hrr_args_hipMemPoolSetAttribute a{};
+  a.ret      = static_cast<int32_t>(r);
+  a.mem_pool = reinterpret_cast<uint64_t>(mem_pool);
+  a.attr     = static_cast<int32_t>(attr);
+  a.value    = reinterpret_cast<uint64_t>(value);
+  if (value) std::memcpy(&a.value_u64, value, sizeof(a.value_u64));
+  hrr_cap::writer::write_event_raw(HRR_API_HIPMEMPOOLSETATTRIBUTE, &a.hdr, sizeof(a));
+  return r;
+}
+
+// ---------------------------------------------------------------------------
+// hipMemPoolCreate — pool_props is a struct pointer; copy it inline.
+// ---------------------------------------------------------------------------
+
+hipError_t capture_hipMemPoolCreate(hipMemPool_t* mem_pool,
+                                    const hipMemPoolProps* pool_props) {
+  hipError_t r = g_real_table.hipMemPoolCreate_fn(mem_pool, pool_props);
+  hrr_args_hipMemPoolCreate a{};
+  a.ret      = static_cast<int32_t>(r);
+  a.mem_pool = reinterpret_cast<uint64_t>(r == hipSuccess ? *mem_pool : nullptr);
+  if (pool_props)
+    std::memcpy(a.pool_props_bytes, pool_props, sizeof(a.pool_props_bytes));
+  hrr_cap::writer::write_event_raw(HRR_API_HIPMEMPOOLCREATE, &a.hdr, sizeof(a));
+  return r;
+}
+
+// ---------------------------------------------------------------------------
+// hipMemcpy3D / hipMemcpy3DAsync — inline parms + optional H2D blob
+// ---------------------------------------------------------------------------
+
+// Helper: write H2D blob hash, return hash (or {0,0} if not H2D)
+static hrr_cap::Hash128 capture_memcpy3d_blob(
+    const struct hipMemcpy3DParms* p, hipStream_t stream, bool is_async) {
+  if (!p || p->kind != hipMemcpyHostToDevice || !p->srcPtr.ptr) return {};
+  size_t byte_count = p->extent.width * p->extent.height * p->extent.depth;
+  if (byte_count == 0) return {};
+  if (is_async && stream)
+    g_real_table.hipStreamSynchronize_fn(stream);
+  return hrr_cap::writer::write_blob(p->srcPtr.ptr, byte_count);
+}
+
+hipError_t capture_hipMemcpy3D(const struct hipMemcpy3DParms* p) {
+  hipError_t r = g_real_table.hipMemcpy3D_fn(p);
+  hrr_args_hipMemcpy3D a{};
+  a.ret = static_cast<int32_t>(r);
+  if (p) std::memcpy(a.parms_bytes, p, sizeof(a.parms_bytes));
+  auto h = capture_memcpy3d_blob(p, nullptr, false);
+  a.blob_hash_lo = h.lo;
+  a.blob_hash_hi = h.hi;
+  hrr_cap::writer::write_event_raw(HRR_API_HIPMEMCPY3D, &a.hdr, sizeof(a));
+  return r;
+}
+
+hipError_t capture_hipMemcpy3DAsync(const struct hipMemcpy3DParms* p, hipStream_t stream) {
+  hipError_t r = g_real_table.hipMemcpy3DAsync_fn(p, stream);
+  hrr_args_hipMemcpy3DAsync a{};
+  a.ret    = static_cast<int32_t>(r);
+  a.stream = reinterpret_cast<uint64_t>(stream);
+  if (p) std::memcpy(a.parms_bytes, p, sizeof(a.parms_bytes));
+  auto h = capture_memcpy3d_blob(p, stream, true);
+  a.blob_hash_lo = h.lo;
+  a.blob_hash_hi = h.hi;
+  hrr_cap::writer::write_event_raw(HRR_API_HIPMEMCPY3DASYNC, &a.hdr, sizeof(a));
+  return r;
+}
+
+hipError_t capture_hipMemcpy3D_spt(const struct hipMemcpy3DParms* p) {
+  hipError_t r = g_real_table.hipMemcpy3D_spt_fn(p);
+  hrr_args_hipMemcpy3D_spt a{};
+  a.ret = static_cast<int32_t>(r);
+  if (p) std::memcpy(a.parms_bytes, p, sizeof(a.parms_bytes));
+  auto h = capture_memcpy3d_blob(p, nullptr, false);
+  a.blob_hash_lo = h.lo;
+  a.blob_hash_hi = h.hi;
+  hrr_cap::writer::write_event_raw(HRR_API_HIPMEMCPY3D_SPT, &a.hdr, sizeof(a));
+  return r;
+}
+
+hipError_t capture_hipMemcpy3DAsync_spt(const struct hipMemcpy3DParms* p, hipStream_t stream) {
+  hipError_t r = g_real_table.hipMemcpy3DAsync_spt_fn(p, stream);
+  hrr_args_hipMemcpy3DAsync_spt a{};
+  a.ret    = static_cast<int32_t>(r);
+  a.stream = reinterpret_cast<uint64_t>(stream);
+  if (p) std::memcpy(a.parms_bytes, p, sizeof(a.parms_bytes));
+  auto h = capture_memcpy3d_blob(p, stream, true);
+  a.blob_hash_lo = h.lo;
+  a.blob_hash_hi = h.hi;
+  hrr_cap::writer::write_event_raw(HRR_API_HIPMEMCPY3DASYNC_SPT, &a.hdr, sizeof(a));
+  return r;
+}
+
+// ---------------------------------------------------------------------------
+// hipArrayCreate / hipArray3DCreate — inline descriptor; record handle
+// ---------------------------------------------------------------------------
+
+hipError_t capture_hipArrayCreate(hipArray_t* pHandle,
+                                  const HIP_ARRAY_DESCRIPTOR* pAllocateArray) {
+  hipError_t r = g_real_table.hipArrayCreate_fn(pHandle, pAllocateArray);
+  hrr_args_hipArrayCreate a{};
+  a.ret     = static_cast<int32_t>(r);
+  a.pHandle = reinterpret_cast<uint64_t>(r == hipSuccess ? *pHandle : nullptr);
+  if (pAllocateArray)
+    std::memcpy(a.array_desc_bytes, pAllocateArray, sizeof(a.array_desc_bytes));
+  hrr_cap::writer::write_event_raw(HRR_API_HIPARRAYCREATE, &a.hdr, sizeof(a));
+  return r;
+}
+
+hipError_t capture_hipArray3DCreate(hipArray_t* array,
+                                    const HIP_ARRAY3D_DESCRIPTOR* pAllocateArray) {
+  hipError_t r = g_real_table.hipArray3DCreate_fn(array, pAllocateArray);
+  hrr_args_hipArray3DCreate a{};
+  a.ret   = static_cast<int32_t>(r);
+  a.array = reinterpret_cast<uint64_t>(r == hipSuccess ? *array : nullptr);
+  if (pAllocateArray)
+    std::memcpy(a.array3d_desc_bytes, pAllocateArray, sizeof(a.array3d_desc_bytes));
+  hrr_cap::writer::write_event_raw(HRR_API_HIPARRAY3DCREATE, &a.hdr, sizeof(a));
+  return r;
+}
+
+// ---------------------------------------------------------------------------
+// hipStreamSetAttribute — inline hipStreamAttrValue (64 bytes)
+// ---------------------------------------------------------------------------
+
+hipError_t capture_hipStreamSetAttribute(hipStream_t stream, hipStreamAttrID attr,
+                                         const hipStreamAttrValue* value) {
+  hipError_t r = g_real_table.hipStreamSetAttribute_fn(stream, attr, value);
+  hrr_args_hipStreamSetAttribute a{};
+  a.ret    = static_cast<int32_t>(r);
+  a.stream = reinterpret_cast<uint64_t>(stream);
+  a.attr   = static_cast<int32_t>(attr);
+  if (value) std::memcpy(a.stream_attr_bytes, value, sizeof(a.stream_attr_bytes));
+  hrr_cap::writer::write_event_raw(HRR_API_HIPSTREAMSETATTRIBUTE, &a.hdr, sizeof(a));
+  return r;
+}
+
+// ---------------------------------------------------------------------------
+// hipMemGetAllocationGranularity — inline hipMemAllocationProp (32 bytes)
+// ---------------------------------------------------------------------------
+
+hipError_t capture_hipMemGetAllocationGranularity(size_t* granularity,
+                                                   const hipMemAllocationProp* prop,
+                                                   hipMemAllocationGranularity_flags option) {
+  hipError_t r = g_real_table.hipMemGetAllocationGranularity_fn(granularity, prop, option);
+  hrr_args_hipMemGetAllocationGranularity a{};
+  a.ret         = static_cast<int32_t>(r);
+  a.granularity = reinterpret_cast<uint64_t>(granularity);
+  a.option      = static_cast<uint32_t>(option);
+  if (prop) std::memcpy(a.alloc_prop_bytes, prop, sizeof(a.alloc_prop_bytes));
+  hrr_cap::writer::write_event_raw(HRR_API_HIPMEMGETALLOCATIONGRANULARITY, &a.hdr, sizeof(a));
+  return r;
+}
+
+// ---------------------------------------------------------------------------
+// hipMemPoolSetAccess / hipMemSetAccess — inline first hipMemAccessDesc entry
+// ---------------------------------------------------------------------------
+
+hipError_t capture_hipMemPoolSetAccess(hipMemPool_t mem_pool,
+                                       const hipMemAccessDesc* desc_list, size_t count) {
+  hipError_t r = g_real_table.hipMemPoolSetAccess_fn(mem_pool, desc_list, count);
+  hrr_args_hipMemPoolSetAccess a{};
+  a.ret      = static_cast<int32_t>(r);
+  a.mem_pool = reinterpret_cast<uint64_t>(mem_pool);
+  a.count    = static_cast<uint64_t>(count);
+  if (desc_list && count > 0)
+    std::memcpy(a.access_desc_bytes, desc_list, sizeof(a.access_desc_bytes));
+  hrr_cap::writer::write_event_raw(HRR_API_HIPMEMPOOLSETACCESS, &a.hdr, sizeof(a));
+  return r;
+}
+
+hipError_t capture_hipMemSetAccess(void* ptr, size_t size,
+                                   const hipMemAccessDesc* desc, size_t count) {
+  hipError_t r = g_real_table.hipMemSetAccess_fn(ptr, size, desc, count);
+  hrr_args_hipMemSetAccess a{};
+  a.ret   = static_cast<int32_t>(r);
+  a.ptr   = reinterpret_cast<uint64_t>(ptr);
+  a.size  = static_cast<uint64_t>(size);
+  a.count = static_cast<uint64_t>(count);
+  if (desc && count > 0)
+    std::memcpy(a.access_desc_bytes, desc, sizeof(a.access_desc_bytes));
+  hrr_cap::writer::write_event_raw(HRR_API_HIPMEMSETACCESS, &a.hdr, sizeof(a));
+  return r;
+}
+
+// ---------------------------------------------------------------------------
 // Install / uninstall (build_table functions live in hip_capture_generated.cpp)
 // ---------------------------------------------------------------------------
 
@@ -728,10 +919,9 @@ struct HrrEarlyInstall {
 
 void hip_capture_init() {
   if (!hip_capture_enabled()) return;
-  if (!g_installed) return;  // early install failed
+  if (!g_installed) return;  // early install failed (table not installed)
 
-  // Open the writer now — Flag::init() has run so HIP_HRR_CAPTURE_OUTPUT is valid.
-  // This must happen before the fat-binary sweep below which calls write_blob().
+  // Open the events writer now — Flag::init() has run so output_dir is valid.
   if (!hrr_cap::writer::open(hip_capture_output_dir())) return;
 
   // Install compiler dispatch shims now — hip::init() has completed so

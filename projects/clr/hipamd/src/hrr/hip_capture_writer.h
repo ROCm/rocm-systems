@@ -14,6 +14,9 @@ namespace writer {
 // Must be called before any write_* functions.
 bool open(const char* output_dir);
 
+// Returns true if open() has been called successfully.
+bool is_open();
+
 // Flush events.bin and write manifest.json. Safe to call multiple times.
 void flush(const char* output_dir);
 

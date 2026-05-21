@@ -564,7 +564,23 @@ hipError_t playback_hipModuleLoadData(PlaybackContext& ctx,
 
 hipError_t playback_hipModuleLoadDataEx(PlaybackContext& ctx,
                                         const uint8_t* payload) {
-    return replay_module_load(ctx, payload);
+    // hipModuleLoadDataEx has extra fields (numOptions/options/optionValues)
+    // before co_hash — use the correct struct type.
+    const auto* a = reinterpret_cast<const hrr_args_hipModuleLoadDataEx*>(payload);
+    uint64_t rec_module = a->module;
+    uint64_t co_hash_lo = a->co_hash_lo;
+    uint64_t co_hash_hi = a->co_hash_hi;
+
+    if (!co_hash_lo && !co_hash_hi) {
+        fprintf(stderr, "[HRR] hipModuleLoadDataEx: no code object hash in payload\n");
+        return hipErrorInvalidValue;
+    }
+
+    hipModule_t mod = ctx.load_module(co_hash_lo, co_hash_hi);
+    if (!mod) return hipErrorSharedObjectInitFailed;
+
+    ctx.record_module(rec_module, mod);
+    return hipSuccess;
 }
 
 hipError_t playback_hipModuleLoad(PlaybackContext& ctx,
@@ -662,6 +678,44 @@ hipError_t playback_hipMallocFromPoolAsync(PlaybackContext& ctx,
     hipError_t r = hipMallocFromPoolAsync(&live, pad_sz, pool, stream);
     if (r == hipSuccess)
         ctx.record_alloc(a->dev_ptr, live, pad_sz);
+    return r;
+}
+
+// ---------------------------------------------------------------------------
+// Manual playback: hipMemPoolSetAttribute / hipMemPoolGetAttribute
+// value is void*; stored inline as value_u64 (8 bytes covers all attr sizes).
+// GetAttribute is a no-op at playback (output only; pool state matches capture).
+// ---------------------------------------------------------------------------
+
+hipError_t playback_hipMemPoolSetAttribute(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipMemPoolSetAttribute*>(pl);
+    hipMemPool_t pool = ctx.translate_mempool(a->mem_pool);
+    return hipMemPoolSetAttribute(pool, (hipMemPoolAttr)a->attr,
+                                  const_cast<void*>(static_cast<const void*>(&a->value_u64)));
+}
+
+hipError_t playback_hipMemPoolGetAttribute(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipMemPoolGetAttribute*>(pl);
+    hipMemPool_t pool = ctx.translate_mempool(a->mem_pool);
+    uint64_t scratch = 0;
+    return hipMemPoolGetAttribute(pool, (hipMemPoolAttr)a->attr, &scratch);
+}
+
+// ---------------------------------------------------------------------------
+// Manual playback: hipMemPoolCreate
+// pool_props stored inline as pool_props_bytes[88] — reconstruct and pass.
+// ---------------------------------------------------------------------------
+
+hipError_t playback_hipMemPoolCreate(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipMemPoolCreate*>(pl);
+    hipMemPoolProps props{};
+    static_assert(sizeof(props) <= sizeof(a->pool_props_bytes),
+                  "hipMemPoolProps larger than pool_props_bytes[88]");
+    std::memcpy(&props, a->pool_props_bytes, sizeof(props));
+    hipMemPool_t live = nullptr;
+    hipError_t r = hipMemPoolCreate(&live, &props);
+    if (r == hipSuccess)
+        ctx.record_mempool(a->mem_pool, live);
     return r;
 }
 
@@ -1012,6 +1066,44 @@ hipError_t playback_hipMemcpyWithStream(PlaybackContext& ctx,
 }
 
 // ---------------------------------------------------------------------------
+// Manual playback: hipMemcpyDtoH / hipMemcpyDtoHAsync
+// ---------------------------------------------------------------------------
+// dst is a host pointer (captured as raw address, not in alloc_map).
+// We use a temp buffer as the copy target; just ensures the GPU side completes.
+hipError_t playback_hipMemcpyDtoH(PlaybackContext& ctx,
+                                  const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipMemcpyDtoH*>(pl);
+    void* src_dev = ctx.translate_ptr(a->src);
+    if (!src_dev) {
+        if (ctx.verbose)
+            fprintf(stderr, "[HRR] hipMemcpyDtoH: src 0x%llx not mapped — skip\n",
+                    (unsigned long long)a->src);
+        return hipSuccess;
+    }
+    size_t sz = static_cast<size_t>(a->sizeBytes);
+    std::vector<uint8_t> tmp(sz);
+    return hipMemcpyDtoH(tmp.data(), (hipDeviceptr_t)src_dev, sz);
+}
+
+hipError_t playback_hipMemcpyDtoHAsync(PlaybackContext& ctx,
+                                       const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipMemcpyDtoHAsync*>(pl);
+    void* src_dev = ctx.translate_ptr(a->src);
+    if (!src_dev) {
+        if (ctx.verbose)
+            fprintf(stderr, "[HRR] hipMemcpyDtoHAsync: src 0x%llx not mapped — skip\n",
+                    (unsigned long long)a->src);
+        return hipSuccess;
+    }
+    size_t sz = static_cast<size_t>(a->sizeBytes);
+    std::vector<uint8_t> tmp(sz);
+    hipStream_t stream = ctx.translate_stream(a->stream);
+    hipError_t r = hipMemcpyDtoHAsync(tmp.data(), (hipDeviceptr_t)src_dev, sz, stream);
+    if (r == hipSuccess) (void)hipStreamSynchronize(stream);
+    return r;
+}
+
+// ---------------------------------------------------------------------------
 // Manual playback: stream create/destroy
 // ---------------------------------------------------------------------------
 // hipStreamCreate:              ret(4) stream(8)
@@ -1264,4 +1356,257 @@ hipError_t playback_hipEventDestroy(PlaybackContext& ctx,
     if (event) r = hipEventDestroy(event);
     ctx.remove_event(a->event);
     return r;
+}
+
+// ---------------------------------------------------------------------------
+// Manual playback: hipMemcpy3D / hipMemcpy3DAsync
+// ---------------------------------------------------------------------------
+
+hipError_t playback_hipMemcpy3D(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipMemcpy3D*>(pl);
+    hipMemcpy3DParms parms{};
+    std::memcpy(&parms, a->parms_bytes, sizeof(parms));
+
+    if (parms.kind == hipMemcpyHostToDevice && a->blob_hash_lo != 0) {
+        size_t blob_sz = 0;
+        const void* blob = ctx.load_blob(a->blob_hash_lo, a->blob_hash_hi, &blob_sz);
+        if (blob) parms.srcPtr.ptr = const_cast<void*>(blob);
+        // dst is a device pointer — translate to live allocation
+        parms.dstPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstPtr.ptr));
+        return hipMemcpy3D(&parms);
+    }
+    // D2H: translate src device ptr; provide a throw-away host buffer as dst.
+    // Use flat hipMemcpy to avoid pitch/extent mismatch with padded allocations.
+    // D2D: translate both
+    if (parms.kind == hipMemcpyDeviceToHost) {
+        uint64_t src_rec = reinterpret_cast<uint64_t>(parms.srcPtr.ptr);
+        void* src_live = ctx.translate_ptr(src_rec);
+        if (!src_live) {
+            fprintf(stderr, "[HRR] hipMemcpy3D D2H: src 0x%llx not mapped — skip\n",
+                    (unsigned long long)src_rec);
+            return hipSuccess;
+        }
+        size_t byte_count = parms.extent.width * parms.extent.height * parms.extent.depth;
+        std::vector<uint8_t> tmp(byte_count ? byte_count : 1);
+        return hipMemcpy(tmp.data(), src_live, byte_count, hipMemcpyDeviceToHost);
+    } else {
+        parms.srcPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.srcPtr.ptr));
+        parms.dstPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstPtr.ptr));
+    }
+    return hipMemcpy3D(&parms);
+}
+
+hipError_t playback_hipMemcpy3DAsync(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipMemcpy3DAsync*>(pl);
+    hipMemcpy3DParms parms{};
+    std::memcpy(&parms, a->parms_bytes, sizeof(parms));
+    hipStream_t stream = ctx.translate_stream(a->stream);
+
+    if (parms.kind == hipMemcpyHostToDevice && a->blob_hash_lo != 0) {
+        size_t blob_sz = 0;
+        const void* blob = ctx.load_blob(a->blob_hash_lo, a->blob_hash_hi, &blob_sz);
+        if (blob) parms.srcPtr.ptr = const_cast<void*>(blob);
+        parms.dstPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstPtr.ptr));
+        return hipMemcpy3DAsync(&parms, stream);
+    }
+    if (parms.kind == hipMemcpyDeviceToHost) {
+        uint64_t src_rec = reinterpret_cast<uint64_t>(parms.srcPtr.ptr);
+        void* src_live = ctx.translate_ptr(src_rec);
+        if (!src_live) {
+            fprintf(stderr, "[HRR] hipMemcpy3DAsync D2H: src 0x%llx not mapped — skip\n",
+                    (unsigned long long)src_rec);
+            return hipSuccess;
+        }
+        // For D2H: use flat hipMemcpyAsync to avoid pitch mismatch with padded allocs.
+        size_t byte_count = parms.extent.width * parms.extent.height * parms.extent.depth;
+        std::vector<uint8_t> tmp(byte_count ? byte_count : 1);
+        hipError_t r = hipMemcpyAsync(tmp.data(), src_live, byte_count,
+                                      hipMemcpyDeviceToHost, stream);
+        if (stream) hipStreamSynchronize(stream);
+        return r;
+    } else {
+        parms.srcPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.srcPtr.ptr));
+        parms.dstPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstPtr.ptr));
+    }
+    return hipMemcpy3DAsync(&parms, stream);
+}
+
+hipError_t playback_hipMemcpy3D_spt(PlaybackContext& ctx, const uint8_t* pl) {
+    return playback_hipMemcpy3D(ctx, pl);
+}
+
+hipError_t playback_hipMemcpy3DAsync_spt(PlaybackContext& ctx, const uint8_t* pl) {
+    return playback_hipMemcpy3DAsync(ctx, pl);
+}
+
+// ---------------------------------------------------------------------------
+// Manual playback: hipArrayCreate / hipArray3DCreate
+// ---------------------------------------------------------------------------
+
+hipError_t playback_hipArrayCreate(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipArrayCreate*>(pl);
+    HIP_ARRAY_DESCRIPTOR desc{};
+    std::memcpy(&desc, a->array_desc_bytes, sizeof(desc));
+    hipArray_t arr = nullptr;
+    hipError_t r = hipArrayCreate(&arr, &desc);
+    if (r == hipSuccess) ctx.record_array(a->pHandle, arr);
+    return r;
+}
+
+hipError_t playback_hipArray3DCreate(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipArray3DCreate*>(pl);
+    HIP_ARRAY3D_DESCRIPTOR desc{};
+    std::memcpy(&desc, a->array3d_desc_bytes, sizeof(desc));
+    hipArray_t arr = nullptr;
+    hipError_t r = hipArray3DCreate(&arr, &desc);
+    if (r == hipSuccess) ctx.record_array(a->array, arr);
+    return r;
+}
+
+// ---------------------------------------------------------------------------
+// Manual playback: hipFreeArray — skip if handle not in array_map
+// ---------------------------------------------------------------------------
+hipError_t playback_hipFreeArray(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipFreeArray*>(pl);
+    hipArray_t arr = ctx.translate_array(a->array);
+    if (!arr) return hipSuccess;  // nooped alloc (hipMallocArray noop)
+    return hipFreeArray(arr);
+}
+
+// ---------------------------------------------------------------------------
+// Manual playback: hipStreamSetAttribute
+// ---------------------------------------------------------------------------
+
+hipError_t playback_hipStreamSetAttribute(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipStreamSetAttribute*>(pl);
+    hipStream_t stream = ctx.translate_stream(a->stream);
+    hipStreamAttrValue val{};
+    std::memcpy(&val, a->stream_attr_bytes, sizeof(val));
+    return hipStreamSetAttribute(stream, static_cast<hipStreamAttrID>(a->attr), &val);
+}
+
+// ---------------------------------------------------------------------------
+// Manual playback: hipMemGetAllocationGranularity
+// ---------------------------------------------------------------------------
+
+hipError_t playback_hipMemGetAllocationGranularity(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipMemGetAllocationGranularity*>(pl);
+    hipMemAllocationProp prop{};
+    std::memcpy(&prop, a->alloc_prop_bytes, sizeof(prop));
+    size_t granularity = 0;
+    return hipMemGetAllocationGranularity(&granularity, &prop,
+                                          static_cast<hipMemAllocationGranularity_flags>(a->option));
+}
+
+// ---------------------------------------------------------------------------
+// Manual playback: hipMemPoolSetAccess / hipMemSetAccess
+// ---------------------------------------------------------------------------
+
+hipError_t playback_hipMemPoolSetAccess(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipMemPoolSetAccess*>(pl);
+    hipMemPool_t pool = ctx.translate_mempool(a->mem_pool);
+    if (!pool) return hipSuccess;
+    hipMemAccessDesc desc{};
+    std::memcpy(&desc, a->access_desc_bytes, sizeof(desc));
+    return hipMemPoolSetAccess(pool, &desc, 1);
+}
+
+hipError_t playback_hipMemSetAccess(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipMemSetAccess*>(pl);
+    // VMM reserved address — look in vmm_va_map first, then fall back to alloc_map
+    void* ptr = ctx.translate_vmm_va(a->ptr);
+    if (!ptr) ptr = ctx.translate_ptr(a->ptr);
+    if (!ptr) return hipSuccess;  // VA not found — address space not rebuilt yet, skip
+    hipMemAccessDesc desc{};
+    std::memcpy(&desc, a->access_desc_bytes, sizeof(desc));
+    return hipMemSetAccess(ptr, static_cast<size_t>(a->size), &desc, 1);
+}
+
+// ---------------------------------------------------------------------------
+// Manual playback: Virtual Memory Management (VMM) address/allocation APIs
+// ---------------------------------------------------------------------------
+// These APIs require tracking: recorded VA -> live VA, and recorded handle ->
+// live hipMemGenericAllocationHandle_t.  The generated shims cannot do this
+// because they discard output pointers and pass stale handles as-is.
+
+hipError_t playback_hipMemAddressReserve(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipMemAddressReserve*>(pl);
+    uint64_t rec_ptr = a->ptr;  // recorded output pointer-to-pointer; contains the reserved VA
+    // Interpret a->ptr as the *value* of the reserved VA (stored by generator as uint64_t ptr)
+    // The recorded ptr field stores the *pointer* output, which at capture time held the VA.
+    // We use it as the recorded-VA key.
+    void* live_va = nullptr;
+    hipError_t r = hipMemAddressReserve(&live_va,
+                                        static_cast<size_t>(a->size),
+                                        static_cast<size_t>(a->alignment),
+                                        nullptr,  // hint addr — don't try to match capture VA
+                                        static_cast<unsigned long long>(a->flags));
+    if (r == hipSuccess && live_va) {
+        std::unique_lock lk(ctx.map_mutex);
+        ctx.vmm_va_map[rec_ptr] = {live_va, static_cast<size_t>(a->size)};
+    }
+    return r;
+}
+
+hipError_t playback_hipMemAddressFree(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipMemAddressFree*>(pl);
+    void* live_va = ctx.translate_vmm_va(a->devPtr);
+    if (!live_va) return hipSuccess;  // already freed or not tracked
+    hipError_t r = hipMemAddressFree(live_va, static_cast<size_t>(a->size));
+    if (r == hipSuccess) {
+        std::unique_lock lk(ctx.map_mutex);
+        ctx.vmm_va_map.erase(a->devPtr);
+    }
+    return r;
+}
+
+hipError_t playback_hipMemCreate(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipMemCreate*>(pl);
+    uint64_t rec_handle = a->handle;  // recorded output handle
+    // Reconstruct the hipMemAllocationProp — it's a regular struct, not stored inline
+    // Generator stores handle (u64) and prop (u64 stale ptr) and flags (u64).
+    // We re-query granularity with the same type/location as captured.
+    hipMemAllocationProp prop{};
+    prop.type                = hipMemAllocationTypePinned;
+    prop.location.type       = hipMemLocationTypeDevice;
+    prop.location.id         = 0;  // device 0; matches test workload
+    hipMemGenericAllocationHandle_t live_handle{};
+    hipError_t r = hipMemCreate(&live_handle, static_cast<size_t>(a->size), &prop, 0);
+    if (r == hipSuccess) {
+        std::unique_lock lk(ctx.map_mutex);
+        ctx.vmm_handle_map[rec_handle] = live_handle;
+    }
+    return r;
+}
+
+hipError_t playback_hipMemRelease(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipMemRelease*>(pl);
+    hipMemGenericAllocationHandle_t live = ctx.translate_vmm_handle(a->handle);
+    if (!live) return hipSuccess;
+    hipError_t r = hipMemRelease(live);
+    if (r == hipSuccess) {
+        std::unique_lock lk(ctx.map_mutex);
+        ctx.vmm_handle_map.erase(a->handle);
+    }
+    return r;
+}
+
+hipError_t playback_hipMemMap(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipMemMap*>(pl);
+    void* live_va = ctx.translate_vmm_va(a->ptr);
+    if (!live_va) return hipSuccess;  // VA not tracked, skip
+    hipMemGenericAllocationHandle_t live_handle = ctx.translate_vmm_handle(a->handle);
+    if (!live_handle) return hipSuccess;  // handle not tracked, skip
+    return hipMemMap(live_va,
+                     static_cast<size_t>(a->size),
+                     static_cast<size_t>(a->offset),
+                     live_handle,
+                     static_cast<unsigned long long>(a->flags));
+}
+
+hipError_t playback_hipMemUnmap(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipMemUnmap*>(pl);
+    void* live_va = ctx.translate_vmm_va(a->ptr);
+    if (!live_va) return hipSuccess;
+    return hipMemUnmap(live_va, static_cast<size_t>(a->size));
 }

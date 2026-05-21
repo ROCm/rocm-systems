@@ -105,9 +105,31 @@ struct PlaybackContext {
     // Guarded by map_mutex.
     std::unordered_map<uint64_t, void*> host_reg_bufs;
 
+    // VMM replay maps (guarded by map_mutex):
+    //   vmm_handle_map: recorded hipMemGenericAllocationHandle_t (as u64) -> live handle
+    //   vmm_va_map    : recorded reserved-VA base (u64) -> {live_va, size}
+    std::unordered_map<uint64_t, hipMemGenericAllocationHandle_t> vmm_handle_map;
+    struct VmmVA { void* live; size_t size; };
+    std::unordered_map<uint64_t, VmmVA> vmm_va_map;
+
+    // Translate a recorded VA (from AddressReserve) to the live replay VA.
+    // Returns nullptr if not found or if rec is 0.
+    void* translate_vmm_va(uint64_t rec) const {
+        if (rec == 0) return nullptr;
+        std::shared_lock lk(map_mutex);
+        auto it = vmm_va_map.find(rec);
+        return it != vmm_va_map.end() ? it->second.live : nullptr;
+    }
+    hipMemGenericAllocationHandle_t translate_vmm_handle(uint64_t rec) const {
+        if (rec == 0) return {};
+        std::shared_lock lk(map_mutex);
+        auto it = vmm_handle_map.find(rec);
+        return it != vmm_handle_map.end() ? it->second : hipMemGenericAllocationHandle_t{};
+    }
+
     // ---- Pointer translation ----
     // Translates a recorded GPU address to a live pointer.
-    // Exact match first; falls back to sub-alloc range search.
+    // Checks alloc_map (exact + range) then vmm_va_map (exact + range).
     void* translate_ptr(uint64_t rec) const {
         if (rec == 0) return nullptr;
         std::shared_lock lk(map_mutex);
@@ -117,6 +139,14 @@ struct PlaybackContext {
         for (auto& [base, entry] : alloc_map) {
             if (rec >= base && rec < base + entry.size)
                 return static_cast<char*>(entry.live_ptr) +
+                       static_cast<ptrdiff_t>(rec - base);
+        }
+        // Fall back to VMM reserved-VA map (exact + range)
+        auto vit = vmm_va_map.find(rec);
+        if (vit != vmm_va_map.end()) return vit->second.live;
+        for (auto& [base, va] : vmm_va_map) {
+            if (rec >= base && rec < base + va.size)
+                return static_cast<char*>(va.live) +
                        static_cast<ptrdiff_t>(rec - base);
         }
         return nullptr;

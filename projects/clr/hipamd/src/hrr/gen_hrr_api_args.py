@@ -103,6 +103,23 @@ MANUAL_CAPTURE_APIS: Set[str] = {
     # Host memory registration — blob snapshotting of initial host mem contents
     "hipHostRegister",
     "hipHostUnregister",
+    # hipMemPoolCreate — pool_props is a struct pointer; must copy it inline
+    "hipMemPoolCreate",
+    # hipMemPoolSetAttribute — value is void*; copy 8 bytes inline as value_u64
+    "hipMemPoolSetAttribute",
+    # hipMemcpy3D family — hipMemcpy3DParms is a struct pointer; copy inline + H2D blob
+    "hipMemcpy3D",
+    "hipMemcpy3DAsync",
+    "hipMemcpy3D_spt",
+    "hipMemcpy3DAsync_spt",
+    # Array creation — need handle map (manual capture for output handle)
+    "hipArrayCreate",
+    "hipArray3DCreate",
+    # Struct-pointer capture: value stored inline
+    "hipStreamSetAttribute",
+    "hipMemGetAllocationGranularity",
+    "hipMemPoolSetAccess",
+    "hipMemSetAccess",
 }
 
 # Alias for backward compat within the file (some helpers used MANUAL_APIS)
@@ -162,6 +179,11 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     "hipHostRegister",
     "hipHostUnregister",
     "hipHostGetDevicePointer",
+    # hipMemPoolCreate — pool_props stored inline; must reconstruct & pass by pointer
+    "hipMemPoolCreate",
+    # hipMemPoolSetAttribute / hipMemPoolGetAttribute — value is void*; stored inline
+    "hipMemPoolSetAttribute",
+    "hipMemPoolGetAttribute",
     # Graph stream-capture flow — hipStreamEndCapture output handle must be recorded,
     # hipGraphInstantiate must use the recorded graph handle and record exec handle.
     # hipStreamBeginCapture also handled manually for debug / stream-not-found safety.
@@ -170,6 +192,31 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     "hipStreamEndCapture",
     "hipGraphInstantiate",
     "hipGraphLaunch",
+    # DtoH driver-style copies — dst is a host pointer (not in alloc_map); need temp buffer
+    "hipMemcpyDtoH",
+    "hipMemcpyDtoHAsync",
+    # hipMemcpy3D family — parms struct stored inline (parms_bytes); must reconstruct
+    "hipMemcpy3D",
+    "hipMemcpy3DAsync",
+    "hipMemcpy3D_spt",
+    "hipMemcpy3DAsync_spt",
+    # Array creation — handle must be recorded in ctx.array_map
+    "hipArrayCreate",
+    "hipArray3DCreate",
+    # hipFreeArray — skip if handle not in array_map (e.g. created by nooped hipMallocArray)
+    "hipFreeArray",
+    # Struct-pointer params stored inline
+    "hipStreamSetAttribute",
+    "hipMemGetAllocationGranularity",
+    "hipMemPoolSetAccess",
+    "hipMemSetAccess",
+    # VMM (Virtual Memory Management) — output handles / VAs must be tracked
+    "hipMemAddressReserve",
+    "hipMemAddressFree",
+    "hipMemCreate",
+    "hipMemRelease",
+    "hipMemMap",
+    "hipMemUnmap",
 }
 
 # ---------------------------------------------------------------------------
@@ -246,13 +293,103 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipDrvGetErrorString",
     "hipGetTextureReference",
     "hipKernelGetName",
-    "hipMemCreate",
     "hipMemImportFromShareableHandle",
     "hipMemRetainAllocationHandle",
+    # hipMemGetAllocationPropertiesFromHandle — handle is stale at playback; query not needed
+    "hipMemGetAllocationPropertiesFromHandle",
     "hipModuleGetTexRef",
     "hipStreamGetDevice",
     "hipUserObjectCreate",
     # Category 6: Misc — struct field issues, wrong return type casts, or missing types
+    # hipDeviceGetByPCIBusId takes a char* PCI string (stale capture-time pointer) — noop
+    "hipDeviceGetByPCIBusId",
+    # hipChooseDevice takes a hipDeviceProp_t* (stale capture-time pointer) — noop
+    "hipChooseDevice",
+    # hipDeviceGetGraphMemAttribute / hipDeviceSetGraphMemAttribute — void* value ptr (stale) — noop
+    "hipDeviceGetGraphMemAttribute",
+    "hipDeviceSetGraphMemAttribute",
+    # hipDevicePrimaryCtxGetState — output pointers (stale) — noop
+    "hipDevicePrimaryCtxGetState",
+    # hipGetSymbolAddress / hipGetSymbolSize — symbol name is a stale host ptr — noop
+    "hipGetSymbolAddress",
+    "hipGetSymbolSize",
+    # hipPointerGetAttribute (singular) — void* output (stale) — noop
+    "hipPointerGetAttribute",
+    # hipDrvPointerGetAttributes — void** array of outputs (stale) — noop
+    "hipDrvPointerGetAttributes",
+    # hipMemPoolGetAccess — hipMemLocation* (stale) — noop
+    "hipMemPoolGetAccess",
+    # hipMemPoolExportPointer / hipMemPoolImportPointer — handle data struct (stale) — noop
+    "hipMemPoolExportPointer",
+    "hipMemPoolImportPointer",
+    # hipMallocArray / hipMalloc3DArray — hipChannelFormatDesc* (stale); output handle not needed for D2H — noop
+    "hipMallocArray",
+    "hipMalloc3DArray",
+    # hipMalloc3D — pitchedDevPtr output (stale), hipExtent non-castable; output not needed for D2H — noop
+    "hipMalloc3D",
+    # hipMemAllocHost / hipMallocHost / hipHostAlloc / hipFreeHost — host ptr alloc/free; not device allocations — noop
+    "hipMemAllocHost",
+    "hipMallocHost",
+    "hipHostAlloc",
+    "hipFreeHost",
+    # hipMemAllocPitch — hipDeviceptr_t* output (type mismatch) + output not in alloc_map — noop
+    "hipMemAllocPitch",
+    # hipHostGetFlags — output flag ptr (stale) — noop
+    "hipHostGetFlags",
+    # _spt memcpy variants with host ptrs: no blob fields; noop since H2D data handled by hipMemcpy blobs
+    "hipMemcpy_spt",
+    "hipMemcpyAsync_spt",
+    "hipMemcpy2D_spt",
+    "hipMemcpy2DAsync_spt",
+    "hipMemcpy2DFromArray_spt",
+    "hipMemcpy2DFromArrayAsync_spt",
+    "hipMemcpy2DToArray_spt",
+    "hipMemcpy2DToArrayAsync_spt",
+    "hipMemcpyFromSymbol_spt",
+    "hipMemcpyFromSymbolAsync_spt",
+    "hipMemcpyToSymbol_spt",
+    "hipMemcpyToSymbolAsync_spt",
+    "hipMemcpyFromArray_spt",
+    # hipMemcpyToArray / hipMemcpyFromArray / hipMemcpy2DToArray / hipMemcpy2DFromArray — array handle (not in array_map for generated shim) — noop
+    "hipMemcpyToArray",
+    "hipMemcpyFromArray",
+    "hipMemcpy2DToArray",
+    "hipMemcpy2DFromArray",
+    "hipMemcpy2DToArrayAsync",
+    "hipMemcpy2DFromArrayAsync",
+    # hipMemcpyAtoH / hipMemcpyHtoA — hipArray_t not in array_map for generated shim — noop
+    "hipMemcpyAtoH",
+    "hipMemcpyHtoA",
+    # hipMemcpyParam2D / hipMemcpyParam2DAsync — hip_Memcpy2D struct* (stale) — noop
+    "hipMemcpyParam2D",
+    "hipMemcpyParam2DAsync",
+    # hipMemcpyToSymbol / hipMemcpyFromSymbol / Async — symbol name is host ptr (stale) — noop
+    "hipMemcpyToSymbol",
+    "hipMemcpyFromSymbol",
+    "hipMemcpyToSymbolAsync",
+    "hipMemcpyFromSymbolAsync",
+    # hipMemset3D / hipMemset3DAsync — hipPitchedPtr is non-castable (stale) — noop
+    "hipMemset3D",
+    "hipMemset3DAsync",
+    "hipMemset3D_spt",
+    "hipMemset3DAsync_spt",
+    # hipMemset_spt / 2D_spt variants — host ptr for dst (stale) or pitched ptr — noop
+    "hipMemset_spt",
+    "hipMemset2D_spt",
+    "hipMemsetAsync_spt",
+    "hipMemset2DAsync_spt",
+    # hipMemsetD2D8/16/32 and Async — hipDeviceptr_t output correctly typed; but not in alloc_map — noop
+    "hipMemsetD2D8",
+    "hipMemsetD2D8Async",
+    "hipMemsetD2D16",
+    "hipMemsetD2D16Async",
+    "hipMemsetD2D32",
+    "hipMemsetD2D32Async",
+    # hipMallocPitch — already in MANUAL_PLAYBACK_APIS for the DrvMemcpy test; these are the _spt wrappers
+    # hipLaunchCooperativeKernel — variable args (void**); handled via regular kernel launch fallback — noop
+    "hipLaunchCooperativeKernel",
+    # hipOccupancyMaxActiveBlocksPerMultiprocessor / WithFlags — kernel fn ptr (stale) — noop
+    # Note: already in NOOP via func pointer category above; just confirming
     "hipExtMallocWithFlags",
     "hipChooseDeviceR0000",
     "hipGetDevicePropertiesR0000",
@@ -263,6 +400,175 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipApiName",
     "hipKernelNameRef",
     "hipKernelNameRefByPtr",
+    # Category 7: APIs that take a host function pointer — meaningless at playback
+    "hipOccupancyMaxPotentialBlockSize",
+    "hipOccupancyMaxPotentialBlockSizeWithFlags",
+    "hipOccupancyMaxActiveBlocksPerMultiprocessor",
+    "hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags",
+    "hipFuncSetCacheConfig",
+    "hipFuncSetSharedMemConfig",
+    "hipFuncGetAttributes",
+    "hipFuncSetAttribute",
+    # Category 8: Device extra — output ptr stale, dangerous context ops, or struct-ptr params
+    # hipDeviceGetUuid — output hipUUID* stale
+    "hipDeviceGetUuid",
+    # hipDeviceGetTexture1DLinearMaxWidth — hipChannelFormatDesc* param (stale struct ptr)
+    "hipDeviceGetTexture1DLinearMaxWidth",
+    # Primary ctx ops that would destroy the context at playback
+    "hipDevicePrimaryCtxRelease",
+    "hipDevicePrimaryCtxReset",
+    "hipDevicePrimaryCtxSetFlags",
+    # Category 9: Stream advanced — stale void* device ptrs, stale stream handles
+    # hipExtStreamCreateWithCUMask — output handle not tracked in stream_map by generator
+    "hipExtStreamCreateWithCUMask",
+    # hipExtStreamGetCUMask — uint32_t* array output (stale)
+    "hipExtStreamGetCUMask",
+    # hipExtGetLinkTypeAndHopCount — output uint32_t* ptrs stale
+    "hipExtGetLinkTypeAndHopCount",
+    # StreamWait/Write Value — void* ptr is stale device address (no alloc_map translation in generated shim)
+    "hipStreamWaitValue32",
+    "hipStreamWaitValue64",
+    "hipStreamWriteValue32",
+    "hipStreamWriteValue64",
+    # hipStreamAttachMemAsync — void* dev_ptr stale
+    "hipStreamAttachMemAsync",
+    # hipGetStreamDeviceId — returns int not hipError_t (wrong return type cast)
+    "hipGetStreamDeviceId",
+    # Category 10: Context APIs — stale hipCtx_t handles or stale output pointers
+    "hipCtxGetFlags",
+    "hipCtxGetCacheConfig",
+    "hipCtxGetSharedMemConfig",
+    "hipCtxGetApiVersion",
+    "hipCtxSetCurrent",
+    "hipCtxEnablePeerAccess",
+    "hipCtxDisablePeerAccess",
+    # Category 11: Module/Library/Kernel — stale handles or unsupported output types
+    # hipModuleUnload — would destroy module needed for kernel replay
+    "hipModuleUnload",
+    # hipModuleGetFunctionCount — output uint* stale
+    "hipModuleGetFunctionCount",
+    # hipModuleLoadFatBinary — fat binary ptr stale at playback (code object already loaded via registered binary)
+    "hipModuleLoadFatBinary",
+    # hipModule occupancy — hipFunction_t stale handle
+    "hipModuleOccupancyMaxPotentialBlockSize",
+    "hipModuleOccupancyMaxPotentialBlockSizeWithFlags",
+    "hipModuleOccupancyMaxActiveBlocksPerMultiprocessor",
+    "hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags",
+    # hipFuncGetAttribute — hipFunction_t stale handle + output int* stale
+    "hipFuncGetAttribute",
+    # hipGetFuncBySymbol — symbolPtr stale + output hipFunction_t* stale
+    "hipGetFuncBySymbol",
+    # hipExtLaunchKernel — function_address void* stale + void** args array stale
+    "hipExtLaunchKernel",
+    # Library APIs — hipLibrary_t handles not tracked at playback
+    "hipLibraryLoadData",
+    "hipLibraryLoadFromFile",
+    "hipLibraryUnload",
+    "hipLibraryGetKernel",
+    "hipLibraryGetKernelCount",
+    "hipLibraryEnumerateKernels",
+    "hipKernelGetLibrary",
+    "hipKernelGetFunction",
+    "hipKernelGetParamInfo",
+    "hipKernelGetAttribute",
+    "hipKernelSetAttribute",
+    # Category 12: Misc — stale output pointers or wrong return type
+    "hipGetProcAddress",
+    "hipGetDriverEntryPoint",
+    "hipGetDriverEntryPoint_spt",
+    # hipOccupancyAvailableDynamicSMemPerBlock — hipFunction_t stale handle
+    "hipOccupancyAvailableDynamicSMemPerBlock",
+    # hipSetValidDevices — device array ptr stale at playback
+    "hipSetValidDevices",
+    # hipMemPtrGetInfo — void* output size ptr stale
+    "hipMemPtrGetInfo",
+    # hipMemGetMemPool — output hipMemPool_t* (type mismatch) + handle not tracked
+    "hipMemGetMemPool",
+    # hipMemGetAccess — hipMemLocation* (stale struct ptr)
+    "hipMemGetAccess",
+    # hipMemRangeGetAttributes — attribute arrays stale
+    "hipMemRangeGetAttributes",
+    # Category 13: Driver 3D/2D memcpy — HIP_MEMCPY3D* / hipMemcpy3DPeerParms* / hip_Memcpy2D* stale struct ptrs
+    "hipDrvMemcpy3D",
+    "hipDrvMemcpy3DAsync",
+    "hipDrvMemcpy2DUnaligned",
+    "hipMemcpy3DPeer",
+    "hipMemcpy3DPeerAsync",
+    "hipMemcpy2DArrayToArray",
+    # AtoD/DtoA/AtoA — hipArray_t handles not in array_map for generated shim
+    "hipMemcpyAtoD",
+    "hipMemcpyDtoA",
+    "hipMemcpyAtoA",
+    "hipMemcpyAtoHAsync",
+    "hipMemcpyHtoAAsync",
+    # Category 14: Texture / Array query APIs — stale handles + non-castable struct output params
+    "hipArrayGetDescriptor",
+    "hipArray3DGetDescriptor",
+    "hipArrayGetInfo",
+    "hipArrayDestroy",
+    "hipGetChannelDesc",
+    "hipCreateTextureObject",
+    "hipDestroyTextureObject",
+    "hipTexObjectCreate",
+    "hipTexObjectDestroy",
+    "hipMallocMipmappedArray",
+    "hipMipmappedArrayCreate",
+    "hipMipmappedArrayDestroy",
+    "hipMipmappedArrayGetLevel",
+    "hipGetMipmappedArrayLevel",
+    "hipFreeMipmappedArray",
+    # Category 15: Graph explicit APIs — stale hipGraph_t/hipGraphExec_t/hipGraphNode_t handles
+    "hipGraphCreate",
+    "hipGraphDestroy",
+    "hipGraphClone",
+    "hipGraphUpload",
+    "hipGraphDebugDotPrint",
+    "hipGraphNodeGetType",
+    "hipGraphNodeSetEnabled",
+    "hipGraphNodeGetEnabled",
+    "hipGraphKernelNodeGetParams",
+    "hipGraphKernelNodeSetParams",
+    "hipGraphKernelNodeCopyAttributes",
+    "hipGraphKernelNodeGetAttribute",
+    "hipGraphKernelNodeSetAttribute",
+    "hipGraphMemcpyNodeGetParams",
+    "hipGraphMemcpyNodeSetParams",
+    "hipGraphMemcpyNodeSetParams1D",
+    "hipGraphMemsetNodeGetParams",
+    "hipGraphMemsetNodeSetParams",
+    "hipGraphHostNodeGetParams",
+    "hipGraphHostNodeSetParams",
+    "hipGraphExecDestroy",
+    "hipGraphExecKernelNodeSetParams",
+    "hipGraphExecMemcpyNodeSetParams",
+    "hipGraphExecMemcpyNodeSetParams1D",
+    "hipGraphExecMemsetNodeSetParams",
+    "hipGraphExecHostNodeSetParams",
+    "hipGraphExecChildGraphNodeSetParams",
+    "hipGraphExecGetFlags",
+    "hipGraphNodeSetParams",
+    "hipGraphExecNodeSetParams",
+    "hipGraphInstantiateWithParams",
+    "hipGraphChildGraphNodeGetGraph",
+    "hipGraphEventRecordNodeGetEvent",
+    "hipGraphEventRecordNodeSetEvent",
+    "hipGraphEventWaitNodeGetEvent",
+    "hipGraphEventWaitNodeSetEvent",
+    "hipGraphExecEventRecordNodeSetEvent",
+    "hipGraphExecEventWaitNodeSetEvent",
+    "hipGraphMemAllocNodeGetParams",
+    "hipGraphMemFreeNodeGetParams",
+    "hipUserObjectRetain",
+    "hipUserObjectRelease",
+    "hipGraphRetainUserObject",
+    "hipGraphReleaseUserObject",
+    "hipGraphBatchMemOpNodeGetParams",
+    "hipGraphBatchMemOpNodeSetParams",
+    "hipGraphExecBatchMemOpNodeSetParams",
+    "hipDrvGraphExecMemcpyNodeSetParams",
+    "hipDrvGraphExecMemsetNodeSetParams",
+    "hipDrvGraphMemcpyNodeGetParams",
+    "hipDrvGraphMemcpyNodeSetParams",
 }
 
 # ---------------------------------------------------------------------------
@@ -314,6 +620,37 @@ EXTRA_FIELDS: Dict[str, List[Tuple[str, str, str]]] = {
     # hipMemcpyWithStream — same semantics as hipMemcpyAsync (H2D blob, D2H/D2D zero)
     "hipMemcpyWithStream": [("uint64_t", "blob_hash_lo", "H2D blob hash lo"),
                             ("uint64_t", "blob_hash_hi", "H2D blob hash hi")],
+    # hipMemPoolCreate — pool_props is a struct pointer; store it inline by value.
+    # sizeof(hipMemPoolProps) == 88 bytes (4+4+8+8+8+56 reserved).
+    "hipMemPoolCreate": [("uint8_t", "pool_props_bytes[88]", "hipMemPoolProps inline copy")],
+    # hipMemPoolSetAttribute / hipMemPoolGetAttribute — value is void* to a scalar
+    # (always uint64_t or uint32_t depending on attr); store 8 bytes inline.
+    "hipMemPoolSetAttribute": [("uint64_t", "value_u64", "attribute value stored inline")],
+    "hipMemPoolGetAttribute": [("uint64_t", "value_u64", "attribute value stored inline (unused at capture)")],
+    # hipMemcpy3D family — hipMemcpy3DParms is 160 bytes; store inline + H2D blob hash.
+    "hipMemcpy3D":          [("uint8_t", "parms_bytes[160]", "hipMemcpy3DParms inline copy"),
+                             ("uint64_t", "blob_hash_lo",    "H2D blob hash lo (0 if not H2D)"),
+                             ("uint64_t", "blob_hash_hi",    "H2D blob hash hi")],
+    "hipMemcpy3DAsync":     [("uint8_t", "parms_bytes[160]", "hipMemcpy3DParms inline copy"),
+                             ("uint64_t", "blob_hash_lo",    "H2D blob hash lo (0 if not H2D)"),
+                             ("uint64_t", "blob_hash_hi",    "H2D blob hash hi")],
+    "hipMemcpy3D_spt":      [("uint8_t", "parms_bytes[160]", "hipMemcpy3DParms inline copy"),
+                             ("uint64_t", "blob_hash_lo",    "H2D blob hash lo (0 if not H2D)"),
+                             ("uint64_t", "blob_hash_hi",    "H2D blob hash hi")],
+    "hipMemcpy3DAsync_spt": [("uint8_t", "parms_bytes[160]", "hipMemcpy3DParms inline copy"),
+                             ("uint64_t", "blob_hash_lo",    "H2D blob hash lo (0 if not H2D)"),
+                             ("uint64_t", "blob_hash_hi",    "H2D blob hash hi")],
+    # hipArrayCreate — HIP_ARRAY_DESCRIPTOR is 24 bytes; store inline.
+    "hipArrayCreate":   [("uint8_t", "array_desc_bytes[24]", "HIP_ARRAY_DESCRIPTOR inline copy")],
+    # hipArray3DCreate — HIP_ARRAY3D_DESCRIPTOR is 40 bytes; store inline.
+    "hipArray3DCreate": [("uint8_t", "array3d_desc_bytes[40]", "HIP_ARRAY3D_DESCRIPTOR inline copy")],
+    # hipStreamSetAttribute — hipStreamAttrValue is 64 bytes; store inline.
+    "hipStreamSetAttribute": [("uint8_t", "stream_attr_bytes[64]", "hipStreamAttrValue inline copy")],
+    # hipMemGetAllocationGranularity — hipMemAllocationProp is 32 bytes; store inline.
+    "hipMemGetAllocationGranularity": [("uint8_t", "alloc_prop_bytes[32]", "hipMemAllocationProp inline copy")],
+    # hipMemPoolSetAccess / hipMemSetAccess — hipMemAccessDesc is 12 bytes; store first entry inline.
+    "hipMemPoolSetAccess": [("uint8_t", "access_desc_bytes[12]", "hipMemAccessDesc[0] inline copy")],
+    "hipMemSetAccess":     [("uint8_t", "access_desc_bytes[12]", "hipMemAccessDesc[0] inline copy")],
 }
 
 

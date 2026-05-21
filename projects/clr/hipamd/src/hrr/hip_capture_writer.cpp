@@ -88,6 +88,7 @@ static std::unordered_set<std::string> g_written_blobs;
 // ---------------------------------------------------------------------------
 
 static void ensure_dir(const std::string& path) {
+  if (path.empty()) return;
   fs::create_directories(path);
 }
 
@@ -207,6 +208,11 @@ static bool atomic_write_file(const std::string& path,
 // ---------------------------------------------------------------------------
 
 Hash128 write_blob(const void* data, size_t len) {
+  {
+    std::lock_guard<std::mutex> lk(g_file_mu);
+    if (!g_events_file) return {};  // writer not open — drop silently
+  }
+
   Hash128 h = hash_buffer(data, len);
   // Writer not open yet (called before hip_capture_init()) — return hash only,
   // no disk write.  The caller records the hash in the event so the blob can
@@ -244,6 +250,11 @@ Hash128 write_blob(const void* data, size_t len) {
 // ---------------------------------------------------------------------------
 
 Hash128 write_code_object(const void* image, size_t image_size) {
+  {
+    std::lock_guard<std::mutex> lk(g_file_mu);
+    if (!g_events_file) return {};  // writer not open — drop silently
+  }
+
   Hash128 h = hash_buffer(image, image_size);
   char hex[33];
   hash_hex(h, hex);
@@ -266,11 +277,12 @@ Hash128 write_code_object(const void* image, size_t image_size) {
 }
 
 // ---------------------------------------------------------------------------
-// Counters
+// Counters / state queries
 // ---------------------------------------------------------------------------
 
-uint64_t event_count() { return g_event_count.load(); }
-uint64_t blob_count()  { return g_blob_count.load(); }
+bool     is_open()      { std::lock_guard<std::mutex> lk(g_file_mu); return g_events_file != nullptr; }
+uint64_t event_count()  { return g_event_count.load(); }
+uint64_t blob_count()   { return g_blob_count.load(); }
 
 }  // namespace writer
 }  // namespace hrr_cap

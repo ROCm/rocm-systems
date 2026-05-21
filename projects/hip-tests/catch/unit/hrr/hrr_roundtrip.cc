@@ -108,6 +108,114 @@ HIP_TEST_CASE(Unit_HRR_CaptureReplayRoundtrip) {
 /**
  * Test Description
  * ----------------
+ *   - Spawns HrrTest Unit_HRR_AllApis_Direct as a subprocess with
+ *     HIP_HRR_CAPTURE_OUTPUT set to a temp directory.  Exercises ~55 distinct
+ *     HIP APIs covering device queries, streams, events, malloc variants
+ *     (Malloc/Async/Pool/Host/Managed), memset, memcpy variants, occupancy,
+ *     pointer attributes, cache config, and (conditionally) managed-memory
+ *     advise/prefetch.
+ *   - Verifies the archive exists and contains at least one D2H blob.
+ *   - Runs hrr-playback on the archive; validates d2[i]==94 byte-for-byte.
+ *   - REQUIRE(playback exit == 0): any D2H mismatch causes failure.
+ *   - Deletes the temp archive directory on scope exit.
+ */
+HIP_TEST_CASE(Unit_HRR_AllApisRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_allapis"};
+
+  // -------------------------------------------------------------------------
+  // Step 1: capture
+  // -------------------------------------------------------------------------
+  {
+    hip::SpawnProc proc(HRR_TEST_EXE);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    {
+      const char* cur = getenv("PATH");
+      proc.setEnv("PATH", std::string(ROCM_BIN_PATH) + ";" + (cur ? cur : ""));
+    }
+    int ret = proc.run("\"Unit_HRR_AllApis_Direct\"");
+    INFO("AllApis capture subprocess exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+
+  // -------------------------------------------------------------------------
+  // Step 2: verify archive structure
+  // -------------------------------------------------------------------------
+  REQUIRE(fs::exists(cap.path / "events.bin"));
+  REQUIRE(fs::exists(cap.path / "blobs"));
+
+  int blob_count = 0;
+  for ([[maybe_unused]] const auto& _ :
+       fs::recursive_directory_iterator(cap.path / "blobs"))
+    ++blob_count;
+  INFO("Blob count: " << blob_count);
+  REQUIRE(blob_count >= 1);
+
+  // -------------------------------------------------------------------------
+  // Step 3: playback + D2H validation (d2[i] == 94)
+  // -------------------------------------------------------------------------
+  {
+    hip::SpawnProc proc(HRR_PLAYBACK_EXE);
+    int ret = proc.run("\"" + cap.path.string() + "\"");
+    INFO("AllApis playback subprocess exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Spawns HrrTest Unit_HRR_HostMemWorkload_Direct as a subprocess with
+ *     HIP_HRR_CAPTURE_OUTPUT set to a temp directory.
+ *   - Verifies the archive exists and contains at least one D2H blob.
+ *   - Runs hrr-playback on the archive; validates D2H buffers byte-for-byte.
+ *   - REQUIRE(playback exit == 0): any D2H mismatch causes failure.
+ *   - Deletes the temp archive directory on scope exit.
+ */
+HIP_TEST_CASE(Unit_HRR_HostMemRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_hostmem"};
+
+  // -------------------------------------------------------------------------
+  // Step 1: capture
+  // -------------------------------------------------------------------------
+  {
+    hip::SpawnProc proc(HRR_TEST_EXE);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    {
+      const char* cur = getenv("PATH");
+      proc.setEnv("PATH", std::string(ROCM_BIN_PATH) + ";" + (cur ? cur : ""));
+    }
+    int ret = proc.run("\"Unit_HRR_HostMemWorkload_Direct\"");
+    INFO("HostMem capture subprocess exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+
+  // -------------------------------------------------------------------------
+  // Step 2: verify archive structure
+  // -------------------------------------------------------------------------
+  REQUIRE(fs::exists(cap.path / "events.bin"));
+  REQUIRE(fs::exists(cap.path / "blobs"));
+
+  int blob_count = 0;
+  for ([[maybe_unused]] const auto& _ :
+       fs::recursive_directory_iterator(cap.path / "blobs"))
+    ++blob_count;
+  INFO("Blob count: " << blob_count);
+  REQUIRE(blob_count >= 1);
+
+  // -------------------------------------------------------------------------
+  // Step 3: playback + D2H validation
+  // -------------------------------------------------------------------------
+  {
+    hip::SpawnProc proc(HRR_PLAYBACK_EXE);
+    int ret = proc.run("\"" + cap.path.string() + "\"");
+    INFO("HostMem playback subprocess exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+}
+
+/**
+ * Test Description
+ * ----------------
  *   - Spawns HrrTest Unit_HRR_GraphWorkload_Direct as a subprocess with
  *     HIP_HRR_CAPTURE_OUTPUT set to a temp directory.
  *   - Verifies the archive exists and contains at least one D2H blob.
@@ -157,4 +265,187 @@ HIP_TEST_CASE(Unit_HRR_GraphRoundtrip) {
     INFO("Graph playback subprocess exit code: " << ret);
     REQUIRE(ret == 0);
   }
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Spawns HrrTest Unit_HRR_StressApis_Direct as a subprocess with
+ *     HIP_HRR_CAPTURE_OUTPUT set to a temp directory.  Generates 500+
+ *     HIP API call events covering stream/event lifecycle, many alloc/free
+ *     cycles, memset/memcpy loops, repeated kernel launches, and device
+ *     attribute queries.
+ *   - Verifies the archive exists and contains at least one D2H blob.
+ *   - Runs hrr-playback on the archive; validates D2H buffers byte-for-byte
+ *     (h_out[i] == 2.0f).
+ *   - REQUIRE(playback exit == 0): any D2H mismatch causes failure.
+ *   - Deletes the temp archive directory on scope exit.
+ */
+HIP_TEST_CASE(Unit_HRR_StressApisRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_stress"};
+
+  // -------------------------------------------------------------------------
+  // Step 1: capture
+  // -------------------------------------------------------------------------
+  {
+    hip::SpawnProc proc(HRR_TEST_EXE);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    {
+      const char* cur = getenv("PATH");
+      proc.setEnv("PATH", std::string(ROCM_BIN_PATH) + ";" + (cur ? cur : ""));
+    }
+    int ret = proc.run("\"Unit_HRR_StressApis_Direct\"");
+    INFO("Stress capture subprocess exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+
+  // -------------------------------------------------------------------------
+  // Step 2: verify archive structure
+  // -------------------------------------------------------------------------
+  REQUIRE(fs::exists(cap.path / "events.bin"));
+  REQUIRE(fs::exists(cap.path / "blobs"));
+
+  int blob_count = 0;
+  for ([[maybe_unused]] const auto& _ :
+       fs::recursive_directory_iterator(cap.path / "blobs"))
+    ++blob_count;
+  INFO("Blob count: " << blob_count);
+  REQUIRE(blob_count >= 1);
+
+  // -------------------------------------------------------------------------
+  // Step 3: playback + D2H validation (h_out[i] == 2.0f)
+  // -------------------------------------------------------------------------
+  {
+    hip::SpawnProc proc(HRR_PLAYBACK_EXE);
+    int ret = proc.run("\"" + cap.path.string() + "\"");
+    INFO("Stress playback subprocess exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Helper: shared roundtrip body — capture → verify archive → playback.
+// ---------------------------------------------------------------------------
+static void hrr_run_roundtrip(const std::string& direct_case,
+                               const fs::path& cap_path) {
+  { hip::SpawnProc proc(HRR_TEST_EXE);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_path.string());
+    { const char* cur = getenv("PATH");
+      proc.setEnv("PATH", std::string(ROCM_BIN_PATH) + ";" + (cur ? cur : "")); }
+    int ret = proc.run("\"" + direct_case + "\"");
+    INFO("Capture exit: " << ret); REQUIRE(ret == 0); }
+  REQUIRE(fs::exists(cap_path / "events.bin"));
+  REQUIRE(fs::exists(cap_path / "blobs"));
+  int bc = 0;
+  for ([[maybe_unused]] const auto& _ :
+       fs::recursive_directory_iterator(cap_path / "blobs")) ++bc;
+  INFO("Blob count: " << bc); REQUIRE(bc >= 1);
+  { hip::SpawnProc proc(HRR_PLAYBACK_EXE);
+    int ret = proc.run("\"" + cap_path.string() + "\"");
+    INFO("Playback exit: " << ret); REQUIRE(ret == 0); }
+}
+
+HIP_TEST_CASE(Unit_HRR_MemsetVariantsRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memsetvariants"};
+  hrr_run_roundtrip("Unit_HRR_MemsetVariants_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_DeviceInfoRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_deviceinfo"};
+  hrr_run_roundtrip("Unit_HRR_DeviceInfo_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_StreamAdvancedRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_streamadvanced"};
+  hrr_run_roundtrip("Unit_HRR_StreamAdvanced_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_DrvMemcpyRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_drvmemcpy"};
+  hrr_run_roundtrip("Unit_HRR_DrvMemcpy_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_OccupancyRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_occupancy"};
+  hrr_run_roundtrip("Unit_HRR_Occupancy_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_HostAliasesRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_hostaliases"};
+  hrr_run_roundtrip("Unit_HRR_HostAliases_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_MemPoolExtendedRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_mempoolext"};
+  hrr_run_roundtrip("Unit_HRR_MemPoolExtended_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_SymbolMemcpyRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_symbol"};
+  hrr_run_roundtrip("Unit_HRR_SymbolMemcpy_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_MemsetExtraRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memsetextra"};
+  hrr_run_roundtrip("Unit_HRR_MemsetExtra_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_MemcpyExtraRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memcpyextra"};
+  hrr_run_roundtrip("Unit_HRR_MemcpyExtra_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_DeviceExtraRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_deviceextra"};
+  hrr_run_roundtrip("Unit_HRR_DeviceExtra_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_StreamAdvanced2Roundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_streamadv2"};
+  hrr_run_roundtrip("Unit_HRR_StreamAdvanced2_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_ContextRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_context"};
+  hrr_run_roundtrip("Unit_HRR_Context_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_ModuleExtraRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_moduleextra"};
+  hrr_run_roundtrip("Unit_HRR_ModuleExtra_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_MiscAPIsRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_miscapis"};
+  hrr_run_roundtrip("Unit_HRR_MiscAPIs_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_DrvMemcpy3DRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_drvmemcpy3d"};
+  hrr_run_roundtrip("Unit_HRR_DrvMemcpy3D_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_TextureRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_texture"};
+  hrr_run_roundtrip("Unit_HRR_Texture_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_GraphExplicitRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_graphexplicit"};
+  hrr_run_roundtrip("Unit_HRR_GraphExplicit_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_HostRegLaunchRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_hostreglch"};
+  hrr_run_roundtrip("Unit_HRR_HostRegLaunch_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_ModuleAPIRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_moduleapi"};
+  hrr_run_roundtrip("Unit_HRR_ModuleAPI_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_VMMRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_vmm"};
+  hrr_run_roundtrip("Unit_HRR_VMM_Direct", cap.path);
 }

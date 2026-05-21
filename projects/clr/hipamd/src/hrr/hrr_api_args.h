@@ -199,6 +199,7 @@ typedef struct {
     int32_t ret;
     uint64_t array;
     uint64_t pAllocateArray;
+    uint8_t array3d_desc_bytes[40];  /* HIP_ARRAY3D_DESCRIPTOR inline copy */
 } hrr_args_hipArray3DCreate;
 
 /* hipError_t hipArray3DGetDescriptor(HIP_ARRAY3D_DESCRIPTOR* pArrayDescriptor, hipArray_t array) */
@@ -215,6 +216,7 @@ typedef struct {
     int32_t ret;
     uint64_t pHandle;
     uint64_t pAllocateArray;
+    uint8_t array_desc_bytes[24];  /* HIP_ARRAY_DESCRIPTOR inline copy */
 } hrr_args_hipArrayCreate;
 
 /* hipError_t hipArrayDestroy(hipArray_t array) */
@@ -2243,6 +2245,7 @@ typedef struct {
     uint64_t granularity;
     uint64_t prop;
     uint64_t /* hipMemAllocationGranularity_flags */ option;
+    uint8_t alloc_prop_bytes[32];  /* hipMemAllocationProp inline copy */
 } hrr_args_hipMemGetAllocationGranularity;
 
 /* hipError_t hipMemGetAllocationPropertiesFromHandle(hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t handle) */
@@ -2296,6 +2299,7 @@ typedef struct {
     int32_t ret;
     uint64_t mem_pool;
     uint64_t pool_props;
+    uint8_t pool_props_bytes[88];  /* hipMemPoolProps inline copy */
 } hrr_args_hipMemPoolCreate;
 
 /* hipError_t hipMemPoolDestroy(hipMemPool_t mem_pool) */
@@ -2339,6 +2343,7 @@ typedef struct {
     uint64_t mem_pool;
     int32_t attr;
     uint64_t value;
+    uint64_t value_u64;  /* attribute value stored inline (unused at capture) */
 } hrr_args_hipMemPoolGetAttribute;
 
 /* hipError_t hipMemPoolImportFromShareableHandle(hipMemPool_t* mem_pool, void* shared_handle, hipMemAllocationHandleType handle_type, unsigned int flags) */
@@ -2367,6 +2372,7 @@ typedef struct {
     uint64_t mem_pool;
     uint64_t desc_list;
     uint64_t count;
+    uint8_t access_desc_bytes[12];  /* hipMemAccessDesc[0] inline copy */
 } hrr_args_hipMemPoolSetAccess;
 
 /* hipError_t hipMemPoolSetAttribute(hipMemPool_t mem_pool, hipMemPoolAttr attr, void* value) */
@@ -2376,6 +2382,7 @@ typedef struct {
     uint64_t mem_pool;
     int32_t attr;
     uint64_t value;
+    uint64_t value_u64;  /* attribute value stored inline */
 } hrr_args_hipMemPoolSetAttribute;
 
 /* hipError_t hipMemPoolTrimTo(hipMemPool_t mem_pool, size_t min_bytes_to_hold) */
@@ -2475,6 +2482,7 @@ typedef struct {
     uint64_t size;
     uint64_t desc;
     uint64_t count;
+    uint8_t access_desc_bytes[12];  /* hipMemAccessDesc[0] inline copy */
 } hrr_args_hipMemSetAccess;
 
 /* hipError_t hipMemUnmap(void* ptr, size_t size) */
@@ -2587,6 +2595,9 @@ typedef struct {
     hrr_event_header hdr;
     int32_t ret;
     uint64_t p;
+    uint8_t parms_bytes[160];  /* hipMemcpy3DParms inline copy */
+    uint64_t blob_hash_lo;  /* H2D blob hash lo (0 if not H2D) */
+    uint64_t blob_hash_hi;  /* H2D blob hash hi */
 } hrr_args_hipMemcpy3D;
 
 /* hipError_t hipMemcpy3DAsync(const struct hipMemcpy3DParms* p, hipStream_t stream) */
@@ -2595,6 +2606,9 @@ typedef struct {
     int32_t ret;
     uint64_t p;
     uint64_t stream;
+    uint8_t parms_bytes[160];  /* hipMemcpy3DParms inline copy */
+    uint64_t blob_hash_lo;  /* H2D blob hash lo (0 if not H2D) */
+    uint64_t blob_hash_hi;  /* H2D blob hash hi */
 } hrr_args_hipMemcpy3DAsync;
 
 /* hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind, hipStream_t stream) */
@@ -3897,6 +3911,9 @@ typedef struct {
     hrr_event_header hdr;
     int32_t ret;
     uint64_t p;
+    uint8_t parms_bytes[160];  /* hipMemcpy3DParms inline copy */
+    uint64_t blob_hash_lo;  /* H2D blob hash lo (0 if not H2D) */
+    uint64_t blob_hash_hi;  /* H2D blob hash hi */
 } hrr_args_hipMemcpy3D_spt;
 
 /* hipError_t hipMemset_spt(void* dst, int value, size_t sizeBytes) */
@@ -3977,6 +3994,9 @@ typedef struct {
     int32_t ret;
     uint64_t p;
     uint64_t stream;
+    uint8_t parms_bytes[160];  /* hipMemcpy3DParms inline copy */
+    uint64_t blob_hash_lo;  /* H2D blob hash lo (0 if not H2D) */
+    uint64_t blob_hash_hi;  /* H2D blob hash hi */
 } hrr_args_hipMemcpy3DAsync_spt;
 
 /* hipError_t hipMemcpy2DAsync_spt(void* dst, size_t dpitch, const void* src, size_t spitch, size_t width, size_t height, hipMemcpyKind kind, hipStream_t stream) */
@@ -4764,6 +4784,7 @@ typedef struct {
     uint64_t stream;
     uint64_t /* hipStreamAttrID */ attr;
     uint64_t value;
+    uint8_t stream_attr_bytes[64];  /* hipStreamAttrValue inline copy */
 } hrr_args_hipStreamSetAttribute;
 
 /* hipError_t hipStreamGetAttribute(hipStream_t stream, hipStreamAttrID attr, hipStreamAttrValue* value_out) */
