@@ -159,8 +159,7 @@ else()
         endif()
 
         file(
-            WRITE
-            "${_PROFILER_HUB_STAMP}"
+            WRITE "${_PROFILER_HUB_STAMP}"
             "${ROCPROFSYS_PROFILER_HUB_GIT_REPOSITORY}@${ROCPROFSYS_PROFILER_HUB_GIT_TAG}:${ROCPROFSYS_PROFILER_HUB_GIT_SUBDIR}"
         )
     else()
