@@ -17,6 +17,8 @@
 #include <chrono>
 #include <cstdio>
 #include <fcntl.h>
+#include <fstream>
+#include <ios>
 #include <memory>
 #include <string>
 #include <utility>
@@ -31,29 +33,36 @@ namespace
 std::vector<char>
 read_tmp_file_bytes(tmp_file& tf)
 {
-    std::vector<char> data{};
     tf.close();
 
-    FILE* fdata = ::fopen(tf.filename.c_str(), "rb");
-    if(!fdata)
+    std::ifstream ifs{ tf.filename, std::ios::binary | std::ios::ate };
+    if(!ifs)
     {
-        LOG_ERROR("perfetto temp trace file '{}' could not be read", tf.filename);
-        return data;
+        LOG_ERROR("perfetto temp trace file '{}' could not be opened for read",
+                  tf.filename);
+        return {};
     }
 
-    ::fseek(fdata, 0, SEEK_END);
-    size_t fnum_elem = ::ftell(fdata);
-    ::fseek(fdata, 0, SEEK_SET);
+    // ate + tellg gives a signed file size; a negative value (overflow on
+    // huge files or a stream error) would otherwise wrap into size_t and
+    // request a SIZE_MAX-byte vector. Treat any negative size as an open
+    // failure rather than crashing the post-process pipeline.
+    const auto end = ifs.tellg();
+    if(end < 0)
+    {
+        LOG_ERROR("perfetto temp trace file '{}' size query failed", tf.filename);
+        return {};
+    }
 
-    data.resize(fnum_elem, '\0');
-    auto fnum_read = ::fread(data.data(), sizeof(char), fnum_elem, fdata);
-    ::fclose(fdata);
+    std::vector<char> data(static_cast<std::size_t>(end));
+    ifs.seekg(0, std::ios::beg);
+    if(!data.empty()) ifs.read(data.data(), static_cast<std::streamsize>(data.size()));
 
-    if(fnum_read != fnum_elem)
+    if(!ifs)
     {
         throw std::runtime_error(
-            fmt::format("read {} elements from perfetto trace file '{}'. Expected {}",
-                        fnum_read, tf.filename, fnum_elem));
+            fmt::format("short read on perfetto trace file '{}' (expected {} bytes)",
+                        tf.filename, data.size()));
     }
     return data;
 }
@@ -112,9 +121,20 @@ live_perfetto_driver::live_perfetto_driver() noexcept
 
 live_perfetto_driver::~live_perfetto_driver()
 {
-    auto* expected = this;
-    g_active_driver.compare_exchange_strong(expected, nullptr, std::memory_order_acq_rel,
-                                            std::memory_order_acquire);
+    auto*      expected = this;
+    const bool cleared  = g_active_driver.compare_exchange_strong(
+        expected, nullptr, std::memory_order_acq_rel, std::memory_order_acquire);
+    if(!cleared && expected != nullptr)
+    {
+        // Another driver took over g_active_driver while this one was still
+        // alive; loud-warn so the lifecycle violation is visible instead of
+        // silently leaving the global pointing at a soon-to-be-destroyed
+        // object.
+        LOG_WARNING("live_perfetto_driver destructor saw g_active_driver pointing at a "
+                    "different instance ({} vs this={}) — overlapping driver "
+                    "lifetimes are not supported",
+                    static_cast<const void*>(expected), static_cast<const void*>(this));
+    }
 }
 
 void

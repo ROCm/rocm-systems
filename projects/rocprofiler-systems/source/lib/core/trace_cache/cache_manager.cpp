@@ -74,10 +74,19 @@ public:
             } catch(const std::exception& exp)
             {
                 LOG_ERROR("Perfetto engine stop/drain raised: {}", exp.what());
+            } catch(...)
+            {
+                // Destructor must not leak — a non-std::exception throw would
+                // otherwise reach std::terminate via stack unwinding.
+                LOG_ERROR("Perfetto engine stop/drain raised a non-std::exception");
             }
         }
-        // Declared-reverse-order teardown: sink last because engine.stop()
-        // (above) owns the final drain call into it.
+        // Members destruct in reverse declaration order (m_tracks → m_sink →
+        // m_engine), which is the inverse of what cached-mode teardown
+        // requires: the engine's stop() above has already drained into the
+        // sink, so the sink must outlive the engine until that drain
+        // returns. Hold the inverted lifetime explicitly so a future
+        // reorder of member declarations cannot silently break it.
         m_engine.reset();
         m_sink.reset();
         m_tracks.reset();

@@ -57,12 +57,15 @@ find_cache_files(const pid_t& root_pid, const data::directory_files_t& dir_conte
 
     data::mapped_cache_files_t cache_map{};
 
+    // Hoisted outside the per-file lambda so the regex engine builds the
+    // DFA once per directory scan, not once per file.
+    const std::regex buff_regex(R"(buffered_storage_(\d+)_(\d+)\.bin)");
+    const std::regex meta_regex(R"(metadata_(\d+)_(\d+)\.json)");
+
     auto parse_and_fill_cache = [&](const std::string& filename) {
         if(filename.empty()) return;
 
-        const std::regex buff_regex(R"(buffered_storage_(\d+)_(\d+)\.bin)");
-        const std::regex meta_regex(R"(metadata_(\d+)_(\d+)\.json)");
-        std::smatch      match;
+        std::smatch match;
 
         // Wrap stoi: regex's (\d+) can match digit runs that overflow int.
         // A pathological file in the temp dir must not abort discovery.

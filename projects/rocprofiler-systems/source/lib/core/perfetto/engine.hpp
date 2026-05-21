@@ -111,7 +111,7 @@ public:
     // ReadTraceBlocking. Returns an empty vector when no session exists.
     // Caller is responsible for disposing the session via destroy_session
     // afterwards if desired.
-    std::vector<char> read_trace(pid_t pid);
+    [[nodiscard]] std::vector<char> read_trace(pid_t pid);
 
     // Destroys the per-pid session: equivalent to .reset() on the slot.
     // Use this when the session is genuinely done (e.g. post-stop cleanup).
@@ -126,7 +126,7 @@ public:
     void forget_session(pid_t pid);
 
     // Whether a session is currently active.
-    bool is_running() const noexcept;
+    [[nodiscard]] bool is_running() const noexcept;
 
     // Pre-creates per-pid byte buffer slots so cached emission stays
     // lock-free on the hot path. MUST be called between start(cached_…)

@@ -45,6 +45,27 @@ emit_open_error_line(const std::string& filename)
                  filename.c_str());
     std::fflush(stderr);
 }
+
+// Writes `bytes` to `filename` and registers the file with `registry` on
+// success. Returns false on open failure with no bytes written so each
+// sink can emit its own context-specific diagnostic; returns true once
+// the file is fully written, sized, and registered. The ofstream is
+// closed by RAII at end of scope — no explicit close() needed.
+bool
+write_proto_to(const std::string& filename, const char* data, std::size_t size,
+               output_file_registry* registry)
+{
+    std::ofstream ofs{};
+    if(!filepath::open(ofs, filename, std::ios::out | std::ios::binary))
+    {
+        emit_open_error_line(filename);
+        return false;
+    }
+    ofs.write(data, static_cast<std::streamsize>(size));
+    emit_size_line(filename, size);
+    if(registry) registry->register_file(filename, output_format::perfetto);
+    return true;
+}
 }  // namespace
 
 // ----------------------------------------------------------------------------
@@ -60,7 +81,16 @@ void
 live_fd_sink::on_source_drained(int /*source_id*/, std::vector<char> bytes)
 {
     // Live mode produces exactly one source per engine.stop(): the
-    // process-wide TracingSession bytes for the current pid.
+    // process-wide TracingSession bytes for the current pid. A second
+    // call would silently lose either the prior bytes or the new ones,
+    // and the only way to reach here is an engine misconfiguration;
+    // surface it loudly and refuse to overwrite.
+    if(m_drained)
+    {
+        LOG_ERROR("live_fd_sink received a second source drain; ignoring (the "
+                  "single-source live-mode contract was violated)");
+        return;
+    }
     m_bytes   = std::move(bytes);
     m_drained = true;
 }
@@ -71,31 +101,23 @@ live_fd_sink::finalize()
     if(!m_drained) return;
 
     auto trace_data = std::move(m_bytes);
-    auto _filename  = config::get_perfetto_output_filename();
+    auto filename   = config::get_perfetto_output_filename();
 
     if(config::output_filtering::is_output_enabled_for_current_mpi_rank())
     {
         if(!trace_data.empty())
         {
-            std::ofstream ofs{};
-            if(!filepath::open(ofs, _filename, std::ios::out | std::ios::binary))
+            if(!write_proto_to(filename, trace_data.data(), trace_data.size(),
+                               m_registry) &&
+               m_output_error)
             {
-                emit_open_error_line(_filename);
-                if(m_output_error) *m_output_error = true;
+                *m_output_error = true;
             }
-            else
-            {
-                ofs.write(trace_data.data(), trace_data.size());
-                emit_size_line(_filename, trace_data.size());
-                if(m_registry)
-                    m_registry->register_file(_filename, output_format::perfetto);
-            }
-            ofs.close();
         }
         else if(dmp::rank() == 0)
         {
             LOG_ERROR("Perfetto trace data is empty. File '{}' will not be written...",
-                      _filename);
+                      filename);
         }
     }
 
@@ -118,23 +140,15 @@ per_pid_file_sink::on_source_drained(int source_id, std::vector<char> bytes)
     if(bytes.empty()) return;
 
     const auto pid = static_cast<pid_t>(source_id);
-    auto       _filename =
+    auto       filename =
         (pid == m_parent_pid)
                   ? config::get_perfetto_output_filename()
                   : config::get_perfetto_output_filename_with_suffix(std::to_string(pid));
 
-    std::ofstream ofs{};
-    if(!filepath::open(ofs, _filename, std::ios::out | std::ios::binary))
+    if(!write_proto_to(filename, bytes.data(), bytes.size(), m_registry))
     {
-        emit_open_error_line(_filename);
-        LOG_ERROR("per_pid_file_sink: failed to open '{}' for pid {}", _filename, pid);
-        return;
+        LOG_ERROR("per_pid_file_sink: failed to open '{}' for pid {}", filename, pid);
     }
-
-    ofs.write(bytes.data(), bytes.size());
-    emit_size_line(_filename, bytes.size());
-    if(m_registry) m_registry->register_file(_filename, output_format::perfetto);
-    ofs.close();
 }
 
 void
@@ -195,7 +209,7 @@ single_file_sink::on_source_drained(int source_id, std::vector<char> bytes)
 void
 single_file_sink::finalize()
 {
-    auto _filename = config::get_perfetto_output_filename();
+    auto filename = config::get_perfetto_output_filename();
 
     if(!config::output_filtering::is_output_enabled_for_current_mpi_rank())
     {
@@ -208,22 +222,14 @@ single_file_sink::finalize()
     {
         if(dmp::rank() == 0)
             LOG_ERROR("Perfetto trace data is empty. File '{}' will not be written...",
-                      _filename);
+                      filename);
         return;
     }
 
-    std::ofstream ofs{};
-    if(!filepath::open(ofs, _filename, std::ios::out | std::ios::binary))
+    if(!write_proto_to(filename, m_buffer.data(), m_buffer.size(), m_registry))
     {
-        emit_open_error_line(_filename);
-        LOG_ERROR("single_file_sink: failed to open '{}'", _filename);
-        return;
+        LOG_ERROR("single_file_sink: failed to open '{}'", filename);
     }
-
-    ofs.write(m_buffer.data(), m_buffer.size());
-    emit_size_line(_filename, m_buffer.size());
-    if(m_registry) m_registry->register_file(_filename, output_format::perfetto);
-    ofs.close();
 
     m_buffer.clear();
     m_source_seq_ids.clear();

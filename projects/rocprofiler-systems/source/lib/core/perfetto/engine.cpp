@@ -155,6 +155,23 @@ struct perfetto_engine::impl
         return cfg.backend != engine_config::backend_t::inprocess;
     }
 
+    // Builds a fresh TracingSession in sessions[pid], wires the error
+    // callback, runs Setup(trace_cfg, fd), and StartBlocking. Takes
+    // sessions_mutex internally — callers must NOT hold it. fd=-1
+    // disables per-Perfetto-default fd output (cached-mode path).
+    void start_session(pid_t pid, int fd)
+    {
+        std::lock_guard<std::mutex> lk{ sessions_mutex };
+        auto&                       slot = sessions[pid];
+        slot                             = ::perfetto::Tracing::NewTrace();
+        slot->SetOnErrorCallback([](::perfetto::TracingError err) {
+            if(err.code == ::perfetto::TracingError::kTracingFailed)
+                LOG_WARNING("Perfetto encountered a tracing error: {}", err.message);
+        });
+        slot->Setup(trace_cfg, fd);
+        slot->StartBlocking();
+    }
+
     void build_trace_config(perfetto_engine::mode m)
     {
         trace_cfg = ::perfetto::TraceConfig{};
@@ -272,16 +289,7 @@ perfetto_engine::start(mode m, int fd)
     m_impl->build_trace_config(mode::live_fd);
 
     const auto pid = static_cast<pid_t>(::getpid());
-
-    std::lock_guard<std::mutex> lk{ m_impl->sessions_mutex };
-    auto&                       slot = m_impl->sessions[pid];
-    slot                             = ::perfetto::Tracing::NewTrace();
-    slot->SetOnErrorCallback([](::perfetto::TracingError err) {
-        if(err.code == ::perfetto::TracingError::kTracingFailed)
-            LOG_WARNING("Perfetto encountered a tracing error: {}", err.message);
-    });
-    slot->Setup(m_impl->trace_cfg, fd);
-    slot->StartBlocking();
+    m_impl->start_session(pid, fd);
 
     m_impl->active_pid   = pid;
     m_impl->running      = true;
@@ -315,18 +323,7 @@ perfetto_engine::start(mode m, trace_sink& sink)
     m_impl->build_trace_config(mode::cached_interceptor);
 
     const auto pid = static_cast<pid_t>(::getpid());
-
-    {
-        std::lock_guard<std::mutex> lk{ m_impl->sessions_mutex };
-        auto&                       slot = m_impl->sessions[pid];
-        slot                             = ::perfetto::Tracing::NewTrace();
-        slot->SetOnErrorCallback([](::perfetto::TracingError err) {
-            if(err.code == ::perfetto::TracingError::kTracingFailed)
-                LOG_WARNING("Perfetto encountered a tracing error: {}", err.message);
-        });
-        slot->Setup(m_impl->trace_cfg);
-        slot->StartBlocking();
-    }
+    m_impl->start_session(pid, /*fd=*/-1);
 
     {
         std::lock_guard<std::mutex> lk{ m_impl->collector_mutex };
@@ -372,12 +369,24 @@ perfetto_engine::stop()
     }
 
     // Clear the active-engine pointer only if we are still the active engine;
-    // a sibling engine that took over via start() owns its own slot.
+    // a sibling engine that took over via start() owns its own slot. Surface
+    // the lifecycle violation when a sibling clobbered the global between
+    // our start() and stop() — silent degradation here ends in UAF in the
+    // interceptor TLS reader.
     if(current_mode == mode::cached_interceptor)
     {
-        auto* expected = this;
-        g_active_cached_engine.compare_exchange_strong(
+        auto*      expected = this;
+        const bool cleared  = g_active_cached_engine.compare_exchange_strong(
             expected, nullptr, std::memory_order_acq_rel, std::memory_order_acquire);
+        if(!cleared && expected != nullptr)
+        {
+            LOG_WARNING(
+                "perfetto_engine::stop() saw g_active_cached_engine pointing at a "
+                "different instance ({} vs this={}) — overlapping cached engines "
+                "are not supported and worker threads attached to the prior engine "
+                "may emit into stale state until they exit",
+                static_cast<const void*>(expected), static_cast<const void*>(this));
+        }
     }
 
     if(session == nullptr)
@@ -486,7 +495,14 @@ perfetto_engine::forget_session(pid_t pid)
 {
     std::lock_guard<std::mutex> lk{ m_impl->sessions_mutex };
     auto                        it = m_impl->sessions.find(pid);
-    if(it != m_impl->sessions.end()) (void) it->second.release();
+    if(it != m_impl->sessions.end())
+    {
+        // Deliberate leak: the parent process owns the underlying
+        // TracingSession after fork; calling unique_ptr::reset() in the
+        // child would double-free when the parent eventually disposes its
+        // own copy. release() detaches our pointer without destroying.
+        (void) it->second.release();
+    }
 }
 
 void
