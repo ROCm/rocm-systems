@@ -270,10 +270,38 @@ VirtualGPU::Queue::~Queue() {
   amd::DestroyWithTrailing(reinterpret_cast<Device::QueueRecycleInfo*>(info_));
 
   if (nullptr != iQueue_) {
-    // Make sure the queues are idle
-    // It's unclear why PAL could still have a busy queue
+    // AIRUNTIME-2173: replace unbounded iQueue_->WaitIdle() with a bounded
+    // wait on the currently-tracked submission fences. The original WaitIdle()
+    // has no timeout in PAL's IQueue contract, so a stuck GPU/KMD fence (e.g.
+    // a wedged kernel left in flight by MIOpen mathlibs under
+    // GPU_ENABLE_PAL=1 on Strix Halo / Navi31 / Navi48) hangs the calling
+    // thread forever at process teardown. The HostQueue::terminate() spin in
+    // platform/commandqueue.cpp is also bounded in this commit; this is the
+    // second layer of defense for the PAL backend specifically.
     std::scoped_lock l(*lock_);
-    iQueue_->WaitIdle();
+    std::vector<Pal::IFence*> activeFences;
+    activeFences.reserve(iCmdFences_.size());
+    for (uint i = 0; i < max_command_buffers_; ++i) {
+      if (iCmdFences_[i] != nullptr &&
+          iCmdFences_[i]->GetStatus() == Pal::Result::NotReady) {
+        activeFences.push_back(iCmdFences_[i]);
+      }
+    }
+    if (!activeFences.empty()) {
+      // Use the same per-iteration timeout as waitForFence<> (palvirtual.hpp).
+      // Whether success or timeout we proceed - the iQueue_->Destroy() below
+      // and the OS process cleanup will reap any residual KMD-side state.
+      Pal::Result result = iDev_->WaitForFences(
+          static_cast<uint32_t>(activeFences.size()), activeFences.data(), true,
+          std::chrono::nanoseconds{WaitTimeoutInNsec});
+      if (result != Pal::Result::Success) {
+        LogPrintfWarning(
+            "~Queue(): %zu PAL fence(s) not signaled after %llu ns; result=%d. "
+            "Proceeding with queue destruction.",
+            activeFences.size(), static_cast<unsigned long long>(WaitTimeoutInNsec),
+            static_cast<int>(result));
+      }
+    }
   }
 
   // Remove all memory references

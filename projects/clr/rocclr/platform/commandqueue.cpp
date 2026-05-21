@@ -10,6 +10,8 @@
 #include "platform/context.hpp"
 #include "utils/flags.hpp"
 
+#include <chrono>
+
 /*!
  * \file commandQueue.cpp
  * \brief  Definitions for HostQueue object.
@@ -98,7 +100,27 @@ bool HostQueue::terminate() {
       }
       if (marker != nullptr) {
         if (marker->notifyCmdQueue()) {
+          // AIRUNTIME-2173: bound the spin so a stuck GPU fence cannot wedge
+          // teardown indefinitely. Without this ceiling, Stream::Destroy()
+          // running from DllMain DLL_PROCESS_DETACH (Windows) or from a
+          // per-thread TLS destructor at process exit will spin forever if
+          // PAL/KMD never advances the marker's completion signal. Observed
+          // with MIOpen mathlibs under GPU_ENABLE_PAL=1 on Strix Halo / Navi31
+          // / Navi48 (AIRUNTIME-2173). The 60 s ceiling is far above any
+          // normal completion path (typical GPU queue drain << 1 s); reaching
+          // it means GPU work is wedged and the only correct action is to
+          // proceed with teardown and let the KMD reap process state.
+          constexpr int kMarkerWaitTimeoutMs = 60000;
+          const auto marker_deadline = std::chrono::steady_clock::now() +
+                                       std::chrono::milliseconds(kMarkerWaitTimeoutMs);
           while (marker->status() > CL_COMPLETE && Os::isThreadAlive(thread_)) {
+            if (std::chrono::steady_clock::now() > marker_deadline) {
+              LogPrintfError(
+                  "HostQueue::terminate(): marker completion did not arrive after %d ms; "
+                  "GPU/KMD fence may be stuck. Proceeding with queue destruction.",
+                  kMarkerWaitTimeoutMs);
+              break;
+            }
             amd::Os::yield();
           }
         }
@@ -113,8 +135,25 @@ bool HostQueue::terminate() {
       }
 
       // FIXME_lmoriche: fix termination handshake
-      while (thread_.state() < Thread::FINISHED && Os::isThreadAlive(thread_)) {
-        Os::yield();
+      // AIRUNTIME-2173: bound this spin too. The worker thread can stay alive
+      // (so Os::isThreadAlive() remains true) while blocked on the same hung
+      // GPU fence that wedges the marker wait above, leaving the loop spinning
+      // forever. 5 s is enough for any healthy loop() exit; past that we'd
+      // rather let the OS reap the thread at process exit than hang.
+      {
+        constexpr int kThreadJoinTimeoutMs = 5000;
+        const auto thread_deadline = std::chrono::steady_clock::now() +
+                                     std::chrono::milliseconds(kThreadJoinTimeoutMs);
+        while (thread_.state() < Thread::FINISHED && Os::isThreadAlive(thread_)) {
+          if (std::chrono::steady_clock::now() > thread_deadline) {
+            LogPrintfError(
+                "HostQueue::terminate(): command-loop thread did not reach FINISHED after %d ms; "
+                "proceeding with queue destruction.",
+                kThreadJoinTimeoutMs);
+            break;
+          }
+          Os::yield();
+        }
       }
     }
   }
