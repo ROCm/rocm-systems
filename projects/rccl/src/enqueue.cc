@@ -1050,6 +1050,7 @@ static bool rcclAINIC_P2pCtsActive() {
 }
 
 static int rcclEffectiveP2pBatchEnable(struct ncclComm* comm) {
+  (void)comm;
   // rcclUseAinic() (net.h / net.cc) detects AMD Pollara via PCI device IDs;
   // it caches the result internally via std::call_once.
   if (rcclUseAinic()) {
