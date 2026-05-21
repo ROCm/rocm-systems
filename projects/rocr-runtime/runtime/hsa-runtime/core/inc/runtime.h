@@ -525,6 +525,7 @@ class Runtime {
 
   KfdVersion_t KfdVersion() const { return kfd_version; }
 
+
   bool VirtualMemApiSupported() const { return virtual_mem_api_supported_; }
   bool XnackEnabled() const { return xnack_enabled_; }
   void XnackEnabled(bool enable) { xnack_enabled_ = enable; }
@@ -934,6 +935,7 @@ class Runtime {
 
   lazy_ptr<AsyncEventsInfo> asyncSignals_;
   lazy_ptr<AsyncEventsInfo> asyncExceptions_;
+
  private:
   void CheckVirtualMemApiSupport();
 

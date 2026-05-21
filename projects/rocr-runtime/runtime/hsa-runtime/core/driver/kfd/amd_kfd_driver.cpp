@@ -110,8 +110,9 @@ KfdDriver::KfdDriver(std::string devnode_name)
     : core::Driver(core::DriverType::KFD, std::move(devnode_name)) {}
 
 hsa_status_t KfdDriver::Init() {
+  bool setup_ttmp = core::Runtime::runtime_singleton_->flag().debug();
   HSAKMT_STATUS ret =
-      HSAKMT_CALL(hsaKmtRuntimeEnable(&_amdgpu_r_debug, core::Runtime::runtime_singleton_->flag().debug()));
+      HSAKMT_CALL(hsaKmtRuntimeEnable(&_amdgpu_r_debug, setup_ttmp));
 
   if (ret != HSAKMT_STATUS_SUCCESS && ret != HSAKMT_STATUS_NOT_SUPPORTED) return HSA_STATUS_ERROR;
 
