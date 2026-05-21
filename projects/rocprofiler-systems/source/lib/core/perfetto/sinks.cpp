@@ -23,13 +23,23 @@ namespace core
 {
 namespace
 {
+// Stderr emission is gated by two independent settings: global verbosity
+// (negative values suppress informational lines) AND the per-rank log-output
+// filter (silences log output on ranks that opted out of stderr noise).
+bool
+stderr_log_allowed()
+{
+    return config::get_verbose() >= 0 &&
+           config::output_filtering::is_log_output_enabled_for_current_mpi_rank();
+}
+
 // Emits the user-facing "[rocprofsys][<rank>]> <file> perfetto (...)... Done"
 // stderr line that announces a written output file. Local to the perfetto
 // sinks until a project-wide file-write notification helper exists.
 void
 emit_size_line(const std::string& filename, std::size_t bytes)
 {
-    if(config::get_verbose() < 0) return;
+    if(!stderr_log_allowed()) return;
     std::fprintf(
         stderr, "[rocprofsys][%i]> %s perfetto (%.2f KB / %.2f MB / %.2f GB)... Done\n",
         dmp::rank(), filename.c_str(), static_cast<double>(bytes) / units::KB,
@@ -40,7 +50,7 @@ emit_size_line(const std::string& filename, std::size_t bytes)
 void
 emit_open_error_line(const std::string& filename)
 {
-    if(config::get_verbose() < 0) return;
+    if(!stderr_log_allowed()) return;
     std::fprintf(stderr, "[rocprofsys][%i]> Error opening '%s'...\n", dmp::rank(),
                  filename.c_str());
     std::fflush(stderr);
@@ -103,7 +113,7 @@ live_fd_sink::finalize()
     auto trace_data = std::move(m_bytes);
     auto filename   = config::get_perfetto_output_filename();
 
-    if(config::output_filtering::is_output_enabled_for_current_mpi_rank())
+    if(config::output_filtering::is_file_output_enabled_for_current_mpi_rank())
     {
         if(!trace_data.empty())
         {
@@ -211,7 +221,7 @@ single_file_sink::finalize()
 {
     auto filename = config::get_perfetto_output_filename();
 
-    if(!config::output_filtering::is_output_enabled_for_current_mpi_rank())
+    if(!config::output_filtering::is_file_output_enabled_for_current_mpi_rank())
     {
         m_buffer.clear();
         m_source_seq_ids.clear();

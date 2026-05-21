@@ -966,6 +966,31 @@ perfetto_processor_t::handle(const cpu_pmc_sample& _cpu_sample)
 }
 
 void
+perfetto_processor_t::handle(const gpu_perf_counter_sample& _gpu_perf_counter)
+{
+    using counter_collection_track =
+        perfetto_counter_track<category::rocm_counter_collection>;
+
+    const auto _ts        = _gpu_perf_counter.timestamp;
+    const auto _device_id = _gpu_perf_counter.device_id;
+
+    for(const auto& entry : _gpu_perf_counter.entries)
+    {
+        auto name_info =
+            m_metadata.find_gpu_perf_counter_by_id(_device_id, entry.counter_id);
+        if(!name_info) continue;
+
+        const auto& track_name = name_info->get().track_name;
+        auto        track_key  = std::hash<std::string>{}(track_name);
+
+        if(!counter_collection_track::exists(track_key))
+            counter_collection_track::emplace(track_key, track_name, "Unit Count");
+        TRACE_COUNTER(trait::name<category::rocm_counter_collection>::value,
+                      counter_collection_track::at(track_key, 0), _ts, entry.value);
+    }
+}
+
+void
 perfetto_processor_t::handle([[maybe_unused]] const backtrace_region_sample& _bts)
 {
     (_bts.category == trait::name<category::timer_sampling>::value)

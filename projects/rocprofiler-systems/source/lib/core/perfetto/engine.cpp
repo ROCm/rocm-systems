@@ -71,6 +71,9 @@ build_engine_config_from_settings()
     const auto& disabled = config::get_disabled_categories();
     out.disabled_categories.assign(disabled.begin(), disabled.end());
 
+    out.silence_sdk_log_callback =
+        !config::output_filtering::is_log_output_enabled_for_current_mpi_rank();
+
     return out;
 }
 
@@ -243,6 +246,9 @@ perfetto_engine::init_sdk()
             args.backends |= ::perfetto::kSystemBackend;
         if(m_impl->cfg.backend != engine_config::backend_t::system)
             args.backends |= ::perfetto::kInProcessBackend;
+
+        if(m_impl->cfg.silence_sdk_log_callback)
+            args.log_message_callback = +[](::perfetto::base::LogMessageCallbackArgs) {};
 
         ::perfetto::Tracing::Initialize(args);
         ::perfetto::TrackEvent::Register();

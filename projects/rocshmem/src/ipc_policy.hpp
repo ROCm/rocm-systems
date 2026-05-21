@@ -37,6 +37,7 @@
 #include "util.hpp"
 #include "bootstrap/bootstrap.hpp"
 #include "atomic.hpp"
+#include "sdma_policy.hpp"
 
 namespace rocshmem {
 
@@ -44,6 +45,7 @@ class Backend;
 class Context;
 
 class IpcOnImpl {
+ protected:
   using HEAP_BASES_T = std::vector<char *, StdAllocatorHIP<char *>>;
 
  public:
@@ -111,6 +113,16 @@ class IpcOnImpl {
     return false;
   }
 
+  void initFrom(const IpcOnImpl &other) {
+    ipc_bases = other.ipc_bases;
+    shm_size = other.shm_size;
+    shm_rank = other.shm_rank;
+    pes_with_ipc_avail = other.pes_with_ipc_avail;
+  }
+
+  void assignSdmaChannel([[maybe_unused]] unsigned int ctx_id) {}
+
+
   __device__ __attribute__((noinline))
   bool isIpcAvailable_irregular(int target_pe, int *local_target_pe) {
     for (int i = 0; i < shm_size; i++) {
@@ -155,27 +167,44 @@ class IpcOnImpl {
     return isIpcAvailable_irregular(target_pe, local_target_pe);
   }
 
+
   __device__ void ipcGpuInit(Backend *gpu_backend, Context *ctx, int thread_id);
 
   template <MemcpyKind Kind = MemcpyKind::Put>
-  __device__ void ipcCopy(void *dst, void *src, size_t size) {
+  __device__ void ipcCopy(void *dst, void *src, size_t size, [[maybe_unused]] int local_pe) {
     memcpy_lane<Kind>(dst, src, size);
   }
 
   template <MemcpyKind Kind = MemcpyKind::Put>
-  __device__ void ipcCopy_wg(void *dst, void *src, size_t size) {
+  __device__ void ipcCopy_wg(void *dst, void *src, size_t size, [[maybe_unused]] int local_pe) {
     memcpy_wg<Kind>(dst, src, size);
   }
 
   template <MemcpyKind Kind = MemcpyKind::Put>
-  __device__ void ipcCopy_wave(void *dst, void *src, size_t size) {
+  __device__ void ipcCopy_wave(void *dst, void *src, size_t size, [[maybe_unused]] int local_pe) {
     memcpy_wave<Kind>(dst, src, size);
   }
 
   template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
-            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_seq_cst>
+            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_release>
   __device__ __forceinline__ void ipcFence() {
     detail::atomic::threadfence<scope, order>();
+  }
+
+  template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
+            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_release>
+  __device__ __forceinline__ void ipcFence([[maybe_unused]] int local_pe) {
+    detail::atomic::threadfence<scope, order>();
+  }
+
+  __device__ void ipcQuiet() {
+    detail::atomic::threadfence<detail::atomic::memory_scope_system,
+                                detail::atomic::memory_order_acq_rel>();
+  }
+
+  __device__ void ipcQuiet([[maybe_unused]] int local_pe) {
+    detail::atomic::threadfence<detail::atomic::memory_scope_system,
+                                detail::atomic::memory_order_acq_rel>();
   }
 
   template <typename T>
@@ -253,6 +282,121 @@ class IpcOnImpl {
   }
 };
 
+#if defined(USE_SDMA)
+class IpcSdmaImpl : public IpcOnImpl {
+ public:
+  SdmaImpl sdmaImpl_;
+
+  void initFrom(const IpcSdmaImpl &other) {
+    IpcOnImpl::initFrom(other);
+    sdmaImpl_ = other.sdmaImpl_;
+  }
+
+  void assignSdmaChannel(unsigned int ctx_id) {
+    if (sdmaImpl_.numChannels > 0) {
+      sdmaImpl_.sdmaChannel = ctx_id % sdmaImpl_.numChannels;
+      // stride=1 (spread wf_id across channels) for the default context (ctx_id=0,
+      // shared by all WGs) or when ROCSHMEM_SDMA_SPREAD_CHANNELS=1 forces it.
+      // Per-WG contexts (ctx_id>=1) already distribute across channels via ctx_id;
+      // the wf_id offset would only reshuffle contention without reducing it.
+      sdmaImpl_.sdmaChannelStride =
+          ((ctx_id == 0) || static_cast<bool>(envvar::sdma::spread_channels)) ? 1 : 0;
+    }
+  }
+
+  __host__ void ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
+                            MPI_Comm thread_comm);
+
+  __host__ void ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
+                            TcpBootstrap *bootstrap);
+
+  __host__ void ipcHostStop();
+
+  template <MemcpyKind Kind = MemcpyKind::Put>
+  __device__ void ipcCopy(void *dst, void *src, size_t size, int local_pe) {
+    if (sdmaImpl_.sdmaEnabled && size >= sdmaImpl_.sdmaThreshold) {
+      auto* handle = sdmaImpl_.sdmaCopy<Kind>(dst, src, size, local_pe);
+      assert(nullptr != handle /* Assuming sdma is available to all pes uniformely */);
+      if constexpr (is_blocking(Kind)) handle->quietAll();
+      return;
+    }
+    memcpy_lane<Kind>(dst, src, size);
+  }
+
+  template <MemcpyKind Kind = MemcpyKind::Put>
+  __device__ void ipcCopy_wg(void *dst, void *src, size_t size, int local_pe) {
+    if (sdmaImpl_.sdmaEnabled && size >= sdmaImpl_.sdmaThreshold) {
+      anvil::SdmaQueueDeviceHandle* handle = nullptr;
+      if (is_thread_zero_in_block()) {
+        handle = sdmaImpl_.sdmaCopy<Kind>(dst, src, size, local_pe);
+        assert(nullptr != handle /* Assuming sdma is available to all pes uniformely */);
+        if constexpr (is_blocking(Kind)) handle->quietAll();
+      }
+      return;
+    }
+    memcpy_wg<Kind>(dst, src, size);
+  }
+
+  template <MemcpyKind Kind = MemcpyKind::Put>
+  __device__ void ipcCopy_wave(void *dst, void *src, size_t size, int local_pe) {
+    if (sdmaImpl_.sdmaEnabled && size >= sdmaImpl_.sdmaThreshold) {
+      anvil::SdmaQueueDeviceHandle* handle = nullptr;
+      if (is_thread_zero_in_wave()) {
+        handle = sdmaImpl_.sdmaCopy<Kind>(dst, src, size, local_pe);
+        assert(nullptr != handle /* Assuming sdma is available to all pes uniformely */);
+        if constexpr (is_blocking(Kind)) handle->quietAll();
+      }
+      return;
+    }
+    memcpy_wave<Kind>(dst, src, size);
+  }
+
+  template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
+            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_release>
+  __device__ __forceinline__ void ipcFence() {
+    if (sdmaImpl_.sdmaEnabled &&
+        __hip_atomic_load(&sdmaImpl_.sdmaDirty, __ATOMIC_RELAXED,
+                          __HIP_MEMORY_SCOPE_AGENT) != 0)
+      sdmaImpl_.sdmaQuietAll();
+    detail::atomic::threadfence<scope, order>();
+  }
+
+  template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
+            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_release>
+  __device__ __forceinline__ void ipcFence(int local_pe) {
+    if (sdmaImpl_.sdmaEnabled) {
+      uint64_t pe_mask = ((1ULL << sdmaImpl_.numChannels) - 1) <<
+                         (local_pe * sdmaImpl_.numChannels);
+      if (__hip_atomic_load(&sdmaImpl_.sdmaDirty, __ATOMIC_RELAXED,
+                            __HIP_MEMORY_SCOPE_AGENT) & pe_mask)
+        sdmaImpl_.sdmaQuiet(local_pe);
+    }
+    detail::atomic::threadfence<scope, order>();
+  }
+
+  __device__ void ipcQuiet() {
+    if (sdmaImpl_.sdmaEnabled &&
+        __hip_atomic_load(&sdmaImpl_.sdmaDirty, __ATOMIC_RELAXED,
+                          __HIP_MEMORY_SCOPE_AGENT) != 0)
+      sdmaImpl_.sdmaQuietAll();
+    detail::atomic::threadfence<detail::atomic::memory_scope_system,
+                                detail::atomic::memory_order_acq_rel>();
+  }
+
+  __device__ void ipcQuiet(int local_pe) {
+    if (sdmaImpl_.sdmaEnabled) {
+      uint64_t pe_mask = ((1ULL << sdmaImpl_.numChannels) - 1) <<
+                         (local_pe * sdmaImpl_.numChannels);
+      if (__hip_atomic_load(&sdmaImpl_.sdmaDirty, __ATOMIC_RELAXED,
+                            __HIP_MEMORY_SCOPE_AGENT) & pe_mask)
+        sdmaImpl_.sdmaQuiet(local_pe);
+    }
+    detail::atomic::threadfence<detail::atomic::memory_scope_system,
+                                detail::atomic::memory_order_acq_rel>();
+  }
+};
+#endif  // USE_SDMA
+
 // clang-format off
 NOWARN(-Wunused-parameter,
 class IpcOffImpl {
@@ -281,24 +425,36 @@ class IpcOffImpl {
   __host__ bool isIpcAvailable([[maybe_unused]] int my_pe, int target_pe, int *local_target_pe) { return false; }
   __device__ bool isIpcAvailable([[maybe_unused]] int my_pe, int target_pe, int *local_target_pe) { return false; }
 
+  void initFrom(const IpcOffImpl &) {}
+
+  void assignSdmaChannel(unsigned int) {}
+
   __device__ void ipcGpuInit(Backend *rocshmem_handle, Context *ctx,
                              int thread_id) {}
 
   template <MemcpyKind Kind = MemcpyKind::Put>
   __device__ void ipcCopy([[maybe_unused]] void *dst, [[maybe_unused]] void *src,
-                          [[maybe_unused]] size_t size) {}
+                          [[maybe_unused]] size_t size, [[maybe_unused]] int local_pe) {}
 
   template <MemcpyKind Kind = MemcpyKind::Put>
   __device__ void ipcCopy_wg([[maybe_unused]] void *dst, [[maybe_unused]] void *src,
-                             [[maybe_unused]] size_t size) {}
+                             [[maybe_unused]] size_t size, [[maybe_unused]] int local_pe) {}
 
   template <MemcpyKind Kind = MemcpyKind::Put>
   __device__ void ipcCopy_wave([[maybe_unused]] void *dst, [[maybe_unused]] void *src,
-                               [[maybe_unused]] size_t size) {}
+                               [[maybe_unused]] size_t size, [[maybe_unused]] int local_pe) {}
+
+  __device__ void ipcQuiet() {}
+
+  __device__ void ipcQuiet(int) {}
 
   template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
-            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_seq_cst>
+            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_release>
   __device__ __forceinline__ void ipcFence() {}
+
+  template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
+            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_release>
+  __device__ __forceinline__ void ipcFence(int) {}
 
   template <typename T>
   __device__ T ipcAMOFetchAdd(T *val, T value) {
@@ -327,7 +483,9 @@ class IpcOffImpl {
 /*
  * Select which one of our IPC policies to use at compile time.
  */
-#if defined(USE_IPC)
+#if defined(USE_SDMA)
+typedef IpcSdmaImpl IpcImpl;
+#elif defined(USE_IPC)
 typedef IpcOnImpl IpcImpl;
 #else
 typedef IpcOffImpl IpcImpl;

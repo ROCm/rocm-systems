@@ -48,6 +48,7 @@ struct engine_config
     fill_policy_t            fill_policy        = fill_policy_t::discard;
     backend_t                backend            = backend_t::inprocess;
     std::vector<std::string> disabled_categories{};
+    bool                     silence_sdk_log_callback{ false };
 };
 
 // Reads the live config::get_perfetto_* getters once and returns a snapshot.

@@ -11,6 +11,7 @@
 #include <iostream>
 #include <unordered_map>
 #include <unordered_set>
+#include <shared_mutex>
 #include <vector>
 
 #include "hip/hip_runtime.h"
@@ -948,6 +949,7 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   static std::unordered_set<GraphExec*> graphExecSet_;
   static std::recursive_mutex graphExecSetLock_;
   static std::recursive_mutex graphExecStreamCreateLock_;
+  static std::shared_mutex graphExecTrimLock_;
   bool graph_dumped_ = false;
   GraphExec(uint64_t flags = 0)
       : ReferenceCountedObject(), Graph(hip::getCurrentDevice()), flags_(flags) {
