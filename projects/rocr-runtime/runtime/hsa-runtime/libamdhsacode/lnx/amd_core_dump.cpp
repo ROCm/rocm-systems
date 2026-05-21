@@ -341,35 +341,20 @@ using SegmentsInfo = std::vector<SegmentInfo>;
 using rocr::amd::hsa::alignUp;
 
 // Helper function to get device info from GpuAgent without debug mode
-static void GetCoreDeviceInfo(const AMD::GpuAgent* agent, kfd_dbg_device_info_entry& entry) {
-  // Call thunk API to get device info from topology/FMM/libdrm
+// Returns true on success, false on failure
+static bool GetCoreDeviceInfo(const AMD::GpuAgent* agent, kfd_dbg_device_info_entry& entry) {
   HSAuint32 gpu_id = agent->properties().KFDGpuID;
   HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtGetCoreDeviceInfo(gpu_id, &entry));
-
   if (status != HSAKMT_STATUS_SUCCESS) {
     fprintf(stderr, "Failed to get core device info for GPU %u\n", gpu_id);
-    return;
+    return false;
   }
-
-  // BUG WORKAROUND: hsaKmtGetCoreDeviceInfo returns zeros for many fields
-  // Manually populate from GpuAgent properties instead
-  const HsaNodeProperties& props = agent->properties();
-
-  entry.gpu_id = gpu_id;
-  entry.vendor_id = props.VendorId;
-  entry.device_id = props.DeviceId;
-
-  // Calculate gfx version from EngineId - decimal encoding for KFD 1.13 compatibility
-  entry.gfx_target_version = (props.EngineId.ui32.Major * 10000
-                               + props.EngineId.ui32.Minor * 100
-                               + props.EngineId.ui32.Stepping);
-
-  // Exception status - TODO: Get from agent exception tracking when implemented
-  entry.exception_status = 0;  // Placeholder until agent exception tracking is implemented
+  return true;
 }
 
 // Helper function to get queue snapshot from AqlQueue without debug mode
-static void GetCoreQueueInfo(AMD::AqlQueue* queue, kfd_queue_snapshot_entry& entry) {
+// Returns true on success, false on failure
+static bool GetCoreQueueInfo(AMD::AqlQueue* queue, kfd_queue_snapshot_entry& entry) {
   // Zero out the structure first
   memset(&entry, 0, sizeof(entry));
 
@@ -381,21 +366,23 @@ static void GetCoreQueueInfo(AMD::AqlQueue* queue, kfd_queue_snapshot_entry& ent
   entry.gpu_id = static_cast<const AMD::GpuAgent*>(queue->GetAgent())->properties().KFDGpuID;
   // entry.ring_size expects size in bytes, hsa_queue.size is in number of packets (64 bytes each)
   entry.ring_size = queue->amd_queue_.hsa_queue.size * 64;
-  entry.queue_type = queue->amd_queue_.hsa_queue.type;
+  entry.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
 
-  // Runtime cached (1 field) - TODO: Get exception status when implemented
-  // entry.exception_status = queue->GetExceptionStatus();
-  entry.exception_status = 0;  // Placeholder until exception caching is implemented
+  // Exception status not needed for core dump functionality
+  entry.exception_status = 0;
 
-  // GetQueueInfo (2 fields) - one non-debug ioctl for CWSR info
+  // Get CWSR info via hsaKmtGetQueueInfo (triggers memory migration / implicit cache flush)
+  // CWSR data is critical for debugger - fail if we can't get it
   HsaQueueInfo queue_info;
-  if (HSAKMT_CALL(hsaKmtGetQueueInfo(entry.queue_id, &queue_info)) == HSAKMT_STATUS_SUCCESS) {
-    entry.ctx_save_restore_address = (uint64_t)queue_info.SaveAreaHeader;
-    entry.ctx_save_restore_area_size = (uint32_t)queue_info.SaveAreaSizeInBytes;
+  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtGetQueueInfo(queue->aql_queue_id(), &queue_info));
+  if (status != HSAKMT_STATUS_SUCCESS) {
+    fprintf(stderr, "queue %" PRIu64 "\n", queue->aql_queue_id());
+    return false;
   }
+  entry.ctx_save_restore_address = (uint64_t)queue_info.SaveAreaHeader;
+  entry.ctx_save_restore_area_size = (uint32_t)queue_info.SaveAreaSizeInBytes;
 
-  // Reserved field
-  entry.reserved = 0;
+  return true;
 }
 
 struct SegmentBuilder {
@@ -408,22 +395,52 @@ struct SegmentBuilder {
 
 struct NoteSegmentBuilder : public SegmentBuilder {
   hsa_status_t Collect(SegmentsInfo& segments) override {
-    void *runtime_ptr, *agents_ptr = NULL, *queues_ptr = NULL;
-    uint32_t runtime_size, agents_size, queue_size, n_entries, entry_size;
-    HsaVersionInfo versionInfo = {0};
+    // Get KFD version - use {1, 18} for current kernel compatibility
+    HsaVersionInfo versionInfo = {1, 18};
 
-    if (HSAKMT_CALL(hsaKmtDbgEnable(&runtime_ptr, &runtime_size))) {
-      fprintf(stderr, "Failed to enable debug interface, "
-              "debugger might be already attached.\n");
+    // Get runtime info (r_debug, ttmp_setup, runtime_state cached from runtime_enable)
+    kfd_runtime_info runtime_info;
+    memset(&runtime_info, 0, sizeof(runtime_info));
+
+    if (HSAKMT_CALL(hsaKmtGetCoreRuntimeInfo(&runtime_info)) != HSAKMT_STATUS_SUCCESS) {
+      fprintf(stderr, "Failed to get runtime info\n");
       return HSA_STATUS_ERROR;
     }
-    std::unique_ptr<void, decltype(std::free) *> runtime_info(runtime_ptr, std::free);
 
-    if (HSAKMT_CALL(hsaKmtGetVersion(&versionInfo))) {
-      HSAKMT_CALL(hsaKmtDbgDisable());
-      fprintf(stderr, "Failed to fetch driver ABI version.\n");
-      return HSA_STATUS_ERROR;
+    // Build device snapshots from GPU agents
+    std::vector<kfd_dbg_device_info_entry> device_snapshots;
+    const auto& gpu_agents = core::Runtime::runtime_singleton_->gpu_agents();
+
+    for (const core::Agent* agent : gpu_agents) {
+      const AMD::GpuAgent* gpu_agent = static_cast<const AMD::GpuAgent*>(agent);
+      kfd_dbg_device_info_entry entry;
+      if (!GetCoreDeviceInfo(gpu_agent, entry)) {
+        fprintf(stderr, "Failed to collect device info, aborting core dump\n");
+        return HSA_STATUS_ERROR;
+      }
+      device_snapshots.push_back(entry);
     }
+
+    // Collect and build queue snapshots (caller handles suspend/resume)
+    std::vector<kfd_queue_snapshot_entry> queue_snapshots;
+    for (const core::Agent* agent : gpu_agents) {
+      const AMD::GpuAgent* gpu_agent = static_cast<const AMD::GpuAgent*>(agent);
+      const auto& aql_queues = gpu_agent->GetAqlQueues();
+
+      for (core::Queue* q : aql_queues) {
+        AMD::AqlQueue* aql_queue = static_cast<AMD::AqlQueue*>(q);
+
+        kfd_queue_snapshot_entry entry;
+        if (!GetCoreQueueInfo(aql_queue, entry)) {
+          fprintf(stderr, "Failed to collect queue info, aborting core dump\n");
+          return HSA_STATUS_ERROR;
+        }
+        queue_snapshots.push_back(entry);
+      }
+    }
+
+    // Package runtime data into PT_NOTE
+
     /* Note version */
     note_package_builder_.Write<uint64_t>(1);
     /* Store version_major in PT_NOTE package */
@@ -431,38 +448,32 @@ struct NoteSegmentBuilder : public SegmentBuilder {
     /* Store version_minor in PT_NOTE package */
     note_package_builder_.Write<uint32_t>(versionInfo.KernelInterfaceMinorVersion);
     /* Store runtime_info_size in PT_NOTE package */
-    note_package_builder_.Write<uint64_t>(runtime_size);
+    static_assert(16 <= sizeof(kfd_runtime_info));
+    note_package_builder_.Write<uint64_t>(sizeof(kfd_runtime_info));
 
-    if (HSAKMT_CALL(hsaKmtDbgGetDeviceData(&agents_ptr, &n_entries, &entry_size))) {
-       HSAKMT_CALL(hsaKmtDbgDisable());
-       fprintf(stderr, "Failed to fetch agents snapshot.\n");
-       return HSA_STATUS_ERROR;
-    }
-    agents_size = n_entries * entry_size;
-    std::unique_ptr<void, decltype(std::free) *> agents_info(agents_ptr, std::free);
     /* Store n_agents in PT_NOTE package */
-    note_package_builder_.Write<uint32_t>(n_entries);
+    note_package_builder_.Write<uint32_t>(device_snapshots.size());
     /* Store agent_info_entry_size in PT_NOTE package */
-    note_package_builder_.Write<uint32_t>(entry_size);
+    static_assert(120 <= sizeof(kfd_dbg_device_info_entry));
+    note_package_builder_.Write<uint32_t>(sizeof(kfd_dbg_device_info_entry));
 
-    if (HSAKMT_CALL(hsaKmtDbgGetQueueData(&queues_ptr, &n_entries, &entry_size, true))) {
-       HSAKMT_CALL(hsaKmtDbgDisable());
-       fprintf(stderr, "Failed to fetch queues snapshot.\n");
-       return HSA_STATUS_ERROR;
-    }
-    queue_size = n_entries * entry_size;
-    std::unique_ptr<void, decltype(std::free) *> queues_info(queues_ptr, std::free);
     /* Store n_queues in PT_NOTE package */
-    note_package_builder_.Write<uint32_t>(n_entries);
+    note_package_builder_.Write<uint32_t>(queue_snapshots.size());
     /* Store queue_info_entry_size in PT_NOTE package */
-    note_package_builder_.Write<uint32_t>(entry_size);
+    static_assert(64 <= sizeof(kfd_queue_snapshot_entry));
+    note_package_builder_.Write<uint32_t>(sizeof(kfd_queue_snapshot_entry));
 
-    PushInfo(runtime_info.get(), runtime_size);
-    PushInfo(agents_info.get(), agents_size);
-    PushInfo(queues_info.get(), queue_size);
-    if (HSAKMT_CALL(hsaKmtDbgDisable())) {
-      fprintf(stderr, "Failed to disable debug interface.\n");
-      return HSA_STATUS_ERROR;
+    // Push runtime info
+    PushInfo(&runtime_info, sizeof(kfd_runtime_info));
+
+    // Push device snapshots
+    if (!device_snapshots.empty()) {
+      PushInfo(device_snapshots.data(), device_snapshots.size() * sizeof(kfd_dbg_device_info_entry));
+    }
+
+    // Push queue snapshots
+    if (!queue_snapshots.empty()) {
+      PushInfo(queue_snapshots.data(), queue_snapshots.size() * sizeof(kfd_queue_snapshot_entry));
     }
 
     /* With note content, package this in the PT_NOTE.  */
@@ -885,9 +896,27 @@ static hsa_status_t build_core_dump(const std::string& filename, const SegmentsI
 
   return result;
 }
+// Helper to suspend all unsuspended queues and return list of queues we suspended
+static std::vector<AMD::AqlQueue*> suspend_all_unsuspended_queues() {
+  std::vector<AMD::AqlQueue*> suspended_queues;
+  const auto& gpu_agents = core::Runtime::runtime_singleton_->gpu_agents();
+  for (const core::Agent* agent : gpu_agents) {
+    const AMD::GpuAgent* gpu_agent = static_cast<const AMD::GpuAgent*>(agent);
+    const auto& aql_queues = gpu_agent->GetAqlQueues();
+    for (core::Queue* q : aql_queues) {
+      AMD::AqlQueue* aql_queue = static_cast<AMD::AqlQueue*>(q);
+      if (!aql_queue->IsSuspended()) {
+        aql_queue->Suspend();
+        suspended_queues.push_back(aql_queue);
+      }
+    }
+  }
+  return suspended_queues;
+}
+
 }   //  namespace impl
 
-hsa_status_t dump_gpu_core() {
+hsa_status_t dump_gpu_core(std::vector<AMD::AqlQueue*>* suspended_queues_out) {
   if (core::Runtime::runtime_singleton_->flag().core_dump_disable()) {
     return HSA_STATUS_SUCCESS;
   }
@@ -904,15 +933,27 @@ hsa_status_t dump_gpu_core() {
     return HSA_STATUS_SUCCESS;
   }
 
+  // Suspend all unsuspended queues before collecting snapshots
+  std::vector<AMD::AqlQueue*> suspended_queues = impl::suspend_all_unsuspended_queues();
+
+  // Return list of suspended queues to caller if requested
+  if (suspended_queues_out != nullptr) {
+    *suspended_queues_out = suspended_queues;
+  }
+
   impl::NoteSegmentBuilder nbuilder;
   impl::LoadSegmentBuilder lbuilder;
   impl::SegmentsInfo segments;
 
   hsa_status_t status = nbuilder.Collect(segments);
-  if (status != HSA_STATUS_SUCCESS) return status;
+  if (status != HSA_STATUS_SUCCESS) {
+    return status;
+  }
 
   status = lbuilder.Collect(segments);
-  if (status != HSA_STATUS_SUCCESS) return status;
+  if (status != HSA_STATUS_SUCCESS) {
+    return status;
+  }
 
   // Determine output pattern
   std::string pattern;
@@ -933,11 +974,12 @@ hsa_status_t dump_gpu_core() {
 
   bool show_progress = core::Runtime::runtime_singleton_->flag().enable_core_dump_progress();
 
+  hsa_status_t dump_status;
   if (!pattern.empty() && pattern[0] == '|') {
     if (show_progress) {
       fprintf(stderr, "Generating GPU core dump via pipe handler\n");
     }
-    return impl::write_to_pipe_handler(pattern, segments, rlimit.rlim_cur, show_progress);
+    dump_status = impl::write_to_pipe_handler(pattern, segments, rlimit.rlim_cur, show_progress);
   } else {
     // Regular file output
     std::string filename = impl::substitute_core_pattern(pattern);
@@ -952,8 +994,10 @@ hsa_status_t dump_gpu_core() {
     if (show_progress) {
       fprintf(stderr, "Generating GPU core dump to: %s\n", filename.c_str());
     }
-    return impl::build_core_dump(filename, segments, rlimit.rlim_cur, show_progress);
+    dump_status = impl::build_core_dump(filename, segments, rlimit.rlim_cur, show_progress);
   }
+
+  return dump_status;
 }
 }   //  namespace coredump
 }   //  namespace amd

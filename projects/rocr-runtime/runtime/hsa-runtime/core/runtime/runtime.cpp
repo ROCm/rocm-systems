@@ -2402,6 +2402,7 @@ bool Runtime::VMFaultHandler(hsa_signal_value_t val, void* arg) {
         fprintf(stderr, "GPU core dump skipped because PC Sampling active\n");
       else if (amd::coredump::dump_gpu_core())
         fprintf(stderr, "GPU core dump failed\n");
+      // Process will abort - no need to resume queues
     }
     assert(false && "GPU memory access fault.");
     std::abort();
