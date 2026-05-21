@@ -651,8 +651,8 @@ TEST_F(GrowMPITest, GetUniqueId_DistinctHandles)
     // Compare the first 8 bytes which hold the magic field
     uint64_t magic1 = 0, magic2 = 0;
     static_assert(sizeof(ncclUniqueId) >= 8, "ncclUniqueId too small");
-static_assert(offsetof(ncclBootstrapHandle, magic) == 0,
-              "magic must be the first field of ncclBootstrapHandle");
+    static_assert(offsetof(ncclBootstrapHandle, magic) == 0,
+                  "magic must be the first field of ncclBootstrapHandle");
     memcpy(&magic1, &growId1, sizeof(magic1));
     memcpy(&magic2, &growId2, sizeof(magic2));
     ASSERT_MPI_NE(magic1, magic2);
