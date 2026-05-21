@@ -1302,57 +1302,6 @@ TEST(WaitcntTranslator, EncodeVmcnt0EmitsLoadcntAndStorecnt) {
   EXPECT_TRUE(has_storecnt_dscnt);
 }
 
-namespace {
-
-struct MutableKernelDescriptorImage {
-  std::vector<uint8_t> image;
-  uint64_t text_offset = 0;
-  uint64_t text_size = 0;
-  uint64_t kd_file_off = 0;
-  bool valid = false;
-};
-
-MutableKernelDescriptorImage mutable_minimal_descriptor(rj_code_arch_t guest_arch,
-                                                        rj_code_arch_t host_arch) {
-  MutableKernelDescriptorImage fixture;
-  fixture.image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text();
-
-  rocjitsu::AmdGpuCodeObject co(fixture.image.data(), fixture.image.size());
-  if (!co.is_valid() || co.text_sections().empty())
-    return fixture;
-
-  fixture.text_offset = co.text_sections()[0]->sectionOffset();
-  fixture.text_size = co.text_sections()[0]->size();
-
-  rocjitsu::KernelDescriptorTranslator translator(guest_arch, host_arch);
-  const auto translations =
-      translator.translate_image(fixture.image, fixture.text_offset, fixture.text_size,
-                                 rocjitsu::KernelDescriptorTranslationOptions{});
-  if (translations.empty())
-    return fixture;
-
-  fixture.kd_file_off = translations[0].descriptor_file_offset;
-  fixture.valid =
-      fixture.kd_file_off + sizeof(rocr::llvm::amdhsa::kernel_descriptor_t) <= fixture.image.size();
-  return fixture;
-}
-
-rocr::llvm::amdhsa::kernel_descriptor_t *
-mutable_kernel_descriptor(MutableKernelDescriptorImage &fixture) {
-  return reinterpret_cast<rocr::llvm::amdhsa::kernel_descriptor_t *>(fixture.image.data() +
-                                                                     fixture.kd_file_off);
-}
-
-std::vector<rocjitsu::KdTranslation>
-translate_mutable_descriptor(const MutableKernelDescriptorImage &fixture, rj_code_arch_t guest_arch,
-                             rj_code_arch_t host_arch) {
-  rocjitsu::KernelDescriptorTranslator translator(guest_arch, host_arch);
-  return translator.translate_image(fixture.image, fixture.text_offset, fixture.text_size,
-                                    rocjitsu::KernelDescriptorTranslationOptions{});
-}
-
-} // namespace
-
 // --- Synthetic BinaryTranslator integration tests ---
 TEST(BinaryTranslatorE2E, TranslatesMultiKernelCodeObject) {
   using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
