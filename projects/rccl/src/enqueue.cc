@@ -384,7 +384,7 @@ static bool testBudget(
 
 // Returns whether this should be disabled at the device level.  Should be called after devWork fields have been set for what
 // it depends on.
-bool gfx9CheapFenceOff(const ncclDevWorkColl& devWork, bool disabledByPrecheck){
+bool cheapPostSendFenceOff(const ncclDevWorkColl& devWork, bool disabledByPrecheck){
     bool fenceOk = devWork.regUsed == 0 && devWork.netRegUsed == 0 && !disabledByPrecheck;
     return !fenceOk;
 }
@@ -470,7 +470,7 @@ ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
       devWork.netRegUsed = 1;
     if (task->regBufType & (NCCL_IPC_REG_BUFFER | NCCL_NVLS_REG_BUFFER))
       devWork.regUsed = 1;
-    devWork.gfx9CheapFenceOff = gfx9CheapFenceOff(devWork, comm->gfx9CheapFenceOff);
+    devWork.cheapPostSendFenceOff = cheapPostSendFenceOff(devWork, comm->cheapPostSendFenceOff);
 
     if (task->regBufType & NCCL_NVLS_REG_BUFFER) {
       struct ncclDevWorkCollReg workReg = {};

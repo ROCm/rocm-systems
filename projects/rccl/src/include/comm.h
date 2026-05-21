@@ -563,7 +563,7 @@ struct ncclComm {
   int node;
   int nNodes;
   int rcclUseOneSlice; // RCCL: true if this comm is using one slice per primitive
-  int gfx9CheapFenceOff; // RCCL: true if gfx9 cheap fence is disabled
+  int cheapPostSendFenceOff; // RCCL: true if cheap post-send fence is disabled
   int localRank;
   int localRanks;
   int maxLocalRanks;
