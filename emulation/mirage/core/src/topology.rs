@@ -2,6 +2,4 @@
 
 pub struct TopologyDef {
     name: String,
-
-    
 }
