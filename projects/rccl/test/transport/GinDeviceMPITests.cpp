@@ -1494,7 +1494,7 @@ __global__ void alltoallHybridKernel(
   // an LSA-team barrier; multi-node crosses rails.
   ncclBarrierSession<ncclCoopCta> bar{
       ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x};
-  bar.sync(ncclCoopCta(), std::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
+  bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
 
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   int nthreads = blockDim.x * gridDim.x;
@@ -1541,7 +1541,7 @@ __global__ void alltoallHybridKernel(
   // Final barrier: every rank's LSA stores into peer recvbufs are issued
   // and the local writes from peers are visible before any rank consumes
   // its recvbuf.
-  bar.sync(ncclCoopCta(), std::memory_order_release, ncclGinFenceLevel::Relaxed);
+  bar.sync(ncclCoopCta(), cuda::memory_order_release, ncclGinFenceLevel::Relaxed);
 }
 
 // Same shape and verification as Alltoall_PureReference but exercises the

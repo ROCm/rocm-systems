@@ -764,7 +764,6 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   comm->forcePatEnable = (parent != nullptr) ? parent->forcePatEnable : false;
 
   if (parent == NULL || !parent->shareResources) {
-    NCCLCHECK(ncclNetInit(comm));
     struct ncclSharedResources* sharedRes = NULL;
     NCCLCHECK(ncclCalloc(&sharedRes, 1));
     sharedRes->owner = comm;
@@ -776,6 +775,7 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
     CUDACHECK(cudaEventCreateWithFlags(&sharedRes->scratchEvent, cudaEventDisableTiming));
     comm->sharedRes = sharedRes;
     sharedRes->refCount = 1;
+    NCCLCHECK(ncclNetInit(comm));
   } else {
     comm->sharedRes = parent->sharedRes;
     ncclAtomicRefCountIncrement(&parent->sharedRes->refCount);
