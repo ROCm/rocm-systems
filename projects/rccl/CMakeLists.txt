@@ -587,6 +587,11 @@ rocm_install(FILES       ${PROJECT_BINARY_DIR}/include/rccl/rccl.h src/include/p
              DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl)
 rocm_install(FILES       src/include/api_trace.h
              DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl/amd_detail)
+rocm_install(FILES       ${PROJECT_BINARY_DIR}/include/nccl.h
+                         ${PROJECT_BINARY_DIR}/include/nccl_device.h
+             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+rocm_install(DIRECTORY   ${PROJECT_BINARY_DIR}/include/nccl_device/
+             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/nccl_device)
 ## Install tuner config directory for CSV-based tuner
 file(COPY tuner DESTINATION ${PROJECT_BINARY_DIR})
 rocm_install(DIRECTORY ${PROJECT_BINARY_DIR}/tuner DESTINATION ${CMAKE_INSTALL_DATADIR}/rccl)
