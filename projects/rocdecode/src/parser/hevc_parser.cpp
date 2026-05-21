@@ -814,7 +814,7 @@ void HevcVideoParser::ParseSubLayerHrdParameters(HevcSubLayerHrdParameters *sub_
     }
 }
 
-ParserResult HevcVideoParser::ParseHrdParameters(HevcHrdParameters *hrd, bool common_inf_present_flag, uint32_t max_num_sub_layers_minus1, uint8_t *nalu, size_t size,size_t &offset) {
+ParserResult HevcVideoParser::ParseHrdParameters(HevcHrdParameters *hrd, bool common_inf_present_flag, uint32_t max_num_sub_layers_minus1, uint8_t *nalu, size_t size, size_t &offset) {
     if (common_inf_present_flag) {
         hrd->nal_hrd_parameters_present_flag = Parser::GetBit(nalu, offset);
         hrd->vcl_hrd_parameters_present_flag = Parser::GetBit(nalu, offset);
@@ -1541,11 +1541,13 @@ ParserResult HevcVideoParser::ParseSps(uint8_t *nalu, size_t size) {
     if (sps_ptr->vui_parameters_present_flag) {
         // Treat VUI parameter parsing failure as non-fatal error and continue parsing since VUI parameters
         // are not necessary for decoding.
-        if (ParseVui(sps_ptr, nalu, size, offset) != PARSER_OK) {
+        if ((ret = ParseVui(sps_ptr, nalu, size, offset)) != PARSER_OK) {
             ErrorLog(g_rocdec_logger, "Failed to parse VUI parameters. Default VUI parameters will be applied.");
         }
     }
-    sps_ptr->sps_extension_flag = Parser::GetBit(nalu, offset);
+    if (ret == PARSER_OK) {
+        sps_ptr->sps_extension_flag = Parser::GetBit(nalu, offset);
+    }
     sps_ptr->is_received = 1;
 
     if (g_rocdec_logger.GetLogLevel() >= kRocDecLogDebug) {
