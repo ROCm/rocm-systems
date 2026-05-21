@@ -42,7 +42,7 @@
 
 // AMD specific HSA backend.
 
-#ifndef HSA_RUNTIME_CORE_INC_AMD_MEMORY_REGION_H_dr
+#ifndef HSA_RUNTIME_CORE_INC_AMD_MEMORY_REGION_H_
 #define HSA_RUNTIME_CORE_INC_AMD_MEMORY_REGION_H_
 
 #include "hsakmt/hsakmt.h"
