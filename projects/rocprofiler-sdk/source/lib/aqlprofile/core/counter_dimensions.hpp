@@ -120,10 +120,8 @@ public:
 
         if(bIsGFX9)
             compute_unit = HasAttr(CounterBlockTcAttr) && shader_engine;
-        else if(HasAttr(CounterBlockWgpAttr))
-            workgroup_processor = true;
-        else if(bIsGFX11 || bIsGFX12)
-            workgroup_processor = HasAttr(CounterBlockWgpAttr);
+        
+        workgroup_processor = HasAttr(CounterBlockWgpAttr);
 
         se_num  = pm4_factory->GetShaderEnginesNumber();
         sarrays = pm4_factory->GetShaderArraysNumber() * se_num;
