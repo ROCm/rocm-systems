@@ -1,6 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import importlib.util
 import re
 import subprocess
 import tempfile
@@ -324,6 +325,26 @@ def test_detect_counters_uses_shared_gfx115x_panel_configs():
     assert filter_blocks == []
     assert captured["length"] > 0
     assert captured["has_top_stats"] is True
+
+
+@pytest.mark.misc
+def test_sets_metric_validator_uses_shared_gfx115x_analysis_configs():
+    validator_path = (
+        Path(__file__).resolve().parents[1] / "tools" / "validate_sets_metric_ids.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "validate_sets_metric_ids",
+        validator_path,
+    )
+    validator = importlib.util.module_from_spec(spec)
+    assert spec is not None
+    assert spec.loader is not None
+    spec.loader.exec_module(validator)
+
+    analysis = validator.load_analysis_configs("gfx1151")
+
+    assert 201 in analysis
+    assert list(analysis[201])[:2] == ["VALU FLOPs", "VALU FLOPs (F64)"]
 
 
 @pytest.mark.misc

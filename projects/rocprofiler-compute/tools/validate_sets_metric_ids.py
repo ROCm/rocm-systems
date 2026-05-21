@@ -28,6 +28,7 @@ GPU_SPEC_PATH = PROJECT_ROOT / "src" / "utils" / "mi_gpu_spec.yaml"
 
 # Make src/ importable so we can reuse the canonical counter definitions.
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
+from utils.specs import canonical_config_arch  # noqa: E402
 from utils.utils_counter_defs import (  # noqa: E402
     counter_to_block,
     extract_counters,
@@ -57,7 +58,7 @@ def load_analysis_configs(arch: str) -> dict[int, dict[str, dict]]:
     ``list(result[table_id])`` gives the ordered name list needed for
     index-based lookups.
     """
-    arch_dir = ANALYSIS_DIR / arch
+    arch_dir = ANALYSIS_DIR / (canonical_config_arch(arch) or arch)
     if not arch_dir.is_dir():
         return {}
     result: dict[int, dict[str, dict]] = {}
