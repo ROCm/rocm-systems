@@ -10,9 +10,9 @@
 
 #include "trace_cache/sample_type.hpp"
 
-#include <rocpdsna/storage.hpp>
-#include <rocpdsna/writer.hpp>
-#include <rocpdsna/writer_types.hpp>
+#include <profiler-hub/storage.hpp>
+#include <profiler-hub/writer.hpp>
+#include <profiler-hub/writer_types.hpp>
 
 namespace rocprofsys
 {
@@ -45,11 +45,11 @@ public:
 private:
     void post_process_metadata();
 
-    std::shared_ptr<metadata_registry>  m_metadata;
-    std::shared_ptr<agent_manager>      m_agent_manager;
-    std::unique_ptr<rocpdsna::writer_t> m_writer;
-    output_file_registry&               m_output_registry;
-    std::string                         m_db_output_path;
+    std::shared_ptr<metadata_registry>      m_metadata;
+    std::shared_ptr<agent_manager>          m_agent_manager;
+    std::unique_ptr<profiler_hub::writer_t> m_writer;
+    output_file_registry&                   m_output_registry;
+    std::string                             m_db_output_path;
 };
 
 }  // namespace trace_cache

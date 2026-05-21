@@ -23,7 +23,7 @@ target_link_libraries(
     PRIVATE
         rocprofiler-systems-googletest-library
         rocprofiler-systems-core-library
-        rocprofiler-systems-rocpdsna
+        rocprofiler-systems-profiler-hub
         rocprofiler-systems-logger
 )
 

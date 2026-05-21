@@ -5,7 +5,7 @@
 
 #include "core/agent.hpp"
 
-#include <rocpdsna/writer_types.hpp>
+#include <profiler-hub/writer_types.hpp>
 
 #include <optional>
 #include <string>
@@ -20,7 +20,7 @@ namespace trace_cache
 namespace rocpd_helpers
 {
 
-inline rocpdsna::writer_types::agent_unique_id_t
+inline profiler_hub::writer_types::agent_unique_id_t
 make_agent_uid(const agent& a)
 {
     const auto type_to_string = [](agent_type type) -> std::optional<std::string_view> {
@@ -33,23 +33,23 @@ make_agent_uid(const agent& a)
         }
     };
 
-    rocpdsna::writer_types::agent_unique_id_t uid;
+    profiler_hub::writer_types::agent_unique_id_t uid;
     uid.agent_type = type_to_string(a.type);
     uid.type_index = a.device_type_index;
     return uid;
 }
 
-inline rocpdsna::writer_types::trace_environment_t
+inline profiler_hub::writer_types::trace_environment_t
 make_trace_env(size_t node_id, size_t process_id, size_t thread_id)
 {
-    rocpdsna::writer_types::trace_environment_t env;
+    profiler_hub::writer_types::trace_environment_t env;
     env.node_id    = node_id;
     env.process_id = process_id;
     env.thread_id  = thread_id;
     return env;
 }
 
-inline rocpdsna::writer_types::trace_environment_t
+inline profiler_hub::writer_types::trace_environment_t
 make_trace_env_with_agent(size_t node_id, size_t process_id, size_t thread_id,
                           const agent& a)
 {
@@ -58,7 +58,7 @@ make_trace_env_with_agent(size_t node_id, size_t process_id, size_t thread_id,
     return env;
 }
 
-inline rocpdsna::writer_types::trace_environment_t
+inline profiler_hub::writer_types::trace_environment_t
 make_trace_env_with_agent_queue_stream(size_t node_id, size_t process_id,
                                        size_t thread_id, const agent& a, size_t queue_id,
                                        size_t stream_id)
@@ -69,11 +69,11 @@ make_trace_env_with_agent_queue_stream(size_t node_id, size_t process_id,
     return env;
 }
 
-inline rocpdsna::writer_types::event_data_t
+inline profiler_hub::writer_types::event_data_t
 make_event(size_t stack_id, size_t parent_stack_id, size_t correlation_id,
            const char* category)
 {
-    rocpdsna::writer_types::event_data_t ev;
+    profiler_hub::writer_types::event_data_t ev;
     ev.stack_id        = stack_id;
     ev.parent_stack_id = parent_stack_id;
     ev.correlation_id  = correlation_id;

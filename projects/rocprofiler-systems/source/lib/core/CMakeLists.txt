@@ -92,7 +92,7 @@ target_link_libraries(
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-compile-definitions>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-compile-options>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-perfetto>
-        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-rocpdsna>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-profiler-hub>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-json>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-timemory>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-mpi>
