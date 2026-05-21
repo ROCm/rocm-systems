@@ -23,11 +23,10 @@ namespace core
 {
 namespace
 {
-// Stderr emission is gated by two independent settings: global verbosity
-// (negative values suppress informational lines) AND the per-rank log-output
-// filter (silences log output on ranks that opted out of stderr noise).
-bool
-stderr_log_allowed()
+// Gates both global verbosity and the per-rank log-output filter; either
+// silencer suppresses the stderr lines emitted below.
+[[nodiscard]] bool
+stderr_log_allowed() noexcept
 {
     return config::get_verbose() >= 0 &&
            config::output_filtering::is_log_output_enabled_for_current_mpi_rank();

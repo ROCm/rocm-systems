@@ -71,7 +71,7 @@ build_engine_config_from_settings()
     const auto& disabled = config::get_disabled_categories();
     out.disabled_categories.assign(disabled.begin(), disabled.end());
 
-    out.silence_sdk_log_callback =
+    out.suppress_sdk_log_output =
         !config::output_filtering::is_log_output_enabled_for_current_mpi_rank();
 
     return out;
@@ -123,105 +123,92 @@ public:
 }  // namespace
 
 // ----------------------------------------------------------------------------
-// perfetto_engine::impl
+// perfetto_engine::perfetto_state — narrowed PIMPL
 // ----------------------------------------------------------------------------
 
-struct perfetto_engine::impl
+// Holds the only members whose definitions force the heavy <perfetto.h>
+// dependency into the TU. All other engine state lives directly in
+// perfetto_engine so the public API doesn't pay an unnecessary indirection.
+struct perfetto_engine::perfetto_state
 {
-    explicit impl(engine_config c)
-    : cfg{ std::move(c) }
-    {}
-
-    engine_config           cfg;
     ::perfetto::TraceConfig trace_cfg{};
-    std::mutex              sessions_mutex{};
+
+    // Cached-mode per-pid byte collector lives in the engine class itself;
+    // this map only holds the perfetto-typed session handles.
     std::unordered_map<pid_t, std::unique_ptr<::perfetto::TracingSession>> sessions{};
-    pid_t active_pid{ 0 };
-    bool  running{ false };
-
-    perfetto_engine::mode current_mode{ perfetto_engine::mode::live_fd };
-    trace_sink*           active_sink{ nullptr };
-
-    // Cached-mode per-pid byte collector. Map structure is mutated under
-    // collector_mutex during preregister_pids; once that call has completed,
-    // the structure is frozen and `collected_bytes_frozen` is released so
-    // worker threads can lock-free `find()` without racing the population.
-    std::mutex                                 collector_mutex{};
-    std::unordered_map<int, std::vector<char>> collected_bytes{};
-    std::atomic<bool>                          collected_bytes_frozen{ false };
-
-    static std::once_flag s_sdk_init_flag;
-    static bool           s_sdk_init_succeeded;
-
-    bool is_system_backend() const noexcept
-    {
-        return cfg.backend != engine_config::backend_t::inprocess;
-    }
-
-    // Builds a fresh TracingSession in sessions[pid], wires the error
-    // callback, runs Setup(trace_cfg, fd), and StartBlocking. Takes
-    // sessions_mutex internally — callers must NOT hold it. fd=-1
-    // disables per-Perfetto-default fd output (cached-mode path).
-    void start_session(pid_t pid, int fd)
-    {
-        std::lock_guard<std::mutex> lk{ sessions_mutex };
-        auto&                       slot = sessions[pid];
-        slot                             = ::perfetto::Tracing::NewTrace();
-        slot->SetOnErrorCallback([](::perfetto::TracingError err) {
-            if(err.code == ::perfetto::TracingError::kTracingFailed)
-                LOG_WARNING("Perfetto encountered a tracing error: {}", err.message);
-        });
-        slot->Setup(trace_cfg, fd);
-        slot->StartBlocking();
-    }
-
-    void build_trace_config(perfetto_engine::mode m)
-    {
-        trace_cfg = ::perfetto::TraceConfig{};
-
-        const auto policy =
-            (cfg.fill_policy == engine_config::fill_policy_t::discard)
-                ? ::perfetto::protos::gen::TraceConfig_BufferConfig_FillPolicy_DISCARD
-                : ::perfetto::protos::gen::
-                      TraceConfig_BufferConfig_FillPolicy_RING_BUFFER;
-        auto* buffer_config = trace_cfg.add_buffers();
-        buffer_config->set_size_kb(cfg.buffer_size_kb);
-        buffer_config->set_fill_policy(policy);
-
-        ::perfetto::protos::gen::TrackEventConfig track_event_cfg{};
-        for(const auto& name : cfg.disabled_categories)
-        {
-            LOG_DEBUG("Disabling perfetto track event category: {}", name);
-            track_event_cfg.add_disabled_categories(name);
-        }
-
-        trace_cfg.set_flush_period_ms(cfg.flush_period_ms);
-
-        auto* ds_cfg = trace_cfg.add_data_sources()->mutable_config();
-        ds_cfg->set_name("track_event");
-        ds_cfg->set_track_event_config_raw(track_event_cfg.SerializeAsString());
-
-        if(m == perfetto_engine::mode::cached_interceptor)
-        {
-            ds_cfg->mutable_interceptor_config()->set_name(CACHED_INTERCEPTOR_NAME);
-        }
-    }
 };
 
-std::once_flag perfetto_engine::impl::s_sdk_init_flag;
-bool           perfetto_engine::impl::s_sdk_init_succeeded = false;
+std::once_flag perfetto_engine::s_sdk_init_flag;
+bool           perfetto_engine::s_sdk_init_succeeded = false;
+
+bool
+perfetto_engine::is_system_backend() const noexcept
+{
+    return m_cfg.backend != engine_config::backend_t::inprocess;
+}
+
+// Builds a fresh TracingSession in m_perfetto->sessions[pid], wires the error
+// callback, runs Setup(trace_cfg, fd), and StartBlocking. Takes
+// m_sessions_mutex internally — callers must NOT hold it. fd=-1 disables
+// per-Perfetto-default fd output (cached-mode path).
+void
+perfetto_engine::start_session(pid_t pid, int fd)
+{
+    std::lock_guard<std::mutex> lk{ m_sessions_mutex };
+    auto&                       slot = m_perfetto->sessions[pid];
+    slot                             = ::perfetto::Tracing::NewTrace();
+    slot->SetOnErrorCallback([](::perfetto::TracingError err) {
+        if(err.code == ::perfetto::TracingError::kTracingFailed)
+            LOG_WARNING("Perfetto encountered a tracing error: {}", err.message);
+    });
+    slot->Setup(m_perfetto->trace_cfg, fd);
+    slot->StartBlocking();
+}
+
+void
+perfetto_engine::build_trace_config(mode m)
+{
+    m_perfetto->trace_cfg = ::perfetto::TraceConfig{};
+
+    const auto policy =
+        (m_cfg.fill_policy == engine_config::fill_policy_t::discard)
+            ? ::perfetto::protos::gen::TraceConfig_BufferConfig_FillPolicy_DISCARD
+            : ::perfetto::protos::gen::TraceConfig_BufferConfig_FillPolicy_RING_BUFFER;
+    auto* buffer_config = m_perfetto->trace_cfg.add_buffers();
+    buffer_config->set_size_kb(m_cfg.buffer_size_kb);
+    buffer_config->set_fill_policy(policy);
+
+    ::perfetto::protos::gen::TrackEventConfig track_event_cfg{};
+    for(const auto& name : m_cfg.disabled_categories)
+    {
+        LOG_DEBUG("Disabling perfetto track event category: {}", name);
+        track_event_cfg.add_disabled_categories(name);
+    }
+
+    m_perfetto->trace_cfg.set_flush_period_ms(m_cfg.flush_period_ms);
+
+    auto* ds_cfg = m_perfetto->trace_cfg.add_data_sources()->mutable_config();
+    ds_cfg->set_name("track_event");
+    ds_cfg->set_track_event_config_raw(track_event_cfg.SerializeAsString());
+
+    if(m == mode::cached_interceptor)
+    {
+        ds_cfg->mutable_interceptor_config()->set_name(CACHED_INTERCEPTOR_NAME);
+    }
+}
 
 // ----------------------------------------------------------------------------
 // perfetto_engine — public API
 // ----------------------------------------------------------------------------
 
 perfetto_engine::perfetto_engine(engine_config cfg)
-: m_impl(std::make_unique<impl>(std::move(cfg)))
+: m_cfg{ std::move(cfg) }
+, m_perfetto{ std::make_unique<perfetto_state>() }
 {}
 
 perfetto_engine::~perfetto_engine()
 {
-    if(m_impl && m_impl->running)
+    if(m_running)
     {
         // Last-ditch teardown so the engine never outlives its
         // TracingSession. Destructors must not throw — swallow.
@@ -238,22 +225,22 @@ perfetto_engine::init_sdk()
 {
     // init_sdk only needs the SDK Initialize/Register calls; the TraceConfig
     // is built per-mode in start().
-    std::call_once(impl::s_sdk_init_flag, [this]() {
+    std::call_once(s_sdk_init_flag, [this]() {
         ::perfetto::TracingInitArgs args{};
-        args.shmem_size_hint_kb = m_impl->cfg.shmem_size_hint_kb;
+        args.shmem_size_hint_kb = m_cfg.shmem_size_hint_kb;
 
-        if(m_impl->cfg.backend != engine_config::backend_t::inprocess)
+        if(m_cfg.backend != engine_config::backend_t::inprocess)
             args.backends |= ::perfetto::kSystemBackend;
-        if(m_impl->cfg.backend != engine_config::backend_t::system)
+        if(m_cfg.backend != engine_config::backend_t::system)
             args.backends |= ::perfetto::kInProcessBackend;
 
-        if(m_impl->cfg.silence_sdk_log_callback)
-            args.log_message_callback = +[](::perfetto::base::LogMessageCallbackArgs) {};
+        if(m_cfg.suppress_sdk_log_output)
+            args.log_message_callback = [](::perfetto::base::LogMessageCallbackArgs) {};
 
         ::perfetto::Tracing::Initialize(args);
         ::perfetto::TrackEvent::Register();
 
-        impl::s_sdk_init_succeeded = true;
+        s_sdk_init_succeeded = true;
     });
 
     // Interceptor registration lives OUTSIDE the SDK-init call_once: the
@@ -279,28 +266,28 @@ perfetto_engine::start(mode m, int fd)
         return;
     }
 
-    if(m_impl->is_system_backend())
+    if(is_system_backend())
     {
         // System backend owns the session; engine has nothing to drive.
         // Match perfetto.cpp:start() pre-refactor behaviour (early return).
         return;
     }
 
-    if(m_impl->running)
+    if(m_running)
     {
         LOG_WARNING("perfetto_engine::start() called while a session is "
                     "already active; replacing it");
     }
 
-    m_impl->build_trace_config(mode::live_fd);
+    build_trace_config(mode::live_fd);
 
     const auto pid = static_cast<pid_t>(::getpid());
-    m_impl->start_session(pid, fd);
+    start_session(pid, fd);
 
-    m_impl->active_pid   = pid;
-    m_impl->running      = true;
-    m_impl->current_mode = mode::live_fd;
-    m_impl->active_sink  = nullptr;
+    m_active_pid   = pid;
+    m_running      = true;
+    m_current_mode = mode::live_fd;
+    m_active_sink  = nullptr;
 }
 
 void
@@ -313,36 +300,36 @@ perfetto_engine::start(mode m, trace_sink& sink)
         return;
     }
 
-    if(m_impl->is_system_backend())
+    if(is_system_backend())
     {
         // System backend can't drive an interceptor-routed cached session;
         // mirror live-mode early return.
         return;
     }
 
-    if(m_impl->running)
+    if(m_running)
     {
         LOG_WARNING("perfetto_engine::start() called while a session is "
                     "already active; replacing it");
     }
 
-    m_impl->build_trace_config(mode::cached_interceptor);
+    build_trace_config(mode::cached_interceptor);
 
     const auto pid = static_cast<pid_t>(::getpid());
-    m_impl->start_session(pid, /*fd=*/-1);
+    start_session(pid, /*fd=*/-1);
 
     {
-        std::lock_guard<std::mutex> lk{ m_impl->collector_mutex };
-        m_impl->collected_bytes.clear();
+        std::lock_guard<std::mutex> lk{ m_collector_mutex };
+        m_collected_bytes.clear();
     }
     // Reset the freeze publication so a subsequent preregister_pids on this
     // engine instance is required before the hot path will accept emissions.
-    m_impl->collected_bytes_frozen.store(false, std::memory_order_release);
+    m_collected_bytes_frozen.store(false, std::memory_order_release);
 
-    m_impl->active_pid   = pid;
-    m_impl->running      = true;
-    m_impl->current_mode = mode::cached_interceptor;
-    m_impl->active_sink  = &sink;
+    m_active_pid   = pid;
+    m_running      = true;
+    m_current_mode = mode::cached_interceptor;
+    m_active_sink  = &sink;
 
     // Only one cached engine may be the SDK interceptor's drain target at a
     // time. The interceptor's ThreadLocalState caches the engine pointer at
@@ -361,17 +348,17 @@ perfetto_engine::start(mode m, trace_sink& sink)
 void
 perfetto_engine::stop()
 {
-    if(!m_impl->running) return;
+    if(!m_running) return;
 
-    const auto current_mode = m_impl->current_mode;
-    const auto pid          = m_impl->active_pid;
-    auto*      sink         = m_impl->active_sink;
+    const auto current_mode = m_current_mode;
+    const auto pid          = m_active_pid;
+    auto*      sink         = m_active_sink;
 
     ::perfetto::TracingSession* session = nullptr;
     {
-        std::lock_guard<std::mutex> lk{ m_impl->sessions_mutex };
-        auto                        it = m_impl->sessions.find(pid);
-        if(it != m_impl->sessions.end()) session = it->second.get();
+        std::lock_guard<std::mutex> lk{ m_sessions_mutex };
+        auto                        it = m_perfetto->sessions.find(pid);
+        if(it != m_perfetto->sessions.end()) session = it->second.get();
     }
 
     // Clear the active-engine pointer only if we are still the active engine;
@@ -397,9 +384,9 @@ perfetto_engine::stop()
 
     if(session == nullptr)
     {
-        m_impl->running     = false;
-        m_impl->active_pid  = 0;
-        m_impl->active_sink = nullptr;
+        m_running     = false;
+        m_active_pid  = 0;
+        m_active_sink = nullptr;
         // Drive the sink's finalize() even when no session ever materialised,
         // so cached-mode owners observe the same teardown contract as a
         // session that ran to completion (e.g. the system backend short-circuit
@@ -419,9 +406,9 @@ perfetto_engine::stop()
     // Clear running state only after StopBlocking() returns successfully —
     // if FlushBlocking or StopBlocking threw, the destructor catch-all (which
     // checks running) gets a second chance to force-stop the session.
-    m_impl->running     = false;
-    m_impl->active_pid  = 0;
-    m_impl->active_sink = nullptr;
+    m_running     = false;
+    m_active_pid  = 0;
+    m_active_sink = nullptr;
 
     if(current_mode != mode::cached_interceptor) return;
 
@@ -430,8 +417,8 @@ perfetto_engine::stop()
     // be slow / throw).
     std::unordered_map<int, std::vector<char>> drained;
     {
-        std::lock_guard<std::mutex> lk{ m_impl->collector_mutex };
-        drained.swap(m_impl->collected_bytes);
+        std::lock_guard<std::mutex> lk{ m_collector_mutex };
+        drained.swap(m_collected_bytes);
     }
 
     if(sink == nullptr) return;
@@ -473,9 +460,9 @@ perfetto_engine::read_trace(pid_t pid)
 {
     ::perfetto::TracingSession* session = nullptr;
     {
-        std::lock_guard<std::mutex> lk{ m_impl->sessions_mutex };
-        auto                        it = m_impl->sessions.find(pid);
-        if(it != m_impl->sessions.end()) session = it->second.get();
+        std::lock_guard<std::mutex> lk{ m_sessions_mutex };
+        auto                        it = m_perfetto->sessions.find(pid);
+        if(it != m_perfetto->sessions.end()) session = it->second.get();
     }
 
     if(session == nullptr) return {};
@@ -485,23 +472,23 @@ perfetto_engine::read_trace(pid_t pid)
 void
 perfetto_engine::destroy_session(pid_t pid)
 {
-    std::lock_guard<std::mutex> lk{ m_impl->sessions_mutex };
-    auto                        it = m_impl->sessions.find(pid);
-    if(it != m_impl->sessions.end()) it->second.reset();
+    std::lock_guard<std::mutex> lk{ m_sessions_mutex };
+    auto                        it = m_perfetto->sessions.find(pid);
+    if(it != m_perfetto->sessions.end()) it->second.reset();
 }
 
 bool
 perfetto_engine::is_running() const noexcept
 {
-    return m_impl->running;
+    return m_running;
 }
 
 void
 perfetto_engine::forget_session(pid_t pid)
 {
-    std::lock_guard<std::mutex> lk{ m_impl->sessions_mutex };
-    auto                        it = m_impl->sessions.find(pid);
-    if(it != m_impl->sessions.end())
+    std::lock_guard<std::mutex> lk{ m_sessions_mutex };
+    auto                        it = m_perfetto->sessions.find(pid);
+    if(it != m_perfetto->sessions.end())
     {
         // Deliberate leak: the parent process owns the underlying
         // TracingSession after fork; calling unique_ptr::reset() in the
@@ -536,7 +523,7 @@ constexpr std::size_t COLLECTED_BYTES_SLAB_SIZE = std::size_t{ 8 } * 1024 * 1024
 void
 perfetto_engine::preregister_pids(const std::vector<int>& source_pids)
 {
-    if(m_impl->collected_bytes_frozen.load(std::memory_order_acquire))
+    if(m_collected_bytes_frozen.load(std::memory_order_acquire))
     {
         LOG_ERROR("preregister_pids called after the map was frozen by the first "
                   "emission; new pids cannot be added without restarting the engine");
@@ -544,10 +531,10 @@ perfetto_engine::preregister_pids(const std::vector<int>& source_pids)
     }
 
     {
-        std::lock_guard<std::mutex> lk{ m_impl->collector_mutex };
+        std::lock_guard<std::mutex> lk{ m_collector_mutex };
         for(int pid : source_pids)
         {
-            auto& bytes = m_impl->collected_bytes[pid];
+            auto& bytes = m_collected_bytes[pid];
             bytes.reserve(COLLECTED_BYTES_SLAB_SIZE);
         }
     }
@@ -555,7 +542,7 @@ perfetto_engine::preregister_pids(const std::vector<int>& source_pids)
     // Release publishes every collector_mutex-guarded map write above to any
     // worker thread that observes the frozen flag via acquire in
     // collect_packet_bytes — the hot path then runs lock-free safely.
-    m_impl->collected_bytes_frozen.store(true, std::memory_order_release);
+    m_collected_bytes_frozen.store(true, std::memory_order_release);
 }
 
 void
@@ -567,7 +554,7 @@ perfetto_engine::collect_packet_bytes(int pid, const void* data,
     // Acquire pairs with preregister_pids' release: refuses emissions until
     // the map population is published, eliminating the data race the previous
     // "frozen by convention" comment relied on.
-    if(!m_impl->collected_bytes_frozen.load(std::memory_order_acquire))
+    if(!m_collected_bytes_frozen.load(std::memory_order_acquire))
     {
         LOG_ERROR("perfetto cached collector dropped packet for pid {} — "
                   "preregister_pids has not run yet",
@@ -577,8 +564,8 @@ perfetto_engine::collect_packet_bytes(int pid, const void* data,
 
     try
     {
-        auto it = m_impl->collected_bytes.find(pid);
-        if(it == m_impl->collected_bytes.end())
+        auto it = m_collected_bytes.find(pid);
+        if(it == m_collected_bytes.end())
         {
             LOG_ERROR("perfetto cached collector dropped packet for unregistered pid {}",
                       pid);

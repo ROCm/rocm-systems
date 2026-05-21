@@ -39,6 +39,8 @@ namespace rocprofsys::trace_cache
 {
 namespace
 {
+constexpr const char* ROCM_COUNTER_UNIT = "Unit Count";
+
 struct annotation_entry
 {
     std::string key;
@@ -976,17 +978,17 @@ perfetto_processor_t::handle(const gpu_perf_counter_sample& _gpu_perf_counter)
 
     for(const auto& entry : _gpu_perf_counter.entries)
     {
-        auto name_info =
+        const auto _name_info =
             m_metadata.find_gpu_perf_counter_by_id(_device_id, entry.counter_id);
-        if(!name_info) continue;
+        if(!_name_info) continue;
 
-        const auto& track_name = name_info->get().track_name;
-        auto        track_key  = std::hash<std::string>{}(track_name);
+        const auto& _track_name = _name_info->get().track_name;
+        const auto  _track_key  = std::hash<std::string>{}(_track_name);
 
-        if(!counter_collection_track::exists(track_key))
-            counter_collection_track::emplace(track_key, track_name, "Unit Count");
+        if(!counter_collection_track::exists(_track_key))
+            counter_collection_track::emplace(_track_key, _track_name, ROCM_COUNTER_UNIT);
         TRACE_COUNTER(trait::name<category::rocm_counter_collection>::value,
-                      counter_collection_track::at(track_key, 0), _ts, entry.value);
+                      counter_collection_track::at(_track_key, 0), _ts, entry.value);
     }
 }
 
@@ -1014,7 +1016,8 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
 
     static const std::unordered_map<size_t, pmc_track_info> kPmcTrackMap = {
         { ROCPROFSYS_CATEGORY_ROCM_COUNTER_COLLECTION,
-          { "Unit Count", [](auto id) { return counter_collection_track::exists(id); },
+          { ROCM_COUNTER_UNIT,
+            [](auto id) { return counter_collection_track::exists(id); },
             [](auto id, auto& n, auto& u) {
                 counter_collection_track::emplace(id, n, u.c_str());
             },

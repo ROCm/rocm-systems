@@ -3,10 +3,13 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <sys/types.h>
@@ -48,7 +51,7 @@ struct engine_config
     fill_policy_t            fill_policy        = fill_policy_t::discard;
     backend_t                backend            = backend_t::inprocess;
     std::vector<std::string> disabled_categories{};
-    bool                     silence_sdk_log_callback{ false };
+    bool                     suppress_sdk_log_output = false;
 };
 
 // Reads the live config::get_perfetto_* getters once and returns a snapshot.
@@ -78,6 +81,11 @@ public:
     explicit perfetto_engine(engine_config cfg);
     ~perfetto_engine();
 
+    // Engine address must be stable for the full lifetime of any cached
+    // session: cached_interceptor's ThreadLocalState caches the
+    // perfetto_engine* at first emission per thread and dereferences it on
+    // every later OnTracePacket. Allowing copy or move would let a caller
+    // dangle that cached pointer. Owners hold the engine via unique_ptr.
     perfetto_engine(const perfetto_engine&)            = delete;
     perfetto_engine& operator=(const perfetto_engine&) = delete;
     perfetto_engine(perfetto_engine&&)                 = delete;
@@ -146,8 +154,30 @@ public:
     void collect_packet_bytes(int pid, const void* data, std::size_t size) noexcept;
 
 private:
-    struct impl;
-    std::unique_ptr<impl> m_impl;
+    [[nodiscard]] bool is_system_backend() const noexcept;
+    void               start_session(pid_t pid, int fd);
+    void               build_trace_config(mode m);
+
+    engine_config m_cfg{};
+    pid_t         m_active_pid{ 0 };
+    bool          m_running{ false };
+    mode          m_current_mode{ mode::live_fd };
+    trace_sink*   m_active_sink{ nullptr };
+
+    std::mutex m_sessions_mutex{};
+
+    std::mutex                                 m_collector_mutex{};
+    std::unordered_map<int, std::vector<char>> m_collected_bytes{};
+    std::atomic<bool>                          m_collected_bytes_frozen{ false };
+
+    static std::once_flag s_sdk_init_flag;
+    static bool           s_sdk_init_succeeded;
+
+    // Narrowed PIMPL: holds the only members whose definitions force
+    // <perfetto.h> into the TU. Keeps the compile firewall while the
+    // engine's own state lives in this class directly.
+    struct perfetto_state;
+    std::unique_ptr<perfetto_state> m_perfetto;
 };
 
 // Thread-local pid tag consumed by the cached-mode interceptor TLS to key
