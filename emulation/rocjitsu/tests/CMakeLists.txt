@@ -53,6 +53,9 @@ add_executable(rocjitsu_tests
 )
 target_link_libraries(rocjitsu_tests PRIVATE
     ${RJ_OBJECT_LIBS} rocjitsu_kmd util flatbuffers Threads::Threads GTest::gtest_main)
+if(HAS_DEVICE_KERNELS)
+    target_sources(rocjitsu_tests PRIVATE dbt/device_kernels_translate_tests.cpp)
+endif()
 rj_configure_target(rocjitsu_tests TEST)
 
 include(GoogleTest)
