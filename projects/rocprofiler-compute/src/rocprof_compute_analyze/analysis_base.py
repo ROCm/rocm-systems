@@ -117,6 +117,7 @@ class OmniAnalyze_Base:
         list_stats: bool,
         filter_metrics: Optional[list[str]],
         sys_info: pd.Series,
+        profiling_config: dict[str, Any],
     ) -> dict[str, schema.ArchConfig]:
         single_panel_config = file_io.is_single_panel_config(
             config_dir, self.__supported_archs
@@ -143,7 +144,10 @@ class OmniAnalyze_Base:
 
         # TODO: filter_metrics should/might be one per arch
         parser.build_dfs(
-            arch_configs=ac, filter_metrics=filter_metrics, sys_info=sys_info
+            arch_configs=ac,
+            filter_metrics=filter_metrics,
+            sys_info=sys_info,
+            profiling_config=profiling_config,
         )
         self._arch_configs[arch] = ac
         return self._arch_configs
@@ -183,6 +187,7 @@ class OmniAnalyze_Base:
             )
 
         # load required configs
+        profiling_config = getattr(self, "_profiling_config", {})
         for path_info in args.path:
             sysinfo_path = get_sysinfo_path(path_info[0])
             if sysinfo_path:
@@ -194,6 +199,7 @@ class OmniAnalyze_Base:
                     args.list_stats,
                     args.filter_metrics,
                     sys_info.iloc[0],
+                    profiling_config,
                 )
 
         self.load_options(normalization_filter)

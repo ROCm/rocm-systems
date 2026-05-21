@@ -877,9 +877,9 @@ class db_analysis(OmniAnalyze_Base):
             pmc_df = self._pmc_df_per_workload[workload_path].copy()
             sys_info = self._runs[workload_path].sys_info.iloc[0].to_dict()
             gfx_arch = sys_info["gpu_arch"]
-            roofline_data_df = self._arch_configs[gfx_arch].dfs[402]
+            roofline_data_df = self._arch_configs[gfx_arch].dfs.get(402)
 
-            if roofline_data_df.empty:
+            if roofline_data_df is None or roofline_data_df.empty:
                 console_warning(
                     f"Roofline data is filtered out or not found for {workload_path}."
                 )

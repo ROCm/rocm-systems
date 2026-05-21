@@ -5,7 +5,7 @@ import argparse
 import json
 import re
 from pathlib import Path
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 import pandas as pd
 
@@ -15,8 +15,10 @@ from utils.metrics.evaluation_pipeline import eval_metric
 from utils.metrics.expression import gen_counter_list
 from utils.pattern_matching import PatternMatcherEngine
 from utils.specs import MachineSpecs
+from utils.utils_analysis import resolve_filter_blocks_to_panel_ids
 from utils.utils_common import (
     SUPPORTED_FIELD,
+    convert_metric_id_to_panel_info,
     expand_placeholder_ranges,
     normalize_filter_to_str_list,
 )
@@ -44,15 +46,28 @@ def build_dfs(
     arch_configs: schema.ArchConfig,
     filter_metrics: Optional[list[str]],
     sys_info: pd.Series,
+    profiling_config: dict[str, Any],
 ) -> None:
     """
     Build dataframe for each type of data source within each panel.
 
     Each dataframe will be used as a template to load data with each run later.
     For now, support "metric_table" and "raw_csv_table". Otherwise, put an empty df.
+
+    Two filters control which tables and metrics are built:
+
+    - ``filter_metrics`` (analyze-mode ``-b``): when set, overrides any
+      profile-side selection.
+    - ``profiling_config["filter_blocks"]`` (profile-mode ``-b``): used only
+      when ``filter_metrics`` is not set, so metrics whose counters were
+      never collected are not evaluated downstream.
+
+    System panels (``panel_id <= 100``) and tables with ``data_source_idx``
+    ``"0"`` always pass either filter. Tables that fail the active filter
+    are not added to ``arch_configs.dfs`` (previously an empty DataFrame was
+    inserted).
     """
 
-    # TODO: more error checking for filter_metrics!!
     simple_box = {
         "Min": ["MIN(", ")"],
         "Q1": ["QUANTILE(", ", 0.25)"],
@@ -61,9 +76,19 @@ def build_dfs(
         "Max": ["MAX(", ")"],
     }
 
-    dfs = {}
-    dfs_type = {}
-    metric_counters = {}
+    dfs: dict[int, pd.DataFrame] = {}
+    dfs_type: dict[int, str] = {}
+    metric_counters: dict[str, list[str]] = {}
+
+    if filter_metrics:
+        user_metric_filter: Optional[list[str]] = filter_metrics
+        profile_panel_filter: set[int] = set()
+    else:
+        user_metric_filter = None
+        profile_panel_filter = resolve_filter_blocks_to_panel_ids(
+            profiling_config.get("filter_blocks", []),
+            arch=sys_info.get("gpu_arch") if sys_info is not None else None,
+        )
 
     arch_configs.panel_configs = expand_placeholder_ranges(
         arch_configs.panel_configs, sys_info
@@ -72,127 +97,189 @@ def build_dfs(
     for panel_id, panel in arch_configs.panel_configs.items():
         for data_source in panel["data source"]:
             for type, data_config in data_source.items():
+                table_id = data_config["id"]
+                file_data_source_idx = str(table_id // 100)
+                always_pass = panel_id <= 100 or file_data_source_idx == "0"
+
                 if type == "metric_table":
-                    headers = ["Metric_ID"]
-                    data_source_idx = str(data_config["id"] // 100)
+                    df = _build_metric_table_df(
+                        panel=panel,
+                        data_config=data_config,
+                        simple_box=simple_box,
+                        panel_id=panel_id,
+                        always_pass=always_pass,
+                        user_metric_filter=user_metric_filter,
+                        profile_panel_filter=profile_panel_filter,
+                        metric_counters=metric_counters,
+                    )
+                    if df is None:
+                        continue
 
-                    if (
-                        "cli_style" in data_config
-                        and data_config["cli_style"] == "simple_box"
-                    ):
-                        headers.append(data_config["header"]["metric"])
-                        for k in simple_box.keys():
-                            headers.append(k)
-
-                        for key, tile in data_config["header"].items():
-                            if key != "metric" and key != "expr":
-                                headers.append(tile)
-                    else:
-                        headers.append(data_config["header"]["metric"])
-                        for key, tile in data_config["header"].items():
-                            if key != "metric":
-                                headers.append(tile)
-
-                    # Only add Metrics Description column if it is defined in the panel
-                    if "metrics_description" in panel:
-                        headers.append("Description")
-
-                    df = pd.DataFrame(columns=headers)
-
-                    for i, (key, entries) in enumerate(data_config["metric"].items()):
-                        data_source_idx = (
-                            f"{data_config['id'] // 100}.{data_config['id'] % 100}"
-                        )
-                        metric_idx = f"{data_source_idx}.{i}"
-                        eqn_content = []
-
-                        if (
-                            (not filter_metrics)
-                            or (
-                                metric_idx in filter_metrics
-                            )  # no filter  # metric in filter
-                            or
-                            # the whole table in filter
-                            (data_source_idx in filter_metrics)
-                            or
-                            # the whole IP block in filter
-                            (str(panel_id // 100) in filter_metrics)
-                        ):
-                            values = [metric_idx, key]
-
-                            if (
-                                "cli_style" in data_config
-                                and data_config["cli_style"] == "simple_box"
-                            ):
-                                for k, v in entries.items():
-                                    if k == "expr":
-                                        for bv in simple_box.values():
-                                            values.append(bv[0] + v + bv[1])
-                                    else:
-                                        if k != "alias":
-                                            values.append(v)
-                            else:
-                                for k, v in entries.items():
-                                    if k != "alias":
-                                        values.append(v)
-                                        eqn_content.append(v)
-
-                            if "alias" in entries.keys():
-                                values.append(entries["alias"])
-
-                            if "metrics_description" in panel:
-                                values.append(panel["metrics_description"].get(key, ""))
-
-                            df_new_row = pd.DataFrame([values], columns=headers)
-                            df = pd.concat([df, df_new_row])
-
-                        # generate mapping of counters and metrics
-                        filtered_counters = {}
-                        formula_visited = False
-
-                        for formula in eqn_content:
-                            if formula is not None and formula != "None":
-                                visited, counters = gen_counter_list(formula)
-                                if visited:
-                                    formula_visited = True
-                                for counter in counters:
-                                    filtered_counters[counter] = None
-
-                        if filtered_counters or formula_visited:
-                            metric_counters[key] = list(filtered_counters)
-
-                    df.set_index("Metric_ID", inplace=True)
                 elif type == "raw_csv_table":
-                    data_source_idx = str(data_config["id"] // 100)
-                    if (
-                        (not filter_metrics)
-                        or (data_source_idx == "0")  # no filter
-                        or (data_source_idx in filter_metrics)
+                    if not always_pass and not _metric_passes_filter(
+                        metric_id=file_data_source_idx,
+                        panel_id=panel_id,
+                        data_source_idx=file_data_source_idx,
+                        user_metric_filter=user_metric_filter,
+                        profile_panel_filter=profile_panel_filter,
                     ):
-                        if "columnwise" in data_config and data_config["columnwise"]:
-                            df = pd.DataFrame(
-                                [data_config["source"]], columns=["from_csv_columnwise"]
-                            )
-                        else:
-                            df = pd.DataFrame(
-                                [data_config["source"]], columns=["from_csv"]
-                            )
+                        continue
+                    if data_config.get("columnwise"):
+                        df = pd.DataFrame(
+                            [data_config["source"]],
+                            columns=["from_csv_columnwise"],
+                        )
                     else:
-                        df = pd.DataFrame()
+                        df = pd.DataFrame([data_config["source"]], columns=["from_csv"])
+
                 elif type == "pc_sampling_table":
-                    data_source_idx = str(data_config["id"] // 100)
+                    if not always_pass and not _metric_passes_filter(
+                        metric_id=file_data_source_idx,
+                        panel_id=panel_id,
+                        data_source_idx=file_data_source_idx,
+                        user_metric_filter=user_metric_filter,
+                        profile_panel_filter=profile_panel_filter,
+                    ):
+                        continue
                     df = pd.DataFrame(
                         [data_config["source"]], columns=["from_pc_sampling"]
                     )
+
                 else:
                     df = pd.DataFrame()
 
-                dfs[data_config["id"]] = df
-                dfs_type[data_config["id"]] = type
+                dfs[table_id] = df
+                dfs_type[table_id] = type
 
-    setattr(arch_configs, "dfs", dfs)
-    setattr(arch_configs, "dfs_type", dfs_type)
-    setattr(arch_configs, "metric_counters", metric_counters)
+    arch_configs.dfs = dfs
+    arch_configs.dfs_type = dfs_type
+    arch_configs.metric_counters = metric_counters
+
+
+def _metric_passes_filter(
+    metric_id: str,
+    panel_id: int,
+    data_source_idx: str,
+    user_metric_filter: Optional[list[str]],
+    profile_panel_filter: set[int],
+) -> bool:
+    """Decide whether a metric or table identified by metric_id is built.
+
+    ``metric_id`` is the dotted id of the thing being checked: a file-level
+    id (``"2"``) for raw_csv / pc_sampling tables, or a per-metric id
+    (``"2.1.0"``) for metric_table rows. ``data_source_idx`` is the
+    surrounding table-level id used by the analyze-mode three-way match.
+    """
+    if panel_id <= 100 or data_source_idx == "0":
+        return True
+    if user_metric_filter is not None:
+        return (
+            metric_id in user_metric_filter
+            or data_source_idx in user_metric_filter
+            or str(panel_id // 100) in user_metric_filter
+        )
+    if profile_panel_filter:
+        file_id, _, _ = convert_metric_id_to_panel_info(metric_id)
+        return int(file_id) in profile_panel_filter
+    return True
+
+
+def _build_metric_table_df(
+    panel: dict[str, Any],
+    data_config: dict[str, Any],
+    simple_box: dict[str, list[str]],
+    panel_id: int,
+    always_pass: bool,
+    user_metric_filter: Optional[list[str]],
+    profile_panel_filter: set[int],
+    metric_counters: dict[str, list[str]],
+) -> Optional[pd.DataFrame]:
+    """Build the metric_table dataframe, dropping rows the active gate
+    filters out.
+
+    Returns ``None`` when the entire table is filtered out at the table
+    level. Otherwise returns a ``Metric_ID``-indexed dataframe — possibly
+    with zero rows if every metric in the config was gated off — and
+    updates ``metric_counters`` in place for included metrics that
+    reference real counters.
+    """
+    table_id = data_config["id"]
+    table_data_source_idx = f"{table_id // 100}.{table_id % 100}"
+    is_simple_box = data_config.get("cli_style") == "simple_box"
+
+    headers: list[str] = ["Metric_ID", data_config["header"]["metric"]]
+    if is_simple_box:
+        for k in simple_box:
+            headers.append(k)
+        for key, tile in data_config["header"].items():
+            if key != "metric" and key != "expr":
+                headers.append(tile)
+    else:
+        for key, tile in data_config["header"].items():
+            if key != "metric":
+                headers.append(tile)
+    if "metrics_description" in panel:
+        headers.append("Description")
+
+    rows: list[list[Any]] = []
+    metric_entries = data_config["metric"]
+    for i, (key, entries) in enumerate(metric_entries.items()):
+        metric_idx = f"{table_data_source_idx}.{i}"
+
+        if not always_pass and not _metric_passes_filter(
+            metric_id=metric_idx,
+            panel_id=panel_id,
+            data_source_idx=table_data_source_idx,
+            user_metric_filter=user_metric_filter,
+            profile_panel_filter=profile_panel_filter,
+        ):
+            continue
+
+        values: list[Any] = [metric_idx, key]
+        eqn_content: list[Any] = []
+        if is_simple_box:
+            for k, v in entries.items():
+                if k == "expr":
+                    for bv in simple_box.values():
+                        values.append(bv[0] + v + bv[1])
+                elif k != "alias":
+                    values.append(v)
+        else:
+            for k, v in entries.items():
+                if k != "alias":
+                    values.append(v)
+                    eqn_content.append(v)
+
+        if "alias" in entries:
+            values.append(entries["alias"])
+        if "metrics_description" in panel:
+            values.append(panel["metrics_description"].get(key, ""))
+
+        rows.append(values)
+
+        filtered_counters: dict[str, None] = {}
+        formula_visited = False
+        for formula in eqn_content:
+            if formula is None or formula == "None":
+                continue
+            visited, counters = gen_counter_list(formula)
+            if visited:
+                formula_visited = True
+            for counter in counters:
+                filtered_counters[counter] = None
+
+        if filtered_counters or formula_visited:
+            metric_counters[key] = list(filtered_counters)
+
+    # Skip only when an active filter dropped every metric in the config.
+    # Tables whose config is empty to begin with (some arch variants) keep
+    # a placeholder empty df so multi-arch baseline lookups stay safe.
+    if not always_pass and metric_entries and not rows:
+        return None
+
+    df = pd.DataFrame(rows, columns=headers)
+    df.set_index("Metric_ID", inplace=True)
+    return df
 
 
 @demarcate

@@ -402,6 +402,9 @@ Filtering options
 ``-b``, ``--block <block-id|block-alias|metric-id>``
    Allows system profiling on one or more selected analysis report blocks to speed
    up the profiling process. See :ref:`profiling-hw-component-filtering`.
+   The selection is recorded in ``profiling_config.yaml`` and is honored by
+   analyze mode: metrics outside the selected blocks are not evaluated during
+   analyze unless overridden with analyze-mode ``-b``.
    Note that this option cannot be used with ``--roof-only`` or ``--set``.
 
 ``-k``, ``--kernel <kernel-substr>``

@@ -684,18 +684,6 @@ def load_panel_configs(
     return OrderedDict(sorted(configs.items()))
 
 
-def calc_builtin_var(var: Union[int, str], sys_info: dict[str, Any]) -> int:  # type: ignore[return]
-    """
-    Calculate build-in variable based on sys_info.
-    """
-    if isinstance(var, int):
-        return var
-    elif isinstance(var, str) and var.startswith("$total_l2_chan"):
-        return int(sys_info["total_l2_chan"])
-    else:
-        console_error(f'Built-in var "{var}" is not supported')
-
-
 def expand_placeholder_ranges(
     panel_configs: OrderedDict[int, dict[str, Any]],
     sys_info: Optional[dict[str, Any]],
@@ -712,30 +700,36 @@ def expand_placeholder_ranges(
     for _panel_id, panel in panel_configs.items():
         for data_source in panel["data source"]:
             for type_key, data_config in data_source.items():
-                if (
-                    type_key == "metric_table"
-                    and "metric" in data_config
-                    and "placeholder_range" in data_config["metric"]
-                ):
-                    new_metrics: dict[str, Any] = {}
-                    if sys_info is not None:
-                        # NB: support single placeholder for now!!
-                        p_range = data_config["metric"].pop("placeholder_range")
-                        metric, metric_expr = data_config["metric"].popitem()
-                        for p, r in p_range.items():
-                            # NB: We have to resolve placeholder range first if it
-                            #   is a build-in var. It will be too late to do it in
-                            #   eval_metric(). This is the only reason we need
-                            #   sys_info at this stage.
-                            var = calc_builtin_var(r, sys_info)
-                            for i in range(var):
-                                new_key = metric.replace(p, str(i))
-                                new_val = {
-                                    k: v.replace(p, str(i))
-                                    for k, v in metric_expr.items()
-                                }
-                                new_metrics[new_key] = new_val
-                    data_config["metric"] = new_metrics
+                if type_key != "metric_table":
+                    continue
+                if "metric" not in data_config:
+                    continue
+                if "placeholder_range" not in data_config["metric"]:
+                    continue
+                if sys_info is None:
+                    data_config["metric"] = {}
+                    continue
+
+                # NB: We have to resolve placeholder range here because it
+                # would be too late to do it in eval_metric(). Single
+                # placeholder only.
+                p_range = data_config["metric"].pop("placeholder_range")
+                metric, metric_expr = data_config["metric"].popitem()
+                new_metrics: dict[str, Any] = {}
+                for p, r in p_range.items():
+                    if isinstance(r, int):
+                        var = r
+                    elif isinstance(r, str) and r.startswith("$total_l2_chan"):
+                        var = int(sys_info["total_l2_chan"])
+                    else:
+                        console_error(f'Built-in var "{r}" is not supported')
+                    for i in range(var):
+                        new_key = metric.replace(p, str(i))
+                        new_val = {
+                            k: v.replace(p, str(i)) for k, v in metric_expr.items()
+                        }
+                        new_metrics[new_key] = new_val
+                data_config["metric"] = new_metrics
 
     return panel_configs
 

@@ -29,6 +29,14 @@ Walkthrough
 
 1. To begin, generate a high-level analysis report using ROCm Compute Profiler's ``-b`` (or ``--block``) flag.
 
+.. note::
+
+   By default, analyze evaluates only the blocks recorded in
+   ``profiling_config.yaml`` (the profile-mode ``-b`` selection).
+   Analyze-mode ``-b`` overrides that selection; requesting blocks whose
+   counters were not collected during profiling will produce
+   missing-counter warnings.
+
 There are three high-level GPU analysis views:
 
 * System Speed-of-Light: Key GPU performance metrics to show overall GPU performance and utilization.

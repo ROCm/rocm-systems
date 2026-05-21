@@ -21,7 +21,7 @@ from utils.metrics.noise_clamper import (
     print_noise_clamp_summary,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.utils_common import SUPPORTED_FIELD, calc_builtin_var
+from utils.utils_common import SUPPORTED_FIELD
 from utils.utils_counter_defs import get_build_in_vars
 
 
@@ -88,7 +88,7 @@ def create_sys_vars(sys_info: pd.Series) -> dict[str, int | float]:
         sys_vars_collection[f"ammolite__{var_name}"] = variable_value
 
     # Special case for total_l2_chan
-    total_l2_channel_count = calc_builtin_var("$total_l2_chan", sys_info.to_dict())
+    total_l2_channel_count = int(sys_info.to_dict()["total_l2_chan"])
     if np.isnan(total_l2_channel_count) or total_l2_channel_count == 0:
         console_warning(
             "total_l2_chan is not available in sysinfo.csv, please provide the correct "

@@ -37,6 +37,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Flattened the analyze-mode PMC dataframe to a single-index frame.
 
+* Analyze mode no longer evaluates metrics whose counters were not collected during profiling. Tables and metrics outside profile-mode `-b` selection are skipped at config-build time, eliminating "missing counter" warning noise and unnecessary work across CLI, DB, and TUI analysis paths.
+
 ### Resolved issues
 
 * Roofline panel L1/L2 bandwidth and arithmetic intensity on gfx942 and gfx950 now use the correct 128B cache line, matching the values reported in the Speed-of-Light and vL1D/L2 cache panels for the same run. Bandwidth values on these architectures are 2x and AI values are 0.5x compared to prior releases.

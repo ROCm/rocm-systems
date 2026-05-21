@@ -37,7 +37,6 @@ from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
     get_noise_clamp_warnings,
 )
-from utils.utils_common import calc_builtin_var
 
 # =============================================================================
 # Tests for utils.metrics.aggregation
@@ -163,12 +162,6 @@ class TestExpression:
     def test_update_denominator_string_returns_empty_for_empty_equation(self):
         """update_denominator_string returns the empty string when input is empty."""
         assert update_denominator_string("", "per_wave") == ""
-
-    def test_calc_builtin_var_exits_for_unsupported_var(self):
-        """calc_builtin_var exits when given an unsupported variable name."""
-        sys_info = {"total_l2_chan": 32}
-        with pytest.raises(SystemExit):
-            calc_builtin_var("$unsupported_var", sys_info)
 
     def test_visit_call_raises_for_unknown_function(self):
         """CodeTransformer.visit_Call raises for unknown function names."""
