@@ -12,7 +12,6 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 - Remove Boost as a Dyninst dependency by replacing Boost usage with in-tree dyncompat shims and C++17 standard library equivalents; Bundled Dyninst now requires **GCC ≥ 10**
 
-  
 ### Resolved issues
 
 ## ROCm Systems Profiler 1.6.0 for ROCm 7.13.0
