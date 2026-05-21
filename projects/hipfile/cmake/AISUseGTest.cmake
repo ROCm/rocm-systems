@@ -5,31 +5,55 @@
 include(AISSanitizers)
 include(FetchContent)
 
-# This line is used (or not) in FetchContent_Declare to determine
-# if we check for a system GoogleTest install first. When building
+# Decide whether to check for a system GoogleTest install first. When building
 # with the sanitizers, we HAVE to build GoogleTest from source.
 if(AIS_USE_SANITIZERS OR AIS_USE_THREAD_SANITIZER)
-    set(AIS_LOCAL_GTEST_CHECK "")
+    set(AIS_GTEST_TRY_SYSTEM FALSE)
 else()
-    set(AIS_LOCAL_GTEST_CHECK FIND_PACKAGE_ARGS NAMES GTest)
+    set(AIS_GTEST_TRY_SYSTEM TRUE)
 endif()
-
-# lint_cmake: -readability/wonkycase
-FetchContent_Declare(
-  googletest
-  URL https://github.com/google/googletest/releases/download/v1.17.0/googletest-1.17.0.tar.gz
-  DOWNLOAD_EXTRACT_TIMESTAMP true
-  ${AIS_LOCAL_GTEST_CHECK}
-  SYSTEM
-)
-# lint_cmake: +readability/wonkycase
 
 set(INSTALL_GTEST OFF CACHE BOOL "Don't install GoogleTest")
 set(GTEST_HAS_ABSL OFF CACHE BOOL "Don't use Abseil for GoogleTest")
 
-# lint_cmake: -readability/wonkycase
-FetchContent_MakeAvailable(googletest)
-# lint_cmake: +readability/wonkycase
+# FIND_PACKAGE_ARGS was implemented in CMake 3.24:
+# https://cmake.org/cmake/help/latest/module/FetchContent.html
+# CMake 3.24 is not available on all systems by default.
+if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.24")
+    if(AIS_GTEST_TRY_SYSTEM)
+        set(AIS_LOCAL_GTEST_CHECK FIND_PACKAGE_ARGS NAMES GTest)
+    else()
+        set(AIS_LOCAL_GTEST_CHECK "")
+    endif()
+
+    # lint_cmake: -readability/wonkycase
+    FetchContent_Declare(
+      googletest
+      URL https://github.com/google/googletest/releases/download/v1.17.0/googletest-1.17.0.tar.gz
+      DOWNLOAD_EXTRACT_TIMESTAMP true
+      ${AIS_LOCAL_GTEST_CHECK}
+      SYSTEM
+    )
+    FetchContent_MakeAvailable(googletest)
+    # lint_cmake: +readability/wonkycase
+else()
+    # CMake < 3.24: FIND_PACKAGE_ARGS unavailable, do the find/fetch manually.
+    if(AIS_GTEST_TRY_SYSTEM)
+        find_package(GTest QUIET)
+    endif()
+
+    if(NOT GTest_FOUND)
+        # lint_cmake: -readability/wonkycase
+        FetchContent_Declare(
+          googletest
+          URL https://github.com/google/googletest/releases/download/v1.17.0/googletest-1.17.0.tar.gz
+          DOWNLOAD_EXTRACT_TIMESTAMP true
+          SYSTEM
+        )
+        FetchContent_MakeAvailable(googletest)
+        # lint_cmake: +readability/wonkycase
+    endif()
+endif()
 
 if(googletest_SOURCE_DIR)
     message(STATUS "Using fetched GoogleTest")
