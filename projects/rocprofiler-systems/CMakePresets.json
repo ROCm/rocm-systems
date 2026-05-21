@@ -68,6 +68,21 @@
             "displayName": "Official release build",
             "inherits": "default",
             "name": "release"
+        },
+        {
+            "binaryDir": "${sourceDir}/build/coverage",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "ROCPROFSYS_BUILD_CODECOV": "ON",
+                "ROCPROFSYS_BUILD_GTEST": "ON",
+                "ROCPROFSYS_BUILD_HIDDEN_VISIBILITY": "OFF",
+                "ROCPROFSYS_BUILD_TESTING": "ON",
+                "ROCPROFSYS_STRIP_LIBRARIES": "OFF"
+            },
+            "description": "Build with GCC code coverage instrumentation",
+            "displayName": "Code coverage build",
+            "inherits": "default",
+            "name": "coverage"
         }
     ],
     "version": 3
