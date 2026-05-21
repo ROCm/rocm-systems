@@ -33,6 +33,16 @@
     }                                                                                        \
   }
 
+//Make sure value and expected_val can be compared. Also make sure that they can be printed using std::cerr.
+#define TEST_ASSERT_EQUAL(value, expected_val, msg_string)                                                                    \
+  {                                                                                          \
+    if (value != expected_val) {                                                                           \
+      std::cerr << msg_string << ":: " << "Assert failed(" << value << " " << " is not equal to " << #expected_val << ") at " << __FILE__ << ", line " << __LINE__ \
+                << std::endl;                                                                \
+      exit(-1);                                                                              \
+    }                                                                                        \
+  }
+
 #define TEST_STATUS(cond)                                                              \
   {                                                                                    \
     if (!(cond)) {                                                                     \
