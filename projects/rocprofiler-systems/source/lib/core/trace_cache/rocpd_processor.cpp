@@ -300,7 +300,7 @@ void
 rocpd_processor_t::handle(const pmc_event_with_sample& _pmc)
 {
     const auto& process_info = m_metadata->get_process_info();
-    const auto& agent_ref    = m_agent_manager->get_agent_by_id(
+    const auto& agent_ref    = m_agent_manager->get_agent_by_type_index(
         _pmc.device_id, static_cast<agent_type>(_pmc.device_type));
 
     auto ev    = make_event(_pmc.stack_id, _pmc.parent_stack_id, _pmc.correlation_id,
