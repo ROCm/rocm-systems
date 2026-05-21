@@ -2,13 +2,20 @@
 _build_wheel_common.py
 ======================
 
-Shared helpers used by both ``tools/build_wheel_debian.py`` and
-``tools/build_wheel_rpm.py``. Anything OS-specific (interpreter discovery,
-prerequisite installation, OS detection) lives in the per-format
-drivers. Edit this file to change behavior shared across both.
+Helpers shared by ``tools/build_wheel.py`` and any future wheel-build
+drivers. The helpers exist (rather than being inlined into the workflow
+YAML) so that a developer can reproduce a CI wheel-build failure locally
+with the exact command CI runs -- for example inside a
+``quay.io/pypa/manylinux_2_28_x86_64`` container. The two functions whose
+semantics do not survive translation to shell are:
 
-Python 3.6-safe (uses ``universal_newlines``, not ``text``; no f-strings
-in critical paths).
+* ``best_effort_pip_upgrade`` -- warns on failure rather than silently
+  swallowing all errors the way ``pip install ... || true`` would.
+* ``mark_safe_git_dir`` / ``write_temp_git_config`` -- falls back to a
+  per-build ``GIT_CONFIG_GLOBAL`` when the global gitconfig is not
+  writable (read-only ``HOME``, ``nobody`` user, etc.).
+
+Python 3.6-safe (uses ``universal_newlines``, not ``text``).
 """
 
 import logging
@@ -33,16 +40,6 @@ def run(cmd, cwd=None, env=None, check=True):
 def abort(message, code=1):
     log.error(message)
     sys.exit(code)
-
-
-def find_project_dir(start):
-    """Walk up from *start* looking for the first directory with CMakeLists.txt."""
-    candidate = Path(start)
-    for _ in range(10):
-        if (candidate / "CMakeLists.txt").exists():
-            return candidate
-        candidate = candidate.parent
-    abort("Could not auto-detect project root.  Pass --project-dir explicitly.")
 
 
 def best_effort_pip_upgrade(py, packages):
@@ -96,6 +93,6 @@ def write_temp_git_config(config_path, safe_paths):
         Path(config_path).write_text("\n".join(lines))
         log.info("Temporary git config for safe.directory: %s", config_path)
         return {"GIT_CONFIG_GLOBAL": str(config_path)}
-    except Exception as exc:  # noqa: BLE001
+    except (OSError, PermissionError) as exc:
         log.warning("Failed to create temporary git config: %s", exc)
         return {}
