@@ -171,6 +171,7 @@ resolve_schema_config(const nlohmann::json& config)
         resolve_value(result, tracing, "backend", env_vars::PERFETTO_BACKEND);
         resolve_value(result, tracing, "flush_period_ms",
                       env_vars::PERFETTO_FLUSH_PERIOD);
+        resolve_value(result, tracing, "output_layout", env_vars::PERFETTO_OUTPUT_LAYOUT);
         resolve_value(result, tracing, "region", env_vars::SELECTED_REGIONS);
     }
 
@@ -726,6 +727,8 @@ export_tracing_section(nlohmann::json&                           config,
                         "backend");
     export_int_value(config, env_map, env_vars::PERFETTO_FLUSH_PERIOD, "tracing",
                      "flush_period_ms");
+    export_string_value(config, env_map, env_vars::PERFETTO_OUTPUT_LAYOUT, "tracing",
+                        "output_layout");
     export_string_value(config, env_map, env_vars::SELECTED_REGIONS, "tracing", "region");
 }
 
