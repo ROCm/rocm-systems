@@ -67,7 +67,7 @@ public:
      * @brief Collect current NIC RDMA metrics.
      *
      * Queries the first RDMA port for statistics and extracts the
-     * 6 RDMA metrics: rx/tx bytes, rx/tx packets, and rx/tx CNP packets.
+     * supported NIC RDMA metrics.
      *
      * @return Collected metrics (zeros if query fails)
      */
