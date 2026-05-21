@@ -3536,7 +3536,7 @@ typedef union rocprofiler_hip_api_args_t
     } hipExecutionCtxGetDevice;
     struct
     {
-        hipExecutionCtx_t  ctx;
+        hipExecutionCtx_t   ctx;
         unsigned long long* ctxId;
     } hipExecutionCtxGetId;
     struct
