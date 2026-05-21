@@ -42,8 +42,11 @@ function(add_rocshmem_unit_test)
         set(TEST_TIMEOUT 1200)  # 20 minutes
     endif()
 
-    # Build test command
+    # Build test command with wrapper (handles GPU count checking and skip logic)
     set(TEST_COMMAND
+        ${CMAKE_CURRENT_SOURCE_DIR}/unit_test_wrapper.sh
+        ${FULL_TEST_NAME}
+        ${TEST_RANKS}
         ${MPIRUN_EXECUTABLE}
         -np ${TEST_RANKS}
         --timeout ${TEST_TIMEOUT}
@@ -68,6 +71,7 @@ function(add_rocshmem_unit_test)
         TIMEOUT ${TEST_TIMEOUT}
         LABELS "${ALL_LABELS}"
         PROCESSORS ${TEST_RANKS}
+        SKIP_RETURN_CODE 125  # CTest skip code for insufficient GPUs
     )
 endfunction()
 
@@ -96,7 +100,7 @@ function(register_all_unit_tests)
         NAME all_tests
         RANKS 4
         GTEST_FILTER "-${TEST_WITH_TWO_PES}"
-        LABELS "ALL;IPC;SDMA"
+        LABELS "ALL;IPC;SDMA;quick;standard;comprehensive;full"
     )
 
     # Note: 2-rank tests are commented out in driver.sh

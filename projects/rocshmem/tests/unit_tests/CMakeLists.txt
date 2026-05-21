@@ -142,6 +142,12 @@ target_link_libraries(
 # Enable testing
 enable_testing()
 
+# Install the wrapper script
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/unit_test_wrapper.sh
+               ${CMAKE_CURRENT_BINARY_DIR}/unit_test_wrapper.sh COPYONLY)
+rocm_install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/unit_test_wrapper.sh
+             COMPONENT tests DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem)
+
 # Include CTest-based unit tests
 # Set ROCSHMEM_USE_CTEST=ON to register unit tests
 if(ROCSHMEM_USE_CTEST)
