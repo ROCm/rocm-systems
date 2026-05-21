@@ -1242,8 +1242,9 @@ ParserResult HevcVideoParser::ParseVui(HevcSeqParamSet *sps_ptr, uint8_t *nalu, 
         vui->def_disp_win_right_offset = Parser::ExpGolomb::ReadUe(nalu, offset);
         uint32_t left_offset = sps_ptr->conf_win_left_offset + vui->def_disp_win_left_offset;
         uint32_t right_offset = sps_ptr->conf_win_right_offset + vui->def_disp_win_right_offset;
-        if (sub_width_c_ * (left_offset + right_offset) > sps_ptr->pic_width_in_luma_samples - 1) {
-            ErrorLog(g_rocdec_logger, "SubWidthC * (leftOffset + rightOffset) value greater than maximum allowed value: " + ROCDEC_TOSTR(sub_width_c_ * (left_offset + right_offset)) + ", max: " + ROCDEC_TOSTR(sps_ptr->pic_width_in_luma_samples - 1) + ". Using default value: 0");
+        uint64_t data = static_cast<uint64_t>(sub_width_c_) * (left_offset + right_offset);
+        if (data > sps_ptr->pic_width_in_luma_samples - 1) {
+            ErrorLog(g_rocdec_logger, "SubWidthC * (leftOffset + rightOffset) value greater than maximum allowed value: " + ROCDEC_TOSTR(data) + ", max: " + ROCDEC_TOSTR(sps_ptr->pic_width_in_luma_samples - 1) + ". Using default value: 0");
             vui->def_disp_win_left_offset = 0;
             vui->def_disp_win_right_offset = 0;
         }
@@ -1251,8 +1252,9 @@ ParserResult HevcVideoParser::ParseVui(HevcSeqParamSet *sps_ptr, uint8_t *nalu, 
         vui->def_disp_win_bottom_offset = Parser::ExpGolomb::ReadUe(nalu, offset);
         uint32_t top_offset = sps_ptr->conf_win_top_offset + vui->def_disp_win_top_offset;
         uint32_t bottom_offset = sps_ptr->conf_win_bottom_offset + vui->def_disp_win_bottom_offset;
-        if (sub_height_c_ * (top_offset + bottom_offset) > sps_ptr->pic_height_in_luma_samples) {
-            ErrorLog(g_rocdec_logger, "SubHeightC * (topOffset + bottomOffset) value greater than maximum allowed value: " + ROCDEC_TOSTR(sub_height_c_ * (top_offset + bottom_offset)) + ", max: " + ROCDEC_TOSTR(sps_ptr->pic_height_in_luma_samples) + ". Using default value: 0");
+        data = static_cast<uint64_t>(sub_height_c_) * (top_offset + bottom_offset);
+        if (data > sps_ptr->pic_height_in_luma_samples) {
+            ErrorLog(g_rocdec_logger, "SubHeightC * (topOffset + bottomOffset) value greater than maximum allowed value: " + ROCDEC_TOSTR(data) + ", max: " + ROCDEC_TOSTR(sps_ptr->pic_height_in_luma_samples) + ". Using default value: 0");
             vui->def_disp_win_top_offset = 0;
             vui->def_disp_win_bottom_offset = 0;
         }
@@ -1542,7 +1544,7 @@ ParserResult HevcVideoParser::ParseSps(uint8_t *nalu, size_t size) {
         // Treat VUI parameter parsing failure as non-fatal error and continue parsing since VUI parameters
         // are not necessary for decoding.
         if ((ret = ParseVui(sps_ptr, nalu, size, offset)) != PARSER_OK) {
-            ErrorLog(g_rocdec_logger, "Failed to parse VUI parameters. Default VUI parameters will be applied.");
+            ErrorLog(g_rocdec_logger, "Failed to parse VUI parameters.");
         }
     }
     if (ret == PARSER_OK) {
