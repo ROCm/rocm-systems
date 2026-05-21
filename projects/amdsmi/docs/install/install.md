@@ -128,10 +128,32 @@ ROCm system dependencies.
 (install_nightly)=
 ## Install a nightly build
 
-The [TheRock](https://github.com/ROCm/TheRock) build system also publishes
-nightly builds for the ROCm Core SDK and its components, including AMD SMI. See
-[Nightly release status
-(TheRock)](https://github.com/ROCm/TheRock#nightly-release-status) for details.
+Nightly builds of the ROCm Core SDK (including AMD SMI) are published by
+[TheRock](https://github.com/ROCm/TheRock) to a unified pip index.
+
+1. Create and activate a Python virtual environment (recommended):
+
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate
+   ```
+
+2. Install ROCm with the device extra matching your GPU. For example, for
+   gfx942 (MI300X / MI325X):
+
+   ```bash
+   pip install --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ \
+       "rocm[libraries,device-gfx942]"
+   ```
+
+   For the full list of `device-*` extras and other release options, see
+   [TheRock RELEASES.md](https://github.com/ROCm/TheRock/blob/main/RELEASES.md#supported-python-device--install-extras).
+
+3. Verify your installation:
+
+   ```bash
+   amd-smi version
+   ```
 
 ## Optional and advanced installation
 
