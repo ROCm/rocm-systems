@@ -3893,6 +3893,7 @@ amdsmi_status_t amdsmi_set_gpu_pci_bandwidth(amdsmi_processor_handle processor_h
  *
  *  @param[in,out] timestamp a pointer to uint64_t to which the timestamp
  *  will be written. Resolution: 1 ns.
+ *  If this parameter is nullptr, this function will return ::AMDSMI_STATUS_INVAL
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */

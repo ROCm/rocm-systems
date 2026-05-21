@@ -343,7 +343,7 @@ amdsmi_status_t amdsmi_init(uint64_t flags) {
 
 amdsmi_status_t amdsmi_shut_down() {
   if (init_ref_count == 0) {
-    return AMDSMI_STATUS_SUCCESS;
+    return AMDSMI_STATUS_NOT_INIT;
   }
   // Decrement the reference count
   init_ref_count--;
@@ -357,6 +357,7 @@ amdsmi_status_t amdsmi_shut_down() {
 }
 
 amdsmi_status_t amdsmi_status_code_to_string(amdsmi_status_t status, const char** status_string) {
+  if (status_string == nullptr) return AMDSMI_STATUS_INVAL;
   switch (status) {
     case AMDSMI_STATUS_SUCCESS:
       *status_string = "AMDSMI_STATUS_SUCCESS: Call succeeded.";
@@ -559,7 +560,7 @@ amdsmi_status_t amdsmi_get_socket_handles(uint32_t* socket_count,
 amdsmi_status_t amdsmi_get_socket_info(amdsmi_socket_handle socket_handle, size_t len, char* name) {
   AMDSMI_CHECK_INIT();
 
-  if (socket_handle == nullptr || name == nullptr) {
+  if (len == 0 || socket_handle == nullptr || name == nullptr) {
     return AMDSMI_STATUS_INVAL;
   }
 
@@ -2192,16 +2193,19 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
 
 amdsmi_status_t amdsmi_get_gpu_fan_rpms(amdsmi_processor_handle processor_handle,
                                         uint32_t sensor_ind, int64_t* speed) {
+  if (speed == nullptr) return AMDSMI_STATUS_INVAL;
   return rsmi_wrapper(rsmi_dev_fan_rpms_get, processor_handle, 0, sensor_ind, speed);
 }
 
 amdsmi_status_t amdsmi_get_gpu_fan_speed(amdsmi_processor_handle processor_handle,
                                          uint32_t sensor_ind, int64_t* speed) {
+  if (speed == nullptr) return AMDSMI_STATUS_INVAL;
   return rsmi_wrapper(rsmi_dev_fan_speed_get, processor_handle, 0, sensor_ind, speed);
 }
 
 amdsmi_status_t amdsmi_get_gpu_fan_speed_max(amdsmi_processor_handle processor_handle,
                                              uint32_t sensor_ind, uint64_t* max_speed) {
+  if (max_speed == nullptr) return AMDSMI_STATUS_INVAL;
   return rsmi_wrapper(rsmi_dev_fan_speed_max_get, processor_handle, 0, sensor_ind, max_speed);
 }
 
@@ -2657,21 +2661,25 @@ amdsmi_status_t amdsmi_get_gpu_kfd_info(amdsmi_processor_handle processor_handle
 
 amdsmi_status_t amdsmi_get_gpu_subsystem_id(amdsmi_processor_handle processor_handle,
                                             uint16_t* id) {
+  if (id == nullptr) return AMDSMI_STATUS_INVAL;
   return rsmi_wrapper(rsmi_dev_subsystem_id_get, processor_handle, 0, id);
 }
 
 amdsmi_status_t amdsmi_get_gpu_subsystem_name(amdsmi_processor_handle processor_handle, char* name,
                                               size_t len) {
+  if (name == nullptr || len == 0) return AMDSMI_STATUS_INVAL;
   return rsmi_wrapper(rsmi_dev_subsystem_name_get, processor_handle, 0, name, len);
 }
 
 amdsmi_status_t amdsmi_get_gpu_vendor_name(amdsmi_processor_handle processor_handle, char* name,
                                            size_t len) {
+  if (name == nullptr || len == 0) return AMDSMI_STATUS_INVAL;
   return rsmi_wrapper(rsmi_dev_vendor_name_get, processor_handle, 0, name, len);
 }
 
 amdsmi_status_t amdsmi_get_gpu_vram_vendor(amdsmi_processor_handle processor_handle, char* brand,
                                            uint32_t len) {
+  if (brand == nullptr || len == 0) return AMDSMI_STATUS_INVAL;
   return rsmi_wrapper(rsmi_dev_vram_vendor_get, processor_handle, 0, brand, len);
 }
 
@@ -2884,6 +2892,8 @@ amdsmi_status_t amdsmi_get_gpu_available_counters(amdsmi_processor_handle proces
 
 amdsmi_status_t amdsmi_topo_get_numa_node_number(amdsmi_processor_handle processor_handle,
                                                  uint32_t* numa_node) {
+  if (numa_node == nullptr) return AMDSMI_STATUS_INVAL;
+
   return rsmi_wrapper(rsmi_topo_get_numa_node_number, processor_handle, 0, numa_node);
 }
 
@@ -3935,22 +3945,27 @@ amdsmi_status_t amdsmi_get_gpu_ecc_count(amdsmi_processor_handle processor_handl
                                          amdsmi_gpu_block_t block, amdsmi_error_count_t* ec) {
   AMDSMI_CHECK_INIT();
   // nullptr api supported
+  if (ec == nullptr) return AMDSMI_STATUS_INVAL;
 
   return rsmi_wrapper(rsmi_dev_ecc_count_get, processor_handle, 0,
                       static_cast<rsmi_gpu_block_t>(block),
                       reinterpret_cast<rsmi_error_count_t*>(ec));
 }
+
 amdsmi_status_t amdsmi_get_gpu_ecc_enabled(amdsmi_processor_handle processor_handle,
                                            uint64_t* enabled_blocks) {
   AMDSMI_CHECK_INIT();
   // nullptr api supported
+  if (enabled_blocks == nullptr) return AMDSMI_STATUS_INVAL;
 
   return rsmi_wrapper(rsmi_dev_ecc_enabled_get, processor_handle, 0, enabled_blocks);
 }
+
 amdsmi_status_t amdsmi_get_gpu_ecc_status(amdsmi_processor_handle processor_handle,
                                           amdsmi_gpu_block_t block, amdsmi_ras_err_state_t* state) {
   AMDSMI_CHECK_INIT();
   // nullptr api supported
+  if (state == nullptr) return AMDSMI_STATUS_INVAL;
 
   return rsmi_wrapper(rsmi_dev_ecc_status_get, processor_handle, 0,
                       static_cast<rsmi_gpu_block_t>(block),
@@ -4089,6 +4104,7 @@ amdsmi_status_t amdsmi_get_gpu_power_profile_presets(amdsmi_processor_handle pro
                                                      amdsmi_power_profile_status_t* status) {
   AMDSMI_CHECK_INIT();
   // nullptr api supported
+  if (status == nullptr) return AMDSMI_STATUS_INVAL;
 
   // Bare Metal and passthrough only feature
   amdsmi_virtualization_mode_t virt_mode;
@@ -4426,6 +4442,7 @@ amdsmi_status_t amdsmi_get_gpu_memory_usage(amdsmi_processor_handle processor_ha
 amdsmi_status_t amdsmi_get_gpu_overdrive_level(amdsmi_processor_handle processor_handle,
                                                uint32_t* od) {
   // Bare Metal and passthrough only feature
+  if (od == nullptr) return AMDSMI_STATUS_INVAL;
   amdsmi_virtualization_mode_t virt_mode;
   if (amdsmi_get_gpu_virtualization_mode(processor_handle, &virt_mode) == AMDSMI_STATUS_SUCCESS) {
     if (virt_mode == AMDSMI_VIRTUALIZATION_MODE_GUEST) {
@@ -4455,6 +4472,7 @@ amdsmi_status_t amdsmi_set_gpu_overdrive_level(amdsmi_processor_handle processor
 }
 amdsmi_status_t amdsmi_get_gpu_pci_replay_counter(amdsmi_processor_handle processor_handle,
                                                   uint64_t* counter) {
+  if (counter == nullptr) return AMDSMI_STATUS_INVAL;
   return rsmi_wrapper(rsmi_dev_pci_replay_counter_get, processor_handle, 0, counter);
 }
 amdsmi_status_t amdsmi_get_gpu_pci_throughput(amdsmi_processor_handle processor_handle,
@@ -4565,6 +4583,7 @@ amdsmi_status_t amdsmi_get_utilization_count(amdsmi_processor_handle processor_h
 amdsmi_status_t amdsmi_get_energy_count(amdsmi_processor_handle processor_handle,
                                         uint64_t* energy_accumulator, float* counter_resolution,
                                         uint64_t* timestamp) {
+  if (energy_accumulator == nullptr || timestamp == nullptr) return AMDSMI_STATUS_INVAL;
   return rsmi_wrapper(rsmi_dev_energy_count_get, processor_handle, 0, energy_accumulator,
                       counter_resolution, timestamp);
 }
@@ -7443,6 +7462,7 @@ amdsmi_status_t amdsmi_get_cpucore_handles(uint32_t* cores_count,
 }
 
 amdsmi_status_t amdsmi_get_esmi_err_msg(amdsmi_status_t status, const char** status_string) {
+  if (status_string == nullptr) return AMDSMI_STATUS_INVAL;
   for (const auto& iter : amd::smi::esmi_status_map) {
     const amdsmi_status_t _status = status;
     if (static_cast<int>(iter.first) == static_cast<int>(_status)) {
