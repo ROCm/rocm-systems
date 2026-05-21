@@ -1808,6 +1808,11 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     }
   }
 
+  // TODO: Set gfx1250 nc defaults after dedicated tuning data is available.
+  if (IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250")) {
+    allGather3Data[rank].nc = 2;
+  }
+
   allGather3Data[rank].pivotA2AEnabled = comm->topo->pivotA2AEnabled && rcclParamPivotAlltoallEnable();
   comm->topo->ll128Enabled =  comm->topo->ll128Enabled || rcclParamLL128ForceEnable();
   allGather3Data[rank].ll128Enabled = comm->topo->ll128Enabled;
