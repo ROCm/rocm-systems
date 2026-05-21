@@ -62,18 +62,31 @@ bool Stream::Create() { return create(); }
 
 // ================================================================================================
 void Stream::Destroy(hip::Stream* stream, bool forceDestroy) {
-  // If this stream was created inside an hipExecutionCtx_t, unregister it
-  // so the context never keeps a dangling pointer after the stream is gone.
-  // If the ctx was already destroyed, Detach() has cleared executionCtx_
-  // and this is a no-op.
-  if (auto* ctx = stream->GetExecutionCtx()) {
-    ctx->removeStream(stream);
-    stream->SetExecutionCtx(nullptr);
-  }
+  // If this stream was created inside an hipExecutionCtx_t, the ctx holds
+  // an additional retain() on it, so release() here only drops the caller's
+  // ref. The ctx's ref is dropped in ~ExecutionCtx, which is what actually
+  // frees the object when both refs are gone.
   stream->device().removeFromActiveQueues(stream);
   stream->GetDevice()->RemoveStream(stream);
   stream->SetForceDestroy(forceDestroy);
   stream->release();
+}
+
+// ================================================================================================
+void Stream::Detach() {
+  // Invoked by ~ExecutionCtx() on every stream the destroyed ctx still owns.
+  // If this stream is currently driving an active capture, invalidate the
+  // capture on this stream and on every forked parallel branch so that the
+  // user observes hipStreamCaptureStatusInvalidated on subsequent
+  // hipStreamGetCaptureInfo / EndCapture calls.
+  if (captureStatus_ == hipStreamCaptureStatusActive) {
+    captureStatus_ = hipStreamCaptureStatusInvalidated;
+    for (auto s : parallelCaptureStreams_) {
+      reinterpret_cast<hip::Stream*>(s)->SetCaptureStatus(
+          hipStreamCaptureStatusInvalidated);
+    }
+  }
+  detached_.store(true, std::memory_order_release);
 }
 
 // ================================================================================================

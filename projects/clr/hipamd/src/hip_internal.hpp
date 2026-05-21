@@ -427,16 +427,6 @@ namespace hip {
 
     // --- Execution context (green context) lifecycle ---
 
-    /// Records the ExecutionCtx that owns this stream. Set by
-    /// hipExecutionCtxStreamCreate; cleared back to nullptr by Stream::Destroy
-    /// or on detach.
-    void SetExecutionCtx(ExecutionCtx* ctx) {
-      executionCtx_.store(ctx, std::memory_order_release);
-    }
-    /// Returns the owning ExecutionCtx, or nullptr if none / already detached.
-    ExecutionCtx* GetExecutionCtx() const {
-      return executionCtx_.load(std::memory_order_acquire);
-    }
     /// Marks the stream as detached: its owning ExecutionCtx has been
     /// destroyed. Behavior:
     ///   - Subsequent work-submit / sync APIs on this stream must return
@@ -475,12 +465,10 @@ namespace hip {
     uint64_t captureID_ = 0;                              //!< Unique ID for this capture sequence
 
     // ----- Execution context (green context) state -----
-    /// Owning ExecutionCtx if the stream was created via
-    /// hipExecutionCtxStreamCreate; nullptr for regular streams and after detach.
-    std::atomic<ExecutionCtx*> executionCtx_{nullptr};
     /// Set true when the owning ExecutionCtx is destroyed. Once detached,
     /// work-submit / sync APIs on this stream return hipErrorStreamDetached;
-    /// hipStreamDestroy still succeeds.
+    /// hipStreamDestroy still succeeds. Streams that are not created under
+    /// an ExecutionCtx leave this flag false for their lifetime.
     std::atomic<bool> detached_{false};
 
     static CommandQueue::Priority convertToQueuePriority(Priority p) {
