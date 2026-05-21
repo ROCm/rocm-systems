@@ -1,5 +1,6 @@
 # Goal: extend to all projects using a single root .pre-commit-config.yaml.
 # Currently only checks emulation/rocjitsu/ with its own config.
+# test: trailing whitespace on this line
 name: "Pre-commit (rocjitsu)"
 
 on:
