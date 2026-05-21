@@ -385,6 +385,18 @@ static void GetCoreDeviceInfo(const AMD::GpuAgent* agent, kfd_dbg_device_info_en
   entry.exception_status = 0;  // Placeholder until agent exception tracking is implemented
 }
 
+// Minimal struct queue layout from libhsakmt/src/queues.c
+// Used to access cached CWSR info without ioctl that hangs on faulted queues
+struct queue_cwsr_info {
+  uint32_t queue_id;              // Offset 0
+  uint64_t wptr;                  // Offset 4 (with padding)
+  uint64_t rptr;                  // Offset 12
+  void *eop_buffer;               // Offset 20
+  void *ctx_save_restore;         // Offset 24/28 (CWSR address - cached at queue creation)
+  uint32_t ctx_save_restore_size; // Offset 32/36 (allocated size - never changes)
+  // ... rest of struct not needed
+};
+
 // Helper function to get queue snapshot from AqlQueue without debug mode
 static void GetCoreQueueInfo(AMD::AqlQueue* queue, kfd_queue_snapshot_entry& entry) {
   // Zero out the structure first
@@ -397,21 +409,66 @@ static void GetCoreQueueInfo(AMD::AqlQueue* queue, kfd_queue_snapshot_entry& ent
   entry.queue_id = (uint32_t)queue->aql_queue_id();
   entry.gpu_id = static_cast<const AMD::GpuAgent*>(queue->GetAgent())->properties().KFDGpuID;
   entry.ring_size = queue->amd_queue_.hsa_queue.size;
-  entry.queue_type = queue->amd_queue_.hsa_queue.type;
+  entry.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
 
   // Runtime cached (1 field) - TODO: Get exception status when implemented
   // entry.exception_status = queue->GetExceptionStatus();
   entry.exception_status = 0;  // Placeholder until exception caching is implemented
 
-  // GetQueueInfo (2 fields) - one non-debug ioctl for CWSR info
-  HsaQueueInfo queue_info;
-  if (HSAKMT_CALL(hsaKmtGetQueueInfo(entry.queue_id, &queue_info)) == HSAKMT_STATUS_SUCCESS) {
-    entry.ctx_save_restore_address = (uint64_t)queue_info.SaveAreaHeader;
-    entry.ctx_save_restore_area_size = (uint32_t)queue_info.SaveAreaSizeInBytes;
-  }
+  // CWSR fields (2 fields) - Read directly from cached struct queue data
+  // This avoids calling hsaKmtGetQueueInfo which uses AMDKFD_IOC_GET_QUEUE_WAVE_STATE
+  // ioctl that hangs when GPU hardware is in faulted state
+
+  struct queue_cwsr_info* q = (struct queue_cwsr_info*)(uintptr_t)queue->aql_queue_id();
+  entry.ctx_save_restore_address = (uint64_t)q->ctx_save_restore;
+  entry.ctx_save_restore_area_size = q->ctx_save_restore_size;
 
   // Reserved field
   entry.reserved = 0;
+}
+
+// DEBUG: Print device snapshot for comparison
+static void PrintDeviceSnapshot(const char* label, const kfd_dbg_device_info_entry* entry) {
+  fprintf(stderr, "\n=== %s DEVICE SNAPSHOT ===\n", label);
+  fprintf(stderr, "  gpu_id:                   0x%08x\n", entry->gpu_id);
+  fprintf(stderr, "  location_id:              0x%08x\n", entry->location_id);
+  fprintf(stderr, "  vendor_id:                0x%04x\n", entry->vendor_id);
+  fprintf(stderr, "  device_id:                0x%04x\n", entry->device_id);
+  fprintf(stderr, "  revision_id:              0x%02x\n", entry->revision_id);
+  fprintf(stderr, "  subsystem_vendor_id:      0x%04x\n", entry->subsystem_vendor_id);
+  fprintf(stderr, "  subsystem_device_id:      0x%04x\n", entry->subsystem_device_id);
+  fprintf(stderr, "  gfx_target_version:       0x%08x\n", entry->gfx_target_version);
+  fprintf(stderr, "  fw_version:               0x%08x\n", entry->fw_version);
+  fprintf(stderr, "  simd_count:               %u\n", entry->simd_count);
+  fprintf(stderr, "  max_waves_per_simd:       %u\n", entry->max_waves_per_simd);
+  fprintf(stderr, "  array_count:              %u\n", entry->array_count);
+  fprintf(stderr, "  simd_arrays_per_engine:   %u\n", entry->simd_arrays_per_engine);
+  fprintf(stderr, "  num_xcc:                  %u\n", entry->num_xcc);
+  fprintf(stderr, "  capability:               0x%08x\n", entry->capability);
+  fprintf(stderr, "  debug_prop:               0x%08x\n", entry->debug_prop);
+  fprintf(stderr, "  lds_base:                 0x%016llx\n", (unsigned long long)entry->lds_base);
+  fprintf(stderr, "  lds_limit:                0x%016llx\n", (unsigned long long)entry->lds_limit);
+  fprintf(stderr, "  scratch_base:             0x%016llx\n", (unsigned long long)entry->scratch_base);
+  fprintf(stderr, "  scratch_limit:            0x%016llx\n", (unsigned long long)entry->scratch_limit);
+  fprintf(stderr, "  gpuvm_base:               0x%016llx\n", (unsigned long long)entry->gpuvm_base);
+  fprintf(stderr, "  gpuvm_limit:              0x%016llx\n", (unsigned long long)entry->gpuvm_limit);
+  fprintf(stderr, "  exception_status:         0x%016llx (IGNORED)\n", (unsigned long long)entry->exception_status);
+}
+
+// DEBUG: Print queue snapshot for comparison
+static void PrintQueueSnapshot(const char* label, const kfd_queue_snapshot_entry* entry) {
+  fprintf(stderr, "\n=== %s QUEUE SNAPSHOT ===\n", label);
+  fprintf(stderr, "  queue_id:                     0x%08x\n", entry->queue_id);
+  fprintf(stderr, "  gpu_id:                       0x%08x\n", entry->gpu_id);
+  fprintf(stderr, "  ring_base_address:            0x%016llx\n", (unsigned long long)entry->ring_base_address);
+  fprintf(stderr, "  write_pointer_address:        0x%016llx\n", (unsigned long long)entry->write_pointer_address);
+  fprintf(stderr, "  read_pointer_address:         0x%016llx\n", (unsigned long long)entry->read_pointer_address);
+  fprintf(stderr, "  ring_size:                    %u\n", entry->ring_size);
+  fprintf(stderr, "  queue_type:                   %u\n", entry->queue_type);
+  fprintf(stderr, "  ctx_save_restore_address:     0x%016llx\n", (unsigned long long)entry->ctx_save_restore_address);
+  fprintf(stderr, "  ctx_save_restore_area_size:   %u\n", entry->ctx_save_restore_area_size);
+  fprintf(stderr, "  exception_status:             0x%016llx (IGNORED)\n", (unsigned long long)entry->exception_status);
+  fprintf(stderr, "  reserved:                     0x%08x\n", entry->reserved);
 }
 
 struct SegmentBuilder {
@@ -424,22 +481,69 @@ struct SegmentBuilder {
 
 struct NoteSegmentBuilder : public SegmentBuilder {
   hsa_status_t Collect(SegmentsInfo& segments) override {
-    void *runtime_ptr, *agents_ptr = NULL, *queues_ptr = NULL;
-    uint32_t runtime_size, agents_size, queue_size, n_entries, entry_size;
-    HsaVersionInfo versionInfo = {0};
+    // Hardcode KFD version to 1.13 for note format compatibility
+    HsaVersionInfo versionInfo = {1, 13};
 
-    if (HSAKMT_CALL(hsaKmtDbgEnable(&runtime_ptr, &runtime_size))) {
-      fprintf(stderr, "Failed to enable debug interface, "
-              "debugger might be already attached.\n");
+    // ========================================================================
+    // PHASE 2: Runtime-Only Approach (Debug API Disabled for Stability)
+    // ========================================================================
+    // Note: Debug API comparison was causing double-free crashes.
+    // Using runtime helpers only - they work with or without debugger attached.
+
+    // ========================================================================
+    // ALWAYS Collect Runtime-Based Data (Works With or Without Debugger)
+    // ========================================================================
+
+    // 1. Get runtime info (cached from runtime_enable)
+    kfd_runtime_info runtime_info;
+    memset(&runtime_info, 0, sizeof(runtime_info));
+
+    if (HSAKMT_CALL(hsaKmtGetCoreRuntimeInfo(&runtime_info)) != HSAKMT_STATUS_SUCCESS) {
+      fprintf(stderr, "Failed to get runtime info via hsaKmtGetCoreRuntimeInfo()\n");
       return HSA_STATUS_ERROR;
     }
-    std::unique_ptr<void, decltype(std::free) *> runtime_info(runtime_ptr, std::free);
 
-    if (HSAKMT_CALL(hsaKmtGetVersion(&versionInfo))) {
-      HSAKMT_CALL(hsaKmtDbgDisable());
-      fprintf(stderr, "Failed to fetch driver ABI version.\n");
-      return HSA_STATUS_ERROR;
+    // 2. Build device snapshots from GPU agents
+    std::vector<kfd_dbg_device_info_entry> device_snapshots;
+    const auto& gpu_agents = core::Runtime::runtime_singleton_->gpu_agents();
+
+    for (const core::Agent* agent : gpu_agents) {
+      const AMD::GpuAgent* gpu_agent = static_cast<const AMD::GpuAgent*>(agent);
+      kfd_dbg_device_info_entry entry;
+      GetCoreDeviceInfo(gpu_agent, entry);
+      device_snapshots.push_back(entry);
     }
+
+    // 3. Collect all queues and suspend them (via queue percentage)
+    std::vector<AMD::AqlQueue*> all_queues;
+    for (const core::Agent* agent : gpu_agents) {
+      const AMD::GpuAgent* gpu_agent = static_cast<const AMD::GpuAgent*>(agent);
+      const auto& aql_queues = gpu_agent->GetAqlQueues();
+
+      for (core::Queue* q : aql_queues) {
+        AMD::AqlQueue* aql_queue = static_cast<AMD::AqlQueue*>(q);
+        all_queues.push_back(aql_queue);
+        // Suspend queue using Suspend() method which sets suspended_ flag properly
+        aql_queue->Suspend();
+      }
+    }
+
+
+    // 4. Build queue snapshots (reading cached data, no ioctls)
+    std::vector<kfd_queue_snapshot_entry> queue_snapshots;
+    for (size_t i = 0; i < all_queues.size(); i++) {
+      AMD::AqlQueue* queue = all_queues[i];
+      kfd_queue_snapshot_entry entry;
+      GetCoreQueueInfo(queue, entry);
+      queue_snapshots.push_back(entry);
+    }
+
+    // 5. Skip queue resumption - process is terminating anyway due to fatal GPU exception
+
+    // ========================================================================
+    // Package Runtime Data into PT_NOTE (Works in Both Cases)
+    // ========================================================================
+
     /* Note version */
     note_package_builder_.Write<uint64_t>(1);
     /* Store version_major in PT_NOTE package */
@@ -447,39 +551,34 @@ struct NoteSegmentBuilder : public SegmentBuilder {
     /* Store version_minor in PT_NOTE package */
     note_package_builder_.Write<uint32_t>(versionInfo.KernelInterfaceMinorVersion);
     /* Store runtime_info_size in PT_NOTE package */
-    note_package_builder_.Write<uint64_t>(runtime_size);
+    static_assert(10 <= sizeof(kfd_runtime_info));
+    note_package_builder_.Write<uint64_t>(10 /* sizeof(kfd_runtime_info) for version 1.13 */);
 
-    if (HSAKMT_CALL(hsaKmtDbgGetDeviceData(&agents_ptr, &n_entries, &entry_size))) {
-       HSAKMT_CALL(hsaKmtDbgDisable());
-       fprintf(stderr, "Failed to fetch agents snapshot.\n");
-       return HSA_STATUS_ERROR;
-    }
-    agents_size = n_entries * entry_size;
-    std::unique_ptr<void, decltype(std::free) *> agents_info(agents_ptr, std::free);
     /* Store n_agents in PT_NOTE package */
-    note_package_builder_.Write<uint32_t>(n_entries);
+    note_package_builder_.Write<uint32_t>(device_snapshots.size());
     /* Store agent_info_entry_size in PT_NOTE package */
-    note_package_builder_.Write<uint32_t>(entry_size);
+    static_assert(120 <= sizeof(kfd_dbg_device_info_entry));
+    note_package_builder_.Write<uint32_t>(120 /* sizeof(kfd_dbg_device_info_entry) at version 1.13 */);
 
-    if (HSAKMT_CALL(hsaKmtDbgGetQueueData(&queues_ptr, &n_entries, &entry_size, true))) {
-       HSAKMT_CALL(hsaKmtDbgDisable());
-       fprintf(stderr, "Failed to fetch queues snapshot.\n");
-       return HSA_STATUS_ERROR;
-    }
-    queue_size = n_entries * entry_size;
-    std::unique_ptr<void, decltype(std::free) *> queues_info(queues_ptr, std::free);
     /* Store n_queues in PT_NOTE package */
-    note_package_builder_.Write<uint32_t>(n_entries);
+    note_package_builder_.Write<uint32_t>(queue_snapshots.size());
     /* Store queue_info_entry_size in PT_NOTE package */
-    note_package_builder_.Write<uint32_t>(entry_size);
+    static_assert(64 <= sizeof(kfd_queue_snapshot_entry));
+    note_package_builder_.Write<uint32_t>(64 /* sizeof(kfd_queue_snapshot_entry) at version 1.13 */);
 
-    PushInfo(runtime_info.get(), runtime_size);
-    PushInfo(agents_info.get(), agents_size);
-    PushInfo(queues_info.get(), queue_size);
-    if (HSAKMT_CALL(hsaKmtDbgDisable())) {
-      fprintf(stderr, "Failed to disable debug interface.\n");
-      return HSA_STATUS_ERROR;
+    // Push runtime info
+    PushInfo(&runtime_info, sizeof(runtime_info));
+
+    // Push device snapshots
+    if (!device_snapshots.empty()) {
+      PushInfo(device_snapshots.data(), device_snapshots.size() * sizeof(kfd_dbg_device_info_entry));
     }
+
+    // Push queue snapshots
+    if (!queue_snapshots.empty()) {
+      PushInfo(queue_snapshots.data(), queue_snapshots.size() * sizeof(kfd_queue_snapshot_entry));
+    }
+
 
     /* With note content, package this in the PT_NOTE.  */
     PackageBuilder noteHeaderBuilder;
@@ -502,6 +601,7 @@ struct NoteSegmentBuilder : public SegmentBuilder {
     s.flags = 0;
     s.builder = this;
     segments.push_back(s);
+
 
     return HSA_STATUS_SUCCESS;
   }
@@ -930,6 +1030,7 @@ hsa_status_t dump_gpu_core() {
 
   status = lbuilder.Collect(segments);
   if (status != HSA_STATUS_SUCCESS) return status;
+
 
   // Determine output pattern
   std::string pattern;
