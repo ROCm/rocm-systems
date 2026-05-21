@@ -41,6 +41,7 @@ target_sources(rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_SOURCES}
                                                       ${ROCPROFILER_LIB_HEADERS})
 add_subdirectory(hsa)
 add_subdirectory(hip)
+add_subdirectory(hipfile)
 add_subdirectory(code_object)
 add_subdirectory(context)
 add_subdirectory(counters)

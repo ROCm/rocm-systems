@@ -119,6 +119,7 @@ ROCPROFILER_EXTERN_C_FINI
 #include "rocprofiler-sdk/device_counting_service.h"
 #include "rocprofiler-sdk/dispatch_counting_service.h"
 #include "rocprofiler-sdk/external_correlation.h"
+#include "rocprofiler-sdk/hipfile.h"
 #include "rocprofiler-sdk/hip.h"
 #include "rocprofiler-sdk/hsa.h"
 #include "rocprofiler-sdk/intercept_table.h"

@@ -25,6 +25,8 @@
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/defines.h>
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/hipfile/api_args.h>
+#include <rocprofiler-sdk/hipfile/api_id.h>
 #include <rocprofiler-sdk/hip/api_args.h>
 #include <rocprofiler-sdk/kfd/kfd_id.h>
 #include <rocprofiler-sdk/rocdecode/api_args.h>
@@ -269,6 +271,26 @@ typedef struct rocprofiler_buffer_tracing_rocjpeg_api_record_t
     /// @brief Specification of the API function (@see
     /// ::rocprofiler_rocjpeg_api_id_t)
 } rocprofiler_buffer_tracing_rocjpeg_api_record_t;
+
+/**
+ * @brief ROCProfiler Buffer hipFILE API Record.
+ */
+typedef struct rocprofiler_buffer_tracing_hipfile_api_record_t
+{
+    uint64_t                          size;  ///< size of this struct
+    rocprofiler_buffer_tracing_kind_t kind;
+    rocprofiler_hipfile_api_id_t      operation;
+    rocprofiler_correlation_id_t      correlation_id;   ///< correlation ids for record
+    rocprofiler_timestamp_t           start_timestamp;  ///< start time in nanoseconds
+    rocprofiler_timestamp_t           end_timestamp;    ///< end time in nanoseconds
+    rocprofiler_thread_id_t           thread_id;        ///< id for thread generating this record
+
+    /// @var kind
+    /// @brief ::ROCPROFILER_CALLBACK_TRACING_HIPFILE_API
+    /// @var operation
+    /// @brief Specification of the API function (@see
+    /// ::rocprofiler_hipfile_api_id_t)
+} rocprofiler_buffer_tracing_hipfile_api_record_t;
 
 /**
  * @brief ROCProfiler Buffer Memory Copy Tracer Record.

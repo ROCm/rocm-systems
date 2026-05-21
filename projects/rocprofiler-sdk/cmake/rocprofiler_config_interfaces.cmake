@@ -397,3 +397,29 @@ else()
                                INTERFACE ROCPROFILER_SDK_USE_SYSTEM_ROCJPEG=0)
 
 endif()
+
+# ----------------------------------------------------------------------------------------#
+#
+# hipFILE
+#
+# ----------------------------------------------------------------------------------------#
+
+find_path(
+    hipfile_INCLUDE_DIR
+    NAMES hipfile-api-trace.h hipfile.h
+    HINTS ${ROCM_PATH}
+    PATHS ${ROCM_PATH} ${ROCPROFILER_DEFAULT_ROCM_PATH}
+    PATH_SUFFIXES include)
+
+if(hipfile_INCLUDE_DIR
+   AND EXISTS "${hipfile_INCLUDE_DIR}/hipfile-api-trace.h"
+   AND EXISTS "${hipfile_INCLUDE_DIR}/hipfile.h")
+    target_include_directories(rocprofiler-sdk-hipfile-nolink
+                               INTERFACE ${hipfile_INCLUDE_DIR})
+    target_compile_definitions(rocprofiler-sdk-hipfile-nolink
+                               INTERFACE ROCPROFILER_SDK_USE_SYSTEM_HIPFILE=1)
+else()
+    target_compile_definitions(rocprofiler-sdk-hipfile-nolink
+                               INTERFACE ROCPROFILER_SDK_USE_SYSTEM_HIPFILE=0)
+
+endif()

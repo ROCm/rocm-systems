@@ -183,6 +183,7 @@ typedef enum rocprofiler_callback_tracing_kind_t  // NOLINT(performance-enum-siz
     ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,  ///< @see ::rocprofiler_hip_stream_operation_t
     ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API,  ///< @see
                                                          ///< ::rocprofiler_marker_core_range_api_id_t
+    ROCPROFILER_CALLBACK_TRACING_HIPFILE_API,             ///< hipFILE API Tracing
     ROCPROFILER_CALLBACK_TRACING_LAST,
 } rocprofiler_callback_tracing_kind_t;
 
@@ -234,6 +235,7 @@ typedef enum rocprofiler_buffer_tracing_kind_t  // NOLINT(performance-enum-size)
     ROCPROFILER_BUFFER_TRACING_KFD_QUEUE,         ///< @see rocprofiler_kfd_queue_operation_t
     ROCPROFILER_BUFFER_TRACING_MARKER_CORE_RANGE_API,  ///< @see
                                                        ///< ::rocprofiler_marker_core_range_api_id_t
+    ROCPROFILER_BUFFER_TRACING_HIPFILE_API,             ///< hipFILE tracing
     ROCPROFILER_BUFFER_TRACING_LAST,
 
     /// @var ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT
@@ -409,7 +411,8 @@ typedef enum rocprofiler_runtime_library_t
     ROCPROFILER_ROCDECODE_LIBRARY = (1 << 5),
     ROCPROFILER_ROCJPEG_LIBRARY   = (1 << 6),
     ROCPROFILER_OMPT_LIBRARY      = (1 << 7),
-    ROCPROFILER_LIBRARY_LAST      = ROCPROFILER_OMPT_LIBRARY,
+    ROCPROFILER_HIPFILE_LIBRARY   = (1 << 8),
+    ROCPROFILER_LIBRARY_LAST      = ROCPROFILER_HIPFILE_LIBRARY,
 } rocprofiler_runtime_library_t;
 
 /**
@@ -427,7 +430,8 @@ typedef enum rocprofiler_intercept_table_t
     ROCPROFILER_RCCL_TABLE           = (1 << 6),
     ROCPROFILER_ROCDECODE_TABLE      = (1 << 7),
     ROCPROFILER_ROCJPEG_TABLE        = (1 << 8),
-    ROCPROFILER_TABLE_LAST           = ROCPROFILER_ROCJPEG_TABLE,
+    ROCPROFILER_HIPFILE_TABLE        = (1 << 9),
+    ROCPROFILER_TABLE_LAST           = ROCPROFILER_HIPFILE_TABLE,
 } rocprofiler_intercept_table_t;
 
 /**
@@ -443,6 +447,7 @@ typedef enum rocprofiler_runtime_initialization_operation_t  // NOLINT(performan
     ROCPROFILER_RUNTIME_INITIALIZATION_ROCDECODE,  ///< Application loaded rocDecoder runtime
     ROCPROFILER_RUNTIME_INITIALIZATION_ROCJPEG,    ///< Application loaded rocJPEG runtime
     ROCPROFILER_RUNTIME_INITIALIZATION_OMPT,       ///< Application loaded OMPT runtime
+    ROCPROFILER_RUNTIME_INITIALIZATION_HIPFILE,    ///< Application loaded hipFILE runtime
     ROCPROFILER_RUNTIME_INITIALIZATION_LAST,
 } rocprofiler_runtime_initialization_operation_t;
 

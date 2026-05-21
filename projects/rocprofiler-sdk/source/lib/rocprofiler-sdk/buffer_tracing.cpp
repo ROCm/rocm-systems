@@ -23,6 +23,7 @@
 #include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
+#include "lib/rocprofiler-sdk/hipfile/hipfile.hpp"
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
 #include "lib/rocprofiler-sdk/hip/stream.hpp"
 #include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
@@ -41,6 +42,7 @@
 
 #include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/hipfile/table_id.h>
 #include <rocprofiler-sdk/hip/table_id.h>
 #include <rocprofiler-sdk/hsa/table_id.h>
 #include <rocprofiler-sdk/marker/table_id.h>
@@ -98,6 +100,7 @@ ROCPROFILER_BUFFER_TRACING_KIND_STRING(OMPT)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(RUNTIME_INITIALIZATION)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(ROCDECODE_API)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(ROCJPEG_API)
+ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIPFILE_API)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIP_STREAM)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIP_RUNTIME_API_EXT)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIP_COMPILER_API_EXT)
@@ -329,6 +332,11 @@ rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_buffer_tracing_
             val = rocprofiler::rocjpeg::name_by_id<ROCPROFILER_ROCJPEG_TABLE_ID_CORE>(operation);
             break;
         }
+        case ROCPROFILER_BUFFER_TRACING_HIPFILE_API:
+        {
+            val = rocprofiler::hipfile::name_by_id<ROCPROFILER_HIPFILE_TABLE_ID_CORE>(operation);
+            break;
+        }
         case ROCPROFILER_BUFFER_TRACING_HIP_STREAM:
         {
             val = rocprofiler::hip::stream::name_by_id(operation);
@@ -489,6 +497,11 @@ rocprofiler_iterate_buffer_tracing_kind_operations(
         case ROCPROFILER_BUFFER_TRACING_ROCJPEG_API:
         {
             ops = rocprofiler::rocjpeg::get_ids<ROCPROFILER_ROCJPEG_TABLE_ID_CORE>();
+            break;
+        }
+        case ROCPROFILER_BUFFER_TRACING_HIPFILE_API:
+        {
+            ops = rocprofiler::hipfile::get_ids<ROCPROFILER_HIPFILE_TABLE_ID_CORE>();
             break;
         }
         case ROCPROFILER_BUFFER_TRACING_HIP_STREAM:
