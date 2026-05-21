@@ -1398,6 +1398,43 @@ template <class T>
 struct isBooleanFunc<T, cooperative_groups::bit_xor<T>> : __hip_internal::true_type {
 };
 
+// this is the value to return in exclusive_scan, for lane 0
+template <class T, class Op>
+struct CGIdentity {
+  __CG_QUALIFIER__ T operator()()
+  {
+    T result;
+
+    __builtin_memset(&result, 0, sizeof(T));
+    return result;
+  }
+};
+
+template <class T>
+struct CGIdentity<T, cooperative_groups::bit_and<T>> {
+  __CG_QUALIFIER__ T operator()()
+  {
+    T result {};
+    return ~result;
+  }
+};
+
+template <class T>
+struct CGIdentity<T, cooperative_groups::less<T>> {
+  __CG_QUALIFIER__ T operator()()
+  {
+    return std::numeric_limits<T>::max();
+  }
+};
+
+template <class T>
+struct CGIdentity<T, cooperative_groups::greater<T>> {
+  __CG_QUALIFIER__ T operator()()
+  {
+    return std::numeric_limits<T>::lowest();
+  }
+};
+
 // calculates the necessary warp mask for cooperative groups that support reduce(), or
 // inclusive/exlcusive_scan()
 template <typename TyGroup>
