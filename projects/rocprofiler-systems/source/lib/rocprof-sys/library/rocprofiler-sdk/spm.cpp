@@ -24,6 +24,8 @@ constexpr bool sdk_spm_header_available = false;
 
 constexpr auto beta_env_name  = "ROCPROFILER_SPM_BETA_ENABLED";
 constexpr auto beta_env_value = "1";
+
+constexpr bool runtime_collection_available = false;
 }  // namespace
 
 bool
@@ -59,6 +61,13 @@ validate_beta_request(const beta_request&             request,
     {
         LOG_WARNING("SPM counter collection was requested, but this build was compiled "
                     "without rocprofiler-sdk experimental SPM header support");
+        return false;
+    }
+
+    if(!runtime_collection_available)
+    {
+        LOG_WARNING("SPM counter collection was requested, but Systems Profiler SPM "
+                    "runtime collection is not implemented in this build");
         return false;
     }
 
