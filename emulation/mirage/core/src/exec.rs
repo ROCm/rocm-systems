@@ -16,7 +16,6 @@ pub struct ExecArgs {
     pub env: BTreeMap<String, String>,
 }
 
-
 /// A request to start an exec inside an existing session.
 ///
 /// The daemon resolves the session, looks up its simulator, and calls

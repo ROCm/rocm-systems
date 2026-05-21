@@ -1,4 +1,6 @@
+use crate::{common::MaybeRef, exec::ExecDef, profile::ProfileDef};
+
 struct Workload {
-    profile : Profile,
-    
+    profile: MaybeRef<ProfileDef>,
+    execution: ExecDef,
 }
