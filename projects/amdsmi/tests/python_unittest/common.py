@@ -84,7 +84,7 @@ def print_shadow_error(script, loaded_from, expected_path, file=sys.stderr):
     diagnosis, the shared remediation steps, and a pointer to -h for more details.
     """
     print(
-        f"ERROR: amdsmi loaded from '{loaded_from}' instead of AMDSMI_PATH='{expected_path}'.",
+        f"ERROR: amdsmi loaded from '{loaded_from}' instead of expected path '{expected_path}'.",
         file=file,
     )
     print("A system-installed amdsmi package is shadowing the test target.", file=file)
@@ -185,7 +185,7 @@ def print_unittest_help():
     buf = io.StringIO()
     try:
         with contextlib.redirect_stdout(buf):
-            unittest.main(argv=["", "--help"])
+            unittest.main(argv=[sys.argv[0] or "unit_tests.py", "--help"])
     except SystemExit:
         pass
     output = buf.getvalue()
