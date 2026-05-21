@@ -606,6 +606,11 @@ For attachment profiling of running processes:
         "--rocjpeg-trace",
         help="For collecting rocJPEG Traces",
     )
+    add_parser_bool_argument(
+        basic_tracing_options,
+        "--hipfile-trace",
+        help="For collecting hipFILE Traces",
+    )
 
     extended_tracing_options = parser.add_argument_group("Granular tracing options")
 
@@ -1661,6 +1666,7 @@ def run(app_args, args, **kwargs):
             "ompt_trace",
             "rocdecode_trace",
             "rocjpeg_trace",
+            "hipfile_trace",
         ):
             setattrifnone(args, itr, True)
 
@@ -1677,6 +1683,7 @@ def run(app_args, args, **kwargs):
             "ompt_trace",
             "rocdecode_trace",
             "rocjpeg_trace",
+            "hipfile_trace",
         ):
             setattrifnone(args, itr, True)
 
@@ -1726,6 +1733,7 @@ def run(app_args, args, **kwargs):
             ["ompt_trace", "OMPT_TRACE"],
             ["rocdecode_trace", "ROCDECODE_API_TRACE"],
             ["rocjpeg_trace", "ROCJPEG_API_TRACE"],
+            ["hipfile_trace", "HIPFILE_API_TRACE"],
             ["kernel_trace", "KERNEL_TRACE"],
             ["memory_copy_trace", "MEMORY_COPY_TRACE"],
             ["memory_allocation_trace", "MEMORY_ALLOCATION_TRACE"],

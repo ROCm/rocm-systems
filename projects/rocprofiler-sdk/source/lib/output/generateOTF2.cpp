@@ -369,7 +369,8 @@ write_otf2(const output_config&                                          cfg,
            std::deque<rocprofiler_buffer_tracing_rccl_api_record_t>*       rccl_api_data,
            std::deque<tool_buffer_tracing_memory_allocation_ext_record_t>* memory_allocation_data,
            std::deque<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>* rocdecode_api_data,
-           std::deque<rocprofiler_buffer_tracing_rocjpeg_api_record_t>*       rocjpeg_api_data)
+           std::deque<rocprofiler_buffer_tracing_rocjpeg_api_record_t>*       rocjpeg_api_data,
+           std::deque<rocprofiler_buffer_tracing_hipfile_api_record_t>*       hipfile_api_data)
 {
     namespace sdk = ::rocprofiler::sdk;
 
@@ -423,6 +424,8 @@ write_otf2(const output_config&                                          cfg,
         for(auto itr : *rocdecode_api_data)
             tids.emplace(itr.thread_id);
         for(auto itr : *rocjpeg_api_data)
+            tids.emplace(itr.thread_id);
+        for(auto itr : *hipfile_api_data)
             tids.emplace(itr.thread_id);
 
         for(auto itr : *memory_copy_data)
@@ -577,14 +580,17 @@ write_otf2(const output_config&                                          cfg,
             if(!_inp) return;
             for(auto itr : *_inp)
             {
-                if(itr.kind == ROCPROFILER_BUFFER_TRACING_MARKER_CORE_RANGE_API &&
-                   itr.operation == ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxMarkA)
-                    continue;
-
                 using value_type = common::mpl::unqualified_type_t<decltype(itr)>;
+                if constexpr(std::is_same<value_type,
+                                          rocprofiler_buffer_tracing_marker_api_record_t>::value)
+                {
+                    if(itr.kind == ROCPROFILER_BUFFER_TRACING_MARKER_CORE_RANGE_API &&
+                       itr.operation == ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxMarkA)
+                        continue;
+                }
 
-                auto name     = buffer_names.at(itr.kind, itr.operation);
-                auto paradigm = OTF2_PARADIGM_HIP;
+                auto name        = buffer_names.at(itr.kind, itr.operation);
+                auto paradigm    = OTF2_PARADIGM_HIP;
                 if constexpr(std::is_same<value_type,
                                           rocprofiler_buffer_tracing_marker_api_record_t>::value)
                 {
@@ -618,6 +624,7 @@ write_otf2(const output_config&                                          cfg,
         add_event_data(marker_api_data, sdk::category::marker_api{});
         add_event_data(rccl_api_data, sdk::category::rccl_api{});
         add_event_data(rocjpeg_api_data, sdk::category::rocjpeg_api{});
+        add_event_data(hipfile_api_data, sdk::category::hipfile_api{});
     }
 
     for(auto itr : *rocdecode_api_data)
