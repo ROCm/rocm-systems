@@ -53,44 +53,47 @@ RUN apt-get update \
     python3-yaml \
     vim \
     less \
+    openmpi-bin openmpi-common libopenmpi-dev \
     && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-RUN wget https://github.com/Kitware/CMake/releases/download/v3.28.0/cmake-3.28.0-linux-x86_64.sh \
-    && chmod +x cmake-3.28.0-linux-x86_64.sh \
-    && bash ./cmake-3.28.0-linux-x86_64.sh --prefix=/usr --exclude-subdir --skip-license \
-    && rm cmake-3.28.0-linux-x86_64.sh
+## Not needed on Ubuntu 24, probably needed on Ubuntu22
+#RUN wget https://github.com/Kitware/CMake/releases/download/v3.28.0/cmake-3.28.0-linux-x86_64.sh \
+#    && chmod +x cmake-3.28.0-linux-x86_64.sh \
+#    && bash ./cmake-3.28.0-linux-x86_64.sh --prefix=/usr --exclude-subdir --skip-license \
+#    && rm cmake-3.28.0-linux-x86_64.sh
 
 ## Set ROCm path
 ENV ROCM_PATH=/opt/rocm
 
+# We use MPI only as a launcher, any MPI will do, use system install
 ## Install UCX
-ENV UCX_INSTALL_PREFIX=/opt/ucx
-RUN wget https://github.com/openucx/ucx/releases/download/v1.16.0/ucx-1.16.0.tar.gz \
-    && mkdir -p ucx \
-    && tar -zxf ucx-1.16.0.tar.gz -C ucx --strip-components=1 \
-    && cd ucx \
-    && mkdir build \
-    && cd build \
-    && ../configure --prefix=${UCX_INSTALL_PREFIX} --with-rocm=${ROCM_PATH} \
-    && make -j16 install \
-    && cd ../.. \
-    && rm -rf ucx ucx-1.16.0.tar.gz
+#ENV UCX_INSTALL_PREFIX=/opt/ucx
+#RUN wget https://github.com/openucx/ucx/releases/download/v1.16.0/ucx-1.16.0.tar.gz \
+#    && mkdir -p ucx \
+#    && tar -zxf ucx-1.16.0.tar.gz -C ucx --strip-components=1 \
+#    && cd ucx \
+#    && mkdir build \
+#    && cd build \
+#    && ../configure --prefix=${UCX_INSTALL_PREFIX} --with-rocm=${ROCM_PATH} \
+#    && make -j16 install \
+#    && cd ../.. \
+#    && rm -rf ucx ucx-1.16.0.tar.gz
 
 ## Install OpenMPI
-ENV MPI_INSTALL_PREFIX=/opt/ompi
-RUN wget https://download.open-mpi.org/release/open-mpi/v4.1/openmpi-4.1.6.tar.gz \
-    && mkdir -p ompi4 \
-    && tar -zxf openmpi-4.1.6.tar.gz -C ompi4 --strip-components=1 \
-    && cd ompi4 \
-    && mkdir build \
-    && cd build \
-    && ../configure --prefix=${MPI_INSTALL_PREFIX} --with-ucx=${UCX_INSTALL_PREFIX} --disable-oshmem --disable-mpi-fortran --enable-orterun-prefix-by-default \
-    && make -j16 install \
-    && cd ../.. \
-    && rm -rf ompi4 openmpi-4.1.6.tar.gz
-ENV PATH="${MPI_INSTALL_PREFIX}/bin:${PATH}"
+#ENV MPI_INSTALL_PREFIX=/opt/ompi
+#RUN wget https://download.open-mpi.org/release/open-mpi/v4.1/openmpi-4.1.6.tar.gz \
+#    && mkdir -p ompi4 \
+#    && tar -zxf openmpi-4.1.6.tar.gz -C ompi4 --strip-components=1 \
+#    && cd ompi4 \
+#    && mkdir build \
+#    && cd build \
+#    && ../configure --prefix=${MPI_INSTALL_PREFIX} --with-ucx=${UCX_INSTALL_PREFIX} --disable-oshmem --disable-mpi-fortran --enable-orterun-prefix-by-default \
+#    && make -j16 install \
+#    && cd ../.. \
+#    && rm -rf ompi4 openmpi-4.1.6.tar.gz
+#ENV PATH="${MPI_INSTALL_PREFIX}/bin:${PATH}"
 
 # OPTIONAL: Install rocm-enabled IB perftest (used to validate if network config is sane)
 # The following block is OPTIONAL and can be commented out if you only want to run rocSHMEM
@@ -101,32 +104,32 @@ RUN cd rdma-perftest \
  && make -j 8 #install
 
 ## rccl repo
-ARG RCCL_REPO=https://github.com/ROCm/rocm-systems.git
-ARG RCCL_BRANCH=users/prasanna-amd/nccl-sync-v2-28-9-gin-rebased-0501
+ARG ROCM_REPO=https://github.com/ROCm/rocm-systems.git
 
 ## AMD GPU Targets
-ARG GPU_TARGETS=gfx942
+ARG GPU_TARGETS=gfx950
 
 ## building rocSHMEM
+ARG ROCSHMEM_BRANCH=users/abouteiller/gin-stage1
 ENV ROCSHMEM_INSTALL_DIR=${WORKDIR}/rocshmem
-RUN git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git ${WORKDIR}/rocshmem/src && cd ${WORKDIR}/rocshmem/src \
+RUN git clone --no-checkout --filter=blob:none ${ROCM_REPO} ${WORKDIR}/rocshmem/src && cd ${WORKDIR}/rocshmem/src \
  && git sparse-checkout set --cone projects/rocshmem \
- && git checkout users/abouteiller/gin-stage1
+ && git checkout ${ROCSHMEM_BRANCH}
 RUN cd rocshmem/src/projects/rocshmem \
  && mkdir -p build && cd build \
  && ../scripts/build_configs/all_backends \
+#      -DBUILD_DEBUG_TRACE_DEVICE=ON -DBUILD_DEBUG_DEVICE=ON -DBUILD_DEBUG_TRACE_HOST=ON \
       -DMPI_ROOT=${MPI_INSTALL_DIR} \
       -DUSE_EXTERNAL_MPI=OFF \
-#      -DBUILD_LOCAL_GPU_TARGET_ONLY=ON \
       -DGPU_TARGETS=${GPU_TARGETS} \
       -DCMAKE_INSTALL_PREFIX=${ROCSHMEM_INSTALL_DIR} \
-      -DUSE_IPC=ON -DUSE_SDMA=ON #-DBUILD_DEBUG_TRACE_DEVICE=ON -DBUILD_DEBUG_DEVICE=ON -DBUILD_DEBUG_TRACE_HOST=ON
+      -DUSE_IPC=ON -DUSE_SDMA=ON
 
 ## building RCCL
+ARG RCCL_BRANCH=users/prasanna-amd/nccl-sync-v2-28-9-gin-rebased-0501
 ENV RCCL_INSTALL_PREFIX=${WORKDIR}/rccl
 ENV ONLY_FUNCS="SendRecv|AlltoAllPivot|AlltoAllGda|AlltoAllvGda"
-#RUN git clone --recurse-submodules -b "${RCCL_BRANCH}" "${RCCL_REPO}" \
-RUN git clone --no-checkout --filter=blob:none "${RCCL_REPO}" ${WORKDIR}/rccl/src/ && cd ${WORKDIR}/rccl/src \
+RUN git clone --no-checkout --filter=blob:none "${ROCM_REPO}" ${WORKDIR}/rccl/src/ && cd ${WORKDIR}/rccl/src \
  && git sparse-checkout set --cone projects/rccl \
  && git checkout ${RCCL_BRANCH}
 # patch for SDMA enablement
@@ -148,7 +151,7 @@ RUN cd rccl/src/ \
 RUN mkdir rccl-tests \
     && cd rccl-tests \
     && cmake -DCMAKE_BUILD_TYPE=Release -DUSE_MPI=ON -DCMAKE_PREFIX_PATH="${RCCL_INSTALL_PREFIX};${MPI_INSTALL_PREFIX}" -DGPU_TARGETS=${GPU_TARGETS} ${WORKDIR}/rccl/src/projects/rccl-tests \
-    && make -j16
+    && make -j16 ENABLE_DEVICE_API=1
 
 ## set environment variables
 ENV PATH="${MPI_INSTALL_PREFIX}/bin:${ROCM_PATH}/bin:${PATH}"
@@ -158,4 +161,5 @@ ENV OMPI_ALLOW_RUN_AS_ROOT=1
 ENV OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
 ENV NCL_DEBUG=VERSION
 ENV ROCSHMEM_DEBUG_LEVEL=info:noversion
+ENV ROCSHMEM_TEST_UUID=1
 
