@@ -418,10 +418,16 @@ static void GetCoreQueueInfo(AMD::AqlQueue* queue, kfd_queue_snapshot_entry& ent
   // CWSR fields (2 fields) - Read directly from cached struct queue data
   // This avoids calling hsaKmtGetQueueInfo which uses AMDKFD_IOC_GET_QUEUE_WAVE_STATE
   // ioctl that hangs when GPU hardware is in faulted state
+  fprintf(stderr, "[Core Dump] Queue %u: Accessing cached CWSR info from struct queue\n", entry.queue_id);
 
   struct queue_cwsr_info* q = (struct queue_cwsr_info*)(uintptr_t)queue->aql_queue_id();
   entry.ctx_save_restore_address = (uint64_t)q->ctx_save_restore;
   entry.ctx_save_restore_area_size = q->ctx_save_restore_size;
+
+  fprintf(stderr, "[Core Dump] Queue %u: CWSR address=0x%lx, allocated_size=%u (from cache, no ioctl)\n",
+          entry.queue_id,
+          (unsigned long)entry.ctx_save_restore_address,
+          entry.ctx_save_restore_area_size);
 
   // Reserved field
   entry.reserved = 0;
@@ -489,6 +495,7 @@ struct NoteSegmentBuilder : public SegmentBuilder {
     // ========================================================================
     // Note: Debug API comparison was causing double-free crashes.
     // Using runtime helpers only - they work with or without debugger attached.
+    fprintf(stderr, "[Core Dump] Using runtime helpers only (debug API disabled)\n");
 
     // ========================================================================
     // ALWAYS Collect Runtime-Based Data (Works With or Without Debugger)
@@ -515,30 +522,47 @@ struct NoteSegmentBuilder : public SegmentBuilder {
     }
 
     // 3. Collect all queues and suspend them (via queue percentage)
+    fprintf(stderr, "\n[Core Dump] ========== PHASE 3: Queue Collection and Suspension ==========\n");
     std::vector<AMD::AqlQueue*> all_queues;
     for (const core::Agent* agent : gpu_agents) {
       const AMD::GpuAgent* gpu_agent = static_cast<const AMD::GpuAgent*>(agent);
       const auto& aql_queues = gpu_agent->GetAqlQueues();
+      fprintf(stderr, "[Core Dump] GPU %u: Found %zu queue(s)\n",
+              gpu_agent->properties().KFDGpuID, aql_queues.size());
 
       for (core::Queue* q : aql_queues) {
         AMD::AqlQueue* aql_queue = static_cast<AMD::AqlQueue*>(q);
         all_queues.push_back(aql_queue);
+        uint32_t qid = (uint32_t)aql_queue->aql_queue_id();
+        fprintf(stderr, "[Core Dump] Queue %u: Suspending via Suspend() method...\n", qid);
         // Suspend queue using Suspend() method which sets suspended_ flag properly
         aql_queue->Suspend();
+        fprintf(stderr, "[Core Dump] Queue %u: Suspension complete\n", qid);
       }
     }
+    fprintf(stderr, "[Core Dump] Total queues collected: %zu\n", all_queues.size());
 
 
     // 4. Build queue snapshots (reading cached data, no ioctls)
+    fprintf(stderr, "\n[Core Dump] ========== PHASE 4: Building Queue Snapshots ==========\n");
     std::vector<kfd_queue_snapshot_entry> queue_snapshots;
     for (size_t i = 0; i < all_queues.size(); i++) {
       AMD::AqlQueue* queue = all_queues[i];
+      fprintf(stderr, "[Core Dump] Processing queue %zu/%zu (queue_id=%u)...\n",
+              i+1, all_queues.size(), (uint32_t)queue->aql_queue_id());
+
       kfd_queue_snapshot_entry entry;
       GetCoreQueueInfo(queue, entry);
       queue_snapshots.push_back(entry);
+
+      fprintf(stderr, "[Core Dump] Queue %u snapshot complete\n", entry.queue_id);
     }
+    fprintf(stderr, "[Core Dump] All queue snapshots built successfully\n");
 
     // 5. Skip queue resumption - process is terminating anyway due to fatal GPU exception
+    fprintf(stderr, "\n[Core Dump] ========== PHASE 5: Queue Resumption SKIPPED ==========\n");
+    fprintf(stderr, "[Core Dump] Not resuming queues - process terminating due to fatal exception\n");
+    fprintf(stderr, "[Core Dump] (Resumption would hang on faulted GPU hardware)\n");
 
     // ========================================================================
     // Package Runtime Data into PT_NOTE (Works in Both Cases)
@@ -579,6 +603,8 @@ struct NoteSegmentBuilder : public SegmentBuilder {
       PushInfo(queue_snapshots.data(), queue_snapshots.size() * sizeof(kfd_queue_snapshot_entry));
     }
 
+    fprintf(stderr, "\n[Core Dump] ========== PHASE 6: PT_NOTE Packaging ==========\n");
+    fprintf(stderr, "[Core Dump] All data pushed to note_package_builder successfully\n");
 
     /* With note content, package this in the PT_NOTE.  */
     PackageBuilder noteHeaderBuilder;
@@ -602,6 +628,8 @@ struct NoteSegmentBuilder : public SegmentBuilder {
     s.builder = this;
     segments.push_back(s);
 
+    fprintf(stderr, "[Core Dump] ========== NoteSegmentBuilder::Collect() COMPLETE ==========\n");
+    fprintf(stderr, "[Core Dump] Returning HSA_STATUS_SUCCESS - no errors detected\n");
 
     return HSA_STATUS_SUCCESS;
   }
@@ -1025,12 +1053,17 @@ hsa_status_t dump_gpu_core() {
   impl::LoadSegmentBuilder lbuilder;
   impl::SegmentsInfo segments;
 
+  fprintf(stderr, "\n[CALLER] About to call NoteSegmentBuilder::Collect()...\n");
   hsa_status_t status = nbuilder.Collect(segments);
+  fprintf(stderr, "[CALLER] NoteSegmentBuilder::Collect() returned with status=%d\n", status);
   if (status != HSA_STATUS_SUCCESS) return status;
 
+  fprintf(stderr, "[CALLER] About to call LoadSegmentBuilder::Collect()...\n");
   status = lbuilder.Collect(segments);
+  fprintf(stderr, "[CALLER] LoadSegmentBuilder::Collect() returned with status=%d\n", status);
   if (status != HSA_STATUS_SUCCESS) return status;
 
+  fprintf(stderr, "[CALLER] Both Collect() calls completed successfully - continuing to file write...\n");
 
   // Determine output pattern
   std::string pattern;
