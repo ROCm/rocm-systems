@@ -3,6 +3,7 @@
 
 #include "core/agent.hpp"
 #include "core/trace_cache/rocpd_helpers.hpp"
+#include <cstdint>
 
 #include <profiler-hub/reader.hpp>
 #include <profiler-hub/reader_types.hpp>

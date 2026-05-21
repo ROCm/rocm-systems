@@ -9,8 +9,8 @@ set(trace_cache_tests_sources
     test_enabled_formats.cpp
     test_flush_worker.cpp
     test_kfd_args.cpp
-    test_rocpd_xcp_output.cpp
     test_rocpd_processor.cpp
+    test_rocpd_xcp_output.cpp
     test_sample_type.cpp
     test_storage_parser.cpp
     test_type_registry.cpp

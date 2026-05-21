@@ -26,8 +26,8 @@ set(trace_cache_headers
     ${CMAKE_CURRENT_LIST_DIR}/rocpd_helpers.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rocpd_processor.hpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto_processor.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/post_processor.hpp
     ${CMAKE_CURRENT_LIST_DIR}/unified_memory_processor.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/post_processor.hpp
     ${CMAKE_CURRENT_LIST_DIR}/sample_processor.hpp
     ${CMAKE_CURRENT_LIST_DIR}/sample_type.hpp
     ${CMAKE_CURRENT_LIST_DIR}/storage_parser_alias.hpp

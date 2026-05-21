@@ -253,8 +253,11 @@ rocpd_processor_t::handle(const backtrace_region_sample& _bts)
     auto& n_info  = node_info::get_instance();
     auto  process = m_metadata->get_process_info();
 
-    auto ev    = make_event(0, 0, 0, _bts.category.c_str());
-    ev.extdata = _bts.extdata.c_str();
+    auto ev = make_event(0, 0, 0, _bts.category.c_str());
+    ev.call_stack.push_back({});
+    // call_stack and line_info are serialized JSON in the old code; in profiler-hub
+    // they are structured types. For now pass the raw JSON via extdata.
+    ev.extdata = _bts.call_stack.c_str();
 
     profiler_hub::writer_types::region_data_t region;
     region.event           = ev;
@@ -569,14 +572,13 @@ rocpd_processor_t::handle(
 {
     if(_gpu_perf_counter.entries.empty()) return;
 
-    const auto* _name            = "rocm_counter_collection";
-    auto        name_primary_key = m_data_processor->insert_string(_name);
-    auto        event_id = m_data_processor->insert_event(name_primary_key, 0, 0, 0);
+    const auto* _name        = "rocm_counter_collection";
+    const auto& process_info = m_metadata->get_process_info();
+    const auto& agent_ref    = m_agent_manager->get_agent_by_type_index(
+        _gpu_perf_counter.device_id, agent_type::GPU);
 
-    auto base_id =
-        m_agent_manager
-            ->get_agent_by_type_index(_gpu_perf_counter.device_id, agent_type::GPU)
-            .base_id;
+    const auto agent_uid = make_agent_uid(agent_ref);
+    auto       ev        = make_event(0, 0, 0, _name);
 
     for(const auto& entry : _gpu_perf_counter.entries)
     {
@@ -586,10 +588,25 @@ rocpd_processor_t::handle(
 
         const auto& info = name_info->get();
 
-        m_data_processor->insert_pmc_event(event_id, base_id, info.pmc_info_name.c_str(),
-                                           entry.value);
-        m_data_processor->insert_sample(info.track_name.c_str(),
-                                        _gpu_perf_counter.timestamp, event_id);
+        profiler_hub::writer_types::pmc_event_data_t pmc_data;
+        pmc_data.event = ev;
+        pmc_data.value = entry.value;
+
+        profiler_hub::writer_types::track_info_t track;
+        track.name       = info.track_name.c_str();
+        track.node_id    = node_info::get_instance().id;
+        track.process_id = process_info.pid;
+
+        profiler_hub::writer_types::sample_data_t sample;
+        sample.timestamp = _gpu_perf_counter.timestamp;
+        sample.track     = track;
+        pmc_data.sample  = sample;
+
+        profiler_hub::writer_types::pmc_info_unique_id_t pmc_uid;
+        pmc_uid.name     = info.pmc_info_name.c_str();
+        pmc_uid.agent_id = agent_uid;
+
+        m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
     }
 }
 
