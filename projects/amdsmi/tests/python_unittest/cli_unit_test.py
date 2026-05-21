@@ -30,24 +30,13 @@ import unittest
 import common
 import runcmd
 
-amdsmi_path = os.environ.get("AMDSMI_PATH") or os.path.join(
-    os.environ.get("ROCM_HOME") or os.environ.get("ROCM_PATH") or "/opt/rocm", "share/amd_smi"
-)
-if not os.path.exists(amdsmi_path):
-    raise FileNotFoundError(
-        f'amdsmi path "{amdsmi_path}" does not exist. '
-        "Set ROCM_HOME, ROCM_PATH, or AMDSMI_PATH to the correct install location."
-    )
-sys.path.insert(0, amdsmi_path)
-try:
-    import amdsmi
-except ImportError:
-    raise ImportError(f'Could not import the "amdsmi" module from "{amdsmi_path}"')
+# common.py owns path resolution, sys.path setup, and amdsmi loading — borrow the reference.
+from common import amdsmi
 
 # Module-level default; __main__ overwrites this with the actual parsed value.
 # It must exist at module scope so setUpClass/setUp can reference it before
 # __main__ runs (e.g. when loaded by an external test runner).
-verbose = 1
+verbose = common.VERBOSITY_NORMAL
 
 
 class TestAmdSmiCli(unittest.TestCase):

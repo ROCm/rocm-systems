@@ -19,7 +19,9 @@
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+import contextlib
 import inspect
+import io
 import json
 import os
 import pathlib
@@ -28,66 +30,72 @@ import sys
 import unittest
 
 
-def print_amdsmi_path_help(script=None, loaded_from=None, expected_path=None, file=sys.stdout):
-    """Print amdsmi path help and remediation steps.
+def _print_path_remediation(script, file):
+    """Print the shared 'fix with one of:' remediation block.
 
-    Without error context (script/loaded_from/expected_path), prints the env-var
-    table followed by the remediation list; used for -h output.
-    With error context, prints an ERROR header and appends a 'Refer to -h' footer;
-    used when the wrong amdsmi package was loaded at import time.
+    Used by both print_amdsmi_path_help() (-h context) and print_shadow_error()
+    (import-error context) to avoid duplicating the step list.
     """
-    _script = script or os.path.basename(sys.argv[0]) or "<script>"
-    if loaded_from is not None and expected_path is not None:
-        print(
-            f"ERROR: amdsmi loaded from '{loaded_from}' instead of AMDSMI_PATH='{expected_path}'.",
-            file=file,
-        )
-    else:
-        print("\nAdditional options:", file=file)
-        print("  -l, --list           List all available tests and exit", file=file)
-        print(file=file)
-        print("Environment variables:", file=file)
-        print(
-            "  AMDSMI_PATH   Path to amd_smi share dir (overrides ROCM_HOME/ROCM_PATH)", file=file
-        )
-        print("  ROCM_HOME     ROCm install root, used when AMDSMI_PATH is unset", file=file)
-        print("  ROCM_PATH     Fallback ROCm install root (default: /opt/rocm)", file=file)
-        print(file=file)
     print(
-        "A system-installed amdsmi package is shadowing the test target.\n"
-        "Fix with one of:\n"
         "\t 1. Run the tests from the installed amd-smi-lib-tests package location (RECOMMENDED):\n"
-        f"\t\t `sudo $ROCM_PATH/share/amd_smi/tests/python_unittest/{_script} -v`\n"
-        f"\t\t e.g. `sudo /opt/rocm/share/amd_smi/tests/python_unittest/{_script} -v`\n\n"
+        f"\t\t `sudo $ROCM_PATH/share/amd_smi/tests/python_unittest/{script} -v`\n"
+        f"\t\t e.g. `sudo /opt/rocm/share/amd_smi/tests/python_unittest/{script} -v`\n\n"
         "\t 2. Set AMDSMI_PATH to point at the correct build:\n"
         "\t\t `export AMDSMI_PATH=$ROCM_PATH/share/amd_smi`\n\n"
         "\t 3. Reinstall the correct amd-smi-lib package (removes the stale Python package too):\n"
         "\t\t `sudo apt remove amd-smi-lib && sudo apt install amd-smi-lib`\n"
-        "\t\t or, if amdsmi was installed directly via pip:\n"
+        "\t\t or, if amd-smi was installed directly via pip:\n"
         "\t\t `sudo pip uninstall amdsmi`",
         file=file,
     )
-    if loaded_from is not None:
-        print(f"\nRefer to `{_script} -h` for more details.", file=file)
-    else:
-        _full = "sudo " + (sys.argv[0] or _script)
-        _cmds = [
-            (_full + " -l", "list all available tests"),
-            (_full + " -v", "run all tests, verbose with print statements (RECOMMENDED)"),
-            (_full + ' -k "test_name" -v', "run only tests matching substring"),
-            (_full + " -q", "run all tests, quiet with no print statements"),
-        ]
-        _w = max(len(cmd) for cmd, _ in _cmds) + 2
-        print(file=file)
-        print("Examples:", file=file)
-        for cmd, desc in _cmds:
-            print(f"  {cmd:<{_w}} - {desc}", file=file)
 
 
-_rocm_root = os.environ.get("AMDSMI_PATH") or os.path.join(
+def print_amdsmi_path_help(file=sys.stdout):
+    """Print env-var documentation, path remediation guidance, and usage examples for -h output."""
+    _script = os.path.basename(sys.argv[0]) or "<script>"
+    print("\nAdditional options:", file=file)
+    print("  -l, --list           List all available tests and exit", file=file)
+    print(file=file)
+    print("Environment variables:", file=file)
+    print("  AMDSMI_PATH   Path to amd_smi share dir (overrides ROCM_HOME/ROCM_PATH)", file=file)
+    print("  ROCM_HOME     ROCm install root, used when AMDSMI_PATH is unset", file=file)
+    print("  ROCM_PATH     Fallback ROCm install root (default: /opt/rocm)", file=file)
+    print(file=file)
+    print("If amd-smi loads from the wrong path, fix with one of:", file=file)
+    _print_path_remediation(_script, file)
+    _full = "sudo " + (sys.argv[0] or _script)
+    _cmds = [
+        (_full + " -l", "list all available tests"),
+        (_full + " -v", "run all tests, verbose with print statements (RECOMMENDED)"),
+        (_full + ' -k "test_name" -v', "run only tests matching substring"),
+        (_full + " -q", "run all tests, quiet with no print statements"),
+    ]
+    _w = max(len(cmd) for cmd, _ in _cmds) + 2
+    print(file=file)
+    print("Examples:", file=file)
+    for cmd, desc in _cmds:
+        print(f"  {cmd:<{_w}} - {desc}", file=file)
+
+
+def print_shadow_error(script, loaded_from, expected_path, file=sys.stderr):
+    """Print an actionable error when amdsmi was loaded from the wrong path.
+
+    Prints an ERROR header identifying the unexpected source, the shadowing
+    diagnosis, the shared remediation steps, and a pointer to -h for more details.
+    """
+    print(
+        f"ERROR: amdsmi loaded from '{loaded_from}' instead of AMDSMI_PATH='{expected_path}'.",
+        file=file,
+    )
+    print("A system-installed amdsmi package is shadowing the test target.", file=file)
+    print("Fix with one of:", file=file)
+    _print_path_remediation(script, file)
+    print(f"\nRefer to `{script} -h` for more details.", file=file)
+
+
+amdsmi_path = os.environ.get("AMDSMI_PATH") or os.path.join(
     os.environ.get("ROCM_HOME") or os.environ.get("ROCM_PATH") or "/opt/rocm", "share/amd_smi"
 )
-amdsmi_path = _rocm_root
 if not os.path.exists(amdsmi_path):
     raise FileNotFoundError(
         f'amdsmi path "{amdsmi_path}" does not exist. '
@@ -104,15 +112,22 @@ except ImportError as e:
 # dist-packages is already on sys.path at interpreter startup; insert(0,...) above
 # prevents this, but error explicitly in case amdsmi was already cached in sys.modules.
 #
-# Example of how to proc this error output (for test purposes):
+# Example of how to trigger this error output (for test purposes):
 # sudo AMDSMI_PATH=/tmp /opt/rocm/share/amd_smi/tests/python_unittest/cli_unit_test.py -v
-_amdsmi_file = getattr(amdsmi, "__file__", "")
-if not os.path.abspath(_amdsmi_file).startswith(os.path.abspath(amdsmi_path)):
+_amdsmi_file = getattr(amdsmi, "__file__", None) or ""
+if not os.path.realpath(_amdsmi_file).startswith(os.path.realpath(amdsmi_path) + os.sep):
     _script = os.path.basename(sys.argv[0]) or "unit_tests.py"
-    print_amdsmi_path_help(
-        script=_script, loaded_from=_amdsmi_file, expected_path=amdsmi_path, file=sys.stderr
+    print_shadow_error(_script, _amdsmi_file, amdsmi_path)
+    # For direct test-script invocations use sys.exit so no Python traceback
+    # clutters the remediation output.  For anything else (pytest, IDE runners,
+    # ad-hoc imports) raise so the caller gets a clear error with location.
+    _known_scripts = ("unit_tests.py", "integration_test.py", "cli_unit_test.py")
+    _main_file = getattr(sys.modules.get("__main__"), "__file__", "") or ""
+    if os.path.basename(_main_file) in _known_scripts:
+        sys.exit(1)
+    raise RuntimeError(
+        f"amdsmi loaded from wrong path: '{_amdsmi_file}' (expected under '{amdsmi_path}')"
     )
-    sys.exit(1)
 
 #################################################
 # Module level functions, not part of the class #
@@ -167,13 +182,10 @@ def print_unittest_help():
     remove everything from the last 'Examples:' onward, and reprint — leaving
     our print_amdsmi_path_help() as the sole Examples section at the bottom.
     """
-    import contextlib
-    import io
-
     buf = io.StringIO()
     try:
         with contextlib.redirect_stdout(buf):
-            unittest.main()
+            unittest.main(argv=["", "--help"])
     except SystemExit:
         pass
     output = buf.getvalue()

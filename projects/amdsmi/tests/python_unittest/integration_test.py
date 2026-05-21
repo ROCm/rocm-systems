@@ -42,19 +42,8 @@ import common
 verbose = common.VERBOSITY_NORMAL
 
 
-amdsmi_path = os.environ.get("AMDSMI_PATH") or os.path.join(
-    os.environ.get("ROCM_HOME") or os.environ.get("ROCM_PATH") or "/opt/rocm", "share/amd_smi"
-)
-if not os.path.exists(amdsmi_path):
-    raise FileNotFoundError(
-        f'amdsmi path "{amdsmi_path}" does not exist. '
-        "Set ROCM_HOME, ROCM_PATH, or AMDSMI_PATH to the correct install location."
-    )
-sys.path.insert(0, amdsmi_path)
-try:
-    import amdsmi
-except ImportError as exc:
-    raise ImportError(f"Could not import {amdsmi_path}") from exc
+# common.py owns path resolution, sys.path setup, and amdsmi loading — borrow the reference.
+from common import amdsmi
 
 
 class TestAmdSmiInit(unittest.TestCase):
@@ -1562,15 +1551,6 @@ if __name__ == "__main__":
         common.print_tests(__name__)
         sys.exit(0)
 
-    # Only show the dot-character legend when not in verbose mode; in verbose
-    # mode each test prints its own result line so the dot legend is irrelevant.
-    if verbose < common.VERBOSITY_VERBOSE:
-        common.print_legend()
-
-    if verbose > common.VERBOSITY_QUIET:
-        print(f"AMD SMI Integration Tests\n")
-        print("Running tests...\n")
-
     # Detect if ran without sudo or root privileges
     if os.geteuid() != 0:
         print(
@@ -1579,6 +1559,15 @@ if __name__ == "__main__":
         )
         print("Please relaunch with elevated privileges.\n", file=sys.stderr)
         sys.exit(1)
+
+    # Only show the dot-character legend when not in verbose mode; in verbose
+    # mode each test prints its own result line so the dot legend is irrelevant.
+    if verbose < common.VERBOSITY_VERBOSE:
+        common.print_legend()
+
+    if verbose > common.VERBOSITY_QUIET:
+        print(f"AMD SMI Integration Tests\n")
+        print("Running tests...\n")
 
     # WARNING: Future developers! Please read. :)
     # Avoid per-test ASIC skipping because:
@@ -1615,7 +1604,9 @@ if __name__ == "__main__":
     #       self.assertEqual(e.get_error_code(), amdsmi.AmdSmiStatus.AMDSMI_STATUS_NOT_SUPPORTED)
     # ---------------------------------------------------------------------------
 
-    runner = unittest.TextTestRunner(verbosity=common.make_runner_verbosity(verbose))
+    runner = unittest.TextTestRunner(
+        stream=sys.stderr, verbosity=common.make_runner_verbosity(verbose)
+    )
 
     common.expand_glob_k_arg(globals())
     unittest.main(testRunner=runner)
