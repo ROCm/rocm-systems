@@ -82,6 +82,7 @@ ncclResult_t  ncclMemAlloc_impl(void **ptr, size_t size) {
     CUCHECK(cuMemAddressReserve((CUdeviceptr*)ptr, handleSize, memGran, 0, 0));
     /* Map the virtual address range to the physical allocation */
     CUCHECK(cuMemMap((CUdeviceptr)*ptr, handleSize, 0, handle, 0));
+
     /* Now allow RW access to the newly mapped memory */
     for (int i = 0; i < dcnt; ++i) {
       int p2p = 0;
@@ -462,6 +463,10 @@ ncclResult_t ncclShadowPoolToHost(struct ncclShadowPool* pool, void* devObj, voi
   if (devObj == nullptr) {
     *hostObj = nullptr;
     return ncclSuccess;
+  }
+
+  if (pool->hbits == 0 || pool->table == nullptr) {
+    return ncclInvalidArgument;
   }
 
   int b = hashBucket(pool->hbits, devObj);
