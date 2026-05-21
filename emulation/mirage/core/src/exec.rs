@@ -1,3 +1,7 @@
+use std::collections::BTreeMap;
+
+use serde::{Deserialize, Serialize};
+
 /// Concrete process arguments for one program invocation.
 ///
 /// Describes the program, its arguments, and any extra environment
