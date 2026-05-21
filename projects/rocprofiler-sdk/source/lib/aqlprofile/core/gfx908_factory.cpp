@@ -107,7 +107,6 @@ Mi100Factory::Mi100Factory(const AgentInfo* agent_info, bool is_base)
                 block_info->event_id_max = 87;
                 // ROCP_FATAL_IF disabled: se_per_xcc * instance_count may not match
                 // cu_block_delay_table_size on partitioned/SR-IOV topologies.
-#if 0
                 ROCP_FATAL_IF(!is_base && agent_info->se_per_xcc() * block_info->instance_count !=
                                               cu_block_delay_table_size)
                     << fmt::format("Mismatch in CU block delay table size. Expected {}, got {}. "
@@ -117,7 +116,6 @@ Mi100Factory::Mi100Factory(const AgentInfo* agent_info, bool is_base)
                                    agent_info->dev_index,
                                    agent_info->se_per_xcc(),
                                    block_info->instance_count);
-#endif
                 break;
             case TccCounterBlockId:
                 block_info->instance_count = 32;
