@@ -609,6 +609,8 @@ rsmi_status_t rsmi_dev_ecc_enabled_get(uint32_t dv_ind, uint64_t* enabled_blks) 
   ss << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ss);
 
+  if (enabled_blks == nullptr) return RSMI_STATUS_INVALID_ARGS;
+
   CHK_SUPPORT_NAME_ONLY(enabled_blks)
 
   DEVICE_MUTEX
@@ -662,6 +664,8 @@ rsmi_status_t rsmi_dev_ecc_status_get(uint32_t dv_ind, rsmi_gpu_block_t block,
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
 
+  if (state == nullptr) return RSMI_STATUS_INVALID_ARGS;
+
   CHK_SUPPORT_NAME_ONLY(state)
 
   if (!is_power_of_2(block)) {
@@ -710,6 +714,10 @@ rsmi_status_t rsmi_dev_ecc_count_get(uint32_t dv_ind, rsmi_gpu_block_t block,
 
   TRY ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
+
+  if (ec == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
 
   amd::smi::DevInfoTypes type;
   switch (block) {
@@ -767,10 +775,6 @@ rsmi_status_t rsmi_dev_ecc_count_get(uint32_t dv_ind, rsmi_gpu_block_t block,
        << " -> reporting " << amd::smi::getRSMIStatusString(ret);
     LOG_ERROR(ss);
     return ret;
-  }
-
-  if (ec == nullptr) {
-    return RSMI_STATUS_INVALID_ARGS;
   }
 
   std::string junk;
@@ -1122,6 +1126,7 @@ rsmi_status_t rsmi_dev_subsystem_id_get(uint32_t dv_ind, uint16_t* id) {
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
+  if (id == nullptr) return RSMI_STATUS_INVALID_ARGS;
   CHK_SUPPORT_NAME_ONLY(id)
   auto ret = get_id(dv_ind, amd::smi::kDevSubSysDevID, id);
   ss << __PRETTY_FUNCTION__ << " | ======= end ======="
@@ -1272,6 +1277,7 @@ rsmi_status_t rsmi_dev_overdrive_level_get(uint32_t dv_ind, uint32_t* od) {
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
+  if (od == nullptr) return RSMI_STATUS_INVALID_ARGS;
   CHK_SUPPORT_NAME_ONLY(od)
   DEVICE_MUTEX
 
@@ -1997,6 +2003,9 @@ static rsmi_status_t set_power_profile(uint32_t dv_ind, rsmi_power_profile_prese
 }
 
 static rsmi_status_t topo_get_numa_node_number(uint32_t dv_ind, uint32_t* numa_node_number) {
+  if (numa_node_number == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
   TRY
 
       GET_DEV_AND_KFDNODE_FROM_INDX
@@ -2909,9 +2918,7 @@ rsmi_status_t rsmi_dev_vram_vendor_get(uint32_t dv_ind, char* brand, uint32_t le
   LOG_TRACE(ss);
   CHK_SUPPORT_NAME_ONLY(brand)
 
-  if (len == 0) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
+  if (brand == nullptr || len == 0) return RSMI_STATUS_INVALID_ARGS;
   std::string val_str;
   DEVICE_MUTEX
   int ret = dev->readDevInfo(amd::smi::kDevVramVendor, &val_str);
@@ -2940,9 +2947,7 @@ rsmi_status_t rsmi_dev_subsystem_name_get(uint32_t dv_ind, char* name, size_t le
   LOG_TRACE(ss);
   CHK_SUPPORT_NAME_ONLY(name)
 
-  if (len == 0) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
+  if (name == nullptr || len == 0) return RSMI_STATUS_INVALID_ARGS;
 
   DEVICE_MUTEX
 
@@ -3557,6 +3562,7 @@ rsmi_status_t rsmi_dev_fan_speed_get(uint32_t dv_ind, uint32_t sensor_ind, int64
   TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
+  if (speed == nullptr) return RSMI_STATUS_INVALID_ARGS;
 
   rsmi_status_t ret;
 
@@ -3589,6 +3595,7 @@ rsmi_status_t rsmi_dev_fan_rpms_get(uint32_t dv_ind, uint32_t sensor_ind, int64_
   TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
+  if (speed == nullptr) return RSMI_STATUS_INVALID_ARGS;
 
   ++sensor_ind;  // fan sysfs files have 1-based indices
 
@@ -3719,6 +3726,7 @@ rsmi_status_t rsmi_dev_fan_speed_max_get(uint32_t dv_ind, uint32_t sensor_ind,
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
+  if (max_speed == nullptr) return RSMI_STATUS_INVALID_ARGS;
   ++sensor_ind;  // fan sysfs files have 1-based indices
   CHK_SUPPORT_SUBVAR_ONLY(max_speed, sensor_ind)
   DEVICE_MUTEX
@@ -4125,6 +4133,7 @@ rsmi_status_t rsmi_dev_power_profile_presets_get(uint32_t dv_ind, uint32_t reser
   TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
+  if (status == nullptr) return RSMI_STATUS_INVALID_ARGS;
 
   (void)reserved;
   CHK_SUPPORT_NAME_ONLY(status)
@@ -4901,6 +4910,7 @@ rsmi_status_t rsmi_dev_pci_replay_counter_get(uint32_t dv_ind, uint64_t* counter
   TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
+  if (counter == nullptr) return RSMI_STATUS_INVALID_ARGS;
   CHK_SUPPORT_NAME_ONLY(counter)
 
   rsmi_status_t ret;
