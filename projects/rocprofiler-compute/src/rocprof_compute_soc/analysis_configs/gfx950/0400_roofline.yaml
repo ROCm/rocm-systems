@@ -59,11 +59,11 @@ Panel Config:
           unit: GB/s
           peak: $HBMBw_empirical_peak
         L2 Cache Bandwidth:
-          value: SUM((TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum + TCP_TCC_READ_REQ_sum) * 64) / SUM(End_Timestamp - Start_Timestamp)
+          value: SUM((TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum + TCP_TCC_READ_REQ_sum) * 128) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
           peak: $L2Bw_empirical_peak
         L1 Cache Bandwidth:
-          value: SUM(TCP_TOTAL_CACHE_ACCESSES_sum * 64) / SUM(End_Timestamp - Start_Timestamp)
+          value: SUM(TCP_TOTAL_CACHE_ACCESSES_sum * 128) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
           peak: $L1Bw_empirical_peak
         LDS Bandwidth:
@@ -103,7 +103,7 @@ Panel Config:
             512) + (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F8
             * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F6F4 * 512) ) / SUM( (TCP_TCC_WRITE_REQ_sum
             + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum
-            + TCP_TCC_READ_REQ_sum) * 64 ) )
+            + TCP_TCC_READ_REQ_sum) * 128 ) )
           unit: FLOPs/Byte
         AI L1:
           value: ( SUM( ($wave_size * ( (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16
@@ -114,7 +114,7 @@ Panel Config:
             (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F32 *
             512) + (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F8
             * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F6F4 * 512) ) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum
-            * 64) )
+            * 128) )
           unit: FLOPs/Byte
         Performance (GFLOPs):
           value: ( SUM( ($wave_size * ( (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16
