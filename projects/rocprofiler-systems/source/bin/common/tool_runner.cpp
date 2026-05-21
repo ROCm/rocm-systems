@@ -95,6 +95,47 @@ getenv_string(std::string_view key, std::string_view default_value)
     return (val != nullptr) ? std::string{ val } : std::string{ default_value };
 }
 
+std::optional<std::string_view>
+lookup_env_value(const std::vector<std::string>& envs, std::string_view key)
+{
+    const auto prefix = std::string{ key } + "=";
+    for(auto itr = envs.rbegin(); itr != envs.rend(); ++itr)
+    {
+        if(itr->find(prefix) == 0) return std::string_view{ *itr }.substr(prefix.size());
+    }
+    return std::nullopt;
+}
+
+bool
+is_enabled_value(std::string_view value)
+{
+    return (value == "1" || value == "true" || value == "TRUE" || value == "ON" ||
+            value == "on" || value == "yes" || value == "YES");
+}
+
+bool
+spm_runtime_requested(const std::vector<std::string>& envs)
+{
+    if(auto events = lookup_env_value(envs, env::ROCM_SPM_EVENTS);
+       events && !events->empty())
+        return true;
+
+    if(auto enabled = lookup_env_value(envs, env::ROCM_SPM_ENABLED);
+       enabled && is_enabled_value(*enabled))
+        return true;
+
+    return false;
+}
+
+void
+validate_spm_runtime_request(const std::vector<std::string>& envs)
+{
+    if(!spm_runtime_requested(envs)) return;
+
+    throw std::runtime_error("SPM counter collection is configured, but Systems Profiler "
+                             "SPM runtime collection is not implemented in this build");
+}
+
 // All string_view fields point at static-storage data (string literals from the
 // make_*_config factories). Do not assign from temporaries.
 struct tool_config
@@ -473,6 +514,7 @@ tool_runner::apply_post_parse(parser_t& parser)
 
     rocprofsys::common_utils::run_post_parse_validation(config.tool_name, domain_state,
                                                         data.out.verbose);
+    validate_spm_runtime_request(data.env.current);
 
     return std::nullopt;
 }
@@ -536,6 +578,7 @@ try
     if(config.enable_launcher) prepare_command(argv[0]);
 
     prepare_environment();
+    validate_spm_runtime_request(data.env.current);
 
     if(data.out.command.empty())
     {
