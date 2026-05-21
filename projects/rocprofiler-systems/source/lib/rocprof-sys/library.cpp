@@ -547,6 +547,18 @@ rocprofsys_init_library_hidden()
     // configure the settings
     configure_settings();
 
+    // Disable Timemory console output for specified ranks
+    if(!config::output_filtering::is_log_output_enabled_for_current_mpi_rank())
+    {
+        auto* _settings = tim::settings::instance();
+        if(_settings)
+        {
+            _settings->cout_output() = false;
+            _settings->verbose()     = -1;
+            _settings->banner()      = false;
+        }
+    }
+
     auto _debug_value = get_debug();
     if(_debug_init) config::set_setting_value("ROCPROFSYS_DEBUG", true);
     scope::destructor _debug_dtor{ [_debug_value, _debug_init]() {
@@ -593,17 +605,17 @@ rocprofsys_init_tooling_hidden(void)
 
     if(_debug_init)
     {
-        LOG_DEBUG("Printing banner...");
-    }
-
-    print_banner();
-
-    if(_debug_init)
-    {
         LOG_DEBUG("Calling rocprofsys_init_library()...");
     }
 
     rocprofsys_init_library_hidden();
+
+    if(_debug_init)
+    {
+        LOG_DEBUG("Printing banner...");
+    }
+
+    print_banner();
 
     auto _dtor = scope::destructor{ []() {
         // if set to finalized, don't continue
@@ -1211,7 +1223,7 @@ rocprofsys_finalize_hidden(void)
             settings::default_process_suffix() = fmt::format("%pid%-{}", session_id++);
 
         // Disable Timemory file output for disabled ranks
-        if(!config::output_filtering::is_output_enabled_for_current_mpi_rank())
+        if(!config::output_filtering::is_file_output_enabled_for_current_mpi_rank())
         {
             auto* _settings = tim::settings::instance();
             if(_settings)
@@ -1251,7 +1263,10 @@ rocprofsys_finalize_hidden(void)
         }
     }
 
-    _output_registry.print_summary();
+    if(config::output_filtering::is_log_output_enabled_for_current_mpi_rank())
+    {
+        _output_registry.print_summary();
+    }
 
     categories::shutdown();
 
