@@ -9,7 +9,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 ### Added
 
 - **Added new alias for `amd-smi set -C/--compute-partition` as `amd-smi set --accelerator-partition`**.
-  - Compute an Acclerator partitions are fundamentally the same, so users can now use `--accelerator-partition` as an option to set the compute/accelerator partition.
+  - Compute and accelerator partitions are fundamentally the same, so users can now use `--accelerator-partition` to set the compute/accelerator partition.
 
 ## amd_smi_lib for ROCm 7.13.0
 
