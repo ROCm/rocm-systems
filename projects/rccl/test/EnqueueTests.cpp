@@ -163,7 +163,7 @@ struct EnqueueTestEnvironment
         // Initialize config
         memset(&comm->config, 0, sizeof(comm->config));
         comm->config.blocking = 1;
-        comm->checkPointers   = 0; // Disable pointer validation for easier testing
+        comm->checkMode = ncclCheckModeDefault; // Disable pointer validation for easier testing (was: comm->checkPointers = 0, removed in v2.29)
 
         // Initialize peer info arrays
         comm->peerInfo = new ncclPeerInfo[comm->nRanks];
@@ -453,7 +453,7 @@ TEST_F(EnqueueTests, ncclEnqueueCheck_InvalidBuffers)
                 env.setup();
 
                 // Test with null sendbuff
-                env.comm->checkPointers = 1;
+                env.comm->checkMode = ncclCheckModeDebugLocal; // was: env.comm->checkPointers = 1 (removed in v2.29)
                 env.info->sendbuff      = nullptr;
                 ncclResult_t result     = ncclEnqueueCheck(env.info);
                 EXPECT_EQ(result, ncclInvalidArgument);
