@@ -26,7 +26,7 @@ set(ROCPROFSYS_PROFILER_HUB_GIT_TAG
 )
 
 set(ROCPROFSYS_PROFILER_HUB_SOURCE_DIR
-    "${PROJECT_SOURCE_DIR}/../../../../../rocm-systems/profilers/profiler-hub"
+    "${PROJECT_SOURCE_DIR}/../../profilers/profiler-hub"
     CACHE PATH
     "Local path to profiler-hub source directory"
 )
