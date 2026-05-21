@@ -3,7 +3,7 @@
 !
 ! Combined OpenMP host example that runs two distinct phases in sequence:
 !   Phase 1: round-robin parallel loop
-!   Phase 2: parallel task with detach (Currently Disabled)
+!   Phase 2: parallel task with detach
 
 
 program host_combined
@@ -12,9 +12,7 @@ program host_combined
 
     call run_ordered_phase()
     print *, "----"
-    ! DISABLED until underlying SDK issue is fixed
-    ! (ROCP fatal occurs when early_fulfill arrives after task_complete, which should not be the case)
-    ! call run_task_detach_phase()
+    call run_task_detach_phase()
 
 contains
 
