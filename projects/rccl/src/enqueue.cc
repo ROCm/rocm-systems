@@ -1059,7 +1059,7 @@ static int rcclEffectiveP2pBatchEnable(struct ncclComm* comm) {
     //   CTS inactive → either RCCL_P2P_BATCH_ENABLE=1 or
     //                  RCCL_P2P_BATCH_FORCE_ENABLE=1 enables batching.
     bool ctsActive = rcclAINIC_P2pCtsActive();
-    bool enabled = rcclParamP2pBatchForceEnable() ||
+    bool enabled = (rcclParamP2pBatchForceEnable() > 0) ||
                    (!ctsActive && rcclParamP2pBatchEnable() > 0);
     INFO(NCCL_INIT, "RCCL P2P batching on AINIC: %s (P2P CTS %s)",
          enabled ? "enabled" : "disabled",
