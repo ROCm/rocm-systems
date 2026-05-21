@@ -410,9 +410,20 @@ include(Packages) # finds third-party libraries
 rocprofiler_systems_activate_clang_tidy()
 
 # custom visibility settings
-if(ROCPROFSYS_BUILD_HIDDEN_VISIBILITY)
-    set(CMAKE_C_VISIBILITY_PRESET "internal")
-    set(CMAKE_CXX_VISIBILITY_PRESET "internal")
+#
+# When building with a sanitizer we must use default (not hidden) visibility.
+# ASAN's instrumentation pass changes COMDAT symbol binding differently for
+# -fPIC (libraries → STB_WEAK) vs -fPIE (executables → STB_GLOBAL).  lld
+# rejects the mix, so both sides must produce STB_GLOBAL, which only happens
+# with -fvisibility=default.  Non-sanitizer builds keep hidden visibility for
+# a smaller .dynsym and to prevent unintended symbol export.
+#
+# Detect sanitizer via CMAKE_CXX_FLAGS: THEROCK_SANITIZER is a super-project
+# variable and is not forwarded into this ExternalProject scope.
+string(FIND "${CMAKE_CXX_FLAGS}" "-fsanitize" _rocprofsys_sanitizer_flag_pos)
+if(ROCPROFSYS_BUILD_HIDDEN_VISIBILITY AND _rocprofsys_sanitizer_flag_pos EQUAL -1)
+    set(CMAKE_C_VISIBILITY_PRESET "hidden")
+    set(CMAKE_CXX_VISIBILITY_PRESET "hidden")
     set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 endif()
 
