@@ -335,6 +335,9 @@ std::string
 get_sampling_gpus();
 
 std::string
+get_gpu_perf_counters();
+
+std::string
 get_sampling_ainics();
 
 bool
@@ -361,7 +364,10 @@ get_kill_delay();
 namespace output_filtering
 {
 bool
-is_output_enabled_for_current_mpi_rank();
+is_file_output_enabled_for_current_mpi_rank();
+
+bool
+is_log_output_enabled_for_current_mpi_rank();
 }  // namespace output_filtering
 
 std::string
