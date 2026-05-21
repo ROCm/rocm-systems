@@ -1005,8 +1005,7 @@ class TestArtifactSplitterIntegration:
         When a fat binary contains code objects for multiple architectures
         (e.g., gfx906 and gfx1100), only the architectures in gpu_targets
         should produce kpack artifacts. Without this filter, a cross-arch
-        build can produce spurious per-arch artifacts that overwrite correct
-        ones when uploaded to the same S3 prefix.
+        build can produce spurious per-arch kpack artifacts.
         """
         # Set up a fake prefix with a placeholder binary
         prefix = "math-libs/BLAS/rocSOLVER/stage"
