@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 
 from rocprof_compute_analyze.analysis_db import db_analysis
+from utils import schema
 from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
     get_noise_clamp_warnings,
@@ -16,7 +17,7 @@ from utils.metrics.noise_clamper import (
 
 
 def make_dual_issue_arch_config(metric_name: str, peak_col: str = "Peak"):
-    """Build an arch_config stub with a metric_table carrying one VALU row."""
+    """Build an arch_config with a metric_table carrying one VALU row."""
     metric_df = pd.DataFrame(
         {
             "Metric": [metric_name],
@@ -25,7 +26,7 @@ def make_dual_issue_arch_config(metric_name: str, peak_col: str = "Peak"):
         },
         index=pd.Index(["1.1"], name="Metric_ID"),
     )
-    arch_config = MagicMock()
+    arch_config = schema.ArchConfig()
     arch_config.dfs = {201: metric_df}
     arch_config.dfs_type = {201: "metric_table"}
     return arch_config
@@ -262,7 +263,7 @@ def test_calc_builtin_vars_processes_per_xcd_first():
     pmc_df = pd.DataFrame({
         "Counter1": [100, 200],
     })
-    sys_info = {"base_value": 10}
+    sys_info = {"base_value": 10, "gpu_arch": "gfx942"}
 
     # Mock BUILD_IN_VARS with dependency chain:
     # - PER_XCD_VAR: computed from base_value
@@ -272,7 +273,16 @@ def test_calc_builtin_vars_processes_per_xcd_first():
         "DERIVED_VAR": "$PER_XCD_VAR + 5",  # Depends on PER_XCD_VAR -> 25
     }
 
-    with patch("rocprof_compute_analyze.analysis_db.BUILD_IN_VARS", mock_builtin_vars):
+    with (
+        patch(
+            "rocprof_compute_analyze.analysis_db.mi_gpu_specs.get_gpu_series",
+            return_value="MI300",
+        ),
+        patch(
+            "rocprof_compute_analyze.analysis_db.get_build_in_vars",
+            return_value=mock_builtin_vars,
+        ),
+    ):
         result = db_analysis.calc_builtin_vars(pmc_df, sys_info)
 
     # Verify PER_XCD var was computed
@@ -290,7 +300,7 @@ def test_calc_builtin_vars_with_dataframe_expressions():
     pmc_df = pd.DataFrame({
         "Counter1": [10, 20, 30],
     })
-    sys_info = {"multiplier": 2}
+    sys_info = {"multiplier": 2, "gpu_arch": "gfx942"}
 
     # Use SUPPORTED_CALL function names (SUM -> to_sum via CodeTransformer)
     mock_builtin_vars = {
@@ -298,7 +308,16 @@ def test_calc_builtin_vars_with_dataframe_expressions():
         "SCALED_TOTAL": "$TOTAL_COUNT * $multiplier",  # 120
     }
 
-    with patch("rocprof_compute_analyze.analysis_db.BUILD_IN_VARS", mock_builtin_vars):
+    with (
+        patch(
+            "rocprof_compute_analyze.analysis_db.mi_gpu_specs.get_gpu_series",
+            return_value="MI300",
+        ),
+        patch(
+            "rocprof_compute_analyze.analysis_db.get_build_in_vars",
+            return_value=mock_builtin_vars,
+        ),
+    ):
         db_analysis.calc_builtin_vars(pmc_df, sys_info)
 
     assert sys_info["TOTAL_COUNT"] == 60
@@ -316,7 +335,7 @@ def test_calc_dataframe_expressions_applies_evaluate_to_rows():
         "Counter1": [10, 20, 30],
         "Counter2": [1, 2, 3],
     })
-    sys_info = {"scale": 100}
+    sys_info = {"scale": 100, "gpu_arch": "gfx942"}
 
     expression_df = pd.DataFrame({
         "metric_id": ["1.1", "1.2"],
@@ -327,7 +346,9 @@ def test_calc_dataframe_expressions_applies_evaluate_to_rows():
         ],
     })
 
-    with patch("rocprof_compute_analyze.analysis_db.BUILD_IN_VARS", {}):
+    with patch(
+        "rocprof_compute_analyze.analysis_db.get_build_in_vars", return_value={}
+    ):
         result = db_analysis.calc_dataframe_expressions(pmc_df, sys_info, expression_df)
 
     assert isinstance(result, pd.Series)
@@ -339,7 +360,7 @@ def test_calc_dataframe_expressions_applies_evaluate_to_rows():
 def test_calc_dataframe_expressions_with_builtin_vars():
     """Test that calc_dataframe_expressions calls calc_builtin_vars first."""
     pmc_df = pd.DataFrame({"Counter1": [10, 20, 30]})
-    sys_info = {"base": 5}
+    sys_info = {"base": 5, "gpu_arch": "gfx942"}
 
     # Expression references a builtin var that gets computed
     mock_builtin_vars = {
@@ -355,7 +376,16 @@ def test_calc_dataframe_expressions_with_builtin_vars():
         ],
     })
 
-    with patch("rocprof_compute_analyze.analysis_db.BUILD_IN_VARS", mock_builtin_vars):
+    with (
+        patch(
+            "rocprof_compute_analyze.analysis_db.mi_gpu_specs.get_gpu_series",
+            return_value="MI300",
+        ),
+        patch(
+            "rocprof_compute_analyze.analysis_db.get_build_in_vars",
+            return_value=mock_builtin_vars,
+        ),
+    ):
         result = db_analysis.calc_dataframe_expressions(pmc_df, sys_info, expression_df)
 
     assert result.iloc[0] == 51
@@ -444,7 +474,7 @@ def test_calc_expressions_noise_clamp():
     # calc_expressions per-workload bracket.
     clear_noise_clamp_warnings()
     with (
-        patch("rocprof_compute_analyze.analysis_db.BUILD_IN_VARS", {}),
+        patch("rocprof_compute_analyze.analysis_db.get_build_in_vars", return_value={}),
         patch(
             "rocprof_compute_analyze.analysis_db.console_warning"
         ) as console_warning_mock,

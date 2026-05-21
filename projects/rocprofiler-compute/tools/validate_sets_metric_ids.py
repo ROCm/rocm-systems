@@ -93,6 +93,22 @@ def load_perfmon_configs() -> dict[str, dict[str, int]]:
     return result
 
 
+def load_gpu_series_mapping() -> dict[str, str]:
+    """Return {gpu_arch: gpu_series} mapping from mi_gpu_spec.yaml."""
+    data = yaml.safe_load(GPU_SPEC_PATH.read_text())
+    result: dict[str, str] = {}
+    for series in data.get("mi_gpu_spec", []):
+        gpu_series = series.get("gpu_series")
+        if not gpu_series:
+            continue
+        for arch_entry in series.get("gpu_archs", []):
+            arch = arch_entry.get("gpu_arch")
+            if arch:
+                # Store uppercase to match mi_gpu_specs.get_gpu_series() behavior
+                result[arch] = gpu_series.upper()
+    return result
+
+
 def _flatten_formula_values(d: dict) -> str:
     """Recursively collect all string values from a metric formula dict."""
     parts: list[str] = []
@@ -113,9 +129,17 @@ def validate() -> list[str]:
     """Run all checks, return error messages."""
     errors: list[str] = []
     perfmon_configs = load_perfmon_configs()
+    gpu_series_map = load_gpu_series_mapping()
 
     for sets_path in sorted(SETS_DIR.glob("gfx*_sets.yaml")):
         arch = sets_path.stem.replace("_sets", "")
+        gpu_series = gpu_series_map.get(arch)
+        if not gpu_series:
+            errors.append(
+                f"[{arch}] arch missing from mi_gpu_spec.yaml; "
+                f"add it under mi_gpu_spec.<series>.gpu_archs"
+            )
+            continue
         sets_data = yaml.safe_load(sets_path.read_text())
 
         # Load analysis configs once per arch
@@ -188,7 +212,7 @@ def validate() -> list[str]:
             if not formula_texts or limits is None:
                 continue
 
-            counters = extract_counters("\n".join(formula_texts))
+            counters = extract_counters("\n".join(formula_texts), gpu_series)
             # *_ACCUM is the per-bucket alias for SQ_ACCUM_PREV_HIRES, which is
             # injected automatically by the profiler for level counters
             counters = {c for c in counters if not c.endswith("_ACCUM")}

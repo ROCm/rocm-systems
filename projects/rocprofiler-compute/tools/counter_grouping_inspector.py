@@ -48,7 +48,10 @@ from rocprof_compute_soc.soc_base import (  # noqa: E402
 )
 from utils.logger import console_error  # noqa: E402
 from utils.mi_gpu_spec import mi_gpu_specs  # noqa: E402
-from utils.utils_counter_defs import BUILD_IN_VARS, parse_counters_text  # noqa: E402
+from utils.utils_counter_defs import (  # noqa: E402
+    get_build_in_vars,
+    parse_counters_text,
+)
 from vendored import yaml  # noqa: E402
 
 
@@ -72,15 +75,21 @@ def _counters_grouped_by_ip_sorted(counters: list[str]) -> dict[str, list[str]]:
     return by_ip
 
 
-def parse_counters(config_text: str) -> set[str]:
-    """Extract all hardware counters from config text."""
+def parse_counters(config_text: str, gpu_series: str) -> set[str]:
+    """Extract all hardware counters from config text.
+
+    Args:
+        config_text: Metric formula text
+        gpu_series: GPU series for resolving built-in vars
+    """
     hw_counters, variables = parse_counters_text(config_text)
+    build_in_vars = get_build_in_vars(gpu_series)
 
     while variables:
         subvariables: set[str] = set()
         for var in variables:
-            if var in BUILD_IN_VARS:
-                hw_new, var_new = parse_counters_text(BUILD_IN_VARS[var])
+            if var in build_in_vars:
+                hw_new, var_new = parse_counters_text(build_in_vars[var])
                 hw_counters.update(hw_new)
                 subvariables.update(var_new)
         variables = subvariables - variables
@@ -322,11 +331,12 @@ def generate_bucket_metrics(
     single_rows: list[tuple[str, str, int, str, str]] = []
     total_metrics = 0
 
+    gpu_series = mi_gpu_specs.get_gpu_series(arch)
     for file_id, panel_id, metric_idx, metric_name, metric_yaml in iter_yaml_metrics(
         config_dir, arch
     ):
         total_metrics += 1
-        hardware_counters = parse_counters(metric_yaml)
+        hardware_counters = parse_counters(metric_yaml, gpu_series)
         buckets: set[str] = set()
         for formula_counter in hardware_counters:
             bucket_label = counter_to_bucket.get(formula_counter)

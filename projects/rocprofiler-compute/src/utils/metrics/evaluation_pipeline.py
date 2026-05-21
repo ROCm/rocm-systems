@@ -20,8 +20,9 @@ from utils.metrics.noise_clamper import (
     get_noise_clamp_warnings,
     print_noise_clamp_summary,
 )
+from utils.mi_gpu_spec import mi_gpu_specs
 from utils.utils_common import SUPPORTED_FIELD, calc_builtin_var
-from utils.utils_counter_defs import BUILD_IN_VARS
+from utils.utils_counter_defs import get_build_in_vars
 
 
 def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, float]:
@@ -101,14 +102,16 @@ def create_sys_vars(sys_info: pd.Series) -> dict[str, int | float]:
 def calc_builtin_vars(
     raw_pmc_df: pd.DataFrame,
     sys_vars: dict[str, int | float],
+    gpu_arch: str,
 ) -> dict[str, Optional[str | float | int]]:
     """Calculate built-in variables."""
     # TODO: fix all $normUnit in Unit column or title
     # build and eval all derived build-in global variables
     builtin_vars_collection = {}
+    build_in_vars = get_build_in_vars(mi_gpu_specs.get_gpu_series(gpu_arch))
 
     # First pass: calculate per-XCD values
-    for variable_key, variable_value in BUILD_IN_VARS.items():
+    for variable_key, variable_value in build_in_vars.items():
         if "PER_XCD" not in variable_key:
             continue
 
@@ -126,7 +129,7 @@ def calc_builtin_vars(
             builtin_vars_collection[f"ammolite__{variable_key}"] = np.nan
 
     # Second pass: calculate remaining variables that depend on per-XCD values
-    for variable_key, variable_value in BUILD_IN_VARS.items():
+    for variable_key, variable_value in build_in_vars.items():
         if "PER_XCD" in variable_key:
             continue
 
@@ -168,7 +171,7 @@ def eval_metric(
 
     sys_vars = create_sys_vars(sys_info)
     empirical_peaks = create_empirical_peaks_dict(empirical_peaks_df)
-    builtin_vars = calc_builtin_vars(raw_pmc_df, sys_vars)
+    builtin_vars = calc_builtin_vars(raw_pmc_df, sys_vars, sys_info["gpu_arch"])
     sys_vars.update(builtin_vars)
 
     # Clear any previous noise clamp warnings before this analysis

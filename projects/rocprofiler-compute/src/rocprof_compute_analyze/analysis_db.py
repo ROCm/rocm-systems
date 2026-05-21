@@ -45,6 +45,7 @@ from utils.metrics.noise_clamper import (
     print_noise_clamp_summary,
     to_noise_clamp,
 )
+from utils.mi_gpu_spec import mi_gpu_specs
 from utils.parser import (
     PC_SAMPLING_NOT_ISSUE_PREFIX,
 )
@@ -55,7 +56,7 @@ from utils.roofline_calc import (
     SUPPORTED_DATATYPES,
 )
 from utils.utils_common import get_uuid, get_version
-from utils.utils_counter_defs import BUILD_IN_VARS
+from utils.utils_counter_defs import get_build_in_vars
 
 
 class db_analysis(OmniAnalyze_Base):
@@ -572,15 +573,17 @@ class db_analysis(OmniAnalyze_Base):
 
     @staticmethod
     def calc_builtin_vars(pmc_df: pd.DataFrame, sys_info: dict) -> pd.DataFrame:
-        """Calculate built-in variables (numActiveCUs, kernelBusyCycles, etc.)"""
+        """Calculate arch-specific built-in variables (numActiveCUs, etc.)"""
+        gpu_series = mi_gpu_specs.get_gpu_series(sys_info["gpu_arch"])
+        build_in_vars = get_build_in_vars(gpu_series)
         # Calculate PER_XCD variables first
-        for key, value in BUILD_IN_VARS.items():
+        for key, value in build_in_vars.items():
             if "PER_XCD" in key:
                 sys_info[key] = db_analysis.evaluate(
                     key, value, pmc_df, sys_info, parse=True
                 )
         # Variable dependent on PER_XCD variables
-        for key, value in BUILD_IN_VARS.items():
+        for key, value in build_in_vars.items():
             if "PER_XCD" not in key:
                 sys_info[key] = db_analysis.evaluate(
                     key, value, pmc_df, sys_info, parse=True
