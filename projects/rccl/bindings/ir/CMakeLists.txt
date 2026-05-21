@@ -9,12 +9,12 @@
 # via:
 #     option(EMIT_LLVM_IR "Generate LLVM IR/bitcode for device APIs" OFF)
 #     if(EMIT_LLVM_IR)
-#       add_subdirectory(ir)
+#       add_subdirectory(bindings/ir)
 #       add_dependencies(llvm_ir copy_nccl_device_headers)
 #       add_custom_target(rccl_with_ir ALL DEPENDS rccl llvm_ir)
 #     endif()
 #
-# The output mirrors the standalone ir/Makefile:
+# The output mirrors the standalone bindings/ir/Makefile:
 #   ${CMAKE_BINARY_DIR}/lib/librccl_device.bc          (final clean bitcode)
 #   ${CMAKE_BINARY_DIR}/obj/llvm_ir/*.bc.{un,}optimized
 #   ${CMAKE_BINARY_DIR}/obj/llvm_ir/librccl_device.ll  (textual IR)
@@ -127,19 +127,47 @@ add_custom_command(
   OUTPUT ${UNOPTIMIZED_BC}
   COMMAND ${CMAKE_COMMAND} -E make_directory ${OBJDIR}
   COMMAND ${CLANG_EXECUTABLE} ${CLANG_FLAGS} ${LLVM_SRC} -o ${UNOPTIMIZED_BC}
-  DEPENDS ${LLVM_SRC}
+  # Track both the impl TU (clang's direct input) and the staged wrapper
+  # header it transitively includes. Without the WRAPPER_HEADER dep,
+  # editing nccl_device_wrapper.h would not retrigger this command.
+  DEPENDS ${LLVM_SRC} ${WRAPPER_HEADER}
   COMMENT "Generating unoptimized LLVM bitcode for ${BITCODE_LIB_ARCH}..."
   VERBATIM
 )
 
 ##### Step 2: opt -> optimized bitcode #####
-# Internalize anything outside the ncclXxx public surface, then inline
-# and drop dead globals. Same recipe as NCCL.
+# Internalize everything outside the public surface, then inline and drop
+# dead globals. NCCL's recipe uses "-internalize-public-api-list=nccl*",
+# but opt's `internalize` pass takes EXACT symbol names, not globs -- the
+# literal token "nccl*" matches no symbol, so every wrapper thunk gets
+# internalized and dropped to internal linkage. We list the public surface
+# explicitly instead; keep this set in sync with the NCCL_IR_EXTERN_C
+# entries in nccl_device_wrapper.h.
+set(RCCL_DEVICE_BC_PUBLIC_API
+    # [A] Always-on
+    ncclGetPeerPointerTeam
+    # [B] ncclCoopAny + LSA barrier session
+    ncclCoopAnyInitThread
+    ncclCoopAnyInitWarp
+    ncclCoopAnyInitLanes
+    ncclCoopAnyInitWarpSpan
+    ncclCoopAnyInitCta
+    ncclCoopThreadRank
+    ncclCoopSize
+    ncclCoopNumThreads
+    ncclCoopSync
+    ncclLsaBarrierSessionInit
+    ncclLsaBarrierSessionArrive
+    ncclLsaBarrierSessionWait
+    ncclLsaBarrierSessionSync
+)
+string(REPLACE ";" "," RCCL_DEVICE_BC_PUBLIC_API_CSV "${RCCL_DEVICE_BC_PUBLIC_API}")
+
 add_custom_command(
   OUTPUT ${OPTIMIZED_BC}
   COMMAND ${OPT_EXECUTABLE}
           --passes=internalize,inline,globaldce
-          -internalize-public-api-list=nccl*
+          -internalize-public-api-list=${RCCL_DEVICE_BC_PUBLIC_API_CSV}
           ${UNOPTIMIZED_BC} -o ${OPTIMIZED_BC}
   DEPENDS ${UNOPTIMIZED_BC}
   COMMENT "Optimizing LLVM bitcode (internalize/inline/globaldce)..."

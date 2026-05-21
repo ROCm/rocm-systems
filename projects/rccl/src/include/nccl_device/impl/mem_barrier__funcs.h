@@ -10,7 +10,7 @@
 #include "comm__types.h"
 #include <atomic>
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 template<typename Coop>
 NCCL_DEVICE_INLINE ncclLsaBarrierSession<Coop>::ncclLsaBarrierSession(
     Coop coop, ncclDevComm const& comm, ncclTeam team,
@@ -31,7 +31,7 @@ NCCL_DEVICE_INLINE ncclLsaBarrierSession<Coop>::ncclLsaBarrierSession(
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 template<typename Coop>
 NCCL_DEVICE_INLINE ncclLsaBarrierSession<Coop>::ncclLsaBarrierSession(
     Coop coop, ncclDevComm const& comm, ncclTeamTagLsa, uint32_t index, bool multimem
@@ -41,7 +41,7 @@ NCCL_DEVICE_INLINE ncclLsaBarrierSession<Coop>::ncclLsaBarrierSession(
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 template<typename Coop>
 NCCL_DEVICE_INLINE ncclLsaBarrierSession<Coop>::~ncclLsaBarrierSession() {
   uint32_t* state = (uint32_t*)ncclGetResourceBufferLocalPointer(this->comm, this->handle.bufHandle);
@@ -58,7 +58,7 @@ NCCL_DEVICE_INLINE ncclLsaBarrierSession<Coop>::~ncclLsaBarrierSession() {
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 #if __HIP_PLATFORM_AMD__
 template<typename Coop>
 NCCL_DEVICE_INLINE void ncclLsaBarrierSession<Coop>::arrive(Coop, std::memory_order order) {
@@ -109,7 +109,7 @@ NCCL_DEVICE_INLINE void ncclLsaBarrierSession<Coop>::arrive(Coop, cuda::memory_o
 #endif
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 #if __HIP_PLATFORM_AMD__
 template<typename Coop>
 NCCL_DEVICE_INLINE void ncclLsaBarrierSession<Coop>::wait(Coop, std::memory_order order) {
@@ -173,7 +173,7 @@ NCCL_DEVICE_INLINE void ncclLsaBarrierSession<Coop>::wait(Coop, cuda::memory_ord
 #endif
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 template<typename Coop>
 #if __HIP_PLATFORM_AMD__
 NCCL_DEVICE_INLINE void ncclLsaBarrierSession<Coop>::sync(Coop coop, std::memory_order order) {

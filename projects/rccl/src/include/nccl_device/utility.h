@@ -299,6 +299,33 @@ NCCL_HOST_DEVICE_INLINE constexpr cuda::memory_order releaseOrderOf(cuda::memory
 #endif
 
 #if NCCL_CHECK_CUDACC
+#if __HIP_PLATFORM_AMD__
+/* HIP/AMDGPU path. PTX inline asm ("%%laneid", "%%lanemask_lt") is not
+ * understood by the AMDGPU backend, so these need explicit HIP-native
+ * implementations.
+ *
+ * In the regular RCCL build these were quietly DCE'd from every HIP TU
+ * (no caller survives optimization), so the unported PTX never reached
+ * codegen. The bitcode artifact, however, retains every coop vtable
+ * (including ncclCoopLanes::thread_rank) so the AMDGPU backend now
+ * actually has to lower them. */
+NCCL_DEVICE_INLINE int lane() {
+  return __lane_id();
+}
+/* NOTE: upstream declares this as `unsigned int` (32 bits) which is
+ * the natural size on a CUDA 32-lane warp. On AMD wave64 this is too
+ * narrow to represent the full lower-lane mask for lanes >= 32. The
+ * only caller (ncclCoopLanes::thread_rank in coop.h) widens the return
+ * value to ncclCoopMask_t (uint64_t on AMD) immediately, so the high
+ * bits are zero — a real fix needs the return type widened on the
+ * AMD path. For now we mirror that and return a 32-bit value built
+ * from the lane id; this is correct for lane < 32 and conservative
+ * for lane >= 32 (popcount-on-mask there is undercounted). */
+NCCL_DEVICE_INLINE unsigned int lanemask_lt() {
+  const unsigned int lid = __lane_id();
+  return lid >= 32u ? 0xFFFFFFFFu : ((1u << lid) - 1u);
+}
+#else
 NCCL_DEVICE_INLINE int lane() {
   int ret;
   asm("mov.u32 %0, %%laneid;" : "=r"(ret));
@@ -309,6 +336,7 @@ NCCL_DEVICE_INLINE unsigned int lanemask_lt() {
   asm("mov.u32 %0, %%lanemask_lt;" : "=r"(ret));
   return ret;
 }
+#endif
 #endif
 
 #if NCCL_CHECK_CUDACC

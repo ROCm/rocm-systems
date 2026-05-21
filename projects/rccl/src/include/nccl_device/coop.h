@@ -25,7 +25,7 @@
   #define WARP_SIZE 32
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 #if __HIP_PLATFORM_AMD__
 using ncclCoopMask_t = uint64_t;
 static constexpr ncclCoopMask_t ncclCoopFullMask = ~0ull;
@@ -39,30 +39,16 @@ NCCL_DEVICE_INLINE int ncclCoopPopc(ncclCoopMask_t x) { return (int)__popc(x); }
 
 // ----------------------------------------------------------------------------
 // ncclCoopAny: type-erased polymorphic wrapper over the static coop types
-// (ncclCoopThread/Warp/Lanes/WarpSpan/Cta). Required by the LLVM IR / bitcode
-// build (ir/) so that extern "C" wrapper thunks can take a single concrete
-// parameter type and forward it to the templated session classes
+// (ncclCoopThread/Warp/Lanes/WarpSpan/Cta). Used by the LLVM IR / bitcode
+// build (bindings/ir/) so that extern "C" wrapper thunks can take a single
+// concrete parameter type and forward it to the templated session classes
 // (e.g. ncclLsaBarrierSession<ncclCoopAny>).
 //
-// Disabled by default because:
-//   - No regular RCCL kernel uses ncclCoopAny today (they use the static
-//     types directly for performance: indirect device function calls
-//     through the vtable are slower than direct inlined calls).
-//   - The ir/ wrapper headers that consume it are themselves gated on the
-//     same RCCL_ENABLE_NCCL_COOP_ANY switch.
-//
-// To enable: build with -DRCCL_ENABLE_NCCL_COOP_ANY=1. No other code in
-// RCCL needs to change. The static_asserts in get_vtable<Impl>() will fire
-// at compile time if a future RCCL coop type ever outgrows the 16-byte /
-// 8-byte-aligned Storage.
+// The static_asserts in get_vtable<Impl>() will fire at compile time if a
+// future RCCL coop type ever outgrows the 16-byte / 8-byte-aligned Storage.
 //
 // Source: NVIDIA NCCL v2.29.2-1 src/include/nccl_device/coop.h.
 // ----------------------------------------------------------------------------
-#ifndef RCCL_ENABLE_NCCL_COOP_ANY
-#define RCCL_ENABLE_NCCL_COOP_ANY 0
-#endif
-
-#if RCCL_ENABLE_NCCL_COOP_ANY  // default: disabled. Enable via -DRCCL_ENABLE_NCCL_COOP_ANY=1
 struct ncclCoopAny {
   struct Storage { alignas(alignof(void*)) char space[16]; };
   struct VTable {
@@ -110,9 +96,8 @@ struct ncclCoopAny {
   __device__ int  num_threads() const { return vtable->size(&storage); }
   __device__ void sync()              { vtable->sync(&storage); }
 };
-#endif  // RCCL_ENABLE_NCCL_COOP_ANY
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 template<int nThreadsPow2>
 struct ncclCoopTile { // An aligned pow2 set of threads within the warp.
   static_assert(nccl::utility::isPow2(nThreadsPow2) && nThreadsPow2 <= WARP_SIZE, "Condition required");
@@ -136,12 +121,12 @@ struct ncclCoopTile { // An aligned pow2 set of threads within the warp.
 };
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 typedef ncclCoopTile<1> ncclCoopThread;
 typedef ncclCoopTile<WARP_SIZE> ncclCoopWarp;
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 struct ncclCoopLanes { // Some lanes of this warp.
   ncclCoopMask_t lmask;
   
@@ -166,7 +151,7 @@ struct ncclCoopLanes { // Some lanes of this warp.
 };
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 // A set of consecutive warps that the user has also supplied with a unique
 // id from [0..15]. It is an error for two different warp spans with the same
 // id to be in a collective concurrently.
@@ -198,7 +183,7 @@ struct ncclCoopWarpSpan {
 };
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 struct ncclCoopCta {
   NCCL_DEVICE_INLINE int thread_rank() const { return threadIdx.x; }
   NCCL_DEVICE_INLINE int size() const { return blockDim.x; }
@@ -207,7 +192,7 @@ struct ncclCoopCta {
 };
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 template<int nThreadsPow2>
 NCCL_DEVICE_INLINE ncclCoopMask_t ncclCoopLaneMask(ncclCoopTile<nThreadsPow2> coop) {
   return coop.laneMask();
@@ -223,7 +208,7 @@ NCCL_DEVICE_INLINE ncclCoopMask_t ncclCoopLaneMask(ncclCoopCta coop) {
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 // ncclCoopIsThread:
 // At compile time do we know the given coop is a single thread only.
 template<int nThreads>
@@ -235,7 +220,7 @@ NCCL_DEVICE_INLINE constexpr bool ncclCoopIsThread(ncclCoopWarpSpan) { return fa
 NCCL_DEVICE_INLINE constexpr bool ncclCoopIsThread(ncclCoopCta) { return false; }
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 // Pick threads of our warp that are safe to use collectively.
 NCCL_DEVICE_INLINE ncclCoopLanes ncclCoopCoalesced() {
 #if ROCM_VERSION >= 70000
@@ -246,7 +231,7 @@ NCCL_DEVICE_INLINE ncclCoopLanes ncclCoopCoalesced() {
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 // Pick threads of our warp that are safe to use collectively given that this
 // is a collective on the provided cooperative group.
 template<typename Coop>

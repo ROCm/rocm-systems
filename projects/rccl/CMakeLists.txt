@@ -558,9 +558,9 @@ add_subdirectory(src)
 # The bitcode is generated from the hipify-staged headers that librccl.so itself
 # is compiled from, so the IR is guaranteed to match the host library.
 if(EMIT_LLVM_IR)
-  add_subdirectory(ir)
-  # ir/ reads headers out of ${PROJECT_BINARY_DIR}/hipify, which is populated by
-  # the copy_nccl_device_headers target defined in src/CMakeLists.txt.
+  add_subdirectory(bindings/ir)
+  # bindings/ir/ reads headers out of ${PROJECT_BINARY_DIR}/hipify, which is
+  # populated by the copy_nccl_device_headers target defined in src/CMakeLists.txt.
   add_dependencies(llvm_ir copy_nccl_device_headers)
   # Convenience aggregate target: builds librccl.so together with the bitcode.
   add_custom_target(rccl_with_ir ALL DEPENDS rccl llvm_ir)
