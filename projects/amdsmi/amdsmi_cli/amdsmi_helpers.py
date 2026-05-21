@@ -3133,8 +3133,8 @@ class AMDSMIHelpers:
                 requested_power_cap, AMDSMIHelpers.SI_Unit.BASE, AMDSMIHelpers.SI_Unit.MICRO
             )
             amdsmi_interface.amdsmi_set_power_cap(device_handle, power_type, new_power_cap)
+            msg = f"Successfully set {power_type_key} power cap to {requested_power_cap}W"
             if logger.is_json_format() or logger.is_csv_format():
-                msg = f"Successfully set {power_type_key} power cap to {requested_power_cap}W"
                 return {
                     "status": "success",
                     "sensor": power_type_key,

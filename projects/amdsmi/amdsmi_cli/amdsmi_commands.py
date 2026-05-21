@@ -8860,9 +8860,7 @@ class AMDSMICommands:
                 exc = None
                 try:
                     amdsmi_interface.amdsmi_set_gpu_fan_speed(args.gpu, 0, hw_value)
-                    result = (
-                        f"Successfully set fan speed to {hw_value} RPM/PWM ({fan_percentage}%)",
-                    )
+                    result = f"Successfully set fan speed to {hw_value} RPM/PWM ({fan_percentage}%)"
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError("Command requires elevation") from e

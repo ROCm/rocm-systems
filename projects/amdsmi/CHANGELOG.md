@@ -17,7 +17,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 ### Changed
 
 - **Changed CLI exit codes and reported error codes**.  
-  - CLI errors have error codes greater than 200 and less than 255
+  - CLI errors have error codes greater than 192 and less than 255
   - AMDSMI library errors have error codes from 0 to amdsmi_status_t
   - All errors return the error code that is reported to stderr
 
