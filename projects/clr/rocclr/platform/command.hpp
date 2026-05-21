@@ -282,9 +282,8 @@ union CopyMetadata {
     uint32_t isAsync_ : 1;
     uint32_t copyEnginePreference_ : 2;
     uint32_t srcAccessOrder_ : 2;       //!< Source access ordering for batch copies
-    uint32_t preferCE_ : 1;             //!< Prefer compute engine over SDMA
     uint32_t copyOpType_ : 3;           //!< Operation type (CopyOpType)
-    uint32_t reserved_ : 23;            //!< Reserved for future use
+    uint32_t reserved_ : 24;            //!< Reserved for future use
   };
   uint32_t flags_;
   CopyMetadata() : flags_(0) {}
@@ -292,7 +291,6 @@ union CopyMetadata {
       : isAsync_(isAsync),
         copyEnginePreference_(copyEnginePreference),
         srcAccessOrder_(kSrcAccessOrderStream),
-        preferCE_(0),
         copyOpType_(kCopyOpLinear),
         reserved_(0) {}
   CopyMetadata(bool isAsync, CopyEnginePreference copyEnginePreference,
@@ -300,7 +298,6 @@ union CopyMetadata {
       : isAsync_(isAsync),
         copyEnginePreference_(copyEnginePreference),
         srcAccessOrder_(srcAccessOrder),
-        preferCE_(0),
         copyOpType_(kCopyOpLinear),
         reserved_(0) {}
 };
