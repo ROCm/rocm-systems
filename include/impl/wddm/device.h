@@ -146,7 +146,7 @@ public:
   }
   uint32_t GetComputeEngine() { return shared_dev_->ComputeEngine(); }
 
-  uint64_t VramAvail();
+  ErrorCode VramAvail(uint64_t *avail);
 
   void GetClockCounters(uint64_t *gpu, uint64_t *cpu);
   uint32_t GetNumCpQueues() { return shared_dev_->NumCpQueues(); }
@@ -216,7 +216,8 @@ private:
   void InitCmdbufInfo(void);
 
   bool QuerySegmentInfo();
-  bool GetSegmentId(D3DKMT_QUERYSTATISTICS_SEGMENT_TYPE segment_type, uint32_t &segment_id);
+  bool GetSegmentId(D3DKMT_QUERYSTATISTICS_SEGMENT_TYPE segment_type,
+                    uint32_t &segment_id);
 
   D3DKMT_HANDLE adapter_;
   Device *shared_dev_ = nullptr;
@@ -230,7 +231,7 @@ private:
   uint32_t cmdbuf_aql_frame_size_;
   static const uint32_t cmdbuf_aql_frame_num_;
   uint32_t node_id_;
-  std::vector<struct SegmentInfo> segment_infos_;
+  std::vector<SegmentInfo> segment_infos_;
   //CmdUtil cmd_util;
 };
 
