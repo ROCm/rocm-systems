@@ -1,0 +1,37 @@
+# Goal: extend to all projects using a single root .pre-commit-config.yaml.
+# Currently only checks emulation/rocjitsu/ with its own config.
+name: "Pre-commit (rocjitsu)"
+
+on:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          sparse-checkout: emulation/rocjitsu
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install pre-commit
+
+      - name: Run pre-commit on changed rocjitsu files
+        run: |
+          MERGE_BASE=$(git merge-base ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})
+          FILES=$(git diff --name-only --diff-filter=ACMR "$MERGE_BASE" HEAD -- 'emulation/rocjitsu/')
+          if [ -z "$FILES" ]; then
+            echo "No rocjitsu files changed, skipping."
+            exit 0
+          fi
+          echo "Checking files:"
+          echo "$FILES"
+          pre-commit run --config emulation/rocjitsu/.pre-commit-config.yaml --files $FILES
