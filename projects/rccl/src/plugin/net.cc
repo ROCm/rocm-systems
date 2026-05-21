@@ -343,8 +343,10 @@ static void initPluginLibsOnceFunc() {
         netPluginLibs[pluginCounter].ncclGin = (ncclGin_t *)-1;
       else if (ncclParamGinType() == NCCL_NET_DEVICE_GIN_PROXY)
         netPluginLibs[pluginCounter].ncclGin = &ncclGinIbProxy;
+#if !defined(__HIP_PLATFORM_AMD__)
       else if (ncclParamGinType() == NCCL_NET_DEVICE_GIN_GDAKI)
         netPluginLibs[pluginCounter].ncclGin = &ncclGinIbGdaki;
+#endif
       netPluginLibs[pluginCounter].ncclNetPluginState = ncclNetPluginStateInitReady;
       netPluginLibs[pluginCounter].ncclGinPluginState = netPluginLibs[pluginCounter].ncclGin ? ncclNetPluginStateInitReady : ncclNetPluginStateLoadFailed;
       ++pluginCounter;
