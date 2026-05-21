@@ -4,8 +4,15 @@
 # SPDX-License-Identifier: MIT
 ###############################################################################
 
-# CTest-based functional test definitions
+# CTest-based functional test definitions with multi-dimensional label system
 # This replaces the shell-based driver.sh with native CTest integration
+#
+# Multi-Dimensional Label System:
+# 1. Category: RMA, PUT, GET, AMO, COLLECTIVE, STREAM, etc.
+# 2. CI Tiers: quick, standard, comprehensive, full
+# 3. Backend Compatibility: backend_all, backend_ipc, backend_gda, backend_ro
+# 4. GPU Architecture: gpu_all, gpu_gfx942, gpu_gfx90a, etc.
+# 5. Variants: variant_base, variant_uuid, variant_default_stream
 
 # Test number mappings (must match TestType enum in tester.hpp)
 set(TEST_get 0)
@@ -119,31 +126,358 @@ if(NOT MPIRUN_EXECUTABLE)
     return()
 endif()
 
-# Helper function to add a single functional test
-# Usage:
-#   add_rocshmem_functional_test(
-#     NAME <test_name>
-#     RANKS <num_ranks>
-#     WORKGROUPS <num_workgroups>
-#     THREADS <num_threads>
-#     [MAX_MSG_SIZE <size>]
-#     [VOLUME_SIZE <size>]  # For volume mode tests (heatmap)
-#     [LOCALBUFTYPE <type>]  # host, device, fine, uncached, managed
-#     [SUFFIX <suffix>]  # Optional suffix to distinguish tests with same params
-#     [ENV_VARS <var1> <var2> ...]
-#     [TIMEOUT <seconds>]
-#     [LABELS <label1> <label2> ...]
-#     [NO_VERIFY]  # Disable verification (for heatmap tests)
-#   )
+###############################################################################
+# Variant Definitions
+###############################################################################
+
+# Tier-level variants: Apply to ALL tests in specified tiers
+# Format: variant_name|tier_min|tier_max|env_var|label
+set(TIER_VARIANT_uuid "uuid|standard|full|ROCSHMEM_TEST_UUID=1|variant_uuid")
+
+# Test-specific variants: Apply only when explicitly requested
+# Format: variant_name|env_var|label
+set(TEST_VARIANT_default_stream "default_stream|ROCSHMEM_TEST_USE_DEFAULT_STREAM=1|variant_default_stream;STREAM")
+
+# List of all tier variant names (order matters)
+set(ALL_TIER_VARIANT_NAMES uuid)
+
+# List of all test-specific variant names
+set(ALL_TEST_VARIANT_NAMES default_stream)
+
+###############################################################################
+# Helper Functions for Multi-Dimensional Labels
+###############################################################################
+
+# Convert tier name to numeric level for comparison
+function(tier_to_level tier output_var)
+    if(tier STREQUAL "quick")
+        set(${output_var} 0 PARENT_SCOPE)
+    elseif(tier STREQUAL "standard")
+        set(${output_var} 1 PARENT_SCOPE)
+    elseif(tier STREQUAL "comprehensive")
+        set(${output_var} 2 PARENT_SCOPE)
+    elseif(tier STREQUAL "full")
+        set(${output_var} 3 PARENT_SCOPE)
+    else()
+        set(${output_var} 3 PARENT_SCOPE)  # Default to full
+    endif()
+endfunction()
+
+# Check if a tier falls within a range
+function(tier_in_range test_tier min_tier max_tier output_var)
+    tier_to_level("${test_tier}" test_level)
+    tier_to_level("${min_tier}" min_level)
+    tier_to_level("${max_tier}" max_level)
+
+    if(test_level GREATER_EQUAL min_level AND test_level LESS_EQUAL max_level)
+        set(${output_var} TRUE PARENT_SCOPE)
+    else()
+        set(${output_var} FALSE PARENT_SCOPE)
+    endif()
+endfunction()
+
+# Get tier-level variants applicable to a specific tier
+function(get_tier_variants tier output_var)
+    set(TIER_VARIANTS "")
+
+    foreach(variant_name ${ALL_TIER_VARIANT_NAMES})
+        # Parse variant config
+        string(REPLACE "|" ";" variant_config "${TIER_VARIANT_${variant_name}}")
+        list(GET variant_config 1 tier_min)
+        list(GET variant_config 2 tier_max)
+
+        # Check if this tier falls in the variant's range
+        tier_in_range("${tier}" "${tier_min}" "${tier_max}" applies)
+        if(applies)
+            list(APPEND TIER_VARIANTS ${variant_name})
+        endif()
+    endforeach()
+
+    set(${output_var} "${TIER_VARIANTS}" PARENT_SCOPE)
+endfunction()
+
+# Generate all combinations of tier and test variants
+function(generate_variant_combinations tier_variants test_variants output_var)
+    set(ALL_COMBINATIONS "")
+
+    # Always include base variant (no tier variants, no test variants)
+    list(APPEND ALL_COMBINATIONS "base")
+
+    # Add tier-only variants
+    foreach(tier_var ${tier_variants})
+        list(APPEND ALL_COMBINATIONS "${tier_var}")
+    endforeach()
+
+    # Add test-only variants
+    foreach(test_var ${test_variants})
+        list(APPEND ALL_COMBINATIONS "${test_var}")
+    endforeach()
+
+    # Add combinations of tier + test variants
+    foreach(tier_var ${tier_variants})
+        foreach(test_var ${test_variants})
+            list(APPEND ALL_COMBINATIONS "${tier_var}+${test_var}")
+        endforeach()
+    endforeach()
+
+    set(${output_var} "${ALL_COMBINATIONS}" PARENT_SCOPE)
+endfunction()
+
+# Parse a variant combination string and get env vars + labels + suffix
+function(parse_variant_combination combo tier_variants test_variants env_vars_var labels_var suffix_var)
+    set(ENV_VARS "")
+    set(LABELS "variant_base")
+    set(SUFFIX "")
+
+    if(combo STREQUAL "base")
+        set(${env_vars_var} "" PARENT_SCOPE)
+        set(${labels_var} "variant_base" PARENT_SCOPE)
+        set(${suffix_var} "" PARENT_SCOPE)
+        return()
+    endif()
+
+    # Split combination by '+'
+    string(REPLACE "+" ";" combo_parts "${combo}")
+
+    set(LABELS "")
+    set(suffix_parts "")
+
+    foreach(variant_part ${combo_parts})
+        # Check if it's a tier variant
+        list(FIND tier_variants "${variant_part}" tier_idx)
+        if(NOT tier_idx EQUAL -1)
+            string(REPLACE "|" ";" variant_config "${TIER_VARIANT_${variant_part}}")
+            list(GET variant_config 3 env_var)
+            list(GET variant_config 4 label)
+
+            if(env_var)
+                list(APPEND ENV_VARS "${env_var}")
+            endif()
+            if(label)
+                string(REPLACE ";" "," label_temp "${label}")
+                string(REPLACE "," ";" label_list "${label_temp}")
+                list(APPEND LABELS ${label_list})
+            endif()
+            list(APPEND suffix_parts "${variant_part}")
+        else()
+            # Check if it's a test variant
+            list(FIND test_variants "${variant_part}" test_idx)
+            if(NOT test_idx EQUAL -1)
+                string(REPLACE "|" ";" variant_config "${TEST_VARIANT_${variant_part}}")
+                list(GET variant_config 1 env_var)
+                list(GET variant_config 2 label)
+
+                if(env_var)
+                    list(APPEND ENV_VARS "${env_var}")
+                endif()
+                if(label)
+                    string(REPLACE ";" "," label_temp "${label}")
+                    string(REPLACE "," ";" label_list "${label_temp}")
+                    list(APPEND LABELS ${label_list})
+                endif()
+                list(APPEND suffix_parts "${variant_part}")
+            endif()
+        endif()
+    endforeach()
+
+    # Build suffix from parts
+    string(REPLACE ";" "_" SUFFIX "${suffix_parts}")
+
+    set(${env_vars_var} "${ENV_VARS}" PARENT_SCOPE)
+    set(${labels_var} "${LABELS}" PARENT_SCOPE)
+    set(${suffix_var} "${SUFFIX}" PARENT_SCOPE)
+endfunction()
+
+# Compute tier labels (propagate upwards)
+function(compute_tier_labels base_tier output_var)
+    if(base_tier STREQUAL "quick")
+        set(${output_var} "quick;standard;comprehensive;full" PARENT_SCOPE)
+    elseif(base_tier STREQUAL "standard")
+        set(${output_var} "standard;comprehensive;full" PARENT_SCOPE)
+    elseif(base_tier STREQUAL "comprehensive")
+        set(${output_var} "comprehensive;full" PARENT_SCOPE)
+    elseif(base_tier STREQUAL "full")
+        set(${output_var} "full" PARENT_SCOPE)
+    else()
+        set(${output_var} "full" PARENT_SCOPE)
+    endif()
+endfunction()
+
+# Compute backend labels
+function(compute_backend_labels backends output_var)
+    if(NOT backends OR backends STREQUAL "all")
+        set(${output_var} "backend_all" PARENT_SCOPE)
+    else()
+        set(BACKEND_LABELS "")
+        foreach(backend ${backends})
+            list(APPEND BACKEND_LABELS "backend_${backend}")
+        endforeach()
+        set(${output_var} "${BACKEND_LABELS}" PARENT_SCOPE)
+    endif()
+endfunction()
+
+# Compute GPU labels
+function(compute_gpu_labels gpus output_var)
+    if(NOT gpus OR gpus STREQUAL "all")
+        set(${output_var} "gpu_all" PARENT_SCOPE)
+    else()
+        set(GPU_LABELS "")
+        foreach(gpu ${gpus})
+            list(APPEND GPU_LABELS "gpu_${gpu}")
+        endforeach()
+        set(${output_var} "${GPU_LABELS}" PARENT_SCOPE)
+    endif()
+endfunction()
+
+###############################################################################
+# Group Context Management
+###############################################################################
+
+function(begin_test_group)
+    set(oneValueArgs CATEGORY TIER)
+    set(multiValueArgs BACKENDS GPUS EXTRA_LABELS)
+    cmake_parse_arguments(GROUP "" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+
+    # Parse CATEGORY into labels
+    set(CATEGORY_LABELS "")
+    if(DEFINED GROUP_CATEGORY)
+        string(REPLACE ";" "," TEMP "${GROUP_CATEGORY}")
+        string(REPLACE "," ";" CATEGORY_LABELS "${TEMP}")
+    endif()
+
+    # Combine category and extra labels
+    set(ALL_GROUP_LABELS ${CATEGORY_LABELS})
+    if(DEFINED GROUP_EXTRA_LABELS)
+        list(APPEND ALL_GROUP_LABELS ${GROUP_EXTRA_LABELS})
+    endif()
+
+    # Store in parent scope
+    set(CURRENT_GROUP_TIER "${GROUP_TIER}" PARENT_SCOPE)
+    set(CURRENT_GROUP_BACKENDS "${GROUP_BACKENDS}" PARENT_SCOPE)
+    set(CURRENT_GROUP_GPUS "${GROUP_GPUS}" PARENT_SCOPE)
+    set(CURRENT_GROUP_LABELS "${ALL_GROUP_LABELS}" PARENT_SCOPE)
+endfunction()
+
+function(end_test_group)
+    unset(CURRENT_GROUP_TIER PARENT_SCOPE)
+    unset(CURRENT_GROUP_BACKENDS PARENT_SCOPE)
+    unset(CURRENT_GROUP_GPUS PARENT_SCOPE)
+    unset(CURRENT_GROUP_LABELS PARENT_SCOPE)
+endfunction()
+
+###############################################################################
+# Main Test Registration Function with Automatic Variant Multiplication
+###############################################################################
+
 function(add_rocshmem_functional_test)
     set(options NO_VERIFY)
-    set(oneValueArgs NAME RANKS WORKGROUPS THREADS MAX_MSG_SIZE VOLUME_SIZE LOCALBUFTYPE TIMEOUT SUFFIX)
+    set(oneValueArgs NAME RANKS WORKGROUPS THREADS MAX_MSG_SIZE VOLUME_SIZE
+                     LOCALBUFTYPE TIMEOUT TIER)
+    set(multiValueArgs ENV_VARS EXTRA_LABELS BACKENDS GPUS TEST_VARIANTS)
+    cmake_parse_arguments(TEST "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+
+    # Use group defaults if not specified
+    if(NOT DEFINED TEST_TIER AND DEFINED CURRENT_GROUP_TIER)
+        set(TEST_TIER "${CURRENT_GROUP_TIER}")
+    endif()
+    if(NOT DEFINED TEST_BACKENDS AND DEFINED CURRENT_GROUP_BACKENDS)
+        set(TEST_BACKENDS "${CURRENT_GROUP_BACKENDS}")
+    endif()
+    if(NOT DEFINED TEST_GPUS AND DEFINED CURRENT_GROUP_GPUS)
+        set(TEST_GPUS "${CURRENT_GROUP_GPUS}")
+    endif()
+    if(NOT DEFINED TEST_EXTRA_LABELS AND DEFINED CURRENT_GROUP_LABELS)
+        set(TEST_EXTRA_LABELS "${CURRENT_GROUP_LABELS}")
+    endif()
+
+    # Set defaults
+    if(NOT DEFINED TEST_TIER)
+        set(TEST_TIER "full")
+    endif()
+    if(NOT DEFINED TEST_BACKENDS)
+        set(TEST_BACKENDS "all")
+    endif()
+    if(NOT DEFINED TEST_GPUS)
+        set(TEST_GPUS "all")
+    endif()
+
+    # Get tier-level variants
+    get_tier_variants("${TEST_TIER}" tier_variants)
+
+    # Get test-specific variants (if any)
+    if(DEFINED TEST_TEST_VARIANTS)
+        set(test_variants ${TEST_TEST_VARIANTS})
+    else()
+        set(test_variants "")
+    endif()
+
+    # Generate all variant combinations
+    generate_variant_combinations("${tier_variants}" "${test_variants}" variant_combinations)
+
+    # Create a CTest test for each variant combination
+    foreach(combo ${variant_combinations})
+        # Parse combination to get env vars and labels
+        parse_variant_combination(
+            "${combo}"
+            "${tier_variants}"
+            "${test_variants}"
+            variant_env_vars
+            variant_labels
+            variant_suffix
+        )
+
+        # Combine with test-specific env vars
+        set(combined_env_vars ${variant_env_vars})
+        if(DEFINED TEST_ENV_VARS)
+            list(APPEND combined_env_vars ${TEST_ENV_VARS})
+        endif()
+
+        # Build multi-dimensional labels
+        compute_tier_labels("${TEST_TIER}" TIER_LABELS)
+        compute_backend_labels("${TEST_BACKENDS}" BACKEND_LABELS)
+        compute_gpu_labels("${TEST_GPUS}" GPU_LABELS)
+
+        set(all_labels "functional")
+        list(APPEND all_labels ${TIER_LABELS})
+        list(APPEND all_labels ${BACKEND_LABELS})
+        list(APPEND all_labels ${GPU_LABELS})
+        list(APPEND all_labels ${variant_labels})
+        if(DEFINED TEST_EXTRA_LABELS)
+            list(APPEND all_labels ${TEST_EXTRA_LABELS})
+        endif()
+
+        # Call internal function to create actual CTest test
+        _add_single_rocshmem_test(
+            NAME ${TEST_NAME}
+            RANKS ${TEST_RANKS}
+            WORKGROUPS ${TEST_WORKGROUPS}
+            THREADS ${TEST_THREADS}
+            MAX_MSG_SIZE ${TEST_MAX_MSG_SIZE}
+            VOLUME_SIZE ${TEST_VOLUME_SIZE}
+            LOCALBUFTYPE ${TEST_LOCALBUFTYPE}
+            TIMEOUT ${TEST_TIMEOUT}
+            SUFFIX "${variant_suffix}"
+            ENV_VARS ${combined_env_vars}
+            LABELS "${all_labels}"
+            NO_VERIFY ${TEST_NO_VERIFY}
+        )
+    endforeach()
+endfunction()
+
+###############################################################################
+# Internal Function - Creates Single CTest Test
+###############################################################################
+
+function(_add_single_rocshmem_test)
+    set(options NO_VERIFY)
+    set(oneValueArgs NAME RANKS WORKGROUPS THREADS MAX_MSG_SIZE VOLUME_SIZE
+                     LOCALBUFTYPE TIMEOUT SUFFIX)
     set(multiValueArgs ENV_VARS LABELS)
     cmake_parse_arguments(TEST "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
     # Validate required arguments
     if(NOT DEFINED TEST_NAME OR NOT DEFINED TEST_RANKS OR NOT DEFINED TEST_WORKGROUPS OR NOT DEFINED TEST_THREADS)
-        message(FATAL_ERROR "add_rocshmem_functional_test: NAME, RANKS, WORKGROUPS, and THREADS are required")
+        message(FATAL_ERROR "_add_single_rocshmem_test: NAME, RANKS, WORKGROUPS, and THREADS are required")
     endif()
 
     # Get test number from mapping
@@ -155,7 +489,7 @@ function(add_rocshmem_functional_test)
     # Build test name following driver.sh convention
     set(FULL_TEST_NAME "${TEST_NAME}_n${TEST_RANKS}_w${TEST_WORKGROUPS}_z${TEST_THREADS}")
 
-    # Add size suffix if specified
+    # Add size suffix
     if(DEFINED TEST_MAX_MSG_SIZE)
         set(FULL_TEST_NAME "${FULL_TEST_NAME}_${TEST_MAX_MSG_SIZE}B")
     elseif(DEFINED TEST_VOLUME_SIZE)
@@ -167,36 +501,22 @@ function(add_rocshmem_functional_test)
         set(FULL_TEST_NAME "${FULL_TEST_NAME}_${TEST_LOCALBUFTYPE}")
     endif()
 
-    # Add custom suffix if specified (for tests with same params but different env)
-    if(DEFINED TEST_SUFFIX)
+    # Add variant suffix if specified
+    if(DEFINED TEST_SUFFIX AND NOT TEST_SUFFIX STREQUAL "")
         set(FULL_TEST_NAME "${FULL_TEST_NAME}_${TEST_SUFFIX}")
     endif()
 
-    # Default environment variables (matching driver.sh)
-    set(DEFAULT_ENV
-        "ROCSHMEM_MAX_NUM_CONTEXTS=${TEST_WORKGROUPS}"
-        "UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384"
-        "ROCSHMEM_HEAP_SIZE=6442450944"  # 6GB
-    )
+    # Environment variables for the test wrapper (NOT for MPI ranks)
+    set(DEFAULT_ENV)
 
-    # Add LOCALBUFTYPE if specified
-    if(DEFINED TEST_LOCALBUFTYPE)
-        list(APPEND DEFAULT_ENV "LOCALBUFTYPE=${TEST_LOCALBUFTYPE}")
-    endif()
+    # Set default log directory
+    set(DEFAULT_LOG_DIR "${CMAKE_CURRENT_BINARY_DIR}/test_logs")
+    list(APPEND DEFAULT_ENV "LOG_DIR=${DEFAULT_LOG_DIR}")
 
-    # Add log directory (can be overridden with ROCSHMEM_TEST_LOG_DIR env var)
-    # Default to build/test_logs
-    if(NOT DEFINED ENV{ROCSHMEM_TEST_LOG_DIR})
-        set(DEFAULT_LOG_DIR "${CMAKE_CURRENT_BINARY_DIR}/test_logs")
-    else()
-        set(DEFAULT_LOG_DIR "$ENV{ROCSHMEM_TEST_LOG_DIR}")
-    endif()
-    list(APPEND DEFAULT_ENV "ROCSHMEM_TEST_LOG_DIR=${DEFAULT_LOG_DIR}")
+    # Combine with user-specified env vars (for wrapper script)
+    set(ALL_ENV ${DEFAULT_ENV})
 
-    # Combine with user-specified env vars
-    set(ALL_ENV ${DEFAULT_ENV} ${TEST_ENV_VARS})
-
-    # Default timeout (matching driver.sh)
+    # Default timeout
     if(NOT DEFINED TEST_TIMEOUT)
         set(TEST_TIMEOUT 300)  # 5 minutes
     endif()
@@ -211,7 +531,24 @@ function(add_rocshmem_functional_test)
         -mca osc ucx
     )
 
-    # Add timeout if non-zero (0 = no timeout, for heatmap tests)
+    # Export environment variables to MPI ranks via -x flags
+    list(APPEND TEST_COMMAND
+        -x "ROCSHMEM_MAX_NUM_CONTEXTS=${TEST_WORKGROUPS}"
+        -x "UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384"
+        -x "ROCSHMEM_HEAP_SIZE=6442450944"
+    )
+
+    # Export LOCALBUFTYPE if specified
+    if(DEFINED TEST_LOCALBUFTYPE)
+        list(APPEND TEST_COMMAND -x "LOCALBUFTYPE=${TEST_LOCALBUFTYPE}")
+    endif()
+
+    # Export variant-specific and user-specified environment variables
+    foreach(ENV_VAR ${TEST_ENV_VARS})
+        list(APPEND TEST_COMMAND -x "${ENV_VAR}")
+    endforeach()
+
+    # Add timeout if non-zero
     if(TEST_TIMEOUT GREATER 0)
         list(APPEND TEST_COMMAND --timeout ${TEST_TIMEOUT})
     endif()
@@ -256,20 +593,13 @@ function(add_rocshmem_functional_test)
         COMMAND ${TEST_COMMAND}
     )
 
-    # Build labels list
-    set(ALL_LABELS "functional")
-    if(DEFINED TEST_LABELS)
-        list(APPEND ALL_LABELS ${TEST_LABELS})
-    endif()
-
-    # Set test properties directly (don't build as list variable to avoid expansion issues)
+    # Set test properties
     if(TEST_TIMEOUT GREATER 0)
-        # Normal tests with timeout
         set_tests_properties(${FULL_TEST_NAME} PROPERTIES
             ENVIRONMENT "${ALL_ENV}"
             TIMEOUT ${TEST_TIMEOUT}
             SKIP_RETURN_CODE 125
-            LABELS "${ALL_LABELS}"
+            LABELS "${TEST_LABELS}"
             PROCESSORS ${TEST_RANKS}
             WILL_FAIL FALSE
             FAIL_REGULAR_EXPRESSION "FAILED"
@@ -279,7 +609,7 @@ function(add_rocshmem_functional_test)
         set_tests_properties(${FULL_TEST_NAME} PROPERTIES
             ENVIRONMENT "${ALL_ENV}"
             SKIP_RETURN_CODE 125
-            LABELS "${ALL_LABELS}"
+            LABELS "${TEST_LABELS}"
             PROCESSORS ${TEST_RANKS}
             WILL_FAIL FALSE
             FAIL_REGULAR_EXPRESSION "FAILED"
@@ -288,371 +618,462 @@ function(add_rocshmem_functional_test)
 endfunction()
 
 ###############################################################################
-# Test Definitions (matching driver.sh test suites)
+# Test Definitions (using multi-dimensional label system)
 ###############################################################################
 
 # RMA Put Tests
 function(add_rma_put_tests)
-    add_rocshmem_functional_test(NAME put RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576 LABELS "RMA;PUT")
-    add_rocshmem_functional_test(NAME put RANKS 2 WORKGROUPS 1 THREADS 1024 MAX_MSG_SIZE 512 LABELS "RMA;PUT")
-    add_rocshmem_functional_test(NAME put RANKS 2 WORKGROUPS 8 THREADS 1 MAX_MSG_SIZE 1048576 LABELS "RMA;PUT")
-    add_rocshmem_functional_test(NAME put RANKS 2 WORKGROUPS 16 THREADS 128 MAX_MSG_SIZE 8 LABELS "RMA;PUT")
-    add_rocshmem_functional_test(NAME put RANKS 2 WORKGROUPS 32 THREADS 256 MAX_MSG_SIZE 512 LABELS "RMA;PUT")
-    add_rocshmem_functional_test(NAME put RANKS 2 WORKGROUPS 64 THREADS 1024 MAX_MSG_SIZE 8 LABELS "RMA;PUT")
+    # Quick tier PUT tests - all backends, all GPUs
+    begin_test_group(CATEGORY "RMA;PUT" TIER quick BACKENDS "all" GPUS "all")
+        add_rocshmem_functional_test(NAME put RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576)
+    end_test_group()
 
-    add_rocshmem_functional_test(NAME defaultctxput RANKS 2 WORKGROUPS 4 THREADS 128 MAX_MSG_SIZE 1024 LABELS "RMA;PUT;CTX")
-    add_rocshmem_functional_test(NAME teamctxput RANKS 2 WORKGROUPS 4 THREADS 128 MAX_MSG_SIZE 1024 LABELS "RMA;PUT;CTX;TEAM")
-    add_rocshmem_functional_test(NAME teamctxput RANKS 2 WORKGROUPS 16 THREADS 256 MAX_MSG_SIZE 1024 LABELS "RMA;PUT;CTX;TEAM")
+    # Standard tier PUT tests
+    begin_test_group(CATEGORY "RMA;PUT" TIER standard BACKENDS "all" GPUS "all")
+        add_rocshmem_functional_test(NAME put RANKS 2 WORKGROUPS 1 THREADS 1024 MAX_MSG_SIZE 512)
+        add_rocshmem_functional_test(NAME put RANKS 2 WORKGROUPS 8 THREADS 1 MAX_MSG_SIZE 1048576)
+    end_test_group()
 
-    add_rocshmem_functional_test(NAME wgput RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 1048576 LABELS "RMA;PUT;WG")
-    add_rocshmem_functional_test(NAME wgput RANKS 2 WORKGROUPS 2 THREADS 64 MAX_MSG_SIZE 1048576 LABELS "RMA;PUT;WG")
-    add_rocshmem_functional_test(NAME wgput RANKS 2 WORKGROUPS 16 THREADS 64 MAX_MSG_SIZE 8 LABELS "RMA;PUT;WG")
+    # Comprehensive tier PUT tests
+    begin_test_group(CATEGORY "RMA;PUT" TIER comprehensive BACKENDS "all" GPUS "all")
+        add_rocshmem_functional_test(NAME put RANKS 2 WORKGROUPS 16 THREADS 128 MAX_MSG_SIZE 8)
+        add_rocshmem_functional_test(NAME put RANKS 2 WORKGROUPS 32 THREADS 256 MAX_MSG_SIZE 512)
+    end_test_group()
 
-    add_rocshmem_functional_test(NAME waveput RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 1048576 LABELS "RMA;PUT;WAVE")
-    add_rocshmem_functional_test(NAME waveput RANKS 2 WORKGROUPS 2 THREADS 64 MAX_MSG_SIZE 1048576 LABELS "RMA;PUT;WAVE")
-    add_rocshmem_functional_test(NAME waveput RANKS 2 WORKGROUPS 2 THREADS 128 MAX_MSG_SIZE 1048576 LABELS "RMA;PUT;WAVE")
-    add_rocshmem_functional_test(NAME waveput RANKS 2 WORKGROUPS 16 THREADS 128 MAX_MSG_SIZE 8 LABELS "RMA;PUT;WAVE")
+    # Full tier PUT tests
+    begin_test_group(CATEGORY "RMA;PUT" TIER full BACKENDS "all" GPUS "all")
+        add_rocshmem_functional_test(NAME put RANKS 2 WORKGROUPS 64 THREADS 1024 MAX_MSG_SIZE 8)
+    end_test_group()
 
-    # Non-blocking
-    add_rocshmem_functional_test(NAME p RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 128 LABELS "RMA;PUT;NBI")
-    add_rocshmem_functional_test(NAME p RANKS 2 WORKGROUPS 1 THREADS 1024 MAX_MSG_SIZE 2 LABELS "RMA;PUT;NBI")
-    add_rocshmem_functional_test(NAME p RANKS 2 WORKGROUPS 8 THREADS 1 MAX_MSG_SIZE 32 LABELS "RMA;PUT;NBI")
-    add_rocshmem_functional_test(NAME p RANKS 2 WORKGROUPS 16 THREADS 128 MAX_MSG_SIZE 4 LABELS "RMA;PUT;NBI")
+    # Context PUT tests
+    begin_test_group(CATEGORY "RMA;PUT;CTX" TIER quick BACKENDS "all" GPUS "all")
+        add_rocshmem_functional_test(NAME defaultctxput RANKS 2 WORKGROUPS 4 THREADS 128 MAX_MSG_SIZE 1024)
+    end_test_group()
 
-    add_rocshmem_functional_test(NAME putnbi RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576 LABELS "RMA;PUT;NBI")
-    add_rocshmem_functional_test(NAME putnbi RANKS 2 WORKGROUPS 1 THREADS 1024 MAX_MSG_SIZE 512 LABELS "RMA;PUT;NBI")
-    add_rocshmem_functional_test(NAME putnbi RANKS 2 WORKGROUPS 8 THREADS 1 MAX_MSG_SIZE 1048576 LABELS "RMA;PUT;NBI")
-    add_rocshmem_functional_test(NAME putnbi RANKS 2 WORKGROUPS 16 THREADS 128 MAX_MSG_SIZE 8 LABELS "RMA;PUT;NBI")
-    add_rocshmem_functional_test(NAME putnbi RANKS 2 WORKGROUPS 32 THREADS 256 MAX_MSG_SIZE 512 LABELS "RMA;PUT;NBI")
-    add_rocshmem_functional_test(NAME putnbi RANKS 2 WORKGROUPS 64 THREADS 1024 MAX_MSG_SIZE 8 LABELS "RMA;PUT;NBI")
+    begin_test_group(CATEGORY "RMA;PUT;CTX;TEAM" TIER quick BACKENDS "all" GPUS "all")
+        add_rocshmem_functional_test(NAME teamctxput RANKS 2 WORKGROUPS 4 THREADS 128 MAX_MSG_SIZE 1024)
+    end_test_group()
 
-    add_rocshmem_functional_test(NAME defaultctxputnbi RANKS 2 WORKGROUPS 4 THREADS 128 MAX_MSG_SIZE 1024 LABELS "RMA;PUT;NBI;CTX")
-    add_rocshmem_functional_test(NAME teamctxputnbi RANKS 2 WORKGROUPS 4 THREADS 128 MAX_MSG_SIZE 1024 LABELS "RMA;PUT;NBI;CTX;TEAM")
-    add_rocshmem_functional_test(NAME teamctxputnbi RANKS 2 WORKGROUPS 16 THREADS 256 MAX_MSG_SIZE 1024 LABELS "RMA;PUT;NBI;CTX;TEAM")
+    begin_test_group(CATEGORY "RMA;PUT;CTX;TEAM" TIER standard BACKENDS "all" GPUS "all")
+        add_rocshmem_functional_test(NAME teamctxput RANKS 2 WORKGROUPS 16 THREADS 256 MAX_MSG_SIZE 1024)
+    end_test_group()
 
-    add_rocshmem_functional_test(NAME wgputnbi RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 1048576 LABELS "RMA;PUT;NBI;WG")
-    add_rocshmem_functional_test(NAME wgputnbi RANKS 2 WORKGROUPS 2 THREADS 64 MAX_MSG_SIZE 1048576 LABELS "RMA;PUT;NBI;WG")
-    add_rocshmem_functional_test(NAME wgputnbi RANKS 2 WORKGROUPS 16 THREADS 64 MAX_MSG_SIZE 8 LABELS "RMA;PUT;NBI;WG")
+    # Workgroup PUT tests
+    begin_test_group(CATEGORY "RMA;PUT;WG" TIER comprehensive BACKENDS "all" GPUS "all")
+        add_rocshmem_functional_test(NAME wgput RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME wgput RANKS 2 WORKGROUPS 2 THREADS 64 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME wgput RANKS 2 WORKGROUPS 16 THREADS 64 MAX_MSG_SIZE 8)
+    end_test_group()
 
-    add_rocshmem_functional_test(NAME waveputnbi RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 1048576 LABELS "RMA;PUT;NBI;WAVE")
-    add_rocshmem_functional_test(NAME waveputnbi RANKS 2 WORKGROUPS 2 THREADS 64 MAX_MSG_SIZE 1048576 LABELS "RMA;PUT;NBI;WAVE")
-    add_rocshmem_functional_test(NAME waveputnbi RANKS 2 WORKGROUPS 2 THREADS 128 MAX_MSG_SIZE 1048576 LABELS "RMA;PUT;NBI;WAVE")
-    add_rocshmem_functional_test(NAME waveputnbi RANKS 2 WORKGROUPS 16 THREADS 128 MAX_MSG_SIZE 8 LABELS "RMA;PUT;NBI;WAVE")
+    # Wave PUT tests
+    begin_test_group(CATEGORY "RMA;PUT;WAVE" TIER comprehensive BACKENDS "all" GPUS "all")
+        add_rocshmem_functional_test(NAME waveput RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME waveput RANKS 2 WORKGROUPS 2 THREADS 64 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME waveput RANKS 2 WORKGROUPS 2 THREADS 128 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME waveput RANKS 2 WORKGROUPS 16 THREADS 128 MAX_MSG_SIZE 8)
+    end_test_group()
+
+    # Non-blocking PUT tests
+    begin_test_group(CATEGORY "RMA;PUT;NBI" TIER comprehensive BACKENDS "all" GPUS "all")
+        add_rocshmem_functional_test(NAME p RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 128)
+        add_rocshmem_functional_test(NAME p RANKS 2 WORKGROUPS 1 THREADS 1024 MAX_MSG_SIZE 2)
+        add_rocshmem_functional_test(NAME p RANKS 2 WORKGROUPS 8 THREADS 1 MAX_MSG_SIZE 32)
+        add_rocshmem_functional_test(NAME p RANKS 2 WORKGROUPS 16 THREADS 128 MAX_MSG_SIZE 4)
+
+        add_rocshmem_functional_test(NAME putnbi RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME putnbi RANKS 2 WORKGROUPS 1 THREADS 1024 MAX_MSG_SIZE 512)
+        add_rocshmem_functional_test(NAME putnbi RANKS 2 WORKGROUPS 8 THREADS 1 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME putnbi RANKS 2 WORKGROUPS 16 THREADS 128 MAX_MSG_SIZE 8)
+        add_rocshmem_functional_test(NAME putnbi RANKS 2 WORKGROUPS 32 THREADS 256 MAX_MSG_SIZE 512)
+        add_rocshmem_functional_test(NAME putnbi RANKS 2 WORKGROUPS 64 THREADS 1024 MAX_MSG_SIZE 8)
+
+        add_rocshmem_functional_test(NAME defaultctxputnbi RANKS 2 WORKGROUPS 4 THREADS 128 MAX_MSG_SIZE 1024)
+        add_rocshmem_functional_test(NAME teamctxputnbi RANKS 2 WORKGROUPS 4 THREADS 128 MAX_MSG_SIZE 1024)
+        add_rocshmem_functional_test(NAME teamctxputnbi RANKS 2 WORKGROUPS 16 THREADS 256 MAX_MSG_SIZE 1024)
+
+        add_rocshmem_functional_test(NAME wgputnbi RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME wgputnbi RANKS 2 WORKGROUPS 2 THREADS 64 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME wgputnbi RANKS 2 WORKGROUPS 16 THREADS 64 MAX_MSG_SIZE 8)
+
+        add_rocshmem_functional_test(NAME waveputnbi RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME waveputnbi RANKS 2 WORKGROUPS 2 THREADS 64 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME waveputnbi RANKS 2 WORKGROUPS 2 THREADS 128 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME waveputnbi RANKS 2 WORKGROUPS 16 THREADS 128 MAX_MSG_SIZE 8)
+    end_test_group()
 endfunction()
 
-# RMA Get Tests
+# RMA Get Tests (don't work with RO backend - AIROCSHMEM-120)
 function(add_rma_get_tests)
-    add_rocshmem_functional_test(NAME get RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576 LABELS "RMA;GET")
-    add_rocshmem_functional_test(NAME get RANKS 2 WORKGROUPS 1 THREADS 1024 MAX_MSG_SIZE 512 LABELS "RMA;GET")
-    add_rocshmem_functional_test(NAME get RANKS 2 WORKGROUPS 8 THREADS 1 MAX_MSG_SIZE 1048576 LABELS "RMA;GET")
-    add_rocshmem_functional_test(NAME get RANKS 2 WORKGROUPS 16 THREADS 128 MAX_MSG_SIZE 8 LABELS "RMA;GET")
-    add_rocshmem_functional_test(NAME get RANKS 2 WORKGROUPS 32 THREADS 256 MAX_MSG_SIZE 512 LABELS "RMA;GET")
-    add_rocshmem_functional_test(NAME get RANKS 2 WORKGROUPS 64 THREADS 1024 MAX_MSG_SIZE 8 LABELS "RMA;GET")
+    # Quick tier GET tests - IPC and GDA only (not RO)
+    begin_test_group(CATEGORY "RMA;GET" TIER quick BACKENDS "ipc;gda" GPUS "all")
+        add_rocshmem_functional_test(NAME get RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576)
+    end_test_group()
 
-    add_rocshmem_functional_test(NAME defaultctxget RANKS 2 WORKGROUPS 4 THREADS 128 MAX_MSG_SIZE 1024 LABELS "RMA;GET;CTX")
-    add_rocshmem_functional_test(NAME teamctxget RANKS 2 WORKGROUPS 4 THREADS 128 MAX_MSG_SIZE 1024 LABELS "RMA;GET;CTX;TEAM")
-    add_rocshmem_functional_test(NAME teamctxget RANKS 2 WORKGROUPS 16 THREADS 256 MAX_MSG_SIZE 1024 LABELS "RMA;GET;CTX;TEAM")
+    # Standard tier GET tests
+    begin_test_group(CATEGORY "RMA;GET" TIER standard BACKENDS "ipc;gda" GPUS "all")
+        add_rocshmem_functional_test(NAME get RANKS 2 WORKGROUPS 1 THREADS 1024 MAX_MSG_SIZE 512)
+        add_rocshmem_functional_test(NAME get RANKS 2 WORKGROUPS 8 THREADS 1 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME get RANKS 2 WORKGROUPS 16 THREADS 128 MAX_MSG_SIZE 8)
+        add_rocshmem_functional_test(NAME get RANKS 2 WORKGROUPS 32 THREADS 256 MAX_MSG_SIZE 512)
+        add_rocshmem_functional_test(NAME get RANKS 2 WORKGROUPS 64 THREADS 1024 MAX_MSG_SIZE 8)
+    end_test_group()
 
-    add_rocshmem_functional_test(NAME wgget RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 1048576 LABELS "RMA;GET;WG")
-    add_rocshmem_functional_test(NAME wgget RANKS 2 WORKGROUPS 2 THREADS 64 MAX_MSG_SIZE 1048576 LABELS "RMA;GET;WG")
-    add_rocshmem_functional_test(NAME wgget RANKS 2 WORKGROUPS 16 THREADS 64 MAX_MSG_SIZE 8 LABELS "RMA;GET;WG")
+    # Context GET tests
+    begin_test_group(CATEGORY "RMA;GET;CTX" TIER quick BACKENDS "ipc;gda" GPUS "all")
+        add_rocshmem_functional_test(NAME defaultctxget RANKS 2 WORKGROUPS 4 THREADS 128 MAX_MSG_SIZE 1024)
+    end_test_group()
 
-    add_rocshmem_functional_test(NAME waveget RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 1048576 LABELS "RMA;GET;WAVE")
-    add_rocshmem_functional_test(NAME waveget RANKS 2 WORKGROUPS 2 THREADS 64 MAX_MSG_SIZE 1048576 LABELS "RMA;GET;WAVE")
-    add_rocshmem_functional_test(NAME waveget RANKS 2 WORKGROUPS 2 THREADS 128 MAX_MSG_SIZE 1048576 LABELS "RMA;GET;WAVE")
-    add_rocshmem_functional_test(NAME waveget RANKS 2 WORKGROUPS 16 THREADS 128 MAX_MSG_SIZE 8 LABELS "RMA;GET;WAVE")
+    begin_test_group(CATEGORY "RMA;GET;CTX;TEAM" TIER quick BACKENDS "ipc;gda" GPUS "all")
+        add_rocshmem_functional_test(NAME teamctxget RANKS 2 WORKGROUPS 4 THREADS 128 MAX_MSG_SIZE 1024)
+    end_test_group()
 
-    add_rocshmem_functional_test(NAME g RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 128 LABELS "RMA;GET;NBI")
-    add_rocshmem_functional_test(NAME g RANKS 2 WORKGROUPS 1 THREADS 1024 MAX_MSG_SIZE 1 LABELS "RMA;GET;NBI")
-    add_rocshmem_functional_test(NAME g RANKS 2 WORKGROUPS 8 THREADS 1 MAX_MSG_SIZE 32 LABELS "RMA;GET;NBI")
-    add_rocshmem_functional_test(NAME g RANKS 2 WORKGROUPS 16 THREADS 128 MAX_MSG_SIZE 4 LABELS "RMA;GET;NBI")
+    begin_test_group(CATEGORY "RMA;GET;CTX;TEAM" TIER standard BACKENDS "ipc;gda" GPUS "all")
+        add_rocshmem_functional_test(NAME teamctxget RANKS 2 WORKGROUPS 16 THREADS 256 MAX_MSG_SIZE 1024)
+    end_test_group()
 
-    # Non-blocking
-    add_rocshmem_functional_test(NAME getnbi RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576 LABELS "RMA;GET;NBI")
-    add_rocshmem_functional_test(NAME getnbi RANKS 2 WORKGROUPS 1 THREADS 1024 MAX_MSG_SIZE 512 LABELS "RMA;GET;NBI")
-    add_rocshmem_functional_test(NAME getnbi RANKS 2 WORKGROUPS 8 THREADS 1 MAX_MSG_SIZE 1048576 LABELS "RMA;GET;NBI")
-    add_rocshmem_functional_test(NAME getnbi RANKS 2 WORKGROUPS 16 THREADS 128 MAX_MSG_SIZE 8 LABELS "RMA;GET;NBI")
-    add_rocshmem_functional_test(NAME getnbi RANKS 2 WORKGROUPS 32 THREADS 256 MAX_MSG_SIZE 512 LABELS "RMA;GET;NBI")
-    add_rocshmem_functional_test(NAME getnbi RANKS 2 WORKGROUPS 64 THREADS 1024 MAX_MSG_SIZE 8 LABELS "RMA;GET;NBI")
+    # Workgroup GET tests
+    begin_test_group(CATEGORY "RMA;GET;WG" TIER comprehensive BACKENDS "ipc;gda" GPUS "all")
+        add_rocshmem_functional_test(NAME wgget RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME wgget RANKS 2 WORKGROUPS 2 THREADS 64 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME wgget RANKS 2 WORKGROUPS 16 THREADS 64 MAX_MSG_SIZE 8)
+    end_test_group()
 
-    add_rocshmem_functional_test(NAME defaultctxgetnbi RANKS 2 WORKGROUPS 4 THREADS 128 MAX_MSG_SIZE 1024 LABELS "RMA;GET;NBI;CTX")
-    add_rocshmem_functional_test(NAME teamctxgetnbi RANKS 2 WORKGROUPS 4 THREADS 128 MAX_MSG_SIZE 1024 LABELS "RMA;GET;NBI;CTX;TEAM")
-    add_rocshmem_functional_test(NAME teamctxgetnbi RANKS 2 WORKGROUPS 16 THREADS 256 MAX_MSG_SIZE 1024 LABELS "RMA;GET;NBI;CTX;TEAM")
+    # Wave GET tests
+    begin_test_group(CATEGORY "RMA;GET;WAVE" TIER comprehensive BACKENDS "ipc;gda" GPUS "all")
+        add_rocshmem_functional_test(NAME waveget RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME waveget RANKS 2 WORKGROUPS 2 THREADS 64 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME waveget RANKS 2 WORKGROUPS 2 THREADS 128 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME waveget RANKS 2 WORKGROUPS 16 THREADS 128 MAX_MSG_SIZE 8)
+    end_test_group()
 
-    add_rocshmem_functional_test(NAME wggetnbi RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 1048576 LABELS "RMA;GET;NBI;WG")
-    add_rocshmem_functional_test(NAME wggetnbi RANKS 2 WORKGROUPS 2 THREADS 64 MAX_MSG_SIZE 1048576 LABELS "RMA;GET;NBI;WG")
-    add_rocshmem_functional_test(NAME wggetnbi RANKS 2 WORKGROUPS 16 THREADS 64 MAX_MSG_SIZE 8 LABELS "RMA;GET;NBI;WG")
+    # Scalar g test - IPC only (not GDA - AIROCSHMEM-162, not RO - AIROCSHMEM-120)
+    begin_test_group(CATEGORY "RMA;GET;NBI" TIER comprehensive BACKENDS "ipc" GPUS "all")
+        add_rocshmem_functional_test(NAME g RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 128)
+        add_rocshmem_functional_test(NAME g RANKS 2 WORKGROUPS 1 THREADS 1024 MAX_MSG_SIZE 1)
+        add_rocshmem_functional_test(NAME g RANKS 2 WORKGROUPS 8 THREADS 1 MAX_MSG_SIZE 32)
+        add_rocshmem_functional_test(NAME g RANKS 2 WORKGROUPS 16 THREADS 128 MAX_MSG_SIZE 4)
+    end_test_group()
 
-    add_rocshmem_functional_test(NAME wavegetnbi RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 1048576 LABELS "RMA;GET;NBI;WAVE")
-    add_rocshmem_functional_test(NAME wavegetnbi RANKS 2 WORKGROUPS 2 THREADS 64 MAX_MSG_SIZE 1048576 LABELS "RMA;GET;NBI;WAVE")
-    add_rocshmem_functional_test(NAME wavegetnbi RANKS 2 WORKGROUPS 2 THREADS 128 MAX_MSG_SIZE 1048576 LABELS "RMA;GET;NBI;WAVE")
-    add_rocshmem_functional_test(NAME wavegetnbi RANKS 2 WORKGROUPS 16 THREADS 128 MAX_MSG_SIZE 8 LABELS "RMA;GET;NBI;WAVE")
+    # Non-blocking GET tests
+    begin_test_group(CATEGORY "RMA;GET;NBI" TIER comprehensive BACKENDS "ipc;gda" GPUS "all")
+        add_rocshmem_functional_test(NAME getnbi RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME getnbi RANKS 2 WORKGROUPS 1 THREADS 1024 MAX_MSG_SIZE 512)
+        add_rocshmem_functional_test(NAME getnbi RANKS 2 WORKGROUPS 8 THREADS 1 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME getnbi RANKS 2 WORKGROUPS 16 THREADS 128 MAX_MSG_SIZE 8)
+        add_rocshmem_functional_test(NAME getnbi RANKS 2 WORKGROUPS 32 THREADS 256 MAX_MSG_SIZE 512)
+        add_rocshmem_functional_test(NAME getnbi RANKS 2 WORKGROUPS 64 THREADS 1024 MAX_MSG_SIZE 8)
+
+        add_rocshmem_functional_test(NAME defaultctxgetnbi RANKS 2 WORKGROUPS 4 THREADS 128 MAX_MSG_SIZE 1024)
+        add_rocshmem_functional_test(NAME teamctxgetnbi RANKS 2 WORKGROUPS 4 THREADS 128 MAX_MSG_SIZE 1024)
+        add_rocshmem_functional_test(NAME teamctxgetnbi RANKS 2 WORKGROUPS 16 THREADS 256 MAX_MSG_SIZE 1024)
+
+        add_rocshmem_functional_test(NAME wggetnbi RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME wggetnbi RANKS 2 WORKGROUPS 2 THREADS 64 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME wggetnbi RANKS 2 WORKGROUPS 16 THREADS 64 MAX_MSG_SIZE 8)
+
+        add_rocshmem_functional_test(NAME wavegetnbi RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME wavegetnbi RANKS 2 WORKGROUPS 2 THREADS 64 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME wavegetnbi RANKS 2 WORKGROUPS 2 THREADS 128 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME wavegetnbi RANKS 2 WORKGROUPS 16 THREADS 128 MAX_MSG_SIZE 8)
+    end_test_group()
 endfunction()
 
 # AMO Tests
 function(add_amo_tests)
-    add_rocshmem_functional_test(NAME amo_add RANKS 2 WORKGROUPS 1 THREADS 1 LABELS "AMO")
-    add_rocshmem_functional_test(NAME amo_add RANKS 2 WORKGROUPS 1 THREADS 1024 LABELS "AMO")
-    add_rocshmem_functional_test(NAME amo_add RANKS 2 WORKGROUPS 8 THREADS 1 LABELS "AMO")
-    add_rocshmem_functional_test(NAME amo_add RANKS 2 WORKGROUPS 32 THREADS 128 LABELS "AMO")
+    # AMO add tests - don't work with RO backend (AIROCSHMEM-211)
+    begin_test_group(CATEGORY "AMO" TIER quick BACKENDS "ipc;gda" GPUS "all")
+        add_rocshmem_functional_test(NAME amo_add RANKS 2 WORKGROUPS 1 THREADS 1)
+    end_test_group()
 
-    add_rocshmem_functional_test(NAME amo_fadd RANKS 2 WORKGROUPS 1 THREADS 1 LABELS "AMO")
-    add_rocshmem_functional_test(NAME amo_fadd RANKS 2 WORKGROUPS 1 THREADS 1024 LABELS "AMO")
-    add_rocshmem_functional_test(NAME amo_fadd RANKS 2 WORKGROUPS 8 THREADS 1 LABELS "AMO")
-    add_rocshmem_functional_test(NAME amo_fadd RANKS 2 WORKGROUPS 32 THREADS 128 LABELS "AMO")
+    begin_test_group(CATEGORY "AMO" TIER standard BACKENDS "ipc;gda" GPUS "all")
+        add_rocshmem_functional_test(NAME amo_add RANKS 2 WORKGROUPS 1 THREADS 1024)
+        add_rocshmem_functional_test(NAME amo_add RANKS 2 WORKGROUPS 8 THREADS 1)
+        add_rocshmem_functional_test(NAME amo_add RANKS 2 WORKGROUPS 32 THREADS 128)
 
-    add_rocshmem_functional_test(NAME amo_inc RANKS 2 WORKGROUPS 1 THREADS 1 LABELS "AMO")
-    add_rocshmem_functional_test(NAME amo_inc RANKS 2 WORKGROUPS 1 THREADS 1024 LABELS "AMO")
-    add_rocshmem_functional_test(NAME amo_inc RANKS 2 WORKGROUPS 8 THREADS 1 LABELS "AMO")
-    add_rocshmem_functional_test(NAME amo_inc RANKS 2 WORKGROUPS 32 THREADS 128 LABELS "AMO")
+        add_rocshmem_functional_test(NAME amo_fadd RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME amo_fadd RANKS 2 WORKGROUPS 1 THREADS 1024)
+        add_rocshmem_functional_test(NAME amo_fadd RANKS 2 WORKGROUPS 8 THREADS 1)
+        add_rocshmem_functional_test(NAME amo_fadd RANKS 2 WORKGROUPS 32 THREADS 128)
 
-    add_rocshmem_functional_test(NAME amo_finc RANKS 2 WORKGROUPS 1 THREADS 1 LABELS "AMO")
-    add_rocshmem_functional_test(NAME amo_finc RANKS 2 WORKGROUPS 1 THREADS 1024 LABELS "AMO")
-    add_rocshmem_functional_test(NAME amo_finc RANKS 2 WORKGROUPS 8 THREADS 1 LABELS "AMO")
-    add_rocshmem_functional_test(NAME amo_finc RANKS 2 WORKGROUPS 32 THREADS 128 LABELS "AMO")
+        add_rocshmem_functional_test(NAME amo_inc RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME amo_inc RANKS 2 WORKGROUPS 1 THREADS 1024)
+        add_rocshmem_functional_test(NAME amo_inc RANKS 2 WORKGROUPS 8 THREADS 1)
+        add_rocshmem_functional_test(NAME amo_inc RANKS 2 WORKGROUPS 32 THREADS 128)
 
-    add_rocshmem_functional_test(NAME amo_set RANKS 2 WORKGROUPS 1 THREADS 1 LABELS "AMO")
-    add_rocshmem_functional_test(NAME amo_set RANKS 2 WORKGROUPS 8 THREADS 1 LABELS "AMO")
-    add_rocshmem_functional_test(NAME amo_set RANKS 2 WORKGROUPS 32 THREADS 1 LABELS "AMO")
+        add_rocshmem_functional_test(NAME amo_finc RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME amo_finc RANKS 2 WORKGROUPS 1 THREADS 1024)
+        add_rocshmem_functional_test(NAME amo_finc RANKS 2 WORKGROUPS 8 THREADS 1)
+        add_rocshmem_functional_test(NAME amo_finc RANKS 2 WORKGROUPS 32 THREADS 128)
+    end_test_group()
 
-    add_rocshmem_functional_test(NAME amo_fetch RANKS 2 WORKGROUPS 1 THREADS 1 LABELS "AMO")
-    add_rocshmem_functional_test(NAME amo_fetch RANKS 2 WORKGROUPS 1 THREADS 1024 LABELS "AMO")
-    add_rocshmem_functional_test(NAME amo_fetch RANKS 2 WORKGROUPS 8 THREADS 1 LABELS "AMO")
-    add_rocshmem_functional_test(NAME amo_fetch RANKS 2 WORKGROUPS 32 THREADS 128 LABELS "AMO")
+    # Other AMO tests - work with all backends
+    begin_test_group(CATEGORY "AMO" TIER standard BACKENDS "all" GPUS "all")
+        add_rocshmem_functional_test(NAME amo_set RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME amo_set RANKS 2 WORKGROUPS 8 THREADS 1)
+        add_rocshmem_functional_test(NAME amo_set RANKS 2 WORKGROUPS 32 THREADS 1)
 
-    add_rocshmem_functional_test(NAME amo_fcswap RANKS 2 WORKGROUPS 1 THREADS 1 LABELS "AMO")
-    add_rocshmem_functional_test(NAME amo_fcswap RANKS 2 WORKGROUPS 32 THREADS 1 LABELS "AMO")
-    add_rocshmem_functional_test(NAME amo_fcswap RANKS 2 WORKGROUPS 8 THREADS 1 LABELS "AMO")
+        add_rocshmem_functional_test(NAME amo_fetch RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME amo_fetch RANKS 2 WORKGROUPS 1 THREADS 1024)
+        add_rocshmem_functional_test(NAME amo_fetch RANKS 2 WORKGROUPS 8 THREADS 1)
+        add_rocshmem_functional_test(NAME amo_fetch RANKS 2 WORKGROUPS 32 THREADS 128)
 
-    add_rocshmem_functional_test(NAME amo_and RANKS 2 WORKGROUPS 1 THREADS 1 LABELS "AMO")
-    add_rocshmem_functional_test(NAME amo_fetchand RANKS 2 WORKGROUPS 1 THREADS 1 LABELS "AMO")
-    add_rocshmem_functional_test(NAME amo_xor RANKS 2 WORKGROUPS 1 THREADS 1 LABELS "AMO")
+        add_rocshmem_functional_test(NAME amo_fcswap RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME amo_fcswap RANKS 2 WORKGROUPS 32 THREADS 1)
+        add_rocshmem_functional_test(NAME amo_fcswap RANKS 2 WORKGROUPS 8 THREADS 1)
+
+        add_rocshmem_functional_test(NAME amo_and RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME amo_fetchand RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME amo_xor RANKS 2 WORKGROUPS 1 THREADS 1)
+    end_test_group()
 endfunction()
 
-# Signaling Operations Tests
+# Signal Operations
 function(add_sigops_tests)
-    add_rocshmem_functional_test(NAME putsignal RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576 LABELS "SIGOPS")
-    add_rocshmem_functional_test(NAME putsignal RANKS 2 WORKGROUPS 2 THREADS 32 MAX_MSG_SIZE 1048576 LABELS "SIGOPS")
-    add_rocshmem_functional_test(NAME wgputsignal RANKS 2 WORKGROUPS 2 THREADS 32 MAX_MSG_SIZE 1048576 LABELS "SIGOPS;WG")
-    add_rocshmem_functional_test(NAME waveputsignal RANKS 2 WORKGROUPS 1 THREADS 32 MAX_MSG_SIZE 1048576 LABELS "SIGOPS;WAVE")
-    add_rocshmem_functional_test(NAME waveputsignal RANKS 2 WORKGROUPS 2 THREADS 64 MAX_MSG_SIZE 1048576 LABELS "SIGOPS;WAVE")
+    begin_test_group(CATEGORY "SIGOPS" TIER standard BACKENDS "all" GPUS "all")
+        add_rocshmem_functional_test(NAME putsignal RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME putsignal RANKS 2 WORKGROUPS 2 THREADS 32 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME wgputsignal RANKS 2 WORKGROUPS 2 THREADS 32 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME waveputsignal RANKS 2 WORKGROUPS 1 THREADS 32 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME waveputsignal RANKS 2 WORKGROUPS 2 THREADS 64 MAX_MSG_SIZE 1048576)
 
-    add_rocshmem_functional_test(NAME putsignalnbi RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576 LABELS "SIGOPS;NBI")
-    add_rocshmem_functional_test(NAME putsignalnbi RANKS 2 WORKGROUPS 2 THREADS 32 MAX_MSG_SIZE 1048576 LABELS "SIGOPS;NBI")
-    add_rocshmem_functional_test(NAME wgputsignalnbi RANKS 2 WORKGROUPS 2 THREADS 32 MAX_MSG_SIZE 1048576 LABELS "SIGOPS;NBI;WG")
-    add_rocshmem_functional_test(NAME waveputsignalnbi RANKS 2 WORKGROUPS 1 THREADS 32 MAX_MSG_SIZE 1048576 LABELS "SIGOPS;NBI;WAVE")
-    add_rocshmem_functional_test(NAME waveputsignalnbi RANKS 2 WORKGROUPS 2 THREADS 64 MAX_MSG_SIZE 1048576 LABELS "SIGOPS;NBI;WAVE")
+        add_rocshmem_functional_test(NAME putsignalnbi RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME putsignalnbi RANKS 2 WORKGROUPS 2 THREADS 32 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME wgputsignalnbi RANKS 2 WORKGROUPS 2 THREADS 32 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME waveputsignalnbi RANKS 2 WORKGROUPS 1 THREADS 32 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME waveputsignalnbi RANKS 2 WORKGROUPS 2 THREADS 64 MAX_MSG_SIZE 1048576)
 
-    add_rocshmem_functional_test(NAME signalfetch RANKS 2 WORKGROUPS 1 THREADS 1 LABELS "SIGOPS")
-    add_rocshmem_functional_test(NAME wgsignalfetch RANKS 2 WORKGROUPS 2 THREADS 32 LABELS "SIGOPS;WG")
-    add_rocshmem_functional_test(NAME wavesignalfetch RANKS 2 WORKGROUPS 1 THREADS 32 LABELS "SIGOPS;WAVE")
-    add_rocshmem_functional_test(NAME wavesignalfetch RANKS 2 WORKGROUPS 1 THREADS 64 LABELS "SIGOPS;WAVE")
+        add_rocshmem_functional_test(NAME signalfetch RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME wgsignalfetch RANKS 2 WORKGROUPS 2 THREADS 32)
+        add_rocshmem_functional_test(NAME wavesignalfetch RANKS 2 WORKGROUPS 1 THREADS 32)
+        add_rocshmem_functional_test(NAME wavesignalfetch RANKS 2 WORKGROUPS 1 THREADS 64)
+    end_test_group()
 endfunction()
 
-# Collective Tests
-function(add_collective_tests)
-    add_rocshmem_functional_test(NAME syncall RANKS 2 WORKGROUPS 1 THREADS 1 LABELS "COLLECTIVE;SYNC")
-    add_rocshmem_functional_test(NAME wavesyncall RANKS 2 WORKGROUPS 1 THREADS 1 LABELS "COLLECTIVE;SYNC;WAVE")
-    add_rocshmem_functional_test(NAME wgsyncall RANKS 2 WORKGROUPS 1 THREADS 1 LABELS "COLLECTIVE;SYNC;WG")
+# Collective Operations
+function(add_coll_tests)
+    begin_test_group(CATEGORY "COLLECTIVE" TIER quick BACKENDS "all" GPUS "all")
+        add_rocshmem_functional_test(NAME init RANKS 2 WORKGROUPS 1 THREADS 1)
+    end_test_group()
 
-    add_rocshmem_functional_test(NAME teamsync RANKS 2 WORKGROUPS 1 THREADS 1 LABELS "COLLECTIVE;SYNC;TEAM")
-    add_rocshmem_functional_test(NAME teamsync RANKS 2 WORKGROUPS 16 THREADS 64 LABELS "COLLECTIVE;SYNC;TEAM")
-    add_rocshmem_functional_test(NAME teamsync RANKS 2 WORKGROUPS 32 THREADS 256 LABELS "COLLECTIVE;SYNC;TEAM")
-    add_rocshmem_functional_test(NAME teamsync RANKS 2 WORKGROUPS 39 THREADS 1024 LABELS "COLLECTIVE;SYNC;TEAM")
+    begin_test_group(CATEGORY "COLLECTIVE;SYNC" TIER standard BACKENDS "all" GPUS "all")
+        add_rocshmem_functional_test(NAME syncall RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME wavesyncall RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME wgsyncall RANKS 2 WORKGROUPS 1 THREADS 1)
 
-    add_rocshmem_functional_test(NAME teamwavesync RANKS 2 WORKGROUPS 1 THREADS 1 LABELS "COLLECTIVE;SYNC;TEAM;WAVE")
-    add_rocshmem_functional_test(NAME teamwavesync RANKS 2 WORKGROUPS 16 THREADS 64 LABELS "COLLECTIVE;SYNC;TEAM;WAVE")
-    add_rocshmem_functional_test(NAME teamwavesync RANKS 2 WORKGROUPS 32 THREADS 256 LABELS "COLLECTIVE;SYNC;TEAM;WAVE")
-    add_rocshmem_functional_test(NAME teamwavesync RANKS 2 WORKGROUPS 39 THREADS 1024 LABELS "COLLECTIVE;SYNC;TEAM;WAVE")
+        add_rocshmem_functional_test(NAME teamsync RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME teamsync RANKS 2 WORKGROUPS 16 THREADS 64)
+        add_rocshmem_functional_test(NAME teamsync RANKS 2 WORKGROUPS 32 THREADS 256)
+        add_rocshmem_functional_test(NAME teamsync RANKS 2 WORKGROUPS 39 THREADS 1024)
 
-    add_rocshmem_functional_test(NAME teamwgsync RANKS 2 WORKGROUPS 1 THREADS 1 LABELS "COLLECTIVE;SYNC;TEAM;WG")
-    add_rocshmem_functional_test(NAME teamwgsync RANKS 2 WORKGROUPS 16 THREADS 64 LABELS "COLLECTIVE;SYNC;TEAM;WG")
-    add_rocshmem_functional_test(NAME teamwgsync RANKS 2 WORKGROUPS 32 THREADS 256 LABELS "COLLECTIVE;SYNC;TEAM;WG")
-    add_rocshmem_functional_test(NAME teamwgsync RANKS 2 WORKGROUPS 39 THREADS 1024 LABELS "COLLECTIVE;SYNC;TEAM;WG")
+        add_rocshmem_functional_test(NAME teamwavesync RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME teamwavesync RANKS 2 WORKGROUPS 16 THREADS 64)
+        add_rocshmem_functional_test(NAME teamwavesync RANKS 2 WORKGROUPS 32 THREADS 256)
+        add_rocshmem_functional_test(NAME teamwavesync RANKS 2 WORKGROUPS 39 THREADS 1024)
 
-    add_rocshmem_functional_test(NAME barrierall RANKS 2 WORKGROUPS 1 THREADS 1 LABELS "COLLECTIVE;BARRIER")
-    add_rocshmem_functional_test(NAME wavebarrierall RANKS 2 WORKGROUPS 1 THREADS 1 LABELS "COLLECTIVE;BARRIER;WAVE")
-    add_rocshmem_functional_test(NAME wgbarrierall RANKS 2 WORKGROUPS 1 THREADS 1 LABELS "COLLECTIVE;BARRIER;WG")
+        add_rocshmem_functional_test(NAME teamwgsync RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME teamwgsync RANKS 2 WORKGROUPS 16 THREADS 64)
+        add_rocshmem_functional_test(NAME teamwgsync RANKS 2 WORKGROUPS 32 THREADS 256)
+        add_rocshmem_functional_test(NAME teamwgsync RANKS 2 WORKGROUPS 39 THREADS 1024)
+    end_test_group()
 
-    add_rocshmem_functional_test(NAME teambarrier RANKS 2 WORKGROUPS 1 THREADS 1 LABELS "COLLECTIVE;BARRIER;TEAM")
-    add_rocshmem_functional_test(NAME teambarrier RANKS 2 WORKGROUPS 16 THREADS 64 LABELS "COLLECTIVE;BARRIER;TEAM")
-    add_rocshmem_functional_test(NAME teambarrier RANKS 2 WORKGROUPS 32 THREADS 256 LABELS "COLLECTIVE;BARRIER;TEAM")
-    add_rocshmem_functional_test(NAME teambarrier RANKS 2 WORKGROUPS 39 THREADS 1024 LABELS "COLLECTIVE;BARRIER;TEAM")
+    begin_test_group(CATEGORY "COLLECTIVE;BARRIER" TIER standard BACKENDS "all" GPUS "all")
+        add_rocshmem_functional_test(NAME barrierall RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME wavebarrierall RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME wgbarrierall RANKS 2 WORKGROUPS 1 THREADS 1)
 
-    add_rocshmem_functional_test(NAME teamwavebarrier RANKS 2 WORKGROUPS 1 THREADS 1 LABELS "COLLECTIVE;BARRIER;TEAM;WAVE")
-    add_rocshmem_functional_test(NAME teamwavebarrier RANKS 2 WORKGROUPS 16 THREADS 64 LABELS "COLLECTIVE;BARRIER;TEAM;WAVE")
-    add_rocshmem_functional_test(NAME teamwavebarrier RANKS 2 WORKGROUPS 32 THREADS 256 LABELS "COLLECTIVE;BARRIER;TEAM;WAVE")
-    add_rocshmem_functional_test(NAME teamwavebarrier RANKS 2 WORKGROUPS 39 THREADS 1024 LABELS "COLLECTIVE;BARRIER;TEAM;WAVE")
+        add_rocshmem_functional_test(NAME teambarrier RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME teambarrier RANKS 2 WORKGROUPS 16 THREADS 64)
+        add_rocshmem_functional_test(NAME teambarrier RANKS 2 WORKGROUPS 32 THREADS 256)
+        add_rocshmem_functional_test(NAME teambarrier RANKS 2 WORKGROUPS 39 THREADS 1024)
 
-    add_rocshmem_functional_test(NAME teamwgbarrier RANKS 2 WORKGROUPS 1 THREADS 1 LABELS "COLLECTIVE;BARRIER;TEAM;WG")
-    add_rocshmem_functional_test(NAME teamwgbarrier RANKS 2 WORKGROUPS 16 THREADS 64 LABELS "COLLECTIVE;BARRIER;TEAM;WG")
-    add_rocshmem_functional_test(NAME teamwgbarrier RANKS 2 WORKGROUPS 32 THREADS 256 LABELS "COLLECTIVE;BARRIER;TEAM;WG")
-    add_rocshmem_functional_test(NAME teamwgbarrier RANKS 2 WORKGROUPS 39 THREADS 1024 LABELS "COLLECTIVE;BARRIER;TEAM;WG")
+        add_rocshmem_functional_test(NAME teamwavebarrier RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME teamwavebarrier RANKS 2 WORKGROUPS 16 THREADS 64)
+        add_rocshmem_functional_test(NAME teamwavebarrier RANKS 2 WORKGROUPS 32 THREADS 256)
+        add_rocshmem_functional_test(NAME teamwavebarrier RANKS 2 WORKGROUPS 39 THREADS 1024)
 
-    add_rocshmem_functional_test(NAME alltoall RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 512 LABELS "COLLECTIVE;ALLTOALL")
-    add_rocshmem_functional_test(NAME teambroadcast RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768 LABELS "COLLECTIVE;BROADCAST;TEAM")
-    add_rocshmem_functional_test(NAME fcollect RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768 LABELS "COLLECTIVE;FCOLLECT")
-    add_rocshmem_functional_test(NAME teamreduction RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768 LABELS "COLLECTIVE;REDUCTION;TEAM")
+        add_rocshmem_functional_test(NAME teamwgbarrier RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME teamwgbarrier RANKS 2 WORKGROUPS 16 THREADS 64)
+        add_rocshmem_functional_test(NAME teamwgbarrier RANKS 2 WORKGROUPS 32 THREADS 256)
+        add_rocshmem_functional_test(NAME teamwgbarrier RANKS 2 WORKGROUPS 39 THREADS 1024)
+    end_test_group()
+
+    begin_test_group(CATEGORY "COLLECTIVE" TIER standard BACKENDS "all" GPUS "all")
+        add_rocshmem_functional_test(NAME alltoall RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 512)
+        add_rocshmem_functional_test(NAME teambroadcast RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
+        add_rocshmem_functional_test(NAME fcollect RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
+        add_rocshmem_functional_test(NAME teamreduction RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
+    end_test_group()
 endfunction()
 
-# Stream-based Tests
+# Stream Tests
 function(add_stream_tests)
-    add_rocshmem_functional_test(NAME putmem_on_stream RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576 LABELS "STREAM")
+    # putmem_on_stream with test-specific variant
+    begin_test_group(CATEGORY "RMA;PUT;STREAM" TIER full BACKENDS "all" GPUS "all")
+        add_rocshmem_functional_test(
+            NAME putmem_on_stream
+            RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576
+            TEST_VARIANTS "default_stream"
+        )
+    end_test_group()
 
-    # Test with default stream (add suffix to distinguish from above)
-    add_rocshmem_functional_test(NAME putmem_on_stream RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576
-                                 SUFFIX "default_stream"
-                                 ENV_VARS "ROCSHMEM_TEST_USE_DEFAULT_STREAM=1" LABELS "STREAM;DEFAULT_STREAM")
+    # Other stream tests (no test-specific variant)
+    begin_test_group(CATEGORY "RMA;GET;STREAM" TIER full BACKENDS "ipc;gda" GPUS "all")
+        add_rocshmem_functional_test(NAME getmem_on_stream RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576)
+    end_test_group()
 
-    add_rocshmem_functional_test(NAME getmem_on_stream RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576 LABELS "STREAM")
-    add_rocshmem_functional_test(NAME signal_wait_until_on_stream RANKS 2 WORKGROUPS 1 THREADS 1 LABELS "STREAM")
-    add_rocshmem_functional_test(NAME putmem_signal_on_stream RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576 LABELS "STREAM")
-    add_rocshmem_functional_test(NAME barrier_all_on_stream RANKS 2 WORKGROUPS 1 THREADS 1 LABELS "STREAM")
-    add_rocshmem_functional_test(NAME quiet_on_stream RANKS 2 WORKGROUPS 1 THREADS 1 LABELS "STREAM")
-    add_rocshmem_functional_test(NAME sync_all_on_stream RANKS 2 WORKGROUPS 1 THREADS 1 LABELS "STREAM")
-    add_rocshmem_functional_test(NAME alltoallmem_on_stream RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 1048576 LABELS "STREAM")
-    add_rocshmem_functional_test(NAME broadcastmem_on_stream RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 1048576 LABELS "STREAM")
+    begin_test_group(CATEGORY "STREAM;SIGOPS" TIER full BACKENDS "all" GPUS "all")
+        add_rocshmem_functional_test(NAME signal_wait_until_on_stream RANKS 2 WORKGROUPS 1 THREADS 1)
+    end_test_group()
+
+    # putmem_signal_on_stream - doesn't work with RO (AIROCSHMEM-217)
+    begin_test_group(CATEGORY "RMA;PUT;STREAM;SIGOPS" TIER full BACKENDS "ipc;gda" GPUS "all")
+        add_rocshmem_functional_test(NAME putmem_signal_on_stream RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576)
+    end_test_group()
+
+    begin_test_group(CATEGORY "COLLECTIVE;STREAM" TIER full BACKENDS "all" GPUS "all")
+        add_rocshmem_functional_test(NAME barrier_all_on_stream RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME quiet_on_stream RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME sync_all_on_stream RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME alltoallmem_on_stream RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME broadcastmem_on_stream RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 1048576)
+    end_test_group()
 endfunction()
 
 # Other Tests
 function(add_other_tests)
-    add_rocshmem_functional_test(NAME init RANKS 2 WORKGROUPS 1 THREADS 1 LABELS "OTHER")
-    add_rocshmem_functional_test(NAME library_info RANKS 2 WORKGROUPS 1 THREADS 1 LABELS "OTHER")
-    add_rocshmem_functional_test(NAME hipmodule_init RANKS 2 WORKGROUPS 1 THREADS 1 LABELS "OTHER")
+    begin_test_group(CATEGORY "OTHER" TIER full BACKENDS "all" GPUS "all")
+        add_rocshmem_functional_test(NAME library_info RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME hipmodule_init RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME device_bitcode RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME device_bitcode RANKS 2 WORKGROUPS 32 THREADS 1024)
+        add_rocshmem_functional_test(NAME device_bitcode RANKS 4 WORKGROUPS 16 THREADS 256)
+        add_rocshmem_functional_test(NAME device_bitcode RANKS 8 WORKGROUPS 16 THREADS 128)
 
-    add_rocshmem_functional_test(NAME device_bitcode RANKS 2 WORKGROUPS 1 THREADS 1 LABELS "OTHER")
-    add_rocshmem_functional_test(NAME device_bitcode RANKS 2 WORKGROUPS 32 THREADS 1024 LABELS "OTHER")
-    add_rocshmem_functional_test(NAME device_bitcode RANKS 4 WORKGROUPS 16 THREADS 256 LABELS "OTHER")
-    add_rocshmem_functional_test(NAME device_bitcode RANKS 8 WORKGROUPS 16 THREADS 128 LABELS "OTHER")
+        add_rocshmem_functional_test(NAME pingpong RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME pingpong RANKS 2 WORKGROUPS 8 THREADS 1)
+        add_rocshmem_functional_test(NAME pingpong RANKS 2 WORKGROUPS 32 THREADS 1)
 
-    add_rocshmem_functional_test(NAME pingpong RANKS 2 WORKGROUPS 1 THREADS 1 LABELS "OTHER")
-    add_rocshmem_functional_test(NAME pingpong RANKS 2 WORKGROUPS 8 THREADS 1 LABELS "OTHER")
-    add_rocshmem_functional_test(NAME pingpong RANKS 2 WORKGROUPS 32 THREADS 1 LABELS "OTHER")
+        add_rocshmem_functional_test(NAME pingall RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME pingall RANKS 2 WORKGROUPS 8 THREADS 1)
+        add_rocshmem_functional_test(NAME pingall RANKS 2 WORKGROUPS 32 THREADS 1)
 
-    add_rocshmem_functional_test(NAME pingall RANKS 2 WORKGROUPS 1 THREADS 1 LABELS "OTHER")
-    add_rocshmem_functional_test(NAME pingall RANKS 2 WORKGROUPS 8 THREADS 1 LABELS "OTHER")
-    add_rocshmem_functional_test(NAME pingall RANKS 2 WORKGROUPS 32 THREADS 1 LABELS "OTHER")
+        add_rocshmem_functional_test(NAME shmemptr RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 8)
+        add_rocshmem_functional_test(NAME shmemptr RANKS 2 WORKGROUPS 1 THREADS 1024 MAX_MSG_SIZE 8)
+        add_rocshmem_functional_test(NAME shmemptr RANKS 2 WORKGROUPS 8 THREADS 1 MAX_MSG_SIZE 8)
+        add_rocshmem_functional_test(NAME shmemptr RANKS 2 WORKGROUPS 16 THREADS 128 MAX_MSG_SIZE 8)
+    end_test_group()
 
-    # Flood tests
-    add_rocshmem_functional_test(NAME flood_put RANKS 2 WORKGROUPS 64 THREADS 1024 LABELS "OTHER;FLOOD")
-    add_rocshmem_functional_test(NAME flood_put RANKS 8 WORKGROUPS 64 THREADS 1024 LABELS "OTHER;FLOOD")
-    add_rocshmem_functional_test(NAME flood_putnbi RANKS 8 WORKGROUPS 64 THREADS 1024 LABELS "OTHER;FLOOD")
-    add_rocshmem_functional_test(NAME flood_p RANKS 8 WORKGROUPS 64 THREADS 1024 LABELS "OTHER;FLOOD")
+    # Flood tests - don't work with RO backend (AIROCSHMEM-324)
+    begin_test_group(CATEGORY "FLOOD;RMA;PUT" TIER full BACKENDS "ipc;gda" GPUS "all")
+        add_rocshmem_functional_test(NAME flood_put RANKS 2 WORKGROUPS 64 THREADS 1024)
+        add_rocshmem_functional_test(NAME flood_put RANKS 8 WORKGROUPS 64 THREADS 1024)
+        add_rocshmem_functional_test(NAME flood_putnbi RANKS 8 WORKGROUPS 64 THREADS 1024)
+        add_rocshmem_functional_test(NAME flood_p RANKS 8 WORKGROUPS 64 THREADS 1024)
+    end_test_group()
 
-    add_rocshmem_functional_test(NAME flood_get RANKS 2 WORKGROUPS 64 THREADS 1024 LABELS "OTHER;FLOOD")
-    add_rocshmem_functional_test(NAME flood_get RANKS 8 WORKGROUPS 64 THREADS 1024 LABELS "OTHER;FLOOD")
-    add_rocshmem_functional_test(NAME flood_getnbi RANKS 8 WORKGROUPS 64 THREADS 1024 LABELS "OTHER;FLOOD")
-    add_rocshmem_functional_test(NAME flood_g RANKS 8 WORKGROUPS 64 THREADS 1024 LABELS "OTHER;FLOOD")
+    begin_test_group(CATEGORY "FLOOD;RMA;GET" TIER full BACKENDS "ipc;gda" GPUS "all")
+        add_rocshmem_functional_test(NAME flood_get RANKS 2 WORKGROUPS 64 THREADS 1024)
+        add_rocshmem_functional_test(NAME flood_get RANKS 8 WORKGROUPS 64 THREADS 1024)
+        add_rocshmem_functional_test(NAME flood_getnbi RANKS 8 WORKGROUPS 64 THREADS 1024)
+    end_test_group()
 
-    add_rocshmem_functional_test(NAME flood_add RANKS 2 WORKGROUPS 64 THREADS 1024 LABELS "OTHER;FLOOD")
-    add_rocshmem_functional_test(NAME flood_add RANKS 8 WORKGROUPS 64 THREADS 1024 LABELS "OTHER;FLOOD")
-    add_rocshmem_functional_test(NAME flood_fadd RANKS 8 WORKGROUPS 64 THREADS 1024 LABELS "OTHER;FLOOD")
-    add_rocshmem_functional_test(NAME flood_waitadd RANKS 8 WORKGROUPS 64 THREADS 1024 LABELS "OTHER;FLOOD")
+    # flood_g - only works with IPC (not GDA, not RO)
+    begin_test_group(CATEGORY "FLOOD;RMA;GET" TIER full BACKENDS "ipc" GPUS "all")
+        add_rocshmem_functional_test(NAME flood_g RANKS 8 WORKGROUPS 64 THREADS 1024)
+    end_test_group()
 
-    # Team context infrastructure tests (require more contexts than workgroups)
-    add_rocshmem_functional_test(NAME teamctxinfra RANKS 2 WORKGROUPS 1 THREADS 1
-                                 ENV_VARS "ROCSHMEM_MAX_NUM_CONTEXTS=1024" LABELS "OTHER;TEAM;CTX")
-    add_rocshmem_functional_test(NAME teamctxsingleinfra RANKS 2 WORKGROUPS 1 THREADS 1
-                                 ENV_VARS "ROCSHMEM_MAX_NUM_CONTEXTS=1024" LABELS "OTHER;TEAM;CTX")
-    add_rocshmem_functional_test(NAME teamctxblockinfra RANKS 4 WORKGROUPS 1 THREADS 1
-                                 ENV_VARS "ROCSHMEM_MAX_NUM_CONTEXTS=1024" LABELS "OTHER;TEAM;CTX")
-    add_rocshmem_functional_test(NAME teamctxblockinfra RANKS 5 WORKGROUPS 1 THREADS 1
-                                 ENV_VARS "ROCSHMEM_MAX_NUM_CONTEXTS=1024" LABELS "OTHER;TEAM;CTX")
-    add_rocshmem_functional_test(NAME teamctxoddeveninfra RANKS 4 WORKGROUPS 1 THREADS 1
-                                 ENV_VARS "ROCSHMEM_MAX_NUM_CONTEXTS=1024" LABELS "OTHER;TEAM;CTX")
-    add_rocshmem_functional_test(NAME teamctxoddeveninfra RANKS 5 WORKGROUPS 1 THREADS 1
-                                 ENV_VARS "ROCSHMEM_MAX_NUM_CONTEXTS=1024" LABELS "OTHER;TEAM;CTX")
-    add_rocshmem_functional_test(NAME teamctxsharedinfra RANKS 2 WORKGROUPS 1 THREADS 1
-                                 ENV_VARS "ROCSHMEM_MAX_NUM_CONTEXTS=1024" LABELS "OTHER;TEAM;CTX")
-    add_rocshmem_functional_test(NAME teamctxsharedinfra RANKS 5 WORKGROUPS 1 THREADS 1
-                                 ENV_VARS "ROCSHMEM_MAX_NUM_CONTEXTS=1024" LABELS "OTHER;TEAM;CTX")
-    add_rocshmem_functional_test(NAME teamctxsubsetparentinfra RANKS 4 WORKGROUPS 1 THREADS 1
-                                 ENV_VARS "ROCSHMEM_MAX_NUM_CONTEXTS=1024" LABELS "OTHER;TEAM;CTX")
-    add_rocshmem_functional_test(NAME teamctxsubsetparentinfra RANKS 5 WORKGROUPS 1 THREADS 1
-                                 ENV_VARS "ROCSHMEM_MAX_NUM_CONTEXTS=1024" LABELS "OTHER;TEAM;CTX")
+    begin_test_group(CATEGORY "FLOOD;AMO" TIER full BACKENDS "ipc;gda" GPUS "all")
+        add_rocshmem_functional_test(NAME flood_add RANKS 2 WORKGROUPS 64 THREADS 1024)
+        add_rocshmem_functional_test(NAME flood_add RANKS 8 WORKGROUPS 64 THREADS 1024)
+        add_rocshmem_functional_test(NAME flood_fadd RANKS 8 WORKGROUPS 64 THREADS 1024)
+        add_rocshmem_functional_test(NAME flood_waitadd RANKS 8 WORKGROUPS 64 THREADS 1024)
+    end_test_group()
 
-    add_rocshmem_functional_test(NAME shmemptr RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 8 LABELS "OTHER")
-    add_rocshmem_functional_test(NAME shmemptr RANKS 2 WORKGROUPS 1 THREADS 1024 MAX_MSG_SIZE 8 LABELS "OTHER")
-    add_rocshmem_functional_test(NAME shmemptr RANKS 2 WORKGROUPS 8 THREADS 1 MAX_MSG_SIZE 8 LABELS "OTHER")
-    add_rocshmem_functional_test(NAME shmemptr RANKS 2 WORKGROUPS 16 THREADS 128 MAX_MSG_SIZE 8 LABELS "OTHER")
+    # Team context infrastructure tests - need ROCSHMEM_MAX_NUM_CONTEXTS=1024
+    begin_test_group(CATEGORY "TEAM;CTX;INFRA" TIER full BACKENDS "all" GPUS "all")
+        add_rocshmem_functional_test(NAME teamctxinfra RANKS 2 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_MAX_NUM_CONTEXTS=1024")
+        add_rocshmem_functional_test(NAME teamctxsingleinfra RANKS 2 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_MAX_NUM_CONTEXTS=1024")
+        add_rocshmem_functional_test(NAME teamctxblockinfra RANKS 4 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_MAX_NUM_CONTEXTS=1024")
+        add_rocshmem_functional_test(NAME teamctxblockinfra RANKS 5 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_MAX_NUM_CONTEXTS=1024")
+        add_rocshmem_functional_test(NAME teamctxoddeveninfra RANKS 4 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_MAX_NUM_CONTEXTS=1024")
+        add_rocshmem_functional_test(NAME teamctxoddeveninfra RANKS 5 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_MAX_NUM_CONTEXTS=1024")
+        add_rocshmem_functional_test(NAME teamctxsharedinfra RANKS 2 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_MAX_NUM_CONTEXTS=1024")
+        add_rocshmem_functional_test(NAME teamctxsharedinfra RANKS 5 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_MAX_NUM_CONTEXTS=1024")
+        add_rocshmem_functional_test(NAME teamctxsubsetparentinfra RANKS 4 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_MAX_NUM_CONTEXTS=1024")
+        add_rocshmem_functional_test(NAME teamctxsubsetparentinfra RANKS 5 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_MAX_NUM_CONTEXTS=1024")
+    end_test_group()
 
-    # Fence ordering tests
-    add_rocshmem_functional_test(NAME fence_putwavesignal RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 1048576 LABELS "OTHER;FENCE")
-    add_rocshmem_functional_test(NAME fence_putwavesignal RANKS 2 WORKGROUPS 8 THREADS 256 MAX_MSG_SIZE 1048576 LABELS "OTHER;FENCE")
-    add_rocshmem_functional_test(NAME fence_putwavesignal RANKS 2 WORKGROUPS 32 THREADS 1024 MAX_MSG_SIZE 65536 LABELS "OTHER;FENCE")
-    add_rocshmem_functional_test(NAME fence_putlargesmall RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 4096 LABELS "OTHER;FENCE")
-    add_rocshmem_functional_test(NAME fence_putlargesmall RANKS 2 WORKGROUPS 8 THREADS 256 MAX_MSG_SIZE 65536 LABELS "OTHER;FENCE")
-    add_rocshmem_functional_test(NAME fence_fanout RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 1048576 LABELS "OTHER;FENCE")
-    add_rocshmem_functional_test(NAME fence_fanout RANKS 4 WORKGROUPS 4 THREADS 256 MAX_MSG_SIZE 65536 LABELS "OTHER;FENCE")
-    add_rocshmem_functional_test(NAME fence_fanout RANKS 8 WORKGROUPS 8 THREADS 256 MAX_MSG_SIZE 65536 LABELS "OTHER;FENCE")
-    add_rocshmem_functional_test(NAME fence_putwavenbichunks RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 1048576 LABELS "OTHER;FENCE")
-    add_rocshmem_functional_test(NAME fence_putwavenbichunks RANKS 2 WORKGROUPS 8 THREADS 256 MAX_MSG_SIZE 65536 LABELS "OTHER;FENCE")
+    # Fence tests - don't work with RO backend (AIROCSHMEM-418)
+    begin_test_group(CATEGORY "FENCE" TIER full BACKENDS "ipc;gda" GPUS "all")
+        add_rocshmem_functional_test(NAME fence_putwavesignal RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME fence_putwavesignal RANKS 2 WORKGROUPS 8 THREADS 256 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME fence_putwavesignal RANKS 2 WORKGROUPS 32 THREADS 1024 MAX_MSG_SIZE 65536)
+        add_rocshmem_functional_test(NAME fence_putlargesmall RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 4096)
+        add_rocshmem_functional_test(NAME fence_putlargesmall RANKS 2 WORKGROUPS 8 THREADS 256 MAX_MSG_SIZE 65536)
+        add_rocshmem_functional_test(NAME fence_fanout RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME fence_fanout RANKS 4 WORKGROUPS 4 THREADS 256 MAX_MSG_SIZE 65536)
+        add_rocshmem_functional_test(NAME fence_fanout RANKS 8 WORKGROUPS 8 THREADS 256 MAX_MSG_SIZE 65536)
+        add_rocshmem_functional_test(NAME fence_putwavenbichunks RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME fence_putwavenbichunks RANKS 2 WORKGROUPS 8 THREADS 256 MAX_MSG_SIZE 65536)
+    end_test_group()
 endfunction()
 
-# Heatmap RMA Tests (volume mode, no verification, no timeout)
-function(add_heatmap_rma_tests)
-    # GET tests
-    add_rocshmem_functional_test(NAME get RANKS 2 WORKGROUPS 1 THREADS 1 VOLUME_SIZE 1048576
-                                 SUFFIX heatmap NO_VERIFY TIMEOUT 0 LABELS "HEATMAP;RMA;GET")
-    add_rocshmem_functional_test(NAME get RANKS 2 WORKGROUPS 32 THREADS 1024 VOLUME_SIZE 1073741824
-                                 SUFFIX heatmap NO_VERIFY TIMEOUT 0 LABELS "HEATMAP;RMA;GET")
+# Heatmap Tests
+function(add_heatmap_tests)
+    # Heatmap RMA GET tests - no timeout, no verification
+    begin_test_group(CATEGORY "HEATMAP;RMA;GET" TIER full BACKENDS "ipc;gda" GPUS "all")
+        add_rocshmem_functional_test(NAME get RANKS 2 WORKGROUPS 1 THREADS 1 VOLUME_SIZE 1048576 TIMEOUT 0 NO_VERIFY)
+        add_rocshmem_functional_test(NAME get RANKS 2 WORKGROUPS 32 THREADS 1024 VOLUME_SIZE 1073741824 TIMEOUT 0 NO_VERIFY)
+        add_rocshmem_functional_test(NAME waveget RANKS 2 WORKGROUPS 1 THREADS 64 VOLUME_SIZE 1073741824 TIMEOUT 0 NO_VERIFY)
+        add_rocshmem_functional_test(NAME waveget RANKS 2 WORKGROUPS 2 THREADS 64 VOLUME_SIZE 1073741824 TIMEOUT 0 NO_VERIFY)
+        add_rocshmem_functional_test(NAME waveget RANKS 2 WORKGROUPS 16 THREADS 1024 VOLUME_SIZE 1073741824 TIMEOUT 0 NO_VERIFY)
+        add_rocshmem_functional_test(NAME wgget RANKS 2 WORKGROUPS 1 THREADS 1024 VOLUME_SIZE 1073741824 TIMEOUT 0 NO_VERIFY)
+        add_rocshmem_functional_test(NAME wgget RANKS 2 WORKGROUPS 16 THREADS 1024 VOLUME_SIZE 1073741824 TIMEOUT 0 NO_VERIFY)
+    end_test_group()
 
-    add_rocshmem_functional_test(NAME waveget RANKS 2 WORKGROUPS 1 THREADS 64 VOLUME_SIZE 1073741824
-                                 SUFFIX heatmap NO_VERIFY TIMEOUT 0 LABELS "HEATMAP;RMA;GET;WAVE")
-    add_rocshmem_functional_test(NAME waveget RANKS 2 WORKGROUPS 2 THREADS 64 VOLUME_SIZE 1073741824
-                                 SUFFIX heatmap NO_VERIFY TIMEOUT 0 LABELS "HEATMAP;RMA;GET;WAVE")
-    add_rocshmem_functional_test(NAME waveget RANKS 2 WORKGROUPS 16 THREADS 1024 VOLUME_SIZE 1073741824
-                                 SUFFIX heatmap NO_VERIFY TIMEOUT 0 LABELS "HEATMAP;RMA;GET;WAVE")
+    # Heatmap RMA PUT tests
+    begin_test_group(CATEGORY "HEATMAP;RMA;PUT" TIER full BACKENDS "all" GPUS "all")
+        add_rocshmem_functional_test(NAME put RANKS 2 WORKGROUPS 1 THREADS 1 VOLUME_SIZE 1048576 TIMEOUT 0 NO_VERIFY)
+        add_rocshmem_functional_test(NAME put RANKS 2 WORKGROUPS 32 THREADS 1024 VOLUME_SIZE 1073741824 TIMEOUT 0 NO_VERIFY)
+        add_rocshmem_functional_test(NAME waveput RANKS 2 WORKGROUPS 1 THREADS 64 VOLUME_SIZE 1073741824 TIMEOUT 0 NO_VERIFY)
+        add_rocshmem_functional_test(NAME waveput RANKS 2 WORKGROUPS 2 THREADS 64 VOLUME_SIZE 1073741824 TIMEOUT 0 NO_VERIFY)
+        add_rocshmem_functional_test(NAME waveput RANKS 2 WORKGROUPS 16 THREADS 1024 VOLUME_SIZE 1073741824 TIMEOUT 0 NO_VERIFY)
+        add_rocshmem_functional_test(NAME wgput RANKS 2 WORKGROUPS 1 THREADS 1024 VOLUME_SIZE 1073741824 TIMEOUT 0 NO_VERIFY)
+        add_rocshmem_functional_test(NAME wgput RANKS 2 WORKGROUPS 16 THREADS 1024 VOLUME_SIZE 1073741824 TIMEOUT 0 NO_VERIFY)
+    end_test_group()
 
-    add_rocshmem_functional_test(NAME wgget RANKS 2 WORKGROUPS 1 THREADS 1024 VOLUME_SIZE 1073741824
-                                 SUFFIX heatmap NO_VERIFY TIMEOUT 0 LABELS "HEATMAP;RMA;GET;WG")
-    add_rocshmem_functional_test(NAME wgget RANKS 2 WORKGROUPS 16 THREADS 1024 VOLUME_SIZE 1073741824
-                                 SUFFIX heatmap NO_VERIFY TIMEOUT 0 LABELS "HEATMAP;RMA;GET;WG")
-
-    # PUT tests
-    add_rocshmem_functional_test(NAME put RANKS 2 WORKGROUPS 1 THREADS 1 VOLUME_SIZE 1048576
-                                 SUFFIX heatmap NO_VERIFY TIMEOUT 0 LABELS "HEATMAP;RMA;PUT")
-    add_rocshmem_functional_test(NAME put RANKS 2 WORKGROUPS 32 THREADS 1024 VOLUME_SIZE 1073741824
-                                 SUFFIX heatmap NO_VERIFY TIMEOUT 0 LABELS "HEATMAP;RMA;PUT")
-
-    add_rocshmem_functional_test(NAME waveput RANKS 2 WORKGROUPS 1 THREADS 64 VOLUME_SIZE 1073741824
-                                 SUFFIX heatmap NO_VERIFY TIMEOUT 0 LABELS "HEATMAP;RMA;PUT;WAVE")
-    add_rocshmem_functional_test(NAME waveput RANKS 2 WORKGROUPS 2 THREADS 64 VOLUME_SIZE 1073741824
-                                 SUFFIX heatmap NO_VERIFY TIMEOUT 0 LABELS "HEATMAP;RMA;PUT;WAVE")
-    add_rocshmem_functional_test(NAME waveput RANKS 2 WORKGROUPS 16 THREADS 1024 VOLUME_SIZE 1073741824
-                                 SUFFIX heatmap NO_VERIFY TIMEOUT 0 LABELS "HEATMAP;RMA;PUT;WAVE")
-
-    add_rocshmem_functional_test(NAME wgput RANKS 2 WORKGROUPS 1 THREADS 1024 VOLUME_SIZE 1073741824
-                                 SUFFIX heatmap NO_VERIFY TIMEOUT 0 LABELS "HEATMAP;RMA;PUT;WG")
-    add_rocshmem_functional_test(NAME wgput RANKS 2 WORKGROUPS 16 THREADS 1024 VOLUME_SIZE 1073741824
-                                 SUFFIX heatmap NO_VERIFY TIMEOUT 0 LABELS "HEATMAP;RMA;PUT;WG")
+    # Heatmap collective tests
+    begin_test_group(CATEGORY "HEATMAP;COLLECTIVE" TIER full BACKENDS "all" GPUS "all")
+        add_rocshmem_functional_test(NAME alltoall RANKS 2 WORKGROUPS 1 THREADS 256 VOLUME_SIZE 1073741824 TIMEOUT 0 NO_VERIFY)
+        add_rocshmem_functional_test(NAME alltoall RANKS 4 WORKGROUPS 1 THREADS 256 VOLUME_SIZE 1073741824 TIMEOUT 0 NO_VERIFY)
+        add_rocshmem_functional_test(NAME alltoall RANKS 8 WORKGROUPS 1 THREADS 256 VOLUME_SIZE 1073741824 TIMEOUT 0 NO_VERIFY)
+        add_rocshmem_functional_test(NAME alltoall RANKS 16 WORKGROUPS 1 THREADS 256 VOLUME_SIZE 1073741824 TIMEOUT 0 NO_VERIFY)
+        add_rocshmem_functional_test(NAME alltoall RANKS 32 WORKGROUPS 1 THREADS 256 VOLUME_SIZE 1073741824 TIMEOUT 0 NO_VERIFY)
+        add_rocshmem_functional_test(NAME alltoall RANKS 64 WORKGROUPS 1 THREADS 256 VOLUME_SIZE 1073741824 TIMEOUT 0 NO_VERIFY)
+    end_test_group()
 endfunction()
 
-# Heatmap Collective Tests (volume mode, no verification, no timeout)
-function(add_heatmap_coll_tests)
-    add_rocshmem_functional_test(NAME alltoall RANKS 2 WORKGROUPS 1 THREADS 256 VOLUME_SIZE 1073741824
-                                 SUFFIX heatmap NO_VERIFY TIMEOUT 0 LABELS "HEATMAP;COLLECTIVE;ALLTOALL")
-    add_rocshmem_functional_test(NAME alltoall RANKS 4 WORKGROUPS 1 THREADS 256 VOLUME_SIZE 1073741824
-                                 SUFFIX heatmap NO_VERIFY TIMEOUT 0 LABELS "HEATMAP;COLLECTIVE;ALLTOALL")
-    add_rocshmem_functional_test(NAME alltoall RANKS 8 WORKGROUPS 1 THREADS 256 VOLUME_SIZE 1073741824
-                                 SUFFIX heatmap NO_VERIFY TIMEOUT 0 LABELS "HEATMAP;COLLECTIVE;ALLTOALL")
-    add_rocshmem_functional_test(NAME alltoall RANKS 16 WORKGROUPS 1 THREADS 256 VOLUME_SIZE 1073741824
-                                 SUFFIX heatmap NO_VERIFY TIMEOUT 0 LABELS "HEATMAP;COLLECTIVE;ALLTOALL")
-    add_rocshmem_functional_test(NAME alltoall RANKS 32 WORKGROUPS 1 THREADS 256 VOLUME_SIZE 1073741824
-                                 SUFFIX heatmap NO_VERIFY TIMEOUT 0 LABELS "HEATMAP;COLLECTIVE;ALLTOALL")
-    add_rocshmem_functional_test(NAME alltoall RANKS 64 WORKGROUPS 1 THREADS 256 VOLUME_SIZE 1073741824
-                                 SUFFIX heatmap NO_VERIFY TIMEOUT 0 LABELS "HEATMAP;COLLECTIVE;ALLTOALL")
-endfunction()
+###############################################################################
+# Register all tests
+###############################################################################
 
-# Register all test suites
 function(register_all_functional_tests)
     add_rma_put_tests()
     add_rma_get_tests()
     add_amo_tests()
     add_sigops_tests()
-    add_collective_tests()
+    add_coll_tests()
     add_stream_tests()
     add_other_tests()
-    add_heatmap_rma_tests()
-    add_heatmap_coll_tests()
+    add_heatmap_tests()
 endfunction()
