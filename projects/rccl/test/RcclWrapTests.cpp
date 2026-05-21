@@ -204,7 +204,7 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_UsesLL128WhenInRange)
     unsetenv("NCCL_PROTO");
 
     ncclComm_t comm = new ncclComm();
-    *comm           = {};
+    // fields set explicitly below
     // Manually populate minimal fields for comm
     comm->nRanks                    = 1;
     comm->nNodes                    = 2; // triggers inter-node logic
@@ -247,7 +247,7 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_WarnsOnGfx942Arch)
     unsetenv("NCCL_PROTO");
 
     ncclComm_t comm = new ncclComm();
-    *comm           = {};
+    // fields set explicitly below
     // Manually populate minimal fields for comm
     comm->nRanks                    = 1;
     comm->nNodes                    = 2; // triggers inter-node logic
@@ -289,7 +289,7 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_HonorsUserProtocolEnv)
     setenv("NCCL_PROTO", "1", 1); // Simulate manual override
 
     ncclComm_t comm = new ncclComm();
-    *comm           = {};
+    // fields set explicitly below
     // Manually populate minimal fields for comm
     comm->nRanks = 1;
     comm->nNodes = 2; // triggers inter-node logic
@@ -324,7 +324,7 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_SimpleFallbackWhenNoRanges)
     unsetenv("NCCL_PROTO");
 
     ncclComm_t comm = new ncclComm();
-    *comm           = {};
+    // fields set explicitly below
     // Manually populate minimal fields for comm
     comm->nRanks = 1;
     comm->nNodes = 2; // triggers inter-node logic
