@@ -1074,4 +1074,98 @@ TEST_F(GrowMPITest, GetUniqueId_MagicChainThree)
     if (mid2) (void)ncclCommDestroy(mid2);
 }
 
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Coverage gap tests — target remaining uncovered branches in
+// ncclCommGetUniqueId / ncclCommGrow / bcastGrowHandle.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── GetUniqueId_NullComm ────────────────────────────────────────────────────
+// Covers: CommCheck(nullptr,...) early-return in ncclCommGetUniqueId
+//   src/init.cc line 3833 — CommCheck failure branch (first NCCLCHECK)
+// No comm or collective needed — rank 0 only.
+TEST_F(GrowMPITest, GetUniqueId_NullComm)
+{
+    if (MPIEnvironment::world_rank == 0) {
+        ncclUniqueId id{};
+        ASSERT_EQ(ncclInvalidArgument, ncclCommGetUniqueId(nullptr, &id));
+    }
+}
+
+// ── GetUniqueId_NullUniqueId ────────────────────────────────────────────────
+// Covers: PtrCheck(uniqueId,...) early-return in ncclCommGetUniqueId
+//   src/init.cc line 3835 — PtrCheck failure branch (third NCCLCHECK)
+TEST_F(GrowMPITest, GetUniqueId_NullUniqueId)
+{
+    ASSERT_MPI_EQ(ncclSuccess, buildComm(MPIEnvironment::world_size, &initialComm_));
+    if (MPIEnvironment::world_rank == 0) {
+        ASSERT_EQ(ncclInvalidArgument, ncclCommGetUniqueId(initialComm_, nullptr));
+    }
+}
+
+
+// ── GetUniqueId_NullArgs_Combined ───────────────────────────────────────────
+// Covers: both CommCheck(nullptr) and PtrCheck(nullptr,uniqueId) failure paths
+// in one test for clarity; supplements GetUniqueId_NullComm and
+// GetUniqueId_NullUniqueId with a non-MPI single-rank variant.
+// Also verifies the NCCL API robustly handles NULL in both positions.
+TEST_F(GrowMPITest, GetUniqueId_NullArgs_Combined)
+{
+    ASSERT_MPI_EQ(ncclSuccess, buildComm(MPIEnvironment::world_size, &initialComm_));
+
+    if (MPIEnvironment::world_rank == 0) {
+        // Both null
+        ncclUniqueId id{};
+        ASSERT_EQ(ncclInvalidArgument, ncclCommGetUniqueId(nullptr, &id));
+        ASSERT_EQ(ncclInvalidArgument, ncclCommGetUniqueId(initialComm_, nullptr));
+
+        // Verify a valid call still succeeds after the failed ones
+        ASSERT_EQ(ncclSuccess, ncclCommGetUniqueId(initialComm_, &id));
+    }
+}
+
+
+// ── Grow_ExistingRankBadRankArg ─────────────────────────────────────────────
+// Covers: rank != -1 guard in ncclCommGrow for existing-rank callers
+//   src/init.cc line 3876 — "if (rank != -1)" → ncclInvalidArgument + goto exit
+// Existing ranks (comm != NULL) must pass rank=-1; any other value is rejected
+// before any collective or bootstrap operation begins.
+TEST_F(GrowMPITest, Grow_ExistingRankBadRankArg)
+{
+    const int wr        = MPIEnvironment::world_rank;
+    const int worldSize = MPIEnvironment::world_size;
+    ASSERT_MPI_EQ(ncclSuccess, buildComm(worldSize, &initialComm_));
+
+    if (wr == 0) {
+        ncclComm_t dummy = nullptr;
+        // rank=0 from an existing-rank caller must be rejected
+        ASSERT_EQ(ncclInvalidArgument,
+            ncclCommGrow(initialComm_, worldSize + 2, nullptr, 0, &dummy, nullptr));
+        ASSERT_EQ(nullptr, dummy);
+
+        // rank=1 also rejected
+        ASSERT_EQ(ncclInvalidArgument,
+            ncclCommGrow(initialComm_, worldSize + 2, nullptr, 1, &dummy, nullptr));
+        ASSERT_EQ(nullptr, dummy);
+    }
+}
+
+// ── Grow_NewRankNRanksEqualExisting ────────────────────────────────────────
+// Covers: exact boundary of "nRanks <= comm->nRanks" guard
+//   src/init.cc line 3858 — nRanks == existing (previously only < was tested)
+TEST_F(GrowMPITest, Grow_NewRankNRanksEqualExisting)
+{
+    const int wr        = MPIEnvironment::world_rank;
+    const int worldSize = MPIEnvironment::world_size;
+    ASSERT_MPI_EQ(ncclSuccess, buildComm(worldSize, &initialComm_));
+
+    if (wr == 0) {
+        ncclComm_t dummy = nullptr;
+        // nRanks == existing nRanks — not a grow, must be rejected
+        ASSERT_EQ(ncclInvalidArgument,
+            ncclCommGrow(initialComm_, worldSize, nullptr, -1, &dummy, nullptr));
+        ASSERT_EQ(nullptr, dummy);
+    }
+}
+
 #endif // MPI_TESTS_ENABLED
