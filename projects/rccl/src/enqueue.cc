@@ -1033,9 +1033,17 @@ RCCL_PARAM(P2pBatchForceEnable, "P2P_BATCH_FORCE_ENABLE", 0); // Force-enable re
 __attribute__((weak)) int64_t rcclParamIbCastCtsOffloadEnabled();
 __attribute__((weak)) int64_t rcclParamIbCastP2pDisableCts();
 
-// Mirror IbCastIsCtsOffloadEnabled(isP2p=1) from net_ib_cast/connect.cc.
-// Returns true when P2P CTS offloading is active.
-// Returns false if the AINIC plugin is not linked (non-AINIC build).
+// Param-based heuristic mirroring IbCastIsCtsOffloadEnabled(isP2p=1) from
+// net_ib_cast/connect.cc.  Returns true when P2P CTS offloading appears active
+// based on env params alone.  Returns false if the AINIC plugin is not linked
+// (non-AINIC build).
+//
+// Note: This is intentionally conservative (may return true even when the
+// runtime has disabled CTS via IbCastOffloadEnabled).  False positives —
+// treating CTS as active when it is not — are acceptable here because this
+// function is used as a safety gate; suppressing P2P batching unnecessarily is
+// preferable to enabling it incorrectly.  If precise runtime state is needed,
+// use RCCL_P2P_BATCH_FORCE_ENABLE to override the decision explicitly.
 static bool rcclAINIC_P2pCtsActive() {
   // Plugin not linked → no CTS capability → not active.
   if (!rcclParamIbCastCtsOffloadEnabled || !rcclParamIbCastP2pDisableCts) return false;
