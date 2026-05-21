@@ -65,6 +65,7 @@ ENV_VAR_TO_JSON_PATH: dict[str, str] = {
     "ROCPROFSYS_USE_AMD_SMI": "domains.gpu.enabled",
     "ROCPROFSYS_AMD_SMI_METRICS": "domains.gpu.metrics",
     "ROCPROFSYS_USE_AINIC": "domains.gpu.ainic",
+    "ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING": "domains.gpu.unified_memory_profiling",
     "ROCPROFSYS_USE_PROCESS_SAMPLING": "domains.gpu.process_sampling",
     "ROCPROFSYS_PROCESS_SAMPLING_FREQ": "domains.gpu.process_sampling_freq",
     "ROCPROFSYS_PROCESS_SAMPLING_DURATION": "domains.gpu.process_sampling_duration",
@@ -90,6 +91,7 @@ ENV_VAR_TO_JSON_PATH: dict[str, str] = {
     "ROCPROFSYS_ROCM_EVENTS": "hardware_counters.rocm_events",
     "ROCPROFSYS_PAPI_EVENTS": "hardware_counters.papi_events",
     "ROCPROFSYS_PAPI_MULTIPLEXING": "hardware_counters.papi_multiplexing",
+    "ROCPROFSYS_GPU_PERF_COUNTERS": "hardware_counters.gpu_perf_counters",
     # --- Causal ---
     "ROCPROFSYS_USE_CAUSAL": "causal.enabled",
     "ROCPROFSYS_CAUSAL_MODE": "causal.mode",

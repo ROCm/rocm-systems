@@ -34,38 +34,30 @@
 #include "hsakmt/hsakmtmodel.h"
 #include <assert.h>
 
-
 struct hsa_kfd_event_context
 {
 	HSAuint64 *events_page;
 };
 
-struct hsa_kfd_event_context *hsakmt_kfdcontext_get_event_context(HsaKFDContext *ctx)
+int hsakmt_kfdcontext_init_event_context(HsaKFDContext *ctx)
 {
-	assert(ctx);
-	if (!ctx) {
-		pr_err("Expected a non-null ptr for HsaKFDContext");
-		return NULL;
-	}
+	CHECK_CTX(ctx, -1);
 
 	if (ctx->event_context)
-		return ctx->event_context;
+		return 0;
 
 	ctx->event_context = calloc(1, sizeof(struct hsa_kfd_event_context));
 	if (!ctx->event_context) {
 		pr_err("Alloc memory failed for struct hsa_kfd_event_context size %zu\n",
 				 sizeof(struct hsa_kfd_event_context));
-		return NULL;
+		return -1;
 	}
-	return ctx->event_context;
+	return 0;
 }
 
 void hsakmt_clear_events_page(HsaKFDContext *ctx)
 {
-	struct hsa_kfd_event_context *event_ctx = hsakmt_kfdcontext_get_event_context(ctx);
-	if (event_ctx) {
-		event_ctx->events_page = NULL;
-	}
+	ctx->event_context->events_page = NULL;
 }
 
 static bool IsSystemEventType(HSA_EVENTTYPE type)
@@ -104,7 +96,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateEventCtx(HsaKFDContext *ctx,
 
 	/* dGPU code */
 	pthread_mutex_lock(&hsakmt_mutex);
-	event_ctx = hsakmt_kfdcontext_get_event_context(ctx);
+	event_ctx = ctx->event_context;
 	events_page = event_ctx->events_page;
 
 	if (hsakmt_is_dgpu && !events_page) {

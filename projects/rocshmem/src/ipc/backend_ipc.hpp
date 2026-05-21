@@ -100,7 +100,7 @@ class IPCBackend : public Backend {
   void create_new_team(Team *parent_team,
                        const TeamInfo& team_info_wrt_parent,
                        const TeamInfo& team_info_wrt_world, int num_pes,
-                       int my_pe_in_new_team, MPI_Comm team_comm,
+                       int my_pe_in_new_team, MPI_Comm new_team_comm,
                        rocshmem_team_t *new_team) override;
 
   /**
@@ -307,7 +307,9 @@ class IPCBackend : public Backend {
   /**
    * @brief
    */
-  void Allreduce_char_BAND (char* inbuf, char *outbuf, size_t num_bytes, Team *team);
+  void Allreduce_char_BAND (char* inbuf, char *outbuf, size_t num_bytes,
+                            const TeamInfo& new_team_info_wrt_world,
+                            int num_pes, int my_pe_in_new_team);
 
 };
 

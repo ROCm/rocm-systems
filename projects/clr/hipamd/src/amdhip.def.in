@@ -191,6 +191,7 @@ hipProfilerStop
 hipProfilerEnableExt
 hipProfilerDisableExt
 hipProfilerGetRecordsExt
+hipProfilerRegisterChunkCallbackExt
 hipRuntimeGetVersion
 hipGetDeviceFlags
 hipSetDevice
@@ -536,4 +537,19 @@ hipKernelSetAttribute
 hipKernelGetFunction
 hipOccupancyMaxPotentialClusterSize
 hipOccupancyMaxActiveClusters
+hipGreenCtxCreate
+hipExecutionCtxDestroy
+hipExecutionCtxStreamCreate
+hipDeviceGetDevResource
+hipDevSmResourceSplitByCount
+hipDevSmResourceSplit
+hipDevResourceGenerateDesc
+hipDeviceGetExecutionCtx
+hipExecutionCtxGetDevResource
+hipExecutionCtxGetDevice
+hipExecutionCtxGetId
+hipStreamGetDevResource
+hipExecutionCtxRecordEvent
+hipExecutionCtxSynchronize
+hipExecutionCtxWaitEvent
 @HSA_EXPORTS@

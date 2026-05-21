@@ -279,7 +279,7 @@ void GDABackend::setup_host_ctx() {
 
 void GDABackend::setup_default_ctx() {
   TeamInfo *tinfo = team_tracker.get_team_world()->tinfo_wrt_world;
-  default_context_proxy_ = GDADefaultContextProxy(this, tinfo, gda_provider);
+  default_context_proxy_ = GDADefaultContextProxy(this, tinfo);
 }
 
 void GDABackend::log_ctx_nics([[maybe_unused]] unsigned int ctx_id,
@@ -305,7 +305,7 @@ void GDABackend::setup_ctxs() {
   // 0th context is default context
   for (size_t i = 0; i < envvar::max_num_contexts; i++) {
     unsigned int cid = static_cast<unsigned int>(i + 1);
-    new (&ctx_array[i]) GDAContext(this, cid, gda_provider);
+    new (&ctx_array[i]) GDAContext(this, cid);
     ctx_free_list.get()->push_back(ctx_array + i);
 
     if (verbose) {
@@ -477,24 +477,25 @@ void GDABackend::Alltoall_char_inplace (char *inoutbuf, size_t num_bytes, rocshm
 
 //TODO: factorize somewhere else, maybe backend_bc?
 void GDABackend::Allreduce_char_BAND (char* inbuf, char *outbuf, size_t num_bytes,
-                                      Team *team) {
+                                      const TeamInfo& new_team_info_wrt_world,
+                                      int num_pes, int my_pe_in_new_team) {
 
   // Implement an Allreduce outside of MPI. This is specialized for the scenario
   // required for the team creation, i.e. assuming bytes and using BAND operation.
   // Implementation uses an Allgather operation followed a local reduction.
-
-  GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
-  int num_pes = team_obj->num_pes;
-  std::vector<int> pes_in_world;
+  // Note: Only PEs in the new team call this function.
 
   char *tmp_buffer = new char[num_pes * num_bytes];
   std::memset(tmp_buffer, 0, num_pes * num_bytes);
-  std::memcpy(&tmp_buffer[my_pe * num_bytes], inbuf, num_bytes);
+  std::memcpy(&tmp_buffer[my_pe_in_new_team * num_bytes], inbuf, num_bytes);
 
+  // Build a vector of world ranks for the new team
+  std::vector<int> world_ranks;
+  world_ranks.reserve(num_pes);
   for (int i = 0; i < num_pes; i++) {
-    pes_in_world.push_back(team_obj->get_pe_in_world(i));
+    world_ranks.push_back(new_team_info_wrt_world.pe_start + i * new_team_info_wrt_world.stride);
   }
-  backend_bootstr->groupAllGather(tmp_buffer, num_bytes, pes_in_world);
+  backend_bootstr->groupAllGather(tmp_buffer, num_bytes, world_ranks);
 
   for (size_t i = 0; i < num_bytes; i++) {
     outbuf[i] = tmp_buffer[i];
@@ -510,17 +511,18 @@ void GDABackend::create_new_team([[maybe_unused]] Team *parent_team,
                                 const TeamInfo& team_info_wrt_parent,
                                 const TeamInfo& team_info_wrt_world,
                                 int num_pes, int my_pe_in_new_team,
-                                MPI_Comm team_comm,
+                                MPI_Comm new_team_comm,
                                 rocshmem_team_t *new_team) {
   /**
    * Read the bit mask and find out a common index into
    * the pool of available work arrays.
    */
-  if (team_comm != MPI_COMM_NULL) {
+  if (new_team_comm != MPI_COMM_NULL) {
     NET_CHECK(mpilib_ftable_.Allreduce(team_pool_bitmask_, team_reduced_bitmask_, team_bitmask_size_,
-                            MPI_CHAR, MPI_BAND, team_comm));
+                            MPI_CHAR, MPI_BAND, new_team_comm));
   } else {
-    Allreduce_char_BAND (team_pool_bitmask_, team_reduced_bitmask_, team_bitmask_size_, parent_team);
+    Allreduce_char_BAND (team_pool_bitmask_, team_reduced_bitmask_, team_bitmask_size_,
+                         team_info_wrt_world, num_pes, my_pe_in_new_team);
   }
 
   /* Pick the least significant non-zero bit (logical layout) in the reduced
@@ -545,7 +547,7 @@ void GDABackend::create_new_team([[maybe_unused]] Team *parent_team,
   CHECK_HIP(hipMalloc(&new_team_obj, sizeof(GDATeam)));
   new (new_team_obj)
       GDATeam(this, team_info_wrt_parent, team_info_wrt_world, num_pes,
-                my_pe_in_new_team, team_comm, common_index);
+                my_pe_in_new_team, new_team_comm, common_index);
 
   *new_team = get_external_team(new_team_obj);
 }
@@ -565,15 +567,51 @@ void GDABackend::ctx_destroy(Context *ctx) {
   delete gda_host_ctx;
 }
 
-int GDABackend::buffer_register([[maybe_unused]] void *addr,
-                                [[maybe_unused]] size_t length) {
-  LOG_ERROR("GDABackend::buffer_register not supported");
-  return ROCSHMEM_ERROR;
+int GDABackend::buffer_register(void *addr, size_t length) {
+  int err = ROCSHMEM_SUCCESS;
+  bool qp_registration_failed = false;
+
+  /* Register in ptr cache */
+  err = Backend::buffer_register(addr, length);
+
+  if (ROCSHMEM_SUCCESS != err) {
+    return ROCSHMEM_ERROR;
+  }
+
+  /* Register with QPs */
+  for (size_t i = 0; i < num_qps; i++) {
+    err = host_qps[i].buffer_register((uintptr_t)addr, length);
+    if (ROCSHMEM_SUCCESS != err) {
+      qp_registration_failed = true;
+    }
+  }
+
+  if (qp_registration_failed) {
+    Backend::buffer_unregister(addr);
+    return ROCSHMEM_ERROR;
+  }
+  return ROCSHMEM_SUCCESS;
 }
 
-int GDABackend::buffer_unregister([[maybe_unused]] void *addr) {
-  LOG_ERROR("GDABackend::buffer_unregister not supported");
-  return ROCSHMEM_ERROR;
+int GDABackend::buffer_unregister(void *addr) {
+  int err = ROCSHMEM_SUCCESS;
+
+  /* Deregister in ptr cache */
+  err = Backend::buffer_unregister(addr);
+
+  if (ROCSHMEM_SUCCESS != err) {
+    return ROCSHMEM_ERROR;
+  }
+
+  /* Deregister with QPs */
+  for (size_t i = 0; i < num_qps; i++) {
+    err = host_qps[i].buffer_unregister((uintptr_t)addr);
+    if (ROCSHMEM_SUCCESS != err) {
+      return ROCSHMEM_ERROR;
+    }
+  }
+
+  return err;
 }
 
 void GDABackend::reset_backend_stats() {
@@ -888,6 +926,12 @@ bool GDABackend::has_active_ib_interface(GDAProvider provider) {
 int GDABackend::backend_can_run() {
   void *handle{nullptr};
   GDAProvider requested = requested_provider();
+
+  /* Libnuma ? */
+  if (!numa.is_available()) {
+    LOG_WARN("GDA backend unavailable: libnuma support is missing");
+    return ROCSHMEM_ERROR;
+  }
 
   /* Basic verbs? */
   if (!ibv.is_initialized) return ROCSHMEM_ERROR;
