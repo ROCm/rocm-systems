@@ -13,6 +13,17 @@
 #include "alloc.h"
 #include "ce_fault_inject.h"
 
+#ifdef ENABLE_FAULT_INJECTION
+// Common fault check helper
+static ncclResult_t ceFaultCheck(struct ncclComm* comm, uint32_t bit, const char* fnName) {
+  if (comm->ceColl.ceFaults & bit) {
+    WARN("CE: fault injection: %s returning ncclSystemError (rank %d)", fnName, comm->rank);
+    return ncclSystemError;
+  }
+  return ncclSuccess;
+}
+#endif
+
 RCCL_PARAM(CeMultiStreams, "CE_MULTI_STREAMS", 0);
 // Static constant for graph synchronization
 static const uint32_t GRAPH_SYNC_VALUE = 1;
@@ -35,10 +46,7 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   ncclResult_t ret = ncclSuccess;
 
 #ifdef ENABLE_FAULT_INJECTION
-  if (comm->ceColl.ceFaults & CE_FAULT_INIT) {
-    WARN("CE: fault injection: ncclCeInit returning ncclSystemError (rank %d)", comm->rank);
-    return ncclSystemError;
-  }
+  NCCLCHECK(ceFaultCheck(comm, CE_FAULT_INIT, "ncclCeInit"));
 #endif
 
   uint8_t* ceDevBase = nullptr;
@@ -192,10 +200,7 @@ ncclResult_t ncclPrepUCSync(struct ncclComm* comm, bool isComplete,
   ncclResult_t ret = ncclSuccess;
 
 #ifdef ENABLE_FAULT_INJECTION
-  if (comm->ceColl.ceFaults & CE_FAULT_SYNC_PREP) {
-    WARN("CE: fault injection: ncclPrepUCSync returning ncclSystemError (rank %d)", comm->rank);
-    return ncclSystemError;
-  }
+  NCCLCHECK(ceFaultCheck(comm, CE_FAULT_SYNC_PREP, "ncclPrepUCSync"));
 #endif
 
   uint32_t* readyPtrs    = (uint32_t*)comm->ceColl.baseUCSymReadyPtr;
@@ -331,10 +336,7 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
   ncclResult_t ret = ncclSuccess;
 
 #ifdef ENABLE_FAULT_INJECTION
-  if (comm->ceColl.ceFaults & CE_FAULT_LAUNCH_OP) {
-    WARN("CE: fault injection: ncclCeLaunchBatchOps returning ncclSystemError (rank %d)", comm->rank);
-    return ncclSystemError;
-  }
+  NCCLCHECK(ceFaultCheck(comm, CE_FAULT_LAUNCH_OP, "ncclCeLaunchBatchOps"));
 #endif
 
   // Check if there are any operations to perform

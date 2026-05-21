@@ -43,6 +43,12 @@ class CeInternalMPITest : public MPITestBase
 protected:
     ncclComm* ceComm = nullptr;
 
+    // RAII guards: set NCCL_DEBUG=INFO and NCCL_DEBUG_SUBSYS=ALL before communicator
+    // creation so that CE init/dispatch log lines are always available for diagnostics,
+    // regardless of the external environment.  Mirrors the pattern in CeMPITest.
+    std::unique_ptr<MPIHelpers::MpiEnvGuard> debugGuard_;
+    std::unique_ptr<MPIHelpers::MpiEnvGuard> debugSubsysGuard_;
+
     void SetUp() override
     {
         MPITestBase::SetUp();
@@ -50,6 +56,10 @@ protected:
         if(!isCeDispatchConfigured())
             GTEST_SKIP() << "CE requires ROCm >= 7.12 or 7.0.2.x, "
                             "NCCL_CTA_POLICY=2, NCCL_LOCAL_REGISTER=0, NCCL_CUMEM_ENABLE=1";
+
+        // Set debug env vars before ncclCommInitRank so the communicator picks them up.
+        debugGuard_       = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_DEBUG",        "INFO");
+        debugSubsysGuard_ = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_DEBUG_SUBSYS", "ALL");
 
         ASSERT_EQ(createTestCommunicator(), ncclSuccess)
             << "ncclCommInitRank failed";
@@ -73,6 +83,8 @@ protected:
                   ncclSuccess);
         ASSERT_EQ(hipStreamSynchronize(getActiveStream()), hipSuccess);
 
+        // White-box check: baseUCSymReadyPtr is ncclCeInit's primary output — it is
+        // the definition of "CE initialized".
         if(ceComm->ceColl.baseUCSymReadyPtr == nullptr)
             GTEST_SKIP() << "CE not available on this system (ncclCeInit was not triggered)";
     }
@@ -80,7 +92,11 @@ protected:
     void TearDown() override
     {
         ceComm = nullptr;
+        // Destroy communicator before releasing the debug guards so any final
+        // NCCL log lines from comm teardown still go to the debug output.
         MPITestBase::TearDown();
+        debugSubsysGuard_.reset();
+        debugGuard_.reset();
     }
 
     // Batch buffer for ncclPrepUCSync: capacity = NCCL_CE_SYNC_OPS_PER_RANK_UC * nRanks.
@@ -178,9 +194,8 @@ TEST_F(CeInternalMPITest, IndependentCeStatePerComm)
     // The test runner's --timeout option provides the external deadline.
     ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
 
-    // White-box check: baseUCSymReadyPtr is set by ncclCeInit and is the most direct
-    // indicator that CE initialized on comm2.  Log-based detection would require
-    // capturing per-rank stderr across MPI processes, which is unavailable here.
+    // White-box check: baseUCSymReadyPtr is ncclCeInit's primary output — it is
+    // the definition of "CE initialized on this comm".
     if(ceComm2->ceColl.baseUCSymReadyPtr == nullptr)
         GTEST_SKIP() << "CE not available on comm2";
 
