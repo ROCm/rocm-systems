@@ -45,7 +45,7 @@ class TestUserAPI(RocprofsysTest):
         "args",
     ]
     BASELINE_FAIL_REGEX = ["Pushing custom region"]
-    REWRITE_FAIL_REGEX = ["0 instrumented loops in procedure"]
+    BINARY_REWRITE_FAIL_REGEX = ["0 instrumented loops in procedure"]
     CUSTOM_MARKER_PASS_REGEX = ["Pushing custom region :: run.10. x 1000"]
 
     def test(self, mode):
@@ -60,8 +60,8 @@ class TestUserAPI(RocprofsysTest):
             result,
             mode,
             baseline_fail_regex=self.BASELINE_FAIL_REGEX,
-            rewrite_fail_regex=self.REWRITE_FAIL_REGEX,
-            rewrite_run_pass_regex=self.CUSTOM_MARKER_PASS_REGEX,
-            runtime_pass_regex=self.CUSTOM_MARKER_PASS_REGEX,
+            binary_rewrite_fail_regex=self.BINARY_REWRITE_FAIL_REGEX,
+            binary_rewrite_pass_regex=self.CUSTOM_MARKER_PASS_REGEX,
+            runtime_instrument_pass_regex=self.CUSTOM_MARKER_PASS_REGEX,
             sampling_pass_regex=self.CUSTOM_MARKER_PASS_REGEX,
         )

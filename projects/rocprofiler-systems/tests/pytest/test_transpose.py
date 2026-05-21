@@ -223,7 +223,7 @@ class TestTranspose(RocprofsysTest):
         self.assert_regex(
             result,
             mode,
-            rewrite_fail_regex=["0 instrumented loops in procedure transpose"],
+            binary_rewrite_fail_regex=["0 instrumented loops in procedure transpose"],
         )
 
     @pytest.mark.timeout(120)
@@ -332,8 +332,8 @@ class TestTransposeROCProfiler(RocprofsysTest):
 @pytest.mark.mpi_optional("transpose")
 @pytest.mark.rocprofiler
 @pytest.mark.class_name("transpose-gpu-perf-counters")
+@pytest.mark.timeout(120)
 class TestTransposeGPUPerfCounters(RocprofsysTest):
-
     @pytest.mark.rocpd("gpu_perf_counter_env")
     def test(
         self,
@@ -347,8 +347,8 @@ class TestTransposeGPUPerfCounters(RocprofsysTest):
             "transpose",
             env=gpu_perf_counter_env,
             check_target_arch=True,
-            timeout=120,
-            mpi_ranks=num_processes,
+            launcher="mpi",
+            num_procs=num_processes,
         )
         self.assert_regex(result)
         self.assert_perfetto(

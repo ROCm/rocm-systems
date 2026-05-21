@@ -157,8 +157,8 @@ class TestOpenMPCG(RocprofsysTest):
 
 class TestOpenMPLU(RocprofsysTest):
     REWRITE_ARGS = ["-e", "-v", "2", "--instrument-loops"]
-    REWRITE_PASS_REGEX = ["\\|_omp_"]
-    REWRITE_FAIL_REGEX = ["0 instrumented loops in procedure"]
+    BINARY_REWRITE_PASS_REGEX = ["\\|_omp_"]
+    BINARY_REWRITE_FAIL_REGEX = ["0 instrumented loops in procedure"]
     DURATION_SAMPLING_PASS_REGEX = [
         r"Sampler for thread 0 will be triggered 1000\.0x per second of CPU-time",
         r"Sampler for thread 0 will be triggered 500\.0x per second of wall-time",
@@ -191,8 +191,8 @@ class TestOpenMPLU(RocprofsysTest):
         self.assert_regex(
             result,
             mode,
-            rewrite_pass_regex=self.REWRITE_PASS_REGEX,
-            rewrite_fail_regex=self.REWRITE_FAIL_REGEX,
+            binary_rewrite_pass_regex=self.BINARY_REWRITE_PASS_REGEX,
+            binary_rewrite_fail_regex=self.BINARY_REWRITE_FAIL_REGEX,
         )
 
     @pytest.mark.timeout(300)
@@ -276,8 +276,8 @@ class TestOpenMPFortran(RocprofsysTest):
         self.assert_regex(
             result,
             mode,
-            rewrite_pass_regex=["omp_parallel"],
-            runtime_pass_regex=["omp_parallel"],
+            binary_rewrite_pass_regex=["omp_parallel"],
+            runtime_instrument_pass_regex=["omp_parallel"],
             sys_run_pass_regex=["omp_parallel"],
         )
 
@@ -318,7 +318,7 @@ class TestOpenMPFortran(RocprofsysTest):
         self.assert_regex(
             result,
             mode,
-            rewrite_pass_regex=["omp_offloading"],
-            runtime_pass_regex=["omp_offloading"],
+            binary_rewrite_pass_regex=["omp_offloading"],
+            runtime_instrument_pass_regex=["omp_offloading"],
             sys_run_pass_regex=["omp_offloading"],
         )

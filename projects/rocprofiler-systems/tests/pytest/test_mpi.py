@@ -87,8 +87,8 @@ class TestMPI(RocprofsysTest):
             "--min-instructions",
             "0",
         ]
-        REWRITE_PASS_REGEX = [r"perfetto-trace-0\.proto", r"wall_clock-0\.txt"]
-        REWRITE_FAIL_REGEX = [
+        BINARY_REWRITE_PASS_REGEX = [r"perfetto-trace-0\.proto", r"wall_clock-0\.txt"]
+        BINARY_REWRITE_FAIL_REGEX = [
             r"Outputting.*(perfetto-trace|trip_count|sampling_percent|sampling_cpu_clock|sampling_wall_clock|wall_clock)-[0-9][0-9]+.(json|txt|proto)"
         ]
         ENV = {"ROCPROFSYS_VERBOSE": "1"}
@@ -104,8 +104,8 @@ class TestMPI(RocprofsysTest):
         self.assert_regex(
             result,
             mode,
-            rewrite_pass_regex=REWRITE_PASS_REGEX,
-            rewrite_fail_regex=REWRITE_FAIL_REGEX,
+            binary_rewrite_pass_regex=BINARY_REWRITE_PASS_REGEX,
+            binary_rewrite_fail_regex=BINARY_REWRITE_FAIL_REGEX,
         )
 
     @pytest.mark.parametrize("mode", ["sampling", "binary_rewrite", "sys_run"])
@@ -120,8 +120,10 @@ class TestMPI(RocprofsysTest):
             "--min-instructions",
             "0",
         ]
-        REWRITE_PASS_REGEX = [r"Successfully executed: .+rocprof-sys-merge-output.sh.*"]
-        REWRITE_FAIL_REGEX = ["Script not found", "Failed to execute"]
+        BINARY_REWRITE_PASS_REGEX = [
+            r"Successfully executed: .+rocprof-sys-merge-output.sh.*"
+        ]
+        BINARY_REWRITE_FAIL_REGEX = ["Script not found", "Failed to execute"]
         ENV = {
             "ROCPROFSYS_VERBOSE": "1",
             "ROCPROFSYS_MERGE_PERFETTO_FILES": "ON",
@@ -137,8 +139,8 @@ class TestMPI(RocprofsysTest):
         self.assert_regex(
             result,
             mode,
-            rewrite_pass_regex=REWRITE_PASS_REGEX,
-            rewrite_fail_regex=REWRITE_FAIL_REGEX,
+            binary_rewrite_pass_regex=BINARY_REWRITE_PASS_REGEX,
+            binary_rewrite_fail_regex=BINARY_REWRITE_FAIL_REGEX,
         )
 
 
@@ -193,7 +195,7 @@ class TestMPIP(RocprofsysTest):
             "--min-instructions",
             "0",
         ]
-        REWRITE_PASS_REGEX = [
+        BINARY_REWRITE_PASS_REGEX = [
             r">>> mpi-example.inst",
             r">>> MPI_Init_thread",
             r">>> pthread_create",
@@ -214,5 +216,5 @@ class TestMPIP(RocprofsysTest):
         self.assert_regex(
             result,
             mode,
-            rewrite_pass_regex=REWRITE_PASS_REGEX,
+            binary_rewrite_pass_regex=BINARY_REWRITE_PASS_REGEX,
         )

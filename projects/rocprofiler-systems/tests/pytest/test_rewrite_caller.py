@@ -32,7 +32,7 @@ class TestRewriteCaller(RocprofsysTest):
         "functions",
     ]
     BASELINE_PASS_REGEX = ["number of calls made = 17"]
-    REWRITE_PASS_REGEX = [
+    BINARY_REWRITE_PASS_REGEX = [
         r"\[function\]\[Forcing\] caller-include-regex :: 'outer'",
         r">>> ._outer ([ \|]+) 17",
     ]
@@ -49,6 +49,5 @@ class TestRewriteCaller(RocprofsysTest):
         self.assert_regex(
             result,
             mode,
-            rewrite_pass_regex=self.REWRITE_PASS_REGEX,
-            rewrite_run_pass_regex=self.REWRITE_PASS_REGEX,
+            binary_rewrite_pass_regex=self.BINARY_REWRITE_PASS_REGEX,
         )

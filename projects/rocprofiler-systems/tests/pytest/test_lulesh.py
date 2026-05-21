@@ -66,8 +66,8 @@ class TestLulesh(RocprofsysTest):
         self.assert_regex(
             result,
             mode,
-            rewrite_pass_regex=[r"\|_\[kokkos\] [a-zA-Z]"],
-            runtime_pass_regex=[r"\|_\[kokkos\] [a-zA-Z]"],
+            binary_rewrite_pass_regex=[r"\|_\[kokkos\] [a-zA-Z]"],
+            runtime_instrument_pass_regex=[r"\|_\[kokkos\] [a-zA-Z]"],
         )
 
     @pytest.mark.baseline
@@ -173,5 +173,5 @@ class TestLulesh(RocprofsysTest):
         self.assert_regex(
             result,
             mode,
-            rewrite_fail_regex=["0 instrumented loops in procedure"],
+            binary_rewrite_fail_regex=["0 instrumented loops in procedure"],
         )
