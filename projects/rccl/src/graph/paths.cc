@@ -1118,11 +1118,14 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     // Round to next pow2 nChannelsPerPeer and nChannels
     comm->p2pnChannelsPerPeer = pow2Up(minChannels);
     // Doubling P2P channels per peer on single node
+    // However, p2pnChannels must be >= p2pnChannelsPerPeer: the device-side inverse
+    // ncclP2pChannelToPart cannot recover part indices >= nP2pChannels, so
+    // higher parts silently alias onto lower ones and produce wrong data
     if (comm->topo->nodes[GPU].count == comm->topo->nRanks &&
         (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") ||
          IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") ||
          IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250"))) comm->p2pnChannelsPerPeer *= 2;
-    comm->p2pnChannels = std::min(pow2Up(comm->p2pnChannels), 4*CHANNEL_LIMIT);
+    comm->p2pnChannels = std::min(std::max(pow2Up(comm->p2pnChannels), pow2Up(comm->p2pnChannelsPerPeer)), 4*CHANNEL_LIMIT);
     // p2pnChannelsPerPeer cannot be greater than MAXCHANNELS
     // Capping the comm->p2pnChannels to 32 for send/recv based collectives on multi-node MI350 (2 and 4 nodes)
     if (((comm->nNodes == 2 && comm->topo->nRanks == 16) || (comm->nNodes == 4 && comm->topo->nRanks == 32)) && (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950"))) comm->p2pnChannels = std::min(comm->p2pnChannels, 32);
@@ -1132,7 +1135,9 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     if (ncclParamP2pCuReduceScaleEnable() && comm->nNodes >= 16 && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")) comm->p2pnChannels = std::min(comm->p2pnChannels, 16);
     comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, MAXCHANNELS);
   }
-
+  // Final safety: arch-specific caps above may shrink p2pnChannels below
+  // p2pnChannelsPerPeer; clamp to preserve the device-side invariant.
+  comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, comm->p2pnChannels);
   // Init channels that weren't used so far
   for (int c=comm->nChannels; c<std::max(comm->nChannels, comm->p2pnChannels); c++) NCCLCHECK(initChannel(comm, c));
 
