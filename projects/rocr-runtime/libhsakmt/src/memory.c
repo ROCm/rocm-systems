@@ -986,8 +986,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtHandleExport(const HsaHandleExportDesc* desc,
 
 		if (ret)
 			return HSAKMT_STATUS_INVALID_HANDLE;
+
 		break;
 	}
+	default:
 	case HSA_EXTERNAL_HANDLE_GEM_FLINK_NAME:
 	case HSA_EXTERNAL_HANDLE_KMS:
 		return HSAKMT_STATUS_NOT_SUPPORTED;
@@ -1045,10 +1047,11 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtHandleImport(const HsaHandleImportDesc* import_des
 	break;
 	case HSA_EXTERNAL_HANDLE_GEM_FLINK_NAME:
 	case HSA_EXTERNAL_HANDLE_KMS:
+	default:
 			return HSAKMT_STATUS_NOT_SUPPORTED;
 	}
 	
-	ret = hsakmt_amdgpu_bo_import(devhandle, type, import_desc->dmabuf_fd, &res);
+	ret = amdgpu_bo_import(devhandle, type, import_desc->dmabuf_fd, &res);
 	if (ret)
 		return HSAKMT_STATUS_ERROR;
 
