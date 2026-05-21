@@ -208,6 +208,11 @@ if __name__ == "__main__":
         action="store_true",
         help="Verify each counter track has paired start/end entries (even count, last value is 0)",
     )
+    parser.add_argument(
+        "--match-by-label",
+        action="store_true",
+        help="Match slices by kernel name and sum counts across depths (non-positional)",
+    )
 
     args = parser.parse_args()
 
