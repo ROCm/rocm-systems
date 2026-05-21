@@ -4,9 +4,11 @@
 #include "gtest/gtest.h"
 
 #include "core/perfetto/engine.hpp"
+#include "core/perfetto/packet_framing.hpp"
 #include "core/perfetto/sinks.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <thread>
 #include <variant>
 #include <vector>
@@ -161,24 +163,19 @@ TEST(perfetto_engine_cached, start_then_stop_with_no_emission_drains_empty)
     EXPECT_TRUE(rec.records().empty());
 }
 
-// collect_packet_bytes wraps each raw TracePacket in the Trace.packets
-// length-delimited header (tag 0x0A + varint(size)). These helpers
-// compute the expected framed byte sequence so tests stay readable.
+// Builds the expected framed byte sequence for a raw TracePacket payload
+// by reusing the production helpers — keeps the test in lockstep with the
+// engine's framing rather than re-deriving the protobuf wire format here.
 namespace
 {
 std::vector<char>
 frame_packet(const std::vector<char>& payload)
 {
     std::vector<char> out;
-    out.reserve(payload.size() + 2);
-    out.push_back(static_cast<char>(0x0A));  // field 1, wire type 2
-    std::size_t v = payload.size();
-    while(v >= 0x80)
-    {
-        out.push_back(static_cast<char>((v & 0x7F) | 0x80));
-        v >>= 7;
-    }
-    out.push_back(static_cast<char>(v));
+    out.reserve(payload.size() + rocprofsys::core::TRACE_PACKETS_TAG_BYTES +
+                rocprofsys::core::VARINT_MAX_BYTES);
+    out.push_back(static_cast<char>(rocprofsys::core::TRACE_PACKETS_TAG));
+    rocprofsys::core::append_varint(out, static_cast<std::uint64_t>(payload.size()));
     out.insert(out.end(), payload.begin(), payload.end());
     return out;
 }

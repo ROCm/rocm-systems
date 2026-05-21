@@ -139,8 +139,10 @@ public:
     // Called by the cached-mode interceptor TLS to append per-pid bytes
     // during emission. Public so the TU-private interceptor inside the
     // .cpp can reach it without crossing the private-member boundary; not
-    // intended for outside callers.
-    void collect_packet_bytes(int pid, const void* data, std::size_t size);
+    // intended for outside callers. noexcept because it runs inside the
+    // Perfetto SDK callback frame, which is not exception-safe; internal
+    // bad_alloc is caught and the packet is dropped with LOG_ERROR.
+    void collect_packet_bytes(int pid, const void* data, std::size_t size) noexcept;
 
 private:
     struct impl;

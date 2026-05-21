@@ -139,9 +139,13 @@ struct perfetto_engine::impl
     perfetto_engine::mode current_mode{ perfetto_engine::mode::live_fd };
     trace_sink*           active_sink{ nullptr };
 
-    // Cached-mode per-pid byte collector. Protected by collector_mutex.
+    // Cached-mode per-pid byte collector. Map structure is mutated under
+    // collector_mutex during preregister_pids; once that call has completed,
+    // the structure is frozen and `collected_bytes_frozen` is released so
+    // worker threads can lock-free `find()` without racing the population.
     std::mutex                                 collector_mutex{};
     std::unordered_map<int, std::vector<char>> collected_bytes{};
+    std::atomic<bool>                          collected_bytes_frozen{ false };
 
     static std::once_flag s_sdk_init_flag;
     static bool           s_sdk_init_succeeded;
@@ -328,6 +332,9 @@ perfetto_engine::start(mode m, trace_sink& sink)
         std::lock_guard<std::mutex> lk{ m_impl->collector_mutex };
         m_impl->collected_bytes.clear();
     }
+    // Reset the freeze publication so a subsequent preregister_pids on this
+    // engine instance is required before the hot path will accept emissions.
+    m_impl->collected_bytes_frozen.store(false, std::memory_order_release);
 
     m_impl->active_pid   = pid;
     m_impl->running      = true;
@@ -431,7 +438,17 @@ perfetto_engine::stop()
         }
     }
 
-    std::visit([](auto& s) { s.finalize(); }, *sink);
+    // finalize() must run regardless of per-source drain failures, and a
+    // finalize-thrown exception is captured the same way as a per-source one
+    // so the rethrow below honors the documented "first exception wins"
+    // contract whether the throw came from a sink drain or its finalize.
+    try
+    {
+        std::visit([](auto& s) { s.finalize(); }, *sink);
+    } catch(...)
+    {
+        if(!first_exc) first_exc = std::current_exception();
+    }
 
     if(first_exc) std::rethrow_exception(first_exc);
 }
@@ -484,45 +501,92 @@ get_emitting_pid() noexcept
     return t_emitting_pid;
 }
 
-void
-perfetto_engine::preregister_pids(const std::vector<int>& source_pids)
+// 8 MiB up-front reservation per pid lets the hot path append packets with
+// amortized O(1) push_back while typically avoiding any reallocation —
+// each parser thread emits ~1-10 MiB of framed bytes for a non-trivial
+// workload. Sized to dominate the typical case; larger traces still grow
+// geometrically thereafter.
+namespace
 {
-    std::lock_guard<std::mutex> lk{ m_impl->collector_mutex };
-    for(int pid : source_pids)
-        m_impl->collected_bytes.try_emplace(pid);
+constexpr std::size_t COLLECTED_BYTES_SLAB_SIZE = std::size_t{ 8 } * 1024 * 1024;
 }
 
 void
-perfetto_engine::collect_packet_bytes(int pid, const void* data, std::size_t size)
+perfetto_engine::preregister_pids(const std::vector<int>& source_pids)
+{
+    if(m_impl->collected_bytes_frozen.load(std::memory_order_acquire))
+    {
+        LOG_ERROR("preregister_pids called after the map was frozen by the first "
+                  "emission; new pids cannot be added without restarting the engine");
+        return;
+    }
+
+    {
+        std::lock_guard<std::mutex> lk{ m_impl->collector_mutex };
+        for(int pid : source_pids)
+        {
+            auto& bytes = m_impl->collected_bytes[pid];
+            bytes.reserve(COLLECTED_BYTES_SLAB_SIZE);
+        }
+    }
+
+    // Release publishes every collector_mutex-guarded map write above to any
+    // worker thread that observes the frozen flag via acquire in
+    // collect_packet_bytes — the hot path then runs lock-free safely.
+    m_impl->collected_bytes_frozen.store(true, std::memory_order_release);
+}
+
+void
+perfetto_engine::collect_packet_bytes(int pid, const void* data,
+                                      std::size_t size) noexcept
 {
     if(data == nullptr || size == 0) return;
 
-    auto it = m_impl->collected_bytes.find(pid);
-    if(it == m_impl->collected_bytes.end())
+    // Acquire pairs with preregister_pids' release: refuses emissions until
+    // the map population is published, eliminating the data race the previous
+    // "frozen by convention" comment relied on.
+    if(!m_impl->collected_bytes_frozen.load(std::memory_order_acquire))
     {
-        // pid was not preregistered. With the 1:1 parser-thread:pid
-        // invariant, lock-free append requires the map structure to be
-        // frozen before emission starts — so this branch indicates a
-        // setup bug (caller forgot to call preregister_pids). Drop the
-        // packet rather than risk a concurrent map mutation.
-        LOG_ERROR("perfetto cached collector dropped packet for unregistered pid {}",
+        LOG_ERROR("perfetto cached collector dropped packet for pid {} — "
+                  "preregister_pids has not run yet",
                   pid);
         return;
     }
 
-    // Lock-free hot path: the map structure is frozen (preregister_pids
-    // populated all entries before emission started), and this pid's
-    // vector has exactly one writer thread (the parser owning this pid).
-    // The framing wraps each raw TracePacket in a length-delimited
-    // Trace.packets field so concatenation forms a valid Trace proto.
-    auto&          bytes             = it->second;
-    constexpr auto MAX_VARINT_BYTES  = std::size_t{ 10 };
-    constexpr auto PACKETS_TAG_BYTES = std::size_t{ 1 };
-    bytes.reserve(bytes.size() + PACKETS_TAG_BYTES + MAX_VARINT_BYTES + size);
-    bytes.push_back(static_cast<char>(TRACE_PACKETS_TAG));
-    append_varint(bytes, static_cast<std::uint64_t>(size));
-    bytes.insert(bytes.end(), static_cast<const char*>(data),
-                 static_cast<const char*>(data) + size);
+    try
+    {
+        auto it = m_impl->collected_bytes.find(pid);
+        if(it == m_impl->collected_bytes.end())
+        {
+            LOG_ERROR("perfetto cached collector dropped packet for unregistered pid {}",
+                      pid);
+            return;
+        }
+
+        // Lock-free hot path: the map structure is frozen (preregister_pids
+        // populated all entries before emission started), and this pid's
+        // vector has exactly one writer thread (the parser owning this pid).
+        // The framing wraps each raw TracePacket in a length-delimited
+        // Trace.packets field so concatenation forms a valid Trace proto.
+        // Per-call reserve() is deliberately omitted — the 8 MiB slab from
+        // preregister_pids absorbs typical traces and vector's geometric
+        // growth handles overruns without the O(N^2) re-copy cost that a
+        // per-call exact-fit reserve would incur.
+        auto& bytes = it->second;
+        bytes.push_back(static_cast<char>(TRACE_PACKETS_TAG));
+        append_varint(bytes, static_cast<std::uint64_t>(size));
+        bytes.insert(bytes.end(), static_cast<const char*>(data),
+                     static_cast<const char*>(data) + size);
+    } catch(...)
+    {
+        // The SDK interceptor callback frame is not exception-safe; bad_alloc
+        // from vector growth (or any other throwing operation) is captured
+        // here so it cannot unwind through Perfetto SDK code that does not
+        // expect C++ exceptions.
+        LOG_ERROR("perfetto cached collector dropped packet for pid {} on internal "
+                  "exception",
+                  pid);
+    }
 }
 
 }  // namespace core

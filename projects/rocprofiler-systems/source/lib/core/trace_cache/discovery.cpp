@@ -4,6 +4,7 @@
 #include "core/trace_cache/discovery.hpp"
 
 #include "core/config.hpp"
+#include "core/perfetto/merge_script.hpp"
 #include "core/timemory.hpp"
 #include "core/trace_cache/cacheable.hpp"
 #include "logger/debug.hpp"
@@ -140,27 +141,8 @@ merge_perfetto_files()
 
     if(cached_mpi_rank != 0) return;
 
-    auto _filename      = config::get_perfetto_output_filename();
-    auto _output_folder = tim::filepath::dirname(_filename);
-    auto _script_path   = std::string{ "rocprof-sys-merge-output.sh" };
-    auto _script_dir    = get_env("ROCPROFSYS_SCRIPT_PATH", std::string{}, false);
-
-    if(!_script_dir.empty())
-        _script_path = fmt::format("{}/{}", _script_dir, _script_path);
-
-    if(!tim::filepath::exists(_script_path))
-    {
-        LOG_WARNING("Merge script not found: {}", _script_path);
-        return;
-    }
-
-    auto _command = _script_path + " '" + _output_folder + "'";
-    int  result   = system(_command.c_str());
-
-    if(result != 0)
-        LOG_ERROR("Failed to execute merge script: {}", _command);
-    else
-        LOG_INFO("Successfully executed: {}", _command);
+    rocprofsys::core::perfetto::run_merge_script(
+        tim::filepath::dirname(config::get_perfetto_output_filename()));
 }
 
 }  // namespace rocprofsys::trace_cache::discovery

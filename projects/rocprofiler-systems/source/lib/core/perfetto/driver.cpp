@@ -7,21 +7,18 @@
 #include "core/output_file_registry.hpp"
 #include "core/perfetto/engine.hpp"
 #include "core/perfetto/fwd.hpp"
+#include "core/perfetto/merge_script.hpp"
 #include "core/perfetto/sinks.hpp"
 #include "core/timemory.hpp"
 #include "core/utility.hpp"
 #include "library/runtime.hpp"
 #include "logger/debug.hpp"
 
-#include <cerrno>
 #include <chrono>
 #include <cstdio>
-#include <cstdlib>
 #include <fcntl.h>
 #include <memory>
 #include <string>
-#include <sys/wait.h>
-#include <unistd.h>
 #include <utility>
 #include <vector>
 
@@ -66,6 +63,11 @@ namespace
 {
 std::atomic<live_perfetto_driver*> g_active_driver{ nullptr };
 
+// 0600 (-rw-------) keeps the live-mode tmp trace readable only by the
+// owning process, matching the threat model that profiling data may carry
+// callstacks the user does not want world-readable on shared workstations.
+constexpr ::mode_t TMP_FILE_PERMS = 0600;
+
 // When ROCPROFSYS_USE_MPI is enabled and ROCPROFSYS_PERFETTO_COMBINED_TRACES
 // is set, gather every rank's trace bytes into a single buffer on the
 // collecting rank so the live sink writes one combined .proto instead of one
@@ -82,73 +84,22 @@ gather_combined_trace_bytes(std::vector<char> local_bytes)
     // variable-size byte buffers and the collapse_processes setting.
     using perfetto_mpi_get_t = tim::operation::finalize::mpi_get<char_vec_t, true>;
 
-    auto _rank_data = std::vector<char_vec_t>{};
-    auto _combine   = [](char_vec_t& _dst, const char_vec_t& _src) -> char_vec_t& {
-        _dst.reserve(_dst.size() + _src.size());
-        for(auto&& itr : _src)
-            _dst.emplace_back(itr);
-        return _dst;
+    auto rank_data = std::vector<char_vec_t>{};
+    auto combine   = [](char_vec_t& dst, const char_vec_t& src) -> char_vec_t& {
+        dst.insert(dst.end(), src.begin(), src.end());
+        return dst;
     };
 
     perfetto_mpi_get_t{ config::get_perfetto_combined_traces(),
-                        settings::node_count() }(_rank_data, local_bytes, _combine);
+                        settings::node_count() }(rank_data, local_bytes, combine);
 
     char_vec_t combined{};
-    for(auto& itr : _rank_data)
-        combined = (combined.empty()) ? std::move(itr) : _combine(combined, itr);
+    for(auto& itr : rank_data)
+        combined = (combined.empty()) ? std::move(itr) : combine(combined, itr);
     return combined;
 #else
     return local_bytes;
 #endif
-}
-
-// Spawns rocprof-sys-merge-output.sh on the directory containing the
-// freshly-written perfetto trace so multi-rank or multi-pid outputs end up in
-// one merged.proto. Rank 0 only — other ranks return without forking. Uses
-// fork+execlp instead of std::system to avoid the shell-injection footprint
-// when _output_folder contains characters that would terminate a
-// single-quoted argument (a single quote, in particular).
-void
-run_merge_output_script(const std::string& output_filename)
-{
-    if(dmp::rank() != 0) return;
-
-    auto _output_folder = filepath::dirname(output_filename);
-    auto _script_path   = std::string{ "rocprof-sys-merge-output.sh" };
-    auto _script_dir    = get_env("ROCPROFSYS_SCRIPT_PATH", std::string{}, false);
-
-    if(!_script_dir.empty())
-        _script_path = fmt::format("{}/{}", _script_dir, _script_path);
-
-    if(!filepath::exists(_script_path))
-    {
-        LOG_WARNING("Script not found: {}", _script_path);
-        return;
-    }
-
-    pid_t pid = ::fork();
-    if(pid < 0)
-    {
-        LOG_ERROR("fork failed for merge script {}: errno={}", _script_path, errno);
-        return;
-    }
-    if(pid == 0)
-    {
-        ::execlp(_script_path.c_str(), _script_path.c_str(), _output_folder.c_str(),
-                 nullptr);
-        // execlp only returns on failure
-        ::_exit(127);
-    }
-
-    int status = 0;
-    while(::waitpid(pid, &status, 0) < 0 && errno == EINTR)
-    {
-    }
-    if(WIFEXITED(status) && WEXITSTATUS(status) == 0)
-        LOG_INFO("Successfully executed: {} {}", _script_path, _output_folder);
-    else
-        LOG_ERROR("Failed to execute: {} {} (status={})", _script_path, _output_folder,
-                  status);
 }
 }  // namespace
 
@@ -185,7 +136,7 @@ live_perfetto_driver::start()
         if(!m_tmp_file)
         {
             m_tmp_file = config::get_tmp_file("perfetto-trace", "proto");
-            m_tmp_file->open(O_RDWR | O_CREAT | O_TRUNC, 0600);
+            m_tmp_file->open(O_RDWR | O_CREAT | O_TRUNC, TMP_FILE_PERMS);
         }
         fd = m_tmp_file->fd;
     }
@@ -229,7 +180,8 @@ live_perfetto_driver::post_process(bool&                 perfetto_output_error,
     sink.on_source_drained(static_cast<int>(pid), std::move(bytes));
     sink.finalize();
 
-    run_merge_output_script(config::get_perfetto_output_filename());
+    core::perfetto::run_merge_script(
+        filepath::dirname(config::get_perfetto_output_filename()));
 
     if(m_tmp_file)
     {

@@ -19,6 +19,7 @@ set(core_sources
     ${CMAKE_CURRENT_LIST_DIR}/perf.cpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto/driver.cpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto/engine.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/perfetto/merge_script.cpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto/sinks.cpp
     ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.cpp
     ${CMAKE_CURRENT_LIST_DIR}/state.cpp

@@ -127,6 +127,17 @@ public:
     , m_finalize_fn{ +[](void* p) { static_cast<T*>(p)->finalize(); } }
     {}
 
+    // Rule of 5: the templated forwarding ctor disables implicit copy/move
+    // unless we declare them explicitly. All members are trivially copyable
+    // and the view is non-owning, so defaulted copy/move is the correct
+    // semantics — defaulting makes the intent visible at the type level
+    // rather than relying on compiler heuristics.
+    polymorphic_sink_view(const polymorphic_sink_view&)            = default;
+    polymorphic_sink_view(polymorphic_sink_view&&)                 = default;
+    polymorphic_sink_view& operator=(const polymorphic_sink_view&) = default;
+    polymorphic_sink_view& operator=(polymorphic_sink_view&&)      = default;
+    ~polymorphic_sink_view()                                       = default;
+
     void on_source_drained(int source_id, std::vector<char> bytes)
     {
         m_drain_fn(m_target, source_id, std::move(bytes));
@@ -137,6 +148,8 @@ private:
     using drain_fn_t    = void (*)(void*, int, std::vector<char>);
     using finalize_fn_t = void (*)(void*);
 
+    // Non-owning: the caller keeps the target alive for as long as the view
+    // is reachable. Stored as void* because the type was erased at ctor.
     void*         m_target{ nullptr };
     drain_fn_t    m_drain_fn{ nullptr };
     finalize_fn_t m_finalize_fn{ nullptr };
