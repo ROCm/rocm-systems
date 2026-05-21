@@ -25,6 +25,7 @@ indirs = [
     "tests/workloads/vcopy/MI300A_A1",
     "tests/workloads/vcopy/MI300X_A1",
     "tests/workloads/vcopy/MI350",
+    "tests/workloads/vcopy/RDNA35_HALO",
 ]
 
 roofline_dir = "tests/workloads/mem_levels_HBM/MI200"
@@ -713,7 +714,10 @@ def test_dispatch_5(binary_handler_analyze_rocprof_compute):
 @pytest.mark.misc
 def test_gpu_ids(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        if dir == "tests/workloads/vcopy/MI350":
+        if (
+            dir == "tests/workloads/vcopy/MI350"
+            or dir == "tests/workloads/vcopy/RDNA35_HALO"
+        ):
             gpu_id = "0"
         else:
             gpu_id = "2"

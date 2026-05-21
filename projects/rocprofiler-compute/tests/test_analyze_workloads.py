@@ -8,6 +8,7 @@
 import os
 
 import common
+import pytest
 
 config = {}
 config["cleanup"] = True if "PYTEST_XDIST_WORKER_COUNT" in os.environ else False
@@ -28,6 +29,25 @@ def test_analyze_vcopy_MI100(binary_handler_analyze_rocprof_compute):
 
 def test_analyze_vcopy_MI200(binary_handler_analyze_rocprof_compute):
     workload_dir = common.setup_workload_dir("tests/workloads/vcopy/MI200")
+
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        workload_dir,
+    ])
+    assert code == 0
+
+    common.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.parametrize(
+    "workload_type",
+    ["vcopy", "dispatch_0", "ipblocks_CU", "kernel", "no_roof", "path"],
+)
+def test_analyze_RDNA35_HALO(binary_handler_analyze_rocprof_compute, workload_type):
+    workload_dir = common.setup_workload_dir(
+        f"tests/workloads/{workload_type}/RDNA35_HALO"
+    )
 
     code = binary_handler_analyze_rocprof_compute([
         "analyze",
