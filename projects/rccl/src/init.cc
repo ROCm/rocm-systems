@@ -1754,17 +1754,21 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     allGather3Data[rank].nc = std::max(allGather3Data[rank].nc, 4/ringGraph->nChannels);
   if (ringGraph->nChannels > MAXCHANNELS/2)
     allGather3Data[rank].nc = 1;
-  comm -> gfx9CheapFenceOff = 1;
+  comm -> cheapPostSendFenceOff = 1;
   #ifdef HIP_UNCACHED_MEMORY
   if(!rcclParamGfx9CheapFenceOff()){
     if(IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx942")){
-      comm -> gfx9CheapFenceOff = 0;
+      comm -> cheapPostSendFenceOff = 0;
     }
     else if(IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx950")){
-      comm -> gfx9CheapFenceOff = ROCM_VERSION < 70002 && nNodes > 1; // Enable for single node only prior to ROCm 7.0.2
+      comm -> cheapPostSendFenceOff = ROCM_VERSION < 70002 && nNodes > 1; // Enable for single node only prior to ROCm 7.0.2
+    }
+    else if(IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250")){
+      // DWORDX4 sc0+sc1 builtins now active for gfx1250; cheap fence is sufficient.
+      comm -> cheapPostSendFenceOff = 0;
     }
   }
-  INFO(NCCL_INIT, "GFX9 cheap fence is %s", comm -> gfx9CheapFenceOff ? "OFF" : "ON");
+  INFO(NCCL_INIT, "Cheap post-send fence is %s", comm -> cheapPostSendFenceOff ? "OFF" : "ON");
   #endif
   // RCCL: Only use one slice per primitive on some single node gfx9xx systems, only currently enabled for AllReduce, ReduceScatter, and AllGather
   if (IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx942") || IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx950")){
