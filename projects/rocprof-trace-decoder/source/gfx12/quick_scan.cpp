@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "quick_scan.h"
+#include "../quick_scan_export.hpp"
 
 #include <cstring>
 
@@ -36,6 +36,8 @@
 
 namespace gfx12::quick_scan
 {
+using ::quick_scan::QuickToken;
+
 namespace
 {
 
@@ -467,11 +469,13 @@ ScanFn select_scanner()
 }
 
 } // namespace
+} // namespace gfx12::quick_scan
 
+namespace quick_scan
+{
 size_t scan_gfx12(const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap)
 {
-    static const ScanFn fn = select_scanner();
+    static const gfx12::quick_scan::ScanFn fn = gfx12::quick_scan::select_scanner();
     return fn(buf, size, out, out_cap);
 }
-
-} // namespace gfx12::quick_scan
+};

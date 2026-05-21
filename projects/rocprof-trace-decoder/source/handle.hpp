@@ -114,7 +114,7 @@ public:
     void* se_data_userdata{nullptr};
 
     mutable std::condition_variable_any cv;
-    int gfxip = 0;
+    mutable std::atomic<int> gfxip = 0;
     uint64_t gfx9_header = 0;
     Pipestate pipestate{};
 

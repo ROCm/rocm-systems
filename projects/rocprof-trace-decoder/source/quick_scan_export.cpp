@@ -28,14 +28,11 @@
 #include <sstream>
 #include <vector>
 
-#include "rocprof_trace_decoder/rocprof_trace_decoder.h"
-#include "rocprof_trace_decoder/trace_decoder_instrument.h"
-
 #include "gfx9/build_standalone.h"
 #include "gfx9/gfx9token.h" // gfx9::Reg, gfx9::RegCs
-#include "gfx9/quick_scan.h"
-#include "handle.hpp"
-#include "trace_parser.hpp" // CSRegisterHandler, sqtt_token_reg_t, sqtt_event_type_t
+#include "gfx12/gfx12token.h"
+#include "mi400/mi400token.h"
+#include "quick_scan_export.hpp"
 
 //#define GET_TIMING
 
@@ -51,24 +48,46 @@
 
 namespace
 {
+using quick_scan::QuickToken;
+
+size_t scan_none(const uint8_t* buf, size_t size, QuickToken* out, size_t out_cap) { return 0; };
+
+rocprofiler_thread_trace_decoder_status_t process_events_none(
+    CSRegisterHandler& csregister,
+    const std::vector<QuickToken>& raw,
+    int n,
+    uint64_t header_skip,
+    rocprof_trace_decoder_trace_callback_t trace_callback,
+    void* userdata
+)
+{
+    return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
+};
 
 // Status-token reconstruction (build_standalone) — see
 // source/gfx9/build_standalone.{h,cpp}. Per-arch builders live next to
 // the per-arch scanner; this TU only orchestrates.
 
-inline bool is_gfx9_header(uint64_t header)
+inline int extract_gfxip(uint64_t header)
 {
-    rocprof_trace_decoder_gfx9_header_t h{.raw = header};
-    return (h.legacy_version == 0 || h.legacy_version == 0x11) && (h.gfx9_version2 >= 4 && h.gfx9_version2 <= 6);
+    {
+        rocprof_trace_decoder_gfx9_header_t h{.raw = header};
+        if ((h.legacy_version == 0 || h.legacy_version == 0x11) && (h.gfx9_version2 >= 4 && h.gfx9_version2 <= 6)) return 9;
+    }
+
+    auto hw_header = mi400::header_type{.raw = header};
+
+    if (hw_header.version == 4) return 12;
+    return 0;
 }
 
 // Templated on whether to emit dispatch/event records. The state-update path
 // (UpdateRegCS / UpdateRegNoCS) runs unconditionally; build_standalone
 // instantiates with EmitEvents=false to advance a CSRegisterHandler over the
 // chunk prefix without surfacing events to a caller that didn't ask for them.
-template <bool EmitEvents> rocprofiler_thread_trace_decoder_status_t quick_scan_gfx9(
+template <bool EmitEvents> rocprofiler_thread_trace_decoder_status_t process_events_gfx9(
     CSRegisterHandler& csregister,
-    const std::vector<gfx9::quick_scan::QuickToken>& raw,
+    const std::vector<quick_scan::QuickToken>& raw,
     int n,
     uint64_t header_skip,
     rocprof_trace_decoder_trace_callback_t trace_callback,
@@ -150,7 +169,7 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_quick
     void* userdata
 )
 {
-    thread_local std::vector<gfx9::quick_scan::QuickToken> raw{1u << 18};
+    thread_local std::vector<quick_scan::QuickToken> raw{1u << 18};
 
     if (!data || data_size < 8 || !trace_callback)
         return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
@@ -176,7 +195,7 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_quick
     if (chunk_index == 0)
     {
         uint64_t header_word = static_cast<const uint64_t*>(data)[0];
-        gfxip = is_gfx9_header(header_word) ? 9 : 0;
+        gfxip = extract_gfxip(header_word);
 
         auto decoder = HandleData::get_write_handle(handle);
         if (!decoder.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
@@ -203,6 +222,9 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_quick
         auto decoder = HandleData::get_read_handle(handle);
         if (!decoder.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
+        if (decoder->gfxip == 0)
+            decoder->gfxip = extract_gfxip(static_cast<const uint64_t*>(data)[0]);
+
         gfxip = decoder->gfxip;
     }
 
@@ -211,11 +233,14 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_quick
     data_size -= header_skip;
     buf += header_skip;
 
-    size_t ntokens = gfx9::quick_scan::scan_gfx9(buf, data_size, raw.data(), raw.size());
+    auto scanner = (gfxip == 9) ? &quick_scan::scan_gfx9 : &scan_none;
+    if (gfxip == 12) scanner = &quick_scan::scan_gfx12;
+
+    size_t ntokens = scanner(buf, data_size, raw.data(), raw.size());
     while (ntokens == raw.size())
     {
         raw.resize(raw.size() * 2);
-        ntokens = gfx9::quick_scan::scan_gfx9(buf, data_size, raw.data(), raw.size());
+        ntokens = scanner(buf, data_size, raw.data(), raw.size());
     }
 
     TIMING(t2);
@@ -255,9 +280,9 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_quick
 
     rocprofiler_thread_trace_decoder_status_t status;
     if (gfxip == 9)
-        status = quick_scan_gfx9<true>(local, raw, ntokens, header_skip, trace_callback, userdata);
+        status = process_events_gfx9<true>(local, raw, ntokens, header_skip, trace_callback, userdata);
     else
-        return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
+        status = process_events_none(local, raw, ntokens, header_skip, trace_callback, userdata);
 
     TIMING(t4);
 
@@ -327,16 +352,16 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_build
     // copy taken above. EmitEvents=false: this is a state-advance pass,
     // no callback is invoked.
 
-    thread_local std::vector<gfx9::quick_scan::QuickToken> raw{1u << 20};
+    thread_local std::vector<quick_scan::QuickToken> raw{1u << 16};
 
-    size_t ntokens = gfx9::quick_scan::scan_gfx9(buf, offset_begin, raw.data(), raw.size());
+    size_t ntokens = quick_scan::scan_gfx9(buf, offset_begin, raw.data(), raw.size());
     while (ntokens == raw.size())
     {
         raw.resize(raw.size() * 2);
-        ntokens = gfx9::quick_scan::scan_gfx9(buf, offset_begin, raw.data(), raw.size());
+        ntokens = quick_scan::scan_gfx9(buf, offset_begin, raw.data(), raw.size());
     }
 
-    quick_scan_gfx9</*EmitEvents=*/false>(temp, raw, static_cast<int>(ntokens), 0, nullptr, nullptr);
+    process_events_gfx9</*EmitEvents=*/false>(temp, raw, static_cast<int>(ntokens), 0, nullptr, nullptr);
 
     // Materialise the synthetic context as SQTT tokens. Wrapped in a
     // gfxip-keyed dispatch so additional architectures can plug their own

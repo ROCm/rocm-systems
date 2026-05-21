@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "quick_scan.h"
+#include "../quick_scan_export.hpp"
 
 #include <array>
 #include <cstring>
@@ -38,6 +38,7 @@ namespace gfx9::quick_scan
 {
 namespace
 {
+using ::quick_scan::QuickToken;
 
 // gfx9 token format (see gfx9token.h:181-199, gfx9token.cpp:29):
 //   - The low nibble of the first byte is the type id (0..15).
@@ -555,10 +556,13 @@ ScanFn select_scanner()
 
 } // namespace
 
+} // namespace gfx9::quick_scan
+
+namespace quick_scan
+{
 size_t scan_gfx9(const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap)
 {
-    thread_local const ScanFn fn = select_scanner();
+    thread_local const gfx9::quick_scan::ScanFn fn = gfx9::quick_scan::select_scanner();
     return fn(buf, size, out, out_cap);
 }
-
-} // namespace gfx9::quick_scan
+}

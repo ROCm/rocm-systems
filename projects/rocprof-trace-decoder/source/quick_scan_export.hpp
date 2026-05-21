@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,14 +20,20 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#pragma once
-
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 
-namespace gfx9::quick_scan
+#include "rocprof_trace_decoder/rocprof_trace_decoder.h"
+#include "rocprof_trace_decoder/trace_decoder_instrument.h"
+
+#include "handle.hpp"
+#include "trace_parser.hpp" // CSRegisterHandler, sqtt_token_reg_t, sqtt_event_type_t
+
+//#define GET_TIMING
+
+namespace quick_scan
 {
-
 // Captured rare-token entry. `contents` is the full 64-bit window starting
 // at the token's first byte (always safe — every gfx9 rare type is <= 8 bytes).
 // Only the bits within the type's encoded field width are meaningful;
@@ -65,5 +71,5 @@ struct QuickToken
 // Writes up to `out_cap` entries into `out` in stream order; returns the
 // number written. Single-threaded, no exceptions.
 size_t scan_gfx9(const uint8_t* buf, size_t size, QuickToken* out, size_t out_cap);
-
-} // namespace gfx9::quick_scan
+size_t scan_gfx12(const uint8_t* buf, size_t size, QuickToken* out, size_t out_cap);
+};
