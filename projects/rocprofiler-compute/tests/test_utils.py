@@ -52,6 +52,8 @@ class MockSoc:
 
 logging.trace = lambda *args, **kwargs: None
 
+ANALYSIS_CONFIGS = Path(ROOT) / "src" / "rocprof_compute_soc" / "analysis_configs"
+
 ##################################################
 ##          Generated tests                     ##
 ##################################################
@@ -4305,7 +4307,6 @@ def test_alignment_and_width():
 # =============================================================================
 
 
-@pytest.mark.list_metrics
 def test_list_metrics(binary_handler_analyze_rocprof_compute, capsys):
     return_code = binary_handler_analyze_rocprof_compute(["--list-metrics", "gfx90a"])
     assert return_code == 0
@@ -4316,39 +4317,8 @@ def test_list_metrics(binary_handler_analyze_rocprof_compute, capsys):
     assert "5.2 -> Command processor packet processor (CPC)" in output
 
 
-@pytest.mark.list_blocks
-def test_list_blocks(binary_handler_analyze_rocprof_compute, capsys):
-    return_code = binary_handler_analyze_rocprof_compute(["--list-blocks", "gfx90a"])
-    assert return_code == 0
-
-    # Test output
-    output = capsys.readouterr().out
-    assert "INDEX" in output
-    assert "BLOCK ALIAS" in output
-    assert "BLOCK NAME" in output
-
-    # Verify specific block id, alias, and name mappings
-    lines = output.strip().splitlines()
-    block_entries = {}
-    for line in lines[1:]:  # skip header
-        parts = line.split()
-        if len(parts) >= 3:
-            block_id = parts[0]
-            block_alias = parts[1]
-            block_name = " ".join(parts[2:])
-            block_entries[block_id] = (block_alias, block_name)
-
-    assert block_entries["0"] == ("topstats", "Top Stats")
-    assert block_entries["1"] == ("sysinfo", "System Info")
-    assert block_entries["6"] == ("spi", "Workgroup Manager (SPI)")
-
-
-ANALYSIS_CONFIGS = Path(ROOT) / "src" / "rocprof_compute_soc" / "analysis_configs"
-
-
 def list_blocks_supported_archs() -> list[str]:
-    """Discover every arch dir under analysis_configs/. New arch dirs are
-    picked up automatically — no test edits needed when an arch is added."""
+    """Return sorted arch names from analysis_configs/gfx* directories."""
     return sorted(
         p.name
         for p in ANALYSIS_CONFIGS.iterdir()
@@ -4357,9 +4327,7 @@ def list_blocks_supported_archs() -> list[str]:
 
 
 def arch_panels_from_disk(arch: str) -> dict[str, str]:
-    """Return panel_id_str -> Panel Config title for every per-arch yaml.
-    Panel Config.id is encoded as panel_idx * 100 (e.g. 0, 100, 2100), so
-    divide by 100 to get the panel_id used by --list-blocks output."""
+    """Return {panel_id_str: title} from per-arch yaml Panel Configs."""
     panels: dict[str, str] = {}
     for yaml_path in sorted((ANALYSIS_CONFIGS / arch).glob("*.yaml")):
         data = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
@@ -4371,9 +4339,7 @@ def arch_panels_from_disk(arch: str) -> dict[str, str]:
 
 
 def all_template_aliases_by_panel_id() -> dict[str, set[str]]:
-    """Aggregate panel_id_str -> {alias, ...} declared across every
-    *_config_template.yaml. Used to assert that any non-empty alias shown
-    by --list-blocks matches a real template entry, not a fabrication."""
+    """Return {panel_id_str: {alias, ...}} from all *_config_template.yaml."""
     aliases: dict[str, set[str]] = {}
     for tpl in sorted(ANALYSIS_CONFIGS.glob("*_config_template.yaml")):
         data = yaml.safe_load(tpl.read_text(encoding="utf-8")) or {}
@@ -4385,13 +4351,9 @@ def all_template_aliases_by_panel_id() -> dict[str, set[str]]:
     return aliases
 
 
-@pytest.mark.list_blocks
 @pytest.mark.parametrize("arch", list_blocks_supported_archs())
 def test_list_blocks_all_archs(binary_handler_analyze_rocprof_compute, capsys, arch):
-    """--list-blocks <arch> must list every per-arch panel with its on-disk
-    title; any non-empty alias must match a panel_alias declared for that
-    panel_id in some *_config_template.yaml. Auto-discovers new arches via
-    analysis_configs/ so future arches surface bugs in CI, not via users."""
+    """Verify --list-blocks output matches on-disk panels and template aliases."""
     return_code = binary_handler_analyze_rocprof_compute(["--list-blocks", arch])
     assert return_code == 0
 
@@ -4400,11 +4362,7 @@ def test_list_blocks_all_archs(binary_handler_analyze_rocprof_compute, capsys, a
     assert "BLOCK ALIAS" in output
     assert "BLOCK NAME" in output
 
-    # Parse fixed-width columns: id [0:8], alias [9:25], name [26:].
-    # Whitespace splitting would conflate an empty alias (e.g. gfx1151
-    # today) with the start of the block name. Anchor on the header line
-    # so leading log output (e.g. an INFO line emitted on subsequent
-    # module reloads in parametrized runs) does not shift the offset.
+    # Fixed-width parse: empty aliases break whitespace splitting.
     lines = output.splitlines()
     header_idx = next(i for i, line in enumerate(lines) if line.startswith("INDEX"))
     block_entries: dict[str, tuple[str, str]] = {}
