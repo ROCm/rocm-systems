@@ -16,33 +16,115 @@ SKIP_CODE=125
 TEST_NAME=$1
 shift
 
+# Find the test executable path from remaining arguments
+# The command is: mpirun/mpiexec [mpi_args] <executable> [test_args]
+# We need to find the rocshmem test executable (not mpirun)
+TEST_EXECUTABLE=""
+SKIP_NEXT=false
+for arg in "$@"; do
+    # Skip argument values that follow MPI flags
+    if $SKIP_NEXT; then
+        SKIP_NEXT=false
+        continue
+    fi
+    # MPI flags that take arguments - skip their values
+    if [[ "$arg" == "-n" || "$arg" == "-np" || "$arg" == "-mca" || "$arg" == "-x" || "$arg" == "--timeout" || "$arg" == "--map-by" ]]; then
+        SKIP_NEXT=true
+        continue
+    fi
+    # Skip other MPI flags
+    if [[ "$arg" == -* ]]; then
+        continue
+    fi
+    # Look for rocshmem test executable (not mpirun/mpiexec)
+    if [[ "$arg" == *"rocshmem"* ]] && [[ -x "$arg" ]]; then
+        TEST_EXECUTABLE="$arg"
+        break
+    fi
+done
+
 # Get backend type from environment or rocshmem_info
-if [[ -n "$ROCSHMEM_BACKEND_TYPE" ]]; then
+# Strategy:
+# 1. If ROCSHMEM_BACKEND is explicitly set, use that value
+# 2. Otherwise, check rocshmem_info:
+#    a. If exactly ONE backend is compiled, use that backend
+#    b. If MULTIPLE backends are compiled, don't set backend (let rocshmem decide)
+if [[ -n "$ROCSHMEM_BACKEND" ]]; then
+    # User explicitly requested a specific backend
+    BACKEND="$ROCSHMEM_BACKEND"
+    echo "Using explicitly set backend: $BACKEND"
+elif [[ -n "$ROCSHMEM_BACKEND_TYPE" ]]; then
+    # Legacy compatibility
     BACKEND="$ROCSHMEM_BACKEND_TYPE"
+    echo "Using ROCSHMEM_BACKEND_TYPE: $BACKEND"
 elif [[ -n "$TEST" ]]; then
     # For compatibility with driver.sh TEST variable (e.g., "ro", "gda")
     BACKEND="$TEST"
+    echo "Using TEST variable: $BACKEND"
 else
-    # Try to detect from rocshmem_info if available
-    ROCSHMEM_INFO="$(dirname "$1")/rocshmem_info"
-    if [[ ! -x "$ROCSHMEM_INFO" ]]; then
-        # Try alternate locations
-        ROCSHMEM_INFO="$(dirname "$1")/../../tools/rocshmem_info"
-    fi
-    if [[ -x "$ROCSHMEM_INFO" ]]; then
-        BACKEND=$("$ROCSHMEM_INFO" | grep -i "backend" | awk '{print tolower($2)}')
+    # Auto-detect from rocshmem_info
+    # Find rocshmem_info (use test executable path)
+    if [[ -n "$TEST_EXECUTABLE" ]]; then
+        ROCSHMEM_INFO="$(dirname "$TEST_EXECUTABLE")/rocshmem_info"
+        if [[ ! -x "$ROCSHMEM_INFO" ]]; then
+            # Try alternate location (builddir case)
+            ROCSHMEM_INFO="$(dirname "$TEST_EXECUTABLE")/../../tools/rocshmem_info"
+        fi
+        if [[ -x "$ROCSHMEM_INFO" ]]; then
+            # Check which backends are compiled in
+            # Format: # USE_RO                      : ON                                             #
+            INFO_OUTPUT=$("$ROCSHMEM_INFO")
+            USE_RO=$(echo "$INFO_OUTPUT" | grep "USE_RO" | awk -F ':' '{print $2}' | awk '{print $1}')
+            USE_IPC=$(echo "$INFO_OUTPUT" | grep "USE_IPC" | awk -F ':' '{print $2}' | awk '{print $1}')
+            USE_GDA=$(echo "$INFO_OUTPUT" | grep "USE_GDA" | awk -F ':' '{print $2}' | awk '{print $1}')
+
+            # Count how many backends are enabled
+            BACKEND_COUNT=0
+            AVAILABLE_BACKEND=""
+            if [[ "$USE_RO" == "ON" ]]; then
+                BACKEND_COUNT=$((BACKEND_COUNT + 1))
+                AVAILABLE_BACKEND="ro"
+            fi
+            if [[ "$USE_IPC" == "ON" ]]; then
+                BACKEND_COUNT=$((BACKEND_COUNT + 1))
+                AVAILABLE_BACKEND="ipc"
+            fi
+            if [[ "$USE_GDA" == "ON" ]]; then
+                BACKEND_COUNT=$((BACKEND_COUNT + 1))
+                AVAILABLE_BACKEND="gda"
+            fi
+
+            if [[ $BACKEND_COUNT -eq 1 ]]; then
+                # Exactly one backend compiled - use it and apply skip logic
+                BACKEND="$AVAILABLE_BACKEND"
+                echo "Single backend detected: $BACKEND (will apply backend-specific skip logic)"
+            elif [[ $BACKEND_COUNT -gt 1 ]]; then
+                # Multiple backends compiled - let rocshmem decide, don't skip tests
+                BACKEND="multi"
+                echo "Multiple backends detected (RO=$USE_RO, IPC=$USE_IPC, GDA=$USE_GDA) - letting rocshmem choose, no skip logic"
+            else
+                # No backends found (shouldn't happen)
+                BACKEND="unknown"
+                echo "Warning: No backends detected in rocshmem_info"
+            fi
+        else
+            BACKEND="unknown"
+            echo "Warning: rocshmem_info not found at $ROCSHMEM_INFO"
+        fi
     else
-        BACKEND="default"
+        BACKEND="unknown"
+        echo "Warning: Could not find test executable"
     fi
 fi
 
-echo "Test: $TEST_NAME (Backend: $BACKEND)"
+echo "Test: $TEST_NAME (Backend: $BACKEND, Executable: ${TEST_EXECUTABLE:-<not found>})"
 
 # Apply skip conditions based on backend type and known issues
 # These match the skip logic from driver.sh
+# Note: Skip logic only applies when backend is known (not "multi" or "unknown")
 
 # AIROCSHMEM-120: RO get tests abort
-if [[ "$BACKEND" == ro* ]]; then
+if [[ "$BACKEND" == "ro" ]]; then
     case "$TEST_NAME" in
         get_*|getnbi_*|defaultctxget_*|defaultctxgetnbi_*|teamctxget_*|teamctxgetnbi_*|wgget_*|wggetnbi_*|waveget_*|wavegetnbi_*)
             echo "Skip: $TEST_NAME (AIROCSHMEM-120: RO get tests abort)"
@@ -52,7 +134,7 @@ if [[ "$BACKEND" == ro* ]]; then
 fi
 
 # AIROCSHMEM-162: GDA _g not implemented
-if [[ "$BACKEND" == gda* ]]; then
+if [[ "$BACKEND" == "gda" ]]; then
     case "$TEST_NAME" in
         g_*|defaultctxg_*|flood_g_*)
             echo "Skip: $TEST_NAME (AIROCSHMEM-162: GDA _g not implemented)"
@@ -62,7 +144,7 @@ if [[ "$BACKEND" == gda* ]]; then
 fi
 
 # AIROCSHMEM-211: RO AMO operations abort
-if [[ "$BACKEND" == ro* ]]; then
+if [[ "$BACKEND" == "ro" ]]; then
     case "$TEST_NAME" in
         amo_add_*|amo_fadd_*|amo_inc_*|amo_finc_*)
             echo "Skip: $TEST_NAME (AIROCSHMEM-211: RO amo abort)"
@@ -72,7 +154,7 @@ if [[ "$BACKEND" == ro* ]]; then
 fi
 
 # AIROCSHMEM-217: RO putmem_signal_on_stream sometimes abort
-if [[ "$BACKEND" == ro* ]]; then
+if [[ "$BACKEND" == "ro" ]]; then
     case "$TEST_NAME" in
         putmem_signal_on_stream_*)
             echo "Skip: $TEST_NAME (AIROCSHMEM-217: RO sometimes abort)"
@@ -82,7 +164,7 @@ if [[ "$BACKEND" == ro* ]]; then
 fi
 
 # AIROCSHMEM-324: RO flood tests fail in UCX
-if [[ "$BACKEND" == ro* ]]; then
+if [[ "$BACKEND" == "ro" ]]; then
     case "$TEST_NAME" in
         flood_*)
             echo "Skip: $TEST_NAME (AIROCSHMEM-324: RO flood tests fail in UCX)"
@@ -92,7 +174,7 @@ if [[ "$BACKEND" == ro* ]]; then
 fi
 
 # AIROCSHMEM-418: fence tests not supported on RO
-if [[ "$BACKEND" == ro* ]]; then
+if [[ "$BACKEND" == "ro" ]]; then
     case "$TEST_NAME" in
         fence_*)
             echo "Skip: $TEST_NAME (AIROCSHMEM-418: fence tests not supported on RO)"
