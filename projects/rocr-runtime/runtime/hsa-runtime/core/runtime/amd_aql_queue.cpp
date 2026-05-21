@@ -1404,6 +1404,11 @@ bool AqlQueue::ExceptionHandler(hsa_signal_value_t error_code, void* arg) {
       { 50, HSA_STATUS_ERROR }};
 
   AqlQueue* queue = (AqlQueue*)arg;
+
+  // Log which queue triggered the exception
+  fprintf(stderr, "\n[EXCEPTION HANDLER] Queue %u triggered exception (error_code=0x%lx)\n",
+          (uint32_t)queue->aql_queue_id(), (unsigned long)error_code);
+
   hsa_status_t errorCode = HSA_STATUS_ERROR;
   auto exceptionHandlerDone = [&]() {
     Signal* signal = queue->exception_signal_;
