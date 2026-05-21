@@ -107,6 +107,11 @@ constexpr std::string_view USE_ROCPD     = "ROCPROFSYS_USE_ROCPD";
 constexpr std::string_view USE_UNIFIED_MEMORY_PROFILING =
     "ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING";
 
+// --- MPI output filtering ---
+constexpr std::string_view RANK_FILTER_ID     = "ROCPROFSYS_RANK_FILTER_ID";
+constexpr std::string_view RANK_FILTER_OUTPUT = "ROCPROFSYS_RANK_FILTER_OUTPUT";
+constexpr std::string_view RANK_FILTER_LOGS   = "ROCPROFSYS_RANK_FILTER_LOGS";
+
 // --- Process sampling ---
 constexpr std::string_view PROCESS_SAMPLING_FREQ  = "ROCPROFSYS_PROCESS_SAMPLING_FREQ";
 constexpr std::string_view PROCESS_SAMPLING_DELAY = "ROCPROFSYS_PROCESS_SAMPLING_DELAY";

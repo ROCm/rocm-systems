@@ -902,6 +902,13 @@ configure_settings(bool _init)
         "for all ranks",
         std::string{}, "data", "io", "advanced");
 
+    ROCPROFSYS_CONFIG_SETTING(
+        std::string, "ROCPROFSYS_RANK_FILTER_LOGS",
+        "Ranks for which console output is generated. Values should be separated by "
+        "commas and can be explicit or ranges, e.g. 0,1,5-8. An empty value enables "
+        "output for all ranks",
+        std::string{}, "data", "io", "advanced");
+
     // set the defaults
     _config->get_flamegraph_output()     = false;
     _config->get_ctest_notes()           = false;
@@ -996,6 +1003,16 @@ configure_settings(bool _init)
     _add_advanced_category("ROCPROFSYS_WIDTH");
     _add_advanced_category("ROCPROFSYS_COLLAPSE_THREADS");
     _add_advanced_category("ROCPROFSYS_COLLAPSE_PROCESSES");
+
+    // Setting is registered above with "ROCPROFSYS_CONFIG_SETTING"; safe to read them
+    // here.
+    if(!output_filtering::is_log_output_enabled_for_current_mpi_rank())
+    {
+        logger_t::instance().set_level(spdlog::level::err);
+        setenv("ROCPROFSYS_LOG_LEVEL", "error", 1);
+        setenv("ROCPROFSYS_DL_VERBOSE", "-1", 1);
+        setenv("ROCPROFSYS_VERBOSE", "-1", 1);
+    }
 
 #if defined(TIMEMORY_USE_PAPI)
     int _paranoid = 2;
@@ -1565,6 +1582,8 @@ handle_deprecated_setting(const std::string& _old, const std::string& _new,
 void
 print_banner(std::ostream& _os)
 {
+    if(!output_filtering::is_log_output_enabled_for_current_mpi_rank()) return;
+
     static const char* _banner = R"banner(
 
      ____   ___   ____ __  __   ______   ______ _____ _____ __  __ ____    ____  ____   ___  _____ ___ _     _____ ____
@@ -2708,6 +2727,13 @@ get_rank_filter_output()
     return static_cast<tim::tsettings<std::string>&>(*_v).get();
 }
 
+std::string
+get_rank_filter_logs()
+{
+    static auto _v = get_config()->at("ROCPROFSYS_RANK_FILTER_LOGS");
+    return static_cast<tim::tsettings<std::string>&>(*_v).get();
+}
+
 #if(defined(ROCPROFSYS_USE_MPI_HEADERS) && ROCPROFSYS_USE_MPI_HEADERS > 0) ||            \
     (defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0)
 #    define ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED 1
@@ -2750,14 +2776,15 @@ get_mpi_rank_from_env()
 
 namespace output_filtering
 {
-bool
-is_output_enabled_for_current_mpi_rank()
-{
 #if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
-    auto enabled_ranks_str = get_rank_filter_output();
+namespace
+{
+bool
+is_rank_in_filter(std::string enabled_ranks_str)
+{
     rocprofsys::utility::trim_str(enabled_ranks_str);
     for(auto& ch : enabled_ranks_str)
-        ch = std::tolower(ch);
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
 
     if(enabled_ranks_str.empty() || enabled_ranks_str == "all") return true;
     if(enabled_ranks_str == "none") return false;
@@ -2776,6 +2803,27 @@ is_output_enabled_for_current_mpi_rank()
     LOG_DEBUG("Output for MPI rank {} is {}", current_rank.value(),
               is_enabled ? "enabled" : "disabled");
     return is_enabled;
+}
+}  // namespace
+#endif
+
+bool
+is_file_output_enabled_for_current_mpi_rank()
+{
+#if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
+    static auto _v = is_rank_in_filter(get_rank_filter_output());
+    return _v;
+#else
+    return true;
+#endif
+}
+
+bool
+is_log_output_enabled_for_current_mpi_rank()
+{
+#if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
+    static auto _v = is_rank_in_filter(get_rank_filter_logs());
+    return _v;
 #else
     return true;
 #endif

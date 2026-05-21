@@ -464,6 +464,12 @@ perfetto_processor_t::initialize_perfetto()
         args.backends           = ::perfetto::kInProcessBackend;
         args.shmem_size_hint_kb = config::get_perfetto_shmem_size_hint();
 
+        // Silence all Perfetto log output on log-disabled ranks with empty callback
+        if(!config::output_filtering::is_log_output_enabled_for_current_mpi_rank())
+        {
+            args.log_message_callback = +[](::perfetto::base::LogMessageCallbackArgs) {};
+        }
+
         ::perfetto::Tracing::Initialize(args);
         ::perfetto::TrackEvent::Register();
         LOG_TRACE("Perfetto tracing backend initialized");
@@ -613,14 +619,18 @@ perfetto_processor_t::flush(bool& _perfetto_output_error)
 
     if(!trace_data.empty())
     {
+        const bool logs_enabled =
+            config::output_filtering::is_log_output_enabled_for_current_mpi_rank();
         operation::file_output_message<tim::project::rocprofsys> _fom{};
         // Write the trace into a file.
-        if(config::get_verbose() >= 0)
+        if(config::get_verbose() >= 0 && logs_enabled)
+        {
             _fom(_filename, std::string{ "perfetto" },
                  " (%.2f KB / %.2f MB / %.2f GB)... ",
                  static_cast<double>(trace_data.size()) / units::KB,
                  static_cast<double>(trace_data.size()) / units::MB,
                  static_cast<double>(trace_data.size()) / units::GB);
+        }
         std::ofstream ofs{};
         if(!filepath::open(ofs, _filename, std::ios::out | std::ios::binary))
         {
@@ -631,7 +641,10 @@ perfetto_processor_t::flush(bool& _perfetto_output_error)
         {
             // Write the trace into a file.
             ofs.write(trace_data.data(), trace_data.size());
-            if(config::get_verbose() >= 0) _fom.append("%s", "Done");  // NOLINT
+            if(config::get_verbose() >= 0 && logs_enabled)
+            {
+                _fom.append("%s", "Done");  // NOLINT
+            }
             m_output_registry.register_file(_filename, output_format::perfetto);
         }
         ofs.close();
