@@ -84,7 +84,7 @@ def test_calc_ai_analyze_replaces_inf_with_zero(monkeypatch):
         },
     )
 
-    assert result["kernelNames"] == ["K0"]
+    assert result["kernelNames"] == ["test_kernel"]
     assert result["ai_hbm"][0] == [0], "np.inf should be replaced with 0"
     assert result["ai_hbm"][1] == [100.0]
     assert result["ai_l2"][0] == [0], "-np.inf should be replaced with 0"
@@ -105,7 +105,7 @@ def test_calc_ai_analyze_replaces_none_with_zero(monkeypatch):
         },
     )
 
-    assert result["kernelNames"] == ["K0"]
+    assert result["kernelNames"] == ["test_kernel"]
     assert result["ai_hbm"][0] == [0], "None should be replaced with 0"
     assert result["ai_l2"][0] == [0], "None should be replaced with 0"
     assert result["ai_l1"][0] == [0], "None should be replaced with 0"
@@ -123,7 +123,7 @@ def test_calc_ai_analyze_valid_values_pass_through(monkeypatch):
         },
     )
 
-    assert result["kernelNames"] == ["K0"]
+    assert result["kernelNames"] == ["test_kernel"]
     assert result["ai_hbm"][0] == [2.5]
     assert result["ai_hbm"][1] == [100.0]
     assert result["ai_l2"][0] == [3.0]
@@ -144,7 +144,7 @@ def test_calc_ai_analyze_na_and_empty_replaced(monkeypatch):
         },
     )
 
-    assert result["kernelNames"] == ["K0"]
+    assert result["kernelNames"] == ["test_kernel"]
     assert result["ai_hbm"][0] == [0], "'N/A' should be replaced with 0"
     assert result["ai_l2"][0] == [0], "'' should be replaced with 0"
     assert result["ai_l1"][0] == [0], "'N/A' should be replaced with 0"
