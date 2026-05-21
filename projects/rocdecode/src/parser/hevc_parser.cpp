@@ -1267,8 +1267,10 @@ ParserResult HevcVideoParser::ParseVui(HevcSeqParamSet *sps_ptr, uint8_t *nalu, 
         }
         vui->vui_hrd_parameters_present_flag = Parser::GetBit(nalu, offset);
         if (vui->vui_hrd_parameters_present_flag) {
-            if (ParseHrdParameters(&vui->hrd_parameters, 1, sps_ptr->sps_max_sub_layers_minus1, nalu, size, offset) != PARSER_OK) {
+            ParserResult ret = ParseHrdParameters(&vui->hrd_parameters, 1, sps_ptr->sps_max_sub_layers_minus1, nalu, size, offset);
+            if (ret != PARSER_OK) {
                 ErrorLog(g_rocdec_logger, "Failed to parse HRD parameters in VUI.");
+                return ret;
             }
         }
     }
@@ -1538,8 +1540,7 @@ ParserResult HevcVideoParser::ParseSps(uint8_t *nalu, size_t size) {
     sps_ptr->vui_parameters_present_flag = Parser::GetBit(nalu, offset);
     if (sps_ptr->vui_parameters_present_flag) {
         // Treat VUI parameter parsing failure as non-fatal error and continue parsing since VUI parameters
-        // are not necessary for decoding. The decoder can choose to apply default VUI parameters or skip
-        // applying VUI parameters when VUI parameters parsing failure.
+        // are not necessary for decoding.
         if (ParseVui(sps_ptr, nalu, size, offset) != PARSER_OK) {
             ErrorLog(g_rocdec_logger, "Failed to parse VUI parameters. Default VUI parameters will be applied.");
         }

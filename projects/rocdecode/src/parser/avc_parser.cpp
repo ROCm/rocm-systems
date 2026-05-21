@@ -1039,10 +1039,8 @@ ParserResult AvcVideoParser::ParseSps(uint8_t *p_stream, size_t size) {
 
     p_sps->vui_parameters_present_flag = Parser::GetBit(p_stream, offset);
     if (p_sps->vui_parameters_present_flag == 1) {
-        // Treat VUI parameter parsing failure as non-fatal error and continue parsing since VUI parameters are not necessary for decoding. The decoder can choose to apply default VUI parameters or skip applying VUI parameters when VUI parameters parsing failure.
-        if (GetVuiParameters(p_stream, offset, &p_sps->vui_seq_parameters) != PARSER_OK) {
-            ErrorLog(g_rocdec_logger, "Failed to parse VUI parameters. Default VUI parameters will be applied.");
-        }
+        // Treat VUI parameter parsing failure as non-fatal error and continue parsing since VUI parameters are not necessary for decoding.
+        GetVuiParameters(p_stream, offset, &p_sps->vui_seq_parameters);
     }
 
     p_sps->is_received = 1;  // confirm SPS with seq_parameter_set_id received (but not activated)
