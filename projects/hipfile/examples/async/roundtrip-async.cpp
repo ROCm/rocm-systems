@@ -174,8 +174,11 @@ main(int argc, char *argv[])
         goto close_wfile;
     }
 
-    /* 9. Close the files first so cached writes are visible to the
-     * plain-POSIX hashing path, then hash and compare. */
+    /* 9. Close the O_DIRECT fds before the verify path reopens the files with
+     * buffered I/O. Mixing O_DIRECT writes and page-cache reads on the same
+     * file has undefined coherence per open(2); closing first sidesteps that
+     * and also flushes file-size metadata for the fresh open() in the hasher.
+     * Then hash and compare. */
     if (close_file(write_path, wfd, whandle)) {
         wfd          = -1;
         whandle_open = false;

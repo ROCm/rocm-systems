@@ -17,7 +17,7 @@ set(ASYNC_EXAMPLES
 
 foreach(example ${ASYNC_EXAMPLES})
     add_executable(${example} "${example}.cpp")
-    target_compile_features(${example} PRIVATE cxx_std_17)
+    target_compile_features(${example} PRIVATE cxx_std_${AIS_CXX_STANDARD})
     set_target_properties(${example} PROPERTIES CXX_EXTENSIONS OFF)
     target_compile_options(${example} PRIVATE -Wall -Wextra -fno-sanitize=all)
 

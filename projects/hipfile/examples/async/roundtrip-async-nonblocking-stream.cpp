@@ -109,8 +109,8 @@ main(int argc, char *argv[])
     buf_registered = true;
 
     /* 4. Open the input and output files with O_DIRECT and register both.
-     * WRITE_FILE is opened O_RDWR (the spec calls for it) so future variants
-     * can read-back through the same handle without reopening. */
+     * WRITE_FILE is opened O_RDWR so future variants can read-back through
+     * the same handle without reopening. */
     if (open_file(read_path, O_RDONLY | O_DIRECT, 0, &rfd, &rhandle))
         goto deregister_buf;
     rhandle_open = true;
@@ -187,8 +187,11 @@ main(int argc, char *argv[])
         goto destroy_stream;
     }
 
-    /* 9. Close the files first so cached writes are visible to the
-     * plain-POSIX hashing path, then hash and compare. */
+    /* 9. Close the O_DIRECT fds before the verify path reopens the files with
+     * buffered I/O. Mixing O_DIRECT writes and page-cache reads on the same
+     * file has undefined coherence per open(2); closing first sidesteps that
+     * and also flushes file-size metadata for the fresh open() in the hasher.
+     * Then hash and compare. */
     if (close_file(write_path, wfd, whandle)) {
         wfd          = -1;
         whandle_open = false;

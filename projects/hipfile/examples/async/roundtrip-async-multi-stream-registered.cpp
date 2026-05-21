@@ -16,8 +16,8 @@
  *               TOTAL_SIZE bytes of generated test pattern via a plain POSIX
  *               write so the async path has known content to read.
  *   WRITE_FILE  Path to the output file. Opened O_WRONLY|O_CREAT|O_DIRECT
- *               (per spec; no O_TRUNC). SLICE_SIZE is already block-aligned
- *               so no ftruncate is needed.
+ *               (no O_TRUNC). SLICE_SIZE is already block-aligned so no
+ *               ftruncate is needed.
  *   GPUID       GPU device index (optional, default 0).
  *
  * Steps:
@@ -229,8 +229,11 @@ main(int argc, char *argv[])
         }
     }
 
-    /* 8. Close the files first so cached writes are visible to the
-     * plain-POSIX hashing path, then hash the full TOTAL_SIZE and compare. */
+    /* 8. Close the O_DIRECT fds before the verify path reopens the files with
+     * buffered I/O. Mixing O_DIRECT writes and page-cache reads on the same
+     * file has undefined coherence per open(2); closing first sidesteps that
+     * and also flushes file-size metadata for the fresh open() in the hasher.
+     * Then hash the full TOTAL_SIZE and compare. */
     if (close_file(write_path, wfd, whandle)) {
         wfd          = -1;
         whandle_open = false;
@@ -271,7 +274,7 @@ close_rfile:
     }
 
 cleanup_slices:
-    /* Per the spec:
+    /* Teardown order:
      *   hipFileStreamDeregister -> hipStreamDestroy -> hipFileBufDeregister -> hipFree
      * Per-entry bool flags handle partial setup from a failed init loop. */
     for (int i = 0; i < NUM_STREAMS; ++i) {
