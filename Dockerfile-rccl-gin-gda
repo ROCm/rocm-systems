@@ -3,6 +3,10 @@ ARG ROCM_IMAGE_NAME=rocm/dev-ubuntu-24.04
 ARG ROCM_IMAGE_TAG=latest
 FROM "${ROCM_IMAGE_NAME}:${ROCM_IMAGE_TAG}"
 
+# Example command lines:
+#docker run -it --rm --shm-size 64G   --network host --device /dev/dri --device /dev/kfd --device /dev/infiniband --ipc host   --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged  rccl-gingda mpirun -n 8 -mca pml ob1 -mca btl ^openib -x RCCL_ROCSHMEM_ENABLE=0 -x RCCL_ROCSHMEM_THRESHOLD=$((128*1024*1024)) -x NCCL_DEBUG=VERSION -x NCCL_GIN_ENABLE=1 -x NCCL_GIN_TYPE=2 -x NCCL_DEBUG_SUBSYS=INIT,NET -x NONCCL_CUMEM_ENABLE=1 -x NORCCL_ENABLE_INTRANET=1  -x NCCL_DMABUF_ENABLE=1 -x NCCL_MSCCL_ENABLE=0 -x HSA_NO_SCRATCH_RECLAIM=1 rccl-tests/alltoall_perf -b 128 -e 128M -f 2 -g 1 -R 2 -D 0 -A 1
+#docker run -it --rm --shm-size 64G   --network host --device /dev/dri --device /dev/kfd --device /dev/infiniband --ipc host   --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged  rccl-gingda mpirun -n 8 -mca pml ob1 -mca btl ^openib rocshmem/bin/rocshmem_functional_tests -a 19 -w 1 -z 256 -v $((128*1024*1024)) -noverif
+
 ## creating scratch space
 ENV WORKDIR /workspace
 RUN mkdir -p ${WORKDIR}
@@ -126,7 +130,8 @@ RUN cd rocshmem/src/projects/rocshmem \
       -DUSE_IPC=ON -DUSE_SDMA=ON
 
 ## building RCCL
-ARG RCCL_BRANCH=users/prasanna-amd/nccl-sync-v2-28-9-gin-rebased-0501
+#ARG RCCL_BRANCH=users/prasanna-amd/nccl-sync-v2-28-9-gin-rebased-0501
+ARG RCCL_BRANCH=users/abouteiller/gin-stage1
 ENV RCCL_INSTALL_PREFIX=${WORKDIR}/rccl
 ENV ONLY_FUNCS="SendRecv|AlltoAllPivot|AlltoAllGda|AlltoAllvGda"
 RUN git clone --no-checkout --filter=blob:none "${ROCM_REPO}" ${WORKDIR}/rccl/src/ && cd ${WORKDIR}/rccl/src \
@@ -135,9 +140,9 @@ RUN git clone --no-checkout --filter=blob:none "${ROCM_REPO}" ${WORKDIR}/rccl/sr
 # patch for SDMA enablement
 RUN cd rccl/src/projects/rccl \
  && sed -i \
-       -e '/target_link_libraries(rccl PRIVATE \${ROCSHMEM_LIBRARY})/i\  find_package(hsakmt REQUIRED PATHS /opt/rocm)' \
-       -e '/target_link_libraries(rccl PRIVATE \${ROCSHMEM_LIBRARY})/i\  target_link_libraries(rccl PRIVATE hsakmt::hsakmt)' \
-       src/CMakeLists.txt \
+        -e '/target_link_libraries(rccl PRIVATE \${ROCSHMEM_LIBRARY})/i\  find_package(hsakmt REQUIRED PATHS /opt/rocm)' \
+        -e '/target_link_libraries(rccl PRIVATE \${ROCSHMEM_LIBRARY})/i\  target_link_libraries(rccl PRIVATE hsakmt::hsakmt)' \
+        src/CMakeLists.txt \
  && sed -i \
        's/if (comm->enableRocshmem && comm->nNodes > 1 && (comm->nRanks\/comm->nNodes == 8) && comm->rocshmemThreshold <= 1048576)/if (comm->enableRocshmem)/' \
        src/rccl_wrap.cc
