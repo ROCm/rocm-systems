@@ -4915,4 +4915,19 @@ void VirtualGPU::MetaDataPreloader::SetPacket(
   metadata->header1 = metadata_header;
   metadata->header0 = metadata_header;
 }
+// ================================================================================================
+uint64_t VirtualGPU::dispatchGraphSignalReset(uint64_t base_va, uint32_t count) {
+  // Use the xfer queue's compiled kernel (user-created stream blit managers cannot compile
+  // __amd_streamOpsIncrement/Decrement) but submit it on this VirtualGPU's AQL queue so the
+  // reset is sequenced on the launch stream. execution() must be held for submitKernelInternal.
+  VirtualGPU* xferQ = dev().xferQueue();
+  if (xferQ == nullptr) {
+    return 0;
+  }
+  auto& kbm = static_cast<KernelBlitManager&>(xferQ->blitMgr());
+  std::scoped_lock lock(execution());
+  hsa_signal_t sig = kbm.resetGraphHwSignals(base_va, count, *this);
+  return sig.handle;
+}
+
 }  // End of roc namespace

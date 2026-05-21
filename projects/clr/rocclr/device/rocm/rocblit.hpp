@@ -309,6 +309,7 @@ class KernelBlitManager : public DmaBlitManager {
     StreamOpsIncrement,
     StreamOpsDecrement,
     BlitCopyBufferBatch,
+    ResetGraphHwSignals,
     BlitLinearTotal,
     FillImage = BlitLinearTotal,
     BlitCopyImage,
@@ -518,6 +519,11 @@ class KernelBlitManager : public DmaBlitManager {
   bool RunGwsInit(uint32_t value  //!< Initial value for GWS resource
   ) const;
 
+  //! Resets hw_event signal values to 1 for all slots; returns the completion signal (handle=0 on failure)
+  hsa_signal_t resetGraphHwSignals(uint64_t base_va, uint32_t count) const;
+  //! Same but submits the kernel on targetGpu instead of this blit manager's own queue.
+  hsa_signal_t resetGraphHwSignals(uint64_t base_va, uint32_t count, VirtualGPU& targetGpu) const;
+
   //! Stream memory write operation - Write a 'value' at 'memory'.
   virtual bool streamOpsWrite(device::Memory& memory,  //!< Memory to write the 'value'
                               uint64_t value, size_t offset, size_t sizeBytes) const;
@@ -636,7 +642,7 @@ static const char* BlitName[KernelBlitManager::BlitTotal] = {
     "__amd_rocclr_scheduler",          "__amd_rocclr_gwsInit",
     "__amd_rocclr_initHeap",           "__amd_rocclr_batchMemOp",
     "__amd_rocclr_streamOpsIncrement", "__amd_rocclr_streamOpsDecrement",
-    "__amd_rocclr_copyBufferBatch",
+    "__amd_rocclr_copyBufferBatch",    "__amd_rocclr_resetGraphHwSignals",
     "__amd_rocclr_fillImage",          "__amd_rocclr_copyImage",
     "__amd_rocclr_copyImage1DA",       "__amd_rocclr_copyImageToBuffer",
     "__amd_rocclr_copyBufferToImage"};

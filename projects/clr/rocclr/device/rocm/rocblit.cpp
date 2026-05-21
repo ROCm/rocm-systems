@@ -3380,4 +3380,34 @@ bool KernelBlitManager::RunGwsInit(uint32_t value) const {
   return result;
 }
 
+// ================================================================================================
+hsa_signal_t KernelBlitManager::resetGraphHwSignals(uint64_t base_va, uint32_t count) const {
+  return resetGraphHwSignals(base_va, count, gpu());
+}
+
+hsa_signal_t KernelBlitManager::resetGraphHwSignals(uint64_t base_va, uint32_t count,
+                                                     VirtualGPU& targetGpu) const {
+  std::scoped_lock k(lockXferOps_);
+
+  size_t globalWorkOffset[1] = {0};
+  size_t globalWorkSize[1] = {count};
+  size_t localWorkSize[1] = {1};
+
+  setArgument(kernels_[ResetGraphHwSignals], 0, sizeof(uint64_t), &base_va);
+  setArgument(kernels_[ResetGraphHwSignals], 1, sizeof(uint32_t), &count);
+
+  amd::NDRangeContainer ndrange(1, globalWorkOffset, globalWorkSize, localWorkSize);
+
+  address parameters = captureArguments(kernels_[ResetGraphHwSignals]);
+  bool ok = targetGpu.submitKernelInternal(ndrange, *kernels_[ResetGraphHwSignals], parameters,
+                                           nullptr, 0, nullptr, nullptr, /*attach_signal=*/true);
+  releaseArguments(parameters);
+
+  if (!ok) {
+    return hsa_signal_t{0};
+  }
+
+  return targetGpu.Barriers().GetLastSignal()->signal_;
+}
+
 }  // namespace amd::roc

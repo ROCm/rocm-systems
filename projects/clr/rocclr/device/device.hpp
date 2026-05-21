@@ -1343,6 +1343,12 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void ReleaseHwQueue() {}
   //!< Request a system-scope release fence on the next AQL packet (ROCm specific)
   virtual void addSystemScope() {}
+  //!< Inject an HSA signal (by handle) as a GPU-side wait before the next AQL packet
+  virtual void addDynamicQueueWait(uint64_t signal_handle) {}
+  //!< Immediately dispatch a barrier packet waiting on the given signal handle
+  virtual void waitCompleteSignal(uint64_t signal_handle) {}
+  //!< Dispatch reset kernel on xfer queue; returns completion signal handle (0 on failure)
+  virtual uint64_t dispatchGraphSignalReset(uint64_t base_va, uint32_t count) { return 0; }
 
   //! Get the blit manager object
   device::BlitManager& blitMgr() const { return *blitMgr_; }
@@ -2118,6 +2124,7 @@ class Device : public RuntimeObject {
 
   virtual bool CreateHwEvents(int count, std::vector<void*>& hw_events) const { return false; }
   virtual void DestroyHwEvent(void* hw_event) const {}
+  virtual void DestroyHwEvents(std::vector<void*>& hw_events) const { hw_events.clear(); }
 
   struct HwEventPatch {
     static constexpr int kCompletionSignal = -1;
@@ -2132,6 +2139,7 @@ class Device : public RuntimeObject {
   virtual uint8_t* CreateBarrierPacket() const { return nullptr; }
   virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
                                    const std::vector<void*>& hw_events) const {}
+
 
   virtual const bool isFineGrainSupported() const {
     return (info().svmCapabilities_ & CL_DEVICE_SVM_ATOMICS) != 0 ? true : false;

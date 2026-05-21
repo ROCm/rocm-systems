@@ -228,7 +228,16 @@ const char* HipExtraSourceCode = BLIT_KERNELS(
       __ockl_dm_init_v1(heap_to_initialize, initial_blocks, heap_size, number_of_initial_blocks);
     }
 
-    __kernel void __amd_rocclr_gwsInit(uint value) { __builtin_amdgcn_ds_gws_init(value, 0); });
+    __kernel void __amd_rocclr_gwsInit(uint value) { __builtin_amdgcn_ds_gws_init(value, 0); }
+
+    __kernel void __amd_rocclr_resetGraphHwSignals(ulong base_va, uint count) {
+      uint i = get_global_id(0);
+      if (i < count) {
+        __global volatile long* val = (__global volatile long*)(base_va + (ulong)i * 64UL + 8UL);
+        *val = 1L;
+        mem_fence(CLK_GLOBAL_MEM_FENCE);
+      }
+    });
 
 const char* HipExtraSourceCodeNoGWS = BLIT_KERNELS(
     __kernel void __amd_rocclr_streamOpsWrite(__global uint* ptrInt, __global ulong* ptrUlong,
@@ -254,6 +263,15 @@ const char* HipExtraSourceCodeNoGWS = BLIT_KERNELS(
     __kernel void __amd_rocclr_initHeap(ulong heap_to_initialize, ulong initial_blocks,
                                         uint heap_size, uint number_of_initial_blocks) {
       __ockl_dm_init_v1(heap_to_initialize, initial_blocks, heap_size, number_of_initial_blocks);
+    }
+
+    __kernel void __amd_rocclr_resetGraphHwSignals(ulong base_va, uint count) {
+      uint i = get_global_id(0);
+      if (i < count) {
+        __global volatile long* val = (__global volatile long*)(base_va + (ulong)i * 64UL + 8UL);
+        *val = 1L;
+        mem_fence(CLK_GLOBAL_MEM_FENCE);
+      }
     });
 
 const char* BlitImageSourceCode = BLIT_KERNELS(

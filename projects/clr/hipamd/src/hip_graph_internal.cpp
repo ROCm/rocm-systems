@@ -1576,6 +1576,26 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
     }
   }
 
+  auto* device = g_devices[instantiateDeviceId_]->devices()[0];
+  // Sparse: one slot per segment whose signal is consumed (PASS 1 in BuildSyncPlan).
+  // Allocated once at instantiate time; reused across launches; freed in ~GraphExec.
+  segment_hw_events_.clear();
+  hw_events_base_va_ = 0;
+  if (sync_plan_.num_hw_events > 0) {
+    if (!device->CreateHwEvents(sync_plan_.num_hw_events, segment_hw_events_)) {
+      return hipErrorOutOfMemory;
+    }
+    // Sentinel at back() = raw device VA of the contiguous amd_signal_t block.
+    hw_events_base_va_ = reinterpret_cast<uint64_t>(segment_hw_events_.back());
+
+  }
+
+  // Apply pre-computed patches -- writes HW events directly into flatPacketData
+  // via the flat_packet pointers resolved at instantiate time, so no rebuild needed.
+  if (!sync_plan_.patch_list.empty()) {
+    device->ApplyHwEventPatches(sync_plan_.patch_list, segment_hw_events_);
+  }
+
   return status;
 }
 
@@ -1840,28 +1860,7 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
                                                const std::vector<hip::Stream*>& streams,
                                                hipError_t* out_status) {
   hipError_t status = hipSuccess;
-  if (out_status != nullptr) {
-    *out_status = hipSuccess;
-  }
-
   auto* device = g_devices[launch_stream->DeviceId()]->devices()[0];
-
-  // Sparse: one slot per segment whose signal is consumed (PASS 1 in BuildSyncPlan).
-  std::vector<void*> segment_hw_events;
-  if (sync_plan_.num_hw_events > 0) {
-    if (!device->CreateHwEvents(sync_plan_.num_hw_events, segment_hw_events)) {
-      if (out_status != nullptr) {
-        *out_status = hipErrorOutOfMemory;
-      }
-      return nullptr;
-    }
-  }
-
-  // Apply pre-computed patches -- writes HW events directly into flatPacketData
-  // via the flat_packet pointers resolved at instantiate time, so no rebuild needed.
-  if (!sync_plan_.patch_list.empty()) {
-    device->ApplyHwEventPatches(sync_plan_.patch_list, segment_hw_events);
-  }
 
   // Resolve a segment's assigned hip::Stream* from its pre-computed stream_id.
   // streams is the collision-handled streams_ vector built by UpdateStreams.
@@ -1872,17 +1871,27 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
     return launch_stream;
   };
 
-  // Single AccumulateCommand on launch_stream manages all HW event lifetimes
-  // and serves as the dispatch anchor for all segments across all streams.
+  // Single AccumulateCommand on launch_stream serves as the dispatch anchor
+  // for all segments across all streams. HW event lifetime is owned by GraphExec.
   auto* graph_accumulate = new amd::AccumulateCommand(*launch_stream, {}, nullptr);
 
-  // Transfer HW-event ownership to graph_accumulate (~AccumulateCommand releases them).
-  for (auto& hw_event : segment_hw_events) {
-    if (hw_event != nullptr) {
-      graph_accumulate->addHwEvent(hw_event, device);
+  // Reset hw_event signals to 1 before 2nd+ launches so barriers fire correctly.
+  // hw_signals_launched_ is used instead of repeatLaunch_ because repeatLaunch_ is already
+  // true when EnqueueSegmentedGraph is called and cannot distinguish 1st from 2nd launch.
+  if (hw_signals_launched_ && hw_events_base_va_ != 0 && sync_plan_.num_hw_events > 0) {
+    uint64_t reset_handle = launch_stream->vdev()->dispatchGraphSignalReset(
+        hw_events_base_va_, static_cast<uint32_t>(sync_plan_.num_hw_events));
+    if (reset_handle == 0) {
+      ClPrint(amd::LOG_WARNING, amd::LOG_CODE,
+              "[GraphExec] dispatchGraphSignalReset failed on repeat launch");
+    } else {
+      for (hip::Stream* s : streams) {
+        if (s != launch_stream)
+          s->vdev()->waitCompleteSignal(reset_handle);
+      }
     }
   }
-
+  hw_signals_launched_ = true;
   // Process segments level by level
   for (int level = 0; level <= max_dependency_level_; ++level) {
     auto level_it = segments_per_level_.find(level);
@@ -1891,28 +1900,6 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
     }
 
     const auto& segments_at_level = level_it->second;
-
-    if (level == 0) {
-      // Synchronize internal streams with launch stream's last command if available
-      amd::Command* launch_last_cmd = launch_stream->getLastQueuedCommand(true);
-      if (launch_last_cmd != nullptr) {
-        amd::Command::EventWaitList launch_wait_list;
-        launch_wait_list.push_back(launch_last_cmd);
-
-        // For each segment at level 0, if it's on a different stream, add a wait marker
-        for (int segment_id : segments_at_level) {
-          hip::Stream* seg_stream = resolveSegmentStream(segments_[segment_id]);
-          if (seg_stream != launch_stream) {
-            auto marker = new amd::Marker(*seg_stream, true, launch_wait_list);
-            if (marker != nullptr) {
-              marker->enqueue();
-              marker->release();
-            }
-          }
-        }
-        launch_last_cmd->release();
-      }
-    }
 
     // Dispatch each segment -- barriers are in the batch, signals are patched
     for (int segment_id : segments_at_level) {
@@ -1931,16 +1918,16 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
     }
   }
 
-  // Sync parallel-stream leaves back to launch_stream via graph_accumulate's
-  // dep_signal[]. Same-stream leaves rely on in-order queue semantics instead.
+  // Sync parallel-stream leaf segments back to launch_stream.
   if (IsLeafNodeSyncRequired()) {
     for (int seg_id : sync_plan_.leaf_segment_ids) {
       if (seg_id < 0 || seg_id >= static_cast<int>(segments_.size())) continue;
       hip::Stream* seg_stream = resolveSegmentStream(segments_[seg_id]);
       if (seg_stream == launch_stream) continue;
-      int hw_slot = sync_plan_.seg_to_hw_event[seg_id];  // PASS 1 guarantees >= 0; guard defensively.
-      if (hw_slot < 0 || hw_slot >= static_cast<int>(segment_hw_events.size())) continue;
-      graph_accumulate->addDepHwEvent(segment_hw_events[hw_slot]);
+      int hw_slot = sync_plan_.seg_to_hw_event[seg_id];
+      if (hw_slot < 0 || hw_slot >= sync_plan_.num_hw_events) continue;
+      uint64_t sig_handle = hw_events_base_va_ + static_cast<uint64_t>(hw_slot) * 64UL;
+      launch_stream->vdev()->addDynamicQueueWait(sig_handle);
     }
   }
 

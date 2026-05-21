@@ -976,6 +976,12 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
     }
 
     segmentBatches_.clear();
+
+    if (!segment_hw_events_.empty()) {
+      auto* dev = g_devices[instantiateDeviceId_]->devices()[0];
+      dev->DestroyHwEvents(segment_hw_events_);
+    }
+
   }
 
   Node GetClonedNode(Node node) {
@@ -1118,7 +1124,7 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
     int num_segments = 0;   // total segment count (used for bounds checks)
     int num_hw_events = 0;  // HW event slots to allocate (one per ncs=true segment)
 
-    // Dense index into segment_hw_events for each segment.
+    // Dense index into segment_hw_events_ for each segment.
     // seg_to_hw_event[seg_id] == -1  ->  no completion signal emitted.
     // seg_to_hw_event[seg_id] >= 0  ->  index into the compact hw_events vector.
     std::vector<int> seg_to_hw_event;
@@ -1133,6 +1139,16 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   };
 
   SyncPlan sync_plan_;
+
+  // Pre-allocated HW events (one per segment with needs_completion_signal).
+  // Allocated once in BuildSyncPlan, reused across launches, freed in ~GraphExec.
+  std::vector<void*> segment_hw_events_;
+
+  // Device VA of the contiguous amd_signal_t block (base of segment_hw_events_ buffer).
+  uint64_t hw_events_base_va_ = 0;
+
+  // True after the first EnqueueSegmentedGraph; signals need reset on 2nd+ launches.
+  bool hw_signals_launched_ = false;
 
   void BuildSyncPlan();
 };

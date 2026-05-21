@@ -565,6 +565,13 @@ class VirtualGPU : public device::VirtualDevice {
     addSystemScope_ = true;
     fence_state_ = amd::Device::CacheState::kCacheStateInvalid;
   }
+  void addDynamicQueueWait(uint64_t signal_handle) override {
+    barriers_.AddDynamicQueueWait(hsa_signal_t{signal_handle});
+  }
+  void waitCompleteSignal(uint64_t signal_handle) override {
+    WaitCompleteSignal(hsa_signal_t{signal_handle});
+  }
+  uint64_t dispatchGraphSignalReset(uint64_t base_va, uint32_t count) override;
   void SetCopyCommandType(cl_command_type type) { copy_command_type_ = type; }
 
   HwQueueTracker& Barriers() { return barriers_; }

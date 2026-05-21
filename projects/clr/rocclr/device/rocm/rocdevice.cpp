@@ -3676,26 +3676,78 @@ void Device::RetainGlobalSignal(void* signal) const {
 
 // ================================================================================================
 bool Device::CreateHwEvents(int count, std::vector<void*>& hw_events) const {
+  if (count <= 0 || gpuvm_segment_.handle == 0) return false;
+
+  // Allocate one contiguous block of amd_signal_t structs on device coarse VRAM.
+  // sizeof(amd_signal_t) == AMD_SIGNAL_ALIGN_BYTES == 64; we use that as stride.
+  const size_t stride = sizeof(amd_signal_t);
+  const size_t buf_size = static_cast<size_t>(count) * stride;
+
+  amd_signal_t* buf = nullptr;
+  hsa_status_t st = Hsa::memory_pool_allocate(gpuvm_segment_, buf_size, 0,
+                                               reinterpret_cast<void**>(&buf));
+  if (st != HSA_STATUS_SUCCESS || buf == nullptr) {
+    LogError("CreateHwEvents: failed to allocate contiguous signal buffer on device");
+    return false;
+  }
+
+  // Allow CPU read-write so we can initialize the structs from the host.
+  hsa_agent_t cpu = getCpuAgent();
+  st = Hsa::agents_allow_access(1, &cpu, nullptr, buf);
+  if (st != HSA_STATUS_SUCCESS) {
+    Hsa::memory_pool_free(buf);
+    LogError("CreateHwEvents: agents_allow_access failed");
+    return false;
+  }
+
+  // Initialize each amd_signal_t slot and wrap it in a ProfilingSignal.
   hw_events.resize(count, nullptr);
   for (int i = 0; i < count; ++i) {
+    amd_signal_t* sig_mem = &buf[i];
+    memset(sig_mem, 0, stride);
+    sig_mem->kind  = AMD_SIGNAL_KIND_USER;
+    sig_mem->value = 1;  // GPU barriers decrement to 0 on completion
+
     ProfilingSignal* ps = new ProfilingSignal();
-    if (HSA_STATUS_SUCCESS !=
-        Hsa::signal_create(1, 0, nullptr, HSA_AMD_SIGNAL_AMD_GPU_ONLY, &ps->signal_)) {
-      delete ps;
-      for (int j = 0; j < i; ++j) {
-        reinterpret_cast<ProfilingSignal*>(hw_events[j])->release();
-        hw_events[j] = nullptr;
-      }
-      return false;
-    }
+    ps->signal_.handle = reinterpret_cast<uint64_t>(sig_mem);
+    ps->contiguous_alloc_ = true;  // bulk buffer freed separately; skip hsa_signal_destroy
     hw_events[i] = ps;
   }
+
+  // Store the base pointer as a sentinel in the last slot so DestroyHwEvents
+  // can retrieve and free the block.  The sentinel is appended beyond [count-1]
+  // so it never occupies a valid event slot.
+  hw_events.push_back(reinterpret_cast<void*>(buf));
+
   return true;
 }
 
 // ================================================================================================
 void Device::DestroyHwEvent(void* hw_event) const {
   ReleaseGlobalSignal(hw_event);
+}
+
+// ================================================================================================
+// ================================================================================================
+// Free the contiguous device buffer allocated by CreateHwEvents.
+// hw_events must be the same vector returned by CreateHwEvents; the sentinel
+// base pointer appended at hw_events[count] is extracted and freed here.
+void Device::DestroyHwEvents(std::vector<void*>& hw_events) const {
+  if (hw_events.empty()) return;
+
+  // Last entry is the sentinel: raw device pointer to the contiguous amd_signal_t block.
+  void* buf = hw_events.back();
+  hw_events.pop_back();
+
+  // Release ProfilingSignal wrappers (skips hsa_signal_destroy via contiguous_alloc_ flag).
+  for (auto* p : hw_events) {
+    if (p != nullptr) reinterpret_cast<ProfilingSignal*>(p)->release();
+  }
+  hw_events.clear();
+
+  if (buf != nullptr) {
+    Hsa::memory_pool_free(buf);
+  }
 }
 
 // ================================================================================================
@@ -3740,6 +3792,8 @@ void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
   }
 }
 
+
+// ================================================================================================
 // ================================================================================================
 bool Device::CreateUserEvent(amd::UserEvent* event) const {
   std::unique_ptr<ProfilingSignal> signal(new ProfilingSignal());
@@ -3981,6 +4035,9 @@ void Device::RemoveKernel(Kernel& gpuKernel) const {
 
 // ================================================================================================
 ProfilingSignal::~ProfilingSignal() {
+  // Contiguous-allocated signals share a bulk device buffer owned by GraphExec;
+  // the buffer is freed separately, so skip per-signal HSA destroy here.
+  if (contiguous_alloc_) return;
   if (signal_.handle != 0) {
     if (Hsa::signal_load_relaxed(signal_) > 0
         && !(HIP_SKIP_ABORT_ON_GPU_ERROR && amd::Device::IsGPUInError())) {
