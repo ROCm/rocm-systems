@@ -772,16 +772,23 @@ class TestExecutor:
 
         # Build LD_LIBRARY_PATH.  Priority order (highest → lowest):
         #   1. build_dir          – always first so the test-built librccl.so wins
-        #   2. caller environment – LD_LIBRARY_PATH already set in the shell lets
+        #   2. test JSON value    – per-test custom lib dir (e.g. a backport HIP stack)
+        #   3. caller environment – LD_LIBRARY_PATH already set in the shell lets
         #                           users point at a custom libamdhip64.so.7 without
         #                           any special variable:
         #                             LD_LIBRARY_PATH=/path/to/hip python3 test_runner.py ...
-        #   3. {rocm_path}/lib    – default ROCm/HIP fallback
-        #   4. mpi_path/lib       – MPI runtime
+        #   4. {rocm_path}/lib    – default ROCm/HIP fallback
+        #   5. mpi_path/lib       – MPI runtime
+        #
+        # LD_LIBRARY_PATH from the JSON config is consumed here (not in the
+        # merged_env loop below) so that build_dir always stays first.
         mpi_path  = self.paths.get("mpi_path", "")
         rocm_path = self.paths.get("rocm_path", "/opt/rocm")
 
         ld_library_path_parts = [self.build_dir]
+        test_ld = merged_env.get('LD_LIBRARY_PATH')
+        if test_ld:
+            ld_library_path_parts.append(str(test_ld))
         if env.get('LD_LIBRARY_PATH'):
             ld_library_path_parts.append(env['LD_LIBRARY_PATH'])
         ld_library_path_parts.append(os.path.join(rocm_path, "lib"))
@@ -797,15 +804,9 @@ class TestExecutor:
         if self.args.coverage_report:
             env['LLVM_PROFILE_FILE'] = "rccl_tests_%p_%m.profraw"
 
-        # Add test-specific env vars.
-        # LD_LIBRARY_PATH is treated specially: a value coming from the JSON
-        # config is prepended to the already-constructed path so that the
-        # user-supplied directory wins over the {rocm_path}/lib default without
-        # losing build_dir (which must always remain first for librccl.so).
+        # Add test-specific env vars.  LD_LIBRARY_PATH is already merged above.
         for key, value in merged_env.items():
-            if key == 'LD_LIBRARY_PATH' and env.get('LD_LIBRARY_PATH'):
-                env[key] = str(value) + ":" + env['LD_LIBRARY_PATH']
-            else:
+            if key != 'LD_LIBRARY_PATH':
                 env[key] = str(value)
 
         # Build command based on test type

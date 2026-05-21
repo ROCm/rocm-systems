@@ -32,7 +32,7 @@ python test_runner.py --config my_tests.json
 # Run with verbose output
 python test_runner.py --config my_tests.json --verbose
 
-# Run a specific test by exact name
+# Run a specific test by exact name (searches all enabled suites for a match)
 python test_runner.py --config my_tests.json --test-name SHM_ComprehensiveWorkflow
 
 # Run all tests whose name starts with 'P2P' (glob prefix match)
@@ -1211,9 +1211,7 @@ These override the paths specified in the JSON configuration file:
 | `RCCL_TEST_MPI_HOSTFILE` | Path to MPI hostfile for multi-node tests | `export RCCL_TEST_MPI_HOSTFILE=~/.mpi_hostfile` |
 | `RCCL_MPI_LOG_ALL_RANKS` | Set to `1` to redirect each MPI rank's stdout/stderr to `rccl_test_rank_<N>.log` (rank 0 is also tee'd to the console). Useful when debugging failures on non-zero ranks or when tests read per-rank log files for assertions. | `export RCCL_MPI_LOG_ALL_RANKS=1` |
 
-**Note**: `RCCL_TEST_MPI_HOSTFILE` falls back to `~/.mpi_hostfile` if not set.
-
-**Note**: Falls back to `~/.mpi_hostfile` if not set. For SLURM environments, hostfile is auto-generated from `SLURM_NODELIST`.
+**Note**: `RCCL_TEST_MPI_HOSTFILE` falls back to `~/.mpi_hostfile` if not set. For SLURM environments, hostfile is auto-generated from `SLURM_NODELIST`.
 
 ### Test-Specific Variables
 
