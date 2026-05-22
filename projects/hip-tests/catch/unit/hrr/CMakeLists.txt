@@ -42,6 +42,12 @@ hip_add_exe_to_target(NAME HrrTest
                       LINKER_LIBS hiprtc::hiprtc
                       PROPERTY CXX_STANDARD 17)
 
+# On Linux with ROCm clang/lld, the system C++ stdlib is not automatically
+# linked. Add it explicitly so that std::filesystem, std::ostream etc. resolve.
+if(NOT WIN32)
+  target_link_libraries(HrrTest PRIVATE stdc++ stdc++fs)
+endif()
+
 target_include_directories(HrrTest PRIVATE
     ${HRR_CLR_DIR}
     ${HRR_CLR_DIR}/playback
