@@ -85,8 +85,15 @@ static void hrr_run_playback(const fs::path& cap_path,
                              bool require_d2h = true) {
   hip::SpawnProc proc(HRR_PLAYBACK_EXE, /*capture_stdout=*/true);
   set_proc_search_path(proc);
-  int ret = proc.run("\"" + cap_path.string() + "\"" +
-                     (extra_args.empty() ? "" : " " + extra_args));
+  // On Windows, wrap the path in quotes so CreateProcess handles spaces.
+  // On Linux, SpawnProc uses execvp (no shell), so quotes are literal characters
+  // in the argument — pass the raw path without quoting.
+#ifdef _WIN32
+  std::string path_arg = "\"" + cap_path.string() + "\"";
+#else
+  std::string path_arg = cap_path.string();
+#endif
+  int ret = proc.run(path_arg + (extra_args.empty() ? "" : " " + extra_args));
   std::string out = proc.getOutput();
   INFO("Playback stdout:\n" << out);
   INFO("Playback exit code: " << ret);
@@ -546,7 +553,12 @@ HIP_TEST_CASE(Unit_HRR_MultiThreadRoundtrip) {
   auto run_mt_playback = [&](const std::string& extra_args) {
     hip::SpawnProc proc(HRR_PLAYBACK_EXE, /*capture_stdout=*/true);
     set_proc_search_path(proc);
-    proc.run("\"" + cap.path.string() + "\" --skip-device-sync" +
+#ifdef _WIN32
+    std::string mt_path_arg = "\"" + cap.path.string() + "\"";
+#else
+    std::string mt_path_arg = cap.path.string();
+#endif
+    proc.run(mt_path_arg + " --skip-device-sync" +
              (extra_args.empty() ? "" : " " + extra_args));
     std::string out = proc.getOutput();
     INFO("Playback args: " + extra_args);
