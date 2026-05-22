@@ -22,8 +22,8 @@
 
 // Invariant tests for the `should_batch_packets` decision in
 // hsa/queue.cpp:WriteInterceptor. After C2, the historical map-iteration over
-// `_callbacks` that ANDed every callback's `batch_packets()` return is
-// replaced with the explicit expression:
+// the per-callback registration map (which ANDed every callback's
+// batch_packets() return) is replaced with the explicit expression:
 //
 //     bool should_batch_packets =
 //         !rocprofiler::counters::is_any_active()
@@ -137,9 +137,10 @@ TEST(ShouldBatchPackets, BatchesPacketsWhenNoSubsystemActive)
 // Test 2: counters context active -> per-packet mode required.
 //
 // Activation mirrors `TEST(core, start_stop_buffered_ctx)` in
-// counters/tests/core.cpp:523. The `check_callbacks` pattern is deliberately
-// NOT used because it bypasses context registration, so `is_any_active()`
-// (which walks the active-context list) would not observe the context.
+// counters/tests/core.cpp:523. The direct queue_cb invocation pattern (used
+// elsewhere in counters tests) is deliberately NOT used here because it
+// bypasses context registration, so `is_any_active()` (which walks the
+// active-context list) would not observe the context.
 // ---------------------------------------------------------------------------
 TEST(ShouldBatchPackets, RequiresPerPacketWhenCountersActive)
 {

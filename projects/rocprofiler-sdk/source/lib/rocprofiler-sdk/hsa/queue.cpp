@@ -190,7 +190,8 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
         auto dispatch_time = kernel_dispatch::get_dispatch_time(queue_info_session, packet);
         kernel_dispatch::dispatch_complete(queue_info_session, packet, dispatch_time);
 
-        // Direct subsystem completion calls — replaces map-iteration over _callbacks.
+        // Direct subsystem completion calls — each subsystem decides internally
+        // whether it has work to do for this dispatch.
         rocprofiler::counters::signal_completion_hook(queue_info_session.queue,
                                                       packet.kernel_packet,
                                                       _session,
@@ -629,8 +630,8 @@ WriteInterceptor(const void* packets,
             // along with an ID of the client we got the packet from (this will be returned via
             // completed_cb_t)
 
-            // Direct subsystem calls — replaces map-iteration over _callbacks.
-            // Each subsystem checks its own activation state internally.
+            // Direct subsystem calls — each subsystem checks its own
+            // activation state internally.
             //
             // Counters: 0..N entries (one per active counter_callback_info)
             rocprofiler::counters::write_hook(
@@ -1040,24 +1041,6 @@ Queue::sync() const
         ROCP_WARNING_IF(_value != 0)
             << fmt::format("Timeout while waiting for queue sync: {} kernels still active", _value);
     }
-}
-
-void
-Queue::register_callback(ClientID id, queue_callbacks_t callbacks)
-{
-    _callbacks.wlock([&](auto& map) {
-        ROCP_FATAL_IF(rocprofiler::common::get_val(map, id)) << "ID already exists!";
-        _notifiers++;
-        map[id] = std::move(callbacks);
-    });
-}
-
-void
-Queue::remove_callback(ClientID id)
-{
-    _callbacks.wlock([&](auto& map) {
-        if(map.erase(id) == 1) _notifiers--;
-    });
 }
 
 queue_state
