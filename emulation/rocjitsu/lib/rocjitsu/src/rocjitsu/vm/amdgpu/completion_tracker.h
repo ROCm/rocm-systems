@@ -8,6 +8,7 @@
 /// @brief EOP-like completion tracking: per-dispatch WG retirement and
 /// in-order signal firing per queue.
 
+#include "plugins/execution_plugin.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -15,6 +16,7 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <unordered_map>
 #include <vector>
 
@@ -27,6 +29,10 @@ public:
 
   CompletionTracker(GpuMemory *mem, std::vector<ComputeUnitCore *> &cus)
       : memory_(mem), cus_(cus) {}
+
+  void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
+    plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group();
+  }
 
   void set_interrupt_callback(InterruptCallback cb) { interrupt_cb_ = std::move(cb); }
 
@@ -51,6 +57,7 @@ private:
   GpuMemory *memory_;
   std::vector<ComputeUnitCore *> &cus_;
   InterruptCallback interrupt_cb_;
+  std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
 
   /// @brief Map from dispatch_id -> queue_idx for fast lookup.
   std::unordered_map<uint32_t, size_t> dispatch_queue_map_;

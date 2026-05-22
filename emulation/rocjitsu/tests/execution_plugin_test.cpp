@@ -19,15 +19,21 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/AMDHSAKernelDescriptor.h"
 RJ_DIAGNOSTIC_POP
 
+#include "plugins/race_detection_plugin.h"
+
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace {
 
 using namespace rocjitsu;
+using namespace rocjitsu::amdgpu;
 
 const std::string SCHEMA_PATH = std::string(SCHEMA_DIR) + "/simulation_config.fbs";
 
@@ -39,30 +45,316 @@ constexpr uint32_t S_NOP = sopp(0);
 constexpr uint32_t S_ENDPGM = sopp(1);
 constexpr uint32_t S_BARRIER = sopp(10);
 
-/// A plugin that counts how many times each hook is called.
-class CountingPlugin : public ExecutionPlugin {
-public:
-  int kernel_dispatches = 0;
-  int workgroup_dispatches = 0;
-  int instructions = 0;
-  int barriers = 0;
-  int barriers_resolved = 0;
-  int memory_insts = 0;
-  int riscv_instructions = 0;
+struct HookEvent {
+  enum Kind {
+    DISPATCH_PACKET_PROCESSED,
+    DISPATCH_EXECUTION_BEGIN,
+    DISPATCH_EXECUTION_END,
+    WORKGROUP_DISPATCHED,
+    WORKGROUP_COMPLETED,
+    WAVEFRONT_DISPATCHED,
+    WAVEFRONT_HALTED,
+    BEFORE_INSTRUCTION,
+    AFTER_INSTRUCTION,
+    ROUTE_MEMORY,
+    READ_VGPR,
+    READ_SGPR,
+    BARRIER_RESOLVED,
+    INIT,
+    SHUTDOWN,
+    KIND_COUNT,
+  };
 
-  void onAmdgpuKernelDispatch(uint64_t, uint64_t) override { ++kernel_dispatches; }
-  void onAmdgpuDispatchWorkgroup(uint32_t, uint32_t, uint32_t,
-                                 std::span<amdgpu::Wavefront *>) override {
-    ++workgroup_dispatches;
+  explicit HookEvent(Kind k) : kind(k) {}
+
+  Kind kind;
+  uint32_t dispatch_id = 0;
+  uint32_t wg_id = 0;
+  uint32_t wf_id = 0;
+  uint64_t pc = 0;
+  std::string mnemonic;
+};
+
+/// A plugin that records an ordered event log for ordering assertions.
+class OrderingPlugin : public ExecutionPlugin {
+public:
+  OrderingPlugin() : ExecutionPlugin("ordering") {}
+  std::vector<HookEvent> events;
+
+  void onInit() override { events.push_back(HookEvent(HookEvent::INIT)); }
+
+  void onShutdown() override { events.push_back(HookEvent(HookEvent::SHUTDOWN)); }
+
+  void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override {
+    HookEvent e{HookEvent::DISPATCH_PACKET_PROCESSED};
+    e.dispatch_id = info.dispatch_id;
+    events.push_back(e);
   }
-  void onAmdgpuExecuteInstruction(uint64_t, const Instruction &inst) override {
-    ++instructions;
-    if (inst.mnemonic() == "s_barrier")
-      ++barriers;
+
+  void onAmdgpuDispatchExecutionBegin(uint32_t dispatch_id) override {
+    HookEvent e{HookEvent::DISPATCH_EXECUTION_BEGIN};
+    e.dispatch_id = dispatch_id;
+    events.push_back(e);
   }
-  void onAmdgpuBarrierResolved(uint32_t) override { ++barriers_resolved; }
-  void onAmdgpuRouteMemoryInstruction(const Instruction &) override { ++memory_insts; }
-  void onRiscvExecuteInstruction(uint64_t, const Instruction &) override { ++riscv_instructions; }
+
+  void onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) override {
+    HookEvent e{HookEvent::DISPATCH_EXECUTION_END};
+    e.dispatch_id = dispatch_id;
+    events.push_back(e);
+  }
+
+  void onAmdgpuWorkgroupDispatched(uint32_t wg_id, uint32_t dispatch_id, uint32_t, uint32_t,
+                                   std::span<amdgpu::Wavefront *>) override {
+    HookEvent e{HookEvent::WORKGROUP_DISPATCHED};
+    e.dispatch_id = dispatch_id;
+    e.wg_id = wg_id;
+    events.push_back(e);
+  }
+
+  void onAmdgpuWorkgroupCompleted(uint32_t dispatch_id, uint32_t wg_id) override {
+    HookEvent e{HookEvent::WORKGROUP_COMPLETED};
+    e.dispatch_id = dispatch_id;
+    e.wg_id = wg_id;
+    events.push_back(e);
+  }
+
+  void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) override {
+    HookEvent e{HookEvent::WAVEFRONT_DISPATCHED};
+    e.dispatch_id = wf.dispatch_id();
+    e.wg_id = wf.wg_id();
+    e.wf_id = wf.wf_id();
+    events.push_back(e);
+  }
+
+  void onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) override {
+    HookEvent e{HookEvent::WAVEFRONT_HALTED};
+    e.dispatch_id = wf.dispatch_id();
+    e.wg_id = wf.wg_id();
+    e.wf_id = wf.wf_id();
+    events.push_back(e);
+  }
+
+  void beforeAmdgpuExecuteInstruction(uint64_t pc, const Instruction &inst,
+                                      amdgpu::Wavefront &wf) override {
+    HookEvent e{HookEvent::BEFORE_INSTRUCTION};
+    e.dispatch_id = wf.dispatch_id();
+    e.wg_id = wf.wg_id();
+    e.wf_id = wf.wf_id();
+    e.pc = pc;
+    e.mnemonic = inst.mnemonic();
+    events.push_back(e);
+  }
+
+  void afterAmdgpuExecuteInstruction(uint64_t pc, const Instruction &inst,
+                                     amdgpu::Wavefront &wf) override {
+    HookEvent e{HookEvent::AFTER_INSTRUCTION};
+    e.dispatch_id = wf.dispatch_id();
+    e.wg_id = wf.wg_id();
+    e.wf_id = wf.wf_id();
+    e.pc = pc;
+    e.mnemonic = inst.mnemonic();
+    events.push_back(e);
+  }
+
+  void onAmdgpuRouteMemoryInstruction(const Instruction &inst, amdgpu::Wavefront &wf) override {
+    HookEvent e{HookEvent::ROUTE_MEMORY};
+    e.dispatch_id = wf.dispatch_id();
+    e.wg_id = wf.wg_id();
+    e.wf_id = wf.wf_id();
+    e.mnemonic = inst.mnemonic();
+    events.push_back(e);
+  }
+
+  void onAmdgpuReadVgpr(amdgpu::Wavefront *wf, uint32_t, uint32_t, uint8_t) override {
+    HookEvent e{HookEvent::READ_VGPR};
+    if (wf) {
+      e.dispatch_id = wf->dispatch_id();
+      e.wg_id = wf->wg_id();
+      e.wf_id = wf->wf_id();
+    }
+    events.push_back(e);
+  }
+
+  void onAmdgpuReadSgpr(amdgpu::Wavefront *wf, uint32_t) override {
+    HookEvent e{HookEvent::READ_SGPR};
+    if (wf) {
+      e.dispatch_id = wf->dispatch_id();
+      e.wg_id = wf->wg_id();
+      e.wf_id = wf->wf_id();
+    }
+    events.push_back(e);
+  }
+
+  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wfs) override {
+    HookEvent e{HookEvent::BARRIER_RESOLVED};
+    if (!wfs.empty()) {
+      e.dispatch_id = wfs[0]->dispatch_id();
+      e.wg_id = wfs[0]->wg_id();
+    }
+    events.push_back(e);
+  }
+};
+
+const char *kindName(HookEvent::Kind k) {
+  static const char *names[] = {
+      "DISPATCH_PACKET_PROCESSED",
+      "DISPATCH_EXECUTION_BEGIN",
+      "DISPATCH_EXECUTION_END",
+      "WORKGROUP_DISPATCHED",
+      "WORKGROUP_COMPLETED",
+      "WAVEFRONT_DISPATCHED",
+      "WAVEFRONT_HALTED",
+      "BEFORE_INSTRUCTION",
+      "AFTER_INSTRUCTION",
+      "ROUTE_MEMORY",
+      "READ_VGPR",
+      "READ_SGPR",
+      "BARRIER_RESOLVED",
+      "INIT",
+      "SHUTDOWN",
+  };
+  return k < HookEvent::KIND_COUNT ? names[k] : "UNKNOWN";
+}
+
+/// Helper for asserting ordering invariants on a HookEvent log.
+class EventLog {
+public:
+  using Kind = HookEvent::Kind;
+
+  explicit EventLog(const std::vector<HookEvent> &events) : events_(events) {}
+
+  /// Print the full lifecycle event timeline to stderr.
+  void dump() const {
+    std::cerr << "\n=== Event timeline (" << events_.size() << " events) ===\n";
+    for (size_t i = 0; i < events_.size(); ++i) {
+      const auto &e = events_[i];
+      if (e.kind > Kind::WAVEFRONT_HALTED && e.kind != Kind::INIT && e.kind != Kind::SHUTDOWN)
+        continue;
+      std::cerr << std::setw(4) << i << "  " << std::setw(30) << std::left << kindName(e.kind)
+                << std::right;
+      switch (e.kind) {
+      case Kind::DISPATCH_PACKET_PROCESSED:
+      case Kind::DISPATCH_EXECUTION_BEGIN:
+      case Kind::DISPATCH_EXECUTION_END:
+        std::cerr << " d=" << e.dispatch_id;
+        break;
+      case Kind::WORKGROUP_DISPATCHED:
+      case Kind::WORKGROUP_COMPLETED:
+        std::cerr << " d=" << e.dispatch_id << " wg=" << e.wg_id;
+        break;
+      case Kind::WAVEFRONT_DISPATCHED:
+      case Kind::WAVEFRONT_HALTED:
+        std::cerr << " d=" << e.dispatch_id << " wg=" << e.wg_id << " wf=" << e.wf_id;
+        break;
+      default:
+        break;
+      }
+      std::cerr << "\n";
+    }
+    std::cerr << "=== end ===\n\n";
+  }
+
+  /// Count events of a given kind, optionally filtered by dispatch_id.
+  size_t count(Kind kind, uint32_t dispatch_id = UINT32_MAX) const {
+    size_t n = 0;
+    for (const auto &e : events_)
+      if (e.kind == kind && (dispatch_id == UINT32_MAX || e.dispatch_id == dispatch_id))
+        ++n;
+    return n;
+  }
+
+  /// Return dispatch_ids in the order they first appear as DISPATCH_PACKET_PROCESSED.
+  std::vector<uint32_t> dispatchIds() const {
+    std::vector<uint32_t> ids;
+    for (const auto &e : events_) {
+      if (e.kind == Kind::DISPATCH_PACKET_PROCESSED &&
+          std::find(ids.begin(), ids.end(), e.dispatch_id) == ids.end())
+        ids.push_back(e.dispatch_id);
+    }
+    return ids;
+  }
+
+  /// Assert that the last event of kind 'a' precedes the first event of kind 'b'.
+  void assertAllBefore(Kind a, Kind b) const {
+    size_t last_a = 0;
+    size_t first_b = events_.size();
+    bool found_a = false;
+    for (size_t i = 0; i < events_.size(); ++i) {
+      if (events_[i].kind == a) {
+        last_a = i;
+        found_a = true;
+      }
+      if (events_[i].kind == b && i < first_b)
+        first_b = i;
+    }
+    std::cerr << "  edge: last " << kindName(a) << " [" << last_a << "] -> first " << kindName(b)
+              << " [" << first_b << "]\n";
+    ASSERT_TRUE(found_a) << "No events of first kind found";
+    EXPECT_LT(last_a, first_b)
+        << "All events of first kind should precede all events of second kind";
+  }
+
+  /// Assert that the last (a, da) event precedes the first (b, db) event.
+  void assertLastBeforeFirst(Kind a, uint32_t da, Kind b, uint32_t db) const {
+    size_t last_a = 0;
+    size_t first_b = events_.size();
+    bool found_a = false;
+    for (size_t i = 0; i < events_.size(); ++i) {
+      if (events_[i].kind == a && events_[i].dispatch_id == da) {
+        last_a = i;
+        found_a = true;
+      }
+      if (events_[i].kind == b && events_[i].dispatch_id == db && i < first_b)
+        first_b = i;
+    }
+    std::cerr << "  edge: last " << kindName(a) << "(d=" << da << ") [" << last_a << "] -> first "
+              << kindName(b) << "(d=" << db << ") [" << first_b << "]\n";
+    ASSERT_TRUE(found_a) << "No matching events for first kind";
+    EXPECT_LT(last_a, first_b);
+  }
+
+  /// Return all unique dispatch_ids seen across all lifecycle events.
+  std::set<uint32_t> allDispatchIds() const {
+    std::set<uint32_t> ids;
+    for (const auto &e : events_) {
+      switch (e.kind) {
+      case Kind::DISPATCH_PACKET_PROCESSED:
+      case Kind::DISPATCH_EXECUTION_BEGIN:
+      case Kind::DISPATCH_EXECUTION_END:
+      case Kind::WORKGROUP_DISPATCHED:
+      case Kind::WORKGROUP_COMPLETED:
+      case Kind::WAVEFRONT_DISPATCHED:
+      case Kind::WAVEFRONT_HALTED:
+        ids.insert(e.dispatch_id);
+        break;
+      default:
+        break;
+      }
+    }
+    return ids;
+  }
+
+  /// Assert that begin/end events are matched by wf_id within a dispatch:
+  /// each begin has a corresponding end, begin precedes end, none left open.
+  void assertPaired(Kind begin_kind, Kind end_kind, uint32_t dispatch_id) const {
+    std::map<uint32_t, size_t> opens;
+    for (size_t i = 0; i < events_.size(); ++i) {
+      if (events_[i].dispatch_id != dispatch_id)
+        continue;
+      if (events_[i].kind == begin_kind) {
+        opens[events_[i].wf_id] = i;
+      } else if (events_[i].kind == end_kind) {
+        auto it = opens.find(events_[i].wf_id);
+        ASSERT_NE(it, opens.end()) << "End without matching begin for wf=" << events_[i].wf_id;
+        EXPECT_LT(it->second, i);
+        opens.erase(it);
+      }
+    }
+    EXPECT_TRUE(opens.empty()) << "Unmatched begin events remain";
+  }
+
+private:
+  const std::vector<HookEvent> &events_;
 };
 
 /// Minimal SoC fixture: 1 XCD, 1 SE, 1 CU.
@@ -119,14 +411,27 @@ struct PluginFixture {
     return addr;
   }
 
-  /// Attach a CountingPlugin and return a raw pointer to it.
-  CountingPlugin *attach_plugin() {
-    auto group = std::make_shared<ExecutionPluginGroup>();
-    auto plugin = std::make_unique<CountingPlugin>();
+  /// Attach an OrderingPlugin, fire onInit, and return a raw pointer to it.
+  OrderingPlugin *attach_ordering_plugin() {
+    plugin_group_ = std::make_shared<ExecutionPluginGroup>();
+    auto plugin = std::make_unique<OrderingPlugin>();
     auto *p = plugin.get();
-    group->add(std::move(plugin));
-    soc->set_plugin_group(group);
+    plugin_group_->add(std::move(plugin));
+    soc->set_plugin_group(plugin_group_);
+    plugin_group_->onInit();
     return p;
+  }
+
+  void shutdown() {
+    if (plugin_group_)
+      plugin_group_->onShutdown();
+  }
+
+  std::shared_ptr<ExecutionPluginGroup> plugin_group_;
+
+  void run_until_idle() {
+    for (uint32_t i = 0; i < 100000 && engine->step(); ++i) {
+    }
   }
 
   void run_kernel(const uint32_t *code, size_t num_words, uint32_t grid = 64,
@@ -134,47 +439,9 @@ struct PluginFixture {
     uint64_t ko = write_kernel(0x1000, code, num_words);
     test::AqlQueue queue(mem, cp());
     queue.dispatch(ko, grid, workgroup);
-    for (uint32_t i = 0; i < 10000 && engine->step(); ++i) {
-      if (cu()->num_wfs() > 0) {
-        bool all_halted = true;
-        for (uint32_t w = 0; w < cu()->num_wf_slots(); ++w) {
-          auto *wf = cu()->wf(w);
-          if (wf && wf->sgpr_alloc().count > 0 && !wf->is_halted()) {
-            all_halted = false;
-            break;
-          }
-        }
-        if (all_halted)
-          break;
-      }
-    }
+    run_until_idle();
   }
 };
-
-TEST(ExecutionPluginTest, SimpleKernelFiresHooks) {
-  PluginFixture f;
-  auto *p = f.attach_plugin();
-
-  const uint32_t code[] = {S_NOP, S_ENDPGM};
-  f.run_kernel(code, 2);
-
-  EXPECT_EQ(p->kernel_dispatches, 1);
-  EXPECT_EQ(p->workgroup_dispatches, 1);
-  EXPECT_GE(p->instructions, 2);
-}
-
-TEST(ExecutionPluginTest, BarrierFiresHooks) {
-  PluginFixture f;
-  auto *p = f.attach_plugin();
-
-  const uint32_t code[] = {S_BARRIER, S_ENDPGM};
-  f.run_kernel(code, 2, /*grid=*/128, /*workgroup=*/128);
-
-  EXPECT_EQ(p->kernel_dispatches, 1);
-  EXPECT_EQ(p->workgroup_dispatches, 1);
-  EXPECT_EQ(p->barriers, 2);          // one per wavefront
-  EXPECT_EQ(p->barriers_resolved, 1); // one resolution for the workgroup
-}
 
 TEST(ExecutionPluginTest, NoPluginNoCrash) {
   PluginFixture f;
@@ -183,6 +450,13 @@ TEST(ExecutionPluginTest, NoPluginNoCrash) {
 }
 
 TEST(ExecutionPluginTest, RiscvInstructionHook) {
+  class RiscvCountingPlugin : public ExecutionPlugin {
+  public:
+    RiscvCountingPlugin() : ExecutionPlugin("riscv_test") {}
+    int count = 0;
+    void onRiscvExecuteInstruction(uint64_t, const Instruction &) override { ++count; }
+  };
+
   simdojo::SimulationEngine::Config config{};
   config.max_ticks = 1000;
   config.num_threads = 1;
@@ -194,7 +468,7 @@ TEST(ExecutionPluginTest, RiscvInstructionHook) {
   auto *hart = static_cast<rocjitsu::risc_v::Hart *>(root->add_child(std::move(hart_ptr)));
 
   auto group = std::make_shared<ExecutionPluginGroup>();
-  auto plugin = std::make_unique<CountingPlugin>();
+  auto plugin = std::make_unique<RiscvCountingPlugin>();
   auto *p = plugin.get();
   group->add(std::move(plugin));
   hart->set_plugin_group(group);
@@ -208,8 +482,209 @@ TEST(ExecutionPluginTest, RiscvInstructionHook) {
   hart->state().pc = 0;
   engine->run();
 
-  EXPECT_EQ(p->riscv_instructions, 2);
+  EXPECT_EQ(p->count, 2);
   EXPECT_EQ(hart->state().read_xreg(1), 42);
+}
+
+// -- Ordering tests ----------------------------------------------------------
+//
+// These tests use functional mode with quantum=0 (the PluginFixture default).
+// In this mode, cu->activate() runs synchronously until all active wavefronts
+// halt, and the CP fully completes each dispatch before starting the next.
+// This guarantees strictly sequential dispatch execution on a single queue:
+// no workgroups from different dispatches are ever active simultaneously.
+//
+// With quantum > 0 (timed mode), the CU would execute a limited number of
+// instructions per activation and yield, allowing the CP to interleave
+// workgroups from different queues. The sequential ordering assertions below
+// would not hold in that configuration.
+
+TEST(HookOrderingTest, BarrierTwoWaves) {
+  PluginFixture f;
+  auto *p = f.attach_ordering_plugin();
+  const uint32_t code[] = {S_BARRIER, S_ENDPGM};
+  f.run_kernel(code, 2, /*grid=*/128, /*workgroup=*/128);
+  f.shutdown();
+
+  EventLog log(p->events);
+  EXPECT_EQ(log.count(HookEvent::INIT), 1u);
+  EXPECT_EQ(log.count(HookEvent::SHUTDOWN), 1u);
+  EXPECT_EQ(log.count(HookEvent::BARRIER_RESOLVED), 1u);
+  EXPECT_EQ(log.count(HookEvent::WAVEFRONT_DISPATCHED), 2u);
+  EXPECT_EQ(log.count(HookEvent::WAVEFRONT_HALTED), 2u);
+
+  ASSERT_EQ(p->events.front().kind, HookEvent::INIT);
+  ASSERT_EQ(p->events.back().kind, HookEvent::SHUTDOWN);
+}
+
+TEST(HookOrderingTest, FiveDispatchLifecycle) {
+  PluginFixture f;
+  auto *p = f.attach_ordering_plugin();
+
+  // 3 distinct kernels.
+  const uint32_t kernel_a[] = {S_NOP, S_ENDPGM};
+  const uint32_t kernel_b[] = {S_NOP, S_NOP, S_ENDPGM};
+  const uint32_t kernel_c[] = {S_NOP, S_NOP, S_NOP, S_ENDPGM};
+  uint64_t ko_a = f.write_kernel(0x1000, kernel_a, 2);
+  uint64_t ko_b = f.write_kernel(0x2000, kernel_b, 3);
+  uint64_t ko_c = f.write_kernel(0x3000, kernel_c, 4);
+
+  // 5 dispatches with varying workgroup counts (1 wave per WG, wave_size=64).
+  struct DispatchSpec {
+    uint64_t kernel;
+    uint32_t grid;
+    uint32_t wg_size;
+    uint32_t expected_wgs;
+  };
+  DispatchSpec specs[] = {
+      {ko_a, 192, 64, 3}, // dispatch 0: kernel A, 3 WGs
+      {ko_b, 128, 64, 2}, // dispatch 1: kernel B, 2 WGs
+      {ko_a, 256, 64, 4}, // dispatch 2: kernel A, 4 WGs
+      {ko_c, 64, 64, 1},  // dispatch 3: kernel C, 1 WG
+      {ko_b, 320, 64, 5}, // dispatch 4: kernel B, 5 WGs
+  };
+  constexpr size_t N = std::size(specs);
+  constexpr uint32_t total_wgs = 3 + 2 + 4 + 1 + 5;
+
+  test::AqlQueue queue(f.mem, f.cp());
+  for (const auto &s : specs)
+    queue.dispatch(s.kernel, s.grid, static_cast<uint16_t>(s.wg_size));
+  f.run_until_idle();
+  f.shutdown();
+
+  EventLog log(p->events);
+  log.dump();
+
+  // -- Init/Shutdown lifecycle ------------------------------------------------
+
+  EXPECT_EQ(log.count(HookEvent::INIT), 1u);
+  EXPECT_EQ(log.count(HookEvent::SHUTDOWN), 1u);
+  ASSERT_EQ(p->events.front().kind, HookEvent::INIT);
+  ASSERT_EQ(p->events.back().kind, HookEvent::SHUTDOWN);
+
+  // -- Dispatch ID integrity --------------------------------------------------
+
+  auto dispatches = log.dispatchIds();
+  ASSERT_EQ(dispatches.size(), N);
+
+  // All dispatch_ids must be distinct.
+  std::set<uint32_t> unique_ids(dispatches.begin(), dispatches.end());
+  EXPECT_EQ(unique_ids.size(), N) << "All dispatch_ids must be distinct";
+
+  // Every lifecycle event must carry a known dispatch_id.
+  auto all_ids = log.allDispatchIds();
+  EXPECT_EQ(all_ids, unique_ids) << "No lifecycle event should carry an unexpected dispatch_id";
+
+  // -- Counts -----------------------------------------------------------------
+
+  EXPECT_EQ(log.count(HookEvent::DISPATCH_PACKET_PROCESSED), N);
+  EXPECT_EQ(log.count(HookEvent::DISPATCH_EXECUTION_BEGIN), N);
+  EXPECT_EQ(log.count(HookEvent::DISPATCH_EXECUTION_END), N);
+  EXPECT_EQ(log.count(HookEvent::WORKGROUP_DISPATCHED), total_wgs);
+  EXPECT_EQ(log.count(HookEvent::WORKGROUP_COMPLETED), total_wgs);
+  EXPECT_EQ(log.count(HookEvent::WAVEFRONT_DISPATCHED), log.count(HookEvent::WAVEFRONT_HALTED));
+
+  for (size_t i = 0; i < N; ++i) {
+    uint32_t d = dispatches[i];
+    EXPECT_EQ(log.count(HookEvent::WORKGROUP_DISPATCHED, d), specs[i].expected_wgs)
+        << "Workgroup count mismatch for dispatch index " << i;
+  }
+
+  // -- DAG edges --------------------------------------------------------------
+  std::cerr << "--- DAG edge assertions ---\n";
+
+  log.assertAllBefore(HookEvent::DISPATCH_PACKET_PROCESSED, HookEvent::DISPATCH_EXECUTION_BEGIN);
+
+  // -- Per-dispatch lifecycle brackets ----------------------------------------
+
+  for (uint32_t d : dispatches) {
+    // Exactly one execution-begin and one execution-end per dispatch.
+    EXPECT_EQ(log.count(HookEvent::DISPATCH_EXECUTION_BEGIN, d), 1u);
+    EXPECT_EQ(log.count(HookEvent::DISPATCH_EXECUTION_END, d), 1u);
+    EXPECT_EQ(log.count(HookEvent::DISPATCH_PACKET_PROCESSED, d), 1u);
+
+    // Execution-begin precedes first workgroup dispatch.
+    log.assertLastBeforeFirst(HookEvent::DISPATCH_EXECUTION_BEGIN, d,
+                              HookEvent::WORKGROUP_DISPATCHED, d);
+    // All wavefronts halt before execution-end.
+    log.assertLastBeforeFirst(HookEvent::WAVEFRONT_HALTED, d, HookEvent::DISPATCH_EXECUTION_END, d);
+    // Wavefront dispatched/halted are properly paired.
+    log.assertPaired(HookEvent::WAVEFRONT_DISPATCHED, HookEvent::WAVEFRONT_HALTED, d);
+    // Workgroup dispatched/completed counts match.
+    EXPECT_EQ(log.count(HookEvent::WORKGROUP_DISPATCHED, d),
+              log.count(HookEvent::WORKGROUP_COMPLETED, d));
+    // Wavefront dispatched/halted counts match.
+    EXPECT_EQ(log.count(HookEvent::WAVEFRONT_DISPATCHED, d),
+              log.count(HookEvent::WAVEFRONT_HALTED, d));
+  }
+
+  // -- Sequential execution (functional mode, quantum=0) ----------------------
+  // In functional mode, the CP drains each dispatch to completion before
+  // starting the next on the same queue. This would not hold with quantum > 0
+  // or with dispatches on separate queues.
+
+  for (size_t i = 0; i + 1 < N; ++i) {
+    log.assertLastBeforeFirst(HookEvent::DISPATCH_EXECUTION_END, dispatches[i],
+                              HookEvent::DISPATCH_EXECUTION_BEGIN, dispatches[i + 1]);
+  }
+}
+
+// -- formatTrace tests -------------------------------------------------------
+
+auto make_trace(std::initializer_list<uint64_t> pcs) {
+  RingBuffer<uint64_t, 256> rb;
+  for (auto pc : pcs)
+    rb.push(pc);
+  return rb;
+}
+
+TEST(FormatTraceTest, WaveLaneAnnotations) {
+  auto trace = make_trace({0x100, 0x108, 0x10c});
+  std::unordered_map<uint64_t, std::string> disasm = {
+      {0x100, "ds_write_b32 v9, v12"},
+      {0x108, "s_nop 0"},
+      {0x10c, "ds_read_b32 v8, v9"},
+  };
+  MarkedPc conflict{0x100, 3, -1};
+  MarkedPc read{0x10c, 0, 5};
+  auto result = formatTrace(trace, disasm, conflict, read);
+  EXPECT_NE(result.find("; <-- wave 3"), std::string::npos);
+  EXPECT_NE(result.find("; <-- wave 0 lane 5"), std::string::npos);
+}
+
+TEST(FormatTraceTest, NoLineBeforeFirstMarker) {
+  auto trace = make_trace({0x100, 0x104, 0x108, 0x10c, 0x110});
+  std::unordered_map<uint64_t, std::string> disasm = {
+      {0x100, "s_nop 0"},
+      {0x104, "s_nop 0"},
+      {0x108, "ds_write_b32 v9, v12"},
+      {0x10c, "s_nop 0"},
+      {0x110, "ds_read_b32 v8, v9"},
+  };
+  MarkedPc conflict{0x108, 2, -1};
+  MarkedPc read{0x110, 1, 3};
+  auto result = formatTrace(trace, disasm, conflict, read);
+  EXPECT_EQ(result.substr(0, 5), "  ==>");
+  EXPECT_EQ(result.find("0x100"), std::string::npos);
+  EXPECT_EQ(result.find("0x104"), std::string::npos);
+}
+
+TEST(FormatTraceTest, ConflictBeforeTraceWindow) {
+  auto trace = make_trace({0x200, 0x204, 0x208});
+  std::unordered_map<uint64_t, std::string> disasm = {
+      {0x100, "buffer_load_dwordx4 v[148:151], v0, s[8:11], 0"},
+      {0x200, "s_nop 0"},
+      {0x204, "s_nop 0"},
+      {0x208, "ds_read_b32 v8, v9"},
+  };
+  MarkedPc conflict{0x100, 3, -1};
+  MarkedPc read{0x208, 0, 5};
+  auto result = formatTrace(trace, disasm, conflict, read);
+  EXPECT_NE(result.find("before trace window"), std::string::npos);
+  EXPECT_NE(result.find("buffer_load_dwordx4"), std::string::npos);
+  EXPECT_NE(result.find("; <-- wave 3"), std::string::npos);
+  EXPECT_NE(result.find("not recorded"), std::string::npos);
+  EXPECT_NE(result.find("; <-- wave 0 lane 5"), std::string::npos);
 }
 
 } // namespace

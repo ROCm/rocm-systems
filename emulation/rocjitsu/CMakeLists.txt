@@ -195,10 +195,19 @@ endforeach()
 
 add_custom_target(flatbuffers_schemas DEPENDS ${GENERATED_HEADERS})
 
+# Set include paths before adding subdirectories so all targets can find them.
+set(ROCJITSU_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/lib/rocjitsu/include)
+set(ROCJITSU_SRC_DIR ${PROJECT_SOURCE_DIR}/lib/rocjitsu/src)
+
 # Libraries
 add_subdirectory(lib/util)
 add_subdirectory(lib/simdojo)
 add_subdirectory(lib/rocjitsu)
+add_subdirectory(
+    ${CMAKE_CURRENT_SOURCE_DIR}/../plugins/race-detector
+    ${CMAKE_BINARY_DIR}/race-detector
+)
+add_subdirectory(plugins)
 
 # Main shared library - assembles all object libraries.
 add_library(rocjitsu_shared SHARED)
@@ -221,6 +230,7 @@ target_link_libraries(
         simdojo
         rocjitsu_vm
         rocjitsu_vm_amdgpu
+        rocjitsu_vm_plugins
         rocjitsu_vm_risc_v
         rocjitsu_config
         flatbuffers

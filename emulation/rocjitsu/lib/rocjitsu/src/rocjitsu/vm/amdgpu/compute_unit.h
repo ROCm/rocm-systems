@@ -7,6 +7,7 @@
 #ifndef ROCJITSU_VM_AMDGPU_COMPUTE_UNIT_H_
 #define ROCJITSU_VM_AMDGPU_COMPUTE_UNIT_H_
 
+#include "plugins/execution_plugin.h"
 #include "rocjitsu/base/api.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -18,7 +19,6 @@
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "rocjitsu/vm/execution_plugin.h"
 #include "simdojo/components/register_file.h"
 #include "simdojo/components/vector_reg.h"
 #include "util/bit.h"
@@ -170,6 +170,9 @@ public:
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
     plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group();
   }
+
+  /// @brief Return the execution plugin group.
+  ExecutionPluginGroup &plugin_group() { return *plugin_group_; }
 
   /// @brief Return the number of dispatched (active or halted) wavefront slots.
   /// @returns Count of non-idle wavefront slots.
@@ -330,7 +333,12 @@ public:
   /// @brief Read a scalar register from the physical SGPR file.
   /// @param reg_idx Physical register index.
   /// @returns Register value.
-  uint32_t read_sgpr(uint32_t reg_idx) const { return sgpr_file_[reg_idx]; }
+  uint32_t read_sgpr(uint32_t reg_idx) const {
+    if (auto *wf = sgpr_to_wave_[reg_idx]) {
+      plugin_group_->onAmdgpuReadSgpr(wf, reg_idx);
+    }
+    return sgpr_file_[reg_idx];
+  }
 
   /// @brief Write a scalar register in the physical SGPR file.
   /// @param reg_idx Physical register index.
@@ -451,6 +459,12 @@ protected:
   std::unordered_map<uint64_t, uint32_t> active_wgs_;
 
   std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
+
+  /// Reverse lookup: physical SGPR index -> owning wavefront (for race detection).
+  /// Populated at dispatch_wf time. Null entries mean "not allocated".
+  std::vector<Wavefront *> sgpr_to_wave_;
+  /// Populated by the ISA-specific subclass (which owns the VGPR file).
+  virtual void fill_vgpr_to_wave(uint32_t /*base*/, uint32_t /*count*/, Wavefront * /*wf*/) {}
   simdojo::Port *cpl_ = nullptr; ///< Completer port: dispatch activation from CP.
   simdojo::Port *req_ = nullptr; ///< Requester port: L2 cache request (structural).
 };
@@ -557,6 +571,7 @@ public:
                      L2Cache *l2)
       : ExecComputeUnit<Mode>(std::move(name), config, memory, l2, Isa::WF_SIZE) {
     vgpr_file_.init(config.num_wf_slots * config.vgprs_per_wf, config.vgprs_per_wf);
+    vgpr_to_wave_.resize(config.num_wf_slots * config.vgprs_per_wf, nullptr);
     for (uint32_t i = 0; i < config.num_wf_slots; ++i)
       this->wfs_[i] = std::make_unique<IsaWavefront<Isa>>(*this, i);
     this->sram_ecc_ = Isa::SRAM_ECC;
@@ -564,7 +579,14 @@ public:
 
   /// @returns Lane value from the VGPR file.
   uint32_t read_vgpr(uint32_t reg_idx, uint32_t lane) const override {
+    if (auto *wf = vgpr_to_wave_[reg_idx]) {
+      this->plugin_group_->onAmdgpuReadVgpr(wf, reg_idx, lane);
+    }
     return vgpr_file_[reg_idx][lane];
+  }
+
+  void fill_vgpr_to_wave(uint32_t base, uint32_t count, Wavefront *wf) override {
+    std::fill(vgpr_to_wave_.begin() + base, vgpr_to_wave_.begin() + base + count, wf);
   }
 
   /// @brief Write a value to the VGPR file.
@@ -606,6 +628,7 @@ protected:
 
 private:
   simdojo::RegisterFile<Vgpr> vgpr_file_{"vgpr"};
+  std::vector<Wavefront *> vgpr_to_wave_; ///< Physical VGPR → owning wavefront.
 };
 
 } // namespace amdgpu

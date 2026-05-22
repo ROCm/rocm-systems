@@ -174,6 +174,7 @@ void CommandProcessor::startup() {
   doorbell_event_.set_handler(
       [this](simdojo::Tick ts, simdojo::Message *) { handle_doorbell(ts); });
   completion_ = std::make_unique<CompletionTracker>(memory_, cus_);
+  completion_->set_plugin_group(plugin_group_);
   if (interrupt_cb_)
     completion_->set_interrupt_callback(interrupt_cb_);
 }
@@ -354,8 +355,11 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
         init_wavefront_regs(cu, wf, entry, global_wg_id, w);
         wg_wavefronts.push_back(wf);
       }
-      plugin_group_->onAmdgpuDispatchWorkgroup(global_wg_id, entry.vgprs_per_wf, entry.sgprs_per_wf,
-                                               std::span<Wavefront *>(wg_wavefronts));
+      plugin_group_->onAmdgpuWorkgroupDispatched(global_wg_id, entry.dispatch_id,
+                                                 entry.vgprs_per_wf, entry.sgprs_per_wf,
+                                                 std::span<Wavefront *>(wg_wavefronts));
+      for (auto *wf : wg_wavefronts)
+        plugin_group_->onAmdgpuWavefrontDispatched(*wf);
       next_cu_ = (cu_idx + 1) % cus_.size();
       placed = true;
     }
@@ -560,25 +564,6 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   dp.host_signal = host_accessible;
   dp.barrier_bit = (pkt.header >> HSA_PACKET_HEADER_BARRIER) & 1;
 
-  // Process AQL acquire fence: invalidate caches so the kernel sees the
-  // latest host/agent writes (kernarg data, input buffers, etc.).
-  // On real hardware the CP issues GL1_INV + GL2_INV for SYSTEM/AGENT scope.
-  uint32_t acquire_scope = (pkt.header >> HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) & 0x3;
-  if (acquire_scope >= HSA_FENCE_SCOPE_AGENT && !cus_.empty()) {
-    for (auto *cu : cus_)
-      cu->flush_all();
-  }
-
-  plugin_group_->onAmdgpuKernelDispatch(pkt.kernel_object, entry_pc);
-  util::Logger::vm([&](auto &os) {
-    os << std::format("DISPATCH d={} pc={:#x} grid=[{},{},{}] wg=[{},{},{}] total_wgs={} "
-                      "sgprs={} vgprs={} lds={} kernarg={:#x}",
-                      dp.dispatch_id, entry_pc, dp.grid_wgs_x, dp.grid_wgs_y, dp.grid_wgs_z,
-                      pkt.workgroup_size_x, pkt.workgroup_size_y, pkt.workgroup_size_z, total_wgs,
-                      dp.sgprs_per_wf, dp.vgprs_per_wf, dp.group_segment_fixed_size,
-                      dp.kernarg_addr);
-  });
-
   std::string kernel_sym;
   if (host_accessible && memory_) {
     auto [range_base, range_size] = memory_->find_host_range(pkt.kernel_object);
@@ -592,6 +577,40 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
       }
     }
   }
+
+  util::Logger::vm([&](auto &os) {
+    os << std::format("CP: dispatch \"{}\" entry_pc={:#x} kernarg={:#x}"
+                      " wgs={} wfs/wg={} grid=[{},{},{}] wg=[{},{},{}]"
+                      " sgprs={} vgprs={}",
+                      kernel_sym.empty() ? "?" : kernel_sym, entry_pc, dp.kernarg_addr, total_wgs,
+                      wfs_per_wg, pkt.grid_size_x, pkt.grid_size_y, pkt.grid_size_z,
+                      pkt.workgroup_size_x, pkt.workgroup_size_y, pkt.workgroup_size_z,
+                      dp.sgprs_per_wf, dp.vgprs_per_wf);
+  });
+
+  // Acquire fence.
+  uint32_t acquire_scope = (pkt.header >> HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) & 0x3;
+  if (acquire_scope >= HSA_FENCE_SCOPE_AGENT && !cus_.empty()) {
+    for (auto *cu : cus_)
+      cu->flush_all();
+  }
+
+  KernelDispatchInfo dispatch_info{};
+  dispatch_info.dispatch_id = dp.dispatch_id;
+  dispatch_info.kernel_object = pkt.kernel_object;
+  dispatch_info.entry_pc = entry_pc;
+  dispatch_info.kernel_name = kernel_sym;
+  dispatch_info.grid_size_x = pkt.grid_size_x;
+  dispatch_info.grid_size_y = pkt.grid_size_y;
+  dispatch_info.grid_size_z = pkt.grid_size_z;
+  dispatch_info.workgroup_size_x = pkt.workgroup_size_x;
+  dispatch_info.workgroup_size_y = pkt.workgroup_size_y;
+  dispatch_info.workgroup_size_z = pkt.workgroup_size_z;
+  dispatch_info.workgroup_count = total_wgs;
+  dispatch_info.wfs_per_workgroup = wfs_per_wg;
+  dispatch_info.sgprs_per_wf = dp.sgprs_per_wf;
+  dispatch_info.vgprs_per_wf = dp.vgprs_per_wf;
+  plugin_group_->onAmdgpuDispatchPacketProcessed(dispatch_info);
 
   {
     static uint32_t dispatch_count = 0;
@@ -918,6 +937,7 @@ void CommandProcessor::handle_doorbell(simdojo::Tick) {
         // NOTE: drain_completions may pop entries, so we must re-check indices
         // after each drain and not hold stale references.
         uint32_t dispatch_id = entry.dispatch_id;
+        plugin_group_->onAmdgpuDispatchExecutionBegin(dispatch_id);
         for (;;) {
           if (qs.next_dispatch_idx >= qs.entries.size())
             break;

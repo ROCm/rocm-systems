@@ -62,8 +62,9 @@ public:
   /// @brief Create a default driver from RJ_CONFIG/RJ_SCHEMA env vars.
   static std::unique_ptr<SimulatedDriver> create_default();
 
-  /// @brief Construct with a simulation engine and SoC.
-  SimulatedDriver(simdojo::SimulationEngine &engine, SoC &soc);
+  /// @brief Construct with a simulation engine, SoC, and plugin group.
+  SimulatedDriver(simdojo::SimulationEngine &engine, SoC &soc,
+                  std::shared_ptr<ExecutionPluginGroup> pg);
   ~SimulatedDriver() override;
 
   int open() override;
@@ -112,6 +113,8 @@ private:
 
   simdojo::SimulationEngine &engine_;
   SoC &soc_;
+  std::shared_ptr<ExecutionPluginGroup> plugin_group_;
+  bool shutdown_fired_ = false;
   int fd_ = -1; ///< Stable synthetic KFD fd (memfd); allocated once on first open(), reused across
                 ///< close/reopen.
 
