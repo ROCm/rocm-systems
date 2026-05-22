@@ -490,10 +490,14 @@ static hipError_t playback_hipDeviceGetMemPool(PlaybackContext& ctx, const uint8
 }
 
 static hipError_t playback_hipDeviceGetName(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipDeviceGetName*>(payload);
-  char _out_name{};
-  hipError_t _r = (hipError_t)hipDeviceGetName(&_out_name, (int)a->len, (hipDevice_t)a->device);
-  return _r;
+  (void)ctx; (void)payload;
+  static bool warned = false;
+  if (!warned) {
+    warned = true;
+    fprintf(stderr, "[HRR] NOOP playback handler called for hipDeviceGetName — "
+            "this API is not replayed; results may differ from capture.\n");
+  }
+  return hipSuccess;
 }
 
 static hipError_t playback_hipDeviceGetP2PAttribute(PlaybackContext& ctx, const uint8_t* payload) {
@@ -504,10 +508,14 @@ static hipError_t playback_hipDeviceGetP2PAttribute(PlaybackContext& ctx, const 
 }
 
 static hipError_t playback_hipDeviceGetPCIBusId(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipDeviceGetPCIBusId*>(payload);
-  char _out_pciBusId{};
-  hipError_t _r = (hipError_t)hipDeviceGetPCIBusId(&_out_pciBusId, (int)a->len, (int)a->device);
-  return _r;
+  (void)ctx; (void)payload;
+  static bool warned = false;
+  if (!warned) {
+    warned = true;
+    fprintf(stderr, "[HRR] NOOP playback handler called for hipDeviceGetPCIBusId — "
+            "this API is not replayed; results may differ from capture.\n");
+  }
+  return hipSuccess;
 }
 
 static hipError_t playback_hipDeviceGetSharedMemConfig(PlaybackContext& ctx, const uint8_t* payload) {

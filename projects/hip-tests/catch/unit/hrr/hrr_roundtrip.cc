@@ -45,21 +45,14 @@ static constexpr char kPathSep = ';';
 static constexpr char kPathSep = ':';
 #endif
 
-// Set PATH (and LD_LIBRARY_PATH on Linux) so the subprocess can find the ROCm
-// runtime and any custom-built amdhip64 that the test harness was built against.
-//
-// On Windows: DLLs are found via PATH — no separate library path needed.
-// On Linux:   shared objects are found via LD_LIBRARY_PATH; PATH alone is not
-//             enough.  We inherit the current LD_LIBRARY_PATH so that any
-//             build-tree rpath set by cmake --target install is respected.
+// Set PATH so the subprocess can find the ROCm runtime binaries.
+// On Windows: DLLs are found via PATH.
+// On Linux:   fork() inherits LD_LIBRARY_PATH from the parent automatically;
+//             no explicit setEnv needed.
 static void set_proc_search_path(hip::SpawnProc& proc) {
   const char* cur_path = getenv("PATH");
   proc.setEnv("PATH",
               std::string(ROCM_BIN_PATH) + kPathSep + (cur_path ? cur_path : ""));
-#ifndef _WIN32
-  const char* cur_ldp = getenv("LD_LIBRARY_PATH");
-  proc.setEnv("LD_LIBRARY_PATH", cur_ldp ? cur_ldp : "");
-#endif
 }
 
 // RAII guard: removes a directory tree on scope exit (even on REQUIRE failure).

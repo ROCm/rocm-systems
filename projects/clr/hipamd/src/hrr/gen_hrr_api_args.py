@@ -306,6 +306,11 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     # Category 6: Misc — struct field issues, wrong return type casts, or missing types
     # hipDeviceGetByPCIBusId takes a char* PCI string (stale capture-time pointer) — noop
     "hipDeviceGetByPCIBusId",
+    # hipDeviceGetName / hipDeviceGetPCIBusId write into a caller-sized char buffer.
+    # The generator emits `char _out{}` (1 byte) causing a stack-smash on Linux.
+    # These are query-only calls with no effect on replay correctness — noop.
+    "hipDeviceGetName",
+    "hipDeviceGetPCIBusId",
     # hipChooseDevice takes a hipDeviceProp_t* (stale capture-time pointer) — noop
     "hipChooseDevice",
     # hipDeviceGetGraphMemAttribute / hipDeviceSetGraphMemAttribute — void* value ptr (stale) — noop
