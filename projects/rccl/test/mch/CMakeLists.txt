@@ -38,6 +38,21 @@ target_compile_definitions(rccl-UnitTestsMch PRIVATE
 # directly and provides its own stubs for the rest.
 add_dependencies(rccl-UnitTestsMch rccl)
 
+# Independent coverage knob for this binary. We can't reuse the global
+# ENABLE_CODE_COVERAGE because src/CMakeLists.txt gates that on Debug
+# builds (librccl.so's internal symbols are only visible in Debug). The
+# mch binary doesn't link librccl.so -- it compiles p2p.cc directly --
+# so it gets full symbol visibility in any build type. Enable with
+# -DENABLE_MCH_COVERAGE=ON; use test/mch/coverage.sh to render reports.
+option(ENABLE_MCH_COVERAGE "Build rccl-UnitTestsMch with llvm source-based coverage" OFF)
+if(ENABLE_MCH_COVERAGE)
+  message(STATUS "rccl-UnitTestsMch: coverage instrumentation enabled")
+  target_compile_options(rccl-UnitTestsMch PRIVATE
+    -fprofile-instr-generate -fcoverage-mapping)
+  target_link_options(rccl-UnitTestsMch PRIVATE
+    -fprofile-instr-generate -fcoverage-mapping)
+endif()
+
 if(BUILD_ADDRESS_SANITIZER)
   target_compile_options(rccl-UnitTestsMch PRIVATE -fsanitize=address)
   target_link_options(rccl-UnitTestsMch PRIVATE -fsanitize=address -shared-libasan)
