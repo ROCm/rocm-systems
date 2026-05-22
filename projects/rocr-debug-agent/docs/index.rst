@@ -24,7 +24,7 @@ The code is open source and hosted at `<https://github.com/ROCm/rocm-systems/tre
   .. grid-item-card:: Install
 
     * :doc:`Install ROCr Debug Agent <install/installation>`
-    * :doc:`Build from source <install/build>`
+    * `Build from source <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocr-debug-agent/README.md#build-the-rocdebug-agent-library>`_.
 
   .. grid-item-card:: How to
 
