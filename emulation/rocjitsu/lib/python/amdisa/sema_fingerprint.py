@@ -29,22 +29,47 @@ from amdisa.sema_ast import SemaBlock, SemaNode, SemaNodeKind
 
 _log = logging.getLogger(__name__)
 
-_CONTEXT_IDS: frozenset[str] = frozenset({
-    'SCC', 'VCC', 'EXEC', 'EXEC_LO', 'MEM', 'LDS',
-    'VGPR', 'SGPR', 'laneId', 'M0',
-    'PC', 'TRAPSTS', 'VCCZ', 'EXECZ', 'MODE', 'WAVE64',
-    'TBA', 'TTMP', 'SHADER_CYCLES_HI', 'SHADER_CYCLES_LO', 'WAVE_STATUS',
-    'ROUND_MODE', 'DENORM', 'OPSEL', 'OPSEL_HI',
-    'BARRIER_STATE', 'HW_REGISTERS',
-})
+_CONTEXT_IDS: frozenset[str] = frozenset(
+    {
+        'SCC',
+        'VCC',
+        'EXEC',
+        'EXEC_LO',
+        'MEM',
+        'LDS',
+        'VGPR',
+        'SGPR',
+        'laneId',
+        'M0',
+        'PC',
+        'TRAPSTS',
+        'VCCZ',
+        'EXECZ',
+        'MODE',
+        'WAVE64',
+        'TBA',
+        'TTMP',
+        'SHADER_CYCLES_HI',
+        'SHADER_CYCLES_LO',
+        'WAVE_STATUS',
+        'ROUND_MODE',
+        'DENORM',
+        'OPSEL',
+        'OPSEL_HI',
+        'BARRIER_STATE',
+        'HW_REGISTERS',
+    }
+)
 
 _OPERAND_TAGS: frozenset[str] = frozenset({'S', 'D'})
 
-_LIT_HASH_PARENTS: frozenset[SemaNodeKind] = frozenset({
-    SemaNodeKind.INSTOPERAND,
-    SemaNodeKind.ARRAYSLICE,
-    SemaNodeKind.ARRAYSLICESIZE,
-})
+_LIT_HASH_PARENTS: frozenset[SemaNodeKind] = frozenset(
+    {
+        SemaNodeKind.INSTOPERAND,
+        SemaNodeKind.ARRAYSLICE,
+        SemaNodeKind.ARRAYSLICESIZE,
+    }
+)
 
 
 def fingerprint(block: SemaBlock) -> bytes:
@@ -86,8 +111,7 @@ def _hash_node(
         if node.id_name in _CONTEXT_IDS or node.id_name in _OPERAND_TAGS:
             h.update(f'id:{node.id_name}'.encode())
 
-    if (node.kind == SemaNodeKind.LIT
-            and parent_kind in _LIT_HASH_PARENTS):
+    if node.kind == SemaNodeKind.LIT and parent_kind in _LIT_HASH_PARENTS:
         h.update(f'lit:{node.lit_value}'.encode())
 
     for child in node.children:
@@ -124,7 +148,10 @@ def build_equivalence_map(
         if fp in dst_by_fp:
             _log.debug(
                 'fingerprint collision: %s and %s have identical semantics; '
-                'keeping %s', dst_by_fp[fp], mnemonic, dst_by_fp[fp],
+                'keeping %s',
+                dst_by_fp[fp],
+                mnemonic,
+                dst_by_fp[fp],
             )
         else:
             dst_by_fp[fp] = mnemonic

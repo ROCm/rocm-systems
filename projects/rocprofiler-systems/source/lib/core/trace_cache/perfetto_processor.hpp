@@ -49,6 +49,7 @@ public:
     void handle(const gpu_pmc_sample& sample);
     void handle(const ainic_pmc_sample& sample);
     void handle(const cpu_pmc_sample& sample);
+    void handle(const gpu_perf_counter_sample& sample);
     void handle(const backtrace_region_sample& sample);
     void handle(const kfd_sample& sample);
 
@@ -57,6 +58,7 @@ private:
     void       setup_perfetto();
     void       start_session();
     void       stop_session();
+    void       initialize_pmc_track_map();
     void       flush(bool& perfetto_output_error);
     char_vec_t get_session_data();
 

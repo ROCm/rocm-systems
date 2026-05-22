@@ -162,7 +162,13 @@ static int proxyGinPollGfd(struct ginProxyCtx *ctx, ginProxyHostGpuCtx *hostGpuC
   ncclGinProxyGfd_t *q = hostGpuCtx->queues + targetRank * hostGpuCtx->queueSize;
   uint32_t idx = hostGpuCtx->sis[targetRank] & (hostGpuCtx->queueSize - 1);
   ncclGinProxyQword_t qword;
+#if defined(__HIP_PLATFORM_AMD__)
+  // Packed struct: hint alignment so __atomic_load_n inlines instead of emitting a libatomic call.
+  uint64_t *headerPtr = (uint64_t *)__builtin_assume_aligned(&q[idx].qword[ncclGinProxyGfdHeader].raw, alignof(uint64_t));
+  qword.raw = __atomic_load_n(headerPtr, __ATOMIC_RELAXED);
+#else
   __atomic_load(&q[idx].qword[ncclGinProxyGfdHeader].raw, &qword.raw, __ATOMIC_RELAXED);
+#endif
   if (qword.flag.v == 0) {
     return 0;
   }
@@ -171,9 +177,16 @@ static int proxyGinPollGfd(struct ginProxyCtx *ctx, ginProxyHostGpuCtx *hostGpuC
   gfd->qword[ncclGinProxyGfdHeader] = q[idx].qword[ncclGinProxyGfdHeader];
   // Wait for and copy the other qwords.
   for (int k = 1; k < ncclGinProxyGfdQwords; k++) {
+#if defined(__HIP_PLATFORM_AMD__)
+    uint64_t *qwordPtr = (uint64_t *)__builtin_assume_aligned(&q[idx].qword[k].raw, alignof(uint64_t));
+    do {
+      qword.raw = __atomic_load_n(qwordPtr, __ATOMIC_RELAXED);
+    } while (qword.flag.v == 0);
+#else
     do {
       __atomic_load(&q[idx].qword[k].raw, &qword.raw, __ATOMIC_RELAXED);
     } while (qword.flag.v == 0);
+#endif
     gfd->qword[k] = qword;
   }
   // Now we have the full GFD in the local struct.
