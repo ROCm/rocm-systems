@@ -4,9 +4,9 @@
 
 .. _rdc-handbook:
 
-******************
+**********************
 Build RDC from source
-******************
+**********************
 
 To build RDC as part of the ROCm Core SDK, see `TheRock build
 instructions
@@ -18,17 +18,6 @@ Alternatively, you can build RDC standalone using the instructions given in the 
 Build and install RDC
 =====================
 
-To build and install, clone the RDC source code from GitHub and use CMake.
-
-.. code-block:: shell
-
-    $ git clone 'https://github.com/ROCm/rocm-systems' --recursive
-    $ cd rocm-systems/projects/rdc
-    $ mkdir -p build; cd build
-    $ cmake -DROCM_DIR=/opt/rocm -DGRPC_ROOT="$GRPC_PROTOC_ROOT"..
-    $ make
-    #Install library file and header and the default location is /opt/rocm
-    $ make install
 To build RDC from source, install the dependencies and follow the steps given in the following sections.
 
 Dependencies
@@ -43,15 +32,15 @@ Dependencies
 - libcap-dev
 
    .. code-block:: shell
-   
-     $ sudo apt install libcap-dev   
-   
+
+     $ sudo apt install libcap-dev
+
 For building latest documentation:
 
 - Doxygen (1.8.11)
 
     .. code-block:: shell
-    
+
       $ sudo apt install -y doxygen
 
 - LaTeX (pdfTeX 3.14159265-2.6-1.40.16)
@@ -158,7 +147,6 @@ You can generate PDF documentation after a successful build. The reference manua
     $ cd latex
     $ make
 
-
 Build unit tests for RDC tool
 -----------------------------
 
@@ -173,7 +161,6 @@ Build unit tests for RDC tool
 
     $ cd build/rdctst_tests
     $ ./rdctst
-
 
 Test
 ----
