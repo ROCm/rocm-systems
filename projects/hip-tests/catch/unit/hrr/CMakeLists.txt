@@ -44,8 +44,9 @@ hip_add_exe_to_target(NAME HrrTest
 
 # On Linux with ROCm clang/lld, the system C++ stdlib is not automatically
 # linked. Add it explicitly so that std::filesystem, std::ostream etc. resolve.
+# Use plain (non-keyword) signature to match hip_add_exe_to_target's usage.
 if(NOT WIN32)
-  target_link_libraries(HrrTest PRIVATE stdc++ stdc++fs)
+  target_link_libraries(HrrTest stdc++ stdc++fs)
 endif()
 
 target_include_directories(HrrTest PRIVATE
