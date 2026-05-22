@@ -12,7 +12,7 @@ Before you begin, verify that your system is supported. For more information,
 see :ref:`ROCm Core SDK components <rocm:release-components>`.
 
 For advanced workflows, source builds, or custom configurations, see
-:doc:`./build`.
+`Build ROCdebug-agent library <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocr-debug-agent/README.md#build-the-rocdebug-agent-library>`_.
 
 .. _install-rocm:
 
