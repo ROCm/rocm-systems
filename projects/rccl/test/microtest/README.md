@@ -266,12 +266,10 @@ triage it into the right bucket:
   in any build type. The microtest binary doesn't link `librccl.so`, so it
   has full symbol visibility regardless of build type.
 
-Enable and rebuild:
-
-```bash
-cmake -DENABLE_MICROTEST_COVERAGE=ON -DENABLE_CODE_COVERAGE=OFF build/release
-cmake --build build/release --target rccl-UnitTestsMicro
-```
+Enable at configure time (see [Running and rebuilding](#running-and-rebuilding)
+for the canonical build commands). The short version: pass
+`--cmake-options "-DENABLE_MICROTEST_COVERAGE=ON"` to `./install.sh` on
+the initial build, then iterate with `make` in `build/release`.
 
 Render a report:
 
@@ -316,23 +314,61 @@ The intended iteration loop for this directory:
 
 ## Running and rebuilding
 
+RCCL's canonical build entry point is `./install.sh` (never `cmake`
+directly). The two-phase pattern for this directory is: one full
+`install.sh` to configure + build everything, then a tight
+`make`-only inner loop for every subsequent edit to `p2p-test.cc` or
+`fakes/p2p_fakes.cc`.
+
+### Initial (one-time) build
+
+Local-arch (`-l`), with tests (`-t`) and microtest coverage
+instrumentation wired in via `--cmake-options`:
+
 ```bash
-# First-time configure (release build, with coverage):
-cmake -B build/release -DBUILD_TESTS=ON -DENABLE_MICROTEST_COVERAGE=ON
+./install.sh -l -t -j $(nproc) \
+    --cmake-options "-DENABLE_MICROTEST_COVERAGE=ON"
+```
 
-# Build:
-cmake --build build/release --target rccl-UnitTestsMicro -j $(nproc)
+`-l` is non-negotiable for dev builds — a cross-arch build is 30+
+minutes. `-t` is required: without `BUILD_TESTS=ON` the
+`test/microtest/CMakeLists.txt` guard short-circuits and
+`rccl-UnitTestsMicro` is never produced. `install.sh` wipes
+`build/release` first; that's the safety guarantee.
 
-# Run all tests:
+### Tight inner loop (after editing a test or a fake)
+
+```bash
+cd build/release
+make -j $(nproc) rccl-UnitTestsMicro
+```
+
+This rebuilds only what changed. Don't re-run `./install.sh` for
+incrementals — it would wipe the whole tree and force a full
+reconfigure.
+
+### Run
+
+```bash
+# All tests:
 ./build/release/test/microtest/rccl-UnitTestsMicro
 
-# Run one test:
+# One test:
 ./build/release/test/microtest/rccl-UnitTestsMicro \
     --gtest_filter='IpcRegisterBuffer.NullRegRecordIsNoOp'
 
 # Coverage (see Coverage section for FUNC/--html options):
 ./test/microtest/coverage.sh
 ```
+
+### When to drop back to a full `./install.sh`
+
+- You toggled `-DENABLE_MICROTEST_COVERAGE` (or any other
+  configure-time cmake flag).
+- You switched git branches or pulled commits that touch
+  `CMakeLists.txt`, `install.sh`, or `src/device/generate.py`.
+- You see linker errors that don't make sense — stale objects from a
+  previous configure are in play.
 
 
 ## What this binary is not
