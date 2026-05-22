@@ -6,16 +6,23 @@
 #include "core/config.hpp"
 #include "library/pmc/collectors/cpu/types.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
+#include "library/pmc/collectors/gpu_perf_counter/types.hpp"
 #include "library/pmc/collectors/nic/types.hpp"
+#include "library/pmc/common/types.hpp"
 #include "logger/debug.hpp"
 #include <cstdint>
 
 #include <algorithm>
+#include <cstdint>
 #include <regex>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace rocprofsys::pmc::collectors
 {
@@ -108,7 +115,7 @@ struct settings_policy
             return result;
         }
 
-        auto filter_str = filter.value();
+        const auto& filter_str = filter.value();
         if(filter_str == "all" || filter_str == "on")
         {
             nic::nic_device_filter result;
@@ -156,6 +163,70 @@ struct settings_policy
             return parse_cpu_enabled_metrics(value_str);
         }();
         return _result;
+    }
+
+    static gpu_perf_counter::gpu_perf_counter_settings
+    get_gpu_perf_counter_enabled_metrics() noexcept
+    {
+        auto value_str = rocprofsys::get_gpu_perf_counters();
+        if(value_str.empty())
+        {
+            return gpu_perf_counter::gpu_perf_counter_settings{};
+        }
+
+        std::string trimmed;
+        trimmed.reserve(value_str.size());
+        for(auto chr : value_str)
+        {
+            if(chr != '\t' && chr != ' ') trimmed.push_back(chr);
+        }
+
+        gpu_perf_counter::gpu_perf_counter_settings result;
+
+        constexpr auto device_qualifier = std::string_view{ ":device=" };
+
+        std::stringstream stream(trimmed);
+        std::string       token;
+        while(std::getline(stream, token, ','))
+        {
+            std::stringstream sub_stream(token);
+            std::string       subtoken;
+            while(std::getline(sub_stream, subtoken, ';'))
+            {
+                if(subtoken.empty()) continue;
+                auto pos = subtoken.find(device_qualifier);
+                if(pos == std::string::npos)
+                {
+                    result.broadcast_names.push_back(subtoken);
+                }
+                else
+                {
+                    auto name       = subtoken.substr(0, pos);
+                    auto device_str = subtoken.substr(pos + device_qualifier.size());
+                    if(name.empty()) continue;
+                    if(device_str.empty() ||
+                       !std::all_of(device_str.begin(), device_str.end(), ::isdigit))
+                    {
+                        LOG_ERROR("Invalid :device= value in "
+                                  "ROCPROFSYS_GPU_PERF_COUNTERS: '{}'",
+                                  subtoken);
+                        continue;
+                    }
+                    try
+                    {
+                        result.explicit_counters.push_back(
+                            { name, std::stoull(device_str) });
+                    } catch(const std::exception&)
+                    {
+                        LOG_ERROR("Invalid :device= value in "
+                                  "ROCPROFSYS_GPU_PERF_COUNTERS: '{}'",
+                                  subtoken);
+                    }
+                }
+            }
+        }
+
+        return result;
     }
 
 private:

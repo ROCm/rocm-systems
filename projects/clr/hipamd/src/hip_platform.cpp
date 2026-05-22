@@ -8,6 +8,7 @@
 #include <hip/texture_types.h>
 #include "hip_platform.hpp"
 #include "hip_internal.hpp"
+#include "platform/command.hpp"
 #include "platform/program.hpp"
 #include "platform/runtime.hpp"
 #include "utils/flags.hpp"
@@ -126,7 +127,8 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_par
                                   uint32_t flags = 0, uint32_t params = 0,
                                   uint32_t gridId = 0, uint32_t numGrids = 0,
                                   uint64_t prevGridSum = 0, uint64_t allGridSum = 0,
-                                  uint32_t firstDevice = 0);
+                                  uint32_t firstDevice = 0,
+                                  const amd::DynDataPrefetchConfig* dynDataPrefetchConfig = nullptr);
 
 // ================================================================================================
 static bool isCompatibleCodeObject(const std::string& codeobj_target_id, const char* device_name) {
@@ -687,7 +689,8 @@ namespace hip {
 // ================================================================================================
 hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDim, void** args,
                             size_t sharedMemBytes, hipStream_t stream, hipEvent_t startEvent,
-                            hipEvent_t stopEvent, int flags, dim3 clusterDim = {1, 1, 1}) {
+                            hipEvent_t stopEvent, int flags, dim3 clusterDim = {1, 1, 1},
+                            const amd::DynDataPrefetchConfig* dynDataPrefetchConfig = nullptr) {
   if (hostFunction == nullptr) {
     return hipErrorInvalidDeviceFunction;
   }
@@ -733,7 +736,7 @@ hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDi
   }
 
   return ihipModuleLaunchKernel(func, launch_params, stream, args, nullptr, startEvent, stopEvent,
-                                flags);
+                                flags, 0, 0, 0, 0, 0, 0, dynDataPrefetchConfig);
 }
 
 // ================================================================================================
@@ -1127,22 +1130,7 @@ hipError_t PlatformState::GetDynGlobalVar(const char* hostVar, hipModule_t hmod,
     LogPrintfError("Cannot find the module: 0x%x", hmod);
     return hipErrorNotFound;
   }
-  if (dev_ptr) {
-    *dev_ptr = nullptr;
-  }
-  IHIP_RETURN_ONFAIL(it->second->getManagedVarPointer(hostVar, dev_ptr, size_ptr));
-  // if dev_ptr is nullptr, hostvar is not in managed variable list
-  if ((dev_ptr && !*dev_ptr) || (size_ptr && *size_ptr == 0)) {
-    amd::Memory* mem = nullptr;
-    IHIP_RETURN_ONFAIL(it->second->GetDeviceVar(&mem, hostVar));
-    if (dev_ptr) {
-      *dev_ptr = memDevPtr(mem);
-    }
-    if (size_ptr) {
-      *size_ptr = mem->getSize();
-    }
-  }
-  return hipSuccess;
+  return it->second->GetGlobal(hostVar, reinterpret_cast<void**>(dev_ptr), size_ptr);
 }
 
 // ================================================================================================

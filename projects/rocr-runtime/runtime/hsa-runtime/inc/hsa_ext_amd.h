@@ -48,6 +48,7 @@
 #include "hsa.h"
 #include "hsa_ext_image.h"
 #include "hsa_ven_amd_pc_sampling.h"
+#include "amd_launch_descriptor.h"
 
 /**
  * - 1.0 - initial version
@@ -73,9 +74,10 @@
  * - 1.20 - Memory batch discard API: hsa_amd_svm_discard_batch_async
  * - 1.21 - hsa_amd_signal_get_event_id
  * - 1.22 - hsa_amd_queue_get_info: per-queue VM fault state queries
+ * - 1.23 - hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_MAX_DATA_PREFETCH_REGIONS
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 21
+#define HSA_AMD_INTERFACE_VERSION_MINOR 23
 
 #ifdef __cplusplus
 extern "C" {
@@ -534,10 +536,17 @@ typedef struct hsa_amd_metadata_kernel_dispatch_packet_s {
    * Kernarg preload 30 through 31
    */
   uint32_t kernarg_preload_30_31[2];
-  /**
-   * Reserved. Must be 0.
-   */
-  uint8_t reserved1[52];
+  union {
+    /**
+     * Reserved. Must be 0.
+     */
+    uint8_t reserved1[52];
+    /**
+     * Launch descriptor. Overlays the former reserved1[52] area.
+     * Zero-initialised means version=0 (NONE) — CP treats as "no descriptor".
+     */
+    amd_launch_descriptor_t launch_descriptor;
+  };
 } hsa_amd_metadata_kernel_dispatch_packet_t;
 
 /**
@@ -952,6 +961,11 @@ typedef enum hsa_amd_agent_info_s {
    * Returns hsa_amd_dim3_t into value output.
    */
   HSA_AMD_AGENT_INFO_KERNEL_WG_MAX_DIM = 0xA122,
+  /*
+   * Maximum number of L2 data prefetch regions supported per kernel dispatch.
+   * Returns uint32_t. Zero if the device does not support dynamic data prefetch.
+   */
+  HSA_AMD_AGENT_INFO_MAX_DATA_PREFETCH_REGIONS = 0xA123,
 } hsa_amd_agent_info_t;
 
 /**
@@ -2198,18 +2212,18 @@ typedef enum {
  *
  * LINEAR (multi-copy when num_entries > 0, one signal for all entries):
  *   src_list         -- caller-owned array of num_entries source pointers
- *   src_agent        -- common source agent (must be GPU)
+ *   src_agent        -- common source agent (GPU or CPU); if CPU, all dst_agent_list entries must be GPU
  *   dst_list         -- caller-owned array of num_entries destination pointers
  *   dst_agent_list   -- caller-owned array of num_entries destination agents
  *   size_list        -- caller-owned array of num_entries copy sizes in bytes
- *   num_entries         -- number of entries (>= 1, <= 1024)
+ *   num_entries         -- number of entries (>= 1, <= 65536)
  *
  * LINEAR_BROADCAST (single source -> multiple destinations):
  *   src, src_agent    -- source pointer and agent (must be GPU)
  *   dst_list          -- caller-owned array of num_entries destination pointers
  *   dst_agent_list    -- caller-owned array of num_entries destination agents
  *   size              -- copy size in bytes (same for every destination)
- *   num_entries          -- number of entries in dst_list / dst_agent_list (>= 1, <= 1024)
+ *   num_entries          -- number of entries in dst_list / dst_agent_list (>= 1, <= 65536)
  *
  * LINEAR_SWAP (exchange contents of two buffers, multi-entry when num_entries > 0):
  *   src_list         -- caller-owned array of num_entries source pointers
@@ -2217,7 +2231,7 @@ typedef enum {
  *   dst_list         -- caller-owned array of num_entries destination pointers
  *   dst_agent_list   -- caller-owned array of num_entries destination agents
  *   size_list        -- caller-owned array of num_entries swap sizes in bytes
- *   num_entries      -- number of entries (>= 1, <= 1024)
+ *   num_entries      -- number of entries (>= 1, <= 65536)
  *
  * LINEAR_SWAP (single, when num_entries == 0):
  *   src, src_agent  -- first buffer pointer and agent (modified in place)
