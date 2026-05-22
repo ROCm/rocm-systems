@@ -110,6 +110,9 @@ ErrorCode Platform::reQueryDevices() {
   if (code = d3dthunk::EnumAdapters(&args); code != ErrorCode::Success)
     return code;
 
+  if (args.NumAdapters > 0)
+    queryWddmVersion(infos[0].hAdapter);
+
   for (u32 i = 0; i < args.NumAdapters; ++i)
     code = queryLinkedDevicesInLdaChain(args.pAdapters[i]);
 
@@ -186,6 +189,19 @@ ErrorCode Platform::queryLinkedDevicesInLdaChain(
   }
 
   return code;
+}
+
+void Platform::queryWddmVersion(D3DKMT_HANDLE adapter) {
+  D3DKMT_DRIVERVERSION version = static_cast<D3DKMT_DRIVERVERSION>(0);
+  d3dthunk::QueryAdapterInfoArgs queryInfo{};
+
+  queryInfo.hAdapter = adapter;
+  queryInfo.Type = KMTQAITYPE_DRIVERVERSION;
+  queryInfo.pPrivateDriverData = &version;
+  queryInfo.PrivateDriverDataSize = sizeof(version);
+
+  if (d3dthunk::QueryAdapterInfo(&queryInfo) == ErrorCode::Success)
+    wddm_version_ = version;
 }
 
 } // namespace thunk

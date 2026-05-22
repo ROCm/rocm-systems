@@ -68,10 +68,13 @@ public:
 
   size_t GetLdaChainCount() const { return lda_chain_count_; }
   LdaChain *GetLdaChain(size_t index) const { return lda_chain_list_[index]; }
+
+  D3DKMT_DRIVERVERSION WddmVersion() const { return wddm_version_; }
 private:
   ErrorCode initProperties();
   ErrorCode reQueryDevices();
   ErrorCode queryLinkedDevicesInLdaChain(const D3DKMT_ADAPTERINFO &adapterInfo);
+  void queryWddmVersion(D3DKMT_HANDLE adapter);
 
   Platform() = default;
   DISABLE_COPY_AND_ASSIGN(Platform);
@@ -79,6 +82,7 @@ private:
   LdaChain *lda_chain_list_[MaxDevices];
   u32 lda_chain_count_ = 0;
   std::vector<Device *> devices_;
+  D3DKMT_DRIVERVERSION wddm_version_ = static_cast<D3DKMT_DRIVERVERSION>(0);
 };
 
 } // namespace thunk

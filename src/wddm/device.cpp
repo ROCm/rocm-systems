@@ -74,7 +74,12 @@ WDDMDevice::WDDMDevice(Device *shared_dev,
   SetPowerOptimization(false);
   CreatePagingQueue();
   InitCmdbufInfo();
-  QuerySegmentInfo();
+
+  unsigned ver = static_cast<unsigned>(Platform::instance().WddmVersion());
+  if (ver)
+    pr_info("WDDM version %u.%u\n", ver / 1000, (ver % 1000) / 100);
+  else
+    pr_info("WDDM version: unknown\n");
 }
 
 WDDMDevice::~WDDMDevice() {
