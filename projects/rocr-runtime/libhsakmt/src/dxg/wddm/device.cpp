@@ -152,8 +152,8 @@ bool WDDMDevice::QuerySegmentInfo()
 
     SegmentInfo info;
     info.segment_id = i;
-    info.is_aperture = !!seg.Aperture;
-    info.is_system_memory = !!seg.SegmentProperties.SystemMemory;
+    info.is_aperture = seg.Aperture;
+    info.is_system_memory = seg.SegmentProperties.SystemMemory;
 
     if (seg.Aperture) {
       info.kind = SegmentKind::kAperture;
