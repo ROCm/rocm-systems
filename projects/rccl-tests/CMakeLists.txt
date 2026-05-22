@@ -18,6 +18,7 @@ project(rccl-tests LANGUAGES CXX)
 # Build options
 #==================================================================================================
 option(USE_MPI                     "Build RCCL-tests with MPI support."           OFF)
+option(ENABLE_DEVICE_API           "Build with NCCL Device API support (GIN)."    OFF)
 option(BUILD_LOCAL_GPU_TARGET_ONLY "Build only for GPUs detected on this machine" OFF)
 
 if (NOT CMAKE_BUILD_TYPE)
@@ -199,6 +200,11 @@ if (USE_MPI)
     endif()
 else()
     message ("-- MPI support disabled")
+endif()
+
+if (ENABLE_DEVICE_API)
+    message(STATUS "NCCL Device API (GIN) support enabled")
+    add_definitions(-DENABLE_DEVICE_API)
 endif()
 
 set(ROCM_USE_DEV_COMPONENT OFF)  # This repo doesn't have a dev component

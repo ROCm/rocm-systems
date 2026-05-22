@@ -76,6 +76,8 @@ set(COMMON_FILES
   nccl1_compat.h
   rccl_compat.h
   rccl_float8.h
+  rccl_vector_types.h
+  multimem_ops.h
   timer.h
   timer.cc
   util.h
