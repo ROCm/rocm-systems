@@ -64,7 +64,16 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM> {
     ncclGinRocshmemMemHandle* dstMh = (ncclGinRocshmemMemHandle*)dstWin;
     T* dst = (T*)(loadConst(&dstMh->baseAddr) + dstOff);
 
-    rocshmem::rocshmem_putmem(dst, &srcVal, sizeof(T), peer);
+    // Use rocshmem_p (scalar put) — value is on stack, no symmetric src needed
+    static_assert(sizeof(T) <= 8, "PutValue requires sizeof(T) <= 8");
+    if constexpr (sizeof(T) == 8)
+      rocshmem::rocshmem_longlong_p((long long*)dst, (long long)srcVal, peer);
+    else if constexpr (sizeof(T) == 4)
+      rocshmem::rocshmem_int_p((int*)dst, (int)srcVal, peer);
+    else if constexpr (sizeof(T) == 2)
+      rocshmem::rocshmem_short_p((short*)dst, (short)srcVal, peer);
+    else if constexpr (sizeof(T) == 1)
+      rocshmem::rocshmem_char_p((char*)dst, (char)srcVal, peer);
 
     if (hasSignal) {
       rocshmem::rocshmem_quiet();
