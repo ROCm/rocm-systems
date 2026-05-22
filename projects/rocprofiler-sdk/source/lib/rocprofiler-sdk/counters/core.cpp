@@ -150,57 +150,17 @@ start_context(const context::context* ctx)
 
     auto* controller = hsa::get_queue_controller();
 
-    bool already_enabled = true;
     CHECK_NOTNULL(controller)->enable_serialization();
     ctx->dispatch_counter_collection->enabled.wlock([&](auto& enabled) {
         if(enabled) return;
-        already_enabled = false;
-        enabled         = true;
+        enabled = true;
     });
 
-    if(!already_enabled)
-    {
-        for(auto& cb : ctx->dispatch_counter_collection->callbacks)
-        {
-            using external_corr_id_map_t = tracing::external_correlation_id_map_t;
-
-            // Insert our callbacks into HSA Interceptor. This
-            // turns on counter instrumentation.
-            if(cb->queue_id != rocprofiler::hsa::ClientID{-1}) continue;
-            cb->queue_id = controller->add_callback(
-                std::nullopt,
-                hsa::queue_callbacks_t{.batch_packets = []() { return false; },
-                                       .write_interceptor =
-                                           [=](const hsa::Queue&              q,
-                                               const hsa::rocprofiler_packet& kern_pkt,
-                                               rocprofiler_kernel_id_t        kernel_id,
-                                               rocprofiler_dispatch_id_t      dispatch_id,
-                                               rocprofiler_user_data_t*       user_data,
-                                               const external_corr_id_map_t&  extern_corr_ids,
-                                               const context::correlation_id* correlation_id) {
-                                               return queue_cb(ctx,
-                                                               cb,
-                                                               q,
-                                                               kern_pkt,
-                                                               kernel_id,
-                                                               dispatch_id,
-                                                               user_data,
-                                                               extern_corr_ids,
-                                                               correlation_id);
-                                           },
-                                       // Completion CB
-                                       .signal_completion =
-                                           [=](const hsa::Queue& /*queue*/,
-                                               hsa::rocprofiler_packet /*kern_pkt*/,
-                                               std::shared_ptr<hsa::queue_info_session_t>& session,
-                                               hsa::packet_data_t&                         packet,
-                                               inst_pkt_t&                                 aql,
-                                               kernel_dispatch::profiling_time dispatch_time) {
-                                               completed_cb(
-                                                   ctx, cb, session, packet, aql, dispatch_time);
-                                           }});
-        }
-    }
+    // Callback installation deleted — counters::write_hook and
+    // counters::signal_completion_hook are called directly from queue.cpp's
+    // WriteInterceptor and AsyncSignalHandler via the new hooks mechanism.
+    // The `enabled` flag set above remains because it gates per-callback
+    // dispatch inside the hook (see counters/queue_hooks.cpp).
 }
 
 void

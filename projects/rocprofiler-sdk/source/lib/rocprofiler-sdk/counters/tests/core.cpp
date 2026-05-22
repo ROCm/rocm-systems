@@ -542,14 +542,11 @@ TEST(core, start_stop_buffered_ctx)
     ctx.dispatch_counter_collection->enabled.rlock([&](const auto& data) { found = data; });
     EXPECT_TRUE(found);
 
-    found = false;
-    hsa::get_queue_controller()->iterate_callbacks([&](auto cid, const auto&) {
-        if(cid == ctx.dispatch_counter_collection->callbacks.at(0)->queue_id)
-        {
-            found = true;
-        }
-    });
-    EXPECT_TRUE(found);
+    // Callback installation in the queue controller has been removed in C2 — counters
+    // now call into the queue controller via the new hooks mechanism rather than
+    // installing a per-callback entry. The queue_id field is no longer set.
+    // TODO(C3): delete the queue_id field and rewrite these checks against the
+    // hooks-mechanism activation state once the field itself is gone.
 
     /**
      * Check if context can be disabled correctly
@@ -609,14 +606,11 @@ TEST(core, start_stop_callback_ctx)
     ctx.dispatch_counter_collection->enabled.rlock([&](const auto& data) { found = data; });
     EXPECT_TRUE(found);
 
-    found = false;
-    hsa::get_queue_controller()->iterate_callbacks([&](auto cid, const auto&) {
-        if(cid == ctx.dispatch_counter_collection->callbacks.at(0)->queue_id)
-        {
-            found = true;
-        }
-    });
-    EXPECT_TRUE(found);
+    // Callback installation in the queue controller has been removed in C2 — counters
+    // now call into the queue controller via the new hooks mechanism rather than
+    // installing a per-callback entry. The queue_id field is no longer set.
+    // TODO(C3): delete the queue_id field and rewrite these checks against the
+    // hooks-mechanism activation state once the field itself is gone.
 
     /**
      * Check if context can be disabled correctly

@@ -473,39 +473,10 @@ DispatchThreadTracer::post_kernel_call(DispatchThreadTracer::inst_pkt_t& aql,
 void
 DispatchThreadTracer::start_context()
 {
-    using corr_id_map_t = hsa::queue_info_session_t::external_corr_id_map_t;
-
     CHECK_NOTNULL(hsa::get_queue_controller())->enable_serialization();
-
-    // Only one thread should be attempting to enable/disable this context
-    client.wlock([&](auto& client_id) {
-        if(client_id) return;
-
-        auto&& _callbacks = hsa::queue_callbacks_t{
-            .batch_packets = []() { return false; },
-            .write_interceptor =
-                [=](const hsa::Queue& q,
-                    const hsa::rocprofiler_packet& /* kern_pkt */,
-                    rocprofiler_kernel_id_t   kernel_id,
-                    rocprofiler_dispatch_id_t dispatch_id,
-                    rocprofiler_user_data_t*  user_data,
-                    const corr_id_map_t& /* extern_corr_ids */,
-                    const context::correlation_id* corr_id) {
-                    return this->pre_kernel_call(q, kernel_id, dispatch_id, user_data, corr_id);
-                },
-            .signal_completion =
-                [=](const hsa::Queue& /* q */,
-                    hsa::rocprofiler_packet /* kern_pkt */,
-                    std::shared_ptr<hsa::queue_info_session_t>& session,
-                    hsa::packet_data_t&                         packet_data,
-                    inst_pkt_t&                                 aql,
-                    kernel_dispatch::profiling_time) {
-                    this->post_kernel_call(aql, *session, packet_data);
-                }};
-
-        client_id = CHECK_NOTNULL(hsa::get_queue_controller())
-                        ->add_callback(std::nullopt, std::move(_callbacks));
-    });
+    // Callback installation deleted — thread_trace::write_hook and
+    // thread_trace::signal_completion_hook are called directly from
+    // queue.cpp via the new hooks mechanism.
 }
 
 void
@@ -514,15 +485,8 @@ DispatchThreadTracer::stop_context()  // NOLINT(readability-convert-member-funct
     auto* controller = hsa::get_queue_controller();
     if(!controller) return;
 
-    client.wlock([&](auto& client_id) {
-        if(!client_id) return;
-
-        // Remove our callbacks from HSA's queue controller
-        controller->remove_callback(*client_id);
-        client_id = std::nullopt;
-    });
-
     controller->disable_serialization();
+    // Callback removal deleted — see start_context.
 }
 
 DeviceThreadTracer::DeviceThreadTracer()

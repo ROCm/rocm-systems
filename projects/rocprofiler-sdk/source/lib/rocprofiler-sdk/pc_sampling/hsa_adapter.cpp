@@ -351,34 +351,9 @@ pc_sampling_service_finish_configuration(context::pc_sampling_service* service)
         }
     }
 
-    using external_corr_id_map_t = ::rocprofiler::hsa::queue_info_session_t::external_corr_id_map_t;
-
-    // Register callbacks for the HSA's queue interceptor.
-    // TODO: should we store callback ID in the service?
-    rocprofiler::hsa::get_queue_controller()->add_callback(
-        std::nullopt,
-        ::rocprofiler::hsa::queue_callbacks_t{
-            .batch_packets = []() { return true; },
-            .write_interceptor =
-                [](const rocprofiler::hsa::Queue&,
-                   const rocprofiler::hsa::rocprofiler_packet&,
-                   rocprofiler_kernel_id_t /*kernel_id*/,
-                   rocprofiler_dispatch_id_t /*dispatch_id*/,
-                   rocprofiler_user_data_t*,
-                   const external_corr_id_map_t&,
-                   const context::correlation_id*) {
-                    return rocprofiler::hsa::write_packet_t{nullptr, false};
-                },
-            // Completion CB
-            .signal_completion =
-                [](const rocprofiler::hsa::Queue&                           q,
-                   rocprofiler::hsa::rocprofiler_packet                     kern_pkt,
-                   std::shared_ptr<rocprofiler::hsa::queue_info_session_t>& session,
-                   rocprofiler::hsa::packet_data_t& /*packet*/,
-                   rocprofiler::hsa::inst_pkt_t&,
-                   kernel_dispatch::profiling_time) {
-                    kernel_completion_cb(q.get_agent().get_rocp_agent(), kern_pkt, *session);
-                }});
+    // Callback registration deleted — pc_sampling::maybe_marker_packet and
+    // pc_sampling::signal_completion_hook are called directly from queue.cpp
+    // via the new hooks mechanism.
 }
 
 rocprofiler_status_t
