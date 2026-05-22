@@ -3,12 +3,12 @@
 #pragma once
 #include <rocprofiler-sdk/rocprofiler.h>
 
-namespace rocprofiler_compute_tool
+namespace rocm_compute
 {
-class SdkWrapper
+class sdk_wrapper_t
 {
 public:
-    virtual ~SdkWrapper()                                             = default;
+    virtual ~sdk_wrapper_t()                                          = default;
     virtual void create_context(rocprofiler_context_id_t* context_id) = 0;
     virtual void configure_callback_dispatch_counting_service(
         rocprofiler_context_id_t                   context_id,
@@ -43,7 +43,7 @@ public:
                                          rocprofiler_counter_id_t*         counter_id) = 0;
 };
 
-class SdkWrapperImpl : public SdkWrapper
+class sdk_wrapper_impl_t : public sdk_wrapper_t
 {
 public:
     void create_context(rocprofiler_context_id_t* context_id) override;
@@ -73,4 +73,4 @@ public:
     void query_record_counter_id(rocprofiler_counter_instance_id_t id,
                                  rocprofiler_counter_id_t*         counter_id) override;
 };
-}  // namespace rocprofiler_compute_tool
+}  // namespace rocm_compute
