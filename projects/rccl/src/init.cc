@@ -776,6 +776,17 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
     CUDACHECK(cudaEventCreateWithFlags(&sharedRes->scratchEvent, cudaEventDisableTiming));
     comm->sharedRes = sharedRes;
     sharedRes->refCount = 1;
+#ifdef ENABLE_ROCSHMEM
+    // Assign built-in GIN rocshmem plugin if requested and no GIN plugin was loaded
+    if (sharedRes->ginState.ncclGin == nullptr) {
+      extern int64_t ncclParamGinType();
+      if (ncclParamGinType() == NCCL_NET_DEVICE_GIN_ROCSHMEM) {
+        extern ncclGin_v11_t ncclGinRocshmemPlugin;
+        INFO(NCCL_INIT, "Using built-in GIN rocshmem plugin");
+        sharedRes->ginState.ncclGin = &ncclGinRocshmemPlugin;
+      }
+    }
+#endif
   } else {
     comm->sharedRes = parent->sharedRes;
     ncclAtomicRefCountIncrement(&parent->sharedRes->refCount);

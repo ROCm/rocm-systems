@@ -250,6 +250,12 @@ static ncclResult_t ncclNetPluginAssignToComm(struct ncclComm* comm, int pluginI
       INFO(NCCL_INIT|NCCL_NET, "Assigned GIN plugin %s to comm", netPluginLibs[pluginIndex].ncclGin->name);
       comm->sharedRes->ginState.ncclGin = netPluginLibs[pluginIndex].ncclGin;
     }
+    // TODO: The GIN plugin assignment at line 251 accesses comm->sharedRes which is NULL
+    // at this point (ncclNetInit runs before sharedRes allocation in init.cc:767-777).
+    // It only works today because the IB GIN plugin is typically not enabled on the first
+    // comm creation path. The built-in rocshmem GIN plugin is assigned separately in
+    // init.cc after sharedRes allocation as a workaround. The proper fix is to defer ALL
+    // GIN plugin-to-comm assignment (line 251) to after sharedRes is allocated.
   }
 exit:
   return ncclSuccess;
