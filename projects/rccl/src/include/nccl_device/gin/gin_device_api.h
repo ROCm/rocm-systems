@@ -15,5 +15,8 @@
 #if NCCL_GIN_PROXY_ENABLE
 #include "proxy/gin_proxy.h"
 #endif
+#if NCCL_GIN_ROCSHMEM_ENABLE
+#include "rocshmem/gin_rocshmem.h"
+#endif
 
 #endif
