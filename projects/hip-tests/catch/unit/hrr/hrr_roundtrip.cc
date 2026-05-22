@@ -45,6 +45,23 @@ static constexpr char kPathSep = ';';
 static constexpr char kPathSep = ':';
 #endif
 
+// Set PATH (and LD_LIBRARY_PATH on Linux) so the subprocess can find the ROCm
+// runtime and any custom-built amdhip64 that the test harness was built against.
+//
+// On Windows: DLLs are found via PATH — no separate library path needed.
+// On Linux:   shared objects are found via LD_LIBRARY_PATH; PATH alone is not
+//             enough.  We inherit the current LD_LIBRARY_PATH so that any
+//             build-tree rpath set by cmake --target install is respected.
+static void set_proc_search_path(hip::SpawnProc& proc) {
+  const char* cur_path = getenv("PATH");
+  proc.setEnv("PATH",
+              std::string(ROCM_BIN_PATH) + kPathSep + (cur_path ? cur_path : ""));
+#ifndef _WIN32
+  const char* cur_ldp = getenv("LD_LIBRARY_PATH");
+  proc.setEnv("LD_LIBRARY_PATH", cur_ldp ? cur_ldp : "");
+#endif
+}
+
 // RAII guard: removes a directory tree on scope exit (even on REQUIRE failure).
 struct ScopedDir {
   fs::path path;
@@ -67,6 +84,7 @@ static void hrr_run_playback(const fs::path& cap_path,
                              const std::string& extra_args = "",
                              bool require_d2h = true) {
   hip::SpawnProc proc(HRR_PLAYBACK_EXE, /*capture_stdout=*/true);
+  set_proc_search_path(proc);
   int ret = proc.run("\"" + cap_path.string() + "\"" +
                      (extra_args.empty() ? "" : " " + extra_args));
   std::string out = proc.getOutput();
@@ -120,8 +138,7 @@ HIP_TEST_CASE(Unit_HRR_CaptureReplayRoundtrip) {
     // Prepend ROCm bin to PATH so the subprocess finds amdhip64_7.dll.
     // SpawnProc replaces PATH entirely, so we reconstruct the full value.
     {
-      const char* cur = getenv("PATH");
-      proc.setEnv("PATH", std::string(ROCM_BIN_PATH) + kPathSep + (cur ? cur : ""));
+      set_proc_search_path(proc);
     }
     int ret = proc.run("\"Unit_HRR_GpuWorkload_Direct\"");
     INFO("Capture subprocess exit code: " << ret);
@@ -174,8 +191,7 @@ HIP_TEST_CASE(Unit_HRR_AllApisRoundtrip) {
     hip::SpawnProc proc(HRR_TEST_EXE);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     {
-      const char* cur = getenv("PATH");
-      proc.setEnv("PATH", std::string(ROCM_BIN_PATH) + kPathSep + (cur ? cur : ""));
+      set_proc_search_path(proc);
     }
     int ret = proc.run("\"Unit_HRR_AllApis_Direct\"");
     INFO("AllApis capture subprocess exit code: " << ret);
@@ -222,8 +238,7 @@ HIP_TEST_CASE(Unit_HRR_HostMemRoundtrip) {
     hip::SpawnProc proc(HRR_TEST_EXE);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     {
-      const char* cur = getenv("PATH");
-      proc.setEnv("PATH", std::string(ROCM_BIN_PATH) + kPathSep + (cur ? cur : ""));
+      set_proc_search_path(proc);
     }
     int ret = proc.run("\"Unit_HRR_HostMemWorkload_Direct\"");
     INFO("HostMem capture subprocess exit code: " << ret);
@@ -273,8 +288,7 @@ HIP_TEST_CASE(Unit_HRR_GraphRoundtrip) {
     // Prepend ROCm bin to PATH so the subprocess finds amdhip64_7.dll.
     // SpawnProc replaces PATH entirely, so we reconstruct the full value.
     {
-      const char* cur = getenv("PATH");
-      proc.setEnv("PATH", std::string(ROCM_BIN_PATH) + kPathSep + (cur ? cur : ""));
+      set_proc_search_path(proc);
     }
     int ret = proc.run("\"Unit_HRR_GraphWorkload_Direct\"");
     INFO("Graph capture subprocess exit code: " << ret);
@@ -324,8 +338,7 @@ HIP_TEST_CASE(Unit_HRR_StressApisRoundtrip) {
     hip::SpawnProc proc(HRR_TEST_EXE);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     {
-      const char* cur = getenv("PATH");
-      proc.setEnv("PATH", std::string(ROCM_BIN_PATH) + kPathSep + (cur ? cur : ""));
+      set_proc_search_path(proc);
     }
     int ret = proc.run("\"Unit_HRR_StressApis_Direct\"");
     INFO("Stress capture subprocess exit code: " << ret);
@@ -358,8 +371,7 @@ static void hrr_run_roundtrip(const std::string& direct_case,
                                const fs::path& cap_path) {
   { hip::SpawnProc proc(HRR_TEST_EXE);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_path.string());
-    { const char* cur = getenv("PATH");
-      proc.setEnv("PATH", std::string(ROCM_BIN_PATH) + kPathSep + (cur ? cur : "")); }
+    { set_proc_search_path(proc); }
     int ret = proc.run("\"" + direct_case + "\"");
     INFO("Capture exit: " << ret); REQUIRE(ret == 0); }
   REQUIRE(fs::exists(cap_path / "events.bin"));
@@ -501,8 +513,7 @@ HIP_TEST_CASE(Unit_HRR_MultiThreadRoundtrip) {
     hip::SpawnProc proc(raw_trace_exe);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     {
-      const char* cur = getenv("PATH");
-      proc.setEnv("PATH", std::string(ROCM_BIN_PATH) + kPathSep + (cur ? cur : ""));
+      set_proc_search_path(proc);
     }
     int ret = proc.run("");
     INFO("hip_raw_trace capture exit code: " << ret);
@@ -534,6 +545,7 @@ HIP_TEST_CASE(Unit_HRR_MultiThreadRoundtrip) {
   // -------------------------------------------------------------------------
   auto run_mt_playback = [&](const std::string& extra_args) {
     hip::SpawnProc proc(HRR_PLAYBACK_EXE, /*capture_stdout=*/true);
+    set_proc_search_path(proc);
     proc.run("\"" + cap.path.string() + "\" --skip-device-sync" +
              (extra_args.empty() ? "" : " " + extra_args));
     std::string out = proc.getOutput();
