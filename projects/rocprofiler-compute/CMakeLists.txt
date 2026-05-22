@@ -2,7 +2,6 @@ cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
 #Add a name for the rocm-systems location
 set(ROCM_SYSTEMS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
-
 # Set cmake_prefix_path for searching, ROCM_PATH if avail otherwise default to general rocm install path
 set(CMAKE_PREFIX_PATH $ENV{ROCM_PATH} "/opt/rocm/")
 message(STATUS "ROCM_PATH: $ENV{ROCM_PATH}")
