@@ -1,21 +1,26 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 #pragma once
-#include "sdk_callbacks.h"
+#include "tool_data.h"
 
-namespace rocprofiler_compute_tool
+#include <string>
+#include <vector>
+
+namespace rocm_compute
 {
 
-class CountersWriter
-{
-public:
-    virtual ~CountersWriter()                           = default;
-    virtual void write_counters(tool_data_t* tool_data) = 0;
-};
-
-class CsvCountersWriter : public CountersWriter
+class counters_writer_t
 {
 public:
-    void write_counters(tool_data_t* tool_data) override;
+    virtual ~counters_writer_t()                                                   = default;
+    virtual void write_counters(const std::filesystem::path&              output_file,
+                                const std::vector<counter_info_record_t>& records) = 0;
 };
-}  // namespace rocprofiler_compute_tool
+
+class csv_counters_writer_t : public counters_writer_t
+{
+public:
+    void write_counters(const std::filesystem::path&              output_file,
+                        const std::vector<counter_info_record_t>& records) override;
+};
+}  // namespace rocm_compute
