@@ -236,11 +236,18 @@ triage it into the right bucket:
   function** → add a return-failure stub. If a future test will need
   to drive it, plan for the function-pointer-hook upgrade.
 - **It's a HIP driver / `cuMem*` / `hipMem*` symbol** → first try
-  linking against `hip::host` (already in `RCCL_COMMON_LINK_LIBS`).
-  If the symbol isn't in the host runtime (e.g. it's a driver-API
-  shim that NCCL `dlsym`'s out of `libcuda.so`), see the note in
-  the original Doxygen on `ipcRegisterBuffer` about link-time
-  interposition.
+  linking against `hip::host` (already in `RCCL_COMMON_LINK_LIBS`);
+  most `hipMem*` host-runtime entry points resolve from there. If
+  the symbol isn't in the host runtime — typically a CUDA-driver-API
+  shim that the real RCCL resolves through `dlsym` on `libcuda.so`
+  at runtime (`cuMemGetAddressRange`, `cuPointerGetAttribute`,
+  `cuMemCreate`, `cuMemExportToShareableHandle`, …) — define your
+  own version in `fakes/p2p_fakes.cc`. Use the same signature the
+  header declares and have it return a failure code (or a canned
+  success) by default; this is just another bucket-C seam and gets
+  the function-pointer-hook treatment when a test needs to drive it.
+  Don't try to link `libcuda.so` into this binary — the whole point
+  is that it runs on machines with no driver.
 - **It's a HIP kernel launch** → you almost certainly don't want to
   test the path that launches it from this binary. Refactor the test
   to avoid the branch, or split the kernel-launching code into a
