@@ -26,7 +26,16 @@ rocprofiler_compute_checkout_git_submodule(
     REPO_URL https://github.com/fmtlib/fmt.git
     REPO_BRANCH "12.1.0"
 )
-
 set(FMT_INSTALL OFF CACHE BOOL "Disable fmt installation" FORCE)
 set(FMT_TEST OFF CACHE BOOL "Disable fmt tests" FORCE)
+
+rocprofiler_compute_checkout_git_submodule(
+    RELATIVE_PATH json
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    TEST_FILE CMakeLists.txt
+    REPO_URL https://github.com/nlohmann/json.git
+    REPO_BRANCH "develop"
+)
+
 add_subdirectory(fmt)
+add_subdirectory(json)
