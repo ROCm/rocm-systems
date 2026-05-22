@@ -4,10 +4,26 @@
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
 
+## ROCm Systems Profiler 1.7.0 for ROCm 7.14.0
+
+### Added
+
+### Changed
+
+- Remove Boost as a Dyninst dependency by replacing Boost usage with in-tree dyncompat shims and C++17 standard library equivalents; Bundled Dyninst now requires **GCC ≥ 10**
+
+### Resolved issues
+
 ## ROCm Systems Profiler 1.6.0 for ROCm 7.13.0
 
 ### Added
 
+- GPU Hardware Performance Counter (PMC) sampling via the ROCProfiler-SDK device
+  counting service. Periodic per-GPU hardware counters are collected alongside
+  existing PMC sources and exposed in both Perfetto and RocPD outputs. Specify
+  counters with `ROCPROFSYS_GPU_PERF_COUNTERS` (comma-separated; suffix
+  `:device=N` to target a specific GPU). Requires ROCProfiler-SDK 0.6.0 or
+  later (ROCm 6.4.0+).
 - GPU graphics and memory clock frequency metrics (`gfx_clock`, `mem_clock`) via
   AMD SMI, exposing `current_gfxclk` and `current_uclk` in MHz as PMC samples.
   Configure via `ROCPROFSYS_AMD_SMI_METRICS=gfx_clock,mem_clock`.
@@ -26,7 +42,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Support for selective region tracing via the `ROCPROFSYS_SELECTED_REGIONS` environment variable, limiting tracing to specified regions.
 - `--selected-regions` CLI argument to `rocprof-sys-sample`, `rocprof-sys-run`, and `rocprof-sys-instrument` for specifying selective region tracing from the command line.
 - Support for re-attaching to a previously profiled process. After detaching, `rocprof-sys-attach` can re-attach to the same PID for a new profiling session.
-- MPI-rank-based file output filtering feature controlled with two new CLI arguments: `--rank-filter-output` and `--rank-filter-id`.
+- MPI-rank-based file output and console output filtering features controlled with 3 new CLI arguments: `--rank-filter-output`, `--rank-filter-logs` and `--rank-filter-id`.
 - JSON-based configurable preset system with `--preset=<name>` flag, replacing the old `--<preset-name>` flags. Presets are now loaded from JSON files in `source/bin/common/presets/`, making them extensible and exportable. Use `--list-presets` to see available presets and `--explain=<name>` for detailed preset information.
 - Domain flags for composable configuration: `--gpu[=metrics]`, `--rocm[=domains]`, `--cpu[=hz]`, `--parallel[=runtimes]`. Domain flags can be combined with presets to customize profiling without editing configuration files.
 - Configuration export via `--export-config[=file]` to save resolved settings as reusable JSON configuration files. Exported configs can be loaded back with `--preset=./config.json`.

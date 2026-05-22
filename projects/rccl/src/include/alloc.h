@@ -472,7 +472,6 @@ restoreCapMode:
      __atomic_fetch_add(&allocTracker[cudaDev].totalAllocSize, size, __ATOMIC_RELAXED);
   }
   INFO(NCCL_ALLOC, "ncclCuMemAlloc: Memory used = %ld on device = %d", allocTracker[cudaDev].totalAllocSize, cudaDev);
-
   return result;
 fail:
   WARN("ncclCuMemAlloc failed (size %zu, dev %d): cleaning up partial allocation", size, cudaDev);
