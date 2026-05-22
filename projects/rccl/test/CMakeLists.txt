@@ -640,6 +640,6 @@ if(BUILD_TESTS)
     COMPONENT tests
     RENAME "CTestTestfile.cmake"
   )
-  add_subdirectory(mch)
+  add_subdirectory(microtest)
 
 endif()

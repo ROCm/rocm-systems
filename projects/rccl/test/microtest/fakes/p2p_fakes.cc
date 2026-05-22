@@ -5,7 +5,7 @@
  ************************************************************************/
 
 // Minimal stubs for everything p2p.cc references but doesn't define, so
-// rccl-UnitTestsMch links without pulling in librccl.so.
+// rccl-UnitTestsMicro links without pulling in librccl.so.
 //
 // Philosophy:
 //   - Globals get a definition with a sensible default.

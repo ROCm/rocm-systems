@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
-# Run rccl-UnitTestsMch under llvm source-based coverage and emit a
+# Run rccl-UnitTestsMicro under llvm source-based coverage and emit a
 # report scoped to the file(s) compiled directly into the binary
 # (currently just hipify/src/transport/p2p.cc).
 #
 # Requirements:
-#   - Configure with -DENABLE_MCH_COVERAGE=ON so the test binary is
+#   - Configure with -DENABLE_MICROTEST_COVERAGE=ON so the test binary is
 #     built with -fprofile-instr-generate -fcoverage-mapping. (We use
 #     our own knob rather than -DENABLE_CODE_COVERAGE because the
-#     latter is Debug-only at the top level; the mch binary doesn't
+#     latter is Debug-only at the top level; the microtest binary doesn't
 #     need that constraint.)
 #   - llvm-profdata and llvm-cov on PATH (or under /opt/rocm/llvm/bin).
 #
 # Usage:
-#   test/mch/coverage.sh                            # text summary to stdout
-#   test/mch/coverage.sh --html out/cov-html        # also emit HTML report
-#   FUNC=ipcRegisterBuffer test/mch/coverage.sh ... # scope to one function
-#   BUILD_DIR=build/debug test/mch/coverage.sh      # non-default build tree
+#   test/microtest/coverage.sh                            # text summary to stdout
+#   test/microtest/coverage.sh --html out/cov-html        # also emit HTML report
+#   FUNC=ipcRegisterBuffer test/microtest/coverage.sh ... # scope to one function
+#   BUILD_DIR=build/debug test/microtest/coverage.sh      # non-default build tree
 #
 # HTML reports include inline branch counts (--show-branches=count) and a
 # branch column in the per-file summary, so branch coverage is visible
@@ -30,10 +30,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RCCL_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 BUILD_DIR="${BUILD_DIR:-${RCCL_ROOT}/build/release}"
-BIN="${BUILD_DIR}/test/mch/rccl-UnitTestsMch"
-COV_DIR="${BUILD_DIR}/test/mch/coverage"
-PROFRAW="${COV_DIR}/mch.profraw"
-PROFDATA="${COV_DIR}/mch.profdata"
+BIN="${BUILD_DIR}/test/microtest/rccl-UnitTestsMicro"
+COV_DIR="${BUILD_DIR}/test/microtest/coverage"
+PROFRAW="${COV_DIR}/micro.profraw"
+PROFDATA="${COV_DIR}/micro.profdata"
 
 # Prefer ROCm's bundled llvm tooling, fall back to system PATH.
 LLVM_BIN="/opt/rocm/llvm/bin"
