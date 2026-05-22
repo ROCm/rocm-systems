@@ -58,12 +58,12 @@ repos:
         files: ^projects/rocprofiler-compute/.*\.(py|hip|cpp)$
         stages: [pre-commit]
 
-  # Local hook: hardcoded environment-variable secrets
+  # Local hook: hardcoded secrets in tracked files
   - repo: local
     hooks:
-      - id: env-secret-check
-        name: Environment variable secret check
-        entry: python projects/rocprofiler-compute/tools/env_secret_check.py
+      - id: secret-check
+        name: Hardcoded secret check
+        entry: python projects/rocprofiler-compute/tools/secret_check.py
         language: python
         files: ^projects/rocprofiler-compute/
         pass_filenames: false

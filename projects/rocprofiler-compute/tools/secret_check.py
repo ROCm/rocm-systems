@@ -2,7 +2,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Pre-commit hook to reject hardcoded secrets in environment assignments."""
+"""Pre-commit hook to reject hardcoded secrets in tracked text files."""
 
 import argparse
 import math
@@ -58,8 +58,14 @@ CPP_ENV_PATTERNS = (
     re.compile(r"putenv\(\s*(?P<value>['\"]\w+=[^'\"]+['\"])"),
 )
 SECRET_NAME_PATTERN = re.compile(
-    r"(SECRET|TOKEN|PASSWORD|PASSWD|API[_-]?KEY|PRIVATE[_-]?KEY|ACCESS[_-]?KEY)",
+    r"(?<![A-Za-z0-9])"
+    r"(SECRET|TOKEN|PASSWORD|PASSWD|API[_-]?KEY|PRIVATE[_-]?KEY|ACCESS[_-]?KEY)"
+    r"(?![A-Za-z0-9])",
     re.IGNORECASE,
+)
+GENERIC_ASSIGNMENT_PATTERN = re.compile(
+    r"(?P<name>[A-Za-z_][A-Za-z0-9_-]*)\s*(?<![=!<>])[:=](?![=])\s*"
+    r"(?P<value>\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|[A-Za-z0-9_+=/\-]+)",
 )
 
 
@@ -80,8 +86,16 @@ class Assignment:
 
 
 @dataclass(frozen=True)
+class LiteralCandidate:
+    """A literal value that can be checked for high entropy."""
+
+    name: str
+    value: str
+
+
+@dataclass(frozen=True)
 class Finding:
-    """A secret-like environment-variable assignment found in a file."""
+    """A secret-like value found in a file."""
 
     filepath: str
     line_number: int
@@ -99,7 +113,7 @@ SECRET_VALUE_PATTERNS = (
 
 
 def main() -> int:
-    """Run the environment secret check."""
+    """Run the hardcoded secret check."""
     args = _parse_args()
     repo_paths = _files_to_check(args.all, args.files)
     findings = _scan_repo_paths(repo_paths)
@@ -107,7 +121,7 @@ def main() -> int:
     if not findings:
         return 0
 
-    print("Environment variable secret check failed:\n")
+    print("Hardcoded secret check failed:\n")
     for finding in findings:
         print(
             f"{finding.filepath}:{finding.line_number}  "
@@ -119,7 +133,7 @@ def main() -> int:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Detect secret-like values in environment-variable assignments.",
+        description="Detect hardcoded secrets in tracked text files.",
     )
     parser.add_argument(
         "--all",
@@ -217,11 +231,12 @@ def _scan_text_file(repo_path: str, absolute_path: Path) -> list[Finding]:
     except OSError:
         return []
 
-    return _find_secret_assignments(repo_path, lines)
+    return _find_secrets(repo_path, lines)
 
 
-def _find_secret_assignments(repo_path: str, lines: list[str]) -> list[Finding]:
+def _find_secrets(repo_path: str, lines: list[str]) -> list[Finding]:
     findings = []
+    seen_findings: set[tuple[int, str, str]] = set()
     yaml_env_block_indent: Optional[int] = None
 
     for line_number, line in enumerate(lines, start=1):
@@ -238,16 +253,118 @@ def _find_secret_assignments(repo_path: str, lines: list[str]) -> list[Finding]:
             if reason is None:
                 continue
 
-            findings.append(
-                Finding(
-                    filepath=repo_path,
-                    line_number=line_number,
-                    name=assignment.name,
-                    reason=reason,
-                ),
+            _append_finding(
+                findings,
+                seen_findings,
+                repo_path,
+                line_number,
+                assignment.name,
+                assignment.value,
+                reason,
+            )
+
+        if _has_secret_pattern_signal(line):
+            for secret_pattern in SECRET_VALUE_PATTERNS:
+                for match in secret_pattern.expression.finditer(line):
+                    _append_finding(
+                        findings,
+                        seen_findings,
+                        repo_path,
+                        line_number,
+                        secret_pattern.name,
+                        match.group(0),
+                        secret_pattern.name,
+                    )
+
+        for assignment in _generic_literal_assignments(line):
+            if SECRET_NAME_PATTERN.search(assignment.name) and _is_literal_secret_value(
+                assignment.value,
+            ):
+                _append_finding(
+                    findings,
+                    seen_findings,
+                    repo_path,
+                    line_number,
+                    assignment.name,
+                    assignment.value,
+                    "secret-name",
+                )
+
+        for candidate in _literal_candidates(line):
+            if not _has_high_entropy(candidate.value):
+                continue
+
+            _append_finding(
+                findings,
+                seen_findings,
+                repo_path,
+                line_number,
+                candidate.name,
+                candidate.value,
+                "high-entropy",
             )
 
     return findings
+
+
+def _generic_literal_assignments(line: str) -> list[Assignment]:
+    if ":" not in line and "=" not in line:
+        return []
+
+    assignments = []
+    for match in GENERIC_ASSIGNMENT_PATTERN.finditer(line):
+        assignments.append(
+            Assignment(
+                name=match.group("name"),
+                value=match.group("value"),
+            ),
+        )
+
+    return assignments
+
+
+def _has_secret_pattern_signal(line: str) -> bool:
+    return "gh" in line or "PRIVATE KEY" in line
+
+
+def _append_finding(
+    findings: list[Finding],
+    seen_findings: set[tuple[int, str, str]],
+    repo_path: str,
+    line_number: int,
+    name: str,
+    raw_value: str,
+    reason: str,
+) -> None:
+    cleaned_value = _clean_raw_value(raw_value)
+    finding_key = (line_number, name, cleaned_value)
+    if finding_key in seen_findings:
+        return
+
+    seen_findings.add(finding_key)
+    findings.append(
+        Finding(
+            filepath=repo_path,
+            line_number=line_number,
+            name=name,
+            reason=reason,
+        ),
+    )
+
+
+def _literal_candidates(line: str) -> list[LiteralCandidate]:
+    has_entropy_markers = _has_entropy_markers(line)
+    if not has_entropy_markers:
+        return []
+
+    return [
+        LiteralCandidate(
+            name=assignment.name,
+            value=_clean_raw_value(assignment.value),
+        )
+        for assignment in _generic_literal_assignments(line)
+        if _is_high_entropy_literal_candidate(assignment)
+    ]
 
 
 def _updated_yaml_env_block_indent(
@@ -346,13 +463,32 @@ def _has_high_entropy(value: str) -> bool:
     if len(value) < ENTROPY_MIN_LENGTH:
         return False
 
-    if re.fullmatch(r"[A-Za-z0-9_+=-]+", value) is None:
+    if re.fullmatch(r"[A-Za-z0-9_+=/\-]+", value) is None:
         return False
 
-    if not re.search(r"[A-Z]", value) or not re.search(r"\d", value):
+    if not _has_entropy_markers(value):
         return False
 
     return _shannon_entropy(value) >= ENTROPY_THRESHOLD
+
+
+def _is_high_entropy_literal_candidate(assignment: Assignment) -> bool:
+    raw_value = assignment.value
+    stripped_value = raw_value.strip()
+    value = _clean_raw_value(raw_value)
+    if any(separator in value for separator in ("/", "\\", "_")):
+        return False
+
+    if len(stripped_value) >= 2 and stripped_value[0] == stripped_value[-1]:
+        return stripped_value[0] in {"'", '"'}
+
+    return assignment.name.lower() != "name"
+
+
+def _has_entropy_markers(value: str) -> bool:
+    return any(character.isupper() for character in value) and any(
+        character.isdigit() for character in value
+    )
 
 
 def _shannon_entropy(value: str) -> float:
@@ -368,7 +504,13 @@ def _is_literal_secret_value(value: str) -> bool:
     if not value:
         return False
 
+    if len(value) < 4:
+        return False
+
     if value.startswith("$"):
+        return False
+
+    if value.isdigit():
         return False
 
     return True
