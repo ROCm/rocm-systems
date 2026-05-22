@@ -84,6 +84,10 @@ const Tables& tables()
             if (type == RdnaType::NOP) v |= INFO_NOP;
             out.info[key] = v;
         }
+        for (int key = 128; key < 256; ++key)
+        {
+            if (key != 0xE1 && out.info[key] != out.info[key & 0x7F]) __builtin_trap();
+        }
         return out;
     }();
     return t;
@@ -164,8 +168,7 @@ __attribute__((target("avx512vbmi,avx512bw,avx512f,avx2,bmi2"))) size_t scan_gfx
 
     const __m512i lut0 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(T.info));
     const __m512i lut1 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(T.info + 64));
-    const __m512i lut2 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(T.info + 128));
-    const __m512i lut3 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(T.info + 192));
+    const __m512i event_sync_info_v = _mm512_set1_epi8(static_cast<char>(T.info[0xE1]));
 
     constexpr size_t CHUNK_NIBBLES = 64;
     constexpr size_t CHUNK_BYTES = CHUNK_NIBBLES / 2;
@@ -181,6 +184,7 @@ __attribute__((target("avx512vbmi,avx512bw,avx512f,avx2,bmi2"))) size_t scan_gfx
     const __m512i exit_table_v = _mm512_add_epi8(index_v, _mm512_set1_epi8(64));
     const __m512i len_mask_v = _mm512_set1_epi8(static_cast<char>(INFO_LEN));
     const __m512i attention_v = _mm512_set1_epi8(static_cast<char>(INFO_RARE | INFO_EXT));
+    const __m512i event_sync_key_v = _mm512_set1_epi8(static_cast<char>(0xE1));
     const __m256i low_nibble_y = _mm256_set1_epi8(0x0F);
     const __m256i high_nibble_y = _mm256_set1_epi8(static_cast<char>(0xF0));
     const __m512i zero_v = _mm512_setzero_si512();
@@ -221,10 +225,9 @@ __attribute__((target("avx512vbmi,avx512bw,avx512f,avx2,bmi2"))) size_t scan_gfx
         const __m256i keys_32_63 = _mm256_permute2x128_si256(keys_lo, keys_hi, 0x31);
         const __m512i keys_v = _mm512_inserti64x4(_mm512_castsi256_si512(keys_0_31), keys_32_63, 1);
 
-        const __m512i lo_lookup = _mm512_permutex2var_epi8(lut0, keys_v, lut1);
-        const __m512i hi_lookup = _mm512_permutex2var_epi8(lut2, keys_v, lut3);
-        const __mmask64 hi_mask = _mm512_movepi8_mask(keys_v);
-        const __m512i info_v = _mm512_mask_blend_epi8(hi_mask, lo_lookup, hi_lookup);
+        __m512i info_v = _mm512_permutex2var_epi8(lut0, keys_v, lut1);
+        const __mmask64 event_sync_mask = _mm512_cmpeq_epi8_mask(keys_v, event_sync_key_v);
+        info_v = _mm512_mask_mov_epi8(info_v, event_sync_mask, event_sync_info_v);
 
         const __m512i len_v = _mm512_and_si512(info_v, len_mask_v);
 
@@ -329,9 +332,9 @@ __attribute__((target("avx512vbmi,avx512bw,avx512f,avx2,bmi2"))) size_t scan_gfx
         tail_pos += nibbles;
     }
 
-    return n_out;
-
 #undef GFX12_EXTRACT_SUCCESSOR
+
+    return n_out;
 }
 
 #endif // GFX12_RARE_SCAN_HAS_X86
