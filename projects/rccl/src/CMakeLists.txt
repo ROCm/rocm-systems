@@ -128,6 +128,7 @@ set(SRC_FILES
   include/gin.h
   include/gin/gin_host.h
   include/gin/gin_host_proxy.h
+  include/gin/gin_host_rocshmem.h
   include/hip_rocm_version_info.h
   include/ibvcore.h
   include/ibvsymbols.h
@@ -192,6 +193,8 @@ set(SRC_FILES
   include/nccl_device/gin/gin_device_host_common.h
   include/nccl_device/gin/proxy/gin_proxy.h
   include/nccl_device/gin/proxy/gin_proxy_device_host_common.h
+  include/nccl_device/gin/rocshmem/gin_rocshmem.h
+  include/nccl_device/gin/rocshmem/gin_rocshmem_device_host_common.h
   include/nccl_device/ll_a2a.h
   include/nccl_device/lsa_barrier.h
   include/nccl_device/ptr.h
