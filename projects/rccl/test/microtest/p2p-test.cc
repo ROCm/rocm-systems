@@ -326,3 +326,87 @@ TEST_F(IpcRegisterBufferFixture, CollectiveReuseEntersStrongStreamBlockWhenDevTa
     EXPECT_EQ(offsetOut,     0u);
     EXPECT_EQ(peerRmtAddrs,  nullptr);
 }
+
+// ---------------------------------------------------------------------------
+// ipcRegisterBuffer: fresh-registration entry, fails on the first HIP call.
+//
+// All previous tests stayed inside the reuse branch (ipcInfos[peer] != null)
+// or skipped the per-peer loop entirely. This test crosses into the
+// fresh-registration `else` block at line 905, which today has zero branch
+// coverage:
+//
+//   - Build a regRecord with ipcInfos[peerLocalRank] == nullptr.
+//   - With baseAddr starting NULL (line 887) and no prior iteration, the
+//     `if (baseAddr == NULL)` branch at line 910 goes True and we hit the
+//     CUCHECKGOTO(hipMemGetAddressRange(...)) at line 911.
+//   - hipMemGetAddressRange is a real HIP runtime call, NOT a PFN seam --
+//     it's resolved through hip::host at link time and called directly
+//     here. We pass a bogus userbuff (0xBADADDR) so it fails with a HIP
+//     error regardless of whether the host has a GPU; CUCHECKGOTO turns
+//     that into ncclUnhandledCudaError and jumps to `fail:`.
+//
+// What this newly covers:
+//   - Branch 894 False is already covered; True (entering the regRecord
+//     block) was already covered too -- but every prior True path went
+//     through the reuse arm. This is the first test where the False side
+//     of branch 900 (`ipcInfos[peerLocalRank]` is null) is taken.
+//   - Line 910 branch True (first iteration of the loop, baseAddr is null).
+//   - Line 911 call site execution.
+//   - The CUCHECKGOTO failure edge through `fail:` from the fresh-reg arm
+//     (the prior fail: coverage came in via the strong-stream block, a
+//     different goto site).
+// ---------------------------------------------------------------------------
+TEST(IpcRegisterBuffer, FreshRegistrationFailsOnAddressRangeLookup)
+{
+    constexpr int kPeerRank      = 4;
+    constexpr int kPeerLocalRank = 3;
+    constexpr uintptr_t kBegAddr    = 0x50000;
+    constexpr uintptr_t kBuffOffset = 0x10;
+    // Deliberately bogus address: we want hipMemGetAddressRange to fail,
+    // not crash. Any non-registered host/device pointer works -- HIP
+    // returns hipErrorInvalidValue (or similar) regardless of GPU presence.
+    constexpr uintptr_t kBogusUserbuff = 0xBADADD0ull;
+
+    ncclComm comm{};
+    int rankToLocalRank[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    rankToLocalRank[kPeerRank] = kPeerLocalRank;
+    comm.rankToLocalRank = rankToLocalRank;
+    comm.localRanks      = NCCL_MAX_LOCAL_RANKS;
+
+    // Fresh-registration path: ipcInfos[peerLocalRank] left NULL so the
+    // `else` at line 905 is taken.
+    ncclReg regRecord{};
+    regRecord.begAddr = kBegAddr;
+    regRecord.endAddr = kBegAddr + 0x1000;
+    // ipcInfos[kPeerLocalRank] is NULL by virtue of the {} initializer.
+
+    int       peerRanks[1]  = {kPeerRank};
+    int       regBufFlag    = 0xdead;
+    uintptr_t offsetOut     = 0xdead;
+    uintptr_t* peerRmtAddrs = reinterpret_cast<uintptr_t*>(0xdead);
+    bool      isLegacyIpc   = true;
+
+    ncclResult_t r = ipcRegisterBuffer(
+        /*comm=*/        &comm,
+        /*userbuff=*/    reinterpret_cast<const void*>(kBogusUserbuff + kBuffOffset),
+        /*buffSize=*/    256,
+        /*peerRanks=*/   peerRanks,
+        /*nPeers=*/      1,
+        /*type=*/        NCCL_IPC_SENDRECV,
+        /*regRecord=*/   &regRecord,
+        /*regBufFlag=*/  &regBufFlag,
+        /*offsetOut=*/   &offsetOut,
+        /*peerRmtAddrsOut=*/ &peerRmtAddrs,
+        /*isLegacyIpc=*/ &isLegacyIpc);
+
+    // CUCHECKGOTO turns any non-hipSuccess into ncclUnhandledCudaError.
+    EXPECT_EQ(r, ncclUnhandledCudaError);
+
+    // `fail:` zeroed the OUT params (lines 1029-1031).
+    EXPECT_EQ(regBufFlag,    0);
+    EXPECT_EQ(offsetOut,     0u);
+    EXPECT_EQ(peerRmtAddrs,  nullptr);
+
+    // Prologue cleared isLegacyIpc (line 893) before any failure path.
+    EXPECT_FALSE(isLegacyIpc);
+}
