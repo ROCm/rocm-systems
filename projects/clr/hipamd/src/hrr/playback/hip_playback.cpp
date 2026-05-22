@@ -1,4 +1,8 @@
-/* Copyright (c) 2026 Advanced Micro Devices, Inc. - MIT License */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 //
 // hip_playback.cpp — Manual playback implementations for APIs that need
 // complex handling: kernel launches, H2D memcpy with blobs, module load

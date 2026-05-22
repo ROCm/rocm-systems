@@ -1,4 +1,8 @@
-/* Copyright (c) 2026 Advanced Micro Devices, Inc. - MIT License */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /*
  * hip_capture.cpp — Hand-written capture shims for complex HIP APIs.
