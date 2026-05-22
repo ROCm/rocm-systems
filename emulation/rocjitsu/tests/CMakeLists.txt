@@ -24,6 +24,7 @@ set(RJ_OBJECT_LIBS
     simdojo
     rocjitsu_vm
     rocjitsu_vm_amdgpu
+    rocjitsu_vm_plugins
     rocjitsu_vm_risc_v
     rocjitsu_config
 )
@@ -58,6 +59,7 @@ target_link_libraries(
         ${RJ_OBJECT_LIBS}
         rocjitsu_kmd
         util
+        race_detector
         flatbuffers
         Threads::Threads
         GTest::gtest_main
@@ -78,7 +80,7 @@ gtest_discover_tests(rocjitsu_tests)
 add_executable(scaling_test scaling_test.cpp)
 target_link_libraries(
     scaling_test
-    PRIVATE ${RJ_OBJECT_LIBS} util flatbuffers Threads::Threads
+    PRIVATE ${RJ_OBJECT_LIBS} util race_detector flatbuffers Threads::Threads
 )
 target_compile_options(scaling_test PRIVATE -O2)
 rj_configure_target(scaling_test TEST)
@@ -255,6 +257,7 @@ if(HSA_RUNTIME64)
             hsa_translate_test
             PRIVATE
                 ${RJ_OBJECT_LIBS}
+                race_detector
                 ${HSA_RUNTIME64}
                 GTest::gtest
                 GTest::gtest_main
@@ -470,6 +473,77 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
 
     rj_add_hip_test(hip_bfe_2d_test)
     rj_add_hip_test_case(hip_bfe_2d_test "BfeRegressionTest.ThreadIdxY")
+
+    # --- Race detection HIP tests ---
+    set(HIP_RACE_SRC ${CMAKE_CURRENT_SOURCE_DIR}/hip_race_tests.hip)
+    set(HIP_RACE_BIN ${CMAKE_CURRENT_BINARY_DIR}/hip_race_tests)
+
+    add_custom_command(
+        OUTPUT ${HIP_RACE_BIN}
+        COMMAND
+            ${HIPCC_EXECUTABLE} --offload-arch=gfx950 -std=c++20 -isystem
+            ${GTEST_INC} -L${GTEST_LIB_DIR} -lgtest -lpthread
+            -Wl,-rpath,${GTEST_LIB_DIR} -o ${HIP_RACE_BIN} ${HIP_RACE_SRC}
+        DEPENDS ${HIP_RACE_SRC} GTest::gtest
+        COMMENT "Building hip_race_tests with hipcc + gtest"
+        VERBATIM
+    )
+    add_custom_target(hip_race_tests_target ALL DEPENDS ${HIP_RACE_BIN})
+
+    function(rj_add_race_test_case TEST_CASE)
+        set(LOG ${CMAKE_CURRENT_BINARY_DIR}/racetest_${TEST_CASE}.log)
+        add_test(
+            NAME "RaceTest.${TEST_CASE}"
+            COMMAND ${HIP_RACE_BIN} --gtest_filter=RaceTest.${TEST_CASE}
+        )
+        set_tests_properties(
+            "RaceTest.${TEST_CASE}"
+            PROPERTIES
+                ENVIRONMENT "${RJ_KMD_PRELOAD_ENV};RJ_RACE=1;RJ_RACE_LOG=${LOG}"
+                TIMEOUT 30
+        )
+    endfunction()
+
+    rj_add_race_test_case(vgpr_waitcnt)
+    rj_add_race_test_case(vgpr_waitcnt_race)
+    rj_add_race_test_case(sgpr_waitcnt)
+    rj_add_race_test_case(sgpr_waitcnt_race)
+    rj_add_race_test_case(lds_cross_wave)
+    rj_add_race_test_case(lds_cross_wave_race)
+    rj_add_race_test_case(global_to_lds_buffer)
+    rj_add_race_test_case(global_to_lds_buffer_race)
+    rj_add_race_test_case(partial_vmcnt_race)
+    rj_add_race_test_case(multiple_race)
+    rj_add_race_test_case(multi_kernel)
+    rj_add_race_test_case(multi_kernel_race)
+    rj_add_race_test_case(multi_workgroup)
+    rj_add_race_test_case(multi_workgroup_race)
+    rj_add_race_test_case(mixed_counters_race)
+    rj_add_race_test_case(stress_wavefront_reuse)
+    rj_add_race_test_case(stress_wavefront_reuse_race)
+    rj_add_race_test_case(exec_mask)
+    rj_add_race_test_case(exec_mask_race)
+    rj_add_race_test_case(exec_mask_same_wave)
+    rj_add_race_test_case(exec_mask_cross_wave_race)
+    rj_add_race_test_case(exec_mask_cross_wave)
+    rj_add_race_test_case(dual_offset_lds)
+    rj_add_race_test_case(dual_offset_lds_race)
+    rj_add_race_test_case(scratch_vmcnt)
+    rj_add_race_test_case(scratch_vmcnt_race)
+
+    # --- Performance benchmark (standalone, no gtest) ---
+    set(PERF_BENCH_SRC ${CMAKE_CURRENT_SOURCE_DIR}/hip_perf_bench.cpp)
+    set(PERF_BENCH_BIN ${CMAKE_CURRENT_BINARY_DIR}/hip_perf_bench)
+    add_custom_command(
+        OUTPUT ${PERF_BENCH_BIN}
+        COMMAND
+            ${HIPCC_EXECUTABLE} --offload-arch=gfx950 -std=c++20 -o
+            ${PERF_BENCH_BIN} ${PERF_BENCH_SRC}
+        DEPENDS ${PERF_BENCH_SRC}
+        COMMENT "Building hip_perf_bench with hipcc"
+        VERBATIM
+    )
+    add_custom_target(hip_perf_bench_target ALL DEPENDS ${PERF_BENCH_BIN})
 
     message(STATUS "HIP tests enabled (found ${HIPCC_EXECUTABLE})")
 else()

@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/kmd/linux/simulated_driver.h"
+#include "plugins/kernel_logging_plugin.h"
+#include "plugins/race_detection_plugin.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
@@ -153,6 +155,27 @@ std::unique_ptr<SimulatedDriver> SimulatedDriver::create_default() {
   auto state = std::make_unique<DefaultDriverState>();
   state->loaded = config::load_config(config_path, schema_path);
   auto *soc = state->loaded.soc();
+
+  auto pg = std::make_shared<ExecutionPluginGroup>();
+  auto add_plugin = [&](std::unique_ptr<ExecutionPlugin> p) {
+    std::string name = p->name();
+    if (!pg->add(std::move(p)))
+      throw util::ConfigError("duplicate plugin: " + name);
+  };
+
+  const char *rj_log = std::getenv("RJ_LOG");
+  if (rj_log && std::string(rj_log) == "1") {
+    add_plugin(std::make_unique<amdgpu::KernelLoggingPlugin>());
+    fprintf(stderr, "[rocjitsu] Logging enabled (RJ_LOG)\n");
+  }
+
+  const char *race = std::getenv("RJ_RACE");
+  if (race && std::string(race) == "1") {
+    add_plugin(std::make_unique<amdgpu::RaceDetectionPlugin>());
+    fprintf(stderr, "[rocjitsu] Race detection enabled (RJ_RACE)\n");
+  }
+  soc->set_plugin_group(pg);
+
   // Override max_ticks: the KFD driver runs the engine indefinitely, waiting for
   // doorbell events from ROCR. Termination is controlled by open()/close().
   state->loaded.engine_config.max_ticks = 0;
@@ -171,7 +194,7 @@ std::unique_ptr<SimulatedDriver> SimulatedDriver::create_default() {
   // when the driver calls request_exit on shutdown.
   state->engine_thread = std::jthread([&engine = *state->engine]() { engine.run(); });
 
-  auto driver = std::make_unique<SimulatedDriver>(*state->engine, *soc);
+  auto driver = std::make_unique<SimulatedDriver>(*state->engine, *soc, pg);
 
   // Build sysfs GpuInfo from the config's device section.
   Sysfs::GpuInfo gpu{};
@@ -217,8 +240,9 @@ std::unique_ptr<SimulatedDriver> SimulatedDriver::create_default() {
   return driver;
 }
 
-SimulatedDriver::SimulatedDriver(simdojo::SimulationEngine &engine, SoC &soc)
-    : engine_(engine), soc_(soc) {}
+SimulatedDriver::SimulatedDriver(simdojo::SimulationEngine &engine, SoC &soc,
+                                 std::shared_ptr<ExecutionPluginGroup> pg)
+    : engine_(engine), soc_(soc), plugin_group_(std::move(pg)) {}
 
 SimulatedDriver::~SimulatedDriver() {
   if (fd_ >= 0)
@@ -276,6 +300,8 @@ int SimulatedDriver::open() {
     }
     event_cv_.notify_all();
   });
+  if (plugin_group_)
+    plugin_group_->onInit();
   return fd_;
 }
 
@@ -298,6 +324,11 @@ int SimulatedDriver::close() {
     // remains stable across close/reopen. lookup() uses g_kfd_fd to gate routing.
     g_kfd_fd.store(-1, std::memory_order_release);
   }
+  if (plugin_group_ && !shutdown_fired_) {
+    shutdown_fired_ = true;
+    plugin_group_->onShutdown();
+  }
+
   // Signal every event page slot non-zero. libhsakmt's WaitOnEvent polls
   // signal_page[event_slot_index] directly; a non-zero value breaks the loop
   // immediately, allowing ROCR's background threads to see IsValid()==false

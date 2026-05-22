@@ -44,6 +44,7 @@ ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemo
 
   wfs_.resize(config.num_wf_slots);
   sgpr_file_.init(config.num_wf_slots * config.sgprs_per_wf, config.sgprs_per_wf);
+  sgpr_to_wave_.resize(config.num_wf_slots * config.sgprs_per_wf, nullptr);
 
   // Completer port: CP sends dispatch activation messages here.
   cpl_ = add_port(std::make_unique<simdojo::Port>("cpl", 0, this, simdojo::PortDirection::IN,
@@ -142,6 +143,11 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sg
   wf->vcc_ = 0;
   wf->m0_ = 0;
   wf->state_ = WfState::RUNNING;
+
+  // Populate reverse-lookup arrays for race detection plugin.
+  std::fill(sgpr_to_wave_.begin() + sgpr_base, sgpr_to_wave_.begin() + sgpr_base + sgprs, wf);
+  fill_vgpr_to_wave(static_cast<uint32_t>(vgpr_base), vgprs, wf);
+
   return wf;
 }
 
@@ -192,6 +198,7 @@ void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id) {
   auto key = wg_key(dispatch_id, wg_id);
   auto it = active_wgs_.find(key);
   if (it != active_wgs_.end() && --it->second == 0) {
+    plugin_group_->onAmdgpuWorkgroupCompleted(dispatch_id, wg_id);
     active_wgs_.erase(it);
     if (cp_)
       cp_->notify_wg_complete(dispatch_id, wg_id);
@@ -244,7 +251,7 @@ void ComputeUnitCore::tick_pipelines() {
 }
 
 void ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
-  plugin_group_->onAmdgpuRouteMemoryInstruction(*inst);
+  plugin_group_->onAmdgpuRouteMemoryInstruction(*inst, wf);
   switch (inst->data()->tag()) {
   case SCALAR_MEM:
     scalar_mem_pipeline_.issue(inst, wf);
@@ -372,10 +379,13 @@ bool ComputeUnitCore::step() {
         }
       }
       if (all_at_barrier) {
-        plugin_group_->onAmdgpuBarrierResolved(wg);
+        std::vector<Wavefront *> barrier_wfs;
         for (auto &w2 : wfs_)
           if (w2->wg_id() == wg && w2->state() == WfState::BARRIER)
-            w2->set_state(WfState::RUNNING);
+            barrier_wfs.push_back(w2.get());
+        plugin_group_->onAmdgpuBarrierResolved(std::span<Wavefront *>(barrier_wfs));
+        for (auto *bwf : barrier_wfs)
+          bwf->set_state(WfState::RUNNING);
       }
     }
     // Drain WAITCNT and ENDING wavefronts that are ready to proceed.
@@ -499,9 +509,9 @@ bool ComputeUnitCore::step() {
     }
   }
 
-  plugin_group_->onAmdgpuExecuteInstruction(active->pc, *inst);
-
+  plugin_group_->beforeAmdgpuExecuteInstruction(active->pc, *inst, *active);
   execute_instruction(inst, *active);
+  plugin_group_->afterAmdgpuExecuteInstruction(active->pc, *inst, *active);
 
   if constexpr (util::Logger::group_enabled(util::Logger::GROUP_VM)) {
     if (active->wf_id() == 0 && active->trace_inst_count_ <= 2000 && active->num_vgprs_ >= 32) {

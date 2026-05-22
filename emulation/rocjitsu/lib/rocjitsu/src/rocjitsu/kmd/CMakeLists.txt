@@ -6,6 +6,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         linux/simulated_driver.cpp
         linux/sysfs.cpp
     )
+    target_link_libraries(rocjitsu_kmd PUBLIC race_detector)
 
     add_library(rocjitsu_kmd_shim SHARED linux/interposer.cpp)
     target_include_directories(
@@ -35,8 +36,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             simdojo
             rocjitsu_vm
             rocjitsu_vm_amdgpu
+            rocjitsu_vm_plugins
             rocjitsu_vm_risc_v
             rocjitsu_config
+            race_detector
             util
             flatbuffers
             Threads::Threads

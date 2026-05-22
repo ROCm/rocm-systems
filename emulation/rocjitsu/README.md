@@ -50,6 +50,7 @@ applications.
 ## Project layout
 
 ```
+plugins/                rocjitsu-specific execution plugins (logging, race detection)
 lib/
   util/                 Header-only shared utilities
     include/util/       bitfield, data types, intrusive list, etc.
@@ -78,6 +79,9 @@ configs/                JSON configurations (amdgpu_cdna4.json)
 tests/                  Google Test suite + scaling test
   kernels/              HIP device kernels for integration testing
 scripts/                Utility scripts
+
+../plugins/             Standalone plugin libraries (shared across emulation tools)
+  race-detector/        Race detection algorithm (builds independently, has its own CI)
 ```
 
 ## Prerequisites
@@ -89,6 +93,15 @@ scripts/                Utility scripts
 
 Third-party dependencies (Google Test and FlatBuffers) are fetched automatically
 via CMake `FetchContent`.
+
+## Sparse checkout
+
+This project lives in the `rocm-systems` monorepo. To work on rocjitsu, add
+both paths to your sparse checkout:
+
+```bash
+git sparse-checkout add emulation/rocjitsu emulation/plugins
+```
 
 ## Building
 

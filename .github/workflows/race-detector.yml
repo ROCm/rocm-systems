@@ -1,0 +1,35 @@
+name: Race Detector
+
+on:
+  push:
+    paths:
+      - 'emulation/plugins/race-detector/**'
+      - '.github/workflows/race-detector.yml'
+  pull_request:
+    paths:
+      - 'emulation/plugins/race-detector/**'
+      - '.github/workflows/race-detector.yml'
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            emulation/plugins/race-detector
+
+      - name: Install dependencies
+        run: sudo apt-get install -y ninja-build
+
+      - name: Configure
+        run: |
+          cmake -G Ninja -B build -S emulation/plugins/race-detector \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=ON
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure

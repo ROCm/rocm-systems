@@ -7,14 +7,17 @@
 #ifndef ROCJITSU_VM_AMDGPU_WAVEFRONT_H_
 #define ROCJITSU_VM_AMDGPU_WAVEFRONT_H_
 
+#include "plugins/wavefront_state.h"
 #include "rocjitsu/base/api.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
 #include "rocjitsu/vm/thread_context.h"
 
+#include <cassert>
 #include <cstdint>
 #include <memory>
 #include <string_view>
+#include <vector>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -172,6 +175,8 @@ public:
   /// @param vmcnt VM counter threshold.
   /// @param lgkmcnt LGKM counter threshold.
   /// @param expcnt Export counter threshold.
+  const WaitTarget &wait_target() const { return wait_target_; }
+
   void set_wait_target(uint8_t vmcnt, uint8_t lgkmcnt, uint8_t expcnt) {
     wait_target_.vmcnt = vmcnt;
     wait_target_.lgkmcnt = lgkmcnt;
@@ -372,6 +377,22 @@ private:
 
 public:
   uint32_t trace_inst_count_ = 0; ///< Debug: instruction count for trace.
+
+  /// Per-plugin state slots, indexed by ExecutionPlugin::slot_index().
+  WavefrontState *plugin_state(uint32_t slot) {
+    assert(slot < plugin_states_.size());
+    return plugin_states_[slot].get();
+  }
+  void set_plugin_state(uint32_t slot, std::unique_ptr<WavefrontState> s) {
+    if (plugin_states_.size() <= slot)
+      plugin_states_.resize(slot + 1);
+    plugin_states_[slot] = std::move(s);
+  }
+
+private:
+  std::vector<std::unique_ptr<WavefrontState>> plugin_states_;
+  friend class ExecutionPluginGroup;
+
 private:
   WaitTarget wait_target_; ///< Current s_waitcnt thresholds.
 

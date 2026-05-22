@@ -529,6 +529,13 @@ int amdgpu_device_deinitialize(void * /*device_handle*/) { return 0; }
 
 int amdgpu_device_get_fd(void * /*device_handle*/) { return SimulatedDriver::kfd_fd(); }
 
+const char *amdgpu_get_marketing_name(void * /*device_handle*/) {
+  auto *drv = SimulatedDriver::lookup(SimulatedDriver::kfd_fd());
+  if (drv)
+    return drv->topology().gpu_info().marketing_name;
+  return "";
+}
+
 // -- fopen / freopen interposition (sysfs redirect) --
 
 FILE *fopen(const char *path, const char *mode) {
