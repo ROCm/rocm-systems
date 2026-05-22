@@ -9,8 +9,9 @@
 #include "impl/core__types.h"
 #include "core_tmp.h"
 
-#undef __CUDACC__
-#define __CUDACC__ 0
+// Note: NCCL originally had #undef __CUDACC__ / #define __CUDACC__ 0 here.
+// Removed because hipify converts it to #define __HIPCC__ 0 which breaks
+// all subsequent device code guards in downstream includes.
 
 struct ncclLsaBarrierHandle;
 

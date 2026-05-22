@@ -9,7 +9,7 @@
 #include "../lsa_barrier.h"
 #include "core__types.h"
 
-#define __CUDACC__ 0
+// Removed: #define __CUDACC__ 0 (hipify converts to #define __HIPCC__ 0, breaking device guards)
 
 struct ncclLsaBarrierHandle {
   ncclDevResourceHandle_t bufHandle;

@@ -9,8 +9,6 @@
 #include "lsa_barrier__types.h"
 #include "comm__types.h"
 
-#define __CUDACC__ 0
-
 #if __CUDACC__
 template<typename Coop>
 NCCL_DEVICE_INLINE ncclLsaBarrierSession<Coop>::ncclLsaBarrierSession(
