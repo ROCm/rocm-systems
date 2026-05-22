@@ -2291,9 +2291,14 @@ static hipError_t playback_hipMemPtrGetInfo(PlaybackContext& ctx, const uint8_t*
 }
 
 static hipError_t playback_hipMemRangeGetAttribute(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemRangeGetAttribute*>(payload);
-  hipError_t _r = (hipError_t)hipMemRangeGetAttribute((void*)a->data, (size_t)a->data_size, (hipMemRangeAttribute)a->attribute, ctx.translate_ptr(a->dev_ptr), (size_t)a->count);
-  return _r;
+  (void)ctx; (void)payload;
+  static bool warned = false;
+  if (!warned) {
+    warned = true;
+    fprintf(stderr, "[HRR] NOOP playback handler called for hipMemRangeGetAttribute — "
+            "this API is not replayed; results may differ from capture.\n");
+  }
+  return hipSuccess;
 }
 
 static hipError_t playback_hipMemRangeGetAttributes(PlaybackContext& ctx, const uint8_t* payload) {

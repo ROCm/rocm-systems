@@ -489,6 +489,8 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipMemGetMemPool",
     # hipMemGetAccess — hipMemLocation* (stale struct ptr)
     "hipMemGetAccess",
+    # hipMemRangeGetAttribute — segfaults on Linux ROCm 7.13; stale dev_ptr unsafe
+    "hipMemRangeGetAttribute",
     # hipMemRangeGetAttributes — attribute arrays stale
     "hipMemRangeGetAttributes",
     # Category 13: Driver 3D/2D memcpy — HIP_MEMCPY3D* / hipMemcpy3DPeerParms* / hip_Memcpy2D* stale struct ptrs
