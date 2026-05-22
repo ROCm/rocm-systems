@@ -5,11 +5,11 @@
 #include "fmt/format.h"
 #include "rocprofiler_compute_tool.h"
 
-using namespace rocprofiler_compute_tool;
+using namespace rocm_compute;
 
-TEST_F(TestSdkCallbacks, ProvidedSameKernelWithMultiplexingDisabled_DispatchCbReturnsFirstPmc)
+TEST_F(test_sdk_callbacks_t, ProvidedSameKernelWithMultiplexingDisabled_DispatchCbReturnsFirstPmc)
 {
-    m_tool_data->iteration_multiplexing_mode = iteration_multiplexing_mode_t::DISABLED;
+    m_tool_data->iteration_multiplexing_mode = IterationMultiplexingMode::Disabled;
     const auto config_index_0 = dispatch_kernel_with_id(1, m_counters_pmc0, m_counters_pmc1);
     const auto config_index_1 = dispatch_kernel_with_id(1, m_counters_pmc0, m_counters_pmc1);
 
@@ -18,9 +18,9 @@ TEST_F(TestSdkCallbacks, ProvidedSameKernelWithMultiplexingDisabled_DispatchCbRe
     EXPECT_EQ(created_config_info[config_index_1].counter_names, m_counters_pmc0);
 }
 
-TEST_F(TestSdkCallbacks, ProvidedDifferentKernelsWithMultiplexingDisabled_DispatchCbReturnsFirstPmc)
+TEST_F(test_sdk_callbacks_t, ProvidedDifferentKernelsWithMultiplexingDisabled_DispatchCbReturnsFirstPmc)
 {
-    m_tool_data->iteration_multiplexing_mode = iteration_multiplexing_mode_t::DISABLED;
+    m_tool_data->iteration_multiplexing_mode = IterationMultiplexingMode::Disabled;
     const auto config_index_0 = dispatch_kernel_with_id(1, m_counters_pmc0, m_counters_pmc1);
     const auto config_index_1 = dispatch_kernel_with_id(2, m_counters_pmc0, m_counters_pmc1);
 
@@ -29,9 +29,9 @@ TEST_F(TestSdkCallbacks, ProvidedDifferentKernelsWithMultiplexingDisabled_Dispat
     EXPECT_EQ(created_config_info[config_index_1].counter_names, m_counters_pmc0);
 }
 
-TEST_F(TestSdkCallbacks, ProvidedSameKernelWithKernelMultiplexing_DispatchCbReturnsEachPmc)
+TEST_F(test_sdk_callbacks_t, ProvidedSameKernelWithKernelMultiplexing_DispatchCbReturnsEachPmc)
 {
-    m_tool_data->iteration_multiplexing_mode = iteration_multiplexing_mode_t::KERNEL;
+    m_tool_data->iteration_multiplexing_mode = IterationMultiplexingMode::Kernel;
     const auto config_index_0 = dispatch_kernel_with_id(1, m_counters_pmc0, m_counters_pmc1);
     const auto config_index_1 = dispatch_kernel_with_id(1, m_counters_pmc0, m_counters_pmc1);
 
@@ -42,9 +42,9 @@ TEST_F(TestSdkCallbacks, ProvidedSameKernelWithKernelMultiplexing_DispatchCbRetu
     EXPECT_EQ(created_config_info[config_index_1].counter_names, m_counters_pmc1);
 }
 
-TEST_F(TestSdkCallbacks, ProvidedDifferentKernelsWithKernelMultiplexing_DispatchCbReturnsFirstPmc)
+TEST_F(test_sdk_callbacks_t, ProvidedDifferentKernelsWithKernelMultiplexing_DispatchCbReturnsFirstPmc)
 {
-    m_tool_data->iteration_multiplexing_mode = iteration_multiplexing_mode_t::KERNEL;
+    m_tool_data->iteration_multiplexing_mode = IterationMultiplexingMode::Kernel;
     const auto config_index_0 = dispatch_kernel_with_id(1, m_counters_pmc0, m_counters_pmc1);
     const auto config_index_1 = dispatch_kernel_with_id(2, m_counters_pmc0, m_counters_pmc1);
     const auto config_index_2 = dispatch_kernel_with_id(1, m_counters_pmc0, m_counters_pmc1);
@@ -57,9 +57,9 @@ TEST_F(TestSdkCallbacks, ProvidedDifferentKernelsWithKernelMultiplexing_Dispatch
     EXPECT_EQ(created_config_info[config_index_3].counter_names, m_counters_pmc1);
 }
 
-TEST_F(TestSdkCallbacks, ProvidedSameKernelSameParamsWithLaunchMultiplexing_DispatchCbReturnsEachPmc)
+TEST_F(test_sdk_callbacks_t, ProvidedSameKernelSameParamsWithLaunchMultiplexing_DispatchCbReturnsEachPmc)
 {
-    m_tool_data->iteration_multiplexing_mode = iteration_multiplexing_mode_t::LAUNCH;
+    m_tool_data->iteration_multiplexing_mode = IterationMultiplexingMode::Launch;
     constexpr kernel_dispatch_info_t info    = {1, 2, {3, 3, 3}, {4, 4, 4}, 5};
 
     const auto config_index_0 = dispatch_kernel_with_dispatch_info(info, m_counters_pmc0, m_counters_pmc1);
@@ -70,9 +70,10 @@ TEST_F(TestSdkCallbacks, ProvidedSameKernelSameParamsWithLaunchMultiplexing_Disp
     EXPECT_EQ(created_config_info[config_index_1].counter_names, m_counters_pmc1);
 }
 
-TEST_F(TestSdkCallbacks, ProvidedSameKernelDifferentParamsWithLaunchMultiplexing_DispatchCbReturnsSamePmc)
+TEST_F(test_sdk_callbacks_t,
+       ProvidedSameKernelDifferentParamsWithLaunchMultiplexing_DispatchCbReturnsSamePmc)
 {
-    m_tool_data->iteration_multiplexing_mode   = iteration_multiplexing_mode_t::LAUNCH;
+    m_tool_data->iteration_multiplexing_mode   = IterationMultiplexingMode::Launch;
     kernel_dispatch_info_t info                = {1, 2, {3, 3, 3}, {4, 4, 4}, 5};
     const auto&            created_config_info = m_sdk_wrapper->get_create_counter_config_info();
 
@@ -100,7 +101,7 @@ TEST_F(TestSdkCallbacks, ProvidedSameKernelDifferentParamsWithLaunchMultiplexing
     EXPECT_EQ(created_config_info[config_index].counter_names, m_counters_pmc0);
 }
 
-TEST_P(TestSdkCallbacksMultiplexing, DISABLED_ProvidedCountersNotAvailable_DispatchCbReturnsNoConfig)
+TEST_P(test_sdk_callbacks_multiplexing_t, DISABLED_ProvidedCountersNotAvailable_DispatchCbReturnsNoConfig)
 {
     // FIXME: This test currently disabled because current implementation of dispatch_callback
     // tries to create counters config even if there are no counters available for it.
@@ -108,12 +109,12 @@ TEST_P(TestSdkCallbacksMultiplexing, DISABLED_ProvidedCountersNotAvailable_Dispa
 
     constexpr rocprofiler_dispatch_counting_service_data_t dispatch_data = {};
     rocprofiler_counter_config_id_t                        config{m_invalid_config_id};
-    m_sdk_callbacks->dispatch_callback(dispatch_data, &config, &m_tool_data);
+    m_sdk_callbacks->dispatch_callback(dispatch_data, &config, *m_tool_data);
 
     EXPECT_EQ(config.handle, m_invalid_config_id);
 }
 
-TEST_P(TestSdkCallbacksMultiplexing, ProvidedKernelIdsOfInterest_DispatchCbReturnsResultForThemOnly)
+TEST_P(test_sdk_callbacks_multiplexing_t, ProvidedKernelIdsOfInterest_DispatchCbReturnsResultForThemOnly)
 {
     m_tool_data->target_kernel_ids.insert(2);
 
@@ -126,7 +127,7 @@ TEST_P(TestSdkCallbacksMultiplexing, ProvidedKernelIdsOfInterest_DispatchCbRetur
     EXPECT_EQ(created_config_info[config_index_1].counter_names, m_counters_pmc1);
 }
 
-TEST_P(TestSdkCallbacksMultiplexing, ProvidedKernelDispatchRanges_DispatchCbReturnsResultForThemOnly)
+TEST_P(test_sdk_callbacks_multiplexing_t, ProvidedKernelDispatchRanges_DispatchCbReturnsResultForThemOnly)
 {
     m_tool_data->kernel_filter_ranges.emplace_back(2, 2);
 
@@ -139,7 +140,7 @@ TEST_P(TestSdkCallbacksMultiplexing, ProvidedKernelDispatchRanges_DispatchCbRetu
     EXPECT_EQ(created_config_info[config_index_1].counter_names, m_counters_pmc1);
 }
 
-TEST_F(TestSdkCallbacks, ProvidedCounterRecord_RecordCbReturnsCorrectData)
+TEST_F(test_sdk_callbacks_t, ProvidedCounterRecord_RecordCbReturnsCorrectData)
 {
     constexpr uint64_t counter_id    = 10;
     const std::string  counter_name  = "counter10";
@@ -152,7 +153,7 @@ TEST_F(TestSdkCallbacks, ProvidedCounterRecord_RecordCbReturnsCorrectData)
     EXPECT_EQ(m_tool_data->counter_records[0].counter_value, counter_value);
 }
 
-TEST_F(TestSdkCallbacks, ProvidedTracingRecord_ToolTracingCbReturnsKernelIdsFromIt)
+TEST_F(test_sdk_callbacks_t, ProvidedTracingRecord_ToolTracingCbReturnsKernelIdsFromIt)
 {
     constexpr uint64_t kernel_id_0 = 10;
     constexpr uint64_t kernel_id_1 = 20;
@@ -165,7 +166,7 @@ TEST_F(TestSdkCallbacks, ProvidedTracingRecord_ToolTracingCbReturnsKernelIdsFrom
     EXPECT_EQ(*(++m_tool_data->target_kernel_ids.cbegin()), kernel_id_1);
 }
 
-TEST_P(TestSdkCallbacksKernelFiltering, ProvidedKernelFilteringEnabled_ReturnsKernelIdsOnlyForMathing)
+TEST_P(test_sdk_callbacks_kernel_filtering_t, ProvidedKernelFilteringEnabled_ReturnsKernelIdsOnlyForMathing)
 {
     constexpr uint64_t kernel_id_0           = 10;
     constexpr uint64_t kernel_id_1           = 20;
@@ -181,18 +182,19 @@ TEST_P(TestSdkCallbacksKernelFiltering, ProvidedKernelFilteringEnabled_ReturnsKe
 }
 
 //////////////////////////////////////////////////////////////////////////
-/// TestSdkCallbacks
-void TestSdkCallbacks::SetUp()
+/// test_sdk_callbacks_t
+void test_sdk_callbacks_t::SetUp()
 {
-    m_sdk_wrapper = std::make_shared<MockSdkWrapper>();
+    m_sdk_wrapper = std::make_shared<mock_sdk_wrapper_t>();
     test_knobs::set_sdk_wrapper(m_sdk_wrapper);
-    m_sdk_callbacks = std::make_shared<SdkCallbacksImpl>(m_sdk_wrapper);
+    m_sdk_callbacks = std::make_shared<sdk_callbacks_impl_t>(m_sdk_wrapper);
     m_tool_data     = std::make_unique<tool_data_t>();
 }
 
-uint64_t TestSdkCallbacks::dispatch_kernel_with_dispatch_info(const kernel_dispatch_info_t& dispatch_info,
-                                                              const std::vector<std::string>& counters_pmc0,
-                                                              const std::vector<std::string>& counters_pmc1)
+uint64_t test_sdk_callbacks_t::dispatch_kernel_with_dispatch_info(
+    const kernel_dispatch_info_t&   dispatch_info,
+    const std::vector<std::string>& counters_pmc0,
+    const std::vector<std::string>& counters_pmc1) const
 {
     m_tool_data->requested_counters = convert_counters_per_pmc_to_str({counters_pmc0, counters_pmc1});
     m_sdk_wrapper->set_available_counters(concat_counters(counters_pmc0, counters_pmc1));
@@ -205,22 +207,22 @@ uint64_t TestSdkCallbacks::dispatch_kernel_with_dispatch_info(const kernel_dispa
     dispatch_data.dispatch_info.group_segment_size             = dispatch_info.LDS_memory_size;
     dispatch_data.dispatch_info.agent_id.handle                = 0xff;
     rocprofiler_counter_config_id_t config{m_invalid_config_id};
-    m_sdk_callbacks->dispatch_callback(dispatch_data, &config, &m_tool_data);
+    m_sdk_callbacks->dispatch_callback(dispatch_data, &config, *m_tool_data);
     return config.handle;
 }
 
-uint64_t TestSdkCallbacks::dispatch_kernel_with_id(uint64_t                        kernel_id,
-                                                   const std::vector<std::string>& counters_pmc0,
-                                                   const std::vector<std::string>& counters_pmc1)
+uint64_t test_sdk_callbacks_t::dispatch_kernel_with_id(uint64_t kernel_id,
+                                                       const std::vector<std::string>& counters_pmc0,
+                                                       const std::vector<std::string>& counters_pmc1) const
 {
     kernel_dispatch_info_t dispatch_info = {};
     dispatch_info.kernel_id              = kernel_id;
     return dispatch_kernel_with_dispatch_info(dispatch_info, counters_pmc0, counters_pmc1);
 }
 
-void TestSdkCallbacks::invoke_record_callback(uint64_t           counter_id,
-                                              const std::string& counter_name,
-                                              double             counter_value)
+void test_sdk_callbacks_t::invoke_record_callback(uint64_t           counter_id,
+                                                  const std::string& counter_name,
+                                                  double             counter_value) const
 {
     rocprofiler_dispatch_counting_service_data_t dispatch_data = {};
     dispatch_data.dispatch_info.dispatch_id                    = 100;
@@ -234,7 +236,7 @@ void TestSdkCallbacks::invoke_record_callback(uint64_t           counter_id,
 
     m_tool_data->counter_id_name_map[counter_id] = counter_name;
 
-    m_sdk_callbacks->record_callback(dispatch_data, record_data.data(), record_data.size(), &m_tool_data);
+    m_sdk_callbacks->record_callback(dispatch_data, record_data.data(), record_data.size(), *m_tool_data);
 
     const auto query_record_info = m_sdk_wrapper->get_query_counter_record_info();
     EXPECT_EQ(m_tool_data->counter_records.size(), record_data.size());
@@ -246,7 +248,8 @@ void TestSdkCallbacks::invoke_record_callback(uint64_t           counter_id,
               dispatch_data.dispatch_info.group_segment_size);
 }
 
-void TestSdkCallbacks::invoke_tool_tracing_callback(uint64_t kernel_id, const std::string& kernel_name)
+void test_sdk_callbacks_t::invoke_tool_tracing_callback(uint64_t           kernel_id,
+                                                        const std::string& kernel_name) const
 {
     rocprofiler_callback_tracing_record_t                                  record  = {};
     rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t payload = {};
@@ -257,10 +260,10 @@ void TestSdkCallbacks::invoke_tool_tracing_callback(uint64_t kernel_id, const st
 
     payload.kernel_id   = kernel_id;
     payload.kernel_name = kernel_name.c_str();
-    m_sdk_callbacks->tool_tracing_callback(record, &m_tool_data);
+    m_sdk_callbacks->tool_tracing_callback(record, *m_tool_data);
 }
 
-std::string TestSdkCallbacks::convert_counters_per_pmc_to_str(
+std::string test_sdk_callbacks_t::convert_counters_per_pmc_to_str(
     const std::vector<std::vector<std::string>>& counters_per_pmc)
 {
     std::string result;
@@ -272,7 +275,7 @@ std::string TestSdkCallbacks::convert_counters_per_pmc_to_str(
     return remove_trailing_comma(result);
 }
 
-std::string TestSdkCallbacks::convert_counters_to_str(const std::vector<std::string>& counters)
+std::string test_sdk_callbacks_t::convert_counters_to_str(const std::vector<std::string>& counters)
 {
     if (counters.empty())
         return "";
@@ -285,7 +288,7 @@ std::string TestSdkCallbacks::convert_counters_to_str(const std::vector<std::str
     return result;
 }
 
-std::string TestSdkCallbacks::remove_trailing_comma(const std::string& str)
+std::string test_sdk_callbacks_t::remove_trailing_comma(const std::string& str)
 {
     std::string result = str;
     if (!result.empty() && result.back() == ',')
@@ -295,8 +298,8 @@ std::string TestSdkCallbacks::remove_trailing_comma(const std::string& str)
     return result;
 }
 
-std::vector<std::string> TestSdkCallbacks::concat_counters(const std::vector<std::string>& v0,
-                                                           const std::vector<std::string>& v1)
+std::vector<std::string> test_sdk_callbacks_t::concat_counters(const std::vector<std::string>& v0,
+                                                               const std::vector<std::string>& v1)
 {
     auto result = v0;
     result.insert(result.end(), v1.begin(), v1.end());
@@ -304,31 +307,30 @@ std::vector<std::string> TestSdkCallbacks::concat_counters(const std::vector<std
 }
 
 //////////////////////////////////////////////////////////////////////////
-/// TestSdkCallbacksMultiplexing
-void TestSdkCallbacksMultiplexing::SetUp()
+/// test_sdk_callbacks_multiplexing_t
+void test_sdk_callbacks_multiplexing_t::SetUp()
 {
-    TestSdkCallbacks::SetUp();
+    test_sdk_callbacks_t::SetUp();
     m_multiplexing_mode = GetParam();
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    Multiplexing,
-    TestSdkCallbacksMultiplexing,
-    ::testing::Values(rocprofiler_compute_tool::iteration_multiplexing_mode_t::DISABLED,
-                      rocprofiler_compute_tool::iteration_multiplexing_mode_t::KERNEL,
-                      rocprofiler_compute_tool::iteration_multiplexing_mode_t::LAUNCH));
+INSTANTIATE_TEST_SUITE_P(Multiplexing,
+                         test_sdk_callbacks_multiplexing_t,
+                         ::testing::Values(rocm_compute::IterationMultiplexingMode::Disabled,
+                                           rocm_compute::IterationMultiplexingMode::Kernel,
+                                           rocm_compute::IterationMultiplexingMode::Launch));
 
 //////////////////////////////////////////////////////////////////////////
-/// TestSdkCallbacksKernelFiltering
-void TestSdkCallbacksKernelFiltering::SetUp()
+/// test_sdk_callbacks_kernel_filtering_t
+void test_sdk_callbacks_kernel_filtering_t::SetUp()
 {
-    TestSdkCallbacks::SetUp();
+    test_sdk_callbacks_t::SetUp();
     m_filtering_params = GetParam();
 }
 
 INSTANTIATE_TEST_SUITE_P(
     KernelFiltering,
-    TestSdkCallbacksKernelFiltering,
+    test_sdk_callbacks_kernel_filtering_t,
     ::testing::Values(
         kernel_filtering_test_params_t{"_Z10my_kernel", "my_kernel()", ".*my_kernel.*"},
         kernel_filtering_test_params_t{"_ZN3hip12vector_add_1Ev", "hip::vector_add_1()", ".*vector_add.*"},
