@@ -75,9 +75,25 @@ if(HIP_PLATFORM STREQUAL "amd")
   endif()
   message(STATUS "HRR playback: ${HRR_PLAYBACK_EXE}")
 
+  # Optional: hip_raw_trace.exe for Unit_HRR_MultiThreadRoundtrip.
+  # A genuine multi-threaded capture workload (4 threads + graph + pinned + hostReg).
+  # If not found, the MT roundtrip test is skipped at runtime via HRR_RAW_TRACE_EXE="".
+  if(NOT DEFINED HRR_RAW_TRACE_EXE)
+    find_program(HRR_RAW_TRACE_EXE NAMES hip_raw_trace hip_raw_trace.exe
+      HINTS
+        "${CMAKE_INSTALL_PREFIX}/bin"
+        "${ROCM_PATH}/bin"
+    )
+    if(NOT HRR_RAW_TRACE_EXE)
+      set(HRR_RAW_TRACE_EXE "")
+    endif()
+  endif()
+  message(STATUS "HRR raw trace: ${HRR_RAW_TRACE_EXE}")
+
   target_compile_definitions(HrrTest PRIVATE
     HRR_TEST_EXE="$<TARGET_FILE:HrrTest>"
     HRR_PLAYBACK_EXE="${HRR_PLAYBACK_EXE}"
+    HRR_RAW_TRACE_EXE="${HRR_RAW_TRACE_EXE}"
     ROCM_BIN_PATH="${ROCM_PATH}/bin"
   )
 endif()

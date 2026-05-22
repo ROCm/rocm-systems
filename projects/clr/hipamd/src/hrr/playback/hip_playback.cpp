@@ -515,13 +515,21 @@ hipError_t playback___hipRegisterFatBinary(PlaybackContext& ctx,
 // ---------------------------------------------------------------------------
 // Manual playback: hipModuleGetFunction
 // ---------------------------------------------------------------------------
-// The function handle is stored by name — not as a fixed uint64_t mapping.
-// We ignore the call during replay; functions are looked up by name at launch time.
+// Intentional no-op at playback.
+//
+// Function handles are resolved lazily by name at kernel launch time:
+// replay_kernel_launch() searches module_map + co_modules + func_cache.
+// Recording a handle map here would require translating the recorded module
+// handle to a live hipModule_t at the time of this call, which is fragile;
+// the lazy lookup at launch is simpler and more robust.
+//
+// LIMITATION: if the captured application calls hipFuncGetAttributes or
+// similar APIs on the returned function handle, those calls will silently
+// receive a null handle and may fail or no-op during playback.
 
 hipError_t playback_hipModuleGetFunction(PlaybackContext& ctx,
                                          const uint8_t* payload) {
-    (void)ctx; (void)payload; 
-    // Function handles are resolved by name at kernel launch time.
+    (void)ctx; (void)payload;
     return hipSuccess;
 }
 
@@ -970,17 +978,20 @@ static hipError_t replay_memcpy_impl(PlaybackContext& ctx,
                (hash_lo || hash_hi)) {
         // D2H validation: copy from live device src into a local host buffer,
         // then compare against the expected data blob captured at record time.
+        ctx.d2h_attempted++;
         void* src_dev = ctx.translate_ptr(src_rec);
         if (!src_dev) {
-            if (ctx.verbose)
-                fprintf(stderr, "[HRR] D2H validate: src 0x%llx not mapped — skip\n",
-                        (unsigned long long)src_rec);
+            fprintf(stderr, "[HRR] D2H validate FAIL: src 0x%llx not mapped — pointer translation bug\n",
+                    (unsigned long long)src_rec);
+            ctx.d2h_fail++;
+            return hipErrorInvalidValue;
         } else {
             size_t copy_sz = static_cast<size_t>(size);
             size_t blob_sz = 0;
             const void* expected = ctx.load_blob(hash_lo, hash_hi, &blob_sz);
             if (!expected) {
-                fprintf(stderr, "[HRR] D2H validate: expected blob not found — skip\n");
+                fprintf(stderr, "[HRR] D2H validate FAIL: expected blob not found in archive\n");
+                ctx.d2h_fail++;
             } else {
                 copy_sz = std::min(copy_sz, blob_sz);
                 std::vector<uint8_t> actual(copy_sz);
@@ -1069,38 +1080,108 @@ hipError_t playback_hipMemcpyWithStream(PlaybackContext& ctx,
 // Manual playback: hipMemcpyDtoH / hipMemcpyDtoHAsync
 // ---------------------------------------------------------------------------
 // dst is a host pointer (captured as raw address, not in alloc_map).
-// We use a temp buffer as the copy target; just ensures the GPU side completes.
+// We copy from the live device src into a temp host buffer and compare against
+// the expected blob captured at record time (D2H validation).
 hipError_t playback_hipMemcpyDtoH(PlaybackContext& ctx,
                                   const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipMemcpyDtoH*>(pl);
+    uint64_t hash_lo = a->blob_hash_lo;
+    uint64_t hash_hi = a->blob_hash_hi;
+    if (hash_lo || hash_hi) ctx.d2h_attempted++;
+
     void* src_dev = ctx.translate_ptr(a->src);
     if (!src_dev) {
-        if (ctx.verbose)
-            fprintf(stderr, "[HRR] hipMemcpyDtoH: src 0x%llx not mapped — skip\n",
-                    (unsigned long long)a->src);
-        return hipSuccess;
+        fprintf(stderr, "[HRR] hipMemcpyDtoH: src 0x%llx not mapped — D2H validate FAIL\n",
+                (unsigned long long)a->src);
+        if (hash_lo || hash_hi) ctx.d2h_fail++;
+        return hipErrorInvalidValue;
     }
     size_t sz = static_cast<size_t>(a->sizeBytes);
-    std::vector<uint8_t> tmp(sz);
-    return hipMemcpyDtoH(tmp.data(), (hipDeviceptr_t)src_dev, sz);
+    std::vector<uint8_t> actual(sz);
+    hipError_t r = hipMemcpyDtoH(actual.data(), (hipDeviceptr_t)src_dev, sz);
+    if (r != hipSuccess) {
+        fprintf(stderr, "[HRR] hipMemcpyDtoH failed: %d (%s)\n", r, hipGetErrorString(r));
+        if (hash_lo || hash_hi) ctx.d2h_fail++;
+        return r;
+    }
+    if (hash_lo || hash_hi) {
+        size_t blob_sz = 0;
+        const void* expected = ctx.load_blob(hash_lo, hash_hi, &blob_sz);
+        if (!expected) {
+            fprintf(stderr, "[HRR] D2H validate FAIL: expected blob not found in archive\n");
+            ctx.d2h_fail++;
+        } else {
+            size_t cmp_sz = std::min(sz, blob_sz);
+            if (memcmp(actual.data(), expected, cmp_sz) == 0) {
+                ctx.d2h_pass++;
+                if (ctx.verbose)
+                    fprintf(stderr, "[HRR] hipMemcpyDtoH D2H validate: %zu bytes OK\n", cmp_sz);
+            } else {
+                ctx.d2h_fail++;
+                size_t first_diff = 0;
+                const uint8_t* exp = static_cast<const uint8_t*>(expected);
+                while (first_diff < cmp_sz && actual[first_diff] == exp[first_diff])
+                    ++first_diff;
+                fprintf(stderr,
+                        "[HRR] hipMemcpyDtoH D2H validate FAIL: %zu bytes, first diff at byte %zu "
+                        "(got 0x%02x expected 0x%02x)\n",
+                        cmp_sz, first_diff, actual[first_diff], exp[first_diff]);
+            }
+        }
+    }
+    return hipSuccess;
 }
 
 hipError_t playback_hipMemcpyDtoHAsync(PlaybackContext& ctx,
                                        const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipMemcpyDtoHAsync*>(pl);
+    uint64_t hash_lo = a->blob_hash_lo;
+    uint64_t hash_hi = a->blob_hash_hi;
+    if (hash_lo || hash_hi) ctx.d2h_attempted++;
+
     void* src_dev = ctx.translate_ptr(a->src);
     if (!src_dev) {
-        if (ctx.verbose)
-            fprintf(stderr, "[HRR] hipMemcpyDtoHAsync: src 0x%llx not mapped — skip\n",
-                    (unsigned long long)a->src);
-        return hipSuccess;
+        fprintf(stderr, "[HRR] hipMemcpyDtoHAsync: src 0x%llx not mapped — D2H validate FAIL\n",
+                (unsigned long long)a->src);
+        if (hash_lo || hash_hi) ctx.d2h_fail++;
+        return hipErrorInvalidValue;
     }
     size_t sz = static_cast<size_t>(a->sizeBytes);
-    std::vector<uint8_t> tmp(sz);
+    std::vector<uint8_t> actual(sz);
     hipStream_t stream = ctx.translate_stream(a->stream);
-    hipError_t r = hipMemcpyDtoHAsync(tmp.data(), (hipDeviceptr_t)src_dev, sz, stream);
+    hipError_t r = hipMemcpyDtoHAsync(actual.data(), (hipDeviceptr_t)src_dev, sz, stream);
     if (r == hipSuccess) (void)hipStreamSynchronize(stream);
-    return r;
+    if (r != hipSuccess) {
+        fprintf(stderr, "[HRR] hipMemcpyDtoHAsync failed: %d (%s)\n", r, hipGetErrorString(r));
+        if (hash_lo || hash_hi) ctx.d2h_fail++;
+        return r;
+    }
+    if (hash_lo || hash_hi) {
+        size_t blob_sz = 0;
+        const void* expected = ctx.load_blob(hash_lo, hash_hi, &blob_sz);
+        if (!expected) {
+            fprintf(stderr, "[HRR] D2H validate FAIL: expected blob not found in archive\n");
+            ctx.d2h_fail++;
+        } else {
+            size_t cmp_sz = std::min(sz, blob_sz);
+            if (memcmp(actual.data(), expected, cmp_sz) == 0) {
+                ctx.d2h_pass++;
+                if (ctx.verbose)
+                    fprintf(stderr, "[HRR] hipMemcpyDtoHAsync D2H validate: %zu bytes OK\n", cmp_sz);
+            } else {
+                ctx.d2h_fail++;
+                size_t first_diff = 0;
+                const uint8_t* exp = static_cast<const uint8_t*>(expected);
+                while (first_diff < cmp_sz && actual[first_diff] == exp[first_diff])
+                    ++first_diff;
+                fprintf(stderr,
+                        "[HRR] hipMemcpyDtoHAsync D2H validate FAIL: %zu bytes, first diff at byte %zu "
+                        "(got 0x%02x expected 0x%02x)\n",
+                        cmp_sz, first_diff, actual[first_diff], exp[first_diff]);
+            }
+        }
+    }
+    return hipSuccess;
 }
 
 // ---------------------------------------------------------------------------
@@ -1362,6 +1443,57 @@ hipError_t playback_hipEventDestroy(PlaybackContext& ctx,
 // Manual playback: hipMemcpy3D / hipMemcpy3DAsync
 // ---------------------------------------------------------------------------
 
+// Shared D2H validation logic for all 3D memcpy variants.
+// Copies byte_count bytes from src_live (device) into a host buffer, then
+// validates against the expected blob stored at d2h_hash_lo/hi.
+static hipError_t replay_memcpy3d_d2h(PlaybackContext& ctx,
+                                       void* src_live, size_t byte_count,
+                                       uint64_t d2h_hash_lo, uint64_t d2h_hash_hi,
+                                       hipStream_t stream, bool is_async) {
+    std::vector<uint8_t> actual(byte_count ? byte_count : 1);
+    hipError_t r;
+    if (is_async) {
+        r = hipMemcpyAsync(actual.data(), src_live, byte_count,
+                           hipMemcpyDeviceToHost, stream);
+        if (stream) (void)hipStreamSynchronize(stream);
+    } else {
+        r = hipMemcpy(actual.data(), src_live, byte_count, hipMemcpyDeviceToHost);
+    }
+    if (r != hipSuccess) {
+        fprintf(stderr, "[HRR] hipMemcpy3D D2H: device readback failed: %d (%s)\n",
+                r, hipGetErrorString(r));
+        ctx.d2h_fail++;
+        return r;
+    }
+    if (!ctx.validate_d2h || !(d2h_hash_lo || d2h_hash_hi))
+        return hipSuccess;  // no expected blob — just execute, no comparison
+
+    ctx.d2h_attempted++;
+    size_t blob_sz = 0;
+    const void* expected = ctx.load_blob(d2h_hash_lo, d2h_hash_hi, &blob_sz);
+    if (!expected) {
+        fprintf(stderr, "[HRR] hipMemcpy3D D2H validate FAIL: expected blob not found in archive\n");
+        ctx.d2h_fail++;
+        return hipSuccess;
+    }
+    size_t cmp_sz = std::min(byte_count, blob_sz);
+    if (memcmp(actual.data(), expected, cmp_sz) == 0) {
+        ctx.d2h_pass++;
+        if (ctx.verbose)
+            fprintf(stderr, "[HRR] hipMemcpy3D D2H validate: %zu bytes OK\n", cmp_sz);
+    } else {
+        ctx.d2h_fail++;
+        size_t first_diff = 0;
+        const uint8_t* exp = static_cast<const uint8_t*>(expected);
+        while (first_diff < cmp_sz && actual[first_diff] == exp[first_diff]) ++first_diff;
+        fprintf(stderr,
+                "[HRR] hipMemcpy3D D2H validate FAIL: %zu bytes, first diff at byte %zu "
+                "(got 0x%02x expected 0x%02x)\n",
+                cmp_sz, first_diff, actual[first_diff], exp[first_diff]);
+    }
+    return hipSuccess;
+}
+
 hipError_t playback_hipMemcpy3D(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipMemcpy3D*>(pl);
     hipMemcpy3DParms parms{};
@@ -1371,28 +1503,27 @@ hipError_t playback_hipMemcpy3D(PlaybackContext& ctx, const uint8_t* pl) {
         size_t blob_sz = 0;
         const void* blob = ctx.load_blob(a->blob_hash_lo, a->blob_hash_hi, &blob_sz);
         if (blob) parms.srcPtr.ptr = const_cast<void*>(blob);
-        // dst is a device pointer — translate to live allocation
         parms.dstPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstPtr.ptr));
         return hipMemcpy3D(&parms);
     }
-    // D2H: translate src device ptr; provide a throw-away host buffer as dst.
-    // Use flat hipMemcpy to avoid pitch/extent mismatch with padded allocations.
-    // D2D: translate both
     if (parms.kind == hipMemcpyDeviceToHost) {
         uint64_t src_rec = reinterpret_cast<uint64_t>(parms.srcPtr.ptr);
         void* src_live = ctx.translate_ptr(src_rec);
         if (!src_live) {
-            fprintf(stderr, "[HRR] hipMemcpy3D D2H: src 0x%llx not mapped — skip\n",
+            fprintf(stderr, "[HRR] hipMemcpy3D D2H validate FAIL: src 0x%llx not mapped — pointer translation bug\n",
                     (unsigned long long)src_rec);
+            ctx.d2h_attempted++;
+            ctx.d2h_fail++;
             return hipSuccess;
         }
         size_t byte_count = parms.extent.width * parms.extent.height * parms.extent.depth;
-        std::vector<uint8_t> tmp(byte_count ? byte_count : 1);
-        return hipMemcpy(tmp.data(), src_live, byte_count, hipMemcpyDeviceToHost);
-    } else {
-        parms.srcPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.srcPtr.ptr));
-        parms.dstPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstPtr.ptr));
+        return replay_memcpy3d_d2h(ctx, src_live, byte_count,
+                                   a->d2h_hash_lo, a->d2h_hash_hi,
+                                   nullptr, false);
     }
+    // D2D: translate both pointers
+    parms.srcPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.srcPtr.ptr));
+    parms.dstPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstPtr.ptr));
     return hipMemcpy3D(&parms);
 }
 
@@ -1413,21 +1544,20 @@ hipError_t playback_hipMemcpy3DAsync(PlaybackContext& ctx, const uint8_t* pl) {
         uint64_t src_rec = reinterpret_cast<uint64_t>(parms.srcPtr.ptr);
         void* src_live = ctx.translate_ptr(src_rec);
         if (!src_live) {
-            fprintf(stderr, "[HRR] hipMemcpy3DAsync D2H: src 0x%llx not mapped — skip\n",
+            fprintf(stderr, "[HRR] hipMemcpy3DAsync D2H validate FAIL: src 0x%llx not mapped — pointer translation bug\n",
                     (unsigned long long)src_rec);
+            ctx.d2h_attempted++;
+            ctx.d2h_fail++;
             return hipSuccess;
         }
-        // For D2H: use flat hipMemcpyAsync to avoid pitch mismatch with padded allocs.
         size_t byte_count = parms.extent.width * parms.extent.height * parms.extent.depth;
-        std::vector<uint8_t> tmp(byte_count ? byte_count : 1);
-        hipError_t r = hipMemcpyAsync(tmp.data(), src_live, byte_count,
-                                      hipMemcpyDeviceToHost, stream);
-        if (stream) hipStreamSynchronize(stream);
-        return r;
-    } else {
-        parms.srcPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.srcPtr.ptr));
-        parms.dstPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstPtr.ptr));
+        return replay_memcpy3d_d2h(ctx, src_live, byte_count,
+                                   a->d2h_hash_lo, a->d2h_hash_hi,
+                                   stream, true);
     }
+    // D2D: translate both pointers
+    parms.srcPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.srcPtr.ptr));
+    parms.dstPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstPtr.ptr));
     return hipMemcpy3DAsync(&parms, stream);
 }
 

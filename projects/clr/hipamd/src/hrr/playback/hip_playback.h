@@ -93,6 +93,11 @@ struct PlaybackContext {
     double              total_graph_ms   = 0.0;  // guarded by map_mutex when ctx.timing
     std::atomic<size_t> d2h_pass{0};
     std::atomic<size_t> d2h_fail{0};
+    // Incremented for every D2H event that had a captured blob hash (i.e., validation
+    // was expected). Includes pass + fail + skipped (missing ptr / missing blob).
+    // If d2h_attempted > 0 but d2h_pass == 0 && d2h_fail == 0, every check was
+    // skipped — pointer translation or blob loading failed for all D2H events.
+    std::atomic<size_t> d2h_attempted{0};
 
     // Timing events — one pair per replay thread, created on first kernel launch
     // and reused for every subsequent launch on that thread. Registered here so

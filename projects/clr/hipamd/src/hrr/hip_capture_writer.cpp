@@ -155,21 +155,21 @@ void close() {
 // ---------------------------------------------------------------------------
 
 void write_event_raw(uint16_t api_id, hrr_event_header* hdr, uint16_t payload_len) {
-  // Check file open before consuming a sequence ID so post-close writes don't
-  // create invisible gaps in the event stream.
-  {
-    std::lock_guard<std::mutex> lk(g_file_mu);
-    if (!g_events_file) return;
-  }
+  // Fill fields that don't require the lock (timestamp and thread_id are
+  // cheap and per-thread; getting them outside the lock keeps contention low).
   hdr->event_type     = api_id;
-  hdr->sequence_id    = g_seq_id.fetch_add(1, std::memory_order_relaxed);
   hdr->timestamp_ns   = amd::Os::timeNanos();
   hdr->thread_id      = current_thread_id();
   hdr->payload_length = payload_len;
   memset(hdr->reserved, 0, sizeof(hdr->reserved));
 
+  // Acquire once: assign sequence_id and write atomically so IDs are only
+  // consumed for events that are actually written.  Avoids the TOCTOU gap
+  // between the old double-lock pattern where a concurrent close() could
+  // cause the seq ID to be burned with no corresponding event on disk.
   std::lock_guard<std::mutex> lk(g_file_mu);
-  if (!g_events_file) return;  // re-check: file may have closed between the two lock acquisitions
+  if (!g_events_file) return;
+  hdr->sequence_id = g_seq_id.fetch_add(1, std::memory_order_relaxed);
   fwrite(hdr, 1, payload_len, g_events_file);
   g_event_count.fetch_add(1, std::memory_order_relaxed);
 }
@@ -214,11 +214,6 @@ Hash128 write_blob(const void* data, size_t len) {
   }
 
   Hash128 h = hash_buffer(data, len);
-  // Writer not open yet (called before hip_capture_init()) — return hash only,
-  // no disk write.  The caller records the hash in the event so the blob can
-  // be written later if needed, but in practice blobs are re-recorded by the
-  // fat-binary sweep in hip_capture_init().
-  if (!g_events_file) return h;
 
   char hex[33];
   hash_hex(h, hex);

@@ -19,6 +19,7 @@
 #include <hip_test_common.hh>
 #include "hrr_reader.h"
 #include "hrr_api_args.h"
+#include "hip_playback.h"
 
 #include <cstdio>
 #include <cstring>
@@ -162,13 +163,16 @@ HIP_TEST_CASE(Unit_HRR_Format_TruncatedEvent) {
 
   hrr::Archive archive;
   // load_archive may return true (with partial data) or false — either is
-  // acceptable.  What must NOT happen is a crash or reading event 1 as valid.
+  // acceptable.  What must NOT happen is a crash or reading the truncated
+  // second event as a valid event.
   hrr::load_archive(arc.path(), archive);
-  // The first complete event must still be present.
+  // The first complete event must be present.
   REQUIRE(archive.events.size() >= 1);
   const auto* a0 =
       reinterpret_cast<const hrr_args_hipSetDevice*>(archive.events[0].raw_payload.data());
   CHECK(a0->hdr.sequence_id == 0u);
+  // The truncated second event must NOT appear as a parsed event.
+  CHECK(archive.events.size() == 1);
 }
 
 /**
@@ -203,4 +207,141 @@ HIP_TEST_CASE(Unit_HRR_Format_EventTypeName) {
 
   const char* unk = hrr::event_type_name(0xFFFFu);
   REQUIRE(std::string(unk) == "UNKNOWN");
+}
+
+// ---------------------------------------------------------------------------
+// CPU-only translate_ptr unit tests (no GPU required)
+//
+// These tests construct a PlaybackContext entirely on the CPU, populate
+// alloc_map with fake entries, and verify translate_ptr behaviour.
+// No HIP API calls are made.
+// ---------------------------------------------------------------------------
+
+/**
+ * Test Description
+ * ----------------
+ *   - record_alloc maps a base address exactly.
+ *   - translate_ptr(base) returns the live pointer.
+ */
+HIP_TEST_CASE(Unit_HRR_TranslatePtr_ExactMatch) {
+  PlaybackContext ctx;
+  void* fake_live = reinterpret_cast<void*>(static_cast<uintptr_t>(0xDEAD0000u));
+  ctx.record_alloc(0xBEEF0000ULL, fake_live, 1024);
+  CHECK(ctx.translate_ptr(0xBEEF0000ULL) == fake_live);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - An address that falls within a recorded allocation (base + offset) is
+ *     returned as (live_ptr + offset).
+ */
+HIP_TEST_CASE(Unit_HRR_TranslatePtr_SubAlloc_ReturnsOffset) {
+  PlaybackContext ctx;
+  void* fake_live = reinterpret_cast<void*>(static_cast<uintptr_t>(0xDEAD0000u));
+  ctx.record_alloc(0xBEEF0000ULL, fake_live, 1024);
+  void* result = ctx.translate_ptr(0xBEEF0100ULL);  // +256 bytes into alloc
+  CHECK(result == static_cast<char*>(fake_live) + 256);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - An address exactly one byte past the end of a recorded allocation
+ *     returns nullptr (out of range).
+ */
+HIP_TEST_CASE(Unit_HRR_TranslatePtr_OutOfRange_ReturnsNull) {
+  PlaybackContext ctx;
+  void* fake_live = reinterpret_cast<void*>(static_cast<uintptr_t>(0xDEAD0000u));
+  ctx.record_alloc(0xBEEF0000ULL, fake_live, 1024);
+  CHECK(ctx.translate_ptr(0xBEEF0400ULL) == nullptr);  // base + 1024 = one past end
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - translate_ptr(0) always returns nullptr regardless of alloc_map state.
+ */
+HIP_TEST_CASE(Unit_HRR_TranslatePtr_Zero_ReturnsNull) {
+  PlaybackContext ctx;
+  void* fake_live = reinterpret_cast<void*>(static_cast<uintptr_t>(0xDEAD0000u));
+  ctx.record_alloc(0xBEEF0000ULL, fake_live, 1024);
+  CHECK(ctx.translate_ptr(0) == nullptr);
+}
+
+// ---------------------------------------------------------------------------
+// Archive reader SIZE_OK guard tests (CPU-only, no GPU required)
+//
+// These tests verify that load_archive() does not crash or produce a decoded
+// event when an event's payload_length is too small for its declared type.
+// The SIZE_OK macro in hrr_reader.cpp guards every typed cast; these tests
+// confirm it fires correctly for known event types.
+// ---------------------------------------------------------------------------
+
+/**
+ * Test Description
+ * ----------------
+ *   - A hipMalloc event with payload_length == sizeof(hrr_event_header) (header
+ *     only, no fields) must not be decoded as a malloc event.  load_archive()
+ *     should return true (archive is structurally valid) but the event must not
+ *     have malloc_ev.ptr_handle set (SIZE_OK guard skips the typed cast).
+ */
+HIP_TEST_CASE(Unit_HRR_Format_SmallPayloadForType) {
+  TmpArchive arc("small_payload");
+
+  // Build a hipMalloc event whose payload_length is exactly sizeof(hrr_event_header)
+  // — the header is present but the malloc fields (ptr, size, ret) are absent.
+  hrr_event_header hdr{};
+  hdr.event_type     = static_cast<uint16_t>(HRR_API_HIPMALLOC);
+  hdr.sequence_id    = 0;
+  hdr.timestamp_ns   = 0;
+  hdr.thread_id      = 1;
+  hdr.payload_length = static_cast<uint16_t>(sizeof(hrr_event_header));  // header only
+  memset(hdr.reserved, 0, sizeof(hdr.reserved));
+
+  std::vector<uint8_t> body(sizeof(hdr));
+  std::memcpy(body.data(), &hdr, sizeof(hdr));
+  arc.write_events(body);
+
+  hrr::Archive archive;
+  // load_archive must not crash and should return true (file is structurally valid).
+  bool ok = hrr::load_archive(arc.path(), archive);
+  REQUIRE(ok);
+
+  // The event must be present (raw_payload retained) …
+  REQUIRE(archive.events.size() == 1);
+  // … but the SIZE_OK guard must have prevented the typed decode, so
+  // malloc_ev.ptr_handle stays at its default zero value.
+  CHECK(archive.events[0].malloc_ev.ptr_handle == 0u);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - An event with an unknown event_type and a valid payload_length must not
+ *     crash load_archive() and must be silently accepted into the event list
+ *     (raw_payload retained for future replay use).
+ */
+HIP_TEST_CASE(Unit_HRR_Format_UnknownEventType) {
+  TmpArchive arc("unknown_type");
+
+  hrr_event_header hdr{};
+  hdr.event_type     = 0xFFFFu;  // unknown
+  hdr.sequence_id    = 0;
+  hdr.timestamp_ns   = 0;
+  hdr.thread_id      = 1;
+  hdr.payload_length = static_cast<uint16_t>(sizeof(hrr_event_header));
+  memset(hdr.reserved, 0, sizeof(hdr.reserved));
+
+  std::vector<uint8_t> body(sizeof(hdr));
+  std::memcpy(body.data(), &hdr, sizeof(hdr));
+  arc.write_events(body);
+
+  hrr::Archive archive;
+  REQUIRE(hrr::load_archive(arc.path(), archive));
+  // Unknown types fall through to the default: case — raw_payload is kept,
+  // no typed fields are populated, and the archive is not rejected.
+  REQUIRE(archive.events.size() == 1);
+  CHECK(archive.events[0].header().event_type == 0xFFFFu);
+  CHECK(archive.events[0].malloc_ev.ptr_handle == 0u);
 }

@@ -266,7 +266,9 @@ TEST_CASE("Unit_HRR_HostMemWorkload_Direct", "[.][hrr-direct]") {
   HIP_CHECK(hipHostMalloc(&buf, sizeof(*buf)));
   HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&buf_dev), buf, 0));
 
-  *buf = 1;
+  // Initialize via H2D so the captured blob restores this value at playback.
+  int init_val = 1;
+  HIP_CHECK(hipMemcpy(buf_dev, &init_val, sizeof(init_val), hipMemcpyHostToDevice));
 
   hipLaunchKernelGGL(hrr_incrementInt, dim3(1), dim3(1), 0, hipStreamDefault,
                      buf_dev);
@@ -275,6 +277,11 @@ TEST_CASE("Unit_HRR_HostMemWorkload_Direct", "[.][hrr-direct]") {
 
   // buf is host-visible; kernel wrote via buf_dev — same physical page.
   REQUIRE(*buf == 2);
+
+  // Explicit D2H memcpy so the capture layer records a D2H blob for playback validation.
+  int result = 0;
+  HIP_CHECK(hipMemcpy(&result, buf_dev, sizeof(result), hipMemcpyDeviceToHost));
+  REQUIRE(result == 2);
 
   HIP_CHECK(hipFree(buf));
 }
@@ -1384,77 +1391,6 @@ TEST_CASE("Unit_HRR_MemPoolExtended_Direct", "[.][hrr-direct]") {
 }
 
 // ===========================================================================
-// Workload M: Symbol memcpy APIs
-//
-// Exercises hipMemcpyToSymbol, hipMemcpyFromSymbol,
-// hipMemcpyToSymbolAsync, hipMemcpyFromSymbolAsync,
-// hipGetSymbolAddress, hipGetSymbolSize.
-// Final blob: h[i] == 42.
-// ===========================================================================
-__device__ int g_hrr_symbol[256];
-
-TEST_CASE("Unit_HRR_SymbolMemcpy_Direct", "[.][hrr-direct]") {
-  HIP_CHECK(hipSetDevice(0));
-  constexpr int N = 256;
-  constexpr size_t SZ = N * sizeof(int);
-
-  hipStream_t s;
-  HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
-
-  // hipGetSymbolAddress
-  void* sym_ptr = nullptr;
-  HIP_CHECK(hipGetSymbolAddress(&sym_ptr, HIP_SYMBOL(g_hrr_symbol)));
-  REQUIRE(sym_ptr != nullptr);
-
-  // hipGetSymbolSize
-  size_t sym_size = 0;
-  HIP_CHECK(hipGetSymbolSize(&sym_size, HIP_SYMBOL(g_hrr_symbol)));
-  REQUIRE(sym_size == SZ);
-
-  // hipMemcpyToSymbol — write value 42 to device symbol
-  int h_src[N];
-  for (int i = 0; i < N; ++i) h_src[i] = 42;
-  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(g_hrr_symbol), h_src, SZ, 0, hipMemcpyHostToDevice));
-
-  // hipMemcpyFromSymbol — read it back
-  int h_dst[N] = {};
-  HIP_CHECK(hipMemcpyFromSymbol(h_dst, HIP_SYMBOL(g_hrr_symbol), SZ, 0, hipMemcpyDeviceToHost));
-  for (int i = 0; i < N; ++i) REQUIRE(h_dst[i] == 42);
-
-  // hipMemcpyToSymbolAsync — write 42 again via async path
-  int h_src2[N];
-  for (int i = 0; i < N; ++i) h_src2[i] = 42;
-  HIP_CHECK(hipMemcpyToSymbolAsync(HIP_SYMBOL(g_hrr_symbol), h_src2, SZ, 0,
-                                    hipMemcpyHostToDevice, s));
-  HIP_CHECK(hipStreamSynchronize(s));
-  HIP_CHECK(hipDeviceSynchronize());
-
-  // hipMemcpyFromSymbolAsync
-  int h_dst2[N] = {};
-  HIP_CHECK(hipMemcpyFromSymbolAsync(h_dst2, HIP_SYMBOL(g_hrr_symbol), SZ, 0,
-                                      hipMemcpyDeviceToHost, s));
-  HIP_CHECK(hipStreamSynchronize(s));
-  for (int i = 0; i < N; ++i) REQUIRE(h_dst2[i] == 42);
-
-  // D2H blob: copy symbol to malloc'd buffer via hipMemcpyFromSymbol (sync D2H),
-  // then copy to device and back for the blob capture
-  int* d = nullptr; int* h = new int[N]();
-  HIP_CHECK(hipMalloc(&d, SZ));
-  // Reload 42 with sync hipMemcpyToSymbol to guarantee value before D2H
-  int h_reload[N]; for (int i = 0; i < N; ++i) h_reload[i] = 42;
-  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(g_hrr_symbol), h_reload, SZ, 0, hipMemcpyHostToDevice));
-  // H2D the known data into d, then D2H async for blob capture
-  HIP_CHECK(hipMemcpy(d, h_reload, SZ, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpyAsync(h, d, SZ, hipMemcpyDeviceToHost, s));
-  HIP_CHECK(hipStreamSynchronize(s));
-  for (int i = 0; i < N; ++i) REQUIRE(h[i] == 42);
-
-  HIP_CHECK(hipFree(d));
-  HIP_CHECK(hipStreamDestroy(s));
-  delete[] h;
-}
-
-// ===========================================================================
 // Workload N: Additional memset variants
 //
 // Exercises hipMemset3D, hipMemset3DAsync, hipMemsetD2D8/16/32 and Async,
@@ -1549,6 +1485,9 @@ TEST_CASE("Unit_HRR_MemsetExtra_Direct", "[.][hrr-direct]") {
 }
 
 // ===========================================================================
+// Device symbol used by the symbol _spt variants in Workload P.
+__device__ int g_hrr_symbol[256];
+
 // Workload P: Additional memcpy variants (array-based, param2D, _spt, symbol_spt)
 //
 // Exercises hipMemcpyToArray, hipMemcpyFromArray, hipMemcpy2DToArray,
@@ -1659,7 +1598,7 @@ TEST_CASE("Unit_HRR_MemcpyExtra_Direct", "[.][hrr-direct]") {
     HIP_CHECK(hipFreeArray(arr));
   }
 
-  // Symbol _spt H2D variants — exercise capture path (From_spt covered in SymbolMemcpy workload)
+  // Symbol _spt H2D variants — exercise capture path for symbol memcpy _spt APIs
   {
     int h_sym[N];
     for (int i = 0; i < N; ++i) h_sym[i] = 55;

@@ -332,10 +332,18 @@ static hipError_t dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
   // Spin-wait for our turn in global capture order.
   // Also check fatal_error: if another thread failed and advanced next_seq
   // past our slot, we must not spin forever — bail out immediately.
-  while (ctx.next_seq.load(std::memory_order_acquire) != ev.header().sequence_id) {
-    if (ctx.fatal_error.load(std::memory_order_acquire))
-      return hipErrorUnknown;
-    std::this_thread::yield();
+  // After ~1000 failed yields, sleep for 1 µs to avoid burning a full core
+  // while waiting for a slow ordering predecessor.
+  {
+    int spin = 0;
+    while (ctx.next_seq.load(std::memory_order_acquire) != ev.header().sequence_id) {
+      if (ctx.fatal_error.load(std::memory_order_acquire))
+        return hipErrorUnknown;
+      if (++spin < 1000)
+        std::this_thread::yield();
+      else
+        std::this_thread::sleep_for(std::chrono::microseconds(1));
+    }
   }
 
   // If a fatal error was already flagged by another thread that ran before us,
@@ -715,12 +723,25 @@ int main(int argc, char** argv) {
     printf("[HRR]   GPU graph time  : %.1f ms\n", ctx.total_graph_ms);
     printf("[HRR]   GPU total time  : %.1f ms\n", ctx.total_kernel_ms + ctx.total_graph_ms);
   }
-  printf("[HRR]   D2H checks     : %zu pass, %zu fail\n",
-         ctx.d2h_pass.load(), ctx.d2h_fail.load());
+  printf("[HRR]   D2H checks     : %zu pass, %zu fail, %zu skipped\n",
+         ctx.d2h_pass.load(), ctx.d2h_fail.load(),
+         ctx.d2h_attempted.load() - ctx.d2h_pass.load() - ctx.d2h_fail.load());
 
   bool ok = (ctx.d2h_fail == 0);
-  if (ctx.d2h_pass == 0 && ctx.d2h_fail == 0)
-    printf("[HRR]   (no D2H validation blobs in archive -- re-capture to enable)\n");
+  if (ctx.d2h_pass == 0 && ctx.d2h_fail == 0) {
+    if (ctx.d2h_attempted > 0) {
+      // D2H events with captured blobs existed, but every validation was skipped
+      // (source pointer translation failed or expected blob was missing for all).
+      // This indicates a pointer-translation bug or archive corruption.
+      fprintf(stderr,
+              "[HRR] ERROR: %zu D2H validation event(s) attempted but 0 pass/fail recorded "
+              "(all skipped — check pointer translation and blob files)\n",
+              ctx.d2h_attempted.load());
+      ok = false;
+    } else {
+      printf("[HRR]   (no D2H validation blobs in archive -- re-capture to enable)\n");
+    }
+  }
 
   printf("[HRR] %s\n", ok ? "PASS" : "FAIL");
 

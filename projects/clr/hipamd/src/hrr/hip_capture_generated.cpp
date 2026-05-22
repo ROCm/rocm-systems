@@ -3812,34 +3812,7 @@ static hipError_t capture_hipMemcpyDtoDAsync(hipDeviceptr_t dst, hipDeviceptr_t 
   return r;
 }
 
-// Generated shim
-static hipError_t capture_hipMemcpyDtoH(void* dst, hipDeviceptr_t src, size_t sizeBytes) {
-  hipError_t r = g_real_table.hipMemcpyDtoH_fn(dst, src, sizeBytes);
-  if (r == hipSuccess) {
-    hrr_args_hipMemcpyDtoH a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.dst = reinterpret_cast<uint64_t>(dst);
-    a.src = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(src));
-    a.sizeBytes = static_cast<decltype(a.sizeBytes)>(sizeBytes);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPMEMCPYDTOH, &a.hdr, sizeof(a));
-  }
-  return r;
-}
 
-// Generated shim
-static hipError_t capture_hipMemcpyDtoHAsync(void* dst, hipDeviceptr_t src, size_t sizeBytes, hipStream_t stream) {
-  hipError_t r = g_real_table.hipMemcpyDtoHAsync_fn(dst, src, sizeBytes, stream);
-  if (r == hipSuccess) {
-    hrr_args_hipMemcpyDtoHAsync a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.dst = reinterpret_cast<uint64_t>(dst);
-    a.src = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(src));
-    a.sizeBytes = static_cast<decltype(a.sizeBytes)>(sizeBytes);
-    a.stream = reinterpret_cast<uint64_t>(stream);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPMEMCPYDTOHASYNC, &a.hdr, sizeof(a));
-  }
-  return r;
-}
 
 // Generated shim
 static hipError_t capture_hipMemcpyFromArray(void* dst, hipArray_const_t srcArray, size_t wOffset, size_t hOffset, size_t count, hipMemcpyKind kind) {
@@ -7225,6 +7198,8 @@ extern hipError_t capture_hipMemcpy(void* dst, const void* src, size_t sizeBytes
 extern hipError_t capture_hipMemcpy3D(const struct hipMemcpy3DParms* p);
 extern hipError_t capture_hipMemcpy3DAsync(const struct hipMemcpy3DParms* p, hipStream_t stream);
 extern hipError_t capture_hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind, hipStream_t stream);
+extern hipError_t capture_hipMemcpyDtoH(void* dst, hipDeviceptr_t src, size_t sizeBytes);
+extern hipError_t capture_hipMemcpyDtoHAsync(void* dst, hipDeviceptr_t src, size_t sizeBytes, hipStream_t stream);
 extern hipError_t capture_hipMemcpyHtoD(hipDeviceptr_t dst, const void* src, size_t sizeBytes);
 extern hipError_t capture_hipMemcpyHtoDAsync(hipDeviceptr_t dst, const void* src, size_t sizeBytes, hipStream_t stream);
 extern hipError_t capture_hipMemcpyWithStream(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind, hipStream_t stream);

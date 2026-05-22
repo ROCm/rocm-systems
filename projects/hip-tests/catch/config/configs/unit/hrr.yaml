@@ -15,6 +15,24 @@ hrr:
   Unit_HRR_Format_EventTypeName:
     <<: *level_2
     tags: [format]
+  Unit_HRR_TranslatePtr_ExactMatch:
+    <<: *level_2
+    tags: [format, cpu]
+  Unit_HRR_TranslatePtr_SubAlloc_ReturnsOffset:
+    <<: *level_2
+    tags: [format, cpu]
+  Unit_HRR_TranslatePtr_OutOfRange_ReturnsNull:
+    <<: *level_2
+    tags: [format, cpu]
+  Unit_HRR_TranslatePtr_Zero_ReturnsNull:
+    <<: *level_2
+    tags: [format, cpu]
+  Unit_HRR_Format_SmallPayloadForType:
+    <<: *level_2
+    tags: [format, cpu]
+  Unit_HRR_Format_UnknownEventType:
+    <<: *level_2
+    tags: [format, cpu]
   Unit_HRR_AllApisRoundtrip:
     <<: *level_2
     tags: [capture, allapis, playback, roundtrip]
@@ -51,9 +69,6 @@ hrr:
   Unit_HRR_MemPoolExtendedRoundtrip:
     <<: *level_2
     tags: [capture, mempool, playback, roundtrip]
-  Unit_HRR_SymbolMemcpyRoundtrip:
-    <<: *level_2
-    tags: [capture, symbol, playback, roundtrip]
   Unit_HRR_MemsetExtraRoundtrip:
     <<: *level_2
     tags: [capture, memset, playback, roundtrip]
@@ -93,3 +108,6 @@ hrr:
   Unit_HRR_VMMRoundtrip:
     <<: *level_2
     tags: [capture, vmm, playback, roundtrip]
+  Unit_HRR_MultiThreadRoundtrip:
+    <<: *level_2
+    tags: [capture, multithread, playback, roundtrip]

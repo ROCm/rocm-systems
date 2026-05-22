@@ -200,9 +200,9 @@ static void serialize_kernel_launch(
   }
 
   if (payload.size() > UINT16_MAX) {
-    LogPrintfWarning("[HRR capture] Kernel launch payload too large (%zu bytes) — truncating",
-                     payload.size());
-    payload.resize(UINT16_MAX);
+    LogPrintfWarning("[HRR capture] Kernel launch payload too large (%zu bytes) — dropping event for '%s'",
+                     payload.size(), kernel_name);
+    return;
   }
   hrr_cap::writer::write_event_raw(HRR_API_HIPMODULELAUNCHKERNEL,
                                    reinterpret_cast<hrr_event_header*>(payload.data()),
@@ -331,6 +331,51 @@ hipError_t capture_hipMemcpyHtoDAsync(hipDeviceptr_t dst, const void* src,
     a.blob_hash_lo = h.lo;
     a.blob_hash_hi = h.hi;
     hrr_cap::writer::write_event_raw(HRR_API_HIPMEMCPYHTODASYNC, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+hipError_t capture_hipMemcpyDtoH(void* dst, hipDeviceptr_t src, size_t sizeBytes) {
+  hipError_t r = g_real_table.hipMemcpyDtoH_fn(dst, src, sizeBytes);
+  if (r == hipSuccess) {
+    hrr_cap::Hash128 h{0, 0};
+    if (dst && sizeBytes > 0)
+      h = hrr_cap::writer::write_blob(dst, sizeBytes);  // dst is host ptr, valid after sync call
+    hrr_args_hipMemcpyDtoH a{};
+    a.ret          = static_cast<int32_t>(r);
+    a.dst          = reinterpret_cast<uint64_t>(dst);
+    a.src          = reinterpret_cast<uint64_t>(src);
+    a.sizeBytes    = static_cast<uint64_t>(sizeBytes);
+    a.blob_hash_lo = h.lo;
+    a.blob_hash_hi = h.hi;
+    hrr_cap::writer::write_event_raw(HRR_API_HIPMEMCPYDTOH, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+hipError_t capture_hipMemcpyDtoHAsync(void* dst, hipDeviceptr_t src,
+                                      size_t sizeBytes, hipStream_t stream) {
+  hipError_t r = g_real_table.hipMemcpyDtoHAsync_fn(dst, src, sizeBytes, stream);
+  if (r == hipSuccess) {
+    hrr_cap::Hash128 h{0, 0};
+    if (dst && sizeBytes > 0) {
+      // Sync the stream so host dst is valid before we snapshot it.
+      hipError_t sync_r = g_real_table.hipStreamSynchronize_fn(stream);
+      if (sync_r == hipSuccess)
+        h = hrr_cap::writer::write_blob(dst, sizeBytes);
+      else
+        LogPrintfWarning("[HRR capture] hipStreamSynchronize failed (%d) — DtoH async blob skipped",
+                         sync_r);
+    }
+    hrr_args_hipMemcpyDtoHAsync a{};
+    a.ret          = static_cast<int32_t>(r);
+    a.dst          = reinterpret_cast<uint64_t>(dst);
+    a.src          = reinterpret_cast<uint64_t>(src);
+    a.sizeBytes    = static_cast<uint64_t>(sizeBytes);
+    a.stream       = reinterpret_cast<uint64_t>(stream);
+    a.blob_hash_lo = h.lo;
+    a.blob_hash_hi = h.hi;
+    hrr_cap::writer::write_event_raw(HRR_API_HIPMEMCPYDTOHASYNC, &a.hdr, sizeof(a));
   }
   return r;
 }
@@ -573,10 +618,23 @@ static size_t compute_bundle_size(const void* blob) {
   if (n == 0) return 0;
 
   // Walk entries to find the last offset + size (that is the blob end).
+  // Guard against corrupt bundles: bundleEntryIdSize is read from untrusted
+  // memory (fires at static-init before any error handler is installed).
+  // A sane bundle ID is never > 4 KB; anything larger indicates corruption.
+  static constexpr uint64_t kMaxBundleIdSize = 4096;
+  static constexpr uint64_t kMaxEntries      = 4096;
   size_t end = 0;
   const uint8_t* cur = reinterpret_cast<const uint8_t*>(&hdr->desc[0]);
-  for (uint64_t i = 0; i < n; i++) {
+  uint64_t safe_n = (n < kMaxEntries) ? n : kMaxEntries;
+  for (uint64_t i = 0; i < safe_n; i++) {
     const auto* entry = reinterpret_cast<const hip::symbols::ClangOffloadBundleInfo*>(cur);
+    if (entry->bundleEntryIdSize > kMaxBundleIdSize) {
+      LogPrintfWarning("[HRR capture] compute_bundle_size: bundleEntryIdSize %llu too large"
+                       " — stopping walk at entry %llu",
+                       (unsigned long long)entry->bundleEntryIdSize,
+                       (unsigned long long)i);
+      break;
+    }
     size_t entry_end = static_cast<size_t>(entry->offset) + static_cast<size_t>(entry->size);
     if (entry_end > end) end = entry_end;
     // Advance past this entry: three uint64_t fields + bundleEntryIdSize bytes
@@ -693,29 +751,57 @@ hipError_t capture_hipMemPoolCreate(hipMemPool_t* mem_pool,
 }
 
 // ---------------------------------------------------------------------------
-// hipMemcpy3D / hipMemcpy3DAsync — inline parms + optional H2D blob
+// hipMemcpy3D / hipMemcpy3DAsync — inline parms + H2D blob + D2H expected blob
 // ---------------------------------------------------------------------------
 
-// Helper: write H2D blob hash, return hash (or {0,0} if not H2D)
-static hrr_cap::Hash128 capture_memcpy3d_blob(
+// Helper: compute byte count from 3D extent
+static size_t memcpy3d_byte_count(const struct hipMemcpy3DParms* p) {
+  return p->extent.width * p->extent.height * p->extent.depth;
+}
+
+// Helper shared by all four 3D variants.
+// Writes H2D blob (src host data) and D2H expected blob (dst host data after copy),
+// then emits the event record.
+template <typename T>
+static void capture_memcpy3d_impl(
+    T& a, hrr_api_id_t api_id,
     const struct hipMemcpy3DParms* p, hipStream_t stream, bool is_async) {
-  if (!p || p->kind != hipMemcpyHostToDevice || !p->srcPtr.ptr) return {};
-  size_t byte_count = p->extent.width * p->extent.height * p->extent.depth;
-  if (byte_count == 0) return {};
-  if (is_async && stream)
-    g_real_table.hipStreamSynchronize_fn(stream);
-  return hrr_cap::writer::write_blob(p->srcPtr.ptr, byte_count);
+  if (!p) {
+    hrr_cap::writer::write_event_raw(api_id, &a.hdr, sizeof(a));
+    return;
+  }
+  std::memcpy(a.parms_bytes, p, sizeof(a.parms_bytes));
+  size_t byte_count = memcpy3d_byte_count(p);
+
+  if (p->kind == hipMemcpyHostToDevice && p->srcPtr.ptr && byte_count > 0) {
+    // H2D: host source is valid at call time — no stream sync needed.
+    auto h = hrr_cap::writer::write_blob(p->srcPtr.ptr, byte_count);
+    a.blob_hash_lo = h.lo;
+    a.blob_hash_hi = h.hi;
+  } else if (p->kind == hipMemcpyDeviceToHost && p->dstPtr.ptr && byte_count > 0) {
+    // D2H: real call already completed (sync API) or stream sync done below;
+    // host buffer now holds GPU result — capture it as the expected output.
+    if (is_async && stream) {
+      hipError_t sync_r = g_real_table.hipStreamSynchronize_fn(stream);
+      if (sync_r != hipSuccess) {
+        LogPrintfWarning("[HRR capture] hipStreamSynchronize failed (%d) — D2H 3D blob skipped",
+                         sync_r);
+        hrr_cap::writer::write_event_raw(api_id, &a.hdr, sizeof(a));
+        return;
+      }
+    }
+    auto h = hrr_cap::writer::write_blob(p->dstPtr.ptr, byte_count);
+    a.d2h_hash_lo = h.lo;
+    a.d2h_hash_hi = h.hi;
+  }
+  hrr_cap::writer::write_event_raw(api_id, &a.hdr, sizeof(a));
 }
 
 hipError_t capture_hipMemcpy3D(const struct hipMemcpy3DParms* p) {
   hipError_t r = g_real_table.hipMemcpy3D_fn(p);
   hrr_args_hipMemcpy3D a{};
   a.ret = static_cast<int32_t>(r);
-  if (p) std::memcpy(a.parms_bytes, p, sizeof(a.parms_bytes));
-  auto h = capture_memcpy3d_blob(p, nullptr, false);
-  a.blob_hash_lo = h.lo;
-  a.blob_hash_hi = h.hi;
-  hrr_cap::writer::write_event_raw(HRR_API_HIPMEMCPY3D, &a.hdr, sizeof(a));
+  capture_memcpy3d_impl(a, HRR_API_HIPMEMCPY3D, p, nullptr, false);
   return r;
 }
 
@@ -724,11 +810,7 @@ hipError_t capture_hipMemcpy3DAsync(const struct hipMemcpy3DParms* p, hipStream_
   hrr_args_hipMemcpy3DAsync a{};
   a.ret    = static_cast<int32_t>(r);
   a.stream = reinterpret_cast<uint64_t>(stream);
-  if (p) std::memcpy(a.parms_bytes, p, sizeof(a.parms_bytes));
-  auto h = capture_memcpy3d_blob(p, stream, true);
-  a.blob_hash_lo = h.lo;
-  a.blob_hash_hi = h.hi;
-  hrr_cap::writer::write_event_raw(HRR_API_HIPMEMCPY3DASYNC, &a.hdr, sizeof(a));
+  capture_memcpy3d_impl(a, HRR_API_HIPMEMCPY3DASYNC, p, stream, true);
   return r;
 }
 
@@ -736,11 +818,7 @@ hipError_t capture_hipMemcpy3D_spt(const struct hipMemcpy3DParms* p) {
   hipError_t r = g_real_table.hipMemcpy3D_spt_fn(p);
   hrr_args_hipMemcpy3D_spt a{};
   a.ret = static_cast<int32_t>(r);
-  if (p) std::memcpy(a.parms_bytes, p, sizeof(a.parms_bytes));
-  auto h = capture_memcpy3d_blob(p, nullptr, false);
-  a.blob_hash_lo = h.lo;
-  a.blob_hash_hi = h.hi;
-  hrr_cap::writer::write_event_raw(HRR_API_HIPMEMCPY3D_SPT, &a.hdr, sizeof(a));
+  capture_memcpy3d_impl(a, HRR_API_HIPMEMCPY3D_SPT, p, nullptr, false);
   return r;
 }
 
@@ -749,11 +827,7 @@ hipError_t capture_hipMemcpy3DAsync_spt(const struct hipMemcpy3DParms* p, hipStr
   hrr_args_hipMemcpy3DAsync_spt a{};
   a.ret    = static_cast<int32_t>(r);
   a.stream = reinterpret_cast<uint64_t>(stream);
-  if (p) std::memcpy(a.parms_bytes, p, sizeof(a.parms_bytes));
-  auto h = capture_memcpy3d_blob(p, stream, true);
-  a.blob_hash_lo = h.lo;
-  a.blob_hash_hi = h.hi;
-  hrr_cap::writer::write_event_raw(HRR_API_HIPMEMCPY3DASYNC_SPT, &a.hdr, sizeof(a));
+  capture_memcpy3d_impl(a, HRR_API_HIPMEMCPY3DASYNC_SPT, p, stream, true);
   return r;
 }
 

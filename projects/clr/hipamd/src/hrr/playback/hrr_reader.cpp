@@ -206,23 +206,30 @@ bool load_archive(const std::string& path, Archive& archive) {
     }
 
     // Convenience cast macro — raw_payload.data() is the full hrr_args_* struct.
+    // SIZE_OK(T): verify payload is large enough for the typed struct before casting.
+    // A malformed archive could supply a valid event_type with payload_length == 32
+    // (header only), which would cause an OOB read in the typed cast.
     #define AS(T) reinterpret_cast<const T*>(ev.raw_payload.data())
+    #define SIZE_OK(T) (total >= static_cast<uint16_t>(sizeof(T)))
 
     switch (ev.header().event_type) {
 
       // --- Memory allocation ---
 
       case HRR_API_HIPMALLOC: {
+        if (!SIZE_OK(hrr_args_hipMalloc)) break;
         const auto* a = AS(hrr_args_hipMalloc);
         ev.malloc_ev.ptr_handle = a->ptr;
         ev.malloc_ev.size       = a->size;
         break;
       }
       case HRR_API_HIPFREE:
-        ev.malloc_ev.ptr_handle = AS(hrr_args_hipFree)->ptr;
+        if (SIZE_OK(hrr_args_hipFree))
+          ev.malloc_ev.ptr_handle = AS(hrr_args_hipFree)->ptr;
         break;
 
       case HRR_API_HIPMALLOCASYNC: {
+        if (!SIZE_OK(hrr_args_hipMallocAsync)) break;
         const auto* a = AS(hrr_args_hipMallocAsync);
         ev.malloc_async_ev.ptr_handle    = a->dev_ptr;
         ev.malloc_async_ev.size          = a->size;
@@ -230,6 +237,7 @@ bool load_archive(const std::string& path, Archive& archive) {
         break;
       }
       case HRR_API_HIPFREEASYNC: {
+        if (!SIZE_OK(hrr_args_hipFreeAsync)) break;
         const auto* a = AS(hrr_args_hipFreeAsync);
         ev.free_async_ev.ptr_handle    = a->dev_ptr;
         ev.free_async_ev.stream_handle = a->stream;
@@ -239,6 +247,7 @@ bool load_archive(const std::string& path, Archive& archive) {
       // --- Data transfer ---
 
       case HRR_API_HIPMEMCPY: {
+        if (!SIZE_OK(hrr_args_hipMemcpy)) break;
         const auto* a = AS(hrr_args_hipMemcpy);
         ev.memcpy_ev.dst_addr = a->dst;
         ev.memcpy_ev.src_addr = a->src;
@@ -249,6 +258,7 @@ bool load_archive(const std::string& path, Archive& archive) {
         break;
       }
       case HRR_API_HIPMEMCPYASYNC: {
+        if (!SIZE_OK(hrr_args_hipMemcpyAsync)) break;
         const auto* a = AS(hrr_args_hipMemcpyAsync);
         ev.memcpy_ev.dst_addr = a->dst;
         ev.memcpy_ev.src_addr = a->src;
@@ -260,6 +270,7 @@ bool load_archive(const std::string& path, Archive& archive) {
         break;
       }
       case HRR_API_HIPMEMCPYHTOD: {
+        if (!SIZE_OK(hrr_args_hipMemcpyHtoD)) break;
         const auto* a = AS(hrr_args_hipMemcpyHtoD);
         ev.memcpy_ev.dst_addr = a->dst;
         ev.memcpy_ev.src_addr = a->src;
@@ -270,6 +281,7 @@ bool load_archive(const std::string& path, Archive& archive) {
         break;
       }
       case HRR_API_HIPMEMCPYHTODASYNC: {
+        if (!SIZE_OK(hrr_args_hipMemcpyHtoDAsync)) break;
         const auto* a = AS(hrr_args_hipMemcpyHtoDAsync);
         ev.memcpy_ev.dst_addr = a->dst;
         ev.memcpy_ev.src_addr = a->src;
@@ -289,6 +301,7 @@ bool load_archive(const std::string& path, Archive& archive) {
 
       case HRR_API_HIPMODULELOADDATA:
       case HRR_API_HIPMODULELOADDATAEX: {
+        if (!SIZE_OK(hrr_args_hipModuleLoadData)) break;
         const auto* a = AS(hrr_args_hipModuleLoadData);
         ev.module_load_ev.module_handle = a->module;
         ev.module_load_ev.hash_lo       = a->co_hash_lo;
@@ -296,6 +309,7 @@ bool load_archive(const std::string& path, Archive& archive) {
         break;
       }
       case HRR_API_HIPMODULELOAD: {
+        if (!SIZE_OK(hrr_args_hipModuleLoad)) break;
         const auto* a = AS(hrr_args_hipModuleLoad);
         ev.module_load_ev.module_handle = a->module;
         ev.module_load_ev.hash_lo       = a->co_hash_lo;
@@ -303,7 +317,8 @@ bool load_archive(const std::string& path, Archive& archive) {
         break;
       }
       case HRR_API_HIPMODULEUNLOAD:
-        ev.handle64 = AS(hrr_args_hipModuleUnload)->module;
+        if (SIZE_OK(hrr_args_hipModuleUnload))
+          ev.handle64 = AS(hrr_args_hipModuleUnload)->module;
         break;
 
       // --- Kernel launch ---
@@ -329,6 +344,7 @@ bool load_archive(const std::string& path, Archive& archive) {
       // --- Streams ---
 
       case HRR_API_HIPSTREAMCREATE: {
+        if (!SIZE_OK(hrr_args_hipStreamCreate)) break;
         const auto* a = AS(hrr_args_hipStreamCreate);
         ev.stream_create_ev.stream_handle = a->stream;
         ev.stream_create_ev.flags         = 0;
@@ -336,6 +352,7 @@ bool load_archive(const std::string& path, Archive& archive) {
         break;
       }
       case HRR_API_HIPSTREAMCREATEWITHFLAGS: {
+        if (!SIZE_OK(hrr_args_hipStreamCreateWithFlags)) break;
         const auto* a = AS(hrr_args_hipStreamCreateWithFlags);
         ev.stream_create_ev.stream_handle = a->stream;
         ev.stream_create_ev.flags         = a->flags;
@@ -343,6 +360,7 @@ bool load_archive(const std::string& path, Archive& archive) {
         break;
       }
       case HRR_API_HIPSTREAMCREATEWITHPRIORITY: {
+        if (!SIZE_OK(hrr_args_hipStreamCreateWithPriority)) break;
         const auto* a = AS(hrr_args_hipStreamCreateWithPriority);
         ev.stream_create_ev.stream_handle = a->stream;
         ev.stream_create_ev.flags         = a->flags;
@@ -350,13 +368,16 @@ bool load_archive(const std::string& path, Archive& archive) {
         break;
       }
       case HRR_API_HIPSTREAMDESTROY:
-        ev.handle64 = AS(hrr_args_hipStreamDestroy)->stream;
+        if (SIZE_OK(hrr_args_hipStreamDestroy))
+          ev.handle64 = AS(hrr_args_hipStreamDestroy)->stream;
         break;
       case HRR_API_HIPSTREAMSYNCHRONIZE:
-        ev.handle64 = AS(hrr_args_hipStreamSynchronize)->stream;
+        if (SIZE_OK(hrr_args_hipStreamSynchronize))
+          ev.handle64 = AS(hrr_args_hipStreamSynchronize)->stream;
         break;
 
       case HRR_API_HIPSTREAMWAITEVENT: {
+        if (!SIZE_OK(hrr_args_hipStreamWaitEvent)) break;
         const auto* a = AS(hrr_args_hipStreamWaitEvent);
         ev.stream_wait_ev.stream_handle = a->stream;
         ev.stream_wait_ev.event_handle  = a->event;
@@ -367,22 +388,27 @@ bool load_archive(const std::string& path, Archive& archive) {
       // --- Events ---
 
       case HRR_API_HIPEVENTCREATE:
-        ev.handle64 = AS(hrr_args_hipEventCreate)->event;
+        if (SIZE_OK(hrr_args_hipEventCreate))
+          ev.handle64 = AS(hrr_args_hipEventCreate)->event;
         break;
       case HRR_API_HIPEVENTCREATEWITHFLAGS:
-        ev.handle64 = AS(hrr_args_hipEventCreateWithFlags)->event;
+        if (SIZE_OK(hrr_args_hipEventCreateWithFlags))
+          ev.handle64 = AS(hrr_args_hipEventCreateWithFlags)->event;
         break;
       case HRR_API_HIPEVENTRECORD: {
+        if (!SIZE_OK(hrr_args_hipEventRecord)) break;
         const auto* a = AS(hrr_args_hipEventRecord);
         ev.event_record_ev.event_handle  = a->event;
         ev.event_record_ev.stream_handle = a->stream;
         break;
       }
       case HRR_API_HIPEVENTSYNCHRONIZE:
-        ev.handle64 = AS(hrr_args_hipEventSynchronize)->event;
+        if (SIZE_OK(hrr_args_hipEventSynchronize))
+          ev.handle64 = AS(hrr_args_hipEventSynchronize)->event;
         break;
       case HRR_API_HIPEVENTDESTROY:
-        ev.handle64 = AS(hrr_args_hipEventDestroy)->event;
+        if (SIZE_OK(hrr_args_hipEventDestroy))
+          ev.handle64 = AS(hrr_args_hipEventDestroy)->event;
         break;
 
       // --- Device sync ---
@@ -393,6 +419,7 @@ bool load_archive(const std::string& path, Archive& archive) {
     }
 
     #undef AS
+    #undef SIZE_OK
 
     archive.events.push_back(std::move(ev));
   }

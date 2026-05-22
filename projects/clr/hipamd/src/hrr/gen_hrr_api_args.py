@@ -98,6 +98,9 @@ MANUAL_CAPTURE_APIS: Set[str] = {
     "hipMemcpyHtoD",
     "hipMemcpyHtoDAsync",
     "hipMemcpyWithStream",
+    # Memcpy D2H variants — blob capture of host dst data after copy
+    "hipMemcpyDtoH",
+    "hipMemcpyDtoHAsync",
     # Fat binary registration — blob snapshotting
     "__hipRegisterFatBinary",
     # Host memory registration — blob snapshotting of initial host mem contents
@@ -402,7 +405,7 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipKernelNameRefByPtr",
     # Category 7: APIs that take a host function pointer — meaningless at playback
     "hipOccupancyMaxPotentialBlockSize",
-    "hipOccupancyMaxPotentialBlockSizeWithFlags",
+    # hipOccupancyMaxPotentialBlockSizeWithFlags removed from dispatch table in ROCm 6.4
     "hipOccupancyMaxActiveBlocksPerMultiprocessor",
     "hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags",
     "hipFuncSetCacheConfig",
@@ -607,14 +610,14 @@ EXTRA_FIELDS: Dict[str, List[Tuple[str, str, str]]] = {
                            ("uint64_t", "blob_hash_hi", "H2D blob hash hi")],
     "hipMemcpyHtoD":      [("uint64_t", "blob_hash_lo", "blob hash lo"),
                            ("uint64_t", "blob_hash_hi", "blob hash hi")],
-    "hipMemcpyDtoH":      [("uint64_t", "blob_hash_lo", "zero (D2H)"),
-                           ("uint64_t", "blob_hash_hi", "zero (D2H)")],
+    "hipMemcpyDtoH":      [("uint64_t", "blob_hash_lo", "D2H expected-output blob hash lo"),
+                           ("uint64_t", "blob_hash_hi", "D2H expected-output blob hash hi")],
     "hipMemcpyDtoD":      [("uint64_t", "blob_hash_lo", "zero (D2D)"),
                            ("uint64_t", "blob_hash_hi", "zero (D2D)")],
     "hipMemcpyHtoDAsync": [("uint64_t", "blob_hash_lo", "blob hash lo"),
                            ("uint64_t", "blob_hash_hi", "blob hash hi")],
-    "hipMemcpyDtoHAsync": [("uint64_t", "blob_hash_lo", "zero (D2H)"),
-                           ("uint64_t", "blob_hash_hi", "zero (D2H)")],
+    "hipMemcpyDtoHAsync": [("uint64_t", "blob_hash_lo", "D2H expected-output blob hash lo"),
+                           ("uint64_t", "blob_hash_hi", "D2H expected-output blob hash hi")],
     "hipMemcpyDtoDAsync": [("uint64_t", "blob_hash_lo", "zero (D2D)"),
                            ("uint64_t", "blob_hash_hi", "zero (D2D)")],
     # hipMemcpyWithStream — same semantics as hipMemcpyAsync (H2D blob, D2H/D2D zero)
@@ -630,16 +633,24 @@ EXTRA_FIELDS: Dict[str, List[Tuple[str, str, str]]] = {
     # hipMemcpy3D family — hipMemcpy3DParms is 160 bytes; store inline + H2D blob hash.
     "hipMemcpy3D":          [("uint8_t", "parms_bytes[160]", "hipMemcpy3DParms inline copy"),
                              ("uint64_t", "blob_hash_lo",    "H2D blob hash lo (0 if not H2D)"),
-                             ("uint64_t", "blob_hash_hi",    "H2D blob hash hi")],
+                             ("uint64_t", "blob_hash_hi",    "H2D blob hash hi"),
+                             ("uint64_t", "d2h_hash_lo",     "D2H expected-output blob hash lo (0 if not D2H)"),
+                             ("uint64_t", "d2h_hash_hi",     "D2H expected-output blob hash hi")],
     "hipMemcpy3DAsync":     [("uint8_t", "parms_bytes[160]", "hipMemcpy3DParms inline copy"),
                              ("uint64_t", "blob_hash_lo",    "H2D blob hash lo (0 if not H2D)"),
-                             ("uint64_t", "blob_hash_hi",    "H2D blob hash hi")],
+                             ("uint64_t", "blob_hash_hi",    "H2D blob hash hi"),
+                             ("uint64_t", "d2h_hash_lo",     "D2H expected-output blob hash lo (0 if not D2H)"),
+                             ("uint64_t", "d2h_hash_hi",     "D2H expected-output blob hash hi")],
     "hipMemcpy3D_spt":      [("uint8_t", "parms_bytes[160]", "hipMemcpy3DParms inline copy"),
                              ("uint64_t", "blob_hash_lo",    "H2D blob hash lo (0 if not H2D)"),
-                             ("uint64_t", "blob_hash_hi",    "H2D blob hash hi")],
+                             ("uint64_t", "blob_hash_hi",    "H2D blob hash hi"),
+                             ("uint64_t", "d2h_hash_lo",     "D2H expected-output blob hash lo (0 if not D2H)"),
+                             ("uint64_t", "d2h_hash_hi",     "D2H expected-output blob hash hi")],
     "hipMemcpy3DAsync_spt": [("uint8_t", "parms_bytes[160]", "hipMemcpy3DParms inline copy"),
                              ("uint64_t", "blob_hash_lo",    "H2D blob hash lo (0 if not H2D)"),
-                             ("uint64_t", "blob_hash_hi",    "H2D blob hash hi")],
+                             ("uint64_t", "blob_hash_hi",    "H2D blob hash hi"),
+                             ("uint64_t", "d2h_hash_lo",     "D2H expected-output blob hash lo (0 if not D2H)"),
+                             ("uint64_t", "d2h_hash_hi",     "D2H expected-output blob hash hi")],
     # hipArrayCreate — HIP_ARRAY_DESCRIPTOR is 24 bytes; store inline.
     "hipArrayCreate":   [("uint8_t", "array_desc_bytes[24]", "HIP_ARRAY_DESCRIPTOR inline copy")],
     # hipArray3DCreate — HIP_ARRAY3D_DESCRIPTOR is 40 bytes; store inline.
@@ -651,6 +662,20 @@ EXTRA_FIELDS: Dict[str, List[Tuple[str, str, str]]] = {
     # hipMemPoolSetAccess / hipMemSetAccess — hipMemAccessDesc is 12 bytes; store first entry inline.
     "hipMemPoolSetAccess": [("uint8_t", "access_desc_bytes[12]", "hipMemAccessDesc[0] inline copy")],
     "hipMemSetAccess":     [("uint8_t", "access_desc_bytes[12]", "hipMemAccessDesc[0] inline copy")],
+}
+
+# Maps the base name of a uint8_t inline-array field (e.g. "pool_props_bytes")
+# to the C struct type whose sizeof must match the declared array extent.
+# Used to emit static_assert(sizeof(CType) == N) immediately after each struct
+# that contains such a field, catching size mismatches at compile time.
+_INLINE_STRUCT_ASSERTS: Dict[str, str] = {
+    "pool_props_bytes":   "hipMemPoolProps",
+    "parms_bytes":        "hipMemcpy3DParms",
+    "array_desc_bytes":   "HIP_ARRAY_DESCRIPTOR",
+    "array3d_desc_bytes": "HIP_ARRAY3D_DESCRIPTOR",
+    "stream_attr_bytes":  "hipStreamAttrValue",
+    "alloc_prop_bytes":   "hipMemAllocationProp",
+    "access_desc_bytes":  "hipMemAccessDesc",
 }
 
 
@@ -1154,6 +1179,31 @@ def generate_struct(entry: ApiEntry) -> str:
         lines.append(f"    {ftype} {fname};  /* {fcomment} */")
 
     lines.append(f"}} {sname};")
+
+    # Emit static_assert for every inline uint8_t array whose size is hard-coded.
+    # Guarded by HIP_INCLUDE_HIP_HIP_RUNTIME_H because the referenced types
+    # (hipMemcpy3DParms, hipMemPoolProps, etc.) are only defined when the full
+    # HIP runtime header is included.  hrr_api_args.h may be included in
+    # translation units (e.g. hrr_reader.cpp) that use only minimal headers.
+    asserts = []
+    for (ftype, fname, _fcomment) in EXTRA_FIELDS.get(entry.name, []):
+        if not ftype.startswith("uint8_t") or '[' not in fname:
+            continue
+        base = fname[:fname.index('[')]
+        ctype = _INLINE_STRUCT_ASSERTS.get(base)
+        if not ctype:
+            continue
+        # Extract the declared array size N from "name[N]"
+        n = fname[fname.index('[')+1 : fname.index(']')]
+        asserts.append(
+            f"static_assert(sizeof({ctype}) <= {n},"
+            f' "hrr_args_{entry.name}::{fname} too small for {ctype}");'
+        )
+    if asserts:
+        lines.append("#ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H")
+        lines.extend(asserts)
+        lines.append("#endif")
+
     lines.append("")
     return "\n".join(lines)
 
@@ -1735,11 +1785,19 @@ def generate_playback_shim(entry: ApiEntry) -> str:
     fname = f"playback_{entry.name}"
     sig   = f"static hipError_t {fname}(PlaybackContext& ctx, const uint8_t* payload)"
 
-    # No-op playback APIs: emit an inline static no-op body (return hipSuccess)
+    # No-op playback APIs: emit a one-time warning then return hipSuccess.
+    # The static bool ensures the message fires once per process, not once per event,
+    # so replays with thousands of events don't spam stderr.
     if entry.name in NOOP_PLAYBACK_APIS:
         return (f"static hipError_t {fname}"
                 f"(PlaybackContext& ctx, const uint8_t* payload) {{\n"
                 f"  (void)ctx; (void)payload;\n"
+                f"  static bool warned = false;\n"
+                f"  if (!warned) {{\n"
+                f"    warned = true;\n"
+                f"    fprintf(stderr, \"[HRR] NOOP playback handler called for {entry.name} — \"\n"
+                f"            \"this API is not replayed; results may differ from capture.\\n\");\n"
+                f"  }}\n"
                 f"  return hipSuccess;\n"
                 f"}}\n")
 
@@ -1925,6 +1983,29 @@ def main() -> None:
     n_manual_play    = sum(1 for e in entries if e.name in MANUAL_PLAYBACK_APIS)
     n_noop_play      = sum(1 for e in entries if e.name in NOOP_PLAYBACK_APIS)
     print(f"  Found {n_compiler} compiler + {n_runtime} runtime = {len(entries)} total")
+
+    # -------------------------------------------------------------------------
+    # Cross-validate classification sets against parsed API names.
+    # Entries that don't exist in hip_api_trace.hpp are silent dead weight —
+    # catch them here so a typo or removed API is flagged immediately.
+    # -------------------------------------------------------------------------
+    parsed_names: Set[str] = {e.name for e in entries}
+    unknown: Dict[str, List[str]] = {}
+    for set_name, api_set in [
+        ("MANUAL_CAPTURE_APIS",  MANUAL_CAPTURE_APIS),
+        ("MANUAL_PLAYBACK_APIS", MANUAL_PLAYBACK_APIS),
+        ("NOOP_PLAYBACK_APIS",   NOOP_PLAYBACK_APIS),
+        ("EXTRA_FIELDS",         set(EXTRA_FIELDS.keys())),
+    ]:
+        bad = sorted(n for n in api_set if n not in parsed_names)
+        if bad:
+            unknown[set_name] = bad
+    if unknown:
+        print("\nERROR: the following entries are not present in the parsed API list:")
+        for set_name, names in unknown.items():
+            for n in names:
+                print(f"  {set_name}: '{n}'")
+        sys.exit(1)
     print(f"  Manual capture (hand-written in hip_capture.cpp):  {n_manual_cap}")
     print(f"  Manual playback (hand-written in hip_playback.cpp): {n_manual_play}")
     print(f"  No-op playback (inline hipSuccess stubs):           {n_noop_play}")
