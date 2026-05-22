@@ -134,7 +134,7 @@ docker run -it  \
 
 ## WSL Compatiblity Matrix
 - Windows 11
-- Ubuntu 24.04 LTS / Ubuntu 22.04 LTS
+- Ubuntu 26.04 LTS / Ubuntu 24.04 LTS / Ubuntu 22.04 LTS
 - The AMD ROCDXG library utilizes a ROCm runtime feature introduced in ROCm 7.1, which loads ***librocdxg*** to enable ROCm functionality within the WSL environment. This design keeps the ***librocdxg*** solution loosely coupled with both AMD ROCm release and Windows display driver. As a result, the AMD ROCDXG library can evolve independently, following its own development schedule without impacting the existing ROCm solution.
 
 | AMD Rocdxg Lib Version | AMD ROCm Version | AMD Windows Driver Version | Supported AMD GPU Products |
