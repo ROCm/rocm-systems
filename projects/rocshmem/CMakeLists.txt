@@ -255,12 +255,19 @@ if (NOT BUILD_TESTS_ONLY)
                           "Install libnuma-dev (or equivalent).")
     endif()
     find_package(hsakmt REQUIRED PATHS /opt/rocm)
-    # hsakmtTargets.cmake hardcodes /usr/lib64/libc.so (absolute path from the
-    # ROCm RHEL CI environment) in INTERFACE_LINK_LIBRARIES instead of -lc.
-    # CMake treats bare paths as build targets, causing nonsensical errors.
-    # libc is always linked implicitly, so just strip the entry.
+    # hsakmtTargets.cmake contains two classes of paths baked in from the ROCm
+    # RHEL CI build environment that break on any other system:
+    #   /usr/lib64/libc.so      — bare libc path instead of -lc (always implicit)
+    #   -L/__w/rockrel/...      — hardcoded CI search path for libdrm/libdrm_amdgpu
+    # Strip both, then inject the correct ROCm sysdeps libdrm search path so
+    # the -ldrm/-ldrm_amdgpu flags that follow can actually resolve.
     get_target_property(_hsakmt_iface_libs hsakmt::hsakmt INTERFACE_LINK_LIBRARIES)
-    list(FILTER _hsakmt_iface_libs EXCLUDE REGEX "/libc\\.so")
+    list(FILTER _hsakmt_iface_libs EXCLUDE REGEX "(/libc\\.so|/__w/)")
+    get_target_property(_numa_loc numa::numa IMPORTED_LOCATION)
+    get_filename_component(_numa_libdir "${_numa_loc}" DIRECTORY)
+    list(PREPEND _hsakmt_iface_libs "-L${_numa_libdir}")
+    unset(_numa_loc)
+    unset(_numa_libdir)
     set_target_properties(hsakmt::hsakmt PROPERTIES INTERFACE_LINK_LIBRARIES "${_hsakmt_iface_libs}")
     unset(_hsakmt_iface_libs)
   endif()
