@@ -12,9 +12,14 @@
 #   - llvm-profdata and llvm-cov on PATH (or under /opt/rocm/llvm/bin).
 #
 # Usage:
-#   test/mch/coverage.sh                       # text summary to stdout
-#   test/mch/coverage.sh --html out/cov-html   # also emit HTML report
-#   BUILD_DIR=build/debug test/mch/coverage.sh # non-default build tree
+#   test/mch/coverage.sh                            # text summary to stdout
+#   test/mch/coverage.sh --html out/cov-html        # also emit HTML report
+#   FUNC=ipcRegisterBuffer test/mch/coverage.sh ... # scope to one function
+#   BUILD_DIR=build/debug test/mch/coverage.sh      # non-default build tree
+#
+# HTML reports include inline branch counts (--show-branches=count) and a
+# branch column in the per-file summary, so branch coverage is visible
+# alongside line coverage.
 #
 # All paths are resolved relative to the rccl source root, regardless of
 # where the script is invoked from.
@@ -57,20 +62,50 @@ SOURCES=(
   "${BUILD_DIR}/hipify/src/transport/p2p.cc"
 )
 
-echo "==> Coverage summary"
+# Optional: scope the HTML / annotated-source output to a single function
+# (exact match). Set via environment, e.g.
+#   `FUNC=ipcRegisterBuffer ./coverage.sh --html out/`
+HTML_NAME_FLAGS=()
+if [[ -n "${FUNC:-}" ]]; then
+  HTML_NAME_FLAGS+=(--name="${FUNC}")
+  echo "==> Scoped to function: ${FUNC}"
+fi
+
+echo "==> Coverage summary (file totals)"
 "${COV_TOOL}" report "${BIN}" \
   -instr-profile="${PROFDATA}" \
+  --show-branch-summary --show-region-summary \
   "${SOURCES[@]}"
+
+# When scoped to a specific function, also show the annotated source so
+# branch hit/miss counts are visible in the terminal. (llvm-cov `report`
+# aggregates per-file regardless of --name, so we use `show` for this.)
+if [[ -n "${FUNC:-}" ]]; then
+  echo ""
+  echo "==> Annotated source for ${FUNC} (branch hit/miss counts inline)"
+  "${COV_TOOL}" show "${BIN}" \
+    -instr-profile="${PROFDATA}" \
+    --name="${FUNC}" \
+    --show-branches=count \
+    "${SOURCES[@]}"
+fi
 
 # Optional HTML output: --html <dir>
 if [[ "${1:-}" == "--html" ]]; then
   HTML_DIR="${2:?--html requires an output directory}"
   mkdir -p "${HTML_DIR}"
   echo "==> Writing HTML report to ${HTML_DIR}"
+  # --show-branches=count puts hit/miss counts inline next to each branch;
+  # --show-regions surfaces region boundaries (helpful when one source line
+  # has multiple short-circuited conditions).
   "${COV_TOOL}" show "${BIN}" \
     -instr-profile="${PROFDATA}" \
     -format=html -output-dir="${HTML_DIR}" \
     -show-line-counts-or-regions \
+    -show-regions \
+    -show-branches=count \
+    --show-region-summary --show-branch-summary \
+    "${HTML_NAME_FLAGS[@]}" \
     "${SOURCES[@]}"
   echo "    Open: ${HTML_DIR}/index.html"
 fi
