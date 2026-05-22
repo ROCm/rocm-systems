@@ -4,16 +4,16 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Unit tests for src/transport/p2p-scratch.cc.
+// Microtests for src/transport/p2p.cc.
 //
-// Unlike rccl-UnitTests, this binary does NOT link librccl.so. The goal is to
-// eventually compile p2p-scratch.cc directly into the test binary so that
-// internal symbols (e.g. the static ipcRegisterBuffer) can be exercised with
-// link-time-substituted fakes for the HIP driver API and the NCCL proxy layer.
+// This binary does NOT link librccl.so -- it compiles the hipified p2p.cc
+// directly into the test TU via the #include below, with everything p2p.cc
+// references (proxy, HIP driver shims, topology helpers, etc.) provided as
+// stubs in fakes/. That gives the tests visibility into static helpers like
+// ipcRegisterBuffer and the ability to drive their failure paths deterministically.
 //
-// For now this file just stands up the test target with a trivial smoke test;
-// real coverage of ipcRegisterBuffer will be added once the stub layer for
-// ncclProxyCallBlocking / ncclProxyConnect / the HIP driver seam is in place.
+// See README.md in this directory for the full rationale, the fake-layer
+// architecture, and the recipe for adding a new test.
 
 #include <gtest/gtest.h>
 
@@ -25,10 +25,20 @@
 // literal pointing at ${PROJECT_BINARY_DIR}/hipify/src/transport/p2p.cc.
 #include P2P_CC_PATH
 
-TEST(P2pScratchSmoke, BinaryLinksAndRuns)
-{
-    EXPECT_EQ(1 + 1, 2);
-}
+// ---------------------------------------------------------------------------
+// Default fixture for every test in this file.
+//
+// Several tests install per-test hooks into the controllable seams declared
+// in fakes/p2p_fakes.h (e.g. g_strongStreamAcquire). ResetP2pFakes() puts
+// every hook back to its default in TearDown so tests don't leak state into
+// each other. Tests that don't currently install hooks still use this
+// fixture -- it's the file-wide default so adding a hook to a test that
+// previously didn't need one doesn't silently contaminate the next test.
+// ---------------------------------------------------------------------------
+class P2pMicrotest : public ::testing::Test {
+protected:
+    void TearDown() override { ResetP2pFakes(); }
+};
 
 // ---------------------------------------------------------------------------
 // ipcRegisterBuffer: cheapest real path -- regRecord == nullptr.
@@ -39,7 +49,7 @@ TEST(P2pScratchSmoke, BinaryLinksAndRuns)
 // from the test TU (via the #include of p2p.cc above) without needing any
 // of the fakes' "real" behaviour.
 // ---------------------------------------------------------------------------
-TEST(IpcRegisterBuffer, NullRegRecordIsNoOp)
+TEST_F(P2pMicrotest, IpcRegisterBuffer_NullRegRecordIsNoOp)
 {
     // Comm is never dereferenced on this path, but pass a non-null pointer
     // to be safe against future defensive null-checks.
@@ -81,7 +91,7 @@ TEST(IpcRegisterBuffer, NullRegRecordIsNoOp)
 // *peerRmtAddrsOut. This pins down the cheapest path through the function
 // that still actually populates all the outputs.
 // ---------------------------------------------------------------------------
-TEST(IpcRegisterBuffer, SendrecvReusesExistingIpcInfo)
+TEST_F(P2pMicrotest, IpcRegisterBuffer_SendrecvReusesExistingIpcInfo)
 {
     constexpr int kPeerRank      = 3;
     constexpr int kPeerLocalRank = 2;
@@ -157,7 +167,7 @@ TEST(IpcRegisterBuffer, SendrecvReusesExistingIpcInfo)
 //     even if it were entered the test would still pass -- but staying out
 //     of it keeps the test honest about which code path it covers.
 // ---------------------------------------------------------------------------
-TEST(IpcRegisterBuffer, CollectiveReuseReturnsDevicePeerAddrTable)
+TEST_F(P2pMicrotest, IpcRegisterBuffer_CollectiveReuseReturnsDevicePeerAddrTable)
 {
     constexpr int kPeerRank      = 1;
     constexpr int kPeerLocalRank = 1;
@@ -239,12 +249,7 @@ TEST(IpcRegisterBuffer, CollectiveReuseReturnsDevicePeerAddrTable)
 // the entire `fail:` block including the `if (newInfo) free(newInfo)` branch
 // at line 1032, and output-zeroing semantics on the failure path.
 // ---------------------------------------------------------------------------
-class IpcRegisterBufferFixture : public ::testing::Test {
-protected:
-    void TearDown() override { ResetP2pFakes(); }
-};
-
-TEST_F(IpcRegisterBufferFixture, CollectiveReuseEntersStrongStreamBlockWhenDevTableMissing)
+TEST_F(P2pMicrotest, IpcRegisterBuffer_CollectiveReuseEntersStrongStreamBlockWhenDevTableMissing)
 {
     constexpr int kPeerRank      = 1;
     constexpr int kPeerLocalRank = 1;
@@ -356,7 +361,7 @@ TEST_F(IpcRegisterBufferFixture, CollectiveReuseEntersStrongStreamBlockWhenDevTa
 //     (the prior fail: coverage came in via the strong-stream block, a
 //     different goto site).
 // ---------------------------------------------------------------------------
-TEST(IpcRegisterBuffer, FreshRegistrationFailsOnAddressRangeLookup)
+TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationFailsOnAddressRangeLookup)
 {
     constexpr int kPeerRank      = 4;
     constexpr int kPeerLocalRank = 3;
