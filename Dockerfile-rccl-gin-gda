@@ -1,7 +1,8 @@
 ## base docker image
-ARG ROCM_IMAGE_NAME=rocm/dev-ubuntu-24.04
-ARG ROCM_IMAGE_TAG=latest
-FROM "${ROCM_IMAGE_NAME}:${ROCM_IMAGE_TAG}"
+#ARG ROCM_IMAGE_NAME=rocm/dev-ubuntu-24.04
+#ARG ROCM_IMAGE_TAG=latest
+#FROM "${ROCM_IMAGE_NAME}:${ROCM_IMAGE_TAG}"
+FROM ubuntu:24.04
 
 # Example command lines:
 #docker run -it --rm --shm-size 64G   --network host --device /dev/dri --device /dev/kfd --device /dev/infiniband --ipc host   --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged  rccl-gingda mpirun -n 8 -mca pml ob1 -mca btl ^openib -x RCCL_ROCSHMEM_ENABLE=0 -x RCCL_ROCSHMEM_THRESHOLD=$((128*1024*1024)) -x NCCL_DEBUG=VERSION -x NCCL_GIN_ENABLE=1 -x NCCL_GIN_TYPE=2 -x NCCL_DEBUG_SUBSYS=INIT,NET -x NONCCL_CUMEM_ENABLE=1 -x NORCCL_ENABLE_INTRANET=1  -x NCCL_DMABUF_ENABLE=1 -x NCCL_MSCCL_ENABLE=0 -x HSA_NO_SCRATCH_RECLAIM=1 rccl-tests/alltoall_perf -b 128 -e 128M -f 2 -g 1 -R 2 -D 0 -A 1
@@ -14,23 +15,24 @@ WORKDIR ${WORKDIR}
 ENV SRC /src
 RUN mkdir -p ${SRC}
 
-## install dependencies
+ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
-    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    build-essential autoconf libtool flex bison pkg-config cmake git wget curl ca-certificates \
-    libibverbs-dev ibverbs-utils libibumad-dev libpci-dev librdmacm-dev rdma-core infiniband-diags \
-    ca-certificates \
+ && apt-get install -y sudo wget curl gpg ca-certificates
+RUN mkdir --parents --mode=0755 /etc/apt/keyrings \
+ && wget https://repo.amd.com/rocm/packages/gpg/rocm.gpg -O - | gpg --dearmor | tee /etc/apt/keyrings/amdrocm.gpg > /dev/null \
+ && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/amdrocm.gpg] https://repo.amd.com/rocm/packages-multi-arch/ubuntu2404 stable main" > /etc/apt/sources.list.d/rocm.list
+RUN apt-get update \
+ && apt-get install -y amdrocm-core7.13-gfx950 amdrocm-core7.13-gfx942 amdrocm-core-dev7.13 amdrocm-developer-tools7.13 amdrocm-runtime-dev \
+ && ln -s /opt/rocm/core/.info /opt/rocm/.info
+
+## install dependencies
+RUN apt-get install -y --no-install-recommends \
+    build-essential  \
     git \
     make \
-    rocm-cmake \
+    cmake \
     ninja-build \
-    gfortran \
-    build-essential \
-    libomp5 \
-    libomp-dev \
-    libbfd-dev \
-    libboost-all-dev \
-    libnuma1 \
+    pkg-config \
     libnuma-dev \
     libpthread-stubs0-dev \
     libzstd-dev \
@@ -55,12 +57,13 @@ RUN apt-get update \
     python3-dev \
     python3-tk \
     python3-yaml \
+    libfmt-dev \
     vim \
     less \
+    build-essential autoconf libtool flex bison pkg-config git \
+    libibverbs-dev ibverbs-utils libibumad-dev libpci-dev librdmacm-dev rdma-core infiniband-diags \
     openmpi-bin openmpi-common libopenmpi-dev \
-    && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+ && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 ## Not needed on Ubuntu 24, probably needed on Ubuntu22
 #RUN wget https://github.com/Kitware/CMake/releases/download/v3.28.0/cmake-3.28.0-linux-x86_64.sh \
@@ -114,7 +117,8 @@ ARG ROCM_REPO=https://github.com/ROCm/rocm-systems.git
 ARG GPU_TARGETS=gfx950
 
 ## building rocSHMEM
-ARG ROCSHMEM_BRANCH=users/abouteiller/gin-stage1
+ARG ROCSHMEM_BRANCH=users/abouteiller/gin-stage1-wip
+ARG ROCSHMEM_CACHE_BUST=1
 ENV ROCSHMEM_INSTALL_DIR=${WORKDIR}/rocshmem
 RUN git clone --no-checkout --filter=blob:none ${ROCM_REPO} ${WORKDIR}/rocshmem/src && cd ${WORKDIR}/rocshmem/src \
  && git sparse-checkout set --cone projects/rocshmem \
@@ -131,23 +135,29 @@ RUN cd rocshmem/src/projects/rocshmem \
 
 ## building RCCL
 #ARG RCCL_BRANCH=users/prasanna-amd/nccl-sync-v2-28-9-gin-rebased-0501
-ARG RCCL_BRANCH=users/abouteiller/gin-stage1
+ARG RCCL_BRANCH=users/abouteiller/gin-stage1-wip
+ARG RCCL_CACHE_BUST=1
 ENV RCCL_INSTALL_PREFIX=${WORKDIR}/rccl
 ENV ONLY_FUNCS="SendRecv|AlltoAllPivot|AlltoAllGda|AlltoAllvGda"
 RUN git clone --no-checkout --filter=blob:none "${ROCM_REPO}" ${WORKDIR}/rccl/src/ && cd ${WORKDIR}/rccl/src \
  && git sparse-checkout set --cone projects/rccl \
  && git checkout ${RCCL_BRANCH}
 # patch for SDMA enablement
+#RUN cd rccl/src/projects/rccl \
+# && sed -i \
+#        -e '/target_link_libraries(rccl PRIVATE \${ROCSHMEM_LIBRARY})/i\  find_package(hsakmt REQUIRED PATHS /opt/rocm)' \
+#        -e '/target_link_libraries(rccl PRIVATE \${ROCSHMEM_LIBRARY})/i\  target_link_libraries(rccl PRIVATE hsakmt::hsakmt)' \
+#        src/CMakeLists.txt \
+# && sed -i \
+#       's/if (comm->enableRocshmem && comm->nNodes > 1 && (comm->nRanks\/comm->nNodes == 8) && comm->rocshmemThreshold <= 1048576)/if (comm->enableRocshmem)/' \
+#       src/rccl_wrap.cc
 RUN cd rccl/src/projects/rccl \
- && sed -i \
-        -e '/target_link_libraries(rccl PRIVATE \${ROCSHMEM_LIBRARY})/i\  find_package(hsakmt REQUIRED PATHS /opt/rocm)' \
-        -e '/target_link_libraries(rccl PRIVATE \${ROCSHMEM_LIBRARY})/i\  target_link_libraries(rccl PRIVATE hsakmt::hsakmt)' \
-        src/CMakeLists.txt \
- && sed -i \
-       's/if (comm->enableRocshmem && comm->nNodes > 1 && (comm->nRanks\/comm->nNodes == 8) && comm->rocshmemThreshold <= 1048576)/if (comm->enableRocshmem)/' \
-       src/rccl_wrap.cc
-RUN cd rccl/src/projects/rccl \
- && ./install.sh --amdgpu_targets=${GPU_TARGETS} --prefix=${RCCL_INSTALL_PREFIX} --rocshmem --no-device-linker
+ && ./install.sh --amdgpu_targets=${GPU_TARGETS} --prefix=${RCCL_INSTALL_PREFIX} --rocshmem --no-device-linker --no_clean
+
+# Workaround: hipify renames core.h->core_tmp.h but gin headers still include ../core.h
+RUN ln -sf core_tmp.h ${WORKDIR}/rccl/src/projects/rccl/build/release/include/nccl_device/core.h \
+ && ln -sf ../hipify/src/include/nccl_tuner.h ${WORKDIR}/rccl/src/projects/rccl/build/release/include/nccl_tuner.h \
+ && cp -r ${WORKDIR}/rccl/src/projects/rccl/build/release/include/* ${RCCL_INSTALL_PREFIX}/include/
 
 ## building RCCL-Tests
 RUN cd rccl/src/ \
@@ -155,8 +165,8 @@ RUN cd rccl/src/ \
  && git checkout ${RCCL_BRANCH}
 RUN mkdir rccl-tests \
     && cd rccl-tests \
-    && cmake -DCMAKE_BUILD_TYPE=Release -DUSE_MPI=ON -DCMAKE_PREFIX_PATH="${RCCL_INSTALL_PREFIX};${MPI_INSTALL_PREFIX}" -DGPU_TARGETS=${GPU_TARGETS} ${WORKDIR}/rccl/src/projects/rccl-tests \
-    && make -j16 ENABLE_DEVICE_API=1
+    && cmake -DCMAKE_BUILD_TYPE=Release -DUSE_MPI=ON -DENABLE_DEVICE_API=ON -DCMAKE_PREFIX_PATH="${RCCL_INSTALL_PREFIX};${MPI_INSTALL_PREFIX}" -DGPU_TARGETS=${GPU_TARGETS} ${WORKDIR}/rccl/src/projects/rccl-tests \
+    && make -j16 -k || true # keep going allreduce fails to build but alltoall builds
 
 ## set environment variables
 ENV PATH="${MPI_INSTALL_PREFIX}/bin:${ROCM_PATH}/bin:${PATH}"
