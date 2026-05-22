@@ -255,6 +255,14 @@ if (NOT BUILD_TESTS_ONLY)
                           "Install libnuma-dev (or equivalent).")
     endif()
     find_package(hsakmt REQUIRED PATHS /opt/rocm)
+    # hsakmtTargets.cmake hardcodes /usr/lib64/libc.so (absolute path from the
+    # ROCm RHEL CI environment) in INTERFACE_LINK_LIBRARIES instead of -lc.
+    # CMake treats bare paths as build targets, causing nonsensical errors.
+    # libc is always linked implicitly, so just strip the entry.
+    get_target_property(_hsakmt_iface_libs hsakmt::hsakmt INTERFACE_LINK_LIBRARIES)
+    list(FILTER _hsakmt_iface_libs EXCLUDE REGEX "/libc\\.so")
+    set_target_properties(hsakmt::hsakmt PROPERTIES INTERFACE_LINK_LIBRARIES "${_hsakmt_iface_libs}")
+    unset(_hsakmt_iface_libs)
   endif()
 
   set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
