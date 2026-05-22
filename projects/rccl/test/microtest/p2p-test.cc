@@ -17,6 +17,8 @@
 
 #include <gtest/gtest.h>
 
+#include "fakes/p2p_fakes.h"
+
 // Pull in the hipified copy of p2p.cc (cudaXxx -> hipXxx rewrites already
 // applied by the hipify pass that runs as part of the main RCCL build).
 // P2P_CC_PATH is defined by this target's CMakeLists.txt as a string
@@ -212,4 +214,115 @@ TEST(IpcRegisterBuffer, CollectiveReuseReturnsDevicePeerAddrTable)
     EXPECT_EQ(offsetOut,   kBuffOffset);
     EXPECT_EQ(peerRmtAddrs, devPeerRmtAddrs);                  // the table itself, not an addr
     EXPECT_FALSE(isLegacyIpc);
+}
+
+// ---------------------------------------------------------------------------
+// ipcRegisterBuffer: collective reuse, devPeerRmtAddrs missing -> enters the
+// strong-stream allocation block (lines 1004-1015 in the hipified p2p.cc).
+//
+// Same shape as CollectiveReuseReturnsDevicePeerAddrTable, but deliberately
+// leave regRecord.regIpcAddrs.devPeerRmtAddrs == nullptr so the
+// `if (devPeerRmtAddrs == NULL || needUpdate)` branch goes True. Our existing
+// stubs would normally let the block complete "successfully" (returning a
+// null hipStream_t), but the very next call -- ncclCudaCallocAsync -- is a
+// header-only template that hits the real HIP runtime and there is no GPU
+// here, so it would fail mid-block with confusing diagnostics.
+//
+// Instead we promote ncclStrongStreamAcquire to a controllable seam (see
+// fakes/p2p_fakes.h) and have the test install a hook that:
+//   (a) records that the block was entered (proves coverage of line 1004's
+//       True side and line 1006), and
+//   (b) returns ncclSystemError on the first call, so control flows cleanly
+//       through NCCLCHECKGOTO into the `fail:` epilogue (lines 1028-1034).
+//
+// Net coverage gain: line 1004 True side, line 1006 strong-stream call site,
+// the entire `fail:` block including the `if (newInfo) free(newInfo)` branch
+// at line 1032, and output-zeroing semantics on the failure path.
+// ---------------------------------------------------------------------------
+class IpcRegisterBufferFixture : public ::testing::Test {
+protected:
+    void TearDown() override { ResetP2pFakes(); }
+};
+
+TEST_F(IpcRegisterBufferFixture, CollectiveReuseEntersStrongStreamBlockWhenDevTableMissing)
+{
+    constexpr int kPeerRank      = 1;
+    constexpr int kPeerLocalRank = 1;
+    constexpr uintptr_t kBegAddr     = 0x30000;
+    constexpr uintptr_t kBuffOffset  = 0x100;
+    constexpr uintptr_t kRmtRegAddr  = 0xfeedface00ull;
+
+    // Comm + sharedRes: the strong-stream calls dereference
+    // comm->sharedRes->{hostStream,deviceStream,scratchEvent}. The hook
+    // doesn't actually read them, but the address-taking in the call site
+    // (`&comm->sharedRes->hostStream`) requires sharedRes to be non-null.
+    ncclSharedResources sharedRes{};
+    ncclComm comm{};
+    comm.sharedRes = &sharedRes;
+    int rankToLocalRank[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    rankToLocalRank[kPeerRank] = kPeerLocalRank;
+    comm.rankToLocalRank = rankToLocalRank;
+    comm.localRanks      = NCCL_MAX_LOCAL_RANKS;
+
+    // Reuse path: ipcInfos[peer] is pre-populated, hostPeerRmtAddrs is set,
+    // but devPeerRmtAddrs is intentionally left null -> triggers line 1004.
+    uintptr_t hostPeerRmtAddrs[NCCL_MAX_LOCAL_RANKS] = {0};
+    hostPeerRmtAddrs[kPeerLocalRank] = kRmtRegAddr;
+
+    ncclIpcRegInfo existingInfo{};
+    existingInfo.peerRank             = kPeerRank;
+    existingInfo.impInfo.rmtRegAddr   = reinterpret_cast<void*>(kRmtRegAddr);
+    existingInfo.impInfo.legacyIpcCap = false;
+
+    ncclReg regRecord{};
+    regRecord.begAddr = kBegAddr;
+    regRecord.endAddr = kBegAddr + 0x4000;
+    regRecord.ipcInfos[kPeerLocalRank]      = &existingInfo;
+    regRecord.regIpcAddrs.hostPeerRmtAddrs  = hostPeerRmtAddrs;
+    regRecord.regIpcAddrs.devPeerRmtAddrs   = nullptr;        // <-- key
+
+    // Spy + failure injector. Counts entries to the strong-stream block,
+    // and on the first call returns an error so NCCLCHECKGOTO routes us to
+    // `fail:` before we hit the header-template ncclCudaCallocAsync that
+    // would otherwise try to run real HIP.
+    int acquireCalls = 0;
+    g_strongStreamAcquire = [&](struct ncclCudaGraph,
+                                struct ncclStrongStream*,
+                                bool,
+                                hipStream_t* stream) -> ncclResult_t {
+        ++acquireCalls;
+        if (stream) *stream = nullptr;
+        return ncclSystemError;
+    };
+
+    int       peerRanks[1]  = {kPeerRank};
+    int       regBufFlag    = 0xdead;
+    uintptr_t offsetOut     = 0xdead;
+    uintptr_t* peerRmtAddrs = reinterpret_cast<uintptr_t*>(0xdead);
+    bool      isLegacyIpc   = true;
+
+    ncclResult_t r = ipcRegisterBuffer(
+        /*comm=*/        &comm,
+        /*userbuff=*/    reinterpret_cast<const void*>(kBegAddr + kBuffOffset),
+        /*buffSize=*/    1024,
+        /*peerRanks=*/   peerRanks,
+        /*nPeers=*/      1,
+        /*type=*/        NCCL_IPC_COLLECTIVE,
+        /*regRecord=*/   &regRecord,
+        /*regBufFlag=*/  &regBufFlag,
+        /*offsetOut=*/   &offsetOut,
+        /*peerRmtAddrsOut=*/ &peerRmtAddrs,
+        /*isLegacyIpc=*/ &isLegacyIpc);
+
+    // The strong-stream block was entered -- proves line 1004 True side and
+    // line 1006 are now covered.
+    EXPECT_EQ(acquireCalls, 1);
+
+    // Error propagated out of the NCCLCHECKGOTO at line 1006.
+    EXPECT_EQ(r, ncclSystemError);
+
+    // `fail:` epilogue zeroed the OUT params (lines 1029-1031).
+    EXPECT_EQ(regBufFlag,    0);
+    EXPECT_EQ(offsetOut,     0u);
+    EXPECT_EQ(peerRmtAddrs,  nullptr);
 }

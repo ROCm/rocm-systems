@@ -36,6 +36,8 @@
 #include "comm.h"         // ncclCommGraphRegister / Deregister
 #include "strongstream.h" // ncclStrongStream*
 
+#include "p2p_fakes.h"     // controllable seam hooks
+
 // ---------------------------------------------------------------------------
 // Bucket A: trivial globals
 // ---------------------------------------------------------------------------
@@ -211,13 +213,37 @@ ncclResult_t ncclShmAllocateShareableBuffer(size_t            /*size*/,
     return ncclSystemError;
 }
 
-ncclResult_t ncclStrongStreamAcquire(struct ncclCudaGraph /*graph*/,
-                                     struct ncclStrongStream* /*ss*/,
-                                     bool                 /*concurrent*/,
-                                     hipStream_t*         stream)
+// --- Controllable seam: ncclStrongStreamAcquire ---------------------------
+// Default behaviour preserves the old stub: succeed, hand back a null
+// hipStream_t. Tests that want to drive failure into the
+// devPeerRmtAddrs-allocation block override g_strongStreamAcquire in their
+// fixture SetUp().
+static ncclResult_t DefaultStrongStreamAcquire(struct ncclCudaGraph,
+                                               struct ncclStrongStream*,
+                                               bool,
+                                               hipStream_t* stream)
 {
     if (stream) *stream = nullptr;
     return ncclSuccess;
+}
+
+std::function<ncclResult_t(struct ncclCudaGraph,
+                           struct ncclStrongStream*,
+                           bool,
+                           hipStream_t*)>
+    g_strongStreamAcquire = DefaultStrongStreamAcquire;
+
+ncclResult_t ncclStrongStreamAcquire(struct ncclCudaGraph graph,
+                                     struct ncclStrongStream* ss,
+                                     bool                 concurrent,
+                                     hipStream_t*         stream)
+{
+    return g_strongStreamAcquire(graph, ss, concurrent, stream);
+}
+
+void ResetP2pFakes()
+{
+    g_strongStreamAcquire = DefaultStrongStreamAcquire;
 }
 
 ncclResult_t ncclStrongStreamRelease(struct ncclCudaGraph     /*graph*/,
