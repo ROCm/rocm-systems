@@ -86,12 +86,16 @@ if(HIP_PLATFORM STREQUAL "amd")
   # A genuine multi-threaded capture workload (4 threads + graph + pinned + hostReg).
   # If not found, the MT roundtrip test is skipped at runtime via HRR_RAW_TRACE_EXE="".
   if(NOT DEFINED HRR_RAW_TRACE_EXE)
-    find_program(HRR_RAW_TRACE_EXE NAMES hip_raw_trace hip_raw_trace.exe
+    # Use a local variable so find_program's cache sentinel (-NOTFOUND) does
+    # not leak into the compile definition.
+    find_program(_hrr_raw_trace_found NAMES hip_raw_trace hip_raw_trace.exe
       HINTS
         "${CMAKE_INSTALL_PREFIX}/bin"
         "${ROCM_PATH}/bin"
     )
-    if(NOT HRR_RAW_TRACE_EXE)
+    if(_hrr_raw_trace_found)
+      set(HRR_RAW_TRACE_EXE "${_hrr_raw_trace_found}")
+    else()
       set(HRR_RAW_TRACE_EXE "")
     endif()
   endif()
