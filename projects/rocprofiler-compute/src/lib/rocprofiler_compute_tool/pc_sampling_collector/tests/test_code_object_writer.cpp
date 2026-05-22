@@ -256,3 +256,8 @@ TEST_F(test_code_object_writer_t, ProvidedEmptyOutputFilePath_Throws)
 {
     EXPECT_THROW(m_writer.flush(""), std::runtime_error);
 }
+
+TEST_F(test_code_object_writer_t, ProvidedUnopenableOutputPath_Throws)
+{
+    EXPECT_THROW(m_writer.flush("/proc/self/cannot-create-here"), std::runtime_error);
+}

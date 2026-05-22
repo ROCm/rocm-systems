@@ -5,6 +5,7 @@
 
 #include "env_parameters.h"
 #include "gsl_assert.h"
+#include "pc_sampling_collector/code_object_writer.h"
 #include "sdk_callbacks.h"
 #include "sdk_wrapper.h"
 
@@ -105,13 +106,17 @@ void code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
         break;
         case ROCPROFILER_CODE_OBJECT_LOAD:
         {
-            if (tool_data->pc_sampling_mode != PcSamplingMode::Disabled)
+            if (tool_data->pc_sampling)
             {
                 Expects(record.payload);
                 auto* obj_data = static_cast<rocprofiler_callback_tracing_code_object_load_data_t*>(
                     record.payload);
-                tool_data->pc_sampling_collector.rlock([&](const pc_sampling_collector_t::ptr& collector)
-                                                       { collector->on_code_object_load(*obj_data); });
+                tool_data->pc_sampling->collector.rlock(
+                    [&](const pc_sampling_collector_t::ptr& collector)
+                    {
+                        Expects(collector);
+                        collector->on_code_object_load(*obj_data);
+                    });
             }
         }
         break;
@@ -164,12 +169,16 @@ void generate_output(tool_data_t& tool_data)
         g_counters_writer->write_counters(tool_data.counters_output_filename, tool_data.counter_records);
     }
 
-    if (tool_data.pc_sampling_mode != PcSamplingMode::Disabled)
+    if (tool_data.pc_sampling)
     {
         code_object_writer_json_t obj_writer;
-        tool_data.pc_sampling_collector.rlock([&](const pc_sampling_collector_t::ptr& ptr)
-                                              { ptr->write(obj_writer); });
-        obj_writer.flush(tool_data.code_obj_output_filename);
+        tool_data.pc_sampling->collector.rlock(
+            [&](const pc_sampling_collector_t::ptr& ptr)
+            {
+                Expects(ptr);
+                ptr->write(obj_writer);
+            });
+        obj_writer.flush(tool_data.pc_sampling->output_filename);
     }
 }
 
@@ -198,13 +207,18 @@ std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
     auto tool_data = std::make_unique<tool_data_t>();
 
     tool_data->sdk_callbacks = std::make_shared<sdk_callbacks_impl_t>(g_sdk_wrapper);
-    tool_data->pc_sampling_collector.wlock([](auto& ptr) { ptr = pc_sampling_collector_t::create(); });
-    tool_data->pc_sampling_mode = pc_sampling_mode(g_input_parameters->get_pc_sampling_mode());
 
     tool_data->counters_output_filename =
         generate_output_file_path(g_input_parameters->get_output_path(), "_native_counter_collection.csv");
-    tool_data->code_obj_output_filename = generate_output_file_path(g_input_parameters->get_output_path(),
-                                                                    "_code_obj_info.json");
+
+    const auto mode = rocm_compute::pc_sampling_mode(g_input_parameters->get_pc_sampling_mode());
+    if (mode != PcSamplingMode::Disabled)
+    {
+        tool_data->pc_sampling = std::make_unique<pc_sampling_feature_t>(
+            mode,
+            generate_output_file_path(g_input_parameters->get_output_path(), "_code_obj_info.json"),
+            pc_sampling_collector_t::create());
+    }
 
     // ROCPROF_COUNTERS env. var. is a string like "pmc: counter1 counter2 ..."
     tool_data->requested_counters = g_input_parameters->get_requested_counters();

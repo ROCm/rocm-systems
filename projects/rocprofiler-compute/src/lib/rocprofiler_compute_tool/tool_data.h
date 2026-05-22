@@ -1,14 +1,18 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 #pragma once
-#include "pc_sampling_collector.h"
-#include "synchronized.hpp"
+#include "pc_sampling_collector/pc_sampling_feature.h"
 
+#include <filesystem>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <set>
 #include <string>
+#include <tuple>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace rocm_compute
 {
@@ -73,10 +77,8 @@ struct counter_info_record_t
 struct tool_data_t
 {
     IterationMultiplexingMode iteration_multiplexing_mode{IterationMultiplexingMode::Disabled};
-    PcSamplingMode            pc_sampling_mode{PcSamplingMode::Disabled};
     std::mutex                mut{};
     std::filesystem::path     counters_output_filename{};
-    std::filesystem::path     code_obj_output_filename{};
     std::unordered_map<uint64_t, std::string>  counter_id_name_map{};
     std::string                                requested_counters{};
     std::string                                kernel_filter_include_regex{};
@@ -84,7 +86,7 @@ struct tool_data_t
     std::vector<counter_info_record_t>         counter_records;
     std::set<uint64_t>                         target_kernel_ids{};
 
-    synchronized_t<pc_sampling_collector_t::ptr> pc_sampling_collector;
-    std::shared_ptr<sdk_callbacks_t>             sdk_callbacks{};
+    std::unique_ptr<pc_sampling_feature_t> pc_sampling{};
+    std::shared_ptr<sdk_callbacks_t>       sdk_callbacks{};
 };
 }  // namespace rocm_compute

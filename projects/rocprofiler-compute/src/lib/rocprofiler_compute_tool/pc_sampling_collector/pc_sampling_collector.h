@@ -1,8 +1,6 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 #pragma once
-#include "code_object_translator.h"
-#include "code_object_writer.h"
 
 #include <rocprofiler-sdk/rocprofiler.h>
 
@@ -10,13 +8,8 @@
 
 namespace rocm_compute
 {
-
-enum class PcSamplingMode : uint8_t
-{
-    Disabled,
-    Stochastic,
-    HostTrap
-};
+class code_object_translator_t;
+class code_object_writer_t;
 
 class pc_sampling_collector_t
 {

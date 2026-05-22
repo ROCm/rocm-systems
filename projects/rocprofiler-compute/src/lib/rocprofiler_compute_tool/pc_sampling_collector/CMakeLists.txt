@@ -3,8 +3,9 @@
 set(target pc-sampling-collector)
 add_library(
     ${target}
-    STATIC
+    OBJECT
     pc_sampling_collector.h
+    pc_sampling_feature.h
     pc_sampling_collector.cpp
     code_object_translator.h
     code_object_translator.cpp
@@ -20,6 +21,7 @@ target_link_libraries(
         rocprofiler-sdk::rocprofiler-sdk
         gsl_assert
         synchronized
+    PRIVATE
         libdw::libdw
         amd_comgr
         nlohmann_json

@@ -3,7 +3,7 @@
 #pragma once
 #include "counters_writer.h"
 #include "env_parameters.h"
-#include "pc_sampling_collector.h"
+#include "pc_sampling_collector/pc_sampling_collector.h"
 #include "sdk_callbacks.h"
 #include "sdk_wrapper.h"
 

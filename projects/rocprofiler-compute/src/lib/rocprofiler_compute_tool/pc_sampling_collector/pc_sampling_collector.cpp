@@ -2,6 +2,8 @@
 // SPDX-License-Identifier:  MIT
 #include "pc_sampling_collector.h"
 
+#include "code_object_translator.h"
+#include "code_object_writer.h"
 #include "gsl_assert.h"
 
 #include <ios>
@@ -26,15 +28,15 @@ void pc_sampling_collector_impl_t::on_code_object_load(
 {
     if (info.storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE)
     {
-        m_translator->add_code_object(info.uri, info.code_object_id, info.load_base, info.load_size);
+        m_translator->add_file_code_object(info.uri, info.code_object_id, info.load_base, info.load_size);
     }
     else if (info.storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY)
     {
-        m_translator->add_code_object(info.memory_base,
-                                      info.memory_size,
-                                      info.code_object_id,
-                                      info.load_base,
-                                      info.load_size);
+        m_translator->add_memory_code_object(info.memory_base,
+                                             info.memory_size,
+                                             info.code_object_id,
+                                             info.load_base,
+                                             info.load_size);
     }
 }
 

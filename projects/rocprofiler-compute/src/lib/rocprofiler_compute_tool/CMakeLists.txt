@@ -1,5 +1,7 @@
 ## Copyright (c) Advanced Micro Devices, Inc.
 ## SPDX-License-Identifier:  MIT
+add_subdirectory(pc_sampling_collector)
+
 set(target rocprofiler-compute-tool)
 add_library(
     ${target}
@@ -20,7 +22,8 @@ add_library(
 target_include_directories(${target} PUBLIC .)
 target_link_libraries(
     ${target}
-    PUBLIC rocprofiler-sdk::rocprofiler-sdk gsl_assert synchronized pc-sampling-collector
+    PUBLIC rocprofiler-sdk::rocprofiler-sdk gsl_assert synchronized
+    PRIVATE pc-sampling-collector nlohmann_json
 )
 
 if(ENABLE_TESTS)

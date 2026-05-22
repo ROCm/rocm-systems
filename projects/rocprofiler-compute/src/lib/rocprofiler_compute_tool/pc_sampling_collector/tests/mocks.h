@@ -28,14 +28,14 @@ public:
         uint64_t load_size   = 0;
     };
 
-    void add_code_object(const char* filepath, size_t id, uint64_t load_addr, uint64_t load_size) override;
-    void add_code_object(uint64_t memory_base,
-                         size_t   memory_size,
-                         size_t   id,
-                         uint64_t load_base,
-                         uint64_t load_size) override;
+    void add_file_code_object(const char* filepath, size_t id, uint64_t load_addr, uint64_t load_size) override;
+    void add_memory_code_object(uint64_t memory_base,
+                                size_t   memory_size,
+                                size_t   id,
+                                uint64_t load_base,
+                                uint64_t load_size) override;
 
-    const std::vector<size_t>&          get_code_object_ids() const override;
+    std::vector<size_t>                 get_code_object_ids() const override;
     std::vector<rocm_compute::symbol_t> get_symbols(size_t object_id) const override;
     rocm_compute::instruction_t get_instruction(size_t object_id, uint64_t virtual_address) const override;
 

@@ -18,7 +18,7 @@ using kernel_symbol_data_t = rocprofiler_callback_tracing_code_object_kernel_sym
 sdk_callbacks_impl_t::sdk_callbacks_impl_t(const std::shared_ptr<sdk_wrapper_t>& sdk_wrapper)
     : m_sdk_wrapper(sdk_wrapper)
 {
-    Expects(m_sdk_wrapper)
+    Expects(m_sdk_wrapper);
 }
 
 void sdk_callbacks_impl_t::dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,

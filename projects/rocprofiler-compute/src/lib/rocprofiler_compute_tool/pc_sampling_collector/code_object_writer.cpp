@@ -6,6 +6,7 @@
 
 #include <fstream>
 #include <iostream>
+#include <stdexcept>
 
 using namespace rocm_compute;
 
@@ -82,8 +83,7 @@ void code_object_writer_json_t::flush(const std::filesystem::path& output_file_p
     std::ofstream out_file(output_file_path, std::ios::out);
     if (!out_file.is_open())
     {
-        std::cerr << "Failed to open output file: " << output_file_path << "\n";
-        return;
+        throw std::runtime_error("Failed to open output file: " + output_file_path.string());
     }
     out_file << get_result();
     std::clog << "[rocprofiler-compute] [" << __FUNCTION__

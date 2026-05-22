@@ -30,5 +30,4 @@ find_package(
 
 add_subdirectory(external)
 add_subdirectory(rocprofiler_compute_tool)
-add_subdirectory(pc_sampling_collector)
 add_subdirectory(utils)
