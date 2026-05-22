@@ -432,11 +432,16 @@ def calc_ai_analyze(
                 plot_points.ai_l1[0].append(ai_l1)
                 plot_points.ai_l1[1].append(performance)
 
-            plot_points.kernelNames.append(f"K{kernel_id}")
-            console_debug("roofline", f"Added kernel {kernel_id} to plot points")
+            plot_points.kernelNames.append(kernel_name)
+            console_debug(
+                "roofline",
+                f"Added kernel {kernel_id}: {kernel_name[:50]} to plot points",
+            )
         else:
             console_debug(
-                "roofline", f"Skipping kernel {kernel_id} - no performance data"
+                "roofline",
+                f"Skipping kernel {kernel_id}: {kernel_name[:50]}"
+                f" - no performance data",
             )
 
         # store metrics for display
