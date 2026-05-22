@@ -35,17 +35,20 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM> {
     }
 
     if (hasSignal || hasCounter) {
-      rocshmem::rocshmem_quiet();
-    }
+      if (hasCounter)
+        rocshmem::rocshmem_quiet();  // counter only needs local completion (source consumed),
+                                     // but shmem API only provides quiet (remote completion);
+                                     // also sufficient to order data before signal
+      else
+        rocshmem::rocshmem_fence();  // lighter: just orders data before signal
 
-    if (hasSignal) {
-      if (signalOp == ncclGinSignalInc) signalOpArg = 1;
-      rocshmem::rocshmem_uint64_atomic_add(
-        loadConst(&rsCtx->signals) + signalId, signalOpArg, peer);
-    }
-
-    if (hasCounter) {
-      atomicAdd((unsigned long long*)(loadConst(&rsCtx->counters) + counterId), 1ULL);
+      if (hasSignal) {
+        if (signalOp == ncclGinSignalInc) signalOpArg = 1;
+        rocshmem::rocshmem_uint64_atomic_add(
+          loadConst(&rsCtx->signals) + signalId, signalOpArg, peer);
+      }
+      if (hasCounter)
+        atomicAdd((unsigned long long*)(loadConst(&rsCtx->counters) + counterId), 1ULL);
     }
   }
 };
