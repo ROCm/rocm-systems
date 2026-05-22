@@ -27,8 +27,11 @@
 #include "lib/rocprofiler-sdk/counters/dispatch_handlers.hpp"
 #include "lib/rocprofiler-sdk/counters/id_decode.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
+#include "lib/rocprofiler-sdk/counters/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/counters/tests/hsa_tables.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_hooks/client_ids.hpp"
+#include "lib/rocprofiler-sdk/hsa/tests/fake_queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
@@ -274,31 +277,6 @@ TEST(core, check_packet_generation)
         }
     }
 }
-
-namespace rocprofiler
-{
-namespace hsa
-{
-class FakeQueue : public Queue
-{
-public:
-    FakeQueue(const AgentCache& a, rocprofiler_queue_id_t id)
-    : Queue(a, get_api_table())
-    , _agent(a)
-    , _id(id)
-    {}
-    const AgentCache&      get_agent() const final { return _agent; };
-    rocprofiler_queue_id_t get_id() const final { return _id; };
-
-    ~FakeQueue() override = default;
-
-private:
-    const AgentCache&      _agent;
-    rocprofiler_queue_id_t _id = {};
-};
-
-}  // namespace hsa
-}  // namespace rocprofiler
 
 namespace
 {
@@ -949,4 +927,209 @@ TEST(core, create_counter)
             }
         }
     }
+}
+
+// ----------------------------------------------------------------------------
+// Tests for counters::write_hook (Tasks 1.4 and 1.5 of the queue-hooks refactor)
+//
+// These exercise the write-path enumerator that WriteInterceptor calls. Each
+// test colocates here (rather than queue_hooks_test.cpp) so it can reuse the
+// fixture helpers above (`test_init`, `get_client_ctx`, `null_dispatch_callback`,
+// `null_buffered_callback`).
+// ----------------------------------------------------------------------------
+
+namespace
+{
+// Build a synthetic packet whose fields don't matter for write_hook itself
+// (write_hook just forwards them to queue_cb, which only reads dispatch fields
+// when the user_cb returns a non-zero handle).
+hsa::rocprofiler_packet
+make_synthetic_packet()
+{
+    hsa::rocprofiler_packet pkt{};
+    pkt.ext_amd_aql_pm4.header = 1;
+    return pkt;
+}
+}  // namespace
+
+TEST(CountersQueueHooks, WriteHookProducesNoEntriesWhenNoContextActive)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    // Sanity: no dispatch_counter_collection context should be active in a
+    // fresh test. If a prior test leaked one, that is a separate bug.
+    ASSERT_FALSE(counters::is_any_active());
+
+    ASSERT_TRUE(hsa::get_queue_controller() != nullptr);
+    auto agents = hsa::get_queue_controller()->get_supported_agents();
+    ASSERT_GT(agents.size(), 0);
+
+    const auto& agent = agents.begin()->second;
+    hsa::FakeQueue fq(agent, rocprofiler_queue_id_t{.handle = 0});
+
+    auto                    pkt        = make_synthetic_packet();
+    hsa::queue_info_session_t::external_corr_id_map_t extern_ids{};
+    counters::inst_pkt_t    inst_pkt;
+    bool                    is_serialized = false;
+
+    counters::write_hook(fq,
+                         pkt,
+                         /*kernel_id*/ 0,
+                         /*dispatch_id*/ 0,
+                         /*user_data*/ nullptr,
+                         extern_ids,
+                         /*correlation_id*/ nullptr,
+                         inst_pkt,
+                         is_serialized);
+
+    EXPECT_EQ(inst_pkt.size(), 0u);
+    EXPECT_FALSE(is_serialized);
+}
+
+TEST(CountersQueueHooks, WriteHookProducesOneEntryWithOneActiveCounterCallback)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+    ROCPROFILER_CALL(rocprofiler_create_context(&get_client_ctx()), "context creation failed");
+
+    rocprofiler_buffer_id_t opt_buff_id = {.handle = 0};
+    ROCPROFILER_CALL(rocprofiler_create_buffer(get_client_ctx(),
+                                               500 * sizeof(size_t),
+                                               500 * sizeof(size_t),
+                                               ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                               null_buffered_callback,
+                                               nullptr,
+                                               &opt_buff_id),
+                     "Could not create buffer");
+
+    ROCPROFILER_CALL(rocprofiler_configure_buffer_dispatch_counting_service(
+                         get_client_ctx(), opt_buff_id, null_dispatch_callback, (void*) 0x12345),
+                     "Could not setup buffered service");
+    ROCPROFILER_CALL(rocprofiler_start_context(get_client_ctx()), "start context");
+
+    // Verify the context is actually active and visible to get_active_contexts.
+    EXPECT_TRUE(counters::is_any_active());
+
+    auto* ctx_p = context::get_mutable_registered_context(get_client_ctx());
+    ASSERT_TRUE(ctx_p);
+    ASSERT_TRUE(ctx_p->dispatch_counter_collection);
+    ASSERT_EQ(ctx_p->dispatch_counter_collection->callbacks.size(), 1u);
+
+    ASSERT_TRUE(hsa::get_queue_controller() != nullptr);
+    auto agents = hsa::get_queue_controller()->get_supported_agents();
+    ASSERT_GT(agents.size(), 0);
+
+    const auto& agent = agents.begin()->second;
+    hsa::FakeQueue fq(agent, rocprofiler_queue_id_t{.handle = 1});
+
+    auto                    pkt        = make_synthetic_packet();
+    hsa::queue_info_session_t::external_corr_id_map_t extern_ids{};
+    counters::inst_pkt_t    inst_pkt;
+    bool                    is_serialized = false;
+
+    counters::write_hook(fq,
+                         pkt,
+                         /*kernel_id*/ 0,
+                         /*dispatch_id*/ 0,
+                         /*user_data*/ nullptr,
+                         extern_ids,
+                         /*correlation_id*/ nullptr,
+                         inst_pkt,
+                         is_serialized);
+
+    // null_dispatch_callback leaves req_profile.handle == 0, so queue_cb
+    // returns {EmptyAQLPacket, /*bSerial=*/true} — non-null packet, serialized.
+    EXPECT_EQ(inst_pkt.size(), 1u);
+    EXPECT_EQ(inst_pkt[0].second, hsa::queue_hooks::COUNTERS_CLIENT_ID);
+    EXPECT_TRUE(is_serialized);
+
+    ROCPROFILER_CALL(rocprofiler_stop_context(get_client_ctx()), "stop context");
+
+    rocprofiler_flush_buffer(opt_buff_id);
+    rocprofiler_destroy_buffer(opt_buff_id);
+
+    registration::set_init_status(1);
+    registration::finalize();
+}
+
+TEST(CountersMultiCallback, TwoCallbacksProduceTwoInstPktEntries)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+    ROCPROFILER_CALL(rocprofiler_create_context(&get_client_ctx()), "context creation failed");
+
+    rocprofiler_buffer_id_t opt_buff_id = {.handle = 0};
+    ROCPROFILER_CALL(rocprofiler_create_buffer(get_client_ctx(),
+                                               500 * sizeof(size_t),
+                                               500 * sizeof(size_t),
+                                               ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                               null_buffered_callback,
+                                               nullptr,
+                                               &opt_buff_id),
+                     "Could not create buffer");
+
+    // Configure twice — each call appends a counter_callback_info to
+    // dispatch_counter_collection->callbacks (see
+    // CounterController::configure_dispatch in counters/controller.cpp).
+    ROCPROFILER_CALL(rocprofiler_configure_buffer_dispatch_counting_service(
+                         get_client_ctx(), opt_buff_id, null_dispatch_callback, (void*) 0x1111),
+                     "Could not setup buffered service (1st)");
+    ROCPROFILER_CALL(rocprofiler_configure_buffer_dispatch_counting_service(
+                         get_client_ctx(), opt_buff_id, null_dispatch_callback, (void*) 0x2222),
+                     "Could not setup buffered service (2nd)");
+    ROCPROFILER_CALL(rocprofiler_start_context(get_client_ctx()), "start context");
+
+    auto* ctx_p = context::get_mutable_registered_context(get_client_ctx());
+    ASSERT_TRUE(ctx_p);
+    ASSERT_TRUE(ctx_p->dispatch_counter_collection);
+    ASSERT_EQ(ctx_p->dispatch_counter_collection->callbacks.size(), 2u);
+
+    EXPECT_TRUE(counters::is_any_active());
+
+    ASSERT_TRUE(hsa::get_queue_controller() != nullptr);
+    auto agents = hsa::get_queue_controller()->get_supported_agents();
+    ASSERT_GT(agents.size(), 0);
+
+    const auto& agent = agents.begin()->second;
+    hsa::FakeQueue fq(agent, rocprofiler_queue_id_t{.handle = 2});
+
+    auto                    pkt        = make_synthetic_packet();
+    hsa::queue_info_session_t::external_corr_id_map_t extern_ids{};
+    counters::inst_pkt_t    inst_pkt;
+    bool                    is_serialized = false;
+
+    counters::write_hook(fq,
+                         pkt,
+                         /*kernel_id*/ 0,
+                         /*dispatch_id*/ 0,
+                         /*user_data*/ nullptr,
+                         extern_ids,
+                         /*correlation_id*/ nullptr,
+                         inst_pkt,
+                         is_serialized);
+
+    EXPECT_EQ(inst_pkt.size(), 2u);
+    if(inst_pkt.size() == 2u)
+    {
+        EXPECT_EQ(inst_pkt[0].second, hsa::queue_hooks::COUNTERS_CLIENT_ID);
+        EXPECT_EQ(inst_pkt[1].second, hsa::queue_hooks::COUNTERS_CLIENT_ID);
+    }
+    EXPECT_TRUE(is_serialized);
+
+    ROCPROFILER_CALL(rocprofiler_stop_context(get_client_ctx()), "stop context");
+
+    rocprofiler_flush_buffer(opt_buff_id);
+    rocprofiler_destroy_buffer(opt_buff_id);
+
+    registration::set_init_status(1);
+    registration::finalize();
 }

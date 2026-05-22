@@ -56,6 +56,15 @@ pc_sampling_service_finish_configuration(context::pc_sampling_service* service);
 
 rocprofiler_status_t
 flush_internal_agent_buffers(const PCSAgentSession* agent_session);
+
+// Called by the HSA queue completion path (via pc_sampling::signal_completion_hook)
+// when a kernel completes. Marks the dispatch's correlation id as completed in the
+// agent's CID manager if PC sampling is configured on that agent. Promoted out of
+// the anonymous namespace in hsa_adapter.cpp so the queue_hooks shim can call it.
+void
+kernel_completion_cb(const rocprofiler_agent_t*                    rocp_agent,
+                     rocprofiler::hsa::rocprofiler_packet&         kernel_pkt,
+                     const rocprofiler::hsa::queue_info_session_t& session);
 }  // namespace hsa
 }  // namespace pc_sampling
 }  // namespace rocprofiler

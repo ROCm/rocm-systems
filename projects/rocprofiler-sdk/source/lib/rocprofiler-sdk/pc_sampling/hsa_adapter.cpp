@@ -122,9 +122,13 @@ amd_intercept_marker_handler_callback(const struct amd_aql_intercept_marker_s* p
 
     parser->newDispatch(dispatch_pkt);
 }
+}  // namespace
 
 /**
  * Callback called by HSA interceptor when the kernel has completed.
+ *
+ * Has external linkage so pc_sampling::signal_completion_hook (queue_hooks.cpp)
+ * can call it from the queue completion path.
  */
 void
 kernel_completion_cb(const rocprofiler_agent_t* rocp_agent,
@@ -145,6 +149,8 @@ kernel_completion_cb(const rocprofiler_agent_t* rocp_agent,
     agent_session->cid_manager->cid_async_activity_completed(session.correlation_id);
 }
 
+namespace
+{
 void
 data_ready_callback(void*                                client_callback_data,
                     size_t                               data_size,
