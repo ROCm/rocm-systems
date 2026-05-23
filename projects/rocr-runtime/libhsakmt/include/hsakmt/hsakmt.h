@@ -601,6 +601,20 @@ hsaKmtDestroyExternalSemaphore(
     );
 
 /**
+  Enqueues a GPU-side signal of an imported external semaphore on
+  QueueId, ordered behind prior submissions. Handle must come from
+  hsaKmtImportExternalSemaphore on a node reachable from the queue.
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtQueueSignalExternalSemaphore(
+    HSA_QUEUEID                   QueueId,   //IN
+    HSA_EXTERNAL_SEMAPHORE_HANDLE Handle,    //IN
+    HSAuint64                     Value      //IN
+    );
+
+/**
  * Export a dmabuf handle and offset for a given memory address
  *
  * Validates that @MemoryAddress belongs to a valid allocation and that the
