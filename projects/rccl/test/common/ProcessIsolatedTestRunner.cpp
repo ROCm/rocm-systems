@@ -601,6 +601,16 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
                 setenv("ROCR_VISIBLE_DEVICES", ids.c_str(), 1);
             }
 
+            // Give each re-exec'd child its own profraw file so parallel
+            // runs don't clobber each other.  %p is expanded to the child
+            // PID by the LLVM profile runtime; %m adds the binary module
+            // hash so profiles from different test executables stay
+            // distinguishable when merging.  overwrite=0 preserves any
+            // LLVM_PROFILE_FILE already set by CI or the test config.
+#if defined(RCCL_TEST_CODE_COVERAGE)
+            setenv("LLVM_PROFILE_FILE", "rccl_tests_%p_%m.profraw", 0 /*no overwrite*/);
+#endif
+
             setenv(kReexecMarkerEnvVar, cfg.name.c_str(), 1);
 
             if(!gtestInfo)
