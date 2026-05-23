@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <gtest/gtest.h>
+#include <poll.h>
 #include <unistd.h>
 
 #include <dirent.h>
@@ -405,23 +406,47 @@ ProcessIsolatedTestRunner::CapturedOutput ProcessIsolatedTestRunner::captureProc
     char           buffer[4096];
     ssize_t        count;
 
-    // Read from stdout pipe
-    while((count = read(stdoutPipe[0], buffer, sizeof(buffer) - 1)) > 0)
-    {
-        buffer[count] = '\0';
-        output.stdoutContent += buffer;
-    }
-    close(stdoutPipe[0]);
+    // Drain stdout and stderr interleaved via poll() to avoid a deadlock
+    // where the child blocks writing one pipe while the parent is blocked
+    // reading the other (possible when either pipe buffer fills, ~64 KB).
+    struct pollfd pfds[2];
+    pfds[0] = {stdoutPipe[0], POLLIN, 0};
+    pfds[1] = {stderrPipe[0], POLLIN, 0};
+    int openFds = 2;
 
-    // Read from stderr pipe
-    while((count = read(stderrPipe[0], buffer, sizeof(buffer) - 1)) > 0)
+    while(openFds > 0)
     {
-        buffer[count] = '\0';
-        output.stderrContent += buffer;
-    }
-    close(stderrPipe[0]);
+        int ready = poll(pfds, 2, -1 /*block indefinitely*/);
+        if(ready < 0)
+        {
+            if(errno == EINTR) continue;
+            break; // unexpected error -- fall through to waitpid
+        }
+        for(int i = 0; i < 2; ++i)
+        {
+            if(pfds[i].fd < 0) continue;
 
-    // Wait for child to exit (blocking)
+            if(pfds[i].revents & (POLLIN | POLLHUP | POLLERR))
+            {
+                count = read(pfds[i].fd, buffer, sizeof(buffer) - 1);
+                if(count > 0)
+                {
+                    buffer[count] = '\0';
+                    (i == 0 ? output.stdoutContent : output.stderrContent)
+                        += buffer;
+                }
+                else
+                {
+                    // EOF or error -- no more data from this fd.
+                    close(pfds[i].fd);
+                    pfds[i].fd = -1; // poll ignores negative fds
+                    --openFds;
+                }
+            }
+        }
+    }
+
+    // Wait for child to exit (blocking).
     waitpid(pid, status, 0);
 
     return output;
