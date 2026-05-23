@@ -134,7 +134,7 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
 #endif
   }
 
-#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__)
+#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__) && !defined(__gfx1250__)
   __device__  void run() {
 #else
   __device__  __attribute__((noinline)) void run() {
@@ -247,7 +247,7 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
     }
 
     if (isCopy) {
-#if defined(__gfx942__) || defined(__gfx950__)
+#if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)
       reduceCopy<COLL_UNROLL*2, 0, RedOp, T, 0,1,1, 0,1,1, /*PreOpSrcs=*/0>
         (subtid, subtn, 0, nullptr, false, 1, &work->sendAddr, 1, &work->recvAddr, (ssize_t)work->sendBytes);
 #else
@@ -260,7 +260,7 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
       } else {
 #if defined(__gfx90a__)
         runSend<ProtoSimple<1,1,0,8>>(subtid, subtn, group, work);
-#elif defined(__gfx908__) || defined(__gfx942__) || defined(__gfx950__)
+#elif defined(__gfx908__) || defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)
         runSend<ProtoSimple<1,1,0,4>>(subtid, subtn, group, work);
 #else
         runSend<ProtoSimple<1,1>>(subtid, subtn, group, work);
@@ -272,7 +272,7 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
       } else {
 #if defined(__gfx90a__)
         runRecv<ProtoSimple<1,1,0,8>>(subtid, subtn, group, work);
-#elif defined(__gfx908__) || defined(__gfx942__) || defined(__gfx950__)
+#elif defined(__gfx908__) || defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)
         runRecv<ProtoSimple<1,1,0,4>>(subtid, subtn, group, work);
 #else
         runRecv<ProtoSimple<1,1>>(subtid, subtn, group, work);
