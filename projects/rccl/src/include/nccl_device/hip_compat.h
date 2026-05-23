@@ -92,7 +92,8 @@
 #if defined(NCCL_HIP_PLATFORM)
   // AMD GPUs use 64-wide waves (or 32 in wave32 mode)
   #if defined(__GFX10__) || defined(__GFX11__) || defined(__gfx1100__) || \
-      defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1200__) || defined(__gfx1201__)
+      defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1200__) || defined(__gfx1201__) || \
+      defined(__gfx1250__)
     #define NCCL_WARP_SIZE 32
   #else
     #define NCCL_WARP_SIZE 64
