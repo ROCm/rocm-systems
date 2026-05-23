@@ -604,6 +604,19 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
             if(!assignedGpus.empty())
             {
                 std::string ids = formatGpuList(assignedGpus);
+
+                // Warn when the slot manager overrides a value the test
+                // set via withEnvironment() / setVariable().  The override
+                // is intentional (isolation requires it) but should be
+                // visible so test authors can diagnose unexpected behaviour.
+                const char* existingHVD = std::getenv("HIP_VISIBLE_DEVICES");
+                if(existingHVD && *existingHVD)
+                    std::cerr
+                        << "ProcessIsolatedTestRunner: GPU slot manager overrides "
+                           "test-specified HIP_VISIBLE_DEVICES='" << existingHVD
+                        << "' with '" << ids
+                        << "' for parallel isolation\n";
+
                 setenv("HIP_VISIBLE_DEVICES", ids.c_str(), 1 /*overwrite*/);
                 setenv("ROCR_VISIBLE_DEVICES", ids.c_str(), 1);
             }
