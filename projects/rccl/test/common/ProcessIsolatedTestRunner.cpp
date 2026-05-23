@@ -163,6 +163,76 @@ static std::vector<int> detectGpuPool()
     return pool;
 }
 
+// ── GpuSlotManager ────────────────────────────────────────────────────────
+// Tracks which physical GPU device indices from a fixed pool are currently
+// in use.  acquire() and release() are NOT themselves thread-safe: the
+// caller is responsible for holding the shared mutex (cvMtx in
+// executeAllTests) whenever either method is invoked.
+class GpuSlotManager
+{
+public:
+    explicit GpuSlotManager(std::vector<int> pool)
+        : pool_(std::move(pool)), inUse_(pool_.size(), false)
+    {}
+
+    bool   empty() const { return pool_.empty(); }
+    size_t size()  const { return pool_.size(); }
+    const std::vector<int>& pool() const { return pool_; }
+
+    // Number of currently free slots.  Must be called with the external mutex held.
+    size_t freeSlots() const
+    {
+        return static_cast<size_t>(
+            std::count(inUse_.begin(), inUse_.end(), false));
+    }
+
+    // Assign up to `n` free slots; returns their physical device IDs.
+    // Must be called with the external mutex held.
+    std::vector<int> acquire(size_t n)
+    {
+        std::vector<int> assigned;
+        assigned.reserve(n);
+        for(size_t i = 0; i < pool_.size() && assigned.size() < n; ++i)
+        {
+            if(!inUse_[i])
+            {
+                inUse_[i] = true;
+                assigned.push_back(pool_[i]);
+            }
+        }
+        return assigned;
+    }
+
+    // Return previously acquired slots back to the pool.
+    // Must be called with the external mutex held.
+    void release(const std::vector<int>& physIds)
+    {
+        for(int id : physIds)
+            for(size_t i = 0; i < pool_.size(); ++i)
+                if(pool_[i] == id)
+                {
+                    inUse_[i] = false;
+                    break;
+                }
+    }
+
+    // Format a list of device indices as a comma-separated string.
+    static std::string formatList(const std::vector<int>& ids)
+    {
+        std::string s;
+        for(size_t i = 0; i < ids.size(); ++i)
+        {
+            if(i) s += ',';
+            s += std::to_string(ids[i]);
+        }
+        return s;
+    }
+
+private:
+    std::vector<int>  pool_;
+    std::vector<bool> inUse_;
+};
+
 // ExecutionOptions implementation
 ProcessIsolatedTestRunner::ExecutionOptions::ExecutionOptions()
     : stopOnFirstFailure(false), verboseLogging(true), maxParallelJobs(1)
@@ -574,18 +644,6 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
         CapturedOutput output;
     };
 
-    // Helper: build a comma-separated string from a list of GPU device ids.
-    auto formatGpuList = [](const std::vector<int>& ids) -> std::string
-    {
-        std::string s;
-        for(size_t i = 0; i < ids.size(); ++i)
-        {
-            if(i) s += ',';
-            s += std::to_string(ids[i]);
-        }
-        return s;
-    };
-
     // spawnOne: fork+execv a fresh copy of the binary to run a single isolated
     // test.  `assignedGpus` lists the physical device indices this child is
     // allowed to use; it is injected via HIP_VISIBLE_DEVICES / ROCR_VISIBLE_DEVICES
@@ -626,7 +684,7 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
             // Both env vars are set for compatibility across ROCm versions.
             if(!assignedGpus.empty())
             {
-                std::string ids = formatGpuList(assignedGpus);
+                std::string ids = GpuSlotManager::formatList(assignedGpus);
 
                 // Warn when the slot manager overrides a value the test
                 // set via withEnvironment() / setVariable().  The override
@@ -692,7 +750,7 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
         {
             std::string extras;
             if(!assignedGpus.empty())
-                extras += " GPUs: " + formatGpuList(assignedGpus);
+                extras += " GPUs: " + GpuSlotManager::formatList(assignedGpus);
             if(!cfg.environmentVariables.empty())
             {
                 std::string envVars;
@@ -830,51 +888,13 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
         // checked atomically to avoid TOCTOU races.
         // Use the pool that was already detected above -- same snapshot as
         // the parallelism calculation to avoid any TOCTOU divergence.
-        std::vector<int> gpuPool = detectedPool;
+        GpuSlotManager slots(detectedPool);
 
-        std::vector<bool> gpuSlotInUse(gpuPool.size(), false);
-
-        const bool gpuMgmtEnabled = !gpuPool.empty();
-
-        if(gpuMgmtEnabled)
+        if(!slots.empty())
             TEST_INFO(
                 "GPU slot manager: pool = [%s] (%zu device(s))",
-                formatGpuList(gpuPool).c_str(), gpuPool.size()
+                GpuSlotManager::formatList(slots.pool()).c_str(), slots.size()
             );
-
-        // Caller must hold cvMtx for all three helpers below.
-        auto gpuAcquireLocked = [&](size_t n) -> std::vector<int>
-        {
-            std::vector<int> assigned;
-            assigned.reserve(n);
-            for(size_t i = 0; i < gpuPool.size() && assigned.size() < n; ++i)
-            {
-                if(!gpuSlotInUse[i])
-                {
-                    gpuSlotInUse[i] = true;
-                    assigned.push_back(gpuPool[i]);
-                }
-            }
-            return assigned;
-        };
-
-        auto gpuReleaseLocked = [&](const std::vector<int>& physIds)
-        {
-            for(int id : physIds)
-                for(size_t i = 0; i < gpuPool.size(); ++i)
-                    if(gpuPool[i] == id)
-                    {
-                        gpuSlotInUse[i] = false;
-                        break;
-                    }
-        };
-
-        auto gpuFreeLocked = [&]() -> size_t
-        {
-            return static_cast<size_t>(
-                std::count(gpuSlotInUse.begin(), gpuSlotInUse.end(), false)
-            );
-        };
 
         std::mutex              cvMtx;
         std::condition_variable cv;
@@ -889,19 +909,19 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
         for(const auto& testConfig : testsToRun)
         {
             // 0 = CPU-only (no slot); > 0 = GPU slots needed.
-            const size_t need = (gpuMgmtEnabled && testConfig.numGpus > 0)
+            const size_t need = (!slots.empty() && testConfig.numGpus > 0)
                                     ? testConfig.numGpus
                                     : 0;
             // Clamp to pool size: over-requesting runs exclusively so no
             // sibling can hold a subset and cause resource contention.
-            const size_t effectiveNeed = std::min(need, gpuPool.size());
+            const size_t effectiveNeed = std::min(need, slots.size());
 
-            if(need > 0 && need > gpuPool.size())
+            if(need > 0 && need > slots.size())
             {
                 TEST_INFO(
                     "WARNING: test '%s' requests %zu GPU(s) but pool has only %zu — "
                     "assigning the entire pool and running exclusively",
-                    testConfig.name.c_str(), need, gpuPool.size()
+                    testConfig.name.c_str(), need, slots.size()
                 );
             }
 
@@ -912,7 +932,7 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
                 {
                     if(stopOnFirst && anyFailed.load()) return true;
                     if(active >= parallelism) return false;
-                    if(effectiveNeed > 0 && gpuFreeLocked() < effectiveNeed)
+                    if(effectiveNeed > 0 && slots.freeSlots() < effectiveNeed)
                         return false;
                     return true;
                 });
@@ -922,19 +942,19 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
 
                 ++active;
                 if(effectiveNeed > 0)
-                    assignedGpus = gpuAcquireLocked(effectiveNeed);
+                    assignedGpus = slots.acquire(effectiveNeed);
             }
 
             futures.push_back(std::async(
                 std::launch::async,
                 [testConfig, assignedGpus, stopOnFirst, &spawnOne, &active, &cv, &cvMtx,
-                 &gpuReleaseLocked, &anyFailed]() -> Outcome
+                 &slots, &anyFailed]() -> Outcome
                 {
                     auto so = spawnOne(testConfig, assignedGpus);
                     {
                         std::lock_guard<std::mutex> lk(cvMtx);
                         --active;
-                        gpuReleaseLocked(assignedGpus);
+                        slots.release(assignedGpus);
                         if(stopOnFirst && !so.result.passed && !so.result.skipped)
                             anyFailed.store(true);
                     }
