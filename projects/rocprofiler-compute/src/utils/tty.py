@@ -27,7 +27,7 @@ from utils.utils_analysis import (
 from utils.utils_common import (
     METRIC_ID_RE,
     convert_metric_id_to_panel_info,
-    get_panel_alias,
+    get_arch_alias_to_panel_id,
 )
 
 
@@ -885,18 +885,15 @@ def show_all(
             if table_type == "metric_id"
         ]
 
-    panel_alias = get_panel_alias()  # alias -> panel_id (string or int)
-
-    filter_panel_ids = set()
+    panel_alias = get_arch_alias_to_panel_id(gpu_arch) if gpu_arch else {}
+    filter_panel_ids: set[int] = set()
     for bid in raw_filter_panel_ids:
         bid_s = str(bid)
 
-        # If it's not already an ID, resolve alias -> ID
         if not METRIC_ID_RE.match(bid_s):
-            try:
-                bid_s = str(panel_alias[bid_s])
-            except KeyError as e:
-                raise KeyError(f"Unknown panel alias: {bid_s!r}") from e
+            if bid_s not in panel_alias:
+                raise KeyError(f"Unknown panel alias: {bid_s!r}")
+            bid_s = str(panel_alias[bid_s])
 
         file_id, _, _ = convert_metric_id_to_panel_info(bid_s)
         if file_id is not None:

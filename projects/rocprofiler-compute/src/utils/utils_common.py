@@ -926,12 +926,29 @@ def load_yaml(filepath: str) -> dict[str, Any]:
         return yaml.safe_load(f)
 
 
-def get_panel_alias() -> dict[str, str]:
-    panel_yaml = load_yaml(
-        f"{config.rocprof_compute_home}/rocprof_compute_soc/analysis_configs/gfx9_config_template.yaml"
+def get_arch_panel_id_to_alias(arch: str) -> dict[str, str]:
+    """Return panel_id_str -> alias from the *_config_template.yaml whose
+    filename prefix matches arch. Empty/None aliases stay as "".
+    Returns {} when no template matches the arch."""
+    template_glob = (
+        f"{config.rocprof_compute_home}"
+        "/rocprof_compute_soc/analysis_configs/*_config_template.yaml"
     )
+    for path in sorted(glob.glob(template_glob)):
+        m = re.match(r".*(gfx\d+)_config_template\.yaml$", path)
+        if m and arch.startswith(m.group(1)):
+            panel_yaml = load_yaml(path) or {}
+            panels = panel_yaml.get("panels") or []
+            return {str(p["panel_id"]): (p.get("panel_alias") or "") for p in panels}
+    return {}
+
+
+def get_arch_alias_to_panel_id(arch: str) -> dict[str, str]:
+    """Inverse of get_arch_panel_id_to_alias for resolving --block
+    <alias> tokens: alias -> panel_id_str. Skips panels with empty or
+    None aliases so unknown aliases naturally raise KeyError on lookup."""
     return {
-        panel["panel_alias"]: str(panel["panel_id"]) for panel in panel_yaml["panels"]
+        alias: pid for pid, alias in get_arch_panel_id_to_alias(arch).items() if alias
     }
 
 

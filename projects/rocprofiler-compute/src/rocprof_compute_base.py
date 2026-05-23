@@ -33,8 +33,8 @@ from utils.specs import (
 from utils.utils_common import (
     build_metric_list,
     detect_rocprof,
+    get_arch_panel_id_to_alias,
     get_job_rank_and_size,
-    get_panel_alias,
     get_version,
     get_version_display,
     load_panel_configs,
@@ -432,12 +432,12 @@ class RocProfCompute:
 
         if arch in self.__supported_archs.keys():
             metric_list = self._build_arch_metric_list(arch, sys_info=None)
+            top_panels = {k: v for k, v in metric_list.items() if "." not in k}
+            panel_alias_dict = get_arch_panel_id_to_alias(arch)
             print(f"{'INDEX':<8} {'BLOCK ALIAS':<16} {'BLOCK NAME'}")
-            panel_alias_dict = {value: key for key, value in get_panel_alias().items()}
-            for key, value in metric_list.items():
-                if key.count(".") > 0:
-                    continue
-                print(f"{key:<8} {panel_alias_dict[key]:<16} {value}")
+            for key, value in top_panels.items():
+                alias = panel_alias_dict.get(key, "")
+                print(f"{key:<8} {alias:<16} {value}")
             sys.exit(0)
         else:
             console_error("Unsupported arch")
