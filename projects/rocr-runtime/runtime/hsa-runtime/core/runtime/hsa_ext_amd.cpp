@@ -52,6 +52,7 @@
 
 #include "core/inc/agent.h"
 #include "core/inc/amd_aie_agent.h"
+#include "core/inc/amd_aql_queue.h"
 #include "core/inc/amd_cpu_agent.h"
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/amd_memory_region.h"
@@ -1967,6 +1968,46 @@ hsa_status_t hsa_amd_external_semaphore_handle_close(
     if (s != HSA_STATUS_ERROR_INVALID_AGENT) return s;
   }
   return HSA_STATUS_ERROR_INVALID_AGENT;
+  CATCH;
+}
+
+hsa_status_t hsa_amd_queue_signal_external_semaphore(
+    hsa_queue_t *queue,
+    hsa_amd_external_semaphore_t sem,
+    uint64_t value) {
+  TRY;
+  IS_OPEN();
+  if (queue == nullptr) return HSA_STATUS_ERROR_INVALID_QUEUE;
+  if (sem.handle == 0)  return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  core::Queue *core_queue = core::Queue::Convert(queue);
+  IS_VALID(core_queue);
+
+  // Only AMD GPU AQL queues carry a KMD queue id; gate on agent type
+  // before the libhsakmt reverse-cast to a WDDMQueue *.
+  core::Agent *core_agent = core_queue->GetAgent();
+  IS_VALID(core_agent);
+  if (core_agent->device_type() != core::Agent::DeviceType::kAmdGpuDevice)
+    return HSA_STATUS_ERROR_INVALID_QUEUE;
+  AMD::AqlQueue *aql = static_cast<AMD::AqlQueue *>(core_queue);
+
+  HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = { sem.handle };
+  HSAKMT_STATUS s = hsaKmtQueueSignalExternalSemaphore(
+      aql->aql_queue_id(), kmt_handle, value);
+
+  // Map libhsakmt status onto hsa_status_t, as handle_open does.
+  switch (s) {
+    case HSAKMT_STATUS_SUCCESS:
+      return HSA_STATUS_SUCCESS;
+    case HSAKMT_STATUS_INVALID_HANDLE:
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    case HSAKMT_STATUS_INVALID_NODE_UNIT:
+      return HSA_STATUS_ERROR_INVALID_AGENT;
+    case HSAKMT_STATUS_NOT_SUPPORTED:
+      return HSA_STATUS_ERROR;
+    default:
+      return HSA_STATUS_ERROR;
+  }
   CATCH;
 }
 

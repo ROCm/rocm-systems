@@ -281,6 +281,7 @@ struct AmdExtTable {
   decltype(hsa_amd_signal_get_event_id)* hsa_amd_signal_get_event_id_fn;
   decltype(hsa_amd_external_semaphore_handle_open)*  hsa_amd_external_semaphore_handle_open_fn;
   decltype(hsa_amd_external_semaphore_handle_close)* hsa_amd_external_semaphore_handle_close_fn;
+  decltype(hsa_amd_queue_signal_external_semaphore)* hsa_amd_queue_signal_external_semaphore_fn;
 };
 
 // Table to export HSA Core Runtime Apis

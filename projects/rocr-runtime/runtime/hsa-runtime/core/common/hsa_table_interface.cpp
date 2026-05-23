@@ -1397,6 +1397,14 @@ hsa_status_t HSA_API hsa_amd_external_semaphore_handle_close(
   return amdExtTable->hsa_amd_external_semaphore_handle_close_fn(sem);
 }
 
+// Mirrors Amd Extension Apis
+hsa_status_t HSA_API hsa_amd_queue_signal_external_semaphore(
+    hsa_queue_t *queue,
+    hsa_amd_external_semaphore_t sem,
+    uint64_t value) {
+  return amdExtTable->hsa_amd_queue_signal_external_semaphore_fn(queue, sem, value);
+}
+
 // Tools only table interfaces.
 namespace rocr {
 
