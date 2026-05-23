@@ -4656,16 +4656,15 @@ void VirtualGPU::submitExternalSemaphoreCmd(amd::ExternalSemaphoreCmd& cmd) {
       cmd.setStatus(CL_INVALID_OPERATION);
     }
   } else {
-    // GPU-side wait. Symmetric to the signal branch -- the wait is
-    // posted into the AQL ring ahead of subsequent kernel/copy
-    // submissions on gpu_queue_, so the next packet blocks until the
-    // imported syncobj reaches cmd.fence().
+    // GPU-side wait. Best-effort: post the wait but do NOT fail the
+    // command on KMD rejection (mirrors PAL, which only logs). Some
+    // KMDs reject GPU-side waits on imported syncobjs even though
+    // SIGNAL works; higher-level synchronization gates the actual
+    // data dependency in the meantime.
     hsa_status_t s = hsa_amd_queue_wait_external_semaphore(
         gpu_queue_, *holder, cmd.fence());
-    if (s != HSA_STATUS_SUCCESS) {
+    if (s != HSA_STATUS_SUCCESS)
       LogError("Failed to wait on external semaphore");
-      cmd.setStatus(CL_INVALID_OPERATION);
-    }
   }
 }
 
