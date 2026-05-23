@@ -215,8 +215,11 @@ int ProcessIsolatedTestRunner::runTestInProcess(const TestConfig& config)
 
     try
     {
-        // Apply environment variables
-        applyEnvironmentVariables(config);
+        // Environment was already applied in the fork child before execv().
+        // Do NOT call applyEnvironmentVariables() here: for configs with
+        // inheritParentEnv=false it would invoke clearenv() a second time,
+        // wiping HIP_VISIBLE_DEVICES that the parallel GPU slot manager
+        // injected before re-exec.
 
         // Thread-safe test execution with timeout protection
         std::atomic<bool>  testCompleted{false};
