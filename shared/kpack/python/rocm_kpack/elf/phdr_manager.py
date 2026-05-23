@@ -135,7 +135,7 @@ class ProgramHeaderManager:
         Returns:
             Virtual address at page boundary after existing segments
         """
-        return round_up_to_page(self.get_max_vaddr())
+        return round_up_to_page(self.get_max_vaddr(), self._surgery.page_size)
 
     def _get_available_space(self) -> int:
         """Get available space for program headers at current location."""
@@ -207,7 +207,7 @@ class ProgramHeaderManager:
 
         # Calculate file offset with proper alignment
         current_end = len(self._surgery.data)
-        new_phoff = page_align_offset(current_end, phdr_vaddr)
+        new_phoff = page_align_offset(current_end, phdr_vaddr, self._surgery.page_size)
 
         # Add padding to reach aligned offset
         padding = new_phoff - current_end
@@ -249,7 +249,7 @@ class ProgramHeaderManager:
             p_paddr=phdr_vaddr,
             p_filesz=allocated_size,
             p_memsz=allocated_size,
-            p_align=PAGE_SIZE,
+            p_align=self._surgery.page_size,
         )
         self._phdrs.append(phdr_load)
 
@@ -285,6 +285,7 @@ def create_load_segment(
     file_offset: int,
     size: int,
     flags: int = PF_R,
+    page_size: int = PAGE_SIZE,
 ) -> ProgramHeader:
     """Create a PT_LOAD segment.
 
@@ -298,7 +299,7 @@ def create_load_segment(
         New ProgramHeader
     """
     # Verify alignment constraint
-    if (file_offset % PAGE_SIZE) != (vaddr % PAGE_SIZE):
+    if (file_offset % page_size) != (vaddr % page_size):
         raise ValueError(
             f"File offset 0x{file_offset:x} not page-aligned with vaddr 0x{vaddr:x}"
         )
@@ -311,5 +312,5 @@ def create_load_segment(
         p_paddr=vaddr,
         p_filesz=size,
         p_memsz=size,
-        p_align=PAGE_SIZE,
+        p_align=page_size,
     )

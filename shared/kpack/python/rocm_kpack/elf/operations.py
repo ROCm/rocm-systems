@@ -95,13 +95,14 @@ def map_section_to_load(
 
     # Check if we need to relocate section data for mmap alignment
     section_offset = section.header.sh_offset
-    vaddr_mod = vaddr % PAGE_SIZE
-    offset_mod = section_offset % PAGE_SIZE
+    page_size = surgery.page_size
+    vaddr_mod = vaddr % page_size
+    offset_mod = section_offset % page_size
 
     new_offset = section_offset
     if offset_mod != vaddr_mod:
         # Need to copy section data to a new location with proper alignment
-        new_offset = page_align_offset(len(surgery.data), vaddr)
+        new_offset = page_align_offset(len(surgery.data), vaddr, page_size)
         padding = new_offset - len(surgery.data)
 
         if padding > 0:
@@ -118,6 +119,7 @@ def map_section_to_load(
         file_offset=new_offset,
         size=section.header.sh_size,
         flags=PF_R,  # Read-only
+        page_size=page_size,
     )
     manager.add_program_header(new_load)
 

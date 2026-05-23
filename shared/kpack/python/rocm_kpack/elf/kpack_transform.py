@@ -204,11 +204,12 @@ def verify_no_fatbin_relocations(
     problematic: list[ProblematicRelocation] = []
 
     # Iterate all RELA sections
+    r_relative = surgery.arch_config.r_relative
     for section in surgery.iter_rela_sections():
         for _, rela in surgery.iter_relocations(section):
-            in_range = rela.targets_range(fatbin_vaddr, fatbin_size)
+            in_range = rela.targets_range(fatbin_vaddr, fatbin_size, r_relative)
             if in_range is True:
-                target = rela.get_target_address()
+                target = rela.get_target_address(r_relative)
                 assert target is not None  # targets_range returned True
                 problematic.append(
                     ProblematicRelocation(
