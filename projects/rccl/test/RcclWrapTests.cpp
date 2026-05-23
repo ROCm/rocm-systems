@@ -1182,6 +1182,7 @@ TEST(Rcclwrap, AllrcclSetP2pNetChunkSizeTests)
                     }()
                 )
                 .withTimeout(std::chrono::seconds(60))
+                .withNumGpus(0)
         );
     }
 
@@ -1295,6 +1296,7 @@ TEST(Rcclwrap, AllPxnTests)
                         return env;
                     }()
                 )
+                .withNumGpus(0)
         );
     }
 
@@ -1441,6 +1443,7 @@ TEST(Rcclwrap, RcclUseAllGatherDirectNodeCountTests)
                     }()
                 )
                 .withTimeout(std::chrono::seconds(60))
+                .withNumGpus(0)
         );
     }
 
