@@ -328,7 +328,30 @@ int ProcessIsolatedTestRunner::runTestInProcess(const TestConfig& config)
 // Register a test configuration
 void ProcessIsolatedTestRunner::registerTest(const TestConfig& config)
 {
+    // Null bytes are silently truncated by setenv()/getenv(), which would
+    // cause the re-exec child to fail to find its target test.
+    if(config.name.find('\0') != std::string::npos)
+    {
+        std::cerr << "ProcessIsolatedTestRunner: test name contains a null "
+                     "byte and cannot be registered: '" << config.name
+                  << "'\n";
+        return;
+    }
+
     std::lock_guard<std::mutex> lock(testConfigsMutex_);
+
+    // Duplicate names cause the re-exec child to always match the first
+    // registration and silently skip the second.
+    for(const auto& existing : testConfigs_)
+    {
+        if(existing.name == config.name)
+        {
+            std::cerr << "ProcessIsolatedTestRunner: duplicate test name '"
+                      << config.name << "' — second registration ignored.\n";
+            return;
+        }
+    }
+
     testConfigs_.push_back(config);
 }
 
