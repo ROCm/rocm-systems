@@ -126,7 +126,7 @@ std::unordered_map<ncclComm_t, rocshmem::rocshmem_team_t> ncclCommToRshmemTeam;
 #endif
 
 // Turn off cheap fence for gfx942/gfx950
-RCCL_PARAM(Gfx9CheapFenceOff, "GFX9_CHEAP_FENCE_OFF", 0);
+RCCL_PARAM(CheapPostSendFenceOff, "CHEAP_POST_SEND_FENCE_OFF", 0);
 
 /**
  * Used on gfx1151 (StrixHalo) to set the nChannels for ncclTopoPreset before determining number of nodes. 
@@ -1756,7 +1756,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     allGather3Data[rank].nc = 1;
   comm -> cheapPostSendFenceOff = 1;
   #ifdef HIP_UNCACHED_MEMORY
-  if(!rcclParamGfx9CheapFenceOff()){
+  if(!rcclParamCheapPostSendFenceOff()){
     if(IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx942")){
       comm -> cheapPostSendFenceOff = 0;
     }
