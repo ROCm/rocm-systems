@@ -371,6 +371,10 @@ GPU slot management is skipped (no `HIP_VISIBLE_DEVICES` override) in two cases:
 
 In both cases tests see the full device list as usual.
 
+#### Interaction with `withEnvironment({{"HIP_VISIBLE_DEVICES", ...}})`
+
+In parallel mode, the runner injects `HIP_VISIBLE_DEVICES` **after** applying the test's own environment variables. Any `HIP_VISIBLE_DEVICES` set via `withEnvironment()` or `setVariable()` is overridden by the slot manager's assignment; a warning is logged to stderr when this happens. Use `withNumGpus(N)` to declare device requirements rather than hard-coding device indices.
+
 ---
 
 ## API Reference
@@ -441,7 +445,9 @@ RUN_ISOLATED_TESTS_WITH_OPTIONS(opts,
 ### Main Methods (For Manual Use)
 
 #### `registerTest()`
-Register a test for later execution.
+Register a test for later execution. Registration fails with a diagnostic if:
+- The name contains a null byte (would be silently truncated by `setenv`/`getenv`).
+- The name is a duplicate of an already-registered test (the re-exec child matches on the first occurrence, so the second would never run).
 
 ```cpp
 // Variant 1: Full configuration
@@ -1158,7 +1164,7 @@ EXPECT_EQ(results.size(), expectedTestCount)
 
 ### Why `fork()+execv()` instead of plain `fork()`
 
-Plain `fork()` after HIP has been initialized is unsafe — the GPU runtime state (device contexts, memory handles, threads) is copied into the child but is not valid there. `execv()` replaces the child's entire address space with a fresh binary image, so the child starts with no inherited runtime state. This also ensures the LLVM profile runtime initializes with the correct child PID, so `%p` in `LLVM_PROFILE_FILE` expands properly without any manual filename fixup.
+Plain `fork()` after HIP has been initialized is unsafe — the GPU runtime state (device contexts, memory handles, threads) is copied into the child but is not valid there. `execv()` replaces the child's entire address space with a fresh binary image, so the child starts with no inherited runtime state. This also ensures the LLVM profile runtime initializes with the correct child PID. Before `execv()` the fork child sets `LLVM_PROFILE_FILE=rccl_tests_%p_%m.profraw` (with `overwrite=0`) so each re-exec'd process writes a unique file. A `LLVM_PROFILE_FILE` already in the environment — from CI or via `withEnvironment()` — takes precedence.
 
 ### Exit Codes
 
