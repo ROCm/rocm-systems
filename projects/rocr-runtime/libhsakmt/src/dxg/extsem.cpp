@@ -94,3 +94,29 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtQueueSignalExternalSemaphore(
     return HSAKMT_STATUS_ERROR;
   return HSAKMT_STATUS_SUCCESS;
 }
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtQueueWaitExternalSemaphore(
+    HSA_QUEUEID QueueId,
+    HSA_EXTERNAL_SEMAPHORE_HANDLE Handle,
+    HSAuint64 Value) {
+  CHECK_DXG_OPEN();
+  if (QueueId == 0) return HSAKMT_STATUS_INVALID_HANDLE;
+
+  D3DKMT_HANDLE syncobj = 0;
+  HSAuint32 node_id = 0;
+  DecodeExtSemHandle(Handle.handle, &syncobj, &node_id);
+  if (syncobj == 0) return HSAKMT_STATUS_INVALID_HANDLE;
+
+  WDDMDevice *device = get_wddmdev(node_id);
+  if (device == nullptr) return HSAKMT_STATUS_INVALID_NODE_UNIT;
+
+  auto *queue = reinterpret_cast<WDDMQueue *>(QueueId);
+
+  // GpuWait takes the WDDMQueue * directly (pulling .context out
+  // internally), unlike GpuSignal which takes the bare D3DKMT_HANDLE.
+  // Keep fence_value alive for the ioctl.
+  uint64_t fence_value = Value;
+  if (!device->GpuWait(queue, &syncobj, &fence_value, 1))
+    return HSAKMT_STATUS_ERROR;
+  return HSAKMT_STATUS_SUCCESS;
+}
