@@ -233,6 +233,36 @@ private:
      */
     static void handleReexecEntrypoint(const std::vector<TestConfig>& tests);
 
+    /// Return type for a single spawned test: result + captured output.
+    struct SpawnOutcome
+    {
+        TestResult     result;
+        CapturedOutput output;
+    };
+
+    /// Callable type for spawning one isolated test.
+    using SpawnFn = std::function<SpawnOutcome(const TestConfig&, const std::vector<int>&)>;
+
+    /**
+     * @brief Run tests one at a time (no GPU slot management).
+     */
+    static void runSequential(
+        const std::vector<TestConfig>& tests,
+        const ExecutionOptions&        opts,
+        const SpawnFn&                 spawnFn);
+
+    /**
+     * @brief Run tests with a bounded sliding window and GPU slot management.
+     * @param parallelism Maximum simultaneous child processes.
+     * @param gpuPool     Physical GPU indices available for slot assignment.
+     */
+    static void runParallel(
+        const std::vector<TestConfig>& tests,
+        const ExecutionOptions&        opts,
+        size_t                         parallelism,
+        const std::vector<int>&        gpuPool,
+        const SpawnFn&                 spawnFn);
+
 public:
     /**
      * @brief Register a test configuration
