@@ -186,7 +186,8 @@ public:
             std::count(inUse_.begin(), inUse_.end(), false));
     }
 
-    // Assign up to `n` free slots; returns their physical device IDs.
+    // Assign `n` free slots; returns their physical device IDs.
+    // Precondition: n <= size() — callers must clamp before calling.
     // Must be called with the external mutex held.
     std::vector<int> acquire(size_t n)
     {
@@ -749,20 +750,13 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
         return false;
     }
 
-    // Per-test work unit: fork()+execv() the same binary with a gtest filter
-    // and the sentinel env var, then drain the child's pipes and wait.
-    // Captured as a lambda so it can be called from both the sequential and
-    // parallel paths without code duplication.
-    //
-    // Safe to call from multiple threads simultaneously: env modifications
-    // (applyEnvironmentVariables, setenv) happen inside the fork child which
-    // is always single-threaded; the parent threads only touch their own pipe
-    // file descriptors and the blocking waitpid() for their own child PID.
     // spawnOne: fork+execv a fresh copy of the binary to run a single isolated
     // test.  `assignedGpus` lists the physical device indices this child is
-    // allowed to use; it is injected via HIP_VISIBLE_DEVICES / ROCR_VISIBLE_DEVICES
-    // in the fork child so that concurrent tests never share a GPU.
-    // An empty `assignedGpus` means no restriction (sequential mode).
+    // allowed to use; injected via HIP_VISIBLE_DEVICES / ROCR_VISIBLE_DEVICES
+    // in the fork child so concurrent tests never share a GPU.
+    // Safe to call from multiple threads: env modifications happen inside the
+    // fork child (always single-threaded); parent threads only touch their own
+    // pipe fds and block in waitpid() for their own child PID.
     auto spawnOne = [&](const TestConfig& cfg, const std::vector<int>& assignedGpus)
         -> SpawnOutcome
     {
