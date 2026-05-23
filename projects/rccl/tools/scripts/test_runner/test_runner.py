@@ -94,7 +94,6 @@ def main():
 
             # Run only enabled (and name-matched) test suites
             # Note: Reruns happen immediately within run_test_suite() if --rerun-failed is set
-            all_results = []
             for suite in test_suites:
                 suite_name = suite["suite_details"]["name"]
                 enabled = suite["suite_details"].get("enabled", True)
@@ -102,8 +101,7 @@ def main():
                     continue
                 if args.suite_name and not glob_filter_matches(suite_name, args.suite_name):
                     continue
-                results = executor.run_test_suite(suite)
-                all_results.extend(results)
+                executor.run_test_suite(suite)
 
             # Print summary once at the end
             executor.print_summary()

@@ -811,10 +811,14 @@ class TestExecutor:
 
         # Build command based on test type
         if num_ranks == 1:
-            # Non-MPI test - prepend environment variables to the command
+            # Non-MPI test - prepend environment variables to the command.
+            # LD_LIBRARY_PATH is already merged with correct priority order above,
+            # so skip it in the merged_env loop and use the final env value instead.
             env_prefix = ""
             for key, value in merged_env.items():
-                env_prefix += f"{key}={value} "
+                if key != 'LD_LIBRARY_PATH':
+                    env_prefix += f"{key}={value} "
+            env_prefix += f"LD_LIBRARY_PATH={env['LD_LIBRARY_PATH']} "
 
             if is_gtest:
                 # GTest-based test - use --gtest_filter syntax
