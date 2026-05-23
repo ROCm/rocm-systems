@@ -770,20 +770,22 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
     };
 
     // ── Determine parallelism ──────────────────────────────────────────────
-    // When maxParallelJobs is 0, default to the GPU pool size so threads don't
-    // pile up waiting for slots on GPU-test suites; fall back to
-    // hardware_concurrency() when no GPU pool exists.
-    auto computeDefaultParallelism = [&]() -> size_t
-    {
-        const std::vector<int> pool
-            = options.gpuPool.empty() ? detectGpuPool() : options.gpuPool;
-        return pool.empty() ? static_cast<size_t>(std::thread::hardware_concurrency())
-                            : pool.size();
-    };
+    // Detect the GPU pool once here so both the parallelism calculation and
+    // the slot manager always operate on the same snapshot.  A second call
+    // to detectGpuPool() inside the parallel block would re-parse env vars
+    // and re-scan /dev/dri independently, risking a TOCTOU divergence.
+    const std::vector<int> detectedPool
+        = options.gpuPool.empty() ? detectGpuPool() : options.gpuPool;
 
+    // When maxParallelJobs is 0, default to the GPU pool size so threads
+    // don't pile up waiting for slots on GPU-test suites; fall back to
+    // hardware_concurrency() when no GPU pool exists.
     const size_t parallelism
-        = (options.maxParallelJobs == 0) ? computeDefaultParallelism()
-                                         : options.maxParallelJobs;
+        = (options.maxParallelJobs == 0)
+              ? (detectedPool.empty()
+                     ? static_cast<size_t>(std::thread::hardware_concurrency())
+                     : detectedPool.size())
+              : options.maxParallelJobs;
 
     if(parallelism <= 1)
     {
@@ -803,8 +805,9 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
         // GPU tests receive a non-overlapping slice of the pool via
         // HIP_VISIBLE_DEVICES; concurrency and GPU slot availability are
         // checked atomically to avoid TOCTOU races.
-        std::vector<int> gpuPool
-            = options.gpuPool.empty() ? detectGpuPool() : options.gpuPool;
+        // Use the pool that was already detected above -- same snapshot as
+        // the parallelism calculation to avoid any TOCTOU divergence.
+        std::vector<int> gpuPool = detectedPool;
 
         std::vector<bool> gpuSlotInUse(gpuPool.size(), false);
 
