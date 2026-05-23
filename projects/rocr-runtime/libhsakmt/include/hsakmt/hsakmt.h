@@ -615,6 +615,22 @@ hsaKmtQueueSignalExternalSemaphore(
     );
 
 /**
+  Posts a GPU-side wait on an imported external semaphore. The wait
+  blocks any subsequent submissions on QueueId until the syncobj
+  reaches Value. The semaphore must have been imported via
+  hsaKmtImportExternalSemaphore on a node reachable from the same
+  device as the queue.
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtQueueWaitExternalSemaphore(
+    HSA_QUEUEID                   QueueId,   //IN
+    HSA_EXTERNAL_SEMAPHORE_HANDLE Handle,    //IN
+    HSAuint64                     Value      //IN
+    );
+
+/**
  * Export a dmabuf handle and offset for a given memory address
  *
  * Validates that @MemoryAddress belongs to a valid allocation and that the

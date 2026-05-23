@@ -32,6 +32,7 @@ hsaKmtRegisterMemoryToNodes;
 hsaKmtImportExternalSemaphore;
 hsaKmtDestroyExternalSemaphore;
 hsaKmtQueueSignalExternalSemaphore;
+hsaKmtQueueWaitExternalSemaphore;
 hsaKmtRegisterMemoryWithFlags;
 hsaKmtRegisterGraphicsHandleToNodes;
 hsaKmtShareMemory;
