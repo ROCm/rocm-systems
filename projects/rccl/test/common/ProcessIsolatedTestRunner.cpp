@@ -567,6 +567,42 @@ void ProcessIsolatedTestRunner::displayCapturedOutput(
     }
 }
 
+// Re-exec child entrypoint.  If kReexecMarkerEnvVar is set this process is a
+// re-exec'd child: locate the matching test, run it, flush coverage, and
+// _exit().  Returns normally only when called from the original parent.
+void ProcessIsolatedTestRunner::handleReexecEntrypoint(
+    const std::vector<TestConfig>& tests)
+{
+    const char* target = std::getenv(kReexecMarkerEnvVar);
+    if(!target)
+        return;
+
+    // Unset so any nested RUN_ISOLATED_TESTS in the lambda doesn't recurse.
+    unsetenv(kReexecMarkerEnvVar);
+
+    for(const auto& testConfig : tests)
+    {
+        if(testConfig.name == target)
+        {
+            int result = runTestInProcess(testConfig);
+            fflush(NULL);
+#if defined(RCCL_TEST_CODE_COVERAGE)
+            __llvm_profile_write_file();
+            using WriteFn = int (*)(void);
+            auto libWrite = reinterpret_cast<WriteFn>(
+                dlsym(RTLD_DEFAULT, "rcclCoverageWriteFile"));
+            if(libWrite) libWrite();
+#endif
+            _exit(result);
+        }
+    }
+
+    std::cerr << "ProcessIsolatedTestRunner: re-exec target '" << target
+              << "' not found in registered tests" << std::endl;
+    fflush(NULL);
+    _exit(RCCL_TEST_INVALID);
+}
+
 // Execute all registered tests (simplified sequential execution only)
 bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
 {
@@ -584,37 +620,9 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
         testResults_.clear();
     }
 
-    // Re-exec child entrypoint. Every isolated test is spawned via
-    // fork()+execve() of the same binary with --gtest_filter set to the
-    // currently running TEST(). The re-exec'd process re-enters the TEST()
-    // body, calls RUN_ISOLATED_TESTS again, and lands here. The sentinel env
-    // var tells us to run the matching lambda inline (no further fork/exec)
-    // and exit with its result.
-    if(const char* target = std::getenv(kReexecMarkerEnvVar))
-    {
-        // Unset so any nested RUN_ISOLATED_TESTS in the lambda doesn't recurse.
-        unsetenv(kReexecMarkerEnvVar);
-        for(const auto& testConfig : testsToRun)
-        {
-            if(testConfig.name == target)
-            {
-                int result = runTestInProcess(testConfig);
-                fflush(NULL);
-#if defined(RCCL_TEST_CODE_COVERAGE)
-                __llvm_profile_write_file();
-                using WriteFn = int (*)(void);
-                auto libWrite = reinterpret_cast<WriteFn>(
-                    dlsym(RTLD_DEFAULT, "rcclCoverageWriteFile"));
-                if(libWrite) libWrite();
-#endif
-                _exit(result);
-            }
-        }
-        std::cerr << "ProcessIsolatedTestRunner: re-exec target '" << target
-                  << "' not found in registered tests" << std::endl;
-        fflush(NULL);
-        _exit(RCCL_TEST_INVALID);
-    }
+    // If this process is a re-exec child, handleReexecEntrypoint() runs the
+    // target test and calls _exit() — it returns only in the parent.
+    handleReexecEntrypoint(testsToRun);
 
     // Capture the gtest test-info once in the parent — current_test_info() is
     // a single global (not thread-local) and remains valid for the lifetime of

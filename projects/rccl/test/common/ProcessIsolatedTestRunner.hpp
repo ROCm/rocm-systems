@@ -222,6 +222,17 @@ private:
      */
     static void displayCapturedOutput(const CapturedOutput& output, const std::string& testName);
 
+    /**
+     * @brief Handle re-exec child entrypoint
+     *
+     * If kReexecMarkerEnvVar is set, this process is a re-exec child:
+     * run the matching test lambda, flush coverage, and _exit().
+     * Returns normally only when called from the original parent process.
+     *
+     * @param tests Test configurations to search for the target
+     */
+    static void handleReexecEntrypoint(const std::vector<TestConfig>& tests);
+
 public:
     /**
      * @brief Register a test configuration
