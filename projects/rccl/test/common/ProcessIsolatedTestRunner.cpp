@@ -603,6 +603,118 @@ void ProcessIsolatedTestRunner::handleReexecEntrypoint(
     _exit(RCCL_TEST_INVALID);
 }
 
+void ProcessIsolatedTestRunner::runSequential(
+    const std::vector<TestConfig>& tests,
+    const ExecutionOptions&        opts,
+    const SpawnFn&                 spawnFn)
+{
+    for(const auto& testConfig : tests)
+    {
+        auto outcome = spawnFn(testConfig, {});
+        displayCapturedOutput(outcome.output, testConfig.name);
+        recordTestResult(outcome.result);
+
+        if(opts.stopOnFirstFailure && !outcome.result.passed && !outcome.result.skipped)
+            break;
+    }
+}
+
+void ProcessIsolatedTestRunner::runParallel(
+    const std::vector<TestConfig>& tests,
+    const ExecutionOptions&        opts,
+    size_t                         parallelism,
+    const std::vector<int>&        gpuPool,
+    const SpawnFn&                 spawnFn)
+{
+    // Bounded sliding window: up to `parallelism` children run at once.
+    // GPU tests receive a non-overlapping slice of the pool via
+    // HIP_VISIBLE_DEVICES; concurrency and GPU slot availability are
+    // checked atomically to avoid TOCTOU races.
+    GpuSlotManager slots(gpuPool);
+
+    if(!slots.empty())
+        TEST_INFO(
+            "GPU slot manager: pool = [%s] (%zu device(s))",
+            GpuSlotManager::formatList(slots.pool()).c_str(), slots.size()
+        );
+
+    std::mutex              cvMtx;
+    std::condition_variable cv;
+    size_t                  active = 0;
+    std::atomic<bool>       anyFailed{false};
+    const bool              stopOnFirst = opts.stopOnFirstFailure;
+
+    using OutcomePair = std::pair<TestResult, CapturedOutput>;
+    std::vector<std::future<OutcomePair>> futures;
+    futures.reserve(tests.size());
+
+    for(const auto& testConfig : tests)
+    {
+        // 0 = CPU-only (no slot); > 0 = GPU slots needed.
+        const size_t need = (!slots.empty() && testConfig.numGpus > 0)
+                                ? testConfig.numGpus
+                                : 0;
+        // Clamp to pool size: over-requesting runs exclusively so no
+        // sibling can hold a subset and cause resource contention.
+        const size_t effectiveNeed = std::min(need, slots.size());
+
+        if(need > 0 && need > slots.size())
+        {
+            TEST_INFO(
+                "WARNING: test '%s' requests %zu GPU(s) but pool has only %zu — "
+                "assigning the entire pool and running exclusively",
+                testConfig.name.c_str(), need, slots.size()
+            );
+        }
+
+        std::vector<int> assignedGpus;
+        {
+            std::unique_lock<std::mutex> lk(cvMtx);
+            cv.wait(lk, [&]
+            {
+                if(stopOnFirst && anyFailed.load()) return true;
+                if(active >= parallelism) return false;
+                if(effectiveNeed > 0 && slots.freeSlots() < effectiveNeed)
+                    return false;
+                return true;
+            });
+
+            if(stopOnFirst && anyFailed.load())
+                break;
+
+            ++active;
+            if(effectiveNeed > 0)
+                assignedGpus = slots.acquire(effectiveNeed);
+        }
+
+        futures.push_back(std::async(
+            std::launch::async,
+            [testConfig, assignedGpus, stopOnFirst, &spawnFn, &active, &cv, &cvMtx,
+             &slots, &anyFailed]() -> OutcomePair
+            {
+                auto outcome = spawnFn(testConfig, assignedGpus);
+                {
+                    std::lock_guard<std::mutex> lk(cvMtx);
+                    --active;
+                    slots.release(assignedGpus);
+                    if(stopOnFirst && !outcome.result.passed && !outcome.result.skipped)
+                        anyFailed.store(true);
+                }
+                cv.notify_all();
+                return {std::move(outcome.result), std::move(outcome.output)};
+            }
+        ));
+    }
+
+    // Drain futures in registration order (including in-flight ones after a break).
+    for(auto& future : futures)
+    {
+        auto [result, output] = future.get();
+        displayCapturedOutput(output, result.testName);
+        recordTestResult(result);
+    }
+}
+
 // Execute all registered tests (simplified sequential execution only)
 bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
 {
@@ -646,12 +758,6 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
     // (applyEnvironmentVariables, setenv) happen inside the fork child which
     // is always single-threaded; the parent threads only touch their own pipe
     // file descriptors and the blocking waitpid() for their own child PID.
-    struct SpawnOutcome
-    {
-        TestResult     result;
-        CapturedOutput output;
-    };
-
     // spawnOne: fork+execv a fresh copy of the binary to run a single isolated
     // test.  `assignedGpus` lists the physical device indices this child is
     // allowed to use; it is injected via HIP_VISIBLE_DEVICES / ROCR_VISIBLE_DEVICES
@@ -876,110 +982,11 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
                      : detectedPool.size())
               : options.maxParallelJobs;
 
+    SpawnFn spawn = spawnOne;
     if(parallelism <= 1)
-    {
-        for(const auto& testConfig : testsToRun)
-        {
-            auto [result, output] = spawnOne(testConfig, {});
-            displayCapturedOutput(output, testConfig.name);
-            recordTestResult(result);
-
-            if(options.stopOnFirstFailure && !result.passed && !result.skipped)
-                break;
-        }
-    }
+        runSequential(testsToRun, options, spawn);
     else
-    {
-        // Bounded sliding window: up to `parallelism` children run at once.
-        // GPU tests receive a non-overlapping slice of the pool via
-        // HIP_VISIBLE_DEVICES; concurrency and GPU slot availability are
-        // checked atomically to avoid TOCTOU races.
-        // Use the pool that was already detected above -- same snapshot as
-        // the parallelism calculation to avoid any TOCTOU divergence.
-        GpuSlotManager slots(detectedPool);
-
-        if(!slots.empty())
-            TEST_INFO(
-                "GPU slot manager: pool = [%s] (%zu device(s))",
-                GpuSlotManager::formatList(slots.pool()).c_str(), slots.size()
-            );
-
-        std::mutex              cvMtx;
-        std::condition_variable cv;
-        size_t                  active = 0;
-        std::atomic<bool>       anyFailed{false};
-        const bool              stopOnFirst = options.stopOnFirstFailure;
-
-        using Outcome = std::pair<TestResult, CapturedOutput>;
-        std::vector<std::future<Outcome>> futures;
-        futures.reserve(testsToRun.size());
-
-        for(const auto& testConfig : testsToRun)
-        {
-            // 0 = CPU-only (no slot); > 0 = GPU slots needed.
-            const size_t need = (!slots.empty() && testConfig.numGpus > 0)
-                                    ? testConfig.numGpus
-                                    : 0;
-            // Clamp to pool size: over-requesting runs exclusively so no
-            // sibling can hold a subset and cause resource contention.
-            const size_t effectiveNeed = std::min(need, slots.size());
-
-            if(need > 0 && need > slots.size())
-            {
-                TEST_INFO(
-                    "WARNING: test '%s' requests %zu GPU(s) but pool has only %zu — "
-                    "assigning the entire pool and running exclusively",
-                    testConfig.name.c_str(), need, slots.size()
-                );
-            }
-
-            std::vector<int> assignedGpus;
-            {
-                std::unique_lock<std::mutex> lk(cvMtx);
-                cv.wait(lk, [&]
-                {
-                    if(stopOnFirst && anyFailed.load()) return true;
-                    if(active >= parallelism) return false;
-                    if(effectiveNeed > 0 && slots.freeSlots() < effectiveNeed)
-                        return false;
-                    return true;
-                });
-
-                if(stopOnFirst && anyFailed.load())
-                    break;
-
-                ++active;
-                if(effectiveNeed > 0)
-                    assignedGpus = slots.acquire(effectiveNeed);
-            }
-
-            futures.push_back(std::async(
-                std::launch::async,
-                [testConfig, assignedGpus, stopOnFirst, &spawnOne, &active, &cv, &cvMtx,
-                 &slots, &anyFailed]() -> Outcome
-                {
-                    auto so = spawnOne(testConfig, assignedGpus);
-                    {
-                        std::lock_guard<std::mutex> lk(cvMtx);
-                        --active;
-                        slots.release(assignedGpus);
-                        if(stopOnFirst && !so.result.passed && !so.result.skipped)
-                            anyFailed.store(true);
-                    }
-                    cv.notify_all();
-                    return {std::move(so.result), std::move(so.output)};
-                }
-            ));
-        }
-
-        // Drain futures in registration order (including in-flight ones after a break).
-        for(auto& future : futures)
-        {
-            auto [result, output] = future.get();
-            displayCapturedOutput(output, result.testName);
-            recordTestResult(result);
-        }
-    }
+        runParallel(testsToRun, options, parallelism, detectedPool, spawn);
 
     bool result = generateReport(options, testsToRun.size());
     {
