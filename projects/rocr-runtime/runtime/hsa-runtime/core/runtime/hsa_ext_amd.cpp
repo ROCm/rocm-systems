@@ -2011,5 +2011,44 @@ hsa_status_t hsa_amd_queue_signal_external_semaphore(
   CATCH;
 }
 
+hsa_status_t hsa_amd_queue_wait_external_semaphore(
+    hsa_queue_t *queue,
+    hsa_amd_external_semaphore_t sem,
+    uint64_t value) {
+  TRY;
+  IS_OPEN();
+  if (queue == nullptr) return HSA_STATUS_ERROR_INVALID_QUEUE;
+  if (sem.handle == 0)  return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  core::Queue *core_queue = core::Queue::Convert(queue);
+  IS_VALID(core_queue);
+
+  // Same agent-type gate as the signal path -- only AMD GPU AQL
+  // queues have a meaningful HSA_QUEUEID for the KMD reverse-cast.
+  core::Agent *core_agent = core_queue->GetAgent();
+  IS_VALID(core_agent);
+  if (core_agent->device_type() != core::Agent::DeviceType::kAmdGpuDevice)
+    return HSA_STATUS_ERROR_INVALID_QUEUE;
+  AMD::AqlQueue *aql = static_cast<AMD::AqlQueue *>(core_queue);
+
+  HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = { sem.handle };
+  HSAKMT_STATUS s = hsaKmtQueueWaitExternalSemaphore(
+      aql->aql_queue_id(), kmt_handle, value);
+
+  switch (s) {
+    case HSAKMT_STATUS_SUCCESS:
+      return HSA_STATUS_SUCCESS;
+    case HSAKMT_STATUS_INVALID_HANDLE:
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    case HSAKMT_STATUS_INVALID_NODE_UNIT:
+      return HSA_STATUS_ERROR_INVALID_AGENT;
+    case HSAKMT_STATUS_NOT_SUPPORTED:
+      return HSA_STATUS_ERROR;
+    default:
+      return HSA_STATUS_ERROR;
+  }
+  CATCH;
+}
+
 }   //  namespace amd
 }   //  namespace rocr

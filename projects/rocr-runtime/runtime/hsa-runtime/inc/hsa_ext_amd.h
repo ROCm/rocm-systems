@@ -77,9 +77,10 @@
  * - 1.23 - hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_MAX_DATA_PREFETCH_REGIONS
  * - 1.24 - hsa_amd_external_semaphore_handle_open/hsa_amd_external_semaphore_handle_close
  * - 1.25 - hsa_amd_queue_signal_external_semaphore
+ * - 1.26 - hsa_amd_queue_wait_external_semaphore
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 25
+#define HSA_AMD_INTERFACE_VERSION_MINOR 26
 
 #ifdef __cplusplus
 extern "C" {
@@ -3280,6 +3281,43 @@ hsa_status_t HSA_API hsa_amd_external_semaphore_handle_close(
  * @retval HSA_STATUS_ERROR                  KMD signal ioctl failed.
  */
 hsa_status_t HSA_API hsa_amd_queue_signal_external_semaphore(
+    hsa_queue_t                  *queue,
+    hsa_amd_external_semaphore_t  sem,
+    uint64_t                      value);
+
+/**
+ * @brief Submits a GPU-side wait on an imported external semaphore
+ * onto @p queue. The wait blocks any subsequent packets on the AQL
+ * ring until the imported syncobj reaches @p value. Ordering against
+ * prior submissions is the caller's responsibility (rocclr's
+ * host-queue worker submits commands sequentially, so the wait is
+ * appended in program order ahead of subsequent submitKernel /
+ * submitCopyMemory calls).
+ *
+ * Wired to KMD via libhsakmt's hsaKmtQueueWaitExternalSemaphore,
+ * which on Windows resolves to D3DKMTWaitForSynchronizationObjectFromGpu
+ * against the queue's WDDM context. Linux / KFD route is currently a
+ * stub returning HSA_STATUS_ERROR (NOT_SUPPORTED at the libhsakmt
+ * layer).
+ *
+ * @param queue HSA queue created from the agent that imported @p sem.
+ *   Must be an AMD GPU AQL queue; HostQueue / AIE queues return
+ *   HSA_STATUS_ERROR_INVALID_QUEUE.
+ * @param sem   Handle returned by hsa_amd_external_semaphore_handle_open.
+ * @param value Fence value to wait for. Vulkan binary semaphores
+ *   conventionally use 0 / 1 but the value is passed through verbatim
+ *   so timeline-style callers can pick their own.
+ *
+ * @retval HSA_STATUS_SUCCESS                Wait queued successfully.
+ * @retval HSA_STATUS_ERROR_INVALID_QUEUE    queue is null, invalid, or
+ *   not an AMD GPU AQL queue.
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT sem.handle is malformed.
+ * @retval HSA_STATUS_ERROR_INVALID_AGENT    The queue's KMD node has
+ *   no associated WDDM device.
+ * @retval HSA_STATUS_ERROR                  Underlying KMD wait
+ *   ioctl failed.
+ */
+hsa_status_t HSA_API hsa_amd_queue_wait_external_semaphore(
     hsa_queue_t                  *queue,
     hsa_amd_external_semaphore_t  sem,
     uint64_t                      value);
