@@ -528,6 +528,13 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
     // this TEST() body, including across background threads.
     const ::testing::TestInfo* gtestInfo
         = ::testing::UnitTest::GetInstance()->current_test_info();
+    if(!gtestInfo)
+    {
+        std::cerr << "ProcessIsolatedTestRunner: executeAllTests() must be "
+                     "called from within a gtest TEST() body; "
+                     "current_test_info() is null." << std::endl;
+        return false;
+    }
 
     // Per-test work unit: fork()+execv() the same binary with a gtest filter
     // and the sentinel env var, then drain the child's pipes and wait.
@@ -613,15 +620,8 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
 
             setenv(kReexecMarkerEnvVar, cfg.name.c_str(), 1);
 
-            if(!gtestInfo)
-            {
-                std::cerr << "ProcessIsolatedTestRunner: executeAllTests() must be "
-                             "called from within a gtest TEST() body; "
-                             "current_test_info() is null."
-                          << std::endl;
-                fflush(NULL);
-                _exit(RCCL_TEST_INVALID);
-            }
+            // gtestInfo was validated non-null in the parent before any
+            // fork; no need to re-check here.
             std::string filterArg = std::string("--gtest_filter=")
                                     + gtestInfo->test_suite_name() + "." + gtestInfo->name();
             // Disable ANSI color in the child: its output is captured via pipe
