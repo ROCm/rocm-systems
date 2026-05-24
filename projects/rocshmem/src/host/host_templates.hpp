@@ -31,10 +31,43 @@
 #include "memory/window_info.hpp"
 #include "team.hpp"
 
-#include <utility>
+#include <atomic>
 #include <cassert>
+#include <cstdint>
+#include <cstring>
+#include <utility>
 
 namespace rocshmem {
+
+// __atomic_load_n rejects float/double pointer arguments. Type-pun through a
+// same-sized unsigned integer so the builtin accepts it while preserving the
+// requested memory order and generating identical machine code.
+template <typename T>
+static T atomic_load_any(T* src, int order) {
+  static_assert(sizeof(T) == 1 || sizeof(T) == 2 ||
+                sizeof(T) == 4 || sizeof(T) == 8, "unsupported type width");
+  if constexpr (sizeof(T) == 1) {
+    uint8_t raw = __atomic_load_n(reinterpret_cast<uint8_t*>(src), order);
+    T result;
+    std::memcpy(&result, &raw, sizeof(T));
+    return result;
+  } else if constexpr (sizeof(T) == 2) {
+    uint16_t raw = __atomic_load_n(reinterpret_cast<uint16_t*>(src), order);
+    T result;
+    std::memcpy(&result, &raw, sizeof(T));
+    return result;
+  } else if constexpr (sizeof(T) == 4) {
+    uint32_t raw = __atomic_load_n(reinterpret_cast<uint32_t*>(src), order);
+    T result;
+    std::memcpy(&result, &raw, sizeof(T));
+    return result;
+  } else {
+    uint64_t raw = __atomic_load_n(reinterpret_cast<uint64_t*>(src), order);
+    T result;
+    std::memcpy(&result, &raw, sizeof(T));
+    return result;
+  }
+}
 
 template <typename T>
 __host__ void HostInterface::p(T* dest, T value, int pe,
@@ -296,7 +329,16 @@ __host__ T HostInterface::amo_fetch_add(void* dst, T value, int pe,
                                         WindowInfo* window_info) {
   WindowInfoMPI* window_info_mpi = dynamic_cast<WindowInfoMPI*>(window_info);
   if (!window_info_mpi) {
-    abort();
+    // IPC non-MPI: dst may be an IPC-mapped device address (not CPU-accessible).
+    // Delegate to a single-thread GPU kernel that performs the atomic and writes
+    // the old value to a fine-grain staging buffer the CPU can read after sync.
+    hdp_policy_->hdp_flush();
+    uint64_t u_val{}, u_ret{};
+    std::memcpy(&u_val, &value, sizeof(T));
+    u_ret = ipc_amo_fetch_add(dst, u_val, sizeof(T) == 4);
+    T ret{};
+    std::memcpy(&ret, &u_ret, sizeof(T));
+    return ret;
   }
 
   /* Calculate offset of remote dest from base address of window */
@@ -325,7 +367,17 @@ __host__ T HostInterface::amo_fetch_cas(void* dst, T value, T cond, int pe,
                                         WindowInfo* window_info) {
   WindowInfoMPI* window_info_mpi = dynamic_cast<WindowInfoMPI*>(window_info);
   if (!window_info_mpi) {
-    abort();
+    // IPC non-MPI: dst may be an IPC-mapped device address (not CPU-accessible).
+    // Delegate to a single-thread GPU kernel that performs the CAS and writes
+    // the old value to a fine-grain staging buffer the CPU can read after sync.
+    hdp_policy_->hdp_flush();
+    uint64_t u_val{}, u_cond{}, u_ret{};
+    std::memcpy(&u_val, &value, sizeof(T));
+    std::memcpy(&u_cond, &cond, sizeof(T));
+    u_ret = ipc_amo_fetch_cas(dst, u_cond, u_val, sizeof(T) == 4);
+    T ret{};
+    std::memcpy(&ret, &u_ret, sizeof(T));
+    return ret;
   }
 
   /* Calculate offset of remote dest from base address of window */
@@ -468,10 +520,17 @@ template <typename T>
 __host__ void HostInterface::wait_until(T *ivars, int cmp, T val,
                                         WindowInfo* window_info) {
   WindowInfoMPI* window_info_mpi = dynamic_cast<WindowInfoMPI*>(window_info);
-  if (!window_info_mpi) {
-    abort();
-  }
   LOG_API("host::wait_until (ivars=%p, cmp=%d)", ivars, cmp);
+  if (!window_info_mpi) {
+    // IPC non-MPI: ivars is CPU-accessible fine-grain memory; spin with a
+    // plain atomic load until the condition is satisfied.
+    while (1) {
+      hdp_policy_->hdp_flush();
+      T fetched = atomic_load_any(ivars, __ATOMIC_SEQ_CST);
+      if (compare(cmp, fetched, val)) break;
+    }
+    return;
+  }
 
   /*
    * Find the offset of this memory in the window
@@ -725,10 +784,13 @@ template <typename T>
 __host__ int HostInterface::test(T* ivars, int cmp, T val,
                                  WindowInfo* window_info) {
   WindowInfoMPI* window_info_mpi = dynamic_cast<WindowInfoMPI*>(window_info);
-  if (!window_info_mpi) {
-    abort();
-  }
   LOG_API("host::test (ivars=%p, cmp=%d)", ivars, cmp);
+  if (!window_info_mpi) {
+    // IPC non-MPI: ivars is CPU-accessible fine-grain memory.
+    hdp_policy_->hdp_flush();
+    T fetched = atomic_load_any(ivars, __ATOMIC_SEQ_CST);
+    return compare(cmp, fetched, val);
+  }
 
   /*
    * Find the offset of this memory in the window

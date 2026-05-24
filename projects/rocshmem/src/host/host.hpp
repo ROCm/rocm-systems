@@ -383,6 +383,17 @@ class HostInterface {
    */
   HostContextWindowInfo** host_window_context_pool_{nullptr};
 
+  /**
+   * @brief Fine-grain staging buffer for IPC non-MPI GPU atomic operations.
+   * The GPU kernel writes the old value here; the CPU reads it after sync.
+   * Null in the MPI path (only allocated by the TcpBootstrap constructor).
+   */
+  uint64_t* ipc_staging_buf_{nullptr};
+
+  __host__ uint64_t ipc_amo_fetch_add(void* dst, uint64_t val, bool is_32bit);
+  __host__ uint64_t ipc_amo_fetch_cas(void* dst, uint64_t cond, uint64_t val,
+                                      bool is_32bit);
+
   int find_win_info_in_pool(WindowInfo* window_info);
 
   int find_avail_pool_entry();
