@@ -972,7 +972,8 @@ def test_run_prof_success_v3(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
     monkeypatch.setattr(
-        "glob.glob", lambda pattern: [workload_dir + "/out/pmc_1/results_0.csv"]
+        "utils.utils_profile.process_rocprofv3_output",
+        lambda *a, **k: [workload_dir + "/out/pmc_1/results_0.csv"],
     )
 
     utils_profile.run_prof(str(fname), ["--arg"], workload_dir, logging.INFO, "csv")
@@ -1314,7 +1315,6 @@ def test_run_prof_no_results_files(tmp_path, monkeypatch):
         "utils.utils_profile.capture_subprocess_output",
         lambda *a, **k: (True, "success"),
     )
-    monkeypatch.setattr("glob.glob", lambda pattern: [])  # No files found
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
 
@@ -1432,9 +1432,6 @@ def test_run_prof_tcc_flattening_mi300(tmp_path, monkeypatch):
         lambda *a, **k: (True, "success"),
     )
     monkeypatch.setattr("utils.mi_gpu_spec.mi_gpu_specs.get_num_xcds", lambda *a: 2)
-    monkeypatch.setattr(
-        "glob.glob", lambda pattern: [workload_dir + "/results_test.csv"]
-    )
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
 
@@ -1757,15 +1754,6 @@ def test_process_rocprofv3_output_csv_format_with_counter_files(tmp_path, monkey
 
     counter_file.write_text("counter,data\ntest,value")
     agent_file.write_text("agent,data\ntest,value")
-
-    def mock_glob(pattern):
-        if "_counter_collection.csv" in pattern:
-            return [str(counter_file)]
-        elif "_converted.csv" in pattern:
-            return [str(converted_file)]
-        return []
-
-    monkeypatch.setattr("glob.glob", mock_glob)
 
     def mock_v3_counter_csv_to_v2_csv(counter_path, agent_path, output_path):
         Path(output_path).write_text("converted,data\ntest,value")
