@@ -48,6 +48,13 @@ memory_type = ["coarse","fine", "host"]
 path = os.path.dirname(os.path.abspath(__file__))
 executable = path + "/../build/all_reduce_perf"
 
+# NCCL debug env prepended to every rccl-tests invocation; lets us capture
+# the last subsystem touched when a test hangs in CI.
+NCCL_DEBUG_ENV = "NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=ALL "
+# Per-subprocess wall-clock timeout so a hang fails the test instead of
+# wedging the CI runner.
+TEST_TIMEOUT_SEC = 180
+
 @pytest.mark.parametrize("nthreads, ngpus_single, byte_range, op, step_factor, datatype, memory_type",
     itertools.product(nthreads, ngpus_single, byte_range, op, step_factor, datatype, memory_type))
 def test_AllReduceSingleProcess(nthreads, ngpus_single, byte_range, op, step_factor, datatype, memory_type):
@@ -63,8 +70,12 @@ def test_AllReduceSingleProcess(nthreads, ngpus_single, byte_range, op, step_fac
                 "-Y", memory_type]
         if memory_type == "fine":
             args.insert(0, "HSA_FORCE_FINE_GRAIN_PCIE=1")
-        args_str = " ".join(args)
-        rccl_test = subprocess.run(args_str, stdout=subprocess.PIPE, universal_newlines=True, shell=True)
+        args_str = NCCL_DEBUG_ENV + " ".join(args)
+        rccl_test = subprocess.run(args_str, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                   universal_newlines=True, shell=True, timeout=TEST_TIMEOUT_SEC)
+    except subprocess.TimeoutExpired as err:
+        print(err.stdout or "(no output captured)")
+        pytest.fail(f"AllReduce test HUNG (>{TEST_TIMEOUT_SEC}s).")
     except subprocess.CalledProcessError as err:
         print(rccl_test.stdout)
         pytest.fail("AllReduce test error(s) detected.")
@@ -99,9 +110,13 @@ def test_AllReduceMPI(request, nthreads, nprocs, ngpus_mpi, byte_range, op, step
                     "-o", op,
                     "-f", step_factor,
                     "-d", datatype]
-        args_str = " ".join(args)
+        args_str = NCCL_DEBUG_ENV + " ".join(args)
         print(args_str)
-        rccl_test = subprocess.run(args_str, universal_newlines=True, shell=True)
+        rccl_test = subprocess.run(args_str, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                   universal_newlines=True, shell=True, timeout=TEST_TIMEOUT_SEC)
+    except subprocess.TimeoutExpired as err:
+        print(err.stdout or "(no output captured)")
+        pytest.fail(f"AllReduce test HUNG (>{TEST_TIMEOUT_SEC}s).")
     except subprocess.CalledProcessError as err:
         print(rccl_test.stdout)
         pytest.fail("AllReduce test error(s) detected.")
