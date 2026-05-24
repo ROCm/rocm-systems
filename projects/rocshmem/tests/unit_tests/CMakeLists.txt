@@ -70,7 +70,14 @@ if (USE_IPC)
       ipc_impl_simple_coarse_gtest.cpp
       ipc_impl_simple_fine_gtest.cpp
       ipc_impl_tiled_fine_gtest.cpp
+      ipc_host_amo_gtest.cpp
   )
+endif()
+
+# Pass -DJIRA_419_FIXED=1 at cmake time to compile the post-fix functional
+# tests instead of the pre-fix death tests.
+if (JIRA_419_FIXED)
+  target_compile_definitions(${PROJECT_NAME} PRIVATE JIRA_419_FIXED)
 endif()
 
 
