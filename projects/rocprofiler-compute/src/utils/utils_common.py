@@ -5,7 +5,6 @@ import argparse
 import csv
 import ctypes
 import errno
-import glob
 import io
 import os
 import pty
@@ -126,8 +125,10 @@ def resolve_rocm_library_path(library_path: Optional[str]) -> Optional[str]:
         console_debug(f"Resolved library (exact match): {path}")
         return str(path)
 
-    # Escape the input path so any glob metacharacters are treated literally.
-    matches = glob.glob(f"{glob.escape(library_path)}.*")
+    # Use iterdir to avoid glob metacharacter issues in library_path.
+    matches = [
+        str(p) for p in path.parent.iterdir() if p.name.startswith(path.name + ".")
+    ]
 
     # First pass: filter to numeric versions and collect version tuples
     version_tuples: list[tuple[list[int], str]] = []
