@@ -47,7 +47,6 @@
 #include <climits>
 #include <map>
 #include <memory>
-#include <unordered_map>
 
 #include "core/inc/amd_aie_agent.h"
 #include "core/inc/driver.h"
@@ -79,60 +78,12 @@ class XdnaDriver final : public core::Driver {
     constexpr bool IsValid() const { return handle != 0; }
   };
 
-
-  /// @brief Per hardware context PDI cache.
-  class PDICache {
-   private:
-    /// @brief CU mask size.
-    constexpr static size_t cu_mask_size = sizeof(uint32_t) * CHAR_BIT;
-
-   public:
-    using size_type = uint32_t;
-
-   private:
-    std::array<BOHandle, cu_mask_size> entries = {};
-    size_type entry_count = 0;
-
-   public:
-    /// @brief Sentinel value for entries not found.
-    constexpr static size_type NotFound = cu_mask_size;
-
-    /// @brief Returns if the cache is empty.
-    constexpr bool empty() const { return entry_count == 0; }
-
-    /// @brief Returns the size of the cache.
-    constexpr size_type size() const { return entry_count; }
-
-    /// @brief Returns the index of the BO handle if it is the cache, otherwise @ref NotFound.
-    ///
-    /// This function does a linear search because the mask is small (32 elements).
-    size_type GetIndex(uint32_t pdi_handle) const {
-      for (size_type i = 0; i < entry_count; ++i) {
-        if (entries[i].handle == pdi_handle) {
-          return i;
-        }
-      }
-      return NotFound;
-    }
-
-    /// @brief Sets the next cache entry.
-    hsa_status_t SetNext(const BOHandle& pdi_bo_handle, size_type& index) {
-      if (entry_count == entries.size()) {
-        // cache is full
-        return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-      }
-
-      index = entry_count++;
-      entries[index] = pdi_bo_handle;
-      return HSA_STATUS_SUCCESS;
-    }
-
-    constexpr const BOHandle& operator[](size_type index) const { return entries[index]; }
-  };
-
 public:
   XdnaDriver(std::string devnode_name);
 
+  /// @brief Determine if the xdna-driver is present on the system and attempt to open it if found.
+  ///
+  /// @param[out] driver object
   static hsa_status_t DiscoverDriver(std::unique_ptr<core::Driver>& driver);
 
   /// @brief Returns the size of the dev heap in bytes.
@@ -141,7 +92,6 @@ public:
   hsa_status_t Init() override;
   hsa_status_t ShutDown() override;
   hsa_status_t QueryKernelModeDriver(core::DriverQuery query) override;
-
   hsa_status_t Open() override;
   hsa_status_t Close() override;
   hsa_status_t GetSystemProperties(HsaSystemProperties& sys_props) const override;
@@ -164,6 +114,23 @@ public:
   hsa_status_t UpdateQueue(HSA_QUEUEID queue_id, uint32_t queue_pct, HSA::hsa_amd_queue_priority_internal_t priority,
                            void* queue_addr, uint64_t queue_size, HsaEvent* event) const override;
   hsa_status_t DestroyQueue(HSA_QUEUEID queue_id) const override;
+
+  /// @brief Create Kernel Mode Queue (KMQ) metadata to dispatch packets in a user-mode access agent
+  /// dispatch queue.
+  ///
+  /// @param[in] queue_size size of the dispatch queue in number of packets
+  /// @param[out] queue_metadata KMQ metadata created for the dispatch queue
+  hsa_status_t CreateKernelModeQueue(size_t queue_size, void** queue_metadata) const;
+
+  /// @brief Destroy the Kernel Mode Queue (KMQ) metadata.
+  ///
+  /// @note This function will also destroy the hardware context associated with the KMQ. Even if
+  /// that fails, the metadata is still considered destroyed and the function will return the error
+  /// from destroying the hardware context.
+  ///
+  /// @param[in] queue_metadata KMQ metadata to be destroyed
+  hsa_status_t DestroyKernelModeQueue(void* queue_metadata) const;
+
   hsa_status_t SetQueueCUMask(HSA_QUEUEID queue_id, uint32_t cu_mask_count,
                               uint32_t* queue_cu_mask) const override;
   hsa_status_t AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
@@ -182,17 +149,17 @@ public:
                                      uint64_t* drm_fd_offset) override;
   hsa_status_t DestroyShareableHandle(core::ShareableHandle* handle) override;
 
-  /// @brief Submits a chain of command packets to the driver for execution.
+  /// @brief Submits packets to the driver for execution.
   ///
   /// @note The packets are contiguous in index but not necessarily contiguous in memory.
   ///
-  /// @param[in] q AIE KMQ queue with queued packets
-  /// @param[in,out] queue_id queue ID. It will be updated if the driver needs to create a new
-  /// hardware context for this command chain.
+  /// @param[in] q queue with packets
+  /// @param[in,out] queue_metadata Kernel Mode Queue (KMQ) metadata. It will be updated if the
+  /// driver needs to create a new hardware context.
   /// @param[in] first_pkt_idx index of the first packet in the queue
-  /// @param[in] num_pkts number of packets in the queue to be submitted
+  /// @param[in] num_pkts number of packets in the queue to be submitted. Must be greater than 0.
   /// @param[in] num_core_tiles number of core tiles in the AIE device
-  hsa_status_t SubmitCmdChain(hsa_queue_t& q, HSA_QUEUEID& queue_id, uint64_t first_pkt_idx,
+  hsa_status_t SubmitCmdChain(hsa_queue_t& q, void* queue_metadata, uint64_t first_pkt_idx,
                               uint64_t num_pkts, uint32_t num_core_tiles);
 
   hsa_status_t SPMAcquire(uint32_t preferred_node_id) const override;
@@ -222,42 +189,32 @@ public:
  private:
   /// @brief Destroys @p bo_handle.
   ///
-  /// This function will unmap the virtual address and close the BO, but will not return any status.
-  void DestroyBOHandle(BOHandle& bo_handle);
+  /// @note This function will unmap the virtual address and close the BO, even if the former fails.
+  ///
+  /// @param[in,out] bo_handle BO handle to destroy.
+  hsa_status_t DestroyBOHandle(BOHandle& bo_handle) const;
 
   /// @brief Returns the BO associated with the address.
+  ///
+  /// @param[in] mem virtual address to query.
   BOHandle FindBOHandle(void* mem) const;
 
-  /// @brief Creates a new hardware context with the given PDI BO handles.
-  hsa_status_t ConfigHwCtx(const PDICache& pdi_bo_handles, HSA_QUEUEID& queue_id,
-                           uint32_t num_core_tiles) const;
-
+  /// @brief Queries the driver version and updates internal state.
   hsa_status_t QueryDriverVersion();
 
-  /// @brief Allocate device accesible heap space.
-  ///
-  /// Allocate and map a buffer object (BO) that the AIE device can access.
+  /// @brief Allocate device accessible heap space.
   hsa_status_t InitDeviceHeap();
+
+  /// @brief Free device accessible heap space.
   hsa_status_t FreeDeviceHeap();
 
   /// @brief Creates a command BO and returns it to @p bo_info.
   ///
-  /// @param size size of memory to allocate
-  /// @param bo_info allocated BO
-  hsa_status_t CreateCmdBO(uint32_t size, BOHandle& bo_info);
-
-  /// @brief Executes a command and waits for its completion
-  ///
-  /// @param cmd_chain_bo_handle command to execute
-  /// @param bo_handles handles associated with the command
-  /// @param aie_queue queue to submit to
-  hsa_status_t ExecCmdAndWait(const BOHandle& cmd_chain_bo_handle,
-                              const std::vector<uint32_t>& bo_handles, HSA_QUEUEID queue_id);
+  /// @param[in] size size of memory to allocate
+  /// @param[out] bo_info allocated BO
+  hsa_status_t CreateCmdBO(uint32_t size, BOHandle& bo_info) const;
 
   std::map<void*, BOHandle> vmem_addr_mappings;
-
-  /// @brief Queue to PDI cache map.
-  std::unordered_map<HSA_QUEUEID, PDICache> queue_pdi_map_;
 
   /// @brief Virtual address range allocated for the device heap.
   ///

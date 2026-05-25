@@ -48,6 +48,7 @@
 #include "hsa.h"
 #include "hsa_ext_image.h"
 #include "hsa_ven_amd_pc_sampling.h"
+#include "amd_launch_descriptor.h"
 
 /**
  * - 1.0 - initial version
@@ -72,9 +73,11 @@
  * - 1.19 - hsa_amd_agent_preload
  * - 1.20 - Memory batch discard API: hsa_amd_svm_discard_batch_async
  * - 1.21 - hsa_amd_signal_get_event_id
+ * - 1.22 - hsa_amd_queue_get_info: per-queue VM fault state queries
+ * - 1.23 - hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_MAX_DATA_PREFETCH_REGIONS
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 21
+#define HSA_AMD_INTERFACE_VERSION_MINOR 23
 
 #ifdef __cplusplus
 extern "C" {
@@ -533,10 +536,17 @@ typedef struct hsa_amd_metadata_kernel_dispatch_packet_s {
    * Kernarg preload 30 through 31
    */
   uint32_t kernarg_preload_30_31[2];
-  /**
-   * Reserved. Must be 0.
-   */
-  uint8_t reserved1[52];
+  union {
+    /**
+     * Reserved. Must be 0.
+     */
+    uint8_t reserved1[52];
+    /**
+     * Launch descriptor. Overlays the former reserved1[52] area.
+     * Zero-initialised means version=0 (NONE) — CP treats as "no descriptor".
+     */
+    amd_launch_descriptor_t launch_descriptor;
+  };
 } hsa_amd_metadata_kernel_dispatch_packet_t;
 
 /**
@@ -639,6 +649,13 @@ enum {
    * by the requested operation.
    */
   HSA_STATUS_ERROR_XNACK_DISABLED = 48,
+
+  /**
+   * The kernel dispatch packet parameters exceed hardware limits for this
+   * agent (e.g. register usage, work-group dimensions, or other dispatch
+   * constraints enforced by the command processor).
+   */
+  HSA_STATUS_ERROR_INVALID_DISPATCH_PARAMETERS = 49,
 };
 
 /** @} */
@@ -944,6 +961,11 @@ typedef enum hsa_amd_agent_info_s {
    * Returns hsa_amd_dim3_t into value output.
    */
   HSA_AMD_AGENT_INFO_KERNEL_WG_MAX_DIM = 0xA122,
+  /*
+   * Maximum number of L2 data prefetch regions supported per kernel dispatch.
+   * Returns uint32_t. Zero if the device does not support dynamic data prefetch.
+   */
+  HSA_AMD_AGENT_INFO_MAX_DATA_PREFETCH_REGIONS = 0xA123,
 } hsa_amd_agent_info_t;
 
 /**
@@ -2190,18 +2212,18 @@ typedef enum {
  *
  * LINEAR (multi-copy when num_entries > 0, one signal for all entries):
  *   src_list         -- caller-owned array of num_entries source pointers
- *   src_agent        -- common source agent (must be GPU)
+ *   src_agent        -- common source agent (GPU or CPU); if CPU, all dst_agent_list entries must be GPU
  *   dst_list         -- caller-owned array of num_entries destination pointers
  *   dst_agent_list   -- caller-owned array of num_entries destination agents
  *   size_list        -- caller-owned array of num_entries copy sizes in bytes
- *   num_entries         -- number of entries (>= 1, <= 1024)
+ *   num_entries         -- number of entries (>= 1, <= 65536)
  *
  * LINEAR_BROADCAST (single source -> multiple destinations):
  *   src, src_agent    -- source pointer and agent (must be GPU)
  *   dst_list          -- caller-owned array of num_entries destination pointers
  *   dst_agent_list    -- caller-owned array of num_entries destination agents
  *   size              -- copy size in bytes (same for every destination)
- *   num_entries          -- number of entries in dst_list / dst_agent_list (>= 1, <= 1024)
+ *   num_entries          -- number of entries in dst_list / dst_agent_list (>= 1, <= 65536)
  *
  * LINEAR_SWAP (exchange contents of two buffers, multi-entry when num_entries > 0):
  *   src_list         -- caller-owned array of num_entries source pointers
@@ -2209,7 +2231,7 @@ typedef enum {
  *   dst_list         -- caller-owned array of num_entries destination pointers
  *   dst_agent_list   -- caller-owned array of num_entries destination agents
  *   size_list        -- caller-owned array of num_entries swap sizes in bytes
- *   num_entries      -- number of entries (>= 1, <= 1024)
+ *   num_entries      -- number of entries (>= 1, <= 65536)
  *
  * LINEAR_SWAP (single, when num_entries == 0):
  *   src, src_agent  -- first buffer pointer and agent (modified in place)
@@ -4319,6 +4341,28 @@ typedef enum {
    * The type of this attribute is uint8_t[8].
    */
   HSA_AMD_QUEUE_INFO_PROPERTIES,
+
+  /*
+   * Per-queue VM fault state — populated after a GPU memory fault.
+   */
+
+  /*
+   * Whether this queue has experienced a VM fault.
+   * The type of this attribute is bool.
+   */
+  HSA_AMD_QUEUE_INFO_VM_FAULT_STATUS,
+  /*
+   * The virtual address that caused the VM fault on this queue.
+   * Only valid when HSA_AMD_QUEUE_INFO_VM_FAULT_STATUS is true.
+   * The type of this attribute is uint64_t.
+   */
+  HSA_AMD_QUEUE_INFO_VM_FAULT_ADDRESS,
+  /*
+   * A bitmask of HSA_AMD_MEMORY_FAULT_* flags describing the reason for the
+   * VM fault on this queue.  Only valid when HSA_AMD_QUEUE_INFO_VM_FAULT_STATUS
+   * is true.  The type of this attribute is uint32_t.
+   */
+  HSA_AMD_QUEUE_INFO_VM_FAULT_REASON,
 } hsa_queue_info_attribute_t;
 
 hsa_status_t hsa_amd_queue_get_info(hsa_queue_t* queue, hsa_queue_info_attribute_t attribute,

@@ -83,9 +83,9 @@ public:
      * @throws std::runtime_error If AMD SMI query fails.
      */
     [[nodiscard]] std::vector<stat_entry> get_nic_rdma_port_statistics(
-        uint8_t rdma_port_idx) const
+        std::uint8_t rdma_port_idx) const
     {
-        uint32_t num_stats = 0;
+        std::uint32_t num_stats = 0;
         check(amdsmi_get_nic_rdma_port_statistics(m_handle, rdma_port_idx, &num_stats,
                                                   nullptr),
               "get_nic_rdma_port_statistics (count)");
