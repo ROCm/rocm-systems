@@ -17,6 +17,11 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
+#include <cstdint>
+#include <initializer_list>
+#include <utility>
+
 #include "fakes/p2p_fakes.h"
 
 // Pull in the hipified copy of p2p.cc (cudaXxx -> hipXxx rewrites already
@@ -25,7 +30,7 @@
 // literal pointing at ${PROJECT_BINARY_DIR}/hipify/src/transport/p2p.cc.
 #include P2P_CC_PATH
 
-// ---------------------------------------------------------------------------
+// ===========================================================================
 // Default fixture for every test in this file.
 //
 // Several tests install per-test hooks into the controllable seams declared
@@ -34,262 +39,259 @@
 // each other. Tests that don't currently install hooks still use this
 // fixture -- it's the file-wide default so adding a hook to a test that
 // previously didn't need one doesn't silently contaminate the next test.
-// ---------------------------------------------------------------------------
+// ===========================================================================
 class P2pMicrotest : public ::testing::Test {
 protected:
     void TearDown() override { ResetP2pFakes(); }
 };
 
-// ---------------------------------------------------------------------------
-// ipcRegisterBuffer: cheapest real path -- regRecord == nullptr.
+// ===========================================================================
+// Helpers: lightweight builders for the recurring input/output shapes.
 //
-// With no registration record to consult, the function should fall through
-// the whole per-peer loop without touching the proxy or driver and just
-// zero out the OUT params. This confirms the static symbol is reachable
-// from the test TU (via the #include of p2p.cc above) without needing any
-// of the fakes' "real" behaviour.
-// ---------------------------------------------------------------------------
+// Goal: each test body should read as "build the state that makes this test
+// different, call the function, assert". Anything that's identical between
+// tests lives here.
+// ===========================================================================
+
+namespace {
+
+// RankMapping -- owns storage for comm->rankToLocalRank and wires it in.
+// Usage:
+//     RankMapping ranks(comm, {{peerRank, peerLocalRank}});
+// The mapping table is sized to NCCL_MAX_LOCAL_RANKS (the maximum local
+// rank index ipcRegisterBuffer can address); unassigned entries stay 0.
+struct RankMapping {
+    std::array<int, NCCL_MAX_LOCAL_RANKS> storage{};
+
+    RankMapping(ncclComm& comm,
+                std::initializer_list<std::pair<int, int>> rankToLocal)
+    {
+        for (auto& [rank, localRank] : rankToLocal) {
+            storage[rank] = localRank;
+        }
+        comm.rankToLocalRank = storage.data();
+    }
+};
+
+// ReusableIpcInfo -- owns the per-peer ncclIpcRegInfo + the host-side
+// remote-address slot that the reuse path keys off. Drop it into a
+// regRecord with .InstallInto(regRecord).
+struct ReusableIpcInfo {
+    ncclIpcRegInfo info{};
+    std::array<uintptr_t, NCCL_MAX_LOCAL_RANKS> hostPeerRmtAddrs{};
+    int peerLocalRank;
+
+    ReusableIpcInfo(int peerRank,
+                    int peerLocalRank_,
+                    uintptr_t rmtRegAddr,
+                    bool legacyIpcCap)
+        : peerLocalRank(peerLocalRank_)
+    {
+        info.peerRank             = peerRank;
+        info.impInfo.rmtRegAddr   = reinterpret_cast<void*>(rmtRegAddr);
+        info.impInfo.legacyIpcCap = legacyIpcCap;
+        hostPeerRmtAddrs[peerLocalRank] = rmtRegAddr;
+    }
+
+    void InstallInto(ncclReg& regRecord)
+    {
+        regRecord.ipcInfos[peerLocalRank]      = &info;
+        regRecord.regIpcAddrs.hostPeerRmtAddrs = hostPeerRmtAddrs.data();
+    }
+};
+
+// IpcRegOutputs -- the four OUT parameters of ipcRegisterBuffer, pre-seeded
+// with sentinel values. The sentinels matter: ipcRegisterBuffer is required
+// to either populate them on success or zero them on failure, and an
+// accidental no-op (or a fail path that forgets to clear) shows up as the
+// sentinel surviving.
+struct IpcRegOutputs {
+    static constexpr uintptr_t kSentinel = 0xDEADBEEFDEADBEEFull;
+    int        regBufFlag    = static_cast<int>(kSentinel);
+    uintptr_t  offsetOut     = kSentinel;
+    uintptr_t* peerRmtAddrs  = reinterpret_cast<uintptr_t*>(kSentinel);
+
+    // Assert the function's documented failure-path contract: all three
+    // outputs cleared. Called by every test that takes a fail: path.
+    void ExpectZeroed() const
+    {
+        EXPECT_EQ(regBufFlag,   0);
+        EXPECT_EQ(offsetOut,    0u);
+        EXPECT_EQ(peerRmtAddrs, nullptr);
+    }
+};
+
+// CallIpcRegisterBuffer -- thin wrapper so test bodies aren't dominated by
+// a 12-line argument list. `isLegacyIpc` is in/out: callers initialise it
+// to whatever value they want to see overwritten (or kept).
+ncclResult_t CallIpcRegisterBuffer(ncclComm& comm,
+                                   const void* userbuff,
+                                   size_t buffSize,
+                                   int* peerRanks,
+                                   int nPeers,
+                                   ncclIpcRegType type,
+                                   ncclReg* regRecord,
+                                   IpcRegOutputs& out,
+                                   bool* isLegacyIpc)
+{
+    return ipcRegisterBuffer(&comm, userbuff, buffSize, peerRanks, nPeers,
+                             type, regRecord,
+                             &out.regBufFlag, &out.offsetOut,
+                             &out.peerRmtAddrs, isLegacyIpc);
+}
+
+}  // namespace
+
+// ===========================================================================
+// Tests
+// ===========================================================================
+
+// ipcRegisterBuffer with regRecord == nullptr: cheapest real path. The
+// function should fall through the whole per-peer loop without touching the
+// proxy or driver, leaving all OUT params zeroed.
 TEST_F(P2pMicrotest, IpcRegisterBuffer_NullRegRecordIsNoOp)
 {
-    // Comm is never dereferenced on this path, but pass a non-null pointer
-    // to be safe against future defensive null-checks.
-    ncclComm dummyComm{};
+    ncclComm comm{};
+    int peerRanks[] = {0};
+    IpcRegOutputs out;
+    bool isLegacyIpc = true;
 
-    int       peerRanks[1]    = {0};
-    int       regBufFlag      = 0xdead;
-    uintptr_t offsetOut       = 0xdead;
-    uintptr_t* peerRmtAddrs   = reinterpret_cast<uintptr_t*>(0xdead);
-    bool      isLegacyIpc     = true;
+    auto r = CallIpcRegisterBuffer(comm,
+                                   /*userbuff=*/ reinterpret_cast<const void*>(0x1000),
+                                   /*buffSize=*/ 4096,
+                                   peerRanks, 1,
+                                   NCCL_IPC_COLLECTIVE,
+                                   /*regRecord=*/ nullptr,
+                                   out, &isLegacyIpc);
 
-    ncclResult_t r = ipcRegisterBuffer(
-        /*comm=*/        &dummyComm,
-        /*userbuff=*/    reinterpret_cast<const void*>(0x1000),
-        /*buffSize=*/    4096,
-        /*peerRanks=*/   peerRanks,
-        /*nPeers=*/      1,
-        /*type=*/        NCCL_IPC_COLLECTIVE,
-        /*regRecord=*/   nullptr,
-        /*regBufFlag=*/  &regBufFlag,
-        /*offsetOut=*/   &offsetOut,
-        /*peerRmtAddrsOut=*/ &peerRmtAddrs,
-        /*isLegacyIpc=*/ &isLegacyIpc);
-
-    EXPECT_EQ(r,             ncclSuccess);
-    EXPECT_EQ(regBufFlag,    0);
-    EXPECT_EQ(offsetOut,     0u);
-    EXPECT_EQ(peerRmtAddrs,  nullptr);
+    EXPECT_EQ(r, ncclSuccess);
+    out.ExpectZeroed();
     EXPECT_FALSE(isLegacyIpc);
 }
 
-// ---------------------------------------------------------------------------
-// ipcRegisterBuffer: reuse path for SENDRECV.
-//
-// Pre-populate regRecord->ipcInfos[peerLocalRank] so the per-peer loop hits
-// the "we already have IPC info for peerLocalRank" branch -- no driver, no
-// proxy, no device-stream work. For type == NCCL_IPC_SENDRECV the post-loop
-// block is also trivial: it just returns the host-side remote address as
-// *peerRmtAddrsOut. This pins down the cheapest path through the function
-// that still actually populates all the outputs.
-// ---------------------------------------------------------------------------
+// Reuse path for SENDRECV: per-peer loop hits the "already have IPC info"
+// branch (no driver, no proxy, no device-stream work), and the post-loop
+// arm returns the host-side remote address as *peerRmtAddrsOut.
 TEST_F(P2pMicrotest, IpcRegisterBuffer_SendrecvReusesExistingIpcInfo)
 {
-    constexpr int kPeerRank      = 3;
-    constexpr int kPeerLocalRank = 2;
-    constexpr uintptr_t kBegAddr     = 0x10000;
-    constexpr uintptr_t kBuffOffset  = 0x40;        // userbuff = begAddr + 0x40
-    constexpr uintptr_t kRmtRegAddr  = 0xdeadbeef00ull;
+    constexpr int       kPeerRank      = 3;
+    constexpr int       kPeerLocalRank = 2;
+    constexpr uintptr_t kBegAddr       = 0x10000;
+    constexpr uintptr_t kBuffOffset    = 0x40;
+    constexpr uintptr_t kRmtRegAddr    = 0xA000;
 
-    // Build a comm with enough state for the reuse path:
-    //   - rankToLocalRank[kPeerRank] -> kPeerLocalRank
     ncclComm comm{};
-    int rankToLocalRank[8] = {0, 0, 0, 0, 0, 0, 0, 0};
-    rankToLocalRank[kPeerRank] = kPeerLocalRank;
-    comm.rankToLocalRank = rankToLocalRank;
+    RankMapping ranks(comm, {{kPeerRank, kPeerLocalRank}});
 
-    // Pre-built remote-address table (host side). For NCCL_IPC_SENDRECV the
-    // function returns hostPeerRmtAddrs[peerLocalRank] CAST to uintptr_t*,
-    // not the table itself.
-    uintptr_t hostPeerRmtAddrs[NCCL_MAX_LOCAL_RANKS] = {0};
-    hostPeerRmtAddrs[kPeerLocalRank] = kRmtRegAddr;
-
-    // Pre-built per-peer IPC info -- the thing the reuse branch keys off.
-    ncclIpcRegInfo existingInfo{};
-    existingInfo.peerRank             = kPeerRank;
-    existingInfo.impInfo.rmtRegAddr   = reinterpret_cast<void*>(kRmtRegAddr);
-    existingInfo.impInfo.legacyIpcCap = true;       // should surface in isLegacyIpc
-
+    ReusableIpcInfo existing(kPeerRank, kPeerLocalRank, kRmtRegAddr,
+                             /*legacyIpcCap=*/ true);
     ncclReg regRecord{};
     regRecord.begAddr = kBegAddr;
     regRecord.endAddr = kBegAddr + 0x1000;
-    regRecord.ipcInfos[kPeerLocalRank]    = &existingInfo;
-    regRecord.regIpcAddrs.hostPeerRmtAddrs = hostPeerRmtAddrs;
+    existing.InstallInto(regRecord);
 
-    int       peerRanks[1]  = {kPeerRank};
-    int       regBufFlag    = 0xdead;
-    uintptr_t offsetOut     = 0xdead;
-    uintptr_t* peerRmtAddrs = reinterpret_cast<uintptr_t*>(0xdead);
-    bool      isLegacyIpc   = false;
+    int peerRanks[] = {kPeerRank};
+    IpcRegOutputs out;
+    bool isLegacyIpc = false;
 
-    ncclResult_t r = ipcRegisterBuffer(
-        /*comm=*/        &comm,
-        /*userbuff=*/    reinterpret_cast<const void*>(kBegAddr + kBuffOffset),
-        /*buffSize=*/    256,
-        /*peerRanks=*/   peerRanks,
-        /*nPeers=*/      1,
-        /*type=*/        NCCL_IPC_SENDRECV,
-        /*regRecord=*/   &regRecord,
-        /*regBufFlag=*/  &regBufFlag,
-        /*offsetOut=*/   &offsetOut,
-        /*peerRmtAddrsOut=*/ &peerRmtAddrs,
-        /*isLegacyIpc=*/ &isLegacyIpc);
+    auto r = CallIpcRegisterBuffer(comm,
+                                   /*userbuff=*/ reinterpret_cast<const void*>(kBegAddr + kBuffOffset),
+                                   /*buffSize=*/ 256,
+                                   peerRanks, 1,
+                                   NCCL_IPC_SENDRECV,
+                                   &regRecord, out, &isLegacyIpc);
 
-    EXPECT_EQ(r,            ncclSuccess);
-    EXPECT_EQ(regBufFlag,   1);
-    EXPECT_EQ(offsetOut,    kBuffOffset);                      // userbuff - begAddr
-    EXPECT_EQ(reinterpret_cast<uintptr_t>(peerRmtAddrs),
-              kRmtRegAddr);                                    // raw remote addr, not a pointer
-    EXPECT_TRUE(isLegacyIpc);                                  // propagated from existingInfo
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(out.regBufFlag, 1);
+    EXPECT_EQ(out.offsetOut,  kBuffOffset);
+    // SENDRECV returns the raw remote address (cast to uintptr_t*), not a
+    // pointer into a peer-address table.
+    EXPECT_EQ(reinterpret_cast<uintptr_t>(out.peerRmtAddrs), kRmtRegAddr);
+    EXPECT_TRUE(isLegacyIpc);  // propagated from existing.info.impInfo
 }
 
-// ---------------------------------------------------------------------------
-// ipcRegisterBuffer: reuse path for COLLECTIVE.
-//
-// Same per-peer reuse branch as test 2, but type == NCCL_IPC_COLLECTIVE
-// changes the post-loop output marshalling:
-//   - returns the *device-side* peer-address table (regIpcAddrs.devPeerRmtAddrs)
-//     instead of a single host-side address.
-//   - would normally allocate/refresh devPeerRmtAddrs via ncclCudaCallocAsync
-//     + ncclCudaMemcpyAsync, but those are only triggered when
-//     devPeerRmtAddrs == nullptr OR needUpdate == true. The reuse branch
-//     never flips needUpdate (that's a new-registration thing), so by
-//     pre-populating devPeerRmtAddrs we keep the whole strong-stream block
-//     skipped. Our fakes for those functions return ncclSuccess anyway, so
-//     even if it were entered the test would still pass -- but staying out
-//     of it keeps the test honest about which code path it covers.
-// ---------------------------------------------------------------------------
+// Reuse path for COLLECTIVE with a pre-populated device peer-address table:
+// post-loop arm returns the *device-side* table itself rather than a single
+// remote address, and the strong-stream allocation block stays skipped
+// because both devPeerRmtAddrs is non-null and needUpdate is false.
 TEST_F(P2pMicrotest, IpcRegisterBuffer_CollectiveReuseReturnsDevicePeerAddrTable)
 {
-    constexpr int kPeerRank      = 1;
-    constexpr int kPeerLocalRank = 1;
-    constexpr uintptr_t kBegAddr     = 0x20000;
-    constexpr uintptr_t kBuffOffset  = 0x80;
-    constexpr uintptr_t kRmtRegAddr  = 0xcafef00d00ull;
+    constexpr int       kPeerRank      = 1;
+    constexpr int       kPeerLocalRank = 1;
+    constexpr uintptr_t kBegAddr       = 0x10000;
+    constexpr uintptr_t kBuffOffset    = 0x80;
+    constexpr uintptr_t kRmtRegAddr    = 0xA000;
 
     ncclComm comm{};
-    int rankToLocalRank[8] = {0, 0, 0, 0, 0, 0, 0, 0};
-    rankToLocalRank[kPeerRank] = kPeerLocalRank;
-    comm.rankToLocalRank = rankToLocalRank;
-    comm.localRanks      = NCCL_MAX_LOCAL_RANKS;   // unused on this path, set defensively
+    RankMapping ranks(comm, {{kPeerRank, kPeerLocalRank}});
+    comm.localRanks = NCCL_MAX_LOCAL_RANKS;  // unused on this path, set defensively
 
-    // host + dev peer-addr tables both pre-populated -> needUpdate stays
-    // false, devPeerRmtAddrs is non-null, so the strong-stream block is
-    // entirely skipped.
-    uintptr_t hostPeerRmtAddrs[NCCL_MAX_LOCAL_RANKS] = {0};
-    uintptr_t devPeerRmtAddrs[NCCL_MAX_LOCAL_RANKS]  = {0};
-    hostPeerRmtAddrs[kPeerLocalRank] = kRmtRegAddr;
-
-    ncclIpcRegInfo existingInfo{};
-    existingInfo.peerRank             = kPeerRank;
-    existingInfo.impInfo.rmtRegAddr   = reinterpret_cast<void*>(kRmtRegAddr);
-    existingInfo.impInfo.legacyIpcCap = false;
-
+    ReusableIpcInfo existing(kPeerRank, kPeerLocalRank, kRmtRegAddr,
+                             /*legacyIpcCap=*/ false);
     ncclReg regRecord{};
     regRecord.begAddr = kBegAddr;
     regRecord.endAddr = kBegAddr + 0x2000;
-    regRecord.ipcInfos[kPeerLocalRank]      = &existingInfo;
-    regRecord.regIpcAddrs.hostPeerRmtAddrs  = hostPeerRmtAddrs;
-    regRecord.regIpcAddrs.devPeerRmtAddrs   = devPeerRmtAddrs;
+    existing.InstallInto(regRecord);
 
-    int       peerRanks[1]  = {kPeerRank};
-    int       regBufFlag    = 0xdead;
-    uintptr_t offsetOut     = 0xdead;
-    uintptr_t* peerRmtAddrs = reinterpret_cast<uintptr_t*>(0xdead);
-    bool      isLegacyIpc   = true;                            // start true to see it cleared
+    // Pre-populated dev table -> needUpdate stays false, strong-stream
+    // block stays skipped.
+    std::array<uintptr_t, NCCL_MAX_LOCAL_RANKS> devPeerRmtAddrs{};
+    regRecord.regIpcAddrs.devPeerRmtAddrs = devPeerRmtAddrs.data();
 
-    ncclResult_t r = ipcRegisterBuffer(
-        /*comm=*/        &comm,
-        /*userbuff=*/    reinterpret_cast<const void*>(kBegAddr + kBuffOffset),
-        /*buffSize=*/    512,
-        /*peerRanks=*/   peerRanks,
-        /*nPeers=*/      1,
-        /*type=*/        NCCL_IPC_COLLECTIVE,
-        /*regRecord=*/   &regRecord,
-        /*regBufFlag=*/  &regBufFlag,
-        /*offsetOut=*/   &offsetOut,
-        /*peerRmtAddrsOut=*/ &peerRmtAddrs,
-        /*isLegacyIpc=*/ &isLegacyIpc);
+    int peerRanks[] = {kPeerRank};
+    IpcRegOutputs out;
+    bool isLegacyIpc = true;  // start true to see it cleared
 
-    EXPECT_EQ(r,           ncclSuccess);
-    EXPECT_EQ(regBufFlag,  1);
-    EXPECT_EQ(offsetOut,   kBuffOffset);
-    EXPECT_EQ(peerRmtAddrs, devPeerRmtAddrs);                  // the table itself, not an addr
+    auto r = CallIpcRegisterBuffer(comm,
+                                   /*userbuff=*/ reinterpret_cast<const void*>(kBegAddr + kBuffOffset),
+                                   /*buffSize=*/ 512,
+                                   peerRanks, 1,
+                                   NCCL_IPC_COLLECTIVE,
+                                   &regRecord, out, &isLegacyIpc);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(out.regBufFlag, 1);
+    EXPECT_EQ(out.offsetOut,  kBuffOffset);
+    EXPECT_EQ(out.peerRmtAddrs, devPeerRmtAddrs.data());  // the table itself
     EXPECT_FALSE(isLegacyIpc);
 }
 
-// ---------------------------------------------------------------------------
-// ipcRegisterBuffer: collective reuse, devPeerRmtAddrs missing -> enters the
-// strong-stream allocation block (lines 1004-1015 in the hipified p2p.cc).
+// Reuse-COLLECTIVE with the device peer-address table missing: drives the
+// `devPeerRmtAddrs == NULL || needUpdate` branch True so control enters
+// the strong-stream allocation block.
 //
-// Same shape as CollectiveReuseReturnsDevicePeerAddrTable, but deliberately
-// leave regRecord.regIpcAddrs.devPeerRmtAddrs == nullptr so the
-// `if (devPeerRmtAddrs == NULL || needUpdate)` branch goes True. Our existing
-// stubs would normally let the block complete "successfully" (returning a
-// null hipStream_t), but the very next call -- ncclCudaCallocAsync -- is a
-// header-only template that hits the real HIP runtime and there is no GPU
-// here, so it would fail mid-block with confusing diagnostics.
-//
-// Instead we promote ncclStrongStreamAcquire to a controllable seam (see
-// fakes/p2p_fakes.h) and have the test install a hook that:
-//   (a) records that the block was entered (proves coverage of line 1004's
-//       True side and line 1006), and
-//   (b) returns ncclSystemError on the first call, so control flows cleanly
-//       through NCCLCHECKGOTO into the `fail:` epilogue (lines 1028-1034).
-//
-// Net coverage gain: line 1004 True side, line 1006 strong-stream call site,
-// the entire `fail:` block including the `if (newInfo) free(newInfo)` branch
-// at line 1032, and output-zeroing semantics on the failure path.
-// ---------------------------------------------------------------------------
+// We *don't* let the block complete -- ncclCudaCallocAsync inside it is a
+// header-only template that hits the real HIP runtime, which there is no
+// GPU for here. Instead the test installs a per-test hook on
+// ncclStrongStreamAcquire that:
+//   (a) records that the block was entered, and
+//   (b) returns an error on the first call so control flows cleanly
+//       through NCCLCHECKGOTO into the fail: epilogue.
 TEST_F(P2pMicrotest, IpcRegisterBuffer_CollectiveReuseEntersStrongStreamBlockWhenDevTableMissing)
 {
-    constexpr int kPeerRank      = 1;
-    constexpr int kPeerLocalRank = 1;
-    constexpr uintptr_t kBegAddr     = 0x30000;
-    constexpr uintptr_t kBuffOffset  = 0x100;
-    constexpr uintptr_t kRmtRegAddr  = 0xfeedface00ull;
+    constexpr int       kPeerRank      = 1;
+    constexpr int       kPeerLocalRank = 1;
+    constexpr uintptr_t kBegAddr       = 0x10000;
+    constexpr uintptr_t kBuffOffset    = 0x100;
+    constexpr uintptr_t kRmtRegAddr    = 0xA000;
 
-    // Comm + sharedRes: the strong-stream calls dereference
-    // comm->sharedRes->{hostStream,deviceStream,scratchEvent}. The hook
-    // doesn't actually read them, but the address-taking in the call site
-    // (`&comm->sharedRes->hostStream`) requires sharedRes to be non-null.
+    // sharedRes must be non-null: the strong-stream call site takes the
+    // address of comm->sharedRes->hostStream. The hook doesn't read it.
     ncclSharedResources sharedRes{};
     ncclComm comm{};
-    comm.sharedRes = &sharedRes;
-    int rankToLocalRank[8] = {0, 0, 0, 0, 0, 0, 0, 0};
-    rankToLocalRank[kPeerRank] = kPeerLocalRank;
-    comm.rankToLocalRank = rankToLocalRank;
-    comm.localRanks      = NCCL_MAX_LOCAL_RANKS;
+    comm.sharedRes  = &sharedRes;
+    comm.localRanks = NCCL_MAX_LOCAL_RANKS;
+    RankMapping ranks(comm, {{kPeerRank, kPeerLocalRank}});
 
-    // Reuse path: ipcInfos[peer] is pre-populated, hostPeerRmtAddrs is set,
-    // but devPeerRmtAddrs is intentionally left null -> triggers line 1004.
-    uintptr_t hostPeerRmtAddrs[NCCL_MAX_LOCAL_RANKS] = {0};
-    hostPeerRmtAddrs[kPeerLocalRank] = kRmtRegAddr;
-
-    ncclIpcRegInfo existingInfo{};
-    existingInfo.peerRank             = kPeerRank;
-    existingInfo.impInfo.rmtRegAddr   = reinterpret_cast<void*>(kRmtRegAddr);
-    existingInfo.impInfo.legacyIpcCap = false;
-
+    ReusableIpcInfo existing(kPeerRank, kPeerLocalRank, kRmtRegAddr,
+                             /*legacyIpcCap=*/ false);
     ncclReg regRecord{};
     regRecord.begAddr = kBegAddr;
     regRecord.endAddr = kBegAddr + 0x4000;
-    regRecord.ipcInfos[kPeerLocalRank]      = &existingInfo;
-    regRecord.regIpcAddrs.hostPeerRmtAddrs  = hostPeerRmtAddrs;
-    regRecord.regIpcAddrs.devPeerRmtAddrs   = nullptr;        // <-- key
+    existing.InstallInto(regRecord);
+    // devPeerRmtAddrs intentionally left null -- this is what makes the
+    // strong-stream block fire.
 
-    // Spy + failure injector. Counts entries to the strong-stream block,
-    // and on the first call returns an error so NCCLCHECKGOTO routes us to
-    // `fail:` before we hit the header-template ncclCudaCallocAsync that
-    // would otherwise try to run real HIP.
     int acquireCalls = 0;
     g_strongStreamAcquire = [&](struct ncclCudaGraph,
                                 struct ncclStrongStream*,
@@ -300,118 +302,60 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_CollectiveReuseEntersStrongStreamBlockWhe
         return ncclSystemError;
     };
 
-    int       peerRanks[1]  = {kPeerRank};
-    int       regBufFlag    = 0xdead;
-    uintptr_t offsetOut     = 0xdead;
-    uintptr_t* peerRmtAddrs = reinterpret_cast<uintptr_t*>(0xdead);
-    bool      isLegacyIpc   = true;
+    int peerRanks[] = {kPeerRank};
+    IpcRegOutputs out;
+    bool isLegacyIpc = true;
 
-    ncclResult_t r = ipcRegisterBuffer(
-        /*comm=*/        &comm,
-        /*userbuff=*/    reinterpret_cast<const void*>(kBegAddr + kBuffOffset),
-        /*buffSize=*/    1024,
-        /*peerRanks=*/   peerRanks,
-        /*nPeers=*/      1,
-        /*type=*/        NCCL_IPC_COLLECTIVE,
-        /*regRecord=*/   &regRecord,
-        /*regBufFlag=*/  &regBufFlag,
-        /*offsetOut=*/   &offsetOut,
-        /*peerRmtAddrsOut=*/ &peerRmtAddrs,
-        /*isLegacyIpc=*/ &isLegacyIpc);
+    auto r = CallIpcRegisterBuffer(comm,
+                                   /*userbuff=*/ reinterpret_cast<const void*>(kBegAddr + kBuffOffset),
+                                   /*buffSize=*/ 1024,
+                                   peerRanks, 1,
+                                   NCCL_IPC_COLLECTIVE,
+                                   &regRecord, out, &isLegacyIpc);
 
-    // The strong-stream block was entered -- proves line 1004 True side and
-    // line 1006 are now covered.
-    EXPECT_EQ(acquireCalls, 1);
-
-    // Error propagated out of the NCCLCHECKGOTO at line 1006.
-    EXPECT_EQ(r, ncclSystemError);
-
-    // `fail:` epilogue zeroed the OUT params (lines 1029-1031).
-    EXPECT_EQ(regBufFlag,    0);
-    EXPECT_EQ(offsetOut,     0u);
-    EXPECT_EQ(peerRmtAddrs,  nullptr);
+    EXPECT_EQ(acquireCalls, 1);             // strong-stream block was entered
+    EXPECT_EQ(r, ncclSystemError);          // error from the hook propagated
+    out.ExpectZeroed();                     // fail: epilogue cleared outputs
 }
 
-// ---------------------------------------------------------------------------
-// ipcRegisterBuffer: fresh-registration entry, fails on the first HIP call.
-//
-// All previous tests stayed inside the reuse branch (ipcInfos[peer] != null)
-// or skipped the per-peer loop entirely. This test crosses into the
-// fresh-registration `else` block at line 905, which today has zero branch
-// coverage:
-//
-//   - Build a regRecord with ipcInfos[peerLocalRank] == nullptr.
-//   - With baseAddr starting NULL (line 887) and no prior iteration, the
-//     `if (baseAddr == NULL)` branch at line 910 goes True and we hit the
-//     CUCHECKGOTO(hipMemGetAddressRange(...)) at line 911.
-//   - hipMemGetAddressRange is a real HIP runtime call, NOT a PFN seam --
-//     it's resolved through hip::host at link time and called directly
-//     here. We pass a bogus userbuff (0xBADADDR) so it fails with a HIP
-//     error regardless of whether the host has a GPU; CUCHECKGOTO turns
-//     that into ncclUnhandledCudaError and jumps to `fail:`.
-//
-// What this newly covers:
-//   - Branch 894 False is already covered; True (entering the regRecord
-//     block) was already covered too -- but every prior True path went
-//     through the reuse arm. This is the first test where the False side
-//     of branch 900 (`ipcInfos[peerLocalRank]` is null) is taken.
-//   - Line 910 branch True (first iteration of the loop, baseAddr is null).
-//   - Line 911 call site execution.
-//   - The CUCHECKGOTO failure edge through `fail:` from the fresh-reg arm
-//     (the prior fail: coverage came in via the strong-stream block, a
-//     different goto site).
-// ---------------------------------------------------------------------------
-TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationFailsOnAddressRangeLookup)
+// Fresh-registration entry path: ipcInfos[peerLocalRank] is NULL, so the
+// per-peer loop takes the `else` branch instead of the reuse branch. The
+// first thing it does is CUCHECKGOTO(hipMemGetAddressRange(...)), which is
+// a real HIP runtime call -- not a PFN seam -- so passing a bogus userbuff
+// fails it deterministically with no GPU required, and control routes
+// through CUCHECKGOTO into the fail: epilogue.
+TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationFailureClearsOutputs)
 {
-    constexpr int kPeerRank      = 4;
-    constexpr int kPeerLocalRank = 3;
-    constexpr uintptr_t kBegAddr    = 0x50000;
-    constexpr uintptr_t kBuffOffset = 0x10;
-    // Deliberately bogus address: we want hipMemGetAddressRange to fail,
-    // not crash. Any non-registered host/device pointer works -- HIP
-    // returns hipErrorInvalidValue (or similar) regardless of GPU presence.
-    constexpr uintptr_t kBogusUserbuff = 0xBADADD0ull;
+    constexpr int       kPeerRank          = 4;
+    constexpr int       kPeerLocalRank     = 3;
+    constexpr uintptr_t kBegAddr           = 0x10000;
+    constexpr uintptr_t kBuffOffset        = 0x10;
+    // Any non-registered pointer works: hipMemGetAddressRange returns an
+    // error rather than crashing.
+    constexpr uintptr_t kUnregisteredUserbuff = 0xBADADD0ull;
 
     ncclComm comm{};
-    int rankToLocalRank[8] = {0, 0, 0, 0, 0, 0, 0, 0};
-    rankToLocalRank[kPeerRank] = kPeerLocalRank;
-    comm.rankToLocalRank = rankToLocalRank;
-    comm.localRanks      = NCCL_MAX_LOCAL_RANKS;
+    comm.localRanks = NCCL_MAX_LOCAL_RANKS;
+    RankMapping ranks(comm, {{kPeerRank, kPeerLocalRank}});
 
-    // Fresh-registration path: ipcInfos[peerLocalRank] left NULL so the
-    // `else` at line 905 is taken.
     ncclReg regRecord{};
     regRecord.begAddr = kBegAddr;
     regRecord.endAddr = kBegAddr + 0x1000;
-    // ipcInfos[kPeerLocalRank] is NULL by virtue of the {} initializer.
+    // regRecord.ipcInfos[kPeerLocalRank] is NULL -> fresh-registration arm.
 
-    int       peerRanks[1]  = {kPeerRank};
-    int       regBufFlag    = 0xdead;
-    uintptr_t offsetOut     = 0xdead;
-    uintptr_t* peerRmtAddrs = reinterpret_cast<uintptr_t*>(0xdead);
-    bool      isLegacyIpc   = true;
+    int peerRanks[] = {kPeerRank};
+    IpcRegOutputs out;
+    bool isLegacyIpc = true;
 
-    ncclResult_t r = ipcRegisterBuffer(
-        /*comm=*/        &comm,
-        /*userbuff=*/    reinterpret_cast<const void*>(kBogusUserbuff + kBuffOffset),
-        /*buffSize=*/    256,
-        /*peerRanks=*/   peerRanks,
-        /*nPeers=*/      1,
-        /*type=*/        NCCL_IPC_SENDRECV,
-        /*regRecord=*/   &regRecord,
-        /*regBufFlag=*/  &regBufFlag,
-        /*offsetOut=*/   &offsetOut,
-        /*peerRmtAddrsOut=*/ &peerRmtAddrs,
-        /*isLegacyIpc=*/ &isLegacyIpc);
+    auto r = CallIpcRegisterBuffer(comm,
+                                   /*userbuff=*/ reinterpret_cast<const void*>(kUnregisteredUserbuff + kBuffOffset),
+                                   /*buffSize=*/ 256,
+                                   peerRanks, 1,
+                                   NCCL_IPC_SENDRECV,
+                                   &regRecord, out, &isLegacyIpc);
 
-    // CUCHECKGOTO turns any non-hipSuccess into ncclUnhandledCudaError.
+    // CUCHECKGOTO maps any non-hipSuccess to ncclUnhandledCudaError.
     EXPECT_EQ(r, ncclUnhandledCudaError);
-
-    // `fail:` zeroed the OUT params (lines 1029-1031).
-    EXPECT_EQ(regBufFlag,    0);
-    EXPECT_EQ(offsetOut,     0u);
-    EXPECT_EQ(peerRmtAddrs,  nullptr);
-
-    // Prologue cleared isLegacyIpc (line 893) before any failure path.
-    EXPECT_FALSE(isLegacyIpc);
+    out.ExpectZeroed();
+    EXPECT_FALSE(isLegacyIpc);  // prologue cleared it before the failure
 }
