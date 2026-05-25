@@ -27,3 +27,7 @@ _toc.yml
 
 # Backup directories
 .backups/
+
+# graphify generated knowledge graph
+/graphify-out/
+**/graphify-out/
