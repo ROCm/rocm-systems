@@ -43,6 +43,7 @@ def ucx_base_env() -> dict[str, str]:
         "UCX_TLS": "tcp,self",  # Tell UCX to use TCP for inter-process, self for intra-process
         "OMPI_MCA_pml_base_verbose": "100",  # Show which PML is selected
         "UCX_LOG_LEVEL": "info",  # Enable UCX logging to show transport usage
+        "ROCPROFSYS_LOG_LEVEL": "debug",  # Enable rocprof-sys logging to show transport usage
     }
 
 
@@ -89,6 +90,11 @@ def ucx_env(ucx_base_env) -> dict[str, str]:
 
 
 class TestUCX(RocprofsysTest):
+    UCX_PASS_REGEX = [
+        "Shutting down UCX tracing",  # Emitted by rocprof-sys (requires debug l)
+        r"pml.*ucx",  # Emitted by program when UCX logging is enabled
+    ]
+
     @pytest.mark.parametrize("mode", ["binary_rewrite", "sys_run"])
     @pytest.mark.parametrize(
         "target",
@@ -112,10 +118,6 @@ class TestUCX(RocprofsysTest):
             "0",
         ]
         RUN_ARGS = ["30"]
-        BINARY_REWRITE_PASS_REGEX = [
-            r"ucx_gotcha|category::ucx|Successfully executed: .+rocprof-sys-merge-output\.sh.*"
-        ]
-        SYS_RUN_PASS_REGEX = [r"ucx_gotcha|category::ucx|Using UCX|pml.*ucx"]
 
         result = self.run_test(
             mode,
@@ -129,8 +131,7 @@ class TestUCX(RocprofsysTest):
         self.assert_regex(
             result,
             mode,
-            binary_rewrite_pass_regex=BINARY_REWRITE_PASS_REGEX,
-            sys_run_pass_regex=SYS_RUN_PASS_REGEX,
+            pass_regex=self.UCX_PASS_REGEX,
         )
         if mode == "sys_run":
             self.assert_perfetto(
@@ -152,11 +153,7 @@ class TestUCX(RocprofsysTest):
             "--min-instructions",
             "0",
         ]
-        BINARY_REWRITE_PASS_REGEX = [
-            r"ucx_gotcha|category::ucx|Successfully executed: .+rocprof-sys-merge-output\.sh.*"
-        ]
-        binary_rewrite_fail_regex = [r"Script not found|Failed to execute"]
-        SYS_RUN_PASS_REGEX = [r"ucx_gotcha|category::ucx|Using UCX|pml.*ucx"]
+        BINARY_REWRITE_FAIL_REGEX = [r"Script not found|Failed to execute"]
 
         result = self.run_test(
             mode,
@@ -169,9 +166,8 @@ class TestUCX(RocprofsysTest):
         self.assert_regex(
             result,
             mode,
-            binary_rewrite_pass_regex=BINARY_REWRITE_PASS_REGEX,
-            binary_rewrite_fail_regex=binary_rewrite_fail_regex,
-            sys_run_pass_regex=SYS_RUN_PASS_REGEX,
+            pass_regex=self.UCX_PASS_REGEX,
+            binary_rewrite_fail_regex=BINARY_REWRITE_FAIL_REGEX,
         )
         if mode == "sys_run":
             self.assert_perfetto(
@@ -194,7 +190,6 @@ class TestUCX(RocprofsysTest):
             "--min-instructions",
             "0",
         ]
-        BINARY_REWRITE_PASS_REGEX = [r"ucx_gotcha|category::ucx"]
         RUN_ARGS = ["30"]
 
         result = self.run_test(
@@ -209,7 +204,7 @@ class TestUCX(RocprofsysTest):
         self.assert_regex(
             result,
             mode,
-            binary_rewrite_pass_regex=BINARY_REWRITE_PASS_REGEX,
+            pass_regex=self.UCX_PASS_REGEX,
         )
 
     @pytest.mark.parametrize("mode", ["binary_rewrite", "sys_run"])
@@ -225,7 +220,6 @@ class TestUCX(RocprofsysTest):
             "--min-instructions",
             "0",
         ]
-        BINARY_REWRITE_PASS_REGEX = [r"ucx_gotcha|category::ucx"]
 
         result = self.run_test(
             mode,
@@ -239,7 +233,7 @@ class TestUCX(RocprofsysTest):
         self.assert_regex(
             result,
             mode,
-            binary_rewrite_pass_regex=BINARY_REWRITE_PASS_REGEX,
+            pass_regex=self.UCX_PASS_REGEX,
         )
 
     @pytest.mark.parametrize("mode", ["binary_rewrite", "sys_run"])
@@ -254,7 +248,6 @@ class TestUCX(RocprofsysTest):
             "--min-instructions",
             "0",
         ]
-        BINARY_REWRITE_PASS_REGEX = [r"ucx_gotcha|category::ucx"]
         RUN_ARGS = ["64"]
 
         result = self.run_test(
@@ -269,5 +262,5 @@ class TestUCX(RocprofsysTest):
         self.assert_regex(
             result,
             mode,
-            binary_rewrite_pass_regex=BINARY_REWRITE_PASS_REGEX,
+            pass_regex=self.UCX_PASS_REGEX,
         )

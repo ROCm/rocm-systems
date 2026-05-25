@@ -351,6 +351,12 @@ ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, void* a
 }
 
 void
+ucx_gotcha::audit(const gotcha_data& _data, audit::outgoing)
+{
+    category_region<category::ucx>::stop(std::string_view{ _data.tool_id });
+}
+
+void
 ucx_gotcha::audit(const gotcha_data& _data, audit::outgoing, void* ret)
 {
     category_region<category::ucx>::stop(std::string_view{ _data.tool_id }, "return",
