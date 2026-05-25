@@ -18,7 +18,7 @@ namespace profiler_hub
 class insert_validator
 {
 public:
-    explicit insert_validator(const std::shared_ptr<entity_registry>& registry);
+    explicit insert_validator(std::shared_ptr<entity_registry> registry);
 
     insert_validator& require_node(const std::optional<writer_types::node_id_t>& node_id);
     insert_validator& require_node(writer_types::node_id_t node_id);

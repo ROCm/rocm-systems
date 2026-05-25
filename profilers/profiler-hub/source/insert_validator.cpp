@@ -90,8 +90,8 @@ require_value(const std::optional<EntityId>& entity_id, std::string_view field_n
 
 }  // namespace
 
-insert_validator::insert_validator(const std::shared_ptr<entity_registry>& registry)
-: m_registry(registry)
+insert_validator::insert_validator(std::shared_ptr<entity_registry> registry)
+: m_registry(std::move(registry))
 {}
 
 insert_validator&
