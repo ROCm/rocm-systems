@@ -1263,7 +1263,7 @@ bool Device::populateOCLDeviceConstants() {
           uint64_t gtt_usable = (static_cast<uint64_t>(std::min(GPU_MAX_HEAP_SIZE, 100u)) *
                                  static_cast<uint64_t>(gtt_segment_size)) / 100u;
           info_.globalMemSize_ += gtt_usable;
-          LogPrintfInfo("APU unified memory: VRAM=%zu GTT=%zu total=%llu",
+          LogPrintfInfo("APU unified memory: VRAM=%zu GTT=%zu total=%" PRIu64,
                         global_segment_size, gtt_segment_size, info_.globalMemSize_);
         }
       }
