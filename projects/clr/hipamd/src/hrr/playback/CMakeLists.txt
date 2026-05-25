@@ -41,6 +41,7 @@ target_include_directories(hrr-playback PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${HRR_DIR}
   ${HIP_COMMON_INCLUDE_DIR}
+  ${PROJECT_SOURCE_DIR}/include
   ${PROJECT_BINARY_DIR}/include
 )
 target_compile_definitions(hrr-playback PRIVATE
