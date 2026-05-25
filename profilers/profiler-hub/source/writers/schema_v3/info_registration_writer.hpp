@@ -151,12 +151,12 @@ public:
 
         m_ctx->validator->require_node(pmc_info.node_id)
             .require_process(pmc_info.process_id)
-            .require_agent(*pmc_info.unique_id.agent_id);
+            .validate_optional_agent(pmc_info.unique_id.agent_id);
 
         const auto process_pk =
             m_ctx->validator->resolve_process_key(pmc_info.process_id);
         const auto agent_pk =
-            m_ctx->validator->resolve_agent_key(*pmc_info.unique_id.agent_id);
+            m_ctx->validator->resolve_optional_agent_key(pmc_info.unique_id.agent_id);
         const auto primary_key = m_ctx->key_providers->pmc_info().get_primary_key_value();
 
         m_stmts->pmc_info_statement()(primary_key,
