@@ -29,6 +29,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -80,9 +81,24 @@ public:
     std::vector<StackEntry> chain;
 };
 
-// PRODUCER_INFO is universally present and unused by non-JIT scripts,
-// which is the only workflow --torch-trace targets.
-constexpr c10::DebugInfoKind kRoctxDbgKind = c10::DebugInfoKind::PRODUCER_INFO;
+// USER_SCOPE chain slot for the autograd worker overlay. PyTorch lets
+// downstream tools claim a private TLDI slot by pointer identity on a
+// string_view literal (see c10/util/ThreadLocalDebugInfo.h). Using a
+// private slot here avoids every collision risk with PyTorch builtins:
+//   * PRODUCER_INFO would collide with torch.jit.trace / torch.jit.script
+//   * PROFILER_STATE collides with torch.profiler
+//   * PARAM_COMMS_INFO collides with c10d collectives
+//   * INFERENCE_CONTEXT collides with torch.inference_mode
+// On older PyTorch where DebugInfoKind is still the legacy enum class,
+// we fall back at compile time to TEST_INFO_2 (dormant outside PyTorch's
+// own gtest suite, which never runs inside a --torch-trace workload).
+// The probe + macro are wired by CMakeLists.txt via check_cxx_source_compiles.
+#ifdef ROCPROF_TORCHTRACE_HAS_CUSTOM_DBGINFOKIND
+inline constexpr std::string_view kRoctxUserScopeName = "ROCPROF_TORCHTRACE_INFO";
+inline const c10::DebugInfoKind   kRoctxDbgKind(&kRoctxUserScopeName);
+#else
+constexpr c10::DebugInfoKind kRoctxDbgKind = c10::DebugInfoKind::TEST_INFO_2;
+#endif
 
 // LIFO of DebugInfoGuards driving non-RAII push/pop via RAII. Strict
 // LIFO is preserved by the Python-side push/pop nesting contract.
@@ -98,6 +114,10 @@ struct Shard
     std::unordered_map<std::int64_t, std::vector<StackEntry>> snapshots;
     // Front = oldest seqNr; evict one entry at a time when at SHARD_SOFT_CAP.
     std::list<std::int64_t> lru_order;
+    // O(1) index into lru_order for remove/touch. Kept in lock-step
+    // with lru_order under shard.mu; without this, lru_order.remove()
+    // is linear in shard size and dominates large-shard hot paths.
+    std::unordered_map<std::int64_t, std::list<std::int64_t>::iterator> lru_idx;
 };
 
 std::array<Shard, NUM_SHARDS> g_shards;
@@ -191,13 +211,20 @@ std::string build_marker_string(const std::vector<StackEntry>& stack)
 
 void lru_remove(Shard& shard, std::int64_t seq)
 {
-    shard.lru_order.remove(seq);
+    auto it = shard.lru_idx.find(seq);
+    if (it == shard.lru_idx.end())
+        return;
+    shard.lru_order.erase(it->second);
+    shard.lru_idx.erase(it);
 }
 
 void lru_touch(Shard& shard, std::int64_t seq)
 {
     lru_remove(shard, seq);
     shard.lru_order.push_back(seq);
+    auto tail = shard.lru_order.end();
+    --tail;
+    shard.lru_idx.emplace(seq, tail);
 }
 
 void evict_oldest_snapshot(Shard& shard)
@@ -206,6 +233,7 @@ void evict_oldest_snapshot(Shard& shard)
         return;
     const std::int64_t oldest = shard.lru_order.front();
     shard.lru_order.pop_front();
+    shard.lru_idx.erase(oldest);
     shard.snapshots.erase(oldest);
     g_n_snapshots_dropped.fetch_add(1, std::memory_order_relaxed);
 }
@@ -228,6 +256,9 @@ void save_snapshot(std::int64_t seq, const std::vector<StackEntry>& stack)
     }
     shard.snapshots.emplace(seq, stack);
     shard.lru_order.push_back(seq);
+    auto tail = shard.lru_order.end();
+    --tail;
+    shard.lru_idx.emplace(seq, tail);
     g_n_snapshots_saved.fetch_add(1, std::memory_order_relaxed);
 }
 
@@ -284,7 +315,18 @@ std::size_t apply_userscope_overlay()
     {
         return 0;
     }
-    const std::size_t pushed = push_with_prefix_dedup(chain_info->chain);
+    // Defensive local copy before the dispatch hot path. PyTorch's
+    // autograd engine propagates ThreadLocalDebugInfo to the backward
+    // worker via a snapshot whose shared_ptr is held on the worker for
+    // the duration of the backward task, so reading chain_info->chain
+    // directly is in-contract today; but the raw DebugInfoBase* is not
+    // formally documented as keeping its owner alive across threads,
+    // and any future PyTorch refactor that drops the snapshot would
+    // turn this into a use-after-free. Copying out under our own stack
+    // frame is cheap (chain is bounded by the user's push depth) and
+    // makes the lifetime obvious to anyone reading the code.
+    const std::vector<StackEntry> chain_copy = chain_info->chain;
+    const std::size_t             pushed     = push_with_prefix_dedup(chain_copy);
     if (pushed > 0)
     {
         g_n_userscope_inherits.fetch_add(1, std::memory_order_relaxed);

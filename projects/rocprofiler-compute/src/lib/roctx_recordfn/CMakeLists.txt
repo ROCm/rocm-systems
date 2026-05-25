@@ -313,6 +313,50 @@ endforeach()
 
 target_link_libraries(${_so_name} PRIVATE ${_torch_resolved_libs} ${ROCTX_LIB})
 
+# Feature probe: PyTorch >= 2.7-ish ships c10::DebugInfoKind as a class
+# constructible from `const std::string_view*`, which lets downstream
+# tools allocate their own private TLDI slot by pointer identity. Older
+# PyTorch ships it as an `enum class` with fixed members; in that case
+# we fall back to TEST_INFO_2 (used only inside PyTorch's own gtest
+# suite, dormant in production training/inference workloads).
+include(CheckCXXSourceCompiles)
+set(_rcfn_saved_required_flags ${CMAKE_REQUIRED_FLAGS})
+set(_rcfn_saved_required_libs ${CMAKE_REQUIRED_LIBRARIES})
+set(_rcfn_saved_required_includes ${CMAKE_REQUIRED_INCLUDES})
+get_target_property(_rcfn_inc_dirs ${_so_name} INCLUDE_DIRECTORIES)
+set(CMAKE_REQUIRED_INCLUDES ${_rcfn_inc_dirs})
+set(CMAKE_REQUIRED_FLAGS "-std=c++17 -D_GLIBCXX_USE_CXX11_ABI=${_cxx11_abi}")
+check_cxx_source_compiles(
+    "#include <c10/util/ThreadLocalDebugInfo.h>
+     #include <string_view>
+     inline constexpr std::string_view kProbe = \"PROBE\";
+     const c10::DebugInfoKind kProbeKind(&kProbe);
+     int main() { (void)kProbeKind; return 0; }"
+    ROCPROF_TORCHTRACE_HAS_CUSTOM_DBGINFOKIND
+)
+set(CMAKE_REQUIRED_FLAGS ${_rcfn_saved_required_flags})
+set(CMAKE_REQUIRED_LIBRARIES ${_rcfn_saved_required_libs})
+set(CMAKE_REQUIRED_INCLUDES ${_rcfn_saved_required_includes})
+if(ROCPROF_TORCHTRACE_HAS_CUSTOM_DBGINFOKIND)
+    target_compile_definitions(
+        ${_so_name}
+        PRIVATE ROCPROF_TORCHTRACE_HAS_CUSTOM_DBGINFOKIND=1
+    )
+    message(
+        STATUS
+        "roctx_recordfn: using private DebugInfoKind slot "
+        "ROCPROF_TORCHTRACE_INFO (pointer-identity)"
+    )
+else()
+    message(
+        STATUS
+        "roctx_recordfn: PyTorch DebugInfoKind is the legacy enum form; "
+        "falling back to c10::DebugInfoKind::TEST_INFO_2 (safe in "
+        "training/inference workloads, may collide with PyTorch's own "
+        "gtest suite if profiled directly)"
+    )
+endif()
+
 target_compile_definitions(${_so_name} PRIVATE _GLIBCXX_USE_CXX11_ABI=${_cxx11_abi})
 
 target_compile_options(

@@ -213,29 +213,33 @@ def pytest_addoption(parser):
     )
 
 
-@pytest.fixture
-def require_torch():
-    """Skip the test when PyTorch is unavailable. GPU is not required.
+def _require_torch(*, gpu: bool) -> None:
+    """Shared skip-logic for the require_torch* fixtures.
 
-    Use this for CPU-only torch tests that would otherwise need a
-    module-level ``pytest.skip(..., allow_module_level=True)`` guard.
-    Module-level skips collect zero items and make pytest exit with code
-    5 ("no tests collected"), which CTest interprets as a test failure;
-    per-test skips via this fixture leave the session at exit 0.
+    Module-level ``pytest.skip(..., allow_module_level=True)`` collects
+    zero items and makes pytest exit with code 5 ("no tests collected"),
+    which CTest interprets as a test failure; per-test skips via the
+    fixtures below leave the session at exit 0.
     """
     if importlib.util.find_spec("torch") is None:
         pytest.skip("PyTorch is not installed")
+    if gpu:
+        import torch
+
+        if not torch.cuda.is_available():
+            pytest.skip("torch.cuda.is_available() is False")
+
+
+@pytest.fixture
+def require_torch():
+    """Skip the test when PyTorch is unavailable. GPU is not required."""
+    _require_torch(gpu=False)
 
 
 @pytest.fixture
 def require_torch_gpu():
     """Skip the test when PyTorch or a CUDA-capable GPU is unavailable."""
-    if importlib.util.find_spec("torch") is None:
-        pytest.skip("PyTorch is not installed")
-    import torch
-
-    if not torch.cuda.is_available():
-        pytest.skip("torch.cuda.is_available() is False")
+    _require_torch(gpu=True)
 
 
 @pytest.fixture(scope="session")

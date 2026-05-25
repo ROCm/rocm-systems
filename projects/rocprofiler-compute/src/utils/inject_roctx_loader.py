@@ -602,6 +602,13 @@ def _try_jit_build(tag):
         f"-L{os.path.join(rocm_path, 'lib')}",
         "-lrocprofiler-sdk-roctx",
     ]
+    # The cppext fallback omits the ROCPROF_TORCHTRACE_HAS_CUSTOM_DBGINFOKIND
+    # feature probe used by the CMake tiers, so the .so falls back to
+    # c10::DebugInfoKind::TEST_INFO_2 here even on new PyTorch. That slot
+    # is dormant in production training/inference workloads and only used
+    # by PyTorch's own gtest suite, so this is safe; profiling PyTorch's
+    # own C++ test binaries via cppext is the only path that could see a
+    # collision, and that is not a supported --torch-trace workload.
     extra_cflags = ["-O2", "-fvisibility=hidden", "-Wno-deprecated-declarations"]
 
     build_dir = _jit_cache_dir() / f"build-{tag}"

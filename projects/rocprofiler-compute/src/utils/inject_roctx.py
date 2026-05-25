@@ -122,24 +122,31 @@ if _roctx_recordfn is not None:
 
 _USING_C_TIER = _roctx_recordfn is not None
 
-# Single user-facing WARNING when the C++ tier didn't load. Folds in
-# the loader's per-tier diagnostic trail so the cause is visible at
-# default verbosity without a separate -VVV re-run, and emits exactly
-# once per process (the loader's per-tier WHY lines stay at LOG to
-# avoid multiplying noise on multi-pass PMC sweeps).
-if not _USING_C_TIER:
-    _loader_trail = ""
+
+def _emit_python_tier_fallback_warning():
+    """Single user-facing WARNING when the C++ tier didn't load.
+
+    Folds in the loader's per-tier diagnostic trail so the cause is
+    visible at default verbosity without a separate -VVV re-run, and
+    emits exactly once per process (the loader's per-tier WHY lines
+    stay at LOG to avoid multiplying noise on multi-pass PMC sweeps).
+    Gated on ``__main__`` by the caller so plain imports from
+    test/tooling code stay inert (matches the module docstring).
+    """
+    if _USING_C_TIER:
+        return
+    loader_trail = ""
     if _roctx_loader_module is not None:
         try:
-            _tier, _diagnostics = _roctx_loader_module.consume_diagnostics()
-            _loader_trail = _roctx_loader_module.format_load_diagnostic_trail(
-                _diagnostics,
+            _tier, diagnostics = _roctx_loader_module.consume_diagnostics()
+            loader_trail = _roctx_loader_module.format_load_diagnostic_trail(
+                diagnostics,
             )
         except Exception:
             # Diagnostic drain is best-effort; the surrounding WARNING
             # is the actionable signal and must always fire.
-            _loader_trail = ""
-    _trail_block = f"\nLoader trail:\n{_loader_trail}" if _loader_trail else ""
+            loader_trail = ""
+    trail_block = f"\nLoader trail:\n{loader_trail}" if loader_trail else ""
     console_warning(
         "torch trace",
         "Coverage tier: Python-only injector (C++ RecordFunction tier "
@@ -147,8 +154,9 @@ if not _USING_C_TIER:
         "degraded: backward markers carry single-level labels "
         "(python.dispatch:0) instead of aten.nested:0 / autograd.bwd:0, "
         "and the main-thread USER_SCOPE chain is not visible from "
-        "backward Nodes." + _trail_block,
+        "backward Nodes." + trail_block,
     )
+
 
 # Per-thread marker/context stacks. Source of truth on the Python tier;
 # a defensive mirror of the C++ thread_local stack on the C++ tier.
@@ -470,27 +478,32 @@ def patch_process_group_methods():
     _wrap_one(ProcessGroup)
     _walk(ProcessGroup)
 
-    original_init_subclass = ProcessGroup.__init_subclass__
+    existing_isc = ProcessGroup.__init_subclass__
+    existing_isc_fn = getattr(existing_isc, "__func__", existing_isc)
+    if not getattr(existing_isc_fn, "_roctx_pg_subclass_hook", False):
+        original_init_subclass = existing_isc
 
-    def init_subclass_hook(cls, **kwargs):
+        def init_subclass_hook(cls, **kwargs):
+            try:
+                original_init_subclass(**kwargs)
+            except Exception:
+                pass
+            try:
+                _wrap_one(cls)
+            except Exception as e:
+                console_warning(
+                    "torch trace",
+                    f"_wrap_one({cls.__name__}) failed in "
+                    f"ProcessGroup.__init_subclass__: {e}",
+                )
+
+        init_subclass_hook._roctx_pg_subclass_hook = True
         try:
-            original_init_subclass(**kwargs)
+            ProcessGroup.__init_subclass__ = classmethod(init_subclass_hook)
         except Exception:
+            # C-defined on some builds; the per-subclass walk above still
+            # covers existing backends.
             pass
-        try:
-            _wrap_one(cls)
-        except Exception as e:
-            console_warning(
-                "torch trace",
-                f"_wrap_one({cls.__name__}) failed in ProcessGroup.__init_subclass__: {e}",
-            )
-
-    try:
-        ProcessGroup.__init_subclass__ = classmethod(init_subclass_hook)
-    except Exception:
-        # C-defined on some builds; the per-subclass walk above still
-        # covers existing backends.
-        pass
 
     if wrapped_method_count["count"]:
         console_log(
@@ -845,15 +858,18 @@ def wrap_method_on_subclasses(base_class, method_name, wrapper_factory):
     walk_existing(base_class)
     wrap_class(base_class)
 
-    original_init = base_class.__init__
+    existing_init = base_class.__init__
+    if not getattr(existing_init, "_roctx_init_hook", False):
+        original_init = existing_init
 
-    def init_hook(self, *args, **kwargs):
-        cls = type(self)
-        if cls not in wrapped_classes:
-            wrap_class(cls)
-        return original_init(self, *args, **kwargs)
+        def init_hook(self, *args, **kwargs):
+            cls = type(self)
+            if cls not in wrapped_classes:
+                wrap_class(cls)
+            return original_init(self, *args, **kwargs)
 
-    base_class.__init__ = init_hook
+        init_hook._roctx_init_hook = True
+        base_class.__init__ = init_hook
 
 
 def inject_roctx_into_optimizer():
@@ -1010,7 +1026,12 @@ def install_function_apply_wrappers():
 
     walk(Function)
 
-    original_init_subclass = Function.__init_subclass__
+    existing_isc = Function.__init_subclass__
+    existing_isc_fn = getattr(existing_isc, "__func__", existing_isc)
+    if getattr(existing_isc_fn, "_roctx_function_subclass_hook", False):
+        return True
+
+    original_init_subclass = existing_isc
 
     def init_subclass_hook(cls, **kwargs):
         try:
@@ -1025,6 +1046,7 @@ def install_function_apply_wrappers():
                 f"stamp_apply({cls.__name__}) failed in __init_subclass__: {e}",
             )
 
+    init_subclass_hook._roctx_function_subclass_hook = True
     Function.__init_subclass__ = classmethod(init_subclass_hook)
     return True
 
@@ -1192,6 +1214,7 @@ def install_global_wraps():
 
 
 if __name__ == "__main__":
+    _emit_python_tier_fallback_warning()
     if len(sys.argv) < 2:
         console_log("Usage: python inject_roctx.py <script.py> [script_args...]")
         sys.exit(1)
