@@ -20,6 +20,7 @@
 
 #include <array>
 #include <atomic>
+#include <cerrno>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -339,10 +340,21 @@ inline T getEnvParam(const char* name, T ncclDefault)
     static_assert(std::is_integral_v<T>, "getEnvParam: T must be an integer type");
     const char* v = std::getenv(name);
     if(!v || v[0] == '\0') return ncclDefault;
+
+    char* endptr = nullptr;
+    errno        = 0;
     if constexpr(std::is_unsigned_v<T>)
-        return static_cast<T>(std::strtoull(v, nullptr, 0));
+    {
+        const unsigned long long val = std::strtoull(v, &endptr, 0);
+        if(errno == ERANGE || endptr == v) return ncclDefault;
+        return static_cast<T>(val);
+    }
     else
-        return static_cast<T>(std::strtoll(v, nullptr, 0));
+    {
+        const long long val = std::strtoll(v, &endptr, 0);
+        if(errno == ERANGE || endptr == v) return ncclDefault;
+        return static_cast<T>(val);
+    }
 }
 
 /** RAII scoped set/restore of a single env var; restores (or unsets) on destruction.
