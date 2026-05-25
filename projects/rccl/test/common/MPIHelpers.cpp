@@ -578,7 +578,11 @@ TestLogAssertionContext::TestLogAssertionContext(const TestLogAssertionOptions& 
         // fopen("w") which truncates, so if we recorded the OLD file's size
         // as nccl_start_offset_, readNcclDebugLog() would slice past all of
         // the new content and return an empty string on every subsequent run.
-        (void)::unlink(nccl_path_.c_str());
+        // Only unlink auto-generated paths; do not clobber a user-supplied file.
+        if(auto_nccl_path_)
+        {
+            (void)::unlink(nccl_path_.c_str());
+        }
 
         if(opts_.isolate_new_output)
         {
