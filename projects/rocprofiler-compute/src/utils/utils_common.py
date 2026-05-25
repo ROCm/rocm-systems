@@ -126,6 +126,8 @@ def resolve_rocm_library_path(library_path: Optional[str]) -> Optional[str]:
         return str(path)
 
     # Use iterdir to avoid glob metacharacter issues in library_path.
+    if not path.parent.is_dir():
+        return None
     matches = [
         str(p) for p in path.parent.iterdir() if p.name.startswith(path.name + ".")
     ]
