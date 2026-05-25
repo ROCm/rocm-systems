@@ -744,7 +744,7 @@ HIP_TEST_CASE(Unit_hipMemMap_Positive_APU_LargeAllocSpill) {
   size_t granularity = 0;
   HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &aprop,
                                            hipMemAllocationGranularityMinimum));
-  if (granularity == 0) granularity = static_cast<size_t>(2) * 1024 * 1024;
+  REQUIRE(granularity > 0);
   const size_t size = ((requested + granularity - 1) / granularity) * granularity;
 
   void* va = nullptr;
