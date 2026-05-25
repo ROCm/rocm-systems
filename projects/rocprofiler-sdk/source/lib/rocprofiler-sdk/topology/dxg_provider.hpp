@@ -39,8 +39,8 @@ public:
     std::vector<unique_agent_t> enumerate() override;
     std::string_view            name() const override { return "wsl-dxcore"; }
 
-    // True if libdxcore.so can be dlopened and CreateDXCoreAdapterFactory
-    // resolved. Cached on first call. Used by the factory for runtime selection.
+    // True if libdxcore.so can be dlopened and D3DKMTEnumAdapters3 resolved.
+    // Cached on first call. Used by the factory for runtime selection.
     static bool is_available();
 
 private:
