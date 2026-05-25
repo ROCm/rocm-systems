@@ -27,6 +27,13 @@ For instructions, see :doc:`Install AMD ROCm <rocm:install/rocm>`. Use the
 selector panel on that page to view instructions appropriate for your system
 environment.
 
+.. note::
+
+   The `TheRock <https://github.com/ROCm/TheRock>`__ build system also publishes
+   nightly builds for the ROCm Core SDK and its components, including ROCm Systems
+   Profiler. See `Nightly release status
+   <https://github.com/ROCm/TheRock#nightly-release-status>`__ for details.
+
 .. _install-base:
 
 Install ROCm profilers on Linux
@@ -99,16 +106,6 @@ This includes the ROCm profilers, dependencies, and base packages.
 
             # Install ROCm and the profilers from the AMD package repository.
             python -m pip install --index-url https://repo.amd.com/rocm/whl-multi-arch/ "rocm[profiler]"
-
-.. _install-nightly:
-
-Install a nightly build
-=======================
-
-The `TheRock <https://github.com/ROCm/TheRock>`__ build system also publishes
-nightly builds for the ROCm Core SDK and its components, including ROCm Systems
-Profiler. See `Nightly release status
-<https://github.com/ROCm/TheRock#nightly-release-status>`__ for details.
 
 .. _post-installation-steps:
 
