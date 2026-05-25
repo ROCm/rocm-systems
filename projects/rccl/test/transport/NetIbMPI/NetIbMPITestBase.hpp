@@ -8,18 +8,6 @@
 #define RCCL_TEST_NET_IB_MPI_TEST_BASE_HPP_
 
 #include <gtest/gtest.h>
-// Pre-seed the bf16 guard macros and pull in the new hip_bf16.h before
-// hip_runtime.h transitively includes the old hip_bfloat16.h. Otherwise
-// device.h's #error guard fires during the device-pass compile (the test
-// include path exposes the hipified librccl device.h via
-// ${PROJECT_BINARY_DIR}/hipify/src/include).
-#if defined(ROCM_VERSION) && ROCM_VERSION >= 60000
-  #if !defined(_HIP_INCLUDE_HIP_AMD_DETAIL_HIP_BFLOAT16_H_) && !defined(_HIP_BFLOAT16_H_)
-    #define _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_BFLOAT16_H_
-    #define _HIP_BFLOAT16_H_
-    #include <hip/hip_bf16.h>
-  #endif
-#endif
 #include <hip/hip_runtime.h>
 #include "MPITestBase.hpp"
 #include "NetIbCastInspect.hpp"
