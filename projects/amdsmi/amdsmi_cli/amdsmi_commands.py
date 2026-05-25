@@ -6225,6 +6225,12 @@ class AMDSMICommands:
             self.helpers.handle_watch(args=args, subcommand=self.process, logger=self.logger)
             return
 
+        # Handle --sort-by-pid: group process output by PID across all GPUs
+        if getattr(args, 'sort_by_pid', False):
+            handles = args.gpu if isinstance(args.gpu, list) else [args.gpu]
+            self._process_sort_by_pid(args, handles, watching_output)
+            return
+
         # Handle multiple GPUs
         if isinstance(args.gpu, list):
             if len(args.gpu) > 1:
@@ -6420,6 +6426,226 @@ class AMDSMICommands:
 
         if watching_output:  # End of single gpu add to watch_output
             self.logger.store_watch_output(multiple_device_enabled=multiple_devices)
+
+    def _process_sort_by_pid(self, args, handles, watching_output):
+        """Process output grouped by PID instead of GPU."""
+        try:
+            pid_list = amdsmi_interface.amdsmi_get_gpu_process_list_by_pid(handles)
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            logging.debug("Failed to get process list by pid | %s", e.get_error_info())
+            raise e
+
+        # Apply --pid filter
+        if getattr(args, 'pid', None):
+            pid_list = [p for p in pid_list if p["pid"] == args.pid]
+
+        # Apply --name filter
+        if getattr(args, 'name', None):
+            pid_list = [p for p in pid_list
+                        if p["name"].lower() == str(args.name).lower()]
+
+        engine_usage_unit = "ns"
+        memory_usage_unit = "B"
+        evicted_time_unit = "ms"
+        sdma_usage_unit = "us"
+
+        for proc in pid_list:
+            for gpu_entry in proc["gpus"]:
+                if self.logger.is_human_readable_format():
+                    gpu_entry["mem"] = self.helpers.convert_bytes_to_readable(gpu_entry["mem"])
+                    for key in ("gtt_mem", "cpu_mem", "vram_mem"):
+                        gpu_entry["memory_usage"][key] = (
+                            self.helpers.convert_bytes_to_readable(gpu_entry["memory_usage"][key])
+                        )
+
+                mem_unit = "" if self.logger.is_human_readable_format() else memory_usage_unit
+                gpu_entry["mem"] = self.helpers.unit_format(
+                    self.logger, gpu_entry["mem"], mem_unit
+                )
+                gpu_entry["evicted_time"] = self.helpers.unit_format(
+                    self.logger, gpu_entry["evicted_time"], evicted_time_unit
+                )
+                gpu_entry["sdma_usage"] = self.helpers.unit_format(
+                    self.logger, gpu_entry["sdma_usage"], sdma_usage_unit
+                )
+                for key in gpu_entry["engine_usage"]:
+                    gpu_entry["engine_usage"][key] = self.helpers.unit_format(
+                        self.logger, gpu_entry["engine_usage"][key], engine_usage_unit
+                    )
+                for key in gpu_entry["memory_usage"]:
+                    gpu_entry["memory_usage"][key] = self.helpers.unit_format(
+                        self.logger, gpu_entry["memory_usage"][key], mem_unit
+                    )
+
+        if not pid_list:
+            pid_list = [{"pid": "N/A", "name": "N/A", "gpus": [],
+                         "message": "No running processes detected"}]
+
+        if self.logger.is_json_format():
+            for proc in pid_list:
+                self.logger.output = proc
+                self.logger.store_multiple_device_output()
+            self.logger.print_output(multiple_device_enabled=True)
+            return
+
+        if self.logger.is_human_readable_format():
+            for proc in pid_list:
+                if proc.get("message"):
+                    self.logger.output = {"process_info": proc["message"]}
+                    self.logger.store_multiple_device_output()
+                    continue
+
+                header = f"PID: {proc['pid']}  NAME: {proc['name']}"
+                self.logger.output = {"process_info": header}
+                self.logger.store_multiple_device_output()
+
+                for gpu_entry in proc["gpus"]:
+                    gpu_idx = gpu_entry["gpu_index"]
+                    parts = [f"GPU: {gpu_idx}"]
+                    mem_usage = gpu_entry.get("memory_usage", {})
+                    if isinstance(gpu_entry["mem"], dict):
+                        parts.append(f"MEM: {gpu_entry['mem']['value']} {gpu_entry['mem']['unit']}")
+                    else:
+                        parts.append(f"MEM: {gpu_entry['mem']}")
+                    eng = gpu_entry.get("engine_usage", {})
+                    if isinstance(eng.get("gfx"), dict):
+                        parts.append(f"GFX: {eng['gfx']['value']} {eng['gfx']['unit']}")
+                        parts.append(f"ENC: {eng['enc']['value']} {eng['enc']['unit']}")
+                    else:
+                        parts.append(f"GFX: {eng.get('gfx', 'N/A')}")
+                        parts.append(f"ENC: {eng.get('enc', 'N/A')}")
+
+                    line = "    " + "  ".join(parts)
+                    self.logger.output = {"gpu_entry": line}
+                    self.logger.store_multiple_device_output()
+
+            self.logger.print_output(multiple_device_enabled=True,
+                                     watching_output=watching_output)
+            if watching_output:
+                self.logger.store_watch_output(multiple_device_enabled=True)
+                self.logger.print_output(multiple_device_enabled=True,
+                                         watching_output=watching_output)
+            return
+
+        if self.logger.is_csv_format():
+            for proc in pid_list:
+                for gpu_entry in proc["gpus"]:
+                    row = {"pid": proc["pid"], "name": proc["name"]}
+                    row["gpu_index"] = gpu_entry["gpu_index"]
+                    row.update(self.logger.flatten_dict(gpu_entry["memory_usage"]))
+                    row.update(self.logger.flatten_dict(gpu_entry["engine_usage"]))
+                    row["sdma_usage"] = gpu_entry["sdma_usage"]
+                    row["cu_occupancy"] = gpu_entry["cu_occupancy"]
+                    row["evicted_time"] = gpu_entry["evicted_time"]
+                    self.logger.output = row
+                    self.logger.store_multiple_device_output()
+            self.logger.print_output(multiple_device_enabled=True,
+                                     watching_output=watching_output)
+
+    def _monitor_inject_sort_by_pid(self, args, watching_output):
+        """Inject PID-grouped process table into monitor's multiple_device_output."""
+        handles = args.gpu if isinstance(args.gpu, list) else [args.gpu]
+        try:
+            pid_list = amdsmi_interface.amdsmi_get_gpu_process_list_by_pid(handles)
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            logging.debug("Failed to get process list by pid | %s", e.get_error_info())
+            return
+
+        # Build process_list entries in the same format the tabular renderer expects.
+        # Each entry: {"process_info": {"name":..,"pid":..,"memory_usage":..,"mem_usage":..,...}}
+        # The renderer reads "gpu" from the outer dict for the GPU column.
+        # For PID-grouped output we emit one row per PID+GPU combination,
+        # grouped so all GPUs for a PID appear together.
+        filtered = []
+        for proc in pid_list:
+            for gpu_entry in proc["gpus"]:
+                memory_usage_unit = "B"
+                evicted_time_unit = "ms"
+                sdma_usage_unit = "us"
+
+                mem_usage = gpu_entry["mem"]
+                mem_dict = {
+                    "gtt_mem": gpu_entry["memory_usage"]["gtt_mem"],
+                    "cpu_mem": gpu_entry["memory_usage"]["cpu_mem"],
+                    "vram_mem": gpu_entry["memory_usage"]["vram_mem"],
+                }
+
+                if self.logger.is_human_readable_format():
+                    mem_usage = self.helpers.convert_bytes_to_readable(mem_usage)
+                    for k in mem_dict:
+                        mem_dict[k] = self.helpers.convert_bytes_to_readable(mem_dict[k])
+                    memory_usage_unit = ""
+
+                mem_usage = self.helpers.unit_format(self.logger, mem_usage, memory_usage_unit)
+                for k in mem_dict:
+                    mem_dict[k] = self.helpers.unit_format(self.logger, mem_dict[k], memory_usage_unit)
+
+                cu = gpu_entry["cu_occupancy"]
+                if cu == "N/A":
+                    cu_str = "N/A"
+                else:
+                    cu_str = self.helpers.unit_format(self.logger, cu, "")
+
+                if self.logger.is_human_readable_format():
+                    sdma = self.helpers.convert_time_to_readable(gpu_entry["sdma_usage"], "us")
+                    evict = self.helpers.convert_time_to_readable(gpu_entry["evicted_time"], "ms")
+                else:
+                    sdma = self.helpers.unit_format(self.logger, gpu_entry["sdma_usage"], sdma_usage_unit)
+                    evict = self.helpers.unit_format(self.logger, gpu_entry["evicted_time"], evicted_time_unit)
+
+                info = {
+                    "name": proc["name"],
+                    "pid": proc["pid"],
+                    "memory_usage": mem_dict,
+                    "mem_usage": mem_usage,
+                    "cu_occupancy": cu_str,
+                    "sdma_usage": sdma,
+                    "evicted_time": evict,
+                }
+                filtered.append({
+                    "gpu_index": gpu_entry["gpu_index"],
+                    "process_info": info,
+                })
+
+        if not filtered:
+            filtered.append({
+                "gpu_index": "N/A",
+                "process_info": "No running processes detected",
+            })
+
+        # Set secondary table header — same columns as normal but title indicates PID grouping
+        self.logger.secondary_table_title = "PROCESS INFO (grouped by PID)"
+        self.logger.secondary_table_header = (
+            "GPU".rjust(3)
+            + "NAME".rjust(19)
+            + "PID".rjust(9)
+            + "GTT_MEM".rjust(10)
+            + "CPU_MEM".rjust(10)
+            + "VRAM_MEM".rjust(10)
+            + "MEM_USG".rjust(10)
+            + "CU%".rjust(9)
+            + "SDMA".rjust(8)
+            + "EVICT".rjust(8)
+        )
+        if watching_output:
+            self.logger.secondary_table_header = (
+                "TIMESTAMP".rjust(10) + "  " + self.logger.secondary_table_header
+            )
+
+        # The tabular renderer reads "gpu" from each device_output entry and uses
+        # it as the GPU column for every process row in that entry's process_list.
+        # So we must distribute process entries back to the correct GPU's entry.
+        pid_by_gpu = {}
+        for item in filtered:
+            gi = item["gpu_index"]
+            if gi not in pid_by_gpu:
+                pid_by_gpu[gi] = []
+            pid_by_gpu[gi].append({"process_info": item["process_info"]})
+
+        for entry in self.logger.multiple_device_output:
+            gpu = entry.get("gpu")
+            if gpu in pid_by_gpu:
+                entry["process_list"] = pid_by_gpu[gpu]
 
     def profile(self, args):
         """Not applicable to linux baremetal"""
@@ -10337,6 +10563,11 @@ class AMDSMICommands:
                 for gpu in args.gpu:
                     stored_gpus.append(gpu)
 
+                # When --sort-by-pid, suppress per-GPU process collection
+                sort_by_pid = getattr(args, 'sort_by_pid', False) and args.process
+                if sort_by_pid:
+                    args.process = False
+
                 # Store output from multiple devices without printing to console
                 for device_handle in args.gpu:
                     self.monitor(
@@ -10349,10 +10580,18 @@ class AMDSMICommands:
                 # Reload original gpus
                 args.gpu = stored_gpus
 
+                # Restore args.process if we suppressed it
+                if sort_by_pid:
+                    args.process = True
+
                 dual_csv_output = False
                 if args.process:
                     if self.logger.is_csv_format():
                         dual_csv_output = True
+
+                # When --sort-by-pid, inject PID-grouped process table
+                if sort_by_pid:
+                    self._monitor_inject_sort_by_pid(args, watching_output)
 
                 # Flush the output
                 self.logger.print_output(

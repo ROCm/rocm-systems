@@ -1421,6 +1421,13 @@ class AMDSMIParser(argparse.ArgumentParser):
         command_modifier_group.add_argument(
             "--append", action="store_true", required=False, help="Append to the file"
         )
+        command_modifier_group.add_argument(
+            '--sort-by-pid',
+            action='store_true',
+            default=False,
+            help='Group process output by PID instead of GPU. '
+                 'Applies to any command that shows process information.'
+        )
         # Placing loglevel outside the subcommands so it can be used with any subcommand
         command_modifier_group.add_argument(
             "--loglevel",
