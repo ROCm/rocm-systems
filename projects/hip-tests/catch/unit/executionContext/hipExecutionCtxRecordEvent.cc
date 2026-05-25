@@ -580,6 +580,129 @@ HIP_TEST_CASE(Unit_hipExecutionCtxWaitEvent_CrossCtx) {
 }
 
 /**
+ * Record on a ctx, wait via hipStreamWaitEvent on a plain stream, and verify
+ * the dependent work observes the ctx-side writes.
+ */
+HIP_TEST_CASE(Unit_hipExecutionCtxRecordEvent_WaitFromPlainStream) {
+  hipExecutionCtx_t ctx = nullptr;
+  hipStream_t cs = nullptr;
+  MakeCtxAndStream(ctx, cs);
+
+  hipStream_t ps = nullptr;
+  HIP_CHECK(hipStreamCreate(&ps));
+  REQUIRE(ps != nullptr);
+
+  hipEvent_t evt = nullptr;
+  HIP_CHECK(hipEventCreate(&evt));
+
+  constexpr size_t kN = 1 << 16;
+  const size_t kBytes = kN * sizeof(int);
+  std::vector<int> h_a(kN), h_b(kN), h_out(kN, 0);
+  for (size_t i = 0; i < kN; ++i) {
+    h_a[i] = static_cast<int>(i);
+    h_b[i] = static_cast<int>(2 * i);
+  }
+
+  int* d_a = nullptr;
+  int* d_b = nullptr;
+  int* d_sum = nullptr;
+  HIP_CHECK(hipMalloc(&d_a, kBytes));
+  HIP_CHECK(hipMalloc(&d_b, kBytes));
+  HIP_CHECK(hipMalloc(&d_sum, kBytes));
+
+  // Producer side: stage inputs and compute the sum on the ctx-owned stream.
+  HIP_CHECK(hipMemcpyAsync(d_a, h_a.data(), kBytes, hipMemcpyHostToDevice, cs));
+  HIP_CHECK(hipMemcpyAsync(d_b, h_b.data(), kBytes, hipMemcpyHostToDevice, cs));
+  constexpr int kThreads = 256;
+  const int blocks = static_cast<int>((kN + kThreads - 1) / kThreads);
+  HipTest::vectorADD<<<blocks, kThreads, 0, cs>>>(d_a, d_b, d_sum, kN);
+  HIP_CHECK(hipGetLastError());
+
+  // Record the ctx-wide event; have the plain stream wait on it via the
+  // standard cross-stream wait API; then drain d_sum on the plain stream.
+  HIP_CHECK(hipExecutionCtxRecordEvent(ctx, evt));
+  HIP_CHECK(hipStreamWaitEvent(ps, evt, 0));
+  HIP_CHECK(hipMemcpyAsync(h_out.data(), d_sum, kBytes, hipMemcpyDeviceToHost, ps));
+  HIP_CHECK(hipStreamSynchronize(ps));
+
+  for (size_t i = 0; i < kN; ++i) {
+    REQUIRE(h_out[i] == h_a[i] + h_b[i]);
+  }
+
+  HIP_CHECK(hipFree(d_a));
+  HIP_CHECK(hipFree(d_b));
+  HIP_CHECK(hipFree(d_sum));
+  HIP_CHECK(hipEventDestroy(evt));
+  HIP_CHECK(hipStreamDestroy(ps));
+  HIP_CHECK(hipStreamDestroy(cs));
+  HIP_CHECK(hipExecutionCtxDestroy(ctx));
+}
+
+/**
+ * Record on a plain stream via hipEventRecord, wait via hipExecutionCtxWaitEvent
+ * on a ctx, and verify ctx work observes the plain-side writes.
+ */
+HIP_TEST_CASE(Unit_hipExecutionCtxWaitEvent_RecordedOnPlainStream) {
+  hipExecutionCtx_t ctx = nullptr;
+  hipStream_t cs = nullptr;
+  MakeCtxAndStream(ctx, cs);
+
+  hipStream_t ps = nullptr;
+  HIP_CHECK(hipStreamCreate(&ps));
+  REQUIRE(ps != nullptr);
+
+  hipEvent_t evt = nullptr;
+  HIP_CHECK(hipEventCreate(&evt));
+
+  constexpr size_t kN = 1 << 16;
+  const size_t kBytes = kN * sizeof(int);
+  std::vector<int> h_a(kN), h_b(kN), h_out(kN, 0);
+  for (size_t i = 0; i < kN; ++i) {
+    h_a[i] = static_cast<int>(i);
+    h_b[i] = static_cast<int>(2 * i);
+  }
+
+  int* d_a = nullptr;
+  int* d_b = nullptr;
+  int* d_sum = nullptr;
+  int* d_out = nullptr;
+  HIP_CHECK(hipMalloc(&d_a, kBytes));
+  HIP_CHECK(hipMalloc(&d_b, kBytes));
+  HIP_CHECK(hipMalloc(&d_sum, kBytes));
+  HIP_CHECK(hipMalloc(&d_out, kBytes));
+
+  // Producer on the plain stream computes d_sum, then records the event.
+  HIP_CHECK(hipMemcpyAsync(d_a, h_a.data(), kBytes, hipMemcpyHostToDevice, ps));
+  HIP_CHECK(hipMemcpyAsync(d_b, h_b.data(), kBytes, hipMemcpyHostToDevice, ps));
+  constexpr int kThreads = 256;
+  const int blocks = static_cast<int>((kN + kThreads - 1) / kThreads);
+  HipTest::vectorADD<<<blocks, kThreads, 0, ps>>>(d_a, d_b, d_sum, kN);
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipEventRecord(evt, ps));
+
+  // The ctx's wait fans the event out to every ctx-stream's per-stream
+  // wait list; the dependent kernel on cs must observe d_sum.
+  HIP_CHECK(hipExecutionCtxWaitEvent(ctx, evt));
+  HipTest::vectorADD<<<blocks, kThreads, 0, cs>>>(d_sum, d_sum, d_out, kN);
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipMemcpyAsync(h_out.data(), d_out, kBytes, hipMemcpyDeviceToHost, cs));
+  HIP_CHECK(hipExecutionCtxSynchronize(ctx));
+
+  for (size_t i = 0; i < kN; ++i) {
+    REQUIRE(h_out[i] == 2 * (h_a[i] + h_b[i]));
+  }
+
+  HIP_CHECK(hipFree(d_a));
+  HIP_CHECK(hipFree(d_b));
+  HIP_CHECK(hipFree(d_sum));
+  HIP_CHECK(hipFree(d_out));
+  HIP_CHECK(hipEventDestroy(evt));
+  HIP_CHECK(hipStreamDestroy(ps));
+  HIP_CHECK(hipStreamDestroy(cs));
+  HIP_CHECK(hipExecutionCtxDestroy(ctx));
+}
+
+/**
  * End doxygen group hipExecutionCtxRecordEvent.
  * @}
  */

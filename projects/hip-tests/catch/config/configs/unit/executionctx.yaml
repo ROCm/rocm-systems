@@ -27,6 +27,10 @@ executionctx:
     <<: *level_2
   Unit_hipExecutionCtxWaitEvent_CrossCtx:
     <<: *level_2
+  Unit_hipExecutionCtxRecordEvent_WaitFromPlainStream:
+    <<: *level_2
+  Unit_hipExecutionCtxWaitEvent_RecordedOnPlainStream:
+    <<: *level_2
   Unit_hipExecutionCtxResourceSplit_Sanity:
     <<: *level_2
   Unit_hipExecutionCtxResourceSplit_By_Count_Sanity:
