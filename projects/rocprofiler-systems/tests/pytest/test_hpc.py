@@ -168,11 +168,9 @@ class TestJacobi(RocprofsysTest):
             depths=[1, 1],
         )
 
-    @pytest.mark.rocm
     @pytest.mark.hip
     @pytest.mark.mpi
     @pytest.mark.multi_gpu(2)
-    @pytest.mark.timeout(600)
     @pytest.mark.rocpd("hpc_hip_environment")
     @pytest.mark.parametrize("mode", ["sys_run"])
     def test_hip(self, mode, hpc_hip_environment):
@@ -187,6 +185,7 @@ class TestJacobi(RocprofsysTest):
             launcher="mpi",
             num_procs=2,
         )
+        self.assert_regex(result)
         # Taken from the program's defines.hpp
         JACOBI_MAX_LOOPS = 1000
 
