@@ -576,31 +576,44 @@ struct NoteSegmentBuilder : public SegmentBuilder {
     note_package_builder_.Write<uint32_t>(versionInfo.KernelInterfaceMinorVersion);
     /* Store runtime_info_size in PT_NOTE package */
     static_assert(10 <= sizeof(kfd_runtime_info));
+    fprintf(stderr, "[Core Dump] runtime_info: declared_size=%u, actual_sizeof=%zu\n",
+            10, sizeof(kfd_runtime_info));
     note_package_builder_.Write<uint64_t>(10 /* sizeof(kfd_runtime_info) for version 1.13 */);
 
     /* Store n_agents in PT_NOTE package */
     note_package_builder_.Write<uint32_t>(device_snapshots.size());
     /* Store agent_info_entry_size in PT_NOTE package */
     static_assert(120 <= sizeof(kfd_dbg_device_info_entry));
+    fprintf(stderr, "[Core Dump] device_info: declared_size=%u, actual_sizeof=%zu, n_agents=%zu\n",
+            120, sizeof(kfd_dbg_device_info_entry), device_snapshots.size());
     note_package_builder_.Write<uint32_t>(120 /* sizeof(kfd_dbg_device_info_entry) at version 1.13 */);
 
     /* Store n_queues in PT_NOTE package */
     note_package_builder_.Write<uint32_t>(queue_snapshots.size());
     /* Store queue_info_entry_size in PT_NOTE package */
     static_assert(64 <= sizeof(kfd_queue_snapshot_entry));
+    fprintf(stderr, "[Core Dump] queue_info: declared_size=%u, actual_sizeof=%zu, n_queues=%zu\n",
+            64, sizeof(kfd_queue_snapshot_entry), queue_snapshots.size());
     note_package_builder_.Write<uint32_t>(64 /* sizeof(kfd_queue_snapshot_entry) at version 1.13 */);
 
     // Push runtime info
+    fprintf(stderr, "[Core Dump] Pushing runtime_info: %zu bytes\n", sizeof(runtime_info));
     PushInfo(&runtime_info, sizeof(runtime_info));
 
     // Push device snapshots
     if (!device_snapshots.empty()) {
-      PushInfo(device_snapshots.data(), device_snapshots.size() * sizeof(kfd_dbg_device_info_entry));
+      size_t total_bytes = device_snapshots.size() * sizeof(kfd_dbg_device_info_entry);
+      fprintf(stderr, "[Core Dump] Pushing device_snapshots: %zu bytes (%zu agents * %zu)\n",
+              total_bytes, device_snapshots.size(), sizeof(kfd_dbg_device_info_entry));
+      PushInfo(device_snapshots.data(), total_bytes);
     }
 
     // Push queue snapshots
     if (!queue_snapshots.empty()) {
-      PushInfo(queue_snapshots.data(), queue_snapshots.size() * sizeof(kfd_queue_snapshot_entry));
+      size_t total_bytes = queue_snapshots.size() * sizeof(kfd_queue_snapshot_entry);
+      fprintf(stderr, "[Core Dump] Pushing queue_snapshots: %zu bytes (%zu queues * %zu)\n",
+              total_bytes, queue_snapshots.size(), sizeof(kfd_queue_snapshot_entry));
+      PushInfo(queue_snapshots.data(), total_bytes);
     }
 
     fprintf(stderr, "\n[Core Dump] ========== PHASE 6: PT_NOTE Packaging ==========\n");
