@@ -27,7 +27,7 @@
  *   6. ftruncate to exact size + hash verify
  */
 
-#include "basics_common.h"
+#include "examples_common.h"
 
 #include <hipfile.h>
 #include <hip/hip_runtime_api.h>
@@ -188,21 +188,10 @@ main(int argc, char *argv[])
     out_fd = -1;
 
     {
-        uint64_t hash_in, hash_out;
-
-        if (hash_file_range(in_path, 0, payload_size, &hash_in))
+        uint64_t hash;
+        if (verify_files_match(in_path, out_path, payload_size, &hash))
             goto close_in;
-        if (hash_file_range(out_path, 0, payload_size, &hash_out))
-            goto close_in;
-
-        if (hash_in != hash_out) {
-            fprintf(stderr, "Hash mismatch: %s=0x%016" PRIx64 "  %s=0x%016" PRIx64 "\n", in_path, hash_in,
-                    out_path, hash_out);
-            goto close_in;
-        }
-
-        printf("OK  %s -> %s  (%zu bytes, hash 0x%016" PRIx64 ")\n", in_path, out_path, payload_size,
-               hash_in);
+        printf("OK  %s -> %s  (%zu bytes, hash 0x%016" PRIx64 ")\n", in_path, out_path, payload_size, hash);
     }
 
     exit_status = EXIT_SUCCESS;

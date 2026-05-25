@@ -1,0 +1,11 @@
+jobs:
+- pmc:
+  - SQ_WAVES
+  - SQ_WAVE_CYCLES_sum
+  - SQ_INSTS_ALL_sum
+  - SQ_INSTS_INTERNAL_sum
+  - SQ_WAIT_ANY
+  - SQ_WAVE_CYCLES
+  - SQC_DCACHE_HITS_sum
+  - SQC_DCACHE_MISSES_sum
+  - GRBM_GUI_ACTIVE

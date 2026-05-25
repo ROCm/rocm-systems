@@ -1130,22 +1130,7 @@ hipError_t PlatformState::GetDynGlobalVar(const char* hostVar, hipModule_t hmod,
     LogPrintfError("Cannot find the module: 0x%x", hmod);
     return hipErrorNotFound;
   }
-  if (dev_ptr) {
-    *dev_ptr = nullptr;
-  }
-  IHIP_RETURN_ONFAIL(it->second->getManagedVarPointer(hostVar, dev_ptr, size_ptr));
-  // if dev_ptr is nullptr, hostvar is not in managed variable list
-  if ((dev_ptr && !*dev_ptr) || (size_ptr && *size_ptr == 0)) {
-    amd::Memory* mem = nullptr;
-    IHIP_RETURN_ONFAIL(it->second->GetDeviceVar(&mem, hostVar));
-    if (dev_ptr) {
-      *dev_ptr = memDevPtr(mem);
-    }
-    if (size_ptr) {
-      *size_ptr = mem->getSize();
-    }
-  }
-  return hipSuccess;
+  return it->second->GetGlobal(hostVar, reinterpret_cast<void**>(dev_ptr), size_ptr);
 }
 
 // ================================================================================================
