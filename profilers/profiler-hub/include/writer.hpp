@@ -14,7 +14,7 @@ namespace profiler_hub
 struct writer_t
 {
     explicit writer_t(std::unique_ptr<profiler_hub::storage_t> storage);
-    virtual ~writer_t();
+    ~writer_t();
     writer_t()                           = delete;
     writer_t(const writer_t&)            = delete;
     writer_t& operator=(const writer_t&) = delete;

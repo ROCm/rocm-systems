@@ -17,7 +17,7 @@ class storage_t
 {
 public:
     explicit storage_t(const std::string& database_path, const std::string& uuid);
-    virtual ~storage_t();
+    ~storage_t();
 
     storage_t(const storage_t&)            = delete;
     storage_t(storage_t&&)                 = delete;
