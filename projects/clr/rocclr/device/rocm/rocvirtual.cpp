@@ -1928,7 +1928,33 @@ VirtualGPU::~VirtualGPU() {
 
   delete blitMgr_;
 
-  if (tracking_created_) {
+  bool skip_fence_barrier = false;
+  if (nullptr != schedulerQueue_) {
+#if defined(_WIN32)
+    if (isSchedulerQueueThreadRunning()) {
+      schedulerQueueThreadRunning_.store(false, std::memory_order_release);
+      {
+        std::lock_guard<std::mutex> lock(scheduler_mutex_);
+        pendingSchedulerEvents_.clear();
+        scheduler_cv_.notify_one();
+      }
+      if (schedulerQueueThread_.joinable()) {
+        schedulerQueueThread_.join();
+      }
+    }
+    if (!dev().IsPm4Emulation()) {
+      roc_device_.hasSchedulerQueue_.fetch_add(1, std::memory_order_release);
+      skip_fence_barrier = true;
+    } else {
+      Hsa::queue_destroy(schedulerQueue_);
+    }
+#else
+    Hsa::queue_destroy(schedulerQueue_);
+#endif  // _WIN32
+    schedulerQueue_ = nullptr;
+  }
+
+  if (tracking_created_ && !skip_fence_barrier) {
     std::scoped_lock l(execution());
     // Dedicated queues keep their HW queue, never acquire from pool
     if (!dedicated_queue_ && gpu_queue_ == nullptr) {
@@ -1951,23 +1977,6 @@ VirtualGPU::~VirtualGPU() {
   }
 
   delete printfdbg_;
-
-  if (nullptr != schedulerQueue_) {
-#if defined(_WIN32)
-    // Stop the monitor thread before destroying the queue
-    if (isSchedulerQueueThreadRunning()) {
-      schedulerQueueThreadRunning_.store(false, std::memory_order_relaxed);
-      {
-        std::lock_guard<std::mutex> lock(scheduler_mutex_);
-        scheduler_cv_.notify_one();
-      }
-      if (schedulerQueueThread_.joinable()) {
-        schedulerQueueThread_.join();
-      }
-    }
-#endif  // _WIN32
-    Hsa::queue_destroy(schedulerQueue_);
-  }
 
   if (nullptr != virtualQueue_) {
     virtualQueue_->release();

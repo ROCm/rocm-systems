@@ -3,12 +3,14 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include "basics_common.h"
+#include "examples_common.h"
 
 #include <hipfile.h>
 
 #include <cerrno>
+#include <cinttypes>
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -85,6 +87,67 @@ hash_file_range(const char *path, off_t offset, size_t size, uint64_t *out_hash)
 
     *out_hash = hash_buffer(cpu_buf, size);
     free(cpu_buf);
+    return 0;
+}
+
+int
+seed_read_file(const char *path, size_t size)
+{
+    uint8_t *buf = (uint8_t *)malloc(size);
+    if (!buf) {
+        fprintf(stderr, "seed_read_file: could not allocate %zu bytes\n", size);
+        return 1;
+    }
+    fill_pattern(buf, size);
+
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    if (-1 == fd) {
+        fprintf(stderr, "seed_read_file: could not open %s (%s)\n", path, strerror(errno));
+        free(buf);
+        return 1;
+    }
+
+    size_t written = 0;
+    while (written < size) {
+        ssize_t n = write(fd, buf + written, size - written);
+        if (n < 0) {
+            if (errno == EINTR)
+                continue;
+            fprintf(stderr, "seed_read_file: write to %s failed (%s)\n", path, strerror(errno));
+            close(fd);
+            free(buf);
+            return 1;
+        }
+        written += (size_t)n;
+    }
+
+    if (-1 == close(fd)) {
+        fprintf(stderr, "seed_read_file: could not close %s (%s)\n", path, strerror(errno));
+        free(buf);
+        return 1;
+    }
+
+    free(buf);
+    return 0;
+}
+
+int
+verify_files_match(const char *read_path, const char *write_path, size_t size, uint64_t *out_hash)
+{
+    uint64_t hash_read, hash_write;
+
+    if (hash_file_range(read_path, 0, size, &hash_read))
+        return 1;
+    if (hash_file_range(write_path, 0, size, &hash_write))
+        return 1;
+
+    if (hash_read != hash_write) {
+        fprintf(stderr, "Hash mismatch: %s=0x%016" PRIx64 "  %s=0x%016" PRIx64 "\n", read_path, hash_read,
+                write_path, hash_write);
+        return 1;
+    }
+
+    *out_hash = hash_read;
     return 0;
 }
 

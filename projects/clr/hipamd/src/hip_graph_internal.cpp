@@ -37,8 +37,8 @@ const char* GetGraphNodeTypeString(uint32_t op) {
 
 namespace hip {
 
-int GraphNode::nextID = 0;
-int Graph::nextID = 0;
+std::atomic<int> GraphNode::nextID{0};
+std::atomic<int> Graph::nextID{0};
 std::unordered_set<GraphNode*> GraphNode::nodeSet_;
 // Guards global node set
 amd::Monitor GraphNode::nodeSetLock_{};
