@@ -11,6 +11,7 @@
 #include <timemory/mpl/macros.hpp>
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <string>
 
@@ -50,9 +51,9 @@ private:
     template <typename... Args>
     auto operator()(uintptr_t&&, int (*)(Args...), Args...) const;
 
-    mutable bool         m_protect = false;
-    const gotcha_data_t* m_data    = nullptr;
-    static std::mutex    s_mutex;
+    mutable bool             m_protect = false;
+    const gotcha_data_t*     m_data    = nullptr;
+    static std::atomic<bool> s_paused;
 };
 
 using pthread_mutex_gotcha_t = comp::gotcha<pthread_mutex_gotcha::gotcha_capacity,

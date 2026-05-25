@@ -150,20 +150,18 @@ pthread_mutex_gotcha::shutdown()
     pthread_mutex_gotcha_t::disable();
 }
 
-std::mutex pthread_mutex_gotcha::s_mutex = {};
+std::atomic<bool> pthread_mutex_gotcha::s_paused = { false };
 
 void
 pthread_mutex_gotcha::pause()
 {
-    std::scoped_lock<std::mutex> _lk{ s_mutex };
-    pthread_mutex_gotcha_t::set_ready(false);
+    s_paused.store(true, std::memory_order_relaxed);
 }
 
 void
 pthread_mutex_gotcha::resume()
 {
-    std::scoped_lock<std::mutex> _lk{ s_mutex };
-    pthread_mutex_gotcha_t::set_ready(true);
+    s_paused.store(false, std::memory_order_relaxed);
 }
 
 pthread_mutex_gotcha::pthread_mutex_gotcha(const gotcha_data_t& _data)
@@ -252,7 +250,8 @@ bool
 pthread_mutex_gotcha::is_disabled()
 {
     static thread_local const auto& _info = thread_info::get();
-    return (!_info || _info->is_offset || get_state() != ::rocprofsys::State::Active ||
+    return (s_paused.load(std::memory_order_relaxed) || !_info || _info->is_offset ||
+            get_state() != ::rocprofsys::State::Active ||
             get_thread_state() != ThreadState::Enabled);
 }
 }  // namespace component
