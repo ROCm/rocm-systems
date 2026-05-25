@@ -7,7 +7,9 @@ subtrees:
 - caption: Install
   entries:
   - file: install/install
-    title: Installing RDC
+    title: Install RDC
+  - file: install/handbook
+    title: Build from source
 
 - caption: How to
   entries:

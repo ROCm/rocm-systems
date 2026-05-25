@@ -10,7 +10,6 @@
                 "CMAKE_CXX_COMPILER": "g++",
                 "CMAKE_C_COMPILER": "gcc",
                 "CMAKE_INSTALL_PREFIX": "/opt/rocprofiler-systems",
-                "ROCPROFSYS_BUILD_BOOST": "ON",
                 "ROCPROFSYS_BUILD_DYNINST": "ON",
                 "ROCPROFSYS_BUILD_ELFUTILS": "ON",
                 "ROCPROFSYS_BUILD_LIBIBERTY": "ON",
