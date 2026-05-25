@@ -184,6 +184,7 @@ def validate_json_output(filepath: Path) -> bool:
                 "max_size_bytes",
                 "avg_size_bytes",
                 "total_time_ns",
+                "migration_throughput_gbps",
                 "bandwidth_gbps",
             ]
             missing_stats = [field for field in required_stats if field not in stats]

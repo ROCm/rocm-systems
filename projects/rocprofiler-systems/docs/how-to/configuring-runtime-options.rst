@@ -336,10 +336,15 @@ ROCpd outputs:
 
 * ``unified_memory.txt`` -- human-readable per-GPU summary with fault counts,
   trigger breakdown (``gpu_page_fault``, ``cpu_page_fault``, ``prefetch``), and
-  host-to-device / device-to-host migration bandwidth.
+  host-to-device / device-to-host effective migration throughput.
 * ``unified_memory.json`` -- machine-readable equivalent with the same fields
   plus an ``xnack_enabled`` flag and an always-present
   ``device_to_device`` direction bucket for schema stability.
+
+The migration-throughput value is computed as migrated bytes divided by KFD
+page-migration event duration. It is an end-to-end migration-service metric and
+should not be interpreted as PCIe, XGMI, SDMA, HBM, or raw memory-subsystem
+bandwidth.
 
 Requires an XNACK-capable AMD GPU with ``HSA_XNACK=1`` and
 ROCProfiler-SDK 1.2.2 or above. The KFD tracing domains

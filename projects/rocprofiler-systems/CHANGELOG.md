@@ -34,10 +34,10 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Unified-memory profiling reports (`unified_memory.txt` and
   `unified_memory.json`) summarizing KFD page-fault and page-migration events,
   including per-GPU counts, trigger breakdown (`gpu_page_fault`,
-  `cpu_page_fault`, `prefetch`), and Host-to-Device / Device-to-Host migration
-  bandwidth. Enable with `ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON`; requires
-  `HSA_XNACK=1` on an XNACK-capable AMD GPU and ROCProfiler-SDK 1.2.2 or
-  later. The required KFD tracing domains are enabled automatically.
+  `cpu_page_fault`, `prefetch`), and Host-to-Device / Device-to-Host effective
+  migration throughput. Enable with `ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON`;
+  requires `HSA_XNACK=1` on an XNACK-capable AMD GPU and ROCProfiler-SDK 1.2.2
+  or later. The required KFD tracing domains are enabled automatically.
 - Support for pause and resume of profiling via `roctxProfilerPause` and `roctxProfilerResume`.
 - Support for selective region tracing via the `ROCPROFSYS_SELECTED_REGIONS` environment variable, limiting tracing to specified regions.
 - `--selected-regions` CLI argument to `rocprof-sys-sample`, `rocprof-sys-run`, and `rocprof-sys-instrument` for specifying selective region tracing from the command line.
