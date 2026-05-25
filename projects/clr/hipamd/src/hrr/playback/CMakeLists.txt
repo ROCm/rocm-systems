@@ -48,6 +48,7 @@ target_compile_definitions(hrr-playback PRIVATE
   __HIP_PLATFORM_AMD__
   $<$<BOOL:${WIN32}>:NOMINMAX WIN32_LEAN_AND_MEAN>
 )
-target_link_libraries(hrr-playback PRIVATE hrr_reader amdhip64)
+find_package(Threads REQUIRED)
+target_link_libraries(hrr-playback PRIVATE hrr_reader amdhip64 Threads::Threads)
 
 install(TARGETS hrr-playback RUNTIME DESTINATION bin)
