@@ -10,7 +10,13 @@ import pytest
 from pathlib import Path
 from conftest import RocprofsysTest
 
-pytestmark = [pytest.mark.openmp, pytest.mark.ci_enable]
+pytestmark = [
+    pytest.mark.openmp,
+    pytest.mark.ci_enable,
+    pytest.mark.rocm_min_version(
+        "6.4"
+    ),  # Requires SDK version >= 600, 6.3 ships with 500
+]
 
 # ============================================================================
 # OpenMP Fixtures
