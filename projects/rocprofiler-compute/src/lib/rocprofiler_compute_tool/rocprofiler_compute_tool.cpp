@@ -208,7 +208,7 @@ std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
     const auto mode = rocm_compute::pc_sampling_mode(g_input_parameters->get_pc_sampling_mode());
     if (mode != PcSamplingMode::Disabled)
     {
-        tool_data->pc_sampling = std::make_unique<pc_sampling_feature_t>(
+        tool_data->pc_sampling = std::make_unique<pc_sampling_context_t>(
             mode,
             generate_output_file_path(g_input_parameters->get_output_path(), "_code_obj_info.json"),
             pc_sampling_collector_t::create());

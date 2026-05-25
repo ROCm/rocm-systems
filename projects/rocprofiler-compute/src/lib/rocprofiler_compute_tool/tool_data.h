@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 #pragma once
-#include "pc_sampling_collector/pc_sampling_feature.h"
+#include "pc_sampling_collector/pc_sampling_context.h"
 
 #include <filesystem>
 #include <map>
@@ -86,7 +86,7 @@ struct tool_data_t
     std::vector<counter_info_record_t>         counter_records;
     std::set<uint64_t>                         target_kernel_ids{};
 
-    std::unique_ptr<pc_sampling_feature_t> pc_sampling{};
+    std::unique_ptr<pc_sampling_context_t> pc_sampling{};
     std::shared_ptr<sdk_callbacks_t>       sdk_callbacks{};
 };
 }  // namespace rocm_compute

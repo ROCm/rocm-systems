@@ -17,14 +17,14 @@ enum class PcSamplingMode : uint8_t
     HostTrap
 };
 
-struct pc_sampling_feature_t
+struct pc_sampling_context_t
 {
-    pc_sampling_feature_t(PcSamplingMode               feature_mode,
+    pc_sampling_context_t(PcSamplingMode               pc_sampling_mode,
                           std::filesystem::path        code_obj_output_filename,
-                          pc_sampling_collector_t::ptr feature_collector)
-        : mode(feature_mode)
+                          pc_sampling_collector_t::ptr pc_sampling_collector)
+        : mode(pc_sampling_mode)
         , output_filename(std::move(code_obj_output_filename))
-        , collector(std::move(feature_collector))
+        , collector(std::move(pc_sampling_collector))
     {
     }
 

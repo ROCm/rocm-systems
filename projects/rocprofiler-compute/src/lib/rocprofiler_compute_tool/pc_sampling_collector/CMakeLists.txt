@@ -5,7 +5,7 @@ add_library(
     ${target}
     OBJECT
     pc_sampling_collector.h
-    pc_sampling_feature.h
+    pc_sampling_context.h
     pc_sampling_collector.cpp
     code_object_translator.h
     code_object_translator.cpp

@@ -337,7 +337,7 @@ TEST_F(test_rocprofiler_compute_tool_t, OnKernelSymbolRegisterOperation_Forwards
 TEST_F(test_rocprofiler_compute_tool_t, OnCodeObjectTracingIfPcSamplingEnabled_ForwardsToSdkCallbacks)
 {
     m_payload.code_object_id = 1;
-    m_tool_data->pc_sampling = std::make_unique<pc_sampling_feature_t>(PcSamplingMode::HostTrap,
+    m_tool_data->pc_sampling = std::make_unique<pc_sampling_context_t>(PcSamplingMode::HostTrap,
                                                                        "code_obj_output.json",
                                                                        m_pc_sampling_collector);
     code_object_tracing_callback(m_pc_sampling_record, nullptr, m_tool_data.get());
