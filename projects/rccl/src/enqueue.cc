@@ -3169,21 +3169,41 @@ static ncclResult_t rmaTaskAppend(
       return ncclInvalidArgument;
     }
 
-    struct ncclWindow_vidmem* peerWinDevHost = NULL;
-    NCCLCHECK(ncclShadowPoolToHost(&comm->devrState.shadows, info->peerWin, &peerWinDevHost));
-    peerWinHost = (struct ncclDevrWindow*)peerWinDevHost->winHost;
+    if (comm->symmetricSupport) {
+      struct ncclWindow_vidmem* peerWinDevHost = NULL;
+      NCCLCHECK(ncclShadowPoolToHost(&comm->devrState.shadows, info->peerWin, &peerWinDevHost));
+      peerWinHost = (struct ncclDevrWindow*)peerWinDevHost->winHost;
+    } else {
+      // hostRmaSupport path: handle is already a host pointer (type-punned in ncclDevrWindowRegisterInGroup)
+      peerWinHost = reinterpret_cast<struct ncclDevrWindow*>(info->peerWin);
+    }
 
     // Validate source buffer and window
     if (srcBuff == NULL) {
       WARN("ncclPutSignal: srcBuff is NULL");
       return ncclInvalidArgument;
     }
-    NCCLCHECK(ncclDevrFindWindow(comm, srcBuff, &srcWinHost));
-    if (srcWinHost == NULL || !(srcWinHost->winFlags & NCCL_WIN_COLL_SYMMETRIC)) {
-      WARN("ncclPutSignal: srcWinHost is not in a valid symmetric window");
+    if (info->peerWinOffset >= peerWinHost->size) {
+      WARN("ncclPutSignal: peerWinOffset %zu is greater than peerWin size %zu", info->peerWinOffset, peerWinHost->size);
       return ncclInvalidArgument;
     }
-    srcWinOffset = (char*)srcBuff - (char*)srcWinHost->userPtr;
+    if (comm->symmetricSupport) {
+      NCCLCHECK(ncclDevrFindWindow(comm, srcBuff, &srcWinHost));
+      if (srcWinHost == NULL || !(srcWinHost->winFlags & NCCL_WIN_COLL_SYMMETRIC)) {
+        WARN("ncclPutSignal: srcWinHost is not in a valid symmetric window");
+        return ncclInvalidArgument;
+      }
+      srcWinOffset = (char*)srcBuff - (char*)srcWinHost->userPtr;
+    } else {
+      // hostRmaSupport path: source buffer must be inside a registered window so
+      // the GIN proxy can resolve its MR handle.  Look it up the same way.
+      NCCLCHECK(ncclDevrFindWindow(comm, srcBuff, &srcWinHost));
+      if (srcWinHost == NULL) {
+        WARN("ncclPutSignal: srcBuff is not inside a registered ncclWindow");
+        return ncclInvalidArgument;
+      }
+      srcWinOffset = (char*)srcBuff - (char*)srcWinHost->userPtr;
+    }
 
     bool isMultiSegment = ncclDevrWindowIsMultiSegment(srcWinHost) || ncclDevrWindowIsMultiSegment(peerWinHost);
     bool hasSysmemSegment = ncclDevrWindowHasSysmemSegment(srcWinHost) || ncclDevrWindowHasSysmemSegment(peerWinHost);

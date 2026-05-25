@@ -11,6 +11,7 @@
 #include "hsa/hsa.h"
 #include "param.h"
 #include "bootstrap.h"
+#include "nccl_merge_stubs.h"
 
 #include <dlfcn.h>
 #include <unistd.h>
@@ -405,7 +406,7 @@ extern size_t ncclOsGetPageSize();
 ncclResult_t getDmaBufFd(void *addr, size_t length, int *fd,
                                 bool forceNonDataDirect) {
   if (ncclParamDmaBufEnable() == 0) return ncclInvalidUsage;
-#if HIP_VERSION >= 71260540
+#if HIP_VERSION >= 70000000
   static size_t hostPageSize = ncclOsGetPageSize();
   size_t alignedSize = length;
   uint64_t offset;

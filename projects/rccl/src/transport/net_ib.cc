@@ -3469,8 +3469,6 @@ ncclGin_t ncclGinIbGdaki = {
 };
 #endif // !defined(__HIP_PLATFORM_AMD__)
 
-#endif // !defined(__HIP_PLATFORM_AMD__)
-
 struct ncclIbGinProxyMrHandle {
   struct ncclIbMrHandle *mrHandle;
   uintptr_t *base_vas;

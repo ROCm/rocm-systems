@@ -230,31 +230,7 @@ static ncclResult_t ncclGdrCudaFree(void* gdrHandle) {
   return ncclSuccess;
 }
 
-// Helper: Allocate memory accessible from CPU (either GDR or host memory)
-template <typename T>
-static ncclResult_t allocMemCPUAccessible(T **ptr, T **devPtr, size_t nelem, int host_flags,
-                                          void **gdrHandle, struct ncclMemManager* manager, bool forceHost = false) {
-  if (ncclGdrCopy && !forceHost) {
-    NCCLCHECK(ncclGdrCudaCalloc(ptr, devPtr, nelem, gdrHandle));
-  } else {
-    NCCLCHECK(ncclCuMemHostAlloc((void **)ptr, NULL, nelem * sizeof(T)));
-    memset((void *)*ptr, 0, nelem * sizeof(T));
-    *devPtr = *ptr;
-    if (gdrHandle) *gdrHandle = NULL;  // Mark as host allocated by nulling GDR handle
-  }
-  return ncclSuccess;
-}
 
-// Helper: Free memory allocated by allocMemCPUAccessible
-template <typename T>
-static ncclResult_t freeMemCPUAccessible(T *ptr, void *gdrHandle, struct ncclMemManager* manager) {
-  if (gdrHandle != NULL) {  // If a GDR handle exists, it was GDR memory
-    NCCLCHECK(ncclGdrCudaFree(gdrHandle));
-  } else {  // Otherwise, it was host memory (or GDR was off)
-    NCCLCHECK(ncclCuMemHostFree(ptr));
-  }
-  return ncclSuccess;
-}
 
 #else
 static gdr_t ncclGdrInit() {
@@ -350,5 +326,40 @@ static ncclResult_t ncclGdrCudaFree(void* gdrHandle) {
   return ncclSuccess;
 }
 #endif
+
+
+// Helper: Allocate memory accessible from CPU (either GDR or host memory)
+template <typename T>
+static ncclResult_t allocMemCPUAccessible(T **ptr, T **devPtr, size_t nelem, int host_flags,
+                                          void **gdrHandle, struct ncclMemManager* manager, bool forceHost = false) {
+  if (ncclGdrCopy && !forceHost) {
+    NCCLCHECK(ncclGdrCudaCalloc(ptr, devPtr, nelem, gdrHandle));
+  } else {
+#if !defined(__HIP_PLATFORM_AMD__) && ! defined(__HIPCC__)
+    NCCLCHECK(ncclCuMemHostAlloc((void **)ptr, NULL, nelem * sizeof(T)));
+#else
+    CUDACHECK(hipHostMalloc((void **)ptr, nelem * sizeof(T)));
+#endif
+    memset((void *)*ptr, 0, nelem * sizeof(T));
+    *devPtr = *ptr;
+    if (gdrHandle) *gdrHandle = NULL;  // Mark as host allocated by nulling GDR handle
+  }
+  return ncclSuccess;
+}
+
+// Helper: Free memory allocated by allocMemCPUAccessible
+template <typename T>
+static ncclResult_t freeMemCPUAccessible(T *ptr, void *gdrHandle, struct ncclMemManager* manager) {
+  if (gdrHandle != NULL) {  // If a GDR handle exists, it was GDR memory
+    NCCLCHECK(ncclGdrCudaFree(gdrHandle));
+  } else {  // Otherwise, it was host memory (or GDR was off)
+#if !defined(__HIP_PLATFORM_AMD__) && ! defined(__HIPCC__)
+    NCCLCHECK(ncclCuMemHostFree(ptr));
+#else
+    CUDACHECK(hipFree(ptr));
+#endif
+  }
+  return ncclSuccess;
+}
 
 #endif // End include guard

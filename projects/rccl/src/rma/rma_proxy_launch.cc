@@ -25,13 +25,27 @@
 
 ncclResult_t ncclCuStreamBatchMemOp(hipStream_t stream, unsigned int numOps, hipStreamBatchMemOpParams* batchParams) {
   ncclResult_t ret = ncclSuccess;
+#if HIP_VERSION >= 71360850
   const unsigned int maxOpsPerBatch = 255;
 
   for (unsigned int offset = 0; offset < numOps; offset += maxOpsPerBatch) {
     unsigned int opsInThisChunk = (numOps - offset < maxOpsPerBatch) ? (numOps - offset) : maxOpsPerBatch;
     CUCHECKGOTO(hipStreamBatchMemOp(stream, opsInThisChunk, &batchParams[offset], 0), ret, fail);
   }
-
+#else
+  for (int opIdx = 0; opIdx < numOps; opIdx++) {
+    if (batchParams[opIdx].operation == CU_STREAM_MEM_OP_WRITE_VALUE_64) {
+      CUCHECKGOTO(hipStreamWriteValue64(stream, batchParams[opIdx].writeValue.address,
+                                        batchParams[opIdx].writeValue.value64,
+                                       batchParams[opIdx].writeValue.flags), ret, fail);
+    } else if (batchParams[opIdx].operation == CU_STREAM_MEM_OP_WAIT_VALUE_64) {
+      CUCHECKGOTO(hipStreamWaitValue64(stream, batchParams[opIdx].waitValue.address,
+                                        batchParams[opIdx].waitValue.value64,
+                                       batchParams[opIdx].waitValue.flags, UINT64_MAX), ret, fail);
+    }
+  }
+#endif
+	
 exit:
   return ret;
 fail:
@@ -223,20 +237,20 @@ ncclResult_t ncclRmaProxyPutLaunch(struct ncclComm* comm, struct ncclKernelPlan*
     // Prepare the readySeq write operation
     batchParams[batchIdx].writeValue.operation = CU_STREAM_MEM_OP_WRITE_VALUE_64;
     batchParams[batchIdx].writeValue.address = (CUdeviceptr)desc->readySeqDev;
-    batchParams[batchIdx].writeValue.value = desc->opSeq;
+    batchParams[batchIdx].writeValue.value64 = desc->opSeq;
     batchParams[batchIdx].writeValue.flags = CU_STREAM_WRITE_VALUE_DEFAULT;
 
     // Prepare the doneSeq wait operation
     batchParams[batchIdx+nRmaTasksProxy].waitValue.operation = CU_STREAM_MEM_OP_WAIT_VALUE_64;
     batchParams[batchIdx+nRmaTasksProxy].waitValue.address = (CUdeviceptr)desc->doneSeqDev;
-    batchParams[batchIdx+nRmaTasksProxy].waitValue.value = desc->opSeq;
+    batchParams[batchIdx+nRmaTasksProxy].waitValue.value64 = desc->opSeq;
     batchParams[batchIdx+nRmaTasksProxy].waitValue.flags = CU_STREAM_WAIT_VALUE_GEQ;
 
     // Graph: extra reset op for doneSeq
     if (persistent) {
       batchParams[batchIdx + 2 * nRmaTasksProxy].writeValue.operation = CU_STREAM_MEM_OP_WRITE_VALUE_64;
       batchParams[batchIdx + 2 * nRmaTasksProxy].writeValue.address = (CUdeviceptr)desc->doneSeqDev;
-      batchParams[batchIdx + 2 * nRmaTasksProxy].writeValue.value = 0;
+      batchParams[batchIdx + 2 * nRmaTasksProxy].writeValue.value64 = 0;
       batchParams[batchIdx + 2 * nRmaTasksProxy].writeValue.flags = CU_STREAM_WRITE_VALUE_DEFAULT;
     }
 
@@ -323,19 +337,19 @@ ncclResult_t ncclRmaProxyWaitLaunch(struct ncclComm* comm, struct ncclKernelPlan
 
       batchParams[opIdx].writeValue.operation = CU_STREAM_MEM_OP_WRITE_VALUE_64;
       batchParams[opIdx].writeValue.address = (CUdeviceptr)desc->readySeqDev;
-      batchParams[opIdx].writeValue.value = 1;
+      batchParams[opIdx].writeValue.value64 = 1;
       batchParams[opIdx].writeValue.flags = CU_STREAM_WRITE_VALUE_DEFAULT;
       opIdx++;
 
       batchParams[opIdx].waitValue.operation = CU_STREAM_MEM_OP_WAIT_VALUE_64;
       batchParams[opIdx].waitValue.address = (CUdeviceptr)desc->doneSeqDev;
-      batchParams[opIdx].waitValue.value = 1;
+      batchParams[opIdx].waitValue.value64 = 1;
       batchParams[opIdx].waitValue.flags = CU_STREAM_WAIT_VALUE_GEQ;
       opIdx++;
 
       batchParams[opIdx].writeValue.operation = CU_STREAM_MEM_OP_WRITE_VALUE_64;
       batchParams[opIdx].writeValue.address = (CUdeviceptr)desc->doneSeqDev;
-      batchParams[opIdx].writeValue.value = 0;
+      batchParams[opIdx].writeValue.value64 = 0;
       batchParams[opIdx].writeValue.flags = CU_STREAM_WRITE_VALUE_DEFAULT;
       opIdx++;
 

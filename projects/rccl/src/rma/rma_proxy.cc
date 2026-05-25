@@ -116,8 +116,12 @@ static ncclResult_t ncclRmaProxyCtxAlloc(struct ncclComm* comm, ncclGin_t* ginCo
   // Allocate the signals on the GPU and then register the memory region with the GIN plugin.
   // Enforcing strong ordering on the signals mr is vital to ensure ordering between puts and signals.
   size_t signalsBufSize = (comm->nRanks + 1) * sizeof(uint64_t);
+#if !defined(__HIP_PLATFORM_AMD__) && ! defined(__HIPCC__)
   NCCLCHECK(ncclCuMemAlloc((void **)&rmaProxyCtx->signalsDev, &rmaProxyCtx->signalsCumemhandle,
                            CU_MEM_HANDLE_TYPE_NONE, signalsBufSize /*, comm->memManager*/));
+#else
+  CUDACHECK(hipExtMallocWithFlags((void**)&rmaProxyCtx->signalsDev, signalsBufSize, hipDeviceMallocFinegrained));
+#endif
   CUDACHECK(cudaMemset(rmaProxyCtx->signalsDev, 0, signalsBufSize));
   NCCLCHECK(ncclRmaProxyRegMrSym(ginComm, rmaProxyCtx->ginCollComm, rmaProxyCtx->props, rmaProxyCtx->signalsDev, signalsBufSize,
                                  NCCL_PTR_CUDA, NCCL_NET_MR_FLAG_FORCE_SO,
@@ -128,6 +132,7 @@ static ncclResult_t ncclRmaProxyCtxAlloc(struct ncclComm* comm, ncclGin_t* ginCo
   // These are allocated as CPU-accessible memory (either GDR or host memory)
   NCCLCHECK(allocMemCPUAccessible(&rmaProxyCtx->opSeqs, &rmaProxyCtx->opSeqsDev,
                                   comm->nRanks, 0, &rmaProxyCtx->opSeqsGdrHandle, comm->memManager));
+  for (int i = 0; i < comm->nRanks; i++) rmaProxyCtx->opSeqs[i] = 1;
   NCCLCHECK(allocMemCPUAccessible(&rmaProxyCtx->readySeqs, &rmaProxyCtx->readySeqsDev,
                                   comm->nRanks, 0, &rmaProxyCtx->readySeqsGdrHandle, comm->memManager));
   NCCLCHECK(allocMemCPUAccessible(&rmaProxyCtx->doneSeqs, &rmaProxyCtx->doneSeqsDev,
@@ -184,8 +189,12 @@ static ncclResult_t ncclRmaProxyCtxAllocGraph(struct ncclComm* comm, ncclGin_t* 
 
   // Allocate the flush buffer on the GPU and then register the memory region with the GIN plugin.
   size_t flushBufSize = comm->nRanks * sizeof(uint64_t);
+#if !defined(__HIP_PLATFORM_AMD__) && ! defined(__HIPCC__)
   NCCLCHECK(ncclCuMemAlloc((void **)&rmaProxyCtx->flushBufDev, &rmaProxyCtx->flushBufCumemhandle,
-                            CU_MEM_HANDLE_TYPE_NONE, flushBufSize/*, comm->memManager*/));
+                           CU_MEM_HANDLE_TYPE_NONE, flushBufSize/*, comm->memManager*/));
+#else
+  CUDACHECK(hipExtMallocWithFlags((void**)&rmaProxyCtx->flushBufDev, flushBufSize, hipDeviceMallocFinegrained));
+#endif
   CUDACHECK(cudaMemset(rmaProxyCtx->flushBufDev, 0, flushBufSize));
   NCCLCHECK(ncclRmaProxyRegMrSym(ginComm, rmaProxyCtx->ginCollComm, rmaProxyCtx->props, rmaProxyCtx->flushBufDev, flushBufSize,
                                   NCCL_PTR_CUDA, NCCL_NET_MR_FLAG_FORCE_SO,
@@ -324,13 +333,17 @@ ncclResult_t ncclRmaProxyDestroyContext(ncclGin_t* ginComm, void* rmaProxyCtx){
 }
 
 // ---- Memory registration ----
-
+RCCL_PARAM(RmaProxyUseDMABUF, "RMA_USE_DMABUF", 0);
 ncclResult_t ncclRmaProxyRegister(struct ncclComm* comm, void* address, size_t size,
     void* rmaHostWins[NCCL_GIN_MAX_CONNECTIONS],
     ncclGinWindow_t rmaDevWins[NCCL_GIN_MAX_CONNECTIONS]){
       struct ncclRmaProxyState* rmaProxyState = &comm->rmaState.rmaProxyState;
       for (int n = 0; n < rmaProxyState->ginCommCount; n++) {
-          NCCLCHECK(ncclRmaProxyRegMrSym(rmaProxyState->ncclGin, rmaProxyState->ginComms[n], rmaProxyState->props[n], address, size,
+	  ncclNetProperties_t props_tmp = rmaProxyState->props[n];
+	  if (ncclParamRmaProxyUseDMABUF() == 0) {
+            props_tmp.ptrSupport &= ~NCCL_PTR_DMABUF;
+	  }
+          NCCLCHECK(ncclRmaProxyRegMrSym(rmaProxyState->ncclGin, rmaProxyState->ginComms[n], props_tmp, address, size,
                                          NCCL_PTR_CUDA, 0, &rmaHostWins[n], &rmaDevWins[n]));
         if (rmaHostWins[n] == NULL) {
           WARN("rank %d - GIN Symmetric register failed: buff %p, size %ld", comm->rank, address, size);
