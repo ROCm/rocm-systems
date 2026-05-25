@@ -1,5 +1,5 @@
 # =============================================================================
-# RDNA3.5 (gfx1151) - Graphics Core Efficiency Arbiter (GCEA) performance metrics
+# RDNA3.5 (gfx115x) - Graphics Core Efficiency Arbiter (GCEA) performance metrics
 # =============================================================================
 # GCEA (Graphics Core Efficiency Arbiter) interfaces to system memory (DRAM).
 # For APUs, this connects to system memory (DDR5/LPDDR5) instead of HBM

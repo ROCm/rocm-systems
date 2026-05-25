@@ -19,7 +19,6 @@ from typing import Any, Optional, TypeVar
 
 import config
 from utils import amdsmi_interface
-from utils.gpu_arch import canonical_gpu_arch
 from utils.logger import (
     console_debug,
     console_error,
@@ -80,9 +79,8 @@ def detect_arch(rocminfo_lines: list[str]) -> Optional[tuple[str, int]]:
         if not gpu_arch:
             continue
 
-        arch_for_support = canonical_gpu_arch(gpu_arch)
-        if arch_for_support in supported_gpu_arch:
-            return (arch_for_support, idx1)
+        if gpu_arch in supported_gpu_arch:
+            return (gpu_arch, idx1)
 
         if gpu_arch not in unsupported_gpu_arch:
             unsupported_gpu_arch.add(gpu_arch)

@@ -11,7 +11,7 @@ import yaml
 
 import config
 from utils import schema, utils_analysis
-from utils.gpu_arch import canonical_config_arch, canonical_gpu_arch
+from utils.gpu_arch import canonical_config_arch
 from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import (
     console_debug,
@@ -30,12 +30,7 @@ def load_sys_info(f: str) -> pd.DataFrame:
     """
     Load sys running info from csv file to a df.
     """
-    df = pd.read_csv(f)
-    if "gpu_arch" in df.columns and not df.empty:
-        df["gpu_arch"] = df["gpu_arch"].map(
-            lambda x: canonical_gpu_arch(str(x)) if pd.notna(x) else x
-        )
-    return df
+    return pd.read_csv(f)
 
 
 def load_panel_configs(

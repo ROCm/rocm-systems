@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any, Optional, Union
 
 import config
+from utils.gpu_arch import canonical_config_arch
 from utils.logger import (
     console_debug,
     console_error,
@@ -36,6 +37,27 @@ from vendored import yaml
 
 # Global constants
 METRIC_ID_RE = re.compile(pattern=r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
+
+
+def get_sets_yaml_path(arch: str, root: Optional[Path] = None) -> Path:
+    """Resolve a sets config file, allowing archs to share one yaml."""
+    sets_root = (
+        (root or config.rocprof_compute_home)
+        / "rocprof_compute_soc"
+        / "profile_configs"
+        / "sets"
+    )
+    exact_path = sets_root / f"{arch}_sets.yaml"
+    if exact_path.exists():
+        return exact_path
+
+    shared_arch = canonical_config_arch(arch)
+    if shared_arch and shared_arch != arch:
+        shared_path = sets_root / f"{shared_arch}_sets.yaml"
+        if shared_path.exists():
+            return shared_path
+
+    return exact_path
 
 
 # Supported expression field names for metric tables
@@ -637,13 +659,7 @@ def format_time(seconds: float) -> str:
 
 
 def parse_sets_yaml(arch: str) -> dict[str, Any]:
-    filename = (
-        config.rocprof_compute_home
-        / "rocprof_compute_soc"
-        / "profile_configs"
-        / "sets"
-        / f"{arch}_sets.yaml"
-    )
+    filename = get_sets_yaml_path(arch)
     with open(filename, encoding="utf-8") as file:
         content = file.read()
     data = yaml.safe_load(content)

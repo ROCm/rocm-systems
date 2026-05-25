@@ -156,13 +156,14 @@ def get_available_sets_for_arch(gpu_arch):
         return []
     if common.SRC not in sys.path:
         sys.path.insert(0, common.SRC)
-    sets_file = (
-        Path(common.SRC)
-        / "rocprof_compute_soc"
-        / "profile_configs"
-        / "sets"
-        / f"{gpu_arch}_sets.yaml"
-    )
+    from utils.gpu_arch import canonical_config_arch
+
+    sets_root = Path(common.SRC) / "rocprof_compute_soc" / "profile_configs" / "sets"
+    sets_file = sets_root / f"{gpu_arch}_sets.yaml"
+    if not sets_file.exists():
+        config_arch = canonical_config_arch(gpu_arch)
+        if config_arch and config_arch != gpu_arch:
+            sets_file = sets_root / f"{config_arch}_sets.yaml"
     if not sets_file.exists():
         return []
     data = yaml.safe_load(sets_file.read_text())

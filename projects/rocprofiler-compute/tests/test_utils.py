@@ -4289,6 +4289,15 @@ def test_set_parser():
     assert result["compute_thruput_util"]["title"] == "Compute Throughput Utilization"
 
 
+def test_set_parser_uses_shared_gfx115x_sets_file():
+    from utils.utils_common import parse_sets_yaml
+
+    result = parse_sets_yaml("gfx1152")
+
+    assert "compute_thruput_flops" in result
+    assert result["launch_stats"]["title"] == "Launch Stats"
+
+
 @pytest.mark.sci_notion
 def test_scientific_notation_trigger_below_lower_bound():
     value = 0.0001
