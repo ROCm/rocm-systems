@@ -195,10 +195,13 @@ bool testhipLinkTypeHopcountDevice(int numDevices) {
   rsmi_status_t (*fntopo_init)(uint64_t);
   rsmi_status_t (*fntopo_shut_down)();
 
-  // Use system dlopen path to find lib instead of hardcoding or configuration from cmake
-  // since this lib is outside of clr projects.
-  std::string rocm_smi_path = "librocm_smi64.so";
-  lib_rocm_smi_hdl = dlopen(rocm_smi_path.c_str(), RTLD_LAZY);
+  lib_rocm_smi_hdl = dlopen("librocm_smi64.so", RTLD_LAZY);
+  if (lib_rocm_smi_hdl == nullptr) {
+    lib_rocm_smi_hdl = dlopen("/opt/rocm/lib/librocm_smi64.so", RTLD_LAZY);
+  }
+  if (lib_rocm_smi_hdl == nullptr) {
+    INFO("Failed to dlopen librocm_smi64.so: " << dlerror());
+  }
   REQUIRE(lib_rocm_smi_hdl);
 
   void* fnsym = dlsym(lib_rocm_smi_hdl, "rsmi_topo_get_link_type");
