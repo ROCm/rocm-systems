@@ -37,7 +37,7 @@ Quick start RCCL build
 ----------------------
 
 RCCL directly depends on the HIP runtime plus the HIP-Clang compiler, which are part of the ROCm software stack.
-For ROCm installation instructions, see the :doc:`package manager installation guide <rocm-install-on-linux:install/install-methods/package-manager-index>`.
+For ROCm installation instructions, see the :doc:`rocm:install/rocm`.
 
 Use the `install.sh helper script <https://github.com/ROCm/rccl/blob/develop/install.sh>`_,
 located in the root directory of the RCCL repository,
@@ -53,6 +53,12 @@ To build the library using the install script, use this command:
 .. code-block:: shell
 
     ./install.sh
+
+To build for only for your local machine's AMD GPU architecture, reducing build time, add the ``-l`` flag.
+
+.. code-block:: shell
+
+   ./install.sh -l
 
 For more information on the build options and flags for the install script, run the following command:
 
