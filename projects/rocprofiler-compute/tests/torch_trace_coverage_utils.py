@@ -3610,7 +3610,7 @@ def parse_roctx_markers(
 # C++ RecordFunction tier signature detection. compare_single_op()
 # PASSes on either tier (markers + kernel intersection); these
 # sentinels are the only way to prove the C++ tier ran. Source of
-# truth: src/utils/roctx_recordfn/roctx_recordfn.cpp:default_leaf_context().
+# truth: src/lib/roctx_recordfn/roctx_recordfn.cpp:default_leaf_context().
 
 
 C_TIER_LEAF_CONTEXT_SENTINELS: Tuple[str, ...] = (

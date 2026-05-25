@@ -184,7 +184,7 @@ def test_cmake_and_runtime_compute_identical_fingerprint():
         f"install-time fingerprint {cmake_side!r} != runtime "
         f"fingerprint {runtime_side!r}; prebuilt .so will never be "
         f"resolved. Check the import path in "
-        f"src/utils/roctx_recordfn/CMakeLists.txt."
+        f"src/lib/roctx_recordfn/CMakeLists.txt."
     )
 
 
@@ -193,13 +193,8 @@ def test_roctx_recordfn_source_avoids_torch_umbrella_headers():
     Some ROCm nightly wheels strip the umbrella; only narrow ATen +
     c10 + pybind11 includes are portable.
     """
-    from pathlib import Path
 
-    cpp_path = (
-        Path(inject_roctx_loader.__file__).resolve().parent
-        / "roctx_recordfn"
-        / "roctx_recordfn.cpp"
-    )
+    cpp_path = inject_roctx_loader._SO_SOURCE
     assert cpp_path.is_file(), f"expected the C++ source at {cpp_path}"
     # Strip line comments so the rationale prose doesn't false-positive.
     active_lines = [
@@ -283,7 +278,7 @@ def test_loader_and_cmake_agree_on_artifact_filename_shape():
     import inspect
 
     # The loader-side expected-output line lives in _try_cmake_build:
-    #     produced = build_dir / "prebuilt" / f"roctx_recordfn-{tag}.so"
+    #     produced = build_dir / f"roctx_recordfn-{tag}.so"
     # We don't want to invoke _try_cmake_build (it would spawn cmake);
     # we just inspect its source for the literal expectation. This is
     # fragile to refactors but exactly the kind of bug we want pinned
@@ -308,13 +303,8 @@ def test_roctx_recordfn_source_uses_narrow_includes():
     could pass the negative test by deleting <torch/extension.h>
     while also accidentally dropping <pybind11/pybind11.h>, leaving
     the source uncompilable for the opposite reason."""
-    from pathlib import Path
 
-    cpp_path = (
-        Path(inject_roctx_loader.__file__).resolve().parent
-        / "roctx_recordfn"
-        / "roctx_recordfn.cpp"
-    )
+    cpp_path = inject_roctx_loader._SO_SOURCE
     src = cpp_path.read_text()
 
     required = (
@@ -944,7 +934,7 @@ def test_try_cmake_build_passes_runtime_python_to_cmake(monkeypatch, tmp_path):
     # Pre-create the expected output so the existence check passes.
     cache_dir = inject_roctx_loader._jit_cache_dir()
     build_dir = cache_dir / f"cmake-build-{_FAKE_TAG}"
-    produced = build_dir / "prebuilt" / f"roctx_recordfn-{_FAKE_TAG}.so"
+    produced = build_dir / f"roctx_recordfn-{_FAKE_TAG}.so"
     produced.parent.mkdir(parents=True, exist_ok=True)
     produced.write_bytes(b"stub-so")
     monkeypatch.setattr(
@@ -957,7 +947,7 @@ def test_try_cmake_build_passes_runtime_python_to_cmake(monkeypatch, tmp_path):
 
     assert len(invocations) == 2, f"expected two cmake invocations, saw {invocations!r}"
     configure_argv = invocations[0]
-    assert "-DTORCH_TRACE_PREBUILT=ON" in configure_argv
+    assert "-DBUILD_TORCH_TRACE_EXTENSION=ON" in configure_argv
     runtime_python_flag = f"-DTORCH_TRACE_PYTHON={sys.executable}"
     assert runtime_python_flag in configure_argv, (
         f"-DTORCH_TRACE_PYTHON must equal sys.executable; saw {configure_argv!r}"
@@ -1071,7 +1061,7 @@ def test_try_cmake_build_cleans_build_dir_on_success(monkeypatch, tmp_path):
 
     cache_dir = inject_roctx_loader._jit_cache_dir()
     build_dir = cache_dir / f"cmake-build-{_FAKE_TAG}"
-    produced = build_dir / "prebuilt" / f"roctx_recordfn-{_FAKE_TAG}.so"
+    produced = build_dir / f"roctx_recordfn-{_FAKE_TAG}.so"
     produced.parent.mkdir(parents=True, exist_ok=True)
     produced.write_bytes(b"stub-so")
     leftover = build_dir / "CMakeFiles"

@@ -865,16 +865,31 @@ install(
     PATTERN "rooflines*" EXCLUDE
     PATTERN "__pycache__" EXCLUDE
 )
-# Opt-in pre-built roctx_recordfn pybind11 extension used by
-# --torch-trace. OFF by default: rocprof-compute does NOT pull
-# PyTorch as an install-time dependency -- the --torch-trace
-# subcommand only matters at runtime, when the user has already
-# activated their training-stack torch env, and the install-time
-# Python is almost never the runtime PyTorch env anyway. Packagers
-# baking a docker image against a fixed rocm-pytorch wheel can opt
-# in with -DTORCH_TRACE_PREBUILT=ON -DTORCH_TRACE_PYTHON=<python>;
-# see the subdirectory CMakeLists.txt for the full contract.
-add_subdirectory(src/utils/roctx_recordfn)
+# roctx_recordfn pybind11 extension used by --torch-trace. Smart
+# default: ON when torch is importable in the install-time Python (or
+# -DTORCH_TRACE_PYTHON=<python> if set), OFF otherwise. The runtime
+# loader (utils/inject_roctx_loader.py) JIT-compiles on first
+# --torch-trace use if no prebuilt was baked. UNGATED on
+# SKIP_NATIVE_TOOL_BUILD: the torch-trace extension and the native
+# counter tool are independent concerns. Sources are installed by the
+# rule below so the runtime cmake-tier keeps working post-install.
+# See src/lib/roctx_recordfn/CMakeLists.txt for the full contract.
+add_subdirectory(src/lib/roctx_recordfn)
+# Always install the roctx_recordfn sources next to the loader's
+# search path so the runtime cmake-tier (utils/inject_roctx_loader.py:
+# _try_cmake_build) can rebuild against the user's torch env, even
+# when no prebuilt .so was baked at package time. Independent of
+# SKIP_NATIVE_TOOL_BUILD: the SKIP block below installs src/lib/
+# wholesale but only fires in source-shipping mode; this rule keeps
+# the cmake-tier alive in the default (compiled-tool) mode too.
+install(
+    DIRECTORY src/lib/roctx_recordfn
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/lib
+    COMPONENT main
+    PATTERN "_build" EXCLUDE
+    PATTERN "build" EXCLUDE
+    PATTERN "__pycache__" EXCLUDE
+)
 # src/roofline
 install(
     DIRECTORY src/roofline
@@ -975,13 +990,17 @@ if(NOT SKIP_NATIVE_TOOL_BUILD)
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute COMPONENT main
     )
 else()
-    # Install source files for runtime compilation
+    # Install source files for runtime compilation. roctx_recordfn/ is
+    # excluded here because it has its own dedicated, unconditional
+    # install rule above (the runtime cmake-tier needs the sources
+    # available in both SKIP_NATIVE_TOOL_BUILD modes).
     install(
         DIRECTORY src/lib/
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/lib
         COMPONENT main
         PATTERN "_build" EXCLUDE
         PATTERN "tests" EXCLUDE
+        PATTERN "roctx_recordfn" EXCLUDE
     )
 endif()
 

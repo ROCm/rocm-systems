@@ -57,7 +57,7 @@ def _marker_df(*function_cells):
 
 def test_sentinel_set_matches_cpp_source():
     """The C++ tier emits exactly these four leaf context labels (see
-    src/utils/roctx_recordfn/roctx_recordfn.cpp:default_leaf_context).
+    src/lib/roctx_recordfn/roctx_recordfn.cpp:default_leaf_context).
     A drift between the .cpp emitter and this constant would silently
     blind the coverage test to half the C++ tier outputs; this
     assertion makes the set the single source of truth from the test

@@ -4,43 +4,103 @@
 ## Builds roctx_recordfn.so for the --torch-trace C++ tier. Used in two
 # modes that produce a byte-name-identical artifact (same tag scheme,
 # computed by the loader's _source_fingerprint()):
-#   A. as a subdirectory of the parent rocprof-compute build (opt-in
-#      via TORCH_TRACE_PREBUILT for packagers with a fixed torch matrix);
+#   A. as a subdirectory of the parent rocprof-compute build (smart-
+#      default ON when the install-time interpreter has torch; OFF
+#      otherwise; force with -DBUILD_TORCH_TRACE_EXTENSION=ON);
 #   B. standalone, invoked by inject_roctx_loader.py's cmake tier at
 #      runtime in the user's PyTorch env.
+#
+# Install layout: prebuilt lands flat at
+# ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}/roctx_recordfn-<tag>.so
+# next to librocprofiler-compute-tool.so. Sources are installed at
+# ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/lib/roctx_recordfn/ by
+# the parent CMakeLists so the runtime cmake-tier keeps working post-
+# install regardless of SKIP_NATIVE_TOOL_BUILD.
 if(NOT PROJECT_NAME)
     cmake_minimum_required(VERSION 3.20)
     project(roctx_recordfn_runtime LANGUAGES CXX)
 endif()
 
-# Opt-in for packagers baking against a fixed (python, torch, abi)
-# cell. OFF by default: rocprof-compute does not pull PyTorch at
-# install time, and a prebuilt against the install-time interpreter
-# would almost never match the user's runtime env. Invoke as:
-#   cmake .. -DTORCH_TRACE_PREBUILT=ON -DTORCH_TRACE_PYTHON=<python>
+# Smart-default detection of torch in the install-time interpreter (or
+# the explicit -DTORCH_TRACE_PYTHON=<python> override). A reachable
+# torch flips the option ON; missing torch flips it OFF and the runtime
+# loader takes over the build. Operators can always override with
+# -DBUILD_TORCH_TRACE_EXTENSION={ON,OFF}.
+if(TORCH_TRACE_PYTHON)
+    set(_rcfn_default_python "${TORCH_TRACE_PYTHON}")
+else()
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_FOUND)
+        set(_rcfn_default_python "${Python3_EXECUTABLE}")
+    else()
+        set(_rcfn_default_python "")
+    endif()
+endif()
+
+set(_rcfn_default_build OFF)
+if(_rcfn_default_python)
+    execute_process(
+        COMMAND "${_rcfn_default_python}" -c "import torch"
+        RESULT_VARIABLE _rcfn_default_probe_rc
+        OUTPUT_QUIET
+        ERROR_QUIET
+    )
+    if(_rcfn_default_probe_rc EQUAL 0)
+        set(_rcfn_default_build ON)
+    endif()
+endif()
+
 option(
-    TORCH_TRACE_PREBUILT
-    "Pre-build roctx_recordfn.so against TORCH_TRACE_PYTHON's torch installation. OFF by default; opt-in for packagers with a fixed torch matrix."
-    OFF
+    BUILD_TORCH_TRACE_EXTENSION
+    "Build the roctx_recordfn pybind11 extension for --torch-trace. Smart default: ON when torch is importable in the install-time Python (or TORCH_TRACE_PYTHON if set), OFF otherwise. Packagers baking against a fixed (python, torch) cell should also pass -DTORCH_TRACE_PYTHON=<python>."
+    ${_rcfn_default_build}
 )
 
-if(NOT TORCH_TRACE_PREBUILT)
+if(NOT BUILD_TORCH_TRACE_EXTENSION)
+    if(_rcfn_default_python AND NOT _rcfn_default_probe_rc EQUAL 0)
+        message(
+            STATUS
+            "roctx_recordfn: BUILD_TORCH_TRACE_EXTENSION=OFF "
+            "(torch not importable in ${_rcfn_default_python}). The runtime "
+            "loader will JIT-compile on first --torch-trace use if the user's "
+            "env has torch + a C++ compiler. Force with "
+            "-DBUILD_TORCH_TRACE_EXTENSION=ON -DTORCH_TRACE_PYTHON=<python>."
+        )
+    elseif(NOT _rcfn_default_python)
+        message(
+            STATUS
+            "roctx_recordfn: BUILD_TORCH_TRACE_EXTENSION=OFF (no Python3 "
+            "interpreter found by find_package(Python3)). The runtime loader "
+            "will JIT-compile on first --torch-trace use if the user's env "
+            "has torch + a C++ compiler. Force with "
+            "-DBUILD_TORCH_TRACE_EXTENSION=ON -DTORCH_TRACE_PYTHON=<python>."
+        )
+    else()
+        message(
+            STATUS
+            "roctx_recordfn: BUILD_TORCH_TRACE_EXTENSION=OFF (explicit "
+            "override). The runtime loader will JIT-compile on first "
+            "--torch-trace use if the user's env has torch + a C++ compiler."
+        )
+    endif()
     return()
 endif()
 
-# Opt-in path: the operator promised they have a torch-equipped
-# Python and want the prebuilt produced. From here, missing torch is
-# a real configuration error, not a routine condition -- if you said
-# "build the prebuilt" you owe us the inputs to do it.
+# At this point BUILD_TORCH_TRACE_EXTENSION=ON. From here, missing
+# torch is a real configuration error: the operator asked for the
+# prebuilt but didn't supply the inputs to make it.
 
 if(NOT TORCH_TRACE_PYTHON)
-    message(
-        FATAL_ERROR
-        "TORCH_TRACE_PREBUILT=ON requires -DTORCH_TRACE_PYTHON=<python> "
-        "pointing at the runtime interpreter you want to bake against. "
-        "(The install-time interpreter and the runtime PyTorch env "
-        "are almost never the same; pinning is mandatory.)"
-    )
+    if(_rcfn_default_python)
+        set(TORCH_TRACE_PYTHON "${_rcfn_default_python}")
+    else()
+        message(
+            FATAL_ERROR
+            "BUILD_TORCH_TRACE_EXTENSION=ON requires either an explicit "
+            "-DTORCH_TRACE_PYTHON=<python> or a Python3 interpreter findable "
+            "by find_package(Python3). Neither was available."
+        )
+    endif()
 endif()
 
 execute_process(
@@ -52,13 +112,19 @@ execute_process(
 if(NOT _torch_present_rc EQUAL 0)
     message(
         FATAL_ERROR
-        "TORCH_TRACE_PREBUILT=ON but ${TORCH_TRACE_PYTHON} cannot "
+        "BUILD_TORCH_TRACE_EXTENSION=ON but ${TORCH_TRACE_PYTHON} cannot "
         "import torch. Either install torch into this interpreter, "
         "point TORCH_TRACE_PYTHON at one that has it, or drop the "
-        "TORCH_TRACE_PREBUILT=ON flag (the runtime loader will JIT "
-        "build at first --torch-trace use)."
+        "BUILD_TORCH_TRACE_EXTENSION=ON flag (the runtime loader will "
+        "JIT build at first --torch-trace use)."
     )
 endif()
+
+message(
+    STATUS
+    "roctx_recordfn: BUILD_TORCH_TRACE_EXTENSION=ON; baking prebuilt "
+    "against ${TORCH_TRACE_PYTHON}"
+)
 
 execute_process(
     COMMAND
@@ -167,12 +233,14 @@ add_library(${_so_name} MODULE roctx_recordfn.cpp)
 # filename). The loader resolves by tag via spec_from_file_location,
 # so a bare "roctx_recordfn.so" would be invisible to it; keeping the
 # tag also lets multiple (python, torch, abi, src) cells coexist in
-# the cache without collision.
+# the cache without collision. Output flat under the build dir so the
+# loader's cmake-tier (which builds in a fresh tmp dir and reads the
+# .so back from there) doesn't need to know about a sub-folder.
 set_target_properties(
     ${_so_name}
     PROPERTIES
         PREFIX ""
-        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/prebuilt"
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
         CXX_STANDARD 17
         CXX_STANDARD_REQUIRED ON
         POSITION_INDEPENDENT_CODE ON
@@ -252,14 +320,14 @@ target_compile_options(
     PRIVATE -fvisibility=hidden -Wno-deprecated-declarations
 )
 
-# Install under prebuilt/ next to the source; the runtime loader probes
-# this directory first by tag.
+# Flat install next to librocprofiler-compute-tool.so. The directory
+# ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}/ is solely owned by
+# rocprofiler-compute (verified against rocm-systems/projects/*/
+# CMakeLists.txt: no other ROCm package installs into it). The
+# loader resolves this location first by tag.
 install(
     TARGETS ${_so_name}
-    LIBRARY
-        DESTINATION
-            ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/utils/roctx_recordfn/prebuilt
-        COMPONENT main
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME} COMPONENT main
 )
 
 message(STATUS "roctx_recordfn: pre-built target ${_so_name} configured")

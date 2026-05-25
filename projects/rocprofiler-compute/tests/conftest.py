@@ -238,25 +238,30 @@ def require_torch_gpu():
         pytest.skip("torch.cuda.is_available() is False")
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 def _warm_roctx_recordfn_so():
     """Pre-build the roctx_recordfn .so once per pytest session.
 
+    Auto-applied (via ``pytest_collection_modifyitems`` below) to any
+    test whose module name matches ``test_torch_trace_*``. Not applied
+    to anything else, so tests that have nothing to do with
+    --torch-trace never pay the cold-build tax (not even as a silent
+    no-op shelling out to importlib).
+
     The first time rocprof-compute --torch-trace runs in a fresh
     cache, the loader builds the .so via cmake (typically ~20-60s
-    on a stock host). Without this fixture that cold-build cost
-    lands inside whichever test invocation happens to be first --
-    typically test_torch_trace_coverage -- and inflates its wall
-    time confusingly (a ~190s coverage run becomes a ~230s run, and
-    the bulk of the extra time is invisible to anyone reading the
-    test log because it happens inside the rocprof-compute subprocess).
+    on a stock host). Without this warmup that cold-build cost
+    lands inside whichever torch-trace test invocation happens to
+    be first -- typically test_torch_trace_coverage -- and inflates
+    its wall time confusingly (a ~190s coverage run becomes a ~230s
+    run, with the bulk of the extra time invisible to anyone reading
+    the test log because it happens inside the rocprof-compute
+    subprocess).
 
-    Best-effort by design: torch missing, cmake missing, or any
-    build failure leaves the fixture as a silent no-op and the
-    actual test surfaces any real symptom. We never fail the test
-    session here because plenty of tests in this suite do not
-    exercise --torch-trace at all and shouldn't be penalised for
-    being unable to pre-warm.
+    Best-effort: torch missing, cmake missing, or any build failure
+    leaves the fixture as a silent no-op. The real-symptom tests
+    (e.g. test_torch_trace_coverage) surface any underlying issue
+    with full context; the warmup never fails the session.
     """
     if importlib.util.find_spec("torch") is None:
         return
@@ -265,11 +270,26 @@ def _warm_roctx_recordfn_so():
 
         inject_roctx_loader.load()
     except Exception:
-        # The loader itself is responsible for emitting any
-        # diagnostic; swallowing here is intentional. Real-symptom
-        # tests (e.g. test_torch_trace_coverage) will surface the
-        # underlying issue with full context.
         pass
+
+
+def pytest_collection_modifyitems(config, items):
+    """Auto-apply ``_warm_roctx_recordfn_so`` to ``test_torch_trace_*``.
+
+    Replaces the previous ``autouse=True`` mechanism with a naming-
+    convention matcher so the warmup only fires for tests that
+    actually exercise --torch-trace. New torch-trace test modules
+    are picked up automatically (no per-test marker required) as
+    long as they follow the ``test_torch_trace_<name>.py`` pattern.
+    """
+    for item in items:
+        try:
+            module_name = Path(item.fspath).name
+        except (AttributeError, TypeError):
+            continue
+        if module_name.startswith("test_torch_trace_"):
+            if "_warm_roctx_recordfn_so" not in item.fixturenames:
+                item.fixturenames.append("_warm_roctx_recordfn_so")
 
 
 @pytest.fixture(autouse=True)

@@ -30,10 +30,22 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 _THIS_DIR = Path(__file__).resolve().parent
-_SO_SOURCE_DIR = _THIS_DIR / "roctx_recordfn"
+# The C++ sources live under src/lib/ alongside rocprofiler_compute_tool;
+# the layout below holds for both dev-tree and install-tree (in the
+# install tree, the loader sits at <libexec>/<proj>/utils/ and the
+# sources sit at <libexec>/<proj>/lib/roctx_recordfn/, so .parent/"lib"
+# resolves the same way as <repo>/src/utils/../lib/roctx_recordfn).
+_SO_SOURCE_DIR = _THIS_DIR.parent / "lib" / "roctx_recordfn"
 _SO_SOURCE = _SO_SOURCE_DIR / "roctx_recordfn.cpp"
 _SO_BUILDFILE = _SO_SOURCE_DIR / "CMakeLists.txt"
-_PREBUILT_DIR = _SO_SOURCE_DIR / "prebuilt"
+
+# Owner of the install-tree LIBDIR sub-folder we resolve prebuilt .so
+# files from. Hard-coded to "rocprofiler-compute" because the loader
+# has no access to CMAKE_PROJECT_NAME at import time. The sweep over
+# rocm-systems/projects/*/CMakeLists.txt confirmed this directory is
+# solely owned by us, so there is no risk of pulling a stranger's
+# library by name collision.
+_INSTALL_TREE_PROJECT_NAME = "rocprofiler-compute"
 
 # Recorded in the negative-cache marker so post-mortem readers can see
 # which build tier wrote it. Tests match these strings literally.
@@ -169,17 +181,39 @@ def _import_module_from_path(name, path):
     return module
 
 
+def _install_tree_prebuilt_candidates(tag):
+    """Paths to try, in order, for a packager-baked prebuilt .so.
+
+    The loader is installed at ``<prefix>/libexec/<project>/utils/``;
+    from there ``<prefix>`` is three levels up. The .so installs flat
+    under ``<prefix>/lib[64]/<project>/`` per the parent CMakeLists.
+    No dev-tree fallback: a developer iterating on the C++ sources
+    should rely on the JIT-cache or cmake tier, not a stale .so in
+    the source tree (that contract was a source of confusion in the
+    pre-C' layout and was dropped as part of the hard-break).
+    """
+    install_root = _THIS_DIR.parent.parent.parent
+    so_name = f"roctx_recordfn-{tag}.so"
+    return [
+        install_root / "lib" / _INSTALL_TREE_PROJECT_NAME / so_name,
+        install_root / "lib64" / _INSTALL_TREE_PROJECT_NAME / so_name,
+    ]
+
+
 def _try_prebuilt(tag):
-    so_path = _PREBUILT_DIR / f"roctx_recordfn-{tag}.so"
-    if not so_path.exists():
-        return None
-    try:
-        mod = _import_module_from_path("roctx_recordfn", so_path)
-        _safe_log("log", f"loaded pre-built .so: {so_path}")
-        return mod
-    except Exception as e:
-        _safe_log("warning", f"pre-built .so at {so_path} failed to load: {e}")
-        return None
+    for so_path in _install_tree_prebuilt_candidates(tag):
+        if not so_path.exists():
+            continue
+        try:
+            mod = _import_module_from_path("roctx_recordfn", so_path)
+            _safe_log("log", f"loaded pre-built .so: {so_path}")
+            return mod
+        except Exception as e:
+            _safe_log(
+                "warning",
+                f"pre-built .so at {so_path} failed to load: {e}",
+            )
+    return None
 
 
 def _jit_cache_dir():
@@ -190,9 +224,10 @@ def _jit_cache_dir():
 
 
 _PREBUILT_HINT = (
-    "ship a prebuilt roctx_recordfn-{tag}.so under "
-    "src/utils/roctx_recordfn/prebuilt/ so the loader's first "
-    "tier matches"
+    "bake a prebuilt roctx_recordfn-{tag}.so into "
+    "<libdir>/" + _INSTALL_TREE_PROJECT_NAME + "/ by configuring with "
+    "-DBUILD_TORCH_TRACE_EXTENSION=ON -DTORCH_TRACE_PYTHON=<python> "
+    "so the loader's first tier matches"
 )
 
 
@@ -444,7 +479,7 @@ def _try_cmake_build(tag):
         str(_SO_SOURCE_DIR),
         "-B",
         str(build_dir),
-        "-DTORCH_TRACE_PREBUILT=ON",
+        "-DBUILD_TORCH_TRACE_EXTENSION=ON",
         f"-DTORCH_TRACE_PYTHON={sys.executable}",
         "-DCMAKE_BUILD_TYPE=Release",
     ]
@@ -494,7 +529,7 @@ def _try_cmake_build(tag):
         )
         return None
 
-    produced = build_dir / "prebuilt" / f"roctx_recordfn-{tag}.so"
+    produced = build_dir / f"roctx_recordfn-{tag}.so"
     if not produced.is_file():
         err = RuntimeError(
             f"cmake build succeeded but expected .so missing at {produced}"
