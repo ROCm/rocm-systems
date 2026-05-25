@@ -71,9 +71,6 @@ ROCPROFSYS_ABORT_FAIL_REGEX = [
     r"terminate called after throwing an instance",
     r"calling abort\.\. in ",
     r"Exit code: [1-9]",
-    # Catches missing bundles stop excluding .inst, as this is expected
-    # Other bundles should be stopped by category_region::stop (or equivalent)
-    r"Instrumentation bundle .* with label '[^']*(?<!\.inst)' was not stopped",
 ]
 
 from rocprofsys.runners import TestResult
