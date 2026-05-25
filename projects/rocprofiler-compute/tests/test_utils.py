@@ -4413,15 +4413,19 @@ def test_list_blocks_all_archs(binary_handler_analyze_rocprof_compute, capsys, a
     assert "BLOCK NAME" in output
 
     # Fixed-width parse: empty aliases break whitespace splitting.
+    # Derive column offsets from the header so this parser tracks the producer.
     lines = output.splitlines()
     header_idx = next(i for i, line in enumerate(lines) if line.startswith("INDEX"))
+    header = lines[header_idx]
+    alias_col = header.index("BLOCK ALIAS")
+    name_col = header.index("BLOCK NAME")
     block_entries: dict[str, tuple[str, str]] = {}
     for line in lines[header_idx + 1 :]:
-        block_id = line[0:8].strip()
+        block_id = line[:alias_col].strip()
         if not block_id:
             continue
-        alias = line[9:25].strip()
-        name = line[26:].strip()
+        alias = line[alias_col:name_col].strip()
+        name = line[name_col:].strip()
         block_entries[block_id] = (alias, name)
 
     expected_panels = arch_panels_from_disk(arch)
