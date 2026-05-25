@@ -766,7 +766,7 @@ HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id, HsaNodeProperties&
   props.NumGws = 0;
   /*
    * In Native Linux, if the asic is APU, this value will be set to 1,
-   * if the asic is dGPU, this value will be set to 0. clr use this info
+   * if the asic is dGPU, this value will be set to 0. clr uses this info
    * to set hostUnifiedMemory_.
    */
   props.Integrated = !device->IsDgpu();
