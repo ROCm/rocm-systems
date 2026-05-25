@@ -195,12 +195,9 @@ bool testhipLinkTypeHopcountDevice(int numDevices) {
   rsmi_status_t (*fntopo_init)(uint64_t);
   rsmi_status_t (*fntopo_shut_down)();
 
-  // Use ROCM_SMI_LIB_DIR from CMake instead of hardcoding to /opt/rocm
-#ifdef ROCM_SMI_LIB_DIR
-  std::string rocm_smi_path = std::string(ROCM_SMI_LIB_DIR) + "/librocm_smi64.so";
-#else
+  // Use system dlopen path to find lib instead of hardcoding or configuration from cmake
+  // since this lib is outside of clr projects.
   std::string rocm_smi_path = "librocm_smi64.so";
-#endif
   lib_rocm_smi_hdl = dlopen(rocm_smi_path.c_str(), RTLD_LAZY);
   REQUIRE(lib_rocm_smi_hdl);
 
