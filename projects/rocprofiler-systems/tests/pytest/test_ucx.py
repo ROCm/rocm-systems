@@ -91,7 +91,7 @@ def ucx_env(ucx_base_env) -> dict[str, str]:
 
 class TestUCX(RocprofsysTest):
     UCX_PASS_REGEX = [
-        "Shutting down UCX tracing",  # Emitted by rocprof-sys (requires debug l)
+        "Shutting down UCX tracing",  # Emitted by rocprof-sys (requires debug logging)
         r"pml.*ucx",  # Emitted by program when UCX logging is enabled
     ]
 
