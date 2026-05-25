@@ -18,7 +18,22 @@ find_package(
     CONFIG
     REQUIRED
 )
-find_package(libdw REQUIRED)
+find_package(libdw QUIET)
+if(NOT TARGET libdw::libdw)
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(libdw QUIET IMPORTED_TARGET libdw)
+        if(TARGET PkgConfig::libdw)
+            add_library(libdw::libdw ALIAS PkgConfig::libdw)
+        endif()
+    endif()
+endif()
+if(NOT TARGET libdw::libdw)
+    message(
+        FATAL_ERROR
+        "libdw not found. Install libdw-dev (Debian/Ubuntu) or elfutils-devel (RHEL)."
+    )
+endif()
 find_package(
     amd_comgr
     REQUIRED
