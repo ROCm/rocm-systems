@@ -2,10 +2,8 @@
 # SPDX-License-Identifier:  MIT
 
 import argparse
-from pathlib import Path
 from unittest.mock import patch
 
-import common
 import pytest
 
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
@@ -234,11 +232,11 @@ def test_sanitize_no_torch_trace(tmp_path, remaining, expected_exception, setup)
 # ---------------------------------------------------------------------------
 # get_profiler_options(): live-attach library resolution with fallback
 # ---------------------------------------------------------------------------
-def test_attach_library_resolution_with_fallback():
+def test_attach_library_resolution_with_fallback(tmp_path):
     """Unit test: attach branch picks new lib first, falls back to old, errors if
     neither exists. resolve_rocm_library_path is mocked so the actual library
     locations are controlled by the test, independent of the configured tool path."""
-    output_dir = Path(common.get_output_dir())
+    output_dir = tmp_path / "attach_library_resolution"
     output_dir.mkdir(parents=True, exist_ok=True)
     args = argparse.Namespace(
         remaining="-- /bin/true",
