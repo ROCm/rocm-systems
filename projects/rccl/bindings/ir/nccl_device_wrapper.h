@@ -30,21 +30,6 @@
 #include "nccl_device.h"
 
 /* ------------------------------------------------------------------------
- * NCCL_IR_EXTERN_C: extern "C" only when this header is included while
- * building the bitcode artifact (clang -D__clang_llvm_bitcode_lib__);
- * otherwise empty. Provided defensively here in case nccl_device/utility.h
- * has not yet been updated with the same definition (that update is part
- * of the broader IR enablement work; see the porting plan).
- * ----------------------------------------------------------------------*/
-#ifndef NCCL_IR_EXTERN_C
-  #ifdef __clang_llvm_bitcode_lib__
-    #define NCCL_IR_EXTERN_C extern "C"
-  #else
-    #define NCCL_IR_EXTERN_C
-  #endif
-#endif
-
-/* ------------------------------------------------------------------------
  * NCCL_IR_EXPORT: full attribute set for an exported C-ABI thunk in the
  * bitcode artifact.
  *

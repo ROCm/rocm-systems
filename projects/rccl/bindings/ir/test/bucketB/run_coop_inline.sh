@@ -13,7 +13,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO="$(cd "$HERE/../../.." && pwd)"
+REPO="$(cd "$HERE/../../../.." && pwd)"
 BUILD="${BUILD:-$REPO/build/release}"
 HIPIFIED_INC="$BUILD/hipify/src/include"
 GENERATED_INC="$BUILD/include"
@@ -29,12 +29,9 @@ AMDGPU="$OUTDIR/coop_inline.amdgpu"
 
 echo "[coop-inline] arch=$ARCH  GPU=$GPU"
 
-# -DRCCL_ENABLE_NCCL_COOP_ANY=1 : same gate the bitcode build uses; without
-#   it, coop.h does not define ncclCoopAny and the test does not compile.
-# -D__HIP_PLATFORM_AMD__=1      : same as in the bucket A inline runner.
+# ncclCoopAny is unconditionally defined in coop.h; no extra macro needed.
 "$ROCM_PATH/bin/hipcc" --offload-arch="$ARCH" -O2 \
   -D__HIP_PLATFORM_AMD__=1 \
-  -DRCCL_ENABLE_NCCL_COOP_ANY=1 \
   -I"$HIPIFIED_INC" \
   -I"$HIPIFIED_INC/nccl_device" \
   -I"$GENERATED_INC" \

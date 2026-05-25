@@ -13,13 +13,12 @@
 #   combined_bitcode.k.disasm           k_combined disassembly
 #   librccl_device.ll                   textual IR of the bitcode
 #
-# Requires librccl_device.bc to have been built with
-#     -DRCCL_ENABLE_NCCL_COOP_ANY=ON
-# so it contains both bucket A and bucket B thunks.
+# Requires librccl_device.bc to have been built (cmake -DEMIT_LLVM_IR=ON).
+# Both bucket A and bucket B thunks are unconditionally in the artifact.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO="$(cd "$HERE/../../.." && pwd)"
+REPO="$(cd "$HERE/../../../.." && pwd)"
 BUILD="${BUILD:-$REPO/build/release}"
 HIPIFIED_INC="$BUILD/hipify/src/include"
 GENERATED_INC="$BUILD/include"
@@ -39,8 +38,7 @@ LL="$OUTDIR/librccl_device.ll"
 
 if [[ ! -f "$BC" ]]; then
   echo "ERROR: bitcode not found at $BC" >&2
-  echo "Build it: cmake -DEMIT_LLVM_IR=ON -DBITCODE_LIB_ARCH=$ARCH \\" >&2
-  echo "                -DRCCL_ENABLE_NCCL_COOP_ANY=ON ." >&2
+  echo "Build it: cmake -DEMIT_LLVM_IR=ON -DBITCODE_LIB_ARCH=$ARCH ." >&2
   echo "        : cmake --build . --target llvm_ir" >&2
   exit 2
 fi
@@ -55,7 +53,7 @@ fi
 if ! "$ROCM_PATH/llvm/bin/llvm-nm" "$BC" 2>/dev/null \
        | grep -q -E '^[^[:space:]]+[[:space:]]+T[[:space:]]+ncclCoopAnyInitWarp$'; then
   echo "ERROR: bitcode missing bucket B symbol ncclCoopAnyInitWarp." >&2
-  echo "Rebuild librccl_device.bc with -DRCCL_ENABLE_NCCL_COOP_ANY=ON." >&2
+  echo "Rebuild librccl_device.bc with: cmake -DEMIT_LLVM_IR=ON --build . --target llvm_ir" >&2
   exit 2
 fi
 
@@ -66,7 +64,6 @@ echo "[combined-bitcode] librccl_device.bc as text -> $LL"
 
 "$ROCM_PATH/bin/hipcc" --offload-arch="$ARCH" -O2 \
   -D__HIP_PLATFORM_AMD__=1 \
-  -DRCCL_ENABLE_NCCL_COOP_ANY=1 \
   -I"$HIPIFIED_INC" \
   -I"$HIPIFIED_INC/nccl_device" \
   -I"$WRAPPER_INC" \

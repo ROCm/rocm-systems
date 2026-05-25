@@ -37,18 +37,7 @@ NCCL_DEVICE_INLINE int ncclCoopPopc(ncclCoopMask_t x) { return (int)__popc(x); }
 #endif
 #endif
 
-// ----------------------------------------------------------------------------
-// ncclCoopAny: type-erased polymorphic wrapper over the static coop types
-// (ncclCoopThread/Warp/Lanes/WarpSpan/Cta). Used by the LLVM IR / bitcode
-// build (bindings/ir/) so that extern "C" wrapper thunks can take a single
-// concrete parameter type and forward it to the templated session classes
-// (e.g. ncclLsaBarrierSession<ncclCoopAny>).
-//
-// The static_asserts in get_vtable<Impl>() will fire at compile time if a
-// future RCCL coop type ever outgrows the 16-byte / 8-byte-aligned Storage.
-//
-// Source: NVIDIA NCCL v2.29.2-1 src/include/nccl_device/coop.h.
-// ----------------------------------------------------------------------------
+#if NCCL_CHECK_CUDACC
 struct ncclCoopAny {
   struct Storage { alignas(alignof(void*)) char space[16]; };
   struct VTable {
@@ -96,6 +85,7 @@ struct ncclCoopAny {
   __device__ int  num_threads() const { return vtable->size(&storage); }
   __device__ void sync()              { vtable->sync(&storage); }
 };
+#endif
 
 #if NCCL_CHECK_CUDACC
 template<int nThreadsPow2>
