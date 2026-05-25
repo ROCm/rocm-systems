@@ -36,7 +36,7 @@ target_compile_definitions(rccl-UnitTestsMicro PRIVATE
 # the test. We depend on the `rccl` target (which owns the hipify outputs)
 # WITHOUT linking against it -- the test deliberately compiles p2p.cc
 # directly and provides its own stubs for the rest.
-add_dependencies(rccl-UnitTestsMicro rccl)
+add_dependencies(rccl-UnitTestsMicro hipify_all copy_nccl_device_headers)
 
 # Independent coverage knob for this binary. We can't reuse the global
 # ENABLE_CODE_COVERAGE because src/CMakeLists.txt gates that on Debug
