@@ -39,6 +39,22 @@ enum class Encoding : size_t {
 enum fp16 : __hip_uint16_t {};
 enum bf16 : __hip_uint16_t {};
 
+// Map a source storage type to its Encoding as a true compile-time constant.
+// Using a traits struct (rather than an IIFE assigned to `const auto`) guarantees
+// the value is usable as a non-type template argument across all supported
+// toolchains, including the comgr-bundled Clang used by HIPRTC on Windows where
+// implicit-constexpr lambda rules differ from the Linux host toolchain.
+template <typename T> struct EncodingOf;
+template <> struct EncodingOf<float> {
+  static constexpr Encoding value = Encoding::IEEE754;
+};
+template <> struct EncodingOf<__amd_fp16_storage_t> {
+  static constexpr Encoding value = Encoding::E5M10;
+};
+template <> struct EncodingOf<__amd_bf16_storage_t> {
+  static constexpr Encoding value = Encoding::E8M7;
+};
+
 struct Float {
   __hip_int32_t ExpBias;
   __hip_uint32_t ExpBits;
@@ -448,16 +464,11 @@ __OCP_FP_HOST_DEVICE_STATIC__ T to_float(__hip_uint32_t u32, __hip_int8_t scale_
   static_assert(E != Encoding::IEEE754 && E != Encoding::E5M10 && E != Encoding::E8M7, "");
 
   const auto& enc = encodings[(size_t)E];
-  const auto dstE = []() -> Encoding {
-    if constexpr (__hip_internal::is_same<T, float>())
-      return Encoding::IEEE754;
-    else if constexpr (__hip_internal::is_same<T, __amd_fp16_storage_t>())
-      return Encoding::E5M10;
-    else if constexpr (__hip_internal::is_same<T, __amd_bf16_storage_t>())
-      return Encoding::E8M7;
-    else
-      __builtin_trap();
-  }();
+  static_assert(__hip_internal::is_same<T, float>() ||
+                    __hip_internal::is_same<T, __amd_fp16_storage_t>() ||
+                    __hip_internal::is_same<T, __amd_bf16_storage_t>(),
+                "to_float: unsupported destination type T");
+  constexpr Encoding dstE = EncodingOf<T>::value;
   const auto& dstEnc = encodings[(size_t)dstE];
 
   if (isnan<E, sat>(u32) || (enc.MxScale && scale_exp == OCP_SCALE_EXP_NAN))
@@ -561,16 +572,11 @@ __OCP_FP_HOST_DEVICE_STATIC__ __hip_uint32_t from_float_sr(T f, __hip_uint32_t s
     __builtin_trap();
 
   const auto& enc = encodings[(size_t)E];
-  const auto srcE = []() -> Encoding {
-    if constexpr (__hip_internal::is_same<T, float>())
-      return Encoding::IEEE754;
-    else if constexpr (__hip_internal::is_same<T, __amd_fp16_storage_t>())
-      return Encoding::E5M10;
-    else if constexpr (__hip_internal::is_same<T, __amd_bf16_storage_t>())
-      return Encoding::E8M7;
-    else
-      __builtin_trap();
-  }();
+  static_assert(__hip_internal::is_same<T, float>() ||
+                    __hip_internal::is_same<T, __amd_fp16_storage_t>() ||
+                    __hip_internal::is_same<T, __amd_bf16_storage_t>(),
+                "from_float_sr: unsupported source type T");
+  constexpr Encoding srcE = EncodingOf<T>::value;
   const auto& srcEnc = encodings[(size_t)srcE];
 
   auto srcU32 = u.u32;  // (srcE == Encoding::IEEE754) ? U32(f) : (__hip_uint32_t)f;
@@ -675,16 +681,11 @@ __OCP_FP_HOST_DEVICE_STATIC__ __hip_uint32_t from_float(T f, __hip_int8_t scale_
     __builtin_trap();
 
   const auto& enc = encodings[(size_t)E];
-  const auto srcE = []() -> Encoding {
-    if constexpr (__hip_internal::is_same<T, float>())
-      return Encoding::IEEE754;
-    else if constexpr (__hip_internal::is_same<T, __amd_fp16_storage_t>())
-      return Encoding::E5M10;
-    else if constexpr (__hip_internal::is_same<T, __amd_bf16_storage_t>())
-      return Encoding::E8M7;
-    else
-      __builtin_trap();
-  }();
+  static_assert(__hip_internal::is_same<T, float>() ||
+                    __hip_internal::is_same<T, __amd_fp16_storage_t>() ||
+                    __hip_internal::is_same<T, __amd_bf16_storage_t>(),
+                "from_float: unsupported source type T");
+  constexpr Encoding srcE = EncodingOf<T>::value;
   const auto& srcEnc = encodings[(size_t)srcE];
 
   auto srcU32 = u.u32;  // (srcE == Encoding::IEEE754) ? U32(f) : (__hip_uint32_t)f;
@@ -797,7 +798,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ OutType fp6_cvt_packedx16(InType in, __hip_int8_t 
     __hip_uint8_t val15 : 6;
     __hip_uint8_t val16 : 6;
     unsigned int padded;
-  } __attribute__((packed));
+  } __attribute__((packed, gcc_struct));
 
   static_assert(sizeof(other_type) == sizeof(fp6x16_packed));
   union {
@@ -927,7 +928,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ OutType fp6_cvt_packedx32(InType in, __hip_int8_t 
     __hip_uint8_t val31 : 6;
     __hip_uint8_t val32 : 6;
     unsigned long long padded;
-  } __attribute__((packed));
+  } __attribute__((packed, gcc_struct));
 
   static_assert(sizeof(other_type) == sizeof(fp6x32_packed), "");
   union {
