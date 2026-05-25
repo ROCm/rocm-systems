@@ -197,9 +197,7 @@ class TestJacobi(RocprofsysTest):
             perfetto_file="merged.proto",
             categories=["rocm_hip_stream"],
             print_output=True,
-            pass_regex=[
-                rf"LocalLaplacianKernel.*\|\s+{JACOBI_MAX_LOOPS * 2}\s+\|"
-            ],
+            pass_regex=[rf"LocalLaplacianKernel.*\|\s+{JACOBI_MAX_LOOPS * 2}\s+\|"],
         )
 
         # hipHostFree is one of the last calls — tracked via rocprofiler-sdk in Perfetto
