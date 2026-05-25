@@ -64,7 +64,7 @@ public:
     cached_perfetto_session(cached_perfetto_session&&)                 = delete;
     cached_perfetto_session& operator=(cached_perfetto_session&&)      = delete;
 
-    ~cached_perfetto_session()
+    ~cached_perfetto_session() noexcept
     {
         if(m_started)
         {

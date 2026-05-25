@@ -177,6 +177,23 @@ single_file_sink::on_source_drained(int source_id, std::vector<char> bytes)
 {
     if(bytes.empty()) return;
 
+    // Rewriting preserves payload size and adds a small per-packet header,
+    // so each source contributes at most slightly more than bytes.size() to
+    // the buffer. Reserve up front to skip the geometric-growth realloc
+    // cascade across many small per-packet appends.
+    if(m_buffer.capacity() < m_buffer.size() + bytes.size())
+        m_buffer.reserve(m_buffer.size() + bytes.size() + bytes.size() / 8);
+
+    static constexpr std::size_t SINGLE_FILE_BUFFER_WARN_THRESHOLD =
+        std::size_t{ 1 } * 1024 * 1024 * 1024;
+    if(m_buffer.size() < SINGLE_FILE_BUFFER_WARN_THRESHOLD &&
+       m_buffer.size() + bytes.size() >= SINGLE_FILE_BUFFER_WARN_THRESHOLD)
+    {
+        LOG_WARNING("single_file_sink in-memory buffer crossed 1 GiB; large MPI "
+                    "traces may exhaust host memory. Consider switching to "
+                    "ROCPROFSYS_PERFETTO_OUTPUT_LAYOUT=per_process.");
+    }
+
     auto [it, inserted] = m_source_seq_ids.try_emplace(source_id, m_next_seq_id);
     if(inserted) ++m_next_seq_id;
     const auto seq_id = it->second;

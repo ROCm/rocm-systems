@@ -15,6 +15,7 @@
 #include <cstring>
 #include <exception>
 #include <mutex>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <variant>
@@ -44,6 +45,14 @@ thread_local int t_emitting_pid = -1;
 // because cached-mode use is single-engine-at-a-time per process (cached
 // and live are mutually exclusive via ROCPROFSYS_TRACE_LEGACY).
 std::atomic<perfetto_engine*> g_active_cached_engine{ nullptr };
+
+// Surfaces violations of the "exactly one parser thread per pid" invariant
+// that the lock-free hot path in collect_packet_bytes relies on. Concurrent
+// writes to the same pid's byte vector would be UB (data race on
+// std::vector internals). The check fires on set_emitting_pid; the actual
+// emission path stays branch-free.
+std::mutex                               g_pid_owner_mutex{};
+std::unordered_map<int, std::thread::id> g_pid_owner_tids{};
 }  // namespace
 
 engine_config
@@ -114,6 +123,14 @@ public:
         auto& tls = context.GetThreadLocalState();
         if(tls.engine == nullptr) return;
         if(tls.pid < 0) return;  // emitter never called set_emitting_pid
+
+        // Primary safety: parser threads join via post_processor::run_multithreaded
+        // before cached_perfetto_session destructs the engine. The reload below
+        // is defense-in-depth: if the global has been cleared or rebound to a
+        // different engine since this thread's TLS cached the pointer, refuse
+        // the dereference so a hypothetical TLS-cache-outlives-engine race
+        // degrades into a dropped packet rather than UAF.
+        if(g_active_cached_engine.load(std::memory_order_acquire) != tls.engine) return;
 
         tls.engine->collect_packet_bytes(tls.pid, context.packet_data.data,
                                          context.packet_data.size);
@@ -206,7 +223,7 @@ perfetto_engine::perfetto_engine(engine_config cfg)
 , m_perfetto{ std::make_unique<perfetto_state>() }
 {}
 
-perfetto_engine::~perfetto_engine()
+perfetto_engine::~perfetto_engine() noexcept
 {
     if(m_running)
     {
@@ -397,20 +414,31 @@ perfetto_engine::stop()
     }
 
     LOG_DEBUG("Flushing the perfetto trace data...");
-    ::perfetto::TrackEvent::Flush();
-    session->FlushBlocking();
+    std::exception_ptr first_exc{};
+    try
+    {
+        ::perfetto::TrackEvent::Flush();
+        session->FlushBlocking();
 
-    LOG_DEBUG("Stopping the perfetto trace session (blocking)...");
-    session->StopBlocking();
+        LOG_DEBUG("Stopping the perfetto trace session (blocking)...");
+        session->StopBlocking();
+    } catch(...)
+    {
+        // Capture but proceed so cached-mode owners still get drain + finalize;
+        // the first observed exception is rethrown below per the documented
+        // teardown contract.
+        first_exc = std::current_exception();
+    }
 
-    // Clear running state only after StopBlocking() returns successfully —
-    // if FlushBlocking or StopBlocking threw, the destructor catch-all (which
-    // checks running) gets a second chance to force-stop the session.
     m_running     = false;
     m_active_pid  = 0;
     m_active_sink = nullptr;
 
-    if(current_mode != mode::cached_interceptor) return;
+    if(current_mode != mode::cached_interceptor)
+    {
+        if(first_exc) std::rethrow_exception(first_exc);
+        return;
+    }
 
     // Cached-mode drain: move collected bytes out under the lock, then
     // feed them through the sink without holding the lock (sink calls can
@@ -421,11 +449,24 @@ perfetto_engine::stop()
         drained.swap(m_collected_bytes);
     }
 
-    if(sink == nullptr) return;
-
-    std::exception_ptr first_exc{};
-    for(auto& [source_pid, bytes] : drained)
+    if(sink == nullptr)
     {
+        if(first_exc) std::rethrow_exception(first_exc);
+        return;
+    }
+
+    const auto dropped = m_dropped_packet_count.exchange(0, std::memory_order_relaxed);
+    if(dropped > 0)
+    {
+        LOG_WARNING("perfetto cached collector dropped {} packet(s) during the "
+                    "session (most likely allocation pressure)",
+                    dropped);
+    }
+
+    for(auto& entry : drained)
+    {
+        auto&      bytes      = entry.second;
+        const auto source_pid = entry.first;
         if(bytes.empty()) continue;
         try
         {
@@ -501,6 +542,32 @@ perfetto_engine::forget_session(pid_t pid)
 void
 set_emitting_pid(int pid) noexcept
 {
+    try
+    {
+        const auto                  self = std::this_thread::get_id();
+        std::lock_guard<std::mutex> lk{ g_pid_owner_mutex };
+        if(t_emitting_pid >= 0)
+        {
+            auto it = g_pid_owner_tids.find(t_emitting_pid);
+            if(it != g_pid_owner_tids.end() && it->second == self)
+                g_pid_owner_tids.erase(it);
+        }
+        if(pid >= 0)
+        {
+            auto [it, inserted] = g_pid_owner_tids.try_emplace(pid, self);
+            if(!inserted && it->second != self)
+            {
+                LOG_ERROR("perfetto cached emission: pid {} claimed by two parser "
+                          "threads concurrently; the single-writer-per-pid "
+                          "invariant of collect_packet_bytes is violated",
+                          pid);
+            }
+        }
+    } catch(...)
+    {
+        // Registry maintenance must not propagate; the hot path doesn't
+        // depend on it for correctness, only diagnostics.
+    }
     t_emitting_pid = pid;
 }
 
@@ -591,7 +658,10 @@ perfetto_engine::collect_packet_bytes(int pid, const void* data,
         // The SDK interceptor callback frame is not exception-safe; bad_alloc
         // from vector growth (or any other throwing operation) is captured
         // here so it cannot unwind through Perfetto SDK code that does not
-        // expect C++ exceptions.
+        // expect C++ exceptions. The per-packet LOG_ERROR can flood stderr
+        // under sustained pressure, so the count is also tracked and
+        // surfaced once at stop() time.
+        m_dropped_packet_count.fetch_add(1, std::memory_order_relaxed);
         LOG_ERROR("perfetto cached collector dropped packet for pid {} on internal "
                   "exception",
                   pid);

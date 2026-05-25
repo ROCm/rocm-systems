@@ -89,8 +89,11 @@ gather_combined_trace_bytes(std::vector<char> local_bytes)
     if(!config::get_perfetto_combined_traces()) return local_bytes;
 
     using char_vec_t = std::vector<char>;
-    // Held pending a project-local mpi gather helper that handles
-    // variable-size byte buffers and the collapse_processes setting.
+    // TODO(mpi-helper): replace tim::operation::finalize::mpi_get with a
+    // project-local core::mpi::gather_bytes helper. Variable-size byte buffers
+    // plus the collapse-processes semantics need their own test surface; this
+    // is the one site that still depends on timemory after the rest of the
+    // perfetto path was scrubbed.
     using perfetto_mpi_get_t = tim::operation::finalize::mpi_get<char_vec_t, true>;
 
     auto rank_data = std::vector<char_vec_t>{};
@@ -119,7 +122,7 @@ live_perfetto_driver::live_perfetto_driver() noexcept
     g_active_driver.store(this, std::memory_order_release);
 }
 
-live_perfetto_driver::~live_perfetto_driver()
+live_perfetto_driver::~live_perfetto_driver() noexcept
 {
     auto*      expected = this;
     const bool cleared  = g_active_driver.compare_exchange_strong(

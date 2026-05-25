@@ -45,11 +45,13 @@ read_varint(const char* data, std::size_t size, std::size_t& pos,
     std::uint32_t shift = 0;
     while(pos < size)
     {
+        // Reject before OR-ing payload bits so an attacker-controlled 10th
+        // byte cannot smuggle bits into the high end of `out`.
+        if(shift >= VARINT_MAX_SHIFT_BITS) return false;
         auto b = static_cast<std::uint8_t>(data[pos++]);
         out |= static_cast<std::uint64_t>(b & VARINT_PAYLOAD_MASK) << shift;
         if((b & VARINT_CONTINUATION_BIT) == 0) return true;
         shift += VARINT_SHIFT_BITS;
-        if(shift >= VARINT_MAX_SHIFT_BITS) return false;
     }
     return false;
 }

@@ -79,7 +79,7 @@ public:
     };
 
     explicit perfetto_engine(engine_config cfg);
-    ~perfetto_engine();
+    ~perfetto_engine() noexcept;
 
     // Engine address must be stable for the full lifetime of any cached
     // session: cached_interceptor's ThreadLocalState caches the
@@ -169,6 +169,7 @@ private:
     std::mutex                                 m_collector_mutex{};
     std::unordered_map<int, std::vector<char>> m_collected_bytes{};
     std::atomic<bool>                          m_collected_bytes_frozen{ false };
+    std::atomic<std::size_t>                   m_dropped_packet_count{ 0 };
 
     static std::once_flag s_sdk_init_flag;
     static bool           s_sdk_init_succeeded;

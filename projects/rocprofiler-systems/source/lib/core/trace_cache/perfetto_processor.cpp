@@ -436,19 +436,17 @@ emit_grouped_event(bool group_by_queue, QueueCategory queue_cat,
 
 perfetto_processor_t::perfetto_processor_t(
     const std::shared_ptr<metadata_registry>& metadata,
-    const std::shared_ptr<agent_manager>& agent_mngr, int pid, int ppid,
-    output_file_registry& output_registry, core::perfetto_engine* engine,
+    const std::shared_ptr<agent_manager>& agent_mngr, int pid, [[maybe_unused]] int ppid,
+    [[maybe_unused]] output_file_registry& output_registry, core::perfetto_engine* engine,
     rocprofsys::track_registry* tracks)
 : processor_t<perfetto_processor_t>()
 , m_metadata(*metadata)
 , m_process_id(pid)
-, m_parent_pid(ppid)
 , m_agent_manager(*agent_mngr)
 , m_use_annotations(config::get_perfetto_annotations())
 , m_default_group_by_queue(config::get_group_by_queue())
 , m_engine(engine)
 , m_tracks(tracks)
-, m_output_registry(output_registry)
 {
     for(const auto& agent_ptr : m_agent_manager.get_agents())
     {
@@ -1014,7 +1012,7 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
         perfetto_counter_track<category::thread_hardware_counter>;
     using comm_data_track = perfetto_counter_track<category::comm_data>;
 
-    static const std::unordered_map<size_t, pmc_track_info> kPmcTrackMap = {
+    static const std::unordered_map<size_t, pmc_track_info> PMC_TRACK_MAP = {
         { ROCPROFSYS_CATEGORY_ROCM_COUNTER_COLLECTION,
           { ROCM_COUNTER_UNIT,
             [](auto id) { return counter_collection_track::exists(id); },
@@ -1100,8 +1098,8 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
 
     auto track_key = std::hash<std::string>{}(_track_name + std::to_string(_device_id));
 
-    auto track_it = kPmcTrackMap.find(_pmc.category_enum_id);
-    if(track_it != kPmcTrackMap.end())
+    auto track_it = PMC_TRACK_MAP.find(_pmc.category_enum_id);
+    if(track_it != PMC_TRACK_MAP.end())
     {
         const auto& track_info = track_it->second;
 

@@ -28,7 +28,7 @@ namespace core
 {
 class perfetto_engine;
 }
-namespace config
+inline namespace config
 {
 struct tmp_file;
 }
@@ -40,7 +40,7 @@ class live_perfetto_driver
 {
 public:
     live_perfetto_driver() noexcept;
-    ~live_perfetto_driver();
+    ~live_perfetto_driver() noexcept;
 
     live_perfetto_driver(const live_perfetto_driver&)            = delete;
     live_perfetto_driver& operator=(const live_perfetto_driver&) = delete;

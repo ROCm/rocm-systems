@@ -127,7 +127,15 @@ if __name__ == "__main__":
     )
     parser.add_argument("-i", "--input", type=str, help="Input file", required=True)
     parser.add_argument(
-        "-t", "--trace_processor_shell", type=str, help="Path of trace_processor_shell"
+        "-t",
+        "--trace_processor_shell",
+        type=str,
+        default=os.environ.get("ROCPROFSYS_TRACE_PROC_SHELL"),
+        help=(
+            "Path of trace_processor_shell. Defaults to "
+            "$ROCPROFSYS_TRACE_PROC_SHELL when set (used by RHEL 8 CI to "
+            "pin an older binary that runs against the host's glibc)."
+        ),
     )
     parser.add_argument(
         "--key-names",

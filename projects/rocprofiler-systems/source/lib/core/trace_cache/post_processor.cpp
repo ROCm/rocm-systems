@@ -191,24 +191,34 @@ post_processor::run_multithreaded(
     auto _progress_cb = m_tracker.begin(
         fmt::format("Generating {} output", formats.names()), sum_storage_bytes(configs));
 
-    std::vector<std::thread> processing_threads;
-    processing_threads.reserve(configs.size());
-    for(const auto& cfg : configs)
-    {
+    // Bound concurrency to hardware_concurrency so processing hundreds of
+    // pids does not oversubscribe the scheduler and degrade total
+    // throughput. Process in batches that fit the bound.
+    const auto hw         = std::thread::hardware_concurrency();
+    const auto max_active = (hw > 0) ? static_cast<std::size_t>(hw) : std::size_t{ 1 };
+
+    auto spawn_for_config = [this, &formats, &_progress_cb](
+                                const std::shared_ptr<data::processor_config_t>& cfg) {
         LOG_TRACE("Spawning processing thread for pid={}", cfg->_pid);
-        // Capture the callback by value: it holds a shared_ptr to the bar,
-        // and bar::on_advance is thread-safe, so concurrent calls are fine.
-        processing_threads.emplace_back([this, cfg, &formats, _progress_cb] {
+        return std::thread{ [this, cfg, &formats, _progress_cb] {
             const auto _filename =
                 utility::get_buffered_storage_filename(cfg->_ppid, cfg->_pid);
             process_buffered_storage(cfg, _filename, formats, m_registry, _progress_cb,
                                      m_engine, m_tracks);
-        });
-    }
+        } };
+    };
 
-    LOG_TRACE("Waiting for {} processing threads to complete", processing_threads.size());
-    for(auto& thread : processing_threads)
-        thread.join();
+    for(std::size_t batch_start = 0; batch_start < configs.size();
+        batch_start += max_active)
+    {
+        const auto batch_end = std::min(batch_start + max_active, configs.size());
+        std::vector<std::thread> processing_threads;
+        processing_threads.reserve(batch_end - batch_start);
+        for(auto i = batch_start; i < batch_end; ++i)
+            processing_threads.emplace_back(spawn_for_config(configs[i]));
+        for(auto& thread : processing_threads)
+            thread.join();
+    }
     LOG_DEBUG("Multithreaded processing completed");
 }
 
