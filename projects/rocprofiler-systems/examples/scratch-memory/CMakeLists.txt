@@ -65,9 +65,9 @@ find_package(Threads REQUIRED)
 
 add_executable(scratch-memory scratch-memory.cpp)
 
-# ASan is not supported on GPU offload arches without xnack+. When building
-# under a sanitizer, -fsanitize=address lands in CMAKE_CXX_FLAGS and clang
-# emits -Woption-ignored for every non-xnack arch. Suppress that warning so
+# GPU offload arches without xnack+ do not support sanitizers. When building
+# under a sanitizer, -fsanitize=... lands in CMAKE_CXX_FLAGS and clang emits
+# -Woption-ignored for every non-xnack arch. Suppress that warning so
 # -Werror does not turn it into a fatal error.
 string(FIND "${CMAKE_CXX_FLAGS}" "-fsanitize" _scratch_memory_sanitizer_pos)
 if(_scratch_memory_sanitizer_pos GREATER -1)

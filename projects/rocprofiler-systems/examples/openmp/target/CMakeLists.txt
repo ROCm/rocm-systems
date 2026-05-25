@@ -11,8 +11,9 @@ endif()
 if(NOT OMP_TARGET_COMPILER)
     # Prefer amdclang++ from the same bin/ directory as the active CXX compiler
     # so its LLVM version matches the ASan bitcode (asanrtl.bc) built into the
-    # same toolchain tree. Use if(EXISTS) rather than find_program HINTS to
-    # avoid HINTS priority ambiguity with ENV ROCM_PATH paths.
+    # same toolchain tree. Use if(EXISTS) rather than find_program to bypass
+    # the result cache — a stale entry from a different ROCm installation would
+    # otherwise take precedence over the path derived from the active compiler.
     get_filename_component(_cxx_bin_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set(_toolchain_amdclangpp "${_cxx_bin_dir}/amdclang++")
 
