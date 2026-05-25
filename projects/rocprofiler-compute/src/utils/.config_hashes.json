@@ -10,7 +10,7 @@
         "0400_roofline.yaml": "9c3405ed493fcdc23c084cdd9db18baf",
         "0500_command_processor_cpc.yaml": "9de95259d153357dde907a7a410aa1a3",
         "0600_workgroup_manager_spi.yaml": "e0fb474a8a5e97cf26467578f7b5c316",
-        "0700_workgroup_processor.yaml": "2e4b9dcea407fdebba15c08b9b4f312c",
+        "0700_workgroup_processor.yaml": "e31edb6677cd0b6474c9f086469d3e41",
         "0900_l0_cache.yaml": "1cbfbc0badeed8ec0caa178faec2f231",
         "1100_l1_cache.yaml": "7403eeb9b47f69f73cf42eccb984cdf7",
         "1300_l2_cache.yaml": "dd34f4b6cbdbb8afbafa059b58ba9839",
@@ -19,7 +19,7 @@
       }
     },
     "gfx908": {
-      "delta_hash": "a9e81d4e9bb60270de4b17ee2dfc259d",
+      "delta_hash": "8b027c53f003dd0ee213076fe99b74fa",
       "files": {
         "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",
         "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",
@@ -42,7 +42,7 @@
       }
     },
     "gfx90a": {
-      "delta_hash": "429d5af92493bb26900dddbae85fa6bb",
+      "delta_hash": "4edabbe9c22dcae6e986b2d2a8b8759c",
       "files": {
         "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",
         "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",
@@ -65,7 +65,7 @@
       }
     },
     "gfx940": {
-      "delta_hash": "c578606c05da0f545ca3299facbf9edb",
+      "delta_hash": "6797e71567bdea7697dbc1d737f4b988",
       "files": {
         "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",
         "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",
@@ -88,7 +88,7 @@
       }
     },
     "gfx941": {
-      "delta_hash": "047e922ae1342a16e832d34ad98aba3d",
+      "delta_hash": "1d9c4c8765658a7095c631ff7cdb5727",
       "files": {
         "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",
         "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",

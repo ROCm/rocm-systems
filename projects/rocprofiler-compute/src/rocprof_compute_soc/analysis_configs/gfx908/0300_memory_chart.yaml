@@ -21,7 +21,7 @@ Panel Config:
           value: ROUND(SUM(SQ_INSTS_SMEM) / SUM($denom), 0)
         VALU:
           value: ROUND(SUM(SQ_INSTS_VALU) / SUM($denom), 0)
-        MFMA:
+        Matrix Ops:
           value: None
         VMEM:
           value: ROUND(SUM(SQ_INSTS_VMEM) / SUM($denom), 0)
@@ -132,7 +132,7 @@ Panel Config:
     SMEM: Total number of SMEM (Scalar Memory Read) instructions issued normalization
       unit.
     VALU: The number of VALU (Vector ALU) instructions issued per normalization unit.
-    MFMA: Total number of MFMA (Matrix-Fused-Multiply-Add) instructions issued per
+    Matrix Ops: Total number of MFMA (Matrix-Fused-Multiply-Add) instructions issued per
       normalization unit.
     VMEM: The number of VMEM (GPU Memory) read instructions issued (including FLAT/scratch
       memory) per normalization unit.
