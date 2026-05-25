@@ -166,10 +166,10 @@ HIP_TEST_CASE(Unit_hipMalloc_Allocate90PercentOfDeviceMemory) {
  * Test Description
  * ------------------------
  * - APU-only. Allocates a single device buffer expected to exceed the
- *   dedicated-VRAM carveout, then exercises it end-to-end (memset, copy
- *   back, verify head and tail). Validates that hipMalloc honours the
- *   spill path for large allocations on unified memory and that the
- *   resulting buffer is usable by an AQL kernel submit.
+ *   dedicated-VRAM carveout, then exercises it with memory operations
+ *   (memset, copy back, verify head and tail). Validates that hipMalloc
+ *   honours the spill path for large allocations on unified memory and
+ *   that the resulting buffer remains accessible for those operations.
  * Test source
  * ------------------------
  * - unit/memory/hipMalloc.cc
