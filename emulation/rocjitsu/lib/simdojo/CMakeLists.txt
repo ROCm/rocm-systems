@@ -10,6 +10,7 @@ if(NOT CMAKE_PROJECT_NAME OR CMAKE_PROJECT_NAME STREQUAL "simdojo")
     set(CMAKE_CXX_STANDARD_REQUIRED ON)
 endif()
 
+include(GNUInstallDirs)
 find_package(Threads REQUIRED)
 
 add_library(
@@ -35,13 +36,17 @@ if(MSVC)
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
     target_compile_options(
         simdojo
-        PRIVATE -Wall -Wextra -Wpedantic -Werror -fvisibility=hidden
+        PRIVATE -Wall -Wextra -Wpedantic -Werror
     )
+    # Hide symbols only for static builds; shared libraries need them exported.
+    get_target_property(_simdojo_type simdojo TYPE)
+    if(_simdojo_type STREQUAL "STATIC_LIBRARY")
+        target_compile_options(simdojo PRIVATE -fvisibility=hidden)
+    endif()
 endif()
 
 # --- Install / export (standalone or when parent opts in) ---
 if(SIMDOJO_STANDALONE OR SIMDOJO_INSTALL)
-    include(GNUInstallDirs)
     include(CMakePackageConfigHelpers)
 
     install(
