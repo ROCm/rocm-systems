@@ -170,12 +170,12 @@ set(FLATBUFFERS_BUILD_FLATLIB ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest flatbuffers)
 
 # Compile FlatBuffers schemas into C++ headers.
-set(GENERATED_DIR ${CMAKE_BINARY_DIR}/generated)
+set(GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
 file(MAKE_DIRECTORY ${GENERATED_DIR})
 
 set(SCHEMA_FILES
-    ${CMAKE_SOURCE_DIR}/schemas/simulation_config.fbs
-    ${CMAKE_SOURCE_DIR}/schemas/checkpoint.fbs
+    ${CMAKE_CURRENT_SOURCE_DIR}/schemas/simulation_config.fbs
+    ${CMAKE_CURRENT_SOURCE_DIR}/schemas/checkpoint.fbs
 )
 
 set(GENERATED_HEADERS)
@@ -185,7 +185,7 @@ foreach(schema ${SCHEMA_FILES})
     add_custom_command(
         OUTPUT ${output_header}
         COMMAND
-            $<TARGET_FILE:flatc> --cpp -I ${CMAKE_SOURCE_DIR}/schemas -o
+            $<TARGET_FILE:flatc> --cpp -I ${CMAKE_CURRENT_SOURCE_DIR}/schemas -o
             ${GENERATED_DIR} ${schema}
         DEPENDS flatc ${schema}
         COMMENT "Compiling FlatBuffers schema: ${schema_name}.fbs"
