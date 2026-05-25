@@ -16,15 +16,29 @@ Why: the only end-to-end check that the --torch-trace marker stream
     matches torch.profiler ground truth at the per-op level.
 """
 
+import importlib.util
 import json
 import random
 import sys
+import threading
 import warnings
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import common
 import pytest
+
+# Guard torch / loader imports so this module still loads on CPU-only
+# hosts. The cpp_tier_* tests below skip via the module-scoped
+# roctx_recordfn_so fixture and the require_torch(gpu=True) call.
+# A module-level pytest.skip(..., allow_module_level=True) or a top-
+# level pytest.importorskip("torch") would collect zero items on a
+# CPU-only host and make pytest exit with code 5, which CTest reads
+# as a test failure.
+if importlib.util.find_spec("torch") is not None:
+    import torch  # noqa: E402
+
+    from utils import inject_roctx_loader  # noqa: E402
 
 COVERAGE_TEST_CONFIG: Dict[str, Any] = {"cleanup": True}
 
@@ -356,3 +370,384 @@ def test_random_operator_kernel_coverage(
             COVERAGE_TEST_CONFIG["cleanup"],
             gt_work_dir,
         )
+
+
+# -----------------------------------
+# C++ tier API contract tests
+# -----------------------------------
+#
+# Folded in from the former test_torch_trace_worker_thread.py and
+# test_torch_trace_seqnr_correlation.py. These exercise the roctx_recordfn
+# .so directly rather than through `rocprof-compute --torch-trace`, so they
+# live next to the coverage suite that does cover the CLI: per-test budgets
+# are small (a single fwd+bwd) and the contracts checked here are the ones
+# the integration test above cannot observe (snapshot counters, push/pop
+# balance, capture-buffer contents, TLS DebugInfo propagation across the
+# autograd worker, soft-cap and multi-thread safety).
+#
+# Counters from dump_stats() are the source of truth; wire-string shape is
+# additionally covered by test_random_operator_kernel_coverage above.
+
+
+@pytest.fixture(scope="module")
+def roctx_recordfn_so():
+    """Load roctx_recordfn.so once for the cpp_tier_* tests below.
+
+    Skips on CPU-only / toolchain-less hosts. Duplicates the GPU + torch
+    checks done by the per-test require_torch(gpu=True) call because
+    pytest does not guarantee a function-scoped fixture resolves before
+    a module-scoped one; without this, a host where this fixture happens
+    to resolve first would call into the loader (and reference the
+    module-level inject_roctx_loader name, unbound on CPU-only hosts)
+    before require_torch had a chance to skip.
+
+    Each test calls install() explicitly so the fixture itself stays
+    test-state-free; uninstall() runs best-effort on teardown.
+    """
+    if importlib.util.find_spec("torch") is None:
+        pytest.skip("PyTorch is not installed")
+    if not torch.cuda.is_available():
+        pytest.skip("torch.cuda.is_available() is False")
+    mod = inject_roctx_loader.load()
+    if mod is None:
+        pytest.skip("roctx_recordfn.so unavailable (no toolchain/libtorch)")
+    yield mod
+    try:
+        mod.uninstall()
+    except Exception:
+        pass
+
+
+def _leaf_label(marker: str) -> str:
+    """Return the LEAF context label (e.g. 'aten:0', 'autograd.bwd:0',
+    'main.py:42') from a wire string built by build_marker_string()."""
+    _, _, right = marker.partition(":#")
+    last_ctx = right.split("/#")[-1]
+    return last_ctx.partition("@")[2]
+
+
+@pytest.mark.torch_trace
+def test_cpp_tier_install_idempotent(require_torch, roctx_recordfn_so):
+    """install() is idempotent: two calls return the same handle and
+    is_installed() remains true."""
+    require_torch(gpu=True)
+    mod = roctx_recordfn_so
+    h1 = mod.install()
+    h2 = mod.install()
+    assert h1 == h2
+    assert mod.is_installed()
+
+
+@pytest.mark.torch_trace
+def test_cpp_tier_push_pop_balance_under_forward(require_torch, roctx_recordfn_so):
+    """Pushes == pops + zero callback errors after a forward-only workload."""
+    require_torch(gpu=True)
+    mod = roctx_recordfn_so
+    mod.install()
+    before = mod.dump_stats()
+    x = torch.randn(32, 32, device="cuda", requires_grad=False)
+    mod.push_user_scope("test.scope.forward_only", "#1@test:1")
+    try:
+        y = x @ x
+        del y
+    finally:
+        mod.pop_user_scope()
+    after = mod.dump_stats()
+    assert after["pushes"] > before["pushes"]
+    assert after["pops"] == after["pushes"]
+    assert after["callback_errors"] == 0
+
+
+@pytest.mark.torch_trace
+def test_cpp_tier_seqnr_correlation_across_worker_thread(
+    require_torch, roctx_recordfn_so
+):
+    """fwd+bwd must save >= 1 snapshot, consume >= 1, with 0 errors."""
+    require_torch(gpu=True)
+    mod = roctx_recordfn_so
+    mod.install()
+    before = mod.dump_stats()
+
+    x = torch.randn(64, 64, device="cuda", requires_grad=True)
+    mod.push_user_scope("test.scope.SeqNrCheck.forward", "#1@test:42")
+    try:
+        y = (x @ x).sum()
+    finally:
+        mod.pop_user_scope()
+
+    mod.push_user_scope("test.scope.SeqNrCheck.backward", "#1@test:43")
+    try:
+        y.backward()
+    finally:
+        mod.pop_user_scope()
+
+    torch.cuda.synchronize()
+    after = mod.dump_stats()
+
+    delta_saved = after["snapshots_saved"] - before["snapshots_saved"]
+    delta_consumed = after["snapshots_consumed"] - before["snapshots_consumed"]
+
+    assert delta_saved > 0, "FUNCTION+seqNr save path is broken"
+    assert delta_consumed > 0, (
+        "BACKWARD_FUNCTION consume path is broken (TLS propagation, scope "
+        "enrolment, or seqNr mismatch)"
+    )
+    assert after["callback_errors"] == 0
+    assert after["pops"] == after["pushes"]
+
+
+@pytest.mark.torch_trace
+def test_cpp_tier_stats_pending_per_call_bounded(require_torch, roctx_recordfn_so):
+    """A small fwd+bwd should not leak more than a handful of pending
+    snapshots. Delta-based (not absolute) because earlier tests in this
+    module share the fixture and may have left residue; <=4 absorbs the
+    handful of autograd internals that legitimately don't backward.
+    (saved - consumed > pending because same-seqNr overwrites also tick
+    saved -- see the dump_stats contract in roctx_recordfn.cpp.)"""
+    require_torch(gpu=True)
+    mod = roctx_recordfn_so
+    mod.install()
+    before = mod.dump_stats()
+    x = torch.randn(8, 8, device="cuda", requires_grad=True)
+    y = (x * 2).sum()
+    y.backward()
+    torch.cuda.synchronize()
+    after = mod.dump_stats()
+    delta_pending = after["snapshots_pending"] - before["snapshots_pending"]
+    assert delta_pending <= 4, (
+        f"delta snapshots_pending={delta_pending} for a single fwd+bwd "
+        f"-- snapshots leaking"
+    )
+
+
+@pytest.mark.torch_trace
+def test_cpp_tier_new_leaf_labels_replace_legacy_dispatcher_label(
+    require_torch, roctx_recordfn_so
+):
+    """Every leaf must carry one of the four C++-tier labels (aten:0,
+    aten.nested:0, autograd.bwd:0, autograd.engine:0) or a USER_SCOPE
+    file:line. The legacy 'dispatcher:0' sentinel must not appear."""
+    require_torch(gpu=True)
+    mod = roctx_recordfn_so
+    mod.install()
+    mod.start_capture()
+    try:
+        x = torch.randn(32, 32, device="cuda", requires_grad=True)
+        # Forward outside USER_SCOPE: expect aten:0 / aten.nested:0 leaves.
+        y = (x @ x).sum()
+        # Forward inside USER_SCOPE: still uses aten.nested:0 once
+        # the user scope has pushed a frame.
+        mod.push_user_scope("test.nested", "#1@test:1")
+        try:
+            z = (x * 2).sum()
+        finally:
+            mod.pop_user_scope()
+        # Backward exercises autograd.bwd:0 and autograd.engine:0.
+        (y + z).backward()
+        torch.cuda.synchronize()
+        captured = mod.stop_capture()
+    except Exception:
+        mod.stop_capture()
+        raise
+
+    assert captured, "capture buffer is empty"
+
+    expected_cpp_labels = {
+        "aten:0",
+        "aten.nested:0",
+        "autograd.bwd:0",
+        "autograd.engine:0",
+    }
+    seen = {_leaf_label(m) for m in captured}
+    cpp_seen = seen & expected_cpp_labels
+
+    assert "dispatcher:0" not in {label.split("@")[-1] for label in seen}, (
+        f"legacy 'dispatcher:0' leaked into a marker (seen leaves: {seen})"
+    )
+    assert "aten:0" in cpp_seen, (
+        f"no top-level aten:0 leaf observed -- label classifier broken "
+        f"(seen leaves: {seen})"
+    )
+    assert "aten.nested:0" in cpp_seen, (
+        f"no aten.nested:0 leaf observed -- nested ATen redispatch label "
+        f"broken (seen leaves: {seen})"
+    )
+    assert "autograd.bwd:0" in cpp_seen, (
+        f"no autograd.bwd:0 leaf observed -- BACKWARD_FUNCTION + seq>=0 "
+        f"label broken (seen leaves: {seen})"
+    )
+
+
+@pytest.mark.torch_trace
+def test_cpp_tier_user_scope_propagates_to_autograd_worker(
+    require_torch, roctx_recordfn_so
+):
+    """USER_SCOPE pushed on the main thread must prefix BACKWARD records
+    emitted on the autograd worker. This is the c10::ThreadLocalDebugInfo
+    propagation channel; without it the worker would see an empty chain
+    and the backward subtree would be ungrouped from its user scope."""
+    require_torch(gpu=True)
+    mod = roctx_recordfn_so
+    mod.install()
+    before = mod.dump_stats()
+    mod.start_capture()
+    try:
+        mod.push_user_scope("test.user_scope.backward", "#1@test:42")
+        try:
+            x = torch.randn(64, 64, device="cuda", requires_grad=True)
+            (x @ x).sum().backward()
+        finally:
+            mod.pop_user_scope()
+        torch.cuda.synchronize()
+        captured = mod.stop_capture()
+    except Exception:
+        mod.stop_capture()
+        raise
+
+    backward_markers = [
+        m for m in captured if _leaf_label(m) in ("autograd.bwd:0", "autograd.engine:0")
+    ]
+    assert backward_markers, "no BACKWARD records captured"
+    inherited = [
+        m for m in backward_markers if m.startswith("test.user_scope.backward/")
+    ]
+    assert inherited, (
+        "USER_SCOPE did not propagate to autograd worker via TLS DebugInfo. "
+        f"Backward markers do not start with 'test.user_scope.backward/'. "
+        f"Sample of 3: {backward_markers[:3]}"
+    )
+
+    after = mod.dump_stats()
+    delta_inherits = after["user_scope_inherits"] - before["user_scope_inherits"]
+    assert delta_inherits > 0, (
+        "user_scope_inherits counter did not tick during this test -- "
+        "apply_userscope_overlay is not firing on the worker thread"
+    )
+
+
+@pytest.mark.torch_trace
+def test_cpp_tier_common_prefix_dedup_when_scope_wraps_fwd_and_bwd(
+    require_torch, roctx_recordfn_so
+):
+    """A single USER_SCOPE that wraps BOTH forward and backward must not
+    appear twice in the backward marker (snapshot already has it; the
+    TLS overlay must skip the common prefix)."""
+    require_torch(gpu=True)
+    mod = roctx_recordfn_so
+    mod.install()
+    mod.start_capture()
+    try:
+        mod.push_user_scope("test.outer_step", "#1@test:7")
+        try:
+            x = torch.randn(48, 48, device="cuda", requires_grad=True)
+            (x @ x).sum().backward()
+        finally:
+            mod.pop_user_scope()
+        torch.cuda.synchronize()
+        captured = mod.stop_capture()
+    except Exception:
+        mod.stop_capture()
+        raise
+
+    backward = [m for m in captured if _leaf_label(m) == "autograd.bwd:0"]
+    assert backward, "no autograd.bwd:0 backward markers captured"
+
+    for m in backward:
+        marker_path = m.partition(":#")[0]
+        segments = marker_path.split("/")
+        # The wrapping scope should appear exactly once at the head.
+        head_count = sum(1 for s in segments if s == "test.outer_step")
+        assert head_count == 1, (
+            f"USER_SCOPE 'test.outer_step' appears {head_count} times in a "
+            f"backward marker -- common-prefix dedup in apply_userscope_overlay "
+            f"is broken. Marker: {m!r}"
+        )
+
+
+def _tiny_train_step():
+    """One fwd+bwd cycle used by the correlation stress tests."""
+    x = torch.randn(128, 128, device="cuda", requires_grad=True)
+    y = ((x @ x) + x).sum()
+    y.backward()
+
+
+@pytest.mark.torch_trace
+def test_cpp_tier_correlation_under_many_steps(require_torch, roctx_recordfn_so):
+    """Most saved snapshots should be consumed (>=50%) and the soft cap
+    must not fire on a workload this small."""
+    require_torch(gpu=True)
+    mod = roctx_recordfn_so
+    mod.install()
+    n_steps = 16
+    before = mod.dump_stats()
+    for _ in range(n_steps):
+        _tiny_train_step()
+    torch.cuda.synchronize()
+    after = mod.dump_stats()
+
+    delta_saved = after["snapshots_saved"] - before["snapshots_saved"]
+    delta_consumed = after["snapshots_consumed"] - before["snapshots_consumed"]
+    delta_dropped = after["snapshots_dropped"] - before["snapshots_dropped"]
+    delta_errors = after["callback_errors"] - before["callback_errors"]
+
+    assert delta_saved > 0
+    assert delta_consumed >= int(0.5 * delta_saved), (
+        f"only {delta_consumed}/{delta_saved} correlated -- worker callback "
+        f"is not re-seeding the marker stack"
+    )
+    assert delta_errors == 0
+    assert delta_dropped == 0, f"soft cap fired unexpectedly: {delta_dropped}"
+
+
+@pytest.mark.torch_trace
+def test_cpp_tier_detached_forward_does_not_explode(require_torch, roctx_recordfn_so):
+    """Detached forwards leak snapshots by design; the soft cap
+    (10k/shard * 64 shards = 640k slots) must hold and the callback
+    must not crash."""
+    require_torch(gpu=True)
+    mod = roctx_recordfn_so
+    mod.install()
+    before = mod.dump_stats()
+    for _ in range(50):
+        x = torch.randn(32, 32, device="cuda", requires_grad=True)
+        y = (x @ x).sum().detach()
+        del x, y
+    torch.cuda.synchronize()
+    after = mod.dump_stats()
+    delta_saved = after["snapshots_saved"] - before["snapshots_saved"]
+    delta_errors = after["callback_errors"] - before["callback_errors"]
+
+    assert delta_saved > 0
+    assert delta_errors == 0
+    assert after["snapshots_pending"] < 640_000
+
+
+@pytest.mark.torch_trace
+def test_cpp_tier_concurrent_threads_no_callback_errors(
+    require_torch, roctx_recordfn_so
+):
+    """Concurrent fwd+bwd on N Python threads: no callback errors, no
+    deadlock, global push/pop balance preserved. Per-thread correlation
+    may be lower because backward saves can race against same-seqNr
+    consumes -- that is acceptable."""
+    require_torch(gpu=True)
+    mod = roctx_recordfn_so
+    mod.install()
+    before = mod.dump_stats()
+
+    def worker():
+        for _ in range(4):
+            x = torch.randn(64, 64, device="cuda", requires_grad=True)
+            (x @ x).sum().backward()
+        torch.cuda.synchronize()
+
+    threads = [threading.Thread(target=worker) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=60)
+        assert not t.is_alive(), "worker thread deadlocked"
+
+    after = mod.dump_stats()
+    assert (after["callback_errors"] - before["callback_errors"]) == 0
+    assert after["pops"] == after["pushes"]

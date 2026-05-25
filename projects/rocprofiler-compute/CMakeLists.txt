@@ -676,30 +676,6 @@ add_test(
 )
 set_tests_properties(test_torch_trace_coverage_utils PROPERTIES TIMEOUT 60)
 
-add_test(
-    NAME test_torch_trace_worker_thread
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_torch_trace_worker_thread.xml ${COV_OPTION}
-        tests/test_torch_trace_worker_thread.py ${WORKING_DIR_OPTION}
-)
-set_tests_properties(
-    test_torch_trace_worker_thread
-    PROPERTIES TIMEOUT 600 LABELS "profile" RESOURCE_GROUPS gpus:1
-)
-
-add_test(
-    NAME test_torch_trace_seqnr_correlation
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_torch_trace_seqnr_correlation.xml ${COV_OPTION}
-        tests/test_torch_trace_seqnr_correlation.py ${WORKING_DIR_OPTION}
-)
-set_tests_properties(
-    test_torch_trace_seqnr_correlation
-    PROPERTIES TIMEOUT 600 LABELS "profile" RESOURCE_GROUPS gpus:1
-)
-
 # ---------------------------------------
 # Pure csv compatibility layer for pandas
 # ---------------------------------------

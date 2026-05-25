@@ -1,6 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
-# ruff: noqa
 
 """Resolve and load the roctx_recordfn pybind11 extension.
 
@@ -26,8 +25,9 @@ import os
 import shutil
 import subprocess
 import sys
+import types
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Optional
 
 _THIS_DIR = Path(__file__).resolve().parent
 # The C++ sources live under src/lib/ alongside rocprofiler_compute_tool;
@@ -70,7 +70,7 @@ C_TIER_NAMES = frozenset((
 # Per-process diagnostic trail. Every _safe_log call appends here so
 # inject_roctx.py can fold the cause into its single user-facing
 # WARNING when the C++ tier doesn't load. Cleared by load() on entry.
-_LAST_LOAD_DIAGNOSTICS: List[Tuple[str, str]] = []
+_LAST_LOAD_DIAGNOSTICS: list[tuple[str, str]] = []
 _LAST_LOADED_TIER: Optional[str] = None
 
 # Files folded into the source fingerprint. Only inputs that affect
@@ -82,14 +82,14 @@ _FINGERPRINT_INPUTS = (_SO_SOURCE, _SO_BUILDFILE)
 _REBUILD_ENV_VAR = "ROCPROFCOMPUTE_REBUILD_ROCTX"
 
 
-def _safe_log(level, msg):
+def _safe_log(level: str, msg: str) -> None:
     """Log via utils.logger if importable, else stderr; tee to the
     diagnostic trail unconditionally so consume_diagnostics() returns
     the full cause when the C++ tier doesn't load.
     """
     _LAST_LOAD_DIAGNOSTICS.append((level, msg))
     try:
-        from utils.logger import console_log, console_warning, console_error
+        from utils.logger import console_error, console_log, console_warning
 
         emit = {"log": console_log, "warning": console_warning, "error": console_error}[
             level
@@ -106,7 +106,7 @@ def loaded_tier() -> Optional[str]:
     return _LAST_LOADED_TIER
 
 
-def consume_diagnostics() -> Tuple[Optional[str], List[Tuple[str, str]]]:
+def consume_diagnostics() -> tuple[Optional[str], list[tuple[str, str]]]:
     """Drain and return (tier_loaded, [(level, msg), ...]). One-way."""
     diagnostics = list(_LAST_LOAD_DIAGNOSTICS)
     _LAST_LOAD_DIAGNOSTICS.clear()
@@ -114,7 +114,7 @@ def consume_diagnostics() -> Tuple[Optional[str], List[Tuple[str, str]]]:
 
 
 def format_load_diagnostic_trail(
-    diagnostics: List[Tuple[str, str]],
+    diagnostics: list[tuple[str, str]],
     *,
     max_lines: int = 24,
 ) -> str:
@@ -127,7 +127,7 @@ def format_load_diagnostic_trail(
     return "\n".join(rendered)
 
 
-def _source_fingerprint():
+def _source_fingerprint() -> str:
     """First 12 hex of SHA-256 over _FINGERPRINT_INPUTS. Missing inputs
     are skipped; an all-missing fingerprint returns the sentinel
     ``"missing"`` so the cache key still has a stable shape.
@@ -148,7 +148,7 @@ def _source_fingerprint():
     return h.hexdigest()[:12]
 
 
-def compute_tag():
+def compute_tag() -> Optional[str]:
     """``py{X}.{Y}_torch{Z}_abi{0|1}_src{12-hex}`` for the running
     interpreter, or None if torch is not importable.
     """
@@ -171,7 +171,7 @@ def compute_tag():
     )
 
 
-def _import_module_from_path(name, path):
+def _import_module_from_path(name: str, path: Path) -> types.ModuleType:
     """Import a .so from a filesystem path."""
     spec = importlib.util.spec_from_file_location(name, str(path))
     if spec is None or spec.loader is None:
@@ -181,7 +181,7 @@ def _import_module_from_path(name, path):
     return module
 
 
-def _install_tree_prebuilt_candidates(tag):
+def _install_tree_prebuilt_candidates(tag: str) -> list[Path]:
     """Paths to try, in order, for a packager-baked prebuilt .so.
 
     The loader is installed at ``<prefix>/libexec/<project>/utils/``;
@@ -200,7 +200,7 @@ def _install_tree_prebuilt_candidates(tag):
     ]
 
 
-def _try_prebuilt(tag):
+def _try_prebuilt(tag: str) -> Optional[types.ModuleType]:
     for so_path in _install_tree_prebuilt_candidates(tag):
         if not so_path.exists():
             continue
@@ -216,7 +216,7 @@ def _try_prebuilt(tag):
     return None
 
 
-def _jit_cache_dir():
+def _jit_cache_dir() -> Path:
     base = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
     d = Path(base) / "rocprofiler-compute" / "roctx_recordfn"
     d.mkdir(parents=True, exist_ok=True)
@@ -231,7 +231,7 @@ _PREBUILT_HINT = (
 )
 
 
-def _explain_cppext_failure(err):
+def _explain_cppext_failure(err: Exception) -> tuple[str, str]:
     """Classify a torch.utils.cpp_extension failure into (reason, hint).
 
     Hints never recommend installing ninja (CONTRIBUTING.md: Profile
@@ -270,7 +270,9 @@ def _explain_cppext_failure(err):
     )
 
 
-def _explain_cmake_failure(phase, err, stderr_tail):
+def _explain_cmake_failure(
+    phase: str, err: Exception, stderr_tail: str
+) -> tuple[str, str]:
     """Classify a cmake-tier failure into (reason, hint).
 
     phase: "invoke" | "configure" | "build" | "missing-output" | "load".
@@ -309,7 +311,7 @@ def _explain_cmake_failure(phase, err, stderr_tail):
     )
 
 
-def _log_cppext_failure(err):
+def _log_cppext_failure(err: Exception) -> None:
     """Log a classified cpp_extension failure at LOG level. The single
     user-facing WARNING is emitted by inject_roctx.py via the drained
     diagnostic trail; per-tier lines stay at LOG to bound multi-pass noise.
@@ -319,7 +321,7 @@ def _log_cppext_failure(err):
     _safe_log("log", f"to enable the C++ tier, {hint}")
 
 
-def _log_cmake_failure(phase, err, stderr_tail):
+def _log_cmake_failure(phase: str, err: Exception, stderr_tail: str) -> None:
     """Same contract as _log_cppext_failure, plus a tail of cmake stderr."""
     reason, hint = _explain_cmake_failure(phase, err, stderr_tail or "")
     _safe_log("log", f"cmake build skipped: {reason}: {err}")
@@ -330,14 +332,13 @@ def _log_cmake_failure(phase, err, stderr_tail):
     _safe_log("log", f"to enable the C++ tier, {hint}")
 
 
-def _jit_compile_viable(cpp_ext):
+def _jit_compile_viable(cpp_ext: types.ModuleType) -> bool:
     """True if torch.utils.cpp_extension.load is expected to succeed
     without rocprof-compute depending on ninja: either the running
     cpp_extension still accepts ``use_ninja=False`` or ninja is
     already on PATH. Heuristic; the actual load() is still guarded.
     """
     import inspect
-    import shutil
 
     try:
         if "use_ninja" in inspect.signature(cpp_ext.load).parameters:
@@ -348,13 +349,18 @@ def _jit_compile_viable(cpp_ext):
     return shutil.which("ninja") is not None
 
 
-def _jit_failure_marker(tag):
+def _jit_failure_marker(tag: str) -> Path:
     """Path of the tag-scoped negative-cache marker (co-located with
     the cached .so so cache cleanup hits both)."""
     return _jit_cache_dir() / f"roctx_recordfn-{tag}.build-failed"
 
 
-def _record_jit_failure(tag, err, reason=_CPPEXT_TIER_NAME, stderr=""):
+def _record_jit_failure(
+    tag: str,
+    err: Exception,
+    reason: str = _CPPEXT_TIER_NAME,
+    stderr: str = "",
+) -> None:
     """Drop a tag-scoped negative-cache marker shared by both build
     tiers. A failure in either short-circuits both on subsequent
     processes for the same tag; a source edit (new fingerprint) or
@@ -374,7 +380,7 @@ def _record_jit_failure(tag, err, reason=_CPPEXT_TIER_NAME, stderr=""):
         )
 
 
-def _previous_jit_failure(tag):
+def _previous_jit_failure(tag: str) -> Optional[str]:
     """Return the cached failure summary for this tag, or None."""
     try:
         marker = _jit_failure_marker(tag)
@@ -385,7 +391,7 @@ def _previous_jit_failure(tag):
     return None
 
 
-def _clear_jit_failure(tag):
+def _clear_jit_failure(tag: str) -> None:
     """Remove the failure marker (best-effort)."""
     try:
         _jit_failure_marker(tag).unlink()
@@ -395,7 +401,7 @@ def _clear_jit_failure(tag):
         pass
 
 
-def _install_cached_so(src_so, cached_so):
+def _install_cached_so(src_so: Path, cached_so: Path) -> None:
     """Copy src_so onto cached_so so the next run hits the JIT cache.
     Best-effort: a failure to copy never propagates (the in-memory
     module is already loaded; the cache is just a next-run optimisation).
@@ -408,7 +414,7 @@ def _install_cached_so(src_so, cached_so):
         pass
 
 
-def _try_jit_cached(tag):
+def _try_jit_cached(tag: str) -> Optional[types.ModuleType]:
     cache_dir = _jit_cache_dir()
     so_path = cache_dir / f"roctx_recordfn-{tag}.so"
     if not so_path.exists():
@@ -426,14 +432,14 @@ def _try_jit_cached(tag):
         return None
 
 
-def _cmake_executable():
+def _cmake_executable() -> Optional[str]:
     """Return the cmake binary (from $CMAKE or PATH) or None. Exposed
     as a function so tests can monkeypatch a single seam.
     """
     return shutil.which(os.environ.get("CMAKE", "cmake"))
 
 
-def _try_cmake_build(tag):
+def _try_cmake_build(tag: str) -> Optional[types.ModuleType]:
     """Build the .so via our own CMakeLists.txt (cmake default
     generator). Primary cold-start path; does not require ninja.
     On any failure returns None so the caller falls through to the
@@ -558,7 +564,7 @@ def _try_cmake_build(tag):
     return mod
 
 
-def _try_jit_build(tag):
+def _try_jit_build(tag: str) -> Optional[types.ModuleType]:
     """Fallback build via torch.utils.cpp_extension.load. Skipped on
     hosts where it would need ninja and ninja is not already on PATH
     (CONTRIBUTING.md: Profile Mode Dependency Policy).
@@ -596,10 +602,10 @@ def _try_jit_build(tag):
         _record_jit_failure(tag, err, reason=_CPPEXT_TIER_NAME)
         return None
 
-    rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
-    extra_include_paths = [os.path.join(rocm_path, "include")]
+    rocm_path = Path(os.environ.get("ROCM_PATH", "/opt/rocm"))
+    extra_include_paths = [str(rocm_path / "include")]
     extra_ldflags = [
-        f"-L{os.path.join(rocm_path, 'lib')}",
+        f"-L{rocm_path / 'lib'}",
         "-lrocprofiler-sdk-roctx",
     ]
     # The cppext fallback omits the ROCPROF_TORCHTRACE_HAS_CUSTOM_DBGINFOKIND
@@ -657,7 +663,7 @@ def _try_jit_build(tag):
     return mod
 
 
-def load(force_python_fallback=False):
+def load(force_python_fallback: bool = False) -> Optional[types.ModuleType]:
     """Return the roctx_recordfn module, or None for the Python-only
     fallback. ``force_python_fallback=True`` is for tests.
     ``ROCPROFCOMPUTE_REBUILD_ROCTX=1`` skips prebuilt + JIT cache and
