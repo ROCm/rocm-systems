@@ -643,11 +643,6 @@ Addition:
         min: MIN(TCC_EA0_WRREQ_WRITE_DRAM_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
         max: MAX(TCC_EA0_WRREQ_WRITE_DRAM_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
         unit: Gbps
-    - Atomic - HBM:
-        avg: SUM(TCC_EA0_WRREQ_ATOMIC_DRAM_sum) / SUM($denom)
-        min: MIN((TCC_EA0_WRREQ_ATOMIC_DRAM_sum / $denom))
-        max: MAX((TCC_EA0_WRREQ_ATOMIC_DRAM_sum / $denom))
-        unit: (Req + $normUnit)
     - Atomic Bandwidth - PCIe:
         avg: SUM(TCC_EA0_WRREQ_ATOMIC_IO_32B_sum * 32) / SUM(End_Timestamp - Start_Timestamp)
         min: MIN(TCC_EA0_WRREQ_ATOMIC_IO_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
@@ -681,7 +676,6 @@ Addition:
     Atomic Bandwidth - PCIe: Total number of bytes due to L2 atomic requests due to PCIe traffic, divided by total duration.
     "Atomic Bandwidth - Infinity Fabric™": Total number of bytes due to L2 atomic requests due to Infinity Fabric traffic, divided by total duration.
     Atomic Bandwidth - HBM: Total number of bytes due to L2 atomic requests due to HBM traffic, divided by total duration.
-    Atomic - HBM: The total number of L2 atomic requests (either 32-byte or 64-byte) destined for the accelerator's local high-bandwidth memory (HBM), per normalization unit. These are read-modify-write operations that update memory atomically.
     Read Stall: >-
       The ratio of the total number of cycles the L2-Fabric interface was
       stalled on a read request to any destination (local HBM, remote PCIe\xAE
@@ -694,6 +688,23 @@ Addition:
     Write - PCIe Stall: The number of cycles the L2-Fabric interface was stalled on write or atomic requests to remote PCIe connected accelerators or CPUs as a percent of the total active L2 cycles.
     Write - Infinity Fabric Stall: The number of cycles the L2-Fabric interface was stalled on write or atomic requests to remote Infinity Fabric connected accelerators or CPUs as a percent of the total active L2 cycles.
     Write - HBM Stall: The number of cycles the L2-Fabric interface was stalled on write or atomic requests to accelerator's local HBM as a percent of the total active L2 cycles.
+Deletion:
+- Panel Config:
+    id: 1700
+  metric_table:
+    id: 1706
+    metrics:
+    - HBM Read:
+    - Remote Read:
+    - HBM Write and Atomic:
+    - Remote Write and Atomic:
+- Panel Config:
+    id: 1700
+  metric_descriptions:
+    HBM Read:
+    Remote Read:
+    HBM Write and Atomic:
+    Remote Write and Atomic:
 Modification:
 - Panel Config:
     id: 200
@@ -853,10 +864,6 @@ Modification:
         avg: SUM(TCC_EA0_RDREQ_64B_sum) / SUM($denom)
         min: MIN((TCC_EA0_RDREQ_64B_sum / $denom))
         max: MAX((TCC_EA0_RDREQ_64B_sum / $denom))
-    - HBM Write and Atomic:
-        avg: SUM(TCC_EA0_WRREQ_WRITE_DRAM_sum) / SUM($denom)
-        min: MIN((TCC_EA0_WRREQ_WRITE_DRAM_sum / $denom))
-        max: MAX((TCC_EA0_WRREQ_WRITE_DRAM_sum / $denom))
 - Panel Config:
     id: 1800
   metric_table:
