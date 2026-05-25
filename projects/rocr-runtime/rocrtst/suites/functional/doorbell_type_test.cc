@@ -2,6 +2,16 @@
  * Standalone unit tests for doorbell type validation logic.
  * Can be compiled and run without ROCm/HSA runtime installed.
  *
+ * When built as part of rocrtst, these TESTs are auto-registered with gtest
+ * and run from the rocrtst64 binary's main(). No main() is defined here so
+ * that this file can be linked into rocrtst64 without a duplicate-symbol
+ * clash against suites/test_common/main.cc.
+ *
+ * For a standalone hardware-free build, link against the bundled gtest_main
+ * (the `gtest-all.cpp` amalgamation in this tree is stale — it #includes .cc
+ * files that don't exist here, so list the individual .cpp sources instead,
+ * mirroring rocrtst/gtest/CMakeLists.txt).
+ *
  * From projects/rocr-runtime/rocrtst/suites/functional/:
  *
  * Build:  g++ -std=c++17 -I../../gtest/include -I../../gtest \
@@ -13,6 +23,7 @@
  *           ../../gtest/src/gtest-test-part.cpp \
  *           ../../gtest/src/gtest-typed-test.cpp \
  *           ../../gtest/src/gtest-death-test.cpp \
+ *           ../../gtest/src/gtest_main.cpp \
  *           -lpthread
  *
  * Run:    ./doorbell_type_test
@@ -159,7 +170,3 @@ TEST(DoorbellTypeValidation, FutureProofing_MakeAndExtract_RoundTripsForAllValid
   }
 }
 
-int main(int argc, char **argv) {
-  ::testing::InitGoogleTest(&argc, argv);
-  return RUN_ALL_TESTS();
-}
