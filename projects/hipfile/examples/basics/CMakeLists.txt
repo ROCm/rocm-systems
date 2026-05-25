@@ -41,3 +41,21 @@ foreach(example ${BASICS_EXAMPLES})
     target_include_directories(${example} SYSTEM PRIVATE ${HIPFILE_INCLUDE_PATH})
     target_link_libraries(${example} PRIVATE examples_common)
 endforeach()
+
+file(
+    COPY test-examples.sh
+    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}
+    FILE_PERMISSIONS
+        OWNER_READ OWNER_WRITE OWNER_EXECUTE
+        GROUP_READ GROUP_EXECUTE
+        WORLD_READ WORLD_EXECUTE
+)
+
+file(
+    COPY ${CMAKE_CURRENT_SOURCE_DIR}/../test-all-examples.sh
+    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/..
+    FILE_PERMISSIONS
+        OWNER_READ OWNER_WRITE OWNER_EXECUTE
+        GROUP_READ GROUP_EXECUTE
+        WORLD_READ WORLD_EXECUTE
+)
