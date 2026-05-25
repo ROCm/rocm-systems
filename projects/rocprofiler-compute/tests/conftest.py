@@ -192,21 +192,8 @@ def pytest_addoption(parser):
         type=int,
         default=100,
         help=(
-            "ATen operator sample budget for test_torch_trace_coverage. "
-            "Structural entries are always included; this budget caps "
-            "only the random ATen sample (default: 100)."
-        ),
-    )
-    parser.addoption(
-        "--require-cpp-tier",
-        action="store_true",
-        default=False,
-        help=(
-            "Strict C++ RecordFunction tier validation in "
-            "test_random_operator_kernel_coverage. ON BY DEFAULT; "
-            "fails the test on loader fallback to the Python tier, "
-            "missing forward sentinels, or missing backward sentinels. "
-            "This flag exists for explicitness."
+            "Random ATen operator sample budget for "
+            "test_torch_trace_coverage (default: 100)."
         ),
     )
     parser.addoption(
@@ -214,21 +201,15 @@ def pytest_addoption(parser):
         action="store_true",
         default=False,
         help=(
-            "Relax strict C++ tier validation. Tier degradation is "
-            "still reported via stdout + UserWarning. Use on hosts "
-            "where the .so cannot be built and a degraded Python-tier "
-            "run is acceptable."
+            "Relax strict C++ RecordFunction tier validation; "
+            "degradation is still reported via stdout and UserWarning."
         ),
     )
     parser.addoption(
         "--torch-trace-match-verbose",
         action="store_true",
         default=False,
-        help=(
-            "Per-op match logging in test_random_operator_kernel_coverage. "
-            "Prints matched marker leaves, ground-truth kernels, ROCTX "
-            "kernels, and their intersection for every sampled op."
-        ),
+        help="Per-op match logging in test_random_operator_kernel_coverage.",
     )
 
 

@@ -332,8 +332,11 @@ def _record_jit_failure(tag, err, reason=_CPPEXT_TIER_NAME, stderr=""):
             if tail:
                 payload += f"--- stderr tail ---\n{tail}\n"
         _jit_failure_marker(tag).write_text(payload)
-    except Exception:
-        pass
+    except Exception as exc:
+        _safe_log(
+            "log",
+            f"jit failure-marker write skipped ({tag}): {type(exc).__name__}: {exc}",
+        )
 
 
 def _previous_jit_failure(tag):

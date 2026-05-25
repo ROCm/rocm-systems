@@ -272,4 +272,4 @@ def test_common_prefix_dedup_when_scope_wraps_fwd_and_bwd(loaded_module):
         )
 
 
-# Python-tier fallback test lives in test_torch_trace_so_loader.py (no GPU).
+# Python-tier fallback test lives in test_inject_roctx_loader.py (no GPU).

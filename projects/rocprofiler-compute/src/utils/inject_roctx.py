@@ -454,7 +454,6 @@ def patch_process_group_methods():
             try:
                 marker = f"ProcessGroup.{cls.__name__}.{method_name}"
                 wrapped = roctx_wrapper(fn, marker)
-                wrapped._roctx_wrapped = True
                 setattr(cls, method_name, wrapped)
                 wrapped_method_count["count"] += 1
             except Exception as e:
@@ -524,7 +523,6 @@ def patch_cuda_graph():
         try:
             marker = f"torch.cuda.CUDAGraph.{method_name}"
             wrapped = roctx_wrapper(fn, marker)
-            wrapped._roctx_wrapped = True
             setattr(cls, method_name, wrapped)
             wrapped_methods.append(method_name)
         except Exception as e:
@@ -895,7 +893,6 @@ def wrap_module_function(module, attr_name, marker_name):
     if getattr(fn, "_roctx_wrapped", False):
         return True
     wrapped = roctx_wrapper(fn, marker_name)
-    wrapped._roctx_wrapped = True
     try:
         setattr(module, attr_name, wrapped)
     except Exception as e:
@@ -1050,7 +1047,6 @@ def install_tensor_method_wrappers():
             continue
         try:
             wrapped_fn = roctx_wrapper(fn, f"torch.Tensor.{method_name}")
-            wrapped_fn._roctx_wrapped = True
             setattr(torch.Tensor, method_name, wrapped_fn)
             wrapped.append(method_name)
         except (TypeError, AttributeError) as e:
@@ -1110,7 +1106,6 @@ def install_extra_structural_wrappers():
                     cls.__init__ = _marker_only_init_wrapper(f"torch.cuda.{cls_name}")
                 else:
                     wrapped_init = roctx_wrapper(init, f"torch.cuda.{cls_name}")
-                    wrapped_init._roctx_wrapped = True
                     cls.__init__ = wrapped_init
                 wrapped.append(f"torch.cuda.{cls_name}")
             except Exception as e:

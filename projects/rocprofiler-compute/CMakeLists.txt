@@ -659,22 +659,22 @@ set_tests_properties(
 )
 
 add_test(
-    NAME test_torch_trace_so_loader
+    NAME test_inject_roctx_loader
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_torch_trace_so_loader.xml ${COV_OPTION}
-        tests/test_torch_trace_so_loader.py ${WORKING_DIR_OPTION}
+        --junitxml=tests/test_inject_roctx_loader.xml ${COV_OPTION}
+        tests/test_inject_roctx_loader.py ${WORKING_DIR_OPTION}
 )
-set_tests_properties(test_torch_trace_so_loader PROPERTIES TIMEOUT 300)
+set_tests_properties(test_inject_roctx_loader PROPERTIES TIMEOUT 300)
 
 add_test(
-    NAME test_torch_trace_cpp_tier_signature
+    NAME test_torch_trace_coverage_utils
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_torch_trace_cpp_tier_signature.xml ${COV_OPTION}
-        tests/test_torch_trace_cpp_tier_signature.py ${WORKING_DIR_OPTION}
+        --junitxml=tests/test_torch_trace_coverage_utils.xml ${COV_OPTION}
+        tests/test_torch_trace_coverage_utils.py ${WORKING_DIR_OPTION}
 )
-set_tests_properties(test_torch_trace_cpp_tier_signature PROPERTIES TIMEOUT 60)
+set_tests_properties(test_torch_trace_coverage_utils PROPERTIES TIMEOUT 60)
 
 add_test(
     NAME test_torch_trace_worker_thread
@@ -787,8 +787,8 @@ if(${ENABLE_COVERAGE})
         test_tui_components
         test_torch_trace_analysis
         test_torch_trace_coverage
-        test_torch_trace_so_loader
-        test_torch_trace_cpp_tier_signature
+        test_inject_roctx_loader
+        test_torch_trace_coverage_utils
     )
 
     string(REPLACE ";" ";" ALL_TESTS_STRING "${ALL_TEST_NAMES}")

@@ -81,12 +81,10 @@ def test_random_operator_kernel_coverage(
     rng = random.Random(seed)
 
     # Strict C++ tier validation is ON BY DEFAULT; --no-require-cpp-tier
-    # relaxes all three axes. --require-cpp-tier is for explicitness.
-    explicit_require = bool(request.config.getoption("--require-cpp-tier"))
-    explicit_no_require = bool(request.config.getoption("--no-require-cpp-tier"))
-    if explicit_require and explicit_no_require:
-        pytest.fail("Cannot pass both --require-cpp-tier and --no-require-cpp-tier.")
-    require_cpp_tier = not explicit_no_require
+    # relaxes all three axes.
+    require_cpp_tier = not bool(
+        request.config.getoption("--no-require-cpp-tier"),
+    )
     match_verbose = bool(
         request.config.getoption("--torch-trace-match-verbose"),
     )
