@@ -267,7 +267,7 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_CollectiveReuseReturnsDevicePeerAddrTable
 //   (a) records that the block was entered, and
 //   (b) returns an error on the first call so control flows cleanly
 //       through NCCLCHECKGOTO into the fail: epilogue.
-TEST_F(P2pMicrotest, IpcRegisterBuffer_CollectiveReuseEntersStrongStreamBlockWhenDevTableMissing)
+TEST_F(P2pMicrotest, IpcRegisterBuffer_CollectiveReuseStrongStreamAcquireFailurePropagates)
 {
     constexpr int       kPeerRank      = 1;
     constexpr int       kPeerLocalRank = 1;
@@ -313,9 +313,9 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_CollectiveReuseEntersStrongStreamBlockWhe
                                    NCCL_IPC_COLLECTIVE,
                                    &regRecord, out, &isLegacyIpc);
 
-    EXPECT_EQ(acquireCalls, 1);             // strong-stream block was entered
-    EXPECT_EQ(r, ncclSystemError);          // error from the hook propagated
-    out.ExpectZeroed();                     // fail: epilogue cleared outputs
+    EXPECT_EQ(acquireCalls, 1);     // strong-stream block was entered
+    EXPECT_EQ(r, ncclSystemError);  // error from the hook propagated out
+    out.ExpectZeroed();             // failure-path contract honoured
 }
 
 // Fresh-registration entry path: ipcInfos[peerLocalRank] is NULL, so the
