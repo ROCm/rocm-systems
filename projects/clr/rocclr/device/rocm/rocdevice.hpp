@@ -774,6 +774,12 @@ class Device : public NullDevice {
   friend void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data);
 
  public:
+
+  //! Count of schedulerQueue_ instances per device
+  //! Windows AQL device-enqueue path.
+  std::atomic<uint32_t> hasSchedulerQueue_{0};
+  static std::atomic<bool> skipHsaShutdown_;
+
   std::atomic<uint> numOfVgpus_;  //!< Virtual gpu unique index
 
   //! Returns the valid SDMA engine bitmask for the given operation type.

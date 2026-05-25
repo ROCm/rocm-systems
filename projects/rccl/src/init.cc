@@ -113,6 +113,7 @@ NCCL_PARAM(NvlsChannels, "NVLS_NCHANNELS", NCCL_CONFIG_UNDEF_INT);
 NCCL_PARAM(SetCpuStackSize, "SET_CPU_STACK_SIZE", 1);
 
 extern int64_t ncclParamSingleProcMemRegEnable();
+extern int64_t ncclParamPatEnable();
 
 struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
 ncclResult_t commReclaim(ncclComm_t comm);
@@ -1807,6 +1808,11 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     }
   }
 
+  // TODO: Set gfx1250 nc defaults after dedicated tuning data is available.
+  if (IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250")) {
+    allGather3Data[rank].nc = 2;
+  }
+
   allGather3Data[rank].pivotA2AEnabled = comm->topo->pivotA2AEnabled && rcclParamPivotAlltoallEnable();
   comm->topo->ll128Enabled =  comm->topo->ll128Enabled || rcclParamLL128ForceEnable();
   allGather3Data[rank].ll128Enabled = comm->topo->ll128Enabled;
@@ -2061,8 +2067,9 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     // Connect Trees
     NCCLCHECKGOTO(ncclTransportTreeConnect(comm), ret, fail);
 
-    // Connect PAT only for communicators with 1 GPU per node
-    if (comm->maxLocalRanks == 1) NCCLCHECKGOTO(ncclTransportPatConnect(comm), ret, fail);
+    // Connect PAT only for communicators with 1 GPU per node and PAT enabled
+    if (comm->maxLocalRanks == 1 && (ncclParamPatEnable() || comm->forcePatEnable))
+      NCCLCHECKGOTO(ncclTransportPatConnect(comm), ret, fail);
 
     // Attempt to setup NVLS, may silently fail and disable NVLS
     NCCLCHECKGOTO(ncclNvlsSetup(comm, parent), ret, fail);

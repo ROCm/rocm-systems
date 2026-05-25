@@ -2602,6 +2602,37 @@ struct CopyBufferBatchDescriptor {
 };
 
 // ================================================================================================
+bool KernelBlitManager::useShaderCopyBufferPath(const Memory& srcMemory, const Memory& dstMemory,
+                                                size_t size, amd::CopyMetadata copyMetadata,
+                                                bool* useLimitedP2pBlitWg) const {
+  bool isP2pOrIpc = (&srcMemory.dev() != &dstMemory.dev()) ||
+                    srcMemory.owner()->ipcShared() || dstMemory.owner()->ipcShared() ||
+                    srcMemory.owner()->vmmImported() || dstMemory.owner()->vmmImported();
+  const bool smallP2pOrIpc = isP2pOrIpc && size <= dev().settings().sdma_p2p_threshold_;
+  if (useLimitedP2pBlitWg != nullptr) {
+    *useLimitedP2pBlitWg = smallP2pOrIpc;
+  }
+
+  // Use the shader path for small P2P/IPC transfers, otherwise keep large P2P/IPC on SDMA.
+  if (smallP2pOrIpc) {
+    isP2pOrIpc = false;
+  }
+
+  bool isSdmaPreference =
+      copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::SDMA;
+  bool isBlitPreference =
+      copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::BLIT;
+  bool neitherMemoryIsHostDirectAccess =
+      !srcMemory.isHostMemDirectAccess() && !dstMemory.isHostMemDirectAccess();
+  bool smallSizeWithNonSdmaPreference =
+      size <= dev().settings().sdmaCopyThreshold_ && !isSdmaPreference;
+  bool nonP2PIpcOrDirectAccess =
+      !isP2pOrIpc && neitherMemoryIsHostDirectAccess && !isSdmaPreference;
+
+  return smallSizeWithNonSdmaPreference || nonP2PIpcOrDirectAccess || isBlitPreference;
+}
+
+// ================================================================================================
 bool KernelBlitManager::ShaderCopyBufferBatch(
     const std::vector<amd::BatchCopyOp> &copy_operations) const {
   std::scoped_lock transfer_operations_lock(lockXferOps_);
@@ -2716,17 +2747,14 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
       return false;
     }
 
-    // Resolve real agents for partition decision (handles IPC shared memory)
     const Memory& srcMem = gpuMem(*srcDevMem);
     const Memory& dstMem = gpuMem(*dstDevMem);
-    address srcAddr = reinterpret_cast<address>(srcMem.getDeviceMemory()) + op.srcOffset;
-    address dstAddr = reinterpret_cast<address>(dstMem.getDeviceMemory()) + op.dstOffset;
+    bool isLinearCopyOp = op.metadata.copyOpType_ == amd::CopyMetadata::kCopyOpLinear;
+    // ShaderCopyBufferBatch only describes linear copies; route swap/other ops through DMA.
+    bool useShaderCopyPath =
+        isLinearCopyOp && useShaderCopyBufferPath(srcMem, dstMem, op.size, op.metadata);
 
-    hsa_agent_t srcAgent;
-    hsa_agent_t dstAgent;
-    resolveAgents(srcMem, dstMem, srcAddr, dstAddr, srcAgent, dstAgent);
-
-    if (srcAgent.handle == dstAgent.handle && !op.metadata.preferCE_) {
+    if (useShaderCopyPath) {
       d2dCopyOps.push_back(op);
     } else {
       p2pCopyOps.push_back(op);
@@ -2807,39 +2835,17 @@ bool KernelBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& ds
   bool result = false;
   uint32_t blitWg = dev().settings().limit_blit_wg_;
 
-  bool isP2pOrIpc = (&gpuMem(srcMemory).dev() != &gpuMem(dstMemory).dev()) ||
-                    srcMemory.owner()->ipcShared() || dstMemory.owner()->ipcShared() ||
-                    srcMemory.owner()->vmmImported() || dstMemory.owner()->vmmImported();
-
-  // Use SDMA for large P2P/IPC transfers, shader for small ones
-  if (isP2pOrIpc && sizeIn[0] <= dev().settings().sdma_p2p_threshold_) {
+  const Memory& srcRocMemory = gpuMem(srcMemory);
+  const Memory& dstRocMemory = gpuMem(dstMemory);
+  bool useLimitedP2pBlitWg = false;
+  const bool useShaderCopyBuffer =
+      useShaderCopyBufferPath(srcRocMemory, dstRocMemory, sizeIn[0], copyMetadata,
+                              &useLimitedP2pBlitWg);
+  const bool useShaderCopyPath = setup_.disableHwlCopyBuffer_ || useShaderCopyBuffer;
+  if (useLimitedP2pBlitWg) {
     constexpr uint32_t kLimitWgForKernelP2p = 16;
     blitWg = kLimitWgForKernelP2p;
-    isP2pOrIpc = false;
   }
-
-  // Determine if we should use shader copy path based on various conditions
-  bool hwlCopyDisabled = setup_.disableHwlCopyBuffer_;
-
-  // Check copy engine preferences
-  bool isSdmaPreference =
-      copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::SDMA;
-  bool isBlitPreference =
-      copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::BLIT;
-
-  // Check memory access patterns
-  bool neitherMemoryIsHostDirectAccess =
-      !srcMemory.isHostMemDirectAccess() && !dstMemory.isHostMemDirectAccess();
-
-  // Determine shader copy path conditions
-  bool smallSizeWithNonSdmaPreference =
-      sizeIn[0] <= dev().settings().sdmaCopyThreshold_ && !isSdmaPreference;
-
-  bool nonP2PIpcOrDirectAccess =
-      !isP2pOrIpc && neitherMemoryIsHostDirectAccess && !isSdmaPreference;
-
-  const bool useShaderCopyPath = hwlCopyDisabled || smallSizeWithNonSdmaPreference ||
-                                 nonP2PIpcOrDirectAccess || isBlitPreference;
 
   if (!useShaderCopyPath) {
     if (amd::IS_HIP) {

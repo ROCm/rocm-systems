@@ -6748,6 +6748,42 @@ hipError_t hipLibraryGetKernel(hipKernel_t* pKernel, hipLibrary_t library, const
 hipError_t hipLibraryGetKernelCount(unsigned int *count, hipLibrary_t library);
 
 /**
+ * @brief Get device pointer to a `__device__` global variable defined in a library.
+ *
+ * Returns the device pointer and size of the named global symbol within the
+ * library's code object. Mirrors CUDA's `cuLibraryGetGlobal` /
+ * `cudaLibraryGetGlobal`. Either `dptr` or `bytes` (but not both) may be NULL.
+ *
+ * @param [out] dptr   Pointer to receive the device pointer, may be NULL.
+ * @param [out] bytes  Pointer to receive the size in bytes, may be NULL.
+ * @param [in]  library Input hip library handle.
+ * @param [in]  name   Name of the global symbol to look up.
+ * @return #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidResourceHandle,
+ *         #hipErrorNotFound
+ */
+hipError_t hipLibraryGetGlobal(void** dptr, size_t* bytes, hipLibrary_t library,
+                               const char* name);
+
+/**
+ * @brief Get host pointer to a `__managed__` variable defined in a library.
+ *
+ * Returns the host-accessible managed pointer and size of the named managed
+ * symbol within the library's code object. Mirrors CUDA's
+ * `cuLibraryGetManaged` / `cudaLibraryGetManaged`. Either `dptr` or `bytes`
+ * (but not both) may be NULL. Returns #hipErrorNotFound if the symbol does
+ * not exist or is not a `__managed__` variable.
+ *
+ * @param [out] dptr   Pointer to receive the managed host pointer, may be NULL.
+ * @param [out] bytes  Pointer to receive the size in bytes, may be NULL.
+ * @param [in]  library Input hip library handle.
+ * @param [in]  name   Name of the managed symbol to look up.
+ * @return #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidResourceHandle,
+ *         #hipErrorNotFound
+ */
+hipError_t hipLibraryGetManaged(void** dptr, size_t* bytes, hipLibrary_t library,
+                                const char* name);
+
+/**
  * @brief Retrieve kernel handles within a library
  *
  * @param [out] kernels Buffer for kernel handles
