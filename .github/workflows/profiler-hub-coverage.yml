@@ -92,6 +92,24 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
           echo "${LINES} | ${FUNCS} | ${BRANCHES}"
 
+      - name: Enforce line coverage threshold
+        working-directory: profilers/profiler-hub
+        env:
+          COVERAGE_LINES_THRESHOLD: '80'
+        run: |
+          set -euo pipefail
+          LINES_PCT=$(grep -oE 'lines: [0-9.]+%' coverage.log \
+                        | tail -1 \
+                        | grep -oE '[0-9.]+')
+          if [ -z "${LINES_PCT}" ]; then
+            echo "ERROR: could not parse line coverage from coverage.log" >&2
+            exit 1
+          fi
+          echo "Line coverage: ${LINES_PCT}% (threshold: ${COVERAGE_LINES_THRESHOLD}%)"
+          awk -v cov="${LINES_PCT}" -v thr="${COVERAGE_LINES_THRESHOLD}" \
+            'BEGIN { exit (cov + 0 >= thr + 0) ? 0 : 1 }' \
+            || { echo "FAIL: line coverage ${LINES_PCT}% below threshold ${COVERAGE_LINES_THRESHOLD}%" >&2; exit 1; }
+
       - name: Upload coverage artifact
         if: always()
         uses: actions/upload-artifact@v7
