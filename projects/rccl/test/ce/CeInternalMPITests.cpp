@@ -301,6 +301,10 @@ TEST_F(CeInternalMPITest, PrepUCSyncNoSelfTargetedOp)
 
     auto [batch, opIdx] = callPrepUCSync();
 
+    // baseUCSymReadyPtr points into a VMM-backed symmetric (host-accessible)
+    // allocation created by ncclCeInit via ncclSymBufAlloc.  Address arithmetic
+    // on the host-side pointer is valid for comparison with batch op addresses,
+    // which are also expressed as host-visible hipDeviceptr_t values.
     uint32_t*      readyPtrs = reinterpret_cast<uint32_t*>(ceComm->ceColl.baseUCSymReadyPtr);
     hipDeviceptr_t selfReady = reinterpret_cast<hipDeviceptr_t>(&readyPtrs[rank]);
     int selfTargets = 0;
@@ -320,8 +324,10 @@ TEST_F(CeInternalMPITest, SeqNumWrap)
     requireMinRanks(2);
     ceComm->ceColl.ceSeqNum = UINT32_MAX - 1;
 
-    { auto [b, i] = callPrepUCSync(); EXPECT_EQ(ceComm->ceColl.ceSeqNum, UINT32_MAX); }
-    { auto [b, i] = callPrepUCSync(); EXPECT_EQ(ceComm->ceColl.ceSeqNum, 0u) << "wrap from UINT32_MAX to 0"; }
+    callPrepUCSync();
+    EXPECT_EQ(ceComm->ceColl.ceSeqNum, UINT32_MAX);
+    callPrepUCSync();
+    EXPECT_EQ(ceComm->ceColl.ceSeqNum, 0u) << "wrap from UINT32_MAX to 0";
 }
 
 // SYNC-05: ceSeqNum wraps correctly through the full AllGather dispatch path (not only PrepUCSync).

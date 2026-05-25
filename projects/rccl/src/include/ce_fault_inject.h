@@ -45,26 +45,12 @@
 #define CE_FAULT_LAUNCH_OP   0x04U
 
 // ---------------------------------------------------------------------------
-// Public API (implemented as inline helpers that touch comm->ceColl.ceFaults)
+// Inline implementations – ncclComm is defined in comm.h, ncclResult_t in nccl.h.
+// All three functions are defined here so callers need not link against a
+// separate translation unit.
 // ---------------------------------------------------------------------------
 
-struct ncclComm;
-
-/** Arm one or more fault bits on @p comm. */
-static inline ncclResult_t ncclCeFaultSet(struct ncclComm* comm, uint32_t bits);
-
-/** Clear all CE fault bits on @p comm. */
-static inline ncclResult_t ncclCeFaultClear(struct ncclComm* comm);
-
-/** Return the current fault bitmask on @p comm. */
-static inline uint32_t ncclCeFaultGet(struct ncclComm* comm);
-
-// ---------------------------------------------------------------------------
-// Inline implementations – included only here so callers need not link
-// against a separate translation unit.
-// ---------------------------------------------------------------------------
-
-#include "comm.h"   // ncclComm definition
+#include "comm.h"   // ncclComm definition (transitively includes nccl.h)
 
 static inline ncclResult_t ncclCeFaultSet(struct ncclComm* comm, uint32_t bits) {
   if (comm == nullptr) return ncclInvalidArgument;
