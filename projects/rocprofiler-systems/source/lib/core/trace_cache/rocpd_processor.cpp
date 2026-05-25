@@ -170,6 +170,7 @@ rocpd_processor_t::handle(const memory_copy_sample& _mcs)
 
     auto env      = make_trace_env(n_info.id, process.pid, _mcs.thread_id);
     env.stream_id = _mcs.stream_handle;
+    env.queue_id  = 0;
 
     m_writer->insert_memory_copy_data(mc, env);
 }
@@ -207,6 +208,7 @@ rocpd_processor_t::handle([[maybe_unused]] const memory_allocate_sample& _mas)
         auto env =
             make_trace_env_with_agent(n_info.id, process.pid, _mas.thread_id, agent_ref);
         env.stream_id = _mas.stream_handle;
+        env.queue_id  = 0;
 
         m_writer->insert_memory_alloc_data(ma, env);
     }
