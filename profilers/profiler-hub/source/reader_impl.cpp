@@ -766,7 +766,45 @@ reader_t::impl::get_events_for_track(reader_types::track_info_ptr_t      track,
 size_t
 reader_t::impl::get_event_count(const reader_types::event_filter_t& filter)
 {
-    return get_events(filter).size();
+    const bool query_all    = filter.types.empty();
+    auto       should_count = [&](reader_types::event_type_t t) {
+        return query_all || std::find(filter.types.begin(), filter.types.end(), t) !=
+                                filter.types.end();
+    };
+
+    const bool has_time =
+        filter.time_window.start.has_value() && filter.time_window.end.has_value();
+
+    auto run_count = [&](const auto& base_stmt, const auto& time_stmt) -> size_t {
+        auto results = has_time ? time_stmt(filter.time_window.end.value(),
+                                            filter.time_window.start.value())
+                                      .to_vector()
+                                : base_stmt().to_vector();
+        return results.empty() ? 0 : results.front().count;
+    };
+
+    size_t total = 0;
+    if(should_count(reader_types::event_type_t::region))
+    {
+        total += run_count(m_read_statements->region_count(),
+                           m_read_statements->region_count_time_filtered());
+    }
+    if(should_count(reader_types::event_type_t::kernel_dispatch))
+    {
+        total += run_count(m_read_statements->kernel_dispatch_count(),
+                           m_read_statements->kernel_dispatch_count_time_filtered());
+    }
+    if(should_count(reader_types::event_type_t::memory_copy))
+    {
+        total += run_count(m_read_statements->memory_copy_count(),
+                           m_read_statements->memory_copy_count_time_filtered());
+    }
+    if(should_count(reader_types::event_type_t::memory_allocate))
+    {
+        total += run_count(m_read_statements->memory_alloc_count(),
+                           m_read_statements->memory_alloc_count_time_filtered());
+    }
+    return total;
 }
 
 // ============================================================================
@@ -1171,25 +1209,28 @@ reader_t::impl::get_data_time_range()
 reader_types::event_counts_t
 reader_t::impl::get_event_counts(const reader_types::time_window_t& window)
 {
-    (void) window;  // TODO: time-filtered counts
+    const bool has_time = window.start.has_value() && window.end.has_value();
 
-    reader_types::event_counts_t counts;
-
-    auto get_count = [](const auto& stmt) -> size_t {
-        auto results = stmt().to_vector();
-        if(!results.empty()) return results.front().count;
-        return 0;
+    auto get_count = [&](const auto& base_stmt, const auto& time_stmt) -> size_t {
+        auto results =
+            has_time ? time_stmt(window.end.value(), window.start.value()).to_vector()
+                     : base_stmt().to_vector();
+        return results.empty() ? 0 : results.front().count;
     };
 
+    reader_types::event_counts_t counts;
     counts[reader_types::event_type_t::region] =
-        get_count(m_read_statements->region_count());
+        get_count(m_read_statements->region_count(),
+                  m_read_statements->region_count_time_filtered());
     counts[reader_types::event_type_t::kernel_dispatch] =
-        get_count(m_read_statements->kernel_dispatch_count());
+        get_count(m_read_statements->kernel_dispatch_count(),
+                  m_read_statements->kernel_dispatch_count_time_filtered());
     counts[reader_types::event_type_t::memory_copy] =
-        get_count(m_read_statements->memory_copy_count());
+        get_count(m_read_statements->memory_copy_count(),
+                  m_read_statements->memory_copy_count_time_filtered());
     counts[reader_types::event_type_t::memory_allocate] =
-        get_count(m_read_statements->memory_alloc_count());
-
+        get_count(m_read_statements->memory_alloc_count(),
+                  m_read_statements->memory_alloc_count_time_filtered());
     return counts;
 }
 

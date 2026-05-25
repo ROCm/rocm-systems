@@ -25,7 +25,7 @@ struct reader_t
      */
     explicit reader_t(std::unique_ptr<profiler_hub::storage_t> storage);
 
-    virtual ~reader_t();
+    ~reader_t();
 
     reader_t()                           = delete;
     reader_t(const reader_t&)            = delete;
@@ -132,10 +132,12 @@ struct reader_t
         const reader_types::event_filter_t& filter = {}) const;
 
     /**
-     * @brief Get count of events matching filter without fetching data
-     * @param filter Optional filter for time window
+     * @brief Get total count of events matching filter without fetching data
+     * @param filter Optional filter; honors `time_window` and `types`. Pagination,
+     *               sort, and where fields are ignored - count reflects the total
+     *               number of matches.
      * @return Number of matching events
-     * @note Useful for pagination UI
+     * @note Useful for pagination UI - returns the unpaginated total.
      */
     [[nodiscard]] size_t get_event_count(
         const reader_types::event_filter_t& filter = {}) const;

@@ -408,6 +408,8 @@ struct read_statements
     using event_id_func_t =
         std::function<sqlite_backend::result_set<event_id_result>(size_t)>;
     using count_func_t = std::function<sqlite_backend::result_set<count_result>()>;
+    using count_time_filtered_func_t =
+        std::function<sqlite_backend::result_set<count_result>(size_t, size_t)>;
     using time_range_func_t =
         std::function<sqlite_backend::result_set<time_range_result>()>;
 
@@ -567,6 +569,25 @@ struct read_statements
     [[nodiscard]] const count_func_t& memory_alloc_count() const
     {
         return m_memory_alloc_count;
+    }
+    [[nodiscard]] const count_time_filtered_func_t& region_count_time_filtered() const
+    {
+        return m_region_count_time_filtered;
+    }
+    [[nodiscard]] const count_time_filtered_func_t& kernel_dispatch_count_time_filtered()
+        const
+    {
+        return m_kernel_dispatch_count_time_filtered;
+    }
+    [[nodiscard]] const count_time_filtered_func_t& memory_copy_count_time_filtered()
+        const
+    {
+        return m_memory_copy_count_time_filtered;
+    }
+    [[nodiscard]] const count_time_filtered_func_t& memory_alloc_count_time_filtered()
+        const
+    {
+        return m_memory_alloc_count_time_filtered;
     }
     [[nodiscard]] const time_range_func_t& region_time_range() const
     {
@@ -1324,11 +1345,28 @@ private:
             return m_backend->create_read_statement_executor<count_result>(
                 q, &count_result::count);
         };
+        auto make_count_time_filtered_stmt = [&](const std::string& table) {
+            auto q = fmt::format(
+                "SELECT COUNT(*) FROM {}_{} WHERE start <= ? AND \"end\" >= ?",
+                table,
+                m_uuid);
+            return m_backend->create_read_statement_executor<count_result,
+                                                             bind_types<size_t, size_t>>(
+                q, &count_result::count);
+        };
 
         m_region_count          = make_count_stmt("rocpd_region");
         m_kernel_dispatch_count = make_count_stmt("rocpd_kernel_dispatch");
         m_memory_copy_count     = make_count_stmt("rocpd_memory_copy");
         m_memory_alloc_count    = make_count_stmt("rocpd_memory_allocate");
+
+        m_region_count_time_filtered = make_count_time_filtered_stmt("rocpd_region");
+        m_kernel_dispatch_count_time_filtered =
+            make_count_time_filtered_stmt("rocpd_kernel_dispatch");
+        m_memory_copy_count_time_filtered =
+            make_count_time_filtered_stmt("rocpd_memory_copy");
+        m_memory_alloc_count_time_filtered =
+            make_count_time_filtered_stmt("rocpd_memory_allocate");
     }
 
     void initialize_time_range_statements()
@@ -1387,6 +1425,11 @@ private:
     count_func_t m_kernel_dispatch_count;
     count_func_t m_memory_copy_count;
     count_func_t m_memory_alloc_count;
+
+    count_time_filtered_func_t m_region_count_time_filtered;
+    count_time_filtered_func_t m_kernel_dispatch_count_time_filtered;
+    count_time_filtered_func_t m_memory_copy_count_time_filtered;
+    count_time_filtered_func_t m_memory_alloc_count_time_filtered;
 
     // Time range statements
     time_range_func_t m_region_time_range;

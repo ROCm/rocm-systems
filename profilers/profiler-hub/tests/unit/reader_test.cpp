@@ -295,6 +295,52 @@ TEST_F(reader_test, get_event_count_matches_events_size)
     ASSERT_EQ(count, events.size());
 }
 
+TEST_F(reader_test, get_event_count_ignores_pagination)
+{
+    const auto total = m_reader->get_event_count();
+    ASSERT_GT(total, 1U);
+
+    profiler_hub::reader_types::event_filter_t paged_filter;
+    paged_filter.pagination.limit  = 1;
+    paged_filter.pagination.offset = 0;
+
+    ASSERT_EQ(m_reader->get_event_count(paged_filter), total);
+}
+
+TEST_F(reader_test, get_event_count_respects_types_filter)
+{
+    const auto counts = m_reader->get_event_counts({});
+
+    profiler_hub::reader_types::event_filter_t region_filter;
+    region_filter.types = { profiler_hub::reader_types::event_type_t::region };
+    ASSERT_EQ(m_reader->get_event_count(region_filter),
+              counts.at(profiler_hub::reader_types::event_type_t::region));
+
+    profiler_hub::reader_types::event_filter_t dispatch_filter;
+    dispatch_filter.types = { profiler_hub::reader_types::event_type_t::kernel_dispatch };
+    ASSERT_EQ(m_reader->get_event_count(dispatch_filter),
+              counts.at(profiler_hub::reader_types::event_type_t::kernel_dispatch));
+}
+
+TEST_F(reader_test, get_event_count_with_time_window_matches_filtered_events)
+{
+    const auto unfiltered = m_reader->get_events();
+    ASSERT_FALSE(unfiltered.empty());
+
+    auto first_start = unfiltered.front().start_timestamp;
+    auto last_start  = unfiltered.back().start_timestamp;
+    if(last_start < first_start) std::swap(first_start, last_start);
+
+    const auto mid = first_start + (last_start - first_start) / 2;
+
+    profiler_hub::reader_types::event_filter_t windowed;
+    windowed.time_window.start = first_start;
+    windowed.time_window.end   = mid;
+
+    const auto windowed_events = m_reader->get_events(windowed);
+    ASSERT_EQ(m_reader->get_event_count(windowed), windowed_events.size());
+}
+
 // ============================================================================
 // Event detail tests
 // ============================================================================
