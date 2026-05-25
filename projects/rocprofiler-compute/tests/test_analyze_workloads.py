@@ -53,7 +53,9 @@ config["cleanup"] = True if "PYTEST_XDIST_WORKER_COUNT" in os.environ else False
 def test_analyze_MI100(
     binary_handler_analyze_rocprof_compute, workload_type, expected_code
 ):
-    workload_dir = common.setup_workload_dir(f"tests/workloads/{workload_type}/MI100")
+    workload_dir = common.setup_workload_dir(
+        f"tests/workloads/{workload_type}/MI100", param_id=workload_type
+    )
 
     code = binary_handler_analyze_rocprof_compute([
         "analyze",
@@ -114,7 +116,9 @@ def test_analyze_MI100(
 def test_analyze_MI200(
     binary_handler_analyze_rocprof_compute, workload_type, expected_code
 ):
-    workload_dir = common.setup_workload_dir(f"tests/workloads/{workload_type}/MI200")
+    workload_dir = common.setup_workload_dir(
+        f"tests/workloads/{workload_type}/MI200", param_id=workload_type
+    )
 
     code = binary_handler_analyze_rocprof_compute([
         "analyze",
@@ -163,7 +167,7 @@ def test_analyze_MI200(
 )
 def test_analyze_MI300A_A1(binary_handler_analyze_rocprof_compute, workload_type):
     workload_dir = common.setup_workload_dir(
-        f"tests/workloads/{workload_type}/MI300A_A1"
+        f"tests/workloads/{workload_type}/MI300A_A1", param_id=workload_type
     )
 
     code = binary_handler_analyze_rocprof_compute([
@@ -213,7 +217,7 @@ def test_analyze_MI300A_A1(binary_handler_analyze_rocprof_compute, workload_type
 )
 def test_analyze_MI300X_A1(binary_handler_analyze_rocprof_compute, workload_type):
     workload_dir = common.setup_workload_dir(
-        f"tests/workloads/{workload_type}/MI300X_A1"
+        f"tests/workloads/{workload_type}/MI300X_A1", param_id=workload_type
     )
 
     code = binary_handler_analyze_rocprof_compute([
@@ -233,7 +237,9 @@ def test_analyze_MI300X_A1(binary_handler_analyze_rocprof_compute, workload_type
     ],
 )
 def test_analyze_MI350(binary_handler_analyze_rocprof_compute, workload_type):
-    workload_dir = common.setup_workload_dir(f"tests/workloads/{workload_type}/MI350")
+    workload_dir = common.setup_workload_dir(
+        f"tests/workloads/{workload_type}/MI350", param_id=workload_type
+    )
 
     code = binary_handler_analyze_rocprof_compute([
         "analyze",
@@ -251,7 +257,7 @@ def test_analyze_MI350(binary_handler_analyze_rocprof_compute, workload_type):
 )
 def test_analyze_RDNA35_HALO(binary_handler_analyze_rocprof_compute, workload_type):
     workload_dir = common.setup_workload_dir(
-        f"tests/workloads/{workload_type}/RDNA35_HALO"
+        f"tests/workloads/{workload_type}/RDNA35_HALO", param_id=workload_type
     )
 
     code = binary_handler_analyze_rocprof_compute([
