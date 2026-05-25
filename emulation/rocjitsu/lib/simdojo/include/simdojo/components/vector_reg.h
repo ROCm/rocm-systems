@@ -7,8 +7,8 @@
 #ifndef SIMDOJO_COMPONENTS_VECTOR_REG_H_
 #define SIMDOJO_COMPONENTS_VECTOR_REG_H_
 
-#include "util/bit.h"
-#include "util/meta_programming.h"
+#include "simdojo/util/bit.h"
+#include "simdojo/util/meta_programming.h"
 
 #include <array>
 #include <cstddef>
@@ -29,7 +29,7 @@ namespace simdojo {
 /// @tparam VecElem Element type (e.g., uint32_t, float).
 template <size_t NUM_ELEMS, typename VecElem> class VectorReg {
 public:
-  static_assert(util::is_power_of_2(NUM_ELEMS * sizeof(VecElem)),
+  static_assert(is_power_of_2(NUM_ELEMS * sizeof(VecElem)),
                 "VectorReg total size must be a power of 2.");
 
   static constexpr size_t num_elems_ = NUM_ELEMS;
@@ -74,25 +74,25 @@ public:
   }
 
   template <typename Scalar>
-    requires util::metaprogramming::IsArithmetic<Scalar>
+    requires metaprogramming::IsArithmetic<Scalar>
   VectorReg operator+(Scalar s) const {
     return scalar_op(s, [](VecElem a, Scalar b) { return static_cast<VecElem>(a + b); });
   }
 
   template <typename Scalar>
-    requires util::metaprogramming::IsArithmetic<Scalar>
+    requires metaprogramming::IsArithmetic<Scalar>
   VectorReg operator-(Scalar s) const {
     return scalar_op(s, [](VecElem a, Scalar b) { return static_cast<VecElem>(a - b); });
   }
 
   template <typename Scalar>
-    requires util::metaprogramming::IsArithmetic<Scalar>
+    requires metaprogramming::IsArithmetic<Scalar>
   VectorReg operator*(Scalar s) const {
     return scalar_op(s, [](VecElem a, Scalar b) { return static_cast<VecElem>(a * b); });
   }
 
   template <typename Scalar>
-    requires util::metaprogramming::IsArithmetic<Scalar>
+    requires metaprogramming::IsArithmetic<Scalar>
   VectorReg operator/(Scalar s) const {
     return scalar_op(s, [](VecElem a, Scalar b) { return static_cast<VecElem>(a / b); });
   }
@@ -122,25 +122,25 @@ public:
   }
 
   template <typename Scalar>
-    requires util::metaprogramming::IsArithmetic<Scalar>
+    requires metaprogramming::IsArithmetic<Scalar>
   VectorReg &operator+=(Scalar s) {
     return *this = *this + s;
   }
 
   template <typename Scalar>
-    requires util::metaprogramming::IsArithmetic<Scalar>
+    requires metaprogramming::IsArithmetic<Scalar>
   VectorReg &operator-=(Scalar s) {
     return *this = *this - s;
   }
 
   template <typename Scalar>
-    requires util::metaprogramming::IsArithmetic<Scalar>
+    requires metaprogramming::IsArithmetic<Scalar>
   VectorReg &operator*=(Scalar s) {
     return *this = *this * s;
   }
 
   template <typename Scalar>
-    requires util::metaprogramming::IsArithmetic<Scalar>
+    requires metaprogramming::IsArithmetic<Scalar>
   VectorReg &operator/=(Scalar s) {
     return *this = *this / s;
   }
@@ -172,13 +172,13 @@ private:
 
 /// @brief Commutative scalar-on-left arithmetic (scalar + vec, scalar * vec, etc.).
 template <typename Scalar, size_t NUM_ELEMS, typename VecElem>
-  requires util::metaprogramming::IsArithmetic<Scalar>
+  requires metaprogramming::IsArithmetic<Scalar>
 VectorReg<NUM_ELEMS, VecElem> operator+(Scalar s, const VectorReg<NUM_ELEMS, VecElem> &v) {
   return v + s;
 }
 
 template <typename Scalar, size_t NUM_ELEMS, typename VecElem>
-  requires util::metaprogramming::IsArithmetic<Scalar>
+  requires metaprogramming::IsArithmetic<Scalar>
 VectorReg<NUM_ELEMS, VecElem> operator*(Scalar s, const VectorReg<NUM_ELEMS, VecElem> &v) {
   return v * s;
 }

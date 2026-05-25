@@ -7,7 +7,7 @@
 #ifndef SIMDOJO_COMPONENTS_CACHE_H_
 #define SIMDOJO_COMPONENTS_CACHE_H_
 
-#include "util/bit.h"
+#include "simdojo/util/bit.h"
 
 #include <algorithm>
 #include <cassert>
@@ -97,7 +97,7 @@ public:
   Cache()
       : tags_(static_cast<size_t>(NumSets) * Associativity),
         data_(static_cast<size_t>(LINE_SIZE) * NumSets * Associativity, 0) {
-    static_assert(util::is_power_of_2(NumSets), "NumSets must be a power of 2");
+    static_assert(is_power_of_2(NumSets), "NumSets must be a power of 2");
   }
 
   /// @brief Look up an address in the cache.
