@@ -14,7 +14,15 @@ from amdisa.codegen.execute.vop3_modifiers import (
 )
 
 
-def gen_vector_cmp_class(dst: list[str], src: list[str], dtype: str | None, is_cmpx: bool, cmpx_writes_vcc: bool = False, is_vop3: bool = False, has_abs: bool = False) -> str:
+def gen_vector_cmp_class(
+    dst: list[str],
+    src: list[str],
+    dtype: str | None,
+    is_cmpx: bool,
+    cmpx_writes_vcc: bool = False,
+    is_vop3: bool = False,
+    has_abs: bool = False,
+) -> str:
     """Generate V_CMP_CLASS / V_CMPX_CLASS body."""
     L = []
     L.append('  uint64_t exec = wf.exec();')
@@ -28,19 +36,33 @@ def gen_vector_cmp_class(dst: list[str], src: list[str], dtype: str | None, is_c
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     if dtype == 'f64':
-        L.append(f'    double s0 = std::bit_cast<double>({src[0]}.read_lane64(wf, lane));')
+        L.append(
+            f'    double s0 = std::bit_cast<double>({src[0]}.read_lane64(wf, lane));'
+        )
         if is_vop3:
             L.extend(vop3_src_mod('s0', 0, has_abs))
         L.append(f'    uint32_t mask = {src[1]}.read_lane(wf, lane);')
         L.append('    bool match = false;')
-        L.append('    if ((mask & 0x001) && std::isnan(s0) && (std::bit_cast<uint64_t>(s0) & 0x0008000000000000ULL) == 0) match = true;')
-        L.append('    if ((mask & 0x002) && std::isnan(s0) && (std::bit_cast<uint64_t>(s0) & 0x0008000000000000ULL) != 0) match = true;')
+        L.append(
+            '    if ((mask & 0x001) && std::isnan(s0) && (std::bit_cast<uint64_t>(s0) & 0x0008000000000000ULL) == 0) match = true;'
+        )
+        L.append(
+            '    if ((mask & 0x002) && std::isnan(s0) && (std::bit_cast<uint64_t>(s0) & 0x0008000000000000ULL) != 0) match = true;'
+        )
         L.append('    if ((mask & 0x004) && std::isinf(s0) && s0 < 0) match = true;')
         L.append('    if ((mask & 0x008) && std::isnormal(s0) && s0 < 0) match = true;')
-        L.append('    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0 && std::signbit(s0)) match = true;')
-        L.append('    if ((mask & 0x020) && s0 == 0.0 && std::signbit(s0)) match = true;')
-        L.append('    if ((mask & 0x040) && s0 == 0.0 && !std::signbit(s0)) match = true;')
-        L.append('    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0 && !std::signbit(s0)) match = true;')
+        L.append(
+            '    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0 && std::signbit(s0)) match = true;'
+        )
+        L.append(
+            '    if ((mask & 0x020) && s0 == 0.0 && std::signbit(s0)) match = true;'
+        )
+        L.append(
+            '    if ((mask & 0x040) && s0 == 0.0 && !std::signbit(s0)) match = true;'
+        )
+        L.append(
+            '    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0 && !std::signbit(s0)) match = true;'
+        )
         L.append('    if ((mask & 0x100) && std::isnormal(s0) && s0 > 0) match = true;')
         L.append('    if ((mask & 0x200) && std::isinf(s0) && s0 > 0) match = true;')
     elif dtype == 'f16':
@@ -48,21 +70,37 @@ def gen_vector_cmp_class(dst: list[str], src: list[str], dtype: str | None, is_c
         # quiet NaN bit in IEEE 754 binary16), then convert to f32 for
         # the remaining class checks. The f16→f32 conversion may turn
         # sNaN into qNaN, so we cannot rely on the converted value.
-        L.append(f'    uint16_t s0_raw = static_cast<uint16_t>({src[0]}.read_lane(wf, lane));')
+        L.append(
+            f'    uint16_t s0_raw = static_cast<uint16_t>({src[0]}.read_lane(wf, lane));'
+        )
         L.append(f'    float s0 = util::f16_to_f32(s0_raw);')
         if is_vop3:
             L.extend(vop3_src_mod('s0', 0, has_abs))
         L.append(f'    uint32_t mask = {src[1]}.read_lane(wf, lane);')
         L.append('    bool match = false;')
-        L.append('    bool is_f16_nan = ((s0_raw & 0x7C00) == 0x7C00) && ((s0_raw & 0x03FF) != 0);')
-        L.append('    if ((mask & 0x001) && is_f16_nan && (s0_raw & 0x0200) == 0) match = true;')
-        L.append('    if ((mask & 0x002) && is_f16_nan && (s0_raw & 0x0200) != 0) match = true;')
+        L.append(
+            '    bool is_f16_nan = ((s0_raw & 0x7C00) == 0x7C00) && ((s0_raw & 0x03FF) != 0);'
+        )
+        L.append(
+            '    if ((mask & 0x001) && is_f16_nan && (s0_raw & 0x0200) == 0) match = true;'
+        )
+        L.append(
+            '    if ((mask & 0x002) && is_f16_nan && (s0_raw & 0x0200) != 0) match = true;'
+        )
         L.append('    if ((mask & 0x004) && std::isinf(s0) && s0 < 0) match = true;')
         L.append('    if ((mask & 0x008) && std::isnormal(s0) && s0 < 0) match = true;')
-        L.append('    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f && std::signbit(s0)) match = true;')
-        L.append('    if ((mask & 0x020) && s0 == 0.0f && std::signbit(s0)) match = true;')
-        L.append('    if ((mask & 0x040) && s0 == 0.0f && !std::signbit(s0)) match = true;')
-        L.append('    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f && !std::signbit(s0)) match = true;')
+        L.append(
+            '    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f && std::signbit(s0)) match = true;'
+        )
+        L.append(
+            '    if ((mask & 0x020) && s0 == 0.0f && std::signbit(s0)) match = true;'
+        )
+        L.append(
+            '    if ((mask & 0x040) && s0 == 0.0f && !std::signbit(s0)) match = true;'
+        )
+        L.append(
+            '    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f && !std::signbit(s0)) match = true;'
+        )
         L.append('    if ((mask & 0x100) && std::isnormal(s0) && s0 > 0) match = true;')
         L.append('    if ((mask & 0x200) && std::isinf(s0) && s0 > 0) match = true;')
     else:
@@ -71,14 +109,26 @@ def gen_vector_cmp_class(dst: list[str], src: list[str], dtype: str | None, is_c
             L.extend(vop3_src_mod('s0', 0, has_abs))
         L.append(f'    uint32_t mask = {src[1]}.read_lane(wf, lane);')
         L.append('    bool match = false;')
-        L.append('    if ((mask & 0x001) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000) == 0) match = true;')
-        L.append('    if ((mask & 0x002) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000) != 0) match = true;')
+        L.append(
+            '    if ((mask & 0x001) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000) == 0) match = true;'
+        )
+        L.append(
+            '    if ((mask & 0x002) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000) != 0) match = true;'
+        )
         L.append('    if ((mask & 0x004) && std::isinf(s0) && s0 < 0) match = true;')
         L.append('    if ((mask & 0x008) && std::isnormal(s0) && s0 < 0) match = true;')
-        L.append('    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f && std::signbit(s0)) match = true;')
-        L.append('    if ((mask & 0x020) && s0 == 0.0f && std::signbit(s0)) match = true;')
-        L.append('    if ((mask & 0x040) && s0 == 0.0f && !std::signbit(s0)) match = true;')
-        L.append('    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f && !std::signbit(s0)) match = true;')
+        L.append(
+            '    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f && std::signbit(s0)) match = true;'
+        )
+        L.append(
+            '    if ((mask & 0x020) && s0 == 0.0f && std::signbit(s0)) match = true;'
+        )
+        L.append(
+            '    if ((mask & 0x040) && s0 == 0.0f && !std::signbit(s0)) match = true;'
+        )
+        L.append(
+            '    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f && !std::signbit(s0)) match = true;'
+        )
         L.append('    if ((mask & 0x100) && std::isnormal(s0) && s0 > 0) match = true;')
         L.append('    if ((mask & 0x200) && std::isinf(s0) && s0 > 0) match = true;')
     if is_cmpx:
@@ -97,7 +147,15 @@ def gen_vector_cmp_class(dst: list[str], src: list[str], dtype: str | None, is_c
         L.append('  wf.set_vcc(vcc);')
     return '\n'.join(L)
 
-def _cmp_condition(src: list[str], op: str | None, dtype: str | None, is_vop3: bool, L: list[str], has_abs: bool = False) -> str:
+
+def _cmp_condition(
+    src: list[str],
+    op: str | None,
+    dtype: str | None,
+    is_vop3: bool,
+    L: list[str],
+    has_abs: bool = False,
+) -> str:
     """Emit source reads and return the C++ condition expression.
 
     For FP types, handles ordered comparisons (eq, lt, le, gt, ge, lg),
@@ -107,23 +165,38 @@ def _cmp_condition(src: list[str], op: str | None, dtype: str | None, is_vop3: b
     is_fp = dtype in ('f32', 'f64', 'f16')
     if is_fp:
         if dtype == 'f64':
-            L.append(f'    double s0 = std::bit_cast<double>({src[0]}.read_lane64(wf, lane));')
-            L.append(f'    double s1 = std::bit_cast<double>({src[1]}.read_lane64(wf, lane));')
+            L.append(
+                f'    double s0 = std::bit_cast<double>({src[0]}.read_lane64(wf, lane));'
+            )
+            L.append(
+                f'    double s1 = std::bit_cast<double>({src[1]}.read_lane64(wf, lane));'
+            )
         elif dtype == 'f16':
-            L.append(f'    float s0 = util::f16_to_f32(static_cast<uint16_t>({src[0]}.read_lane(wf, lane)));')
-            L.append(f'    float s1 = util::f16_to_f32(static_cast<uint16_t>({src[1]}.read_lane(wf, lane)));')
+            L.append(
+                f'    float s0 = util::f16_to_f32(static_cast<uint16_t>({src[0]}.read_lane(wf, lane)));'
+            )
+            L.append(
+                f'    float s1 = util::f16_to_f32(static_cast<uint16_t>({src[1]}.read_lane(wf, lane)));'
+            )
         else:
-            L.append(f'    float s0 = std::bit_cast<float>({src[0]}.read_lane(wf, lane));')
-            L.append(f'    float s1 = std::bit_cast<float>({src[1]}.read_lane(wf, lane));')
+            L.append(
+                f'    float s0 = std::bit_cast<float>({src[0]}.read_lane(wf, lane));'
+            )
+            L.append(
+                f'    float s1 = std::bit_cast<float>({src[1]}.read_lane(wf, lane));'
+            )
         if is_vop3:
             L.extend(vop3_src_mod('s0', 0, has_abs))
             L.extend(vop3_src_mod('s1', 1, has_abs))
         # Ordered comparisons (false if NaN)
         ordered_map = {
-            'eq': 's0 == s1', 'ne': 's0 != s1',
+            'eq': 's0 == s1',
+            'ne': 's0 != s1',
             'lg': 's0 < s1 || s0 > s1',
-            'lt': 's0 < s1', 'le': 's0 <= s1',
-            'gt': 's0 > s1', 'ge': 's0 >= s1',
+            'lt': 's0 < s1',
+            'le': 's0 <= s1',
+            'gt': 's0 > s1',
+            'ge': 's0 >= s1',
         }
         # Unordered comparisons (true if NaN)
         unordered_map = {
@@ -144,31 +217,60 @@ def _cmp_condition(src: list[str], op: str | None, dtype: str | None, is_vop3: b
             return 'std::isnan(s0) || std::isnan(s1)'
         return f's0 == s1 /* TODO: {op} */'
     elif dtype in ('i64',):
-        L.append(f'    int64_t s0 = static_cast<int64_t>({src[0]}.read_lane64(wf, lane));')
-        L.append(f'    int64_t s1 = static_cast<int64_t>({src[1]}.read_lane64(wf, lane));')
+        L.append(
+            f'    int64_t s0 = static_cast<int64_t>({src[0]}.read_lane64(wf, lane));'
+        )
+        L.append(
+            f'    int64_t s1 = static_cast<int64_t>({src[1]}.read_lane64(wf, lane));'
+        )
     elif dtype in ('u64',):
         L.append(f'    uint64_t s0 = {src[0]}.read_lane64(wf, lane);')
         L.append(f'    uint64_t s1 = {src[1]}.read_lane64(wf, lane);')
     elif dtype in ('i16',):
-        L.append(f'    int16_t s0 = static_cast<int16_t>({src[0]}.read_lane(wf, lane) & 0xFFFF);')
-        L.append(f'    int16_t s1 = static_cast<int16_t>({src[1]}.read_lane(wf, lane) & 0xFFFF);')
+        L.append(
+            f'    int16_t s0 = static_cast<int16_t>({src[0]}.read_lane(wf, lane) & 0xFFFF);'
+        )
+        L.append(
+            f'    int16_t s1 = static_cast<int16_t>({src[1]}.read_lane(wf, lane) & 0xFFFF);'
+        )
     elif dtype in ('u16',):
-        L.append(f'    uint16_t s0 = static_cast<uint16_t>({src[0]}.read_lane(wf, lane));')
-        L.append(f'    uint16_t s1 = static_cast<uint16_t>({src[1]}.read_lane(wf, lane));')
+        L.append(
+            f'    uint16_t s0 = static_cast<uint16_t>({src[0]}.read_lane(wf, lane));'
+        )
+        L.append(
+            f'    uint16_t s1 = static_cast<uint16_t>({src[1]}.read_lane(wf, lane));'
+        )
     elif dtype in ('i32',):
-        L.append(f'    int32_t s0 = static_cast<int32_t>({src[0]}.read_lane(wf, lane));')
-        L.append(f'    int32_t s1 = static_cast<int32_t>({src[1]}.read_lane(wf, lane));')
+        L.append(
+            f'    int32_t s0 = static_cast<int32_t>({src[0]}.read_lane(wf, lane));'
+        )
+        L.append(
+            f'    int32_t s1 = static_cast<int32_t>({src[1]}.read_lane(wf, lane));'
+        )
     else:
         L.append(f'    uint32_t s0 = {src[0]}.read_lane(wf, lane);')
         L.append(f'    uint32_t s1 = {src[1]}.read_lane(wf, lane);')
     cmp_map = {
-        'eq': '==', 'ne': '!=', 'lg': '!=',
-        'gt': '>', 'ge': '>=', 'lt': '<', 'le': '<=',
+        'eq': '==',
+        'ne': '!=',
+        'lg': '!=',
+        'gt': '>',
+        'ge': '>=',
+        'lt': '<',
+        'le': '<=',
     }
     cmp_op = cmp_map.get(op, f'== /* TODO: {op} */')
     return f's0 {cmp_op} s1'
 
-def gen_vector_cmp(dst: list[str], src: list[str], op: str | None, dtype: str | None, is_vop3: bool = False, has_abs: bool = False) -> str:
+
+def gen_vector_cmp(
+    dst: list[str],
+    src: list[str],
+    op: str | None,
+    dtype: str | None,
+    is_vop3: bool = False,
+    has_abs: bool = False,
+) -> str:
     """Generate vector compare body.
 
     VOPC (VOP2-like): result always goes to VCC.
@@ -206,9 +308,16 @@ def gen_vector_cmp(dst: list[str], src: list[str], op: str | None, dtype: str | 
         L.append('  wf.set_vcc(vcc);')
     return '\n'.join(L)
 
-def gen_vector_cmpx(src: list[str], op: str | None, dtype: str | None, cmpx_writes_vcc: bool = False,
-                     is_vop3: bool = False, dst: list[str] | None = None,
-                     has_abs: bool = False) -> str:
+
+def gen_vector_cmpx(
+    src: list[str],
+    op: str | None,
+    dtype: str | None,
+    cmpx_writes_vcc: bool = False,
+    is_vop3: bool = False,
+    dst: list[str] | None = None,
+    has_abs: bool = False,
+) -> str:
     """Generate vector compare-and-write-EXEC body.
 
     On CDNA (GFX9), V_CMPX writes both EXEC and the SDST operand.
@@ -238,7 +347,10 @@ def gen_vector_cmpx(src: list[str], op: str | None, dtype: str | None, cmpx_writ
     L.append('  wf.set_exec(result);')
     return '\n'.join(L)
 
-def gen_vector_add_co(dst: list[str], src: list[str], op: str | None, dtype: str | None) -> str:
+
+def gen_vector_add_co(
+    dst: list[str], src: list[str], op: str | None, dtype: str | None
+) -> str:
     """Generate vector add/sub with carry in/out.
 
     VOP2: carry in/out via VCC (implicit).
@@ -264,29 +376,47 @@ def gen_vector_add_co(dst: list[str], src: list[str], op: str | None, dtype: str
     L.append(f'    uint32_t sv1 = {s1}.read_lane(wf, lane);')
 
     if op == 'add':
-        L.append('    uint64_t wide = static_cast<uint64_t>(sv0) + static_cast<uint64_t>(sv1);')
+        L.append(
+            '    uint64_t wide = static_cast<uint64_t>(sv0) + static_cast<uint64_t>(sv1);'
+        )
     elif op == 'sub':
-        L.append('    uint64_t wide = static_cast<uint64_t>(sv0) - static_cast<uint64_t>(sv1);')
+        L.append(
+            '    uint64_t wide = static_cast<uint64_t>(sv0) - static_cast<uint64_t>(sv1);'
+        )
         L.append('    bool borrow = sv0 < sv1;')
     elif op == 'rsub':
-        L.append('    uint64_t wide = static_cast<uint64_t>(sv1) - static_cast<uint64_t>(sv0);')
+        L.append(
+            '    uint64_t wide = static_cast<uint64_t>(sv1) - static_cast<uint64_t>(sv0);'
+        )
         L.append('    bool borrow = sv1 < sv0;')
     elif op == 'addc':
         L.append('    uint32_t cin = (old_vcc & (1ULL << lane)) ? 1u : 0u;')
-        L.append('    uint64_t wide = static_cast<uint64_t>(sv0) + static_cast<uint64_t>(sv1) + cin;')
+        L.append(
+            '    uint64_t wide = static_cast<uint64_t>(sv0) + static_cast<uint64_t>(sv1) + cin;'
+        )
     elif op == 'subbc':
         L.append('    uint32_t cin = (old_vcc & (1ULL << lane)) ? 1u : 0u;')
-        L.append('    uint64_t wide = static_cast<uint64_t>(sv0) - static_cast<uint64_t>(sv1) - cin;')
-        L.append('    bool borrow = static_cast<uint64_t>(sv0) < static_cast<uint64_t>(sv1) + cin;')
+        L.append(
+            '    uint64_t wide = static_cast<uint64_t>(sv0) - static_cast<uint64_t>(sv1) - cin;'
+        )
+        L.append(
+            '    bool borrow = static_cast<uint64_t>(sv0) < static_cast<uint64_t>(sv1) + cin;'
+        )
     elif op == 'subbrevco':
         L.append('    uint32_t cin = (old_vcc & (1ULL << lane)) ? 1u : 0u;')
-        L.append('    uint64_t wide = static_cast<uint64_t>(sv1) - static_cast<uint64_t>(sv0) - cin;')
-        L.append('    bool borrow = static_cast<uint64_t>(sv1) < static_cast<uint64_t>(sv0) + cin;')
+        L.append(
+            '    uint64_t wide = static_cast<uint64_t>(sv1) - static_cast<uint64_t>(sv0) - cin;'
+        )
+        L.append(
+            '    bool borrow = static_cast<uint64_t>(sv1) < static_cast<uint64_t>(sv0) + cin;'
+        )
 
     L.append(f'    {d}.write_lane(wf, lane, static_cast<uint32_t>(wide));')
 
     if op in ('add', 'addc'):
-        L.append('    if (wide > 0xFFFFFFFFULL) vcc |= (1ULL << lane); else vcc &= ~(1ULL << lane);')
+        L.append(
+            '    if (wide > 0xFFFFFFFFULL) vcc |= (1ULL << lane); else vcc &= ~(1ULL << lane);'
+        )
     elif op in ('sub', 'rsub', 'subbc', 'subbrevco'):
         L.append('    if (borrow) vcc |= (1ULL << lane); else vcc &= ~(1ULL << lane);')
 
@@ -297,4 +427,3 @@ def gen_vector_add_co(dst: list[str], src: list[str], op: str | None, dtype: str
     else:
         L.append('  wf.set_vcc(vcc);')
     return '\n'.join(L)
-

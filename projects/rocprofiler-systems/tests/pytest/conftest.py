@@ -351,6 +351,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "kfd",
         "unified_memory",
         "selective_regions",
+        "minimal",
         "rank_filter",
     ]
     for label in non_functional_markers + generic_functional_markers:

@@ -17,7 +17,6 @@ ARG GCC_TOOLSET_VERSION=10
 
 ARG EXTRA_PACKAGES=""
 ARG ELFUTILS_DOWNLOAD_VERSION="0.188"
-ARG BOOST_DOWNLOAD_VERSION="1.79.0"
 ARG NJOBS="8"
 
 RUN echo "* soft memlock unlimited" >> /etc/security/limits.conf && \

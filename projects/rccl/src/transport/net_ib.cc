@@ -3376,6 +3376,7 @@ ncclResult_t ncclGinIbCloseColl(void* collComm) {
   return ncclSuccess;
 }
 
+#if !defined(__HIP_PLATFORM_AMD__)
 #include "gdaki/gin_host_gdaki.h"
 
 static std::mutex ncclGinIbGdakiLockMutex;
@@ -3467,6 +3468,7 @@ ncclGin_t ncclGinIbGdaki = {
   ncclGinIbFinalize
 };
 
+#endif // !defined(__HIP_PLATFORM_AMD__)
 
 struct ncclIbGinProxyMrHandle {
   struct ncclIbMrHandle *mrHandle;
