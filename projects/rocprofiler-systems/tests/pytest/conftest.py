@@ -2005,7 +2005,7 @@ def _filter_kwargs(function: str, mode: Optional[str], **kwargs: Any) -> dict[st
     unknown = set(kwargs) - all_known_for_function
     if unknown:
         pytest.fail(
-            f"{function}: unknown kwargs {sorted(unknown)}"
+            f"{function}: unknown kwargs {sorted(unknown)}. "
             f"Valid kwargs across all modes: {sorted(all_known_for_function)}."
         )
 

@@ -43,7 +43,7 @@ def ucx_base_env() -> dict[str, str]:
         "UCX_TLS": "tcp,self",  # Tell UCX to use TCP for inter-process, self for intra-process
         "OMPI_MCA_pml_base_verbose": "100",  # Show which PML is selected
         "UCX_LOG_LEVEL": "info",  # Enable UCX logging to show transport usage
-        "ROCPROFSYS_LOG_LEVEL": "debug",  # Enable rocprof-sys logging to show transport usage
+        "ROCPROFSYS_LOG_LEVEL": "debug",  # Required for rocprof-sys UCX regex validation output
     }
 
 

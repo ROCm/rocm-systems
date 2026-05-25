@@ -1,9 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
-#
-# The CG example is C++ and is compiled with amdclang++ so that OMPT
-# instrumentation is available. -fopenmp and the OpenMP runtime are
-# propagated transitively from the openmp-common OBJECT library.
 
 if(ROCPROFSYS_DISABLE_EXAMPLES)
     if("openmp-cg" IN_LIST ROCPROFSYS_DISABLE_EXAMPLES)
