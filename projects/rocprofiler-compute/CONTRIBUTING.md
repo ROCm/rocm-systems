@@ -2,7 +2,7 @@
 
 ## Getting Started
 
-ROCm Compute Profiler lives under `projects/rocprofiler-compute` in the [ROCm Systems super-repo](https://github.com/ROCm/rocm-systems). To set up your local environment, follow the [clone and setup instructions](https://github.com/ROCm/rocm-systems/blob/develop/CONTRIBUTING.md#getting-started) in the rocm-systems CONTRIBUTING.md. Sparse checkout is recommended for most contributors.
+ROCm Compute Profiler lives under `projects/rocprofiler-compute` in the [ROCm Systems super-repo](https://github.com/ROCm/rocm-systems). To set up your local environment, follow the [clone and setup instructions](https://github.com/ROCm/rocm-systems/blob/rocprofiler-compute-develop/CONTRIBUTING.md#getting-started) in the rocm-systems CONTRIBUTING.md. Sparse checkout is recommended for most contributors.
 
 ## Reporting Issues and Bugs
 
@@ -11,17 +11,17 @@ ROCm Compute Profiler lives under `projects/rocprofiler-compute` in the [ROCm Sy
 
 ## Submitting a Pull Request
 
-Follow the [pull request guidelines](https://github.com/ROCm/rocm-systems/blob/develop/CONTRIBUTING.md#pull-request-guidelines) in the rocm-systems CONTRIBUTING.md.
+Follow the [pull request guidelines](https://github.com/ROCm/rocm-systems/blob/rocprofiler-compute-develop/CONTRIBUTING.md#pull-request-guidelines) in the rocm-systems CONTRIBUTING.md.
 
 > **Note for external contributors:** Please refer to the [ROCm contribution guide](https://rocm.docs.amd.com/en/develop/contribute/contributing.html) for instructions on contributing from a fork.
 
 ### Review and Labeling
 
-Labels and reviewer assignments are handled automatically based on the files you've changed. Reviewers for `projects/rocprofiler-compute` are defined in the top-level [CODEOWNERS](https://github.com/ROCm/rocm-systems/blob/develop/CODEOWNERS) file.
+Labels and reviewer assignments are handled automatically based on the files you've changed. Reviewers for `projects/rocprofiler-compute` are defined in the top-level [CODEOWNERS](https://github.com/ROCm/rocm-systems/blob/rocprofiler-compute-develop/CODEOWNERS) file.
 
 ### CI Requirements
 
-All pull requests must pass CI checks before merging. For `rocprofiler-compute`, these currently include compilation checks, with correctness and performance tests being added over time. See the [CI documentation](https://github.com/ROCm/rocm-systems/blob/develop/docs/continuous-integration.md) for a full breakdown of what runs on each PR.
+All pull requests must pass CI checks before merging. For `rocprofiler-compute`, these currently include compilation checks, with correctness and performance tests being added over time. See the [CI documentation](https://github.com/ROCm/rocm-systems/blob/rocprofiler-compute-develop/docs/continuous-integration.md) for a full breakdown of what runs on each PR.
 
 > [!TIP]
 > Run our pre-commit hooks locally before pushing to catch formatting issues early. See [Using Pre-Commit Hooks](#using-pre-commit-hooks) below for setup instructions.
