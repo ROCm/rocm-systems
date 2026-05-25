@@ -49,6 +49,7 @@ try:
     console_log("torch trace", f"ROCTX module loaded from: {roctx_path}")
 except ImportError:
     console_error(
+        "torch trace",
         f"Looked for roctx in: {candidate_paths}\n"
         "ROCTX not found. --torch-trace requires roctx from rocprofiler-sdk. "
         "Ensure your workload uses a Python version for which "
@@ -62,16 +63,17 @@ try:
     import torch
     import torch._C
 
-    console_log(f"PyTorch version: {torch.__version__}")
+    console_log("torch trace", f"PyTorch version: {torch.__version__}")
     try:
         _TORCH_ROOT = str(Path(torch.__file__).resolve().parent) + os.sep
     except Exception:
         _TORCH_ROOT = ""
 except ImportError:
     console_warning(
+        "torch trace",
         "PyTorch is not installed or not properly configured.\n"
         "The --torch-trace option requires a valid PyTorch installation.\n"
-        "Please install PyTorch and try again."
+        "Please install PyTorch and try again.",
     )
     sys.exit(0)
 
@@ -821,7 +823,7 @@ def install_tensor_backward_wrapper():
 
     backward_with_roctx._roctx_wrapped = True
     torch.Tensor.backward = backward_with_roctx
-    console_log("Wrapped torch.Tensor.backward with ROCTX markers")
+    console_log("torch trace", "Wrapped torch.Tensor.backward with ROCTX markers")
 
 
 def wrap_method_on_subclasses(base_class, method_name, wrapper_factory):
@@ -895,7 +897,8 @@ def inject_roctx_into_optimizer():
 
     wrap_method_on_subclasses(Optimizer, "step", make_step_wrapper)
     console_log(
-        "Wrapped optimizer.step() across torch.optim subclasses with ROCTX markers\n"
+        "torch trace",
+        "Wrapped optimizer.step() across torch.optim subclasses with ROCTX markers\n",
     )
 
 
@@ -1181,7 +1184,7 @@ def inject_roctx_into_model():
 
     call_with_roctx._roctx_wrapped = True
     nn.Module.__call__ = call_with_roctx
-    console_log("Wrapped nn.Module forward() with ROCTX markers\n")
+    console_log("torch trace", "Wrapped nn.Module forward() with ROCTX markers\n")
 
 
 # Public test surface.
@@ -1216,7 +1219,9 @@ def install_global_wraps():
 if __name__ == "__main__":
     _emit_python_tier_fallback_warning()
     if len(sys.argv) < 2:
-        console_log("Usage: python inject_roctx.py <script.py> [script_args...]")
+        console_log(
+            "torch trace", "Usage: python inject_roctx.py <script.py> [script_args...]"
+        )
         sys.exit(1)
 
     target_script = sys.argv[1]
@@ -1232,7 +1237,7 @@ if __name__ == "__main__":
     inject_roctx_into_model()
 
     console_log("=" * 70)
-    console_log("Starting target script with ROCTX instrumentation...")
+    console_log("torch trace", "Starting target script with ROCTX instrumentation...")
     console_log("=" * 70)
 
     sys.argv = [target_script] + script_args
@@ -1253,9 +1258,10 @@ if __name__ == "__main__":
             _cb_errors = int(_stats.get("callback_errors", 0) or 0)
             if _cb_errors > 0:
                 console_log(
+                    "torch trace",
                     "WARNING: roctx_recordfn C++ tier observed "
                     f"{_cb_errors} swallowed callback exception(s) "
                     "during the workload. Some ROCTX markers may be "
                     "missing or misattributed for affected dispatches. "
-                    f"Full stats: {dict(_stats)}"
+                    f"Full stats: {dict(_stats)}",
                 )
