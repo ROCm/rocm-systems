@@ -21,6 +21,7 @@ please install the ROCm package by following the official ROCm Installation Quic
 [ROCm Installation Quick Start](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/install/quick-start.html)
 
 > ***Note***
+> - The ROCm 7.13.0 technology preview release documentation is available at [ROCm Preview documentation](https://rocm.docs.amd.com/en/7.13.0-preview/). For production use, continue to use ROCm 7.2.3 documentation.
 > - This step may take several minutes, depending on internet connection and system speed.
 > - Follow the quick-start guide for package repository setup and ROCm package installation.
 > - **Important**: Post-installation validation of ROCm (Step 5) must only be performed after the successful completion of **Step 3** and **Step 4**. Executing the validation prior to this will lead to failure.
@@ -132,14 +133,15 @@ docker run -it  \
 - AMD-SMI currently provides a limited set of features on WSL2. The source code is available in the develop branch, and a formal release plan is under development.
 - Debugging/Profiling: `ROCm-profiler`, `Debugger` are not supported.
 
-## WSL Compatiblity Matrix
+## WSL Compatibility Matrix
 - Windows 11
 - Ubuntu 26.04 LTS / Ubuntu 24.04 LTS / Ubuntu 22.04 LTS
 - The AMD ROCDXG library utilizes a ROCm runtime feature introduced in ROCm 7.1, which loads ***librocdxg*** to enable ROCm functionality within the WSL environment. This design keeps the ***librocdxg*** solution loosely coupled with both AMD ROCm release and Windows display driver. As a result, the AMD ROCDXG library can evolve independently, following its own development schedule without impacting the existing ROCm solution.
 
 | AMD Rocdxg Lib Version | AMD ROCm Version | AMD Windows Driver Version | Supported AMD GPU Products |
 | ---------------------- | ---------------- | -------------------------- | -------------------------- |
-| 1.2.0                  | 7.2.x / 7.13       | AMD Windows x86 drivers can be directly downloaded from [AMD Driver](https://www.amd.com/en/support/download/drivers.html) | ***Radeon***<br><br>AMD Radeon RX 9070<br>AMD Radeon RX 9070 XT<br>AMD Radeon RX 9070 GRE<br>AMD Radeon AI PRO R9700<br>AMD Radeon RX 9060<br>AMD Radeon RX 9060 XT<br>AMD Radeon RX 7900 XTX<br>AMD Radeon RX 7900 XT<br>AMD Radeon RX 7900 GRE<br>AMD Radeon PRO W7900<br>AMD Radeon PRO W7900 Dual Slot<br>AMD Radeon PRO W7800<br>AMD Radeon PRO W7800 48GB<br>AMD Radeon RX 7800 XT<br>AMD Radeon PRO W7700<br><br>***Ryzen***<br><br>AMD Ryzen&trade; AI 9 HX PRO 475<br>AMD Ryzen&trade; AI 9 HX PRO 470<br>AMD Ryzen&trade; AI 9 PRO 465<br>AMD Ryzen&trade; AI 9 HX 475<br>AMD Ryzen&trade; AI 9 HX 470<br>AMD Ryzen&trade; AI 9 465<br>AMD Ryzen&trade; AI 7 PRO 450<br>AMD Ryzen&trade; AI 5 PRO 440<br>AMD Ryzen&trade; AI 7 450<br>AMD Ryzen&trade; AI Max+ PRO 395<br>AMD Ryzen&trade; AI Max PRO 390<br>AMD Ryzen&trade; AI Max PRO 385<br>AMD Ryzen&trade; AI Max PRO 380<br>AMD Ryzen&trade; AI Max+ 395<br>AMD Ryzen&trade; AI Max 390<br>AMD Ryzen&trade; AI Max 385<br>AMD Ryzen&trade; AI Max+ 392<br>AMD Ryzen&trade; AI Max+ 388<br>AMD Ryzen AI 9 HX 375<br>AMD Ryzen AI 9 HX 370<br>AMD Ryzen AI 9 365 |
+| 1.2.0                  | 7.13             | AMD Windows x86 drivers can be directly downloaded from [AMD Driver](https://www.amd.com/en/support/download/drivers.html) | ***Radeon***<br><br>AMD Radeon RX 9070<br>AMD Radeon RX 9070 XT<br>AMD Radeon RX 9070 GRE<br>AMD Radeon AI PRO R9700<br>AMD Radeon RX 9060<br>AMD Radeon RX 9060 XT<br>AMD Radeon RX 7900 XTX<br>AMD Radeon RX 7900 XT<br>AMD Radeon RX 7900 GRE<br>AMD Radeon PRO W7900<br>AMD Radeon PRO W7900 Dual Slot<br>AMD Radeon PRO W7800<br>AMD Radeon PRO W7800 48GB<br>AMD Radeon RX 7800 XT<br>AMD Radeon PRO W7700<br><br>***Ryzen***<br><br>AMD Ryzen AI Max+ 395<br>AMD Ryzen AI Max 390<br>AMD Ryzen AI Max 385<br>AMD Ryzen AI 9 HX 375<br>AMD Ryzen AI 9 HX 370<br>AMD Ryzen AI 9 365<br>AMD Ryzen AI 7 PRO 360<br>AMD Ryzen AI 7 PRO 350<br>AMD Ryzen AI 5 PRO 340<br>AMD Ryzen AI 7 350<br>AMD Ryzen AI 7 345<br>AMD Ryzen AI 5 340<br>AMD Ryzen AI 5 330 |
+| 1.2.0                  | 7.2.x            | AMD Windows x86 drivers can be directly downloaded from [AMD Driver](https://www.amd.com/en/support/download/drivers.html) | ***Radeon***<br><br>AMD Radeon RX 9070<br>AMD Radeon RX 9070 XT<br>AMD Radeon RX 9070 GRE<br>AMD Radeon AI PRO R9700<br>AMD Radeon RX 9060<br>AMD Radeon RX 9060 XT<br>AMD Radeon RX 7900 XTX<br>AMD Radeon RX 7900 XT<br>AMD Radeon RX 7900 GRE<br>AMD Radeon PRO W7900<br>AMD Radeon PRO W7900 Dual Slot<br>AMD Radeon PRO W7800<br>AMD Radeon PRO W7800 48GB<br>AMD Radeon RX 7800 XT<br>AMD Radeon PRO W7700<br><br>***Ryzen***<br><br>AMD Ryzen AI Max+ 395<br>AMD Ryzen AI Max 390<br>AMD Ryzen AI Max 385<br>AMD Ryzen AI 9 HX 375<br>AMD Ryzen AI 9 HX 370<br>AMD Ryzen AI 9 365 |
 
 
 ## Documentation
