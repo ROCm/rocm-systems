@@ -15,7 +15,6 @@ import config
 from argparser import omniarg_parser
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from roofline.run_benchmark import run_roofline_benchmark
-from utils.gpu_arch import canonical_config_arch
 from utils.logger import (
     console_debug,
     console_error,
@@ -33,6 +32,7 @@ from utils.specs import (
 )
 from utils.utils_common import (
     build_metric_list,
+    canonical_config_arch,
     detect_rocprof,
     get_arch_panel_id_to_alias,
     get_job_rank_and_size,

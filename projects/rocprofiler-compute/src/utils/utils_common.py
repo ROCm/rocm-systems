@@ -26,7 +26,6 @@ from pathlib import Path
 from typing import Any, Optional, Union
 
 import config
-from utils.gpu_arch import canonical_config_arch
 from utils.logger import (
     console_debug,
     console_error,
@@ -37,6 +36,15 @@ from vendored import yaml
 
 # Global constants
 METRIC_ID_RE = re.compile(pattern=r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
+
+
+def canonical_config_arch(gpu_arch: Optional[str]) -> Optional[str]:
+    """Map GPU architectures to the shared analysis-config directory name."""
+    if gpu_arch is None:
+        return None
+    if gpu_arch.startswith("gfx115"):
+        return "gfx115x"
+    return gpu_arch
 
 
 def get_sets_yaml_path(arch: str, root: Optional[Path] = None) -> Path:

@@ -17,7 +17,6 @@ from typing import Any, Optional
 import config
 from roofline.run_benchmark import run_roofline_benchmark
 from utils import amdsmi_interface
-from utils.gpu_arch import canonical_config_arch
 from utils.logger import (
     console_debug,
     console_error,
@@ -30,6 +29,7 @@ from utils.specs import MachineSpecs
 from utils.utils_common import (
     METRIC_ID_RE,
     add_counter_extra_config_input_yaml,
+    canonical_config_arch,
     convert_metric_id_to_panel_info,
     create_temp_rocprofiler_metrics_path,
     get_arch_alias_to_panel_id,

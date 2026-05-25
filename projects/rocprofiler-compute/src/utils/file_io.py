@@ -11,7 +11,6 @@ import yaml
 
 import config
 from utils import schema, utils_analysis
-from utils.gpu_arch import canonical_config_arch
 from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import (
     console_debug,
@@ -20,7 +19,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.utils_common import normalize_filter_to_str_list
+from utils.utils_common import canonical_config_arch, normalize_filter_to_str_list
 
 # TODO: use pandas chunksize or dask to read really large csv file
 # from dask import dataframe as dd

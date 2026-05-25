@@ -405,7 +405,7 @@ mi_gpu_spec:
 
   #########################################################
   #Note: in the future, we might set a seperate file for NAVI
-  - gpu_series: navi3 
+  - gpu_series: navi3
     # for memory_die, APU does not have separate MCDs like dGPU,
     # mark it as unified memory
     gpu_archs:

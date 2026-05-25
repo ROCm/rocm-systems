@@ -16,7 +16,6 @@ import pandas as pd
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils import file_io, parser, schema
-from utils.gpu_arch import canonical_config_arch
 from utils.logger import (
     console_debug,
     console_error,
@@ -31,6 +30,7 @@ from utils.utils_analysis import (
     merge_counters_spatial_multiplex,
 )
 from utils.utils_common import (
+    canonical_config_arch,
     get_uuid,
     is_only_pc_sampling,
     load_panel_configs,
