@@ -10,21 +10,21 @@ myst:
 This page describes the system requirements for AMD SMI and explains how to
 install the AMD SMI library, Python interface, and `amd-smi` CLI on Linux.
 
-(install_reqs)=
 ## Supported platforms
 
 AMD SMI supports:
 
-- {doc}`AMD GPUs <rocm:release-supported-hw>` on Linux bare metal systems
+- {ref}`AMD GPUs <rocm:release-supported-hw>` on Linux bare metal systems
 - AMD GPUs in Linux virtual machine guests
 - AMD EPYC™ CPUs through the [esmi_ib_library](https://github.com/amd/esmi_ib_library)
 
 For AMD SMI on Linux SR-IOV hosts, refer to
 the [AMD SMI for Virtualization documentation](https://instinct.docs.amd.com/projects/amd-smi-virt/en/latest/index.html).
 
-AMD SMI library runs on AMD ROCm supported platforms. Refer to {ref}`AMD
-hardware support <rocm:release-supported-hw>` for more information.
+AMD SMI library runs on AMD ROCm supported platforms. Refer to
+{ref}`AMD hardware support <rocm:release-supported-hw>` for more information.
 
+(install_reqs)=
 ## Requirements
 
 Before installing AMD SMI, make sure your system meets the following
