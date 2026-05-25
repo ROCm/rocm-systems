@@ -1,6 +1,6 @@
 # ROCProfiler-Compute Configuration Management
 
-This directory contains the configuration-management system for ROCProfiler-Compute analysis configurations.
+This directory contains the authoritative configuration-management system for ROCProfiler-Compute analysis configurations.
 
 It is designed to guarantee:
 
