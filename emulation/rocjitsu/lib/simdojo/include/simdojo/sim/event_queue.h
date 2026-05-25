@@ -177,7 +177,7 @@ public:
   /// @brief Push an entry into the queue (thread-safe).
   /// @param entry The entry to push (ownership of message transferred).
   void push(EventQueueEntry entry) {
-    std::lock_guard<SDSpinlock> guard(lock_);
+    std::lock_guard<Spinlock> guard(lock_);
     entries_.push_back(std::move(entry));
   }
 
@@ -186,7 +186,7 @@ public:
   /// @returns Number of entries drained.
   size_t drain_into(EventQueue &local_queue) {
     {
-      std::lock_guard<SDSpinlock> guard(lock_);
+      std::lock_guard<Spinlock> guard(lock_);
       drain_buf_.swap(entries_);
     }
     for (auto &e : drain_buf_)
@@ -200,19 +200,19 @@ public:
   /// @retval true No entries are pending.
   /// @retval false At least one entry is pending.
   bool empty() const {
-    std::lock_guard<SDSpinlock> guard(lock_);
+    std::lock_guard<Spinlock> guard(lock_);
     return entries_.empty();
   }
 
   /// @brief Return the number of pending entries (thread-safe).
   /// @returns Current queue size.
   size_t size() const {
-    std::lock_guard<SDSpinlock> guard(lock_);
+    std::lock_guard<Spinlock> guard(lock_);
     return entries_.size();
   }
 
 private:
-  mutable SDSpinlock lock_;              ///< Protects entries_.
+  mutable Spinlock lock_;              ///< Protects entries_.
   std::vector<EventQueueEntry> entries_; ///< Buffered entries awaiting drain.
   std::vector<EventQueueEntry>
       drain_buf_; ///< Pre-allocated buffer for drain_into() (avoids per-call allocation).

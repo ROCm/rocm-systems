@@ -11,14 +11,14 @@
 
 // TSAN annotations: let ThreadSanitizer track this spinlock as a mutex.
 #if defined(__SANITIZE_THREAD__)
-#define SD_SPINLOCK_TSAN 1
+#define SIMDOJO_SPINLOCK_TSAN 1
 #elif defined(__has_feature)
 #if __has_feature(thread_sanitizer)
-#define SD_SPINLOCK_TSAN 1
+#define SIMDOJO_SPINLOCK_TSAN 1
 #endif
 #endif
 
-#ifdef SD_SPINLOCK_TSAN
+#ifdef SIMDOJO_SPINLOCK_TSAN
 #include <sanitizer/tsan_interface.h>
 #endif
 
@@ -34,10 +34,10 @@ namespace simdojo {
 /// Use for hot paths where the critical section is very short (e.g.,
 /// cross-partition queue push/drain). For longer critical sections or
 /// blocking waits, prefer std::mutex.
-class SDSpinlock {
+class Spinlock {
 public:
   void lock() noexcept {
-#ifdef SD_SPINLOCK_TSAN
+#ifdef SIMDOJO_SPINLOCK_TSAN
     __tsan_mutex_pre_lock(this, 0);
 #endif
     while (true) {
@@ -46,7 +46,7 @@ public:
         locked_.wait(true, std::memory_order_relaxed);
       // Attempt to acquire via exchange (cache-line transfer).
       if (!locked_.exchange(true, std::memory_order_acquire)) {
-#ifdef SD_SPINLOCK_TSAN
+#ifdef SIMDOJO_SPINLOCK_TSAN
         __tsan_mutex_post_lock(this, 0, 0);
 #endif
         return;
@@ -55,22 +55,22 @@ public:
   }
 
   void unlock() noexcept {
-#ifdef SD_SPINLOCK_TSAN
+#ifdef SIMDOJO_SPINLOCK_TSAN
     __tsan_mutex_pre_unlock(this, 0);
 #endif
     locked_.store(false, std::memory_order_release);
     locked_.notify_one();
-#ifdef SD_SPINLOCK_TSAN
+#ifdef SIMDOJO_SPINLOCK_TSAN
     __tsan_mutex_post_unlock(this, 0);
 #endif
   }
 
   bool try_lock() noexcept {
-#ifdef SD_SPINLOCK_TSAN
+#ifdef SIMDOJO_SPINLOCK_TSAN
     __tsan_mutex_pre_lock(this, __tsan_mutex_try_lock);
 #endif
     bool acquired = !locked_.exchange(true, std::memory_order_acquire);
-#ifdef SD_SPINLOCK_TSAN
+#ifdef SIMDOJO_SPINLOCK_TSAN
     if (acquired)
       __tsan_mutex_post_lock(this, __tsan_mutex_try_lock, 0);
     else
