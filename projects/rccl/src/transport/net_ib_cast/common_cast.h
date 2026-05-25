@@ -499,6 +499,10 @@ struct alignas(32) ncclIbNetCommBase {
   struct ncclIbDevInfo remDevs[NCCL_IB_MAX_DEVS_PER_NIC];
   // statistics about the comm
   struct ncclIbStats stats;
+#ifdef ENABLE_FAULT_INJECTION
+  uint32_t faultQpDelayUs[NCCL_IB_MAX_QPS];
+  bool     faultQpError[NCCL_IB_MAX_QPS];
+#endif
   struct ncclIbResiliency* resiliency;
 };
 
@@ -744,7 +748,6 @@ ncclResult_t IbCastSetNetAttr(void *ctx, ncclNetAttr_t *netAttr);
 #define NCCL_CTS_QP_SLOT_INVALID 0xFF
 
 // IB-CAST specific infrastructure
-#define NCCL_IB_MAX_QPS 128
 
 #define NSEC_PER_USEC           1000ULL
 #define NSEC_PER_MSEC           (NSEC_PER_USEC * 1000)

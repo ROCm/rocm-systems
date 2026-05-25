@@ -1,0 +1,192 @@
+name: hipfile-python-bindings
+run-name: Build and install hipFile Python bindings
+
+env:
+  AIS_GHA_CMD_FILES_DOCKER_DIR: /root/github
+  AIS_INPUT_CI_IMAGE: ${{ inputs.ci_image }}
+  AIS_INPUT_HIPFILE_PKG_DEV_FILENAME: ${{ inputs.ais_hipfile_pkg_dev_filename }}
+  AIS_INPUT_HIPFILE_PKG_FILENAME: ${{ inputs.ais_hipfile_pkg_filename }}
+  AIS_INPUT_PLATFORM: ${{ inputs.platform }}
+  AIS_INPUT_ROCM_VERSION: ${{ inputs.rocm_version }}
+  AIS_PKG_MGR: >-
+    ${{
+      startsWith(inputs.platform, 'rocky') && 'dnf' ||
+      inputs.platform == 'suse' && 'zypper' ||
+      inputs.platform == 'ubuntu' && 'apt'
+    }}
+
+on:
+  workflow_call:
+    inputs:
+      ais_hipfile_pkg_dev_filename:
+        required: true
+        type: string
+      ais_hipfile_pkg_filename:
+        required: true
+        type: string
+      ci_image:
+        required: true
+        type: string
+      platform:
+        required: true
+        type: string
+      rocm_version:
+        description: "Target ROCm MAJOR.MINOR.PATCH Version"
+        required: true
+        type: string
+    outputs:
+      hipfile_python_sdist_filename:
+        description: "Filename of the hipFile Python sdist artifact"
+        value: ${{ jobs.build_python_bindings.outputs.hipfile_python_sdist_filename }}
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  build_python_bindings:
+    runs-on: [ubuntu-24.04]
+    outputs:
+      hipfile_python_sdist_filename: ${{ steps.sdist-metadata.outputs.HIPFILE_PYTHON_SDIST_FILENAME }}
+    steps:
+      - name: Set early AIS CI environment variables
+        run: |
+          echo "AIS_PR_NUMBER=$(echo "${GITHUB_REF}" | sed 's|[^0-9]||g')" >> "${GITHUB_ENV}"
+          echo "AIS_GHA_CMD_FILES_DIR=${GITHUB_ENV%/*}" >> "${GITHUB_ENV}"
+      - name: Set AIS CI container name
+        run: |
+          echo "AIS_CONTAINER_NAME=${AIS_PR_NUMBER:=${GITHUB_RUN_ID}}_${GITHUB_JOB}_${AIS_INPUT_PLATFORM}_${AIS_INPUT_ROCM_VERSION}" >> "${GITHUB_ENV}"
+      - name: Fetching code repository...
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          path: rocm-systems
+          sparse-checkout: |
+            projects/hipfile
+            .github/workflows
+      - name: Download hipFile runtime package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.ais_hipfile_pkg_filename }}
+      - name: Download hipFile development package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.ais_hipfile_pkg_dev_filename }}
+      - name: Authenticating to GitHub Container Registry
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Starting Docker Container
+        run: |
+          docker run \
+            -dt \
+            --rm \
+            --pull always \
+            -v ${GITHUB_WORKSPACE}:/mnt/ais:ro \
+            -v "${AIS_GHA_CMD_FILES_DIR}:${AIS_GHA_CMD_FILES_DOCKER_DIR}" \
+            --name "${AIS_CONTAINER_NAME}" \
+            "${AIS_INPUT_CI_IMAGE}"
+      - name: Make copy of the code repository
+        run: |
+          docker exec \
+            -t \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              cp -R /mnt/ais /ais
+            '
+      - name: Copy the hipFile packages into the container
+        run: |
+          docker cp \
+            "${GITHUB_WORKSPACE}/${AIS_INPUT_HIPFILE_PKG_FILENAME}" \
+            "${AIS_CONTAINER_NAME}:/root"
+          docker cp \
+            "${GITHUB_WORKSPACE}/${AIS_INPUT_HIPFILE_PKG_DEV_FILENAME}" \
+            "${AIS_CONTAINER_NAME}:/root"
+      - name: Install the hipFile packages
+        run: |
+          docker exec \
+            -t \
+            -w /root \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              ${{
+                format(
+                  env.AIS_PKG_MGR == 'apt' && 'apt install -y "./{0}" "./{1}"' ||
+                    env.AIS_PKG_MGR == 'dnf' && 'dnf install -y --cacheonly "./{0}" "./{1}"' ||
+                    env.AIS_PKG_MGR == 'zypper' && 'zypper --no-refresh install -y --allow-unsigned-rpm "./{0}" "./{1}"' ||
+                    'echo "Unknown platform."; exit 1',
+                  inputs.ais_hipfile_pkg_filename,
+                  inputs.ais_hipfile_pkg_dev_filename
+                )
+              }}
+              ldconfig
+            '
+      - name: Create Python virtual environment and install build dependencies
+        run: |
+          docker exec \
+            -t \
+            -w /ais/rocm-systems/projects/hipfile \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              python3.12 -m venv .venv
+              .venv/bin/pip install --upgrade pip
+              .venv/bin/pip install build
+            '
+      - name: Build hipFile Python sdist & capture metadata
+        id: sdist-metadata
+        run: |
+          docker exec \
+            -e "AIS_GITHUB_OUTPUT=${{ env.AIS_GHA_CMD_FILES_DOCKER_DIR }}/${GITHUB_OUTPUT##*/}" \
+            -e "_AIS_INPUT_PLATFORM=${AIS_INPUT_PLATFORM}" \
+            -t \
+            -w /ais/rocm-systems/projects/hipfile \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              .venv/bin/python -m build --sdist ./python
+              shopt -s nullglob
+              OLD_FILENAME="$(basename ./python/dist/hipfile-*.tar.gz)"
+              NEW_FILENAME="${OLD_FILENAME%.tar.gz}-${_AIS_INPUT_PLATFORM}.tar.gz"
+              mv ./python/dist/${OLD_FILENAME} ./python/dist/${NEW_FILENAME}
+              echo "HIPFILE_PYTHON_SDIST_FILENAME=${NEW_FILENAME}" >> "${AIS_GITHUB_OUTPUT}"
+            '
+      - name: Install hipFile Python sdist into virtual environment
+        run: |
+          docker exec \
+            -t \
+            -w /ais/rocm-systems/projects/hipfile \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              .venv/bin/pip install ./python/dist/${{ steps.sdist-metadata.outputs.HIPFILE_PYTHON_SDIST_FILENAME }}
+            '
+      - name: Verify hipFile Python package installation
+        run: |
+          docker exec \
+            -t \
+            -w /ais/rocm-systems/projects/hipfile \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              .venv/bin/python -c "import hipfile; print(f\"hipfile {hipfile.__version__} installed successfully\")"
+            '
+      - name: Copy sdist out of the container
+        run: |
+          docker cp \
+            "${AIS_CONTAINER_NAME}:/ais/rocm-systems/projects/hipfile/python/dist/${{ steps.sdist-metadata.outputs.HIPFILE_PYTHON_SDIST_FILENAME }}" \
+            ${GITHUB_WORKSPACE}
+      - name: Upload hipFile Python sdist as an artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.sdist-metadata.outputs.HIPFILE_PYTHON_SDIST_FILENAME }}
+          path: ${{ format('{0}/{1}', github.workspace, steps.sdist-metadata.outputs.HIPFILE_PYTHON_SDIST_FILENAME) }}
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+      - name: Cleanup & Stop the Docker container
+        if: ${{ always() }}
+        run: |
+          if docker inspect "${AIS_CONTAINER_NAME}" >/dev/null 2>&1; then
+            docker stop "${AIS_CONTAINER_NAME}"
+          else
+            echo "Container ${AIS_CONTAINER_NAME} does not exist; skipping stop"
+          fi

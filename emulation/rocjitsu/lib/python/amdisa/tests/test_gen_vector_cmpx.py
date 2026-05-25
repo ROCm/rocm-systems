@@ -37,14 +37,17 @@ from amdisa.isa_profile import (
     Rdna4Profile,
 )
 
-
 # ---------------------------------------------------------------------------
 # Layer 1: profile contract
 # ---------------------------------------------------------------------------
 
 _CDNA_PROFILES = [CdnaProfile, Cdna1Profile, Cdna2Profile]
 _RDNA_PROFILES = [
-    Rdna1Profile, Rdna2Profile, Rdna3Profile, Rdna3_5Profile, Rdna4Profile,
+    Rdna1Profile,
+    Rdna2Profile,
+    Rdna3Profile,
+    Rdna3_5Profile,
+    Rdna4Profile,
 ]
 
 
@@ -71,6 +74,7 @@ class TestCmpxWritesVccProfileContract:
 # ---------------------------------------------------------------------------
 # Layer 2: codegen wiring
 # ---------------------------------------------------------------------------
+
 
 class _StubSpec:
     """Holds a real IsaProfile under ``.profile`` for codegen consumption."""
@@ -100,7 +104,9 @@ def _make_codegen(profile) -> CodeGenerator:
 # ``set_vcc``, ``set_exec``) and the dst identifier — not on the exact
 # variable name of the result-mask local.
 def _re_write_scalar64(dst_ident: str) -> re.Pattern[str]:
-    return re.compile(rf'\b{re.escape(dst_ident)}\s*\.\s*write_scalar64\s*\(\s*wf\s*,\s*\w+\s*\)\s*;')
+    return re.compile(
+        rf'\b{re.escape(dst_ident)}\s*\.\s*write_scalar64\s*\(\s*wf\s*,\s*\w+\s*\)\s*;'
+    )
 
 
 _RE_SET_VCC = re.compile(r'\bwf\s*\.\s*set_vcc\s*\(\s*\w+\s*\)\s*;')
@@ -115,14 +121,20 @@ _DST_IDENT = 's_sdst_pair'
 
 _CASES = [
     # (id, profile_factory, is_vop3, dst, expect_sdst_write, expect_vcc_write)
-    pytest.param(CdnaProfile,  True,  [_DST_IDENT], True,  False, id='cdna-vop3-with-dst'),
-    pytest.param(CdnaProfile,  False, None,         False, True,  id='cdna-vopc-no-dst'),
-    pytest.param(CdnaProfile,  True,  None,         False, True,  id='cdna-vop3-no-dst'),
-    pytest.param(CdnaProfile,  False, [_DST_IDENT], False, True,  id='cdna-vopc-with-dst'),
-    pytest.param(Rdna4Profile, True,  [_DST_IDENT], False, False, id='rdna-vop3-with-dst'),
-    pytest.param(Rdna4Profile, False, None,         False, False, id='rdna-vopc-no-dst'),
-    pytest.param(Rdna4Profile, True,  None,         False, False, id='rdna-vop3-no-dst'),
-    pytest.param(Rdna4Profile, False, [_DST_IDENT], False, False, id='rdna-vopc-with-dst'),
+    pytest.param(CdnaProfile, True, [_DST_IDENT], True, False, id='cdna-vop3-with-dst'),
+    pytest.param(CdnaProfile, False, None, False, True, id='cdna-vopc-no-dst'),
+    pytest.param(CdnaProfile, True, None, False, True, id='cdna-vop3-no-dst'),
+    pytest.param(
+        CdnaProfile, False, [_DST_IDENT], False, True, id='cdna-vopc-with-dst'
+    ),
+    pytest.param(
+        Rdna4Profile, True, [_DST_IDENT], False, False, id='rdna-vop3-with-dst'
+    ),
+    pytest.param(Rdna4Profile, False, None, False, False, id='rdna-vopc-no-dst'),
+    pytest.param(Rdna4Profile, True, None, False, False, id='rdna-vop3-no-dst'),
+    pytest.param(
+        Rdna4Profile, False, [_DST_IDENT], False, False, id='rdna-vopc-with-dst'
+    ),
 ]
 
 
@@ -148,27 +160,30 @@ class TestGenVectorCmpxWriteBacks:
     def test_writeback_invariants(
         self, profile_cls, is_vop3, dst, expect_sdst_write, expect_vcc_write
     ):
-        cg = _make_codegen(profile_cls())
-        body = cg._gen_vector_cmpx(
+        from amdisa.codegen.execute.vector_cmp import gen_vector_cmpx
+
+        profile = profile_cls()
+        body = gen_vector_cmpx(
             src=['s0', 's1'],
             op='t',  # bypasses _cmp_condition; see class docstring
             dtype='u32',
+            cmpx_writes_vcc=profile.cmpx_writes_vcc,
             is_vop3=is_vop3,
             dst=dst,
         )
 
         # EXEC is always updated.
-        assert _RE_SET_EXEC.search(body), (
-            f'V_CMPX must always update EXEC; not found in:\n{body}'
-        )
+        assert _RE_SET_EXEC.search(
+            body
+        ), f'V_CMPX must always update EXEC; not found in:\n{body}'
 
         # SDST write: must appear iff expected, and target the right ident.
         sdst_match = _re_write_scalar64(_DST_IDENT).search(body) if dst else None
         sdst_count = len(_RE_ANY_WRITE_SCALAR64.findall(body))
         if expect_sdst_write:
-            assert sdst_match, (
-                f'Expected write_scalar64 on {_DST_IDENT!r}; body was:\n{body}'
-            )
+            assert (
+                sdst_match
+            ), f'Expected write_scalar64 on {_DST_IDENT!r}; body was:\n{body}'
             # Guard against a stray second write_scalar64 to a different
             # target slipping through alongside the expected one.
             assert sdst_count == 1, (
@@ -184,13 +199,11 @@ class TestGenVectorCmpxWriteBacks:
         # VCC write: must appear iff expected.
         vcc_match = _RE_SET_VCC.search(body)
         if expect_vcc_write:
-            assert vcc_match, (
-                f'Expected wf.set_vcc(...) call; body was:\n{body}'
-            )
+            assert vcc_match, f'Expected wf.set_vcc(...) call; body was:\n{body}'
         else:
-            assert not vcc_match, (
-                f'Did not expect wf.set_vcc(...) call; body was:\n{body}'
-            )
+            assert (
+                not vcc_match
+            ), f'Did not expect wf.set_vcc(...) call; body was:\n{body}'
 
         # Mutual exclusion: a single V_CMPX never writes both VCC and SDST.
         assert not (

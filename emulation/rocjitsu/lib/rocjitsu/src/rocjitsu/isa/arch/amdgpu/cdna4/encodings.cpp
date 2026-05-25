@@ -69,6 +69,8 @@ Sopk::Sopk(std::string_view mnemonic, const SopkMachineInst *inst, ExecuteFn exe
   opcode_ = inst_.op;
   if (hasImpliedLiteral())
     size_ += sizeof(MachineInst);
+  if (hasImpliedLiteral())
+    literal_ = reinterpret_cast<const uint32_t *>(inst)[1];
 }
 
 bool Sopk::hasImpliedLiteral() { return inst_.op == 20; }
@@ -156,6 +158,8 @@ Vop2::Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exe
   opcode_ = inst_.op;
   if (!default_encoding() || hasImpliedLiteral())
     size_ += sizeof(MachineInst);
+  if (hasImpliedLiteral())
+    literal_ = reinterpret_cast<const uint32_t *>(inst)[1];
 }
 
 bool Vop2::default_encoding() {

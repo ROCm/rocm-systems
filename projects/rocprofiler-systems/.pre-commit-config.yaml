@@ -69,4 +69,4 @@ repos:
         entry: ./projects/rocprofiler-systems/scripts/check-fixedwidth-types.sh
         language: script
         files: \.(cpp|hpp)$
-        exclude: ^\.|^external/
+        exclude: ^\.|^external/|^examples/

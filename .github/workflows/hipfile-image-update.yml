@@ -71,6 +71,8 @@ jobs:
         run: |
           AIS_CI_IMAGE="${AIS_DOCKER_REGISTRY}/${AIS_CI_IMAGE_NAME}:latest-rocm${{ matrix.rocm_versions }}"
           echo "AIS_CI_IMAGE=$(printf '%s' "${AIS_CI_IMAGE}" | tr '[:upper:]' '[:lower:]')" >> "${GITHUB_OUTPUT}"
+          AIS_CI_IMAGE_NVIDIA="${AIS_DOCKER_REGISTRY}/${AIS_CI_IMAGE_NAME}:latest-rocm${{ matrix.rocm_versions }}-nvidia"
+          echo "AIS_CI_IMAGE_NVIDIA=$(printf '%s' "${AIS_CI_IMAGE_NVIDIA}" | tr '[:upper:]' '[:lower:]')" >> "${GITHUB_OUTPUT}"
 
       - name: Set Docker Cache Instruction
         id: use-cache
@@ -79,10 +81,15 @@ jobs:
         # for 'null'.
         # See: https://docs.github.com/en/actions/reference/workflows-and-actions/expressions
         # for how null gets converted when compared to non-null, and converted into a string.
-        run: >-
+        run: |
           echo "CACHE_FROM_CMD=${{
             ( format('{0}', inputs.pull_from_cache) == '' || inputs.pull_from_cache ) &&
             format('--cache-from=type=registry,ref=\"{0}-cache\"', steps.ci-image.outputs.AIS_CI_IMAGE) ||
+            ''
+          }}" >> "${GITHUB_OUTPUT}"
+          echo "CACHE_FROM_CMD_NVIDIA=${{
+            ( format('{0}', inputs.pull_from_cache) == '' || inputs.pull_from_cache ) &&
+            format('--cache-from=type=registry,ref=\"{0}-cache\"', steps.ci-image.outputs.AIS_CI_IMAGE_NVIDIA) ||
             ''
           }}" >> "${GITHUB_OUTPUT}"
 
@@ -93,15 +100,26 @@ jobs:
           driver: docker-container
           cache-binary: false # True uses the GHA Cache Backend
 
-      - name: Build & Push latest image for AIS CI
+      - name: Build & Push latest base image for AIS CI
         run: |
           docker buildx build \
             -f "${GITHUB_WORKSPACE}/projects/hipfile/util/docker/DOCKERFILE.${AIS_CI_IMAGE_NAME}" \
-            --label "org.opencontainers.image.description= \
-              Latest AIS CI Image for ${AIS_INPUT_PLATFORM} using ROCm ${{ matrix.rocm_versions }}." \
+            --target base \
             --build-arg ROCM_VERSION=${{ matrix.rocm_versions }} \
             --cache-to=type=registry,ref="${{ steps.ci-image.outputs.AIS_CI_IMAGE }}-cache" \
             ${{ steps.use-cache.outputs.CACHE_FROM_CMD }} \
             --push \
             -t "${{ steps.ci-image.outputs.AIS_CI_IMAGE }}" \
+            "${GITHUB_WORKSPACE}/projects/hipfile/util/docker"
+
+      - name: Build & Push latest NVIDIA image for AIS CI
+        run: |
+          docker buildx build \
+            -f "${GITHUB_WORKSPACE}/projects/hipfile/util/docker/DOCKERFILE.${AIS_CI_IMAGE_NAME}" \
+            --target nvidia \
+            --build-arg ROCM_VERSION=${{ matrix.rocm_versions }} \
+            --cache-to=type=registry,ref="${{ steps.ci-image.outputs.AIS_CI_IMAGE_NVIDIA }}-cache" \
+            ${{ steps.use-cache.outputs.CACHE_FROM_CMD_NVIDIA }} \
+            --push \
+            -t "${{ steps.ci-image.outputs.AIS_CI_IMAGE_NVIDIA }}" \
             "${GITHUB_WORKSPACE}/projects/hipfile/util/docker"

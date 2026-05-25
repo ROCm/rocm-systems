@@ -116,17 +116,19 @@ rj_status_t rj_code_inst_list_create(rj_code_object_t *obj, rj_code_target_id_t 
 
   auto owned = std::make_unique<rj_code_inst_list_t>();
 
-  for (const auto *sec : obj->co->text_sections()) {
+  // DBT-generated cave bodies live outside .text, but they still need normal
+  // disassembly/validation alongside original text bytes.
+  for (const auto *sec : obj->co->code_sections()) {
     const auto *inst_data = reinterpret_cast<const uint32_t *>(sec->data());
     std::size_t inst_data_size = sec->size() / sizeof(uint32_t);
-    uint64_t pc = 0;
-    while (pc < inst_data_size) {
-      auto *raw_inst = decoder->decode(&inst_data[pc]);
+    // Each executable section owns a separate data buffer, so decoding starts
+    // at word zero for each section.
+    std::size_t word_index = 0;
+    while (word_index < inst_data_size) {
+      auto *raw_inst = decoder->decode(&inst_data[word_index]);
       std::unique_ptr<Instruction> inst(raw_inst);
       owned->list.push_back(*inst);
-      ++pc;
-      if (inst->size() == 8)
-        ++pc;
+      word_index += static_cast<std::size_t>(inst->size()) / sizeof(uint32_t);
       owned->storage.push_back(std::move(inst));
     }
   }

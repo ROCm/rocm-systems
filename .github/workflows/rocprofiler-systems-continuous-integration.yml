@@ -193,7 +193,6 @@ jobs:
             -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
             -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \
             -DROCPROFSYS_BUILD_DYNINST=ON \
-            -DROCPROFSYS_BUILD_BOOST=ON \
             -DROCPROFSYS_BUILD_TBB=ON \
             -DROCPROFSYS_BUILD_ELFUTILS=ON \
             -DROCPROFSYS_BUILD_LIBIBERTY=ON \

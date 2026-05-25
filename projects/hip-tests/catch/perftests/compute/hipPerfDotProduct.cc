@@ -223,8 +223,7 @@ HIP_TEST_CASE(Perf_hipPerfDotProduct) {
   HIP_CHECK(hipGetDeviceCount(&nGpu));
 
   if (nGpu < 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
   hipDeviceProp_t props;
   HIP_CHECK(hipSetDevice(p_gpuDevice));

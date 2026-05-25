@@ -1058,8 +1058,7 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_MultiGPU) {
   HIP_CHECK(hipGetDeviceCount(&devcount));
   // If only single GPU is detected then return
   if (devcount < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
   hipStream_t* stream = reinterpret_cast<hipStream_t*>(malloc(devcount * sizeof(hipStream_t)));
   REQUIRE(stream != nullptr);
@@ -1258,6 +1257,8 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_streamReuse) {
   for (int i = 0; i < 3; i++) {
     hipGraphExec_t graphExec{nullptr};
     HIP_CHECK(hipMemset(devMem[i], 0, sizeof(int)));
+    // hipMemset to device memory can be asynchronous; keep the reset ordered before graph launch.
+    HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipGraphInstantiate(&graphExec, graphs[i], nullptr, nullptr, 0));
     HIP_CHECK(hipGraphLaunch(graphExec, streams[i]));
     HIP_CHECK(hipStreamSynchronize(streams[i]));

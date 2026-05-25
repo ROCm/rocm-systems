@@ -14,6 +14,7 @@
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
+#include "util/log.h"
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -174,72 +175,67 @@ inline void execute_lds_param_load_ldsdir([[maybe_unused]] Inst &inst,
 
 template <typename Inst>
 inline void execute_s_abs_i32_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  int32_t val = static_cast<int32_t>(inst.ssrc0.read_scalar(wf));
-  uint32_t uval = static_cast<uint32_t>(val);
-  uint32_t result = val < 0 ? (0u - uval) : uval;
+  int32_t result = abs(static_cast<int32_t>(inst.ssrc0.read_scalar(wf)));
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_absdiff_i32_sop2([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  int32_t s0 = static_cast<int32_t>(inst.ssrc0.read_scalar(wf));
-  int32_t s1 = static_cast<int32_t>(inst.ssrc1.read_scalar(wf));
-  int64_t wide_s0 = static_cast<int64_t>(s0);
-  int64_t wide_s1 = static_cast<int64_t>(s1);
-  uint32_t result =
-      static_cast<uint32_t>(wide_s0 > wide_s1 ? (wide_s0 - wide_s1) : (wide_s1 - wide_s0));
+  int32_t result = [&]() {
+    auto a = static_cast<int32_t>(static_cast<int32_t>(inst.ssrc0.read_scalar(wf)));
+    auto b = static_cast<int32_t>(static_cast<int32_t>(inst.ssrc1.read_scalar(wf)));
+    return static_cast<uint32_t>(a > b ? a - b : b - a);
+  }();
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_add_f16_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t s0 = inst.ssrc0.read_scalar(wf);
-  uint32_t s1 = inst.ssrc1.read_scalar(wf);
-  float f0 = util::f16_to_f32(static_cast<uint16_t>(s0 & 0xFFFF));
-  float f1 = util::f16_to_f32(static_cast<uint16_t>(s1 & 0xFFFF));
-  float fr = f0 + f1;
-  inst.sdst.write_scalar(wf, static_cast<uint32_t>(util::f32_to_f16(fr)));
+  float result = (util::f16_to_f32(static_cast<uint16_t>(inst.ssrc0.read_scalar(wf))) +
+                  util::f16_to_f32(static_cast<uint16_t>(inst.ssrc1.read_scalar(wf))));
+  inst.sdst.write_scalar(wf, util::f32_to_f16(result));
 }
 
 template <typename Inst>
 inline void execute_s_add_f32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t s0 = inst.ssrc0.read_scalar(wf);
-  uint32_t s1 = inst.ssrc1.read_scalar(wf);
-  float f0 = std::bit_cast<float>(s0);
-  float f1 = std::bit_cast<float>(s1);
-  float fr = f0 + f1;
-  inst.sdst.write_scalar(wf, std::bit_cast<uint32_t>(fr));
+  float result = (std::bit_cast<float>(inst.ssrc0.read_scalar(wf)) +
+                  std::bit_cast<float>(inst.ssrc1.read_scalar(wf)));
+  inst.sdst.write_scalar(wf, std::bit_cast<uint32_t>(result));
 }
 
 template <typename Inst>
 inline void execute_s_add_i32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   int32_t s0 = static_cast<int32_t>(inst.ssrc0.read_scalar(wf));
   int32_t s1 = static_cast<int32_t>(inst.ssrc1.read_scalar(wf));
-  int64_t wide = static_cast<int64_t>(s0) + static_cast<int64_t>(s1);
-  int32_t result = static_cast<int32_t>(wide);
-  inst.sdst.write_scalar(wf, static_cast<uint32_t>(result));
-  wf.write_scc(wide != static_cast<int64_t>(result));
+  int32_t result = (static_cast<int32_t>(inst.ssrc0.read_scalar(wf)) +
+                    static_cast<int32_t>(inst.ssrc1.read_scalar(wf)));
+  inst.sdst.write_scalar(wf, result);
+  wf.write_scc(
+      ((static_cast<int64_t>(s0) + static_cast<int64_t>(s1)) != static_cast<int64_t>(result)));
 }
 
 template <typename Inst>
 inline void execute_s_add_u32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint32_t s0 = inst.ssrc0.read_scalar(wf);
   uint32_t s1 = inst.ssrc1.read_scalar(wf);
-  uint64_t wide = static_cast<uint64_t>(s0) + static_cast<uint64_t>(s1);
-  inst.sdst.write_scalar(wf, static_cast<uint32_t>(wide));
-  wf.write_scc(wide > 0xFFFFFFFFULL);
+  uint32_t result = (inst.ssrc0.read_scalar(wf) + inst.ssrc1.read_scalar(wf));
+  inst.sdst.write_scalar(wf, result);
+  wf.write_scc(((static_cast<uint64_t>(s0) + static_cast<uint64_t>(s1)) > 4294967295ULL));
 }
 
 template <typename Inst>
 inline void execute_s_addc_u32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t s0 = inst.ssrc0.read_scalar(wf);
-  uint32_t s1 = inst.ssrc1.read_scalar(wf);
-  uint64_t wide = static_cast<uint64_t>(s0) + static_cast<uint64_t>(s1) + (wf.read_scc() ? 1u : 0u);
-  inst.sdst.write_scalar(wf, static_cast<uint32_t>(wide));
-  wf.write_scc(wide > 0xFFFFFFFFULL);
+  uint32_t result = [&]() {
+    uint64_t w = static_cast<uint64_t>(inst.ssrc0.read_scalar(wf)) +
+                 static_cast<uint64_t>(inst.ssrc1.read_scalar(wf)) +
+                 static_cast<uint64_t>(wf.read_scc());
+    wf.write_scc(w > 0xFFFFFFFFULL);
+    return static_cast<uint32_t>(w);
+  }();
+  inst.sdst.write_scalar(wf, result);
 }
 
 template <typename Inst>
@@ -254,50 +250,35 @@ inline void execute_s_addk_i32_sopk([[maybe_unused]] Inst &inst, [[maybe_unused]
 
 template <typename Inst>
 inline void execute_s_and_b32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t s0 = inst.ssrc0.read_scalar(wf);
-  uint32_t s1 = inst.ssrc1.read_scalar(wf);
-  uint32_t result = s0 & s1;
+  uint32_t result = (inst.ssrc0.read_scalar(wf) & inst.ssrc1.read_scalar(wf));
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_and_b64_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint64_t s0 = inst.ssrc0.read_scalar64(wf);
-  uint64_t s1 = inst.ssrc1.read_scalar64(wf);
-  uint64_t result = s0 & s1;
+  uint64_t result = (static_cast<uint64_t>(inst.ssrc0.read_scalar64(wf)) &
+                     static_cast<uint64_t>(inst.ssrc1.read_scalar64(wf)));
   inst.sdst.write_scalar64(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_and_not0_saveexec_b32_sop1([[maybe_unused]] Inst &inst,
                                                  [[maybe_unused]] Wavefront &wf) {
-  uint64_t old_exec = wf.exec();
-  uint64_t src = inst.ssrc0.read_scalar64(wf);
-  inst.sdst.write_scalar64(wf, old_exec);
-  uint64_t result = old_exec & ~src;
-  util::Logger::vm([&](auto &os) {
-    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
-                      inst.ssrc0.encoding_value(), src, old_exec, result);
-  });
-  wf.set_exec(result);
-  wf.write_scc(result != 0);
+  uint64_t src = static_cast<uint64_t>(inst.ssrc0.read_scalar(wf));
+  inst.sdst.write_scalar(wf, wf.exec());
+  wf.set_exec((wf.exec() & (~src)));
+  wf.write_scc((wf.exec() != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_and_not0_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                                  [[maybe_unused]] Wavefront &wf) {
-  uint64_t old_exec = wf.exec();
-  uint64_t src = inst.ssrc0.read_scalar64(wf);
-  inst.sdst.write_scalar64(wf, old_exec);
-  uint64_t result = old_exec & ~src;
-  util::Logger::vm([&](auto &os) {
-    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
-                      inst.ssrc0.encoding_value(), src, old_exec, result);
-  });
-  wf.set_exec(result);
-  wf.write_scc(result != 0);
+  uint64_t src = static_cast<uint64_t>(inst.ssrc0.read_scalar64(wf));
+  inst.sdst.write_scalar64(wf, wf.exec());
+  wf.set_exec((wf.exec() & (~src)));
+  wf.write_scc((wf.exec() != 0ULL));
 }
 
 template <typename Inst>
@@ -317,31 +298,19 @@ inline void execute_s_and_not0_wrexec_b64_sop1([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_s_and_not1_saveexec_b32_sop1([[maybe_unused]] Inst &inst,
                                                  [[maybe_unused]] Wavefront &wf) {
-  uint64_t old_exec = wf.exec();
-  uint64_t src = inst.ssrc0.read_scalar64(wf);
-  inst.sdst.write_scalar64(wf, old_exec);
-  uint64_t result = ~src & ~old_exec;
-  util::Logger::vm([&](auto &os) {
-    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
-                      inst.ssrc0.encoding_value(), src, old_exec, result);
-  });
-  wf.set_exec(result);
-  wf.write_scc(result != 0);
+  uint64_t src = static_cast<uint64_t>(inst.ssrc0.read_scalar(wf));
+  inst.sdst.write_scalar(wf, wf.exec());
+  wf.set_exec((src & (~wf.exec())));
+  wf.write_scc((wf.exec() != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_and_not1_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                                  [[maybe_unused]] Wavefront &wf) {
-  uint64_t old_exec = wf.exec();
-  uint64_t src = inst.ssrc0.read_scalar64(wf);
-  inst.sdst.write_scalar64(wf, old_exec);
-  uint64_t result = ~src & ~old_exec;
-  util::Logger::vm([&](auto &os) {
-    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
-                      inst.ssrc0.encoding_value(), src, old_exec, result);
-  });
-  wf.set_exec(result);
-  wf.write_scc(result != 0);
+  uint64_t src = static_cast<uint64_t>(inst.ssrc0.read_scalar64(wf));
+  inst.sdst.write_scalar64(wf, wf.exec());
+  wf.set_exec((src & (~wf.exec())));
+  wf.write_scc((wf.exec() != 0ULL));
 }
 
 template <typename Inst>
@@ -361,61 +330,37 @@ inline void execute_s_and_not1_wrexec_b64_sop1([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_s_and_saveexec_b32_sop1([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
-  uint64_t old_exec = wf.exec();
-  uint64_t src = inst.ssrc0.read_scalar64(wf);
-  inst.sdst.write_scalar64(wf, old_exec);
-  uint64_t result = old_exec & src;
-  util::Logger::vm([&](auto &os) {
-    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
-                      inst.ssrc0.encoding_value(), src, old_exec, result);
-  });
-  wf.set_exec(result);
-  wf.write_scc(result != 0);
+  uint64_t src = static_cast<uint64_t>(inst.ssrc0.read_scalar(wf));
+  inst.sdst.write_scalar(wf, wf.exec());
+  wf.set_exec((wf.exec() & src));
+  wf.write_scc((wf.exec() != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_and_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
-  uint64_t old_exec = wf.exec();
-  uint64_t src = inst.ssrc0.read_scalar64(wf);
-  inst.sdst.write_scalar64(wf, old_exec);
-  uint64_t result = old_exec & src;
-  util::Logger::vm([&](auto &os) {
-    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
-                      inst.ssrc0.encoding_value(), src, old_exec, result);
-  });
-  wf.set_exec(result);
-  wf.write_scc(result != 0);
+  uint64_t src = static_cast<uint64_t>(inst.ssrc0.read_scalar64(wf));
+  inst.sdst.write_scalar64(wf, wf.exec());
+  wf.set_exec((wf.exec() & src));
+  wf.write_scc((wf.exec() != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_andn1_saveexec_b32_sop1([[maybe_unused]] Inst &inst,
                                               [[maybe_unused]] Wavefront &wf) {
-  uint64_t old_exec = wf.exec();
-  uint64_t src = inst.ssrc0.read_scalar64(wf);
-  inst.sdst.write_scalar64(wf, old_exec);
-  uint64_t result = ~src & old_exec;
-  util::Logger::vm([&](auto &os) {
-    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
-                      inst.ssrc0.encoding_value(), src, old_exec, result);
-  });
-  wf.set_exec(result);
-  wf.write_scc(result != 0);
+  uint64_t src = static_cast<uint64_t>(inst.ssrc0.read_scalar(wf));
+  inst.sdst.write_scalar(wf, wf.exec());
+  wf.set_exec((wf.exec() & src));
+  wf.write_scc((wf.exec() != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_andn1_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                               [[maybe_unused]] Wavefront &wf) {
-  uint64_t old_exec = wf.exec();
-  uint64_t src = inst.ssrc0.read_scalar64(wf);
-  inst.sdst.write_scalar64(wf, old_exec);
-  uint64_t result = ~src & old_exec;
-  util::Logger::vm([&](auto &os) {
-    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
-                      inst.ssrc0.encoding_value(), src, old_exec, result);
-  });
-  wf.set_exec(result);
-  wf.write_scc(result != 0);
+  uint64_t src = static_cast<uint64_t>(inst.ssrc0.read_scalar64(wf));
+  inst.sdst.write_scalar64(wf, wf.exec());
+  wf.set_exec((wf.exec() & src));
+  wf.write_scc((wf.exec() != 0ULL));
 }
 
 template <typename Inst>
@@ -434,50 +379,35 @@ inline void execute_s_andn1_wrexec_b64_sop1([[maybe_unused]] Inst &inst,
 
 template <typename Inst>
 inline void execute_s_andn2_b32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t s0 = inst.ssrc0.read_scalar(wf);
-  uint32_t s1 = inst.ssrc1.read_scalar(wf);
-  uint32_t result = s0 & ~s1;
+  uint32_t result = (inst.ssrc0.read_scalar(wf) & (~inst.ssrc1.read_scalar(wf)));
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_andn2_b64_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint64_t s0 = inst.ssrc0.read_scalar64(wf);
-  uint64_t s1 = inst.ssrc1.read_scalar64(wf);
-  uint64_t result = s0 & ~s1;
+  uint64_t result = (static_cast<uint64_t>(inst.ssrc0.read_scalar64(wf)) &
+                     (~static_cast<uint64_t>(inst.ssrc1.read_scalar64(wf))));
   inst.sdst.write_scalar64(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_andn2_saveexec_b32_sop1([[maybe_unused]] Inst &inst,
                                               [[maybe_unused]] Wavefront &wf) {
-  uint64_t old_exec = wf.exec();
-  uint64_t src = inst.ssrc0.read_scalar64(wf);
-  inst.sdst.write_scalar64(wf, old_exec);
-  uint64_t result = src & ~old_exec;
-  util::Logger::vm([&](auto &os) {
-    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
-                      inst.ssrc0.encoding_value(), src, old_exec, result);
-  });
-  wf.set_exec(result);
-  wf.write_scc(result != 0);
+  uint64_t src = static_cast<uint64_t>(inst.ssrc0.read_scalar(wf));
+  inst.sdst.write_scalar(wf, wf.exec());
+  wf.set_exec((src & (~wf.exec())));
+  wf.write_scc((wf.exec() != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_andn2_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                               [[maybe_unused]] Wavefront &wf) {
-  uint64_t old_exec = wf.exec();
-  uint64_t src = inst.ssrc0.read_scalar64(wf);
-  inst.sdst.write_scalar64(wf, old_exec);
-  uint64_t result = src & ~old_exec;
-  util::Logger::vm([&](auto &os) {
-    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
-                      inst.ssrc0.encoding_value(), src, old_exec, result);
-  });
-  wf.set_exec(result);
-  wf.write_scc(result != 0);
+  uint64_t src = static_cast<uint64_t>(inst.ssrc0.read_scalar64(wf));
+  inst.sdst.write_scalar64(wf, wf.exec());
+  wf.set_exec((src & (~wf.exec())));
+  wf.write_scc((wf.exec() != 0ULL));
 }
 
 template <typename Inst>
@@ -496,20 +426,22 @@ inline void execute_s_andn2_wrexec_b64_sop1([[maybe_unused]] Inst &inst,
 
 template <typename Inst>
 inline void execute_s_ashr_i32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  int32_t s0 = static_cast<int32_t>(inst.ssrc0.read_scalar(wf));
-  int32_t s1 = static_cast<int32_t>(inst.ssrc1.read_scalar(wf));
-  int32_t result = s0 >> (s1 & 31);
-  inst.sdst.write_scalar(wf, static_cast<uint32_t>(result));
-  wf.write_scc(result != 0);
+  int32_t result = [&]() {
+    auto v = static_cast<int32_t>(static_cast<int32_t>(inst.ssrc0.read_scalar(wf)));
+    return static_cast<uint32_t>(v >> (static_cast<int32_t>(inst.ssrc1.read_scalar(wf)) & 31u));
+  }();
+  inst.sdst.write_scalar(wf, result);
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_ashr_i64_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  int64_t s0 = static_cast<int64_t>(inst.ssrc0.read_scalar64(wf));
-  int64_t s1 = static_cast<int64_t>(inst.ssrc1.read_scalar64(wf));
-  int64_t result = s0 >> (s1 & 63);
-  inst.sdst.write_scalar64(wf, static_cast<uint64_t>(result));
-  wf.write_scc(result != 0);
+  int64_t result = [&]() {
+    auto v = static_cast<int64_t>(static_cast<int64_t>(inst.ssrc0.read_scalar64(wf)));
+    return static_cast<uint64_t>(v >> (static_cast<int64_t>(inst.ssrc1.read_scalar64(wf)) & 63u));
+  }();
+  inst.sdst.write_scalar64(wf, result);
+  wf.write_scc((result != 0LL));
 }
 
 template <typename Inst>
@@ -520,213 +452,172 @@ inline void execute_s_barrier_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]]
 template <typename Inst>
 inline void execute_s_bcnt0_i32_b32_sop1([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
-  uint32_t val = inst.ssrc0.read_scalar(wf);
-  uint32_t result = static_cast<uint32_t>(std::popcount(~val));
+  uint32_t result = static_cast<uint32_t>(std::popcount(~inst.ssrc0.read_scalar(wf)));
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_bcnt0_i32_b64_sop1([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
-  uint64_t val = inst.ssrc0.read_scalar64(wf);
-  uint64_t result = static_cast<uint64_t>(std::popcount(~val));
+  uint64_t result =
+      static_cast<uint32_t>(std::popcount(~static_cast<uint64_t>(inst.ssrc0.read_scalar64(wf))));
   inst.sdst.write_scalar64(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_bcnt1_i32_b32_sop1([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
-  uint32_t val = inst.ssrc0.read_scalar(wf);
-  uint32_t result = static_cast<uint32_t>(std::popcount(val));
+  uint32_t result = static_cast<uint32_t>(std::popcount(inst.ssrc0.read_scalar(wf)));
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_bcnt1_i32_b64_sop1([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
-  uint64_t val = inst.ssrc0.read_scalar64(wf);
-  uint64_t result = static_cast<uint64_t>(std::popcount(val));
+  uint64_t result =
+      static_cast<uint32_t>(std::popcount(static_cast<uint64_t>(inst.ssrc0.read_scalar64(wf))));
   inst.sdst.write_scalar64(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_bfe_i32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t base = inst.ssrc0.read_scalar(wf);
-  uint32_t field = inst.ssrc1.read_scalar(wf);
-  uint32_t offset = field & 31u;
-  uint32_t width = (field >> 16) & 127u;
-  if (width == 0) {
-    inst.sdst.write_scalar(wf, 0);
-    wf.write_scc(false);
-  } else {
-    uint32_t mask = width >= 32 ? ~0u : ((1u << width) - 1);
+  int32_t result = [&]() {
+    uint32_t base = static_cast<int32_t>(inst.ssrc0.read_scalar(wf)),
+             field = static_cast<int32_t>(inst.ssrc1.read_scalar(wf));
+    uint32_t offset = field & 31u;
+    uint32_t width = (field >> 16) & 127u;
+    if (width == 0)
+      return 0u;
+    uint32_t mask = width >= 32 ? ~0u : ((1u << width) - 1u);
     uint32_t extracted = (base >> offset) & mask;
     if (width < 32 && (extracted & (1u << (width - 1))))
       extracted |= ~mask;
-    inst.sdst.write_scalar(wf, extracted);
-    wf.write_scc(extracted != 0);
-  }
+    return extracted;
+  }();
+  inst.sdst.write_scalar(wf, result);
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_bfe_i64_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint64_t base = inst.ssrc0.read_scalar64(wf);
-  uint32_t field = inst.ssrc1.read_scalar(wf);
-  uint32_t offset = field & 63u;
-  uint32_t width = (field >> 16) & 127u;
-  if (width == 0) {
-    inst.sdst.write_scalar64(wf, 0);
-    wf.write_scc(false);
-  } else {
-    uint64_t mask = width >= 64 ? ~0ULL : ((1ULL << width) - 1);
+  int64_t result = [&]() {
+    uint64_t base = static_cast<int64_t>(inst.ssrc0.read_scalar64(wf));
+    uint32_t field = static_cast<uint32_t>(static_cast<int64_t>(inst.ssrc1.read_scalar64(wf)));
+    uint32_t offset = field & 63u;
+    uint32_t width = (field >> 16) & 127u;
+    if (width == 0)
+      return static_cast<int64_t>(0);
+    uint64_t mask = width >= 64 ? ~0ULL : ((1ULL << width) - 1ULL);
     uint64_t extracted = (base >> offset) & mask;
     if (width < 64 && (extracted & (1ULL << (width - 1))))
       extracted |= ~mask;
-    inst.sdst.write_scalar64(wf, extracted);
-    wf.write_scc(extracted != 0);
-  }
+    return static_cast<int64_t>(extracted);
+  }();
+  inst.sdst.write_scalar64(wf, result);
+  wf.write_scc((result != 0LL));
 }
 
 template <typename Inst>
 inline void execute_s_bfe_u32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t base = inst.ssrc0.read_scalar(wf);
-  uint32_t field = inst.ssrc1.read_scalar(wf);
-  uint32_t offset = field & 31u;
-  uint32_t width = (field >> 16) & 127u;
-  if (width == 0) {
-    inst.sdst.write_scalar(wf, 0);
-    wf.write_scc(false);
-  } else {
-    uint32_t mask = width >= 32 ? ~0u : ((1u << width) - 1);
-    uint32_t extracted = (base >> offset) & mask;
-    inst.sdst.write_scalar(wf, extracted);
-    wf.write_scc(extracted != 0);
-  }
+  uint32_t result = [&]() {
+    uint32_t base = inst.ssrc0.read_scalar(wf), field = inst.ssrc1.read_scalar(wf);
+    uint32_t offset = field & 31u;
+    uint32_t width = (field >> 16) & 127u;
+    if (width == 0)
+      return 0u;
+    uint32_t mask = width >= 32 ? ~0u : ((1u << width) - 1u);
+    return (base >> offset) & mask;
+  }();
+  inst.sdst.write_scalar(wf, result);
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_bfe_u64_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint64_t base = inst.ssrc0.read_scalar64(wf);
-  uint32_t field = inst.ssrc1.read_scalar(wf);
-  uint32_t offset = field & 63u;
-  uint32_t width = (field >> 16) & 127u;
-  if (width == 0) {
-    inst.sdst.write_scalar64(wf, 0);
-    wf.write_scc(false);
-  } else {
-    uint64_t mask = width >= 64 ? ~0ULL : ((1ULL << width) - 1);
-    uint64_t extracted = (base >> offset) & mask;
-    inst.sdst.write_scalar64(wf, extracted);
-    wf.write_scc(extracted != 0);
-  }
+  uint64_t result = [&]() {
+    uint64_t base = static_cast<uint64_t>(inst.ssrc0.read_scalar64(wf));
+    uint32_t field = static_cast<uint32_t>(static_cast<uint64_t>(inst.ssrc1.read_scalar64(wf)));
+    uint32_t offset = field & 63u;
+    uint32_t width = (field >> 16) & 127u;
+    if (width == 0)
+      return static_cast<uint64_t>(0);
+    uint64_t mask = width >= 64 ? ~0ULL : ((1ULL << width) - 1ULL);
+    return (base >> offset) & mask;
+  }();
+  inst.sdst.write_scalar64(wf, result);
+  wf.write_scc((result != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_bfm_b32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t s0 = inst.ssrc0.read_scalar(wf);
-  uint32_t s1 = inst.ssrc1.read_scalar(wf);
-  uint32_t count = s0 & 31u;
-  uint32_t offset = s1 & 31u;
-  uint32_t result = count == 0 ? 0 : ((1u << count) - 1) << offset;
+  uint32_t result =
+      (((1u << (inst.ssrc0.read_scalar(wf) & 31u)) - 1u) << (inst.ssrc1.read_scalar(wf) & 31u));
   inst.sdst.write_scalar(wf, result);
 }
 
 template <typename Inst>
 inline void execute_s_bfm_b64_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint64_t s0 = inst.ssrc0.read_scalar64(wf);
-  uint64_t s1 = inst.ssrc1.read_scalar64(wf);
-  uint64_t count = s0 & 63u;
-  uint64_t offset = s1 & 63u;
-  uint64_t result = count == 0 ? 0 : ((1ULL << count) - 1) << offset;
+  uint64_t result = (((1u << (static_cast<uint64_t>(inst.ssrc0.read_scalar64(wf)) & 31u)) - 1u)
+                     << (static_cast<uint64_t>(inst.ssrc1.read_scalar64(wf)) & 31u));
   inst.sdst.write_scalar64(wf, result);
 }
 
 template <typename Inst>
 inline void execute_s_bitcmp0_b32_sopc([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  uint32_t val = inst.ssrc0.read_scalar(wf);
-  uint32_t bit = inst.ssrc1.read_scalar(wf) & 31u;
-  wf.write_scc(!(val & (1ULL << bit)));
+  wf.write_scc((((inst.ssrc0.read_scalar(wf) >> inst.ssrc1.read_scalar(wf)) & 1) != 0));
 }
 
 template <typename Inst>
 inline void execute_s_bitcmp0_b64_sopc([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  uint64_t val = inst.ssrc0.read_scalar64(wf);
-  uint32_t bit = inst.ssrc1.read_scalar(wf) & 63u;
-  wf.write_scc(!(val & (1ULL << bit)));
+  wf.write_scc((((static_cast<uint64_t>(inst.ssrc0.read_scalar64(wf)) >>
+                  static_cast<uint64_t>(inst.ssrc1.read_scalar64(wf))) &
+                 1) != 0));
 }
 
 template <typename Inst>
 inline void execute_s_bitcmp1_b32_sopc([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  uint32_t val = inst.ssrc0.read_scalar(wf);
-  uint32_t bit = inst.ssrc1.read_scalar(wf) & 31u;
-  wf.write_scc((val & (1ULL << bit)) != 0);
+  wf.write_scc((((inst.ssrc0.read_scalar(wf) >> inst.ssrc1.read_scalar(wf)) & 1) != 0));
 }
 
 template <typename Inst>
 inline void execute_s_bitcmp1_b64_sopc([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  uint64_t val = inst.ssrc0.read_scalar64(wf);
-  uint32_t bit = inst.ssrc1.read_scalar(wf) & 63u;
-  wf.write_scc((val & (1ULL << bit)) != 0);
-}
-
-template <typename Inst>
-inline void execute_s_bitset0_b32_sop1([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {
-  uint32_t bit = inst.ssrc0.read_scalar(wf);
-  uint32_t result = inst.sdst.read_scalar(wf) & ~(1u << (bit & 31));
-  inst.sdst.write_scalar(wf, result);
-}
-
-template <typename Inst>
-inline void execute_s_bitset0_b64_sop1([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {
-  uint32_t bit = inst.ssrc0.read_scalar(wf);
-  uint64_t result = inst.sdst.read_scalar64(wf) & ~(1ULL << (bit & 63));
-  inst.sdst.write_scalar64(wf, result);
-}
-
-template <typename Inst>
-inline void execute_s_bitset1_b32_sop1([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {
-  uint32_t bit = inst.ssrc0.read_scalar(wf);
-  uint32_t result = inst.sdst.read_scalar(wf) | (1u << (bit & 31));
-  inst.sdst.write_scalar(wf, result);
-}
-
-template <typename Inst>
-inline void execute_s_bitset1_b64_sop1([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {
-  uint32_t bit = inst.ssrc0.read_scalar(wf);
-  uint64_t result = inst.sdst.read_scalar64(wf) | (1ULL << (bit & 63));
-  inst.sdst.write_scalar64(wf, result);
+  wf.write_scc((((static_cast<uint64_t>(inst.ssrc0.read_scalar64(wf)) >>
+                  static_cast<uint64_t>(inst.ssrc1.read_scalar64(wf))) &
+                 1) != 0));
 }
 
 template <typename Inst>
 inline void execute_s_brev_b32_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t val = inst.ssrc0.read_scalar(wf);
-  uint32_t result = 0;
-  for (int i = 0; i < 32; ++i)
-    result |= ((val >> i) & 1) << (31 - i);
+  uint32_t result = [&]() {
+    uint32_t s = inst.ssrc0.read_scalar(wf);
+    uint32_t r = 0;
+    for (int i = 0; i < 32; ++i)
+      r |= ((s >> i) & 1) << (31 - i);
+    return r;
+  }();
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_brev_b64_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint64_t val = inst.ssrc0.read_scalar64(wf);
-  uint64_t result = 0;
-  for (int i = 0; i < 64; ++i)
-    result |= ((val >> i) & 1) << (63 - i);
+  uint64_t result = [&]() {
+    uint64_t s = inst.ssrc0.read_scalar64(wf);
+    uint64_t r = 0;
+    for (int i = 0; i < 64; ++i)
+      r |= ((s >> i) & 1ULL) << (63 - i);
+    return r;
+  }();
   inst.sdst.write_scalar64(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0ULL));
 }
 
 template <typename Inst>
@@ -751,19 +642,16 @@ inline void execute_s_cbranch_join_sop1([[maybe_unused]] Inst &inst,
 
 template <typename Inst>
 inline void execute_s_ceil_f16_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t val = inst.ssrc0.read_scalar(wf);
-  float f = util::f16_to_f32(static_cast<uint16_t>(val & 0xFFFF));
-  uint32_t result = static_cast<uint32_t>(util::f32_to_f16(std::ceil(f)));
-  inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  float result = std::ceil(util::f16_to_f32(static_cast<uint16_t>(inst.ssrc0.read_scalar(wf))));
+  inst.sdst.write_scalar(wf, util::f32_to_f16(result));
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_ceil_f32_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t val = inst.ssrc0.read_scalar(wf);
-  uint32_t result = std::bit_cast<uint32_t>(std::ceil(std::bit_cast<float>(val)));
-  inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  float result = std::ceil(std::bit_cast<float>(inst.ssrc0.read_scalar(wf)));
+  inst.sdst.write_scalar(wf, std::bit_cast<uint32_t>(result));
+  wf.write_scc((result != 0.0f));
 }
 
 template <typename Inst>
@@ -771,42 +659,51 @@ inline void execute_s_clause_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] 
 
 template <typename Inst>
 inline void execute_s_cls_i32_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t val = inst.ssrc0.read_scalar(wf);
-  int32_t sval = static_cast<int32_t>(val);
-  uint32_t uval = sval < 0 ? ~static_cast<uint32_t>(sval) : static_cast<uint32_t>(sval);
-  uint32_t result = uval == 0 ? 31u : static_cast<uint32_t>(std::countl_zero(uval)) - 1;
+  uint32_t result = [&]() {
+    int32_t sv = static_cast<int32_t>(inst.ssrc0.read_scalar(wf));
+    if (sv == 0 || sv == -1)
+      return 32u;
+    uint32_t u = sv < 0 ? ~static_cast<uint32_t>(sv) : static_cast<uint32_t>(sv);
+    return static_cast<uint32_t>(std::countl_zero(u)) - 1u;
+  }();
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_cls_i32_i64_sop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  int64_t sval = static_cast<int64_t>(inst.ssrc0.read_scalar64(wf));
-  uint64_t uval = sval < 0 ? ~static_cast<uint64_t>(sval) : static_cast<uint64_t>(sval);
-  uint32_t result = uval == 0 ? 63u : static_cast<uint32_t>(std::countl_zero(uval)) - 1;
-  inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  int64_t result = [&]() {
+    int32_t sv = static_cast<int32_t>(static_cast<int64_t>(inst.ssrc0.read_scalar64(wf)));
+    if (sv == 0 || sv == -1)
+      return 32u;
+    uint32_t u = sv < 0 ? ~static_cast<uint32_t>(sv) : static_cast<uint32_t>(sv);
+    return static_cast<uint32_t>(std::countl_zero(u)) - 1u;
+  }();
+  inst.sdst.write_scalar64(wf, result);
+  wf.write_scc((result != 0LL));
 }
 
 template <typename Inst>
 inline void execute_s_clz_i32_u32_sop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  uint32_t val = inst.ssrc0.read_scalar(wf);
-  uint32_t result =
-      val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(val));
+  uint32_t result = [&]() {
+    auto s = static_cast<uint32_t>(inst.ssrc0.read_scalar(wf));
+    return s == 0 ? 32u : static_cast<uint32_t>(std::countl_zero(s));
+  }();
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_clz_i32_u64_sop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  uint64_t val = inst.ssrc0.read_scalar64(wf);
-  uint32_t result =
-      val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(val));
+  uint32_t result = [&]() {
+    auto s = static_cast<uint64_t>(inst.ssrc0.read_scalar(wf));
+    return s == 0 ? 64u : static_cast<uint32_t>(std::countl_zero(s));
+  }();
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
@@ -830,100 +727,80 @@ inline void execute_s_cmovk_i32_sopk([[maybe_unused]] Inst &inst, [[maybe_unused
 
 template <typename Inst>
 inline void execute_s_cmp_eq_i32_sopc([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  int32_t s0 = static_cast<int32_t>(inst.ssrc0.read_scalar(wf));
-  int32_t s1 = static_cast<int32_t>(inst.ssrc1.read_scalar(wf));
-  wf.write_scc(s0 == s1);
+  wf.write_scc((static_cast<int32_t>(inst.ssrc0.read_scalar(wf)) ==
+                static_cast<int32_t>(inst.ssrc1.read_scalar(wf))));
 }
 
 template <typename Inst>
 inline void execute_s_cmp_eq_u32_sopc([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t s0 = inst.ssrc0.read_scalar(wf);
-  uint32_t s1 = inst.ssrc1.read_scalar(wf);
-  wf.write_scc(s0 == s1);
+  wf.write_scc((inst.ssrc0.read_scalar(wf) == inst.ssrc1.read_scalar(wf)));
 }
 
 template <typename Inst>
 inline void execute_s_cmp_eq_u64_sopc([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint64_t s0 = inst.ssrc0.read_scalar64(wf);
-  uint64_t s1 = inst.ssrc1.read_scalar64(wf);
-  wf.write_scc(s0 == s1);
+  wf.write_scc((static_cast<uint64_t>(inst.ssrc0.read_scalar64(wf)) ==
+                static_cast<uint64_t>(inst.ssrc1.read_scalar64(wf))));
 }
 
 template <typename Inst>
 inline void execute_s_cmp_ge_i32_sopc([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  int32_t s0 = static_cast<int32_t>(inst.ssrc0.read_scalar(wf));
-  int32_t s1 = static_cast<int32_t>(inst.ssrc1.read_scalar(wf));
-  wf.write_scc(s0 >= s1);
+  wf.write_scc((static_cast<int32_t>(inst.ssrc0.read_scalar(wf)) >=
+                static_cast<int32_t>(inst.ssrc1.read_scalar(wf))));
 }
 
 template <typename Inst>
 inline void execute_s_cmp_ge_u32_sopc([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t s0 = inst.ssrc0.read_scalar(wf);
-  uint32_t s1 = inst.ssrc1.read_scalar(wf);
-  wf.write_scc(s0 >= s1);
+  wf.write_scc((inst.ssrc0.read_scalar(wf) >= inst.ssrc1.read_scalar(wf)));
 }
 
 template <typename Inst>
 inline void execute_s_cmp_gt_i32_sopc([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  int32_t s0 = static_cast<int32_t>(inst.ssrc0.read_scalar(wf));
-  int32_t s1 = static_cast<int32_t>(inst.ssrc1.read_scalar(wf));
-  wf.write_scc(s0 > s1);
+  wf.write_scc((static_cast<int32_t>(inst.ssrc0.read_scalar(wf)) >
+                static_cast<int32_t>(inst.ssrc1.read_scalar(wf))));
 }
 
 template <typename Inst>
 inline void execute_s_cmp_gt_u32_sopc([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t s0 = inst.ssrc0.read_scalar(wf);
-  uint32_t s1 = inst.ssrc1.read_scalar(wf);
-  wf.write_scc(s0 > s1);
+  wf.write_scc((inst.ssrc0.read_scalar(wf) > inst.ssrc1.read_scalar(wf)));
 }
 
 template <typename Inst>
 inline void execute_s_cmp_le_i32_sopc([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  int32_t s0 = static_cast<int32_t>(inst.ssrc0.read_scalar(wf));
-  int32_t s1 = static_cast<int32_t>(inst.ssrc1.read_scalar(wf));
-  wf.write_scc(s0 <= s1);
+  wf.write_scc((static_cast<int32_t>(inst.ssrc0.read_scalar(wf)) <=
+                static_cast<int32_t>(inst.ssrc1.read_scalar(wf))));
 }
 
 template <typename Inst>
 inline void execute_s_cmp_le_u32_sopc([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t s0 = inst.ssrc0.read_scalar(wf);
-  uint32_t s1 = inst.ssrc1.read_scalar(wf);
-  wf.write_scc(s0 <= s1);
+  wf.write_scc((inst.ssrc0.read_scalar(wf) <= inst.ssrc1.read_scalar(wf)));
 }
 
 template <typename Inst>
 inline void execute_s_cmp_lg_i32_sopc([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  int32_t s0 = static_cast<int32_t>(inst.ssrc0.read_scalar(wf));
-  int32_t s1 = static_cast<int32_t>(inst.ssrc1.read_scalar(wf));
-  wf.write_scc(s0 != s1);
+  wf.write_scc((static_cast<int32_t>(inst.ssrc0.read_scalar(wf)) !=
+                static_cast<int32_t>(inst.ssrc1.read_scalar(wf))));
 }
 
 template <typename Inst>
 inline void execute_s_cmp_lg_u32_sopc([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t s0 = inst.ssrc0.read_scalar(wf);
-  uint32_t s1 = inst.ssrc1.read_scalar(wf);
-  wf.write_scc(s0 != s1);
+  wf.write_scc((inst.ssrc0.read_scalar(wf) != inst.ssrc1.read_scalar(wf)));
 }
 
 template <typename Inst>
 inline void execute_s_cmp_lg_u64_sopc([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint64_t s0 = inst.ssrc0.read_scalar64(wf);
-  uint64_t s1 = inst.ssrc1.read_scalar64(wf);
-  wf.write_scc(s0 != s1);
+  wf.write_scc((static_cast<uint64_t>(inst.ssrc0.read_scalar64(wf)) !=
+                static_cast<uint64_t>(inst.ssrc1.read_scalar64(wf))));
 }
 
 template <typename Inst>
 inline void execute_s_cmp_lt_i32_sopc([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  int32_t s0 = static_cast<int32_t>(inst.ssrc0.read_scalar(wf));
-  int32_t s1 = static_cast<int32_t>(inst.ssrc1.read_scalar(wf));
-  wf.write_scc(s0 < s1);
+  wf.write_scc((static_cast<int32_t>(inst.ssrc0.read_scalar(wf)) <
+                static_cast<int32_t>(inst.ssrc1.read_scalar(wf))));
 }
 
 template <typename Inst>
 inline void execute_s_cmp_lt_u32_sopc([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t s0 = inst.ssrc0.read_scalar(wf);
-  uint32_t s1 = inst.ssrc1.read_scalar(wf);
-  wf.write_scc(s0 < s1);
+  wf.write_scc((inst.ssrc0.read_scalar(wf) < inst.ssrc1.read_scalar(wf)));
 }
 
 template <typename Inst>
@@ -1042,93 +919,99 @@ inline void execute_s_cselect_b64_sop2([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_s_ctz_i32_b32_sop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  uint32_t val = inst.ssrc0.read_scalar(wf);
-  uint32_t result =
-      val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(val));
+  uint32_t result = [&]() {
+    auto s = static_cast<uint64_t>(inst.ssrc0.read_scalar(wf));
+    return s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(s));
+  }();
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_ctz_i32_b64_sop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  uint64_t val = inst.ssrc0.read_scalar64(wf);
-  uint32_t result =
-      val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(val));
-  inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  uint64_t result = [&]() {
+    auto s = static_cast<uint64_t>(inst.ssrc0.read_scalar64(wf));
+    return s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(s));
+  }();
+  inst.sdst.write_scalar64(wf, result);
+  wf.write_scc((result != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_cvt_f16_f32_sop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  uint32_t val = inst.ssrc0.read_scalar(wf);
-  uint32_t result = static_cast<uint32_t>(util::f32_to_f16(std::bit_cast<float>(val)));
+  uint32_t result =
+      util::f32_to_f16(std::bit_cast<float>(static_cast<uint32_t>(inst.ssrc0.read_scalar(wf))));
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_cvt_f32_f16_sop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  uint32_t val = inst.ssrc0.read_scalar(wf);
-  uint32_t result = std::bit_cast<uint32_t>(util::f16_to_f32(static_cast<uint16_t>(val & 0xFFFF)));
+  uint32_t result =
+      std::bit_cast<uint32_t>(util::f16_to_f32(static_cast<uint16_t>(inst.ssrc0.read_scalar(wf))));
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_cvt_f32_i32_sop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  uint32_t val = inst.ssrc0.read_scalar(wf);
-  uint32_t result = std::bit_cast<uint32_t>(static_cast<float>(static_cast<int32_t>(val)));
+  uint32_t result =
+      std::bit_cast<uint32_t>(static_cast<float>(static_cast<int32_t>(inst.ssrc0.read_scalar(wf))));
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_cvt_f32_u32_sop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  uint32_t val = inst.ssrc0.read_scalar(wf);
-  uint32_t result = std::bit_cast<uint32_t>(static_cast<float>(val));
+  uint32_t result = std::bit_cast<uint32_t>(static_cast<float>(inst.ssrc0.read_scalar(wf)));
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_cvt_hi_f32_f16_sop1([[maybe_unused]] Inst &inst,
                                           [[maybe_unused]] Wavefront &wf) {
-  uint32_t val = inst.ssrc0.read_scalar(wf);
-  uint32_t result =
-      std::bit_cast<uint32_t>(util::f16_to_f32(static_cast<uint16_t>((val >> 16) & 0xFFFF)));
+  uint32_t result = std::bit_cast<uint32_t>(
+      util::f16_to_f32(static_cast<uint16_t>((inst.ssrc0.read_scalar(wf)) >> 16)));
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_cvt_i32_f32_sop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  uint32_t val = inst.ssrc0.read_scalar(wf);
-  float f = std::bit_cast<float>(val);
-  int32_t r = std::isnan(f) ? 0
-                            : (f >= 2147483648.0f
-                                   ? INT32_MAX
-                                   : (f < -2147483648.0f ? INT32_MIN : static_cast<int32_t>(f)));
-  uint32_t result = static_cast<uint32_t>(r);
+  uint32_t result = [&]() -> uint32_t {
+    float s = std::bit_cast<float>(static_cast<uint32_t>(inst.ssrc0.read_scalar(wf)));
+    if (std::isnan(s))
+      return 0u;
+    if (s >= 2147483648.0f)
+      return static_cast<uint32_t>(INT32_MAX);
+    if (s < -2147483648.0f)
+      return static_cast<uint32_t>(INT32_MIN);
+    return static_cast<uint32_t>(static_cast<int32_t>(s));
+  }();
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_cvt_u32_f32_sop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  uint32_t val = inst.ssrc0.read_scalar(wf);
-  float f = std::bit_cast<float>(val);
-  uint32_t result = (std::isnan(f) || f < 0.0f)
-                        ? 0u
-                        : (f >= 4294967296.0f ? UINT32_MAX : static_cast<uint32_t>(f));
+  uint32_t result = [&]() -> uint32_t {
+    float s = std::bit_cast<float>(static_cast<uint32_t>(inst.ssrc0.read_scalar(wf)));
+    if (std::isnan(s) || s < 0.0f)
+      return 0u;
+    if (s >= 4294967296.0f)
+      return UINT32_MAX;
+    return static_cast<uint32_t>(s);
+  }();
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
@@ -1145,96 +1028,139 @@ inline void execute_s_denorm_mode_sopp([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_s_ff0_i32_b32_sop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  uint32_t val = inst.ssrc0.read_scalar(wf);
-  uint32_t result =
-      val == ~0u ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(~val));
+  uint32_t result = [&]() {
+    auto s = ~static_cast<uint32_t>(inst.ssrc0.read_scalar(wf));
+    return s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(s));
+  }();
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_ff0_i32_b64_sop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  uint64_t val = inst.ssrc0.read_scalar64(wf);
-  uint64_t result = static_cast<uint64_t>(val == ~0ULL ? -1 : std::countr_zero(~val));
+  uint64_t result = [&]() {
+    auto s = ~static_cast<uint64_t>(inst.ssrc0.read_scalar64(wf));
+    return s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(s));
+  }();
   inst.sdst.write_scalar64(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_ff1_i32_b32_sop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  uint32_t val = inst.ssrc0.read_scalar(wf);
-  uint32_t result =
-      val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(val));
+  uint32_t result = [&]() {
+    auto s = static_cast<uint32_t>(inst.ssrc0.read_scalar(wf));
+    return s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(s));
+  }();
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_ff1_i32_b64_sop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  uint64_t val = inst.ssrc0.read_scalar64(wf);
-  uint64_t result = static_cast<uint64_t>(val == 0 ? -1 : std::countr_zero(val));
+  uint64_t result = [&]() {
+    auto s = static_cast<uint64_t>(inst.ssrc0.read_scalar64(wf));
+    return s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(s));
+  }();
   inst.sdst.write_scalar64(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_flbit_i32_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  int32_t sval = static_cast<int32_t>(inst.ssrc0.read_scalar(wf));
-  uint32_t val = sval < 0 ? ~static_cast<uint32_t>(sval) : static_cast<uint32_t>(sval);
-  uint32_t result =
-      val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(val));
+  int32_t result = [&]() {
+    int32_t sv = static_cast<int32_t>(static_cast<int32_t>(inst.ssrc0.read_scalar(wf)));
+    uint32_t abs_val = sv < 0 ? ~static_cast<uint32_t>(sv) : static_cast<uint32_t>(sv);
+    return abs_val == 0 ? static_cast<uint32_t>(-1)
+                        : static_cast<uint32_t>(std::countl_zero(abs_val));
+  }();
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_flbit_i32_b32_sop1([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
-  uint32_t val = inst.ssrc0.read_scalar(wf);
-  uint32_t result =
-      val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(val));
+  uint32_t result = [&]() {
+    auto s = static_cast<uint32_t>(inst.ssrc0.read_scalar(wf));
+    return s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(s));
+  }();
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_flbit_i32_b64_sop1([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
-  uint64_t val = inst.ssrc0.read_scalar64(wf);
-  uint64_t result = static_cast<uint64_t>(val == 0 ? -1 : std::countl_zero(val));
+  uint64_t result = [&]() {
+    auto s = static_cast<uint64_t>(inst.ssrc0.read_scalar64(wf));
+    return s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(s));
+  }();
   inst.sdst.write_scalar64(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_flbit_i32_i64_sop1([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
-  int64_t sval = static_cast<int64_t>(inst.ssrc0.read_scalar64(wf));
-  uint64_t uval = sval < 0 ? ~static_cast<uint64_t>(sval) : static_cast<uint64_t>(sval);
-  uint32_t result =
-      uval == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(uval));
-  inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  int64_t result = [&]() {
+    int64_t sv = static_cast<int64_t>(static_cast<int64_t>(inst.ssrc0.read_scalar64(wf)));
+    uint64_t abs_val = sv < 0 ? ~static_cast<uint64_t>(sv) : static_cast<uint64_t>(sv);
+    return abs_val == 0 ? static_cast<uint32_t>(-1)
+                        : static_cast<uint32_t>(std::countl_zero(abs_val));
+  }();
+  inst.sdst.write_scalar64(wf, result);
+  wf.write_scc((result != 0LL));
 }
 
 template <typename Inst>
 inline void execute_s_floor_f16_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t val = inst.ssrc0.read_scalar(wf);
-  float f = util::f16_to_f32(static_cast<uint16_t>(val & 0xFFFF));
-  uint32_t result = static_cast<uint32_t>(util::f32_to_f16(std::floor(f)));
-  inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  float result = std::floor(util::f16_to_f32(static_cast<uint16_t>(inst.ssrc0.read_scalar(wf))));
+  inst.sdst.write_scalar(wf, util::f32_to_f16(result));
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_floor_f32_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t val = inst.ssrc0.read_scalar(wf);
-  uint32_t result = std::bit_cast<uint32_t>(std::floor(std::bit_cast<float>(val)));
-  inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  float result = std::floor(std::bit_cast<float>(inst.ssrc0.read_scalar(wf)));
+  inst.sdst.write_scalar(wf, std::bit_cast<uint32_t>(result));
+  wf.write_scc((result != 0.0f));
+}
+
+template <typename Inst>
+inline void execute_s_getreg_b32_sopk([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  uint16_t hwreg = inst.simm16.encoding_value_;
+  uint32_t reg_id = hwreg & 0x3Fu;
+  uint32_t offset = (hwreg >> 6) & 0x1Fu;
+  uint32_t size = ((hwreg >> 11) & 0x1Fu) + 1;
+  uint32_t reg_val = 0;
+  switch (reg_id) {
+  case 1:
+    reg_val = wf.status_raw();
+    break;
+  case 4:
+    reg_val = static_cast<uint32_t>(wf.cu().id());
+    break;
+  case 5:
+    reg_val = static_cast<uint32_t>(wf.cu().id() >> 16);
+    break;
+  case 6:
+    reg_val = (wf.sgpr_alloc().count & 0xFFu) | ((wf.sgpr_alloc().base & 0xFFu) << 8);
+    break;
+  case 7:
+    reg_val = (wf.vgpr_alloc().count & 0xFFu) | ((wf.vgpr_alloc().base & 0xFFu) << 8);
+    break;
+  default:
+    util::Logger::warn("s_getreg_b32: unhandled hwreg id=", reg_id);
+    break;
+  }
+  if (offset + size > 32)
+    size = 32 - offset;
+  uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);
+  inst.sdst.write_scalar(wf, (reg_val >> offset) & mask);
 }
 
 template <typename Inst>
@@ -1258,113 +1184,117 @@ inline void execute_s_inst_prefetch_sopp([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_s_lshl1_add_u32_sop2([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
-  uint32_t s0 = inst.ssrc0.read_scalar(wf);
-  uint32_t s1 = inst.ssrc1.read_scalar(wf);
-  uint64_t wide = (static_cast<uint64_t>(s0) << 1u) + static_cast<uint64_t>(s1);
-  inst.sdst.write_scalar(wf, static_cast<uint32_t>(wide));
-  wf.write_scc(wide > 0xFFFFFFFFULL);
+  uint32_t result = [&]() {
+    uint64_t w = (static_cast<uint64_t>(inst.ssrc0.read_scalar(wf)) << 1u) +
+                 static_cast<uint64_t>(inst.ssrc1.read_scalar(wf));
+    wf.write_scc(w > 0xFFFFFFFFULL);
+    return static_cast<uint32_t>(w);
+  }();
+  inst.sdst.write_scalar(wf, result);
 }
 
 template <typename Inst>
 inline void execute_s_lshl2_add_u32_sop2([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
-  uint32_t s0 = inst.ssrc0.read_scalar(wf);
-  uint32_t s1 = inst.ssrc1.read_scalar(wf);
-  uint64_t wide = (static_cast<uint64_t>(s0) << 2u) + static_cast<uint64_t>(s1);
-  inst.sdst.write_scalar(wf, static_cast<uint32_t>(wide));
-  wf.write_scc(wide > 0xFFFFFFFFULL);
+  uint32_t result = [&]() {
+    uint64_t w = (static_cast<uint64_t>(inst.ssrc0.read_scalar(wf)) << 2u) +
+                 static_cast<uint64_t>(inst.ssrc1.read_scalar(wf));
+    wf.write_scc(w > 0xFFFFFFFFULL);
+    return static_cast<uint32_t>(w);
+  }();
+  inst.sdst.write_scalar(wf, result);
 }
 
 template <typename Inst>
 inline void execute_s_lshl3_add_u32_sop2([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
-  uint32_t s0 = inst.ssrc0.read_scalar(wf);
-  uint32_t s1 = inst.ssrc1.read_scalar(wf);
-  uint64_t wide = (static_cast<uint64_t>(s0) << 3u) + static_cast<uint64_t>(s1);
-  inst.sdst.write_scalar(wf, static_cast<uint32_t>(wide));
-  wf.write_scc(wide > 0xFFFFFFFFULL);
+  uint32_t result = [&]() {
+    uint64_t w = (static_cast<uint64_t>(inst.ssrc0.read_scalar(wf)) << 3u) +
+                 static_cast<uint64_t>(inst.ssrc1.read_scalar(wf));
+    wf.write_scc(w > 0xFFFFFFFFULL);
+    return static_cast<uint32_t>(w);
+  }();
+  inst.sdst.write_scalar(wf, result);
 }
 
 template <typename Inst>
 inline void execute_s_lshl4_add_u32_sop2([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
-  uint32_t s0 = inst.ssrc0.read_scalar(wf);
-  uint32_t s1 = inst.ssrc1.read_scalar(wf);
-  uint64_t wide = (static_cast<uint64_t>(s0) << 4u) + static_cast<uint64_t>(s1);
-  inst.sdst.write_scalar(wf, static_cast<uint32_t>(wide));
-  wf.write_scc(wide > 0xFFFFFFFFULL);
+  uint32_t result = [&]() {
+    uint64_t w = (static_cast<uint64_t>(inst.ssrc0.read_scalar(wf)) << 4u) +
+                 static_cast<uint64_t>(inst.ssrc1.read_scalar(wf));
+    wf.write_scc(w > 0xFFFFFFFFULL);
+    return static_cast<uint32_t>(w);
+  }();
+  inst.sdst.write_scalar(wf, result);
 }
 
 template <typename Inst>
 inline void execute_s_lshl_b32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t s0 = inst.ssrc0.read_scalar(wf);
-  uint32_t s1 = inst.ssrc1.read_scalar(wf);
-  uint32_t result = s0 << (s1 & 31u);
+  uint32_t result = (inst.ssrc0.read_scalar(wf) << (inst.ssrc1.read_scalar(wf) & 31u));
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_lshl_b64_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint64_t s0 = inst.ssrc0.read_scalar64(wf);
-  uint64_t s1 = inst.ssrc1.read_scalar64(wf);
-  uint64_t result = s0 << (s1 & 63u);
+  uint64_t result = (static_cast<uint64_t>(inst.ssrc0.read_scalar64(wf))
+                     << (static_cast<uint64_t>(inst.ssrc1.read_scalar64(wf)) & 63u));
   inst.sdst.write_scalar64(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_lshr_b32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t s0 = inst.ssrc0.read_scalar(wf);
-  uint32_t s1 = inst.ssrc1.read_scalar(wf);
-  uint32_t result = s0 >> (s1 & 31u);
+  uint32_t result = (inst.ssrc0.read_scalar(wf) >> (inst.ssrc1.read_scalar(wf) & 31u));
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_lshr_b64_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint64_t s0 = inst.ssrc0.read_scalar64(wf);
-  uint64_t s1 = inst.ssrc1.read_scalar64(wf);
-  uint64_t result = s0 >> (s1 & 63u);
+  uint64_t result = (static_cast<uint64_t>(inst.ssrc0.read_scalar64(wf)) >>
+                     (static_cast<uint64_t>(inst.ssrc1.read_scalar64(wf)) & 63u));
   inst.sdst.write_scalar64(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_max_i32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   int32_t s0 = static_cast<int32_t>(inst.ssrc0.read_scalar(wf));
   int32_t s1 = static_cast<int32_t>(inst.ssrc1.read_scalar(wf));
-  int32_t result = s0 > s1 ? s0 : s1;
-  inst.sdst.write_scalar(wf, static_cast<uint32_t>(result));
-  wf.write_scc(s0 > s1);
+  int32_t result = std::max(static_cast<int32_t>(inst.ssrc0.read_scalar(wf)),
+                            static_cast<int32_t>(inst.ssrc1.read_scalar(wf)));
+  inst.sdst.write_scalar(wf, result);
+  wf.write_scc((s0 >= s1));
 }
 
 template <typename Inst>
 inline void execute_s_max_u32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint32_t s0 = inst.ssrc0.read_scalar(wf);
   uint32_t s1 = inst.ssrc1.read_scalar(wf);
-  uint32_t result = s0 > s1 ? s0 : s1;
+  uint32_t result = std::max(inst.ssrc0.read_scalar(wf), inst.ssrc1.read_scalar(wf));
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc(s0 > s1);
+  wf.write_scc((s0 >= s1));
 }
 
 template <typename Inst>
 inline void execute_s_min_i32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   int32_t s0 = static_cast<int32_t>(inst.ssrc0.read_scalar(wf));
   int32_t s1 = static_cast<int32_t>(inst.ssrc1.read_scalar(wf));
-  int32_t result = s0 < s1 ? s0 : s1;
-  inst.sdst.write_scalar(wf, static_cast<uint32_t>(result));
-  wf.write_scc(s0 < s1);
+  int32_t result = std::min(static_cast<int32_t>(inst.ssrc0.read_scalar(wf)),
+                            static_cast<int32_t>(inst.ssrc1.read_scalar(wf)));
+  inst.sdst.write_scalar(wf, result);
+  wf.write_scc((s0 < s1));
 }
 
 template <typename Inst>
 inline void execute_s_min_u32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint32_t s0 = inst.ssrc0.read_scalar(wf);
   uint32_t s1 = inst.ssrc1.read_scalar(wf);
-  uint32_t result = s0 < s1 ? s0 : s1;
+  uint32_t result = std::min(inst.ssrc0.read_scalar(wf), inst.ssrc1.read_scalar(wf));
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc(s0 < s1);
+  wf.write_scc((s0 < s1));
 }
 
 template <typename Inst>
@@ -1385,46 +1315,43 @@ inline void execute_s_movk_i32_sopk([[maybe_unused]] Inst &inst, [[maybe_unused]
 
 template <typename Inst>
 inline void execute_s_mul_f16_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t s0 = inst.ssrc0.read_scalar(wf);
-  uint32_t s1 = inst.ssrc1.read_scalar(wf);
-  float f0 = util::f16_to_f32(static_cast<uint16_t>(s0 & 0xFFFF));
-  float f1 = util::f16_to_f32(static_cast<uint16_t>(s1 & 0xFFFF));
-  float fr = f0 * f1;
-  inst.sdst.write_scalar(wf, static_cast<uint32_t>(util::f32_to_f16(fr)));
+  float result = (util::f16_to_f32(static_cast<uint16_t>(inst.ssrc0.read_scalar(wf))) *
+                  util::f16_to_f32(static_cast<uint16_t>(inst.ssrc1.read_scalar(wf))));
+  inst.sdst.write_scalar(wf, util::f32_to_f16(result));
 }
 
 template <typename Inst>
 inline void execute_s_mul_f32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t s0 = inst.ssrc0.read_scalar(wf);
-  uint32_t s1 = inst.ssrc1.read_scalar(wf);
-  float f0 = std::bit_cast<float>(s0);
-  float f1 = std::bit_cast<float>(s1);
-  float fr = f0 * f1;
-  inst.sdst.write_scalar(wf, std::bit_cast<uint32_t>(fr));
+  float result = (std::bit_cast<float>(inst.ssrc0.read_scalar(wf)) *
+                  std::bit_cast<float>(inst.ssrc1.read_scalar(wf)));
+  inst.sdst.write_scalar(wf, std::bit_cast<uint32_t>(result));
 }
 
 template <typename Inst>
 inline void execute_s_mul_hi_i32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  int32_t s0 = static_cast<int32_t>(inst.ssrc0.read_scalar(wf));
-  int32_t s1 = static_cast<int32_t>(inst.ssrc1.read_scalar(wf));
-  int64_t wide = static_cast<int64_t>(s0) * static_cast<int64_t>(s1);
-  inst.sdst.write_scalar(wf, static_cast<uint32_t>(static_cast<uint64_t>(wide) >> 32));
+  int32_t result = [&]() {
+    auto a = static_cast<uint64_t>(static_cast<int32_t>(inst.ssrc0.read_scalar(wf)));
+    auto b = static_cast<uint64_t>(static_cast<int32_t>(inst.ssrc1.read_scalar(wf)));
+    return static_cast<uint32_t>((a * b) >> 32);
+  }();
+  inst.sdst.write_scalar(wf, result);
 }
 
 template <typename Inst>
 inline void execute_s_mul_hi_u32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t s0 = inst.ssrc0.read_scalar(wf);
-  uint32_t s1 = inst.ssrc1.read_scalar(wf);
-  uint64_t wide = static_cast<uint64_t>(s0) * static_cast<uint64_t>(s1);
-  inst.sdst.write_scalar(wf, static_cast<uint32_t>(wide >> 32));
+  uint32_t result = [&]() {
+    auto a = static_cast<uint64_t>(inst.ssrc0.read_scalar(wf));
+    auto b = static_cast<uint64_t>(inst.ssrc1.read_scalar(wf));
+    return static_cast<uint32_t>((a * b) >> 32);
+  }();
+  inst.sdst.write_scalar(wf, result);
 }
 
 template <typename Inst>
 inline void execute_s_mul_i32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  int32_t s0 = static_cast<int32_t>(inst.ssrc0.read_scalar(wf));
-  int32_t s1 = static_cast<int32_t>(inst.ssrc1.read_scalar(wf));
-  inst.sdst.write_scalar(
-      wf, static_cast<uint32_t>(static_cast<uint32_t>(s0) * static_cast<uint32_t>(s1)));
+  int32_t result = (static_cast<int32_t>(inst.ssrc0.read_scalar(wf)) *
+                    static_cast<int32_t>(inst.ssrc1.read_scalar(wf)));
+  inst.sdst.write_scalar(wf, result);
 }
 
 template <typename Inst>
@@ -1436,50 +1363,35 @@ inline void execute_s_mulk_i32_sopk([[maybe_unused]] Inst &inst, [[maybe_unused]
 
 template <typename Inst>
 inline void execute_s_nand_b32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t s0 = inst.ssrc0.read_scalar(wf);
-  uint32_t s1 = inst.ssrc1.read_scalar(wf);
-  uint32_t result = ~(s0 & s1);
+  uint32_t result = (~(inst.ssrc0.read_scalar(wf) & inst.ssrc1.read_scalar(wf)));
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_nand_b64_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint64_t s0 = inst.ssrc0.read_scalar64(wf);
-  uint64_t s1 = inst.ssrc1.read_scalar64(wf);
-  uint64_t result = ~(s0 & s1);
+  uint64_t result = (~(static_cast<uint64_t>(inst.ssrc0.read_scalar64(wf)) &
+                       static_cast<uint64_t>(inst.ssrc1.read_scalar64(wf))));
   inst.sdst.write_scalar64(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_nand_saveexec_b32_sop1([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
-  uint64_t old_exec = wf.exec();
-  uint64_t src = inst.ssrc0.read_scalar64(wf);
-  inst.sdst.write_scalar64(wf, old_exec);
-  uint64_t result = ~(old_exec & src);
-  util::Logger::vm([&](auto &os) {
-    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
-                      inst.ssrc0.encoding_value(), src, old_exec, result);
-  });
-  wf.set_exec(result);
-  wf.write_scc(result != 0);
+  uint64_t src = static_cast<uint64_t>(inst.ssrc0.read_scalar(wf));
+  inst.sdst.write_scalar(wf, wf.exec());
+  wf.set_exec((~(wf.exec() & src)));
+  wf.write_scc((wf.exec() != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_nand_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
-  uint64_t old_exec = wf.exec();
-  uint64_t src = inst.ssrc0.read_scalar64(wf);
-  inst.sdst.write_scalar64(wf, old_exec);
-  uint64_t result = ~(old_exec & src);
-  util::Logger::vm([&](auto &os) {
-    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
-                      inst.ssrc0.encoding_value(), src, old_exec, result);
-  });
-  wf.set_exec(result);
-  wf.write_scc(result != 0);
+  uint64_t src = static_cast<uint64_t>(inst.ssrc0.read_scalar64(wf));
+  inst.sdst.write_scalar64(wf, wf.exec());
+  wf.set_exec((~(wf.exec() & src)));
+  wf.write_scc((wf.exec() != 0ULL));
 }
 
 template <typename Inst>
@@ -1487,300 +1399,223 @@ inline void execute_s_nop_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wav
 
 template <typename Inst>
 inline void execute_s_nor_b32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t s0 = inst.ssrc0.read_scalar(wf);
-  uint32_t s1 = inst.ssrc1.read_scalar(wf);
-  uint32_t result = ~(s0 | s1);
+  uint32_t result = (~(inst.ssrc0.read_scalar(wf) | inst.ssrc1.read_scalar(wf)));
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_nor_b64_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint64_t s0 = inst.ssrc0.read_scalar64(wf);
-  uint64_t s1 = inst.ssrc1.read_scalar64(wf);
-  uint64_t result = ~(s0 | s1);
+  uint64_t result = (~(static_cast<uint64_t>(inst.ssrc0.read_scalar64(wf)) |
+                       static_cast<uint64_t>(inst.ssrc1.read_scalar64(wf))));
   inst.sdst.write_scalar64(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_nor_saveexec_b32_sop1([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
-  uint64_t old_exec = wf.exec();
-  uint64_t src = inst.ssrc0.read_scalar64(wf);
-  inst.sdst.write_scalar64(wf, old_exec);
-  uint64_t result = ~(old_exec | src);
-  util::Logger::vm([&](auto &os) {
-    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
-                      inst.ssrc0.encoding_value(), src, old_exec, result);
-  });
-  wf.set_exec(result);
-  wf.write_scc(result != 0);
+  uint64_t src = static_cast<uint64_t>(inst.ssrc0.read_scalar(wf));
+  inst.sdst.write_scalar(wf, wf.exec());
+  wf.set_exec((~(wf.exec() | src)));
+  wf.write_scc((wf.exec() != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_nor_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
-  uint64_t old_exec = wf.exec();
-  uint64_t src = inst.ssrc0.read_scalar64(wf);
-  inst.sdst.write_scalar64(wf, old_exec);
-  uint64_t result = ~(old_exec | src);
-  util::Logger::vm([&](auto &os) {
-    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
-                      inst.ssrc0.encoding_value(), src, old_exec, result);
-  });
-  wf.set_exec(result);
-  wf.write_scc(result != 0);
+  uint64_t src = static_cast<uint64_t>(inst.ssrc0.read_scalar64(wf));
+  inst.sdst.write_scalar64(wf, wf.exec());
+  wf.set_exec((~(wf.exec() | src)));
+  wf.write_scc((wf.exec() != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_not_b32_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t val = inst.ssrc0.read_scalar(wf);
-  uint32_t result = ~val;
+  uint32_t result = (~inst.ssrc0.read_scalar(wf));
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_not_b64_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint64_t val = inst.ssrc0.read_scalar64(wf);
-  uint64_t result = ~val;
+  uint64_t result = (~static_cast<uint64_t>(inst.ssrc0.read_scalar64(wf)));
   inst.sdst.write_scalar64(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_or_b32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t s0 = inst.ssrc0.read_scalar(wf);
-  uint32_t s1 = inst.ssrc1.read_scalar(wf);
-  uint32_t result = s0 | s1;
+  uint32_t result = (inst.ssrc0.read_scalar(wf) | inst.ssrc1.read_scalar(wf));
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_or_b64_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint64_t s0 = inst.ssrc0.read_scalar64(wf);
-  uint64_t s1 = inst.ssrc1.read_scalar64(wf);
-  uint64_t result = s0 | s1;
+  uint64_t result = (static_cast<uint64_t>(inst.ssrc0.read_scalar64(wf)) |
+                     static_cast<uint64_t>(inst.ssrc1.read_scalar64(wf)));
   inst.sdst.write_scalar64(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_or_not0_saveexec_b32_sop1([[maybe_unused]] Inst &inst,
                                                 [[maybe_unused]] Wavefront &wf) {
-  uint64_t old_exec = wf.exec();
-  uint64_t src = inst.ssrc0.read_scalar64(wf);
-  inst.sdst.write_scalar64(wf, old_exec);
-  uint64_t result = old_exec | ~src;
-  util::Logger::vm([&](auto &os) {
-    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
-                      inst.ssrc0.encoding_value(), src, old_exec, result);
-  });
-  wf.set_exec(result);
-  wf.write_scc(result != 0);
+  uint64_t src = static_cast<uint64_t>(inst.ssrc0.read_scalar(wf));
+  inst.sdst.write_scalar(wf, wf.exec());
+  wf.set_exec((wf.exec() | (~src)));
+  wf.write_scc((wf.exec() != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_or_not0_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                                 [[maybe_unused]] Wavefront &wf) {
-  uint64_t old_exec = wf.exec();
-  uint64_t src = inst.ssrc0.read_scalar64(wf);
-  inst.sdst.write_scalar64(wf, old_exec);
-  uint64_t result = old_exec | ~src;
-  util::Logger::vm([&](auto &os) {
-    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
-                      inst.ssrc0.encoding_value(), src, old_exec, result);
-  });
-  wf.set_exec(result);
-  wf.write_scc(result != 0);
+  uint64_t src = static_cast<uint64_t>(inst.ssrc0.read_scalar64(wf));
+  inst.sdst.write_scalar64(wf, wf.exec());
+  wf.set_exec((wf.exec() | (~src)));
+  wf.write_scc((wf.exec() != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_or_not1_saveexec_b32_sop1([[maybe_unused]] Inst &inst,
                                                 [[maybe_unused]] Wavefront &wf) {
-  uint64_t old_exec = wf.exec();
-  uint64_t src = inst.ssrc0.read_scalar64(wf);
-  inst.sdst.write_scalar64(wf, old_exec);
-  uint64_t result = ~src | old_exec;
-  util::Logger::vm([&](auto &os) {
-    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
-                      inst.ssrc0.encoding_value(), src, old_exec, result);
-  });
-  wf.set_exec(result);
-  wf.write_scc(result != 0);
+  uint64_t src = static_cast<uint64_t>(inst.ssrc0.read_scalar(wf));
+  inst.sdst.write_scalar(wf, wf.exec());
+  wf.set_exec((src | (~wf.exec())));
+  wf.write_scc((wf.exec() != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_or_not1_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                                 [[maybe_unused]] Wavefront &wf) {
-  uint64_t old_exec = wf.exec();
-  uint64_t src = inst.ssrc0.read_scalar64(wf);
-  inst.sdst.write_scalar64(wf, old_exec);
-  uint64_t result = ~src | old_exec;
-  util::Logger::vm([&](auto &os) {
-    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
-                      inst.ssrc0.encoding_value(), src, old_exec, result);
-  });
-  wf.set_exec(result);
-  wf.write_scc(result != 0);
+  uint64_t src = static_cast<uint64_t>(inst.ssrc0.read_scalar64(wf));
+  inst.sdst.write_scalar64(wf, wf.exec());
+  wf.set_exec((src | (~wf.exec())));
+  wf.write_scc((wf.exec() != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_or_saveexec_b32_sop1([[maybe_unused]] Inst &inst,
                                            [[maybe_unused]] Wavefront &wf) {
-  uint64_t old_exec = wf.exec();
-  uint64_t src = inst.ssrc0.read_scalar64(wf);
-  inst.sdst.write_scalar64(wf, old_exec);
-  uint64_t result = old_exec | src;
-  util::Logger::vm([&](auto &os) {
-    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
-                      inst.ssrc0.encoding_value(), src, old_exec, result);
-  });
-  wf.set_exec(result);
-  wf.write_scc(result != 0);
+  uint64_t src = static_cast<uint64_t>(inst.ssrc0.read_scalar(wf));
+  inst.sdst.write_scalar(wf, wf.exec());
+  wf.set_exec((wf.exec() | src));
+  wf.write_scc((wf.exec() != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_or_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                            [[maybe_unused]] Wavefront &wf) {
-  uint64_t old_exec = wf.exec();
-  uint64_t src = inst.ssrc0.read_scalar64(wf);
-  inst.sdst.write_scalar64(wf, old_exec);
-  uint64_t result = old_exec | src;
-  util::Logger::vm([&](auto &os) {
-    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
-                      inst.ssrc0.encoding_value(), src, old_exec, result);
-  });
-  wf.set_exec(result);
-  wf.write_scc(result != 0);
+  uint64_t src = static_cast<uint64_t>(inst.ssrc0.read_scalar64(wf));
+  inst.sdst.write_scalar64(wf, wf.exec());
+  wf.set_exec((wf.exec() | src));
+  wf.write_scc((wf.exec() != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_orn1_saveexec_b32_sop1([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
-  uint64_t old_exec = wf.exec();
-  uint64_t src = inst.ssrc0.read_scalar64(wf);
-  inst.sdst.write_scalar64(wf, old_exec);
-  uint64_t result = ~src | old_exec;
-  util::Logger::vm([&](auto &os) {
-    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
-                      inst.ssrc0.encoding_value(), src, old_exec, result);
-  });
-  wf.set_exec(result);
-  wf.write_scc(result != 0);
+  uint64_t src = static_cast<uint64_t>(inst.ssrc0.read_scalar(wf));
+  inst.sdst.write_scalar(wf, wf.exec());
+  wf.set_exec((wf.exec() & src));
+  wf.write_scc((wf.exec() != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_orn1_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
-  uint64_t old_exec = wf.exec();
-  uint64_t src = inst.ssrc0.read_scalar64(wf);
-  inst.sdst.write_scalar64(wf, old_exec);
-  uint64_t result = ~src | old_exec;
-  util::Logger::vm([&](auto &os) {
-    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
-                      inst.ssrc0.encoding_value(), src, old_exec, result);
-  });
-  wf.set_exec(result);
-  wf.write_scc(result != 0);
+  uint64_t src = static_cast<uint64_t>(inst.ssrc0.read_scalar64(wf));
+  inst.sdst.write_scalar64(wf, wf.exec());
+  wf.set_exec((wf.exec() & src));
+  wf.write_scc((wf.exec() != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_orn2_b32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t s0 = inst.ssrc0.read_scalar(wf);
-  uint32_t s1 = inst.ssrc1.read_scalar(wf);
-  uint32_t result = s0 | ~s1;
+  uint32_t result = (inst.ssrc0.read_scalar(wf) | (~inst.ssrc1.read_scalar(wf)));
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_orn2_b64_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint64_t s0 = inst.ssrc0.read_scalar64(wf);
-  uint64_t s1 = inst.ssrc1.read_scalar64(wf);
-  uint64_t result = s0 | ~s1;
+  uint64_t result = (static_cast<uint64_t>(inst.ssrc0.read_scalar64(wf)) |
+                     (~static_cast<uint64_t>(inst.ssrc1.read_scalar64(wf))));
   inst.sdst.write_scalar64(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_orn2_saveexec_b32_sop1([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
-  uint64_t old_exec = wf.exec();
-  uint64_t src = inst.ssrc0.read_scalar64(wf);
-  inst.sdst.write_scalar64(wf, old_exec);
-  uint64_t result = src | ~old_exec;
-  util::Logger::vm([&](auto &os) {
-    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
-                      inst.ssrc0.encoding_value(), src, old_exec, result);
-  });
-  wf.set_exec(result);
-  wf.write_scc(result != 0);
+  uint64_t src = static_cast<uint64_t>(inst.ssrc0.read_scalar(wf));
+  inst.sdst.write_scalar(wf, wf.exec());
+  wf.set_exec((src | (~wf.exec())));
+  wf.write_scc((wf.exec() != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_orn2_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
-  uint64_t old_exec = wf.exec();
-  uint64_t src = inst.ssrc0.read_scalar64(wf);
-  inst.sdst.write_scalar64(wf, old_exec);
-  uint64_t result = src | ~old_exec;
-  util::Logger::vm([&](auto &os) {
-    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
-                      inst.ssrc0.encoding_value(), src, old_exec, result);
-  });
-  wf.set_exec(result);
-  wf.write_scc(result != 0);
+  uint64_t src = static_cast<uint64_t>(inst.ssrc0.read_scalar64(wf));
+  inst.sdst.write_scalar64(wf, wf.exec());
+  wf.set_exec((src | (~wf.exec())));
+  wf.write_scc((wf.exec() != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_pack_hh_b32_b16_sop2([[maybe_unused]] Inst &inst,
                                            [[maybe_unused]] Wavefront &wf) {
-  uint32_t s0 = inst.ssrc0.read_scalar(wf);
-  uint32_t s1 = inst.ssrc1.read_scalar(wf);
-  inst.sdst.write_scalar(wf, ((s0 >> 16) & 0xFFFFu) | (s1 & 0xFFFF0000u));
+  uint32_t result =
+      (((inst.ssrc0.read_scalar(wf) >> 16) & 0xFFFFu) | (inst.ssrc1.read_scalar(wf) & 0xFFFF0000u));
+  inst.sdst.write_scalar(wf, result);
 }
 
 template <typename Inst>
 inline void execute_s_pack_lh_b32_b16_sop2([[maybe_unused]] Inst &inst,
                                            [[maybe_unused]] Wavefront &wf) {
-  uint32_t s0 = inst.ssrc0.read_scalar(wf);
-  uint32_t s1 = inst.ssrc1.read_scalar(wf);
-  inst.sdst.write_scalar(wf, (s0 & 0xFFFFu) | (s1 & 0xFFFF0000u));
+  uint32_t result =
+      ((inst.ssrc0.read_scalar(wf) & 0xFFFFu) | (inst.ssrc1.read_scalar(wf) & 0xFFFF0000u));
+  inst.sdst.write_scalar(wf, result);
 }
 
 template <typename Inst>
 inline void execute_s_pack_ll_b32_b16_sop2([[maybe_unused]] Inst &inst,
                                            [[maybe_unused]] Wavefront &wf) {
-  uint32_t s0 = inst.ssrc0.read_scalar(wf);
-  uint32_t s1 = inst.ssrc1.read_scalar(wf);
-  inst.sdst.write_scalar(wf, (s0 & 0xFFFFu) | ((s1 & 0xFFFFu) << 16));
+  uint32_t result =
+      ((inst.ssrc0.read_scalar(wf) & 0xFFFFu) | ((inst.ssrc1.read_scalar(wf) & 0xFFFFu) << 16));
+  inst.sdst.write_scalar(wf, result);
 }
 
 template <typename Inst>
 inline void execute_s_quadmask_b32_sop1([[maybe_unused]] Inst &inst,
                                         [[maybe_unused]] Wavefront &wf) {
-  uint32_t val = inst.ssrc0.read_scalar(wf);
-  uint32_t result = 0;
-  for (int q = 0; q < 8; ++q)
-    if (val & (0xFu << (q * 4)))
-      result |= (1u << q);
+  uint32_t result = [&]() {
+    uint32_t s = inst.ssrc0.read_scalar(wf);
+    uint32_t r = 0;
+    for (int i = 0; i < 8; ++i)
+      if (s & (0xFu << (i * 4)))
+        r |= (1u << i);
+    return r;
+  }();
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_quadmask_b64_sop1([[maybe_unused]] Inst &inst,
                                         [[maybe_unused]] Wavefront &wf) {
-  uint64_t val = inst.ssrc0.read_scalar64(wf);
-  uint64_t result = 0;
-  for (int q = 0; q < 16; ++q)
-    if (val & (0xFULL << (q * 4)))
-      result |= (1ULL << q);
+  uint64_t result = [&]() {
+    uint64_t s = inst.ssrc0.read_scalar64(wf);
+    uint64_t r = 0;
+    for (int i = 0; i < 16; ++i)
+      if (s & (0xFULL << (i * 4)))
+        r |= (1ULL << i);
+    return r;
+  }();
   inst.sdst.write_scalar64(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0ULL));
 }
 
 template <typename Inst>
@@ -1788,19 +1623,17 @@ inline void execute_s_rfe_b64_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_s_rndne_f16_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t val = inst.ssrc0.read_scalar(wf);
-  float f = util::f16_to_f32(static_cast<uint16_t>(val & 0xFFFF));
-  uint32_t result = static_cast<uint32_t>(util::f32_to_f16(std::nearbyint(f)));
-  inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  float result =
+      std::nearbyint(util::f16_to_f32(static_cast<uint16_t>(inst.ssrc0.read_scalar(wf))));
+  inst.sdst.write_scalar(wf, util::f32_to_f16(result));
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_rndne_f32_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t val = inst.ssrc0.read_scalar(wf);
-  uint32_t result = std::bit_cast<uint32_t>(std::nearbyint(std::bit_cast<float>(val)));
-  inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  float result = std::nearbyint(std::bit_cast<float>(inst.ssrc0.read_scalar(wf)));
+  inst.sdst.write_scalar(wf, std::bit_cast<uint32_t>(result));
+  wf.write_scc((result != 0.0f));
 }
 
 template <typename Inst>
@@ -1841,18 +1674,65 @@ template <typename Inst>
 inline void execute_s_setprio_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {}
 
 template <typename Inst>
+inline void execute_s_setreg_b32_sopk([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  uint16_t hwreg = inst.simm16.encoding_value_;
+  uint32_t reg_id = hwreg & 0x3Fu;
+  uint32_t offset = (hwreg >> 6) & 0x1Fu;
+  uint32_t size = ((hwreg >> 11) & 0x1Fu) + 1;
+  if (offset + size > 32)
+    size = 32 - offset;
+  uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);
+  uint32_t src = inst.sdst.read_scalar(wf);
+  switch (reg_id) {
+  case 1: {
+    uint32_t s = wf.status_raw();
+    s = (s & ~(mask << offset)) | ((src & mask) << offset);
+    wf.set_status_raw(s);
+    break;
+  }
+  default:
+    util::Logger::warn("s_setreg_b32: unhandled hwreg id=", reg_id);
+    break;
+  }
+}
+
+template <typename Inst>
+inline void execute_s_setreg_imm32_b32_sopk([[maybe_unused]] Inst &inst,
+                                            [[maybe_unused]] Wavefront &wf) {
+  uint16_t hwreg = inst.simm16.encoding_value_;
+  uint32_t reg_id = hwreg & 0x3Fu;
+  uint32_t offset = (hwreg >> 6) & 0x1Fu;
+  uint32_t size = ((hwreg >> 11) & 0x1Fu) + 1;
+  if (offset + size > 32)
+    size = 32 - offset;
+  uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);
+  uint32_t src = inst.literal_;
+  switch (reg_id) {
+  case 1: {
+    uint32_t s = wf.status_raw();
+    s = (s & ~(mask << offset)) | ((src & mask) << offset);
+    wf.set_status_raw(s);
+    break;
+  }
+  default:
+    util::Logger::warn("s_setreg_imm32_b32: unhandled hwreg id=", reg_id);
+    break;
+  }
+}
+
+template <typename Inst>
 inline void execute_s_sext_i32_i16_sop1([[maybe_unused]] Inst &inst,
                                         [[maybe_unused]] Wavefront &wf) {
-  uint32_t val = inst.ssrc0.read_scalar(wf);
-  uint32_t result = static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(val & 0xFFFF)));
+  int32_t result = static_cast<int32_t>(
+      static_cast<int32_t>(static_cast<int32_t>(inst.ssrc0.read_scalar(wf)) << 16) >> 16);
   inst.sdst.write_scalar(wf, result);
 }
 
 template <typename Inst>
 inline void execute_s_sext_i32_i8_sop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  uint32_t val = inst.ssrc0.read_scalar(wf);
-  uint32_t result = static_cast<uint32_t>(static_cast<int32_t>(static_cast<int8_t>(val & 0xFF)));
+  int32_t result = static_cast<int32_t>(
+      static_cast<int32_t>(static_cast<int32_t>(inst.ssrc0.read_scalar(wf)) << 24) >> 24);
   inst.sdst.write_scalar(wf, result);
 }
 
@@ -1861,50 +1741,47 @@ inline void execute_s_sleep_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] W
 
 template <typename Inst>
 inline void execute_s_sub_f16_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t s0 = inst.ssrc0.read_scalar(wf);
-  uint32_t s1 = inst.ssrc1.read_scalar(wf);
-  float f0 = util::f16_to_f32(static_cast<uint16_t>(s0 & 0xFFFF));
-  float f1 = util::f16_to_f32(static_cast<uint16_t>(s1 & 0xFFFF));
-  float fr = f0 - f1;
-  inst.sdst.write_scalar(wf, static_cast<uint32_t>(util::f32_to_f16(fr)));
+  float result = (util::f16_to_f32(static_cast<uint16_t>(inst.ssrc0.read_scalar(wf))) -
+                  util::f16_to_f32(static_cast<uint16_t>(inst.ssrc1.read_scalar(wf))));
+  inst.sdst.write_scalar(wf, util::f32_to_f16(result));
 }
 
 template <typename Inst>
 inline void execute_s_sub_f32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t s0 = inst.ssrc0.read_scalar(wf);
-  uint32_t s1 = inst.ssrc1.read_scalar(wf);
-  float f0 = std::bit_cast<float>(s0);
-  float f1 = std::bit_cast<float>(s1);
-  float fr = f0 - f1;
-  inst.sdst.write_scalar(wf, std::bit_cast<uint32_t>(fr));
+  float result = (std::bit_cast<float>(inst.ssrc0.read_scalar(wf)) -
+                  std::bit_cast<float>(inst.ssrc1.read_scalar(wf)));
+  inst.sdst.write_scalar(wf, std::bit_cast<uint32_t>(result));
 }
 
 template <typename Inst>
 inline void execute_s_sub_i32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   int32_t s0 = static_cast<int32_t>(inst.ssrc0.read_scalar(wf));
   int32_t s1 = static_cast<int32_t>(inst.ssrc1.read_scalar(wf));
-  int64_t wide = static_cast<int64_t>(s0) - static_cast<int64_t>(s1);
-  int32_t result = static_cast<int32_t>(wide);
-  inst.sdst.write_scalar(wf, static_cast<uint32_t>(result));
-  wf.write_scc(wide != static_cast<int64_t>(result));
+  int32_t result = (static_cast<int32_t>(inst.ssrc0.read_scalar(wf)) -
+                    static_cast<int32_t>(inst.ssrc1.read_scalar(wf)));
+  inst.sdst.write_scalar(wf, result);
+  wf.write_scc(
+      ((static_cast<int64_t>(s0) - static_cast<int64_t>(s1)) != static_cast<int64_t>(result)));
 }
 
 template <typename Inst>
 inline void execute_s_sub_u32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint32_t s0 = inst.ssrc0.read_scalar(wf);
   uint32_t s1 = inst.ssrc1.read_scalar(wf);
-  inst.sdst.write_scalar(wf, s0 - s1);
-  wf.write_scc(s0 < s1);
+  uint32_t result = (inst.ssrc0.read_scalar(wf) - inst.ssrc1.read_scalar(wf));
+  inst.sdst.write_scalar(wf, result);
+  wf.write_scc((s0 < s1));
 }
 
 template <typename Inst>
 inline void execute_s_subb_u32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t s0 = inst.ssrc0.read_scalar(wf);
-  uint32_t s1 = inst.ssrc1.read_scalar(wf);
-  uint32_t bin = wf.read_scc() ? 1u : 0u;
-  uint64_t wide = static_cast<uint64_t>(s0) - static_cast<uint64_t>(s1) - bin;
-  inst.sdst.write_scalar(wf, static_cast<uint32_t>(wide));
-  wf.write_scc(static_cast<uint64_t>(s0) < static_cast<uint64_t>(s1) + bin);
+  uint32_t result = [&]() {
+    uint32_t a = inst.ssrc0.read_scalar(wf), b = inst.ssrc1.read_scalar(wf);
+    uint32_t cin = wf.read_scc() ? 1u : 0u;
+    wf.write_scc(static_cast<uint64_t>(a) < static_cast<uint64_t>(b) + cin);
+    return a - b - cin;
+  }();
+  inst.sdst.write_scalar(wf, result);
 }
 
 template <typename Inst>
@@ -1912,19 +1789,16 @@ inline void execute_s_trap_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wa
 
 template <typename Inst>
 inline void execute_s_trunc_f16_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t val = inst.ssrc0.read_scalar(wf);
-  float f = util::f16_to_f32(static_cast<uint16_t>(val & 0xFFFF));
-  uint32_t result = static_cast<uint32_t>(util::f32_to_f16(std::trunc(f)));
-  inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  float result = std::trunc(util::f16_to_f32(static_cast<uint16_t>(inst.ssrc0.read_scalar(wf))));
+  inst.sdst.write_scalar(wf, util::f32_to_f16(result));
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_trunc_f32_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t val = inst.ssrc0.read_scalar(wf);
-  uint32_t result = std::bit_cast<uint32_t>(std::trunc(std::bit_cast<float>(val)));
-  inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  float result = std::trunc(std::bit_cast<float>(inst.ssrc0.read_scalar(wf)));
+  inst.sdst.write_scalar(wf, std::bit_cast<uint32_t>(result));
+  wf.write_scc((result != 0.0f));
 }
 
 template <typename Inst>
@@ -1953,120 +1827,96 @@ inline void execute_s_wakeup_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] 
 
 template <typename Inst>
 inline void execute_s_wqm_b32_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t val = inst.ssrc0.read_scalar(wf);
-  uint32_t result = 0;
-  for (int q = 0; q < 8; ++q)
-    if (val & (0xFu << (q * 4)))
-      result |= (0xFu << (q * 4));
+  uint32_t result = [&]() {
+    uint32_t s = inst.ssrc0.read_scalar(wf);
+    uint32_t r = 0;
+    for (int i = 0; i < 8; ++i)
+      if (s & (0xFu << (i * 4)))
+        r |= (0xFu << (i * 4));
+    return r;
+  }();
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_wqm_b64_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint64_t val = inst.ssrc0.read_scalar64(wf);
-  uint64_t result = 0;
-  for (int q = 0; q < 16; ++q)
-    if (val & (0xFULL << (q * 4)))
-      result |= (0xFULL << (q * 4));
+  uint64_t result = [&]() {
+    uint64_t s = inst.ssrc0.read_scalar64(wf);
+    uint64_t r = 0;
+    for (int i = 0; i < 16; ++i)
+      if (s & (0xFULL << (i * 4)))
+        r |= (0xFULL << (i * 4));
+    return r;
+  }();
   inst.sdst.write_scalar64(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_xnor_b32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t s0 = inst.ssrc0.read_scalar(wf);
-  uint32_t s1 = inst.ssrc1.read_scalar(wf);
-  uint32_t result = ~(s0 ^ s1);
+  uint32_t result = (~(inst.ssrc0.read_scalar(wf) ^ inst.ssrc1.read_scalar(wf)));
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_xnor_b64_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint64_t s0 = inst.ssrc0.read_scalar64(wf);
-  uint64_t s1 = inst.ssrc1.read_scalar64(wf);
-  uint64_t result = ~(s0 ^ s1);
+  uint64_t result = (~(static_cast<uint64_t>(inst.ssrc0.read_scalar64(wf)) ^
+                       static_cast<uint64_t>(inst.ssrc1.read_scalar64(wf))));
   inst.sdst.write_scalar64(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_xnor_saveexec_b32_sop1([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
-  uint64_t old_exec = wf.exec();
-  uint64_t src = inst.ssrc0.read_scalar64(wf);
-  inst.sdst.write_scalar64(wf, old_exec);
-  uint64_t result = ~(old_exec ^ src);
-  util::Logger::vm([&](auto &os) {
-    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
-                      inst.ssrc0.encoding_value(), src, old_exec, result);
-  });
-  wf.set_exec(result);
-  wf.write_scc(result != 0);
+  uint64_t src = static_cast<uint64_t>(inst.ssrc0.read_scalar(wf));
+  inst.sdst.write_scalar(wf, wf.exec());
+  wf.set_exec((~(wf.exec() ^ src)));
+  wf.write_scc((wf.exec() != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_xnor_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
-  uint64_t old_exec = wf.exec();
-  uint64_t src = inst.ssrc0.read_scalar64(wf);
-  inst.sdst.write_scalar64(wf, old_exec);
-  uint64_t result = ~(old_exec ^ src);
-  util::Logger::vm([&](auto &os) {
-    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
-                      inst.ssrc0.encoding_value(), src, old_exec, result);
-  });
-  wf.set_exec(result);
-  wf.write_scc(result != 0);
+  uint64_t src = static_cast<uint64_t>(inst.ssrc0.read_scalar64(wf));
+  inst.sdst.write_scalar64(wf, wf.exec());
+  wf.set_exec((~(wf.exec() ^ src)));
+  wf.write_scc((wf.exec() != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_xor_b32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint32_t s0 = inst.ssrc0.read_scalar(wf);
-  uint32_t s1 = inst.ssrc1.read_scalar(wf);
-  uint32_t result = s0 ^ s1;
+  uint32_t result = (inst.ssrc0.read_scalar(wf) ^ inst.ssrc1.read_scalar(wf));
   inst.sdst.write_scalar(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_xor_b64_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint64_t s0 = inst.ssrc0.read_scalar64(wf);
-  uint64_t s1 = inst.ssrc1.read_scalar64(wf);
-  uint64_t result = s0 ^ s1;
+  uint64_t result = (static_cast<uint64_t>(inst.ssrc0.read_scalar64(wf)) ^
+                     static_cast<uint64_t>(inst.ssrc1.read_scalar64(wf)));
   inst.sdst.write_scalar64(wf, result);
-  wf.write_scc(result != 0);
+  wf.write_scc((result != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_xor_saveexec_b32_sop1([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
-  uint64_t old_exec = wf.exec();
-  uint64_t src = inst.ssrc0.read_scalar64(wf);
-  inst.sdst.write_scalar64(wf, old_exec);
-  uint64_t result = old_exec ^ src;
-  util::Logger::vm([&](auto &os) {
-    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
-                      inst.ssrc0.encoding_value(), src, old_exec, result);
-  });
-  wf.set_exec(result);
-  wf.write_scc(result != 0);
+  uint64_t src = static_cast<uint64_t>(inst.ssrc0.read_scalar(wf));
+  inst.sdst.write_scalar(wf, wf.exec());
+  wf.set_exec((wf.exec() ^ src));
+  wf.write_scc((wf.exec() != 0ULL));
 }
 
 template <typename Inst>
 inline void execute_s_xor_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
-  uint64_t old_exec = wf.exec();
-  uint64_t src = inst.ssrc0.read_scalar64(wf);
-  inst.sdst.write_scalar64(wf, old_exec);
-  uint64_t result = old_exec ^ src;
-  util::Logger::vm([&](auto &os) {
-    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
-                      inst.ssrc0.encoding_value(), src, old_exec, result);
-  });
-  wf.set_exec(result);
-  wf.write_scc(result != 0);
+  uint64_t src = static_cast<uint64_t>(inst.ssrc0.read_scalar64(wf));
+  inst.sdst.write_scalar64(wf, wf.exec());
+  wf.set_exec((wf.exec() ^ src));
+  wf.write_scc((wf.exec() != 0ULL));
 }
 
 template <typename Inst>
@@ -2087,20 +1937,28 @@ inline void execute_v_accvgpr_mov_b32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    if (inst.inst_.omod == 1)
-      s *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      s *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      s *= 0.5f;
-    if (inst.inst_.clamp)
-      s = std::clamp(s, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(s));
+    inst.vdst.write_lane(wf, lane, [&]() {
+      float v = [&]() {
+        float v = [&]() {
+          float sv = inst.src0.read_lane(wf, lane);
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }();
+        if (inst.inst_.omod == 1)
+          v *= 2.0f;
+        else if (inst.inst_.omod == 2)
+          v *= 4.0f;
+        else if (inst.inst_.omod == 3)
+          v *= 0.5f;
+        return v;
+      }();
+      if (inst.inst_.clamp)
+        v = std::clamp(v, 0.0f, 1.0f);
+      return v;
+    }());
   }
 }
 
@@ -2110,10 +1968,9 @@ inline void execute_v_add3_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t a = inst.src0.read_lane(wf, lane);
-    uint32_t b = inst.src1.read_lane(wf, lane);
-    uint32_t c = inst.src2.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, a + b + c);
+    inst.vdst.write_lane(wf, lane,
+                         (inst.src0.read_lane(wf, lane) + inst.src1.read_lane(wf, lane) +
+                          inst.src2.read_lane(wf, lane)));
   }
 }
 
@@ -2121,20 +1978,20 @@ template <typename Inst>
 inline void execute_v_add_co_ci_u32_vop2([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t old_vcc = wf.vcc();
   uint64_t vcc = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.vsrc1.read_lane(wf, lane);
-    uint32_t cin = (old_vcc & (1ULL << lane)) ? 1u : 0u;
-    uint64_t wide = static_cast<uint64_t>(sv0) + static_cast<uint64_t>(sv1) + cin;
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(wide));
-    if (wide > 0xFFFFFFFFULL)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
+    inst.vdst.write_lane(wf, lane, [&]() {
+      uint64_t w = static_cast<uint64_t>(inst.src0.read_lane(wf, lane)) +
+                   static_cast<uint64_t>(inst.vsrc1.read_lane(wf, lane)) +
+                   static_cast<uint64_t>(((wf.vcc() >> lane) & 1));
+      if (w > 0xFFFFFFFFULL)
+        vcc |= (1ULL << lane);
+      else
+        vcc &= ~(1ULL << lane);
+      return static_cast<uint32_t>(w);
+    }());
   }
   wf.set_vcc(vcc);
 }
@@ -2143,20 +2000,20 @@ template <typename Inst>
 inline void execute_v_add_co_ci_u32_vop3([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t old_vcc = inst.src2.read_scalar64(wf);
   uint64_t vcc = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.src1.read_lane(wf, lane);
-    uint32_t cin = (old_vcc & (1ULL << lane)) ? 1u : 0u;
-    uint64_t wide = static_cast<uint64_t>(sv0) + static_cast<uint64_t>(sv1) + cin;
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(wide));
-    if (wide > 0xFFFFFFFFULL)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
+    inst.vdst.write_lane(wf, lane, [&]() {
+      uint64_t w = static_cast<uint64_t>(inst.src0.read_lane(wf, lane)) +
+                   static_cast<uint64_t>(inst.src1.read_lane(wf, lane)) +
+                   static_cast<uint64_t>(((inst.src2.read_scalar64(wf) >> lane) & 1));
+      if (w > 0xFFFFFFFFULL)
+        vcc |= (1ULL << lane);
+      else
+        vcc &= ~(1ULL << lane);
+      return static_cast<uint32_t>(w);
+    }());
   }
   inst.sdst.write_scalar64(wf, vcc);
 }
@@ -2168,14 +2025,15 @@ inline void execute_v_add_co_u32_vop2([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.vsrc1.read_lane(wf, lane);
-    uint64_t wide = static_cast<uint64_t>(sv0) + static_cast<uint64_t>(sv1);
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(wide));
-    if (wide > 0xFFFFFFFFULL)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
+    inst.vdst.write_lane(wf, lane, [&]() {
+      uint64_t w = static_cast<uint64_t>(inst.src0.read_lane(wf, lane)) +
+                   static_cast<uint64_t>(inst.vsrc1.read_lane(wf, lane));
+      if (w > 0xFFFFFFFFULL)
+        vcc |= (1ULL << lane);
+      else
+        vcc &= ~(1ULL << lane);
+      return static_cast<uint32_t>(w);
+    }());
   }
   wf.set_vcc(vcc);
 }
@@ -2187,14 +2045,15 @@ inline void execute_v_add_co_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.src1.read_lane(wf, lane);
-    uint64_t wide = static_cast<uint64_t>(sv0) + static_cast<uint64_t>(sv1);
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(wide));
-    if (wide > 0xFFFFFFFFULL)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
+    inst.vdst.write_lane(wf, lane, [&]() {
+      uint64_t w = static_cast<uint64_t>(inst.src0.read_lane(wf, lane)) +
+                   static_cast<uint64_t>(inst.src1.read_lane(wf, lane));
+      if (w > 0xFFFFFFFFULL)
+        vcc |= (1ULL << lane);
+      else
+        vcc &= ~(1ULL << lane);
+      return static_cast<uint32_t>(w);
+    }());
   }
   inst.sdst.write_scalar64(wf, vcc);
 }
@@ -2205,9 +2064,11 @@ inline void execute_v_add_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float sv1 = util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane)));
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(sv0 + sv1));
+    inst.vdst.write_lane(
+        wf, lane,
+        util::f32_to_f16(
+            (util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane))) +
+             util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane))))));
   }
 }
 
@@ -2217,26 +2078,38 @@ inline void execute_v_add_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float sv1 = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst.inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst.inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst.inst_.neg & (1u << 1))
-      sv1 = -sv1;
-    float result = sv0 + sv1;
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(result));
+    inst.vdst.write_lane(
+        wf, lane, util::f32_to_f16([&]() {
+          float v = [&]() {
+            float v = ([&]() {
+              float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+              if (inst.inst_.abs & (1u << 0))
+                sv = std::fabs(sv);
+              if (inst.inst_.neg & (1u << 0))
+                sv = -sv;
+              return sv;
+            }() +
+                       [&]() {
+                         float sv =
+                             util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
+                         if (inst.inst_.abs & (1u << 1))
+                           sv = std::fabs(sv);
+                         if (inst.inst_.neg & (1u << 1))
+                           sv = -sv;
+                         return sv;
+                       }());
+            if (inst.inst_.omod == 1)
+              v *= 2.0f;
+            else if (inst.inst_.omod == 2)
+              v *= 4.0f;
+            else if (inst.inst_.omod == 3)
+              v *= 0.5f;
+            return v;
+          }();
+          if (inst.inst_.clamp)
+            v = std::clamp(v, 0.0f, 1.0f);
+          return v;
+        }()));
   }
 }
 
@@ -2246,9 +2119,10 @@ inline void execute_v_add_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float sv1 = std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(sv0 + sv1));
+    inst.vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>((std::bit_cast<float>(inst.src0.read_lane(wf, lane)) +
+                                 std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane)))));
   }
 }
 
@@ -2258,26 +2132,37 @@ inline void execute_v_add_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float sv1 = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst.inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst.inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst.inst_.neg & (1u << 1))
-      sv1 = -sv1;
-    float result = sv0 + sv1;
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v = ([&]() {
+                               float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                               if (inst.inst_.abs & (1u << 0))
+                                 sv = std::fabs(sv);
+                               if (inst.inst_.neg & (1u << 0))
+                                 sv = -sv;
+                               return sv;
+                             }() +
+                                        [&]() {
+                                          float sv =
+                                              std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+                                          if (inst.inst_.abs & (1u << 1))
+                                            sv = std::fabs(sv);
+                                          if (inst.inst_.neg & (1u << 1))
+                                            sv = -sv;
+                                          return sv;
+                                        }());
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -2287,26 +2172,37 @@ inline void execute_v_add_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double sv0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    double sv1 = std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst.inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst.inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst.inst_.neg & (1u << 1))
-      sv1 = -sv1;
-    double result = sv0 + sv1;
-    if (inst.inst_.omod == 1)
-      result *= 2.0;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0, 1.0);
-    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
+    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>([&]() {
+                             double v = [&]() {
+                               double v = ([&]() {
+                                 double sv = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
+                                 if (inst.inst_.abs & (1u << 0))
+                                   sv = std::fabs(sv);
+                                 if (inst.inst_.neg & (1u << 0))
+                                   sv = -sv;
+                                 return sv;
+                               }() +
+                                           [&]() {
+                                             double sv = std::bit_cast<double>(
+                                                 inst.src1.read_lane64(wf, lane));
+                                             if (inst.inst_.abs & (1u << 1))
+                                               sv = std::fabs(sv);
+                                             if (inst.inst_.neg & (1u << 1))
+                                               sv = -sv;
+                                             return sv;
+                                           }());
+                               if (inst.inst_.omod == 1)
+                                 v *= 2.0;
+                               else if (inst.inst_.omod == 2)
+                                 v *= 4.0;
+                               else if (inst.inst_.omod == 3)
+                                 v *= 0.5;
+                               return v;
+                             }();
+                             if (inst.inst_.clamp)
+                               v = std::clamp(v, 0.0, 1.0);
+                             return v;
+                           }()));
   }
 }
 
@@ -2316,10 +2212,10 @@ inline void execute_v_add_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t sv0 = static_cast<int16_t>(inst.src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t sv1 = static_cast<int16_t>(inst.src1.read_lane(wf, lane) & 0xFFFF);
-    inst.vdst.write_lane(
-        wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(sv0 + sv1))));
+    inst.vdst.write_lane(wf, lane,
+                         static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(
+                             (static_cast<int16_t>(inst.src0.read_lane(wf, lane)) +
+                              static_cast<int16_t>(inst.src1.read_lane(wf, lane)))))));
   }
 }
 
@@ -2329,9 +2225,9 @@ inline void execute_v_add_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t sv0 = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
-    int32_t sv1 = static_cast<int32_t>(inst.src1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(sv0 + sv1));
+    inst.vdst.write_lane(wf, lane,
+                         (static_cast<int32_t>(inst.src0.read_lane(wf, lane)) +
+                          static_cast<int32_t>(inst.src1.read_lane(wf, lane))));
   }
 }
 
@@ -2342,10 +2238,9 @@ inline void execute_v_add_lshl_u32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t a = inst.src0.read_lane(wf, lane);
-    uint32_t b = inst.src1.read_lane(wf, lane);
-    uint32_t c = inst.src2.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, (a + b) << (c & 31));
+    inst.vdst.write_lane(wf, lane,
+                         ((inst.src0.read_lane(wf, lane) + inst.src1.read_lane(wf, lane))
+                          << inst.src2.read_lane(wf, lane)));
   }
 }
 
@@ -2355,10 +2250,10 @@ inline void execute_v_add_nc_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t sv0 = static_cast<int16_t>(inst.src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t sv1 = static_cast<int16_t>(inst.src1.read_lane(wf, lane) & 0xFFFF);
-    inst.vdst.write_lane(
-        wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(sv0 + sv1))));
+    inst.vdst.write_lane(wf, lane,
+                         static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(
+                             (static_cast<int16_t>(inst.src0.read_lane(wf, lane)) +
+                              static_cast<int16_t>(inst.src1.read_lane(wf, lane)))))));
   }
 }
 
@@ -2368,9 +2263,9 @@ inline void execute_v_add_nc_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t sv0 = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
-    int32_t sv1 = static_cast<int32_t>(inst.src1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(sv0 + sv1));
+    inst.vdst.write_lane(wf, lane,
+                         (static_cast<int32_t>(inst.src0.read_lane(wf, lane)) +
+                          static_cast<int32_t>(inst.src1.read_lane(wf, lane))));
   }
 }
 
@@ -2380,9 +2275,10 @@ inline void execute_v_add_nc_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t sv0 = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t sv1 = static_cast<uint16_t>(inst.src1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(sv0 + sv1)));
+    inst.vdst.write_lane(wf, lane,
+                         static_cast<uint32_t>(static_cast<uint16_t>(
+                             (static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) +
+                              static_cast<uint16_t>(inst.src1.read_lane(wf, lane))))));
   }
 }
 
@@ -2392,9 +2288,8 @@ inline void execute_v_add_nc_u32_vop2([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.vsrc1.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, sv0 + sv1);
+    inst.vdst.write_lane(wf, lane,
+                         (inst.src0.read_lane(wf, lane) + inst.vsrc1.read_lane(wf, lane)));
   }
 }
 
@@ -2404,9 +2299,7 @@ inline void execute_v_add_nc_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.src1.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, sv0 + sv1);
+    inst.vdst.write_lane(wf, lane, (inst.src0.read_lane(wf, lane) + inst.src1.read_lane(wf, lane)));
   }
 }
 
@@ -2416,9 +2309,10 @@ inline void execute_v_add_u16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t sv0 = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t sv1 = static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(sv0 + sv1)));
+    inst.vdst.write_lane(wf, lane,
+                         static_cast<uint32_t>(static_cast<uint16_t>(
+                             (static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) +
+                              static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane))))));
   }
 }
 
@@ -2428,9 +2322,10 @@ inline void execute_v_add_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t sv0 = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t sv1 = static_cast<uint16_t>(inst.src1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(sv0 + sv1)));
+    inst.vdst.write_lane(wf, lane,
+                         static_cast<uint32_t>(static_cast<uint16_t>(
+                             (static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) +
+                              static_cast<uint16_t>(inst.src1.read_lane(wf, lane))))));
   }
 }
 
@@ -2440,9 +2335,8 @@ inline void execute_v_add_u32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.vsrc1.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, sv0 + sv1);
+    inst.vdst.write_lane(wf, lane,
+                         (inst.src0.read_lane(wf, lane) + inst.vsrc1.read_lane(wf, lane)));
   }
 }
 
@@ -2452,9 +2346,7 @@ inline void execute_v_add_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.src1.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, sv0 + sv1);
+    inst.vdst.write_lane(wf, lane, (inst.src0.read_lane(wf, lane) + inst.src1.read_lane(wf, lane)));
   }
 }
 
@@ -2462,20 +2354,20 @@ template <typename Inst>
 inline void execute_v_addc_co_u32_vop2([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t old_vcc = wf.vcc();
   uint64_t vcc = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.vsrc1.read_lane(wf, lane);
-    uint32_t cin = (old_vcc & (1ULL << lane)) ? 1u : 0u;
-    uint64_t wide = static_cast<uint64_t>(sv0) + static_cast<uint64_t>(sv1) + cin;
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(wide));
-    if (wide > 0xFFFFFFFFULL)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
+    inst.vdst.write_lane(wf, lane, [&]() {
+      uint64_t w = static_cast<uint64_t>(inst.src0.read_lane(wf, lane)) +
+                   static_cast<uint64_t>(inst.vsrc1.read_lane(wf, lane)) +
+                   static_cast<uint64_t>(((wf.vcc() >> lane) & 1));
+      if (w > 0xFFFFFFFFULL)
+        vcc |= (1ULL << lane);
+      else
+        vcc &= ~(1ULL << lane);
+      return static_cast<uint32_t>(w);
+    }());
   }
   wf.set_vcc(vcc);
 }
@@ -2484,20 +2376,20 @@ template <typename Inst>
 inline void execute_v_addc_co_u32_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t old_vcc = inst.src2.read_scalar64(wf);
   uint64_t vcc = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.src1.read_lane(wf, lane);
-    uint32_t cin = (old_vcc & (1ULL << lane)) ? 1u : 0u;
-    uint64_t wide = static_cast<uint64_t>(sv0) + static_cast<uint64_t>(sv1) + cin;
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(wide));
-    if (wide > 0xFFFFFFFFULL)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
+    inst.vdst.write_lane(wf, lane, [&]() {
+      uint64_t w = static_cast<uint64_t>(inst.src0.read_lane(wf, lane)) +
+                   static_cast<uint64_t>(inst.src1.read_lane(wf, lane)) +
+                   static_cast<uint64_t>(((inst.src2.read_scalar64(wf) >> lane) & 1));
+      if (w > 0xFFFFFFFFULL)
+        vcc |= (1ULL << lane);
+      else
+        vcc &= ~(1ULL << lane);
+      return static_cast<uint32_t>(w);
+    }());
   }
   inst.sdst.write_scalar64(wf, vcc);
 }
@@ -2509,11 +2401,13 @@ inline void execute_v_alignbit_b32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t a = inst.src0.read_lane(wf, lane);
-    uint32_t b = inst.src1.read_lane(wf, lane);
-    uint32_t c = inst.src2.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane,
-                         static_cast<uint32_t>(((static_cast<uint64_t>(a) << 32) | b) >> (c & 31)));
+    inst.vdst.write_lane(wf, lane, [&]() {
+      auto a = inst.src0.read_lane(wf, lane);
+      auto b = inst.src1.read_lane(wf, lane);
+      auto c = inst.src2.read_lane(wf, lane);
+      uint64_t val = (static_cast<uint64_t>(a) << 32) | b;
+      return static_cast<uint32_t>(val >> (c & 31u));
+    }());
   }
 }
 
@@ -2524,11 +2418,13 @@ inline void execute_v_alignbyte_b32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t a = inst.src0.read_lane(wf, lane);
-    uint32_t b = inst.src1.read_lane(wf, lane);
-    uint32_t c = inst.src2.read_lane(wf, lane);
-    inst.vdst.write_lane(
-        wf, lane, static_cast<uint32_t>(((static_cast<uint64_t>(a) << 32) | b) >> ((c & 3) * 8)));
+    inst.vdst.write_lane(wf, lane, [&]() {
+      auto a = inst.src0.read_lane(wf, lane);
+      auto b = inst.src1.read_lane(wf, lane);
+      auto c = inst.src2.read_lane(wf, lane);
+      uint64_t val = (static_cast<uint64_t>(a) << 32) | b;
+      return static_cast<uint32_t>(val >> ((c & 3u) * 8u));
+    }());
   }
 }
 
@@ -2538,9 +2434,10 @@ inline void execute_v_and_b16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t sv0 = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t sv1 = static_cast<uint16_t>(inst.src1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(sv0 & sv1)));
+    inst.vdst.write_lane(wf, lane,
+                         static_cast<uint32_t>(static_cast<uint16_t>(
+                             (static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) &
+                              static_cast<uint16_t>(inst.src1.read_lane(wf, lane))))));
   }
 }
 
@@ -2550,9 +2447,8 @@ inline void execute_v_and_b32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.vsrc1.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, sv0 & sv1);
+    inst.vdst.write_lane(wf, lane,
+                         (inst.src0.read_lane(wf, lane) & inst.vsrc1.read_lane(wf, lane)));
   }
 }
 
@@ -2562,9 +2458,7 @@ inline void execute_v_and_b32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.src1.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, sv0 & sv1);
+    inst.vdst.write_lane(wf, lane, (inst.src0.read_lane(wf, lane) & inst.src1.read_lane(wf, lane)));
   }
 }
 
@@ -2574,10 +2468,9 @@ inline void execute_v_and_or_b32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t a = inst.src0.read_lane(wf, lane);
-    uint32_t b = inst.src1.read_lane(wf, lane);
-    uint32_t c = inst.src2.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, (a & b) | c);
+    inst.vdst.write_lane(wf, lane,
+                         ((inst.src0.read_lane(wf, lane) & inst.src1.read_lane(wf, lane)) |
+                          inst.src2.read_lane(wf, lane)));
   }
 }
 
@@ -2588,11 +2481,12 @@ inline void execute_v_ashrrev_i16_vop2([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t sv0 = static_cast<int16_t>(inst.src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t sv1 = static_cast<int16_t>(inst.vsrc1.read_lane(wf, lane) & 0xFFFF);
     inst.vdst.write_lane(
-        wf, lane,
-        static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(sv1 >> (sv0 & 15)))));
+        wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>([&]() {
+          auto v = static_cast<int32_t>(static_cast<int16_t>(inst.vsrc1.read_lane(wf, lane)));
+          return static_cast<uint32_t>(v >>
+                                       (static_cast<int16_t>(inst.src0.read_lane(wf, lane)) & 31u));
+        }()))));
   }
 }
 
@@ -2603,11 +2497,12 @@ inline void execute_v_ashrrev_i16_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t sv0 = static_cast<int16_t>(inst.src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t sv1 = static_cast<int16_t>(inst.src1.read_lane(wf, lane) & 0xFFFF);
     inst.vdst.write_lane(
-        wf, lane,
-        static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(sv1 >> (sv0 & 15)))));
+        wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>([&]() {
+          auto v = static_cast<int32_t>(static_cast<int16_t>(inst.src1.read_lane(wf, lane)));
+          return static_cast<uint32_t>(v >>
+                                       (static_cast<int16_t>(inst.src0.read_lane(wf, lane)) & 31u));
+        }()))));
   }
 }
 
@@ -2618,9 +2513,11 @@ inline void execute_v_ashrrev_i32_vop2([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t sv0 = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
-    int32_t sv1 = static_cast<int32_t>(inst.vsrc1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<int32_t>(sv1) >> (sv0 & 31)));
+    inst.vdst.write_lane(wf, lane, [&]() {
+      auto v = static_cast<int32_t>(static_cast<int32_t>(inst.vsrc1.read_lane(wf, lane)));
+      return static_cast<uint32_t>(v >>
+                                   (static_cast<int32_t>(inst.src0.read_lane(wf, lane)) & 31u));
+    }());
   }
 }
 
@@ -2631,9 +2528,11 @@ inline void execute_v_ashrrev_i32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t sv0 = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
-    int32_t sv1 = static_cast<int32_t>(inst.src1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<int32_t>(sv1) >> (sv0 & 31)));
+    inst.vdst.write_lane(wf, lane, [&]() {
+      auto v = static_cast<int32_t>(static_cast<int32_t>(inst.src1.read_lane(wf, lane)));
+      return static_cast<uint32_t>(v >>
+                                   (static_cast<int32_t>(inst.src0.read_lane(wf, lane)) & 31u));
+    }());
   }
 }
 
@@ -2644,9 +2543,11 @@ inline void execute_v_ashrrev_i64_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int64_t val = static_cast<int64_t>(inst.src1.read_lane64(wf, lane));
-    uint32_t shift = inst.src0.read_lane(wf, lane) & 63u;
-    inst.vdst.write_lane64(wf, lane, static_cast<uint64_t>(val >> shift));
+    inst.vdst.write_lane64(wf, lane, [&]() {
+      auto v = static_cast<int64_t>(static_cast<int64_t>(inst.src1.read_lane64(wf, lane)));
+      return static_cast<uint64_t>(v >>
+                                   (static_cast<int64_t>(inst.src0.read_lane64(wf, lane)) & 63u));
+    }());
   }
 }
 
@@ -2657,8 +2558,8 @@ inline void execute_v_bcnt_u32_b32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = inst.src0.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(std::popcount(s)));
+    inst.vdst.write_lane(wf, lane,
+                         static_cast<uint32_t>(std::popcount(inst.src0.read_lane(wf, lane))));
   }
 }
 
@@ -2668,20 +2569,17 @@ inline void execute_v_bfe_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t a = inst.src0.read_lane(wf, lane);
-    uint32_t b = inst.src1.read_lane(wf, lane);
-    uint32_t c = inst.src2.read_lane(wf, lane);
-    uint32_t offset = b & 31;
-    uint32_t width = c & 31;
-    int32_t sv = static_cast<int32_t>(a);
-    int32_t result_val;
-    if (width == 0)
-      result_val = 0;
-    else if (offset + width >= 32)
-      result_val = sv >> offset;
-    else
-      result_val = (sv << (32 - offset - width)) >> (32 - width);
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(result_val));
+    inst.vdst.write_lane(wf, lane, [&]() -> uint32_t {
+      int32_t src = static_cast<int32_t>(static_cast<int32_t>(inst.src0.read_lane(wf, lane)));
+      uint32_t off = static_cast<int32_t>(inst.src1.read_lane(wf, lane)) & 31u;
+      uint32_t w = static_cast<int32_t>(inst.src2.read_lane(wf, lane)) & 31u;
+      if (w == 0)
+        return 0u;
+      int32_t val = (src >> off) & ((1 << w) - 1);
+      if (val & (1 << (w - 1)))
+        val |= -(1 << w);
+      return static_cast<uint32_t>(val);
+    }());
   }
 }
 
@@ -2691,13 +2589,15 @@ inline void execute_v_bfe_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t a = inst.src0.read_lane(wf, lane);
-    uint32_t b = inst.src1.read_lane(wf, lane);
-    uint32_t c = inst.src2.read_lane(wf, lane);
-    uint32_t offset = b & 31;
-    uint32_t width = c & 31;
-    uint32_t mask = (width == 0 || width >= 32) ? 0u : ((1u << width) - 1);
-    inst.vdst.write_lane(wf, lane, width == 0 ? 0u : (a >> offset) & mask);
+    inst.vdst.write_lane(wf, lane, [&]() {
+      uint32_t src = inst.src0.read_lane(wf, lane);
+      uint32_t off = inst.src1.read_lane(wf, lane) & 31u;
+      uint32_t w = inst.src2.read_lane(wf, lane) & 31u;
+      if (w == 0)
+        return 0u;
+      uint32_t mask = (w >= 32) ? ~0u : ((1u << w) - 1u);
+      return (src >> off) & mask;
+    }());
   }
 }
 
@@ -2707,10 +2607,12 @@ inline void execute_v_bfi_b32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t a = inst.src0.read_lane(wf, lane);
-    uint32_t b = inst.src1.read_lane(wf, lane);
-    uint32_t c = inst.src2.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, (a & b) | (~a & c));
+    inst.vdst.write_lane(wf, lane, [&]() {
+      auto a = inst.src0.read_lane(wf, lane);
+      auto b = inst.src1.read_lane(wf, lane);
+      auto c = inst.src2.read_lane(wf, lane);
+      return (a & b) | (~a & c);
+    }());
   }
 }
 
@@ -2720,10 +2622,9 @@ inline void execute_v_bfm_b32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.src1.read_lane(wf, lane);
     inst.vdst.write_lane(wf, lane,
-                         (sv0 & 31u) == 0 ? 0u : ((1u << (sv0 & 31u)) - 1u) << (sv1 & 31u));
+                         (((1u << (inst.src0.read_lane(wf, lane) & 31u)) - 1u)
+                          << (inst.src1.read_lane(wf, lane) & 31u)));
   }
 }
 
@@ -2733,11 +2634,13 @@ inline void execute_v_bfrev_b32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = inst.src0.read_lane(wf, lane);
-    uint32_t result = 0;
-    for (int i = 0; i < 32; ++i)
-      result |= ((s >> i) & 1) << (31 - i);
-    inst.vdst.write_lane(wf, lane, result);
+    inst.vdst.write_lane(wf, lane, [&]() {
+      uint32_t s = inst.src0.read_lane(wf, lane);
+      uint32_t r = 0;
+      for (int i = 0; i < 32; ++i)
+        r |= ((s >> i) & 1) << (31 - i);
+      return r;
+    }());
   }
 }
 
@@ -2747,11 +2650,13 @@ inline void execute_v_bfrev_b32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = inst.src0.read_lane(wf, lane);
-    uint32_t result = 0;
-    for (int i = 0; i < 32; ++i)
-      result |= ((s >> i) & 1) << (31 - i);
-    inst.vdst.write_lane(wf, lane, result);
+    inst.vdst.write_lane(wf, lane, [&]() {
+      uint32_t s = inst.src0.read_lane(wf, lane);
+      uint32_t r = 0;
+      for (int i = 0; i < 32; ++i)
+        r |= ((s >> i) & 1) << (31 - i);
+      return r;
+    }());
   }
 }
 
@@ -2761,8 +2666,9 @@ inline void execute_v_ceil_f16_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(std::ceil(s)));
+    inst.vdst.write_lane(wf, lane,
+                         util::f32_to_f16(std::ceil(util::f16_to_f32(
+                             static_cast<uint16_t>(inst.src0.read_lane(wf, lane))))));
   }
 }
 
@@ -2772,21 +2678,29 @@ inline void execute_v_ceil_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    float result = std::ceil(s);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(result));
+    inst.vdst.write_lane(wf, lane, util::f32_to_f16([&]() {
+                           float v = [&]() {
+                             float v = std::ceil([&]() {
+                               float sv = util::f16_to_f32(
+                                   static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+                               if (inst.inst_.abs & (1u << 0))
+                                 sv = std::fabs(sv);
+                               if (inst.inst_.neg & (1u << 0))
+                                 sv = -sv;
+                               return sv;
+                             }());
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -2796,8 +2710,9 @@ inline void execute_v_ceil_f32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(std::ceil(s)));
+    inst.vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(std::ceil(std::bit_cast<float>(inst.src0.read_lane(wf, lane)))));
   }
 }
 
@@ -2807,21 +2722,28 @@ inline void execute_v_ceil_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    float result = std::ceil(s);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v = std::ceil([&]() {
+                               float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                               if (inst.inst_.abs & (1u << 0))
+                                 sv = std::fabs(sv);
+                               if (inst.inst_.neg & (1u << 0))
+                                 sv = -sv;
+                               return sv;
+                             }());
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -2831,8 +2753,9 @@ inline void execute_v_ceil_f64_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(std::ceil(s)));
+    inst.vdst.write_lane64(
+        wf, lane,
+        std::bit_cast<uint64_t>(std::ceil(std::bit_cast<double>(inst.src0.read_lane64(wf, lane)))));
   }
 }
 
@@ -2842,21 +2765,28 @@ inline void execute_v_ceil_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    double result = std::ceil(s);
-    if (inst.inst_.omod == 1)
-      result *= 2.0;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0, 1.0);
-    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
+    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>([&]() {
+                             double v = [&]() {
+                               double v = std::ceil([&]() {
+                                 double sv = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
+                                 if (inst.inst_.abs & (1u << 0))
+                                   sv = std::fabs(sv);
+                                 if (inst.inst_.neg & (1u << 0))
+                                   sv = -sv;
+                                 return sv;
+                               }());
+                               if (inst.inst_.omod == 1)
+                                 v *= 2.0;
+                               else if (inst.inst_.omod == 2)
+                                 v *= 4.0;
+                               else if (inst.inst_.omod == 3)
+                                 v *= 0.5;
+                               return v;
+                             }();
+                             if (inst.inst_.clamp)
+                               v = std::clamp(v, 0.0, 1.0);
+                             return v;
+                           }()));
   }
 }
 
@@ -2872,12 +2802,11 @@ inline void execute_v_cls_i32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = inst.src0.read_lane(wf, lane);
-    int32_t sv = static_cast<int32_t>(s);
-    uint32_t abs_val = sv < 0 ? ~s : s;
-    inst.vdst.write_lane(wf, lane,
-                         abs_val == 0 ? static_cast<uint32_t>(-1)
-                                      : static_cast<uint32_t>(std::countl_zero(abs_val)));
+    inst.vdst.write_lane(wf, lane, [&]() {
+      auto s = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
+      uint32_t a = s < 0 ? ~static_cast<uint32_t>(s) : static_cast<uint32_t>(s);
+      return a == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(a));
+    }());
   }
 }
 
@@ -2887,12 +2816,11 @@ inline void execute_v_cls_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = inst.src0.read_lane(wf, lane);
-    int32_t sv = static_cast<int32_t>(s);
-    uint32_t abs_val = sv < 0 ? ~s : s;
-    inst.vdst.write_lane(wf, lane,
-                         abs_val == 0 ? static_cast<uint32_t>(-1)
-                                      : static_cast<uint32_t>(std::countl_zero(abs_val)));
+    inst.vdst.write_lane(wf, lane, [&]() {
+      auto s = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
+      uint32_t a = s < 0 ? ~static_cast<uint32_t>(s) : static_cast<uint32_t>(s);
+      return a == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(a));
+    }());
   }
 }
 
@@ -2903,9 +2831,10 @@ inline void execute_v_clz_i32_u32_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = inst.src0.read_lane(wf, lane);
-    inst.vdst.write_lane(
-        wf, lane, s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(s)));
+    inst.vdst.write_lane(wf, lane, [&]() {
+      auto s = inst.src0.read_lane(wf, lane);
+      return s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(s));
+    }());
   }
 }
 
@@ -2916,9 +2845,10 @@ inline void execute_v_clz_i32_u32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = inst.src0.read_lane(wf, lane);
-    inst.vdst.write_lane(
-        wf, lane, s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(s)));
+    inst.vdst.write_lane(wf, lane, [&]() {
+      auto s = inst.src0.read_lane(wf, lane);
+      return s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(s));
+    }());
   }
 }
 
@@ -2930,38 +2860,48 @@ inline void execute_v_cmp_class_f16_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t s0_raw = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    float s0 = util::f16_to_f32(s0_raw);
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    uint32_t mask = inst.src1.read_lane(wf, lane);
-    bool match = false;
-    bool is_f16_nan = ((s0_raw & 0x7C00) == 0x7C00) && ((s0_raw & 0x03FF) != 0);
-    if ((mask & 0x001) && is_f16_nan && (s0_raw & 0x0200) == 0)
-      match = true;
-    if ((mask & 0x002) && is_f16_nan && (s0_raw & 0x0200) != 0)
-      match = true;
-    if ((mask & 0x004) && std::isinf(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x008) && std::isnormal(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f &&
-        std::signbit(s0))
-      match = true;
-    if ((mask & 0x020) && s0 == 0.0f && std::signbit(s0))
-      match = true;
-    if ((mask & 0x040) && s0 == 0.0f && !std::signbit(s0))
-      match = true;
-    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f &&
-        !std::signbit(s0))
-      match = true;
-    if ((mask & 0x100) && std::isnormal(s0) && s0 > 0)
-      match = true;
-    if ((mask & 0x200) && std::isinf(s0) && s0 > 0)
-      match = true;
-    if (match)
+    if ([&]() -> bool {
+          float s0 = std::bit_cast<float>(static_cast<uint32_t>([&]() {
+            float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+            if (inst.inst_.abs & (1u << 0))
+              sv = std::fabs(sv);
+            if (inst.inst_.neg & (1u << 0))
+              sv = -sv;
+            return sv;
+          }()));
+          uint32_t mask = [&]() {
+            float sv = inst.src1.read_lane(wf, lane);
+            if (inst.inst_.abs & (1u << 1))
+              sv = std::fabs(sv);
+            if (inst.inst_.neg & (1u << 1))
+              sv = -sv;
+            return sv;
+          }();
+          bool match = false;
+          if ((mask & 0x001u) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000u) == 0)
+            match = true;
+          if ((mask & 0x002u) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000u) != 0)
+            match = true;
+          if ((mask & 0x004u) && std::isinf(s0) && s0 < 0)
+            match = true;
+          if ((mask & 0x008u) && std::isnormal(s0) && s0 < 0)
+            match = true;
+          if ((mask & 0x010u) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) &&
+              s0 != 0.0f && std::signbit(s0))
+            match = true;
+          if ((mask & 0x020u) && s0 == 0.0f && std::signbit(s0))
+            match = true;
+          if ((mask & 0x040u) && s0 == 0.0f && !std::signbit(s0))
+            match = true;
+          if ((mask & 0x080u) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) &&
+              s0 != 0.0f && !std::signbit(s0))
+            match = true;
+          if ((mask & 0x100u) && std::isnormal(s0) && s0 > 0)
+            match = true;
+          if ((mask & 0x200u) && std::isinf(s0) && s0 > 0)
+            match = true;
+          return match;
+        }())
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -2977,34 +2917,35 @@ inline void execute_v_cmp_class_f16_vopc([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t s0_raw = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    float s0 = util::f16_to_f32(s0_raw);
-    uint32_t mask = inst.vsrc1.read_lane(wf, lane);
-    bool match = false;
-    bool is_f16_nan = ((s0_raw & 0x7C00) == 0x7C00) && ((s0_raw & 0x03FF) != 0);
-    if ((mask & 0x001) && is_f16_nan && (s0_raw & 0x0200) == 0)
-      match = true;
-    if ((mask & 0x002) && is_f16_nan && (s0_raw & 0x0200) != 0)
-      match = true;
-    if ((mask & 0x004) && std::isinf(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x008) && std::isnormal(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f &&
-        std::signbit(s0))
-      match = true;
-    if ((mask & 0x020) && s0 == 0.0f && std::signbit(s0))
-      match = true;
-    if ((mask & 0x040) && s0 == 0.0f && !std::signbit(s0))
-      match = true;
-    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f &&
-        !std::signbit(s0))
-      match = true;
-    if ((mask & 0x100) && std::isnormal(s0) && s0 > 0)
-      match = true;
-    if ((mask & 0x200) && std::isinf(s0) && s0 > 0)
-      match = true;
-    if (match)
+    if ([&]() -> bool {
+          float s0 = std::bit_cast<float>(static_cast<uint32_t>(
+              util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)))));
+          uint32_t mask = inst.vsrc1.read_lane(wf, lane);
+          bool match = false;
+          if ((mask & 0x001u) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000u) == 0)
+            match = true;
+          if ((mask & 0x002u) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000u) != 0)
+            match = true;
+          if ((mask & 0x004u) && std::isinf(s0) && s0 < 0)
+            match = true;
+          if ((mask & 0x008u) && std::isnormal(s0) && s0 < 0)
+            match = true;
+          if ((mask & 0x010u) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) &&
+              s0 != 0.0f && std::signbit(s0))
+            match = true;
+          if ((mask & 0x020u) && s0 == 0.0f && std::signbit(s0))
+            match = true;
+          if ((mask & 0x040u) && s0 == 0.0f && !std::signbit(s0))
+            match = true;
+          if ((mask & 0x080u) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) &&
+              s0 != 0.0f && !std::signbit(s0))
+            match = true;
+          if ((mask & 0x100u) && std::isnormal(s0) && s0 > 0)
+            match = true;
+          if ((mask & 0x200u) && std::isinf(s0) && s0 > 0)
+            match = true;
+          return match;
+        }())
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -3020,36 +2961,48 @@ inline void execute_v_cmp_class_f32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    uint32_t mask = inst.src1.read_lane(wf, lane);
-    bool match = false;
-    if ((mask & 0x001) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000) == 0)
-      match = true;
-    if ((mask & 0x002) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000) != 0)
-      match = true;
-    if ((mask & 0x004) && std::isinf(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x008) && std::isnormal(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f &&
-        std::signbit(s0))
-      match = true;
-    if ((mask & 0x020) && s0 == 0.0f && std::signbit(s0))
-      match = true;
-    if ((mask & 0x040) && s0 == 0.0f && !std::signbit(s0))
-      match = true;
-    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f &&
-        !std::signbit(s0))
-      match = true;
-    if ((mask & 0x100) && std::isnormal(s0) && s0 > 0)
-      match = true;
-    if ((mask & 0x200) && std::isinf(s0) && s0 > 0)
-      match = true;
-    if (match)
+    if ([&]() -> bool {
+          float s0 = std::bit_cast<float>(static_cast<uint32_t>([&]() {
+            float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+            if (inst.inst_.abs & (1u << 0))
+              sv = std::fabs(sv);
+            if (inst.inst_.neg & (1u << 0))
+              sv = -sv;
+            return sv;
+          }()));
+          uint32_t mask = [&]() {
+            float sv = inst.src1.read_lane(wf, lane);
+            if (inst.inst_.abs & (1u << 1))
+              sv = std::fabs(sv);
+            if (inst.inst_.neg & (1u << 1))
+              sv = -sv;
+            return sv;
+          }();
+          bool match = false;
+          if ((mask & 0x001u) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000u) == 0)
+            match = true;
+          if ((mask & 0x002u) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000u) != 0)
+            match = true;
+          if ((mask & 0x004u) && std::isinf(s0) && s0 < 0)
+            match = true;
+          if ((mask & 0x008u) && std::isnormal(s0) && s0 < 0)
+            match = true;
+          if ((mask & 0x010u) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) &&
+              s0 != 0.0f && std::signbit(s0))
+            match = true;
+          if ((mask & 0x020u) && s0 == 0.0f && std::signbit(s0))
+            match = true;
+          if ((mask & 0x040u) && s0 == 0.0f && !std::signbit(s0))
+            match = true;
+          if ((mask & 0x080u) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) &&
+              s0 != 0.0f && !std::signbit(s0))
+            match = true;
+          if ((mask & 0x100u) && std::isnormal(s0) && s0 > 0)
+            match = true;
+          if ((mask & 0x200u) && std::isinf(s0) && s0 > 0)
+            match = true;
+          return match;
+        }())
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -3065,32 +3018,35 @@ inline void execute_v_cmp_class_f32_vopc([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    uint32_t mask = inst.vsrc1.read_lane(wf, lane);
-    bool match = false;
-    if ((mask & 0x001) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000) == 0)
-      match = true;
-    if ((mask & 0x002) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000) != 0)
-      match = true;
-    if ((mask & 0x004) && std::isinf(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x008) && std::isnormal(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f &&
-        std::signbit(s0))
-      match = true;
-    if ((mask & 0x020) && s0 == 0.0f && std::signbit(s0))
-      match = true;
-    if ((mask & 0x040) && s0 == 0.0f && !std::signbit(s0))
-      match = true;
-    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f &&
-        !std::signbit(s0))
-      match = true;
-    if ((mask & 0x100) && std::isnormal(s0) && s0 > 0)
-      match = true;
-    if ((mask & 0x200) && std::isinf(s0) && s0 > 0)
-      match = true;
-    if (match)
+    if ([&]() -> bool {
+          float s0 = std::bit_cast<float>(
+              static_cast<uint32_t>(std::bit_cast<float>(inst.src0.read_lane(wf, lane))));
+          uint32_t mask = inst.vsrc1.read_lane(wf, lane);
+          bool match = false;
+          if ((mask & 0x001u) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000u) == 0)
+            match = true;
+          if ((mask & 0x002u) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000u) != 0)
+            match = true;
+          if ((mask & 0x004u) && std::isinf(s0) && s0 < 0)
+            match = true;
+          if ((mask & 0x008u) && std::isnormal(s0) && s0 < 0)
+            match = true;
+          if ((mask & 0x010u) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) &&
+              s0 != 0.0f && std::signbit(s0))
+            match = true;
+          if ((mask & 0x020u) && s0 == 0.0f && std::signbit(s0))
+            match = true;
+          if ((mask & 0x040u) && s0 == 0.0f && !std::signbit(s0))
+            match = true;
+          if ((mask & 0x080u) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) &&
+              s0 != 0.0f && !std::signbit(s0))
+            match = true;
+          if ((mask & 0x100u) && std::isnormal(s0) && s0 > 0)
+            match = true;
+          if ((mask & 0x200u) && std::isinf(s0) && s0 > 0)
+            match = true;
+          return match;
+        }())
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -3106,38 +3062,48 @@ inline void execute_v_cmp_class_f64_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    uint32_t mask = inst.src1.read_lane(wf, lane);
-    bool match = false;
-    if ((mask & 0x001) && std::isnan(s0) &&
-        (std::bit_cast<uint64_t>(s0) & 0x0008000000000000ULL) == 0)
-      match = true;
-    if ((mask & 0x002) && std::isnan(s0) &&
-        (std::bit_cast<uint64_t>(s0) & 0x0008000000000000ULL) != 0)
-      match = true;
-    if ((mask & 0x004) && std::isinf(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x008) && std::isnormal(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0 &&
-        std::signbit(s0))
-      match = true;
-    if ((mask & 0x020) && s0 == 0.0 && std::signbit(s0))
-      match = true;
-    if ((mask & 0x040) && s0 == 0.0 && !std::signbit(s0))
-      match = true;
-    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0 &&
-        !std::signbit(s0))
-      match = true;
-    if ((mask & 0x100) && std::isnormal(s0) && s0 > 0)
-      match = true;
-    if ((mask & 0x200) && std::isinf(s0) && s0 > 0)
-      match = true;
-    if (match)
+    if ([&]() -> bool {
+          float s0 = std::bit_cast<float>(static_cast<uint32_t>([&]() {
+            double sv = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
+            if (inst.inst_.abs & (1u << 0))
+              sv = std::fabs(sv);
+            if (inst.inst_.neg & (1u << 0))
+              sv = -sv;
+            return sv;
+          }()));
+          uint32_t mask = [&]() {
+            float sv = inst.src1.read_lane64(wf, lane);
+            if (inst.inst_.abs & (1u << 1))
+              sv = std::fabs(sv);
+            if (inst.inst_.neg & (1u << 1))
+              sv = -sv;
+            return sv;
+          }();
+          bool match = false;
+          if ((mask & 0x001u) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000u) == 0)
+            match = true;
+          if ((mask & 0x002u) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000u) != 0)
+            match = true;
+          if ((mask & 0x004u) && std::isinf(s0) && s0 < 0)
+            match = true;
+          if ((mask & 0x008u) && std::isnormal(s0) && s0 < 0)
+            match = true;
+          if ((mask & 0x010u) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) &&
+              s0 != 0.0f && std::signbit(s0))
+            match = true;
+          if ((mask & 0x020u) && s0 == 0.0f && std::signbit(s0))
+            match = true;
+          if ((mask & 0x040u) && s0 == 0.0f && !std::signbit(s0))
+            match = true;
+          if ((mask & 0x080u) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) &&
+              s0 != 0.0f && !std::signbit(s0))
+            match = true;
+          if ((mask & 0x100u) && std::isnormal(s0) && s0 > 0)
+            match = true;
+          if ((mask & 0x200u) && std::isinf(s0) && s0 > 0)
+            match = true;
+          return match;
+        }())
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -3153,34 +3119,35 @@ inline void execute_v_cmp_class_f64_vopc([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    uint32_t mask = inst.vsrc1.read_lane(wf, lane);
-    bool match = false;
-    if ((mask & 0x001) && std::isnan(s0) &&
-        (std::bit_cast<uint64_t>(s0) & 0x0008000000000000ULL) == 0)
-      match = true;
-    if ((mask & 0x002) && std::isnan(s0) &&
-        (std::bit_cast<uint64_t>(s0) & 0x0008000000000000ULL) != 0)
-      match = true;
-    if ((mask & 0x004) && std::isinf(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x008) && std::isnormal(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0 &&
-        std::signbit(s0))
-      match = true;
-    if ((mask & 0x020) && s0 == 0.0 && std::signbit(s0))
-      match = true;
-    if ((mask & 0x040) && s0 == 0.0 && !std::signbit(s0))
-      match = true;
-    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0 &&
-        !std::signbit(s0))
-      match = true;
-    if ((mask & 0x100) && std::isnormal(s0) && s0 > 0)
-      match = true;
-    if ((mask & 0x200) && std::isinf(s0) && s0 > 0)
-      match = true;
-    if (match)
+    if ([&]() -> bool {
+          float s0 = std::bit_cast<float>(
+              static_cast<uint32_t>(std::bit_cast<double>(inst.src0.read_lane64(wf, lane))));
+          uint32_t mask = inst.vsrc1.read_lane64(wf, lane);
+          bool match = false;
+          if ((mask & 0x001u) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000u) == 0)
+            match = true;
+          if ((mask & 0x002u) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000u) != 0)
+            match = true;
+          if ((mask & 0x004u) && std::isinf(s0) && s0 < 0)
+            match = true;
+          if ((mask & 0x008u) && std::isnormal(s0) && s0 < 0)
+            match = true;
+          if ((mask & 0x010u) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) &&
+              s0 != 0.0f && std::signbit(s0))
+            match = true;
+          if ((mask & 0x020u) && s0 == 0.0f && std::signbit(s0))
+            match = true;
+          if ((mask & 0x040u) && s0 == 0.0f && !std::signbit(s0))
+            match = true;
+          if ((mask & 0x080u) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) &&
+              s0 != 0.0f && !std::signbit(s0))
+            match = true;
+          if ((mask & 0x100u) && std::isnormal(s0) && s0 > 0)
+            match = true;
+          if ((mask & 0x200u) && std::isinf(s0) && s0 > 0)
+            match = true;
+          return match;
+        }())
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -3195,17 +3162,22 @@ inline void execute_v_cmp_eq_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 == s1)
+    if (([&]() {
+          float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }() ==
+         [&]() {
+           float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
+           if (inst.inst_.abs & (1u << 1))
+             sv = std::fabs(sv);
+           if (inst.inst_.neg & (1u << 1))
+             sv = -sv;
+           return sv;
+         }()))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -3220,9 +3192,8 @@ inline void execute_v_cmp_eq_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane)));
-    if (s0 == s1)
+    if ((util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane))) ==
+         util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane)))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -3237,17 +3208,22 @@ inline void execute_v_cmp_eq_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 == s1)
+    if (([&]() {
+          float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }() ==
+         [&]() {
+           float sv = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+           if (inst.inst_.abs & (1u << 1))
+             sv = std::fabs(sv);
+           if (inst.inst_.neg & (1u << 1))
+             sv = -sv;
+           return sv;
+         }()))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -3262,9 +3238,8 @@ inline void execute_v_cmp_eq_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane));
-    if (s0 == s1)
+    if ((std::bit_cast<float>(inst.src0.read_lane(wf, lane)) ==
+         std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -3279,17 +3254,22 @@ inline void execute_v_cmp_eq_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 == s1)
+    if (([&]() {
+          double sv = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }() ==
+         [&]() {
+           double sv = std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
+           if (inst.inst_.abs & (1u << 1))
+             sv = std::fabs(sv);
+           if (inst.inst_.neg & (1u << 1))
+             sv = -sv;
+           return sv;
+         }()))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -3304,9 +3284,8 @@ inline void execute_v_cmp_eq_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(inst.vsrc1.read_lane64(wf, lane));
-    if (s0 == s1)
+    if ((std::bit_cast<double>(inst.src0.read_lane64(wf, lane)) ==
+         std::bit_cast<double>(inst.vsrc1.read_lane64(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -3321,9 +3300,8 @@ inline void execute_v_cmp_eq_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t s0 = static_cast<int16_t>(inst.src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t s1 = static_cast<int16_t>(inst.src1.read_lane(wf, lane) & 0xFFFF);
-    if (s0 == s1)
+    if ((static_cast<int16_t>(inst.src0.read_lane(wf, lane)) ==
+         static_cast<int16_t>(inst.src1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -3338,9 +3316,8 @@ inline void execute_v_cmp_eq_i16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t s0 = static_cast<int16_t>(inst.src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t s1 = static_cast<int16_t>(inst.vsrc1.read_lane(wf, lane) & 0xFFFF);
-    if (s0 == s1)
+    if ((static_cast<int16_t>(inst.src0.read_lane(wf, lane)) ==
+         static_cast<int16_t>(inst.vsrc1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -3355,9 +3332,8 @@ inline void execute_v_cmp_eq_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t s0 = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
-    int32_t s1 = static_cast<int32_t>(inst.src1.read_lane(wf, lane));
-    if (s0 == s1)
+    if ((static_cast<int32_t>(inst.src0.read_lane(wf, lane)) ==
+         static_cast<int32_t>(inst.src1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -3372,9 +3348,8 @@ inline void execute_v_cmp_eq_i32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t s0 = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
-    int32_t s1 = static_cast<int32_t>(inst.vsrc1.read_lane(wf, lane));
-    if (s0 == s1)
+    if ((static_cast<int32_t>(inst.src0.read_lane(wf, lane)) ==
+         static_cast<int32_t>(inst.vsrc1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -3389,9 +3364,8 @@ inline void execute_v_cmp_eq_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int64_t s0 = static_cast<int64_t>(inst.src0.read_lane64(wf, lane));
-    int64_t s1 = static_cast<int64_t>(inst.src1.read_lane64(wf, lane));
-    if (s0 == s1)
+    if ((static_cast<int64_t>(inst.src0.read_lane64(wf, lane)) ==
+         static_cast<int64_t>(inst.src1.read_lane64(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -3406,9 +3380,8 @@ inline void execute_v_cmp_eq_i64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int64_t s0 = static_cast<int64_t>(inst.src0.read_lane64(wf, lane));
-    int64_t s1 = static_cast<int64_t>(inst.vsrc1.read_lane64(wf, lane));
-    if (s0 == s1)
+    if ((static_cast<int64_t>(inst.src0.read_lane64(wf, lane)) ==
+         static_cast<int64_t>(inst.vsrc1.read_lane64(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -3423,9 +3396,8 @@ inline void execute_v_cmp_eq_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t s0 = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t s1 = static_cast<uint16_t>(inst.src1.read_lane(wf, lane));
-    if (s0 == s1)
+    if ((static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) ==
+         static_cast<uint16_t>(inst.src1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -3440,9 +3412,8 @@ inline void execute_v_cmp_eq_u16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t s0 = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t s1 = static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane));
-    if (s0 == s1)
+    if ((static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) ==
+         static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -3457,9 +3428,7 @@ inline void execute_v_cmp_eq_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0 = inst.src0.read_lane(wf, lane);
-    uint32_t s1 = inst.src1.read_lane(wf, lane);
-    if (s0 == s1)
+    if ((inst.src0.read_lane(wf, lane) == inst.src1.read_lane(wf, lane)))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -3474,9 +3443,7 @@ inline void execute_v_cmp_eq_u32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0 = inst.src0.read_lane(wf, lane);
-    uint32_t s1 = inst.vsrc1.read_lane(wf, lane);
-    if (s0 == s1)
+    if ((inst.src0.read_lane(wf, lane) == inst.vsrc1.read_lane(wf, lane)))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -3491,9 +3458,8 @@ inline void execute_v_cmp_eq_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint64_t s0 = inst.src0.read_lane64(wf, lane);
-    uint64_t s1 = inst.src1.read_lane64(wf, lane);
-    if (s0 == s1)
+    if ((static_cast<uint64_t>(inst.src0.read_lane64(wf, lane)) ==
+         static_cast<uint64_t>(inst.src1.read_lane64(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -3508,9 +3474,8 @@ inline void execute_v_cmp_eq_u64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint64_t s0 = inst.src0.read_lane64(wf, lane);
-    uint64_t s1 = inst.vsrc1.read_lane64(wf, lane);
-    if (s0 == s1)
+    if ((static_cast<uint64_t>(inst.src0.read_lane64(wf, lane)) ==
+         static_cast<uint64_t>(inst.vsrc1.read_lane64(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -3525,7 +3490,10 @@ inline void execute_v_cmp_f_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc &= ~(1ULL << lane);
+    if (0)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   inst.vdst.write_scalar64(wf, vcc);
 }
@@ -3537,7 +3505,10 @@ inline void execute_v_cmp_f_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc &= ~(1ULL << lane);
+    if (0)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   wf.set_vcc(vcc);
 }
@@ -3549,7 +3520,10 @@ inline void execute_v_cmp_f_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc &= ~(1ULL << lane);
+    if (0)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   inst.vdst.write_scalar64(wf, vcc);
 }
@@ -3561,7 +3535,10 @@ inline void execute_v_cmp_f_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc &= ~(1ULL << lane);
+    if (0)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   wf.set_vcc(vcc);
 }
@@ -3573,7 +3550,10 @@ inline void execute_v_cmp_f_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc &= ~(1ULL << lane);
+    if (0)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   inst.vdst.write_scalar64(wf, vcc);
 }
@@ -3585,7 +3565,10 @@ inline void execute_v_cmp_f_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc &= ~(1ULL << lane);
+    if (0)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   wf.set_vcc(vcc);
 }
@@ -3597,7 +3580,10 @@ inline void execute_v_cmp_f_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc &= ~(1ULL << lane);
+    if (0)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   inst.vdst.write_scalar64(wf, vcc);
 }
@@ -3609,7 +3595,10 @@ inline void execute_v_cmp_f_i16_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc &= ~(1ULL << lane);
+    if (0)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   wf.set_vcc(vcc);
 }
@@ -3621,7 +3610,10 @@ inline void execute_v_cmp_f_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc &= ~(1ULL << lane);
+    if (0)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   inst.vdst.write_scalar64(wf, vcc);
 }
@@ -3633,7 +3625,10 @@ inline void execute_v_cmp_f_i32_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc &= ~(1ULL << lane);
+    if (0)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   wf.set_vcc(vcc);
 }
@@ -3645,7 +3640,10 @@ inline void execute_v_cmp_f_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc &= ~(1ULL << lane);
+    if (0)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   inst.vdst.write_scalar64(wf, vcc);
 }
@@ -3657,7 +3655,10 @@ inline void execute_v_cmp_f_i64_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc &= ~(1ULL << lane);
+    if (0)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   wf.set_vcc(vcc);
 }
@@ -3669,7 +3670,10 @@ inline void execute_v_cmp_f_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc &= ~(1ULL << lane);
+    if (0)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   inst.vdst.write_scalar64(wf, vcc);
 }
@@ -3681,7 +3685,10 @@ inline void execute_v_cmp_f_u16_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc &= ~(1ULL << lane);
+    if (0)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   wf.set_vcc(vcc);
 }
@@ -3693,7 +3700,10 @@ inline void execute_v_cmp_f_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc &= ~(1ULL << lane);
+    if (0)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   inst.vdst.write_scalar64(wf, vcc);
 }
@@ -3705,7 +3715,10 @@ inline void execute_v_cmp_f_u32_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc &= ~(1ULL << lane);
+    if (0)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   wf.set_vcc(vcc);
 }
@@ -3717,7 +3730,10 @@ inline void execute_v_cmp_f_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc &= ~(1ULL << lane);
+    if (0)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   inst.vdst.write_scalar64(wf, vcc);
 }
@@ -3729,7 +3745,10 @@ inline void execute_v_cmp_f_u64_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc &= ~(1ULL << lane);
+    if (0)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   wf.set_vcc(vcc);
 }
@@ -3741,17 +3760,22 @@ inline void execute_v_cmp_ge_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 >= s1)
+    if (([&]() {
+          float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }() >=
+         [&]() {
+           float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
+           if (inst.inst_.abs & (1u << 1))
+             sv = std::fabs(sv);
+           if (inst.inst_.neg & (1u << 1))
+             sv = -sv;
+           return sv;
+         }()))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -3766,9 +3790,8 @@ inline void execute_v_cmp_ge_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane)));
-    if (s0 >= s1)
+    if ((util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane))) >=
+         util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane)))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -3783,17 +3806,22 @@ inline void execute_v_cmp_ge_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 >= s1)
+    if (([&]() {
+          float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }() >=
+         [&]() {
+           float sv = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+           if (inst.inst_.abs & (1u << 1))
+             sv = std::fabs(sv);
+           if (inst.inst_.neg & (1u << 1))
+             sv = -sv;
+           return sv;
+         }()))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -3808,9 +3836,8 @@ inline void execute_v_cmp_ge_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane));
-    if (s0 >= s1)
+    if ((std::bit_cast<float>(inst.src0.read_lane(wf, lane)) >=
+         std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -3825,17 +3852,22 @@ inline void execute_v_cmp_ge_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 >= s1)
+    if (([&]() {
+          double sv = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }() >=
+         [&]() {
+           double sv = std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
+           if (inst.inst_.abs & (1u << 1))
+             sv = std::fabs(sv);
+           if (inst.inst_.neg & (1u << 1))
+             sv = -sv;
+           return sv;
+         }()))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -3850,9 +3882,8 @@ inline void execute_v_cmp_ge_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(inst.vsrc1.read_lane64(wf, lane));
-    if (s0 >= s1)
+    if ((std::bit_cast<double>(inst.src0.read_lane64(wf, lane)) >=
+         std::bit_cast<double>(inst.vsrc1.read_lane64(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -3867,9 +3898,8 @@ inline void execute_v_cmp_ge_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t s0 = static_cast<int16_t>(inst.src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t s1 = static_cast<int16_t>(inst.src1.read_lane(wf, lane) & 0xFFFF);
-    if (s0 >= s1)
+    if ((static_cast<int16_t>(inst.src0.read_lane(wf, lane)) >=
+         static_cast<int16_t>(inst.src1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -3884,9 +3914,8 @@ inline void execute_v_cmp_ge_i16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t s0 = static_cast<int16_t>(inst.src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t s1 = static_cast<int16_t>(inst.vsrc1.read_lane(wf, lane) & 0xFFFF);
-    if (s0 >= s1)
+    if ((static_cast<int16_t>(inst.src0.read_lane(wf, lane)) >=
+         static_cast<int16_t>(inst.vsrc1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -3901,9 +3930,8 @@ inline void execute_v_cmp_ge_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t s0 = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
-    int32_t s1 = static_cast<int32_t>(inst.src1.read_lane(wf, lane));
-    if (s0 >= s1)
+    if ((static_cast<int32_t>(inst.src0.read_lane(wf, lane)) >=
+         static_cast<int32_t>(inst.src1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -3918,9 +3946,8 @@ inline void execute_v_cmp_ge_i32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t s0 = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
-    int32_t s1 = static_cast<int32_t>(inst.vsrc1.read_lane(wf, lane));
-    if (s0 >= s1)
+    if ((static_cast<int32_t>(inst.src0.read_lane(wf, lane)) >=
+         static_cast<int32_t>(inst.vsrc1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -3935,9 +3962,8 @@ inline void execute_v_cmp_ge_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int64_t s0 = static_cast<int64_t>(inst.src0.read_lane64(wf, lane));
-    int64_t s1 = static_cast<int64_t>(inst.src1.read_lane64(wf, lane));
-    if (s0 >= s1)
+    if ((static_cast<int64_t>(inst.src0.read_lane64(wf, lane)) >=
+         static_cast<int64_t>(inst.src1.read_lane64(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -3952,9 +3978,8 @@ inline void execute_v_cmp_ge_i64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int64_t s0 = static_cast<int64_t>(inst.src0.read_lane64(wf, lane));
-    int64_t s1 = static_cast<int64_t>(inst.vsrc1.read_lane64(wf, lane));
-    if (s0 >= s1)
+    if ((static_cast<int64_t>(inst.src0.read_lane64(wf, lane)) >=
+         static_cast<int64_t>(inst.vsrc1.read_lane64(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -3969,9 +3994,8 @@ inline void execute_v_cmp_ge_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t s0 = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t s1 = static_cast<uint16_t>(inst.src1.read_lane(wf, lane));
-    if (s0 >= s1)
+    if ((static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) >=
+         static_cast<uint16_t>(inst.src1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -3986,9 +4010,8 @@ inline void execute_v_cmp_ge_u16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t s0 = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t s1 = static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane));
-    if (s0 >= s1)
+    if ((static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) >=
+         static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4003,9 +4026,7 @@ inline void execute_v_cmp_ge_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0 = inst.src0.read_lane(wf, lane);
-    uint32_t s1 = inst.src1.read_lane(wf, lane);
-    if (s0 >= s1)
+    if ((inst.src0.read_lane(wf, lane) >= inst.src1.read_lane(wf, lane)))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4020,9 +4041,7 @@ inline void execute_v_cmp_ge_u32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0 = inst.src0.read_lane(wf, lane);
-    uint32_t s1 = inst.vsrc1.read_lane(wf, lane);
-    if (s0 >= s1)
+    if ((inst.src0.read_lane(wf, lane) >= inst.vsrc1.read_lane(wf, lane)))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4037,9 +4056,8 @@ inline void execute_v_cmp_ge_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint64_t s0 = inst.src0.read_lane64(wf, lane);
-    uint64_t s1 = inst.src1.read_lane64(wf, lane);
-    if (s0 >= s1)
+    if ((static_cast<uint64_t>(inst.src0.read_lane64(wf, lane)) >=
+         static_cast<uint64_t>(inst.src1.read_lane64(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4054,9 +4072,8 @@ inline void execute_v_cmp_ge_u64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint64_t s0 = inst.src0.read_lane64(wf, lane);
-    uint64_t s1 = inst.vsrc1.read_lane64(wf, lane);
-    if (s0 >= s1)
+    if ((static_cast<uint64_t>(inst.src0.read_lane64(wf, lane)) >=
+         static_cast<uint64_t>(inst.vsrc1.read_lane64(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4071,17 +4088,22 @@ inline void execute_v_cmp_gt_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 > s1)
+    if (([&]() {
+          float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }() >
+         [&]() {
+           float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
+           if (inst.inst_.abs & (1u << 1))
+             sv = std::fabs(sv);
+           if (inst.inst_.neg & (1u << 1))
+             sv = -sv;
+           return sv;
+         }()))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4096,9 +4118,8 @@ inline void execute_v_cmp_gt_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane)));
-    if (s0 > s1)
+    if ((util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane))) >
+         util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane)))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4113,17 +4134,22 @@ inline void execute_v_cmp_gt_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 > s1)
+    if (([&]() {
+          float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }() >
+         [&]() {
+           float sv = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+           if (inst.inst_.abs & (1u << 1))
+             sv = std::fabs(sv);
+           if (inst.inst_.neg & (1u << 1))
+             sv = -sv;
+           return sv;
+         }()))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4138,9 +4164,8 @@ inline void execute_v_cmp_gt_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane));
-    if (s0 > s1)
+    if ((std::bit_cast<float>(inst.src0.read_lane(wf, lane)) >
+         std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4155,17 +4180,22 @@ inline void execute_v_cmp_gt_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 > s1)
+    if (([&]() {
+          double sv = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }() >
+         [&]() {
+           double sv = std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
+           if (inst.inst_.abs & (1u << 1))
+             sv = std::fabs(sv);
+           if (inst.inst_.neg & (1u << 1))
+             sv = -sv;
+           return sv;
+         }()))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4180,9 +4210,8 @@ inline void execute_v_cmp_gt_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(inst.vsrc1.read_lane64(wf, lane));
-    if (s0 > s1)
+    if ((std::bit_cast<double>(inst.src0.read_lane64(wf, lane)) >
+         std::bit_cast<double>(inst.vsrc1.read_lane64(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4197,9 +4226,8 @@ inline void execute_v_cmp_gt_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t s0 = static_cast<int16_t>(inst.src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t s1 = static_cast<int16_t>(inst.src1.read_lane(wf, lane) & 0xFFFF);
-    if (s0 > s1)
+    if ((static_cast<int16_t>(inst.src0.read_lane(wf, lane)) >
+         static_cast<int16_t>(inst.src1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4214,9 +4242,8 @@ inline void execute_v_cmp_gt_i16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t s0 = static_cast<int16_t>(inst.src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t s1 = static_cast<int16_t>(inst.vsrc1.read_lane(wf, lane) & 0xFFFF);
-    if (s0 > s1)
+    if ((static_cast<int16_t>(inst.src0.read_lane(wf, lane)) >
+         static_cast<int16_t>(inst.vsrc1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4231,9 +4258,8 @@ inline void execute_v_cmp_gt_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t s0 = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
-    int32_t s1 = static_cast<int32_t>(inst.src1.read_lane(wf, lane));
-    if (s0 > s1)
+    if ((static_cast<int32_t>(inst.src0.read_lane(wf, lane)) >
+         static_cast<int32_t>(inst.src1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4248,9 +4274,8 @@ inline void execute_v_cmp_gt_i32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t s0 = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
-    int32_t s1 = static_cast<int32_t>(inst.vsrc1.read_lane(wf, lane));
-    if (s0 > s1)
+    if ((static_cast<int32_t>(inst.src0.read_lane(wf, lane)) >
+         static_cast<int32_t>(inst.vsrc1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4265,9 +4290,8 @@ inline void execute_v_cmp_gt_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int64_t s0 = static_cast<int64_t>(inst.src0.read_lane64(wf, lane));
-    int64_t s1 = static_cast<int64_t>(inst.src1.read_lane64(wf, lane));
-    if (s0 > s1)
+    if ((static_cast<int64_t>(inst.src0.read_lane64(wf, lane)) >
+         static_cast<int64_t>(inst.src1.read_lane64(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4282,9 +4306,8 @@ inline void execute_v_cmp_gt_i64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int64_t s0 = static_cast<int64_t>(inst.src0.read_lane64(wf, lane));
-    int64_t s1 = static_cast<int64_t>(inst.vsrc1.read_lane64(wf, lane));
-    if (s0 > s1)
+    if ((static_cast<int64_t>(inst.src0.read_lane64(wf, lane)) >
+         static_cast<int64_t>(inst.vsrc1.read_lane64(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4299,9 +4322,8 @@ inline void execute_v_cmp_gt_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t s0 = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t s1 = static_cast<uint16_t>(inst.src1.read_lane(wf, lane));
-    if (s0 > s1)
+    if ((static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) >
+         static_cast<uint16_t>(inst.src1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4316,9 +4338,8 @@ inline void execute_v_cmp_gt_u16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t s0 = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t s1 = static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane));
-    if (s0 > s1)
+    if ((static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) >
+         static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4333,9 +4354,7 @@ inline void execute_v_cmp_gt_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0 = inst.src0.read_lane(wf, lane);
-    uint32_t s1 = inst.src1.read_lane(wf, lane);
-    if (s0 > s1)
+    if ((inst.src0.read_lane(wf, lane) > inst.src1.read_lane(wf, lane)))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4350,9 +4369,7 @@ inline void execute_v_cmp_gt_u32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0 = inst.src0.read_lane(wf, lane);
-    uint32_t s1 = inst.vsrc1.read_lane(wf, lane);
-    if (s0 > s1)
+    if ((inst.src0.read_lane(wf, lane) > inst.vsrc1.read_lane(wf, lane)))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4367,9 +4384,8 @@ inline void execute_v_cmp_gt_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint64_t s0 = inst.src0.read_lane64(wf, lane);
-    uint64_t s1 = inst.src1.read_lane64(wf, lane);
-    if (s0 > s1)
+    if ((static_cast<uint64_t>(inst.src0.read_lane64(wf, lane)) >
+         static_cast<uint64_t>(inst.src1.read_lane64(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4384,9 +4400,8 @@ inline void execute_v_cmp_gt_u64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint64_t s0 = inst.src0.read_lane64(wf, lane);
-    uint64_t s1 = inst.vsrc1.read_lane64(wf, lane);
-    if (s0 > s1)
+    if ((static_cast<uint64_t>(inst.src0.read_lane64(wf, lane)) >
+         static_cast<uint64_t>(inst.vsrc1.read_lane64(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4401,17 +4416,22 @@ inline void execute_v_cmp_le_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 <= s1)
+    if (([&]() {
+          float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }() <=
+         [&]() {
+           float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
+           if (inst.inst_.abs & (1u << 1))
+             sv = std::fabs(sv);
+           if (inst.inst_.neg & (1u << 1))
+             sv = -sv;
+           return sv;
+         }()))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4426,9 +4446,8 @@ inline void execute_v_cmp_le_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane)));
-    if (s0 <= s1)
+    if ((util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane))) <=
+         util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane)))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4443,17 +4462,22 @@ inline void execute_v_cmp_le_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 <= s1)
+    if (([&]() {
+          float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }() <=
+         [&]() {
+           float sv = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+           if (inst.inst_.abs & (1u << 1))
+             sv = std::fabs(sv);
+           if (inst.inst_.neg & (1u << 1))
+             sv = -sv;
+           return sv;
+         }()))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4468,9 +4492,8 @@ inline void execute_v_cmp_le_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane));
-    if (s0 <= s1)
+    if ((std::bit_cast<float>(inst.src0.read_lane(wf, lane)) <=
+         std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4485,17 +4508,22 @@ inline void execute_v_cmp_le_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 <= s1)
+    if (([&]() {
+          double sv = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }() <=
+         [&]() {
+           double sv = std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
+           if (inst.inst_.abs & (1u << 1))
+             sv = std::fabs(sv);
+           if (inst.inst_.neg & (1u << 1))
+             sv = -sv;
+           return sv;
+         }()))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4510,9 +4538,8 @@ inline void execute_v_cmp_le_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(inst.vsrc1.read_lane64(wf, lane));
-    if (s0 <= s1)
+    if ((std::bit_cast<double>(inst.src0.read_lane64(wf, lane)) <=
+         std::bit_cast<double>(inst.vsrc1.read_lane64(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4527,9 +4554,8 @@ inline void execute_v_cmp_le_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t s0 = static_cast<int16_t>(inst.src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t s1 = static_cast<int16_t>(inst.src1.read_lane(wf, lane) & 0xFFFF);
-    if (s0 <= s1)
+    if ((static_cast<int16_t>(inst.src0.read_lane(wf, lane)) <=
+         static_cast<int16_t>(inst.src1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4544,9 +4570,8 @@ inline void execute_v_cmp_le_i16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t s0 = static_cast<int16_t>(inst.src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t s1 = static_cast<int16_t>(inst.vsrc1.read_lane(wf, lane) & 0xFFFF);
-    if (s0 <= s1)
+    if ((static_cast<int16_t>(inst.src0.read_lane(wf, lane)) <=
+         static_cast<int16_t>(inst.vsrc1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4561,9 +4586,8 @@ inline void execute_v_cmp_le_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t s0 = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
-    int32_t s1 = static_cast<int32_t>(inst.src1.read_lane(wf, lane));
-    if (s0 <= s1)
+    if ((static_cast<int32_t>(inst.src0.read_lane(wf, lane)) <=
+         static_cast<int32_t>(inst.src1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4578,9 +4602,8 @@ inline void execute_v_cmp_le_i32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t s0 = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
-    int32_t s1 = static_cast<int32_t>(inst.vsrc1.read_lane(wf, lane));
-    if (s0 <= s1)
+    if ((static_cast<int32_t>(inst.src0.read_lane(wf, lane)) <=
+         static_cast<int32_t>(inst.vsrc1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4595,9 +4618,8 @@ inline void execute_v_cmp_le_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int64_t s0 = static_cast<int64_t>(inst.src0.read_lane64(wf, lane));
-    int64_t s1 = static_cast<int64_t>(inst.src1.read_lane64(wf, lane));
-    if (s0 <= s1)
+    if ((static_cast<int64_t>(inst.src0.read_lane64(wf, lane)) <=
+         static_cast<int64_t>(inst.src1.read_lane64(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4612,9 +4634,8 @@ inline void execute_v_cmp_le_i64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int64_t s0 = static_cast<int64_t>(inst.src0.read_lane64(wf, lane));
-    int64_t s1 = static_cast<int64_t>(inst.vsrc1.read_lane64(wf, lane));
-    if (s0 <= s1)
+    if ((static_cast<int64_t>(inst.src0.read_lane64(wf, lane)) <=
+         static_cast<int64_t>(inst.vsrc1.read_lane64(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4629,9 +4650,8 @@ inline void execute_v_cmp_le_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t s0 = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t s1 = static_cast<uint16_t>(inst.src1.read_lane(wf, lane));
-    if (s0 <= s1)
+    if ((static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) <=
+         static_cast<uint16_t>(inst.src1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4646,9 +4666,8 @@ inline void execute_v_cmp_le_u16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t s0 = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t s1 = static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane));
-    if (s0 <= s1)
+    if ((static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) <=
+         static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4663,9 +4682,7 @@ inline void execute_v_cmp_le_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0 = inst.src0.read_lane(wf, lane);
-    uint32_t s1 = inst.src1.read_lane(wf, lane);
-    if (s0 <= s1)
+    if ((inst.src0.read_lane(wf, lane) <= inst.src1.read_lane(wf, lane)))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4680,9 +4697,7 @@ inline void execute_v_cmp_le_u32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0 = inst.src0.read_lane(wf, lane);
-    uint32_t s1 = inst.vsrc1.read_lane(wf, lane);
-    if (s0 <= s1)
+    if ((inst.src0.read_lane(wf, lane) <= inst.vsrc1.read_lane(wf, lane)))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4697,9 +4712,8 @@ inline void execute_v_cmp_le_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint64_t s0 = inst.src0.read_lane64(wf, lane);
-    uint64_t s1 = inst.src1.read_lane64(wf, lane);
-    if (s0 <= s1)
+    if ((static_cast<uint64_t>(inst.src0.read_lane64(wf, lane)) <=
+         static_cast<uint64_t>(inst.src1.read_lane64(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4714,9 +4728,8 @@ inline void execute_v_cmp_le_u64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint64_t s0 = inst.src0.read_lane64(wf, lane);
-    uint64_t s1 = inst.vsrc1.read_lane64(wf, lane);
-    if (s0 <= s1)
+    if ((static_cast<uint64_t>(inst.src0.read_lane64(wf, lane)) <=
+         static_cast<uint64_t>(inst.vsrc1.read_lane64(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4731,17 +4744,22 @@ inline void execute_v_cmp_lg_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 < s1 || s0 > s1)
+    if (([&]() {
+          float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }() !=
+         [&]() {
+           float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
+           if (inst.inst_.abs & (1u << 1))
+             sv = std::fabs(sv);
+           if (inst.inst_.neg & (1u << 1))
+             sv = -sv;
+           return sv;
+         }()))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4756,9 +4774,8 @@ inline void execute_v_cmp_lg_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane)));
-    if (s0 < s1 || s0 > s1)
+    if ((util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane))) !=
+         util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane)))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4773,17 +4790,22 @@ inline void execute_v_cmp_lg_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 < s1 || s0 > s1)
+    if (([&]() {
+          float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }() !=
+         [&]() {
+           float sv = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+           if (inst.inst_.abs & (1u << 1))
+             sv = std::fabs(sv);
+           if (inst.inst_.neg & (1u << 1))
+             sv = -sv;
+           return sv;
+         }()))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4798,9 +4820,8 @@ inline void execute_v_cmp_lg_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane));
-    if (s0 < s1 || s0 > s1)
+    if ((std::bit_cast<float>(inst.src0.read_lane(wf, lane)) !=
+         std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4815,17 +4836,22 @@ inline void execute_v_cmp_lg_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 < s1 || s0 > s1)
+    if (([&]() {
+          double sv = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }() !=
+         [&]() {
+           double sv = std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
+           if (inst.inst_.abs & (1u << 1))
+             sv = std::fabs(sv);
+           if (inst.inst_.neg & (1u << 1))
+             sv = -sv;
+           return sv;
+         }()))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4840,9 +4866,8 @@ inline void execute_v_cmp_lg_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(inst.vsrc1.read_lane64(wf, lane));
-    if (s0 < s1 || s0 > s1)
+    if ((std::bit_cast<double>(inst.src0.read_lane64(wf, lane)) !=
+         std::bit_cast<double>(inst.vsrc1.read_lane64(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4857,17 +4882,22 @@ inline void execute_v_cmp_lt_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 < s1)
+    if (([&]() {
+          float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }() <
+         [&]() {
+           float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
+           if (inst.inst_.abs & (1u << 1))
+             sv = std::fabs(sv);
+           if (inst.inst_.neg & (1u << 1))
+             sv = -sv;
+           return sv;
+         }()))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4882,9 +4912,8 @@ inline void execute_v_cmp_lt_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane)));
-    if (s0 < s1)
+    if ((util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane))) <
+         util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane)))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4899,17 +4928,22 @@ inline void execute_v_cmp_lt_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 < s1)
+    if (([&]() {
+          float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }() <
+         [&]() {
+           float sv = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+           if (inst.inst_.abs & (1u << 1))
+             sv = std::fabs(sv);
+           if (inst.inst_.neg & (1u << 1))
+             sv = -sv;
+           return sv;
+         }()))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4924,9 +4958,8 @@ inline void execute_v_cmp_lt_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane));
-    if (s0 < s1)
+    if ((std::bit_cast<float>(inst.src0.read_lane(wf, lane)) <
+         std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4941,17 +4974,22 @@ inline void execute_v_cmp_lt_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 < s1)
+    if (([&]() {
+          double sv = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }() <
+         [&]() {
+           double sv = std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
+           if (inst.inst_.abs & (1u << 1))
+             sv = std::fabs(sv);
+           if (inst.inst_.neg & (1u << 1))
+             sv = -sv;
+           return sv;
+         }()))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4966,9 +5004,8 @@ inline void execute_v_cmp_lt_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(inst.vsrc1.read_lane64(wf, lane));
-    if (s0 < s1)
+    if ((std::bit_cast<double>(inst.src0.read_lane64(wf, lane)) <
+         std::bit_cast<double>(inst.vsrc1.read_lane64(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -4983,9 +5020,8 @@ inline void execute_v_cmp_lt_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t s0 = static_cast<int16_t>(inst.src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t s1 = static_cast<int16_t>(inst.src1.read_lane(wf, lane) & 0xFFFF);
-    if (s0 < s1)
+    if ((static_cast<int16_t>(inst.src0.read_lane(wf, lane)) <
+         static_cast<int16_t>(inst.src1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5000,9 +5036,8 @@ inline void execute_v_cmp_lt_i16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t s0 = static_cast<int16_t>(inst.src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t s1 = static_cast<int16_t>(inst.vsrc1.read_lane(wf, lane) & 0xFFFF);
-    if (s0 < s1)
+    if ((static_cast<int16_t>(inst.src0.read_lane(wf, lane)) <
+         static_cast<int16_t>(inst.vsrc1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5017,9 +5052,8 @@ inline void execute_v_cmp_lt_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t s0 = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
-    int32_t s1 = static_cast<int32_t>(inst.src1.read_lane(wf, lane));
-    if (s0 < s1)
+    if ((static_cast<int32_t>(inst.src0.read_lane(wf, lane)) <
+         static_cast<int32_t>(inst.src1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5034,9 +5068,8 @@ inline void execute_v_cmp_lt_i32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t s0 = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
-    int32_t s1 = static_cast<int32_t>(inst.vsrc1.read_lane(wf, lane));
-    if (s0 < s1)
+    if ((static_cast<int32_t>(inst.src0.read_lane(wf, lane)) <
+         static_cast<int32_t>(inst.vsrc1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5051,9 +5084,8 @@ inline void execute_v_cmp_lt_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int64_t s0 = static_cast<int64_t>(inst.src0.read_lane64(wf, lane));
-    int64_t s1 = static_cast<int64_t>(inst.src1.read_lane64(wf, lane));
-    if (s0 < s1)
+    if ((static_cast<int64_t>(inst.src0.read_lane64(wf, lane)) <
+         static_cast<int64_t>(inst.src1.read_lane64(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5068,9 +5100,8 @@ inline void execute_v_cmp_lt_i64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int64_t s0 = static_cast<int64_t>(inst.src0.read_lane64(wf, lane));
-    int64_t s1 = static_cast<int64_t>(inst.vsrc1.read_lane64(wf, lane));
-    if (s0 < s1)
+    if ((static_cast<int64_t>(inst.src0.read_lane64(wf, lane)) <
+         static_cast<int64_t>(inst.vsrc1.read_lane64(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5085,9 +5116,8 @@ inline void execute_v_cmp_lt_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t s0 = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t s1 = static_cast<uint16_t>(inst.src1.read_lane(wf, lane));
-    if (s0 < s1)
+    if ((static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) <
+         static_cast<uint16_t>(inst.src1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5102,9 +5132,8 @@ inline void execute_v_cmp_lt_u16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t s0 = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t s1 = static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane));
-    if (s0 < s1)
+    if ((static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) <
+         static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5119,9 +5148,7 @@ inline void execute_v_cmp_lt_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0 = inst.src0.read_lane(wf, lane);
-    uint32_t s1 = inst.src1.read_lane(wf, lane);
-    if (s0 < s1)
+    if ((inst.src0.read_lane(wf, lane) < inst.src1.read_lane(wf, lane)))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5136,9 +5163,7 @@ inline void execute_v_cmp_lt_u32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0 = inst.src0.read_lane(wf, lane);
-    uint32_t s1 = inst.vsrc1.read_lane(wf, lane);
-    if (s0 < s1)
+    if ((inst.src0.read_lane(wf, lane) < inst.vsrc1.read_lane(wf, lane)))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5153,9 +5178,8 @@ inline void execute_v_cmp_lt_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint64_t s0 = inst.src0.read_lane64(wf, lane);
-    uint64_t s1 = inst.src1.read_lane64(wf, lane);
-    if (s0 < s1)
+    if ((static_cast<uint64_t>(inst.src0.read_lane64(wf, lane)) <
+         static_cast<uint64_t>(inst.src1.read_lane64(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5170,9 +5194,8 @@ inline void execute_v_cmp_lt_u64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint64_t s0 = inst.src0.read_lane64(wf, lane);
-    uint64_t s1 = inst.vsrc1.read_lane64(wf, lane);
-    if (s0 < s1)
+    if ((static_cast<uint64_t>(inst.src0.read_lane64(wf, lane)) <
+         static_cast<uint64_t>(inst.vsrc1.read_lane64(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5187,9 +5210,8 @@ inline void execute_v_cmp_ne_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t s0 = static_cast<int16_t>(inst.src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t s1 = static_cast<int16_t>(inst.src1.read_lane(wf, lane) & 0xFFFF);
-    if (s0 != s1)
+    if ((static_cast<int16_t>(inst.src0.read_lane(wf, lane)) !=
+         static_cast<int16_t>(inst.src1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5204,9 +5226,8 @@ inline void execute_v_cmp_ne_i16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t s0 = static_cast<int16_t>(inst.src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t s1 = static_cast<int16_t>(inst.vsrc1.read_lane(wf, lane) & 0xFFFF);
-    if (s0 != s1)
+    if ((static_cast<int16_t>(inst.src0.read_lane(wf, lane)) !=
+         static_cast<int16_t>(inst.vsrc1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5221,9 +5242,8 @@ inline void execute_v_cmp_ne_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t s0 = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
-    int32_t s1 = static_cast<int32_t>(inst.src1.read_lane(wf, lane));
-    if (s0 != s1)
+    if ((static_cast<int32_t>(inst.src0.read_lane(wf, lane)) !=
+         static_cast<int32_t>(inst.src1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5238,9 +5258,8 @@ inline void execute_v_cmp_ne_i32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t s0 = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
-    int32_t s1 = static_cast<int32_t>(inst.vsrc1.read_lane(wf, lane));
-    if (s0 != s1)
+    if ((static_cast<int32_t>(inst.src0.read_lane(wf, lane)) !=
+         static_cast<int32_t>(inst.vsrc1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5255,9 +5274,8 @@ inline void execute_v_cmp_ne_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int64_t s0 = static_cast<int64_t>(inst.src0.read_lane64(wf, lane));
-    int64_t s1 = static_cast<int64_t>(inst.src1.read_lane64(wf, lane));
-    if (s0 != s1)
+    if ((static_cast<int64_t>(inst.src0.read_lane64(wf, lane)) !=
+         static_cast<int64_t>(inst.src1.read_lane64(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5272,9 +5290,8 @@ inline void execute_v_cmp_ne_i64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int64_t s0 = static_cast<int64_t>(inst.src0.read_lane64(wf, lane));
-    int64_t s1 = static_cast<int64_t>(inst.vsrc1.read_lane64(wf, lane));
-    if (s0 != s1)
+    if ((static_cast<int64_t>(inst.src0.read_lane64(wf, lane)) !=
+         static_cast<int64_t>(inst.vsrc1.read_lane64(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5289,9 +5306,8 @@ inline void execute_v_cmp_ne_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t s0 = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t s1 = static_cast<uint16_t>(inst.src1.read_lane(wf, lane));
-    if (s0 != s1)
+    if ((static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) !=
+         static_cast<uint16_t>(inst.src1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5306,9 +5322,8 @@ inline void execute_v_cmp_ne_u16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t s0 = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t s1 = static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane));
-    if (s0 != s1)
+    if ((static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) !=
+         static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5323,9 +5338,7 @@ inline void execute_v_cmp_ne_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0 = inst.src0.read_lane(wf, lane);
-    uint32_t s1 = inst.src1.read_lane(wf, lane);
-    if (s0 != s1)
+    if ((inst.src0.read_lane(wf, lane) != inst.src1.read_lane(wf, lane)))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5340,9 +5353,7 @@ inline void execute_v_cmp_ne_u32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0 = inst.src0.read_lane(wf, lane);
-    uint32_t s1 = inst.vsrc1.read_lane(wf, lane);
-    if (s0 != s1)
+    if ((inst.src0.read_lane(wf, lane) != inst.vsrc1.read_lane(wf, lane)))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5357,9 +5368,8 @@ inline void execute_v_cmp_ne_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint64_t s0 = inst.src0.read_lane64(wf, lane);
-    uint64_t s1 = inst.src1.read_lane64(wf, lane);
-    if (s0 != s1)
+    if ((static_cast<uint64_t>(inst.src0.read_lane64(wf, lane)) !=
+         static_cast<uint64_t>(inst.src1.read_lane64(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5374,9 +5384,8 @@ inline void execute_v_cmp_ne_u64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint64_t s0 = inst.src0.read_lane64(wf, lane);
-    uint64_t s1 = inst.vsrc1.read_lane64(wf, lane);
-    if (s0 != s1)
+    if ((static_cast<uint64_t>(inst.src0.read_lane64(wf, lane)) !=
+         static_cast<uint64_t>(inst.vsrc1.read_lane64(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5392,17 +5401,22 @@ inline void execute_v_cmp_neq_f16_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 != s1 || std::isnan(s0) || std::isnan(s1))
+    if (([&]() {
+          float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }() !=
+         [&]() {
+           float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
+           if (inst.inst_.abs & (1u << 1))
+             sv = std::fabs(sv);
+           if (inst.inst_.neg & (1u << 1))
+             sv = -sv;
+           return sv;
+         }()))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5418,9 +5432,8 @@ inline void execute_v_cmp_neq_f16_vopc([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane)));
-    if (s0 != s1 || std::isnan(s0) || std::isnan(s1))
+    if ((util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane))) !=
+         util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane)))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5436,17 +5449,22 @@ inline void execute_v_cmp_neq_f32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 != s1 || std::isnan(s0) || std::isnan(s1))
+    if (([&]() {
+          float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }() !=
+         [&]() {
+           float sv = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+           if (inst.inst_.abs & (1u << 1))
+             sv = std::fabs(sv);
+           if (inst.inst_.neg & (1u << 1))
+             sv = -sv;
+           return sv;
+         }()))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5462,9 +5480,8 @@ inline void execute_v_cmp_neq_f32_vopc([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane));
-    if (s0 != s1 || std::isnan(s0) || std::isnan(s1))
+    if ((std::bit_cast<float>(inst.src0.read_lane(wf, lane)) !=
+         std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5480,17 +5497,22 @@ inline void execute_v_cmp_neq_f64_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 != s1 || std::isnan(s0) || std::isnan(s1))
+    if (([&]() {
+          double sv = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }() !=
+         [&]() {
+           double sv = std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
+           if (inst.inst_.abs & (1u << 1))
+             sv = std::fabs(sv);
+           if (inst.inst_.neg & (1u << 1))
+             sv = -sv;
+           return sv;
+         }()))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5506,9 +5528,8 @@ inline void execute_v_cmp_neq_f64_vopc([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(inst.vsrc1.read_lane64(wf, lane));
-    if (s0 != s1 || std::isnan(s0) || std::isnan(s1))
+    if ((std::bit_cast<double>(inst.src0.read_lane64(wf, lane)) !=
+         std::bit_cast<double>(inst.vsrc1.read_lane64(wf, lane))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5524,17 +5545,22 @@ inline void execute_v_cmp_nge_f16_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (!(s0 >= s1))
+    if ((!([&]() {
+          float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }() >=
+           [&]() {
+             float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
+             if (inst.inst_.abs & (1u << 1))
+               sv = std::fabs(sv);
+             if (inst.inst_.neg & (1u << 1))
+               sv = -sv;
+             return sv;
+           }())))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5550,9 +5576,8 @@ inline void execute_v_cmp_nge_f16_vopc([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane)));
-    if (!(s0 >= s1))
+    if ((!(util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane))) >=
+           util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane))))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5568,17 +5593,22 @@ inline void execute_v_cmp_nge_f32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (!(s0 >= s1))
+    if ((!([&]() {
+          float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }() >=
+           [&]() {
+             float sv = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+             if (inst.inst_.abs & (1u << 1))
+               sv = std::fabs(sv);
+             if (inst.inst_.neg & (1u << 1))
+               sv = -sv;
+             return sv;
+           }())))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5594,9 +5624,8 @@ inline void execute_v_cmp_nge_f32_vopc([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane));
-    if (!(s0 >= s1))
+    if ((!(std::bit_cast<float>(inst.src0.read_lane(wf, lane)) >=
+           std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane)))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5612,17 +5641,22 @@ inline void execute_v_cmp_nge_f64_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (!(s0 >= s1))
+    if ((!([&]() {
+          double sv = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }() >=
+           [&]() {
+             double sv = std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
+             if (inst.inst_.abs & (1u << 1))
+               sv = std::fabs(sv);
+             if (inst.inst_.neg & (1u << 1))
+               sv = -sv;
+             return sv;
+           }())))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5638,9 +5672,8 @@ inline void execute_v_cmp_nge_f64_vopc([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(inst.vsrc1.read_lane64(wf, lane));
-    if (!(s0 >= s1))
+    if ((!(std::bit_cast<double>(inst.src0.read_lane64(wf, lane)) >=
+           std::bit_cast<double>(inst.vsrc1.read_lane64(wf, lane)))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5656,17 +5689,22 @@ inline void execute_v_cmp_ngt_f16_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (!(s0 > s1))
+    if ((!([&]() {
+          float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }() >
+           [&]() {
+             float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
+             if (inst.inst_.abs & (1u << 1))
+               sv = std::fabs(sv);
+             if (inst.inst_.neg & (1u << 1))
+               sv = -sv;
+             return sv;
+           }())))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5682,9 +5720,8 @@ inline void execute_v_cmp_ngt_f16_vopc([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane)));
-    if (!(s0 > s1))
+    if ((!(util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane))) >
+           util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane))))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5700,17 +5737,22 @@ inline void execute_v_cmp_ngt_f32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (!(s0 > s1))
+    if ((!([&]() {
+          float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }() >
+           [&]() {
+             float sv = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+             if (inst.inst_.abs & (1u << 1))
+               sv = std::fabs(sv);
+             if (inst.inst_.neg & (1u << 1))
+               sv = -sv;
+             return sv;
+           }())))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5726,9 +5768,8 @@ inline void execute_v_cmp_ngt_f32_vopc([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane));
-    if (!(s0 > s1))
+    if ((!(std::bit_cast<float>(inst.src0.read_lane(wf, lane)) >
+           std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane)))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5744,17 +5785,22 @@ inline void execute_v_cmp_ngt_f64_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (!(s0 > s1))
+    if ((!([&]() {
+          double sv = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }() >
+           [&]() {
+             double sv = std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
+             if (inst.inst_.abs & (1u << 1))
+               sv = std::fabs(sv);
+             if (inst.inst_.neg & (1u << 1))
+               sv = -sv;
+             return sv;
+           }())))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5770,9 +5816,8 @@ inline void execute_v_cmp_ngt_f64_vopc([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(inst.vsrc1.read_lane64(wf, lane));
-    if (!(s0 > s1))
+    if ((!(std::bit_cast<double>(inst.src0.read_lane64(wf, lane)) >
+           std::bit_cast<double>(inst.vsrc1.read_lane64(wf, lane)))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5788,17 +5833,22 @@ inline void execute_v_cmp_nle_f16_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (!(s0 <= s1))
+    if ((!([&]() {
+          float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }() <=
+           [&]() {
+             float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
+             if (inst.inst_.abs & (1u << 1))
+               sv = std::fabs(sv);
+             if (inst.inst_.neg & (1u << 1))
+               sv = -sv;
+             return sv;
+           }())))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5814,9 +5864,8 @@ inline void execute_v_cmp_nle_f16_vopc([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane)));
-    if (!(s0 <= s1))
+    if ((!(util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane))) <=
+           util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane))))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5832,17 +5881,22 @@ inline void execute_v_cmp_nle_f32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (!(s0 <= s1))
+    if ((!([&]() {
+          float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }() <=
+           [&]() {
+             float sv = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+             if (inst.inst_.abs & (1u << 1))
+               sv = std::fabs(sv);
+             if (inst.inst_.neg & (1u << 1))
+               sv = -sv;
+             return sv;
+           }())))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5858,9 +5912,8 @@ inline void execute_v_cmp_nle_f32_vopc([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane));
-    if (!(s0 <= s1))
+    if ((!(std::bit_cast<float>(inst.src0.read_lane(wf, lane)) <=
+           std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane)))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5876,17 +5929,22 @@ inline void execute_v_cmp_nle_f64_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (!(s0 <= s1))
+    if ((!([&]() {
+          double sv = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }() <=
+           [&]() {
+             double sv = std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
+             if (inst.inst_.abs & (1u << 1))
+               sv = std::fabs(sv);
+             if (inst.inst_.neg & (1u << 1))
+               sv = -sv;
+             return sv;
+           }())))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5902,9 +5960,8 @@ inline void execute_v_cmp_nle_f64_vopc([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(inst.vsrc1.read_lane64(wf, lane));
-    if (!(s0 <= s1))
+    if ((!(std::bit_cast<double>(inst.src0.read_lane64(wf, lane)) <=
+           std::bit_cast<double>(inst.vsrc1.read_lane64(wf, lane)))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5920,17 +5977,22 @@ inline void execute_v_cmp_nlg_f16_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (!(s0 < s1 || s0 > s1))
+    if ((!([&]() {
+          float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }() !=
+           [&]() {
+             float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
+             if (inst.inst_.abs & (1u << 1))
+               sv = std::fabs(sv);
+             if (inst.inst_.neg & (1u << 1))
+               sv = -sv;
+             return sv;
+           }())))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5946,9 +6008,8 @@ inline void execute_v_cmp_nlg_f16_vopc([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane)));
-    if (!(s0 < s1 || s0 > s1))
+    if ((!(util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane))) !=
+           util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane))))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5964,17 +6025,22 @@ inline void execute_v_cmp_nlg_f32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (!(s0 < s1 || s0 > s1))
+    if ((!([&]() {
+          float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }() !=
+           [&]() {
+             float sv = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+             if (inst.inst_.abs & (1u << 1))
+               sv = std::fabs(sv);
+             if (inst.inst_.neg & (1u << 1))
+               sv = -sv;
+             return sv;
+           }())))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -5990,9 +6056,8 @@ inline void execute_v_cmp_nlg_f32_vopc([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane));
-    if (!(s0 < s1 || s0 > s1))
+    if ((!(std::bit_cast<float>(inst.src0.read_lane(wf, lane)) !=
+           std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane)))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -6008,17 +6073,22 @@ inline void execute_v_cmp_nlg_f64_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (!(s0 < s1 || s0 > s1))
+    if ((!([&]() {
+          double sv = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }() !=
+           [&]() {
+             double sv = std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
+             if (inst.inst_.abs & (1u << 1))
+               sv = std::fabs(sv);
+             if (inst.inst_.neg & (1u << 1))
+               sv = -sv;
+             return sv;
+           }())))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -6034,9 +6104,8 @@ inline void execute_v_cmp_nlg_f64_vopc([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(inst.vsrc1.read_lane64(wf, lane));
-    if (!(s0 < s1 || s0 > s1))
+    if ((!(std::bit_cast<double>(inst.src0.read_lane64(wf, lane)) !=
+           std::bit_cast<double>(inst.vsrc1.read_lane64(wf, lane)))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -6052,17 +6121,22 @@ inline void execute_v_cmp_nlt_f16_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (!(s0 < s1))
+    if ((!([&]() {
+          float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }() <
+           [&]() {
+             float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
+             if (inst.inst_.abs & (1u << 1))
+               sv = std::fabs(sv);
+             if (inst.inst_.neg & (1u << 1))
+               sv = -sv;
+             return sv;
+           }())))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -6078,9 +6152,8 @@ inline void execute_v_cmp_nlt_f16_vopc([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane)));
-    if (!(s0 < s1))
+    if ((!(util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane))) <
+           util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane))))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -6096,17 +6169,22 @@ inline void execute_v_cmp_nlt_f32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (!(s0 < s1))
+    if ((!([&]() {
+          float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }() <
+           [&]() {
+             float sv = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+             if (inst.inst_.abs & (1u << 1))
+               sv = std::fabs(sv);
+             if (inst.inst_.neg & (1u << 1))
+               sv = -sv;
+             return sv;
+           }())))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -6122,9 +6200,8 @@ inline void execute_v_cmp_nlt_f32_vopc([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane));
-    if (!(s0 < s1))
+    if ((!(std::bit_cast<float>(inst.src0.read_lane(wf, lane)) <
+           std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane)))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -6140,17 +6217,22 @@ inline void execute_v_cmp_nlt_f64_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (!(s0 < s1))
+    if ((!([&]() {
+          double sv = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }() <
+           [&]() {
+             double sv = std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
+             if (inst.inst_.abs & (1u << 1))
+               sv = std::fabs(sv);
+             if (inst.inst_.neg & (1u << 1))
+               sv = -sv;
+             return sv;
+           }())))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -6166,9 +6248,8 @@ inline void execute_v_cmp_nlt_f64_vopc([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(inst.vsrc1.read_lane64(wf, lane));
-    if (!(s0 < s1))
+    if ((!(std::bit_cast<double>(inst.src0.read_lane64(wf, lane)) <
+           std::bit_cast<double>(inst.vsrc1.read_lane64(wf, lane)))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -6183,17 +6264,22 @@ inline void execute_v_cmp_o_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (!std::isnan(s0) && !std::isnan(s1))
+    if ((!std::isnan([&]() {
+          float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }()) &&
+         !std::isnan([&]() {
+           float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
+           if (inst.inst_.abs & (1u << 1))
+             sv = std::fabs(sv);
+           if (inst.inst_.neg & (1u << 1))
+             sv = -sv;
+           return sv;
+         }())))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -6208,9 +6294,8 @@ inline void execute_v_cmp_o_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane)));
-    if (!std::isnan(s0) && !std::isnan(s1))
+    if ((!std::isnan(util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)))) &&
+         !std::isnan(util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane))))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -6225,17 +6310,22 @@ inline void execute_v_cmp_o_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (!std::isnan(s0) && !std::isnan(s1))
+    if ((!std::isnan([&]() {
+          float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }()) &&
+         !std::isnan([&]() {
+           float sv = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+           if (inst.inst_.abs & (1u << 1))
+             sv = std::fabs(sv);
+           if (inst.inst_.neg & (1u << 1))
+             sv = -sv;
+           return sv;
+         }())))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -6250,9 +6340,8 @@ inline void execute_v_cmp_o_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane));
-    if (!std::isnan(s0) && !std::isnan(s1))
+    if ((!std::isnan(std::bit_cast<float>(inst.src0.read_lane(wf, lane))) &&
+         !std::isnan(std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane)))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -6267,17 +6356,22 @@ inline void execute_v_cmp_o_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (!std::isnan(s0) && !std::isnan(s1))
+    if ((!std::isnan([&]() {
+          double sv = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }()) &&
+         !std::isnan([&]() {
+           double sv = std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
+           if (inst.inst_.abs & (1u << 1))
+             sv = std::fabs(sv);
+           if (inst.inst_.neg & (1u << 1))
+             sv = -sv;
+           return sv;
+         }())))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -6292,9 +6386,8 @@ inline void execute_v_cmp_o_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(inst.vsrc1.read_lane64(wf, lane));
-    if (!std::isnan(s0) && !std::isnan(s1))
+    if ((!std::isnan(std::bit_cast<double>(inst.src0.read_lane64(wf, lane))) &&
+         !std::isnan(std::bit_cast<double>(inst.vsrc1.read_lane64(wf, lane)))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -6309,7 +6402,10 @@ inline void execute_v_cmp_t_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc |= (1ULL << lane);
+    if (1)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   inst.vdst.write_scalar64(wf, vcc);
 }
@@ -6321,7 +6417,10 @@ inline void execute_v_cmp_t_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc |= (1ULL << lane);
+    if (1)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   wf.set_vcc(vcc);
 }
@@ -6333,7 +6432,10 @@ inline void execute_v_cmp_t_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc |= (1ULL << lane);
+    if (1)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   inst.vdst.write_scalar64(wf, vcc);
 }
@@ -6345,7 +6447,10 @@ inline void execute_v_cmp_t_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc |= (1ULL << lane);
+    if (1)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   wf.set_vcc(vcc);
 }
@@ -6357,7 +6462,10 @@ inline void execute_v_cmp_t_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc |= (1ULL << lane);
+    if (1)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   inst.vdst.write_scalar64(wf, vcc);
 }
@@ -6369,7 +6477,10 @@ inline void execute_v_cmp_t_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc |= (1ULL << lane);
+    if (1)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   wf.set_vcc(vcc);
 }
@@ -6381,7 +6492,10 @@ inline void execute_v_cmp_t_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc |= (1ULL << lane);
+    if (1)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   inst.vdst.write_scalar64(wf, vcc);
 }
@@ -6393,7 +6507,10 @@ inline void execute_v_cmp_t_i16_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc |= (1ULL << lane);
+    if (1)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   wf.set_vcc(vcc);
 }
@@ -6405,7 +6522,10 @@ inline void execute_v_cmp_t_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc |= (1ULL << lane);
+    if (1)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   inst.vdst.write_scalar64(wf, vcc);
 }
@@ -6417,7 +6537,10 @@ inline void execute_v_cmp_t_i32_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc |= (1ULL << lane);
+    if (1)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   wf.set_vcc(vcc);
 }
@@ -6429,7 +6552,10 @@ inline void execute_v_cmp_t_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc |= (1ULL << lane);
+    if (1)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   inst.vdst.write_scalar64(wf, vcc);
 }
@@ -6441,7 +6567,10 @@ inline void execute_v_cmp_t_i64_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc |= (1ULL << lane);
+    if (1)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   wf.set_vcc(vcc);
 }
@@ -6453,7 +6582,10 @@ inline void execute_v_cmp_t_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc |= (1ULL << lane);
+    if (1)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   inst.vdst.write_scalar64(wf, vcc);
 }
@@ -6465,7 +6597,10 @@ inline void execute_v_cmp_t_u16_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc |= (1ULL << lane);
+    if (1)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   wf.set_vcc(vcc);
 }
@@ -6477,7 +6612,10 @@ inline void execute_v_cmp_t_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc |= (1ULL << lane);
+    if (1)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   inst.vdst.write_scalar64(wf, vcc);
 }
@@ -6489,7 +6627,10 @@ inline void execute_v_cmp_t_u32_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc |= (1ULL << lane);
+    if (1)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   wf.set_vcc(vcc);
 }
@@ -6501,7 +6642,10 @@ inline void execute_v_cmp_t_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc |= (1ULL << lane);
+    if (1)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   inst.vdst.write_scalar64(wf, vcc);
 }
@@ -6513,7 +6657,10 @@ inline void execute_v_cmp_t_u64_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc |= (1ULL << lane);
+    if (1)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   wf.set_vcc(vcc);
 }
@@ -6526,7 +6673,10 @@ inline void execute_v_cmp_tru_f16_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc |= (1ULL << lane);
+    if (1)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   inst.vdst.write_scalar64(wf, vcc);
 }
@@ -6539,7 +6689,10 @@ inline void execute_v_cmp_tru_f16_vopc([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc |= (1ULL << lane);
+    if (1)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   wf.set_vcc(vcc);
 }
@@ -6552,7 +6705,10 @@ inline void execute_v_cmp_tru_f32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc |= (1ULL << lane);
+    if (1)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   inst.vdst.write_scalar64(wf, vcc);
 }
@@ -6565,7 +6721,10 @@ inline void execute_v_cmp_tru_f32_vopc([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc |= (1ULL << lane);
+    if (1)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   wf.set_vcc(vcc);
 }
@@ -6578,7 +6737,10 @@ inline void execute_v_cmp_tru_f64_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc |= (1ULL << lane);
+    if (1)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   inst.vdst.write_scalar64(wf, vcc);
 }
@@ -6591,7 +6753,10 @@ inline void execute_v_cmp_tru_f64_vopc([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vcc |= (1ULL << lane);
+    if (1)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
   }
   wf.set_vcc(vcc);
 }
@@ -6603,17 +6768,22 @@ inline void execute_v_cmp_u_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (std::isnan(s0) || std::isnan(s1))
+    if ((std::isnan([&]() {
+           float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+           if (inst.inst_.abs & (1u << 0))
+             sv = std::fabs(sv);
+           if (inst.inst_.neg & (1u << 0))
+             sv = -sv;
+           return sv;
+         }()) ||
+         std::isnan([&]() {
+           float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
+           if (inst.inst_.abs & (1u << 1))
+             sv = std::fabs(sv);
+           if (inst.inst_.neg & (1u << 1))
+             sv = -sv;
+           return sv;
+         }())))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -6628,9 +6798,8 @@ inline void execute_v_cmp_u_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane)));
-    if (std::isnan(s0) || std::isnan(s1))
+    if ((std::isnan(util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)))) ||
+         std::isnan(util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane))))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -6645,17 +6814,22 @@ inline void execute_v_cmp_u_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (std::isnan(s0) || std::isnan(s1))
+    if ((std::isnan([&]() {
+           float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+           if (inst.inst_.abs & (1u << 0))
+             sv = std::fabs(sv);
+           if (inst.inst_.neg & (1u << 0))
+             sv = -sv;
+           return sv;
+         }()) ||
+         std::isnan([&]() {
+           float sv = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+           if (inst.inst_.abs & (1u << 1))
+             sv = std::fabs(sv);
+           if (inst.inst_.neg & (1u << 1))
+             sv = -sv;
+           return sv;
+         }())))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -6670,9 +6844,8 @@ inline void execute_v_cmp_u_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane));
-    if (std::isnan(s0) || std::isnan(s1))
+    if ((std::isnan(std::bit_cast<float>(inst.src0.read_lane(wf, lane))) ||
+         std::isnan(std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane)))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -6687,17 +6860,22 @@ inline void execute_v_cmp_u_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (std::isnan(s0) || std::isnan(s1))
+    if ((std::isnan([&]() {
+           double sv = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
+           if (inst.inst_.abs & (1u << 0))
+             sv = std::fabs(sv);
+           if (inst.inst_.neg & (1u << 0))
+             sv = -sv;
+           return sv;
+         }()) ||
+         std::isnan([&]() {
+           double sv = std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
+           if (inst.inst_.abs & (1u << 1))
+             sv = std::fabs(sv);
+           if (inst.inst_.neg & (1u << 1))
+             sv = -sv;
+           return sv;
+         }())))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -6712,9 +6890,8 @@ inline void execute_v_cmp_u_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(inst.vsrc1.read_lane64(wf, lane));
-    if (std::isnan(s0) || std::isnan(s1))
+    if ((std::isnan(std::bit_cast<double>(inst.src0.read_lane64(wf, lane))) ||
+         std::isnan(std::bit_cast<double>(inst.vsrc1.read_lane64(wf, lane)))))
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -6726,13 +6903,14 @@ template <typename Inst>
 inline void execute_v_cndmask_b16_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t cond = inst.src2.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val =
-        (cond & (1ULL << lane)) ? inst.src1.read_lane(wf, lane) : inst.src0.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, val);
+    inst.vdst.write_lane(wf, lane,
+                         static_cast<uint32_t>(static_cast<uint16_t>(
+                             ((inst.src2.read_scalar64(wf) >> lane) & 1)
+                                 ? static_cast<uint16_t>(inst.src1.read_lane(wf, lane))
+                                 : static_cast<uint16_t>(inst.src0.read_lane(wf, lane)))));
   }
 }
 
@@ -6740,13 +6918,12 @@ template <typename Inst>
 inline void execute_v_cndmask_b32_vop2([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t cond = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val =
-        (cond & (1ULL << lane)) ? inst.vsrc1.read_lane(wf, lane) : inst.src0.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, val);
+    inst.vdst.write_lane(wf, lane,
+                         ((wf.vcc() >> lane) & 1) ? inst.vsrc1.read_lane(wf, lane)
+                                                  : inst.src0.read_lane(wf, lane));
   }
 }
 
@@ -6754,13 +6931,13 @@ template <typename Inst>
 inline void execute_v_cndmask_b32_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t cond = inst.src2.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val =
-        (cond & (1ULL << lane)) ? inst.src1.read_lane(wf, lane) : inst.src0.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, val);
+    inst.vdst.write_lane(wf, lane,
+                         ((inst.src2.read_scalar64(wf) >> lane) & 1)
+                             ? inst.src1.read_lane(wf, lane)
+                             : inst.src0.read_lane(wf, lane));
   }
 }
 
@@ -6770,8 +6947,9 @@ inline void execute_v_cos_f16_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(std::cos(s * 6.2831853071795864f)));
+    inst.vdst.write_lane(wf, lane,
+                         util::f32_to_f16(std::cos(util::f16_to_f32(
+                             static_cast<uint16_t>(inst.src0.read_lane(wf, lane))))));
   }
 }
 
@@ -6781,21 +6959,29 @@ inline void execute_v_cos_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    float result = std::cos(s * 6.2831853071795864f);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(result));
+    inst.vdst.write_lane(wf, lane, util::f32_to_f16([&]() {
+                           float v = [&]() {
+                             float v = std::cos([&]() {
+                               float sv = util::f16_to_f32(
+                                   static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+                               if (inst.inst_.abs & (1u << 0))
+                                 sv = std::fabs(sv);
+                               if (inst.inst_.neg & (1u << 0))
+                                 sv = -sv;
+                               return sv;
+                             }());
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -6805,8 +6991,9 @@ inline void execute_v_cos_f32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(amdgpu::transcendental::cos_f32(s)));
+    inst.vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(std::cos(std::bit_cast<float>(inst.src0.read_lane(wf, lane)))));
   }
 }
 
@@ -6816,21 +7003,28 @@ inline void execute_v_cos_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    float result = amdgpu::transcendental::cos_f32(s);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v = std::cos([&]() {
+                               float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                               if (inst.inst_.abs & (1u << 0))
+                                 sv = std::fabs(sv);
+                               if (inst.inst_.neg & (1u << 0))
+                                 sv = -sv;
+                               return sv;
+                             }());
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -6841,9 +7035,10 @@ inline void execute_v_ctz_i32_b32_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = inst.src0.read_lane(wf, lane);
-    inst.vdst.write_lane(
-        wf, lane, s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(s)));
+    inst.vdst.write_lane(wf, lane, [&]() {
+      auto s = inst.src0.read_lane(wf, lane);
+      return s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(s));
+    }());
   }
 }
 
@@ -6854,9 +7049,10 @@ inline void execute_v_ctz_i32_b32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = inst.src0.read_lane(wf, lane);
-    inst.vdst.write_lane(
-        wf, lane, s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(s)));
+    inst.vdst.write_lane(wf, lane, [&]() {
+      auto s = inst.src0.read_lane(wf, lane);
+      return s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(s));
+    }());
   }
 }
 
@@ -6866,38 +7062,52 @@ inline void execute_v_cubeid_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float a = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float b = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    float c = std::bit_cast<float>(inst.src2.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst.inst_.neg & (1u << 0))
-      a = -a;
-    if (inst.inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst.inst_.neg & (1u << 1))
-      b = -b;
-    if (inst.inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst.inst_.neg & (1u << 2))
-      c = -c;
-    float ax = std::fabs(a), ay = std::fabs(b), az = std::fabs(c);
-    float face;
-    if (az >= ax && az >= ay)
-      face = c >= 0 ? 4.0f : 5.0f;
-    else if (ay >= ax)
-      face = b >= 0 ? 2.0f : 3.0f;
-    else
-      face = a >= 0 ? 0.0f : 1.0f;
-    if (inst.inst_.omod == 1)
-      face *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      face *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      face *= 0.5f;
-    if (inst.inst_.clamp)
-      face = std::clamp(face, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(face));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v = [&]() {
+                               auto x = [&]() {
+                                 float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                                 if (inst.inst_.abs & (1u << 0))
+                                   sv = std::fabs(sv);
+                                 if (inst.inst_.neg & (1u << 0))
+                                   sv = -sv;
+                                 return sv;
+                               }();
+                               auto y = [&]() {
+                                 float sv = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+                                 if (inst.inst_.abs & (1u << 1))
+                                   sv = std::fabs(sv);
+                                 if (inst.inst_.neg & (1u << 1))
+                                   sv = -sv;
+                                 return sv;
+                               }();
+                               auto z = [&]() {
+                                 float sv = std::bit_cast<float>(inst.src2.read_lane(wf, lane));
+                                 if (inst.inst_.abs & (1u << 2))
+                                   sv = std::fabs(sv);
+                                 if (inst.inst_.neg & (1u << 2))
+                                   sv = -sv;
+                                 return sv;
+                               }();
+                               float ax = std::fabs(x), ay = std::fabs(y), az = std::fabs(z);
+                               if (ax >= ay && ax >= az)
+                                 return x >= 0 ? 0.0f : 1.0f;
+                               if (ay >= ax && ay >= az)
+                                 return y >= 0 ? 2.0f : 3.0f;
+                               return z >= 0 ? 4.0f : 5.0f;
+                             }();
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -6907,38 +7117,48 @@ inline void execute_v_cubema_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float a = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float b = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    float c = std::bit_cast<float>(inst.src2.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst.inst_.neg & (1u << 0))
-      a = -a;
-    if (inst.inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst.inst_.neg & (1u << 1))
-      b = -b;
-    if (inst.inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst.inst_.neg & (1u << 2))
-      c = -c;
-    float ax = std::fabs(a), ay = std::fabs(b), az = std::fabs(c);
-    float ma;
-    if (az >= ax && az >= ay)
-      ma = 2.0f * az;
-    else if (ay >= ax)
-      ma = 2.0f * ay;
-    else
-      ma = 2.0f * ax;
-    if (inst.inst_.omod == 1)
-      ma *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      ma *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      ma *= 0.5f;
-    if (inst.inst_.clamp)
-      ma = std::clamp(ma, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(ma));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v = [&]() {
+                               auto x = [&]() {
+                                 float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                                 if (inst.inst_.abs & (1u << 0))
+                                   sv = std::fabs(sv);
+                                 if (inst.inst_.neg & (1u << 0))
+                                   sv = -sv;
+                                 return sv;
+                               }();
+                               auto y = [&]() {
+                                 float sv = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+                                 if (inst.inst_.abs & (1u << 1))
+                                   sv = std::fabs(sv);
+                                 if (inst.inst_.neg & (1u << 1))
+                                   sv = -sv;
+                                 return sv;
+                               }();
+                               auto z = [&]() {
+                                 float sv = std::bit_cast<float>(inst.src2.read_lane(wf, lane));
+                                 if (inst.inst_.abs & (1u << 2))
+                                   sv = std::fabs(sv);
+                                 if (inst.inst_.neg & (1u << 2))
+                                   sv = -sv;
+                                 return sv;
+                               }();
+                               float ax = std::fabs(x), ay = std::fabs(y), az = std::fabs(z);
+                               return 2.0f * std::max({ax, ay, az});
+                             }();
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -6948,38 +7168,52 @@ inline void execute_v_cubesc_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float a = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float b = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    float c = std::bit_cast<float>(inst.src2.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst.inst_.neg & (1u << 0))
-      a = -a;
-    if (inst.inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst.inst_.neg & (1u << 1))
-      b = -b;
-    if (inst.inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst.inst_.neg & (1u << 2))
-      c = -c;
-    float ax = std::fabs(a), ay = std::fabs(b), az = std::fabs(c);
-    float sc;
-    if (az >= ax && az >= ay)
-      sc = c >= 0 ? a : -a;
-    else if (ay >= ax)
-      sc = a;
-    else
-      sc = a >= 0 ? -c : c;
-    if (inst.inst_.omod == 1)
-      sc *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      sc *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      sc *= 0.5f;
-    if (inst.inst_.clamp)
-      sc = std::clamp(sc, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(sc));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v = [&]() {
+                               auto x = [&]() {
+                                 float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                                 if (inst.inst_.abs & (1u << 0))
+                                   sv = std::fabs(sv);
+                                 if (inst.inst_.neg & (1u << 0))
+                                   sv = -sv;
+                                 return sv;
+                               }();
+                               auto y = [&]() {
+                                 float sv = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+                                 if (inst.inst_.abs & (1u << 1))
+                                   sv = std::fabs(sv);
+                                 if (inst.inst_.neg & (1u << 1))
+                                   sv = -sv;
+                                 return sv;
+                               }();
+                               auto z = [&]() {
+                                 float sv = std::bit_cast<float>(inst.src2.read_lane(wf, lane));
+                                 if (inst.inst_.abs & (1u << 2))
+                                   sv = std::fabs(sv);
+                                 if (inst.inst_.neg & (1u << 2))
+                                   sv = -sv;
+                                 return sv;
+                               }();
+                               float ax = std::fabs(x), ay = std::fabs(y), az = std::fabs(z);
+                               if (ax >= ay && ax >= az)
+                                 return x >= 0 ? z : -z;
+                               if (ay >= ax && ay >= az)
+                                 return x;
+                               return z >= 0 ? -x : x;
+                             }();
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -6989,38 +7223,52 @@ inline void execute_v_cubetc_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float a = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float b = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    float c = std::bit_cast<float>(inst.src2.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst.inst_.neg & (1u << 0))
-      a = -a;
-    if (inst.inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst.inst_.neg & (1u << 1))
-      b = -b;
-    if (inst.inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst.inst_.neg & (1u << 2))
-      c = -c;
-    float ax = std::fabs(a), ay = std::fabs(b), az = std::fabs(c);
-    float tc;
-    if (az >= ax && az >= ay)
-      tc = -b;
-    else if (ay >= ax)
-      tc = b >= 0 ? c : -c;
-    else
-      tc = -b;
-    if (inst.inst_.omod == 1)
-      tc *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      tc *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      tc *= 0.5f;
-    if (inst.inst_.clamp)
-      tc = std::clamp(tc, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(tc));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v = [&]() {
+                               auto x = [&]() {
+                                 float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                                 if (inst.inst_.abs & (1u << 0))
+                                   sv = std::fabs(sv);
+                                 if (inst.inst_.neg & (1u << 0))
+                                   sv = -sv;
+                                 return sv;
+                               }();
+                               auto y = [&]() {
+                                 float sv = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+                                 if (inst.inst_.abs & (1u << 1))
+                                   sv = std::fabs(sv);
+                                 if (inst.inst_.neg & (1u << 1))
+                                   sv = -sv;
+                                 return sv;
+                               }();
+                               auto z = [&]() {
+                                 float sv = std::bit_cast<float>(inst.src2.read_lane(wf, lane));
+                                 if (inst.inst_.abs & (1u << 2))
+                                   sv = std::fabs(sv);
+                                 if (inst.inst_.neg & (1u << 2))
+                                   sv = -sv;
+                                 return sv;
+                               }();
+                               float ax = std::fabs(x), ay = std::fabs(y), az = std::fabs(z);
+                               if (ax >= ay && ax >= az)
+                                 return -y;
+                               if (ay >= ax && ay >= az)
+                                 return y >= 0 ? -z : z;
+                               return -y;
+                             }();
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -7031,8 +7279,9 @@ inline void execute_v_cvt_f16_f32_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(s));
+    inst.vdst.write_lane(wf, lane,
+                         util::f32_to_f16(std::bit_cast<float>(
+                             static_cast<uint32_t>(inst.src0.read_lane(wf, lane)))));
   }
 }
 
@@ -7043,8 +7292,9 @@ inline void execute_v_cvt_f16_f32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(s));
+    inst.vdst.write_lane(wf, lane,
+                         util::f32_to_f16(std::bit_cast<float>(
+                             static_cast<uint32_t>(inst.src0.read_lane(wf, lane)))));
   }
 }
 
@@ -7055,8 +7305,9 @@ inline void execute_v_cvt_f16_i16_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t s = static_cast<int16_t>(inst.src0.read_lane(wf, lane) & 0xFFFF);
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(static_cast<float>(s)));
+    inst.vdst.write_lane(wf, lane,
+                         util::f32_to_f16(static_cast<float>(
+                             static_cast<int16_t>(inst.src0.read_lane(wf, lane) & 0xFFFF))));
   }
 }
 
@@ -7067,8 +7318,9 @@ inline void execute_v_cvt_f16_i16_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t s = static_cast<int16_t>(inst.src0.read_lane(wf, lane) & 0xFFFF);
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(static_cast<float>(s)));
+    inst.vdst.write_lane(wf, lane,
+                         util::f32_to_f16(static_cast<float>(
+                             static_cast<int16_t>(inst.src0.read_lane(wf, lane) & 0xFFFF))));
   }
 }
 
@@ -7079,8 +7331,9 @@ inline void execute_v_cvt_f16_u16_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t s = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(static_cast<float>(s)));
+    inst.vdst.write_lane(
+        wf, lane,
+        util::f32_to_f16(static_cast<float>(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)))));
   }
 }
 
@@ -7091,8 +7344,9 @@ inline void execute_v_cvt_f16_u16_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t s = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(static_cast<float>(s)));
+    inst.vdst.write_lane(
+        wf, lane,
+        util::f32_to_f16(static_cast<float>(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)))));
   }
 }
 
@@ -7103,8 +7357,9 @@ inline void execute_v_cvt_f32_bf8_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float r = util::bf8_e5m2_to_f32(static_cast<uint8_t>(inst.src0.read_lane(wf, lane) & 0xFF));
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(r));
+    inst.vdst.write_lane(wf, lane,
+                         std::bit_cast<uint32_t>(util::bf8_e5m2_to_f32(
+                             static_cast<uint8_t>(inst.src0.read_lane(wf, lane)))));
   }
 }
 
@@ -7115,8 +7370,9 @@ inline void execute_v_cvt_f32_bf8_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float r = util::bf8_e5m2_to_f32(static_cast<uint8_t>(inst.src0.read_lane(wf, lane) & 0xFF));
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(r));
+    inst.vdst.write_lane(wf, lane,
+                         std::bit_cast<uint32_t>(util::bf8_e5m2_to_f32(
+                             static_cast<uint8_t>(inst.src0.read_lane(wf, lane)))));
   }
 }
 
@@ -7127,9 +7383,9 @@ inline void execute_v_cvt_f32_f16_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t raw = inst.src0.read_lane(wf, lane);
     inst.vdst.write_lane(wf, lane,
-                         std::bit_cast<uint32_t>(util::f16_to_f32(static_cast<uint16_t>(raw))));
+                         std::bit_cast<uint32_t>(util::f16_to_f32(
+                             static_cast<uint16_t>(inst.src0.read_lane(wf, lane)))));
   }
 }
 
@@ -7140,9 +7396,9 @@ inline void execute_v_cvt_f32_f16_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t raw = inst.src0.read_lane(wf, lane);
     inst.vdst.write_lane(wf, lane,
-                         std::bit_cast<uint32_t>(util::f16_to_f32(static_cast<uint16_t>(raw))));
+                         std::bit_cast<uint32_t>(util::f16_to_f32(
+                             static_cast<uint16_t>(inst.src0.read_lane(wf, lane)))));
   }
 }
 
@@ -7153,8 +7409,9 @@ inline void execute_v_cvt_f32_f64_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(static_cast<float>(s)));
+    inst.vdst.write_lane(wf, lane,
+                         std::bit_cast<uint32_t>(static_cast<float>(std::bit_cast<double>(
+                             static_cast<uint64_t>(inst.src0.read_lane(wf, lane))))));
   }
 }
 
@@ -7165,8 +7422,9 @@ inline void execute_v_cvt_f32_f64_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(static_cast<float>(s)));
+    inst.vdst.write_lane(wf, lane,
+                         std::bit_cast<uint32_t>(static_cast<float>(std::bit_cast<double>(
+                             static_cast<uint64_t>(inst.src0.read_lane(wf, lane))))));
   }
 }
 
@@ -7177,8 +7435,9 @@ inline void execute_v_cvt_f32_fp8_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float r = util::fp8_e4m3_to_f32(static_cast<uint8_t>(inst.src0.read_lane(wf, lane) & 0xFF));
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(r));
+    inst.vdst.write_lane(wf, lane,
+                         std::bit_cast<uint32_t>(util::fp8_e4m3_to_f32(
+                             static_cast<uint8_t>(inst.src0.read_lane(wf, lane)))));
   }
 }
 
@@ -7189,8 +7448,9 @@ inline void execute_v_cvt_f32_fp8_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float r = util::fp8_e4m3_to_f32(static_cast<uint8_t>(inst.src0.read_lane(wf, lane) & 0xFF));
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(r));
+    inst.vdst.write_lane(wf, lane,
+                         std::bit_cast<uint32_t>(util::fp8_e4m3_to_f32(
+                             static_cast<uint8_t>(inst.src0.read_lane(wf, lane)))));
   }
 }
 
@@ -7201,8 +7461,9 @@ inline void execute_v_cvt_f32_i32_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t s = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(static_cast<float>(s)));
+    inst.vdst.write_lane(wf, lane,
+                         std::bit_cast<uint32_t>(static_cast<float>(
+                             static_cast<int32_t>(inst.src0.read_lane(wf, lane)))));
   }
 }
 
@@ -7213,8 +7474,9 @@ inline void execute_v_cvt_f32_i32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t s = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(static_cast<float>(s)));
+    inst.vdst.write_lane(wf, lane,
+                         std::bit_cast<uint32_t>(static_cast<float>(
+                             static_cast<int32_t>(inst.src0.read_lane(wf, lane)))));
   }
 }
 
@@ -7225,8 +7487,8 @@ inline void execute_v_cvt_f32_u32_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = inst.src0.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(static_cast<float>(s)));
+    inst.vdst.write_lane(
+        wf, lane, std::bit_cast<uint32_t>(static_cast<float>(inst.src0.read_lane(wf, lane))));
   }
 }
 
@@ -7237,8 +7499,8 @@ inline void execute_v_cvt_f32_u32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = inst.src0.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(static_cast<float>(s)));
+    inst.vdst.write_lane(
+        wf, lane, std::bit_cast<uint32_t>(static_cast<float>(inst.src0.read_lane(wf, lane))));
   }
 }
 
@@ -7249,8 +7511,9 @@ inline void execute_v_cvt_f32_ubyte0_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = inst.src0.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(static_cast<float>(s & 0xFFu)));
+    inst.vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(static_cast<float>(inst.src0.read_lane(wf, lane) & 0xFFu)));
   }
 }
 
@@ -7261,8 +7524,9 @@ inline void execute_v_cvt_f32_ubyte0_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = inst.src0.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(static_cast<float>(s & 0xFFu)));
+    inst.vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(static_cast<float>(inst.src0.read_lane(wf, lane) & 0xFFu)));
   }
 }
 
@@ -7273,8 +7537,9 @@ inline void execute_v_cvt_f32_ubyte1_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = inst.src0.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(static_cast<float>((s >> 8) & 0xFFu)));
+    inst.vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(static_cast<float>((inst.src0.read_lane(wf, lane) >> 8) & 0xFFu)));
   }
 }
 
@@ -7285,8 +7550,9 @@ inline void execute_v_cvt_f32_ubyte1_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = inst.src0.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(static_cast<float>((s >> 8) & 0xFFu)));
+    inst.vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(static_cast<float>((inst.src0.read_lane(wf, lane) >> 8) & 0xFFu)));
   }
 }
 
@@ -7297,8 +7563,9 @@ inline void execute_v_cvt_f32_ubyte2_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = inst.src0.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(static_cast<float>((s >> 16) & 0xFFu)));
+    inst.vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(static_cast<float>((inst.src0.read_lane(wf, lane) >> 16) & 0xFFu)));
   }
 }
 
@@ -7309,8 +7576,9 @@ inline void execute_v_cvt_f32_ubyte2_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = inst.src0.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(static_cast<float>((s >> 16) & 0xFFu)));
+    inst.vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(static_cast<float>((inst.src0.read_lane(wf, lane) >> 16) & 0xFFu)));
   }
 }
 
@@ -7321,8 +7589,9 @@ inline void execute_v_cvt_f32_ubyte3_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = inst.src0.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(static_cast<float>((s >> 24) & 0xFFu)));
+    inst.vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(static_cast<float>((inst.src0.read_lane(wf, lane) >> 24) & 0xFFu)));
   }
 }
 
@@ -7333,8 +7602,9 @@ inline void execute_v_cvt_f32_ubyte3_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = inst.src0.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(static_cast<float>((s >> 24) & 0xFFu)));
+    inst.vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(static_cast<float>((inst.src0.read_lane(wf, lane) >> 24) & 0xFFu)));
   }
 }
 
@@ -7345,8 +7615,9 @@ inline void execute_v_cvt_f64_f32_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(static_cast<double>(s)));
+    inst.vdst.write_lane(wf, lane,
+                         std::bit_cast<uint64_t>(static_cast<double>(std::bit_cast<float>(
+                             static_cast<uint32_t>(inst.src0.read_lane(wf, lane))))));
   }
 }
 
@@ -7357,8 +7628,9 @@ inline void execute_v_cvt_f64_f32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(static_cast<double>(s)));
+    inst.vdst.write_lane(wf, lane,
+                         std::bit_cast<uint64_t>(static_cast<double>(std::bit_cast<float>(
+                             static_cast<uint32_t>(inst.src0.read_lane(wf, lane))))));
   }
 }
 
@@ -7369,8 +7641,9 @@ inline void execute_v_cvt_f64_i32_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t s = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
-    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(static_cast<double>(s)));
+    inst.vdst.write_lane(wf, lane,
+                         std::bit_cast<uint64_t>(static_cast<double>(
+                             static_cast<int32_t>(inst.src0.read_lane(wf, lane)))));
   }
 }
 
@@ -7381,8 +7654,9 @@ inline void execute_v_cvt_f64_i32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t s = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
-    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(static_cast<double>(s)));
+    inst.vdst.write_lane(wf, lane,
+                         std::bit_cast<uint64_t>(static_cast<double>(
+                             static_cast<int32_t>(inst.src0.read_lane(wf, lane)))));
   }
 }
 
@@ -7393,8 +7667,8 @@ inline void execute_v_cvt_f64_u32_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = inst.src0.read_lane(wf, lane);
-    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(static_cast<double>(s)));
+    inst.vdst.write_lane(
+        wf, lane, std::bit_cast<uint64_t>(static_cast<double>(inst.src0.read_lane(wf, lane))));
   }
 }
 
@@ -7405,8 +7679,8 @@ inline void execute_v_cvt_f64_u32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = inst.src0.read_lane(wf, lane);
-    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(static_cast<double>(s)));
+    inst.vdst.write_lane(
+        wf, lane, std::bit_cast<uint64_t>(static_cast<double>(inst.src0.read_lane(wf, lane))));
   }
 }
 
@@ -7417,17 +7691,16 @@ inline void execute_v_cvt_floor_i32_f32_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    int32_t r;
-    if (std::isnan(s))
-      r = 0;
-    else if (s >= 2147483648.0f)
-      r = INT32_MAX;
-    else if (s < -2147483648.0f)
-      r = INT32_MIN;
-    else
-      r = static_cast<int32_t>(s);
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(r));
+    inst.vdst.write_lane(wf, lane, [&]() -> uint32_t {
+      float s = std::bit_cast<float>(static_cast<uint32_t>(inst.src0.read_lane(wf, lane)));
+      if (std::isnan(s))
+        return 0u;
+      if (s >= 2147483648.0f)
+        return static_cast<uint32_t>(INT32_MAX);
+      if (s < -2147483648.0f)
+        return static_cast<uint32_t>(INT32_MIN);
+      return static_cast<uint32_t>(static_cast<int32_t>(s));
+    }());
   }
 }
 
@@ -7438,17 +7711,16 @@ inline void execute_v_cvt_floor_i32_f32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    int32_t r;
-    if (std::isnan(s))
-      r = 0;
-    else if (s >= 2147483648.0f)
-      r = INT32_MAX;
-    else if (s < -2147483648.0f)
-      r = INT32_MIN;
-    else
-      r = static_cast<int32_t>(s);
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(r));
+    inst.vdst.write_lane(wf, lane, [&]() -> uint32_t {
+      float s = std::bit_cast<float>(static_cast<uint32_t>(inst.src0.read_lane(wf, lane)));
+      if (std::isnan(s))
+        return 0u;
+      if (s >= 2147483648.0f)
+        return static_cast<uint32_t>(INT32_MAX);
+      if (s < -2147483648.0f)
+        return static_cast<uint32_t>(INT32_MIN);
+      return static_cast<uint32_t>(static_cast<int32_t>(s));
+    }());
   }
 }
 
@@ -7459,18 +7731,17 @@ inline void execute_v_cvt_flr_i32_f32_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float rounded = std::floor(s);
-    int32_t r;
-    if (std::isnan(rounded))
-      r = 0;
-    else if (rounded >= 2147483648.0f)
-      r = INT32_MAX;
-    else if (rounded < -2147483648.0f)
-      r = INT32_MIN;
-    else
-      r = static_cast<int32_t>(rounded);
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(r));
+    inst.vdst.write_lane(wf, lane, [&]() -> uint32_t {
+      float s = std::bit_cast<float>(static_cast<uint32_t>(inst.src0.read_lane(wf, lane)));
+      float r = std::floor(s);
+      if (std::isnan(r))
+        return 0u;
+      if (r >= 2147483648.0f)
+        return static_cast<uint32_t>(INT32_MAX);
+      if (r < -2147483648.0f)
+        return static_cast<uint32_t>(INT32_MIN);
+      return static_cast<uint32_t>(static_cast<int32_t>(r));
+    }());
   }
 }
 
@@ -7481,18 +7752,17 @@ inline void execute_v_cvt_flr_i32_f32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float rounded = std::floor(s);
-    int32_t r;
-    if (std::isnan(rounded))
-      r = 0;
-    else if (rounded >= 2147483648.0f)
-      r = INT32_MAX;
-    else if (rounded < -2147483648.0f)
-      r = INT32_MIN;
-    else
-      r = static_cast<int32_t>(rounded);
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(r));
+    inst.vdst.write_lane(wf, lane, [&]() -> uint32_t {
+      float s = std::bit_cast<float>(static_cast<uint32_t>(inst.src0.read_lane(wf, lane)));
+      float r = std::floor(s);
+      if (std::isnan(r))
+        return 0u;
+      if (r >= 2147483648.0f)
+        return static_cast<uint32_t>(INT32_MAX);
+      if (r < -2147483648.0f)
+        return static_cast<uint32_t>(INT32_MIN);
+      return static_cast<uint32_t>(static_cast<int32_t>(r));
+    }());
   }
 }
 
@@ -7503,17 +7773,16 @@ inline void execute_v_cvt_i16_f16_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    int16_t r;
-    if (std::isnan(s))
-      r = 0;
-    else if (s >= 32768.0f)
-      r = INT16_MAX;
-    else if (s < -32768.0f)
-      r = INT16_MIN;
-    else
-      r = static_cast<int16_t>(s);
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(r)));
+    inst.vdst.write_lane(wf, lane, [&]() -> uint32_t {
+      float s = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+      if (std::isnan(s))
+        return 0u;
+      if (s >= 32768.0f)
+        return static_cast<uint32_t>(static_cast<uint16_t>(INT16_MAX));
+      if (s < -32768.0f)
+        return static_cast<uint32_t>(static_cast<uint16_t>(INT16_MIN));
+      return static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(s)));
+    }());
   }
 }
 
@@ -7524,17 +7793,16 @@ inline void execute_v_cvt_i16_f16_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    int16_t r;
-    if (std::isnan(s))
-      r = 0;
-    else if (s >= 32768.0f)
-      r = INT16_MAX;
-    else if (s < -32768.0f)
-      r = INT16_MIN;
-    else
-      r = static_cast<int16_t>(s);
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(r)));
+    inst.vdst.write_lane(wf, lane, [&]() -> uint32_t {
+      float s = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+      if (std::isnan(s))
+        return 0u;
+      if (s >= 32768.0f)
+        return static_cast<uint32_t>(static_cast<uint16_t>(INT16_MAX));
+      if (s < -32768.0f)
+        return static_cast<uint32_t>(static_cast<uint16_t>(INT16_MIN));
+      return static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(s)));
+    }());
   }
 }
 
@@ -7545,17 +7813,16 @@ inline void execute_v_cvt_i32_f32_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    int32_t r;
-    if (std::isnan(s))
-      r = 0;
-    else if (s >= 2147483648.0f)
-      r = INT32_MAX;
-    else if (s < -2147483648.0f)
-      r = INT32_MIN;
-    else
-      r = static_cast<int32_t>(s);
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(r));
+    inst.vdst.write_lane(wf, lane, [&]() -> uint32_t {
+      float s = std::bit_cast<float>(static_cast<uint32_t>(inst.src0.read_lane(wf, lane)));
+      if (std::isnan(s))
+        return 0u;
+      if (s >= 2147483648.0f)
+        return static_cast<uint32_t>(INT32_MAX);
+      if (s < -2147483648.0f)
+        return static_cast<uint32_t>(INT32_MIN);
+      return static_cast<uint32_t>(static_cast<int32_t>(s));
+    }());
   }
 }
 
@@ -7566,17 +7833,16 @@ inline void execute_v_cvt_i32_f32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    int32_t r;
-    if (std::isnan(s))
-      r = 0;
-    else if (s >= 2147483648.0f)
-      r = INT32_MAX;
-    else if (s < -2147483648.0f)
-      r = INT32_MIN;
-    else
-      r = static_cast<int32_t>(s);
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(r));
+    inst.vdst.write_lane(wf, lane, [&]() -> uint32_t {
+      float s = std::bit_cast<float>(static_cast<uint32_t>(inst.src0.read_lane(wf, lane)));
+      if (std::isnan(s))
+        return 0u;
+      if (s >= 2147483648.0f)
+        return static_cast<uint32_t>(INT32_MAX);
+      if (s < -2147483648.0f)
+        return static_cast<uint32_t>(INT32_MIN);
+      return static_cast<uint32_t>(static_cast<int32_t>(s));
+    }());
   }
 }
 
@@ -7587,17 +7853,16 @@ inline void execute_v_cvt_i32_f64_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    int32_t r;
-    if (std::isnan(s))
-      r = 0;
-    else if (s >= 2147483648.0)
-      r = INT32_MAX;
-    else if (s < -2147483648.0)
-      r = INT32_MIN;
-    else
-      r = static_cast<int32_t>(s);
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(r));
+    inst.vdst.write_lane(wf, lane, [&]() -> uint32_t {
+      double s = std::bit_cast<double>(static_cast<uint64_t>(inst.src0.read_lane(wf, lane)));
+      if (std::isnan(s))
+        return 0;
+      if (s >= 2147483648.0)
+        return static_cast<uint32_t>(INT32_MAX);
+      if (s < -2147483648.0)
+        return static_cast<uint32_t>(INT32_MIN);
+      return static_cast<uint32_t>(static_cast<int32_t>(s));
+    }());
   }
 }
 
@@ -7608,17 +7873,16 @@ inline void execute_v_cvt_i32_f64_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    int32_t r;
-    if (std::isnan(s))
-      r = 0;
-    else if (s >= 2147483648.0)
-      r = INT32_MAX;
-    else if (s < -2147483648.0)
-      r = INT32_MIN;
-    else
-      r = static_cast<int32_t>(s);
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(r));
+    inst.vdst.write_lane(wf, lane, [&]() -> uint32_t {
+      double s = std::bit_cast<double>(static_cast<uint64_t>(inst.src0.read_lane(wf, lane)));
+      if (std::isnan(s))
+        return 0;
+      if (s >= 2147483648.0)
+        return static_cast<uint32_t>(INT32_MAX);
+      if (s < -2147483648.0)
+        return static_cast<uint32_t>(INT32_MIN);
+      return static_cast<uint32_t>(static_cast<int32_t>(s));
+    }());
   }
 }
 
@@ -7629,9 +7893,9 @@ inline void execute_v_cvt_i32_i16_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t s = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
-    inst.vdst.write_lane(
-        wf, lane, static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(s & 0xFFFF))));
+    inst.vdst.write_lane(wf, lane,
+                         static_cast<uint32_t>(static_cast<int32_t>(
+                             static_cast<int16_t>(inst.src0.read_lane(wf, lane) & 0xFFFF))));
   }
 }
 
@@ -7642,9 +7906,9 @@ inline void execute_v_cvt_i32_i16_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t s = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
-    inst.vdst.write_lane(
-        wf, lane, static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(s & 0xFFFF))));
+    inst.vdst.write_lane(wf, lane,
+                         static_cast<uint32_t>(static_cast<int32_t>(
+                             static_cast<int16_t>(inst.src0.read_lane(wf, lane) & 0xFFFF))));
   }
 }
 
@@ -7655,17 +7919,16 @@ inline void execute_v_cvt_nearest_i32_f32_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    int32_t r;
-    if (std::isnan(s))
-      r = 0;
-    else if (s >= 2147483648.0f)
-      r = INT32_MAX;
-    else if (s < -2147483648.0f)
-      r = INT32_MIN;
-    else
-      r = static_cast<int32_t>(s);
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(r));
+    inst.vdst.write_lane(wf, lane, [&]() -> uint32_t {
+      float s = std::bit_cast<float>(static_cast<uint32_t>(inst.src0.read_lane(wf, lane)));
+      if (std::isnan(s))
+        return 0u;
+      if (s >= 2147483648.0f)
+        return static_cast<uint32_t>(INT32_MAX);
+      if (s < -2147483648.0f)
+        return static_cast<uint32_t>(INT32_MIN);
+      return static_cast<uint32_t>(static_cast<int32_t>(s));
+    }());
   }
 }
 
@@ -7676,17 +7939,16 @@ inline void execute_v_cvt_nearest_i32_f32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    int32_t r;
-    if (std::isnan(s))
-      r = 0;
-    else if (s >= 2147483648.0f)
-      r = INT32_MAX;
-    else if (s < -2147483648.0f)
-      r = INT32_MIN;
-    else
-      r = static_cast<int32_t>(s);
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(r));
+    inst.vdst.write_lane(wf, lane, [&]() -> uint32_t {
+      float s = std::bit_cast<float>(static_cast<uint32_t>(inst.src0.read_lane(wf, lane)));
+      if (std::isnan(s))
+        return 0u;
+      if (s >= 2147483648.0f)
+        return static_cast<uint32_t>(INT32_MAX);
+      if (s < -2147483648.0f)
+        return static_cast<uint32_t>(INT32_MIN);
+      return static_cast<uint32_t>(static_cast<int32_t>(s));
+    }());
   }
 }
 
@@ -7983,18 +8245,17 @@ inline void execute_v_cvt_rpi_i32_f32_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float rounded = std::ceil(s - 0.5f);
-    int32_t r;
-    if (std::isnan(rounded))
-      r = 0;
-    else if (rounded >= 2147483648.0f)
-      r = INT32_MAX;
-    else if (rounded < -2147483648.0f)
-      r = INT32_MIN;
-    else
-      r = static_cast<int32_t>(rounded);
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(r));
+    inst.vdst.write_lane(wf, lane, [&]() -> uint32_t {
+      float s = std::bit_cast<float>(static_cast<uint32_t>(inst.src0.read_lane(wf, lane)));
+      float r = std::ceil(s - 0.5f);
+      if (std::isnan(r))
+        return 0u;
+      if (r >= 2147483648.0f)
+        return static_cast<uint32_t>(INT32_MAX);
+      if (r < -2147483648.0f)
+        return static_cast<uint32_t>(INT32_MIN);
+      return static_cast<uint32_t>(static_cast<int32_t>(r));
+    }());
   }
 }
 
@@ -8005,18 +8266,17 @@ inline void execute_v_cvt_rpi_i32_f32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float rounded = std::ceil(s - 0.5f);
-    int32_t r;
-    if (std::isnan(rounded))
-      r = 0;
-    else if (rounded >= 2147483648.0f)
-      r = INT32_MAX;
-    else if (rounded < -2147483648.0f)
-      r = INT32_MIN;
-    else
-      r = static_cast<int32_t>(rounded);
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(r));
+    inst.vdst.write_lane(wf, lane, [&]() -> uint32_t {
+      float s = std::bit_cast<float>(static_cast<uint32_t>(inst.src0.read_lane(wf, lane)));
+      float r = std::ceil(s - 0.5f);
+      if (std::isnan(r))
+        return 0u;
+      if (r >= 2147483648.0f)
+        return static_cast<uint32_t>(INT32_MAX);
+      if (r < -2147483648.0f)
+        return static_cast<uint32_t>(INT32_MIN);
+      return static_cast<uint32_t>(static_cast<int32_t>(r));
+    }());
   }
 }
 
@@ -8027,15 +8287,14 @@ inline void execute_v_cvt_u16_f16_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    uint16_t r;
-    if (std::isnan(s) || s < 0.0f)
-      r = 0;
-    else if (s >= 65536.0f)
-      r = UINT16_MAX;
-    else
-      r = static_cast<uint16_t>(s);
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(r));
+    inst.vdst.write_lane(wf, lane, [&]() -> uint32_t {
+      float s = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+      if (std::isnan(s) || s < 0.0f)
+        return 0u;
+      if (s >= 65536.0f)
+        return static_cast<uint32_t>(UINT16_MAX);
+      return static_cast<uint32_t>(static_cast<uint16_t>(s));
+    }());
   }
 }
 
@@ -8046,15 +8305,14 @@ inline void execute_v_cvt_u16_f16_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    uint16_t r;
-    if (std::isnan(s) || s < 0.0f)
-      r = 0;
-    else if (s >= 65536.0f)
-      r = UINT16_MAX;
-    else
-      r = static_cast<uint16_t>(s);
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(r));
+    inst.vdst.write_lane(wf, lane, [&]() -> uint32_t {
+      float s = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+      if (std::isnan(s) || s < 0.0f)
+        return 0u;
+      if (s >= 65536.0f)
+        return static_cast<uint32_t>(UINT16_MAX);
+      return static_cast<uint32_t>(static_cast<uint16_t>(s));
+    }());
   }
 }
 
@@ -8065,15 +8323,14 @@ inline void execute_v_cvt_u32_f32_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    uint32_t r;
-    if (std::isnan(s) || s < 0.0f)
-      r = 0;
-    else if (s >= 4294967296.0f)
-      r = UINT32_MAX;
-    else
-      r = static_cast<uint32_t>(s);
-    inst.vdst.write_lane(wf, lane, r);
+    inst.vdst.write_lane(wf, lane, [&]() -> uint32_t {
+      float s = std::bit_cast<float>(static_cast<uint32_t>(inst.src0.read_lane(wf, lane)));
+      if (std::isnan(s) || s < 0.0f)
+        return 0u;
+      if (s >= 4294967296.0f)
+        return UINT32_MAX;
+      return static_cast<uint32_t>(s);
+    }());
   }
 }
 
@@ -8084,15 +8341,14 @@ inline void execute_v_cvt_u32_f32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    uint32_t r;
-    if (std::isnan(s) || s < 0.0f)
-      r = 0;
-    else if (s >= 4294967296.0f)
-      r = UINT32_MAX;
-    else
-      r = static_cast<uint32_t>(s);
-    inst.vdst.write_lane(wf, lane, r);
+    inst.vdst.write_lane(wf, lane, [&]() -> uint32_t {
+      float s = std::bit_cast<float>(static_cast<uint32_t>(inst.src0.read_lane(wf, lane)));
+      if (std::isnan(s) || s < 0.0f)
+        return 0u;
+      if (s >= 4294967296.0f)
+        return UINT32_MAX;
+      return static_cast<uint32_t>(s);
+    }());
   }
 }
 
@@ -8103,15 +8359,14 @@ inline void execute_v_cvt_u32_f64_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    uint32_t r;
-    if (std::isnan(s) || s < 0.0)
-      r = 0;
-    else if (s >= 4294967296.0)
-      r = UINT32_MAX;
-    else
-      r = static_cast<uint32_t>(s);
-    inst.vdst.write_lane(wf, lane, r);
+    inst.vdst.write_lane(wf, lane, [&]() -> uint32_t {
+      double s = std::bit_cast<double>(static_cast<uint64_t>(inst.src0.read_lane(wf, lane)));
+      if (std::isnan(s) || s < 0.0)
+        return 0u;
+      if (s >= 4294967296.0)
+        return UINT32_MAX;
+      return static_cast<uint32_t>(s);
+    }());
   }
 }
 
@@ -8122,15 +8377,14 @@ inline void execute_v_cvt_u32_f64_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    uint32_t r;
-    if (std::isnan(s) || s < 0.0)
-      r = 0;
-    else if (s >= 4294967296.0)
-      r = UINT32_MAX;
-    else
-      r = static_cast<uint32_t>(s);
-    inst.vdst.write_lane(wf, lane, r);
+    inst.vdst.write_lane(wf, lane, [&]() -> uint32_t {
+      double s = std::bit_cast<double>(static_cast<uint64_t>(inst.src0.read_lane(wf, lane)));
+      if (std::isnan(s) || s < 0.0)
+        return 0u;
+      if (s >= 4294967296.0)
+        return UINT32_MAX;
+      return static_cast<uint32_t>(s);
+    }());
   }
 }
 
@@ -8141,8 +8395,7 @@ inline void execute_v_cvt_u32_u16_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = inst.src0.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, s & 0xFFFFu);
+    inst.vdst.write_lane(wf, lane, (inst.src0.read_lane(wf, lane) & 0xFFFFu));
   }
 }
 
@@ -8153,8 +8406,7 @@ inline void execute_v_cvt_u32_u16_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = inst.src0.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, s & 0xFFFFu);
+    inst.vdst.write_lane(wf, lane, (inst.src0.read_lane(wf, lane) & 0xFFFFu));
   }
 }
 
@@ -8992,8 +9244,9 @@ inline void execute_v_exp_f16_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(std::exp2(s)));
+    inst.vdst.write_lane(wf, lane,
+                         util::f32_to_f16(std::exp2(util::f16_to_f32(
+                             static_cast<uint16_t>(inst.src0.read_lane(wf, lane))))));
   }
 }
 
@@ -9003,21 +9256,29 @@ inline void execute_v_exp_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    float result = std::exp2(s);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(result));
+    inst.vdst.write_lane(wf, lane, util::f32_to_f16([&]() {
+                           float v = [&]() {
+                             float v = std::exp2([&]() {
+                               float sv = util::f16_to_f32(
+                                   static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+                               if (inst.inst_.abs & (1u << 0))
+                                 sv = std::fabs(sv);
+                               if (inst.inst_.neg & (1u << 0))
+                                 sv = -sv;
+                               return sv;
+                             }());
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -9027,8 +9288,9 @@ inline void execute_v_exp_f32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(amdgpu::transcendental::exp_f32(s)));
+    inst.vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(std::exp2(std::bit_cast<float>(inst.src0.read_lane(wf, lane)))));
   }
 }
 
@@ -9038,21 +9300,28 @@ inline void execute_v_exp_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    float result = amdgpu::transcendental::exp_f32(s);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v = std::exp2([&]() {
+                               float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                               if (inst.inst_.abs & (1u << 0))
+                                 sv = std::fabs(sv);
+                               if (inst.inst_.neg & (1u << 0))
+                                 sv = -sv;
+                               return sv;
+                             }());
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -9062,12 +9331,11 @@ inline void execute_v_ffbh_i32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = inst.src0.read_lane(wf, lane);
-    int32_t sv = static_cast<int32_t>(s);
-    uint32_t abs_val = sv < 0 ? ~s : s;
-    inst.vdst.write_lane(wf, lane,
-                         abs_val == 0 ? static_cast<uint32_t>(-1)
-                                      : static_cast<uint32_t>(std::countl_zero(abs_val)));
+    inst.vdst.write_lane(wf, lane, [&]() {
+      auto s = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
+      uint32_t a = s < 0 ? ~static_cast<uint32_t>(s) : static_cast<uint32_t>(s);
+      return a == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(a));
+    }());
   }
 }
 
@@ -9077,12 +9345,11 @@ inline void execute_v_ffbh_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = inst.src0.read_lane(wf, lane);
-    int32_t sv = static_cast<int32_t>(s);
-    uint32_t abs_val = sv < 0 ? ~s : s;
-    inst.vdst.write_lane(wf, lane,
-                         abs_val == 0 ? static_cast<uint32_t>(-1)
-                                      : static_cast<uint32_t>(std::countl_zero(abs_val)));
+    inst.vdst.write_lane(wf, lane, [&]() {
+      auto s = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
+      uint32_t a = s < 0 ? ~static_cast<uint32_t>(s) : static_cast<uint32_t>(s);
+      return a == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(a));
+    }());
   }
 }
 
@@ -9092,9 +9359,10 @@ inline void execute_v_ffbh_u32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = inst.src0.read_lane(wf, lane);
-    inst.vdst.write_lane(
-        wf, lane, s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(s)));
+    inst.vdst.write_lane(wf, lane, [&]() {
+      auto s = inst.src0.read_lane(wf, lane);
+      return s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(s));
+    }());
   }
 }
 
@@ -9104,9 +9372,10 @@ inline void execute_v_ffbh_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = inst.src0.read_lane(wf, lane);
-    inst.vdst.write_lane(
-        wf, lane, s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(s)));
+    inst.vdst.write_lane(wf, lane, [&]() {
+      auto s = inst.src0.read_lane(wf, lane);
+      return s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(s));
+    }());
   }
 }
 
@@ -9116,9 +9385,10 @@ inline void execute_v_ffbl_b32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = inst.src0.read_lane(wf, lane);
-    inst.vdst.write_lane(
-        wf, lane, s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(s)));
+    inst.vdst.write_lane(wf, lane, [&]() {
+      auto s = inst.src0.read_lane(wf, lane);
+      return s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(s));
+    }());
   }
 }
 
@@ -9128,9 +9398,10 @@ inline void execute_v_ffbl_b32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = inst.src0.read_lane(wf, lane);
-    inst.vdst.write_lane(
-        wf, lane, s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(s)));
+    inst.vdst.write_lane(wf, lane, [&]() {
+      auto s = inst.src0.read_lane(wf, lane);
+      return s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(s));
+    }());
   }
 }
 
@@ -9140,8 +9411,9 @@ inline void execute_v_floor_f16_vop1([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(std::floor(s)));
+    inst.vdst.write_lane(wf, lane,
+                         util::f32_to_f16(std::floor(util::f16_to_f32(
+                             static_cast<uint16_t>(inst.src0.read_lane(wf, lane))))));
   }
 }
 
@@ -9151,21 +9423,29 @@ inline void execute_v_floor_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    float result = std::floor(s);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(result));
+    inst.vdst.write_lane(wf, lane, util::f32_to_f16([&]() {
+                           float v = [&]() {
+                             float v = std::floor([&]() {
+                               float sv = util::f16_to_f32(
+                                   static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+                               if (inst.inst_.abs & (1u << 0))
+                                 sv = std::fabs(sv);
+                               if (inst.inst_.neg & (1u << 0))
+                                 sv = -sv;
+                               return sv;
+                             }());
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -9175,8 +9455,9 @@ inline void execute_v_floor_f32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(std::floor(s)));
+    inst.vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(std::floor(std::bit_cast<float>(inst.src0.read_lane(wf, lane)))));
   }
 }
 
@@ -9186,21 +9467,28 @@ inline void execute_v_floor_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    float result = std::floor(s);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v = std::floor([&]() {
+                               float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                               if (inst.inst_.abs & (1u << 0))
+                                 sv = std::fabs(sv);
+                               if (inst.inst_.neg & (1u << 0))
+                                 sv = -sv;
+                               return sv;
+                             }());
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -9210,8 +9498,9 @@ inline void execute_v_floor_f64_vop1([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(std::floor(s)));
+    inst.vdst.write_lane64(wf, lane,
+                           std::bit_cast<uint64_t>(
+                               std::floor(std::bit_cast<double>(inst.src0.read_lane64(wf, lane)))));
   }
 }
 
@@ -9221,21 +9510,28 @@ inline void execute_v_floor_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    double result = std::floor(s);
-    if (inst.inst_.omod == 1)
-      result *= 2.0;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0, 1.0);
-    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
+    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>([&]() {
+                             double v = [&]() {
+                               double v = std::floor([&]() {
+                                 double sv = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
+                                 if (inst.inst_.abs & (1u << 0))
+                                   sv = std::fabs(sv);
+                                 if (inst.inst_.neg & (1u << 0))
+                                   sv = -sv;
+                                 return sv;
+                               }());
+                               if (inst.inst_.omod == 1)
+                                 v *= 2.0;
+                               else if (inst.inst_.omod == 2)
+                                 v *= 4.0;
+                               else if (inst.inst_.omod == 3)
+                                 v *= 0.5;
+                               return v;
+                             }();
+                             if (inst.inst_.clamp)
+                               v = std::clamp(v, 0.0, 1.0);
+                             return v;
+                           }()));
   }
 }
 
@@ -9246,31 +9542,45 @@ inline void execute_v_fma_dx9_zero_f32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float a = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float b = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    float c = std::bit_cast<float>(inst.src2.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst.inst_.neg & (1u << 0))
-      a = -a;
-    if (inst.inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst.inst_.neg & (1u << 1))
-      b = -b;
-    if (inst.inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst.inst_.neg & (1u << 2))
-      c = -c;
-    float result = std::fma(a, b, c);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v = std::fma(
+                                 [&]() {
+                                   float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                                   if (inst.inst_.abs & (1u << 0))
+                                     sv = std::fabs(sv);
+                                   if (inst.inst_.neg & (1u << 0))
+                                     sv = -sv;
+                                   return sv;
+                                 }(),
+                                 [&]() {
+                                   float sv = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+                                   if (inst.inst_.abs & (1u << 1))
+                                     sv = std::fabs(sv);
+                                   if (inst.inst_.neg & (1u << 1))
+                                     sv = -sv;
+                                   return sv;
+                                 }(),
+                                 [&]() {
+                                   float sv = std::bit_cast<float>(inst.src2.read_lane(wf, lane));
+                                   if (inst.inst_.abs & (1u << 2))
+                                     sv = std::fabs(sv);
+                                   if (inst.inst_.neg & (1u << 2))
+                                     sv = -sv;
+                                   return sv;
+                                 }());
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -9280,31 +9590,46 @@ inline void execute_v_fma_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float a = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float b = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
-    float c = util::f16_to_f32(static_cast<uint16_t>(inst.src2.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst.inst_.neg & (1u << 0))
-      a = -a;
-    if (inst.inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst.inst_.neg & (1u << 1))
-      b = -b;
-    if (inst.inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst.inst_.neg & (1u << 2))
-      c = -c;
-    float result = std::fma(a, b, c);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(result));
+    inst.vdst.write_lane(
+        wf, lane, util::f32_to_f16([&]() {
+          float v = [&]() {
+            float v = std::fma(
+                [&]() {
+                  float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+                  if (inst.inst_.abs & (1u << 0))
+                    sv = std::fabs(sv);
+                  if (inst.inst_.neg & (1u << 0))
+                    sv = -sv;
+                  return sv;
+                }(),
+                [&]() {
+                  float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
+                  if (inst.inst_.abs & (1u << 1))
+                    sv = std::fabs(sv);
+                  if (inst.inst_.neg & (1u << 1))
+                    sv = -sv;
+                  return sv;
+                }(),
+                [&]() {
+                  float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src2.read_lane(wf, lane)));
+                  if (inst.inst_.abs & (1u << 2))
+                    sv = std::fabs(sv);
+                  if (inst.inst_.neg & (1u << 2))
+                    sv = -sv;
+                  return sv;
+                }());
+            if (inst.inst_.omod == 1)
+              v *= 2.0f;
+            else if (inst.inst_.omod == 2)
+              v *= 4.0f;
+            else if (inst.inst_.omod == 3)
+              v *= 0.5f;
+            return v;
+          }();
+          if (inst.inst_.clamp)
+            v = std::clamp(v, 0.0f, 1.0f);
+          return v;
+        }()));
   }
 }
 
@@ -9314,31 +9639,45 @@ inline void execute_v_fma_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float a = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float b = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    float c = std::bit_cast<float>(inst.src2.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst.inst_.neg & (1u << 0))
-      a = -a;
-    if (inst.inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst.inst_.neg & (1u << 1))
-      b = -b;
-    if (inst.inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst.inst_.neg & (1u << 2))
-      c = -c;
-    float result = std::fma(a, b, c);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v = std::fma(
+                                 [&]() {
+                                   float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                                   if (inst.inst_.abs & (1u << 0))
+                                     sv = std::fabs(sv);
+                                   if (inst.inst_.neg & (1u << 0))
+                                     sv = -sv;
+                                   return sv;
+                                 }(),
+                                 [&]() {
+                                   float sv = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+                                   if (inst.inst_.abs & (1u << 1))
+                                     sv = std::fabs(sv);
+                                   if (inst.inst_.neg & (1u << 1))
+                                     sv = -sv;
+                                   return sv;
+                                 }(),
+                                 [&]() {
+                                   float sv = std::bit_cast<float>(inst.src2.read_lane(wf, lane));
+                                   if (inst.inst_.abs & (1u << 2))
+                                     sv = std::fabs(sv);
+                                   if (inst.inst_.neg & (1u << 2))
+                                     sv = -sv;
+                                   return sv;
+                                 }());
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -9348,31 +9687,46 @@ inline void execute_v_fma_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double a = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    double b = std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
-    double c = std::bit_cast<double>(inst.src2.read_lane64(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst.inst_.neg & (1u << 0))
-      a = -a;
-    if (inst.inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst.inst_.neg & (1u << 1))
-      b = -b;
-    if (inst.inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst.inst_.neg & (1u << 2))
-      c = -c;
-    double result = std::fma(a, b, c);
-    if (inst.inst_.omod == 1)
-      result *= 2.0;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0, 1.0);
-    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
+    inst.vdst.write_lane64(
+        wf, lane, std::bit_cast<uint64_t>([&]() {
+          double v = [&]() {
+            double v = std::fma(
+                [&]() {
+                  double sv = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
+                  if (inst.inst_.abs & (1u << 0))
+                    sv = std::fabs(sv);
+                  if (inst.inst_.neg & (1u << 0))
+                    sv = -sv;
+                  return sv;
+                }(),
+                [&]() {
+                  double sv = std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
+                  if (inst.inst_.abs & (1u << 1))
+                    sv = std::fabs(sv);
+                  if (inst.inst_.neg & (1u << 1))
+                    sv = -sv;
+                  return sv;
+                }(),
+                [&]() {
+                  double sv = std::bit_cast<double>(inst.src2.read_lane64(wf, lane));
+                  if (inst.inst_.abs & (1u << 2))
+                    sv = std::fabs(sv);
+                  if (inst.inst_.neg & (1u << 2))
+                    sv = -sv;
+                  return sv;
+                }());
+            if (inst.inst_.omod == 1)
+              v *= 2.0;
+            else if (inst.inst_.omod == 2)
+              v *= 4.0;
+            else if (inst.inst_.omod == 3)
+              v *= 0.5;
+            return v;
+          }();
+          if (inst.inst_.clamp)
+            v = std::clamp(v, 0.0, 1.0);
+          return v;
+        }()));
   }
 }
 
@@ -9383,31 +9737,46 @@ inline void execute_v_fma_legacy_f16_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float a = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float b = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
-    float c = util::f16_to_f32(static_cast<uint16_t>(inst.src2.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst.inst_.neg & (1u << 0))
-      a = -a;
-    if (inst.inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst.inst_.neg & (1u << 1))
-      b = -b;
-    if (inst.inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst.inst_.neg & (1u << 2))
-      c = -c;
-    float result = std::fma(a, b, c);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(result));
+    inst.vdst.write_lane(
+        wf, lane, util::f32_to_f16([&]() {
+          float v = [&]() {
+            float v = std::fma(
+                [&]() {
+                  float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+                  if (inst.inst_.abs & (1u << 0))
+                    sv = std::fabs(sv);
+                  if (inst.inst_.neg & (1u << 0))
+                    sv = -sv;
+                  return sv;
+                }(),
+                [&]() {
+                  float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
+                  if (inst.inst_.abs & (1u << 1))
+                    sv = std::fabs(sv);
+                  if (inst.inst_.neg & (1u << 1))
+                    sv = -sv;
+                  return sv;
+                }(),
+                [&]() {
+                  float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src2.read_lane(wf, lane)));
+                  if (inst.inst_.abs & (1u << 2))
+                    sv = std::fabs(sv);
+                  if (inst.inst_.neg & (1u << 2))
+                    sv = -sv;
+                  return sv;
+                }());
+            if (inst.inst_.omod == 1)
+              v *= 2.0f;
+            else if (inst.inst_.omod == 2)
+              v *= 4.0f;
+            else if (inst.inst_.omod == 3)
+              v *= 0.5f;
+            return v;
+          }();
+          if (inst.inst_.clamp)
+            v = std::clamp(v, 0.0f, 1.0f);
+          return v;
+        }()));
   }
 }
 
@@ -9556,11 +9925,11 @@ inline void execute_v_fmac_dx9_zero_f32_vop2([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float sv1 = std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane,
-                         std::bit_cast<uint32_t>(std::fma(
-                             sv0, sv1, std::bit_cast<float>(inst.vdst.read_lane(wf, lane)))));
+    inst.vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(std::fma(std::bit_cast<float>(inst.src0.read_lane(wf, lane)),
+                                         std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane)),
+                                         std::bit_cast<float>(inst.vdst.read_lane(wf, lane)))));
   }
 }
 
@@ -9571,26 +9940,38 @@ inline void execute_v_fmac_dx9_zero_f32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float sv1 = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst.inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst.inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst.inst_.neg & (1u << 1))
-      sv1 = -sv1;
-    float result = std::fma(sv0, sv1, std::bit_cast<float>(inst.vdst.read_lane(wf, lane)));
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v = std::fma(
+                                 [&]() {
+                                   float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                                   if (inst.inst_.abs & (1u << 0))
+                                     sv = std::fabs(sv);
+                                   if (inst.inst_.neg & (1u << 0))
+                                     sv = -sv;
+                                   return sv;
+                                 }(),
+                                 [&]() {
+                                   float sv = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+                                   if (inst.inst_.abs & (1u << 1))
+                                     sv = std::fabs(sv);
+                                   if (inst.inst_.neg & (1u << 1))
+                                     sv = -sv;
+                                   return sv;
+                                 }(),
+                                 std::bit_cast<float>(inst.vdst.read_lane(wf, lane)));
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -9600,12 +9981,12 @@ inline void execute_v_fmac_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float sv1 = util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane)));
     inst.vdst.write_lane(
         wf, lane,
-        util::f32_to_f16(std::fma(
-            sv0, sv1, util::f16_to_f32(static_cast<uint16_t>(inst.vdst.read_lane(wf, lane))))));
+        util::f32_to_f16(
+            std::fma(util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane))),
+                     util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane))),
+                     util::f16_to_f32(static_cast<uint16_t>(inst.vdst.read_lane(wf, lane))))));
   }
 }
 
@@ -9615,27 +9996,39 @@ inline void execute_v_fmac_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float sv1 = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst.inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst.inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst.inst_.neg & (1u << 1))
-      sv1 = -sv1;
-    float result =
-        std::fma(sv0, sv1, util::f16_to_f32(static_cast<uint16_t>(inst.vdst.read_lane(wf, lane))));
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(result));
+    inst.vdst.write_lane(
+        wf, lane, util::f32_to_f16([&]() {
+          float v = [&]() {
+            float v = std::fma(
+                [&]() {
+                  float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+                  if (inst.inst_.abs & (1u << 0))
+                    sv = std::fabs(sv);
+                  if (inst.inst_.neg & (1u << 0))
+                    sv = -sv;
+                  return sv;
+                }(),
+                [&]() {
+                  float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
+                  if (inst.inst_.abs & (1u << 1))
+                    sv = std::fabs(sv);
+                  if (inst.inst_.neg & (1u << 1))
+                    sv = -sv;
+                  return sv;
+                }(),
+                util::f16_to_f32(static_cast<uint16_t>(inst.vdst.read_lane(wf, lane))));
+            if (inst.inst_.omod == 1)
+              v *= 2.0f;
+            else if (inst.inst_.omod == 2)
+              v *= 4.0f;
+            else if (inst.inst_.omod == 3)
+              v *= 0.5f;
+            return v;
+          }();
+          if (inst.inst_.clamp)
+            v = std::clamp(v, 0.0f, 1.0f);
+          return v;
+        }()));
   }
 }
 
@@ -9645,11 +10038,11 @@ inline void execute_v_fmac_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float sv1 = std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane,
-                         std::bit_cast<uint32_t>(std::fma(
-                             sv0, sv1, std::bit_cast<float>(inst.vdst.read_lane(wf, lane)))));
+    inst.vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(std::fma(std::bit_cast<float>(inst.src0.read_lane(wf, lane)),
+                                         std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane)),
+                                         std::bit_cast<float>(inst.vdst.read_lane(wf, lane)))));
   }
 }
 
@@ -9659,26 +10052,38 @@ inline void execute_v_fmac_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float sv1 = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst.inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst.inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst.inst_.neg & (1u << 1))
-      sv1 = -sv1;
-    float result = std::fma(sv0, sv1, std::bit_cast<float>(inst.vdst.read_lane(wf, lane)));
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v = std::fma(
+                                 [&]() {
+                                   float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                                   if (inst.inst_.abs & (1u << 0))
+                                     sv = std::fabs(sv);
+                                   if (inst.inst_.neg & (1u << 0))
+                                     sv = -sv;
+                                   return sv;
+                                 }(),
+                                 [&]() {
+                                   float sv = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+                                   if (inst.inst_.abs & (1u << 1))
+                                     sv = std::fabs(sv);
+                                   if (inst.inst_.neg & (1u << 1))
+                                     sv = -sv;
+                                   return sv;
+                                 }(),
+                                 std::bit_cast<float>(inst.vdst.read_lane(wf, lane)));
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -9688,11 +10093,11 @@ inline void execute_v_fmac_f64_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double sv0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    double sv1 = std::bit_cast<double>(inst.vsrc1.read_lane64(wf, lane));
-    inst.vdst.write_lane64(wf, lane,
-                           std::bit_cast<uint64_t>(std::fma(
-                               sv0, sv1, std::bit_cast<double>(inst.vdst.read_lane64(wf, lane)))));
+    inst.vdst.write_lane64(
+        wf, lane,
+        std::bit_cast<uint64_t>(std::fma(std::bit_cast<double>(inst.src0.read_lane64(wf, lane)),
+                                         std::bit_cast<double>(inst.vsrc1.read_lane64(wf, lane)),
+                                         std::bit_cast<double>(inst.vdst.read_lane64(wf, lane)))));
   }
 }
 
@@ -9702,26 +10107,40 @@ inline void execute_v_fmac_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double sv0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    double sv1 = std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst.inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst.inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst.inst_.neg & (1u << 1))
-      sv1 = -sv1;
-    double result = std::fma(sv0, sv1, std::bit_cast<double>(inst.vdst.read_lane64(wf, lane)));
-    if (inst.inst_.omod == 1)
-      result *= 2.0;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0, 1.0);
-    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
+    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>([&]() {
+                             double v = [&]() {
+                               double v = std::fma(
+                                   [&]() {
+                                     double sv =
+                                         std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
+                                     if (inst.inst_.abs & (1u << 0))
+                                       sv = std::fabs(sv);
+                                     if (inst.inst_.neg & (1u << 0))
+                                       sv = -sv;
+                                     return sv;
+                                   }(),
+                                   [&]() {
+                                     double sv =
+                                         std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
+                                     if (inst.inst_.abs & (1u << 1))
+                                       sv = std::fabs(sv);
+                                     if (inst.inst_.neg & (1u << 1))
+                                       sv = -sv;
+                                     return sv;
+                                   }(),
+                                   std::bit_cast<double>(inst.vdst.read_lane64(wf, lane)));
+                               if (inst.inst_.omod == 1)
+                                 v *= 2.0;
+                               else if (inst.inst_.omod == 2)
+                                 v *= 4.0;
+                               else if (inst.inst_.omod == 3)
+                                 v *= 0.5;
+                               return v;
+                             }();
+                             if (inst.inst_.clamp)
+                               v = std::clamp(v, 0.0, 1.0);
+                             return v;
+                           }()));
   }
 }
 
@@ -9757,8 +10176,11 @@ inline void execute_v_fract_f16_vop1([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(s - std::floor(s)));
+    inst.vdst.write_lane(wf, lane, util::f32_to_f16([&]() {
+                           auto v = util::f16_to_f32(
+                               static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+                           return v - std::floor(v);
+                         }()));
   }
 }
 
@@ -9768,21 +10190,32 @@ inline void execute_v_fract_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    float result = s - std::floor(s);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(result));
+    inst.vdst.write_lane(wf, lane, util::f32_to_f16([&]() {
+                           float v = [&]() {
+                             float v = [&]() {
+                               auto v = [&]() {
+                                 float sv = util::f16_to_f32(
+                                     static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+                                 if (inst.inst_.abs & (1u << 0))
+                                   sv = std::fabs(sv);
+                                 if (inst.inst_.neg & (1u << 0))
+                                   sv = -sv;
+                                 return sv;
+                               }();
+                               return v - std::floor(v);
+                             }();
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -9792,8 +10225,10 @@ inline void execute_v_fract_f32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(s - std::floor(s)));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           auto v = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                           return v - std::floor(v);
+                         }()));
   }
 }
 
@@ -9803,21 +10238,31 @@ inline void execute_v_fract_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    float result = s - std::floor(s);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v = [&]() {
+                               auto v = [&]() {
+                                 float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                                 if (inst.inst_.abs & (1u << 0))
+                                   sv = std::fabs(sv);
+                                 if (inst.inst_.neg & (1u << 0))
+                                   sv = -sv;
+                                 return sv;
+                               }();
+                               return v - std::floor(v);
+                             }();
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -9827,8 +10272,10 @@ inline void execute_v_fract_f64_vop1([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(s - std::floor(s)));
+    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>([&]() {
+                             auto v = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
+                             return v - std::floor(v);
+                           }()));
   }
 }
 
@@ -9838,21 +10285,32 @@ inline void execute_v_fract_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    double result = s - std::floor(s);
-    if (inst.inst_.omod == 1)
-      result *= 2.0;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0, 1.0);
-    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
+    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>([&]() {
+                             double v = [&]() {
+                               double v = [&]() {
+                                 auto v = [&]() {
+                                   double sv =
+                                       std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
+                                   if (inst.inst_.abs & (1u << 0))
+                                     sv = std::fabs(sv);
+                                   if (inst.inst_.neg & (1u << 0))
+                                     sv = -sv;
+                                   return sv;
+                                 }();
+                                 return v - std::floor(v);
+                               }();
+                               if (inst.inst_.omod == 1)
+                                 v *= 2.0;
+                               else if (inst.inst_.omod == 2)
+                                 v *= 4.0;
+                               else if (inst.inst_.omod == 3)
+                                 v *= 0.5;
+                               return v;
+                             }();
+                             if (inst.inst_.clamp)
+                               v = std::clamp(v, 0.0, 1.0);
+                             return v;
+                           }()));
   }
 }
 
@@ -9863,11 +10321,10 @@ inline void execute_v_frexp_exp_i16_f16_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    int exp = 0;
-    if (s != 0.0f && !std::isnan(s) && !std::isinf(s))
-      std::frexp(s, &exp);
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(exp));
+    inst.vdst.write_lane(wf, lane,
+                         util::f32_to_f16(std::ilogb(util::f16_to_f32(static_cast<uint16_t>(
+                                              inst.src0.read_lane(wf, lane)))) +
+                                          1));
   }
 }
 
@@ -9878,15 +10335,30 @@ inline void execute_v_frexp_exp_i16_f16_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    int exp = 0;
-    if (s != 0.0f && !std::isnan(s) && !std::isinf(s))
-      std::frexp(s, &exp);
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(exp));
+    inst.vdst.write_lane(wf, lane, util::f32_to_f16([&]() {
+                           float v = [&]() {
+                             float v = std::ilogb([&]() {
+                                         float sv = util::f16_to_f32(
+                                             static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+                                         if (inst.inst_.abs & (1u << 0))
+                                           sv = std::fabs(sv);
+                                         if (inst.inst_.neg & (1u << 0))
+                                           sv = -sv;
+                                         return sv;
+                                       }()) +
+                                       1;
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -9897,11 +10369,9 @@ inline void execute_v_frexp_exp_i32_f32_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    int exp = 0;
-    if (s != 0.0f && !std::isnan(s) && !std::isinf(s))
-      std::frexp(s, &exp);
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(exp));
+    inst.vdst.write_lane(wf, lane,
+                         std::bit_cast<uint32_t>(
+                             std::ilogb(std::bit_cast<float>(inst.src0.read_lane(wf, lane))) + 1));
   }
 }
 
@@ -9912,15 +10382,30 @@ inline void execute_v_frexp_exp_i32_f32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    int exp = 0;
-    if (s != 0.0f && !std::isnan(s) && !std::isinf(s))
-      std::frexp(s, &exp);
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(exp));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v = std::ilogb([&]() {
+                                         float sv =
+                                             std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                                         if (inst.inst_.abs & (1u << 0))
+                                           sv = std::fabs(sv);
+                                         if (inst.inst_.neg & (1u << 0))
+                                           sv = -sv;
+                                         return sv;
+                                       }()) +
+                                       1;
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -9931,11 +10416,13 @@ inline void execute_v_frexp_exp_i32_f64_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    int exp = 0;
-    if (s != 0.0 && !std::isnan(s) && !std::isinf(s))
-      std::frexp(s, &exp);
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(exp));
+    inst.vdst.write_lane64(wf, lane, [&]() {
+      double s = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
+      int exp = 0;
+      if (s != 0.0 && !std::isnan(s) && !std::isinf(s))
+        std::frexp(s, &exp);
+      return static_cast<uint32_t>(exp);
+    }());
   }
 }
 
@@ -9946,15 +10433,34 @@ inline void execute_v_frexp_exp_i32_f64_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    int exp = 0;
-    if (s != 0.0 && !std::isnan(s) && !std::isinf(s))
-      std::frexp(s, &exp);
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(exp));
+    inst.vdst.write_lane64(wf, lane, [&]() {
+      float v = [&]() {
+        float v = [&]() {
+          double s = [&]() {
+            double sv = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
+            if (inst.inst_.abs & (1u << 0))
+              sv = std::fabs(sv);
+            if (inst.inst_.neg & (1u << 0))
+              sv = -sv;
+            return sv;
+          }();
+          int exp = 0;
+          if (s != 0.0 && !std::isnan(s) && !std::isinf(s))
+            std::frexp(s, &exp);
+          return static_cast<uint32_t>(exp);
+        }();
+        if (inst.inst_.omod == 1)
+          v *= 2.0f;
+        else if (inst.inst_.omod == 2)
+          v *= 4.0f;
+        else if (inst.inst_.omod == 3)
+          v *= 0.5f;
+        return v;
+      }();
+      if (inst.inst_.clamp)
+        v = std::clamp(v, 0.0f, 1.0f);
+      return v;
+    }());
   }
 }
 
@@ -9965,10 +10471,13 @@ inline void execute_v_frexp_mant_f16_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    int exp = 0;
-    float result = std::frexp(s, &exp);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(wf, lane, util::f32_to_f16([&]() {
+                           int e;
+                           return std::frexp(
+                               static_cast<float>(util::f16_to_f32(
+                                   static_cast<uint16_t>(inst.src0.read_lane(wf, lane)))),
+                               &e);
+                         }()));
   }
 }
 
@@ -9979,22 +10488,34 @@ inline void execute_v_frexp_mant_f16_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    int exp = 0;
-    float result = std::frexp(s, &exp);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(wf, lane, util::f32_to_f16([&]() {
+                           float v = [&]() {
+                             float v = [&]() {
+                               int e;
+                               return std::frexp(static_cast<float>([&]() {
+                                                   float sv =
+                                                       util::f16_to_f32(static_cast<uint16_t>(
+                                                           inst.src0.read_lane(wf, lane)));
+                                                   if (inst.inst_.abs & (1u << 0))
+                                                     sv = std::fabs(sv);
+                                                   if (inst.inst_.neg & (1u << 0))
+                                                     sv = -sv;
+                                                   return sv;
+                                                 }()),
+                                                 &e);
+                             }();
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -10005,10 +10526,12 @@ inline void execute_v_frexp_mant_f32_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    int exp = 0;
-    float result = std::frexp(s, &exp);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(
+        wf, lane, std::bit_cast<uint32_t>([&]() {
+          int e;
+          return std::frexp(static_cast<float>(std::bit_cast<float>(inst.src0.read_lane(wf, lane))),
+                            &e);
+        }()));
   }
 }
 
@@ -10019,22 +10542,33 @@ inline void execute_v_frexp_mant_f32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    int exp = 0;
-    float result = std::frexp(s, &exp);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v = [&]() {
+                               int e;
+                               return std::frexp(static_cast<float>([&]() {
+                                                   float sv = std::bit_cast<float>(
+                                                       inst.src0.read_lane(wf, lane));
+                                                   if (inst.inst_.abs & (1u << 0))
+                                                     sv = std::fabs(sv);
+                                                   if (inst.inst_.neg & (1u << 0))
+                                                     sv = -sv;
+                                                   return sv;
+                                                 }()),
+                                                 &e);
+                             }();
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -10045,10 +10579,11 @@ inline void execute_v_frexp_mant_f64_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    int exp = 0;
-    double result = std::frexp(s, &exp);
-    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
+    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>([&]() {
+                             double s = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
+                             int exp = 0;
+                             return std::frexp(s, &exp);
+                           }()));
   }
 }
 
@@ -10059,22 +10594,33 @@ inline void execute_v_frexp_mant_f64_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    int exp = 0;
-    double result = std::frexp(s, &exp);
-    if (inst.inst_.omod == 1)
-      result *= 2.0;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0, 1.0);
-    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
+    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>([&]() {
+                             double v = [&]() {
+                               double v = [&]() {
+                                 double s = [&]() {
+                                   double sv =
+                                       std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
+                                   if (inst.inst_.abs & (1u << 0))
+                                     sv = std::fabs(sv);
+                                   if (inst.inst_.neg & (1u << 0))
+                                     sv = -sv;
+                                   return sv;
+                                 }();
+                                 int exp = 0;
+                                 return std::frexp(s, &exp);
+                               }();
+                               if (inst.inst_.omod == 1)
+                                 v *= 2.0;
+                               else if (inst.inst_.omod == 2)
+                                 v *= 4.0;
+                               else if (inst.inst_.omod == 3)
+                                 v *= 0.5;
+                               return v;
+                             }();
+                             if (inst.inst_.clamp)
+                               v = std::clamp(v, 0.0, 1.0);
+                             return v;
+                           }()));
   }
 }
 
@@ -10084,10 +10630,11 @@ inline void execute_v_ldexp_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    int32_t sv1_i = static_cast<int32_t>(
-        static_cast<int16_t>(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane))));
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(std::ldexp(sv0, static_cast<int>(sv1_i))));
+    inst.vdst.write_lane(
+        wf, lane,
+        util::f32_to_f16(std::ldexp(
+            util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane))),
+            static_cast<int32_t>(static_cast<int16_t>(inst.vsrc1.read_lane(wf, lane))))));
   }
 }
 
@@ -10097,23 +10644,38 @@ inline void execute_v_ldexp_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    int32_t sv1_i = static_cast<int32_t>(
-        static_cast<int16_t>(static_cast<uint16_t>(inst.src1.read_lane(wf, lane))));
-    if (inst.inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst.inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    float result = std::ldexp(sv0, static_cast<int>(sv1_i));
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(result));
+    inst.vdst.write_lane(wf, lane, util::f32_to_f16([&]() {
+                           float v = [&]() {
+                             float v = std::ldexp(
+                                 [&]() {
+                                   float sv = util::f16_to_f32(
+                                       static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+                                   if (inst.inst_.abs & (1u << 0))
+                                     sv = std::fabs(sv);
+                                   if (inst.inst_.neg & (1u << 0))
+                                     sv = -sv;
+                                   return sv;
+                                 }(),
+                                 static_cast<int32_t>([&]() {
+                                   float sv = static_cast<int16_t>(inst.src1.read_lane(wf, lane));
+                                   if (inst.inst_.abs & (1u << 1))
+                                     sv = std::fabs(sv);
+                                   if (inst.inst_.neg & (1u << 1))
+                                     sv = -sv;
+                                   return sv;
+                                 }()));
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -10123,22 +10685,37 @@ inline void execute_v_ldexp_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    int32_t sv1_i = static_cast<int32_t>(inst.src1.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst.inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    float result = std::ldexp(sv0, static_cast<int>(sv1_i));
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v = std::ldexp(
+                                 [&]() {
+                                   float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                                   if (inst.inst_.abs & (1u << 0))
+                                     sv = std::fabs(sv);
+                                   if (inst.inst_.neg & (1u << 0))
+                                     sv = -sv;
+                                   return sv;
+                                 }(),
+                                 [&]() {
+                                   float sv = static_cast<int32_t>(inst.src1.read_lane(wf, lane));
+                                   if (inst.inst_.abs & (1u << 1))
+                                     sv = std::fabs(sv);
+                                   if (inst.inst_.neg & (1u << 1))
+                                     sv = -sv;
+                                   return sv;
+                                 }());
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -10148,22 +10725,39 @@ inline void execute_v_ldexp_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double sv0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    int32_t sv1_i = static_cast<int32_t>(inst.src1.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst.inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    double result = std::ldexp(sv0, static_cast<int>(sv1_i));
-    if (inst.inst_.omod == 1)
-      result *= 2.0;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0, 1.0);
-    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
+    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>([&]() {
+                             double v = [&]() {
+                               double v = std::ldexp(
+                                   [&]() {
+                                     double sv =
+                                         std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
+                                     if (inst.inst_.abs & (1u << 0))
+                                       sv = std::fabs(sv);
+                                     if (inst.inst_.neg & (1u << 0))
+                                       sv = -sv;
+                                     return sv;
+                                   }(),
+                                   [&]() {
+                                     float sv =
+                                         static_cast<int32_t>(inst.src1.read_lane64(wf, lane));
+                                     if (inst.inst_.abs & (1u << 1))
+                                       sv = std::fabs(sv);
+                                     if (inst.inst_.neg & (1u << 1))
+                                       sv = -sv;
+                                     return sv;
+                                   }());
+                               if (inst.inst_.omod == 1)
+                                 v *= 2.0;
+                               else if (inst.inst_.omod == 2)
+                                 v *= 4.0;
+                               else if (inst.inst_.omod == 3)
+                                 v *= 0.5;
+                               return v;
+                             }();
+                             if (inst.inst_.clamp)
+                               v = std::clamp(v, 0.0, 1.0);
+                             return v;
+                           }()));
   }
 }
 
@@ -10173,16 +10767,19 @@ inline void execute_v_lerp_u8_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t a = inst.src0.read_lane(wf, lane);
-    uint32_t b = inst.src1.read_lane(wf, lane);
-    uint32_t c = inst.src2.read_lane(wf, lane);
-    uint32_t result = 0;
-    for (int i = 0; i < 4; ++i) {
-      uint32_t ba = (a >> (i * 8)) & 0xFF, bb = (b >> (i * 8)) & 0xFF;
-      uint32_t bc = (c >> (i * 8)) & 1;
-      result |= (((ba + bb + bc) >> 1) & 0xFF) << (i * 8);
-    }
-    inst.vdst.write_lane(wf, lane, result);
+    inst.vdst.write_lane(wf, lane, [&]() {
+      auto a = inst.src0.read_lane(wf, lane);
+      auto b = inst.src1.read_lane(wf, lane);
+      auto c = inst.src2.read_lane(wf, lane);
+      uint32_t r = 0;
+      for (int i = 0; i < 4; ++i) {
+        uint8_t ab = (a >> (i * 8)) & 0xFF;
+        uint8_t bb = (b >> (i * 8)) & 0xFF;
+        uint8_t cb = (c >> (i * 8)) & 0xFF;
+        r |= static_cast<uint32_t>(ab + ((bb - ab) * cb + 128) / 256) << (i * 8);
+      }
+      return r;
+    }());
   }
 }
 
@@ -10192,8 +10789,9 @@ inline void execute_v_log_f16_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(std::log2(s)));
+    inst.vdst.write_lane(wf, lane,
+                         util::f32_to_f16(std::log2(util::f16_to_f32(
+                             static_cast<uint16_t>(inst.src0.read_lane(wf, lane))))));
   }
 }
 
@@ -10203,21 +10801,29 @@ inline void execute_v_log_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    float result = std::log2(s);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(result));
+    inst.vdst.write_lane(wf, lane, util::f32_to_f16([&]() {
+                           float v = [&]() {
+                             float v = std::log2([&]() {
+                               float sv = util::f16_to_f32(
+                                   static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+                               if (inst.inst_.abs & (1u << 0))
+                                 sv = std::fabs(sv);
+                               if (inst.inst_.neg & (1u << 0))
+                                 sv = -sv;
+                               return sv;
+                             }());
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -10227,8 +10833,9 @@ inline void execute_v_log_f32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(amdgpu::transcendental::log_f32(s)));
+    inst.vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(std::log2(std::bit_cast<float>(inst.src0.read_lane(wf, lane)))));
   }
 }
 
@@ -10238,21 +10845,28 @@ inline void execute_v_log_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    float result = amdgpu::transcendental::log_f32(s);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v = std::log2([&]() {
+                               float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                               if (inst.inst_.abs & (1u << 0))
+                                 sv = std::fabs(sv);
+                               if (inst.inst_.neg & (1u << 0))
+                                 sv = -sv;
+                               return sv;
+                             }());
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -10263,10 +10877,9 @@ inline void execute_v_lshl_add_u32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t a = inst.src0.read_lane(wf, lane);
-    uint32_t b = inst.src1.read_lane(wf, lane);
-    uint32_t c = inst.src2.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, (a << (b & 31)) + c);
+    inst.vdst.write_lane(wf, lane,
+                         ((inst.src0.read_lane(wf, lane) << inst.src1.read_lane(wf, lane)) +
+                          inst.src2.read_lane(wf, lane)));
   }
 }
 
@@ -10277,10 +10890,10 @@ inline void execute_v_lshl_add_u64_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint64_t a = inst.src0.read_lane64(wf, lane);
-    uint64_t b = inst.src1.read_lane64(wf, lane);
-    uint64_t c = inst.src2.read_lane64(wf, lane);
-    inst.vdst.write_lane64(wf, lane, (a << (b & 63u)) + c);
+    inst.vdst.write_lane64(wf, lane,
+                           ((static_cast<uint64_t>(inst.src0.read_lane64(wf, lane))
+                             << static_cast<uint64_t>(inst.src1.read_lane64(wf, lane))) +
+                            static_cast<uint64_t>(inst.src2.read_lane64(wf, lane))));
   }
 }
 
@@ -10291,10 +10904,9 @@ inline void execute_v_lshl_or_b32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t a = inst.src0.read_lane(wf, lane);
-    uint32_t b = inst.src1.read_lane(wf, lane);
-    uint32_t c = inst.src2.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, (a << (b & 31)) | c);
+    inst.vdst.write_lane(wf, lane,
+                         ((inst.src0.read_lane(wf, lane) << inst.src1.read_lane(wf, lane)) |
+                          inst.src2.read_lane(wf, lane)));
   }
 }
 
@@ -10305,10 +10917,10 @@ inline void execute_v_lshlrev_b16_vop2([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t sv0 = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t sv1 = static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane));
     inst.vdst.write_lane(wf, lane,
-                         static_cast<uint32_t>(static_cast<uint16_t>(sv1 << (sv0 & 15u))));
+                         static_cast<uint32_t>(static_cast<uint16_t>(
+                             (static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane))
+                              << (static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) & 15u)))));
   }
 }
 
@@ -10319,10 +10931,10 @@ inline void execute_v_lshlrev_b16_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t sv0 = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t sv1 = static_cast<uint16_t>(inst.src1.read_lane(wf, lane));
     inst.vdst.write_lane(wf, lane,
-                         static_cast<uint32_t>(static_cast<uint16_t>(sv1 << (sv0 & 15u))));
+                         static_cast<uint32_t>(static_cast<uint16_t>(
+                             (static_cast<uint16_t>(inst.src1.read_lane(wf, lane))
+                              << (static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) & 15u)))));
   }
 }
 
@@ -10333,9 +10945,8 @@ inline void execute_v_lshlrev_b32_vop2([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.vsrc1.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, sv1 << (sv0 & 31u));
+    inst.vdst.write_lane(wf, lane,
+                         (inst.vsrc1.read_lane(wf, lane) << (inst.src0.read_lane(wf, lane) & 31u)));
   }
 }
 
@@ -10346,9 +10957,8 @@ inline void execute_v_lshlrev_b32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.src1.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, sv1 << (sv0 & 31u));
+    inst.vdst.write_lane(wf, lane,
+                         (inst.src1.read_lane(wf, lane) << (inst.src0.read_lane(wf, lane) & 31u)));
   }
 }
 
@@ -10359,9 +10969,9 @@ inline void execute_v_lshlrev_b64_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint64_t val = inst.src1.read_lane64(wf, lane);
-    uint32_t shift = inst.src0.read_lane(wf, lane) & 63u;
-    inst.vdst.write_lane64(wf, lane, val << shift);
+    inst.vdst.write_lane64(wf, lane,
+                           (static_cast<uint64_t>(inst.src1.read_lane64(wf, lane))
+                            << (static_cast<uint64_t>(inst.src0.read_lane64(wf, lane)) & 63u)));
   }
 }
 
@@ -10372,10 +10982,10 @@ inline void execute_v_lshrrev_b16_vop2([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t sv0 = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t sv1 = static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane));
     inst.vdst.write_lane(wf, lane,
-                         static_cast<uint32_t>(static_cast<uint16_t>(sv1 >> (sv0 & 15u))));
+                         static_cast<uint32_t>(static_cast<uint16_t>(
+                             (static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane)) >>
+                              (static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) & 15u)))));
   }
 }
 
@@ -10386,10 +10996,10 @@ inline void execute_v_lshrrev_b16_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t sv0 = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t sv1 = static_cast<uint16_t>(inst.src1.read_lane(wf, lane));
     inst.vdst.write_lane(wf, lane,
-                         static_cast<uint32_t>(static_cast<uint16_t>(sv1 >> (sv0 & 15u))));
+                         static_cast<uint32_t>(static_cast<uint16_t>(
+                             (static_cast<uint16_t>(inst.src1.read_lane(wf, lane)) >>
+                              (static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) & 15u)))));
   }
 }
 
@@ -10400,9 +11010,8 @@ inline void execute_v_lshrrev_b32_vop2([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.vsrc1.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, sv1 >> (sv0 & 31u));
+    inst.vdst.write_lane(wf, lane,
+                         (inst.vsrc1.read_lane(wf, lane) >> (inst.src0.read_lane(wf, lane) & 31u)));
   }
 }
 
@@ -10413,9 +11022,8 @@ inline void execute_v_lshrrev_b32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.src1.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, sv1 >> (sv0 & 31u));
+    inst.vdst.write_lane(wf, lane,
+                         (inst.src1.read_lane(wf, lane) >> (inst.src0.read_lane(wf, lane) & 31u)));
   }
 }
 
@@ -10426,9 +11034,9 @@ inline void execute_v_lshrrev_b64_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint64_t val = inst.src1.read_lane64(wf, lane);
-    uint32_t shift = inst.src0.read_lane(wf, lane) & 63u;
-    inst.vdst.write_lane64(wf, lane, val >> shift);
+    inst.vdst.write_lane64(wf, lane,
+                           (static_cast<uint64_t>(inst.src1.read_lane64(wf, lane)) >>
+                            (static_cast<uint64_t>(inst.src0.read_lane64(wf, lane)) & 63u)));
   }
 }
 
@@ -10438,12 +11046,12 @@ inline void execute_v_mac_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float sv1 = util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane)));
     inst.vdst.write_lane(
         wf, lane,
-        util::f32_to_f16(std::fma(
-            sv0, sv1, util::f16_to_f32(static_cast<uint16_t>(inst.vdst.read_lane(wf, lane))))));
+        util::f32_to_f16(
+            std::fma(util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane))),
+                     util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane))),
+                     util::f16_to_f32(static_cast<uint16_t>(inst.vdst.read_lane(wf, lane))))));
   }
 }
 
@@ -10453,27 +11061,39 @@ inline void execute_v_mac_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float sv1 = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst.inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst.inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst.inst_.neg & (1u << 1))
-      sv1 = -sv1;
-    float result =
-        std::fma(sv0, sv1, util::f16_to_f32(static_cast<uint16_t>(inst.vdst.read_lane(wf, lane))));
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(result));
+    inst.vdst.write_lane(
+        wf, lane, util::f32_to_f16([&]() {
+          float v = [&]() {
+            float v = std::fma(
+                [&]() {
+                  float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+                  if (inst.inst_.abs & (1u << 0))
+                    sv = std::fabs(sv);
+                  if (inst.inst_.neg & (1u << 0))
+                    sv = -sv;
+                  return sv;
+                }(),
+                [&]() {
+                  float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
+                  if (inst.inst_.abs & (1u << 1))
+                    sv = std::fabs(sv);
+                  if (inst.inst_.neg & (1u << 1))
+                    sv = -sv;
+                  return sv;
+                }(),
+                util::f16_to_f32(static_cast<uint16_t>(inst.vdst.read_lane(wf, lane))));
+            if (inst.inst_.omod == 1)
+              v *= 2.0f;
+            else if (inst.inst_.omod == 2)
+              v *= 4.0f;
+            else if (inst.inst_.omod == 3)
+              v *= 0.5f;
+            return v;
+          }();
+          if (inst.inst_.clamp)
+            v = std::clamp(v, 0.0f, 1.0f);
+          return v;
+        }()));
   }
 }
 
@@ -10483,11 +11103,11 @@ inline void execute_v_mac_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float sv1 = std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane,
-                         std::bit_cast<uint32_t>(std::fma(
-                             sv0, sv1, std::bit_cast<float>(inst.vdst.read_lane(wf, lane)))));
+    inst.vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(std::fma(std::bit_cast<float>(inst.src0.read_lane(wf, lane)),
+                                         std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane)),
+                                         std::bit_cast<float>(inst.vdst.read_lane(wf, lane)))));
   }
 }
 
@@ -10497,26 +11117,38 @@ inline void execute_v_mac_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float sv1 = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst.inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst.inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst.inst_.neg & (1u << 1))
-      sv1 = -sv1;
-    float result = std::fma(sv0, sv1, std::bit_cast<float>(inst.vdst.read_lane(wf, lane)));
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v = std::fma(
+                                 [&]() {
+                                   float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                                   if (inst.inst_.abs & (1u << 0))
+                                     sv = std::fabs(sv);
+                                   if (inst.inst_.neg & (1u << 0))
+                                     sv = -sv;
+                                   return sv;
+                                 }(),
+                                 [&]() {
+                                   float sv = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+                                   if (inst.inst_.abs & (1u << 1))
+                                     sv = std::fabs(sv);
+                                   if (inst.inst_.neg & (1u << 1))
+                                     sv = -sv;
+                                   return sv;
+                                 }(),
+                                 std::bit_cast<float>(inst.vdst.read_lane(wf, lane)));
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -10526,31 +11158,48 @@ inline void execute_v_mad_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float a = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float b = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
-    float c = util::f16_to_f32(static_cast<uint16_t>(inst.src2.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst.inst_.neg & (1u << 0))
-      a = -a;
-    if (inst.inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst.inst_.neg & (1u << 1))
-      b = -b;
-    if (inst.inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst.inst_.neg & (1u << 2))
-      c = -c;
-    float result = a * b + c;
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(result));
+    inst.vdst.write_lane(
+        wf, lane, util::f32_to_f16([&]() {
+          float v = [&]() {
+            float v = (([&]() {
+                         float sv =
+                             util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+                         if (inst.inst_.abs & (1u << 0))
+                           sv = std::fabs(sv);
+                         if (inst.inst_.neg & (1u << 0))
+                           sv = -sv;
+                         return sv;
+                       }() *
+                        [&]() {
+                          float sv = util::f16_to_f32(
+                              static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
+                          if (inst.inst_.abs & (1u << 1))
+                            sv = std::fabs(sv);
+                          if (inst.inst_.neg & (1u << 1))
+                            sv = -sv;
+                          return sv;
+                        }()) +
+                       [&]() {
+                         float sv =
+                             util::f16_to_f32(static_cast<uint16_t>(inst.src2.read_lane(wf, lane)));
+                         if (inst.inst_.abs & (1u << 2))
+                           sv = std::fabs(sv);
+                         if (inst.inst_.neg & (1u << 2))
+                           sv = -sv;
+                         return sv;
+                       }());
+            if (inst.inst_.omod == 1)
+              v *= 2.0f;
+            else if (inst.inst_.omod == 2)
+              v *= 4.0f;
+            else if (inst.inst_.omod == 3)
+              v *= 0.5f;
+            return v;
+          }();
+          if (inst.inst_.clamp)
+            v = std::clamp(v, 0.0f, 1.0f);
+          return v;
+        }()));
   }
 }
 
@@ -10560,31 +11209,45 @@ inline void execute_v_mad_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float a = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float b = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    float c = std::bit_cast<float>(inst.src2.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst.inst_.neg & (1u << 0))
-      a = -a;
-    if (inst.inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst.inst_.neg & (1u << 1))
-      b = -b;
-    if (inst.inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst.inst_.neg & (1u << 2))
-      c = -c;
-    float result = a * b + c;
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v =
+                                 (([&]() {
+                                    float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                                    if (inst.inst_.abs & (1u << 0))
+                                      sv = std::fabs(sv);
+                                    if (inst.inst_.neg & (1u << 0))
+                                      sv = -sv;
+                                    return sv;
+                                  }() *
+                                   [&]() {
+                                     float sv = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+                                     if (inst.inst_.abs & (1u << 1))
+                                       sv = std::fabs(sv);
+                                     if (inst.inst_.neg & (1u << 1))
+                                       sv = -sv;
+                                     return sv;
+                                   }()) +
+                                  [&]() {
+                                    float sv = std::bit_cast<float>(inst.src2.read_lane(wf, lane));
+                                    if (inst.inst_.abs & (1u << 2))
+                                      sv = std::fabs(sv);
+                                    if (inst.inst_.neg & (1u << 2))
+                                      sv = -sv;
+                                    return sv;
+                                  }());
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -10594,11 +11257,11 @@ inline void execute_v_mad_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t a = static_cast<int16_t>(inst.src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t b = static_cast<int16_t>(inst.src1.read_lane(wf, lane) & 0xFFFF);
-    int16_t c = static_cast<int16_t>(inst.src2.read_lane(wf, lane) & 0xFFFF);
-    inst.vdst.write_lane(
-        wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(a * b + c))));
+    inst.vdst.write_lane(wf, lane,
+                         static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(
+                             ((static_cast<int16_t>(inst.src0.read_lane(wf, lane)) *
+                               static_cast<int16_t>(inst.src1.read_lane(wf, lane))) +
+                              static_cast<int16_t>(inst.src2.read_lane(wf, lane)))))));
   }
 }
 
@@ -10623,10 +11286,11 @@ inline void execute_v_mad_i32_i24_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t a = static_cast<int32_t>(inst.src0.read_lane(wf, lane) << 8) >> 8;
-    int32_t b = static_cast<int32_t>(inst.src1.read_lane(wf, lane) << 8) >> 8;
-    int32_t c = static_cast<int32_t>(inst.src2.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(a * b + c));
+    inst.vdst.write_lane(wf, lane, [&]() {
+      auto a = static_cast<int32_t>(inst.src0.read_lane(wf, lane) << 8) >> 8;
+      auto b = static_cast<int32_t>(inst.src1.read_lane(wf, lane) << 8) >> 8;
+      return static_cast<uint32_t>(a * b + static_cast<int32_t>(inst.src2.read_lane(wf, lane)));
+    }());
   }
 }
 
@@ -10652,31 +11316,48 @@ inline void execute_v_mad_legacy_f16_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float a = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float b = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
-    float c = util::f16_to_f32(static_cast<uint16_t>(inst.src2.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst.inst_.neg & (1u << 0))
-      a = -a;
-    if (inst.inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst.inst_.neg & (1u << 1))
-      b = -b;
-    if (inst.inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst.inst_.neg & (1u << 2))
-      c = -c;
-    float result = a * b + c;
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(result));
+    inst.vdst.write_lane(
+        wf, lane, util::f32_to_f16([&]() {
+          float v = [&]() {
+            float v = (([&]() {
+                         float sv =
+                             util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+                         if (inst.inst_.abs & (1u << 0))
+                           sv = std::fabs(sv);
+                         if (inst.inst_.neg & (1u << 0))
+                           sv = -sv;
+                         return sv;
+                       }() *
+                        [&]() {
+                          float sv = util::f16_to_f32(
+                              static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
+                          if (inst.inst_.abs & (1u << 1))
+                            sv = std::fabs(sv);
+                          if (inst.inst_.neg & (1u << 1))
+                            sv = -sv;
+                          return sv;
+                        }()) +
+                       [&]() {
+                         float sv =
+                             util::f16_to_f32(static_cast<uint16_t>(inst.src2.read_lane(wf, lane)));
+                         if (inst.inst_.abs & (1u << 2))
+                           sv = std::fabs(sv);
+                         if (inst.inst_.neg & (1u << 2))
+                           sv = -sv;
+                         return sv;
+                       }());
+            if (inst.inst_.omod == 1)
+              v *= 2.0f;
+            else if (inst.inst_.omod == 2)
+              v *= 4.0f;
+            else if (inst.inst_.omod == 3)
+              v *= 0.5f;
+            return v;
+          }();
+          if (inst.inst_.clamp)
+            v = std::clamp(v, 0.0f, 1.0f);
+          return v;
+        }()));
   }
 }
 
@@ -10687,31 +11368,45 @@ inline void execute_v_mad_legacy_f32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float a = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float b = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    float c = std::bit_cast<float>(inst.src2.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst.inst_.neg & (1u << 0))
-      a = -a;
-    if (inst.inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst.inst_.neg & (1u << 1))
-      b = -b;
-    if (inst.inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst.inst_.neg & (1u << 2))
-      c = -c;
-    float result = a * b + c;
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v =
+                                 (([&]() {
+                                    float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                                    if (inst.inst_.abs & (1u << 0))
+                                      sv = std::fabs(sv);
+                                    if (inst.inst_.neg & (1u << 0))
+                                      sv = -sv;
+                                    return sv;
+                                  }() *
+                                   [&]() {
+                                     float sv = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+                                     if (inst.inst_.abs & (1u << 1))
+                                       sv = std::fabs(sv);
+                                     if (inst.inst_.neg & (1u << 1))
+                                       sv = -sv;
+                                     return sv;
+                                   }()) +
+                                  [&]() {
+                                    float sv = std::bit_cast<float>(inst.src2.read_lane(wf, lane));
+                                    if (inst.inst_.abs & (1u << 2))
+                                      sv = std::fabs(sv);
+                                    if (inst.inst_.neg & (1u << 2))
+                                      sv = -sv;
+                                    return sv;
+                                  }());
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -10722,11 +11417,11 @@ inline void execute_v_mad_legacy_i16_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t a = static_cast<int16_t>(inst.src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t b = static_cast<int16_t>(inst.src1.read_lane(wf, lane) & 0xFFFF);
-    int16_t c = static_cast<int16_t>(inst.src2.read_lane(wf, lane) & 0xFFFF);
-    inst.vdst.write_lane(
-        wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(a * b + c))));
+    inst.vdst.write_lane(wf, lane,
+                         static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(
+                             ((static_cast<int16_t>(inst.src0.read_lane(wf, lane)) *
+                               static_cast<int16_t>(inst.src1.read_lane(wf, lane))) +
+                              static_cast<int16_t>(inst.src2.read_lane(wf, lane)))))));
   }
 }
 
@@ -10737,10 +11432,11 @@ inline void execute_v_mad_legacy_u16_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t a = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t b = static_cast<uint16_t>(inst.src1.read_lane(wf, lane));
-    uint16_t c = static_cast<uint16_t>(inst.src2.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(a * b + c)));
+    inst.vdst.write_lane(wf, lane,
+                         static_cast<uint32_t>(static_cast<uint16_t>(
+                             ((static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) *
+                               static_cast<uint16_t>(inst.src1.read_lane(wf, lane))) +
+                              static_cast<uint16_t>(inst.src2.read_lane(wf, lane))))));
   }
 }
 
@@ -10862,10 +11558,11 @@ inline void execute_v_mad_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t a = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t b = static_cast<uint16_t>(inst.src1.read_lane(wf, lane));
-    uint16_t c = static_cast<uint16_t>(inst.src2.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(a * b + c)));
+    inst.vdst.write_lane(wf, lane,
+                         static_cast<uint32_t>(static_cast<uint16_t>(
+                             ((static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) *
+                               static_cast<uint16_t>(inst.src1.read_lane(wf, lane))) +
+                              static_cast<uint16_t>(inst.src2.read_lane(wf, lane))))));
   }
 }
 
@@ -10890,10 +11587,10 @@ inline void execute_v_mad_u32_u24_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t a = inst.src0.read_lane(wf, lane) & 0x00FFFFFFu;
-    uint32_t b = inst.src1.read_lane(wf, lane) & 0x00FFFFFFu;
-    uint32_t c = inst.src2.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, a * b + c);
+    inst.vdst.write_lane(wf, lane,
+                         ((inst.src0.read_lane(wf, lane) & 0x00FFFFFFu) *
+                              (inst.src1.read_lane(wf, lane) & 0x00FFFFFFu) +
+                          inst.src2.read_lane(wf, lane)));
   }
 }
 
@@ -10970,31 +11667,49 @@ inline void execute_v_max3_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float a = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float b = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
-    float c = util::f16_to_f32(static_cast<uint16_t>(inst.src2.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst.inst_.neg & (1u << 0))
-      a = -a;
-    if (inst.inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst.inst_.neg & (1u << 1))
-      b = -b;
-    if (inst.inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst.inst_.neg & (1u << 2))
-      c = -c;
-    float result = std::fmax(std::fmax(a, b), c);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(result));
+    inst.vdst.write_lane(
+        wf, lane, util::f32_to_f16([&]() {
+          float v = [&]() {
+            float v = std::max(
+                std::max(
+                    [&]() {
+                      float sv =
+                          util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+                      if (inst.inst_.abs & (1u << 0))
+                        sv = std::fabs(sv);
+                      if (inst.inst_.neg & (1u << 0))
+                        sv = -sv;
+                      return sv;
+                    }(),
+                    [&]() {
+                      float sv =
+                          util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
+                      if (inst.inst_.abs & (1u << 1))
+                        sv = std::fabs(sv);
+                      if (inst.inst_.neg & (1u << 1))
+                        sv = -sv;
+                      return sv;
+                    }()),
+                [&]() {
+                  float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src2.read_lane(wf, lane)));
+                  if (inst.inst_.abs & (1u << 2))
+                    sv = std::fabs(sv);
+                  if (inst.inst_.neg & (1u << 2))
+                    sv = -sv;
+                  return sv;
+                }());
+            if (inst.inst_.omod == 1)
+              v *= 2.0f;
+            else if (inst.inst_.omod == 2)
+              v *= 4.0f;
+            else if (inst.inst_.omod == 3)
+              v *= 0.5f;
+            return v;
+          }();
+          if (inst.inst_.clamp)
+            v = std::clamp(v, 0.0f, 1.0f);
+          return v;
+        }()));
   }
 }
 
@@ -11004,31 +11719,46 @@ inline void execute_v_max3_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float a = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float b = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    float c = std::bit_cast<float>(inst.src2.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst.inst_.neg & (1u << 0))
-      a = -a;
-    if (inst.inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst.inst_.neg & (1u << 1))
-      b = -b;
-    if (inst.inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst.inst_.neg & (1u << 2))
-      c = -c;
-    float result = std::fmax(std::fmax(a, b), c);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(
+        wf, lane, std::bit_cast<uint32_t>([&]() {
+          float v = [&]() {
+            float v = std::max(std::max(
+                                   [&]() {
+                                     float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                                     if (inst.inst_.abs & (1u << 0))
+                                       sv = std::fabs(sv);
+                                     if (inst.inst_.neg & (1u << 0))
+                                       sv = -sv;
+                                     return sv;
+                                   }(),
+                                   [&]() {
+                                     float sv = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+                                     if (inst.inst_.abs & (1u << 1))
+                                       sv = std::fabs(sv);
+                                     if (inst.inst_.neg & (1u << 1))
+                                       sv = -sv;
+                                     return sv;
+                                   }()),
+                               [&]() {
+                                 float sv = std::bit_cast<float>(inst.src2.read_lane(wf, lane));
+                                 if (inst.inst_.abs & (1u << 2))
+                                   sv = std::fabs(sv);
+                                 if (inst.inst_.neg & (1u << 2))
+                                   sv = -sv;
+                                 return sv;
+                               }());
+            if (inst.inst_.omod == 1)
+              v *= 2.0f;
+            else if (inst.inst_.omod == 2)
+              v *= 4.0f;
+            else if (inst.inst_.omod == 3)
+              v *= 0.5f;
+            return v;
+          }();
+          if (inst.inst_.clamp)
+            v = std::clamp(v, 0.0f, 1.0f);
+          return v;
+        }()));
   }
 }
 
@@ -11038,11 +11768,11 @@ inline void execute_v_max3_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t a = static_cast<int16_t>(inst.src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t b = static_cast<int16_t>(inst.src1.read_lane(wf, lane) & 0xFFFF);
-    int16_t c = static_cast<int16_t>(inst.src2.read_lane(wf, lane) & 0xFFFF);
     inst.vdst.write_lane(wf, lane,
-                         static_cast<uint32_t>(static_cast<uint16_t>(std::max(std::max(a, b), c))));
+                         static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(
+                             std::max(std::max(static_cast<int16_t>(inst.src0.read_lane(wf, lane)),
+                                               static_cast<int16_t>(inst.src1.read_lane(wf, lane))),
+                                      static_cast<int16_t>(inst.src2.read_lane(wf, lane)))))));
   }
 }
 
@@ -11052,10 +11782,10 @@ inline void execute_v_max3_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t a = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
-    int32_t b = static_cast<int32_t>(inst.src1.read_lane(wf, lane));
-    int32_t c = static_cast<int32_t>(inst.src2.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(std::max(std::max(a, b), c)));
+    inst.vdst.write_lane(wf, lane,
+                         std::max(std::max(static_cast<int32_t>(inst.src0.read_lane(wf, lane)),
+                                           static_cast<int32_t>(inst.src1.read_lane(wf, lane))),
+                                  static_cast<int32_t>(inst.src2.read_lane(wf, lane))));
   }
 }
 
@@ -11065,10 +11795,11 @@ inline void execute_v_max3_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t a = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t b = static_cast<uint16_t>(inst.src1.read_lane(wf, lane));
-    uint16_t c = static_cast<uint16_t>(inst.src2.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(std::max(std::max(a, b), c)));
+    inst.vdst.write_lane(wf, lane,
+                         static_cast<uint32_t>(static_cast<uint16_t>(std::max(
+                             std::max(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)),
+                                      static_cast<uint16_t>(inst.src1.read_lane(wf, lane))),
+                             static_cast<uint16_t>(inst.src2.read_lane(wf, lane))))));
   }
 }
 
@@ -11078,10 +11809,10 @@ inline void execute_v_max3_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t a = inst.src0.read_lane(wf, lane);
-    uint32_t b = inst.src1.read_lane(wf, lane);
-    uint32_t c = inst.src2.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, std::max(std::max(a, b), c));
+    inst.vdst.write_lane(
+        wf, lane,
+        std::max(std::max(inst.src0.read_lane(wf, lane), inst.src1.read_lane(wf, lane)),
+                 inst.src2.read_lane(wf, lane)));
   }
 }
 
@@ -11091,9 +11822,11 @@ inline void execute_v_max_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float sv1 = util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane)));
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(std::fmax(sv0, sv1)));
+    inst.vdst.write_lane(
+        wf, lane,
+        util::f32_to_f16(
+            std::fmax(util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane))),
+                      util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane))))));
   }
 }
 
@@ -11103,26 +11836,38 @@ inline void execute_v_max_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float sv1 = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst.inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst.inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst.inst_.neg & (1u << 1))
-      sv1 = -sv1;
-    float result = std::fmax(sv0, sv1);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(result));
+    inst.vdst.write_lane(
+        wf, lane, util::f32_to_f16([&]() {
+          float v = [&]() {
+            float v = std::fmax(
+                [&]() {
+                  float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+                  if (inst.inst_.abs & (1u << 0))
+                    sv = std::fabs(sv);
+                  if (inst.inst_.neg & (1u << 0))
+                    sv = -sv;
+                  return sv;
+                }(),
+                [&]() {
+                  float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
+                  if (inst.inst_.abs & (1u << 1))
+                    sv = std::fabs(sv);
+                  if (inst.inst_.neg & (1u << 1))
+                    sv = -sv;
+                  return sv;
+                }());
+            if (inst.inst_.omod == 1)
+              v *= 2.0f;
+            else if (inst.inst_.omod == 2)
+              v *= 4.0f;
+            else if (inst.inst_.omod == 3)
+              v *= 0.5f;
+            return v;
+          }();
+          if (inst.inst_.clamp)
+            v = std::clamp(v, 0.0f, 1.0f);
+          return v;
+        }()));
   }
 }
 
@@ -11132,9 +11877,10 @@ inline void execute_v_max_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float sv1 = std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(std::fmax(sv0, sv1)));
+    inst.vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(std::fmax(std::bit_cast<float>(inst.src0.read_lane(wf, lane)),
+                                          std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane)))));
   }
 }
 
@@ -11144,26 +11890,37 @@ inline void execute_v_max_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float sv1 = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst.inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst.inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst.inst_.neg & (1u << 1))
-      sv1 = -sv1;
-    float result = std::fmax(sv0, sv1);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v = std::fmax(
+                                 [&]() {
+                                   float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                                   if (inst.inst_.abs & (1u << 0))
+                                     sv = std::fabs(sv);
+                                   if (inst.inst_.neg & (1u << 0))
+                                     sv = -sv;
+                                   return sv;
+                                 }(),
+                                 [&]() {
+                                   float sv = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+                                   if (inst.inst_.abs & (1u << 1))
+                                     sv = std::fabs(sv);
+                                   if (inst.inst_.neg & (1u << 1))
+                                     sv = -sv;
+                                   return sv;
+                                 }());
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -11173,26 +11930,39 @@ inline void execute_v_max_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double sv0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    double sv1 = std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst.inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst.inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst.inst_.neg & (1u << 1))
-      sv1 = -sv1;
-    double result = std::fmax(sv0, sv1);
-    if (inst.inst_.omod == 1)
-      result *= 2.0;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0, 1.0);
-    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
+    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>([&]() {
+                             double v = [&]() {
+                               double v = std::fmax(
+                                   [&]() {
+                                     double sv =
+                                         std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
+                                     if (inst.inst_.abs & (1u << 0))
+                                       sv = std::fabs(sv);
+                                     if (inst.inst_.neg & (1u << 0))
+                                       sv = -sv;
+                                     return sv;
+                                   }(),
+                                   [&]() {
+                                     double sv =
+                                         std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
+                                     if (inst.inst_.abs & (1u << 1))
+                                       sv = std::fabs(sv);
+                                     if (inst.inst_.neg & (1u << 1))
+                                       sv = -sv;
+                                     return sv;
+                                   }());
+                               if (inst.inst_.omod == 1)
+                                 v *= 2.0;
+                               else if (inst.inst_.omod == 2)
+                                 v *= 4.0;
+                               else if (inst.inst_.omod == 3)
+                                 v *= 0.5;
+                               return v;
+                             }();
+                             if (inst.inst_.clamp)
+                               v = std::clamp(v, 0.0, 1.0);
+                             return v;
+                           }()));
   }
 }
 
@@ -11202,10 +11972,10 @@ inline void execute_v_max_i16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t sv0 = static_cast<int16_t>(inst.src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t sv1 = static_cast<int16_t>(inst.vsrc1.read_lane(wf, lane) & 0xFFFF);
     inst.vdst.write_lane(wf, lane,
-                         static_cast<uint32_t>(static_cast<uint16_t>(sv0 > sv1 ? sv0 : sv1)));
+                         static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(
+                             std::max(static_cast<int16_t>(inst.src0.read_lane(wf, lane)),
+                                      static_cast<int16_t>(inst.vsrc1.read_lane(wf, lane)))))));
   }
 }
 
@@ -11215,10 +11985,10 @@ inline void execute_v_max_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t sv0 = static_cast<int16_t>(inst.src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t sv1 = static_cast<int16_t>(inst.src1.read_lane(wf, lane) & 0xFFFF);
     inst.vdst.write_lane(wf, lane,
-                         static_cast<uint32_t>(static_cast<uint16_t>(sv0 > sv1 ? sv0 : sv1)));
+                         static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(
+                             std::max(static_cast<int16_t>(inst.src0.read_lane(wf, lane)),
+                                      static_cast<int16_t>(inst.src1.read_lane(wf, lane)))))));
   }
 }
 
@@ -11228,9 +11998,9 @@ inline void execute_v_max_i32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t sv0 = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
-    int32_t sv1 = static_cast<int32_t>(inst.vsrc1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(sv0 > sv1 ? sv0 : sv1));
+    inst.vdst.write_lane(wf, lane,
+                         std::max(static_cast<int32_t>(inst.src0.read_lane(wf, lane)),
+                                  static_cast<int32_t>(inst.vsrc1.read_lane(wf, lane))));
   }
 }
 
@@ -11240,9 +12010,9 @@ inline void execute_v_max_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t sv0 = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
-    int32_t sv1 = static_cast<int32_t>(inst.src1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(sv0 > sv1 ? sv0 : sv1));
+    inst.vdst.write_lane(wf, lane,
+                         std::max(static_cast<int32_t>(inst.src0.read_lane(wf, lane)),
+                                  static_cast<int32_t>(inst.src1.read_lane(wf, lane))));
   }
 }
 
@@ -11252,9 +12022,10 @@ inline void execute_v_max_u16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t sv0 = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t sv1 = static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(sv0 > sv1 ? sv0 : sv1));
+    inst.vdst.write_lane(wf, lane,
+                         static_cast<uint32_t>(static_cast<uint16_t>(
+                             std::max(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)),
+                                      static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane))))));
   }
 }
 
@@ -11264,9 +12035,10 @@ inline void execute_v_max_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t sv0 = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t sv1 = static_cast<uint16_t>(inst.src1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(sv0 > sv1 ? sv0 : sv1));
+    inst.vdst.write_lane(wf, lane,
+                         static_cast<uint32_t>(static_cast<uint16_t>(
+                             std::max(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)),
+                                      static_cast<uint16_t>(inst.src1.read_lane(wf, lane))))));
   }
 }
 
@@ -11276,9 +12048,8 @@ inline void execute_v_max_u32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.vsrc1.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, sv0 > sv1 ? sv0 : sv1);
+    inst.vdst.write_lane(wf, lane,
+                         std::max(inst.src0.read_lane(wf, lane), inst.vsrc1.read_lane(wf, lane)));
   }
 }
 
@@ -11288,9 +12059,8 @@ inline void execute_v_max_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.src1.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, sv0 > sv1 ? sv0 : sv1);
+    inst.vdst.write_lane(wf, lane,
+                         std::max(inst.src0.read_lane(wf, lane), inst.src1.read_lane(wf, lane)));
   }
 }
 
@@ -11300,31 +12070,49 @@ inline void execute_v_maxmin_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float a = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float b = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
-    float c = util::f16_to_f32(static_cast<uint16_t>(inst.src2.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst.inst_.neg & (1u << 0))
-      a = -a;
-    if (inst.inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst.inst_.neg & (1u << 1))
-      b = -b;
-    if (inst.inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst.inst_.neg & (1u << 2))
-      c = -c;
-    float result = std::fmax(a, std::fmin(b, c));
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(result));
+    inst.vdst.write_lane(
+        wf, lane, util::f32_to_f16([&]() {
+          float v = [&]() {
+            float v = std::min(
+                std::max(
+                    [&]() {
+                      float sv =
+                          util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+                      if (inst.inst_.abs & (1u << 0))
+                        sv = std::fabs(sv);
+                      if (inst.inst_.neg & (1u << 0))
+                        sv = -sv;
+                      return sv;
+                    }(),
+                    [&]() {
+                      float sv =
+                          util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
+                      if (inst.inst_.abs & (1u << 1))
+                        sv = std::fabs(sv);
+                      if (inst.inst_.neg & (1u << 1))
+                        sv = -sv;
+                      return sv;
+                    }()),
+                [&]() {
+                  float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src2.read_lane(wf, lane)));
+                  if (inst.inst_.abs & (1u << 2))
+                    sv = std::fabs(sv);
+                  if (inst.inst_.neg & (1u << 2))
+                    sv = -sv;
+                  return sv;
+                }());
+            if (inst.inst_.omod == 1)
+              v *= 2.0f;
+            else if (inst.inst_.omod == 2)
+              v *= 4.0f;
+            else if (inst.inst_.omod == 3)
+              v *= 0.5f;
+            return v;
+          }();
+          if (inst.inst_.clamp)
+            v = std::clamp(v, 0.0f, 1.0f);
+          return v;
+        }()));
   }
 }
 
@@ -11334,31 +12122,46 @@ inline void execute_v_maxmin_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float a = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float b = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    float c = std::bit_cast<float>(inst.src2.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst.inst_.neg & (1u << 0))
-      a = -a;
-    if (inst.inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst.inst_.neg & (1u << 1))
-      b = -b;
-    if (inst.inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst.inst_.neg & (1u << 2))
-      c = -c;
-    float result = std::fmax(a, std::fmin(b, c));
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(
+        wf, lane, std::bit_cast<uint32_t>([&]() {
+          float v = [&]() {
+            float v = std::min(std::max(
+                                   [&]() {
+                                     float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                                     if (inst.inst_.abs & (1u << 0))
+                                       sv = std::fabs(sv);
+                                     if (inst.inst_.neg & (1u << 0))
+                                       sv = -sv;
+                                     return sv;
+                                   }(),
+                                   [&]() {
+                                     float sv = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+                                     if (inst.inst_.abs & (1u << 1))
+                                       sv = std::fabs(sv);
+                                     if (inst.inst_.neg & (1u << 1))
+                                       sv = -sv;
+                                     return sv;
+                                   }()),
+                               [&]() {
+                                 float sv = std::bit_cast<float>(inst.src2.read_lane(wf, lane));
+                                 if (inst.inst_.abs & (1u << 2))
+                                   sv = std::fabs(sv);
+                                 if (inst.inst_.neg & (1u << 2))
+                                   sv = -sv;
+                                 return sv;
+                               }());
+            if (inst.inst_.omod == 1)
+              v *= 2.0f;
+            else if (inst.inst_.omod == 2)
+              v *= 4.0f;
+            else if (inst.inst_.omod == 3)
+              v *= 0.5f;
+            return v;
+          }();
+          if (inst.inst_.clamp)
+            v = std::clamp(v, 0.0f, 1.0f);
+          return v;
+        }()));
   }
 }
 
@@ -11368,10 +12171,10 @@ inline void execute_v_maxmin_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t a = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
-    int32_t b = static_cast<int32_t>(inst.src1.read_lane(wf, lane));
-    int32_t c = static_cast<int32_t>(inst.src2.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(std::max(a, std::min(b, c))));
+    inst.vdst.write_lane(wf, lane,
+                         std::min(std::max(static_cast<int32_t>(inst.src0.read_lane(wf, lane)),
+                                           static_cast<int32_t>(inst.src1.read_lane(wf, lane))),
+                                  static_cast<int32_t>(inst.src2.read_lane(wf, lane))));
   }
 }
 
@@ -11381,10 +12184,10 @@ inline void execute_v_maxmin_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t a = inst.src0.read_lane(wf, lane);
-    uint32_t b = inst.src1.read_lane(wf, lane);
-    uint32_t c = inst.src2.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, std::max(a, std::min(b, c)));
+    inst.vdst.write_lane(
+        wf, lane,
+        std::min(std::max(inst.src0.read_lane(wf, lane), inst.src1.read_lane(wf, lane)),
+                 inst.src2.read_lane(wf, lane)));
   }
 }
 
@@ -11425,31 +12228,48 @@ inline void execute_v_med3_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float a = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float b = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
-    float c = util::f16_to_f32(static_cast<uint16_t>(inst.src2.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst.inst_.neg & (1u << 0))
-      a = -a;
-    if (inst.inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst.inst_.neg & (1u << 1))
-      b = -b;
-    if (inst.inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst.inst_.neg & (1u << 2))
-      c = -c;
-    float result = std::fmax(std::fmin(std::fmax(a, b), c), std::fmin(a, b));
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(result));
+    inst.vdst.write_lane(
+        wf, lane, util::f32_to_f16([&]() {
+          float v = [&]() {
+            float v = [&]() {
+              auto a = [&]() {
+                float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+                if (inst.inst_.abs & (1u << 0))
+                  sv = std::fabs(sv);
+                if (inst.inst_.neg & (1u << 0))
+                  sv = -sv;
+                return sv;
+              }();
+              auto b = [&]() {
+                float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
+                if (inst.inst_.abs & (1u << 1))
+                  sv = std::fabs(sv);
+                if (inst.inst_.neg & (1u << 1))
+                  sv = -sv;
+                return sv;
+              }();
+              auto c = [&]() {
+                float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src2.read_lane(wf, lane)));
+                if (inst.inst_.abs & (1u << 2))
+                  sv = std::fabs(sv);
+                if (inst.inst_.neg & (1u << 2))
+                  sv = -sv;
+                return sv;
+              }();
+              return std::max(std::min(std::max(a, b), c), std::min(a, b));
+            }();
+            if (inst.inst_.omod == 1)
+              v *= 2.0f;
+            else if (inst.inst_.omod == 2)
+              v *= 4.0f;
+            else if (inst.inst_.omod == 3)
+              v *= 0.5f;
+            return v;
+          }();
+          if (inst.inst_.clamp)
+            v = std::clamp(v, 0.0f, 1.0f);
+          return v;
+        }()));
   }
 }
 
@@ -11459,31 +12279,47 @@ inline void execute_v_med3_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float a = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float b = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    float c = std::bit_cast<float>(inst.src2.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst.inst_.neg & (1u << 0))
-      a = -a;
-    if (inst.inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst.inst_.neg & (1u << 1))
-      b = -b;
-    if (inst.inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst.inst_.neg & (1u << 2))
-      c = -c;
-    float result = std::fmax(std::fmin(std::fmax(a, b), c), std::fmin(a, b));
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v = [&]() {
+                               auto a = [&]() {
+                                 float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                                 if (inst.inst_.abs & (1u << 0))
+                                   sv = std::fabs(sv);
+                                 if (inst.inst_.neg & (1u << 0))
+                                   sv = -sv;
+                                 return sv;
+                               }();
+                               auto b = [&]() {
+                                 float sv = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+                                 if (inst.inst_.abs & (1u << 1))
+                                   sv = std::fabs(sv);
+                                 if (inst.inst_.neg & (1u << 1))
+                                   sv = -sv;
+                                 return sv;
+                               }();
+                               auto c = [&]() {
+                                 float sv = std::bit_cast<float>(inst.src2.read_lane(wf, lane));
+                                 if (inst.inst_.abs & (1u << 2))
+                                   sv = std::fabs(sv);
+                                 if (inst.inst_.neg & (1u << 2))
+                                   sv = -sv;
+                                 return sv;
+                               }();
+                               return std::max(std::min(std::max(a, b), c), std::min(a, b));
+                             }();
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -11493,12 +12329,13 @@ inline void execute_v_med3_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t a = static_cast<int16_t>(inst.src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t b = static_cast<int16_t>(inst.src1.read_lane(wf, lane) & 0xFFFF);
-    int16_t c = static_cast<int16_t>(inst.src2.read_lane(wf, lane) & 0xFFFF);
     inst.vdst.write_lane(wf, lane,
-                         static_cast<uint32_t>(static_cast<uint16_t>(
-                             std::max(std::min(std::max(a, b), c), std::min(a, b)))));
+                         static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>([&]() {
+                           auto a = static_cast<int16_t>(inst.src0.read_lane(wf, lane));
+                           auto b = static_cast<int16_t>(inst.src1.read_lane(wf, lane));
+                           auto c = static_cast<int16_t>(inst.src2.read_lane(wf, lane));
+                           return std::max(std::min(std::max(a, b), c), std::min(a, b));
+                         }()))));
   }
 }
 
@@ -11508,11 +12345,12 @@ inline void execute_v_med3_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t a = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
-    int32_t b = static_cast<int32_t>(inst.src1.read_lane(wf, lane));
-    int32_t c = static_cast<int32_t>(inst.src2.read_lane(wf, lane));
-    inst.vdst.write_lane(
-        wf, lane, static_cast<uint32_t>(std::max(std::min(std::max(a, b), c), std::min(a, b))));
+    inst.vdst.write_lane(wf, lane, [&]() {
+      auto a = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
+      auto b = static_cast<int32_t>(inst.src1.read_lane(wf, lane));
+      auto c = static_cast<int32_t>(inst.src2.read_lane(wf, lane));
+      return std::max(std::min(std::max(a, b), c), std::min(a, b));
+    }());
   }
 }
 
@@ -11522,11 +12360,12 @@ inline void execute_v_med3_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t a = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t b = static_cast<uint16_t>(inst.src1.read_lane(wf, lane));
-    uint16_t c = static_cast<uint16_t>(inst.src2.read_lane(wf, lane));
-    inst.vdst.write_lane(
-        wf, lane, static_cast<uint32_t>(std::max(std::min(std::max(a, b), c), std::min(a, b))));
+    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>([&]() {
+                           auto a = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
+                           auto b = static_cast<uint16_t>(inst.src1.read_lane(wf, lane));
+                           auto c = static_cast<uint16_t>(inst.src2.read_lane(wf, lane));
+                           return std::max(std::min(std::max(a, b), c), std::min(a, b));
+                         }())));
   }
 }
 
@@ -11536,10 +12375,12 @@ inline void execute_v_med3_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t a = inst.src0.read_lane(wf, lane);
-    uint32_t b = inst.src1.read_lane(wf, lane);
-    uint32_t c = inst.src2.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, std::max(std::min(std::max(a, b), c), std::min(a, b)));
+    inst.vdst.write_lane(wf, lane, [&]() {
+      auto a = inst.src0.read_lane(wf, lane);
+      auto b = inst.src1.read_lane(wf, lane);
+      auto c = inst.src2.read_lane(wf, lane);
+      return std::max(std::min(std::max(a, b), c), std::min(a, b));
+    }());
   }
 }
 
@@ -11549,31 +12390,49 @@ inline void execute_v_min3_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float a = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float b = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
-    float c = util::f16_to_f32(static_cast<uint16_t>(inst.src2.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst.inst_.neg & (1u << 0))
-      a = -a;
-    if (inst.inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst.inst_.neg & (1u << 1))
-      b = -b;
-    if (inst.inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst.inst_.neg & (1u << 2))
-      c = -c;
-    float result = std::fmin(std::fmin(a, b), c);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(result));
+    inst.vdst.write_lane(
+        wf, lane, util::f32_to_f16([&]() {
+          float v = [&]() {
+            float v = std::min(
+                std::min(
+                    [&]() {
+                      float sv =
+                          util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+                      if (inst.inst_.abs & (1u << 0))
+                        sv = std::fabs(sv);
+                      if (inst.inst_.neg & (1u << 0))
+                        sv = -sv;
+                      return sv;
+                    }(),
+                    [&]() {
+                      float sv =
+                          util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
+                      if (inst.inst_.abs & (1u << 1))
+                        sv = std::fabs(sv);
+                      if (inst.inst_.neg & (1u << 1))
+                        sv = -sv;
+                      return sv;
+                    }()),
+                [&]() {
+                  float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src2.read_lane(wf, lane)));
+                  if (inst.inst_.abs & (1u << 2))
+                    sv = std::fabs(sv);
+                  if (inst.inst_.neg & (1u << 2))
+                    sv = -sv;
+                  return sv;
+                }());
+            if (inst.inst_.omod == 1)
+              v *= 2.0f;
+            else if (inst.inst_.omod == 2)
+              v *= 4.0f;
+            else if (inst.inst_.omod == 3)
+              v *= 0.5f;
+            return v;
+          }();
+          if (inst.inst_.clamp)
+            v = std::clamp(v, 0.0f, 1.0f);
+          return v;
+        }()));
   }
 }
 
@@ -11583,31 +12442,46 @@ inline void execute_v_min3_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float a = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float b = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    float c = std::bit_cast<float>(inst.src2.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst.inst_.neg & (1u << 0))
-      a = -a;
-    if (inst.inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst.inst_.neg & (1u << 1))
-      b = -b;
-    if (inst.inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst.inst_.neg & (1u << 2))
-      c = -c;
-    float result = std::fmin(std::fmin(a, b), c);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(
+        wf, lane, std::bit_cast<uint32_t>([&]() {
+          float v = [&]() {
+            float v = std::min(std::min(
+                                   [&]() {
+                                     float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                                     if (inst.inst_.abs & (1u << 0))
+                                       sv = std::fabs(sv);
+                                     if (inst.inst_.neg & (1u << 0))
+                                       sv = -sv;
+                                     return sv;
+                                   }(),
+                                   [&]() {
+                                     float sv = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+                                     if (inst.inst_.abs & (1u << 1))
+                                       sv = std::fabs(sv);
+                                     if (inst.inst_.neg & (1u << 1))
+                                       sv = -sv;
+                                     return sv;
+                                   }()),
+                               [&]() {
+                                 float sv = std::bit_cast<float>(inst.src2.read_lane(wf, lane));
+                                 if (inst.inst_.abs & (1u << 2))
+                                   sv = std::fabs(sv);
+                                 if (inst.inst_.neg & (1u << 2))
+                                   sv = -sv;
+                                 return sv;
+                               }());
+            if (inst.inst_.omod == 1)
+              v *= 2.0f;
+            else if (inst.inst_.omod == 2)
+              v *= 4.0f;
+            else if (inst.inst_.omod == 3)
+              v *= 0.5f;
+            return v;
+          }();
+          if (inst.inst_.clamp)
+            v = std::clamp(v, 0.0f, 1.0f);
+          return v;
+        }()));
   }
 }
 
@@ -11617,11 +12491,11 @@ inline void execute_v_min3_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t a = static_cast<int16_t>(inst.src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t b = static_cast<int16_t>(inst.src1.read_lane(wf, lane) & 0xFFFF);
-    int16_t c = static_cast<int16_t>(inst.src2.read_lane(wf, lane) & 0xFFFF);
     inst.vdst.write_lane(wf, lane,
-                         static_cast<uint32_t>(static_cast<uint16_t>(std::min(std::min(a, b), c))));
+                         static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(
+                             std::min(std::min(static_cast<int16_t>(inst.src0.read_lane(wf, lane)),
+                                               static_cast<int16_t>(inst.src1.read_lane(wf, lane))),
+                                      static_cast<int16_t>(inst.src2.read_lane(wf, lane)))))));
   }
 }
 
@@ -11631,10 +12505,10 @@ inline void execute_v_min3_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t a = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
-    int32_t b = static_cast<int32_t>(inst.src1.read_lane(wf, lane));
-    int32_t c = static_cast<int32_t>(inst.src2.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(std::min(std::min(a, b), c)));
+    inst.vdst.write_lane(wf, lane,
+                         std::min(std::min(static_cast<int32_t>(inst.src0.read_lane(wf, lane)),
+                                           static_cast<int32_t>(inst.src1.read_lane(wf, lane))),
+                                  static_cast<int32_t>(inst.src2.read_lane(wf, lane))));
   }
 }
 
@@ -11644,10 +12518,11 @@ inline void execute_v_min3_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t a = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t b = static_cast<uint16_t>(inst.src1.read_lane(wf, lane));
-    uint16_t c = static_cast<uint16_t>(inst.src2.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(std::min(std::min(a, b), c)));
+    inst.vdst.write_lane(wf, lane,
+                         static_cast<uint32_t>(static_cast<uint16_t>(std::min(
+                             std::min(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)),
+                                      static_cast<uint16_t>(inst.src1.read_lane(wf, lane))),
+                             static_cast<uint16_t>(inst.src2.read_lane(wf, lane))))));
   }
 }
 
@@ -11657,10 +12532,10 @@ inline void execute_v_min3_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t a = inst.src0.read_lane(wf, lane);
-    uint32_t b = inst.src1.read_lane(wf, lane);
-    uint32_t c = inst.src2.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, std::min(std::min(a, b), c));
+    inst.vdst.write_lane(
+        wf, lane,
+        std::min(std::min(inst.src0.read_lane(wf, lane), inst.src1.read_lane(wf, lane)),
+                 inst.src2.read_lane(wf, lane)));
   }
 }
 
@@ -11670,9 +12545,11 @@ inline void execute_v_min_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float sv1 = util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane)));
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(std::fmin(sv0, sv1)));
+    inst.vdst.write_lane(
+        wf, lane,
+        util::f32_to_f16(
+            std::fmin(util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane))),
+                      util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane))))));
   }
 }
 
@@ -11682,26 +12559,38 @@ inline void execute_v_min_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float sv1 = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst.inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst.inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst.inst_.neg & (1u << 1))
-      sv1 = -sv1;
-    float result = std::fmin(sv0, sv1);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(result));
+    inst.vdst.write_lane(
+        wf, lane, util::f32_to_f16([&]() {
+          float v = [&]() {
+            float v = std::fmin(
+                [&]() {
+                  float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+                  if (inst.inst_.abs & (1u << 0))
+                    sv = std::fabs(sv);
+                  if (inst.inst_.neg & (1u << 0))
+                    sv = -sv;
+                  return sv;
+                }(),
+                [&]() {
+                  float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
+                  if (inst.inst_.abs & (1u << 1))
+                    sv = std::fabs(sv);
+                  if (inst.inst_.neg & (1u << 1))
+                    sv = -sv;
+                  return sv;
+                }());
+            if (inst.inst_.omod == 1)
+              v *= 2.0f;
+            else if (inst.inst_.omod == 2)
+              v *= 4.0f;
+            else if (inst.inst_.omod == 3)
+              v *= 0.5f;
+            return v;
+          }();
+          if (inst.inst_.clamp)
+            v = std::clamp(v, 0.0f, 1.0f);
+          return v;
+        }()));
   }
 }
 
@@ -11711,9 +12600,10 @@ inline void execute_v_min_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float sv1 = std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(std::fmin(sv0, sv1)));
+    inst.vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(std::fmin(std::bit_cast<float>(inst.src0.read_lane(wf, lane)),
+                                          std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane)))));
   }
 }
 
@@ -11723,26 +12613,37 @@ inline void execute_v_min_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float sv1 = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst.inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst.inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst.inst_.neg & (1u << 1))
-      sv1 = -sv1;
-    float result = std::fmin(sv0, sv1);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v = std::fmin(
+                                 [&]() {
+                                   float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                                   if (inst.inst_.abs & (1u << 0))
+                                     sv = std::fabs(sv);
+                                   if (inst.inst_.neg & (1u << 0))
+                                     sv = -sv;
+                                   return sv;
+                                 }(),
+                                 [&]() {
+                                   float sv = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+                                   if (inst.inst_.abs & (1u << 1))
+                                     sv = std::fabs(sv);
+                                   if (inst.inst_.neg & (1u << 1))
+                                     sv = -sv;
+                                   return sv;
+                                 }());
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -11752,26 +12653,39 @@ inline void execute_v_min_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double sv0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    double sv1 = std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst.inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst.inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst.inst_.neg & (1u << 1))
-      sv1 = -sv1;
-    double result = std::fmin(sv0, sv1);
-    if (inst.inst_.omod == 1)
-      result *= 2.0;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0, 1.0);
-    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
+    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>([&]() {
+                             double v = [&]() {
+                               double v = std::fmin(
+                                   [&]() {
+                                     double sv =
+                                         std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
+                                     if (inst.inst_.abs & (1u << 0))
+                                       sv = std::fabs(sv);
+                                     if (inst.inst_.neg & (1u << 0))
+                                       sv = -sv;
+                                     return sv;
+                                   }(),
+                                   [&]() {
+                                     double sv =
+                                         std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
+                                     if (inst.inst_.abs & (1u << 1))
+                                       sv = std::fabs(sv);
+                                     if (inst.inst_.neg & (1u << 1))
+                                       sv = -sv;
+                                     return sv;
+                                   }());
+                               if (inst.inst_.omod == 1)
+                                 v *= 2.0;
+                               else if (inst.inst_.omod == 2)
+                                 v *= 4.0;
+                               else if (inst.inst_.omod == 3)
+                                 v *= 0.5;
+                               return v;
+                             }();
+                             if (inst.inst_.clamp)
+                               v = std::clamp(v, 0.0, 1.0);
+                             return v;
+                           }()));
   }
 }
 
@@ -11781,10 +12695,10 @@ inline void execute_v_min_i16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t sv0 = static_cast<int16_t>(inst.src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t sv1 = static_cast<int16_t>(inst.vsrc1.read_lane(wf, lane) & 0xFFFF);
     inst.vdst.write_lane(wf, lane,
-                         static_cast<uint32_t>(static_cast<uint16_t>(sv0 < sv1 ? sv0 : sv1)));
+                         static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(
+                             std::min(static_cast<int16_t>(inst.src0.read_lane(wf, lane)),
+                                      static_cast<int16_t>(inst.vsrc1.read_lane(wf, lane)))))));
   }
 }
 
@@ -11794,10 +12708,10 @@ inline void execute_v_min_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t sv0 = static_cast<int16_t>(inst.src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t sv1 = static_cast<int16_t>(inst.src1.read_lane(wf, lane) & 0xFFFF);
     inst.vdst.write_lane(wf, lane,
-                         static_cast<uint32_t>(static_cast<uint16_t>(sv0 < sv1 ? sv0 : sv1)));
+                         static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(
+                             std::min(static_cast<int16_t>(inst.src0.read_lane(wf, lane)),
+                                      static_cast<int16_t>(inst.src1.read_lane(wf, lane)))))));
   }
 }
 
@@ -11807,9 +12721,9 @@ inline void execute_v_min_i32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t sv0 = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
-    int32_t sv1 = static_cast<int32_t>(inst.vsrc1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(sv0 < sv1 ? sv0 : sv1));
+    inst.vdst.write_lane(wf, lane,
+                         std::min(static_cast<int32_t>(inst.src0.read_lane(wf, lane)),
+                                  static_cast<int32_t>(inst.vsrc1.read_lane(wf, lane))));
   }
 }
 
@@ -11819,9 +12733,9 @@ inline void execute_v_min_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t sv0 = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
-    int32_t sv1 = static_cast<int32_t>(inst.src1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(sv0 < sv1 ? sv0 : sv1));
+    inst.vdst.write_lane(wf, lane,
+                         std::min(static_cast<int32_t>(inst.src0.read_lane(wf, lane)),
+                                  static_cast<int32_t>(inst.src1.read_lane(wf, lane))));
   }
 }
 
@@ -11831,9 +12745,10 @@ inline void execute_v_min_u16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t sv0 = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t sv1 = static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(sv0 < sv1 ? sv0 : sv1));
+    inst.vdst.write_lane(wf, lane,
+                         static_cast<uint32_t>(static_cast<uint16_t>(
+                             std::min(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)),
+                                      static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane))))));
   }
 }
 
@@ -11843,9 +12758,10 @@ inline void execute_v_min_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t sv0 = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t sv1 = static_cast<uint16_t>(inst.src1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(sv0 < sv1 ? sv0 : sv1));
+    inst.vdst.write_lane(wf, lane,
+                         static_cast<uint32_t>(static_cast<uint16_t>(
+                             std::min(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)),
+                                      static_cast<uint16_t>(inst.src1.read_lane(wf, lane))))));
   }
 }
 
@@ -11855,9 +12771,8 @@ inline void execute_v_min_u32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.vsrc1.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, sv0 < sv1 ? sv0 : sv1);
+    inst.vdst.write_lane(wf, lane,
+                         std::min(inst.src0.read_lane(wf, lane), inst.vsrc1.read_lane(wf, lane)));
   }
 }
 
@@ -11867,9 +12782,8 @@ inline void execute_v_min_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.src1.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, sv0 < sv1 ? sv0 : sv1);
+    inst.vdst.write_lane(wf, lane,
+                         std::min(inst.src0.read_lane(wf, lane), inst.src1.read_lane(wf, lane)));
   }
 }
 
@@ -11879,31 +12793,49 @@ inline void execute_v_minmax_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float a = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float b = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
-    float c = util::f16_to_f32(static_cast<uint16_t>(inst.src2.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst.inst_.neg & (1u << 0))
-      a = -a;
-    if (inst.inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst.inst_.neg & (1u << 1))
-      b = -b;
-    if (inst.inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst.inst_.neg & (1u << 2))
-      c = -c;
-    float result = std::fmin(a, std::fmax(b, c));
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(result));
+    inst.vdst.write_lane(
+        wf, lane, util::f32_to_f16([&]() {
+          float v = [&]() {
+            float v = std::max(
+                std::min(
+                    [&]() {
+                      float sv =
+                          util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+                      if (inst.inst_.abs & (1u << 0))
+                        sv = std::fabs(sv);
+                      if (inst.inst_.neg & (1u << 0))
+                        sv = -sv;
+                      return sv;
+                    }(),
+                    [&]() {
+                      float sv =
+                          util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
+                      if (inst.inst_.abs & (1u << 1))
+                        sv = std::fabs(sv);
+                      if (inst.inst_.neg & (1u << 1))
+                        sv = -sv;
+                      return sv;
+                    }()),
+                [&]() {
+                  float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src2.read_lane(wf, lane)));
+                  if (inst.inst_.abs & (1u << 2))
+                    sv = std::fabs(sv);
+                  if (inst.inst_.neg & (1u << 2))
+                    sv = -sv;
+                  return sv;
+                }());
+            if (inst.inst_.omod == 1)
+              v *= 2.0f;
+            else if (inst.inst_.omod == 2)
+              v *= 4.0f;
+            else if (inst.inst_.omod == 3)
+              v *= 0.5f;
+            return v;
+          }();
+          if (inst.inst_.clamp)
+            v = std::clamp(v, 0.0f, 1.0f);
+          return v;
+        }()));
   }
 }
 
@@ -11913,31 +12845,46 @@ inline void execute_v_minmax_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float a = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float b = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    float c = std::bit_cast<float>(inst.src2.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      a = std::fabs(a);
-    if (inst.inst_.neg & (1u << 0))
-      a = -a;
-    if (inst.inst_.abs & (1u << 1))
-      b = std::fabs(b);
-    if (inst.inst_.neg & (1u << 1))
-      b = -b;
-    if (inst.inst_.abs & (1u << 2))
-      c = std::fabs(c);
-    if (inst.inst_.neg & (1u << 2))
-      c = -c;
-    float result = std::fmin(a, std::fmax(b, c));
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(
+        wf, lane, std::bit_cast<uint32_t>([&]() {
+          float v = [&]() {
+            float v = std::max(std::min(
+                                   [&]() {
+                                     float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                                     if (inst.inst_.abs & (1u << 0))
+                                       sv = std::fabs(sv);
+                                     if (inst.inst_.neg & (1u << 0))
+                                       sv = -sv;
+                                     return sv;
+                                   }(),
+                                   [&]() {
+                                     float sv = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+                                     if (inst.inst_.abs & (1u << 1))
+                                       sv = std::fabs(sv);
+                                     if (inst.inst_.neg & (1u << 1))
+                                       sv = -sv;
+                                     return sv;
+                                   }()),
+                               [&]() {
+                                 float sv = std::bit_cast<float>(inst.src2.read_lane(wf, lane));
+                                 if (inst.inst_.abs & (1u << 2))
+                                   sv = std::fabs(sv);
+                                 if (inst.inst_.neg & (1u << 2))
+                                   sv = -sv;
+                                 return sv;
+                               }());
+            if (inst.inst_.omod == 1)
+              v *= 2.0f;
+            else if (inst.inst_.omod == 2)
+              v *= 4.0f;
+            else if (inst.inst_.omod == 3)
+              v *= 0.5f;
+            return v;
+          }();
+          if (inst.inst_.clamp)
+            v = std::clamp(v, 0.0f, 1.0f);
+          return v;
+        }()));
   }
 }
 
@@ -11947,10 +12894,10 @@ inline void execute_v_minmax_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t a = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
-    int32_t b = static_cast<int32_t>(inst.src1.read_lane(wf, lane));
-    int32_t c = static_cast<int32_t>(inst.src2.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(std::min(a, std::max(b, c))));
+    inst.vdst.write_lane(wf, lane,
+                         std::max(std::min(static_cast<int32_t>(inst.src0.read_lane(wf, lane)),
+                                           static_cast<int32_t>(inst.src1.read_lane(wf, lane))),
+                                  static_cast<int32_t>(inst.src2.read_lane(wf, lane))));
   }
 }
 
@@ -11960,10 +12907,10 @@ inline void execute_v_minmax_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t a = inst.src0.read_lane(wf, lane);
-    uint32_t b = inst.src1.read_lane(wf, lane);
-    uint32_t c = inst.src2.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, std::min(a, std::max(b, c)));
+    inst.vdst.write_lane(
+        wf, lane,
+        std::max(std::min(inst.src0.read_lane(wf, lane), inst.src1.read_lane(wf, lane)),
+                 inst.src2.read_lane(wf, lane)));
   }
 }
 
@@ -11973,7 +12920,9 @@ inline void execute_v_mov_b16_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    inst.vdst.write_lane(wf, lane, inst.src0.read_lane(wf, lane));
+    inst.vdst.write_lane(wf, lane,
+                         static_cast<uint32_t>(static_cast<uint16_t>(
+                             static_cast<uint16_t>(inst.src0.read_lane(wf, lane)))));
   }
 }
 
@@ -11983,20 +12932,28 @@ inline void execute_v_mov_b16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    if (inst.inst_.omod == 1)
-      s *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      s *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      s *= 0.5f;
-    if (inst.inst_.clamp)
-      s = std::clamp(s, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(s));
+    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>([&]() {
+                           float v = [&]() {
+                             float v = [&]() {
+                               float sv = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
+                               if (inst.inst_.abs & (1u << 0))
+                                 sv = std::fabs(sv);
+                               if (inst.inst_.neg & (1u << 0))
+                                 sv = -sv;
+                               return sv;
+                             }();
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }())));
   }
 }
 
@@ -12016,20 +12973,28 @@ inline void execute_v_mov_b32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    if (inst.inst_.omod == 1)
-      s *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      s *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      s *= 0.5f;
-    if (inst.inst_.clamp)
-      s = std::clamp(s, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(s));
+    inst.vdst.write_lane(wf, lane, [&]() {
+      float v = [&]() {
+        float v = [&]() {
+          float sv = inst.src0.read_lane(wf, lane);
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }();
+        if (inst.inst_.omod == 1)
+          v *= 2.0f;
+        else if (inst.inst_.omod == 2)
+          v *= 4.0f;
+        else if (inst.inst_.omod == 3)
+          v *= 0.5f;
+        return v;
+      }();
+      if (inst.inst_.clamp)
+        v = std::clamp(v, 0.0f, 1.0f);
+      return v;
+    }());
   }
 }
 
@@ -12039,7 +13004,7 @@ inline void execute_v_mov_b64_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    inst.vdst.write_lane64(wf, lane, inst.src0.read_lane64(wf, lane));
+    inst.vdst.write_lane64(wf, lane, static_cast<uint64_t>(inst.src0.read_lane64(wf, lane)));
   }
 }
 
@@ -12049,20 +13014,28 @@ inline void execute_v_mov_b64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    if (inst.inst_.omod == 1)
-      s *= 2.0;
-    else if (inst.inst_.omod == 2)
-      s *= 4.0;
-    else if (inst.inst_.omod == 3)
-      s *= 0.5;
-    if (inst.inst_.clamp)
-      s = std::clamp(s, 0.0, 1.0);
-    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(s));
+    inst.vdst.write_lane64(wf, lane, [&]() {
+      float v = [&]() {
+        float v = [&]() {
+          float sv = static_cast<uint64_t>(inst.src0.read_lane64(wf, lane));
+          if (inst.inst_.abs & (1u << 0))
+            sv = std::fabs(sv);
+          if (inst.inst_.neg & (1u << 0))
+            sv = -sv;
+          return sv;
+        }();
+        if (inst.inst_.omod == 1)
+          v *= 2.0f;
+        else if (inst.inst_.omod == 2)
+          v *= 4.0f;
+        else if (inst.inst_.omod == 3)
+          v *= 0.5f;
+        return v;
+      }();
+      if (inst.inst_.clamp)
+        v = std::clamp(v, 0.0f, 1.0f);
+      return v;
+    }());
   }
 }
 
@@ -12072,16 +13045,20 @@ inline void execute_v_msad_u8_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t a = inst.src0.read_lane(wf, lane);
-    uint32_t b = inst.src1.read_lane(wf, lane);
-    uint32_t c = inst.src2.read_lane(wf, lane);
-    uint32_t sum = 0;
-    for (int i = 0; i < 4; ++i) {
-      uint32_t ba = (a >> (i * 8)) & 0xFF, bb = (b >> (i * 8)) & 0xFF;
-      if (ba != 0)
-        sum += ba > bb ? ba - bb : bb - ba;
-    }
-    inst.vdst.write_lane(wf, lane, sum + c);
+    inst.vdst.write_lane(wf, lane, [&]() {
+      auto a = inst.src0.read_lane(wf, lane);
+      auto b = inst.src1.read_lane(wf, lane);
+      auto c = inst.src2.read_lane(wf, lane);
+      uint32_t r = c;
+      for (int i = 0; i < 4; ++i) {
+        uint8_t rb = (a >> (i * 8)) & 0xFF;
+        if (rb != 0) {
+          uint8_t sb = (b >> (i * 8)) & 0xFF;
+          r += (rb > sb) ? (rb - sb) : (sb - rb);
+        }
+      }
+      return r;
+    }());
   }
 }
 
@@ -12092,10 +13069,11 @@ inline void execute_v_mul_dx9_zero_f32_vop2([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float sv1 = std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane,
-                         std::bit_cast<uint32_t>(sv0 == 0.0f || sv1 == 0.0f ? 0.0f : sv0 * sv1));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           auto a = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                           auto b = std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane));
+                           return (a == 0.0f || b == 0.0f) ? 0.0f : a * b;
+                         }()));
   }
 }
 
@@ -12106,26 +13084,39 @@ inline void execute_v_mul_dx9_zero_f32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float sv1 = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst.inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst.inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst.inst_.neg & (1u << 1))
-      sv1 = -sv1;
-    float result = sv0 == 0.0f || sv1 == 0.0f ? 0.0f : sv0 * sv1;
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v = [&]() {
+                               auto a = [&]() {
+                                 float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                                 if (inst.inst_.abs & (1u << 0))
+                                   sv = std::fabs(sv);
+                                 if (inst.inst_.neg & (1u << 0))
+                                   sv = -sv;
+                                 return sv;
+                               }();
+                               auto b = [&]() {
+                                 float sv = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+                                 if (inst.inst_.abs & (1u << 1))
+                                   sv = std::fabs(sv);
+                                 if (inst.inst_.neg & (1u << 1))
+                                   sv = -sv;
+                                 return sv;
+                               }();
+                               return (a == 0.0f || b == 0.0f) ? 0.0f : a * b;
+                             }();
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -12135,9 +13126,11 @@ inline void execute_v_mul_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float sv1 = util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane)));
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(sv0 * sv1));
+    inst.vdst.write_lane(
+        wf, lane,
+        util::f32_to_f16(
+            (util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane))) *
+             util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane))))));
   }
 }
 
@@ -12147,26 +13140,38 @@ inline void execute_v_mul_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float sv1 = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst.inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst.inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst.inst_.neg & (1u << 1))
-      sv1 = -sv1;
-    float result = sv0 * sv1;
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(result));
+    inst.vdst.write_lane(
+        wf, lane, util::f32_to_f16([&]() {
+          float v = [&]() {
+            float v = ([&]() {
+              float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+              if (inst.inst_.abs & (1u << 0))
+                sv = std::fabs(sv);
+              if (inst.inst_.neg & (1u << 0))
+                sv = -sv;
+              return sv;
+            }() *
+                       [&]() {
+                         float sv =
+                             util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
+                         if (inst.inst_.abs & (1u << 1))
+                           sv = std::fabs(sv);
+                         if (inst.inst_.neg & (1u << 1))
+                           sv = -sv;
+                         return sv;
+                       }());
+            if (inst.inst_.omod == 1)
+              v *= 2.0f;
+            else if (inst.inst_.omod == 2)
+              v *= 4.0f;
+            else if (inst.inst_.omod == 3)
+              v *= 0.5f;
+            return v;
+          }();
+          if (inst.inst_.clamp)
+            v = std::clamp(v, 0.0f, 1.0f);
+          return v;
+        }()));
   }
 }
 
@@ -12176,9 +13181,10 @@ inline void execute_v_mul_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float sv1 = std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(sv0 * sv1));
+    inst.vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>((std::bit_cast<float>(inst.src0.read_lane(wf, lane)) *
+                                 std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane)))));
   }
 }
 
@@ -12188,26 +13194,37 @@ inline void execute_v_mul_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float sv1 = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst.inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst.inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst.inst_.neg & (1u << 1))
-      sv1 = -sv1;
-    float result = sv0 * sv1;
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v = ([&]() {
+                               float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                               if (inst.inst_.abs & (1u << 0))
+                                 sv = std::fabs(sv);
+                               if (inst.inst_.neg & (1u << 0))
+                                 sv = -sv;
+                               return sv;
+                             }() *
+                                        [&]() {
+                                          float sv =
+                                              std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+                                          if (inst.inst_.abs & (1u << 1))
+                                            sv = std::fabs(sv);
+                                          if (inst.inst_.neg & (1u << 1))
+                                            sv = -sv;
+                                          return sv;
+                                        }());
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -12217,26 +13234,37 @@ inline void execute_v_mul_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double sv0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    double sv1 = std::bit_cast<double>(inst.src1.read_lane64(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst.inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst.inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst.inst_.neg & (1u << 1))
-      sv1 = -sv1;
-    double result = sv0 * sv1;
-    if (inst.inst_.omod == 1)
-      result *= 2.0;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0, 1.0);
-    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
+    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>([&]() {
+                             double v = [&]() {
+                               double v = ([&]() {
+                                 double sv = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
+                                 if (inst.inst_.abs & (1u << 0))
+                                   sv = std::fabs(sv);
+                                 if (inst.inst_.neg & (1u << 0))
+                                   sv = -sv;
+                                 return sv;
+                               }() *
+                                           [&]() {
+                                             double sv = std::bit_cast<double>(
+                                                 inst.src1.read_lane64(wf, lane));
+                                             if (inst.inst_.abs & (1u << 1))
+                                               sv = std::fabs(sv);
+                                             if (inst.inst_.neg & (1u << 1))
+                                               sv = -sv;
+                                             return sv;
+                                           }());
+                               if (inst.inst_.omod == 1)
+                                 v *= 2.0;
+                               else if (inst.inst_.omod == 2)
+                                 v *= 4.0;
+                               else if (inst.inst_.omod == 3)
+                                 v *= 0.5;
+                               return v;
+                             }();
+                             if (inst.inst_.clamp)
+                               v = std::clamp(v, 0.0, 1.0);
+                             return v;
+                           }()));
   }
 }
 
@@ -12246,11 +13274,11 @@ inline void execute_v_mul_hi_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t sv0 = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
-    int32_t sv1 = static_cast<int32_t>(inst.src1.read_lane(wf, lane));
-    inst.vdst.write_lane(
-        wf, lane,
-        static_cast<uint32_t>(static_cast<uint64_t>(static_cast<int64_t>(sv0) * sv1) >> 32));
+    inst.vdst.write_lane(wf, lane, [&]() {
+      auto a = static_cast<uint64_t>(static_cast<int32_t>(inst.src0.read_lane(wf, lane)));
+      auto b = static_cast<uint64_t>(static_cast<int32_t>(inst.src1.read_lane(wf, lane)));
+      return static_cast<uint32_t>((a * b) >> 32);
+    }());
   }
 }
 
@@ -12261,9 +13289,11 @@ inline void execute_v_mul_hi_i32_i24_vop2([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t sv0 = static_cast<int32_t>(inst.src0.read_lane(wf, lane) << 8) >> 8;
-    int32_t sv1 = static_cast<int32_t>(inst.vsrc1.read_lane(wf, lane) << 8) >> 8;
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>((static_cast<int64_t>(sv0) * sv1) >> 32));
+    inst.vdst.write_lane(wf, lane, [&]() {
+      auto a = static_cast<int64_t>(static_cast<int32_t>(inst.src0.read_lane(wf, lane) << 8) >> 8);
+      auto b = static_cast<int64_t>(static_cast<int32_t>(inst.vsrc1.read_lane(wf, lane) << 8) >> 8);
+      return static_cast<uint32_t>(static_cast<uint64_t>((a * b) >> 32));
+    }());
   }
 }
 
@@ -12274,9 +13304,11 @@ inline void execute_v_mul_hi_i32_i24_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t sv0 = static_cast<int32_t>(inst.src0.read_lane(wf, lane) << 8) >> 8;
-    int32_t sv1 = static_cast<int32_t>(inst.src1.read_lane(wf, lane) << 8) >> 8;
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>((static_cast<int64_t>(sv0) * sv1) >> 32));
+    inst.vdst.write_lane(wf, lane, [&]() {
+      auto a = static_cast<int64_t>(static_cast<int32_t>(inst.src0.read_lane(wf, lane) << 8) >> 8);
+      auto b = static_cast<int64_t>(static_cast<int32_t>(inst.src1.read_lane(wf, lane) << 8) >> 8);
+      return static_cast<uint32_t>(static_cast<uint64_t>((a * b) >> 32));
+    }());
   }
 }
 
@@ -12286,9 +13318,11 @@ inline void execute_v_mul_hi_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.src1.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>((static_cast<uint64_t>(sv0) * sv1) >> 32));
+    inst.vdst.write_lane(wf, lane, [&]() {
+      auto a = static_cast<uint64_t>(inst.src0.read_lane(wf, lane));
+      auto b = static_cast<uint64_t>(inst.src1.read_lane(wf, lane));
+      return static_cast<uint32_t>((a * b) >> 32);
+    }());
   }
 }
 
@@ -12299,9 +13333,11 @@ inline void execute_v_mul_hi_u32_u24_vop2([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane) & 0x00FFFFFFu;
-    uint32_t sv1 = inst.vsrc1.read_lane(wf, lane) & 0x00FFFFFFu;
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>((static_cast<uint64_t>(sv0) * sv1) >> 32));
+    inst.vdst.write_lane(wf, lane, [&]() {
+      auto a = static_cast<uint64_t>(inst.src0.read_lane(wf, lane) & 0x00FFFFFFu);
+      auto b = static_cast<uint64_t>(inst.vsrc1.read_lane(wf, lane) & 0x00FFFFFFu);
+      return static_cast<uint32_t>((a * b) >> 32);
+    }());
   }
 }
 
@@ -12312,9 +13348,11 @@ inline void execute_v_mul_hi_u32_u24_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane) & 0x00FFFFFFu;
-    uint32_t sv1 = inst.src1.read_lane(wf, lane) & 0x00FFFFFFu;
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>((static_cast<uint64_t>(sv0) * sv1) >> 32));
+    inst.vdst.write_lane(wf, lane, [&]() {
+      auto a = static_cast<uint64_t>(inst.src0.read_lane(wf, lane) & 0x00FFFFFFu);
+      auto b = static_cast<uint64_t>(inst.src1.read_lane(wf, lane) & 0x00FFFFFFu);
+      return static_cast<uint32_t>((a * b) >> 32);
+    }());
   }
 }
 
@@ -12325,9 +13363,11 @@ inline void execute_v_mul_i32_i24_vop2([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t sv0 = static_cast<int32_t>(inst.src0.read_lane(wf, lane) << 8) >> 8;
-    int32_t sv1 = static_cast<int32_t>(inst.vsrc1.read_lane(wf, lane) << 8) >> 8;
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(sv0 * sv1));
+    inst.vdst.write_lane(wf, lane, [&]() {
+      auto a = static_cast<int32_t>(inst.src0.read_lane(wf, lane) << 8) >> 8;
+      auto b = static_cast<int32_t>(inst.vsrc1.read_lane(wf, lane) << 8) >> 8;
+      return static_cast<uint32_t>(a * b);
+    }());
   }
 }
 
@@ -12338,9 +13378,11 @@ inline void execute_v_mul_i32_i24_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t sv0 = static_cast<int32_t>(inst.src0.read_lane(wf, lane) << 8) >> 8;
-    int32_t sv1 = static_cast<int32_t>(inst.src1.read_lane(wf, lane) << 8) >> 8;
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(sv0 * sv1));
+    inst.vdst.write_lane(wf, lane, [&]() {
+      auto a = static_cast<int32_t>(inst.src0.read_lane(wf, lane) << 8) >> 8;
+      auto b = static_cast<int32_t>(inst.src1.read_lane(wf, lane) << 8) >> 8;
+      return static_cast<uint32_t>(a * b);
+    }());
   }
 }
 
@@ -12351,10 +13393,11 @@ inline void execute_v_mul_legacy_f32_vop2([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float sv1 = std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane,
-                         std::bit_cast<uint32_t>(sv0 == 0.0f || sv1 == 0.0f ? 0.0f : sv0 * sv1));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           auto a = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                           auto b = std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane));
+                           return (a == 0.0f || b == 0.0f) ? 0.0f : a * b;
+                         }()));
   }
 }
 
@@ -12365,26 +13408,39 @@ inline void execute_v_mul_legacy_f32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float sv1 = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst.inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst.inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst.inst_.neg & (1u << 1))
-      sv1 = -sv1;
-    float result = sv0 == 0.0f || sv1 == 0.0f ? 0.0f : sv0 * sv1;
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v = [&]() {
+                               auto a = [&]() {
+                                 float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                                 if (inst.inst_.abs & (1u << 0))
+                                   sv = std::fabs(sv);
+                                 if (inst.inst_.neg & (1u << 0))
+                                   sv = -sv;
+                                 return sv;
+                               }();
+                               auto b = [&]() {
+                                 float sv = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+                                 if (inst.inst_.abs & (1u << 1))
+                                   sv = std::fabs(sv);
+                                 if (inst.inst_.neg & (1u << 1))
+                                   sv = -sv;
+                                 return sv;
+                               }();
+                               return (a == 0.0f || b == 0.0f) ? 0.0f : a * b;
+                             }();
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -12394,9 +13450,11 @@ inline void execute_v_mul_lo_u16_vop2([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t sv0 = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t sv1 = static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(sv0 * sv1)));
+    inst.vdst.write_lane(
+        wf, lane,
+        static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(
+            static_cast<uint16_t>(static_cast<uint16_t>(inst.src0.read_lane(wf, lane))) *
+            static_cast<uint16_t>(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane))))))));
   }
 }
 
@@ -12406,9 +13464,11 @@ inline void execute_v_mul_lo_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t sv0 = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t sv1 = static_cast<uint16_t>(inst.src1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(sv0 * sv1)));
+    inst.vdst.write_lane(
+        wf, lane,
+        static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(
+            static_cast<uint16_t>(static_cast<uint16_t>(inst.src0.read_lane(wf, lane))) *
+            static_cast<uint16_t>(static_cast<uint16_t>(inst.src1.read_lane(wf, lane))))))));
   }
 }
 
@@ -12418,9 +13478,7 @@ inline void execute_v_mul_lo_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.src1.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, sv0 * sv1);
+    inst.vdst.write_lane(wf, lane, (inst.src0.read_lane(wf, lane) * inst.src1.read_lane(wf, lane)));
   }
 }
 
@@ -12431,9 +13489,9 @@ inline void execute_v_mul_u32_u24_vop2([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane) & 0x00FFFFFFu;
-    uint32_t sv1 = inst.vsrc1.read_lane(wf, lane) & 0x00FFFFFFu;
-    inst.vdst.write_lane(wf, lane, sv0 * sv1);
+    inst.vdst.write_lane(wf, lane,
+                         ((inst.src0.read_lane(wf, lane) & 0x00FFFFFFu) *
+                          (inst.vsrc1.read_lane(wf, lane) & 0x00FFFFFFu)));
   }
 }
 
@@ -12444,9 +13502,9 @@ inline void execute_v_mul_u32_u24_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane) & 0x00FFFFFFu;
-    uint32_t sv1 = inst.src1.read_lane(wf, lane) & 0x00FFFFFFu;
-    inst.vdst.write_lane(wf, lane, sv0 * sv1);
+    inst.vdst.write_lane(wf, lane,
+                         ((inst.src0.read_lane(wf, lane) & 0x00FFFFFFu) *
+                          (inst.src1.read_lane(wf, lane) & 0x00FFFFFFu)));
   }
 }
 
@@ -12462,8 +13520,8 @@ inline void execute_v_not_b16_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = inst.src0.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, ~s);
+    inst.vdst.write_lane(
+        wf, lane, static_cast<uint32_t>(static_cast<uint16_t>((~inst.src0.read_lane(wf, lane)))));
   }
 }
 
@@ -12473,8 +13531,8 @@ inline void execute_v_not_b16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = inst.src0.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, ~s);
+    inst.vdst.write_lane(
+        wf, lane, static_cast<uint32_t>(static_cast<uint16_t>((~inst.src0.read_lane(wf, lane)))));
   }
 }
 
@@ -12484,8 +13542,7 @@ inline void execute_v_not_b32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = inst.src0.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, ~s);
+    inst.vdst.write_lane(wf, lane, (~inst.src0.read_lane(wf, lane)));
   }
 }
 
@@ -12495,8 +13552,7 @@ inline void execute_v_not_b32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s = inst.src0.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, ~s);
+    inst.vdst.write_lane(wf, lane, (~inst.src0.read_lane(wf, lane)));
   }
 }
 
@@ -12506,10 +13562,9 @@ inline void execute_v_or3_b32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t a = inst.src0.read_lane(wf, lane);
-    uint32_t b = inst.src1.read_lane(wf, lane);
-    uint32_t c = inst.src2.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, a | b | c);
+    inst.vdst.write_lane(wf, lane,
+                         (inst.src0.read_lane(wf, lane) | inst.src1.read_lane(wf, lane) |
+                          inst.src2.read_lane(wf, lane)));
   }
 }
 
@@ -12519,9 +13574,10 @@ inline void execute_v_or_b16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] 
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t sv0 = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t sv1 = static_cast<uint16_t>(inst.src1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(sv0 | sv1)));
+    inst.vdst.write_lane(wf, lane,
+                         static_cast<uint32_t>(static_cast<uint16_t>(
+                             (static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) |
+                              static_cast<uint16_t>(inst.src1.read_lane(wf, lane))))));
   }
 }
 
@@ -12531,9 +13587,8 @@ inline void execute_v_or_b32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] 
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.vsrc1.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, sv0 | sv1);
+    inst.vdst.write_lane(wf, lane,
+                         (inst.src0.read_lane(wf, lane) | inst.vsrc1.read_lane(wf, lane)));
   }
 }
 
@@ -12543,9 +13598,7 @@ inline void execute_v_or_b32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] 
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.src1.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, sv0 | sv1);
+    inst.vdst.write_lane(wf, lane, (inst.src0.read_lane(wf, lane) | inst.src1.read_lane(wf, lane)));
   }
 }
 
@@ -12568,26 +13621,22 @@ inline void execute_v_perm_b32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t a = inst.src0.read_lane(wf, lane);
-    uint32_t b = inst.src1.read_lane(wf, lane);
-    uint32_t c = inst.src2.read_lane(wf, lane);
-    uint32_t result = 0;
-    uint64_t src = (static_cast<uint64_t>(a) << 32) | b;
-    for (int i = 0; i < 4; ++i) {
-      uint32_t sel = (c >> (i * 8)) & 0xFF;
-      uint32_t byte;
-      if (sel <= 7)
-        byte = (src >> (sel * 8)) & 0xFF;
-      else if (sel >= 0x09 && sel <= 0x0C) {
-        uint32_t bi = sel - 0x09;
-        byte = ((src >> (bi * 8 + 7)) & 1) ? 0xFF : 0x00;
-      } else if (sel == 0x0D)
-        byte = 0xFF;
-      else
-        byte = 0;
-      result |= byte << (i * 8);
-    }
-    inst.vdst.write_lane(wf, lane, result);
+    inst.vdst.write_lane(wf, lane, [&]() {
+      auto a = inst.src0.read_lane(wf, lane);
+      auto b = inst.src1.read_lane(wf, lane);
+      auto c = inst.src2.read_lane(wf, lane);
+      uint32_t r = 0;
+      uint64_t src = (static_cast<uint64_t>(a) << 32) | b;
+      for (int i = 0; i < 4; ++i) {
+        uint8_t sel = (c >> (i * 8)) & 0xFF;
+        uint8_t byte = (sel < 8)      ? static_cast<uint8_t>((src >> (sel * 8)) & 0xFF)
+                       : (sel == 0xC) ? 0u
+                       : (sel == 0xD) ? 0xFFu
+                                      : 0u;
+        r |= static_cast<uint32_t>(byte) << (i * 8);
+      }
+      return r;
+    }());
   }
 }
 
@@ -13370,8 +14419,9 @@ inline void execute_v_rcp_f16_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(1.0f / s));
+    inst.vdst.write_lane(wf, lane,
+                         util::f32_to_f16(1.0f / util::f16_to_f32(static_cast<uint16_t>(
+                                                     inst.src0.read_lane(wf, lane)))));
   }
 }
 
@@ -13381,21 +14431,29 @@ inline void execute_v_rcp_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    float result = 1.0f / s;
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(result));
+    inst.vdst.write_lane(wf, lane, util::f32_to_f16([&]() {
+                           float v = [&]() {
+                             float v = 1.0f / [&]() {
+                               float sv = util::f16_to_f32(
+                                   static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+                               if (inst.inst_.abs & (1u << 0))
+                                 sv = std::fabs(sv);
+                               if (inst.inst_.neg & (1u << 0))
+                                 sv = -sv;
+                               return sv;
+                             }();
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -13405,8 +14463,9 @@ inline void execute_v_rcp_f32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(amdgpu::transcendental::rcp_f32(s)));
+    inst.vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(1.0f / std::bit_cast<float>(inst.src0.read_lane(wf, lane))));
   }
 }
 
@@ -13416,21 +14475,28 @@ inline void execute_v_rcp_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    float result = amdgpu::transcendental::rcp_f32(s);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v = 1.0f / [&]() {
+                               float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                               if (inst.inst_.abs & (1u << 0))
+                                 sv = std::fabs(sv);
+                               if (inst.inst_.neg & (1u << 0))
+                                 sv = -sv;
+                               return sv;
+                             }();
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -13440,8 +14506,9 @@ inline void execute_v_rcp_f64_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(amdgpu::transcendental::rcp_f64(s)));
+    inst.vdst.write_lane64(
+        wf, lane,
+        std::bit_cast<uint64_t>(1.0f / std::bit_cast<double>(inst.src0.read_lane64(wf, lane))));
   }
 }
 
@@ -13451,21 +14518,28 @@ inline void execute_v_rcp_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    double result = amdgpu::transcendental::rcp_f64(s);
-    if (inst.inst_.omod == 1)
-      result *= 2.0;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0, 1.0);
-    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
+    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>([&]() {
+                             double v = [&]() {
+                               double v = 1.0f / [&]() {
+                                 double sv = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
+                                 if (inst.inst_.abs & (1u << 0))
+                                   sv = std::fabs(sv);
+                                 if (inst.inst_.neg & (1u << 0))
+                                   sv = -sv;
+                                 return sv;
+                               }();
+                               if (inst.inst_.omod == 1)
+                                 v *= 2.0;
+                               else if (inst.inst_.omod == 2)
+                                 v *= 4.0;
+                               else if (inst.inst_.omod == 3)
+                                 v *= 0.5;
+                               return v;
+                             }();
+                             if (inst.inst_.clamp)
+                               v = std::clamp(v, 0.0, 1.0);
+                             return v;
+                           }()));
   }
 }
 
@@ -13476,8 +14550,9 @@ inline void execute_v_rcp_iflag_f32_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(amdgpu::transcendental::rcp_f32(s)));
+    inst.vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(1.0f / std::bit_cast<float>(inst.src0.read_lane(wf, lane))));
   }
 }
 
@@ -13488,21 +14563,28 @@ inline void execute_v_rcp_iflag_f32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    float result = amdgpu::transcendental::rcp_f32(s);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v = 1.0f / [&]() {
+                               float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                               if (inst.inst_.abs & (1u << 0))
+                                 sv = std::fabs(sv);
+                               if (inst.inst_.neg & (1u << 0))
+                                 sv = -sv;
+                               return sv;
+                             }();
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -13512,8 +14594,9 @@ inline void execute_v_rndne_f16_vop1([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(std::nearbyint(s)));
+    inst.vdst.write_lane(wf, lane,
+                         util::f32_to_f16(std::nearbyint(util::f16_to_f32(
+                             static_cast<uint16_t>(inst.src0.read_lane(wf, lane))))));
   }
 }
 
@@ -13523,21 +14606,29 @@ inline void execute_v_rndne_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    float result = std::nearbyint(s);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(result));
+    inst.vdst.write_lane(wf, lane, util::f32_to_f16([&]() {
+                           float v = [&]() {
+                             float v = std::nearbyint([&]() {
+                               float sv = util::f16_to_f32(
+                                   static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+                               if (inst.inst_.abs & (1u << 0))
+                                 sv = std::fabs(sv);
+                               if (inst.inst_.neg & (1u << 0))
+                                 sv = -sv;
+                               return sv;
+                             }());
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -13547,8 +14638,9 @@ inline void execute_v_rndne_f32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(std::nearbyint(s)));
+    inst.vdst.write_lane(wf, lane,
+                         std::bit_cast<uint32_t>(
+                             std::nearbyint(std::bit_cast<float>(inst.src0.read_lane(wf, lane)))));
   }
 }
 
@@ -13558,21 +14650,28 @@ inline void execute_v_rndne_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    float result = std::nearbyint(s);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v = std::nearbyint([&]() {
+                               float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                               if (inst.inst_.abs & (1u << 0))
+                                 sv = std::fabs(sv);
+                               if (inst.inst_.neg & (1u << 0))
+                                 sv = -sv;
+                               return sv;
+                             }());
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -13582,8 +14681,9 @@ inline void execute_v_rndne_f64_vop1([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(std::nearbyint(s)));
+    inst.vdst.write_lane64(wf, lane,
+                           std::bit_cast<uint64_t>(std::nearbyint(
+                               std::bit_cast<double>(inst.src0.read_lane64(wf, lane)))));
   }
 }
 
@@ -13593,21 +14693,28 @@ inline void execute_v_rndne_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    double result = std::nearbyint(s);
-    if (inst.inst_.omod == 1)
-      result *= 2.0;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0, 1.0);
-    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
+    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>([&]() {
+                             double v = [&]() {
+                               double v = std::nearbyint([&]() {
+                                 double sv = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
+                                 if (inst.inst_.abs & (1u << 0))
+                                   sv = std::fabs(sv);
+                                 if (inst.inst_.neg & (1u << 0))
+                                   sv = -sv;
+                                 return sv;
+                               }());
+                               if (inst.inst_.omod == 1)
+                                 v *= 2.0;
+                               else if (inst.inst_.omod == 2)
+                                 v *= 4.0;
+                               else if (inst.inst_.omod == 3)
+                                 v *= 0.5;
+                               return v;
+                             }();
+                             if (inst.inst_.clamp)
+                               v = std::clamp(v, 0.0, 1.0);
+                             return v;
+                           }()));
   }
 }
 
@@ -13617,8 +14724,9 @@ inline void execute_v_rsq_f16_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(1.0f / std::sqrt(s)));
+    inst.vdst.write_lane(wf, lane,
+                         util::f32_to_f16(1.0f / std::sqrt(util::f16_to_f32(static_cast<uint16_t>(
+                                                     inst.src0.read_lane(wf, lane))))));
   }
 }
 
@@ -13628,21 +14736,29 @@ inline void execute_v_rsq_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    float result = 1.0f / std::sqrt(s);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(result));
+    inst.vdst.write_lane(wf, lane, util::f32_to_f16([&]() {
+                           float v = [&]() {
+                             float v = 1.0f / std::sqrt([&]() {
+                                         float sv = util::f16_to_f32(
+                                             static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+                                         if (inst.inst_.abs & (1u << 0))
+                                           sv = std::fabs(sv);
+                                         if (inst.inst_.neg & (1u << 0))
+                                           sv = -sv;
+                                         return sv;
+                                       }());
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -13652,8 +14768,9 @@ inline void execute_v_rsq_f32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(amdgpu::transcendental::rsq_f32(s)));
+    inst.vdst.write_lane(wf, lane,
+                         std::bit_cast<uint32_t>(1.0f / std::sqrt(std::bit_cast<float>(
+                                                            inst.src0.read_lane(wf, lane)))));
   }
 }
 
@@ -13663,21 +14780,29 @@ inline void execute_v_rsq_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    float result = amdgpu::transcendental::rsq_f32(s);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v = 1.0f / std::sqrt([&]() {
+                                         float sv =
+                                             std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                                         if (inst.inst_.abs & (1u << 0))
+                                           sv = std::fabs(sv);
+                                         if (inst.inst_.neg & (1u << 0))
+                                           sv = -sv;
+                                         return sv;
+                                       }());
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -13687,8 +14812,9 @@ inline void execute_v_rsq_f64_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(amdgpu::transcendental::rsq_f64(s)));
+    inst.vdst.write_lane64(wf, lane,
+                           std::bit_cast<uint64_t>(1.0f / std::sqrt(std::bit_cast<double>(
+                                                              inst.src0.read_lane64(wf, lane)))));
   }
 }
 
@@ -13698,21 +14824,29 @@ inline void execute_v_rsq_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    double result = amdgpu::transcendental::rsq_f64(s);
-    if (inst.inst_.omod == 1)
-      result *= 2.0;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0, 1.0);
-    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
+    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>([&]() {
+                             double v = [&]() {
+                               double v = 1.0f / std::sqrt([&]() {
+                                            double sv = std::bit_cast<double>(
+                                                inst.src0.read_lane64(wf, lane));
+                                            if (inst.inst_.abs & (1u << 0))
+                                              sv = std::fabs(sv);
+                                            if (inst.inst_.neg & (1u << 0))
+                                              sv = -sv;
+                                            return sv;
+                                          }());
+                               if (inst.inst_.omod == 1)
+                                 v *= 2.0;
+                               else if (inst.inst_.omod == 2)
+                                 v *= 4.0;
+                               else if (inst.inst_.omod == 3)
+                                 v *= 0.5;
+                               return v;
+                             }();
+                             if (inst.inst_.clamp)
+                               v = std::clamp(v, 0.0, 1.0);
+                             return v;
+                           }()));
   }
 }
 
@@ -13722,15 +14856,18 @@ inline void execute_v_sad_hi_u8_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t a = inst.src0.read_lane(wf, lane);
-    uint32_t b = inst.src1.read_lane(wf, lane);
-    uint32_t c = inst.src2.read_lane(wf, lane);
-    uint32_t sum = 0;
-    for (int i = 0; i < 4; ++i) {
-      uint32_t ba = (a >> (i * 8)) & 0xFF, bb = (b >> (i * 8)) & 0xFF;
-      sum += ba > bb ? ba - bb : bb - ba;
-    }
-    inst.vdst.write_lane(wf, lane, (sum << 16) + c);
+    inst.vdst.write_lane(wf, lane, [&]() {
+      auto a = inst.src0.read_lane(wf, lane);
+      auto b = inst.src1.read_lane(wf, lane);
+      auto c = inst.src2.read_lane(wf, lane);
+      uint32_t r = 0;
+      for (int i = 0; i < 4; ++i) {
+        uint8_t ab = (a >> (i * 8)) & 0xFF;
+        uint8_t bb = (b >> (i * 8)) & 0xFF;
+        r += (ab > bb) ? (ab - bb) : (bb - ab);
+      }
+      return (r << 16) + c;
+    }());
   }
 }
 
@@ -13740,14 +14877,16 @@ inline void execute_v_sad_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t a = inst.src0.read_lane(wf, lane);
-    uint32_t b = inst.src1.read_lane(wf, lane);
-    uint32_t c = inst.src2.read_lane(wf, lane);
-    uint32_t lo_a = a & 0xFFFF, hi_a = a >> 16;
-    uint32_t lo_b = b & 0xFFFF, hi_b = b >> 16;
-    uint32_t sum =
-        (lo_a > lo_b ? lo_a - lo_b : lo_b - lo_a) + (hi_a > hi_b ? hi_a - hi_b : hi_b - hi_a);
-    inst.vdst.write_lane(wf, lane, sum + c);
+    inst.vdst.write_lane(wf, lane, [&]() {
+      auto a = inst.src0.read_lane(wf, lane);
+      auto b = inst.src1.read_lane(wf, lane);
+      auto c = inst.src2.read_lane(wf, lane);
+      uint16_t al = a & 0xFFFF;
+      uint16_t ah = (a >> 16) & 0xFFFF;
+      uint16_t bl = b & 0xFFFF;
+      uint16_t bh = (b >> 16) & 0xFFFF;
+      return c + ((al > bl) ? (al - bl) : (bl - al)) + ((ah > bh) ? (ah - bh) : (bh - ah));
+    }());
   }
 }
 
@@ -13757,10 +14896,12 @@ inline void execute_v_sad_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t a = inst.src0.read_lane(wf, lane);
-    uint32_t b = inst.src1.read_lane(wf, lane);
-    uint32_t c = inst.src2.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, (a > b ? a - b : b - a) + c);
+    inst.vdst.write_lane(wf, lane, [&]() {
+      auto a = inst.src0.read_lane(wf, lane);
+      auto b = inst.src1.read_lane(wf, lane);
+      auto c = inst.src2.read_lane(wf, lane);
+      return c + ((a > b) ? (a - b) : (b - a));
+    }());
   }
 }
 
@@ -13770,15 +14911,18 @@ inline void execute_v_sad_u8_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] 
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t a = inst.src0.read_lane(wf, lane);
-    uint32_t b = inst.src1.read_lane(wf, lane);
-    uint32_t c = inst.src2.read_lane(wf, lane);
-    uint32_t sum = 0;
-    for (int i = 0; i < 4; ++i) {
-      uint32_t ba = (a >> (i * 8)) & 0xFF, bb = (b >> (i * 8)) & 0xFF;
-      sum += ba > bb ? ba - bb : bb - ba;
-    }
-    inst.vdst.write_lane(wf, lane, sum + c);
+    inst.vdst.write_lane(wf, lane, [&]() {
+      auto a = inst.src0.read_lane(wf, lane);
+      auto b = inst.src1.read_lane(wf, lane);
+      auto c = inst.src2.read_lane(wf, lane);
+      uint32_t r = c;
+      for (int i = 0; i < 4; ++i) {
+        uint8_t ab = (a >> (i * 8)) & 0xFF;
+        uint8_t bb = (b >> (i * 8)) & 0xFF;
+        r += (ab > bb) ? (ab - bb) : (bb - ab);
+      }
+      return r;
+    }());
   }
 }
 
@@ -13788,8 +14932,9 @@ inline void execute_v_sin_f16_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(std::sin(s * 6.2831853071795864f)));
+    inst.vdst.write_lane(wf, lane,
+                         util::f32_to_f16(std::sin(util::f16_to_f32(
+                             static_cast<uint16_t>(inst.src0.read_lane(wf, lane))))));
   }
 }
 
@@ -13799,21 +14944,29 @@ inline void execute_v_sin_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    float result = std::sin(s * 6.2831853071795864f);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(result));
+    inst.vdst.write_lane(wf, lane, util::f32_to_f16([&]() {
+                           float v = [&]() {
+                             float v = std::sin([&]() {
+                               float sv = util::f16_to_f32(
+                                   static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+                               if (inst.inst_.abs & (1u << 0))
+                                 sv = std::fabs(sv);
+                               if (inst.inst_.neg & (1u << 0))
+                                 sv = -sv;
+                               return sv;
+                             }());
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -13823,8 +14976,9 @@ inline void execute_v_sin_f32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(amdgpu::transcendental::sin_f32(s)));
+    inst.vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(std::sin(std::bit_cast<float>(inst.src0.read_lane(wf, lane)))));
   }
 }
 
@@ -13834,21 +14988,28 @@ inline void execute_v_sin_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    float result = amdgpu::transcendental::sin_f32(s);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v = std::sin([&]() {
+                               float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                               if (inst.inst_.abs & (1u << 0))
+                                 sv = std::fabs(sv);
+                               if (inst.inst_.neg & (1u << 0))
+                                 sv = -sv;
+                               return sv;
+                             }());
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -13858,8 +15019,9 @@ inline void execute_v_sqrt_f16_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(std::sqrt(s)));
+    inst.vdst.write_lane(wf, lane,
+                         util::f32_to_f16(std::sqrt(util::f16_to_f32(
+                             static_cast<uint16_t>(inst.src0.read_lane(wf, lane))))));
   }
 }
 
@@ -13869,21 +15031,29 @@ inline void execute_v_sqrt_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    float result = std::sqrt(s);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(result));
+    inst.vdst.write_lane(wf, lane, util::f32_to_f16([&]() {
+                           float v = [&]() {
+                             float v = std::sqrt([&]() {
+                               float sv = util::f16_to_f32(
+                                   static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+                               if (inst.inst_.abs & (1u << 0))
+                                 sv = std::fabs(sv);
+                               if (inst.inst_.neg & (1u << 0))
+                                 sv = -sv;
+                               return sv;
+                             }());
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -13893,8 +15063,9 @@ inline void execute_v_sqrt_f32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(amdgpu::transcendental::sqrt_f32(s)));
+    inst.vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(std::sqrt(std::bit_cast<float>(inst.src0.read_lane(wf, lane)))));
   }
 }
 
@@ -13904,21 +15075,28 @@ inline void execute_v_sqrt_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    float result = amdgpu::transcendental::sqrt_f32(s);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v = std::sqrt([&]() {
+                               float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                               if (inst.inst_.abs & (1u << 0))
+                                 sv = std::fabs(sv);
+                               if (inst.inst_.neg & (1u << 0))
+                                 sv = -sv;
+                               return sv;
+                             }());
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -13928,8 +15106,9 @@ inline void execute_v_sqrt_f64_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(amdgpu::transcendental::sqrt_f64(s)));
+    inst.vdst.write_lane64(
+        wf, lane,
+        std::bit_cast<uint64_t>(std::sqrt(std::bit_cast<double>(inst.src0.read_lane64(wf, lane)))));
   }
 }
 
@@ -13939,21 +15118,28 @@ inline void execute_v_sqrt_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    double result = amdgpu::transcendental::sqrt_f64(s);
-    if (inst.inst_.omod == 1)
-      result *= 2.0;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0, 1.0);
-    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
+    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>([&]() {
+                             double v = [&]() {
+                               double v = std::sqrt([&]() {
+                                 double sv = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
+                                 if (inst.inst_.abs & (1u << 0))
+                                   sv = std::fabs(sv);
+                                 if (inst.inst_.neg & (1u << 0))
+                                   sv = -sv;
+                                 return sv;
+                               }());
+                               if (inst.inst_.omod == 1)
+                                 v *= 2.0;
+                               else if (inst.inst_.omod == 2)
+                                 v *= 4.0;
+                               else if (inst.inst_.omod == 3)
+                                 v *= 0.5;
+                               return v;
+                             }();
+                             if (inst.inst_.clamp)
+                               v = std::clamp(v, 0.0, 1.0);
+                             return v;
+                           }()));
   }
 }
 
@@ -13961,21 +15147,20 @@ template <typename Inst>
 inline void execute_v_sub_co_ci_u32_vop2([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t old_vcc = wf.vcc();
   uint64_t vcc = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.vsrc1.read_lane(wf, lane);
-    uint32_t cin = (old_vcc & (1ULL << lane)) ? 1u : 0u;
-    uint64_t wide = static_cast<uint64_t>(sv0) - static_cast<uint64_t>(sv1) - cin;
-    bool borrow = static_cast<uint64_t>(sv0) < static_cast<uint64_t>(sv1) + cin;
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(wide));
-    if (borrow)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
+    inst.vdst.write_lane(wf, lane, [&]() {
+      uint64_t a = static_cast<uint64_t>(inst.src0.read_lane(wf, lane)),
+               b = static_cast<uint64_t>(inst.vsrc1.read_lane(wf, lane)),
+               c = static_cast<uint64_t>(((wf.vcc() >> lane) & 1));
+      if (a < b + c)
+        vcc |= (1ULL << lane);
+      else
+        vcc &= ~(1ULL << lane);
+      return static_cast<uint32_t>(a - b - c);
+    }());
   }
   wf.set_vcc(vcc);
 }
@@ -13984,21 +15169,20 @@ template <typename Inst>
 inline void execute_v_sub_co_ci_u32_vop3([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t old_vcc = inst.src2.read_scalar64(wf);
   uint64_t vcc = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.src1.read_lane(wf, lane);
-    uint32_t cin = (old_vcc & (1ULL << lane)) ? 1u : 0u;
-    uint64_t wide = static_cast<uint64_t>(sv0) - static_cast<uint64_t>(sv1) - cin;
-    bool borrow = static_cast<uint64_t>(sv0) < static_cast<uint64_t>(sv1) + cin;
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(wide));
-    if (borrow)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
+    inst.vdst.write_lane(wf, lane, [&]() {
+      uint64_t a = static_cast<uint64_t>(inst.src0.read_lane(wf, lane)),
+               b = static_cast<uint64_t>(inst.src1.read_lane(wf, lane)),
+               c = static_cast<uint64_t>(((inst.src2.read_scalar64(wf) >> lane) & 1));
+      if (a < b + c)
+        vcc |= (1ULL << lane);
+      else
+        vcc &= ~(1ULL << lane);
+      return static_cast<uint32_t>(a - b - c);
+    }());
   }
   inst.sdst.write_scalar64(wf, vcc);
 }
@@ -14010,15 +15194,14 @@ inline void execute_v_sub_co_u32_vop2([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.vsrc1.read_lane(wf, lane);
-    uint64_t wide = static_cast<uint64_t>(sv0) - static_cast<uint64_t>(sv1);
-    bool borrow = sv0 < sv1;
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(wide));
-    if (borrow)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
+    inst.vdst.write_lane(wf, lane, [&]() {
+      uint32_t a = inst.src0.read_lane(wf, lane), b = inst.vsrc1.read_lane(wf, lane);
+      if (a < b)
+        vcc |= (1ULL << lane);
+      else
+        vcc &= ~(1ULL << lane);
+      return a - b;
+    }());
   }
   wf.set_vcc(vcc);
 }
@@ -14030,15 +15213,14 @@ inline void execute_v_sub_co_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.src1.read_lane(wf, lane);
-    uint64_t wide = static_cast<uint64_t>(sv0) - static_cast<uint64_t>(sv1);
-    bool borrow = sv0 < sv1;
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(wide));
-    if (borrow)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
+    inst.vdst.write_lane(wf, lane, [&]() {
+      uint32_t a = inst.src0.read_lane(wf, lane), b = inst.src1.read_lane(wf, lane);
+      if (a < b)
+        vcc |= (1ULL << lane);
+      else
+        vcc &= ~(1ULL << lane);
+      return a - b;
+    }());
   }
   inst.sdst.write_scalar64(wf, vcc);
 }
@@ -14049,9 +15231,11 @@ inline void execute_v_sub_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float sv1 = util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane)));
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(sv0 - sv1));
+    inst.vdst.write_lane(
+        wf, lane,
+        util::f32_to_f16(
+            (util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane))) -
+             util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane))))));
   }
 }
 
@@ -14061,26 +15245,38 @@ inline void execute_v_sub_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float sv1 = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst.inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst.inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst.inst_.neg & (1u << 1))
-      sv1 = -sv1;
-    float result = sv0 - sv1;
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(result));
+    inst.vdst.write_lane(
+        wf, lane, util::f32_to_f16([&]() {
+          float v = [&]() {
+            float v = ([&]() {
+              float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+              if (inst.inst_.abs & (1u << 0))
+                sv = std::fabs(sv);
+              if (inst.inst_.neg & (1u << 0))
+                sv = -sv;
+              return sv;
+            }() -
+                       [&]() {
+                         float sv =
+                             util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
+                         if (inst.inst_.abs & (1u << 1))
+                           sv = std::fabs(sv);
+                         if (inst.inst_.neg & (1u << 1))
+                           sv = -sv;
+                         return sv;
+                       }());
+            if (inst.inst_.omod == 1)
+              v *= 2.0f;
+            else if (inst.inst_.omod == 2)
+              v *= 4.0f;
+            else if (inst.inst_.omod == 3)
+              v *= 0.5f;
+            return v;
+          }();
+          if (inst.inst_.clamp)
+            v = std::clamp(v, 0.0f, 1.0f);
+          return v;
+        }()));
   }
 }
 
@@ -14090,9 +15286,10 @@ inline void execute_v_sub_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float sv1 = std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(sv0 - sv1));
+    inst.vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>((std::bit_cast<float>(inst.src0.read_lane(wf, lane)) -
+                                 std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane)))));
   }
 }
 
@@ -14102,26 +15299,37 @@ inline void execute_v_sub_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float sv1 = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst.inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst.inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst.inst_.neg & (1u << 1))
-      sv1 = -sv1;
-    float result = sv0 - sv1;
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v = ([&]() {
+                               float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                               if (inst.inst_.abs & (1u << 0))
+                                 sv = std::fabs(sv);
+                               if (inst.inst_.neg & (1u << 0))
+                                 sv = -sv;
+                               return sv;
+                             }() -
+                                        [&]() {
+                                          float sv =
+                                              std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+                                          if (inst.inst_.abs & (1u << 1))
+                                            sv = std::fabs(sv);
+                                          if (inst.inst_.neg & (1u << 1))
+                                            sv = -sv;
+                                          return sv;
+                                        }());
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -14131,10 +15339,10 @@ inline void execute_v_sub_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t sv0 = static_cast<int16_t>(inst.src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t sv1 = static_cast<int16_t>(inst.src1.read_lane(wf, lane) & 0xFFFF);
-    inst.vdst.write_lane(
-        wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(sv0 - sv1))));
+    inst.vdst.write_lane(wf, lane,
+                         static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(
+                             (static_cast<int16_t>(inst.src0.read_lane(wf, lane)) -
+                              static_cast<int16_t>(inst.src1.read_lane(wf, lane)))))));
   }
 }
 
@@ -14144,9 +15352,9 @@ inline void execute_v_sub_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t sv0 = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
-    int32_t sv1 = static_cast<int32_t>(inst.src1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(sv0 - sv1));
+    inst.vdst.write_lane(wf, lane,
+                         (static_cast<int32_t>(inst.src0.read_lane(wf, lane)) -
+                          static_cast<int32_t>(inst.src1.read_lane(wf, lane))));
   }
 }
 
@@ -14156,10 +15364,10 @@ inline void execute_v_sub_nc_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t sv0 = static_cast<int16_t>(inst.src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t sv1 = static_cast<int16_t>(inst.src1.read_lane(wf, lane) & 0xFFFF);
-    inst.vdst.write_lane(
-        wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(sv0 - sv1))));
+    inst.vdst.write_lane(wf, lane,
+                         static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(
+                             (static_cast<int16_t>(inst.src0.read_lane(wf, lane)) -
+                              static_cast<int16_t>(inst.src1.read_lane(wf, lane)))))));
   }
 }
 
@@ -14169,9 +15377,9 @@ inline void execute_v_sub_nc_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t sv0 = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
-    int32_t sv1 = static_cast<int32_t>(inst.src1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(sv0 - sv1));
+    inst.vdst.write_lane(wf, lane,
+                         (static_cast<int32_t>(inst.src0.read_lane(wf, lane)) -
+                          static_cast<int32_t>(inst.src1.read_lane(wf, lane))));
   }
 }
 
@@ -14181,9 +15389,10 @@ inline void execute_v_sub_nc_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t sv0 = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t sv1 = static_cast<uint16_t>(inst.src1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(sv0 - sv1)));
+    inst.vdst.write_lane(wf, lane,
+                         static_cast<uint32_t>(static_cast<uint16_t>(
+                             (static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) -
+                              static_cast<uint16_t>(inst.src1.read_lane(wf, lane))))));
   }
 }
 
@@ -14193,9 +15402,8 @@ inline void execute_v_sub_nc_u32_vop2([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.vsrc1.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, sv0 - sv1);
+    inst.vdst.write_lane(wf, lane,
+                         (inst.src0.read_lane(wf, lane) - inst.vsrc1.read_lane(wf, lane)));
   }
 }
 
@@ -14205,9 +15413,7 @@ inline void execute_v_sub_nc_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.src1.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, sv0 - sv1);
+    inst.vdst.write_lane(wf, lane, (inst.src0.read_lane(wf, lane) - inst.src1.read_lane(wf, lane)));
   }
 }
 
@@ -14217,9 +15423,10 @@ inline void execute_v_sub_u16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t sv0 = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t sv1 = static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(sv0 - sv1)));
+    inst.vdst.write_lane(wf, lane,
+                         static_cast<uint32_t>(static_cast<uint16_t>(
+                             (static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) -
+                              static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane))))));
   }
 }
 
@@ -14229,9 +15436,10 @@ inline void execute_v_sub_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t sv0 = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t sv1 = static_cast<uint16_t>(inst.src1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(sv0 - sv1)));
+    inst.vdst.write_lane(wf, lane,
+                         static_cast<uint32_t>(static_cast<uint16_t>(
+                             (static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) -
+                              static_cast<uint16_t>(inst.src1.read_lane(wf, lane))))));
   }
 }
 
@@ -14241,9 +15449,8 @@ inline void execute_v_sub_u32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.vsrc1.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, sv0 - sv1);
+    inst.vdst.write_lane(wf, lane,
+                         (inst.src0.read_lane(wf, lane) - inst.vsrc1.read_lane(wf, lane)));
   }
 }
 
@@ -14253,9 +15460,7 @@ inline void execute_v_sub_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.src1.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, sv0 - sv1);
+    inst.vdst.write_lane(wf, lane, (inst.src0.read_lane(wf, lane) - inst.src1.read_lane(wf, lane)));
   }
 }
 
@@ -14263,21 +15468,20 @@ template <typename Inst>
 inline void execute_v_subb_co_u32_vop2([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t old_vcc = wf.vcc();
   uint64_t vcc = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.vsrc1.read_lane(wf, lane);
-    uint32_t cin = (old_vcc & (1ULL << lane)) ? 1u : 0u;
-    uint64_t wide = static_cast<uint64_t>(sv0) - static_cast<uint64_t>(sv1) - cin;
-    bool borrow = static_cast<uint64_t>(sv0) < static_cast<uint64_t>(sv1) + cin;
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(wide));
-    if (borrow)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
+    inst.vdst.write_lane(wf, lane, [&]() {
+      uint64_t a = static_cast<uint64_t>(inst.src0.read_lane(wf, lane)),
+               b = static_cast<uint64_t>(inst.vsrc1.read_lane(wf, lane)),
+               c = static_cast<uint64_t>(((wf.vcc() >> lane) & 1));
+      if (a < b + c)
+        vcc |= (1ULL << lane);
+      else
+        vcc &= ~(1ULL << lane);
+      return static_cast<uint32_t>(a - b - c);
+    }());
   }
   wf.set_vcc(vcc);
 }
@@ -14286,21 +15490,20 @@ template <typename Inst>
 inline void execute_v_subb_co_u32_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t old_vcc = inst.src2.read_scalar64(wf);
   uint64_t vcc = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.src1.read_lane(wf, lane);
-    uint32_t cin = (old_vcc & (1ULL << lane)) ? 1u : 0u;
-    uint64_t wide = static_cast<uint64_t>(sv0) - static_cast<uint64_t>(sv1) - cin;
-    bool borrow = static_cast<uint64_t>(sv0) < static_cast<uint64_t>(sv1) + cin;
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(wide));
-    if (borrow)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
+    inst.vdst.write_lane(wf, lane, [&]() {
+      uint64_t a = static_cast<uint64_t>(inst.src0.read_lane(wf, lane)),
+               b = static_cast<uint64_t>(inst.src1.read_lane(wf, lane)),
+               c = static_cast<uint64_t>(((inst.src2.read_scalar64(wf) >> lane) & 1));
+      if (a < b + c)
+        vcc |= (1ULL << lane);
+      else
+        vcc &= ~(1ULL << lane);
+      return static_cast<uint32_t>(a - b - c);
+    }());
   }
   inst.sdst.write_scalar64(wf, vcc);
 }
@@ -14309,21 +15512,20 @@ template <typename Inst>
 inline void execute_v_subbrev_co_u32_vop2([[maybe_unused]] Inst &inst,
                                           [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t old_vcc = wf.vcc();
   uint64_t vcc = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.vsrc1.read_lane(wf, lane);
-    uint32_t cin = (old_vcc & (1ULL << lane)) ? 1u : 0u;
-    uint64_t wide = static_cast<uint64_t>(sv1) - static_cast<uint64_t>(sv0) - cin;
-    bool borrow = static_cast<uint64_t>(sv1) < static_cast<uint64_t>(sv0) + cin;
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(wide));
-    if (borrow)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
+    inst.vdst.write_lane(wf, lane, [&]() {
+      uint64_t a = static_cast<uint64_t>(inst.vsrc1.read_lane(wf, lane)),
+               b = static_cast<uint64_t>(inst.src0.read_lane(wf, lane)),
+               c = static_cast<uint64_t>(((wf.vcc() >> lane) & 1));
+      if (a < b + c)
+        vcc |= (1ULL << lane);
+      else
+        vcc &= ~(1ULL << lane);
+      return static_cast<uint32_t>(a - b - c);
+    }());
   }
   wf.set_vcc(vcc);
 }
@@ -14332,21 +15534,20 @@ template <typename Inst>
 inline void execute_v_subbrev_co_u32_vop3([[maybe_unused]] Inst &inst,
                                           [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t old_vcc = inst.src2.read_scalar64(wf);
   uint64_t vcc = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.src1.read_lane(wf, lane);
-    uint32_t cin = (old_vcc & (1ULL << lane)) ? 1u : 0u;
-    uint64_t wide = static_cast<uint64_t>(sv1) - static_cast<uint64_t>(sv0) - cin;
-    bool borrow = static_cast<uint64_t>(sv1) < static_cast<uint64_t>(sv0) + cin;
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(wide));
-    if (borrow)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
+    inst.vdst.write_lane(wf, lane, [&]() {
+      uint64_t a = static_cast<uint64_t>(inst.src1.read_lane(wf, lane)),
+               b = static_cast<uint64_t>(inst.src0.read_lane(wf, lane)),
+               c = static_cast<uint64_t>(((inst.src2.read_scalar64(wf) >> lane) & 1));
+      if (a < b + c)
+        vcc |= (1ULL << lane);
+      else
+        vcc &= ~(1ULL << lane);
+      return static_cast<uint32_t>(a - b - c);
+    }());
   }
   inst.sdst.write_scalar64(wf, vcc);
 }
@@ -14355,21 +15556,20 @@ template <typename Inst>
 inline void execute_v_subrev_co_ci_u32_vop2([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t old_vcc = wf.vcc();
   uint64_t vcc = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.vsrc1.read_lane(wf, lane);
-    uint32_t cin = (old_vcc & (1ULL << lane)) ? 1u : 0u;
-    uint64_t wide = static_cast<uint64_t>(sv1) - static_cast<uint64_t>(sv0) - cin;
-    bool borrow = static_cast<uint64_t>(sv1) < static_cast<uint64_t>(sv0) + cin;
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(wide));
-    if (borrow)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
+    inst.vdst.write_lane(wf, lane, [&]() {
+      uint64_t a = static_cast<uint64_t>(inst.vsrc1.read_lane(wf, lane)),
+               b = static_cast<uint64_t>(inst.src0.read_lane(wf, lane)),
+               c = static_cast<uint64_t>(((wf.vcc() >> lane) & 1));
+      if (a < b + c)
+        vcc |= (1ULL << lane);
+      else
+        vcc &= ~(1ULL << lane);
+      return static_cast<uint32_t>(a - b - c);
+    }());
   }
   wf.set_vcc(vcc);
 }
@@ -14378,21 +15578,20 @@ template <typename Inst>
 inline void execute_v_subrev_co_ci_u32_vop3([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t old_vcc = inst.src2.read_scalar64(wf);
   uint64_t vcc = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.src1.read_lane(wf, lane);
-    uint32_t cin = (old_vcc & (1ULL << lane)) ? 1u : 0u;
-    uint64_t wide = static_cast<uint64_t>(sv1) - static_cast<uint64_t>(sv0) - cin;
-    bool borrow = static_cast<uint64_t>(sv1) < static_cast<uint64_t>(sv0) + cin;
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(wide));
-    if (borrow)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
+    inst.vdst.write_lane(wf, lane, [&]() {
+      uint64_t a = static_cast<uint64_t>(inst.src1.read_lane(wf, lane)),
+               b = static_cast<uint64_t>(inst.src0.read_lane(wf, lane)),
+               c = static_cast<uint64_t>(((inst.src2.read_scalar64(wf) >> lane) & 1));
+      if (a < b + c)
+        vcc |= (1ULL << lane);
+      else
+        vcc &= ~(1ULL << lane);
+      return static_cast<uint32_t>(a - b - c);
+    }());
   }
   inst.sdst.write_scalar64(wf, vcc);
 }
@@ -14405,15 +15604,14 @@ inline void execute_v_subrev_co_u32_vop2([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.vsrc1.read_lane(wf, lane);
-    uint64_t wide = static_cast<uint64_t>(sv1) - static_cast<uint64_t>(sv0);
-    bool borrow = sv1 < sv0;
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(wide));
-    if (borrow)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
+    inst.vdst.write_lane(wf, lane, [&]() {
+      uint32_t a = inst.vsrc1.read_lane(wf, lane), b = inst.src0.read_lane(wf, lane);
+      if (a < b)
+        vcc |= (1ULL << lane);
+      else
+        vcc &= ~(1ULL << lane);
+      return a - b;
+    }());
   }
   wf.set_vcc(vcc);
 }
@@ -14426,15 +15624,14 @@ inline void execute_v_subrev_co_u32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.src1.read_lane(wf, lane);
-    uint64_t wide = static_cast<uint64_t>(sv1) - static_cast<uint64_t>(sv0);
-    bool borrow = sv1 < sv0;
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(wide));
-    if (borrow)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
+    inst.vdst.write_lane(wf, lane, [&]() {
+      uint32_t a = inst.src1.read_lane(wf, lane), b = inst.src0.read_lane(wf, lane);
+      if (a < b)
+        vcc |= (1ULL << lane);
+      else
+        vcc &= ~(1ULL << lane);
+      return a - b;
+    }());
   }
   inst.sdst.write_scalar64(wf, vcc);
 }
@@ -14445,9 +15642,10 @@ inline void execute_v_subrev_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float sv1 = util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane)));
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(sv1 - sv0));
+    inst.vdst.write_lane(
+        wf, lane,
+        util::f32_to_f16((util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane))) -
+                          util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane))))));
   }
 }
 
@@ -14457,26 +15655,38 @@ inline void execute_v_subrev_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    float sv1 = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst.inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst.inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst.inst_.neg & (1u << 1))
-      sv1 = -sv1;
-    float result = sv1 - sv0;
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(result));
+    inst.vdst.write_lane(
+        wf, lane, util::f32_to_f16([&]() {
+          float v = [&]() {
+            float v = ([&]() {
+              float sv = util::f16_to_f32(static_cast<uint16_t>(inst.src1.read_lane(wf, lane)));
+              if (inst.inst_.abs & (1u << 1))
+                sv = std::fabs(sv);
+              if (inst.inst_.neg & (1u << 1))
+                sv = -sv;
+              return sv;
+            }() -
+                       [&]() {
+                         float sv =
+                             util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+                         if (inst.inst_.abs & (1u << 0))
+                           sv = std::fabs(sv);
+                         if (inst.inst_.neg & (1u << 0))
+                           sv = -sv;
+                         return sv;
+                       }());
+            if (inst.inst_.omod == 1)
+              v *= 2.0f;
+            else if (inst.inst_.omod == 2)
+              v *= 4.0f;
+            else if (inst.inst_.omod == 3)
+              v *= 0.5f;
+            return v;
+          }();
+          if (inst.inst_.clamp)
+            v = std::clamp(v, 0.0f, 1.0f);
+          return v;
+        }()));
   }
 }
 
@@ -14486,9 +15696,10 @@ inline void execute_v_subrev_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float sv1 = std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(sv1 - sv0));
+    inst.vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>((std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane)) -
+                                 std::bit_cast<float>(inst.src0.read_lane(wf, lane)))));
   }
 }
 
@@ -14498,26 +15709,37 @@ inline void execute_v_subrev_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float sv0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float sv1 = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      sv0 = std::fabs(sv0);
-    if (inst.inst_.neg & (1u << 0))
-      sv0 = -sv0;
-    if (inst.inst_.abs & (1u << 1))
-      sv1 = std::fabs(sv1);
-    if (inst.inst_.neg & (1u << 1))
-      sv1 = -sv1;
-    float result = sv1 - sv0;
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v = ([&]() {
+                               float sv = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+                               if (inst.inst_.abs & (1u << 1))
+                                 sv = std::fabs(sv);
+                               if (inst.inst_.neg & (1u << 1))
+                                 sv = -sv;
+                               return sv;
+                             }() -
+                                        [&]() {
+                                          float sv =
+                                              std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                                          if (inst.inst_.abs & (1u << 0))
+                                            sv = std::fabs(sv);
+                                          if (inst.inst_.neg & (1u << 0))
+                                            sv = -sv;
+                                          return sv;
+                                        }());
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -14528,9 +15750,8 @@ inline void execute_v_subrev_nc_u32_vop2([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.vsrc1.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, sv1 - sv0);
+    inst.vdst.write_lane(wf, lane,
+                         (inst.vsrc1.read_lane(wf, lane) - inst.src0.read_lane(wf, lane)));
   }
 }
 
@@ -14541,9 +15762,7 @@ inline void execute_v_subrev_nc_u32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.src1.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, sv1 - sv0);
+    inst.vdst.write_lane(wf, lane, (inst.src1.read_lane(wf, lane) - inst.src0.read_lane(wf, lane)));
   }
 }
 
@@ -14553,9 +15772,10 @@ inline void execute_v_subrev_u16_vop2([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t sv0 = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t sv1 = static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(sv1 - sv0)));
+    inst.vdst.write_lane(wf, lane,
+                         static_cast<uint32_t>(static_cast<uint16_t>(
+                             (static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane)) -
+                              static_cast<uint16_t>(inst.src0.read_lane(wf, lane))))));
   }
 }
 
@@ -14565,9 +15785,10 @@ inline void execute_v_subrev_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t sv0 = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t sv1 = static_cast<uint16_t>(inst.src1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(sv1 - sv0)));
+    inst.vdst.write_lane(wf, lane,
+                         static_cast<uint32_t>(static_cast<uint16_t>(
+                             (static_cast<uint16_t>(inst.src1.read_lane(wf, lane)) -
+                              static_cast<uint16_t>(inst.src0.read_lane(wf, lane))))));
   }
 }
 
@@ -14577,9 +15798,8 @@ inline void execute_v_subrev_u32_vop2([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.vsrc1.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, sv1 - sv0);
+    inst.vdst.write_lane(wf, lane,
+                         (inst.vsrc1.read_lane(wf, lane) - inst.src0.read_lane(wf, lane)));
   }
 }
 
@@ -14589,9 +15809,7 @@ inline void execute_v_subrev_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.src1.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, sv1 - sv0);
+    inst.vdst.write_lane(wf, lane, (inst.src1.read_lane(wf, lane) - inst.src0.read_lane(wf, lane)));
   }
 }
 
@@ -14601,8 +15819,9 @@ inline void execute_v_trunc_f16_vop1([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(std::trunc(s)));
+    inst.vdst.write_lane(wf, lane,
+                         util::f32_to_f16(std::trunc(util::f16_to_f32(
+                             static_cast<uint16_t>(inst.src0.read_lane(wf, lane))))));
   }
 }
 
@@ -14612,21 +15831,29 @@ inline void execute_v_trunc_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    float result = std::trunc(s);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, util::f32_to_f16(result));
+    inst.vdst.write_lane(wf, lane, util::f32_to_f16([&]() {
+                           float v = [&]() {
+                             float v = std::trunc([&]() {
+                               float sv = util::f16_to_f32(
+                                   static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
+                               if (inst.inst_.abs & (1u << 0))
+                                 sv = std::fabs(sv);
+                               if (inst.inst_.neg & (1u << 0))
+                                 sv = -sv;
+                               return sv;
+                             }());
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -14636,8 +15863,9 @@ inline void execute_v_trunc_f32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(std::trunc(s)));
+    inst.vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(std::trunc(std::bit_cast<float>(inst.src0.read_lane(wf, lane)))));
   }
 }
 
@@ -14647,21 +15875,28 @@ inline void execute_v_trunc_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    float result = std::trunc(s);
-    if (inst.inst_.omod == 1)
-      result *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5f;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
+                           float v = [&]() {
+                             float v = std::trunc([&]() {
+                               float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+                               if (inst.inst_.abs & (1u << 0))
+                                 sv = std::fabs(sv);
+                               if (inst.inst_.neg & (1u << 0))
+                                 sv = -sv;
+                               return sv;
+                             }());
+                             if (inst.inst_.omod == 1)
+                               v *= 2.0f;
+                             else if (inst.inst_.omod == 2)
+                               v *= 4.0f;
+                             else if (inst.inst_.omod == 3)
+                               v *= 0.5f;
+                             return v;
+                           }();
+                           if (inst.inst_.clamp)
+                             v = std::clamp(v, 0.0f, 1.0f);
+                           return v;
+                         }()));
   }
 }
 
@@ -14671,8 +15906,9 @@ inline void execute_v_trunc_f64_vop1([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(std::trunc(s)));
+    inst.vdst.write_lane64(wf, lane,
+                           std::bit_cast<uint64_t>(
+                               std::trunc(std::bit_cast<double>(inst.src0.read_lane64(wf, lane)))));
   }
 }
 
@@ -14682,21 +15918,28 @@ inline void execute_v_trunc_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s = std::fabs(s);
-    if (inst.inst_.neg & (1u << 0))
-      s = -s;
-    double result = std::trunc(s);
-    if (inst.inst_.omod == 1)
-      result *= 2.0;
-    else if (inst.inst_.omod == 2)
-      result *= 4.0;
-    else if (inst.inst_.omod == 3)
-      result *= 0.5;
-    if (inst.inst_.clamp)
-      result = std::clamp(result, 0.0, 1.0);
-    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
+    inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>([&]() {
+                             double v = [&]() {
+                               double v = std::trunc([&]() {
+                                 double sv = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
+                                 if (inst.inst_.abs & (1u << 0))
+                                   sv = std::fabs(sv);
+                                 if (inst.inst_.neg & (1u << 0))
+                                   sv = -sv;
+                                 return sv;
+                               }());
+                               if (inst.inst_.omod == 1)
+                                 v *= 2.0;
+                               else if (inst.inst_.omod == 2)
+                                 v *= 4.0;
+                               else if (inst.inst_.omod == 3)
+                                 v *= 0.5;
+                               return v;
+                             }();
+                             if (inst.inst_.clamp)
+                               v = std::clamp(v, 0.0, 1.0);
+                             return v;
+                           }()));
   }
 }
 
@@ -14706,10 +15949,9 @@ inline void execute_v_xad_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t a = inst.src0.read_lane(wf, lane);
-    uint32_t b = inst.src1.read_lane(wf, lane);
-    uint32_t c = inst.src2.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, (a ^ b) + c);
+    inst.vdst.write_lane(wf, lane,
+                         ((inst.src0.read_lane(wf, lane) ^ inst.src1.read_lane(wf, lane)) +
+                          inst.src2.read_lane(wf, lane)));
   }
 }
 
@@ -14719,9 +15961,8 @@ inline void execute_v_xnor_b32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.vsrc1.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, ~(sv0 ^ sv1));
+    inst.vdst.write_lane(wf, lane,
+                         (~(inst.src0.read_lane(wf, lane) ^ inst.vsrc1.read_lane(wf, lane))));
   }
 }
 
@@ -14731,9 +15972,8 @@ inline void execute_v_xnor_b32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.src1.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, ~(sv0 ^ sv1));
+    inst.vdst.write_lane(wf, lane,
+                         (~(inst.src0.read_lane(wf, lane) ^ inst.src1.read_lane(wf, lane))));
   }
 }
 
@@ -14743,10 +15983,9 @@ inline void execute_v_xor3_b32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t a = inst.src0.read_lane(wf, lane);
-    uint32_t b = inst.src1.read_lane(wf, lane);
-    uint32_t c = inst.src2.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, a ^ b ^ c);
+    inst.vdst.write_lane(wf, lane,
+                         (inst.src0.read_lane(wf, lane) ^ inst.src1.read_lane(wf, lane) ^
+                          inst.src2.read_lane(wf, lane)));
   }
 }
 
@@ -14756,9 +15995,10 @@ inline void execute_v_xor_b16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t sv0 = static_cast<uint16_t>(inst.src0.read_lane(wf, lane));
-    uint16_t sv1 = static_cast<uint16_t>(inst.src1.read_lane(wf, lane));
-    inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(sv0 ^ sv1)));
+    inst.vdst.write_lane(wf, lane,
+                         static_cast<uint32_t>(static_cast<uint16_t>(
+                             (static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) ^
+                              static_cast<uint16_t>(inst.src1.read_lane(wf, lane))))));
   }
 }
 
@@ -14768,9 +16008,8 @@ inline void execute_v_xor_b32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.vsrc1.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, sv0 ^ sv1);
+    inst.vdst.write_lane(wf, lane,
+                         (inst.src0.read_lane(wf, lane) ^ inst.vsrc1.read_lane(wf, lane)));
   }
 }
 
@@ -14780,9 +16019,7 @@ inline void execute_v_xor_b32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t sv0 = inst.src0.read_lane(wf, lane);
-    uint32_t sv1 = inst.src1.read_lane(wf, lane);
-    inst.vdst.write_lane(wf, lane, sv0 ^ sv1);
+    inst.vdst.write_lane(wf, lane, (inst.src0.read_lane(wf, lane) ^ inst.src1.read_lane(wf, lane)));
   }
 }
 
