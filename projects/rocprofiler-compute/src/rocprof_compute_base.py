@@ -416,8 +416,10 @@ class RocProfCompute:
     def list_metrics(self) -> None:
         for_current_arch = getattr(self.__args, "list_available_metrics", False)
         arch = self.__mspec.gpu_arch if for_current_arch else self.__args.list_metrics
+        config_arch = canonical_config_arch(arch) or arch
+        config_root = Path(self.__args.config_dir) / config_arch
 
-        if arch in self.__supported_archs.keys():
+        if arch in self.__supported_archs.keys() or config_root.is_dir():
             sys_info = self.__mspec.get_class_members() if for_current_arch else None
             metric_list = self._build_arch_metric_list(arch, sys_info)
             for key, value in metric_list.items():
@@ -430,8 +432,10 @@ class RocProfCompute:
     @demarcate
     def list_blocks(self) -> None:
         arch = self.__args.list_blocks
+        config_arch = canonical_config_arch(arch) or arch
+        config_root = Path(self.__args.config_dir) / config_arch
 
-        if arch in self.__supported_archs.keys():
+        if arch in self.__supported_archs.keys() or config_root.is_dir():
             metric_list = self._build_arch_metric_list(arch, sys_info=None)
             top_panels = {k: v for k, v in metric_list.items() if "." not in k}
             panel_alias_dict = get_arch_panel_id_to_alias(arch)
