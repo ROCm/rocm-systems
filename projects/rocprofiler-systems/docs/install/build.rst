@@ -11,7 +11,8 @@ instructions
 <https://github.com/ROCm/TheRock/blob/main/README.md#build-configuration>`__.
 TheRock is the recommended way to build ROCm components from source.
 
-To build ROCm Systems Profiler standalone instead, use the instructions on this page.
+To build ROCm Systems Profiler standalone, without TheRock, use the
+instructions on this page.
 
 .. seealso::
 
