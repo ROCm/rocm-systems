@@ -52,10 +52,23 @@ enum class sort_order_t
     descending
 };
 
+/**
+ * @brief Property to sort timeline events by.
+ *
+ * Typed enum prevents ORDER BY injection that a raw string would permit.
+ */
+enum class sort_property_t
+{
+    start,     ///< Sort by start timestamp
+    end,       ///< Sort by end timestamp
+    duration,  ///< Sort by (end - start)
+    name,      ///< Sort by display name
+};
+
 struct sort_t
 {
-    std::string  property  = "start";  ///< Property to sort by
-    sort_order_t direction = sort_order_t::ascending;
+    sort_property_t property  = sort_property_t::start;
+    sort_order_t    direction = sort_order_t::ascending;
 };
 
 struct event_filter_t
@@ -66,9 +79,6 @@ struct event_filter_t
 
     /// Which event types to include (empty = all)
     std::vector<event_type_t> types;
-
-    /// Optional WHERE filter
-    std::optional<std::string> where;
 };
 
 struct event_summary_t
