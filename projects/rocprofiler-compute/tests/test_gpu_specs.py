@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 from unittest.mock import patch
 
+import common
 import pytest
 
 try:
@@ -28,13 +29,6 @@ GFX942_CHIP_IDS_TO_NUM_XCDS = {
     "29865": {"spx": 8, "dpx": 4, "qpx": 2, "cpx": 1},
     "29885": {"spx": 8, "dpx": 4, "qpx": 2, "cpx": 1},
 }
-
-# helper to strip ANSI color codes if your app uses them
-ANSI_ESCAPE = re.compile(r"\x1B[@-_][0-?]*[ -/]*[@-~]")
-
-
-def strip_ansi(s: str) -> str:
-    return ANSI_ESCAPE.sub("", s)
 
 
 def parse_table_dict(output: str) -> dict:
@@ -95,25 +89,10 @@ def get_num_xcds():
     return num_xcds
 
 
-def get_gpu_arch():
-    rocminfo = str(
-        # decode with utf-8 to account for rocm-smi changes in latest rocm
-        subprocess.run(
-            ["rocminfo"], stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        ).stdout.decode("utf-8")
-    )
-    rocminfo = rocminfo.split("\n")
-
-    soc_regex = re.compile(r"^\s*Name\s*:\s+ ([a-zA-Z0-9]+)\s*$", re.MULTILINE)
-    devices = list(filter(soc_regex.match, rocminfo))
-    gpu_arch = devices[0].split()[1]
-    return gpu_arch
-
-
 @pytest.mark.num_xcds_spec_class
 def test_num_xcds_spec_class(monkeypatch):
     # 1. Check if gfx942 soc
-    gpu_arch = get_gpu_arch()
+    gpu_arch = common.gpu_soc()[0]
     if gpu_arch is None or gpu_arch.lower() != "gfx942":
         pytest.skip("Skipping num xcds test for non-gfx942 socs.")
 
@@ -132,7 +111,7 @@ def test_num_xcds_spec_class(monkeypatch):
 @pytest.mark.num_xcds_cli_output
 def test_num_xcds_cli_output():
     # 1. Check if gfx942 soc
-    gpu_arch = get_gpu_arch()
+    gpu_arch = common.gpu_soc()[0]
     if gpu_arch is None or gpu_arch.lower() != "gfx942":
         pytest.skip("Skipping num xcds test for non-gfx942 socs.")
 
@@ -158,7 +137,7 @@ def test_num_xcds_cli_output():
     )
 
     # 3. strip ANSI, parse table
-    clean = strip_ansi(proc.stdout)
+    clean = common.strip_ansi(proc.stdout)
     return_dict = parse_table_dict(clean)
 
     # 4. check results are expected

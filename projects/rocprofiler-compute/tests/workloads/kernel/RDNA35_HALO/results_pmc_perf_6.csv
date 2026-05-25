@@ -1,0 +1,13 @@
+GPU_ID,GUID,Correlation_Id,Dispatch_ID,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,Scratch_Per_Workitem,Arch_VGPR,Accum_VGPR,SGPR,Kernel_Name,Start_Timestamp,End_Timestamp,Kernel_ID,Counter_Name,Counter_Value
+1,000091ae-cb5a-7b5a-9772-db6d8ccfdd26,1,0,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",2444151824235031,2444151824265969,0,CPC_ME1_STALL_ON_DATA_FROM_ROQ,927.0
+1,000091ae-cb5a-7b5a-9772-db6d8ccfdd26,1,0,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",2444151824235031,2444151824265969,0,CPC_TCIU_READ_REQUEST_SENT_sum,13.0
+1,000091ae-cb5a-7b5a-9772-db6d8ccfdd26,1,0,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",2444151824235031,2444151824265969,0,GCEA_RDRAM_CHAINED_REQ_PER_CLIGRP_sum,327989.0
+1,000091ae-cb5a-7b5a-9772-db6d8ccfdd26,1,0,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",2444151824235031,2444151824265969,0,GCEA_WRET_VLD_sum,131087.0
+1,000091ae-cb5a-7b5a-9772-db6d8ccfdd26,2,1,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",2444151825729245,2444151825750445,0,CPC_ME1_STALL_ON_DATA_FROM_ROQ,753.0
+1,000091ae-cb5a-7b5a-9772-db6d8ccfdd26,2,1,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",2444151825729245,2444151825750445,0,CPC_TCIU_READ_REQUEST_SENT_sum,3.0
+1,000091ae-cb5a-7b5a-9772-db6d8ccfdd26,2,1,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",2444151825729245,2444151825750445,0,GCEA_RDRAM_CHAINED_REQ_PER_CLIGRP_sum,327800.0
+1,000091ae-cb5a-7b5a-9772-db6d8ccfdd26,2,1,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",2444151825729245,2444151825750445,0,GCEA_WRET_VLD_sum,118226.0
+1,000091ae-cb5a-7b5a-9772-db6d8ccfdd26,3,2,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",2444151825833961,2444151825854279,0,CPC_ME1_STALL_ON_DATA_FROM_ROQ,766.0
+1,000091ae-cb5a-7b5a-9772-db6d8ccfdd26,3,2,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",2444151825833961,2444151825854279,0,CPC_TCIU_READ_REQUEST_SENT_sum,3.0
+1,000091ae-cb5a-7b5a-9772-db6d8ccfdd26,3,2,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",2444151825833961,2444151825854279,0,GCEA_RDRAM_CHAINED_REQ_PER_CLIGRP_sum,327800.0
+1,000091ae-cb5a-7b5a-9772-db6d8ccfdd26,3,2,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",2444151825833961,2444151825854279,0,GCEA_WRET_VLD_sum,117826.0

@@ -82,6 +82,7 @@ void Runtime::tearDown() {
   Agent::tearDown();
   Device::tearDown();
   option::teardown();
+  Os::resetPreferredNumaNode();
   Flag::tearDown();
   if (outFile != stderr && outFile != nullptr) {
     fclose(outFile);

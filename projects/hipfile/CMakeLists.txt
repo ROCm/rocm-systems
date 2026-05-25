@@ -290,7 +290,9 @@ endif()
 if(AIS_INSTALL_EXAMPLES)
     add_subdirectory(examples/aiscp)
     add_subdirectory(examples/api)
+    add_subdirectory(examples/common)
     add_subdirectory(examples/basics)
+    add_subdirectory(examples/async)
 endif()
 
 # Add tools directory

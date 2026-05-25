@@ -77,28 +77,35 @@ def _new_output(sem, src_ops, dst_ops, dtype=None, enc_fields=None):
     if enc_fields:
         block = enrich_block(block, enc_field_names=frozenset(enc_fields))
     omap = OperandMap.from_operand_names(
-        src_ops, dst_ops, exec_model, dtype or sem.data_type)
+        src_ops, dst_ops, exec_model, dtype or sem.data_type
+    )
     ctx = LoweringContext(exec_model=exec_model, operand_map=omap)
     return lower_sema_block(block, ctx)
 
 
 class TestScalarBinopValidation:
-    @pytest.mark.parametrize('op,dtype,scc', [
-        ('add', 'u32', 'carry'),
-        ('sub', 'u32', 'borrow'),
-        ('and', 'b32', 'nonzero'),
-        ('or', 'b64', 'nonzero'),
-        ('xor', 'b32', 'nonzero'),
-        ('shl', 'b32', 'nonzero'),
-    ])
+    @pytest.mark.parametrize(
+        'op,dtype,scc',
+        [
+            ('add', 'u32', 'carry'),
+            ('sub', 'u32', 'borrow'),
+            ('and', 'b32', 'nonzero'),
+            ('or', 'b64', 'nonzero'),
+            ('xor', 'b32', 'nonzero'),
+            ('shl', 'b32', 'nonzero'),
+        ],
+    )
     def test_scalar_binop_properties_match(self, op, dtype, scc):
-        sem = _FakeSem(f'S_{op.upper()}_{dtype.upper()}', 'scalar_binop', op, dtype, scc)
+        sem = _FakeSem(
+            f'S_{op.upper()}_{dtype.upper()}', 'scalar_binop', op, dtype, scc
+        )
         old = gen_scalar_binop(['sdst'], ['ssrc0', 'ssrc1'], op, dtype, scc)
         new = _new_output(sem, ['ssrc0', 'ssrc1'], ['sdst'], dtype)
         old_props = _extract_properties(old)
         new_props = _extract_properties(new)
-        assert old_props['writes_scc'] == new_props['writes_scc'], \
-            f"SCC mismatch for {op}/{dtype}: old={old_props['writes_scc']}, new={new_props['writes_scc']}"
+        assert (
+            old_props['writes_scc'] == new_props['writes_scc']
+        ), f"SCC mismatch for {op}/{dtype}: old={old_props['writes_scc']}, new={new_props['writes_scc']}"
         assert not old_props['has_exec_loop'], "scalar should not have EXEC loop"
         assert not new_props['has_exec_loop'], "scalar should not have EXEC loop"
         assert 'ssrc0' in new_props['operand_names']
@@ -127,12 +134,15 @@ class TestScalarUnaryValidation:
 
 
 class TestVectorBinopValidation:
-    @pytest.mark.parametrize('op,dtype', [
-        ('add', 'f32'),
-        ('sub', 'f32'),
-        ('mul', 'f32'),
-        ('and', 'b32'),
-    ])
+    @pytest.mark.parametrize(
+        'op,dtype',
+        [
+            ('add', 'f32'),
+            ('sub', 'f32'),
+            ('mul', 'f32'),
+            ('and', 'b32'),
+        ],
+    )
     def test_vector_binop_has_exec_loop(self, op, dtype):
         sem = _FakeSem(f'V_{op.upper()}_{dtype.upper()}', 'vector_binop', op, dtype)
         old = gen_vector_binop(['vdst'], ['src0', 'vsrc1'], op, dtype)
@@ -171,8 +181,13 @@ class TestVectorUnaryValidation:
 class TestVop3ModifierValidation:
     def test_enriched_has_modifier_code(self):
         sem = _FakeSem('V_ADD_F32', 'vector_binop', 'add', 'f32')
-        new = _new_output(sem, ['src0', 'vsrc1'], ['vdst'], 'f32',
-                          enc_fields={'neg', 'abs', 'clamp', 'omod'})
+        new = _new_output(
+            sem,
+            ['src0', 'vsrc1'],
+            ['vdst'],
+            'f32',
+            enc_fields={'neg', 'abs', 'clamp', 'omod'},
+        )
         assert 'inst_.neg' in new
         assert 'inst_.abs' in new
         assert 'inst_.omod' in new
@@ -200,6 +215,7 @@ class TestAllClassesLowerWithOperandMap:
 
     def test_all_classes_produce_output(self):
         from amdisa.sema_derive import _DERIVE_REGISTRY
+
         errors = []
         for cls_name in sorted(_DERIVE_REGISTRY.keys()):
             sem = _FakeSem(f'TEST_{cls_name.upper()}', cls_name, 'add', 'f32')
@@ -211,8 +227,8 @@ class TestAllClassesLowerWithOperandMap:
             if block is None:
                 continue
             omap = OperandMap.from_operand_names(
-                ['src0', 'src1', 'src2'], ['dst0'],
-                block.pragma, 'f32')
+                ['src0', 'src1', 'src2'], ['dst0'], block.pragma, 'f32'
+            )
             ctx = LoweringContext(exec_model=block.pragma, operand_map=omap)
             try:
                 cpp = lower_sema_block(block, ctx)
