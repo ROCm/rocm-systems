@@ -148,18 +148,9 @@ def test_cmake_and_runtime_compute_identical_fingerprint():
     Drift here makes a prebuilt .so silently invisible and forces the
     Python fallback.
     """
-    import pathlib
     import subprocess
 
-    cmake_dir = (
-        pathlib
-        .Path(
-            inject_roctx_loader.__file__,
-        )
-        .resolve()
-        .parent
-        / "roctx_recordfn"
-    )
+    cmake_dir = inject_roctx_loader._SO_SOURCE_DIR
     assert cmake_dir.is_dir(), (
         f"expected the cmake source dir at {cmake_dir}; if the layout "
         f"moved, the CMakeLists.txt sys.path computation must move too"
@@ -222,13 +213,7 @@ def test_cmake_buildfile_does_not_override_output_name():
     the artifact filename, making it invisible to the tag-keyed
     runtime probes).
     """
-    from pathlib import Path
-
-    cmake_path = (
-        Path(inject_roctx_loader.__file__).resolve().parent
-        / "roctx_recordfn"
-        / "CMakeLists.txt"
-    )
+    cmake_path = inject_roctx_loader._SO_BUILDFILE
     assert cmake_path.is_file(), f"expected CMakeLists.txt at {cmake_path}"
     # Strip line comments so rationale text doesn't false-positive.
     active_lines = [
@@ -250,13 +235,8 @@ def test_cmake_buildfile_strips_lib_prefix():
     `libroctx_recordfn-${tag}.so`).
     """
     import re
-    from pathlib import Path
 
-    cmake_path = (
-        Path(inject_roctx_loader.__file__).resolve().parent
-        / "roctx_recordfn"
-        / "CMakeLists.txt"
-    )
+    cmake_path = inject_roctx_loader._SO_BUILDFILE
     active_lines = [
         line
         for line in cmake_path.read_text().splitlines()
@@ -681,13 +661,21 @@ def test_default_load_path_falls_through_to_cppext_when_cmake_misses(monkeypatch
     assert inject_roctx_loader.load() is sentinel
 
 
-def test_no_prebuilt_returns_none_for_unknown_tag(tmp_path, monkeypatch):
-    """Empty / mismatched prebuilt dir -> None, no exception."""
-    fake_dir = tmp_path / "prebuilt"
-    fake_dir.mkdir()
-    # Decoy with a non-matching tag.
-    (fake_dir / "roctx_recordfn-py9.99_torchUNRELATED_abi1.so").write_bytes(b"")
-    monkeypatch.setattr(inject_roctx_loader, "_PREBUILT_DIR", fake_dir)
+def test_no_prebuilt_returns_none_for_unknown_tag(monkeypatch):
+    """No installer-tree candidate matches the requested tag -> None.
+
+    After the C' packaging refactor the loader no longer exposes a
+    single ``_PREBUILT_DIR`` attribute; tag-keyed candidates come
+    from ``_install_tree_prebuilt_candidates(tag)``. Monkeypatching
+    that iterator to return an empty list emulates the
+    "unknown tag -> no matching candidate" case the original
+    test exercised, without depending on a real on-disk decoy.
+    """
+    monkeypatch.setattr(
+        inject_roctx_loader,
+        "_install_tree_prebuilt_candidates",
+        lambda _tag: [],
+    )
     assert inject_roctx_loader._try_prebuilt("py3.10_torch2.9_abi1") is None
 
 
