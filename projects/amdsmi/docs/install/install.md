@@ -119,7 +119,17 @@ ROCm system dependencies.
    ::::
    :::::
 
-3. Verify your installation.
+3. Prepend the `amd-smi` binary to your PATH, it is not on PATH by default.
+   Replace `<major>` and `<minor>` with the appropriate ROCm version.
+
+   ```bash
+   export PATH="/opt/rocm/core-<major>.<minor>/bin${PATH:+:${PATH}}"
+   ```
+
+   To persist this across shells, append the line to your `~/.bashrc` (or
+   equivalent shell config).
+
+4. Verify your installation.
 
    ```bash
    amd-smi version
@@ -190,11 +200,12 @@ Installing multiple versions of ROCm on the same system can result in the `amd-s
    python3 -m pip uninstall amdsmi
    ```
 
-2. Install the AMD SMI Python library from your target ROCm instance.
+2. Install the AMD SMI Python library from your target ROCm instance. Replace
+   `<major>` and `<minor>` with the appropriate ROCm version.
 
    ```shell
    # Install from target ROCm instance
-   cd /opt/rocm/share/amd_smi
+   cd /opt/rocm/core-<major>.<minor>/share/amd_smi
    python3 -m pip install --user .
    ```
 
