@@ -2751,6 +2751,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx1152
       - gfx1151
       - gfx1150
       block: SQ
@@ -4405,6 +4406,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx1151
+      - gfx1152
       - gfx1150
       expression: reduce(SQ_INSTS_DUAL_VALU_WAVE32,sum)
   - name: SQ_ITEMS_sum
