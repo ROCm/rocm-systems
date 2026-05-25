@@ -14,7 +14,7 @@ from unittest import mock
 import pandas as pd
 import pytest
 import yaml
-from common import ROOT
+from common import SRC
 
 import utils.utils_analysis as utils_analysis
 import utils.utils_common as utils_common
@@ -52,7 +52,7 @@ class MockSoc:
 
 logging.trace = lambda *args, **kwargs: None
 
-ANALYSIS_CONFIGS = Path(ROOT) / "src" / "rocprof_compute_soc" / "analysis_configs"
+ANALYSIS_CONFIGS = Path(SRC) / "rocprof_compute_soc" / "analysis_configs"
 
 ##################################################
 ##          Generated tests                     ##

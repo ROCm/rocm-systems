@@ -256,7 +256,7 @@ the correct instruction syntax:
 #if defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__)
     // CDNA syntax: dword suffix, glc for return
     asm volatile("global_atomic_add %0, %1, %2, off glc" : "=v"(old) : "v"(addr), "v"(val) : "memory");
-    
+
 #elif defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) || defined(__gfx1200__) || defined(__gfx1201__)
     // RDNA 3.5 APU / RDNA4 (GFX12-style): explicit type suffix, TH_ATOMIC_RETURN for return
     asm volatile("global_atomic_add_u32 %0, %1, %2, off th:TH_ATOMIC_RETURN" : "=v"(old) : "v"(addr), "v"(val) : "memory");

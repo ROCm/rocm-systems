@@ -9,7 +9,7 @@ ARCH_BINS := $(addprefix mega_kernel_test_,$(ARCHES))
 #
 #   CDNA (Compute/Datacenter):
 #   - MI250/MI250X (CDNA2): gfx90a
-#   - MI300/MI300X (CDNA3): gfx942  
+#   - MI300/MI300X (CDNA3): gfx942
 #   - MI350/MI355X (CDNA4): gfx950
 #
 #   RDNA 3.5+ APU iGPU (gfx115x-class today; additional APUs may use this bucket later):

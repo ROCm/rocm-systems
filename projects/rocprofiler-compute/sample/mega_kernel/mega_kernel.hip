@@ -1,5 +1,5 @@
-// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
-// SPDX-License-Identifier: MIT
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier:  MIT
 
 /**
  * GPU Mega Kernel Unit Test
@@ -118,7 +118,7 @@
             __builtin_amdgcn_s_wait_loadcnt(0);                                          \
             __builtin_amdgcn_s_wait_storecnt(0);                                         \
         } while(0)
-    
+
     // Wait for LDS + scalar memory (kmcnt + dscnt)
 #    define WAITCNT_LDS_SCALAR()                                                         \
         do                                                                               \
@@ -126,7 +126,7 @@
             __builtin_amdgcn_s_wait_kmcnt(0);                                            \
             __builtin_amdgcn_s_wait_dscnt(0);                                            \
         } while(0)
-    
+
     // Wait for all outstanding operations: VMEM (load/store) + scalar + LDS
 #    define WAITCNT_ALL()                                                                \
         do                                                                               \
@@ -136,7 +136,7 @@
             __builtin_amdgcn_s_wait_kmcnt(0);                                            \
             __builtin_amdgcn_s_wait_dscnt(0);                                            \
         } while(0)
-    
+
     // Inline assembly versions for GFX12+ (split waits with 0x0 syntax)
 #    define ASM_WAITCNT_VMEM "s_wait_loadcnt 0x0\n\ts_wait_storecnt 0x0"
 #    define ASM_WAITCNT_LDS  "s_wait_kmcnt 0x0\n\ts_wait_dscnt 0x0"
@@ -1717,13 +1717,13 @@ test_dot_products(TestResults* results, int lane_id)
     // Future arch: use new IU suffix opcodes
     unsigned int a = 0x01020304;  // [1, 2, 3, 4] packed as 4 unsigned bytes
     unsigned int b = 0x01010101;  // [1, 1, 1, 1] packed as 4 unsigned bytes
-    
+
     // v_dot4_u32_iu8 is the GFX12 IU-suffixed variant
     int dot4_result;
-    asm volatile("v_dot4_u32_iu8 %0, %1, %2, %3" 
-                 : "=v"(dot4_result) 
+    asm volatile("v_dot4_u32_iu8 %0, %1, %2, %3"
+                 : "=v"(dot4_result)
                  : "v"(a), "v"(b), "v"(0));
-    
+
     // Expected: 1*1 + 2*1 + 3*1 + 4*1 = 10
     passed = (dot4_result == 10);
 
@@ -2654,7 +2654,7 @@ test_async_lds_operations([[maybe_unused]] float* global_src, float* global_dst,
         __builtin_amdgcn_ds_atomic_async_barrier_arrive_b64(
             ((__attribute__((address_space(3))) long*)&async_barrier_counter));
     }
-    
+
     // Wait for async operations to complete (s_wait_asynccnt on targets that expose it)
     __builtin_amdgcn_s_wait_asynccnt(0);  // Wait for async copy operations
 #    else
@@ -2701,7 +2701,7 @@ test_async_lds_operations([[maybe_unused]] float* global_src, float* global_dst,
         __builtin_amdgcn_ds_atomic_async_barrier_arrive_b64(
             ((__attribute__((address_space(3))) long*)&async_barrier_counter));
     }
-    
+
     // Wait for async store operations to complete
     __builtin_amdgcn_s_wait_asynccnt(0);  // Wait for async copy operations
 #    else
@@ -2845,14 +2845,14 @@ test_wmma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
     bool f16_passed = true;
     bool bf16_passed = true;
     bool i8_passed = true;
-    
+
     const int laneWrapped = tid % 16;
     const int laneGroup = tid / 16;
     //  FP16/BF16: 16 elements per lane for A and B; INT8: 8 int (32 i8) per lane
     using wmma_f16_frag_ = __attribute__((__vector_size__(16 * sizeof(_Float16)))) _Float16;
     using wmma_bf16_frag_ = __attribute__((__vector_size__(16 * sizeof(short)))) short;
     using wmma_i8_frag_ = __attribute__((__vector_size__(8 * sizeof(int)))) int;
-    
+
     // ---- FP16: __builtin_amdgcn_wmma_f32_16x16x32_f16(transA, A_16, transB, B_16, scale, C_8, bool, bool) ----
     {
         wmma_f16_frag_ a_frag;
@@ -2871,7 +2871,7 @@ test_wmma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
         f16_passed = (sink != 0.0f || tid >= 32);
         (void)sink;
     }
-    
+
     // ---- BF16: __builtin_amdgcn_wmma_f32_16x16x32_bf16(transA, A_16, transB, B_16, scale, C_8, bool, bool) ----
     {
         wmma_bf16_frag_ a_frag;
@@ -2892,7 +2892,7 @@ test_wmma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
         bf16_passed = (sink != 0.0f || tid >= 32);
         (void)sink;
     }
-    
+
     // ---- INT8: __builtin_amdgcn_wmma_i32_16x16x64_iu8(negA, A_8i, negB, B_8i, C_8i, bool, bool) ----
     {
         wmma_i8_frag_ a_frag = {0};
@@ -2917,7 +2917,7 @@ test_wmma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
         i8_passed = (sink != 0 || tid >= 32);
         (void)sink;
     }
-    
+
     if (lane_id == 0) {
         atomicAdd(&results->wmma_f16_passed, f16_passed ? 1 : 0);
         atomicAdd(&results->wmma_bf16_passed, bf16_passed ? 1 : 0);

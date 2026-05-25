@@ -3,7 +3,6 @@ test_categories:
     description: "Fast sanity checks - Run pre-commit (target: < 5 min)"
     test_patterns:
       - test_profile_misc
-      - test_metric_validation
       - test_metric_utils
       - test_profile_section
       - test_pc_sampling
@@ -30,6 +29,7 @@ test_categories:
       - test-rocprofiler-compute-tool
     exclude:
       - test_profile_live_attach_detach
+      - test_metric_validation
     labels:
       - "quick"
       - "pre-commit"
@@ -42,14 +42,17 @@ test_categories:
       - test_profile_dispatch
       - test_profile_kernel_execution
       - test_profile_join
+      - test_profile_misc
+      - test_profile_path
       - test_pc_sampling
       - test_profile_roofline_1
+      - test_profile_roofline_2
       - test_profile_section
       - test_profile_sets_func
       - test_profile_sort
       - test_profile_iteration_multiplexing_1
       - test_profile_iteration_multiplexing_2
-      - test_metric_validation
+      - test_profile_iteration_multiplexing_stochastic
       - test_metric_utils
       - test_autogen_config
       - test_analyze_commands
@@ -73,6 +76,7 @@ test_categories:
       - test-rocprofiler-compute-tool
     exclude:
       - test_profile_live_attach_detach
+      - test_metric_validation
     labels:
       - "standard"
       - "pr"
@@ -95,7 +99,6 @@ test_categories:
       - test_profile_iteration_multiplexing_1
       - test_profile_iteration_multiplexing_2
       - test_profile_iteration_multiplexing_stochastic
-      - test_metric_validation
       - test_metric_utils
       - test_autogen_config
       - test_analyze_commands
@@ -119,6 +122,7 @@ test_categories:
       - test-rocprofiler-compute-tool
     exclude:
       - test_profile_live_attach_detach
+      - test_metric_validation
     labels:
       - "comprehensive"
       - "nightly"
@@ -141,7 +145,6 @@ test_categories:
       - test_profile_iteration_multiplexing_1
       - test_profile_iteration_multiplexing_2
       - test_profile_iteration_multiplexing_stochastic
-      - test_metric_validation
       - test_metric_utils
       - test_autogen_config
       - test_analyze_commands
@@ -165,6 +168,7 @@ test_categories:
       - test-rocprofiler-compute-tool
     exclude:
       - test_profile_live_attach_detach
+      - test_metric_validation
     labels:
       - "full"
       - "weekly"
