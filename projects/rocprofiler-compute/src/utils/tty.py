@@ -918,8 +918,10 @@ def show_all(
         for data_source in panel["data source"]:
             for table_type, table_config in data_source.items():
                 # Skip tables that were filtered out at build_dfs time
-                # (e.g. analyze-mode -b dropped this block).
-                if not any(table_config["id"] in run.dfs for run in runs.values()):
+                # (e.g. analyze-mode -b dropped this block). In baseline mode
+                # require the table in every run so per-run dfs[id] lookups
+                # downstream stay safe.
+                if not all(table_config["id"] in run.dfs for run in runs.values()):
                     continue
 
                 # Emit warnings for roofline tables (401, 402)

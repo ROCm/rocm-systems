@@ -64,8 +64,7 @@ def build_dfs(
 
     System panels (``panel_id <= 100``) and tables with ``data_source_idx``
     ``"0"`` always pass either filter. Tables that fail the active filter
-    are not added to ``arch_configs.dfs`` (previously an empty DataFrame was
-    inserted).
+    are not added to ``arch_configs.dfs``.
     """
 
     simple_box = {
@@ -87,7 +86,7 @@ def build_dfs(
         user_metric_filter = None
         profile_panel_filter = resolve_filter_blocks_to_panel_ids(
             profiling_config.get("filter_blocks", []),
-            arch=sys_info.get("gpu_arch") if sys_info is not None else None,
+            arch=sys_info.get("gpu_arch"),
         )
 
     arch_configs.panel_configs = expand_placeholder_ranges(
@@ -96,18 +95,16 @@ def build_dfs(
 
     for panel_id, panel in arch_configs.panel_configs.items():
         for data_source in panel["data source"]:
-            for type, data_config in data_source.items():
+            for table_type, data_config in data_source.items():
                 table_id = data_config["id"]
                 file_data_source_idx = str(table_id // 100)
-                always_pass = panel_id <= 100 or file_data_source_idx == "0"
 
-                if type == "metric_table":
+                if table_type == "metric_table":
                     df = _build_metric_table_df(
                         panel=panel,
                         data_config=data_config,
                         simple_box=simple_box,
                         panel_id=panel_id,
-                        always_pass=always_pass,
                         user_metric_filter=user_metric_filter,
                         profile_panel_filter=profile_panel_filter,
                         metric_counters=metric_counters,
@@ -115,8 +112,8 @@ def build_dfs(
                     if df is None:
                         continue
 
-                elif type == "raw_csv_table":
-                    if not always_pass and not _metric_passes_filter(
+                elif table_type == "raw_csv_table":
+                    if not _metric_passes_filter(
                         metric_id=file_data_source_idx,
                         panel_id=panel_id,
                         data_source_idx=file_data_source_idx,
@@ -132,8 +129,8 @@ def build_dfs(
                     else:
                         df = pd.DataFrame([data_config["source"]], columns=["from_csv"])
 
-                elif type == "pc_sampling_table":
-                    if not always_pass and not _metric_passes_filter(
+                elif table_type == "pc_sampling_table":
+                    if not _metric_passes_filter(
                         metric_id=file_data_source_idx,
                         panel_id=panel_id,
                         data_source_idx=file_data_source_idx,
@@ -149,7 +146,7 @@ def build_dfs(
                     df = pd.DataFrame()
 
                 dfs[table_id] = df
-                dfs_type[table_id] = type
+                dfs_type[table_id] = table_type
 
     arch_configs.dfs = dfs
     arch_configs.dfs_type = dfs_type
@@ -189,7 +186,6 @@ def _build_metric_table_df(
     data_config: dict[str, Any],
     simple_box: dict[str, list[str]],
     panel_id: int,
-    always_pass: bool,
     user_metric_filter: Optional[list[str]],
     profile_panel_filter: set[int],
     metric_counters: dict[str, list[str]],
@@ -209,8 +205,7 @@ def _build_metric_table_df(
 
     headers: list[str] = ["Metric_ID", data_config["header"]["metric"]]
     if is_simple_box:
-        for k in simple_box:
-            headers.append(k)
+        headers.extend(simple_box)
         for key, tile in data_config["header"].items():
             if key != "metric" and key != "expr":
                 headers.append(tile)
@@ -226,7 +221,7 @@ def _build_metric_table_df(
     for i, (key, entries) in enumerate(metric_entries.items()):
         metric_idx = f"{table_data_source_idx}.{i}"
 
-        if not always_pass and not _metric_passes_filter(
+        if not _metric_passes_filter(
             metric_id=metric_idx,
             panel_id=panel_id,
             data_source_idx=table_data_source_idx,
@@ -274,6 +269,7 @@ def _build_metric_table_df(
     # Skip only when an active filter dropped every metric in the config.
     # Tables whose config is empty to begin with (some arch variants) keep
     # a placeholder empty df so multi-arch baseline lookups stay safe.
+    always_pass = panel_id <= 100 or str(data_config["id"] // 100) == "0"
     if not always_pass and metric_entries and not rows:
         return None
 

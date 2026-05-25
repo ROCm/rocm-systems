@@ -121,11 +121,15 @@ def parse_counters_text(text: str) -> tuple[set[str], set[str]]:
     return hw_counter_matches, variable_matches
 
 
-def extract_counters(text: str, gpu_series: str) -> set[str]:
-    """Return the full set of HW counters referenced by *text*.
+def extract_counters_and_variables(
+    text: str, gpu_series: str
+) -> tuple[set[str], set[str]]:
+    """Return ``(hw_counters, builtin_vars)`` referenced by *text*.
 
-    Resolves ``$variable`` references and supported denominators
-    recursively so that all transitive counter dependencies are included.
+    Resolves ``$variable`` references and supported denominators recursively,
+    so the returned sets include transitive dependencies. ``builtin_vars``
+    contains only the names that resolve against the arch's built-in var
+    table (other ``$var`` matches such as ``$num_xcd`` are dropped).
     """
     hw, variables = parse_counters_text(text)
 
@@ -135,20 +139,56 @@ def extract_counters(text: str, gpu_series: str) -> set[str]:
         hw.update(hw_d)
         variables.update(var_d)
 
-    # Recursively resolve built-in variables
     build_in_vars = get_build_in_vars(gpu_series)
+    referenced_builtins: set[str] = set()
     seen: set[str] = set()
     while variables - seen:
         new_vars: set[str] = set()
         for var in variables - seen:
             seen.add(var)
             if var in build_in_vars:
+                referenced_builtins.add(var)
                 hw_v, var_v = parse_counters_text(build_in_vars[var])
                 hw.update(hw_v)
                 new_vars.update(var_v)
         variables.update(new_vars)
 
+    return hw, referenced_builtins
+
+
+def extract_counters(text: str, gpu_series: str) -> set[str]:
+    """Return the full set of HW counters referenced by *text*.
+
+    Thin wrapper over :func:`extract_counters_and_variables`.
+    """
+    hw, _ = extract_counters_and_variables(text, gpu_series)
     return hw
+
+
+# Post-eval-string rewrite of "$var" to "ammolite__var" by
+# build_eval_string / build_metric_value_string; the analyze-side scan must
+# recognize both forms.
+_AMMOLITE_VAR_RE = re.compile(r"ammolite__([0-9A-Za-z_]+)")
+
+
+def referenced_builtin_vars(text: str, gpu_series: str) -> set[str]:
+    """Return the set of built-in var names referenced by *text*.
+
+    Handles both pre-eval ``$var`` form (used in YAML and during build_dfs)
+    and post-eval ``ammolite__var`` form (used after ``build_eval_string``
+    has rewritten metric_table cells). Transitive dependencies are followed
+    via :func:`extract_counters_and_variables`.
+    """
+    _, referenced = extract_counters_and_variables(text, gpu_series)
+    build_in_vars = get_build_in_vars(gpu_series)
+    for candidate in _AMMOLITE_VAR_RE.findall(text):
+        if candidate in build_in_vars and candidate not in referenced:
+            _, nested = extract_counters_and_variables(
+                build_in_vars[candidate], gpu_series
+            )
+            referenced.add(candidate)
+            referenced.update(nested)
+    return referenced
 
 
 def counter_to_block(counter: str) -> str:

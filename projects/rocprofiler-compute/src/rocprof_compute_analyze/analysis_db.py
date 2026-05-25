@@ -56,7 +56,7 @@ from utils.roofline_calc import (
     SUPPORTED_DATATYPES,
 )
 from utils.utils_common import get_uuid, get_version
-from utils.utils_counter_defs import get_build_in_vars
+from utils.utils_counter_defs import get_build_in_vars, referenced_builtin_vars
 
 
 class db_analysis(OmniAnalyze_Base):
@@ -572,10 +572,24 @@ class db_analysis(OmniAnalyze_Base):
             return None
 
     @staticmethod
-    def calc_builtin_vars(pmc_df: pd.DataFrame, sys_info: dict) -> pd.DataFrame:
-        """Calculate arch-specific built-in variables (numActiveCUs, etc.)"""
+    def calc_builtin_vars(
+        pmc_df: pd.DataFrame,
+        sys_info: dict,
+        relevant_vars: Optional[set[str]] = None,
+    ) -> pd.DataFrame:
+        """Calculate arch-specific built-in variables (numActiveCUs, etc.).
+
+        When ``relevant_vars`` is provided, only built-in vars whose names
+        appear in that set are evaluated. Callers pass the set scanned from
+        the metric expressions they intend to evaluate, so we skip vars whose
+        counters were never collected.
+        """
         gpu_series = mi_gpu_specs.get_gpu_series(sys_info["gpu_arch"])
         build_in_vars = get_build_in_vars(gpu_series)
+        if relevant_vars is not None:
+            build_in_vars = {
+                k: v for k, v in build_in_vars.items() if k in relevant_vars
+            }
         # Calculate PER_XCD variables first
         for key, value in build_in_vars.items():
             if "PER_XCD" in key:
@@ -597,8 +611,16 @@ class db_analysis(OmniAnalyze_Base):
         expression_df: pd.DataFrame,
         emit_variance_warnings: bool = False,
     ) -> pd.Series:
+        # Scan expressions for referenced built-in vars so we skip vars whose
+        # counters were never collected.
+        expression_text = "\n".join(
+            str(v) for v in expression_df["value"].tolist() if isinstance(v, str)
+        )
+        relevant_vars = referenced_builtin_vars(
+            expression_text, mi_gpu_specs.get_gpu_series(sys_info["gpu_arch"])
+        )
         # Calculate built-in variables
-        db_analysis.calc_builtin_vars(pmc_df, sys_info)
+        db_analysis.calc_builtin_vars(pmc_df, sys_info, relevant_vars=relevant_vars)
         # Evaluate expressions while printing warnings
         return expression_df.apply(
             lambda row: db_analysis.evaluate(
