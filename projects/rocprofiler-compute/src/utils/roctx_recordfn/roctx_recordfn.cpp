@@ -45,13 +45,22 @@ struct StackEntry {
   std::string context;
 };
 
+// Per-RecordFunction-call state carried from start_cb to end_cb so
+// end_cb only undoes what start_cb actually committed. Returning
+// nullptr from start_cb on a hard failure means end_cb sees a null
+// ctx and short-circuits without touching g_stack or roctx ranges
+// (which is what kept push/pop counts and the marker stack drifting
+// before this struct was introduced).
+struct RoctxObsCtx : public at::ObserverContext {
+  bool pushed_roctx_range = false;
+  bool pushed_leaf = false;
+  std::size_t pushed_snapshot_frames = 0;
+};
+
 // Per-OS-thread marker stack. The autograd worker starts empty and is
 // re-seeded by start_cb via the seqNr snapshot map (forward chain) and
 // the TLS DebugInfo USER_SCOPE chain.
 thread_local std::vector<StackEntry> g_stack;
-
-// Extra frames start_cb pushed on top of the leaf; end_cb pops them.
-thread_local std::vector<std::size_t> g_snapshot_frame_counts;
 
 // TLS DebugInfo subclass carrying the main-thread USER_SCOPE chain.
 // Set by push_user_scope and read by start_cb on the worker so
@@ -252,7 +261,13 @@ std::size_t apply_userscope_overlay() {
 }
 
 std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction &fn) {
+  // Allocated before the try so the catch can roll back any partial
+  // commits captured in ctx->pushed_* flags. If allocation itself
+  // throws, ctx is null and the catch only bumps callback_errors.
+  std::unique_ptr<RoctxObsCtx> ctx;
   try {
+    ctx = std::make_unique<RoctxObsCtx>();
+
     const at::RecordScope scope = fn.scope();
     const std::int64_t seq = fn.seqNr();
     const char *name = fn.name();
@@ -261,7 +276,6 @@ std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction &fn) {
     }
 
     const bool stack_was_empty = g_stack.empty();
-    std::size_t snapshot_frames_pushed = 0;
     // Tracks g_stack-emptiness at leaf-context-computation time
     // (post-overlay/snapshot). Drives the aten:0 vs aten.nested:0
     // choice in default_leaf_context().
@@ -279,7 +293,7 @@ std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction &fn) {
     // a published TLS overlay implies a worker thread.
     if (stack_was_empty) {
       const std::size_t overlay_frames = apply_userscope_overlay();
-      snapshot_frames_pushed += overlay_frames;
+      ctx->pushed_snapshot_frames += overlay_frames;
       if (overlay_frames > 0) {
         stack_was_empty_for_leaf = false;
       }
@@ -291,7 +305,7 @@ std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction &fn) {
     if (scope == at::RecordScope::BACKWARD_FUNCTION && seq >= 0) {
       std::vector<StackEntry> snapshot;
       if (consume_snapshot(seq, &snapshot)) {
-        snapshot_frames_pushed += push_with_prefix_dedup(snapshot);
+        ctx->pushed_snapshot_frames += push_with_prefix_dedup(snapshot);
       }
     }
 
@@ -300,7 +314,7 @@ std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction &fn) {
     leaf.marker = name;
     leaf.context = default_leaf_context(scope, seq, stack_was_empty_for_leaf);
     g_stack.push_back(std::move(leaf));
-    g_snapshot_frame_counts.push_back(snapshot_frames_pushed);
+    ctx->pushed_leaf = true;
 
     // Forward op with seqNr -> save the whole stack (including
     // USER_SCOPE parents) for the matching backward Node.
@@ -308,34 +322,59 @@ std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction &fn) {
       save_snapshot(seq, g_stack);
     }
 
+    // ROCTX emit is the last side effect so any earlier failure
+    // rolls back without an unmatched roctxRangePop in end_cb.
     const std::string full = build_marker_string(g_stack);
     roctxRangePushA(full.c_str());
+    ctx->pushed_roctx_range = true;
     maybe_capture(full);
     g_n_pushes.fetch_add(1, std::memory_order_relaxed);
+    return ctx;
   } catch (...) {
     g_n_callback_errors.fetch_add(1, std::memory_order_relaxed);
+    // Best-effort rollback of whatever start_cb committed before
+    // the throw so end_cb (which still runs with a null obs ctx)
+    // doesn't compound the damage.
+    try {
+      if (ctx) {
+        if (ctx->pushed_roctx_range) {
+          roctxRangePop();
+        }
+        if (ctx->pushed_leaf && !g_stack.empty()) {
+          g_stack.pop_back();
+        }
+        for (std::size_t i = 0;
+             i < ctx->pushed_snapshot_frames && !g_stack.empty(); ++i) {
+          g_stack.pop_back();
+        }
+      }
+    } catch (...) {
+      g_n_callback_errors.fetch_add(1, std::memory_order_relaxed);
+    }
+    // Null obs ctx signals end_cb to skip every pop.
+    return nullptr;
   }
-  return nullptr;
 }
 
-void end_cb(const at::RecordFunction & /*fn*/, at::ObserverContext * /*ctx*/) {
+void end_cb(const at::RecordFunction & /*fn*/, at::ObserverContext *obs_ctx) {
+  // start_cb returned nullptr on a hard failure (or never started a
+  // matching push); skip every pop so counters and g_stack stay
+  // paired with what was actually committed.
+  if (obs_ctx == nullptr) {
+    return;
+  }
+  auto *ctx = static_cast<RoctxObsCtx *>(obs_ctx);
   try {
-    roctxRangePop();
-    g_n_pops.fetch_add(1, std::memory_order_relaxed);
-
-    // Pop the leaf this scope pushed.
-    if (!g_stack.empty()) {
+    if (ctx->pushed_roctx_range) {
+      roctxRangePop();
+      g_n_pops.fetch_add(1, std::memory_order_relaxed);
+    }
+    if (ctx->pushed_leaf && !g_stack.empty()) {
       g_stack.pop_back();
     }
-
-    // Pop snapshot/overlay frames added by start_cb (they have no
-    // roctxRangePushA of their own -- they only fed the leaf label).
-    if (!g_snapshot_frame_counts.empty()) {
-      const std::size_t n = g_snapshot_frame_counts.back();
-      g_snapshot_frame_counts.pop_back();
-      for (std::size_t i = 0; i < n && !g_stack.empty(); ++i) {
-        g_stack.pop_back();
-      }
+    for (std::size_t i = 0; i < ctx->pushed_snapshot_frames && !g_stack.empty();
+         ++i) {
+      g_stack.pop_back();
     }
   } catch (...) {
     g_n_callback_errors.fetch_add(1, std::memory_order_relaxed);
@@ -345,49 +384,85 @@ void end_cb(const at::RecordFunction & /*fn*/, at::ObserverContext * /*ctx*/) {
 // Python-side USER_SCOPE push from main-thread structural wraps. A
 // dedicated entry is needed because RecordFunction::name() can't carry
 // a context segment, and the autograd worker needs the chain via TLS.
+//
+// All-or-nothing: on any partial failure we roll back every committed
+// side effect (g_stack, g_dbg_guards, roctx range) and rethrow so the
+// Python caller can fall through to the Python tier without
+// double-pushing into a half-mutated C++ stack.
 void push_user_scope(const std::string &marker, const std::string &context) {
+  bool pushed_to_stack = false;
+  bool pushed_to_guards = false;
+  bool pushed_roctx = false;
   try {
     StackEntry e;
     e.marker = marker;
     e.context = context;
     g_stack.push_back(std::move(e));
-    g_snapshot_frame_counts.push_back(0);
+    pushed_to_stack = true;
 
-    // Publish into TLS DebugInfo; the guard restores on pop.
+    // Publish into TLS DebugInfo; the guard restores on pop. We
+    // push a unique_ptr onto g_dbg_guards in either case (real
+    // guard or null sentinel) so pop_user_scope's strict pair-wise
+    // pop with g_stack stays balanced.
+    std::unique_ptr<c10::DebugInfoGuard> guard;
     try {
       auto info = std::make_shared<RoctxUserScopeChain>(g_stack);
-      g_dbg_guards.push_back(std::make_unique<c10::DebugInfoGuard>(
-          kRoctxDbgKind, std::move(info)));
+      guard =
+          std::make_unique<c10::DebugInfoGuard>(kRoctxDbgKind, std::move(info));
     } catch (...) {
-      // Push a sentinel so pop_user_scope() pops the right slot.
-      g_dbg_guards.push_back(nullptr);
+      // Swallowed: missing TLS publication only degrades worker
+      // overlay; the roctx range itself still emits.
     }
+    g_dbg_guards.push_back(std::move(guard));
+    pushed_to_guards = true;
 
     const std::string full = build_marker_string(g_stack);
     roctxRangePushA(full.c_str());
+    pushed_roctx = true;
+
     maybe_capture(full);
     g_n_user_scope_pushes.fetch_add(1, std::memory_order_relaxed);
     g_n_pushes.fetch_add(1, std::memory_order_relaxed);
   } catch (...) {
     g_n_callback_errors.fetch_add(1, std::memory_order_relaxed);
+    try {
+      if (pushed_roctx) {
+        roctxRangePop();
+      }
+      if (pushed_to_guards && !g_dbg_guards.empty()) {
+        g_dbg_guards.pop_back();
+      }
+      if (pushed_to_stack && !g_stack.empty()) {
+        g_stack.pop_back();
+      }
+    } catch (...) {
+      g_n_callback_errors.fetch_add(1, std::memory_order_relaxed);
+    }
+    // Rethrow so Python's _push_scope falls through to the Python
+    // tier instead of treating the failed push as a success.
+    throw;
   }
 }
 
 void pop_user_scope() {
   try {
+    // Strict pair-wise pop: g_stack and g_dbg_guards are pushed
+    // together by push_user_scope, so an imbalance here is a
+    // programmer error (unmatched push/pop). Silently no-op rather
+    // than throw, to avoid masking user exceptions in Python
+    // finally blocks; bump callback_errors so the imbalance is
+    // observable in dump_stats and the end-of-run warning.
+    if (g_stack.empty() || g_dbg_guards.empty()) {
+      g_n_callback_errors.fetch_add(1, std::memory_order_relaxed);
+      return;
+    }
     roctxRangePop();
     g_n_user_scope_pops.fetch_add(1, std::memory_order_relaxed);
     g_n_pops.fetch_add(1, std::memory_order_relaxed);
-    if (!g_stack.empty()) {
-      g_stack.pop_back();
-    }
-    if (!g_snapshot_frame_counts.empty()) {
-      g_snapshot_frame_counts.pop_back();
-    }
-    if (!g_dbg_guards.empty()) {
-      // unique_ptr dtor restores the previous TLS DebugInfo head.
-      g_dbg_guards.pop_back();
-    }
+    g_stack.pop_back();
+    // unique_ptr dtor restores the previous TLS DebugInfo head
+    // (no-op for null sentinels pushed when TLS publish failed).
+    g_dbg_guards.pop_back();
   } catch (...) {
     g_n_callback_errors.fetch_add(1, std::memory_order_relaxed);
   }

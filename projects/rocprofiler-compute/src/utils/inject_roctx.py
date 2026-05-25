@@ -171,6 +171,17 @@ def get_context_stack():
     return _thread_local.context_stack
 
 
+def get_tier_stack():
+    # Per-thread record of which tier handled each _push_scope (True =
+    # C++ push_user_scope, False = Python rangePush). _pop_scope uses
+    # the popped value to call the matching pop path, so a one-off
+    # C++-tier failure that fell through to the Python tier still
+    # pairs correctly on the way back out.
+    if not hasattr(_thread_local, "tier_stack"):
+        _thread_local.tier_stack = []
+    return _thread_local.tier_stack
+
+
 def resolve_user_caller_location():
     """'file:line' for the nearest user frame, or 'python.dispatch:0'.
 
@@ -200,37 +211,57 @@ def resolve_user_caller_location():
 def _push_scope(marker, context):
     marker_stack = get_marker_stack()
     context_stack = get_context_stack()
-    marker_stack.append(marker)
-    context_stack.append(context)
+    tier_stack = get_tier_stack()
+
+    used_cpp = False
     if _USING_C_TIER:
         try:
             _roctx_recordfn.push_user_scope(marker, context)
-            return
+            used_cpp = True
         except Exception:
-            # Fall through so the scope isn't silently dropped.
+            # Fall through so the scope isn't silently dropped. The
+            # C++ side rolled back any partial commit before raising,
+            # so it's safe to push on the Python tier instead.
             pass
-    full = "/".join(marker_stack) + ":" + "/".join(context_stack)
-    rangePush(full)
+
+    if not used_cpp:
+        # Build the full marker BEFORE mutating the stacks so the
+        # emitted string includes this frame exactly once.
+        full = (
+            "/".join([*marker_stack, marker])
+            + ":"
+            + "/".join([*context_stack, context])
+        )
+        rangePush(full)
+
+    # Record bookkeeping last so a rangePush/push_user_scope failure
+    # leaves nothing for _pop_scope to undo on this call.
+    tier_stack.append(used_cpp)
+    marker_stack.append(marker)
+    context_stack.append(context)
 
 
 def _pop_scope():
     marker_stack = get_marker_stack()
     context_stack = get_context_stack()
-    if _USING_C_TIER:
-        try:
+    tier_stack = get_tier_stack()
+
+    # Underflow: an unmatched _pop_scope. No-op so we don't over-pop
+    # roctx ranges or shadow a real exception in a caller's finally.
+    if not tier_stack:
+        return
+
+    used_cpp = tier_stack.pop()
+    try:
+        if used_cpp:
             _roctx_recordfn.pop_user_scope()
-            if marker_stack:
-                marker_stack.pop()
-            if context_stack:
-                context_stack.pop()
-            return
-        except Exception:
-            pass
-    rangePop()
-    if marker_stack:
-        marker_stack.pop()
-    if context_stack:
-        context_stack.pop()
+        else:
+            rangePop()
+    finally:
+        if marker_stack:
+            marker_stack.pop()
+        if context_stack:
+            context_stack.pop()
 
 
 # Structural wrappers installed at module load. These entry points bypass
