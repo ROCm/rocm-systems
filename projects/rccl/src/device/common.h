@@ -674,7 +674,9 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
   }
 #endif
   if (tid == 0) __insert_timestamp(__LINE__);
-  if (COLLTRACE && tid%WARP_SIZE == 0) traceKernelLaunch(ncclCollTraceKernelLaunchType, 0);
+  if constexpr (COLLTRACE) {
+    if (tid%WARP_SIZE == 0) traceKernelLaunch(ncclCollTraceKernelLaunchType, 0);
+  }
 
   while (ncclShmem.aborted == 0) {
     if (tid == 0) __insert_timestamp(__LINE__);
@@ -717,10 +719,14 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
     profiler(STOP);
     loadWorkBatchToShmem(tid%WARP_SIZE, tn, args, batchIx);
     __syncthreads();
-    if (COLLTRACE && tid%WARP_SIZE == 0) traceKernelLaunch(ncclCollTraceCollLaunchType, batchIx);
+    if constexpr (COLLTRACE) {
+      if (tid%WARP_SIZE == 0) traceKernelLaunch(ncclCollTraceCollLaunchType, batchIx);
+    }
   }
   profiler(FINI);
-  if (COLLTRACE && tid%WARP_SIZE == 0) traceKernelEnd(ncclCollTraceKernelEndType);
+  if constexpr (COLLTRACE) {
+    if (tid%WARP_SIZE == 0) traceKernelEnd(ncclCollTraceKernelEndType);
+  }
 
 #ifdef ENABLE_PROFILING
   if (ncclShmem.comm.devProf->seq < PROFILE_NUM_LAUNCHES) {
