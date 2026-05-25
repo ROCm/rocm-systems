@@ -950,7 +950,7 @@ int SimulatedDriver::import_dmabuf_ioctl(void *arg) {
   if (args->gpu_id != gpu_id_)
     return -EINVAL;
 
-  struct stat st{};
+  struct stat st {};
   if (fstat(args->dmabuf_fd, &st) != 0)
     return -errno;
   uint64_t size = static_cast<uint64_t>(st.st_size);
@@ -1026,7 +1026,7 @@ int SimulatedDriver::get_dmabuf_info_ioctl(void *arg) {
   }
 
   if (!found) {
-    struct stat st{};
+    struct stat st {};
     if (fstat(args->dmabuf_fd, &st) != 0)
       return -errno;
     size = static_cast<uint64_t>(st.st_size);

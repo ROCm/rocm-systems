@@ -30,6 +30,8 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 * New HIP APIs
     - `cooperative_groups::reduce()` allows calling reduce operators on `thread_block_tile` and `coalesced_threads`. The implementation is based on the `__reduce_*_sync` operations, so the macro `HIP_ENABLE_EXTRA_WARP_SYNC_TYPES` may be needed to unlock some optimizations.
+    - `hipLibraryGetGlobal` returns the device pointer and size of a `__device__` global defined in a `hipLibrary_t`. Mirrors CUDA's `cudaLibraryGetGlobal` / `cuLibraryGetGlobal`.
+    - `hipLibraryGetManaged` returns the host-accessible managed pointer and size of a `__managed__` variable defined in a `hipLibrary_t`. Mirrors CUDA's `cudaLibraryGetManaged` / `cuLibraryGetManaged`.
 * New device attribute `hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported`, indicating support for GPU Direct RDMA when using HIP VMM. This attribute corresponds to CUDA’s `CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_WITH_CUDA_VMM_SUPPORTED`.
 
 ### Resolved issues

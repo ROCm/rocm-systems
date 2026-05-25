@@ -160,6 +160,8 @@ start_context(const context::context* ctx)
 
     if(!already_enabled)
     {
+        callback_thread_start();
+
         for(auto& cb : ctx->dispatch_counter_collection->callbacks)
         {
             using external_corr_id_map_t = tracing::external_correlation_id_map_t;
@@ -216,6 +218,8 @@ stop_context(const context::context* ctx)
     });
 
     if(controller) controller->disable_serialization();
+
+    callback_thread_stop();
 }
 
 rocprofiler_status_t

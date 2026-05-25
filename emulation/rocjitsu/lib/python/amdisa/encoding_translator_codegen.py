@@ -44,10 +44,14 @@ def _clang_format(path: Path) -> None:
     """
     exe = shutil.which('clang-format')
     if not exe:
-        print('warning: clang-format not found; emitted files may need manual '
-              'formatting', file=sys.stderr)
+        print(
+            'warning: clang-format not found; emitted files may need manual '
+            'formatting',
+            file=sys.stderr,
+        )
         return
     subprocess.run([exe, '-i', str(path)], check=True)
+
 
 if TYPE_CHECKING:
     from amdisa.gpuisa import InstEncoding, IsaSpec
@@ -71,11 +75,11 @@ FIELD_RENAMES: dict[str, str] = {
     'op_sel': 'opsel',
     'op_sel_hi': 'opsel_hi',
     'op_sel_hi_2': 'opsel_hi_2',
-    'offset': 'ioffset',     # SMEM, MUBUF, FLAT offset → RDNA4 ioffset
-    'data': 'vsrc',          # FLAT store source field
-    'srsrc': 'rsrc',         # MUBUF buffer resource → VBUFFER rsrc (5b → 9b)
-    'addr': 'vaddr',         # FLAT address register → VGLOBAL vaddr
-    'data0': 'data0',        # DS data fields — same name, keep explicit
+    'offset': 'ioffset',  # SMEM, MUBUF, FLAT offset → RDNA4 ioffset
+    'data': 'vsrc',  # FLAT store source field
+    'srsrc': 'rsrc',  # MUBUF buffer resource → VBUFFER rsrc (5b → 9b)
+    'addr': 'vaddr',  # FLAT address register → VGLOBAL vaddr
+    'data0': 'data0',  # DS data fields — same name, keep explicit
     'data1': 'data1',
 }
 
@@ -172,13 +176,20 @@ _PAIR_ENC_MAPS: dict[tuple[str, str], dict[str, str]] = {
 # translation (GFX940 sc0/sc1/nt -> GFX12 scope/th)
 # ---------------------------------------------------------------------------
 
-_COHERENCY_REMAP_ENCODINGS = frozenset({
-    'ENC_MUBUF', 'ENC_FLAT', 'ENC_FLAT_GLBL', 'ENC_FLAT_SCRATCH',
-})
+_COHERENCY_REMAP_ENCODINGS = frozenset(
+    {
+        'ENC_MUBUF',
+        'ENC_FLAT',
+        'ENC_FLAT_GLBL',
+        'ENC_FLAT_SCRATCH',
+    }
+)
 
-_GLC_REMAP_ENCODINGS = frozenset({
-    'ENC_SMEM',
-})
+_GLC_REMAP_ENCODINGS = frozenset(
+    {
+        'ENC_SMEM',
+    }
+)
 
 # Fields that participate in coherency remapping (source side)
 _COHERENCY_SRC_FIELDS = frozenset({'sc0', 'sc1', 'nt', 'glc'})
@@ -195,12 +206,12 @@ _COHERENCY_DST_FIELDS = frozenset({'scope', 'th'})
 class FieldMapping:
     """Describes how a single field maps from source to target encoding."""
 
-    kind: str           # 'copy', 'remap', 'drop', 'insert', 'coherency'
-    src_name: str       # field name on source ('' for insert)
-    dst_name: str       # field name on target ('' for drop)
-    src_bits: int       # bit width on source
-    dst_bits: int       # bit width on target
-    comment: str = ''   # human-readable explanation
+    kind: str  # 'copy', 'remap', 'drop', 'insert', 'coherency'
+    src_name: str  # field name on source ('' for insert)
+    dst_name: str  # field name on target ('' for drop)
+    src_bits: int  # bit width on source
+    dst_bits: int  # bit width on target
+    comment: str = ''  # human-readable explanation
 
 
 @dataclass
@@ -209,14 +220,14 @@ class EncodingTranslation:
 
     src_enc_name: str
     dst_enc_name: str
-    src_struct: str         # C++ struct name on source
-    dst_struct: str         # C++ struct name on target
+    src_struct: str  # C++ struct name on source
+    dst_struct: str  # C++ struct name on target
     src_bit_cnt: int
     dst_bit_cnt: int
     mappings: list[FieldMapping] = field(default_factory=list)
     has_coherency_remap: bool = False
     has_glc_remap: bool = False
-    src_dt_index: int = 0       # primary decode table index (for dispatch)
+    src_dt_index: int = 0  # primary decode table index (for dispatch)
     src_enc_field_bit_cnt: int = 9  # encoding field width in bits
     dst_enc_field_val: int = 0  # actual encoding bitfield value (for dst.encoding)
 
@@ -323,27 +334,45 @@ def _classify_fields(
 
         # Coherency fields handled specially
         if has_coherency_remap and sname in _COHERENCY_SRC_FIELDS:
-            mappings.append(FieldMapping(
-                'coherency', sname, '', sf.bit_cnt, 0,
-                f'coherency remap: {sname} -> scope/th',
-            ))
+            mappings.append(
+                FieldMapping(
+                    'coherency',
+                    sname,
+                    '',
+                    sf.bit_cnt,
+                    0,
+                    f'coherency remap: {sname} -> scope/th',
+                )
+            )
             continue
 
         if has_glc_remap and sname == 'glc':
-            mappings.append(FieldMapping(
-                'glc_remap', sname, '', sf.bit_cnt, 0,
-                f'GLC remap: glc -> scope/th',
-            ))
+            mappings.append(
+                FieldMapping(
+                    'glc_remap',
+                    sname,
+                    '',
+                    sf.bit_cnt,
+                    0,
+                    f'GLC remap: glc -> scope/th',
+                )
+            )
             continue
 
         # Direct match (same name)
         if sname in dst_fields:
             df = dst_fields[sname]
             matched_dst.add(sname)
-            mappings.append(FieldMapping(
-                'copy', sname, sname, sf.bit_cnt, df.bit_cnt,
-                f'COPY {sname} ({sf.bit_cnt}b -> {df.bit_cnt}b)',
-            ))
+            mappings.append(
+                FieldMapping(
+                    'copy',
+                    sname,
+                    sname,
+                    sf.bit_cnt,
+                    df.bit_cnt,
+                    f'COPY {sname} ({sf.bit_cnt}b -> {df.bit_cnt}b)',
+                )
+            )
             continue
 
         # Rename match
@@ -351,10 +380,16 @@ def _classify_fields(
         if renamed and renamed in dst_fields:
             df = dst_fields[renamed]
             matched_dst.add(renamed)
-            mappings.append(FieldMapping(
-                'remap', sname, renamed, sf.bit_cnt, df.bit_cnt,
-                f'REMAP {sname} -> {renamed} ({sf.bit_cnt}b -> {df.bit_cnt}b)',
-            ))
+            mappings.append(
+                FieldMapping(
+                    'remap',
+                    sname,
+                    renamed,
+                    sf.bit_cnt,
+                    df.bit_cnt,
+                    f'REMAP {sname} -> {renamed} ({sf.bit_cnt}b -> {df.bit_cnt}b)',
+                )
+            )
             continue
 
         # Reverse rename match
@@ -362,17 +397,29 @@ def _classify_fields(
         if rev_renamed and rev_renamed in dst_fields:
             df = dst_fields[rev_renamed]
             matched_dst.add(rev_renamed)
-            mappings.append(FieldMapping(
-                'remap', sname, rev_renamed, sf.bit_cnt, df.bit_cnt,
-                f'REMAP {sname} -> {rev_renamed} ({sf.bit_cnt}b -> {df.bit_cnt}b)',
-            ))
+            mappings.append(
+                FieldMapping(
+                    'remap',
+                    sname,
+                    rev_renamed,
+                    sf.bit_cnt,
+                    df.bit_cnt,
+                    f'REMAP {sname} -> {rev_renamed} ({sf.bit_cnt}b -> {df.bit_cnt}b)',
+                )
+            )
             continue
 
         # No match -> DROP
-        mappings.append(FieldMapping(
-            'drop', sname, '', sf.bit_cnt, 0,
-            f'DROP {sname} ({sf.bit_cnt}b) -- not present on target',
-        ))
+        mappings.append(
+            FieldMapping(
+                'drop',
+                sname,
+                '',
+                sf.bit_cnt,
+                0,
+                f'DROP {sname} ({sf.bit_cnt}b) -- not present on target',
+            )
+        )
 
     # INSERT: target fields not matched by any source field
     for dname, df in dst_fields.items():
@@ -383,10 +430,16 @@ def _classify_fields(
         # Coherency destination fields are handled by the coherency remap
         if (has_coherency_remap or has_glc_remap) and dname in _COHERENCY_DST_FIELDS:
             continue
-        mappings.append(FieldMapping(
-            'insert', '', dname, 0, df.bit_cnt,
-            f'INSERT {dname} ({df.bit_cnt}b) -- new on target, default 0',
-        ))
+        mappings.append(
+            FieldMapping(
+                'insert',
+                '',
+                dname,
+                0,
+                df.bit_cnt,
+                f'INSERT {dname} ({df.bit_cnt}b) -- new on target, default 0',
+            )
+        )
 
     return mappings
 
@@ -474,16 +527,25 @@ def generate_encoding_fields(all_specs, output_dir):
             enc_fields[enc_name] = _all_field_names_from_encodings(encodings)
             enc_dt_index[enc_name] = _dt_index(encodings[0], rep_spec)
 
-    lines = [_COPYRIGHT, '', '#pragma once', '',
-             '#include <cstdint>', '',
-             'namespace rocjitsu {', '']
+    lines = [
+        _COPYRIGHT,
+        '',
+        '#pragma once',
+        '',
+        '#include <cstdint>',
+        '',
+        'namespace rocjitsu {',
+        '',
+    ]
     # Emit universal encoding-format ID constants once. Per-pair translator
     # headers reference these via #include "encoding_fields.h", so they MUST
     # NOT redefine them at namespace scope (ODR violation when more than one
     # per-pair header is included in the same translation unit).
     for enc_name in sorted(enc_dt_index):
         cn = enc_name.upper().replace('ENC_', '')
-        lines.append(f'inline constexpr uint32_t kEnc_{cn} = 0x{enc_dt_index[enc_name]:X};')
+        lines.append(
+            f'inline constexpr uint32_t kEnc_{cn} = 0x{enc_dt_index[enc_name]:X};'
+        )
     lines.append('')
     for enc_name in sorted(enc_fields):
         lines.extend(_emit_fields_struct(enc_name, enc_fields[enc_name]))
@@ -493,8 +555,11 @@ def generate_encoding_fields(all_specs, output_dir):
     path.write_text('\n'.join(lines))
     _clang_format(path)
 
-    print(f'Generated encoding_fields.h with {len(enc_fields)} field structs '
-          f'from {len(all_specs)} ISAs', file=sys.stderr)
+    print(
+        f'Generated encoding_fields.h with {len(enc_fields)} field structs '
+        f'from {len(all_specs)} ISAs',
+        file=sys.stderr,
+    )
     return str(path)
 
 
@@ -502,8 +567,9 @@ def _emit_decode_fn(trans, src_ns, src_name):
     base = trans.src_enc_name.lower().replace('enc_', '')
     fn = f'decode_{base}_{src_name}'
     fsname = _fields_struct_name(trans.src_enc_name)
-    src_fmap = {f.name: f for f in
-                [ff for ff in __import__('itertools').chain([], [])]}  # unused placeholder
+    src_fmap = {
+        f.name: f for f in [ff for ff in __import__('itertools').chain([], [])]
+    }  # unused placeholder
 
     bit_cnt = trans.src_bit_cnt
     full_type = f'{src_ns}::{trans.src_struct}'
@@ -556,14 +622,18 @@ def _emit_encode_fn(trans, dst_ns, dst_name):
     bit_cnt = trans.dst_bit_cnt
 
     lines = []
-    lines.append(f'inline TranslationResult {fn}(const {fsname} &f, uint16_t dst_op) {{')
+    lines.append(
+        f'inline TranslationResult {fn}(const {fsname} &f, uint16_t dst_op) {{'
+    )
     lines.append(f'    {full_type} dst{{}};')
     lines.append(f'    dst.encoding = 0x{trans.dst_enc_field_val:X};')
     lines.append(f'    dst.op = dst_op;')
 
     # Coherency remap
     if trans.has_coherency_remap:
-        lines.append(f'    auto coh = remap_gfx940_to_gfx12({{uint8_t(f.sc0), uint8_t(f.sc1), uint8_t(f.nt)}});')
+        lines.append(
+            f'    auto coh = remap_gfx940_to_gfx12({{uint8_t(f.sc0), uint8_t(f.sc1), uint8_t(f.nt)}});'
+        )
         lines.append(f'    dst.scope = coh.scope;')
         lines.append(f'    dst.th = coh.th;')
     elif trans.has_glc_remap:
@@ -598,7 +668,9 @@ def _emit_encode_fn(trans, dst_ns, dst_name):
     if _uses_rdna_null_sgpr_sentinel(dst_name):
         if any(m.src_name == 'saddr' or m.dst_name == 'saddr' for m in trans.mappings):
             lines.append('    if (dst.saddr == 0x7F) dst.saddr = 0x7C;')
-        if any(m.src_name == 'soffset' or m.dst_name == 'soffset' for m in trans.mappings):
+        if any(
+            m.src_name == 'soffset' or m.dst_name == 'soffset' for m in trans.mappings
+        ):
             lines.append('    if (dst.soffset == 0x7F) dst.soffset = 0x7C;')
             # CDNA SMEM uses soffset_en=0 to disable scalar offset. RDNA uses soffset=0x7C (null).
             if any(m.src_name == 'soffset_en' for m in trans.mappings):
@@ -606,7 +678,9 @@ def _emit_encode_fn(trans, dst_ns, dst_name):
 
     # Return
     if bit_cnt <= 32:
-        lines.append(f'    return TranslationResult{{{{std::bit_cast<uint32_t>(dst), 0u, 0u}}, uint8_t{{1}}}};')
+        lines.append(
+            f'    return TranslationResult{{{{std::bit_cast<uint32_t>(dst), 0u, 0u}}, uint8_t{{1}}}};'
+        )
     else:
         n = bit_cnt // 32
         lines.append(f'    TranslationResult r{{}};')
@@ -630,7 +704,9 @@ def _emit_dispatch(translations, src_name, dst_name):
 
     fn = f'translate_encoding_{src_name}_to_{dst_name}'
     lines.append(f'inline TranslationResult {fn}(')
-    lines.append(f'    uint32_t encoding_id, uint32_t w0, uint32_t w1, [[maybe_unused]] uint32_t w2,')
+    lines.append(
+        f'    uint32_t encoding_id, uint32_t w0, uint32_t w1, [[maybe_unused]] uint32_t w2,'
+    )
     lines.append(f'    uint16_t dst_op) {{')
     # Build a priority-ordered lookup table: (enc_bits, base_val) sorted
     # by ascending bit count. Encodings with fewer bits must be tried first
@@ -662,7 +738,11 @@ def _emit_dispatch(translations, src_name, dst_name):
             base = t.src_enc_name.lower().replace('enc_', '')
             dec_fn = f'decode_{base}_{src_name}'
             enc_fn = f'encode_{base}_{dst_name}'
-            args = 'w0' if t.src_bit_cnt <= 32 else ('w0, w1' if t.src_bit_cnt == 64 else 'w0, w1, w2')
+            args = (
+                'w0'
+                if t.src_bit_cnt <= 32
+                else ('w0, w1' if t.src_bit_cnt == 64 else 'w0, w1, w2')
+            )
             lines.append(f'    case kEnc_{cn}:')
             lines.append(f'        return {enc_fn}({dec_fn}({args}), dst_op);')
         else:
@@ -683,8 +763,14 @@ def _emit_dispatch(translations, src_name, dst_name):
                 base = t.src_enc_name.lower().replace('enc_', '')
                 dec_fn = f'decode_{base}_{src_name}'
                 enc_fn = f'encode_{base}_{dst_name}'
-                args = 'w0' if t.src_bit_cnt <= 32 else ('w0, w1' if t.src_bit_cnt == 64 else 'w0, w1, w2')
-                lines.append(f'        case {sv}: return {enc_fn}({dec_fn}({args}), dst_op);')
+                args = (
+                    'w0'
+                    if t.src_bit_cnt <= 32
+                    else ('w0, w1' if t.src_bit_cnt == 64 else 'w0, w1, w2')
+                )
+                lines.append(
+                    f'        case {sv}: return {enc_fn}({dec_fn}({args}), dst_op);'
+                )
             lines.append(f'        default: break;')
             lines.append(f'        }}')
             lines.append(f'        break;')
@@ -701,8 +787,8 @@ def _emit_dispatch(translations, src_name, dst_name):
     if need_norm:
         # Build a static mapping from mask → base value, widest first.
         norm_entries_wide = sorted(
-            [(b, v) for b, v in enc_entries if b < 9],
-            key=lambda x: -x[0])
+            [(b, v) for b, v in enc_entries if b < 9], key=lambda x: -x[0]
+        )
         for bits, base_val in norm_entries_wide:
             mask = ((1 << bits) - 1) << (9 - bits)
             cn_n = val_groups[base_val][0].src_enc_name.upper().replace('ENC_', '')
@@ -719,18 +805,27 @@ def _emit_dispatch(translations, src_name, dst_name):
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _extract_dt_indices(spec, enc_names):
-    return {n: _dt_index(spec.encoding_map[n], spec)
-            for n in enc_names if n in spec.encoding_map}
+    return {
+        n: _dt_index(spec.encoding_map[n], spec)
+        for n in enc_names
+        if n in spec.encoding_map
+    }
+
 
 def _extract_enc_field_values(spec, enc_names):
-    return {n: _enc_field_value(spec.encoding_map[n], spec)
-            for n in enc_names if n in spec.encoding_map}
+    return {
+        n: _enc_field_value(spec.encoding_map[n], spec)
+        for n in enc_names
+        if n in spec.encoding_map
+    }
 
 
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
+
 
 def generate_encoding_translators(src_spec, dst_spec, src_name, dst_name, output_dir):
     output_dir = Path(output_dir)
@@ -738,8 +833,11 @@ def generate_encoding_translators(src_spec, dst_spec, src_name, dst_name, output
 
     enc_map = _PAIR_ENC_MAPS.get((src_name, dst_name))
     if enc_map is None:
-        print(f'warning: no encoding map for ({src_name}, {dst_name}); '
-              f'no translator will be generated', file=sys.stderr)
+        print(
+            f'warning: no encoding map for ({src_name}, {dst_name}); '
+            f'no translator will be generated',
+            file=sys.stderr,
+        )
         return []
     src_encs = [e.enc_name for e in src_spec.inst_encodings]
     dst_encs = [e.enc_name for e in dst_spec.inst_encodings]
@@ -750,9 +848,11 @@ def generate_encoding_translators(src_spec, dst_spec, src_name, dst_name, output
     skipped = []
     for se, de in enc_map.items():
         if se not in src_spec.encoding_map:
-            skipped.append(se); continue
+            skipped.append(se)
+            continue
         if de not in dst_spec.encoding_map:
-            skipped.append(de); continue
+            skipped.append(de)
+            continue
         src_enc = src_spec.encoding_map[se]
         dst_enc = dst_spec.encoding_map[de]
         # The coherency remap targets GFX12-style scope/th fields. If the
@@ -760,47 +860,60 @@ def generate_encoding_translators(src_spec, dst_spec, src_name, dst_name, output
         # glc/dlc), suppress the remap so the regular field-by-field copy
         # path handles glc/dlc directly.
         dst_field_names = {f.name for f in dst_enc.ucode_fields}
-        dst_has_scope_th = ('scope' in dst_field_names and 'th' in dst_field_names)
+        dst_has_scope_th = 'scope' in dst_field_names and 'th' in dst_field_names
         has_coherency_remap = (se in _COHERENCY_REMAP_ENCODINGS) and dst_has_scope_th
         has_glc_remap = (se in _GLC_REMAP_ENCODINGS) and dst_has_scope_th
-        translations.append(EncodingTranslation(
-            src_enc_name=se, dst_enc_name=de,
-            src_struct=_struct_name(se), dst_struct=_struct_name(de),
-            src_bit_cnt=src_enc.bit_cnt, dst_bit_cnt=dst_enc.bit_cnt,
-            mappings=_classify_fields(
-                src_enc, dst_enc, se,
+        translations.append(
+            EncodingTranslation(
+                src_enc_name=se,
+                dst_enc_name=de,
+                src_struct=_struct_name(se),
+                dst_struct=_struct_name(de),
+                src_bit_cnt=src_enc.bit_cnt,
+                dst_bit_cnt=dst_enc.bit_cnt,
+                mappings=_classify_fields(
+                    src_enc,
+                    dst_enc,
+                    se,
+                    has_coherency_remap=has_coherency_remap,
+                    has_glc_remap=has_glc_remap,
+                ),
                 has_coherency_remap=has_coherency_remap,
                 has_glc_remap=has_glc_remap,
-            ),
-            has_coherency_remap=has_coherency_remap,
-            has_glc_remap=has_glc_remap,
-            src_dt_index=src_dts.get(se, 0),
-            src_enc_field_bit_cnt=src_enc.enc_field_bit_cnt,
-            dst_enc_field_val=dst_evs.get(de, 0),
-        ))
+                src_dt_index=src_dts.get(se, 0),
+                src_enc_field_bit_cnt=src_enc.enc_field_bit_cnt,
+                dst_enc_field_val=dst_evs.get(de, 0),
+            )
+        )
     translations.sort(key=lambda t: (t.src_bit_cnt, t.src_enc_name))
 
     src_ns = f'rocjitsu::{src_name}'
     dst_ns = f'rocjitsu::{dst_name}'
 
     # Emit per-pair decode/encode/dispatch (encoding_fields.h generated separately)
-    pair_lines = [_COPYRIGHT, '', '#pragma once', '',
-                  '#include <array>',
-                  '#include <bit>',
-                  '#include <cstdint>',
-                  '#include <cstring>',
-                  '',
-                  f'#include "rocjitsu/isa/arch/amdgpu/{src_name}/machine_insts.h"',
-                  f'#include "rocjitsu/isa/arch/amdgpu/{dst_name}/machine_insts.h"',
-                  '#include "rocjitsu/code/dbt/encoding_translator.h"',
-                  '#include "encoding_fields.h"',
-                  '',
-                  'namespace rocjitsu {',
-                  '// Per-pair named namespace. Two pairs that share a source ISA',
-                  '// (e.g. cdna4->rdna3 and cdna4->rdna4) both emit decode_*_cdna4',
-                  '// helpers; isolating them per pair avoids ODR conflicts when',
-                  '// both headers are included in the same TU.',
-                  f'namespace {src_name}_to_{dst_name} {{', '']
+    pair_lines = [
+        _COPYRIGHT,
+        '',
+        '#pragma once',
+        '',
+        '#include <array>',
+        '#include <bit>',
+        '#include <cstdint>',
+        '#include <cstring>',
+        '',
+        f'#include "rocjitsu/isa/arch/amdgpu/{src_name}/machine_insts.h"',
+        f'#include "rocjitsu/isa/arch/amdgpu/{dst_name}/machine_insts.h"',
+        '#include "rocjitsu/code/dbt/encoding_translator.h"',
+        '#include "encoding_fields.h"',
+        '',
+        'namespace rocjitsu {',
+        '// Per-pair named namespace. Two pairs that share a source ISA',
+        '// (e.g. cdna4->rdna3 and cdna4->rdna4) both emit decode_*_cdna4',
+        '// helpers; isolating them per pair avoids ODR conflicts when',
+        '// both headers are included in the same TU.',
+        f'namespace {src_name}_to_{dst_name} {{',
+        '',
+    ]
 
     for t in translations:
         pair_lines.extend(_emit_decode_fn(t, src_ns, src_name))
@@ -808,15 +921,21 @@ def generate_encoding_translators(src_spec, dst_spec, src_name, dst_name, output
         pair_lines.extend(_emit_encode_fn(t, dst_ns, dst_name))
     pair_lines.extend(_emit_dispatch(translations, src_name, dst_name))
 
-    pair_lines += [f'}}  // namespace {src_name}_to_{dst_name}',
-                   '}  // namespace rocjitsu', '']
+    pair_lines += [
+        f'}}  // namespace {src_name}_to_{dst_name}',
+        '}  // namespace rocjitsu',
+        '',
+    ]
 
     pair_path = output_dir / f'encoding_{src_name}_to_{dst_name}.h'
     pair_path.write_text('\n'.join(pair_lines))
     _clang_format(pair_path)
 
-    print(f'Generated {len(translations)} encoding translators for '
-          f'{src_name} -> {dst_name}', file=sys.stderr)
+    print(
+        f'Generated {len(translations)} encoding translators for '
+        f'{src_name} -> {dst_name}',
+        file=sys.stderr,
+    )
     print(f'  Header: {pair_path}', file=sys.stderr)
     if skipped:
         print(f'  Skipped: {len(skipped)} encodings', file=sys.stderr)

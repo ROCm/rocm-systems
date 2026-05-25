@@ -1017,6 +1017,23 @@ target_link_libraries(rccl PRIVATE $<BUILD_INTERFACE:fmt::fmt-header-only>)
 if(ENABLE_ROCSHMEM)
   target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
   target_link_libraries(rccl PRIVATE ${IBVERBS})
+  # librocshmem.a is compiled with -fgpu-rdc (relocatable device code).
+  # The __hip_gpubin_handle_* symbols referenced by __hip_module_ctor in the
+  # librocshmem.a objects are only defined by the RDC device-link step.
+  # --hip-link tells amdclang++ to perform that step as part of the final
+  # librccl.so link; -fgpu-rdc marks the link as RDC-mode.  --offload-arch
+  # flags use RCCL's GPU_TARGETS (stripped of feature suffixes like :xnack-)
+  # so the device-link covers every arch RCCL is built for.
+  # RCCL's own device code (already embedded in device_build/common.o by the
+  # custom device-linker pipeline) is NOT compiled with -fgpu-rdc and is
+  # therefore unaffected by this device-link step.
+  set(_rocshmem_offload_arch_flags "")
+  foreach(_gpu_raw ${GPU_TARGETS})
+    string(REGEX REPLACE ":.*" "" _gpu "${_gpu_raw}")
+    list(APPEND _rocshmem_offload_arch_flags "--offload-arch=${_gpu}")
+  endforeach()
+  list(REMOVE_DUPLICATES _rocshmem_offload_arch_flags)
+  target_link_options(rccl PRIVATE -fgpu-rdc --hip-link ${_rocshmem_offload_arch_flags})
 endif()
 
 ## Set RCCL link options
