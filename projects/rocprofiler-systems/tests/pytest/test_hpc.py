@@ -168,6 +168,7 @@ class TestJacobi(RocprofsysTest):
             depths=[1, 1],
         )
 
+    @pytest.mark.rocm
     @pytest.mark.hip
     @pytest.mark.mpi
     @pytest.mark.rocpd("hpc_hip_environment")
