@@ -6,8 +6,11 @@
 #include "code_object_writer.h"
 #include "gsl_assert.h"
 
+#include <fmt/format.h>
+
 #include <ios>
 #include <iostream>
+#include <stdexcept>
 
 using namespace rocm_compute;
 
@@ -53,10 +56,18 @@ void pc_sampling_collector_impl_t::write(code_object_writer_t& writer)
             const uint64_t end = sym.virtual_address + sym.size;
             while (pc < end)
             {
-                const auto& inst = m_translator->get_instruction(id, pc);
-                Expects(inst.size);
-                writer.write_instruction(inst);
-                pc += inst.size;
+                const auto inst = m_translator->get_instruction(id, pc);
+                if (!inst)
+                {
+                    throw std::runtime_error(fmt::format(
+                        "[pc_sampling_collector] missed instruction lookup: "
+                        "object_id={}, pc=0x{:x}, symbol=\"{}\"",
+                        id,
+                        pc,
+                        sym.name));
+                }
+                writer.write_instruction(*inst);
+                pc += inst->size;
             }
             writer.end_symbol();
         }

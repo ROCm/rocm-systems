@@ -37,8 +37,10 @@ std::vector<symbol_t> mock_code_object_translator_t::get_symbols(size_t object_i
     return {};
 }
 
-instruction_t mock_code_object_translator_t::get_instruction(size_t, uint64_t) const
+std::optional<instruction_t> mock_code_object_translator_t::get_instruction(size_t, uint64_t) const
 {
+    if (m_force_miss)
+        return std::nullopt;
     return m_instruction;
 }
 
@@ -51,6 +53,11 @@ void mock_code_object_translator_t::add_symbols(size_t object_id,
 void mock_code_object_translator_t::add_instruction(const rocm_compute::instruction_t& instruction)
 {
     m_instruction = instruction;
+}
+
+void mock_code_object_translator_t::force_instruction_miss()
+{
+    m_force_miss = true;
 }
 
 const std::vector<mock_code_object_translator_t::mem_code_object_info_t>&

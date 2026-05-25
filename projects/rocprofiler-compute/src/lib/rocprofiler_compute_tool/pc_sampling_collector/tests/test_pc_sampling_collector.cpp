@@ -2,7 +2,10 @@
 // SPDX-License-Identifier:  MIT
 #include "test_pc_sampling_collector.h"
 
+#include <gmock/gmock.h>
+
 using namespace rocm_compute;
+using ::testing::HasSubstr;
 
 TEST_F(test_pc_sampling_collector_t, ProvidedFileCodeObject_PassesItToDecode)
 {
@@ -71,16 +74,24 @@ TEST_F(test_pc_sampling_collector_t, ProvidedSymbolInstructions_WritesThem)
     EXPECT_EQ(m_writer->get_instruction_descriptions().size(), symbols[0].size * 2);
 }
 
-TEST_F(test_pc_sampling_collector_t, ProvidedSymbolInstructionSizeZero_Throws)
+TEST_F(test_pc_sampling_collector_t, ProvidedSymbolInstructionLookupMiss_Throws)
 {
     m_pc_sampling_collector->on_code_object_load(m_file_info);
-    m_pc_sampling_collector->on_code_object_load(m_mem_info);
-    const std::vector<symbol_t> symbols = {{"name0", 0x10, 0x1000, 2}};
+    const std::vector<symbol_t> symbols = {{"my_symbol", 0x10, 0x1000, 2}};
     m_translator->add_symbols(m_file_info.code_object_id, symbols);
-    m_translator->add_symbols(m_mem_info.code_object_id, symbols);
-    const instruction_t instruction = {"inst0", "comment0", 0x1000, 0x10, 0};
-    m_translator->add_instruction(instruction);
-    EXPECT_THROW(m_pc_sampling_collector->write(*m_writer), std::runtime_error);
+    m_translator->force_instruction_miss();
+    try
+    {
+        m_pc_sampling_collector->write(*m_writer);
+        FAIL() << "expected std::runtime_error";
+    }
+    catch (const std::runtime_error& e)
+    {
+        const std::string what = e.what();
+        EXPECT_THAT(what, HasSubstr("my_symbol"));
+        EXPECT_THAT(what, HasSubstr(std::to_string(m_file_info.code_object_id)));
+        EXPECT_THAT(what, HasSubstr("0x1000"));
+    }
 }
 
 void test_pc_sampling_collector_t::SetUp()

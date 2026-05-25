@@ -65,14 +65,13 @@ std::vector<symbol_t> code_object_translator_impl_t::get_symbols(size_t object_i
     return symbol_map;
 }
 
-instruction_t code_object_translator_impl_t::get_instruction(size_t /*object_id*/,
-                                                             uint64_t virtual_address) const
+std::optional<instruction_t> code_object_translator_impl_t::get_instruction(
+    size_t /*object_id*/,
+    uint64_t virtual_address) const
 {
     auto        lock = std::shared_lock{m_mutex};
     const auto& inst = m_translator->get(virtual_address);
-    if (inst)
-    {
-        return {inst->inst, inst->comment, virtual_address, inst->faddr, inst->size};
-    }
-    return {};
+    if (!inst)
+        return std::nullopt;
+    return instruction_t{inst->inst, inst->comment, virtual_address, inst->faddr, inst->size};
 }

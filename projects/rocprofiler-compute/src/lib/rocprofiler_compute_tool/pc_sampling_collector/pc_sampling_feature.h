@@ -3,7 +3,6 @@
 #pragma once
 
 #include "pc_sampling_collector.h"
-#include "synchronized.hpp"
 
 #include <cstdint>
 #include <filesystem>
@@ -29,8 +28,8 @@ struct pc_sampling_feature_t
     {
     }
 
-    PcSamplingMode                               mode;
-    std::filesystem::path                        output_filename;
-    synchronized_t<pc_sampling_collector_t::ptr> collector;
+    PcSamplingMode               mode;
+    std::filesystem::path        output_filename;
+    pc_sampling_collector_t::ptr collector;
 };
 }  // namespace rocm_compute

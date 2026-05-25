@@ -22,7 +22,7 @@ add_library(
 target_include_directories(${target} PUBLIC .)
 target_link_libraries(
     ${target}
-    PUBLIC rocprofiler-sdk::rocprofiler-sdk gsl_assert synchronized
+    PUBLIC rocprofiler-sdk::rocprofiler-sdk gsl_assert
     PRIVATE pc-sampling-collector nlohmann_json
 )
 

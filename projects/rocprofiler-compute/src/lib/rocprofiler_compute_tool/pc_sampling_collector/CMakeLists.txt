@@ -20,11 +20,11 @@ target_link_libraries(
     PUBLIC
         rocprofiler-sdk::rocprofiler-sdk
         gsl_assert
-        synchronized
     PRIVATE
         libdw::libdw
         amd_comgr
         nlohmann_json
+        fmt::fmt
 )
 
 if(ENABLE_TESTS)

@@ -266,7 +266,7 @@ TEST_F(test_rocprofiler_compute_tool_t, OnFiniWithHostTrapPcSamplingEnabled_Writ
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto tool_data = get_tool_data(cfg);
     ASSERT_TRUE(tool_data->pc_sampling);
-    tool_data->pc_sampling->collector.wlock([&](auto& ptr) { ptr = m_pc_sampling_collector; });
+    tool_data->pc_sampling->collector = m_pc_sampling_collector;
     cfg->finalize(tool_data);
     EXPECT_EQ(m_pc_sampling_collector->get_write_count(), 1);
 }
@@ -277,7 +277,7 @@ TEST_F(test_rocprofiler_compute_tool_t, OnFiniWithStochasticPcSamplingEnabled_Wr
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto tool_data = get_tool_data(cfg);
     ASSERT_TRUE(tool_data->pc_sampling);
-    tool_data->pc_sampling->collector.wlock([&](auto& ptr) { ptr = m_pc_sampling_collector; });
+    tool_data->pc_sampling->collector = m_pc_sampling_collector;
     cfg->finalize(tool_data);
     EXPECT_EQ(m_pc_sampling_collector->get_write_count(), 1);
 }

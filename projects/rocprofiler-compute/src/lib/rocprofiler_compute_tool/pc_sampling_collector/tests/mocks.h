@@ -4,6 +4,7 @@
 #include "code_object_translator.h"
 #include "code_object_writer.h"
 
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -37,10 +38,12 @@ public:
 
     std::vector<size_t>                 get_code_object_ids() const override;
     std::vector<rocm_compute::symbol_t> get_symbols(size_t object_id) const override;
-    rocm_compute::instruction_t get_instruction(size_t object_id, uint64_t virtual_address) const override;
+    std::optional<rocm_compute::instruction_t> get_instruction(size_t   object_id,
+                                                               uint64_t virtual_address) const override;
 
     void add_symbols(size_t object_id, const std::vector<rocm_compute::symbol_t>& symbols);
     void add_instruction(const rocm_compute::instruction_t& instruction);
+    void force_instruction_miss();
 
     const std::vector<mem_code_object_info_t>&  get_mem_code_object_info() const;
     const std::vector<file_code_object_info_t>& get_file_code_object_info() const;
@@ -50,7 +53,8 @@ private:
     std::vector<file_code_object_info_t>                            m_file_code_obj_info;
     std::vector<size_t>                                             m_code_object_ids;
     std::unordered_map<size_t, std::vector<rocm_compute::symbol_t>> m_symbols_per_obj;
-    rocm_compute::instruction_t m_instruction = {"", "", 0, 0, 1};
+    rocm_compute::instruction_t                                     m_instruction = {"", "", 0, 0, 1};
+    bool                                                            m_force_miss  = false;
 };
 
 class mock_code_object_writer_t : public rocm_compute::code_object_writer_t

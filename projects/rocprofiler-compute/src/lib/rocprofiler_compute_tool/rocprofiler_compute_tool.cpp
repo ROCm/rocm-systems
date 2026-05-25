@@ -111,12 +111,9 @@ void code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 Expects(record.payload);
                 auto* obj_data = static_cast<rocprofiler_callback_tracing_code_object_load_data_t*>(
                     record.payload);
-                tool_data->pc_sampling->collector.rlock(
-                    [&](const pc_sampling_collector_t::ptr& collector)
-                    {
-                        Expects(collector);
-                        collector->on_code_object_load(*obj_data);
-                    });
+                const auto& collector = tool_data->pc_sampling->collector;
+                Expects(collector);
+                collector->on_code_object_load(*obj_data);
             }
         }
         break;
@@ -172,12 +169,9 @@ void generate_output(tool_data_t& tool_data)
     if (tool_data.pc_sampling)
     {
         code_object_writer_json_t obj_writer;
-        tool_data.pc_sampling->collector.rlock(
-            [&](const pc_sampling_collector_t::ptr& ptr)
-            {
-                Expects(ptr);
-                ptr->write(obj_writer);
-            });
+        const auto&               collector = tool_data.pc_sampling->collector;
+        Expects(collector);
+        collector->write(obj_writer);
         obj_writer.flush(tool_data.pc_sampling->output_filename);
     }
 }

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <optional>
 #include <shared_mutex>
 #include <string>
 #include <vector>
@@ -48,7 +49,8 @@ public:
                                                          uint64_t load_size)  = 0;
     virtual std::vector<size_t>   get_code_object_ids() const                 = 0;
     virtual std::vector<symbol_t> get_symbols(size_t object_id) const         = 0;
-    virtual instruction_t get_instruction(size_t object_id, uint64_t virtual_address) const = 0;
+    virtual std::optional<instruction_t> get_instruction(size_t   object_id,
+                                                         uint64_t virtual_address) const = 0;
 };
 
 class code_object_translator_impl_t : public code_object_translator_t
@@ -65,7 +67,8 @@ public:
 
     std::vector<size_t>   get_code_object_ids() const override;
     std::vector<symbol_t> get_symbols(size_t object_id) const override;
-    instruction_t get_instruction(size_t object_id, uint64_t virtual_address) const override;
+    std::optional<instruction_t> get_instruction(size_t   object_id,
+                                                 uint64_t virtual_address) const override;
 
 private:
     mutable std::shared_mutex                                                        m_mutex;
