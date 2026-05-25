@@ -23,28 +23,31 @@ import common  # noqa: F401  -- adds src/ to sys.path
 import pytest
 
 # Guard torch / loader imports so this module still loads on CPU-only
-# hosts; each test below picks up the require_torch_gpu fixture via the
-# module-level pytestmark and skips per-test when torch or CUDA is
-# unavailable. A module-level pytest.skip(..., allow_module_level=True)
-# or top-level pytest.importorskip("torch") would collect zero items and
-# make pytest exit with code 5 ("no tests collected"), which CTest reads
+# hosts; each test below skips via the autouse _require_gpu fixture
+# when torch or CUDA is unavailable. A module-level
+# pytest.skip(..., allow_module_level=True) or top-level
+# pytest.importorskip("torch") would collect zero items and make
+# pytest exit with code 5 ("no tests collected"), which CTest reads
 # as a test failure.
 if importlib.util.find_spec("torch") is not None:
     import torch  # noqa: E402
 
     from utils import inject_roctx_loader  # noqa: E402
 
-pytestmark = pytest.mark.usefixtures("require_torch_gpu")
+
+@pytest.fixture(autouse=True)
+def _require_gpu(require_torch):
+    require_torch(gpu=True)
 
 
 @pytest.fixture(scope="module")
 def loaded_module():
-    # Duplicates the require_torch_gpu check because pytest does not
-    # guarantee that a function-scoped fixture resolves before a
-    # module-scoped one. Without this, a CPU-only host where
-    # loaded_module happens to resolve first would attempt to call into
-    # the loader (and reference inject_roctx_loader, which is not bound
-    # on CPU-only hosts) before require_torch_gpu got a chance to skip.
+    # Duplicates the GPU check because pytest does not guarantee that
+    # a function-scoped fixture resolves before a module-scoped one.
+    # Without this, a CPU-only host where loaded_module happens to
+    # resolve first would attempt to call into the loader (and
+    # reference inject_roctx_loader, which is not bound on CPU-only
+    # hosts) before _require_gpu got a chance to skip.
     if importlib.util.find_spec("torch") is None:
         pytest.skip("PyTorch is not installed")
     if not torch.cuda.is_available():

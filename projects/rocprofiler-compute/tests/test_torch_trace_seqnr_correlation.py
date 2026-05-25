@@ -27,26 +27,28 @@ import common  # noqa: F401  -- adds src/ to sys.path
 import pytest
 
 # Guard torch / loader imports so this module still loads on CPU-only
-# hosts; each test below picks up the require_torch_gpu fixture via the
-# module-level pytestmark and skips per-test when torch or CUDA is
-# unavailable. A module-level pytest.skip(..., allow_module_level=True)
-# or top-level pytest.importorskip("torch") would collect zero items and
-# make pytest exit with code 5 ("no tests collected"), which CTest reads
+# hosts; each test below skips via the autouse _require_gpu fixture
+# when torch or CUDA is unavailable. A module-level
+# pytest.skip(..., allow_module_level=True) or top-level
+# pytest.importorskip("torch") would collect zero items and make
+# pytest exit with code 5 ("no tests collected"), which CTest reads
 # as a test failure.
 if importlib.util.find_spec("torch") is not None:
     import torch  # noqa: E402
 
     from utils import inject_roctx_loader  # noqa: E402
 
-pytestmark = pytest.mark.usefixtures("require_torch_gpu")
+
+@pytest.fixture(autouse=True)
+def _require_gpu(require_torch):
+    require_torch(gpu=True)
 
 
 @pytest.fixture(scope="module")
 def mod():
-    # Duplicates the require_torch_gpu check because pytest does not
-    # guarantee that a function-scoped fixture resolves before a
-    # module-scoped one. See test_torch_trace_worker_thread.py for the
-    # full rationale.
+    # Duplicates the GPU check because pytest does not guarantee that
+    # a function-scoped fixture resolves before a module-scoped one.
+    # See test_torch_trace_worker_thread.py for the full rationale.
     if importlib.util.find_spec("torch") is None:
         pytest.skip("PyTorch is not installed")
     if not torch.cuda.is_available():

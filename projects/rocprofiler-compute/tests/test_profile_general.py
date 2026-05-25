@@ -2799,7 +2799,7 @@ def test_iteration_multiplexing_data_types(
 
 @pytest.mark.torch_trace
 def test_torch_trace_profile(
-    require_torch_gpu,
+    require_torch,
     binary_handler_profile_rocprof_compute,
     binary_handler_analyze_rocprof_compute,
     capsys,
@@ -2815,6 +2815,7 @@ def test_torch_trace_profile(
     kernel IDs, sort order).
     Requires PyTorch and GPU; not included in default suite.
     """
+    require_torch(gpu=True)
     workload_dir = common.get_output_dir(param_id="torch_trace")
 
     # --torch-trace needs --experimental for profiling
@@ -3135,14 +3136,13 @@ def test_torch_trace_profile(
 
 
 @pytest.mark.torch_trace
-def test_torch_trace_overhead(
-    require_torch_gpu, binary_handler_profile_rocprof_compute
-):
+def test_torch_trace_overhead(require_torch, binary_handler_profile_rocprof_compute):
     """
     Measure overhead introduced by --torch-trace flag.
     Compares execution time with and without the flag to ensure overhead is acceptable.
     NOTE: Not included in the test suite since this requires PyTorch and GPU.
     """
+    require_torch(gpu=True)
     # Run WITHOUT --torch-trace (baseline)
     workload_dir_baseline = common.get_output_dir(param_id="torch_trace_baseline")
     start_baseline = time.time()
@@ -3447,13 +3447,14 @@ def test_multi_rank_no_warning_with_iteration_multiplexing(
     ],
 )
 def test_profile_invalid_workloads_torch_trace(
-    require_torch_gpu,
+    require_torch,
     binary_handler_profile_rocprof_compute,
     workload_cmd,
     expected_exit,
     request,
 ):
     """Integration test: workload validation exit codes with --torch-trace."""
+    require_torch(gpu=True)
     app_name = "test_invalid_workload"
     test_config = {**config, app_name: workload_cmd}
 

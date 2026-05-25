@@ -26,8 +26,8 @@ import pytest
 
 # torch_trace_coverage_utils imports torch unconditionally. Guard the
 # symbol import so this module still loads on CPU-only hosts; each test
-# below picks up the require_torch fixture via the module-level
-# pytestmark and skips per-test when torch is unavailable. A module-level
+# below skips via the autouse _require_torch_present fixture when torch
+# is unavailable. A module-level
 # pytest.skip(..., allow_module_level=True) would collect zero items and
 # make pytest exit with code 5 ("no tests collected"), which CTest reads
 # as a test failure.
@@ -42,7 +42,10 @@ if importlib.util.find_spec("torch") is not None:
         format_cpp_tier_signature_report,
     )
 
-pytestmark = pytest.mark.usefixtures("require_torch")
+
+@pytest.fixture(autouse=True)
+def _require_torch_present(require_torch):
+    require_torch()
 
 
 def _marker_df(*function_cells):

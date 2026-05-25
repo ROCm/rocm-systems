@@ -44,7 +44,7 @@ def torch_trace_coverage_sampling(request):
 
 @pytest.mark.torch_trace
 def test_random_operator_kernel_coverage(
-    require_torch_gpu,
+    require_torch,
     request,
     binary_handler_profile_rocprof_compute,
     torch_trace_coverage_sampling,
@@ -56,6 +56,7 @@ def test_random_operator_kernel_coverage(
     mismatches are reported (stdout + UserWarning) and fail the test.
     SKIPs (builder gaps, ground-truth errors, etc.) do not fail.
     """
+    require_torch(gpu=True)
     from collections import Counter, defaultdict
 
     from torch_trace_coverage_utils import (
