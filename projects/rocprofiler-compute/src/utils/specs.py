@@ -45,7 +45,8 @@ VERSION_LOC: list[str] = [
 
 
 def run(cmd: list[str]) -> Optional[str]:
-    """Run a command and return stdout, or None if it fails."""
+    """Run a command and return stdout, aborting on execution failures."""
+    cmd_str = " ".join(cmd)
     try:
         completed = subprocess.run(
             cmd,
@@ -53,10 +54,16 @@ def run(cmd: list[str]) -> Optional[str]:
             capture_output=True,
             text=True,
         )
-    except (FileNotFoundError, OSError):
-        return None
+    except FileNotFoundError as exc:
+        console_error(f"Required command not found: {cmd_str} ({exc})")
+    except OSError as exc:
+        console_error(f"Failed to execute command: {cmd_str} ({exc})")
     if completed.returncode != 0:
-        return None
+        stderr = completed.stderr.strip()
+        message = f"Command failed with exit code {completed.returncode}: {cmd_str}"
+        if stderr:
+            message += f". stderr: {stderr}"
+        console_error(message)
     return completed.stdout
 
 

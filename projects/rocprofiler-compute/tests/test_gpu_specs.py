@@ -6,6 +6,7 @@ import re
 import subprocess
 import tempfile
 from pathlib import Path
+from subprocess import CompletedProcess
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -13,11 +14,13 @@ import common
 import pytest
 
 try:
+    import src.utils.specs as specs
     from src.rocprof_compute_soc.soc_base import OmniSoC_Base
     from src.utils.file_io import is_single_panel_config
     from src.utils.gpu_arch import canonical_config_arch
     from src.utils.specs import generate_machine_specs
 except Exception:
+    import utils.specs as specs
     from rocprof_compute_soc.soc_base import OmniSoC_Base
     from utils.file_io import is_single_panel_config
     from utils.gpu_arch import canonical_config_arch
@@ -195,6 +198,28 @@ def test_load_yaml_generic_exception():
     with patch("builtins.open", side_effect=PermissionError("Access denied")):
         with pytest.raises(PermissionError, match="Access denied"):
             MIGPUSpecs._load_yaml("some_file.yaml")
+
+
+@pytest.mark.misc
+def test_run_fails_fast_when_command_missing():
+    with patch.object(
+        specs.subprocess, "run", side_effect=FileNotFoundError("missing")
+    ):
+        with pytest.raises(SystemExit):
+            specs.run(["rocminfo"])
+
+
+@pytest.mark.misc
+def test_run_fails_fast_on_nonzero_exit():
+    with patch.object(
+        specs.subprocess,
+        "run",
+        return_value=CompletedProcess(
+            args=["rocminfo"], returncode=1, stdout="", stderr="boom"
+        ),
+    ):
+        with pytest.raises(SystemExit):
+            specs.run(["rocminfo"])
 
 
 @pytest.mark.misc
