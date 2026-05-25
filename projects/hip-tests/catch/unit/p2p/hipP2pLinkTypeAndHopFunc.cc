@@ -199,9 +199,6 @@ bool testhipLinkTypeHopcountDevice(int numDevices) {
   if (lib_rocm_smi_hdl == nullptr) {
     lib_rocm_smi_hdl = dlopen("/opt/rocm/lib/librocm_smi64.so", RTLD_LAZY);
   }
-  if (lib_rocm_smi_hdl == nullptr) {
-    INFO("Failed to dlopen librocm_smi64.so: " << dlerror());
-  }
   REQUIRE(lib_rocm_smi_hdl);
 
   void* fnsym = dlsym(lib_rocm_smi_hdl, "rsmi_topo_get_link_type");
