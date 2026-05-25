@@ -21,27 +21,27 @@ Panel Config:
           value: None
           unit: GFLOP/s
           peak: ((($max_sclk * $cu_per_gpu) * 512) / 1000)
-          pop: true
+          pop: false
         MFMA FLOPs (F16):
           value: None
           unit: GFLOP/s
           peak: ((($max_sclk * $cu_per_gpu) * 1024) / 1000)
-          pop: true
+          pop: false
         MFMA FLOPs (F32):
           value: None
           unit: GFLOP/s
           peak: ((($max_sclk * $cu_per_gpu) * 256) / 1000)
-          pop: true
+          pop: false
         MFMA FLOPs (F64):
           value: None
           unit: GFLOP/s
           peak: ((($max_sclk * $cu_per_gpu) * 256) / 1000)
-          pop: true
+          pop: false
         MFMA IOPs (Int8):
           value: None
           unit: GIOP/s
           peak: ((($max_sclk * $cu_per_gpu) * 1024) / 1000)
-          pop: true
+          pop: false
         Active CUs (deprecated):
           value: $numActiveCUs
           unit: CUs

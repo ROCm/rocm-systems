@@ -90,6 +90,7 @@ Panel Config:
             SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: $max_sclk * $cu_per_gpu * 64 * 2 / 1000
+          pop: true
         MFMA FLOPs (F8):
           value: SUM(SQ_INSTS_VALU_MFMA_MOPS_F8 * 512) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
