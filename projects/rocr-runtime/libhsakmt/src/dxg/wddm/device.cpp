@@ -252,6 +252,7 @@ hsa_status_t WDDMDevice::VramAvail(uint64_t* available_bytes) {
     }
 
     bool found_any = false;
+    bool queried_any = false;
     for (const auto& seg_info : segment_infos_) {
       if (!seg_info.is_aperture || !seg_info.is_system_memory) {
         continue;
@@ -266,10 +267,11 @@ hsa_status_t WDDMDevice::VramAvail(uint64_t* available_bytes) {
       if (ret != 0) {
         continue;
       }
+      queried_any = true;
       usedNonLocal += stats.QueryResult.SegmentInformation.BytesResident;
     }
 
-    if (!found_any) {
+    if (!found_any || !queried_any) {
       return HSA_STATUS_ERROR;
     }
 
