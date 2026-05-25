@@ -87,6 +87,17 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
           echo "Errors: ${ERRORS}, Warnings: ${WARNINGS}"
 
+      - name: Enforce zero clang-tidy findings
+        working-directory: profilers/profiler-hub
+        run: |
+          WARNINGS=$(grep -cE 'warning:' clang-tidy.log || true)
+          ERRORS=$(grep -cE 'error:' clang-tidy.log || true)
+          if [ "${ERRORS}" -gt 0 ] || [ "${WARNINGS}" -gt 0 ]; then
+            echo "FAIL: clang-tidy reported ${ERRORS} error(s) and ${WARNINGS} warning(s); zero tolerated" >&2
+            exit 1
+          fi
+          echo "OK: clang-tidy produced zero errors and zero warnings"
+
       - name: Upload clang-tidy log
         if: always()
         uses: actions/upload-artifact@v7
