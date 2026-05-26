@@ -22,9 +22,9 @@ modified_msg = """
 # File has been updated by hip-tests/catch folder for portability
 """
 ctest_current_str = """
-get_filename_component(FULL_FILE_PATH ${CMAKE_CURRENT_LIST_FILE} REALPATH)
+file(REAL_PATH ${CMAKE_CURRENT_LIST_FILE} FULL_FILE_PATH)
 get_filename_component(CTEST_CURRENT_DIR ${FULL_FILE_PATH} DIRECTORY)
-get_filename_component(EXE_PATH ${CTEST_CURRENT_DIR}/.. REALPATH)
+file(REAL_PATH ${CTEST_CURRENT_DIR}/.. EXE_PATH)
 """
 if os.name == "posix":
     library_path_str = """
@@ -64,7 +64,7 @@ def make_test_files_portable(filenames):
             modified_content = file_content.replace(old_text, "")
             if inc_cmake_pattern in filename:
                 # 2 get folder path relative to the current *_include.cmake
-                if r"get_filename_component(FULL_FILE_PATH" not in modified_content:
+                if r"file(REAL_PATH" not in modified_content:
                     modified_content = ctest_current_str + modified_content
                 # 3 CTEST_FILE to have parameterized relative file
                 test_cmake_pattern = r"\[==\[(\w+-[a-f0-9]+_tests.cmake)\]==\]"
