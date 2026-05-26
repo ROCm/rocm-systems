@@ -70,17 +70,17 @@ To collect a trace for the Jacobi example, run the following command:
 
     rocprof-sys-run --preset=trace-openmp -- "$JACOBI_FORTRAN_BIN"
 
-Once the command completes, a ``.proto`` file will be generated in the output directory:
+Once the command completes, an output directory will be generated:
 
 .. code-block:: shell
 
     rocprofsys-jacobi-fortran-targetdata-markers-output/<timestamp>/
 
-By default, this file contains all captured traces from the profiling session.
+By default, a ``.proto`` trace file containing all captured traces from the profiling session is written under this directory.
 
 .. tip::
 
-    More information about presets can be found in the `Using preset profiles <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-systems/docs/how-to/using-preset-profiles.rst#using-preset-profiles-and-domain-flags>`_ documentation.
+    More information about presets can be found in the :doc:`Using preset profiles <using-preset-profiles>` documentation.
 
 Understanding the proto file output
 -----------------------------------------------
@@ -102,15 +102,16 @@ To view the collected traces, click on the drop-down arrow in the ``jacobi-fortr
     You can pin important tracks in Perfetto by hovering over the track name and clicking the pin icon.
 
 Multiple tracks are displayed, each representing different information:
-    1. Shows the events captured on the main thread. The main program is executed here (represented by the trace labelled ``jacobi-fortran-targetdata-markers``).
-    2. Shows GPU kernel executions.
-    3. Shows memory copy operations between agents (CPU/GPU).
-    4. Shows the power being used by the GPU.
-    5. Measures graphics engine utilization as a percentage.
-    6. Measures multimedia engine activity as a percentage.
-    7. Measures VRAM consumption.
-    8. Shows GPU temperature in Celsius.
-    9. Measures memory controller utilization as a percentage.
+
+1. Shows the events captured on the main thread. The main program is executed here (represented by the trace labelled ``jacobi-fortran-targetdata-markers``).
+2. Shows GPU kernel executions.
+3. Shows memory copy operations between agents (CPU/GPU).
+4. Shows the power being used by the GPU.
+5. Measures graphics engine utilization as a percentage.
+6. Measures multimedia engine activity as a percentage.
+7. Measures VRAM consumption.
+8. Shows GPU temperature in Celsius.
+9. Measures memory controller utilization as a percentage.
 
 For this example, the important tracks are ``jacobi-fortran-targetdata-markers`` (1), ``GPU Kernel Dispatch`` (2), and ``GPU Memory Copy to Agent`` (3).
 
@@ -166,15 +167,16 @@ The image below shows a group of events that correspond to the execution of the 
     :width: 1400
 
 The general sequence of events for this code block is as follows:
-    1. An ``omp_target_emi`` callback is generated and spans the entire duration of the OpenMP ``target teams`` construct.
-    2. Memory is allocated on the GPU for variables. This is represented by an ``omp_target_data_op_emi`` event with ``optype = target_data_alloc``.
-    3. The variables are then transferred to the GPU. This is represented by an ``omp_target_data_op_emi`` event with ``optype = target_data_transfer_to_device``.
-    4. A corresponding ``MEMORY_COPY_HOST_TO_DEVICE`` is generated in the ``GPU Memory Copy to Agent`` track for each occurrence of (3).
-    5. Once the necessary data transfers are complete, the kernel can be launched. An ``omp_target_submit_emi`` event is generated and points to the kernel being executed on the GPU.
-    6. A corresponding ``__omp_offloading`` kernel is generated on the ``GPU Kernel Dispatch`` track for each occurrence of (5), representing the GPU code being executed.
-    7. Once complete, the data is transferred back to the host. This is represented by an ``omp_target_data_op_emi`` event with ``optype = target_data_transfer_from_device``.
-    8. A corresponding ``MEMORY_COPY_DEVICE_TO_HOST`` is generated in the ``GPU Memory Copy to Agent`` track for each occurrence of (7).
-    9. The previously allocated memory is deallocated from the GPU. This is represented by an ``omp_target_data_op_emi`` event with ``optype = target_data_delete``.
+
+1. An ``omp_target_emi`` callback is generated and spans the entire duration of the OpenMP ``target teams`` construct.
+2. Memory is allocated on the GPU for variables. This is represented by an ``omp_target_data_op_emi`` event with ``optype = target_data_alloc``.
+3. The variables are then transferred to the GPU. This is represented by an ``omp_target_data_op_emi`` event with ``optype = target_data_transfer_to_device``.
+4. A corresponding ``MEMORY_COPY_HOST_TO_DEVICE`` is generated in the ``GPU Memory Copy to Agent`` track for each occurrence of (3).
+5. Once the necessary data transfers are complete, the kernel can be launched. An ``omp_target_submit_emi`` event is generated and points to the kernel being executed on the GPU.
+6. A corresponding ``__omp_offloading`` kernel is generated on the ``GPU Kernel Dispatch`` track for each occurrence of (5), representing the GPU code being executed.
+7. Once complete, the data is transferred back to the host. This is represented by an ``omp_target_data_op_emi`` event with ``optype = target_data_transfer_from_device``.
+8. A corresponding ``MEMORY_COPY_DEVICE_TO_HOST`` is generated in the ``GPU Memory Copy to Agent`` track for each occurrence of (7).
+9. The previously allocated memory is deallocated from the GPU. This is represented by an ``omp_target_data_op_emi`` event with ``optype = target_data_delete``.
 
 In general, if an event directly relates to another event, an arrow will be generated between the two. These arrows are called "flow events". A flow event is visible only when an event on a track is selected.
 For the sake of showing all relations at once, black arrows were inserted in the image above.
@@ -189,7 +191,7 @@ Instrumenting the application with rocprof-sys-instrument
 -------------------------------------------------------------
 
 The application can be instrumented using ``rocprof-sys-instrument`` to gather more data than would be obtained from tracing using ``rocprof-sys-run`` alone.
-More details on ``rocprof-sys-instrument`` and the data it gathers can be found in the `data collection modes document <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-systems/docs/conceptual/data-collection-modes.rst>`_.
+More details on ``rocprof-sys-instrument`` and the data it gathers can be found in the :doc:`data collection modes <../conceptual/data-collection-modes>` document.
 
 .. code-block:: shell
 
@@ -201,19 +203,19 @@ This command generates an instrumented binary, ``jacobi.inst``. To profile this 
 
     rocprof-sys-run --preset=trace-openmp -- ./jacobi.inst
 
-Once profiling completes, a ``.proto`` file will be generated in the output directory:
+Once profiling completes, an output directory will be generated:
 
 .. code-block:: shell
 
     rocprofsys-jacobi-inst-output/<timestamp>/
 
-This ``.proto`` file can be viewed using the same method described in the previous section.
+A ``.proto`` trace file is written under this directory, and can be viewed using the same method described in the previous section.
 Compared to the trace from the preset-only run, the instrumented trace additionally surfaces user-defined functions in the ``jacobi-fortran-targetdata-markers`` track, allowing application-level call paths to be correlated with OMPT and GPU activity.
 
 .. important::
 
     With ``rocprof-sys-instrument``, data on user-defined functions can be gathered. However, default values on certain settings
-    may prevent the expected function from being instrumented. For details, see the `selective instrumentation guide <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-systems/docs/how-to/instrumenting-rewriting-binary-application.rst#selective-instrumentation>`_.
+    may prevent the expected function from being instrumented. For details, see the :doc:`Instrumenting and rewriting a binary application <instrumenting-rewriting-binary-application>` guide (in particular, its "Selective instrumentation" section).
 
 Environment variable configuration
 ===================================
@@ -226,12 +228,12 @@ To enable OMPT callback capture without a preset:
 
 .. code-block:: shell
 
-    ROCPROFSYS_USE_OMPT=ON
+    export ROCPROFSYS_USE_OMPT=ON
 
 .. tip::
 
     Creating a default configuration file helps maintain consistent profiling settings across sessions.
-    For details, see the `configuring runtime options guide <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-systems/docs/how-to/configuring-runtime-options.rst>`_.
+    For details, see the :doc:`Configuring runtime options <configuring-runtime-options>` guide.
 
 .. note::
 
@@ -243,4 +245,4 @@ To enable OMPT callback capture without a preset:
 
     .. code-block:: shell
 
-        ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,marker_api,kernel_dispatch,memory_copy,scratch_memory,hsa_api
+        export ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,marker_api,kernel_dispatch,memory_copy,scratch_memory,hsa_api
