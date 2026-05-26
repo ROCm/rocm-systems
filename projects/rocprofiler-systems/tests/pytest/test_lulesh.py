@@ -49,8 +49,17 @@ class TestLulesh(RocprofsysTest):
             "lulesh",
             env=env,
             run_args=["-i", "5", "-s", "20", "-p"],
-            rewrite_args=["-e", "-v", "2", "--label", "file", "line", "return", "args"],
-            runtime_args=[
+            binary_rewrite_args=[
+                "-e",
+                "-v",
+                "2",
+                "--label",
+                "file",
+                "line",
+                "return",
+                "args",
+            ],
+            runtime_instrument_args=[
                 "-e",
                 "-v",
                 "1",
@@ -93,8 +102,8 @@ class TestLulesh(RocprofsysTest):
             "lulesh",
             env=env,
             run_args=["-i", "10", "-s", "20", "-p"],
-            rewrite_args=["-e", "-v", "2"],
-            runtime_args=[
+            binary_rewrite_args=["-e", "-v", "2"],
+            runtime_instrument_args=[
                 "-e",
                 "-v",
                 "1",
@@ -121,8 +130,8 @@ class TestLulesh(RocprofsysTest):
             "lulesh",
             env=env,
             run_args=["-i", "10", "-s", "20", "-p"],
-            rewrite_args=["-e", "-v", "2"],
-            runtime_args=[
+            binary_rewrite_args=["-e", "-v", "2"],
+            runtime_instrument_args=[
                 "-e",
                 "-v",
                 "1",
@@ -149,7 +158,7 @@ class TestLulesh(RocprofsysTest):
             "lulesh",
             env=env,
             run_args=["-i", "2", "-s", "20", "-p"],
-            rewrite_args=[
+            binary_rewrite_args=[
                 "-e",
                 "-v",
                 "2",
@@ -158,7 +167,7 @@ class TestLulesh(RocprofsysTest):
                 "--traps",
                 "--allow-overlapping",
             ],
-            runtime_args=[
+            runtime_instrument_args=[
                 "-e",
                 "-v",
                 "1",

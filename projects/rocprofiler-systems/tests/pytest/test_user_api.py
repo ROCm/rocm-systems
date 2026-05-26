@@ -21,7 +21,7 @@ pytestmark = [pytest.mark.user_api]
 )
 @pytest.mark.class_name("user-api")
 class TestUserAPI(RocprofsysTest):
-    REWRITE_ARGS = [
+    BINARY_REWRITE_ARGS = [
         "-e",
         "-v",
         "2",
@@ -30,7 +30,7 @@ class TestUserAPI(RocprofsysTest):
         "-E",
         "custom_push_region",
     ]
-    RUNTIME_ARGS = [
+    RUNTIME_INSTRUMENT_ARGS = [
         "-e",
         "-v",
         "1",
@@ -53,8 +53,8 @@ class TestUserAPI(RocprofsysTest):
             mode,
             "user-api",
             run_args=["10", str(self.num_threads), "1000"],
-            rewrite_args=self.REWRITE_ARGS,
-            runtime_args=self.RUNTIME_ARGS,
+            binary_rewrite_args=self.BINARY_REWRITE_ARGS,
+            runtime_instrument_args=self.RUNTIME_INSTRUMENT_ARGS,
         )
         self.assert_regex(
             result,

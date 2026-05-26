@@ -1950,10 +1950,10 @@ def _is_assert_disabled(request: pytest.FixtureRequest, subtest_name: str) -> bo
 _FUNCTION_ALLOWED_KWARGS: dict[str, dict[str, set[str]]] = {
     "run_test": {
         "baseline": {"command"},
-        "sampling": {"sample_args"},
-        "binary_rewrite": {"rewrite_args", "cleanup_on_success"},
-        "runtime_instrument": {"runtime_args"},
-        "sys_run": {"sysrun_args"},
+        "sampling": {"sampling_args"},
+        "binary_rewrite": {"binary_rewrite_args", "cleanup_on_success"},
+        "runtime_instrument": {"runtime_instrument_args"},
+        "sys_run": {"sys_run_args"},
         "causal": {"causal_args", "causal_mode"},
         "python": {"python_version", "profile_args", "annotated", "standalone"},
     },
@@ -2082,7 +2082,7 @@ def run_test(
         fail_on_not_found: If True, pytest.fail when binary not found (default: False = skip)
         fail_message: Custom failure message (default: "{runner_type} test failed: {output}")
         no_base_env: If true, don't use the base environment (default: False)
-        **kwargs: Additional runner-specific arguments (sample_args, rewrite_args, etc.)
+        **kwargs: Additional runner-specific arguments (sampling_args, binary_rewrite_args, etc.)
 
     Returns:
         TestResult for further assertions

@@ -108,7 +108,7 @@ class TestUCX(RocprofsysTest):
         ],
     )
     def test(self, mode, target, ucx_env):
-        REWRITE_ARGS = [
+        BINARY_REWRITE_ARGS = [
             "-e",
             "-v",
             "2",
@@ -124,7 +124,7 @@ class TestUCX(RocprofsysTest):
             mode,
             target,
             env=ucx_env,
-            rewrite_args=REWRITE_ARGS,
+            binary_rewrite_args=BINARY_REWRITE_ARGS,
             run_args=RUN_ARGS,
             launcher="mpi",
             num_procs=2,
@@ -144,7 +144,7 @@ class TestUCX(RocprofsysTest):
 
     @pytest.mark.parametrize("mode", ["binary_rewrite", "sys_run"])
     def test_perfetto(self, mode, ucx_env):
-        REWRITE_ARGS = [
+        BINARY_REWRITE_ARGS = [
             "-e",
             "-v",
             "2",
@@ -160,7 +160,7 @@ class TestUCX(RocprofsysTest):
             mode,
             "mpi-send-recv",
             env=ucx_env,
-            rewrite_args=REWRITE_ARGS,
+            binary_rewrite_args=BINARY_REWRITE_ARGS,
             launcher="mpi",
             num_procs=2,
         )
@@ -180,7 +180,7 @@ class TestUCX(RocprofsysTest):
 
     @pytest.mark.parametrize("mode", ["binary_rewrite", "sys_run"])
     def test_mpip(self, mode, ucx_mpip_env):
-        REWRITE_ARGS = [
+        BINARY_REWRITE_ARGS = [
             "-e",
             "-v",
             "2",
@@ -197,7 +197,7 @@ class TestUCX(RocprofsysTest):
             mode,
             "mpi-all2all",
             env=ucx_mpip_env,
-            rewrite_args=REWRITE_ARGS,
+            binary_rewrite_args=BINARY_REWRITE_ARGS,
             run_args=RUN_ARGS,
             launcher="mpi",
             num_procs=2,
@@ -211,7 +211,7 @@ class TestUCX(RocprofsysTest):
     @pytest.mark.parametrize("mode", ["binary_rewrite", "sys_run"])
     @pytest.mark.parametrize("msg_size", ["1024", "4096", "16384"])
     def test_bcast(self, mode, msg_size, ucx_env):
-        REWRITE_ARGS = [
+        BINARY_REWRITE_ARGS = [
             "-e",
             "-v",
             "2",
@@ -226,7 +226,7 @@ class TestUCX(RocprofsysTest):
             mode,
             "mpi-bcast",
             env=ucx_env,
-            rewrite_args=REWRITE_ARGS,
+            binary_rewrite_args=BINARY_REWRITE_ARGS,
             run_args=[msg_size],
             launcher="mpi",
             num_procs=2,
@@ -239,7 +239,7 @@ class TestUCX(RocprofsysTest):
 
     @pytest.mark.parametrize("mode", ["binary_rewrite", "sys_run"])
     def test_active_message(self, mode, ucx_active_messages_env):
-        REWRITE_ARGS = [
+        BINARY_REWRITE_ARGS = [
             "-e",
             "-v",
             "2",
@@ -255,7 +255,7 @@ class TestUCX(RocprofsysTest):
             mode,
             "mpi-allreduce",
             env=ucx_active_messages_env,
-            rewrite_args=REWRITE_ARGS,
+            binary_rewrite_args=BINARY_REWRITE_ARGS,
             run_args=RUN_ARGS,
             launcher="mpi",
             num_procs=2,

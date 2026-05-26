@@ -75,7 +75,7 @@ class TestMPI(RocprofsysTest):
         "mode", ["baseline", "sampling", "binary_rewrite", "sys_run"]
     )
     def test(self, mode):
-        REWRITE_ARGS = [
+        BINARY_REWRITE_ARGS = [
             "-e",
             "-v",
             "2",
@@ -97,7 +97,7 @@ class TestMPI(RocprofsysTest):
             mode,
             "mpi-example",
             env=ENV,
-            rewrite_args=REWRITE_ARGS,
+            binary_rewrite_args=BINARY_REWRITE_ARGS,
             launcher="mpi",
             num_procs=2,
         )
@@ -110,7 +110,7 @@ class TestMPI(RocprofsysTest):
 
     @pytest.mark.parametrize("mode", ["sampling", "binary_rewrite", "sys_run"])
     def test_perfetto_merge(self, mode):
-        REWRITE_ARGS = [
+        BINARY_REWRITE_ARGS = [
             "-e",
             "-v",
             "2",
@@ -132,7 +132,7 @@ class TestMPI(RocprofsysTest):
             mode,
             "mpi-example",
             env=ENV,
-            rewrite_args=REWRITE_ARGS,
+            binary_rewrite_args=BINARY_REWRITE_ARGS,
             launcher="mpi",
             num_procs=2,
         )
@@ -159,7 +159,7 @@ class TestMPIP(RocprofsysTest):
         ],
     )
     def test(self, mode, target, mpip_env, mpip_all2all_env):
-        REWRITE_ARGS = [
+        BINARY_REWRITE_ARGS = [
             "-e",
             "-v",
             "2",
@@ -175,7 +175,7 @@ class TestMPIP(RocprofsysTest):
             mode,
             target,
             env=mpip_env if target != "mpi-all2all" else mpip_all2all_env,
-            rewrite_args=REWRITE_ARGS,
+            binary_rewrite_args=BINARY_REWRITE_ARGS,
             run_args=RUN_ARGS,
             launcher="mpi",
             num_procs=2,
@@ -184,7 +184,7 @@ class TestMPIP(RocprofsysTest):
 
     @pytest.mark.parametrize("mode", ["sampling", "binary_rewrite", "sys_run"])
     def test_flat(self, mode, mpip_flat_env):
-        REWRITE_ARGS = [
+        BINARY_REWRITE_ARGS = [
             "-e",
             "-v",
             "2",
@@ -209,7 +209,7 @@ class TestMPIP(RocprofsysTest):
             mode,
             "mpi-example",
             env=mpip_flat_env,
-            rewrite_args=REWRITE_ARGS,
+            binary_rewrite_args=BINARY_REWRITE_ARGS,
             launcher="mpi",
             num_procs=2,
         )

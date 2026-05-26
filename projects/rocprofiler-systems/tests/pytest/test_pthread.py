@@ -66,7 +66,7 @@ class TestPthreads(RocprofsysTest):
         r"pthread_mutex_unlock (.*) 4000"
     ]
 
-    TIMEMORY_REWRITE_ARGS = [
+    TIMEMORY_BINARY_REWRITE_ARGS = [
         "-e",
         "-v",
         "2",
@@ -86,8 +86,8 @@ class TestPthreads(RocprofsysTest):
             mode,
             "parallel-overhead-locks",
             env=pthread_env,
-            rewrite_args=["-e", "-i", "256"],
-            runtime_args=["-e", "-i", "256"],
+            binary_rewrite_args=["-e", "-i", "256"],
+            runtime_instrument_args=["-e", "-i", "256"],
             run_args=["30", "4", "1000"],
         )
         self.assert_regex(
@@ -105,7 +105,7 @@ class TestPthreads(RocprofsysTest):
             mode,
             "parallel-overhead-locks",
             env=pthread_timemory_env,
-            rewrite_args=self.TIMEMORY_REWRITE_ARGS,
+            binary_rewrite_args=self.TIMEMORY_BINARY_REWRITE_ARGS,
             run_args=["10", "4", "1000"],
         )
         self.assert_regex(

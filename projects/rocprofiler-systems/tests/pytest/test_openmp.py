@@ -103,7 +103,7 @@ def openmp_target_rules(validation_rules_dir: Path) -> list[Path]:
 
 
 class TestOpenMPCG(RocprofsysTest):
-    REWRITE_ARGS = ["-e", "-v", "2", "--instrument-loops"]
+    BINARY_REWRITE_ARGS = ["-e", "-v", "2", "--instrument-loops"]
     DURATION_SAMPLING_PASS_REGEX = [
         r"Sampler for thread 0 will be triggered 1000\.0x per second of CPU-time",
         r"Sampler for thread 0 will be triggered 500\.0x per second of wall-time",
@@ -130,7 +130,7 @@ class TestOpenMPCG(RocprofsysTest):
             mode,
             "openmp-cg",
             env=env,
-            rewrite_args=self.REWRITE_ARGS,
+            binary_rewrite_args=self.BINARY_REWRITE_ARGS,
         )
         self.assert_regex(result)
 
@@ -162,7 +162,7 @@ class TestOpenMPCG(RocprofsysTest):
 
 
 class TestOpenMPLU(RocprofsysTest):
-    REWRITE_ARGS = ["-e", "-v", "2", "--instrument-loops"]
+    BINARY_REWRITE_ARGS = ["-e", "-v", "2", "--instrument-loops"]
     BINARY_REWRITE_PASS_REGEX = ["\\|_omp_"]
     BINARY_REWRITE_FAIL_REGEX = ["0 instrumented loops in procedure"]
     DURATION_SAMPLING_PASS_REGEX = [
@@ -192,7 +192,7 @@ class TestOpenMPLU(RocprofsysTest):
             mode,
             "openmp-lu",
             env=env,
-            rewrite_args=self.REWRITE_ARGS,
+            binary_rewrite_args=self.BINARY_REWRITE_ARGS,
         )
         self.assert_regex(
             result,
@@ -259,8 +259,8 @@ class TestOpenMPTarget(RocprofsysTest):
 @pytest.mark.class_name("openmp-fortran")
 class TestOpenMPFortran(RocprofsysTest):
 
-    REWRITE_ARGS = ["-e", "-v", "2", "--instrument-loops"]
-    RUNTIME_ARGS = ["-e", "-v", "2", "--label", "return", "args"]
+    BINARY_REWRITE_ARGS = ["-e", "-v", "2", "--instrument-loops"]
+    RUNTIME_INSTRUMENT_ARGS = ["-e", "-v", "2", "--label", "return", "args"]
 
     @pytest.mark.parametrize(
         "mode",
@@ -276,8 +276,8 @@ class TestOpenMPFortran(RocprofsysTest):
             mode,
             "openmp-fortran-host",
             env=env,
-            rewrite_args=self.REWRITE_ARGS,
-            runtime_args=self.RUNTIME_ARGS,
+            binary_rewrite_args=self.BINARY_REWRITE_ARGS,
+            runtime_instrument_args=self.RUNTIME_INSTRUMENT_ARGS,
         )
         self.assert_regex(
             result,
@@ -317,8 +317,8 @@ class TestOpenMPFortran(RocprofsysTest):
             mode,
             "openmp-fortran-offload",
             env=env,
-            rewrite_args=self.REWRITE_ARGS,
-            runtime_args=self.RUNTIME_ARGS,
+            binary_rewrite_args=self.BINARY_REWRITE_ARGS,
+            runtime_instrument_args=self.RUNTIME_INSTRUMENT_ARGS,
             check_target_arch=True,
         )
         self.assert_regex(

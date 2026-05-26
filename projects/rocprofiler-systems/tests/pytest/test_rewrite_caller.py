@@ -20,7 +20,7 @@ pytestmark = [pytest.mark.rewrite_caller]
 @pytest.mark.caller_include
 @pytest.mark.class_name("rewrite-caller")
 class TestRewriteCaller(RocprofsysTest):
-    REWRITE_ARGS = [
+    BINARY_REWRITE_ARGS = [
         "-e",
         "-i",
         "256",
@@ -43,7 +43,7 @@ class TestRewriteCaller(RocprofsysTest):
             mode,
             "rewrite-caller",
             env={"ROCPROFSYS_COUT_OUTPUT": "ON"},
-            rewrite_args=self.REWRITE_ARGS,
+            binary_rewrite_args=self.BINARY_REWRITE_ARGS,
             run_args=["17"],
         )
         self.assert_regex(
