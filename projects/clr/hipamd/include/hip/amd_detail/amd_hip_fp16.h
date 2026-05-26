@@ -943,9 +943,9 @@ inline __device__ __half unsafeAtomicAdd(__half* address, __half value) {
 
 namespace __hip_internal {
 template <>
-struct numeric_limits<__half> {
+struct NumericLimits<__half> {
     // IEEE 754 half: 0 11110 1111111111 = 65504 (max finite half)
-    static constexpr __half max() {
+    static constexpr __half maximum() {
         __half_raw r; r.x = 0x7BFF; return r;
     }
     static constexpr __half lowest() {
