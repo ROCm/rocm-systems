@@ -3,3 +3,4 @@
 # SPDX-License-Identifier: MIT
 
 add_subdirectory(api)
+add_subdirectory(scenarios)
