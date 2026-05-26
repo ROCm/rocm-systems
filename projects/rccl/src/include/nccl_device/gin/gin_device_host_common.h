@@ -9,7 +9,7 @@
 
 #include <cuda.h>
 #include "../net_device.h"
-#include "../core.h"  // for ncclGin{Signal|Counter}_t
+#include "../core_tmp.h"  // for ncclGin{Signal|Counter}_t
 
 #define NCCL_GIN_MAX_CONTEXTS 4
 

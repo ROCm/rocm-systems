@@ -700,6 +700,11 @@ HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNT
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipExecutionCtxSynchronize, hipExecutionCtxSynchronize, hipExecutionCtxSynchronize_fn, ctx);
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipExecutionCtxWaitEvent, hipExecutionCtxWaitEvent, hipExecutionCtxWaitEvent_fn, ctx, event);
 #endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 29
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipLibraryGetGlobal, hipLibraryGetGlobal, hipLibraryGetGlobal_fn, dptr, bytes, library, name);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipLibraryGetManaged, hipLibraryGetManaged, hipLibraryGetManaged_fn, dptr, bytes, library, name);
+#endif
 // clang-format on
 
 #else

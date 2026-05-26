@@ -203,8 +203,12 @@ live_perfetto_driver::post_process(bool&                 perfetto_output_error,
     sink.on_source_drained(static_cast<int>(pid), std::move(bytes));
     sink.finalize();
 
-    core::perfetto::run_merge_script(
-        filepath::dirname(config::get_perfetto_output_filename()));
+    if(dmp::rank() == 0 &&
+       config::output_filtering::is_file_output_enabled_for_current_mpi_rank())
+    {
+        core::perfetto::run_merge_script(
+            filepath::dirname(config::get_perfetto_output_filename()));
+    }
 
     if(m_tmp_file)
     {

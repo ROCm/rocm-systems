@@ -75,6 +75,19 @@ jobs:
               ;;
           esac
 
+      - name: Cleanup orphan RCCL/MPI processes
+        if: always()
+        run: |
+          echo "Cleaning up orphan processes..."
+          pkill -9 -f prterun || true
+          pkill -9 -f mpirun || true
+          pkill -9 -f "_perf" || true
+
+          sleep 10
+
+          echo "Processes still holding artifact directory:"
+          fuser -vm "${OUTPUT_ARTIFACTS_DIR}" || true
+
       - name: Run setup test environment workflow
         uses: './.github/actions/setup_test_environment'
         with:

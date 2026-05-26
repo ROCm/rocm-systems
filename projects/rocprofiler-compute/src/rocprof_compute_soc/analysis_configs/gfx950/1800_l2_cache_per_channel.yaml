@@ -15,82 +15,10 @@ Panel Config:
         unit: Unit
       metric:
         L2 Cache Hit Rate:
-          avg: AVG(((((((((((((((((100 * TCC_HIT[0]) + (100 * TCC_HIT[1])) + (100
-            * TCC_HIT[2])) + (100 * TCC_HIT[3])) + (100 * TCC_HIT[4])) + (100 * TCC_HIT[5]))
-            + (100 * TCC_HIT[6])) + (100 * TCC_HIT[7])) + (100 * TCC_HIT[8])) + (100
-            * TCC_HIT[9])) + (100 * TCC_HIT[10])) + (100 * TCC_HIT[11])) + (100 *
-            TCC_HIT[12])) + (100 * TCC_HIT[13])) + (100 * TCC_HIT[14])) + (100 * TCC_HIT[15]))
-            / (((((((((((((((((TCC_MISS[0] + TCC_HIT[0]) + (TCC_MISS[1] + TCC_HIT[1]))
-            + (TCC_MISS[2] + TCC_HIT[2])) + (TCC_MISS[3] + TCC_HIT[3])) + (TCC_MISS[4]
-            + TCC_HIT[4])) + (TCC_MISS[5] + TCC_HIT[5])) + (TCC_MISS[6] + TCC_HIT[6]))
-            + (TCC_MISS[7] + TCC_HIT[7])) + (TCC_MISS[8] + TCC_HIT[8])) + (TCC_MISS[9]
-            + TCC_HIT[9])) + (TCC_MISS[10] + TCC_HIT[10])) + (TCC_MISS[11] + TCC_HIT[11]))
-            + (TCC_MISS[12] + TCC_HIT[12])) + (TCC_MISS[13] + TCC_HIT[13])) + (TCC_MISS[14]
-            + TCC_HIT[14])) + (TCC_MISS[15] + TCC_HIT[15]))) if (((((((((((((((((TCC_MISS[0]
-            + TCC_HIT[0]) + (TCC_MISS[1] + TCC_HIT[1])) + (TCC_MISS[2] + TCC_HIT[2]))
-            + (TCC_MISS[3] + TCC_HIT[3])) + (TCC_MISS[4] + TCC_HIT[4])) + (TCC_MISS[5]
-            + TCC_HIT[5])) + (TCC_MISS[6] + TCC_HIT[6])) + (TCC_MISS[7] + TCC_HIT[7]))
-            + (TCC_MISS[8] + TCC_HIT[8])) + (TCC_MISS[9] + TCC_HIT[9])) + (TCC_MISS[10]
-            + TCC_HIT[10])) + (TCC_MISS[11] + TCC_HIT[11])) + (TCC_MISS[12] + TCC_HIT[12]))
-            + (TCC_MISS[13] + TCC_HIT[13])) + (TCC_MISS[14] + TCC_HIT[14])) + (TCC_MISS[15]
-            + TCC_HIT[15])) != 0) else None)
-          std dev: STD(((((((((((((((((100 * TCC_HIT[0]) + (100 * TCC_HIT[1])) + (100
-            * TCC_HIT[2])) + (100 * TCC_HIT[3])) + (100 * TCC_HIT[4])) + (100 * TCC_HIT[5]))
-            + (100 * TCC_HIT[6])) + (100 * TCC_HIT[7])) + (100 * TCC_HIT[8])) + (100
-            * TCC_HIT[9])) + (100 * TCC_HIT[10])) + (100 * TCC_HIT[11])) + (100 *
-            TCC_HIT[12])) + (100 * TCC_HIT[13])) + (100 * TCC_HIT[14])) + (100 * TCC_HIT[15]))
-            / (((((((((((((((((TCC_MISS[0] + TCC_HIT[0]) + (TCC_MISS[1] + TCC_HIT[1]))
-            + (TCC_MISS[2] + TCC_HIT[2])) + (TCC_MISS[3] + TCC_HIT[3])) + (TCC_MISS[4]
-            + TCC_HIT[4])) + (TCC_MISS[5] + TCC_HIT[5])) + (TCC_MISS[6] + TCC_HIT[6]))
-            + (TCC_MISS[7] + TCC_HIT[7])) + (TCC_MISS[8] + TCC_HIT[8])) + (TCC_MISS[9]
-            + TCC_HIT[9])) + (TCC_MISS[10] + TCC_HIT[10])) + (TCC_MISS[11] + TCC_HIT[11]))
-            + (TCC_MISS[12] + TCC_HIT[12])) + (TCC_MISS[13] + TCC_HIT[13])) + (TCC_MISS[14]
-            + TCC_HIT[14])) + (TCC_MISS[15] + TCC_HIT[15]))) if (((((((((((((((((TCC_MISS[0]
-            + TCC_HIT[0]) + (TCC_MISS[1] + TCC_HIT[1])) + (TCC_MISS[2] + TCC_HIT[2]))
-            + (TCC_MISS[3] + TCC_HIT[3])) + (TCC_MISS[4] + TCC_HIT[4])) + (TCC_MISS[5]
-            + TCC_HIT[5])) + (TCC_MISS[6] + TCC_HIT[6])) + (TCC_MISS[7] + TCC_HIT[7]))
-            + (TCC_MISS[8] + TCC_HIT[8])) + (TCC_MISS[9] + TCC_HIT[9])) + (TCC_MISS[10]
-            + TCC_HIT[10])) + (TCC_MISS[11] + TCC_HIT[11])) + (TCC_MISS[12] + TCC_HIT[12]))
-            + (TCC_MISS[13] + TCC_HIT[13])) + (TCC_MISS[14] + TCC_HIT[14])) + (TCC_MISS[15]
-            + TCC_HIT[15])) != 0) else None)
-          min: MIN(((((((((((((((((100 * TCC_HIT[0]) + (100 * TCC_HIT[1])) + (100
-            * TCC_HIT[2])) + (100 * TCC_HIT[3])) + (100 * TCC_HIT[4])) + (100 * TCC_HIT[5]))
-            + (100 * TCC_HIT[6])) + (100 * TCC_HIT[7])) + (100 * TCC_HIT[8])) + (100
-            * TCC_HIT[9])) + (100 * TCC_HIT[10])) + (100 * TCC_HIT[11])) + (100 *
-            TCC_HIT[12])) + (100 * TCC_HIT[13])) + (100 * TCC_HIT[14])) + (100 * TCC_HIT[15]))
-            / (((((((((((((((((TCC_MISS[0] + TCC_HIT[0]) + (TCC_MISS[1] + TCC_HIT[1]))
-            + (TCC_MISS[2] + TCC_HIT[2])) + (TCC_MISS[3] + TCC_HIT[3])) + (TCC_MISS[4]
-            + TCC_HIT[4])) + (TCC_MISS[5] + TCC_HIT[5])) + (TCC_MISS[6] + TCC_HIT[6]))
-            + (TCC_MISS[7] + TCC_HIT[7])) + (TCC_MISS[8] + TCC_HIT[8])) + (TCC_MISS[9]
-            + TCC_HIT[9])) + (TCC_MISS[10] + TCC_HIT[10])) + (TCC_MISS[11] + TCC_HIT[11]))
-            + (TCC_MISS[12] + TCC_HIT[12])) + (TCC_MISS[13] + TCC_HIT[13])) + (TCC_MISS[14]
-            + TCC_HIT[14])) + (TCC_MISS[15] + TCC_HIT[15]))) if (((((((((((((((((TCC_MISS[0]
-            + TCC_HIT[0]) + (TCC_MISS[1] + TCC_HIT[1])) + (TCC_MISS[2] + TCC_HIT[2]))
-            + (TCC_MISS[3] + TCC_HIT[3])) + (TCC_MISS[4] + TCC_HIT[4])) + (TCC_MISS[5]
-            + TCC_HIT[5])) + (TCC_MISS[6] + TCC_HIT[6])) + (TCC_MISS[7] + TCC_HIT[7]))
-            + (TCC_MISS[8] + TCC_HIT[8])) + (TCC_MISS[9] + TCC_HIT[9])) + (TCC_MISS[10]
-            + TCC_HIT[10])) + (TCC_MISS[11] + TCC_HIT[11])) + (TCC_MISS[12] + TCC_HIT[12]))
-            + (TCC_MISS[13] + TCC_HIT[13])) + (TCC_MISS[14] + TCC_HIT[14])) + (TCC_MISS[15]
-            + TCC_HIT[15])) != 0) else None)
-          max: MAX(((((((((((((((((100 * TCC_HIT[0]) + (100 * TCC_HIT[1])) + (100
-            * TCC_HIT[2])) + (100 * TCC_HIT[3])) + (100 * TCC_HIT[4])) + (100 * TCC_HIT[5]))
-            + (100 * TCC_HIT[6])) + (100 * TCC_HIT[7])) + (100 * TCC_HIT[8])) + (100
-            * TCC_HIT[9])) + (100 * TCC_HIT[10])) + (100 * TCC_HIT[11])) + (100 *
-            TCC_HIT[12])) + (100 * TCC_HIT[13])) + (100 * TCC_HIT[14])) + (100 * TCC_HIT[15]))
-            / (((((((((((((((((TCC_MISS[0] + TCC_HIT[0]) + (TCC_MISS[1] + TCC_HIT[1]))
-            + (TCC_MISS[2] + TCC_HIT[2])) + (TCC_MISS[3] + TCC_HIT[3])) + (TCC_MISS[4]
-            + TCC_HIT[4])) + (TCC_MISS[5] + TCC_HIT[5])) + (TCC_MISS[6] + TCC_HIT[6]))
-            + (TCC_MISS[7] + TCC_HIT[7])) + (TCC_MISS[8] + TCC_HIT[8])) + (TCC_MISS[9]
-            + TCC_HIT[9])) + (TCC_MISS[10] + TCC_HIT[10])) + (TCC_MISS[11] + TCC_HIT[11]))
-            + (TCC_MISS[12] + TCC_HIT[12])) + (TCC_MISS[13] + TCC_HIT[13])) + (TCC_MISS[14]
-            + TCC_HIT[14])) + (TCC_MISS[15] + TCC_HIT[15]))) if (((((((((((((((((TCC_MISS[0]
-            + TCC_HIT[0]) + (TCC_MISS[1] + TCC_HIT[1])) + (TCC_MISS[2] + TCC_HIT[2]))
-            + (TCC_MISS[3] + TCC_HIT[3])) + (TCC_MISS[4] + TCC_HIT[4])) + (TCC_MISS[5]
-            + TCC_HIT[5])) + (TCC_MISS[6] + TCC_HIT[6])) + (TCC_MISS[7] + TCC_HIT[7]))
-            + (TCC_MISS[8] + TCC_HIT[8])) + (TCC_MISS[9] + TCC_HIT[9])) + (TCC_MISS[10]
-            + TCC_HIT[10])) + (TCC_MISS[11] + TCC_HIT[11])) + (TCC_MISS[12] + TCC_HIT[12]))
-            + (TCC_MISS[13] + TCC_HIT[13])) + (TCC_MISS[14] + TCC_HIT[14])) + (TCC_MISS[15]
-            + TCC_HIT[15])) != 0) else None)
+          avg: SUM(100 * TCC_HIT[0] + 100 * TCC_HIT[1] + 100 * TCC_HIT[2] + 100 * TCC_HIT[3] + 100 * TCC_HIT[4] + 100 * TCC_HIT[5] + 100 * TCC_HIT[6] + 100 * TCC_HIT[7] + 100 * TCC_HIT[8] + 100 * TCC_HIT[9] + 100 * TCC_HIT[10] + 100 * TCC_HIT[11] + 100 * TCC_HIT[12] + 100 * TCC_HIT[13] + 100 * TCC_HIT[14] + 100 * TCC_HIT[15]) / SUM(TCC_MISS[0] + TCC_HIT[0] + TCC_MISS[1] + TCC_HIT[1] + TCC_MISS[2] + TCC_HIT[2] + TCC_MISS[3] + TCC_HIT[3] + TCC_MISS[4] + TCC_HIT[4] + TCC_MISS[5] + TCC_HIT[5] + TCC_MISS[6] + TCC_HIT[6] + TCC_MISS[7] + TCC_HIT[7] + TCC_MISS[8] + TCC_HIT[8] + TCC_MISS[9] + TCC_HIT[9] + TCC_MISS[10] + TCC_HIT[10] + TCC_MISS[11] + TCC_HIT[11] + TCC_MISS[12] + TCC_HIT[12] + TCC_MISS[13] + TCC_HIT[13] + TCC_MISS[14] + TCC_HIT[14] + TCC_MISS[15] + TCC_HIT[15])
+          std dev: STD((100 * TCC_HIT[0] + 100 * TCC_HIT[1] + 100 * TCC_HIT[2] + 100 * TCC_HIT[3] + 100 * TCC_HIT[4] + 100 * TCC_HIT[5] + 100 * TCC_HIT[6] + 100 * TCC_HIT[7] + 100 * TCC_HIT[8] + 100 * TCC_HIT[9] + 100 * TCC_HIT[10] + 100 * TCC_HIT[11] + 100 * TCC_HIT[12] + 100 * TCC_HIT[13] + 100 * TCC_HIT[14] + 100 * TCC_HIT[15]) / (TCC_MISS[0] + TCC_HIT[0] + TCC_MISS[1] + TCC_HIT[1] + TCC_MISS[2] + TCC_HIT[2] + TCC_MISS[3] + TCC_HIT[3] + TCC_MISS[4] + TCC_HIT[4] + TCC_MISS[5] + TCC_HIT[5] + TCC_MISS[6] + TCC_HIT[6] + TCC_MISS[7] + TCC_HIT[7] + TCC_MISS[8] + TCC_HIT[8] + TCC_MISS[9] + TCC_HIT[9] + TCC_MISS[10] + TCC_HIT[10] + TCC_MISS[11] + TCC_HIT[11] + TCC_MISS[12] + TCC_HIT[12] + TCC_MISS[13] + TCC_HIT[13] + TCC_MISS[14] + TCC_HIT[14] + TCC_MISS[15] + TCC_HIT[15]))
+          min: MIN((100 * TCC_HIT[0] + 100 * TCC_HIT[1] + 100 * TCC_HIT[2] + 100 * TCC_HIT[3] + 100 * TCC_HIT[4] + 100 * TCC_HIT[5] + 100 * TCC_HIT[6] + 100 * TCC_HIT[7] + 100 * TCC_HIT[8] + 100 * TCC_HIT[9] + 100 * TCC_HIT[10] + 100 * TCC_HIT[11] + 100 * TCC_HIT[12] + 100 * TCC_HIT[13] + 100 * TCC_HIT[14] + 100 * TCC_HIT[15]) / (TCC_MISS[0] + TCC_HIT[0] + TCC_MISS[1] + TCC_HIT[1] + TCC_MISS[2] + TCC_HIT[2] + TCC_MISS[3] + TCC_HIT[3] + TCC_MISS[4] + TCC_HIT[4] + TCC_MISS[5] + TCC_HIT[5] + TCC_MISS[6] + TCC_HIT[6] + TCC_MISS[7] + TCC_HIT[7] + TCC_MISS[8] + TCC_HIT[8] + TCC_MISS[9] + TCC_HIT[9] + TCC_MISS[10] + TCC_HIT[10] + TCC_MISS[11] + TCC_HIT[11] + TCC_MISS[12] + TCC_HIT[12] + TCC_MISS[13] + TCC_HIT[13] + TCC_MISS[14] + TCC_HIT[14] + TCC_MISS[15] + TCC_HIT[15]))
+          max: MAX((100 * TCC_HIT[0] + 100 * TCC_HIT[1] + 100 * TCC_HIT[2] + 100 * TCC_HIT[3] + 100 * TCC_HIT[4] + 100 * TCC_HIT[5] + 100 * TCC_HIT[6] + 100 * TCC_HIT[7] + 100 * TCC_HIT[8] + 100 * TCC_HIT[9] + 100 * TCC_HIT[10] + 100 * TCC_HIT[11] + 100 * TCC_HIT[12] + 100 * TCC_HIT[13] + 100 * TCC_HIT[14] + 100 * TCC_HIT[15]) / (TCC_MISS[0] + TCC_HIT[0] + TCC_MISS[1] + TCC_HIT[1] + TCC_MISS[2] + TCC_HIT[2] + TCC_MISS[3] + TCC_HIT[3] + TCC_MISS[4] + TCC_HIT[4] + TCC_MISS[5] + TCC_HIT[5] + TCC_MISS[6] + TCC_HIT[6] + TCC_MISS[7] + TCC_HIT[7] + TCC_MISS[8] + TCC_HIT[8] + TCC_MISS[9] + TCC_HIT[9] + TCC_MISS[10] + TCC_HIT[10] + TCC_MISS[11] + TCC_HIT[11] + TCC_MISS[12] + TCC_HIT[12] + TCC_MISS[13] + TCC_HIT[13] + TCC_MISS[14] + TCC_HIT[14] + TCC_MISS[15] + TCC_HIT[15]))
           unit: Percent
   - metric_table:
       id: 1802
@@ -100,8 +28,7 @@ Panel Config:
         expr: Expression
       metric:
         ::_1:
-          expr: (((100 * TCC_HIT[::_1]) / (TCC_HIT[::_1] + TCC_MISS[::_1])) if ((TCC_HIT[::_1]
-            + TCC_MISS[::_1]) != 0) else None)
+          expr: 100 * TCC_HIT[::_1] / (TCC_HIT[::_1] + TCC_MISS[::_1])
         placeholder_range:
           ::_1: $total_l2_chan
       cli_style: simple_box
@@ -129,9 +56,9 @@ Panel Config:
         atomic req: L2 Atomic
       metric:
         ::_1:
-          read req: AVG((TO_INT(TCC_READ[::_1]) / $denom))
-          write req: AVG((TO_INT(TCC_WRITE[::_1]) / $denom))
-          atomic req: AVG((TO_INT(TCC_ATOMIC[::_1]) / $denom))
+          read req: SUM(TO_INT(TCC_READ[::_1])) / SUM($denom)
+          write req: SUM(TO_INT(TCC_WRITE[::_1])) / SUM($denom)
+          atomic req: SUM(TO_INT(TCC_ATOMIC[::_1])) / SUM($denom)
         placeholder_range:
           ::_1: $total_l2_chan
       cli_style: simple_multiple_bar
@@ -146,9 +73,9 @@ Panel Config:
         atomic req: L2-Fabric Atomic
       metric:
         ::_1:
-          read req: AVG((TO_INT(TCC_EA0_RDREQ[::_1]) / $denom))
-          write req: AVG((TO_INT(TCC_EA0_WRREQ[::_1]) / $denom))
-          atomic req: AVG((TO_INT(TCC_EA0_ATOMIC[::_1]) / $denom))
+          read req: SUM(TO_INT(TCC_EA0_RDREQ[::_1])) / SUM($denom)
+          write req: SUM(TO_INT(TCC_EA0_WRREQ[::_1])) / SUM($denom)
+          atomic req: SUM(TO_INT(TCC_EA0_ATOMIC[::_1])) / SUM($denom)
         placeholder_range:
           ::_1: $total_l2_chan
       cli_style: simple_multiple_bar
@@ -161,8 +88,7 @@ Panel Config:
         expr: Expression
       metric:
         ::_1:
-          expr: ((TCC_EA0_RDREQ_LEVEL[::_1] / TCC_EA0_RDREQ[::_1]) if (TCC_EA0_RDREQ[::_1]
-            != 0) else None)
+          expr: TCC_EA0_RDREQ_LEVEL[::_1] / TCC_EA0_RDREQ[::_1]
         placeholder_range:
           ::_1: $total_l2_chan
       cli_style: simple_box
@@ -175,8 +101,7 @@ Panel Config:
         expr: Expression
       metric:
         ::_1:
-          expr: ((TCC_EA0_WRREQ_LEVEL[::_1] / TCC_EA0_WRREQ[::_1]) if (TCC_EA0_WRREQ[::_1]
-            != 0) else None)
+          expr: TCC_EA0_WRREQ_LEVEL[::_1] / TCC_EA0_WRREQ[::_1]
         placeholder_range:
           ::_1: $total_l2_chan
       cli_style: simple_box
@@ -205,12 +130,9 @@ Panel Config:
         ea read stall - hbm: L2-Fabric Read Stall (HBM)
       metric:
         ::_1:
-          ea read stall - pcie: AVG((TO_INT(TCC_EA0_RDREQ_IO_CREDIT_STALL[::_1]) /
-            $denom))
-          ea read stall - if: AVG((TO_INT(TCC_EA0_RDREQ_GMI_CREDIT_STALL[::_1]) /
-            $denom))
-          ea read stall - hbm: AVG((TO_INT(TCC_EA0_RDREQ_DRAM_CREDIT_STALL[::_1])
-            / $denom))
+          ea read stall - pcie: SUM(TO_INT(TCC_EA0_RDREQ_IO_CREDIT_STALL[::_1])) / SUM($denom)
+          ea read stall - if: SUM(TO_INT(TCC_EA0_RDREQ_GMI_CREDIT_STALL[::_1])) / SUM($denom)
+          ea read stall - hbm: SUM(TO_INT(TCC_EA0_RDREQ_DRAM_CREDIT_STALL[::_1])) / SUM($denom)
         placeholder_range:
           ::_1: $total_l2_chan
       cli_style: simple_multiple_bar
@@ -226,14 +148,10 @@ Panel Config:
         ea write stall - starve: L2-Fabric Write Starve
       metric:
         ::_1:
-          ea write stall - pcie: AVG((TO_INT(TCC_EA0_WRREQ_IO_CREDIT_STALL[::_1])
-            / $denom))
-          ea write stall - if: AVG((TO_INT(TCC_EA0_WRREQ_GMI_CREDIT_STALL[::_1]) /
-            $denom))
-          ea write stall - hbm: AVG((TO_INT(TCC_EA0_WRREQ_DRAM_CREDIT_STALL[::_1])
-            / $denom))
-          ea write stall - starve: AVG((TO_INT(TCC_TOO_MANY_EA_WRREQS_STALL[::_1])
-            / $denom))
+          ea write stall - pcie: SUM(TO_INT(TCC_EA0_WRREQ_IO_CREDIT_STALL[::_1])) / SUM($denom)
+          ea write stall - if: SUM(TO_INT(TCC_EA0_WRREQ_GMI_CREDIT_STALL[::_1])) / SUM($denom)
+          ea write stall - hbm: SUM(TO_INT(TCC_EA0_WRREQ_DRAM_CREDIT_STALL[::_1])) / SUM($denom)
+          ea write stall - starve: SUM(TO_INT(TCC_TOO_MANY_EA_WRREQS_STALL[::_1])) / SUM($denom)
         placeholder_range:
           ::_1: $total_l2_chan
       cli_style: simple_multiple_bar
