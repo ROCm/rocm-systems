@@ -5271,11 +5271,10 @@ amdsmi_status_t amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_ha
              : AMDSMI_STATUS_OUT_OF_RESOURCES;
 }
 
-amdsmi_status_t amdsmi_get_gpu_process_list_by_pid(
-    amdsmi_processor_handle* processor_handles,
-    uint32_t num_processors,
-    amdsmi_proc_info_by_pid_t* list,
-    uint32_t* max_processes) {
+amdsmi_status_t amdsmi_get_gpu_process_list_by_pid(amdsmi_processor_handle* processor_handles,
+                                                   uint32_t num_processors,
+                                                   amdsmi_proc_info_by_pid_t* list,
+                                                   uint32_t* max_processes) {
   AMDSMI_CHECK_INIT();
 
   if (!processor_handles || num_processors == 0 || !max_processes) {

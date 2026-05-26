@@ -1392,22 +1392,22 @@ typedef struct {
  * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef struct {
-  uint32_t gpu_index;                  //!< GPU index
-  uint64_t mem;                        //!< Total memory in bytes
+  uint32_t gpu_index;  //!< GPU index
+  uint64_t mem;        //!< Total memory in bytes
   struct {
-    uint64_t gfx;                      //!< GFX engine usage in nanoseconds
-    uint64_t enc;                      //!< ENC engine usage in nanoseconds
+    uint64_t gfx;  //!< GFX engine usage in nanoseconds
+    uint64_t enc;  //!< ENC engine usage in nanoseconds
     uint32_t reserved[12];
   } engine_usage;
   struct {
-    uint64_t gtt_mem;                  //!< GTT memory in bytes
-    uint64_t cpu_mem;                  //!< CPU memory in bytes
-    uint64_t vram_mem;                 //!< VRAM memory in bytes
+    uint64_t gtt_mem;   //!< GTT memory in bytes
+    uint64_t cpu_mem;   //!< CPU memory in bytes
+    uint64_t vram_mem;  //!< VRAM memory in bytes
     uint32_t reserved[10];
   } memory_usage;
-  uint32_t cu_occupancy;               //!< Number of CUs utilized
-  uint32_t evicted_time;               //!< Queue eviction time in milliseconds
-  uint64_t sdma_usage;                 //!< SDMA usage in microseconds
+  uint32_t cu_occupancy;  //!< Number of CUs utilized
+  uint32_t evicted_time;  //!< Queue eviction time in milliseconds
+  uint64_t sdma_usage;    //!< SDMA usage in microseconds
   uint32_t reserved[8];
 } amdsmi_proc_gpu_entry_t;
 
@@ -1420,8 +1420,8 @@ typedef struct {
   amdsmi_process_handle_t pid;
   char name[AMDSMI_MAX_STRING_LENGTH];
   char container_name[AMDSMI_MAX_STRING_LENGTH];
-  uint32_t num_gpus;                   //!< Number of GPU entries populated
-  amdsmi_proc_gpu_entry_t gpus[AMDSMI_MAX_DEVICES]; //!< Per-GPU data, num_gpus entries valid
+  uint32_t num_gpus;                                 //!< Number of GPU entries populated
+  amdsmi_proc_gpu_entry_t gpus[AMDSMI_MAX_DEVICES];  //!< Per-GPU data, num_gpus entries valid
 } amdsmi_proc_info_by_pid_t;
 
 /**
@@ -7304,13 +7304,13 @@ amdsmi_status_t amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_ha
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
  *                            | ::AMDSMI_STATUS_OUT_OF_RESOURCES if max_processes was too small,
- *                            | ::AMDSMI_STATUS_INVAL if processor_handles is NULL or num_processors is 0
+ *                            | ::AMDSMI_STATUS_INVAL if processor_handles is NULL or num_processors
+ * is 0
  */
-amdsmi_status_t amdsmi_get_gpu_process_list_by_pid(
-    amdsmi_processor_handle* processor_handles,
-    uint32_t num_processors,
-    amdsmi_proc_info_by_pid_t* list,
-    uint32_t* max_processes);
+amdsmi_status_t amdsmi_get_gpu_process_list_by_pid(amdsmi_processor_handle* processor_handles,
+                                                   uint32_t num_processors,
+                                                   amdsmi_proc_info_by_pid_t* list,
+                                                   uint32_t* max_processes);
 
 /** @} End tagProcessInfo */
 
