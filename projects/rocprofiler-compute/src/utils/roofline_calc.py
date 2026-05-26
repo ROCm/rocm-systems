@@ -104,6 +104,13 @@ class AI_Data:
     mfma_flops_f32: float
     mfma_flops_f64: float
     mfma_iops_i8: float
+    wmma_flops_f6f4: float
+    wmma_flops_f8: float
+    wmma_flops_f16: float
+    wmma_flops_bf16: float
+    wmma_flops_f32: float
+    wmma_flops_f64: float
+    wmma_iops_i8: float
     lds_data: float
     L1cache_data: float
     L2cache_data: float
@@ -263,17 +270,19 @@ def calc_ceilings(
 
             try:
                 peak_matrix = float(
-                    benchmark_data[f"MFMA{target_precision}{ops_flops}"][
-                        roofline_parameters["device_id"]
-                    ]
+                    benchmark_data[
+                        f"{roofline_parameters['matrix_ops_type']}{target_precision}{ops_flops}"
+                    ][roofline_parameters["device_id"]]
                 )
                 x2_matrix = peak_matrix / peak_bw
                 y2_matrix = peak_matrix
             except KeyError:
                 console_warning(
                     f"Missing benchmark data for "
-                    f"MFMA{target_precision}{ops_flops} in benchmark_results. "
-                    f"Skipping MFMA calculations for {cache_level} cache level. "
+                    f"{roofline_parameters['matrix_ops_type']}"
+                    f"{target_precision}{ops_flops} in benchmark_results. "
+                    f"Skipping {roofline_parameters['matrix_ops_type']} "
+                    f"calculations for {cache_level} cache level. "
                     "This may indicate incomplete or corrupted benchmark data."
                 )
 
@@ -523,7 +532,9 @@ def construct_roof(
 
     if dtype in MATRIX_DATATYPES:
         target_precision = dtype if dtype.startswith("I") else f"F{dtype[2:]}"
-        expected_columns.append(f"MFMA{target_precision}{ops_flops}")
+        expected_columns.append(
+            f"{roofline_parameters['matrix_ops_type']}{target_precision}{ops_flops}"
+        )
 
     # Check for missing expected columns
     missing_columns = [col for col in expected_columns if col not in benchmark_data]
