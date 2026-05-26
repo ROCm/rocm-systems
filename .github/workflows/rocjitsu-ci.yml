@@ -1,0 +1,90 @@
+# rocjitsu CI: build + test (including HIP device kernel tests).
+#
+# All tests run on the CPU emulator — no GPU hardware required.
+# HIP device kernels are cross-compiled for gfx950 using hipcc from
+# the rocm-sdk-core pip package.
+
+name: rocjitsu CI
+
+on:
+  pull_request:
+    paths:
+      - "emulation/rocjitsu/**"
+      - "emulation/plugins/**"
+      - ".github/workflows/rocjitsu-ci.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "emulation/rocjitsu/**"
+      - "emulation/plugins/**"
+      - ".github/workflows/rocjitsu-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: Linux (clang, Release)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            emulation/rocjitsu
+            emulation/plugins
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build clang libdrm-dev
+
+      - name: Install ROCm SDK (hipcc + device libs)
+        run: |
+          pip install --index-url https://repo.amd.com/rocm/whl/gfx950-dcgpu/ rocm-sdk-core
+          CORE=$(python3 -c "import importlib; print(importlib.import_module('_rocm_sdk_core').__path__[0])")
+
+          # The SDK's amdclang++ lives at $CORE/lib/llvm/bin/. CMake's
+          # find_program searches $ROCM_PATH/bin, and rj_add_device_kernel
+          # derives --rocm-path by going up two dirs from the compiler.
+          # Setting ROCM_PATH=$CORE/lib/llvm makes both work:
+          #   find_program → $CORE/lib/llvm/bin/amdclang++ ✓
+          #   --rocm-path  → $CORE/lib/llvm (has amdgcn/bitcode/) ✓
+          echo "ROCM_PATH=$CORE/lib/llvm" >> $GITHUB_ENV
+
+          # Symlink HIP headers into the LLVM include tree so
+          # rj_add_device_kernel's --rocm-path finds them.
+          for d in "$CORE"/include/*/; do
+            ln -sfn "$d" "$CORE/lib/llvm/include/$(basename "$d")"
+          done
+
+          # hipcc shim for cmake find_program(HIPCC_EXECUTABLE hipcc ...)
+          printf '#!/bin/bash\nexec "%s/lib/llvm/bin/amdclang++" "$@"\n' "$CORE" > "$CORE/lib/llvm/bin/hipcc"
+          chmod +x "$CORE/lib/llvm/bin/hipcc"
+
+          # Debug: show what cmake will find
+          echo "ROCM_PATH=$CORE/lib/llvm"
+          echo "amdclang++: $(ls -la $CORE/lib/llvm/bin/amdclang++ 2>&1)"
+          echo "hipcc:      $(ls -la $CORE/lib/llvm/bin/hipcc 2>&1)"
+          echo "hsa .so:    $(ls -la $CORE/lib/llvm/lib/libhsa* 2>&1)"
+          echo "include:    $(ls -la $CORE/lib/llvm/include 2>&1)"
+          echo "bitcode:    $(ls $CORE/lib/llvm/amdgcn/bitcode/ | head -3)"
+
+          # Verify amdclang++ can compile HIP
+          echo '__global__ void k(){}' | "$CORE/lib/llvm/bin/amdclang++" -x hip --offload-arch=gfx950 --cuda-device-only -c -o /dev/null -
+          echo "amdclang++ OK"
+
+      - name: Configure
+        env:
+          CC: clang
+          CXX: clang++
+        run: >
+          cmake -B build -G Ninja
+          -S emulation/rocjitsu
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_CXX_FLAGS="-Werror"
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --timeout 120
