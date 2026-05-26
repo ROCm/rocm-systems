@@ -309,6 +309,50 @@ template <size_t... Ints>
 constexpr index_sequence<Ints...> make_index_sequence_value(index_sequence<Ints...>) {
   return {};
 }
+
+
+// Device-side equivalents of std::numeric_limits<T>::max() and lowest().
+template <typename T>
+struct numeric_limits;
+
+template <>
+struct numeric_limits<int> {
+    static constexpr int max()    { return 0x7FFFFFFF; }
+    static constexpr int lowest() { return ~0x7FFFFFFF; }
+};
+
+template <>
+struct numeric_limits<unsigned int> {
+    static constexpr unsigned int max()    { return 0xFFFFFFFFu; }
+    static constexpr unsigned int lowest() { return 0u; }
+};
+
+template <>
+struct numeric_limits<long long> {
+    static constexpr long long max()    { return 0x7FFFFFFFFFFFFFFFLL; }
+    static constexpr long long lowest() { return ~0x7FFFFFFFFFFFFFFFLL; }
+};
+
+template <>
+struct numeric_limits<unsigned long long> {
+    static constexpr unsigned long long max()    { return 0xFFFFFFFFFFFFFFFFull; }
+    static constexpr unsigned long long lowest() { return 0ull; }
+};
+
+template <>
+struct numeric_limits<float> {
+    // IEEE 754: 0 11111110 11111111111111111111111 = largest finite float
+    static constexpr float max()    { return __builtin_bit_cast(float, 0x7F7FFFFF); }
+    static constexpr float lowest() { return __builtin_bit_cast(float, 0xFF7FFFFF); }
+};
+
+template <>
+struct numeric_limits<double> {
+    // IEEE 754: 0 11111111110 [52 ones] = largest finite double
+    static constexpr double max()    { return __builtin_bit_cast(double, 0x7FEFFFFFFFFFFFFFLL); }
+    static constexpr double lowest() { return __builtin_bit_cast(double, 0xFFEFFFFFFFFFFFFFLL); }
+};
+
 }  // namespace __hip_internal
 typedef __hip_internal::uint8_t __hip_uint8_t;
 typedef __hip_internal::uint16_t __hip_uint16_t;
