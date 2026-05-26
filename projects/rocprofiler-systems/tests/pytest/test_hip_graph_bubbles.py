@@ -59,6 +59,7 @@ def hip_graph_bubbles_rules(validation_rules_dir: Path) -> list[Path]:
         validation_rules_dir / "hip-graph-bubbles" / "graph-bubbles-rules.json",
     ]
 
+
 @pytest.mark.timeout(120)
 @pytest.mark.class_name("hip-graph-bubbles")
 class TestHipGraphBubbles(RocprofsysTest):
