@@ -143,6 +143,7 @@ public:
   bool has_lit_0_has_lit_1_has_lit_2();
   using OpEncoding = Vop3MachineInst;
   const OpEncoding inst_;
+  uint32_t literal_ = 0;
 };
 
 class Vop3p : public IsaInstruction<Isa> {
@@ -157,6 +158,7 @@ public:
   bool has_lit_0_has_lit_1_has_lit_2();
   using OpEncoding = Vop3pMachineInst;
   const OpEncoding inst_;
+  uint32_t literal_ = 0;
 };
 
 class Vinterp : public IsaInstruction<Isa> {

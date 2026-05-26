@@ -38,5 +38,6 @@ __pycache__
 
 # agents
 .claude
+.beads/
 
 CMakePresets.json

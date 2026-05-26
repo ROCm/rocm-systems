@@ -1,0 +1,10 @@
+# Local rocfuzz build and run artifacts.
+afl-dbi/build/
+afl-dbi/tools/__pycache__/
+examples/.venv/
+examples/build*/
+examples/therock.env
+examples/afl-in/
+examples/afl-out/
+examples/findings/
+examples/scripts/__pycache__/
