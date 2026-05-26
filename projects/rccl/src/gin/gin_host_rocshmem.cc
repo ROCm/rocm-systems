@@ -12,6 +12,11 @@
 
 #include <rocshmem/rocshmem.hpp>
 #include <hip/hip_runtime.h>
+#include <map>
+
+// Refcount for rocshmem_buffer_register: ncclGinRegister calls us once per
+// GIN context for the same buffer, but rocshmem expects a single registration.
+static std::map<void*, int> bufferRegRefcount;
 
 struct ginRocshmemCtx {
   struct ncclComm *comm;
@@ -134,12 +139,17 @@ ncclResult_t ncclGinRocshmemRegister(ncclGin_t *ginComm, void *ginCtx, void *add
   struct ginRocshmemMemHandle *mh = NULL;
   NCCLCHECK(ncclCalloc(&mh, 1));
 
-  int rc = rocshmem::rocshmem_buffer_register(addr, size);
-  if (rc != 0) {
-    WARN("GIN rocshmem: rocshmem_buffer_register failed for %p size %zu", addr, size);
-    free(mh);
-    return ncclSystemError;
+  auto &refcount = bufferRegRefcount[addr]; // inserts 0 if new
+  if (refcount == 0) {
+    int rc = rocshmem::rocshmem_buffer_register(addr, size);
+    if (rc != 0) {
+      WARN("GIN rocshmem: rocshmem_buffer_register failed for %p size %zu", addr, size);
+      bufferRegRefcount.erase(addr);
+      free(mh);
+      return ncclSystemError;
+    }
   }
+  refcount++;
   mh->addr = addr;
   mh->size = size;
 
@@ -169,7 +179,14 @@ ncclResult_t ncclGinRocshmemDeregister(ncclGin_t *ginComm, void *ginCtx, void *m
   struct ginRocshmemMemHandle *mh = (struct ginRocshmemMemHandle *)mhandle;
   if (mh == NULL) return ncclSuccess;
 
-  if (mh->addr) rocshmem::rocshmem_buffer_unregister(mh->addr);
+  if (mh->addr) {
+    auto &refcount = bufferRegRefcount[mh->addr];
+    refcount--;
+    if (refcount <= 0) {
+      rocshmem::rocshmem_buffer_unregister(mh->addr);
+      bufferRegRefcount.erase(mh->addr);
+    }
+  }
   if (mh->devHandle) hipFree(mh->devHandle);
   free(mh);
   return ncclSuccess;
