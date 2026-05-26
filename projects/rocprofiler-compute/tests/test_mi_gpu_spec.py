@@ -1,6 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+
 from pathlib import Path
 from unittest.mock import patch
 
@@ -11,7 +12,6 @@ from src.utils.mi_gpu_spec import MIGPUSpecs
 
 @pytest.mark.mi_gpu_spec
 class TestMIGPUSpecs:
-
     # -- YAML parsing / initialization ---------------------------------------
 
     def test_yaml_loads_successfully(self):
@@ -104,45 +104,40 @@ class TestMIGPUSpecs:
                 )
 
     def test_get_num_dies_cdna_no_design(self):
-        with patch.object(
-            MIGPUSpecs, "_gpu_design", {"mi100": {}}
-        ), patch.object(
-            MIGPUSpecs, "_gpu_series_dict", {"gfx908": "mi100"}
+        with (
+            patch.object(MIGPUSpecs, "_gpu_design", {"mi100": {}}),
+            patch.object(MIGPUSpecs, "_gpu_series_dict", {"gfx908": "mi100"}),
         ):
             assert MIGPUSpecs.get_num_dies("gfx908", "mi100") == 1
 
     def test_get_num_dies_cdna_with_design(self):
         design = {"testmodel": {"physical_aid": 4, "logical_partitions_per_die": 2}}
-        with patch.object(
-            MIGPUSpecs, "_gpu_design", design
-        ), patch.object(
-            MIGPUSpecs, "_gpu_series_dict", {"gfx942": "mi300"}
+        with (
+            patch.object(MIGPUSpecs, "_gpu_design", design),
+            patch.object(MIGPUSpecs, "_gpu_series_dict", {"gfx942": "mi300"}),
         ):
             assert MIGPUSpecs.get_num_dies("gfx942", "testmodel") == 8
 
     def test_get_num_dies_cdna_partial_design(self):
         design = {"testmodel": {"physical_aid": 4}}
-        with patch.object(
-            MIGPUSpecs, "_gpu_design", design
-        ), patch.object(
-            MIGPUSpecs, "_gpu_series_dict", {"gfx942": "mi300"}
+        with (
+            patch.object(MIGPUSpecs, "_gpu_design", design),
+            patch.object(MIGPUSpecs, "_gpu_series_dict", {"gfx942": "mi300"}),
         ):
             assert MIGPUSpecs.get_num_dies("gfx942", "testmodel") == 4
 
     def test_get_num_dies_rdna_with_memory_die(self):
         design = {"rdna_model": {"memory_die": 3}}
-        with patch.object(
-            MIGPUSpecs, "_gpu_design", design
-        ), patch.object(
-            MIGPUSpecs, "_gpu_series_dict", {"gfx1151": "navi3"}
+        with (
+            patch.object(MIGPUSpecs, "_gpu_design", design),
+            patch.object(MIGPUSpecs, "_gpu_series_dict", {"gfx1151": "navi3"}),
         ):
             assert MIGPUSpecs.get_num_dies("gfx1151", "rdna_model") == 3
 
     def test_get_num_dies_rdna_no_memory_die(self):
         design = {"rdna_model": {}}
-        with patch.object(
-            MIGPUSpecs, "_gpu_design", design
-        ), patch.object(
-            MIGPUSpecs, "_gpu_series_dict", {"gfx1151": "navi3"}
+        with (
+            patch.object(MIGPUSpecs, "_gpu_design", design),
+            patch.object(MIGPUSpecs, "_gpu_series_dict", {"gfx1151": "navi3"}),
         ):
             assert MIGPUSpecs.get_num_dies("gfx1151", "rdna_model") == 1
