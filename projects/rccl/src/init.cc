@@ -50,6 +50,7 @@
 #include <unordered_map>
 #include "ce_coll.h"
 #include "nvtx.h"
+#include "env.h"
 
 // [RCCL]
 #include "git_version.h"
@@ -72,6 +73,8 @@
 
 #include "latency_profiler/CollTrace.h"
 #include "latency_profiler/CollTraceFunc.h"
+#include "dda_all_reduce_ipc.h"
+#include "ipc_init.h"
 #include  <cpuid.h>
 
 #ifndef STR2
@@ -110,6 +113,7 @@ NCCL_PARAM(NvlsChannels, "NVLS_NCHANNELS", NCCL_CONFIG_UNDEF_INT);
 NCCL_PARAM(SetCpuStackSize, "SET_CPU_STACK_SIZE", 1);
 
 extern int64_t ncclParamSingleProcMemRegEnable();
+extern int64_t ncclParamPatEnable();
 
 struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
 ncclResult_t commReclaim(ncclComm_t comm);
@@ -278,6 +282,19 @@ static ncclResult_t ncclInit() {
   return initResult;
 }
 
+static ncclResult_t envInitResult = ncclSuccess;
+static std::once_flag envInitOnceFlag;
+
+static void envInitOnceFunc() {
+  NCCLCHECKGOTO(ncclEnvPluginInit(), envInitResult, exit);
+exit:;
+}
+
+ncclResult_t ncclInitEnv() {
+  std::call_once(envInitOnceFlag, envInitOnceFunc);
+  return envInitResult;
+}
+
 NCCL_API(ncclResult_t, ncclGetVersion, int* version);
 ncclResult_t ncclGetVersion_impl(int* version) {
   Recorder::instance().record("GetVersion");
@@ -288,6 +305,7 @@ ncclResult_t ncclGetVersion_impl(int* version) {
 
 NCCL_API(ncclResult_t, ncclGetUniqueId, ncclUniqueId* out);
 ncclResult_t ncclGetUniqueId_impl(ncclUniqueId* out) {
+  NCCLCHECK(ncclInitEnv());
   NCCLCHECK(ncclInit());
   NCCLCHECK(PtrCheck(out, "GetUniqueId", "out"));
   struct ncclBootstrapHandle handle;
@@ -428,6 +446,7 @@ void ncclCommPushFree(struct ncclComm* comm, void* obj) {
   struct ncclDestructor* dtor = ncclMemoryStackAlloc<struct ncclDestructor>(&comm->memPermanent);
   dtor->fn = ncclDestructorFnFree;
   dtor->obj = obj;
+  dtor->comm = comm;
   dtor->next = comm->destructorHead;
   comm->destructorHead = dtor;
 }
@@ -440,6 +459,7 @@ void ncclCommPushCudaFree(struct ncclComm* comm, void* obj) {
   struct ncclDestructor* dtor = ncclMemoryStackAlloc<struct ncclDestructor>(&comm->memPermanent);
   dtor->fn = ncclDestructorFnCudaFree;
   dtor->obj = obj;
+  dtor->comm = comm;
   dtor->next = comm->destructorHead;
   comm->destructorHead = dtor;
 }
@@ -452,6 +472,7 @@ void ncclCommPushCudaHostFree(struct ncclComm* comm, void* obj) {
   struct ncclDestructor* dtor = ncclMemoryStackAlloc<struct ncclDestructor>(&comm->memPermanent);
   dtor->fn = ncclDestructorFnCudaHostFree;
   dtor->obj = obj;
+  dtor->comm = comm;
   dtor->next = comm->destructorHead;
   comm->destructorHead = dtor;
 }
@@ -464,6 +485,7 @@ void ncclCommPushCudaGdrFree(struct ncclComm* comm, void* handle) {
   struct ncclDestructor* dtor = ncclMemoryStackAlloc<struct ncclDestructor>(&comm->memPermanent);
   dtor->fn = ncclDestructorFnCudaGdrFree;
   dtor->obj = handle;
+  dtor->comm = comm;
   dtor->next = comm->destructorHead;
   comm->destructorHead = dtor;
 }
@@ -514,6 +536,9 @@ static ncclResult_t commFree(ncclComm_t comm) {
       PTHREADCHECK(pthread_join(comm->proxyState->threadUDS, nullptr), "pthread_join");
     }
   }
+
+  // Destroy dynamic memory manager only after all proxy threads have been joined
+  NCCLCHECK(ncclMemManagerDestroy(comm));
 
   if (comm->memPool) CUDACHECK(cudaMemPoolDestroy(comm->memPool));
 
@@ -577,6 +602,8 @@ skip_profiling:
   free(comm->collNetHeads);
   free(comm->clique.ranks);
 
+  NCCLCHECK(ncclDdaIpcCommFini(comm));
+
   if (comm->bootstrap)
     NCCLCHECK(bootstrapClose(comm->bootstrap));
 
@@ -586,8 +613,13 @@ skip_profiling:
   if (comm->doneEvent != NULL)
     CUDACHECK(hipEventDestroy(comm->doneEvent));
 
+  // GIN may use proxy. We need to finalize it before destroying the proxy.
+  NCCLCHECK(ncclGinFinalize(comm));
+
+  int sharedResRefCount = 0;
   if (comm->sharedRes) {
-    if (ncclAtomicRefCountDecrement(&comm->sharedRes->refCount) == 0) {
+    sharedResRefCount = ncclAtomicRefCountDecrement(&comm->sharedRes->refCount);
+    if (sharedResRefCount == 0) {
       for (int c=0; c<MAXCHANNELS; c++) {
         if (comm->sharedRes->peers[c]) free(comm->sharedRes->peers[c]);
         if (comm->sharedRes->devPeers[c]) ncclCudaFree(comm->sharedRes->devPeers[c]);
@@ -636,7 +668,7 @@ skip_profiling:
 
   commPoison(comm); // poison comm before free to avoid comm reuse.
   NCCLCHECK(ncclProfilerPluginFinalize(comm));
-  NCCLCHECK(ncclNetFinalize(comm));
+  if (sharedResRefCount == 0) NCCLCHECK(ncclNetFinalize(comm));
   if (ncclParamLaunchOrderImplicit()) {
     ncclCudaContextDrop(comm->context);
     INFO(NCCL_INIT, "cudaDev %d context tracking destroyed", comm->cudaDev);
@@ -715,6 +747,13 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   ncclMemoryStackConstruct(&comm->memPermanent);
   ncclMemoryStackConstruct(&comm->memScoped);
   comm->destructorHead = nullptr;
+  
+  comm->ddaIpcMemHandler = nullptr;
+  comm->ddaIpcScratch = nullptr;
+  comm->ddaIpcScratchBytes = 0;
+  comm->ddaIpcPeerPtrsDev = nullptr;
+  comm->ddaIpcBarrierState = nullptr;
+  
   comm->rank = rank;
   comm->nRanks = ndev;
 
@@ -722,10 +761,27 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   comm->hierarchicalInterComm = nullptr;
   comm->hierarchicalCommsInitialized = false;
   comm->hierarchicalAGTempBuffer = nullptr;
-  // Enable PAT for interComm hierarchical AG
   comm->forcePatEnable = (parent != nullptr) ? parent->forcePatEnable : false;
 
-  NCCLCHECK(ncclNetInit(comm));
+  if (parent == NULL || !parent->shareResources) {
+    NCCLCHECK(ncclNetInit(comm));
+    struct ncclSharedResources* sharedRes = NULL;
+    NCCLCHECK(ncclCalloc(&sharedRes, 1));
+    sharedRes->owner = comm;
+    sharedRes->tpNRanks = comm->nRanks;
+    NCCLCHECK(ncclCalloc(&sharedRes->tpRankToLocalRank, comm->nRanks));
+    NCCLCHECK(ncclStrongStreamConstruct(&sharedRes->deviceStream));
+    NCCLCHECK(ncclStrongStreamConstruct(&sharedRes->hostStream));
+    CUDACHECK(cudaEventCreateWithFlags(&sharedRes->launchEvent, cudaEventDisableTiming));
+    CUDACHECK(cudaEventCreateWithFlags(&sharedRes->scratchEvent, cudaEventDisableTiming));
+    comm->sharedRes = sharedRes;
+    sharedRes->refCount = 1;
+  } else {
+    comm->sharedRes = parent->sharedRes;
+    ncclAtomicRefCountIncrement(&parent->sharedRes->refCount);
+    NCCLCHECK(ncclNetInitFromParent(comm, parent));
+  }
+
   INFO(NCCL_INIT, "Using network %s", comm->ncclNet->name);
 
   if (parent && parent->shareResources) {
@@ -741,6 +797,7 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
 
   comm->doneEvent = doneEvent;
   comm->lastStream = nullptr;
+  comm->lastStreamValid = false;
   CUDACHECK(cudaGetDevice(&comm->cudaDev));
 
   // RCCL: create persistent stream for calloc
@@ -767,6 +824,18 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
 
   comm->checkPointers = ncclParamCheckPointers() == 1 ? true : false;
   comm->dmaBufSupport = (dmaBufSupported(comm) == ncclSuccess) ? true : false;
+
+  // Initialize memory manager
+  if (parent && parent->shareResources && parent->memManager) {
+    // Share parent's memory manager
+    comm->memManager = parent->memManager;
+    ncclAtomicRefCountIncrement(&comm->memManager->refCount);
+    INFO(NCCL_INIT, "MemManager: Shared from parent, refCount=%d",
+         comm->memManager->refCount);
+  } else {
+    // Create new memory manager
+    NCCLCHECK(ncclMemManagerInit(comm));
+  }
 
 #ifdef ENABLE_COLLTRACE
   NCCLCHECK(ncclCudaHostCalloc(&comm->collTraceTail, MAXCHANNELS));
@@ -1235,6 +1304,8 @@ NCCL_PARAM(MNNVLEnable, "MNNVL_ENABLE", 2);
 #define TIMER_INIT_ALLOC 7
 #define TIMERS_INIT_COUNT 8
 
+extern int64_t ncclParamWinStride();
+
 static ncclResult_t initNvlDomainInfo(struct ncclComm* comm) {
   // Initialize NVLink domain info
   comm->nvlDomainInfo.nNvlDomains = comm->nNodes;
@@ -1267,6 +1338,76 @@ static bool uniformRanksPerHost(const struct ncclComm* comm, int nranks) {
     else if (cnt != ranksPerHost) return false;
   }
   return total == nranks && ranksPerHost > 0;
+}
+
+NCCL_PARAM(GroupSize, "P2P_SCHEDULE_GROUP_SIZE", NCCL_MAX_DEV_WORK_P2P_PER_BATCH);
+
+static ncclResult_t ncclP2pSchedule(struct ncclComm* comm) {
+  struct ncclNodeRanks* nodeRanks = comm->nodeRanks;
+  int groupSize = (comm->nNodes > 1) ? ncclParamGroupSize() : comm->maxLocalRanks;
+  for (int node = 0; node < comm->nNodes; node++) {
+    int localRanks = nodeRanks[node].localRanks;
+    if (localRanks % groupSize != 0 || localRanks < groupSize) groupSize = gcd(groupSize, nodeRanks[node].localRanks);
+  }
+  // p2pChannelShiftSize is set by rcclCommSetP2pShiftSize() before this function;
+  // do not overwrite the RCCL-specific channel mapping (defaults to bit-reversal = -1).
+
+  int local = comm->localRank % groupSize;
+  int group = comm->localRank / groupSize;
+  int nGroups = comm->nRanks / groupSize;
+  int nGroupsPow2 = pow2Up(nGroups);
+
+  int *groupToNode, *groupToLocal;
+  NCCLCHECK(ncclCalloc(&groupToNode, nGroups));
+  NCCLCHECK(ncclCalloc(&groupToLocal, nGroups));
+  int groupCount = 0;
+  for (int n = 0; n < comm->nNodes; ++n) {
+    if (0 != comm->nodeRanks[n].localRanks % groupSize) {
+      WARN("nLocals = %d should be a diviser of the number of ranks in node %d = %d", groupSize, n, comm->nodeRanks[n].localRanks);
+      return ncclInternalError;
+    }
+    int nGroupsInNode = comm->nodeRanks[n].localRanks / groupSize;
+    for (int g = 0; g < nGroupsInNode; ++g) {
+      groupToLocal[groupCount] = g * groupSize;
+      groupToNode[groupCount] = n;
+      groupCount++;
+    }
+    if (n < comm->node) group += nGroupsInNode;
+  }
+  if (groupCount != nGroups) {
+    WARN("Group creation failed: %d vs %d", groupCount, nGroups);
+    return ncclInternalError;
+  }
+  INFO(NCCL_GRAPH,"%s: group size used is %d",__func__,groupSize);
+
+  uint32_t groupRound = 0, groupDelta = 0;
+  int round = 0;
+  do {
+    if (groupDelta < nGroups) {
+      int sendGroup = (group + groupDelta) % nGroups;
+      int recvGroup = (group - groupDelta + nGroups) % nGroups;
+      int sendNode = groupToNode[sendGroup];
+      int recvNode = groupToNode[recvGroup];
+      for (int delta = 0; delta < groupSize; delta++) {
+        int sendLocal = groupToLocal[sendGroup] + (local + delta) % groupSize;
+        int recvLocal = groupToLocal[recvGroup] + (local - delta + groupSize) % groupSize;
+        comm->p2pSchedule[round].sendRank = nodeRanks[sendNode].localRankToRank[sendLocal];
+        comm->p2pSchedule[round].recvRank = nodeRanks[recvNode].localRankToRank[recvLocal];
+        round += 1;
+      }
+    }
+    groupRound += 1;
+    groupDelta = (groupDelta + groupRound) & (nGroupsPow2 - 1);
+  } while (groupRound != nGroupsPow2);
+
+  free(groupToNode);
+  free(groupToLocal);
+
+  if (round != comm->nRanks) {
+    WARN("P2p schedule creation has bugs.");
+    return ncclInternalError;
+  }
+  return ncclSuccess;
 }
 
 static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* parent, uint64_t timers[TIMERS_INIT_COUNT]) {
@@ -1356,13 +1497,13 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   do {
     // Compute intra-process ranks
     int intraProcRank0 = -1, intraProcRank = -1, intraProcRanks = 0;
-    for (int i = 0; i < nranks; i++) comm->minCompCap = std::min(comm->minCompCap, comm->peerInfo[i].cudaCompCap);
-    for (int i = 0; i < nranks; i++) comm->maxCompCap = std::max(comm->maxCompCap, comm->peerInfo[i].cudaCompCap);
 
     comm->nvlsRegSupport = 1;
     for (int i = 0; i < nranks; i++) {
-      if ((comm->peerInfo[i].hostHash == comm->peerInfo[rank].hostHash)
-          && (comm->peerInfo[i].pidHash == comm->peerInfo[rank].pidHash)) {
+      comm->minCompCap = std::min(comm->minCompCap, comm->peerInfo[i].cudaCompCap);
+      comm->maxCompCap = std::max(comm->maxCompCap, comm->peerInfo[i].cudaCompCap);
+      if ((comm->peerInfo[i].hostHash == comm->peerInfo[rank].hostHash) &&
+          (comm->peerInfo[i].pidHash == comm->peerInfo[rank].pidHash)) {
         // Rank is in same process
         if (intraProcRanks == 0) intraProcRank0 = i;
         if (i == rank) intraProcRank = intraProcRanks;
@@ -1601,7 +1742,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   // AllGather3 - begin
   NCCLCHECKGOTO(ncclCalloc(&allGather3Data, nranks), ret, fail);
   int idx;
-  NCCLCHECK(ncclTopoIdToIndex(comm->topo, GPU, comm->busId, &idx));
+  NCCLCHECK(ncclTopoIdToIndex(comm->topo, GPU, NCCL_TOPO_ID(comm->topo->systemId, comm->busId), &idx));
   allGather3Data[rank].nc = 2;
   if (comm->topo->nodes[GPU].count == comm->topo->nRanks &&
        IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx906") && allXgmi)
@@ -1665,6 +1806,11 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     } else {
       allGather3Data[rank].nc = 4;
     }
+  }
+
+  // TODO: Set gfx1250 nc defaults after dedicated tuning data is available.
+  if (IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250")) {
+    allGather3Data[rank].nc = 2;
   }
 
   allGather3Data[rank].pivotA2AEnabled = comm->topo->pivotA2AEnabled && rcclParamPivotAlltoallEnable();
@@ -1876,7 +2022,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   // Profiler plugin context has to be initialized before proxy thread
   NCCLCHECK(ncclProfilerPluginInit(comm));
 
-  NCCLCHECKGOTO(ncclTransportCheckP2pType(comm, &comm->isAllDirectP2p, &comm->directMode), ret, fail);
+  NCCLCHECKGOTO(ncclTransportCheckP2pType(comm, &comm->isAllDirectP2p, &comm->directMode, &comm->isAllCudaP2p), ret, fail);
   // Launch proxy service thread, after this, the proxy calls can be used.
   if (parent && parent->shareResources) {
     comm->proxyState = parent->sharedRes->proxyState;
@@ -1887,61 +2033,10 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   NCCLCHECKGOTO(ncclCalloc(&comm->gproxyConn, comm->nRanks), ret, fail);
 
   timers[TIMER_INIT_CONNECT] = clockNano();
-  do { // Build p2p schedule
-    int node = comm->node;
-    int nNodes = comm->nNodes;
-    int nRanks = comm->nRanks;
-    int local = comm->localRank;
-    int nLocals = comm->maxLocalRanks;
-    struct ncclNodeRanks* nodeRanks = comm->nodeRanks;
-    bool flat = false;
-    for (int node = 0; node < nNodes; node++) {
-      if (nodeRanks[node].localRanks != nLocals) {
-        flat = true;
-        nNodes = 1; node = 0;
-        nLocals = nRanks; local = rank;
-        break;
-      }
-    }
-    int nNodesPow2 = pow2Up(nNodes);
-    int nLocalsPow2 = pow2Up(nLocals);
-    comm->p2pSchedule = ncclMemoryStackAlloc<ncclComm::P2pSchedulePair>(&comm->memPermanent, nRanks);
-    comm->planner.peers = ncclMemoryStackAlloc<ncclKernelPlanner::Peer>(&comm->memPermanent, nRanks);
-    uint32_t nodeRound = 0;
-    uint32_t nodeDelta = 0;
-    int round = 0;
-    // When enumerating peer deltas we use the quadratic formula (x*x+x)/2 mod N.
-    // Since that formula only produces valid permutations when N is a pow of 2,
-    // we let N = pow2Up(n) and filter out results greater-eq to n.
-    // Example sequence for 16 ranks: 0, 1, 3, 6, 10, 15, 5, 12, 4, 13, 7, 2, 14, 11, 9, 8
-    do {
-      if (nodeDelta < nNodes) { // Filter nonsensical node deltas
-        int sendNode = (node + nodeDelta) % nNodes;
-        int recvNode = (node - nodeDelta + nNodes) % nNodes;
-        uint32_t localRound = 0;
-        uint32_t localDelta = 0;
-        do {
-          if (localDelta < nLocals) { // Filter nonsensical node-local deltas
-            int sendLocal = (local + localDelta) % nLocals;
-            int recvLocal = (local - localDelta + nLocals) % nLocals;
-            comm->p2pSchedule[round].sendRank = flat ? sendLocal : nodeRanks[sendNode].localRankToRank[sendLocal];
-            comm->p2pSchedule[round].recvRank = flat ? recvLocal : nodeRanks[recvNode].localRankToRank[recvLocal];
-            round += 1;
-          }
-          localRound += 1;
-          localDelta = (localDelta + localRound) & (nLocalsPow2 - 1); // Quadratic update
-        } while (localRound != nLocalsPow2);
-      }
-      nodeRound += 1;
-      nodeDelta = (nodeDelta + nodeRound) & (nNodesPow2 - 1); // Quadratic update
-    } while (nodeRound != nNodesPow2);
-
-    if (round != nRanks) {
-      WARN("P2p schedule creation has bugs.");
-      ret = ncclInternalError;
-      goto fail;
-    }
-  } while (0);
+  // Build p2p schedule
+  comm->p2pSchedule = ncclMemoryStackAlloc<ncclComm::P2pSchedulePair>(&comm->memPermanent, comm->nRanks);
+  comm->planner.peers = ncclMemoryStackAlloc<ncclKernelPlanner::Peer>(&comm->memPermanent, comm->nRanks);
+  NCCLCHECK(ncclP2pSchedule(comm));
 
   comm->runtimeConn = comm->cuMemSupport && ncclParamRuntimeConnect();
   if (comm->runtimeConn) {
@@ -1972,8 +2067,9 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     // Connect Trees
     NCCLCHECKGOTO(ncclTransportTreeConnect(comm), ret, fail);
 
-    // Connect PAT only for communicators with 1 GPU per node
-    if (comm->maxLocalRanks == 1) NCCLCHECKGOTO(ncclTransportPatConnect(comm), ret, fail);
+    // Connect PAT only for communicators with 1 GPU per node and PAT enabled
+    if (comm->maxLocalRanks == 1 && (ncclParamPatEnable() || comm->forcePatEnable))
+      NCCLCHECKGOTO(ncclTransportPatConnect(comm), ret, fail);
 
     // Attempt to setup NVLS, may silently fail and disable NVLS
     NCCLCHECKGOTO(ncclNvlsSetup(comm, parent), ret, fail);
@@ -2061,7 +2157,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     }
   }
 
-  comm->symmetricSupport = comm->isAllDirectP2p && comm->nNodes == 1 && ncclParamWinEnable() && ncclCuMemEnable();
+  comm->symmetricSupport = comm->isAllCudaP2p && ncclParamWinEnable() && ncclCuMemEnable();
   comm->devrState.bigSize = 0;
 
   comm->ceColl.baseUCSymReadyPtr = NULL;
@@ -2112,7 +2208,7 @@ NCCL_PARAM(MinCTAs, "MIN_CTAS", NCCL_CONFIG_UNDEF_INT);
 #define NCCL_MAX_CGA_CLUSTER_SIZE 8
 
 NCCL_PARAM(NChannelsPerNetPeer, "NCHANNELS_PER_NET_PEER", NCCL_CONFIG_UNDEF_INT);
-NCCL_PARAM(NvlinkUtilCentricSchedEnable, "NVLINK_UTIL_CENTRIC_SCHED_ENABLE", 0);
+NCCL_PARAM(NvlinkUtilCentricSchedEnable, "NVLINK_UTIL_CENTRIC_SCHED_ENABLE", NCCL_CONFIG_UNDEF_INT);
 
 
 #define NCCL_COMMINIT_FUNCNAME_LEN 128
@@ -2136,6 +2232,11 @@ struct ncclCommInitRankAsyncJob {
 };
 
 struct ncclCommFinalizeAsyncJob {
+  struct ncclAsyncJob base;
+  ncclComm_t comm;
+};
+
+struct ncclCommRevokeAsyncJob {
   struct ncclAsyncJob base;
   ncclComm_t comm;
 };
@@ -2393,6 +2494,7 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   }
 
   NCCLCHECKGOTO(latency_profiler::collTraceInit(comm), res, fail);
+  NCCLCHECKGOTO(ncclDdaIpcCommInit(comm), res, fail);
   // update communicator state
   comm->initState = ncclSuccess;
 
@@ -2448,7 +2550,13 @@ exit:
   free(parentRanks);
   return res;
 fail:
-  // archName was allocated but won't be assigned to comm on failure, so free it
+  // archName is assigned to comm->archName before initTransportsRank is called.
+  // If failure occurs after that assignment, commFree() will free comm->archName,
+  // so freeing archName here as well would be a double free. Null it out so that
+  // commFree handles cleanup exclusively.
+  if (archName == comm->archName) {
+    archName = NULL;
+  }
   free(archName);
   comm->initState = res;
   goto exit;
@@ -2484,6 +2592,8 @@ static ncclResult_t envConfigOverride(ncclComm_t comm) {
 
   cgaClusterSizeEnv = ncclParamCGAClusterSize();
   if (0 <= cgaClusterSizeEnv && cgaClusterSizeEnv <= NCCL_MAX_CGA_CLUSTER_SIZE) {
+    if (comm->config.cgaClusterSize != NCCL_CONFIG_UNDEF_INT)
+      INFO(NCCL_ENV, "Comm config cgaClusterSize reset to NCCL_MAX_CGA_CLUSTER_SIZE=%d", cgaClusterSizeEnv);
     comm->config.cgaClusterSize = cgaClusterSizeEnv;
   } else if (cgaClusterSizeEnv > NCCL_MAX_CGA_CLUSTER_SIZE) {
     INFO(NCCL_ENV, "NCCL_CGA_CLUSTER_SIZE value %d is too big. Limiting value to %d.", cgaClusterSizeEnv, NCCL_MAX_CGA_CLUSTER_SIZE);
@@ -2494,16 +2604,22 @@ static ncclResult_t envConfigOverride(ncclComm_t comm) {
   if (minCTAsEnv != NCCL_CONFIG_UNDEF_INT) {
     if (minCTAsEnv <= 0)
       INFO(NCCL_ENV, "NCCL_MIN_CTAS %d is too low, leaving it set at %d", minCTAsEnv, comm->config.minCTAs);
-    else
+    else {
+      if (comm->config.minCTAs != NCCL_CONFIG_UNDEF_INT)
+        INFO(NCCL_ENV, "Comm config minCTAs reset to NCCL_MIN_CTAS=%d", minCTAsEnv);
       comm->config.minCTAs = minCTAsEnv;
+    }
   }
 
   maxCTAsEnv = ncclParamMaxCTAs();
   if (maxCTAsEnv != NCCL_CONFIG_UNDEF_INT) {
     if (maxCTAsEnv <= 0)
       INFO(NCCL_ENV, "NCCL_MAX_CTAS %d is too low, leaving it set at %d", maxCTAsEnv, comm->config.maxCTAs);
-    else
+    else {
+      if (comm->config.maxCTAs != NCCL_CONFIG_UNDEF_INT)
+        INFO(NCCL_ENV, "Comm config maxCTAs reset to NCCL_MAX_CTAS=%d", maxCTAsEnv);
       comm->config.maxCTAs = maxCTAsEnv;
+    }
   }
 
   /* override configuration with env variable. */
@@ -2511,22 +2627,30 @@ static ncclResult_t envConfigOverride(ncclComm_t comm) {
   if (nChannelsPerNetPeerEnv != NCCL_CONFIG_UNDEF_INT) {
     if (nChannelsPerNetPeerEnv <= 0)
       INFO(NCCL_ENV, "NCCL_NCHANNELS_PER_NET_PEER %d is too low, leaving it set at %d", nChannelsPerNetPeerEnv, comm->config.nChannelsPerNetPeer);
-    else
+    else {
+      if (comm->config.nChannelsPerNetPeer != NCCL_CONFIG_UNDEF_INT)
+        INFO(NCCL_ENV, "Comm config nChannelsPerNetPeer reset to NCCL_NCHANNELS_PER_NET_PEER=%d", nChannelsPerNetPeerEnv);
       comm->config.nChannelsPerNetPeer = nChannelsPerNetPeerEnv;
+    }
   }
 
   nvlinkUtilCentricSchedEnableEnv = ncclParamNvlinkUtilCentricSchedEnable();
   if (nvlinkUtilCentricSchedEnableEnv != NCCL_CONFIG_UNDEF_INT) {
     if (nvlinkUtilCentricSchedEnableEnv != 0 && nvlinkUtilCentricSchedEnableEnv != 1)
       INFO(NCCL_ENV, "NCCL_NVLINK_UTIL_CENTRIC_SCHED_ENABLE %d is not valid, leaving it set at %d", nvlinkUtilCentricSchedEnableEnv, comm->config.nvlinkCentricSched);
-    else
+    else {
+      if (comm->config.nvlinkCentricSched != NCCL_CONFIG_UNDEF_INT)
+        INFO(NCCL_ENV, "Comm config nvlinkCentricSched reset to NCCL_NVLINK_UTIL_CENTRIC_SCHED_ENABLE=%d", nvlinkUtilCentricSchedEnableEnv);
       comm->config.nvlinkCentricSched = nvlinkUtilCentricSchedEnableEnv;
+    }
   }
 
   envNetName = ncclGetEnv("NCCL_NET");
   if (envNetName)
     tmpNetName = envNetName;
   if (tmpNetName != NULL) {
+    if (comm->config.netName != NCCL_CONFIG_UNDEF_PTR)
+      INFO(NCCL_ENV, "Comm config netName reset to NCCL_NET=%s", tmpNetName);
     int netNameLen = strlen(tmpNetName) + 1;
     comm->config.netName = (char*)malloc(netNameLen);
     if (comm->config.netName == nullptr) {
@@ -2540,10 +2664,14 @@ static ncclResult_t envConfigOverride(ncclComm_t comm) {
 
   splitShareEnv = ncclParamCommSplitShareResources();
   if (splitShareEnv != NCCL_CONFIG_UNDEF_INT) {
+    if (comm->config.splitShare != NCCL_CONFIG_UNDEF_INT)
+      INFO(NCCL_ENV, "Comm config splitShare reset to NCCL_COMM_SPLIT_SHARE_RESOURCES=%d", splitShareEnv);
     comm->config.splitShare = splitShareEnv;
   }
   shrinkShareEnv = ncclParamCommShrinkShareResources();
   if (shrinkShareEnv != NCCL_CONFIG_UNDEF_INT) {
+    if (comm->config.shrinkShare != NCCL_CONFIG_UNDEF_INT)
+      INFO(NCCL_ENV, "Comm config shrinkShare reset to NCCL_COMM_SHRINK_SHARE_RESOURCES=%d", shrinkShareEnv);
     comm->config.shrinkShare = shrinkShareEnv;
   }
 
@@ -2553,6 +2681,8 @@ static ncclResult_t envConfigOverride(ncclComm_t comm) {
   if (collnetEnableEnv != NULL) {
     int collnetEnableInt = (int)strtol(collnetEnableEnv, NULL, 0);
     if (collnetEnableInt != NCCL_CONFIG_UNDEF_INT) {
+      if (comm->config.collnetEnable != NCCL_CONFIG_UNDEF_INT)
+        INFO(NCCL_ENV, "Comm config collnetEnable reset to NCCL_COLLNET_ENABLE=%d", collnetEnableInt);
       comm->config.collnetEnable = collnetEnableInt;
       INFO(NCCL_ENV, "NCCL_COLLNET_ENABLE set by environment to %d.", collnetEnableInt);
     }
@@ -2560,11 +2690,15 @@ static ncclResult_t envConfigOverride(ncclComm_t comm) {
 
   ctaPolicyEnv = ncclParamCtaPolicy();
   if (ctaPolicyEnv != NCCL_CONFIG_UNDEF_INT) {
+    if (comm->config.CTAPolicy != NCCL_CONFIG_UNDEF_INT)
+      INFO(NCCL_ENV, "Comm config CTAPolicy reset to NCCL_CTA_POLICY=%d", ctaPolicyEnv);
     comm->config.CTAPolicy = ctaPolicyEnv;
   }
 
   nvlsCTAsEnv = ncclParamNvlsChannels();
   if (nvlsCTAsEnv != NCCL_CONFIG_UNDEF_INT) {
+    if (comm->config.nvlsCTAs != NCCL_CONFIG_UNDEF_INT)
+      INFO(NCCL_ENV, "Comm config nvlsCTAs reset to NCCL_NVLS_NCHANNELS=%d", nvlsCTAsEnv);
     comm->config.nvlsCTAs = nvlsCTAsEnv;
   }
 
@@ -2859,6 +2993,7 @@ fail:
 NCCL_API(ncclResult_t, ncclCommInitRank, ncclComm_t* newcomm, int nranks, ncclUniqueId commId, int myrank);
 ncclResult_t ncclCommInitRank_impl(ncclComm_t* newcomm, int nranks, ncclUniqueId commId, int myrank) {
   NCCLCHECK(Recorder::instance().record(rrCommInitRank, nranks, myrank, &commId));
+  NCCLCHECK(ncclInitEnv());
   NVTX3_RANGE(NcclNvtxParamsCommInitRank)
   // Load the CUDA driver and dlsym hooks (can fail on old drivers)
   rocmLibraryInit();
@@ -2960,6 +3095,7 @@ ncclResult_t ncclCommInitRankConfig_impl(ncclComm_t *newcomm, int nranks, ncclUn
   ncclConfig_t internalConfig = NCCL_CONFIG_INITIALIZER;
   ncclConfig_t *internalConfigPtr = NULL;
 
+  NCCLCHECK(ncclInitEnv());
   NVTX3_RANGE(NcclNvtxParamsCommInitRankConfig);
 
   NCCLCHECK(ncclGroupStartInternal());
@@ -2991,6 +3127,7 @@ fail:
 
 NCCL_API(ncclResult_t, ncclCommInitRankScalable, ncclComm_t* newcomm, int nranks, int myrank, int nId, ncclUniqueId* commId, ncclConfig_t* config);
 ncclResult_t ncclCommInitRankScalable(ncclComm_t* newcomm, int nranks, int myrank, int nId, ncclUniqueId* commId, ncclConfig_t* config) {
+  NCCLCHECK(ncclInitEnv());
   NVTX3_RANGE(NcclNvtxParamsCommInitRankScalable);
 
   int cudaDev;
@@ -3108,6 +3245,13 @@ ncclResult_t ncclCommFinalize_impl(ncclComm_t comm) {
   /* wait comm ready before finalize. */
   NCCLCHECKGOTO(ncclCommEnsureReady(comm), ret, fail);
 
+  /* ncclCommFinalize is invalid on a revoked communicator. */
+  if (comm->revokedFlag) {
+    WARN("ncclCommFinalize: comm %p has been revoked; use ncclCommDestroy instead", comm);
+    ret = ncclInvalidUsage;
+    goto fail;
+  }
+
   /* prevent double finalize. */
   if (comm->finalizeCalled) {
     ret = ncclInvalidArgument;
@@ -3167,6 +3311,20 @@ static ncclResult_t commReclaim(struct ncclAsyncJob* job_) {
           /* every comm aborts, commDestroySync should not be blocked. */
           if ((ret = commDestroySync((struct ncclAsyncJob*) &job)) != ncclSuccess)
             WARN("commReclaim: comm %p (rank = %d) in commDestroySync, error %d", curIntraComm, curRank, ret);
+        } else if (curIntraComm->revokedFlag) {
+          /* commRevokeAsync already synced streams and stopped proxy;
+           * drain any remaining persistent graph refs and legacy IPC cleanup
+           * callbacks before commCleanup runs (mirrors commDestroySync). */
+          while (curIntraComm->localPersistentRefs != 0) {
+            if ((ret = ncclCommPollCallbacks(curIntraComm, /*waitSome=*/true)) != ncclSuccess) break;
+          }
+          while (!ncclIntruQueueEmpty(&curIntraComm->legacyRegCleanupQueue)) {
+            struct ncclCommCallback* cb = ncclIntruQueueDequeue(&curIntraComm->legacyRegCleanupQueue);
+            if (cb->fn(curIntraComm, cb) != ncclSuccess) {
+              WARN("commReclaim: legacy IPC cleanup callback failed comm %p (rank = %d) cb %p",
+                   curIntraComm, curRank, cb);
+            }
+          }
         }
       }
 
@@ -3298,6 +3456,91 @@ fail:
   goto exit;
 }
 
+static ncclResult_t commRevokeAsync(struct ncclAsyncJob* job_) {
+  struct ncclCommRevokeAsyncJob* job = (struct ncclCommRevokeAsyncJob*) job_;
+  ncclComm_t comm = job->comm;
+  ncclResult_t res = ncclSuccess;
+
+  NCCLCHECKGOTO(ncclStrongStreamSynchronize(&comm->sharedRes->hostStream),   res, exit);
+  NCCLCHECKGOTO(ncclStrongStreamSynchronize(&comm->sharedRes->deviceStream), res, exit);
+
+  NCCLCHECKGOTO(ncclCommPollEventCallbacks(comm, /*waitSome=*/true),  res, exit);
+  NCCLCHECKGOTO(ncclCommPollCallbacks(comm,      /*waitSome=*/false), res, exit);
+
+  (void) ncclProxyStop(comm);
+  if (comm->proxyState && comm->proxyRefCountOld == 0) {
+    if (comm->proxyState->thread) {
+      PTHREADCHECKGOTO(pthread_join(comm->proxyState->thread, nullptr), "pthread_join", res, exit);
+      comm->proxyState->thread = 0;
+    }
+    if (comm->proxyState->threadUDS) {
+      PTHREADCHECKGOTO(pthread_join(comm->proxyState->threadUDS, nullptr), "pthread_join", res, exit);
+      comm->proxyState->threadUDS = 0;
+    }
+  }
+
+  NCCLCHECKGOTO(setCommAbortFlags(comm, 0), res, exit);
+
+exit:
+  (void) ncclCommSetAsyncError(comm, res);
+  INFO(NCCL_INIT, "CommRevokeAsync END comm %p result %d", comm, res);
+  return res;
+}
+
+NCCL_API(ncclResult_t, ncclCommRevoke, ncclComm_t comm, int revokeFlags);
+ncclResult_t ncclCommRevoke_impl(ncclComm_t comm, int revokeFlags) {
+  NCCLCHECK(Recorder::instance().record(rrOtherCall, comm));
+  NVTX3_RANGE(NcclNvtxParamsCommRevoke);
+
+  ncclResult_t ret = ncclSuccess;
+  struct ncclCommRevokeAsyncJob* job = NULL;
+
+  // For now only NCCL_REVOKE_DEFAULT (0) is supported
+  if (revokeFlags != NCCL_REVOKE_DEFAULT) {
+    return ncclInvalidArgument;
+  }
+  if (comm == NULL) {
+    return ncclInvalidArgument;
+  }
+  // Disallow revoke if destroy/finalize in progress
+  if (comm->destroyFlag || comm->finalizeCalled) {
+    return ncclInvalidArgument;
+  }
+  // Disallow revoke if revoke in progress
+  if (__atomic_load_n(&comm->revokedFlag, __ATOMIC_ACQUIRE)) {
+    return ncclInvalidArgument;
+  }
+
+  NCCLCHECK(ncclGroupStartInternal());
+
+  // Abort in-flight kernels so commRevokeAsync's stream sync cannot deadlock.
+  // finalizeCalled blocks commDestroySync in commReclaim (revoke handles cleanup).
+  (void)setCommAbortFlags(comm, 1);
+  comm->revokedFlag = 1;
+  (void)ncclCommEnsureReady(comm);
+  comm->finalizeCalled = true;
+
+  INFO(NCCL_INIT, "comm %p rank %d nRanks %d cudaDev %d busId %lx - Revoke START",
+       comm, comm->rank, comm->nRanks, comm->cudaDev, comm->busId);
+
+  NCCLCHECKGOTO(ncclCalloc(&job, 1), ret, fail);
+  job->comm = comm;
+  NCCLCHECKGOTO(ncclAsyncLaunch((struct ncclAsyncJob*)job, commRevokeAsync, NULL, free, comm), ret, fail);
+
+exit:
+  ncclGroupErrCheck(ret);
+  NCCLCHECK(ncclGroupEndInternal());
+  if (comm && !comm->config.blocking) {
+    NCCLCHECK(ncclCommGetAsyncError(comm, &ret));
+  }
+  INFO(NCCL_INIT, "comm %p rank %d nRanks %d cudaDev %d busId %lx - Revoke COMPLETE, result %d",
+       comm, comm->rank, comm->nRanks, comm->cudaDev, comm->busId, ret);
+  return ret;
+fail:
+  if (comm && !comm->config.blocking) (void) ncclCommSetAsyncError(comm, ret);
+  goto exit;
+}
+
 static void childCommCleanupJob(void* job) {
   struct ncclCommInitRankAsyncJob* initJob = (struct ncclCommInitRankAsyncJob*)job;
   if (initJob->excludeRanksList) free(initJob->excludeRanksList);
@@ -3337,6 +3580,9 @@ static ncclResult_t ncclCommInitChildComm(ncclComm_t comm, ncclComm_t* newcomm, 
     // Set the shareResource field, this is used throughout the init and must be reset every time.
     // If we shrink, we only reuse resources if we shrink in the default mode
     comm->shareResources = isShrink ? (!(flags & NCCL_SHRINK_ABORT) && comm->config.shrinkShare) : comm->config.splitShare;
+    if (__atomic_load_n(&comm->revokedFlag, __ATOMIC_ACQUIRE)) {
+      comm->shareResources = false;
+    }
     if (comm->shareResources) {
       childComm->abortFlag = comm->abortFlag;
       childComm->abortFlagDev = comm->abortFlagDev;
@@ -3473,6 +3719,26 @@ ncclResult_t ncclCommGetAsyncError_impl(ncclComm_t comm, ncclResult_t *asyncErro
 
   *asyncError = __atomic_load_n(&comm->asyncResult, __ATOMIC_ACQUIRE);
   if (*asyncError == ncclSuccess && comm->proxyState) *asyncError = __atomic_load_n(&comm->proxyState->asyncResult, __ATOMIC_ACQUIRE);
+
+  /* Check gin status */
+  if (*asyncError == ncclSuccess && comm->sharedRes && comm->sharedRes->ginState.ncclGin) {
+    struct ncclGinState* ginState = &comm->sharedRes->ginState;
+    // Gin progress thread status
+    if (ginState->needsProxyProgress) *asyncError = __atomic_load_n(&comm->sharedRes->ginState.asyncResult, __ATOMIC_ACQUIRE);
+    // Gin side errors, also works when we have no GIN progress thread.
+    if (*asyncError == ncclSuccess) {
+      bool ginError;
+      for (int c=0; c<comm->sharedRes->ginState.ginCommCount; c++) {
+        NCCLCHECK(ncclGinQueryLastError(&comm->sharedRes->ginState, &ginError));
+        if (ginError) {
+          WARN("GIN Error on gin context %d\n", c);
+          *asyncError = ncclRemoteError;
+          break;
+        }
+      }
+    }
+  }
+
   /* if there is linked group job, we should complete it. */
   if (*asyncError == ncclSuccess && comm->groupJob) {
     NCCLCHECK(ncclGroupJobComplete(comm->groupJob));

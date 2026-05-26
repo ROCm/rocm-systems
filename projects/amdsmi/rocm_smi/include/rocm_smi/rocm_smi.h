@@ -126,14 +126,14 @@ typedef enum {
  */
 
 typedef enum {
-  RSMI_INIT_FLAG_ALL_GPUS = 0x1,                        //!< Attempt to add all GPUs found
-                                                        //!< (including non-AMD) to the list
-                                                        //!< of devices from which SMI
-                                                        //!< information can be retrieved. By
-                                                        //!< default, only AMD devices are
-                                                        //!<  enumerated by RSMI.
-  RSMI_INIT_FLAG_THRAD_ONLY_MUTEX = 0x400000000000000,  //!< The mutex limit to thread
-  RSMI_INIT_FLAG_RESRV_TEST1 = 0x800000000000000,       //!< Reserved for test
+  RSMI_INIT_FLAG_ALL_GPUS = 0x1,                         //!< Attempt to add all GPUs found
+                                                         //!< (including non-AMD) to the list
+                                                         //!< of devices from which SMI
+                                                         //!< information can be retrieved. By
+                                                         //!< default, only AMD devices are
+                                                         //!<  enumerated by RSMI.
+  RSMI_INIT_FLAG_THRAD_ONLY_MUTEX = 0x0400000000000000,  //!< The mutex limit to thread
+  RSMI_INIT_FLAG_RESRV_TEST1 = 0x0800000000000000,       //!< Reserved for test
 } rsmi_init_flags_t;
 
 /**

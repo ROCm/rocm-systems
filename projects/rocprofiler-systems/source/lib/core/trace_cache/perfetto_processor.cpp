@@ -17,12 +17,18 @@
 #include "trace_cache/sample_type.hpp"
 
 #include "logger/debug.hpp"
+#include <charconv>
 #include <cstdint>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <array>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
+#include <string_view>
+#include <utility>
 
 #include "library/rocprofiler-sdk/fwd.hpp"
 #include <rocprofiler-sdk/context.h>
@@ -33,8 +39,10 @@ namespace
 {
 struct annotation_entry
 {
-    std::string                                                             key;
-    std::variant<std::string, uint64_t, int64_t, double, int32_t, uint32_t> value;
+    std::string key;
+    std::variant<std::string, std::uint64_t, std::int64_t, double, std::int32_t,
+                 std::uint32_t>
+        value;
 };
 
 void
@@ -49,9 +57,73 @@ annotate_perfetto(::perfetto::EventContext&            ctx,
     }
 }  // close annotate_perfetto
 
+[[nodiscard]] std::optional<std::pair<std::uint32_t, std::uint32_t>>
+parse_kfd_migration_node_pair(const std::string& args_str)
+{
+    std::string src_agent;
+    std::string dst_agent;
+
+    try
+    {
+        const auto args = process_arguments_string(args_str);
+        for(const auto& arg : args)
+        {
+            if(arg.arg_name == "src_agent")
+                src_agent = arg.arg_value;
+            else if(arg.arg_name == "dst_agent")
+                dst_agent = arg.arg_value;
+        }
+    } catch(const std::exception& e)
+    {
+        LOG_WARNING("Failed to parse KFD migration args: {}", e.what());
+        return std::nullopt;
+    }
+
+    if(src_agent.empty() || dst_agent.empty()) return std::nullopt;
+
+    auto parse_node_id = [](const std::string& value, std::uint32_t& out) {
+        const auto* first = value.data();
+        const auto* last  = value.data() + value.size();
+        auto        res   = std::from_chars(first, last, out);
+        return res.ec == std::errc{} && res.ptr == last;
+    };
+
+    std::uint32_t src_node_id = 0;
+    std::uint32_t dst_node_id = 0;
+    if(!parse_node_id(src_agent, src_node_id) || !parse_node_id(dst_agent, dst_node_id))
+        return std::nullopt;
+
+    return std::pair{ src_node_id, dst_node_id };
+}
+
+[[nodiscard]] std::optional<std::uint32_t>
+resolve_kfd_migration_gpu_bucket(
+    const std::string&                                   args_str,
+    const std::unordered_map<std::uint32_t, agent_type>& node_type_cache)
+{
+    auto ids = parse_kfd_migration_node_pair(args_str);
+    if(!ids.has_value()) return std::nullopt;
+
+    const auto [src_node_id, dst_node_id] = *ids;
+    const auto find_type = [&](std::uint32_t node_id) -> std::optional<agent_type> {
+        auto it = node_type_cache.find(node_id);
+        if(it == node_type_cache.end()) return std::nullopt;
+        return it->second;
+    };
+
+    const auto src_type = find_type(src_node_id);
+    const auto dst_type = find_type(dst_node_id);
+    if(!src_type.has_value() || !dst_type.has_value()) return std::nullopt;
+
+    if(*src_type == agent_type::CPU && *dst_type == agent_type::GPU) return dst_node_id;
+    if(*src_type == agent_type::GPU) return src_node_id;
+
+    return std::nullopt;
+}
+
 template <typename CategoryT>
 ::perfetto::Track
-get_track(CategoryT, std::string name, uint64_t hash_arg)
+get_track(CategoryT, std::string name, std::uint64_t hash_arg)
 {
     auto _uuid = tracing::get_perfetto_category_uuid<CategoryT>(hash_arg);
 
@@ -94,7 +166,9 @@ using amd_smi_pcie_bandwidth_acc_track =
     perfetto_counter_track<category::amd_smi_pcie_bandwidth_acc>;
 using amd_smi_pcie_bandwidth_inst_track =
     perfetto_counter_track<category::amd_smi_pcie_bandwidth_inst>;
-using amd_smi_sdma_track = perfetto_counter_track<category::amd_smi_sdma_usage>;
+using amd_smi_sdma_track      = perfetto_counter_track<category::amd_smi_sdma_usage>;
+using amd_smi_gfx_clock_track = perfetto_counter_track<category::amd_smi_gfx_clock>;
+using amd_smi_mem_clock_track = perfetto_counter_track<category::amd_smi_mem_clock>;
 using amd_smi_nic_rx_cnp_pkts_track =
     perfetto_counter_track<category::amd_smi_nic_rx_cnp_pkts>;
 using amd_smi_nic_tx_cnp_pkts_track =
@@ -108,9 +182,15 @@ using amd_smi_nic_rx_ucast_pkts_track =
 using amd_smi_nic_tx_ucast_pkts_track =
     perfetto_counter_track<category::amd_smi_nic_tx_ucast_pkts>;
 
+// Unified Memory counter tracks
+using unified_memory_bandwidth_track =
+    perfetto_counter_track<category::unified_memory_bandwidth>;
+using unified_memory_fault_rate_track =
+    perfetto_counter_track<category::unified_memory_fault_rate>;
+
 template <typename Track>
 bool
-ensure_gpu_track(uint32_t device_id, bool enabled, const char* track_suffix,
+ensure_gpu_track(std::uint32_t device_id, bool enabled, const char* track_suffix,
                  const char* units)
 {
     if(!enabled) return false;
@@ -122,8 +202,8 @@ ensure_gpu_track(uint32_t device_id, bool enabled, const char* track_suffix,
 
 template <typename Track, typename ValueT>
 void
-emit_gpu_scalar(uint32_t device_id, size_t ts, bool enabled, const char* track_suffix,
-                const char* units, ValueT value)
+emit_gpu_scalar(std::uint32_t device_id, size_t ts, bool enabled,
+                const char* track_suffix, const char* units, ValueT value)
 {
     if(ensure_gpu_track<Track>(device_id, enabled, track_suffix, units))
         TRACE_COUNTER(trait::name<typename Track::category_type>::value,
@@ -132,7 +212,7 @@ emit_gpu_scalar(uint32_t device_id, size_t ts, bool enabled, const char* track_s
 
 template <typename Track, typename Array, typename Fn>
 void
-emit_xcp_array_metrics(uint32_t device_id, size_t ts, const char* metric_name,
+emit_xcp_array_metrics(std::uint32_t device_id, size_t ts, const char* metric_name,
                        const Array& data, std::optional<size_t> xcp_idx, const Fn& emit)
 {
     for(size_t i = 0; i < data.size(); ++i)
@@ -152,9 +232,9 @@ emit_xcp_array_metrics(uint32_t device_id, size_t ts, const char* metric_name,
                 fmt::format("GPU [{}] {} [{:02}] (S)", device_id, metric_name, i);
         }
 
-        auto unique_key = (static_cast<uint64_t>(device_id) << 16) |
-                          (static_cast<uint64_t>(xcp_idx.value_or(0)) << 8) |
-                          static_cast<uint64_t>(i);
+        auto unique_key = (static_cast<std::uint64_t>(device_id) << 16) |
+                          (static_cast<std::uint64_t>(xcp_idx.value_or(0)) << 8) |
+                          static_cast<std::uint64_t>(i);
 
         if(!Track::exists(unique_key))
         {
@@ -165,7 +245,8 @@ emit_xcp_array_metrics(uint32_t device_id, size_t ts, const char* metric_name,
 }
 
 void
-emit_xgmi_metrics(uint32_t device_id, size_t ts, const pmc::collectors::gpu::metrics& m)
+emit_xgmi_metrics(std::uint32_t device_id, size_t ts,
+                  const pmc::collectors::gpu::metrics& m)
 {
     emit_gpu_scalar<amd_smi_xgmi_link_width_track>(device_id, ts, true, "XGMI Link Width",
                                                    "lanes", m.xgmi.link.width);
@@ -175,9 +256,9 @@ emit_xgmi_metrics(uint32_t device_id, size_t ts, const pmc::collectors::gpu::met
     for(size_t link = 0; link < m.xgmi.data_acc.read.size(); ++link)
     {
         const auto read_val = m.xgmi.data_acc.read[link];
-        if(read_val != std::numeric_limits<uint64_t>::max())
+        if(read_val != std::numeric_limits<std::uint64_t>::max())
         {
-            auto unique_key = (device_id << 8) | link;
+            auto unique_key = (static_cast<std::uint64_t>(device_id) << 8) | link;
             if(!amd_smi_xgmi_read_track::exists(unique_key))
             {
                 amd_smi_xgmi_read_track::emplace(
@@ -191,9 +272,9 @@ emit_xgmi_metrics(uint32_t device_id, size_t ts, const pmc::collectors::gpu::met
         }
 
         const auto write_val = m.xgmi.data_acc.write[link];
-        if(write_val != std::numeric_limits<uint64_t>::max())
+        if(write_val != std::numeric_limits<std::uint64_t>::max())
         {
-            auto unique_key = (device_id << 8) | link;
+            auto unique_key = (static_cast<std::uint64_t>(device_id) << 8) | link;
             if(!amd_smi_xgmi_write_track::exists(unique_key))
             {
                 amd_smi_xgmi_write_track::emplace(
@@ -209,7 +290,8 @@ emit_xgmi_metrics(uint32_t device_id, size_t ts, const pmc::collectors::gpu::met
 }
 
 void
-emit_pcie_metrics(uint32_t device_id, size_t ts, const pmc::collectors::gpu::metrics& m)
+emit_pcie_metrics(std::uint32_t device_id, size_t ts,
+                  const pmc::collectors::gpu::metrics& m)
 {
     emit_gpu_scalar<amd_smi_pcie_link_width_track>(device_id, ts, true, "PCIe Link Width",
                                                    "lanes", m.pcie.link.width);
@@ -315,6 +397,36 @@ dispatch_in_time_sample(size_t category_enum_id, const in_time_sample& _sample,
         category_enum_id, _sample, use_annotations,
         rocprofsys::utility::make_index_sequence_range<1, ROCPROFSYS_CATEGORY_LAST>{});
 }
+
+inline std::string
+hip_activity_stream_track_desc(std::uint64_t _stream_id_v)
+{
+    return fmt::format("HIP Activity Stream {}", _stream_id_v);
+}
+
+template <typename QueueCategory, typename QueueTrackFactory, typename Annotate>
+void
+emit_grouped_event(bool group_by_queue, QueueCategory queue_cat,
+                   QueueTrackFactory&& make_queue_track, std::uint64_t stream_id,
+                   const char* push_name, const char* pop_name, std::uint64_t beg_ts,
+                   std::uint64_t end_ts, std::uint64_t corr_id, const Annotate& annotate)
+{
+    const auto _flow = ::perfetto::Flow::ProcessScoped(corr_id);
+    if(group_by_queue)
+    {
+        const auto _track = std::forward<QueueTrackFactory>(make_queue_track)();
+        tracing::push_perfetto(queue_cat, push_name, _track, beg_ts, _flow, annotate);
+        tracing::pop_perfetto(queue_cat, pop_name, _track, end_ts);
+    }
+    else
+    {
+        const auto _track = tracing::get_perfetto_track(
+            category::rocm_hip_stream{}, hip_activity_stream_track_desc, stream_id);
+        tracing::push_perfetto(category::rocm_hip_stream{}, push_name, _track, beg_ts,
+                               _flow, annotate);
+        tracing::pop_perfetto(category::rocm_hip_stream{}, pop_name, _track, end_ts);
+    }
+}
 }  // namespace
 
 perfetto_processor_t::perfetto_processor_t(
@@ -329,8 +441,18 @@ perfetto_processor_t::perfetto_processor_t(
 , m_tmp_file(nullptr)
 , m_tracing_session(nullptr)
 , m_use_annotations(config::get_perfetto_annotations())
+, m_default_group_by_queue(config::get_group_by_queue())
 , m_output_registry(output_registry)
-{}
+{
+    for(const auto& agent_ptr : m_agent_manager.get_agents())
+    {
+        if(!agent_ptr) continue;
+        m_kfd_node_type_cache[agent_ptr->node_id] = agent_ptr->type;
+        if(agent_ptr->type == agent_type::GPU)
+            m_kfd_node_to_gpu_index_cache[agent_ptr->node_id] =
+                static_cast<std::uint32_t>(agent_ptr->device_type_index);
+    }
+}
 
 void
 perfetto_processor_t::initialize_perfetto()
@@ -341,6 +463,12 @@ perfetto_processor_t::initialize_perfetto()
         auto args               = ::perfetto::TracingInitArgs{};
         args.backends           = ::perfetto::kInProcessBackend;
         args.shmem_size_hint_kb = config::get_perfetto_shmem_size_hint();
+
+        // Silence all Perfetto log output on log-disabled ranks with empty callback
+        if(!config::output_filtering::is_log_output_enabled_for_current_mpi_rank())
+        {
+            args.log_message_callback = +[](::perfetto::base::LogMessageCallbackArgs) {};
+        }
 
         ::perfetto::Tracing::Initialize(args);
         ::perfetto::TrackEvent::Register();
@@ -457,7 +585,7 @@ perfetto_processor_t::get_session_data()
         auto _fnum_read = ::fread(_data.data(), sizeof(char), _fnum_elem, _fdata);
         ::fclose(_fdata);
 
-        if(get_is_continuous_integration() && _fnum_read != _fnum_elem)
+        if(_fnum_read != _fnum_elem)
         {
             throw std::runtime_error(fmt::format(
                 "Error! read {} elements from perfetto trace file '{}'. Expected {}",
@@ -491,14 +619,18 @@ perfetto_processor_t::flush(bool& _perfetto_output_error)
 
     if(!trace_data.empty())
     {
+        const bool logs_enabled =
+            config::output_filtering::is_log_output_enabled_for_current_mpi_rank();
         operation::file_output_message<tim::project::rocprofsys> _fom{};
         // Write the trace into a file.
-        if(config::get_verbose() >= 0)
+        if(config::get_verbose() >= 0 && logs_enabled)
+        {
             _fom(_filename, std::string{ "perfetto" },
                  " (%.2f KB / %.2f MB / %.2f GB)... ",
                  static_cast<double>(trace_data.size()) / units::KB,
                  static_cast<double>(trace_data.size()) / units::MB,
                  static_cast<double>(trace_data.size()) / units::GB);
+        }
         std::ofstream ofs{};
         if(!filepath::open(ofs, _filename, std::ios::out | std::ios::binary))
         {
@@ -509,7 +641,10 @@ perfetto_processor_t::flush(bool& _perfetto_output_error)
         {
             // Write the trace into a file.
             ofs.write(trace_data.data(), trace_data.size());
-            if(config::get_verbose() >= 0) _fom.append("%s", "Done");  // NOLINT
+            if(config::get_verbose() >= 0 && logs_enabled)
+            {
+                _fom.append("%s", "Done");  // NOLINT
+            }
             m_output_registry.register_file(_filename, output_format::perfetto);
         }
         ofs.close();
@@ -537,6 +672,7 @@ perfetto_processor_t::prepare_for_processing()
     initialize_perfetto();
     setup_perfetto();
     start_session();
+    initialize_pmc_track_map();
     LOG_TRACE("Perfetto processor prepared for processing");
 }
 
@@ -557,10 +693,23 @@ perfetto_processor_t::finalize_processing()
     }
 }
 
+template <typename CategoryT, typename FuncT, typename... Args>
+::perfetto::Track
+perfetto_processor_t::get_or_create_track(CategoryT, FuncT&& desc_gen, Args&&... args)
+{
+    const auto _uuid = tracing::get_perfetto_category_uuid<CategoryT>(args...);
+    auto       it    = m_track_cache.find(_uuid);
+    if(it != m_track_cache.end()) return it->second;
+    auto _track = tracing::get_perfetto_track(CategoryT{}, std::forward<FuncT>(desc_gen),
+                                              std::forward<Args>(args)...);
+    m_track_cache.emplace(_uuid, _track);
+    return _track;
+}
+
 void
 perfetto_processor_t::handle(const kernel_dispatch_sample& _kds)
 {
-    static auto _track_desc = [](uint64_t _device_id_v, uint64_t _queue_id_v) {
+    static auto _track_desc = [](std::uint64_t _device_id_v, std::uint64_t _queue_id_v) {
         return fmt::format("GPU Kernel Dispatch [{}] Queue {}", _device_id_v,
                            _queue_id_v);
     };
@@ -581,9 +730,8 @@ perfetto_processor_t::handle(const kernel_dispatch_sample& _kds)
 
     auto kernel_name = rocprofsys::utility::demangle(kernel_symbol->kernel_name);
 
-    const auto _track =
-        tracing::get_perfetto_track(category::rocm_kernel_dispatch{}, _track_desc,
-                                    _agent_device_id, _queue_id_handle);
+    // Force queue grouping when sample is not associated with a HIP stream
+    const bool _group_by_queue = m_default_group_by_queue || _stream_handle == 0;
 
     auto add_annotations = [&](::perfetto::EventContext ctx) {
         if(!m_use_annotations) return;
@@ -605,12 +753,13 @@ perfetto_processor_t::handle(const kernel_dispatch_sample& _kds)
                                               _kds.grid_size_y, _kds.grid_size_z) } });
     };
 
-    tracing::push_perfetto(category::rocm_kernel_dispatch{}, kernel_name.c_str(), _track,
-                           _beg_ts, ::perfetto::Flow::ProcessScoped(_corr_id),
-                           add_annotations);
-
-    tracing::pop_perfetto(category::rocm_kernel_dispatch{}, kernel_name.c_str(), _track,
-                          _end_ts);
+    auto _make_queue_track = [&] {
+        return get_or_create_track(category::rocm_kernel_dispatch{}, _track_desc,
+                                   _agent_device_id, _queue_id_handle);
+    };
+    emit_grouped_event(_group_by_queue, category::rocm_kernel_dispatch{},
+                       _make_queue_track, _stream_handle, kernel_name.c_str(),
+                       kernel_name.c_str(), _beg_ts, _end_ts, _corr_id, add_annotations);
 }
 
 void
@@ -654,8 +803,8 @@ perfetto_processor_t::handle(const scratch_memory_sample& _sms)
         return fmt::format("GPU Scratch Memory Events Thread {}", _thread_id_sequent);
     };
 
-    const auto _track =
-        tracing::get_perfetto_track(category::rocm_scratch_memory{}, _track_desc_events);
+    // Force queue grouping when sample is not associated with a HIP stream
+    const bool _group_by_queue = m_default_group_by_queue || _stream_id == 0;
 
     auto add_perfetto_annotations = [&](::perfetto::EventContext ctx) {
         if(!m_use_annotations) return;
@@ -671,10 +820,12 @@ perfetto_processor_t::handle(const scratch_memory_sample& _sms)
                                  { "flags", _sms.flags } });
     };
 
-    tracing::push_perfetto(category::rocm_scratch_memory{}, _name.c_str(), _track,
-                           _beg_ts, ::perfetto::Flow::ProcessScoped(_corr_id),
-                           add_perfetto_annotations);
-    tracing::pop_perfetto(category::rocm_scratch_memory{}, "", _track, _end_ts);
+    auto _make_queue_track = [&] {
+        return get_or_create_track(category::rocm_scratch_memory{}, _track_desc_events);
+    };
+    emit_grouped_event(_group_by_queue, category::rocm_scratch_memory{},
+                       _make_queue_track, _stream_id, _name.c_str(), "", _beg_ts, _end_ts,
+                       _corr_id, add_perfetto_annotations);
 }
 
 void
@@ -694,14 +845,14 @@ perfetto_processor_t::handle(const memory_copy_sample& _mcs)
         static_cast<rocprofiler_buffer_tracing_kind_t>(_mcs.kind),
         static_cast<rocprofiler_tracing_operation_t>(_mcs.operation)) };
 
-    auto _track_desc = [](int32_t _device_id_v, rocprofiler_thread_id_t _tid) {
+    auto _track_desc = [](std::int32_t _device_id_v, rocprofiler_thread_id_t _tid) {
         const auto& _tid_v = thread_info::get(_tid, SystemTID);
         return fmt::format("GPU Memory Copy to Agent [{}] Thread {}", _device_id_v,
                            _tid_v->index_data->sequent_value);
     };
 
-    const auto _track = tracing::get_perfetto_track(
-        category::rocm_memory_copy{}, _track_desc, _dst_agent_log_node_id, _thrd_id);
+    // Force queue grouping when sample is not associated with a HIP stream
+    const bool _group_by_queue = m_default_group_by_queue || _stream_id == 0;
 
     auto add_perfetto_annotations = [&](::perfetto::EventContext ctx) {
         if(!m_use_annotations) return;
@@ -718,10 +869,13 @@ perfetto_processor_t::handle(const memory_copy_sample& _mcs)
                                  { "dst_address", _mcs.dst_address_value } });
     };
 
-    tracing::push_perfetto(category::rocm_memory_copy{}, _name.c_str(), _track, _beg_ts,
-                           ::perfetto::Flow::ProcessScoped(_corr_id),
-                           add_perfetto_annotations);
-    tracing::pop_perfetto(category::rocm_memory_copy{}, "", _track, _end_ts);
+    auto _make_queue_track = [&] {
+        return get_or_create_track(category::rocm_memory_copy{}, _track_desc,
+                                   _dst_agent_log_node_id, _thrd_id);
+    };
+    emit_grouped_event(_group_by_queue, category::rocm_memory_copy{}, _make_queue_track,
+                       _stream_id, _name.c_str(), "", _beg_ts, _end_ts, _corr_id,
+                       add_perfetto_annotations);
 }
 
 void
@@ -755,7 +909,7 @@ perfetto_processor_t::handle([[maybe_unused]] const memory_allocate_sample& _mas
         const auto* operation = memop_to_string(
             static_cast<rocprofiler_memory_allocation_operation_t>(_mas.operation));
 
-        auto _track_desc = [](int32_t _device_id_v, rocprofiler_thread_id_t _tid) {
+        auto _track_desc = [](std::int32_t _device_id_v, rocprofiler_thread_id_t _tid) {
             const auto& _tid_v = thread_info::get(_tid, SystemTID);
             return fmt::format("GPU Memory Allocation to Agent [{}] Thread {}",
                                _device_id_v, _tid_v->index_data->sequent_value);
@@ -899,7 +1053,7 @@ perfetto_processor_t::handle(const cpu_pmc_sample& _cpu_sample)
         double value;
     };
 
-    auto deserialize_freqs = [](const std::vector<uint8_t>& buffer) {
+    auto deserialize_freqs = [](const std::vector<std::uint8_t>& buffer) {
         std::vector<core_freq_sample> result;
         size_t                        offset = 0;
 
@@ -915,7 +1069,7 @@ perfetto_processor_t::handle(const cpu_pmc_sample& _cpu_sample)
         return result;
     };
 
-    auto deserialize_loads = [](const std::vector<uint8_t>& buffer) {
+    auto deserialize_loads = [](const std::vector<std::uint8_t>& buffer) {
         std::vector<core_load_sample> result;
         size_t                        offset = 0;
 
@@ -1039,7 +1193,7 @@ perfetto_processor_t::handle([[maybe_unused]] const backtrace_region_sample& _bt
 }
 
 void
-perfetto_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
+perfetto_processor_t::initialize_pmc_track_map()
 {
     using counter_collection_track =
         perfetto_counter_track<category::rocm_counter_collection>;
@@ -1129,7 +1283,11 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
                               comm_data_track::at(id, idx), ts, val);
             } } }
     };
+}
 
+void
+perfetto_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
+{
     const auto _track_name = _pmc.track_name;
     const auto _value      = _pmc.value;
     const auto _beg_ts     = _pmc.timestamp_ns;
@@ -1189,6 +1347,11 @@ perfetto_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
 
     emit_gpu_scalar<amd_smi_sdma_track>(_device_id, _ts, _em.bits.sdma_usage,
                                         "SDMA Usage", "%", _m.sdma_usage);
+
+    emit_gpu_scalar<amd_smi_gfx_clock_track>(_device_id, _ts, _em.bits.gfx_clock,
+                                             "GFX Clock", "MHz", _m.gfx_clock_mhz);
+    emit_gpu_scalar<amd_smi_mem_clock_track>(_device_id, _ts, _em.bits.mem_clock,
+                                             "Memory Clock", "MHz", _m.mem_clock_mhz);
 
     // Per-XCP VCN busy metrics (MI300)
     if(_em.bits.vcn_busy)
@@ -1317,6 +1480,36 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
 }
 
 void
+perfetto_processor_t::handle(
+    [[maybe_unused]] const gpu_perf_counter_sample& _gpu_perf_counter)
+{
+    const auto _ts        = _gpu_perf_counter.timestamp;
+    const auto _device_id = _gpu_perf_counter.device_id;
+
+    auto track_it = m_pmc_track_map.find(
+        static_cast<size_t>(category_enum_id<category::rocm_counter_collection>::value));
+    if(track_it == m_pmc_track_map.end()) return;
+
+    const auto& track_info = track_it->second;
+
+    for(const auto& entry : _gpu_perf_counter.entries)
+    {
+        auto name_info =
+            m_metadata.find_gpu_perf_counter_by_id(_device_id, entry.counter_id);
+        if(!name_info) continue;
+
+        const auto& track_name = name_info->get().track_name;
+        auto        track_key  = std::hash<std::string>{}(track_name);
+
+        if(!track_info.exists_fn(track_key))
+        {
+            track_info.emplace_fn(track_key, track_name, track_info.default_units);
+        }
+        track_info.trace_fn(track_key, 0, _ts, entry.value);
+    }
+}
+
+void
 perfetto_processor_t::handle([[maybe_unused]] const in_time_sample& _sample)
 {
     // Dispatch based on category_enum_id using the category type mapping
@@ -1328,64 +1521,143 @@ perfetto_processor_t::handle([[maybe_unused]] const in_time_sample& _sample)
     }
 }
 
+template <typename CategoryT>
 void
-perfetto_processor_t::handle(const kfd_sample& _kfd)
+perfetto_processor_t::emit_kfd_event(const kfd_sample& sample)
 {
-    auto _beg_ts     = _kfd.start_timestamp;
-    auto _end_ts     = _kfd.end_timestamp;
-    auto _track_name = _kfd.track_name;
-    auto _name       = _kfd.name;
-    auto _category   = _kfd.category;
-    auto _track_hash = std::hash<std::string>{}(_track_name);
+    const auto _track_hash = std::hash<std::string>{}(sample.track_name);
+    auto       _track      = get_track(CategoryT{}, sample.track_name, _track_hash);
 
-    auto emit_kfd_event = [&](auto category_tag) {
-        using CategoryT = decltype(category_tag);
-        auto _track     = get_track(CategoryT{}, _track_name, _track_hash);
+    auto add_annotations = [&](::perfetto::EventContext ctx) {
+        if(!m_use_annotations) return;
 
-        auto add_annotations = [&](::perfetto::EventContext ctx) {
-            if(!m_use_annotations) return;
-
-            std::vector<annotation_entry> annotations = {
-                { "begin_ns", _beg_ts },
-                { "end_ns", _end_ts },
-            };
-
-            auto args = process_arguments_string(_kfd.args_str);
-            for(const auto& arg : args)
-            {
-                annotations.push_back({ arg.arg_name.c_str(), arg.arg_value });
-            }
-
-            annotate_perfetto(ctx, annotations);
+        std::vector<annotation_entry> annotations = {
+            { "begin_ns", sample.start_timestamp },
+            { "end_ns", sample.end_timestamp },
         };
 
-        if(_beg_ts == _end_ts)
+        auto args = process_arguments_string(sample.args_str);
+        for(const auto& arg : args)
         {
-            TRACE_EVENT_INSTANT(trait::name<CategoryT>::value,
-                                ::perfetto::DynamicString{ _name }, _track, _beg_ts,
-                                add_annotations);
+            annotations.push_back({ arg.arg_name.c_str(), arg.arg_value });
         }
-        else
-        {
-            tracing::push_perfetto_track(CategoryT{}, _name.c_str(), _track, _beg_ts,
-                                         add_annotations);
-            tracing::pop_perfetto_track(CategoryT{}, _name.c_str(), _track, _end_ts);
-        }
+
+        annotate_perfetto(ctx, annotations);
     };
 
-    if(_category == trait::name<category::rocm_kfd_page_fault>::value)
-        emit_kfd_event(category::rocm_kfd_page_fault{});
-    else if(_category == trait::name<category::rocm_kfd_page_migrate>::value)
-        emit_kfd_event(category::rocm_kfd_page_migrate{});
-    else if(_category == trait::name<category::rocm_kfd_queue>::value)
-        emit_kfd_event(category::rocm_kfd_queue{});
-    else if(_category == trait::name<category::rocm_kfd_event_queue>::value)
-        emit_kfd_event(category::rocm_kfd_event_queue{});
-    else if(_category == trait::name<category::rocm_kfd_event_unmap_from_gpu>::value)
-        emit_kfd_event(category::rocm_kfd_event_unmap_from_gpu{});
-    else if(_category == trait::name<category::rocm_kfd_event_dropped_events>::value)
-        emit_kfd_event(category::rocm_kfd_event_dropped_events{});
+    if(sample.start_timestamp == sample.end_timestamp)
+    {
+        TRACE_EVENT_INSTANT(trait::name<CategoryT>::value,
+                            ::perfetto::DynamicString{ sample.name }, _track,
+                            sample.start_timestamp, add_annotations);
+    }
     else
-        LOG_WARNING("Unknown KFD category: {}", _category);
+    {
+        tracing::push_perfetto_track(CategoryT{}, sample.name.c_str(), _track,
+                                     sample.start_timestamp, add_annotations);
+        tracing::pop_perfetto_track(CategoryT{}, sample.name.c_str(), _track,
+                                    sample.end_timestamp);
+    }
+}
+
+void
+perfetto_processor_t::handle_kfd_page_fault(const kfd_sample& sample)
+{
+    emit_kfd_event<category::rocm_kfd_page_fault>(sample);
+
+    m_unified_memory_fault_counts[sample.device_id]++;
+
+    if(!unified_memory_fault_rate_track::exists(sample.device_id))
+    {
+        auto track_name =
+            fmt::format("Unified Memory Page Faults [Device {}]", sample.device_id);
+        unified_memory_fault_rate_track::emplace(
+            sample.device_id, track_name, "faults",
+            trait::name<category::unified_memory_fault_rate>::value);
+    }
+    TRACE_COUNTER(trait::name<category::unified_memory_fault_rate>::value,
+                  unified_memory_fault_rate_track::at(sample.device_id, 0),
+                  sample.end_timestamp,
+                  static_cast<double>(m_unified_memory_fault_counts[sample.device_id]));
+}
+
+void
+perfetto_processor_t::handle_kfd_page_migrate(const kfd_sample& sample)
+{
+    emit_kfd_event<category::rocm_kfd_page_migrate>(sample);
+
+    const std::uint64_t duration_ns = (sample.end_timestamp >= sample.start_timestamp)
+                                          ? sample.end_timestamp - sample.start_timestamp
+                                          : 0;
+    if(duration_ns == 0) return;
+
+    auto gpu_node_id =
+        resolve_kfd_migration_gpu_bucket(sample.args_str, m_kfd_node_type_cache);
+    if(!gpu_node_id.has_value())
+    {
+        LOG_TRACE("Failed to resolve unified memory bandwidth track for KFD "
+                  "migration args '{}'",
+                  sample.args_str);
+        return;
+    }
+
+    // Convert KFD node_id to GPU index so "Device N" matches page-fault tracks.
+    auto gpu_index_it = m_kfd_node_to_gpu_index_cache.find(*gpu_node_id);
+    if(gpu_index_it == m_kfd_node_to_gpu_index_cache.end())
+    {
+        LOG_TRACE("KFD node {} has no associated GPU device index; skipping "
+                  "unified memory bandwidth sample",
+                  *gpu_node_id);
+        return;
+    }
+    const auto gpu_device_index = gpu_index_it->second;
+
+    if(!unified_memory_bandwidth_track::exists(gpu_device_index))
+    {
+        auto track_name =
+            fmt::format("Unified Memory Bandwidth [Device {}]", gpu_device_index);
+        unified_memory_bandwidth_track::emplace(
+            gpu_device_index, track_name, "GB/s",
+            trait::name<category::unified_memory_bandwidth>::value);
+    }
+
+    // bytes / ns == GB/s (decimal)
+    const double bandwidth_gbps = sample.value / static_cast<double>(duration_ns);
+    TRACE_COUNTER(trait::name<category::unified_memory_bandwidth>::value,
+                  unified_memory_bandwidth_track::at(gpu_device_index, 0),
+                  sample.end_timestamp, bandwidth_gbps);
+}
+
+void
+perfetto_processor_t::handle(const kfd_sample& sample)
+{
+    using handler_fn = void (perfetto_processor_t::*)(const kfd_sample&);
+
+    static const std::array<std::pair<std::string_view, handler_fn>, 6> dispatch{ {
+        { trait::name<category::rocm_kfd_page_fault>::value,
+          &perfetto_processor_t::handle_kfd_page_fault },
+        { trait::name<category::rocm_kfd_page_migrate>::value,
+          &perfetto_processor_t::handle_kfd_page_migrate },
+        { trait::name<category::rocm_kfd_queue>::value,
+          &perfetto_processor_t::emit_kfd_event<category::rocm_kfd_queue> },
+        { trait::name<category::rocm_kfd_event_queue>::value,
+          &perfetto_processor_t::emit_kfd_event<category::rocm_kfd_event_queue> },
+        { trait::name<category::rocm_kfd_event_unmap_from_gpu>::value,
+          &perfetto_processor_t::emit_kfd_event<
+              category::rocm_kfd_event_unmap_from_gpu> },
+        { trait::name<category::rocm_kfd_event_dropped_events>::value,
+          &perfetto_processor_t::emit_kfd_event<
+              category::rocm_kfd_event_dropped_events> },
+    } };
+
+    const auto entry =
+        std::find_if(dispatch.begin(), dispatch.end(),
+                     [&](const auto& row) { return row.first == sample.category; });
+    if(entry == dispatch.end())
+    {
+        LOG_WARNING("Unknown KFD category: {}", sample.category);
+        return;
+    }
+    (this->*(entry->second))(sample);
 }
 }  // namespace rocprofsys::trace_cache

@@ -1,0 +1,72 @@
+# rccl-UnitTestsFixturesDebug — shared/ctest schema (ROCm 6.4+, Debug build).
+# RCCL does not support Windows: exclude_windows matches all tests so generated suites are empty on Windows.
+#
+# Tiers:
+#   quick — canonical anchor; env shared across tiers
+#     (RCCL_TEST_NETSOCKET_* for NetSocket retry tuning).
+#   standard — merge quick; override labels.
+#   comprehensive — merge quick; override labels.
+#   full — merge quick; override labels.
+
+test_categories:
+  quick: &fixtures_debug_quick
+    description: "Smoke — same suite list as standard/comprehensive; env merged into standard/comprehensive."
+    test_patterns:
+      - "Alloc.*"
+      - "ParamTests.*"
+      - "EnqueueTests.*"
+      - "ProxyTests.*"
+      - "Rcclwrap.*"
+      - "TransportTest.*"
+      - "ArgCheckTest.*"
+      - "NetSocketTests.*"
+      - "Ipcsocket.*"
+      - "XmlTest.*"
+    exclude_windows:
+      - "*"
+    labels:
+      - "rccl"
+      - "quick"
+      - "smoke"
+      - "precheck"
+      - "fixtures"
+      - "debug"
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "RCCL_TEST_NETSOCKET_MAX_ATTEMPTS=200"
+      - "RCCL_TEST_NETSOCKET_SLEEP_MS=100"
+  standard:
+    <<: *fixtures_debug_quick
+    description: "Same patterns and env as quick; standard labels."
+    labels:
+      - "rccl"
+      - "standard"
+      - "regression"
+      - "fixtures"
+      - "debug"
+  comprehensive:
+    <<: *fixtures_debug_quick
+    description: "Same patterns and env as quick; comprehensive labels."
+    labels:
+      - "rccl"
+      - "comprehensive"
+      - "comprehensive_regression"
+      - "fixtures"
+      - "debug"
+  full:
+    <<: *fixtures_debug_quick
+    description: "Same patterns and env as quick; full labels."
+    labels:
+      - "rccl"
+      - "full"
+      - "full_regression"
+      - "fixtures"
+      - "debug"
+
+execution_settings:
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 1200
+    standard: 1200
+    comprehensive: 1200
+    full: 1200

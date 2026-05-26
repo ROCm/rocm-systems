@@ -43,21 +43,22 @@ public:
         convert_xcp(raw, out);
         convert_xgmi(raw, out);
         convert_pcie(raw, out);
+        convert_clocks(raw, out);
         return out;
     }
 
-    [[nodiscard]] uint64_t get_memory_usage() const
+    [[nodiscard]] std::uint64_t get_memory_usage() const
     {
-        uint64_t usage = 0;
+        std::uint64_t usage = 0;
         check(amdsmi_get_gpu_memory_usage(m_handle, AMDSMI_MEM_TYPE_VRAM, &usage),
               "get_memory_usage");
         return usage;
     }
 
-    [[nodiscard]] uint64_t get_raw_sdma_usage() const
+    [[nodiscard]] std::uint64_t get_raw_sdma_usage() const
     {
 #if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
-        uint32_t num_processes = 0;
+        std::uint32_t num_processes = 0;
         check(amdsmi_get_gpu_process_list(m_handle, &num_processes, nullptr),
               "get_gpu_process_list (count)");
 
@@ -70,7 +71,7 @@ public:
         check(amdsmi_get_gpu_process_list(m_handle, &num_processes, proc_list.data()),
               "get_gpu_process_list (data)");
 
-        uint64_t cumulative = 0;
+        std::uint64_t cumulative = 0;
         for(const auto& proc : proc_list)
         {
             cumulative += proc.sdma_usage;
@@ -84,7 +85,7 @@ public:
     [[nodiscard]] bool is_sdma_supported() const noexcept
     {
 #if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
-        uint32_t num_processes = 0;
+        std::uint32_t num_processes = 0;
         return amdsmi_get_gpu_process_list(m_handle, &num_processes, nullptr) ==
                AMDSMI_STATUS_SUCCESS;
 #else
@@ -138,7 +139,7 @@ private:
 
             constexpr size_t copy_count =
                 std::min(static_cast<size_t>(sizeof(raw.xcp_stats[0].jpeg_busy) /
-                                             sizeof(uint16_t)),
+                                             sizeof(std::uint16_t)),
                          MAX_NUM_JPEG_V1);
             std::copy_n(std::begin(raw.xcp_stats[xcp].jpeg_busy), copy_count,
                         out.xcp_stats[xcp].jpeg_busy.begin());
@@ -170,6 +171,16 @@ private:
         populate_if_supported(out.pcie.link.speed, raw.pcie_link_speed);
         populate_if_supported(out.pcie.bandwidth.acc, raw.pcie_bandwidth_acc);
         populate_if_supported(out.pcie.bandwidth.inst, raw.pcie_bandwidth_inst);
+    }
+
+    static void convert_clocks(const amdsmi_gpu_metrics_t& raw, metrics& out)
+    {
+        populate_if_supported(out.gfx_clock_mhz,
+                              static_cast<std::uint32_t>(raw.current_gfxclk),
+                              static_cast<std::uint32_t>(0xFFFFU));
+        populate_if_supported(out.mem_clock_mhz,
+                              static_cast<std::uint32_t>(raw.current_uclk),
+                              static_cast<std::uint32_t>(0xFFFFU));
     }
 
     amdsmi_processor_handle m_handle;

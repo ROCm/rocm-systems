@@ -25,7 +25,7 @@ struct mock_nic_driver
     MOCK_METHOD(port_info, get_nic_port_info, (), (const));
     MOCK_METHOD(rdma_info, get_nic_rdma_info, (), (const));
     MOCK_METHOD(std::vector<stat_entry>, get_nic_rdma_port_statistics,
-                (uint8_t rdma_port_idx), (const));
+                (std::uint8_t rdma_port_idx), (const));
 };
 
 }  // namespace rocprofsys::pmc::collectors::nic::testing

@@ -21,9 +21,6 @@ rocprofiler_systems_add_interface_library(
     rocprofiler-systems-dyninst
     "Provides flags and libraries for Dyninst (dynamic instrumentation)"
 )
-rocprofiler_systems_add_interface_library(rocprofiler-systems-boost
-    "Boost interface library (for Dyninst)"
-)
 rocprofiler_systems_add_interface_library(rocprofiler-systems-elfutils
     "ElfUtils interface library (for Dyninst)"
 )
@@ -560,17 +557,6 @@ if(ROCPROFSYS_BUILD_DYNINST)
 
     target_link_libraries(rocprofiler-systems-dyninst INTERFACE Dyninst::Dyninst)
 else()
-    # Find Boost before finding Dyninst
-    find_package(Boost)
-    if(NOT TARGET Dyninst::Boost_headers)
-        add_library(Dyninst::Boost_headers INTERFACE IMPORTED)
-        target_include_directories(
-            Dyninst::Boost_headers
-            SYSTEM
-            INTERFACE ${Boost_INCLUDE_DIRS}
-        )
-    endif()
-
     find_package(
         Dyninst
         ${rocprofiler_systems_FIND_QUIETLY}
@@ -578,9 +564,22 @@ else()
         COMPONENTS dyninstAPI parseAPI instructionAPI symtabAPI
     )
 
-    if(TARGET Dyninst::Dyninst) # updated Dyninst CMake system was found
+    if(TARGET Dyninst::Dyninst) # CMake package exports aggregated target (no-Boost OK)
         target_link_libraries(rocprofiler-systems-dyninst INTERFACE Dyninst::Dyninst)
-    else() # updated Dyninst CMake system was not found
+        rocprofiler_systems_target_compile_definitions(rocprofiler-systems-dyninst
+            INTERFACE ROCPROFSYS_USE_DYNINST
+        )
+    else() # legacy Dyninst install: Boost component libraries
+        find_package(Boost)
+        if(NOT TARGET Dyninst::Boost_headers)
+            add_library(Dyninst::Boost_headers INTERFACE IMPORTED)
+            target_include_directories(
+                Dyninst::Boost_headers
+                SYSTEM
+                INTERFACE ${Boost_INCLUDE_DIRS}
+            )
+        endif()
+
         set(_BOOST_COMPONENTS atomic system thread date_time)
         set(rocprofiler_systems_BOOST_COMPONENTS
             "${_BOOST_COMPONENTS}"
@@ -668,6 +667,12 @@ else()
         )
     endif()
 endif()
+
+# Dyninst's Annotatable.h triggers GCC 14's -Wcalloc-transposed-args; suppress it
+# for any TU that pulls in dyninst headers since the project builds with -Werror.
+add_target_cxx_flag_if_avail(
+    rocprofiler-systems-dyninst "-Wno-calloc-transposed-args"
+)
 
 # ----------------------------------------------------------------------------------------#
 #

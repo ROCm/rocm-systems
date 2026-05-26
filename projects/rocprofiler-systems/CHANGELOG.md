@@ -4,16 +4,45 @@
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
 
+## ROCm Systems Profiler 1.7.0 for ROCm 7.14.0
+
+### Added
+
+### Changed
+
+- Remove Boost as a Dyninst dependency by replacing Boost usage with in-tree dyncompat shims and C++17 standard library equivalents; Bundled Dyninst now requires **GCC ≥ 10**
+
+### Resolved issues
+
 ## ROCm Systems Profiler 1.6.0 for ROCm 7.13.0
 
 ### Added
 
-- Kernel Fusion Driver (KFD) event tracing support to capture page faults, page migrations, queue evictions, GPU unmap events, and dropped events. Requires ROCProfiler-SDK 1.2.1 or later. Enable with `ROCPROFSYS_ROCM_DOMAINS=kfd_events`.
+- GPU Hardware Performance Counter (PMC) sampling via the ROCProfiler-SDK device
+  counting service. Periodic per-GPU hardware counters are collected alongside
+  existing PMC sources and exposed in both Perfetto and RocPD outputs. Specify
+  counters with `ROCPROFSYS_GPU_PERF_COUNTERS` (comma-separated; suffix
+  `:device=N` to target a specific GPU). Requires ROCProfiler-SDK 0.6.0 or
+  later (ROCm 6.4.0+).
+- GPU graphics and memory clock frequency metrics (`gfx_clock`, `mem_clock`) via
+  AMD SMI, exposing `current_gfxclk` and `current_uclk` in MHz as PMC samples.
+  Configure via `ROCPROFSYS_AMD_SMI_METRICS=gfx_clock,mem_clock`.
+- Kernel Fusion Driver (KFD) event tracing support to capture page faults, page
+  migrations, queue evictions, GPU unmap events, and dropped events. Requires
+  ROCProfiler-SDK 1.2.2 or later. Enable with
+  `ROCPROFSYS_ROCM_DOMAINS=kfd_events`.
+- Unified-memory profiling reports (`unified_memory.txt` and
+  `unified_memory.json`) summarizing KFD page-fault and page-migration events,
+  including per-GPU counts, trigger breakdown (`gpu_page_fault`,
+  `cpu_page_fault`, `prefetch`), and Host-to-Device / Device-to-Host migration
+  bandwidth. Enable with `ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON`; requires
+  `HSA_XNACK=1` on an XNACK-capable AMD GPU and ROCProfiler-SDK 1.2.2 or
+  later. The required KFD tracing domains are enabled automatically.
 - Support for pause and resume of profiling via `roctxProfilerPause` and `roctxProfilerResume`.
 - Support for selective region tracing via the `ROCPROFSYS_SELECTED_REGIONS` environment variable, limiting tracing to specified regions.
 - `--selected-regions` CLI argument to `rocprof-sys-sample`, `rocprof-sys-run`, and `rocprof-sys-instrument` for specifying selective region tracing from the command line.
 - Support for re-attaching to a previously profiled process. After detaching, `rocprof-sys-attach` can re-attach to the same PID for a new profiling session.
-- MPI-rank-based file output filtering feature controlled with two new CLI arguments: `--rank-filter-output` and `--rank-filter-id`.
+- MPI-rank-based file output and console output filtering features controlled with 3 new CLI arguments: `--rank-filter-output`, `--rank-filter-logs` and `--rank-filter-id`.
 - JSON-based configurable preset system with `--preset=<name>` flag, replacing the old `--<preset-name>` flags. Presets are now loaded from JSON files in `source/bin/common/presets/`, making them extensible and exportable. Use `--list-presets` to see available presets and `--explain=<name>` for detailed preset information.
 - Domain flags for composable configuration: `--gpu[=metrics]`, `--rocm[=domains]`, `--cpu[=hz]`, `--parallel[=runtimes]`. Domain flags can be combined with presets to customize profiling without editing configuration files.
 - Configuration export via `--export-config[=file]` to save resolved settings as reusable JSON configuration files. Exported configs can be loaded back with `--preset=./config.json`.
@@ -21,6 +50,8 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Post-run output summary during library finalization showing result file locations.
 - JSON schema file (`share/rocprofiler-systems/presets/schema.json`) for preset validation.
 - Documentation (`docs/how-to/instrumenting-rewriting-binary-application.rst`) describing what to do when Dyninst reports a "Failed to transform trace" error during instrumentation.
+- Progress bars during trace cache post-processing: perfetto generation (`sequential dispatch`) shows one bar per buffered_storage file in turn; rocpd generation (`multithreaded dispatch`) shows a single aggregate bar accumulating updates from all worker threads.
+- Per-stream Perfetto tracks (`HIP Activity Stream {N}`) for kernel dispatch, scratch memory, and memory copy events in the trace-cache path, matching the buffered tracing behavior. Controlled via `ROCPROFSYS_ROCM_GROUP_BY_QUEUE` (default: `false` — group by HIP stream).
 
 ### Changed
 
@@ -28,6 +59,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - `rocprof-sys-instrument` diagnostic file dumps (available, instrumented, excluded, coverage, overlapping) are now gated behind the `--dump-info` flag instead of being generated unconditionally.
 - Preset flags changed from `--balanced` to `--preset=balanced` syntax. The old `--<preset-name>` flags are still supported and handled within `preset_registry`.
 - Removed the `ROCPROFSYS_USE_ROCM` CMake option. ROCm is now required for building the ROCm Systems Profiler.
+- `rocprof-sys-sample` - Aligned flags with `rocprof-sys-run`. Renamed `--freq`, `--cputime` and `--realtime` to `--sampling-freq`, `--sampling-cputime` and `--sampling-realtime`, respectively. Old flags are still handled as a part of backward compatibility.
 
 ### Resolved issues
 
