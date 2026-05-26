@@ -147,10 +147,6 @@ __global__ void halo_exchange_kernel(Tensor2D<float> local_tensor,
     rocshmem_ctx_tile_put_wg(ctx, dst_sub, src_sub, start, boundary, west_pe, 0);
   }
 
-  if (threadIdx.x == 0) {
-    rocshmem_ctx_quiet(ctx);
-  }
-
   rocshmem_wg_ctx_destroy(&ctx);
 }
 
