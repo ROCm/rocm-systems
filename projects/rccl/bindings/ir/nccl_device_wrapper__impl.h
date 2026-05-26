@@ -101,9 +101,8 @@ NCCL_IR_EXPORT void ncclCoopSync(const ncclCoopAny* coop) {
  * forces template instantiation of every method on the session class --
  * this is the whole point of the bitcode build.
  *
- * Memory-order parameter type matches wrapper.h: std::memory_order on
- * the HIP path (RCCL has no <cuda/atomic>; mem_barrier__funcs.h provides
- * std::memory_order overloads of arrive/wait/sync). */
+ * Memory-order parameter type matches lsa_barrier.h: cuda::memory_order.
+ * On HIP, cuda::memory_order is provided by hip_compat.h. */
 
 NCCL_IR_EXPORT void ncclLsaBarrierSessionInit(
     ncclLsaBarrierSession_C* session,
@@ -121,21 +120,21 @@ NCCL_IR_EXPORT void ncclLsaBarrierSessionInit(
 NCCL_IR_EXPORT
 void ncclLsaBarrierSessionArrive(ncclLsaBarrierSession_C* session,
                                  ncclCoopAny coop,
-                                 std::memory_order order) {
+                                 cuda::memory_order order) {
   session->bar.arrive(coop, order);
 }
 
 NCCL_IR_EXPORT
 void ncclLsaBarrierSessionWait(ncclLsaBarrierSession_C* session,
                                ncclCoopAny coop,
-                               std::memory_order order) {
+                               cuda::memory_order order) {
   session->bar.wait(coop, order);
 }
 
 NCCL_IR_EXPORT
 void ncclLsaBarrierSessionSync(ncclLsaBarrierSession_C* session,
                                ncclCoopAny coop,
-                               std::memory_order order) {
+                               cuda::memory_order order) {
   session->bar.sync(coop, order);
 }
 
@@ -143,8 +142,7 @@ void ncclLsaBarrierSessionSync(ncclLsaBarrierSession_C* session,
 /* ========================================================================
  * [C] GIN + composite Barrier Session bodies (disabled)
  *
- * Carried over from NCCL v2.29.2-1 with `cuda::memory_order` rewritten
- * to `std::memory_order` to match RCCL's HIP convention. Will become
+ * Carried over from NCCL v2.29.2-1. Will become usable once RCCL imports:
  * usable once RCCL imports:
  *   - ncclGin / ncclGin_C
  *   - ncclGinBarrierSession<Coop>, ncclGinBarrierHandle, ncclGinFenceLevel
@@ -170,7 +168,7 @@ NCCL_IR_EXPORT void ncclGinBarrierSessionInit(
 NCCL_IR_EXPORT void ncclGinBarrierSessionSync(
     ncclGinBarrierSession_C* session,
     ncclCoopAny coop,
-    std::memory_order order,
+    cuda::memory_order order,
     ncclGinFenceLevel fence) {
   session->bar.sync(coop, order, fence);
 }
@@ -195,7 +193,7 @@ NCCL_IR_EXPORT void ncclBarrierSessionInit(
 NCCL_IR_EXPORT void ncclBarrierSessionSync(
     ncclBarrierSession_C* session,
     ncclCoopAny coop,
-    std::memory_order order,
+    cuda::memory_order order,
     ncclGinFenceLevel fence) {
   session->bar.sync(coop, order, fence);
 }

@@ -101,10 +101,8 @@ NCCL_IR_EXPORT void* ncclGetPeerPointerTeam(
  *   - ncclLsaBarrierSession<Coop>  (src/include/nccl_device/mem_barrier.h)
  *   - ncclLsaBarrierHandle, ncclMultimemHandle, ncclDevComm, ncclTeam
  *
- * Memory-order parameter: NCCL upstream uses cuda::memory_order, but RCCL's
- * mem_barrier__funcs.h uses std::memory_order on the HIP/AMD path (see the
- * __HIP_PLATFORM_AMD__ branch in nccl_device/utility.h). The wrapper
- * matches RCCL's HIP convention.
+ * Memory-order parameter: cuda::memory_order (HIP aliases provided by
+ * hip_compat.h in nccl_device/utility.h).
  * ======================================================================*/
 
 /* Struct definitions */
@@ -138,15 +136,15 @@ NCCL_IR_EXPORT void ncclLsaBarrierSessionInit(
 NCCL_IR_EXPORT
 void ncclLsaBarrierSessionArrive(ncclLsaBarrierSession_C* session,
                                  ncclCoopAny coop,
-                                 std::memory_order order);
+                                 cuda::memory_order order);
 NCCL_IR_EXPORT
 void ncclLsaBarrierSessionWait(ncclLsaBarrierSession_C* session,
                                ncclCoopAny coop,
-                               std::memory_order order);
+                               cuda::memory_order order);
 NCCL_IR_EXPORT
 void ncclLsaBarrierSessionSync(ncclLsaBarrierSession_C* session,
                                ncclCoopAny coop,
-                               std::memory_order order);
+                               cuda::memory_order order);
 
 
 /* ========================================================================
@@ -185,7 +183,7 @@ NCCL_IR_EXPORT void ncclGinBarrierSessionInit(
 NCCL_IR_EXPORT void ncclGinBarrierSessionSync(
     ncclGinBarrierSession_C* session,
     ncclCoopAny coop,
-    std::memory_order order,
+    cuda::memory_order order,
     ncclGinFenceLevel fence);
 
 /* Composite (LSA + GIN) Barrier Session APIs */
@@ -204,7 +202,7 @@ NCCL_IR_EXPORT void ncclBarrierSessionInit(
 NCCL_IR_EXPORT void ncclBarrierSessionSync(
     ncclBarrierSession_C* session,
     ncclCoopAny coop,
-    std::memory_order order,
+    cuda::memory_order order,
     ncclGinFenceLevel fence);
 
 #endif  /* 0 — GIN / composite Barrier wrappers */
