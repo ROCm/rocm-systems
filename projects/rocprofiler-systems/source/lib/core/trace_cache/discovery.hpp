@@ -20,7 +20,4 @@ find_cache_files(const pid_t& root_pid, const data::directory_files_t& dir_conte
 void
 clear(const data::mapped_cache_files_t& cache_files);
 
-void
-merge_perfetto_files();
-
 }  // namespace rocprofsys::trace_cache::discovery

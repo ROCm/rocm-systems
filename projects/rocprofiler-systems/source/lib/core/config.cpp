@@ -765,11 +765,6 @@ configure_settings(bool _init)
         "written to a file and re-loaded during finalization",
         true, "io", "data", "advanced");
 
-    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_MERGE_PERFETTO_FILES",
-                              "Merge Perfetto traces. If not explicitly set, it will "
-                              "default to the value of ROCPROFSYS_COLLAPSE_PROCESSES",
-                              false, "perfetto", "data", "advanced");
-
     ROCPROFSYS_CONFIG_SETTING(
         std::string, "ROCPROFSYS_TMPDIR", "Base directory for temporary files",
         get_env<std::string>("TMPDIR", "/tmp"), "io", "data", "advanced");
@@ -2541,13 +2536,6 @@ bool
 get_use_tmp_files()
 {
     static auto _v = get_config()->find("ROCPROFSYS_USE_TEMPORARY_FILES");
-    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
-}
-
-bool
-get_merge_perfetto_files()
-{
-    static auto _v = get_config()->find("ROCPROFSYS_MERGE_PERFETTO_FILES");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 

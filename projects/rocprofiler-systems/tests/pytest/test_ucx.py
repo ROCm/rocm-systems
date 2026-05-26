@@ -112,9 +112,7 @@ class TestUCX(RocprofsysTest):
             "0",
         ]
         RUN_ARGS = ["30"]
-        REWRITE_PASS_REGEX = [
-            r"ucx_gotcha|category::ucx|Successfully executed: .+rocprof-sys-merge-output\.sh.*"
-        ]
+        REWRITE_PASS_REGEX = [r"ucx_gotcha|category::ucx"]
         SYS_RUN_PASS_REGEX = [r"ucx_gotcha|category::ucx|Using UCX|pml.*ucx"]
 
         result = self.run_test(
@@ -152,9 +150,7 @@ class TestUCX(RocprofsysTest):
             "--min-instructions",
             "0",
         ]
-        REWRITE_PASS_REGEX = [
-            r"ucx_gotcha|category::ucx|Successfully executed: .+rocprof-sys-merge-output\.sh.*"
-        ]
+        REWRITE_PASS_REGEX = [r"ucx_gotcha|category::ucx"]
         REWRITE_FAIL_REGEX = [r"Script not found|Failed to execute"]
         SYS_RUN_PASS_REGEX = [r"ucx_gotcha|category::ucx|Using UCX|pml.*ucx"]
 

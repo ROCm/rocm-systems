@@ -37,9 +37,6 @@ stderr_log_allowed() noexcept
            config::output_filtering::is_log_output_enabled_for_current_mpi_rank();
 }
 
-// Emits the user-facing "[rocprofsys][<rank>]> <file> perfetto (...)... Done"
-// stderr line that announces a written output file. Local to the perfetto
-// sinks until a project-wide file-write notification helper exists.
 void
 emit_size_line(const std::string& filename, std::size_t bytes)
 {
@@ -60,11 +57,6 @@ emit_open_error_line(const std::string& filename)
     std::fflush(stderr);
 }
 
-// Writes `bytes` to `filename` and registers the file with `registry` on
-// success. Returns false on open failure with no bytes written so each
-// sink can emit its own context-specific diagnostic; returns true once
-// the file is fully written, sized, and registered. The ofstream is
-// closed by RAII at end of scope — no explicit close() needed.
 bool
 write_proto_to(const std::string& filename, const char* data, std::size_t size,
                output_file_registry* registry)
@@ -181,6 +173,13 @@ bool
 append_with_flock(const std::string& filename, const char* data, std::size_t size,
                   output_file_registry* registry)
 {
+    // TIME_OUTPUT=ON puts the merged file under a timestamped subdirectory
+    // that no other code may have created yet on this process; ensure the
+    // parent exists before O_CREAT, matching filepath::open()'s behavior for
+    // the ofstream-based writers.
+    auto parent = filepath::dirname(filename);
+    if(!parent.empty()) filepath::makedir(parent);
+
     int fd = ::open(filename.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0644);
     if(fd < 0)
     {

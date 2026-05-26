@@ -4,7 +4,6 @@
 #include "core/trace_cache/discovery.hpp"
 
 #include "core/config.hpp"
-#include "core/perfetto/merge_script.hpp"
 #include "core/timemory.hpp"
 #include "core/trace_cache/cacheable.hpp"
 #include "logger/debug.hpp"
@@ -113,39 +112,6 @@ clear(const data::mapped_cache_files_t& cache_files)
                             std::strerror(errno));
         }
     }
-}
-
-void
-merge_perfetto_files()
-{
-    // dmp::rank() returns 0 if MPI is not initialized/finalized. During shutdown
-    // MPI may already be finalized, so we read the rank captured at init time
-    // via settings::default_process_suffix().
-    auto         suffix_variant  = settings::default_process_suffix();
-    std::int32_t cached_mpi_rank = 0;
-
-    if(std::holds_alternative<int>(suffix_variant))
-    {
-        cached_mpi_rank = std::get<int>(suffix_variant);
-    }
-    else if(std::holds_alternative<std::string>(suffix_variant))
-    {
-        try
-        {
-            cached_mpi_rank = std::stoi(std::get<std::string>(suffix_variant));
-        } catch(...)
-        {
-            cached_mpi_rank = 0;
-        }
-    }
-
-    LOG_DEBUG("Merging perfetto files: rank={} (from settings::default_process_suffix)",
-              cached_mpi_rank);
-
-    if(cached_mpi_rank != 0) return;
-
-    rocprofsys::core::perfetto::run_merge_script(
-        tim::filepath::dirname(config::get_perfetto_output_filename()));
 }
 
 }  // namespace rocprofsys::trace_cache::discovery
