@@ -447,6 +447,50 @@ TEST_F(P2pMicrotest, DISABLED_IpcRegisterBuffer_RegressionNcclIssue1859_P2pThenC
     EXPECT_EQ(out.offsetOut,    kBuffOffset);
 }
 
+// Null-isLegacyIpc path: ipcRegisterBufferOnce (the public entry point at
+// p2p.cc:1053) calls ipcRegisterBuffer with isLegacyIpc == NULL, so every
+// `if (isLegacyIpc)` inside the function must take the False branch and
+// skip the write -- otherwise we'd have a null-deref in production.
+//
+// All existing microtests pass a non-null pointer; this test pins down the
+// nullptr arm. It reuses the cheap SENDRECV-reuse setup (no driver, no
+// proxy) so the *only* thing it exercises is the gated-write contract.
+TEST_F(P2pMicrotest, IpcRegisterBuffer_NullIsLegacyIpcPointerIsSkipped)
+{
+    constexpr int       kPeerRank      = 3;
+    constexpr int       kPeerLocalRank = 2;
+    constexpr uintptr_t kBegAddr       = 0x10000;
+    constexpr uintptr_t kBuffOffset    = 0x40;
+    constexpr uintptr_t kRmtRegAddr    = 0xA000;
+
+    ncclComm comm{};
+    RankMapping ranks(comm, {{kPeerRank, kPeerLocalRank}});
+
+    ReusableIpcInfo existing(kPeerRank, kPeerLocalRank, kRmtRegAddr,
+                             /*legacyIpcCap=*/ true);
+    ncclReg regRecord{};
+    regRecord.begAddr = kBegAddr;
+    regRecord.endAddr = kBegAddr + 0x1000;
+    existing.InstallInto(regRecord);
+
+    int peerRanks[] = {kPeerRank};
+    IpcRegOutputs out;
+
+    // The contract: passing nullptr must not crash and must not affect any
+    // OUT param other than isLegacyIpc itself.
+    auto r = CallIpcRegisterBuffer(comm,
+                                   /*userbuff=*/ reinterpret_cast<const void*>(kBegAddr + kBuffOffset),
+                                   /*buffSize=*/ 256,
+                                   peerRanks, 1,
+                                   NCCL_IPC_SENDRECV,
+                                   &regRecord, out, /*isLegacyIpc=*/ nullptr);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(out.regBufFlag, 1);
+    EXPECT_EQ(out.offsetOut,  kBuffOffset);
+    EXPECT_EQ(reinterpret_cast<uintptr_t>(out.peerRmtAddrs), kRmtRegAddr);
+}
+
 // Fresh-registration entry path: ipcInfos[peerLocalRank] is NULL, so the
 // per-peer loop takes the `else` branch instead of the reuse branch. The
 // first thing it does is CUCHECKGOTO(hipMemGetAddressRange(...)), which is
