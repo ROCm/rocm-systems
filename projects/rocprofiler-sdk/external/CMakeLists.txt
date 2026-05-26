@@ -190,16 +190,35 @@ rocprofiler_checkout_git_submodule(
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     TEST_FILE meson.build
     REPO_URL https://github.com/google/perfetto
-    REPO_BRANCH "v44.0")
+    REPO_BRANCH "v56.1")
+
+# Starting with v54.x, Perfetto no longer ships the amalgamated C++ SDK
+# (sdk/perfetto.{h,cc}) inside the source tree; it is published only as a release artifact
+# on GitHub. Fetch it via FetchContent into the build tree.
+set(ROCPROFILER_PERFETTO_SDK_VERSION
+    "v56.1"
+    CACHE STRING "Perfetto C++ SDK release version")
+set(ROCPROFILER_PERFETTO_SDK_URL_HASH
+    "SHA256=9138dad1ab39048a61d3333e0c2ebf32a7497ed45e3b7daa5f3a02c14748af38"
+    CACHE STRING "Perfetto C++ SDK release archive hash")
+
+include(FetchContent)
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.24)
+    cmake_policy(SET CMP0135 NEW)
+endif()
+
+fetchcontent_declare(
+    perfetto-sdk
+    URL https://github.com/google/perfetto/releases/download/${ROCPROFILER_PERFETTO_SDK_VERSION}/perfetto-cpp-sdk-src.zip
+    URL_HASH ${ROCPROFILER_PERFETTO_SDK_URL_HASH})
+fetchcontent_makeavailable(perfetto-sdk)
+set(_perfetto_sdk_dir ${perfetto-sdk_SOURCE_DIR})
 
 add_library(rocprofiler-sdk-perfetto-static-library STATIC)
-target_sources(
-    rocprofiler-sdk-perfetto-static-library
-    PRIVATE ${PROJECT_SOURCE_DIR}/external/perfetto/sdk/perfetto.h
-            ${PROJECT_SOURCE_DIR}/external/perfetto/sdk/perfetto.cc)
-target_include_directories(
-    rocprofiler-sdk-perfetto-static-library SYSTEM
-    INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/perfetto/sdk>)
+target_sources(rocprofiler-sdk-perfetto-static-library
+               PRIVATE ${_perfetto_sdk_dir}/perfetto.h ${_perfetto_sdk_dir}/perfetto.cc)
+target_include_directories(rocprofiler-sdk-perfetto-static-library SYSTEM
+                           INTERFACE $<BUILD_INTERFACE:${_perfetto_sdk_dir}>)
 set_target_properties(
     rocprofiler-sdk-perfetto-static-library
     PROPERTIES POSITION_INDEPENDENT_CODE ON OUTPUT_NAME rocprofiler-sdk-perfetto)
