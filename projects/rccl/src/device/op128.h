@@ -529,7 +529,7 @@ __device__ __forceinline__ Pack loadPack(T* ptr, int ix, int end) {
     int i;
     #pragma unroll
     for (i=0; i < Size/4; i++) {
-      if (i*4/sizeof(T) < 1 || i*4/sizeof(T) < n) part[i] = down[i];
+      if (i*4/sizeof(T) < 1 || i*4 < int(n*sizeof(T)) + misalign) part[i] = down[i];
     }
     uint32_t extra = 0;
     if (misalign) extra = down[i];
