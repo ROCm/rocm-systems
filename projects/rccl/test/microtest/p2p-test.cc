@@ -661,6 +661,288 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationLegacyIpcSucceeds)
     // ASSERT_* above bails early.
 }
 
+// Fresh-registration variant: ncclProxyCallBlocking returns success but
+// writes rmtRegAddr=NULL into the response buffer. Drives the False arm
+// of `if (rmtRegAddr)` (line 979 of p2p.cc) -- the entire bookkeeping
+// block (newInfo alloc, ipcInfos[] install, hostPeerRmtAddrs lazy alloc)
+// must be skipped. Because *regBufFlag is then never set to 1, the
+// post-loop strong-stream block also stays skipped, and the function
+// returns ncclSuccess with all outputs left zeroed by the prologue.
+TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationProxyReturnsNullRmtAddr)
+{
+    constexpr int       kPeerRank      = 2;
+    constexpr int       kPeerLocalRank = 1;
+    constexpr uintptr_t kBaseAddr      = 0x100000;
+    constexpr std::size_t kBaseSize    = 0x4000;
+    constexpr uintptr_t kBuffOffset    = 0x80;
+    constexpr uintptr_t kBegOffset     = 0x20;
+    constexpr uintptr_t kBegAddr       = kBaseAddr + kBegOffset;
+    constexpr int       kNRanks        = kPeerRank + 1;
+
+    CommBuilder cb;
+    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
+      .WithMaxLocalRanks()
+      .WithSharedRes()
+      .WithProxyConnArray(kNRanks);
+
+    ncclReg regRecord{};
+    regRecord.begAddr = kBegAddr;
+    regRecord.endAddr = kBegAddr + 0x1000;
+    RegRecordCleaner regCleanup(regRecord);
+
+    const void* const kUserbuff =
+        reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
+    ScopedHook memGet(g_hipMemGetAddressRange,
+        [&](hipDeviceptr_t* pbase, std::size_t* psize, hipDeviceptr_t)
+            -> hipError_t {
+            if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
+            if (psize) *psize = kBaseSize;
+            return hipSuccess;
+        });
+    ScopedHook ipcGet(g_hipIpcGetMemHandle,
+        [&](hipIpcMemHandle_t* h, void*) -> hipError_t {
+            if (h) std::memset(h, 0x5A, sizeof(*h));
+            return hipSuccess;
+        });
+    ScopedHook connect(g_proxyConnect,
+        [&](struct ncclComm*, int, int, int,
+            struct ncclProxyConnector* pc) -> ncclResult_t {
+            pc->initialized = true;
+            return ncclSuccess;
+        });
+    // The key seam: success, but rmtRegAddr written back as NULL.
+    ScopedHook proxy(g_proxyCallBlocking,
+        [&](struct ncclComm*, struct ncclProxyConnector*, int,
+            void*, int, void* resp, int respSize) -> ncclResult_t {
+            void* nullAddr = nullptr;
+            if (resp && static_cast<size_t>(respSize) >= sizeof(void*)) {
+                std::memcpy(resp, &nullAddr, sizeof(void*));
+            }
+            return ncclSuccess;
+        });
+
+    int peerRanks[] = {kPeerRank};
+    IpcRegOutputs out;
+    bool isLegacyIpc = true;  // expect prologue to clear, no further writes
+
+    auto r = CallIpcRegisterBuffer(cb, kUserbuff,
+                                   /*buffSize=*/ 256,
+                                   peerRanks, 1,
+                                   NCCL_IPC_COLLECTIVE,
+                                   &regRecord, out, &isLegacyIpc);
+
+    EXPECT_EQ(r, ncclSuccess);
+    // Bookkeeping block was skipped:
+    EXPECT_EQ(regRecord.ipcInfos[kPeerLocalRank], nullptr);
+    EXPECT_EQ(regRecord.regIpcAddrs.hostPeerRmtAddrs, nullptr);
+    EXPECT_EQ(regRecord.regIpcAddrs.devPeerRmtAddrs,  nullptr);
+    EXPECT_FALSE(regRecord.state & IPC_REG_COMPLETE);
+    // Outputs stay at the prologue-cleared values:
+    EXPECT_EQ(out.regBufFlag,   0);
+    EXPECT_EQ(out.offsetOut,    0u);
+    EXPECT_EQ(out.peerRmtAddrs, nullptr);
+    // legacyIpcCap path *was* taken (the legacy arm writes
+    // `*isLegacyIpc = true` before ncclProxyCallBlocking is called); the
+    // rmtRegAddr==NULL exit then short-circuits silently. Capturing this
+    // pins down current behaviour -- if a future change clears
+    // isLegacyIpc on the NULL-rmtRegAddr path, this assertion is the
+    // place to update.
+    EXPECT_TRUE(isLegacyIpc);
+}
+
+// Fresh-registration variant: pre-mark comm->gproxyConn[peerRank].initialized
+// = true so the per-peer loop's `if (...initialized == false)` test takes
+// the False arm at line ~921 of p2p.cc and ncclProxyConnect is *not*
+// called. The rest of the registration (handle export, proxy register,
+// bookkeeping) proceeds normally.
+TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationSkipsProxyConnectWhenAlreadyInitialized)
+{
+    constexpr int       kPeerRank      = 2;
+    constexpr int       kPeerLocalRank = 1;
+    constexpr uintptr_t kBaseAddr      = 0x100000;
+    constexpr std::size_t kBaseSize    = 0x4000;
+    constexpr uintptr_t kBuffOffset    = 0x80;
+    constexpr uintptr_t kBegOffset     = 0x20;
+    constexpr uintptr_t kBegAddr       = kBaseAddr + kBegOffset;
+    constexpr uintptr_t kRmtRegAddr    = 0xCAFE0000ull;
+    constexpr int       kNRanks        = kPeerRank + 1;
+
+    CommBuilder cb;
+    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
+      .WithMaxLocalRanks()
+      .WithSharedRes()
+      .WithProxyConnArray(kNRanks);
+    // Key precondition: skip the connect.
+    cb.comm().gproxyConn[kPeerRank].initialized = true;
+
+    ncclReg regRecord{};
+    regRecord.begAddr = kBegAddr;
+    regRecord.endAddr = kBegAddr + 0x1000;
+    RegRecordCleaner regCleanup(regRecord);
+
+    const void* const kUserbuff =
+        reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
+    ScopedHook memGet(g_hipMemGetAddressRange,
+        [&](hipDeviceptr_t* pbase, std::size_t* psize, hipDeviceptr_t)
+            -> hipError_t {
+            if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
+            if (psize) *psize = kBaseSize;
+            return hipSuccess;
+        });
+    ScopedHook ipcGet(g_hipIpcGetMemHandle,
+        [&](hipIpcMemHandle_t* h, void*) -> hipError_t {
+            if (h) std::memset(h, 0x5A, sizeof(*h));
+            return hipSuccess;
+        });
+    // Default g_proxyConnect returns ncclSystemError -- if it were called
+    // we'd see the test fail with that error code. Wrap in a ScopedHook
+    // anyway so we can assert .calls == 0 explicitly.
+    ScopedHook connect(g_proxyConnect,
+        [&](struct ncclComm*, int, int, int,
+            struct ncclProxyConnector*) -> ncclResult_t {
+            ADD_FAILURE() << "ncclProxyConnect must not be called when "
+                             "gproxyConn[peerRank].initialized == true";
+            return ncclSystemError;
+        });
+    ScopedHook proxy(g_proxyCallBlocking,
+        [&](struct ncclComm*, struct ncclProxyConnector*, int,
+            void*, int, void* resp, int respSize) -> ncclResult_t {
+            EXPECT_GE(static_cast<size_t>(respSize), sizeof(void*));
+            if (resp) std::memcpy(resp, &kRmtRegAddr, sizeof(void*));
+            return ncclSuccess;
+        });
+
+    int peerRanks[] = {kPeerRank};
+    IpcRegOutputs out;
+    bool isLegacyIpc = false;
+
+    auto r = CallIpcRegisterBuffer(cb, kUserbuff,
+                                   /*buffSize=*/ 256,
+                                   peerRanks, 1,
+                                   NCCL_IPC_COLLECTIVE,
+                                   &regRecord, out, &isLegacyIpc);
+
+    EXPECT_EQ(connect.calls, 0);   // the contract under test
+    EXPECT_EQ(memGet.calls,  1);
+    EXPECT_EQ(ipcGet.calls,  1);
+    EXPECT_EQ(proxy.calls,   1);
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(out.regBufFlag, 1);
+    ASSERT_NE(regRecord.ipcInfos[kPeerLocalRank], nullptr);
+}
+
+// Fresh-registration fail path with newInfo already allocated. Drives the
+// True arm of `if (newInfo) free(newInfo)` (line 1032 of p2p.cc) -- the
+// leak-prevention contract on the fail: epilogue. Sequence:
+//
+//   1. Happy-path through hipMemGetAddressRange / hipIpcGetMemHandle /
+//      proxyCallBlocking -> rmtRegAddr non-null -> newInfo ncclCalloc'd,
+//      regRecord->ipcInfos[peerLocalRank] = newInfo.
+//   2. Loop exits (one peer).
+//   3. Post-loop COLLECTIVE strong-stream block fires (devPeerRmtAddrs is
+//      NULL, needUpdate is true).
+//   4. g_strongStreamAcquire hook returns failure -> NCCLCHECKGOTO into
+//      `fail:` with newInfo non-null and the local var still holding the
+//      most recent allocation.
+//
+// Without this test the True arm was never hit (existing fresh-reg
+// failure test triggers fail: before newInfo is ever set).
+//
+// Note on the dangling pointer: the production fail: epilogue frees
+// newInfo but leaves regRecord->ipcInfos[peerLocalRank] pointing at the
+// freed memory. That's an existing pre-condition of the function (the
+// fail: path doesn't roll back ipcInfos), not something this test is
+// asserting. The RegRecordCleaner would normally double-free, so we
+// null out the slot before the cleaner runs.
+TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationFreesNewInfoOnPostLoopFailure)
+{
+    constexpr int       kPeerRank      = 2;
+    constexpr int       kPeerLocalRank = 1;
+    constexpr uintptr_t kBaseAddr      = 0x100000;
+    constexpr std::size_t kBaseSize    = 0x4000;
+    constexpr uintptr_t kBuffOffset    = 0x80;
+    constexpr uintptr_t kBegOffset     = 0x20;
+    constexpr uintptr_t kBegAddr       = kBaseAddr + kBegOffset;
+    constexpr uintptr_t kRmtRegAddr    = 0xCAFE0000ull;
+    constexpr int       kNRanks        = kPeerRank + 1;
+
+    CommBuilder cb;
+    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
+      .WithMaxLocalRanks()
+      .WithSharedRes()
+      .WithProxyConnArray(kNRanks);
+
+    ncclReg regRecord{};
+    regRecord.begAddr = kBegAddr;
+    regRecord.endAddr = kBegAddr + 0x1000;
+    RegRecordCleaner regCleanup(regRecord);
+
+    const void* const kUserbuff =
+        reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
+    ScopedHook memGet(g_hipMemGetAddressRange,
+        [&](hipDeviceptr_t* pbase, std::size_t* psize, hipDeviceptr_t)
+            -> hipError_t {
+            if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
+            if (psize) *psize = kBaseSize;
+            return hipSuccess;
+        });
+    ScopedHook ipcGet(g_hipIpcGetMemHandle,
+        [&](hipIpcMemHandle_t* h, void*) -> hipError_t {
+            if (h) std::memset(h, 0x5A, sizeof(*h));
+            return hipSuccess;
+        });
+    ScopedHook connect(g_proxyConnect,
+        [&](struct ncclComm*, int, int, int,
+            struct ncclProxyConnector* pc) -> ncclResult_t {
+            pc->initialized = true;
+            return ncclSuccess;
+        });
+    ScopedHook proxy(g_proxyCallBlocking,
+        [&](struct ncclComm*, struct ncclProxyConnector*, int,
+            void*, int, void* resp, int respSize) -> ncclResult_t {
+            EXPECT_GE(static_cast<size_t>(respSize), sizeof(void*));
+            if (resp) std::memcpy(resp, &kRmtRegAddr, sizeof(void*));
+            return ncclSuccess;
+        });
+    // Fail in the post-loop strong-stream block. By this point newInfo is
+    // allocated and installed into regRecord->ipcInfos[kPeerLocalRank].
+    ScopedHook acquire(g_strongStreamAcquire,
+        [](struct ncclCudaGraph, struct ncclStrongStream*, bool,
+           hipStream_t* stream) -> ncclResult_t {
+            if (stream) *stream = nullptr;
+            return ncclSystemError;
+        });
+
+    int peerRanks[] = {kPeerRank};
+    IpcRegOutputs out;
+    bool isLegacyIpc = false;
+
+    auto r = CallIpcRegisterBuffer(cb, kUserbuff,
+                                   /*buffSize=*/ 256,
+                                   peerRanks, 1,
+                                   NCCL_IPC_COLLECTIVE,
+                                   &regRecord, out, &isLegacyIpc);
+
+    // Failure surfaced from the strong-stream block:
+    EXPECT_EQ(acquire.calls, 1);
+    EXPECT_EQ(r, ncclSystemError);
+    out.ExpectZeroed();
+
+    // The contract being pinned down: the function ran far enough that
+    // newInfo *was* allocated (and stashed in ipcInfos) before the
+    // failure, and the fail: epilogue then free()d it. We can't observe
+    // the free directly without leak detection, but we *can* observe
+    // that the precondition was reached -- otherwise the True arm of
+    // `if (newInfo)` was never exercised.
+    ASSERT_NE(regRecord.ipcInfos[kPeerLocalRank], nullptr)
+        << "test scaffolding broken: newInfo was never allocated, so the "
+           "True arm of `if (newInfo) free(newInfo)` is not reached";
+
+    // Production leaves this slot pointing at freed memory on fail:.
+    // Null it out so RegRecordCleaner doesn't double-free.
+    regRecord.ipcInfos[kPeerLocalRank] = nullptr;
+}
+
 // DISABLED_ until the upstream NCCL PR #1861 fix is merged into RCCL.
 // The test deliberately fails against the current buggy code (calloc'd dev
 // table is never populated from the host table); re-enable by deleting the
