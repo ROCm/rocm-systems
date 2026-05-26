@@ -49,6 +49,7 @@ def base_env() -> dict[str, str]:
     }
 
 
+@pytest.mark.class_name("cached-perfetto-layout")
 class TestCachedPerfettoLayout(RocprofsysTest):
     @pytest.mark.timeout(180)
     @pytest.mark.parametrize("layout", ["single_file", "per_process"])

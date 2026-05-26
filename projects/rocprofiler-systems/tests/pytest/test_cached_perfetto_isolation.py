@@ -41,6 +41,7 @@ def cached_isolation_env() -> dict[str, str]:
     }
 
 
+@pytest.mark.class_name("cached-perfetto-isolation")
 class TestCachedPerfettoIsolation(RocprofsysTest):
     @pytest.mark.timeout(180)
     @pytest.mark.parametrize("mode", ["sys_run"])

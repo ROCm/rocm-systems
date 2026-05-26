@@ -25,6 +25,7 @@ def live_perfetto_env() -> dict[str, str]:
     }
 
 
+@pytest.mark.class_name("live-perfetto-canary")
 class TestLivePerfettoCanary(RocprofsysTest):
     run_args = ["2", "100"]
 

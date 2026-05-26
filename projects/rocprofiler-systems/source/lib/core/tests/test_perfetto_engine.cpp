@@ -363,3 +363,97 @@ TEST(perfetto_engine_cached, stop_rethrows_first_drain_exception_after_finalize)
     ASSERT_EQ(target.kept().size(), 1u) << "only the non-throwing source's bytes kept";
     EXPECT_EQ(target.kept()[0].first, 303);
 }
+
+TEST(perfetto_engine_cached, concurrent_collect_packet_bytes_no_loss_or_bleed)
+{
+    // The lock-free hot path: after preregister_pids freezes the per-pid
+    // map, parser threads call collect_packet_bytes against their own pid
+    // with no synchronization. The contract is single-writer-per-pid
+    // across all threads. This stress run launches one parser thread per
+    // pid; each pushes a sequence of distinct payloads only into its own
+    // pid's slot. After stop(), every preregistered pid's drained record
+    // must contain exactly its own payloads in submission order, with no
+    // bytes from any other pid mixed in.
+    rocprofsys::core::perfetto_engine engine{ make_test_config() };
+    engine.init_sdk();
+
+    rocprofsys::core::trace_sink sink{ rocprofsys::core::recording_sink{} };
+    engine.start(rocprofsys::core::perfetto_engine::mode::cached_interceptor, sink);
+
+    constexpr int pid_count       = 4;
+    constexpr int packets_per_pid = 64;
+
+    std::vector<int> pids;
+    pids.reserve(pid_count);
+    for(int i = 0; i < pid_count; ++i)
+        pids.push_back(1000 + i);
+    engine.preregister_pids(pids);
+
+    // Per-pid payloads are tagged with (pid, index) so cross-pid bleed
+    // is detectable by inspecting any single byte of any record.
+    auto make_payload = [](int pid, int idx) {
+        std::vector<char> payload;
+        payload.reserve(8);
+        payload.push_back(static_cast<char>('P'));
+        payload.push_back(static_cast<char>((pid >> 8) & 0xff));
+        payload.push_back(static_cast<char>(pid & 0xff));
+        payload.push_back(static_cast<char>('#'));
+        payload.push_back(static_cast<char>((idx >> 8) & 0xff));
+        payload.push_back(static_cast<char>(idx & 0xff));
+        return payload;
+    };
+
+    std::atomic<int>         ready{ 0 };
+    std::atomic<bool>        go{ false };
+    std::vector<std::thread> threads;
+    threads.reserve(pid_count);
+    for(int pid : pids)
+    {
+        threads.emplace_back([&, pid]() {
+            ++ready;
+            while(!go.load(std::memory_order_acquire))
+            {
+            }
+            for(int i = 0; i < packets_per_pid; ++i)
+            {
+                const auto payload = make_payload(pid, i);
+                engine.collect_packet_bytes(pid, payload.data(), payload.size());
+            }
+        });
+    }
+    while(ready.load() < pid_count)
+    {
+    }
+    go.store(true, std::memory_order_release);
+    for(auto& t : threads)
+        t.join();
+
+    engine.stop();
+
+    const auto& rec = std::get<rocprofsys::core::recording_sink>(sink);
+    ASSERT_EQ(rec.records().size(), static_cast<std::size_t>(pid_count));
+
+    // Build the expected per-pid concatenated framed bytes and check
+    // that every preregistered pid shows up exactly once with exactly
+    // its payloads, in submission order, with no other pid's bytes
+    // mixed in. Records come out in unordered_map iteration order, so
+    // we lookup-by-pid rather than asserting index order.
+    for(int pid : pids)
+    {
+        const auto it = std::find_if(rec.records().begin(), rec.records().end(),
+                                     [pid](const auto& r) { return r.first == pid; });
+        ASSERT_NE(it, rec.records().end())
+            << "no record drained for preregistered pid " << pid;
+
+        std::vector<char> expected;
+        for(int i = 0; i < packets_per_pid; ++i)
+        {
+            const auto framed = frame_packet(make_payload(pid, i));
+            expected.insert(expected.end(), framed.begin(), framed.end());
+        }
+        EXPECT_EQ(it->second, expected) << "drained bytes for pid " << pid
+                                        << " do not match the concatenated submission";
+    }
+
+    EXPECT_TRUE(rec.finalized());
+}
