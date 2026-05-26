@@ -224,7 +224,7 @@ perf_event::get_fileno() const
 std::uint64_t
 perf_event::get_count() const
 {
-    std::uint64_t count;
+    std::uint64_t count = 0;
     if(read(m_fd, &count, sizeof(std::uint64_t)) != sizeof(std::uint64_t))
     {
         LOG_CRITICAL("Failed to read event count from perf_event file");

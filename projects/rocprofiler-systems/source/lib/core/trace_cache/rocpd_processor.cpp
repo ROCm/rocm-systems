@@ -927,7 +927,7 @@ rocpd_processor_t::post_process_metadata()
             agent_type::CPU,
         };
 
-        size_t agent_primary_key;
+        size_t agent_primary_key = 0;
 
         const bool is_cpu_gpu_agent = std::find(agent_types.begin(), agent_types.end(),
                                                 pmc_info.type) != agent_types.end();

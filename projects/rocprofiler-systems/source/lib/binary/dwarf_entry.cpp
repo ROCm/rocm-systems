@@ -27,22 +27,22 @@ get_dwarf_address_ranges(Dwarf_Die* _die)
         return _ranges;
     }
 
-    Dwarf_Addr _low_pc;
-    Dwarf_Addr _high_pc;
+    Dwarf_Addr _low_pc  = 0;
+    Dwarf_Addr _high_pc = 0;
     dwarf_lowpc(_die, &_low_pc);
     dwarf_highpc(_die, &_high_pc);
 
     if(_low_pc > _high_pc)
     {
-        Dwarf_Addr _entry_pc;
+        Dwarf_Addr _entry_pc = 0;
         dwarf_entrypc(_die, &_entry_pc);
         if(_entry_pc < _low_pc) _low_pc = _entry_pc;
     }
 
     if(_low_pc < _high_pc) _ranges.emplace_back(_low_pc, _high_pc);
 
-    Dwarf_Addr _base_addr;
-    ptrdiff_t  _offset = 0;
+    Dwarf_Addr _base_addr = 0;
+    ptrdiff_t  _offset    = 0;
     do
     {
         uintptr_t _low  = 0;

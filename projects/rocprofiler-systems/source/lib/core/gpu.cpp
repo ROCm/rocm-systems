@@ -223,8 +223,8 @@ std::uint32_t                        processors::total_ainic_count = 0;
 void
 get_processor_handles()
 {
-    std::uint32_t socket_count;
-    std::uint32_t processor_count;
+    std::uint32_t socket_count    = 0;
+    std::uint32_t processor_count = 0;
     processors::processors_list.clear();
     processors::ainic_list.clear();
 
