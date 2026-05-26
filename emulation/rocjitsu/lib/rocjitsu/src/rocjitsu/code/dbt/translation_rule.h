@@ -32,6 +32,35 @@ namespace rocjitsu {
 class Instruction;
 class LivenessAnalysis;
 
+/// @brief Per-kernel resource feedback collected while semantic lowerings run.
+///
+/// @details Descriptor translation happens before instruction translation, but
+/// semantic lowerings only know their actual scratch choices after liveness has
+/// been computed. The first translation pass records the highest SGPR/VGPR
+/// count required by those lowerings here; BinaryTranslator can then rerun once
+/// with descriptor minimums large enough to cover the generated code.
+struct TranslationContext {
+  uint32_t target_vgpr_count = 0;
+  uint32_t target_sgpr_count = 0;
+  uint32_t required_vgpr_count = 0;
+  uint32_t required_sgpr_count = 0;
+
+  TranslationContext() = default;
+  TranslationContext(uint32_t target_vgprs, uint32_t target_sgprs)
+      : target_vgpr_count(target_vgprs), target_sgpr_count(target_sgprs), required_vgpr_count(0),
+        required_sgpr_count(0) {}
+
+  void require_vgprs(uint32_t count) {
+    if (required_vgpr_count < count)
+      required_vgpr_count = count;
+  }
+
+  void require_sgprs(uint32_t count) {
+    if (required_sgpr_count < count)
+      required_sgpr_count = count;
+  }
+};
+
 // ---------------------------------------------------------------------------
 // Tier 1: Instruction Descriptor
 // ---------------------------------------------------------------------------
@@ -127,6 +156,7 @@ struct LaneLayout;
 /// @returns Replacement instruction words, or empty vector if unhandled.
 using ExpandFn = std::vector<uint32_t> (*)(const Instruction &inst, uint32_t arch, uint64_t offset,
                                            const LivenessAnalysis &liveness,
+                                           TranslationContext &context,
                                            const LaneLayout *guest_layout,
                                            const LaneLayout *host_layout);
 

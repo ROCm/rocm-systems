@@ -6,6 +6,7 @@
 
 #include "rocjitsu/code/dbt/semantic/cdna4_to_rdna_common.h"
 
+#include "rocjitsu/code/dbt/translation_rule.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
@@ -27,7 +28,8 @@ build_rdna_vop3(uint16_t op, uint8_t vdst, uint16_t src0, uint16_t src1 = 0, uin
   return {w0, w1};
 }
 
-std::vector<uint32_t> lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_arch) {
+std::vector<uint32_t> lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_arch,
+                                           TranslationContext &context) {
   const auto *raw = inst.raw_encoding();
   if (!raw || inst.size() < 8)
     return {};
@@ -42,6 +44,11 @@ std::vector<uint32_t> lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch
   constexpr uint16_t kOpAddCoU32 = 768;
   constexpr uint16_t kOpAddCoCiU32 = 288;
   constexpr uint8_t kSoppWaitAlu = 8;
+
+  // This lowering introduces VCC as the explicit carry register. Even though VCC
+  // is fixed rather than liveness-allocated, descriptor resources still need to
+  // cover the pair because the generated sequence writes and reads s106:s107.
+  context.require_sgprs(kVccLo + 2);
 
   std::vector<uint32_t> words;
 
@@ -76,8 +83,9 @@ std::vector<uint32_t> lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch
 std::vector<uint32_t> expand_cdna4_v_lshl_add_u64_for_rdna(const Instruction &inst,
                                                            uint32_t host_arch, uint64_t,
                                                            const LivenessAnalysis &,
+                                                           TranslationContext &context,
                                                            const LaneLayout *, const LaneLayout *) {
-  return lower_v_lshl_add_u64(inst, static_cast<rj_code_arch_t>(host_arch));
+  return lower_v_lshl_add_u64(inst, static_cast<rj_code_arch_t>(host_arch), context);
 }
 
 } // namespace rocjitsu

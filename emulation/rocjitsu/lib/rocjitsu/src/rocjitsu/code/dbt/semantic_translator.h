@@ -65,7 +65,8 @@ public:
   /// @param liveness  Kernel-scoped live-before data used for scratch register allocation.
   /// @returns Replacement instruction words on success, empty vector if no rule matches.
   [[nodiscard]] std::vector<uint32_t> try_lower_expand(const Instruction &inst, uint64_t offset,
-                                                       const LivenessAnalysis &liveness) const;
+                                                       const LivenessAnalysis &liveness,
+                                                       TranslationContext &context) const;
 
   [[nodiscard]] bool has_rules() const { return !expand_rules_.empty(); }
 

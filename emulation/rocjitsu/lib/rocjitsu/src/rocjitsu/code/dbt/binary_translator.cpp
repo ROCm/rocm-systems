@@ -34,8 +34,6 @@ namespace rocjitsu {
 
 namespace {
 
-constexpr uint32_t kConservativeLoweringMinimumVgprs = 128;
-
 EncodingTranslateFn select_encoding_translator(rj_code_arch_t guest, rj_code_arch_t host) {
   if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA4)
     return cdna4_to_rdna4::translate_encoding_cdna4_to_rdna4;
@@ -113,7 +111,7 @@ LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t ho
 }
 
 struct KernelTranslationScope {
-  const KdTranslation *translation = nullptr;
+  KdTranslation *translation = nullptr;
   BasicBlock *entry = nullptr;
   std::vector<BasicBlock *> blocks;
 };
@@ -151,17 +149,17 @@ reachable_kernel_blocks(const std::vector<std::unique_ptr<BasicBlock>> &blocks, 
 
 [[nodiscard]] std::vector<KernelTranslationScope>
 kernel_translation_scopes(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
-                          std::span<const KdTranslation> kernels) {
+                          std::span<KdTranslation> kernels) {
   std::vector<KernelTranslationScope> scopes;
   const auto entries = kernel_entry_offsets(kernels);
   if (entries.empty())
     return scopes;
 
   std::unordered_set<uint64_t> entry_set(entries.begin(), entries.end());
-  std::vector<const KdTranslation *> ordered_kernels;
+  std::vector<KdTranslation *> ordered_kernels;
   ordered_kernels.reserve(kernels.size());
   std::unordered_set<uint64_t> seen_entries;
-  for (const KdTranslation &kernel : kernels) {
+  for (KdTranslation &kernel : kernels) {
     if (seen_entries.insert(kernel.entry_text_offset).second)
       ordered_kernels.push_back(&kernel);
   }
@@ -171,7 +169,7 @@ kernel_translation_scopes(const std::vector<std::unique_ptr<BasicBlock>> &blocks
   });
 
   scopes.reserve(ordered_kernels.size());
-  for (const KdTranslation *kernel : ordered_kernels) {
+  for (KdTranslation *kernel : ordered_kernels) {
     BasicBlock *entry = block_for_offset(blocks, kernel->entry_text_offset);
     if (entry == nullptr)
       continue;
@@ -198,36 +196,27 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   result.host_arch = host_arch_;
   warnings_ = &result.warnings;
 
+  CodeObjectPatcher patcher(obj);
   auto leave_unchanged = [&]() {
+    warnings_ = nullptr;
     const auto *image = reinterpret_cast<const uint8_t *>(obj.image_data());
     result.elf_bytes.assign(image, image + obj.image_size());
-    warnings_ = nullptr;
     return result;
   };
-
-  CodeObjectPatcher patcher(obj);
   auto text = patcher.text_bytes();
   if (text.empty()) {
-    result.elf_bytes = patcher.emit();
-    return result;
+    return leave_unchanged();
   }
 
   auto decoder = Decoder::create(guest_arch_);
   if (!decoder) {
     result.warnings.push_back("unsupported guest_arch: no decoder available");
-    result.elf_bytes = patcher.emit();
-    return result;
+    return leave_unchanged();
   }
   KernelDescriptorTranslator descriptor_translator(guest_arch_, host_arch_);
-  KernelDescriptorTranslationOptions descriptor_options;
-  // Semantic lowerings allocate temporary VGPRs from liveness. Descriptor
-  // translation runs before those choices are known, so keep the historical
-  // 128-VGPR headroom for now.
-  // TODO: Have lowerings report their actual highest temporary VGPR demand and
-  // use that instead of this conservative floor.
-  descriptor_options.minimum_vgprs = kConservativeLoweringMinimumVgprs;
-  const auto descriptor_translations = descriptor_translator.translate_image(
-      patcher.image_bytes(), patcher.text_offset(), patcher.text_size(), descriptor_options);
+  auto descriptor_translations = descriptor_translator.translate_image(
+      patcher.image_bytes(), patcher.text_offset(), patcher.text_size(),
+      KernelDescriptorTranslationOptions{});
   bool descriptors_supported = true;
   for (const auto &translation : descriptor_translations) {
     result.warnings.insert(result.warnings.end(), translation.warnings.begin(),
@@ -237,15 +226,12 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   if (!descriptors_supported) {
     result.warnings.push_back("kernel descriptor translation requires unsupported resource or ABI "
                               "virtualization; leaving code object unchanged");
-    result.elf_bytes = patcher.emit();
-    warnings_ = nullptr;
-    return result;
+    return leave_unchanged();
   }
 
   if (descriptor_translations.empty()) {
     result.warnings.push_back("kernel descriptors are required for kernel-level translation");
-    warnings_ = nullptr;
-    return result;
+    return leave_unchanged();
   }
 
   const auto entry_offsets = kernel_entry_offsets(descriptor_translations);
@@ -255,8 +241,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   if (scopes.size() != entry_offsets.size()) {
     result.warnings.push_back(
         "kernel descriptor entry offsets are required to map to decoded text blocks");
-    warnings_ = nullptr;
-    return result;
+    return leave_unchanged();
   }
 
   std::vector<uint8_t> translated_text(text.begin(), text.end());
@@ -268,24 +253,21 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   patcher.set_cave_start(text.size());
 
   std::unordered_set<const BasicBlock *> translated_blocks;
-  bool warned_shared_blocks = false;
   for (const KernelTranslationScope &scope : scopes) {
     if (scope.blocks.empty())
       continue;
 
+    TranslationContext kernel_context(scope.translation->target_vgpr_count,
+                                      scope.translation->target_sgpr_count);
     LivenessAnalysis liveness(KernelBlockScope(scope.blocks));
 
     for (BasicBlock *block : scope.blocks) {
       if (block == nullptr)
         continue;
       if (!translated_blocks.insert(block).second) {
-        if (!warned_shared_blocks) {
-          result.warnings.push_back(
-              "basic block is reachable from multiple kernel entries; using first kernel "
-              "liveness for shared code");
-          warned_shared_blocks = true;
-        }
-        continue;
+        result.warnings.push_back("basic block is reachable from multiple kernel entries; shared "
+                                  "kernel text translation is not implemented");
+        return leave_unchanged();
       }
 
       uint64_t offset = block->start_offset();
@@ -310,7 +292,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         // For Expand: must lower (NOP-fill if unhandled).
         // For Lower: try lowering first, fall through to encoding if unhandled.
         {
-          auto expansion = semantic_translator_->try_lower_expand(inst, offset, liveness);
+          auto expansion =
+              semantic_translator_->try_lower_expand(inst, offset, liveness, kernel_context);
           if (!expansion.empty()) {
             SemanticReplacement repl{offset, offset + inst_size, std::move(expansion)};
             if (!apply_semantic(repl, translated_text, patcher))
@@ -333,6 +316,55 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         if (!handle_encoding(inst, offset, translated_text, dst_opcode, patcher, text))
           return leave_unchanged();
         offset += inst_size;
+      }
+    }
+
+    if (kernel_context.required_vgpr_count > kernel_context.target_vgpr_count)
+      scope.translation->target_vgpr_count = kernel_context.required_vgpr_count;
+    if (kernel_context.required_sgpr_count > kernel_context.target_sgpr_count)
+      scope.translation->target_sgpr_count = kernel_context.required_sgpr_count;
+
+    if (scope.translation->target_vgpr_count != kernel_context.target_vgpr_count ||
+        scope.translation->target_sgpr_count != kernel_context.target_sgpr_count) {
+      KernelDescriptorTranslationOptions descriptor_options;
+      descriptor_options.minimum_vgprs = scope.translation->target_vgpr_count;
+      descriptor_options.minimum_sgprs = scope.translation->target_sgpr_count;
+
+      // Descriptor growth is intentionally done after instruction lowering so each
+      // kernel is translated once. If a future lowering treats accvgpr_base as a
+      // static register number, that lowering must be rerun after this descriptor
+      // recomputation instead of relying on the one-pass patch below.
+      const auto final_translations = descriptor_translator.translate_image(
+          patcher.image_bytes(), patcher.text_offset(), patcher.text_size(), descriptor_options);
+      const auto final_translation =
+          std::ranges::find_if(final_translations, [&](const KdTranslation &candidate) {
+            return candidate.descriptor_file_offset == scope.translation->descriptor_file_offset;
+          });
+      if (final_translation == final_translations.end()) {
+        result.warnings.push_back(
+            "kernel descriptor translation could not be recomputed; leaving code object unchanged");
+        return leave_unchanged();
+      }
+
+      result.warnings.insert(result.warnings.end(), final_translation->warnings.begin(),
+                             final_translation->warnings.end());
+      if (!final_translation->supported) {
+        result.warnings.push_back(
+            "kernel descriptor translation requires unsupported resource or ABI "
+            "virtualization; leaving code object unchanged");
+        return leave_unchanged();
+      }
+
+      for (KdTranslation &translation : descriptor_translations) {
+        if (translation.entry_text_offset != scope.translation->entry_text_offset)
+          continue;
+
+        const auto updated =
+            std::ranges::find_if(final_translations, [&](const KdTranslation &candidate) {
+              return candidate.descriptor_file_offset == translation.descriptor_file_offset;
+            });
+        if (updated != final_translations.end())
+          translation = *updated;
       }
     }
   }
@@ -358,8 +390,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   if (target_mach_)
     patcher.update_elf_flags(target_mach_);
 
-  result.elf_bytes = patcher.emit();
   warnings_ = nullptr;
+  result.elf_bytes = patcher.emit();
   return result;
 }
 

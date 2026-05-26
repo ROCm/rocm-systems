@@ -27,8 +27,8 @@ constexpr uint16_t kCdna4Op_v_lshl_add_u64 = 520;
 /// create a weaker wait. Until we add precise GFX11 re-encoding, emit a
 /// conservative full-drain wait, which is slower but preserves correctness.
 std::vector<uint32_t> expand_waitcnt_gfx9_to_gfx11(const Instruction &inst, uint32_t, uint64_t,
-                                                   const LivenessAnalysis &, const LaneLayout *,
-                                                   const LaneLayout *) {
+                                                   const LivenessAnalysis &, TranslationContext &,
+                                                   const LaneLayout *, const LaneLayout *) {
   constexpr uint16_t kEncSoppValue = 0x17F;
   if (inst.encoding_id() != kEncSoppValue)
     return {};
