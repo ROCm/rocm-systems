@@ -36,9 +36,12 @@ class LivenessAnalysis;
 ///
 /// @details Descriptor translation happens before instruction translation, but
 /// semantic lowerings only know their actual scratch choices after liveness has
-/// been computed. The first translation pass records the highest SGPR/VGPR
-/// count required by those lowerings here; BinaryTranslator can then rerun once
-/// with descriptor minimums large enough to cover the generated code.
+/// been computed. Each kernel is lowered once while recording the highest
+/// SGPR/VGPR count required by those lowerings here; BinaryTranslator then
+/// recomputes the affected descriptor translations with those larger minimums
+/// before patching descriptors into the output image. A second instruction pass
+/// is only needed if a future lowering depends on descriptor-derived register
+/// numbers that can change during that recomputation.
 struct TranslationContext {
   uint32_t target_vgpr_count = 0;
   uint32_t target_sgpr_count = 0;

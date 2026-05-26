@@ -113,12 +113,10 @@ TEST(BinaryTranslatorE2E, TranslateVectorAddCdna4ToRdna4) {
   EXPECT_FALSE(result.elf_bytes.empty()) << "Translation produced empty ELF";
   EXPECT_EQ(result.host_arch, ROCJITSU_CODE_ARCH_RDNA4);
 
-  // Verify ELF machine flags contain GFX1200.
-  ASSERT_GE(result.elf_bytes.size(), 48u);
-  uint32_t e_flags = 0;
-  std::memcpy(&e_flags, result.elf_bytes.data() + 48, sizeof(e_flags));
-  constexpr uint32_t kEfAmdgpuMachGfx1200 = 0x48;
-  EXPECT_EQ(e_flags & 0xFF, kEfAmdgpuMachGfx1200)
+  // Verify ELF machine flags through the typed header so the bounds check covers e_flags.
+  ASSERT_GE(result.elf_bytes.size(), sizeof(rocjitsu::Elf64_Ehdr));
+  const auto *ehdr = reinterpret_cast<const rocjitsu::Elf64_Ehdr *>(result.elf_bytes.data());
+  EXPECT_EQ(ehdr->e_flags & rocjitsu::EF_AMDGPU_MACH, rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1200)
       << "ELF e_flags should contain GFX1200 machine type";
 }
 
@@ -138,11 +136,9 @@ TEST(BinaryTranslatorE2E, TranslateVectorAddCdna4ToCdna3) {
   EXPECT_TRUE(result.warnings.empty())
       << "Vector-add CDNA4→CDNA3 translation should not require unhandled lowering";
 
-  ASSERT_GE(result.elf_bytes.size(), 48u);
-  uint32_t e_flags = 0;
-  std::memcpy(&e_flags, result.elf_bytes.data() + 48, sizeof(e_flags));
-  constexpr uint32_t kEfAmdgpuMachGfx942 = 0x4C;
-  EXPECT_EQ(e_flags & 0xFF, kEfAmdgpuMachGfx942)
+  ASSERT_GE(result.elf_bytes.size(), sizeof(rocjitsu::Elf64_Ehdr));
+  const auto *ehdr = reinterpret_cast<const rocjitsu::Elf64_Ehdr *>(result.elf_bytes.data());
+  EXPECT_EQ(ehdr->e_flags & rocjitsu::EF_AMDGPU_MACH, rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX942)
       << "ELF e_flags should contain GFX942 machine type";
 
   ASSERT_FALSE(co->text_sections().empty());
