@@ -375,6 +375,9 @@ ncclResult_t rcclGetAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t co
       intraChan = task.nMaxChannels;
     }
 
+    // For hierarchical algorithm, only the inter-comm protocol/channels are
+    // reported in rccl-tests -A output.
+    // The intra-comm values are logged below for debugging purposes
     INFO(NCCL_COLL, "Hierarchical AG inter: proto=%d channels=%d, intra: proto=%d channels=%d",
         *protocol, *maxChannels, intraProto, intraChan);
     return ncclSuccess;
