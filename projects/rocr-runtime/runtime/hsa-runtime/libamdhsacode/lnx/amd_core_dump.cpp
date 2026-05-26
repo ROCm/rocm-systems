@@ -364,6 +364,9 @@ static void GetCoreDeviceInfo(const AMD::GpuAgent* agent, kfd_dbg_device_info_en
   HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtGetCoreDeviceInfo(gpu_id, &entry));
 
   fprintf(stderr, "[GetCoreDeviceInfo] GPU %u: hsaKmtGetCoreDeviceInfo returned status=%d\n", gpu_id, status);
+  fprintf(stderr, "[GetCoreDeviceInfo] GPU %u: BEFORE override: simd_count=%u, max_waves_per_simd=%u, array_count=%u, num_xcc=%u\n",
+          gpu_id, entry.simd_count, entry.max_waves_per_simd, entry.array_count, entry.num_xcc);
+
 
   // BUG WORKAROUND: hsaKmtGetCoreDeviceInfo returns zeros for many fields
   // Manually populate from GpuAgent properties instead
@@ -372,6 +375,7 @@ static void GetCoreDeviceInfo(const AMD::GpuAgent* agent, kfd_dbg_device_info_en
   entry.gpu_id = gpu_id;
   entry.vendor_id = props.VendorId;
   entry.device_id = props.DeviceId;
+  entry.array_count = props.NumArrays;
 
   // Calculate gfx version from EngineId - decimal encoding for KFD 1.13 compatibility
   entry.gfx_target_version = (props.EngineId.ui32.Major * 10000
@@ -380,6 +384,8 @@ static void GetCoreDeviceInfo(const AMD::GpuAgent* agent, kfd_dbg_device_info_en
 
   fprintf(stderr, "[GetCoreDeviceInfo] GPU %u: vendor_id=0x%04x, device_id=0x%04x, gfx_version=%u\n",
           gpu_id, entry.vendor_id, entry.device_id, entry.gfx_target_version);
+  fprintf(stderr, "[GetCoreDeviceInfo] GPU %u: AFTER override: simd_count=%u, max_waves_per_simd=%u, array_count=%u, num_xcc=%u\n",
+          gpu_id, entry.simd_count, entry.max_waves_per_simd, entry.array_count, entry.num_xcc);
 
   // Exception status - TODO: Get from agent exception tracking when implemented
   entry.exception_status = 0;  // Placeholder until agent exception tracking is implemented
@@ -488,7 +494,7 @@ struct SegmentBuilder {
 struct NoteSegmentBuilder : public SegmentBuilder {
   hsa_status_t Collect(SegmentsInfo& segments) override {
     // Hardcode KFD version to 1.13 for note format compatibility
-    HsaVersionInfo versionInfo = {1, 13};
+    HsaVersionInfo versionInfo = {1, 18};
 
     // ========================================================================
     // PHASE 2: Runtime-Only Approach (Debug API Disabled for Stability)
@@ -575,10 +581,10 @@ struct NoteSegmentBuilder : public SegmentBuilder {
     /* Store version_minor in PT_NOTE package */
     note_package_builder_.Write<uint32_t>(versionInfo.KernelInterfaceMinorVersion);
     /* Store runtime_info_size in PT_NOTE package */
-    static_assert(10 <= sizeof(kfd_runtime_info));
+    static_assert(16 <= sizeof(kfd_runtime_info));
     fprintf(stderr, "[Core Dump] runtime_info: declared_size=%u, actual_sizeof=%zu\n",
-            10, sizeof(kfd_runtime_info));
-    note_package_builder_.Write<uint64_t>(10 /* sizeof(kfd_runtime_info) for version 1.13 */);
+            16, sizeof(kfd_runtime_info));
+    note_package_builder_.Write<uint64_t>(16 /* sizeof(kfd_runtime_info) for version 1.18 */);
 
     /* Store n_agents in PT_NOTE package */
     note_package_builder_.Write<uint32_t>(device_snapshots.size());
@@ -586,7 +592,7 @@ struct NoteSegmentBuilder : public SegmentBuilder {
     static_assert(120 <= sizeof(kfd_dbg_device_info_entry));
     fprintf(stderr, "[Core Dump] device_info: declared_size=%u, actual_sizeof=%zu, n_agents=%zu\n",
             120, sizeof(kfd_dbg_device_info_entry), device_snapshots.size());
-    note_package_builder_.Write<uint32_t>(120 /* sizeof(kfd_dbg_device_info_entry) at version 1.13 */);
+    note_package_builder_.Write<uint32_t>(120 /* sizeof(kfd_dbg_device_info_entry) at version 1.18 */);
 
     /* Store n_queues in PT_NOTE package */
     note_package_builder_.Write<uint32_t>(queue_snapshots.size());
@@ -594,17 +600,19 @@ struct NoteSegmentBuilder : public SegmentBuilder {
     static_assert(64 <= sizeof(kfd_queue_snapshot_entry));
     fprintf(stderr, "[Core Dump] queue_info: declared_size=%u, actual_sizeof=%zu, n_queues=%zu\n",
             64, sizeof(kfd_queue_snapshot_entry), queue_snapshots.size());
-    note_package_builder_.Write<uint32_t>(64 /* sizeof(kfd_queue_snapshot_entry) at version 1.13 */);
+    note_package_builder_.Write<uint32_t>(64 /* sizeof(kfd_queue_snapshot_entry) at version 1.18 */);
 
     // Push runtime info
-    fprintf(stderr, "[Core Dump] Pushing runtime_info: %zu bytes\n", sizeof(runtime_info));
-    PushInfo(&runtime_info, sizeof(runtime_info));
+    fprintf(stderr, "[Core Dump] Pushing runtime_info: %zu bytes\n", 16);
+    PushInfo(&runtime_info, 16);
 
     // Push device snapshots
     if (!device_snapshots.empty()) {
       size_t total_bytes = device_snapshots.size() * sizeof(kfd_dbg_device_info_entry);
       fprintf(stderr, "[Core Dump] Pushing device_snapshots: %zu bytes (%zu agents * %zu)\n",
               total_bytes, device_snapshots.size(), sizeof(kfd_dbg_device_info_entry));
+      fprintf(stderr, "[Core Dump] Agent[0] before push: simd_count=%u, max_waves_per_simd=%u\n",
+              device_snapshots[0].simd_count, device_snapshots[0].max_waves_per_simd);
       PushInfo(device_snapshots.data(), total_bytes);
     }
 
