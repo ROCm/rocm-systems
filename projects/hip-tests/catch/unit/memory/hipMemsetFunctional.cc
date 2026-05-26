@@ -550,8 +550,6 @@ HIP_TEST_CASE(Unit_hipMemsetFunctional_PartialSet_3D) {
 }
 
 // Corner-case coverage for the __amd_rocclr_fillBufferUnAligned kernel rewrite.
-// These exercise the head/body/body_tile/body_tail/tail cleanup-region paths
-// that the rewrite changed behavior on, and the precondition error propagation.
 TEST_CASE("Unit_hipMemset_UnalignedKernelCornerCases", "[fillBuffer][unaligned]") {
   SECTION("Byte-misaligned hipHostRegister patternSize=1") {
     constexpr size_t kSlack = 64;
@@ -643,13 +641,57 @@ TEST_CASE("Unit_hipMemset_UnalignedKernelCornerCases", "[fillBuffer][unaligned]"
   }
 
   SECTION("Sub-pattern-misaligned VA returns hipError") {
+    hipError_t err = hipSuccess;
     void* base = nullptr;
     HIP_CHECK(hipMalloc(&base, 256));
-    void* misaligned = static_cast<unsigned char*>(base) + 1;
-    hipError_t err = hipMemsetD16(reinterpret_cast<hipDeviceptr_t>(misaligned),
-                                  0xBEEF, /*count=*/16);
-    CAPTURE(err);
-    HIP_ASSERT(err != hipSuccess);
+    hipStream_t stream{nullptr};
+    HIP_CHECK(hipStreamCreate(&stream));
+
+    {
+      // Test hipMemsetD16 with odd-aligned pointer (not 2-byte aligned)
+      void* misaligned16 = static_cast<unsigned char*>(base) + 1;
+      err = hipMemsetD16(reinterpret_cast<hipDeviceptr_t>(misaligned16),
+                                    0xBEEF, /*count=*/16);
+      CAPTURE(err);
+      HIP_ASSERT(err == hipErrorInvalidValue);
+      // Test hipMemsetD16Async with odd-aligned pointer (not 2-byte aligned)
+      err = hipMemsetD16Async(reinterpret_cast<hipDeviceptr_t>(misaligned16),
+                              0xBEEF, /*count=*/16, stream);
+      CAPTURE(err);
+      HIP_ASSERT(err == hipErrorInvalidValue);
+    }
+
+    {
+      // Test hipMemsetD32 with misaligned pointer (not 4-byte aligned)
+      // Test +1 offset (misaligned by 1 byte)
+      void* misaligned32_1 = static_cast<unsigned char*>(base) + 1;
+      err = hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(misaligned32_1),
+                         0xDEADBEEF, /*count=*/16);
+      CAPTURE(err);
+      HIP_ASSERT(err == hipErrorInvalidValue);
+
+      // Test +2 offset (misaligned by 2 bytes)
+      void* misaligned32_2 = static_cast<unsigned char*>(base) + 2;
+      err = hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(misaligned32_2),
+                         0xDEADBEEF, /*count=*/16);
+      CAPTURE(err);
+      HIP_ASSERT(err == hipErrorInvalidValue);
+
+      // Test +3 offset (misaligned by 3 bytes)
+      void* misaligned32_3 = static_cast<unsigned char*>(base) + 3;
+      err = hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(misaligned32_3),
+                         0xDEADBEEF, /*count=*/16);
+      CAPTURE(err);
+      HIP_ASSERT(err == hipErrorInvalidValue);
+
+      // Test hipMemsetD32Async with misaligned pointer (not 4-byte aligned)
+      err = hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(misaligned32_1),
+                              0xDEADBEEF, /*count=*/16, stream);
+      CAPTURE(err);
+      HIP_ASSERT(err == hipErrorInvalidValue);
+    }
+
+    HIP_CHECK(hipStreamDestroy(stream));
     HIP_CHECK(hipFree(base));
   }
 }
