@@ -764,6 +764,169 @@ TEST_F(GinMPIDeviceTests, WaitCounter_Local) {
   MPI_Barrier(MPI_COMM_WORLD);
 }
 
+// Producer kernel: rank 0 issues a single put carrying BOTH a remote
+// SignalInc action and a local CounterInc action, then waits on its OWN
+// counter. The remote SignalInc bumps the peer's signal cell when the IB
+// write lands at the target (gin_host_proxy.cc:271-273); the local
+// CounterInc bumps rank 0's counter when the IB CQE for the put is
+// observed by the local proxy (gin_host_proxy.cc:147-152). One put,
+// two completion sites.
+__global__ void waitCounterAndSignalProducerKernel(
+    ncclWindow_t srcWin, size_t srcOff,
+    ncclWindow_t dstWin, size_t dstOff,
+    size_t bytes,
+    ncclGinSignal_t sigIdx, ncclGinCounter_t cntIdx, int peer,
+    struct ncclDevComm devComm) {
+  ncclGin gin{devComm, /*ginContext=*/0};
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
+    gin.put(ncclTeamWorld(devComm), peer,
+            dstWin, dstOff, srcWin, srcOff, bytes,
+            ncclGin_SignalInc{sigIdx},        // remote: bump peer's signal cell
+            ncclGin_CounterInc{cntIdx});      // local: bump cntIdx on IB CQE
+  }
+  // CTA-collective wait gating kernel exit on local CQ completion. On the
+  // proxy backend, the local CQE strictly follows the remote SignalInc
+  // landing, so once this returns the consumer's waitSignal is unblocked
+  // (or already past).
+  gin.waitCounter(ncclCoopCta(), cntIdx, /*least=*/1);
+}
+
+// Consumer kernel: rank 1 waits on its signal cell to reach 1. No put is
+// issued from this side -- the IB plugin lands rank 0's payload + signal
+// passively.
+__global__ void waitCounterAndSignalConsumerKernel(
+    ncclGinSignal_t sigIdx, uint64_t expectedSignalValue,
+    struct ncclDevComm devComm) {
+  ncclGin gin{devComm, /*ginContext=*/0};
+  gin.waitSignal(ncclCoopCta(), sigIdx, expectedSignalValue);
+}
+
+// Exercises both completion sites of a single gin.put with combined
+// (SignalInc, CounterInc) actions:
+//   - Remote signal notification: rank 1's waitSignal returns when the
+//     IB write of the SignalInc lands on its signal cell.
+//   - Local IB-CQE -> counter bump: rank 0's waitCounter returns when the
+//     local proxy thread has observed the CQE for the put.
+// Together with the post-sync host-side payload check on rank 1, this
+// proves the same put delivered (a) bytes, (b) remote signal, and
+// (c) local counter -- all driven by one gin.put.
+TEST_F(GinMPIDeviceTests, WaitCounterAndSignal) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
+    GTEST_SKIP() << "Requires exactly 2 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  ncclComm_t  comm   = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+
+  int rank = -1, nRanks = -1;
+  ncclCommUserRank(comm, &rank);
+  ncclCommCount(comm, &nRanks);
+  ASSERT_EQ(2, nRanks);
+
+  // 8 KiB symmetric buffers; 4 KiB payload at non-zero src/dst offsets so
+  // the put is a realistic data move. Both signal and counter indices are
+  // non-zero so a regression that drops the index multiplier would land
+  // at cell 0 and the waits would never observe the bump.
+  constexpr size_t kBufBytes      = 8 * 1024;
+  constexpr size_t kTransferBytes = 4 * 1024;
+  constexpr size_t kSrcOff        = 4 * 1024;
+  constexpr size_t kDstOff        = 2 * 1024;
+  constexpr ncclGinSignal_t  kSigIdx = 1;
+  constexpr ncclGinCounter_t kCntIdx = 1;
+  constexpr int kPeer = 1;
+
+  // Symmetric src + dst on every rank (window registration is collective
+  // for SYMMETRIC-mode windows).
+  void* dSrc = nullptr;
+  void* dDst = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSrc, kBufBytes));
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dDst, kBufBytes));
+  auto memCleanup = makeScopeGuard([&]() {
+    if (dSrc) (void)ncclMemFree(dSrc);
+    if (dDst) (void)ncclMemFree(dDst);
+  });
+
+  ncclWindow_t srcWin = nullptr, dstWin = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommWindowRegister(comm, dSrc, kBufBytes, &srcWin, NCCL_WIN_COLL_SYMMETRIC));
+  ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommWindowRegister(comm, dDst, kBufBytes, &dstWin, NCCL_WIN_COLL_SYMMETRIC));
+  auto winCleanup = makeScopeGuard([&]() {
+    if (srcWin) (void)ncclCommWindowDeregister(comm, srcWin);
+    if (dstWin) (void)ncclCommWindowDeregister(comm, dstWin);
+  });
+
+  // ginSignalCount=2 and ginCounterCount=2 so kSigIdx=1 and kCntIdx=1 are
+  // both in range. railGinBarrierCount=1 covers the 1-CTA launch.
+  ncclDevCommRequirements reqs{};
+  reqs.railGinBarrierCount = 1;
+  reqs.ginSignalCount      = 2;
+  reqs.ginCounterCount     = 2;
+  ncclDevComm devComm{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
+  auto devCommCleanup = makeScopeGuard([&]() {
+    (void)ncclDevCommDestroy(comm, &devComm);
+  });
+
+  // Deterministic byte pattern in src so the post-sync data check on
+  // rank 1 catches wrong-bytes / wrong-offset regressions. Both ranks
+  // zero their dst as a baseline.
+  std::vector<uint8_t> hostSrc(kBufBytes, 0);
+  std::vector<uint8_t> hostDst(kBufBytes, 0);
+  for (size_t i = 0; i < kTransferBytes; i++) {
+    hostSrc[kSrcOff + i] = static_cast<uint8_t>(0x40 + (i & 0xFF));
+  }
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSrc, hostSrc.data(), kBufBytes, hipMemcpyHostToDevice));
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dDst, hostDst.data(), kBufBytes, hipMemcpyHostToDevice));
+
+  // Sync so neither rank launches before setup is done globally.
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  // Rank 0 puts + bumps remote signal + bumps local counter; rank 1 waits
+  // for the signal. Each side's gin wait IS its assertion (counter on
+  // rank 0, signal on rank 1); the host-side memcmp on rank 1 below
+  // verifies the payload.
+  if (rank == 0) {
+    waitCounterAndSignalProducerKernel<<<1, 32, 0, stream>>>(
+        srcWin, kSrcOff, dstWin, kDstOff,
+        kTransferBytes, kSigIdx, kCntIdx, kPeer, devComm);
+  } else {
+    waitCounterAndSignalConsumerKernel<<<1, 32, 0, stream>>>(
+        kSigIdx, /*expectedSignalValue=*/1, devComm);
+  }
+  ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+
+  // Sync so rank 1's verify isn't racing rank 0's kernel completion.
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  // Rank 1 verifies the payload landed at [kDstOff, kDstOff+kTransferBytes)
+  // and nothing outside that range was touched.
+  if (rank == 1) {
+    std::vector<uint8_t> hostResult(kBufBytes, 0);
+    ASSERT_EQ(hipSuccess,
+              hipMemcpy(hostResult.data(), dDst, kBufBytes, hipMemcpyDeviceToHost));
+    for (size_t i = 0; i < kDstOff; i++) {
+      ASSERT_EQ(0u, hostResult[i])
+          << "byte " << i << " before dstOff was unexpectedly written";
+    }
+    for (size_t i = 0; i < kTransferBytes; i++) {
+      ASSERT_EQ(hostSrc[kSrcOff + i], hostResult[kDstOff + i])
+          << "payload byte " << i << " mismatched";
+    }
+    for (size_t i = kDstOff + kTransferBytes; i < kBufBytes; i++) {
+      ASSERT_EQ(0u, hostResult[i])
+          << "byte " << i << " after dstOff+kTransferBytes was unexpectedly written";
+    }
+  }
+
+  // Final sync so collective teardown (ScopeGuards) see both ranks past
+  // the verification phase.
+  MPI_Barrier(MPI_COMM_WORLD);
+}
+
 // Collective kernel: every rank runs the same code. The barrier composes
 // signal + waitSignal + an epoch counter (gin_barrier__funcs.h:42-60) -- each
 // sync sends SignalInc to every other rank and waits for the local signal
