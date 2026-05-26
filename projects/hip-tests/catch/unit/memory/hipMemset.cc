@@ -129,8 +129,11 @@ HIP_TEST_CASE(Unit_hipMemset_SetMemoryWithOffset) {
   bool ret;
 
   if (isQuickLevel()) {
-    std::tie(N, memsetval, memsetD32val, memsetD16val, memsetD8val) =
-        std::make_tuple(size_t{10013}, char{0x5a}, int{0xDEADBEEF}, int16_t{0xDEAD}, char{0xDE});
+    N = 10013;
+    memsetval = 0x5a;
+    memsetD32val = static_cast<int>(0xDEADBEEF);
+    memsetD16val = static_cast<int16_t>(0xDEAD);
+    memsetD8val = static_cast<char>(0xDE);
   } else {
     std::tie(N, memsetval, memsetD32val, memsetD16val, memsetD8val) =
         GENERATE(table<size_t, char, int, int16_t, char>(tableItems));
@@ -176,8 +179,11 @@ HIP_TEST_CASE(Unit_hipMemsetAsync_SetMemoryWithOffset) {
   bool ret;
 
   if (isQuickLevel()) {
-    std::tie(N, memsetval, memsetD32val, memsetD16val, memsetD8val) =
-        std::make_tuple(size_t{10013}, char{0x5a}, int{0xDEADBEEF}, int16_t{0xDEAD}, char{0xDE});
+    N = 10013;
+    memsetval = 0x5a;
+    memsetD32val = static_cast<int>(0xDEADBEEF);
+    memsetD16val = static_cast<int16_t>(0xDEAD);
+    memsetD8val = static_cast<char>(0xDE);
   } else {
     std::tie(N, memsetval, memsetD32val, memsetD16val, memsetD8val) =
         GENERATE(table<size_t, char, int, int16_t, char>(tableItems));
