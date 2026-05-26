@@ -195,15 +195,17 @@ main(int argc, char** argv)
     std::cout << "verified: grandchild pid " << grandchild_pid << " loaded the tool library\n";
 
     // Let profiling run for a few seconds.
-    std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
     // Detach from the process tree symmetrically with how we attached.
     ROCATTACH_CALL(rocattach_detach_tree(child_pid));
 
     int grandchild_status = 0;
+    kill(grandchild_pid, SIGINT);
     waitpid(grandchild_pid, &grandchild_status, 0);
 
     int child_status = 0;
+    kill(child_pid, SIGINT);
     waitpid(child_pid, &child_status, 0);
 
     if(grandchild_status != 0)
