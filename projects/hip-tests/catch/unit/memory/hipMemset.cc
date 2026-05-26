@@ -130,6 +130,7 @@ HIP_TEST_CASE(Unit_hipMemset_SetMemoryWithOffset) {
 
   std::tie(N, memsetval, memsetD32val, memsetD16val, memsetD8val) =
       GENERATE(table<size_t, char, int, int16_t, char>(tableItems));
+  if (isQuickLevel() && N == 256 * 1024 * 1024) return;
 
 
   SECTION("Memset with hipMemsetTypeDefault") {
@@ -172,6 +173,7 @@ HIP_TEST_CASE(Unit_hipMemsetAsync_SetMemoryWithOffset) {
 
   std::tie(N, memsetval, memsetD32val, memsetD16val, memsetD8val) =
       GENERATE(table<size_t, char, int, int16_t, char>(tableItems));
+  if (isQuickLevel() && N == 256 * 1024 * 1024) return;
 
 
   SECTION("Memset with hipMemsetTypeDefault") {
@@ -206,7 +208,7 @@ HIP_TEST_CASE(Unit_hipMemset_SmallBufferSizes) {
   char *A_d, *A_h;
   constexpr int memsetval = 0x24;
 
-  auto numElements = GENERATE(range(1, 4));
+  auto numElements = isQuickLevel() ? GENERATE(1) : GENERATE(range(1, 4));
   int numBytes = numElements * sizeof(char);
 
   HIP_CHECK(hipMalloc(&A_d, numBytes));

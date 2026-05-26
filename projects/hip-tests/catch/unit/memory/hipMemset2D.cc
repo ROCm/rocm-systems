@@ -120,6 +120,7 @@ HIP_TEST_CASE(Unit_hipMemset2D_UniqueWidthHeight) {
 
   std::tie(width2D, height2D, memsetWidth, memsetHeight) =
       GENERATE(table<int, int, int, int>(tableItems));
+  if (isQuickLevel() && width2D > 100) return;
 
   size_t width = width2D * sizeof(char);
   size_t sizeElements = width * height2D;
@@ -169,8 +170,8 @@ HIP_TEST_CASE(Unit_hipMemset2DAsync_capturehipMemset2DAsync) {
   hipGraph_t graph{nullptr};
   hipGraphExec_t graphExec{nullptr};
   int rows, cols;
-  rows = GENERATE(3, 4, 100);
-  cols = GENERATE(3, 4, 100);
+  rows = isQuickLevel() ? GENERATE(3, 100) : GENERATE(3, 4, 100);
+  cols = isQuickLevel() ? GENERATE(3, 100) : GENERATE(3, 4, 100);
   hipStream_t stream;
   size_t devPitch;
 

@@ -102,8 +102,10 @@ HIP_TEST_CASE(Unit_hipMemcpyToFromSymbol_SyncAndAsync) {
   enum StreamTestType { NullStream = 0, StreamPerThread, CreatedStream, NoStream };
 
   /* Test type NoStream - Use Sync variants, else use async variants */
-  auto streamType = GENERATE(StreamTestType::NoStream, StreamTestType::NullStream,
-                             StreamTestType::StreamPerThread, StreamTestType::CreatedStream);
+  auto streamType = isQuickLevel()
+      ? GENERATE(StreamTestType::NoStream, StreamTestType::CreatedStream)
+      : GENERATE(StreamTestType::NoStream, StreamTestType::NullStream,
+                 StreamTestType::StreamPerThread, StreamTestType::CreatedStream);
 
   hipStream_t stream{nullptr};
 

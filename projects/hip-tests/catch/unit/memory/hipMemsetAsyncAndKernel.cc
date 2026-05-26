@@ -164,7 +164,7 @@ HIP_TEST_CASE(Unit_hipMemsetAsync_VerifyExecutionWithKernel) {
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   REQUIRE(numDevices > 0);
 
-  auto devNum = GENERATE_COPY(range(0, numDevices));
+  auto devNum = isQuickLevel() ? 0 : GENERATE_COPY(range(0, numDevices));
   HIP_CHECK(hipSetDevice(devNum));
 
   SECTION("hipMemsetAsync With Kernel") {

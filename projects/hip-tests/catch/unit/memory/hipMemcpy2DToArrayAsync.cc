@@ -27,12 +27,14 @@ HIP_TEST_CASE(Unit_hipMemcpy2DToArrayAsync_Positive_Default) {
 
   using namespace std::placeholders;
 
-  const auto stream_type = GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
+  const auto stream_type = isQuickLevel()
+      ? Streams::created
+      : GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
   const StreamGuard stream_guard(stream_type);
   const hipStream_t stream = stream_guard.stream();
 
-  const auto width = GENERATE(16, 32, 48);
-  const auto height = GENERATE(1, 16, 32, 48);
+  const auto width = isQuickLevel() ? GENERATE(16, 48) : GENERATE(16, 32, 48);
+  const auto height = isQuickLevel() ? GENERATE(1, 48) : GENERATE(1, 16, 32, 48);
 
   SECTION("Host to Array") {
     Memcpy2DHosttoAShell<true, int>(
@@ -87,8 +89,8 @@ HIP_TEST_CASE(Unit_hipMemcpy2DToArrayAsync_Positive_Synchronization_Behavior) {
   HIP_CHECK(hipDeviceSynchronize());
 
   SECTION("Host to Array") {
-    const auto width = GENERATE(16, 32, 48);
-    const auto height = GENERATE(16, 32, 48);
+    const auto width = isQuickLevel() ? GENERATE(16, 48) : GENERATE(16, 32, 48);
+    const auto height = isQuickLevel() ? GENERATE(16, 48) : GENERATE(16, 32, 48);
 
     MemcpyHtoASyncBehavior(std::bind(hipMemcpy2DToArrayAsync, _1, 0, 0, _2, width * sizeof(int),
                                      width * sizeof(int), height, hipMemcpyHostToDevice, nullptr),
@@ -96,8 +98,8 @@ HIP_TEST_CASE(Unit_hipMemcpy2DToArrayAsync_Positive_Synchronization_Behavior) {
   }
 
   SECTION("Device to Array") {
-    const auto width = GENERATE(16, 32, 48);
-    const auto height = GENERATE(16, 32, 48);
+    const auto width = isQuickLevel() ? GENERATE(16, 48) : GENERATE(16, 32, 48);
+    const auto height = isQuickLevel() ? GENERATE(16, 48) : GENERATE(16, 32, 48);
 
     MemcpyDtoASyncBehavior(std::bind(hipMemcpy2DToArrayAsync, _1, 0, 0, _2, _3, width * sizeof(int),
                                      height, hipMemcpyDeviceToDevice, nullptr),
@@ -112,7 +114,9 @@ HIP_TEST_CASE(Unit_hipMemcpy2DToArrayAsync_Positive_ZeroWidthHeight) {
   const auto width = 16;
   const auto height = 16;
 
-  const auto stream_type = GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
+  const auto stream_type = isQuickLevel()
+      ? Streams::created
+      : GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
   const StreamGuard stream_guard(stream_type);
   const hipStream_t stream = stream_guard.stream();
 

@@ -62,8 +62,10 @@ template <typename T> static void doMemsetTest(allocType mallocType, memType mem
  */
 
 HIP_TEST_CASE(Unit_hipMemsetASyncMulti) {
-  allocType mallocType = GENERATE(allocType::hostMalloc, allocType::deviceMalloc,
-                                  allocType::hostRegisted, allocType::devRegistered);
+  allocType mallocType = isQuickLevel()
+      ? GENERATE(allocType::hostMalloc, allocType::deviceMalloc)
+      : GENERATE(allocType::hostMalloc, allocType::deviceMalloc,
+                 allocType::hostRegisted, allocType::devRegistered);
   memType mem_type = memType::hipMemsetD8;
   MultiDData data1;
   data1.offset = 0;
@@ -79,8 +81,10 @@ HIP_TEST_CASE(Unit_hipMemsetASyncMulti) {
  * test 2 async hipMemsetD[8,16,32]'s on the same memory at different offsets
  */
 HIP_TEMPLATE_TEST_CASE(Unit_hipMemsetDASyncMulti, int8_t, int16_t, uint32_t) {
-  allocType mallocType = GENERATE(allocType::hostRegisted, allocType::deviceMalloc,
-                                  allocType::hostMalloc, allocType::devRegistered);
+  allocType mallocType = isQuickLevel()
+      ? GENERATE(allocType::hostMalloc, allocType::deviceMalloc)
+      : GENERATE(allocType::hostRegisted, allocType::deviceMalloc,
+                 allocType::hostMalloc, allocType::devRegistered);
   memType memset_type;
   MultiDData data1;
   data1.offset = 0;
@@ -106,8 +110,10 @@ HIP_TEST_CASE(Unit_hipMemset2DASyncMulti) {
 #if HT_AMD
   HIP_SKIP_TEST("tracked issue EXSWCPHIPT-127.");
 #endif
-  allocType mallocType = GENERATE(allocType::deviceMalloc, allocType::hostMalloc,
-                                  allocType::hostRegisted, allocType::devRegistered);
+  allocType mallocType = isQuickLevel()
+      ? GENERATE(allocType::hostMalloc, allocType::deviceMalloc)
+      : GENERATE(allocType::deviceMalloc, allocType::hostMalloc,
+                 allocType::hostRegisted, allocType::devRegistered);
   memType memset_type = memType::hipMem2D;
   MultiDData data1;
   data1.offset = 0;
@@ -127,8 +133,10 @@ HIP_TEST_CASE(Unit_hipMemset3DASyncMulti) {
 #if HT_AMD
   HIP_SKIP_TEST("tracked issue EXSWCPHIPT-127.");
 #endif
-  allocType mallocType = GENERATE(allocType::deviceMalloc, allocType::hostMalloc,
-                                  allocType::hostRegisted, allocType::devRegistered);
+  allocType mallocType = isQuickLevel()
+      ? GENERATE(allocType::hostMalloc, allocType::deviceMalloc)
+      : GENERATE(allocType::deviceMalloc, allocType::hostMalloc,
+                 allocType::hostRegisted, allocType::devRegistered);
   memType memset_type = memType::hipMem3D;
   MultiDData data1;
   data1.offset = 0;

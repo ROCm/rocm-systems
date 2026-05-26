@@ -189,7 +189,9 @@ template <typename T> void partialMemsetTest(T valA, T valB, size_t count, size_
 }
 
 HIP_TEST_CASE(Unit_hipMemsetFunctional_PartialSet_1D) {
-  auto widthOffset = GENERATE(8, 16, 32, 64, 128, 256, 512, 1024);
+  auto widthOffset = isQuickLevel()
+      ? GENERATE(8, 128, 1024)
+      : GENERATE(8, 16, 32, 64, 128, 256, 512, 1024);
   SECTION("hipMemset - Partial Set") {
     partialMemsetTest<char>(0x1, 0x42, 1024, widthOffset, hipMemsetTypeDefault, false);
   }
@@ -364,8 +366,9 @@ template <typename T> void partialMemsetTest2D(T valA, T valB, size_t width, siz
 
 HIP_TEST_CASE(Unit_hipMemsetFunctional_PartialSet_2D) {
 
-  for (auto widthOffset = 8; widthOffset <= 128; widthOffset *= 2) {
-    for (auto heightOffset = 8; heightOffset <= 128; heightOffset *= 2) {
+  const auto maxOffset = isQuickLevel() ? 32 : 128;
+  for (auto widthOffset = 8; widthOffset <= maxOffset; widthOffset *= 2) {
+    for (auto heightOffset = 8; heightOffset <= maxOffset; heightOffset *= 2) {
       SECTION("hipMemset2D - Partial Set") {
         partialMemsetTest2D('a', 'b', 200, 200, widthOffset, heightOffset, false);
       }
@@ -542,9 +545,11 @@ void partialMemsetTest3D(T valA, T valB, size_t width, size_t height, size_t dep
 
 HIP_TEST_CASE(Unit_hipMemsetFunctional_PartialSet_3D) {
 
-  for (auto widthOffset = 8; widthOffset <= 128; widthOffset *= 2) {
-    for (auto heightOffset = 8; heightOffset <= 128; heightOffset *= 2) {
-      for (auto depthOffset = 2; depthOffset <= 5; depthOffset++) {
+  const auto maxWH = isQuickLevel() ? 32 : 128;
+  const auto maxD = isQuickLevel() ? 3 : 5;
+  for (auto widthOffset = 8; widthOffset <= maxWH; widthOffset *= 2) {
+    for (auto heightOffset = 8; heightOffset <= maxWH; heightOffset *= 2) {
+      for (auto depthOffset = 2; depthOffset <= maxD; depthOffset++) {
         SECTION("hipMemset3D - Partial Set") {
           partialMemsetTest3D('a', 'b', 200, 200, 10, widthOffset, heightOffset, depthOffset,
                               false);
