@@ -161,28 +161,28 @@ Adapted from [Josh’s OpenSpec + Superpowers guide](https://vocus.cc/article/69
 
 ```mermaid
 flowchart LR
-  subgraph phase1 [Phase 1: Clarify]
-    B[Superpowers: brainstorming]
-    O1[OpenSpec: /opsx:new + /opsx:ff]
+  subgraph phase1 ["Phase 1: Clarify"]
+    B["Superpowers: brainstorming"]
+    O1["OpenSpec: new + fast-forward"]
     B --> O1
   end
-  subgraph phase2 [Phase 2: Isolate]
-    W[Superpowers: git worktree]
+  subgraph phase2 ["Phase 2: Isolate"]
+    W["Superpowers: git worktree"]
   end
-  subgraph phase3 [Phase 3: Plan]
-    T[OpenSpec: tasks.md]
-    P[Superpowers: writing-plans]
+  subgraph phase3 ["Phase 3: Plan"]
+    T["OpenSpec: tasks.md"]
+    P["Superpowers: writing-plans"]
     T --> P
   end
-  subgraph phase4 [Phase 4: Implement]
-    C[Context reset]
-    A[Superpowers: TDD + subagents]
+  subgraph phase4 ["Phase 4: Implement"]
+    C["Context reset"]
+    A["Superpowers: TDD + subagents"]
     C --> A
   end
-  subgraph phase5 [Phase 5: Finish]
-    R[code review + verify]
-    F[finishing branch]
-    AR[/opsx:archive]
+  subgraph phase5 ["Phase 5: Finish"]
+    R["Code review + verify"]
+    F["Finishing branch"]
+    AR["OpenSpec: archive"]
     R --> F --> AR
   end
   phase1 --> phase2 --> phase3 --> phase4 --> phase5
