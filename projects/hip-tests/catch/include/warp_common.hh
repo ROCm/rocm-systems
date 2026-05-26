@@ -648,7 +648,7 @@ void runTestReduce(int iteration, Reduce reduce)
   LinearAllocGuard<T> input, d_input;
   LinearAllocGuard<unsigned long long> masks, d_masks;
   Op<T> op;
-  std::string opName = opToString<T, Op>();
+  std::string opName = opToString<T, Op<T>>();
   int numReduce = 0;
 
   genRandomBuffers(d_input, input, dist, gen, kNumReduces * wavefrontSize);
