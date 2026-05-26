@@ -50,12 +50,12 @@ namespace
 {
 using ::rocprofiler::agent::update_agent_runtime_visibility;
 
-using NTSTATUS                       = int32_t;
-static constexpr NTSTATUS kNtSuccess = 0;
+using NTSTATUS                = int32_t;
+constexpr NTSTATUS kNtSuccess = 0;
 
-using D3DKMT_HANDLE             = uint32_t;
-using DXC_WCHAR                 = wchar_t;
-static constexpr size_t kMaxStr = 260;
+using D3DKMT_HANDLE      = uint32_t;
+using DXC_WCHAR          = wchar_t;
+constexpr size_t kMaxStr = 260;
 
 struct DxcLuid
 {
@@ -69,7 +69,7 @@ union DxcEnumAdaptersFilter
     {
         uint64_t IncludeComputeOnly : 1;
         uint64_t IncludeDisplayOnly : 1;
-        uint64_t Reserved : 62;
+        uint64_t Reserved           : 62;
     } bits;
     uint64_t Value;
 };
@@ -372,11 +372,8 @@ DxgProvider::enumerate()
         }
 
         DxcAdapterAddress addr{};
-        query_one(m_impl->query_adapter,
-                  a.hAdapter,
-                  DXC_KMTQAITYPE_ADAPTERADDRESS,
-                  &addr,
-                  sizeof(addr));
+        query_one(
+            m_impl->query_adapter, a.hAdapter, DXC_KMTQAITYPE_ADAPTERADDRESS, &addr, sizeof(addr));
 
         DxcAdapterRegistryInfo reg{};
         query_one(m_impl->query_adapter,
@@ -386,11 +383,8 @@ DxgProvider::enumerate()
                   sizeof(reg));
 
         DxcSegmentSizeInfo seg{};
-        query_one(m_impl->query_adapter,
-                  a.hAdapter,
-                  DXC_KMTQAITYPE_GETSEGMENTSIZE,
-                  &seg,
-                  sizeof(seg));
+        query_one(
+            m_impl->query_adapter, a.hAdapter, DXC_KMTQAITYPE_GETSEGMENTSIZE, &seg, sizeof(seg));
 
         auto info                 = common::init_public_api_struct(rocprofiler_agent_t{});
         info.type                 = ROCPROFILER_AGENT_TYPE_GPU;
@@ -400,10 +394,10 @@ DxgProvider::enumerate()
         info.logical_node_type_id = gpu_count++;
         ++logical;
 
-        info.vendor_id = devids.DeviceIds.VendorID;
-        info.device_id = devids.DeviceIds.DeviceID;
-        info.location_id =
-            ((addr.BusNumber & 0xFF) << 8) | ((addr.DeviceNumber & 0x1F) << 3) | (addr.FunctionNumber & 0x7);
+        info.vendor_id   = devids.DeviceIds.VendorID;
+        info.device_id   = devids.DeviceIds.DeviceID;
+        info.location_id = ((addr.BusNumber & 0xFF) << 8) | ((addr.DeviceNumber & 0x1F) << 3) |
+                           (addr.FunctionNumber & 0x7);
         info.domain         = 0;
         info.local_mem_size = seg.DedicatedVideoMemorySize;
         info.num_xcc        = 1;

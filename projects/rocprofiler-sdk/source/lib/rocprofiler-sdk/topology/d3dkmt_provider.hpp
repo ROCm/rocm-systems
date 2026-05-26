@@ -44,11 +44,11 @@ private:
     // All bodies are #ifdef _WIN32 guarded in the .cpp.
     struct AdapterRecord;  // opaque; defined in .cpp under _WIN32
 
-    bool           enumerate_adapters_(std::vector<AdapterRecord>& out);
-    bool           query_node_metadata_(AdapterRecord& adapter);
-    bool           query_umd_private_(AdapterRecord& adapter);
-    bool           query_physical_adapter_(AdapterRecord& adapter);
-    unique_agent_t adapter_to_agent_(const AdapterRecord& adapter, uint64_t logical_node_id);
+    static bool           enumerate_adapters_(std::vector<AdapterRecord>& out);
+    static bool           query_node_metadata_(AdapterRecord& adapter);
+    static bool           query_umd_private_(AdapterRecord& adapter);
+    static bool           query_physical_adapter_(AdapterRecord& adapter);
+    static unique_agent_t adapter_to_agent_(const AdapterRecord& adapter, uint64_t logical_node_id);
 };
 }  // namespace topology
 }  // namespace rocprofiler

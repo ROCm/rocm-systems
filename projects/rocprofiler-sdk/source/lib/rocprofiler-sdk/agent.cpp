@@ -291,7 +291,6 @@ get_topology_provider()
     return *_p;
 }
 
-
 auto&
 get_agent_topology()
 {
