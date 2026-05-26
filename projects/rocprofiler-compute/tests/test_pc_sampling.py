@@ -4,8 +4,8 @@
 import os
 from pathlib import Path
 
+import common
 import pytest
-import test_utils
 
 config = {}
 config["app_1"] = ["./tests/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
@@ -16,7 +16,7 @@ config["METRIC_COMPARE"] = False
 
 num_devices = 1
 
-soc = test_utils.gpu_soc()
+_, soc = common.gpu_soc()
 
 if soc is None:
     pytest.skip("GPU not supported", allow_module_level=True)
@@ -48,20 +48,17 @@ def is_pc_sampling_not_supported(output):
     return "Given PC sampling configuration is not supported" in output
 
 
-def skip_unsupported_pc_sampling_soc(is_stochastic=False):
-    unsupported_socs = {"MI100", "STRIX_HALO"}
-    if is_stochastic:
-        unsupported_socs.add("MI200")
-
-    if soc in unsupported_socs:
-        pytest.skip(f"PC sampling is not supported on {soc}")
+def _skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir):
+    if is_pc_sampling_not_supported(f"{stdout}\n{stderr}"):
+        common.clean_output_dir(config["cleanup"], workload_dir)
+        pytest.skip("PC sampling is not supported")
 
 
 def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute):
     """
     Test that PC sampling works with --block 21 and --pc-sampling-method host_trap.
     """
-    skip_unsupported_pc_sampling_soc()
+    common.skip_unsupported_pc_sampling_soc()
 
     options = [
         "--block",
@@ -72,39 +69,7 @@ def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute):
         "256",
     ]
 
-    workload_dir = test_utils.get_output_dir()
-
-    _ = binary_handler_profile_rocprof_compute(
-        config,
-        workload_dir,
-        options,
-        check_success=True,
-        roof=False,
-        app_name="app_mat_mul_max",
-    )
-
-    file_dict = test_utils.check_non_pmc_files(workload_dir, num_devices, 1)
-    assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_HOST_TRAP_FILES)
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute):
-    """
-    Test that PC sampling works with --block 21 and --pc-sampling-method stochastic.
-    """
-    skip_unsupported_pc_sampling_soc(is_stochastic=True)
-
-    options = [
-        "--block",
-        "21",
-        "--pc-sampling-method",
-        "stochastic",
-        "--pc-sampling-interval",
-        "1048576",
-    ]
-
-    workload_dir = test_utils.get_output_dir()
+    workload_dir = common.get_output_dir()
 
     code, stdout, stderr = binary_handler_profile_rocprof_compute(
         config,
@@ -116,16 +81,49 @@ def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute):
         app_name="app_mat_mul_max",
     )
 
-    output = f"{stdout}\n{stderr}"
-    if is_pc_sampling_not_supported(output):
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
-        pytest.skip("PC sampling is not supported")
+    _skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
 
     assert code == 0
-    file_dict = test_utils.check_non_pmc_files(workload_dir, num_devices, 1)
+    file_dict = common.check_non_pmc_files(workload_dir, num_devices, 1)
+    assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_HOST_TRAP_FILES)
+
+    common.clean_output_dir(config["cleanup"], workload_dir)
+
+
+def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute):
+    """
+    Test that PC sampling works with --block 21 and --pc-sampling-method stochastic.
+    """
+    common.skip_unsupported_pc_sampling_soc(is_stochastic=True)
+
+    options = [
+        "--block",
+        "21",
+        "--pc-sampling-method",
+        "stochastic",
+        "--pc-sampling-interval",
+        "1048576",
+    ]
+
+    workload_dir = common.get_output_dir()
+
+    code, stdout, stderr = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=False,
+        capture_output=True,
+        roof=False,
+        app_name="app_mat_mul_max",
+    )
+
+    _skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
+
+    assert code == 0
+    file_dict = common.check_non_pmc_files(workload_dir, num_devices, 1)
     assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_STOCHASTIC_FILES)
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+    common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 def test_multi_rank_pc_sampling_only(
@@ -135,11 +133,12 @@ def test_multi_rank_pc_sampling_only(
     Test that no multi-rank warning is printed when running with only
     --block 21 (PC sampling only mode requires a single pass) with multi-rank.
     """
-    skip_unsupported_pc_sampling_soc()
+    common.skip_unsupported_pc_sampling_soc()
 
     monkeypatch.setenv("OMPI_COMM_WORLD_RANK", "0")
+    monkeypatch.setenv("OMPI_COMM_WORLD_SIZE", "2")
 
-    workload_dir = test_utils.get_output_dir()
+    workload_dir = common.get_output_dir()
 
     options = [
         "--block",
@@ -159,10 +158,12 @@ def test_multi_rank_pc_sampling_only(
         check_success=False,
     )
 
+    _skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
+
     output = stdout + stderr
     assert "Multi-rank application detected" not in output
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+    common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 def test_multi_rank_warning_pc_sampling_with_counters(
@@ -173,11 +174,12 @@ def test_multi_rank_warning_pc_sampling_with_counters(
     and another block (PC sampling with counters mode requires multiple passes)
     with multi-rank.
     """
-    skip_unsupported_pc_sampling_soc()
+    common.skip_unsupported_pc_sampling_soc()
 
     monkeypatch.setenv("OMPI_COMM_WORLD_RANK", "0")
+    monkeypatch.setenv("OMPI_COMM_WORLD_SIZE", "2")
 
-    workload_dir = test_utils.get_output_dir()
+    workload_dir = common.get_output_dir()
 
     options = [
         "--block",
@@ -198,6 +200,8 @@ def test_multi_rank_warning_pc_sampling_with_counters(
         check_success=False,
     )
 
+    _skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
+
     output = stdout + stderr
     assert "Multi-rank application detected" in output
     assert "Application replay mode" in output
@@ -205,7 +209,7 @@ def test_multi_rank_warning_pc_sampling_with_counters(
     assert "--block" not in output
     assert "--set" in output
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+    common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 def test_pc_sampling_profile_then_analyze(
@@ -217,7 +221,7 @@ def test_pc_sampling_profile_then_analyze(
     End-to-end: profile with PC sampling (host_trap), then
     run analysis on the profiling output.
     """
-    skip_unsupported_pc_sampling_soc()
+    common.skip_unsupported_pc_sampling_soc()
 
     options = [
         "--block",
@@ -228,18 +232,22 @@ def test_pc_sampling_profile_then_analyze(
         "256",
     ]
 
-    workload_dir = test_utils.get_output_dir()
+    workload_dir = common.get_output_dir()
 
-    _ = binary_handler_profile_rocprof_compute(
+    code, stdout, stderr = binary_handler_profile_rocprof_compute(
         config,
         workload_dir,
         options,
-        check_success=True,
+        check_success=False,
+        capture_output=True,
         roof=False,
         app_name="app_mat_mul_max",
     )
 
-    file_dict = test_utils.check_non_pmc_files(workload_dir, num_devices, 1)
+    _skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
+
+    assert code == 0
+    file_dict = common.check_non_pmc_files(workload_dir, num_devices, 1)
     assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_HOST_TRAP_FILES)
 
     code = binary_handler_analyze_rocprof_compute(
@@ -291,7 +299,7 @@ def test_pc_sampling_profile_then_analyze(
     assert "0.2 Dispatch List" in captured.out
     assert "21. PC Sampling" in captured.out
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+    common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 def test_pc_sampling_with_sol_block(binary_handler_profile_rocprof_compute):
@@ -299,7 +307,7 @@ def test_pc_sampling_with_sol_block(binary_handler_profile_rocprof_compute):
     Test that PC sampling works with --block 21 and --block 2
     (PC sampling with counter collection)
     """
-    skip_unsupported_pc_sampling_soc()
+    common.skip_unsupported_pc_sampling_soc()
 
     options = [
         "--block",
@@ -311,25 +319,25 @@ def test_pc_sampling_with_sol_block(binary_handler_profile_rocprof_compute):
         "256",
     ]
 
-    workload_dir = test_utils.get_output_dir()
+    workload_dir = common.get_output_dir()
 
-    _ = binary_handler_profile_rocprof_compute(
+    code, stdout, stderr = binary_handler_profile_rocprof_compute(
         config,
         workload_dir,
         options,
-        check_success=True,
+        check_success=False,
+        capture_output=True,
         roof=False,
         app_name="app_mat_mul_max",
     )
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
+    _skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
+
+    assert code == 0
+    file_dict = common.check_csv_files(workload_dir, num_devices, 1)
     assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_HOST_TRAP_FILES)
 
-    assert test_utils.check_file_pattern(
-        "- '21'", f"{workload_dir}/profiling_config.yaml"
-    )
-    assert test_utils.check_file_pattern(
-        "- '2'", f"{workload_dir}/profiling_config.yaml"
-    )
+    assert common.check_file_pattern("- '21'", f"{workload_dir}/profiling_config.yaml")
+    assert common.check_file_pattern("- '2'", f"{workload_dir}/profiling_config.yaml")
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+    common.clean_output_dir(config["cleanup"], workload_dir)

@@ -640,6 +640,16 @@ WriteInterceptor(const void* packets,
 
             for(const auto& pkt_injection : _packet_data.instrumentation_packets)
             {
+                if(!pkt_injection.first->before_krn_barrier_pkt.empty())
+                {
+                    for(const auto& pkt : pkt_injection.first->before_krn_barrier_pkt)
+                    {
+                        transformed_packets.emplace_back(pkt);
+                    }
+                }
+            }
+            for(const auto& pkt_injection : _packet_data.instrumentation_packets)
+            {
                 for(const auto& pkt : pkt_injection.first->before_krn_pkt)
                 {
                     inserted_before = true;
@@ -821,7 +831,7 @@ Queue::Queue(const AgentCache&  agent,
 
     if(!context::get_registered_contexts([](const context::context* ctx) {
             return (ctx->dispatch_counter_collection || ctx->device_counter_collection ||
-                    ctx->dispatch_thread_trace || ctx->device_thread_trace);
+                    ctx->dispatch_spm || ctx->dispatch_thread_trace || ctx->device_thread_trace);
         }).empty())
     {
         CHECK(_agent.cpu_pool().handle != 0);

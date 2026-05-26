@@ -285,8 +285,7 @@ static void AllocateHmmMemory(int flag, int device) {
 HIP_TEST_CASE(Unit_hipMallocManaged_MultiThread) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
   IfTestPassed = true;
@@ -339,19 +338,17 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiThread) {
 HIP_TEST_CASE(Unit_hipMallocManaged_MGpuMThread) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
   IfTestPassed = true;
   int Ngpus = 0;
   HIP_CHECK(hipGetDeviceCount(&Ngpus));
   if (Ngpus < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
-  int InitVal = 123, *Hmm1 = NULL, NumElms = 4096 * 4;
+  int InitVal = 123, *Hmm1 = NULL, NumElms = isQuickLevel() ? 4096 : 4096 * 4;
   HIP_CHECK(hipMallocManaged(&Hmm1, (NumElms * sizeof(int))));
   for (int i = 0; i < NumElms; ++i) {
     Hmm1[i] = InitVal;
@@ -382,13 +379,12 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MGpuMThread) {
 HIP_TEST_CASE(Unit_hipMallocManaged_MultiKrnlComnHmm) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
   IfTestPassed = true;
 
-  int InitVal = 123, *Hmm = NULL, NumElms = 1024 * 4, TotThrds = 2;
+  int InitVal = 123, *Hmm = NULL, NumElms = isQuickLevel() ? 4096 : 1024 * 4, TotThrds = 2;
   int HmmMem2 = 0, *HstPtr = nullptr;  //  to indicate the thread that
   //  hipMalloc() memory has to be used
   HstPtr = reinterpret_cast<int*>(new int[NumElms]);
@@ -417,12 +413,11 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiKrnlComnHmm) {
 HIP_TEST_CASE(Unit_hipMallocManaged_MultiKrnlComnMalloc) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
   IfTestPassed = true;
-  int InitVal = 123, *Dptr = NULL, NumElms = 4096 * 8, TotThrds = 2;
+  int InitVal = 123, *Dptr = NULL, NumElms = isQuickLevel() ? 4096 : 4096 * 8, TotThrds = 2;
   int* HstPtr = reinterpret_cast<int*>(new int[NumElms]);
   HIP_CHECK(hipMalloc(&Dptr, (NumElms * sizeof(int))));
   for (int i = 0; i < NumElms; ++i) {
@@ -448,13 +443,12 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiKrnlComnMalloc) {
 HIP_TEST_CASE(Unit_hipMallocManaged_MultiThrdMultiStrm) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
   IfTestPassed = true;
 
-  int NumElms = 4096 * 4;
+  int NumElms = isQuickLevel() ? 4096 : 4096 * 4;
   int *Hmm1 = NULL, TotlThrds = 4, InitVal = 123;
   int HmmMem = 1;  //  to indicate the thread that Hmm memory need to be
   //  used inside it
@@ -482,12 +476,11 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiThrdMultiStrm) {
 HIP_TEST_CASE(Unit_hipMallocManaged_TwoKrnlsComnHmmMem) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
   IfTestPassed = true;
-  int InitVal = 123, *Dptr = NULL, NumElms = 4096 * 4, TotThrds = 2;
+  int InitVal = 123, *Dptr = NULL, NumElms = isQuickLevel() ? 4096 : 4096 * 4, TotThrds = 2;
   int* HstPtr = reinterpret_cast<int*>(new int[NumElms]);
   HIP_CHECK(hipMalloc(&Dptr, (NumElms * sizeof(int))));
   for (int i = 0; i < NumElms; ++i) {

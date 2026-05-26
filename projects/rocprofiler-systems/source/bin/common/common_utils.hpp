@@ -5,11 +5,13 @@
 
 #include "common/preset_registry.hpp"
 
+#include <functional>
 #include <iostream>
 #include <map>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -18,41 +20,34 @@ namespace rocprofsys
 namespace common_utils
 {
 /**
- * Thrown by argument actions that require immediate program termination
- * (e.g., --list-presets, --explain, --help). Caught at the parse_args
- * call site to exit gracefully with proper RAII cleanup.
- */
-struct cli_done
-{
-    int exit_code;
-    explicit cli_done(int code) noexcept
-    : exit_code(code)
-    {}
-};
-
-/**
  * Result of translating command-line arguments for the argument parser.
  * Owns any translated strings so their lifetime covers the parse_args call.
  */
 struct translated_args
 {
     std::vector<char*>       argv_ptrs;  // non-owning pointers for parser
-    std::vector<char*>       command;    // args after "--"
+    std::vector<std::string> command;    // args after "--"
     std::vector<std::string> owned;      // RAII ownership of translated strings
 };
 
 /**
  * Translate legacy preset flags (e.g., --balanced -> --preset=balanced)
+ * and deprecated flag aliases (e.g., --cputime -> --sample-cputime)
  * and split argv into parser args and command args (separated by "--").
+ *
+ * Also maps old flag names to new canonical names.
+ * Flags with '=' values (e.g. --freq=100) are handled by splitting on '=' before lookup.
  */
 [[nodiscard]] translated_args
-translate_arguments(int argc, char** argv, preset_registry& registry);
+translate_arguments(
+    int argc, char** argv, preset_registry& registry,
+    const std::unordered_map<std::string, std::string>& deprecated_flags = {});
 
 /**
  * Export configuration to JSON file or stdout.
  */
 void
-export_config(const std::vector<char*>&              current_env,
+export_config(const std::vector<std::string>&        current_env,
               const std::unordered_set<std::string>& initial_envs,
               const std::string& preset_name, std::string_view tool_name,
               const std::string& output_file = "");
@@ -62,10 +57,8 @@ export_config(const std::vector<char*>&              current_env,
  * Called by both run and sample after argument parsing.
  */
 void
-run_post_parse_validation(std::string_view tool_name, std::string_view preset_name,
-                          bool gpu_enabled, bool rocm_enabled, bool cpu_enabled,
-                          bool parallel_enabled, int verbose_level,
-                          preset_registry& registry);
+run_post_parse_validation(std::string_view tool_name, struct domain_flag_state& state,
+                          int verbose_level);
 
 using help_group_names = std::vector<std::string>;
 using help_topic_map   = std::map<std::string, help_group_names>;
@@ -85,15 +78,53 @@ const domain_help_map&
 get_domain_help_map();
 
 void
-print_compact_help(std::string_view tool_name, std::ostream& os = std::cout);
+print_compact_help(std::string_view tool_name, std::ostream& out = std::cout);
 
-bool
+[[nodiscard]] bool
 print_help_for_topic(const std::string& captured_help, std::string_view topic,
-                     std::string_view tool_name, std::ostream& os = std::cout);
+                     std::string_view tool_name, std::ostream& out = std::cout);
 
-bool
+[[nodiscard]] bool
 print_help_for_domain(const std::string& captured_help, std::string_view domain,
-                      std::string_view tool_name, std::ostream& os = std::cout);
+                      std::string_view tool_name, std::ostream& out = std::cout);
+
+/**
+ * Build a NUL-terminated `char*` array suitable for execvpe() / argv-style APIs.
+ *
+ * Returned pointers are non-owning and reference the internal buffers of `src`
+ * via `std::string::data()`. The caller MUST keep `src` alive for the whole
+ * lifetime of the returned vector and MUST NOT mutate `src` (any push_back /
+ * resize that reallocates invalidates every pointer). Non-const reference is
+ * required because `data()` only returns a writable pointer on a non-const
+ * string.
+ */
+[[nodiscard]] std::vector<char*>
+to_c_argv(std::vector<std::string>& src);
+
+void
+print_command(const std::vector<std::string>& argv, std::string_view prefix = {});
+
+namespace detail
+{
+void
+print_environment_impl(const std::vector<std::string>&              env,
+                       const std::function<bool(std::string_view)>& is_updated,
+                       bool include_general_vars, std::string_view prefix);
+}  // namespace detail
+
+template <typename UpdatedEnvsT>
+void
+print_environment(const std::vector<std::string>& env, const UpdatedEnvsT& updated_envs,
+                  bool include_general_vars = false, std::string_view prefix = {})
+{
+    detail::print_environment_impl(
+        env,
+        [&](std::string_view key) {
+            // Both std::string and std::string_view sets accept string_view in count().
+            return updated_envs.count(typename UpdatedEnvsT::key_type{ key }) > 0;
+        },
+        include_general_vars, prefix);
+}
 
 template <typename ParserT>
 std::string
@@ -108,23 +139,14 @@ capture_help_text(ParserT& parser)
 
 /**
  * Shared help dispatch: handles --help (compact), --help=<topic>, --help=all.
- * @throws cli_done after printing help output.
+ * Returns the exit code the caller should use to terminate the program.
  */
 template <typename ParserT>
-void
+[[nodiscard]] int
 dispatch_help(ParserT& parser, std::string_view tool_name, int exit_code)
 {
     std::string topic;
-    if(parser.exists("help"))
-    {
-        try
-        {
-            topic = parser.template get<std::string>("help");
-        } catch(...)
-        {
-            // no value provided — bare --help
-        }
-    }
+    if(parser.exists("help")) topic = parser.template get<std::string>("help");
 
     if(topic.empty())
     {
@@ -145,7 +167,7 @@ dispatch_help(ParserT& parser, std::string_view tool_name, int exit_code)
                       << "Available topics (use --help=<topic>):\n";
 
             std::cerr << "\n  Group topics:\n";
-            for(const auto& [name, _] : get_help_topic_map())
+            for(const auto& [name, groups] : get_help_topic_map())
                 std::cerr << "    " << name << "\n";
 
             std::cerr << "\n  Domain topics:\n";
@@ -155,7 +177,7 @@ dispatch_help(ParserT& parser, std::string_view tool_name, int exit_code)
             std::cerr << "\n  --help=all  Show all options\n";
         }
     }
-    throw cli_done{ exit_code };
+    return exit_code;
 }
 
 }  // namespace common_utils

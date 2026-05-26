@@ -135,7 +135,7 @@ else()
     # If we didn't find a suitable version on the system, then download one from the web
     rocprofiler_systems_add_cache_option(
         ELFUTILS_DOWNLOAD_VERSION "Version of elfutils to download and install" STRING
-        "0.188"
+        "0.195"
     )
     set(ELFUTILS_DOWNLOAD_VERSION ${ElfUtils_DOWNLOAD_VERSION})
 
@@ -177,6 +177,27 @@ else()
     file(MAKE_DIRECTORY "${_eu_root}/lib")
     file(MAKE_DIRECTORY "${_eu_root}/include")
 
+    # Backport elfutils commit 7508696d (released in 0.192) to fix GCC 15
+    # -Werror=unterminated-string-initialization in the i386/x86_64 register
+    # tables. Only applied to versions older than 0.192 where the upstream
+    # fix is missing. The patch invocation is wrapped in
+    # apply_patch_idempotent.cmake because CMake regenerates
+    # *-patch-info.txt on every reconfigure, retriggering the patch step
+    # against already-patched source - vanilla `patch` aborts in that case.
+    set(_eu_patch_args)
+    if(ELFUTILS_DOWNLOAD_VERSION VERSION_LESS 0.192)
+        find_program(PATCH_EXECUTABLE NAMES patch REQUIRED)
+        set(_eu_patch_args
+            PATCH_COMMAND
+            ${CMAKE_COMMAND}
+            -DSRC=<SOURCE_DIR>
+            -DPATCH=${CMAKE_CURRENT_LIST_DIR}/elfutils-0.188-gcc15-regs.patch
+            -DPATCH_EXE=${PATCH_EXECUTABLE}
+            -P
+            ${CMAKE_CURRENT_LIST_DIR}/apply_patch_idempotent.cmake
+        )
+    endif()
+
     include(ExternalProject)
     ExternalProject_Add(
         rocprofiler-systems-elfutils-build
@@ -186,10 +207,12 @@ else()
             "https://sourceware.org/elfutils/ftp/${ELFUTILS_DOWNLOAD_VERSION}/elfutils-${ELFUTILS_DOWNLOAD_VERSION}.tar.bz2"
             "https://mirrors.kernel.org/sourceware/elfutils/${ELFUTILS_DOWNLOAD_VERSION}/elfutils-${ELFUTILS_DOWNLOAD_VERSION}.tar.bz2"
         BUILD_IN_SOURCE 1
+        ${_eu_patch_args}
         CONFIGURE_COMMAND
-            ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER} CFLAGS=-fPIC\ -O3
-            CXX=${CMAKE_CXX_COMPILER} CXXFLAGS=-fPIC\ -O3
-            [=[LDFLAGS=-Wl,-rpath='$$ORIGIN']=] <SOURCE_DIR>/configure
+            ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER}
+            CFLAGS=-fPIC\ -O3\ -Wno-error=maybe-uninitialized CXX=${CMAKE_CXX_COMPILER}
+            CXXFLAGS=-fPIC\ -O3\ -Wno-error=maybe-uninitialized
+            [=[LDFLAGS=-Wl,-rpath='$$ORIGIN' -pthread]=] <SOURCE_DIR>/configure
             --enable-install-elfh --prefix=${_eu_root} --disable-libdebuginfod
             --disable-debuginfod --enable-thread-safety --disable-nls
             ${ElfUtils_CONFIG_OPTIONS} --libdir=${_eu_root}/lib
