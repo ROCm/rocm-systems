@@ -220,23 +220,6 @@ to_string (amd_dbgapi_register_id_t register_id)
 
 template <>
 std::string
-to_string (amd_dbgapi_address_class_id_t address_class_id)
-{
-  if (address_class_id == AMD_DBGAPI_ADDRESS_CLASS_NONE)
-    return "ADDRESS_CLASS_NONE";
-
-  std::string str
-    = string_printf ("address_class_%" PRId64, address_class_id.handle);
-
-  if (const address_class_t *address_class = find (address_class_id);
-      address_class)
-    str += " <" + address_class->name () + ">";
-
-  return str;
-}
-
-template <>
-std::string
 to_string (amd_dbgapi_address_space_id_t address_space_id)
 {
   if (address_space_id == AMD_DBGAPI_ADDRESS_SPACE_NONE)
@@ -341,7 +324,6 @@ to_string (amd_dbgapi_status_t status)
       CASE (STATUS_ERROR_INVALID_REGISTER_CLASS_ID);
       CASE (STATUS_ERROR_INVALID_REGISTER_ID);
       CASE (STATUS_ERROR_INVALID_LANE_ID);
-      CASE (STATUS_ERROR_INVALID_ADDRESS_CLASS_ID);
       CASE (STATUS_ERROR_INVALID_ADDRESS_SPACE_ID);
       CASE (STATUS_ERROR_MEMORY_ACCESS);
       CASE (STATUS_ERROR_INVALID_ADDRESS_SPACE_CONVERSION);
@@ -1403,38 +1385,6 @@ to_string (amd_dbgapi_register_class_state_t register_class_state)
 
 template <>
 std::string
-to_string (amd_dbgapi_address_class_info_t address_class_info)
-{
-  switch (address_class_info)
-    {
-      CASE (ADDRESS_CLASS_INFO_NAME);
-      CASE (ADDRESS_CLASS_INFO_ADDRESS_SPACE);
-      CASE (ADDRESS_CLASS_INFO_DWARF);
-    }
-  return to_string (make_hex (address_class_info));
-}
-
-template <>
-std::string
-to_string (detail::query_ref<amd_dbgapi_address_class_info_t> ref)
-{
-  auto [query, value] = ref;
-  switch (query)
-    {
-    case AMD_DBGAPI_ADDRESS_CLASS_INFO_NAME:
-      return to_string (make_ref (static_cast<char *const *> (value)));
-    case AMD_DBGAPI_ADDRESS_CLASS_INFO_ADDRESS_SPACE:
-      return to_string (
-        make_ref (static_cast<const amd_dbgapi_address_space_id_t *> (value)));
-    case AMD_DBGAPI_ADDRESS_CLASS_INFO_DWARF:
-      return to_string (make_ref (static_cast<const uint64_t *> (value)));
-    }
-  fatal_error ("unhandled amd_dbgapi_address_class_info_t query (%s)",
-               to_cstring (query));
-}
-
-template <>
-std::string
 to_string (amd_dbgapi_address_space_access_t address_space_access)
 {
   switch (address_space_access)
@@ -1500,18 +1450,6 @@ to_string (amd_dbgapi_segment_address_dependency_t address_dependency)
       CASE (SEGMENT_ADDRESS_DEPENDENCE_PROCESS);
     }
   return to_string (make_hex (address_dependency));
-}
-
-template <>
-std::string
-to_string (amd_dbgapi_address_class_state_t address_class_state)
-{
-  switch (address_class_state)
-    {
-      CASE (ADDRESS_CLASS_STATE_NOT_MEMBER);
-      CASE (ADDRESS_CLASS_STATE_MEMBER);
-    }
-  return to_string (make_hex (address_class_state));
 }
 
 template <>

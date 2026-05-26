@@ -44,8 +44,7 @@ namespace detail
    interface.
  */
 static_assert (
-  sizeof (amd_dbgapi_address_class_state_t) == sizeof (uint32_t)
-    && sizeof (amd_dbgapi_address_space_access_t) == sizeof (uint32_t)
+   sizeof (amd_dbgapi_address_space_access_t) == sizeof (uint32_t)
     && sizeof (amd_dbgapi_agent_state_t) == sizeof (uint32_t)
     && sizeof (amd_dbgapi_breakpoint_action_t) == sizeof (uint32_t)
     && sizeof (amd_dbgapi_changed_t) == sizeof (uint32_t)

@@ -175,9 +175,6 @@ amd_dbgapi_get_status_string (amd_dbgapi_status_t status,
       case AMD_DBGAPI_STATUS_ERROR_INVALID_LANE_ID:
         string = "The lane handle is invalid";
         break;
-      case AMD_DBGAPI_STATUS_ERROR_INVALID_ADDRESS_CLASS_ID:
-        string = "The address class handle is invalid";
-        break;
       case AMD_DBGAPI_STATUS_ERROR_INVALID_ADDRESS_SPACE_ID:
         string = "The address space handle is invalid";
         break;

@@ -151,7 +151,6 @@ private:
   std::string const m_target_triple;
 
   std::tuple<handle_object_set_t<address_space_t>,
-             handle_object_set_t<address_class_t>,
              handle_object_set_t<register_class_t>>
     m_handle_object_sets{};
 
@@ -301,10 +300,6 @@ public:
 
   virtual bool
   is_address_space_supported (const address_space_t &address_space) const
-    = 0;
-
-  virtual bool
-  is_address_class_supported (const address_class_t &address_class) const
     = 0;
 
   virtual std::vector<agent_t::aperture_t>

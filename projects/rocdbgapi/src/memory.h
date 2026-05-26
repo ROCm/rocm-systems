@@ -177,8 +177,6 @@ SPECIALIZE (global_address_t);
 namespace amd::dbgapi
 {
 
-class address_class_t;
-
 class address_space_t
   : public detail::handle_object<amd_dbgapi_address_space_id_t>
 {
@@ -244,12 +242,6 @@ public:
     return utils::bit_mask<amd_dbgapi_segment_address_t> (0,
                                                           address_size () - 1);
   }
-
-  bool
-  address_is_in_address_class (const wave_t &wave,
-                               amd_dbgapi_lane_id_t lane_id,
-                               amd_dbgapi_segment_address_t segment_address,
-                               const address_class_t &address_class) const;
 
   virtual amd_dbgapi_segment_address_dependency_t
   address_dependency (amd_dbgapi_segment_address_t address) const
@@ -554,32 +546,6 @@ struct monotonic_counter_start_t<amd_dbgapi_address_space_id_t>
       static_cast<std::underlying_type_t<address_space_t::reserved_ids_t>> (
         address_space_t::reserved_ids_t::next_non_reserved_id)>
 {
-};
-
-class address_class_t
-  : public detail::handle_object<amd_dbgapi_address_class_id_t>
-{
-private:
-  std::string const m_name;
-  uint64_t const m_dwarf_value;
-  const address_space_t &m_address_space;
-
-public:
-  address_class_t (amd_dbgapi_address_class_id_t address_class_id,
-                   std::string name, uint64_t dwarf_value,
-                   const address_space_t &address_space)
-    : handle_object (address_class_id), m_name (std::move (name)),
-      m_dwarf_value (dwarf_value), m_address_space (address_space)
-  {
-  }
-
-public:
-  uint64_t dwarf_value () const { return m_dwarf_value; }
-  const std::string &name () const { return m_name; }
-  const address_space_t &address_space () const { return m_address_space; }
-
-  void get_info (amd_dbgapi_address_class_info_t query, size_t value_size,
-                 void *value) const;
 };
 
 template <typename AddressType> class memory_cache_t

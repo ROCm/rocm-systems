@@ -292,9 +292,6 @@ public:
   bool is_address_space_supported (
     const address_space_t &address_space) const override;
 
-  bool is_address_class_supported (
-    const address_class_t &address_class) const override;
-
   std::vector<os_watch_id_t>
   triggered_watchpoints (const wave_t &wave) const override;
 
@@ -633,13 +630,6 @@ amdgcn_architecture_t::is_address_space_supported (
 {
   return address_space == address_space_t::global ()
          || this->find (address_space.id ()) != nullptr;
-}
-
-bool
-amdgcn_architecture_t::is_address_class_supported (
-  const address_class_t &address_class) const
-{
-  return this->find (address_class.id ()) != nullptr;
 }
 
 std::vector<os_watch_id_t>
@@ -2586,21 +2576,11 @@ gfx9_architecture_t::gfx9_architecture_t (elf_amdgpu_machine_t e_machine,
   /* Create address spaces.  */
 
   create<agent_address_space_t> ("agent");
-  auto &local = create<local_address_space_t> ("local");
-  auto &private_lane = create<private_swizzled_address_space_t> (
+  create<local_address_space_t> ("local");
+  create<private_swizzled_address_space_t> (
     "private_lane", /* interleave_size  */ sizeof (uint32_t));
   create<private_unswizzled_address_space_t> ("private_wave");
-  auto &generic = create<generic_address_space_t> ("generic");
-
-  /* Create address classes.  */
-
-  create<address_class_t> ("none", DW_ADDR_none, generic);
-  create<address_class_t> ("global", DW_ADDR_LLVM_global,
-                           address_space_t::global ());
-  create<address_class_t> ("constant", DW_ADDR_LLVM_constant,
-                           address_space_t::global ());
-  create<address_class_t> ("group", DW_ADDR_LLVM_group, local);
-  create<address_class_t> ("private", DW_ADDR_LLVM_private, private_lane);
+  create<generic_address_space_t> ("generic");
 
   /* Create register classes.  */
 

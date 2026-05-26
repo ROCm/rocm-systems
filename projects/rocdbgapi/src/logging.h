@@ -493,9 +493,6 @@ to_string (detail::parameter_t<detail::query_ref<T>, name, kind> param)
 }
 
 #define AMD_DBGAPI_TYPES_DO(F)                                                \
-  F (amd_dbgapi_address_class_id_t)                                           \
-  F (amd_dbgapi_address_class_info_t)                                         \
-  F (amd_dbgapi_address_class_state_t)                                        \
   F (amd_dbgapi_address_space_access_t)                                       \
   F (amd_dbgapi_address_space_id_t)                                           \
   F (amd_dbgapi_address_space_info_t)                                         \
@@ -558,7 +555,6 @@ to_string (detail::parameter_t<detail::query_ref<T>, name, kind> param)
   F (amd_dbgapi_workgroup_id_t)                                               \
   F (amd_dbgapi_workgroup_info_t)                                             \
   F (detail::query_ref<amd_dbgapi_agent_info_t>)                              \
-  F (detail::query_ref<amd_dbgapi_address_class_info_t>)                      \
   F (detail::query_ref<amd_dbgapi_address_space_info_t>)                      \
   F (detail::query_ref<amd_dbgapi_architecture_info_t>)                       \
   F (detail::query_ref<amd_dbgapi_breakpoint_info_t>)                         \
