@@ -27,6 +27,9 @@
 #include "hsakmt/linux/kfd_ioctl.h"
 #include "fmm.h"
 
+#ifndef MAX_RW_COUNT
+#define MAX_RW_COUNT 0x7ffff000
+#endif
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtAisReadWriteFile(void *MemoryAddress,
 					      HSAuint64 MemorySizeInBytes,
@@ -39,21 +42,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAisReadWriteFile(void *MemoryAddress,
 	CHECK_KFD_OPEN();
 
 	struct kfd_ioctl_ais_args args = {0};
-	uint64_t handle, size_offset = MemorySizeInBytes;
+	uint64_t handle, size_offset;
+	HSAuint64 transfer_size;
 	int ret;
 
-	/* Support is only for dGPUs */
-
-
-	if (!hsakmt_fmm_get_handle(&hsakmt_primary_kfd_ctx, MemoryAddress, &handle, &size_offset)) {
-		pr_err("Address/size out of range: %p/%lu\n", MemoryAddress, MemorySizeInBytes);
-		return HSAKMT_STATUS_INVALID_PARAMETER;
-	}
-
-	args.in.handle = handle;
-	args.in.fd = fd;
-	args.in.file_offset = file_offset;
-	args.in.size = MemorySizeInBytes;
 	if (AisFlags == HSA_AIS_WRITE)
 		args.in.op = KFD_IOC_AIS_WRITE;
 	else if (AisFlags == HSA_AIS_READ)
@@ -63,7 +55,22 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAisReadWriteFile(void *MemoryAddress,
 		return HSAKMT_STATUS_INVALID_PARAMETER;
 	}
 
+	transfer_size = MIN(MemorySizeInBytes, MAX_RW_COUNT);
+	size_offset = transfer_size;
+
+	if (!hsakmt_fmm_get_handle(&hsakmt_primary_kfd_ctx, MemoryAddress, &handle, &size_offset)) {
+		pr_err("Address/size out of range: %p/%lu\n", MemoryAddress, transfer_size);
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+	}
+
+	transfer_size = MIN(transfer_size, size_offset);
+
+	args.in.handle = handle;
+	args.in.fd = fd;
+	args.in.file_offset = file_offset;
+	args.in.size = transfer_size;
 	args.in.handle_offset = size_offset;
+
 	ret = hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_AIS_OP, &args);
 
 	if (SizeCopiedInBytes)
