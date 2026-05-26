@@ -1,0 +1,7 @@
+GPU_ID,GUID,Correlation_Id,Dispatch_ID,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,Scratch_Per_Workitem,Arch_VGPR,Accum_VGPR,SGPR,Kernel_Name,Start_Timestamp,End_Timestamp,Kernel_ID,Counter_Name,Counter_Value
+2,0001fa79-02f5-72f5-9304-2b77a03c07ba,1,0,1048576,256,0,0,8,0,16,"vecCopy(double*, double*, double*, int, int)",8497202364143885,8497202364164365,0,TA_BUFFER_WRITE_WAVEFRONTS_sum,0.0
+2,0001fa79-02f5-72f5-9304-2b77a03c07ba,1,0,1048576,256,0,0,8,0,16,"vecCopy(double*, double*, double*, int, int)",8497202364143885,8497202364164365,0,TA_DATA_STALLED_BY_TC_CYCLES_sum,498451.0
+2,0001fa79-02f5-72f5-9304-2b77a03c07ba,2,1,1048576,256,0,0,8,0,16,"vecCopy(double*, double*, double*, int, int)",8497202364465966,8497202364482606,0,TA_BUFFER_WRITE_WAVEFRONTS_sum,0.0
+2,0001fa79-02f5-72f5-9304-2b77a03c07ba,2,1,1048576,256,0,0,8,0,16,"vecCopy(double*, double*, double*, int, int)",8497202364465966,8497202364482606,0,TA_DATA_STALLED_BY_TC_CYCLES_sum,519043.0
+2,0001fa79-02f5-72f5-9304-2b77a03c07ba,3,2,1048576,256,0,0,8,0,16,"vecCopy(double*, double*, double*, int, int)",8497202364747408,8497202364764048,0,TA_BUFFER_WRITE_WAVEFRONTS_sum,0.0
+2,0001fa79-02f5-72f5-9304-2b77a03c07ba,3,2,1048576,256,0,0,8,0,16,"vecCopy(double*, double*, double*, int, int)",8497202364747408,8497202364764048,0,TA_DATA_STALLED_BY_TC_CYCLES_sum,473605.0
