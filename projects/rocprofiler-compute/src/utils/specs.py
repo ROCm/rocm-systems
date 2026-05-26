@@ -56,14 +56,17 @@ def run(cmd: list[str]) -> Optional[str]:
         )
     except FileNotFoundError as exc:
         console_error(f"Required command not found: {cmd_str} ({exc})")
+        return None
     except OSError as exc:
         console_error(f"Failed to execute command: {cmd_str} ({exc})")
+        return None
     if completed.returncode != 0:
         stderr = completed.stderr.strip()
         message = f"Command failed with exit code {completed.returncode}: {cmd_str}"
         if stderr:
             message += f". stderr: {stderr}"
         console_error(message)
+        return None
     return completed.stdout
 
 
