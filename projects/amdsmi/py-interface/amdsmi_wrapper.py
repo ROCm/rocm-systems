@@ -172,31 +172,49 @@ from pathlib import Path
 #    `_rocm_sdk_core/share/amd_smi/amdsmi`, libraries are in
 #    `_rocm_sdk_core/lib`.
 # 1. ROCM_HOME/ROCM_PATH environment variables
-#    - ROCM_HOME/lib
-#    - ROCM_PATH/lib (usually set to /opt/rocm/)
-# 2. Decided by the linker
-#    - LD_LIBRARY_PATH env var
-#    - defined path in /etc/ld.so.conf.d/
-# 3. Relative to amdsmi_wrapper.py
-#    - parent directory
-#    - current directory
-def find_smi_library():
-    err = OSError("Could not load libamd_smi.so")
+#    - only trusted when running as root
+def _get_versioned_library_locations(lib_dir, library_name):
+    prefix = f"{library_name}."
+    candidates = []
+
+    for candidate in lib_dir.glob(f"{library_name}.*"):
+        suffix = candidate.name[len(prefix):]
+        if suffix and all(part.isdigit() for part in suffix.split(".")):
+            candidates.append(candidate)
+
+    return sorted(candidates, key=lambda path: tuple(int(part) for part in path.name[len(prefix):].split(".")))
+
+
+def _get_trusted_library_dirs(rocm_root):
+    return [
+        rocm_root / "lib",
+        rocm_root / "lib64",
+    ]
+
+
+def _get_smi_library_locations():
+    rocm_root = Path(__file__).resolve().parents[3]
     possible_locations = []
-    # 0.
-    libamd_smi_path = Path(__file__).resolve().parent.parent.parent.parent / "lib/libamd_smi.so.26"
-    possible_locations.append(libamd_smi_path)
-    # 1.
+    for lib_dir in _get_trusted_library_dirs(rocm_root):
+        possible_locations.append(lib_dir / "libamd_smi.so")
+        possible_locations.extend(_get_versioned_library_locations(lib_dir, "libamd_smi.so"))
+
     rocm_path = os.getenv("ROCM_HOME", os.getenv("ROCM_PATH"))
     if rocm_path:
-        possible_locations.append(os.path.join(rocm_path, "lib/libamd_smi.so"))
-    # 2.
-    possible_locations.append("libamd_smi.so")
-    # 3.
-    libamd_smi_parent_dir = Path(__file__).resolve().parent / "libamd_smi.so"
-    libamd_smi_cwd = Path.cwd() / "libamd_smi.so"
-    possible_locations.append(libamd_smi_parent_dir)
-    possible_locations.append(libamd_smi_cwd)
+        effective_uid = os.geteuid() if hasattr(os, "geteuid") else None
+        normalized_rocm_path = os.path.abspath(rocm_path)
+        if effective_uid != 0 or normalized_rocm_path == "/opt" or normalized_rocm_path.startswith("/opt/"):
+            rocm_root = Path(normalized_rocm_path)
+            for lib_dir in _get_trusted_library_dirs(rocm_root):
+                possible_locations.append(lib_dir / "libamd_smi.so")
+                possible_locations.extend(_get_versioned_library_locations(lib_dir, "libamd_smi.so"))
+
+    return possible_locations
+
+
+def find_smi_library():
+    err = OSError("Could not load libamd_smi.so")
+    possible_locations = _get_smi_library_locations()
 
     for location in possible_locations:
         try:
