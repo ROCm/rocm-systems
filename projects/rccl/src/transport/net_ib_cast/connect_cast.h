@@ -103,6 +103,7 @@ struct ncclIbConnectionMetadata {
 };
 
 ncclResult_t IbCastQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs);
+void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, struct ncclIbQpCreateAttr* out);
 ncclResult_t IbCastQpInit(struct ncclIbQp* qp);
 ncclResult_t IbCastQpRtr(struct ncclIbQp* qp);
 ncclResult_t IbCastQpRts(struct ncclIbQp* qp);
