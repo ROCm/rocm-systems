@@ -121,6 +121,11 @@ if(BUILD_TESTS)
   endif()
   list(APPEND RCCL_COMMON_COMPILE_DEFS __HIP_PLATFORM_AMD__)
 
+  # All test executables link against GTest; tell MPIHelpers.cpp so it can use
+  # GTest's current_test_info() rather than relying on __has_include (which only
+  # proves the header is installed, not that the target actually links the library).
+  list(APPEND RCCL_COMMON_COMPILE_DEFS RCCL_MPIHelpers_HAS_GTEST)
+
   # Common link libraries
   set(RCCL_COMMON_LINK_LIBS
     ${GTEST_BOTH_LIBRARIES}
@@ -292,6 +297,7 @@ if(BUILD_TESTS)
       transport/NetIbMPI/CastTests.cpp
       transport/NetIbMPI/FaultInjectTests.cpp
       transport/GinMPI/GinMPITests.cpp
+      transport/NetIbMPI/StressTests.cpp
       ImplicitLaunchOrderMPITests.cpp
       CommMPITests.cpp
       RegistrationMPITests.cpp

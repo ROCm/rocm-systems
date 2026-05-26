@@ -287,8 +287,8 @@ exit:
   if (!body) return -1;
 
   return aca_decode_corrected_error(
-      body->err_ctx.reg_dump, sizeof(body->err_ctx.reg_dump) / sizeof(body->err_ctx.reg_dump[0]),
-      section->flags_mask, section->revision_major, body->err_ctx.reg_ctx_type);
+      body->err_ctx.reg_dump, body->err_ctx.reg_arr_size / sizeof(uint64_t), section->flags_mask,
+      section->revision_major, body->err_ctx.reg_ctx_type);
 }
 
 static int cper_dump_cr_fatal(const struct cper_sec_crashdump* crashdump,

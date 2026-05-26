@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/command_processor.h"
+#include "rocjitsu/code/kernel_symbol.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -454,74 +455,15 @@ CommandProcessor::read_kernel_descriptor(uint64_t kernel_object, bool host_acces
   return kd;
 }
 
-/// @brief Find the kernel symbol name from the code object's AMDHSA metadata.
-/// @details Uses GpuMemory::find_host_range to locate the ELF base. Parses the
-/// PT_NOTE segment to find NT_AMDGPU_METADATA (msgpack-encoded). Extracts kernel
-/// names by scanning for ".kd" symbol strings in the raw msgpack data and matches
-/// to the dispatched kernel using the kernel descriptor fields (group_segment_fixed_size,
-/// private_segment_fixed_size) read from the kernel descriptor at kernel_object.
-static std::string find_kernel_symbol(uint64_t kernel_object, GpuMemory *mem) {
-  if (kernel_object == 0 || !mem)
-    return {};
-
-  auto [range_base, range_size] = mem->find_host_range(kernel_object);
-  if (range_base == 0)
-    return {};
-
-  auto *elf_base = reinterpret_cast<const uint8_t *>(range_base);
-  if (elf_base[0] != 0x7f || elf_base[1] != 'E' || elf_base[2] != 'L' || elf_base[3] != 'F')
-    return {};
-
-  auto *ehdr = reinterpret_cast<const Elf64_Ehdr *>(elf_base);
-  if (ehdr->e_phnum == 0 || ehdr->e_phoff == 0)
-    return {};
-
-  auto *phdrs = reinterpret_cast<const Elf64_Phdr *>(elf_base + ehdr->e_phoff);
-
-  // Find PT_NOTE containing AMDHSA metadata.
-  for (uint16_t i = 0; i < ehdr->e_phnum; ++i) {
-    if (phdrs[i].p_type != PT_NOTE || phdrs[i].p_filesz < sizeof(Elf64_Nhdr))
-      continue;
-    if (phdrs[i].p_offset + phdrs[i].p_filesz > range_size)
-      continue;
-    auto *nhdr = reinterpret_cast<const Elf64_Nhdr *>(elf_base + phdrs[i].p_offset);
-    constexpr uint32_t NT_AMDGPU_METADATA = 32;
-    if (nhdr->n_type != NT_AMDGPU_METADATA)
-      continue;
-
-    uint32_t name_aligned = (nhdr->n_namesz + 3) & ~3u;
-    uint64_t desc_off = phdrs[i].p_offset + sizeof(Elf64_Nhdr) + name_aligned;
-    uint32_t desc_sz = nhdr->n_descsz;
-    if (desc_off + desc_sz > range_size)
-      continue;
-    auto *note = elf_base + desc_off;
-
-    // Scan raw msgpack for ".kd" symbol strings. Each kernel entry has a
-    // ".symbol" field containing "kernel_name.kd" as a length-prefixed string.
-    // We extract the kernel name and check if the corresponding kernel
-    // descriptor matches our dispatch (by group_segment_fixed_size and
-    // private_segment_fixed_size). For single-kernel dispatches, the first
-    // match is sufficient.
-    std::string best_name;
-    for (size_t pos = 2; pos + 2 < desc_sz; ++pos) {
-      if (note[pos] != '.' || note[pos + 1] != 'k' || note[pos + 2] != 'd')
-        continue;
-      size_t end = pos + 3;
-      if (end < desc_sz && note[end] >= 0x20 && note[end] < 0x7f)
-        continue;
-      size_t start = pos;
-      while (start > 0 && note[start - 1] >= 0x20 && note[start - 1] < 0x7f)
-        --start;
-      if (start == pos)
-        continue;
-      std::string_view sym(reinterpret_cast<const char *>(note + start), pos - start);
-      if (best_name.empty())
-        best_name = std::string(sym);
-    }
-    if (!best_name.empty())
-      return best_name;
+/// Scan backward from ptr to find the ELF header (\x7fELF) at a page boundary.
+/// Both ptr and limit must be readable host memory.
+static const uint8_t *find_elf_base(const uint8_t *ptr, const uint8_t *limit) {
+  auto *page = reinterpret_cast<const uint8_t *>(reinterpret_cast<uintptr_t>(ptr) & ~0xFFFULL);
+  for (; page >= limit; page -= 0x1000) {
+    if (page[0] == 0x7f && page[1] == 'E' && page[2] == 'L' && page[3] == 'F')
+      return page;
   }
-  return {};
+  return nullptr;
 }
 
 void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pkt,
@@ -637,15 +579,28 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
                       dp.kernarg_addr);
   });
 
+  std::string kernel_sym;
+  if (host_accessible && memory_) {
+    auto [range_base, range_size] = memory_->find_host_range(pkt.kernel_object);
+    if (range_base != 0) {
+      auto *ko = reinterpret_cast<const uint8_t *>(pkt.kernel_object);
+      auto *range_start = reinterpret_cast<const uint8_t *>(range_base);
+      auto *elf = find_elf_base(ko, range_start);
+      if (elf) {
+        uint64_t accessible = range_size - static_cast<uint64_t>(elf - range_start);
+        kernel_sym = find_kernel_symbol(ko, elf, accessible);
+      }
+    }
+  }
+
   {
     static uint32_t dispatch_count = 0;
     ++dispatch_count;
     util::Logger::vm([&](auto &os) {
-      std::string sym = find_kernel_symbol(pkt.kernel_object, memory_);
       os << std::format("dispatch #{} d={} \"{}\" grid=[{},{},{}] wg=[{},{},{}] wgs={} "
                         "lds={} sgpr={} vgpr={} sig={:#x}",
-                        dispatch_count, dp.dispatch_id, sym.empty() ? "?" : sym, pkt.grid_size_x,
-                        pkt.grid_size_y, pkt.grid_size_z, pkt.workgroup_size_x,
+                        dispatch_count, dp.dispatch_id, kernel_sym.empty() ? "?" : kernel_sym,
+                        pkt.grid_size_x, pkt.grid_size_y, pkt.grid_size_z, pkt.workgroup_size_x,
                         pkt.workgroup_size_y, pkt.workgroup_size_z, total_wgs,
                         kd.group_segment_fixed_size, dp.sgprs_per_wf, dp.vgprs_per_wf,
                         dp.completion_signal);
