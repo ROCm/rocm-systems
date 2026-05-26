@@ -416,21 +416,28 @@ __device__ __forceinline__ void copy_bulk(uint8_t* __restrict__ dst_bytes,
 
     #pragma unroll
     for (int u = 0; u < Unroll; ++u) {
-      if constexpr (LoadPolicy != CachePolicy::Standard) {
-        wait_on_vmem_and_lds(Unroll - 1);
-      }
-      regs[u] = Acc::load(src_bytes + (offset + tid + u * stride) * ChunkSize);
+      // if constexpr (LoadPolicy != CachePolicy::Standard) {
+      //   wait_on_vmem_and_lds(Unroll - 1);
+      // }
+      // regs[u] = Acc::load(src_bytes + (offset + tid + u * stride) * ChunkSize);
+      regs[u] = Acc::load_buffer(
+          src_bytes, static_cast<uint32_t>(n_chunks * ChunkSize),
+          static_cast<uint32_t>((offset + tid + u * stride) * ChunkSize));
     }
 
     #pragma unroll
     for (int u = 0; u < Unroll; ++u) {
-      if constexpr (LoadPolicy != CachePolicy::Standard) {
-        wait_on_vmem_and_lds(Unroll - 1);
-      }
-      Acc::store(dst_bytes + (offset + tid + u * stride) * ChunkSize, regs[u]);
+      // if constexpr (LoadPolicy != CachePolicy::Standard) {
+      //   wait_on_vmem_and_lds(Unroll - 1);
+      // }
+      // Acc::store(dst_bytes + (offset + tid + u * stride) * ChunkSize, regs[u]);
+      Acc::store_buffer(
+          dst_bytes, static_cast<uint32_t>(n_chunks * ChunkSize),
+          static_cast<uint32_t>((offset + tid + u * stride) * ChunkSize),
+          regs[u]);      
     }
 
-    // __builtin_amdgcn_s_barrier();
+    __builtin_amdgcn_s_barrier();
   }
 
   // Tail loop for remaining ChunkSize-byte chunks
@@ -519,9 +526,9 @@ template <MemcpyKind Kind = MemcpyKind::Put>
 
   constexpr int ChunkSize = 16;
   constexpr CachePolicy LP =
-      (Kind == MemcpyKind::Put) ? CachePolicy::FlatCache : CachePolicy::SystemScope;
+      (Kind == MemcpyKind::Put) ? CachePolicy::Standard : CachePolicy::SystemScope;
   constexpr CachePolicy SP =
-      (Kind == MemcpyKind::Put) ? CachePolicy::SystemScope : CachePolicy::FlatCache;
+      (Kind == MemcpyKind::Put) ? CachePolicy::SystemScope : CachePolicy::Standard;
 
   uint8_t* dst_bytes = static_cast<uint8_t*>(dst);
   uint8_t* src_bytes = static_cast<uint8_t*>(src);
@@ -544,9 +551,9 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   
   constexpr int ChunkSize = 16;
   constexpr CachePolicy LP =
-      (Kind == MemcpyKind::Put) ? CachePolicy::FlatCache : CachePolicy::SystemScope;
+      (Kind == MemcpyKind::Put) ? CachePolicy::Standard : CachePolicy::SystemScope;
   constexpr CachePolicy SP =
-      (Kind == MemcpyKind::Put) ? CachePolicy::SystemScope : CachePolicy::FlatCache;
+      (Kind == MemcpyKind::Put) ? CachePolicy::SystemScope : CachePolicy::Standard;
 
   int wave_tid = get_flat_block_id() % WF_SIZE;
   int wave_size{wave_SZ()};
@@ -575,9 +582,9 @@ template <MemcpyKind Kind = MemcpyKind::Put>
 
   constexpr int ChunkSize = 16;
   constexpr CachePolicy LP =
-      (Kind == MemcpyKind::Put) ? CachePolicy::FlatCache : CachePolicy::SystemScope;
+      (Kind == MemcpyKind::Put) ? CachePolicy::Standard : CachePolicy::SystemScope;
   constexpr CachePolicy SP =
-      (Kind == MemcpyKind::Put) ? CachePolicy::SystemScope : CachePolicy::FlatCache;
+      (Kind == MemcpyKind::Put) ? CachePolicy::SystemScope : CachePolicy::Standard;
 
   int thread_id = get_flat_block_id();
   int block_size = get_flat_block_size();
