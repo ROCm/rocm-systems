@@ -102,7 +102,12 @@ if(HIP_PLATFORM STREQUAL "amd")
   message(STATUS "HRR raw trace: ${HRR_RAW_TRACE_EXE}")
 
   target_compile_definitions(HrrTest PRIVATE
-    HRR_TEST_EXE="$<TARGET_FILE:HrrTest>"
+    # Use the exe filename only (no directory).  SpawnProc resolves relative
+    # paths via currentPath() which equals the CTest WORKING_DIRECTORY —
+    # the directory containing HrrTest.exe.  This works both from the build
+    # tree and from an installed/packaged test run where the build tree is
+    # no longer present.
+    HRR_TEST_EXE="HrrTest"
     HRR_PLAYBACK_EXE="${HRR_PLAYBACK_EXE}"
     HRR_RAW_TRACE_EXE="${HRR_RAW_TRACE_EXE}"
     ROCM_BIN_PATH="${ROCM_PATH}/bin"
