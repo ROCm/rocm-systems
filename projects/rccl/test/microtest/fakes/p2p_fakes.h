@@ -10,6 +10,30 @@
 // behaviour by overwriting one of these std::function hooks in a fixture's
 // SetUp(), and ResetP2pFakes() in TearDown() restores defaults so tests
 // don't contaminate each other.
+//
+// SCOPE WARNING -- hook breadth.
+//
+// The macro shims in p2p-test.cc that route through these hooks
+// (`hipMemGetAddressRange`, `hipIpcGetMemHandle`, `ncclCudaCallocAsync`,
+// `ncclCudaMemcpyAsync`) take effect for **every** call site of those
+// symbols inside the `#include`d p2p.cc -- not just inside
+// `ipcRegisterBuffer`. When microtests are added for other functions in
+// the same TU (e.g. `ipcDeregisterBuffer`, `ncclIpcLocalRegisterBuffer`,
+// `ncclIpcGraphRegisterBuffer`), those new tests will silently inherit
+// the default hooks installed here.
+//
+// Practical consequences:
+//   - Setting a hook's default to "return failure loudly" is safe and
+//     desirable -- it surfaces unexpected calls from any new unit
+//     under test, not just the original one.
+//   - Setting a hook's default to a benign success that *happens* to
+//     match `ipcRegisterBuffer`'s usage may be wrong for the next
+//     unit under test. If you add a new test family, revisit each
+//     default and check whether it still makes sense.
+//   - When a new test family needs a *different* default, the
+//     remedy is to overwrite the hook in its fixture's SetUp() (the
+//     ScopedHook helper in p2p-test.cc is the standard pattern), not
+//     to change the default here.
 
 #pragma once
 

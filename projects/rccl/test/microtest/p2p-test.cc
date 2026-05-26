@@ -20,6 +20,7 @@
 #include <array>
 #include <cstdint>
 #include <initializer_list>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -527,184 +528,233 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_CollectiveReuseStrongStreamAcquireFailure
 }
 
 // Fresh-registration happy path (legacy IPC / cudaIpcGetMemHandle arm).
+//
 // This is the path that *produces* the IPC state every reuse test assumes
-// already exists. Coverage-wise it lights up the entire body of the
-// `else` arm at line ~905 of p2p.cc, including:
-//   - hipMemGetAddressRange success (911)
-//   - ncclProxyConnect (921-922) because gproxyConn is uninitialised
-//   - ncclCuMemEnable() == 0 path -> legacy export arm (979)
-//   - cudaIpcGetMemHandle + ipcInfo.legacyIpcCap=true (961-964)
-//   - line 964 `if (isLegacyIpc) *isLegacyIpc = true` (the last
-//     unexercised isLegacyIpc write)
-//   - ncclProxyCallBlocking returning a canned rmtRegAddr (985)
-//   - newInfo allocation + regRecord->ipcInfos install (986-1000)
-//   - hostPeerRmtAddrs lazy-allocation (994)
+// already exists, and it lights up the entire body of the per-peer-loop
+// `else` arm (the "register buffer with peerLocalRank" branch).
+//
+// The happy-path call has two distinct contracts worth pinning down
+// separately:
+//
+//   (a) bookkeeping contract -- everything the function writes *into*
+//       the caller-owned ncclReg (ipcInfos[], hostPeerRmtAddrs,
+//       state bit).
+//
+//   (b) return-value contract -- the OUT parameters
+//       (regBufFlag, offsetOut, peerRmtAddrs, isLegacyIpc) and the
+//       seam-call counts that *produced* them.
+//
+// We split (a) and (b) into two TEST_Fs sharing a fixture so that a
+// failure points at one of the two contracts unambiguously. The fixture
+// runs the actual ipcRegisterBuffer call in SetUp() with all four
+// seam hooks installed.
+//
+// Coverage-wise this lights up:
+//   - hipMemGetAddressRange success
+//   - ncclProxyConnect because gproxyConn[peerRank].initialized is false
+//   - the `ncclCuMemEnable() == 0` path falling into the
+//     `else if (legacyIpcCap)` legacy-export arm
+//   - hipIpcGetMemHandle + the `ipcInfo.legacyIpcCap = true` write
+//   - the legacy-arm's `if (isLegacyIpc) *isLegacyIpc = true` write
+//     (the last unexercised isLegacyIpc write)
+//   - ncclProxyCallBlocking returning a canned rmtRegAddr
+//   - newInfo allocation + the `if (rmtRegAddr)` bookkeeping block:
+//     ipcCalloc, ipcInfos[] install, state |= IPC_REG_COMPLETE
+//   - hostPeerRmtAddrs lazy-allocation (the
+//     `if (regIpcAddrs.hostPeerRmtAddrs == NULL)` arm)
 //   - post-loop COLLECTIVE block with needUpdate=true driving
 //     ncclCudaCallocAsync + ncclCudaMemcpyAsync
-//
-// All four runtime-driver entry points (hipMemGetAddressRange,
-// hipIpcGetMemHandle, ncclProxyConnect, ncclProxyCallBlocking) are driven
-// via per-test hooks installed on the fakes.
-TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationLegacyIpcSucceeds)
-{
-    constexpr int       kPeerRank      = 2;
-    constexpr int       kPeerLocalRank = 1;
-    constexpr uintptr_t kBaseAddr      = 0x100000;
-    constexpr std::size_t kBaseSize    = 0x4000;
-    constexpr uintptr_t kBuffOffset    = 0x80;
-    constexpr uintptr_t kBegOffset     = 0x20;  // regRecord->begAddr - baseAddr
-    constexpr uintptr_t kBegAddr       = kBaseAddr + kBegOffset;
-    constexpr uintptr_t kRmtRegAddr    = 0xCAFE0000ull;
+class FreshRegistrationLegacyIpcSucceedsFixture : public P2pMicrotest {
+protected:
+    static constexpr int       kPeerRank      = 2;
+    static constexpr int       kPeerLocalRank = 1;
+    static constexpr uintptr_t kBaseAddr      = 0x100000;
+    static constexpr std::size_t kBaseSize    = 0x4000;
+    static constexpr uintptr_t kBuffOffset    = 0x80;
+    static constexpr uintptr_t kBegOffset     = 0x20;
+    static constexpr uintptr_t kBegAddr       = kBaseAddr + kBegOffset;
+    static constexpr uintptr_t kRmtRegAddr    = 0xCAFE0000ull;
+    static constexpr int       kNRanks        = kPeerRank + 1;
 
-    // nRanks just has to be big enough to index gproxyConn[kPeerRank].
-    constexpr int kNRanks = kPeerRank + 1;
-    CommBuilder cb;
-    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
-      .WithMaxLocalRanks()
-      .WithSharedRes()
-      .WithProxyConnArray(kNRanks);
-
-    ncclReg regRecord{};
-    regRecord.begAddr = kBegAddr;
-    regRecord.endAddr = kBegAddr + 0x1000;
-    // regRecord.ipcInfos[kPeerLocalRank] is NULL -> fresh-registration arm.
-    // Construct *after* regRecord so its dtor runs first (LIFO), freeing
-    // anything ipcRegisterBuffer leaves behind before regRecord itself dies.
-    RegRecordCleaner regCleanup(regRecord);
-
-    // Force the legacy-IPC arm to be entered (see ForceLegacyCudaRegister
-    // comment for why this is required under HIP_VERSION < 71260540).
-    ScopedHook loadParam(g_loadParam, ForceLegacyCudaRegister());
-
-    // ---- hook 1: hipMemGetAddressRange returns baseAddr + baseSize.
-    // Production contract: called with dptr == userbuff (so the driver
-    // can find the enclosing allocation). Assert that here -- if a
-    // future refactor mis-wires this, we want the test to catch it.
     const void* const kUserbuff =
         reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
-    ScopedHook memGet(g_hipMemGetAddressRange,
-        [&](hipDeviceptr_t* pbase, std::size_t* psize,
-            hipDeviceptr_t dptr) -> hipError_t {
-            EXPECT_EQ(reinterpret_cast<const void*>(dptr), kUserbuff);
-            if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
-            if (psize) *psize = kBaseSize;
-            return hipSuccess;
-        });
 
-    // ---- hook 2: hipIpcGetMemHandle succeeds with a sentinel handle.
-    // p2p.cc copies the handle into ipcInfo.ipcDesc.devIpc and ships it
-    // off via ncclProxyCallBlocking; the fake on the other side never
-    // inspects the bytes, so any pattern works.
-    //
-    // Production contract: called with the *baseAddr* the driver returned
-    // from hipMemGetAddressRange above, NOT the (possibly mid-allocation)
-    // userbuff. This is load-bearing: legacy CUDA IPC handles always
-    // refer to whole allocations, so passing userbuff here would either
-    // fail at runtime or hand the peer a handle to the wrong region.
-    ScopedHook ipcGet(g_hipIpcGetMemHandle,
-        [&](hipIpcMemHandle_t* h, void* devPtr) -> hipError_t {
-            EXPECT_EQ(devPtr, reinterpret_cast<void*>(kBaseAddr));
-            if (h) std::memset(h, 0x5A, sizeof(*h));
-            return hipSuccess;
-        });
+    // Storage that outlives the call. Heap-allocated via unique_ptr so
+    // the fixture is movable-into-place in SetUp() without copying the
+    // non-copyable members.
+    std::unique_ptr<CommBuilder>       cb;
+    std::unique_ptr<ncclReg>           regRecord;
+    std::unique_ptr<RegRecordCleaner>  regCleanup;
+    std::unique_ptr<ScopedHook<int64_t(const char*, int64_t)>> loadParam;
+    std::unique_ptr<ScopedHook<hipError_t(hipDeviceptr_t*, std::size_t*, hipDeviceptr_t)>> memGet;
+    std::unique_ptr<ScopedHook<hipError_t(hipIpcMemHandle_t*, void*)>> ipcGet;
+    std::unique_ptr<ScopedHook<ncclResult_t(struct ncclComm*, int, int, int, struct ncclProxyConnector*)>> connect;
+    std::unique_ptr<ScopedHook<ncclResult_t(struct ncclComm*, struct ncclProxyConnector*, int, void*, int, void*, int)>> proxy;
 
-    // ---- hook 3: ncclProxyConnect marks the gproxyConn slot initialized.
-    // The real implementation does more, but for the unit under test the
-    // only thing that matters post-call is that proxyConn is non-null,
-    // which it already is (it's &comm->gproxyConn[peerRank]).
-    ScopedHook connect(g_proxyConnect,
-        [&](struct ncclComm* c, int transport, int /*send*/,
-            int rank, struct ncclProxyConnector* pc) -> ncclResult_t {
-            EXPECT_EQ(transport, TRANSPORT_P2P);
-            EXPECT_EQ(rank, kPeerRank);
-            EXPECT_EQ(pc, &c->gproxyConn[rank]);
-            pc->initialized = true;
-            return ncclSuccess;
-        });
-
-    // ---- hook 4: ncclProxyCallBlocking returns a canned rmtRegAddr in
-    // respBuff. Without this the post-call `if (rmtRegAddr)` block
-    // (which is where the real registration bookkeeping happens) stays
-    // skipped.
-    ScopedHook proxy(g_proxyCallBlocking,
-        [&](struct ncclComm*, struct ncclProxyConnector*,
-            int type, void* req, int reqSize,
-            void* resp, int respSize) -> ncclResult_t {
-            // Production contract for ncclProxyMsgRegister: the request
-            // is a fully-populated p2pIpcExpInfo describing the
-            // allocation we want the peer to import. Pin down the
-            // fields the unit under test is responsible for setting --
-            // a regression that ships a half-built request or wires the
-            // wrong base address would otherwise sail through.
-            EXPECT_EQ(type, ncclProxyMsgRegister);
-            // Can't use ASSERT_* inside a non-void-returning lambda; do a
-            // manual early-return on the precondition that the cast below
-            // depends on.
-            if (req == nullptr ||
-                static_cast<size_t>(reqSize) < sizeof(p2pIpcExpInfo)) {
-                ADD_FAILURE() << "malformed register-msg request: req="
-                              << req << " reqSize=" << reqSize;
-                return ncclInternalError;
-            }
-            auto* info = static_cast<p2pIpcExpInfo*>(req);
-            EXPECT_TRUE(info->legacyIpcCap);              // legacy arm set this
-            EXPECT_EQ(info->size,   kBaseSize);           // whole-allocation
-            EXPECT_EQ(info->offset, kBegOffset);          // begAddr - baseAddr
-
-            EXPECT_GE(static_cast<size_t>(respSize), sizeof(void*));
-            if (resp) std::memcpy(resp, &kRmtRegAddr, sizeof(void*));
-            return ncclSuccess;
-        });
-
-    int peerRanks[] = {kPeerRank};
     IpcRegOutputs out;
-    bool isLegacyIpc = false;
+    bool         isLegacyIpc = false;
+    ncclResult_t result      = ncclSuccess;
 
-    auto r = CallIpcRegisterBuffer(cb, kUserbuff,
-                                   /*buffSize=*/ 256,
-                                   peerRanks, 1,
-                                   NCCL_IPC_COLLECTIVE,
-                                   &regRecord, out, &isLegacyIpc);
+    void SetUp() override
+    {
+        cb = std::make_unique<CommBuilder>();
+        cb->WithLocalRank(kPeerRank, kPeerLocalRank)
+           .WithMaxLocalRanks()
+           .WithSharedRes()
+           .WithProxyConnArray(kNRanks);
 
-    // ---- contract: every seam was called exactly once on the happy path.
-    EXPECT_EQ(memGet.calls,  1);
-    EXPECT_EQ(ipcGet.calls,  1);
-    EXPECT_EQ(connect.calls, 1);
-    EXPECT_EQ(proxy.calls,   1);
+        regRecord = std::make_unique<ncclReg>();
+        *regRecord = ncclReg{};
+        regRecord->begAddr = kBegAddr;
+        regRecord->endAddr = kBegAddr + 0x1000;
+        // ipcInfos[kPeerLocalRank] is NULL -> fresh-registration arm.
+        regCleanup = std::make_unique<RegRecordCleaner>(*regRecord);
 
-    EXPECT_EQ(r, ncclSuccess);
+        // Force the legacy-IPC arm to be entered (see ForceLegacyCudaRegister
+        // for why this is required under HIP_VERSION < 71260540).
+        loadParam = std::make_unique<ScopedHook<int64_t(const char*, int64_t)>>(
+            g_loadParam, ForceLegacyCudaRegister());
+
+        // hipMemGetAddressRange: returns baseAddr + baseSize. Production
+        // contract: called with dptr == userbuff.
+        memGet = std::make_unique<ScopedHook<hipError_t(hipDeviceptr_t*, std::size_t*, hipDeviceptr_t)>>(
+            g_hipMemGetAddressRange,
+            [this](hipDeviceptr_t* pbase, std::size_t* psize,
+                   hipDeviceptr_t dptr) -> hipError_t {
+                EXPECT_EQ(reinterpret_cast<const void*>(dptr), kUserbuff);
+                if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
+                if (psize) *psize = kBaseSize;
+                return hipSuccess;
+            });
+
+        // hipIpcGetMemHandle: succeeds with a sentinel handle. Production
+        // contract: called with *baseAddr*, NOT the (possibly mid-allocation)
+        // userbuff -- legacy CUDA IPC handles always refer to whole
+        // allocations.
+        ipcGet = std::make_unique<ScopedHook<hipError_t(hipIpcMemHandle_t*, void*)>>(
+            g_hipIpcGetMemHandle,
+            [](hipIpcMemHandle_t* h, void* devPtr) -> hipError_t {
+                EXPECT_EQ(devPtr, reinterpret_cast<void*>(kBaseAddr));
+                if (h) std::memset(h, 0x5A, sizeof(*h));
+                return hipSuccess;
+            });
+
+        // ncclProxyConnect: marks the gproxyConn slot initialized.
+        connect = std::make_unique<ScopedHook<ncclResult_t(struct ncclComm*, int, int, int, struct ncclProxyConnector*)>>(
+            g_proxyConnect,
+            [](struct ncclComm* c, int transport, int /*send*/,
+               int rank, struct ncclProxyConnector* pc) -> ncclResult_t {
+                EXPECT_EQ(transport, TRANSPORT_P2P);
+                EXPECT_EQ(rank, kPeerRank);
+                EXPECT_EQ(pc, &c->gproxyConn[rank]);
+                pc->initialized = true;
+                return ncclSuccess;
+            });
+
+        // ncclProxyCallBlocking: canned rmtRegAddr in respBuff +
+        // production-contract assertions on the request struct.
+        proxy = std::make_unique<ScopedHook<ncclResult_t(struct ncclComm*, struct ncclProxyConnector*, int, void*, int, void*, int)>>(
+            g_proxyCallBlocking,
+            [](struct ncclComm*, struct ncclProxyConnector*,
+               int type, void* req, int reqSize,
+               void* resp, int respSize) -> ncclResult_t {
+                EXPECT_EQ(type, ncclProxyMsgRegister);
+                if (req == nullptr ||
+                    static_cast<size_t>(reqSize) < sizeof(p2pIpcExpInfo)) {
+                    ADD_FAILURE() << "malformed register-msg request: req="
+                                  << req << " reqSize=" << reqSize;
+                    return ncclInternalError;
+                }
+                auto* info = static_cast<p2pIpcExpInfo*>(req);
+                EXPECT_TRUE(info->legacyIpcCap);
+                EXPECT_EQ(info->size,   kBaseSize);
+                EXPECT_EQ(info->offset, kBegOffset);
+                EXPECT_GE(static_cast<size_t>(respSize), sizeof(void*));
+                if (resp) std::memcpy(resp, &kRmtRegAddr, sizeof(void*));
+                return ncclSuccess;
+            });
+
+        int peerRanks[] = {kPeerRank};
+        result = CallIpcRegisterBuffer(*cb, kUserbuff,
+                                       /*buffSize=*/ 256,
+                                       peerRanks, 1,
+                                       NCCL_IPC_COLLECTIVE,
+                                       regRecord.get(), out, &isLegacyIpc);
+    }
+
+    void TearDown() override
+    {
+        // Tear hooks down before the fixture's other state so any hook
+        // captures stay live for the duration of the call. (ScopedHook
+        // dtor restores the prior slot.) Order matters: hooks first,
+        // then the regRecord cleaner, then the regRecord itself.
+        proxy.reset();
+        connect.reset();
+        ipcGet.reset();
+        memGet.reset();
+        loadParam.reset();
+        regCleanup.reset();
+        regRecord.reset();
+        cb.reset();
+        P2pMicrotest::TearDown();
+    }
+};
+
+// (a) Return-value contract: the OUT parameters and the seam-call
+// counts that produced them. A failure here points at the function's
+// post-loop / output-writing code.
+TEST_F(FreshRegistrationLegacyIpcSucceedsFixture, ReturnsCollectiveDevTable)
+{
+    // Every seam was called exactly once on the happy path.
+    EXPECT_EQ(memGet->calls,  1);
+    EXPECT_EQ(ipcGet->calls,  1);
+    EXPECT_EQ(connect->calls, 1);
+    EXPECT_EQ(proxy->calls,   1);
+
+    EXPECT_EQ(result,         ncclSuccess);
     EXPECT_EQ(out.regBufFlag, 1);
     EXPECT_EQ(out.offsetOut,  kBuffOffset);
     // COLLECTIVE: returns the dev table (allocated by the strong-stream
     // block via g_fakeCudaCallocAsync's heap default), populated from the
     // host table by g_fakeCudaMemcpyAsync's real-memcpy default.
     ASSERT_NE(out.peerRmtAddrs, nullptr);
-    EXPECT_EQ(out.peerRmtAddrs, regRecord.regIpcAddrs.devPeerRmtAddrs);
+    EXPECT_EQ(out.peerRmtAddrs, regRecord->regIpcAddrs.devPeerRmtAddrs);
     EXPECT_EQ(out.peerRmtAddrs[kPeerLocalRank], kRmtRegAddr);
-    EXPECT_TRUE(isLegacyIpc);  // line 964 write reached
-
-    // ---- contract: regRecord bookkeeping populated as documented.
-    ASSERT_NE(regRecord.ipcInfos[kPeerLocalRank], nullptr);
-    EXPECT_EQ(regRecord.ipcInfos[kPeerLocalRank]->peerRank, kPeerRank);
-    EXPECT_EQ(regRecord.ipcInfos[kPeerLocalRank]->baseAddr,
-              reinterpret_cast<void*>(kBaseAddr));
-    EXPECT_EQ(regRecord.ipcInfos[kPeerLocalRank]->impInfo.rmtRegAddr,
-              reinterpret_cast<void*>(kRmtRegAddr));
-    EXPECT_EQ(regRecord.ipcInfos[kPeerLocalRank]->impInfo.offset, kBegOffset);
-    EXPECT_TRUE(regRecord.ipcInfos[kPeerLocalRank]->impInfo.legacyIpcCap);
-    EXPECT_TRUE(regRecord.state & IPC_REG_COMPLETE);
-    ASSERT_NE(regRecord.regIpcAddrs.hostPeerRmtAddrs, nullptr);
-    EXPECT_EQ(regRecord.regIpcAddrs.hostPeerRmtAddrs[kPeerLocalRank],
-              kRmtRegAddr);
-
-    // Cleanup is handled by regCleanup (RAII) + ResetP2pFakes() (for the
-    // dev-table calloc owned by g_fakeAllocations). Both run even if an
-    // ASSERT_* above bails early.
+    EXPECT_TRUE(isLegacyIpc);  // the legacy-arm `*isLegacyIpc = true` write reached
 }
+
+// (b) Bookkeeping contract: everything written *into* the caller-owned
+// ncclReg by the `if (rmtRegAddr)` block. A failure here points at
+// the per-peer bookkeeping block, not the post-loop output code.
+TEST_F(FreshRegistrationLegacyIpcSucceedsFixture, PopulatesIpcInfoRecord)
+{
+    ASSERT_EQ(result, ncclSuccess);  // setup precondition
+
+    ASSERT_NE(regRecord->ipcInfos[kPeerLocalRank], nullptr);
+    EXPECT_EQ(regRecord->ipcInfos[kPeerLocalRank]->peerRank, kPeerRank);
+    EXPECT_EQ(regRecord->ipcInfos[kPeerLocalRank]->baseAddr,
+              reinterpret_cast<void*>(kBaseAddr));
+    EXPECT_EQ(regRecord->ipcInfos[kPeerLocalRank]->impInfo.rmtRegAddr,
+              reinterpret_cast<void*>(kRmtRegAddr));
+    EXPECT_EQ(regRecord->ipcInfos[kPeerLocalRank]->impInfo.offset, kBegOffset);
+    EXPECT_TRUE(regRecord->ipcInfos[kPeerLocalRank]->impInfo.legacyIpcCap);
+    EXPECT_TRUE(regRecord->state & IPC_REG_COMPLETE);
+    ASSERT_NE(regRecord->regIpcAddrs.hostPeerRmtAddrs, nullptr);
+    EXPECT_EQ(regRecord->regIpcAddrs.hostPeerRmtAddrs[kPeerLocalRank],
+              kRmtRegAddr);
+}
+
+// Inlined-body test removed -- see fixture above. Comment retained as
+// a breadcrumb for grep so anyone searching for the historic name finds
+// the split tests.
+// IpcRegisterBuffer_FreshRegistrationLegacyIpcSucceeds -> split into
+//   FreshRegistrationLegacyIpcSucceedsFixture.ReturnsCollectiveDevTable
+//   FreshRegistrationLegacyIpcSucceedsFixture.PopulatesIpcInfoRecord
+
 
 // Fresh-registration variant: ncclProxyCallBlocking returns success but
 // writes rmtRegAddr=NULL into the response buffer. Drives the False arm
-// of `if (rmtRegAddr)` (line 979 of p2p.cc) -- the entire bookkeeping
+// of `if (rmtRegAddr)` -- the entire bookkeeping
 // block (newInfo alloc, ipcInfos[] install, hostPeerRmtAddrs lazy alloc)
 // must be skipped. Because *regBufFlag is then never set to 1, the
 // post-loop strong-stream block also stays skipped, and the function
@@ -794,8 +844,7 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationProxyReturnsNullRmtAddr)
 
 // Fresh-registration variant: pre-mark comm->gproxyConn[peerRank].initialized
 // = true so the per-peer loop's `if (...initialized == false)` test takes
-// the False arm at line ~921 of p2p.cc and ncclProxyConnect is *not*
-// called. The rest of the registration (handle export, proxy register,
+// the False arm and ncclProxyConnect is *not* called. The rest of the registration (handle export, proxy register,
 // bookkeeping) proceeds normally.
 TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationSkipsProxyConnectWhenAlreadyInitialized)
 {
@@ -875,7 +924,7 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationSkipsProxyConnectWhenAlr
 }
 
 // Fresh-registration fail path with newInfo already allocated. Drives the
-// True arm of `if (newInfo) free(newInfo)` (line 1032 of p2p.cc) -- the
+// True arm of `if (newInfo) free(newInfo)` in the `fail:` epilogue -- the
 // leak-prevention contract on the fail: epilogue. Sequence:
 //
 //   1. Happy-path through hipMemGetAddressRange / hipIpcGetMemHandle /
@@ -1137,7 +1186,7 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_NullIsLegacyIpcPointerIsSkipped)
 // Fresh-registration variant: ncclProxyConnect returns failure. Drives the
 // `else` (failure) arm of the NCCLCHECKGOTO at the ncclProxyConnect call
 // site -- the per-peer loop must route to `fail:` *without* having
-// allocated newInfo (the bookkeeping block at line ~979 is gated on
+// allocated newInfo (the bookkeeping block under `if (rmtRegAddr)` is gated on
 // rmtRegAddr, which we never get to). Complementary to the
 // FreesNewInfoOnPostLoopFailure test: this one covers the True arm of
 // `if (newInfo) free(newInfo)` False side -- newInfo is still NULL at
@@ -1242,17 +1291,17 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationProxyConnectFailurePropa
 // no-op so the param sits at its compile-time default; we don't depend
 // on a specific value here -- the test installs g_hipIpcGetMemHandle
 // returning failure, and if legacyIpcCap stays false the function takes
-// the `nothing works, just return` goto fail at line ~969 instead,
-// which is the same failure surface. Either way: fail: epilogue runs
+// the `nothing works, just return` goto fail in the trailing `else`
+// instead, which is the same failure surface. Either way: fail: epilogue runs
 // with newInfo still NULL.
 //
-// Plan item A4. Drives the True arm of the line-961 CUDACHECKGOTO
-// (legacy-export `hipIpcGetMemHandle` returning failure). The hookable
-// g_loadParam seam is used to force ncclParamLegacyCudaRegister() to
-// return 1, which is the precondition for control reaching the
-// legacy-export arm at all (the param defaults to 0, which routes
-// instead through the `// nothing works, just return` goto fail at
-// line ~969).
+// Plan item A4. Drives the failure arm of the legacy-export
+// CUDACHECKGOTO(hipIpcGetMemHandle) in the `else if (legacyIpcCap)`
+// branch. The hookable g_loadParam seam forces
+// ncclParamLegacyCudaRegister() to return 1, which is the precondition
+// for control reaching the legacy-export arm at all (the param
+// defaults to 0, which routes instead through the trailing
+// `// nothing works, just return` goto fail).
 TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationLegacyIpcGetMemHandleFailurePropagates)
 {
     constexpr int       kPeerRank      = 2;
@@ -1273,8 +1322,8 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationLegacyIpcGetMemHandleFai
     // proxyConnect call is skipped -- shaves a hook off this test.
     cb.comm().gproxyConn[kPeerRank].initialized = true;
     // directMode=false so the `comm->directMode || !ncclParam...` guard
-    // at line ~961 doesn't short-circuit to fail before the
-    // hipIpcGetMemHandle call.
+    // inside the legacy-export arm doesn't short-circuit to fail before
+    // the hipIpcGetMemHandle call.
     cb.comm().directMode = 0;
 
     ncclReg regRecord{};
@@ -1467,7 +1516,7 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationFailureClearsOutputs)
 // Fresh-registration variant: directMode=true forces the legacy-export
 // arm to short-circuit to fail *before* calling hipIpcGetMemHandle.
 // Drives the True arm of `comm->directMode || !ncclParamLegacyCudaRegister()`
-// in the `else if (legacyIpcCap)` block (line ~961). All existing
+// in the `else if (legacyIpcCap)` block. All existing
 // fresh-reg tests set directMode=0 implicitly (zero-initialised ncclComm)
 // and force the param on, so this short-circuit's True arm was previously
 // unhit.
