@@ -1075,6 +1075,7 @@ target_link_libraries(rccl PRIVATE   ${SMI_LIBRARIES})
 target_link_libraries(rccl PRIVATE $<BUILD_INTERFACE:fmt::fmt-header-only>)
 if(ENABLE_ROCSHMEM)
   target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
+  target_link_libraries(rccl PRIVATE hsakmt)
   target_link_libraries(rccl PRIVATE ${IBVERBS})
   # librocshmem.a is compiled with -fgpu-rdc (relocatable device code).
   # The __hip_gpubin_handle_* symbols referenced by __hip_module_ctor in the
