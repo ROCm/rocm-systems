@@ -4,8 +4,16 @@
 #FROM "${ROCM_IMAGE_NAME}:${ROCM_IMAGE_TAG}"
 FROM ubuntu:24.04
 
+#Example build: from a github pull
+#docker build -f Dockerfile-rccl-gin-gda -t rccl-gingda713 --build-arg GPU_TARGETS=gfx950  .
+#--build-arg ROCSHMEM_CACHE_BUST=N: increase N to force pull rocSHMEM and rebuilding
+#--build-arg RCCL_CACHE_BUST=N: increase N to force pull RCCL and RCCL-test and rebuilding
+#--build-arg ROCSHMEM_BRANCH=users/abouteiller/gin-stage1-wip (RCCL_BRANCH): pull and build that specific branch from github
+# Example build: from local sources, CWD in the rocm-systems pull
+#docker build -f Dockerfile-rccl-gin-gda -t rccl-gingda713 --build-arg GPU_TARGETS=gfx950 --build-arg ROCSHMEM_CACHE_BUST=5 --build-arg USE_LOCAL_SRC=1  .
+
 # Example command lines:
-#docker run -it --rm --shm-size 64G   --network host --device /dev/dri --device /dev/kfd --device /dev/infiniband --ipc host   --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged  rccl-gingda mpirun -n 8 -mca pml ob1 -mca btl ^openib -x RCCL_ROCSHMEM_ENABLE=0 -x RCCL_ROCSHMEM_THRESHOLD=$((128*1024*1024)) -x NCCL_DEBUG=VERSION -x NCCL_GIN_ENABLE=1 -x NCCL_GIN_TYPE=2 -x NCCL_DEBUG_SUBSYS=INIT,NET -x NONCCL_CUMEM_ENABLE=1 -x NORCCL_ENABLE_INTRANET=1  -x NCCL_DMABUF_ENABLE=1 -x NCCL_MSCCL_ENABLE=0 -x HSA_NO_SCRATCH_RECLAIM=1 rccl-tests/alltoall_perf -b 128 -e 128M -f 2 -g 1 -R 2 -D 0 -A 1
+#docker run -it --rm --shm-size 64G   --network host --device /dev/dri --device /dev/kfd --device /dev/infiniband --ipc host   --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged  rccl-gingda mpirun -n 8 -mca pml ob1 -mca btl ^openib -x RCCL_ROCSHMEM_ENABLE=0 -x RCCL_ROCSHMEM_THRESHOLD=$((128*1024*1024)) -x NCCL_DEBUG=VERSION -x NCCL_GIN_ENABLE=1 -x NCCL_GIN_TYPE=2 -x NCCL_DEBUG_SUBSYS=INIT,NET -x NCCL_CUMEM_ENABLE=1 -x RCCL_ENABLE_INTRANET=1  -x NCCL_DMABUF_ENABLE=1 -x NCCL_MSCCL_ENABLE=0 -x HSA_NO_SCRATCH_RECLAIM=1 rccl-tests/alltoall_perf -b 128 -e 128M -f 2 -g 1 -R 2 -D 3 -A 1
 #docker run -it --rm --shm-size 64G   --network host --device /dev/dri --device /dev/kfd --device /dev/infiniband --ipc host   --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged  rccl-gingda mpirun -n 8 -mca pml ob1 -mca btl ^openib rocshmem/bin/rocshmem_functional_tests -a 19 -w 1 -z 256 -v $((128*1024*1024)) -noverif
 
 ## creating scratch space
