@@ -609,7 +609,9 @@ rsmi_status_t rsmi_dev_ecc_enabled_get(uint32_t dv_ind, uint64_t* enabled_blks) 
   ss << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ss);
 
-  if (enabled_blks == nullptr) return RSMI_STATUS_INVALID_ARGS;
+  if (enabled_blks == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
 
   CHK_SUPPORT_NAME_ONLY(enabled_blks)
 
@@ -664,7 +666,9 @@ rsmi_status_t rsmi_dev_ecc_status_get(uint32_t dv_ind, rsmi_gpu_block_t block,
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
 
-  if (state == nullptr) return RSMI_STATUS_INVALID_ARGS;
+  if (state == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
 
   CHK_SUPPORT_NAME_ONLY(state)
 
@@ -1126,7 +1130,9 @@ rsmi_status_t rsmi_dev_subsystem_id_get(uint32_t dv_ind, uint16_t* id) {
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
-  if (id == nullptr) return RSMI_STATUS_INVALID_ARGS;
+  if (id == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
   CHK_SUPPORT_NAME_ONLY(id)
   auto ret = get_id(dv_ind, amd::smi::kDevSubSysDevID, id);
   ss << __PRETTY_FUNCTION__ << " | ======= end ======="
@@ -1188,7 +1194,9 @@ rsmi_status_t rsmi_dev_pcie_slot_type_get(uint32_t dv_ind, rsmi_pcie_slot_type_t
 
   std::string value;
   int ret = dev->readDevInfo(amd::smi::kDevBoardInfo, "type", value);
-  if (ret != 0) return RSMI_STATUS_NOT_SUPPORTED;
+  if (ret != 0) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
 
   *type = RSMI_PCIE_SLOT_PCIE;
   if (value.compare("oam") == 0)
@@ -1277,7 +1285,9 @@ rsmi_status_t rsmi_dev_overdrive_level_get(uint32_t dv_ind, uint32_t* od) {
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
-  if (od == nullptr) return RSMI_STATUS_INVALID_ARGS;
+  if (od == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
   CHK_SUPPORT_NAME_ONLY(od)
   DEVICE_MUTEX
 
@@ -2814,7 +2824,9 @@ static rsmi_status_t get_dev_drm_render_minor(uint32_t dv_ind, uint32_t* minor) 
   }
 
   *minor = dev->drm_render_minor();
-  if (*minor) return RSMI_STATUS_SUCCESS;
+  if (*minor) {
+    return RSMI_STATUS_SUCCESS;
+  }
 
   return RSMI_STATUS_INIT_ERROR;
 }
@@ -2858,7 +2870,9 @@ rsmi_status_t rsmi_dev_pcie_vendor_name_get(uint32_t dv_ind, char* name, size_t 
   DEVICE_MUTEX
   uint16_t id = 0;
   ret = get_id(dv_ind, amd::smi::kDevPCieVendorID, &id);
-  if (ret != RSMI_STATUS_SUCCESS) return ret;
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
   std::string vendor_name = get_vendor_name_from_id(id);
 
   if (vendor_name == "") {
@@ -2918,7 +2932,9 @@ rsmi_status_t rsmi_dev_vram_vendor_get(uint32_t dv_ind, char* brand, uint32_t le
   LOG_TRACE(ss);
   CHK_SUPPORT_NAME_ONLY(brand)
 
-  if (brand == nullptr || len == 0) return RSMI_STATUS_INVALID_ARGS;
+  if (brand == nullptr || len == 0) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
   std::string val_str;
   DEVICE_MUTEX
   int ret = dev->readDevInfo(amd::smi::kDevVramVendor, &val_str);
@@ -2947,7 +2963,9 @@ rsmi_status_t rsmi_dev_subsystem_name_get(uint32_t dv_ind, char* name, size_t le
   LOG_TRACE(ss);
   CHK_SUPPORT_NAME_ONLY(name)
 
-  if (name == nullptr || len == 0) return RSMI_STATUS_INVALID_ARGS;
+  if (name == nullptr || len == 0) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
 
   DEVICE_MUTEX
 
@@ -2997,7 +3015,9 @@ rsmi_status_t rsmi_dev_pm_metrics_info_get(uint32_t dv_ind, rsmi_name_value_t** 
   }
 
   int ret = amd::smi::present_pmmetrics(file_path.c_str(), pm_metrics, num_of_metrics);
-  if (ret == 0) return RSMI_STATUS_SUCCESS;
+  if (ret == 0) {
+    return RSMI_STATUS_SUCCESS;
+  }
   return RSMI_STATUS_NOT_SUPPORTED;
 
   CATCH
@@ -3013,7 +3033,9 @@ rsmi_status_t rsmi_dev_reg_table_info_get(uint32_t dv_ind, rsmi_reg_type_t reg_t
   }
 
   int ret = amd::smi::present_reg_state(file_path.c_str(), reg_type, reg_metrics, num_of_metrics);
-  if (ret == 0) return RSMI_STATUS_SUCCESS;
+  if (ret == 0) {
+    return RSMI_STATUS_SUCCESS;
+  }
   return RSMI_STATUS_NOT_SUPPORTED;
 
   CATCH
@@ -3562,7 +3584,9 @@ rsmi_status_t rsmi_dev_fan_speed_get(uint32_t dv_ind, uint32_t sensor_ind, int64
   TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
-  if (speed == nullptr) return RSMI_STATUS_INVALID_ARGS;
+  if (speed == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
 
   rsmi_status_t ret;
 
@@ -3595,7 +3619,9 @@ rsmi_status_t rsmi_dev_fan_rpms_get(uint32_t dv_ind, uint32_t sensor_ind, int64_
   TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
-  if (speed == nullptr) return RSMI_STATUS_INVALID_ARGS;
+  if (speed == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
 
   ++sensor_ind;  // fan sysfs files have 1-based indices
 
@@ -3726,7 +3752,9 @@ rsmi_status_t rsmi_dev_fan_speed_max_get(uint32_t dv_ind, uint32_t sensor_ind,
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
-  if (max_speed == nullptr) return RSMI_STATUS_INVALID_ARGS;
+  if (max_speed == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
   ++sensor_ind;  // fan sysfs files have 1-based indices
   CHK_SUPPORT_SUBVAR_ONLY(max_speed, sensor_ind)
   DEVICE_MUTEX
@@ -4133,7 +4161,9 @@ rsmi_status_t rsmi_dev_power_profile_presets_get(uint32_t dv_ind, uint32_t reser
   TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
-  if (status == nullptr) return RSMI_STATUS_INVALID_ARGS;
+  if (status == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
 
   (void)reserved;
   CHK_SUPPORT_NAME_ONLY(status)
@@ -4275,11 +4305,15 @@ rsmi_status_t rsmi_dev_cache_info_get(uint32_t dv_ind, rsmi_gpu_cache_info_t* in
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
 
-  if (info == nullptr) return RSMI_STATUS_INVALID_ARGS;
+  if (info == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
 
   GET_DEV_AND_KFDNODE_FROM_INDX
 
-  if (kfd_node->get_cache_info(info) == 0) return RSMI_STATUS_SUCCESS;
+  if (kfd_node->get_cache_info(info) == 0) {
+    return RSMI_STATUS_SUCCESS;
+  }
 
   return RSMI_STATUS_NOT_SUPPORTED;
   CATCH
@@ -4910,7 +4944,9 @@ rsmi_status_t rsmi_dev_pci_replay_counter_get(uint32_t dv_ind, uint64_t* counter
   TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
-  if (counter == nullptr) return RSMI_STATUS_INVALID_ARGS;
+  if (counter == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
   CHK_SUPPORT_NAME_ONLY(counter)
 
   rsmi_status_t ret;
@@ -5109,8 +5145,12 @@ rsmi_status_t rsmi_counter_available_counters_get(uint32_t dv_ind, rsmi_event_gr
     case RSMI_EVNT_GRP_XGMI_DATA_OUT:
 
       ret = get_dev_value_int(amd::smi::kDevDFCountersAvailable, dv_ind, &val);
-      if (ret != RSMI_STATUS_SUCCESS) return ret;
-      if (val == UINT32_MAX) return RSMI_STATUS_NOT_SUPPORTED;
+      if (ret != RSMI_STATUS_SUCCESS) {
+        return ret;
+      }
+      if (val == UINT32_MAX) {
+        return RSMI_STATUS_NOT_SUPPORTED;
+      }
       *available = static_cast<uint32_t>(val);
       break;
 
