@@ -8,31 +8,36 @@
 
 std::optional<std::string_view> MockInputParameters::get_output_path()
 {
-    if (!m_output_path_set) return std::nullopt;
+    if (!m_output_path_set)
+        return std::nullopt;
     return std::string_view{m_output_path};
 }
 
 std::optional<std::string_view> MockInputParameters::get_requested_counters()
 {
-    if (!m_requested_counters_set) return std::nullopt;
+    if (!m_requested_counters_set)
+        return std::nullopt;
     return std::string_view{m_requested_counters};
 }
 
 std::optional<std::string_view> MockInputParameters::get_iteration_multiplexing_mode()
 {
-    if (!m_iteration_multiplexing_mode_set) return std::nullopt;
+    if (!m_iteration_multiplexing_mode_set)
+        return std::nullopt;
     return std::string_view{m_iteration_multiplexing_mode};
 }
 
 std::optional<std::string_view> MockInputParameters::get_kernel_filter_include_regex()
 {
-    if (!m_kernel_filter_include_regex_set) return std::nullopt;
+    if (!m_kernel_filter_include_regex_set)
+        return std::nullopt;
     return std::string_view{m_kernel_filter_include_regex};
 }
 
 std::optional<std::string_view> MockInputParameters::get_kernel_filter_range()
 {
-    if (!m_kernel_filter_range_set) return std::nullopt;
+    if (!m_kernel_filter_range_set)
+        return std::nullopt;
     return std::string_view{m_kernel_filter_range};
 }
 
@@ -66,17 +71,30 @@ void MockInputParameters::set_kernel_filter_range(const std::string& range)
     m_kernel_filter_range_set = true;
 }
 
-void MockInputParameters::unset_output_path() { m_output_path_set = false; }
-void MockInputParameters::unset_requested_counters() { m_requested_counters_set = false; }
+void MockInputParameters::unset_output_path()
+{
+    m_output_path_set = false;
+}
+
+void MockInputParameters::unset_requested_counters()
+{
+    m_requested_counters_set = false;
+}
+
 void MockInputParameters::unset_iteration_multiplexing_mode()
 {
     m_iteration_multiplexing_mode_set = false;
 }
+
 void MockInputParameters::unset_kernel_filter_include_regex()
 {
     m_kernel_filter_include_regex_set = false;
 }
-void MockInputParameters::unset_kernel_filter_range() { m_kernel_filter_range_set = false; }
+
+void MockInputParameters::unset_kernel_filter_range()
+{
+    m_kernel_filter_range_set = false;
+}
 
 /////////////////////////////////////////////////////////////////////////
 // MockSdkWrapper

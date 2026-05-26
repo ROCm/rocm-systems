@@ -32,15 +32,19 @@ public:
     static constexpr std::string_view kDefaultKernelFilterRange{""};
 
     static std::string_view get_default_output_path() { return kDefaultOutputPath; }
+
     static std::string_view get_default_requested_counters() { return kDefaultRequestedCounters; }
+
     static std::string_view get_default_iteration_multiplexing_mode()
     {
         return kDefaultIterationMultiplexingMode;
     }
+
     static std::string_view get_default_kernel_filter_include_regex()
     {
         return kDefaultKernelFilterIncludeRegex;
     }
+
     static std::string_view get_default_kernel_filter_range() { return kDefaultKernelFilterRange; }
 
     explicit EnvInputParameters(std::shared_ptr<const EnvironCache> environ = EnvironCache::instance());
