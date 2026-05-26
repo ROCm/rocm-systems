@@ -184,7 +184,7 @@ using amd_smi_nic_tx_ucast_pkts_track =
 
 // Unified Memory counter tracks
 using unified_memory_migration_throughput_track =
-    perfetto_counter_track<category::unified_memory_bandwidth>;
+    perfetto_counter_track<category::unified_memory_migration_throughput>;
 using unified_memory_fault_rate_track =
     perfetto_counter_track<category::unified_memory_fault_rate>;
 
@@ -1618,13 +1618,13 @@ perfetto_processor_t::handle_kfd_page_migrate(const kfd_sample& sample)
                                       gpu_device_index);
         unified_memory_migration_throughput_track::emplace(
             gpu_device_index, track_name, "GB/s",
-            trait::name<category::unified_memory_bandwidth>::value);
+            trait::name<category::unified_memory_migration_throughput>::value);
     }
 
     // bytes / ns == GB/s (decimal)
     const double migration_throughput_gbps =
         sample.value / static_cast<double>(duration_ns);
-    TRACE_COUNTER(trait::name<category::unified_memory_bandwidth>::value,
+    TRACE_COUNTER(trait::name<category::unified_memory_migration_throughput>::value,
                   unified_memory_migration_throughput_track::at(gpu_device_index, 0),
                   sample.end_timestamp, migration_throughput_gbps);
 }
