@@ -194,12 +194,11 @@ def _install_tree_prebuilt_candidates(tag: str) -> list[Path]:
     """Paths to try, in order, for a packager-baked prebuilt .so.
 
     The loader is installed at ``<prefix>/libexec/<project>/utils/``;
-    from there ``<prefix>`` is three levels up. The .so installs flat
-    under ``<prefix>/lib[64]/<project>/`` per the parent CMakeLists.
-    No dev-tree fallback: a developer iterating on the C++ sources
-    should rely on the JIT-cache or cmake tier, not a stale .so in
-    the source tree (that contract was a source of confusion in the
-    pre-C' layout and was dropped as part of the hard-break).
+    from there ``<prefix>`` is three levels up. The candidate paths
+    follow the standard ``<prefix>/lib[64]/<project>/`` layout for a
+    downstream packager-supplied artifact (the project's own install
+    rules ship sources only). No dev-tree fallback: developers
+    iterating on the C++ sources rely on the JIT cache or cmake tier.
     """
     install_root = _THIS_DIR.parent.parent.parent
     so_name = f"roctx_recordfn-{tag}.so"
@@ -269,10 +268,10 @@ def _jit_cache_dir() -> Path:
 
 
 _PREBUILT_HINT = (
-    "bake a prebuilt roctx_recordfn-{tag}.so into "
-    "<libdir>/" + _INSTALL_TREE_PROJECT_NAME + "/ by configuring with "
-    "-DBUILD_TORCH_TRACE_EXTENSION=ON -DTORCH_TRACE_PYTHON=<python> "
-    "so the loader's first tier matches"
+    "ship a prebuilt roctx_recordfn-{tag}.so under "
+    "<libdir>/" + _INSTALL_TREE_PROJECT_NAME + "/ (resolved by the "
+    "loader's prebuilt tier), or pin one explicitly via "
+    "ROCPROFCOMPUTE_ROCTX_RECORDFN_SO=<path>"
 )
 
 
@@ -530,7 +529,6 @@ def _try_cmake_build(tag: str) -> Optional[types.ModuleType]:
         str(_SO_SOURCE_DIR),
         "-B",
         str(build_dir),
-        "-DBUILD_TORCH_TRACE_EXTENSION=ON",
         f"-DTORCH_TRACE_PYTHON={sys.executable}",
         "-DCMAKE_BUILD_TYPE=Release",
     ]
@@ -641,7 +639,7 @@ def _try_jit_build(tag: str) -> Optional[types.ModuleType]:
             "the running PyTorch's torch.utils.cpp_extension.load "
             "requires the ninja build backend, which rocprof-compute "
             "does not depend on; the cpp_extension tier is skipped on "
-            "this host (the cmake tier 3a is the supported alternative)"
+            "this host (the cmake tier is the supported alternative)"
         )
         _log_cppext_failure(err)
         _record_jit_failure(tag, err, reason=_CPPEXT_TIER_NAME)

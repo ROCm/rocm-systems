@@ -15,7 +15,7 @@
 // torch/extension.h is intentionally avoided -- it pulls torch/all.h
 // which is stripped from some ROCm nightly wheels. The narrower
 // headers below cover everything we need; this contract is pinned by
-// test_roctx_recordfn_avoids_torch_umbrella_header.
+// test_roctx_recordfn_source_avoids_torch_umbrella_headers.
 #include <ATen/record_function.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
 #include <pybind11/pybind11.h>

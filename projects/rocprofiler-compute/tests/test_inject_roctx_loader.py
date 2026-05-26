@@ -1030,7 +1030,6 @@ def test_try_cmake_build_passes_runtime_python_to_cmake(monkeypatch, tmp_path):
 
     assert len(invocations) == 2, f"expected two cmake invocations, saw {invocations!r}"
     configure_argv = invocations[0]
-    assert "-DBUILD_TORCH_TRACE_EXTENSION=ON" in configure_argv
     runtime_python_flag = f"-DTORCH_TRACE_PYTHON={sys.executable}"
     assert runtime_python_flag in configure_argv, (
         f"-DTORCH_TRACE_PYTHON must equal sys.executable; saw {configure_argv!r}"

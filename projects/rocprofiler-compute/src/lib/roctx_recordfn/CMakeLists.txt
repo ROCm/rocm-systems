@@ -1,9 +1,9 @@
 ## Copyright (c) Advanced Micro Devices, Inc.
 ## SPDX-License-Identifier:  MIT
 ##
-## Builds roctx_recordfn.so for the --torch-trace C++ tier. Two consumers,
-# both producing a byte-name-identical artifact (same tag scheme,
-# computed by the loader's _source_fingerprint()):
+## Builds the tagged roctx_recordfn-<tag>.so for the --torch-trace
+# C++ tier. Two consumers, both producing the same filename (tag
+# scheme is computed by the loader's _source_fingerprint()):
 #   A. parent rocprof-compute project's add_subdirectory() -- gated on
 #      ENABLE_TESTS. The .so is a CI test fixture so pytest can pin the
 #      loader to a known artifact via ROCPROFCOMPUTE_ROCTX_RECORDFN_SO
