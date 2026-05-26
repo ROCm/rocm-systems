@@ -62,10 +62,6 @@ bool Stream::Create() { return create(); }
 
 // ================================================================================================
 void Stream::Destroy(hip::Stream* stream, bool forceDestroy) {
-  // If this stream was created inside an hipExecutionCtx_t, the ctx holds
-  // an additional retain() on it, so release() here only drops the caller's
-  // ref. The ctx's ref is dropped in ~ExecutionCtx, which is what actually
-  // frees the object when both refs are gone.
   stream->device().removeFromActiveQueues(stream);
   stream->GetDevice()->RemoveStream(stream);
   stream->SetForceDestroy(forceDestroy);

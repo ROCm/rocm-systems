@@ -19,11 +19,7 @@ hipError_t ihipBatchMemOperation(hipStream_t stream, cl_command_type cmdType, un
     return hipErrorContextIsDestroyed;
   }
 
-  // hipStreamBatchMemOp on a stream whose owning execution context has been
-  // destroyed must return hipErrorStreamDetached. This is a work-submitting
-  // API, so it falls under the general rule that any subsequent API call
-  // involving these streams returns hipErrorStreamDetached, with
-  // hipStreamDestroy as the sole exception.
+  // Reject work submission on a stream whose owning ctx has been destroyed.
   CHECK_STREAM_DETACHED(stream);
 
   // Validate operations in paramArray
@@ -60,11 +56,7 @@ hipError_t ihipStreamOperation(hipStream_t stream, cl_command_type cmdType, void
     return hipErrorContextIsDestroyed;
   }
 
-  // hipStreamWaitValue* / hipStreamWriteValue* on a stream whose owning
-  // execution context has been destroyed must return hipErrorStreamDetached.
-  // These are work-submitting APIs, so they fall under the general rule that
-  // any subsequent API call involving these streams returns
-  // hipErrorStreamDetached, with hipStreamDestroy as the sole exception.
+  // Reject work submission on a stream whose owning ctx has been destroyed.
   CHECK_STREAM_DETACHED(stream);
 
   amd::Memory* memory = getMemoryObject(ptr, offset);

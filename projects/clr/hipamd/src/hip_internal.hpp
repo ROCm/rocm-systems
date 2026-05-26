@@ -426,7 +426,6 @@ namespace hip {
     void EraseParallelCaptureStream(hipStream_t s) { parallelCaptureStreams_.erase(s); }
 
     // --- Execution context (green context) lifecycle ---
-
     /// Marks the stream as detached: its owning ExecutionCtx has been
     /// destroyed. Behavior:
     ///   - Subsequent work-submit / sync APIs on this stream must return
@@ -465,11 +464,7 @@ namespace hip {
     uint64_t captureID_ = 0;                              //!< Unique ID for this capture sequence
 
     // ----- Execution context (green context) state -----
-    /// Set true when the owning ExecutionCtx is destroyed. Once detached,
-    /// work-submit / sync APIs on this stream return hipErrorStreamDetached;
-    /// hipStreamDestroy still succeeds. Streams that are not created under
-    /// an ExecutionCtx leave this flag false for their lifetime.
-    std::atomic<bool> detached_{false};
+    std::atomic<bool> detached_{false};  //!< True once the owning ExecutionCtx has been destroyed
 
     static CommandQueue::Priority convertToQueuePriority(Priority p) {
       return p == Priority::High  ? amd::CommandQueue::Priority::High
