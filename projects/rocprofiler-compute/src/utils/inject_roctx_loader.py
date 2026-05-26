@@ -430,8 +430,11 @@ def _previous_jit_failure(tag: str) -> Optional[str]:
         marker = _jit_failure_marker(tag)
         if marker.exists():
             return marker.read_text().strip() or None
-    except Exception:
-        pass
+    except Exception as exc:
+        _safe_log(
+            "log",
+            f"jit failure-marker read skipped ({tag}): {type(exc).__name__}: {exc}",
+        )
     return None
 
 
@@ -454,8 +457,11 @@ def _install_cached_so(src_so: Path, cached_so: Path) -> None:
         return
     try:
         shutil.copy2(src_so, cached_so)
-    except Exception:
-        pass
+    except Exception as exc:
+        _safe_log(
+            "log",
+            f"jit cache install skipped ({cached_so}): {type(exc).__name__}: {exc}",
+        )
 
 
 def _try_jit_cached(tag: str) -> Optional[types.ModuleType]:

@@ -255,10 +255,7 @@ void save_snapshot(std::int64_t seq, const std::vector<StackEntry>& stack)
         evict_oldest_snapshot(shard);
     }
     shard.snapshots.emplace(seq, stack);
-    shard.lru_order.push_back(seq);
-    auto tail = shard.lru_order.end();
-    --tail;
-    shard.lru_idx.emplace(seq, tail);
+    lru_touch(shard, seq);
     g_n_snapshots_saved.fetch_add(1, std::memory_order_relaxed);
 }
 
