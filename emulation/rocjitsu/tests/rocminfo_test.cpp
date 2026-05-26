@@ -77,6 +77,13 @@ TEST(RocminfoTest, ReportsGfx950) {
       << rocminfo_output().output;
 }
 
+TEST(RocminfoTest, ReportsMarketingName) {
+  ASSERT_EQ(rocminfo_output().exit_code, 0) << rocminfo_output().output;
+  EXPECT_NE(rocminfo_output().output.find("MI350"), std::string::npos)
+      << "rocminfo did not report MI350 marketing name.\nOutput:\n"
+      << rocminfo_output().output;
+}
+
 TEST(RocminfoTest, ReportsWavefrontSize) {
   ASSERT_EQ(rocminfo_output().exit_code, 0) << rocminfo_output().output;
   EXPECT_NE(rocminfo_output().output.find("Wavefront Size:"), std::string::npos)

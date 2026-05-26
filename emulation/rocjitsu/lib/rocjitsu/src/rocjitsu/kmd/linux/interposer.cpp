@@ -875,6 +875,17 @@ int amdgpu_device_get_fd(void * /*device_handle*/) {
   return fd >= 0 ? fd : InterposerContext::ctx.driver_fd();
 }
 
+// Interpose libdrm_amdgpu's amdgpu_get_marketing_name. ROCR calls this to
+// get the GPU's marketing name. We return the name from the simulation config
+// so that the simulated GPU is reported correctly regardless of what physical
+// GPU (if any) is present on the host.
+const char *amdgpu_get_marketing_name(void * /*device_handle*/) {
+  auto *drv = SimulatedDriver::lookup(SimulatedDriver::kfd_fd());
+  if (drv)
+    return drv->topology().gpu_info().marketing_name;
+  return "";
+}
+
 // -- fopen / freopen interposition (sysfs redirect) --
 
 FILE *fopen(const char *path, const char *mode) {

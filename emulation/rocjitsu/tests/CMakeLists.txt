@@ -156,6 +156,11 @@ if(ROCMINFO_EXECUTABLE)
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     )
     add_test(
+        NAME "RocminfoTest.ReportsMarketingName"
+        COMMAND rocminfo_test --gtest_filter=RocminfoTest.ReportsMarketingName
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    add_test(
         NAME "RocminfoTest.ReportsWavefrontSize"
         COMMAND rocminfo_test --gtest_filter=RocminfoTest.ReportsWavefrontSize
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
