@@ -30,6 +30,7 @@
 #include <cassert>
 
 #include "backend_ipc.hpp"
+#include "ipc_user_buf.hpp"
 #include "envvar.hpp"
 #include "ipc_team.hpp"
 #include "mpi_instance.hpp"
@@ -549,6 +550,7 @@ int IPCBackend::buffer_register(void *addr, size_t length) {
   }
 
   user_buffers_.push_back(ubuf);
+  sync_user_buf_constmem();
   LOG_TRACE("IPCBackend::buffer_register OK: %p +%zu (total user buffers: %zu)",
             addr, length, user_buffers_.size());
   return ROCSHMEM_SUCCESS;
@@ -572,7 +574,24 @@ int IPCBackend::buffer_unregister(void *addr) {
       break;
     }
   }
+  sync_user_buf_constmem();
   return ROCSHMEM_SUCCESS;
+}
+
+void IPCBackend::sync_user_buf_constmem() {
+  int count = std::min((int)user_buffers_.size(), IPC_MAX_USER_BUFS);
+  ipc_user_buf_entry_t entries[IPC_MAX_USER_BUFS] = {};
+
+  for (int b = 0; b < count; b++) {
+    entries[b].local_base = reinterpret_cast<uintptr_t>(user_buffers_[b].addr);
+    entries[b].length = user_buffers_[b].length;
+    for (int pe = 0; pe < num_pes && pe < IPC_MAX_PES; pe++) {
+      entries[b].remote_bases[pe] = reinterpret_cast<uintptr_t>(user_buffers_[b].bases[pe]);
+    }
+  }
+
+  ipc_user_buf_update_table(entries, count);
+  LOG_TRACE("IPCBackend::sync_user_buf_constmem: %d buffers synced to __constant__", count);
 }
 
 void IPCBackend::setup_fence_buffer() {
