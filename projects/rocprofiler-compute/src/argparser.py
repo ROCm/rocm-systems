@@ -111,6 +111,19 @@ def print_avail_arch(avail_arch: list[str], args: str) -> str:
     return ret_str
 
 
+def listable_analysis_archs(
+    rocprof_compute_home: Path, supported_archs: dict[str, str]
+) -> list[str]:
+    """Return CLI arch choices for analysis listing commands."""
+    analysis_root = rocprof_compute_home / "rocprof_compute_soc" / "analysis_configs"
+    config_archs = {
+        entry.name
+        for entry in analysis_root.iterdir()
+        if entry.is_dir() and entry.name.startswith("gfx")
+    }
+    return sorted(set(supported_archs.keys()) | config_archs)
+
+
 def add_general_group(
     parser: argparse.ArgumentParser,
     rocprof_compute_home: Path,
@@ -118,6 +131,7 @@ def add_general_group(
     rocprof_compute_version: dict[str, Optional[str]],
 ) -> None:
     general_group = parser.add_argument_group("General Options")
+    list_archs = listable_analysis_archs(rocprof_compute_home, supported_archs)
 
     general_group.add_argument(
         "-v",
@@ -139,15 +153,15 @@ def add_general_group(
         "--list-metrics",
         dest="list_metrics",
         metavar="",
-        choices=supported_archs.keys(),
-        help=print_avail_arch(list(supported_archs.keys()), "metrics"),
+        choices=list_archs,
+        help=print_avail_arch(list_archs, "metrics"),
     )
     general_group.add_argument(
         "--list-blocks",
         dest="list_blocks",
         metavar="",
-        choices=supported_archs.keys(),
-        help=print_avail_arch(list(supported_archs.keys()), "blocks"),
+        choices=list_archs,
+        help=print_avail_arch(list_archs, "blocks"),
     )
     general_group.add_argument(
         "--config-dir",
