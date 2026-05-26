@@ -5,6 +5,7 @@
 // recording output sink.
 
 #include "common/tests/filesystem.hpp"
+#include "core/categories.hpp"
 #include "core/trace_cache/unified_memory_processor.hpp"
 #include "unified_memory_test_helpers.hpp"
 #include <cstdint>
@@ -224,6 +225,18 @@ TEST(MigrationStats, ArithmeticAndSentinels)
                      10.0);  // 4000 bytes / 400 ns = 10 GB/s
 }
 
+TEST(UnifiedMemoryCategory, MigrationThroughputNameAndCompatibilityAlias)
+{
+    using category_type = tim::category::unified_memory_migration_throughput;
+
+    EXPECT_STREQ(tim::trait::name<category_type>::value,
+                 "unified_memory_migration_throughput");
+    EXPECT_EQ(rocprofsys::category_enum_id<category_type>::value,
+              ROCPROFSYS_CATEGORY_UNIFIED_MEMORY_MIGRATION_THROUGHPUT);
+    EXPECT_EQ(ROCPROFSYS_CATEGORY_UNIFIED_MEMORY_BANDWIDTH,
+              ROCPROFSYS_CATEGORY_UNIFIED_MEMORY_MIGRATION_THROUGHPUT);
+}
+
 TEST_F(UnifiedMemoryProcessorTest, JsonSchemaAlwaysEmitsAllDirections)
 {
     processor->handle(make_kfd_page_migrate_sample(kCpu0, kGpu1, /*size=*/4096,
@@ -247,6 +260,9 @@ TEST_F(UnifiedMemoryProcessorTest, JsonSchemaAlwaysEmitsAllDirections)
         {
             EXPECT_TRUE(migrations[dir].contains(k)) << dir << " missing stat: " << k;
         }
+        EXPECT_DOUBLE_EQ(migrations[dir]["bandwidth_gbps"].get<double>(),
+                         migrations[dir]["migration_throughput_gbps"].get<double>())
+            << dir << ": deprecated alias must equal primary field";
     }
 
     EXPECT_EQ(migrations["device_to_host"]["count"], 0u);

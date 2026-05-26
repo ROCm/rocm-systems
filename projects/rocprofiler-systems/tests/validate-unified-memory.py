@@ -86,7 +86,12 @@ def validate_text_output(filepath: Path) -> bool:
     has_device_block = 'Device "' in content
 
     if has_device_block:
-        migration_headers = ["Count", "Avg Size", "Total Size", "Bandwidth"]
+        migration_headers = [
+            "Count",
+            "Avg Size",
+            "Total Size",
+            "Migration Throughput",
+        ]
         missing = [h for h in migration_headers if h not in content]
         if missing:
             print(f"Error: Missing migration headers in text output: {missing}")
@@ -191,6 +196,12 @@ def validate_json_output(filepath: Path) -> bool:
 
             if missing_stats:
                 print(f"Error: Device {i}, {direction} missing stats: {missing_stats}")
+                return False
+            if stats["bandwidth_gbps"] != stats["migration_throughput_gbps"]:
+                print(
+                    f"Error: Device {i}, {direction} has mismatched "
+                    "bandwidth_gbps compatibility alias"
+                )
                 return False
 
     triggers = summary["migration_triggers"]
