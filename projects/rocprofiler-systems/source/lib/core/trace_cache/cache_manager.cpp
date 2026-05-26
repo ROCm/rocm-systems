@@ -152,7 +152,7 @@ cache_manager::post_process_bulk(output_file_registry& _output_registry,
         post_processor processor{ _tracker, _output_registry };
 
         const auto output_layout      = config::get_perfetto_output_layout();
-        const bool single_file_layout = (output_layout == "single_file");
+        const bool single_file_layout = (output_layout == "single_file_only");
 
         std::unique_ptr<cached_perfetto_session> session;
         if(enabled_formats.is_perfetto_enabled())

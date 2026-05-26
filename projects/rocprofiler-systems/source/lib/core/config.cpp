@@ -707,11 +707,15 @@ configure_settings(bool _init)
 
     ROCPROFSYS_CONFIG_SETTING(
         std::string, "ROCPROFSYS_PERFETTO_OUTPUT_LAYOUT",
-        "Output layout for cached perfetto traces. 'per_process' writes one "
-        ".proto per emitting pid; 'single_file' concatenates all pids into one "
-        ".proto and skips the merge script invocation",
-        "per_process", "perfetto", "io", "data")
-        ->set_choices({ "per_process", "single_file" });
+        "Output layout for perfetto traces (both live MPI and cached). "
+        "'single_file_only' produces one merged trace across pids and MPI ranks; "
+        "'per_process_only' produces per-pid (cached) or per-rank (live) files with "
+        "no cross-rank merge; 'full' (default) produces both per-process files and "
+        "a merged trace. The legacy values 'single_file' and 'per_process' are "
+        "accepted with a deprecation warning",
+        "full", "perfetto", "io", "data")
+        ->set_choices({ "single_file_only", "per_process_only", "full", "single_file",
+                        "per_process" });
 
     ROCPROFSYS_CONFIG_SETTING(std::string, "ROCPROFSYS_ENABLE_CATEGORIES",
                               "Enable collecting profiling and trace data for these "
