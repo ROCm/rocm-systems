@@ -282,8 +282,14 @@ def test_calc_builtin_vars_processes_per_xcd_first():
             "rocprof_compute_analyze.analysis_db.get_build_in_vars",
             return_value=mock_builtin_vars,
         ),
+        patch(
+            "utils.utils_counter_defs.get_build_in_vars",
+            return_value=mock_builtin_vars,
+        ),
     ):
-        result = db_analysis.calc_builtin_vars(pmc_df, sys_info)
+        result = db_analysis.calc_builtin_vars(
+            pmc_df, sys_info, ["$PER_XCD_VAR", "$DERIVED_VAR"]
+        )
 
     # Verify PER_XCD var was computed
     assert sys_info["PER_XCD_VAR"] == 20
@@ -317,8 +323,14 @@ def test_calc_builtin_vars_with_dataframe_expressions():
             "rocprof_compute_analyze.analysis_db.get_build_in_vars",
             return_value=mock_builtin_vars,
         ),
+        patch(
+            "utils.utils_counter_defs.get_build_in_vars",
+            return_value=mock_builtin_vars,
+        ),
     ):
-        db_analysis.calc_builtin_vars(pmc_df, sys_info)
+        db_analysis.calc_builtin_vars(
+            pmc_df, sys_info, ["$TOTAL_COUNT", "$SCALED_TOTAL"]
+        )
 
     assert sys_info["TOTAL_COUNT"] == 60
     assert sys_info["SCALED_TOTAL"] == 120
@@ -383,6 +395,10 @@ def test_calc_dataframe_expressions_with_builtin_vars():
         ),
         patch(
             "rocprof_compute_analyze.analysis_db.get_build_in_vars",
+            return_value=mock_builtin_vars,
+        ),
+        patch(
+            "utils.utils_counter_defs.get_build_in_vars",
             return_value=mock_builtin_vars,
         ),
     ):
