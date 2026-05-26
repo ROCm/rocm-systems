@@ -155,6 +155,7 @@ static inline ncclResult_t ncclCuMemHostAlloc(void** ptr, CUmemGenericAllocation
   prop.location.type = CU_MEM_LOCATION_TYPE_HOST;
   prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
   prop.requestedHandleTypes = type; // So it can be exported
+  // HIP/CLR requires host id to be 0. cpuNumaNodeId can exceed GPU count and fail.
   prop.location.id = 0;             // ignored on the Host path
 #else
   prop.location.type = CU_MEM_LOCATION_TYPE_HOST_NUMA;

@@ -140,6 +140,7 @@ int ncclCuMemHostEnable() {
       prop.location.type = hipMemLocationTypeHost;
       prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
       prop.requestedHandleTypes = ncclCuMemHandleType;
+      // HIP/CLR requires host id to be 0. cpuNumaNodeId can exceed GPU count and fail.
       prop.location.id = 0;  // ignored on the Host path
       CUCHECK(cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM));
       size = 1;
