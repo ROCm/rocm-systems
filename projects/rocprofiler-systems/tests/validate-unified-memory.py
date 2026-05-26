@@ -190,18 +190,11 @@ def validate_json_output(filepath: Path) -> bool:
                 "avg_size_bytes",
                 "total_time_ns",
                 "migration_throughput_gbps",
-                "bandwidth_gbps",
             ]
             missing_stats = [field for field in required_stats if field not in stats]
 
             if missing_stats:
                 print(f"Error: Device {i}, {direction} missing stats: {missing_stats}")
-                return False
-            if stats["bandwidth_gbps"] != stats["migration_throughput_gbps"]:
-                print(
-                    f"Error: Device {i}, {direction} has mismatched "
-                    "bandwidth_gbps compatibility alias"
-                )
                 return False
 
     triggers = summary["migration_triggers"]

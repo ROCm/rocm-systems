@@ -481,8 +481,6 @@ unified_memory_processor_t::write_json_output(std::ostream& out) const
             obj["total_size_bytes"] = stats.total_size_bytes;
             obj["total_time_ns"]    = stats.total_time_ns;
             obj["migration_throughput_gbps"] = stats.migration_throughput_gbps();
-            // Deprecated compatibility alias. Prefer migration_throughput_gbps.
-            obj["bandwidth_gbps"] = stats.migration_throughput_gbps();
             return obj;
         };
 

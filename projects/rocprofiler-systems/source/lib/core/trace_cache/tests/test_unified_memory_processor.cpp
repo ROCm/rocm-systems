@@ -233,8 +233,6 @@ TEST(UnifiedMemoryCategory, MigrationThroughputNameAndCompatibilityAlias)
                  "unified_memory_migration_throughput");
     EXPECT_EQ(rocprofsys::category_enum_id<category_type>::value,
               ROCPROFSYS_CATEGORY_UNIFIED_MEMORY_MIGRATION_THROUGHPUT);
-    EXPECT_EQ(ROCPROFSYS_CATEGORY_UNIFIED_MEMORY_BANDWIDTH,
-              ROCPROFSYS_CATEGORY_UNIFIED_MEMORY_MIGRATION_THROUGHPUT);
 }
 
 TEST_F(UnifiedMemoryProcessorTest, JsonSchemaAlwaysEmitsAllDirections)
@@ -254,15 +252,12 @@ TEST_F(UnifiedMemoryProcessorTest, JsonSchemaAlwaysEmitsAllDirections)
     for(const char* dir : { "host_to_device", "device_to_host", "device_to_device" })
     {
         ASSERT_TRUE(migrations.contains(dir)) << "missing direction key: " << dir;
-        for(const char* k : { "count", "total_size_bytes", "min_size_bytes",
-                              "max_size_bytes", "avg_size_bytes", "total_time_ns",
-                              "migration_throughput_gbps", "bandwidth_gbps" })
+        for(const char* k :
+            { "count", "total_size_bytes", "min_size_bytes", "max_size_bytes",
+              "avg_size_bytes", "total_time_ns", "migration_throughput_gbps" })
         {
             EXPECT_TRUE(migrations[dir].contains(k)) << dir << " missing stat: " << k;
         }
-        EXPECT_DOUBLE_EQ(migrations[dir]["bandwidth_gbps"].get<double>(),
-                         migrations[dir]["migration_throughput_gbps"].get<double>())
-            << dir << ": deprecated alias must equal primary field";
     }
 
     EXPECT_EQ(migrations["device_to_host"]["count"], 0u);
