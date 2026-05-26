@@ -168,8 +168,10 @@ per_pid_file_sink::finalize()
 // single_file_sink
 // ----------------------------------------------------------------------------
 
-single_file_sink::single_file_sink(output_file_registry& registry)
+single_file_sink::single_file_sink(output_file_registry& registry,
+                                   std::string           output_filename_override)
 : m_registry{ &registry }
+, m_output_filename_override{ std::move(output_filename_override) }
 {}
 
 void
@@ -235,7 +237,9 @@ single_file_sink::on_source_drained(int source_id, std::vector<char> bytes)
 void
 single_file_sink::finalize()
 {
-    auto filename = config::get_perfetto_output_filename();
+    auto filename = m_output_filename_override.empty()
+                        ? config::get_perfetto_output_filename()
+                        : m_output_filename_override;
 
     if(!config::output_filtering::is_file_output_enabled_for_current_mpi_rank())
     {

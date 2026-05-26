@@ -2136,6 +2136,15 @@ get_perfetto_combined_traces()
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
+bool
+combined_traces_explicitly_set()
+{
+    static auto _v = get_config()->find("ROCPROFSYS_PERFETTO_COMBINE_TRACES");
+    if(_v == get_config()->end()) return false;
+    const auto& setting = *_v->second;
+    return setting.get_environ_updated() || setting.get_config_updated();
+}
+
 std::string
 get_perfetto_fill_policy()
 {

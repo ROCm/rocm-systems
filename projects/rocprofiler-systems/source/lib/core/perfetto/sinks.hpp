@@ -20,13 +20,14 @@ class output_file_registry;
 
 namespace core
 {
-// Live-mode sink: receives the engine's drained bytes for the current pid,
-// runs the existing MPI gather (when ROCPROFSYS_USE_MPI is set), writes the
-// concatenated trace to disk, and runs rocprof-sys-merge-output.sh on rank 0.
-// Holds borrowed references to output_file_registry and a
-// perfetto_output_error flag that the driver consults after finalize.
-// Used concretely by live_perfetto_driver — not dispatched through the
-// engine's sink boundary, so it is not a variant alternative below.
+// Live-mode sink: receives the engine's drained bytes for the current pid and
+// writes them to the configured per-rank output filename. Holds borrowed
+// references to output_file_registry and a perfetto_output_error flag that
+// the driver consults after finalize. Used concretely by live_perfetto_driver
+// for the per-rank file under the `per_process_only` and `full` layouts —
+// cross-rank MPI gather + merge lives in the driver and routes through
+// single_file_sink instead. Not dispatched through the engine's sink boundary,
+// so it is not a variant alternative below.
 class live_fd_sink
 {
 public:
@@ -92,7 +93,13 @@ private:
 class single_file_sink
 {
 public:
-    explicit single_file_sink(output_file_registry& registry);
+    // output_filename_override empty -> resolve via
+    // config::get_perfetto_output_filename() at finalize time. Set to a concrete path
+    // when the caller wants to write to a different location than the configured base
+    // (e.g. the live "full" layout writes its cross-rank merged trace to
+    // `<dir>/merged.proto` alongside per-rank files).
+    explicit single_file_sink(output_file_registry& registry,
+                              std::string           output_filename_override = {});
 
     single_file_sink(single_file_sink&&) noexcept            = default;
     single_file_sink& operator=(single_file_sink&&) noexcept = default;
@@ -105,6 +112,7 @@ public:
 
 private:
     output_file_registry*                  m_registry{ nullptr };
+    std::string                            m_output_filename_override{};
     std::vector<char>                      m_buffer{};
     std::unordered_map<int, std::uint32_t> m_source_seq_ids{};
     std::uint32_t                          m_next_seq_id{ 1 };

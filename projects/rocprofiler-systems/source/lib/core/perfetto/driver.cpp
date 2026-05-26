@@ -8,7 +8,6 @@
 #include "core/output_file_registry.hpp"
 #include "core/perfetto/engine.hpp"
 #include "core/perfetto/fwd.hpp"
-#include "core/perfetto/merge_script.hpp"
 #include "core/perfetto/sinks.hpp"
 #include "core/timemory.hpp"
 #include "core/utility.hpp"
@@ -78,31 +77,35 @@ std::atomic<live_perfetto_driver*> g_active_driver{ nullptr };
 // callstacks the user does not want world-readable on shared workstations.
 constexpr ::mode_t TMP_FILE_PERMS = 0600;
 
-// When ROCPROFSYS_USE_MPI is enabled and ROCPROFSYS_PERFETTO_COMBINED_TRACES
-// is set, gather every rank's trace bytes into a single buffer on the
-// collecting rank so the live sink writes one combined .proto instead of one
-// per rank. Returns the input unchanged when MPI is disabled at build time or
-// the combined-traces setting is off.
-std::vector<char>
-gather_combined_trace_bytes(std::vector<char> local_bytes)
+// Collect each MPI rank's trace bytes into per-rank slots on the root rank so
+// the caller can feed them as separate sources into single_file_sink (whose
+// per-source trusted_packet_sequence_id rewrite eliminates the collisions a
+// raw byte-level concat would produce). Non-root ranks return an empty vector
+// after sending; the no-MPI build returns a single-element wrapper so callers
+// iterate identically. Collective when MPI is initialized — every rank must
+// call it.
+std::vector<std::vector<char>>
+gather_per_rank_trace_bytes(std::vector<char> local_bytes)
 {
 #if defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0
-    if(!config::get_perfetto_combined_traces()) return local_bytes;
-
-    auto per_rank = mpi::gather_bytes(std::move(local_bytes));
-
-    std::vector<char> combined{};
-    for(auto& chunk : per_rank)
-    {
-        if(combined.empty())
-            combined = std::move(chunk);
-        else
-            combined.insert(combined.end(), chunk.begin(), chunk.end());
-    }
-    return combined;
+    return mpi::gather_bytes(std::move(local_bytes));
 #else
-    return local_bytes;
+    return { std::move(local_bytes) };
 #endif
+}
+
+void
+warn_combined_traces_deprecated_once()
+{
+    static bool warned = false;
+    if(warned) return;
+    if(!config::combined_traces_explicitly_set()) return;
+
+    warned = true;
+    LOG_WARNING("ROCPROFSYS_PERFETTO_COMBINE_TRACES is deprecated and no longer "
+                "consulted; ROCPROFSYS_PERFETTO_OUTPUT_LAYOUT now controls per-rank "
+                "vs merged output. Set OUTPUT_LAYOUT to 'single_file_only', "
+                "'per_process_only', or 'full' (default) to silence this warning.");
 }
 }  // namespace
 
@@ -188,17 +191,40 @@ live_perfetto_driver::post_process(bool&                 perfetto_output_error,
 
     m_engine->destroy_session(pid);
 
-    bytes = gather_combined_trace_bytes(std::move(bytes));
+    warn_combined_traces_deprecated_once();
 
-    auto sink = core::live_fd_sink{ &perfetto_output_error, registry };
-    sink.on_source_drained(static_cast<int>(pid), std::move(bytes));
-    sink.finalize();
+    const auto layout        = config::get_perfetto_output_layout();
+    const bool want_per_rank = (layout != "single_file_only");
+    const bool want_merged   = (layout != "per_process_only");
 
-    if(dmp::rank() == 0 &&
-       config::output_filtering::is_file_output_enabled_for_current_mpi_rank())
+    if(want_per_rank)
     {
-        core::perfetto::run_merge_script(
-            filepath::dirname(config::get_perfetto_output_filename()));
+        auto sink         = core::live_fd_sink{ &perfetto_output_error, registry };
+        auto bytes_for_pr = want_merged ? bytes : std::move(bytes);
+        sink.on_source_drained(static_cast<int>(pid), std::move(bytes_for_pr));
+        sink.finalize();
+    }
+
+    if(want_merged)
+    {
+        // gather_per_rank_trace_bytes is collective when MPI is initialized; every
+        // rank must call it even though only rank 0 consumes the returned slots.
+        auto per_rank = gather_per_rank_trace_bytes(std::move(bytes));
+
+        if(dmp::rank() == 0)
+        {
+            const auto base_filename = config::get_perfetto_output_filename();
+            const auto override_path =
+                (layout == "full") ? (filepath::dirname(base_filename) + "/merged.proto")
+                                   : std::string{};
+            auto sink = core::single_file_sink{ registry, override_path };
+            for(std::size_t i = 0; i < per_rank.size(); ++i)
+            {
+                if(!per_rank[i].empty())
+                    sink.on_source_drained(static_cast<int>(i), std::move(per_rank[i]));
+            }
+            sink.finalize();
+        }
     }
 
     if(m_tmp_file)

@@ -246,6 +246,12 @@ get_perfetto_flush_period();
 bool
 get_perfetto_combined_traces();
 
+// True iff the user explicitly set ROCPROFSYS_PERFETTO_COMBINE_TRACES via
+// environment or a config file. Used to fire a one-shot deprecation warning
+// — the setting is no longer consulted by the routing code.
+bool
+combined_traces_explicitly_set();
+
 std::string
 get_perfetto_fill_policy();
 

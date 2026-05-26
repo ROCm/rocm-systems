@@ -120,11 +120,94 @@ class TestMPI(RocprofsysTest):
             "--min-instructions",
             "0",
         ]
-        REWRITE_PASS_REGEX = [r"Successfully executed: .+rocprof-sys-merge-output.sh.*"]
-        REWRITE_FAIL_REGEX = ["Script not found", "Failed to execute"]
+        # `full` layout writes per-rank `perfetto-trace-N.proto` files via
+        # live_fd_sink AND a cross-rank `merged.proto` via single_file_sink on
+        # rank 0. The legacy shell script (rocprof-sys-merge-output.sh) is no
+        # longer invoked from the live path.
+        REWRITE_PASS_REGEX = [r"perfetto-trace-0\.proto", r"merged\.proto"]
+        REWRITE_FAIL_REGEX = [
+            r"Successfully executed: .+rocprof-sys-merge-output\.sh",
+            "Script not found",
+            "Failed to execute",
+        ]
         ENV = {
             "ROCPROFSYS_VERBOSE": "1",
-            "ROCPROFSYS_MERGE_PERFETTO_FILES": "ON",
+            "ROCPROFSYS_PERFETTO_OUTPUT_LAYOUT": "full",
+        }
+        result = self.run_test(
+            mode,
+            "mpi-example",
+            env=ENV,
+            rewrite_args=REWRITE_ARGS,
+            launcher="mpi",
+            num_procs=2,
+        )
+        self.assert_regex(
+            result,
+            mode,
+            rewrite_pass_regex=REWRITE_PASS_REGEX,
+            rewrite_fail_regex=REWRITE_FAIL_REGEX,
+        )
+
+    @pytest.mark.parametrize("mode", ["sampling", "binary_rewrite", "sys_run"])
+    def test_perfetto_single_file_only(self, mode):
+        REWRITE_ARGS = [
+            "-e",
+            "-v",
+            "2",
+            "--label",
+            "file",
+            "line",
+            "--min-instructions",
+            "0",
+        ]
+        # `single_file_only` produces exactly one merged trace at the base
+        # filename via single_file_sink on rank 0; no per-rank files, no
+        # separate merged.proto.
+        REWRITE_PASS_REGEX = [r"perfetto-trace\.proto"]
+        REWRITE_FAIL_REGEX = [
+            r"perfetto-trace-0\.proto",
+            r"perfetto-trace-1\.proto",
+            r"merged\.proto",
+        ]
+        ENV = {
+            "ROCPROFSYS_VERBOSE": "1",
+            "ROCPROFSYS_PERFETTO_OUTPUT_LAYOUT": "single_file_only",
+        }
+        result = self.run_test(
+            mode,
+            "mpi-example",
+            env=ENV,
+            rewrite_args=REWRITE_ARGS,
+            launcher="mpi",
+            num_procs=2,
+        )
+        self.assert_regex(
+            result,
+            mode,
+            rewrite_pass_regex=REWRITE_PASS_REGEX,
+            rewrite_fail_regex=REWRITE_FAIL_REGEX,
+        )
+
+    @pytest.mark.parametrize("mode", ["sampling", "binary_rewrite", "sys_run"])
+    def test_perfetto_per_process_only(self, mode):
+        REWRITE_ARGS = [
+            "-e",
+            "-v",
+            "2",
+            "--label",
+            "file",
+            "line",
+            "--min-instructions",
+            "0",
+        ]
+        # `per_process_only` produces per-rank files via live_fd_sink; no
+        # cross-rank merge happens, so merged.proto must not exist.
+        REWRITE_PASS_REGEX = [r"perfetto-trace-0\.proto", r"perfetto-trace-1\.proto"]
+        REWRITE_FAIL_REGEX = [r"merged\.proto"]
+        ENV = {
+            "ROCPROFSYS_VERBOSE": "1",
+            "ROCPROFSYS_PERFETTO_OUTPUT_LAYOUT": "per_process_only",
         }
         result = self.run_test(
             mode,
