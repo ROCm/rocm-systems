@@ -63,8 +63,10 @@ target_compile_definitions(HrrTest PRIVATE
 
 # ---------------------------------------------------------------------------
 # hrr_roundtrip.cc needs:
-#   HRR_TEST_EXE     — absolute path to HrrTest.exe (the capture subprocess)
-#   HRR_PLAYBACK_EXE — absolute path to hrr-playback.exe
+#   HRR_TEST_EXE     — bare filename; SpawnProc resolves it from currentPath()
+#                      (= CTest WORKING_DIRECTORY = HrrTest's own directory).
+#   HRR_PLAYBACK_EXE — bare filename; hrr-playback is copied next to HrrTest
+#                      via POST_BUILD so it is always colocated.
 #   ROCM_BIN_PATH    — prepended to PATH in the child so it finds amdhip64_7.dll
 #                      (CTest/bash PATH does not include the ROCm bin directory)
 # ---------------------------------------------------------------------------
@@ -81,6 +83,17 @@ if(HIP_PLATFORM STREQUAL "amd")
                         "Pass -DHRR_PLAYBACK_EXE=<path> to cmake.")
   endif()
   message(STATUS "HRR playback: ${HRR_PLAYBACK_EXE}")
+
+  # Copy hrr-playback into HrrTest's output directory so that SpawnProc can
+  # find it via the bare name "hrr-playback" (resolved relative to the CTest
+  # WORKING_DIRECTORY, which is HrrTest's directory).  This survives packaged
+  # test runs where the original CLR install prefix is no longer present.
+  add_custom_command(TARGET HrrTest POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      "${HRR_PLAYBACK_EXE}"
+      "$<TARGET_FILE_DIR:HrrTest>/"
+    COMMENT "Copying hrr-playback next to HrrTest"
+  )
 
   # Optional: hip_raw_trace.exe for Unit_HRR_MultiThreadRoundtrip.
   # A genuine multi-threaded capture workload (4 threads + graph + pinned + hostReg).
@@ -108,7 +121,7 @@ if(HIP_PLATFORM STREQUAL "amd")
     # tree and from an installed/packaged test run where the build tree is
     # no longer present.
     HRR_TEST_EXE="HrrTest"
-    HRR_PLAYBACK_EXE="${HRR_PLAYBACK_EXE}"
+    HRR_PLAYBACK_EXE="hrr-playback"
     HRR_RAW_TRACE_EXE="${HRR_RAW_TRACE_EXE}"
     ROCM_BIN_PATH="${ROCM_PATH}/bin"
   )
