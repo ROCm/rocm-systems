@@ -10,6 +10,10 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     include(${CMAKE_CURRENT_LIST_DIR}/../cmake/standalone-helpers.cmake OPTIONAL)
 endif()
 
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 find_package(hip QUIET HINTS ${ROCmVersion_DIR} PATHS ${ROCmVersion_DIR})
 
 find_program(
@@ -56,7 +60,11 @@ endif()
 find_library(
     ROCTX_LIBRARY
     NAMES rocprofiler-sdk-roctx
-    PATHS ${ROCM_PATH}/lib ${ROCM_PATH}/lib64 /opt/rocm/lib
+    HINTS ${ROCmVersion_DIR} ${ROCM_PATH}
+    ENV ROCM_PATH
+    /opt/rocm
+    PATH_SUFFIXES lib lib64
+    PATHS ${ROCM_PATH}/lib ${ROCM_PATH}/lib64 /opt/rocm/lib /opt/rocm/lib64
     REQUIRED
 )
 

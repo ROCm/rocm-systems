@@ -11,6 +11,7 @@ This directory contains example applications demonstrating various profiling sce
 | [transpose](transpose/) | Tiled matrix transpose on GPU with multi-threaded stream execution | HIP |
 | [unified-memory](unified-memory/) | Managed-memory workload that triggers KFD page fault and migration events and emits unified-memory profiling reports | HIP, XNACK-capable AMD GPU |
 | [scratch-memory](scratch-memory/) | GPU scratch memory allocation stress test across primary and overflow slots | HIP, HSA |
+| [hip-graph-bubbles](hip-graph-bubbles/) | HIP graph capture with repeated launches and rocTX ranges for graph execution profiling | HIP, rocprofiler-sdk-roctx |
 | [sdma_test](sdma_test/) | SDMA engine bandwidth benchmark for H2D, D2D, and D2H transfers | HIP |
 | [transferBench](transferBench/) | All-to-all transfer benchmark across CPU, GPU, SDMA, and NIC executors | HIP, HSA |
 

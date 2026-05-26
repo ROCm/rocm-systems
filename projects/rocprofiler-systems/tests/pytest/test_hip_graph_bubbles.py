@@ -20,14 +20,10 @@ pytestmark = [
     pytest.mark.ci_enable,
 ]
 
-# Must match RUN_ARGS in tests/rocprof-sys-hip-graph-bubbles-tests.cmake. If changed, update
-# tests/rocpd-validation-rules/hip-graph-bubbles/graph-bubbles-rules.json (kernel count = K * I,
-# graph_launch region count = I).
+# If the below values change, update tests/rocpd-validation-rules/hip-graph-bubbles/
+# graph-bubbles-rules.json (expected kernels = K * I, graph_launch regions = I).
 _HIP_GRAPH_BUBBLES_NUM_KERNELS = "64"
 _HIP_GRAPH_BUBBLES_NUM_ITERATIONS = "6"
-
-# Match tests/rocprof-sys-hip-graph-bubbles-tests.cmake (REWRITE / SAMPLING / SYS_RUN timeout).
-_HIP_GRAPH_BUBBLES_RUN_TIMEOUT_SEC = 900
 
 
 def _hip_graph_bubbles_rocm_events(gpu_info: GPUInfo) -> str:
@@ -63,7 +59,8 @@ def hip_graph_bubbles_rules(validation_rules_dir: Path) -> list[Path]:
         validation_rules_dir / "hip-graph-bubbles" / "graph-bubbles-rules.json",
     ]
 
-
+@pytest.mark.timeout(120)
+@pytest.mark.class_name("hip-graph-bubbles")
 class TestHipGraphBubbles(RocprofsysTest):
     """Exercise hip-graph-bubbles under rocprofiler-systems (no binary rewrite / runtime)."""
 
@@ -87,9 +84,6 @@ class TestHipGraphBubbles(RocprofsysTest):
             ),
             run_args=[_HIP_GRAPH_BUBBLES_NUM_KERNELS, _HIP_GRAPH_BUBBLES_NUM_ITERATIONS],
             check_target_arch=True,
-            baseline_timeout=_HIP_GRAPH_BUBBLES_RUN_TIMEOUT_SEC,
-            sampling_timeout=_HIP_GRAPH_BUBBLES_RUN_TIMEOUT_SEC,
-            sys_run_timeout=_HIP_GRAPH_BUBBLES_RUN_TIMEOUT_SEC,
         )
         self.assert_regex(
             result,
