@@ -439,7 +439,7 @@ static void testP2PBiDirMemPerf(const int iterations, const bool useHipMemcpyAsy
  * - performance/scenarios/memory/hipPerfBufferCopySpeedP2P.cc
  * Test requirements
  * ------------------------
- * - performance/scenarios/memory/hipPerfBufferCopySpeedP2P.cc
+ *  - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Performance_hipTestP2PUniDirMemcpyAsync_test_Timing_CPU) {
   const int iterations =
@@ -464,7 +464,7 @@ HIP_TEST_CASE(Performance_hipTestP2PUniDirMemcpyAsync_test_Timing_GPU) {
  * - performance/scenarios/memory/hipPerfBufferCopySpeedP2P.cc
  * Test requirements
  * ------------------------
- * - performance/scenarios/memory/hipPerfBufferCopySpeedP2P.cc
+ *  - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Performance_hipTestP2PUniDirKernelCopy_test_Timing_CPU) {
   const int iterations =
@@ -491,7 +491,7 @@ HIP_TEST_CASE(Performance_hipTestP2PUniDirKernelCopy_test_Timing_GPU) {
  * - performance/scenarios/memory/hipPerfBufferCopySpeedP2P.cc
  * Test requirements
  * ------------------------
- * - performance/scenarios/memory/hipPerfBufferCopySpeedP2P.cc
+ *  - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Performance_hipTestP2PBiDirMemcpyAsync_test) {
   const int iterations =
@@ -510,7 +510,7 @@ HIP_TEST_CASE(Performance_hipTestP2PBiDirMemcpyAsync_test) {
  * - performance/scenarios/memory/hipPerfBufferCopySpeedP2P.cc
  * Test requirements
  * ------------------------
- * - performance/scenarios/memory/hipPerfBufferCopySpeedP2P.cc
+ *  - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Performance_hipTestP2PBiDirKernelCopy_test) {
   const int iterations =
@@ -527,7 +527,7 @@ HIP_TEST_CASE(Performance_hipTestP2PBiDirKernelCopy_test) {
  * - performance/scenarios/memory/hipPerfBufferCopySpeedP2P.cc
  * Test requirements
  * ------------------------
- * - performance/scenarios/memory/hipPerfBufferCopySpeedP2P.cc
+ *  - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Performance_hipCheckP2PSupport) { checkP2PSupport(); }
 

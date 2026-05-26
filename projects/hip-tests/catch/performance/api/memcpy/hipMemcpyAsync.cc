@@ -64,7 +64,7 @@ static void RunBenchmark(LinearAllocs dst_allocation_type, LinearAllocs src_allo
  * - performance/api/memcpy/hipMemcpyAsync.cc
  * Test requirements
  * ------------------------
- * - performance/api/memcpy/hipMemcpyAsync.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpyAsync_DeviceToHost) {
   const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);
@@ -89,7 +89,7 @@ HIP_TEST_CASE(Performance_hipMemcpyAsync_DeviceToHost) {
  * - performance/api/memcpy/hipMemcpyAsync.cc
  * Test requirements
  * ------------------------
- * - performance/api/memcpy/hipMemcpyAsync.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpyAsync_HostToDevice) {
   const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);
@@ -114,7 +114,7 @@ HIP_TEST_CASE(Performance_hipMemcpyAsync_HostToDevice) {
  * - performance/api/memcpy/hipMemcpyAsync.cc
  * Test requirements
  * ------------------------
- * - performance/api/memcpy/hipMemcpyAsync.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpyAsync_HostToHost) {
   const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);
@@ -139,7 +139,7 @@ HIP_TEST_CASE(Performance_hipMemcpyAsync_HostToHost) {
  * - performance/api/memcpy/hipMemcpyAsync.cc
  * Test requirements
  * ------------------------
- * - performance/api/memcpy/hipMemcpyAsync.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpyAsync_DeviceToDevice_DisablePeerAccess) {
   const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);
@@ -164,9 +164,9 @@ HIP_TEST_CASE(Performance_hipMemcpyAsync_DeviceToDevice_DisablePeerAccess) {
  * - performance/api/memcpy/hipMemcpyAsync.cc
  * Test requirements
  * ------------------------
- * - performance/api/memcpy/hipMemcpyAsync.cc
- * - performance/api/memcpy/hipMemcpyAsync.cc
- * - performance/api/memcpy/hipMemcpyAsync.cc
+ *  - Multi-device
+ *  - Device supports Peer-to-Peer access
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpyAsync_DeviceToDevice_EnablePeerAccess) {
   if (HipTest::getDeviceCount() < 2) {

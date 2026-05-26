@@ -52,7 +52,7 @@ static void RunBenchmark(unsigned int expected_flag) {
  * - performance/api/stream/hipStreamGetFlags.cc
  * Test requirements
  * ------------------------
- * - performance/api/stream/hipStreamGetFlags.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipStreamGetFlags) {
   unsigned int expected_flag = GENERATE(hipStreamDefault, hipStreamNonBlocking);

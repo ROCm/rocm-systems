@@ -230,7 +230,7 @@ static bool hipPerfSharedMemReadSpeed_test() {
  * - performance/scenarios/memory/hipPerfSharedMemReadSpeed.cc
  * Test requirements
  * ------------------------
- * - performance/scenarios/memory/hipPerfSharedMemReadSpeed.cc
+ *  - HIP_VERSION >= 5.6
  */
 
 HIP_TEST_CASE(Performance_hipPerfSharedMemReadSpeed_test) {

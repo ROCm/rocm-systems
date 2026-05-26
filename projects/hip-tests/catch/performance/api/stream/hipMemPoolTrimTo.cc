@@ -48,8 +48,8 @@ static void RunBenchmark(const size_t min_bytes_to_hold) {
  * - performance/api/stream/hipMemPoolTrimTo.cc
  * Test requirements
  * ------------------------
- * - performance/api/stream/hipMemPoolTrimTo.cc
- * - performance/api/stream/hipMemPoolTrimTo.cc
+ *  - Device supports memory pools
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemPoolTrimTo) {
   if (!AreMemPoolsSupported(0)) {

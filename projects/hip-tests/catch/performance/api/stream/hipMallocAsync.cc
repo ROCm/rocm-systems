@@ -48,7 +48,7 @@ static void RunBenchmark(const size_t array_size) {
  * - performance/api/stream/hipMallocAsync.cc
  * Test requirements
  * ------------------------
- * - performance/api/stream/hipMallocAsync.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMallocAsync) {
   size_t array_size = GENERATE(4_KB, 4_MB, 16_MB);

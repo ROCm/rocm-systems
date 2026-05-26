@@ -43,8 +43,8 @@ static void RunBenchmark() {
  * - performance/api/stream/hipMemPoolCreate.cc
  * Test requirements
  * ------------------------
- * - performance/api/stream/hipMemPoolCreate.cc
- * - performance/api/stream/hipMemPoolCreate.cc
+ *  - Device supports memory pools
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemPoolCreate) {
   if (!AreMemPoolsSupported(0)) {

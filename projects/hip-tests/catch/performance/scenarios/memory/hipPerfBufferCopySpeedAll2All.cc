@@ -252,7 +252,7 @@ static void testCopyPerf(bool toRemote, bool kernelCopy, bool onOneGpu) {
  * - performance/scenarios/memory/hipPerfBufferCopySpeedAll2All.cc
  * Test requirements
  * ------------------------
- * - performance/scenarios/memory/hipPerfBufferCopySpeedAll2All.cc
+ * - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Performance_PerfBufferCopySpeedAll2All_test_hipMemcpyPeerAsync_remotes_to_local) {
   testCopyPerf(false, false, false);
@@ -271,7 +271,7 @@ HIP_TEST_CASE(Performance_PerfBufferCopySpeedAll2All_test_hipMemcpyPeerAsync_rem
  * - performance/scenarios/memory/hipPerfBufferCopySpeedAll2All.cc
  * Test requirements
  * ------------------------
- * - performance/scenarios/memory/hipPerfBufferCopySpeedAll2All.cc
+ * - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Performance_PerfBufferCopySpeedAll2All_test_hipMemcpyPeerAsync_local_to_remotes) {
   testCopyPerf(true, false, false);
@@ -292,7 +292,7 @@ HIP_TEST_CASE(Performance_PerfBufferCopySpeedAll2All_test_hipMemcpyPeerAsync_loc
  * - performance/scenarios/memory/hipPerfBufferCopySpeedAll2All.cc
  * Test requirements
  * ------------------------
- * - performance/scenarios/memory/hipPerfBufferCopySpeedAll2All.cc
+ * - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Performance_PerfBufferCopySpeedAll2All_test_kernel_copy_remotes_to_local) {
   testCopyPerf(false, true, false);
@@ -313,7 +313,7 @@ HIP_TEST_CASE(Performance_PerfBufferCopySpeedAll2All_test_kernel_copy_remotes_to
  * - performance/scenarios/memory/hipPerfBufferCopySpeedAll2All.cc
  * Test requirements
  * ------------------------
- * - performance/scenarios/memory/hipPerfBufferCopySpeedAll2All.cc
+ * - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Performance_PerfBufferCopySpeedAll2All_test_kernel_copy_local_to_remotes) {
   testCopyPerf(true, true, false);
@@ -332,7 +332,7 @@ HIP_TEST_CASE(Performance_PerfBufferCopySpeedAll2All_test_kernel_copy_local_to_r
  * - performance/scenarios/memory/hipPerfBufferCopySpeedAll2All.cc
  * Test requirements
  * ------------------------
- * - performance/scenarios/memory/hipPerfBufferCopySpeedAll2All.cc
+ * - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Performance_PerfBufferCopySpeedAll2One_test_hipMemcpyPeerAsync_remotes_to_local) {
   testCopyPerf(false, false, true);
@@ -351,7 +351,7 @@ HIP_TEST_CASE(Performance_PerfBufferCopySpeedAll2One_test_hipMemcpyPeerAsync_rem
  * - performance/scenarios/memory/hipPerfBufferCopySpeedAll2All.cc
  * Test requirements
  * ------------------------
- * - performance/scenarios/memory/hipPerfBufferCopySpeedAll2All.cc
+ * - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Performance_PerfBufferCopySpeedOne2All_test_hipMemcpyPeerAsync_local_to_remotes) {
   testCopyPerf(true, false, true);
@@ -370,7 +370,7 @@ HIP_TEST_CASE(Performance_PerfBufferCopySpeedOne2All_test_hipMemcpyPeerAsync_loc
  * - performance/scenarios/memory/hipPerfBufferCopySpeedAll2All.cc
  * Test requirements
  * ------------------------
- * - performance/scenarios/memory/hipPerfBufferCopySpeedAll2All.cc
+ * - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Performance_PerfBufferCopySpeedAll2One_test_kernel_copy_remotes_to_local) {
   testCopyPerf(false, true, true);
@@ -391,7 +391,7 @@ HIP_TEST_CASE(Performance_PerfBufferCopySpeedAll2One_test_kernel_copy_remotes_to
  * - performance/scenarios/memory/hipPerfBufferCopySpeedAll2All.cc
  * Test requirements
  * ------------------------
- * - performance/scenarios/memory/hipPerfBufferCopySpeedAll2All.cc
+ * - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Performance_PerfBufferCopySpeedOne2All_test_kernel_copy_local_to_remotes) {
   testCopyPerf(true, true, true);

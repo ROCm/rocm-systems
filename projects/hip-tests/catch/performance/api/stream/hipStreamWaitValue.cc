@@ -105,8 +105,8 @@ static void RunBenchmark(const size_t array_size, unsigned int flag) {
  * - performance/api/stream/hipStreamWaitValue.cc
  * Test requirements
  * ------------------------
- * - performance/api/stream/hipStreamWaitValue.cc
- * - performance/api/stream/hipStreamWaitValue.cc
+ *  - Device supports Stream Wait Value operations
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipStreamWaitValue32) {
 #if HT_AMD
@@ -141,8 +141,8 @@ HIP_TEST_CASE(Performance_hipStreamWaitValue32) {
  * - performance/api/stream/hipStreamWaitValue.cc
  * Test requirements
  * ------------------------
- * - performance/api/stream/hipStreamWaitValue.cc
- * - performance/api/stream/hipStreamWaitValue.cc
+ *  - Device supports Stream Wait Value operations
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipStreamWaitValue64) {
   if (!IsStreamWaitValueSupported(0)) {

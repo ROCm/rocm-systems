@@ -62,7 +62,7 @@ void thread_jobs(int dev, int virt) {
  * - performance/scenarios/event/hipKernelLookupPerf.cc
  * Test requirements
  * ------------------------
- * - performance/scenarios/event/hipKernelLookupPerf.cc
+ * - HIP_VERSION >= 6.5
  */
 HIP_TEST_CASE(Performance_hipKernelLookup) {
   int mgpu = 0;

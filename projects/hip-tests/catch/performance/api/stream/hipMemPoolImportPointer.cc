@@ -61,8 +61,8 @@ static void RunBenchmark(const size_t array_size) {
  * - performance/api/stream/hipMemPoolImportPointer.cc
  * Test requirements
  * ------------------------
- * - performance/api/stream/hipMemPoolImportPointer.cc
- * - performance/api/stream/hipMemPoolImportPointer.cc
+ *  - Device supports memory pools
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemPoolImportPointer) {
   if (!AreMemPoolsSupported(0)) {

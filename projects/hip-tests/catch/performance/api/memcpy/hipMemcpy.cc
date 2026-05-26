@@ -59,7 +59,7 @@ static void RunBenchmark(LinearAllocs dst_allocation_type, LinearAllocs src_allo
  * - performance/api/memcpy/hipMemcpy.cc
  * Test requirements
  * ------------------------
- * - performance/api/memcpy/hipMemcpy.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpy_DeviceToHost) {
   const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);
@@ -84,7 +84,7 @@ HIP_TEST_CASE(Performance_hipMemcpy_DeviceToHost) {
  * - performance/api/memcpy/hipMemcpy.cc
  * Test requirements
  * ------------------------
- * - performance/api/memcpy/hipMemcpy.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpy_HostToDevice) {
   const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);
@@ -109,7 +109,7 @@ HIP_TEST_CASE(Performance_hipMemcpy_HostToDevice) {
  * - performance/api/memcpy/hipMemcpy.cc
  * Test requirements
  * ------------------------
- * - performance/api/memcpy/hipMemcpy.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpy_HostToHost) {
   const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);
@@ -134,9 +134,9 @@ HIP_TEST_CASE(Performance_hipMemcpy_HostToHost) {
  * - performance/api/memcpy/hipMemcpy.cc
  * Test requirements
  * ------------------------
- * - performance/api/memcpy/hipMemcpy.cc
- * - performance/api/memcpy/hipMemcpy.cc
- * - performance/api/memcpy/hipMemcpy.cc
+ *  - Multi-device
+ *  - Device supports Peer-to-Peer access
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpy_DeviceToDevice_EnablePeerAccess) {
   if (HipTest::getDeviceCount() < 2) {
@@ -165,7 +165,7 @@ HIP_TEST_CASE(Performance_hipMemcpy_DeviceToDevice_EnablePeerAccess) {
  * - performance/api/memcpy/hipMemcpy.cc
  * Test requirements
  * ------------------------
- * - performance/api/memcpy/hipMemcpy.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpy_DeviceToDevice_DisablePeerAccess) {
   const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);

@@ -33,7 +33,7 @@ class HipEventDestroyBenchmark : public Benchmark<HipEventDestroyBenchmark> {
  * - performance/api/event/hipEventDestroy.cc
  * Test requirements
  * ------------------------
- * - performance/api/event/hipEventDestroy.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipEventDestroy) {
   HipEventDestroyBenchmark benchmark;

@@ -115,7 +115,7 @@ static bool hipPerfMemMallocCpyFree_test() {
  * - performance/scenarios/memory/hipPerfMemMallocCpyFree.cc
  * Test requirements
  * ------------------------
- * - performance/scenarios/memory/hipPerfMemMallocCpyFree.cc
+ *  - HIP_VERSION >= 5.6
  */
 
 HIP_TEST_CASE(Performance_hipPerfMemMallocCpyFree_test) {

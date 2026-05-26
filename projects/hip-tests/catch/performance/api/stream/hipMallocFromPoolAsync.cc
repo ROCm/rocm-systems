@@ -55,8 +55,8 @@ static void RunBenchmark(const size_t array_size) {
  * - performance/api/stream/hipMallocFromPoolAsync.cc
  * Test requirements
  * ------------------------
- * - performance/api/stream/hipMallocFromPoolAsync.cc
- * - performance/api/stream/hipMallocFromPoolAsync.cc
+ *  - Device supports memory pools
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMallocFromPoolAsync) {
   if (!AreMemPoolsSupported(0)) {

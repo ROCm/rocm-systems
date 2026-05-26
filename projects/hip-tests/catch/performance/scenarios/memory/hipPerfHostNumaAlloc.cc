@@ -127,7 +127,7 @@ bool runTest(const int& cpuCount, const int& gpuCount, unsigned int hostMallocfl
  * - performance/scenarios/memory/hipPerfHostNumaAlloc.cc
  * Test requirements
  * ------------------------
- * - performance/scenarios/memory/hipPerfHostNumaAlloc.cc
+ *  - HIP_VERSION >= 5.6
  */
 
 HIP_TEST_CASE(Performance_hipPerfHostNumaAlloc_test) {

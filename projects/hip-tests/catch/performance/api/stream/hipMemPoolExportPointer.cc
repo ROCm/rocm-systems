@@ -55,8 +55,8 @@ static void RunBenchmark(const size_t array_size) {
  * - performance/api/stream/hipMemPoolExportPointer.cc
  * Test requirements
  * ------------------------
- * - performance/api/stream/hipMemPoolExportPointer.cc
- * - performance/api/stream/hipMemPoolExportPointer.cc
+ *  - Device supports memory pools
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemPoolExportPointer) {
   if (!AreMemPoolsSupported(0)) {

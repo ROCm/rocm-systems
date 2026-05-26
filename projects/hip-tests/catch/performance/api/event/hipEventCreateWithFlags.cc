@@ -60,7 +60,7 @@ static void RunBenchmark(unsigned flag) {
  * - performance/api/event/hipEventCreateWithFlags.cc
  * Test requirements
  * ------------------------
- * - performance/api/event/hipEventCreateWithFlags.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipEventCreateWithFlags) {
   const auto flag = GENERATE(

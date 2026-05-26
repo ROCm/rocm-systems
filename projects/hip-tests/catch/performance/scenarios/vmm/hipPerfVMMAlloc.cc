@@ -24,7 +24,7 @@
  * - performance/scenarios/vmm/hipPerfVMMAlloc.cc
  * Test requirements
  * ------------------------
- * - performance/scenarios/vmm/hipPerfVMMAlloc.cc
+ *  - HIP_VERSION >= 5.6
  */
 
 // Control Variables

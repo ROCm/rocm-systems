@@ -35,7 +35,7 @@ class HipEventCreateBenchmark : public Benchmark<HipEventCreateBenchmark> {
  * - performance/api/event/hipEventCreate.cc
  * Test requirements
  * ------------------------
- * - performance/api/event/hipEventCreate.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipEventCreate) {
   HipEventCreateBenchmark benchmark;

@@ -42,8 +42,8 @@ static void RunBenchmark() {
  * - performance/api/stream/hipMemPoolDestroy.cc
  * Test requirements
  * ------------------------
- * - performance/api/stream/hipMemPoolDestroy.cc
- * - performance/api/stream/hipMemPoolDestroy.cc
+ *  - Device supports memory pools
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemPoolDestroy) {
   if (!AreMemPoolsSupported(0)) {

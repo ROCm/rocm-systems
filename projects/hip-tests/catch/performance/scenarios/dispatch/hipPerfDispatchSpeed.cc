@@ -25,7 +25,7 @@
  * - performance/scenarios/dispatch/hipPerfDispatchSpeed.cc
  * Test requirements
  * ------------------------
- * - performance/scenarios/dispatch/hipPerfDispatchSpeed.cc
+ *  - HIP_VERSION >= 5.6
  */
 
 unsigned int testList[] = {1, 10, 100, 1000, 10000};

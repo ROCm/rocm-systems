@@ -133,7 +133,7 @@ class HipStreamCreateWithFlagsBenchmark : public Benchmark<HipStreamCreateWithFl
  * - performance/api/stream/hipStreamBasic.cc
  * Test requirements
  * ------------------------
- * - performance/api/stream/hipStreamBasic.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipStreamCreate) {
   HipStreamCreateBenchmark benchmark;
@@ -164,7 +164,7 @@ static void RunBenchmarkWithPriority(unsigned flag) {
  * - performance/api/stream/hipStreamBasic.cc
  * Test requirements
  * ------------------------
- * - performance/api/stream/hipStreamBasic.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipStreamCreateWithFlags) {
   const auto flag = GENERATE(hipStreamDefault, hipStreamNonBlocking);
@@ -183,7 +183,7 @@ HIP_TEST_CASE(Performance_hipStreamCreateWithFlags) {
  * - performance/api/stream/hipStreamBasic.cc
  * Test requirements
  * ------------------------
- * - performance/api/stream/hipStreamBasic.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipStreamCreateWithPriority) {
   const auto flag = GENERATE(hipStreamDefault, hipStreamNonBlocking);
@@ -199,7 +199,7 @@ HIP_TEST_CASE(Performance_hipStreamCreateWithPriority) {
  * - performance/api/stream/hipStreamBasic.cc
  * Test requirements
  * ------------------------
- * - performance/api/stream/hipStreamBasic.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipStreamDestroy) {
   HipStreamDestroyBenchmark benchmark;
@@ -215,7 +215,7 @@ HIP_TEST_CASE(Performance_hipStreamDestroy) {
  * - performance/api/stream/hipStreamBasic.cc
  * Test requirements
  * ------------------------
- * - performance/api/stream/hipStreamBasic.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipDeviceGetStreamPriorityRange) {
   HipDeviceGetStreamPriorityRangeBenchmark benchmark;
@@ -231,7 +231,7 @@ HIP_TEST_CASE(Performance_hipDeviceGetStreamPriorityRange) {
  * - performance/api/stream/hipStreamBasic.cc
  * Test requirements
  * ------------------------
- * - performance/api/stream/hipStreamBasic.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipStreamQuery) {
   const auto perform_work = GENERATE(true, false);
@@ -253,7 +253,7 @@ HIP_TEST_CASE(Performance_hipStreamQuery) {
  * - performance/api/stream/hipStreamBasic.cc
  * Test requirements
  * ------------------------
- * - performance/api/stream/hipStreamBasic.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipStreamSynchronize) {
   HipStreamSynchronizeBenchmark benchmark;

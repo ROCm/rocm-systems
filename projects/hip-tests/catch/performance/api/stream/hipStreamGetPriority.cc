@@ -51,7 +51,7 @@ static void RunBenchmark(Streams stream_type) {
  * - performance/api/stream/hipStreamGetPriority.cc
  * Test requirements
  * ------------------------
- * - performance/api/stream/hipStreamGetPriority.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipStreamGetPriority) {
   Streams stream_type = GENERATE(Streams::nullstream, Streams::created);

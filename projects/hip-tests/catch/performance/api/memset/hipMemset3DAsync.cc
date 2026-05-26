@@ -51,7 +51,7 @@ static void RunBenchmark(size_t width, size_t height, size_t depth) {
  * - performance/api/memset/hipMemset3DAsync.cc
  * Test requirements
  * ------------------------
- * - performance/api/memset/hipMemset3DAsync.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemset3DAsync) {
   const auto width = GENERATE(4_KB, 4_MB, 16_MB);

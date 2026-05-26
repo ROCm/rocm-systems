@@ -52,7 +52,7 @@ static void RunBenchmark(LinearAllocs host_allocation_type, LinearAllocs device_
  * - performance/api/memcpy/hipMemcpyDtoHAsync.cc
  * Test requirements
  * ------------------------
- * - performance/api/memcpy/hipMemcpyDtoHAsync.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpyDtoHAsync) {
   const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);

@@ -340,7 +340,7 @@ void hipPerfStreamConcurrency::checkData(uint* ptr) {
  * - performance/scenarios/stream/hipPerfStreamConcurrency.cc
  * Test requirements
  * ------------------------
- * - performance/scenarios/stream/hipPerfStreamConcurrency.cc
+ *  - HIP_VERSION >= 5.6
  */
 
 HIP_TEST_CASE(Performance_hipPerfStreamConcurrency) {

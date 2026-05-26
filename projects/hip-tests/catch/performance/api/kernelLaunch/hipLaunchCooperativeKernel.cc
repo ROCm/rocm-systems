@@ -76,8 +76,8 @@ template <KernelType kernel_type, bool timer_type> static void RunBenchmark(bool
  * - performance/api/kernelLaunch/hipLaunchCooperativeKernel.cc
  * Test requirements
  * ------------------------
- * - performance/api/kernelLaunch/hipLaunchCooperativeKernel.cc
- * - performance/api/kernelLaunch/hipLaunchCooperativeKernel.cc
+ *  - Device supports CooperativeLaunch
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipLaunchCooperativeKernel) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {

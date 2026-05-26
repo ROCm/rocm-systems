@@ -79,7 +79,7 @@ static void RunBenchmark(size_t width, size_t height, hipMemcpyKind kind,
  * - performance/api/memcpy/hipMemcpy2DAsync.cc
  * Test requirements
  * ------------------------
- * - performance/api/memcpy/hipMemcpy2DAsync.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpy2DAsync_DeviceToHost) {
   const auto width = GENERATE(4_KB, 4_MB, 16_MB);
@@ -99,7 +99,7 @@ HIP_TEST_CASE(Performance_hipMemcpy2DAsync_DeviceToHost) {
  * - performance/api/memcpy/hipMemcpy2DAsync.cc
  * Test requirements
  * ------------------------
- * - performance/api/memcpy/hipMemcpy2DAsync.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpy2DAsync_HostToDevice) {
   const auto width = GENERATE(4_KB, 4_MB, 16_MB);
@@ -119,7 +119,7 @@ HIP_TEST_CASE(Performance_hipMemcpy2DAsync_HostToDevice) {
  * - performance/api/memcpy/hipMemcpy2DAsync.cc
  * Test requirements
  * ------------------------
- * - performance/api/memcpy/hipMemcpy2DAsync.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpy2DAsync_HostToHost) {
   const auto width = GENERATE(4_KB, 4_MB, 16_MB);
@@ -139,7 +139,7 @@ HIP_TEST_CASE(Performance_hipMemcpy2DAsync_HostToHost) {
  * - performance/api/memcpy/hipMemcpy2DAsync.cc
  * Test requirements
  * ------------------------
- * - performance/api/memcpy/hipMemcpy2DAsync.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpy2DAsync_DeviceToDevice_DisablePeerAccess) {
   const auto width = GENERATE(4_KB, 4_MB, 16_MB);
@@ -159,9 +159,9 @@ HIP_TEST_CASE(Performance_hipMemcpy2DAsync_DeviceToDevice_DisablePeerAccess) {
  * - performance/api/memcpy/hipMemcpy2DAsync.cc
  * Test requirements
  * ------------------------
- * - performance/api/memcpy/hipMemcpy2DAsync.cc
- * - performance/api/memcpy/hipMemcpy2DAsync.cc
- * - performance/api/memcpy/hipMemcpy2DAsync.cc
+ *  - Multi-device
+ *  - Device supports Peer-to-Peer access
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpy2DAsync_DeviceToDevice_EnablePeerAccess) {
   if (HipTest::getDeviceCount() < 2) {

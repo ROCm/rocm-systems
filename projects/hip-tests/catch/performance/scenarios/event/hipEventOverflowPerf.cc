@@ -89,7 +89,7 @@ void thread_job(int dev, int virt) {
  * - performance/scenarios/event/hipEventOverflowPerf.cc
  * Test requirements
  * ------------------------
- * - performance/scenarios/event/hipEventOverflowPerf.cc
+ * - HIP_VERSION >= 6.5
  */
 HIP_TEST_CASE(Performance_hipEventOverflow) {
   int mgpu = 0;

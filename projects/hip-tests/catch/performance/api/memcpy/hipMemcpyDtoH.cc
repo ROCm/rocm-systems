@@ -47,7 +47,7 @@ static void RunBenchmark(LinearAllocs host_allocation_type, LinearAllocs device_
  * - performance/api/memcpy/hipMemcpyDtoH.cc
  * Test requirements
  * ------------------------
- * - performance/api/memcpy/hipMemcpyDtoH.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpyDtoH) {
   const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);

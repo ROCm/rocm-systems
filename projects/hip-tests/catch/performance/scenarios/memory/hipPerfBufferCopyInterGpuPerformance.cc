@@ -35,7 +35,7 @@ static constexpr int nIters = 10;                     // interation number for t
  * - performance/scenarios/memory/hipPerfBufferCopyInterGpuPerformance.cc
  * Test requirements
  * ------------------------
- * - performance/scenarios/memory/hipPerfBufferCopyInterGpuPerformance.cc
+ * - HIP_VERSION >= 7.0
  */
 HIP_TEST_CASE(Performance_PerfBufferCopySpeedAll2All_Inter_GPU) {
   int nGpus = 0;

@@ -337,7 +337,7 @@ void hipPerfMemset::run3D(unsigned int test, T memsetval, enum MemsetType type, 
  * - performance/scenarios/memory/hipPerfMemset.cc
  * Test requirements
  * ------------------------
- * - performance/scenarios/memory/hipPerfMemset.cc
+ *  - HIP_VERSION >= 5.6
  */
 
 HIP_TEST_CASE(Performance_hipPerfMemset_test) {

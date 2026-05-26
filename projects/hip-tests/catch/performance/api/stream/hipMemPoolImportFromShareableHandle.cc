@@ -57,8 +57,8 @@ static void RunBenchmark() {
  * - performance/api/stream/hipMemPoolImportFromShareableHandle.cc
  * Test requirements
  * ------------------------
- * - performance/api/stream/hipMemPoolImportFromShareableHandle.cc
- * - performance/api/stream/hipMemPoolImportFromShareableHandle.cc
+ *  - Device supports memory pools
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemPoolImportFromShareableHandle) {
   if (!AreMemPoolsSupported(0)) {

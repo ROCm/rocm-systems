@@ -46,8 +46,8 @@ static void RunBenchmark() {
  * - performance/api/stream/hipExtStreamGetCUMask.cc
  * Test requirements
  * ------------------------
- * - performance/api/stream/hipExtStreamGetCUMask.cc
- * - performance/api/stream/hipExtStreamGetCUMask.cc
+ *  - Platform specific (AMD)
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipExtStreamGetCUMask) { RunBenchmark(); }
 

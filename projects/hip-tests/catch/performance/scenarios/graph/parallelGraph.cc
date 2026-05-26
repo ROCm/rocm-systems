@@ -44,7 +44,7 @@ template <typename T> __global__ void vectorADD(const T* A_d, const T* B_d, T* C
  * - performance/scenarios/graph/parallelGraph.cc
  * Test requirements
  * ------------------------
- * - performance/scenarios/graph/parallelGraph.cc
+ * - HIP_VERSION >= 6.4
  */
 HIP_TEST_CASE(Performance_hipGraph_ParallelGraph) {
   hipGraphNode_t memCpy1, memCpy2, memCpy3;
@@ -120,7 +120,7 @@ HIP_TEST_CASE(Performance_hipGraph_ParallelGraph) {
  * - performance/scenarios/graph/parallelGraph.cc
  * Test requirements
  * ------------------------
- * - performance/scenarios/graph/parallelGraph.cc
+ * - HIP_VERSION >= 6.4
  */
 HIP_TEST_CASE(Performance_hipGraph_WithStreamOperations) {
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
@@ -161,7 +161,7 @@ HIP_TEST_CASE(Performance_hipGraph_WithStreamOperations) {
  * - performance/scenarios/graph/parallelGraph.cc
  * Test requirements
  * ------------------------
- * - performance/scenarios/graph/parallelGraph.cc
+ * - HIP_VERSION >= 6.4
  */
 
 HIP_TEST_CASE(Performance_hipGraph_WithStreamCapture) {

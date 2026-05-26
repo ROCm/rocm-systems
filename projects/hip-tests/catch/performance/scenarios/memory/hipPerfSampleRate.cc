@@ -271,7 +271,7 @@ void hipPerfSampleRate::checkData(uint* ptr) {
  * - performance/scenarios/memory/hipPerfSampleRate.cc
  * Test requirements
  * ------------------------
- * - performance/scenarios/memory/hipPerfSampleRate.cc
+ *  - HIP_VERSION >= 5.6
  */
 
 HIP_TEST_CASE(Performance_hipPerfSampleRate_test) {

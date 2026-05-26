@@ -72,7 +72,7 @@ template <typename WriteValueBenchmark> static void RunBenchmark(const size_t ar
  * - performance/api/stream/hipStreamWriteValue.cc
  * Test requirements
  * ------------------------
- * - performance/api/stream/hipStreamWriteValue.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipStreamWriteValue32) {
 #if HT_AMD
@@ -94,7 +94,7 @@ HIP_TEST_CASE(Performance_hipStreamWriteValue32) {
  * - performance/api/stream/hipStreamWriteValue.cc
  * Test requirements
  * ------------------------
- * - performance/api/stream/hipStreamWriteValue.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipStreamWriteValue64) {
 #if HT_NVIDIA

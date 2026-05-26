@@ -366,7 +366,7 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
  * - performance/scenarios/memory/hipPerfBufferCopySpeed.cc
  * Test requirements
  * ------------------------
- * - performance/scenarios/memory/hipPerfBufferCopySpeed.cc
+ *  - HIP_VERSION >= 5.6
  */
 
 HIP_TEST_CASE(Performance_hipPerfBufferCopySpeed_test) {

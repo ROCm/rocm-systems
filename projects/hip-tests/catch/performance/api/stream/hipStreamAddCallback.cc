@@ -39,7 +39,7 @@ static void RunBenchmark() {
  * - performance/api/stream/hipStreamAddCallback.cc
  * Test requirements
  * ------------------------
- * - performance/api/stream/hipStreamAddCallback.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipStreamAddCallback) { RunBenchmark(); }
 

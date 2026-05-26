@@ -122,7 +122,7 @@ bool hipPerfStreamCreateCopyDestroy::run(unsigned int testNumber) {
  * - performance/scenarios/stream/hipPerfStreamCreateCopyDestroy.cc
  * Test requirements
  * ------------------------
- * - performance/scenarios/stream/hipPerfStreamCreateCopyDestroy.cc
+ *  - HIP_VERSION >= 5.6
  */
 
 HIP_TEST_CASE(Performance_hipPerfStreamCreateCopyDestroy) {

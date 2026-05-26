@@ -117,7 +117,7 @@ static bool hipPerfDevMemWriteSpeed_test() {
  * - performance/scenarios/memory/hipPerfDevMemWriteSpeed.cc
  * Test requirements
  * ------------------------
- * - performance/scenarios/memory/hipPerfDevMemWriteSpeed.cc
+ *  - HIP_VERSION >= 5.6
  */
 
 HIP_TEST_CASE(Performance_hipPerfDevMemWriteSpeed_test) {

@@ -47,7 +47,7 @@ static void RunBenchmark(const void* source, size_t size = 1, size_t offset = 0)
  * - performance/api/memcpy/hipMemcpyToSymbolAsync.cc
  * Test requirements
  * ------------------------
- * - performance/api/memcpy/hipMemcpyToSymbolAsync.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpyToSymbolAsync_SingularValue) {
   int set{42};
@@ -67,7 +67,7 @@ HIP_TEST_CASE(Performance_hipMemcpyToSymbolAsync_SingularValue) {
  * - performance/api/memcpy/hipMemcpyToSymbolAsync.cc
  * Test requirements
  * ------------------------
- * - performance/api/memcpy/hipMemcpyToSymbolAsync.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpyToSymbolAsync_ArrayValue) {
   size_t size = GENERATE(1_KB, 4_KB, 1_MB);
@@ -91,7 +91,7 @@ HIP_TEST_CASE(Performance_hipMemcpyToSymbolAsync_ArrayValue) {
  * - performance/api/memcpy/hipMemcpyToSymbolAsync.cc
  * Test requirements
  * ------------------------
- * - performance/api/memcpy/hipMemcpyToSymbolAsync.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpyToSymbolAsync_WithOffset) {
   size_t size = GENERATE(1_KB, 4_KB, 1_MB);

@@ -121,8 +121,8 @@ void RunBenchmark(size_t copy_size, size_t offset) {
  * - performance/api/memcpy/hipMemcpyBatchAsync.cc
  * Test requirements
  * ------------------------
- * - performance/api/memcpy/hipMemcpyBatchAsync.cc
- * - performance/api/memcpy/hipMemcpyBatchAsync.cc
+ *  - AMD
+ *  - HIP_VERSION >= 7.1
  */
 HIP_TEST_CASE(Performance_hipMemcpyBatchAsync_D2D_OptimizedPath_Aligned) {
   const auto copy_size = GENERATE(4_KB, 64_KB, 128_KB, 256_KB, 1_MB, 4_MB,
@@ -144,8 +144,8 @@ HIP_TEST_CASE(Performance_hipMemcpyBatchAsync_D2D_OptimizedPath_Aligned) {
  * - performance/api/memcpy/hipMemcpyBatchAsync.cc
  * Test requirements
  * ------------------------
- * - performance/api/memcpy/hipMemcpyBatchAsync.cc
- * - performance/api/memcpy/hipMemcpyBatchAsync.cc
+ *  - AMD
+ *  - HIP_VERSION >= 7.1
  */
 HIP_TEST_CASE(Performance_hipMemcpyBatchAsync_D2D_OptimizedPath_4ByteOffset) {
   const auto copy_size = GENERATE(4_KB, 64_KB, 128_KB, 256_KB, 1_MB, 4_MB,

@@ -59,7 +59,7 @@ static void RunBenchmark(Streams stream_type) {
  * - performance/api/stream/hipStreamWaitEvent.cc
  * Test requirements
  * ------------------------
- * - performance/api/stream/hipStreamWaitEvent.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipStreamWaitEvent) {
   Streams stream_type = GENERATE(Streams::nullstream, Streams::created);

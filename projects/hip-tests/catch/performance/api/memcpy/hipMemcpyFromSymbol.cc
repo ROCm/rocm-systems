@@ -42,7 +42,7 @@ static void RunBenchmark(const void* source, void* result, size_t size = 1, size
  * - performance/api/memcpy/hipMemcpyFromSymbol.cc
  * Test requirements
  * ------------------------
- * - performance/api/memcpy/hipMemcpyFromSymbol.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpyFromSymbol_SingularValue) {
   int set{42};
@@ -63,7 +63,7 @@ HIP_TEST_CASE(Performance_hipMemcpyFromSymbol_SingularValue) {
  * - performance/api/memcpy/hipMemcpyFromSymbol.cc
  * Test requirements
  * ------------------------
- * - performance/api/memcpy/hipMemcpyFromSymbol.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpyFromSymbol_ArrayValue) {
   size_t size = GENERATE(1_KB, 4_KB, 512_KB);
@@ -89,7 +89,7 @@ HIP_TEST_CASE(Performance_hipMemcpyFromSymbol_ArrayValue) {
  * - performance/api/memcpy/hipMemcpyFromSymbol.cc
  * Test requirements
  * ------------------------
- * - performance/api/memcpy/hipMemcpyFromSymbol.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpyFromSymbol_WithOffset) {
   size_t size = GENERATE(1_KB, 4_KB, 512_KB);

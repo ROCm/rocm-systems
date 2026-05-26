@@ -45,8 +45,8 @@ static void RunBenchmark() {
  * - performance/api/stream/hipMemPoolGetAccess.cc
  * Test requirements
  * ------------------------
- * - performance/api/stream/hipMemPoolGetAccess.cc
- * - performance/api/stream/hipMemPoolGetAccess.cc
+ *  - Device supports memory pools
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemPoolGetAccess) {
   if (!AreMemPoolsSupported(0)) {

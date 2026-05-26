@@ -51,9 +51,9 @@ static void RunBenchmark(size_t size, bool enable_peer_access = false) {
  * - performance/api/memcpy/hipMemcpyDtoD.cc
  * Test requirements
  * ------------------------
- * - performance/api/memcpy/hipMemcpyDtoD.cc
- * - performance/api/memcpy/hipMemcpyDtoD.cc
- * - performance/api/memcpy/hipMemcpyDtoD.cc
+ *  - Multi-device
+ *  - Device supports Peer-to-Peer access
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpyDtoD_PeerAccessEnabled) {
   if (HipTest::getDeviceCount() < 2) {
@@ -79,7 +79,7 @@ HIP_TEST_CASE(Performance_hipMemcpyDtoD_PeerAccessEnabled) {
  * - performance/api/memcpy/hipMemcpyDtoD.cc
  * Test requirements
  * ------------------------
- * - performance/api/memcpy/hipMemcpyDtoD.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpyDtoD_PeerAccessDisabled) {
   const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);

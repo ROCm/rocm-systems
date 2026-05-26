@@ -496,7 +496,7 @@ template <class T> class hipPerfMemFill {
  * - performance/scenarios/memory/hipPerfMemFill.cc
  * Test requirements
  * ------------------------
- * - performance/scenarios/memory/hipPerfMemFill.cc
+ *  - HIP_VERSION >= 5.6
  */
 
 HIP_TEST_CASE(Performance_hipPerfMemFill_test) {

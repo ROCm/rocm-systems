@@ -582,7 +582,7 @@ void hipPerfMandelBrot::checkData(uint* ptr) {
  * - performance/scenarios/compute/hipPerfMandelbrot.cc
  * Test requirements
  * ------------------------
- * - performance/scenarios/compute/hipPerfMandelbrot.cc
+ *  - HIP_VERSION >= 5.6
  */
 
 HIP_TEST_CASE(Performance_hipPerfMandelbrot) {

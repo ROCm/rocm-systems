@@ -72,7 +72,7 @@ template <KernelType kernel_type, bool timer_type> static void RunBenchmark(bool
  * - performance/api/kernelLaunch/hipExtLaunchKernel.cc
  * Test requirements
  * ------------------------
- * - performance/api/kernelLaunch/hipExtLaunchKernel.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipExtLaunchKernel) {
   bool sync = GENERATE(true, false);

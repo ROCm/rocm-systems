@@ -48,7 +48,7 @@ static void RunBenchmark(hipStream_t stream) {
  * - performance/api/event/hipEventRecord.cc
  * Test requirements
  * ------------------------
- * - performance/api/event/hipEventRecord.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipEventRecord) {
   SECTION("default stream") { RunBenchmark(nullptr); }

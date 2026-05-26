@@ -60,7 +60,7 @@ static void RunBenchmark(size_t width, size_t height, hipMemcpyKind kind,
  * - performance/api/memcpy/hipMemcpy2DToArray.cc
  * Test requirements
  * ------------------------
- * - performance/api/memcpy/hipMemcpy2DToArray.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpy2DToArray_HostToDevice) {
   CHECK_IMAGE_SUPPORT
@@ -82,7 +82,7 @@ HIP_TEST_CASE(Performance_hipMemcpy2DToArray_HostToDevice) {
  * - performance/api/memcpy/hipMemcpy2DToArray.cc
  * Test requirements
  * ------------------------
- * - performance/api/memcpy/hipMemcpy2DToArray.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpy2DToArray_DeviceToDevice_DisablePeerAccess) {
   CHECK_IMAGE_SUPPORT
@@ -104,9 +104,9 @@ HIP_TEST_CASE(Performance_hipMemcpy2DToArray_DeviceToDevice_DisablePeerAccess) {
  * - performance/api/memcpy/hipMemcpy2DToArray.cc
  * Test requirements
  * ------------------------
- * - performance/api/memcpy/hipMemcpy2DToArray.cc
- * - performance/api/memcpy/hipMemcpy2DToArray.cc
- * - performance/api/memcpy/hipMemcpy2DToArray.cc
+ *  - Multi-device
+ *  - Device supports Peer-to-Peer access
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpy2DToArray_DeviceToDevice_EnablePeerAccess) {
   CHECK_IMAGE_SUPPORT

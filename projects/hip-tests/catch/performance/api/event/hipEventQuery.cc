@@ -37,7 +37,7 @@ class HipEventQueryBenchmark : public Benchmark<HipEventQueryBenchmark> {
  * - performance/api/event/hipEventQuery.cc
  * Test requirements
  * ------------------------
- * - performance/api/event/hipEventQuery.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipEventQuery) {
   HipEventQueryBenchmark benchmark;

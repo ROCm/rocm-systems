@@ -57,7 +57,7 @@ static void RunBenchmark(LinearAllocs allocation_type, size_t size) {
  * - performance/api/memset/hipMemsetD16Async.cc
  * Test requirements
  * ------------------------
- * - performance/api/memset/hipMemsetD16Async.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemsetD16Async) {
   const auto size = GENERATE(4_KB, 4_MB, 16_MB);

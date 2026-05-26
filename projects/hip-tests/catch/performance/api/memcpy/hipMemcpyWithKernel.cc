@@ -90,7 +90,7 @@ template <typename BenchmarkType> static void RunBenchmark(LinearAllocs host_all
  * - performance/api/memcpy/hipMemcpyWithKernel.cc
  * Test requirements
  * ------------------------
- * - performance/api/memcpy/hipMemcpyWithKernel.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpyHtoDKernelDtoHV1Async) {
   const auto allocation_size =

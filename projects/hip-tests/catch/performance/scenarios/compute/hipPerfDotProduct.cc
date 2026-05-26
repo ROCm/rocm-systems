@@ -214,7 +214,7 @@ void computeDotProduct(int n, const double* x, const double* y, double& result, 
  * - performance/scenarios/compute/hipPerfDotProduct.cc
  * Test requirements
  * ------------------------
- * - performance/scenarios/compute/hipPerfDotProduct.cc
+ *  - HIP_VERSION >= 5.6
  */
 
 HIP_TEST_CASE(Performance_hipPerfDotProduct) {

@@ -51,8 +51,8 @@ static void RunBenchmark(const hipMemPoolAttr attribute) {
  * - performance/api/stream/hipMemPoolGetAttribute.cc
  * Test requirements
  * ------------------------
- * - performance/api/stream/hipMemPoolGetAttribute.cc
- * - performance/api/stream/hipMemPoolGetAttribute.cc
+ *  - Device supports memory pools
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemPoolGetAttribute) {
   if (!AreMemPoolsSupported(0)) {

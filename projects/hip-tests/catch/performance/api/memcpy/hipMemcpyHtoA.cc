@@ -45,7 +45,7 @@ static void RunBenchmark(LinearAllocs host_allocation_type, size_t width) {
  * - performance/api/memcpy/hipMemcpyHtoA.cc
  * Test requirements
  * ------------------------
- * - performance/api/memcpy/hipMemcpyHtoA.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpyHtoA) {
   CHECK_IMAGE_SUPPORT

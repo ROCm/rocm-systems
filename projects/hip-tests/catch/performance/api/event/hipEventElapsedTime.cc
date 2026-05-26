@@ -47,7 +47,7 @@ class HipEventElapsedTimeBenchmark : public Benchmark<HipEventElapsedTimeBenchma
  * - performance/api/event/hipEventElapsedTime.cc
  * Test requirements
  * ------------------------
- * - performance/api/event/hipEventElapsedTime.cc
+ *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipEventElapsedTime) {
   HipEventElapsedTimeBenchmark benchmark;
