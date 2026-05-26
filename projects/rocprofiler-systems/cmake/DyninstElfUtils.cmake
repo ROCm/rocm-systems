@@ -87,7 +87,52 @@ endforeach()
 
 # -------------- PACKAGES------------------------------------------------------
 
-if(NOT ROCPROFSYS_BUILD_ELFUTILS)
+if(NOT Elfutils_FOUND AND NOT ROCPROFSYS_BUILD_ELFUTILS)
+    # Some elfutils packagings (e.g. TheRock's vendored rocm_sysdeps) only
+    # ship per-library CMake configs (`libdw` exposing libdw::libdw,
+    # `LibElf` exposing elf::elf) instead of a unified ElfutilsConfig, and
+    # those configs carry no version file. Probe for them unversioned in
+    # CONFIG mode so we can populate Elfutils_* from them and avoid the
+    # /usr-defaulting legacy FindLibElf/FindLibDwarf modules below.
+    find_package(libdw CONFIG QUIET)
+    find_package(LibElf CONFIG QUIET)
+    if(TARGET libdw::libdw AND TARGET elf::elf)
+        get_target_property(_eu_dw_lib libdw::libdw IMPORTED_LOCATION)
+        get_target_property(_eu_dw_inc libdw::libdw INTERFACE_INCLUDE_DIRECTORIES)
+        get_target_property(_eu_elf_lib elf::elf IMPORTED_LOCATION)
+        get_target_property(_eu_elf_inc elf::elf INTERFACE_INCLUDE_DIRECTORIES)
+        set(Elfutils_FOUND TRUE)
+        set(Elfutils_LIBRARIES ${_eu_elf_lib} ${_eu_dw_lib})
+        set(Elfutils_INCLUDE_DIRS ${_eu_elf_inc} ${_eu_dw_inc})
+        list(REMOVE_DUPLICATES Elfutils_INCLUDE_DIRS)
+    endif()
+endif()
+
+if(Elfutils_FOUND)
+    # find_package(Elfutils) (or the per-library config probe above) already
+    # discovered libelf/libdw via the package's own CMake config files.
+    # Re-export those results under the LibElf/LibDwarf names that the rest
+    # of this file (and Dyninst) expects.
+    #
+    # Do NOT fall through to the legacy FindLibElf/FindLibDwarf modules in that
+    # case: they default LibElf_ROOT_DIR/LibDwarf_ROOT_DIR to /usr and will
+    # silently pick up the system libelf.so.1/libdw.so.1, causing downstream
+    # binaries to carry the wrong NEEDED SONAMEs when elfutils is vendored
+    # with non-standard SONAMEs (e.g. librocm_sysdeps_{elf,dw}.so.1 in TheRock).
+    set(LibElf_FOUND TRUE)
+    set(LibDwarf_FOUND TRUE)
+    set(LibElf_INCLUDE_DIRS ${Elfutils_INCLUDE_DIRS})
+    set(LibDwarf_INCLUDE_DIRS ${Elfutils_INCLUDE_DIRS})
+    set(LibElf_LIBRARIES "")
+    set(LibDwarf_LIBRARIES "")
+    foreach(_eu_lib IN LISTS Elfutils_LIBRARIES)
+        if(_eu_lib MATCHES "libelf")
+            list(APPEND LibElf_LIBRARIES ${_eu_lib})
+        elseif(_eu_lib MATCHES "libdw")
+            list(APPEND LibDwarf_LIBRARIES ${_eu_lib})
+        endif()
+    endforeach()
+elseif(NOT ROCPROFSYS_BUILD_ELFUTILS)
     find_package(LibElf ${ElfUtils_MIN_VERSION})
 
     # Don't search for libdw or libdebuginfod if we didn't find a suitable libelf
