@@ -486,9 +486,15 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationLegacyIpcSucceeds)
     RegRecordCleaner regCleanup(regRecord);
 
     // ---- hook 1: hipMemGetAddressRange returns baseAddr + baseSize.
+    // Production contract: called with dptr == userbuff (so the driver
+    // can find the enclosing allocation). Assert that here -- if a
+    // future refactor mis-wires this, we want the test to catch it.
+    const void* const kUserbuff =
+        reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
     ScopedHook memGet(g_hipMemGetAddressRange,
         [&](hipDeviceptr_t* pbase, std::size_t* psize,
-            hipDeviceptr_t /*dptr*/) -> hipError_t {
+            hipDeviceptr_t dptr) -> hipError_t {
+            EXPECT_EQ(reinterpret_cast<const void*>(dptr), kUserbuff);
             if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
             if (psize) *psize = kBaseSize;
             return hipSuccess;
@@ -497,9 +503,16 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationLegacyIpcSucceeds)
     // ---- hook 2: hipIpcGetMemHandle succeeds with a sentinel handle.
     // p2p.cc copies the handle into ipcInfo.ipcDesc.devIpc and ships it
     // off via ncclProxyCallBlocking; the fake on the other side never
-    // inspects it, so any pattern works.
+    // inspects the bytes, so any pattern works.
+    //
+    // Production contract: called with the *baseAddr* the driver returned
+    // from hipMemGetAddressRange above, NOT the (possibly mid-allocation)
+    // userbuff. This is load-bearing: legacy CUDA IPC handles always
+    // refer to whole allocations, so passing userbuff here would either
+    // fail at runtime or hand the peer a handle to the wrong region.
     ScopedHook ipcGet(g_hipIpcGetMemHandle,
-        [](hipIpcMemHandle_t* h, void* /*p*/) -> hipError_t {
+        [&](hipIpcMemHandle_t* h, void* devPtr) -> hipError_t {
+            EXPECT_EQ(devPtr, reinterpret_cast<void*>(kBaseAddr));
             if (h) std::memset(h, 0x5A, sizeof(*h));
             return hipSuccess;
         });
@@ -524,9 +537,29 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationLegacyIpcSucceeds)
     // skipped.
     ScopedHook proxy(g_proxyCallBlocking,
         [&](struct ncclComm*, struct ncclProxyConnector*,
-            int type, void* /*req*/, int /*rs*/,
+            int type, void* req, int reqSize,
             void* resp, int respSize) -> ncclResult_t {
+            // Production contract for ncclProxyMsgRegister: the request
+            // is a fully-populated p2pIpcExpInfo describing the
+            // allocation we want the peer to import. Pin down the
+            // fields the unit under test is responsible for setting --
+            // a regression that ships a half-built request or wires the
+            // wrong base address would otherwise sail through.
             EXPECT_EQ(type, ncclProxyMsgRegister);
+            // Can't use ASSERT_* inside a non-void-returning lambda; do a
+            // manual early-return on the precondition that the cast below
+            // depends on.
+            if (req == nullptr ||
+                static_cast<size_t>(reqSize) < sizeof(p2pIpcExpInfo)) {
+                ADD_FAILURE() << "malformed register-msg request: req="
+                              << req << " reqSize=" << reqSize;
+                return ncclInternalError;
+            }
+            auto* info = static_cast<p2pIpcExpInfo*>(req);
+            EXPECT_TRUE(info->legacyIpcCap);              // legacy arm set this
+            EXPECT_EQ(info->size,   kBaseSize);           // whole-allocation
+            EXPECT_EQ(info->offset, kBegOffset);          // begAddr - baseAddr
+
             EXPECT_GE(static_cast<size_t>(respSize), sizeof(void*));
             if (resp) std::memcpy(resp, &kRmtRegAddr, sizeof(void*));
             return ncclSuccess;
@@ -536,8 +569,7 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationLegacyIpcSucceeds)
     IpcRegOutputs out;
     bool isLegacyIpc = false;
 
-    auto r = CallIpcRegisterBuffer(comm,
-                                   /*userbuff=*/ reinterpret_cast<const void*>(kBegAddr + kBuffOffset),
+    auto r = CallIpcRegisterBuffer(comm, kUserbuff,
                                    /*buffSize=*/ 256,
                                    peerRanks, 1,
                                    NCCL_IPC_COLLECTIVE,
