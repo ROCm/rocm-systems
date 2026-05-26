@@ -5,7 +5,7 @@
 
 #include "common/traits.hpp"
 #include "debug.hpp"
-#include "spdlog/fmt/bundled/core.h"
+#include <fmt/core.h>
 
 #include <sqlite3.h>
 

@@ -3,8 +3,8 @@
 
 #pragma once
 
+#include <fmt/core.h>
 #include <spdlog/common.h>
-#include <spdlog/fmt/bundled/core.h>
 #include <spdlog/fmt/ranges.h>
 #include <spdlog/logger.h>
 #include <spdlog/sinks/basic_file_sink.h>

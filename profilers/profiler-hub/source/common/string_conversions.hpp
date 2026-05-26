@@ -4,7 +4,7 @@
 
 #include "profiler-hub/writer_types.hpp"
 
-#include "spdlog/fmt/bundled/core.h"
+#include <fmt/core.h>
 
 #include <optional>
 #include <string>

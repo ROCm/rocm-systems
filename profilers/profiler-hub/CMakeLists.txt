@@ -136,6 +136,13 @@ include(sqlite3)
 target_link_libraries(profiler-hub-objects PRIVATE profiler-hub-sqlite3)
 
 # ------------------------------------------------------------ #
+# fmt
+# ------------------------------------------------------------ #
+
+include(fmt)
+target_link_libraries(profiler-hub-objects PRIVATE fmt::fmt)
+
+# ------------------------------------------------------------ #
 # spdlog
 # ------------------------------------------------------------ #
 
@@ -229,6 +236,7 @@ foreach(_target profiler-hub profiler-hub-static)
             $<BUILD_INTERFACE:profiler-hub_queries>
             $<BUILD_INTERFACE:profiler-hub-sqlite3>
             $<BUILD_INTERFACE:spdlog::spdlog>
+            $<BUILD_INTERFACE:fmt::fmt>
             $<BUILD_INTERFACE:nlohmann_json::nlohmann_json>
     )
 

@@ -3,17 +3,9 @@
 
 include_guard(DIRECTORY)
 
-option(
-    PROFILER_HUB_USE_SYSTEM_SPDLOG
-    "Use system-installed spdlog if available"
-    ON
-)
-
 set(SPDLOG_VERSION "1.14.1" CACHE STRING "spdlog version")
 
-if(PROFILER_HUB_USE_SYSTEM_SPDLOG)
-    find_package(spdlog ${SPDLOG_VERSION} QUIET)
-endif()
+find_package(spdlog QUIET)
 
 if(spdlog_FOUND)
     message(STATUS "Using system spdlog (version ${spdlog_VERSION})")
@@ -33,7 +25,7 @@ else()
 
     set(SPDLOG_BUILD_SHARED OFF CACHE BOOL "" FORCE)
     set(SPDLOG_INSTALL OFF CACHE BOOL "" FORCE)
-    set(SPDLOG_FMT_EXTERNAL OFF CACHE BOOL "" FORCE)
+    set(SPDLOG_FMT_EXTERNAL ON CACHE BOOL "" FORCE)
     set(SPDLOG_BUILD_PIC ON CACHE BOOL "" FORCE)
     set(CMAKE_POSITION_INDEPENDENT_CODE ON CACHE BOOL "" FORCE)
 
