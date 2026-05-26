@@ -21,19 +21,20 @@ THE SOFTWARE.
 */
 
 #include "rocjpeg_samples_utils.h"
+#include <cstdint>
 
 struct DecodeInfo
 {
     std::vector<std::string>         file_paths;
     RocJpegHandle                    rocjpeg_handle;
     std::vector<RocJpegStreamHandle> rocjpeg_stream_handles;
-    uint64_t                         num_decoded_images;
+    std::uint64_t                    num_decoded_images;
     double                           images_per_sec;
     double                           image_size_in_mpixels_per_sec;
-    uint64_t                         num_bad_jpegs;
-    uint64_t                         num_jpegs_with_411_subsampling;
-    uint64_t                         num_jpegs_with_unknown_subsampling;
-    uint64_t                         num_jpegs_with_unsupported_resolution;
+    std::uint64_t                    num_bad_jpegs;
+    std::uint64_t                    num_jpegs_with_411_subsampling;
+    std::uint64_t                    num_jpegs_with_unknown_subsampling;
+    std::uint64_t                    num_jpegs_with_unsupported_resolution;
 };
 
 /**
@@ -52,30 +53,30 @@ DecodeImages(DecodeInfo& decode_info, RocJpegUtils rocjpeg_utils,
              RocJpegDecodeParams& decode_params, bool save_images,
              std::string& output_file_path, int batch_size, int device_id)
 {
-    bool                               is_roi_valid = false;
-    uint32_t                           roi_width;
-    uint32_t                           roi_height;
-    uint8_t                            num_components;
-    uint32_t                           channel_sizes[ROCJPEG_MAX_COMPONENT] = {};
-    std::string                        chroma_sub_sampling                  = "";
-    uint32_t                           num_channels                         = 0;
-    double                             image_size_in_mpixels_all            = 0;
-    double                             total_decode_time_in_milli_sec       = 0;
-    int                                current_batch_size                   = 0;
-    std::vector<std::vector<char>>     batch_images(batch_size);
-    std::vector<std::vector<uint32_t>> widths(
-        batch_size, std::vector<uint32_t>(ROCJPEG_MAX_COMPONENT, 0));
-    std::vector<std::vector<uint32_t>> heights(
-        batch_size, std::vector<uint32_t>(ROCJPEG_MAX_COMPONENT, 0));
-    std::vector<std::vector<uint32_t>> prior_channel_sizes(
-        batch_size, std::vector<uint32_t>(ROCJPEG_MAX_COMPONENT, 0));
+    bool                                    is_roi_valid = false;
+    std::uint32_t                           roi_width;
+    std::uint32_t                           roi_height;
+    std::uint8_t                            num_components;
+    std::uint32_t                           channel_sizes[ROCJPEG_MAX_COMPONENT] = {};
+    std::string                             chroma_sub_sampling                  = "";
+    std::uint32_t                           num_channels                         = 0;
+    double                                  image_size_in_mpixels_all            = 0;
+    double                                  total_decode_time_in_milli_sec       = 0;
+    int                                     current_batch_size                   = 0;
+    std::vector<std::vector<char>>          batch_images(batch_size);
+    std::vector<std::vector<std::uint32_t>> widths(
+        batch_size, std::vector<std::uint32_t>(ROCJPEG_MAX_COMPONENT, 0));
+    std::vector<std::vector<std::uint32_t>> heights(
+        batch_size, std::vector<std::uint32_t>(ROCJPEG_MAX_COMPONENT, 0));
+    std::vector<std::vector<std::uint32_t>> prior_channel_sizes(
+        batch_size, std::vector<std::uint32_t>(ROCJPEG_MAX_COMPONENT, 0));
     std::vector<RocJpegChromaSubsampling> subsamplings(batch_size);
     std::vector<RocJpegImage>             output_images(batch_size);
     std::vector<RocJpegDecodeParams>      decode_params_batch(batch_size, decode_params);
     std::vector<std::string>              base_file_names(batch_size);
     std::vector<RocJpegStreamHandle>      rocjpeg_stream_handles(batch_size);
-    std::vector<uint32_t>                 temp_widths(ROCJPEG_MAX_COMPONENT, 0);
-    std::vector<uint32_t>                 temp_heights(ROCJPEG_MAX_COMPONENT, 0);
+    std::vector<std::uint32_t>            temp_widths(ROCJPEG_MAX_COMPONENT, 0);
+    std::vector<std::uint32_t>            temp_heights(ROCJPEG_MAX_COMPONENT, 0);
     RocJpegChromaSubsampling              temp_subsampling;
     std::string                           temp_base_file_name;
 
@@ -114,9 +115,9 @@ DecodeImages(DecodeInfo& decode_info, RocJpegUtils rocjpeg_utils,
                 return;
             }
 
-            RocJpegStatus rocjpeg_status =
-                rocJpegStreamParse(reinterpret_cast<uint8_t*>(batch_images[index].data()),
-                                   file_size, decode_info.rocjpeg_stream_handles[index]);
+            RocJpegStatus rocjpeg_status = rocJpegStreamParse(
+                reinterpret_cast<std::uint8_t*>(batch_images[index].data()), file_size,
+                decode_info.rocjpeg_stream_handles[index]);
             if(rocjpeg_status != ROCJPEG_STATUS_SUCCESS)
             {
                 decode_info.num_bad_jpegs++;
@@ -154,7 +155,7 @@ DecodeImages(DecodeInfo& decode_info, RocJpegUtils rocjpeg_utils,
             if(rocjpeg_utils.GetChannelPitchAndSizes(
                    decode_params_batch[index], temp_subsampling, temp_widths.data(),
                    temp_heights.data(), num_channels, output_images[current_batch_size],
-                   channel_sizes))
+                   channel_sizes) != 0)
             {
                 std::cerr << "ERROR: Failed to get the channel pitch and sizes"
                           << std::endl;
@@ -219,12 +220,12 @@ DecodeImages(DecodeInfo& decode_info, RocJpegUtils rocjpeg_utils,
                             decode_params_batch[b].crop_rectangle.left;
                 roi_height = decode_params_batch[b].crop_rectangle.bottom -
                              decode_params_batch[b].crop_rectangle.top;
-                is_roi_valid    = (roi_width > 0 && roi_height > 0 &&
+                is_roi_valid         = (roi_width > 0 && roi_height > 0 &&
                                 roi_width <= widths[b][0] && roi_height <= heights[b][0])
-                                      ? true
-                                      : false;
-                uint32_t width  = is_roi_valid ? roi_width : widths[b][0];
-                uint32_t height = is_roi_valid ? roi_height : heights[b][0];
+                                           ? true
+                                           : false;
+                std::uint32_t width  = is_roi_valid ? roi_width : widths[b][0];
+                std::uint32_t height = is_roi_valid ? roi_height : heights[b][0];
                 rocjpeg_utils.GetOutputFileExt(decode_params.output_format,
                                                base_file_names[b], width, height,
                                                subsamplings[b], image_save_path);
@@ -275,7 +276,8 @@ main(int argc, char** argv)
     RocJpegBackend           rocjpeg_backend = ROCJPEG_BACKEND_HARDWARE;
     RocJpegDecodeParams      decode_params   = {};
     RocJpegUtils             rocjpeg_utils;
-    std::string              input_path, output_file_path;
+    std::string              input_path;
+    std::string              output_file_path;
     std::vector<std::string> file_paths = {};
     std::vector<DecodeInfo>  decode_info_per_thread;
 
@@ -343,13 +345,13 @@ main(int argc, char** argv)
     }
     thread_pool.JoinThreads();
 
-    uint64_t total_decoded_images                        = 0;
-    double   total_images_per_sec                        = 0;
-    double   total_image_size_in_mpixels_per_sec         = 0;
-    uint64_t total_num_bad_jpegs                         = 0;
-    uint64_t total_num_jpegs_with_411_subsampling        = 0;
-    uint64_t total_num_jpegs_with_unknown_subsampling    = 0;
-    uint64_t total_num_jpegs_with_unsupported_resolution = 0;
+    std::uint64_t total_decoded_images                        = 0;
+    double        total_images_per_sec                        = 0;
+    double        total_image_size_in_mpixels_per_sec         = 0;
+    std::uint64_t total_num_bad_jpegs                         = 0;
+    std::uint64_t total_num_jpegs_with_411_subsampling        = 0;
+    std::uint64_t total_num_jpegs_with_unknown_subsampling    = 0;
+    std::uint64_t total_num_jpegs_with_unsupported_resolution = 0;
 
     for(auto i = 0; i < num_threads; i++)
     {
@@ -367,29 +369,29 @@ main(int argc, char** argv)
     }
 
     std::cout << "Total decoded images: " << total_decoded_images << std::endl;
-    if(total_num_bad_jpegs || total_num_jpegs_with_411_subsampling ||
-       total_num_jpegs_with_unknown_subsampling ||
-       total_num_jpegs_with_unsupported_resolution)
+    if((total_num_bad_jpegs != 0u) || (total_num_jpegs_with_411_subsampling != 0u) ||
+       (total_num_jpegs_with_unknown_subsampling != 0u) ||
+       (total_num_jpegs_with_unsupported_resolution != 0u))
     {
         std::cout << "Total skipped images: "
                   << total_num_bad_jpegs + total_num_jpegs_with_411_subsampling +
                          total_num_jpegs_with_unknown_subsampling +
                          total_num_jpegs_with_unsupported_resolution;
-        if(total_num_bad_jpegs)
+        if(total_num_bad_jpegs != 0u)
         {
             std::cout << " ,total images that cannot be parsed: " << total_num_bad_jpegs;
         }
-        if(total_num_jpegs_with_411_subsampling)
+        if(total_num_jpegs_with_411_subsampling != 0u)
         {
             std::cout << " ,total images with YUV 4:1:1 chroam subsampling: "
                       << total_num_jpegs_with_411_subsampling;
         }
-        if(total_num_jpegs_with_unknown_subsampling)
+        if(total_num_jpegs_with_unknown_subsampling != 0u)
         {
             std::cout << " ,total images with unknwon chroam subsampling: "
                       << total_num_jpegs_with_unknown_subsampling;
         }
-        if(total_num_jpegs_with_unsupported_resolution)
+        if(total_num_jpegs_with_unsupported_resolution != 0u)
         {
             std::cout << " ,total images with unsupported_resolution: "
                       << total_num_jpegs_with_unsupported_resolution;

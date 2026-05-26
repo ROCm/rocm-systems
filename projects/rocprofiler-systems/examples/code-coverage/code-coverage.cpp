@@ -16,10 +16,10 @@ long
 fib(long n) NOINLINE;
 
 void
-run_real(size_t nitr, long) NOINLINE;
+run_real(size_t nitr, long /*n*/) NOINLINE;
 
 void
-run_fake(size_t nitr, long) NOINLINE;
+run_fake(size_t nitr, long /*n*/) NOINLINE;
 
 int
 main(int argc, char** argv)

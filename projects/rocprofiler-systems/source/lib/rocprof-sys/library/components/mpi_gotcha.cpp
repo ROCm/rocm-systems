@@ -225,7 +225,7 @@ mpi_gotcha::update()
             continue;
             // if currently have null comm, replace
         }
-        else if(_rank_data.comm == null_comm())
+        if(_rank_data.comm == null_comm())
         {
             _rank_data = itr.second;
             // if
@@ -264,7 +264,8 @@ mpi_gotcha::disable_comm_intercept()
 }
 
 void
-mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, int*, char***)
+mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming /*unused*/, int* /*unused*/,
+                  char*** /*unused*/)
 {
     LOG_DEBUG("{}(int*, char***)", _data.tool_id);
 
@@ -276,7 +277,8 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, int*, char***)
 }
 
 void
-mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, int*, char***, int, int*)
+mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming /*unused*/, int* /*unused*/,
+                  char*** /*unused*/, int /*unused*/, int* /*unused*/)
 {
     LOG_DEBUG("{}(int*, char***, int, int*)", _data.tool_id);
 
@@ -288,7 +290,7 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, int*, char***, in
 }
 
 void
-mpi_gotcha::audit([[maybe_unused]] const gotcha_data_t& _data, audit::incoming)
+mpi_gotcha::audit([[maybe_unused]] const gotcha_data_t& _data, audit::incoming /*unused*/)
 {
     LOG_DEBUG("{}()", _data.tool_id);
 
@@ -313,7 +315,8 @@ mpi_gotcha::audit([[maybe_unused]] const gotcha_data_t& _data, audit::incoming)
 }
 
 void
-mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, comm_t _comm, int* _val)
+mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming /*unused*/, comm_t _comm,
+                  int* _val)
 {
     LOG_DEBUG("{}(comm_t _comm, int* _val)", _data.tool_id);
 
@@ -338,7 +341,7 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, comm_t _comm, int
 }
 
 void
-mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
+mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing /*unused*/, int _retval)
 {
     LOG_DEBUG("{}() returned {}", _data.tool_id, (int) _retval);
 

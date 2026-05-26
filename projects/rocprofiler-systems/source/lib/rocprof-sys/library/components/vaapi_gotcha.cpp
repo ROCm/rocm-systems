@@ -141,7 +141,7 @@ vaapi_gotcha::resume()
 
 // vaBeginPicture
 void
-vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
+vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming /*unused*/, VADisplay dpy,
                     VAContextID context, VASurfaceID render_target)
 {
     category_region<category::vaapi>::start(std::string_view{ _data.tool_id }, "dpy", dpy,
@@ -151,7 +151,7 @@ vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
 
 // vaCreateBuffer
 void
-vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
+vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming /*unused*/, VADisplay dpy,
                     VAContextID context, VABufferType type, unsigned int size,
                     unsigned int num_elements, void* data, VABufferID* buf_id)
 {
@@ -162,7 +162,7 @@ vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
 
 // vaCreateConfig
 void
-vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
+vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming /*unused*/, VADisplay dpy,
                     VAProfile profile, VAEntrypoint entrypoint,
                     VAConfigAttrib* attrib_list, int num_attribs, VAConfigID* config_id)
 {
@@ -174,7 +174,7 @@ vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
 
 // vaCreateContext
 void
-vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
+vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming /*unused*/, VADisplay dpy,
                     VAConfigID config_id, int picture_width, int picture_height, int flag,
                     VASurfaceID* render_targets, int num_render_targets,
                     VAContextID* context)
@@ -188,7 +188,7 @@ vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
 
 // vaCreateSurfaces
 void
-vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
+vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming /*unused*/, VADisplay dpy,
                     unsigned int format, unsigned int width, unsigned int height,
                     VASurfaceID* surfaces, unsigned int num_surfaces,
                     VASurfaceAttrib* attrib_list, unsigned int num_attribs)
@@ -202,7 +202,7 @@ vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
 
 // vaCreateImage
 void
-vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
+vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming /*unused*/, VADisplay dpy,
                     VAImageFormat* format, int width, int height, VAImage* image)
 {
     (void) format;  // unused
@@ -213,7 +213,7 @@ vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
 
 // vaPutImage
 void
-vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
+vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming /*unused*/, VADisplay dpy,
                     VASurfaceID surface, VAImageID image, int src_x, int src_y,
                     unsigned int src_width, unsigned int src_height, int dest_x,
                     int dest_y, unsigned int dest_width, unsigned int dest_height)
@@ -234,7 +234,7 @@ vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
 // vaUnmapBuffer
 // vaReleaseBufferHandle
 void
-vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
+vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming /*unused*/, VADisplay dpy,
                     VAContextID context)
 {
     if(_data.tool_id == "vaDestroyBuffer")
@@ -281,7 +281,7 @@ vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
 
 // vaDestroySurfaces
 void
-vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
+vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming /*unused*/, VADisplay dpy,
                     VASurfaceID* surfaces, int num_surfaces)
 {
     (void) surfaces;  // unused
@@ -291,7 +291,7 @@ vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
 
 // vaExportSurfaceHandle
 void
-vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
+vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming /*unused*/, VADisplay dpy,
                     VASurfaceID surface_id, std::uint32_t mem_type, std::uint32_t flags,
                     void* descriptor)
 {
@@ -302,7 +302,7 @@ vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
 
 // vaGetImage
 void
-vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
+vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming /*unused*/, VADisplay dpy,
                     VASurfaceID surface, int x, int y, unsigned int width,
                     unsigned int height, VAImageID image)
 {
@@ -314,7 +314,7 @@ vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
 
 // vaGetConfigAttributes
 void
-vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
+vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming /*unused*/, VADisplay dpy,
                     VAProfile profile, VAEntrypoint entrypoint,
                     VAConfigAttrib* attrib_list, int num_attribs)
 {
@@ -326,7 +326,7 @@ vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
 
 // vaInitialize
 void
-vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
+vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming /*unused*/, VADisplay dpy,
                     int* major_version, int* minor_version)
 {
     category_region<category::vaapi>::start(std::string_view{ _data.tool_id }, "dpy", dpy,
@@ -336,7 +336,7 @@ vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
 
 // vaQueryImageFormats
 void
-vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
+vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming /*unused*/, VADisplay dpy,
                     VAImageFormat* format_list, int* num_formats)
 {
     (void) format_list;  // unused
@@ -346,7 +346,7 @@ vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
 
 // vaQueryConfigEntrypoints
 void
-vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
+vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming /*unused*/, VADisplay dpy,
                     VAProfile profile, VAEntrypoint* entrypoint_list,
                     int* num_entrypoints)
 {
@@ -357,7 +357,7 @@ vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
 
 // vaQuerySurfaceAttributes
 void
-vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
+vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming /*unused*/, VADisplay dpy,
                     VAConfigID config, VASurfaceAttrib* attrib_list,
                     unsigned int* num_attribs)
 {
@@ -368,7 +368,7 @@ vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
 
 // vaQuerySurfaceStatus
 void
-vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
+vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming /*unused*/, VADisplay dpy,
                     VASurfaceID render_target, VASurfaceStatus* status)
 {
     category_region<category::vaapi>::start(std::string_view{ _data.tool_id }, "dpy", dpy,
@@ -378,7 +378,7 @@ vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
 
 // vaDeriveImage
 void
-vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
+vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming /*unused*/, VADisplay dpy,
                     VASurfaceID surface, VAImage* image)
 {
     (void) image;  // unused
@@ -388,7 +388,7 @@ vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
 
 // vaMapBuffer
 void
-vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
+vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming /*unused*/, VADisplay dpy,
                     VABufferID buf_id, void** pbuf)
 {
     category_region<category::vaapi>::start(std::string_view{ _data.tool_id }, "dpy", dpy,
@@ -397,7 +397,7 @@ vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
 
 // vaAcquireBufferHandle
 void
-vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
+vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming /*unused*/, VADisplay dpy,
                     VABufferID buf_id, VABufferInfo* buf_info)
 {
     (void) buf_info;  // unused
@@ -407,7 +407,7 @@ vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
 
 // vaRenderPicture
 void
-vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
+vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming /*unused*/, VADisplay dpy,
                     VAContextID context, VABufferID* buffers, int num_buffers)
 {
     (void) buffers;  // unused
@@ -419,14 +419,14 @@ vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
 // vaTerminate
 // vaDisplayIsValid
 void
-vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy)
+vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming /*unused*/, VADisplay dpy)
 {
     category_region<category::vaapi>::start(std::string_view{ _data.tool_id }, "dpy",
                                             dpy);
 }
 
 void
-vaapi_gotcha::audit(const gotcha_data& _data, audit::outgoing, VAStatus ret)
+vaapi_gotcha::audit(const gotcha_data& _data, audit::outgoing /*unused*/, VAStatus ret)
 {
     category_region<category::vaapi>::stop(std::string_view{ _data.tool_id }, "return",
                                            ret);

@@ -1329,12 +1329,10 @@ set_signal_handler(signal_handler_t _func)
         {
             return _handler;
         }
-        else
-        {
-            _handler = get_signal_handler().load(std::memory_order_seq_cst);
-            get_signal_handler().store(_func);
-            return _handler;
-        }
+
+        _handler = get_signal_handler().load(std::memory_order_seq_cst);
+        get_signal_handler().store(_func);
+        return _handler;
     }
 
     return get_signal_handler().load();
@@ -1403,7 +1401,7 @@ get_use_sampling_cputime()
 }
 
 std::set<int>
-get_sampling_signals(std::int64_t)
+get_sampling_signals(std::int64_t /*unused*/)
 {
     auto _v = std::set<int>{};
     if(get_use_causal())
@@ -1809,12 +1807,9 @@ get_mode()
     {
         auto _mode = tim::get_env_choice<std::string>(
             "ROCPROFSYS_MODE", "trace", { "trace", "sampling", "causal", "coverage" });
-        if(_mode == "sampling")
-            return Mode::Sampling;
-        else if(_mode == "causal")
-            return Mode::Causal;
-        else if(_mode == "coverage")
-            return Mode::Coverage;
+        if(_mode == "sampling") return Mode::Sampling;
+        if(_mode == "causal") return Mode::Causal;
+        if(_mode == "coverage") return Mode::Coverage;
         return Mode::Trace;
     }
     static auto _m =
@@ -2939,7 +2934,7 @@ tmp_file::close()
         stream.close();
         return !stream.is_open();
     }
-    else if(file != nullptr)
+    if(file != nullptr)
     {
         auto _ret = fclose(file);
         if(_ret == 0)
@@ -2949,7 +2944,7 @@ tmp_file::close()
         }
         return (_ret == 0);
     }
-    else if(fd > 0)
+    if(fd > 0)
     {
         auto _ret = ::close(fd);
         if(_ret == 0)

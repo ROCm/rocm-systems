@@ -44,7 +44,7 @@ std::uint64_t              ci_timeout_backtrace_global_done  = 0;
 thread_local std::uint64_t ci_timeout_backtrace_local_count  = 0;
 
 void
-ci_timeout_backtrace(int)
+ci_timeout_backtrace(int /*unused*/)
 {
     if(ci_timeout_backtrace_local_count >= ci_timeout_backtrace_global_count) return;
     ++ci_timeout_backtrace_local_count;
@@ -154,10 +154,8 @@ ensure_ci_timeout_backtrace(double             _ci_timeout_seconds,
             ::kill(process::get_id(), SIGQUIT);
             return;
         }
-        else
-        {
-            ++ci_timeout_backtrace_global_count;
-        }
+
+        ++ci_timeout_backtrace_global_count;
     }
 
     LOG_WARNING("Timeout thread exiting...");

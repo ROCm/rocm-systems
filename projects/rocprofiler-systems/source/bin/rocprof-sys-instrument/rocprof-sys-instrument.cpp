@@ -429,10 +429,8 @@ main(int argc, char** argv)
             if(_cmdc > 0) mutname = _cmdv[0];
             break;
         }
-        else
-        {
-            copy_str(_argv[i], argv[i]);
-        }
+
+        copy_str(_argv[i], argv[i]);
     }
 
     auto cmd_string = [](int _ac, char** _av) -> std::string {
@@ -1763,10 +1761,8 @@ main(int argc, char** argv)
                 return (lname +
                         ((prefer_library == "static" || is_static_exe) ? ".a" : ".so"));
             }
-            else
-            {
-                return (lname + ((is_static_exe) ? ".a" : ".so"));
-            }
+
+            return (lname + ((is_static_exe) ? ".a" : ".so"));
         };
         for(auto& lname : lnames)
         {
@@ -1828,7 +1824,7 @@ main(int argc, char** argv)
             use_mpi = true;
             break;
         }
-        else if(find_undefined_function_symbol(objects, itr) != nullptr)
+        if(find_undefined_function_symbol(objects, itr) != nullptr)
         {
             verbprintf(0,
                        "Found undefined symbol '%s' in '%s'. Enabling MPI support...\n",
@@ -2895,7 +2891,7 @@ canonicalize(std::string _path)
         {
             continue;
         }
-        else if(itr == "..")
+        if(itr == "..")
         {
             ++i;
         }

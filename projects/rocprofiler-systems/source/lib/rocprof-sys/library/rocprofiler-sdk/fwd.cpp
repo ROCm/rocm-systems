@@ -182,11 +182,11 @@ client_data::initialize_event_info()
                           {
                               return lhs.id < rhs.id;
                           }
-                          else if(lhs.is_constant)
+                          if(lhs.is_constant)
                           {
                               return true;
                           }
-                          else if(rhs.is_constant)
+                          if(rhs.is_constant)
                           {
                               return false;
                           }
@@ -195,11 +195,11 @@ client_data::initialize_event_info()
                           {
                               return lhs.id < rhs.id;
                           }
-                          else if(!lhs.is_derived)
+                          if(!lhs.is_derived)
                           {
                               return true;
                           }
-                          else if(!rhs.is_derived)
+                          if(!rhs.is_derived)
                           {
                               return false;
                           }
@@ -216,7 +216,7 @@ client_data::initialize_event_info()
                 {
                     continue;
                 }
-                else if(ditr.is_derived)
+                if(ditr.is_derived)
                 {
                     auto _sym = fmt::format("{}:device={}", ditr.name, _dev_index);
                     auto _short_desc =

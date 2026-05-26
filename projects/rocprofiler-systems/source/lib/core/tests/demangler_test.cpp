@@ -12,7 +12,8 @@ struct mock_demangler_impl
 {
     static inline int call_count = 0;
 
-    static char* demangle(const char* _mangled_name, char*, size_t*, int* _status)
+    static char* demangle(const char* _mangled_name, char* /*unused*/, size_t* /*unused*/,
+                          int*        _status)
     {
         ++call_count;
 

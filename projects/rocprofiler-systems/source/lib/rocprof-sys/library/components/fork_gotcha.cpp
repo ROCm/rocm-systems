@@ -38,7 +38,7 @@ thread_local bool postfork_child_lock  = false;
 // because perfetto has a tendency to access memory it
 // shouldn't during cleanup
 void
-child_exit(int _ec, void*)
+child_exit(int _ec, void* /*unused*/)
 {
     std::quick_exit(_ec);
 }
@@ -155,7 +155,7 @@ fork_gotcha::configure()
 }
 
 pid_t
-fork_gotcha::operator()(const gotcha_data_t&, pid_t (*_real_fork)()) const
+fork_gotcha::operator()(const gotcha_data_t& /*unused*/, pid_t (*_real_fork)()) const
 {
     prefork_setup();
 

@@ -527,7 +527,7 @@ TEST_F(trace_cache_module_integration_test, performance_write_test)
     auto end_time = std::chrono::high_resolution_clock::now();
     auto duration_in_microseconds =
         std::chrono::duration_cast<unit>(end_time - start_time);
-    auto period = static_cast<double>(unit::period().den);
+    auto period = static_cast<double>(unit::period::den);
 
     double avg_write_time =
         static_cast<double>(duration_in_microseconds.count()) / sample_count;

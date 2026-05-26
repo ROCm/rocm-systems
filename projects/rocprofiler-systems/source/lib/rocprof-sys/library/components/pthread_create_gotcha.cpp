@@ -108,7 +108,8 @@ stop_bundle(bundle_t& _bundle, std::int64_t _tid, Args&&... _args)
         auto _wc = *_bundle.get<comp::wall_clock>();
         _wc.stop();
         // update data
-        _bundle.store(std::plus<double>{}, _wc.get() * _wc.unit());
+        _bundle.store(std::plus<double>{},
+                      _wc.get() * tim::component::wall_clock::unit());
         // stop all
         _bundle.stop();
         // exclude popping wall-clock
@@ -348,7 +349,7 @@ const auto shutdown_signal_v = SIGRTMAX - 1;
 size_t shutdown_signals_delivered = 0;
 
 void
-pthread_create_gotcha_shutdown_handler(int)
+pthread_create_gotcha_shutdown_handler(int /*unused*/)
 {
     pthread_create_gotcha::shutdown(threading::get_id());
     ++shutdown_signals_delivered;

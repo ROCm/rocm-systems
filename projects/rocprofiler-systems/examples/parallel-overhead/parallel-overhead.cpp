@@ -29,7 +29,7 @@ long
 fib(long n) __attribute__((noinline));
 
 void
-run(size_t nitr, long) __attribute__((noinline));
+run(size_t nitr, long /*n*/) __attribute__((noinline));
 
 long
 fib(long n)

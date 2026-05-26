@@ -110,7 +110,7 @@ c_print_results(char* name, char class_npb, int n1, int n2, int n3, int niter, d
     {
         printf(" Verification    =            NOT PERFORMED\n");
     }
-    else if(passed_verification)
+    else if(passed_verification != 0)
     {
         printf(" Verification    =               SUCCESSFUL\n");
     }

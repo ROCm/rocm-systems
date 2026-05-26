@@ -111,7 +111,7 @@ struct MockedCommData
 struct MockedCategoryRegion
 {
     template <typename... Args>
-    static void start(std::string_view name, Args&&...)
+    static void start(std::string_view name, Args&&... /*unused*/)
     {
         test_globals::g_category_region_gmock->start_generic(name);
     }
@@ -122,22 +122,22 @@ struct MockedCategoryRegion
     }
 
     template <typename... Args>
-    static void stop(std::string_view name, Args&&...)
+    static void stop(std::string_view name, Args&&... /*unused*/)
     {
         FAIL() << "Unexpected call of category_region::stop";
     }
 
-    static void stop(std::string_view name, const char*, void* ret)
+    static void stop(std::string_view name, const char* /*unused*/, void* ret)
     {
         test_globals::g_category_region_gmock->stop_ptr(name, ret);
     }
 
-    static void stop(std::string_view name, const char*, int ret)
+    static void stop(std::string_view name, const char* /*unused*/, int ret)
     {
         test_globals::g_category_region_gmock->stop_int(name, ret);
     }
 
-    static void stop(std::string_view name, const char*, long ret)
+    static void stop(std::string_view name, const char* /*unused*/, long ret)
     {
         test_globals::g_category_region_gmock->stop_long(name, ret);
     }

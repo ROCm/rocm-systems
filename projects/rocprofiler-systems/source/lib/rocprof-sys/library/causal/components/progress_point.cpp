@@ -191,7 +191,8 @@ namespace operation
 namespace causal = rocprofsys::causal;
 
 void
-push_node<causal::component::progress_point>::operator()(type&        _obj, scope::config,
+push_node<causal::component::progress_point>::operator()(type& _obj,
+                                                         scope::config /*unused*/,
                                                          hash_value_t _hash,
                                                          std::int64_t _tid) const
 {
@@ -209,7 +210,8 @@ push_node<causal::component::progress_point>::operator()(type&        _obj, scop
 }
 
 void
-pop_node<causal::component::progress_point>::operator()(type& _obj, std::int64_t) const
+pop_node<causal::component::progress_point>::operator()(type& _obj,
+                                                        std::int64_t /*unused*/) const
 {
     auto* itr = _obj.get_iterator();
     if(itr && !(_obj.get_is_invalid() || _obj.get_is_running()))

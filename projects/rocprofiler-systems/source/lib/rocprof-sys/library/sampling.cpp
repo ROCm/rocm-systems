@@ -280,7 +280,7 @@ parse_timer_data(std::int64_t _tid, const bundle_t* _init,
                  const std::vector<bundle_t*>& _data);
 
 std::vector<overflow_sampling_data>
-parse_overflow_data(std::int64_t                  _tid, const bundle_t*,
+parse_overflow_data(std::int64_t                  _tid, const bundle_t* /*unused*/,
                     const std::vector<bundle_t*>& _data);
 
 // TODO: should we remove _tid? it's inside timer_data and overflow_data
@@ -1009,18 +1009,22 @@ configure(bool _setup, std::int64_t _tid)
 }
 
 std::vector<timer_sampling_data>
-parse_timer_data(std::int64_t, const bundle_t*, const std::vector<bundle_t*>&);
+parse_timer_data(std::int64_t /*_tid*/, const bundle_t* /*_init*/,
+                 const std::vector<bundle_t*>& /*_data*/);
 
 std::vector<overflow_sampling_data>
-parse_overflow_data(std::int64_t, const bundle_t*, const std::vector<bundle_t*>&);
+parse_overflow_data(std::int64_t /*_tid*/, const bundle_t* /*unused*/,
+                    const std::vector<bundle_t*>& /*_data*/);
 
 void
-post_process_perfetto(std::int64_t, const std::vector<timer_sampling_data>&,
-                      const std::vector<overflow_sampling_data>&);
+post_process_perfetto(std::int64_t /*_tid*/,
+                      const std::vector<timer_sampling_data>& /*_timer_data*/,
+                      const std::vector<overflow_sampling_data>& /*_overflow_data*/);
 
 void
-post_process_timemory(std::int64_t, const std::vector<timer_sampling_data>&,
-                      const std::vector<overflow_sampling_data>&);
+post_process_timemory(std::int64_t /*_tid*/,
+                      const std::vector<timer_sampling_data>& /*_timer_data*/,
+                      const std::vector<overflow_sampling_data>& /*_overflow_data*/);
 
 void
 store_sampling_data_in_cache(std::int64_t                               _tid,
@@ -1337,7 +1341,7 @@ parse_timer_data(std::int64_t _tid, const bundle_t* _init,
 }
 
 std::vector<overflow_sampling_data>
-parse_overflow_data(std::int64_t                  _tid, const bundle_t*,
+parse_overflow_data(std::int64_t                  _tid, const bundle_t* /*unused*/,
                     const std::vector<bundle_t*>& _data)
 {
     auto _results = std::vector<overflow_sampling_data>{};

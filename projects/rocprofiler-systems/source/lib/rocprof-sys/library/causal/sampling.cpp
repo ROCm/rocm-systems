@@ -147,7 +147,7 @@ get_causal_sampler(std::int64_t _tid)
 }
 
 void
-causal_offload_buffer(std::int64_t, causal_sampler_buffer_t&& _buf)
+causal_offload_buffer(std::int64_t /*unused*/, causal_sampler_buffer_t&& _buf)
 {
     auto _data      = std::move(_buf);
     auto _processed = std::map<std::uint32_t, std::map<uintptr_t, std::uint64_t>>{};
@@ -466,7 +466,7 @@ sampling_signals()
 
 template <typename ScopeT>
 void
-pause(ScopeT)
+pause(ScopeT /*unused*/)
 {
     static_assert(
         tim::is_one_of<ScopeT,
@@ -506,7 +506,7 @@ pause(ScopeT)
 
 template <typename ScopeT>
 void
-resume(ScopeT)
+resume(ScopeT /*unused*/)
 {
     static_assert(
         tim::is_one_of<ScopeT,
@@ -619,7 +619,7 @@ post_process()
 namespace
 {
 void
-post_process_causal(std::int64_t, const std::vector<causal_bundle_t>& _data)
+post_process_causal(std::int64_t /*unused*/, const std::vector<causal_bundle_t>& _data)
 {
     for(const auto& itr : _data)
     {

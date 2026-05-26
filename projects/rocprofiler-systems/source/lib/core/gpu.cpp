@@ -272,9 +272,12 @@ get_processor_handles()
             processors::processors_list.push_back(processor);
 
             amdsmi_gpu_metrics_t gpu_metrics;
-            bool                 vcn_supported = false, jpeg_supported = false;
-            bool                 v_busy_supported = false, j_busy_supported = false;
-            bool                 xgmi_supported = false, pcie_supported = false;
+            bool                 vcn_supported    = false;
+            bool                 jpeg_supported   = false;
+            bool                 v_busy_supported = false;
+            bool                 j_busy_supported = false;
+            bool                 xgmi_supported   = false;
+            bool                 pcie_supported   = false;
             // AMD SMI will not report VCN_activity and JPEG_activity, if VCN_busy or
             // JPEG_busy fields are available.
             if(amdsmi_get_gpu_metrics_info(processor, &gpu_metrics) ==

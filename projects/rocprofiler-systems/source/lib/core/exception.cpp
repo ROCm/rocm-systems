@@ -24,7 +24,7 @@ namespace
 {
 template <typename... Args>
 void
-consume_args(Args&&...)
+consume_args(Args&&... /*unused*/)
 {}
 
 template <typename... Args>

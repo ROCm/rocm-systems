@@ -85,7 +85,8 @@ timer_start(int n)
 void
 timer_stop(int n)
 {
-    double t, now;
+    double t;
+    double now;
     now = elapsed_time();
     t   = now - start[n];
     elapsed[n] += t;

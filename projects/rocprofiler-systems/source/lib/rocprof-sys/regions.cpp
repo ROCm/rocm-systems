@@ -22,7 +22,8 @@ template <size_t Idx, size_t... Tail>
 void
 invoke_category_region_start(rocprofsys_category_t _category, const char* name,
                              rocprofsys_annotation_t* _annotations,
-                             size_t _annotation_count, std::index_sequence<Idx, Tail...>)
+                             size_t                   _annotation_count,
+                             std::index_sequence<Idx, Tail...> /*unused*/)
 {
     static_assert(Idx > ROCPROFSYS_CATEGORY_NONE && Idx < ROCPROFSYS_CATEGORY_LAST,
                   "Error! index sequence should only contain values which are greater "
@@ -61,7 +62,8 @@ template <size_t Idx, size_t... Tail>
 void
 invoke_category_region_stop(rocprofsys_category_t _category, const char* name,
                             rocprofsys_annotation_t* _annotations,
-                            size_t _annotation_count, std::index_sequence<Idx, Tail...>)
+                            size_t                   _annotation_count,
+                            std::index_sequence<Idx, Tail...> /*unused*/)
 {
     static_assert(Idx > ROCPROFSYS_CATEGORY_NONE && Idx < ROCPROFSYS_CATEGORY_LAST,
                   "Error! index sequence should only contain values which are greater "

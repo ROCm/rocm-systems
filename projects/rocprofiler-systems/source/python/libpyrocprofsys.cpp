@@ -345,7 +345,7 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
         _update_ignore_stack_depth();
         return;
     }
-    else if(_config.ignore_stack_depth < 0)
+    if(_config.ignore_stack_depth < 0)
     {
         TIMEMORY_PRINT_HERE("WARNING! ignore_stack_depth is < 0 :: ",
                             _config.ignore_stack_depth);

@@ -136,7 +136,7 @@ namespace
 {
 template <typename... Tp>
 auto
-get_enabled(tim::type_list<Tp...>)
+get_enabled(tim::type_list<Tp...> /*unused*/)
 {
     constexpr size_t N  = sizeof...(Tp);
     auto             _v = std::bitset<N>{};
@@ -287,7 +287,7 @@ cache_backtrace_metrics_events(const std::uint32_t device_id, std::uint64_t time
 }  // namespace
 
 void
-backtrace_metrics::sample(int)
+backtrace_metrics::sample(int /*unused*/)
 {
     if(!get_enabled(type_list<category::process_sampling, backtrace_metrics>{}).all())
     {

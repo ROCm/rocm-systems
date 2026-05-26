@@ -85,9 +85,10 @@ transpose_a(int* in, int* out, int M, int N)
 {
     __shared__ int tile[TILE_DIM][TILE_DIM];
 
-    int tx = threadIdx.x, ty = threadIdx.y;
-    int x = blockIdx.x * TILE_DIM + tx;
-    int y = blockIdx.y * TILE_DIM + ty;
+    int tx = threadIdx.x;
+    int ty = threadIdx.y;
+    int x  = blockIdx.x * TILE_DIM + tx;
+    int y  = blockIdx.y * TILE_DIM + ty;
 
     int v = 0;
     if(x < M && y < N) v = in[y * M + x];  // guarded load

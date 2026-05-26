@@ -124,7 +124,7 @@ blocking_gotcha::shutdown()
 
 template <size_t Idx, typename Ret, typename... Args>
 std::enable_if_t<(Idx <= blocking_gotcha::indexes::maybe_post_block_max_idx), Ret>
-blocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
+blocking_gotcha::operator()(gotcha_index<Idx> /*unused*/, Ret (*_func)(Args...),
                             Args... _args) const noexcept
 {
     std::int64_t _delay_value =
@@ -155,7 +155,8 @@ blocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
 }
 
 int
-blocking_gotcha::operator()(gotcha_index<sigwait_idx>, int (*)(const sigset_t*, int*),
+blocking_gotcha::operator()(gotcha_index<sigwait_idx> /*unused*/,
+                            int (* /*unused*/)(const sigset_t*, int*),
                             const sigset_t* _set_v, int* _sig) const noexcept
 {
     auto _active = get_thread_state() < ::rocprofsys::ThreadState::Internal;
@@ -183,16 +184,14 @@ blocking_gotcha::operator()(gotcha_index<sigwait_idx>, int (*)(const sigset_t*, 
     {
         return errno;  // If there was an error, return the error code
     }
-    else
-    {
-        *_sig = _ret;  // sig is declared as non-null so skip check
-    }
+
+    *_sig = _ret;  // sig is declared as non-null so skip check
 
     return 0;
 }
 
 int
-blocking_gotcha::operator()(gotcha_index<sigwaitinfo_idx>,
+blocking_gotcha::operator()(gotcha_index<sigwaitinfo_idx> /*unused*/,
                             int (*_func)(const sigset_t*, siginfo_t*),
                             const sigset_t* _set_v, siginfo_t* _info_v) const noexcept
 {
@@ -220,7 +219,7 @@ blocking_gotcha::operator()(gotcha_index<sigwaitinfo_idx>,
 }
 
 int
-blocking_gotcha::operator()(gotcha_index<sigtimedwait_idx>,
+blocking_gotcha::operator()(gotcha_index<sigtimedwait_idx> /*unused*/,
                             int (*_func)(const sigset_t*, siginfo_t*,
                                          const struct timespec*),
                             const sigset_t* _set_v, siginfo_t* _info_v,
@@ -250,7 +249,8 @@ blocking_gotcha::operator()(gotcha_index<sigtimedwait_idx>,
 }
 
 int
-blocking_gotcha::operator()(gotcha_index<sigsuspend_idx>, int (*)(const sigset_t*),
+blocking_gotcha::operator()(gotcha_index<sigsuspend_idx> /*unused*/,
+                            int (* /*unused*/)(const sigset_t*),
                             const sigset_t* _set_v) const noexcept
 {
     auto _old_set = sigset_t{};

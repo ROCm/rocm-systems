@@ -22,6 +22,7 @@ THE SOFTWARE.
 
 #include <algorithm>
 #include <cstdarg>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -77,7 +78,7 @@ public:
     int                           useHsaDma      = 0;
     int                           gfxBlockOrder  = 0;
     int                           gfxBlockSize   = 256;
-    std::vector<uint32_t>         cuMask;
+    std::vector<std::uint32_t>    cuMask;
     std::vector<std::vector<int>> prefXccTable;
     int                           gfxTemporal      = 0;
     int                           gfxUnroll        = 4;
@@ -94,7 +95,7 @@ public:
     int                           ibGidIndex       = -1;
     int                           roceVersion      = 2;
     int                           ipAddressFamily  = 4;
-    uint8_t                       ibPort           = 1;
+    std::uint8_t                  ibPort           = 1;
     int                           nicRelaxedOrder  = 1;
     std::string                   closestNicStr    = "";
     int                           gpuMaxHwQueues   = 4;
@@ -170,11 +171,11 @@ public:
         return defaultValue;
     }
 
-    void Print(std::string const& name, int32_t const value, const char* format,
+    void Print(std::string const& name, std::int32_t const value, const char* format,
                ...) const
     {
-        printf("%-20s%s%12d%s", name.c_str(), outputToCsv ? "," : " = ", value,
-               outputToCsv ? "," : " : ");
+        printf("%-20s%s%12d%s", name.c_str(), (outputToCsv != 0) ? "," : " = ", value,
+               (outputToCsv != 0) ? "," : " : ");
         va_list args;
         va_start(args, format);
         vprintf(format, args);
@@ -185,8 +186,8 @@ public:
     void Print(std::string const& name, std::string const& value, const char* format,
                ...) const
     {
-        printf("%-20s%s%12s%s", name.c_str(), outputToCsv ? "," : " = ", value.c_str(),
-               outputToCsv ? "," : " : ");
+        printf("%-20s%s%12s%s", name.c_str(), (outputToCsv != 0) ? "," : " = ",
+               value.c_str(), (outputToCsv != 0) ? "," : " : ");
         va_list args;
         va_start(args, format);
         vprintf(format, args);
@@ -201,26 +202,26 @@ public:
 #if NIC_EXEC_ENABLED
         nicSupport = " (with NIC support)";
 #endif
-        if(!outputToCsv)
+        if(outputToCsv == 0)
         {
             printf("Standalone AllToAll v%s%s\n", TransferBench::VERSION,
                    nicSupport.c_str());
             printf("===============================================================\n");
-            if(!hideEnv)
+            if(hideEnv == 0)
                 printf("[Common]                              (Suppress by setting "
                        "HIDE_ENV=1)\n");
         }
-        else if(!hideEnv)
+        else if(hideEnv == 0)
             printf("EnvVar,Value,Description,(Standalone AllToAll v%s)\n",
                    TransferBench::VERSION);
-        if(hideEnv) return;
+        if(hideEnv != 0) return;
 
         Print("NUM_ITERATIONS", numIterations, "Running %d timed iteration(s)",
               numIterations);
         Print("NUM_WARMUPS", numWarmups, "Running %d warmup iteration(s) per Test",
               numWarmups);
         Print("USE_SINGLE_STREAM", useSingleStream, "Using single stream per GFX %s",
-              useSingleStream ? "device" : "Transfer");
+              (useSingleStream != 0) ? "device" : "Transfer");
         Print("GFX_UNROLL", gfxUnroll, "Using GFX unroll factor of %d", gfxUnroll);
         printf("\n");
     }
@@ -282,7 +283,7 @@ public:
         cfg.gfx.unrollFactor   = gfxUnroll;
         cfg.gfx.temporalMode   = gfxTemporal;
         cfg.gfx.useHipEvents   = useHipEvents;
-        cfg.gfx.useMultiStream = !useSingleStream;
+        cfg.gfx.useMultiStream = (useSingleStream == 0);
         cfg.gfx.useSingleTeam  = gfxSingleTeam;
         cfg.gfx.waveOrder      = gfxWaveOrder;
         cfg.gfx.wordSize       = gfxWordSize;
@@ -319,7 +320,7 @@ public:
 
 // Forward declarations
 void
-PrintResults(EnvVars const& ev, int const testNum, std::vector<Transfer> const& transfers,
+PrintResults(EnvVars const& ev, int testNum, std::vector<Transfer> const& transfers,
              TransferBench::TestResults const& results);
 void
 PrintErrors(std::vector<ErrResult> const& errors);
@@ -371,18 +372,18 @@ void
 PrintResults(EnvVars const& ev, int const testNum, std::vector<Transfer> const& transfers,
              TransferBench::TestResults const& results)
 {
-    char   sep                = ev.outputToCsv ? ',' : '|';
+    char   sep                = (ev.outputToCsv != 0) ? ',' : '|';
     size_t numTimedIterations = results.numTimedIterations;
 
-    if(!ev.outputToCsv) printf("Test %d:\n", testNum);
+    if(ev.outputToCsv == 0) printf("Test %d:\n", testNum);
 
     // Loop over each executor
     for(auto exeInfoPair : results.exeResults)
     {
-        ExeDevice const& exeDevice = exeInfoPair.first;
-        ExeResult const& exeResult = exeInfoPair.second;
-        ExeType const    exeType   = exeDevice.exeType;
-        int32_t const    exeIndex  = exeDevice.exeIndex;
+        ExeDevice const&   exeDevice = exeInfoPair.first;
+        ExeResult const&   exeResult = exeInfoPair.second;
+        ExeType const      exeType   = exeDevice.exeType;
+        std::int32_t const exeIndex  = exeDevice.exeIndex;
 
         printf(" Executor: %3s %02d %c %8.3f GB/s %c %8.3f ms %c %12lu bytes %c %-7.3f "
                "GB/s (sum)\n",
@@ -506,7 +507,8 @@ AllToAllPreset(EnvVars& ev, size_t const numBytesPerTransfer,
     int useRemoteRead = EnvVars::GetEnvVar("USE_REMOTE_READ", 0);
 
     // A2A_MODE may be 0,1,2 or else custom numSrcs:numDsts
-    int numSrcs, numDsts;
+    int numSrcs;
+    int numDsts;
     int a2aMode = 0;
     if(getenv("A2A_MODE") && sscanf(getenv("A2A_MODE"), "%d:%d", &numSrcs, &numDsts) == 2)
     {
@@ -526,13 +528,13 @@ AllToAllPreset(EnvVars& ev, size_t const numBytesPerTransfer,
 
     // Print off environment variables
     ev.DisplayEnvVars();
-    if(!ev.hideEnv)
+    if(ev.hideEnv == 0)
     {
-        if(!ev.outputToCsv) printf("[AllToAll Related]\n");
+        if(ev.outputToCsv == 0) printf("[AllToAll Related]\n");
         ev.Print("A2A_DIRECT", a2aDirect,
-                 a2aDirect ? "Only using direct links" : "Full all-to-all");
+                 (a2aDirect != 0) ? "Only using direct links" : "Full all-to-all");
         ev.Print("A2A_LOCAL", a2aLocal, "%s local transfers",
-                 a2aLocal ? "Include" : "Exclude");
+                 (a2aLocal != 0) ? "Include" : "Exclude");
         ev.Print("A2A_MODE",
                  (a2aMode == A2A_CUSTOM)
                      ? std::to_string(numSrcs) + ":" + std::to_string(numDsts)
@@ -547,11 +549,11 @@ AllToAllPreset(EnvVars& ev, size_t const numBytesPerTransfer,
         ev.Print("NUM_SUB_EXEC", numSubExecs, "Using %d subexecutors/CUs per Transfer",
                  numSubExecs);
         ev.Print("USE_DMA_EXEC", useDmaExec, "Using %s executor",
-                 useDmaExec ? "DMA" : "GFX");
+                 (useDmaExec != 0) ? "DMA" : "GFX");
         ev.Print("USE_FINE_GRAIN", useFineGrain, "Using %s-grained memory",
-                 useFineGrain ? "fine" : "coarse");
+                 (useFineGrain != 0) ? "fine" : "coarse");
         ev.Print("USE_REMOTE_READ", useRemoteRead, "Using %s as executor",
-                 useRemoteRead ? "DST" : "SRC");
+                 (useRemoteRead != 0) ? "DST" : "SRC");
         printf("\n");
     }
 
@@ -562,15 +564,15 @@ AllToAllPreset(EnvVars& ev, size_t const numBytesPerTransfer,
                numDetectedGpus);
         exit(1);
     }
-    if(useDmaExec && (numSrcs != 1 || numDsts != 1))
+    if((useDmaExec != 0) && (numSrcs != 1 || numDsts != 1))
     {
         printf("[ERROR] DMA execution can only be used for copies (A2A_MODE=0)\n");
         exit(1);
     }
 
     // Collect the number of GPU devices to use
-    MemType memType = useFineGrain ? MEM_GPU_FINE : MEM_GPU;
-    ExeType exeType = useDmaExec ? EXE_GPU_DMA : EXE_GPU_GFX;
+    MemType memType = (useFineGrain != 0) ? MEM_GPU_FINE : MEM_GPU;
+    ExeType exeType = (useDmaExec != 0) ? EXE_GPU_DMA : EXE_GPU_GFX;
 
     std::map<std::pair<int, int>, int> reIndex;
     std::vector<Transfer>              transfers;
@@ -581,12 +583,13 @@ AllToAllPreset(EnvVars& ev, size_t const numBytesPerTransfer,
             // Check whether or not to execute this pair
             if(i == j)
             {
-                if(!a2aLocal) continue;
+                if(a2aLocal == 0) continue;
             }
-            else if(a2aDirect)
+            else if(a2aDirect != 0)
             {
 #if !defined(__NVCC__)
-                uint32_t linkType, hopCount;
+                std::uint32_t linkType;
+                std::uint32_t hopCount;
                 HIP_CALL(hipExtGetLinkTypeAndHopCount(i, j, &linkType, &hopCount));
                 if(hopCount != 1) continue;
 #endif
@@ -599,10 +602,10 @@ AllToAllPreset(EnvVars& ev, size_t const numBytesPerTransfer,
                 transfer.srcs.push_back({ memType, i });
 
             // When using multiple destinations, the additional destinations are "local"
-            if(numDsts) transfer.dsts.push_back({ memType, j });
+            if(numDsts != 0) transfer.dsts.push_back({ memType, j });
             for(int x = 1; x < numDsts; x++)
                 transfer.dsts.push_back({ memType, i });
-            transfer.exeDevice   = { exeType, (useRemoteRead ? j : i) };
+            transfer.exeDevice   = { exeType, ((useRemoteRead != 0) ? j : i) };
             transfer.exeSubIndex = -1;
             transfer.numSubExecs = numSubExecs;
 
@@ -634,8 +637,8 @@ AllToAllPreset(EnvVars& ev, size_t const numBytesPerTransfer,
     printf("GPU-GFX All-To-All benchmark:\n");
     printf("==========================\n");
     printf("- Copying %lu bytes between %s pairs of GPUs using %d CUs (%lu Transfers)\n",
-           numBytesPerTransfer, a2aDirect ? "directly connected" : "all", numSubExecs,
-           transfers.size());
+           numBytesPerTransfer, (a2aDirect != 0) ? "directly connected" : "all",
+           numSubExecs, transfers.size());
     if(transfers.size() == 0)
     {
         printf("Error: No valid transfers created. Check GPU count, a2aLocal=%d, "
@@ -659,9 +662,9 @@ AllToAllPreset(EnvVars& ev, size_t const numBytesPerTransfer,
     }
 
     // Print results
-    char separator = (ev.outputToCsv ? ',' : ' ');
+    char separator = ((ev.outputToCsv != 0) ? ',' : ' ');
     printf("\nSummary: [%lu bytes per Transfer] [%s:%d] [%d Read(s) %d Write(s)]\n",
-           numBytesPerTransfer, useDmaExec ? "DMA" : "GFX", numSubExecs, numSrcs,
+           numBytesPerTransfer, (useDmaExec != 0) ? "DMA" : "GFX", numSubExecs, numSrcs,
            numDsts);
     printf(
         "===========================================================================\n");
@@ -793,7 +796,7 @@ main(int argc, char** argv)
             case 'k': numBytesPerTransfer *= 1024;
         }
     }
-    if(numBytesPerTransfer % 4)
+    if((numBytesPerTransfer % 4) != 0u)
     {
         printf("[ERROR] numBytesPerTransfer (%lu) must be a multiple of 4\n",
                numBytesPerTransfer);

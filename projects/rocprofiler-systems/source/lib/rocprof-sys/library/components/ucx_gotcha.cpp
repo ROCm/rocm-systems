@@ -264,8 +264,8 @@ ucx_gotcha::resume()
 
 // Specific audit functions for tag operations
 void
-ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, const void* arg2,
-                  size_t arg3, std::uint64_t arg4, const void* arg5)
+ucx_gotcha::audit(const gotcha_data& _data, audit::incoming /*unused*/, void* arg1,
+                  const void* arg2, size_t arg3, std::uint64_t arg4, const void* arg5)
 {
     category_region<category::ucx>::start(std::string_view{ _data.tool_id }, "ep", arg1,
                                           "buffer", arg2, "count", arg3, "tag", arg4,
@@ -276,8 +276,9 @@ ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, const v
 }
 
 void
-ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, void* arg2,
-                  size_t arg3, std::uint64_t arg4, std::uint64_t arg5, const void* arg6)
+ucx_gotcha::audit(const gotcha_data& _data, audit::incoming /*unused*/, void* arg1,
+                  void* arg2, size_t arg3, std::uint64_t arg4, std::uint64_t arg5,
+                  const void* arg6)
 {
     category_region<category::ucx>::start(std::string_view{ _data.tool_id }, "worker",
                                           arg1, "buffer", arg2, "count", arg3, "tag",
@@ -289,8 +290,9 @@ ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, void* a
 
 // RMA operations
 void
-ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, const void* arg2,
-                  size_t arg3, std::uint64_t arg4, void* arg5, const void* arg6)
+ucx_gotcha::audit(const gotcha_data& _data, audit::incoming /*unused*/, void* arg1,
+                  const void* arg2, size_t arg3, std::uint64_t arg4, void* arg5,
+                  const void* arg6)
 {
     category_region<category::ucx>::start(std::string_view{ _data.tool_id }, "ep", arg1,
                                           "buffer", arg2, "count", arg3, "remote_addr",
@@ -301,8 +303,9 @@ ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, const v
 }
 
 void
-ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, void* arg2,
-                  size_t arg3, std::uint64_t arg4, void* arg5, const void* arg6)
+ucx_gotcha::audit(const gotcha_data& _data, audit::incoming /*unused*/, void* arg1,
+                  void* arg2, size_t arg3, std::uint64_t arg4, void* arg5,
+                  const void* arg6)
 {
     category_region<category::ucx>::start(std::string_view{ _data.tool_id }, "ep", arg1,
                                           "buffer", arg2, "count", arg3, "remote_addr",
@@ -314,9 +317,9 @@ ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, void* a
 
 // Active message send
 void
-ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, unsigned arg2,
-                  const void* arg3, size_t arg4, const void* arg5, size_t arg6,
-                  const void* arg7)
+ucx_gotcha::audit(const gotcha_data& _data, audit::incoming /*unused*/, void* arg1,
+                  unsigned arg2, const void* arg3, size_t arg4, const void* arg5,
+                  size_t arg6, const void* arg7)
 {
     category_region<category::ucx>::start(
         std::string_view{ _data.tool_id }, "ep", arg1, "id", arg2, "header", arg3,
@@ -328,8 +331,8 @@ ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, unsigne
 
 // Stream operations
 void
-ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, const void* arg2,
-                  size_t arg3, const void* arg4)
+ucx_gotcha::audit(const gotcha_data& _data, audit::incoming /*unused*/, void* arg1,
+                  const void* arg2, size_t arg3, const void* arg4)
 {
     category_region<category::ucx>::start(std::string_view{ _data.tool_id }, "ep", arg1,
                                           "buffer", arg2, "count", arg3, "param", arg4);
@@ -339,8 +342,8 @@ ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, const v
 }
 
 void
-ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, void* arg2,
-                  size_t arg3, size_t* arg4, const void* arg5)
+ucx_gotcha::audit(const gotcha_data& _data, audit::incoming /*unused*/, void* arg1,
+                  void* arg2, size_t arg3, size_t* arg4, const void* arg5)
 {
     category_region<category::ucx>::start(std::string_view{ _data.tool_id }, "ep", arg1,
                                           "buffer", arg2, "count", arg3, "length", arg4,
@@ -351,14 +354,14 @@ ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, void* a
 }
 
 void
-ucx_gotcha::audit(const gotcha_data& _data, audit::outgoing, void* ret)
+ucx_gotcha::audit(const gotcha_data& _data, audit::outgoing /*unused*/, void* ret)
 {
     category_region<category::ucx>::stop(std::string_view{ _data.tool_id }, "return",
                                          ret);
 }
 
 void
-ucx_gotcha::audit(const gotcha_data& _data, audit::outgoing, int ret)
+ucx_gotcha::audit(const gotcha_data& _data, audit::outgoing /*unused*/, int ret)
 {
     category_region<category::ucx>::stop(std::string_view{ _data.tool_id }, "return",
                                          ret);

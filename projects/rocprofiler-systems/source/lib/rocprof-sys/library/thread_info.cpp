@@ -245,7 +245,7 @@ thread_info::get(std::int64_t _tid, ThreadIdType _type)
     {
         return get_info_data(_tid);
     }
-    else if(_type == ThreadIdType::SystemTID)
+    if(_type == ThreadIdType::SystemTID)
     {
         const auto& _v = get_info_data();
         if(_v)

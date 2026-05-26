@@ -79,7 +79,7 @@ unblocking_gotcha::shutdown()
 
 template <size_t Idx, typename Ret, typename... Args>
 std::enable_if_t<(Idx < unblocking_gotcha::indexes::kill_idx), Ret>
-unblocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
+unblocking_gotcha::operator()(gotcha_index<Idx> /*unused*/, Ret (*_func)(Args...),
                               Args... _args) const noexcept
 {
     auto _active = get_thread_state() < ::rocprofsys::ThreadState::Internal;
@@ -106,7 +106,7 @@ unblocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
 }
 
 int
-unblocking_gotcha::operator()(gotcha_index<kill_idx>, int (*_func)(pid_t, int),
+unblocking_gotcha::operator()(gotcha_index<kill_idx> /*unused*/, int (*_func)(pid_t, int),
                               pid_t _pid, int _sig) const noexcept
 {
     auto _active = get_thread_state() < ::rocprofsys::ThreadState::Internal;

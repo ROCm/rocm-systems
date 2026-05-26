@@ -223,11 +223,9 @@ get_func_file_line_info(module_t* module, procedure_t* func)
         return function_signature(_return_type, _func_name, _file_name, _param_types,
                                   { _row, 0 }, { 0, 0 }, false, true, false);
     }
-    else
-    {
-        return function_signature(_return_type, _func_name, _file_name, _param_types,
-                                  { 0, 0 }, { 0, 0 }, false, false, false);
-    }
+
+    return function_signature(_return_type, _func_name, _file_name, _param_types,
+                              { 0, 0 }, { 0, 0 }, false, false, false);
 }
 
 //======================================================================================//
@@ -236,7 +234,7 @@ get_func_file_line_info(module_t* module, procedure_t* func)
 //  the instrumented loop and formats it properly.
 //
 function_signature
-get_loop_file_line_info(module_t* module, procedure_t* func, flow_graph_t*,
+get_loop_file_line_info(module_t* module, procedure_t* func, flow_graph_t* /*unused*/,
                         basic_loop_t* loopToInstrument)
 {
     ROCPROFSYS_ADD_LOG_ENTRY("Getting loop line info for", get_name(func));
@@ -311,17 +309,13 @@ get_loop_file_line_info(module_t* module, procedure_t* func, flow_graph_t*,
                                       { _row1, _row2 }, { _col1, _col2 }, true, true,
                                       true);
         }
-        else
-        {
-            return function_signature(_return_type, _func_name, _file_name, _param_types,
-                                      { _row1, 0 }, { _col1, 0 }, true, true, false);
-        }
-    }
-    else
-    {
+
         return function_signature(_return_type, _func_name, _file_name, _param_types,
-                                  { 0, 0 }, { 0, 0 }, true, false, false);
+                                  { _row1, 0 }, { _col1, 0 }, true, true, false);
     }
+
+    return function_signature(_return_type, _func_name, _file_name, _param_types,
+                              { 0, 0 }, { 0, 0 }, true, false, false);
 }
 
 //======================================================================================//

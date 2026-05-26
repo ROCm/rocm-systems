@@ -222,7 +222,7 @@ static boolean flag2[ISIZ1 / 2 * 2 + 1];
 
 /* lu */
 int
-main(int, char*[])
+main(int /*unused*/, char* /*unused*/[])
 {
 #if defined(DO_NOT_ALLOCATE_ARRAYS_WITH_DYNAMIC_MEMORY_AND_AS_SINGLE_DIMENSION)
     printf(
@@ -231,7 +231,9 @@ main(int, char*[])
     char    class_npb;
     boolean verified;
     double  mflops;
-    double  t, tmax, trecs[T_LAST + 1];
+    double  t;
+    double  tmax;
+    double  trecs[T_LAST + 1];
     int     i;
     char*   t_names[T_LAST + 1];
     /*
@@ -358,7 +360,7 @@ main(int, char*[])
      * more timers
      * ---------------------------------------------------------------------
      */
-    if(timeron)
+    if(timeron != 0)
     {
         for(i = 1; i <= T_LAST; i++)
         {
@@ -407,8 +409,11 @@ blts(int /*nx*/, int /*ny*/, int /*nz*/, int k, double omega,
      * local variables
      * ---------------------------------------------------------------------
      */
-    int    i, j, m;
-    double tmp, tmp1;
+    int    i;
+    int    j;
+    int    m;
+    double tmp;
+    double tmp1;
     double tmat[5][5], tv[5];
 
 #pragma omp for nowait schedule(static)
@@ -587,8 +592,11 @@ buts(int /*nx*/, int /*ny*/, int /*nz*/, int k, double omega,
      * ---------------------------------------------------------------------
      */
     double(*tv)[ISIZ1 / 2 * 2 + 1][5] = (double(*)[ISIZ1 / 2 * 2 + 1][5]) pointer_tv;
-    int    i, j, m;
-    double tmp, tmp1;
+    int    i;
+    int    j;
+    int    m;
+    double tmp;
+    double tmp1;
     double tmat[5][5];
 
 #pragma omp for nowait schedule(static)
@@ -814,17 +822,42 @@ erhs()
      * local variables
      * ---------------------------------------------------------------------
      */
-    int    i, j, k, m;
-    double xi, eta, zeta;
+    int    i;
+    int    j;
+    int    k;
+    int    m;
+    double xi;
+    double eta;
+    double zeta;
     double q;
-    double u21, u31, u41;
+    double u21;
+    double u31;
+    double u41;
     double tmp;
-    double u21i, u31i, u41i, u51i;
-    double u21j, u31j, u41j, u51j;
-    double u21k, u31k, u41k, u51k;
-    double u21im1, u31im1, u41im1, u51im1;
-    double u21jm1, u31jm1, u41jm1, u51jm1;
-    double u21km1, u31km1, u41km1, u51km1;
+    double u21i;
+    double u31i;
+    double u41i;
+    double u51i;
+    double u21j;
+    double u31j;
+    double u41j;
+    double u51j;
+    double u21k;
+    double u31k;
+    double u41k;
+    double u51k;
+    double u21im1;
+    double u31im1;
+    double u41im1;
+    double u51im1;
+    double u21jm1;
+    double u31jm1;
+    double u41jm1;
+    double u51jm1;
+    double u21km1;
+    double u31km1;
+    double u41km1;
+    double u51km1;
     double flux[ISIZ1][5];
 
 #pragma omp for
@@ -1240,7 +1273,10 @@ error()
      * local variables
      * ---------------------------------------------------------------------
      */
-    int    i, j, k, m;
+    int    i;
+    int    j;
+    int    k;
+    int    m;
     double tmp;
     double u000ijk[5];
     for(m = 0; m < 5; m++)
@@ -1282,7 +1318,9 @@ exact(int i, int j, int k, double u000ijk[])
      * ---------------------------------------------------------------------
      */
     int    m;
-    double xi, eta, zeta;
+    double xi;
+    double eta;
+    double zeta;
     xi   = ((double) i) / (nx0 - 1);
     eta  = ((double) j) / (ny0 - 1);
     zeta = ((double) k) / (nz - 1);
@@ -1309,11 +1347,14 @@ jacld(int k)
      * local variables
      * ---------------------------------------------------------------------
      */
-    int    i, j;
+    int    i;
+    int    j;
     double r43;
     double c1345;
     double c34;
-    double tmp1, tmp2, tmp3;
+    double tmp1;
+    double tmp2;
+    double tmp3;
     r43   = (4.0 / 3.0);
     c1345 = C1 * C3 * C4 * C5;
     c34   = C3 * C4;
@@ -1583,11 +1624,14 @@ jacu(int k)
      * local variables
      * ---------------------------------------------------------------------
      */
-    int    i, j;
+    int    i;
+    int    j;
     double r43;
     double c1345;
     double c34;
-    double tmp1, tmp2, tmp3;
+    double tmp1;
+    double tmp2;
+    double tmp3;
     r43   = (4.0 / 3.0);
     c1345 = C1 * C3 * C4 * C5;
     c34   = C3 * C4;
@@ -1858,7 +1902,10 @@ l2norm(int nx0, int ny0, int nz0, int ist, int iend, int jst, int jend,
      * local variables
      * ---------------------------------------------------------------------
      */
-    int    i, j, k, m;
+    int    i;
+    int    j;
+    int    k;
+    int    m;
     double sum0 = 0.0, sum1 = 0.0, sum2 = 0.0, sum3 = 0.0, sum4 = 0.0;
 
 #pragma omp single
@@ -1908,12 +1955,20 @@ pintgr()
      * local variables
      * ---------------------------------------------------------------------
      */
-    int    i, j, k;
-    int    ibeg, ifin, ifin1;
-    int    jbeg, jfin, jfin1;
+    int    i;
+    int    j;
+    int    k;
+    int    ibeg;
+    int    ifin;
+    int    ifin1;
+    int    jbeg;
+    int    jfin;
+    int    jfin1;
     double phi1[ISIZ3 + 2][ISIZ2 + 2];
     double phi2[ISIZ3 + 2][ISIZ2 + 2];
-    double frc1, frc2, frc3;
+    double frc1;
+    double frc2;
+    double frc3;
     /*
      * ---------------------------------------------------------------------
      * set up the sub-domains for integeration in each processor
@@ -2194,19 +2249,44 @@ rhs()
      * local variables
      * ---------------------------------------------------------------------
      */
-    int    i, j, k, m;
+    int    i;
+    int    j;
+    int    k;
+    int    m;
     double q;
-    double tmp, utmp[ISIZ3][6], rtmp[ISIZ3][5];
-    double u21, u31, u41;
-    double u21i, u31i, u41i, u51i;
-    double u21j, u31j, u41j, u51j;
-    double u21k, u31k, u41k, u51k;
-    double u21im1, u31im1, u41im1, u51im1;
-    double u21jm1, u31jm1, u41jm1, u51jm1;
-    double u21km1, u31km1, u41km1, u51km1;
+    double tmp;
+    double utmp[ISIZ3][6];
+    double rtmp[ISIZ3][5];
+    double u21;
+    double u31;
+    double u41;
+    double u21i;
+    double u31i;
+    double u41i;
+    double u51i;
+    double u21j;
+    double u31j;
+    double u41j;
+    double u51j;
+    double u21k;
+    double u31k;
+    double u41k;
+    double u51k;
+    double u21im1;
+    double u31im1;
+    double u41im1;
+    double u51im1;
+    double u21jm1;
+    double u31jm1;
+    double u41jm1;
+    double u51jm1;
+    double u21km1;
+    double u31km1;
+    double u41km1;
+    double u51km1;
     double flux[ISIZ1][5];
 
-    if(timeron)
+    if(timeron != 0)
     {
         timer_start(T_RHS);
     }
@@ -2231,7 +2311,7 @@ rhs()
             }
         }
     }
-    if(timeron)
+    if(timeron != 0)
     {
         timer_start(T_RHSX);
     }
@@ -2345,11 +2425,11 @@ rhs()
             }
         }
     }
-    if(timeron)
+    if(timeron != 0)
     {
         timer_stop(T_RHSX);
     }
-    if(timeron)
+    if(timeron != 0)
     {
         timer_start(T_RHSY);
     }
@@ -2472,11 +2552,11 @@ rhs()
             }
         }
     }
-    if(timeron)
+    if(timeron != 0)
     {
         timer_stop(T_RHSY);
     }
-    if(timeron)
+    if(timeron != 0)
     {
         timer_start(T_RHSZ);
     }
@@ -2591,11 +2671,11 @@ rhs()
             }
         }
     }
-    if(timeron)
+    if(timeron != 0)
     {
         timer_stop(T_RHSZ);
     }
-    if(timeron)
+    if(timeron != 0)
     {
         timer_stop(T_RHS);
     }
@@ -2614,7 +2694,10 @@ setbv()
      * local variables
      * ---------------------------------------------------------------------
      */
-    int    i, j, k, m;
+    int    i;
+    int    j;
+    int    k;
+    int    m;
     double temp1[5], temp2[5];
 /*
  * ---------------------------------------------------------------------
@@ -2829,10 +2912,19 @@ setiv()
      * local variables
      * ---------------------------------------------------------------------
      */
-    int    i, j, k, m;
-    double xi, eta, zeta;
-    double pxi, peta, pzeta;
-    double ue_1jk[5], ue_nx0jk[5], ue_i1k[5];
+    int    i;
+    int    j;
+    int    k;
+    int    m;
+    double xi;
+    double eta;
+    double zeta;
+    double pxi;
+    double peta;
+    double pzeta;
+    double ue_1jk[5];
+    double ue_nx0jk[5];
+    double ue_i1k[5];
     double ue_iny0k[5], ue_ij1[5], ue_ijnz[5];
 
 #pragma omp for
@@ -2878,9 +2970,14 @@ ssor(int niter)
      * local variables
      * ---------------------------------------------------------------------
      */
-    int    i, j, k, m, n;
+    int    i;
+    int    j;
+    int    k;
+    int    m;
+    int    n;
     int    istep;
-    double tmp, tv[ISIZ2 * (ISIZ1 / 2 * 2 + 1) * 5];
+    double tmp;
+    double tv[ISIZ2 * (ISIZ1 / 2 * 2 + 1) * 5];
     double delunm[5];
     /*
      * ---------------------------------------------------------------------
@@ -2962,7 +3059,7 @@ ssor(int niter)
              * perform SSOR iteration
              * ---------------------------------------------------------------------
              */
-            if(timeron)
+            if(timeron != 0)
             {
 #pragma omp master
                 timer_start(T_RHS);
@@ -2981,7 +3078,7 @@ ssor(int niter)
                     }
                 }
             }
-            if(timeron)
+            if(timeron != 0)
             {
 #pragma omp master
                 timer_stop(T_RHS);
@@ -2994,13 +3091,13 @@ ssor(int niter)
                  * form the lower triangular part of the jacobian matrix
                  * ---------------------------------------------------------------------
                  */
-                if(timeron)
+                if(timeron != 0)
                 {
 #pragma omp master
                     timer_start(T_JACLD);
                 }
                 jacld(k);
-                if(timeron)
+                if(timeron != 0)
                 {
 #pragma omp master
                     timer_stop(T_JACLD);
@@ -3011,7 +3108,7 @@ ssor(int niter)
                  * perform the lower triangular solution
                  * ---------------------------------------------------------------------
                  */
-                if(timeron)
+                if(timeron != 0)
                 {
 #pragma omp master
                     timer_start(T_BLTS);
@@ -3020,7 +3117,7 @@ ssor(int niter)
                 blts(nx, ny, nz, k, omega, rsd, a, b, c, d, ist, iend, jst, jend, nx0,
                      ny0);
 
-                if(timeron)
+                if(timeron != 0)
                 {
 #pragma omp master
                     timer_stop(T_BLTS);
@@ -3036,13 +3133,13 @@ ssor(int niter)
                  * form the strictly upper triangular part of the jacobian matrix
                  * ---------------------------------------------------------------------
                  */
-                if(timeron)
+                if(timeron != 0)
                 {
 #pragma omp master
                     timer_start(T_JACU);
                 }
                 jacu(k);
-                if(timeron)
+                if(timeron != 0)
                 {
 #pragma omp master
                     timer_stop(T_JACU);
@@ -3052,7 +3149,7 @@ ssor(int niter)
                  * perform the upper triangular solution
                  * ---------------------------------------------------------------------
                  */
-                if(timeron)
+                if(timeron != 0)
                 {
 #pragma omp master
                     timer_start(T_BUTS);
@@ -3061,7 +3158,7 @@ ssor(int niter)
                 buts(nx, ny, nz, k, omega, rsd, tv, d, a, b, c, ist, iend, jst, jend, nx0,
                      ny0);
 
-                if(timeron)
+                if(timeron != 0)
                 {
 #pragma omp master
                     timer_stop(T_BUTS);
@@ -3075,7 +3172,7 @@ ssor(int niter)
              * update the variables
              * ---------------------------------------------------------------------
              */
-            if(timeron)
+            if(timeron != 0)
             {
 #pragma omp master
                 timer_start(T_ADD);
@@ -3095,7 +3192,7 @@ ssor(int niter)
                     }
                 }
             }
-            if(timeron)
+            if(timeron != 0)
             {
 #pragma omp master
                 timer_stop(T_ADD);
@@ -3108,13 +3205,13 @@ ssor(int niter)
 
             if((istep % inorm) == 0)
             {
-                if(timeron)
+                if(timeron != 0)
                 {
 #pragma omp master
                     timer_start(T_L2NORM);
                 }
                 l2norm(nx0, ny0, nz0, ist, iend, jst, jend, rsd, delunm);
-                if(timeron)
+                if(timeron != 0)
                 {
 #pragma omp master
                     timer_stop(T_L2NORM);
@@ -3134,13 +3231,13 @@ ssor(int niter)
              */
             if(((istep % inorm) == 0) || (istep == itmax))
             {
-                if(timeron)
+                if(timeron != 0)
                 {
 #pragma omp master
                     timer_start(T_L2NORM);
                 }
                 l2norm(nx0, ny0, nz0, ist, iend, jst, jend, rsd, rsdnm);
-                if(timeron)
+                if(timeron != 0)
                 {
 #pragma omp master
                     timer_stop(T_L2NORM);
@@ -3174,9 +3271,14 @@ ssor(int niter)
 void
 verify(double xcr[], double xce[], double xci, char* class_npb, boolean* verified)
 {
-    double xcrref[5], xceref[5], xciref;
-    double xcrdif[5], xcedif[5], xcidif;
-    double epsilon, dtref = 0.0;
+    double xcrref[5];
+    double xceref[5];
+    double xciref;
+    double xcrdif[5];
+    double xcedif[5];
+    double xcidif;
+    double epsilon;
+    double dtref = 0.0;
     int    m;
     /*
      * ---------------------------------------------------------------------
@@ -3463,8 +3565,8 @@ verify(double xcr[], double xce[], double xci, char* class_npb, boolean* verifie
     {
         printf("\n Verification being performed for class_npb %c\n", *class_npb);
         printf(" Accuracy setting for epsilon = %20.13E\n", epsilon);
-        *verified = (fabs(dt - dtref) <= epsilon);
-        if(!(*verified))
+        *verified = static_cast<boolean>(fabs(dt - dtref) <= epsilon);
+        if((*verified) == 0)
         {
             *class_npb = 'U';
             printf(" DT does not match the reference value of %15.8E\n", dtref);
@@ -3552,7 +3654,7 @@ verify(double xcr[], double xce[], double xci, char* class_npb, boolean* verifie
         printf(" No reference values provided\n");
         printf("No verification performed\n");
     }
-    else if(*verified)
+    else if(*verified != 0)
     {
         printf(" Verification Successful\n");
     }

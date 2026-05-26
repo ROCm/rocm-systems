@@ -307,9 +307,16 @@ validateMemoryOnGPU(int gpu, bool concurOnOneGPU = false)
         return true;  // Return success for CI environments
     }
 
-    int *          A_d, *B_d, *C_d;
-    int *          A_h, *B_h, *C_h;
-    size_t         prevAvl, prevTot, curAvl, curTot;
+    int*           A_d;
+    int*           B_d;
+    int*           C_d;
+    int*           A_h;
+    int*           B_h;
+    int*           C_h;
+    size_t         prevAvl;
+    size_t         prevTot;
+    size_t         curAvl;
+    size_t         curTot;
     bool           TestPassed      = true;
     constexpr auto N               = 4 * 1024 * 1024;
     constexpr auto blocksPerCU     = 6;  // to hide latency
@@ -341,7 +348,7 @@ validateMemoryOnGPU(int gpu, bool concurOnOneGPU = false)
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
 
-    if(!HipTest::checkVectorADD(A_h, B_h, C_h, N))
+    if(HipTest::checkVectorADD(A_h, B_h, C_h, N) == 0u)
     {
         printf("Validation PASSED for gpu %d from pid %d\n", gpu, getpid());
     }
@@ -382,7 +389,8 @@ void
 Unit_hipMalloc_ChildConcurrencyDefaultGpu()
 {
     int            pid        = 0;
-    constexpr auto resSuccess = 0, resFailure = 1;
+    constexpr auto resSuccess = 0;
+    constexpr auto resFailure = 1;
 
     if((pid = fork()) < 0)
     {
@@ -390,7 +398,7 @@ Unit_hipMalloc_ChildConcurrencyDefaultGpu()
                   << std::endl;
         REQUIRE(false);
     }
-    else if(!pid)
+    else if(pid == 0)
     {  // Child process
         bool TestPassedChild = false;
 

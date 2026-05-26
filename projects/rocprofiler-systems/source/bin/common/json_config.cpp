@@ -94,15 +94,11 @@ csv_to_json_enabled_flags(nlohmann::json& target_obj, const std::string& csv_val
 std::string
 json_value_to_string(const nlohmann::json& val)
 {
-    if(val.is_string())
-        return val.get<std::string>();
-    else if(val.is_boolean())
-        return val.get<bool>() ? "true" : "false";
-    else if(val.is_number_integer())
-        return std::to_string(val.get<std::int64_t>());
-    else if(val.is_number_float())
-        return std::to_string(val.get<double>());
-    else if(val.is_array())
+    if(val.is_string()) return val.get<std::string>();
+    if(val.is_boolean()) return val.get<bool>() ? "true" : "false";
+    if(val.is_number_integer()) return std::to_string(val.get<std::int64_t>());
+    if(val.is_number_float()) return std::to_string(val.get<double>());
+    if(val.is_array())
     {
         std::string result;
         for(const auto& item : val)

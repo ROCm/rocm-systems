@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 
+#include <cstdint>
 #include <rocprofiler-systems/categories.h>
 #include <rocprofiler-systems/types.h>
 #include <rocprofiler-systems/user.h>
@@ -21,7 +22,7 @@ long
 fib(long n) __attribute__((noinline));
 
 void
-run(size_t nitr, long) __attribute__((noinline));
+run(size_t nitr, long /*n*/) __attribute__((noinline));
 
 int
 custom_push_region(const char* name);
@@ -110,9 +111,9 @@ custom_push_region(const char* name)
 
     if(original_callbacks.push_annotated_region)
     {
-        int32_t _err = errno;
-        char*   _msg = nullptr;
-        char    _buff[1024];
+        std::int32_t _err = errno;
+        char*        _msg = nullptr;
+        char         _buff[1024];
         if(_err != 0) _msg = strerror_r(_err, _buff, sizeof(_buff));
 
         rocprofsys_annotation_t _annotations[] = {

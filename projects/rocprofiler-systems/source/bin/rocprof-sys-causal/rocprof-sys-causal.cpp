@@ -133,14 +133,12 @@ main(int argc, char** argv)
                 auto envp_ptrs = utils::to_c_argv(_env);
                 return execvpe(_argv.front(), _argv.data(), envp_ptrs.data());
             }
-            else
-            {
-                add_child_pid(_pid);
-                auto _status = wait_pid(_pid);
-                auto _ret    = diagnose_status(_pid, _status);
-                remove_child_pid(_pid);
-                if(_ret != 0) return _ret;
-            }
+
+            add_child_pid(_pid);
+            auto _status = wait_pid(_pid);
+            auto _ret    = diagnose_status(_pid, _status);
+            remove_child_pid(_pid);
+            if(_ret != 0) return _ret;
         }
     }
 }

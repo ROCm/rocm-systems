@@ -34,7 +34,7 @@ configure_categories(bool _enable, const std::set<std::string>& _categories)
 template <size_t... Idx>
 void
 configure_categories(bool _enable, const std::set<std::string>& _categories,
-                     std::index_sequence<Idx...>)
+                     std::index_sequence<Idx...> /*unused*/)
 {
     (configure_categories<category_type_id_t<Idx>>(_enable, _categories), ...);
 }

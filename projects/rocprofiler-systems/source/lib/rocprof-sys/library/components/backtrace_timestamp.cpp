@@ -25,7 +25,7 @@ backtrace_timestamp::is_valid() const
 }
 
 void
-backtrace_timestamp::sample(int)
+backtrace_timestamp::sample(int /*unused*/)
 {
     m_tid  = tim::threading::get_id();
     m_real = tim::get_clock_real_now<std::uint64_t, std::nano>();

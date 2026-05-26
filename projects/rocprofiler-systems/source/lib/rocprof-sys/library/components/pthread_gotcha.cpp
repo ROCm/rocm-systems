@@ -28,11 +28,11 @@ struct stop<rocprofsys::component::pthread_create_gotcha_t>
     using type = rocprofsys::component::pthread_create_gotcha_t;
 
     template <typename... Args>
-    explicit stop(type&, Args&&...)
+    explicit stop(type& /*unused*/, Args&&... /*unused*/)
     {}
 
     template <typename... Args>
-    void operator()(type&, Args&&...)
+    void operator()(type& /*unused*/, Args&&... /*unused*/)
     {}
 };
 }  // namespace operation

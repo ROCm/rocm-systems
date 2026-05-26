@@ -420,7 +420,7 @@ as_pointer(Args&&... _args)
 
 template <typename... Tp>
 void
-consume_args(Tp&&...)
+consume_args(Tp&&... /*unused*/)
 {}
 
 auto
@@ -691,7 +691,8 @@ cache_memory_allocation(rocprofiler_buffer_tracing_memory_allocation_record_t* r
 
 template <typename CategoryT>
 void
-tool_tracing_callback_start(CategoryT, rocprofiler_callback_tracing_record_t record,
+tool_tracing_callback_start(CategoryT /*unused*/,
+                            rocprofiler_callback_tracing_record_t record,
                             rocprofiler_user_data_t* /*user_data*/,
                             rocprofiler_timestamp_t /*ts*/)
 {
@@ -706,7 +707,7 @@ tool_tracing_callback_start(CategoryT, rocprofiler_callback_tracing_record_t rec
 template <typename CategoryT>
 void
 tool_tracing_callback_stop(
-    CategoryT, rocprofiler_callback_tracing_record_t record,
+    CategoryT /*unused*/, rocprofiler_callback_tracing_record_t record,
     rocprofiler_user_data_t* user_data, rocprofiler_timestamp_t ts,
     std::optional<std::vector<tim::unwind::processed_entry>>& _bt_data)
 {
@@ -1400,7 +1401,8 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             case ROCPROFILER_OMPT_ID_implicit_task:
             {
                 int flag = payload_data->args.implicit_task.flags;
-                if(flag & ompt_task_initial) return;  // Skips both the start and end
+                if((flag & ompt_task_initial) != 0u)
+                    return;  // Skips both the start and end
                 break;
             }
             case ROCPROFILER_OMPT_ID_thread_begin:

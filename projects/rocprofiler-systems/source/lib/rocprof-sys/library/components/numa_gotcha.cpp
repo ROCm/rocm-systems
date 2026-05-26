@@ -111,7 +111,7 @@ numa_gotcha::stop()
 }
 
 void
-numa_gotcha::audit(const gotcha_data& _data, audit::incoming, void* start,
+numa_gotcha::audit(const gotcha_data& _data, audit::incoming /*unused*/, void* start,
                    unsigned long len, int mode, const unsigned long* nmask,
                    unsigned long maxnode, unsigned flags)
 {
@@ -121,7 +121,7 @@ numa_gotcha::audit(const gotcha_data& _data, audit::incoming, void* start,
 }
 
 void
-numa_gotcha::audit(const gotcha_data& _data, audit::incoming, int pid,
+numa_gotcha::audit(const gotcha_data& _data, audit::incoming /*unused*/, int pid,
                    unsigned long maxnode, const unsigned long* frommask,
                    const unsigned long* tomask)
 {
@@ -131,7 +131,7 @@ numa_gotcha::audit(const gotcha_data& _data, audit::incoming, int pid,
 }
 
 void
-numa_gotcha::audit(const gotcha_data& _data, audit::incoming, int pid,
+numa_gotcha::audit(const gotcha_data& _data, audit::incoming /*unused*/, int pid,
                    unsigned long count, void** pages, const int* nodes, int* status,
                    int flags)
 {
@@ -141,7 +141,7 @@ numa_gotcha::audit(const gotcha_data& _data, audit::incoming, int pid,
 }
 
 void
-numa_gotcha::audit(const gotcha_data& _data, audit::incoming, int pid,
+numa_gotcha::audit(const gotcha_data& _data, audit::incoming /*unused*/, int pid,
                    struct bitmask* from, struct bitmask* to)
 {
     category_region<category::numa>::start(std::string_view{ _data.tool_id }, "pid", pid,
@@ -149,28 +149,30 @@ numa_gotcha::audit(const gotcha_data& _data, audit::incoming, int pid,
 }
 
 void
-numa_gotcha::audit(const gotcha_data& _data, audit::incoming, size_t _size)
+numa_gotcha::audit(const gotcha_data& _data, audit::incoming /*unused*/, size_t _size)
 {
     category_region<category::numa>::start(std::string_view{ _data.tool_id }, "size",
                                            _size);
 }
 
 void
-numa_gotcha::audit(const gotcha_data& _data, audit::incoming, size_t _size, int _node)
+numa_gotcha::audit(const gotcha_data& _data, audit::incoming /*unused*/, size_t _size,
+                   int _node)
 {
     category_region<category::numa>::start(std::string_view{ _data.tool_id }, "size",
                                            _size, "node", _node);
 }
 
 void
-numa_gotcha::audit(const gotcha_data& _data, audit::incoming, void* _addr, size_t _size)
+numa_gotcha::audit(const gotcha_data& _data, audit::incoming /*unused*/, void* _addr,
+                   size_t _size)
 {
     category_region<category::numa>::start(std::string_view{ _data.tool_id }, "address",
                                            _addr, "size", _size);
 }
 
 void
-numa_gotcha::audit(const gotcha_data& _data, audit::incoming, void* _old_addr,
+numa_gotcha::audit(const gotcha_data& _data, audit::incoming /*unused*/, void* _old_addr,
                    size_t _old_size, size_t _new_size)
 {
     category_region<category::numa>::start(std::string_view{ _data.tool_id },
@@ -179,21 +181,21 @@ numa_gotcha::audit(const gotcha_data& _data, audit::incoming, void* _old_addr,
 }
 
 void
-numa_gotcha::audit(const gotcha_data& _data, audit::outgoing, int ret)
+numa_gotcha::audit(const gotcha_data& _data, audit::outgoing /*unused*/, int ret)
 {
     category_region<category::numa>::stop(std::string_view{ _data.tool_id }, "return",
                                           ret);
 }
 
 void
-numa_gotcha::audit(const gotcha_data& _data, audit::outgoing, long ret)
+numa_gotcha::audit(const gotcha_data& _data, audit::outgoing /*unused*/, long ret)
 {
     category_region<category::numa>::stop(std::string_view{ _data.tool_id }, "return",
                                           ret);
 }
 
 void
-numa_gotcha::audit(const gotcha_data& _data, audit::outgoing, void* ret)
+numa_gotcha::audit(const gotcha_data& _data, audit::outgoing /*unused*/, void* ret)
 {
     category_region<category::numa>::stop(std::string_view{ _data.tool_id }, "return",
                                           ret);

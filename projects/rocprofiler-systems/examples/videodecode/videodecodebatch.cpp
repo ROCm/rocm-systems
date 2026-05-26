@@ -23,6 +23,7 @@ THE SOFTWARE.
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <functional>
 #include <iomanip>
 #include <iostream>
@@ -133,10 +134,13 @@ DecProc(RocVideoDecoder* p_dec, VideoDemuxer* demuxer, int* pn_frame, double* pn
         std::atomic_bool& decoding_complete, bool& b_dump_output_frames,
         std::string& output_file_name, OutputSurfaceMemoryType mem_type)
 {
-    int                n_video_bytes = 0, n_frame_returned = 0, n_frame = 0;
-    uint8_t *          p_video = nullptr, *p_frame = nullptr;
-    int64_t            pts            = 0;
-    double             total_dec_time = 0.0;
+    int                n_video_bytes    = 0;
+    int                n_frame_returned = 0;
+    int                n_frame          = 0;
+    std::uint8_t*      p_video          = nullptr;
+    std::uint8_t*      p_frame          = nullptr;
+    std::int64_t       pts              = 0;
+    double             total_dec_time   = 0.0;
     OutputSurfaceInfo* surf_info;
     auto               start_time = std::chrono::high_resolution_clock::now();
     do
@@ -146,7 +150,7 @@ DecProc(RocVideoDecoder* p_dec, VideoDemuxer* demuxer, int* pn_frame, double* pn
         n_frame += n_frame_returned;
         if(b_dump_output_frames && mem_type != OUT_SURFACE_MEM_NOT_MAPPED)
         {
-            if(n_frame_returned)
+            if(n_frame_returned != 0)
             {
                 if(!p_dec->GetOutputSurfaceInfo(&surf_info))
                 {
@@ -162,7 +166,7 @@ DecProc(RocVideoDecoder* p_dec, VideoDemuxer* demuxer, int* pn_frame, double* pn
                 p_dec->ReleaseFrame(pts);
             }
         }
-    } while(n_video_bytes);
+    } while(n_video_bytes != 0);
     n_frame += p_dec->GetNumOfFlushedFrames();
 
     auto end_time = std::chrono::high_resolution_clock::now();
@@ -212,11 +216,11 @@ ParseCommandLine(std::string& input_folder_path, std::string& output_folder_path
     }
     for(int i = 1; i < argc; i++)
     {
-        if(!strcmp(argv[i], "-h"))
+        if(strcmp(argv[i], "-h") == 0)
         {
             ShowHelpAndExit();
         }
-        if(!strcmp(argv[i], "-i"))
+        if(strcmp(argv[i], "-i") == 0)
         {
             if(++i == argc)
             {
@@ -225,7 +229,7 @@ ParseCommandLine(std::string& input_folder_path, std::string& output_folder_path
             input_folder_path = argv[i];
             continue;
         }
-        if(!strcmp(argv[i], "-t"))
+        if(strcmp(argv[i], "-t") == 0)
         {
             if(++i == argc)
             {
@@ -238,7 +242,7 @@ ParseCommandLine(std::string& input_folder_path, std::string& output_folder_path
             }
             continue;
         }
-        if(!strcmp(argv[i], "-d"))
+        if(strcmp(argv[i], "-d") == 0)
         {
             if(++i == argc)
             {
@@ -251,7 +255,7 @@ ParseCommandLine(std::string& input_folder_path, std::string& output_folder_path
             }
             continue;
         }
-        if(!strcmp(argv[i], "-o"))
+        if(strcmp(argv[i], "-o") == 0)
         {
             if(++i == argc)
             {
@@ -274,7 +278,7 @@ ParseCommandLine(std::string& input_folder_path, std::string& output_folder_path
             b_dump_output_frames = true;
             continue;
         }
-        if(!strcmp(argv[i], "-m"))
+        if(strcmp(argv[i], "-m") == 0)
         {
             if(++i == argc)
             {
@@ -283,7 +287,7 @@ ParseCommandLine(std::string& input_folder_path, std::string& output_folder_path
             mem_type = static_cast<OutputSurfaceMemoryType>(atoi(argv[i]));
             continue;
         }
-        if(!strcmp(argv[i], "-disp_delay"))
+        if(strcmp(argv[i], "-disp_delay") == 0)
         {
             if(++i == argc)
             {
@@ -299,15 +303,18 @@ ParseCommandLine(std::string& input_folder_path, std::string& output_folder_path
 int
 main(int argc, char** argv)
 {
-    std::string             input_folder_path, output_folder_path;
-    int                     device_id = 0, num_files = 0;
+    std::string             input_folder_path;
+    std::string             output_folder_path;
+    int                     device_id              = 0;
+    int                     num_files              = 0;
     int                     n_thread               = 4;
     int                     disp_delay             = 1;
     Rect*                   p_crop_rect            = nullptr;
     bool                    b_extract_sei_messages = false;
     OutputSurfaceMemoryType mem_type =
         OUT_SURFACE_MEM_DEV_INTERNAL;  // set to decode only for performance
-    bool                     b_force_zero_latency = false, b_dump_output_frames = false;
+    bool                     b_force_zero_latency = false;
+    bool                     b_dump_output_frames = false;
     std::vector<std::string> input_file_names;
     ParseCommandLine(input_folder_path, output_folder_path, device_id, n_thread,
                      b_dump_output_frames, mem_type, disp_delay, argc, argv);
@@ -328,8 +335,9 @@ main(int argc, char** argv)
 
         std::vector<std::string> output_file_names(num_files);
         n_thread                    = ((n_thread > num_files) ? num_files : n_thread);
-        int             num_devices = 0, sd = 0;
-        hipError_t      hip_status = hipSuccess;
+        int             num_devices = 0;
+        int             sd          = 0;
+        hipError_t      hip_status  = hipSuccess;
         hipDeviceProp_t hip_dev_prop;
         std::string     gcn_arch_name;
         hip_status = hipGetDeviceCount(&num_devices);
@@ -359,13 +367,15 @@ main(int argc, char** argv)
             (pos != std::string::npos) ? gcn_arch_name.substr(0, pos) : gcn_arch_name;
 
         // gfx90a has two GCDs as two separate devices
-        if(!gcn_arch_name_base.compare("gfx90a") && num_devices > 1)
+        if((gcn_arch_name_base.compare("gfx90a") == 0) && num_devices > 1)
         {
             sd = 1;
         }
 
         std::string         device_name;
-        int                 pci_bus_id, pci_domain_id, pci_device_id;
+        int                 pci_bus_id;
+        int                 pci_domain_id;
+        int                 pci_device_id;
         double              total_fps = 0;
         int                 n_total   = 0;
         std::vector<double> v_fps;
@@ -378,15 +388,19 @@ main(int argc, char** argv)
         std::cout << "info: Number of threads: " << n_thread << std::endl;
 
         std::vector<std::unique_ptr<VideoDemuxer>> v_demuxer(num_files);
-        std::unique_ptr<RocVideoDecoder> dec_8bit_avc(nullptr), dec_8bit_hevc(nullptr),
-            dec_10bit_hevc(nullptr), dec_8bit_av1(nullptr), dec_10bit_av1(nullptr),
-            dec_8bit_vp9(nullptr), dec_10bit_vp9(nullptr);
-        std::vector<std::unique_ptr<DecoderInfo>> v_dec_info;
-        ThreadPool                                thread_pool(n_thread);
+        std::unique_ptr<RocVideoDecoder>           dec_8bit_avc(nullptr);
+        std::unique_ptr<RocVideoDecoder>           dec_8bit_hevc(nullptr);
+        std::unique_ptr<RocVideoDecoder>           dec_10bit_hevc(nullptr);
+        std::unique_ptr<RocVideoDecoder>           dec_8bit_av1(nullptr);
+        std::unique_ptr<RocVideoDecoder>           dec_10bit_av1(nullptr);
+        std::unique_ptr<RocVideoDecoder>           dec_8bit_vp9(nullptr);
+        std::unique_ptr<RocVideoDecoder>           dec_10bit_vp9(nullptr);
+        std::vector<std::unique_ptr<DecoderInfo>>  v_dec_info;
+        ThreadPool                                 thread_pool(n_thread);
 
         // reconfig parameters
         ReconfigParams         reconfig_params      = { 0 };
-        ReconfigDumpFileStruct reconfig_user_struct = { 0 };
+        ReconfigDumpFileStruct reconfig_user_struct = { false };
         reconfig_params.p_fn_reconfigure_flush      = ReconfigureFlushCallback;
         if(!b_dump_output_frames)
         {
@@ -419,7 +433,7 @@ main(int argc, char** argv)
         for(int i = 0; i < n_thread; i++)
         {
             v_dec_info.emplace_back(std::make_unique<DecoderInfo>());
-            if(!hip_vis_dev_count)
+            if(hip_vis_dev_count == 0)
             {
                 if(device_id % 2 == 0)
                 {
@@ -534,7 +548,7 @@ main(int argc, char** argv)
                         ;
                     v_dec_info[thread_idx]->decoding_complete = false;
                 }
-                uint32_t         bit_depth = v_demuxer[j]->GetBitDepth();
+                std::uint32_t    bit_depth = v_demuxer[j]->GetBitDepth();
                 rocDecVideoCodec codec_id =
                     AVCodec2RocDecVideoCodec(v_demuxer[j]->GetCodecID());
                 if(v_dec_info[thread_idx]->bit_depth != bit_depth ||

@@ -49,7 +49,7 @@ namespace tim
 {
 template <>
 inline auto
-invoke_preinit<kokkosp::memory_tracker>(long)
+invoke_preinit<kokkosp::memory_tracker>(long /*unused*/)
 {
     kokkosp::memory_tracker::label()       = "kokkos_memory";
     kokkosp::memory_tracker::description() = "Kokkos Memory tracker";
@@ -145,7 +145,7 @@ violates_name_rules(Arg&& _arg, Args&&... _args)
     {
         return true;
     }
-    else if(_name_len_limit == 0)
+    if(_name_len_limit == 0)
     {
         return false;
     }
@@ -236,14 +236,15 @@ extern "C"
         bool padding[255];
     };
 
-    void kokkosp_request_tool_settings(const std::uint32_t,
-                                       Kokkos_Tools_ToolSettings*) ROCPROFSYS_PUBLIC_API;
-    void kokkosp_dual_view_sync(const char*, const void* const,
-                                bool) ROCPROFSYS_PUBLIC_API;
-    void kokkosp_dual_view_modify(const char*, const void* const,
-                                  bool) ROCPROFSYS_PUBLIC_API;
+    void kokkosp_request_tool_settings(std::uint32_t /*_version*/,
+                                       Kokkos_Tools_ToolSettings* /*_settings*/)
+        ROCPROFSYS_PUBLIC_API;
+    void kokkosp_dual_view_sync(const char* /*label*/, const void* /*unused*/,
+                                bool /*is_device*/) ROCPROFSYS_PUBLIC_API;
+    void kokkosp_dual_view_modify(const char* /*label*/, const void* /*unused*/,
+                                  bool /*is_device*/) ROCPROFSYS_PUBLIC_API;
 
-    void kokkosp_print_help(char*) {}
+    void kokkosp_print_help(char* /*unused*/) {}
 
     void kokkosp_parse_args(int argc, char** argv)
     {
@@ -633,7 +634,8 @@ extern "C"
 
     //----------------------------------------------------------------------------------//
 
-    void kokkosp_dual_view_sync(const char* label, const void* const, bool is_device)
+    void kokkosp_dual_view_sync(const char* label, const void* const /*unused*/,
+                                bool        is_device)
     {
         if(rocprofsys::kokkosp::is_paused()) return;
         if(violates_name_rules(label)) return;
@@ -661,7 +663,8 @@ extern "C"
                            timestamp);
     }
 
-    void kokkosp_dual_view_modify(const char* label, const void* const, bool is_device)
+    void kokkosp_dual_view_modify(const char* label, const void* const /*unused*/,
+                                  bool        is_device)
     {
         if(rocprofsys::kokkosp::is_paused()) return;
         if(violates_name_rules(label)) return;

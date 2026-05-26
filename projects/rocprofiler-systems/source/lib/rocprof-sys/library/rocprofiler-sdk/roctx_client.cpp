@@ -43,10 +43,11 @@ namespace
 std::atomic<std::uint64_t> s_push_range_id{ UINT64_MAX };
 
 int
-iterate_args_callback(rocprofiler_callback_tracing_kind_t, std::int32_t,
-                      std::uint32_t arg_number, const void* const, std::int32_t,
+iterate_args_callback(rocprofiler_callback_tracing_kind_t /*unused*/,
+                      std::int32_t /*unused*/, std::uint32_t arg_number,
+                      const void* const /*unused*/, std::int32_t /*unused*/,
                       const char* arg_type, const char* arg_name,
-                      const char* arg_value_str, std::int32_t, void* data)
+                      const char* arg_value_str, std::int32_t /*unused*/, void* data)
 {
     auto* args = static_cast<function_args_t*>(data);
     if(arg_type && arg_name && arg_value_str)
@@ -304,7 +305,7 @@ roctx_client<MarkerWriterPolicy>::marker_core_callback(
 template <typename MarkerWriterPolicy>
 void
 roctx_client<MarkerWriterPolicy>::marker_control_callback(
-    rocprofiler_callback_tracing_record_t record, rocprofiler_user_data_t*,
+    rocprofiler_callback_tracing_record_t record, rocprofiler_user_data_t* /*unused*/,
     void*                                 callback_data)
 {
     if(!callback_data)

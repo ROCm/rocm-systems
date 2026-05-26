@@ -159,11 +159,11 @@ query_gpu_hw_counters()
                       {
                           return lhs.info.id < rhs.info.id;
                       }
-                      else if(lhs.info.is_constant)
+                      if(lhs.info.is_constant)
                       {
                           return true;
                       }
-                      else if(rhs.info.is_constant)
+                      if(rhs.info.is_constant)
                       {
                           return false;
                       }
@@ -172,11 +172,11 @@ query_gpu_hw_counters()
                       {
                           return lhs.info.id < rhs.info.id;
                       }
-                      else if(!lhs.info.is_derived)
+                      if(!lhs.info.is_derived)
                       {
                           return true;
                       }
-                      else if(!rhs.info.is_derived)
+                      if(!rhs.info.is_derived)
                       {
                           return false;
                       }
@@ -194,7 +194,7 @@ query_gpu_hw_counters()
             {
                 continue;
             }
-            else if(ci.info.is_derived)
+            if(ci.info.is_derived)
             {
                 auto sym        = fmt::format("{}:device={}", ci.info.name, dev_idx);
                 auto short_desc = fmt::format("Derived counter: {}", ci.info.expression);

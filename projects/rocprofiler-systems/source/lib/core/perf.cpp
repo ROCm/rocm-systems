@@ -21,13 +21,13 @@ get_event_type(std::string_view _v)
     {
         return event_type::software;
     }
-    else if(_v.find("PERF_COUNT_SW_") != std::string_view::npos &&
-            !std::regex_search(_v.data(),
-                               std::regex{ "PERF_COUNT_HW_CACHE_(MISSES|REFERENCES)$" }))
+    if(_v.find("PERF_COUNT_SW_") != std::string_view::npos &&
+       !std::regex_search(_v.data(),
+                          std::regex{ "PERF_COUNT_HW_CACHE_(MISSES|REFERENCES)$" }))
     {
         return event_type::hw_cache;
     }
-    else if(_v.find("PERF_COUNT_HW_") != std::string_view::npos)
+    if(_v.find("PERF_COUNT_HW_") != std::string_view::npos)
     {
         return event_type::hardware;
     }
@@ -43,47 +43,44 @@ get_hw_config(std::string_view _v)
     {
         return hw_config::cpu_cycles;
     }
-    else if(HW_CONFIG_REGEX("INSTRUCTIONS"))
+    if(HW_CONFIG_REGEX("INSTRUCTIONS"))
     {
         return hw_config::instructions;
     }
-    else if(HW_CONFIG_REGEX("CACHE_REFERENCES"))
+    if(HW_CONFIG_REGEX("CACHE_REFERENCES"))
     {
         return hw_config::cache_references;
     }
-    else if(HW_CONFIG_REGEX("CACHE_MISSES"))
+    if(HW_CONFIG_REGEX("CACHE_MISSES"))
     {
         return hw_config::cache_misses;
     }
-    else if(HW_CONFIG_REGEX("BRANCH_INSTRUCTIONS"))
+    if(HW_CONFIG_REGEX("BRANCH_INSTRUCTIONS"))
     {
         return hw_config::branch_instructions;
     }
-    else if(HW_CONFIG_REGEX("BRANCH_MISSES"))
+    if(HW_CONFIG_REGEX("BRANCH_MISSES"))
     {
         return hw_config::branch_misses;
     }
-    else if(HW_CONFIG_REGEX("BUS_CYCLES"))
+    if(HW_CONFIG_REGEX("BUS_CYCLES"))
     {
         return hw_config::bus_cycles;
     }
-    else if(HW_CONFIG_REGEX("STALLED_CYCLES_FRONTEND"))
+    if(HW_CONFIG_REGEX("STALLED_CYCLES_FRONTEND"))
     {
         return hw_config::stalled_cycles_frontend;
     }
-    else if(HW_CONFIG_REGEX("STALLED_CYCLES_BACKEND"))
+    if(HW_CONFIG_REGEX("STALLED_CYCLES_BACKEND"))
     {
         return hw_config::stalled_cycles_backend;
     }
-    else if(HW_CONFIG_REGEX("REF_CPU_CYCLES"))
+    if(HW_CONFIG_REGEX("REF_CPU_CYCLES"))
     {
         return hw_config::reference_cpu_cycles;
     }
-    else
-    {
-        throw std::runtime_error(
-            fmt::format("Unknown perf hardware config: {}", _v.data()));
-    }
+
+    throw std::runtime_error(fmt::format("Unknown perf hardware config: {}", _v.data()));
 
 #undef HW_CONFIG_REGEX
 
@@ -99,43 +96,40 @@ get_sw_config(std::string_view _v)
     {
         return sw_config::cpu_clock;
     }
-    else if(SW_CONFIG_REGEX("TASK_CLOCK"))
+    if(SW_CONFIG_REGEX("TASK_CLOCK"))
     {
         return sw_config::task_clock;
     }
-    else if(SW_CONFIG_REGEX("PAGE_FAULTS"))
+    if(SW_CONFIG_REGEX("PAGE_FAULTS"))
     {
         return sw_config::page_faults;
     }
-    else if(SW_CONFIG_REGEX("CONTEXT_SWITCHES"))
+    if(SW_CONFIG_REGEX("CONTEXT_SWITCHES"))
     {
         return sw_config::context_switches;
     }
-    else if(SW_CONFIG_REGEX("CPU_MIGRATIONS"))
+    if(SW_CONFIG_REGEX("CPU_MIGRATIONS"))
     {
         return sw_config::cpu_migrations;
     }
-    else if(SW_CONFIG_REGEX("PAGE_FAULTS_MIN"))
+    if(SW_CONFIG_REGEX("PAGE_FAULTS_MIN"))
     {
         return sw_config::page_faults_minor;
     }
-    else if(SW_CONFIG_REGEX("PAGE_FAULTS_MAJ"))
+    if(SW_CONFIG_REGEX("PAGE_FAULTS_MAJ"))
     {
         return sw_config::page_faults_major;
     }
-    else if(SW_CONFIG_REGEX("ALIGNMENT_FAULTS"))
+    if(SW_CONFIG_REGEX("ALIGNMENT_FAULTS"))
     {
         return sw_config::alignment_faults;
     }
-    else if(SW_CONFIG_REGEX("EMULATION_FAULTS"))
+    if(SW_CONFIG_REGEX("EMULATION_FAULTS"))
     {
         return sw_config::emulation_faults;
     }
-    else
-    {
-        throw std::runtime_error(
-            fmt::format("Unknown perf hw cache config: {}", _v.data()));
-    }
+
+    throw std::runtime_error(fmt::format("Unknown perf hw cache config: {}", _v.data()));
 
 #undef SW_CONFIG_REGEX
 

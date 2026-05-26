@@ -187,7 +187,7 @@ dwarf_entry::process_dwarf(int _fd)
 
 template <typename ArchiveT>
 void
-dwarf_entry::serialize(ArchiveT& ar, const unsigned int)
+dwarf_entry::serialize(ArchiveT& ar, const unsigned int /*unused*/)
 {
 #define ROCPROFSYS_SERIALIZE_MEMBER(MEMBER) ar(::tim::cereal::make_nvp(#MEMBER, MEMBER));
 

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <ratio>
@@ -53,7 +54,7 @@ main(int argc, char** argv)
 size_t
 inner(size_t _duration)
 {
-    static int64_t _n = 0;
+    static std::int64_t _n = 0;
 
     if(_n++ % 5 == 2)
     {
@@ -66,11 +67,9 @@ inner(size_t _duration)
         }
         return nitr;
     }
-    else
-    {
-        std::this_thread::sleep_for(std::chrono::milliseconds{ _duration });
-        return 1;
-    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds{ _duration });
+    return 1;
 }
 
 #define OUTER_FUNCTION(TAG)                                                              \

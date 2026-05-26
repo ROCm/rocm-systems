@@ -92,11 +92,12 @@ template <typename Tp>
 struct setting_serialization<Tp, custom_setting_serializer>
 {
     template <typename ArchiveT>
-    void operator()(ArchiveT&, const char*, const Tp&) const
+    void operator()(ArchiveT& /*unused*/, const char* /*unused*/,
+                    const Tp& /*unused*/) const
     {}
 
     template <typename ArchiveT>
-    void operator()(ArchiveT&, const char*, Tp&&) const
+    void operator()(ArchiveT& /*unused*/, const char* /*unused*/, Tp&& /*unused*/) const
     {}
 };
 //
@@ -161,7 +162,7 @@ struct setting_serialization<tsettings<Tp>, custom_setting_serializer>
 
 template <typename... Tp>
 void
-push(type_list<Tp...>)
+push(type_list<Tp...> /*unused*/)
 {
     ROCPROFSYS_FOLD_EXPRESSION(
         settings::push_serialize_map_callback<Tp, custom_setting_serializer>());
@@ -172,7 +173,7 @@ push(type_list<Tp...>)
 
 template <typename... Tp>
 void
-pop(type_list<Tp...>)
+pop(type_list<Tp...> /*unused*/)
 {
     ROCPROFSYS_FOLD_EXPRESSION(
         settings::pop_serialize_map_callback<Tp, custom_setting_serializer>());
@@ -182,7 +183,7 @@ pop(type_list<Tp...>)
 }
 
 void
-update_choices(const std::shared_ptr<settings>&);
+update_choices(const std::shared_ptr<settings>& /*_settings*/);
 
 void
 generate_config(std::string _config_file, const std::set<std::string>& _config_fmts,

@@ -147,11 +147,17 @@ main(int /*argc*/, char** /*argv*/)
     printf(
         " DO_NOT_ALLOCATE_ARRAYS_WITH_DYNAMIC_MEMORY_AND_AS_SINGLE_DIMENSION mode on\n");
 #endif
-    int     i, j, k, it;
+    int     i;
+    int     j;
+    int     k;
+    int     it;
     double  zeta;
     double  rnorm;
-    double  norm_temp1, norm_temp2;
-    double  t, mflops, tmax;
+    double  norm_temp1;
+    double  norm_temp2;
+    double  t;
+    double  mflops;
+    double  tmax;
     char    class_npb;
     boolean verified;
     double  zeta_verify_value = 0.0;
@@ -508,10 +514,17 @@ static void
 conj_grad(const int colidx[], const int rowstr[], const double x[], double z[],
           const double a[], double p[], double q[], double r[], double* rnorm)
 {
-    int           j, k;
-    int           cgit, cgitmax;
-    double        alpha, beta, suml;
-    static double d, sum, rho, rho0;
+    int           j;
+    int           k;
+    int           cgit;
+    int           cgitmax;
+    double        alpha;
+    double        beta;
+    double        suml;
+    static double d;
+    static double sum;
+    static double rho;
+    static double rho0;
 
     cgitmax = 25;
 #pragma omp single nowait
@@ -720,7 +733,10 @@ makea(int n, int nz, double a[], int colidx[], int rowstr[], int firstrow, int l
     (void) firstcol;
     (void) lastcol;
 
-    int    iouter, ivelt, nzv, nn1;
+    int    iouter;
+    int    ivelt;
+    int    nzv;
+    int    nn1;
     int    ivc[NONZER + 1];
     double vc[NONZER + 1];
 
@@ -785,8 +801,19 @@ sparse(double a[], int colidx[], int rowstr[], int n, int nz, int nozer, const i
      * [col, row, element] tri
      * ---------------------------------------------------
      */
-    int     i, j, j1, j2, nza, k, kk, nzrow, jcol;
-    double  size, scale, ratio, va;
+    int     i;
+    int     j;
+    int     j1;
+    int     j2;
+    int     nza;
+    int     k;
+    int     kk;
+    int     nzrow;
+    int     jcol;
+    double  size;
+    double  scale;
+    double  ratio;
+    double  va;
     boolean goto_40;
 
     /*
@@ -901,7 +928,7 @@ sparse(double a[], int colidx[], int rowstr[], int n, int nz, int nozer, const i
                         goto_40   = TRUE;
                         break;
                     }
-                    else if(colidx[k] == -1)
+                    if(colidx[k] == -1)
                     {
                         colidx[k] = jcol;
                         goto_40   = TRUE;
@@ -980,8 +1007,11 @@ sparse(double a[], int colidx[], int rowstr[], int n, int nz, int nozer, const i
 static void
 sprnvc(int n, int nz, int nn1, double v[], int iv[])
 {
-    int    nzv, ii, i;
-    double vecelt, vecloc;
+    int    nzv;
+    int    ii;
+    int    i;
+    double vecelt;
+    double vecloc;
 
     nzv = 0;
 

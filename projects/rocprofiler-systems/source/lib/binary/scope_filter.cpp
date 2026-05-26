@@ -19,7 +19,7 @@ scope_filter::operator()(std::string_view _value) const
                    ? true
                    : std::regex_search(_value.data(), std::regex{ expression });
     }
-    else if(mode == FILTER_EXCLUDE)
+    if(mode == FILTER_EXCLUDE)
     {
         return (expression.empty())
                    ? false

@@ -95,7 +95,7 @@ experiment::sample::operator+=(const sample& _v) const
 
 template <typename ArchiveT>
 void
-experiment::sample::serialize(ArchiveT& ar, const unsigned)
+experiment::sample::serialize(ArchiveT& ar, const unsigned /*unused*/)
 {
     namespace cereal = ::tim::cereal;
     using cereal::make_nvp;
@@ -131,7 +131,7 @@ experiment::sample::get_identifier() const
 
 template <typename ArchiveT>
 void
-experiment::record::serialize(ArchiveT& ar, const unsigned)
+experiment::record::serialize(ArchiveT& ar, const unsigned /*unused*/)
 {
     namespace cereal = ::tim::cereal;
     ar(cereal::make_nvp("startup_time", startup),
@@ -154,7 +154,7 @@ experiment::record::serialize(ArchiveT& ar, const unsigned)
 
 template <typename ArchiveT>
 void
-experiment::serialize(ArchiveT& ar, const unsigned)
+experiment::serialize(ArchiveT& ar, const unsigned /*unused*/)
 {
     namespace cereal = ::tim::cereal;
 

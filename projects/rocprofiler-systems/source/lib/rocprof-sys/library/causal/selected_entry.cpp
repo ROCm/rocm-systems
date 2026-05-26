@@ -11,7 +11,7 @@ namespace causal
 {
 template <typename ArchiveT>
 void
-selected_entry::serialize(ArchiveT& ar, const unsigned int)
+selected_entry::serialize(ArchiveT& ar, const unsigned int /*unused*/)
 {
     using ::tim::cereal::make_nvp;
     ar(make_nvp("address", address), make_nvp("symbol_address", symbol_address),

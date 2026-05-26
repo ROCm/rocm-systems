@@ -347,7 +347,7 @@ symbol::get_debug_line_info(const std::vector<scope_filter>& _filters) const
 
 template <typename ArchiveT>
 void
-inlined_symbol::serialize(ArchiveT& ar, const unsigned int)
+inlined_symbol::serialize(ArchiveT& ar, const unsigned int /*unused*/)
 {
     using ::tim::cereal::make_nvp;
     ar(make_nvp("func", func), make_nvp("file", file), make_nvp("line", line));
@@ -355,7 +355,7 @@ inlined_symbol::serialize(ArchiveT& ar, const unsigned int)
 
 template <typename ArchiveT>
 void
-symbol::serialize(ArchiveT& ar, const unsigned int)
+symbol::serialize(ArchiveT& ar, const unsigned int /*unused*/)
 {
     using ::tim::cereal::make_nvp;
     ar(make_nvp("address", address), make_nvp("load_address", load_address),

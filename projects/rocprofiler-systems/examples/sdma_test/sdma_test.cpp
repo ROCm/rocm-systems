@@ -116,9 +116,8 @@ main(int argc, char** argv)
             print_usage(argv[0]);
             return 0;
         }
-        else if((std::strcmp(argv[i], "-s") == 0 ||
-                 std::strcmp(argv[i], "--size") == 0) &&
-                i + 1 < argc)
+        if((std::strcmp(argv[i], "-s") == 0 || std::strcmp(argv[i], "--size") == 0) &&
+           i + 1 < argc)
         {
             size_mb = parse_size(argv[++i]);
         }

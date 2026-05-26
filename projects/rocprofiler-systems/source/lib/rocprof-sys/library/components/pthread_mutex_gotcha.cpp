@@ -180,7 +180,7 @@ pthread_mutex_gotcha::pthread_mutex_gotcha(const gotcha_data_t& _data)
 
 template <typename... Args>
 auto
-pthread_mutex_gotcha::operator()(uintptr_t&&, int (*_callee)(Args...),
+pthread_mutex_gotcha::operator()(uintptr_t&& /*unused*/, int (*_callee)(Args...),
                                  Args... _args) const
 {
     using bundle_t = category_region<category::pthread>;
@@ -277,7 +277,8 @@ namespace policy
 template <size_t N>
 pthread_mutex_gotcha&
 static_data<pthread_mutex_gotcha, pthread_mutex_gotcha_t>::operator()(
-    std::integral_constant<size_t, N>, const component::gotcha_data& _data) const
+    std::integral_constant<size_t, N> /*unused*/,
+    const component::gotcha_data& _data) const
 {
     using thread_data_t =
         rocprofsys::thread_data<pthread_mutex_gotcha, std::integral_constant<size_t, N>>;

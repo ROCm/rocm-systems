@@ -84,7 +84,15 @@ Authors of the C++ code:
 double
 randlc(double* x, double a)
 {
-    double t1, t2, t3, t4, a1, a2, x1, x2, z;
+    double t1;
+    double t2;
+    double t3;
+    double t4;
+    double a1;
+    double a2;
+    double x1;
+    double x2;
+    double z;
 
     /*
      * ---------------------------------------------------------------------
@@ -143,7 +151,16 @@ void
 vranlc(int n, double* x_seed, double a, double y[])
 {
     int    i;
-    double x, t1, t2, t3, t4, a1, a2, x1, x2, z;
+    double x;
+    double t1;
+    double t2;
+    double t3;
+    double t4;
+    double a1;
+    double a2;
+    double x1;
+    double x2;
+    double z;
 
     /*
      * ---------------------------------------------------------------------

@@ -71,9 +71,10 @@ process_schema_template(std::string_view schema_content, const std::string& upid
 
 #if defined(ROCPROFSYS_USE_ROCPD_LIBRARY) && ROCPROFSYS_USE_ROCPD_LIBRARY > 0
 void
-load_schema_cb(rocpd_sql_engine_t, rocpd_sql_schema_kind_t, rocpd_sql_options_t,
-               const rocpd_sql_schema_jinja_variables_t*, const char*,
-               const char* schema_content, void* user_data)
+load_schema_cb(rocpd_sql_engine_t /*unused*/, rocpd_sql_schema_kind_t /*unused*/,
+               rocpd_sql_options_t /*unused*/,
+               const rocpd_sql_schema_jinja_variables_t* /*unused*/,
+               const char* /*unused*/, const char* schema_content, void* user_data)
 {
     if(user_data == nullptr || schema_content == nullptr)
     {

@@ -464,8 +464,9 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int sen
 // ucp_tag_send_nbx: (void* ep, const void* buffer, size_t count, std::uint64_t tag, const
 // void* param)
 void
-comm_data::audit(const gotcha_data& _data, audit::incoming, void*, const void*,
-                 size_t count, std::uint64_t tag, const void*)
+comm_data::audit(const gotcha_data& _data, audit::incoming /*unused*/, void* /*unused*/,
+                 const void* /*unused*/, size_t count, std::uint64_t tag,
+                 const void* /*unused*/)
 {
     if(count == 0) return;
 
@@ -487,8 +488,9 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, const void*,
 // ucp_tag_recv_nbx: (void* worker, void* buffer, size_t count, std::uint64_t tag,
 // std::uint64_t tag_mask, const void* param)
 void
-comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t count,
-                 std::uint64_t tag, std::uint64_t tag_mask, const void*)
+comm_data::audit(const gotcha_data& _data, audit::incoming /*unused*/, void* /*unused*/,
+                 void* /*unused*/, size_t count, std::uint64_t tag,
+                 std::uint64_t tag_mask, const void* /*unused*/)
 {
     if(count == 0) return;
 
@@ -511,8 +513,9 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t
 // ucp_put_nbx: (void* ep, const void* buffer, size_t count, std::uint64_t remote_addr,
 // void* rkey, const void* param)
 void
-comm_data::audit(const gotcha_data& _data, audit::incoming, void*, const void*,
-                 size_t count, std::uint64_t remote_addr, void*, const void*)
+comm_data::audit(const gotcha_data& _data, audit::incoming /*unused*/, void* /*unused*/,
+                 const void* /*unused*/, size_t count, std::uint64_t remote_addr,
+                 void* /*unused*/, const void* /*unused*/)
 {
     if(count == 0) return;
 
@@ -534,8 +537,9 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, const void*,
 // ucp_get_nbx: (void* ep, void* buffer, size_t count, std::uint64_t remote_addr, void*
 // rkey, const void* param)
 void
-comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t count,
-                 std::uint64_t remote_addr, void*, const void*)
+comm_data::audit(const gotcha_data& _data, audit::incoming /*unused*/, void* /*unused*/,
+                 void* /*unused*/, size_t count, std::uint64_t remote_addr,
+                 void* /*unused*/, const void* /*unused*/)
 {
     if(count == 0) return;
 
@@ -557,9 +561,9 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t
 // ucp_am_send_nbx: (void* ep, unsigned id, const void* header, size_t header_length,
 // const void* buffer, size_t count, const void* param)
 void
-comm_data::audit(const gotcha_data& _data, audit::incoming, void*, unsigned id,
-                 const void*, size_t header_length, const void*, size_t count,
-                 const void*)
+comm_data::audit(const gotcha_data& _data, audit::incoming /*unused*/, void* /*unused*/,
+                 unsigned id, const void* /*unused*/, size_t header_length,
+                 const void* /*unused*/, size_t count, const void* /*unused*/)
 {
     if(count == 0 && header_length == 0) return;
 
@@ -581,8 +585,8 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, unsigned id,
 
 // ucp_stream_send_nbx: (void* ep, const void* buffer, size_t count, const void* param)
 void
-comm_data::audit(const gotcha_data& _data, audit::incoming, void*, const void*,
-                 size_t             count, const void*)
+comm_data::audit(const gotcha_data& _data, audit::incoming /*unused*/, void* /*unused*/,
+                 const void* /*unused*/, size_t count, const void* /*unused*/)
 {
     if(count == 0) return;
 
@@ -603,8 +607,9 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, const void*,
 // ucp_stream_recv_nbx: (void* ep, void* buffer, size_t count, size_t* length, const void*
 // param)
 void
-comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t count,
-                 size_t*, const void*)
+comm_data::audit(const gotcha_data& _data, audit::incoming /*unused*/, void* /*unused*/,
+                 void* /*unused*/, size_t count, size_t* /*unused*/,
+                 const void* /*unused*/)
 {
     if(count == 0) return;
 
@@ -624,8 +629,8 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t
 
 // Legacy: ucp_tag_send_nb/nbx - send with tag matching (for old-style wrappers)
 void
-comm_data::audit(const gotcha_data& _data, audit::incoming, void*, size_t count, void*,
-                 void*, void*)
+comm_data::audit(const gotcha_data& _data, audit::incoming /*unused*/, void* /*unused*/,
+                 size_t count, void* /*unused*/, void* /*unused*/, void* /*unused*/)
 {
     if(count == 0) return;
 
@@ -645,8 +650,9 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, size_t count,
 
 // Legacy: ucp_tag_recv_nb/nbx - receive with tag matching (for old-style wrappers)
 void
-comm_data::audit(const gotcha_data& _data, audit::incoming, void*, size_t count, void*,
-                 void*, void*, void*, void*)
+comm_data::audit(const gotcha_data& _data, audit::incoming /*unused*/, void* /*unused*/,
+                 size_t count, void* /*unused*/, void* /*unused*/, void* /*unused*/,
+                 void* /*unused*/, void* /*unused*/)
 {
     if(count == 0) return;
 
@@ -666,8 +672,9 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, size_t count,
 
 // ucp_put/get operations - RMA
 void
-comm_data::audit(const gotcha_data& _data, audit::incoming, void*, size_t length,
-                 std::uint64_t, void*, void*)
+comm_data::audit(const gotcha_data& _data, audit::incoming /*unused*/, void* /*unused*/,
+                 size_t             length, std::uint64_t /*unused*/, void* /*unused*/,
+                 void* /*unused*/)
 {
     if(length == 0) return;
 
@@ -706,8 +713,9 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, size_t length
 
 // ucp_am_send_nb/nbx - active message send
 void
-comm_data::audit(const gotcha_data& _data, audit::incoming, void*, unsigned, void*,
-                 size_t header_length, void*, size_t length, unsigned, void*)
+comm_data::audit(const gotcha_data& _data, audit::incoming /*unused*/, void* /*unused*/,
+                 unsigned /*unused*/, void* /*unused*/, size_t header_length,
+                 void* /*unused*/, size_t length, unsigned /*unused*/, void* /*unused*/)
 {
     size_t total_length = header_length + length;
     if(total_length == 0) return;
@@ -728,8 +736,9 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, unsigned, voi
 
 // ucp_stream_send/recv operations
 void
-comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t count,
-                 void*, unsigned, void*)
+comm_data::audit(const gotcha_data& _data, audit::incoming /*unused*/, void* /*unused*/,
+                 void* /*unused*/, size_t count, void* /*unused*/, unsigned /*unused*/,
+                 void* /*unused*/)
 {
     if(count == 0) return;
 

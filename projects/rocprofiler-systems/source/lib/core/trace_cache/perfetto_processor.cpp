@@ -123,7 +123,7 @@ resolve_kfd_migration_gpu_bucket(
 
 template <typename CategoryT>
 ::perfetto::Track
-get_track(CategoryT, std::string name, std::uint64_t hash_arg)
+get_track(CategoryT /*unused*/, std::string name, std::uint64_t hash_arg)
 {
     auto _uuid = tracing::get_perfetto_category_uuid<CategoryT>(hash_arg);
 
@@ -348,7 +348,8 @@ write_sampling_track_data(const struct backtrace_region_sample& _sample,
 
 template <typename CategoryT>
 void
-write_in_time_sample_data(CategoryT, const in_time_sample& _sample, bool use_annotations)
+write_in_time_sample_data(CategoryT /*unused*/, const in_time_sample& _sample,
+                          bool use_annotations)
 {
     const auto event_metadata = nlohmann::json::parse(_sample.event_metadata);
 
@@ -379,7 +380,7 @@ write_in_time_sample_data(CategoryT, const in_time_sample& _sample, bool use_ann
 template <size_t... Idx>
 bool
 dispatch_in_time_sample(size_t category_enum_id, const in_time_sample& _sample,
-                        bool use_annotations, std::index_sequence<Idx...>)
+                        bool use_annotations, std::index_sequence<Idx...> /*unused*/)
 {
     return ((category_enum_id == Idx
                  ? (write_in_time_sample_data(category_type_id_t<Idx>{}, _sample,
@@ -695,7 +696,8 @@ perfetto_processor_t::finalize_processing()
 
 template <typename CategoryT, typename FuncT, typename... Args>
 ::perfetto::Track
-perfetto_processor_t::get_or_create_track(CategoryT, FuncT&& desc_gen, Args&&... args)
+perfetto_processor_t::get_or_create_track(CategoryT /*unused*/, FuncT&& desc_gen,
+                                          Args&&... args)
 {
     const auto _uuid = tracing::get_perfetto_category_uuid<CategoryT>(args...);
     auto       it    = m_track_cache.find(_uuid);

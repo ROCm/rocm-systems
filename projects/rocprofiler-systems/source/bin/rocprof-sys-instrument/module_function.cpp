@@ -270,12 +270,10 @@ module_function::is_user_restricted() const
                                   module_name);
             return false;
         }
-        else
-        {
-            messages.emplace_back(3, "Skipping", "module", "module-restrict-regex",
-                                  module_name);
-            return true;
-        }
+
+        messages.emplace_back(3, "Skipping", "module", "module-restrict-regex",
+                              module_name);
+        return true;
     }
 
     if(!func_restrict.empty())
@@ -286,18 +284,16 @@ module_function::is_user_restricted() const
                                   function_name);
             return false;
         }
-        else if(check_regex_restrictions(signature.get(), func_restrict))
+        if(check_regex_restrictions(signature.get(), func_restrict))
         {
             messages.emplace_back(2, "Forcing", "function", "function-restrict-regex",
                                   signature.get());
             return false;
         }
-        else
-        {
-            messages.emplace_back(3, "Skipping", "function", "function-restrict-regex",
-                                  function_name);
-            return true;
-        }
+
+        messages.emplace_back(3, "Skipping", "function", "function-restrict-regex",
+                              function_name);
+        return true;
     }
 
     return false;
@@ -324,7 +320,7 @@ module_function::is_user_included() const
                                   function_name);
             return true;
         }
-        else if(check_regex_restrictions(signature.get(), func_include))
+        if(check_regex_restrictions(signature.get(), func_include))
         {
             messages.emplace_back(2, "Forcing", "function", "function-include-regex",
                                   signature.get());
@@ -356,7 +352,7 @@ module_function::is_user_excluded() const
                                   function_name);
             return true;
         }
-        else if(check_regex_restrictions(signature.get(), func_exclude))
+        if(check_regex_restrictions(signature.get(), func_exclude))
         {
             messages.emplace_back(2, "Skipping", "function", "function-exclude-regex",
                                   signature.get());
@@ -431,11 +427,11 @@ module_function::is_internal_constrained() const
     {
         return _report("Excluding", "module", "rocprofsys", 3);
     }
-    else if(std::regex_match(module_name,
-                             std::regex{ ".*/source/lib/"
-                                         "(core|common|binary|"
-                                         "rocprofsys|rocprofsys-dl|"
-                                         "rocprofsys-user)/.*/.*\\.(h|c|cpp|hpp)$" }))
+    if(std::regex_match(module_name,
+                        std::regex{ ".*/source/lib/"
+                                    "(core|common|binary|"
+                                    "rocprofsys|rocprofsys-dl|"
+                                    "rocprofsys-user)/.*/.*\\.(h|c|cpp|hpp)$" }))
     {
         return _report("Excluding", "module", "rocprofsys", 3);
     }
@@ -445,11 +441,11 @@ module_function::is_internal_constrained() const
     {
         return _report("Excluding", "function", "rocprofsys", 3);
     }
-    else if(std::regex_search(function_name, std::regex{ "3tim|tim::|timemory(::|_)" }))
+    if(std::regex_search(function_name, std::regex{ "3tim|tim::|timemory(::|_)" }))
     {
         return _report("Excluding", "function", "timemory", 3);
     }
-    else if(std::regex_search(function_name, std::regex{ "9perfetto|perfetto(::|_)" }))
+    if(std::regex_search(function_name, std::regex{ "9perfetto|perfetto(::|_)" }))
     {
         return _report("Excluding", "function", "perfetto", 3);
     }

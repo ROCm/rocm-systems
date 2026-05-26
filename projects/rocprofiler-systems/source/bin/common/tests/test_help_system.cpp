@@ -145,7 +145,8 @@ TEST_F(help_system_test, compact_help_contains_essential_info)
 
 TEST_F(help_system_test, compact_help_uses_tool_name)
 {
-    std::ostringstream oss_run, oss_sample;
+    std::ostringstream oss_run;
+    std::ostringstream oss_sample;
     print_compact_help("run", oss_run);
     print_compact_help("sample", oss_sample);
 

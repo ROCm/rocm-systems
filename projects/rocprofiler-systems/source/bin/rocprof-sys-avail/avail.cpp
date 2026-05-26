@@ -90,19 +90,23 @@ wrap(size_t idx, IntArrayT _breaks, std::array<bool, N> _use, format_options& fm
 
 template <size_t N = num_component_options>
 void
-write_component_info(std::ostream&, const array_t<bool, N>&, const array_t<bool, N>&,
-                     const array_t<string_t, N>&, format_options& fmt_opts);
+write_component_info(std::ostream& /*os*/, const array_t<bool, N>& /*options*/,
+                     const array_t<bool, N>& /*_mark*/,
+                     const array_t<string_t, N>& /*fields*/, format_options& fmt_opts);
 
 template <size_t N = num_settings_options>
 void
-write_settings_info(std::ostream&, format_options& fmt_opts, const array_t<bool, N>& = {},
-                    const array_t<bool, N>& = {}, const array_t<string_t, N>& = {});
+write_settings_info(std::ostream& /*os*/, format_options& fmt_opts,
+                    const array_t<bool, N>& /*opts*/       = {},
+                    const array_t<bool, N>& /*unused*/     = {},
+                    const array_t<string_t, N>& /*unused*/ = {});
 
 template <size_t N = num_hw_counter_options>
 void
-write_hw_counter_info(std::ostream&, format_options& fmt_opts,
-                      const array_t<bool, N>& = {}, const array_t<bool, N>& = {},
-                      const array_t<string_t, N>& = {});
+write_hw_counter_info(std::ostream& /*os*/, format_options& fmt_opts,
+                      const array_t<bool, N>& /*options*/    = {},
+                      const array_t<bool, N>& /*unused*/     = {},
+                      const array_t<string_t, N>& /*unused*/ = {});
 
 namespace
 {
@@ -1003,8 +1007,8 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
 template <size_t N>
 void
 write_settings_info(std::ostream& os, format_options& fmt_opts,
-                    const array_t<bool, N>& opts, const array_t<bool, N>&,
-                    const array_t<string_t, N>&)
+                    const array_t<bool, N>& opts, const array_t<bool, N>& /*unused*/,
+                    const array_t<string_t, N>& /*unused*/)
 {
     static_assert(N >= num_settings_options, "Error! Too few settings options + fields");
 
@@ -1237,8 +1241,8 @@ write_settings_info(std::ostream& os, format_options& fmt_opts,
 template <size_t N>
 void
 write_hw_counter_info(std::ostream& os, format_options& fmt_opts,
-                      const array_t<bool, N>& options, const array_t<bool, N>&,
-                      const array_t<string_t, N>&)
+                      const array_t<bool, N>& options, const array_t<bool, N>& /*unused*/,
+                      const array_t<string_t, N>& /*unused*/)
 {
     static_assert(N >= num_hw_counter_options,
                   "Error! Too few hw counter options + fields");

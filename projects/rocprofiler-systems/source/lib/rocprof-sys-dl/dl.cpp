@@ -614,7 +614,7 @@ extern "C"
                 ::rocprofsys::join(::rocprofsys::QuoteStrings{}, ", ", a, b, c).c_str());
             return;
         }
-        else if(dl::get_inited() && dl::get_active())
+        if(dl::get_inited() && dl::get_active())
         {
             ROCPROFSYS_DL_LOG(
                 2, "%s(%s) ignored :: already initialized and active\n", __FUNCTION__,
@@ -652,7 +652,7 @@ extern "C"
                               __FUNCTION__);
             return;
         }
-        else if(dl::get_finied() && !dl::get_active())
+        if(dl::get_finied() && !dl::get_active())
         {
             ROCPROFSYS_DL_LOG(2, "%s() ignored :: already finalized but not active\n",
                               __FUNCTION__);
@@ -701,10 +701,9 @@ extern "C"
         {
             return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_push_region_f, name);
         }
-        else
-        {
-            ++dl::get_thread_count();
-        }
+
+        ++dl::get_thread_count();
+
         return 0;
     }
 
@@ -715,10 +714,9 @@ extern "C"
         {
             return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_pop_region_f, name);
         }
-        else
-        {
-            if(dl::get_thread_count()-- == 0) rocprofsys_user_start_thread_trace_dl();
-        }
+
+        if(dl::get_thread_count()-- == 0) rocprofsys_user_start_thread_trace_dl();
+
         return 0;
     }
 
@@ -732,10 +730,9 @@ extern "C"
             return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_push_category_region_f,
                                         _category, name, _annotations, _annotation_count);
         }
-        else
-        {
-            ++dl::get_thread_count();
-        }
+
+        ++dl::get_thread_count();
+
         return 0;
     }
 
@@ -749,10 +746,9 @@ extern "C"
             return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_pop_category_region_f,
                                         _category, name, _annotations, _annotation_count);
         }
-        else
-        {
-            ++dl::get_thread_count();
-        }
+
+        ++dl::get_thread_count();
+
         return 0;
     }
 
@@ -1119,8 +1115,9 @@ bool
 rocprofsys_preload() ROCPROFSYS_INTERNAL_API;
 
 std::vector<std::string>
-get_link_map(const char*,
-             std::vector<int>&& = { (RTLD_LAZY | RTLD_NOLOAD) }) ROCPROFSYS_INTERNAL_API;
+get_link_map(const char* /*_name*/,
+             std::vector<int>&& /*_open_modes*/ = {
+                 (RTLD_LAZY | RTLD_NOLOAD) }) ROCPROFSYS_INTERNAL_API;
 
 const char*
 get_default_mode() ROCPROFSYS_INTERNAL_API;
@@ -1398,8 +1395,8 @@ extern "C"
     void rocprofsys_main_init(void) ROCPROFSYS_INTERNAL_API;
     int  rocprofsys_main(int argc, char** argv, char** envp) ROCPROFSYS_INTERNAL_API;
 
-    void rocprofsys_set_main_init(init_func_t) ROCPROFSYS_INTERNAL_API;
-    void rocprofsys_set_main(main_func_t) ROCPROFSYS_INTERNAL_API;
+    void rocprofsys_set_main_init(init_func_t /*_init_real*/) ROCPROFSYS_INTERNAL_API;
+    void rocprofsys_set_main(main_func_t /*_main_real*/) ROCPROFSYS_INTERNAL_API;
 
     void rocprofsys_set_main_init(init_func_t _init_real)
     {

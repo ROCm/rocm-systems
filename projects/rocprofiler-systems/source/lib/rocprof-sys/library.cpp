@@ -562,9 +562,9 @@ rocprofsys_init_library_hidden()
         auto* _settings = tim::settings::instance();
         if(_settings)
         {
-            _settings->cout_output() = false;
-            _settings->verbose()     = -1;
-            _settings->banner()      = false;
+            tim::settings::cout_output() = false;
+            tim::settings::verbose()     = -1;
+            tim::settings::banner()      = false;
         }
     }
 
@@ -828,8 +828,8 @@ rocprofsys_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _
             "mode and/or is_binary_rewrite:"
             "\n    Invocation #1: rocprofsys_init(mode={}, is_binary_rewrite={}, ...)"
             "\n    Invocation #%i: rocprofsys_init(mode={}, is_binary_rewrite={}, ...)",
-            _args.first.data(), std::to_string(_args.second).c_str(), _count + 1, _mode,
-            std::to_string(_is_binary_rewrite)));
+            _args.first.data(), std::to_string(static_cast<int>(_args.second)).c_str(),
+            _count + 1, _mode, std::to_string(static_cast<int>(_is_binary_rewrite))));
     }
 
     // always the first
@@ -1249,9 +1249,9 @@ rocprofsys_finalize_hidden(void)
             auto* _settings = tim::settings::instance();
             if(_settings)
             {
-                _settings->file_output() = false;
-                _settings->text_output() = false;
-                _settings->json_output() = false;
+                tim::settings::file_output() = false;
+                tim::settings::text_output() = false;
+                tim::settings::json_output() = false;
             }
         }
 

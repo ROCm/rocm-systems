@@ -179,7 +179,7 @@ jobs:
       working-directory: projects/rocprofiler-systems/
       run: |
         bash scripts/check-fixedwidth-types.sh
-  
+
   clang-tidy:
     name: "clang-tidy (.clang-tidy)"
     runs-on: ubuntu-22.04
