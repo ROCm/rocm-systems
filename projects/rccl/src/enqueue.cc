@@ -3493,22 +3493,13 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
             NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncRecv, collAPI, (void*)((char*)info->recvbuff+r*info->count*ncclTypeSize(info->datatype)), info->count, info->datatype, r, allowUB));
           }
         } else if (info->coll == ncclFuncAllGather && info->useDirect) {
-          // Direct AllGather: post per-peer Send/Recv P2P tasks the same way
-          // ncclFuncAlltoAll does above. Differences vs A2A:
-          //   - sendbuff is NOT offset per peer (every peer receives this
-          //     rank's full contribution).
-          //   - recvbuff is offset by r * count * sizeof(T) (each peer's
-          //     contribution lands in its slot of the gather buffer).
-          // Identical to A2A in all other respects: iteration order is
-          // 0..nRanks-1 on every rank (no (rank+r)%nRanks rotation), and
-          // the self peer (r == rank) is always posted (no in-place skip).
-          // Posting self via p2pTaskAppend is correct because the device
-          // kernel handles isCopy = (sendRank == self) as a local memcpy
-          // (see device/sendrecv.h's RunWorkBatch<ncclFuncSendRecv,...>).
+          NCCLCHECK(ncclRegFind(comm, info->sendbuff, info->count * ncclTypeSize(info->datatype), &sendReg));
+          NCCLCHECK(ncclRegFind(comm, info->recvbuff, comm->nRanks * info->count * ncclTypeSize(info->datatype), &recvReg));
+          allowUB = captured || (sendReg != NULL && recvReg != NULL);
           size_t rankOffset = info->count * ncclTypeSize(info->datatype);
           for (int r=0; r<comm->nRanks; r++) {
-            NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncSend, collAPI, (void*)info->sendbuff, info->count, info->datatype, r));
-            NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncRecv, collAPI, (void*)((char*)info->recvbuff + r*rankOffset), info->count, info->datatype, r));
+            NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncSend, collAPI, (void*)info->sendbuff, info->count, info->datatype, r, allowUB));
+            NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncRecv, collAPI, (void*)((char*)info->recvbuff + r*rankOffset), info->count, info->datatype, r, allowUB));
           }
         } else if (info->coll == ncclFuncGather){
           size_t offset = 0;
