@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <initializer_list>
 #include <utility>
+#include <vector>
 
 #include "fakes/p2p_fakes.h"
 
@@ -175,22 +176,76 @@ struct RegRecordCleaner {
     RegRecordCleaner& operator=(const RegRecordCleaner&) = delete;
 };
 
-// RankMapping -- owns storage for comm->rankToLocalRank and wires it in.
-// Usage:
-//     RankMapping ranks(comm, {{peerRank, peerLocalRank}});
-// The mapping table is sized to NCCL_MAX_LOCAL_RANKS (the maximum local
-// rank index ipcRegisterBuffer can address); unassigned entries stay 0.
-struct RankMapping {
-    std::array<int, NCCL_MAX_LOCAL_RANKS> storage{};
-
-    RankMapping(ncclComm& comm,
-                std::initializer_list<std::pair<int, int>> rankToLocal)
-    {
-        for (auto& [rank, localRank] : rankToLocal) {
-            storage[rank] = localRank;
+// CommBuilder -- fluent builder that owns the backing storage for the
+// fields of ncclComm that ipcRegisterBuffer reads. Tests grab a
+// reference to the built comm via .comm and pass it to
+// CallIpcRegisterBuffer.
+//
+// Each test sets only the slots it needs:
+//
+//     CommBuilder b;                                // bare ncclComm{}
+//     CommBuilder b; b.WithLocalRank(peer, plr);    // + rankToLocalRank
+//     CommBuilder b; b.WithLocalRank(...)           // + localRanks =
+//                     .WithMaxLocalRanks();         //   NCCL_MAX_LOCAL_RANKS
+//     CommBuilder b; ... .WithSharedRes();          // + sharedRes
+//     CommBuilder b; ... .WithProxyConnArray(N);    // + gproxyConn[N]
+//
+// Storage outlives the comm because the builder owns it; the builder
+// must outlive the test body that uses .comm.
+class CommBuilder {
+public:
+    // rankToLocalRank table sized to NCCL_MAX_LOCAL_RANKS (the maximum
+    // local rank index ipcRegisterBuffer can address); unassigned
+    // entries stay 0.
+    CommBuilder& WithLocalRank(int peerRank, int peerLocalRank) {
+        if (!rankToLocalRankInstalled_) {
+            comm_.rankToLocalRank = rankToLocalRankStorage_.data();
+            rankToLocalRankInstalled_ = true;
         }
-        comm.rankToLocalRank = storage.data();
+        rankToLocalRankStorage_[peerRank] = peerLocalRank;
+        return *this;
     }
+
+    // Most reuse-arm code paths read comm->localRanks but never index
+    // anything by it; setting it to NCCL_MAX_LOCAL_RANKS is the
+    // defensive default.
+    CommBuilder& WithMaxLocalRanks() {
+        comm_.localRanks = NCCL_MAX_LOCAL_RANKS;
+        return *this;
+    }
+
+    // sharedRes must be non-null whenever the call path enters the
+    // strong-stream block: the call site takes the address of
+    // comm->sharedRes->hostStream.
+    CommBuilder& WithSharedRes() {
+        comm_.sharedRes = &sharedResStorage_;
+        return *this;
+    }
+
+    // gproxyConn is a bare pointer in ncclComm; the real ncclCommInit
+    // allocates it sized to comm->nRanks. Tests that drive the
+    // fresh-registration arm hand-roll a backing array sized to
+    // nRanks (must be > max peerRank the test will exercise).
+    CommBuilder& WithProxyConnArray(int nRanks) {
+        gproxyConnStorage_.assign(nRanks, ncclProxyConnector{});
+        comm_.gproxyConn = gproxyConnStorage_.data();
+        comm_.nRanks     = nRanks;
+        return *this;
+    }
+
+    ncclComm& comm() { return comm_; }
+    operator ncclComm&() { return comm_; }
+
+    CommBuilder() = default;
+    CommBuilder(const CommBuilder&)            = delete;
+    CommBuilder& operator=(const CommBuilder&) = delete;
+
+private:
+    ncclComm comm_{};
+    bool rankToLocalRankInstalled_ = false;
+    std::array<int, NCCL_MAX_LOCAL_RANKS> rankToLocalRankStorage_{};
+    ncclSharedResources sharedResStorage_{};
+    std::vector<ncclProxyConnector> gproxyConnStorage_;
 };
 
 // ReusableIpcInfo -- owns the per-peer ncclIpcRegInfo + the host-side
@@ -271,12 +326,12 @@ ncclResult_t CallIpcRegisterBuffer(ncclComm& comm,
 // proxy or driver, leaving all OUT params zeroed.
 TEST_F(P2pMicrotest, IpcRegisterBuffer_NullRegRecordIsNoOp)
 {
-    ncclComm comm{};
+    CommBuilder cb;
     int peerRanks[] = {0};
     IpcRegOutputs out;
     bool isLegacyIpc = true;
 
-    auto r = CallIpcRegisterBuffer(comm,
+    auto r = CallIpcRegisterBuffer(cb,
                                    /*userbuff=*/ reinterpret_cast<const void*>(0x1000),
                                    /*buffSize=*/ 4096,
                                    peerRanks, 1,
@@ -300,8 +355,8 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_SendrecvReusesExistingIpcInfo)
     constexpr uintptr_t kBuffOffset    = 0x40;
     constexpr uintptr_t kRmtRegAddr    = 0xA000;
 
-    ncclComm comm{};
-    RankMapping ranks(comm, {{kPeerRank, kPeerLocalRank}});
+    CommBuilder cb;
+    cb.WithLocalRank(kPeerRank, kPeerLocalRank);
 
     ReusableIpcInfo existing(kPeerRank, kPeerLocalRank, kRmtRegAddr,
                              /*legacyIpcCap=*/ true);
@@ -314,7 +369,7 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_SendrecvReusesExistingIpcInfo)
     IpcRegOutputs out;
     bool isLegacyIpc = false;
 
-    auto r = CallIpcRegisterBuffer(comm,
+    auto r = CallIpcRegisterBuffer(cb,
                                    /*userbuff=*/ reinterpret_cast<const void*>(kBegAddr + kBuffOffset),
                                    /*buffSize=*/ 256,
                                    peerRanks, 1,
@@ -342,9 +397,9 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_CollectiveReuseReturnsDevicePeerAddrTable
     constexpr uintptr_t kBuffOffset    = 0x80;
     constexpr uintptr_t kRmtRegAddr    = 0xA000;
 
-    ncclComm comm{};
-    RankMapping ranks(comm, {{kPeerRank, kPeerLocalRank}});
-    comm.localRanks = NCCL_MAX_LOCAL_RANKS;  // unused on this path, set defensively
+    CommBuilder cb;
+    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
+      .WithMaxLocalRanks();  // unused on this path, set defensively
 
     ReusableIpcInfo existing(kPeerRank, kPeerLocalRank, kRmtRegAddr,
                              /*legacyIpcCap=*/ false);
@@ -362,7 +417,7 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_CollectiveReuseReturnsDevicePeerAddrTable
     IpcRegOutputs out;
     bool isLegacyIpc = true;  // start true to see it cleared
 
-    auto r = CallIpcRegisterBuffer(comm,
+    auto r = CallIpcRegisterBuffer(cb,
                                    /*userbuff=*/ reinterpret_cast<const void*>(kBegAddr + kBuffOffset),
                                    /*buffSize=*/ 512,
                                    peerRanks, 1,
@@ -397,11 +452,10 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_CollectiveReuseStrongStreamAcquireFailure
 
     // sharedRes must be non-null: the strong-stream call site takes the
     // address of comm->sharedRes->hostStream. The hook doesn't read it.
-    ncclSharedResources sharedRes{};
-    ncclComm comm{};
-    comm.sharedRes  = &sharedRes;
-    comm.localRanks = NCCL_MAX_LOCAL_RANKS;
-    RankMapping ranks(comm, {{kPeerRank, kPeerLocalRank}});
+    CommBuilder cb;
+    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
+      .WithMaxLocalRanks()
+      .WithSharedRes();
 
     ReusableIpcInfo existing(kPeerRank, kPeerLocalRank, kRmtRegAddr,
                              /*legacyIpcCap=*/ false);
@@ -423,7 +477,7 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_CollectiveReuseStrongStreamAcquireFailure
     IpcRegOutputs out;
     bool isLegacyIpc = true;
 
-    auto r = CallIpcRegisterBuffer(comm,
+    auto r = CallIpcRegisterBuffer(cb,
                                    /*userbuff=*/ reinterpret_cast<const void*>(kBegAddr + kBuffOffset),
                                    /*buffSize=*/ 1024,
                                    peerRanks, 1,
@@ -465,17 +519,13 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationLegacyIpcSucceeds)
     constexpr uintptr_t kBegAddr       = kBaseAddr + kBegOffset;
     constexpr uintptr_t kRmtRegAddr    = 0xCAFE0000ull;
 
-    ncclSharedResources sharedRes{};
-    ncclComm comm{};
-    comm.sharedRes  = &sharedRes;
-    comm.localRanks = NCCL_MAX_LOCAL_RANKS;
-    RankMapping ranks(comm, {{kPeerRank, kPeerLocalRank}});
-
-    // comm->gproxyConn is a bare pointer (not an array) in ncclComm; the
-    // real ncclCommInit allocates it sized to comm->nRanks. We hand-roll
-    // it here, sized big enough to index [kPeerRank].
-    std::array<ncclProxyConnector, kPeerRank + 1> gproxyConnStorage{};
-    comm.gproxyConn = gproxyConnStorage.data();
+    // nRanks just has to be big enough to index gproxyConn[kPeerRank].
+    constexpr int kNRanks = kPeerRank + 1;
+    CommBuilder cb;
+    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
+      .WithMaxLocalRanks()
+      .WithSharedRes()
+      .WithProxyConnArray(kNRanks);
 
     ncclReg regRecord{};
     regRecord.begAddr = kBegAddr;
@@ -569,7 +619,7 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationLegacyIpcSucceeds)
     IpcRegOutputs out;
     bool isLegacyIpc = false;
 
-    auto r = CallIpcRegisterBuffer(comm, kUserbuff,
+    auto r = CallIpcRegisterBuffer(cb, kUserbuff,
                                    /*buffSize=*/ 256,
                                    peerRanks, 1,
                                    NCCL_IPC_COLLECTIVE,
@@ -657,11 +707,10 @@ TEST_F(P2pMicrotest, DISABLED_IpcRegisterBuffer_RegressionNcclIssue1859_P2pThenC
     // is then supposed to copy into devPeerRmtAddrs[peerLocalRank].
     constexpr uintptr_t kRmtRegAddr    = 0xA000;
 
-    ncclSharedResources sharedRes{};
-    ncclComm comm{};
-    comm.sharedRes  = &sharedRes;
-    comm.localRanks = NCCL_MAX_LOCAL_RANKS;
-    RankMapping ranks(comm, {{kPeerRank, kPeerLocalRank}});
+    CommBuilder cb;
+    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
+      .WithMaxLocalRanks()
+      .WithSharedRes();
 
     // Simulate the state left by a prior SENDRECV registration:
     //   - ipcInfos[peerLocalRank] populated (drives reuse arm in step 2)
@@ -684,7 +733,7 @@ TEST_F(P2pMicrotest, DISABLED_IpcRegisterBuffer_RegressionNcclIssue1859_P2pThenC
     IpcRegOutputs out;
     bool isLegacyIpc = false;
 
-    auto r = CallIpcRegisterBuffer(comm,
+    auto r = CallIpcRegisterBuffer(cb,
                                    /*userbuff=*/ reinterpret_cast<const void*>(kBegAddr + kBuffOffset),
                                    /*buffSize=*/ 512,
                                    peerRanks, 1,
@@ -731,8 +780,8 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_NullIsLegacyIpcPointerIsSkipped)
     constexpr uintptr_t kBuffOffset    = 0x40;
     constexpr uintptr_t kRmtRegAddr    = 0xA000;
 
-    ncclComm comm{};
-    RankMapping ranks(comm, {{kPeerRank, kPeerLocalRank}});
+    CommBuilder cb;
+    cb.WithLocalRank(kPeerRank, kPeerLocalRank);
 
     ReusableIpcInfo existing(kPeerRank, kPeerLocalRank, kRmtRegAddr,
                              /*legacyIpcCap=*/ true);
@@ -746,7 +795,7 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_NullIsLegacyIpcPointerIsSkipped)
 
     // The contract: passing nullptr must not crash and must not affect any
     // OUT param other than isLegacyIpc itself.
-    auto r = CallIpcRegisterBuffer(comm,
+    auto r = CallIpcRegisterBuffer(cb,
                                    /*userbuff=*/ reinterpret_cast<const void*>(kBegAddr + kBuffOffset),
                                    /*buffSize=*/ 256,
                                    peerRanks, 1,
@@ -775,9 +824,9 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationFailureClearsOutputs)
     // error rather than crashing.
     constexpr uintptr_t kUnregisteredUserbuff = 0xBADADD0ull;
 
-    ncclComm comm{};
-    comm.localRanks = NCCL_MAX_LOCAL_RANKS;
-    RankMapping ranks(comm, {{kPeerRank, kPeerLocalRank}});
+    CommBuilder cb;
+    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
+      .WithMaxLocalRanks();
 
     ncclReg regRecord{};
     regRecord.begAddr = kBegAddr;
@@ -788,7 +837,7 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationFailureClearsOutputs)
     IpcRegOutputs out;
     bool isLegacyIpc = true;
 
-    auto r = CallIpcRegisterBuffer(comm,
+    auto r = CallIpcRegisterBuffer(cb,
                                    /*userbuff=*/ reinterpret_cast<const void*>(kUnregisteredUserbuff + kBuffOffset),
                                    /*buffSize=*/ 256,
                                    peerRanks, 1,
