@@ -495,8 +495,8 @@ get_callback_domains()
         {
             for(size_t idx = 0; idx < callback_tracing_info.size(); ++idx)
             {
-                auto ditr = callback_tracing_info[idx];
-                auto dval = static_cast<rocprofiler_callback_tracing_kind_t>(idx);
+                const auto& ditr = callback_tracing_info[idx];
+                auto        dval = static_cast<rocprofiler_callback_tracing_kind_t>(idx);
                 if(itr == to_lower(ditr.name) && supported.count(dval) > 0)
                 {
                     _data.emplace(dval);
@@ -656,8 +656,8 @@ get_buffered_domains()
         {
             for(size_t idx = 0; idx < buffer_tracing_info.size(); ++idx)
             {
-                auto ditr = buffer_tracing_info[idx];
-                auto dval = static_cast<rocprofiler_buffer_tracing_kind_t>(idx);
+                const auto& ditr = buffer_tracing_info[idx];
+                auto        dval = static_cast<rocprofiler_buffer_tracing_kind_t>(idx);
                 if(itr == to_lower(ditr.name) && supported.count(dval) > 0)
                 {
                     _data.emplace(dval);

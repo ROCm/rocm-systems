@@ -865,8 +865,6 @@ error_func_fake(error_level_t level, int num, const char* const* params)
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/join.hpp>
 
-using ::timemory::join::join;
-
 //======================================================================================//
 //
 //  Filters app_modules by removing internal and user-excluded modules.
