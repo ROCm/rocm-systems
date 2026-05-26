@@ -64,8 +64,9 @@ def print_amdsmi_path_help(file=sys.stdout):
     print("If amd-smi loads from the wrong path, fix with one of:", file=file)
     _print_path_remediation(_script, file)
     _full = "sudo " + (sys.argv[0] or _script)
+    _base = sys.argv[0] or _script
     _cmds = [
-        (_full + " -l", "list all available tests"),
+        (_base + " -l", "list all available tests"),
         (_full + " -v", "run all tests, verbose with print statements (RECOMMENDED)"),
         (_full + ' -k "test_name" -v', "run only tests matching substring"),
         (_full + " -q", "run all tests, quiet with no print statements"),
