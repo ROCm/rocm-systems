@@ -273,6 +273,8 @@ run(int rank, int tid, int devid, int argc, char** argv)
     dim3 grid(M / 32, N / 32, 1);
     dim3 block(32, 32, 1);  // transpose
 
+    // Profiled region for rocprofv3 --selected-regions (see process-attachment tests).
+    roctxProfilerResume(0);
     auto t1 = std::chrono::high_resolution_clock::now();
     for(size_t i = 0; i < nitr; ++i)
     {
@@ -288,6 +290,7 @@ run(int rank, int tid, int devid, int argc, char** argv)
         roctxRangePop();
     }
     auto t2 = std::chrono::high_resolution_clock::now();
+    roctxProfilerPause(0);
     HIP_API_CALL(hipStreamSynchronize(stream));
     HIP_API_CALL(hipMemcpyAsync(out_matrix.data(), out, size, hipMemcpyDeviceToHost, stream));
     double time = std::chrono::duration_cast<std::chrono::duration<double>>(t2 - t1).count();

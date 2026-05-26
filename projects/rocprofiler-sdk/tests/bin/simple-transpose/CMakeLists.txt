@@ -44,3 +44,14 @@ target_link_libraries(simple-transpose PRIVATE Threads::Threads)
 find_package(rocprofiler-sdk-roctx REQUIRED)
 target_link_libraries(simple-transpose
                       PRIVATE rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
+
+find_package(MPI COMPONENTS C)
+if(MPI_FOUND AND TARGET MPI::MPI_C)
+    set_source_files_properties(mpi-simple-attach.cpp PROPERTIES LANGUAGE HIP)
+    add_executable(mpi-simple-attach)
+    target_sources(mpi-simple-attach PRIVATE mpi-simple-attach.cpp)
+    target_compile_options(mpi-simple-attach PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow
+                                                     -Werror)
+    target_link_libraries(mpi-simple-attach PRIVATE Threads::Threads MPI::MPI_C
+                                                    rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
+endif()
