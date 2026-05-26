@@ -43,6 +43,7 @@ target_sources(
     util.cpp
     wf_coal_policy.cpp
     ipc_policy.cpp
+    sdma_policy.cpp
 )
 
 set(
@@ -99,6 +100,9 @@ add_subdirectory(reverse_offload)
 endif()
 if (USE_IPC)
 add_subdirectory(ipc)
+endif()
+if (USE_SDMA)
+add_subdirectory(sdma)
 endif()
 add_subdirectory(host)
 add_subdirectory(containers)

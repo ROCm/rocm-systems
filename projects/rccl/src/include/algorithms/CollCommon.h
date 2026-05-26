@@ -13,11 +13,14 @@
 #include <type_traits>
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
-#include <hip/hip_bfloat16.h>
+// Do NOT include <hip/hip_bfloat16.h> (the old header).  It defines
+// _HIP_BFLOAT16_H_ which conflicts with the RCCL bf16 workaround in
+// device.h on ROCm 6.x, causing a hard #error regardless of include order.
+// amd_hip_bf16.h already provides __hip_bfloat16 without touching those macros.
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 #include <hip/amd_detail/amd_hip_bf16.h>
-using bf16 = hip_bfloat16;
+using bf16 = __hip_bfloat16;
 #else
 #include <cuda.h>
 #include <cuda_bf16.h>

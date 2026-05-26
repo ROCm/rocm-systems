@@ -77,8 +77,7 @@ schemas/                FlatBuffers schemas (simulation_config, checkpoint)
 configs/                JSON configurations (amdgpu_cdna4.json)
 tests/                  Google Test suite + scaling test
   kernels/              HIP device kernels for integration testing
-scripts/                Utility scripts (clang_format.sh, install-git-hooks.sh)
-  git-hooks/            Tracked git hook scripts (installed via install-git-hooks.sh)
+scripts/                Utility scripts
 ```
 
 ## Prerequisites
@@ -121,34 +120,25 @@ cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DRJ_SANITIZER=ubsan
 cmake -B build -G Ninja -DRJ_CLANG_TIDY=ON
 ```
 
-## Git hooks for developers
+## Formatting
 
-A pre-commit hook is provided to enforce that any staged `.cpp`/`.h` file
-under `experimental/rocjitsu` is clang-format-clean. The hook is a no-op
-for commits that do not touch that directory, so it is safe to install in
-the parent rocm-systems repo.
+rocjitsu uses [pre-commit](https://pre-commit.com/) for formatting
+(black, clang-format, gersemi). CI checks every PR automatically.
 
-Install once per clone:
-
-```bash
-./scripts/install-git-hooks.sh
-```
-
-This symlinks `scripts/git-hooks/pre-commit` into the enclosing repo's
-hooks directory. The installer refuses to overwrite an existing
-`pre-commit` hook; pass `--force` to replace it.
-
-If a commit is rejected, run the formatter, re-stage the affected files,
-and commit again:
+To run the same checks locally, install from the rocjitsu config
+(not the repo root):
 
 ```bash
-bash scripts/clang_format.sh
-git add <reformatted files>   # or `git add -u` if they are already tracked
-git commit
+cd emulation/rocjitsu
+pip install pre-commit
+pre-commit install -c .pre-commit-config.yaml
 ```
 
-The hook can be bypassed with `git commit --no-verify` (a built-in git
-escape hatch).
+To check all files:
+
+```bash
+pre-commit run -c emulation/rocjitsu/.pre-commit-config.yaml --all-files
+```
 
 ## Running tests
 
@@ -252,7 +242,7 @@ python -m amdisa --gen-all --gen-shared-execute \
     rdna3:path/to/amdgpu_isa_rdna3.xml \
     rdna3_5:path/to/amdgpu_isa_rdna3_5.xml \
     rdna4:path/to/amdgpu_isa_rdna4.xml
-bash scripts/clang_format.sh
+pre-commit run -c .pre-commit-config.yaml clang-format --all-files
 ```
 
 **Important:** Use `--multi` mode with all 9 ISAs to enable cross-ISA analysis and
