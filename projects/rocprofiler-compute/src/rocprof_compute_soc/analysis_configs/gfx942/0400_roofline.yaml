@@ -110,6 +110,16 @@ Panel Config:
             512) + (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F8
             * 512) ) / SUM( TCP_TOTAL_CACHE_ACCESSES_sum * 128 ) )
           unit: FLOPs/Byte
+        AI LDS:
+          value: ( SUM( ($wave_size * ( (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 *
+            SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) + (SQ_INSTS_VALU_ADD_F32 +
+            SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) +
+            (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) +
+            SQ_INSTS_VALU_TRANS_F64) )) + (SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) +
+            (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F32 * 512) +
+            (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F8 * 512) ) /
+            SUM((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * $lds_banks_per_cu) )
+          unit: FLOPs/Byte
         Performance (GFLOPs):
           value: ( SUM( ($wave_size * ( (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16
             + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) + (SQ_INSTS_VALU_ADD_F32
@@ -203,6 +213,11 @@ Panel Config:
       It is the ratio of total floating-point operations (FLOPs) to total bytes
       transferred between HBM and the L2 cache. This value is used as the x-coordinate
       for the HBM roofline.
+    AI LDS: >-
+      The Arithmetic Intensity (AI) relative to the Local Data Share (LDS).
+      It is the ratio of total floating-point operations (FLOPs) to total bytes
+      transferred to/from LDS. This value is used as the x-coordinate for the LDS
+      roofline.
     Performance (GFLOPs): >-
       The overall achieved performance, measured in GigaFLOPs
       per second (GFLOP/s). This is calculated as the sum of all VALU and MFMA floating-point

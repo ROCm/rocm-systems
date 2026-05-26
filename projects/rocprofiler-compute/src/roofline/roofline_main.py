@@ -20,6 +20,7 @@ from utils.logger import (
     demarcate,
 )
 from utils.roofline_calc import (
+    AI_CACHE_LEVELS,
     MATRIX_DATATYPES,
     PEAK_OPS_DATATYPES,
     SUPPORTED_DATATYPES,
@@ -351,7 +352,7 @@ class Roofline:
                     "ai_lds": "orange",
                 }
 
-                for cache_level in ["ai_l1", "ai_l2", "ai_hbm"]:
+                for cache_level in AI_CACHE_LEVELS:
                     if cache_level in self.__ai_data:
                         x_vals = self.__ai_data[cache_level][0]
                         y_vals = self.__ai_data[cache_level][1]
@@ -465,51 +466,33 @@ class Roofline:
             kernel_names = self.__ai_data.get("kernelNames", [])
             symbols_list = [SYMBOLS[i % len(SYMBOLS)] for i in range(len(kernel_names))]
             show_in_legend = not self.__run_parameters["is_standalone"]
-            if self.__ai_data["ai_l1"][0]:
-                fig.add_trace(
-                    go.Scatter(
-                        x=self.__ai_data["ai_l1"][0],
-                        y=self.__ai_data["ai_l1"][1],
-                        name="L1",
-                        mode="markers",
-                        marker=dict(
-                            color="blue",
-                            size=10,
-                            symbol=symbols_list[: len(self.__ai_data["ai_l1"][0])],
-                        ),
-                        showlegend=show_in_legend,
-                    ),
-                    **subplot_kwargs,
-                )
+            cache_plot_styles = {
+                "ai_l1": ("L1", "blue"),
+                "ai_l2": ("L2", "green"),
+                "ai_hbm": ("HBM", "red"),
+                "ai_lds": ("LDS", "orange"),
+            }
 
-            if self.__ai_data["ai_l2"][0]:
-                fig.add_trace(
-                    go.Scatter(
-                        x=self.__ai_data["ai_l2"][0],
-                        y=self.__ai_data["ai_l2"][1],
-                        name="L2",
-                        mode="markers",
-                        marker=dict(
-                            color="green",
-                            size=10,
-                            symbol=symbols_list[: len(self.__ai_data["ai_l2"][0])],
-                        ),
-                        showlegend=show_in_legend,
-                    ),
-                    **subplot_kwargs,
-                )
+            for cache_level in AI_CACHE_LEVELS:
+                if (
+                    cache_level not in self.__ai_data
+                    or not self.__ai_data[cache_level][0]
+                ):
+                    continue
 
-            if self.__ai_data["ai_hbm"][0]:
+                name, color = cache_plot_styles[cache_level]
                 fig.add_trace(
                     go.Scatter(
-                        x=self.__ai_data["ai_hbm"][0],
-                        y=self.__ai_data["ai_hbm"][1],
-                        name="HBM",
+                        x=self.__ai_data[cache_level][0],
+                        y=self.__ai_data[cache_level][1],
+                        name=name,
                         mode="markers",
                         marker=dict(
-                            color="red",
+                            color=color,
                             size=10,
-                            symbol=symbols_list[: len(self.__ai_data["ai_hbm"][0])],
+                            symbol=symbols_list[
+                                : len(self.__ai_data[cache_level][0])
+                            ],
                         ),
                         showlegend=show_in_legend,
                     ),
@@ -1056,7 +1039,9 @@ class Roofline:
             return None
 
         self.__ceiling_data = construct_roof(
-            roofline_parameters=self.__run_parameters, dtype=dtype
+            roofline_parameters=self.__run_parameters,
+            dtype=dtype,
+            ai_data=self.__ai_data,
         )
 
         self.roof_setup()
@@ -1200,6 +1185,9 @@ class Roofline:
             kernel_names = self.__ai_data.get("kernelNames", [])
             for i in range(len(self.__ai_data.get("kernelNames", []))):
                 # Zero intensity level means no data reported for this cache level
+                if i >= len(self.__ai_data[key][0]) or i >= len(self.__ai_data[key][1]):
+                    continue
+
                 if self.__ai_data[key][0][i] > 0 and self.__ai_data[key][1][i] > 0:
                     plt.plot(
                         [self.__ai_data[key][0][i]],
