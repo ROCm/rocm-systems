@@ -11,3 +11,6 @@ plugins/profiler/inspector/version.cc
 
 # Visual Studio Code
 .vscode
+
+# clangd
+compile_commands.json
