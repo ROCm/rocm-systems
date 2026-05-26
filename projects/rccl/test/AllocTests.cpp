@@ -75,6 +75,27 @@ TEST(Alloc, ncclCuMemHostFree)
         }
     );
 }
+#else
+TEST(Alloc, ncclCuMemHostAlloc)
+{
+    RUN_ISOLATED_TEST(
+        "ncclCuMemHostAlloc",
+        []()
+        {
+            ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
+            void*                           ptr    = nullptr;
+            hipMemGenericAllocationHandle_t handle = nullptr;
+            size_t                          size   = 4096;
+
+            ncclResult_t result = ncclCuMemHostAlloc(&ptr, &handle, size);
+            ASSERT_EQ(result, ncclSuccess);
+            ASSERT_NE(ptr, nullptr);
+
+            EXPECT_EQ(ncclCuMemHostFree(ptr), ncclSuccess);
+        }
+    );
+}
 #endif // ROCM_VERSION < 71200
 
 #if ROCM_VERSION < 70000
