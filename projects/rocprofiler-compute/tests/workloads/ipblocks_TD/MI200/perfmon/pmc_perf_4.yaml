@@ -1,0 +1,4 @@
+jobs:
+- pmc:
+  - TA_BUFFER_WRITE_WAVEFRONTS_sum
+  - TA_DATA_STALLED_BY_TC_CYCLES_sum
