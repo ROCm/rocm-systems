@@ -34,6 +34,7 @@
 #include <fmt/format.h>
 
 #include <dlfcn.h>
+#include <unistd.h>
 
 #include <cstdint>
 #include <cstring>
@@ -172,6 +173,11 @@ bool
 probe_libdxcore()
 {
     static const bool _v = []() {
+        if(::access("/dev/dxg", F_OK) != 0)
+        {
+            ROCP_INFO << "DxgProvider: /dev/dxg not present; not a WSL GPU environment";
+            return false;
+        }
         void* h = open_libdxcore();
         if(!h)
         {

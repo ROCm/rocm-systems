@@ -69,8 +69,12 @@ make_default_provider()
     }
     if(force_d3dkmt)
     {
+#ifdef _WIN32
         ROCP_INFO << "TopologyProvider: forced D3dkmtProvider via ROCPROFILER_FORCE_D3DKMT";
         return std::make_unique<D3dkmtProvider>();
+#else
+        ROCP_WARNING << "TopologyProvider: ROCPROFILER_FORCE_D3DKMT ignored on non-Windows build";
+#endif
     }
     if(sysfs_topology_present())
     {
