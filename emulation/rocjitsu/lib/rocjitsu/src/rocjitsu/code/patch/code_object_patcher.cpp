@@ -78,8 +78,7 @@ void write_elf_tables(std::vector<uint8_t> &image, const Elf64_Ehdr &ehdr,
 void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
                        std::vector<Elf64_Shdr> &shdrs, std::vector<Elf64_Phdr> &phdrs,
                        uint64_t file_offset, std::span<const uint8_t> bytes,
-                       std::optional<size_t> grown_section_index,
-                       bool grow_load_at_segment_end) {
+                       std::optional<size_t> grown_section_index, bool grow_load_at_segment_end) {
   assert(file_offset <= image.size() && "ELF insertion offset out of bounds");
   if (bytes.empty())
     return;
@@ -635,8 +634,7 @@ bool CodeObjectPatcher::append_cave_section(std::string_view section_name) {
       [[maybe_unused]] const uint64_t old_addr = shdrs[i].sh_addr;
       shdrs[i].sh_addr += padded_file_delta;
       assert((shdrs[i].sh_addralign <= 1 ||
-              shdrs[i].sh_addr % shdrs[i].sh_addralign ==
-                  old_addr % shdrs[i].sh_addralign) &&
+              shdrs[i].sh_addr % shdrs[i].sh_addralign == old_addr % shdrs[i].sh_addralign) &&
              "shifted allocated section lost its address alignment residue");
     }
   }

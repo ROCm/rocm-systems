@@ -27,16 +27,14 @@ if(NOT MPI_CXX_FOUND)
     return()
 endif()
 
-find_library(ROCTX64_LIBRARY NAMES roctx64 PATHS ${ROCM_PATH}/lib ${ROCM_PATH}/lib64)
-
 find_library(
-    ROCTRACER64_LIBRARY
-    NAMES roctracer64
+    ROCTX_SDK_LIBRARY
+    NAMES rocprofiler-sdk-roctx
     PATHS ${ROCM_PATH}/lib ${ROCM_PATH}/lib64
 )
 
-if(NOT ROCTX64_LIBRARY OR NOT ROCTRACER64_LIBRARY)
-    rocprofiler_systems_message(AUTHOR_WARNING "roctracer not found, this is required for jacobi-hip example")
+if(NOT ROCTX_SDK_LIBRARY)
+    rocprofiler_systems_message(AUTHOR_WARNING "rocprofiler-sdk-roctx not found, this is required for jacobi-hip example")
     return()
 endif()
 
@@ -57,10 +55,6 @@ add_executable(${HPC_EXAMPLE_NAME} ${_JACOBI_HIP_SOURCES})
 
 target_compile_options(${HPC_EXAMPLE_NAME} PRIVATE -xhip)
 target_compile_definitions(${HPC_EXAMPLE_NAME} PRIVATE __HIP_PLATFORM_HCC__)
-target_include_directories(
-    ${HPC_EXAMPLE_NAME}
-    PRIVATE ${ROCM_PATH}/roctracer/include ${ROCM_PATH}/include/roctracer
-)
 target_compile_options(
     ${HPC_EXAMPLE_NAME}
     PRIVATE -O3 -g -ggdb -fPIC -march=native -Wall -Wno-unused-result
@@ -71,10 +65,7 @@ foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
     target_link_options(${HPC_EXAMPLE_NAME} PRIVATE --offload-arch=${arch})
 endforeach()
 
-target_link_libraries(
-    ${HPC_EXAMPLE_NAME}
-    PRIVATE MPI::MPI_CXX ${ROCTX64_LIBRARY} ${ROCTRACER64_LIBRARY}
-)
+target_link_libraries(${HPC_EXAMPLE_NAME} PRIVATE MPI::MPI_CXX ${ROCTX_SDK_LIBRARY})
 
 if(NOT CMAKE_CXX_COMPILER_IS_HIPCC)
     rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET ${HPC_EXAMPLE_NAME})

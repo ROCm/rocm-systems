@@ -64,10 +64,8 @@ class OperandMap:
         is_scalar = exec_model == ExecModel.SCALAR
         reg = RegClass.SGPR if is_scalar else RegClass.VGPR
         width = 64 if is_64 else 32
-        src_b = {i: OperandBinding(name, reg, width)
-                 for i, name in enumerate(src_ops)}
-        dst_b = {i: OperandBinding(name, reg, width)
-                 for i, name in enumerate(dst_ops)}
+        src_b = {i: OperandBinding(name, reg, width) for i, name in enumerate(src_ops)}
+        dst_b = {i: OperandBinding(name, reg, width) for i, name in enumerate(dst_ops)}
         return OperandMap(src_bindings=src_b, dst_bindings=dst_b)
 
 
@@ -86,16 +84,24 @@ class LoweringContext:
 
 
 _INFIX_OPS: dict[SemaNodeKind, str] = {
-    SemaNodeKind.ADD: '+', SemaNodeKind.SUB: '-',
-    SemaNodeKind.MUL: '*', SemaNodeKind.DIV: '/',
+    SemaNodeKind.ADD: '+',
+    SemaNodeKind.SUB: '-',
+    SemaNodeKind.MUL: '*',
+    SemaNodeKind.DIV: '/',
     SemaNodeKind.MOD: '%',
-    SemaNodeKind.AND: '&', SemaNodeKind.OR: '|',
-    SemaNodeKind.XOR: '^', SemaNodeKind.SHL: '<<',
+    SemaNodeKind.AND: '&',
+    SemaNodeKind.OR: '|',
+    SemaNodeKind.XOR: '^',
+    SemaNodeKind.SHL: '<<',
     SemaNodeKind.SHR: '>>',
-    SemaNodeKind.LAND: '&&', SemaNodeKind.LOR: '||',
-    SemaNodeKind.EQ: '==', SemaNodeKind.NE: '!=',
-    SemaNodeKind.LT: '<', SemaNodeKind.GT: '>',
-    SemaNodeKind.LE: '<=', SemaNodeKind.GE: '>=',
+    SemaNodeKind.LAND: '&&',
+    SemaNodeKind.LOR: '||',
+    SemaNodeKind.EQ: '==',
+    SemaNodeKind.NE: '!=',
+    SemaNodeKind.LT: '<',
+    SemaNodeKind.GT: '>',
+    SemaNodeKind.LE: '<=',
+    SemaNodeKind.GE: '>=',
 }
 
 _CONTEXT_READS: dict[str, str] = {
@@ -162,9 +168,14 @@ def lower_sema_block(block: SemaBlock, ctx: LoweringContext | None = None) -> st
     return '\n'.join(body_lines)
 
 
-_VCC_WRITING_CALLS = frozenset({
-    'add_co', 'sub_co', 'addc_co', 'subbc_co',
-})
+_VCC_WRITING_CALLS = frozenset(
+    {
+        'add_co',
+        'sub_co',
+        'addc_co',
+        'subbc_co',
+    }
+)
 
 
 def _writes_vcc(node: SemaNode) -> bool:
@@ -179,7 +190,7 @@ def _writes_vcc(node: SemaNode) -> bool:
                 return True
     if node.kind == SemaNodeKind.CALL and node.call_name in _VCC_WRITING_CALLS:
         return True
-    for child in (node.children or ()):
+    for child in node.children or ():
         if _writes_vcc(child):
             return True
     return False
@@ -331,7 +342,9 @@ def _lower_assign(node: SemaNode, ctx: LoweringContext) -> list[str]:
             if arr.id_name == 'LDS':
                 return [f'{_indent(ctx)}wf.lds().write<{elem_ty}>({idx}, {rhs});']
             if ctx.exec_model == ExecModel.SCALAR:
-                return [f'{_indent(ctx)}wf.scalar_mem().write<{elem_ty}>({idx}, {rhs});']
+                return [
+                    f'{_indent(ctx)}wf.scalar_mem().write<{elem_ty}>({idx}, {rhs});'
+                ]
             return [f'{_indent(ctx)}wf.vmem().write<{elem_ty}>({idx}, {rhs});']
 
     # Local variable assignment
@@ -409,8 +422,12 @@ def _lower_for(node: SemaNode, ctx: LoweringContext) -> list[str]:
         declared=ctx.declared,
     )
 
-    init_str = '; '.join(l.strip().rstrip(';') for l in init_lines) if init_lines else ''
-    step_str = '; '.join(l.strip().rstrip(';') for l in step_lines) if step_lines else ''
+    init_str = (
+        '; '.join(l.strip().rstrip(';') for l in init_lines) if init_lines else ''
+    )
+    step_str = (
+        '; '.join(l.strip().rstrip(';') for l in step_lines) if step_lines else ''
+    )
 
     lines = [f'{_indent(ctx)}for ({init_str}; {cond}; {step_str}) {{']
     lines.extend(_lower_stmt(node.children[3], inner_ctx))
@@ -597,12 +614,24 @@ def _lower_expr(node: SemaNode, ctx: LoweringContext) -> str:
         rhs = _lower_expr(node.children[1], ctx)
         return f'({lhs} = {rhs})'
 
-    if kind in (SemaNodeKind.IF, SemaNodeKind.FOR, SemaNodeKind.WHILE,
-                 SemaNodeKind.SEQ, SemaNodeKind.DECLARE, SemaNodeKind.BREAK,
-                 SemaNodeKind.CONTINUE, SemaNodeKind.RETURN,
-                 SemaNodeKind.COMMENT, SemaNodeKind.PRAGMA, SemaNodeKind.EVAL,
-                 SemaNodeKind.ADD_ASSIGN, SemaNodeKind.SUB_ASSIGN,
-                 SemaNodeKind.SWITCH, SemaNodeKind.CASE, SemaNodeKind.DEFAULT):
+    if kind in (
+        SemaNodeKind.IF,
+        SemaNodeKind.FOR,
+        SemaNodeKind.WHILE,
+        SemaNodeKind.SEQ,
+        SemaNodeKind.DECLARE,
+        SemaNodeKind.BREAK,
+        SemaNodeKind.CONTINUE,
+        SemaNodeKind.RETURN,
+        SemaNodeKind.COMMENT,
+        SemaNodeKind.PRAGMA,
+        SemaNodeKind.EVAL,
+        SemaNodeKind.ADD_ASSIGN,
+        SemaNodeKind.SUB_ASSIGN,
+        SemaNodeKind.SWITCH,
+        SemaNodeKind.CASE,
+        SemaNodeKind.DEFAULT,
+    ):
         return f'/* stmt-in-expr: {kind.name} */'
 
     raise ValueError(f'Unhandled SemaNodeKind in lowering: {kind.name}')
@@ -700,7 +729,9 @@ def _is_src_operand_write(node: SemaNode) -> bool:
 
 
 def _lower_src_write(
-    lhs_node: SemaNode, rhs_node: SemaNode, ctx: LoweringContext,
+    lhs_node: SemaNode,
+    rhs_node: SemaNode,
+    ctx: LoweringContext,
 ) -> list[str]:
     """Lower a write to a source operand (used by vector_swap)."""
     idx = _get_operand_index(lhs_node)
@@ -777,13 +808,25 @@ def _rhs_is_float_expr(node: SemaNode) -> int:
     dst write needs bit_cast<uint32_t> to store it as a register value.
     """
     if node.ty and node.ty.base in ('F', 'BF') and node.ty.size in (32, 64):
-        if node.kind in (SemaNodeKind.ADD, SemaNodeKind.SUB, SemaNodeKind.MUL,
-                         SemaNodeKind.DIV, SemaNodeKind.FMA,
-                         SemaNodeKind.SQRT, SemaNodeKind.SIN, SemaNodeKind.COS, SemaNodeKind.ABS,
-                         SemaNodeKind.LOG2, SemaNodeKind.FLOOR, SemaNodeKind.TRUNC,
-                         SemaNodeKind.FRACT, SemaNodeKind.LDEXP,
-                         SemaNodeKind.UMINUS, SemaNodeKind.UPLUS,
-                         SemaNodeKind.ID):
+        if node.kind in (
+            SemaNodeKind.ADD,
+            SemaNodeKind.SUB,
+            SemaNodeKind.MUL,
+            SemaNodeKind.DIV,
+            SemaNodeKind.FMA,
+            SemaNodeKind.SQRT,
+            SemaNodeKind.SIN,
+            SemaNodeKind.COS,
+            SemaNodeKind.ABS,
+            SemaNodeKind.LOG2,
+            SemaNodeKind.FLOOR,
+            SemaNodeKind.TRUNC,
+            SemaNodeKind.FRACT,
+            SemaNodeKind.LDEXP,
+            SemaNodeKind.UMINUS,
+            SemaNodeKind.UPLUS,
+            SemaNodeKind.ID,
+        ):
             return node.ty.size
         if node.kind == SemaNodeKind.CALL:
             return node.ty.size
@@ -793,7 +836,9 @@ def _rhs_is_float_expr(node: SemaNode) -> int:
 
 
 def _lower_dst_write(
-    lhs_node: SemaNode, rhs_node: SemaNode, ctx: LoweringContext,
+    lhs_node: SemaNode,
+    rhs_node: SemaNode,
+    ctx: LoweringContext,
 ) -> list[str]:
     """Lower a destination operand write."""
     idx = _get_operand_index(lhs_node)
@@ -807,7 +852,11 @@ def _lower_dst_write(
         rhs = f'util::f32_to_bf16({rhs})'
     elif lhs_ty and lhs_ty.size == 16 and lhs_ty.base in ('I', 'U'):
         cpp = lhs_ty.cpp_type
-        rhs = f'static_cast<uint32_t>(static_cast<uint16_t>(static_cast<{cpp}>({rhs})))' if cpp == 'int16_t' else f'static_cast<uint32_t>(static_cast<{cpp}>({rhs}))'
+        rhs = (
+            f'static_cast<uint32_t>(static_cast<uint16_t>(static_cast<{cpp}>({rhs})))'
+            if cpp == 'int16_t'
+            else f'static_cast<uint32_t>(static_cast<{cpp}>({rhs}))'
+        )
     elif needs_bitcast == 32:
         rhs = f'std::bit_cast<uint32_t>({rhs})'
     elif needs_bitcast == 64:
@@ -855,8 +904,11 @@ def _lower_arrayderef(node: SemaNode, ctx: LoweringContext) -> str:
             return f'wf.lds().read<{elem_ty}>({index_expr})'
 
     # Bit index (VCC/EXEC bitmask access)
-    if (array_node.kind == SemaNodeKind.ID and array_node.id_name == 'VCC'
-            and ctx.vcc_read is not None):
+    if (
+        array_node.kind == SemaNodeKind.ID
+        and array_node.id_name == 'VCC'
+        and ctx.vcc_read is not None
+    ):
         return f'(({ctx.vcc_read} >> {index_expr}) & 1)'
     return f'(({array_expr} >> {index_expr}) & 1)'
 
@@ -872,113 +924,113 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     'bcnt1': 'static_cast<uint32_t>(std::popcount({0}))',
     'bcnt0': 'static_cast<uint32_t>(std::popcount(~{0}))',
     'bfrev': '[&]() {{ uint32_t s = {0}; uint32_t r = 0;'
-             ' for (int i = 0; i < 32; ++i) r |= ((s >> i) & 1) << (31 - i);'
-             ' return r; }}()',
+    ' for (int i = 0; i < 32; ++i) r |= ((s >> i) & 1) << (31 - i);'
+    ' return r; }}()',
     'brev': '[&]() {{ uint32_t s = {0}; uint32_t r = 0;'
-            ' for (int i = 0; i < 32; ++i) r |= ((s >> i) & 1) << (31 - i);'
-            ' return r; }}()',
+    ' for (int i = 0; i < 32; ++i) r |= ((s >> i) & 1) << (31 - i);'
+    ' return r; }}()',
     'ffbl': '[&]() {{ auto s = {0};'
-            ' return s == 0 ? static_cast<uint32_t>(-1)'
-            ' : static_cast<uint32_t>(std::countr_zero(s)); }}()',
+    ' return s == 0 ? static_cast<uint32_t>(-1)'
+    ' : static_cast<uint32_t>(std::countr_zero(s)); }}()',
     'ffbh_u32': '[&]() {{ auto s = {0};'
-                ' return s == 0 ? static_cast<uint32_t>(-1)'
-                ' : static_cast<uint32_t>(std::countl_zero(s)); }}()',
+    ' return s == 0 ? static_cast<uint32_t>(-1)'
+    ' : static_cast<uint32_t>(std::countl_zero(s)); }}()',
     'ff0': '[&]() {{ auto s = ~static_cast<uint32_t>({0});'
-           ' return s == 0 ? static_cast<uint32_t>(-1)'
-           ' : static_cast<uint32_t>(std::countr_zero(s)); }}()',
+    ' return s == 0 ? static_cast<uint32_t>(-1)'
+    ' : static_cast<uint32_t>(std::countr_zero(s)); }}()',
     'ff1': '[&]() {{ auto s = static_cast<uint32_t>({0});'
-           ' return s == 0 ? static_cast<uint32_t>(-1)'
-           ' : static_cast<uint32_t>(std::countr_zero(s)); }}()',
+    ' return s == 0 ? static_cast<uint32_t>(-1)'
+    ' : static_cast<uint32_t>(std::countr_zero(s)); }}()',
     'flbit': '[&]() {{ auto s = static_cast<uint32_t>({0});'
-             ' return s == 0 ? static_cast<uint32_t>(-1)'
-             ' : static_cast<uint32_t>(std::countl_zero(s)); }}()',
+    ' return s == 0 ? static_cast<uint32_t>(-1)'
+    ' : static_cast<uint32_t>(std::countl_zero(s)); }}()',
     'flbit_i32': '[&]() {{ int32_t sv = static_cast<int32_t>({0});'
-                 ' uint32_t abs_val = sv < 0 ? ~static_cast<uint32_t>(sv)'
-                 ' : static_cast<uint32_t>(sv);'
-                 ' return abs_val == 0 ? static_cast<uint32_t>(-1)'
-                 ' : static_cast<uint32_t>(std::countl_zero(abs_val)); }}()',
+    ' uint32_t abs_val = sv < 0 ? ~static_cast<uint32_t>(sv)'
+    ' : static_cast<uint32_t>(sv);'
+    ' return abs_val == 0 ? static_cast<uint32_t>(-1)'
+    ' : static_cast<uint32_t>(std::countl_zero(abs_val)); }}()',
     'flbit_i32_i64': '[&]() {{ int64_t sv = static_cast<int64_t>({0});'
-                     ' uint64_t abs_val = sv < 0 ? ~static_cast<uint64_t>(sv)'
-                     ' : static_cast<uint64_t>(sv);'
-                     ' return abs_val == 0 ? static_cast<uint32_t>(-1)'
-                     ' : static_cast<uint32_t>(std::countl_zero(abs_val)); }}()',
+    ' uint64_t abs_val = sv < 0 ? ~static_cast<uint64_t>(sv)'
+    ' : static_cast<uint64_t>(sv);'
+    ' return abs_val == 0 ? static_cast<uint32_t>(-1)'
+    ' : static_cast<uint32_t>(std::countl_zero(abs_val)); }}()',
     'ctz': '[&]() {{ auto s = static_cast<uint64_t>({0});'
-           ' return s == 0 ? static_cast<uint32_t>(-1)'
-           ' : static_cast<uint32_t>(std::countr_zero(s)); }}()',
+    ' return s == 0 ? static_cast<uint32_t>(-1)'
+    ' : static_cast<uint32_t>(std::countr_zero(s)); }}()',
     'cls': '[&]() {{ int32_t sv = static_cast<int32_t>({0});'
-           ' if (sv == 0 || sv == -1) return 32u;'
-           ' uint32_t u = sv < 0 ? ~static_cast<uint32_t>(sv) : static_cast<uint32_t>(sv);'
-           ' return static_cast<uint32_t>(std::countl_zero(u)) - 1u; }}()',
+    ' if (sv == 0 || sv == -1) return 32u;'
+    ' uint32_t u = sv < 0 ? ~static_cast<uint32_t>(sv) : static_cast<uint32_t>(sv);'
+    ' return static_cast<uint32_t>(std::countl_zero(u)) - 1u; }}()',
     'wqm': '[&]() {{ uint32_t s = {0}; uint32_t r = 0;'
-           ' for (int i = 0; i < 8; ++i)'
-           ' if (s & (0xFu << (i * 4))) r |= (0xFu << (i * 4));'
-           ' return r; }}()',
+    ' for (int i = 0; i < 8; ++i)'
+    ' if (s & (0xFu << (i * 4))) r |= (0xFu << (i * 4));'
+    ' return r; }}()',
     'clz': '[&]() {{ auto s = static_cast<uint32_t>({0});'
-           ' return s == 0 ? 32u : static_cast<uint32_t>(std::countl_zero(s)); }}()',
+    ' return s == 0 ? 32u : static_cast<uint32_t>(std::countl_zero(s)); }}()',
     'clz64': '[&]() {{ auto s = static_cast<uint64_t>({0});'
-             ' return s == 0 ? 64u : static_cast<uint32_t>(std::countl_zero(s)); }}()',
+    ' return s == 0 ? 64u : static_cast<uint32_t>(std::countl_zero(s)); }}()',
     'cvt_hi_f32_f16': 'std::bit_cast<uint32_t>(util::f16_to_f32(static_cast<uint16_t>(({0}) >> 16)))',
     'brev64': '[&]() {{ uint64_t s = {0}; uint64_t r = 0;'
-              ' for (int i = 0; i < 64; ++i) r |= ((s >> i) & 1ULL) << (63 - i);'
-              ' return r; }}()',
+    ' for (int i = 0; i < 64; ++i) r |= ((s >> i) & 1ULL) << (63 - i);'
+    ' return r; }}()',
     'wqm64': '[&]() {{ uint64_t s = {0}; uint64_t r = 0;'
-             ' for (int i = 0; i < 16; ++i)'
-             ' if (s & (0xFULL << (i * 4))) r |= (0xFULL << (i * 4));'
-             ' return r; }}()',
+    ' for (int i = 0; i < 16; ++i)'
+    ' if (s & (0xFULL << (i * 4))) r |= (0xFULL << (i * 4));'
+    ' return r; }}()',
     'quadmask64': '[&]() {{ uint64_t s = {0}; uint64_t r = 0;'
-                  ' for (int i = 0; i < 16; ++i)'
-                  ' if (s & (0xFULL << (i * 4))) r |= (1ULL << i);'
-                  ' return r; }}()',
+    ' for (int i = 0; i < 16; ++i)'
+    ' if (s & (0xFULL << (i * 4))) r |= (1ULL << i);'
+    ' return r; }}()',
     'ff064': '[&]() {{ auto s = ~static_cast<uint64_t>({0});'
-             ' return s == 0 ? static_cast<uint32_t>(-1)'
-             ' : static_cast<uint32_t>(std::countr_zero(s)); }}()',
+    ' return s == 0 ? static_cast<uint32_t>(-1)'
+    ' : static_cast<uint32_t>(std::countr_zero(s)); }}()',
     'ff164': '[&]() {{ auto s = static_cast<uint64_t>({0});'
-             ' return s == 0 ? static_cast<uint32_t>(-1)'
-             ' : static_cast<uint32_t>(std::countr_zero(s)); }}()',
+    ' return s == 0 ? static_cast<uint32_t>(-1)'
+    ' : static_cast<uint32_t>(std::countr_zero(s)); }}()',
     'flbit64': '[&]() {{ auto s = static_cast<uint64_t>({0});'
-               ' return s == 0 ? static_cast<uint32_t>(-1)'
-               ' : static_cast<uint32_t>(std::countl_zero(s)); }}()',
+    ' return s == 0 ? static_cast<uint32_t>(-1)'
+    ' : static_cast<uint32_t>(std::countl_zero(s)); }}()',
     'ctz64': '[&]() {{ auto s = static_cast<uint64_t>({0});'
-             ' return s == 0 ? static_cast<uint32_t>(-1)'
-             ' : static_cast<uint32_t>(std::countr_zero(s)); }}()',
+    ' return s == 0 ? static_cast<uint32_t>(-1)'
+    ' : static_cast<uint32_t>(std::countr_zero(s)); }}()',
     'bcnt164': 'static_cast<uint32_t>(std::popcount(static_cast<uint64_t>({0})))',
     'bcnt064': 'static_cast<uint32_t>(std::popcount(~static_cast<uint64_t>({0})))',
     'quadmask': '[&]() {{ uint32_t s = {0}; uint32_t r = 0;'
-                ' for (int i = 0; i < 8; ++i)'
-                ' if (s & (0xFu << (i * 4))) r |= (1u << i);'
-                ' return r; }}()',
+    ' for (int i = 0; i < 8; ++i)'
+    ' if (s & (0xFu << (i * 4))) r |= (1u << i);'
+    ' return r; }}()',
     'bitset0': '({0} & ~(1u << ({0} & 31u)))',
     'bitset1': '({0} | (1u << ({0} & 31u)))',
     'v_readfirstlane': '{0}',
     'ffbh_i32': '[&]() {{ auto s = static_cast<int32_t>({0});'
-                ' uint32_t a = s < 0 ? ~static_cast<uint32_t>(s) : static_cast<uint32_t>(s);'
-                ' return a == 0 ? static_cast<uint32_t>(-1)'
-                ' : static_cast<uint32_t>(std::countl_zero(a)); }}()',
+    ' uint32_t a = s < 0 ? ~static_cast<uint32_t>(s) : static_cast<uint32_t>(s);'
+    ' return a == 0 ? static_cast<uint32_t>(-1)'
+    ' : static_cast<uint32_t>(std::countl_zero(a)); }}()',
     'cls_i32': '[&]() {{ auto s = static_cast<int32_t>({0});'
-               ' uint32_t a = s < 0 ? ~static_cast<uint32_t>(s) : static_cast<uint32_t>(s);'
-               ' return a == 0 ? 31u : static_cast<uint32_t>(std::countl_zero(a)) - 1; }}()',
+    ' uint32_t a = s < 0 ? ~static_cast<uint32_t>(s) : static_cast<uint32_t>(s);'
+    ' return a == 0 ? 31u : static_cast<uint32_t>(std::countl_zero(a)) - 1; }}()',
     'frexp_exp_f32': 'std::ilogb({0}) + 1',
     'frexp_exp_f16': 'std::ilogb({0}) + 1',
     'frexp_exp_f64': '[&]() {{ double s = {0};'
-                     ' int exp = 0;'
-                     ' if (s != 0.0 && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);'
-                     ' return static_cast<uint32_t>(exp); }}()',
+    ' int exp = 0;'
+    ' if (s != 0.0 && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);'
+    ' return static_cast<uint32_t>(exp); }}()',
     'frexp_mant_f64': '[&]() {{ double s = {0};'
-                      ' int exp = 0;'
-                      ' return std::frexp(s, &exp); }}()',
+    ' int exp = 0;'
+    ' return std::frexp(s, &exp); }}()',
     'frexp_mant_f32': '[&]() {{ int e; return std::frexp(static_cast<float>({0}), &e); }}()',
     'log2': 'std::log2({0})',
     'cvt_f32_i32': 'std::bit_cast<uint32_t>(static_cast<float>(static_cast<int32_t>({0})))',
     'cvt_f32_u32': 'std::bit_cast<uint32_t>(static_cast<float>({0}))',
     'cvt_i32_f32': '[&]() -> uint32_t {{ float s = std::bit_cast<float>(static_cast<uint32_t>({0}));'
-                   ' if (std::isnan(s)) return 0u;'
-                   ' if (s >= 2147483648.0f) return static_cast<uint32_t>(INT32_MAX);'
-                   ' if (s < -2147483648.0f) return static_cast<uint32_t>(INT32_MIN);'
-                   ' return static_cast<uint32_t>(static_cast<int32_t>(s)); }}()',
+    ' if (std::isnan(s)) return 0u;'
+    ' if (s >= 2147483648.0f) return static_cast<uint32_t>(INT32_MAX);'
+    ' if (s < -2147483648.0f) return static_cast<uint32_t>(INT32_MIN);'
+    ' return static_cast<uint32_t>(static_cast<int32_t>(s)); }}()',
     'cvt_u32_f32': '[&]() -> uint32_t {{ float s = std::bit_cast<float>(static_cast<uint32_t>({0}));'
-                   ' if (std::isnan(s) || s < 0.0f) return 0u;'
-                   ' if (s >= 4294967296.0f) return UINT32_MAX;'
-                   ' return static_cast<uint32_t>(s); }}()',
+    ' if (std::isnan(s) || s < 0.0f) return 0u;'
+    ' if (s >= 4294967296.0f) return UINT32_MAX;'
+    ' return static_cast<uint32_t>(s); }}()',
     'cvt_f16_f32': 'util::f32_to_f16(std::bit_cast<float>(static_cast<uint32_t>({0})))',
     'cvt_f32_f16': 'std::bit_cast<uint32_t>(util::f16_to_f32(static_cast<uint16_t>({0})))',
     'cvt_f32_bf16': 'std::bit_cast<uint32_t>(util::bf16_to_f32(static_cast<uint16_t>({0})))',
@@ -987,27 +1039,27 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     'cvt_f64_i32': 'std::bit_cast<uint64_t>(static_cast<double>(static_cast<int32_t>({0})))',
     'cvt_f64_u32': 'std::bit_cast<uint64_t>(static_cast<double>({0}))',
     'cvt_i32_f64': '[&]() -> uint32_t {{ double s = std::bit_cast<double>(static_cast<uint64_t>({0}));'
-                   ' if (std::isnan(s)) return 0;'
-                   ' if (s >= 2147483648.0) return static_cast<uint32_t>(INT32_MAX);'
-                   ' if (s < -2147483648.0) return static_cast<uint32_t>(INT32_MIN);'
-                   ' return static_cast<uint32_t>(static_cast<int32_t>(s)); }}()',
+    ' if (std::isnan(s)) return 0;'
+    ' if (s >= 2147483648.0) return static_cast<uint32_t>(INT32_MAX);'
+    ' if (s < -2147483648.0) return static_cast<uint32_t>(INT32_MIN);'
+    ' return static_cast<uint32_t>(static_cast<int32_t>(s)); }}()',
     'cvt_u32_f64': '[&]() -> uint32_t {{ double s = std::bit_cast<double>(static_cast<uint64_t>({0}));'
-                   ' if (std::isnan(s) || s < 0.0) return 0u;'
-                   ' if (s >= 4294967296.0) return UINT32_MAX;'
-                   ' return static_cast<uint32_t>(s); }}()',
+    ' if (std::isnan(s) || s < 0.0) return 0u;'
+    ' if (s >= 4294967296.0) return UINT32_MAX;'
+    ' return static_cast<uint32_t>(s); }}()',
     'cvt_f64_f32': 'std::bit_cast<uint64_t>(static_cast<double>(std::bit_cast<float>(static_cast<uint32_t>({0}))))',
     'cvt_f32_f64': 'std::bit_cast<uint32_t>(static_cast<float>(std::bit_cast<double>(static_cast<uint64_t>({0}))))',
     'cvt_f16_u16': 'util::f32_to_f16(static_cast<float>(static_cast<uint16_t>({0})))',
     'cvt_f16_i16': 'util::f32_to_f16(static_cast<float>(static_cast<int16_t>({0} & 0xFFFF)))',
     'cvt_u16_f16': '[&]() -> uint32_t {{ float s = util::f16_to_f32(static_cast<uint16_t>({0}));'
-                   ' if (std::isnan(s) || s < 0.0f) return 0u;'
-                   ' if (s >= 65536.0f) return static_cast<uint32_t>(UINT16_MAX);'
-                   ' return static_cast<uint32_t>(static_cast<uint16_t>(s)); }}()',
+    ' if (std::isnan(s) || s < 0.0f) return 0u;'
+    ' if (s >= 65536.0f) return static_cast<uint32_t>(UINT16_MAX);'
+    ' return static_cast<uint32_t>(static_cast<uint16_t>(s)); }}()',
     'cvt_i16_f16': '[&]() -> uint32_t {{ float s = util::f16_to_f32(static_cast<uint16_t>({0}));'
-                   ' if (std::isnan(s)) return 0u;'
-                   ' if (s >= 32768.0f) return static_cast<uint32_t>(static_cast<uint16_t>(INT16_MAX));'
-                   ' if (s < -32768.0f) return static_cast<uint32_t>(static_cast<uint16_t>(INT16_MIN));'
-                   ' return static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(s))); }}()',
+    ' if (std::isnan(s)) return 0u;'
+    ' if (s >= 32768.0f) return static_cast<uint32_t>(static_cast<uint16_t>(INT16_MAX));'
+    ' if (s < -32768.0f) return static_cast<uint32_t>(static_cast<uint16_t>(INT16_MIN));'
+    ' return static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(s))); }}()',
     'cvt_i32_i16': 'static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>({0} & 0xFFFF)))',
     'cvt_u32_u16': '({0} & 0xFFFFu)',
     'cvt_f32_ubyte0': 'std::bit_cast<uint32_t>(static_cast<float>({0} & 0xFFu))',
@@ -1015,51 +1067,51 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     'cvt_f32_ubyte2': 'std::bit_cast<uint32_t>(static_cast<float>(({0} >> 16) & 0xFFu))',
     'cvt_f32_ubyte3': 'std::bit_cast<uint32_t>(static_cast<float>(({0} >> 24) & 0xFFu))',
     'cvt_rpi_i32_f32': '[&]() -> uint32_t {{ float s = std::bit_cast<float>(static_cast<uint32_t>({0}));'
-                       ' float r = std::ceil(s - 0.5f);'
-                       ' if (std::isnan(r)) return 0u;'
-                       ' if (r >= 2147483648.0f) return static_cast<uint32_t>(INT32_MAX);'
-                       ' if (r < -2147483648.0f) return static_cast<uint32_t>(INT32_MIN);'
-                       ' return static_cast<uint32_t>(static_cast<int32_t>(r)); }}()',
+    ' float r = std::ceil(s - 0.5f);'
+    ' if (std::isnan(r)) return 0u;'
+    ' if (r >= 2147483648.0f) return static_cast<uint32_t>(INT32_MAX);'
+    ' if (r < -2147483648.0f) return static_cast<uint32_t>(INT32_MIN);'
+    ' return static_cast<uint32_t>(static_cast<int32_t>(r)); }}()',
     'cvt_flr_i32_f32': '[&]() -> uint32_t {{ float s = std::bit_cast<float>(static_cast<uint32_t>({0}));'
-                       ' float r = std::floor(s);'
-                       ' if (std::isnan(r)) return 0u;'
-                       ' if (r >= 2147483648.0f) return static_cast<uint32_t>(INT32_MAX);'
-                       ' if (r < -2147483648.0f) return static_cast<uint32_t>(INT32_MIN);'
-                       ' return static_cast<uint32_t>(static_cast<int32_t>(r)); }}()',
+    ' float r = std::floor(s);'
+    ' if (std::isnan(r)) return 0u;'
+    ' if (r >= 2147483648.0f) return static_cast<uint32_t>(INT32_MAX);'
+    ' if (r < -2147483648.0f) return static_cast<uint32_t>(INT32_MIN);'
+    ' return static_cast<uint32_t>(static_cast<int32_t>(r)); }}()',
     'cvt': '{0}',
 }
 
 _INLINE_BINARY_OPS: dict[str, str] = {
     'mul_hi': '[&]() {{ auto a = static_cast<uint64_t>({0});'
-              ' auto b = static_cast<uint64_t>({1});'
-              ' return static_cast<uint32_t>((a * b) >> 32); }}()',
+    ' auto b = static_cast<uint64_t>({1});'
+    ' return static_cast<uint32_t>((a * b) >> 32); }}()',
     'util::mulhi': '[&]() {{ auto a = static_cast<uint64_t>({0});'
-                   ' auto b = static_cast<uint64_t>({1});'
-                   ' return static_cast<uint32_t>((a * b) >> 32); }}()',
+    ' auto b = static_cast<uint64_t>({1});'
+    ' return static_cast<uint32_t>((a * b) >> 32); }}()',
     'mulhi': '[&]() {{ auto a = static_cast<uint64_t>({0});'
-             ' auto b = static_cast<uint64_t>({1});'
-             ' return static_cast<uint32_t>((a * b) >> 32); }}()',
+    ' auto b = static_cast<uint64_t>({1});'
+    ' return static_cast<uint32_t>((a * b) >> 32); }}()',
     'util::arithmetic_shr': '[&]() {{ auto v = static_cast<int32_t>({0});'
-                            ' return static_cast<uint32_t>(v >> ({1} & 31u)); }}()',
+    ' return static_cast<uint32_t>(v >> ({1} & 31u)); }}()',
     'bfm': '(((1u << ({0} & 31u)) - 1u) << ({1} & 31u))',
     'ashr': '[&]() {{ auto v = static_cast<int32_t>({0});'
-            ' return static_cast<uint32_t>(v >> ({1})); }}()',
+    ' return static_cast<uint32_t>(v >> ({1})); }}()',
     'ashr_i64': '[&]() {{ auto v = static_cast<int64_t>({0});'
-                ' return static_cast<uint64_t>(v >> ({1} & 63u)); }}()',
+    ' return static_cast<uint64_t>(v >> ({1} & 63u)); }}()',
     'mul_legacy': '[&]() {{ auto a = {0}; auto b = {1};'
-                  ' return (a == 0.0f || b == 0.0f) ? 0.0f : a * b; }}()',
+    ' return (a == 0.0f || b == 0.0f) ? 0.0f : a * b; }}()',
     'mul_hi_u24': '[&]() {{ auto a = static_cast<uint64_t>({0} & 0x00FFFFFFu);'
-                  ' auto b = static_cast<uint64_t>({1} & 0x00FFFFFFu);'
-                  ' return static_cast<uint32_t>((a * b) >> 32); }}()',
+    ' auto b = static_cast<uint64_t>({1} & 0x00FFFFFFu);'
+    ' return static_cast<uint32_t>((a * b) >> 32); }}()',
     'mul_hi_i24': '[&]() {{ auto a = static_cast<int64_t>(static_cast<int32_t>({0} << 8) >> 8);'
-                  ' auto b = static_cast<int64_t>(static_cast<int32_t>({1} << 8) >> 8);'
-                  ' return static_cast<uint32_t>(static_cast<uint64_t>((a * b) >> 32)); }}()',
+    ' auto b = static_cast<int64_t>(static_cast<int32_t>({1} << 8) >> 8);'
+    ' return static_cast<uint32_t>(static_cast<uint64_t>((a * b) >> 32)); }}()',
     'mul_u24': '(({0} & 0x00FFFFFFu) * ({1} & 0x00FFFFFFu))',
     'mul_i24': '[&]() {{ auto a = static_cast<int32_t>({0} << 8) >> 8;'
-               ' auto b = static_cast<int32_t>({1} << 8) >> 8;'
-               ' return static_cast<uint32_t>(a * b); }}()',
+    ' auto b = static_cast<int32_t>({1} << 8) >> 8;'
+    ' return static_cast<uint32_t>(a * b); }}()',
     'mul_lo_u16': 'static_cast<uint32_t>(static_cast<uint16_t>('
-                  'static_cast<uint16_t>({0}) * static_cast<uint16_t>({1})))',
+    'static_cast<uint16_t>({0}) * static_cast<uint16_t>({1})))',
     'std::min': 'std::min({0}, {1})',
     'std::max': 'std::max({0}, {1})',
     'std::fmin': 'std::fmin({0}, {1})',
@@ -1067,91 +1119,91 @@ _INLINE_BINARY_OPS: dict[str, str] = {
     'is_ordered': '(!std::isnan({0}) && !std::isnan({1}))',
     'is_unordered': '(std::isnan({0}) || std::isnan({1}))',
     'fp_class_test': '[&]() -> bool {{'
-                     ' float s0 = std::bit_cast<float>(static_cast<uint32_t>({0}));'
-                     ' uint32_t mask = {1}; bool match = false;'
-                     ' if ((mask & 0x001u) && std::isnan(s0)'
-                     ' && (std::bit_cast<uint32_t>(s0) & 0x00400000u) == 0) match = true;'
-                     ' if ((mask & 0x002u) && std::isnan(s0)'
-                     ' && (std::bit_cast<uint32_t>(s0) & 0x00400000u) != 0) match = true;'
-                     ' if ((mask & 0x004u) && std::isinf(s0) && s0 < 0) match = true;'
-                     ' if ((mask & 0x008u) && std::isnormal(s0) && s0 < 0) match = true;'
-                     ' if ((mask & 0x010u) && !std::isnormal(s0) && !std::isinf(s0)'
-                     ' && !std::isnan(s0) && s0 != 0.0f && std::signbit(s0)) match = true;'
-                     ' if ((mask & 0x020u) && s0 == 0.0f && std::signbit(s0)) match = true;'
-                     ' if ((mask & 0x040u) && s0 == 0.0f && !std::signbit(s0)) match = true;'
-                     ' if ((mask & 0x080u) && !std::isnormal(s0) && !std::isinf(s0)'
-                     ' && !std::isnan(s0) && s0 != 0.0f && !std::signbit(s0)) match = true;'
-                     ' if ((mask & 0x100u) && std::isnormal(s0) && s0 > 0) match = true;'
-                     ' if ((mask & 0x200u) && std::isinf(s0) && s0 > 0) match = true;'
-                     ' return match; }}()',
+    ' float s0 = std::bit_cast<float>(static_cast<uint32_t>({0}));'
+    ' uint32_t mask = {1}; bool match = false;'
+    ' if ((mask & 0x001u) && std::isnan(s0)'
+    ' && (std::bit_cast<uint32_t>(s0) & 0x00400000u) == 0) match = true;'
+    ' if ((mask & 0x002u) && std::isnan(s0)'
+    ' && (std::bit_cast<uint32_t>(s0) & 0x00400000u) != 0) match = true;'
+    ' if ((mask & 0x004u) && std::isinf(s0) && s0 < 0) match = true;'
+    ' if ((mask & 0x008u) && std::isnormal(s0) && s0 < 0) match = true;'
+    ' if ((mask & 0x010u) && !std::isnormal(s0) && !std::isinf(s0)'
+    ' && !std::isnan(s0) && s0 != 0.0f && std::signbit(s0)) match = true;'
+    ' if ((mask & 0x020u) && s0 == 0.0f && std::signbit(s0)) match = true;'
+    ' if ((mask & 0x040u) && s0 == 0.0f && !std::signbit(s0)) match = true;'
+    ' if ((mask & 0x080u) && !std::isnormal(s0) && !std::isinf(s0)'
+    ' && !std::isnan(s0) && s0 != 0.0f && !std::signbit(s0)) match = true;'
+    ' if ((mask & 0x100u) && std::isnormal(s0) && s0 > 0) match = true;'
+    ' if ((mask & 0x200u) && std::isinf(s0) && s0 > 0) match = true;'
+    ' return match; }}()',
     'add_co': '[&]() {{ uint64_t w = static_cast<uint64_t>({0})'
-              ' + static_cast<uint64_t>({1});'
-              ' if (w > 0xFFFFFFFFULL) vcc |= (1ULL << lane);'
-              ' else vcc &= ~(1ULL << lane);'
-              ' return static_cast<uint32_t>(w); }}()',
+    ' + static_cast<uint64_t>({1});'
+    ' if (w > 0xFFFFFFFFULL) vcc |= (1ULL << lane);'
+    ' else vcc &= ~(1ULL << lane);'
+    ' return static_cast<uint32_t>(w); }}()',
     'sub_co': '[&]() {{ uint32_t a = {0}, b = {1};'
-              ' if (a < b) vcc |= (1ULL << lane);'
-              ' else vcc &= ~(1ULL << lane);'
-              ' return a - b; }}()',
+    ' if (a < b) vcc |= (1ULL << lane);'
+    ' else vcc &= ~(1ULL << lane);'
+    ' return a - b; }}()',
     'addc': '[&]() {{ uint64_t w = static_cast<uint64_t>({0})'
-            ' + static_cast<uint64_t>({1})'
-            ' + static_cast<uint64_t>(wf.read_scc());'
-            ' wf.write_scc(w > 0xFFFFFFFFULL);'
-            ' return static_cast<uint32_t>(w); }}()',
+    ' + static_cast<uint64_t>({1})'
+    ' + static_cast<uint64_t>(wf.read_scc());'
+    ' wf.write_scc(w > 0xFFFFFFFFULL);'
+    ' return static_cast<uint32_t>(w); }}()',
     'subb': '[&]() {{ uint32_t a = {0}, b = {1};'
-            ' uint32_t cin = wf.read_scc() ? 1u : 0u;'
-            ' wf.write_scc(static_cast<uint64_t>(a) < static_cast<uint64_t>(b) + cin);'
-            ' return a - b - cin; }}()',
+    ' uint32_t cin = wf.read_scc() ? 1u : 0u;'
+    ' wf.write_scc(static_cast<uint64_t>(a) < static_cast<uint64_t>(b) + cin);'
+    ' return a - b - cin; }}()',
     'lshl1_add': '[&]() {{ uint64_t w = (static_cast<uint64_t>({0}) << 1u) + static_cast<uint64_t>({1});'
-                 ' wf.write_scc(w > 0xFFFFFFFFULL);'
-                 ' return static_cast<uint32_t>(w); }}()',
+    ' wf.write_scc(w > 0xFFFFFFFFULL);'
+    ' return static_cast<uint32_t>(w); }}()',
     'lshl2_add': '[&]() {{ uint64_t w = (static_cast<uint64_t>({0}) << 2u) + static_cast<uint64_t>({1});'
-                 ' wf.write_scc(w > 0xFFFFFFFFULL);'
-                 ' return static_cast<uint32_t>(w); }}()',
+    ' wf.write_scc(w > 0xFFFFFFFFULL);'
+    ' return static_cast<uint32_t>(w); }}()',
     'lshl3_add': '[&]() {{ uint64_t w = (static_cast<uint64_t>({0}) << 3u) + static_cast<uint64_t>({1});'
-                 ' wf.write_scc(w > 0xFFFFFFFFULL);'
-                 ' return static_cast<uint32_t>(w); }}()',
+    ' wf.write_scc(w > 0xFFFFFFFFULL);'
+    ' return static_cast<uint32_t>(w); }}()',
     'lshl4_add': '[&]() {{ uint64_t w = (static_cast<uint64_t>({0}) << 4u) + static_cast<uint64_t>({1});'
-                 ' wf.write_scc(w > 0xFFFFFFFFULL);'
-                 ' return static_cast<uint32_t>(w); }}()',
+    ' wf.write_scc(w > 0xFFFFFFFFULL);'
+    ' return static_cast<uint32_t>(w); }}()',
     'pack_ll': '(({0} & 0xFFFFu) | (({1} & 0xFFFFu) << 16))',
     'pack_lh': '(({0} & 0xFFFFu) | ({1} & 0xFFFF0000u))',
     'pack_hh': '((({0} >> 16) & 0xFFFFu) | ({1} & 0xFFFF0000u))',
     'bfe': '[&]() {{ uint32_t base = {0}, field = {1};'
-           ' uint32_t offset = field & 31u;'
-           ' uint32_t width = (field >> 16) & 127u;'
-           ' if (width == 0) return 0u;'
-           ' uint32_t mask = width >= 32 ? ~0u : ((1u << width) - 1u);'
-           ' return (base >> offset) & mask; }}()',
+    ' uint32_t offset = field & 31u;'
+    ' uint32_t width = (field >> 16) & 127u;'
+    ' if (width == 0) return 0u;'
+    ' uint32_t mask = width >= 32 ? ~0u : ((1u << width) - 1u);'
+    ' return (base >> offset) & mask; }}()',
     'bfe_i32': '[&]() {{ uint32_t base = {0}, field = {1};'
-               ' uint32_t offset = field & 31u;'
-               ' uint32_t width = (field >> 16) & 127u;'
-               ' if (width == 0) return 0u;'
-               ' uint32_t mask = width >= 32 ? ~0u : ((1u << width) - 1u);'
-               ' uint32_t extracted = (base >> offset) & mask;'
-               ' if (width < 32 && (extracted & (1u << (width - 1))))'
-               '   extracted |= ~mask;'
-               ' return extracted; }}()',
+    ' uint32_t offset = field & 31u;'
+    ' uint32_t width = (field >> 16) & 127u;'
+    ' if (width == 0) return 0u;'
+    ' uint32_t mask = width >= 32 ? ~0u : ((1u << width) - 1u);'
+    ' uint32_t extracted = (base >> offset) & mask;'
+    ' if (width < 32 && (extracted & (1u << (width - 1))))'
+    '   extracted |= ~mask;'
+    ' return extracted; }}()',
     'bfe64': '[&]() {{ uint64_t base = {0};'
-             ' uint32_t field = static_cast<uint32_t>({1});'
-             ' uint32_t offset = field & 63u;'
-             ' uint32_t width = (field >> 16) & 127u;'
-             ' if (width == 0) return static_cast<uint64_t>(0);'
-             ' uint64_t mask = width >= 64 ? ~0ULL : ((1ULL << width) - 1ULL);'
-             ' return (base >> offset) & mask; }}()',
+    ' uint32_t field = static_cast<uint32_t>({1});'
+    ' uint32_t offset = field & 63u;'
+    ' uint32_t width = (field >> 16) & 127u;'
+    ' if (width == 0) return static_cast<uint64_t>(0);'
+    ' uint64_t mask = width >= 64 ? ~0ULL : ((1ULL << width) - 1ULL);'
+    ' return (base >> offset) & mask; }}()',
     'bfe_i64': '[&]() {{ uint64_t base = {0};'
-               ' uint32_t field = static_cast<uint32_t>({1});'
-               ' uint32_t offset = field & 63u;'
-               ' uint32_t width = (field >> 16) & 127u;'
-               ' if (width == 0) return static_cast<int64_t>(0);'
-               ' uint64_t mask = width >= 64 ? ~0ULL : ((1ULL << width) - 1ULL);'
-               ' uint64_t extracted = (base >> offset) & mask;'
-               ' if (width < 64 && (extracted & (1ULL << (width - 1))))'
-               '   extracted |= ~mask;'
-               ' return static_cast<int64_t>(extracted); }}()',
+    ' uint32_t field = static_cast<uint32_t>({1});'
+    ' uint32_t offset = field & 63u;'
+    ' uint32_t width = (field >> 16) & 127u;'
+    ' if (width == 0) return static_cast<int64_t>(0);'
+    ' uint64_t mask = width >= 64 ? ~0ULL : ((1ULL << width) - 1ULL);'
+    ' uint64_t extracted = (base >> offset) & mask;'
+    ' if (width < 64 && (extracted & (1ULL << (width - 1))))'
+    '   extracted |= ~mask;'
+    ' return static_cast<int64_t>(extracted); }}()',
     'ABSDIFF': '[&]() {{ auto a = static_cast<int32_t>({0});'
-               ' auto b = static_cast<int32_t>({1});'
-               ' return static_cast<uint32_t>(a > b ? a - b : b - a); }}()',
+    ' auto b = static_cast<int32_t>({1});'
+    ' return static_cast<uint32_t>(a > b ? a - b : b - a); }}()',
     'pack_b32_f16': '(({0} & 0xFFFFu) | (({1} & 0xFFFFu) << 16))',
     'v_readlane': '{0}',
 }
@@ -1160,15 +1212,15 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     'min3': 'std::min(std::min({0}, {1}), {2})',
     'max3': 'std::max(std::max({0}, {1}), {2})',
     'med3': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
-            ' return std::max(std::min(std::max(a, b), c), std::min(a, b)); }}()',
+    ' return std::max(std::min(std::max(a, b), c), std::min(a, b)); }}()',
     'lerp_u8': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
-               ' uint32_t r = 0;'
-               ' for (int i = 0; i < 4; ++i) {{'
-               ' uint8_t ab = (a >> (i*8)) & 0xFF;'
-               ' uint8_t bb = (b >> (i*8)) & 0xFF;'
-               ' uint8_t cb = (c >> (i*8)) & 0xFF;'
-               ' r |= static_cast<uint32_t>(ab + ((bb - ab) * cb + 128) / 256) << (i*8);'
-               ' }} return r; }}()',
+    ' uint32_t r = 0;'
+    ' for (int i = 0; i < 4; ++i) {{'
+    ' uint8_t ab = (a >> (i*8)) & 0xFF;'
+    ' uint8_t bb = (b >> (i*8)) & 0xFF;'
+    ' uint8_t cb = (c >> (i*8)) & 0xFF;'
+    ' r |= static_cast<uint32_t>(ab + ((bb - ab) * cb + 128) / 256) << (i*8);'
+    ' }} return r; }}()',
     'add3': '({0} + {1} + {2})',
     'or3': '({0} | {1} | {2})',
     'xor3': '({0} ^ {1} ^ {2})',
@@ -1178,49 +1230,49 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     'add_lshl': '(({0} + {1}) << {2})',
     'and_or': '(({0} & {1}) | {2})',
     'bfi': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
-           ' return (a & b) | (~a & c); }}()',
+    ' return (a & b) | (~a & c); }}()',
     'bfm': '(((1u << ({0} & 31u)) - 1u) << ({1} & 31u))',
     'alignbit': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
-                ' uint64_t val = (static_cast<uint64_t>(a) << 32) | b;'
-                ' return static_cast<uint32_t>(val >> (c & 31u)); }}()',
+    ' uint64_t val = (static_cast<uint64_t>(a) << 32) | b;'
+    ' return static_cast<uint32_t>(val >> (c & 31u)); }}()',
     'alignbyte': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
-                 ' uint64_t val = (static_cast<uint64_t>(a) << 32) | b;'
-                 ' return static_cast<uint32_t>(val >> ((c & 3u) * 8u)); }}()',
+    ' uint64_t val = (static_cast<uint64_t>(a) << 32) | b;'
+    ' return static_cast<uint32_t>(val >> ((c & 3u) * 8u)); }}()',
     'sad_u8': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
-              ' uint32_t r = c;'
-              ' for (int i = 0; i < 4; ++i) {{'
-              ' uint8_t ab = (a >> (i*8)) & 0xFF; uint8_t bb = (b >> (i*8)) & 0xFF;'
-              ' r += (ab > bb) ? (ab - bb) : (bb - ab);'
-              ' }} return r; }}()',
+    ' uint32_t r = c;'
+    ' for (int i = 0; i < 4; ++i) {{'
+    ' uint8_t ab = (a >> (i*8)) & 0xFF; uint8_t bb = (b >> (i*8)) & 0xFF;'
+    ' r += (ab > bb) ? (ab - bb) : (bb - ab);'
+    ' }} return r; }}()',
     'sad_hi_u8': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
-                 ' uint32_t r = 0;'
-                 ' for (int i = 0; i < 4; ++i) {{'
-                 ' uint8_t ab = (a >> (i*8)) & 0xFF; uint8_t bb = (b >> (i*8)) & 0xFF;'
-                 ' r += (ab > bb) ? (ab - bb) : (bb - ab);'
-                 ' }} return (r << 16) + c; }}()',
+    ' uint32_t r = 0;'
+    ' for (int i = 0; i < 4; ++i) {{'
+    ' uint8_t ab = (a >> (i*8)) & 0xFF; uint8_t bb = (b >> (i*8)) & 0xFF;'
+    ' r += (ab > bb) ? (ab - bb) : (bb - ab);'
+    ' }} return (r << 16) + c; }}()',
     'sad_u16': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
-               ' uint16_t al = a & 0xFFFF; uint16_t ah = (a >> 16) & 0xFFFF;'
-               ' uint16_t bl = b & 0xFFFF; uint16_t bh = (b >> 16) & 0xFFFF;'
-               ' return c + ((al > bl) ? (al - bl) : (bl - al))'
-               ' + ((ah > bh) ? (ah - bh) : (bh - ah)); }}()',
+    ' uint16_t al = a & 0xFFFF; uint16_t ah = (a >> 16) & 0xFFFF;'
+    ' uint16_t bl = b & 0xFFFF; uint16_t bh = (b >> 16) & 0xFFFF;'
+    ' return c + ((al > bl) ? (al - bl) : (bl - al))'
+    ' + ((ah > bh) ? (ah - bh) : (bh - ah)); }}()',
     'sad_u32': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
-               ' return c + ((a > b) ? (a - b) : (b - a)); }}()',
+    ' return c + ((a > b) ? (a - b) : (b - a)); }}()',
     'msad_u8': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
-               ' uint32_t r = c;'
-               ' for (int i = 0; i < 4; ++i) {{'
-               ' uint8_t rb = (a >> (i*8)) & 0xFF;'
-               ' if (rb != 0) {{'
-               ' uint8_t sb = (b >> (i*8)) & 0xFF;'
-               ' r += (rb > sb) ? (rb - sb) : (sb - rb);'
-               ' }}}} return r; }}()',
+    ' uint32_t r = c;'
+    ' for (int i = 0; i < 4; ++i) {{'
+    ' uint8_t rb = (a >> (i*8)) & 0xFF;'
+    ' if (rb != 0) {{'
+    ' uint8_t sb = (b >> (i*8)) & 0xFF;'
+    ' r += (rb > sb) ? (rb - sb) : (sb - rb);'
+    ' }}}} return r; }}()',
     'perm': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
-            ' uint32_t r = 0; uint64_t src = (static_cast<uint64_t>(a) << 32) | b;'
-            ' for (int i = 0; i < 4; ++i) {{'
-            ' uint8_t sel = (c >> (i*8)) & 0xFF;'
-            ' uint8_t byte = (sel < 8) ? static_cast<uint8_t>((src >> (sel*8)) & 0xFF)'
-            ' : (sel == 0xC) ? 0u : (sel == 0xD) ? 0xFFu : 0u;'
-            ' r |= static_cast<uint32_t>(byte) << (i*8);'
-            ' }} return r; }}()',
+    ' uint32_t r = 0; uint64_t src = (static_cast<uint64_t>(a) << 32) | b;'
+    ' for (int i = 0; i < 4; ++i) {{'
+    ' uint8_t sel = (c >> (i*8)) & 0xFF;'
+    ' uint8_t byte = (sel < 8) ? static_cast<uint8_t>((src >> (sel*8)) & 0xFF)'
+    ' : (sel == 0xC) ? 0u : (sel == 0xD) ? 0xFFu : 0u;'
+    ' r |= static_cast<uint32_t>(byte) << (i*8);'
+    ' }} return r; }}()',
     'minimum3': 'std::min(std::min({0}, {1}), {2})',
     'maximum3': 'std::max(std::max({0}, {1}), {2})',
     'maxmin': 'std::min(std::max({0}, {1}), {2})',
@@ -1230,81 +1282,81 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     'maximumminimum': 'std::min(std::max({0}, {1}), {2})',
     'minimummaximum': 'std::max(std::min({0}, {1}), {2})',
     'addc_co': '[&]() {{ uint64_t w = static_cast<uint64_t>({0})'
-               ' + static_cast<uint64_t>({1})'
-               ' + static_cast<uint64_t>({2});'
-               ' if (w > 0xFFFFFFFFULL) vcc |= (1ULL << lane);'
-               ' else vcc &= ~(1ULL << lane);'
-               ' return static_cast<uint32_t>(w); }}()',
+    ' + static_cast<uint64_t>({1})'
+    ' + static_cast<uint64_t>({2});'
+    ' if (w > 0xFFFFFFFFULL) vcc |= (1ULL << lane);'
+    ' else vcc &= ~(1ULL << lane);'
+    ' return static_cast<uint32_t>(w); }}()',
     'dot2c': '[&]() {{ uint32_t a = {0}, b = {1};'
-             ' float c = std::bit_cast<float>(static_cast<uint32_t>({2}));'
-             ' float lo = util::f16_to_f32(static_cast<uint16_t>(a))'
-             ' * util::f16_to_f32(static_cast<uint16_t>(b));'
-             ' float hi = util::f16_to_f32(static_cast<uint16_t>(a >> 16))'
-             ' * util::f16_to_f32(static_cast<uint16_t>(b >> 16));'
-             ' return std::bit_cast<uint32_t>(lo + hi + c); }}()',
+    ' float c = std::bit_cast<float>(static_cast<uint32_t>({2}));'
+    ' float lo = util::f16_to_f32(static_cast<uint16_t>(a))'
+    ' * util::f16_to_f32(static_cast<uint16_t>(b));'
+    ' float hi = util::f16_to_f32(static_cast<uint16_t>(a >> 16))'
+    ' * util::f16_to_f32(static_cast<uint16_t>(b >> 16));'
+    ' return std::bit_cast<uint32_t>(lo + hi + c); }}()',
     'dot4c': '[&]() {{ uint32_t a = {0}, b = {1}; int32_t c = static_cast<int32_t>({2});'
-             ' int32_t sum = c;'
-             ' for (int i = 0; i < 4; ++i)'
-             '   sum += static_cast<int32_t>(static_cast<int8_t>((a >> (i*8)) & 0xFF))'
-             '        * static_cast<int32_t>(static_cast<int8_t>((b >> (i*8)) & 0xFF));'
-             ' return static_cast<uint32_t>(sum); }}()',
+    ' int32_t sum = c;'
+    ' for (int i = 0; i < 4; ++i)'
+    '   sum += static_cast<int32_t>(static_cast<int8_t>((a >> (i*8)) & 0xFF))'
+    '        * static_cast<int32_t>(static_cast<int8_t>((b >> (i*8)) & 0xFF));'
+    ' return static_cast<uint32_t>(sum); }}()',
     'dot8c': '[&]() {{ uint32_t a = {0}, b = {1}; int32_t c = static_cast<int32_t>({2});'
-             ' int32_t sum = c;'
-             ' for (int i = 0; i < 8; ++i) {{'
-             '   int32_t av = static_cast<int32_t>((a >> (i*4)) & 0xF);'
-             '   if (av & 8) av |= ~0xF;'
-             '   int32_t bv = static_cast<int32_t>((b >> (i*4)) & 0xF);'
-             '   if (bv & 8) bv |= ~0xF;'
-             '   sum += av * bv; }}'
-             ' return static_cast<uint32_t>(sum); }}()',
+    ' int32_t sum = c;'
+    ' for (int i = 0; i < 8; ++i) {{'
+    '   int32_t av = static_cast<int32_t>((a >> (i*4)) & 0xF);'
+    '   if (av & 8) av |= ~0xF;'
+    '   int32_t bv = static_cast<int32_t>((b >> (i*4)) & 0xF);'
+    '   if (bv & 8) bv |= ~0xF;'
+    '   sum += av * bv; }}'
+    ' return static_cast<uint32_t>(sum); }}()',
     'mad_32_16': '[&]() {{ int32_t a = static_cast<int32_t>(static_cast<int16_t>({0}));'
-                 ' int32_t b = static_cast<int32_t>(static_cast<int16_t>({1}));'
-                 ' int32_t c = static_cast<int32_t>({2});'
-                 ' return static_cast<uint32_t>(a * b + c); }}()',
+    ' int32_t b = static_cast<int32_t>(static_cast<int16_t>({1}));'
+    ' int32_t c = static_cast<int32_t>({2});'
+    ' return static_cast<uint32_t>(a * b + c); }}()',
     'v_writelane': '(lane == {2}) ? {1} : {0}',
     'util::bfe': '[&]() {{ uint32_t base = {0};'
-                 ' uint32_t offset = {1};'
-                 ' uint32_t width = {2};'
-                 ' if (width == 0) return 0u;'
-                 ' uint32_t mask = width >= 32 ? ~0u : ((1u << width) - 1u);'
-                 ' return (base >> offset) & mask; }}()',
+    ' uint32_t offset = {1};'
+    ' uint32_t width = {2};'
+    ' if (width == 0) return 0u;'
+    ' uint32_t mask = width >= 32 ? ~0u : ((1u << width) - 1u);'
+    ' return (base >> offset) & mask; }}()',
     'subbc_co': '[&]() {{ uint64_t a = static_cast<uint64_t>({0}),'
-                ' b = static_cast<uint64_t>({1}),'
-                ' c = static_cast<uint64_t>({2});'
-                ' if (a < b + c) vcc |= (1ULL << lane);'
-                ' else vcc &= ~(1ULL << lane);'
-                ' return static_cast<uint32_t>(a - b - c); }}()',
+    ' b = static_cast<uint64_t>({1}),'
+    ' c = static_cast<uint64_t>({2});'
+    ' if (a < b + c) vcc |= (1ULL << lane);'
+    ' else vcc &= ~(1ULL << lane);'
+    ' return static_cast<uint32_t>(a - b - c); }}()',
     'mad_u24': '(({0} & 0x00FFFFFFu) * ({1} & 0x00FFFFFFu) + {2})',
     'mad_i24': '[&]() {{ auto a = static_cast<int32_t>({0} << 8) >> 8;'
-               ' auto b = static_cast<int32_t>({1} << 8) >> 8;'
-               ' return static_cast<uint32_t>(a * b + static_cast<int32_t>({2})); }}()',
+    ' auto b = static_cast<int32_t>({1} << 8) >> 8;'
+    ' return static_cast<uint32_t>(a * b + static_cast<int32_t>({2})); }}()',
     'bfe_u': '[&]() {{ uint32_t src={0}; uint32_t off={1} & 31u; uint32_t w={2} & 31u;'
-             ' if (w == 0) return 0u;'
-             ' uint32_t mask = (w >= 32) ? ~0u : ((1u << w) - 1u);'
-             ' return (src >> off) & mask; }}()',
+    ' if (w == 0) return 0u;'
+    ' uint32_t mask = (w >= 32) ? ~0u : ((1u << w) - 1u);'
+    ' return (src >> off) & mask; }}()',
     'bfe_i': '[&]() -> uint32_t {{ int32_t src=static_cast<int32_t>({0});'
-             ' uint32_t off={1} & 31u; uint32_t w={2} & 31u;'
-             ' if (w == 0) return 0u; int32_t val = (src >> off) & ((1 << w) - 1);'
-             ' if (val & (1 << (w-1))) val |= -(1 << w);'
-             ' return static_cast<uint32_t>(val); }}()',
+    ' uint32_t off={1} & 31u; uint32_t w={2} & 31u;'
+    ' if (w == 0) return 0u; int32_t val = (src >> off) & ((1 << w) - 1);'
+    ' if (val & (1 << (w-1))) val |= -(1 << w);'
+    ' return static_cast<uint32_t>(val); }}()',
     'cubeid': '[&]() {{ auto x={0}; auto y={1}; auto z={2};'
-              ' float ax=std::fabs(x), ay=std::fabs(y), az=std::fabs(z);'
-              ' if (ax >= ay && ax >= az) return x >= 0 ? 0.0f : 1.0f;'
-              ' if (ay >= ax && ay >= az) return y >= 0 ? 2.0f : 3.0f;'
-              ' return z >= 0 ? 4.0f : 5.0f; }}()',
+    ' float ax=std::fabs(x), ay=std::fabs(y), az=std::fabs(z);'
+    ' if (ax >= ay && ax >= az) return x >= 0 ? 0.0f : 1.0f;'
+    ' if (ay >= ax && ay >= az) return y >= 0 ? 2.0f : 3.0f;'
+    ' return z >= 0 ? 4.0f : 5.0f; }}()',
     'cubesc': '[&]() {{ auto x={0}; auto y={1}; auto z={2};'
-              ' float ax=std::fabs(x), ay=std::fabs(y), az=std::fabs(z);'
-              ' if (ax >= ay && ax >= az) return x >= 0 ? z : -z;'
-              ' if (ay >= ax && ay >= az) return x;'
-              ' return z >= 0 ? -x : x; }}()',
+    ' float ax=std::fabs(x), ay=std::fabs(y), az=std::fabs(z);'
+    ' if (ax >= ay && ax >= az) return x >= 0 ? z : -z;'
+    ' if (ay >= ax && ay >= az) return x;'
+    ' return z >= 0 ? -x : x; }}()',
     'cubetc': '[&]() {{ auto x={0}; auto y={1}; auto z={2};'
-              ' float ax=std::fabs(x), ay=std::fabs(y), az=std::fabs(z);'
-              ' if (ax >= ay && ax >= az) return -y;'
-              ' if (ay >= ax && ay >= az) return y >= 0 ? -z : z;'
-              ' return -y; }}()',
+    ' float ax=std::fabs(x), ay=std::fabs(y), az=std::fabs(z);'
+    ' if (ax >= ay && ax >= az) return -y;'
+    ' if (ay >= ax && ay >= az) return y >= 0 ? -z : z;'
+    ' return -y; }}()',
     'cubema': '[&]() {{ auto x={0}; auto y={1}; auto z={2};'
-              ' float ax=std::fabs(x), ay=std::fabs(y), az=std::fabs(z);'
-              ' return 2.0f * std::max({{ax, ay, az}}); }}()',
+    ' float ax=std::fabs(x), ay=std::fabs(y), az=std::fabs(z);'
+    ' return 2.0f * std::max({{ax, ay, az}}); }}()',
 }
 
 
@@ -1391,11 +1443,13 @@ def _lower_apply_omod(node: SemaNode, ctx: LoweringContext) -> str:
     is_f64 = node.ty and node.ty.base == 'F' and node.ty.size == 64
     fp_type = 'double' if is_f64 else 'float'
     suffix = '' if is_f64 else 'f'
-    return (f'[&]() {{ {fp_type} v = {rhs};'
-            f' if (inst_.omod == 1) v *= 2.0{suffix};'
-            f' else if (inst_.omod == 2) v *= 4.0{suffix};'
-            f' else if (inst_.omod == 3) v *= 0.5{suffix};'
-            f' return v; }}()')
+    return (
+        f'[&]() {{ {fp_type} v = {rhs};'
+        f' if (inst_.omod == 1) v *= 2.0{suffix};'
+        f' else if (inst_.omod == 2) v *= 4.0{suffix};'
+        f' else if (inst_.omod == 3) v *= 0.5{suffix};'
+        f' return v; }}()'
+    )
 
 
 def _lower_apply_clamp(node: SemaNode, ctx: LoweringContext) -> str:
@@ -1413,6 +1467,8 @@ def _lower_apply_clamp(node: SemaNode, ctx: LoweringContext) -> str:
     is_f64 = node.ty and node.ty.base == 'F' and node.ty.size == 64
     fp_type = 'double' if is_f64 else 'float'
     suffix = '' if is_f64 else 'f'
-    return (f'[&]() {{ {fp_type} v = {rhs};'
-            f' if (inst_.clamp) v = std::clamp(v, 0.0{suffix}, 1.0{suffix});'
-            f' return v; }}()')
+    return (
+        f'[&]() {{ {fp_type} v = {rhs};'
+        f' if (inst_.clamp) v = std::clamp(v, 0.0{suffix}, 1.0{suffix});'
+        f' return v; }}()'
+    )

@@ -3536,7 +3536,7 @@ typedef union rocprofiler_hip_api_args_t
     } hipExecutionCtxGetDevice;
     struct
     {
-        hipExecutionCtx_t  ctx;
+        hipExecutionCtx_t   ctx;
         unsigned long long* ctxId;
     } hipExecutionCtxGetId;
     struct
@@ -3559,6 +3559,22 @@ typedef union rocprofiler_hip_api_args_t
         hipExecutionCtx_t ctx;
         hipEvent_t        event;
     } hipExecutionCtxWaitEvent;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 29
+    struct
+    {
+        void**       dptr;
+        size_t*      bytes;
+        hipLibrary_t library;
+        const char*  name;
+    } hipLibraryGetGlobal;
+    struct
+    {
+        void**       dptr;
+        size_t*      bytes;
+        hipLibrary_t library;
+        const char*  name;
+    } hipLibraryGetManaged;
 #endif
 } rocprofiler_hip_api_args_t;
 
