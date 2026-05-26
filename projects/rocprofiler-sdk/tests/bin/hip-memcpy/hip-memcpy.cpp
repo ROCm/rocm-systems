@@ -37,9 +37,9 @@
         auto _status = (CALL);                                                                     \
         if(_status != hipSuccess)                                                                  \
         {                                                                                          \
-            std::cerr << __FILE__ << ":" << __LINE__ << " :: HIP error in " << #CALL << ": "     \
-                      << hipGetErrorString(_status) << '\n';                                      \
-            throw std::runtime_error("hip_api_call");                                             \
+            std::cerr << __FILE__ << ":" << __LINE__ << " :: HIP error in " << #CALL << ": "       \
+                      << hipGetErrorString(_status) << '\n';                                       \
+            throw std::runtime_error("hip_api_call");                                              \
         }                                                                                          \
     } while(false)
 
@@ -56,8 +56,8 @@ verify_equal(const int* lhs, const int* rhs, std::size_t count)
     {
         if(lhs[i] != rhs[i])
         {
-            std::cerr << "[hip-memcpy] mismatch at idx " << i << ": got " << lhs[i]
-                      << ", expected " << rhs[i] << '\n';
+            std::cerr << "[hip-memcpy] mismatch at idx " << i << ": got " << lhs[i] << ", expected "
+                      << rhs[i] << '\n';
             throw std::runtime_error("memory copy verification failed");
         }
     }

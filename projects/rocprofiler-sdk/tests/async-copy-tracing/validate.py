@@ -375,15 +375,23 @@ def test_async_copy_direction(input_data):
     assert len(thread_async_dir_cnt) == 2, f"{thread_async_dir_cnt}"
     min_copy_records = 3
     normal_records_per_direction = min_copy_records
-    batch_records_per_direction = min_copy_records * 4  # 4 count==1 batches * 3 records each
-    total_records_per_direction = normal_records_per_direction + batch_records_per_direction
+    batch_records_per_direction = (
+        min_copy_records * 4
+    )  # 4 count==1 batches * 3 records each
+    total_records_per_direction = (
+        normal_records_per_direction + batch_records_per_direction
+    )
 
     for tid, async_dir_cnt in thread_async_dir_cnt.items():
         assert async_dir_cnt[0] == 0
         assert async_dir_cnt[1] == 0
         assert async_dir_cnt[4] == 0
-        assert async_dir_cnt[2] >= total_records_per_direction, f"TID={tid}:\n\t{async_dir_cnt}"
-        assert async_dir_cnt[3] >= total_records_per_direction, f"TID={tid}:\n\t{async_dir_cnt}"
+        assert (
+            async_dir_cnt[2] >= total_records_per_direction
+        ), f"TID={tid}:\n\t{async_dir_cnt}"
+        assert (
+            async_dir_cnt[3] >= total_records_per_direction
+        ), f"TID={tid}:\n\t{async_dir_cnt}"
         # HIP memory copies may be decomposed into more than one memory
         # copy at the HSA level so require it to be a multiple of
         # min_copy_records.
@@ -396,7 +404,9 @@ def test_async_copy_direction(input_data):
 
     buffer_records = sdk_data.buffer_records
     hip_memcopy_id = get_operation(buffer_records, "HIP_RUNTIME_API", "hipMemcpyAsync")
-    assert hip_memcopy_id is not None, "rocprofiler-sdk does not expose hipMemcpyAsync as a HIP op"
+    assert (
+        hip_memcopy_id is not None
+    ), "rocprofiler-sdk does not expose hipMemcpyAsync as a HIP op"
     hip_memcopy_batch_id = get_operation(
         buffer_records, "HIP_RUNTIME_API", "hipMemcpyBatchAsync"
     )
@@ -409,7 +419,9 @@ def test_async_copy_direction(input_data):
         if x.operation == hip_memcopy_batch_id
     }
     async_thread_ids = {
-        x.thread_id for x in buffer_records.hip_api_traces if x.operation == hip_memcopy_id
+        x.thread_id
+        for x in buffer_records.hip_api_traces
+        if x.operation == hip_memcopy_id
     }
     assert (
         len(async_thread_ids) == 2
@@ -417,13 +429,13 @@ def test_async_copy_direction(input_data):
     assert (
         len(batch_thread_ids) == 2
     ), f"expected exactly two threads to issue hipMemcpyBatchAsync, got {batch_thread_ids}"
-    assert batch_thread_ids == async_thread_ids, f"{batch_thread_ids} != {async_thread_ids}"
+    assert (
+        batch_thread_ids == async_thread_ids
+    ), f"{batch_thread_ids} != {async_thread_ids}"
     assert batch_thread_ids == set(thread_async_dir_cnt.keys()), f"{thread_async_dir_cnt}"
     for tid in batch_thread_ids:
         for op_id in (2, 3):
-            assert (
-                thread_async_dir_cnt[tid][op_id] >= batch_records_per_direction
-            ), (
+            assert thread_async_dir_cnt[tid][op_id] >= batch_records_per_direction, (
                 f"thread {tid} should have at least {batch_records_per_direction} "
                 f"direction={op_id} records: "
                 f"{thread_async_dir_cnt}"
@@ -564,8 +576,12 @@ def test_ancestor_ids(input_data):
             )
         accounted_for_hip_ids.append(parent_hip_call.correlation_id.internal)
 
-    assert matched_async_directions[2] >= 2, "expected at least two hipMemcpyAsync H2D records"
-    assert matched_async_directions[3] >= 2, "expected at least two hipMemcpyAsync D2H records"
+    assert (
+        matched_async_directions[2] >= 2
+    ), "expected at least two hipMemcpyAsync H2D records"
+    assert (
+        matched_async_directions[3] >= 2
+    ), "expected at least two hipMemcpyAsync D2H records"
 
     # Ensure we looked through all HIP memcpy entries.
     expected_hip_ids = set(hip_memcopies.keys()) | set(hip_memcopy_batches.keys())
