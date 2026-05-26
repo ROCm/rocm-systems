@@ -43,8 +43,7 @@ HIP_TEST_CASE(Unit_hipMemcpyPeer_Positive_Default) {
 
   int can_access_peer = 0;
   const auto src_device = isQuickLevel() ? 0 : GENERATE(range(0, HipTest::getDeviceCount()));
-  const auto dst_device =
-      isQuickLevel() ? (device_count > 1 ? 1 : 0) : GENERATE(range(0, HipTest::getDeviceCount()));
+  const auto dst_device = isQuickLevel() ? 1 : GENERATE(range(0, HipTest::getDeviceCount()));
   INFO("Src device: " << src_device << ", Dst device: " << dst_device);
 
   HIP_CHECK(hipSetDevice(src_device));
