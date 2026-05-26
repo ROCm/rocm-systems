@@ -7,6 +7,8 @@
 #include "common/env_vars.hpp"
 #include "common/json_config.hpp"
 
+#include <map>
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -555,8 +557,9 @@ get_domain_help_map()
         { "cpu",
           { "CPU sampling, timers, CPU counters",
             { "--cpu", "-H", "--host", "-S", "--sample", "--sampling-freq",
-              "--sampling-wait", "--sampling-duration", "-t", "--tids", "--sample-cputime",
-              "--sample-realtime", "--sample-overflow", "-C", "--cpu-events" } } },
+              "--sampling-wait", "--sampling-duration", "-t", "--tids",
+              "--sample-cputime", "--sample-realtime", "--sample-overflow", "-C",
+              "--cpu-events" } } },
         { "rocm",
           { "ROCm API tracing options",
             { "--rocm", "-T", "--trace", "--hsa-interrupt", "--selected-regions",
@@ -566,6 +569,42 @@ get_domain_help_map()
             { "--parallel", "-I", "--include", "-E", "--exclude" } } },
     };
     return map;
+}
+
+// Hand-curated topic relations. Listing a topic here surfaces it under
+// the "See also" footer of another topic. Keep the per-topic list short
+// (≤4 entries) so the footer stays useful rather than noisy.
+const related_topics_map&
+get_related_topics_map()
+{
+    static const related_topics_map map = {
+        { "tracing", { "rocm", "process", "backend" } },
+        { "profiling", { "sampling", "counters", "backend" } },
+        { "sampling", { "process", "profiling", "counters", "cpu" } },
+        { "process", { "gpu", "sampling" } },
+        { "counters", { "gpu", "cpu", "sampling" } },
+        { "backend", { "tracing", "profiling", "rocm" } },
+        { "general", { "preset", "tracing", "profiling" } },
+        { "preset", { "tracing", "profiling", "sampling" } },
+        { "misc", { "debug", "general" } },
+        { "gpu", { "rocm", "process", "counters" } },
+        { "cpu", { "sampling", "process", "counters" } },
+        { "rocm", { "gpu", "tracing", "parallel" } },
+        { "parallel", { "rocm", "sampling" } },
+    };
+    return map;
+}
+
+void
+print_see_also(std::string_view topic, std::ostream& out)
+{
+    const auto& relations = get_related_topics_map();
+    auto        it        = relations.find(topic);
+    if(it == relations.end() || it->second.empty()) return;
+
+    out << "\n  See also (related topics):\n";
+    for(const auto& related : it->second)
+        out << "    --help=" << related << "\n";
 }
 
 void
