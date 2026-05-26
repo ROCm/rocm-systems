@@ -1,5 +1,5 @@
 # =============================================================================
-# RDNA3.5 (gfx1151) - RDNA3.5 GL1 Cache (L1 Cache) Performance Metrics
+# RDNA3.5 (gfx115x) - RDNA3.5 GL1 Cache (L1 Cache) Performance Metrics
 # =============================================================================
 # GL1 cache is the shared L1 cache serving multiple WGPs within a Shader Engine
 # Cache hierarchy: GL0 Cache (TCP) -> GL1 Cache -> GL2 Cache

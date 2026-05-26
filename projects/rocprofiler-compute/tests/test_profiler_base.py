@@ -284,3 +284,5 @@ def test_attach_library_resolution_with_fallback():
     with patch(resolve_target, side_effect=[str(new_lib), str(old_lib)]):
         with pytest.raises(SystemExit):
             profiler.get_profiler_options()
+
+    common.clean_output_dir(True, str(output_dir))

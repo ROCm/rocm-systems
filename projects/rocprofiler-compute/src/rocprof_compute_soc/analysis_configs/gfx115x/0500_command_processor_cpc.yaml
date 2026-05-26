@@ -1,5 +1,5 @@
 # =============================================================================
-# RDNA3.5 (gfx1151) - RDNA3.5 CPC (Command Processor Compute) Performance Metrics
+# RDNA3.5 (gfx115x) - RDNA3.5 CPC (Command Processor Compute) Performance Metrics
 # =============================================================================
 # CPC handles compute shader dispatch and command stream processing
 # =============================================================================

@@ -1,5 +1,5 @@
 # =============================================================================
-# RDNA3.5 (gfx1151) - RDNA3.5 SPI (Shader Processor Input) Performance Metrics
+# RDNA3.5 (gfx115x) - RDNA3.5 SPI (Shader Processor Input) Performance Metrics
 # =============================================================================
 # SPI handles wave scheduling and resource allocation to WGPs
 # =============================================================================

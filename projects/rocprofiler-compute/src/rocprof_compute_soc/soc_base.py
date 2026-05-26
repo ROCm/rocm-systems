@@ -29,6 +29,7 @@ from utils.specs import MachineSpecs
 from utils.utils_common import (
     METRIC_ID_RE,
     add_counter_extra_config_input_yaml,
+    canonical_config_arch,
     convert_metric_id_to_panel_info,
     create_temp_rocprofiler_metrics_path,
     get_arch_alias_to_panel_id,
@@ -454,7 +455,8 @@ class OmniSoC_Base:
         args = self.get_args()
 
         # File id dict
-        config_root_dir = f"{args.config_dir}/{self.__arch}"
+        config_arch = canonical_config_arch(self.__arch) or self.__arch
+        config_root_dir = f"{args.config_dir}/{config_arch}"
         config_filename_dict = {
             filename.name.split("_")[0]: str(filename)
             for filename in Path(config_root_dir).glob("*.yaml")
@@ -606,7 +608,7 @@ class OmniSoC_Base:
         arch = self.__arch
         if not arch:
             return
-        config_root = Path(args.config_dir) / arch
+        config_root = Path(args.config_dir) / (canonical_config_arch(arch) or arch)
         if not config_root.is_dir():
             return
         exclude: set[str] = set()

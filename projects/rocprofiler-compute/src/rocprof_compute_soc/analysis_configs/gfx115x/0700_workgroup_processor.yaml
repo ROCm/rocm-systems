@@ -1,5 +1,5 @@
 # =============================================================================
-# RDNA3.5 (gfx1151) - RDNA3.5 Workgroup Processor (WGP) Performance Metrics
+# RDNA3.5 (gfx115x) - RDNA3.5 Workgroup Processor (WGP) Performance Metrics
 # =============================================================================
 # RDNA3.5 WGP Structure: 2 CUs per WGP, 2 SIMD32 per CU, Wave32 primary wavefront size
 # =============================================================================
@@ -156,8 +156,8 @@ Panel Config:
           unit: (Count + $normUnit)
         # Instructions - Dual VALU (VOPD): row omitted (sq_insts_dual_valu_wave32 unreliable). When
         # restoring, uncomment below, switch to SUM(sq_insts_dual_valu_wave32_sum)/… per sdk_config,
-        # and sync tools/per_arch_metric_definitions/gfx1151_metrics_description.yaml,
-        # docs/data/metrics/gfx1151_metrics.yaml, and SoL prose if needed. Lowercase tokens in the
+        # and sync the per-arch metric description/docs files and SoL prose if needed. Lowercase
+        # tokens in the
         # snippet avoid PMC expansion if pasted verbatim; replace with SQ_* before enabling.
         #   avg: SUM(sq_insts_dual_valu_wave32_sum) / SUM($denom)
         #   min: MIN(sq_insts_dual_valu_wave32_sum / $denom)

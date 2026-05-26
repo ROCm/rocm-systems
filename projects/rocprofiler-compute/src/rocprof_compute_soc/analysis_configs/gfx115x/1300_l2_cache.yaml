@@ -1,5 +1,5 @@
 # =============================================================================
-# RDNA3.5 (gfx1151) - RDNA3.5 GL2 Cache (L2 Cache) Performance Metrics
+# RDNA3.5 (gfx115x) - RDNA3.5 GL2 Cache (L2 Cache) Performance Metrics
 # =============================================================================
 # GL2 cache is the GPU's final on-chip cache shared across all compute units
 # Cache hierarchy: GL0 Cache (TCP) -> GL1 Cache -> GL2 Cache -> System Memory via GCEA

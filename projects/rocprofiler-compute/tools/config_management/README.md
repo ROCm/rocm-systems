@@ -29,7 +29,7 @@ rocprofiler-compute/
 │       ├── gfx90a/
 │       ├── gfx940/
 │       ├── gfx950/                      # latest_arch for CDNA (gfx9)
-│       ├── gfx1151/                     # RDNA 3.5 (gfx115*)
+│       ├── gfx115x/                     # RDNA 3.5 shared analysis configs
 │       ├── gfx9_config_template.yaml    # CDNA (gfx9) panel contract
 │       └── gfx11_config_template.yaml   # RDNA 3.5 (gfx115*) panel contract
 │
@@ -56,9 +56,10 @@ rocprofiler-compute/
 ```bash
 src/rocprof_compute_soc/analysis_configs/gfx9_config_template.yaml
 ```
-- RDNA 3.5 configs (`gfx11**`, e.g. `gfx1151`) use a separate template
-  (`gfx11_config_template.yaml`) and do not participate in gfx9 deltas.
-  Regenerate it with `parse_config_template.py` from a gfx11** directory.
+- RDNA 3.5 configs (`gfx115*`) use the shared `gfx115x` directory along with a
+  separate template (`gfx11_config_template.yaml`) and do not participate in
+  gfx9 deltas. Regenerate it with `parse_config_template.py` from the shared
+  RDNA 3.5 config directory.
 
 ### Panel YAMLs
 
@@ -291,7 +292,7 @@ tools/per_arch_metric_definitions/
   ├── gfx{908,90a,942,950,1151}_metrics_description.yaml   # plain + rst + unit
 
 docs/data/metrics/
-  └── gfx{908,90a,942,950,1151}_metrics.yaml               # rst + unit (generated)
+  └── <arch>_metrics.yaml                                  # per-arch rst + unit (generated)
 ```
 
 **After editing panel `metrics_description` sections:**
@@ -300,10 +301,10 @@ python tools/config_management/metric_description_manager.py --sync-all src/rocp
 python tools/config_management/metric_description_manager.py --generate-docs
 ```
 
-To regenerate the docs YAML for a single architecture without rewriting the others (for example, gfx1151 only):
+To regenerate the docs YAML for a single architecture without rewriting the others:
 
 ```bash
-python tools/config_management/metric_description_manager.py --generate-docs --docs-arch gfx1151
+python tools/config_management/metric_description_manager.py --generate-docs --docs-arch <arch>
 ```
 
 **Manual RST edits:** Edit per-arch YAMLs directly. The framework preserves an edit when its `rst` differs from `plain`.

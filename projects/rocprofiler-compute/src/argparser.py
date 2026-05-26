@@ -139,14 +139,14 @@ def add_general_group(
         "--list-metrics",
         dest="list_metrics",
         metavar="",
-        choices=supported_archs.keys(),  # ["gfx908", "gfx90a"],
+        choices=supported_archs.keys(),
         help=print_avail_arch(list(supported_archs.keys()), "metrics"),
     )
     general_group.add_argument(
         "--list-blocks",
         dest="list_blocks",
         metavar="",
-        choices=supported_archs.keys(),  # ["gfx908", "gfx90a"],
+        choices=supported_archs.keys(),
         help=print_avail_arch(list(supported_archs.keys()), "blocks"),
     )
     general_group.add_argument(

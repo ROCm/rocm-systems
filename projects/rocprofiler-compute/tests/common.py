@@ -25,7 +25,9 @@ SUPPORTED_ARCHS = {
     "gfx941": {"mi300": ["MI300X_A0"]},
     "gfx942": {"mi300": ["MI300A_A1", "MI300X_A1"]},
     "gfx950": {"mi350": ["MI350"]},
+    "gfx1150": {"rdna35_point_1": ["RDNA35_POINT_1"]},
     "gfx1151": {"rdna35_halo": ["RDNA35_HALO"]},
+    "gfx1152": {"rdna35_point_2": ["RDNA35_POINT_2"]},
 }
 
 
@@ -262,7 +264,7 @@ def skip_unsupported_pc_sampling_soc(is_stochastic=False):
     """Skip PC-sampling tests on SoCs that do not support the selected mode."""
     _, soc = gpu_soc()
 
-    unsupported_socs = {"MI100", "RDNA35_HALO"}
+    unsupported_socs = {"MI100", "RDNA35_POINT_1", "RDNA35_HALO", "RDNA35_POINT_2"}
     if is_stochastic:
         unsupported_socs.add("MI200")
 

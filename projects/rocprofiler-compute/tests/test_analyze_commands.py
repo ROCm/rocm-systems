@@ -259,8 +259,9 @@ def test_roof_mem_levels(binary_handler_analyze_rocprof_compute, mem_level):
 def test_roofline_missing_file_handling():
     """cli_generate_plot with empty ai_data returns None."""
 
+    import pandas as pd
+
     from roofline.roofline_main import Roofline
-    from utils.file_io import load_sys_info
     from utils.specs import generate_machine_specs
 
     class MockArgs:
@@ -272,7 +273,7 @@ def test_roofline_missing_file_handling():
 
     args = MockArgs()
     workload_dir = common.setup_workload_dir(roofline_dir)
-    sys_info = load_sys_info(f"{workload_dir}/sysinfo.csv")
+    sys_info = pd.read_csv(f"{workload_dir}/sysinfo.csv")
     sys_info_dict = {key: value[0] for key, value in sys_info.to_dict("list").items()}
     mspec = generate_machine_specs(args, sys_info_dict)
 
@@ -295,8 +296,9 @@ def test_roofline_missing_file_handling():
 def test_roofline_invalid_datatype_cli():
     """cli_generate_plot with invalid datatype returns None."""
 
+    import pandas as pd
+
     from roofline.roofline_main import Roofline
-    from utils.file_io import load_sys_info
     from utils.specs import generate_machine_specs
 
     class MockArgs:
@@ -309,7 +311,7 @@ def test_roofline_invalid_datatype_cli():
     args = MockArgs()
 
     workload_dir = common.setup_workload_dir(roofline_dir)
-    sys_info = load_sys_info(f"{workload_dir}/sysinfo.csv")
+    sys_info = pd.read_csv(f"{workload_dir}/sysinfo.csv")
     sys_info_dict = {key: value[0] for key, value in sys_info.to_dict("list").items()}
     mspec = generate_machine_specs(args, sys_info_dict)
 

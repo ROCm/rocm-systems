@@ -1,5 +1,5 @@
 # =============================================================================
-# RDNA3.5 (gfx1151) - RDNA3.5 Roofline Performance Metrics
+# RDNA3.5 (gfx115x) - RDNA3.5 Roofline Performance Metrics
 # =============================================================================
 # RDNA 3.5: VALU FLOP roofline from SQ_INSTS_VALU*; WMMA (separate ISA) is not a dedicated row.
 # Cache hierarchy: TCP Cache (GL0) -> GL1 Cache -> GL2 Cache -> System Memory

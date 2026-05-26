@@ -28,6 +28,7 @@ GPU_SPEC_PATH = PROJECT_ROOT / "src" / "utils" / "mi_gpu_spec.yaml"
 
 # Make src/ importable so we can reuse the canonical counter definitions.
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
+from utils.utils_common import canonical_config_arch  # noqa: E402
 from utils.utils_counter_defs import (  # noqa: E402
     counter_to_block,
     extract_counters,
@@ -57,7 +58,7 @@ def load_analysis_configs(arch: str) -> dict[int, dict[str, dict]]:
     ``list(result[table_id])`` gives the ordered name list needed for
     index-based lookups.
     """
-    arch_dir = ANALYSIS_DIR / arch
+    arch_dir = ANALYSIS_DIR / (canonical_config_arch(arch) or arch)
     if not arch_dir.is_dir():
         return {}
     result: dict[int, dict[str, dict]] = {}
@@ -130,21 +131,13 @@ def validate() -> list[str]:
     errors: list[str] = []
     perfmon_configs = load_perfmon_configs()
     gpu_series_map = load_gpu_series_mapping()
+    shared_arch_expansions = {"gfx115x": ["gfx1150", "gfx1151", "gfx1152"]}
 
     for sets_path in sorted(SETS_DIR.glob("gfx*_sets.yaml")):
         arch = sets_path.stem.replace("_sets", "")
-        gpu_series = gpu_series_map.get(arch)
-        if not gpu_series:
-            errors.append(
-                f"[{arch}] arch missing from mi_gpu_spec.yaml; "
-                f"add it under mi_gpu_spec.<series>.gpu_archs"
-            )
-            continue
         sets_data = yaml.safe_load(sets_path.read_text())
-
-        # Load analysis configs once per arch
         analysis = load_analysis_configs(arch)
-        limits = perfmon_configs.get(arch)
+        target_arches = shared_arch_expansions.get(arch, [arch])
 
         for s in sets_data.get("sets", []):
             set_option = s.get("set_option", "<unknown>")
@@ -208,28 +201,40 @@ def validate() -> list[str]:
                             else str(formula)
                         )
 
-            # --- Check 2: counters fit in single pass ---
-            if not formula_texts or limits is None:
+            if not formula_texts:
                 continue
 
-            counters = extract_counters("\n".join(formula_texts), gpu_series)
-            # *_ACCUM is the per-bucket alias for SQ_ACCUM_PREV_HIRES, which is
-            # injected automatically by the profiler for level counters
-            counters = {c for c in counters if not c.endswith("_ACCUM")}
-            block_counters: dict[str, set[str]] = defaultdict(set)
-            for c in counters:
-                block_counters[counter_to_block(c)].add(c)
-
-            for block, block_ctrs in sorted(block_counters.items()):
-                if block not in limits:
-                    continue
-                if len(block_ctrs) > limits[block]:
+            for target_arch in target_arches:
+                gpu_series = gpu_series_map.get(target_arch)
+                if not gpu_series:
                     errors.append(
-                        f"[{arch}] set '{set_option}': block {block} needs "
-                        f"{len(block_ctrs)} counters but limit is "
-                        f"{limits[block]}. "
-                        f"Counters: {sorted(block_ctrs)}"
+                        f"[{target_arch}] arch missing from mi_gpu_spec.yaml; "
+                        f"add it under mi_gpu_spec.<series>.gpu_archs"
                     )
+                    continue
+
+                limits = perfmon_configs.get(target_arch)
+                if limits is None:
+                    continue
+
+                counters = extract_counters("\n".join(formula_texts), gpu_series)
+                # *_ACCUM is the per-bucket alias for SQ_ACCUM_PREV_HIRES, which is
+                # injected automatically by the profiler for level counters
+                counters = {c for c in counters if not c.endswith("_ACCUM")}
+                block_counters: dict[str, set[str]] = defaultdict(set)
+                for c in counters:
+                    block_counters[counter_to_block(c)].add(c)
+
+                for block, block_ctrs in sorted(block_counters.items()):
+                    if block not in limits:
+                        continue
+                    if len(block_ctrs) > limits[block]:
+                        errors.append(
+                            f"[{target_arch}] set '{set_option}': block {block} needs "
+                            f"{len(block_ctrs)} counters but limit is "
+                            f"{limits[block]}. "
+                            f"Counters: {sorted(block_ctrs)}"
+                        )
 
     return errors
 

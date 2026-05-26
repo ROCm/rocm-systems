@@ -91,8 +91,8 @@ for context_name, section_name in cdna_section_map.items():
                 "data": arch_metrics[arch][section_name],
             }
 
-# Load gfx1151 (RDNA) metrics YAML
-with open("data/metrics/gfx1151_metrics.yaml") as f:
+# Load gfx115x (RDNA 3.5) metrics YAML
+with open("data/metrics/gfx115x_metrics.yaml") as f:
     gfx1151_metrics = yaml.safe_load(f)
 
 # RDNA gfx1151 section mapping: jinja context id -> YAML section name
