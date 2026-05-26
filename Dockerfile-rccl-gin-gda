@@ -121,18 +121,17 @@ ARG GPU_TARGETS=gfx950
 # projects/ always exists even in a sparse checkout, so COPY never fails;
 # individual subdirs are checked in shell before use.
 ARG USE_LOCAL_SRC=0
-COPY projects/ /tmp/local/projects/
-# git clean equivalent: scrub any build artifacts that came from the worktree
-RUN find /tmp/local -name CMakeCache.txt -delete \
- && find /tmp/local -name CMakeFiles -type d -exec rm -rf {} + 2>/dev/null; \
-    find /tmp/local -name build -type d -exec rm -rf {} + 2>/dev/null; true
 
 ## building rocSHMEM
 ARG ROCSHMEM_BRANCH=users/abouteiller/gin-stage1-wip
 ARG ROCSHMEM_CACHE_BUST=1
+COPY projects/rocshmem/ /tmp/local/projects/rocshmem/
 ENV ROCSHMEM_INSTALL_DIR=${WORKDIR}/rocshmem
 RUN if [ "${USE_LOCAL_SRC}" = "1" ]; then \
       [ -d /tmp/local/projects/rocshmem ] || { echo "ERROR: projects/rocshmem not in build context"; exit 1; }; \
+      find /tmp/local/projects/rocshmem -name CMakeCache.txt -delete && \
+      find /tmp/local/projects/rocshmem -name CMakeFiles -type d -exec rm -rf {} + 2>/dev/null; \
+      find /tmp/local/projects/rocshmem -name build -type d -exec rm -rf {} + 2>/dev/null; \
       mkdir -p ${WORKDIR}/rocshmem/src/projects && \
       cp -r /tmp/local/projects/rocshmem ${WORKDIR}/rocshmem/src/projects/rocshmem; \
     else \
@@ -144,7 +143,7 @@ RUN if [ "${USE_LOCAL_SRC}" = "1" ]; then \
 RUN cd rocshmem/src/projects/rocshmem \
  && mkdir -p build && cd build \
  && ../scripts/build_configs/all_backends \
-#      -DBUILD_DEBUG_TRACE_DEVICE=ON -DBUILD_DEBUG_DEVICE=ON -DBUILD_DEBUG_TRACE_HOST=ON \
+      -DBUILD_DEBUG_TRACE_DEVICE=ON -DBUILD_DEBUG_DEVICE=ON -DBUILD_DEBUG_TRACE_HOST=ON \
       -DMPI_ROOT=${MPI_INSTALL_DIR} \
       -DUSE_EXTERNAL_MPI=OFF \
       -DGPU_TARGETS=${GPU_TARGETS} \
@@ -155,11 +154,16 @@ RUN cd rocshmem/src/projects/rocshmem \
 #ARG RCCL_BRANCH=users/prasanna-amd/nccl-sync-v2-28-9-gin-rebased-0501
 ARG RCCL_BRANCH=users/abouteiller/gin-stage1-wip
 ARG RCCL_CACHE_BUST=1
+COPY projects/rccl/      /tmp/local/projects/rccl/
+COPY projects/rccl-tests/ /tmp/local/projects/rccl-tests/
 ENV RCCL_INSTALL_PREFIX=${WORKDIR}/rccl
 ENV ONLY_FUNCS="SendRecv|AlltoAllPivot|AlltoAllGda|AlltoAllvGda"
 RUN if [ "${USE_LOCAL_SRC}" = "1" ]; then \
       [ -d /tmp/local/projects/rccl ]       || { echo "ERROR: projects/rccl not in build context";       exit 1; }; \
       [ -d /tmp/local/projects/rccl-tests ] || { echo "ERROR: projects/rccl-tests not in build context"; exit 1; }; \
+      find /tmp/local/projects/rccl /tmp/local/projects/rccl-tests -name CMakeCache.txt -delete && \
+      find /tmp/local/projects/rccl /tmp/local/projects/rccl-tests -name CMakeFiles -type d -exec rm -rf {} + 2>/dev/null; \
+      find /tmp/local/projects/rccl /tmp/local/projects/rccl-tests -name build -type d -exec rm -rf {} + 2>/dev/null; \
       mkdir -p ${WORKDIR}/rccl/src/projects && \
       cp -r /tmp/local/projects/rccl       ${WORKDIR}/rccl/src/projects/rccl && \
       cp -r /tmp/local/projects/rccl-tests ${WORKDIR}/rccl/src/projects/rccl-tests; \
