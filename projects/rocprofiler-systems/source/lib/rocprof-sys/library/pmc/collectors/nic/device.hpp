@@ -66,8 +66,8 @@ public:
     /**
      * @brief Collect current NIC RDMA metrics.
      *
-     * Queries the first RDMA port for statistics and extracts the
-     * supported NIC RDMA metrics.
+     * Queries the first RDMA port for statistics and extracts
+     * all metrics enumerated by METRIC_MAP.
      *
      * @return Collected metrics (zeros if query fails)
      */
