@@ -45,6 +45,11 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
     endif()
 endif()
 
+# --- Tests ---
+if(BUILD_TESTING)
+    add_subdirectory(tests)
+endif()
+
 # --- Install / export (standalone or when parent opts in) ---
 if(SIMDOJO_STANDALONE OR SIMDOJO_INSTALL)
     include(CMakePackageConfigHelpers)
