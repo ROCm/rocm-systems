@@ -477,6 +477,104 @@ void IPCBackend::cleanup_wrk_sync_buffer() {
   psync_allocator_->deallocate(wrk_sync_pool_);
 }
 
+int IPCBackend::buffer_register(void *addr, size_t length) {
+  LOG_TRACE("IPCBackend::buffer_register addr=%p length=%zu", addr, length);
+
+  int err = Backend::buffer_register(addr, length);
+  if (err != ROCSHMEM_SUCCESS) {
+    LOG_TRACE("IPCBackend::buffer_register FAIL: Backend::buffer_register returned %d", err);
+    return err;
+  }
+
+  IpcUserBuffer ubuf;
+  ubuf.addr = addr;
+  ubuf.length = length;
+  psync_allocator_->allocate(reinterpret_cast<void**>(&ubuf.bases),
+                              num_pes * sizeof(char*));
+
+  // Detect memory type: hipIpcGetMemHandle fails on VMM/cuMem allocations
+  hipIpcMemHandle_t probe_handle;
+  hipError_t hip_err = hipIpcGetMemHandle(&probe_handle, addr);
+
+  ubuf.is_vmm = (hip_err != hipSuccess);
+
+  if (!ubuf.is_vmm) {
+    // hipMalloc'd memory — use IPC handle exchange
+    LOG_TRACE("IPCBackend::buffer_register: hipMalloc memory, using IPC handles for %p", addr);
+
+    HIPIpcHandleVec *ipc_handles = psync_allocator_->AllocateIpcHandleVec(num_pes);
+    CHECK_HIP(psync_allocator_->GetIpcHandle(addr, ipc_handles->GetHandleVecElem(my_pe)));
+
+    size_t ipc_handle_size = psync_allocator_->GetIpcHandleSize();
+    if (backend_comm != MPI_COMM_NULL) {
+      mpilib_ftable_.Allgather(MPI_IN_PLACE, ipc_handle_size, MPI_CHAR,
+                               ipc_handles->GetHandleVecElem(0), ipc_handle_size, MPI_CHAR, backend_comm);
+    } else {
+      backend_bootstr->allGather(ipc_handles->GetHandleVecElem(0), ipc_handle_size);
+    }
+
+    for (int i = 0; i < num_pes; i++) {
+      if (i != my_pe) {
+        CHECK_HIP(psync_allocator_->OpenIpcHandle(reinterpret_cast<void**>(&ubuf.bases[i]),
+                                                   ipc_handles->GetHandleVecElem(i)));
+        LOG_TRACE("IPCBackend::buffer_register: PE %d IPC base=%p", i, ubuf.bases[i]);
+      } else {
+        ubuf.bases[i] = reinterpret_cast<char*>(addr);
+      }
+    }
+    delete ipc_handles;
+  } else {
+    // VMM/cuMem memory — pointers are already P2P accessible on same node,
+    // just exchange base addresses so putmem can compute remote offsets
+    LOG_TRACE("IPCBackend::buffer_register: VMM/cuMem memory (hipIpcGetMemHandle=%d), "
+              "exchanging raw pointers for %p", hip_err, addr);
+
+    // Allgather of raw device pointers (each PE contributes its local VA)
+    char** host_bases = (char**)malloc(num_pes * sizeof(char*));
+    memset(host_bases, 0, num_pes * sizeof(char*));
+    host_bases[my_pe] = reinterpret_cast<char*>(addr);
+
+    if (backend_comm != MPI_COMM_NULL) {
+      mpilib_ftable_.Allgather(MPI_IN_PLACE, sizeof(char*), MPI_CHAR,
+                               host_bases, sizeof(char*), MPI_CHAR, backend_comm);
+    } else {
+      backend_bootstr->allGather(host_bases, sizeof(char*));
+    }
+
+    for (int i = 0; i < num_pes; i++) {
+      ubuf.bases[i] = host_bases[i];
+      LOG_TRACE("IPCBackend::buffer_register: PE %d VMM base=%p", i, ubuf.bases[i]);
+    }
+    free(host_bases);
+  }
+
+  user_buffers_.push_back(ubuf);
+  LOG_TRACE("IPCBackend::buffer_register OK: %p +%zu (total user buffers: %zu)",
+            addr, length, user_buffers_.size());
+  return ROCSHMEM_SUCCESS;
+}
+
+int IPCBackend::buffer_unregister(void *addr) {
+  int err = Backend::buffer_unregister(addr);
+  if (err != ROCSHMEM_SUCCESS) return err;
+
+  for (auto it = user_buffers_.begin(); it != user_buffers_.end(); ++it) {
+    if (it->addr == addr) {
+      if (!it->is_vmm) {
+        for (int i = 0; i < num_pes; i++) {
+          if (i != my_pe) {
+            CHECK_HIP(psync_allocator_->CloseIpcHandle(it->bases[i]));
+          }
+        }
+      }
+      psync_allocator_->deallocate(it->bases);
+      user_buffers_.erase(it);
+      break;
+    }
+  }
+  return ROCSHMEM_SUCCESS;
+}
+
 void IPCBackend::setup_fence_buffer() {
   /*
   * Allocate memory for fence
