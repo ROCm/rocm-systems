@@ -23,7 +23,6 @@
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/aqlprofile/aqlprofile.hpp"
 #include "lib/common/environment.hpp"
-#include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
@@ -60,8 +59,6 @@ namespace agent
 {
 namespace
 {
-namespace fs = ::rocprofiler::common::filesystem;
-
 struct bdf_info
 {
     uint32_t domain{};
