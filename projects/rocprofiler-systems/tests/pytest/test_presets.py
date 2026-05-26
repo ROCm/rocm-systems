@@ -264,6 +264,116 @@ class TestRunDomainFlags(RocprofsysTest):
 
 
 # ============================================================================
+# Sampling target flags (--gpus / --cpus / --ai-nics) stand alone:
+# they must not require --device / --host on the command line, so presets
+# that already enable the matching backend (e.g. trace-hpc, trace-gpu set
+# ROCPROFSYS_USE_AMD_SMI=true) can compose with them.
+# ============================================================================
+
+
+@pytest.mark.timeout(60)
+@pytest.mark.class_name("run-sampling-target-flags")
+class TestRunSamplingTargetFlags(RocprofsysTest):
+    @pytest.mark.sys_run
+    def test_gpus_without_device(self):
+        result = self.run_test(
+            "baseline",
+            target="rocprof-sys-run",
+            run_args=["--gpus=0", "-v", "2", "--", "ls"],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(result, pass_regex=["ROCPROFSYS_SAMPLING_GPUS=0"])
+
+    @pytest.mark.sys_run
+    def test_cpus_without_host(self):
+        result = self.run_test(
+            "baseline",
+            target="rocprof-sys-run",
+            run_args=["--cpus=0-3", "-v", "2", "--", "ls"],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(result, pass_regex=["ROCPROFSYS_SAMPLING_CPUS=0-3"])
+
+    @pytest.mark.sys_run
+    def test_ai_nics_without_device(self):
+        result = self.run_test(
+            "baseline",
+            target="rocprof-sys-run",
+            run_args=["--ai-nics=nic0", "-v", "2", "--", "ls"],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(result, pass_regex=["ROCPROFSYS_SAMPLING_AINICS=nic0"])
+
+    @pytest.mark.sys_run
+    @pytest.mark.parametrize("preset", ["trace-hpc", "trace-gpu"])
+    def test_preset_plus_gpus(self, preset):
+        result = self.run_test(
+            "baseline",
+            target="rocprof-sys-run",
+            run_args=[f"--preset={preset}", "--gpus=0", "-v", "2", "--", "ls"],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(
+            result,
+            pass_regex=[
+                "ROCPROFSYS_SAMPLING_GPUS=0",
+                "ROCPROFSYS_USE_AMD_SMI=true",
+            ],
+        )
+
+
+@pytest.mark.timeout(60)
+@pytest.mark.class_name("sample-sampling-target-flags")
+class TestSampleSamplingTargetFlags(RocprofsysTest):
+    @pytest.mark.sampling
+    def test_gpus_without_device(self):
+        result = self.run_test(
+            "baseline",
+            target="rocprof-sys-sample",
+            run_args=["--gpus=0", "-v", "2", "--", "ls"],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(result, pass_regex=["ROCPROFSYS_SAMPLING_GPUS=0"])
+
+    @pytest.mark.sampling
+    def test_cpus_without_host(self):
+        result = self.run_test(
+            "baseline",
+            target="rocprof-sys-sample",
+            run_args=["--cpus=0-3", "-v", "2", "--", "ls"],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(result, pass_regex=["ROCPROFSYS_SAMPLING_CPUS=0-3"])
+
+    @pytest.mark.sampling
+    def test_ai_nics_without_device(self):
+        result = self.run_test(
+            "baseline",
+            target="rocprof-sys-sample",
+            run_args=["--ai-nics=nic0", "-v", "2", "--", "ls"],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(result, pass_regex=["ROCPROFSYS_SAMPLING_AINICS=nic0"])
+
+    @pytest.mark.sampling
+    @pytest.mark.parametrize("preset", ["trace-hpc", "trace-gpu"])
+    def test_preset_plus_gpus(self, preset):
+        result = self.run_test(
+            "baseline",
+            target="rocprof-sys-sample",
+            run_args=[f"--preset={preset}", "--gpus=0", "-v", "2", "--", "ls"],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(
+            result,
+            pass_regex=[
+                "ROCPROFSYS_SAMPLING_GPUS=0",
+                "ROCPROFSYS_USE_AMD_SMI=true",
+            ],
+        )
+
+
+# ============================================================================
 # Export Config Tests
 # ============================================================================
 
