@@ -110,12 +110,50 @@ public:
     void on_source_drained(int source_id, std::vector<char> bytes);
     void finalize();
 
+    // Switch the sink into "append with file lock" mode for cross-process
+    // aggregation: finalize() opens the target with O_APPEND, takes an
+    // exclusive flock for the duration of the write, releases, and closes.
+    // `seq_id_base` shifts this process's seq_id namespace so concurrent
+    // appenders (one rocprof-sys instance per launcher rank) do not collide
+    // on trusted_packet_sequence_id. Typically derived from
+    // mpi::rank_from_env() multiplied by a per-rank stride. Append mode is
+    // used by the live + cached MPI merge paths so the same mechanism
+    // works whether rocprof-sys is linked against MPI or only built with
+    // MPI headers (and the workload is launched under mpiexec/srun).
+    void set_append_mode(std::uint32_t seq_id_base) noexcept;
+
 private:
     output_file_registry*                  m_registry{ nullptr };
     std::string                            m_output_filename_override{};
     std::vector<char>                      m_buffer{};
     std::unordered_map<int, std::uint32_t> m_source_seq_ids{};
     std::uint32_t                          m_next_seq_id{ 1 };
+    bool                                   m_append_mode{ false };
+};
+
+// Composite sink that fans every drained source out to both wrapped sinks.
+// Used by the cached `full` layout where each rank must write per-pid files
+// (per_pid_file_sink) AND contribute to the cross-rank merged file
+// (single_file_sink in append-with-flock mode). The per-drain bytes are
+// copied once so each sub-sink consumes its own copy; cached drains run at
+// finalize time (not on the hot path) so the copy is acceptable.
+class tee_sink
+{
+public:
+    tee_sink(per_pid_file_sink per_pid, single_file_sink single_file);
+
+    tee_sink(tee_sink&&) noexcept            = default;
+    tee_sink& operator=(tee_sink&&) noexcept = default;
+    tee_sink(const tee_sink&)                = delete;
+    tee_sink& operator=(const tee_sink&)     = delete;
+    ~tee_sink()                              = default;
+
+    void on_source_drained(int source_id, std::vector<char> bytes);
+    void finalize();
+
+private:
+    per_pid_file_sink m_per_pid;
+    single_file_sink  m_single_file;
 };
 
 // Test-only sink: captures (source_id, bytes) tuples in arrival order so
@@ -197,6 +235,6 @@ private:
 // the live driver owns its sink concretely and does not route through the
 // engine. polymorphic_sink_view lets tests inject arbitrary fixtures.
 using trace_sink = std::variant<per_pid_file_sink, single_file_sink, recording_sink,
-                                polymorphic_sink_view>;
+                                polymorphic_sink_view, tee_sink>;
 }  // namespace core
 }  // namespace rocprofsys

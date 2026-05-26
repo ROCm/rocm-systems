@@ -161,14 +161,13 @@ class TestMPI(RocprofsysTest):
             "--min-instructions",
             "0",
         ]
-        # `single_file_only` produces exactly one merged trace at the base
-        # filename via single_file_sink on rank 0; no per-rank files, no
-        # separate merged.proto.
-        REWRITE_PASS_REGEX = [r"perfetto-trace\.proto"]
+        # `single_file_only` makes every rank append its rewritten bytes to
+        # the shared `merged.proto` under O_APPEND + flock. No per-rank
+        # `perfetto-trace-N.proto` files are written.
+        REWRITE_PASS_REGEX = [r"merged\.proto"]
         REWRITE_FAIL_REGEX = [
             r"perfetto-trace-0\.proto",
             r"perfetto-trace-1\.proto",
-            r"merged\.proto",
         ]
         ENV = {
             "ROCPROFSYS_VERBOSE": "1",

@@ -6,9 +6,11 @@
 
 #include "core/agent_manager.hpp"
 #include "core/config.hpp"
+#include "core/mpi.hpp"
 #include "core/output_file_registry.hpp"
 #include "core/perfetto/engine.hpp"
 #include "core/perfetto/sinks.hpp"
+#include "core/timemory.hpp"
 #include "core/trace_cache/data_types.hpp"
 #include "core/trace_cache/discovery.hpp"
 #include "core/trace_cache/post_processor.hpp"
@@ -17,7 +19,9 @@
 #include "logger/debug.hpp"
 
 #include <memory>
+#include <string>
 #include <unistd.h>
+#include <utility>
 
 namespace rocprofsys
 {
@@ -25,6 +29,32 @@ namespace trace_cache
 {
 namespace
 {
+// Stride between per-process seq_id ranges in the cross-process merged
+// output. Each rocprof-sys instance (one per launcher rank) gets a disjoint
+// slice [rank*STRIDE+1, (rank+1)*STRIDE] of the trusted_packet_sequence_id
+// space when contributing to the shared merged file under append-with-flock
+// mode. Mirrors the matching constant in core/perfetto/driver.cpp.
+constexpr std::uint32_t MERGED_SEQ_ID_RANK_STRIDE = 1u << 20;
+
+// Build the single_file_sink that contributes this rank's rewritten bytes
+// to the shared merged.proto via O_APPEND + flock. Used by both the
+// `single_file_only` and `full` cached layouts; the `full` layout wraps
+// it in a tee_sink alongside per_pid_file_sink so per-pid files are
+// written too. The shared file name is a literal so every launcher rank
+// targets the same path; per-pid files keep using
+// config::get_perfetto_output_filename for their own rank/pid-suffixed
+// names.
+core::single_file_sink
+make_merged_append_sink(output_file_registry& registry)
+{
+    const auto base_filename = config::get_perfetto_output_filename();
+    const auto merged_path   = filepath::dirname(base_filename) + "/merged.proto";
+    const auto env_rank      = static_cast<std::uint32_t>(mpi::rank_from_env());
+    auto       sink          = core::single_file_sink{ registry, merged_path };
+    sink.set_append_mode(env_rank * MERGED_SEQ_ID_RANK_STRIDE);
+    return sink;
+}
+
 // RAII orchestrator for the cached-perfetto post-processing pipeline:
 // owns the perfetto_engine + trace_sink + track_registry trio, wires the
 // engine into the active post_processor on construction, and drives the
@@ -36,23 +66,37 @@ class cached_perfetto_session
 {
 public:
     cached_perfetto_session(output_file_registry& registry, pid_t root_pid,
-                            bool single_file_layout, const std::vector<int>& source_pids,
-                            post_processor& processor)
+                            const std::string&      layout,
+                            const std::vector<int>& source_pids,
+                            post_processor&         processor)
     : m_engine{ std::make_unique<core::perfetto_engine>(
           core::build_engine_config_from_settings()) }
     {
         m_engine->init_sdk();
         m_tracks = std::make_unique<rocprofsys::track_registry>();
-        if(single_file_layout)
+
+        if(layout == "single_file_only")
         {
+            // Each rank's drained bytes go straight to the shared merged file
+            // via append + flock; no per-rank single_file output is produced.
             m_sink =
-                std::make_unique<core::trace_sink>(core::single_file_sink{ registry });
+                std::make_unique<core::trace_sink>(make_merged_append_sink(registry));
+        }
+        else if(layout == "full")
+        {
+            // Per-pid files written by per_pid_file_sink during drain; the
+            // single_file branch appends this rank's rewritten bytes to the
+            // shared merged.proto.
+            m_sink = std::make_unique<core::trace_sink>(
+                core::tee_sink{ core::per_pid_file_sink{ root_pid, registry },
+                                make_merged_append_sink(registry) });
         }
         else
         {
             m_sink = std::make_unique<core::trace_sink>(
                 core::per_pid_file_sink{ root_pid, registry });
         }
+
         m_engine->start(core::perfetto_engine::mode::cached_interceptor, *m_sink);
         m_engine->preregister_pids(source_pids);
         processor.set_perfetto_engine(m_engine.get(), m_tracks.get());
@@ -151,8 +195,7 @@ cache_manager::post_process_bulk(output_file_registry& _output_registry,
         LOG_INFO("Processing {} trace cache configurations", processor_configs.size());
         post_processor processor{ _tracker, _output_registry };
 
-        const auto output_layout      = config::get_perfetto_output_layout();
-        const bool single_file_layout = (output_layout == "single_file_only");
+        const auto output_layout = config::get_perfetto_output_layout();
 
         std::unique_ptr<cached_perfetto_session> session;
         if(enabled_formats.is_perfetto_enabled())
@@ -165,7 +208,7 @@ cache_manager::post_process_bulk(output_file_registry& _output_registry,
             try
             {
                 session = std::make_unique<cached_perfetto_session>(
-                    _output_registry, static_cast<pid_t>(root_pid), single_file_layout,
+                    _output_registry, static_cast<pid_t>(root_pid), output_layout,
                     source_pids, processor);
             } catch(const std::exception& exp)
             {
@@ -177,16 +220,11 @@ cache_manager::post_process_bulk(output_file_registry& _output_registry,
 
         processor.process(processor_configs, enabled_formats);
 
-        // Triggers engine.stop() + drain via the session destructor before
-        // the merge script (below) reads what the sink wrote.
+        // Session destruction drives engine.stop() which drains into the
+        // sink (per_pid_file_sink writes per-pid files; single_file_sink
+        // and tee_sink finalize() take care of the cross-process append +
+        // flock for the merged file under single_file_only/full layouts).
         session.reset();
-
-        // single_file layout already produced exactly one .proto; running the
-        // merge script would create a redundant merged.proto in the output
-        // directory.
-        if(enabled_formats.is_perfetto_enabled() && get_merge_perfetto_files() &&
-           !single_file_layout)
-            discovery::merge_perfetto_files();
     }
 
     discovery::clear(cache_files);

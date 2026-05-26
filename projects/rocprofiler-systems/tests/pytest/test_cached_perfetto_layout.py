@@ -3,13 +3,26 @@
 
 """Cached-perfetto output-layout coverage.
 
-Runs mpi-example with -np 2 under both values of
-ROCPROFSYS_PERFETTO_OUTPUT_LAYOUT. For 'single_file', asserts each rank
-produces exactly one .proto, the file is well-formed, and the recorded
-pid set matches the rank's logical pid (proves the seq_id rewrite +
-synthetic ProcessTrack pipeline preserves per-pid attribution under
-concatenation). For 'per_process', asserts the per-rank file behaves the
-same as the cached_perfetto_isolation baseline.
+Runs mpi-example with -np 2 under each value of
+ROCPROFSYS_PERFETTO_OUTPUT_LAYOUT:
+
+* ``single_file_only``: a single shared output file produced by every
+  rank appending to it under O_APPEND + flock. The base perfetto filename
+  is the shared target; per-rank files are NOT written. Each rank's
+  rewritten bytes use a disjoint trusted_packet_sequence_id range so the
+  concatenation is semantically clean.
+* ``per_process_only``: per-rank .proto files only, no cross-rank merge.
+  Same per-pid attribution checks as the cached_perfetto_isolation
+  baseline.
+* ``full``: per-rank .proto files AND a shared ``merged.proto`` produced
+  by each rank's tee_sink branch appending under flock. Both outputs are
+  present and well-formed.
+
+The assertions are tolerant of both ROCPROFSYS_USE_MPI=ON and
+ROCPROFSYS_USE_MPI_HEADERS=ON builds because the file-lock-append
+mechanism works without rocprof-sys-internal MPI: under
+MPI_HEADERS-only, the workload is still launched under mpiexec/srun and
+each independent rocprof-sys process appends its slice via flock.
 """
 
 from __future__ import annotations
@@ -49,10 +62,70 @@ def base_env() -> dict[str, str]:
     }
 
 
+def _run_single_file_checks(validator, proto):
+    """Run --single-file-checks; return (pids, slice_count)."""
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(validator),
+            "--input",
+            str(proto),
+            "--single-file-checks",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert completed.returncode == 0, (
+        f"single-file-checks failed for {proto}\n"
+        f"stdout: {completed.stdout}\nstderr: {completed.stderr}"
+    )
+    match = _SINGLE_FILE_REPORT_RE.search(completed.stdout)
+    assert match, (
+        f"validator stdout missing single-file report for {proto}\n"
+        f"stdout: {completed.stdout}"
+    )
+    pid_list_text = match.group(1).strip()
+    slice_count = int(match.group(2))
+    pids = (
+        [int(p) for p in pid_list_text.split(",") if p.strip()]
+        if pid_list_text
+        else []
+    )
+    return pids, slice_count
+
+
+def _run_per_pid_isolation(validator, proto):
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(validator),
+            "--input",
+            str(proto),
+            "--per-pid-isolation",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert completed.returncode == 0, (
+        f"per-pid-isolation check failed for {proto}\n"
+        f"stdout: {completed.stdout}\nstderr: {completed.stderr}"
+    )
+    match = _PID_REPORT_RE.search(completed.stdout)
+    assert match, (
+        f"validator stdout missing pid/slices report for {proto}\n"
+        f"stdout: {completed.stdout}"
+    )
+    return int(match.group(2))
+
+
 @pytest.mark.class_name("cached-perfetto-layout")
 class TestCachedPerfettoLayout(RocprofsysTest):
     @pytest.mark.timeout(180)
-    @pytest.mark.parametrize("layout", ["single_file", "per_process"])
+    @pytest.mark.parametrize(
+        "layout", ["single_file_only", "per_process_only", "full"]
+    )
     def test(self, layout, base_env, tests_dir):
         env = dict(base_env)
         env["ROCPROFSYS_PERFETTO_OUTPUT_LAYOUT"] = layout
@@ -65,82 +138,68 @@ class TestCachedPerfettoLayout(RocprofsysTest):
             num_procs=2,
         )
 
-        proto_files = sorted(result.output_dir.glob("perfetto-trace-*.proto"))
-        assert len(proto_files) == 2, (
-            f"expected 2 per-rank .proto files (one per rank) in "
-            f"{result.output_dir}, found {[p.name for p in proto_files]}"
-        )
-
+        per_rank_files = sorted(result.output_dir.glob("perfetto-trace-*.proto"))
+        merged_path = result.output_dir / "merged.proto"
         validator = tests_dir / "validate-perfetto-proto.py"
 
-        if layout == "single_file":
-            for proto in proto_files:
-                # Each rank writes ONE concatenated single_file output. With
-                # one logical pid per rank (the rank's own pid), the
-                # single-file checks reduce to: > 0 slices, exactly the
-                # rank's pid in the process table.
-                completed = subprocess.run(
-                    [
-                        sys.executable,
-                        str(validator),
-                        "--input",
-                        str(proto),
-                        "--single-file-checks",
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=120,
-                )
-                assert completed.returncode == 0, (
-                    f"single-file-checks failed for {proto}\n"
-                    f"stdout: {completed.stdout}\nstderr: {completed.stderr}"
-                )
-                match = _SINGLE_FILE_REPORT_RE.search(completed.stdout)
-                assert match, (
-                    f"validator stdout missing single-file report for {proto}\n"
-                    f"stdout: {completed.stdout}"
-                )
-                pid_list_text = match.group(1).strip()
-                slice_count = int(match.group(2))
-                pids = (
-                    [int(p) for p in pid_list_text.split(",") if p.strip()]
-                    if pid_list_text
-                    else []
-                )
-                assert slice_count >= _MIN_SLICES_PER_RANK, (
-                    f"{proto} slice count {slice_count} below floor "
-                    f"{_MIN_SLICES_PER_RANK}; possible event drop or attribution loss"
-                )
-                # Synthetic ProcessTrack with the logical pid must produce
-                # exactly one pid in the process table, the rank's own pid.
-                assert len(pids) == 1, (
-                    f"{proto} single_file pid set = {pids}; expected exactly one "
-                    f"(synthetic ProcessTrack attribution failed)"
+        if layout == "single_file_only":
+            # All ranks append to merged.proto under flock; no per-rank
+            # files are written. The merged proto must contain both
+            # ranks' pids in its process table (proves the cross-process
+            # append-with-flock pipeline actually concatenated bytes from
+            # every launcher rank).
+            assert not per_rank_files, (
+                f"single_file_only: per-rank files must NOT be written; found "
+                f"{[p.name for p in per_rank_files]}"
+            )
+            assert merged_path.exists(), (
+                f"single_file_only: expected merged.proto in {result.output_dir}"
+            )
+            pids, slices = _run_single_file_checks(validator, merged_path)
+            assert len(pids) == 2, (
+                f"merged.proto pid set = {pids}; expected exactly 2 "
+                f"(cross-rank append-with-flock attribution failed)"
+            )
+            assert slices >= 2 * _MIN_SLICES_PER_RANK, (
+                f"merged.proto slice count {slices} below floor "
+                f"{2 * _MIN_SLICES_PER_RANK}; a rank's append likely dropped"
+            )
+        elif layout == "per_process_only":
+            assert len(per_rank_files) == 2, (
+                f"per_process_only: expected 2 per-rank .proto files in "
+                f"{result.output_dir}, found {[p.name for p in per_rank_files]}"
+            )
+            assert not merged_path.exists(), (
+                f"per_process_only: must NOT produce a merged.proto"
+            )
+            for proto in per_rank_files:
+                slices = _run_per_pid_isolation(validator, proto)
+                assert slices >= _MIN_SLICES_PER_RANK, (
+                    f"{proto} slice count {slices} below floor "
+                    f"{_MIN_SLICES_PER_RANK}"
                 )
         else:
-            for proto in proto_files:
-                completed = subprocess.run(
-                    [
-                        sys.executable,
-                        str(validator),
-                        "--input",
-                        str(proto),
-                        "--per-pid-isolation",
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=120,
+            # full: per-rank files (per_pid_file_sink branch of tee) AND
+            # merged.proto (single_file branch of tee in append+flock mode).
+            assert len(per_rank_files) == 2, (
+                f"full: expected 2 per-rank .proto files in "
+                f"{result.output_dir}, found {[p.name for p in per_rank_files]}"
+            )
+            assert merged_path.exists(), (
+                f"full: expected merged.proto alongside per-rank files in "
+                f"{result.output_dir}"
+            )
+            for proto in per_rank_files:
+                slices = _run_per_pid_isolation(validator, proto)
+                assert slices >= _MIN_SLICES_PER_RANK, (
+                    f"{proto} slice count {slices} below floor "
+                    f"{_MIN_SLICES_PER_RANK}"
                 )
-                assert completed.returncode == 0, (
-                    f"per_process layout per-pid check failed for {proto}\n"
-                    f"stdout: {completed.stdout}\nstderr: {completed.stderr}"
-                )
-                match = _PID_REPORT_RE.search(completed.stdout)
-                assert match, (
-                    f"validator stdout missing pid/slices report for {proto}\n"
-                    f"stdout: {completed.stdout}"
-                )
-                slices = int(match.group(2))
-                assert (
-                    slices >= _MIN_SLICES_PER_RANK
-                ), f"{proto} slice count {slices} below floor {_MIN_SLICES_PER_RANK}"
+            pids, slices = _run_single_file_checks(validator, merged_path)
+            assert len(pids) == 2, (
+                f"merged.proto pid set = {pids}; expected exactly 2"
+            )
+            assert slices >= 2 * _MIN_SLICES_PER_RANK, (
+                f"merged.proto slice count {slices} below floor "
+                f"{2 * _MIN_SLICES_PER_RANK}"
+            )

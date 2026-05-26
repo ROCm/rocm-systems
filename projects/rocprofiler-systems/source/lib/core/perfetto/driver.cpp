@@ -15,6 +15,7 @@
 #include "logger/debug.hpp"
 
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <fcntl.h>
 #include <fstream>
@@ -77,22 +78,13 @@ std::atomic<live_perfetto_driver*> g_active_driver{ nullptr };
 // callstacks the user does not want world-readable on shared workstations.
 constexpr ::mode_t TMP_FILE_PERMS = 0600;
 
-// Collect each MPI rank's trace bytes into per-rank slots on the root rank so
-// the caller can feed them as separate sources into single_file_sink (whose
-// per-source trusted_packet_sequence_id rewrite eliminates the collisions a
-// raw byte-level concat would produce). Non-root ranks return an empty vector
-// after sending; the no-MPI build returns a single-element wrapper so callers
-// iterate identically. Collective when MPI is initialized — every rank must
-// call it.
-std::vector<std::vector<char>>
-gather_per_rank_trace_bytes(std::vector<char> local_bytes)
-{
-#if defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0
-    return mpi::gather_bytes(std::move(local_bytes));
-#else
-    return { std::move(local_bytes) };
-#endif
-}
+// Stride between per-process seq_id ranges in the cross-process merged
+// output. Each rocprof-sys instance (one per launcher rank) gets a
+// disjoint slice [rank*STRIDE+1, (rank+1)*STRIDE] of the
+// trusted_packet_sequence_id space when writing to the shared merged file
+// under append-with-flock mode. 1<<20 leaves room for ~1M unique
+// sources per rank, well past anything a single trace would produce.
+constexpr std::uint32_t MERGED_SEQ_ID_RANK_STRIDE = 1u << 20;
 
 void
 warn_combined_traces_deprecated_once()
@@ -207,24 +199,22 @@ live_perfetto_driver::post_process(bool&                 perfetto_output_error,
 
     if(want_merged)
     {
-        // gather_per_rank_trace_bytes is collective when MPI is initialized; every
-        // rank must call it even though only rank 0 consumes the returned slots.
-        auto per_rank = gather_per_rank_trace_bytes(std::move(bytes));
-
-        if(dmp::rank() == 0)
-        {
-            const auto base_filename = config::get_perfetto_output_filename();
-            const auto override_path =
-                (layout == "full") ? (filepath::dirname(base_filename) + "/merged.proto")
-                                   : std::string{};
-            auto sink = core::single_file_sink{ registry, override_path };
-            for(std::size_t i = 0; i < per_rank.size(); ++i)
-            {
-                if(!per_rank[i].empty())
-                    sink.on_source_drained(static_cast<int>(i), std::move(per_rank[i]));
-            }
-            sink.finalize();
-        }
+        // Each process writes its rewritten bytes directly to the shared
+        // merged.proto under O_APPEND + flock. Cross-process aggregation
+        // happens at the filesystem level (mirroring what the old shell
+        // cat did) but with single_file_sink's per-source seq_id rewrite
+        // applied, so concatenation is semantically clean even when
+        // rocprof-sys itself is not linked against MPI. The shared file
+        // name is a literal so every rank targets the same path; the
+        // per-rank/per-pid sinks keep using config::get_perfetto_output_filename
+        // for their own rank-suffixed files under `full`.
+        const auto base_filename = config::get_perfetto_output_filename();
+        const auto merged_path   = filepath::dirname(base_filename) + "/merged.proto";
+        const auto env_rank      = static_cast<std::uint32_t>(mpi::rank_from_env());
+        auto       sink          = core::single_file_sink{ registry, merged_path };
+        sink.set_append_mode(env_rank * MERGED_SEQ_ID_RANK_STRIDE);
+        sink.on_source_drained(static_cast<int>(env_rank), std::move(bytes));
+        sink.finalize();
     }
 
     if(m_tmp_file)

@@ -16,6 +16,7 @@
 #include "logger/debug.hpp"
 
 #include <cstdint>
+#include <cstdlib>
 #include <map>
 #include <unordered_map>
 
@@ -186,6 +187,31 @@ inline std::int32_t rank(comm_t = comm_world_v);
 inline std::int32_t size(comm_t = comm_world_v);
 inline void         set_rank(std::int32_t, comm_t = comm_world_v);
 inline void         set_size(std::int32_t, comm_t = comm_world_v);
+
+// Best-effort process rank discovery for code paths that need cross-process
+// coordination without rocprof-sys itself being linked against MPI. When
+// ROCPROFSYS_USE_MPI=ON and MPI is initialized, mpi::rank() is authoritative.
+// In ROCPROFSYS_USE_MPI_HEADERS=ON builds (rocprof-sys observes a workload
+// launched under mpiexec/srun but doesn't link MPI itself), no PMPI call is
+// available, so we probe the launcher's standard rank env vars. Returns 0
+// when no launcher is detected (single-process run).
+inline std::int32_t
+rank_from_env() noexcept
+{
+    if(const char* v = std::getenv("OMPI_COMM_WORLD_RANK")) return std::atoi(v);
+    if(const char* v = std::getenv("PMI_RANK")) return std::atoi(v);
+    if(const char* v = std::getenv("SLURM_PROCID")) return std::atoi(v);
+    return 0;
+}
+
+inline std::int32_t
+size_from_env() noexcept
+{
+    if(const char* v = std::getenv("OMPI_COMM_WORLD_SIZE")) return std::atoi(v);
+    if(const char* v = std::getenv("PMI_SIZE")) return std::atoi(v);
+    if(const char* v = std::getenv("SLURM_NTASKS")) return std::atoi(v);
+    return 1;
+}
 
 //--------------------------------------------------------------------------------------//
 // Currently ROCPROFSYS_MPI_THREAD is just a placeholder for future

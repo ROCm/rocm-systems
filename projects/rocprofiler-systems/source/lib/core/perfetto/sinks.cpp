@@ -11,10 +11,15 @@
 #include "core/utility.hpp"
 #include "logger/debug.hpp"
 
+#include <cerrno>
 #include <cstdio>
+#include <cstring>
+#include <fcntl.h>
 #include <fstream>
 #include <ios>
 #include <string>
+#include <sys/file.h>
+#include <unistd.h>
 #include <utility>
 
 namespace rocprofsys
@@ -164,6 +169,65 @@ void
 per_pid_file_sink::finalize()
 {}
 
+namespace
+{
+// Append the entire payload to the file at `filename` under an exclusive
+// flock that lives only for the duration of the write. flock auto-releases
+// on process exit, so a crash mid-write leaves the partial bytes in place
+// without holding the lock; the next process gets the lock immediately.
+// The lock serializes writers; concurrent readers (e.g. a future merge
+// inspection tool) see whatever flushed bytes existed at their read point.
+bool
+append_with_flock(const std::string& filename, const char* data, std::size_t size,
+                  output_file_registry* registry)
+{
+    int fd = ::open(filename.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0644);
+    if(fd < 0)
+    {
+        emit_open_error_line(filename);
+        return false;
+    }
+
+    if(::flock(fd, LOCK_EX) != 0)
+    {
+        const int err = errno;
+        ::close(fd);
+        LOG_ERROR("single_file_sink: flock(LOCK_EX) failed on '{}': {}", filename,
+                  std::strerror(err));
+        return false;
+    }
+
+    bool        ok     = true;
+    const char* ptr    = data;
+    std::size_t remain = size;
+    while(remain > 0)
+    {
+        const ssize_t n = ::write(fd, ptr, remain);
+        if(n < 0)
+        {
+            const int err = errno;
+            if(err == EINTR) continue;
+            LOG_ERROR("single_file_sink: write to '{}' failed: {}", filename,
+                      std::strerror(err));
+            ok = false;
+            break;
+        }
+        ptr += n;
+        remain -= static_cast<std::size_t>(n);
+    }
+
+    ::flock(fd, LOCK_UN);
+    ::close(fd);
+
+    if(ok)
+    {
+        emit_size_line(filename, size);
+        if(registry) registry->register_file(filename, output_format::perfetto);
+    }
+    return ok;
+}
+}  // namespace
+
 // ----------------------------------------------------------------------------
 // single_file_sink
 // ----------------------------------------------------------------------------
@@ -173,6 +237,16 @@ single_file_sink::single_file_sink(output_file_registry& registry,
 : m_registry{ &registry }
 , m_output_filename_override{ std::move(output_filename_override) }
 {}
+
+void
+single_file_sink::set_append_mode(std::uint32_t seq_id_base) noexcept
+{
+    m_append_mode = true;
+    // Shift this process's seq_id namespace so concurrent appenders do not
+    // collide on trusted_packet_sequence_id. The +1 preserves the existing
+    // "seq_id starts at 1" invariant downstream consumers may rely on.
+    m_next_seq_id = seq_id_base + 1;
+}
 
 void
 single_file_sink::on_source_drained(int source_id, std::vector<char> bytes)
@@ -256,13 +330,44 @@ single_file_sink::finalize()
         return;
     }
 
-    if(!write_proto_to(filename, m_buffer.data(), m_buffer.size(), m_registry))
+    if(m_append_mode)
+    {
+        if(!append_with_flock(filename, m_buffer.data(), m_buffer.size(), m_registry))
+        {
+            LOG_ERROR("single_file_sink: append-with-flock failed for '{}'", filename);
+        }
+    }
+    else if(!write_proto_to(filename, m_buffer.data(), m_buffer.size(), m_registry))
     {
         LOG_ERROR("single_file_sink: failed to open '{}'", filename);
     }
 
     m_buffer.clear();
     m_source_seq_ids.clear();
+}
+
+// ----------------------------------------------------------------------------
+// tee_sink
+// ----------------------------------------------------------------------------
+
+tee_sink::tee_sink(per_pid_file_sink per_pid, single_file_sink single_file)
+: m_per_pid{ std::move(per_pid) }
+, m_single_file{ std::move(single_file) }
+{}
+
+void
+tee_sink::on_source_drained(int source_id, std::vector<char> bytes)
+{
+    auto copy = bytes;
+    m_per_pid.on_source_drained(source_id, std::move(copy));
+    m_single_file.on_source_drained(source_id, std::move(bytes));
+}
+
+void
+tee_sink::finalize()
+{
+    m_per_pid.finalize();
+    m_single_file.finalize();
 }
 
 // ----------------------------------------------------------------------------
