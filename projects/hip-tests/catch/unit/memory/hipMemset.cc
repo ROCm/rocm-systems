@@ -39,7 +39,7 @@ static bool testhipMemset(T* A_h, T* A_d, T memsetval, enum MemsetType type, siz
   A_h = reinterpret_cast<T*>(malloc(Nbytes));
   REQUIRE(A_h != nullptr);
 
-  for (int offset = MAX_OFFSET; offset >= 0; offset--) {
+  for (int offset = isQuickLevel() ? 0 : MAX_OFFSET; offset >= 0; offset--) {
     if (type == hipMemsetTypeDefault) {
       HIP_CHECK(hipMemset(A_d + offset, memsetval, numElements - offset));
 
@@ -81,7 +81,7 @@ template <typename T> static bool testhipMemsetAsync(T* A_h, T* A_d, T memsetval
   A_h = reinterpret_cast<T*>(malloc(Nbytes));
   REQUIRE(A_h != nullptr);
 
-  for (int offset = MAX_OFFSET; offset >= 0; offset--) {
+  for (int offset = isQuickLevel() ? 0 : MAX_OFFSET; offset >= 0; offset--) {
     if (type == hipMemsetTypeDefault) {
       HIP_CHECK(hipMemsetAsync(A_d + offset, memsetval, numElements - offset, stream));
 
@@ -128,9 +128,13 @@ HIP_TEST_CASE(Unit_hipMemset_SetMemoryWithOffset) {
   size_t N;
   bool ret;
 
-  std::tie(N, memsetval, memsetD32val, memsetD16val, memsetD8val) =
-      GENERATE(table<size_t, char, int, int16_t, char>(tableItems));
-  if (isQuickLevel() && N == 256 * 1024 * 1024) return;
+  if (isQuickLevel()) {
+    std::tie(N, memsetval, memsetD32val, memsetD16val, memsetD8val) =
+        std::make_tuple(size_t{10013}, char{0x5a}, int{0xDEADBEEF}, int16_t{0xDEAD}, char{0xDE});
+  } else {
+    std::tie(N, memsetval, memsetD32val, memsetD16val, memsetD8val) =
+        GENERATE(table<size_t, char, int, int16_t, char>(tableItems));
+  }
 
 
   SECTION("Memset with hipMemsetTypeDefault") {
@@ -171,9 +175,13 @@ HIP_TEST_CASE(Unit_hipMemsetAsync_SetMemoryWithOffset) {
   size_t N;
   bool ret;
 
-  std::tie(N, memsetval, memsetD32val, memsetD16val, memsetD8val) =
-      GENERATE(table<size_t, char, int, int16_t, char>(tableItems));
-  if (isQuickLevel() && N == 256 * 1024 * 1024) return;
+  if (isQuickLevel()) {
+    std::tie(N, memsetval, memsetD32val, memsetD16val, memsetD8val) =
+        std::make_tuple(size_t{10013}, char{0x5a}, int{0xDEADBEEF}, int16_t{0xDEAD}, char{0xDE});
+  } else {
+    std::tie(N, memsetval, memsetD32val, memsetD16val, memsetD8val) =
+        GENERATE(table<size_t, char, int, int16_t, char>(tableItems));
+  }
 
 
   SECTION("Memset with hipMemsetTypeDefault") {
