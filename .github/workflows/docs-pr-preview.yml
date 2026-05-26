@@ -71,7 +71,6 @@ jobs:
             --repo "${{ github.repository }}" \
             --pr "${{ github.event.issue.number }}" \
             --config ".github/repos-config.json" \
-            --require-auto-push
 
       - name: Extract first project
         id: extract
