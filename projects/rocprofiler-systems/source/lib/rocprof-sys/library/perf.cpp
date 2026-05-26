@@ -16,16 +16,16 @@
 #include "logger/debug.hpp"
 
 #include <asm/unistd.h>
+#include <csignal>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <ctime>
 #include <fcntl.h>
 #include <linux/perf_event.h>
 #include <mutex>
 #include <poll.h>
 #include <regex>
-#include <signal.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/types.h>

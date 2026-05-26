@@ -73,8 +73,8 @@
 #include <string_view>
 #include <type_traits>
 
+#include <csignal>
 #include <pthread.h>
-#include <signal.h>
 
 namespace tim
 {

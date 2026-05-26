@@ -47,8 +47,8 @@
 #include <type_traits>
 #include <vector>
 
+#include <csignal>
 #include <pthread.h>
-#include <signal.h>
 
 namespace rocprofsys
 {

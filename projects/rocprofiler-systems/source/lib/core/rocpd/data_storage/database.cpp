@@ -58,9 +58,9 @@ process_schema_template(std::string_view schema_content, const std::string& upid
 {
     std::string query = std::string(schema_content);
 
-    std::regex upid_pattern("\\{\\{uuid\\}\\}");
-    std::regex guid_pattern("\\{\\{guid\\}\\}");
-    std::regex view_upid_pattern("\\{\\{view_upid\\}\\}");
+    std::regex upid_pattern(R"(\{\{uuid\}\})");
+    std::regex guid_pattern(R"(\{\{guid\}\})");
+    std::regex view_upid_pattern(R"(\{\{view_upid\}\})");
 
     query = std::regex_replace(query, upid_pattern, "_" + upid);
     query = std::regex_replace(query, guid_pattern, upid);
@@ -185,17 +185,18 @@ database::initialize_schema()
             continue;
         }
 
-        validate_sqlite3_result(sqlite3_exec(_sqlite3_db_temp, query.c_str(), 0, 0, 0),
-                                query.c_str(),
-                                std::string("Invalid schema, init database failed!"));
+        validate_sqlite3_result(
+            sqlite3_exec(_sqlite3_db_temp, query.c_str(), nullptr, nullptr, nullptr),
+            query.c_str(), std::string("Invalid schema, init database failed!"));
     }
 }
 
 void
 database::execute_query(const std::string& query)
 {
-    validate_sqlite3_result(sqlite3_exec(_sqlite3_db_temp, query.c_str(), 0, 0, 0),
-                            "Failed to execute query - ", query);
+    validate_sqlite3_result(
+        sqlite3_exec(_sqlite3_db_temp, query.c_str(), nullptr, nullptr, nullptr),
+        "Failed to execute query - ", query);
 }
 
 std::string

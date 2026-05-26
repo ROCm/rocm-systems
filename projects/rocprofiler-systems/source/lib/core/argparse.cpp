@@ -608,7 +608,6 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 if(_v.count("all") > 0 || _v.count("kokkosp") > 0)
                     update_env(_data, "KOKKOS_TOOLS_LIBS", _data.env.omni_libpath,
                                update_mode::PREPEND);
-                }
             });
 
         _data.reg.processed_environs.emplace("include");

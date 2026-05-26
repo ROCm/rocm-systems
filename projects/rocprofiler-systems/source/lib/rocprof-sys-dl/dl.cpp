@@ -65,7 +65,7 @@
 //--------------------------------------------------------------------------------------//
 
 using main_func_t = int (*)(int, char**, char**);
-using init_func_t = void (*)(void);
+using init_func_t = void (*)();
 
 std::ostream&
 operator<<(std::ostream& _os, const SpaceHandle& _handle)
@@ -377,10 +377,10 @@ public:
     using user_cb_t = rocprofsys_user_callbacks_t;
 
     // librocprof-sys functions
-    void (*rocprofsys_init_library_f)(void)                                    = nullptr;
-    void (*rocprofsys_init_tooling_f)(void)                                    = nullptr;
+    void (*rocprofsys_init_library_f)()                                        = nullptr;
+    void (*rocprofsys_init_tooling_f)()                                        = nullptr;
     void (*rocprofsys_init_f)(const char*, bool, const char*)                  = nullptr;
-    void (*rocprofsys_finalize_f)(void)                                        = nullptr;
+    void (*rocprofsys_finalize_f)()                                            = nullptr;
     void (*rocprofsys_set_env_f)(const char*, const char*)                     = nullptr;
     void (*rocprofsys_set_mpi_f)(bool, bool)                                   = nullptr;
     void (*rocprofsys_register_source_f)(const char*, const char*, size_t, size_t,

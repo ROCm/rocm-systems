@@ -94,9 +94,8 @@ preset_registry::preset_registry()
 void
 preset_registry::load_embedded()
 {
-    for(size_t i = 0; i < embedded_presets::num_presets; ++i)
+    for(const auto& entry : embedded_presets::presets)
     {
-        const auto& entry = embedded_presets::presets[i];
         try
         {
             auto       j    = nlohmann::json::parse(entry.json);

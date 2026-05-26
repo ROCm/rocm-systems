@@ -680,7 +680,7 @@ rocprofsys_init_tooling_hidden(void)
         auto trace_controller = rocprofiler_sdk::get_trace_controller();
         if(trace_controller)
         {
-            auto pause_callback = [](void) {
+            auto pause_callback = []() {
                 LOG_DEBUG("Pause callback...");
                 rocprofiler_sdk::pause();
                 sampling::pause();
@@ -694,7 +694,7 @@ rocprofsys_init_tooling_hidden(void)
                 process_sampler::pause();
                 invoke_external_pause_callbacks();
             };
-            auto resume_callback = [](void) {
+            auto resume_callback = []() {
                 LOG_DEBUG("Resume callback...");
                 rocprofiler_sdk::resume();
                 sampling::resume();
