@@ -27,6 +27,12 @@ public:
     void set_kernel_filter_include_regex(const std::string& regex);
     void set_kernel_filter_range(const std::string& range);
 
+    void unset_output_path();
+    void unset_requested_counters();
+    void unset_iteration_multiplexing_mode();
+    void unset_kernel_filter_include_regex();
+    void unset_kernel_filter_range();
+
 private:
     const char* m_non_empty_str               = "non empty string";
     std::string m_output_path                 = m_non_empty_str;
@@ -34,6 +40,12 @@ private:
     std::string m_iteration_multiplexing_mode = m_non_empty_str;
     std::string m_kernel_filter_include_regex = m_non_empty_str;
     std::string m_kernel_filter_range         = m_non_empty_str;
+
+    bool m_output_path_set                 = true;
+    bool m_requested_counters_set          = true;
+    bool m_iteration_multiplexing_mode_set = true;
+    bool m_kernel_filter_include_regex_set = true;
+    bool m_kernel_filter_range_set         = true;
 };
 
 class MockSdkWrapper : public rocprofiler_compute_tool::SdkWrapper

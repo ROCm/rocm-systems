@@ -45,6 +45,53 @@ TEST_F(TestRocprofilerComputeTool, ProvidedEmptyKernelFilterRange_DoesntThrow)
     EXPECT_NO_THROW(rocprofiler_configure(1, "", 1, &m_client_id));
 }
 
+TEST_F(TestRocprofilerComputeTool, ProvidedUnsetOutputPath_UsesDefault)
+{
+    m_input_parameters->unset_output_path();
+    EXPECT_NO_THROW(rocprofiler_configure(1, "", 1, &m_client_id));
+    const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
+    const auto tool_data = get_tool_data(cfg);
+    EXPECT_TRUE(tool_data->output_filename.find(EnvInputParameters::get_default_output_path()) !=
+                std::string::npos);
+    EXPECT_TRUE(tool_data->output_filename.find(
+                    std::to_string(getpid()) + "_native_counter_collection.csv") != std::string::npos);
+}
+
+TEST_F(TestRocprofilerComputeTool, ProvidedUnsetRequestedCounters_UsesDefault)
+{
+    m_input_parameters->unset_requested_counters();
+    const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
+    const auto tool_data = get_tool_data(cfg);
+    EXPECT_EQ(tool_data->requested_counters, EnvInputParameters::get_default_requested_counters());
+}
+
+TEST_F(TestRocprofilerComputeTool, ProvidedUnsetIterationMultiplexingMode_UsesDefault)
+{
+    m_input_parameters->unset_iteration_multiplexing_mode();
+    const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
+    const auto tool_data = get_tool_data(cfg);
+    EXPECT_EQ(tool_data->iteration_multiplexing_mode,
+              iteration_multiplexing_mode(EnvInputParameters::get_default_iteration_multiplexing_mode()));
+}
+
+TEST_F(TestRocprofilerComputeTool, ProvidedUnsetKernelFilterIncludeRegex_UsesDefault)
+{
+    m_input_parameters->unset_kernel_filter_include_regex();
+    const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
+    const auto tool_data = get_tool_data(cfg);
+    EXPECT_EQ(tool_data->kernel_filter_include_regex,
+              EnvInputParameters::get_default_kernel_filter_include_regex());
+}
+
+TEST_F(TestRocprofilerComputeTool, ProvidedUnsetKernelFilterRange_UsesDefault)
+{
+    m_input_parameters->unset_kernel_filter_range();
+    const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
+    const auto tool_data = get_tool_data(cfg);
+    EXPECT_TRUE(EnvInputParameters::get_default_kernel_filter_range().empty());
+    EXPECT_TRUE(tool_data->kernel_filter_ranges.empty());
+}
+
 TEST_F(TestRocprofilerComputeTool, ProvidedNonEmptyOutputPath_ReturnsItExtended)
 {
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
