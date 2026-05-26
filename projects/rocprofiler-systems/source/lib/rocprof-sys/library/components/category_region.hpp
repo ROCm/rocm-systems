@@ -36,22 +36,6 @@
 #include <type_traits>
 #include <utility>
 
-namespace
-{
-
-void
-cache_region(std::uint64_t thread_id, const std::string& name, std::uint64_t start_ts,
-             std::uint64_t end_ts, const std::string& category,
-             const std::string& args_str = {})
-{
-    constexpr size_t      NO_CORRELATION_ID = 0;
-    constexpr const char* CALLSTACK         = "{}";
-    rocprofsys::trace_cache::get_buffer_storage().store(
-        rocprofsys::trace_cache::region_sample{
-            thread_id, name.c_str(), NO_CORRELATION_ID, NO_CORRELATION_ID, start_ts,
-            end_ts, CALLSTACK, args_str.c_str(), category.c_str() });
-}
-
 struct entry_key
 {
     std::string name;
@@ -72,11 +56,27 @@ using timestamp_t = std::uint64_t;
 
 struct pending_cache_entry
 {
-    timestamp_t start_ts = 0;
-    std::string args     = {};
+    timestamp_t   start_ts  = 0;
+    std::string   args      = {};
+    std::uint32_t arg_count = 0;
 };
 
-thread_local std::map<entry_key, pending_cache_entry> map_name_to_cache_entry;
+inline thread_local std::map<entry_key, pending_cache_entry> map_name_to_cache_entry;
+
+namespace
+{
+void
+cache_region(std::uint64_t thread_id, const std::string& name, std::uint64_t start_ts,
+             std::uint64_t end_ts, const std::string& category,
+             const std::string& args_str = {})
+{
+    constexpr size_t      NO_CORRELATION_ID = 0;
+    constexpr const char* CALLSTACK         = "{}";
+    rocprofsys::trace_cache::get_buffer_storage().store(
+        rocprofsys::trace_cache::region_sample{
+            thread_id, name.c_str(), NO_CORRELATION_ID, NO_CORRELATION_ID, start_ts,
+            end_ts, CALLSTACK, args_str.c_str(), category.c_str() });
+}
 
 template <typename Tp>
 struct is_trace_cache_arg_name : std::is_convertible<std::decay_t<Tp>, std::string_view>
@@ -93,8 +93,6 @@ has_trace_cache_args(std::index_sequence<Idx...>)
     }
     else
     {
-        // TODO: perfetto annotations can also be passed, we cannot handle those here as
-        // of yet
         return ((Idx % 2 != 0 ||
                  is_trace_cache_arg_name<std::tuple_element_t<Idx, TupleT>>::value) &&
                 ...);
@@ -125,6 +123,7 @@ get_serialized_arg_value(Tp&& value)
     return ss.str();
 }
 
+// Append one trace-cache record "idx;;type;;name;;value;;" to args_str
 template <typename KeyT, typename ValueT>
 void
 append_serialized_arg(std::string& args_str, std::uint32_t idx, KeyT&& key,
@@ -137,6 +136,7 @@ append_serialized_arg(std::string& args_str, std::uint32_t idx, KeyT&& key,
                     get_serialized_arg_value(std::forward<ValueT>(value)), delimiter);
 }
 
+// Same record format, but type/value are pre-stringified by the caller
 void
 append_serialized_arg(std::string& args_str, std::uint32_t idx, std::string_view arg_type,
                       std::string_view key, std::string_view value)
@@ -144,6 +144,30 @@ append_serialized_arg(std::string& args_str, std::uint32_t idx, std::string_view
     const auto* delimiter = ";;";
     args_str += fmt::format("{}{}{}{}{}{}{}{}", idx, delimiter, arg_type, delimiter, key,
                             delimiter, value, delimiter);
+}
+
+std::uint32_t
+renumber_serialized_args(std::string& args_str, std::uint32_t next_idx)
+{
+    const auto delimiter = std::string_view{ ";;" };
+    size_t     start     = 0;
+    size_t     token_id  = 0;
+    auto       count     = std::uint32_t{ 0 };
+    auto       end       = args_str.find(delimiter, start);
+    while(end != std::string::npos)
+    {
+        if(token_id % 4 == 0)
+        {
+            auto replacement = fmt::format("{}", next_idx++);
+            args_str.replace(start, end - start, replacement);
+            end = start + replacement.size();
+            ++count;
+        }
+        start = end + delimiter.size();
+        ++token_id;
+        end = args_str.find(delimiter, start);
+    }
+    return count;
 }
 
 template <size_t Idx = 0, typename TupleT>
@@ -175,6 +199,8 @@ get_serialized_pointer_value(const void* value)
     return ss.str();
 }
 
+// Serialize a rocprofsys_annotation_t record to the trace-cache format
+// Returns true on success, false otherwise
 bool
 append_serialized_annotation_record_arg(std::string& args_str, std::uint32_t idx,
                                         const rocprofsys_annotation_t& annotation)
@@ -185,6 +211,9 @@ append_serialized_annotation_record_arg(std::string& args_str, std::uint32_t idx
     std::string arg_type  = {};
     std::string arg_value = {};
 
+    // annotation.type is a runtime enum tag naming a C type. Each case
+    // sets the type-label string written into the cache record and
+    // selects the matching compile-time reinterpret of annotation.value
     switch(annotation.type)
     {
         case ROCPROFSYS_VALUE_CSTR:
@@ -234,24 +263,15 @@ append_serialized_annotation_record_arg(std::string& args_str, std::uint32_t idx
         default: return false;
     }
 
+    // Append the record with the decoded information
     append_serialized_arg(args_str, idx, arg_type, annotation.name, arg_value);
     return true;
-}
-
-template <typename Tp>
-void
-append_serialized_annotation_arg(std::string& args_str, std::uint32_t& idx, Tp&& value)
-{
-    auto arg_name = fmt::format(
-        "arg{}-{}", idx, rocprofsys::utility::demangle<std::remove_reference_t<Tp>>());
-    append_serialized_arg(args_str, idx, arg_name, std::forward<Tp>(value));
-    ++idx;
 }
 
 // Serialize explicit argument pairs {"name", value}
 template <typename... Args>
 std::string
-get_serialized_args(Args&&... args)
+serialize_name_value_pairs(Args&&... args)
 {
     ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
 
@@ -270,9 +290,9 @@ get_serialized_args(Args&&... args)
     }
 }
 
-// Serialize annotation records using their provided names and value types
-inline std::string
-get_serialized_annotation_args(rocprofsys_annotation_t* annotations,
+// Transforms rocprofsys_annotation_t records into the trace-cache format.
+std::string
+serialize_annotation_args(rocprofsys_annotation_t* annotations,
                                size_t                   annotation_count)
 {
     if(!annotations || annotation_count == 0) return {};
@@ -283,42 +303,71 @@ get_serialized_annotation_args(rocprofsys_annotation_t* annotations,
     std::uint32_t idx      = 0;
     for(size_t i = 0; i < annotation_count; ++i)
     {
+        // Attempt to append the record
         if(append_serialized_annotation_record_arg(args_str, idx, annotations[i])) ++idx;
     }
     return args_str;
 }
 
-// Serialize audit annotation values using generated argN-type names
+// Serializes gotcha audit arguments into the trace-cache format.
+// Names are synthesized as "arg{N}-{demangled-type}" to mirror add_perfetto_annotation
 template <typename... Args>
 std::string
-get_serialized_annotation_args(Args&&... args)
+serialize_annotation_args(Args&&... args)
 {
     ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
 
     std::string   args_str = {};
     std::uint32_t idx      = 0;
     ROCPROFSYS_FOLD_EXPRESSION(
-        append_serialized_annotation_arg(args_str, idx, std::forward<Args>(args)));
+        (append_serialized_arg(
+             args_str, idx,
+             fmt::format("arg{}-{}", idx,
+                         rocprofsys::utility::demangle<std::remove_reference_t<Args>>()),
+             std::forward<Args>(args)),
+         ++idx));
+    return args_str;
+}
+
+// Outgoing audits pass at most one return value. This matches perfetto's single "return"
+// annotation.
+template <typename T>
+std::string
+serialize_return_arg(T&& value)
+{
+    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+
+    std::string args_str = {};
+    append_serialized_arg(args_str, 0, "return", std::forward<T>(value));
     return args_str;
 }
 
 template <typename CategoryT>
 void
-cache_start(const char* name, std::string args_str = {})
+cache_start(const char* name, std::string args_str = {}, std::uint32_t arg_count = 0)
 {
     const auto start_ts =
         static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
     entry_key key{ name, rocprofsys::trait::name<CategoryT>::value };
-    map_name_to_cache_entry[key] = pending_cache_entry{ start_ts, std::move(args_str) };
+    map_name_to_cache_entry[key] =
+        pending_cache_entry{ start_ts, std::move(args_str), arg_count };
 }
 
 template <typename CategoryT>
 void
-cache_args(const char* name, std::string args_str)
+append_cache_args(const char* name, std::string args_str)
 {
     auto key = entry_key{ name, rocprofsys::trait::name<CategoryT>::value };
     auto itr = map_name_to_cache_entry.find(key);
-    if(itr != map_name_to_cache_entry.end()) itr->second.args = std::move(args_str);
+    if(itr != map_name_to_cache_entry.end())
+    {
+        // If args were previously stored, the new ones must be renumbered to accomodate
+        auto appended_arg_count = renumber_serialized_args(args_str, itr->second.arg_count);
+
+        // Update the entry with the new args
+        itr->second.arg_count += appended_arg_count;
+        itr->second.args += std::move(args_str);
+    }
 }
 
 template <typename CategoryT>
@@ -442,7 +491,7 @@ struct category_region : comp::base<category_region<CategoryT>, void>
         return fmt::format("rocprofsys_{}_region", category_name);
     }
 
-    static void set_cache_args(std::string_view name, std::string serialized_args);
+    static void append_cache_args(std::string_view name, std::string serialized_args);
 
     template <typename... OptsT, typename... Args>
     static void start(std::string_view name, Args&&...);
@@ -521,7 +570,7 @@ category_region<CategoryT>::start(std::string_view name, Args&&... args)
     std::string _cache_args = {};
     if constexpr(_has_cache_args)
     {
-        _cache_args = get_serialized_args(args...);
+        _cache_args = serialize_name_value_pairs(args...);
     }
 
     auto _hash = tim::add_hash_id(name);
@@ -553,7 +602,9 @@ category_region<CategoryT>::start(std::string_view name, Args&&... args)
 
     if constexpr(_has_cache_args)
     {
-        cache_start<CategoryT>(name.data(), std::move(_cache_args));
+        constexpr auto _cache_arg_count =
+            static_cast<std::uint32_t>(sizeof...(Args) / 2);
+        cache_start<CategoryT>(name.data(), std::move(_cache_args), _cache_arg_count);
     }
     else
     {
@@ -563,8 +614,8 @@ category_region<CategoryT>::start(std::string_view name, Args&&... args)
 
 template <typename CategoryT>
 void
-category_region<CategoryT>::set_cache_args(std::string_view name,
-                                           std::string      serialized_args)
+category_region<CategoryT>::append_cache_args(std::string_view name,
+                                              std::string      serialized_args)
 {
     if(name.empty() || serialized_args.empty()) return;
 
@@ -572,7 +623,7 @@ category_region<CategoryT>::set_cache_args(std::string_view name,
 
     auto _hash = tim::add_hash_id(name);
     name       = tim::get_hash_identifier_fast(_hash);
-    cache_args<CategoryT>(name.data(), std::move(serialized_args));
+    ::append_cache_args<CategoryT>(name.data(), std::move(serialized_args));
 }
 
 template <typename CategoryT>
@@ -703,7 +754,7 @@ category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::incoming,
 
     if constexpr(sizeof...(Args) > 0)
     {
-        set_cache_args(_data.tool_id.c_str(), get_serialized_annotation_args(_args...));
+        append_cache_args(_data.tool_id.c_str(), serialize_annotation_args(_args...));
     }
 }
 
@@ -713,6 +764,11 @@ void
 category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::outgoing,
                                   Args&&... _args)
 {
+    if constexpr(sizeof...(Args) > 0)
+    {
+        append_cache_args(_data.tool_id.c_str(), serialize_return_arg(_args...));
+    }
+
     stop<OptsT...>(_data.tool_id.c_str(), [&](::perfetto::EventContext ctx) {
         if(config::get_perfetto_annotations())
             tracing::add_perfetto_annotation(
@@ -739,7 +795,7 @@ category_region<CategoryT>::audit(std::string_view _name, audit::incoming,
 
     if constexpr(sizeof...(Args) > 0)
     {
-        set_cache_args(_name.data(), get_serialized_annotation_args(_args...));
+        append_cache_args(_name.data(), serialize_annotation_args(_args...));
     }
 }
 
@@ -749,6 +805,11 @@ void
 category_region<CategoryT>::audit(std::string_view _name, audit::outgoing,
                                   Args&&... _args)
 {
+    if constexpr(sizeof...(Args) > 0)
+    {
+        append_cache_args(_name.data(), serialize_return_arg(_args...));
+    }
+
     stop<OptsT...>(_name.data(), [&](::perfetto::EventContext ctx) {
         if(config::get_perfetto_annotations())
             tracing::add_perfetto_annotation(

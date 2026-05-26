@@ -43,8 +43,8 @@ invoke_category_region_start(rocprofsys_category_t _category, const char* name,
                         tracing::add_perfetto_annotation(ctx, _annotations[i]);
                 }
             });
-        component::category_region<category_type>::set_cache_args(
-            name, get_serialized_annotation_args(_annotations, _annotation_count));
+        component::category_region<category_type>::append_cache_args(
+            name, serialize_annotation_args(_annotations, _annotation_count));
     }
     else
     {
@@ -106,7 +106,7 @@ rocprofsys_push_trace_with_args_hidden(const char* name, const char* serialized_
 {
     rocprofsys::component::category_region<rocprofsys::category::host>::start(name);
     if(!serialized_args) return;
-    rocprofsys::component::category_region<rocprofsys::category::host>::set_cache_args(
+    rocprofsys::component::category_region<rocprofsys::category::host>::append_cache_args(
         name, serialized_args);
 }
 
