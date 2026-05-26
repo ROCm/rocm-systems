@@ -93,8 +93,17 @@ fi
 #   they have already been linked in.
 
 echo "[IR_test] Compiling IR_test.cpp..."
+# NOTE: Compiling at -O0 instead of -O2/-O1.
+# ROCm 7.x AMDGPU backend has a codegen bug that manifests at -O2 / -O1 when
+# kernels make indirect function calls (vtable dispatch) and then store results:
+#   - At -O2: missing s_waitcnt lgkmcnt(0) before the store → stale SGPR base
+#     pointer (gfx942 XNACK retries forever → hang), or incorrect s[54:55]
+#     clobbering in the vtable dispatch loop → illegal memory access (error 700).
+#   - At -O1: similar register-tracking issues cause hangs.
+#   - At -O0: no optimization; the compiler emits correct register tracking.
+# This is a functional-correctness test, not a benchmark, so -O0 is fine.
 "$ROCM_PATH/bin/hipcc" \
-  --offload-arch="$ARCH" -O2 \
+  --offload-arch="$ARCH" -O0 \
   -D__HIP_PLATFORM_AMD__=1 \
   -I"$HIPIFIED_INC" \
   -I"$HIPIFIED_INC/nccl_device" \

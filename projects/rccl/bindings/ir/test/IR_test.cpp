@@ -27,8 +27,9 @@
  *
  * Exit code: 0 = all non-skipped tests passed, 1 = failures present.
  *
- * Build via run_IR_test.sh; manual build example:
- *   hipcc --offload-arch=gfx950 -O2 -D__HIP_PLATFORM_AMD__=1         \
+ * Build via run_IR_test.sh; manual build example (use -O0; see note in
+ * run_IR_test.sh about ROCm 7.x AMDGPU codegen bugs at -O1/-O2):
+ *   hipcc --offload-arch=gfx942 -O0 -D__HIP_PLATFORM_AMD__=1         \
  *         -I<build>/hipify/src/include                                 \
  *         -I<build>/hipify/src/include/nccl_device                    \
  *         -I<build>/include                                            \
@@ -208,60 +209,78 @@ static void run_A(const uintptr_t base) {
 
 /* =====================================================================
  * [B1–B5] Coop kernels — one per init type
+ *
+ * Workaround for a ROCm 7.x AMDGPU codegen bug: when threadIdx.x is used
+ * directly as a scatter-store index after indirect function calls (vtable
+ * dispatch), the compiler hoists the kernel-argument SGPR load to the top
+ * of the function but omits the required s_waitcnt lgkmcnt(0) before the
+ * global_store that uses that SGPR as a base address.  The store fires with
+ * a stale (zero) SGPR, writes to NULL, triggers an XNACK page-fault retry
+ * loop, and the wavefront hangs indefinitely.
+ *
+ * Using `tid = blockIdx.x * blockDim.x + threadIdx.x` forces the compiler
+ * to compute a full 64-bit VGPR address (via v_lshl_add_u64 + s_waitcnt)
+ * and selects the correct addressing mode for global_store.
  * ==================================================================== */
 
 __global__ void k_coop_thread_r(CoopResult* out) {
   ncclCoopAny coop; ncclCoopAnyInitThread(&coop);
-  out[threadIdx.x] = { ncclCoopSize(&coop),
-                       ncclCoopThreadRank(&coop),
-                       ncclCoopNumThreads(&coop) };
+  int tid = blockIdx.x * blockDim.x + threadIdx.x;
+  out[tid] = { ncclCoopSize(&coop),
+               ncclCoopThreadRank(&coop),
+               ncclCoopNumThreads(&coop) };
 }
 
 __global__ void k_coop_warp_r(CoopResult* out) {
   ncclCoopAny coop; ncclCoopAnyInitWarp(&coop);
-  out[threadIdx.x] = { ncclCoopSize(&coop),
-                       ncclCoopThreadRank(&coop),
-                       ncclCoopNumThreads(&coop) };
+  int tid = blockIdx.x * blockDim.x + threadIdx.x;
+  out[tid] = { ncclCoopSize(&coop),
+               ncclCoopThreadRank(&coop),
+               ncclCoopNumThreads(&coop) };
 }
 
 __global__ void k_coop_lanes_r(CoopResult* out, uint32_t mask) {
   ncclCoopAny coop; ncclCoopAnyInitLanes(&coop, mask);
-  out[threadIdx.x] = { ncclCoopSize(&coop),
-                       ncclCoopThreadRank(&coop),
-                       ncclCoopNumThreads(&coop) };
+  int tid = blockIdx.x * blockDim.x + threadIdx.x;
+  out[tid] = { ncclCoopSize(&coop),
+               ncclCoopThreadRank(&coop),
+               ncclCoopNumThreads(&coop) };
 }
 
 __global__ void k_coop_warpspan_r(CoopResult* out, int warp0, int nWarps, int id) {
   ncclCoopAny coop; ncclCoopAnyInitWarpSpan(&coop, warp0, nWarps, id);
-  out[threadIdx.x] = { ncclCoopSize(&coop),
-                       ncclCoopThreadRank(&coop),
-                       ncclCoopNumThreads(&coop) };
+  int tid = blockIdx.x * blockDim.x + threadIdx.x;
+  out[tid] = { ncclCoopSize(&coop),
+               ncclCoopThreadRank(&coop),
+               ncclCoopNumThreads(&coop) };
 }
 
 __global__ void k_coop_cta_r(CoopResult* out) {
   ncclCoopAny coop; ncclCoopAnyInitCta(&coop);
-  out[threadIdx.x] = { ncclCoopSize(&coop),
-                       ncclCoopThreadRank(&coop),
-                       ncclCoopNumThreads(&coop) };
+  int tid = blockIdx.x * blockDim.x + threadIdx.x;
+  out[tid] = { ncclCoopSize(&coop),
+               ncclCoopThreadRank(&coop),
+               ncclCoopNumThreads(&coop) };
 }
 
 /* =====================================================================
  * [B6] Sync kernels — write 1 after sync, host checks all slots == 1
  * ==================================================================== */
 
-__global__ void k_sync_thread  (int* out)                                    { ncclCoopAny c; ncclCoopAnyInitThread  (&c);             ncclCoopSync(&c); out[threadIdx.x] = 1; }
-__global__ void k_sync_warp    (int* out)                                    { ncclCoopAny c; ncclCoopAnyInitWarp    (&c);             ncclCoopSync(&c); out[threadIdx.x] = 1; }
-__global__ void k_sync_lanes   (int* out, uint32_t mask)                     { ncclCoopAny c; ncclCoopAnyInitLanes   (&c, mask);       ncclCoopSync(&c); out[threadIdx.x] = 1; }
-__global__ void k_sync_warpspan(int* out, int warp0, int nWarps, int id)     { ncclCoopAny c; ncclCoopAnyInitWarpSpan(&c,warp0,nWarps,id); ncclCoopSync(&c); out[threadIdx.x] = 1; }
-__global__ void k_sync_cta     (int* out)                                    { ncclCoopAny c; ncclCoopAnyInitCta     (&c);             ncclCoopSync(&c); out[threadIdx.x] = 1; }
+__global__ void k_sync_thread  (int* out)                               { ncclCoopAny c; ncclCoopAnyInitThread  (&c);                ncclCoopSync(&c); int t=blockIdx.x*blockDim.x+threadIdx.x; out[t]=1; }
+__global__ void k_sync_warp    (int* out)                               { ncclCoopAny c; ncclCoopAnyInitWarp    (&c);                ncclCoopSync(&c); int t=blockIdx.x*blockDim.x+threadIdx.x; out[t]=1; }
+__global__ void k_sync_lanes   (int* out, uint32_t mask)                { ncclCoopAny c; ncclCoopAnyInitLanes   (&c, mask);          ncclCoopSync(&c); int t=blockIdx.x*blockDim.x+threadIdx.x; out[t]=1; }
+__global__ void k_sync_warpspan(int* out, int warp0, int nWarps, int id){ ncclCoopAny c; ncclCoopAnyInitWarpSpan(&c,warp0,nWarps,id);ncclCoopSync(&c); int t=blockIdx.x*blockDim.x+threadIdx.x; out[t]=1; }
+__global__ void k_sync_cta     (int* out)                               { ncclCoopAny c; ncclCoopAnyInitCta     (&c);                ncclCoopSync(&c); int t=blockIdx.x*blockDim.x+threadIdx.x; out[t]=1; }
 
 /* =====================================================================
  * Helpers: launch-check-free pattern
  * ==================================================================== */
 
 /* Run a coop_r kernel and return the result array. Caller must free. */
+template<typename Kern, typename... Args>
 static std::vector<CoopResult>
-launch_coop_r(auto kern, int N, auto... args) {
+launch_coop_r(Kern kern, int N, Args... args) {
   CoopResult* d = nullptr;
   HIP_CHECK(hipMalloc(&d, sizeof(CoopResult) * N));
   kern<<<1, N>>>(d, args...);
@@ -274,7 +293,8 @@ launch_coop_r(auto kern, int N, auto... args) {
 }
 
 /* Run a sync kernel and verify every slot is 1. */
-static bool launch_sync(auto kern, int N, auto... args) {
+template<typename Kern, typename... Args>
+static bool launch_sync(Kern kern, int N, Args... args) {
   int* d = nullptr;
   HIP_CHECK(hipMalloc(&d, sizeof(int) * N));
   HIP_CHECK(hipMemset(d, 0, sizeof(int) * N));
@@ -289,11 +309,12 @@ static bool launch_sync(auto kern, int N, auto... args) {
 
 /* Verify size, rank, num_threads in a CoopResult vector.
  * exp_rank(t) returns -1 to skip rank check for thread t.         */
+template<typename ExpSize, typename ExpRank>
 static void check_coop(const char* id_size,  const char* desc_size,
                        const char* id_rank,  const char* desc_rank,
                        const char* id_num,   const char* desc_num,
                        const std::vector<CoopResult>& h,
-                       auto exp_size, auto exp_rank) {
+                       ExpSize exp_size, ExpRank exp_rank) {
   int N = (int)h.size();
   int bs=0, br=0, bn=0, ts=0, tr=0, tn=0;
   char ds[128]={}, dr[128]={}, dn[128]={};
@@ -531,21 +552,26 @@ static void run_B7() {
  * main
  * ==================================================================== */
 int main() {
+  std::printf("[IR_test] starting...\n"); std::fflush(stdout);
   int nDev = 0;
   HIP_CHECK(hipGetDeviceCount(&nDev));
+  std::printf("[IR_test] hipGetDeviceCount done: %d\n", nDev); std::fflush(stdout);
   if (nDev <= 0) {
     std::fprintf(stderr, "[IR_test] No HIP devices found.\n");
     return 2;
   }
-  std::printf("[IR_test] %d HIP device(s) found\n\n", nDev);
+  std::printf("[IR_test] %d HIP device(s) found\n\n", nDev); std::fflush(stdout);
 
   int total_pass = 0, total_fail = 0, total_skip = 0;
 
   for (int d = 0; d < nDev; ++d) {
+    std::printf("[IR_test] calling hipSetDevice(%d)\n", d); std::fflush(stdout);
     HIP_CHECK(hipSetDevice(d));
+    std::printf("[IR_test] hipSetDevice done\n"); std::fflush(stdout);
     hipDeviceProp_t prop{};
     HIP_CHECK(hipGetDeviceProperties(&prop, d));
     const int ws = prop.warpSize;
+    std::printf("[IR_test] device props: warpSize=%d\n", ws); std::fflush(stdout);
 
     std::printf("──────────────────────────────────────────────────────────────\n");
     std::printf("[IR_test] GPU %d: %s  warpSize=%d\n\n", d, prop.name, ws);
@@ -553,8 +579,10 @@ int main() {
     g_results.clear();
 
     /* A: peer pointer */
+    std::printf("[IR_test] starting A tests\n"); std::fflush(stdout);
     const uintptr_t base = 0x100000000ull;
     run_A(base);
+    std::printf("[IR_test] A tests done\n"); std::fflush(stdout);
 
     /* B1–B6: coop init + accessors + sync */
     std::printf("\n");
