@@ -22,9 +22,9 @@ from utils.utils_analysis import (
     CallTreeNode,
     build_operator_summary,
     get_bw_scale_and_unit,
-    resolve_filter_blocks_to_panel_ids,
     simplify_kernel_name,
 )
+from utils.utils_common import resolve_filter_blocks_to_panel_ids
 
 
 def _tty_view_is_table(args: argparse.Namespace) -> bool:

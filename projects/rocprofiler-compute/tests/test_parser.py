@@ -11,8 +11,10 @@ import pytest
 
 from utils import schema
 from utils.parser import build_dfs
-from utils.utils_analysis import resolve_filter_blocks_to_panel_ids
-from utils.utils_common import expand_placeholder_ranges
+from utils.utils_common import (
+    expand_placeholder_ranges,
+    resolve_filter_blocks_to_panel_ids,
+)
 
 # =============================================================================
 # Helpers to build in-memory panel configs

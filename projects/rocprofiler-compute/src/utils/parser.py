@@ -15,12 +15,12 @@ from utils.metrics.evaluation_pipeline import eval_metric
 from utils.metrics.expression import gen_counter_list
 from utils.pattern_matching import PatternMatcherEngine
 from utils.specs import MachineSpecs
-from utils.utils_analysis import resolve_filter_blocks_to_panel_ids
 from utils.utils_common import (
     SUPPORTED_FIELD,
     convert_metric_id_to_panel_info,
     expand_placeholder_ranges,
     normalize_filter_to_str_list,
+    resolve_filter_blocks_to_panel_ids,
 )
 
 # ------------------------------------------------------------------------------

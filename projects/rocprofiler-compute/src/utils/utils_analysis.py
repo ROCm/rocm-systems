@@ -17,18 +17,8 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.utils_common import convert_metric_id_to_panel_info
 
 NS_TO_MS = 1.0 / 1_000_000.0
-
-
-def resolve_filter_blocks_to_panel_ids(filter_blocks: list[str]) -> set[int]:
-    """Inverse of convert_metric_id_to_panel_info: map metric ids like
-    "2" or "11.1" to the set of file_id integers (e.g. {200, 1100}).
-    """
-    return {
-        int(convert_metric_id_to_panel_info(str(bid))[0]) for bid in filter_blocks
-    }
 
 
 def get_bw_scale_and_unit(value: float) -> tuple[float, str]:
