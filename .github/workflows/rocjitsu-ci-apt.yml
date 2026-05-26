@@ -1,0 +1,74 @@
+# rocjitsu CI: build + test including HIP device kernel tests.
+#
+# All tests run on the CPU emulator — no GPU hardware required.
+# HIP device kernels are cross-compiled for gfx950 using hipcc from
+# the ROCm apt packages.
+#
+# RocminfoTest is excluded: it spawns rocminfo under LD_PRELOAD
+# which requires /dev/kfd (not available on CI runners).
+
+name: rocjitsu CI
+
+on:
+  pull_request:
+    paths:
+      - "emulation/rocjitsu/**"
+      - "emulation/plugins/**"
+      - ".github/workflows/rocjitsu-ci-apt.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "emulation/rocjitsu/**"
+      - "emulation/plugins/**"
+      - ".github/workflows/rocjitsu-ci-apt.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: Linux (clang, Release)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            emulation/rocjitsu
+            emulation/plugins
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build clang libdrm-dev
+
+      - name: Install ROCm via apt
+        run: |
+          START=$(date +%s)
+          sudo mkdir -p --mode=0755 /etc/apt/keyrings
+          wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
+          echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/latest noble main" | sudo tee /etc/apt/sources.list.d/rocm.list
+          echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | sudo tee /etc/apt/preferences.d/rocm-pin-600
+          sudo apt-get update
+          sudo apt-get install -y hip-runtime-amd rocm-hip-sdk
+          END=$(date +%s)
+          echo "ROCm apt install took $((END - START)) seconds"
+          echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV
+          /opt/rocm/bin/amdclang++ --version
+          echo '__global__ void k(){}' | /opt/rocm/bin/hipcc -x hip --offload-arch=gfx950 --cuda-device-only -c -o /dev/null -
+          echo "hipcc OK"
+
+      - name: Configure
+        env:
+          CC: clang
+          CXX: clang++
+        run: >
+          cmake -B build -G Ninja
+          -S emulation/rocjitsu
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_CXX_FLAGS="-Werror"
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --timeout 120 --exclude-regex "RocminfoTest"

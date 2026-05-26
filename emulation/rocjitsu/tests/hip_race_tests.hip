@@ -475,11 +475,11 @@ __global__ void partial_vmcnt_kernel(const float *src_a, const float *src_b,
       "global_load_dword %0, %2, off\n"   // oldest (vmcnt event 0)
       "global_load_dword %1, %3, off\n"   // newest (vmcnt event 1)
       "s_waitcnt vmcnt(1)\n"              // drain oldest only
+      "v_add_f32_e32 %0, %0, %1\n"        // reads b which is still pending
       : "=v"(a), "=v"(b)
       : "v"(&src_a[tid]), "v"(&src_b[tid])
   );
-  // Reading b races (still pending). Reading a is safe.
-  dst[tid] = a + b;
+  dst[tid] = a;
 }
 
 TEST_F(RaceTest, partial_vmcnt_race) {
@@ -507,10 +507,11 @@ __global__ void two_races_kernel(const float *src_a, const float *src_b,
       "global_load_dword %0, %2, off\n"
       "global_load_dword %1, %3, off\n"
       // No waitcnt at all.
+      "v_add_f32_e32 %0, %0, %1\n"        // both loads race here
       : "=v"(a), "=v"(b)
       : "v"(&src_a[tid]), "v"(&src_b[tid])
   );
-  dst[tid] = a + b;
+  dst[tid] = a;
 }
 
 TEST_F(RaceTest, multiple_race) {
