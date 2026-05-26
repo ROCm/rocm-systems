@@ -6609,10 +6609,13 @@ class AMDSMICommands:
         if not filtered:
             filtered.append({"gpu_index": "N/A", "process_info": "No running processes detected"})
 
-        # Set secondary table header — same columns as normal but title indicates PID grouping
-        self.logger.secondary_table_title = "PROCESS INFO (grouped by PID)"
-        self.logger.secondary_table_header = (
-            "GPU".rjust(3)
+        # The tabular renderer is GPU-centric — it reads the GPU column from the
+        # outer dict, so distributing per-GPU would give GPU-sorted output (same as
+        # default). Instead, render the PID-grouped secondary table directly and
+        # store it for printing after the primary table.
+        header = (
+            "\nPROCESS INFO (grouped by PID):\n"
+            + "GPU".rjust(3)
             + "NAME".rjust(19)
             + "PID".rjust(9)
             + "GTT_MEM".rjust(10)
@@ -6623,25 +6626,29 @@ class AMDSMICommands:
             + "SDMA".rjust(8)
             + "EVICT".rjust(8)
         )
-        if watching_output:
-            self.logger.secondary_table_header = (
-                "TIMESTAMP".rjust(10) + "  " + self.logger.secondary_table_header
-            )
-
-        # The tabular renderer reads "gpu" from each device_output entry and uses
-        # it as the GPU column for every process row in that entry's process_list.
-        # So we must distribute process entries back to the correct GPU's entry.
-        pid_by_gpu = {}
+        rows = []
         for item in filtered:
-            gi = item["gpu_index"]
-            if gi not in pid_by_gpu:
-                pid_by_gpu[gi] = []
-            pid_by_gpu[gi].append({"process_info": item["process_info"]})
+            info = item["process_info"]
+            if isinstance(info, str):
+                rows.append("  " + info)
+                continue
+            name = str(info.get("name", "N/A")).split("/")[-1][:17]
+            row = str(item["gpu_index"]).rjust(3)
+            row += name.rjust(19)
+            row += str(info["pid"]).rjust(9)
+            mu = info.get("memory_usage", {})
+            row += str(mu.get("gtt_mem", "N/A")).rjust(10)
+            row += str(mu.get("cpu_mem", "N/A")).rjust(10)
+            row += str(mu.get("vram_mem", "N/A")).rjust(10)
+            row += str(info.get("mem_usage", "N/A")).rjust(10)
+            row += str(info.get("cu_occupancy", "N/A")).rjust(9)
+            row += str(info.get("sdma_usage", "N/A")).rjust(8)
+            row += str(info.get("evicted_time", "N/A")).rjust(8)
+            rows.append(row)
 
-        for entry in self.logger.multiple_device_output:
-            gpu = entry.get("gpu")
-            if gpu in pid_by_gpu:
-                entry["process_list"] = pid_by_gpu[gpu]
+        # Store the rendered table — the monitor caller will print it
+        # after the primary table by checking this attribute.
+        self._sort_by_pid_secondary_table = header + "\n" + "\n".join(rows)
 
     def profile(self, args):
         """Not applicable to linux baremetal"""
@@ -10585,8 +10592,9 @@ class AMDSMICommands:
                     if self.logger.is_csv_format():
                         dual_csv_output = True
 
-                # When --sort-by-pid, inject PID-grouped process table
+                # When --sort-by-pid, build the PID-grouped secondary table
                 if sort_by_pid:
+                    self._sort_by_pid_secondary_table = None
                     self._monitor_inject_sort_by_pid(args, watching_output)
 
                 # Flush the output
@@ -10596,6 +10604,10 @@ class AMDSMICommands:
                     tabular=True,
                     dual_csv_output=dual_csv_output,
                 )
+
+                # Print PID-grouped secondary table after the primary table
+                if sort_by_pid and self._sort_by_pid_secondary_table:
+                    print(self._sort_by_pid_secondary_table)
 
                 # Add output to total watch output and clear multiple device output
                 if watching_output:
