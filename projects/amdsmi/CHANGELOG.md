@@ -64,6 +64,23 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - New `amd-smi set --mem-carveout` to change the VRAM carveout (APU).
   - New `amd-smi set --gtt` and `amd-smi reset --gtt` for system-wide GTT size tuning.
   - New APIs: `amdsmi_get_gpu_uma_carveout_info()`, `amdsmi_set_gpu_uma_carveout()`, `amdsmi_get_ttm_info()`, `amdsmi_set_ttm_pages_limit()`, `amdsmi_reset_ttm_pages_limit()`.
+  - **TTM module auto-detection**: probes `amdttm` (DKMS), `amd_ttm`, and the in-tree
+    `ttm` module in order so the correct `pages_limit` parameter is read/written
+    on every supported configuration. Overridable via the `AMDSMI_TTM_SYSFS_NAME`
+    environment variable. Note: third-party tools that hard-code
+    `/sys/module/ttm/parameters/pages_limit` may report `0` on DKMS hosts
+    because the active module is `amdttm`, not `ttm`; `amd-smi` reads the
+    active one.
+  - **Initramfs rebuild**: `set --gtt` / `reset --gtt` / `set --mem-carveout`
+    now invoke the distro's initramfs builder so the new `modprobe.d` snippet
+    is picked up at next boot. Supported tools (first available wins):
+    `dracut -f` (RHEL/Fedora/openSUSE), `update-initramfs -u`
+    (Debian/Ubuntu), and `mkinitcpio -P` (Arch). If none is found, a clear
+    message is printed describing the manual command to run.
+  - **Reboot semantics**: these settings take effect only after the next
+    reboot. `amd-smi node --gtt` shows the currently active value and, when
+    a pending value has been written, an additional `PENDING (after reboot)`
+    line so the previous-boot value is not mistaken for the new one.
 
 - **Added UBB power and power_limit fields to `amdsmi_power_info_t` and `amdsmi_npm_info_t`**.  
   - `amd-smi metric --power` now displays `ubb_power` when available.

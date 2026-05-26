@@ -9294,7 +9294,10 @@ class AMDSMICommands:
                 self.logger.store_output(
                     args.gpu,
                     "mem_carveout",
-                    f"Successfully set VRAM carveout to [{args.mem_carveout}] {description}. Reboot required for changes to take effect.",
+                    f"Successfully set VRAM carveout to [{args.mem_carveout}] {description}. "
+                    "Takes effect after the next reboot — "
+                    "current VRAM size still reflects the previous boot. Note: the BIOS-provided value is the requested carveout; "
+                    "the post-boot VRAM total reported by the kernel may differ slightly due to firmware reservations.",
                 )
                 self.logger.print_output()
                 self.helpers.prompt_reboot()
@@ -9444,7 +9447,9 @@ class AMDSMICommands:
             try:
                 amdsmi_interface.amdsmi_set_ttm_pages_limit(pages)
                 self.logger.output["set_gtt"] = (
-                    f"Successfully set GTT to {gb_value:.2f} GB ({pages} pages). Reboot required for changes to take effect."
+                    f"Successfully set GTT to {gb_value:.2f} GB ({pages} pages). "
+                    "Takes effect after the next reboot — "
+                    "current values shown by 'amd-smi node --gtt' still reflect the previous boot."
                 )
                 self.logger.print_output()
                 self.helpers.prompt_reboot()
@@ -9829,7 +9834,9 @@ class AMDSMICommands:
             try:
                 amdsmi_interface.amdsmi_reset_ttm_pages_limit()
                 self.logger.output["reset_gtt"] = (
-                    "Successfully reset GTT to system default. Reboot required for changes to take effect."
+                    "Successfully reset GTT to system default. "
+                    "Takes effect after the next reboot — "
+                    "current values shown by 'amd-smi node --gtt' still reflect the previous boot."
                 )
                 self.logger.print_output()
                 self.helpers.prompt_reboot()
@@ -12389,6 +12396,15 @@ class AMDSMICommands:
                 gtt_gb = self.helpers.pages_to_gb(gtt_pages)
 
                 gtt_dict = {"size_gb": gtt_gb, "size_pages": gtt_pages}
+
+                # Detect a pending value written by `amd-smi set --gtt` that
+                # will apply on the next boot (modprobe.d snippet baked into
+                # initramfs). Show it so users don't confuse current vs. pending.
+                pending_pages = self.helpers.read_pending_gtt_pages()
+                if pending_pages is not None and pending_pages != gtt_pages:
+                    pending_gb = self.helpers.pages_to_gb(pending_pages)
+                    gtt_dict["pending_size_gb"] = pending_gb
+                    gtt_dict["pending_size_pages"] = pending_pages
             except amdsmi_exception.AmdSmiLibraryException as e:
                 logging.debug("Failed to get GTT info | %s", e.get_error_info())
                 gtt_dict = {}
@@ -12412,6 +12428,12 @@ class AMDSMICommands:
                 gtt_pages = gtt_dict.get("size_pages", 0)
                 node_output.append("    GTT:")
                 node_output.append(f"        SIZE: {gtt_gb:.2f} GB ({gtt_pages} pages)")
+                if "pending_size_gb" in gtt_dict:
+                    p_gb = gtt_dict["pending_size_gb"]
+                    p_pages = gtt_dict["pending_size_pages"]
+                    node_output.append(
+                        f"        PENDING (after reboot): {p_gb:.2f} GB ({p_pages} pages)"
+                    )
             print("\n".join(node_output))
         else:
             if self.logger.is_csv_format():
@@ -12425,6 +12447,9 @@ class AMDSMICommands:
                 if args.gtt and gtt_dict:
                     csv_dict["gtt_gb"] = gtt_dict.get("size_gb", "N/A")
                     csv_dict["gtt_pages"] = gtt_dict.get("size_pages", "N/A")
+                    if "pending_size_gb" in gtt_dict:
+                        csv_dict["gtt_pending_gb"] = gtt_dict["pending_size_gb"]
+                        csv_dict["gtt_pending_pages"] = gtt_dict["pending_size_pages"]
                 self.logger.output = csv_dict
             else:
                 # For JSON and human readable format with file output
