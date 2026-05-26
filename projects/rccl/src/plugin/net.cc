@@ -203,6 +203,7 @@ static ncclResult_t ncclNetPluginInit(struct ncclComm* comm, netPluginLib_t* plu
 
   if (pluginLib->ncclGinPluginState == ncclNetPluginStateInitReady && pluginLib->ncclGin) {
     if ((ncclParamGinType() == -1) && (pluginLib->ncclGin == (ncclGin_t *)-1)) {
+#if !defined(__HIP_PLATFORM_AMD__)
       void* throwAwayContext = nullptr;
       if (ncclGinIbGdaki.init(&throwAwayContext, comm->commHash, ncclDebugLog) == ncclSuccess) {
         if (ncclGinIbGdaki.devices(&ndev) == ncclSuccess && ndev > 0) {
@@ -213,6 +214,9 @@ static ncclResult_t ncclNetPluginInit(struct ncclComm* comm, netPluginLib_t* plu
       else {
         pluginLib->ncclGin = &ncclGinIbProxy;
       }
+#else
+      pluginLib->ncclGin = &ncclGinIbProxy;
+#endif
     }
     if (pluginLib->ncclGin->init(&comm->ginContext, comm->commHash, ncclDebugLog) != ncclSuccess) pluginLib->ncclGinPluginState = ncclNetPluginStateDisabled;
     else if (pluginLib->ncclGin->devices(&ndev) != ncclSuccess || ndev <= 0) pluginLib->ncclGinPluginState = ncclNetPluginStateDisabled;

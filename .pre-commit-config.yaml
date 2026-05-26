@@ -37,6 +37,6 @@ repos:
 
   - repo: https://github.com/BlankSpruce/gersemi
     # gersemi replaces cmake-format and cmake-lint
-    rev: 0.22.1
+    rev: 0.25.1
     hooks:
       - id: gersemi

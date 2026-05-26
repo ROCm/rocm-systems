@@ -5,9 +5,14 @@ myst:
     "keywords": "system, management, interface, contribute, contributing, ROCm, develop, testing"
 ---
 
-# Building AMD SMI
+# Build AMD SMI from source
 
-This section describes the prerequisites and steps to build AMD SMI from source.
+To build AMD SMI as part of the ROCm Core SDK, see [TheRock build
+instructions](https://github.com/ROCm/TheRock/blob/main/docs/development/README.md).
+TheRock is the recommended way to build ROCm components from source.
+
+Alternatively, you can build AMD SMI standalone using the following
+instructions.
 
 (build_reqs)=
 ## Required software

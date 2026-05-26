@@ -493,6 +493,7 @@ struct consumer_thread_handle_t
     : s(std::move(_s)){};
     ~consumer_thread_handle_t()
     {
+        std::unique_lock<std::mutex> lock(s->work_mutex);
         s->stop_cons_thread = true;
         s->work_cond.notify_one();
     }
@@ -586,7 +587,9 @@ consumer(std::shared_ptr<spm_state_t> s, aqlprofile_spm_data_callback_t callback
     while(true)
     {
         std::unique_lock<std::mutex> lock(s->work_mutex);
+        // Wait for data or producer shutdown; do not wait on data_ready alone (see spm_data.cpp).
         s->work_cond.wait(lock, [&s]() { return s->data_ready || s->stop_cons_thread; });
+        // Producer destructor set stop_cons_thread; exit without processing stale work.
         if(!s->data_ready) return;
         s->data_ready = false;
 
