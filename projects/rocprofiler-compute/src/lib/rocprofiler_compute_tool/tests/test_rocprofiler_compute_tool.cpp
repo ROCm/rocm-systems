@@ -9,10 +9,16 @@
 
 using namespace rocprofiler_compute_tool;
 
-TEST_F(TestRocprofilerComputeTool, ProvidedEmptyOutputPath_Throws)
+TEST_F(TestRocprofilerComputeTool, ProvidedEmptyOutputPath_UsesDefault)
 {
     m_input_parameters->set_output_path("");
-    EXPECT_THROW(rocprofiler_configure(1, "", 1, &m_client_id), std::runtime_error);
+    EXPECT_NO_THROW(rocprofiler_configure(1, "", 1, &m_client_id));
+    const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
+    const auto tool_data = get_tool_data(cfg);
+    EXPECT_TRUE(tool_data->output_filename.find(EnvInputParameters::get_default_output_path()) !=
+                std::string::npos);
+    EXPECT_TRUE(tool_data->output_filename.find(
+                    std::to_string(getpid()) + "_native_counter_collection.csv") != std::string::npos);
 }
 
 TEST_F(TestRocprofilerComputeTool, ProvidedNoRequestedCounters_Throws)

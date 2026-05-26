@@ -150,10 +150,6 @@ void tool_fini(void* user_data)
 
 static std::string generate_output_filename(std::string_view output_path)
 {
-    if (output_path.empty())
-    {
-        throw std::runtime_error("Output path is empty");
-    }
     std::string filename{output_path};
     if (filename.back() != '/')
         filename += '/';
@@ -166,8 +162,16 @@ std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
 {
     auto tool_data = std::make_unique<tool_data_t>();
 
-    tool_data->output_filename = generate_output_filename(
-        g_input_parameters->get_output_path().value_or(std::string_view{}));
+    auto output_path = g_input_parameters->get_output_path();
+    if (!output_path || output_path->empty())
+    {
+        auto reason = !output_path ? std::string_view{"unset"} : std::string_view{"empty"};
+        output_path = EnvInputParameters::get_default_output_path();
+        std::clog << "\033[33m[rocprofiler-compute] [" << __FUNCTION__
+                  << "] WARNING: ROCPROF_OUTPUT_PATH is " << reason << "; defaulting to \""
+                  << *output_path << "\"\033[0m" << std::endl;
+    }
+    tool_data->output_filename = generate_output_filename(*output_path);
 
     // ROCPROF_COUNTERS env. var. is a string like "pmc: counter1 counter2 ..."
     if (const auto v = g_input_parameters->get_requested_counters())
