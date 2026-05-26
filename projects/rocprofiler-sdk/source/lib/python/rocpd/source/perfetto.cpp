@@ -807,7 +807,7 @@ write_perfetto(
         // memory copy counter track
         auto mem_cpy_endpoints = std::map<uint64_t, std::map<rocprofiler_timestamp_t, uint64_t>>{};
         auto mem_cpy_extremes  = std::pair<uint64_t, uint64_t>{std::numeric_limits<uint64_t>::max(),
-                                                              std::numeric_limits<uint64_t>::min()};
+                                                               std::numeric_limits<uint64_t>::min()};
         auto constexpr timestamp_buffer = 1000;
         for(auto ditr : memory_copy_gen)
         {
@@ -863,11 +863,12 @@ write_perfetto(
 
             constexpr auto _unit = ::perfetto::CounterTrack::Unit::UNIT_SIZE_BYTES;
             auto&          _name = mem_cpy_cnt_names.emplace_back(_track_name.str());
-            mem_cpy_tracks.emplace(abs_index,
-                                   ::perfetto::CounterTrack{_name.c_str(), this_pid_track}
-                                       .set_unit(_unit)
-                                       .set_unit_multiplier(bytes_multiplier)
-                                       .set_is_incremental(false));
+            mem_cpy_tracks.emplace(
+                abs_index,
+                ::perfetto::CounterTrack{::perfetto::StaticString{_name.c_str()}, this_pid_track}
+                    .set_unit(_unit)
+                    .set_unit_multiplier(bytes_multiplier)
+                    .set_is_incremental(false));
         }
 
         for(auto& mitr : mem_cpy_endpoints)
@@ -1060,11 +1061,12 @@ write_perfetto(
 
             constexpr auto _unit = ::perfetto::CounterTrack::Unit::UNIT_SIZE_BYTES;
             auto&          _name = mem_alloc_cnt_names.emplace_back(_track_name.str());
-            mem_alloc_tracks.emplace(abs_index,
-                                     ::perfetto::CounterTrack{_name.c_str(), this_pid_track}
-                                         .set_unit(_unit)
-                                         .set_unit_multiplier(bytes_multiplier)
-                                         .set_is_incremental(false));
+            mem_alloc_tracks.emplace(
+                abs_index,
+                ::perfetto::CounterTrack{::perfetto::StaticString{_name.c_str()}, this_pid_track}
+                    .set_unit(_unit)
+                    .set_unit_multiplier(bytes_multiplier)
+                    .set_is_incremental(false));
         }
 
         for(auto& alloc_itr : mem_alloc_endpoints)
@@ -1139,11 +1141,13 @@ write_perfetto(
 
                 constexpr auto _unit = ::perfetto::CounterTrack::Unit::UNIT_SIZE_BYTES;
                 auto&          _name = scratch_mem_names.emplace_back(_track_name.str());
-                scratch_mem_tracks.emplace(abs_index,
-                                           ::perfetto::CounterTrack{_name.c_str(), this_pid_track}
-                                               .set_unit(_unit)
-                                               .set_unit_multiplier(bytes_multiplier)
-                                               .set_is_incremental(false));
+                scratch_mem_tracks.emplace(
+                    abs_index,
+                    ::perfetto::CounterTrack{::perfetto::StaticString{_name.c_str()},
+                                             this_pid_track}
+                        .set_unit(_unit)
+                        .set_unit_multiplier(bytes_multiplier)
+                        .set_is_incremental(false));
             }
         }
 
@@ -1237,7 +1241,9 @@ write_perfetto(
                     auto track_name = track_name_ss.str();
 
                     counter_tracks[record.agent_abs_index].emplace(
-                        track_name, ::perfetto::CounterTrack{track_name.c_str(), this_pid_track});
+                        track_name,
+                        ::perfetto::CounterTrack{::perfetto::StaticString{track_name.c_str()},
+                                                 this_pid_track});
                     auto& endpoints = counters_endpoints[record.agent_id][counter_id];
                     for(auto& counter_itr : endpoints)
                     {

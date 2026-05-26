@@ -825,7 +825,7 @@ write_perfetto(
             constexpr auto _unit = ::perfetto::CounterTrack::Unit::UNIT_SIZE_BYTES;
             auto&          _name = mem_cpy_cnt_names.emplace_back(_track_name.str());
             mem_cpy_tracks.emplace(mitr.first,
-                                   ::perfetto::CounterTrack{_name.c_str()}
+                                   ::perfetto::CounterTrack{::perfetto::StaticString{_name.c_str()}}
                                        .set_unit(_unit)
                                        .set_unit_multiplier(bytes_multiplier)
                                        .set_is_incremental(false));
@@ -996,11 +996,12 @@ write_perfetto(
 
             constexpr auto _unit = ::perfetto::CounterTrack::Unit::UNIT_SIZE_BYTES;
             auto&          _name = mem_alloc_cnt_names.emplace_back(_track_name.str());
-            mem_alloc_tracks.emplace(alloc_itr.first,
-                                     ::perfetto::CounterTrack{_name.c_str()}
-                                         .set_unit(_unit)
-                                         .set_unit_multiplier(bytes_multiplier)
-                                         .set_is_incremental(false));
+            mem_alloc_tracks.emplace(
+                alloc_itr.first,
+                ::perfetto::CounterTrack{::perfetto::StaticString{_name.c_str()}}
+                    .set_unit(_unit)
+                    .set_unit_multiplier(bytes_multiplier)
+                    .set_is_incremental(false));
         }
 
         for(auto& alloc_itr : mem_alloc_endpoints)
@@ -1080,11 +1081,12 @@ write_perfetto(
 
                 constexpr auto _unit = ::perfetto::CounterTrack::Unit::UNIT_SIZE_BYTES;
                 auto&          _name = scratch_mem_names.emplace_back(_track_name.str());
-                scratch_mem_tracks.emplace(mitr.first,
-                                           ::perfetto::CounterTrack{_name.c_str()}
-                                               .set_unit(_unit)
-                                               .set_unit_multiplier(bytes_multiplier)
-                                               .set_is_incremental(false));
+                scratch_mem_tracks.emplace(
+                    mitr.first,
+                    ::perfetto::CounterTrack{::perfetto::StaticString{_name.c_str()}}
+                        .set_unit(_unit)
+                        .set_unit_multiplier(bytes_multiplier)
+                        .set_is_incremental(false));
             }
         }
 
@@ -1186,7 +1188,8 @@ write_perfetto(
                         auto track_name = track_name_ss.str();
 
                         counter_tracks[info.agent_id].emplace(
-                            track_name, ::perfetto::CounterTrack(track_name.c_str()));
+                            track_name,
+                            ::perfetto::CounterTrack(::perfetto::StaticString{track_name.c_str()}));
                         auto& endpoints = counters_endpoints[info.agent_id][counter_id];
                         for(auto& counter_itr : endpoints)
                         {
