@@ -34,8 +34,14 @@
 #endif
 #endif
 
+#if defined(__linux__)
+#include <climits>
+#include <unistd.h>
+#endif
+
 #include <algorithm>
 #include <chrono>
+#include <cinttypes>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -69,6 +75,8 @@ namespace amd::roc {
 bool roc::Device::isHsaInitialized_ = false;
 std::vector<hsa_agent_t> roc::Device::gpu_agents_;
 std::vector<AgentInfo> roc::Device::cpu_agents_;
+
+std::atomic<bool> Device::skipHsaShutdown_{false};
 
 address Device::mg_sync_ = nullptr;
 
@@ -216,17 +224,25 @@ Device::~Device() {
   delete xferQueue_;
   xferQueue_ = nullptr;
 
-  for (auto& it : queuePool_) {
-    for (auto qIter = it.begin(); qIter != it.end();) {
-      hsa_queue_t* queue = qIter->first;
-      auto& qInfo = qIter->second;
-      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE, "Deleting hardware queue %p with refCount 0",
-              queue->base_address);
-      qIter = it.erase(qIter);
-      Hsa::queue_destroy(queue);
+#if defined(_WIN32)
+  if (hasSchedulerQueue_.load(std::memory_order_acquire) > 0) {
+    skipHsaShutdown_.store(true, std::memory_order_release);
+    queuePool_.clear();
+  } else
+#endif  // _WIN32
+  {
+    for (auto& it : queuePool_) {
+      for (auto qIter = it.begin(); qIter != it.end();) {
+        hsa_queue_t* queue = qIter->first;
+        auto& qInfo = qIter->second;
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE, "Deleting hardware queue %p with refCount 0",
+                queue->base_address);
+        qIter = it.erase(qIter);
+        Hsa::queue_destroy(queue);
+      }
     }
+    queuePool_.clear();
   }
-  queuePool_.clear();
 
   delete blitProgram_;
 
@@ -344,6 +360,9 @@ hsa_status_t Device::loaderQueryHostAddress(const void* device, const void** hos
 
 // ================================================================================================
 bool Device::init() {
+#if defined(_WIN32)
+  skipHsaShutdown_.store(false, std::memory_order_release);
+#endif
   if (!Hsa::LoadLib()) {
     LogPrintfWarning("Failed to load rocr library!");
     return false;
@@ -526,6 +545,11 @@ extern const char* SchedulerSourceCode;
 
 void Device::tearDown() {
   NullDevice::tearDown();
+#if defined(_WIN32)
+  if (skipHsaShutdown_.load(std::memory_order_acquire)) {
+    return;
+  }
+#endif  // _WIN32
   Hsa::shut_down();
 }
 
@@ -1069,9 +1093,23 @@ bool Device::populateOCLDeviceConstants() {
     return false;
   }
 
-  if ((isa().versionMajor() == 12 && isa().versionMinor() == 5 && isa().versionStepping() == 0)
-       && (info_.globalMemCacheLineSize_ < 256)) {
+  if (info_.globalMemCacheLineSize_ < 256 &&
+      (isa().versionMajor() >= 13 ||
+       (isa().versionMajor() == 12 && isa().versionMinor() >= 5))) {
     info_.globalMemCacheLineSize_ = 256;
+  }
+
+  {
+    uint32_t maxPrefetchRegions = 0;
+    if (HSA_STATUS_SUCCESS ==
+        Hsa::agent_get_info(
+            bkendDevice_,
+            (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MAX_DATA_PREFETCH_REGIONS,
+            &maxPrefetchRegions)) {
+      info_.maxDynDataPrefetchRegions_ = maxPrefetchRegions;
+    } else {
+      info_.maxDynDataPrefetchRegions_ = 0;
+    }
   }
 
   assert(cachesize[0] > 0);
@@ -2903,7 +2941,10 @@ VirtualGPU* Device::xferQueue() const {
       return nullptr;
     }
     if (xferQueue_->gpu_queue() == nullptr) {
-      xferQueue_->set_gpu_queue(thisDevice->AcquireActiveQueue(amd::CommandQueue::Priority::Normal));
+      void* md_rb = nullptr;
+      xferQueue_->SetGpuQueue(
+          thisDevice->AcquireActiveQueue(amd::CommandQueue::Priority::Normal,
+                                         nullptr, nullptr, &md_rb), md_rb);
     }
   }
   xferQueue_->enableSyncBlit();
@@ -2957,7 +2998,8 @@ void Device::getHwEventTime(const amd::Event& event, uint64_t* start, uint64_t* 
 // ================================================================================================
 hsa_queue_t* Device::getQueueFromPool(const uint qIndex, bool force_reuse,
                                       hsa_queue_t* preferred,
-                                      const std::unordered_set<uint64_t>* excluded_ids) {
+                                      const std::unordered_set<uint64_t>* excluded_ids,
+                                      void** metadata_ring_buffer) {
   // Only reuse queues when we've reached the maximum limit, unless forced
   // Below the limit, return nullptr to allow creating new queues
   if (!force_reuse && queuePool_[qIndex].size() < settings().max_hw_queues_) {
@@ -2974,6 +3016,9 @@ hsa_queue_t* Device::getQueueFromPool(const uint qIndex, bool force_reuse,
         auto it = queuePool_[qIndex].find(preferred);
         if (it != queuePool_[qIndex].end()) {
           it->second.refCount++;
+          if (metadata_ring_buffer) {
+            *metadata_ring_buffer = it->second.metadataRingBuffer_;
+          }
           ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
                   "Reusing preferred queue: %p refCount: %d",
                   it->first->base_address, it->second.refCount);
@@ -3020,6 +3065,9 @@ hsa_queue_t* Device::getQueueFromPool(const uint qIndex, bool force_reuse,
         });
 
     lowest->second.refCount++;
+    if (metadata_ring_buffer) {
+      *metadata_ring_buffer = lowest->second.metadataRingBuffer_;
+    }
     ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
             "Selected queue (mode=%u): %p refCount: %d, depth: %lu, metric: %lu, pipe: %d%s%s",
             mode, lowest->first->base_address, lowest->second.refCount,
@@ -3037,10 +3085,12 @@ hsa_queue_t* Device::getQueueFromPool(const uint qIndex, bool force_reuse,
 // ================================================================================================
 hsa_queue_t* Device::AcquireActiveQueue(amd::CommandQueue::Priority priority,
                                         hsa_queue_t* preferred,
-                                        const std::unordered_set<uint64_t>* excluded_ids) {
+                                        const std::unordered_set<uint64_t>* excluded_ids,
+                                        void** metadata_ring_buffer) {
   uint32_t queue_size = ROC_AQL_QUEUE_SIZE;
   auto queue = acquireQueue(queue_size, false, std::vector<uint32_t>{},
-                            priority, true, false, preferred, excluded_ids);
+                            priority, true, false, preferred, excluded_ids,
+                            metadata_ring_buffer);
   return queue;
 }
 
@@ -3049,7 +3099,8 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
                                   const std::vector<uint32_t>& cuMask,
                                   amd::CommandQueue::Priority priority, bool managed,
                                   bool dedicated_queue, hsa_queue_t* preferred,
-                                  const std::unordered_set<uint64_t>* excluded_ids) {
+                                  const std::unordered_set<uint64_t>* excluded_ids,
+                                  void** metadata_ring_buffer) {
   hsa_amd_queue_priority_t queue_priority;
   uint qIndex;
   switch (priority) {
@@ -3101,7 +3152,8 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
     // decide when to start reclaiming queues.
     if (!coop_queue && (cuMask.size() == 0) &&
         (queuePool_[qIndex].size() >= settings().max_hw_queues_)) {
-      hsa_queue_t* queue = getQueueFromPool(qIndex, false, preferred, excluded_ids);
+      hsa_queue_t* queue = getQueueFromPool(qIndex, false, preferred, excluded_ids,
+                                            metadata_ring_buffer);
       if (queue != nullptr) {
         if (!managed) {
           num_queues_[qIndex]++;
@@ -3139,7 +3191,8 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
         amd::ScopedLock l(active_queue_access_);
         if (queuePool_[qIndex].size() > 0) {
           bool kForceReuse = true;
-          return getQueueFromPool(qIndex, kForceReuse);
+          return getQueueFromPool(qIndex, kForceReuse, nullptr, nullptr,
+                                  metadata_ring_buffer);
         }
       }
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE,
@@ -3165,6 +3218,23 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
           queue, queue->base_address, queue_size, queue_priority, coop_queue);
 
   Hsa::profiling_set_profiler_enabled(queue, 1);
+
+  // Query metadata prefetch version once from the first queue created on this device.
+  // The version is identical for all queues.
+  if (!metadata_version_queried_) {
+    uint8_t major = 0, minor = 0;
+    hsa_amd_queue_get_info(queue,
+        HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_DISPATCH_PKT_VERSION_MAJOR, &major);
+    hsa_amd_queue_get_info(queue,
+        HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_DISPATCH_PKT_VERSION_MINOR, &minor);
+    if (major < (1 << 3) && minor < (1 << 5)) {
+      metadata_version_header_ =
+          (static_cast<uint32_t>(major) << HSA_AMD_METADATA_PACKET_HEADER_VERSION_MAJOR) |
+          (static_cast<uint32_t>(minor) << HSA_AMD_METADATA_PACKET_HEADER_VERSION_MINOR);
+    }
+    metadata_version_queried_ = true;
+  }
+
   if (cuMask.size() != 0 || info_.globalCUMask_.size() != 0) {
     std::stringstream ss;
     ss << std::hex;
@@ -3233,12 +3303,20 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
       return nullptr;
     }
 
+    if (metadata_ring_buffer) {
+      hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_RING_BUFFER,
+                             metadata_ring_buffer);
+    }
     return queue;
   }
 
   if (coop_queue) {
     // Skip queue recycling for cooperative queues, since it should be just one
     // per device.
+    if (metadata_ring_buffer) {
+      hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_RING_BUFFER,
+                             metadata_ring_buffer);
+    }
     return queue;
   }
 
@@ -3248,7 +3326,12 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
   assert(result.second && "QueueInfo already exists");
   auto& qInfo = result.first->second;
   qInfo.refCount = 1;
-  qInfo.hasDedicatedQueue_ = dedicated_queue;  // Track if this is a dedicated queue
+  qInfo.hasDedicatedQueue_ = dedicated_queue;
+  hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_RING_BUFFER,
+                         &qInfo.metadataRingBuffer_);
+  if (metadata_ring_buffer) {
+    *metadata_ring_buffer = qInfo.metadataRingBuffer_;
+  }
   ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "acquireQueue refCount: %p (%d) %s",
           result.first->first->base_address, result.first->second.refCount,
           dedicated_queue ? "(dedicated)" : "");
@@ -3487,13 +3570,47 @@ device::Signal* Device::createSignal() const { return new roc::Signal(); }
 device::Signal* Device::createIpcSignal() const { return new roc::IpcSignal(); }
 
 // ================================================================================================
+static std::string GetLocalHostName() {
+#if defined(__linux__)
+  char buf[HOST_NAME_MAX + 1];
+  buf[HOST_NAME_MAX] = '\0';
+  if (gethostname(buf, sizeof(buf)) == 0) return buf;
+#endif
+  return "";
+}
+
+// ================================================================================================
 hsa_status_t Device::BackendErrorCallBackHandler(const hsa_amd_event_t* event, void* data) {
   cl_int gpu_error = CL_SUCCESS;
   switch (event->event_type) {
-    case HSA_AMD_GPU_MEMORY_FAULT_EVENT:
+    case HSA_AMD_GPU_MEMORY_FAULT_EVENT: {
       gpu_error = CL_INVALID_MEM_OBJECT;
       LogError("Memory Fault Error");
+      std::string hostnameStr = GetLocalHostName();
+      std::string host_tag = hostnameStr.empty() ? "" : "host: " + hostnameStr + ", ";
+      for (auto* amd_dev : amd::Device::devices()) {
+        if (amd_dev->type() != CL_DEVICE_TYPE_GPU) continue;
+        Device* roc_dev = reinterpret_cast<Device*>(amd_dev);
+        for (auto it : roc_dev->vgpus()) {
+          roc::VirtualGPU* vgpu = reinterpret_cast<roc::VirtualGPU*>(it);
+          bool faulted = false;
+          if (vgpu->gpu_queue() != nullptr &&
+              hsa_amd_queue_get_info(vgpu->gpu_queue(),
+                                     HSA_AMD_QUEUE_INFO_VM_FAULT_STATUS,
+                                     &faulted) == HSA_STATUS_SUCCESS &&
+              faulted) {
+            std::string kernelName = vgpu->AnalyzeAqlQueue();
+            const char* kname = kernelName.c_str();
+            ClPrint(amd::LOG_NONE, amd::LOG_ALWAYS,
+                    "Memory Fault Error [%sGPU index: %u, "
+                    "faulting addr: 0x%" PRIx64 ", kernel: %s]",
+                    host_tag.c_str(), roc_dev->index(),
+                    event->memory_fault.virtual_address, kname);
+          }
+        }
+      }
       break;
+    }
     case HSA_AMD_GPU_HW_EXCEPTION_EVENT:
       gpu_error = CL_INVALID_OPERATION;
       LogError("HW Exception Error");
@@ -3600,79 +3717,6 @@ void Device::DestroyHwEvent(void* hw_event) const {
 }
 
 // ================================================================================================
-// GraphSignalPool implementation
-// ================================================================================================
-ProfilingSignal* GraphSignalPool::AllocateOneSignal(bool interrupt, bool system_scope) {
-  auto* ps = new ProfilingSignal();
-  hsa_status_t status;
-  if (interrupt && system_scope) {
-    status = Hsa::signal_create(1, 0, nullptr, &ps->signal_);
-  } else {
-    status = Hsa::signal_create(1, 0, nullptr, HSA_AMD_SIGNAL_AMD_GPU_ONLY, &ps->signal_);
-  }
-  if (status != HSA_STATUS_SUCCESS) {
-    delete ps;
-    return nullptr;
-  }
-  ps->flags_.interrupt_ = interrupt;
-  return ps;
-}
-
-bool GraphSignalPool::Allocate(size_t count) {
-  signals_.reserve(count);
-  for (size_t i = signals_.size(); i < count; ++i) {
-    auto* ps = AllocateOneSignal(false, false);
-    if (ps == nullptr) return false;
-    signals_.push_back(ps);
-  }
-  capacity_.store(signals_.size(), std::memory_order_release);
-  next_idx_.store(0);
-  irq_next_idx_.store(0);
-  return true;
-}
-
-bool GraphSignalPool::AllocateIrq(size_t count, bool system_scope) {
-  irq_signals_.reserve(count);
-  for (size_t i = irq_signals_.size(); i < count; ++i) {
-    auto* ps = AllocateOneSignal(true, system_scope);
-    if (ps == nullptr) return false;
-    irq_signals_.push_back(ps);
-  }
-  irq_capacity_.store(irq_signals_.size(), std::memory_order_release);
-  irq_next_idx_.store(0);
-  return true;
-}
-
-ProfilingSignal* GraphSignalPool::GrowAndAcquire(size_t idx) {
-  amd::ScopedLock sl(lock_);
-  if (idx < signals_.size()) return signals_[idx];
-  while (signals_.size() <= idx) {
-    auto* ps = AllocateOneSignal(false, false);
-    if (ps == nullptr) return nullptr;
-    signals_.push_back(ps);
-  }
-  capacity_.store(signals_.size(), std::memory_order_release);
-  return signals_[idx];
-}
-
-ProfilingSignal* GraphSignalPool::GrowAndAcquireIrq(size_t idx, bool system_scope) {
-  amd::ScopedLock sl(lock_);
-  if (idx < irq_signals_.size()) return irq_signals_[idx];
-  while (irq_signals_.size() <= idx) {
-    auto* ps = AllocateOneSignal(true, system_scope);
-    if (ps == nullptr) return nullptr;
-    irq_signals_.push_back(ps);
-  }
-  irq_capacity_.store(irq_signals_.size(), std::memory_order_release);
-  return irq_signals_[idx];
-}
-
-GraphSignalPool::~GraphSignalPool() {
-  for (auto* ps : signals_) { ps->release(); }
-  for (auto* ps : irq_signals_) { ps->release(); }
-}
-
-// ================================================================================================
 uint8_t* Device::CreateBarrierPacket() const {
   static constexpr uint16_t kBarrierNopHeader =
       (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE) |
@@ -3685,45 +3729,6 @@ uint8_t* Device::CreateBarrierPacket() const {
   auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);
   pkt->header = kBarrierNopHeader;
   return raw;
-}
-
-// ================================================================================================
-GraphSignalPool* Device::CreateGraphSignalPool(
-    size_t gpu_count, size_t irq_count,
-    size_t segment_count, std::vector<void*>& hw_events) const {
-  // Clear upfront so every failure path honours the contract: caller sees an
-  // empty hw_events whenever nullptr is returned, regardless of what was passed in.
-  hw_events.clear();
-
-  auto* pool = new GraphSignalPool();
-
-  if (gpu_count > 0 && !pool->Allocate(gpu_count)) {
-    delete pool;
-    return nullptr;
-  }
-  if (irq_count > 0 && !pool->AllocateIrq(irq_count, true)) {
-    delete pool;
-    return nullptr;
-  }
-
-  hw_events.resize(segment_count, nullptr);
-  for (size_t i = 0; i < segment_count; ++i) {
-    hw_events[i] = pool->Acquire();
-    if (hw_events[i] == nullptr) {
-      delete pool;
-      hw_events.clear();
-      return nullptr;
-    }
-  }
-
-  // Pre-allocation is done; reset so GetLastAcquired() only reflects GPU dispatches.
-  pool->ResetLastAcquired();
-  return pool;
-}
-
-// ================================================================================================
-size_t Device::GetGraphSignalPoolUsedCount(GraphSignalPool* pool) const {
-  return pool ? pool->UsedCount() : 0;
 }
 
 // ================================================================================================
@@ -4058,15 +4063,19 @@ cl_int ConvertHSAErrorIntoCLError(hsa_status_t hsa_status) {
 void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data) {
   if (status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK) {
     Device* dev = reinterpret_cast<Device*>(data);
+    std::string hostnameStr = GetLocalHostName();
+    std::string host_tag = hostnameStr.empty() ? "" : "host: " + hostnameStr + ", ";
+    std::string kernelName;
     for (auto it : dev->vgpus()) {
       roc::VirtualGPU* vgpu = reinterpret_cast<roc::VirtualGPU*>(it);
       if (vgpu->gpu_queue() == queue) {
-        vgpu->AnalyzeAqlQueue();
+        kernelName = vgpu->AnalyzeAqlQueue();
       }
     }
     // Abort on device exceptions.
     const char* errorMsg = 0;
     Hsa::status_string(status, &errorMsg);
+    const char* kname = kernelName.c_str();
     if (status == HSA_STATUS_ERROR_OUT_OF_RESOURCES) {
       size_t global_available_mem = 0;
       if (HSA_STATUS_SUCCESS !=
@@ -4076,12 +4085,15 @@ void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data) {
         LogError("HSA_AMD_AGENT_INFO_MEMORY_AVAIL query failed.");
       }
       ClPrint(amd::LOG_NONE, amd::LOG_ALWAYS,
-              "Callback: Queue %p Aborting with error : %s Code: 0x%x Available Free mem : %zu MB",
-              queue->base_address, errorMsg, status, global_available_mem / Mi);
+              "Callback: Queue %p Aborting with error : %s Code: 0x%x Available Free mem : %zu MB"
+              " [%sGPU index: %u, kernel: %s]",
+              queue->base_address, errorMsg, status, global_available_mem / Mi,
+              host_tag.c_str(), dev->index(), kname);
     } else {
       ClPrint(amd::LOG_NONE, amd::LOG_ALWAYS,
-              "Callback: Queue %p aborting with error : %s code: 0x%x", queue->base_address,
-              errorMsg, status);
+              "Callback: Queue %p aborting with error : %s code: 0x%x"
+              " [%sGPU index: %u, kernel: %s]",
+              queue->base_address, errorMsg, status, host_tag.c_str(), dev->index(), kname);
     }
 
     // Core dumps generally provide limited value for OOM or register overflow,

@@ -32,6 +32,29 @@
 
 namespace amd {
 
+// Compile-time upper bound for DynDataPrefetch region arrays.
+// The actual device limit is queried at runtime via hipDeviceAttributeMaxDynDataPrefetchRegions.
+constexpr uint32_t kDynDataPrefetchMaxRegions = 2;
+
+struct DynDataPrefetchRegion {
+  void*    baseAddress;
+  size_t   burstSize;
+  uint32_t numBursts;
+  uint32_t stride;
+};
+
+struct DynDataPrefetchConfig {
+  uint32_t             numRegions;
+  uint8_t              hints;
+  DynDataPrefetchRegion regions[kDynDataPrefetchMaxRegions];
+
+  DynDataPrefetchConfig() : numRegions(0), hints(0) {
+    memset(regions, 0, sizeof(regions));
+  }
+
+  bool isEnabled() const { return numRegions > 0; }
+};
+
 /*! \addtogroup Runtime
  *  @{
  *
@@ -42,7 +65,6 @@ namespace amd {
 class Command;
 class HostQueue;
 union ComputeCommand;
-namespace roc { struct GraphSignalPool; }
 
 /*! \brief Encapsulates the status of a command.
  *
@@ -54,7 +76,7 @@ class Event : public RuntimeObject {
   typedef void(CL_CALLBACK* CallBackFunction)(cl_event event, int32_t command_exec_status,
                                               void* user_data);
 
-  struct CallBackEntry : public HeapObject {
+  struct CallBackEntry {
     struct CallBackEntry* next_;  //!< the next entry in the callback list.
 
     std::atomic<CallBackFunction> callback_;  //!< callback function pointer.
@@ -260,9 +282,8 @@ union CopyMetadata {
     uint32_t isAsync_ : 1;
     uint32_t copyEnginePreference_ : 2;
     uint32_t srcAccessOrder_ : 2;       //!< Source access ordering for batch copies
-    uint32_t preferCE_ : 1;             //!< Prefer compute engine over SDMA
     uint32_t copyOpType_ : 3;           //!< Operation type (CopyOpType)
-    uint32_t reserved_ : 23;            //!< Reserved for future use
+    uint32_t reserved_ : 24;            //!< Reserved for future use
   };
   uint32_t flags_;
   CopyMetadata() : flags_(0) {}
@@ -270,7 +291,6 @@ union CopyMetadata {
       : isAsync_(isAsync),
         copyEnginePreference_(copyEnginePreference),
         srcAccessOrder_(kSrcAccessOrderStream),
-        preferCE_(0),
         copyOpType_(kCopyOpLinear),
         reserved_(0) {}
   CopyMetadata(bool isAsync, CopyEnginePreference copyEnginePreference,
@@ -278,7 +298,6 @@ union CopyMetadata {
       : isAsync_(isAsync),
         copyEnginePreference_(copyEnginePreference),
         srcAccessOrder_(srcAccessOrder),
-        preferCE_(0),
         copyOpType_(kCopyOpLinear),
         reserved_(0) {}
 };
@@ -311,7 +330,6 @@ class Command : public Event {
   GraphKernelArgManager* graphKernArgMgr_ = nullptr;  //!< KernelMgr for graph
   address kernArgOffset_ = nullptr;  //!< KernelArg buffer to used when graph capturing is enabled
   const std::string** capturedKernelName_ = nullptr;  //!< Kernel under capture
-  roc::GraphSignalPool* graph_signal_pool_ = nullptr;  //!< Graph-owned signal pool for this command
  protected:
   bool cpu_wait_ = false;  //!< If true, then the command was issued for CPU/GPU sync
 
@@ -461,11 +479,6 @@ class Command : public Event {
 
   //! Check if this command(should be a marker) requires CPU wait
   bool CpuWaitRequested() const { return cpu_wait_; }
-
-  //! Set graph signal pool for graph-owned signal allocation
-  void SetGraphSignalPool(roc::GraphSignalPool* pool) { graph_signal_pool_ = pool; }
-  //! Get graph signal pool (nullptr for non-graph commands)
-  roc::GraphSignalPool* graphSignalPool() const { return graph_signal_pool_; }
 };
 
 class UserEvent : public Command {
@@ -1180,7 +1193,7 @@ class BatchCopyMemoryCommand : public Command {
   virtual void submit(device::VirtualDevice& device) { device.submitBatchCopyMemory(*this); }
 
   //! Return the vector of copy operations
-  std::vector<BatchCopyOp>& copyOps() { return copyOps_; }
+  const std::vector<BatchCopyOp>& copyOps() const { return copyOps_; }
 
   //! Return the number of copy operations in the batch
   size_t count() const { return copyOps_.size(); }
@@ -1333,6 +1346,7 @@ class NDRangeKernelCommand : public Command {
   uint64_t allGridSum_;      //!< A sum of all grids in multi GPU launch
   uint32_t firstDevice_;     //!< Device index of the first device in the gridc
   uint32_t numWorkgroups_;   //!< Total number of workgroups in the current launch
+  DynDataPrefetchConfig dynDataPrefetchConfig_;  //!< Dynamic data prefetch configuration
 
  public:
   enum {
@@ -1401,6 +1415,9 @@ class NDRangeKernelCommand : public Command {
   uint64_t firstDevice() const { return firstDevice_; }
 
   uint32_t numWorkgroups() const { return numWorkgroups_; }
+
+  const DynDataPrefetchConfig& dynDataPrefetchConfig() const { return dynDataPrefetchConfig_; }
+  void setDynDataPrefetchConfig(const DynDataPrefetchConfig& cfg) { dynDataPrefetchConfig_ = cfg; }
 
   //! Set the local work size.
   void setLocalWorkSize(const NDRange& local) { sizes_.local() = local; }
@@ -1509,8 +1526,6 @@ class AccumulateCommand : public Command {
   std::vector<std::pair<uint64_t, uint64_t>> tsList_;
   //! HW events that need to be released when this command is destroyed
   std::unordered_map<Device*, std::vector<void*>> hw_events_;
-  //! Graph signal pool owned by this command (deleted after GPU completion)
-  roc::GraphSignalPool* owned_graph_signal_pool_ = nullptr;
 
  public:
   //! Create a new Marker
@@ -1533,9 +1548,6 @@ class AccumulateCommand : public Command {
       }
     }
   }
-
-  //! Transfer ownership of graph signal pool for cleanup after GPU completion
-  void SetOwnedGraphSignalPool(roc::GraphSignalPool* pool) { owned_graph_signal_pool_ = pool; }
 
   //! Add kernel name to the list if available
   void addKernelName(const std::string* kernelName) { kernelNames_.push_back(kernelName); }

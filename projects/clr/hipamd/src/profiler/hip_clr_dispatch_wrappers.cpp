@@ -805,7 +805,7 @@ static hipError_t hipExtLaunchKernelLayer(const void* function_address, dim3 num
   _rec->gpu.block_x = dimBlocks.x; _rec->gpu.block_y = dimBlocks.y; _rec->gpu.block_z = dimBlocks.z;
   if (args) {
     hipFunction_t hfunc = nullptr;
-    if (g_next.hipGetFuncBySymbol_fn(&hfunc, function_address) == hipSuccess)
+    if (hip::ihipGetFuncBySymbol(&hfunc, function_address) == hipSuccess)
       HipCaptureKernelArgsExt(&_rec->gpu, hfunc, args);
   }
   auto _r = g_next.hipExtLaunchKernel_fn(function_address, numBlocks, dimBlocks, args, sharedMemBytes, stream, startEvent, stopEvent, flags);
@@ -1535,10 +1535,10 @@ static void CaptureGraphExecNodes(hipGraphExec_t exec, hipGraph_t graph) {
         knode->GetParams(&kp);
         if (!kp.func) continue;
         hipFunction_t hfunc = nullptr;
-        if (g_next.hipGetFuncBySymbol_fn(&hfunc, kp.func) != hipSuccess || !hfunc) {
+        if (hip::ihipGetFuncBySymbol(&hfunc, kp.func) != hipSuccess || !hfunc) {
           // Stream-captured graphs store a hipFunction_t (not a host symbol pointer) in kp.func.
-          // hipGetFuncBySymbol fails with hipErrorInvalidSymbol for these — fall back to casting
-          // directly, mirroring GraphKernelNode::getFunc().
+          // ihipGetFuncBySymbol fails for these — fall back to casting directly, mirroring
+          // GraphKernelNode::getFunc().
           hfunc = static_cast<hipFunction_t>(const_cast<void*>(kp.func));
           if (!hip::asKernel(hfunc)) continue;
         }
@@ -2086,7 +2086,7 @@ static hipError_t hipLaunchCooperativeKernelLayer(const void* f, dim3 gridDim, d
   _rec->gpu.block_x = blockDimX.x; _rec->gpu.block_y = blockDimX.y; _rec->gpu.block_z = blockDimX.z;
   if (kernelParams) {
     hipFunction_t hfunc = nullptr;
-    if (g_next.hipGetFuncBySymbol_fn(&hfunc, f) == hipSuccess)
+    if (hip::ihipGetFuncBySymbol(&hfunc, f) == hipSuccess)
       HipCaptureKernelArgsExt(&_rec->gpu, hfunc, kernelParams);
   }
   auto _r = g_next.hipLaunchCooperativeKernel_fn(f, gridDim, blockDimX, kernelParams, sharedMemBytes, stream);
@@ -2122,7 +2122,7 @@ static hipError_t hipLaunchKernelLayer(const void* function_address, dim3 numBlo
   _rec->gpu.block_x = dimBlocks.x; _rec->gpu.block_y = dimBlocks.y; _rec->gpu.block_z = dimBlocks.z;
   if (args) {
     hipFunction_t hfunc = nullptr;
-    if (g_next.hipGetFuncBySymbol_fn(&hfunc, function_address) == hipSuccess)
+    if (hip::ihipGetFuncBySymbol(&hfunc, function_address) == hipSuccess)
       HipCaptureKernelArgsExt(&_rec->gpu, hfunc, args);
   }
   auto _r = g_next.hipLaunchKernel_fn(function_address, numBlocks, dimBlocks, args, sharedMemBytes, stream);
@@ -5039,6 +5039,24 @@ static hipError_t hipKernelGetFunctionLayer(hipFunction_t* pFunc, hipKernel_t ke
   return _r;
 }
 
+// api_id = 512
+static hipError_t hipLibraryGetGlobalLayer(void** dptr, size_t* bytes, hipLibrary_t library,
+                                            const char* name) {
+  auto* _rec = HipGetActiveRecordExt(512u);
+  auto _r = g_next.hipLibraryGetGlobal_fn(dptr, bytes, library, name);
+  _rec->end_ns = NowNs();
+  return _r;
+}
+
+// api_id = 513
+static hipError_t hipLibraryGetManagedLayer(void** dptr, size_t* bytes, hipLibrary_t library,
+                                             const char* name) {
+  auto* _rec = HipGetActiveRecordExt(513u);
+  auto _r = g_next.hipLibraryGetManaged_fn(dptr, bytes, library, name);
+  _rec->end_ns = NowNs();
+  return _r;
+}
+
 // API name table — indexed by api_id (same order as UpdateDispatchTable).
 const char* const kHipApiNamesExt[] = {
   "hipApiName",
@@ -5553,8 +5571,10 @@ const char* const kHipApiNamesExt[] = {
   "hipKernelGetAttribute",
   "hipKernelSetAttribute",
   "hipKernelGetFunction",
+  "hipLibraryGetGlobal",
+  "hipLibraryGetManaged",
 };
-const size_t kHipApiNamesCountExt = 512;
+const size_t kHipApiNamesCountExt = 514;
 
 #include <cstring>
 
@@ -6073,6 +6093,8 @@ void HipProfilerBuildWrapperTableExt(HipDispatchTable* tbl) {
   g_wrapper_tbl.hipKernelGetAttribute_fn = hipKernelGetAttributeLayer;
   g_wrapper_tbl.hipKernelSetAttribute_fn = hipKernelSetAttributeLayer;
   g_wrapper_tbl.hipKernelGetFunction_fn = hipKernelGetFunctionLayer;
+  g_wrapper_tbl.hipLibraryGetGlobal_fn = hipLibraryGetGlobalLayer;
+  g_wrapper_tbl.hipLibraryGetManaged_fn = hipLibraryGetManagedLayer;
   // g_wrapper_tbl is fully written before any Install call copies it in.
 }
 

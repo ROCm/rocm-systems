@@ -131,6 +131,11 @@ declare -A TEST_NUMBERS=(
   ["teamctxsharedinfra"]="95"
   ["quiet_on_stream"]="96"
   ["sync_all_on_stream"]="97"
+  ["teamctxsubsetparentinfra"]="98"
+  ["fence_putwavesignal"]="99"
+  ["fence_putlargesmall"]="100"
+  ["fence_fanout"]="101"
+  ["fence_putwavenbichunks"]="102"
 )
 
 ExecTest() {
@@ -308,27 +313,25 @@ TestRMAPut() {
   ExecTest  "waveputnbi"       2       16           128       8
 
   ################################ User Buffer Tests ################################
-  if [[ $TEST != gda* ]]; then # AIROCSHMEM-383
-    export LOCALBUFTYPE=host
-    ExecTest  "putnbi"           2       32           128       512
-    unset LOCALBUFTYPE
+  export LOCALBUFTYPE=host
+  ExecTest  "putnbi"           2       32           128       512
+  unset LOCALBUFTYPE
 
-    export LOCALBUFTYPE=device
-    ExecTest  "putnbi"           2       32           128       512
-    unset LOCALBUFTYPE
+  export LOCALBUFTYPE=device
+  ExecTest  "putnbi"           2       32           128       512
+  unset LOCALBUFTYPE
 
-    export LOCALBUFTYPE=fine
-    ExecTest  "putnbi"           2       32           128       512
-    unset LOCALBUFTYPE
+  export LOCALBUFTYPE=fine
+  ExecTest  "putnbi"           2       32           128       512
+  unset LOCALBUFTYPE
 
-    export LOCALBUFTYPE=uncached
-    ExecTest  "putnbi"           2       32           128       512
-    unset LOCALBUFTYPE
+  export LOCALBUFTYPE=uncached
+  ExecTest  "putnbi"           2       32           128       512
+  unset LOCALBUFTYPE
 
-    export LOCALBUFTYPE=managed
-    ExecTest  "putnbi"           2       32           128       512
-    unset LOCALBUFTYPE
-  fi
+  export LOCALBUFTYPE=managed
+  ExecTest  "putnbi"           2       32           128       512
+  unset LOCALBUFTYPE
 }
 
 TestRMAGet() {
@@ -386,9 +389,8 @@ TestRMAGet() {
   else echo "Skip:   get_* (AIROCSHMEM-120: RO get tests abort)"; fi
 
   ################################ User Buffer Tests ################################
-  # AIROCSHMEM-383 for GDA
   # AIROCSHMEM-120 for RO
-  if [[ $TEST != gda* && $TEST != ro* ]]; then
+  if [[ $TEST != ro* ]]; then
     export LOCALBUFTYPE=host
     ExecTest  "getnbi"           2       32           128       512
     unset LOCALBUFTYPE
@@ -612,12 +614,28 @@ TestOther() {
   ExecTest  "teamctxoddeveninfra" 5       1            1
   ExecTest  "teamctxsharedinfra"  2       1            1
   ExecTest  "teamctxsharedinfra"  5       1            1
+  ExecTest  "teamctxsubsetparentinfra" 4  1            1
+  ExecTest  "teamctxsubsetparentinfra" 5  1            1
   unset ROCSHMEM_MAX_NUM_CONTEXTS
 
   ExecTest  "shmemptr"         2       1            1         8
   ExecTest  "shmemptr"         2       1            1024      8
   ExecTest  "shmemptr"         2       8            1         8
   ExecTest  "shmemptr"         2       16           128       8
+
+  ########################### Fence ordering tests #############################
+  if [[ $TEST != ro* ]]; then #AIROCSHMEM-418: fence tests not supported on RO
+  ExecTest  "fence_putwavesignal"    2       1     64        1048576
+  ExecTest  "fence_putwavesignal"    2       8     256       1048576
+  ExecTest  "fence_putwavesignal"    2       32    1024      65536
+  ExecTest  "fence_putlargesmall"    2       1     64        4096
+  ExecTest  "fence_putlargesmall"    2       8     256       65536
+  ExecTest  "fence_fanout"           2       1     64        1048576
+  ExecTest  "fence_fanout"           4       4     256       65536
+  ExecTest  "fence_fanout"           8       8     256       65536
+  ExecTest  "fence_putwavenbichunks" 2       1     64        1048576
+  ExecTest  "fence_putwavenbichunks" 2       8     256       65536
+  else echo "Skip:   fence_* (AIROCSHMEM-418: fence tests not supported on RO)"; fi
 }
 
 TestHeatMapRMA() {
@@ -655,6 +673,7 @@ TestHeatMapColl() {
   ExecTest  "alltoall"         32      1            256        v1073741824
   ExecTest  "alltoall"         64      1            256        v1073741824
 }
+
 
 ValidateInput() {
   INPUT_COUNT=$1
@@ -745,16 +764,32 @@ RerunFailedTests() {
   echo ""
 }
 
-APP=$1
-TEST=$2
-LOG_DIR=$3
-HOSTFILE=$4
+# Parse optional flags before positional arguments
+ARTIFACT_DIR=""
+_POSITIONAL=()
+for _arg in "$@"; do
+  if [[ "$_arg" == --artifact-dir=* ]]; then
+    ARTIFACT_DIR="${_arg#--artifact-dir=}"
+  elif [[ "$_ARG_NEXT_IS_ARTIFACT_DIR" == "1" ]]; then
+    ARTIFACT_DIR="$_arg"
+    _ARG_NEXT_IS_ARTIFACT_DIR=0
+  elif [[ "$_arg" == "--artifact-dir" ]]; then
+    _ARG_NEXT_IS_ARTIFACT_DIR=1
+  else
+    _POSITIONAL+=("$_arg")
+  fi
+done
+
+APP=${_POSITIONAL[0]:-}
+TEST=${_POSITIONAL[1]:-}
+LOG_DIR=${_POSITIONAL[2]:-}
+HOSTFILE=${_POSITIONAL[3]:-}
 
 DRIVER_RETURN_STATUS=0
 FAILED_TESTS=()  # Array to store failed test parameters
 RETRY_THRESHOLD=${RETRY_THRESHOLD:-5}  # Maximum number of failed tests to retry (can be overridden via env var)
 
-ValidateInput $#
+ValidateInput ${#_POSITIONAL[@]}
 ValidateLogDir $LOG_DIR
 
 # Print build info and environment variables before running tests
@@ -864,4 +899,73 @@ else
   fi
 fi
 echo "========================================================================"
+
+# Generate performance artifact if requested
+# --artifact-dir works for any test suite but is most useful with heatmap suites.
+# For a single build (no baseline), perf_compare.py is called via run_perf_compare.sh
+# using --skip-build; the caller must supply --baseline-dir and --branch-dir via the
+# PERF_BASELINE_DIR and PERF_BRANCH_DIR environment variables if a comparison is wanted.
+# When only ARTIFACT_DIR is set (no PERF_BASELINE_DIR), per-test plots are still generated.
+if [[ -n "$ARTIFACT_DIR" && $EXIT_STATUS -eq 0 ]]; then
+  case "$TEST" in
+    heatmap|heatmaprma|heatmapcoll)
+      echo ""
+      echo "========================================================================"
+      echo "Generating performance artifact -> $ARTIFACT_DIR"
+      echo "========================================================================"
+      SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+      RUN_COMPARE="$SCRIPT_DIR/run_perf_compare.sh"
+
+      mkdir -p "$ARTIFACT_DIR"
+
+      if [[ -n "${PERF_BASELINE_DIR:-}" && -n "${PERF_BRANCH_DIR:-}" ]]; then
+        # Full comparison: caller supplied pre-built baseline and branch directories
+        bash "$RUN_COMPARE" \
+          --skip-build \
+          --suite "$TEST" \
+          --iterations 1 \
+          --baseline-dir "$PERF_BASELINE_DIR" \
+          --branch-dir   "$PERF_BRANCH_DIR" \
+          --outdir "$ARTIFACT_DIR"
+        echo ""
+        echo "CI ARTIFACT: $ARTIFACT_DIR/heatmap_summary.png"
+        echo "CI ARTIFACT: $ARTIFACT_DIR/heatmap_summary.txt"
+        echo "CI ARTIFACT: $ARTIFACT_DIR/heatmap_data.csv"
+        echo "CI ARTIFACT: $ARTIFACT_DIR/per_test/"
+      else
+        # Single-build: generate per-test latency plots only (no baseline to compare against)
+        COMPARE="$SCRIPT_DIR/perf_compare.py"
+        VENV_DIR="$SCRIPT_DIR/.perf-venv"
+        # Self-healing: recreate venv if dependencies are missing
+        if [[ -d "$VENV_DIR" ]] && \
+           ! "$VENV_DIR/bin/python3" -c "import matplotlib, numpy, pandas, seaborn" &>/dev/null; then
+          rm -rf "$VENV_DIR"
+        fi
+        if [[ ! -d "$VENV_DIR" ]]; then
+          if python3 -m ensurepip --version &>/dev/null; then
+            python3 -m venv "$VENV_DIR" || { VENV_DIR=""; }
+          else
+            python3 -m venv --system-site-packages --without-pip "$VENV_DIR" || { VENV_DIR=""; }
+          fi
+          [[ -x "$VENV_DIR/bin/python3" ]] && \
+            "$VENV_DIR/bin/python3" -m pip install --quiet matplotlib numpy pandas seaborn || true
+        fi
+        PYTHON="${VENV_DIR:+$VENV_DIR/bin/}python3"
+        # Use the single run log dir as both baseline and variant so per-test plots are produced.
+        # The heatmap will show 0% (identical), which is expected for a single-build run.
+        "$PYTHON" "$COMPARE" \
+          --baseline "$LOG_DIR" \
+          --variants "current:$LOG_DIR" \
+          --outdir "$ARTIFACT_DIR" || true
+        echo ""
+        echo "CI ARTIFACT: $ARTIFACT_DIR/per_test/"
+        echo "NOTE: Set PERF_BASELINE_DIR and PERF_BRANCH_DIR for a full heatmap comparison"
+      fi
+      ;;
+  esac
+elif [[ -n "$ARTIFACT_DIR" && $EXIT_STATUS -ne 0 ]]; then
+  echo ""
+  echo "WARNING: Skipping artifact generation due to test failures" >&2
+fi
+
 exit $EXIT_STATUS

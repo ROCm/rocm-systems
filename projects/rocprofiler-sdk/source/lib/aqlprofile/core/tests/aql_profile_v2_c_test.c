@@ -26,10 +26,19 @@ aql_profile_v2_c_compatibility_test(void)
     aqlprofile_cu_bitmap_t     bitmap  = {{{0}}};
     aqlprofile_agent_info_v2_t info_v2 = {0};
 
+    aqlprofile_spm_available_configuration_t     spm_config = {0};
+    aqlprofile_spm_available_configurations_cb_t spm_cb     = NULL;
+    typedef hsa_status_t (*spm_query_fn_t)(
+        aqlprofile_agent_handle_t, aqlprofile_spm_available_configurations_cb_t, void*);
+    spm_query_fn_t spm_query_fn = &aqlprofile_spm_query_agent_configurations;
+
     (void) status;
     (void) parameter;
     (void) query;
     (void) bitmap;
     (void) info_v2;
+    (void) spm_config;
+    (void) spm_cb;
+    (void) spm_query_fn;
     return 0;
 }

@@ -1,0 +1,67 @@
+{
+    "required_tables": [
+        {
+            "commit": "Validation rules for GPU hardware counters (rocm_counter_collection)",
+            "min_rows": 1,
+            "name_prefix": "rocpd_info_pmc_",
+            "required_columns": [
+                "id",
+                "agent_id",
+                "target_arch",
+                "name",
+                "description",
+                "units",
+                "value_type"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Check that GPU HW counter metadata was registered",
+                    "error_message": "No GPU HW counter info entries found",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM {table_name} WHERE target_arch = 'GPU' AND name LIKE 'GPU %'"
+                }
+            ]
+        },
+        {
+            "commit": "Validation rules for GPU hardware counter events",
+            "min_rows": 1,
+            "name_prefix": "rocpd_pmc_event_",
+            "required_columns": [
+                "event_id",
+                "pmc_id",
+                "value"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Check that GPU HW counter events exist in rocpd_pmc_event",
+                    "error_message": "No GPU HW counter event rows found",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name LIKE 'GPU %'"
+                },
+                {
+                    "comparison": "greater_than",
+                    "description": "Check that GPU HW counter end-of-event zero markers exist (each counter interval must close with value=0)",
+                    "error_message": "No zero-value end markers found for GPU HW counters \u2014 counter intervals are not properly closed",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name LIKE 'GPU %' AND event.value = 0.0"
+                },
+                {
+                    "comparison": "greater_than",
+                    "description": "Check that GPU HW counter non-zero values exist (actual counter measurements)",
+                    "error_message": "No non-zero counter values found \u2014 counters may not be recording",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name LIKE 'GPU %' AND event.value > 0.0"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Check that every non-zero counter event has a matching zero end marker (paired start/end)",
+                    "error_message": "Mismatch between non-zero counter events and zero end markers \u2014 some counter intervals are not closed",
+                    "expected_result": 0,
+                    "query": "SELECT (SELECT COUNT(*) FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name LIKE 'GPU %' AND event.value > 0.0) - (SELECT COUNT(*) FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name LIKE 'GPU %' AND event.value = 0.0) as count"
+                }
+            ]
+        }
+    ]
+}

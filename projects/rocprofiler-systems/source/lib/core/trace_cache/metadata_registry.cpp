@@ -615,6 +615,33 @@ metadata_registry::get_string_list() const
 }
 
 void
+metadata_registry::set_gpu_perf_counter_counter_names(
+    std::uint32_t device_id, std::vector<info::gpu_perf_counter_name_entry> entries)
+{
+    auto& index = m_gpu_perf_counter_index[device_id];
+    index.clear();
+    index.reserve(entries.size());
+    for(std::size_t i = 0; i < entries.size(); ++i)
+    {
+        index.emplace(entries[i].counter_id, i);
+    }
+    m_gpu_perf_counter_counter_names[device_id] = std::move(entries);
+}
+
+std::optional<std::reference_wrapper<const info::gpu_perf_counter_name_entry>>
+metadata_registry::find_gpu_perf_counter_by_id(std::uint32_t device_id,
+                                               std::uint64_t counter_id) const
+{
+    auto idx_it = m_gpu_perf_counter_index.find(device_id);
+    if(idx_it == m_gpu_perf_counter_index.end()) return std::nullopt;
+
+    auto entry_it = idx_it->second.find(counter_id);
+    if(entry_it == idx_it->second.end()) return std::nullopt;
+
+    return std::cref(m_gpu_perf_counter_counter_names.at(device_id)[entry_it->second]);
+}
+
+void
 metadata_registry::add_code_object(
     const rocprofiler_callback_tracing_code_object_load_data_t& code_object)
 {
@@ -734,15 +761,13 @@ metadata_registry::overwrite_callback_names(
             modified_ops[i] = extract_operations(i);
         }
 
-        if(get_is_continuous_integration() &&
-           modified_ops.find(callback_kind) != modified_ops.end())
+        if(modified_ops.find(callback_kind) != modified_ops.end())
         {
             throw std::runtime_error(
                 "Overwriting a previously overwritten entry is forbidden");
         }
 
-        if(get_is_continuous_integration() && !modified_ops.empty() &&
-           callback_kind >= modified_ops.begin()->first)
+        if(!modified_ops.empty() && callback_kind >= modified_ops.begin()->first)
         {
             throw std::runtime_error(
                 "Category must have a larger enum value than all previously "
@@ -753,8 +778,7 @@ metadata_registry::overwrite_callback_names(
         auto operation_names = extract_operations(callback_kind);
         for(const auto& [index, new_value] : category_info.second)
         {
-            if(get_is_continuous_integration() &&
-               (index < 0 || static_cast<size_t>(index) >= operation_names.size()))
+            if((index < 0 || static_cast<size_t>(index) >= operation_names.size()))
             {
                 throw std::runtime_error("Index is invalid");
             }
@@ -771,7 +795,7 @@ metadata_registry::overwrite_callback_names(
     {
         auto renaming_entry = modified_ops.find(i);
 
-        if(get_is_continuous_integration() && renaming_entry == modified_ops.end())
+        if(renaming_entry == modified_ops.end())
         {
             throw std::runtime_error("A category that needs to be emplaced is missing");
         }

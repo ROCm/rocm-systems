@@ -267,7 +267,7 @@ __device__ void QueuePair::bnxt_write_rma_wqe(uintptr_t raddr, uintptr_t laddr, 
   if (!inline_msg) {
     /* Populate SG Segment */
     sge.pa     = laddr;
-    sge.lkey   = lkey;
+    sge.lkey   = get_lkey(laddr);
     sge.length = length;
   }
 
