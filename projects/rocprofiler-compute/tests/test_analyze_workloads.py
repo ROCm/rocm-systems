@@ -13,10 +13,47 @@ import pytest
 config = {}
 config["cleanup"] = True if "PYTEST_XDIST_WORKER_COUNT" in os.environ else False
 
+# MI300A_A1 and MI300X_A1 share the same workload set and expected exit codes.
+# Note: dispatch_6_8, dispatch_7, kernel_inv_int, kernel_inv_str were profiled
+# with rocprofv2, which collects all dispatches regardless of the filter applied
+# at profile time. The analyze command therefore succeeds (exit 0) for these
+# targets, unlike MI100/MI200 where rocprofv1 applied the filter at collection
+# time and produced no joinable data (exit 1).
+MI300_WORKLOADS = [
+    ("device_filter", 0),
+    ("device_inv_int", 0),
+    ("dispatch_0", 0),
+    ("dispatch_0_1", 0),
+    ("dispatch_2", 0),
+    ("dispatch_6_8", 0),
+    ("dispatch_7", 0),
+    ("dispatch_inv", 0),
+    ("ipblocks_CPC", 0),
+    ("ipblocks_CPF", 0),
+    ("ipblocks_SPI", 0),
+    ("ipblocks_SQ", 0),
+    ("ipblocks_SQC", 0),
+    ("ipblocks_SQ_CPC", 0),
+    ("ipblocks_SQ_SPI", 0),
+    ("ipblocks_SQ_SPI_TA_TCC_CPF", 0),
+    ("ipblocks_SQ_SQC_TCP_CPC", 0),
+    ("ipblocks_SQ_TA", 0),
+    ("ipblocks_TA", 0),
+    ("ipblocks_TCC", 0),
+    ("ipblocks_TCP", 0),
+    ("ipblocks_TD", 0),
+    ("join_type_grid", 0),
+    ("join_type_kernel", 0),
+    ("kernel", 0),
+    ("kernel_inv_int", 0),
+    ("kernel_inv_str", 0),
+    ("kernel_substr", 0),
+    ("no_roof", 0),
+    ("path", 0),
+]
 
-@pytest.mark.parametrize(
-    "workload_type,expected_code",
-    [
+WORKLOADS_BY_ARCH = {
+    "MI100": [
         ("device_filter", 0),
         ("device_inv_int", 0),
         ("dispatch_0", 0),
@@ -49,27 +86,7 @@ config["cleanup"] = True if "PYTEST_XDIST_WORKER_COUNT" in os.environ else False
         ("path", 0),
         ("vcopy", 0),
     ],
-)
-def test_analyze_MI100(
-    binary_handler_analyze_rocprof_compute, workload_type, expected_code
-):
-    workload_dir = common.setup_workload_dir(
-        f"tests/workloads/{workload_type}/MI100", param_id=workload_type
-    )
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == expected_code
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.parametrize(
-    "workload_type,expected_code",
-    [
+    "MI200": [
         ("device_filter", 0),
         ("device_inv_int", 0),
         ("dispatch_0", 0),
@@ -112,6 +129,45 @@ def test_analyze_MI100(
         ("sort_kernels", 0),
         ("vcopy", 0),
     ],
+    "MI300A_A1": MI300_WORKLOADS,
+    "MI300X_A1": MI300_WORKLOADS,
+    "RDNA35_HALO": [
+        ("dispatch_0", 0),
+        ("ipblocks_CU", 0),
+        ("kernel", 0),
+        ("no_roof", 0),
+        ("path", 0),
+        ("vcopy", 0),
+    ],
+}
+
+
+@pytest.mark.parametrize(
+    "workload_type,expected_code",
+    WORKLOADS_BY_ARCH["MI100"],
+    ids=[f"workload={w}-exit={c}" for w, c in WORKLOADS_BY_ARCH["MI100"]],
+)
+def test_analyze_MI100(
+    binary_handler_analyze_rocprof_compute, workload_type, expected_code
+):
+    workload_dir = common.setup_workload_dir(
+        f"tests/workloads/{workload_type}/MI100", param_id=workload_type
+    )
+
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        workload_dir,
+    ])
+    assert code == expected_code
+
+    common.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.parametrize(
+    "workload_type,expected_code",
+    WORKLOADS_BY_ARCH["MI200"],
+    ids=[f"workload={w}-exit={c}" for w, c in WORKLOADS_BY_ARCH["MI200"]],
 )
 def test_analyze_MI200(
     binary_handler_analyze_rocprof_compute, workload_type, expected_code
@@ -131,41 +187,13 @@ def test_analyze_MI200(
 
 
 @pytest.mark.parametrize(
-    "workload_type",
-    [
-        "device_filter",
-        "device_inv_int",
-        "dispatch_0",
-        "dispatch_0_1",
-        "dispatch_2",
-        "dispatch_6_8",
-        "dispatch_7",
-        "dispatch_inv",
-        "ipblocks_CPC",
-        "ipblocks_CPF",
-        "ipblocks_SPI",
-        "ipblocks_SQ",
-        "ipblocks_SQC",
-        "ipblocks_SQ_CPC",
-        "ipblocks_SQ_SPI",
-        "ipblocks_SQ_SPI_TA_TCC_CPF",
-        "ipblocks_SQ_SQC_TCP_CPC",
-        "ipblocks_SQ_TA",
-        "ipblocks_TA",
-        "ipblocks_TCC",
-        "ipblocks_TCP",
-        "ipblocks_TD",
-        "join_type_grid",
-        "join_type_kernel",
-        "kernel",
-        "kernel_inv_int",
-        "kernel_inv_str",
-        "kernel_substr",
-        "no_roof",
-        "path",
-    ],
+    "workload_type,expected_code",
+    WORKLOADS_BY_ARCH["MI300A_A1"],
+    ids=[f"workload={w}-exit={c}" for w, c in WORKLOADS_BY_ARCH["MI300A_A1"]],
 )
-def test_analyze_MI300A_A1(binary_handler_analyze_rocprof_compute, workload_type):
+def test_analyze_MI300A_A1(
+    binary_handler_analyze_rocprof_compute, workload_type, expected_code
+):
     workload_dir = common.setup_workload_dir(
         f"tests/workloads/{workload_type}/MI300A_A1", param_id=workload_type
     )
@@ -175,47 +203,19 @@ def test_analyze_MI300A_A1(binary_handler_analyze_rocprof_compute, workload_type
         "--path",
         workload_dir,
     ])
-    assert code == 0
+    assert code == expected_code
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.parametrize(
-    "workload_type",
-    [
-        "device_filter",
-        "device_inv_int",
-        "dispatch_0",
-        "dispatch_0_1",
-        "dispatch_2",
-        "dispatch_6_8",
-        "dispatch_7",
-        "dispatch_inv",
-        "ipblocks_CPC",
-        "ipblocks_CPF",
-        "ipblocks_SPI",
-        "ipblocks_SQ",
-        "ipblocks_SQC",
-        "ipblocks_SQ_CPC",
-        "ipblocks_SQ_SPI",
-        "ipblocks_SQ_SPI_TA_TCC_CPF",
-        "ipblocks_SQ_SQC_TCP_CPC",
-        "ipblocks_SQ_TA",
-        "ipblocks_TA",
-        "ipblocks_TCC",
-        "ipblocks_TCP",
-        "ipblocks_TD",
-        "join_type_grid",
-        "join_type_kernel",
-        "kernel",
-        "kernel_inv_int",
-        "kernel_inv_str",
-        "kernel_substr",
-        "no_roof",
-        "path",
-    ],
+    "workload_type,expected_code",
+    WORKLOADS_BY_ARCH["MI300X_A1"],
+    ids=[f"workload={w}-exit={c}" for w, c in WORKLOADS_BY_ARCH["MI300X_A1"]],
 )
-def test_analyze_MI300X_A1(binary_handler_analyze_rocprof_compute, workload_type):
+def test_analyze_MI300X_A1(
+    binary_handler_analyze_rocprof_compute, workload_type, expected_code
+):
     workload_dir = common.setup_workload_dir(
         f"tests/workloads/{workload_type}/MI300X_A1", param_id=workload_type
     )
@@ -225,21 +225,13 @@ def test_analyze_MI300X_A1(binary_handler_analyze_rocprof_compute, workload_type
         "--path",
         workload_dir,
     ])
-    assert code == 0
+    assert code == expected_code
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.parametrize(
-    "workload_type",
-    [
-        "no_roof",
-    ],
-)
-def test_analyze_MI350(binary_handler_analyze_rocprof_compute, workload_type):
-    workload_dir = common.setup_workload_dir(
-        f"tests/workloads/{workload_type}/MI350", param_id=workload_type
-    )
+def test_analyze_MI350(binary_handler_analyze_rocprof_compute):
+    workload_dir = common.setup_workload_dir("tests/workloads/no_roof/MI350")
 
     code = binary_handler_analyze_rocprof_compute([
         "analyze",
@@ -252,10 +244,13 @@ def test_analyze_MI350(binary_handler_analyze_rocprof_compute, workload_type):
 
 
 @pytest.mark.parametrize(
-    "workload_type",
-    ["dispatch_0", "ipblocks_CU", "kernel", "no_roof", "path", "vcopy"],
+    "workload_type,expected_code",
+    WORKLOADS_BY_ARCH["RDNA35_HALO"],
+    ids=[f"workload={w}-exit={c}" for w, c in WORKLOADS_BY_ARCH["RDNA35_HALO"]],
 )
-def test_analyze_RDNA35_HALO(binary_handler_analyze_rocprof_compute, workload_type):
+def test_analyze_RDNA35_HALO(
+    binary_handler_analyze_rocprof_compute, workload_type, expected_code
+):
     workload_dir = common.setup_workload_dir(
         f"tests/workloads/{workload_type}/RDNA35_HALO", param_id=workload_type
     )
@@ -265,7 +260,7 @@ def test_analyze_RDNA35_HALO(binary_handler_analyze_rocprof_compute, workload_ty
         "--path",
         workload_dir,
     ])
-    assert code == 0
+    assert code == expected_code
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
