@@ -626,7 +626,8 @@ __device__ void GDAContext::internal_getmem_nbi_wave(void *dest, const void *sou
 
 __device__ int GDAContext::tile_collective_wait([[maybe_unused]] rocshmem_team_t team,
                                                  [[maybe_unused]] uint64_t flags) {
-  return ROCSHMEM_ERROR;  // Not implemented
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
 }
 
 }  // namespace rocshmem

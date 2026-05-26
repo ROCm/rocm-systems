@@ -2,24 +2,6 @@
  * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
  *
  * SPDX-License-Identifier: MIT
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to
- * deal in the Software without restriction, including without limitation the
- * rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
- * sell copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
- * IN THE SOFTWARE.
  *****************************************************************************/
 
 #ifndef LIBRARY_INCLUDE_ROCSHMEM_TILE_HPP
@@ -29,17 +11,7 @@
  * @file rocshmem_TILE.hpp
  * @brief Tile-based granular API for rocSHMEM
  *
- * This file contains the tile-based API functions for rocSHMEM, which are
- * equivalents of NVSHMEM's tile API. These functions operate on tensor-based
- * data structures with different granularities:
- * - Default (no suffix): Thread-level granularity
- * - _wave suffix: Wave-level collective operation
- * - _wg suffix: Workgroup-level collective operation
- *
- * Naming conventions from NVSHMEM to rocSHMEM:
- * - warp -> wave
- * - block -> wg (workgroup)
- * - warpgroup -> not implemented (per design rules)
+ * This file contains the tile-based API functions for rocSHMEM
  */
 
 namespace rocshmem {

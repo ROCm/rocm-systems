@@ -911,6 +911,7 @@ __device__ inline int IPCContext::tile_put_wg(void* dst_data, const void* src_da
     }
   }
 
+  __builtin_amdgcn_s_barrier();
   return ROCSHMEM_SUCCESS;
 }
 
@@ -1158,6 +1159,7 @@ __device__ inline int IPCContext::tile_get_wg(void* dst_data, const void* src_da
     }
   }
 
+  __builtin_amdgcn_s_barrier();
   return ROCSHMEM_SUCCESS;
 }
 
@@ -1172,7 +1174,8 @@ __device__ inline int IPCContext::tile_allgather([[maybe_unused]] rocshmem_team_
                                                  [[maybe_unused]] int ndim,
                                                  [[maybe_unused]] size_t element_size,
                                                  [[maybe_unused]] uint64_t flags) {
-  return ROCSHMEM_ERROR;  // Not implemented
+  LOGD_WARN("Tile API not implemented for IPC backend");
+  return ROCSHMEM_ERROR;
 }
 
 __device__ inline int IPCContext::tile_allgather_wave([[maybe_unused]] rocshmem_team_t team,
@@ -1185,7 +1188,8 @@ __device__ inline int IPCContext::tile_allgather_wave([[maybe_unused]] rocshmem_
                                                       [[maybe_unused]] int ndim,
                                                       [[maybe_unused]] size_t element_size,
                                                       [[maybe_unused]] uint64_t flags) {
-  return ROCSHMEM_ERROR;  // Not implemented
+  LOGD_WARN("Tile API not implemented for IPC backend");
+  return ROCSHMEM_ERROR;
 }
 
 __device__ inline int IPCContext::tile_allgather_wg([[maybe_unused]] rocshmem_team_t team,
@@ -1198,7 +1202,8 @@ __device__ inline int IPCContext::tile_allgather_wg([[maybe_unused]] rocshmem_te
                                                     [[maybe_unused]] int ndim,
                                                     [[maybe_unused]] size_t element_size,
                                                     [[maybe_unused]] uint64_t flags) {
-  return ROCSHMEM_ERROR;  // Not implemented
+  LOGD_WARN("Tile API not implemented for IPC backend");
+  return ROCSHMEM_ERROR;
 }
 
 // Collective Broadcast - Type-erased implementations
@@ -1213,7 +1218,8 @@ __device__ inline int IPCContext::tile_broadcast([[maybe_unused]] rocshmem_team_
                                                  [[maybe_unused]] size_t element_size,
                                                  [[maybe_unused]] int pe_root,
                                                  [[maybe_unused]] uint64_t flags) {
-  return ROCSHMEM_ERROR;  // Not implemented
+  LOGD_WARN("Tile API not implemented for IPC backend");
+  return ROCSHMEM_ERROR;
 }
 
 __device__ inline int IPCContext::tile_broadcast_wave([[maybe_unused]] rocshmem_team_t team,
@@ -1227,7 +1233,8 @@ __device__ inline int IPCContext::tile_broadcast_wave([[maybe_unused]] rocshmem_
                                                       [[maybe_unused]] size_t element_size,
                                                       [[maybe_unused]] int pe_root,
                                                       [[maybe_unused]] uint64_t flags) {
-  return ROCSHMEM_ERROR;  // Not implemented
+  LOGD_WARN("Tile API not implemented for IPC backend");
+  return ROCSHMEM_ERROR;
 }
 
 __device__ inline int IPCContext::tile_broadcast_wg([[maybe_unused]] rocshmem_team_t team,
@@ -1241,7 +1248,8 @@ __device__ inline int IPCContext::tile_broadcast_wg([[maybe_unused]] rocshmem_te
                                                     [[maybe_unused]] size_t element_size,
                                                     [[maybe_unused]] int pe_root,
                                                     [[maybe_unused]] uint64_t flags) {
-  return ROCSHMEM_ERROR;  // Not implemented
+  LOGD_WARN("Tile API not implemented for IPC backend");
+  return ROCSHMEM_ERROR;
 }
 
 // SUM Reductions - Type-erased implementations
@@ -1256,7 +1264,8 @@ __device__ inline int IPCContext::tile_sum_reduce([[maybe_unused]] rocshmem_team
                                                   [[maybe_unused]] size_t element_size,
                                                   [[maybe_unused]] int root,
                                                   [[maybe_unused]] uint64_t flags) {
-  return ROCSHMEM_ERROR;  // Not implemented
+  LOGD_WARN("Tile API not implemented for IPC backend");
+  return ROCSHMEM_ERROR;
 }
 
 __device__ inline int IPCContext::tile_sum_reduce_wave([[maybe_unused]] rocshmem_team_t team,
@@ -1270,7 +1279,8 @@ __device__ inline int IPCContext::tile_sum_reduce_wave([[maybe_unused]] rocshmem
                                                        [[maybe_unused]] size_t element_size,
                                                        [[maybe_unused]] int root,
                                                        [[maybe_unused]] uint64_t flags) {
-  return ROCSHMEM_ERROR;  // Not implemented
+  LOGD_WARN("Tile API not implemented for IPC backend");
+  return ROCSHMEM_ERROR;
 }
 
 __device__ inline int IPCContext::tile_sum_reduce_wg([[maybe_unused]] rocshmem_team_t team,
@@ -1284,7 +1294,8 @@ __device__ inline int IPCContext::tile_sum_reduce_wg([[maybe_unused]] rocshmem_t
                                                      [[maybe_unused]] size_t element_size,
                                                      [[maybe_unused]] int root,
                                                      [[maybe_unused]] uint64_t flags) {
-  return ROCSHMEM_ERROR;  // Not implemented
+  LOGD_WARN("Tile API not implemented for IPC backend");
+  return ROCSHMEM_ERROR;
 }
 
 // MAX Reductions - Type-erased interface
@@ -1299,7 +1310,8 @@ __device__ inline int IPCContext::tile_max_reduce([[maybe_unused]] rocshmem_team
                                                    [[maybe_unused]] size_t element_size,
                                                    [[maybe_unused]] int root,
                                                    [[maybe_unused]] uint64_t flags) {
-  return ROCSHMEM_ERROR;  // Not implemented
+  LOGD_WARN("Tile API not implemented for IPC backend");
+  return ROCSHMEM_ERROR;
 }
 
 __device__ inline int IPCContext::tile_max_reduce_wave([[maybe_unused]] rocshmem_team_t team,
@@ -1313,7 +1325,8 @@ __device__ inline int IPCContext::tile_max_reduce_wave([[maybe_unused]] rocshmem
                                                         [[maybe_unused]] size_t element_size,
                                                         [[maybe_unused]] int root,
                                                         [[maybe_unused]] uint64_t flags) {
-  return ROCSHMEM_ERROR;  // Not implemented
+  LOGD_WARN("Tile API not implemented for IPC backend");
+  return ROCSHMEM_ERROR;
 }
 
 __device__ inline int IPCContext::tile_max_reduce_wg([[maybe_unused]] rocshmem_team_t team,
@@ -1327,7 +1340,8 @@ __device__ inline int IPCContext::tile_max_reduce_wg([[maybe_unused]] rocshmem_t
                                                       [[maybe_unused]] size_t element_size,
                                                       [[maybe_unused]] int root,
                                                       [[maybe_unused]] uint64_t flags) {
-  return ROCSHMEM_ERROR;  // Not implemented
+  LOGD_WARN("Tile API not implemented for IPC backend");
+  return ROCSHMEM_ERROR;
 }
 
 // MIN Reductions - Type-erased interface
@@ -1342,7 +1356,8 @@ __device__ inline int IPCContext::tile_min_reduce([[maybe_unused]] rocshmem_team
                                                    [[maybe_unused]] size_t element_size,
                                                    [[maybe_unused]] int root,
                                                    [[maybe_unused]] uint64_t flags) {
-  return ROCSHMEM_ERROR;  // Not implemented
+  LOGD_WARN("Tile API not implemented for IPC backend");
+  return ROCSHMEM_ERROR;
 }
 
 __device__ inline int IPCContext::tile_min_reduce_wave([[maybe_unused]] rocshmem_team_t team,
@@ -1356,7 +1371,8 @@ __device__ inline int IPCContext::tile_min_reduce_wave([[maybe_unused]] rocshmem
                                                         [[maybe_unused]] size_t element_size,
                                                         [[maybe_unused]] int root,
                                                         [[maybe_unused]] uint64_t flags) {
-  return ROCSHMEM_ERROR;  // Not implemented
+  LOGD_WARN("Tile API not implemented for IPC backend");
+  return ROCSHMEM_ERROR;
 }
 
 __device__ inline int IPCContext::tile_min_reduce_wg([[maybe_unused]] rocshmem_team_t team,
@@ -1370,7 +1386,8 @@ __device__ inline int IPCContext::tile_min_reduce_wg([[maybe_unused]] rocshmem_t
                                                       [[maybe_unused]] size_t element_size,
                                                       [[maybe_unused]] int root,
                                                       [[maybe_unused]] uint64_t flags) {
-  return ROCSHMEM_ERROR;  // Not implemented
+  LOGD_WARN("Tile API not implemented for IPC backend");
+  return ROCSHMEM_ERROR;
 }
 
 }  // namespace rocshmem

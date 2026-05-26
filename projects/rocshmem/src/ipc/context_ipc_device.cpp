@@ -310,7 +310,8 @@ __device__ uint64_t IPCContext::signal_fetch_wave(const uint64_t *sig_addr) {
 
 __device__ int IPCContext::tile_collective_wait([[maybe_unused]] rocshmem_team_t team,
                                                 [[maybe_unused]] uint64_t flags) {
-  return ROCSHMEM_ERROR;  // Not implemented
+  LOGD_WARN("Tile API not implemented for IPC backend");
+  return ROCSHMEM_ERROR;
 }
 
 }  // namespace rocshmem

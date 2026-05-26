@@ -2,7 +2,9 @@
  * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
  *
  * SPDX-License-Identifier: MIT
- *
+ *****************************************************************************/
+
+/**
  * 2D Halo Exchange using rocSHMEM Tile API
  *
  * This example demonstrates a 2D halo exchange pattern common in stencil
@@ -13,7 +15,7 @@
  * - Number of PEs must be a perfect square (4, 9, 16, 25, ...)
  * - Each PE has a local domain with a 1-element halo region on each side
  * - Communication uses workgroup-collective tile_put_wg operations
- *****************************************************************************/
+ */
 
 #include <rocshmem/rocshmem.hpp>
 #ifdef __HIP_DEVICE_COMPILE__

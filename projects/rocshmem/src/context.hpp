@@ -391,7 +391,6 @@ class Context {
                                    const size_t* start_coord, const size_t* boundary,
                                    int ndim, size_t element_size, int pe_root, uint64_t flags);
 
-  // Collective wait - No change needed
   __device__ int tile_collective_wait(rocshmem_team_t team, uint64_t flags);
 
   // SUM Reduction operations - Type-erased interface
