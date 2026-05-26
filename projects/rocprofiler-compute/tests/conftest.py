@@ -236,60 +236,6 @@ def require_torch():
     return _check
 
 
-@pytest.fixture(scope="session")
-def _warm_roctx_recordfn_so():
-    """Pre-build the roctx_recordfn .so once per pytest session.
-
-    Auto-applied (via ``pytest_collection_modifyitems`` below) to any
-    test whose module name matches ``test_torch_trace_*``. Not applied
-    to anything else, so tests that have nothing to do with
-    --torch-trace never pay the cold-build tax (not even as a silent
-    no-op shelling out to importlib).
-
-    The first time rocprof-compute --torch-trace runs in a fresh
-    cache, the loader builds the .so via cmake (typically ~20-60s
-    on a stock host). Without this warmup that cold-build cost
-    lands inside whichever torch-trace test invocation happens to
-    be first -- typically test_torch_trace_coverage -- and inflates
-    its wall time confusingly (a ~190s coverage run becomes a ~230s
-    run, with the bulk of the extra time invisible to anyone reading
-    the test log because it happens inside the rocprof-compute
-    subprocess).
-
-    Best-effort: torch missing, cmake missing, or any build failure
-    leaves the fixture as a silent no-op. The real-symptom tests
-    (e.g. test_torch_trace_coverage) surface any underlying issue
-    with full context; the warmup never fails the session.
-    """
-    if importlib.util.find_spec("torch") is None:
-        return
-    try:
-        from utils import inject_roctx_loader
-
-        inject_roctx_loader.load()
-    except Exception:
-        pass
-
-
-def pytest_collection_modifyitems(config, items):
-    """Auto-apply ``_warm_roctx_recordfn_so`` to ``test_torch_trace_*``.
-
-    Replaces the previous ``autouse=True`` mechanism with a naming-
-    convention matcher so the warmup only fires for tests that
-    actually exercise --torch-trace. New torch-trace test modules
-    are picked up automatically (no per-test marker required) as
-    long as they follow the ``test_torch_trace_<name>.py`` pattern.
-    """
-    for item in items:
-        try:
-            module_name = Path(item.fspath).name
-        except (AttributeError, TypeError):
-            continue
-        if module_name.startswith("test_torch_trace_"):
-            if "_warm_roctx_recordfn_so" not in item.fixturenames:
-                item.fixturenames.append("_warm_roctx_recordfn_so")
-
-
 @pytest.fixture(autouse=True)
 def skip_monkeypatch_with_binary(request):
     """Auto-skip tests using monkeypatch when --call-binary is used.

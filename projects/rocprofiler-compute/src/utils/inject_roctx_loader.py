@@ -54,12 +54,14 @@ _CPPEXT_TIER_NAME = "cpp-extension"
 
 # Tier names returned by loaded_tier() / consume_diagnostics() and
 # matched against C_TIER_NAMES. Order matches resolution order in load().
+TIER_EXPLICIT = "explicit"
 TIER_PREBUILT = "prebuilt"
 TIER_JIT_CACHED = "jit_cached"
 TIER_CMAKE_BUILD = "cmake_build"
 TIER_CPP_EXTENSION = "cpp_extension"
 
 C_TIER_NAMES = frozenset((
+    TIER_EXPLICIT,
     TIER_PREBUILT,
     TIER_JIT_CACHED,
     TIER_CMAKE_BUILD,
@@ -80,6 +82,13 @@ _FINGERPRINT_INPUTS = (_SO_SOURCE, _SO_BUILDFILE)
 
 # When "1", load() bypasses prebuilt + JIT cache and forces a rebuild.
 _REBUILD_ENV_VAR = "ROCPROFCOMPUTE_REBUILD_ROCTX"
+
+# When set, load() imports the .so at this path directly and skips every
+# build tier. CI uses this to pin pytest to a configure-time artifact so
+# the runtime cmake / cpp_extension tiers never become implicit pytest
+# dependencies. No fallback on miss: the operator chose an exact file,
+# an unresolvable file is a configuration error to surface.
+_EXPLICIT_SO_ENV_VAR = "ROCPROFCOMPUTE_ROCTX_RECORDFN_SO"
 
 
 def _safe_log(level: str, msg: str) -> None:
@@ -198,6 +207,42 @@ def _install_tree_prebuilt_candidates(tag: str) -> list[Path]:
         install_root / "lib" / _INSTALL_TREE_PROJECT_NAME / so_name,
         install_root / "lib64" / _INSTALL_TREE_PROJECT_NAME / so_name,
     ]
+
+
+def _try_explicit_so(tag: str) -> Optional[types.ModuleType]:
+    """Honour ROCPROFCOMPUTE_ROCTX_RECORDFN_SO if set.
+
+    When the env var points at an existing .so, import it directly and
+    skip every build tier. This is the path CI uses to consume a
+    configure-time test artifact without ever shelling out to cmake or
+    torch.utils.cpp_extension. ``tag`` is accepted to match the signature
+    of every other tier function but is not consulted: the operator is
+    asserting "use exactly this file". Returns None when the env var is
+    unset; load() short-circuits with None (no build-tier fallback) when
+    the env var is set but the path is missing or unimportable.
+    """
+    env_path_str = os.environ.get(_EXPLICIT_SO_ENV_VAR)
+    if not env_path_str:
+        return None
+    env_path = Path(env_path_str)
+    if not env_path.is_file():
+        _safe_log(
+            "warning",
+            f"{_EXPLICIT_SO_ENV_VAR}={env_path_str} but the file does "
+            "not exist; skipping (no build-tier fallback)",
+        )
+        return None
+    try:
+        mod = _import_module_from_path("roctx_recordfn", env_path)
+    except Exception as e:
+        _safe_log(
+            "warning",
+            f"{_EXPLICIT_SO_ENV_VAR}={env_path_str} failed to import: "
+            f"{e}; skipping (no build-tier fallback)",
+        )
+        return None
+    _safe_log("log", f"loaded explicit .so from {_EXPLICIT_SO_ENV_VAR}={env_path}")
+    return mod
 
 
 def _try_prebuilt(tag: str) -> Optional[types.ModuleType]:
@@ -666,6 +711,8 @@ def _try_jit_build(tag: str) -> Optional[types.ModuleType]:
 def load(force_python_fallback: bool = False) -> Optional[types.ModuleType]:
     """Return the roctx_recordfn module, or None for the Python-only
     fallback. ``force_python_fallback=True`` is for tests.
+    ``ROCPROFCOMPUTE_ROCTX_RECORDFN_SO=<path>`` pins the loader to that
+    .so and skips every build tier (no fallback on miss).
     ``ROCPROFCOMPUTE_REBUILD_ROCTX=1`` skips prebuilt + JIT cache and
     runs the build tiers directly.
 
@@ -684,6 +731,17 @@ def load(force_python_fallback: bool = False) -> Optional[types.ModuleType]:
     if tag is None:
         _safe_log("warning", "torch not importable; using Python-only injector")
         return None
+
+    # Explicit .so override (CI pin). Takes precedence over every other
+    # tier so pytest never falls through to a runtime build. On miss,
+    # short-circuit with None instead of falling back: honouring the
+    # operator's "use exactly this file" contract is more useful than
+    # silently selecting a different .so.
+    if os.environ.get(_EXPLICIT_SO_ENV_VAR):
+        explicit_mod = _try_explicit_so(tag)
+        if explicit_mod is not None:
+            _LAST_LOADED_TIER = TIER_EXPLICIT
+        return explicit_mod
 
     if os.environ.get(_REBUILD_ENV_VAR) == "1":
         _safe_log(

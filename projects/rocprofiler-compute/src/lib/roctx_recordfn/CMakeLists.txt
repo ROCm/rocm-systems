@@ -1,130 +1,91 @@
 ## Copyright (c) Advanced Micro Devices, Inc.
 ## SPDX-License-Identifier:  MIT
 ##
-## Builds roctx_recordfn.so for the --torch-trace C++ tier. Used in two
-# modes that produce a byte-name-identical artifact (same tag scheme,
+## Builds roctx_recordfn.so for the --torch-trace C++ tier. Two consumers,
+# both producing a byte-name-identical artifact (same tag scheme,
 # computed by the loader's _source_fingerprint()):
-#   A. as a subdirectory of the parent rocprof-compute build (smart-
-#      default ON when the install-time interpreter has torch; OFF
-#      otherwise; force with -DBUILD_TORCH_TRACE_EXTENSION=ON);
-#   B. standalone, invoked by inject_roctx_loader.py's cmake tier at
-#      runtime in the user's PyTorch env.
-#
-# Install layout: prebuilt lands flat at
-# ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}/roctx_recordfn-<tag>.so
-# next to librocprofiler-compute-tool.so. Sources are installed at
-# ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/lib/roctx_recordfn/ by
-# the parent CMakeLists so the runtime cmake-tier keeps working post-
-# install regardless of SKIP_NATIVE_TOOL_BUILD.
+#   A. parent rocprof-compute project's add_subdirectory() -- gated on
+#      ENABLE_TESTS. The .so is a CI test fixture so pytest can pin the
+#      loader to a known artifact via ROCPROFCOMPUTE_ROCTX_RECORDFN_SO
+#      and never shell out to cmake / torch.utils.cpp_extension at test
+#      time. Production installs ship sources only (parent's
+#      install(DIRECTORY src/lib/roctx_recordfn ...) under
+#      ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/lib/roctx_recordfn/)
+#      and the runtime loader's cmake-tier builds the .so on first
+#      --torch-trace use in the user's PyTorch env.
+#   B. standalone, invoked by inject_roctx_loader.py's cmake-tier at
+#      runtime. Always proceeds; this is the production degraded path.
+set(_rcfn_standalone OFF)
 if(NOT PROJECT_NAME)
     cmake_minimum_required(VERSION 3.20)
     project(roctx_recordfn_runtime LANGUAGES CXX)
+    set(_rcfn_standalone ON)
 endif()
 
-# Smart-default detection of torch in the install-time interpreter (or
-# the explicit -DTORCH_TRACE_PYTHON=<python> override). A reachable
-# torch flips the option ON; missing torch flips it OFF and the runtime
-# loader takes over the build. Operators can always override with
-# -DBUILD_TORCH_TRACE_EXTENSION={ON,OFF}.
+# Parent-project mode: gate on ENABLE_TESTS. Tests are the only in-tree
+# consumer; production installs rely on the runtime loader. Standalone
+# mode always proceeds because the loader is its only caller.
+if(NOT _rcfn_standalone AND NOT ENABLE_TESTS)
+    return()
+endif()
+
+# Resolve the interpreter we'll build the .so against. Explicit
+# -DTORCH_TRACE_PYTHON wins (set by the loader's cmake-tier); otherwise
+# pick whatever find_package(Python3) returns.
 if(TORCH_TRACE_PYTHON)
-    set(_rcfn_default_python "${TORCH_TRACE_PYTHON}")
+    set(_rcfn_python "${TORCH_TRACE_PYTHON}")
 else()
     find_package(Python3 COMPONENTS Interpreter QUIET)
     if(Python3_FOUND)
-        set(_rcfn_default_python "${Python3_EXECUTABLE}")
+        set(_rcfn_python "${Python3_EXECUTABLE}")
     else()
-        set(_rcfn_default_python "")
+        set(_rcfn_python "")
     endif()
 endif()
 
-set(_rcfn_default_build OFF)
-if(_rcfn_default_python)
+# Probe torch in the resolved interpreter. Missing torch is a soft skip
+# in both modes: torch-trace tests skip via the loader's None return,
+# and the standalone runtime caller already handles None gracefully.
+set(_rcfn_torch_ok OFF)
+if(_rcfn_python)
     execute_process(
-        COMMAND "${_rcfn_default_python}" -c "import torch"
-        RESULT_VARIABLE _rcfn_default_probe_rc
+        COMMAND "${_rcfn_python}" -c "import torch"
+        RESULT_VARIABLE _rcfn_torch_rc
         OUTPUT_QUIET
         ERROR_QUIET
     )
-    if(_rcfn_default_probe_rc EQUAL 0)
-        set(_rcfn_default_build ON)
+    if(_rcfn_torch_rc EQUAL 0)
+        set(_rcfn_torch_ok ON)
     endif()
 endif()
 
-option(
-    BUILD_TORCH_TRACE_EXTENSION
-    "Build the roctx_recordfn pybind11 extension for --torch-trace. Smart default: ON when torch is importable in the install-time Python (or TORCH_TRACE_PYTHON if set), OFF otherwise. Packagers baking against a fixed (python, torch) cell should also pass -DTORCH_TRACE_PYTHON=<python>."
-    ${_rcfn_default_build}
-)
-
-if(NOT BUILD_TORCH_TRACE_EXTENSION)
-    if(_rcfn_default_python AND NOT _rcfn_default_probe_rc EQUAL 0)
+if(NOT _rcfn_torch_ok)
+    if(_rcfn_python)
         message(
             STATUS
-            "roctx_recordfn: BUILD_TORCH_TRACE_EXTENSION=OFF "
-            "(torch not importable in ${_rcfn_default_python}). The runtime "
-            "loader will JIT-compile on first --torch-trace use if the user's "
-            "env has torch + a C++ compiler. Force with "
-            "-DBUILD_TORCH_TRACE_EXTENSION=ON -DTORCH_TRACE_PYTHON=<python>."
-        )
-    elseif(NOT _rcfn_default_python)
-        message(
-            STATUS
-            "roctx_recordfn: BUILD_TORCH_TRACE_EXTENSION=OFF (no Python3 "
-            "interpreter found by find_package(Python3)). The runtime loader "
-            "will JIT-compile on first --torch-trace use if the user's env "
-            "has torch + a C++ compiler. Force with "
-            "-DBUILD_TORCH_TRACE_EXTENSION=ON -DTORCH_TRACE_PYTHON=<python>."
+            "roctx_recordfn: skipping .so build (torch not importable in "
+            "${_rcfn_python}); torch-trace tests will skip."
         )
     else()
         message(
             STATUS
-            "roctx_recordfn: BUILD_TORCH_TRACE_EXTENSION=OFF (explicit "
-            "override). The runtime loader will JIT-compile on first "
-            "--torch-trace use if the user's env has torch + a C++ compiler."
+            "roctx_recordfn: skipping .so build (no Python3 interpreter "
+            "available); torch-trace tests will skip."
         )
     endif()
     return()
 endif()
 
-# At this point BUILD_TORCH_TRACE_EXTENSION=ON. From here, missing
-# torch is a real configuration error: the operator asked for the
-# prebuilt but didn't supply the inputs to make it.
-
-if(NOT TORCH_TRACE_PYTHON)
-    if(_rcfn_default_python)
-        set(TORCH_TRACE_PYTHON "${_rcfn_default_python}")
-    else()
-        message(
-            FATAL_ERROR
-            "BUILD_TORCH_TRACE_EXTENSION=ON requires either an explicit "
-            "-DTORCH_TRACE_PYTHON=<python> or a Python3 interpreter findable "
-            "by find_package(Python3). Neither was available."
-        )
-    endif()
-endif()
-
-execute_process(
-    COMMAND "${TORCH_TRACE_PYTHON}" -c "import torch"
-    RESULT_VARIABLE _torch_present_rc
-    OUTPUT_QUIET
-    ERROR_QUIET
+# Pin TORCH_TRACE_PYTHON to the resolved interpreter so every downstream
+# find_package / probe consults the same Python.
+set(TORCH_TRACE_PYTHON
+    "${_rcfn_python}"
+    CACHE FILEPATH
+    "Pinned to the interpreter whose torch we built against."
+    FORCE
 )
-if(NOT _torch_present_rc EQUAL 0)
-    message(
-        FATAL_ERROR
-        "BUILD_TORCH_TRACE_EXTENSION=ON but ${TORCH_TRACE_PYTHON} cannot "
-        "import torch. Either install torch into this interpreter, "
-        "point TORCH_TRACE_PYTHON at one that has it, or drop the "
-        "BUILD_TORCH_TRACE_EXTENSION=ON flag (the runtime loader will "
-        "JIT build at first --torch-trace use)."
-    )
-endif()
 
-message(
-    STATUS
-    "roctx_recordfn: BUILD_TORCH_TRACE_EXTENSION=ON; baking prebuilt "
-    "against ${TORCH_TRACE_PYTHON}"
-)
+message(STATUS "roctx_recordfn: building .so against ${TORCH_TRACE_PYTHON}")
 
 execute_process(
     COMMAND
@@ -364,14 +325,17 @@ target_compile_options(
     PRIVATE -fvisibility=hidden -Wno-deprecated-declarations
 )
 
-# Flat install next to librocprofiler-compute-tool.so. The directory
-# ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}/ is solely owned by
-# rocprofiler-compute (verified against rocm-systems/projects/*/
-# CMakeLists.txt: no other ROCm package installs into it). The
-# loader resolves this location first by tag.
-install(
-    TARGETS ${_so_name}
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME} COMPONENT main
-)
+# Parent-project mode: expose the artifact path to the parent so it can
+# pin torch-trace CTest entries via ROCPROFCOMPUTE_ROCTX_RECORDFN_SO.
+# Standalone mode (the loader's runtime cmake-tier) reads the .so back
+# directly from the build dir and does not need this export.
+#
+# No install(TARGETS ...) rule: the .so is a CI test fixture, not a
+# production artifact. Production installs ship the sources (parent
+# CMakeLists install(DIRECTORY src/lib/roctx_recordfn ...)) and the
+# runtime loader builds the .so on first --torch-trace use.
+if(NOT _rcfn_standalone)
+    set(ROCTX_RECORDFN_SO_PATH "$<TARGET_FILE:${_so_name}>" PARENT_SCOPE)
+endif()
 
-message(STATUS "roctx_recordfn: pre-built target ${_so_name} configured")
+message(STATUS "roctx_recordfn: target ${_so_name} configured")

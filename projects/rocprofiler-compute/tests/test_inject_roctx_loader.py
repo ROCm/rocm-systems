@@ -4,8 +4,8 @@
 """Unit tests for utils.inject_roctx_loader and the Python-tier fallback.
 
 No GPU required. The loader's resolution order, tag computation, and the
-Python tier are exercised by stubbing the loader. The JIT compile path
-itself is covered end-to-end by test_torch_trace_worker_thread.py.
+Python tier are exercised by stubbing the loader. The cmake build path
+is exercised end-to-end by test_torch_trace_coverage.py.
 
 CI: registered with ctest; not in test_categories.yaml so it runs only
     on the full ctest invocation (and on the coverage job). No GPU,
@@ -23,6 +23,20 @@ import common  # noqa: F401  -- adds src/ to sys.path
 import pytest
 
 from utils import inject_roctx_loader
+
+
+@pytest.fixture(autouse=True)
+def _isolate_explicit_so_env(monkeypatch):
+    """Clear ROCPROFCOMPUTE_ROCTX_RECORDFN_SO for every test in this file.
+
+    The CTest registration for test_torch_trace_coverage pins this env
+    var to the configure-time .so path; if a developer runs the whole
+    test suite under one pytest invocation that inherits that env, the
+    explicit-tier short-circuit in load() would mask every tier-resolution
+    test below. The unset is unconditional so manual pytest runs that
+    happen to have the env exported (e.g. shell rcfile) behave the same.
+    """
+    monkeypatch.delenv(inject_roctx_loader._EXPLICIT_SO_ENV_VAR, raising=False)
 
 
 def test_compute_tag_returns_well_formed_string():
@@ -684,6 +698,87 @@ def test_jit_cache_dir_is_creatable(monkeypatch, tmp_path):
     d = inject_roctx_loader._jit_cache_dir()
     assert d.exists() and d.is_dir()
     inject_roctx_loader._jit_cache_dir()  # idempotent
+
+
+# Tier functions an explicit-so test must never reach. Extracted to a
+# module constant so each test below fits in the line limit and edits
+# stay in one place.
+_BUILD_TIERS = (
+    "_try_prebuilt",
+    "_try_jit_cached",
+    "_try_cmake_build",
+    "_try_jit_build",
+)
+
+
+def _fail_if_called(name: str):
+    """Return a tier-function stub that fails the test when invoked."""
+    return lambda _t, _n=name: pytest.fail(f"{_n} called unexpectedly")
+
+
+def test_explicit_so_env_var_short_circuits_other_tiers(monkeypatch, tmp_path):
+    """ROCPROFCOMPUTE_ROCTX_RECORDFN_SO -> module loaded via _try_explicit_so,
+    every other tier function must be untouched, and the recorded tier is
+    TIER_EXPLICIT.
+    """
+    fake_so = tmp_path / "roctx_recordfn.so"
+    fake_so.write_bytes(b"placeholder")  # real import is monkeypatched
+    sentinel = object()
+    monkeypatch.setenv(
+        inject_roctx_loader._EXPLICIT_SO_ENV_VAR,
+        str(fake_so),
+    )
+    monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
+    monkeypatch.setattr(
+        inject_roctx_loader,
+        "_import_module_from_path",
+        lambda _name, _path: sentinel,
+    )
+    for tier in _BUILD_TIERS:
+        monkeypatch.setattr(inject_roctx_loader, tier, _fail_if_called(tier))
+    assert inject_roctx_loader.load() is sentinel
+    assert inject_roctx_loader.loaded_tier() == inject_roctx_loader.TIER_EXPLICIT
+    assert inject_roctx_loader.TIER_EXPLICIT in inject_roctx_loader.C_TIER_NAMES
+
+
+def test_explicit_so_env_var_missing_file_returns_none_no_fallback(
+    monkeypatch, tmp_path
+):
+    """Env var set to a non-existent path -> None, and no build tier fires.
+    The operator pointed at an exact file; silently selecting a different
+    .so would defeat the whole point of the pin.
+    """
+    monkeypatch.setenv(
+        inject_roctx_loader._EXPLICIT_SO_ENV_VAR,
+        str(tmp_path / "nope.so"),
+    )
+    monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
+    for tier in _BUILD_TIERS:
+        monkeypatch.setattr(inject_roctx_loader, tier, _fail_if_called(tier))
+    assert inject_roctx_loader.load() is None
+    assert inject_roctx_loader.loaded_tier() is None
+
+
+def test_explicit_so_env_var_unimportable_returns_none_no_fallback(
+    monkeypatch, tmp_path
+):
+    """Env var path exists but import raises -> None, no fallback to build tiers."""
+    fake_so = tmp_path / "roctx_recordfn.so"
+    fake_so.write_bytes(b"not a real shared object")
+    monkeypatch.setenv(
+        inject_roctx_loader._EXPLICIT_SO_ENV_VAR,
+        str(fake_so),
+    )
+    monkeypatch.setattr(inject_roctx_loader, "compute_tag", lambda: _FAKE_TAG)
+
+    def boom(_name, _path):
+        raise ImportError("synthetic import failure")
+
+    monkeypatch.setattr(inject_roctx_loader, "_import_module_from_path", boom)
+    for tier in _BUILD_TIERS:
+        monkeypatch.setattr(inject_roctx_loader, tier, _fail_if_called(tier))
+    assert inject_roctx_loader.load() is None
+    assert inject_roctx_loader.loaded_tier() is None
 
 
 def test_load_does_not_raise_when_torch_missing(monkeypatch):

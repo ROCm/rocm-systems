@@ -658,6 +658,19 @@ set_tests_properties(
     PROPERTIES TIMEOUT 1800 LABELS "profile" RESOURCE_GROUPS gpus:1
 )
 
+# Pin the loader to the configure-time .so so pytest never falls
+# through to the cmake / cpp_extension build tiers. ROCTX_RECORDFN_SO_PATH
+# is exported from src/lib/roctx_recordfn/CMakeLists.txt when the .so
+# is built (ENABLE_TESTS=ON + torch present); when it is not exported,
+# the test skips at the loader-resolution step.
+if(ROCTX_RECORDFN_SO_PATH)
+    set_property(
+        TEST test_torch_trace_coverage
+        APPEND
+        PROPERTY ENVIRONMENT "ROCPROFCOMPUTE_ROCTX_RECORDFN_SO=${ROCTX_RECORDFN_SO_PATH}"
+    )
+endif()
+
 add_test(
     NAME test_inject_roctx_loader
     COMMAND
@@ -841,16 +854,17 @@ install(
     PATTERN "rooflines*" EXCLUDE
     PATTERN "__pycache__" EXCLUDE
 )
-# roctx_recordfn pybind11 extension used by --torch-trace. Smart
-# default: ON when torch is importable in the install-time Python (or
-# -DTORCH_TRACE_PYTHON=<python> if set), OFF otherwise. The runtime
-# loader (utils/inject_roctx_loader.py) JIT-compiles on first
-# --torch-trace use if no prebuilt was baked. UNGATED on
-# SKIP_NATIVE_TOOL_BUILD: the torch-trace extension and the native
-# counter tool are independent concerns. Sources are installed by the
-# rule below so the runtime cmake-tier keeps working post-install.
+# roctx_recordfn pybind11 extension used by --torch-trace. Built only
+# when ENABLE_TESTS=ON, as a CI test fixture: the torch-trace tests
+# below pin the loader to this configure-time artifact via
+# ROCPROFCOMPUTE_ROCTX_RECORDFN_SO so pytest never shells out to cmake
+# or torch.utils.cpp_extension at test time. Production installs ship
+# the sources (rule below) and the runtime loader's cmake-tier builds
+# the .so on first --torch-trace use in the user's PyTorch env.
 # See src/lib/roctx_recordfn/CMakeLists.txt for the full contract.
-add_subdirectory(src/lib/roctx_recordfn)
+if(ENABLE_TESTS)
+    add_subdirectory(src/lib/roctx_recordfn)
+endif()
 # Always install the roctx_recordfn sources next to the loader's
 # search path so the runtime cmake-tier (utils/inject_roctx_loader.py:
 # _try_cmake_build) can rebuild against the user's torch env, even
