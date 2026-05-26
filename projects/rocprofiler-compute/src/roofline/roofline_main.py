@@ -28,6 +28,7 @@ from utils.roofline_calc import (
     construct_roof,
 )
 from utils.specs import MachineSpecs
+from utils.utils_analysis import get_matrix_ops_type
 
 SYMBOLS = [0, 1, 2, 3, 4, 5, 13, 17, 18, 20]
 
@@ -626,8 +627,12 @@ class Roofline:
             )
 
         if matrix_data:
+            matrix_ops_type = get_matrix_ops_type(
+                getattr(self.__mspec, "gpu_series", "unknown_series")
+            )
             legend_name = (
-                f"Peak MFMA-{dtype}<br>{to_int(matrix_data[2])} G{ops_flops}/s"
+                f"Peak {matrix_ops_type}-{dtype}<br>"
+                f"{to_int(matrix_data[2])} G{ops_flops}/s"
             )
             fig.add_trace(
                 go.Scatter(
@@ -1148,13 +1153,16 @@ class Roofline:
             dtype in MATRIX_DATATYPES
             and self.__ceiling_data["matrix_ops"][0] is not None
         ):
+            matrix_ops_type = get_matrix_ops_type(
+                getattr(self.__mspec, "gpu_series", "unknown_series")
+            )
             plt.plot(
                 self.__ceiling_data["matrix_ops"][0],
                 [
                     self.__ceiling_data["matrix_ops"][1][0] - 0.1,
                     self.__ceiling_data["matrix_ops"][1][1] - 0.1,
                 ],
-                label=f"Peak MFMA-{dtype}",
+                label=f"Peak {matrix_ops_type}-{dtype}",
                 marker="braille",
                 color=get_color("matrix_ops", backend="cli"),
             )
@@ -1222,4 +1230,8 @@ class Roofline:
         return plt.build()
 
     def get_dtype(self) -> list[str]:
+        """
+        Return the data types requested by the user (else the default data type)
+        for the roofline plot.
+        """
         return self.__run_parameters["roofline_data_type"]

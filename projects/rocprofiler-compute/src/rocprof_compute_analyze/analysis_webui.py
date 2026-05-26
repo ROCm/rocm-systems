@@ -27,6 +27,7 @@ from utils.logger import (
     demarcate,
 )
 from utils.roofline_calc import calc_ai_analyze
+from utils.utils_analysis import get_matrix_ops_type
 from utils.utils_common import validate_roofline_csv
 
 
@@ -269,6 +270,9 @@ class webui_analysis(OmniAnalyze_Base):
                     )
                     mem_level = [("L1" if m == "vL1D" else m) for m in mem_level]
 
+                    matrix_ops_type = get_matrix_ops_type(
+                        getattr(soc[self.arch]._mspec, "gpu_series", "unknown_series")
+                    )
                     roof_obj = Roofline(
                         args=soc[self.arch].get_args(),
                         mspec=soc[self.arch]._mspec,
@@ -286,6 +290,7 @@ class webui_analysis(OmniAnalyze_Base):
                             "iteration_multiplexing": self._profiling_config[
                                 "iteration_multiplexing"
                             ],
+                            "matrix_ops_type": matrix_ops_type,
                         },
                     )
 

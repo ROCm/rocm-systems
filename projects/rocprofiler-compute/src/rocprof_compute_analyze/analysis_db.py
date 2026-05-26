@@ -53,7 +53,11 @@ from utils.roofline_calc import (
     PEAK_OPS_DATATYPES,
     SUPPORTED_DATATYPES,
 )
-from utils.utils_analysis import PEAK_COL_PREFERENCE, VALUE_COL_PREFERENCE
+from utils.utils_analysis import (
+    PEAK_COL_PREFERENCE,
+    VALUE_COL_PREFERENCE,
+    get_matrix_ops_type,
+)
 from utils.utils_common import get_uuid, get_version
 from utils.utils_counter_defs import extract_counters_and_variables, get_build_in_vars
 
@@ -351,6 +355,11 @@ class db_analysis(OmniAnalyze_Base):
                 pd.read_csv(f"{workload_path}/roofline.csv").iloc[0].to_dict()
             )
             keys: list[str] = []
+
+            matrix_ops_type = get_matrix_ops_type(
+                self._runs[workload_path].sys_info.iloc[0]["gpu_series"]
+            )
+
             for mem_level in CACHE_HIERARCHY:
                 keys.append(f"{mem_level}Bw")
             for dtype in SUPPORTED_DATATYPES[
@@ -365,9 +374,9 @@ class db_analysis(OmniAnalyze_Base):
                     if dtype.startswith("F") or dtype.startswith("B"):
                         # FP16 -> F16
                         dtype = dtype.replace("FP", "F")
-                        keys.append(f"MFMA{dtype}Flops")
+                        keys.append(f"{matrix_ops_type}{dtype}Flops")
                     elif dtype.startswith("I"):
-                        keys.append(f"MFMA{dtype}Ops")
+                        keys.append(f"{matrix_ops_type}{dtype}Ops")
             roofline_ceilings_per_workload[workload_path] = {
                 key: roofline_dict[key] for key in keys if key in roofline_dict
             }

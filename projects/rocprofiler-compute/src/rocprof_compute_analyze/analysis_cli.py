@@ -16,6 +16,7 @@ from utils.utils_analysis import (
     build_call_trees,
     build_call_trees_with_kernel_ids,
     build_operator_summary,
+    get_matrix_ops_type,
     process_torch_trace_output,
     write_torch_trace_consolidated_csv,
 )
@@ -220,6 +221,9 @@ class cli_analysis(OmniAnalyze_Base):
                                 "kernel_filter": bool(args.gpu_kernel),
                                 "iteration_multiplexing": self._profiling_config.get(
                                     "iteration_multiplexing"
+                                ),
+                                "matrix_ops_type": get_matrix_ops_type(
+                                    workload.sys_info.iloc[0]["gpu_series"]
                                 ),
                             },
                         )
