@@ -28,7 +28,7 @@ cmake_minimum_required(VERSION 3.16.3 FATAL_ERROR)
 # PROJECT
 ###############################################################################
 include(${CMAKE_SOURCE_DIR}/cmake/setup_project.cmake)
-project(rocshmem_functional_tests VERSION 1.0.0 LANGUAGES CXX)
+project(rocshmem_functional_tests VERSION 1.0.0 LANGUAGES CXX HIP)
 
 option(TEST_WITH_ROCSHMEM "Test the rocSHMEM SHMEM library" ON)
 option(TEST_WITH_MORI "Test the Mori SHMEM library" OFF)
@@ -103,6 +103,7 @@ target_sources(
     empty_tester.cpp
     wavefront_primitives.cpp
     flood_tester.cpp
+    mori_globals.cpp
     flood_amo_tester.cpp
     device_bitcode_tester.cpp
 )
@@ -120,14 +121,14 @@ rocm_install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/rocshmem_functional_driver.sh 
 rocm_install(TARGETS rocshmem_functional_tests COMPONENT tests)
 endif(TEST_WITH_ROCSHMEM)
 
-
 ###############################################################################
 # MORI
 ###############################################################################
 if(TEST_WITH_MORI)
+add_compile_definitions(MORI_SHMEM_NO_STATIC_INIT)
+
 message(STATUS "Building functional tests with Mori SHMEM library")
 find_package(mori REQUIRED PATHS /opt/rocm)
-
 
 add_executable(${PROJECT_NAME}_mori "")
 
@@ -135,12 +136,10 @@ target_compile_definitions(
   ${PROJECT_NAME}_mori
   PRIVATE
     $<$<TARGET_EXISTS:PMIx::pmix>:HAVE_PMIX=1>
-)
-
-target_compile_definitions(
-  ${PROJECT_NAME}_mori
-  PRIVATE
     TEST_WITH_MORI
+    MORI_DEVICE_NIC_IONIC
+    HIP_ENABLE_WARP_SYNC_BUILTINS
+    __GFX9__=1
 )
 
 target_link_libraries(
@@ -155,31 +154,50 @@ target_link_libraries(
 target_sources(
   ${PROJECT_NAME}_mori
   PRIVATE
-#    barrier_all_tester.cpp
-#    sync_all_tester.cpp
     test_driver.cpp
     tester.cpp
     tester_arguments.cpp
     ping_pong_tester.cpp
-#    ping_all_tester.cpp
     primitive_tester.cpp
     primitive_mr_tester.cpp
     default_ctx_primitive_tester.cpp
-#    team_ctx_primitive_tester.cpp
-#    team_ctx_infra_tester.cpp
-#    amo_bitwise_tester.cpp
-#    amo_extended_tester.cpp
     amo_standard_tester.cpp
-#    random_access_tester.cpp
-#    shmem_ptr_tester.cpp
-#    signaling_operations_tester.cpp
-#    signaling_operations_tester.hpp
     workgroup_primitives.cpp
     empty_tester.cpp
     wavefront_primitives.cpp
     flood_tester.cpp
-#    flood_amo_tester.cpp
-#    device_bitcode_tester.cpp
+    mori_globals.cpp
 )
-endif(TEST_WITH_MORI)
 
+# Mark all test sources as HIP to enable device code linking
+set_source_files_properties(
+  test_driver.cpp
+  tester.cpp
+  tester_arguments.cpp
+  ping_pong_tester.cpp
+  primitive_tester.cpp
+  primitive_mr_tester.cpp
+  default_ctx_primitive_tester.cpp
+  amo_standard_tester.cpp
+  workgroup_primitives.cpp
+  empty_tester.cpp
+  mori_globals.cpp
+  wavefront_primitives.cpp
+  flood_tester.cpp
+  PROPERTIES LANGUAGE HIP
+)
+
+# Enable RDC for Mori tests to link device symbols across files
+target_compile_options(
+  ${PROJECT_NAME}_mori
+  PRIVATE
+    $<$<COMPILE_LANGUAGE:HIP>:-fgpu-rdc>
+)
+
+target_link_options(
+  ${PROJECT_NAME}_mori
+  PRIVATE
+    $<$<LINK_LANGUAGE:HIP>:-fgpu-rdc>
+)
+
+endif(TEST_WITH_MORI)

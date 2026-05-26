@@ -43,13 +43,7 @@
 
   namespace rocshmem {
 
-#if 0
-    // No context type for Mori (contexts are implicit)
-    struct rocshmem_ctx_handle {
-      int qp_id{0};  // Queue pair ID for Mori
-    };
-#endif
-    using rocshmem_ctx_t = int; // rocshmem_ctx_handle;
+    using rocshmem_ctx_t = int;
     using rocshmem_uniqueid_t = mori::shmem::mori_shmem_uniqueid_t;
     using rocshmem_init_attr_t = mori::shmem::mori_shmem_init_attr_t;
     constexpr int ROCSHMEM_CTX_WG_PRIVATE = 4;
@@ -192,7 +186,7 @@
     // RMA operations - Work-group scope
     __device__ inline void rocshmem_ctx_putmem_wg(rocshmem_ctx_t ctx, void* dest, const void* source,
                                           size_t nelems, int pe) {
-      mori::shmem::ShmemPutMemNbiBlock(dest, source, nelems, pe, ctx);
+      mori::shmem::ShmemPutMemNbiThread(dest, source, nelems, pe, ctx);
       if (threadIdx.x == 0) {
         mori::shmem::ShmemQuietThread(pe, ctx);
       }
@@ -200,7 +194,7 @@
 
     __device__ inline void rocshmem_ctx_putmem_nbi_wg(rocshmem_ctx_t ctx, void* dest, const void* source,
                                               size_t nelems, int pe) {
-      mori::shmem::ShmemPutMemNbiBlock(dest, source, nelems, pe, ctx);
+      mori::shmem::ShmemPutMemNbiThread(dest, source, nelems, pe, ctx);
     }
 
     __device__ inline void rocshmem_ctx_getmem_wg(rocshmem_ctx_t ctx, void* dest, const void* source,
@@ -323,50 +317,45 @@
     }
 
     __device__ inline long rocshmem_ctx_long_atomic_add(rocshmem_ctx_t ctx,
-                                                                    long* dest,
-                                                                    long value,
-                                                                    int pe) {
+                                                        long* dest,
+                                                        long value,
+                                                        int pe) {
       mori::shmem::ShmemLongAtomicAddThread(dest, value, pe, ctx);
       return 0;
     }
 
     __device__ inline long rocshmem_ctx_long_atomic_fetch_add(rocshmem_ctx_t ctx,
-                                                                          long* dest,
-                                                                          long value,
-                                                                          int pe) {
+                                                              long* dest,
+                                                              long value,
+                                                              int pe) {
       return mori::shmem::ShmemLongAtomicFetchAddThread(dest, value, pe, ctx);
     }
 
     __device__ inline long rocshmem_ctx_long_atomic_fetch_inc(rocshmem_ctx_t ctx,
-                                                                          long* dest,
-                                                                          int pe) {
+                                                              long* dest,
+                                                              int pe) {
       return mori::shmem::ShmemLongAtomicFetchAddThread(dest, 1, pe, ctx);
     }
 
     __device__ inline long rocshmem_ctx_long_atomic_inc(rocshmem_ctx_t ctx,
-                                                                    long* dest,
-                                                                    int pe) {
+                                                        long* dest,
+                                                        int pe) {
       mori::shmem::ShmemLongAtomicAddThread(dest, 1, pe, ctx);
       return 0;
     }
 
     __device__ inline long rocshmem_ctx_long_atomic_compare_swap(rocshmem_ctx_t ctx,
-                                                                             long* dest,
-                                                                             long cond,
-                                                                             long value,
-                                                                             int pe) {
+                                                                 long* dest,
+                                                                 long cond,
+                                                                 long value,
+                                                                 int pe) {
       abort();
-#if 0
-      return mori::shmem::ShmemAtomicTypeFetchThread<long>(dest, value, cond,
-                                                  atomicType::AMO_CAS, pe, ctx);
-#endif
       return 0;
     }
 
-
     __host__ __device__ inline void rocshmem_global_exit(int code) { abort(); }
 
-  } // namespace rocshmem_adapter
+  } // namespace rocshmem
 
 #else
   // rocSHMEM backend (default)
