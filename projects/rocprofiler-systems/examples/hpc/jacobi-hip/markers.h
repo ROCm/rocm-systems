@@ -16,8 +16,7 @@
 #if defined(__HIP_PLATFORM_HCC__)
 // begin HCC
 
-#    include <roctracer/roctracer_ext.h>
-#    include <roctracer/roctx.h>
+#    include <rocprofiler-sdk-roctx/roctx.h>
 
 #    define BEGIN_RANGE(name, group)                                                     \
         do                                                                               \
@@ -68,18 +67,6 @@ public:
             const char* cstr = str.c_str();                                              \
             roctxMark(cstr);                                                             \
         } while(0)  // must terminate with semi-colon
-
-static inline void
-initialize_logger()
-{
-    roctracer_start();
-}
-
-static inline void
-finalize_logger()
-{
-    roctracer_stop();
-}
 
 #else  // __HIP_PLATFORM_NVCC__
 // Begin CUDA
