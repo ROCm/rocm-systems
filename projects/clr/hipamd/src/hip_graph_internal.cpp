@@ -5,6 +5,7 @@
  */
 
 #include "hip_graph_internal.hpp"
+#include "platform/activity.hpp"
 
 #define CASE_STRING(X, C)                                                                          \
   case X:                                                                                          \
@@ -432,6 +433,7 @@ void GraphExec::BuildSyncPlan() {
   sync_plan_.patch_list.clear();
   sync_plan_.barrier_packets.clear();
   sync_plan_.leaf_segment_ids.clear();
+  sync_plan_.kernel_hw_event_entries.clear();
   sync_plan_.seg_to_hw_event.assign(segments_.size(), -1);
   sync_plan_.num_hw_events = 0;
 
@@ -575,20 +577,17 @@ void GraphExec::BuildSyncPlan() {
           {completion_barrier, nullptr, hw_slot,
            amd::Device::HwEventPatch::kCompletionSignal});
     } else if (!lastBatch.dispatchPackets.empty() && completion_signal_needed) {
-      // All nodes are capturable — append a real completion barrier packet so that
-      // ApplyHwEventPatches patches the barrier's completion signal, not the last
-      // kernel dispatch's. Patching the last kernel dispatch directly causes
-      // dispatchAqlPacketBatchFlat to see a pre-patched non-zero signal and skip
-      // profiling setup (reserved2 / isPacketDispatch_) for that kernel.
-      uint8_t* completion_barrier = device->CreateBarrierPacket();
-      sync_plan_.barrier_packets.push_back(completion_barrier);
-
-      lastBatch.dispatchPackets.push_back(completion_barrier);
-      lastBatch.dispatchKernelNames.push_back(kBarrierKernelNamePtr);
+      uint8_t* last_pkt = lastBatch.dispatchPackets.back();
 
       sync_plan_.patch_list.push_back(
-          {completion_barrier, nullptr, hw_slot,
+          {last_pkt, nullptr, hw_slot,
            amd::Device::HwEventPatch::kCompletionSignal});
+
+      // Last packet is a captured kernel dispatch — record for timestamp readback.
+      const std::string* kname = lastBatch.dispatchKernelNames.back();
+      if (kname != nullptr) {
+        sync_plan_.kernel_hw_event_entries.emplace_back(hw_slot, kname);
+      }
     }
 
     if (segment.segment_ids_edges.empty()) {
@@ -1581,13 +1580,29 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
   // Allocated once at instantiate time; reused across launches; freed in ~GraphExec.
   segment_hw_events_.clear();
   hw_events_base_va_ = 0;
+  if (hw_signals_dev_ptr_ != nullptr) {
+    (void)ihipFree(hw_signals_dev_ptr_);
+    hw_signals_dev_ptr_ = nullptr;
+  }
   if (sync_plan_.num_hw_events > 0) {
-    if (!device->CreateHwEvents(sync_plan_.num_hw_events, segment_hw_events_)) {
+    const size_t signal_block_size = sync_plan_.num_hw_events * 64;
+
+    // Allocate device signal buffer via ihipMalloc so it is registered in MemObjMap
+    // and can be used as source in ihipMemcpy for D2H readback.
+    if (ihipMalloc(&hw_signals_dev_ptr_, signal_block_size, 0) != hipSuccess) {
       return hipErrorOutOfMemory;
     }
-    // Sentinel at back() = raw device VA of the contiguous amd_signal_t block.
-    hw_events_base_va_ = reinterpret_cast<uint64_t>(segment_hw_events_.back());
 
+    // Initialize amd_signal_t slots in the device buffer and fill segment_hw_events_.
+    if (!device->InitHwEventsInBuffer(hw_signals_dev_ptr_, sync_plan_.num_hw_events,
+                                      segment_hw_events_)) {
+      (void)ihipFree(hw_signals_dev_ptr_);
+      hw_signals_dev_ptr_ = nullptr;
+      return hipErrorOutOfMemory;
+    }
+
+    // Sentinel at back() is nullptr (buffer is caller-owned); base VA from slot 0.
+    hw_events_base_va_ = reinterpret_cast<uint64_t>(hw_signals_dev_ptr_);
   }
 
   // Apply pre-computed patches -- writes HW events directly into flatPacketData
@@ -1928,6 +1943,28 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
       if (hw_slot < 0 || hw_slot >= sync_plan_.num_hw_events) continue;
       uint64_t sig_handle = hw_events_base_va_ + static_cast<uint64_t>(hw_slot) * 64UL;
       launch_stream->vdev()->addDynamicQueueWait(sig_handle);
+    }
+  }
+
+  // Enqueue async D2H readback of the hw_event signal block into per-launch pinned host buffer.
+  if (hw_signals_dev_ptr_ != nullptr && amd::activity_prof::IsProfilingEnabled()) {
+    const size_t copy_bytes = static_cast<size_t>(sync_plan_.num_hw_events) * 64;
+    void* host_ptr = nullptr;
+    if (ihipHostMalloc(&host_ptr, copy_bytes, 0) == hipSuccess) {
+      size_t offset = 0;
+      amd::Memory* host_mem = getMemoryObject(host_ptr, offset);
+      double ticks_to_time = launch_stream->vdev()->gpuTicksToTime();
+      graph_accumulate->setHwSignalsHostMem(host_mem, ticks_to_time);
+      // Register kernel hw_slot entries so ReportActivity can read timestamps.
+      for (const auto& entry : sync_plan_.kernel_hw_event_entries) {
+        graph_accumulate->addHwSignalKernelEntry(entry.first, entry.second);
+      }
+      hipError_t rc = ihipMemcpy(host_ptr, hw_signals_dev_ptr_, copy_bytes,
+                                 hipMemcpyDeviceToHost, *launch_stream, true /*isHostAsync*/);
+      if (rc != hipSuccess) {
+        ClPrint(amd::LOG_WARNING, amd::LOG_CODE,
+                "[GraphExec] hw_events D2H readback failed: %d", rc);
+      }
     }
   }
 

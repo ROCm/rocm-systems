@@ -1526,6 +1526,15 @@ class AccumulateCommand : public Command {
   std::vector<std::pair<uint64_t, uint64_t>> tsList_;
   //! HW events that need to be released when this command is destroyed
   std::unordered_map<Device*, std::vector<void*>> hw_events_;
+  //! Pinned host buffer for per-launch D2H readback of HW event signals.
+  //! Allocated via ihipHostMalloc; retained here and released in destructor.
+  Memory* hw_signals_host_mem_ = nullptr;
+  //! (hw_slot_index, kernel_name*) for each captured kernel dispatch whose
+  //! completion signal was patched into the bulk signal buffer. Used in
+  //! ReportActivity to read start_ts/end_ts directly from the host buffer.
+  std::vector<std::pair<int, const std::string*>> hw_signal_kernel_entries_;
+  //! GPU ticks-to-nanoseconds conversion factor, set alongside hw_signals_host_mem_.
+  double hw_signal_ticks_to_time_ = 0.0;
 
  public:
   //! Create a new Marker
@@ -1547,6 +1556,45 @@ class AccumulateCommand : public Command {
         hw_events_[dev].push_back(hw_event);
       }
     }
+  }
+
+  //! Set the pinned host readback buffer and ticks→ns factor (retains the Memory object).
+  void setHwSignalsHostMem(Memory* mem, double ticks_to_time = 0.0) {
+    if (hw_signals_host_mem_ != nullptr) hw_signals_host_mem_->release();
+    hw_signals_host_mem_ = mem;
+    if (hw_signals_host_mem_ != nullptr) hw_signals_host_mem_->retain();
+    hw_signal_ticks_to_time_ = ticks_to_time;
+  }
+  //! Returns the CPU pointer for the pinned readback buffer, or nullptr if not set.
+  void* hwSignalsHostPtr() const {
+    return hw_signals_host_mem_ ? hw_signals_host_mem_->getSvmPtr() : nullptr;
+  }
+
+  //! Record a (hw_slot, kernel_name) pair for a captured kernel dispatch.
+  void addHwSignalKernelEntry(int hw_slot, const std::string* name) {
+    hw_signal_kernel_entries_.emplace_back(hw_slot, name);
+  }
+  //! Return the hw_slot → kernel_name entries for timestamp readback.
+  const std::vector<std::pair<int, const std::string*>>& hwSignalKernelEntries() const {
+    return hw_signal_kernel_entries_;
+  }
+  //! Read start_ns/end_ns from the pinned host buffer for a given hw_slot.
+  //! amd_signal_t layout: start_ts at byte 32, end_ts at byte 40 (stride = 64).
+  //! Returns false if the host buffer is absent or timestamps are zero/invalid.
+  bool getHwSignalTimestamps(int hw_slot, uint64_t& start_ns, uint64_t& end_ns) const {
+    const auto* base = static_cast<const uint8_t*>(hwSignalsHostPtr());
+    if (base == nullptr || hw_signal_ticks_to_time_ == 0.0) return false;
+    constexpr size_t kStride = 64;
+    constexpr size_t kStartTsOffset = 32;
+    constexpr size_t kEndTsOffset   = 40;
+    const uint8_t* slot = base + static_cast<size_t>(hw_slot) * kStride;
+    uint64_t start_ticks, end_ticks;
+    memcpy(&start_ticks, slot + kStartTsOffset, sizeof(uint64_t));
+    memcpy(&end_ticks,   slot + kEndTsOffset,   sizeof(uint64_t));
+    if (start_ticks == 0 || end_ticks == 0 || end_ticks < start_ticks) return false;
+    start_ns = static_cast<uint64_t>(start_ticks * hw_signal_ticks_to_time_);
+    end_ns   = static_cast<uint64_t>(end_ticks   * hw_signal_ticks_to_time_);
+    return true;
   }
 
   //! Add kernel name to the list if available

@@ -162,6 +162,8 @@ class Buffer : public roc::Memory {
  public:
   Buffer(const roc::Device& dev, amd::Memory& owner);
   Buffer(const roc::Device& dev, size_t size);
+  // Wrap an externally-allocated device pointer; does not free ptr on destruction.
+  Buffer(const roc::Device& dev, void* ptr, size_t size);
 
   virtual ~Buffer();
 

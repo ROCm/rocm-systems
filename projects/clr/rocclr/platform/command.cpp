@@ -74,6 +74,11 @@ AccumulateCommand::~AccumulateCommand() {
       }
     }
   }
+
+  if (hw_signals_host_mem_ != nullptr) {
+    hw_signals_host_mem_->release();
+    hw_signals_host_mem_ = nullptr;
+  }
 }
 
 // ================================================================================================

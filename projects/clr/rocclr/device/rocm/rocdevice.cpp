@@ -3723,6 +3723,33 @@ bool Device::CreateHwEvents(int count, std::vector<void*>& hw_events) const {
 }
 
 // ================================================================================================
+bool Device::InitHwEventsInBuffer(void* buf, int count,
+                                  std::vector<void*>& hw_events) const {
+  if (buf == nullptr || count <= 0) return false;
+
+  constexpr size_t kStride = sizeof(amd_signal_t);
+  auto* signals = reinterpret_cast<amd_signal_t*>(buf);
+
+  hw_events.resize(count, nullptr);
+  for (int i = 0; i < count; ++i) {
+    amd_signal_t* sig_mem = &signals[i];
+    memset(sig_mem, 0, kStride);
+    sig_mem->kind  = AMD_SIGNAL_KIND_USER;
+    sig_mem->value = 1;
+
+    ProfilingSignal* ps = new ProfilingSignal();
+    ps->signal_.handle = reinterpret_cast<uint64_t>(sig_mem);
+    ps->contiguous_alloc_ = true;
+    hw_events[i] = ps;
+  }
+
+  // nullptr sentinel: buffer is caller-owned; DestroyHwEvents skips memory_pool_free.
+  hw_events.push_back(nullptr);
+
+  return true;
+}
+
+// ================================================================================================
 void Device::DestroyHwEvent(void* hw_event) const {
   ReleaseGlobalSignal(hw_event);
 }
@@ -3735,7 +3762,8 @@ void Device::DestroyHwEvent(void* hw_event) const {
 void Device::DestroyHwEvents(std::vector<void*>& hw_events) const {
   if (hw_events.empty()) return;
 
-  // Last entry is the sentinel: raw device pointer to the contiguous amd_signal_t block.
+  // Last entry is the sentinel: raw device pointer to the contiguous amd_signal_t block,
+  // or nullptr when the buffer is caller-owned (e.g. from ihipMalloc via InitHwEventsInBuffer).
   void* buf = hw_events.back();
   hw_events.pop_back();
 
@@ -3745,6 +3773,7 @@ void Device::DestroyHwEvents(std::vector<void*>& hw_events) const {
   }
   hw_events.clear();
 
+  // Only free pool memory when sentinel is non-null (CreateHwEvents path).
   if (buf != nullptr) {
     Hsa::memory_pool_free(buf);
   }

@@ -472,6 +472,7 @@ class VirtualGPU : public device::VirtualDevice {
   void submitNativeFn(amd::NativeFnCommand& cmd);
   void submitMarker(amd::Marker& cmd);
   void submitAccumulate(amd::AccumulateCommand& cmd);
+  double gpuTicksToTime() const override { return Timestamp::getGpuTicksToTime(); }
   void submitAcquireExtObjects(amd::AcquireExtObjectsCommand& cmd);
   void submitReleaseExtObjects(amd::ReleaseExtObjectsCommand& cmd);
   void submitPerfCounter(amd::PerfCounterCommand& cmd);

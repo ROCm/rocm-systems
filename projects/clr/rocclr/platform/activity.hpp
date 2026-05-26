@@ -65,6 +65,9 @@ constexpr OpId OperationId(cl_command_type commandType) {
 }
 
 bool IsEnabled(OpId operation_id);
+
+inline bool IsProfilingEnabled() { return IsEnabled(OP_ID_DISPATCH); }
+
 void ReportActivity(const amd::Command& command);
 
 // Signals roctracer that CLR commits to delivering one activity record for

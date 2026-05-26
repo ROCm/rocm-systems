@@ -626,6 +626,11 @@ Buffer::Buffer(const roc::Device& dev, amd::Memory& owner) : roc::Memory(dev, ow
 
 Buffer::Buffer(const roc::Device& dev, size_t size) : roc::Memory(dev, size) {}
 
+Buffer::Buffer(const roc::Device& dev, void* ptr, size_t size) : roc::Memory(dev, size) {
+  deviceMemory_ = ptr;
+  kind_ = MEMORY_KIND_PTRGIVEN;
+}
+
 Buffer::~Buffer() {
   if (owner() == nullptr) {
     dev().memFree(deviceMemory_, size());

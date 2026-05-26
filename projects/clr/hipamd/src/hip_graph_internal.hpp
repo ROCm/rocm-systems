@@ -981,6 +981,10 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
       auto* dev = g_devices[instantiateDeviceId_]->devices()[0];
       dev->DestroyHwEvents(segment_hw_events_);
     }
+    if (hw_signals_dev_ptr_ != nullptr) {
+      (void)ihipFree(hw_signals_dev_ptr_);
+      hw_signals_dev_ptr_ = nullptr;
+    }
 
   }
 
@@ -1133,6 +1137,11 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
     std::vector<uint8_t*> barrier_packets;
     std::vector<int> leaf_segment_ids;
 
+    // (hw_slot, kernel_name*) for segments whose completion signal was patched
+    // directly onto a captured kernel dispatch packet (not a barrier).
+    // Used to read start_ts/end_ts from the D2H readback buffer per launch.
+    std::vector<std::pair<int, const std::string*>> kernel_hw_event_entries;
+
     ~SyncPlan() {
       for (auto* p : barrier_packets) { delete[] p; }
     }
@@ -1146,6 +1155,10 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
 
   // Device VA of the contiguous amd_signal_t block (base of segment_hw_events_ buffer).
   uint64_t hw_events_base_va_ = 0;
+
+  // Device pointer (from ihipMalloc) for the signal block used for timestamp readback.
+  // Separate from segment_hw_events_ which uses gpuvm_segment_ HSA signals.
+  void* hw_signals_dev_ptr_ = nullptr;
 
   // True after the first EnqueueSegmentedGraph; signals need reset on 2nd+ launches.
   bool hw_signals_launched_ = false;

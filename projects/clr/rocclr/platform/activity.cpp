@@ -106,13 +106,25 @@ void ReportActivity(const amd::Command& command) {
   }
 
   if (command.type() == CL_COMMAND_TASK) {
-    auto timestamps = static_cast<const amd::AccumulateCommand&>(command).getTimestamps();
-    const auto& kernel_names =
-        static_cast<const amd::AccumulateCommand&>(command).getKernelNames();
-    // timestamps has one entry per HSA_PACKET_TYPE_KERNEL_DISPATCH packet only.
-    // kernel_names has one entry per AQL packet slot (nullptr for barriers and SDMA/copy nodes
-    // that don't generate timestamps). Walk kernel_names; for each non-null entry consume
-    // the next timestamp.
+    const auto& acc = static_cast<const amd::AccumulateCommand&>(command);
+
+    // Timestamps from hw_event signals patched onto the last kernel dispatch of each
+    // hw-event segment. The completion signal is in the D2H-copied bulk signal buffer;
+    // these kernels do NOT appear in tsList_ (they skipped the profiling-signal path).
+    for (const auto& [hw_slot, kname] : acc.hwSignalKernelEntries()) {
+      if (kname == nullptr) continue;
+      uint64_t start_ns = 0, end_ns = 0;
+      if (!acc.getHwSignalTimestamps(hw_slot, start_ns, end_ns)) continue;
+      record.begin_ns = start_ns;
+      record.end_ns = end_ns;
+      record.kernel_name = kname->c_str();
+      function(ACTIVITY_DOMAIN_HIP_OPS, operation_id, &record);
+    }
+
+    // Timestamps from ProfilingSignal callbacks for all other kernel dispatches
+    // (non-last kernels in hw-event segments, and all kernels in barrier segments).
+    auto timestamps = acc.getTimestamps();
+    const auto& kernel_names = acc.getKernelNames();
     uint32_t ti = 0;
     for (uint32_t ki = 0; ki < kernel_names.size() && ti < timestamps.size(); ki++) {
       if (kernel_names[ki] == nullptr) continue;

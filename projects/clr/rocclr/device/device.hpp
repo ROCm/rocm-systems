@@ -1309,6 +1309,7 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void submitNativeFn(amd::NativeFnCommand& cmd) = 0;
   virtual void submitMarker(amd::Marker& cmd) = 0;
   virtual void submitAccumulate(amd::AccumulateCommand& cmd) = 0;
+  virtual double gpuTicksToTime() const { return 0.0; }
   virtual void submitExternalSemaphoreCmd(amd::ExternalSemaphoreCmd& cmd) = 0;
   virtual void submitFillMemory(amd::FillMemoryCommand& cmd) = 0;
   virtual void submitMigrateMemObjects(amd::MigrateMemObjectsCommand& cmd) = 0;
@@ -2123,6 +2124,10 @@ class Device : public RuntimeObject {
   virtual void RetainGlobalSignal(void* signal) const {}
 
   virtual bool CreateHwEvents(int count, std::vector<void*>& hw_events) const { return false; }
+  // Initialize hw signal slots in an externally-allocated buffer (e.g. from ihipMalloc).
+  // Fills hw_events with ProfilingSignal wrappers; sentinel at back() is nullptr (no pool free).
+  virtual bool InitHwEventsInBuffer(void* buf, int count,
+                                    std::vector<void*>& hw_events) const { return false; }
   virtual void DestroyHwEvent(void* hw_event) const {}
   virtual void DestroyHwEvents(std::vector<void*>& hw_events) const { hw_events.clear(); }
 
