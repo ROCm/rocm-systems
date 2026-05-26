@@ -7,7 +7,6 @@ rj_add_object_library(rocjitsu_vm_amdgpu
     memory_pipeline.cpp
     command_processor.cpp
     completion_tracker.cpp
-    kernel_symbol.cpp
     shader_engine.cpp
     xcd.cpp
     iod.cpp
