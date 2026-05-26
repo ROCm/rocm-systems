@@ -49,6 +49,16 @@
                           reinterpret_cast<void*>(src), \
                           (nelem) * sizeof(*(dst)), (stream))
 
+// Macro shim: route the HIP driver entry points that ipcRegisterBuffer's
+// fresh-registration arm calls (hipMemGetAddressRange, hipIpcGetMemHandle)
+// through hookable fakes. The real symbols resolve at link time from
+// hip::host but would need a real GPU at runtime. Same pattern as the
+// ncclCudaCallocAsync shim above.
+#define hipMemGetAddressRange(pbase, psize, dptr) \
+    g_hipMemGetAddressRange((pbase), (psize), (dptr))
+#define hipIpcGetMemHandle(handle, devPtr) \
+    g_hipIpcGetMemHandle((handle), (devPtr))
+
 // Pull in the hipified copy of p2p.cc (cudaXxx -> hipXxx rewrites already
 // applied by the hipify pass that runs as part of the main RCCL build).
 // P2P_CC_PATH is defined by this target's CMakeLists.txt as a string
@@ -341,6 +351,153 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_CollectiveReuseStrongStreamAcquireFailure
     EXPECT_EQ(acquireCalls, 1);     // strong-stream block was entered
     EXPECT_EQ(r, ncclSystemError);  // error from the hook propagated out
     out.ExpectZeroed();             // failure-path contract honoured
+}
+
+// Fresh-registration happy path (legacy IPC / cudaIpcGetMemHandle arm).
+// This is the path that *produces* the IPC state every reuse test assumes
+// already exists. Coverage-wise it lights up the entire body of the
+// `else` arm at line ~905 of p2p.cc, including:
+//   - hipMemGetAddressRange success (911)
+//   - ncclProxyConnect (921-922) because gproxyConn is uninitialised
+//   - ncclCuMemEnable() == 0 path -> legacy export arm (979)
+//   - cudaIpcGetMemHandle + ipcInfo.legacyIpcCap=true (961-964)
+//   - line 964 `if (isLegacyIpc) *isLegacyIpc = true` (the last
+//     unexercised isLegacyIpc write)
+//   - ncclProxyCallBlocking returning a canned rmtRegAddr (985)
+//   - newInfo allocation + regRecord->ipcInfos install (986-1000)
+//   - hostPeerRmtAddrs lazy-allocation (994)
+//   - post-loop COLLECTIVE block with needUpdate=true driving
+//     ncclCudaCallocAsync + ncclCudaMemcpyAsync
+//
+// All four runtime-driver entry points (hipMemGetAddressRange,
+// hipIpcGetMemHandle, ncclProxyConnect, ncclProxyCallBlocking) are driven
+// via per-test hooks installed on the fakes.
+TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationLegacyIpcSucceeds)
+{
+    constexpr int       kPeerRank      = 2;
+    constexpr int       kPeerLocalRank = 1;
+    constexpr uintptr_t kBaseAddr      = 0x100000;
+    constexpr std::size_t kBaseSize    = 0x4000;
+    constexpr uintptr_t kBuffOffset    = 0x80;
+    constexpr uintptr_t kBegOffset     = 0x20;  // regRecord->begAddr - baseAddr
+    constexpr uintptr_t kBegAddr       = kBaseAddr + kBegOffset;
+    constexpr uintptr_t kRmtRegAddr    = 0xCAFE0000ull;
+
+    ncclSharedResources sharedRes{};
+    ncclComm comm{};
+    comm.sharedRes  = &sharedRes;
+    comm.localRanks = NCCL_MAX_LOCAL_RANKS;
+    RankMapping ranks(comm, {{kPeerRank, kPeerLocalRank}});
+
+    // comm->gproxyConn is a bare pointer (not an array) in ncclComm; the
+    // real ncclCommInit allocates it sized to comm->nRanks. We hand-roll
+    // it here, sized big enough to index [kPeerRank].
+    std::array<ncclProxyConnector, kPeerRank + 1> gproxyConnStorage{};
+    comm.gproxyConn = gproxyConnStorage.data();
+
+    ncclReg regRecord{};
+    regRecord.begAddr = kBegAddr;
+    regRecord.endAddr = kBegAddr + 0x1000;
+    // regRecord.ipcInfos[kPeerLocalRank] is NULL -> fresh-registration arm.
+
+    // ---- hook 1: hipMemGetAddressRange returns baseAddr + baseSize.
+    int memGetCalls = 0;
+    g_hipMemGetAddressRange = [&](hipDeviceptr_t* pbase, std::size_t* psize,
+                                  hipDeviceptr_t /*dptr*/) -> hipError_t {
+        ++memGetCalls;
+        if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
+        if (psize) *psize = kBaseSize;
+        return hipSuccess;
+    };
+
+    // ---- hook 2: hipIpcGetMemHandle succeeds with a sentinel handle.
+    // p2p.cc copies the handle into ipcInfo.ipcDesc.devIpc and ships it
+    // off via ncclProxyCallBlocking; the fake on the other side never
+    // inspects it, so any pattern works.
+    int ipcGetCalls = 0;
+    g_hipIpcGetMemHandle = [&](hipIpcMemHandle_t* h, void* /*p*/) -> hipError_t {
+        ++ipcGetCalls;
+        if (h) std::memset(h, 0x5A, sizeof(*h));
+        return hipSuccess;
+    };
+
+    // ---- hook 3: ncclProxyConnect marks the gproxyConn slot initialized.
+    // The real implementation does more, but for the unit under test the
+    // only thing that matters post-call is that proxyConn is non-null,
+    // which it already is (it's &comm->gproxyConn[peerRank]).
+    int connectCalls = 0;
+    g_proxyConnect = [&](struct ncclComm* c, int transport, int /*send*/,
+                         int rank,
+                         struct ncclProxyConnector* pc) -> ncclResult_t {
+        ++connectCalls;
+        EXPECT_EQ(transport, TRANSPORT_P2P);
+        EXPECT_EQ(rank, kPeerRank);
+        EXPECT_EQ(pc, &c->gproxyConn[rank]);
+        pc->initialized = true;
+        return ncclSuccess;
+    };
+
+    // ---- hook 4: ncclProxyCallBlocking returns a canned rmtRegAddr in
+    // respBuff. Without this the post-call `if (rmtRegAddr)` block
+    // (which is where the real registration bookkeeping happens) stays
+    // skipped.
+    int proxyCalls = 0;
+    g_proxyCallBlocking = [&](struct ncclComm*, struct ncclProxyConnector*,
+                              int type, void* /*req*/, int /*rs*/,
+                              void* resp, int respSize) -> ncclResult_t {
+        ++proxyCalls;
+        EXPECT_EQ(type, ncclProxyMsgRegister);
+        EXPECT_GE(respSize, static_cast<int>(sizeof(void*)));
+        if (resp) std::memcpy(resp, &kRmtRegAddr, sizeof(void*));
+        return ncclSuccess;
+    };
+
+    int peerRanks[] = {kPeerRank};
+    IpcRegOutputs out;
+    bool isLegacyIpc = false;
+
+    auto r = CallIpcRegisterBuffer(comm,
+                                   /*userbuff=*/ reinterpret_cast<const void*>(kBegAddr + kBuffOffset),
+                                   /*buffSize=*/ 256,
+                                   peerRanks, 1,
+                                   NCCL_IPC_COLLECTIVE,
+                                   &regRecord, out, &isLegacyIpc);
+
+    // ---- contract: every seam was called exactly once on the happy path.
+    EXPECT_EQ(memGetCalls,  1);
+    EXPECT_EQ(ipcGetCalls,  1);
+    EXPECT_EQ(connectCalls, 1);
+    EXPECT_EQ(proxyCalls,   1);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(out.regBufFlag, 1);
+    EXPECT_EQ(out.offsetOut,  kBuffOffset);
+    // COLLECTIVE: returns the dev table (allocated by the strong-stream
+    // block via g_fakeCudaCallocAsync's heap default), populated from the
+    // host table by g_fakeCudaMemcpyAsync's real-memcpy default.
+    ASSERT_NE(out.peerRmtAddrs, nullptr);
+    EXPECT_EQ(out.peerRmtAddrs, regRecord.regIpcAddrs.devPeerRmtAddrs);
+    EXPECT_EQ(out.peerRmtAddrs[kPeerLocalRank], kRmtRegAddr);
+    EXPECT_TRUE(isLegacyIpc);  // line 964 write reached
+
+    // ---- contract: regRecord bookkeeping populated as documented.
+    ASSERT_NE(regRecord.ipcInfos[kPeerLocalRank], nullptr);
+    EXPECT_EQ(regRecord.ipcInfos[kPeerLocalRank]->peerRank, kPeerRank);
+    EXPECT_EQ(regRecord.ipcInfos[kPeerLocalRank]->baseAddr,
+              reinterpret_cast<void*>(kBaseAddr));
+    EXPECT_EQ(regRecord.ipcInfos[kPeerLocalRank]->impInfo.rmtRegAddr,
+              reinterpret_cast<void*>(kRmtRegAddr));
+    EXPECT_EQ(regRecord.ipcInfos[kPeerLocalRank]->impInfo.offset, kBegOffset);
+    EXPECT_TRUE(regRecord.ipcInfos[kPeerLocalRank]->impInfo.legacyIpcCap);
+    EXPECT_TRUE(regRecord.state & IPC_REG_COMPLETE);
+    ASSERT_NE(regRecord.regIpcAddrs.hostPeerRmtAddrs, nullptr);
+    EXPECT_EQ(regRecord.regIpcAddrs.hostPeerRmtAddrs[kPeerLocalRank],
+              kRmtRegAddr);
+
+    // ---- cleanup: free the per-peer newInfo + the lazily-allocated host
+    // table. ResetP2pFakes() takes care of the dev-table calloc.
+    std::free(regRecord.ipcInfos[kPeerLocalRank]);
+    std::free(regRecord.regIpcAddrs.hostPeerRmtAddrs);
 }
 
 // DISABLED_ until the upstream NCCL PR #1861 fix is merged into RCCL.

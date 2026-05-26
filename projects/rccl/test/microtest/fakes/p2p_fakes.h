@@ -18,6 +18,9 @@
 
 #include "nccl.h"
 #include "strongstream.h"
+#include "proxy.h"
+#include <hip/hip_runtime_api.h>
+#include <hip/hip_runtime.h>
 
 // ncclStrongStreamAcquire: by default returns ncclSuccess with *stream=nullptr
 // (matching the stub's prior behaviour). Tests that need to exercise the
@@ -40,6 +43,36 @@ extern std::function<ncclResult_t(void** ptr, std::size_t nbytes, hipStream_t)>
     g_fakeCudaCallocAsync;
 extern std::function<ncclResult_t(void* dst, void* src, std::size_t nbytes, hipStream_t)>
     g_fakeCudaMemcpyAsync;
+
+// ncclProxyConnect / ncclProxyCallBlocking: fresh-registration arm of
+// ipcRegisterBuffer routes the per-peer IPC handshake through these. The
+// default Connect returns ncclSystemError (so tests that don't expect to
+// reach the proxy fail loudly); the default CallBlocking also returns
+// ncclSystemError. Happy-path tests install a hook that returns success
+// and writes a canned rmtRegAddr into respBuff for ncclProxyMsgRegister.
+extern std::function<ncclResult_t(struct ncclComm*, int /*transport*/,
+                                  int /*send*/, int /*proxyRank*/,
+                                  struct ncclProxyConnector*)>
+    g_proxyConnect;
+extern std::function<ncclResult_t(struct ncclComm*, struct ncclProxyConnector*,
+                                  int /*type*/,
+                                  void* /*reqBuff*/, int /*reqSize*/,
+                                  void* /*respBuff*/, int /*respSize*/)>
+    g_proxyCallBlocking;
+
+// hipMemGetAddressRange / hipIpcGetMemHandle: real HIP runtime entry points
+// reached from ipcRegisterBuffer's fresh-registration arm. The microtest
+// binary links hip::host, so these symbols resolve at link time -- but at
+// runtime they need a real GPU. The macro shims in p2p-test.cc route the
+// p2p.cc call sites through these hooks instead.
+//
+// Defaults return hipErrorInvalidValue so any test that *doesn't* opt in
+// surfaces the unexpected call as ncclUnhandledCudaError via CUCHECKGOTO.
+extern std::function<hipError_t(hipDeviceptr_t* /*pbase*/, std::size_t* /*psize*/,
+                                hipDeviceptr_t /*dptr*/)>
+    g_hipMemGetAddressRange;
+extern std::function<hipError_t(hipIpcMemHandle_t* /*handle*/, void* /*devPtr*/)>
+    g_hipIpcGetMemHandle;
 
 // Restore every hook in this header to its default. Call from fixture
 // TearDown().

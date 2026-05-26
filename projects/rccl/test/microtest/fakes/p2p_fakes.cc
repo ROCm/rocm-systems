@@ -89,25 +89,71 @@ void ncclLoadParam(char const* /*env*/,
 
 int ncclCuMemEnable() { return 0; }
 
-ncclResult_t ncclProxyConnect(struct ncclComm*           /*comm*/,
-                              int                        /*transport*/,
-                              int                        /*send*/,
-                              int                        /*proxyRank*/,
-                              struct ncclProxyConnector* /*proxyConn*/)
+// --- Controllable seams: ncclProxyConnect / ncclProxyCallBlocking --------
+// Default behaviour is the old stub: return ncclSystemError. Happy-path
+// tests install a hook that succeeds and writes a canned rmtRegAddr into
+// respBuff for ncclProxyMsgRegister.
+static ncclResult_t DefaultProxyConnect(struct ncclComm*, int, int, int,
+                                        struct ncclProxyConnector*)
 {
     return ncclSystemError;
 }
 
-ncclResult_t ncclProxyCallBlocking(struct ncclComm*           /*comm*/,
-                                   struct ncclProxyConnector* /*proxyConn*/,
-                                   int                        /*type*/,
-                                   void*                      /*reqBuff*/,
-                                   int                        /*reqSize*/,
-                                   void*                      /*respBuff*/,
-                                   int                        /*respSize*/)
+static ncclResult_t DefaultProxyCallBlocking(struct ncclComm*,
+                                             struct ncclProxyConnector*,
+                                             int, void*, int, void*, int)
 {
     return ncclSystemError;
 }
+
+std::function<ncclResult_t(struct ncclComm*, int, int, int,
+                           struct ncclProxyConnector*)>
+    g_proxyConnect = DefaultProxyConnect;
+
+std::function<ncclResult_t(struct ncclComm*, struct ncclProxyConnector*,
+                           int, void*, int, void*, int)>
+    g_proxyCallBlocking = DefaultProxyCallBlocking;
+
+ncclResult_t ncclProxyConnect(struct ncclComm*           comm,
+                              int                        transport,
+                              int                        send,
+                              int                        proxyRank,
+                              struct ncclProxyConnector* proxyConn)
+{
+    return g_proxyConnect(comm, transport, send, proxyRank, proxyConn);
+}
+
+ncclResult_t ncclProxyCallBlocking(struct ncclComm*           comm,
+                                   struct ncclProxyConnector* proxyConn,
+                                   int                        type,
+                                   void*                      reqBuff,
+                                   int                        reqSize,
+                                   void*                      respBuff,
+                                   int                        respSize)
+{
+    return g_proxyCallBlocking(comm, proxyConn, type, reqBuff, reqSize,
+                               respBuff, respSize);
+}
+
+// --- Controllable seams: hipMemGetAddressRange / hipIpcGetMemHandle ------
+// p2p-test.cc macro-shims the p2p.cc call sites onto these hooks, so the
+// test binary never reaches the real HIP runtime (no GPU). Defaults return
+// hipErrorInvalidValue so unexpected call sites surface via CUCHECKGOTO.
+static hipError_t DefaultHipMemGetAddressRange(hipDeviceptr_t*, std::size_t*,
+                                               hipDeviceptr_t)
+{
+    return hipErrorInvalidValue;
+}
+
+static hipError_t DefaultHipIpcGetMemHandle(hipIpcMemHandle_t*, void*)
+{
+    return hipErrorInvalidValue;
+}
+
+std::function<hipError_t(hipDeviceptr_t*, std::size_t*, hipDeviceptr_t)>
+    g_hipMemGetAddressRange = DefaultHipMemGetAddressRange;
+std::function<hipError_t(hipIpcMemHandle_t*, void*)>
+    g_hipIpcGetMemHandle = DefaultHipIpcGetMemHandle;
 
 ncclResult_t ncclProxyClientGetFdBlocking(struct ncclComm* /*comm*/,
                                           int              /*rank*/,
@@ -284,9 +330,13 @@ std::function<ncclResult_t(void*, void*, std::size_t, hipStream_t)>
 
 void ResetP2pFakes()
 {
-    g_strongStreamAcquire = DefaultStrongStreamAcquire;
-    g_fakeCudaCallocAsync = DefaultFakeCudaCallocAsync;
-    g_fakeCudaMemcpyAsync = DefaultFakeCudaMemcpyAsync;
+    g_strongStreamAcquire    = DefaultStrongStreamAcquire;
+    g_fakeCudaCallocAsync    = DefaultFakeCudaCallocAsync;
+    g_fakeCudaMemcpyAsync    = DefaultFakeCudaMemcpyAsync;
+    g_proxyConnect           = DefaultProxyConnect;
+    g_proxyCallBlocking      = DefaultProxyCallBlocking;
+    g_hipMemGetAddressRange  = DefaultHipMemGetAddressRange;
+    g_hipIpcGetMemHandle     = DefaultHipIpcGetMemHandle;
     for (void* p : g_fakeAllocations) std::free(p);
     g_fakeAllocations.clear();
 }
