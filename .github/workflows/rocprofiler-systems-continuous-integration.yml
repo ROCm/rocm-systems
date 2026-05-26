@@ -221,7 +221,7 @@ jobs:
         if: failure() && steps.run_ci.outcome == 'failure'
         uses: actions/upload-artifact@v7
         with:
-          name: failed-test-logs-ubuntu-${{ matrix.system.os-release }}-{{ matrix.system.arch }}
+          name: failed-test-logs-ubuntu-${{ matrix.system.os-release }}-${{ matrix.system.arch }}
           path: |
             projects/rocprofiler-systems/build/ctest-results.xml
             projects/rocprofiler-systems/build/Testing/Temporary/**
