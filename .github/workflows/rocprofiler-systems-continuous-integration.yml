@@ -218,7 +218,7 @@ jobs:
           fi
 
       - name: Upload Test Logs (on failure)
-        if: steps.run_ci.outcome == 'failure'
+        if: failure() && steps.run_ci.outcome == 'failure'
         uses: actions/upload-artifact@v7
         with:
           name: failed-test-logs-ubuntu-${{ matrix.system.os-release }}-{{ matrix.system.arch }}
@@ -226,10 +226,3 @@ jobs:
             build/ctest-results.xml
             build/Testing/Temporary/**
           retention-days: 2
-
-      - name: Output Logs
-        if: failure() && steps.run_ci.outcome == 'failure'
-        working-directory: projects/rocprofiler-systems
-        run: |
-          echo "❌ Run Failed: Now outputting LastTest.log files for detailed logs..."
-          cat build/Testing/Temporary/LastTest*.log
