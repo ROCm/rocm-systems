@@ -146,6 +146,35 @@ private:
 template <typename R, typename... Args, typename Callable>
 ScopedHook(std::function<R(Args...)>&, Callable) -> ScopedHook<R(Args...)>;
 
+// RegRecordCleaner -- RAII guard that frees the allocations
+// ipcRegisterBuffer makes *into* a ncclReg on the fresh-registration path:
+//
+//   - regRecord.ipcInfos[i]                       (per-peer ncclCalloc'd newInfo)
+//   - regRecord.regIpcAddrs.hostPeerRmtAddrs      (lazily-ncclCalloc'd host table)
+//
+// regIpcAddrs.devPeerRmtAddrs is owned by g_fakeAllocations (the
+// ncclCudaCallocAsync default registers it there), so this guard
+// deliberately doesn't touch it.
+//
+// Use this on any test that drives the fresh-registration arm so that an
+// ASSERT_* between the call and the explicit cleanup doesn't leak.
+// Construct *after* the regRecord so destruction order is correct.
+struct RegRecordCleaner {
+    ncclReg& reg;
+    explicit RegRecordCleaner(ncclReg& r) : reg(r) {}
+    ~RegRecordCleaner() {
+        for (auto*& info : reg.ipcInfos) {
+            if (info) { std::free(info); info = nullptr; }
+        }
+        if (reg.regIpcAddrs.hostPeerRmtAddrs) {
+            std::free(reg.regIpcAddrs.hostPeerRmtAddrs);
+            reg.regIpcAddrs.hostPeerRmtAddrs = nullptr;
+        }
+    }
+    RegRecordCleaner(const RegRecordCleaner&)            = delete;
+    RegRecordCleaner& operator=(const RegRecordCleaner&) = delete;
+};
+
 // RankMapping -- owns storage for comm->rankToLocalRank and wires it in.
 // Usage:
 //     RankMapping ranks(comm, {{peerRank, peerLocalRank}});
@@ -452,6 +481,9 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationLegacyIpcSucceeds)
     regRecord.begAddr = kBegAddr;
     regRecord.endAddr = kBegAddr + 0x1000;
     // regRecord.ipcInfos[kPeerLocalRank] is NULL -> fresh-registration arm.
+    // Construct *after* regRecord so its dtor runs first (LIFO), freeing
+    // anything ipcRegisterBuffer leaves behind before regRecord itself dies.
+    RegRecordCleaner regCleanup(regRecord);
 
     // ---- hook 1: hipMemGetAddressRange returns baseAddr + baseSize.
     ScopedHook memGet(g_hipMemGetAddressRange,
@@ -542,10 +574,9 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationLegacyIpcSucceeds)
     EXPECT_EQ(regRecord.regIpcAddrs.hostPeerRmtAddrs[kPeerLocalRank],
               kRmtRegAddr);
 
-    // ---- cleanup: free the per-peer newInfo + the lazily-allocated host
-    // table. ResetP2pFakes() takes care of the dev-table calloc.
-    std::free(regRecord.ipcInfos[kPeerLocalRank]);
-    std::free(regRecord.regIpcAddrs.hostPeerRmtAddrs);
+    // Cleanup is handled by regCleanup (RAII) + ResetP2pFakes() (for the
+    // dev-table calloc owned by g_fakeAllocations). Both run even if an
+    // ASSERT_* above bails early.
 }
 
 // DISABLED_ until the upstream NCCL PR #1861 fix is merged into RCCL.
