@@ -565,10 +565,19 @@ struct NoteSegmentBuilder : public SegmentBuilder {
     }
     fprintf(stderr, "[Core Dump] All queue snapshots built successfully\n");
 
-    // 5. Skip queue resumption - process is terminating anyway due to fatal GPU exception
-    fprintf(stderr, "\n[Core Dump] ========== PHASE 5: Queue Resumption SKIPPED ==========\n");
-    fprintf(stderr, "[Core Dump] Not resuming queues - process terminating due to fatal exception\n");
-    fprintf(stderr, "[Core Dump] (Resumption would hang on faulted GPU hardware)\n");
+    // 5. Try queue resumption 
+    fprintf(stderr, "\n[Core Dump] ========== PHASE 5: Queue Resumption TEST ==========\n");
+    fprintf(stderr, "[Core Dump]  resuming queues\n");
+
+    for (size_t i = 0; i < all_queues.size(); i++) {
+      AMD::AqlQueue* queue = all_queues[i];
+      fprintf(stderr, "[Core Dump] Resuming queue %zu/%zu (queue_id=%u)...\n",
+              i+1, all_queues.size(), (uint32_t)queue->aql_queue_id());
+
+      queue->Resume();
+
+      fprintf(stderr, "[Core Dump] Queue %u resume complete\n", (uint32_t)queue->aql_queue_id());
+    }
 
     // ========================================================================
     // Package Runtime Data into PT_NOTE (Works in Both Cases)
