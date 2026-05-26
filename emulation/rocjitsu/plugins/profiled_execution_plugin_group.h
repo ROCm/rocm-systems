@@ -51,17 +51,18 @@ public:
     });
   }
 
-  void beforeAmdgpuExecuteInstruction(uint64_t pc, const Instruction &inst,
-                                      amdgpu::Wavefront &wf) override {
+  void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
+                                        amdgpu::Wavefront &wf) override {
     profiled_dispatch(prof_before_exec_, [&]() {
-      ExecutionPluginGroup::beforeAmdgpuExecuteInstruction(pc, inst, wf);
+      ExecutionPluginGroup::onAmdgpuBeforeExecuteInstruction(pc, inst, wf);
     });
   }
 
-  void afterAmdgpuExecuteInstruction(uint64_t pc, const Instruction &inst,
-                                     amdgpu::Wavefront &wf) override {
-    profiled_dispatch(prof_after_exec_,
-                      [&]() { ExecutionPluginGroup::afterAmdgpuExecuteInstruction(pc, inst, wf); });
+  void onAmdgpuAfterExecuteInstruction(uint64_t pc, const Instruction &inst,
+                                       amdgpu::Wavefront &wf) override {
+    profiled_dispatch(prof_after_exec_, [&]() {
+      ExecutionPluginGroup::onAmdgpuAfterExecuteInstruction(pc, inst, wf);
+    });
   }
 
   void onAmdgpuRouteMemoryInstruction(const Instruction &inst, amdgpu::Wavefront &wf) override {
@@ -89,11 +90,11 @@ public:
     reset_profiles();
   }
 
-  void onAmdgpuWorkgroupDispatched(uint32_t wg_id, uint32_t dispatch_id, uint32_t vgpr_count,
+  void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id, uint32_t vgpr_count,
                                    uint32_t sgpr_count,
                                    std::span<amdgpu::Wavefront *> wavefronts) override {
     profiled_dispatch(prof_wg_dispatched_, [&]() {
-      ExecutionPluginGroup::onAmdgpuWorkgroupDispatched(wg_id, dispatch_id, vgpr_count, sgpr_count,
+      ExecutionPluginGroup::onAmdgpuWorkgroupDispatched(dispatch_id, wg_id, vgpr_count, sgpr_count,
                                                         wavefronts);
     });
   }
@@ -115,9 +116,9 @@ public:
   }
 
   void onAmdgpuReadVgpr(amdgpu::Wavefront *wf, uint32_t physical_reg, uint32_t lane,
-                        uint8_t byteMask = 0xF) override {
+                        uint8_t byte_mask = 0xF) override {
     profiled_dispatch(prof_read_vgpr_, [&]() {
-      ExecutionPluginGroup::onAmdgpuReadVgpr(wf, physical_reg, lane, byteMask);
+      ExecutionPluginGroup::onAmdgpuReadVgpr(wf, physical_reg, lane, byte_mask);
     });
   }
 

@@ -19,7 +19,8 @@ public:
   ~KernelLoggingPlugin() override;
 
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override;
-  void afterAmdgpuExecuteInstruction(uint64_t pc, const Instruction &inst, Wavefront &wf) override;
+  void onAmdgpuAfterExecuteInstruction(uint64_t pc, const Instruction &inst,
+                                       Wavefront &wf) override;
 
 private:
   int dispatch_count_ = 0;

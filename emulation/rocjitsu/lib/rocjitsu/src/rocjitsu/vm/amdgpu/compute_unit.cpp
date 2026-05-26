@@ -509,9 +509,9 @@ bool ComputeUnitCore::step() {
     }
   }
 
-  plugin_group_->beforeAmdgpuExecuteInstruction(active->pc, *inst, *active);
+  plugin_group_->onAmdgpuBeforeExecuteInstruction(active->pc, *inst, *active);
   execute_instruction(inst, *active);
-  plugin_group_->afterAmdgpuExecuteInstruction(active->pc, *inst, *active);
+  plugin_group_->onAmdgpuAfterExecuteInstruction(active->pc, *inst, *active);
 
   if constexpr (util::Logger::group_enabled(util::Logger::GROUP_VM)) {
     if (active->wf_id() == 0 && active->trace_inst_count_ <= 2000 && active->num_vgprs_ >= 32) {

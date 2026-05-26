@@ -113,19 +113,21 @@ public:
 
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override;
 
-  void onAmdgpuWorkgroupDispatched(uint32_t wg_id, uint32_t dispatch_id, uint32_t vgpr_count,
+  void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id, uint32_t vgpr_count,
                                    uint32_t sgpr_count, std::span<Wavefront *> wavefronts) override;
 
   void onAmdgpuRouteMemoryInstruction(const Instruction &inst, Wavefront &wf) override;
 
   void onAmdgpuReadVgpr(Wavefront *wf, uint32_t physical_reg, uint32_t lane,
-                        uint8_t byteMask = 0xF) override;
+                        uint8_t byte_mask = 0xF) override;
 
   void onAmdgpuReadSgpr(Wavefront *wf, uint32_t physical_reg) override;
 
-  void beforeAmdgpuExecuteInstruction(uint64_t pc, const Instruction &inst, Wavefront &wf) override;
+  void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
+                                        Wavefront &wf) override;
 
-  void afterAmdgpuExecuteInstruction(uint64_t pc, const Instruction &inst, Wavefront &wf) override;
+  void onAmdgpuAfterExecuteInstruction(uint64_t pc, const Instruction &inst,
+                                       Wavefront &wf) override;
 
   void onAmdgpuBarrierResolved(std::span<Wavefront *> wavefronts) override;
 

@@ -103,7 +103,7 @@ public:
     events.push_back(e);
   }
 
-  void onAmdgpuWorkgroupDispatched(uint32_t wg_id, uint32_t dispatch_id, uint32_t, uint32_t,
+  void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id, uint32_t, uint32_t,
                                    std::span<amdgpu::Wavefront *>) override {
     HookEvent e{HookEvent::WORKGROUP_DISPATCHED};
     e.dispatch_id = dispatch_id;
@@ -134,8 +134,8 @@ public:
     events.push_back(e);
   }
 
-  void beforeAmdgpuExecuteInstruction(uint64_t pc, const Instruction &inst,
-                                      amdgpu::Wavefront &wf) override {
+  void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
+                                        amdgpu::Wavefront &wf) override {
     HookEvent e{HookEvent::BEFORE_INSTRUCTION};
     e.dispatch_id = wf.dispatch_id();
     e.wg_id = wf.wg_id();
@@ -145,8 +145,8 @@ public:
     events.push_back(e);
   }
 
-  void afterAmdgpuExecuteInstruction(uint64_t pc, const Instruction &inst,
-                                     amdgpu::Wavefront &wf) override {
+  void onAmdgpuAfterExecuteInstruction(uint64_t pc, const Instruction &inst,
+                                       amdgpu::Wavefront &wf) override {
     HookEvent e{HookEvent::AFTER_INSTRUCTION};
     e.dispatch_id = wf.dispatch_id();
     e.wg_id = wf.wg_id();

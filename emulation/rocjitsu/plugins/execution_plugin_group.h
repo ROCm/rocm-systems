@@ -56,16 +56,16 @@ public:
   }
 
   // -- AMDGPU (virtual) --
-  virtual void beforeAmdgpuExecuteInstruction(uint64_t pc, const Instruction &inst,
-                                              amdgpu::Wavefront &wf) {
+  virtual void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
+                                                amdgpu::Wavefront &wf) {
     for (auto &p : plugins_)
-      p->beforeAmdgpuExecuteInstruction(pc, inst, wf);
+      p->onAmdgpuBeforeExecuteInstruction(pc, inst, wf);
   }
 
-  virtual void afterAmdgpuExecuteInstruction(uint64_t pc, const Instruction &inst,
-                                             amdgpu::Wavefront &wf) {
+  virtual void onAmdgpuAfterExecuteInstruction(uint64_t pc, const Instruction &inst,
+                                               amdgpu::Wavefront &wf) {
     for (auto &p : plugins_)
-      p->afterAmdgpuExecuteInstruction(pc, inst, wf);
+      p->onAmdgpuAfterExecuteInstruction(pc, inst, wf);
   }
 
   virtual void onAmdgpuRouteMemoryInstruction(const Instruction &inst, amdgpu::Wavefront &wf) {
@@ -88,11 +88,11 @@ public:
       p->onAmdgpuDispatchExecutionEnd(dispatch_id);
   }
 
-  virtual void onAmdgpuWorkgroupDispatched(uint32_t wg_id, uint32_t dispatch_id,
+  virtual void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id,
                                            uint32_t vgpr_count, uint32_t sgpr_count,
                                            std::span<amdgpu::Wavefront *> wavefronts) {
     for (auto &p : plugins_)
-      p->onAmdgpuWorkgroupDispatched(wg_id, dispatch_id, vgpr_count, sgpr_count, wavefronts);
+      p->onAmdgpuWorkgroupDispatched(dispatch_id, wg_id, vgpr_count, sgpr_count, wavefronts);
   }
 
   virtual void onAmdgpuWorkgroupCompleted(uint32_t dispatch_id, uint32_t wg_id) {
@@ -111,9 +111,9 @@ public:
   }
 
   virtual void onAmdgpuReadVgpr(amdgpu::Wavefront *wf, uint32_t physical_reg, uint32_t lane,
-                                uint8_t byteMask = 0xF) {
+                                uint8_t byte_mask = 0xF) {
     for (auto &p : plugins_)
-      p->onAmdgpuReadVgpr(wf, physical_reg, lane, byteMask);
+      p->onAmdgpuReadVgpr(wf, physical_reg, lane, byte_mask);
   }
 
   virtual void onAmdgpuReadSgpr(amdgpu::Wavefront *wf, uint32_t physical_reg) {

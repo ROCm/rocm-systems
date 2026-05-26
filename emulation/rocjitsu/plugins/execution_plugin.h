@@ -55,13 +55,13 @@ public:
 
   /// Called before every AMDGPU instruction is executed.
   /// Wavefront state reflects the state prior to the instruction's effects.
-  virtual void beforeAmdgpuExecuteInstruction(uint64_t /*pc*/, const Instruction & /*inst*/,
-                                              amdgpu::Wavefront & /*wf*/) {}
+  virtual void onAmdgpuBeforeExecuteInstruction(uint64_t /*pc*/, const Instruction & /*inst*/,
+                                                amdgpu::Wavefront & /*wf*/) {}
 
   /// Called after every AMDGPU instruction is executed.
   /// Wavefront state (wait targets, PC, etc.) reflects the instruction's effects.
-  virtual void afterAmdgpuExecuteInstruction(uint64_t /*pc*/, const Instruction & /*inst*/,
-                                             amdgpu::Wavefront & /*wf*/) {}
+  virtual void onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/, const Instruction & /*inst*/,
+                                               amdgpu::Wavefront & /*wf*/) {}
 
   /// Called when an AMDGPU memory instruction is routed to a pipeline.
   virtual void onAmdgpuRouteMemoryInstruction(const Instruction & /*inst*/,
@@ -80,7 +80,7 @@ public:
   virtual void onAmdgpuDispatchExecutionEnd(uint32_t /*dispatch_id*/) {}
 
   /// Called after a workgroup's wavefronts have been dispatched to a CU.
-  virtual void onAmdgpuWorkgroupDispatched(uint32_t /*wg_id*/, uint32_t /*dispatch_id*/,
+  virtual void onAmdgpuWorkgroupDispatched(uint32_t /*dispatch_id*/, uint32_t /*wg_id*/,
                                            uint32_t /*vgpr_count*/, uint32_t /*sgpr_count*/,
                                            std::span<amdgpu::Wavefront *> /*wavefronts*/) {}
 
@@ -98,7 +98,7 @@ public:
   /// @param physical_reg Physical register index in the VGPR file.
   /// @param lane Lane index within the wavefront.
   virtual void onAmdgpuReadVgpr(amdgpu::Wavefront * /*wf*/, uint32_t /*physical_reg*/,
-                                uint32_t /*lane*/, uint8_t /*byteMask*/ = 0xF) {}
+                                uint32_t /*lane*/, uint8_t /*byte_mask*/ = 0xF) {}
 
   /// Called when an SGPR is read during instruction execution.
   /// @param wf Owning wavefront, or nullptr if the register is unallocated.

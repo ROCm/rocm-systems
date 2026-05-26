@@ -175,7 +175,7 @@ void RaceDetectionPlugin::onAmdgpuDispatchPacketProcessed(const KernelDispatchIn
           info.kernel_name.empty() ? "?" : info.kernel_name.c_str());
 }
 
-void RaceDetectionPlugin::onAmdgpuWorkgroupDispatched(uint32_t wg_id, uint32_t dispatch_id,
+void RaceDetectionPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id,
                                                       uint32_t vgpr_count, uint32_t sgpr_count,
                                                       std::span<Wavefront *> wavefronts) {
   uint32_t num_waves = static_cast<uint32_t>(wavefronts.size());
@@ -281,9 +281,10 @@ void RaceDetectionPlugin::onAmdgpuRouteMemoryInstruction(const Instruction &inst
       for (uint32_t i = 0; i < d.num_elems; ++i)
         registers[i] = logicalBase + i;
     }
-    uint8_t byteMask = d.d16_lo ? 0x3 : d.d16_hi ? 0xC : 0xF;
+    uint8_t byte_mask = d.d16_lo ? 0x3 : d.d16_hi ? 0xC : 0xF;
     rs->registerLdsEvent(wf.pc, type, std::move(registers), wf.exec(), wf.wf_size(),
-                         std::span<const uint32_t>(laneAddrs, wf.wf_size()), d.elem_size, byteMask);
+                         std::span<const uint32_t>(laneAddrs, wf.wf_size()), d.elem_size,
+                         byte_mask);
   }
 
   if (inst.data()->tag() == GLOBAL_MEM) {
@@ -301,9 +302,9 @@ void RaceDetectionPlugin::onAmdgpuRouteMemoryInstruction(const Instruction &inst
       std::vector<uint32_t> registers(d.num_elems);
       for (uint32_t i = 0; i < d.num_elems; ++i)
         registers[i] = logicalBase + i;
-      uint8_t byteMask = d.d16_lo ? 0x3 : d.d16_hi ? 0xC : 0xF;
+      uint8_t byte_mask = d.d16_lo ? 0x3 : d.d16_hi ? 0xC : 0xF;
       rs->registerEvent(wf.pc, raceemulator::MemoryEventType::GLOBAL_TO_VGPR, std::move(registers),
-                        wf.exec(), byteMask);
+                        wf.exec(), byte_mask);
     } else if (!d.is_load) {
       rs->registerEvent(wf.pc, raceemulator::MemoryEventType::VGPR_TO_GLOBAL, {}, wf.exec());
     }
@@ -323,11 +324,11 @@ void RaceDetectionPlugin::onAmdgpuRouteMemoryInstruction(const Instruction &inst
 }
 
 void RaceDetectionPlugin::onAmdgpuReadVgpr(Wavefront *wf, uint32_t physical_reg, uint32_t lane,
-                                           uint8_t byteMask) {
+                                           uint8_t byte_mask) {
   auto *s = get_state(wf);
   assert(s && s->race_state);
   uint32_t logical_reg = physical_reg - wf->vgpr_alloc().base;
-  s->race_state->checkVgprRead(static_cast<int>(logical_reg), static_cast<int>(lane), byteMask);
+  s->race_state->checkVgprRead(static_cast<int>(logical_reg), static_cast<int>(lane), byte_mask);
 }
 
 void RaceDetectionPlugin::onAmdgpuReadSgpr(Wavefront *wf, uint32_t physical_reg) {
@@ -337,16 +338,16 @@ void RaceDetectionPlugin::onAmdgpuReadSgpr(Wavefront *wf, uint32_t physical_reg)
   s->race_state->checkSgprRead(static_cast<int>(logical_reg));
 }
 
-void RaceDetectionPlugin::beforeAmdgpuExecuteInstruction(uint64_t pc, const Instruction &inst,
-                                                         Wavefront &wf) {
+void RaceDetectionPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
+                                                           Wavefront &wf) {
   auto *s = get_state(wf);
   assert(s);
   s->trace.push(pc);
   s->disasm->record(pc, inst);
 }
 
-void RaceDetectionPlugin::afterAmdgpuExecuteInstruction(uint64_t /*pc*/, const Instruction &inst,
-                                                        Wavefront &wf) {
+void RaceDetectionPlugin::onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/, const Instruction &inst,
+                                                          Wavefront &wf) {
   auto *s = get_state(wf);
   assert(s && s->race_state);
 

@@ -20,8 +20,8 @@ void KernelLoggingPlugin::onAmdgpuDispatchPacketProcessed(const KernelDispatchIn
       info.wfs_per_workgroup, info.sgprs_per_wf, info.vgprs_per_wf);
 }
 
-void KernelLoggingPlugin::afterAmdgpuExecuteInstruction(uint64_t /*pc*/, const Instruction &inst,
-                                                        Wavefront &wf) {
+void KernelLoggingPlugin::onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/, const Instruction &inst,
+                                                          Wavefront &wf) {
   auto dispatch_id = wf.dispatch_id();
   bool is_mfma = inst.is_mfma() || inst.mnemonic().starts_with("v_wmma_");
   if (is_mfma && !mfma_printed_.contains(dispatch_id)) {
