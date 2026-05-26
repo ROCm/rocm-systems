@@ -56,7 +56,7 @@ rocprofiler-compute/
 ```bash
 src/rocprof_compute_soc/analysis_configs/gfx9_config_template.yaml
 ```
-- RDNA 3.5 configs (`gfx115*`) use the shared `gfx115x` directory plus a
+- RDNA 3.5 configs (`gfx115*`) use the shared `gfx115x` directory along with a
   separate template (`gfx11_config_template.yaml`) and do not participate in
   gfx9 deltas. Regenerate it with `parse_config_template.py` from the shared
   RDNA 3.5 config directory.
