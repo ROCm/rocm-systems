@@ -18,7 +18,7 @@ Usage (paths relative to project root):
     python $SCRIPT --sync-all $CONFIGS
     python $SCRIPT --validate <arch_name> $CONFIGS
     python $SCRIPT --generate-docs
-    python $SCRIPT --generate-docs --docs-arch gfx1151
+    python $SCRIPT --generate-docs --docs-arch gfx115x
 """
 
 from __future__ import annotations

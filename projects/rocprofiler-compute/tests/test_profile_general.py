@@ -19,6 +19,8 @@ import pytest
 import yaml
 from scipy.stats import zscore
 
+from utils.utils_common import canonical_config_arch
+
 # Runtime config options
 config = {}
 config["kernel_name_1"] = "vecCopy"
@@ -154,14 +156,13 @@ def get_available_sets_for_arch(gpu_arch):
     or [] if gpu_arch is falsy."""
     if not gpu_arch:
         return []
-    if common.SRC not in sys.path:
-        sys.path.insert(0, common.SRC)
+    config_arch = canonical_config_arch(gpu_arch) or gpu_arch
     sets_file = (
         Path(common.SRC)
         / "rocprof_compute_soc"
         / "profile_configs"
         / "sets"
-        / f"{gpu_arch}_sets.yaml"
+        / f"{config_arch}_sets.yaml"
     )
     if not sets_file.exists():
         return []
@@ -580,12 +581,12 @@ def clear_rank_env(monkeypatch, *env_vars):
 
 
 def skip_unsupported_roofline_soc():
-    if soc in {"MI100", "RDNA35_HALO"}:
+    if soc in {"MI100", "RDNA35_POINT_1", "RDNA35_HALO", "RDNA35_POINT_2"}:
         pytest.skip(f"Roofline is not supported on {soc}")
 
 
-def is_rdna35_halo_soc():
-    return soc == "RDNA35_HALO"
+def is_gfx115x_soc():
+    return soc in {"RDNA35_POINT_1", "RDNA35_HALO", "RDNA35_POINT_2"}
 
 
 # --
@@ -1871,7 +1872,7 @@ def test_roof_sort_kernels(
 
 @pytest.mark.section
 def test_lds_section(binary_handler_profile_rocprof_compute):
-    lds_block = "3" if is_rdna35_halo_soc() else "12"
+    lds_block = "3" if is_gfx115x_soc() else "12"
     options = ["--block", lds_block]
     workload_dir = common.get_output_dir()
     _ = binary_handler_profile_rocprof_compute(
@@ -1895,7 +1896,7 @@ def test_lds_section(binary_handler_profile_rocprof_compute):
 
 @pytest.mark.section
 def test_instmix_memchart_section(binary_handler_profile_rocprof_compute):
-    instmix_block = "7" if is_rdna35_halo_soc() else "10"
+    instmix_block = "7" if is_gfx115x_soc() else "10"
     options = ["--block", instmix_block, "3"]
     workload_dir = common.get_output_dir()
     _ = binary_handler_profile_rocprof_compute(
@@ -1913,7 +1914,7 @@ def test_instmix_memchart_section(binary_handler_profile_rocprof_compute):
         f"- '{instmix_block}'", f"{workload_dir}/profiling_config.yaml"
     )
     assert common.check_file_pattern("- '3'", f"{workload_dir}/profiling_config.yaml")
-    instmix_counter = "SQ_INSTS_FLAT" if is_rdna35_halo_soc() else "TA_FLAT_WAVEFRONTS"
+    instmix_counter = "SQ_INSTS_FLAT" if is_gfx115x_soc() else "TA_FLAT_WAVEFRONTS"
     results_files = Path(workload_dir).glob("results_*.csv")
     assert any(
         common.check_file_pattern(instmix_counter, str(f)) for f in results_files
@@ -1927,7 +1928,7 @@ def test_instmix_memchart_section(binary_handler_profile_rocprof_compute):
 
 @pytest.mark.section
 def test_lds_sol_section(binary_handler_profile_rocprof_compute):
-    lds_sol_block = "3" if is_rdna35_halo_soc() else "12.1"
+    lds_sol_block = "3" if is_gfx115x_soc() else "12.1"
     options = ["--block", lds_sol_block]
     workload_dir = common.get_output_dir()
     _ = binary_handler_profile_rocprof_compute(
@@ -1944,9 +1945,7 @@ def test_lds_sol_section(binary_handler_profile_rocprof_compute):
     assert common.check_file_pattern(
         f"- '{lds_sol_block}'", f"{workload_dir}/profiling_config.yaml"
     )
-    lds_sol_counter = (
-        "SQC_LDS_IDX_ACTIVE" if is_rdna35_halo_soc() else "SQ_ACTIVE_INST_LDS"
-    )
+    lds_sol_counter = "SQC_LDS_IDX_ACTIVE" if is_gfx115x_soc() else "SQ_ACTIVE_INST_LDS"
     results_files = Path(workload_dir).glob("results_*.csv")
     assert any(
         common.check_file_pattern(lds_sol_counter, str(f)) for f in results_files
@@ -1956,7 +1955,7 @@ def test_lds_sol_section(binary_handler_profile_rocprof_compute):
 
 @pytest.mark.section
 def test_instmix_section_global_write_kernel(binary_handler_profile_rocprof_compute):
-    instmix_block = "7" if is_rdna35_halo_soc() else "10"
+    instmix_block = "7" if is_gfx115x_soc() else "10"
     options = ["-k", "global_write", "--block", instmix_block]
     custom_config = dict(config)
     custom_config["kernel_name_1"] = "global_write"
@@ -1981,9 +1980,7 @@ def test_instmix_section_global_write_kernel(binary_handler_profile_rocprof_comp
     assert common.check_file_pattern(
         "- global_write", f"{workload_dir}/profiling_config.yaml"
     )
-    kernel_counter = (
-        "SQ_INSTS_FLAT_STORE" if is_rdna35_halo_soc() else "TA_FLAT_WAVEFRONTS"
-    )
+    kernel_counter = "SQ_INSTS_FLAT_STORE" if is_gfx115x_soc() else "TA_FLAT_WAVEFRONTS"
     results_files = Path(workload_dir).glob("results_*.csv")
     assert any(common.check_file_pattern(kernel_counter, str(f)) for f in results_files)
     results_files = Path(workload_dir).glob("results_*.csv")
@@ -2265,16 +2262,28 @@ def test_live_attach_detach_singlepass_launch_stats(
 
     # Check that launch-stat sets were applied
     config_file = f"{workload_dir}/profiling_config.yaml"
-    for tag in [
-        "7.1.0",
-        "7.1.1",
-        "7.1.2",
-        "7.1.5",
-        "7.1.6",
-        "7.1.7",
-        "7.1.8",
-        "7.1.9",
-    ]:
+    for tag in (
+        [
+            "7.2.0",
+            "7.2.1",
+            "7.2.2",
+            "7.2.3",
+            "7.2.4",
+            "7.2.5",
+            "7.3.0",
+        ]
+        if is_gfx115x_soc()
+        else [
+            "7.1.0",
+            "7.1.1",
+            "7.1.2",
+            "7.1.5",
+            "7.1.6",
+            "7.1.7",
+            "7.1.8",
+            "7.1.9",
+        ]
+    ):
         assert common.check_file_pattern(f"- {tag}", config_file)
 
     common.clean_output_dir(config["cleanup"], workload_dir)

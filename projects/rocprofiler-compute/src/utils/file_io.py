@@ -19,24 +19,10 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.utils_common import normalize_filter_to_str_list
+from utils.utils_common import canonical_config_arch, normalize_filter_to_str_list
 
 # TODO: use pandas chunksize or dask to read really large csv file
 # from dask import dataframe as dd
-
-
-def load_sys_info(f: str) -> pd.DataFrame:
-    """
-    Load sys running info from csv file to a df.
-    """
-    from utils.specs import canonical_gpu_arch
-
-    df = pd.read_csv(f)
-    if "gpu_arch" in df.columns and not df.empty:
-        df["gpu_arch"] = df["gpu_arch"].map(
-            lambda x: canonical_gpu_arch(str(x)) if pd.notna(x) else x
-        )
-    return df
 
 
 def load_panel_configs(
@@ -410,7 +396,9 @@ def is_single_panel_config(
     archs, or one for each arch.
     """
     # If not single config, verify all supported archs have defined configs
-    arch_names = list(supported_archs.keys())
+    arch_names = {
+        canonical_config_arch(arch) or arch for arch in supported_archs.keys()
+    }
     root_path = Path(root_dir)
     arch_count = sum(1 for arch in arch_names if (root_path / arch).exists())
 

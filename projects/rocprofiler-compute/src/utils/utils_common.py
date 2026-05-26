@@ -38,6 +38,15 @@ from vendored import yaml
 METRIC_ID_RE = re.compile(pattern=r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
 
 
+def canonical_config_arch(gpu_arch: Optional[str]) -> Optional[str]:
+    """Map GPU architectures to the shared analysis-config directory name."""
+    if gpu_arch is None:
+        return None
+    if gpu_arch.startswith("gfx115"):
+        return "gfx115x"
+    return gpu_arch
+
+
 # Supported expression field names for metric tables
 SUPPORTED_FIELD: list[str] = [
     "Value",
@@ -637,12 +646,13 @@ def format_time(seconds: float) -> str:
 
 
 def parse_sets_yaml(arch: str) -> dict[str, Any]:
+    config_arch = canonical_config_arch(arch) or arch
     filename = (
         config.rocprof_compute_home
         / "rocprof_compute_soc"
         / "profile_configs"
         / "sets"
-        / f"{arch}_sets.yaml"
+        / f"{config_arch}_sets.yaml"
     )
     with open(filename, encoding="utf-8") as file:
         content = file.read()
