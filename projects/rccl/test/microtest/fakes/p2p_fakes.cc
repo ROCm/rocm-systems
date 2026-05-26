@@ -80,8 +80,19 @@ void ncclLoadParam(char const* /*env*/,
                    int64_t     /*uninitialized*/,
                    int64_t*    /*cache*/)
 {
-    // No-op: leaves cache untouched so NCCL_PARAM callers see the default.
+    // No-op: leaves cache untouched so NCCL_PARAM callers in non-shimmed
+    // TUs see the default. The NCCL_PARAM bodies that p2p-test.cc
+    // redirects through g_loadParam bypass this entirely.
 }
+
+// Default returns deftVal verbatim -- preserves the pre-hook contract that
+// every param sits at its compile-time default.
+static int64_t DefaultLoadParam(const char* /*env*/, int64_t deftVal)
+{
+    return deftVal;
+}
+
+std::function<int64_t(const char*, int64_t)> g_loadParam = DefaultLoadParam;
 
 // ---------------------------------------------------------------------------
 // Bucket C: seams worth controlling from tests (return failure by default)
@@ -337,6 +348,7 @@ void ResetP2pFakes()
     g_proxyCallBlocking      = DefaultProxyCallBlocking;
     g_hipMemGetAddressRange  = DefaultHipMemGetAddressRange;
     g_hipIpcGetMemHandle     = DefaultHipIpcGetMemHandle;
+    g_loadParam              = DefaultLoadParam;
     for (void* p : g_fakeAllocations) std::free(p);
     g_fakeAllocations.clear();
 }

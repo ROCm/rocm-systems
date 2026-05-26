@@ -30,6 +30,19 @@
 // to see them, and the shim below would land too late.
 #include "alloc.h"
 
+// Same pattern for param.h: pull it in now so we can #undef NCCL_PARAM and
+// replace it with a redirector that routes every generated ncclParamXxx()
+// through g_loadParam on every call (no caching). Without this,
+// ncclParamLegacyCudaRegister() and friends would cache their default on
+// first call -- which means tests can't flip them between cases. The
+// redirected body matches the real NCCL_PARAM signature
+// (`int64_t ncclParam<name>()`) but skips the cache and uninitialized
+// machinery entirely.
+#include "param.h"
+#undef NCCL_PARAM
+#define NCCL_PARAM(name, env, deftVal) \
+    int64_t ncclParam##name() { return g_loadParam((env), (deftVal)); }
+
 // Macro shim: replace the header-only function templates ncclCudaCallocAsync
 // and ncclCudaMemcpyAsync from alloc.h with thin trampolines that route
 // through hookable fakes in fakes/p2p_fakes.cc. Without this, p2p.cc's call
@@ -296,6 +309,30 @@ struct IpcRegOutputs {
     }
 };
 
+// ForceLegacyCudaRegister -- the param-hook lambda that every fresh-reg
+// test in the legacy-IPC arm needs. ncclParamLegacyCudaRegister() must
+// return non-zero so:
+//   (a) the `if (ncclParamLegacyCudaRegister()) legacyIpcCap = 1` write
+//       fires under HIP_VERSION < 71260540, which is the precondition
+//       for control reaching the `else if (legacyIpcCap)` arm, and
+//   (b) the `comm->directMode || !ncclParamLegacyCudaRegister()` guard
+//       inside that arm doesn't short-circuit to fail.
+//
+// Returned as a plain lambda (not a ScopedHook) so call sites compose:
+//     ScopedHook loadParam(g_loadParam, ForceLegacyCudaRegister());
+auto ForceLegacyCudaRegister()
+{
+    // Note: NCCL_PARAM passes the env arg *without* the "NCCL_" prefix
+    // (the real ncclLoadParam prepends it before getenv). Our redirector
+    // doesn't go through ncclLoadParam, so the string we match here is
+    // the raw arg from the NCCL_PARAM(...) call site:
+    // `NCCL_PARAM(LegacyCudaRegister, "LEGACY_CUDA_REGISTER", 0)`.
+    return [](const char* env, int64_t deftVal) -> int64_t {
+        if (std::strcmp(env, "LEGACY_CUDA_REGISTER") == 0) return 1;
+        return deftVal;
+    };
+}
+
 // CallIpcRegisterBuffer -- thin wrapper so test bodies aren't dominated by
 // a 12-line argument list. `isLegacyIpc` is in/out: callers initialise it
 // to whatever value they want to see overwritten (or kept).
@@ -535,6 +572,10 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationLegacyIpcSucceeds)
     // anything ipcRegisterBuffer leaves behind before regRecord itself dies.
     RegRecordCleaner regCleanup(regRecord);
 
+    // Force the legacy-IPC arm to be entered (see ForceLegacyCudaRegister
+    // comment for why this is required under HIP_VERSION < 71260540).
+    ScopedHook loadParam(g_loadParam, ForceLegacyCudaRegister());
+
     // ---- hook 1: hipMemGetAddressRange returns baseAddr + baseSize.
     // Production contract: called with dptr == userbuff (so the driver
     // can find the enclosing allocation). Assert that here -- if a
@@ -689,6 +730,7 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationProxyReturnsNullRmtAddr)
     regRecord.begAddr = kBegAddr;
     regRecord.endAddr = kBegAddr + 0x1000;
     RegRecordCleaner regCleanup(regRecord);
+    ScopedHook loadParam(g_loadParam, ForceLegacyCudaRegister());
 
     const void* const kUserbuff =
         reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
@@ -779,6 +821,7 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationSkipsProxyConnectWhenAlr
     regRecord.begAddr = kBegAddr;
     regRecord.endAddr = kBegAddr + 0x1000;
     RegRecordCleaner regCleanup(regRecord);
+    ScopedHook loadParam(g_loadParam, ForceLegacyCudaRegister());
 
     const void* const kUserbuff =
         reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
@@ -876,6 +919,7 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationFreesNewInfoOnPostLoopFa
     regRecord.begAddr = kBegAddr;
     regRecord.endAddr = kBegAddr + 0x1000;
     RegRecordCleaner regCleanup(regRecord);
+    ScopedHook loadParam(g_loadParam, ForceLegacyCudaRegister());
 
     const void* const kUserbuff =
         reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
@@ -1202,10 +1246,13 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationProxyConnectFailurePropa
 // which is the same failure surface. Either way: fail: epilogue runs
 // with newInfo still NULL.
 //
-// Plan item A4. Drives the False arm of the line-961 CUDACHECKGOTO that
-// shows up as `[True: 0, False: 4]` (hipIpcGetMemHandle success branch)
-// -- this test injects the True arm (the macro takes the True arm on
-// non-zero err code).
+// Plan item A4. Drives the True arm of the line-961 CUDACHECKGOTO
+// (legacy-export `hipIpcGetMemHandle` returning failure). The hookable
+// g_loadParam seam is used to force ncclParamLegacyCudaRegister() to
+// return 1, which is the precondition for control reaching the
+// legacy-export arm at all (the param defaults to 0, which routes
+// instead through the `// nothing works, just return` goto fail at
+// line ~969).
 TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationLegacyIpcGetMemHandleFailurePropagates)
 {
     constexpr int       kPeerRank      = 2;
@@ -1225,11 +1272,18 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationLegacyIpcGetMemHandleFai
     // Pre-mark gproxyConn initialized so the (covered-elsewhere)
     // proxyConnect call is skipped -- shaves a hook off this test.
     cb.comm().gproxyConn[kPeerRank].initialized = true;
+    // directMode=false so the `comm->directMode || !ncclParam...` guard
+    // at line ~961 doesn't short-circuit to fail before the
+    // hipIpcGetMemHandle call.
+    cb.comm().directMode = 0;
 
     ncclReg regRecord{};
     regRecord.begAddr = kBegAddr;
     regRecord.endAddr = kBegAddr + 0x1000;
     RegRecordCleaner regCleanup(regRecord);
+
+    // Force the legacy-IPC arm to be entered (see ForceLegacyCudaRegister).
+    ScopedHook loadParam(g_loadParam, ForceLegacyCudaRegister());
 
     const void* const kUserbuff =
         reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
@@ -1268,25 +1322,16 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationLegacyIpcGetMemHandleFai
                                    &regRecord, out, &isLegacyIpc);
 
     EXPECT_EQ(memGet.calls, 1);
-    // ipcGet is called only if we actually entered the legacy-export
-    // arm (i.e. legacyIpcCap was true). If the param default leaves it
-    // false, control takes the `nothing works` goto fail at line ~969
-    // and ipcGet stays at 0. Both routes are valid for this test --
-    // assert the union: function failed, outputs cleared.
-    EXPECT_EQ(proxy.calls, 0);
+    // The contract under test: we actually entered the legacy-export
+    // arm. If g_loadParam wiring breaks, legacyIpcCap stays 0 and
+    // control takes the `// nothing works` goto fail instead, leaving
+    // ipcGet.calls at 0 -- this assertion is what catches that
+    // regression.
+    EXPECT_EQ(ipcGet.calls, 1);
+    EXPECT_EQ(proxy.calls,  0);
 
-    // Failure either way -- either CUDACHECKGOTO from ipcGet
-    // (ncclUnhandledCudaError) or the `goto fail` (ncclSuccess return
-    // path... wait no -- goto fail returns ncclSuccess unless ret was
-    // set). Actually `goto fail` without setting ret leaves ret at
-    // ncclSuccess; the fail: epilogue just zeros outputs. Pin down:
-    if (ipcGet.calls == 1) {
-        EXPECT_EQ(r, ncclUnhandledCudaError);
-    } else {
-        // Took the "nothing works" path -- function returns ncclSuccess
-        // but with cleared outputs.
-        EXPECT_EQ(r, ncclSuccess);
-    }
+    // CUDACHECKGOTO maps non-hipSuccess to ncclUnhandledCudaError.
+    EXPECT_EQ(r, ncclUnhandledCudaError);
     out.ExpectZeroed();
     EXPECT_EQ(regRecord.ipcInfos[kPeerLocalRank], nullptr);
     EXPECT_FALSE(regRecord.state & IPC_REG_COMPLETE);

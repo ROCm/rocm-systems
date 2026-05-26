@@ -74,6 +74,20 @@ extern std::function<hipError_t(hipDeviceptr_t* /*pbase*/, std::size_t* /*psize*
 extern std::function<hipError_t(hipIpcMemHandle_t* /*handle*/, void* /*devPtr*/)>
     g_hipIpcGetMemHandle;
 
+// NCCL_PARAM redirector: p2p-test.cc replaces the body of every
+// NCCL_PARAM(name, env, deftVal) generator in the #included p2p.cc with a
+// thin trampoline that calls g_loadParam(env, deftVal) on every invocation
+// (no caching, unlike the real NCCL_PARAM). Default returns deftVal so
+// callers see their compile-time defaults. Tests that need to flip a
+// specific param (e.g. force ncclParamLegacyCudaRegister() == 1 to enter
+// the legacy-export arm) install a hook that dispatches on the env string.
+//
+// Because the redirection happens at macro-expansion time, this only
+// affects NCCL_PARAM bodies inside the #included p2p.cc -- not any
+// already-compiled TUs.
+extern std::function<int64_t(const char* /*env*/, int64_t /*deftVal*/)>
+    g_loadParam;
+
 // Restore every hook in this header to its default. Call from fixture
 // TearDown().
 void ResetP2pFakes();
