@@ -17,6 +17,7 @@ find_package(rocJPEG)
 add_subdirectory(reproducible-runtime)
 add_subdirectory(reproducible-dispatch-count)
 add_subdirectory(transpose)
+add_subdirectory(hip-memcpy)
 add_subdirectory(openmp)
 
 set(CMAKE_BUILD_RPATH "\$ORIGIN:\$ORIGIN/../lib")

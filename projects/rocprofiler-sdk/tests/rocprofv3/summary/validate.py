@@ -213,7 +213,7 @@ def test_summary_data(json_data):
                     )
                     assert oitr.value.count == 2
         elif itr.domain == "HIP_API":
-            assert itr.stats.count >= 2160 and itr.stats.count <= 2230
+            assert itr.stats.count >= 2130 and itr.stats.count <= 2165
         elif itr.domain == "MEMORY_COPY":
             # two threads + two memory copies (H2D + D2H).
             # HIP may decompose memory copies into more than one HSA memory copy
@@ -236,23 +236,20 @@ def test_summary_data(json_data):
                 memory_allocation_allocate_count + memory_allocation_free_count
             )
             assert (
-                memory_allocation_allocate_and_free_count >= 30
-                and memory_allocation_allocate_and_free_count <= 60
+                memory_allocation_allocate_and_free_count >= 10
+                and memory_allocation_allocate_and_free_count <= 30
             )
             # check if hip-runtime memory management pools through virtual memory allocation count is equal to free count.
             assert (
                 memory_allocation_vmem_allocate_count == memory_allocation_vmem_free_count
             )
         elif itr.domain == "MARKER_API":
-            assert itr.stats.count == 1109
+            assert itr.stats.count == 1106
             expected = dict(
                 [
                     ["run", 2],
                     ["run/iteration", 1000],
                     ["run/iteration/sync", 100],
-                    ["run/hip-memcpy-batch", 1],
-                    ["run/hip-memcpy-batch/H2D", 1],
-                    ["run/hip-memcpy-batch/D2H", 1],
                 ]
             )
             for oitr in itr.stats.operations:
@@ -305,13 +302,11 @@ def test_summary_display_data(json_data, summary_data):
 
     # HIP_API rows vary: extra hipGetDeviceProperties* may appear depending on runtime/environment
     expected_hip_and_marker_dims = (
-        ([29, 9], [30, 9]) if hip_and_marker is not None else ([0, 0],)
+        ([21, 9], [22, 9]) if hip_and_marker is not None else ([0, 0],)
     )
     expected_total_dims = compute_combined_dims(hip, marker, memcpy, memalloc)
 
-    # 7 baseline rows + 3 from run_hip_memcpy_batch
-    # ("run/hip-memcpy-batch", ".../H2D", ".../D2H") = 10.
-    assert get_dims(marker) == [10, 9], f"{marker}"
+    assert get_dims(marker) == [7, 9], f"{marker}"
     assert get_dims(memcpy) == [2, 9], f"{memcpy}"
     assert get_dims(memalloc) in (
         [2, 9],  # [2,9] when hip-runtime doesn't use vmem.
@@ -320,7 +315,7 @@ def test_summary_display_data(json_data, summary_data):
     assert get_dims(dispatch) == [3, 9], f"{dispatch}"
     assert get_dims(dispatch_and_copy) == [5, 9], f"{dispatch_and_copy}"
     # HIP_API rows vary: extra hipGetDeviceProperties* may appear depending on runtime/environment
-    assert get_dims(hip) in ([19, 9], [20, 9]), f"{hip}"
+    assert get_dims(hip) in ([14, 9], [15, 9]), f"{hip}"
     assert get_dims(hip_and_marker) in expected_hip_and_marker_dims, f"{hip_and_marker}"
     assert get_dims(total) == expected_total_dims, f"{total}"
 
