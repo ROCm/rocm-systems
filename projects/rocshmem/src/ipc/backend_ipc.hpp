@@ -308,6 +308,9 @@ class IPCBackend : public Backend {
   // User-registered buffers with IPC-mapped per-PE bases
   std::vector<IpcUserBuffer> user_buffers_;
 
+  // Sync user_buffers_ to __constant__ memory for device-side lookup
+  void sync_user_buf_constmem();
+
   /**
    * @brief Initialize memory required for work/sync buffers and open IPC
    * handle on PE's wrk_sync_pool.
