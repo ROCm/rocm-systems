@@ -863,18 +863,15 @@ def show_all(
     Show all panels with their data in plain text mode.
     """
     comparable_columns = parser.build_comparable_columns(args.time_unit)
+    filter_panel_ids = resolve_filter_blocks_to_panel_ids(
+        profiling_config.get("filter_blocks", [])
+    )
 
-    # Get gpu_arch from the first run's sys_info
     first_run = next(iter(runs.values()))
     gpu_arch = (
         first_run.sys_info.iloc[0]["gpu_arch"]
         if hasattr(first_run, "sys_info") and not first_run.sys_info.empty
         else None
-    )
-
-    filter_panel_ids = resolve_filter_blocks_to_panel_ids(
-        profiling_config.get("filter_blocks", []),
-        arch=gpu_arch,
     )
 
     if args.include_cols:

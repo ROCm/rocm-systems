@@ -17,58 +17,18 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.utils_common import (
-    METRIC_ID_RE,
-    convert_metric_id_to_panel_info,
-    get_arch_alias_to_panel_id,
-)
+from utils.utils_common import convert_metric_id_to_panel_info
 
 NS_TO_MS = 1.0 / 1_000_000.0
 
 
-def resolve_filter_blocks_to_panel_ids(
-    filter_blocks: Union[list[Any], dict[Any, Any]],
-    arch: Optional[str] = None,
-) -> set[int]:
-    """Resolve a profile-mode ``filter_blocks`` selection to file_id integers.
-
-    Accepts the list form (e.g. ``["2", "11.1", "lds"]``) or the legacy
-    dict form (``{"2": "metric_id", "name": "other"}``), where only
-    entries marked ``"metric_id"`` are kept. Aliases such as ``"lds"`` are
-    resolved via :func:`get_arch_alias_to_panel_id` for the given ``arch``.
-    Raises ``KeyError`` for unknown aliases.
-
-    Returns the set of file_id integers (e.g. ``{200, 1100}``).
+def resolve_filter_blocks_to_panel_ids(filter_blocks: list[str]) -> set[int]:
+    """Inverse of convert_metric_id_to_panel_info: map metric ids like
+    "2" or "11.1" to the set of file_id integers (e.g. {200, 1100}).
     """
-    if isinstance(filter_blocks, dict):
-        raw_ids = [
-            name
-            for name, table_type in filter_blocks.items()
-            if table_type == "metric_id"
-        ]
-    else:
-        raw_ids = list(filter_blocks or [])
-
-    if not raw_ids:
-        return set()
-
-    panel_alias: Optional[dict[str, str]] = None
-    file_ids: set[int] = set()
-    for bid in raw_ids:
-        bid_s = str(bid)
-        if not METRIC_ID_RE.match(bid_s):
-            if panel_alias is None:
-                panel_alias = get_arch_alias_to_panel_id(arch) if arch else {}
-            try:
-                bid_s = str(panel_alias[bid_s])
-            except KeyError as e:
-                raise KeyError(f"Unknown panel alias: {bid_s!r}") from e
-
-        file_id, _, _ = convert_metric_id_to_panel_info(bid_s)
-        if file_id is not None:
-            file_ids.add(int(file_id))
-
-    return file_ids
+    return {
+        int(convert_metric_id_to_panel_info(str(bid))[0]) for bid in filter_blocks
+    }
 
 
 def get_bw_scale_and_unit(value: float) -> tuple[float, str]:

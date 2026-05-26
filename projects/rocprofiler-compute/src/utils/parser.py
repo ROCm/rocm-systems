@@ -48,23 +48,9 @@ def build_dfs(
     sys_info: pd.Series,
     profiling_config: dict[str, Any],
 ) -> None:
-    """
-    Build dataframe for each type of data source within each panel.
-
-    Each dataframe will be used as a template to load data with each run later.
-    For now, support "metric_table" and "raw_csv_table". Otherwise, put an empty df.
-
-    Two filters control which tables and metrics are built:
-
-    - ``filter_metrics`` (analyze-mode ``-b``): when set, overrides any
-      profile-side selection.
-    - ``profiling_config["filter_blocks"]`` (profile-mode ``-b``): used only
-      when ``filter_metrics`` is not set, so metrics whose counters were
-      never collected are not evaluated downstream.
-
-    System panels (``panel_id <= 100``) and tables with ``data_source_idx``
-    ``"0"`` always pass either filter. Tables that fail the active filter
-    are not added to ``arch_configs.dfs``.
+    """Build a dataframe template for each table in each panel. Analyze-mode
+    filter_metrics overrides profile-mode filter_blocks; tables that fail the
+    active filter are omitted from arch_configs.dfs.
     """
 
     simple_box = {
@@ -85,8 +71,7 @@ def build_dfs(
     else:
         user_metric_filter = None
         profile_panel_filter = resolve_filter_blocks_to_panel_ids(
-            profiling_config.get("filter_blocks", []),
-            arch=sys_info.get("gpu_arch"),
+            profiling_config.get("filter_blocks", [])
         )
 
     arch_configs.panel_configs = expand_placeholder_ranges(
@@ -160,12 +145,9 @@ def _metric_passes_filter(
     user_metric_filter: Optional[list[str]],
     profile_panel_filter: set[int],
 ) -> bool:
-    """Decide whether a metric or table identified by metric_id is built.
-
-    ``metric_id`` is the dotted id of the thing being checked: a file-level
-    id (``"2"``) for raw_csv / pc_sampling tables, or a per-metric id
-    (``"2.1.0"``) for metric_table rows. ``data_source_idx`` is the
-    surrounding table-level id used by the analyze-mode three-way match.
+    """Return True if a metric or table identified by metric_id passes the
+    active filter. metric_id is the file-level id for raw_csv / pc_sampling
+    tables, or the per-metric id (e.g. "2.1.0") for metric_table rows.
     """
     if panel_id <= 100 or data_source_idx == "0":
         return True
@@ -190,14 +172,10 @@ def _build_metric_table_df(
     profile_panel_filter: set[int],
     metric_counters: dict[str, list[str]],
 ) -> Optional[pd.DataFrame]:
-    """Build the metric_table dataframe, dropping rows the active gate
-    filters out.
-
-    Returns ``None`` when the entire table is filtered out at the table
-    level. Otherwise returns a ``Metric_ID``-indexed dataframe — possibly
-    with zero rows if every metric in the config was gated off — and
-    updates ``metric_counters`` in place for included metrics that
-    reference real counters.
+    """Build the metric_table dataframe for data_config, dropping rows the
+    active filter excludes. Returns None when an active filter dropped every
+    metric in a non-empty config; otherwise returns a Metric_ID-indexed
+    dataframe and updates metric_counters in place.
     """
     table_id = data_config["id"]
     table_data_source_idx = f"{table_id // 100}.{table_id % 100}"
@@ -266,9 +244,7 @@ def _build_metric_table_df(
         if filtered_counters or formula_visited:
             metric_counters[key] = list(filtered_counters)
 
-    # Skip only when an active filter dropped every metric in the config.
-    # Tables whose config is empty to begin with (some arch variants) keep
-    # a placeholder empty df so multi-arch baseline lookups stay safe.
+    # Empty-by-config tables keep a placeholder df for multi-arch baseline.
     always_pass = panel_id <= 100 or str(data_config["id"] // 100) == "0"
     if not always_pass and metric_entries and not rows:
         return None

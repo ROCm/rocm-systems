@@ -31,11 +31,9 @@ Walkthrough
 
 .. note::
 
-   By default, analyze evaluates only the blocks recorded in
-   ``profiling_config.yaml`` (the profile-mode ``-b`` selection).
-   Analyze-mode ``-b`` overrides that selection; requesting blocks whose
-   counters were not collected during profiling will produce
-   missing-counter warnings.
+   By default, analyze only evaluates blocks that were profiled. Analyze-mode
+   ``-b`` overrides this and may produce missing-counter warnings for blocks
+   whose counters were not collected.
 
 There are three high-level GPU analysis views:
 

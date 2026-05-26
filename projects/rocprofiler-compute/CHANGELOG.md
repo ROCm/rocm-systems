@@ -37,7 +37,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Flattened the analyze-mode PMC dataframe to a single-index frame.
 
-* Analyze mode no longer evaluates metrics whose counters were not collected during profiling. Tables and metrics outside profile-mode `-b` selection are skipped at config-build time, eliminating "missing counter" warning noise and unnecessary work across CLI, DB, and TUI analysis paths.
+* Eliminated "missing counter" warnings during analyze when profile-mode `-b` was used. Analyze now skips metrics outside the selected blocks.
 
 ### Resolved issues
 

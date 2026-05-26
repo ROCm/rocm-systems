@@ -77,32 +77,9 @@ class TestResolveFilterBlocksToPanelIds:
     def test_empty_list_returns_empty_set(self):
         assert resolve_filter_blocks_to_panel_ids([]) == set()
 
-    def test_empty_dict_returns_empty_set(self):
-        assert resolve_filter_blocks_to_panel_ids({}) == set()
-
     def test_numeric_ids_resolve_to_file_ids(self):
         result = resolve_filter_blocks_to_panel_ids(["2", "11.1", "11.1.5"])
         assert result == {200, 1100}
-
-    def test_legacy_dict_keeps_only_metric_id_entries(self):
-        result = resolve_filter_blocks_to_panel_ids({"2": "metric_id", "x": "other"})
-        assert result == {200}
-
-    def test_alias_is_resolved_via_get_arch_alias_to_panel_id(self, monkeypatch):
-        monkeypatch.setattr(
-            "utils.utils_analysis.get_arch_alias_to_panel_id",
-            lambda arch: {"lds": "12"},
-        )
-        result = resolve_filter_blocks_to_panel_ids(["lds"], arch="gfx942")
-        assert result == {1200}
-
-    def test_unknown_alias_raises_key_error(self, monkeypatch):
-        monkeypatch.setattr(
-            "utils.utils_analysis.get_arch_alias_to_panel_id",
-            lambda arch: {"lds": "12"},
-        )
-        with pytest.raises(KeyError, match="Unknown panel alias"):
-            resolve_filter_blocks_to_panel_ids(["zzz"], arch="gfx942")
 
 
 # =============================================================================

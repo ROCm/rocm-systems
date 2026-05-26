@@ -836,38 +836,17 @@ class TestExtractCountersAndVariables:
         _, vars_ = extract_counters_and_variables(text, "MI200")
         assert "num_xcd" not in vars_
 
-    def test_extract_counters_wraps_extract_counters_and_variables(self):
-        from utils.utils_counter_defs import extract_counters
-
-        hw = extract_counters("$GRBM_GUI_ACTIVE_PER_XCD", "MI200")
-        assert "GRBM_GUI_ACTIVE" in hw
-
-    def test_referenced_builtin_vars_handles_dollar_prefix(self):
-        from utils.utils_counter_defs import referenced_builtin_vars
-
-        text = "(100 * $numActiveCUs) / $cu_per_gpu"
-        result = referenced_builtin_vars(text, "MI200")
-        assert "numActiveCUs" in result
-
-    def test_referenced_builtin_vars_handles_ammolite_prefix(self):
-        from utils.utils_counter_defs import referenced_builtin_vars
+    def test_handles_ammolite_prefix(self):
+        from utils.utils_counter_defs import extract_counters_and_variables
 
         # After build_eval_string, $var becomes ammolite__var
         text = "(100 * ammolite__numActiveCUs) / ammolite__cu_per_gpu"
-        result = referenced_builtin_vars(text, "MI200")
-        assert "numActiveCUs" in result
+        _, vars_ = extract_counters_and_variables(text, "MI200")
+        assert "numActiveCUs" in vars_
 
-    def test_referenced_builtin_vars_resolves_transitive_deps(self):
-        from utils.utils_counter_defs import referenced_builtin_vars
-
-        # numActiveCUs references $GRBM_GUI_ACTIVE_PER_XCD
-        result = referenced_builtin_vars("ammolite__numActiveCUs", "MI200")
-        assert "numActiveCUs" in result
-        assert "GRBM_GUI_ACTIVE_PER_XCD" in result
-
-    def test_referenced_builtin_vars_ignores_non_builtin_ammolite(self):
-        from utils.utils_counter_defs import referenced_builtin_vars
+    def test_ignores_non_builtin_ammolite(self):
+        from utils.utils_counter_defs import extract_counters_and_variables
 
         # ammolite__cu_per_gpu is a sys var, not a built-in var
-        result = referenced_builtin_vars("ammolite__cu_per_gpu", "MI200")
-        assert "cu_per_gpu" not in result
+        _, vars_ = extract_counters_and_variables("ammolite__cu_per_gpu", "MI200")
+        assert "cu_per_gpu" not in vars_

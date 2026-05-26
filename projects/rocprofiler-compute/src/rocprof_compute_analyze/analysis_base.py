@@ -142,7 +142,6 @@ class OmniAnalyze_Base:
                 )
             ac.panel_configs = load_panel_configs(arch_panel_config)
 
-        # TODO: filter_metrics should/might be one per arch
         parser.build_dfs(
             arch_configs=ac,
             filter_metrics=filter_metrics,
@@ -187,7 +186,6 @@ class OmniAnalyze_Base:
             )
 
         # load required configs
-        profiling_config = getattr(self, "_profiling_config", {})
         for path_info in args.path:
             sysinfo_path = get_sysinfo_path(path_info[0])
             if sysinfo_path:
@@ -199,7 +197,7 @@ class OmniAnalyze_Base:
                     args.list_stats,
                     args.filter_metrics,
                     sys_info.iloc[0],
-                    profiling_config,
+                    getattr(self, "_profiling_config", {}),
                 )
 
         self.load_options(normalization_filter)

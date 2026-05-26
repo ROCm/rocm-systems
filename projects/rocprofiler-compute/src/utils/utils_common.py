@@ -710,9 +710,8 @@ def expand_placeholder_ranges(
                     data_config["metric"] = {}
                     continue
 
-                # NB: We have to resolve placeholder range here because it
-                # would be too late to do it in eval_metric(). Single
-                # placeholder only.
+                # Resolved here (not in eval_metric) because the range may
+                # itself be a built-in var. Single placeholder only.
                 p_range = data_config["metric"].pop("placeholder_range")
                 metric, metric_expr = data_config["metric"].popitem()
                 new_metrics: dict[str, Any] = {}
