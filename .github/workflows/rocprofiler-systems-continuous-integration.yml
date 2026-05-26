@@ -223,6 +223,6 @@ jobs:
         with:
           name: failed-test-logs-ubuntu-${{ matrix.system.os-release }}-{{ matrix.system.arch }}
           path: |
-            build/ctest-results.xml
-            build/Testing/Temporary/**
+            projects/rocprofiler-systems/build/ctest-results.xml
+            projects/rocprofiler-systems/build/Testing/Temporary/**
           retention-days: 2
