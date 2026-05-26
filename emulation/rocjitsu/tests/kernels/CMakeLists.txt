@@ -49,6 +49,35 @@ rj_add_device_kernel(matmul_mfma gfx950)
 rj_add_device_kernel(matmul_mfma_16x16 gfx950)
 rj_add_device_kernel(matmul_tiled gfx950)
 rj_add_device_kernel(vector_add gfx950)
+rj_add_device_kernel(dynamic_copy_loop gfx950)
+
+# Triton-generated CDNA4 matmul fixture. The checked-in assembly records the
+# original Triton-generated kernel, so normal test builds only need the ROCm
+# assembler/linker and do not depend on a Python/Triton install.
+function(rj_add_triton_cdna4_asm_fixture name)
+    set(asm_obj ${KERNEL_OUTPUT_DIR}/${name}.asm.o)
+    set(hsaco ${KERNEL_OUTPUT_DIR}/${name}.hsaco)
+    add_custom_command(
+        OUTPUT ${asm_obj}
+        COMMAND
+            ${AMDCLANG} -x assembler -target amdgcn-amd-amdhsa -mcpu=gfx950
+            --rocm-path=${ROCM_PATH} -c -o ${asm_obj}
+            ${CMAKE_CURRENT_SOURCE_DIR}/${name}.s
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${name}.s
+        COMMENT "Assembling Triton CDNA4 fixture: ${name} (gfx950)"
+    )
+    add_custom_command(
+        OUTPUT ${hsaco}
+        COMMAND
+            ${AMDCLANG} -target amdgcn-amd-amdhsa -mcpu=gfx950
+            --rocm-path=${ROCM_PATH} -nostdlib -shared -o ${hsaco} ${asm_obj}
+        DEPENDS ${asm_obj}
+        COMMENT "Linking Triton CDNA4 fixture: ${name} (gfx950)"
+    )
+    add_custom_target(kernel_${name} DEPENDS ${hsaco})
+endfunction()
+
+rj_add_triton_cdna4_asm_fixture(triton_cdna4_matmul_dynamic_32x32x64)
 
 # Umbrella target for all device kernels.
 add_custom_target(
@@ -59,6 +88,8 @@ add_custom_target(
         kernel_matmul_mfma_16x16
         kernel_matmul_tiled
         kernel_vector_add
+        kernel_dynamic_copy_loop
+        kernel_triton_cdna4_matmul_dynamic_32x32x64
 )
 
 # Export variables to the parent scope so the test executable can use them.

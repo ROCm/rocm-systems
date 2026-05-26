@@ -22,6 +22,8 @@ namespace {
                                                                          rj_code_arch_t host) {
   if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA4)
     return semantic_expand_rules_cdna4_to_rdna4();
+  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_CDNA3)
+    return semantic_expand_rules_cdna4_to_cdna3();
   if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA3)
     return semantic_expand_rules_cdna4_to_rdna3();
   return {};

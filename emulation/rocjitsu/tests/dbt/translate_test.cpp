@@ -52,8 +52,13 @@
 #include "rocjitsu/code/dbt/generated/legalization_rdna4_to_cdna4.h"
 #include "rocjitsu/code/dbt/generated/legalization_types.h"
 #include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
+#include "rocjitsu/code/dbt/semantic/rules.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
+#include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/instruction.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -1302,6 +1307,313 @@ TEST(WaitcntTranslator, EncodeVmcnt0EmitsLoadcntAndStorecnt) {
   EXPECT_TRUE(has_storecnt_dscnt);
 }
 
+constexpr uint16_t kAnyExpectedField = 0xffff;
+
+enum class ExpectedCdna3Kind {
+  Vop3,
+  Vop3pMfma,
+  Ds,
+  Sopp,
+};
+
+struct ExpectedCdna3Inst {
+  ExpectedCdna3Kind kind = ExpectedCdna3Kind::Vop3;
+  uint16_t op = 0;
+  uint16_t vdst = kAnyExpectedField;
+  uint16_t acc_cd = kAnyExpectedField;
+  uint16_t src0 = kAnyExpectedField;
+  uint16_t src1 = kAnyExpectedField;
+  uint16_t src2 = kAnyExpectedField;
+};
+
+struct Cdna4ToCdna3SemanticRuleCase {
+  const char *name = "";
+  uint16_t encoding_id = 0;
+  uint16_t opcode = 0;
+  std::array<uint32_t, 2> words{};
+  std::vector<ExpectedCdna3Inst> expected{};
+};
+
+ExpectedCdna3Inst expect_vop3(uint16_t op) {
+  ExpectedCdna3Inst inst{};
+  inst.kind = ExpectedCdna3Kind::Vop3;
+  inst.op = op;
+  return inst;
+}
+
+ExpectedCdna3Inst expect_mfma(uint16_t op, uint16_t vdst, uint16_t acc_cd, uint16_t src0,
+                              uint16_t src1, uint16_t src2) {
+  ExpectedCdna3Inst inst{};
+  inst.kind = ExpectedCdna3Kind::Vop3pMfma;
+  inst.op = op;
+  inst.vdst = vdst;
+  inst.acc_cd = acc_cd;
+  inst.src0 = src0;
+  inst.src1 = src1;
+  inst.src2 = src2;
+  return inst;
+}
+
+ExpectedCdna3Inst expect_ds(uint16_t op) {
+  ExpectedCdna3Inst inst{};
+  inst.kind = ExpectedCdna3Kind::Ds;
+  inst.op = op;
+  return inst;
+}
+
+ExpectedCdna3Inst expect_sopp(uint16_t op) {
+  ExpectedCdna3Inst inst{};
+  inst.kind = ExpectedCdna3Kind::Sopp;
+  inst.op = op;
+  return inst;
+}
+
+std::vector<ExpectedCdna3Inst> expected_cdna3_bitop3_sequence(bool b16) {
+  // Truth table 0xde lowers to S2 ^ S1 ^ (S1 & S2) ^ S0 ^ (S0 & S1).
+  std::vector<ExpectedCdna3Inst> expected = {
+      expect_vop3(321), // v_mov_b32
+      expect_vop3(277), // v_xor_b32
+      expect_vop3(275), // v_and_b32
+      expect_vop3(277), // v_xor_b32
+      expect_vop3(277), // v_xor_b32
+      expect_vop3(275), // v_and_b32
+      expect_vop3(277), // v_xor_b32
+  };
+  if (b16) {
+    expected.push_back(expect_vop3(274)); // v_lshlrev_b32
+    expected.push_back(expect_vop3(272)); // v_lshrrev_b32
+  }
+  expected.push_back(expect_vop3(321)); // v_mov_b32 copy scratch accumulator to vdst.
+  expected.push_back(expect_sopp(2));   // s_branch back to original fallthrough.
+  return expected;
+}
+
+std::vector<ExpectedCdna3Inst> expected_cdna3_mfma_sequence(uint16_t narrow_op,
+                                                            uint16_t src2 = 128) {
+  return {
+      expect_mfma(narrow_op, 0, 1, 256, 260, src2),
+      expect_mfma(narrow_op, 0, 1, 258, 262, 256),
+      expect_sopp(2),
+  };
+}
+
+std::vector<ExpectedCdna3Inst> expected_cdna3_raw_b16_pack_sequence() {
+  return {
+      expect_vop3(321), // v_mov_b32 -1
+      expect_vop3(272), // v_lshrrev_b32 16, mask
+      expect_vop3(275), // v_and_b32 low half
+      expect_vop3(275), // v_and_b32 high half
+      expect_vop3(274), // v_lshlrev_b32 16, high half
+      expect_vop3(276), // v_or_b32
+  };
+}
+
+std::vector<ExpectedCdna3Inst> expected_cdna3_ds_read_b64_tr_b16_sequence() {
+  std::vector<ExpectedCdna3Inst> expected = {
+      expect_ds(118),   // ds_read_b64
+      expect_sopp(12),  // s_waitcnt lgkmcnt(0)
+      expect_vop3(652), // v_mbcnt_lo_u32_b32
+      expect_vop3(653), // v_mbcnt_hi_u32_b32
+      expect_vop3(275), // v_and_b32
+      expect_vop3(274), // v_lshlrev_b32
+      expect_vop3(275), // v_and_b32
+      expect_vop3(274), // v_lshlrev_b32
+      expect_vop3(275), // v_and_b32
+      expect_vop3(276), // v_or_b32
+      expect_vop3(308), // v_add_u32
+      expect_vop3(274), // v_lshlrev_b32
+      expect_vop3(276), // v_or_b32
+      expect_ds(63),    // ds_bpermute_b32
+      expect_ds(63),    // ds_bpermute_b32
+      expect_sopp(12),  // s_waitcnt lgkmcnt(0)
+      expect_vop3(493), // v_perm_b32
+      expect_vop3(308), // v_add_u32
+      expect_ds(63),    expect_ds(63), expect_sopp(12), expect_vop3(493),
+  };
+
+  auto first_pack = expected_cdna3_raw_b16_pack_sequence();
+  expected.insert(expected.end(), first_pack.begin(), first_pack.end());
+  expected.insert(expected.end(), {
+                                      expect_vop3(308),
+                                      expect_ds(63),
+                                      expect_ds(63),
+                                      expect_sopp(12),
+                                      expect_vop3(493),
+                                      expect_vop3(308),
+                                      expect_ds(63),
+                                      expect_ds(63),
+                                      expect_sopp(12),
+                                      expect_vop3(493),
+                                  });
+  auto second_pack = expected_cdna3_raw_b16_pack_sequence();
+  expected.insert(expected.end(), second_pack.begin(), second_pack.end());
+  expected.push_back(expect_sopp(2));
+  return expected;
+}
+
+template <typename MachineInst>
+std::array<uint32_t, 2> encode_two_word_inst(const MachineInst &inst) {
+  std::array<uint32_t, 2> words{};
+  std::memcpy(words.data(), &inst, sizeof(inst));
+  return words;
+}
+
+std::array<uint32_t, 2> make_cdna4_bitop3_words(uint16_t opcode, uint8_t vdst) {
+  rocjitsu::cdna4::Vop3MachineInst inst{};
+  inst.encoding = 0x34;
+  inst.op = opcode;
+  inst.vdst = vdst;
+  inst.src0 = static_cast<uint16_t>(256 + vdst + 1);
+  inst.src1 = static_cast<uint16_t>(256 + vdst + 2);
+  inst.src2 = static_cast<uint16_t>(256 + vdst + 3);
+
+  // Use a non-trivial LUT so the generic expansion emits real AND/XOR work and
+  // cannot accidentally pass by lowering to a simple move.
+  constexpr uint8_t kTruthTable = 0xde;
+  inst.omod = kTruthTable >> 6;
+  inst.abs = (kTruthTable >> 3) & 0x7;
+  inst.neg = kTruthTable & 0x7;
+  return encode_two_word_inst(inst);
+}
+
+std::array<uint32_t, 2> make_cdna4_mfma_words(uint8_t opcode, uint8_t vdst, uint16_t src0,
+                                              uint16_t src1, uint16_t src2 = 128) {
+  rocjitsu::cdna4::Vop3pMfmaMachineInst inst{};
+  inst.encoding = 0x1A7;
+  inst.op = opcode;
+  inst.vdst = vdst;
+  inst.acc_cd = 1;
+  inst.src0 = src0;
+  inst.src1 = src1;
+  inst.src2 = src2;
+  return encode_two_word_inst(inst);
+}
+
+std::array<uint32_t, 2> make_cdna4_ds_read_b64_tr_b16_words() {
+  rocjitsu::cdna4::DsMachineInst inst{};
+  inst.encoding = 0x36;
+  inst.op = 227;
+  inst.addr = 2;
+  inst.vdst = 0;
+  return encode_two_word_inst(inst);
+}
+
+std::vector<Cdna4ToCdna3SemanticRuleCase> cdna4_to_cdna3_semantic_rule_cases() {
+  return {
+      {"VBitop3B16", 0x1A4, 563, make_cdna4_bitop3_words(563, 8),
+       expected_cdna3_bitop3_sequence(true)},
+      {"VBitop3B32", 0x1A4, 564, make_cdna4_bitop3_words(564, 16),
+       expected_cdna3_bitop3_sequence(false)},
+      {"MfmaF32_16x16x32F16", 0x1A7, 84, make_cdna4_mfma_words(84, 0, 256, 260),
+       expected_cdna3_mfma_sequence(77)},
+      {"MfmaF32_32x32x16F16", 0x1A7, 85, make_cdna4_mfma_words(85, 0, 256, 260),
+       expected_cdna3_mfma_sequence(76)},
+      {"MfmaF32_16x16x32F16AccumVgpr", 0x1A7, 84, make_cdna4_mfma_words(84, 0, 256, 260, 272),
+       expected_cdna3_mfma_sequence(77, 272)},
+      {"MfmaF32_32x32x16F16AccumVgpr", 0x1A7, 85, make_cdna4_mfma_words(85, 0, 256, 260, 272),
+       expected_cdna3_mfma_sequence(76, 272)},
+      {"DsReadB64TrB16", 0x1B3, 227, make_cdna4_ds_read_b64_tr_b16_words(),
+       expected_cdna3_ds_read_b64_tr_b16_sequence()},
+  };
+}
+
+bool has_cdna4_to_cdna3_semantic_rule(uint16_t encoding_id, uint16_t opcode) {
+  for (const auto &rule : rocjitsu::semantic_expand_rules_cdna4_to_cdna3()) {
+    if (rule.src_encoding_id == encoding_id && rule.src_opcode == opcode)
+      return true;
+  }
+  return false;
+}
+
+bool has_cdna4_to_cdna3_semantic_rule_case(uint16_t encoding_id, uint16_t opcode) {
+  for (const auto &test_case : cdna4_to_cdna3_semantic_rule_cases()) {
+    if (test_case.encoding_id == encoding_id && test_case.opcode == opcode)
+      return true;
+  }
+  return false;
+}
+
+void expect_field_matches(uint16_t expected, uint16_t actual, std::string_view field_name) {
+  if (expected != kAnyExpectedField)
+    EXPECT_EQ(actual, expected) << field_name;
+}
+
+void expect_cdna3_instruction_matches(const rocjitsu::Instruction &inst,
+                                      const ExpectedCdna3Inst &expected) {
+  const uint32_t *raw = inst.raw_encoding();
+  ASSERT_NE(raw, nullptr);
+
+  switch (expected.kind) {
+  case ExpectedCdna3Kind::Vop3: {
+    rocjitsu::cdna3::Vop3MachineInst actual{};
+    std::memcpy(&actual, raw, sizeof(actual));
+    EXPECT_EQ(actual.encoding, 0x34u);
+    EXPECT_EQ(actual.op, expected.op);
+    expect_field_matches(expected.vdst, static_cast<uint16_t>(actual.vdst), "vdst");
+    expect_field_matches(expected.src0, static_cast<uint16_t>(actual.src0), "src0");
+    expect_field_matches(expected.src1, static_cast<uint16_t>(actual.src1), "src1");
+    expect_field_matches(expected.src2, static_cast<uint16_t>(actual.src2), "src2");
+    break;
+  }
+  case ExpectedCdna3Kind::Vop3pMfma: {
+    rocjitsu::cdna3::Vop3pMfmaMachineInst actual{};
+    std::memcpy(&actual, raw, sizeof(actual));
+    EXPECT_EQ(actual.encoding, 0x1A7u);
+    EXPECT_EQ(actual.op, expected.op);
+    expect_field_matches(expected.vdst, static_cast<uint16_t>(actual.vdst), "vdst");
+    expect_field_matches(expected.acc_cd, static_cast<uint16_t>(actual.acc_cd), "acc_cd");
+    expect_field_matches(expected.src0, static_cast<uint16_t>(actual.src0), "src0");
+    expect_field_matches(expected.src1, static_cast<uint16_t>(actual.src1), "src1");
+    expect_field_matches(expected.src2, static_cast<uint16_t>(actual.src2), "src2");
+    break;
+  }
+  case ExpectedCdna3Kind::Ds: {
+    rocjitsu::cdna3::DsMachineInst actual{};
+    std::memcpy(&actual, raw, sizeof(actual));
+    EXPECT_EQ(actual.encoding, 0x36u);
+    EXPECT_EQ(actual.op, expected.op);
+    expect_field_matches(expected.vdst, static_cast<uint16_t>(actual.vdst), "vdst");
+    break;
+  }
+  case ExpectedCdna3Kind::Sopp: {
+    rocjitsu::cdna3::SoppMachineInst actual{};
+    std::memcpy(&actual, raw, sizeof(actual));
+    EXPECT_EQ(actual.encoding, 0x17Fu);
+    EXPECT_EQ(actual.op, expected.op);
+    break;
+  }
+  }
+}
+
+void expect_cdna3_code_cave_matches(const rocjitsu::Section &translations,
+                                    const std::vector<ExpectedCdna3Inst> &expected) {
+  ASSERT_EQ(translations.size() % sizeof(uint32_t), 0u);
+  ASSERT_GT(translations.size(), 0u);
+
+  auto decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+
+  const auto *words = reinterpret_cast<const uint32_t *>(translations.data());
+  const size_t word_count = translations.size() / sizeof(uint32_t);
+  std::vector<std::unique_ptr<rocjitsu::Instruction>> actual;
+  for (size_t pc = 0; pc < word_count;) {
+    SCOPED_TRACE(pc);
+    auto inst = std::unique_ptr<rocjitsu::Instruction>(decoder->decode(&words[pc]));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_GT(inst->size(), 0u);
+    ASSERT_EQ(inst->size() % sizeof(uint32_t), 0u);
+    ASSERT_LE(pc + inst->size() / sizeof(uint32_t), word_count);
+    pc += inst->size() / sizeof(uint32_t);
+    actual.push_back(std::move(inst));
+  }
+
+  ASSERT_EQ(actual.size(), expected.size());
+  for (size_t i = 0; i < expected.size(); ++i) {
+    SCOPED_TRACE(i);
+    expect_cdna3_instruction_matches(*actual[i], expected[i]);
+  }
+}
+
 // --- Synthetic BinaryTranslator integration tests ---
 TEST(BinaryTranslatorE2E, TranslatesMultiKernelCodeObject) {
   using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
@@ -1367,6 +1679,59 @@ TEST(BinaryTranslatorE2E, TranslatesMultiKernelCodeObject) {
   EXPECT_EQ(translated_entries, (std::vector<uint64_t>{0, sizeof(uint32_t)}));
   EXPECT_EQ(translated_descriptor_offsets, original_descriptor_offsets);
 }
+
+TEST(BinaryTranslatorE2E, Cdna4ToCdna3SemanticExpandRulesHaveTranslationFixtures) {
+  const auto test_cases = cdna4_to_cdna3_semantic_rule_cases();
+  const auto rules = rocjitsu::semantic_expand_rules_cdna4_to_cdna3();
+
+  for (const auto &rule : rules) {
+    EXPECT_TRUE(has_cdna4_to_cdna3_semantic_rule_case(rule.src_encoding_id, rule.src_opcode))
+        << "missing fixture for CDNA4->CDNA3 semantic rule encoding=0x" << std::hex
+        << rule.src_encoding_id << " opcode=" << rule.src_opcode << std::dec;
+  }
+  for (const auto &test_case : test_cases) {
+    EXPECT_TRUE(has_cdna4_to_cdna3_semantic_rule(test_case.encoding_id, test_case.opcode))
+        << "test fixture has no CDNA4->CDNA3 semantic rule: " << test_case.name;
+  }
+}
+
+class Cdna4ToCdna3SemanticRuleTranslationTest
+    : public ::testing::TestWithParam<Cdna4ToCdna3SemanticRuleCase> {};
+
+TEST_P(Cdna4ToCdna3SemanticRuleTranslationTest, TranslatesSingleInstruction) {
+  const auto &test_case = GetParam();
+  SCOPED_TRACE(test_case.name);
+
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text();
+  rocjitsu::AmdGpuCodeObject source_layout(image.data(), image.size());
+  ASSERT_TRUE(source_layout.is_valid());
+  ASSERT_FALSE(source_layout.text_sections().empty());
+
+  const auto *source_text = source_layout.text_sections()[0];
+  ASSERT_EQ(source_text->size(), test_case.words.size() * sizeof(uint32_t));
+  std::memcpy(image.data() + source_text->sectionOffset(), test_case.words.data(),
+              test_case.words.size() * sizeof(uint32_t));
+
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(source);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.warnings.empty()) << result.warnings.front();
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  const rocjitsu::Section *translations = rocjitsu::find_section(translated, ".rj_translations");
+  ASSERT_NE(translations, nullptr);
+  expect_cdna3_code_cave_matches(*translations, test_case.expected);
+}
+
+INSTANTIATE_TEST_SUITE_P(ImplementedRules, Cdna4ToCdna3SemanticRuleTranslationTest,
+                         ::testing::ValuesIn(cdna4_to_cdna3_semantic_rule_cases()),
+                         [](const ::testing::TestParamInfo<Cdna4ToCdna3SemanticRuleCase> &info) {
+                           return std::string(info.param.name);
+                         });
 
 TEST(KernelDescriptorTranslator, IgnoresNonAllocExecutableSectionsForEntryRange) {
   using KD = rocr::llvm::amdhsa::kernel_descriptor_t;

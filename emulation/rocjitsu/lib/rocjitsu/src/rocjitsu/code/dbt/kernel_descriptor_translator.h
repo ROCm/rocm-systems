@@ -35,6 +35,7 @@ struct KdTranslation {
 
   uint32_t target_vgpr_count = 0;
   uint32_t target_vgpr_granulated = 0;
+  uint32_t target_accvgpr_base = 0;
   uint32_t accvgpr_base = 0;
   uint32_t vgpr_spill_to_lds_count = 0;
   uint32_t vgpr_spill_to_scratch_count = 0;

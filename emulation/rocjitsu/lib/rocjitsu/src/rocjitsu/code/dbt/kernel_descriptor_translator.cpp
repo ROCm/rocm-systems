@@ -416,6 +416,11 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
   return (registers + granularity - 1) / granularity - 1;
 }
 
+[[nodiscard]] uint32_t align_up(uint32_t value, uint32_t alignment) {
+  alignment = std::max(alignment, 1u);
+  return ((value + alignment - 1) / alignment) * alignment;
+}
+
 [[nodiscard]] uint16_t accum_vgpr_base(const KD &desc, rj_code_arch_t guest_arch) {
   if (!uses_gfx90a_accum_offset(guest_arch) || !arch_has_accvgpr(guest_arch))
     return 0;
@@ -550,6 +555,7 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   // The descriptor translator records the first unified VGPR index that must be
   // reserved for those remapped accumulator registers.
   result.accvgpr_base = accum_vgpr_base(src, guest_arch);
+  result.target_accvgpr_base = result.accvgpr_base;
 
   // Descriptor ABI fixes that require instructions, not bitfield changes, are
   // emitted as prologue words. CodeObjectPatcher decides where to place them and
@@ -572,13 +578,39 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
       granulated_count_to_registers(guest_vgpr_granulated, guest_vgpr_granularity);
 
   // Start from the guest's required VGPR allocation. Then grow it for semantic
-  // lowering requirements: AccVGPR unification needs enough unified VGPRs to
-  // cover the remapped accumulator window, and instruction lowering may request
-  // additional scratch temporaries through options.minimum_vgprs.
+  // lowering requirements:
+  //
+  // - CDNA-to-RDNA unifies AccVGPRs into the ordinary VGPR namespace, so the
+  //   target needs enough VGPRs to cover the remapped accumulator window.
+  //
+  // - CDNA-to-CDNA keeps a real AccVGPR bank. On GFX90A/GFX942/GFX950 the
+  //   ACCUM_OFFSET descriptor field selects where that bank starts in the
+  //   unified register file. If a semantic lowering needs new ordinary VGPRs
+  //   at or above the original offset, merely increasing VGPRS is not enough:
+  //   those temporary VGPRs would alias a0, a1, ... at runtime. Move the
+  //   accumulator base up and preserve the original accumulator-window size.
+  //
+  // - instruction lowering may request additional scratch temporaries through
+  //   options.minimum_vgprs.
   uint32_t required_vgprs = result.guest_vgpr_count;
   if (arch_has_accvgpr(guest_arch) && !arch_has_accvgpr(host_arch) && result.accvgpr_base != 0)
     required_vgprs = std::max(required_vgprs, result.accvgpr_base + result.guest_vgpr_count);
   required_vgprs = std::max(required_vgprs, options.minimum_vgprs);
+  if (arch_has_accvgpr(guest_arch) && arch_has_accvgpr(host_arch) &&
+      uses_gfx90a_accum_offset(host_arch) && result.accvgpr_base != 0) {
+    const uint32_t source_accvgpr_count = result.guest_vgpr_count > result.accvgpr_base
+                                              ? result.guest_vgpr_count - result.accvgpr_base
+                                              : 0;
+    if (source_accvgpr_count != 0 && options.minimum_vgprs > result.accvgpr_base) {
+      result.target_accvgpr_base = align_up(options.minimum_vgprs, 4);
+      required_vgprs = std::max(required_vgprs, result.target_accvgpr_base + source_accvgpr_count);
+      if (result.target_accvgpr_base > 256) {
+        result.warnings.push_back("required AccVGPR offset exceeds GFX90A descriptor field range; "
+                                  "AccVGPR base virtualization is not implemented");
+        result.supported = false;
+      }
+    }
+  }
   result.host_vgpr_count = required_vgprs;
   result.target_vgpr_count = required_vgprs;
   if (arch_max_vgprs(host_arch) != 0 && required_vgprs > arch_max_vgprs(host_arch)) {
