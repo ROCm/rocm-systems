@@ -1702,3 +1702,211 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_MultiPeerMixedReuseAndFreshUpdatesDevTabl
     // the next maintainer doesn't get surprised.
     regRecord.ipcInfos[kPeer0LocalRank] = nullptr;
 }
+
+// Reuse-COLLECTIVE with a missing dev table but no fresh registrations:
+// drives the strong-stream block past the `if (needUpdate)` guard's False
+// arm (branch 1010:15 False). All peers are reuse, so needUpdate stays
+// false; devPeerRmtAddrs is null, so the outer `devPeerRmtAddrs == NULL ||
+// needUpdate` enters the block; the inner `devPeerRmtAddrs == NULL` calloc
+// fires (1008:15 True); the inner `if (needUpdate)` memcpy is skipped
+// (1010:15 False); and *peerRmtAddrsOut returns the freshly-callocated dev
+// table, still zeroed.
+//
+// This is the lifecycle path where a prior caller registered the host
+// table (e.g. a SENDRECV) and a follow-up COLLECTIVE-reuse call is the
+// first to materialise the device-side copy.
+TEST_F(P2pMicrotest, IpcRegisterBuffer_CollectiveReuseAllocatesDevTableWithoutMemcpy)
+{
+    constexpr int       kPeerRank      = 2;
+    constexpr int       kPeerLocalRank = 1;
+    constexpr uintptr_t kBegAddr       = 0x10000;
+    constexpr uintptr_t kBuffOffset    = 0x80;
+    constexpr uintptr_t kRmtRegAddr    = 0xA000;
+
+    CommBuilder cb;
+    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
+      .WithMaxLocalRanks()
+      .WithSharedRes();
+
+    ReusableIpcInfo existing(kPeerRank, kPeerLocalRank, kRmtRegAddr,
+                             /*legacyIpcCap=*/ false);
+    ncclReg regRecord{};
+    regRecord.begAddr = kBegAddr;
+    regRecord.endAddr = kBegAddr + 0x2000;
+    existing.InstallInto(regRecord);
+    // devPeerRmtAddrs intentionally left null -- enters strong-stream block.
+
+    // Count both seams so we can pin down the contract:
+    //   calloc fires once (devPeerRmtAddrs == NULL True arm), memcpy is
+    //   skipped (needUpdate False arm -- 1010:15 False).
+    ScopedHook calloc(g_fakeCudaCallocAsync,
+        [](void** ptr, std::size_t nbytes, hipStream_t) -> ncclResult_t {
+            void* p = std::calloc(1, nbytes);
+            if (!p) return ncclSystemError;
+            if (ptr) *ptr = p;
+            // Hand ownership to the test; we free it explicitly below.
+            return ncclSuccess;
+        });
+    ScopedHook memcpy_(g_fakeCudaMemcpyAsync,
+        [](void*, void*, std::size_t, hipStream_t) -> ncclResult_t {
+            ADD_FAILURE() << "memcpy must not fire on pure-reuse path "
+                          << "(needUpdate=false)";
+            return ncclSystemError;
+        });
+
+    int peerRanks[] = {kPeerRank};
+    IpcRegOutputs out;
+    bool isLegacyIpc = true;  // start true to see it cleared
+
+    auto r = CallIpcRegisterBuffer(cb,
+                                   /*userbuff=*/ reinterpret_cast<const void*>(kBegAddr + kBuffOffset),
+                                   /*buffSize=*/ 512,
+                                   peerRanks, 1,
+                                   NCCL_IPC_COLLECTIVE,
+                                   &regRecord, out, &isLegacyIpc);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(calloc.calls,  1);
+    EXPECT_EQ(memcpy_.calls, 0);  // the 1010:15-False contract
+    EXPECT_EQ(out.regBufFlag, 1);
+    EXPECT_EQ(out.offsetOut,  kBuffOffset);
+    // Returns the freshly-callocated dev table; not the host one.
+    EXPECT_EQ(out.peerRmtAddrs, regRecord.regIpcAddrs.devPeerRmtAddrs);
+    ASSERT_NE(out.peerRmtAddrs, nullptr);
+    // Skipped-memcpy contract: the slot is the calloc zero, NOT kRmtRegAddr.
+    EXPECT_EQ(out.peerRmtAddrs[kPeerLocalRank], 0u);
+    EXPECT_FALSE(isLegacyIpc);
+
+    std::free(regRecord.regIpcAddrs.devPeerRmtAddrs);
+    regRecord.regIpcAddrs.devPeerRmtAddrs = nullptr;
+}
+
+// Two-peer fresh-registration: drives the False arm of the function-local
+// `if (baseAddr == NULL)` (branch 910:13 False) on the *second* loop
+// iteration. Iteration p=0 calls hipMemGetAddressRange and writes the
+// function-local baseAddr; iteration p=1 sees baseAddr already non-NULL
+// from the prior peer and skips the re-call. This is the contract that
+// keeps a multi-peer fresh registration from re-querying the driver N
+// times for the same allocation.
+TEST_F(P2pMicrotest, IpcRegisterBuffer_MultiPeerFreshRegistrationReusesBaseAddrAcrossLoop)
+{
+    constexpr int       kPeer0Rank      = 1;
+    constexpr int       kPeer0LocalRank = 0;
+    constexpr int       kPeer1Rank      = 3;
+    constexpr int       kPeer1LocalRank = 2;
+    constexpr uintptr_t kBaseAddr       = 0x100000;
+    constexpr std::size_t kBaseSize     = 0x4000;
+    constexpr uintptr_t kBegOffset      = 0x20;
+    constexpr uintptr_t kBegAddr        = kBaseAddr + kBegOffset;
+    constexpr uintptr_t kBuffOffset     = 0x80;
+    constexpr uintptr_t kRmt0           = 0xCAFE0000ull;
+    constexpr uintptr_t kRmt1           = 0xCAFE1000ull;
+    constexpr int       kNRanks         = kPeer1Rank + 1;
+
+    CommBuilder cb;
+    cb.WithLocalRank(kPeer0Rank, kPeer0LocalRank)
+      .WithLocalRank(kPeer1Rank, kPeer1LocalRank)
+      .WithMaxLocalRanks()
+      .WithSharedRes()
+      .WithProxyConnArray(kNRanks);
+    // Both gproxyConn slots pre-initialized so we don't have to fake
+    // ncclProxyConnect for both peers; this test is focused on the
+    // baseAddr-reuse contract, not the connect path.
+    cb.comm().gproxyConn[kPeer0Rank].initialized = true;
+    cb.comm().gproxyConn[kPeer1Rank].initialized = true;
+
+    ncclReg regRecord{};
+    regRecord.begAddr = kBegAddr;
+    regRecord.endAddr = kBegAddr + 0x1000;
+    // Both ipcInfos[] slots NULL -> both peers take the fresh-reg arm.
+    RegRecordCleaner regCleanup(regRecord);
+
+    ScopedHook loadParam(g_loadParam, ForceLegacyCudaRegister());
+
+    const void* const kUserbuff =
+        reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
+    ScopedHook memGet(g_hipMemGetAddressRange,
+        [&](hipDeviceptr_t* pbase, std::size_t* psize,
+            hipDeviceptr_t dptr) -> hipError_t {
+            EXPECT_EQ(reinterpret_cast<const void*>(dptr), kUserbuff);
+            if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
+            if (psize) *psize = kBaseSize;
+            return hipSuccess;
+        });
+    ScopedHook ipcGet(g_hipIpcGetMemHandle,
+        [&](hipIpcMemHandle_t* h, void* devPtr) -> hipError_t {
+            // Both iterations must hand the driver the *same* baseAddr.
+            // If a regression re-querying per peer ever lands, this is
+            // the assertion that catches it (driving the True arm on
+            // iter 1 again would still call ipcGet with kBaseAddr, but
+            // the False-arm contract is that memGet only ran once --
+            // checked on memGet.calls below).
+            EXPECT_EQ(devPtr, reinterpret_cast<void*>(kBaseAddr));
+            if (h) std::memset(h, 0x5A, sizeof(*h));
+            return hipSuccess;
+        });
+
+    int proxyCallIdx = 0;
+    const uintptr_t kRmts[] = {kRmt0, kRmt1};
+    ScopedHook proxy(g_proxyCallBlocking,
+        [&](struct ncclComm*, struct ncclProxyConnector*, int type,
+            void* req, int reqSize, void* resp, int respSize) -> ncclResult_t {
+            EXPECT_EQ(type, ncclProxyMsgRegister);
+            if (req == nullptr ||
+                static_cast<size_t>(reqSize) < sizeof(p2pIpcExpInfo)) {
+                ADD_FAILURE() << "malformed register-msg request";
+                return ncclInternalError;
+            }
+            auto* info = static_cast<p2pIpcExpInfo*>(req);
+            // Both iterations must ship the same baseAddr-derived
+            // ipcInfo (size = whole allocation, offset = begAddr-baseAddr).
+            EXPECT_TRUE(info->legacyIpcCap);
+            EXPECT_EQ(info->size,   kBaseSize);
+            EXPECT_EQ(info->offset, kBegOffset);
+            EXPECT_GE(static_cast<size_t>(respSize), sizeof(void*));
+            if (resp && proxyCallIdx < 2) {
+                std::memcpy(resp, &kRmts[proxyCallIdx], sizeof(void*));
+            }
+            ++proxyCallIdx;
+            return ncclSuccess;
+        });
+
+    int peerRanks[] = {kPeer0Rank, kPeer1Rank};
+    IpcRegOutputs out;
+    bool isLegacyIpc = false;
+
+    auto r = CallIpcRegisterBuffer(cb, kUserbuff,
+                                   /*buffSize=*/ 256,
+                                   peerRanks, 2,
+                                   NCCL_IPC_COLLECTIVE,
+                                   &regRecord, out, &isLegacyIpc);
+
+    // ---- The 910:13-False contract: memGet fires once (iter 0 only).
+    // ipcGet and the proxy fire once per peer; baseAddr is reused.
+    EXPECT_EQ(memGet.calls, 1);
+    EXPECT_EQ(ipcGet.calls, 2);
+    EXPECT_EQ(proxy.calls,  2);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(out.regBufFlag, 1);
+    EXPECT_EQ(out.offsetOut,  kBuffOffset);
+    EXPECT_EQ(out.peerRmtAddrs, regRecord.regIpcAddrs.devPeerRmtAddrs);
+    ASSERT_NE(out.peerRmtAddrs, nullptr);
+    EXPECT_EQ(out.peerRmtAddrs[kPeer0LocalRank], kRmt0);
+    EXPECT_EQ(out.peerRmtAddrs[kPeer1LocalRank], kRmt1);
+    EXPECT_TRUE(isLegacyIpc);
+
+    // Both ipcInfos populated.
+    ASSERT_NE(regRecord.ipcInfos[kPeer0LocalRank], nullptr);
+    ASSERT_NE(regRecord.ipcInfos[kPeer1LocalRank], nullptr);
+    EXPECT_EQ(regRecord.ipcInfos[kPeer0LocalRank]->impInfo.rmtRegAddr,
+              reinterpret_cast<void*>(kRmt0));
+    EXPECT_EQ(regRecord.ipcInfos[kPeer1LocalRank]->impInfo.rmtRegAddr,
+              reinterpret_cast<void*>(kRmt1));
+    // baseAddr written into both ipcInfos -- additional pin-down that
+    // both peers saw the same function-local baseAddr.
+    EXPECT_EQ(regRecord.ipcInfos[kPeer0LocalRank]->baseAddr,
+              reinterpret_cast<void*>(kBaseAddr));
+    EXPECT_EQ(regRecord.ipcInfos[kPeer1LocalRank]->baseAddr,
+              reinterpret_cast<void*>(kBaseAddr));
+}
