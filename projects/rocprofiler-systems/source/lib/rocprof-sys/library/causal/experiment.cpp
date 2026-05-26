@@ -66,8 +66,10 @@ experiment::sample::sample(const base_type& _b, std::uint64_t _c)
         for(const auto& itr : lineinfo.lines)
         {
             if(itr.inlined)
+            {
                 inlines.emplace_back(
                     binary::inlined_symbol{ itr.line, itr.location, itr.name });
+            }
         }
     }
 }
@@ -140,7 +142,9 @@ experiment::record::serialize(ArchiveT& ar, const unsigned)
     {
         ar(cereal::make_nvp("samples", _samples));
         for(auto& itr : _samples)
+        {
             samples.emplace_back(std::move(itr));
+        }
     }
     else
     {
@@ -175,7 +179,9 @@ experiment::serialize(ArchiveT& ar, const unsigned)
         fini_progress.clear();
         ar(cereal::make_nvp("progress_points", _ppts));
         for(auto itr : _ppts)
+        {
             fini_progress.emplace(itr.get_hash(), itr);
+        }
     }
     else
     {
@@ -183,12 +189,18 @@ experiment::serialize(ArchiveT& ar, const unsigned)
         {
             auto ppts = fini_progress;
             for(auto& pitr : ppts)
+            {
                 pitr.second.set_hash(pitr.first);
+            }
             for(auto pitr : init_progress)
+            {
                 ppts[pitr.first] -= pitr.second;
+            }
             _ppts.reserve(ppts.size());
             for(auto& pitr : ppts)
+            {
                 _ppts.emplace_back(pitr.second);
+            }
         }
         ar(cereal::make_nvp("progress_points", _ppts));
     }
@@ -293,7 +305,9 @@ experiment::stop()
     }
     std::sort(_prog_vals.begin(), _prog_vals.end());
     for(auto itr : _prog_vals)
+    {
         _prog_stats += itr;
+    }
 
     auto _nvals = _prog_vals.size();
     auto _medi  = (_nvals > 2) ? _prog_vals.at(_nvals / 2) : _prog_vals.front();
@@ -347,14 +361,20 @@ experiment::as_string() const
         << "%, period: " << std::setw(4) << std::fixed << std::setprecision(2)
         << (sampling_period / static_cast<double>(units::msec)) << " msec";
     if(!config::get_causal_end_to_end())
+    {
         _ss << ", duration: " << std::setw(5) << std::fixed << std::setprecision(3)
             << _dur << " sec";
+    }
     _ss << " :: experiment: " << fmt::format("0x{:X}", selection.address) << " ";
     if(selection.symbol_address > 0 && selection.address != selection.symbol_address)
+    {
         _ss << "(symbol@" << fmt::format("0x{:X}", selection.symbol_address) << ") ";
+    }
     if(!selection.symbol.file.empty() && selection.symbol.line > 0)
+    {
         _ss << "[" << filepath::basename(selection.symbol.file) << ":"
             << selection.symbol.line << "]";
+    }
 
     auto _patch = [](std::string _v) {
         auto _pos       = std::string::npos;
@@ -366,7 +386,9 @@ experiment::as_string() const
               strpair_t{ "::__cxx11::", "::" } })
         {
             while((_pos = _v.find(itr.first)) != std::string::npos)
+            {
                 _v = _v.replace(_pos, itr.first.length(), itr.second);
+            }
         }
         return _v;
     };
@@ -416,7 +438,9 @@ experiment::is_selected(unwind_addr_t _stack)
     if(is_active())
     {
         for(auto itr : _stack)
+        {
             if(itr > 0 && current_experiment_value.selection.contains(itr)) return true;
+        }
     }
     return false;
 }
@@ -427,7 +451,9 @@ experiment::is_selected(container::c_array<std::uint64_t> _stack)
     if(is_active())
     {
         for(auto itr : _stack)
+        {
             if(itr > 0 && current_experiment_value.selection.contains(itr)) return true;
+        }
     }
     return false;
 }
@@ -543,8 +569,10 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
         if(tim::filepath::open(ofs, _fname))
         {
             if(get_verbose() >= 0)
+            {
                 operation::file_output_message<experiment>{}(
                     _fname, std::string{ "causal_experiments" });
+            }
             ofs << oss.str() << "\n";
         }
         else
@@ -577,8 +605,10 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
     if(tim::filepath::open(ofs, _fname))
     {
         if(get_verbose() >= 0)
+        {
             operation::file_output_message<experiment>{}(
                 _fname, std::string{ "causal_experiments" });
+        }
 
         ofs << _existing.str();
         ofs << "startup\ttime=" << current_record.startup << "\n";
@@ -611,7 +641,9 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
 
             auto ppts = itr.fini_progress;
             for(auto pitr : itr.init_progress)
+            {
                 ppts[pitr.first] -= pitr.second;
+            }
 
             for(auto pitr : ppts)
             {
@@ -647,7 +679,9 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
             ofs << "samples\tlocation=" << itr.get_identifier()
                 << "\tcount=" << itr.count;
             if(config::get_debug())
+            {
                 ofs << "\taddress=" << fmt::format("0x{:X}", itr.address);
+            }
             ofs << "\n";
         }
     }

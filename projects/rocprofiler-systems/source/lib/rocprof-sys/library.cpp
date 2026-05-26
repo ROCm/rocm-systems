@@ -178,23 +178,28 @@ auto
 ensure_finalization(bool _static_init = false)
 {
     if(config::set_signal_handler(nullptr) == nullptr)
+    {
         config::set_signal_handler(&finalization_handler);
+    }
 
     if(_static_init)
     {
         auto _idx = threading::add_callback(&ensure_initialization);
         if(_idx < 0)
+        {
             throw exception<std::runtime_error>("failure adding threading callback");
+        }
     }
 
     if(config::set_signal_handler(nullptr) != &finalization_handler)
-
+    {
         throw std::runtime_error(fmt::format(
             "Assignment of signal handler failed. signal handler is {:P}, expected "
             "{:P}",
             fmt::format("0x{:X}",
                         reinterpret_cast<void*>(config::set_signal_handler(nullptr))),
             fmt::format("0x{:X}", reinterpret_cast<void*>(&finalization_handler))));
+    }
 
     const auto& _info = thread_info::init();
     const auto& _tid  = _info->index_data;
@@ -279,7 +284,7 @@ struct fini_bundle
     std::string as_string(bool _print_prefix = true) const
     {
         std::stringstream _ss;
-        if(_print_prefix && m_label.length() > 0) _ss << m_label << " : ";
+        if(_print_prefix && !m_label.empty()) _ss << m_label << " : ";
         size_t _idx = 0;
         ((_ss << (_idx++ > 0 ? ", " : "") << std::get<Tp>(m_data)), ...);
         return _ss.str();
@@ -406,7 +411,9 @@ invoke_external_pause_callbacks()
 {
     std::lock_guard<std::mutex> _lk{ external_pause_resume_callbacks_mutex };
     for(auto* _fn : external_pause_callbacks)
+    {
         _fn();
+    }
 }
 
 void
@@ -414,7 +421,9 @@ invoke_external_resume_callbacks()
 {
     std::lock_guard<std::mutex> _lk{ external_pause_resume_callbacks_mutex };
     for(auto* _fn : external_resume_callbacks)
+    {
         _fn();
+    }
 }
 
 }  // namespace
@@ -590,7 +599,9 @@ rocprofsys_init_tooling_hidden(void)
 
     pid_t expected = 0;
     if(!rocprofsys_init_tooling_done.compare_exchange_strong(expected, getpid()))
+    {
         return false;
+    }
 
     ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
 
@@ -749,7 +760,9 @@ rocprofsys_init_tooling_hidden(void)
         std::set<int> _comps{};
         // convert string into set of enumerations
         for(auto&& itr : tim::delimit(tim::settings::global_components()))
+        {
             _comps.emplace(tim::runtime::enumerate(itr));
+        }
         if(_comps.size() == 1 && _comps.find(TIMEMORY_WALL_CLOCK) != _comps.end())
         {
             // using wall_clock directly is lower overhead than using it via user_bundle
@@ -803,7 +816,9 @@ rocprofsys_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _
     // we want to guard against multiple calls which with different arguments
     if(_count > 0 &&
        std::tie(_args.first, _args.second) == std::tie(_mode_sv, _is_binary_rewrite))
+    {
         return;
+    }
 
     if(_count > 0 &&
        std::tie(_args.first, _args.second) != std::tie(_mode_sv, _is_binary_rewrite))
@@ -891,7 +906,9 @@ rocprofsys_reset_preload_hidden(void)
             _modified_preload += fmt::format(":{}", itr);
         }
         if(!_modified_preload.empty() && _modified_preload.find(':') == 0)
+        {
             _modified_preload = _modified_preload.substr(1);
+        }
 
         tim::set_env("LD_PRELOAD", _modified_preload, 1);
     }
@@ -1210,7 +1227,9 @@ rocprofsys_finalize_hidden(void)
             {
                 auto&& _path = itr.pathname;
                 if(!_path.empty() && _path.at(0) != '[' && filepath::exists(_path))
+                {
                     _libs.emplace(_path);
+                }
             }
             ar(tim::cereal::make_nvp("memory_maps_files", _libs),
                tim::cereal::make_nvp("memory_maps", _maps));
@@ -1220,7 +1239,9 @@ rocprofsys_finalize_hidden(void)
         static auto  session_id            = 0;
 
         if(attach_add_session_id)
+        {
             settings::default_process_suffix() = fmt::format("%pid%-{}", session_id++);
+        }
 
         // Disable Timemory file output for disabled ranks
         if(!config::output_filtering::is_file_output_enabled_for_current_mpi_rank())

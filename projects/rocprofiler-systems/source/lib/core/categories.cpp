@@ -92,7 +92,9 @@ setup()
             // only disable categories if not finalized since this might run in background
             // during finalization and disable output of data in those categories
             if(get_state() < State::Finalized)
+            {
                 disable_categories(config::get_enabled_categories());
+            }
             return get_state() < State::Finalized;
         };
 
@@ -101,10 +103,14 @@ setup()
                         // ensure all categories are disabled before proceeding
                         // if a delay is requested
                         if(_trace_specs.front().delay > 1.0e-3)
+                        {
                             disable_categories(config::get_enabled_categories());
+                        }
                         _prom->set_value();
                         for(const auto& itr : _trace_specs)
+                        {
                             itr(_trace_stages);
+                        }
                     },
                      &_promise }
             .detach();

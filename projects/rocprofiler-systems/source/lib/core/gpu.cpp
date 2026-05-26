@@ -301,9 +301,13 @@ get_processor_handles()
                 for(const auto& xcp : gpu_metrics.xcp_stats)
                 {
                     if(!v_busy_supported && has_valid_u16(xcp.vcn_busy))
+                    {
                         v_busy_supported = true;
+                    }
                     if(!j_busy_supported && has_valid_u16(xcp.jpeg_busy))
+                    {
                         j_busy_supported = true;
+                    }
                     if(v_busy_supported && j_busy_supported) break;
                 }
 

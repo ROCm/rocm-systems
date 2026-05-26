@@ -47,7 +47,9 @@ dimensions_info_callback(rocprofiler_counter_id_t /*id*/,
         static_cast<std::vector<rocprofiler_record_dimension_info_t>*>(user_data);
     dims->reserve(num_dims);
     for(size_t j = 0; j < num_dims; j++)
+    {
         dims->emplace_back(dim_info[j]);
+    }
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
@@ -133,7 +135,9 @@ query_gpu_hw_counters()
     auto gpu_agent_pairs = std::vector<std::pair<size_t, const agent*>>{};
     gpu_agent_pairs.reserve(gpu_agents_v.size());
     for(const auto& a : gpu_agents_v)
+    {
         gpu_agent_pairs.emplace_back(a->device_type_index, a.get());
+    }
 
     auto agent_counters = get_agent_counter_info(gpu_agent_pairs);
 
@@ -152,18 +156,30 @@ query_gpu_hw_counters()
         std::sort(counters.begin(), counters.end(),
                   [](const counter_info& lhs, const counter_info& rhs) {
                       if(lhs.info.is_constant && rhs.info.is_constant)
+                      {
                           return lhs.info.id < rhs.info.id;
+                      }
                       else if(lhs.info.is_constant)
+                      {
                           return true;
+                      }
                       else if(rhs.info.is_constant)
+                      {
                           return false;
+                      }
 
                       if(!lhs.info.is_derived && !rhs.info.is_derived)
+                      {
                           return lhs.info.id < rhs.info.id;
+                      }
                       else if(!lhs.info.is_derived)
+                      {
                           return true;
+                      }
                       else if(!rhs.info.is_derived)
+                      {
                           return false;
+                      }
 
                       return lhs.info.id < rhs.info.id;
                   });

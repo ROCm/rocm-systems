@@ -20,7 +20,9 @@ function_signature::function_signature(std::string_view _ret, std::string_view _
 , m_file(_file)
 {
     if(m_file.find('/') != std::string_view::npos)
+    {
         m_file = m_file.substr(m_file.find_last_of('/') + 1);
+    }
 }
 
 function_signature::function_signature(std::string_view _ret, std::string_view _name,
@@ -32,7 +34,9 @@ function_signature::function_signature(std::string_view _ret, std::string_view _
 {
     m_params = "(";
     for(const auto& itr : _params)
+    {
         m_params.append(itr + ", ");
+    }
     if(!_params.empty()) m_params = m_params.substr(0, m_params.length() - 2);
     m_params += ")";
 }
@@ -58,31 +62,45 @@ function_signature::get(bool _all, bool _save) const
             std::stringstream _ss{};
             if(_row == 0 && _col == 0) return std::string{};
             if(_col > 0)
+            {
                 _ss << "{" << _row << "," << _col << "}";
+            }
             else
+            {
                 _ss << "{" << _row << "}";
+            }
             return _ss.str();
         };
 
         auto _rc1 = _row_col_str(m_row.first, m_col.first);
         auto _rc2 = _row_col_str(m_row.second, m_col.second);
         if(m_info_end && !_rc1.empty() && !_rc2.empty() && _rc1 != _rc2)
+        {
             ss << " [" << _rc1 << "-" << _rc2 << "]";
+        }
         else if(m_info_end && !_rc1.empty() && !_rc2.empty() && _rc1 == _rc2)
+        {
             ss << " [" << _rc1 << "]";
+        }
         else if(m_info_end && !_rc1.empty() && _rc2.empty())
+        {
             ss << " [" << _rc1 << "]";
+        }
         else if(!m_info_end && !_rc1.empty())
+        {
             ss << " [" << _rc1 << "]";
+        }
         else if(m_loop_num < std::numeric_limits<std::uint32_t>::max())
+        {
             ss << " [loop#" << m_loop_num << "]";
+        }
         else
             errprintf(3, "line info for %s is empty! [{%s}] [{%s}]\n", m_name.c_str(),
                       _rc1.c_str(), _rc2.c_str());
     }
-    if((_all || use_file_info) && m_file.length() > 0) ss << " [" << m_file;
+    if((_all || use_file_info) && !m_file.empty()) ss << " [" << m_file;
     if((_all || use_line_info) && m_row.first > 0) ss << ":" << m_row.first;
-    if((_all || use_file_info) && m_file.length() > 0) ss << "]";
+    if((_all || use_file_info) && !m_file.empty()) ss << "]";
 
     if(_save) m_signature = ss.str();
     return ss.str();
@@ -96,35 +114,47 @@ function_signature::get_coverage(bool _basic_block) const
     ss << m_name << m_params;
     if(_basic_block && m_loop && m_info_beg)
     {
-        if(m_file.length() > 0) ss << " [" << m_file << "]";
+        if(!m_file.empty()) ss << " [" << m_file << "]";
         auto _row_col_str = [](unsigned long _row, unsigned long _col) {
             std::stringstream _ss{};
             if(_row == 0 && _col == 0) return std::string{};
             if(_col > 0)
+            {
                 _ss << "{" << _row << "," << _col << "}";
+            }
             else
+            {
                 _ss << "{" << _row << "}";
+            }
             return _ss.str();
         };
 
         auto _rc1 = _row_col_str(m_row.first, m_col.first);
         auto _rc2 = _row_col_str(m_row.second, m_col.second);
         if(m_info_end && !_rc1.empty() && !_rc2.empty() && _rc1 != _rc2)
+        {
             ss << " [" << _rc1 << "-" << _rc2 << "]";
+        }
         else if(m_info_end && !_rc1.empty() && !_rc2.empty() && _rc1 == _rc2)
+        {
             ss << " [" << _rc1 << "]";
+        }
         else if(m_info_end && !_rc1.empty() && _rc2.empty())
+        {
             ss << " [" << _rc1 << "]";
+        }
         else if(!m_info_end && !_rc1.empty())
+        {
             ss << " [" << _rc1 << "]";
+        }
         else
             errprintf(3, "line info for %s is empty!\n", m_name.c_str());
     }
     else
     {
-        if(m_file.length() > 0) ss << " [" << m_file;
+        if(!m_file.empty()) ss << " [" << m_file;
         if(m_row.first > 0) ss << ":" << m_row.first;
-        if(m_file.length() > 0) ss << "]";
+        if(!m_file.empty()) ss << "]";
     }
 
     return ss.str();

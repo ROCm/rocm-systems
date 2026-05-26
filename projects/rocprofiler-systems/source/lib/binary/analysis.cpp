@@ -163,7 +163,9 @@ get_binary_info(const std::vector<std::string>&  _files,
     for(auto& itr : _data)
     {
         for(const auto& mitr : _maps)
+        {
             if(itr.bfd->name == mitr.pathname) itr.mappings.emplace_back(mitr);
+        }
     }
 
     for(auto& itr : _data)
@@ -180,7 +182,9 @@ get_binary_info(const std::vector<std::string>&  _files,
     }
 
     for(auto& itr : _data)
+    {
         itr.sort();
+    }
 
     return _data;
 }
@@ -219,16 +223,22 @@ lookup_ipaddr_entry(uintptr_t _addr, unw_context_t* _context_p,
             };
 
             for(const auto& itr : binary::get_link_map("librocprof-sys.so", "", ""))
+            {
                 _insert_exclude_range(itr.real());
+            }
 
             for(const auto& itr : binary::get_link_map("librocprof-sys-dl.so", "", ""))
+            {
                 _insert_exclude_range(itr.real());
+            }
 
             return _exclude_range_v;
         }();
 
         for(auto itr : _exclude_range)
+        {
             if(itr.contains(_addr)) return std::optional<tim::unwind::processed_entry>{};
+        }
     }
 
     // NOLINTNEXTLINE(readability-misleading-indentation)

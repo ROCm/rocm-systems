@@ -149,8 +149,10 @@ counter_storage::counter_storage(const client_data* _tool_data, std::uint64_t _d
                              [storage_ptr = storage.get(), metric_name = metric_name,
                               metric_description = metric_description]() {
                                  if(storage_ptr)
+                                 {
                                      counter_storage::write(storage_ptr, metric_name,
                                                             metric_description);
+                                 }
                              });
     }
     else

@@ -41,7 +41,9 @@ main(int argc, char** argv)
         auto _arg = std::string_view{ argv[arg_idx] };
         if(_arg == "--" || _arg == "-?" || _arg == "-h" || _arg == "--help" ||
            _arg == "--version")
+        {
             _has_double_hyphen = true;
+        }
     }
 
     std::vector<char*> _argv = {};
@@ -68,7 +70,9 @@ main(int argc, char** argv)
         {
             auto _env = _base_env;
             for(const auto& eitr : citr)
+            {
                 update_env(_env, eitr.first, eitr.second);
+            }
             auto _prefix = std::to_string(_n++) + ":  ";
             utils::print_environment(_env, get_updated_envs(), true, _prefix);
         }
@@ -80,7 +84,9 @@ main(int argc, char** argv)
         {
             auto _env = _base_env;
             for(const auto& eitr : _causal_env.front())
+            {
                 update_env(_env, eitr.first, eitr.second);
+            }
             auto _verbose = get_verbose();
             if(_verbose >= 0)
                 utils::print_environment(_env, get_updated_envs(), _verbose >= 1, "0: ");
@@ -114,7 +120,9 @@ main(int argc, char** argv)
 
                 auto _env = _base_env;
                 for(const auto& eitr : citr)
+                {
                     update_env(_env, eitr.first, eitr.second);
+                }
                 auto _verbose = get_verbose();
                 if(_verbose >= 0)
                     utils::print_environment(_env, get_updated_envs(), _verbose >= 1,

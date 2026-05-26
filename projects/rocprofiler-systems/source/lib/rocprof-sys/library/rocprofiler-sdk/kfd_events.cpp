@@ -166,7 +166,9 @@ get_tool_agent(const client_data* tool_data, rocprofiler_agent_id_t agent_id)
     const auto* agent = tool_data->get_gpu_tool_agent(agent_id);
     if(agent) return agent;
     for(const auto& itr : tool_data->cpu_agents)
+    {
         if(agent_id.handle == itr.agent->handle) return &itr;
+    }
     return nullptr;
 }
 

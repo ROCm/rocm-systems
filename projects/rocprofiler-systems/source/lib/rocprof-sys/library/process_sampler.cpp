@@ -65,7 +65,9 @@ sampler::poll(std::atomic<State>* _state, nsec_t _interval, promise_t* _ready)
     if(_ready) _ready->set_value();
 
     for(auto& itr : instances)
+    {
         itr->config();
+    }
 
     LOG_DEBUG(
         "Background process sampling polling at an interval of {:.2f} seconds...",
@@ -88,7 +90,9 @@ sampler::poll(std::atomic<State>* _state, nsec_t _interval, promise_t* _ready)
         if(sampler_paused.load(std::memory_order_relaxed)) continue;
         get_sampler_is_sampling().store(true);
         for(auto& itr : instances)
+        {
             itr->sample();
+        }
         get_sampler_is_sampling().store(false);
         if(_has_duration && _now >= _end) break;
         _now = std::chrono::steady_clock::now() + _interval;
@@ -133,7 +137,9 @@ sampler::setup()
     _pmc->pause        = []() { pmc::pause(); };
 
     for(auto& itr : instances)
+    {
         itr->setup();
+    }
 
     polling_finished = std::make_unique<promise_t>();
 
@@ -159,7 +165,9 @@ sampler::shutdown()
 
     // shutdown all components
     for(auto& itr : instances)
+    {
         itr->shutdown();
+    }
 
     auto& _thread = get_thread();
     if(_thread)
@@ -222,7 +230,9 @@ void
 sampler::post_process()
 {
     for(auto& itr : instances)
+    {
         itr->post_process();
+    }
 
     instances.clear();
 }

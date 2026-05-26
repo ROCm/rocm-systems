@@ -110,7 +110,9 @@ static std::string
 strip_flag_prefix(std::string_view name)
 {
     if(name.size() > 2 && name.compare(0, 2, "--") == 0)
+    {
         return std::string{ name.substr(2) };
+    }
     return std::string{ name };
 }
 
@@ -516,7 +518,9 @@ line_contains_flag(const std::string& line, const std::string& flag)
     {
         char next = stripped[end];
         if(next != ' ' && next != ',' && next != '=' && next != '\t' && next != '[')
+        {
             return false;
+        }
     }
     return true;
 }
@@ -634,7 +638,9 @@ print_help_for_topic(const std::string& captured, std::string_view topic,
     std::string              line;
     std::vector<std::string> lines;
     while(std::getline(iss, line))
+    {
         lines.push_back(line);
+    }
 
     // Find section boundaries
     struct Section
@@ -652,9 +658,13 @@ print_help_for_topic(const std::string& captured, std::string_view topic,
         if(is_section_header(lines[line_idx], bracket_name))
         {
             if(sections.empty())
+            {
                 preamble_end = line_idx;
+            }
             else
+            {
                 sections.back().end = line_idx;
+            }
             sections.push_back({ line_idx, lines.size(), bracket_name });
         }
     }
@@ -669,7 +679,9 @@ print_help_for_topic(const std::string& captured, std::string_view topic,
         {
             found = true;
             for(size_t line_idx = sec.start; line_idx < sec.end; ++line_idx)
+            {
                 out << lines[line_idx] << '\n';
+            }
         }
     }
 
@@ -696,12 +708,16 @@ print_help_for_domain(const std::string& captured, std::string_view domain,
     std::string              line;
     std::vector<std::string> lines;
     while(std::getline(iss, line))
+    {
         lines.push_back(line);
+    }
 
     // Print header
     std::string upper_domain{ domain };
     for(auto& c : upper_domain)
+    {
         c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    }
     out << upper_domain << " OPTIONS (" << entry.description << ")\n\n";
 
     // Skip lines before "Options:" to avoid matching flags in the usage summary

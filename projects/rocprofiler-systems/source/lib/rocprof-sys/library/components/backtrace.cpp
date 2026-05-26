@@ -73,7 +73,9 @@ backtrace::get() const
         std::set<std::string>{ "funlockfile", "killpg", "__restore_rt" };
     // remove some known functions which are by-products of interrupts
     while(!_v.empty() && _known_excludes.find(_v.back().name) != _known_excludes.end())
+    {
         _v.pop_back();
+    }
 
     return _v;
 }

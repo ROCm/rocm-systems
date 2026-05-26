@@ -102,7 +102,9 @@ void
 forward_signals(const std::set<int>& _signals)
 {
     for(auto itr : _signals)
+    {
         create_signal_handler(itr, get_signal_handler(itr), &forward_signal);
+    }
 }
 
 void
@@ -262,7 +264,9 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
             std::stringstream msg;
             msg << "Error in command:";
             for(int i = 0; i < argc; ++i)
+            {
                 msg << " " << argv[i];
+            }
             msg << "\n\n";
             stream(std::cerr, color::fatal()) << msg.str();
             std::cerr << std::flush;
@@ -313,8 +317,10 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
 
     auto _cols = std::get<0>(console::get_columns());
     if(_cols > parser.get_help_width() + 8)
+    {
         parser.set_description_width(
             std::min<int>(_cols - parser.get_help_width() - 8, 120));
+    }
 
     parser.start_group("DEBUG OPTIONS", "");
 
@@ -649,9 +655,13 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
 
     auto _cerr = parser.parse_args(_inpv.size(), _inpv.data());
     if(help_check(parser, argc, argv))
+    {
         help_action(parser);
+    }
     else if(_cerr)
+    {
         throw std::runtime_error(_cerr.what());
+    }
 
     if(_niterations < 1) _niterations = 1;
     auto _get_size = [](const auto& _v) { return std::max<size_t>(_v.size(), 1); };
@@ -716,7 +726,9 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
     for(std::int64_t i = 0; i < _niterations; ++i)
     {
         for(const auto& itr : _causal_envs_tmp)
+        {
             _causal_envs.emplace_back(itr);
+        }
     }
 
     if(_generate_configs)
@@ -756,7 +768,9 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
             }
         }
         for(const auto& itr : _omni_env_m)
+        {
             _omni_env.emplace_back(itr.first, itr.second);
+        }
 
         _causal_envs_tmp = std::move(_causal_envs);
         _causal_envs.clear();
@@ -765,20 +779,28 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
                         const std::map<std::string_view, std::string>& _data) {
                 size_t _width = 0;
                 for(const auto& itr : _omni_env)
+                {
                     _width = std::max(_width, itr.first.length());
+                }
 
                 for(const auto& itr : _data)
+                {
                     _width = std::max(_width, itr.first.length());
+                }
 
                 _os << "# rocprofsys common settings\n";
                 for(const auto& itr : _omni_env)
+                {
                     _os << std::setw(_width + 1) << std::left << itr.first << " = "
                         << itr.second << "\n";
+                }
 
                 _os << "\n# rocprofsys causal settings\n";
                 for(const auto& itr : _data)
+                {
                     _os << std::setw(_width + 1) << std::left << itr.first << " = "
                         << itr.second << "\n";
+                }
             };
 
         int nwidth = (std::log10(_causal_envs_tmp.size()) + 1);
@@ -800,8 +822,10 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
     }
 
     if(_reset)
+    {
         _causal_envs.front().emplace(std::string_view{ "ROCPROFSYS_CAUSAL_FILE_RESET" },
                                      std::string{ "true" });
+    }
 
     return _outv;
 }

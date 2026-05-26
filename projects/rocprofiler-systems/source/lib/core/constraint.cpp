@@ -39,7 +39,9 @@ clock_name(std::string _v)
 {
     constexpr auto _clock_prefix = std::string_view{ "clock_" };
     for(auto& itr : _v)
+    {
         itr = tolower(itr);
+    }
     auto _pos = _v.find(_clock_prefix);
     if(_pos == 0) _v = _v.substr(_pos + _clock_prefix.length());
     if(_v == "process_cputime_id") _v = "cputime";
@@ -88,7 +90,9 @@ find_clock_identifier(const Tp& _v)
     auto _choices = std::vector<std::string>{};
     _choices.reserve(accepted_clock_ids.size());
     for(const auto& itr : accepted_clock_ids)
+    {
         _choices.emplace_back(itr.as_string());
+    }
 
     throw std::runtime_error(fmt::format("Unknown clock id {}: {}. Valid choices: {}",
                                          _descript, _v, fmt::join(_choices, "")));
@@ -182,7 +186,9 @@ clock_identifier::as_string() const
 {
     auto _name = name;
     for(auto& itr : _name)
+    {
         itr = tolower(itr);
+    }
     auto _ss = std::stringstream{};
     _ss << _name << "(id=" << raw_name << ", value=" << value << ")";
     return _ss.str();
@@ -241,7 +247,9 @@ spec::operator()(const stages& _stages) const
     if(_n < 1) _n = std::numeric_limits<std::uint64_t>::max();
 
     while(get_state() < State::Active)
+    {
         sleep(1 * units::usec);
+    }
 
     for(std::uint64_t i = 0; i < _n; ++i)
     {
@@ -312,7 +320,9 @@ get_trace_specs()
         if(!_periods_v.empty())
         {
             for(auto itr : tim::delimit(_periods_v, " ;\t\n"))
+            {
                 _v.emplace_back(itr);
+            }
         }
     }
 

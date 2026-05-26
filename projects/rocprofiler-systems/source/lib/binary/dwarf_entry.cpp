@@ -23,7 +23,9 @@ get_dwarf_address_ranges(Dwarf_Die* _die)
     auto _ranges = std::vector<address_range>{};
 
     if(dwarf_tag(_die) != DW_TAG_compile_unit && dwarf_tag(_die) != DW_TAG_subprogram)
+    {
         return _ranges;
+    }
 
     Dwarf_Addr _low_pc;
     Dwarf_Addr _high_pc;

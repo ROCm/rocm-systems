@@ -173,9 +173,13 @@ backtrace::sample(int _sig)
     if(_sig == cputime_signal)
     {
         if(causal::experiment::is_active())
+        {
             causal::delay::process();
+        }
         else
+        {
             _set_current_selection(m_stack);
+        }
     }
     else if(_sig == realtime_signal)
     {
@@ -196,7 +200,9 @@ backtrace::sample(int _sig)
             // the cputime signals. This is rare but has been observed
             //
             if(_select_count == 0 && _select_zeros >= select_ival)
+            {
                 _set_current_selection(m_stack);
+            }
         }
     }
     else

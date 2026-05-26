@@ -124,7 +124,9 @@ get_causal_sampler_signals(std::int64_t _tid)
 {
     auto& _data = get_causal_sampler_signals();
     if(static_cast<size_t>(_tid) >= _data->size())
+    {
         _data->resize(_tid + 1, std::set<int>{});
+    }
     return _data->at(_tid);
 }
 
@@ -236,7 +238,9 @@ configure(bool _setup, std::int64_t _tid)
         // if the thread state is disabled or completed, return
         if(_info && _info->index_data->sequent_value == _tid &&
            get_thread_state() == ThreadState::Disabled)
+        {
             return std::set<int>{};
+        }
 
         (void) get_debug_sampling();  // make sure query in sampler does not allocate
         assert(_tid == threading::get_id());
@@ -355,7 +359,9 @@ configure(bool _setup, std::int64_t _tid)
         _running = false;
 
         if(_tid == threading::get_id() && !_signal_types.empty())
+        {
             block_signals(_signal_types);
+        }
 
         if(_tid == 0)
         {

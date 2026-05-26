@@ -585,7 +585,9 @@ extern "C"
     void rocprofsys_preinit_library(void)
     {
         if(rocprofsys::common::get_env("ROCPROFSYS_MONOCHROME", tim::log::monochrome()))
+        {
             tim::log::monochrome() = true;
+        }
     }
 
     int rocprofsys_preload_library(void)
@@ -621,7 +623,9 @@ extern "C"
         }
 
         if(dl::get_instrumented() < dl::InstrumentMode::PythonProfile)
+        {
             dl::rocprofsys_preinit();
+        }
 
         bool _invoked = false;
         ROCPROFSYS_DL_INVOKE_STATUS(_invoked, get_indirect().rocprofsys_init_f, a, b, c);
@@ -1166,7 +1170,9 @@ get_default_mode()
     {
         if(itr.find("librocprof-sys-rt.so") != std::string::npos ||
            itr.find("libdyninstAPI_RT.so") != std::string::npos)
+        {
             return "trace";
+        }
     }
 
     return "sampling";
@@ -1218,13 +1224,19 @@ rocprofsys_postinit(std::string _exe)
         case InstrumentMode::ProcessAttach:
         {
             if(_exe.empty())
+            {
                 _exe = tim::filepath::readlink(join('/', "/proc", getpid(), "exe"));
+            }
 
             rocprofsys_init_tooling();
             if(_exe.empty())
+            {
                 rocprofsys_push_trace("main");
+            }
             else
+            {
                 rocprofsys_push_trace(basename(_exe.c_str()));
+            }
             break;
         }
         case InstrumentMode::PythonProfile:
@@ -1504,8 +1516,10 @@ extern "C"
         _reentry = 1;
 
         if(!::rocprofsys::dl::main_real)
+        {
             throw std::runtime_error("[rocprof-sys][dl] Unsuccessful wrapping of main: "
                                      "real_main function is nullptr.");
+        }
 
         if(envp)
         {
@@ -1515,7 +1529,9 @@ extern "C"
                 auto _env_v = std::string_view{ envp[_idx++] };
                 if(_env_v.find("ROCPROFSYS") != 0 &&
                    _env_v.find("librocprof-sys") == std::string_view::npos)
+                {
                     continue;
+                }
                 auto _pos = _env_v.find('=');
                 if(_pos < _env_v.length())
                 {

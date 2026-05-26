@@ -251,7 +251,9 @@ void
 set_sampling_on_all_future_threads(bool _v)
 {
     for(size_t i = 0; i < max_supported_threads; ++i)
+    {
         get_sampling_on_child_threads_history(i).emplace_back(_v);
+    }
 }
 
 pid_t

@@ -68,11 +68,15 @@ ignore_setting(const Tp& _v, const format_options& fmt_opts)
     if(category_view.count("deprecated") == 0 &&
        category_view.count("settings::deprecated") == 0 &&
        _v->get_categories().count("deprecated") > 0)
+    {
         return true;
+    }
     if(!fmt_opts.print_advanced && category_view.count("advanced") == 0 &&
        category_view.count("settings::advanced") == 0 &&
        _v->get_categories().count("advanced") > 0)
+    {
         return true;
+    }
     return false;
 }
 }  // namespace
@@ -113,7 +117,9 @@ struct setting_serialization<tsettings<Tp>, custom_setting_serializer>
         if constexpr(concepts::is_string_type<Tp>::value)
         {
             if(_val.get_name() != "time_format")
+            {
                 _val.set(settings::format(_val.get(), settings::instance()->get_tag()));
+            }
             if(_val.get_name() == "config_file")
             {
                 _save = std::make_shared<value_type>(_val);
@@ -133,11 +139,17 @@ struct setting_serialization<tsettings<Tp>, custom_setting_serializer>
             _ar(cereal::make_nvp("name", _val.get_name()));
             _ar(cereal::make_nvp("value", _v));
             if(custom_setting_serializer::options[DESC])
+            {
                 _ar(cereal::make_nvp("description", _val.get_description()));
+            }
             if(custom_setting_serializer::options[CATEGORY])
+            {
                 _ar(cereal::make_nvp("description", _val.get_categories()));
+            }
             if(custom_setting_serializer::options[VAL])
+            {
                 _ar(cereal::make_nvp("choices", _val.get_choices()));
+            }
             _ar.finishNode();
         }
 
@@ -196,7 +208,9 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
         _output_dir = std::string{ (_absolute) ? "/" : "" } + _dirs.front();
         _dirs.erase(_dirs.begin());
         for(const auto& itr : _dirs)
+        {
             _output_dir = TIMEMORY_JOIN('/', _output_dir, itr);
+        }
     }
     _output_dir += "/";
 
@@ -215,11 +229,15 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
     }
 
     if(_fmts.empty() && _config_fmts.size() == 1)
+    {
         _fmts = _config_fmts;
+    }
     else if(!_fmts.empty())
     {
-        for(auto& itr : _config_fmts)
+        for(const auto& itr : _config_fmts)
+        {
             _fmts.emplace(itr);
+        }
     }
 
     update_choices(_settings);
@@ -250,8 +268,10 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
             if(fmt_opts.force_config)
             {
                 if(settings::verbose() >= 1)
+                {
                     std::cout << "[rocprof-sys-avail] File '" << _fname
                               << "' exists. Overwrite force...\n";
+                }
             }
             else
             {
@@ -266,8 +286,10 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
         if(filepath::open(_ofs, _fname))
         {
             if(settings::verbose() >= 0)
+            {
                 printf("[rocprof-sys-avail] Outputting %s configuration file '%s'...\n",
                        _type.c_str(), _fname.c_str());
+            }
         }
         else
         {
@@ -306,7 +328,9 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
         if(preset_name.empty()) preset_name = _config_file;
         preset_json["metadata"]["name"] = preset_name;
         if(!fmt_opts.preset_description.empty())
+        {
             preset_json["metadata"]["description"] = fmt_opts.preset_description;
+        }
 
         auto _fname = settings::compose_output_filename(_config_file, ".json", false, -1,
                                                         true, _output_dir);
@@ -335,15 +359,19 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
         {
             if(exclude_setting(itr.second->get_env_name())) continue;
             for(const auto& citr : itr.second->get_categories())
+            {
                 if(citr == "deprecated") continue;
+            }
             if(ignore_setting(itr.second, fmt_opts)) continue;
             _data.emplace_back(itr.second);
         }
 
         if(fmt_opts.alphabetical)
+        {
             std::sort(_data.begin(), _data.end(), [](auto _lhs, auto _rhs) {
                 return _lhs->get_name() < _rhs->get_name();
             });
+        }
         else
         {
             _settings->ordering();
@@ -362,20 +390,28 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
                 {
                     if(_lhs->get_env_name().find(itr) == 0 &&
                        _rhs->get_env_name().find(itr) != 0)
+                    {
                         return true;
+                    }
                     if(_rhs->get_env_name().find(itr) == 0 &&
                        _lhs->get_env_name().find(itr) != 0)
+                    {
                         return false;
+                    }
                 }
                 for(const auto* itr :
                     { "ROCPROFSYS_SUPPRESS_PARSING", "ROCPROFSYS_SUPPRESS_CONFIG" })
                 {
                     if(_lhs->get_env_name().find(itr) == 0 &&
                        _rhs->get_env_name().find(itr) != 0)
+                    {
                         return false;
+                    }
                     if(_rhs->get_env_name().find(itr) == 0 &&
                        _lhs->get_env_name().find(itr) != 0)
+                    {
                         return true;
+                    }
                 }
                 return _lhs->get_name() < _rhs->get_name();
             });
@@ -411,14 +447,18 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
                     _line << " " << _str;
                 };
                 for(auto& iitr : _desc)
+                {
                     _write(iitr);
+                }
                 _ss << _line.str() << "\n#\n";
             }
             if(_options[CATEGORY] || fmt_opts.all_info)
             {
                 _ss << "# categories:\n";
                 for(const auto& iitr : itr->get_categories())
+                {
                     _ss << "#    " << iitr << "\n";
+                }
                 _ss << "#\n";
             }
             if((_options[VAL] || fmt_opts.all_info) && !itr->get_choices().empty())
@@ -439,7 +479,9 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
             auto _v = itr->as_string();
             if(itr->get_name() == "config_file") _v = {};
             if(!_v.empty() && fmt_opts.expand_keys && itr->get_name() != "time_format")
+            {
                 _v = settings::format(_v, _settings->get_tag());
+            }
             _ss << _v << "\n";
         }
         auto _fname = settings::compose_output_filename(_config_file, _txt_ext, false, -1,
@@ -464,7 +506,9 @@ update_choices(const std::shared_ptr<settings>& _settings)
     std::vector<info_type> _info = get_component_info<TIMEMORY_NATIVE_COMPONENTS_END>();
 
     if(_settings->get_verbose() >= 2 || _settings->get_debug())
+    {
         printf("[rocprof-sys-avail] # of component found: %zu\n", _info.size());
+    }
 
     _info.erase(std::remove_if(_info.begin(), _info.end(),
                                [](const auto& itr) {
@@ -476,7 +520,9 @@ update_choices(const std::shared_ptr<settings>& _settings)
                                          "printer" })
                                    {
                                        if(itr.name().find(nitr) != std::string::npos)
+                                       {
                                            return true;
+                                       }
                                    }
                                    return false;
                                }),
@@ -485,10 +531,14 @@ update_choices(const std::shared_ptr<settings>& _settings)
     std::vector<std::string> _component_choices = {};
     _component_choices.reserve(_info.size());
     for(const auto& itr : _info)
+    {
         _component_choices.emplace_back(itr.id_type());
+    }
     if(_settings->get_verbose() >= 2 || _settings->get_debug())
+    {
         printf("[rocprof-sys-avail] # of component choices: %zu\n",
                _component_choices.size());
+    }
     _settings->find("ROCPROFSYS_TIMEMORY_COMPONENTS")
         ->second->set_choices(_component_choices);
 }

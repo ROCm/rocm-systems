@@ -373,17 +373,25 @@ backtrace_metrics::init_perfetto(std::int64_t _tid, valid_array_t _valid)
     if(!perfetto_counter_track<perfetto_rusage>::exists(_tid))
     {
         if(get_valid(category::thread_cpu_time{}, _valid))
+        {
             perfetto_counter_track<perfetto_rusage>::emplace(
                 _tid, fmt::format("Thread CPU time {} (S)", _tid_name), "sec");
+        }
         if(get_valid(category::thread_peak_memory{}, _valid))
+        {
             perfetto_counter_track<perfetto_rusage>::emplace(
                 _tid, fmt::format("Thread Peak Memory Usage {} (S)", _tid_name), "MB");
+        }
         if(get_valid(category::thread_context_switch{}, _valid))
+        {
             perfetto_counter_track<perfetto_rusage>::emplace(
                 _tid, fmt::format("Thread Context Switches {} (S)", _tid_name));
+        }
         if(get_valid(category::thread_page_fault{}, _valid))
+        {
             perfetto_counter_track<perfetto_rusage>::emplace(
                 _tid, fmt::format("Thread Page Faults {} (S)", _tid_name));
+        }
     }
 
     if(!perfetto_counter_track<hw_counters>::exists(_tid) &&
@@ -528,7 +536,9 @@ backtrace_metrics::operator-=(const backtrace_metrics& _rhs)
     if(_lhs(type_list<hw_counters>{}) && _lhs(category::thread_hardware_counter{}))
     {
         for(size_t i = 0; i < _lhs.m_hw_counter.size(); ++i)
+        {
             _lhs.m_hw_counter.at(i) -= _rhs.m_hw_counter.at(i);
+        }
     }
 
     return _lhs;

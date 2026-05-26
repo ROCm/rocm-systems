@@ -96,7 +96,9 @@ callchain::get() const
     {
         while(!itr.second.empty() &&
               _known_excludes.find(itr.second.back().name) != _known_excludes.end())
+        {
             itr.second.pop_back();
+        }
     }
 
     std::sort(_v.begin(), _v.end(),
@@ -181,9 +183,13 @@ callchain::sample(int signo)
                 // skip the first instance of current IP but allow after that since this
                 // might be a recursive call
                 if(ditr == _ip && _skip_ip)
+                {
                     _skip_ip = false;
+                }
                 else
+                {
                     _data.data.emplace_back(ditr);
+                }
                 if(_data.data.size() == _data.data.capacity()) break;
             }
             if(!_data.data.empty()) m_data.emplace_back(_data);

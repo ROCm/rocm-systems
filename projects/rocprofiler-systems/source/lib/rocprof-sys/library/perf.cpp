@@ -183,9 +183,13 @@ perf_event::open(double _freq, std::uint32_t _batch_size, pid_t _pid, int _cpu)
     struct perf_event_attr _pe;
 
     if(_batch_size > 0)
+    {
         m_batch_size = _batch_size;
+    }
     else
+    {
         _batch_size = m_batch_size;
+    }
 
     memset(&_pe, 0, sizeof(_pe));
     _pe.type           = PERF_TYPE_SOFTWARE;
@@ -548,7 +552,9 @@ perf_event::record::locate_field() const
     // pid, tid
     if constexpr(SampleT == sample::pid_tid) return reinterpret_cast<Tp>(p);
     if(m_source != nullptr && m_source->is_sampling(sample::pid_tid))
+    {
         p += sizeof(std::uint32_t) + sizeof(std::uint32_t);
+    }
 
     // time
     if constexpr(SampleT == sample::time) return reinterpret_cast<Tp>(p);
@@ -568,17 +574,23 @@ perf_event::record::locate_field() const
     // stream_id
     if constexpr(SampleT == sample::stream_id) return reinterpret_cast<Tp>(p);
     if(m_source != nullptr && m_source->is_sampling(sample::stream_id))
+    {
         p += sizeof(std::uint64_t);
+    }
 
     // cpu
     if constexpr(SampleT == sample::cpu) return reinterpret_cast<Tp>(p);
     if(m_source != nullptr && m_source->is_sampling(sample::cpu))
+    {
         p += sizeof(std::uint32_t) + sizeof(std::uint32_t);
+    }
 
     // period
     if constexpr(SampleT == sample::period) return reinterpret_cast<Tp>(p);
     if(m_source != nullptr && m_source->is_sampling(sample::period))
+    {
         p += sizeof(std::uint64_t);
+    }
 
     // value
     if constexpr(SampleT == sample::read) return reinterpret_cast<Tp>(p);
@@ -656,9 +668,13 @@ perf_event::record::locate_field() const
     std::abort();
 
     if constexpr(std::is_pointer<Tp>::value)
+    {
         return nullptr;
+    }
     else
+    {
         return Tp{};
+    }
 }
 
 namespace

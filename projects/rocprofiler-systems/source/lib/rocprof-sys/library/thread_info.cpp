@@ -205,7 +205,9 @@ thread_info::get(native_handle_t&& _tid)
         {
             if(itr && itr->index_data &&
                pthread_equal(itr->index_data->pthread_value, _tid) == 0)
+            {
                 return itr;
+            }
         }
     }
 
@@ -240,7 +242,9 @@ const std::optional<thread_info>&
 thread_info::get(std::int64_t _tid, ThreadIdType _type)
 {
     if(_type == ThreadIdType::InternalTID)
+    {
         return get_info_data(_tid);
+    }
     else if(_type == ThreadIdType::SystemTID)
     {
         const auto& _v = get_info_data();
@@ -249,7 +253,9 @@ thread_info::get(std::int64_t _tid, ThreadIdType _type)
             for(const auto& itr : *_v)
             {
                 if(itr && itr->index_data && itr->index_data->system_value == _tid)
+                {
                     return itr;
+                }
             }
         }
     }
@@ -261,7 +267,9 @@ thread_info::get(std::int64_t _tid, ThreadIdType _type)
             for(const auto& itr : *_v)
             {
                 if(itr && itr->index_data && itr->index_data->sequent_value == _tid)
+                {
                     return itr;
+                }
             }
         }
     }
@@ -292,7 +300,9 @@ thread_info::set_start(std::uint64_t _ts, bool _force)
     auto& _v = get_info_data(utility::get_thread_index());
     if(!_v) init();
     if(_force || (_ts > 0 && (_v->lifetime.first == 0 || _ts < _v->lifetime.first)))
+    {
         _v->lifetime.first = _ts;
+    }
 }
 
 void
@@ -312,9 +322,13 @@ thread_info::set_stop(std::uint64_t _ts)
                 if(itr && itr->index_data && itr->index_data->internal_value != _tid)
                 {
                     if(itr->lifetime.second > _v->lifetime.second)
+                    {
                         itr->lifetime.second = _v->lifetime.second;
+                    }
                     else if(itr->lifetime.second == 0)
+                    {
                         itr->lifetime.second = _v->lifetime.second;
+                    }
                 }
             }
         }
