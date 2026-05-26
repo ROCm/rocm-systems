@@ -1210,18 +1210,25 @@ hipError_t hipStreamEndCapture_common(hipStream_t stream, hip::Graph** pGraph) {
   }
   if (s->GetCaptureMode() == hipStreamCaptureModeGlobal) {
     amd::ScopedLock lock(g_captureStreamsLock);
-    g_captureStreams.erase(std::find(g_captureStreams.begin(), g_captureStreams.end(), s));
+    auto git = std::find(g_captureStreams.begin(), g_captureStreams.end(), s);
+    if (git != g_captureStreams.end()) {
+      g_captureStreams.erase(git);
+    }
   }
   {
     amd::ScopedLock lock(g_streamSetLock);
-    g_allCapturingStreams.erase(
-        std::find(g_allCapturingStreams.begin(), g_allCapturingStreams.end(), s));
+    auto ait = g_allCapturingStreams.find(s);
+    if (ait != g_allCapturingStreams.end()) {
+      g_allCapturingStreams.erase(ait);
+    }
   }
   // If capture was invalidated, due to a violation of the rules of stream capture
   if (s->GetCaptureStatus() == hipStreamCaptureStatusInvalidated) {
     *pGraph = nullptr;
     // When capture is invalidated, graph should be deleted, otherwise it leaks
     s->ReleaseCaptureGraph();
+    // Clean up forked streams' state to avoid dangling pointers and stale capture status
+    s->EndCapture();
 
     return hipErrorStreamCaptureInvalidated;
   }
@@ -1260,6 +1267,8 @@ hipError_t hipStreamEndCapture_common(hipStream_t stream, hip::Graph** pGraph) {
     if (leafNodes.size() > 1 && foundInRemovedDep == false) {
       // Release created graph as it can't be retrieved anymore
       s->ReleaseCaptureGraph();
+      // Clean up forked streams' state to avoid dangling pointers and stale capture status
+      s->EndCapture();
       return hipErrorStreamCaptureUnjoined;
     }
   } else {
