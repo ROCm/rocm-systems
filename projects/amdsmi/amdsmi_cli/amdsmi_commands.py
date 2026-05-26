@@ -6492,22 +6492,20 @@ class AMDSMICommands:
             return
 
         if self.logger.is_human_readable_format():
+            lines = []
             for proc in pid_list:
                 if proc.get("message"):
-                    self.logger.output = {"process_info": proc["message"]}
-                    self.logger.store_multiple_device_output()
+                    lines.append(proc["message"])
                     continue
 
-                header = f"PID: {proc['pid']}  NAME: {proc['name']}"
-                self.logger.output = {"process_info": header}
-                self.logger.store_multiple_device_output()
-
+                lines.append(f"PID: {proc['pid']}  NAME: {proc['name']}")
                 for gpu_entry in proc["gpus"]:
                     gpu_idx = gpu_entry["gpu_index"]
                     parts = [f"GPU: {gpu_idx}"]
-                    mem_usage = gpu_entry.get("memory_usage", {})
                     if isinstance(gpu_entry["mem"], dict):
-                        parts.append(f"MEM: {gpu_entry['mem']['value']} {gpu_entry['mem']['unit']}")
+                        parts.append(
+                            f"MEM: {gpu_entry['mem']['value']} {gpu_entry['mem']['unit']}"
+                        )
                     else:
                         parts.append(f"MEM: {gpu_entry['mem']}")
                     eng = gpu_entry.get("engine_usage", {})
@@ -6517,17 +6515,13 @@ class AMDSMICommands:
                     else:
                         parts.append(f"GFX: {eng.get('gfx', 'N/A')}")
                         parts.append(f"ENC: {eng.get('enc', 'N/A')}")
+                    lines.append("    " + "  ".join(parts))
+                lines.append("")  # blank line between PIDs
 
-                    line = "    " + "  ".join(parts)
-                    self.logger.output = {"gpu_entry": line}
-                    self.logger.store_multiple_device_output()
+            print("\n".join(lines))
 
-            self.logger.print_output(multiple_device_enabled=True, watching_output=watching_output)
             if watching_output:
-                self.logger.store_watch_output(multiple_device_enabled=True)
-                self.logger.print_output(
-                    multiple_device_enabled=True, watching_output=watching_output
-                )
+                self.logger.store_watch_output(multiple_device_enabled=False)
             return
 
         if self.logger.is_csv_format():
