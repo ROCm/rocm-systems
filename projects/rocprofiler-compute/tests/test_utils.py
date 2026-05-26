@@ -20,6 +20,7 @@ import utils.utils_analysis as utils_analysis
 import utils.utils_common as utils_common
 import utils.utils_profile as utils_profile
 from utils.amdsmi_interface import _per_device_query
+from utils.mi_gpu_spec import mi_gpu_specs
 from utils.tty import (
     format_duration,
     format_node_stats,
@@ -36,7 +37,6 @@ from utils.utils_analysis import (
     parse_top_level_location,
     rollup_node_stats,
 )
-from utils.mi_gpu_spec import mi_gpu_specs
 
 
 class MockArgs:
@@ -4426,7 +4426,9 @@ def test_list_blocks_all_archs(binary_handler_analyze_rocprof_compute, capsys, a
         name = line[name_col:].strip()
         block_entries[block_id] = (alias, name)
 
-    expected_panels = arch_panels_from_disk(utils_common.canonical_config_arch(arch) or arch)
+    expected_panels = arch_panels_from_disk(
+        utils_common.canonical_config_arch(arch) or arch
+    )
     assert set(block_entries) == set(expected_panels), (
         f"--list-blocks {arch}: rows {sorted(block_entries)} != "
         f"on-disk panels {sorted(expected_panels)}"
