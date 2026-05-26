@@ -1463,3 +1463,242 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationFailureClearsOutputs)
     out.ExpectZeroed();
     EXPECT_FALSE(isLegacyIpc);  // prologue cleared it before the failure
 }
+
+// Fresh-registration variant: directMode=true forces the legacy-export
+// arm to short-circuit to fail *before* calling hipIpcGetMemHandle.
+// Drives the True arm of `comm->directMode || !ncclParamLegacyCudaRegister()`
+// in the `else if (legacyIpcCap)` block (line ~961). All existing
+// fresh-reg tests set directMode=0 implicitly (zero-initialised ncclComm)
+// and force the param on, so this short-circuit's True arm was previously
+// unhit.
+//
+// Plan item A4 follow-up (961-sub-branch). Complementary to
+// LegacyIpcGetMemHandleFailurePropagates: that one fails at the
+// hipIpcGetMemHandle call site itself; this one fails one line earlier,
+// at the directMode guard.
+TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationDirectModeShortCircuitsLegacyExport)
+{
+    constexpr int       kPeerRank      = 2;
+    constexpr int       kPeerLocalRank = 1;
+    constexpr uintptr_t kBaseAddr      = 0x100000;
+    constexpr std::size_t kBaseSize    = 0x4000;
+    constexpr uintptr_t kBuffOffset    = 0x80;
+    constexpr uintptr_t kBegOffset     = 0x20;
+    constexpr uintptr_t kBegAddr       = kBaseAddr + kBegOffset;
+    constexpr int       kNRanks        = kPeerRank + 1;
+
+    CommBuilder cb;
+    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
+      .WithMaxLocalRanks()
+      .WithSharedRes()
+      .WithProxyConnArray(kNRanks);
+    cb.comm().gproxyConn[kPeerRank].initialized = true;  // skip proxyConnect
+    cb.comm().directMode = 1;                            // the seam under test
+
+    ncclReg regRecord{};
+    regRecord.begAddr = kBegAddr;
+    regRecord.endAddr = kBegAddr + 0x1000;
+    RegRecordCleaner regCleanup(regRecord);
+
+    // Force legacyIpcCap=1 so control reaches the `else if (legacyIpcCap)`
+    // arm. Without this it would take the `// nothing works` goto fail
+    // one branch earlier, exercising a different failure surface.
+    ScopedHook loadParam(g_loadParam, ForceLegacyCudaRegister());
+
+    const void* const kUserbuff =
+        reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
+    ScopedHook memGet(g_hipMemGetAddressRange,
+        [&](hipDeviceptr_t* pbase, std::size_t* psize, hipDeviceptr_t)
+            -> hipError_t {
+            if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
+            if (psize) *psize = kBaseSize;
+            return hipSuccess;
+        });
+    // The contract: hipIpcGetMemHandle MUST NOT be reached when directMode
+    // is set -- the short-circuit fires first.
+    ScopedHook ipcGet(g_hipIpcGetMemHandle,
+        [&](hipIpcMemHandle_t*, void*) -> hipError_t {
+            ADD_FAILURE() << "hipIpcGetMemHandle must not be reached when "
+                             "comm->directMode short-circuits the legacy "
+                             "export arm to fail";
+            return hipErrorInvalidValue;
+        });
+    ScopedHook proxy(g_proxyCallBlocking,
+        [&](struct ncclComm*, struct ncclProxyConnector*, int,
+            void*, int, void*, int) -> ncclResult_t {
+            ADD_FAILURE() << "ncclProxyCallBlocking must not be reached "
+                             "on the directMode short-circuit";
+            return ncclSystemError;
+        });
+
+    int peerRanks[] = {kPeerRank};
+    IpcRegOutputs out;
+    bool isLegacyIpc = true;
+
+    auto r = CallIpcRegisterBuffer(cb, kUserbuff,
+                                   /*buffSize=*/ 256,
+                                   peerRanks, 1,
+                                   NCCL_IPC_COLLECTIVE,
+                                   &regRecord, out, &isLegacyIpc);
+
+    EXPECT_EQ(memGet.calls, 1);
+    EXPECT_EQ(ipcGet.calls, 0);
+    EXPECT_EQ(proxy.calls,  0);
+
+    // The short-circuit is a bare `goto fail` (not NCCLCHECKGOTO), so ret
+    // stays at its initial ncclSuccess. This pins down current behaviour
+    // -- it's a quirk of the production code that a directMode-rejected
+    // registration looks identical to a successful no-op from the
+    // caller's perspective: ncclSuccess + regBufFlag=0.
+    EXPECT_EQ(r, ncclSuccess);
+    out.ExpectZeroed();
+    EXPECT_EQ(regRecord.ipcInfos[kPeerLocalRank], nullptr);
+    EXPECT_FALSE(regRecord.state & IPC_REG_COMPLETE);
+}
+
+// Multi-peer mixed loop: peer 0 in the reuse arm, peer 1 fresh-registers.
+// Simulates the real lifecycle where a previous call already registered
+// the buffer for peer 0 and a follow-up call brings peer 1 online.
+//
+// Three branch frontiers this is the first test to hit:
+//   - line 990:15 `if (hostPeerRmtAddrs == NULL)` False arm: peer 0's
+//     prior registration already allocated it, so peer 1's fresh-reg
+//     bookkeeping skips the lazy alloc.
+//   - line 1004:63 `needUpdate` True arm under a non-null devPeerRmtAddrs:
+//     post-loop COLLECTIVE block enters even though devPeerRmtAddrs
+//     != NULL, because peer 1 set needUpdate=true.
+//   - line 1008:15 `if (devPeerRmtAddrs == NULL)` False arm: inside the
+//     strong-stream block, skip the calloc but still memcpy.
+//
+// Plan item A6-mixed.
+TEST_F(P2pMicrotest, IpcRegisterBuffer_MultiPeerMixedReuseAndFreshUpdatesDevTable)
+{
+    constexpr int       kPeer0Rank      = 1;
+    constexpr int       kPeer0LocalRank = 0;
+    constexpr int       kPeer1Rank      = 3;
+    constexpr int       kPeer1LocalRank = 2;
+    constexpr uintptr_t kBaseAddr       = 0x100000;
+    constexpr std::size_t kBaseSize     = 0x4000;
+    constexpr uintptr_t kBegOffset      = 0x20;
+    constexpr uintptr_t kBegAddr        = kBaseAddr + kBegOffset;
+    constexpr uintptr_t kBuffOffset     = 0x80;
+    constexpr uintptr_t kRmt0           = 0xA000;
+    constexpr uintptr_t kRmt1Fresh      = 0xCAFE0000ull;
+    constexpr int       kNRanks         = kPeer1Rank + 1;
+
+    CommBuilder cb;
+    cb.WithLocalRank(kPeer0Rank, kPeer0LocalRank)
+      .WithLocalRank(kPeer1Rank, kPeer1LocalRank)
+      .WithMaxLocalRanks()
+      .WithSharedRes()
+      .WithProxyConnArray(kNRanks);
+    cb.comm().gproxyConn[kPeer1Rank].initialized = true;
+
+    // Peer 0's prior-registration state: reusable ipcInfo + host-table
+    // slot. The host table was allocated by that prior fresh-reg, so it
+    // is non-null going into this call (the contract we want to drive).
+    ncclIpcRegInfo info0{};
+    info0.peerRank             = kPeer0Rank;
+    info0.impInfo.rmtRegAddr   = reinterpret_cast<void*>(kRmt0);
+    info0.impInfo.legacyIpcCap = true;
+
+    // hostPeerRmtAddrs has to be heap-allocated (production code path
+    // uses ncclCalloc / free, and RegRecordCleaner free()s it).
+    auto* hostTable = static_cast<uintptr_t*>(
+        std::calloc(NCCL_MAX_LOCAL_RANKS, sizeof(uintptr_t)));
+    ASSERT_NE(hostTable, nullptr);
+    hostTable[kPeer0LocalRank] = kRmt0;
+
+    // devPeerRmtAddrs pre-populated by the prior registration's
+    // post-loop block. Mismatched-vs-host on purpose so that we can
+    // assert the post-loop memcpy actually overwrote it.
+    std::array<uintptr_t, NCCL_MAX_LOCAL_RANKS> devTable{};
+    devTable[kPeer0LocalRank] = 0xDEADu;
+    devTable[kPeer1LocalRank] = 0xDEADu;
+
+    ncclReg regRecord{};
+    regRecord.begAddr = kBegAddr;
+    regRecord.endAddr = kBegAddr + 0x1000;
+    regRecord.ipcInfos[kPeer0LocalRank]    = &info0;
+    regRecord.regIpcAddrs.hostPeerRmtAddrs = hostTable;
+    regRecord.regIpcAddrs.devPeerRmtAddrs  = devTable.data();
+    RegRecordCleaner regCleanup(regRecord);
+
+    ScopedHook loadParam(g_loadParam, ForceLegacyCudaRegister());
+
+    const void* const kUserbuff =
+        reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
+    ScopedHook memGet(g_hipMemGetAddressRange,
+        [&](hipDeviceptr_t* pbase, std::size_t* psize, hipDeviceptr_t)
+            -> hipError_t {
+            if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
+            if (psize) *psize = kBaseSize;
+            return hipSuccess;
+        });
+    ScopedHook ipcGet(g_hipIpcGetMemHandle,
+        [&](hipIpcMemHandle_t* h, void*) -> hipError_t {
+            if (h) std::memset(h, 0x5A, sizeof(*h));
+            return hipSuccess;
+        });
+    ScopedHook proxy(g_proxyCallBlocking,
+        [&](struct ncclComm*, struct ncclProxyConnector*, int,
+            void*, int, void* resp, int respSize) -> ncclResult_t {
+            EXPECT_GE(static_cast<size_t>(respSize), sizeof(void*));
+            if (resp) std::memcpy(resp, &kRmt1Fresh, sizeof(void*));
+            return ncclSuccess;
+        });
+
+    int peerRanks[] = {kPeer0Rank, kPeer1Rank};
+    IpcRegOutputs out;
+    bool isLegacyIpc = false;
+
+    auto r = CallIpcRegisterBuffer(cb, kUserbuff,
+                                   /*buffSize=*/ 256,
+                                   peerRanks, 2,
+                                   NCCL_IPC_COLLECTIVE,
+                                   &regRecord, out, &isLegacyIpc);
+
+    // Peer 0: pure reuse, no driver/proxy. Peer 1: one trip through each
+    // fresh-reg seam.
+    EXPECT_EQ(memGet.calls, 1);
+    EXPECT_EQ(ipcGet.calls, 1);
+    EXPECT_EQ(proxy.calls,  1);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(out.regBufFlag, 1);
+    EXPECT_EQ(out.offsetOut,  kBuffOffset);
+    // COLLECTIVE post-loop arm returns the dev table itself.
+    EXPECT_EQ(out.peerRmtAddrs, devTable.data());
+
+    // Peer 0's existing ipcInfo untouched.
+    EXPECT_EQ(regRecord.ipcInfos[kPeer0LocalRank], &info0);
+    // Peer 1's bookkeeping populated.
+    ASSERT_NE(regRecord.ipcInfos[kPeer1LocalRank], nullptr);
+    EXPECT_EQ(regRecord.ipcInfos[kPeer1LocalRank]->peerRank, kPeer1Rank);
+    EXPECT_EQ(regRecord.ipcInfos[kPeer1LocalRank]->impInfo.rmtRegAddr,
+              reinterpret_cast<void*>(kRmt1Fresh));
+
+    // The 990:15 False-arm contract: peer 1's fresh-reg used the
+    // already-allocated host table rather than re-allocating it.
+    EXPECT_EQ(regRecord.regIpcAddrs.hostPeerRmtAddrs, hostTable);
+    EXPECT_EQ(hostTable[kPeer0LocalRank], kRmt0);          // peer 0 untouched
+    EXPECT_EQ(hostTable[kPeer1LocalRank], kRmt1Fresh);     // peer 1 inserted
+
+    // The 1004:63 True / 1008:15 False / 1010:15 True contract: post-loop
+    // strong-stream block fired (needUpdate=true), skipped the calloc
+    // (devPeerRmtAddrs already non-null), but the memcpy from the host
+    // table actually overwrote both slots.
+    EXPECT_EQ(regRecord.regIpcAddrs.devPeerRmtAddrs, devTable.data());
+    EXPECT_EQ(devTable[kPeer0LocalRank], kRmt0);
+    EXPECT_EQ(devTable[kPeer1LocalRank], kRmt1Fresh);
+
+    // legacyIpcCap reflects the *last* peer (peer 1, fresh-reg legacy arm).
+    EXPECT_TRUE(isLegacyIpc);
+
+    // RegRecordCleaner will free hostTable and the peer-1 ipcInfo.
+    // Peer 0's ipcInfo is stack-allocated (&info0) -- null its slot so
+    // the cleaner doesn't free() it. devTable is stack-owned; cleaner
+    // doesn't touch devPeerRmtAddrs anyway, but the comment is here so
+    // the next maintainer doesn't get surprised.
+    regRecord.ipcInfos[kPeer0LocalRank] = nullptr;
+}
