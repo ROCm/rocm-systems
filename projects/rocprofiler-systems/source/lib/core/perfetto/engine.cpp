@@ -156,7 +156,6 @@ struct perfetto_engine::perfetto_state
 };
 
 std::once_flag perfetto_engine::s_sdk_init_flag;
-bool           perfetto_engine::s_sdk_init_succeeded = false;
 
 bool
 perfetto_engine::is_system_backend() const noexcept
@@ -256,8 +255,6 @@ perfetto_engine::init_sdk()
 
         ::perfetto::Tracing::Initialize(args);
         ::perfetto::TrackEvent::Register();
-
-        s_sdk_init_succeeded = true;
     });
 
     // Interceptor registration lives OUTSIDE the SDK-init call_once: the

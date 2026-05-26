@@ -172,7 +172,6 @@ private:
     std::atomic<std::size_t>                   m_dropped_packet_count{ 0 };
 
     static std::once_flag s_sdk_init_flag;
-    static bool           s_sdk_init_succeeded;
 
     // Narrowed PIMPL: holds the only members whose definitions force
     // <perfetto.h> into the TU. Keeps the compile firewall while the
