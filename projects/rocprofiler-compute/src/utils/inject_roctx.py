@@ -1298,9 +1298,9 @@ if __name__ == "__main__":
         if _stats is not None:
             _cb_errors = int(_stats.get("callback_errors", 0) or 0)
             if _cb_errors > 0:
-                console_log(
+                console_warning(
                     "torch trace",
-                    "WARNING: roctx_recordfn C++ tier observed "
+                    "roctx_recordfn C++ tier observed "
                     f"{_cb_errors} swallowed callback exception(s) "
                     "during the workload. Some ROCTX markers may be "
                     "missing or misattributed for affected dispatches. "

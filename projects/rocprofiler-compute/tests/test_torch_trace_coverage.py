@@ -68,7 +68,9 @@ def test_random_operator_kernel_coverage(
     Steps: sample ops → emit workload + runner → run runner for JSON → run
     rocprof-compute on the workload → parse CSVs → compare per op. Per-op
     mismatches are reported (stdout + UserWarning) and fail the test.
-    SKIPs (builder gaps, ground-truth errors, etc.) do not fail.
+    SKIPs (builder gaps, ground-truth errors, etc.) do not fail individually,
+    but at least one operator must PASS — an all-SKIP run fails as a
+    regression guard.
     """
     require_torch(gpu=True)
     from collections import Counter, defaultdict
