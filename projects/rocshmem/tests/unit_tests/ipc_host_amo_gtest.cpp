@@ -227,12 +227,9 @@ TEST_F(IPCHostAMOFixture, PostFix_amo_fetch_add_remote) {
 
     int old_val = -1;
     if (my_pe_ == 0) {
-        // Translate PE 1's slot into PE 0's address space.
-        int* pe1_slot = reinterpret_cast<int*>(to_remote_ptr(local_slot, /*pe=*/1));
-        old_val = host_interface_->amo_fetch_add(static_cast<void*>(pe1_slot),
-                                                 kAddend,
-                                                 /*pe=*/1,
-                                                 context_window_info_);
+        // Pass local_slot directly — ctx_amo_fetch_add replicates
+        // IPCHostContext::amo_fetch_add and calls shmem_ptr internally.
+        old_val = ctx_amo_fetch_add(static_cast<void*>(local_slot), kAddend, /*pe=*/1);
         EXPECT_EQ(old_val, kInitial);
     }
     MPI_Barrier(MPI_COMM_WORLD);
@@ -261,12 +258,10 @@ TEST_F(IPCHostAMOFixture, PostFix_amo_fetch_cas_success) {
     MPI_Barrier(MPI_COMM_WORLD);
 
     if (my_pe_ == 0) {
-        int* pe1_slot = reinterpret_cast<int*>(to_remote_ptr(local_slot, /*pe=*/1));
-        int old = host_interface_->amo_fetch_cas(static_cast<void*>(pe1_slot),
-                                                 /*new_val=*/kNew,
-                                                 /*cond=*/kInitial,
-                                                 /*pe=*/1,
-                                                 context_window_info_);
+        // Pass local_slot directly — ctx_amo_fetch_cas replicates
+        // IPCHostContext::amo_fetch_cas and calls shmem_ptr internally.
+        int old = ctx_amo_fetch_cas(static_cast<void*>(local_slot),
+                                    /*value=*/kNew, /*cond=*/kInitial, /*pe=*/1);
         EXPECT_EQ(old, kInitial);
     }
     MPI_Barrier(MPI_COMM_WORLD);
@@ -291,12 +286,8 @@ TEST_F(IPCHostAMOFixture, PostFix_amo_fetch_cas_failure) {
     MPI_Barrier(MPI_COMM_WORLD);
 
     if (my_pe_ == 0) {
-        int* pe1_slot = reinterpret_cast<int*>(to_remote_ptr(local_slot, /*pe=*/1));
-        int old = host_interface_->amo_fetch_cas(static_cast<void*>(pe1_slot),
-                                                 kNew,
-                                                 /*cond=*/kWrong,  // won't match
-                                                 /*pe=*/1,
-                                                 context_window_info_);
+        int old = ctx_amo_fetch_cas(static_cast<void*>(local_slot),
+                                    kNew, /*cond=*/kWrong, /*pe=*/1);
         EXPECT_EQ(old, kInitial);  // old value returned unchanged
     }
     MPI_Barrier(MPI_COMM_WORLD);
@@ -403,7 +394,7 @@ TEST_F(IPCHostAMOFixture, PostFix_putmem_remote) {
 
     if (my_pe_ == 0) {
         int src = kValue;
-        int* pe1_slot = reinterpret_cast<int*>(to_remote_ptr(local_slot, /*pe=*/1));
+        int* pe1_slot = reinterpret_cast<int*>(shmem_ptr(local_slot, /*pe=*/1));
         EXPECT_NO_FATAL_FAILURE(
             host_interface_->putmem(static_cast<void*>(pe1_slot),
                                     &src, sizeof(int),

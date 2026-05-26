@@ -150,15 +150,30 @@ class IPCHostAMOFixture : public ::testing::Test {
     MPIInstance::mpilib_dl_close();
   }
 
-  // Translate a symmetric-heap pointer from local PE space to remote PE space.
-  // Mirrors IPCHostContext::shmem_ptr / the address translation in all IPC ops.
-  char* to_remote_ptr(void* local_ptr, int pe) {
-    uint64_t offset = reinterpret_cast<char*>(local_ptr) - host_ipc_bases_[my_pe_];
+  // Replicates IPCHostContext::shmem_ptr: translates a local symmetric-heap
+  // pointer to the IPC-mapped address in the target PE's address space.
+  void* shmem_ptr(const void* local_ptr, int pe) {
+    uint64_t offset = reinterpret_cast<const char*>(local_ptr) - host_ipc_bases_[my_pe_];
     return host_ipc_bases_[pe] + offset;
   }
 
+  // Replicates IPCHostContext::amo_fetch_add: translates dst via shmem_ptr
+  // then delegates to HostInterface, matching the production call chain.
+  template <typename T>
+  T ctx_amo_fetch_add(void* dst, T value, int pe) {
+    return host_interface_->amo_fetch_add(shmem_ptr(dst, pe), value, pe,
+                                          context_window_info_);
+  }
+
+  // Replicates IPCHostContext::amo_fetch_cas: same pattern as ctx_amo_fetch_add.
+  template <typename T>
+  T ctx_amo_fetch_cas(void* dst, T value, T cond, int pe) {
+    return host_interface_->amo_fetch_cas(shmem_ptr(dst, pe), value, cond, pe,
+                                          context_window_info_);
+  }
+
   // Allocate an int from the local fine-grain heap (base + fixed offset).
-  // Returns a local pointer; to_remote_ptr() gives the view from another PE.
+  // Returns a local pointer; shmem_ptr() gives the view from another PE.
   int* alloc_int_on_heap(size_t slot = 0) {
     return reinterpret_cast<int*>(sym_heap_->get_local_heap_base()) + slot;
   }
