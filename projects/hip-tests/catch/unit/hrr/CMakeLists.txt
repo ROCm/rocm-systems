@@ -84,16 +84,23 @@ if(HIP_PLATFORM STREQUAL "amd")
   endif()
   message(STATUS "HRR playback: ${HRR_PLAYBACK_EXE}")
 
-  # Copy hrr-playback into HrrTest's output directory so that SpawnProc can
-  # find it via the bare name "hrr-playback" (resolved relative to the CTest
-  # WORKING_DIRECTORY, which is HrrTest's directory).  This survives packaged
-  # test runs where the original CLR install prefix is no longer present.
+  # Copy hrr-playback next to HrrTest so SpawnProc finds it via the bare name
+  # "hrr-playback" (resolved from currentPath() = CTest WORKING_DIRECTORY).
+  #
+  # Two steps are needed:
+  #   1. POST_BUILD copy into the build-tree output dir (for local ctest runs).
+  #   2. install(PROGRAMS ...) into share/hip/catch_tests/ (for packaged runs).
+  #      packaging/CMakeLists.txt installs all G_INSTALL_EXE_TARGETS there;
+  #      we install hrr-playback to the same destination so it is colocated.
   add_custom_command(TARGET HrrTest POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
       "${HRR_PLAYBACK_EXE}"
       "$<TARGET_FILE_DIR:HrrTest>/"
     COMMENT "Copying hrr-playback next to HrrTest"
   )
+  include(GNUInstallDirs)
+  install(PROGRAMS "${HRR_PLAYBACK_EXE}"
+          DESTINATION "${CMAKE_INSTALL_DATADIR}/hip/${CATCH_BUILD_DIR}")
 
   # Optional: hip_raw_trace.exe for Unit_HRR_MultiThreadRoundtrip.
   # A genuine multi-threaded capture workload (4 threads + graph + pinned + hostReg).
