@@ -90,6 +90,62 @@ protected:
 
 namespace {
 
+// ScopedHook -- RAII wrapper around a controllable seam (any of the
+// std::function<...> hooks declared in fakes/p2p_fakes.h).
+//
+// Three jobs in one type:
+//   1. Installs the test's behaviour on construction.
+//   2. Counts calls automatically (.calls), so tests don't hand-roll a
+//      separate `int xCalls = 0; ++xCalls` per hook.
+//   3. Restores the previous behaviour on destruction. This means tests
+//      don't have to inherit the fixture or rely on ResetP2pFakes() to
+//      avoid contaminating each other -- the hook's lifetime ends with
+//      the ScopedHook local, before the captured stack locals die.
+//
+// Usage (CTAD picks up the signature from the hook variable):
+//   ScopedHook memGet(g_hipMemGetAddressRange,
+//       [&](hipDeviceptr_t* pb, std::size_t* ps, hipDeviceptr_t) {
+//           if (pb) *pb = ...;
+//           return hipSuccess;
+//       });
+//   ...
+//   EXPECT_EQ(memGet.calls, 1);
+//
+// Non-movable + non-copyable because the installed lambda captures `this`
+// to bump the counter.
+template <typename FnSig>
+class ScopedHook;
+
+template <typename R, typename... Args>
+class ScopedHook<R(Args...)> {
+public:
+    template <typename Callable>
+    ScopedHook(std::function<R(Args...)>& slot, Callable fn)
+        : slot_(slot), saved_(std::move(slot))
+    {
+        slot_ = [this, fn = std::move(fn)](Args... args) -> R {
+            ++calls;
+            return fn(std::forward<Args>(args)...);
+        };
+    }
+    ~ScopedHook() { slot_ = std::move(saved_); }
+
+    ScopedHook(const ScopedHook&)            = delete;
+    ScopedHook& operator=(const ScopedHook&) = delete;
+    ScopedHook(ScopedHook&&)                 = delete;
+    ScopedHook& operator=(ScopedHook&&)      = delete;
+
+    int calls = 0;
+private:
+    std::function<R(Args...)>& slot_;
+    std::function<R(Args...)>  saved_;
+};
+
+// CTAD: deduce R(Args...) from the std::function<R(Args...)>& argument so
+// call sites don't have to spell out the signature.
+template <typename R, typename... Args, typename Callable>
+ScopedHook(std::function<R(Args...)>&, Callable) -> ScopedHook<R(Args...)>;
+
 // RankMapping -- owns storage for comm->rankToLocalRank and wires it in.
 // Usage:
 //     RankMapping ranks(comm, {{peerRank, peerLocalRank}});
@@ -327,15 +383,12 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_CollectiveReuseStrongStreamAcquireFailure
     // devPeerRmtAddrs intentionally left null -- this is what makes the
     // strong-stream block fire.
 
-    int acquireCalls = 0;
-    g_strongStreamAcquire = [&](struct ncclCudaGraph,
-                                struct ncclStrongStream*,
-                                bool,
-                                hipStream_t* stream) -> ncclResult_t {
-        ++acquireCalls;
-        if (stream) *stream = nullptr;
-        return ncclSystemError;
-    };
+    ScopedHook acquire(g_strongStreamAcquire,
+        [](struct ncclCudaGraph, struct ncclStrongStream*, bool,
+           hipStream_t* stream) -> ncclResult_t {
+            if (stream) *stream = nullptr;
+            return ncclSystemError;
+        });
 
     int peerRanks[] = {kPeerRank};
     IpcRegOutputs out;
@@ -348,7 +401,7 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_CollectiveReuseStrongStreamAcquireFailure
                                    NCCL_IPC_COLLECTIVE,
                                    &regRecord, out, &isLegacyIpc);
 
-    EXPECT_EQ(acquireCalls, 1);     // strong-stream block was entered
+    EXPECT_EQ(acquire.calls, 1);    // strong-stream block was entered
     EXPECT_EQ(r, ncclSystemError);  // error from the hook propagated out
     out.ExpectZeroed();             // failure-path contract honoured
 }
@@ -401,56 +454,51 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationLegacyIpcSucceeds)
     // regRecord.ipcInfos[kPeerLocalRank] is NULL -> fresh-registration arm.
 
     // ---- hook 1: hipMemGetAddressRange returns baseAddr + baseSize.
-    int memGetCalls = 0;
-    g_hipMemGetAddressRange = [&](hipDeviceptr_t* pbase, std::size_t* psize,
-                                  hipDeviceptr_t /*dptr*/) -> hipError_t {
-        ++memGetCalls;
-        if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
-        if (psize) *psize = kBaseSize;
-        return hipSuccess;
-    };
+    ScopedHook memGet(g_hipMemGetAddressRange,
+        [&](hipDeviceptr_t* pbase, std::size_t* psize,
+            hipDeviceptr_t /*dptr*/) -> hipError_t {
+            if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
+            if (psize) *psize = kBaseSize;
+            return hipSuccess;
+        });
 
     // ---- hook 2: hipIpcGetMemHandle succeeds with a sentinel handle.
     // p2p.cc copies the handle into ipcInfo.ipcDesc.devIpc and ships it
     // off via ncclProxyCallBlocking; the fake on the other side never
     // inspects it, so any pattern works.
-    int ipcGetCalls = 0;
-    g_hipIpcGetMemHandle = [&](hipIpcMemHandle_t* h, void* /*p*/) -> hipError_t {
-        ++ipcGetCalls;
-        if (h) std::memset(h, 0x5A, sizeof(*h));
-        return hipSuccess;
-    };
+    ScopedHook ipcGet(g_hipIpcGetMemHandle,
+        [](hipIpcMemHandle_t* h, void* /*p*/) -> hipError_t {
+            if (h) std::memset(h, 0x5A, sizeof(*h));
+            return hipSuccess;
+        });
 
     // ---- hook 3: ncclProxyConnect marks the gproxyConn slot initialized.
     // The real implementation does more, but for the unit under test the
     // only thing that matters post-call is that proxyConn is non-null,
     // which it already is (it's &comm->gproxyConn[peerRank]).
-    int connectCalls = 0;
-    g_proxyConnect = [&](struct ncclComm* c, int transport, int /*send*/,
-                         int rank,
-                         struct ncclProxyConnector* pc) -> ncclResult_t {
-        ++connectCalls;
-        EXPECT_EQ(transport, TRANSPORT_P2P);
-        EXPECT_EQ(rank, kPeerRank);
-        EXPECT_EQ(pc, &c->gproxyConn[rank]);
-        pc->initialized = true;
-        return ncclSuccess;
-    };
+    ScopedHook connect(g_proxyConnect,
+        [&](struct ncclComm* c, int transport, int /*send*/,
+            int rank, struct ncclProxyConnector* pc) -> ncclResult_t {
+            EXPECT_EQ(transport, TRANSPORT_P2P);
+            EXPECT_EQ(rank, kPeerRank);
+            EXPECT_EQ(pc, &c->gproxyConn[rank]);
+            pc->initialized = true;
+            return ncclSuccess;
+        });
 
     // ---- hook 4: ncclProxyCallBlocking returns a canned rmtRegAddr in
     // respBuff. Without this the post-call `if (rmtRegAddr)` block
     // (which is where the real registration bookkeeping happens) stays
     // skipped.
-    int proxyCalls = 0;
-    g_proxyCallBlocking = [&](struct ncclComm*, struct ncclProxyConnector*,
-                              int type, void* /*req*/, int /*rs*/,
-                              void* resp, int respSize) -> ncclResult_t {
-        ++proxyCalls;
-        EXPECT_EQ(type, ncclProxyMsgRegister);
-        EXPECT_GE(respSize, static_cast<int>(sizeof(void*)));
-        if (resp) std::memcpy(resp, &kRmtRegAddr, sizeof(void*));
-        return ncclSuccess;
-    };
+    ScopedHook proxy(g_proxyCallBlocking,
+        [&](struct ncclComm*, struct ncclProxyConnector*,
+            int type, void* /*req*/, int /*rs*/,
+            void* resp, int respSize) -> ncclResult_t {
+            EXPECT_EQ(type, ncclProxyMsgRegister);
+            EXPECT_GE(static_cast<size_t>(respSize), sizeof(void*));
+            if (resp) std::memcpy(resp, &kRmtRegAddr, sizeof(void*));
+            return ncclSuccess;
+        });
 
     int peerRanks[] = {kPeerRank};
     IpcRegOutputs out;
@@ -464,10 +512,10 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_FreshRegistrationLegacyIpcSucceeds)
                                    &regRecord, out, &isLegacyIpc);
 
     // ---- contract: every seam was called exactly once on the happy path.
-    EXPECT_EQ(memGetCalls,  1);
-    EXPECT_EQ(ipcGetCalls,  1);
-    EXPECT_EQ(connectCalls, 1);
-    EXPECT_EQ(proxyCalls,   1);
+    EXPECT_EQ(memGet.calls,  1);
+    EXPECT_EQ(ipcGet.calls,  1);
+    EXPECT_EQ(connect.calls, 1);
+    EXPECT_EQ(proxy.calls,   1);
 
     EXPECT_EQ(r, ncclSuccess);
     EXPECT_EQ(out.regBufFlag, 1);
