@@ -575,7 +575,10 @@ static ncclResult_t setTreeDown(struct ncclTree* tree, int* indexes, int d) {
 
 static ncclResult_t connectTrees(struct ncclComm* comm, int* treeToParent, int* treeToChild0, int* treeToChild1, int* treePatterns) {
 
-  const int channelLimit = (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") || IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")) ? 2*CHANNEL_LIMIT : CHANNEL_LIMIT;
+  // gfx942/gfx950/gfx1250 use the doubled channel limit (2*CHANNEL_LIMIT)
+  const int channelLimit = (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") ||
+                            IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") ||
+                            IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250")) ? 2*CHANNEL_LIMIT : CHANNEL_LIMIT;
   const int nChannels = (comm->nChannels > channelLimit) ? comm->nChannels / 2 : comm->nChannels;
   const int nNodes = comm->nNodes, node = comm->node;
   // Compute tree depth. Not an exact value but a good approximation in most
@@ -1051,6 +1054,7 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
   const bool singleNode = comm->nNodes == 1;
   const bool isGfx950 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
 #endif
+  const bool isGfx1250 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250");
   NCCLCHECK(ncclCalloc(&ringRecv, nNodes*MAXCHANNELS));
   NCCLCHECKGOTO(ncclCalloc(&ringSend, nNodes*MAXCHANNELS), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&ringPrev, nranks*MAXCHANNELS), ret, fail);
@@ -1146,11 +1150,13 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
     }
   }
 
-  // Only use full MAXCHANNELS for gfx942 (MI300X) and gfx950
+  // Only use full MAXCHANNELS for gfx942, gfx950, and gfx1250
+  // pre-gfx942 GPUs are capped at 2*CHANNEL_LIMIT
   maxChannels = (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") ||
-                 IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950"))
+                 IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") ||
+                 IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250"))
                  ? std::min(comm->topo->nodes[GPU].nodes[0].gpu.cu, MAXCHANNELS) : 2*CHANNEL_LIMIT;
-                 
+
   if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes > 1) {
     int userMax = ncclParamMaxNchannels();
     if (userMax != -2) {
@@ -1161,13 +1167,17 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
       INFO(NCCL_TUNING, "RCCL MaxChannels: default capping to 48");
     }
   }
-                     
+
+  // warpSpeed is not applicable to gfx1250 yet
 #ifdef ENABLE_WARP_SPEED
   if (!wsEnabled && (graphs[NCCL_ALGO_RING]->nIntraChannels > 0 || comm->nNodes > 1)) {
     maxChannels = std::min(64, maxChannels);
   }
 #else
-  if (graphs[NCCL_ALGO_RING]->nIntraChannels > 0 || comm->nNodes > 1) {
+  // Skip the 64-channel cap for gfx1250 single-node P2P and for MNNVL transports.
+  // Retain the 64-channel cap for gfx1250 multi-node non-MNNVL (NET path) and all other arches.
+  if (!comm->MNNVL && !(isGfx1250 && comm->nNodes == 1) &&
+      (graphs[NCCL_ALGO_RING]->nIntraChannels > 0 || comm->nNodes > 1)) {
     maxChannels = std::min(64, maxChannels);
   }
 #endif
@@ -1257,10 +1267,12 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
   }
 
   minNchannels = ncclMinNchannels();
-  if (comm->nNodes > 1) {
+  if (comm->nNodes > 1 && !comm->MNNVL) {
     minNchannels = std::min(64, minNchannels);
   }
-  if (comm->nRanks < 8 && 64 < minNchannels) {
+  // gfx1250 can support high channel counts with fewer than 8 GPUs;
+  // skip the nRanks < 8 clamp so NCCL_MIN_NCHANNELS is respected.
+  if (comm->nRanks < 8 && 64 < minNchannels && !comm->MNNVL && !isGfx1250) {
     minNchannels = 2;
     WARN("NCCL_MIN_NCHANNELS set by environment is ignored due to less than 8 GPUs.");
   }

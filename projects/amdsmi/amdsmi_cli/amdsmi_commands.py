@@ -12263,9 +12263,17 @@ class AMDSMICommands:
 
             print()
 
+        is_json = self.logger.is_json_format()
         while True:
+            all_json_rows = []
             for idx, device_handle in enumerate(args.gpu):
-                self.helpers.ras_cper(args, device_handle, self.logger, idx)
+                rows = self.helpers.ras_cper(
+                    args, device_handle, self.logger, idx, emit_json=not is_json
+                )
+                all_json_rows.extend(rows)
+            if is_json and all_json_rows:
+                self.logger.multiple_device_output = all_json_rows
+                self.logger.print_output(multiple_device_enabled=True)
             if not args.follow:
                 break
             time.sleep(1)

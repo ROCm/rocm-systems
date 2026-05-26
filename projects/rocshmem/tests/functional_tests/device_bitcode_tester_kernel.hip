@@ -39,6 +39,7 @@ extern "C" {
   __device__ int rocshmem_n_pes();
   __device__ void rocshmem_barrier_all();
   __device__ void rocshmem_barrier_all_wave();
+  __device__ int rocshmem_int_sum_reduce_wg(int team, int *dest, const int *source, int nreduce);
   __device__ void rocshmem_quiet();
 
   __device__ void rocshmem_putmem(void*, const void*, size_t, int);
@@ -264,4 +265,12 @@ extern "C" __global__ void test_typed_wait_vector(
 
     *out_idx = 1;
   }
+}
+
+// All threads in the workgroup participate in the wg collective.
+// Source is pre-filled by the host (1 per PE); expected dest = n_pes after sum.
+extern "C" __global__ void test_int_sum_reduce(
+    int *sym_dest, int *sym_src, int nreduce, int team)
+{
+  rocshmem_int_sum_reduce_wg(team, sym_dest, sym_src, nreduce);
 }

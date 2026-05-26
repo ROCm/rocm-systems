@@ -39,12 +39,9 @@ def run_calc_ai_analyze_with_values(monkeypatch, metric_values):
     }
     arch_config.dfs_type = {401: "metric_table", 402: "metric_table"}
 
-    pmc_data = pd.DataFrame({"Kernel_Name": [kernel_name]})
-    pmc_df = pd.concat({"pmc_perf": pmc_data}, axis=1)
+    pmc_df = pd.DataFrame({"Kernel_Name": [kernel_name]})
 
-    def mock_eval_metric(
-        dfs, dfs_type, sys_info_row, roofline_peaks, pmc_data, debug, config
-    ):
+    def mock_eval_metric(dfs, dfs_type, sys_info_row, roofline_peaks, pmc_data, debug):
         dfs[402] = pd.DataFrame({
             "Metric": [
                 "AI HBM",
@@ -71,7 +68,6 @@ def run_calc_ai_analyze_with_values(monkeypatch, metric_values):
     return calc_ai_analyze(
         workload=workload,
         pmc_df=pmc_df,
-        config={},
         arch_config=arch_config,
     )
 
@@ -88,7 +84,7 @@ def test_calc_ai_analyze_replaces_inf_with_zero(monkeypatch):
         },
     )
 
-    assert result["kernelNames"] == ["K0"]
+    assert result["kernelNames"] == ["test_kernel"]
     assert result["ai_hbm"][0] == [0], "np.inf should be replaced with 0"
     assert result["ai_hbm"][1] == [100.0]
     assert result["ai_l2"][0] == [0], "-np.inf should be replaced with 0"
@@ -109,7 +105,7 @@ def test_calc_ai_analyze_replaces_none_with_zero(monkeypatch):
         },
     )
 
-    assert result["kernelNames"] == ["K0"]
+    assert result["kernelNames"] == ["test_kernel"]
     assert result["ai_hbm"][0] == [0], "None should be replaced with 0"
     assert result["ai_l2"][0] == [0], "None should be replaced with 0"
     assert result["ai_l1"][0] == [0], "None should be replaced with 0"
@@ -127,7 +123,7 @@ def test_calc_ai_analyze_valid_values_pass_through(monkeypatch):
         },
     )
 
-    assert result["kernelNames"] == ["K0"]
+    assert result["kernelNames"] == ["test_kernel"]
     assert result["ai_hbm"][0] == [2.5]
     assert result["ai_hbm"][1] == [100.0]
     assert result["ai_l2"][0] == [3.0]
@@ -148,7 +144,7 @@ def test_calc_ai_analyze_na_and_empty_replaced(monkeypatch):
         },
     )
 
-    assert result["kernelNames"] == ["K0"]
+    assert result["kernelNames"] == ["test_kernel"]
     assert result["ai_hbm"][0] == [0], "'N/A' should be replaced with 0"
     assert result["ai_l2"][0] == [0], "'' should be replaced with 0"
     assert result["ai_l1"][0] == [0], "'N/A' should be replaced with 0"

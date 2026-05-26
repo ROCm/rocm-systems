@@ -119,8 +119,7 @@ jobs:
               --rocm-version ${{ matrix.rocm-version }} \
               --user ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }} \
               --jobs 2 \
-              --elfutils-version 0.188 \
-              --boost-version 1.79.0
+              --elfutils-version 0.188
 
       - name: Build CI Container (Push)
         if: github.event_name != 'pull_request'
@@ -139,7 +138,6 @@ jobs:
               --user ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }} \
               --jobs 2 \
               --elfutils-version 0.188 \
-              --boost-version 1.79.0 \
               --push
 
   prepare_matrix_release:

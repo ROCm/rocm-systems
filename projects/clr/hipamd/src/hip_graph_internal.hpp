@@ -6,11 +6,13 @@
 
 #pragma once
 #include <algorithm>
+#include <atomic>
 #include <queue>
 #include <stack>
 #include <iostream>
 #include <unordered_map>
 #include <unordered_set>
+#include <shared_mutex>
 #include <vector>
 
 #include "hip/hip_runtime.h"
@@ -194,7 +196,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
             const char* label = "")
       : type_(type),
         visited_(false),
-        id_(nextID++),
+        id_(nextID.fetch_add(1, std::memory_order_relaxed)),
         parentGraph_(nullptr),
         isEnabled_(1),
         dev_id_(ihipGetDevice()),
@@ -465,7 +467,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   int hw_queue_id_ = -1; //! Hardware queue ID on which this node will be executed
   int32_t segment_id_ = -1;  //! Segment ID on which this node will be executed
   int32_t launch_id_ = -1;  //! Launch ID of this node in the entire graph execution sequence
-  static int nextID;
+  static std::atomic<int> nextID;
   Graph* parentGraph_;
   static std::unordered_set<GraphNode*> nodeSet_;
   static amd::Monitor nodeSetLock_;
@@ -541,7 +543,9 @@ class Graph {
   static std::unordered_set<Graph*> graphSet_;
   static amd::Monitor graphSetLock_;
   Graph(hip::Device* device, const Graph* original = nullptr)
-      : pOriginalGraph_(original), id_(nextID++), device_(device) {
+      : pOriginalGraph_(original),
+        id_(nextID.fetch_add(1, std::memory_order_relaxed)),
+        device_(device) {
     amd::ScopedLock lock(graphSetLock_);
     graphSet_.insert(this);
     mem_pool_ = device->GetGraphMemoryPool();
@@ -906,7 +910,7 @@ class Graph {
   //!< graphUserObj_.second stores refcount owned by this graph for user object,
   std::unordered_map<UserObject*, int> graphUserObj_;
   unsigned int id_;
-  static int nextID;
+  static std::atomic<int> nextID;
   uint32_t memalloc_nodes_ = 0;  //!< Count of unreleased Memalloc nodes
   std::vector<Node> roots_;      //!< Root nodes, used in parallel launches
   std::vector<Node> leafs_;      //!< The list of leaf nodes on every parallel stream
@@ -948,6 +952,7 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   static std::unordered_set<GraphExec*> graphExecSet_;
   static std::recursive_mutex graphExecSetLock_;
   static std::recursive_mutex graphExecStreamCreateLock_;
+  static std::shared_mutex graphExecTrimLock_;
   bool graph_dumped_ = false;
   GraphExec(uint64_t flags = 0)
       : ReferenceCountedObject(), Graph(hip::getCurrentDevice()), flags_(flags) {
@@ -1043,6 +1048,7 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   uint64_t flags_ = 0;
   GraphKernelArgManager* kernArgManager_ = nullptr;  //!< Kernel Arg manager for graph.
   bool hasHiddenHeap_ = false;  //!< Hidden heap indicator for Kernel node
+  std::unordered_set<int> hiddenHeapInitializedDevices_;
   bool repeatLaunch_ = false;
 
   // PacketBatch structure
@@ -1066,6 +1072,7 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
     // Allows the fast flat-dispatch path even in the partially-disabled case.
     std::vector<uint8_t> filteredFlatPacketData;
     std::vector<uint32_t> filteredValidPacketFullHeaders;
+    bool filteredCacheValid = false;
 
     // Node tracking
     struct NodeRange {
@@ -1080,10 +1087,14 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
     PacketBatch() {}
     // O(1) enable/disable operations - just update state
     void setEnabled(GraphNode* node, bool enabled);
-    // Rebuild cached filtered lists if cache is stale
-    void rebuildFilteredLists();
+    // Rebuild cached filtered lists if cache is stale.
+    // Updates flat_packet pointers in patch_list to point into filteredFlatPacketData.
+    void rebuildFilteredLists(std::vector<amd::Device::HwEventPatch>& patch_list);
     // Rebuild the flat buffer from the current dispatchPackets contents.
     void rebuildFlatBuffer();
+    // Restore flat_packet pointers in patch_list back to flatPacketData when
+    // all nodes are re-enabled (disabledNodeCount == 0).
+    void restorePatchListPointers(std::vector<amd::Device::HwEventPatch>& patch_list);
     // Append one 64-byte AQL packet to a flat buffer: copies the body, saves the
     // full_header dword, and invalidates the header. Zeroes completion_signal
     // (ApplyHwEventPatches re-patches it directly via flat_packet pointers at launch).
@@ -1212,7 +1223,7 @@ class ChildGraphNode : public GraphNode, public GraphExec {
 
   hipError_t SetParams(GraphNode* node) override {
     const ChildGraphNode* childGraphNode = static_cast<ChildGraphNode const*>(node);
-    return SetParams((Graph*)this);
+    return SetParams(static_cast<const Graph*>(childGraphNode));
   }
 
   virtual std::string GetLabel(hipGraphDebugDotFlags flag) override {
@@ -1913,7 +1924,7 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
     amd::Memory* srcMemory = getMemoryObject(src_, sOffset);
     size_t dOffset = 0;
     amd::Memory* dstMemory = getMemoryObject(dst_, dOffset);
-    
+
     hip::MemcpyType memType = hipHostToHost;
     if (srcMemory != nullptr && dstMemory == nullptr) {
         memType = ihipGetMemcpyType(srcMemory, dst_);
@@ -2159,7 +2170,7 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
       // which is only valid for device to device copies.
       if (dstMemory != nullptr && srcMemory != nullptr) {
         return (hipCopyBuffer == ihipGetMemcpyType(srcMemory, dstMemory, kind_));
-      } 
+      }
       return false;
     }
     return false;
