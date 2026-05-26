@@ -40,15 +40,15 @@ class ProfiledExecutionPluginGroup : public ExecutionPluginGroup {
   };
 
 public:
-  ProfiledExecutionPluginGroup() : start_time_(Clock::now()) {
-    active_start_ = &start_time_;
-    std::atexit([]() {
-      if (active_start_) {
-        double total = std::chrono::duration<double>(Clock::now() - *active_start_).count();
-        std::cerr << "[rocjitsu] total emulation time: " << std::fixed << std::setprecision(3)
-                  << total << " s" << std::endl;
-      }
-    });
+  ProfiledExecutionPluginGroup() : start_time_(Clock::now()) {}
+
+  void onShutdown() {
+    if (prof_before_exec_.count > 0)
+      print_profile_summary();
+    ExecutionPluginGroup::onShutdown();
+    double total = std::chrono::duration<double>(Clock::now() - start_time_).count();
+    std::cerr << "[rocjitsu] total emulation time: " << std::fixed << std::setprecision(3) << total
+              << " s" << std::endl;
   }
 
   void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
@@ -184,7 +184,6 @@ private:
   }
 
   Clock::time_point start_time_;
-  static inline const Clock::time_point *active_start_ = nullptr;
   std::string current_kernel_name_;
   std::unordered_map<uint32_t, std::string> dispatch_kernel_names_;
 
