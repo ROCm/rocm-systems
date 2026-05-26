@@ -23,6 +23,10 @@ void SoC::wire_backing(simdojo::Topology &topo) {
   if (!hbm_standalone_) {
     return;
   }
+  // The standalone HBM controller is not part of the component tree, so the
+  // automatic partitioner won't assign it a partition. Assign it to partition 0
+  // so classify_links() doesn't access partitions_ out of bounds.
+  hbm_standalone_->set_partition_id(0);
   for (auto *x : xcds_) {
     if (!x->l2_cache())
       continue;
