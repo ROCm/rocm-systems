@@ -7297,10 +7297,10 @@ amdsmi_status_t amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_ha
  *
  *  @param[in]  processor_handles  Array of processor handles to query
  *  @param[in]  num_processors     Number of handles in processor_handles
- *  @param[out] list               Caller-allocated buffer of amdsmi_proc_info_by_pid_t.
+ *  @param[out] procs              Caller-allocated buffer of amdsmi_proc_info_by_pid_t.
  *                                 Pass NULL to query the required size via max_processes.
- *  @param[in,out] max_processes   On input: capacity of list. On output: number of
- *                                 unique PIDs written (or required if list is NULL).
+ *  @param[in,out] max_processes   On input: capacity of procs. On output: number of
+ *                                 unique PIDs written (or required if procs is NULL).
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
  *                            | ::AMDSMI_STATUS_OUT_OF_RESOURCES if max_processes was too small,
@@ -7309,7 +7309,7 @@ amdsmi_status_t amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_ha
  */
 amdsmi_status_t amdsmi_get_gpu_process_list_by_pid(amdsmi_processor_handle* processor_handles,
                                                    uint32_t num_processors,
-                                                   amdsmi_proc_info_by_pid_t* list,
+                                                   amdsmi_proc_info_by_pid_t* procs,
                                                    uint32_t* max_processes);
 
 /** @} End tagProcessInfo */

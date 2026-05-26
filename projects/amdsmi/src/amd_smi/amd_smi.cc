@@ -5273,7 +5273,7 @@ amdsmi_status_t amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_ha
 
 amdsmi_status_t amdsmi_get_gpu_process_list_by_pid(amdsmi_processor_handle* processor_handles,
                                                    uint32_t num_processors,
-                                                   amdsmi_proc_info_by_pid_t* list,
+                                                   amdsmi_proc_info_by_pid_t* procs,
                                                    uint32_t* max_processes) {
   AMDSMI_CHECK_INIT();
 
@@ -5323,8 +5323,8 @@ amdsmi_status_t amdsmi_get_gpu_process_list_by_pid(amdsmi_processor_handle* proc
 
   uint32_t num_pids = static_cast<uint32_t>(pid_map.size());
 
-  // Size query: list is NULL, return required count
-  if (!list) {
+  // Size query: procs is NULL, return required count
+  if (!procs) {
     *max_processes = num_pids;
     return AMDSMI_STATUS_SUCCESS;
   }
@@ -5340,7 +5340,7 @@ amdsmi_status_t amdsmi_get_gpu_process_list_by_pid(amdsmi_processor_handle* proc
   uint32_t idx = 0;
   for (auto& [pid, entry] : pid_map) {
     if (idx >= capacity) break;
-    list[idx++] = entry;
+    procs[idx++] = entry;
   }
 
   return (capacity >= num_pids) ? AMDSMI_STATUS_SUCCESS : AMDSMI_STATUS_OUT_OF_RESOURCES;
