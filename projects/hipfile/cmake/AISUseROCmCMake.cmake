@@ -5,7 +5,7 @@
 include(FetchContent)
 
 if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.24")
-    # lint_cmake: -readability/wonkycase
+# lint_cmake: -readability/wonkycase
     FetchContent_Declare(
         rocm-cmake
         URL https://github.com/ROCm/rocm-cmake/archive/refs/tags/rocm-6.4.3.tar.gz
@@ -15,12 +15,12 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.24")
         FIND_PACKAGE_ARGS NAMES ROCmCMakeBuildTools
     )
     FetchContent_MakeAvailable(rocm-cmake)
-    # lint_cmake: +readability/wonkycase
+# lint_cmake: +readability/wonkycase
 else()
     # CMake < 3.24: FIND_PACKAGE_ARGS unavailable, do the find/fetch dance manually.
     find_package(ROCmCMakeBuildTools CONFIG QUIET)
     if(NOT ROCmCMakeBuildTools_FOUND)
-        # lint_cmake: -readability/wonkycase
+# lint_cmake: -readability/wonkycase
         FetchContent_Declare(
             rocm-cmake
             URL https://github.com/ROCm/rocm-cmake/archive/refs/tags/rocm-6.4.3.tar.gz
@@ -29,7 +29,7 @@ else()
             SYSTEM
         )
         FetchContent_MakeAvailable(rocm-cmake)
-        # lint_cmake: +readability/wonkycase
+# lint_cmake: +readability/wonkycase
     endif()
 endif()
 

@@ -26,7 +26,7 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.24")
         set(AIS_LOCAL_GTEST_CHECK "")
     endif()
 
-    # lint_cmake: -readability/wonkycase
+# lint_cmake: -readability/wonkycase
     FetchContent_Declare(
       googletest
       URL https://github.com/google/googletest/releases/download/v1.17.0/googletest-1.17.0.tar.gz
@@ -35,7 +35,7 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.24")
       SYSTEM
     )
     FetchContent_MakeAvailable(googletest)
-    # lint_cmake: +readability/wonkycase
+# lint_cmake: +readability/wonkycase
 else()
     # CMake < 3.24: FIND_PACKAGE_ARGS unavailable, do the find/fetch manually.
     if(AIS_GTEST_TRY_SYSTEM)
@@ -43,7 +43,7 @@ else()
     endif()
 
     if(NOT GTest_FOUND)
-        # lint_cmake: -readability/wonkycase
+# lint_cmake: -readability/wonkycase
         FetchContent_Declare(
           googletest
           URL https://github.com/google/googletest/releases/download/v1.17.0/googletest-1.17.0.tar.gz
@@ -51,7 +51,7 @@ else()
           SYSTEM
         )
         FetchContent_MakeAvailable(googletest)
-        # lint_cmake: +readability/wonkycase
+# lint_cmake: +readability/wonkycase
     endif()
 endif()
 
