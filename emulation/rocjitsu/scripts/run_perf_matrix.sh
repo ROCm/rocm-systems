@@ -10,7 +10,7 @@
 #
 # BUILD_DIR defaults to ~/workspace/builds/$(basename <repo-root>).
 # --runs=N   Run each config N times and report mean±std (default: 1).
-# --profile  Enable hook profiling (sets RJ_HOOK_PROFILE=1).
+# --profile  Enable hook profiling (sets RJ_USE_PROFILED_EXECUTION_PLUGIN_GROUP=1).
 
 set -euo pipefail
 
@@ -79,9 +79,8 @@ run_once() {
         env_vars+=("RJ_RACE=1")
     fi
     if [ "$PROFILE" = "1" ]; then
-        env_vars+=("RJ_HOOK_PROFILE=1")
+        env_vars+=("RJ_USE_PROFILED_EXECUTION_PLUGIN_GROUP=1")
     fi
-
     local tmpstderr
     tmpstderr=$(mktemp)
 

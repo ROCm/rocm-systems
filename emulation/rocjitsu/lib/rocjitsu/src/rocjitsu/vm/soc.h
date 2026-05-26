@@ -7,7 +7,7 @@
 #ifndef ROCJITSU_VM_SOC_H_
 #define ROCJITSU_VM_SOC_H_
 
-#include "plugins/execution_plugin.h"
+#include "plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/hbm_controller.h"
 #include "rocjitsu/vm/amdgpu/iod.h"

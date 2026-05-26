@@ -8,7 +8,7 @@
 /// @brief EOP-like completion tracking: per-dispatch WG retirement and
 /// in-order signal firing per queue.
 
-#include "plugins/execution_plugin.h"
+#include "plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"

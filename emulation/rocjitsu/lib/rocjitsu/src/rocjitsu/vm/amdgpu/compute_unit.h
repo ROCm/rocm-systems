@@ -7,7 +7,7 @@
 #ifndef ROCJITSU_VM_AMDGPU_COMPUTE_UNIT_H_
 #define ROCJITSU_VM_AMDGPU_COMPUTE_UNIT_H_
 
-#include "plugins/execution_plugin.h"
+#include "plugins/execution_plugin_group.h"
 #include "rocjitsu/base/api.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"

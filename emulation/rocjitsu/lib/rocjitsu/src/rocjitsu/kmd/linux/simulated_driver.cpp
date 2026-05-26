@@ -3,6 +3,7 @@
 
 #include "rocjitsu/kmd/linux/simulated_driver.h"
 #include "plugins/kernel_logging_plugin.h"
+#include "plugins/profiled_execution_plugin_group.h"
 #include "plugins/race_detection_plugin.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
@@ -156,7 +157,11 @@ std::unique_ptr<SimulatedDriver> SimulatedDriver::create_default() {
   state->loaded = config::load_config(config_path, schema_path);
   auto *soc = state->loaded.soc();
 
-  auto pg = std::make_shared<ExecutionPluginGroup>();
+  std::shared_ptr<ExecutionPluginGroup> pg;
+  if (std::getenv("RJ_USE_PROFILED_EXECUTION_PLUGIN_GROUP"))
+    pg = std::make_shared<ProfiledExecutionPluginGroup>();
+  else
+    pg = std::make_shared<ExecutionPluginGroup>();
   auto add_plugin = [&](std::unique_ptr<ExecutionPlugin> p) {
     std::string name = p->name();
     if (!pg->add(std::move(p)))
