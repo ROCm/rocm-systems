@@ -4,6 +4,7 @@
 #include "core/perfetto/driver.hpp"
 
 #include "core/config.hpp"
+#include "core/mpi.hpp"
 #include "core/output_file_registry.hpp"
 #include "core/perfetto/engine.hpp"
 #include "core/perfetto/fwd.hpp"
@@ -88,26 +89,16 @@ gather_combined_trace_bytes(std::vector<char> local_bytes)
 #if defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0
     if(!config::get_perfetto_combined_traces()) return local_bytes;
 
-    using char_vec_t = std::vector<char>;
-    // TODO(mpi-helper): replace tim::operation::finalize::mpi_get with a
-    // project-local core::mpi::gather_bytes helper. Variable-size byte buffers
-    // plus the collapse-processes semantics need their own test surface; this
-    // is the one site that still depends on timemory after the rest of the
-    // perfetto path was scrubbed.
-    using perfetto_mpi_get_t = tim::operation::finalize::mpi_get<char_vec_t, true>;
+    auto per_rank = mpi::gather_bytes(std::move(local_bytes));
 
-    auto rank_data = std::vector<char_vec_t>{};
-    auto combine   = [](char_vec_t& dst, const char_vec_t& src) -> char_vec_t& {
-        dst.insert(dst.end(), src.begin(), src.end());
-        return dst;
-    };
-
-    perfetto_mpi_get_t{ config::get_perfetto_combined_traces(),
-                        settings::node_count() }(rank_data, local_bytes, combine);
-
-    char_vec_t combined{};
-    for(auto& itr : rank_data)
-        combined = (combined.empty()) ? std::move(itr) : combine(combined, itr);
+    std::vector<char> combined{};
+    for(auto& chunk : per_rank)
+    {
+        if(combined.empty())
+            combined = std::move(chunk);
+        else
+            combined.insert(combined.end(), chunk.begin(), chunk.end());
+    }
     return combined;
 #else
     return local_bytes;

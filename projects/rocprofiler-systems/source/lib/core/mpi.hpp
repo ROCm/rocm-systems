@@ -702,6 +702,99 @@ gather(const void* sendbuf, int sendcount, data_type_t sendtype, void* recvbuf,
 }
 
 //--------------------------------------------------------------------------------------//
+// Variable-size byte gather with per-rank attribution preserved on the root.
+//
+// On the root rank, returns a vector with one entry per communicator rank, in
+// rank order, containing each rank's local bytes. On a non-root rank, returns
+// an empty vector after sending its local bytes to the root. Without MPI (or
+// before init), returns a single-element vector wrapping the caller's local
+// bytes so callers can iterate identically in single-process mode.
+//
+// Length is sent as MPI_UNSIGNED_LONG_LONG so payloads above 2 GiB do not
+// overflow the int-typed MPI_CHAR count; for those the payload is reframed as
+// MPI_LONG batches, mirroring the existing send/recv(string) helpers.
+inline std::vector<std::vector<char>>
+gather_bytes(std::vector<char> local, int root = 0, comm_t comm = mpi::comm_world_v)
+{
+#if defined(ROCPROFSYS_USE_MPI)
+    if(!is_initialized()) return { std::move(local) };
+
+    const auto self      = rank(comm);
+    const auto comm_size = size(comm);
+
+    using ulli_t = unsigned long long;
+
+    if(self != root)
+    {
+        const ulli_t len = local.size();
+        ROCPROFSYS_MPI_ERROR_CHECK(
+            PMPI_Send(&len, 1, MPI_UNSIGNED_LONG_LONG, root, 0, comm));
+        if(len != 0)
+        {
+            const ulli_t int_max_v = std::numeric_limits<int>::max();
+            if(len <= int_max_v)
+            {
+                ROCPROFSYS_MPI_ERROR_CHECK(PMPI_Send(local.data(), static_cast<int>(len),
+                                                     MPI_CHAR, root, 0, comm));
+            }
+            else
+            {
+                auto long_len = len / sizeof(long);
+                auto rem      = len % sizeof(long);
+                if(rem > 0)
+                {
+                    local.resize(local.size() + (sizeof(long) - rem), '\0');
+                    long_len += 1;
+                }
+                ROCPROFSYS_MPI_ERROR_CHECK(PMPI_Send(
+                    local.data(), static_cast<int>(long_len), MPI_LONG, root, 0, comm));
+            }
+        }
+        return {};
+    }
+
+    std::vector<std::vector<char>> result;
+    result.resize(static_cast<std::size_t>(comm_size));
+    result[static_cast<std::size_t>(root)] = std::move(local);
+
+    for(std::int32_t src = 0; src < comm_size; ++src)
+    {
+        if(src == root) continue;
+
+        ulli_t     len = 0;
+        MPI_Status status{};
+        ROCPROFSYS_MPI_ERROR_CHECK(
+            PMPI_Recv(&len, 1, MPI_UNSIGNED_LONG_LONG, src, 0, comm, &status));
+        if(len == 0) continue;
+
+        auto&        slot      = result[static_cast<std::size_t>(src)];
+        const ulli_t int_max_v = std::numeric_limits<int>::max();
+        if(len <= int_max_v)
+        {
+            slot.resize(static_cast<std::size_t>(len));
+            ROCPROFSYS_MPI_ERROR_CHECK(PMPI_Recv(slot.data(), static_cast<int>(len),
+                                                 MPI_CHAR, src, 0, comm, &status));
+        }
+        else
+        {
+            auto long_len = len / sizeof(long);
+            auto rem      = len % sizeof(long);
+            if(rem > 0) long_len += 1;
+            std::vector<long> tmp(long_len);
+            ROCPROFSYS_MPI_ERROR_CHECK(PMPI_Recv(tmp.data(), static_cast<int>(long_len),
+                                                 MPI_LONG, src, 0, comm, &status));
+            slot.assign(reinterpret_cast<const char*>(tmp.data()),
+                        reinterpret_cast<const char*>(tmp.data()) + len);
+        }
+    }
+    return result;
+#else
+    tim::consume_parameters(root, comm);
+    return { std::move(local) };
+#endif
+}
+
+//--------------------------------------------------------------------------------------//
 
 inline void
 comm_spawn_multiple(int count, char** commands, char*** argv, const int* maxprocs,
