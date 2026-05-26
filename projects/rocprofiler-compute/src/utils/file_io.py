@@ -25,13 +25,6 @@ from utils.utils_common import canonical_config_arch, normalize_filter_to_str_li
 # from dask import dataframe as dd
 
 
-def load_sys_info(f: str) -> pd.DataFrame:
-    """
-    Load sys running info from csv file to a df.
-    """
-    return pd.read_csv(f)
-
-
 def load_panel_configs(
     dirs: list[str],
 ) -> OrderedDict[int, dict[str, Any]]:

@@ -190,7 +190,7 @@ class OmniAnalyze_Base:
         for path_info in args.path:
             sysinfo_path = get_sysinfo_path(path_info[0])
             if sysinfo_path:
-                sys_info = file_io.load_sys_info(f"{sysinfo_path}/sysinfo.csv")
+                sys_info = pd.read_csv(f"{sysinfo_path}/sysinfo.csv")
                 arch = sys_info.iloc[0]["gpu_arch"]
                 self.generate_configs(
                     arch,
@@ -210,7 +210,7 @@ class OmniAnalyze_Base:
             w = schema.Workload()
             sysinfo_path = get_sysinfo_path(path_info[0])
             if sysinfo_path:
-                w.sys_info = file_io.load_sys_info(f"{sysinfo_path}/sysinfo.csv")
+                w.sys_info = pd.read_csv(f"{sysinfo_path}/sysinfo.csv")
                 if not getattr(args, "no_roof", False):
                     # Validate roofline CSV before loading
 

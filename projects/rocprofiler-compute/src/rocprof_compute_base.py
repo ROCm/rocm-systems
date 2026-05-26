@@ -11,6 +11,8 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
+import pandas as pd
+
 import config
 from argparser import omniarg_parser
 from rocprof_compute_soc.soc_base import OmniSoC_Base
@@ -724,7 +726,7 @@ class RocProfCompute:
             else:
                 sysinfo_path = file_io.find_1st_sub_dir(base_path)
 
-            sys_info = file_io.load_sys_info(f"{sysinfo_path}/sysinfo.csv")
+            sys_info = pd.read_csv(f"{sysinfo_path}/sysinfo.csv")
             sys_info_dict = {
                 key: value[0] for key, value in sys_info.to_dict("list").items()
             }

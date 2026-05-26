@@ -19,6 +19,8 @@ import pytest
 import yaml
 from scipy.stats import zscore
 
+from utils.utils_common import canonical_config_arch
+
 # Runtime config options
 config = {}
 config["kernel_name_1"] = "vecCopy"
@@ -154,16 +156,14 @@ def get_available_sets_for_arch(gpu_arch):
     or [] if gpu_arch is falsy."""
     if not gpu_arch:
         return []
-    if common.SRC not in sys.path:
-        sys.path.insert(0, common.SRC)
-    from utils.utils_common import canonical_config_arch
-
-    sets_root = Path(common.SRC) / "rocprof_compute_soc" / "profile_configs" / "sets"
-    sets_file = sets_root / f"{gpu_arch}_sets.yaml"
-    if not sets_file.exists():
-        config_arch = canonical_config_arch(gpu_arch)
-        if config_arch and config_arch != gpu_arch:
-            sets_file = sets_root / f"{config_arch}_sets.yaml"
+    config_arch = canonical_config_arch(gpu_arch) or gpu_arch
+    sets_file = (
+        Path(common.SRC)
+        / "rocprof_compute_soc"
+        / "profile_configs"
+        / "sets"
+        / f"{config_arch}_sets.yaml"
+    )
     if not sets_file.exists():
         return []
     data = yaml.safe_load(sets_file.read_text())
@@ -581,12 +581,12 @@ def clear_rank_env(monkeypatch, *env_vars):
 
 
 def skip_unsupported_roofline_soc():
-    if soc in {"MI100", "RDNA35_POINT1", "RDNA35_HALO", "KRACKAN"}:
+    if soc in {"MI100", "RDNA35_POINT_1", "RDNA35_HALO", "RDNA35_POINT_2"}:
         pytest.skip(f"Roofline is not supported on {soc}")
 
 
 def is_gfx115x_soc():
-    return soc == "RDNA35_POINT1" or soc == "RDNA35_HALO" or soc == "KRACKAN"
+    return soc in {"RDNA35_POINT_1", "RDNA35_HALO", "RDNA35_POINT_2"}
 
 
 # --

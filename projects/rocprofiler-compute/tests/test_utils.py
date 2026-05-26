@@ -4281,21 +4281,13 @@ def test_pc_sampling_prof_multiarg_appcmd(
 
 
 def test_set_parser():
-    from utils.utils_common import parse_sets_yaml
-
-    result = parse_sets_yaml("gfx90a")
-
+    result = utils_common.parse_sets_yaml("gfx90a")
     assert "compute_thruput_util" in result
     assert result["compute_thruput_util"]["title"] == "Compute Throughput Utilization"
 
-
-def test_set_parser_uses_shared_gfx115x_sets_file():
-    from utils.utils_common import parse_sets_yaml
-
-    result = parse_sets_yaml("gfx1152")
-
-    assert "compute_thruput_flops" in result
-    assert result["launch_stats"]["title"] == "Launch Stats"
+    shared = utils_common.parse_sets_yaml("gfx1152")
+    assert "compute_thruput_flops" in shared
+    assert shared["launch_stats"]["title"] == "Launch Stats"
 
 
 @pytest.mark.sci_notion

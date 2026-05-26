@@ -47,27 +47,6 @@ def canonical_config_arch(gpu_arch: Optional[str]) -> Optional[str]:
     return gpu_arch
 
 
-def get_sets_yaml_path(arch: str, root: Optional[Path] = None) -> Path:
-    """Resolve a sets config file, allowing archs to share one yaml."""
-    sets_root = (
-        (root or config.rocprof_compute_home)
-        / "rocprof_compute_soc"
-        / "profile_configs"
-        / "sets"
-    )
-    exact_path = sets_root / f"{arch}_sets.yaml"
-    if exact_path.exists():
-        return exact_path
-
-    shared_arch = canonical_config_arch(arch)
-    if shared_arch and shared_arch != arch:
-        shared_path = sets_root / f"{shared_arch}_sets.yaml"
-        if shared_path.exists():
-            return shared_path
-
-    return exact_path
-
-
 # Supported expression field names for metric tables
 SUPPORTED_FIELD: list[str] = [
     "Value",
@@ -667,7 +646,14 @@ def format_time(seconds: float) -> str:
 
 
 def parse_sets_yaml(arch: str) -> dict[str, Any]:
-    filename = get_sets_yaml_path(arch)
+    config_arch = canonical_config_arch(arch) or arch
+    filename = (
+        config.rocprof_compute_home
+        / "rocprof_compute_soc"
+        / "profile_configs"
+        / "sets"
+        / f"{config_arch}_sets.yaml"
+    )
     with open(filename, encoding="utf-8") as file:
         content = file.read()
     data = yaml.safe_load(content)

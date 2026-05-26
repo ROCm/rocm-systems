@@ -1,30 +1,19 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-import importlib.util
 import re
 import subprocess
 import tempfile
-from pathlib import Path
 from subprocess import CompletedProcess
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import common
 import pytest
 
-try:
-    import src.utils.specs as specs
-    from src.rocprof_compute_soc.soc_base import OmniSoC_Base
-    from src.utils.file_io import is_single_panel_config
-    from src.utils.specs import generate_machine_specs
-    from src.utils.utils_common import canonical_config_arch
-except Exception:
-    import utils.specs as specs
-    from rocprof_compute_soc.soc_base import OmniSoC_Base
-    from utils.file_io import is_single_panel_config
-    from utils.specs import generate_machine_specs
-    from utils.utils_common import canonical_config_arch
+import utils.specs as specs
+from utils.file_io import is_single_panel_config
+from utils.specs import generate_machine_specs
+from utils.utils_common import canonical_config_arch
 
 # NOTE: Only testing gfx942 for now.
 GFX942_CHIP_IDS_TO_NUM_XCDS = {
@@ -201,25 +190,24 @@ def test_load_yaml_generic_exception():
 
 
 @pytest.mark.misc
-def test_run_fails_fast_when_command_missing():
-    with patch.object(
-        specs.subprocess, "run", side_effect=FileNotFoundError("missing")
+@pytest.mark.parametrize(
+    "mock_kwargs",
+    [
+        {"side_effect": FileNotFoundError("missing")},
+        {
+            "return_value": CompletedProcess(
+                args=["rocminfo"], returncode=1, stdout="", stderr="boom"
+            )
+        },
+    ],
+    ids=["missing_binary", "nonzero_exit"],
+)
+def test_run_fails_fast(mock_kwargs):
+    with (
+        patch.object(specs.subprocess, "run", **mock_kwargs),
+        pytest.raises(SystemExit),
     ):
-        with pytest.raises(SystemExit):
-            specs.run(["rocminfo"])
-
-
-@pytest.mark.misc
-def test_run_fails_fast_on_nonzero_exit():
-    with patch.object(
-        specs.subprocess,
-        "run",
-        return_value=CompletedProcess(
-            args=["rocminfo"], returncode=1, stdout="", stderr="boom"
-        ),
-    ):
-        with pytest.raises(SystemExit):
-            specs.run(["rocminfo"])
+        specs.run(["rocminfo"])
 
 
 @pytest.mark.misc
@@ -290,6 +278,7 @@ def test_get_gpu_model_none_result():
 
 @pytest.mark.misc
 def test_canonical_config_arch_maps_gfx115_variants_to_shared_dir():
+    assert canonical_config_arch(None) is None
     assert canonical_config_arch("gfx1150") == "gfx115x"
     assert canonical_config_arch("gfx1151") == "gfx115x"
     assert canonical_config_arch("gfx1152") == "gfx115x"
@@ -301,77 +290,12 @@ def test_is_single_panel_config_accepts_shared_gfx115x_dir(tmp_path):
     (tmp_path / "gfx115x").mkdir()
 
     supported_archs = {
-        "gfx1150": "rdna35_point1",
+        "gfx1150": "rdna35_point_1",
         "gfx1151": "rdna35_halo",
-        "gfx1152": "krackan",
+        "gfx1152": "rdna35_point_2",
     }
 
     assert is_single_panel_config(str(tmp_path), supported_archs) is False
-
-
-@pytest.mark.misc
-def test_detect_counters_uses_shared_gfx115x_panel_configs():
-    class DummySoc(OmniSoC_Base):
-        def profiling_setup(self):
-            return None
-
-        def post_profiling(self):
-            return None
-
-    config_dir = (
-        Path(__file__).resolve().parents[1]
-        / "src"
-        / "rocprof_compute_soc"
-        / "analysis_configs"
-    )
-    assert not (config_dir / "gfx1152").exists()
-    assert (config_dir / "gfx115x").exists()
-
-    args = SimpleNamespace(
-        config_dir=str(config_dir),
-        filter_blocks=[],
-        set_selected=None,
-        roof_only=False,
-        membw_analysis=False,
-    )
-    soc = DummySoc(args, SimpleNamespace(num_xcd=1, l2_banks=1))
-    soc.set_arch("gfx1152")
-
-    captured = {}
-
-    def capture(text):
-        captured["length"] = len(text)
-        captured["has_top_stats"] = "Top Stats" in text
-        return set()
-
-    soc.parse_counters = capture
-
-    counters, filter_blocks = soc.detect_counters()
-
-    assert counters == set()
-    assert filter_blocks == []
-    assert captured["length"] > 0
-    assert captured["has_top_stats"] is True
-
-
-@pytest.mark.misc
-def test_sets_metric_validator_uses_shared_gfx115x_analysis_configs():
-    validator_path = (
-        Path(__file__).resolve().parents[1] / "tools" / "validate_sets_metric_ids.py"
-    )
-    spec = importlib.util.spec_from_file_location(
-        "validate_sets_metric_ids",
-        validator_path,
-    )
-    validator = importlib.util.module_from_spec(spec)
-    assert spec is not None
-    assert spec.loader is not None
-    spec.loader.exec_module(validator)
-
-    analysis = validator.load_analysis_configs("gfx1151")
-
-    assert 201 in analysis
-    assert list(analysis[201])[:2] == ["VALU FLOPs", "VALU FLOPs (F64)"]
 
 
 @pytest.mark.misc
