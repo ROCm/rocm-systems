@@ -1,0 +1,29 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+# Config file for @PACKAGE_NAME@
+#
+# Provides:
+#   @PACKAGE_NAME@::@PACKAGE_NAME@ - imported target
+#
+# Variables:
+#   @PACKAGE_NAME@_FOUND
+#   @PACKAGE_NAME@_VERSION
+#   @PACKAGE_NAME@_INCLUDE_DIR
+#   @PACKAGE_NAME@_LIB_DIR
+
+include_guard(DIRECTORY)
+
+@PACKAGE_INIT@
+
+set_and_check(@PACKAGE_NAME@_INCLUDE_DIR "@PACKAGE_INCLUDE_INSTALL_DIR@")
+set_and_check(@PACKAGE_NAME@_LIB_DIR "@PACKAGE_LIB_INSTALL_DIR@")
+
+include("${CMAKE_CURRENT_LIST_DIR}/@PACKAGE_NAME@-targets.cmake")
+
+include(FindPackageHandleStandardArgs)
+find_package_handle_standard_args(
+    @PACKAGE_NAME@
+    FOUND_VAR @PACKAGE_NAME@_FOUND
+    REQUIRED_VARS @PACKAGE_NAME@_INCLUDE_DIR @PACKAGE_NAME@_LIB_DIR
+)

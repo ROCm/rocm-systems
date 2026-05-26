@@ -53,7 +53,11 @@ NCCL_DEVICE_INLINE void postGfd(Coop coop, ncclGinProxyGpuCtx_t* proxyCtx, ncclG
 // 4x16 byte store with the write-through cache hint
 #pragma unroll
     for (uint8_t i = 0; i < 4; i++) {
+#if defined(__HIP_PLATFORM_AMD__)
+      *((uint4*)&q[idx] + i) = ((uint4*)gfd)[i];
+#else
       __stwt((uint4*)&q[idx] + i, ((uint4*)gfd)[i]);
+#endif
     }
   }
 }
