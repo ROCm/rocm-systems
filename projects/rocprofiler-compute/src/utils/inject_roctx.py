@@ -1174,10 +1174,9 @@ def install_tensor_method_wrappers() -> None:
     if not _deep_tensor_method_wraps_enabled():
         console_log(
             "torch trace",
-            "Deep tensor method wraps disabled by default; set "(
-                f"{DEEP_TENSOR_METHOD_WRAPS_ENV}=1 to enable "
-                f"({', '.join(DEEP_TENSOR_METHOD_WRAPS)})."
-            ),
+            "Deep tensor method wraps disabled by default; set "
+            f"{DEEP_TENSOR_METHOD_WRAPS_ENV}=1 to enable "
+            f"({', '.join(DEEP_TENSOR_METHOD_WRAPS)}).",
         )
     for method_name in selected_methods:
         fn = getattr(torch.Tensor, method_name, None)
