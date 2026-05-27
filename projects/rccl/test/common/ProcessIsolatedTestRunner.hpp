@@ -62,11 +62,12 @@ public:
         bool                     inheritParentEnv;     ///< Whether to inherit parent environment
         std::vector<std::string> clearEnvVars; ///< Environment variables to explicitly clear
         size_t                   numGpus; ///< GPU slots this test needs.
-                                         ///< 0 = no GPU slot needed; test runs without any
-                                         ///<     HIP_VISIBLE_DEVICES restriction and does not
-                                         ///<     consume a pool slot (use for CPU-only tests).
-                                         ///< 1 = one dedicated GPU from the pool (default).
+                                         ///< 0 = no GPU slot needed (default); test runs
+                                         ///<     without any HIP_VISIBLE_DEVICES restriction
+                                         ///<     and does not consume a pool slot.
+                                         ///< 1 = one dedicated GPU from the pool.
                                          ///< N = exactly N GPUs from the pool.
+                                         ///< GPU tests should call withNumGpus(n) explicitly.
 
         /**
          * @brief Constructor
@@ -160,6 +161,7 @@ public:
         ExecutionOptions();
     };
 
+private:
     /**
      * @brief Structure to hold captured process output
      */
@@ -168,8 +170,6 @@ public:
         std::string stdoutContent; ///< Captured stdout content
         std::string stderrContent; ///< Captured stderr content
     };
-
-private:
     // Thread-safe static members for test management
     static std::mutex              testConfigsMutex_;
     static std::vector<TestConfig> testConfigs_;

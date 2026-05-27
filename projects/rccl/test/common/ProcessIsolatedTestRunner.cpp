@@ -67,7 +67,7 @@ ProcessIsolatedTestRunner::TestResult::TestResult()
 ProcessIsolatedTestRunner::TestConfig::TestConfig(
     const std::string& testName, std::function<void()> logic
 )
-    : name(testName), testLogic(logic), timeout(30), inheritParentEnv(true), numGpus(1)
+    : name(testName), testLogic(logic), timeout(30), inheritParentEnv(true), numGpus(0)
 {}
 
 ProcessIsolatedTestRunner::TestConfig& ProcessIsolatedTestRunner::TestConfig::withEnvironment(
@@ -930,23 +930,20 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
         }
         else if(WIFSIGNALED(status))
         {
+            // With the re-exec model the child always calls _exit(code) after
+            // the test completes, so a signal means a genuine crash or an
+            // external kill (OOM killer, SIGKILL from CI timeout, SIGSEGV).
+            // The old fork-only model needed a 'PASSED' heuristic because GPU
+            // runtime atexit handlers could SIGTERM an already-successful child;
+            // _exit() bypasses atexit, so that case no longer applies.
             int signal = WTERMSIG(status);
-            if(output.stdoutContent.find("PASSED") != std::string::npos)
-            {
-                result.passed   = true;
-                result.exitCode = RCCL_TEST_SUCCESS;
-                TEST_INFO("Test '%s' PASSED (%ld ms)", cfg.name.c_str(), duration.count());
-            }
-            else
-            {
-                result.passed       = false;
-                result.exitCode     = -signal;
-                result.errorMessage = "Terminated by signal " + std::to_string(signal);
-                TEST_INFO(
-                    "Test '%s' (PID: %d) terminated by signal %d after %ld ms",
-                    cfg.name.c_str(), pid, signal, duration.count()
-                );
-            }
+            result.passed       = false;
+            result.exitCode     = -signal;
+            result.errorMessage = "Terminated by signal " + std::to_string(signal);
+            TEST_INFO(
+                "Test '%s' (PID: %d) terminated by signal %d after %ld ms",
+                cfg.name.c_str(), pid, signal, duration.count()
+            );
         }
         else
         {
@@ -1063,7 +1060,10 @@ bool ProcessIsolatedTestRunner::generateReport(
         }
     }
 
-    return failedTests == 0 && notRunTests == 0;
+    // notRunTests (stop-on-first-failure) is shown in the summary log
+    // but does not itself constitute a failure — the actual failing test
+    // already drives the false return.
+    return failedTests == 0;
 }
 
 // Get detailed test results (thread-safe)
