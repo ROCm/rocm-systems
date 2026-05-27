@@ -62,6 +62,12 @@ endif() # if (ROCM_CCACHE_BUILD)
 
 list( PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules" )
 
+## Define default install prefix before GNUInstallDirs computes paths.
+if( CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT )
+  set ( CMAKE_INSTALL_PREFIX "/opt/rocm" )
+endif()
+set ( CMAKE_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX} CACHE STRING "Default installation directory." FORCE )
+
 ## Include common cmake modules
 include ( utils )
 include ( GNUInstallDirs )
@@ -187,10 +193,6 @@ target_link_libraries ( ${ROCDXG_TARGET}
 target_compile_options(${ROCDXG_TARGET} PRIVATE ${ROCDXG_CXX_FLAGS})
 
 ## Define default paths and packages.
-if( CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT )
-  set ( CMAKE_INSTALL_PREFIX "/opt/rocm" )
-endif()
-set ( CMAKE_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX} CACHE STRING "Default installation directory." FORCE )
 set ( CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}"  CACHE STRING "Default packaging prefix." )
 set ( CPACK_GENERATOR "DEB"  CACHE STRING "Default packaging generators." )
 
@@ -281,6 +283,13 @@ set ( ENABLE_LDCONFIG ON CACHE BOOL "Set library links and caches using ldconfig
 # Install License file
 install ( FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT binary )
 
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/data/dids.conf
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/rocdxg
+        COMPONENT binary)
+
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/conffiles"
+     "${CMAKE_INSTALL_FULL_DATADIR}/rocdxg/dids.conf\n")
+
 # Prepare final version for the CPACK use
 set(PACKAGE_VERSION_STR "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
 if ( NOT "${ROCDXG_VERSION_PRERELEASE}" STREQUAL "" )
@@ -305,7 +314,10 @@ set(CPACK_DEBIAN_DEV_PACKAGE_DESCRIPTION "ROCDXG development package containing 
 ## Process the Debian install/remove scripts to update the CPACK variables
 configure_file ( ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/postinst.in DEBIAN/postinst @ONLY )
 configure_file ( ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/prerm.in DEBIAN/prerm @ONLY )
-set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA "DEBIAN/postinst;DEBIAN/prerm")
+set(CPACK_DEBIAN_BINARY_PACKAGE_CONTROL_EXTRA
+    "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/postinst"
+    "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/prerm"
+    "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/conffiles")
 
 # Setting package dependencies
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "rocm-core")
