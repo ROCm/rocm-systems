@@ -148,14 +148,6 @@ if(ROCPROFSYS_BUILD_ELFUTILS)
         INSTALL_COMMAND ""
     )
 
-    # Re-run installation target (kept from the original module for parity).
-    add_custom_target(
-        rocprofiler-systems-elfutils-install
-        COMMAND make install
-        WORKING_DIRECTORY ${${_eu_root}}/src/ElfUtils-External
-        COMMENT "Installing ElfUtils..."
-    )
-
     install(
         DIRECTORY ${_eu_root}/lib/
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}
@@ -215,6 +207,11 @@ if(ROCPROFSYS_BUILD_ELFUTILS)
             INTERFACE "${_eu_root}/include"
         )
     endif()
+
+    unset(_eu_root)
+    unset(_eu_libdw)
+    unset(_eu_libelf)
+    unset(_eu_patch_args)
 
     # --------------------------------------------------------------------------------------
     # Modes 2 and 3: discover via shim Find modules (config-package then pkg-config).
