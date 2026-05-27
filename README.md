@@ -94,7 +94,7 @@ When you launch the container, add these WSL-specific arguments (they do not rep
 | Flag | Purpose |
 | ---- | ------- |
 | `--device /dev/dxg` | Pass the `/dev/dxg` device node into the container so applications inside the container can access the GPU. |
-| `-v /usr/lib/wsl/lib/libdxcore.so:/usr/lib/libdxcore.so`<br>`-v /opt/rocm/lib/librocdxg.so:/usr/lib/librocdxg.so` | Make the AMD ROCDXG and Microsoft DXCore libraries available inside the container so that ROCm/HIP applications can route their GPU compute calls through ROCDXG and DXCore to communicate with the GPU. |
+| `-v /usr/lib/wsl/lib/libdxcore.so:/usr/lib/libdxcore.so`<br>`-v /opt/rocm/lib/librocdxg.so:/usr/lib/librocdxg.so`<br>`-v /opt/rocm/share/rocdxg/dids.conf:/usr/share/rocdxg/dids.conf` | Make the AMD ROCDXG and Microsoft DXCore libraries available inside the container so that ROCm/HIP applications can route their GPU compute calls through ROCDXG and DXCore to communicate with the GPU. |
 | `-e HSA_ENABLE_DXG_DETECTION=1` | For legacy ROCm releases, HSA_ENABLE_DXG_DETECTION=1 MUST be set; this requirement is removed starting with the ROCk release 7.13. |
 
 Example docker run command:
@@ -103,6 +103,7 @@ Example docker run command:
 docker run -it  \
     -v /usr/lib/wsl/lib/libdxcore.so:/usr/lib/libdxcore.so \
     -v /opt/rocm/lib/librocdxg.so:/usr/lib/librocdxg.so \
+    -v /opt/rocm/share/rocdxg/dids.conf:/usr/share/rocdxg/dids.conf \
     --device=/dev/dxg \
     --cap-add=SYS_PTRACE \
     --security-opt seccomp=unconfined \
@@ -118,6 +119,7 @@ docker run -it  \
 >   docker run -it  \
 >       -v /usr/lib/wsl/lib/libdxcore.so:/usr/lib/libdxcore.so \
 >       -v /opt/rocm/lib/librocdxg.so:/usr/lib/librocdxg.so \
+>       -v /opt/rocm/share/rocdxg/dids.conf:/usr/share/rocdxg/dids.conf \
 >       -e HSA_ENABLE_DXG_DETECTION=1 \
 >       --device=/dev/dxg \
 >       --cap-add=SYS_PTRACE \
