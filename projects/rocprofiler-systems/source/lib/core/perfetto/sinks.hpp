@@ -20,14 +20,12 @@ class output_file_registry;
 
 namespace core
 {
-// Live-mode sink: receives the engine's drained bytes for the current pid and
-// writes them to the configured per-rank output filename. Holds borrowed
-// references to output_file_registry and a perfetto_output_error flag that
-// the driver consults after finalize. Used concretely by live_perfetto_driver
-// for the per-rank file under the `per_process_only` and `full` layouts —
-// cross-rank MPI gather + merge lives in the driver and routes through
-// single_file_sink instead. Not dispatched through the engine's sink boundary,
-// so it is not a variant alternative below.
+// Live-mode sink: writes the engine's drained bytes to the configured
+// per-rank output filename. Used by live_perfetto_driver for the per-rank
+// file under the per_process_only and full layouts; cross-rank merging
+// stays in the driver and routes through single_file_sink. Not a variant
+// alternative below — the live path owns its sink concretely and does
+// not need polymorphism at that boundary.
 class live_fd_sink
 {
 public:

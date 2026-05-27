@@ -175,7 +175,6 @@ TEST(packet_framing_rewrite, preserves_distinct_seq_ids_across_packets)
     ASSERT_TRUE(rewrite_trace_packet(dst, in_5.data(), in_5.size(), 100));
     ASSERT_TRUE(rewrite_trace_packet(dst, in_9.data(), in_9.size(), 100));
 
-    // Decode both framed packets and extract their seq_id values.
     auto extract_seq_id_at = [&](std::size_t start) -> std::uint64_t {
         EXPECT_EQ(static_cast<std::uint8_t>(dst[start]), TRACE_PACKETS_TAG);
         std::size_t   pos = start + 1;

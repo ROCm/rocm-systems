@@ -184,15 +184,12 @@ live_perfetto_driver::post_process(bool&                 perfetto_output_error,
 
     if(want_merged)
     {
-        // Each process writes its rewritten bytes directly to the shared
-        // merged.proto under O_APPEND + flock. Cross-process aggregation
-        // happens at the filesystem level (mirroring what the old shell
-        // cat did) but with single_file_sink's per-source seq_id rewrite
-        // applied, so concatenation is semantically clean even when
-        // rocprof-sys itself is not linked against MPI. The shared file
-        // name is a literal so every rank targets the same path; the
-        // per-rank/per-pid sinks keep using config::get_perfetto_output_filename
-        // for their own rank-suffixed files under `full`.
+        // Each process writes via single_file_sink in append-with-flock
+        // mode. The per-source seq_id rewrite keeps each rank's
+        // interned-data namespace intact across the concatenated bytes, so
+        // the merge stays correct even when rocprof-sys is not linked
+        // against MPI. The shared filename is a literal so every rank
+        // targets the same path.
         const auto base_filename = config::get_perfetto_output_filename();
         const auto merged_path   = filepath::dirname(base_filename) + "/merged.proto";
         const auto env_rank      = static_cast<std::uint32_t>(mpi::rank_from_env());

@@ -119,7 +119,6 @@ read_framed_packet(const std::vector<char>& buf, std::size_t start,
     const auto payload_start = pos;
     const auto payload_end   = payload_start + static_cast<std::size_t>(len);
 
-    // Walk fields until we find the seq_id and the marker.
     out_seq_id = 0;
     out_marker = 0;
     while(pos < payload_end)
@@ -151,10 +150,9 @@ read_framed_packet(const std::vector<char>& buf, std::size_t start,
 TEST(single_file_sink, cross_source_preserves_seq_id_namespace)
 {
     // Feed two sources whose inputs both carry the SDK placeholder
-    // seq_id=1 — the case that exposed the bug in jacobi-hip-sys-run.
-    // Each source must end up with its own disjoint effective seq_id
-    // so downstream interned-data resolution does not collapse the
-    // two sources' iid namespaces into one.
+    // seq_id=1. Each source must end up with its own disjoint effective
+    // seq_id so downstream interned-data resolution does not collapse
+    // the two sources' iid namespaces into one.
     rocprofsys::output_file_registry   registry;
     rocprofsys::core::single_file_sink sink{ registry };
 
