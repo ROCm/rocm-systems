@@ -170,9 +170,9 @@ enum rocp_reg_supported_library  // NOLINT(performance-enum-size)
     ROCP_REG_RCCL,
     ROCP_REG_ROCDECODE,
     ROCP_REG_ROCJPEG,
-    ROCP_REG_ROCSHMEM,
     ROCP_REG_ROCATTACH,
     ROCP_REG_HIPFILE,
+    ROCP_REG_ROCSHMEM,
     ROCP_REG_LAST,
 };
 
@@ -739,7 +739,7 @@ rocprofiler_register_library_api_table(
 
     rocprofiler_register::logging::initialize();
 
-    // rocprofiler-register is disabled via environment
+s    // rocprofiler-register is disabled via environment
     if(!common::get_env("ROCPROFILER_REGISTER_ENABLED", true))
     {
         LOG(INFO) << "rocprofiler-register disabled via ROCPROFILER_REGISTER_ENABLED=0";
