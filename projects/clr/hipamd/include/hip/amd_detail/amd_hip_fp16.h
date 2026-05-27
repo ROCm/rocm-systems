@@ -945,10 +945,10 @@ namespace __hip_internal {
 template <>
 struct NumericLimits<__half> {
     // IEEE 754 half: 0 11110 1111111111 = 65504 (max finite half)
-    static constexpr __half maximum() {
+    static __half maximum() {
         __half_raw r; r.x = 0x7BFF; return r;
     }
-    static constexpr __half lowest() {
+    static __half lowest() {
         __half_raw r; r.x = 0xFBFF; return r;
     }
 };
