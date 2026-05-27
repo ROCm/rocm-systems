@@ -33,11 +33,8 @@ void AmdgpuIsaOperand<Isa>::read_lane_chunk(const amdgpu::Wavefront &wf, uint32_
     this->delegate()->read_lane_chunk(wf, lane_base, count, out);
     return;
   }
-  if (auto off = Isa::resolved_vgpr_offset(this->opr_type_, this->encoding_value_)) {
-    const uint8_t *src = wf.cu().vgpr_data(wf.vgpr_alloc().base + *off);
-    std::memcpy(out, src + lane_base * sizeof(uint32_t), count * sizeof(uint32_t));
+  if (simd_read_lanes(wf, lane_base, count, out))
     return;
-  }
   std::fill_n(out, count, Isa::simd_broadcast_value(wf, this->opr_type_, this->encoding_value_));
 }
 
@@ -63,15 +60,18 @@ void AmdgpuIsaOperand<Isa>::write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lan
 }
 
 template <typename Isa>
-const uint32_t *AmdgpuIsaOperand<Isa>::simd_lane_ptr(const amdgpu::Wavefront &wf,
-                                                     uint32_t lane_base) const {
+bool AmdgpuIsaOperand<Isa>::simd_read_lanes(const amdgpu::Wavefront &wf, uint32_t lane_base,
+                                            uint32_t count, uint32_t *out) const {
   if (this->delegate())
-    return amdgpu::SimdAccess::lane_ptr(*this->delegate(), wf, lane_base);
-  if (auto off = Isa::resolved_vgpr_offset(this->opr_type_, this->encoding_value_)) {
-    const uint8_t *base = wf.cu().vgpr_data(wf.vgpr_alloc().base + *off);
-    return reinterpret_cast<const uint32_t *>(base + lane_base * sizeof(uint32_t));
-  }
-  return nullptr;
+    return amdgpu::SimdAccess::read_lanes(*this->delegate(), wf, lane_base, count, out);
+  auto off = Isa::resolved_vgpr_offset(this->opr_type_, this->encoding_value_);
+  if (!off)
+    return false;
+  uint32_t physical_reg = wf.vgpr_alloc().base + *off;
+  // Plugin notification hook goes here when the plugin system lands.
+  const uint8_t *src = wf.cu().vgpr_data(physical_reg);
+  std::memcpy(out, src + lane_base * sizeof(uint32_t), count * sizeof(uint32_t));
+  return true;
 }
 
 template <typename Isa>

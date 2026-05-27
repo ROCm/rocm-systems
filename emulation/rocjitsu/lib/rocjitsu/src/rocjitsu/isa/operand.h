@@ -175,26 +175,23 @@ public:
   bool is_vgpr_ = false;
 
 private:
-  /// @brief If this operand has contiguous per-lane uint32_t storage for the
-  /// lane range starting at `lane_base`, return a pointer to lane `lane_base`.
-  /// Otherwise return nullptr — the caller should fall back to a scalar
-  /// broadcast via `read_scalar` (for SGPR/imm/inline-const operands).
+  /// @brief Read VGPR lane data for lanes [lane_base, lane_base + count) into
+  /// @p out, notifying the plugin system. Returns true if this operand is a
+  /// VGPR (data was copied + plugins notified); false for non-VGPR operands
+  /// (caller should broadcast a scalar value instead).
   ///
-  /// @details Internal SIMD fast-path hook, reachable only through
-  /// `amdgpu::SimdAccess`. Plugins observing register reads should hook the
-  /// public `read_lane` / `read_lane_chunk` surface instead.
-  virtual const uint32_t *simd_lane_ptr(const amdgpu::Wavefront &wf, uint32_t lane_base) const {
+  /// @details No raw pointer to the register file escapes. The operand owns
+  /// both the read and the notification, guaranteeing they stay in sync.
+  virtual bool simd_read_lanes(const amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
+                               uint32_t *out) const {
     if (delegate_)
-      return delegate_->simd_lane_ptr(wf, lane_base);
-    return nullptr;
+      return delegate_->simd_read_lanes(wf, lane_base, count, out);
+    return false;
   }
 
   /// @brief If this operand's destination is contiguous per-lane uint32_t
   /// storage (a VGPR), return a writable pointer to lane `lane_base`. Otherwise
   /// return nullptr — the caller should fall back to `write_lane_chunk`.
-  ///
-  /// @details Internal SIMD fast-path hook; same access policy as
-  /// `simd_lane_ptr`.
   virtual uint32_t *simd_dst_ptr(amdgpu::Wavefront &wf, uint32_t lane_base) const {
     (void)wf;
     (void)lane_base;
@@ -249,7 +246,8 @@ public:
                         const uint32_t *vals, uint64_t mask) const override;
 
 private:
-  const uint32_t *simd_lane_ptr(const amdgpu::Wavefront &wf, uint32_t lane_base) const override;
+  bool simd_read_lanes(const amdgpu::Wavefront &wf, uint32_t lane_base, uint32_t count,
+                       uint32_t *out) const override;
   uint32_t *simd_dst_ptr(amdgpu::Wavefront &wf, uint32_t lane_base) const override;
 };
 
@@ -297,11 +295,17 @@ public:
   }
 
 private:
-  const uint32_t *simd_lane_ptr(const amdgpu::Wavefront & /*wf*/,
-                                uint32_t lane_base) const override {
-    if (static_cast<int>(lane_base) >= lane_count_)
-      return nullptr;
-    return &data_[lane_base];
+  // DPP reads from the pre-permuted buffer, not the register file, so no
+  // plugin notification is needed (the original read was hooked at
+  // construction time when the buffer was populated).
+  bool simd_read_lanes(const amdgpu::Wavefront & /*wf*/, uint32_t lane_base, uint32_t count,
+                       uint32_t *out) const override {
+    uint32_t lanes = static_cast<uint32_t>(lane_count_);
+    for (uint32_t i = 0; i < count; ++i) {
+      uint32_t l = lane_base + i;
+      out[i] = (l < lanes) ? data_[l] : 0u;
+    }
+    return true;
   }
 
   uint32_t data_[MAX_LANES]{};
@@ -311,15 +315,18 @@ private:
 namespace amdgpu {
 /// @brief Privileged accessor for the operand SIMD fast-path hooks.
 ///
-/// Only the SIMD glue in `arch/amdgpu/shared/simd_glue.h` (and arch operand
-/// implementations that need to forward a delegate dispatch) reaches the
-/// private `simd_lane_ptr` / `simd_dst_ptr` virtuals through this struct.
-/// Plugin-visible register I/O stays on the public `read_lane` /
-/// `read_lane_chunk` / `write_lane` / `write_lane_chunk` surface.
+/// Bridges the private `simd_read_lanes` / `simd_dst_ptr` virtuals on Operand
+/// to the SIMD glue in `simd_glue.h`. Read access goes through `read_lanes`,
+/// which copies data into a caller buffer — no raw pointer to the register
+/// file escapes. Write access still returns a raw pointer (`dst_ptr`) since
+/// there are no write-observation hooks to bypass.
 struct SimdAccess {
+  /// Copy lane data for [lane_base, lane_base + count) into @p out,
+  /// notifying the plugin system. Returns false for non-VGPR operands.
   template <typename Op>
-  static const uint32_t *lane_ptr(const Op &op, const Wavefront &wf, uint32_t lane_base) {
-    return op.simd_lane_ptr(wf, lane_base);
+  static bool read_lanes(const Op &op, const Wavefront &wf, uint32_t lane_base, uint32_t count,
+                         uint32_t *out) {
+    return op.simd_read_lanes(wf, lane_base, count, out);
   }
   template <typename Op> static uint32_t *dst_ptr(const Op &op, Wavefront &wf, uint32_t lane_base) {
     return op.simd_dst_ptr(wf, lane_base);

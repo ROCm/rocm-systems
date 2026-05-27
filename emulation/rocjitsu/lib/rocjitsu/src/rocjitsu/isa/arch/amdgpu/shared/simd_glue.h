@@ -32,18 +32,19 @@ using float32_t = float;
 /// kernels that have one. Forwards to util::force_scalar().
 inline bool &simd_force_scalar() { return util::force_scalar(); }
 
-/// SIMD load of an operand at `lane_base`. Returns a contiguous SIMD
-/// load when the operand resolves to per-lane VGPR storage; otherwise
-/// broadcasts the operand's scalar value. Constrained on
-/// `util::has_stdx_simd` so toolchains without `<experimental/simd>`
-/// remove this overload from the candidate set entirely.
+/// SIMD load of an operand at `lane_base`. Copies lane data into an
+/// aligned local buffer via `SimdAccess::read_lanes` (which also fires
+/// the plugin notification), then SIMD-loads from the buffer. No raw
+/// pointer to the register file escapes this function. For non-VGPR
+/// operands, broadcasts the scalar value instead.
 template <typename T, typename Op>
   requires(util::has_stdx_simd)
 inline util::native<T> read_simd(const Op &op, const Wavefront &wf, uint32_t lane_base) {
   static_assert(sizeof(T) == sizeof(uint32_t), "read_simd: T must be a 32-bit lane type");
-  const uint32_t *p = SimdAccess::lane_ptr(op, wf, lane_base);
-  if (p)
-    return util::load<T>(p);
+  constexpr auto W = static_cast<uint32_t>(util::native_width_v<T>);
+  alignas(util::native<T>) uint32_t buf[W];
+  if (SimdAccess::read_lanes(op, wf, lane_base, W, buf))
+    return util::load<T>(buf);
   return util::broadcast<T>(op.read_scalar(wf));
 }
 
