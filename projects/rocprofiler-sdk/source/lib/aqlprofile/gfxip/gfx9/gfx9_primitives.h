@@ -63,14 +63,16 @@ namespace gfx9
 class gfx9_cntx_prim
 {
 public:
-    static const uint32_t     GFXIP_LEVEL         = 9;
-    static const uint32_t     NUMBER_OF_BLOCKS    = LastCounterBlockId + 1;
-    static constexpr Register GRBM_GFX_INDEX_ADDR = REG_32B_ADDR(GC, 0, regGRBM_GFX_INDEX);
+    static const uint32_t     GFXIP_LEVEL          = 9;
+    static const uint32_t     NUMBER_OF_BLOCKS     = LastCounterBlockId + 1;
+    static constexpr Register GRBM_GFX_INDEX_ADDR  = REG_32B_ADDR(GC, 0, regGRBM_GFX_INDEX);
+    static constexpr Register GRBMA_GFX_INDEX_ADDR = REG_32B_NULL;
     static constexpr Register COMPUTE_PERFCOUNT_ENABLE_ADDR =
         REG_32B_ADDR(GC, 0, regCOMPUTE_PERFCOUNT_ENABLE);
     static constexpr Register RLC_PERFMON_CLK_CNTL_ADDR =
         REG_32B_ADDR(GC, 0, regRLC_PERFMON_CLK_CNTL);
-    static constexpr Register CP_PERFMON_CNTL_ADDR = REG_32B_ADDR(GC, 0, regCP_PERFMON_CNTL);
+    static constexpr Register CP_PERFMON_CNTL_ADDR  = REG_32B_ADDR(GC, 0, regCP_PERFMON_CNTL);
+    static constexpr Register AID_PERFMON_CNTL_ADDR = REG_32B_NULL;
 
     static const uint32_t MC_PERFCOUNTER_RSLT_CNTL__ENABLE_ANY_MASK_PRM = 0x01000000L;
     static const uint32_t MC_PERFCOUNTER_RSLT_CNTL__CLEAR_ALL_MASK_PRM  = 0x02000000L;
@@ -674,7 +676,7 @@ public:
     static const uint32_t SQTT_TOKEN_ISSUE       = 1 << 13;
     static const uint32_t SQTT_TOKEN_REG_CS_PRIV = 1 << 15;
 
-    static uint32_t sqtt_token_mask_on_value()
+    static uint32_t sqtt_token_mask_on_value(bool)
     {
         uint32_t sq_thread_trace_token_mask;
         uint32_t sq_thread_trace_token_mask_token_mask =

@@ -1214,41 +1214,6 @@ void PlatformState::PopExec(ihipExec_t& exec) {
 }
 
 // ================================================================================================
-std::shared_ptr<UniqueFD> PlatformState::GetUniqueFileHandle(const std::string& file_path) {
-  std::scoped_lock lock(ufd_lock_);
-
-  auto it = ufd_map_.find(file_path);
-  if (it != ufd_map_.end()) {
-    return it->second;
-  }
-
-  // Get the file desc and file size from amd::Os API
-  amd::Os::FileDesc fdesc;
-  size_t fsize = 0;
-  if (!amd::Os::GetFileHandle(file_path.c_str(), &fdesc, &fsize)) {
-    return nullptr;
-  }
-  
-  auto ufd = std::make_shared<UniqueFD>(file_path, fdesc, fsize);
-  ufd_map_.emplace(file_path, ufd);
-  return ufd;
-}
-
-// ================================================================================================
-bool PlatformState::CloseUniqueFileHandle(const std::shared_ptr<UniqueFD>& ufd) {
-  std::scoped_lock lock(ufd_lock_);
-
-  // if use_count is 2, then there is 1 entry in the map and the current entry is the last close.
-  if (ufd.use_count() == 2) {
-    ufd_map_.erase(ufd->fpath_);
-    if (!amd::Os::CloseFileHandle(ufd->fdesc_)) {
-      return false;
-    }
-  }
-  return true;
-}
-
-// ================================================================================================
 void* PlatformState::GetDynamicLibraryHandle() {
   std::scoped_lock lock(lock_);
 
