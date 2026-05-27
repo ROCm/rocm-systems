@@ -126,6 +126,35 @@ bool alloc_kernel_memory(HsaRsrcFactory* rsrc, const AgentInfo* gpu,
   return true;
 }
 
+struct PmcCreateResult {
+  aqlprofile_handle_t handle;
+  aqlprofile_pmc_aql_packets_t packets;
+  hsa_status_t status;
+};
+
+PmcCreateResult create_pmc_packets(aqlprofile_agent_handle_t agent,
+                                    const AgentInfo* gpu) {
+  PmcCreateResult ret{};
+  aqlprofile_pmc_event_flags_t ev_flags{};
+  ev_flags.raw = 0;
+  aqlprofile_pmc_event_t events_v2[1] = {};
+  events_v2[0].block_index = 0;
+  events_v2[0].event_id = 4;
+  events_v2[0].flags = ev_flags;
+  events_v2[0].block_name = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ;
+
+  aqlprofile_pmc_profile_t profile{};
+  profile.agent = agent;
+  profile.events = events_v2;
+  profile.event_count = 1;
+
+  ret.status = aqlprofile_pmc_create_packets(
+      &ret.handle, &ret.packets, profile,
+      new_tests_mem_alloc, new_tests_mem_dealloc,
+      new_tests_mem_copy, const_cast<AgentInfo*>(gpu));
+  return ret;
+}
+
 }  // namespace
 
 struct KernelSetupResult {
@@ -197,25 +226,34 @@ hsa_kernel_dispatch_packet_t build_kernel_dispatch_packet(KernelSetupResult& kr,
 //Ring doorbell by incrementing the queue write_index
 //Wait for completion by watching the packet signal
 void explicit_submit(const void* packet, hsa_signal_t signal, hsa_queue_t* queue) {
-    constexpr uint32_t slot_size_b = 0x40;
-      hsa_signal_store_relaxed(signal, 1);
-      const uint64_t write_idx = hsa_queue_load_write_index_relaxed(queue);
-      hsa_queue_store_write_index_relaxed(queue, write_idx + 1);
-      while ((write_idx - hsa_queue_load_read_index_relaxed(queue)) >= queue->size)
-        std::this_thread::yield();
-      const uint32_t slot_idx = static_cast<uint32_t>(write_idx % queue->size);
-      uint32_t* queue_slot = reinterpret_cast<uint32_t*>(
-          reinterpret_cast<uintptr_t>(queue->base_address) + (slot_idx * slot_size_b));
-      const uint32_t* slot_data = reinterpret_cast<const uint32_t*>(packet);
-      memcpy(&queue_slot[1], &slot_data[1], slot_size_b - sizeof(uint32_t));
-      std::atomic<uint32_t>* header =
-          reinterpret_cast<std::atomic<uint32_t>*>(&queue_slot[0]);
-      header->store(slot_data[0], std::memory_order_release);
-      hsa_signal_store_relaxed(queue->doorbell_signal, write_idx);
-      hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX,
-                                HSA_WAIT_STATE_BLOCKED);
-      return;
+    constexpr uint32_t slot_size_b = HsaRsrcFactory::CMD_SLOT_SIZE_B;
+    constexpr hsa_signal_value_t signal_init_val = 1;
+    hsa_signal_store_relaxed(signal, signal_init_val);
+    const uint64_t write_idx = hsa_queue_add_write_index_relaxed(queue, 1);
+    while ((write_idx - hsa_queue_load_read_index_relaxed(queue)) >= queue->size)
+      std::this_thread::yield();
+    const uint32_t slot_idx = static_cast<uint32_t>(write_idx % queue->size);
+    uint32_t* queue_slot = reinterpret_cast<uint32_t*>(
+        reinterpret_cast<uintptr_t>(queue->base_address) + (slot_idx * slot_size_b));
+    const uint32_t* slot_data = reinterpret_cast<const uint32_t*>(packet);
+    memcpy(&queue_slot[1], &slot_data[1], slot_size_b - sizeof(uint32_t));
+    std::atomic<uint32_t>* header =
+        reinterpret_cast<std::atomic<uint32_t>*>(&queue_slot[0]);
+    header->store(slot_data[0], std::memory_order_release);
+    hsa_signal_store_relaxed(queue->doorbell_signal, write_idx);
+    hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX,
+                              HSA_WAIT_STATE_BLOCKED);
+    return;
 };
+
+void submit_with_signal(hsa_ext_amd_aql_pm4_packet_t* pkt,
+                         hsa_signal_t sig, hsa_queue_t* q) {
+  pkt->header = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
+  pkt->completion_signal = sig;
+  explicit_submit(pkt, sig, q);
+  constexpr hsa_signal_value_t signal_init_val = 1;
+  hsa_signal_store_relaxed(sig, signal_init_val);
+}
 
 char** pmc_argv(unsigned argc, const hsa_ven_amd_aqlprofile_event_t* events) {
   const int argv_pmc_size = 32;
@@ -246,6 +284,134 @@ struct PmcResult {
   uint32_t event_id;
   uint64_t value;
 };
+
+bool run_new_test_flow() {
+    HsaRsrcFactory* rsrc = TestHsa::HsaInstantiate();
+    const AgentInfo* gpu = nullptr;
+    if (!rsrc || !rsrc->GetGpuAgentInfo(TestHsa::HsaAgentId(), &gpu) || gpu == nullptr) {
+      std::cerr << "AQLPROFILE_NEW_TESTS: GPU agent not available" << std::endl;
+      TestHsa::HsaShutdown();
+      return 1;
+    }
+
+    //register agent.
+    aqlprofile_agent_info_v1_t agent_info_v1 = make_agent_info_v1(gpu);
+    aqlprofile_agent_handle_t agent_v1{};
+    if (aqlprofile_register_agent_info(&agent_v1, &agent_info_v1, AQLPROFILE_AGENT_VERSION_V1) !=
+        HSA_STATUS_SUCCESS) {
+      std::cerr << "AQLPROFILE_NEW_TESTS: aqlprofile_register_agent_info failed" << std::endl;
+      TestHsa::HsaShutdown();
+      return 1;
+    }
+
+    //Create a queue.
+    hsa_queue_t* queue = nullptr;
+    if (!rsrc->CreateQueue(gpu, 1024, &queue)) {
+      std::cerr << "AQLPROFILE_NEW_TESTS: CreateQueue failed" << std::endl;
+      TestHsa::HsaShutdown();
+      return 1;
+    }
+
+    auto pmc = create_pmc_packets(agent_v1, gpu);
+    auto& pmc_handle = pmc.handle;
+    auto& packets = pmc.packets;
+    hsa_status_t st = pmc.status;
+
+    // --- Create completion signals ---
+    hsa_signal_t kernel_signal{}, prof_signal{};
+    hsa_signal_create(1, 0, nullptr, &kernel_signal);
+    hsa_signal_create(1, 0, nullptr, &prof_signal);
+
+    if (st == HSA_STATUS_SUCCESS) {
+
+        KernelSetupResult kr{};
+        if (!setup_kernel_and_properties(rsrc, gpu, pmc_handle, kernel_signal, prof_signal,
+                                          queue, &kr)) {
+          aqlprofile_pmc_delete_packets(pmc_handle);
+          hsa_signal_destroy(kernel_signal);
+          hsa_signal_destroy(prof_signal);
+          hsa_queue_destroy(queue);
+          TestHsa::HsaShutdown();
+          return 1;
+        }
+
+        // --- Build kernel dispatch AQL packet ---
+        hsa_kernel_dispatch_packet_t aql = build_kernel_dispatch_packet(kr, kernel_signal);
+
+        // --- Submit profiling start packet ---
+        std::vector<PmcResult> pmc_results;
+        auto pmc_data_cb = [](aqlprofile_pmc_event_t ev, uint64_t /*counter_id*/,
+                               uint64_t val, void* userdata) -> hsa_status_t {
+          static_cast<std::vector<PmcResult>*>(userdata)->push_back(
+              {static_cast<uint32_t>(ev.block_name), ev.block_index, ev.event_id, val});
+          return HSA_STATUS_SUCCESS;
+        };
+        aqlprofile_pmc_iterate_data(pmc_handle, pmc_data_cb, &pmc_results);
+
+        auto total = 0;
+        for (auto& pmc_result : pmc_results) {
+          total += pmc_result.value;
+        }
+        TEST_ASSERT_EQUAL(total, 0, "counter_result_value_beforedoorbell");
+
+        submit_with_signal(&packets.start_packet, prof_signal, queue);
+
+        // --- Submit kernel dispatch ---
+        aql.completion_signal = kernel_signal;
+        explicit_submit(&aql, kernel_signal, queue);
+
+        // --- Submit profiling read + stop packets ---
+        submit_with_signal(&packets.read_packet, prof_signal, queue);
+        submit_with_signal(&packets.stop_packet, prof_signal, queue);
+
+        aqlprofile_pmc_iterate_data(pmc_handle, pmc_data_cb, &pmc_results);
+
+        // --- Verify results ---
+        //TODO: Delete after code review. These lines are added to show the o/p to bing and giovanni
+        std::cout << "=== AQLProfile PMC Results (aqlprofile SDK v2) ===" << std::endl;
+        auto total1 = 0;
+        for (auto& pmc_result : pmc_results) {
+          std::cout << "  block=" << pmc_result.block_name
+                    << " idx=" << pmc_result.block_index
+                    << " event=" << pmc_result.event_id
+                    << " value=" << pmc_result.value << std::endl;
+          total1 += pmc_result.value;
+        }
+        std::cout << "===================================================" << std::endl;
+        std::cout << "total1 = " << total1 << std::endl;
+        TEST_ASSERT_EQUAL(total1, 614, "counter_result_value_afterdoorbell"); /*614 also matches with older version of this test*/
+
+        // Allocate host memory, copy GPU result, and verify against reference
+        void* output = rsrc->AllocateSysMemory(gpu, kr.conv.GetOutputSize());
+        if (rsrc->Memcpy(gpu, output, kr.conv.GetOutputPtr(), kr.conv.GetOutputSize())) {
+          bool pass = (memcmp(output, kr.conv.GetRefOut(), kr.conv.GetOutputSize()) == 0);
+          std::cout << ">>> Verification: " << (pass ? "PASS" : "FAIL") << std::endl;
+          if (!pass) kr.conv.PrintOutput(output);
+        } else {
+          std::cerr << "AQLPROFILE_NEW_TESTS: Memcpy for verify failed" << std::endl;
+        }
+        rsrc->FreeMemory(output);
+
+        // --- Cleanup kernel resources ---
+        //TODO: This code crashes for some reason. Not sure why
+        //for (auto& [buf_id, des] : kr.conv.GetMemMap()) {
+        //  if (des.ptr) rsrc->FreeMemory(des.ptr);
+        //}
+        hsa_signal_destroy(kernel_signal);
+        hsa_signal_destroy(prof_signal);
+        hsa_executable_destroy(kr.hsa_exec);
+
+        aqlprofile_pmc_delete_packets(pmc_handle);
+    } else {
+        std::cerr << "AQLPROFILE_NEW_TESTS: aqlprofile_pmc_create_packets failed" << std::endl;
+        hsa_signal_destroy(kernel_signal);
+        hsa_signal_destroy(prof_signal);
+    }
+
+    hsa_queue_destroy(queue);
+    TestHsa::HsaShutdown();
+    return (st == HSA_STATUS_SUCCESS) ? 0 : 1;
+}
 
 int main(int argc, char* argv[]) {
   bool ret_val = false;
@@ -285,180 +451,9 @@ int main(int argc, char* argv[]) {
   const hsa_ven_amd_aqlprofile_event_t* events_arr;
 
   if (new_tests) {
-    HsaRsrcFactory* rsrc = TestHsa::HsaInstantiate();
-    const AgentInfo* gpu = nullptr;
-    if (!rsrc || !rsrc->GetGpuAgentInfo(TestHsa::HsaAgentId(), &gpu) || gpu == nullptr) {
-      std::cerr << "AQLPROFILE_NEW_TESTS: GPU agent not available" << std::endl;
-      TestHsa::HsaShutdown();
-      return 1;
-    }
-
-    aqlprofile_agent_info_t agent_info = make_agent_info(gpu);
-
-    // Skeleton exercises both registration entry points; a full integration typically uses one.
-#ifndef INCLUDE_DOUBTFUL_CODE
-    aqlprofile_agent_handle_t agent_v0{};
-    if (aqlprofile_register_agent(&agent_v0, &agent_info) != HSA_STATUS_SUCCESS) {
-      std::cerr << "AQLPROFILE_NEW_TESTS: aqlprofile_register_agent failed" << std::endl;
-      TestHsa::HsaShutdown();
-      return 1;
-    }
-#endif
-
-    aqlprofile_agent_info_v1_t agent_info_v1 = make_agent_info_v1(gpu);
-    aqlprofile_agent_handle_t agent_v1{};
-    if (aqlprofile_register_agent_info(&agent_v1, &agent_info_v1, AQLPROFILE_AGENT_VERSION_V1) !=
-        HSA_STATUS_SUCCESS) {
-      std::cerr << "AQLPROFILE_NEW_TESTS: aqlprofile_register_agent_info failed" << std::endl;
-      TestHsa::HsaShutdown();
-      return 1;
-    }
-
-    //Create a queue.
-    hsa_queue_t* queue = nullptr;
-    if (!rsrc->CreateQueue(gpu, 1024, &queue)) {
-      std::cerr << "AQLPROFILE_NEW_TESTS: CreateQueue failed" << std::endl;
-      TestHsa::HsaShutdown();
-      return 1;
-    }
-
-    aqlprofile_pmc_event_flags_t ev_flags{};
-    ev_flags.raw = 0;
-    aqlprofile_pmc_event_t events_v2[1] = {};
-    events_v2[0].block_index = 0;
-    //events_v2[0].event_id = 2;
-    events_v2[0].event_id = 4; /*Waves*/
-    events_v2[0].flags = ev_flags;
-    events_v2[0].block_name = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ;
-
-    aqlprofile_pmc_profile_t profile{};
-    profile.agent = agent_v1;
-    profile.events = events_v2;
-    profile.event_count = 1;
-
-    aqlprofile_handle_t pmc_handle{};
-    aqlprofile_pmc_aql_packets_t packets{};
-    hsa_status_t st = aqlprofile_pmc_create_packets(&pmc_handle, &packets, profile,
-                                                     new_tests_mem_alloc, new_tests_mem_dealloc,
-                                                     new_tests_mem_copy, const_cast<AgentInfo*>(gpu));
-    //(void)agent_v0;
-
-    // --- Create completion signals ---
-    hsa_signal_t kernel_signal{}, prof_signal{};
-    hsa_signal_create(1, 0, nullptr, &kernel_signal);
-    hsa_signal_create(1, 0, nullptr, &prof_signal);
-
-    if (st == HSA_STATUS_SUCCESS) {
-      packets.start_packet.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
-      packets.stop_packet.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
-      packets.read_packet.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
-
-      KernelSetupResult kr{};
-      if (!setup_kernel_and_properties(rsrc, gpu, pmc_handle, kernel_signal, prof_signal,
-                                        queue, &kr)) {
-        aqlprofile_pmc_delete_packets(pmc_handle);
-        hsa_signal_destroy(kernel_signal);
-        hsa_signal_destroy(prof_signal);
-        hsa_queue_destroy(queue);
-        TestHsa::HsaShutdown();
-        return 1;
-      }
-
-      // --- Build kernel dispatch AQL packet ---
-      hsa_kernel_dispatch_packet_t aql = build_kernel_dispatch_packet(kr, kernel_signal);
-
-      // --- Submit profiling start packet ---
-      std::vector<PmcResult> pmc_results;
-      auto pmc_data_cb = [](aqlprofile_pmc_event_t ev, uint64_t /*counter_id*/,
-                             uint64_t val, void* userdata) -> hsa_status_t {
-        static_cast<std::vector<PmcResult>*>(userdata)->push_back(
-            {static_cast<uint32_t>(ev.block_name), ev.block_index, ev.event_id, val});
-        return HSA_STATUS_SUCCESS;
-      };
-      aqlprofile_pmc_iterate_data(pmc_handle, pmc_data_cb, &pmc_results);
-
-      //TODO: Delete after code review. These lines are added to show the o/p to bing and giovanni
-      std::cout << "=== before AQLProfile PMC Results (aqlprofile SDK v2) ===" << std::endl;
-      auto total = 0;
-      for (auto& pmc_result : pmc_results) {
-        std::cout << " before  block=" << pmc_result.block_name
-                  << " idx=" << pmc_result.block_index
-                  << " event=" << pmc_result.event_id
-                  << " value=" << pmc_result.value << std::endl;
-        total += pmc_result.value;
-      }
-      std::cout << "===================================================" << std::endl;
-      TEST_ASSERT_EQUAL(total, 0, "counter_result_value_beforedoorbell");
-
-      packets.start_packet.completion_signal = prof_signal;
-      explicit_submit(&packets.start_packet, prof_signal, queue);
-      hsa_signal_store_relaxed(prof_signal, 1);
-
-      // --- Submit kernel dispatch ---
-      aql.completion_signal = kernel_signal;
-      explicit_submit(&aql, kernel_signal, queue);
-
-      // --- Submit profiling read + stop packets ---
-      packets.read_packet.completion_signal = prof_signal;
-      explicit_submit(&packets.read_packet, prof_signal, queue);
-      hsa_signal_store_relaxed(prof_signal, 1);
-
-      packets.stop_packet.completion_signal = prof_signal;
-      explicit_submit(&packets.stop_packet, prof_signal, queue);
-
-      auto pmc_data_cb2 = [](aqlprofile_pmc_event_t ev, uint64_t /*counter_id*/,
-                             uint64_t val, void* userdata) -> hsa_status_t {
-        static_cast<std::vector<PmcResult>*>(userdata)->push_back(
-            {static_cast<uint32_t>(ev.block_name), ev.block_index, ev.event_id, val});
-        return HSA_STATUS_SUCCESS;
-      };
-      aqlprofile_pmc_iterate_data(pmc_handle, pmc_data_cb, &pmc_results);
-
-      // --- Verify results ---
-      //TODO: Delete after code review. These lines are added to show the o/p to bing and giovanni
-      std::cout << "=== AQLProfile PMC Results (aqlprofile SDK v2) ===" << std::endl;
-      auto total1 = 0;
-      for (auto& pmc_result : pmc_results) {
-        std::cout << "  block=" << pmc_result.block_name
-                  << " idx=" << pmc_result.block_index
-                  << " event=" << pmc_result.event_id
-                  << " value=" << pmc_result.value << std::endl;
-        total1 += pmc_result.value;
-      }
-      std::cout << "===================================================" << std::endl;
-      std::cout << "total1 = " << total1 << std::endl;
-      TEST_ASSERT_EQUAL(total1, 614, "counter_result_value_afterdoorbell"); /*614 also matches with older version of this test*/
-
-      // Allocate host memory, copy GPU result, and verify against reference
-      void* output = rsrc->AllocateSysMemory(gpu, kr.conv.GetOutputSize());
-      if (rsrc->Memcpy(gpu, output, kr.conv.GetOutputPtr(), kr.conv.GetOutputSize())) {
-        bool pass = (memcmp(output, kr.conv.GetRefOut(), kr.conv.GetOutputSize()) == 0);
-        std::cout << ">>> Verification: " << (pass ? "PASS" : "FAIL") << std::endl;
-        if (!pass) kr.conv.PrintOutput(output);
-      } else {
-        std::cerr << "AQLPROFILE_NEW_TESTS: Memcpy for verify failed" << std::endl;
-      }
-      rsrc->FreeMemory(output);
-
-      // --- Cleanup kernel resources ---
-      hsa_signal_destroy(kernel_signal);
-      hsa_signal_destroy(prof_signal);
-      hsa_executable_destroy(kr.hsa_exec);
-      for (auto& [buf_id, des] : kr.conv.GetMemMap()) {
-        if (des.ptr) rsrc->FreeMemory(des.ptr);
-      }
-
-      aqlprofile_pmc_delete_packets(pmc_handle);
-    } else {
-      std::cerr << "AQLPROFILE_NEW_TESTS: aqlprofile_pmc_create_packets failed" << std::endl;
-      hsa_signal_destroy(kernel_signal);
-      hsa_signal_destroy(prof_signal);
-    }
-
-    hsa_queue_destroy(queue);
-    TestHsa::HsaShutdown();
-    return (st == HSA_STATUS_SUCCESS) ? 0 : 1;
-  } /*end new_tests*/
+      auto res = run_new_test_flow();
+      return res;
+  }
 
   //Older V1 based Test flow starts here. This will be deprecated soon.
   // Run simple convolution test
