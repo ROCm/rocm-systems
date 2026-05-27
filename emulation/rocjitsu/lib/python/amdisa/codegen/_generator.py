@@ -3200,6 +3200,11 @@ class CodeGenerator:
         shared_dir = os.path.join(self.out_path, 'shared')
         os.makedirs(shared_dir, exist_ok=True)
 
+        from amdisa.codegen.execute.simd_codegen import (
+            simd_extra_includes,
+            simd_probe_line,
+        )
+
         guard = 'ROCJITSU_ISA_AMDGPU_SHARED_EXECUTE_SHARED_H_'
         lines = CppFile._prologue_comment().splitlines()
         lines += [
@@ -3211,12 +3216,14 @@ class CodeGenerator:
             '#include "rocjitsu/vm/amdgpu/mem_state.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"',
+            *simd_extra_includes(),
             '#include "util/data_types.h"',
             '#include "util/except.h"',
             '#include "util/log.h"',
             '#include <algorithm>',
             '#include <bit>',
             '#include <cmath>',
+            '#include <functional>',
             '#include <limits>',
             '',
             'namespace rocjitsu {',
@@ -3230,6 +3237,9 @@ class CodeGenerator:
                 f'inline void execute_{mnemonic}('
                 f'[[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {{'
             )
+            probe = simd_probe_line(mnemonic)
+            if probe is not None:
+                lines.append(probe)
             lines.append(prefixed_body)
             lines.append('}')
             lines.append('')
@@ -3436,19 +3446,19 @@ class CodeGenerator:
 
         class_def = [
             cgen.Line(
-                'class Operand : public IsaOperand<Isa> {\n'
+                'class Operand : public AmdgpuIsaOperand<Isa> {\n'
                 'public:\n'
-                'Operand(int size_bits, OperandType opr_type, int encoding_value);\n'
-                'std::string name() const override;\n'
-                'std::optional<RegisterRef> to_register_ref() const override;\n'
-                'uint32_t read_scalar(const amdgpu::Wavefront &wf) const override;\n'
-                'uint32_t read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const override;\n'
-                'void write_scalar(amdgpu::Wavefront &wf, uint32_t val) const override;\n'
-                'void write_lane(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val) const override;\n'
-                'uint64_t read_lane64(const amdgpu::Wavefront &wf, uint32_t lane) const override;\n'
-                'void write_lane64(amdgpu::Wavefront &wf, uint32_t lane, uint64_t val) const override;\n'
-                'uint64_t read_scalar64(const amdgpu::Wavefront &wf) const override;\n'
-                'void write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const override;\n'
+                '  Operand(int size_bits, OperandType opr_type, int encoding_value);\n'
+                '  std::string name() const override;\n'
+                '  std::optional<RegisterRef> to_register_ref() const override;\n'
+                '  uint32_t read_scalar(const amdgpu::Wavefront &wf) const override;\n'
+                '  uint32_t read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const override;\n'
+                '  void write_scalar(amdgpu::Wavefront &wf, uint32_t val) const override;\n'
+                '  void write_lane(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val) const override;\n'
+                '  uint64_t read_lane64(const amdgpu::Wavefront &wf, uint32_t lane) const override;\n'
+                '  void write_lane64(amdgpu::Wavefront &wf, uint32_t lane, uint64_t val) const override;\n'
+                '  uint64_t read_scalar64(const amdgpu::Wavefront &wf) const override;\n'
+                '  void write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const override;\n'
                 '};'
             )
         ]
@@ -3456,7 +3466,7 @@ class CodeGenerator:
         class_impl = [
             cgen.Line(
                 'Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)\n'
-                '    : IsaOperand<Isa>(size_bits, opr_type, encoding_value) {\n'
+                '    : AmdgpuIsaOperand<Isa>(size_bits, opr_type, encoding_value) {\n'
                 '  is_vgpr_ = is_vgpr_operand_type(opr_type);\n'
                 '}'
             ),
@@ -3565,41 +3575,40 @@ class CodeGenerator:
         _vgpr_index_lines.append('}')
         _vgpr_index_body = '\n'.join(_vgpr_index_lines)
 
-        _read_lane_extra = ''
-        _read_lane64_extra = ''
+        # Single source of truth for "does this operand resolve to per-lane VGPR
+        # storage, and if so what's the offset within the wavefront's VGPR
+        # allocation?". Used by read_lane/read_lane64/write_lane/write_lane64
+        # and by every SIMD method below. Adding a new VGPR-bearing operand
+        # type means editing this helper, not chasing dispatch through ~8
+        # callsites.
+        _resolved_vgpr_offset_lines = [
+            'std::optional<uint32_t> Isa::resolved_vgpr_offset(OperandType opr_type, int ev) {',
+            '  if (is_vgpr_only_type(opr_type))',
+            '    return vgpr_index(opr_type, ev);',
+            '  if (ev >= 256 && ev <= 511)',
+            '    return static_cast<uint32_t>(ev - 256);',
+        ]
         if 'OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST' in _opr:
-            _read_lane_extra = (
-                '  if (opr_type_ == OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST &&\n'
+            _resolved_vgpr_offset_lines.append(
+                '  if (opr_type == OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST &&\n'
                 '      ev >= OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN &&\n'
                 '      ev <= OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MAX) {\n'
-                f'    return wf.cu().read_vgpr(\n'
-                f'        wf.vgpr_alloc().base + {_ACC_OFFSET} + static_cast<uint32_t>(ev - OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN),\n'
-                '        lane);\n'
-                '  }\n'
+                f'    return {_ACC_OFFSET} + static_cast<uint32_t>(\n'
+                '        ev - OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN);\n'
+                '  }'
             )
-            _read_lane64_extra = (
-                '  if (opr_type_ == OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST &&\n'
-                '      ev >= OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN &&\n'
-                '      ev <= OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MAX) {\n'
-                f'    uint32_t idx = wf.vgpr_alloc().base + {_ACC_OFFSET} +\n'
-                '        static_cast<uint32_t>(ev - OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN);\n'
-                '    uint32_t lo = wf.cu().read_vgpr(idx, lane);\n'
-                '    uint32_t hi = wf.cu().read_vgpr(idx + 1, lane);\n'
-                '    return static_cast<uint64_t>(hi) << 32 | lo;\n'
-                '  }\n'
-            )
+        _resolved_vgpr_offset_lines.append('  return std::nullopt;')
+        _resolved_vgpr_offset_lines.append('}')
+        _resolved_vgpr_offset_body = '\n'.join(_resolved_vgpr_offset_lines)
 
         _read_lane_body = (
             'uint32_t Operand::read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const {\n'
             '  if (delegate()) return delegate()->read_lane(wf, lane);\n'
             '  int ev = encoding_value_;\n'
-            '  if (is_vgpr_only_type(opr_type_))\n'
-            '    return wf.cu().read_vgpr(wf.vgpr_alloc().base + vgpr_index(opr_type_, ev), lane);\n'
+            '  if (auto off = Isa::resolved_vgpr_offset(opr_type_, ev))\n'
+            '    return wf.cu().read_vgpr(wf.vgpr_alloc().base + *off, lane);\n'
             '  if (is_immediate_type(opr_type_))\n'
             '    return static_cast<uint32_t>(ev);\n'
-            '  if (ev >= 256 && ev <= 511)\n'
-            '    return wf.cu().read_vgpr(wf.vgpr_alloc().base + static_cast<uint32_t>(ev - 256), lane);\n'
-            f'{_read_lane_extra}'
             '  return resolve_src_scalar(wf, ev);\n'
             '}'
         )
@@ -3608,19 +3617,12 @@ class CodeGenerator:
             'uint64_t Operand::read_lane64(const amdgpu::Wavefront &wf, uint32_t lane) const {\n'
             '  if (delegate()) return delegate()->read_lane64(wf, lane);\n'
             '  int ev = encoding_value_;\n'
-            '  if (is_vgpr_only_type(opr_type_)) {\n'
-            '    uint32_t idx = wf.vgpr_alloc().base + vgpr_index(opr_type_, ev);\n'
+            '  if (auto off = Isa::resolved_vgpr_offset(opr_type_, ev)) {\n'
+            '    uint32_t idx = wf.vgpr_alloc().base + *off;\n'
             '    uint32_t lo = wf.cu().read_vgpr(idx, lane);\n'
             '    uint32_t hi = wf.cu().read_vgpr(idx + 1, lane);\n'
             '    return static_cast<uint64_t>(hi) << 32 | lo;\n'
             '  }\n'
-            '  if (ev >= 256 && ev <= 511) {\n'
-            '    uint32_t idx = wf.vgpr_alloc().base + static_cast<uint32_t>(ev - 256);\n'
-            '    uint32_t lo = wf.cu().read_vgpr(idx, lane);\n'
-            '    uint32_t hi = wf.cu().read_vgpr(idx + 1, lane);\n'
-            '    return static_cast<uint64_t>(hi) << 32 | lo;\n'
-            '  }\n'
-            f'{_read_lane64_extra}'
             '  if (is_immediate_type(opr_type_))\n'
             '    return static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(ev)));\n'
             '  return resolve_src_scalar64(wf, ev);\n'
@@ -3676,6 +3678,15 @@ class CodeGenerator:
             '  if (ev == 253)\n'
             '    return wf.read_scc() ? 1u : 0u; // SCC\n'
             '  throw std::logic_error("Unsupported encoding value for scalar read: " + std::to_string(ev));\n'
+            '}\n'
+            '\n'
+            '// Must stay in sync with resolve_src_scalar above — returns true for\n'
+            '// exactly the encoding values that resolve_src_scalar handles without\n'
+            '// throwing. Used by Isa::simd_capable_value() to keep the SIMD fast\n'
+            '// path off operands whose scalar broadcast would throw at runtime.\n'
+            'bool can_resolve_src_scalar(int ev) {\n'
+            '  return (ev >= 0 && ev <= 107) || ev == 124 || ev == 126 || ev == 127 ||\n'
+            '         (ev >= 128 && ev <= 208) || (ev >= 240 && ev <= 253);\n'
             '}\n'
             '\n'
             'uint64_t resolve_src_scalar64(const amdgpu::Wavefront &wf, int ev) {\n'
@@ -3767,6 +3778,21 @@ class CodeGenerator:
             + '\n'
             '} // namespace\n'
             '\n'
+            '// Isa::-scoped SIMD traits — see rocjitsu/isa/isa_operand_simd_inl.h\n'
+            '// for the templated callers in AmdgpuIsaOperand<Isa>.\n'
+            + _resolved_vgpr_offset_body
+            + '\n\n'
+            'bool Isa::simd_capable_value(OperandType opr_type, int ev) {\n'
+            '  return resolved_vgpr_offset(opr_type, ev).has_value() ||\n'
+            '         is_immediate_type(opr_type) || can_resolve_src_scalar(ev);\n'
+            '}\n'
+            '\n'
+            'uint32_t Isa::simd_broadcast_value(const amdgpu::Wavefront &wf, OperandType opr_type,\n'
+            '                                   int ev) {\n'
+            '  return is_immediate_type(opr_type) ? static_cast<uint32_t>(ev)\n'
+            '                                     : resolve_src_scalar(wf, ev);\n'
+            '}\n'
+            '\n'
             'uint32_t Operand::read_scalar(const amdgpu::Wavefront &wf) const {\n'
             '  if (delegate()) return delegate()->read_scalar(wf);\n'
             '  if (is_immediate_type(opr_type_))\n'
@@ -3779,18 +3805,16 @@ class CodeGenerator:
             '}\n'
             '\n'
             'void Operand::write_lane(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val) const {\n'
-            '  int ev = encoding_value_;\n'
-            '  if (is_vgpr_only_type(opr_type_)) {\n'
-            '    wf.cu().write_vgpr(wf.vgpr_alloc().base + vgpr_index(opr_type_, ev), lane, val);\n'
+            '  if (auto off = Isa::resolved_vgpr_offset(opr_type_, encoding_value_)) {\n'
+            '    wf.cu().write_vgpr(wf.vgpr_alloc().base + *off, lane, val);\n'
             '    return;\n'
             '  }\n'
             '  throw std::logic_error("write_lane called on non-VGPR operand type");\n'
             '}\n'
             '\n' + _read_lane64_body + '\n\n'
             'void Operand::write_lane64(amdgpu::Wavefront &wf, uint32_t lane, uint64_t val) const {\n'
-            '  int ev = encoding_value_;\n'
-            '  if (is_vgpr_only_type(opr_type_)) {\n'
-            '    uint32_t idx = wf.vgpr_alloc().base + vgpr_index(opr_type_, ev);\n'
+            '  if (auto off = Isa::resolved_vgpr_offset(opr_type_, encoding_value_)) {\n'
+            '    uint32_t idx = wf.vgpr_alloc().base + *off;\n'
             '    wf.cu().write_vgpr(idx, lane, static_cast<uint32_t>(val));\n'
             '    wf.cu().write_vgpr(idx + 1, lane, static_cast<uint32_t>(val >> 32));\n'
             '    return;\n'
@@ -3830,9 +3854,11 @@ class CodeGenerator:
             False,
             [
                 (f'rocjitsu/isa/arch/amdgpu/{arch}/operand.h', False),
+                ('rocjitsu/isa/isa_operand_simd_inl.h', False),
                 ('rocjitsu/vm/amdgpu/compute_unit.h', False),
                 ('rocjitsu/vm/amdgpu/wavefront.h', False),
                 ('format', True),
+                ('optional', True),
                 ('stdexcept', True),
                 ('string', True),
             ],
