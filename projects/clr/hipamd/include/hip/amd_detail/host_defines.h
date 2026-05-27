@@ -343,14 +343,12 @@ struct NumericLimits<unsigned long long> {
 
 template <>
 struct NumericLimits<float> {
-    // IEEE 754: 0 11111110 11111111111111111111111 = largest finite float
     static constexpr float maximum()    { return __builtin_bit_cast(float, 0x7F7FFFFF); }
-    static constexpr float lowest() { return __builtin_bit_cast(float, 0xFF7FFFFF); }
+    static constexpr float lowest() { return __builtin_bit_cast(float, 0x80800001); }
 };
 
 template <>
 struct NumericLimits<double> {
-    // IEEE 754: 0 11111111110 [52 ones] = largest finite double
     static constexpr double maximum()    { return __builtin_bit_cast(double, 0x7FEFFFFFFFFFFFFFLL); }
     static constexpr double lowest() { return __builtin_bit_cast(double, 0xFFEFFFFFFFFFFFFFLL); }
 };
