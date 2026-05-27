@@ -88,9 +88,7 @@ def _run_single_file_checks(validator, proto):
     pid_list_text = match.group(1).strip()
     slice_count = int(match.group(2))
     pids = (
-        [int(p) for p in pid_list_text.split(",") if p.strip()]
-        if pid_list_text
-        else []
+        [int(p) for p in pid_list_text.split(",") if p.strip()] if pid_list_text else []
     )
     return pids, slice_count
 
@@ -123,9 +121,7 @@ def _run_per_pid_isolation(validator, proto):
 @pytest.mark.class_name("cached-perfetto-layout")
 class TestCachedPerfettoLayout(RocprofsysTest):
     @pytest.mark.timeout(180)
-    @pytest.mark.parametrize(
-        "layout", ["single_file_only", "per_process_only", "full"]
-    )
+    @pytest.mark.parametrize("layout", ["single_file_only", "per_process_only", "full"])
     def test(self, layout, base_env, tests_dir):
         env = dict(base_env)
         env["ROCPROFSYS_PERFETTO_OUTPUT_LAYOUT"] = layout
@@ -152,9 +148,9 @@ class TestCachedPerfettoLayout(RocprofsysTest):
                 f"single_file_only: per-rank files must NOT be written; found "
                 f"{[p.name for p in per_rank_files]}"
             )
-            assert merged_path.exists(), (
-                f"single_file_only: expected merged.proto in {result.output_dir}"
-            )
+            assert (
+                merged_path.exists()
+            ), f"single_file_only: expected merged.proto in {result.output_dir}"
             pids, slices = _run_single_file_checks(validator, merged_path)
             assert len(pids) == 2, (
                 f"merged.proto pid set = {pids}; expected exactly 2 "
@@ -169,14 +165,13 @@ class TestCachedPerfettoLayout(RocprofsysTest):
                 f"per_process_only: expected 2 per-rank .proto files in "
                 f"{result.output_dir}, found {[p.name for p in per_rank_files]}"
             )
-            assert not merged_path.exists(), (
-                f"per_process_only: must NOT produce a merged.proto"
-            )
+            assert (
+                not merged_path.exists()
+            ), f"per_process_only: must NOT produce a merged.proto"
             for proto in per_rank_files:
                 slices = _run_per_pid_isolation(validator, proto)
                 assert slices >= _MIN_SLICES_PER_RANK, (
-                    f"{proto} slice count {slices} below floor "
-                    f"{_MIN_SLICES_PER_RANK}"
+                    f"{proto} slice count {slices} below floor " f"{_MIN_SLICES_PER_RANK}"
                 )
         else:
             # full: per-rank files (per_pid_file_sink branch of tee) AND
@@ -192,13 +187,10 @@ class TestCachedPerfettoLayout(RocprofsysTest):
             for proto in per_rank_files:
                 slices = _run_per_pid_isolation(validator, proto)
                 assert slices >= _MIN_SLICES_PER_RANK, (
-                    f"{proto} slice count {slices} below floor "
-                    f"{_MIN_SLICES_PER_RANK}"
+                    f"{proto} slice count {slices} below floor " f"{_MIN_SLICES_PER_RANK}"
                 )
             pids, slices = _run_single_file_checks(validator, merged_path)
-            assert len(pids) == 2, (
-                f"merged.proto pid set = {pids}; expected exactly 2"
-            )
+            assert len(pids) == 2, f"merged.proto pid set = {pids}; expected exactly 2"
             assert slices >= 2 * _MIN_SLICES_PER_RANK, (
                 f"merged.proto slice count {slices} below floor "
                 f"{2 * _MIN_SLICES_PER_RANK}"
