@@ -17,6 +17,11 @@ import os
 import sys
 import shutil
 
+try:
+    import yaml  # PyYAML; optional - tier label injection is skipped if absent
+except ImportError:  # pragma: no cover - graceful no-op
+    yaml = None  # type: ignore[assignment]
+
 # Add the pytest directory to Python path for rocprofsys package
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -884,6 +889,127 @@ def _ctest_item_ctest_identity(item: pytest.Item) -> tuple[str, str, str]:
     return test_id, test_name, test_nodeid
 
 
+# ----------------------------------------------------------------------------
+# Test-category (tier) label injection from test_categories.yaml
+# ----------------------------------------------------------------------------
+# Single source of truth for tier policy is tests/test_categories.yaml.
+# At CTest-generate time we read the YAML and append tier and arch-exclude
+# labels to each test's emitted LABELS set, so `ctest -L <tier>` Just Works
+# from the installed share/rocprofiler-systems/tests directory.
+
+TIER_ORDER = ["quick", "standard", "comprehensive", "full"]
+_TEST_CATEGORIES_YAML = Path(__file__).parent.parent / "test_categories.yaml"
+
+
+@lru_cache(maxsize=1)
+def _load_test_categories() -> Optional[dict]:
+    """Load and compile tests/test_categories.yaml.
+
+    Returns ``None`` (with a single STDERR warning) when the YAML is missing or
+    PyYAML isn't importable - the conftest stays usable in sparse / standalone
+    checkouts that don't carry the test-filter standardisation files.
+
+    Pattern semantics intentionally mirror CTest ``--tests-regex`` (substring
+    regex via ``re.search``), so legacy patterns from
+    test_rocprofiler_systems.py port over unchanged.
+    """
+    if yaml is None:
+        print(
+            "[test_categories] PyYAML not available - skipping tier label injection.",
+            file=sys.stderr,
+        )
+        return None
+    if not _TEST_CATEGORIES_YAML.exists():
+        return None
+    try:
+        data = yaml.safe_load(_TEST_CATEGORIES_YAML.read_text()) or {}
+    except yaml.YAMLError as exc:
+        print(
+            f"[test_categories] Failed to load {_TEST_CATEGORIES_YAML}: {exc}",
+            file=sys.stderr,
+        )
+        return None
+
+    def _compile_list(patterns):
+        compiled = []
+        for p in patterns or []:
+            try:
+                compiled.append(re.compile(p))
+            except re.error as exc:
+                print(
+                    f"[test_categories] Skipping invalid regex {p!r}: {exc}",
+                    file=sys.stderr,
+                )
+        return compiled
+
+    tier_cfg: dict = {}
+    for tier in TIER_ORDER:
+        cfg = (data.get("test_categories", {}) or {}).get(tier) or {}
+        tier_cfg[tier] = {
+            "include": _compile_list(cfg.get("test_patterns")),
+            "exclude": _compile_list(cfg.get("exclude")),
+            "excluded_labels": set(cfg.get("excluded_labels") or []),
+        }
+
+    arch_exclude: dict[str, list] = {}  # {label: [compiled_patterns]}
+    for _key, section in (data.get("exclude_arch") or {}).items():
+        if not isinstance(section, dict):
+            continue
+        labels = section.get("labels") or []
+        patterns = _compile_list(section.get("test_patterns"))
+        for label in labels:
+            arch_exclude.setdefault(label, []).extend(patterns)
+
+    return {"tiers": tier_cfg, "arch_exclude": arch_exclude}
+
+
+def _resolve_tier_labels(test_name: str, existing_labels: set[str]) -> set[str]:
+    """Return tier labels (subset of TIER_ORDER) for *test_name*.
+
+    A test gets tier T if its name matches any of T's `test_patterns` AND
+    doesn't match any of T's `exclude` patterns AND none of its
+    `existing_labels` (pytest-marker-derived) appear in T's `excluded_labels`.
+
+    Matches are inclusive: matching `quick` also yields standard/comprehensive/
+    full, mirroring the rocJenkins-style tiering used across the standardised
+    components (hipsolver, rocblas, hipfft, ...).
+    """
+    categories = _load_test_categories()
+    if not categories:
+        return set()
+    matched_indices: list[int] = []
+    for i, tier in enumerate(TIER_ORDER):
+        cfg = categories["tiers"].get(tier) or {}
+        if not any(p.search(test_name) for p in cfg.get("include", [])):
+            continue
+        if any(p.search(test_name) for p in cfg.get("exclude", [])):
+            continue
+        if existing_labels & cfg.get("excluded_labels", set()):
+            continue
+        matched_indices.append(i)
+    if not matched_indices:
+        return set()
+    return {TIER_ORDER[i] for i in range(min(matched_indices), len(TIER_ORDER))}
+
+
+def _resolve_arch_exclude_labels(test_name: str) -> set[str]:
+    """Return arch-exclude labels (e.g. ``gfx950_linux_exclude``) matching *test_name*.
+
+    The TheRock test_runner.py honours ``<gfx_pattern>[_<os>]_exclude`` labels
+    via its find_matching_arch_exclude_labels() helper - any label emitted
+    here just needs to follow that naming convention to be auto-excluded on
+    the matching GPU/OS combination.
+    """
+    categories = _load_test_categories()
+    if not categories:
+        return set()
+    matched: set[str] = set()
+    for label, patterns in categories["arch_exclude"].items():
+        if any(p.search(test_name) for p in patterns):
+            matched.add(label)
+    return matched
+
+
 def _emit_ctest_header_block() -> list[str]:
     """CMake preamble for generated CTestTestfile.cmake (env, paths, pytest/python discovery)."""
     return [
@@ -1120,6 +1246,13 @@ def _ctest_generate_tests(
             else:
                 args_str = ", ".join(str(a) for a in marker.args)
                 labels.add(f"{marker.name}[{args_str}]")
+
+        # Inject tier (quick/standard/comprehensive/full) and arch-exclude
+        # labels from tests/test_categories.yaml.  The tier check consults
+        # `labels` so heavy markers (mpi, lulesh, ...) opt the test out of
+        # the relevant tiers.
+        labels |= _resolve_tier_labels(test_name, labels)
+        labels |= _resolve_arch_exclude_labels(test_name)
 
         escaped_name = _cmake_escape(test_name)
 

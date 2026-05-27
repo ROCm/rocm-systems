@@ -49,6 +49,24 @@ set_target_properties(
         RUNTIME_OUTPUT_DIRECTORY "${_capchk_dir}"
 )
 
+# test_categories.yaml drives tier (quick/standard/comprehensive/full) and
+# arch-exclude label injection at CTest-generate time (see tests/pytest/
+# conftest.py:_load_test_categories).
+#
+# Copy at CONFIGURE time so the YAML is at its expected build-tree location
+# before any build target runs - the generate-pytest-ctests target does not
+# depend on `copy-test-files`, so a build-time copy alone could race and
+# leave _load_test_categories() silently degrading to "no tier labels".
+# The build-time copy below also picks up edits without re-running cmake.
+set(ROCPROFSYS_TEST_CATEGORIES_YAML
+    ${CMAKE_CURRENT_LIST_DIR}/test_categories.yaml
+)
+configure_file(
+    ${ROCPROFSYS_TEST_CATEGORIES_YAML}
+    ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests/test_categories.yaml
+    COPYONLY
+)
+
 add_custom_target(
     copy-test-files
     ALL
@@ -60,6 +78,9 @@ add_custom_target(
         ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests
     COMMAND
         ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_LIST_DIR}/README.md
+        ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests
+    COMMAND
+        ${CMAKE_COMMAND} -E copy_if_different ${ROCPROFSYS_TEST_CATEGORIES_YAML}
         ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests
     COMMAND
         ${CMAKE_COMMAND} -E copy_directory
@@ -101,5 +122,12 @@ if(ROCPROFSYS_INSTALL_TESTING)
         RUNTIME
             DESTINATION share/rocprofiler-systems/tests
             COMPONENT rocprofiler-systems-tests
+    )
+    # Test categories policy (informational / debuggable - the labels
+    # themselves are baked into the generated CTestTestfile.cmake).
+    install(
+        FILES ${ROCPROFSYS_TEST_CATEGORIES_YAML}
+        DESTINATION share/rocprofiler-systems/tests
+        COMPONENT rocprofiler-systems-tests
     )
 endif()
