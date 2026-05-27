@@ -73,6 +73,14 @@ if [ -e /proc/sys/kernel/yama/ptrace_scope ]                             \
     exit 0
 fi
 
+# Check for pgrep before continuing
+# TODO: Remove when pgrep is available in all test environments
+if ! command -v pgrep > /dev/null 2>&1; then
+    echo "pgrep is not installed on this system. This test is skipped."
+    touch ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/skipped
+    exit 0
+fi
+
 # Start the test application in the background with --fork-child so it spawns
 # a child process, exercising rocprofv3 --attach-children tree attachment.
 echo "Launching test application: ${TEST_APP}"
