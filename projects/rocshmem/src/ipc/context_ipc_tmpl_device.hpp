@@ -739,9 +739,7 @@ __device__ inline int IPCContext::tile_put(void* dst_data, const void* src_data,
     }
   }
 
-  if (get_flat_block_id() == 0) {
-    ipcImpl_.ipcQuiet();
-  }
+  ipcImpl_.ipcQuiet();
   return ROCSHMEM_SUCCESS;
 }
 
@@ -825,7 +823,7 @@ __device__ inline int IPCContext::tile_put_wave(void* dst_data, const void* src_
     }
   }
 
-  if (get_flat_block_id() == 0) {
+  if (is_thread_zero_in_wave()) {
     ipcImpl_.ipcQuiet();
   }
   return ROCSHMEM_SUCCESS;
@@ -917,10 +915,11 @@ __device__ inline int IPCContext::tile_put_wg(void* dst_data, const void* src_da
     }
   }
 
-  __builtin_amdgcn_s_barrier();
   if (get_flat_block_id() == 0) {
     ipcImpl_.ipcQuiet();
   }
+  __builtin_amdgcn_s_barrier();
+
   return ROCSHMEM_SUCCESS;
 }
 
@@ -997,9 +996,7 @@ __device__ inline int IPCContext::tile_get(void* dst_data, const void* src_data,
     }
   }
 
-  if (get_flat_block_id() == 0) {
-    ipcImpl_.ipcQuiet();
-  }
+  ipcImpl_.ipcQuiet();
   return ROCSHMEM_SUCCESS;
 }
 
@@ -1083,7 +1080,7 @@ __device__ inline int IPCContext::tile_get_wave(void* dst_data, const void* src_
     }
   }
 
-  if (get_flat_block_id() == 0) {
+  if (is_thread_zero_in_wave()) {
     ipcImpl_.ipcQuiet();
   }
   return ROCSHMEM_SUCCESS;
@@ -1174,10 +1171,11 @@ __device__ inline int IPCContext::tile_get_wg(void* dst_data, const void* src_da
     }
   }
 
-  __builtin_amdgcn_s_barrier();
   if (get_flat_block_id() == 0) {
     ipcImpl_.ipcQuiet();
   }
+  __builtin_amdgcn_s_barrier();
+
   return ROCSHMEM_SUCCESS;
 }
 
