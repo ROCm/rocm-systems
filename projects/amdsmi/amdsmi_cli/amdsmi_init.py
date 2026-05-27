@@ -118,7 +118,7 @@ def amdsmi_cli_init():
         logging.debug("ionic driver's initstate is live")
         init_flag |= amdsmi_interface.AmdSmiInitFlags.INIT_AMD_NICS
 
-    _INIT_TIMEOUT_SEC = 30
+    _INIT_TIMEOUT_SEC = 60
     init_result = {"exception": None}
 
     def _run_init():
