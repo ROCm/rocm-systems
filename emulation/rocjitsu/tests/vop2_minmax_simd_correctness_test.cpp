@@ -163,13 +163,15 @@ void check_case(const MinMaxCase &c, uint64_t exec) {
 
   for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
     const bool active = (exec >> lane) & 1ULL;
+    if (!active) {
+      // Inactive-lane preservation holds regardless of NaN/signed-zero status.
+      EXPECT_EQ(simd[lane], DST_SENTINEL) << c.label << ": SIMD clobbered inactive lane " << lane;
+      continue;
+    }
     if (nan_lane[lane])
-      continue; // accepted divergence: NaN payload or signed-zero tie
+      continue; // active lane accepted divergence: NaN payload or signed-zero tie
     EXPECT_EQ(scalar[lane], simd[lane]) << c.label << ": divergence at lane " << lane << std::hex
                                         << " scalar=0x" << scalar[lane] << " simd=0x" << simd[lane];
-    if (!active) {
-      EXPECT_EQ(simd[lane], DST_SENTINEL) << c.label << ": SIMD clobbered inactive lane " << lane;
-    }
   }
   delete inst;
 }

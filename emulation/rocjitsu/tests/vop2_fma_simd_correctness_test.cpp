@@ -184,13 +184,15 @@ void check_case(const FmaCase &c, uint64_t exec) {
 
   for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
     const bool active = (exec >> lane) & 1ULL;
+    if (!active) {
+      // Inactive-lane preservation holds regardless of NaN-payload status.
+      EXPECT_EQ(simd[lane], seeded[lane]) << c.label << ": SIMD clobbered inactive lane " << lane;
+      continue;
+    }
     if (nan_lane[lane])
-      continue; // NaN-input lanes have an accepted NaN-payload divergence
+      continue; // active NaN-input lanes have an accepted NaN-payload divergence
     EXPECT_EQ(scalar[lane], simd[lane]) << c.label << ": divergence at lane " << lane << std::hex
                                         << " scalar=0x" << scalar[lane] << " simd=0x" << simd[lane];
-    if (!active) {
-      EXPECT_EQ(simd[lane], seeded[lane]) << c.label << ": SIMD clobbered inactive lane " << lane;
-    }
   }
   delete inst;
 }
