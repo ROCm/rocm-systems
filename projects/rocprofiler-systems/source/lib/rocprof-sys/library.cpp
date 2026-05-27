@@ -1000,7 +1000,8 @@ rocprofsys_finalize_hidden(void)
         }
     }
 
-    LOG_DEBUG("rocprofsys_push_trace :: called {}", _push_count);
+    LOG_DEBUG("rocprofsys_push_trace/rocprofsys_push_trace_with_args :: called {}",
+              _push_count);
     LOG_DEBUG("rocprofsys_pop_trace  :: called {}", _pop_count);
 
     tim::signals::enable_signal_detection({ tim::signals::sys_signal::Interrupt },
@@ -1282,9 +1283,9 @@ rocprofsys_finalize_hidden(void)
        !get_env<bool>("ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK", false))
     {
         throw std::runtime_error(fmt::format(
-            "rocprofsys_push_trace was called more times than "
-            "rocprofsys_pop_trace. The inverse is fine but the current state "
-            "means not every measurement was ended :: pushed: {} vs. popped: {}",
+            "rocprofsys_push_trace/rocprofsys_push_trace_with_args was called more "
+            "times than rocprofsys_pop_trace. The inverse is fine but the current "
+            "state means not every measurement was ended :: pushed: {} vs. popped: {}",
             _push_count, _pop_count));
     }
 

@@ -52,22 +52,29 @@ struct entry_key
 
 using timestamp_t = std::uint64_t;
 
-inline thread_local std::map<entry_key, std::vector<timestamp_t>> map_name_to_args;
+struct pending_cache_entry
+{
+    timestamp_t start_ts = 0;
+    std::string args     = {};
+};
+
+inline thread_local std::map<entry_key, std::vector<pending_cache_entry>>
+    map_name_to_args;
 
 namespace
 {
 
 void
 cache_region(std::uint64_t thread_id, const std::string& name, std::uint64_t start_ts,
-             std::uint64_t end_ts, const std::string& category)
+             std::uint64_t end_ts, const std::string& category,
+             const std::string& args_str = {})
 {
     constexpr size_t      NO_CORRELATION_ID = 0;
     constexpr const char* CALLSTACK         = "{}";
-    constexpr const char* ARGUMENTS         = "";
     rocprofsys::trace_cache::get_buffer_storage().store(
         rocprofsys::trace_cache::region_sample{
             thread_id, name.c_str(), NO_CORRELATION_ID, NO_CORRELATION_ID, start_ts,
-            end_ts, CALLSTACK, ARGUMENTS, category.c_str() });
+            end_ts, CALLSTACK, args_str.c_str(), category.c_str() });
 }
 
 template <typename CategoryT, typename... Args>
@@ -77,7 +84,21 @@ cache_start(const char* name)
     const auto start_ts =
         static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
     map_name_to_args[{ name, rocprofsys::trait::name<CategoryT>::value }].push_back(
-        start_ts);
+        pending_cache_entry{ start_ts, /*args=*/{} });
+}
+
+// Attach a pre-serialized args string to the currently open region for
+// this thread
+template <typename CategoryT>
+void
+set_cache_args(const char* name, std::string args_str)
+{
+    auto key = entry_key{ name, rocprofsys::trait::name<CategoryT>::value };
+    auto itr = map_name_to_args.find(key);
+    if(itr != map_name_to_args.end() && !itr->second.empty())
+    {
+        itr->second.back().args = std::move(args_str);
+    }
 }
 
 template <typename CategoryT>
@@ -88,7 +109,7 @@ cache_stop(const char* name)
     auto      x = map_name_to_args.find(key);
     if(x != map_name_to_args.end() && !x->second.empty())
     {
-        auto timestamp = x->second.back();
+        auto entry = std::move(x->second.back());
         x->second.pop_back();
         if(x->second.empty()) map_name_to_args.erase(x);
 
@@ -106,8 +127,8 @@ cache_stop(const char* name)
                 { getppid(), getpid(), thread_id, UNKNOWN_TIME, UNKNOWN_TIME, "{}" });
         }
 
-        cache_region(thread_id, name, timestamp, end_ts,
-                     rocprofsys::trait::name<CategoryT>::value);
+        cache_region(thread_id, name, entry.start_ts, end_ts,
+                     rocprofsys::trait::name<CategoryT>::value, entry.args);
     }
 }
 
@@ -131,11 +152,12 @@ flush_pending_cached_entries()
             { getppid(), getpid(), thread_id, UNKNOWN_TIME, UNKNOWN_TIME, "{}" });
     }
 
-    for(const auto& [key, start_ts_stack] : map_name_to_args)
+    for(const auto& [key, entry_stack] : map_name_to_args)
     {
-        for(const auto& start_ts : start_ts_stack)
+        for(const auto& entry : entry_stack)
         {
-            cache_region(thread_id, key.name, start_ts, end_ts, key.category);
+            cache_region(thread_id, key.name, entry.start_ts, end_ts, key.category,
+                         entry.args);
         }
     }
     map_name_to_args.clear();
@@ -228,6 +250,8 @@ struct category_region : comp::base<category_region<CategoryT>, void>
 
     template <typename... OptsT, typename... Args>
     static void audit(quirk::config<OptsT...>, Args&&...);
+
+    static void set_cache_args(std::string_view name, std::string serialized_args);
 };
 
 template <typename CategoryT>
@@ -302,6 +326,20 @@ category_region<CategoryT>::start(std::string_view name, Args&&... args)
     }
 
     cache_start<CategoryT>(name.data());
+}
+
+template <typename CategoryT>
+void
+category_region<CategoryT>::set_cache_args(std::string_view name,
+                                           std::string      serialized_args)
+{
+    if(name.empty() || serialized_args.empty()) return;
+
+    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+
+    auto _hash = tim::add_hash_id(name);
+    name       = tim::get_hash_identifier_fast(_hash);
+    ::set_cache_args<CategoryT>(name.data(), std::move(serialized_args));
 }
 
 template <typename CategoryT>
