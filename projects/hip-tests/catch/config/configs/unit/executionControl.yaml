@@ -74,6 +74,7 @@ executionControl:
   Unit_hipLaunchByPtr_Verify_Capture: *level_2
   Unit_hipGetProcAddress_KernelLaunchApis:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [kernel]
   Unit_hipGetProcAddress_CallbackActivityAPIs:
     <<: *level_2

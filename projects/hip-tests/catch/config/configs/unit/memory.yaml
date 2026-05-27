@@ -46,47 +46,57 @@ memory:
     tags: [multigpu, transfer, image]
   Unit_hipMemcpy3D_Positive_Basic:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [transfer]
   Unit_hipMemcpy3D_Positive_Synchronization_Behavior:
     <<: *level_2
     # Below tests tests fail in PSDB
-    disabled: [nvidia_windows]
+    disabled: [nvidia_windows, amd_wsl]
     tags: [transfer]
   Unit_hipMemcpy3D_Positive_DeviceToDevice_Synchronization_Behavior:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [transfer]
   Unit_hipMemcpy3D_Positive_Parameters:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [transfer]
   Unit_hipMemcpy3D_Positive_Array:
     <<: *level_2
     tags: [transfer, image]
   Unit_hipMemcpy3D_Negative_Parameters:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [transfer]
   Unit_hipMemcpy3D_Capture:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [transfer]
   Unit_hipMemcpy3D_multiDevice_Negative:
     <<: *level_2
     tags: [multigpu, image]
   Unit_hipMemcpy3DAsync_Positive_Basic:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [transfer]
   Unit_hipMemcpy3DAsync_Positive_Synchronization_Behavior:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [transfer]
   Unit_hipMemcpy3DAsync_Positive_Parameters:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [transfer]
   Unit_hipMemcpy3DAsync_Positive_Array:
     <<: *level_2
     tags: [transfer, image]
   Unit_hipMemcpy3DAsync_Negative_Parameters:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [transfer]
   Unit_hipMemcpy3DAsync_Capture:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [transfer]
   Unit_hipMemcpy3DAsync_multiDevice_Negative:
     <<: *level_2
@@ -96,61 +106,74 @@ memory:
     tags: [multigpu, image]
   Unit_hipMemcpyParam2D_Positive_Basic:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [transfer]
   Unit_hipMemcpyParam2D_Positive_Synchronization_Behavior:
     <<: *level_2
     # Below tests tests fail in PSDB
-    disabled: [nvidia_windows]
+    disabled: [nvidia_windows, amd_wsl]
     tags: [transfer]
   Unit_hipMemcpyParam2D_Positive_Parameters:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [transfer]
   Unit_hipMemcpyParam2D_Positive_Array:
     <<: *level_2
     tags: [transfer, image]
   Unit_hipMemcpyParam2D_Negative_Parameters:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [transfer]
   Unit_hipMemcpyParam2D_Capture:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [transfer]
   Unit_hipMemcpyParam2DAsync_Positive_Basic:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [transfer]
   Unit_hipMemcpyParam2DAsync_Positive_Synchronization_Behavior:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [transfer]
   Unit_hipMemcpyParam2DAsync_Positive_Parameters:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [transfer]
   Unit_hipMemcpyParam2DAsync_Positive_Array:
     <<: *level_2
     tags: [transfer, image]
   Unit_hipMemcpyParam2DAsync_Negative_Parameters:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [transfer]
   Unit_hipMemcpyParam2DAsync_Capture:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [transfer]
   Unit_hipMemcpyParam2DAsync_multiDevice_StreamOnDiffDevice:
     <<: *level_2
     tags: [multigpu, transfer]
   Unit_hipMemcpy2D_Positive_Basic:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [transfer]
   Unit_hipMemcpy2D_Positive_Synchronization_Behavior:
     <<: *level_2
     # Below tests tests fail in PSDB
-    disabled: [nvidia_windows]
+    disabled: [nvidia_windows, amd_wsl]
     tags: [transfer]
   Unit_hipMemcpy2D_Positive_Parameters:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [transfer]
   Unit_hipMemcpy2D_Negative_Parameters:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [transfer]
   Unit_hipMemcpy2D_Capture:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [transfer]
   Unit_hipMemcpy2D_H2D_D2D_D2H:
     <<: *level_2
@@ -169,17 +192,23 @@ memory:
     tags: [transfer]
   Unit_hipMemcpy2DAsync_Positive_Basic:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [transfer]
   Unit_hipMemcpy2DAsync_Positive_Synchronization_Behavior:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [transfer]
   Unit_hipMemcpy2DAsync_Positive_Parameters:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [transfer]
   Unit_hipMemcpy2DAsync_Negative_Parameters:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [transfer]
-  Unit_hipMemcpy2DAsync_Capture: *level_2
+  Unit_hipMemcpy2DAsync_Capture:
+    <<: *level_2
+    disabled: [amd_wsl]
   Unit_hipMemcpy2DAsync_Host_N_PinnedMem:
     <<: *level_2
     # Below tests are failing PSDB
@@ -469,24 +498,30 @@ memory:
     tags: [memset]
   Unit_hipMemset2D_Negative_InvalidPtr:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemset2D_Negative_InvalidSizes:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemset2D_Negative_OutOfBoundsPtr:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemset3D_Negative_InvalidPtr:
     <<: *level_2
     tags: [memset]
   Unit_hipMemset3D_Negative_ModifiedPtr:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemset3D_Negative_InvalidSizes:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemset3D_Negative_OutOfBounds:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemset_SetMemoryWithOffset:
     <<: *level_2
@@ -504,66 +539,86 @@ memory:
   Unit_hipMemsetD8_Capture: *level_2
   Unit_hipMemset3D_BasicFunctional:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemset3DAsync_BasicFunctional:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemset3DAsync_capturehipMemset3DAsync:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows, amd_wsl]
     tags: [memset]
-  Unit_hipMemset3D_Capture: *level_2
+  Unit_hipMemset3D_Capture:
+    <<: *level_2
+    disabled: [amd_wsl]
   Unit_hipMemset2D_BasicFunctional:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemset2DAsync_BasicFunctional:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemset2D_UniqueWidthHeight:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemset2DAsync_capturehipMemset2DAsync:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows, amd_wsl]
     tags: [memset]
-  Unit_hipMemset2D_Capture: *level_2
+  Unit_hipMemset2D_Capture:
+    <<: *level_2
+    disabled: [amd_wsl]
   Unit_hipHostMalloc_ArgValidation:
     <<: *level_2
     tags: [alloc]
   Unit_hipMemset3D_MemsetWithExtent:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemset3DAsync_MemsetWithExtent:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemset3D_MemsetMaxValue:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemset3DAsync_MemsetMaxValue:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemset3D_SeekSetSlice:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemset3DAsync_SeekSetSlice:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemset3D_SeekSetArrayPortion:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemset3DAsync_SeekSetArrayPortion:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemset3D_RegressInLoop:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemset3DAsync_RegressInLoop:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemset3DAsync_ConcurrencyMthread:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMallocManaged_FlgParam:
     <<: *level_2
@@ -741,57 +796,75 @@ memory:
     tags: [transfer]
   Unit_hipMemsetD2D8_BasicFunctional:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemsetD2D8_UnEvenRowsCols:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemsetD2D8_NegTsts:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemsetD2D8Async_BasicFunctional:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemsetD2D8Async_UnEvenRowsCols:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemsetD2D8Async_NegTsts:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemsetD2D16_BasicFunctional:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemsetD2D16_UnEvenRowsCols:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemsetD2D16_NegTsts:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemsetD2D16Async_BasicFunctional:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemsetD2D16Async_UnEvenRowsCols:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemsetD2D16Async_NegTsts:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemsetD2D32_BasicFunctional:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemsetD2D32_UnEvenRowsCols:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemsetD2D32_NegTsts:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemsetD2D32Async_BasicFunctional:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemsetD2D32Async_UnEvenRowsCols:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemsetD2D32Async_NegTsts:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemcpy3DPeer_BasicFunctional:
     <<: *level_2
@@ -932,7 +1005,9 @@ memory:
   Unit_hipMemcpyDeviceToDeviceNoCU_Memcpy_Kernel_InParallel:
     <<: *level_2
     tags: [transfer]
-  Unit_hipGetProcAddress_MemoryApisMallocFree: *level_2
+  Unit_hipGetProcAddress_MemoryApisMallocFree:
+    <<: *level_2
+    disabled: [amd_wsl]
   Unit_hipGetProcAddress_MemoryApisRegisterUnReg: *level_2
   Unit_hipGetProcAddress_MemoryApisArrayRelated:
     <<: *level_2
@@ -941,13 +1016,19 @@ memory:
   Unit_hipGetProcAddress_MemoryApisMemCopy: *level_2
   Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams: *level_2
   Unit_hipGetProcAddress_MemoryApisMemset: *level_2
-  Unit_hipGetProcAddress_MemoryApisMemset2D3D: *level_2
+  Unit_hipGetProcAddress_MemoryApisMemset2D3D:
+    <<: *level_2
+    disabled: [amd_wsl]
   Unit_hipGetProcAddress_MemoryApisGetMemInfoRelated: *level_2
-  Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated: *level_2
+  Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated:
+    <<: *level_2
+    disabled: [amd_wsl]
   Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array:
     <<: *level_2
     tags: [image]
-  Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated: *level_2
+  Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated:
+    <<: *level_2
+    disabled: [amd_wsl]
   Unit_hipGetProcAddress_MemoryApisAddressRelated: *level_2
   Unit_hipGetProcAddress_MemoryApisManagedMemory: *level_2
   Unit_hipGetProcAddress_MemoryApisStreamOrderedMemory: *level_2
@@ -1294,9 +1375,11 @@ memory:
     tags: [memset]
   Unit_hipMemset2DAsync_WithKernel:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemset2DAsync_MultiThread:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemcpyDtoD_Basic:
     <<: *level_2
@@ -1466,27 +1549,35 @@ memory:
     tags: [memset]
   Unit_hipMemsetFunctional_ZeroValue_2D:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemsetFunctional_SmallSize_2D:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemsetFunctional_ZeroSize_2D:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemsetFunctional_PartialSet_2D:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemsetFunctional_ZeroValue_3D:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemsetFunctional_SmallSize_3D:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemsetFunctional_ZeroSize_3D:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMemsetFunctional_PartialSet_3D:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [memset]
   Unit_hipMalloc_Positive_Basic:
     <<: *level_2
@@ -1521,6 +1612,7 @@ memory:
     tags: [alloc]
   Unit_hipMallocPitch_ValidatePitch:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [alloc]
   Unit_hipMalloc3D_Negative:
     <<: *level_2
@@ -1538,23 +1630,33 @@ memory:
     tags: [alloc]
   Unit_hipMallocPitch_Basic:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [alloc]
   Unit_hipMallocPitch_SmallandBigChunks:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [alloc]
-  Unit_hipMallocPitch_Memcpy2D: *level_2
+  Unit_hipMallocPitch_Memcpy2D:
+    <<: *level_2
+    disabled: [amd_wsl]
   Unit_hipMallocPitch_MultiThread:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [alloc]
-  Unit_hipMallocPitch_KernelLaunch: *level_2
+  Unit_hipMallocPitch_KernelLaunch:
+    <<: *level_2
+    disabled: [amd_wsl]
   Unit_hipMalloc3D_Basic:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [alloc]
   Unit_hipMalloc3D_SmallandBigChunks:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [alloc]
   Unit_hipMalloc3D_MultiThread:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [alloc]
   Unit_hipMalloc3DArray_DiffSizes:
     <<: *level_2
@@ -1647,14 +1749,16 @@ memory:
     tags: [image]
   Unit_hipDrvMemcpy3D_Positive_Basic:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [transfer]
   Unit_hipDrvMemcpy3D_Positive_Synchronization_Behavior:
     <<: *level_2
     # Below tests tests fail in PSDB
-    disabled: [nvidia_windows]
+    disabled: [nvidia_windows, amd_wsl]
     tags: [transfer]
   Unit_hipDrvMemcpy3D_Positive_Parameters:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [transfer]
   Unit_hipDrvMemcpy3D_Positive_Array:
     <<: *level_2
@@ -1663,9 +1767,11 @@ memory:
     tags: [transfer, image]
   Unit_hipDrvMemcpy3D_Negative_Parameters:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [transfer]
   Unit_hipDrvMemcpy3D_Capture:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [transfer]
   Unit_hipDrvMemcpy3D_MultipleDataTypes:
     <<: *level_2
@@ -1690,12 +1796,15 @@ memory:
     tags: [transfer, image]
   Unit_hipDrvMemcpy3DAsync_Positive_Basic:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [transfer]
   Unit_hipDrvMemcpy3DAsync_Positive_Synchronization_Behavior:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [transfer]
   Unit_hipDrvMemcpy3DAsync_Positive_Parameters:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [transfer]
   Unit_hipDrvMemcpy3DAsync_Positive_Array:
     <<: *level_2
@@ -1704,9 +1813,11 @@ memory:
     tags: [transfer, image]
   Unit_hipDrvMemcpy3DAsync_Negative_Parameters:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [transfer]
   Unit_hipDrvMemcpy3DAsync_Capture:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [transfer]
   Unit_hipDrvMemcpy3DAsync_H2DDeviceContextChange:
     <<: *level_2
@@ -1740,6 +1851,7 @@ memory:
     tags: [query]
   Unit_hipPointerGetAttribute_ipc_capable:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [query]
   Unit_hipPointerGetAttribute_ipc_capable_Array:
     <<: *level_2

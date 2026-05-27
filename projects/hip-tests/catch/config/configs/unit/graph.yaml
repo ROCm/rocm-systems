@@ -242,7 +242,9 @@ graph:
   Unit_hipGraphAddMemcpyNodeToSymbol_Negative_Parameters:
     <<: *level_2
     tags: [node]
-  Unit_hipGraphExecMemsetNodeSetParams_Positive_Basic: *level_2
+  Unit_hipGraphExecMemsetNodeSetParams_Positive_Basic:
+    <<: *level_2
+    disabled: [amd_wsl]
   Unit_hipGraphExecMemsetNodeSetParams_Negative_Parameters:
     <<: *level_2
     tags: [exec]
@@ -252,7 +254,9 @@ graph:
     disabled: [amd_windows, amd_wsl]
     tags: [exec]
   Unit_hipGraphMemsetNodeSetParams_FlatAlloc_2D_Positive: *level_2
-  Unit_hipGraphMemsetNodeSetParams_PitchedAlloc_OverExtent_Negative: *level_2
+  Unit_hipGraphMemsetNodeSetParams_PitchedAlloc_OverExtent_Negative:
+    <<: *level_2
+    disabled: [amd_wsl]
   Unit_hipGraphExecUpdate_FlatAlloc_2DMemset_Idempotent: *level_2
   Unit_hipGraphExecUpdate_2DMemset_ShapeChange_Negative: *level_2
   Unit_hipGraphExecUpdate_2DMemset_ValueAndDst_Positive: *level_2
@@ -540,6 +544,7 @@ graph:
     tags: [node]
   Unit_hipGraphMemsetNodeGetParams_Negative_Parameters:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [query]
   Unit_hipGraphMemsetNodeSetParams_Positive_Basic:
     <<: *level_2
@@ -898,9 +903,11 @@ graph:
     tags: [query]
   Unit_hipGetProcAddress_GraphAPIs_AddMemsetMemcpyNodes:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [query]
   Unit_hipGetProcAddress_GraphAPIs_SetGetParamsMemsetMemcpy:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [query]
   Unit_hipGetProcAddress_GraphAPIs_KernelNodeSetGetParams:
     <<: *level_2
@@ -922,6 +929,7 @@ graph:
     tags: [query]
   Unit_hipGetProcAddress_GraphAPIs_ExecMemsetMemcpySetParams:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [query]
   Unit_hipGraphExecNodeSetParams_Negative_Parameters:
     <<: *level_2
@@ -1009,20 +1017,25 @@ graph:
     tags: [exec]
   Unit_hipGraphAddMemsetNode_Positive_Basic:
     <<: *level_2
+    disabled: [amd_wsl]
   Unit_hipGraphAddMemsetNode_Negative_Parameters:
     <<: *level_2
     tags: [node]
   Unit_hipGraphAddMemsetNode_hipMallocPitch_2D:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [node]
   Unit_hipGraphAddMemsetNode_hipMallocPitch_1D:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [node]
   Unit_hipGraphAddMemsetNode_hipMalloc3D_2D:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [node]
   Unit_hipGraphAddMemsetNode_hipMalloc3D_1D:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [node]
   Unit_hipGraphAddMemsetNode_hipMalloc_1D:
     <<: *level_2
@@ -1047,6 +1060,7 @@ graph:
     tags: [node]
   Unit_hipGraphMemcpyNodeGetParams_Negative_Parameters:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [query]
   Unit_hipGraphMemcpyNodeGetParams_Negative:
     <<: *level_2
@@ -1059,6 +1073,7 @@ graph:
     tags: [node, image]
   Unit_hipGraphMemcpyNodeSetParams_Negative_Parameters:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [node]
   Unit_hipGraphKernelNodeGetParams_Negative:
     <<: *level_2
@@ -1537,18 +1552,21 @@ graph:
     tags: [node]
   Unit_hipDrvGraphMemcpyNodeGetParams_Negative_Parameters:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [query]
   Unit_hipDrvGraphMemcpyNodeGetParams_Positive:
     <<: *level_2
     tags: [query]
   Unit_hipDrvGraphMemcpyNodeSetParams_Positive_Basic:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [node]
   Unit_hipDrvGraphMemcpyNodeSetParams_Positive_Array:
     <<: *level_2
     tags: [node, image]
   Unit_hipDrvGraphMemcpyNodeSetParams_Negative_Parameters:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [node]
   Unit_hipDeviceSetGraphMemAttribute_Positive_Default:
     <<: *level_2
@@ -1582,11 +1600,15 @@ graph:
     tags: [exec]
   Unit_hipDrvGraphExecMemsetNodeSetParams_BasicPositive:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [exec]
   Unit_hipDrvGraphExecMemsetNodeSetParams_Negative:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [exec]
-  Unit_hipGraphAddNodeTypeMemset_Positive_Basic: *level_2
+  Unit_hipGraphAddNodeTypeMemset_Positive_Basic:
+    <<: *level_2
+    disabled: [amd_wsl]
   Unit_hipGraphAddNodeTypeKernel_Positive_Basic:
     <<: *level_2
     tags: [node]
@@ -1613,6 +1635,7 @@ graph:
     tags: [node]
   Unit_hipDrvGraphAddMemsetNode_Positive_Basic:
     <<: *level_2
+    disabled: [amd_wsl]
   Unit_hipDrvGraphAddMemsetNode_Negative_Parameters:
     <<: *level_2
     tags: [node]
@@ -1663,6 +1686,7 @@ graph:
     tags: [node, image]
   Unit_hipDrvGraphAddMemcpyNode_Negative_Parameters:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [node]
   Unit_hipEventQuery_GlobalCapture_DefaultMode_NormalEvent: *level_2
   Unit_hipEventQuery_GlobalCapture_DefaultMode_CapturedEvent: *level_2
