@@ -37,7 +37,7 @@ _PROFILER_INTERNAL_RE = re.compile(
 )
 
 
-def _is_live_attach(
+def is_live_attach(
     profiler_options: Union[list[str], dict[str, Union[str, list[str]]]],
 ) -> bool:
     """Return True if the profiler options indicate a live-attach (pid) mode."""
@@ -154,7 +154,7 @@ def run_prof(
             new_env[key] = value
         console_debug(f"rocprof sdk env vars: {new_env}")
 
-        if _is_live_attach(profiler_options):
+        if is_live_attach(profiler_options):
             perform_attach_detach(new_env, options)
         else:
             if app_cmd is None:
@@ -194,7 +194,7 @@ def run_prof(
     if new_env.get("ROCPROFILER_METRICS_PATH"):
         shutil.rmtree(new_env["ROCPROFILER_METRICS_PATH"], ignore_errors=True)
 
-    if (not _is_live_attach(profiler_options)) and (not success):
+    if (not is_live_attach(profiler_options)) and (not success):
         for line in output.splitlines():
             stripped = line.strip()
             if stripped:

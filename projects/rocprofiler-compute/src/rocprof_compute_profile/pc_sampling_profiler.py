@@ -16,15 +16,7 @@ from utils.utils_common import (
     is_only_pc_sampling,
     perform_attach_detach,
 )
-
-
-def _is_live_attach(
-    profiler_options: Union[list[str], dict[str, Union[str, list[str]]]],
-) -> bool:
-    return (isinstance(profiler_options, list) and "--pid" in profiler_options) or (
-        isinstance(profiler_options, dict)
-        and profiler_options.get("ROCPROF_ATTACH_PID") is not None
-    )
+from utils.utils_profile import is_live_attach
 
 
 class PCSamplingProfiler:
@@ -137,7 +129,7 @@ class PCSamplingProfiler:
             new_env[key] = value
         console_debug(f"pc sampling rocprof sdk env vars: {new_env}")
 
-        if _is_live_attach(profiler_options):
+        if is_live_attach(profiler_options):
             perform_attach_detach(new_env, options)
             return
 
@@ -181,7 +173,7 @@ class PCSamplingProfiler:
             "ps_file",  # TODO: sync up with the name from source in 2100_.yaml
         ]
 
-        if _is_live_attach(profiler_options):
+        if is_live_attach(profiler_options):
             try:
                 pid_idx = profiler_options_list.index("--pid")
                 options += ["--pid", profiler_options_list[pid_idx + 1]]
