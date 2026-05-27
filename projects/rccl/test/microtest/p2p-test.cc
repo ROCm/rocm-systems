@@ -2353,4 +2353,225 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_CuMemFreshRegistrationFabricExportFailure
     ncclCuMemHandleType = saved_handle_type;
 }
 
+// cuMem* arm, Retain failure -> retry-as-legacy fallback. Plan item A8.
+//
+// Drives the `if (CUPFN(hipMemRetainAllocationHandle(...)) != hipSuccess)`
+// True arm (branch 930:13 True) and the *inner* fallback path:
+//   - the `comm->directMode || !ncclParamLegacyCudaRegister()` guard
+//     short-circuits to its False arm (branch 932:17 False), because
+//     directMode=false and the param is forced on. Control proceeds to
+//     the legacy hipIpcGetMemHandle call.
+//   - hipIpcGetMemHandle succeeds with a sentinel handle.
+//   - `ipcInfo.legacyIpcCap = true` and the `*isLegacyIpc = true` write
+//     (line 935) fire -- the *only* path that drives this isLegacyIpc
+//     write inside the cuMem arm.
+//   - proxy register sees legacyIpcCap=true (in contrast to the cuMem
+//     happy-path tests, where it's false).
+//
+// Sister to the existing FreshRegistrationLegacyIpcSucceeds: that one
+// stays out of the cuMem arm entirely; this one *enters* the cuMem arm,
+// fails Retain, and falls back to legacy export within the cuMem block.
+TEST_F(P2pMicrotest, IpcRegisterBuffer_CuMemFreshRegistrationRetainFailureFallsBackToLegacyExport)
+{
+    constexpr int       kPeerRank      = 2;
+    constexpr int       kPeerLocalRank = 1;
+    constexpr uintptr_t kBaseAddr      = 0x100000;
+    constexpr std::size_t kBaseSize    = 0x4000;
+    constexpr uintptr_t kBuffOffset    = 0x80;
+    constexpr uintptr_t kBegOffset     = 0x20;
+    constexpr uintptr_t kBegAddr       = kBaseAddr + kBegOffset;
+    constexpr uintptr_t kRmtRegAddr    = 0xCAFE0000ull;
+    constexpr int       kNRanks        = kPeerRank + 1;
+
+    CommBuilder cb;
+    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
+      .WithMaxLocalRanks()
+      .WithSharedRes()
+      .WithProxyConnArray(kNRanks);
+    cb.comm().gproxyConn[kPeerRank].initialized = true;
+    // directMode=false so the `directMode || !legacyParam` short-circuit's
+    // first operand is False; combined with ForceLegacyCudaRegister
+    // (second operand also False), the whole guard takes its False arm
+    // and control proceeds to the legacy hipIpcGetMemHandle fallback.
+    cb.comm().directMode = 0;
+
+    ncclReg regRecord{};
+    regRecord.begAddr = kBegAddr;
+    regRecord.endAddr = kBegAddr + 0x1000;
+    RegRecordCleaner regCleanup(regRecord);
+
+    // Enter the cuMem arm.
+    ScopedHook cuMemEnable(g_cuMemEnable, [] { return 1; });
+    // Required for the inner fallback guard not to short-circuit.
+    ScopedHook loadParam(g_loadParam, ForceLegacyCudaRegister());
+
+    const void* const kUserbuff =
+        reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
+    ScopedHook memGet(g_hipMemGetAddressRange,
+        [&](hipDeviceptr_t* pbase, std::size_t* psize, hipDeviceptr_t) -> hipError_t {
+            if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
+            if (psize) *psize = kBaseSize;
+            return hipSuccess;
+        });
+
+    // Retain *fails* -- the key seam for this test.
+    ScopedHook retain(g_hipMemRetainAllocationHandle,
+        [](hipMemGenericAllocationHandle_t*, void*) -> hipError_t {
+            return hipErrorInvalidValue;
+        });
+    // Export and Release must NOT fire on the fallback arm.
+    ScopedHook xport(g_hipMemExportToShareableHandle,
+        [](void*, hipMemGenericAllocationHandle_t,
+           hipMemAllocationHandleType, unsigned long long) -> hipError_t {
+            ADD_FAILURE() << "retry-as-legacy must not call hipMemExportToShareableHandle";
+            return hipErrorInvalidValue;
+        });
+    ScopedHook release(g_hipMemRelease,
+        [](hipMemGenericAllocationHandle_t) -> hipError_t {
+            ADD_FAILURE() << "retry-as-legacy must not call hipMemRelease "
+                          << "(Retain failed -> no handle was acquired)";
+            return hipErrorInvalidValue;
+        });
+
+    // The fallback's legacy export.
+    ScopedHook ipcGet(g_hipIpcGetMemHandle,
+        [](hipIpcMemHandle_t* h, void* devPtr) -> hipError_t {
+            EXPECT_EQ(devPtr, reinterpret_cast<void*>(kBaseAddr));
+            if (h) std::memset(h, 0x5A, sizeof(*h));
+            return hipSuccess;
+        });
+
+    ScopedHook proxy(g_proxyCallBlocking,
+        [&](struct ncclComm*, struct ncclProxyConnector*, int type,
+            void* req, int reqSize, void* resp, int respSize) -> ncclResult_t {
+            EXPECT_EQ(type, ncclProxyMsgRegister);
+            if (req == nullptr ||
+                static_cast<size_t>(reqSize) < sizeof(p2pIpcExpInfo)) {
+                ADD_FAILURE() << "malformed register-msg request";
+                return ncclInternalError;
+            }
+            auto* info = static_cast<p2pIpcExpInfo*>(req);
+            // The retry-as-legacy contract: legacyIpcCap=true even though
+            // we entered via the cuMem arm.
+            EXPECT_TRUE(info->legacyIpcCap);
+            EXPECT_EQ(info->size,   kBaseSize);
+            EXPECT_EQ(info->offset, kBegOffset);
+            EXPECT_GE(static_cast<size_t>(respSize), sizeof(void*));
+            if (resp) std::memcpy(resp, &kRmtRegAddr, sizeof(void*));
+            return ncclSuccess;
+        });
+
+    int peerRanks[] = {kPeerRank};
+    IpcRegOutputs out;
+    bool isLegacyIpc = false;  // start false to see the retry arm set it
+
+    auto r = CallIpcRegisterBuffer(cb, kUserbuff,
+                                   /*buffSize=*/ 256,
+                                   peerRanks, 1,
+                                   NCCL_IPC_COLLECTIVE,
+                                   &regRecord, out, &isLegacyIpc);
+
+    EXPECT_EQ(cuMemEnable.calls, 1);
+    EXPECT_EQ(retain.calls,      1);
+    EXPECT_EQ(xport.calls,       0);
+    EXPECT_EQ(release.calls,     0);
+    EXPECT_EQ(ipcGet.calls,      1);  // the fallback's legacy export fired
+    EXPECT_EQ(proxy.calls,       1);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(out.regBufFlag, 1);
+    EXPECT_EQ(out.offsetOut,  kBuffOffset);
+    // The line-935 `*isLegacyIpc = true` write fired -- this is the
+    // only path inside the cuMem arm that sets it.
+    EXPECT_TRUE(isLegacyIpc);
+
+    ASSERT_NE(regRecord.ipcInfos[kPeerLocalRank], nullptr);
+    EXPECT_TRUE(regRecord.ipcInfos[kPeerLocalRank]->impInfo.legacyIpcCap);
+    EXPECT_TRUE(regRecord.state & IPC_REG_COMPLETE);
+}
+
+// Companion to the retry-as-legacy test: Retain fails AND the inner
+// `directMode || !ncclParamLegacyCudaRegister()` guard short-circuits
+// to its True arm via directMode=true. Drives branch 932:17 True
+// (the bare-`goto fail` exit from the cuMem arm when no fallback is
+// permitted). Mirror of the existing
+// FreshRegistrationDirectModeShortCircuitsLegacyExport test, which
+// exercises the analogous guard in the *legacy* arm.
+TEST_F(P2pMicrotest, IpcRegisterBuffer_CuMemFreshRegistrationRetainFailureDirectModeShortCircuits)
+{
+    constexpr int       kPeerRank      = 2;
+    constexpr int       kPeerLocalRank = 1;
+    constexpr uintptr_t kBaseAddr      = 0x100000;
+    constexpr std::size_t kBaseSize    = 0x4000;
+    constexpr uintptr_t kBuffOffset    = 0x80;
+    constexpr uintptr_t kBegOffset     = 0x20;
+    constexpr uintptr_t kBegAddr       = kBaseAddr + kBegOffset;
+    constexpr int       kNRanks        = kPeerRank + 1;
+
+    CommBuilder cb;
+    cb.WithLocalRank(kPeerRank, kPeerLocalRank)
+      .WithMaxLocalRanks()
+      .WithSharedRes()
+      .WithProxyConnArray(kNRanks);
+    cb.comm().gproxyConn[kPeerRank].initialized = true;
+    cb.comm().directMode = 1;  // drives the guard's True arm
+
+    ncclReg regRecord{};
+    regRecord.begAddr = kBegAddr;
+    regRecord.endAddr = kBegAddr + 0x1000;
+    RegRecordCleaner regCleanup(regRecord);
+
+    ScopedHook cuMemEnable(g_cuMemEnable, [] { return 1; });
+    // legacyParam value doesn't matter for short-circuit semantics --
+    // directMode=true makes the first operand True.
+    const void* const kUserbuff =
+        reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
+    ScopedHook memGet(g_hipMemGetAddressRange,
+        [&](hipDeviceptr_t* pbase, std::size_t* psize, hipDeviceptr_t) -> hipError_t {
+            if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
+            if (psize) *psize = kBaseSize;
+            return hipSuccess;
+        });
+    ScopedHook retain(g_hipMemRetainAllocationHandle,
+        [](hipMemGenericAllocationHandle_t*, void*) -> hipError_t {
+            return hipErrorInvalidValue;
+        });
+    // Nothing else may fire: the guard short-circuits to goto fail
+    // before any of these are touched.
+    ScopedHook ipcGet(g_hipIpcGetMemHandle,
+        [](hipIpcMemHandle_t*, void*) -> hipError_t {
+            ADD_FAILURE() << "short-circuit must not reach hipIpcGetMemHandle";
+            return hipErrorInvalidValue;
+        });
+    ScopedHook proxy(g_proxyCallBlocking,
+        [](struct ncclComm*, struct ncclProxyConnector*, int,
+           void*, int, void*, int) -> ncclResult_t {
+            ADD_FAILURE() << "short-circuit must not reach proxy register";
+            return ncclInternalError;
+        });
+
+    int peerRanks[] = {kPeerRank};
+    IpcRegOutputs out;
+    bool isLegacyIpc = false;
+
+    auto r = CallIpcRegisterBuffer(cb, kUserbuff,
+                                   /*buffSize=*/ 256,
+                                   peerRanks, 1,
+                                   NCCL_IPC_COLLECTIVE,
+                                   &regRecord, out, &isLegacyIpc);
+
+    EXPECT_EQ(retain.calls, 1);
+    EXPECT_EQ(ipcGet.calls, 0);
+    EXPECT_EQ(proxy.calls,  0);
+
+    // Bare `goto fail` exit -- same quirk as the legacy-arm directMode
+    // short-circuit: ret stays ncclSuccess, fail: epilogue zeros outputs,
+    // caller sees ncclSuccess + regBufFlag=0.
+    EXPECT_EQ(r, ncclSuccess);
+    out.ExpectZeroed();
+    EXPECT_FALSE(isLegacyIpc);  // the line-935 write never fired
+    EXPECT_EQ(regRecord.ipcInfos[kPeerLocalRank], nullptr);
+    EXPECT_FALSE(regRecord.state & IPC_REG_COMPLETE);
+}
+
 #endif  // ROCM_VERSION >= 70000
