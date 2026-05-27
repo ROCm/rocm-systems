@@ -17,9 +17,6 @@ System Speed-of-Light:
   MFMA FLOPs (F64):
     rst: 'The total number of 64-bit floating point MFMA operations executed per second. Note: this does not include any 64-bit floating point operations from VALU instructions. This is also presented as a percent of the peak theoretical F64 MFMA operations achievable on the specific accelerator.'
     unit: GFLOP/s
-  MFMA FLOPs (F6F4):
-    rst: The total number of 4-bit and 6-bit floating-point operations executed on MFMA units, per second. F6/F4 formats are supported in AMD Instinct MI350 series (gfx950) and later only.
-    unit: GFLOPs
   MFMA IOPs (Int8):
     rst: 'The total number of 8-bit integer MFMA operations executed per second. Note: this does not include any 8-bit integer operations from VALU instructions. This is also presented as a percent of the peak theoretical INT8 MFMA operations achievable on the specific accelerator.'
     unit: GIOP/s
@@ -98,6 +95,9 @@ System Speed-of-Light:
   CU Utilization:
     rst: The percent of :ref:`total SIMD cycles <total-simd-cycles>` in the kernel where any :ref:`SIMD <desc-valu>` on a CU was actively doing any work, summed over all CUs. Low values (less than 100%) indicate that the accelerator was not fully saturated by the kernel, or a potential load-imbalance issue.
     unit: Percent
+  MFMA FLOPs (F6F4):
+    rst: The total number of 4-bit and 6-bit floating-point operations executed on MFMA units, per second. F6/F4 formats are supported in AMD Instinct MI350 series (gfx950) and later only.
+    unit: GFLOPs
   VL1 Lat:
     rst: Calculated as the average number of cycles that a vL1D cache line request spent in the vL1D cache pipeline.
   L2 Rd Lat:
@@ -125,7 +125,7 @@ Command processor packet processor (CPC):
     rst: Percent of total cycles where the CPC was busy actively doing any work. The ratio of CPC busy cycles over total cycles counted by the CPC.
     unit: Percent
   CPC SYNC FIFO Full Rate:
-    rst: Percent of cycles where CPC sync counter FIFO was full. High values indicate backpressure in sync counter processing.
+    rst: Percent of CPC sync counter request FIFO busy cycles where the FIFO was full. High values indicate backpressure in synchronization counter processing.
     unit: Percent
   CPC CANE Stall Rate:
     rst: Percent of CPC CANE bus busy cycles where sync counter requests were stalled. High values indicate contention on the CANE bus for synchronization counter operations.
@@ -162,7 +162,7 @@ Workgroup manager utilizations:
     rst: 'The percent of :ref:`total scheduler-pipe cycles <total-pipe-cycles>` in the kernel where the scheduler-pipes were actively doing any work. Note: this value is expected to range between 0% and 25%. See :ref:`desc-spi`.'
     unit: Percent
   Scheduler-Pipe Wave Utilization:
-    rst: Percent of cycles when scheduler-pipe has at least one wave. This measures wave presence in the pipes before dispatch to compute units.
+    rst: Percent of total scheduler-pipe cycles when waves are actively resident in the scheduler-pipe structures. This measures wave presence in the pipes before dispatch to compute units.
     unit: Percent
   Workgroup Manager Utilization:
     rst: The percent of cycles in the kernel where the workgroup manager was actively doing any work.
@@ -372,6 +372,9 @@ Compute Speed-of-Light:
   VALU FLOPs:
     rst: 'The total floating-point operations executed per second on the :ref:`VALU <desc-valu>`. This is also presented as a percent of the peak theoretical FLOPs achievable on the specific accelerator. Note: this does not include any floating-point operations from :ref:`MFMA <desc-mfma>` instructions.'
     unit: GFLOPs
+  MFMA FLOPs (F8):
+    rst: The total number of 8-bit floating-point operations executed on MFMA units, per normalization unit. F8 (FP8) uses either E4M3 or E5M2 format.
+    unit: GFLOPs
   MFMA FLOPs (BF16):
     rst: 'The total number of 16-bit brain floating point :ref:`MFMA <desc-mfma>` operations executed per second. Note: this does not include any 16-bit brain floating point operations from :ref:`VALU <desc-valu>` instructions. This is also presented as a percent of the peak theoretical BF16 MFMA operations achievable on the specific accelerator.'
     unit: GFLOPs
@@ -384,15 +387,12 @@ Compute Speed-of-Light:
   MFMA FLOPs (F64):
     rst: 'The total number of 64-bit floating point :ref:`MFMA <desc-mfma>` operations executed per second. Note: this does not include any 64-bit floating point operations from :ref:`VALU <desc-valu>` instructions. This is also presented as a percent of the peak theoretical F64 MFMA operations achievable on the specific accelerator. The total number of 64-bit floating point :ref:`MFMA <desc-mfma>` operations executed per second. Note: this does not include any 64-bit floating point operations from :ref:`VALU <desc-valu>` instructions. This is also presented as a percent of the peak theoretical F64 MFMA operations achievable on the specific accelerator.'
     unit: GFLOPs
-  MFMA IOPs (INT8):
-    rst: 'The total number of 8-bit integer :ref:`MFMA <desc-mfma>` operations executed per second. Note: this does not include any 8-bit integer operations from :ref:`VALU <desc-valu>` instructions. This is also presented as a percent of the peak theoretical INT8 MFMA operations achievable on the specific accelerator.'
-    unit: GIOPs
   MFMA FLOPs (F6F4):
     rst: The total number of 4-bit and 6-bit floating-point operations executed on MFMA units, per second. F6/F4 formats are supported in AMD Instinct MI350 series (gfx950) and later only.
     unit: GFLOPs
-  MFMA FLOPs (F8):
-    rst: The total number of 8-bit floating-point operations executed on MFMA units, per second. F8 (FP8) uses either E4M3 or E5M2 format.
-    unit: GFLOPs
+  MFMA IOPs (INT8):
+    rst: 'The total number of 8-bit integer :ref:`MFMA <desc-mfma>` operations executed per second. Note: this does not include any 8-bit integer operations from :ref:`VALU <desc-valu>` instructions. This is also presented as a percent of the peak theoretical INT8 MFMA operations achievable on the specific accelerator.'
+    unit: GIOPs
 Pipeline statistics:
   IPC:
     rst: The ratio of the total number of instructions executed on the :doc:`CU <compute-unit>` over the :ref:`total active CU cycles <total-active-cu-cycles>`.
@@ -732,7 +732,6 @@ vL1D cache stall metrics:
     rst: The ratio of the number of cycles where the vL1D is stalled due to Write requests with conflicting tags being looked up concurrently, divided by the number of cycles where the vL1D is active.
   Tag RAM Stall (Atomic):
     rst: The ratio of the number of cycles where the vL1D is stalled due to Atomic requests with conflicting tags being looked up concurrently, divided by the number of cycles where the vL1D is active.
-    unit: Unknown
 vL1D cache access metrics:
   Total Req:
     rst: The total number of incoming requests from the :ref:`address processing unit <desc-ta>` after coalescing.
@@ -906,6 +905,12 @@ L2 cache accesses:
   Streaming Req:
     rst: The total number of incoming requests to the L2 that are marked as *streaming*. The exact meaning of this may differ depending on the targeted accelerator, however on an :ref:`MI2XX <mixxx-note>` this corresponds to `non-temporal load or stores <https://clang.llvm.org/docs/LanguageExtensions.html#non-temporal-load-store-builtins>`_. The L2 cache attempts to evict *streaming* requests before normal requests when the L2 is at capacity.
     unit: Req per Normalization Unit
+  Bypass Req:
+    rst: Number of L2 cache bypass requests measured at the tag block. These requests skip normal cache lookup and go directly to memory, typically for uncacheable or write-combined memory accesses.
+    unit: Req per Normalization Unit
+  Input Buffer Req:
+    rst: Number of raw memory requests received through the L2 cache Input Buffer (IB) from compute units and other hardware clients. This counts all incoming requests before cache lookup processing and represents the total incoming demand on the L2 cache.
+    unit: Req per Normalization Unit
   Probe Req:
     rst: The number of coherence probe requests made to the L2 cache from outside the accelerator. On an :ref:`MI2XX <mixxx-note>`, probe requests may be generated by, for example, writes to :ref:`fine-grained device <memory-type>` memory or by writes to :ref:`coarse-grained <memory-type>` device memory.
     unit: Req per Normalization Unit
@@ -974,6 +979,9 @@ L2 - Fabric interface detailed metrics:
   Read (64B):
     rst: The total number of L2 requests to Infinity Fabric to read 64B of data from any memory location, per :ref:`normalization unit <normalization-units>`. See :ref:`l2-request-flow` for more detail.
     unit: Req per Normalization Unit
+  Read (128B):
+    rst: The total number of L2 requests to Infinity Fabric to read 128B of data from any memory location, per normalization unit.
+    unit: Req per Normalization Unit
   Read (Uncached):
     rst: The total number of L2 requests to Infinity Fabric to read :ref:`uncached data <memory-type>` from any memory location, per :ref:`normalization unit <normalization-units>`. 64B requests for uncached data are counted as two 32B uncached data requests. See :ref:`l2-request-flow` for more detail.
     unit: Req per Normalization Unit
@@ -1027,10 +1035,7 @@ L2 - Fabric interface detailed metrics:
     unit: Gbps
   Atomic - HBM:
     rst: The total number of L2 atomic requests (either 32-byte or 64-byte) destined for the accelerator's local high-bandwidth memory (HBM), per normalization unit. These are read-modify-write operations that update memory atomically.
-    unit: Requests per Normalization Unit
+    unit: Req per Normalization Unit
   Atomic:
     rst: The total number of L2 requests to Infinity Fabric to atomically update 32B or 64B of data in any memory location, per :ref:`normalization unit <normalization-units>`. See :ref:`l2-request-flow` for more detail. Note that on current CDNA accelerators, such as the :ref:`MI2XX <mixxx-note>`, requests are only considered *atomic* by Infinity Fabric if they are targeted at non-write-cacheable memory, such as :ref:`fine-grained memory <memory-type>` allocations or :ref:`uncached memory <memory-type>` allocations on the MI2XX.
-    unit: Req per Normalization Unit
-  Read (128B):
-    rst: The total number of L2 requests to Infinity Fabric to read 128B of data from any memory location, per normalization unit.
     unit: Req per Normalization Unit
