@@ -162,6 +162,55 @@ HIP_TEST_CASE(Unit_hipMalloc_Allocate90PercentOfDeviceMemory) {
   HIP_CHECK(hipFree(devMem));
 }
 
+/**
+ * Test Description
+ * ------------------------
+ * - APU-only. Allocates a single device buffer expected to exceed the
+ *   dedicated-VRAM carveout, then exercises it with memory operations
+ *   (memset, copy back, verify head and tail). Validates that hipMalloc
+ *   honours the spill path for large allocations on unified memory and
+ *   that the resulting buffer remains accessible for those operations.
+ * Test source
+ * ------------------------
+ * - unit/memory/hipMalloc.cc
+ */
+HIP_TEST_CASE(Unit_hipMalloc_Positive_APU_LargeAllocSpill) {
+  hipDeviceProp_t prop{};
+  HIP_CHECK(hipGetDeviceProperties(&prop, 0));
+  if (!prop.integrated) {
+    HIP_SKIP_TEST("dGPU --- APU spill regression test does not apply");
+    return;
+  }
+  // Assumes the dedicated-VRAM carveout is smaller than 5 GiB.
+  constexpr size_t size = static_cast<size_t>(5) << 30;
+  constexpr size_t headroom = static_cast<size_t>(1) << 30;
+  if (prop.totalGlobalMem < size + headroom) {
+    HIP_SKIP_TEST("APU totalGlobalMem too small for this allocation plus headroom");
+    return;
+  }
+
+  char* devMem = nullptr;
+  HIP_CHECK(hipMalloc(&devMem, size));
+  REQUIRE(devMem != nullptr);
+
+  constexpr int fill = 0xCD;
+  HIP_CHECK(hipMemset(devMem, fill, size));
+
+  // Sample-verify head and tail; full read-back is bandwidth-bound at GiB
+  // scale but touching both ends catches page-table or aperture mismatches.
+  constexpr size_t sample = static_cast<size_t>(64) * 1024;
+  std::vector<char> head(sample), tail(sample);
+  HIP_CHECK(hipMemcpy(head.data(), devMem, sample, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(tail.data(), devMem + (size - sample), sample,
+                      hipMemcpyDeviceToHost));
+  for (size_t i = 0; i < sample; ++i) {
+    REQUIRE(head[i] == static_cast<char>(fill));
+    REQUIRE(tail[i] == static_cast<char>(fill));
+  }
+
+  HIP_CHECK(hipFree(devMem));
+}
+
 // Commenting this due to defect SWDEV-501675
 #if 0
 /**

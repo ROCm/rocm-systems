@@ -597,6 +597,8 @@ int64_t hipFileUseCount(void);
  * @brief Get a list of GPU IO driver properties
  * @ingroup driver
  *
+ * \warn_not_implemented
+ *
  * @param [out] props See `hipFileDriverProps_t` for what properties are reported
  *
  * @return \hipfile_error_return
@@ -609,6 +611,8 @@ hipFileError_t hipFileDriverGetProperties(hipFileDriverProps_t *props);
  * @ingroup driver
  *
  * @note On NVIDIA, `poll_threshold_size` must be an increment of 4K
+ *
+ * \warn_not_implemented
  *
  * @param [in] poll `true` to enable polling, `false` to disable
  * @param [in] poll_threshold_size Maximum IO size (in KiB) for which polling is
@@ -625,6 +629,8 @@ hipFileError_t hipFileDriverSetPollMode(bool poll, size_t poll_threshold_size);
  *
  * @note Must be in 64k increments on NVIDIA
  *
+ * \warn_not_implemented
+ *
  * @param [in] max_direct_io_size Maximum IO chunk size (in KiB) for each IO request
  *
  * @return \hipfile_error_return
@@ -638,6 +644,8 @@ hipFileError_t hipFileDriverSetMaxDirectIOSize(size_t max_direct_io_size);
  *
  * @note Must be in 4k increments on NVIDIA
  *
+ * \warn_not_implemented
+ *
  * @param [in] max_cache_size Maximum GPU memory (in KiB) that can be reserved for bounce buffers
  *
  * @return \hipfile_error_return
@@ -650,6 +658,8 @@ hipFileError_t hipFileDriverSetMaxCacheSize(size_t max_cache_size);
  * @ingroup driver
  *
  * @note Must be in 4K increments on NVIDIA
+ *
+ * \warn_not_implemented
  *
  * @param [in] max_pinned_size Maximum GPU memory (in KiB) that can be pinned
  *
@@ -761,6 +771,8 @@ hipFileError_t hipFileBatchIOSubmit(hipFileBatchHandle_t batch_idp, unsigned nr,
  * @brief Poll for the status of completed batch IO operations
  * @ingroup batch
  *
+ * \warn_not_implemented
+ *
  * @param [in] batch_idp \batch_handle_param
  * @param [in] min_nr Minimum number of batch operation statuses that should be returned.
  *                    If `timeout` is exceeded, fewer statuses may be returned.
@@ -780,6 +792,8 @@ hipFileError_t hipFileBatchIOGetStatus(hipFileBatchHandle_t batch_idp, unsigned 
  * @brief Cancels all pending batch IO operations
  * @ingroup batch
  *
+ * \warn_not_implemented
+ *
  * @param [in] batch_idp \batch_handle_param
  *
  * @return \hipfile_error_return
@@ -790,6 +804,8 @@ hipFileError_t hipFileBatchIOCancel(hipFileBatchHandle_t batch_idp);
 /*!
  * @brief Destroys the batch IO handle and frees the associated resources
  * @ingroup batch
+ *
+ * \warn_not_implemented_void
  *
  * @param [in] batch_idp \batch_handle_param
  */
@@ -963,6 +979,8 @@ typedef enum hipFileStringConfigParameter_t {
  * @brief Get the value of a size_t configuration parameter
  * @ingroup core
  *
+ * \warn_not_implemented
+ *
  * @param param The configuration parameter
  * @param value The location to store the value of the configuration parameter
  *
@@ -978,6 +996,8 @@ hipFileError_t hipFileGetParameterSizeT(hipFileSizeTConfigParameter_t param, siz
  * @brief Get the value of a Boolean configuration parameter
  * @ingroup core
  *
+ * \warn_not_implemented
+ *
  * @param param The configuration parameter
  * @param value The location to store the value of the configuration parameter
  *
@@ -992,6 +1012,8 @@ hipFileError_t hipFileGetParameterBool(hipFileBoolConfigParameter_t param, bool 
 /*!
  * @brief Get the value of a string configuration parameter
  * @ingroup core
+ *
+ * \warn_not_implemented
  *
  * @param param    The configuration parameter
  * @param desc_str The location to store the value of the configuration parameter
@@ -1009,6 +1031,8 @@ hipFileError_t hipFileGetParameterString(hipFileStringConfigParameter_t param, c
  * @brief Set the value of a size_t configuration parameter
  * @ingroup core
  *
+ * \warn_not_implemented
+ *
  * @param param The configuration parameter
  * @param value The value of the configuration parameter
  *
@@ -1024,6 +1048,8 @@ hipFileError_t hipFileSetParameterSizeT(hipFileSizeTConfigParameter_t param, siz
  * @brief Set the value of a Boolean configuration parameter
  * @ingroup core
  *
+ * \warn_not_implemented
+ *
  * @param param The configuration parameter
  * @param value The value of the configuration parameter
  *
@@ -1038,6 +1064,8 @@ hipFileError_t hipFileSetParameterBool(hipFileBoolConfigParameter_t param, bool 
 /*!
  * @brief Set the value of a string configuration parameter
  * @ingroup core
+ *
+ * \warn_not_implemented
  *
  * @param param    The configuration parameter
  * @param desc_str The value of the configuration parameter
