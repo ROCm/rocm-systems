@@ -1,0 +1,94 @@
+# rocjitsu CI: build from source and run the full test suite.
+#
+# How it works:
+#   1. Sparse-checkout emulation/rocjitsu
+#   2. Install ROCm from the AMD apt repo (provides hipcc and device
+#      libraries for compiling HIP test kernels). See
+#      https://github.com/ROCm/rocm-systems/pull/6479 for an
+#      alternative using pip rocm-sdk-core (TheRock).
+#   3. Build with clang + ninja in Release mode
+#   4. Run the full ctest suite on the CPU emulator
+#
+# No GPU hardware is needed. rocjitsu's tests run on its built-in
+# CPU emulator, which simulates AMD GPU execution. HIP kernels are
+# compiled for gfx950 by hipcc, then loaded and executed by the
+# emulator at test time.
+#
+# Excluded tests:
+#   RocminfoTest — spawns rocminfo under LD_PRELOAD with the KMD
+#   interposer, which requires /dev/kfd (unavailable on CI runners).
+
+name: rocjitsu CI
+
+on:
+  pull_request:
+    paths:
+      - "emulation/rocjitsu/**"
+      - ".github/workflows/rocjitsu-ci.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "emulation/rocjitsu/**"
+      - ".github/workflows/rocjitsu-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: Linux (clang, Release)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          sparse-checkout: emulation/rocjitsu
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build clang libdrm-dev
+
+      - name: Install ROCm (hipcc + device libraries)
+        run: |
+          # Add the AMD ROCm apt repo and its signing key.
+          sudo mkdir -p --mode=0755 /etc/apt/keyrings
+          wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key \
+            | gpg --dearmor \
+            | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
+          echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] \
+            https://repo.radeon.com/rocm/apt/latest noble main" \
+            | sudo tee /etc/apt/sources.list.d/rocm.list
+
+          # Pin priority 600: prefer ROCm packages from repo.radeon.com
+          # over Ubuntu's defaults, without overriding manually installed
+          # packages. This is the AMD-recommended apt setup for ROCm.
+          echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' \
+            | sudo tee /etc/apt/preferences.d/rocm-pin-600
+
+          sudo apt-get update
+          sudo apt-get install -y hip-runtime-amd rocm-hip-sdk
+          echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV
+
+          # Sanity check: hipcc can compile a trivial HIP kernel
+          echo '__global__ void k(){}' \
+            | /opt/rocm/bin/hipcc -x hip --offload-arch=gfx950 \
+              --cuda-device-only -c -o /dev/null -
+
+      - name: Configure
+        run: >
+          cmake -B build -G Ninja
+          -S emulation/rocjitsu
+          -DCMAKE_C_COMPILER=clang
+          -DCMAKE_CXX_COMPILER=clang++
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_CXX_FLAGS="-Werror"
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Test
+        run: >
+          ctest --test-dir build
+          --output-on-failure
+          --timeout 120
+          --exclude-regex "RocminfoTest"
