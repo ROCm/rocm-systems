@@ -239,7 +239,7 @@ __global__ void k_coop_warp_r(CoopResult* out) {
                ncclCoopNumThreads(&coop) };
 }
 
-__global__ void k_coop_lanes_r(CoopResult* out, uint32_t mask) {
+__global__ void k_coop_lanes_r(CoopResult* out, uint64_t mask) {
   ncclCoopAny coop; ncclCoopAnyInitLanes(&coop, mask);
   int tid = blockIdx.x * blockDim.x + threadIdx.x;
   out[tid] = { ncclCoopSize(&coop),
@@ -269,7 +269,7 @@ __global__ void k_coop_cta_r(CoopResult* out) {
 
 __global__ void k_sync_thread  (int* out)                               { ncclCoopAny c; ncclCoopAnyInitThread  (&c);                ncclCoopSync(&c); int t=blockIdx.x*blockDim.x+threadIdx.x; out[t]=1; }
 __global__ void k_sync_warp    (int* out)                               { ncclCoopAny c; ncclCoopAnyInitWarp    (&c);                ncclCoopSync(&c); int t=blockIdx.x*blockDim.x+threadIdx.x; out[t]=1; }
-__global__ void k_sync_lanes   (int* out, uint32_t mask)                { ncclCoopAny c; ncclCoopAnyInitLanes   (&c, mask);          ncclCoopSync(&c); int t=blockIdx.x*blockDim.x+threadIdx.x; out[t]=1; }
+__global__ void k_sync_lanes   (int* out, uint64_t mask)                { ncclCoopAny c; ncclCoopAnyInitLanes   (&c, mask);          ncclCoopSync(&c); int t=blockIdx.x*blockDim.x+threadIdx.x; out[t]=1; }
 __global__ void k_sync_warpspan(int* out, int warp0, int nWarps, int id){ ncclCoopAny c; ncclCoopAnyInitWarpSpan(&c,warp0,nWarps,id);ncclCoopSync(&c); int t=blockIdx.x*blockDim.x+threadIdx.x; out[t]=1; }
 __global__ void k_sync_cta     (int* out)                               { ncclCoopAny c; ncclCoopAnyInitCta     (&c);                ncclCoopSync(&c); int t=blockIdx.x*blockDim.x+threadIdx.x; out[t]=1; }
 
@@ -378,50 +378,50 @@ static void run_B2(int warpSize) {
              [&](int t) { return t % warpSize; });
 }
 
+/* Return in-group lane rank for thread t, or -1 to skip rank check. */
+static int lane_rank_in_mask(uint64_t mask, int t) {
+  if (t < 0 || !((mask >> t) & 1ull)) return -1;
+  return __builtin_popcountll(mask & ((1ull << t) - 1ull));
+}
+
 /* =====================================================================
- * [B3] ncclCoopAnyInitLanes — three mask variants
- *
- * NOTE: The wrapper takes uint32_t, so on a 64-lane AMD warp only
- * lanes 0–31 can be addressed via this API. Rank is only verified for
- * threads i where (mask >> i) & 1 == 1 (and i < 32).
+ * [B3] ncclCoopAnyInitLanes — mask variants (uint64_t lane_mask)
  * ==================================================================== */
 static void run_B3(int warpSize) {
-  /* ---- B3a: full 32-bit mask (0xFFFFFFFF) ---- */
+  /* ---- B3a: full mask ---- */
   {
-    const uint32_t mask = 0xFFFFFFFFu;
-    const int      sz   = __builtin_popcount(mask); /* 32 */
+    const uint64_t mask = ~0ull;
+    const int      sz   = warpSize;
     auto h = launch_coop_r(k_coop_lanes_r, warpSize, mask);
-    check_coop("B3.1", "ncclCoopAnyInitLanes (full mask): size==32",
+    check_coop("B3.1", "ncclCoopAnyInitLanes (full mask): size==warpSize",
                "B3.2", "ncclCoopAnyInitLanes (full mask): rank==lane",
                "B3.3", "ncclCoopAnyInitLanes (full mask): numThreads==size",
                h,
                [&](int  ) { return sz; },
                [&](int t) {
-                 /* Only verify threads 0–31 that are in the group. */
-                 if (t >= 32 || !((mask >> t) & 1u)) return -1;
-                 return __builtin_popcount(mask & ((1u << t) - 1u));
+                 /* nccl::utility::lanemask_lt() is still 32-bit on AMD wave64,
+                  * so thread_rank() for lanes 32–63 is not lane index today. */
+                 if (warpSize >= 64 && t >= 32) return -1;
+                 return lane_rank_in_mask(mask, t);
                });
   }
 
   /* ---- B3b: sparse mask (lanes 0, 2, 4 — popcount 3) ---- */
   {
-    const uint32_t mask = 0x00000015u; /* bits 0, 2, 4 */
-    const int      sz   = __builtin_popcount(mask); /* 3 */
+    const uint64_t mask = 0x00000015ull; /* bits 0, 2, 4 */
+    const int      sz   = __builtin_popcountll(mask);
     auto h = launch_coop_r(k_coop_lanes_r, warpSize, mask);
     check_coop("B3.4", "ncclCoopAnyInitLanes (sparse mask 0x15): size==3",
                "B3.5", "ncclCoopAnyInitLanes (sparse mask 0x15): rank in-group",
                "B3.6", "ncclCoopAnyInitLanes (sparse mask 0x15): numThreads==size",
                h,
                [&](int  ) { return sz; },
-               [&](int t) {
-                 if (t >= 32 || !((mask >> t) & 1u)) return -1;
-                 return __builtin_popcount(mask & ((1u << t) - 1u));
-               });
+               [&](int t) { return lane_rank_in_mask(mask, t); });
   }
 
   /* ---- B3c: single-bit mask (lane 0 only) ---- */
   {
-    const uint32_t mask = 0x00000001u;
+    const uint64_t mask = 0x00000001ull;
     const int      sz   = 1;
     auto h = launch_coop_r(k_coop_lanes_r, warpSize, mask);
     check_coop("B3.7", "ncclCoopAnyInitLanes (mask=0x1): size==1",
@@ -432,6 +432,18 @@ static void run_B3(int warpSize) {
                [&](int t) {
                  return (t == 0) ? 0 : -1; /* only lane 0 is in the group */
                });
+  }
+
+  /* ---- B3d: upper-lane mask (lane 63 only; requires 64-lane warp) ---- */
+  if (warpSize >= 64) {
+    const uint64_t mask = 1ull << 63;
+    auto h = launch_coop_r(k_coop_lanes_r, warpSize, mask);
+    check_coop("B3.10", "ncclCoopAnyInitLanes (lane 63 mask): size==1",
+               "B3.11", "ncclCoopAnyInitLanes (lane 63 mask): rank==0 on lane 63",
+               "B3.12", "ncclCoopAnyInitLanes (lane 63 mask): numThreads==size",
+               h,
+               [&](int  ) { return 1; },
+               [&](int t) { return (t == 63) ? 0 : -1; });
   }
 }
 
@@ -505,8 +517,8 @@ static void run_B6(int warpSize) {
   report("B6.2", "ncclCoopSync (Warp): kernel completes",
          ok ? Status::PASS : Status::FAIL, ok ? warpSize : 0, warpSize);
 
-  /* Lanes (full mask): all 32 lower lanes participate. */
-  ok = launch_sync(k_sync_lanes, warpSize, (uint32_t)0xFFFFFFFFu);
+  /* Lanes (full mask): all lanes in the warp participate. */
+  ok = launch_sync(k_sync_lanes, warpSize, ~0ull);
   report("B6.3", "ncclCoopSync (Lanes full mask): kernel completes",
          ok ? Status::PASS : Status::FAIL, ok ? warpSize : 0, warpSize);
 

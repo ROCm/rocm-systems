@@ -19,7 +19,7 @@ API individually with `[ PASS ]`, `[ FAIL ]`, or `[ SKIP ]`.
 | A.1 | `ncclGetPeerPointerTeam` — 20 pointer-arithmetic cases |
 | B1.1–B1.3 | `ncclCoopAnyInitThread` + `ncclCoopSize/ThreadRank/NumThreads` |
 | B2.1–B2.3 | `ncclCoopAnyInitWarp` + accessors |
-| B3.1–B3.9 | `ncclCoopAnyInitLanes` — full mask, sparse mask, single-bit mask |
+| B3.1–B3.12 | `ncclCoopAnyInitLanes` — full/sparse/single-bit mask; lane 63 on 64-lane warps |
 | B4.1–B4.6 | `ncclCoopAnyInitWarpSpan` — 1-warp and 2-warp spans |
 | B5.1–B5.6 | `ncclCoopAnyInitCta` — block sizes 64 and 128 |
 | B6.1–B6.5 | `ncclCoopSync` — all five coop types |
@@ -76,7 +76,7 @@ BUILD=/path/to/rccl/build ARCH=gfx942 GPU=0 bash run_IR_test.sh
   [ PASS ] B7.1   ncclLsaBarrierSession_C: sizeof/align        1/1
   [ SKIP ] B7.2   ncclLsaBarrierSessionInit   requires live ncclDevComm ...
   ...
-[IR_test] TOTAL: 34 passed, 0 failed, 4 skipped across 1 GPU(s)
+[IR_test] TOTAL: 37 passed, 0 failed, 4 skipped across 1 GPU(s)
 ```
 
 Exit code `0` = all non-skipped tests passed; `1` = at least one failure;

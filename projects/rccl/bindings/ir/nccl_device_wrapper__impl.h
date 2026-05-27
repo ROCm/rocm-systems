@@ -71,8 +71,8 @@ NCCL_IR_EXPORT void ncclCoopAnyInitThread(ncclCoopAny* coop) {
 NCCL_IR_EXPORT void ncclCoopAnyInitWarp(ncclCoopAny* coop) {
   ::new (coop) ncclCoopAny(ncclCoopWarp{});
 }
-NCCL_IR_EXPORT void ncclCoopAnyInitLanes(ncclCoopAny* coop, uint32_t lane_mask) {
-  ::new (coop) ncclCoopAny(ncclCoopLanes(static_cast<ncclCoopMask_t>(lane_mask)));
+NCCL_IR_EXPORT void ncclCoopAnyInitLanes(ncclCoopAny* coop, ncclCoopMask_t lane_mask) {
+  ::new (coop) ncclCoopAny(ncclCoopLanes(lane_mask));
 }
 NCCL_IR_EXPORT void ncclCoopAnyInitWarpSpan(ncclCoopAny* coop, int warp0, int nWarps, int id) {
   ::new (coop) ncclCoopAny(ncclCoopWarpSpan(warp0, nWarps, id));
