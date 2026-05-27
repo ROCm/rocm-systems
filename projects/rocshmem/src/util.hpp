@@ -407,49 +407,45 @@ __device__ __forceinline__ void copy_bulk(void* dst, void* src,
   using Acc = AsmAccess<ChunkSize, LoadPolicy, StorePolicy>;
   using T = typename Acc::type;
 
+  const uint32_t buf_bytes = static_cast<uint32_t>(n_chunks * ChunkSize);
   int chunk_batch = stride * Unroll;
   int offset = 0;
   T regs[Unroll] = {};
 
-  // Unrolled block copy to hide latency
+  // Unrolled block copy: issue all Unroll loads first to fill the memory pipeline,
+  // then drain with stores. Hardware RAW tracking ensures load→store ordering per reg.
   for (; offset + chunk_batch <= n_chunks; offset += chunk_batch) {
-
     #pragma unroll
     for (int u = 0; u < Unroll; ++u) {
       // if constexpr (LoadPolicy != CachePolicy::Standard) {
       //   wait_on_vmem_and_lds(Unroll - 1);
       // }
       // regs[u] = Acc::load(static_cast<uint8_t*>(src) + (offset + tid + u * stride) * ChunkSize);
-      regs[u] = Acc::load_buffer(
-          src, static_cast<uint32_t>(n_chunks * ChunkSize),
+      regs[u] = Acc::load_buffer(src, buf_bytes,
           static_cast<uint32_t>((offset + tid + u * stride) * ChunkSize));
     }
-
     #pragma unroll
     for (int u = 0; u < Unroll; ++u) {
       // if constexpr (LoadPolicy != CachePolicy::Standard) {
       //   wait_on_vmem_and_lds(Unroll - 1);
       // }
       // Acc::store(static_cast<uint8_t*>(dst) + (offset + tid + u * stride) * ChunkSize, regs[u]);
-      Acc::store_buffer(dst, static_cast<uint32_t>(n_chunks * ChunkSize),
-          static_cast<uint32_t>((offset + tid + u * stride) * ChunkSize),
-          regs[u]);      
+      Acc::store_buffer(dst, buf_bytes,
+          static_cast<uint32_t>((offset + tid + u * stride) * ChunkSize), regs[u]);
     }
 
     // __builtin_amdgcn_s_barrier();
   }
 
-  // Tail loop for remaining ChunkSize-byte chunks
+  // Tail: remaining chunks that don't fill a full unrolled batch
   for (int i = offset + tid; i < n_chunks; i += stride) {
     // T val = Acc::load(static_cast<uint8_t*>(src) + i * ChunkSize);
     // if constexpr (LoadPolicy != CachePolicy::Standard) {
     //   wait_on_vmem_and_lds(0);
     // }
     // Acc::store(static_cast<uint8_t*>(dst) + i * ChunkSize, val);
-    T val = Acc::load_buffer(src, static_cast<uint32_t>(n_chunks * ChunkSize),
-      static_cast<uint32_t>(i * ChunkSize));
-    Acc::store_buffer(dst, static_cast<uint32_t>(n_chunks * ChunkSize),
-      static_cast<uint32_t>(i * ChunkSize), val);
+    T val = Acc::load_buffer(src, buf_bytes, static_cast<uint32_t>(i * ChunkSize));
+    Acc::store_buffer(dst, buf_bytes, static_cast<uint32_t>(i * ChunkSize), val);
   }
 }
 
@@ -460,8 +456,6 @@ template <CachePolicy LP, CachePolicy SP>
 __device__ __forceinline__ void copy_remainder(uint8_t* dst,
                                                uint8_t* src,
                                                int remainder) {
-  // Uses bitwise operations to jump directly to necessary loads
-  // Executed exclusively by Thread 0 to sidestep wave divergence and sync overhead
   if (remainder == 0) return;
 
   if (remainder & 8) {
@@ -512,44 +506,51 @@ __device__ __forceinline__ void copy_remainder(uint8_t* dst,
 // LANE, WAVE, AND WG IMPLEMENTATIONS
 // ==============================================================================
 
-// Note: Unroll template param kept for API compatibility, but handled smartly internally.
+// Blocking variants additionally drain all in-flight VMEM ops before returning.
 template <MemcpyKind Kind = MemcpyKind::Put>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_lane(void* dst, void* src,
                                                              size_t size) {
   if (size == 0) return;
 
   constexpr int ChunkSize = 16;
-  constexpr int Unroll = 4;
+  constexpr int Unroll    = 8;
+  // Compile-time bypass policy: cache-bypass in the direction of the remote side.
+  constexpr CachePolicy LP = is_put(Kind) ? CachePolicy::Standard    : CachePolicy::SystemScope;
+  constexpr CachePolicy SP = is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::Standard;
 
-  CachePolicy LP = is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope;
-  CachePolicy SP = is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::Standard;
+  int n_chunks  = static_cast<int>(size / ChunkSize);
+  int remainder = static_cast<int>(size % ChunkSize);
 
-  if (size > 16 && get_flat_block_size() > 4) {
-    // The stride is large and prevents coallesced access, so:
-    // we should not perform cache-bypassing
-    LP = CachePolicy::Standard;
-    SP = CachePolicy::Standard;
-    detail::atomic::threadfence<detail::atomic::memory_scope_system,
-                                detail::atomic::memory_order_acquire>();
+  if (size >= 16 && get_flat_block_size() > 4) {
+    // Many threads, large transfer: use cached Standard policy.
+    // Fences are direction-specific to maintain system-scope coherence.
+    if constexpr (!is_put(Kind)) {
+      detail::atomic::threadfence<detail::atomic::memory_scope_system,
+                                  detail::atomic::memory_order_acquire>();
+    }
+
+    if (n_chunks > 0) {
+      copy_bulk<ChunkSize, CachePolicy::Standard, CachePolicy::Standard, Unroll>(
+          dst, src, n_chunks, 0, 1);
+    }
+    copy_remainder<CachePolicy::Standard, CachePolicy::Standard>(
+        static_cast<uint8_t*>(dst) + n_chunks * ChunkSize,
+        static_cast<uint8_t*>(src) + n_chunks * ChunkSize, remainder);
+
+    if constexpr (is_put(Kind)) {
+      detail::atomic::threadfence<detail::atomic::memory_scope_system,
+                                  detail::atomic::memory_order_release>();
+    }
+  } else {
+    // Small transfer or single-lane: cache-bypass policy provides direct
+    // remote visibility without explicit fences.
+    if (n_chunks > 0) {
+      copy_bulk<ChunkSize, LP, SP, Unroll>(dst, src, n_chunks, 0, 1);
+    }
+    copy_remainder<LP, SP>(
+        static_cast<uint8_t*>(dst) + n_chunks * ChunkSize,
+        static_cast<uint8_t*>(src) + n_chunks * ChunkSize, remainder);
   }
-
-  int n_chunks = size / ChunkSize;
-  int remainder = size % ChunkSize;
-
-  if (n_chunks > 0) {
-    copy_bulk<ChunkSize, LP, SP, Unroll>(dst, src, n_chunks, 0, 1);
-  }
-
-  copy_remainder<LP, SP>(static_cast<uint8_t*>(dst) + n_chunks * ChunkSize,
-                         static_cast<uint8_t*>(src) + n_chunks * ChunkSize,
-                         remainder);
-  
-  if (size > 16 && get_flat_block_size() > 4) {
-    // The stride is large and prevents coallesced access, so:
-    // we should not perform cache-bypassing
-    detail::atomic::threadfence<detail::atomic::memory_scope_system,
-                                detail::atomic::memory_order_release>();
-  }                         
 }
 
 template <MemcpyKind Kind = MemcpyKind::Put>
