@@ -4063,10 +4063,6 @@ amdsmi_status_t amdsmi_get_gpu_ecc_count(amdsmi_processor_handle processor_handl
                                          amdsmi_gpu_block_t block, amdsmi_error_count_t* ec) {
   AMDSMI_CHECK_INIT();
   // nullptr api supported
-  if (ec == nullptr) {
-    return AMDSMI_STATUS_INVAL;
-  }
-
   return rsmi_wrapper(rsmi_dev_ecc_count_get, processor_handle, 0,
                       static_cast<rsmi_gpu_block_t>(block),
                       reinterpret_cast<rsmi_error_count_t*>(ec));
@@ -4076,10 +4072,6 @@ amdsmi_status_t amdsmi_get_gpu_ecc_enabled(amdsmi_processor_handle processor_han
                                            uint64_t* enabled_blocks) {
   AMDSMI_CHECK_INIT();
   // nullptr api supported
-  if (enabled_blocks == nullptr) {
-    return AMDSMI_STATUS_INVAL;
-  }
-
   return rsmi_wrapper(rsmi_dev_ecc_enabled_get, processor_handle, 0, enabled_blocks);
 }
 
@@ -4087,10 +4079,6 @@ amdsmi_status_t amdsmi_get_gpu_ecc_status(amdsmi_processor_handle processor_hand
                                           amdsmi_gpu_block_t block, amdsmi_ras_err_state_t* state) {
   AMDSMI_CHECK_INIT();
   // nullptr api supported
-  if (state == nullptr) {
-    return AMDSMI_STATUS_INVAL;
-  }
-
   return rsmi_wrapper(rsmi_dev_ecc_status_get, processor_handle, 0,
                       static_cast<rsmi_gpu_block_t>(block),
                       reinterpret_cast<rsmi_ras_err_state_t*>(state));
@@ -4100,10 +4088,6 @@ amdsmi_status_t amdsmi_get_gpu_metrics_header_info(amdsmi_processor_handle proce
                                                    amd_metrics_table_header_t* header_value) {
   AMDSMI_CHECK_INIT();
   // nullptr api supported
-  if (header_value != nullptr) {
-    *header_value = amd_metrics_table_header_t{};  // Use a default initializer for the struct
-  }
-
   return rsmi_wrapper(rsmi_dev_metrics_header_info_get, processor_handle, 0,
                       reinterpret_cast<metrics_table_header_t*>(header_value));
 }
@@ -4232,10 +4216,6 @@ amdsmi_status_t amdsmi_get_gpu_power_profile_presets(amdsmi_processor_handle pro
                                                      amdsmi_power_profile_status_t* status) {
   AMDSMI_CHECK_INIT();
   // nullptr api supported
-  if (status == nullptr) {
-    return AMDSMI_STATUS_INVAL;
-  }
-
   // Bare Metal and passthrough only feature
   amdsmi_virtualization_mode_t virt_mode;
   if (amdsmi_get_gpu_virtualization_mode(processor_handle, &virt_mode) == AMDSMI_STATUS_SUCCESS) {

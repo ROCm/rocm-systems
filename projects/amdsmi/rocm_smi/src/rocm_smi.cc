@@ -608,11 +608,6 @@ rsmi_status_t rsmi_dev_ecc_enabled_get(uint32_t dv_ind, uint64_t* enabled_blks) 
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ss);
-
-  if (enabled_blks == nullptr) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
-
   CHK_SUPPORT_NAME_ONLY(enabled_blks)
 
   DEVICE_MUTEX
@@ -665,11 +660,6 @@ rsmi_status_t rsmi_dev_ecc_status_get(uint32_t dv_ind, rsmi_gpu_block_t block,
   TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
-
-  if (state == nullptr) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
-
   CHK_SUPPORT_NAME_ONLY(state)
 
   if (!is_power_of_2(block)) {
@@ -718,10 +708,7 @@ rsmi_status_t rsmi_dev_ecc_count_get(uint32_t dv_ind, rsmi_gpu_block_t block,
 
   TRY ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
-
-  if (ec == nullptr) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
+  CHK_SUPPORT_NAME_ONLY(ec)
 
   amd::smi::DevInfoTypes type;
   switch (block) {
@@ -4161,12 +4148,9 @@ rsmi_status_t rsmi_dev_power_profile_presets_get(uint32_t dv_ind, uint32_t reser
   TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
-  if (status == nullptr) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
+  CHK_SUPPORT_NAME_ONLY(status)
 
   (void)reserved;
-  CHK_SUPPORT_NAME_ONLY(status)
 
   DEVICE_MUTEX
   rsmi_status_t ret = get_power_profiles(dv_ind, status, nullptr);
@@ -7606,11 +7590,7 @@ rsmi_status_t rsmi_dev_metrics_header_info_get(uint32_t dv_ind,
   TRY std::ostringstream ostrstream;
   ostrstream << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ostrstream);
-
-  assert(header_value != nullptr);
-  if (header_value == nullptr) {
-    return rsmi_status_t::RSMI_STATUS_INVALID_ARGS;
-  }
+  CHK_SUPPORT_NAME_ONLY(header_value)
 
   auto status_code = rsmi_dev_gpu_metrics_header_info_get(dv_ind, *header_value);
   ostrstream << __PRETTY_FUNCTION__ << " | ======= end ======= "
