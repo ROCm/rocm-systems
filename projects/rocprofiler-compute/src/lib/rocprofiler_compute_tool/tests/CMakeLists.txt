@@ -15,18 +15,14 @@ add_executable(
 
 target_link_libraries(
     ${target}
-    PRIVATE rocprofiler-compute-tool gtest_main gmock gsl_assert fmt::fmt
+    PRIVATE
+        rocprofiler-compute-tool
+        gtest_main
+        gmock
+        gsl_assert
+        fmt::fmt
+        asan_build_dependencies
 )
-
-if(NOT WIN32)
-    set(THREADS_PREFER_PTHREAD_FLAG ON)
-    find_package(Threads REQUIRED)
-    target_link_libraries(${target} PRIVATE Threads::Threads)
-    # ASAN with -shared-libsan requires explicit pthread linkage (rocm-systems#6455)
-    if(THEROCK_SANITIZER MATCHES "ASAN" OR ENABLE_ADDRESS_SANITIZER)
-        target_link_options(${target} PRIVATE -lpthread)
-    endif()
-endif()
 
 set_target_properties(
     ${target}
