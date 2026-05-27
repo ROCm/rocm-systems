@@ -16,43 +16,24 @@ endif()
 set(INSTALL_GTEST OFF CACHE BOOL "Don't install GoogleTest")
 set(GTEST_HAS_ABSL OFF CACHE BOOL "Don't use Abseil for GoogleTest")
 
-# FIND_PACKAGE_ARGS was implemented in CMake 3.24:
+# We use find_package manually instead of FIND_PACKAGE_ARGS with
+# FetchContent_Declare, since FIND_PACKAGE_ARGS was introduced in CMake
+# version 3.24, which is unavailable on some operating systems:
 # https://cmake.org/cmake/help/latest/module/FetchContent.html
-# CMake 3.24 is not available on all systems by default.
-if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.24")
-    if(AIS_GTEST_TRY_SYSTEM)
-        set(AIS_LOCAL_GTEST_CHECK FIND_PACKAGE_ARGS NAMES GTest)
-    else()
-        set(AIS_LOCAL_GTEST_CHECK "")
-    endif()
+if(AIS_GTEST_TRY_SYSTEM)
+    find_package(GTest QUIET)
+endif()
 
+if(NOT GTest_FOUND)
 # lint_cmake: -readability/wonkycase
     FetchContent_Declare(
       googletest
       URL https://github.com/google/googletest/releases/download/v1.17.0/googletest-1.17.0.tar.gz
       DOWNLOAD_EXTRACT_TIMESTAMP true
-      ${AIS_LOCAL_GTEST_CHECK}
       SYSTEM
     )
     FetchContent_MakeAvailable(googletest)
 # lint_cmake: +readability/wonkycase
-else()
-    # CMake < 3.24: FIND_PACKAGE_ARGS unavailable, do the find/fetch manually.
-    if(AIS_GTEST_TRY_SYSTEM)
-        find_package(GTest QUIET)
-    endif()
-
-    if(NOT GTest_FOUND)
-# lint_cmake: -readability/wonkycase
-        FetchContent_Declare(
-          googletest
-          URL https://github.com/google/googletest/releases/download/v1.17.0/googletest-1.17.0.tar.gz
-          DOWNLOAD_EXTRACT_TIMESTAMP true
-          SYSTEM
-        )
-        FetchContent_MakeAvailable(googletest)
-# lint_cmake: +readability/wonkycase
-    endif()
 endif()
 
 if(googletest_SOURCE_DIR)
