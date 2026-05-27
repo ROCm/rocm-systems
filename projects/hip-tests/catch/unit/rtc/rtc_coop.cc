@@ -144,11 +144,10 @@ void runAggregation(hiprtcProgram& prog, AggregationType aggType) {
       if ((1ull << laneId) & mask) {
         if (tileSize <= wavefrontSize) {
           T expectedByLane[64];
-          T expected;
           Op<T> op;
           T result = output.host_ptr()[numTile * wavefrontSize + laneId];
 
-          expected = calculateExpected(expectedByLane, input.host_ptr(), op, mask, aggType);
+          calculateExpected(expectedByLane, input.host_ptr(), op, mask, aggType);
 
           if constexpr (std::is_integral<T>::value) {
             REQUIRE(result == expectedByLane[laneId]);
