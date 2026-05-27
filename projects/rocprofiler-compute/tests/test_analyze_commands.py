@@ -2206,3 +2206,19 @@ def test_join_prof_renames_sq_accum_prev_hires_to_bucket_target(tmp_path):
     assert "SQ_ACCUM_PREV_HIRES" not in merged.columns
     assert set(merged["SQ_LEVEL_WAVES_ACCUM"].tolist()) == {100, 200}
     assert "SQ_WAVES" in merged.columns
+
+
+def test_join_prof_rocpd_falls_back_to_results_csv(tmp_path):
+    """rocpd workloads with only results_*.csv remain analyzable."""
+    (tmp_path / "profiling_config.yaml").write_text("format_rocprof_output: rocpd\n")
+    results_file = tmp_path / "results_pmc_perf_0.csv"
+    results_file.write_text(
+        "Dispatch_ID,Kernel_Name,Counter_Name,Counter_Value\n0,kernel_a,SQ_WAVES,10\n"
+    )
+
+    inst = cli_analysis.__new__(cli_analysis)
+    inst.join_prof(tmp_path, out=str(tmp_path / "pmc_perf.csv"))
+    merged = pd.read_csv(tmp_path / "pmc_perf.csv")
+
+    assert merged["Counter_Name"].tolist() == ["SQ_WAVES"]
+    assert merged["Counter_Value"].tolist() == [10]

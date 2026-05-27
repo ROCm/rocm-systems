@@ -191,7 +191,9 @@ class RocProfCompute:
                 console_warning(
                     "rocpd output format is not supported with the "
                     "current rocprofiler-sdk version. "
-                    "Falling back to csv output format."
+                    "Falling back to csv output format. "
+                    "Upgrade to a ROCm version with rocpd support to use "
+                    "the default database workflow."
                 )
                 self.__args.format_rocprof_output = "csv"
 

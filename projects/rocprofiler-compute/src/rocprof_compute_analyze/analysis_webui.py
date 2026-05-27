@@ -156,6 +156,7 @@ class webui_analysis(OmniAnalyze_Base):
                     args.kernel_verbose,
                     args.verbose,
                     self._profiling_config,
+                    self._joined_pmc_df_by_directory,
                 )
 
                 if args.spatial_multiplexing:
@@ -450,6 +451,7 @@ class webui_analysis(OmniAnalyze_Base):
             args.kernel_verbose,
             args.verbose,
             self._profiling_config,
+            self._joined_pmc_df_by_directory,
         )
 
         if args.spatial_multiplexing:

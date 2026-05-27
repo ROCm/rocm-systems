@@ -304,12 +304,17 @@ class db_analysis(OmniAnalyze_Base):
         args = self.get_args()
 
         for workload_path in self._runs.keys():
-            if not (Path(workload_path) / "pmc_perf.csv").exists():
-                continue
-
-            pmc_df = utils_analysis.process_rocpd_csv(
-                pd.read_csv(Path(workload_path) / "pmc_perf.csv")
+            preloaded_pmc_df = self._joined_pmc_df_by_directory.get(
+                str(Path(workload_path).resolve())
             )
+            if preloaded_pmc_df is not None:
+                pmc_df = preloaded_pmc_df.copy()
+            elif not (Path(workload_path) / "pmc_perf.csv").exists():
+                continue
+            else:
+                pmc_df = utils_analysis.process_rocpd_csv(
+                    pd.read_csv(Path(workload_path) / "pmc_perf.csv")
+                )
 
             if args.spatial_multiplexing:
                 pmc_df = self.spatial_multiplex_merge_counters(pmc_df)

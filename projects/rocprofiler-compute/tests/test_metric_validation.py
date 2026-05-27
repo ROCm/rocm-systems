@@ -112,7 +112,7 @@ def test_validate_metrics(
                 app_name=workload,
             )
             # Ensure non zero length of profile df
-            _ = common.check_csv_files(
+            _ = common.check_profile_output_files(
                 profile_workload_dir, num_devices=1, num_kernels=1
             )
 

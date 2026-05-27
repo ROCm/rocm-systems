@@ -10,6 +10,7 @@ from typing import Any, Optional, Union
 import numpy as np
 import pandas as pd
 
+from utils import rocpd_data
 from utils.logger import (
     console_debug,
     console_error,
@@ -19,6 +20,29 @@ from utils.logger import (
 )
 
 NS_TO_MS = 1.0 / 1_000_000.0
+ROCPD_COUNTER_NAME_COLUMN = "Counter_Name"
+ROCPD_COUNTER_VALUE_COLUMN = "Counter_Value"
+ROCPD_PIVOT_GROUP_COLUMNS = [
+    "Dispatch_ID",
+    "Kernel_Name",
+    "Grid_Size",
+    "Workgroup_Size",
+    "LDS_Per_Workgroup",
+]
+ROCPD_METADATA_COLUMNS = [
+    "GPU_ID",
+    "Grid_Size",
+    "Workgroup_Size",
+    "LDS_Per_Workgroup",
+    "Scratch_Per_Workitem",
+    "Arch_VGPR",
+    "Accum_VGPR",
+    "SGPR",
+    "Kernel_Name",
+    "Kernel_ID",
+    "Start_Timestamp",
+    "End_Timestamp",
+]
 
 
 def get_bw_scale_and_unit(value: float) -> tuple[float, str]:
@@ -572,6 +596,8 @@ def is_workload_empty(path: str) -> None:
     # Find PMC data files (merged or separate)
     if pmc_perf_path.is_file():
         files_to_check = [pmc_perf_path]
+    elif rocpd_data.has_rocpd_pass_counter_data(workload_dir):
+        return
     else:
         files_to_check = list(workload_dir.glob("results_*.csv"))
 
@@ -821,36 +847,106 @@ def process_rocpd_csv(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
 
-    data: list[dict[str, Any]] = []
+    counter_columns = {ROCPD_COUNTER_NAME_COLUMN, ROCPD_COUNTER_VALUE_COLUMN}
+    if not counter_columns.issubset(df.columns):
+        return df
 
-    # Group by unique kernel and merge into a single row
-    for _, group_df in df.groupby([
-        "Dispatch_ID",
-        "Kernel_Name",
-        "Grid_Size",
-        "Workgroup_Size",
-        "LDS_Per_Workgroup",
-    ]):
-        row = {
-            "GPU_ID": group_df["GPU_ID"].iloc[0],
-            "Grid_Size": group_df["Grid_Size"].iloc[0],
-            "Workgroup_Size": group_df["Workgroup_Size"].iloc[0],
-            "LDS_Per_Workgroup": group_df["LDS_Per_Workgroup"].iloc[0],
-            "Scratch_Per_Workitem": group_df["Scratch_Per_Workitem"].iloc[0],
-            "Arch_VGPR": group_df["Arch_VGPR"].iloc[0],
-            "Accum_VGPR": group_df["Accum_VGPR"].iloc[0],
-            "SGPR": group_df["SGPR"].iloc[0],
-            "Kernel_Name": group_df["Kernel_Name"].iloc[0],
-            "Kernel_ID": group_df["Kernel_ID"].iloc[0],
-            "Start_Timestamp": group_df["Start_Timestamp"].iloc[0],
-            "End_Timestamp": group_df["End_Timestamp"].iloc[0],
-        }
-        # Each counter will become its own column
-        row.update(dict(zip(group_df["Counter_Name"], group_df["Counter_Value"])))
-        data.append(row)
-    df = pd.DataFrame(data)
+    group_columns = [
+        column for column in ROCPD_PIVOT_GROUP_COLUMNS if column in df.columns
+    ]
+    metadata_columns = [
+        column
+        for column in ROCPD_METADATA_COLUMNS
+        if column in df.columns and column not in group_columns
+    ]
+
+    # Duplicate (group_columns, Counter_Name) rows are tolerated: the pivot
+    # below uses aggfunc="first" so the first value wins, matching the prior
+    # explicit fallback path without an extra O(N) duplicated() scan.
+
+    metadata_df = (
+        df[group_columns + metadata_columns]
+        .groupby(group_columns, sort=False, dropna=False)
+        .first()
+        .reset_index()
+    )
+    counter_df = (
+        df
+        .pivot_table(
+            index=group_columns,
+            columns=ROCPD_COUNTER_NAME_COLUMN,
+            values=ROCPD_COUNTER_VALUE_COLUMN,
+            aggfunc="first",
+            sort=False,
+        )
+        .reset_index()
+        .rename_axis(columns=None)
+    )
+    df = metadata_df.merge(counter_df, on=group_columns, how="left")
     # Rank GPU IDs, map lowest number to 0, next to 1, etc.
     df["GPU_ID"] = df["GPU_ID"].rank(method="dense").astype(int) - 1
     # Reset dispatch IDs
     df["Dispatch_ID"] = range(len(df))
     return df
+
+
+def build_rocpd_pmc_dataframe(counter_df: pd.DataFrame) -> pd.DataFrame:
+    """Build the wide PMC DataFrame used by metric evaluation from rocpd rows."""
+    normalized_df = normalize_rocpd_counter_dataframe(counter_df)
+    return process_rocpd_csv(normalized_df)
+
+
+def normalize_rocpd_counter_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Apply rocprofiler-compute rocpd counter ID normalization in memory.
+
+    Does not mutate ``df`` - the first non-trivial step (``drop``) returns a
+    new frame, so we read from ``df`` and write to ``normalized_df``.
+    """
+    if df.empty:
+        return df
+
+    pass_group_columns: list[str] = []
+    if "Pass_ID" in df.columns:
+        pass_group_columns.append("Pass_ID")
+    elif "PID" in df.columns:
+        pass_group_columns.append("PID")
+
+    kernel_group_columns = pass_group_columns + [
+        "Kernel_Name",
+        "Grid_Size",
+        "Workgroup_Size",
+        "LDS_Per_Workgroup",
+    ]
+    kernel_group_columns = [
+        column for column in kernel_group_columns if column in df.columns
+    ]
+    dispatch_unique_columns = kernel_group_columns + [
+        "Start_Timestamp",
+        "End_Timestamp",
+    ]
+
+    # One representative entry per unique dispatch, ordered so the i-th
+    # invocation by Start_Timestamp in each pass aligns with the i-th in
+    # every other pass for the same kernel group.
+    unique_dispatches = (
+        df[dispatch_unique_columns]
+        .drop_duplicates()
+        .sort_values(by=dispatch_unique_columns)
+        .reset_index(drop=True)
+    )
+    unique_dispatches["Dispatch_ID"] = unique_dispatches.groupby(
+        kernel_group_columns, sort=False, dropna=False
+    ).cumcount()
+
+    normalized_df = df.drop(columns=["Dispatch_ID"], errors="ignore")
+    normalized_df = normalized_df.merge(
+        unique_dispatches, on=dispatch_unique_columns, how="left"
+    )
+
+    normalized_df["Kernel_ID"] = normalized_df.groupby(
+        ["Kernel_Name", "Grid_Size", "Workgroup_Size", "LDS_Per_Workgroup"],
+        sort=False,
+        dropna=False,
+    ).ngroup()
+    return normalized_df.drop(columns=["PID", "Pass_ID", "Pass_Name"], errors="ignore")

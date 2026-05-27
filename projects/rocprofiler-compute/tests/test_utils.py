@@ -7,6 +7,7 @@ import io
 import logging
 import math
 import os
+import sqlite3
 import tempfile
 from pathlib import Path
 from unittest import mock
@@ -54,6 +55,47 @@ class MockSoc:
 logging.trace = lambda *args, **kwargs: None
 
 ANALYSIS_CONFIGS = Path(SRC) / "rocprof_compute_soc" / "analysis_configs"
+
+
+def create_minimal_rocpd_counter_db(db_path):
+    """Create a small rocpd counters_collection table for utility tests."""
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """CREATE TABLE counters_collection (
+            agent_id INTEGER, guid TEXT, stack_id INTEGER, dispatch_id INTEGER,
+            pid INTEGER, grid_size INTEGER, workgroup_size INTEGER,
+            lds_block_size INTEGER, scratch_size INTEGER, vgpr_count INTEGER,
+            accum_vgpr_count INTEGER, sgpr_count INTEGER, kernel_name TEXT,
+            start INTEGER, end INTEGER, kernel_id INTEGER,
+            counter_name TEXT, value REAL
+        )"""
+    )
+    conn.execute(
+        "INSERT INTO counters_collection VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            0,
+            "guid",
+            1,
+            0,
+            100,
+            64,
+            256,
+            0,
+            0,
+            32,
+            0,
+            16,
+            "kernel",
+            10,
+            20,
+            0,
+            "SQ_WAVES",
+            1,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
 
 ##################################################
 ##          Generated tests                     ##
@@ -2942,6 +2984,51 @@ kernel3,0,120,220"""
         utils_analysis.is_workload_empty(str(workload_dir))
 
     assert len(console_error_calls) == 0
+
+
+def test_is_workload_empty_valid_rocpd_pass_db(tmp_path):
+    """Test is_workload_empty accepts known rocpd pass DBs with counter rows."""
+    workload_dir = tmp_path / "workload"
+    perfmon_dir = workload_dir / "perfmon"
+    perfmon_dir.mkdir(parents=True)
+    (perfmon_dir / "pmc_perf_0.yaml").write_text("pmc: []\n")
+    create_minimal_rocpd_counter_db(workload_dir / "pmc_perf_0.db")
+
+    console_error_calls = []
+
+    def mock_console_error(*args, **kwargs):
+        console_error_calls.append((args, kwargs))
+
+    with mock.patch(
+        "utils.utils_analysis.console_error",
+        side_effect=mock_console_error,
+    ):
+        utils_analysis.is_workload_empty(str(workload_dir))
+
+    assert len(console_error_calls) == 0
+
+
+def test_is_workload_empty_ignores_unmatched_rocpd_db(tmp_path):
+    """Test arbitrary DB files do not satisfy rocpd workload validation."""
+    workload_dir = tmp_path / "workload"
+    workload_dir.mkdir()
+    create_minimal_rocpd_counter_db(workload_dir / "unrelated.db")
+
+    console_error_calls = []
+
+    def mock_console_error(*args, **kwargs):
+        console_error_calls.append((args, kwargs))
+
+    with mock.patch(
+        "utils.utils_analysis.console_error",
+        side_effect=mock_console_error,
+    ):
+        utils_analysis.is_workload_empty(str(workload_dir))
+
+    assert len(console_error_calls) == 1
+    error_args = console_error_calls[0][0]
+    assert "analysis" in error_args[0]
+    assert "No profiling data found" in error_args[1]
 
 
 def test_is_workload_empty_file_with_nan_values(tmp_path):

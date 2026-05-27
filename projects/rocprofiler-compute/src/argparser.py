@@ -443,7 +443,13 @@ Examples:
         dest="format_rocprof_output",
         choices=["csv", "rocpd"],
         default="rocpd",
-        help=("\t\t\tSet the format of output file of rocprof."),
+        help=(
+            "\t\t\tSet the format of output file of rocprof.\n"
+            "\t\t\t  rocpd (default): emits a rocpd .db; recommended for\n"
+            "\t\t\t    all metrics workloads.\n"
+            "\t\t\t  csv (legacy): emits results_*.csv; retained for\n"
+            "\t\t\t    backward compatibility on older ROCm."
+        ),
     )
     profile_group.add_argument(
         "--pc-sampling-method",
@@ -495,20 +501,6 @@ Examples:
             "\t\t\tNative tool is not used attach/detach scenario"
         ),
     )
-    profile_group.add_argument(
-        "--retain-rocpd-output",
-        required=False,
-        default=False,
-        action="store_true",
-        help=(
-            "\t\t\t(DEPRECATED) Retain the large raw rocpd database "
-            "in workload directory.\n"
-            "\t\t\tThis option requires --format-rocprof-output rocpd.\n"
-            "\t\t\t --retain-rocpd-output is deprecated. .db files "
-            "will be retained by default in a future release."
-        ),
-    )
-
     ## Roofline Command Line Options (profile: microbenchmark only)
     roofline_group.add_argument(
         "--roof-only",
