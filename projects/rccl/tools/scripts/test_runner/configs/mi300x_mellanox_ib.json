@@ -1168,12 +1168,6 @@
           "test_filter": "RevokeNonBlockingMPITest.Revoke_NonBlocking_ReturnsInProgress"
         },
         {
-          "name": "Revoke_NonBlocking_ThenShrink_NoRace",
-          "description": "Race commRevokeAsync worker thread against an immediate ncclCommShrink on the same parent across 10 iterations; shrink must succeed",
-          "test_filter": "RevokeNonBlockingMPITest.Revoke_NonBlocking_ThenShrink_NoRace",
-          "timeout": 300
-        },
-        {
           "name": "Revoke_NonBlocking_AbortedMidFlight",
           "description": "ncclCommAbort issued mid-flight on a non-blocking revoke must wind down the async-job worker via its abortFlag and return without hanging",
           "test_filter": "RevokeNonBlockingMPITest.Revoke_NonBlocking_AbortedMidFlight"
@@ -1218,6 +1212,12 @@
           "name": "ShrinkAbort_InFlight_ChildWorks_RankRenumbering",
           "description": "ncclCommShrink with NCCL_SHRINK_ABORT terminates in-flight collective and the child reports correct renumbered rank/size and runs AllReduce",
           "test_filter": "RevokeMPITest.ShrinkAbort_InFlight_ChildWorks_RankRenumbering"
+        },
+        {
+          "name": "Revoke_NonBlocking_ThenShrink_NoRace",
+          "description": "Race commRevokeAsync worker thread against an immediate ncclCommShrink on the same parent across 10 iterations; shrink must succeed",
+          "test_filter": "RevokeNonBlockingMPITest.Revoke_NonBlocking_ThenShrink_NoRace",
+          "timeout": 300
         }
       ]
     },
@@ -1235,6 +1235,33 @@
         "RCCL_MPI_LOG_ALL_RANKS": "1"
       },
       "tests": [
+        {
+          "name": "InFlightCollective_Revoke_Destroy_Clean",
+          "description": "In-flight collective then revoke then ncclCommDestroy must return ncclSuccess on every rank (revoke != abort); over IB transport verifies QP cleanup with network buffers in flight",
+          "test_filter": "RevokeMPITest.InFlightCollective_Revoke_Destroy_Clean",
+          "timeout": 240
+        },
+        {
+          "name": "Collective_Revoke_Shrink_Collective",
+          "description": "In-flight AllReduce followed by revoke, shrink to a 3-rank child, and a second AllReduce on the child; over IB transport verifies network buffer teardown and rebuild",
+          "test_filter": "RevokeMPITest.Collective_Revoke_Shrink_Collective"
+        },
+        {
+          "name": "P2P_Revoke_Shrink_P2P",
+          "description": "In-flight P2P send/recv pairs, revoke parent, shrink to a 3-rank child, and exchange P2P on the child; over IB transport tests different teardown path than SHM/P2P",
+          "test_filter": "RevokeMPITest.P2P_Revoke_Shrink_P2P"
+        },
+        {
+          "name": "IncompleteCollective_Revoke_Shrink_Collective",
+          "description": "Rank np-1 skips AllReduce so the collective is truly in-flight when revoke fires; over IB the device-side abortFlag must interrupt a network wait",
+          "test_filter": "RevokeMPITest.IncompleteCollective_Revoke_Shrink_Collective"
+        },
+        {
+          "name": "Revoke_NonBlocking_ThenShrink_NoRace",
+          "description": "Race commRevokeAsync worker thread against an immediate ncclCommShrink on the same parent across 10 iterations over IB transport; shrink must succeed",
+          "test_filter": "RevokeNonBlockingMPITest.Revoke_NonBlocking_ThenShrink_NoRace",
+          "timeout": 300
+        },
         {
           "name": "Collective_Revoke_AsymmetricShrink_Collective",
           "description": "Asymmetric shrink across nodes (unequal per-node GPU counts) forces ring-only topology after revoke; AllReduce must succeed on the child",
