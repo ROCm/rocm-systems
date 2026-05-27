@@ -277,26 +277,6 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::Initialize(const core::Agent& agent,
   return HSA_STATUS_SUCCESS;
 }
 
-template <bool useGCR, bool scopeFields> bool BlitSdma<useGCR, scopeFields>::WaitForIdle(const uint64_t& timeout) {
-  if (queue_rptr_ == nullptr || queue_wptr_ == nullptr) return true;
-
-  auto start = timer::fast_clock::now();
-  auto deadline = std::chrono::microseconds(timeout);
-  
-  /* Wait until the read pointer is the same as the write pointer, 
-  indicating all previously submitted packets have been read. */
-  while (WrapIntoRing(*queue_rptr_) != WrapIntoRing(*queue_wptr_)) {
-    if (timeout != UINT64_MAX) {
-      auto elapsed = timer::fast_clock::now() - start;
-      if (elapsed >= deadline) {
-        return false;
-      }
-    }
-    os::YieldThread();
-  }
-  return true;
-}
-
 template <bool useGCR, bool scopeFields> hsa_status_t BlitSdma<useGCR, scopeFields>::Destroy() {
   // Release all allocated resources and reset them to zero.
 

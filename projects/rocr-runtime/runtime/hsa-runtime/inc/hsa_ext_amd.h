@@ -648,11 +648,6 @@ enum {
    * constraints enforced by the command processor).
    */
   HSA_STATUS_ERROR_INVALID_DISPATCH_PARAMETERS = 49,
-  
-  /**
-   * The operation timed out before completing.
-   */
-  HSA_STATUS_ERROR_TIMEOUT = 50,
 };
 
 /** @} */
@@ -4567,7 +4562,7 @@ typedef enum hsa_amd_sdma_queue_info_attribute_e {
   HSA_AMD_SDMA_QUEUE_INFO_QUEUE_ID = 2,
 
   /**
-   * Engine index this queue is bound to. Type: uint32_t
+   * Engine index this queue is bound to. Type: int32_t
    */
   HSA_AMD_SDMA_QUEUE_INFO_ENGINE_ID = 3,
 
@@ -4584,27 +4579,10 @@ typedef enum hsa_amd_sdma_queue_info_attribute_e {
   /**
    * Minimum submission size in bytes. Some gfx9 devices require
    * 256-byte minimum. User must pad submissions below this with NOP packets.
+   * 0 bytes indicates no minimum size required.
    * Type: size_t.
    */
   HSA_AMD_SDMA_QUEUE_INFO_MIN_SUBMISSION_SIZE = 6,
-
-  /**
-   * Whether platform supports 64-bit atomics for signal completion.
-   * Type: bool. If false, FENCE packets used instead of ATOMIC.
-   */
-  HSA_AMD_SDMA_QUEUE_INFO_PLATFORM_ATOMIC_SUPPORT = 7,
-
-  /**
-   * Whether HDP flush packets are required for cache coherency.
-   * False for XGMI SDMA queues, true for PCIe SDMA queues. Type: bool.
-   */
-  HSA_AMD_SDMA_QUEUE_INFO_HDP_FLUSH_REQUIRED = 8,
-
-  /**
-   * Whether GCR (Global Cache) flush packets are required. True on GFX10+.
-   * User must insert GCR invalidate (before copy) and writeback (after copy).
-   */
-  HSA_AMD_SDMA_QUEUE_INFO_GCR_REQUIRED = 9,
 } hsa_amd_sdma_queue_info_attribute_t;
 
 /**
@@ -4633,9 +4611,6 @@ typedef enum hsa_amd_sdma_queue_flag_e {
  * - Updating the write pointer and doorbell
  * - Ensuring memory coherency with appropriate cache operations
  *
- * The runtime manages the underlying KMT/FMM resources and ensures the queue
- * is properly cleaned up on process termination.
- *
  * @param[in] agent GPU agent on which to create the queue.
  *
  * @param[in] flags Combination of hsa_amd_sdma_queue_flag_t values.
@@ -4645,25 +4620,26 @@ typedef enum hsa_amd_sdma_queue_flag_e {
  *            If passed as 0, the runtime will select an available engine.
  *            Ignored if HSA_AMD_SDMA_QUEUE_FLAG_USE_ENGINE_ID is not set.
  *
+ * @param[in] queue_size Queue ring size in bytes. If 0, runtime default is used.
+ *
  * @param[out] queue Pointer to receive the created queue handle.
  *
  * @retval HSA_STATUS_SUCCESS Queue created successfully.
  * @retval HSA_STATUS_ERROR_NOT_INITIALIZED Runtime not initialized.
- * @retval HSA_STATUS_ERROR_INVALID_AGENT Agent is not a GPU agent.
+ * @retval HSA_STATUS_ERROR_INVALID_AGENT Specified agent is not a GPU agent.
  * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT Invalid parameters.
- * @retval HSA_STATUS_ERROR_OUT_OF_RESOURCES Insufficient resources.
- *
+ * @retval HSA_STATUS_ERROR_OUT_OF_RESOURCES Failed to create an SDMA queue due to insufficient resources.
  */
 hsa_status_t HSA_API hsa_amd_sdma_queue_create(hsa_agent_t agent, uint32_t flags,
                                                hsa_amd_sdma_engine_id_t engine_id_mask,
+                                               size_t queue_size,
                                                hsa_amd_sdma_queue_t* queue);
 
 /**
  * @brief Destroy a direct SDMA queue.
  *
  * The caller must ensure no commands are in flight on the queue before
- * destroying it. The runtime will wait for the queue to be idle
- * (RPTR == WPTR) before releasing resources.
+ * destroying it.
  *
  * @param[in] queue Queue handle to destroy.
  *
@@ -4718,25 +4694,6 @@ hsa_status_t HSA_API hsa_amd_sdma_queue_get_info(hsa_amd_sdma_queue_t queue,
  */
 hsa_status_t HSA_API hsa_amd_sdma_queue_ring_doorbell(hsa_amd_sdma_queue_t queue,
                                                       uint64_t write_index);
-
-/**
- * @brief Wait until all previously submitted packets on an SDMA queue have
- *        been consumed by the hardware.
- *
- * The caller should invoke this before ::hsa_amd_sdma_queue_destroy to ensure
- * no in-flight work remains on the queue.
- *
- * @param[in] queue     Queue handle returned by ::hsa_amd_sdma_queue_create.
- * @param[in] timeout   Maximum time to wait in microseconds. Pass UINT64_MAX to wait infinitely.
- *
- * @retval HSA_STATUS_SUCCESS             All submitted work has completed.
- * @retval HSA_STATUS_ERROR_NOT_INITIALIZED Runtime not initialized.
- * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT @p queue handle is invalid.
- * @retval HSA_STATUS_ERROR_INVALID_AGENT @p queue not registered with any GPU agent.
- * @retval HSA_STATUS_ERROR_TIMEOUT       Timed out before queue became idle.
- */
-hsa_status_t HSA_API hsa_amd_sdma_queue_wait_idle(hsa_amd_sdma_queue_t queue,
-                                                  uint64_t timeout);
 
 /**
  * @brief logging types

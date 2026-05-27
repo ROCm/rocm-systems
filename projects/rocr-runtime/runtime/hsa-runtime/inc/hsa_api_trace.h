@@ -283,7 +283,6 @@ struct AmdExtTable {
   decltype(hsa_amd_sdma_queue_destroy)* hsa_amd_sdma_queue_destroy_fn;
   decltype(hsa_amd_sdma_queue_get_info)* hsa_amd_sdma_queue_get_info_fn;
   decltype(hsa_amd_sdma_queue_ring_doorbell)* hsa_amd_sdma_queue_ring_doorbell_fn;
-  decltype(hsa_amd_sdma_queue_wait_idle)* hsa_amd_sdma_queue_wait_idle_fn;
 };
 
 // Table to export HSA Core Runtime Apis

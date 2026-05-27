@@ -1914,6 +1914,7 @@ hsa_status_t HSA_API hsa_amd_svm_discard_batch_async(void** ptrs, size_t* sizes,
 
 hsa_status_t HSA_API hsa_amd_sdma_queue_create(hsa_agent_t agent, uint32_t flags,
                                                hsa_amd_sdma_engine_id_t engine_id_mask,
+                                               size_t queue_size,
                                                hsa_amd_sdma_queue_t* queue) {
   TRY;
   IS_OPEN();
@@ -1926,8 +1927,12 @@ hsa_status_t HSA_API hsa_amd_sdma_queue_create(hsa_agent_t agent, uint32_t flags
   if (core_agent->device_type() != core::Agent::DeviceType::kAmdGpuDevice) {
     return HSA_STATUS_ERROR_INVALID_AGENT;
   }
-
   AMD::GpuAgent* gpu_agent = static_cast<AMD::GpuAgent*>(core_agent);
+
+  // Check if queue_size is a power of two if specified
+  if (queue_size && !IsPowerOfTwo(queue_size)) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 
   // Determine if XGMI SDMA is requested
   bool use_xgmi = !!(flags & HSA_AMD_SDMA_QUEUE_FLAG_XGMI);
@@ -1942,8 +1947,8 @@ hsa_status_t HSA_API hsa_amd_sdma_queue_create(hsa_agent_t agent, uint32_t flags
     rec_eng = rocr::os::Ctz(engine_id_mask);
   }
 
-  AMD::BlitSdmaBase* sdma = nullptr;
-  hsa_status_t err = gpu_agent->CreateUserSdmaQueue(use_xgmi, rec_eng, &sdma);
+  AMD::SdmaQueue* sdma = nullptr;
+  hsa_status_t err = gpu_agent->CreateUserSdmaQueue(use_xgmi, rec_eng, queue_size, &sdma);
   if (err != HSA_STATUS_SUCCESS) return err;
 
   queue->handle = reinterpret_cast<uint64_t>(sdma);
@@ -1957,26 +1962,20 @@ hsa_status_t HSA_API hsa_amd_sdma_queue_destroy(hsa_amd_sdma_queue_t queue) {
 
   if (queue.handle == 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
-  AMD::BlitSdmaBase* sdma = reinterpret_cast<AMD::BlitSdmaBase*>(queue.handle);
-  AMD::GpuAgent* gpu_agent = nullptr;
-
+  AMD::SdmaQueue* sdma = reinterpret_cast<AMD::SdmaQueue*>(queue.handle);
+  
   // Find the GPU agent that owns the SDMA queue
+  AMD::GpuAgent* gpu_agent = nullptr;
   for (auto* agent : core::Runtime::runtime_singleton_->gpu_agents()) {
     AMD::GpuAgent* ga = static_cast<AMD::GpuAgent*>(agent);
-    if (ga->IsValidSdmaQueue(sdma)) {
+    if (ga->IsValidUserSdmaQueue(sdma)) {
       gpu_agent = ga;
       break;
     }
   }
   if (!gpu_agent) return HSA_STATUS_ERROR_INVALID_AGENT;
 
-  // Remove from registry before destroying the object
-  hsa_status_t err = gpu_agent->RemoveUserSdmaQueue(sdma);
-  if (err != HSA_STATUS_SUCCESS) return err;
-
-  err = sdma->Destroy();
-  delete sdma;
-  return err;
+  return gpu_agent->DestroyUserSdmaQueue(sdma);
   CATCH;
 }
 
@@ -1989,20 +1988,20 @@ hsa_status_t HSA_API hsa_amd_sdma_queue_get_info(hsa_amd_sdma_queue_t queue,
 
   if (queue.handle == 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
+  AMD::SdmaQueue* sdma = reinterpret_cast<AMD::SdmaQueue*>(queue.handle);
+  
   // Find the GPU agent that owns the SDMA queue
-  AMD::BlitSdmaBase* sdma = reinterpret_cast<AMD::BlitSdmaBase*>(queue.handle);
   AMD::GpuAgent* gpu_agent = nullptr;
-
   for (auto* agent : core::Runtime::runtime_singleton_->gpu_agents()) {
     AMD::GpuAgent* ga = static_cast<AMD::GpuAgent*>(agent);
-    if (ga->IsValidSdmaQueue(sdma)) {
+    if (ga->IsValidUserSdmaQueue(sdma)) {
       gpu_agent = ga;
       break;
     }
   }
   if (!gpu_agent) return HSA_STATUS_ERROR_INVALID_AGENT;
 
-  return gpu_agent->GetSdmaQueueInfo(sdma, attribute, value);
+  return sdma->GetInfo(attribute, value);
   CATCH;
 }
 
@@ -2013,43 +2012,20 @@ hsa_status_t HSA_API hsa_amd_sdma_queue_ring_doorbell(hsa_amd_sdma_queue_t queue
 
   if (queue.handle == 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
+  AMD::SdmaQueue* sdma_queue = reinterpret_cast<AMD::SdmaQueue*>(queue.handle);
+
   // Find the GPU agent that owns the SDMA queue
-  AMD::BlitSdmaBase* sdma = reinterpret_cast<AMD::BlitSdmaBase*>(queue.handle);
   AMD::GpuAgent* gpu_agent = nullptr;
-
   for (auto* agent : core::Runtime::runtime_singleton_->gpu_agents()) {
     AMD::GpuAgent* ga = static_cast<AMD::GpuAgent*>(agent);
-    if (ga->IsValidSdmaQueue(sdma)) {
+    if (ga->IsValidUserSdmaQueue(sdma_queue)) {
       gpu_agent = ga;
       break;
     }
   }
   if (!gpu_agent) return HSA_STATUS_ERROR_INVALID_AGENT;
 
-  return gpu_agent->RingSdmaDoorbell(sdma, write_index);
-  CATCH;
-}
-
-hsa_status_t HSA_API hsa_amd_sdma_queue_wait_idle(hsa_amd_sdma_queue_t queue,
-                                                   uint64_t timeout) {
-  TRY;
-  IS_OPEN();
-
-  if (queue.handle == 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-
-  AMD::BlitSdmaBase* sdma = reinterpret_cast<AMD::BlitSdmaBase*>(queue.handle);
-  AMD::GpuAgent* gpu_agent = nullptr;
-
-  for (auto* agent : core::Runtime::runtime_singleton_->gpu_agents()) {
-    AMD::GpuAgent* ga = static_cast<AMD::GpuAgent*>(agent);
-    if (ga->IsValidSdmaQueue(sdma)) {
-      gpu_agent = ga;
-      break;
-    }
-  }
-  if (!gpu_agent) return HSA_STATUS_ERROR_INVALID_AGENT;
-
-  return sdma->WaitForIdle(timeout) ? HSA_STATUS_SUCCESS : (hsa_status_t)HSA_STATUS_ERROR_TIMEOUT;
+  return sdma_queue->RingDoorbell(write_index);
   CATCH;
 }
 

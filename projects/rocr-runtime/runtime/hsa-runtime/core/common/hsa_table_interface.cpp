@@ -1385,8 +1385,10 @@ hsa_status_t HSA_API hsa_amd_signal_get_event_id(hsa_signal_t signal, uint32_t *
 
 hsa_status_t HSA_API hsa_amd_sdma_queue_create(hsa_agent_t agent, uint32_t flags,
                                                hsa_amd_sdma_engine_id_t engine_id_mask,
+                                               size_t queue_size,
                                                hsa_amd_sdma_queue_t* queue) {
-  return amdExtTable->hsa_amd_sdma_queue_create_fn(agent, flags, engine_id_mask, queue);
+  return amdExtTable->hsa_amd_sdma_queue_create_fn(agent, flags, engine_id_mask, queue_size,
+                                                    queue);
 }
 
 hsa_status_t HSA_API hsa_amd_sdma_queue_destroy(hsa_amd_sdma_queue_t queue) {
@@ -1402,11 +1404,6 @@ hsa_status_t HSA_API hsa_amd_sdma_queue_get_info(hsa_amd_sdma_queue_t queue,
 hsa_status_t HSA_API hsa_amd_sdma_queue_ring_doorbell(hsa_amd_sdma_queue_t queue,
                                                       uint64_t write_index) {
   return amdExtTable->hsa_amd_sdma_queue_ring_doorbell_fn(queue, write_index);
-}
-
-hsa_status_t HSA_API hsa_amd_sdma_queue_wait_idle(hsa_amd_sdma_queue_t queue,
-                                                  uint64_t timeout) {
-  return amdExtTable->hsa_amd_sdma_queue_wait_idle_fn(queue, timeout);
 }
 
 // Tools only table interfaces.

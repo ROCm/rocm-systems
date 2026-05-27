@@ -278,11 +278,6 @@ GpuAgent::~GpuAgent() {
   {
     std::lock_guard<std::mutex> lock(user_sdma_lock_);
     for (auto* sdma : user_sdma_queues_) {
-      constexpr uint64_t kTimeout = 5000000;  //5s
-      if (!sdma->WaitForIdle(kTimeout)) {
-        debug_print("GpuAgent teardown: Timed out waiting for SDMA queue %p to become idle\n",
-                    static_cast<void*>(sdma));
-      }
       sdma->Destroy();
       delete sdma;
     }
@@ -4190,101 +4185,52 @@ hsa_status_t GpuAgent::ReleaseCountedQueue(hsa_queue_t* queue) {
   return queue_pool_.ReleaseQueue(queue);
 }
 
-hsa_status_t GpuAgent::CreateUserSdmaQueue(bool use_xgmi, int rec_eng,
-                                              AMD::BlitSdmaBase** out_sdma) {
+hsa_status_t GpuAgent::CreateUserSdmaQueue(bool use_xgmi, int rec_eng, size_t queue_size,
+                                              SdmaQueue** out_sdma) {
   if (out_sdma == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
-  core::Blit* blit = CreateBlitSdma(use_xgmi, rec_eng);
-  if (blit == nullptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  // use default queue size of 8MB when user has not specified one
+  queue_size = (queue_size == 0) ? BlitSdmaBase::kQueueSize : queue_size;
 
-  AMD::BlitSdmaBase* sdma = static_cast<AMD::BlitSdmaBase*>(blit);
+  SdmaQueue* sdma_queue = new SdmaQueue(this, queue_size, use_xgmi, rec_eng);
+  if (!sdma_queue) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
+  hsa_status_t status = sdma_queue->Initialize();
+  if (status != HSA_STATUS_SUCCESS) {
+    delete sdma_queue;
+    return status;
+  }
+
+  // Add to gpu agent's tracking list
   {
     std::lock_guard<std::mutex> lock(user_sdma_lock_);
-    user_sdma_queues_.insert(sdma);
+    user_sdma_queues_.insert(sdma_queue);
   }
 
-  *out_sdma = sdma;
+  *out_sdma = sdma_queue;
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t GpuAgent::RemoveUserSdmaQueue(AMD::BlitSdmaBase* sdma) {
-  if (sdma == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+hsa_status_t GpuAgent::DestroyUserSdmaQueue(SdmaQueue* sdma_queue) {
+  if (!sdma_queue) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
-  std::lock_guard<std::mutex> lock(user_sdma_lock_);
-  auto it = user_sdma_queues_.find(sdma);
-  if (it == user_sdma_queues_.end()) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-
-  user_sdma_queues_.erase(it);
-  return HSA_STATUS_SUCCESS;
-}
-
-bool GpuAgent::IsValidSdmaQueue(AMD::BlitSdmaBase* sdma) const {
-  std::lock_guard<std::mutex> lock(user_sdma_lock_);
-  return user_sdma_queues_.find(sdma) != user_sdma_queues_.end();
-}
-
-hsa_status_t GpuAgent::GetSdmaQueueInfo(AMD::BlitSdmaBase* sdma, 
-                                        hsa_amd_sdma_queue_info_attribute_t attribute, 
-                                        void* value) const {
-  switch (attribute) {
-    case HSA_AMD_SDMA_QUEUE_INFO_RESOURCE: {
-      auto* res = static_cast<hsa_amd_sdma_queue_resource_t*>(value);
-      res->ring_base = static_cast<void*>(sdma->queue_start_addr());
-      res->ring_size = BlitSdmaBase::kQueueSize;
-      res->read_ptr = sdma->queue_rptr();
-      res->write_ptr = sdma->queue_wptr();
-      res->doorbell = sdma->queue_doorbell();
-      break;
+  // Remove from agent's tracking list if found
+  {
+    std::lock_guard<std::mutex> lock(user_sdma_lock_);
+    auto it = user_sdma_queues_.find(sdma_queue);
+    if (it == user_sdma_queues_.end()) {
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
-    case HSA_AMD_SDMA_QUEUE_INFO_QUEUE_ID:
-      *static_cast<uint64_t*>(value) =
-          static_cast<uint64_t>(sdma->queue_resource().QueueId);
-      break;
-    case HSA_AMD_SDMA_QUEUE_INFO_ENGINE_ID:
-      *static_cast<uint32_t*>(value) = sdma->sdma_engine_id();
-      break;
-    case HSA_AMD_SDMA_QUEUE_INFO_IS_XGMI:
-      *static_cast<bool*>(value) = sdma->is_xgmi();
-      break;
-    case HSA_AMD_SDMA_QUEUE_INFO_AGENT:
-      *static_cast<hsa_agent_t*>(value) = sdma->agent()->public_handle();
-      break;
-    case HSA_AMD_SDMA_QUEUE_INFO_MIN_SUBMISSION_SIZE:
-      *static_cast<size_t*>(value) = sdma->min_submission_size();
-      break;
-    case HSA_AMD_SDMA_QUEUE_INFO_PLATFORM_ATOMIC_SUPPORT:
-      *static_cast<bool*>(value) = sdma->PlatformAtomicSupport();
-      break;
-    case HSA_AMD_SDMA_QUEUE_INFO_HDP_FLUSH_REQUIRED:
-      *static_cast<bool*>(value) = sdma->HdpFlushSupport();
-      break;
-    case HSA_AMD_SDMA_QUEUE_INFO_GCR_REQUIRED:
-      *static_cast<bool*>(value) = sdma->UsesGCR();
-      break;
-    default:
-      return HSA_STATUS_ERROR_INVALID_ARGUMENT; 
+    user_sdma_queues_.erase(it);
   }
 
+  delete sdma_queue;
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t GpuAgent::RingSdmaDoorbell(AMD::BlitSdmaBase* sdma,
-                                        uint64_t write_index) {
-  if (sdma == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-
-  // Update write pointer
-  *sdma->queue_wptr() = write_index;
-  std::atomic_thread_fence(std::memory_order_release);
-
-  // Write the doorbell register
-  *sdma->queue_doorbell() = write_index;
-
-  // On DXG/DTIF platforms, use the KMT thunk call to ring the doorbell
-  if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG() ||
-      core::Runtime::runtime_singleton_->thunkLoader()->IsDTIF()) {
-    HSAKMT_CALL(hsaKmtQueueRingDoorbell(sdma->queue_resource().QueueId, write_index));
-  }
-  return HSA_STATUS_SUCCESS;
+bool GpuAgent::IsValidUserSdmaQueue(SdmaQueue* sdma_queue) const {
+  std::lock_guard<std::mutex> lock(user_sdma_lock_);
+  return user_sdma_queues_.find(sdma_queue) != user_sdma_queues_.end();
 }
 
 hsa_status_t GpuAgent::Preload(uint64_t flags) {

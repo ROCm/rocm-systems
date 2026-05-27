@@ -140,10 +140,6 @@ class BlitSdmaBase : public core::Blit {
   // @brief Returns the GPU agent that owns this SDMA queue.
   virtual GpuAgent* agent() const = 0;
 
-  // @brief Block until all previously submitted packets have been consumed
-  //        by the hardware (rptr catches up to wptr).
-  virtual bool WaitForIdle(const uint64_t& timeout) = 0;
-
   // Accessors for SDMA information queries
   virtual char* queue_start_addr() const = 0;
   virtual volatile uint64_t* queue_wptr() const = 0;
@@ -285,7 +281,6 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
 
   bool SwapSupported() const override { return swap_supported_; }
   GpuAgent* agent() const override { return agent_; }
-  bool WaitForIdle(const uint64_t& timeout) override;
 
   // Accessors for direct sdma queue
   char* queue_start_addr() const override { return queue_start_addr_; }

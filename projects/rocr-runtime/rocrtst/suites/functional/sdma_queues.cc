@@ -8,6 +8,8 @@
 #include "suites/functional/sdma_queues.h"
 #include "hsa/hsa_ext_amd.h"
 #include "common/base_rocr_utils.h"
+#include <chrono>
+#include <thread>
 #include <unordered_set>
 
 SdmaQueuesTest::SdmaQueuesTest() : TestBase() {
@@ -67,7 +69,7 @@ void SdmaQueuesTest::CreateDestroy() {
   for (auto cpu : cpus) {
     hsa_amd_sdma_queue_t queue;
     ASSERT_EQ(HSA_STATUS_ERROR_INVALID_AGENT,
-              hsa_amd_sdma_queue_create(cpu, 0, (hsa_amd_sdma_engine_id)0, &queue));
+              hsa_amd_sdma_queue_create(cpu, 0, (hsa_amd_sdma_engine_id)0, 0, &queue));
   }
 
   for (const auto& gpu : gpus) {
@@ -81,7 +83,7 @@ void SdmaQueuesTest::CreateDestroy() {
     uint32_t flags = HSA_AMD_SDMA_QUEUE_FLAG_USE_ENGINE_ID;
     hsa_amd_sdma_queue_t queue;
     ASSERT_SUCCESS(
-        hsa_amd_sdma_queue_create(gpu, flags, (hsa_amd_sdma_engine_id_t)preferred, &queue));
+        hsa_amd_sdma_queue_create(gpu, flags, (hsa_amd_sdma_engine_id_t)preferred, 0, &queue));
     EXPECT_NE(queue.handle, 0u);
 
     // Query ring buffer's address, size, read and write pointers
@@ -98,9 +100,7 @@ void SdmaQueuesTest::CreateDestroy() {
     hsa_agent_t agent;
     ASSERT_SUCCESS(hsa_amd_sdma_queue_get_info(queue, HSA_AMD_SDMA_QUEUE_INFO_AGENT, &agent));
     EXPECT_EQ(agent.handle, gpu.handle);
-
     // Destroy the queue
-    ASSERT_SUCCESS(hsa_amd_sdma_queue_wait_idle(queue, 5000000));  // 5sec
     ASSERT_SUCCESS(hsa_amd_sdma_queue_destroy(queue));
   }
 }
@@ -122,7 +122,7 @@ void SdmaQueuesTest::SubmitLinearCopy() {
 
     // Create SDMA queue
     hsa_amd_sdma_queue_t queue;
-    ASSERT_SUCCESS(hsa_amd_sdma_queue_create(gpu, 0, (hsa_amd_sdma_engine_id_t)0, &queue));
+    ASSERT_SUCCESS(hsa_amd_sdma_queue_create(gpu, 0, (hsa_amd_sdma_engine_id_t)0, 0, &queue));
 
     // Query queue properties
     hsa_amd_sdma_queue_resource_t queue_info = {};
@@ -192,8 +192,16 @@ void SdmaQueuesTest::SubmitLinearCopy() {
         *queue_info.doorbell = new_wptr;
       }
 
-      // Wait for packet to be consumed
-      ASSERT_SUCCESS(hsa_amd_sdma_queue_wait_idle(queue, 5000000));
+      // Wait for SDMA engine to consume the packet and verify the values in dest buffer
+      auto deadline = std::chrono::high_resolution_clock::now() + std::chrono::seconds(5);
+      while (*queue_info.read_ptr < new_wptr) {
+        if (std::chrono::high_resolution_clock::now() > deadline) {
+          FAIL() << "Timed out waiting for SDMA copy to complete";
+          return;
+        }
+        std::this_thread::yield();
+      }
+      std::atomic_thread_fence(std::memory_order_acquire);
 
       // validate values in dest buffer
       uint32_t* dst_words = reinterpret_cast<uint32_t*>(dst_buf);
@@ -212,7 +220,6 @@ void SdmaQueuesTest::SubmitLinearCopy() {
     // Cleanup
     ASSERT_SUCCESS(hsa_amd_memory_pool_free(src_buf));
     ASSERT_SUCCESS(hsa_amd_memory_pool_free(dst_buf));
-    ASSERT_SUCCESS(hsa_amd_sdma_queue_wait_idle(queue, 5000000));  // 5s
     ASSERT_SUCCESS(hsa_amd_sdma_queue_destroy(queue));
   }
 }
@@ -250,7 +257,7 @@ void SdmaQueuesTest::ExclusiveQueueResources() {
     // Create multiple SDMA queues
     for (size_t i = 0; i < kNumQueues; i++) {
       ASSERT_SUCCESS(
-          hsa_amd_sdma_queue_create(gpu, 0, (hsa_amd_sdma_engine_id_t)0, &queues[i].queue));
+          hsa_amd_sdma_queue_create(gpu, 0, (hsa_amd_sdma_engine_id_t)0, 0, &queues[i].queue));
       ASSERT_NE(queues[i].queue.handle, 0);
       ASSERT_SUCCESS(hsa_amd_sdma_queue_get_info(queues[i].queue, HSA_AMD_SDMA_QUEUE_INFO_RESOURCE,
                                                  &queues[i].res));
@@ -314,7 +321,6 @@ void SdmaQueuesTest::ExclusiveQueueResources() {
     ASSERT_SUCCESS(hsa_amd_memory_pool_free(src_buf));
     ASSERT_SUCCESS(hsa_amd_memory_pool_free(dst_buf));
     for (size_t i = 0; i < kNumQueues; i++) {
-      ASSERT_SUCCESS(hsa_amd_sdma_queue_wait_idle(queues[i].queue, 5000000));  // 5sec
       ASSERT_SUCCESS(hsa_amd_sdma_queue_destroy(queues[i].queue));
     }
   }

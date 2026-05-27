@@ -67,6 +67,7 @@
 #include "core/util/small_heap.h"
 #include "pcs/pcs_runtime.h"
 #include "core/inc/counted_queue_manager.h"
+#include "core/inc/amd_sdma_queue.h"
 
 namespace rocr {
 namespace AMD {
@@ -382,33 +383,14 @@ class GpuAgent : public GpuAgentInt {
   hsa_status_t ReleaseCountedQueue(hsa_queue_t* queue);
 
   // @brief Create a user-owned direct SDMA queue.
-  //        Wraps the protected CreateBlitSdma and registers the object
-  //        for later validation via UnregisterDirectSdmaQueue.
-  //
-  // @param [in]  use_xgmi   True to prefer an XGMI-connected engine.
-  // @param [in]  rec_eng    Preferred engine index, or -1 for auto.
-  // @param [out] out_sdma   Populated with the newly created BlitSdmaBase.
-  //
-  // @retval HSA_STATUS_SUCCESS on success.
-  hsa_status_t CreateUserSdmaQueue(bool use_xgmi, int rec_eng,
-                                     AMD::BlitSdmaBase** out_sdma);
+  hsa_status_t CreateUserSdmaQueue(bool use_xgmi, int rec_eng, size_t queue_size,
+                                   SdmaQueue** out_sdma);
 
-  // @brief Validate and unregister a handle previously returned by
-  //        CreateDirectSdmaQueue. Returns HSA_STATUS_ERROR_INVALID_ARGUMENT
-  //        if the handle was not registered on this agent.
-  // @param [in] sdma   SDMA queue handle.
-  hsa_status_t RemoveUserSdmaQueue(AMD::BlitSdmaBase* sdma);
+  // @brief Destroy a user SDMA queue.
+  hsa_status_t DestroyUserSdmaQueue(SdmaQueue* sdma_queue);
 
-  // @brief Validate that the given SDMA queue is still registered to this agent
-  bool IsValidSdmaQueue(AMD::BlitSdmaBase* sdma) const;
-
-  // @brief Query information about a user SDMA queue.
-  hsa_status_t GetSdmaQueueInfo(AMD::BlitSdmaBase*, hsa_amd_sdma_queue_info_attribute_t, void*) const;
-
-  // @brief Ring the doorbell for a user SDMA queue. 
-  // Updates the write pointer and rings the doorbell, handling platform-specific
-  // requirements (DXG/DTIF use KMT call).
-  hsa_status_t RingSdmaDoorbell(AMD::BlitSdmaBase* sdma, uint64_t write_index);
+  // @brief Check if SDMA queue is valid and owned by this agent.
+  bool IsValidUserSdmaQueue(SdmaQueue* sdma_queue) const;
 
   // @brief Override from AMD::GpuAgentInt.
   void TranslateTime(core::Signal* signal, hsa_amd_profiling_dispatch_time_t& time) override;
@@ -988,7 +970,7 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief Registry of all user-owned SDMA queues created through ::hsa_amd_sdma_queue_create.
   mutable std::mutex user_sdma_lock_;
-  std::unordered_set<AMD::BlitSdmaBase*> user_sdma_queues_;
+  std::unordered_set<core::Queue*> user_sdma_queues_;
 
   // structure for host trap sampling
   pcs_data_t pcs_hosttrap_data_;

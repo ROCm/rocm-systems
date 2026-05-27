@@ -220,6 +220,7 @@ set ( SRCS core/driver/driver.cpp
            core/util/flag.cpp
            core/runtime/amd_blit_kernel.cpp
            core/runtime/amd_blit_sdma.cpp
+           core/runtime/amd_sdma_queue.cpp
            core/runtime/amd_cpu_agent.cpp
            core/runtime/amd_gpu_agent.cpp
            core/runtime/amd_hsa_loader.cpp
