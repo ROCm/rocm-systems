@@ -13,14 +13,16 @@
 # to be linked by downstream code generators (Triton, MLIR, etc.) that
 # need RCCL device-side primitives without recompiling RCCL from source.
 #
-# Usage (standalone):
-#     make EMIT_LLVM_IR=1 BITCODE_LIB_ARCH=gfx950
+# Usage (standalone, from projects/rccl/bindings/ir):
+#     make EMIT_LLVM_IR=1 BITCODE_LIB_ARCH=gfx942
+#     make EMIT_LLVM_IR=1 RCCL_ROOT=/path/to/projects/rccl BUILDDIR=/path/to/build
 #
 # Prerequisites:
 #   - ROCm LLVM toolchain (clang++, opt, llvm-dis, llvm-as) under
 #     $(ROCM_PATH)/llvm/bin (default ROCM_PATH=/opt/rocm).
-#   - The main RCCL build has been run at least once so that
-#     $(BUILDDIR)/include/rccl.h (generated from src/nccl.h.in) exists.
+#   - The RCCL CMake build has populated the hipify staging directory at
+#     $(BUILDDIR)/hipify (same headers librccl.so and CMake llvm_ir use).
+#     Example: cmake --build $(BUILDDIR) --target hipify_all
 #
 
 ifneq ($(EMIT_LLVM_IR), 0)
@@ -28,14 +30,16 @@ ifneq ($(EMIT_LLVM_IR), 0)
 ##### Source #####
 LLVM_SRC := nccl_device_wrapper__impl.h
 
-##### Build directories (mirror NCCL/RCCL layout) #####
-BUILDDIR ?= $(abspath ../build)
-OBJDIR   := $(BUILDDIR)/obj/llvm_ir
-LIBDIR   := $(BUILDDIR)/lib
-INCDIR   := $(BUILDDIR)/include
+##### RCCL root (bindings/ir -> projects/rccl) #####
+RCCL_ROOT ?= $(abspath ../..)
 
-##### RCCL source tree (relative to ir/) #####
-RCCLSRC  := $(abspath ..)/src
+##### Build directories (mirror RCCL CMake layout) #####
+BUILDDIR   ?= $(RCCL_ROOT)/build
+HIPIFY_DIR := $(BUILDDIR)/hipify
+HIPIFY_INC := $(HIPIFY_DIR)/src/include
+OBJDIR     := $(BUILDDIR)/obj/llvm_ir
+LIBDIR     := $(BUILDDIR)/lib
+INCDIR     := $(BUILDDIR)/include
 
 ##### ROCm toolchain #####
 ROCM_PATH ?= /opt/rocm
@@ -63,14 +67,13 @@ FINAL_BC       := $(LIBDIR)/librccl_device.bc
 WRAPPER_HEADER := $(INCDIR)/nccl_device_wrapper.h
 
 ##### Include paths #####
-# RCCL's nccl_device/*.h headers are already HIP-aware (they branch on
-# __HIP_PLATFORM_AMD__), so we point clang at the raw sources rather than
-# at the CMake hipify staging directory.
+# Match bindings/ir/CMakeLists.txt: compile against the hipify-staged
+# headers librccl.so is built from, not raw src/include.
 RCCL_INCLUDES := \
 	-I$(INCDIR) \
-	-I$(RCCLSRC)/include \
-	-I$(RCCLSRC)/include/nccl_device \
-	-I$(RCCLSRC)/device
+	-I$(HIPIFY_INC) \
+	-I$(HIPIFY_INC)/nccl_device \
+	-I$(HIPIFY_DIR)/src/device
 
 ROCM_INCLUDES := \
 	-I$(ROCM_PATH)/include
@@ -91,10 +94,25 @@ COMMON_CLANG_FLAGS := \
 CLANG_FLAGS := -c -emit-llvm -O1 $(COMMON_CLANG_FLAGS)
 
 ##### opt passes #####
-# Internalize anything not in the public ncclXxx surface, then inline
-# and drop dead globals. Same recipe as NCCL.
-OPT_PASSES := --passes='internalize,inline,globaldce' \
-	-internalize-public-api-list='*nccl*'
+# Internalize everything outside the public surface, then inline and drop
+# dead globals. opt's internalize pass takes EXACT symbol names, not globs;
+# keep this list in sync with RCCL_DEVICE_BC_PUBLIC_API in CMakeLists.txt
+# and the NCCL_IR_EXPORT entries in nccl_device_wrapper.h.
+RCCL_DEVICE_BC_PUBLIC_API := ncclGetPeerPointerTeam,ncclCoopAnyInitThread,ncclCoopAnyInitWarp,ncclCoopAnyInitLanes,ncclCoopAnyInitWarpSpan,ncclCoopAnyInitCta,ncclCoopThreadRank,ncclCoopSize,ncclCoopNumThreads,ncclCoopSync,ncclLsaBarrierSessionInit,ncclLsaBarrierSessionArrive,ncclLsaBarrierSessionWait,ncclLsaBarrierSessionSync
+
+OPT_PASSES := --passes=internalize,inline,globaldce \
+	-internalize-public-api-list=$(RCCL_DEVICE_BC_PUBLIC_API)
+
+##### Preflight #####
+.PHONY: check_hipify
+check_hipify:
+	@if [ ! -d "$(HIPIFY_INC)" ]; then \
+		echo "ERROR: hipify staging directory not found: $(HIPIFY_INC)" >&2; \
+		echo "Run the RCCL CMake build first to populate it, e.g.:" >&2; \
+		echo "  cmake -B $(BUILDDIR) -DEMIT_LLVM_IR=ON $(RCCL_ROOT)" >&2; \
+		echo "  cmake --build $(BUILDDIR) --target hipify_all" >&2; \
+		exit 1; \
+	fi
 
 ##### Rules #####
 $(WRAPPER_HEADER): nccl_device_wrapper.h
@@ -102,7 +120,7 @@ $(WRAPPER_HEADER): nccl_device_wrapper.h
 	@echo "Copying nccl_device_wrapper.h -> $@"
 	cp -f $< $@
 
-$(UNOPTIMIZED_BC): $(LLVM_SRC)
+$(UNOPTIMIZED_BC): $(LLVM_SRC) check_hipify
 	@mkdir -p $(OBJDIR)
 	@echo "Generating unoptimized LLVM bitcode for $(BITCODE_LIB_ARCH)..."
 	$(CLANG) $(CLANG_FLAGS) $(LLVM_SRC) -o $@
@@ -145,4 +163,4 @@ build: llvm_ir
 clean:
 	rm -rf $(OBJDIR) $(FINAL_BC) $(WRAPPER_HEADER)
 
-.PHONY: llvm_ir build clean
+.PHONY: llvm_ir build clean check_hipify

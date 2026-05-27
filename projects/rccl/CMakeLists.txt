@@ -596,12 +596,17 @@ rocm_install(FILES       ${PROJECT_BINARY_DIR}/include/rccl/rccl.h src/include/p
 rocm_install(FILES       src/include/api_trace.h
              DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl/amd_detail)
 ## Optional: install LLVM bitcode artifacts when EMIT_LLVM_IR is enabled.
-## librccl_device.bc and nccl_device_wrapper.h are produced by the ir/ subdir
-## and are present by install time because rccl_with_ir is part of ALL.
+## librccl_device.bc, nccl_device_wrapper.h, hipified nccl_device headers,
+## and nccl.h (same as rccl.h; nccl_device #includes <nccl.h>) are produced
+## before install because rccl_with_ir is part of ALL.
 if(EMIT_LLVM_IR)
   rocm_install(FILES       ${PROJECT_BINARY_DIR}/lib/librccl_device.bc
                DESTINATION ${CMAKE_INSTALL_LIBDIR}/rccl)
   rocm_install(FILES       ${PROJECT_BINARY_DIR}/include/nccl_device_wrapper.h
+                           ${PROJECT_BINARY_DIR}/include/nccl_device.h
+                           ${PROJECT_BINARY_DIR}/include/nccl.h
+               DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl)
+  rocm_install(DIRECTORY   ${PROJECT_BINARY_DIR}/include/nccl_device
                DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl)
 endif()
 ## Install tuner config directory for CSV-based tuner
