@@ -1,0 +1,125 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ROCclr ISA Table Schema",
+  "description": "Schema for additional ISA (Instruction Set Architecture) definitions to append to the hardcoded ISA table",
+  "type": "object",
+  "required": ["version", "isas"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "Schema version for compatibility checking",
+      "pattern": "^[0-9]+\\.[0-9]+$"
+    },
+    "comment": {
+      "type": "string",
+      "description": "Optional comment describing the purpose of this ISA table"
+    },
+    "isas": {
+      "type": "array",
+      "description": "Array of ISA specifications to append to hardcoded table",
+      "items": {
+        "type": "object",
+        "required": [
+          "targetId",
+          "runtimeRocSupported",
+          "runtimePalSupported",
+          "versionMajor",
+          "versionMinor",
+          "versionStepping",
+          "sramecc",
+          "xnack",
+          "simdPerCU",
+          "simdWidth",
+          "simdInstructionWidth",
+          "memChannelBankWidth",
+          "localMemSizePerCU",
+          "localMemBanks",
+          "ldsAlignment"
+        ],
+        "properties": {
+          "targetId": {
+            "type": "string",
+            "description": "Target ID string (e.g., 'gfx942:sramecc+:xnack-'). Must start with 'gfx' followed by digits, optionally followed by feature flags.",
+            "pattern": "^gfx[0-9]+(-generic)?(:[a-z]+[+-])*$"
+          },
+          "runtimeRocSupported": {
+            "type": "boolean",
+            "description": "Whether ROCm runtime supports this ISA"
+          },
+          "runtimePalSupported": {
+            "type": "boolean",
+            "description": "Whether PAL runtime supports this ISA"
+          },
+          "versionMajor": {
+            "type": "integer",
+            "description": "ISA major version (0-255)",
+            "minimum": 0,
+            "maximum": 255
+          },
+          "versionMinor": {
+            "type": "integer",
+            "description": "ISA minor version (0-255)",
+            "minimum": 0,
+            "maximum": 255
+          },
+          "versionStepping": {
+            "type": "integer",
+            "description": "ISA stepping version (0-255)",
+            "minimum": 0,
+            "maximum": 255
+          },
+          "sramecc": {
+            "type": "string",
+            "description": "SRAM ECC feature status",
+            "enum": ["Unsupported", "Any", "Disabled", "Enabled"]
+          },
+          "xnack": {
+            "type": "string",
+            "description": "XNACK feature status",
+            "enum": ["Unsupported", "Any", "Disabled", "Enabled"]
+          },
+          "simdPerCU": {
+            "type": "integer",
+            "description": "Number of SIMDs per compute unit",
+            "minimum": 1,
+            "maximum": 16
+          },
+          "simdWidth": {
+            "type": "integer",
+            "description": "Number of workitems processed per SIMD",
+            "minimum": 1,
+            "maximum": 128
+          },
+          "simdInstructionWidth": {
+            "type": "integer",
+            "description": "Number of instructions processed per SIMD",
+            "minimum": 1,
+            "maximum": 16
+          },
+          "memChannelBankWidth": {
+            "type": "integer",
+            "description": "Memory channel bank width in bytes",
+            "minimum": 1
+          },
+          "localMemSizePerCU": {
+            "type": "integer",
+            "description": "Local memory (LDS) size per compute unit in bytes",
+            "minimum": 0
+          },
+          "localMemBanks": {
+            "type": "integer",
+            "description": "Number of banks of local memory",
+            "minimum": 1
+          },
+          "ldsAlignment": {
+            "type": "integer",
+            "description": "LDS alignment requirement in bytes",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

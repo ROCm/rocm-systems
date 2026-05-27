@@ -5,6 +5,7 @@
  */
 
 #include "device/device.hpp"
+#include "device/isa_loader.hpp"
 #include "thread/monitor.hpp"
 #include "utils/options.hpp"
 #include "comgrctx.hpp"
@@ -74,13 +75,20 @@ static_assert(static_cast<uint32_t>(device::Memory::MemAccess::kMemAccessReadWri
 namespace amd {
 
 std::recursive_mutex Device::lockP2P_;
-std::pair<const Isa*, const Isa*> Isa::supportedIsas() {
-  constexpr amd::Isa::Feature NONE = amd::Isa::Feature::Unsupported;
-  constexpr amd::Isa::Feature ANY = amd::Isa::Feature::Any;
-  constexpr amd::Isa::Feature OFF = amd::Isa::Feature::Disabled;
-  constexpr amd::Isa::Feature ON = amd::Isa::Feature::Enabled;
 
-  static constexpr Isa supportedIsas_[] = {
+// Static member initialization for ISA loader
+std::vector<Isa> Isa::runtimeIsas_;
+std::vector<std::string> Isa::targetIdStorage_;
+std::once_flag Isa::initFlag_;
+
+void Isa::initializeIsaTable() {
+  const amd::Isa::Feature NONE = amd::Isa::Feature::Unsupported;
+  const amd::Isa::Feature ANY = amd::Isa::Feature::Any;
+  const amd::Isa::Feature OFF = amd::Isa::Feature::Disabled;
+  const amd::Isa::Feature ON = amd::Isa::Feature::Enabled;
+
+  // Hardcoded ISA table - this is ALWAYS loaded first
+  static const Isa supportedIsas_[] = {
 
       // NOTE: Add new targets by adding rows for each permutation of the SRAMECC
       // and XNACK target feature values. If the target does not support the
@@ -248,7 +256,66 @@ std::pair<const Isa*, const Isa*> Isa::supportedIsas() {
       {"gfx1250", true, true, 12, 5, 0, NONE, NONE, 4, 32, 1, 256, 320* Ki, 64, 1024},
       {"gfx12-generic", true, true, 12, 0, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
   };
-  return std::make_pair(std::begin(supportedIsas_), std::end(supportedIsas_));
+
+  // Step 1: Copy all hardcoded ISAs to runtime table
+  for (const auto& isa : supportedIsas_) {
+    targetIdStorage_.push_back(isa.targetId());
+  }
+
+  // Create runtime ISAs with stable pointers from storage
+  for (size_t i = 0; i < std::size(supportedIsas_); ++i) {
+    const auto& src = supportedIsas_[i];
+    runtimeIsas_.emplace_back(
+      targetIdStorage_[i].c_str(),
+      src.runtimeRocSupported(), src.runtimePalSupported(),
+      src.versionMajor(), src.versionMinor(), src.versionStepping(),
+      src.sramecc(), src.xnack(),
+      src.simdPerCU(), src.simdWidth(), src.simdInstructionWidth(),
+      src.memChannelBankWidth(), src.localMemSizePerCU(),
+      src.localMemBanks(), src.ldsAlignment()
+    );
+  }
+
+  size_t hardcodedCount = runtimeIsas_.size();
+  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Loaded %zu hardcoded ISAs", hardcodedCount);
+
+  // Step 2: Check for additional ISAs in .json file
+  std::string configFile = IsaLoader::findConfigFile();
+  if (!configFile.empty()) {
+    std::string errorMsg;
+    std::vector<Isa> additionalIsas;
+
+    if (IsaLoader::loadFromFile(configFile, additionalIsas,
+                                targetIdStorage_, errorMsg)) {
+      // Append additional ISAs to runtime table
+      runtimeIsas_.insert(runtimeIsas_.end(),
+                         additionalIsas.begin(),
+                         additionalIsas.end());
+
+      ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Appended %zu ISAs from %s (total: %zu)",
+              additionalIsas.size(), configFile.c_str(), runtimeIsas_.size());
+    } else {
+      ClPrint(amd::LOG_WARNING, amd::LOG_INIT,
+              "Failed to load additional ISAs from %s: %s. Using hardcoded table only.",
+              configFile.c_str(), errorMsg.c_str());
+    }
+  } else {
+    ClPrint(amd::LOG_INFO, amd::LOG_INIT,
+            "No additional ISA config file found. Using %zu hardcoded ISAs only.",
+            hardcodedCount);
+  }
+}
+
+std::pair<const Isa*, const Isa*> Isa::supportedIsas() {
+  // Initialize ISA table on first call (thread-safe)
+  std::call_once(initFlag_, initializeIsaTable);
+
+  if (runtimeIsas_.empty()) {
+    return std::make_pair(nullptr, nullptr);
+  }
+
+  return std::make_pair(runtimeIsas_.data(),
+                       runtimeIsas_.data() + runtimeIsas_.size());
 }
 
 std::string Isa::processorName() const {

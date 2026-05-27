@@ -49,6 +49,7 @@ target_sources(rocclr PRIVATE
   ${ROCCLR_SRC_DIR}/device/devhcprintf.cpp
   ${ROCCLR_SRC_DIR}/device/devhostcall.cpp
   ${ROCCLR_SRC_DIR}/device/device.cpp
+  ${ROCCLR_SRC_DIR}/device/isa_loader.cpp
   ${ROCCLR_SRC_DIR}/device/devkernel.cpp
   ${ROCCLR_SRC_DIR}/device/devprogram.cpp
   ${ROCCLR_SRC_DIR}/elf/elf.cpp

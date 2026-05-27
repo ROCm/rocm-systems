@@ -1,0 +1,40 @@
+{
+  "version": "1.0",
+  "comment": "Example ISA table - demonstrates the append functionality for adding additional GPU architectures. Rename to isa_table_internal.json to activate.",
+  "isas": [
+    {
+      "targetId": "gfx9999",
+      "runtimeRocSupported": true,
+      "runtimePalSupported": false,
+      "versionMajor": 9,
+      "versionMinor": 99,
+      "versionStepping": 9,
+      "sramecc": "Any",
+      "xnack": "Any",
+      "simdPerCU": 4,
+      "simdWidth": 16,
+      "simdInstructionWidth": 1,
+      "memChannelBankWidth": 256,
+      "localMemSizePerCU": 65536,
+      "localMemBanks": 32,
+      "ldsAlignment": 512
+    },
+    {
+      "targetId": "gfx9999:sramecc+:xnack-",
+      "runtimeRocSupported": true,
+      "runtimePalSupported": false,
+      "versionMajor": 9,
+      "versionMinor": 99,
+      "versionStepping": 9,
+      "sramecc": "Enabled",
+      "xnack": "Disabled",
+      "simdPerCU": 4,
+      "simdWidth": 16,
+      "simdInstructionWidth": 1,
+      "memChannelBankWidth": 256,
+      "localMemSizePerCU": 65536,
+      "localMemBanks": 32,
+      "ldsAlignment": 512
+    }
+  ]
+}

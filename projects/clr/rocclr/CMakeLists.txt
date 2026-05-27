@@ -10,3 +10,21 @@ endif()
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(ROCclr)
+
+# Install ISA table schema for documentation
+install(FILES
+  ${CMAKE_CURRENT_SOURCE_DIR}/device/isa_table_schema.json
+  DESTINATION ${CMAKE_INSTALL_PREFIX}/share/rocclr
+  COMPONENT development
+  OPTIONAL
+)
+
+# Install internal ISA table if it exists (for internal builds with additional ISAs)
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/device/isa_table_internal.json)
+  install(FILES
+    ${CMAKE_CURRENT_SOURCE_DIR}/device/isa_table_internal.json
+    DESTINATION ${CMAKE_INSTALL_PREFIX}/share/rocclr
+    COMPONENT runtime
+  )
+  message(STATUS "Will install internal ISA table")
+endif()

@@ -1632,12 +1632,12 @@ class Isa {
   /// @returns Iterator for one past the end isa.
   static const Isa* end();
 
- private:
-  constexpr Isa(const char* targetId, bool runtimeRocSupported, bool runtimePalSupported,
-                uint32_t versionMajor, uint32_t versionMinor, uint32_t versionStepping,
-                Feature sramecc, Feature xnack, uint32_t simdPerCU, uint32_t simdWidth,
-                uint32_t simdInstructionWidth, uint32_t memChannelBankWidth,
-                uint32_t localMemSizePerCU, uint32_t localMemBanks, uint32_t ldsAlignment)
+  // Constructor for runtime ISA creation
+  Isa(const char* targetId, bool runtimeRocSupported, bool runtimePalSupported,
+      uint32_t versionMajor, uint32_t versionMinor, uint32_t versionStepping,
+      Feature sramecc, Feature xnack, uint32_t simdPerCU, uint32_t simdWidth,
+      uint32_t simdInstructionWidth, uint32_t memChannelBankWidth,
+      uint32_t localMemSizePerCU, uint32_t localMemBanks, uint32_t ldsAlignment)
       : targetId_(targetId),
         runtimeRocSupported_(runtimeRocSupported),
         runtimePalSupported_(runtimePalSupported),
@@ -1654,8 +1654,21 @@ class Isa {
         localMemBanks_(localMemBanks),
         ldsAlignment_(ldsAlignment) {}
 
+ private:
   // @brief Returns the begin and end iterators for the suppported ISAs.
   static std::pair<const Isa*, const Isa*> supportedIsas();
+
+  // @brief Initialize ISA table from hardcoded entries and optional config file
+  static void initializeIsaTable();
+
+  // Runtime ISA table storage (hardcoded + appended from JSON)
+  static std::vector<Isa> runtimeIsas_;
+
+  // String storage for targetId pointers (ensures pointer stability)
+  static std::vector<std::string> targetIdStorage_;
+
+  // Initialization state
+  static std::once_flag initFlag_;
 
   // @brief Isa's target ID name. Used for LLVM COde Object Manager
   // compilations.
