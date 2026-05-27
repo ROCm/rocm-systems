@@ -62,6 +62,8 @@ target_compile_definitions(dxg_shared PRIVATE
     LITTLEENDIAN_CPU
 )
 
+target_link_libraries(dxg_shared PRIVATE ${CMAKE_DL_LIBS})
+
 message(STATUS "dxg_shared configuration:")
 message(STATUS "  Include dir: ${CMAKE_CURRENT_SOURCE_DIR}/include")
 
