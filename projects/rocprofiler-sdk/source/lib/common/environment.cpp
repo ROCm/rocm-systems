@@ -151,6 +151,8 @@ get_env(std::string_view env_id,
     return _default;
 }
 
+// set_env uses standard ::setenv() (no wrapper needed).
+// Unlike getenv(), bash does not interpose setenv(), so it works correctly.
 int
 set_env(std::string_view env_id, bool value, int override)
 {
