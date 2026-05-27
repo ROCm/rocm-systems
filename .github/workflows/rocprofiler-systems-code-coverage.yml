@@ -212,7 +212,7 @@ jobs:
         echo 'EOF' >> $GITHUB_OUTPUT
 
     - name: Write Code Coverage Comment
-      if: always() && github.event_name == 'pull_request'
+      if: github.event_name == 'pull_request'
       timeout-minutes: 5
       uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
       env:
