@@ -219,6 +219,8 @@ typedef enum {
                                     // Gb/Second
   RDC_FI_GPU_MEMORY_CUR_BANDWIDTH,  //<! The Memory current bandwidth in Gb/Second
   RDC_FI_GPU_BUSY_PERCENT,          //<! The GPU busy percentage
+  RDC_FI_GFX_ACTIVITY_ACC,          //!< GFX activity accumulated (%)
+  RDC_FI_MEM_ACTIVITY_ACC,          //!< Memory activity accumulated (%)
 
   /**
    * @brief GPU page related fields

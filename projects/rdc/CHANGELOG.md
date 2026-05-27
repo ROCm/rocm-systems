@@ -2,7 +2,12 @@
 
 Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](https://rocm.docs.amd.com/projects/rdc/en/latest/).
 
-## amd_smi_lib for ROCm 7.13.0
+## RDC for ROCm 7.13.0
+
+### Added
+
+- **Added GFX and memory accumulated activity metrics**.
+  - New fields `RDC_FI_GFX_ACTIVITY_ACC` (509) and `RDC_FI_MEM_ACTIVITY_ACC` (510) expose the accumulated GFX and memory activity counters from amdsmi gpu_metrics (available since gpu_metrics v1.1).
 
 ### Resolved Issues
 
