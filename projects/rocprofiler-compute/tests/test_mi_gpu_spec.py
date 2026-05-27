@@ -5,7 +5,7 @@
 from pathlib import Path
 from unittest.mock import patch
 
-import common  # noqa: F401 — adds src/ to sys.path
+import common
 
 from utils.mi_gpu_spec import MIGPUSpecs
 
@@ -14,7 +14,7 @@ class TestMIGPUSpecs:
     # -- YAML parsing / initialization ---------------------------------------
 
     def test_yaml_loads_successfully(self):
-        yaml_path = Path(__file__).parent.parent / "src" / "utils" / "mi_gpu_spec.yaml"
+        yaml_path = Path(common.SRC) / "utils" / "mi_gpu_spec.yaml"
         data = MIGPUSpecs._load_yaml(str(yaml_path))
         assert isinstance(data, dict)
         assert "mi_gpu_spec" in data
