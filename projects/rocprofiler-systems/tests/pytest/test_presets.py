@@ -111,9 +111,9 @@ class TestRunPresets(RocprofsysTest):
 
 
 @pytest.mark.timeout(60)
+@pytest.mark.sampling
 @pytest.mark.class_name("sample-domain-flags")
 class TestSampleDomainFlags(RocprofsysTest):
-    @pytest.mark.sampling
     def test_gpu(self):
         result = self.run_test(
             "baseline",
@@ -123,7 +123,6 @@ class TestSampleDomainFlags(RocprofsysTest):
         )
         self.assert_regex(result, pass_regex=["ROCPROFSYS_USE_AMD_SMI=true"])
 
-    @pytest.mark.sampling
     def test_gpu_metrics(self):
         result = self.run_test(
             "baseline",
@@ -133,7 +132,6 @@ class TestSampleDomainFlags(RocprofsysTest):
         )
         self.assert_regex(result, pass_regex=["ROCPROFSYS_AMD_SMI_METRICS=temp,power"])
 
-    @pytest.mark.sampling
     def test_rocm(self):
         result = self.run_test(
             "baseline",
@@ -146,7 +144,6 @@ class TestSampleDomainFlags(RocprofsysTest):
             pass_regex=["ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch"],
         )
 
-    @pytest.mark.sampling
     def test_cpu(self):
         result = self.run_test(
             "baseline",
@@ -156,7 +153,6 @@ class TestSampleDomainFlags(RocprofsysTest):
         )
         self.assert_regex(result, pass_regex=["ROCPROFSYS_SAMPLING_FREQ=50"])
 
-    @pytest.mark.sampling
     def test_parallel(self):
         result = self.run_test(
             "baseline",
@@ -166,7 +162,6 @@ class TestSampleDomainFlags(RocprofsysTest):
         )
         self.assert_regex(result, pass_regex=["ROCPROFSYS_USE_MPIP=true"])
 
-    @pytest.mark.sampling
     def test_preset_plus_domain(self):
         result = self.run_test(
             "baseline",
@@ -190,9 +185,9 @@ class TestSampleDomainFlags(RocprofsysTest):
 
 
 @pytest.mark.timeout(60)
+@pytest.mark.sys_run
 @pytest.mark.class_name("run-domain-flags")
 class TestRunDomainFlags(RocprofsysTest):
-    @pytest.mark.sys_run
     def test_gpu(self):
         result = self.run_test(
             "baseline",
@@ -202,7 +197,6 @@ class TestRunDomainFlags(RocprofsysTest):
         )
         self.assert_regex(result, pass_regex=["ROCPROFSYS_USE_AMD_SMI=true"])
 
-    @pytest.mark.sys_run
     def test_gpu_metrics(self):
         result = self.run_test(
             "baseline",
@@ -212,7 +206,6 @@ class TestRunDomainFlags(RocprofsysTest):
         )
         self.assert_regex(result, pass_regex=["ROCPROFSYS_AMD_SMI_METRICS=temp,power"])
 
-    @pytest.mark.sys_run
     def test_rocm(self):
         result = self.run_test(
             "baseline",
@@ -225,7 +218,6 @@ class TestRunDomainFlags(RocprofsysTest):
             pass_regex=["ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch"],
         )
 
-    @pytest.mark.sys_run
     def test_cpu(self):
         result = self.run_test(
             "baseline",
@@ -235,7 +227,6 @@ class TestRunDomainFlags(RocprofsysTest):
         )
         self.assert_regex(result, pass_regex=["ROCPROFSYS_SAMPLING_FREQ=50"])
 
-    @pytest.mark.sys_run
     def test_parallel(self):
         result = self.run_test(
             "baseline",
@@ -245,7 +236,6 @@ class TestRunDomainFlags(RocprofsysTest):
         )
         self.assert_regex(result, pass_regex=["ROCPROFSYS_USE_MPIP=true"])
 
-    @pytest.mark.sys_run
     def test_preset_plus_domain(self):
         result = self.run_test(
             "baseline",
@@ -272,9 +262,9 @@ class TestRunDomainFlags(RocprofsysTest):
 
 
 @pytest.mark.timeout(60)
+@pytest.mark.sys_run
 @pytest.mark.class_name("run-sampling-target-flags")
 class TestRunSamplingTargetFlags(RocprofsysTest):
-    @pytest.mark.sys_run
     def test_gpus_without_device(self):
         result = self.run_test(
             "baseline",
@@ -284,7 +274,6 @@ class TestRunSamplingTargetFlags(RocprofsysTest):
         )
         self.assert_regex(result, pass_regex=["ROCPROFSYS_SAMPLING_GPUS=0"])
 
-    @pytest.mark.sys_run
     def test_cpus_without_host(self):
         result = self.run_test(
             "baseline",
@@ -294,7 +283,6 @@ class TestRunSamplingTargetFlags(RocprofsysTest):
         )
         self.assert_regex(result, pass_regex=["ROCPROFSYS_SAMPLING_CPUS=0-3"])
 
-    @pytest.mark.sys_run
     def test_ai_nics_without_device(self):
         result = self.run_test(
             "baseline",
@@ -304,7 +292,6 @@ class TestRunSamplingTargetFlags(RocprofsysTest):
         )
         self.assert_regex(result, pass_regex=["ROCPROFSYS_SAMPLING_AINICS=nic0"])
 
-    @pytest.mark.sys_run
     @pytest.mark.parametrize("preset", ["trace-hpc", "trace-gpu"])
     def test_preset_plus_gpus(self, preset):
         result = self.run_test(
@@ -323,9 +310,9 @@ class TestRunSamplingTargetFlags(RocprofsysTest):
 
 
 @pytest.mark.timeout(60)
+@pytest.mark.sampling
 @pytest.mark.class_name("sample-sampling-target-flags")
 class TestSampleSamplingTargetFlags(RocprofsysTest):
-    @pytest.mark.sampling
     def test_gpus_without_device(self):
         result = self.run_test(
             "baseline",
@@ -335,7 +322,6 @@ class TestSampleSamplingTargetFlags(RocprofsysTest):
         )
         self.assert_regex(result, pass_regex=["ROCPROFSYS_SAMPLING_GPUS=0"])
 
-    @pytest.mark.sampling
     def test_cpus_without_host(self):
         result = self.run_test(
             "baseline",
@@ -345,7 +331,6 @@ class TestSampleSamplingTargetFlags(RocprofsysTest):
         )
         self.assert_regex(result, pass_regex=["ROCPROFSYS_SAMPLING_CPUS=0-3"])
 
-    @pytest.mark.sampling
     def test_ai_nics_without_device(self):
         result = self.run_test(
             "baseline",
@@ -355,7 +340,6 @@ class TestSampleSamplingTargetFlags(RocprofsysTest):
         )
         self.assert_regex(result, pass_regex=["ROCPROFSYS_SAMPLING_AINICS=nic0"])
 
-    @pytest.mark.sampling
     @pytest.mark.parametrize("preset", ["trace-hpc", "trace-gpu"])
     def test_preset_plus_gpus(self, preset):
         result = self.run_test(
