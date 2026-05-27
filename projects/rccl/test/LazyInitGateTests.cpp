@@ -64,12 +64,17 @@ enum class LazyInitState : int {
 //   Return false to abort ownership: the gate is released back to
 //   LAZY_UNINIT and the caller returns err_out. Threads that did not win
 //   the CAS never invoke it -- that's the property we pin.
+// waiterReachedWaitLoop - optional instrumentation hook. When non-null, a
+//   thread that did NOT win the CAS sets it to 1 on entering the spin
+//   wait. Lets multi-thread tests deterministically synchronize on "the
+//   waiter is parked" without resorting to sleep_for-based handshakes.
 static ncclResult_t testGateRun(
     std::atomic<LazyInitState>& gate,
     std::atomic<int>& errSlot,
     std::function<ncclResult_t()> initFn,
     std::function<bool(ncclResult_t&)> ownerPrecondition =
-        [](ncclResult_t&){ return true; }) {
+        [](ncclResult_t&){ return true; },
+    std::atomic<int>* waiterReachedWaitLoop = nullptr) {
   for (;;) {
     LazyInitState s = gate.load(std::memory_order_acquire);
     if (s == LazyInitState::LAZY_DONE) return ncclSuccess;
@@ -99,6 +104,9 @@ static ncclResult_t testGateRun(
     }
 
     LazyInitState w;
+    if (waiterReachedWaitLoop) {
+      waiterReachedWaitLoop->store(1, std::memory_order_release);
+    }
     while ((w = gate.load(std::memory_order_acquire)) == LazyInitState::LAZY_INITIALIZING) {
       sched_yield();
     }
@@ -278,6 +286,7 @@ TEST(LazyInitGateTests, MultiThread_OwnerAborts_WaiterRetriesAndSucceeds) {
   std::atomic<int> initCalls{0};
   std::atomic<int> ownerEnteredPrecondition{0};
   std::atomic<int> releaseOwner{0};
+  std::atomic<int> retrierInWaitLoop{0};
 
   std::thread owner([&]{
     ncclResult_t r = testGateRun(gate, err,
@@ -301,12 +310,16 @@ TEST(LazyInitGateTests, MultiThread_OwnerAborts_WaiterRetriesAndSucceeds) {
   // LAZY_UNINIT release, retry the CAS itself, run init, and succeed.
   std::thread retrier([&]{
     ncclResult_t r = testGateRun(gate, err,
-        [&]{ initCalls.fetch_add(1); return ncclSuccess; });
+        [&]{ initCalls.fetch_add(1); return ncclSuccess; },
+        [](ncclResult_t&){ return true; },
+        &retrierInWaitLoop);
     EXPECT_EQ(r, ncclSuccess) << "waiter must retry CAS on owner-abort and succeed";
   });
 
-  // Let the second thread reach the waiter loop, then unblock the owner.
-  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  // Deterministically wait until the retrier is actually parked in the
+  // wait loop, then unblock the owner. Avoids relying on sleep_for, which
+  // is flaky under CI load.
+  while (retrierInWaitLoop.load(std::memory_order_acquire) == 0) sched_yield();
   releaseOwner.store(1, std::memory_order_release);
 
   owner.join();
